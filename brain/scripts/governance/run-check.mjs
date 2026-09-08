@@ -73,6 +73,7 @@ import { loadContext, gitlabApiConfig } from '../vcs/ci-context.mjs';
 import { loadBrainConfig } from '../lib/brain-config.mjs';
 import { getVcs } from '../vcs/cli.mjs';
 import { resolveTier, tierParams } from '../vcs/governance-tiers.mjs';
+import { mapDetectionToWarning } from './detection-policy.mjs';
 
 /**
  * Default `readRecords` dep for the memory-gate (issue #222 cutover fix):
@@ -530,8 +531,29 @@ export async function runCheck(checkName, deps = {}) {
  */
 export async function main(checkName, deps = {}) {
   const result = await runCheck(checkName, deps);
-  if (result.reason) console.log(result.reason);
-  return resultToExit(result);
+  // #603 — the tier decides the exit code, and it decides it HERE, once.
+  // REQ-TIER-3's scenario is normative: "every job whose lite policy is
+  // detection exits 0 with a warning annotation stating the tier as the
+  // reason". `phase-order-check.mjs` and `actor-check.mjs` already routed
+  // through this helper; this entrypoint — which owns memory-gate,
+  // decision-gate, issue-link and diff-size — did not, so a failing
+  // `memory-gate` exited 1 at `lite`. GitHub's branch protection filtered that
+  // out of the merge decision; GitLab has no such layer, so the MR was blocked
+  // by a gate the tier calls advisory (#603's compounding finding).
+  //
+  // In `main`, not in `runCheck`: `runCheck` returns the EVALUATION, and a
+  // caller wanting the raw verdict must be able to have it. Softening is an
+  // exit-code policy, so it lives where the exit code is computed — the same
+  // split phase-order-check.mjs makes.
+  //
+  // The helper carries its own three guards: it softens nothing that passed,
+  // nothing marked `uncomputable` (absent evidence is not a passing gate), and
+  // nothing whose policy at this tier is `required`.
+  const readConfig = deps.readConfig ?? defaultReadConfig;
+  const tier = resolveTier(readConfig());
+  const policied = mapDetectionToWarning(result, tier, checkName);
+  if (policied.reason) console.log(policied.reason);
+  return resultToExit(policied);
 }
 
 // ── CLI entrypoint ───────────────────────────────────────────────────────────

@@ -75,6 +75,21 @@ function readyDeps({ vcs, labels = [] } = {}) {
       // are blockers here.
       tier: 'standard',
     },
+    // Pinned for the SAME reason the tier above is (issue #812). These tests
+    // read the REAL brain.config.json on purpose (#442) — that is what makes
+    // the repo prove its own configuration works. But the dogfooding needs a
+    // boundary, and it had none on this axis: configuring `sdd.map`, the
+    // supported way to enable the cold review's judgment half, made
+    // `judgment.run` true and sent these unit tests to RUN THE STAGE and spawn
+    // an engine. Twenty-six went red, and the repository could dogfood the
+    // reviewer or the router but never both.
+    //
+    // The line the boundary follows: a test may inherit DOCTRINE from the real
+    // config — the protocol version, the declared tier — and must pin its
+    // ENVIRONMENT. A transport is environment. `{}` is the honest stub: no
+    // generator, so the half does not run and the verdict says so, which is
+    // exactly what a repo that has not run the stage should read.
+    inferentialDeps: {},
     writeVerbs: vcs,
   };
 }

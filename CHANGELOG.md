@@ -6,6 +6,123 @@ registry (ADR-0030, superseding ADR-0006's git tags); consumers upgrade with
 changes** before upgrading — additive `brain.config.json` migrations apply
 automatically, but renames need manual action.
 
+## v1.5.0 — the governance surface stops trusting what it cannot measure
+
+**No manual step.** No migration was promoted since v1.4.0, so nothing is
+dormant and nothing is renamed or removed. `brain:upgrade` is enough.
+
+### Why a minor and not a patch
+
+Three of the eight changes add capability a consumer can rely on — a capability
+report, a coverage measurement, and a release-debt line — and the remaining five
+repair the verification surface itself. Nothing is removed, so the number moves
+right.
+
+(The eight split 4 feat / 4 fix by commit prefix, which is not the same split:
+#124 carries a `feat` prefix but is listed below as a repair, because what it
+changed for a consumer is that a gate stopped being theatre.)
+
+### What you can do that you could not before
+
+- **Ask what your forge account actually allows.** brain now reports the
+  capability it HAS rather than the plan the platform sells. Where a control
+  (required reviews, protected branches) is unavailable on the account tier,
+  it is reported as unavailable and the ruling is *ratify and report* — brain
+  states the gap instead of assuming a control it cannot verify, so the
+  agent–human operating flow degrades honestly across GitHub and GitLab.
+- **Measure the port instead of asserting it.** `brain:vcs:coverage` walks the
+  exported verbs, folds their provenance and reports per-verb coverage with
+  consumer counts, excluding itself from its own walk.
+- **See release debt in `brain:status`.** A line now names dormant migrations
+  (declared above the published version and therefore unreachable) and ordinary
+  drift since the last tag. When a fact cannot be read it says so — the report
+  never claims health from evidence it did not read, on either channel.
+
+### Repairs to the verification surface
+
+- **An approval can no longer be granted by the identity it governs.** An agent
+  may act under an approval and may never grant one: the deny set is the union
+  of `governance.reviewActors` and `governance.agentActors`, compared
+  case-folded, and one exported predicate now answers for both the gate and the
+  approve CLI — the two had diverged twice.
+- **The tier decides the exit code, and decides it once.** `run-check.mjs` —
+  which owns `memory-gate`, `decision-gate`, `issue-link` and `diff-size` —
+  never called `mapDetectionToWarning`, so a gate whose lite policy is
+  *detection* still exited 1. GitHub's branch protection hid this; GitLab has
+  no such layer, so a lite consumer there was blocked by a gate that REQ-TIER-3
+  says must warn. This is the fix consumers on GitLab want most.
+- **The publish guard checks the right thing.** It asserted `tag === HEAD` and
+  so called ordinary post-release history a failure, red on every maintainer
+  checkout while the published state was correct. It now asserts the tag is ON
+  this history — and it no longer returns early in CI, where it had been inert.
+- **The container harness stopped waiting on a service it does not use.** The
+  danger-paths scenarios install a zero-dependency package from a local
+  `git+file://` remote and spent minutes in npm's audit call: 17m57s end to end
+  before, 59s after.
+- **Dogfooding got a boundary.** Configuring `sdd.map` turned 26 tests red, so
+  the repository could dogfood the router or the reviewer and never both.
+
+## v1.4.0 — the SDD pipeline becomes composable (M5 + M8)
+
+**No manual step.** Unlike v1.1.0, this release is additive: `brain:upgrade`
+migrates `brain.config.json` for you and nothing is renamed or removed.
+
+### Why the number jumps 1.1.0 → 1.4.0
+
+Three config migrations were promoted and signed between the two releases, and
+`migrateConfig` applies a migration only when its version is **at or below the
+installed package version** (`installer.mjs`). At 1.1.0 all three were dead
+code for every consumer. The package meets its migration tail, so they run:
+
+| migration | key it adds | default |
+|---|---|---|
+| 1.2.0 | `sdd.stages` — the declared stage set | `{}` |
+| 1.3.0 | `sdd.configs` — per-stage agent and enabled state | `{}` |
+| 1.4.0 | `sdd.engines` — what each SDD engine declared when last interrogated | `{}` |
+
+Every default is an **empty object**, and that is the design: an absent
+declaration keeps today's behaviour exactly. A stage you never declared runs as
+it always did; an engine nobody recorded stays honestly absent rather than
+reading as "interrogated and declared nothing".
+
+### What you can do that you could not before
+
+- **Compose the SDD pipeline per stage.** `sdd.map.<stage> = { engine, model? }`
+  routes who PRODUCES each stage's artefact. Two engines ship wired: `plain`
+  (manual handoff) and `gentle-ai` (runs on the platform). Who VERIFIES stays
+  neutral — no gate can name an engine, and a test guards that.
+- **Declare a stage of your own.** A stage beyond the four lifecycle stages is
+  scaffolded by `brain:project:feature`, walked by `phase-order` in its declared
+  position, and carried into the archive like any other. Declaring it is the
+  demand: the gate then requires its artefact.
+- **One config verb.** `brain:config get|set` is the single writer for
+  `brain.config.json`, running pending migrations as part of the write.
+- **Roles as a port.** Each stage declares its agent, model tier and
+  instructions through one interface, with four archetypes on it.
+
+### Refusals you may meet if you declare stages
+
+`sdd.stages` is validated when read, and a malformed declaration is refused
+with a message naming what is wrong — never silently normalised. It refuses:
+omitting one of the four lifecycle stages (the set is additive-only),
+reordering them relative to each other, a custom artefact impersonating a
+lifecycle file, a reserved vocabulary name, one of the four renaming its own
+artefact, two stages sharing one file, a stage name that is not a plain kebab
+identifier, and an artefact that is not a bare `.md` filename.
+
+### Also in this release
+
+- `brain:promote` grows a migration arm: adding a config migration is a
+  declarative draft the human signs, and the verb proves the candidate imports
+  and migrates before it shows a plan.
+- `brain:status` reports stranded feature branches — a tracker ahead of the
+  default branch with no open PR is a signal, not silence.
+- `tasks.md` may carry a `brain-slice-scope/1` block declaring a slice's claims
+  and its terminal PR; `check-refs` refuses a malformed one repo-wide.
+- Test fixtures no longer leak: every temporary directory lives under one
+  per-run root that dies with the process, with a pre-suite sweep for runs that
+  were killed.
+
 ## v1.1.0 — BREAKING: the package is now `@logikas/brain` (#655)
 
 **If brain is already installed in your repo, do not upgrade with

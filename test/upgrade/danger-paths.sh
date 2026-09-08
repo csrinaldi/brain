@@ -49,7 +49,21 @@ echo "▶ M4 danger paths | source=$(git -C "$ROOT" rev-parse --short HEAD 2>/de
 # the remainder of the script — and `docker run -i` keeps it open for them to do
 # it. The repo is already mounted, so naming the file costs nothing and removes
 # the hazard entirely.
+# npm's audit call is not part of what these scenarios test, and it is the whole
+# of their cost when the registry is slow (#850). Measured in one container run,
+# same tree and image: a plain `npm i` of the local `git+file://` remote took
+# 175s; with these two variables set it took 4s. The same install with the
+# network removed entirely takes 5s — so every second above five was npm
+# waiting on a service this test does not use.
+#
+# Set as ENVIRONMENT rather than as `--no-audit` flags on the install lines, on
+# purpose: each scenario runs TWO installs — the harness's own, and the one
+# `brain:upgrade` spawns. The second is production code, and making a consumer's
+# real upgrade skip its audit to speed up a test would be brain deciding
+# something for the consumer that is not brain's to decide. The variables scope
+# the decision to the container, where it belongs, and production is untouched.
 docker run --rm \
   -v "${ROOT}:/brain-src:ro" \
   -e HOME=/root \
+  -e npm_config_audit=false -e npm_config_fund=false \
   "$IMAGE" bash /brain-src/test/upgrade/danger-paths-in-container.sh

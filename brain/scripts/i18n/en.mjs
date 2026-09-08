@@ -301,6 +301,8 @@ export default {
   'session.ticket.none':        '(no active ticket memory)',
 
   // ── memory/cli.mjs — reindex (issue #205, C1) ─────────────────────────────────
+  'memory.audit.failed':   '✗ audit could not run — {message}',
+  'memory.audit.badSince': '✗ audit: --since is not a date — {value}',
   'memory.reindex.done':   '✓ reindex complete — {count} record(s) indexed.',
   'memory.reindex.failed': '✗ reindex failed — {message}',
   'memory.resolveIndex.done':   '✓ index regenerated from records/ — {count} record(s). Nothing was unmerged, so nothing was staged.',
@@ -359,6 +361,7 @@ export default {
   'memory.import.empty':    'ℹ no records found in .memory/records/ — nothing to import.',
   'memory.import.progress': '  ✓ {written}/{total} records imported',
   'memory.import.done':     '✓ import complete — {written}/{total} records imported into engram (records-only, D2/C4).',
+  'memory.import.contended': '⚠ another hydration is running (pid {pid}, started {age}s ago) — import SKIPPED so records are not duplicated. Nothing was written; the next run retries.',
   'memory.import.stateUnreadable': '⚠ engram\'s current state could not be read — import SKIPPED so records are not duplicated. Reason: {reason}. Nothing was written; run the import again once engram responds.',
 
   // ── memory/cli.mjs — migrate-v1 (issue #217, C2a / #219 C2-migrate / #222 C2b-2) ──

@@ -8,6 +8,10 @@ import assert from 'node:assert/strict';
 import { share, dualWriteRecords, pullMemory, buildImportPayload, importMemory } from './engram.mjs';
 import { buildRecord } from '../lib/format.mjs';
 
+// #820: a faked backend has no store to protect — never take the real machine guard from a test.
+const noGuard = () => ({ held: true, release() {} });
+
+
 const baseRecordFields = {
   ts: '2026-07-04T12:00:00Z', actor: '@crinaldi', actorKind: 'human', type: 'decision', project: 'brain',
 };
@@ -119,6 +123,7 @@ test('importMemory: a seam still returning a BARE ARRAY degrades to "no accounti
   const rec = { id: 'rec-aaa', ts: '2026-07-04T12:00:00Z', actor: '@crinaldi', actorKind: 'agent', type: 'decision', project: 'brain', content: 'x' };
 
   const result = await importMemory({
+    _guard: noGuard,
     root: '/fake/root',
     _requireEngram: () => 'engram',
     _readRecords: () => [rec],                       // the OLD shape

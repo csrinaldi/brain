@@ -49,13 +49,15 @@ test('#824 cli: --record WRITES — sdd.engines is declared since migration 1.4.
   assert.equal(r.status, 0, r.stderr);
   const cfg = JSON.parse(readFileSync(join(root, 'brain.config.json'), 'utf8'));
   // schemaVersion lands at the PACKAGE version, not the migration tail:
-  // migrateConfig applies entries up to the installed version, and 1.2.0-1.4.0
-  // sit ABOVE package 1.1.0 until a release carries them (#806's other half —
-  // the number IS the package version, so the entry activates when the package
-  // reaches it). The PATH is settable now (KNOWN_PATHS reads the declared
-  // list); the DEFAULT applies at release. Declared vs active — noted, ruled
-  // elsewhere if it needs ruling.
-  assert.equal(cfg.schemaVersion, '1.1.0', 'migrated up to the installed package version');
+  // migrateConfig applies entries up to the installed version, so an entry
+  // activates when the package reaches it. That is why this reads the real
+  // package.json instead of naming a version: the literal here was '1.1.0'
+  // and the 1.4.0 release cut (#848) expired it the moment it shipped. The
+  // RELATIONSHIP is the invariant; the number is today's value of it.
+  const packageVersion = JSON.parse(
+    readFileSync(new URL('../../../package.json', import.meta.url), 'utf8'),
+  ).version;
+  assert.equal(cfg.schemaVersion, packageVersion, 'migrated up to the installed package version');
   for (const engine of ['plain', 'gentle-ai']) {
     assert.ok(cfg.sdd.engines[engine], `${engine} recorded`);
     assert.ok(Array.isArray(cfg.sdd.engines[engine].stages) && cfg.sdd.engines[engine].stages.length > 0);

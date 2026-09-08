@@ -22,7 +22,14 @@ FROM="${1:-$(git -C "$ROOT" tag --sort=-v:refname 2>/dev/null | sed -n '2p')}"
 { [ -z "$FROM" ] || [ -z "$TO" ]; } && { echo "✗ need two tags — npm run test:upgrade -- <from> <to> (or cut ≥2 tags)."; exit 2; }
 
 echo "▶ upgrade test | ${FROM} → ${TO} | consumer=${CONSUMER_REPO} | image=${IMAGE}"
+# The two npm_config_* variables below: see the block above the `docker run` in
+# danger-paths.sh, which carries the measurement and the reasoning. ONE copy of
+# that explanation on purpose — this comment was a verbatim 14-line duplicate,
+# and two copies of a rationale drift the same way two copies of a rule do.
+# Short version: brain ships zero dependencies, so npm's audit finds nothing and
+# costs whatever the registry costs that minute (#850).
 docker run --rm -i \
+  -e npm_config_audit=false -e npm_config_fund=false \
   -e VCS_TOKEN="$TOKEN" \
   -e FROM_TAG="$FROM" -e TO_TAG="$TO" \
   -e CONSUMER_REPO="$CONSUMER_REPO" \

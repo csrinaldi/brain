@@ -271,6 +271,8 @@ export default {
   'session.ticket.none':        '(sin memoria de ticket activa)',
 
   // ── memory/cli.mjs — reindex (issue #205, C1) ─────────────────────────────────
+  'memory.audit.failed':   '✗ audit no pudo correr — {message}',
+  'memory.audit.badSince': '✗ audit: --since no es una fecha — {value}',
   'memory.reindex.done':   '✓ reindex completo — {count} registro(s) indexado(s).',
   'memory.reindex.failed': '✗ reindex falló — {message}',
   'memory.resolveIndex.done':   '✓ índice regenerado desde records/ — {count} registro(s). No había nada en conflicto, no se agregó nada al stage.',
@@ -315,6 +317,7 @@ export default {
   'memory.import.empty':    'ℹ no se encontraron registros en .memory/records/ — nada para importar.',
   'memory.import.progress': '  ✓ {written}/{total} registros importados',
   'memory.import.done':     '✓ importación completa — {written}/{total} registros importados a engram (solo records, D2/C4).',
+  'memory.import.contended': '⚠ hay otra hidratación corriendo (pid {pid}, empezó hace {age}s) — import OMITIDO para no duplicar registros. No se escribió nada; la próxima corrida reintenta.',
   'memory.import.stateUnreadable': '⚠ no se pudo leer el estado actual de engram — importación OMITIDA para no duplicar registros. Motivo: {reason}. No se escribió nada; volvé a correr la importación cuando engram responda.',
 
   // ── memory/cli.mjs — migrate-v1 (issue #217, C2a / #219 C2-migrate / #222 C2b-2) ──

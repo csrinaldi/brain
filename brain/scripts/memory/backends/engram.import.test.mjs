@@ -16,6 +16,13 @@ import assert from 'node:assert/strict';
 
 import { importMemory } from './engram.mjs';
 import { buildRecord } from '../lib/format.mjs';
+import { join as joinPath } from 'node:path';
+import { testTmp } from '../../lib/test-tmp.mjs';
+import { acquireHydrationGuard } from '../lib/hydration-guard.mjs';
+
+// #820: a faked backend has no store to protect — never take the real machine guard from a test.
+const noGuard = () => ({ held: true, release() {} });
+
 
 function fixtureRecords(n) {
   const records = [];
@@ -50,6 +57,7 @@ test('importMemory: reads records via _readRecords and hydrates engram in ONE ba
   const imports = [];
 
   const result = await importMemory({
+    _guard: noGuard,
     root: '/fake/root',
     _requireEngram: () => 'engram',
     _readRecords: () => ({ records }),
@@ -75,6 +83,7 @@ test('importMemory: no chunk path is read — never spawns `engram sync --import
   let chunkPathTouched = false;
 
   await importMemory({
+    _guard: noGuard,
     root: '/fake/root',
     _requireEngram: () => 'engram',
     _readRecords: () => ({ records }),
@@ -100,6 +109,7 @@ test('importMemory: no chunk path is read — never spawns `engram sync --import
 test('importMemory: empty records/ → zero writes, no throw', async () => {
   const progressLines = [];
   const result = await importMemory({
+    _guard: noGuard,
     root: '/fake/root',
     _requireEngram: () => 'engram',
     _readRecords: () => ({ records: [] }),
@@ -166,6 +176,7 @@ test('importMemory: re-running over the same records creates NO duplicate observ
   const records = fixtureRecords(5);
   const store = makeFakeEngramStore();
   const run = () => importMemory({
+    _guard: noGuard,
     root: '/fake/root',
     _requireEngram: () => 'engram',
     _readRecords: () => ({ records }),
@@ -189,4 +200,110 @@ test('importMemory: re-running over the same records creates NO duplicate observ
 
   const keys = store.rows.map((r) => r.topic_key);
   assert.equal(new Set(keys).size, 5, 'every stored topic_key must still be distinct');
+});
+
+// ── #820 — the hydration guard around the read→write window ────────────────
+
+
+function sharedGuard() {
+  const lockPath = joinPath(testTmp('import-guard-'), 'brain-memory-hydration.lock');
+  return () => acquireHydrationGuard({ lockPath, _pidAlive: () => true });
+}
+
+test('importMemory (#820 shape): importer B started inside A\'s read window is CONTENDED — one payload reaches engram, not two', async () => {
+  const records = fixtureRecords(3);
+  const imports = [];
+  const warned = [];
+  const _guard = sharedGuard();
+  let bPromise = null;
+
+  const a = await importMemory({
+    _requireEngram: () => ({}),
+    _readRecords: () => records,
+    _engramExistingTopicKeys: () => {
+      // While A holds the guard between its read and its write, B starts.
+      bPromise = importMemory({
+        _requireEngram: () => ({}),
+        _readRecords: () => records,
+        _engramExistingTopicKeys: () => new Set(),
+        _engramImport: (payload) => imports.push(['B', payload]),
+        _warn: (m) => warned.push(m),
+        _guard,
+      });
+      return new Set();
+    },
+    _engramImport: (payload) => imports.push(['A', payload]),
+    _warn: (m) => warned.push(m),
+    _guard,
+  });
+  const b = await bPromise;
+
+  assert.equal(imports.length, 1, 'exactly one import payload');
+  assert.equal(imports[0][0], 'A');
+  assert.equal(a.written, 3);
+  assert.equal(b.deferred, true);
+  assert.equal(b.contended, true);
+  assert.equal(b.written, 0);
+  assert.equal(warned.length, 1, 'B said so, once');
+  assert.match(warned[0], /another hydration/i);
+});
+
+test('importMemory: contended path never waits and never throws — returns deferred, writes nothing', async () => {
+  const lockPath = joinPath(testTmp('import-guard-'), 'brain-memory-hydration.lock');
+  const holder = acquireHydrationGuard({ lockPath, _pidAlive: () => true, _pid: 7 });
+  assert.equal(holder.held, true);
+  let imported = 0;
+  const started = Date.now();
+  const r = await importMemory({
+    _requireEngram: () => ({}),
+    _readRecords: () => fixtureRecords(2),
+    _engramExistingTopicKeys: () => new Set(),
+    _engramImport: () => { imported++; },
+    _warn: () => {},
+    _guard: () => acquireHydrationGuard({ lockPath, _pidAlive: () => true }),
+  });
+  holder.release();
+  assert.equal(imported, 0);
+  assert.deepEqual({ deferred: r.deferred, contended: r.contended, written: r.written }, { deferred: true, contended: true, written: 0 });
+  assert.ok(Date.now() - started < 1000, 'no waiting');
+});
+
+test('importMemory: the guard is released after the write, so the NEXT run proceeds', async () => {
+  const _guard = sharedGuard();
+  let imported = 0;
+  const opts = () => ({
+    _requireEngram: () => ({}),
+    _readRecords: () => fixtureRecords(1),
+    _engramExistingTopicKeys: () => new Set(),
+    _engramImport: () => { imported++; },
+    _warn: () => {},
+    _guard,
+  });
+  await importMemory(opts());
+  await importMemory(opts());
+  assert.equal(imported, 2);
+});
+
+test('importMemory: the guard is released when the read throws (unreadable store path)', async () => {
+  const _guard = sharedGuard();
+  let imported = 0;
+  const r1 = await importMemory({
+    _requireEngram: () => ({}),
+    _readRecords: () => fixtureRecords(1),
+    _engramExistingTopicKeys: () => { throw new Error('engram: locked'); },
+    _engramImport: () => { imported++; },
+    _warn: () => {},
+    _guard,
+  });
+  assert.equal(r1.deferred, true);
+  const r2 = await importMemory({
+    _requireEngram: () => ({}),
+    _readRecords: () => fixtureRecords(1),
+    _engramExistingTopicKeys: () => new Set(),
+    _engramImport: () => { imported++; },
+    _warn: () => {},
+    _guard,
+  });
+  assert.equal(r2.written, 1);
+  assert.equal(imported, 1);
 });

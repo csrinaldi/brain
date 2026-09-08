@@ -15,6 +15,10 @@ import { exportObservation } from './engram-export.mjs';
 import { renderProvenance } from './provenance.mjs';
 import { RECORD_TYPES, computeRecordId } from './format.mjs';
 
+// #820: a faked backend has no store to protect — never take the real machine guard from a test.
+const noGuard = () => ({ held: true, release() {} });
+
+
 function tmpRoot(prefix) {
   return mkdtempSync(join(tmpdir(), prefix));
 }
@@ -96,6 +100,7 @@ test('REQ-C3-6: plainfiles → engram round-trips with record-level equality, no
     // binary, which is exactly the hermeticity the name promises.
     const captured = [];
     const importResult = await importMemory({
+      _guard: noGuard,
       root,
       _requireEngram: () => 'engram',
       _engramExistingTopicKeys: () => new Set(),

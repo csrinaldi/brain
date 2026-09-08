@@ -1,6 +1,6 @@
 {
   "name": "@logikas/brain",
-  "version": "1.1.0",
+  "version": "1.5.0",
   "bin": {
     "brain": "brain/scripts/cli-entry.mjs"
   },
@@ -57,6 +57,7 @@
     "brain:protect": "node ./brain/scripts/brain-protect.mjs",
     "brain:protect-server": "node ./brain/scripts/brain-protect-server.mjs",
     "brain:governance-status": "node ./brain/scripts/brain-governance-status.mjs",
+    "brain:port:coverage": "node brain/scripts/vcs/port-coverage.mjs",
     "pretest": "node brain/scripts/test-hygiene.mjs",
     "test": "node --test \"brain/scripts/**/*.test.mjs\" \"test/**/*.e2e.test.mjs\"",
     "test:fresh-install": "bash test/fresh-install/run.sh",
@@ -67,6 +68,7 @@
     "memory:pull": "node ./brain/scripts/memory/cli.mjs pull",
     "memory:reindex": "node ./brain/scripts/memory/cli.mjs reindex",
     "memory:resolve-index": "node ./brain/scripts/memory/cli.mjs resolve-index",
+    "memory:audit": "node ./brain/scripts/memory/cli.mjs audit",
     "memory:split-records": "node ./brain/scripts/memory/cli.mjs split-records",
     "memory:migrate-v1": "node ./brain/scripts/memory/cli.mjs migrate-v1",
     "feature:checkpoint": "node ./brain/scripts/memory/cli.mjs feature-checkpoint",

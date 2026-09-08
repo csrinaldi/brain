@@ -175,6 +175,13 @@ export async function activateProtection({ _config = null, _providerModule = nul
 
   if (result.enforced) {
     console.log('Branch protection activated successfully.');
+    // A PARTIAL success says so, here, where the operator is looking (#348).
+    // The verb was taught to report the approval count it could not apply, and
+    // this branch read `reason` only on failure — so the value became honest
+    // while the surface stayed silent, which is the same defect one layer up.
+    // A reader learns it from the output, not from the return value they never
+    // see (spec R348-2).
+    if (result.reason) console.log(`  Note   : ${result.reason}`);
     // Dispatches to run-based verification only when the provider supports it,
     // else logs a distinct "unsupported" note (issue #203 review fix F2).
     await verifyAfterArm({ checks, project, branch, provider, providerModule });

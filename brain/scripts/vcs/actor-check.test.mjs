@@ -16,6 +16,7 @@ import { renderDecision } from '../review/lib/decision-block.mjs';
 import { testTmp } from '../lib/test-tmp.mjs';
 
 import {
+  denyingList,
   evaluateActor,
   extractIssueNumber,
   filterLabeledEvents,
@@ -2270,4 +2271,131 @@ test('gatherActorCheckInputs: the REAL reader returns [] for a config with no ag
     'an undeclared key must read as [] — a default value here would exempt an identity nobody registered');
   assert.equal(evaluateActor(inputs).level, 'fail',
     'and the gate must behave exactly as it did before #454 for every consumer who never declares the key');
+});
+
+// ── #124: the identity that may DO the work may not GRANT the approval ───────
+// Measured before this change, everything else held equal:
+//   labelled by a human                      -> pass
+//   labelled by an identity in reviewActors  -> fail   (machinery works)
+//   labelled by an identity in agentActors   -> PASS   (the gap)
+// The agent's real identity is registered in this repo's config, the deny path
+// is built and tested, and the two never met.
+
+const humanApproved = {
+  author: 'csrinaldi',
+  commits: [{ sha: 'a', login: 'csrinaldi', at: '2026-09-04T00:00:00Z' }],
+  tier: 'lite',
+};
+const labelledBy = (login) => [{ actor: { login }, at: '2026-09-05T00:00:00Z' }];
+
+test('#124: an approval applied by a registered AGENT identity is refused', () => {
+  const r = evaluateActor({
+    ...humanApproved,
+    labeledEvents: labelledBy('claude'),
+    denyActors: ['claude'],       // the union the reader now produces
+    agentActors: ['claude'],
+  });
+  assert.equal(r.level, 'fail', 'an agent may act under an approval; it may not grant one (ADR-0026 \'What is unchanged\' §9)');
+  assert.match(r.reason, /agentActors/, 'and the refusal names the key the operator must edit');
+  assert.doesNotMatch(r.reason, /registered in governance\.reviewActors/,
+    'naming the wrong key sends the operator to the wrong config line');
+});
+
+test('#124: a REVIEW identity is still refused, and still named as one', () => {
+  const r = evaluateActor({
+    ...humanApproved,
+    labeledEvents: labelledBy('csrinaldibot'),
+    denyActors: ['csrinaldibot'],
+    agentActors: ['claude'],
+  });
+  assert.equal(r.level, 'fail');
+  assert.match(r.reason, /reviewActors/, 'the pre-existing message is unchanged for the identity it was written for');
+});
+
+test('#124: a human approval is unchanged in every respect', () => {
+  const r = evaluateActor({
+    ...humanApproved,
+    labeledEvents: labelledBy('csrinaldi'),
+    denyActors: ['csrinaldibot', 'claude'],
+    agentActors: ['claude'],
+  });
+  assert.equal(r.level, 'pass');
+});
+
+test('#124 (R124-2): Amendment 3 survives — the agent COMMITS, the human approves', () => {
+  // The opposite answer to the opposite question about the same identity: an
+  // agent's commits under the approver's instruction do not re-arm an approval.
+  // Merging the two lists at the source would repeal this by accident.
+  const r = evaluateActor({
+    author: 'alice',
+    labeledEvents: labelledBy('alice'),
+    commits: [{ sha: 'abc', login: 'alice-agent', at: '2026-09-05T00:10:00Z' }],
+    agentActors: ['alice-agent'],
+    denyActors: [],
+    tier: 'lite',
+  });
+  assert.equal(r.level, 'pass', 'the commit exemption is about work the approver has seen — untouched');
+});
+
+test('#124 (R124-3): an unreadable actor does not silently PASS — and the existing warn is not repealed', () => {
+  // #124 asks for "fail closed". The shipped behaviour is `warn`, and it is
+  // SPECIFIED: REQ-L5-2, "never failing on missing evidence", named in the
+  // reason itself. This test asserts the property #124 actually needs — the
+  // approval is not waved through — without silently repealing a requirement
+  // that predates it. Whether missing evidence should harden from warn to fail
+  // is a doctrine question, recorded in the proposal, not decided here.
+  const r = evaluateActor({ ...humanApproved, labeledEvents: [], denyActors: ['claude'], agentActors: ['claude'] });
+  assert.notEqual(r.level, 'pass', 'no readable actor is not a human signature');
+  assert.equal(r.level, 'warn', 'and it is REQ-L5-2 speaking, unchanged by this PR');
+  assert.match(r.reason, /REQ-L5-2/, 'the reason names the requirement that chose this level');
+});
+
+test('#124 (round 1): BOTH deny reports name the same key — the label branch and rule 15', () => {
+  // The first cut taught only the label branch to name the key. Rule 15 reuses
+  // the identical denyActors union and kept saying `governance.reviewActors`
+  // for an identity that is only an agent — the same message repaired on one
+  // path and left wrong on the other.
+  assert.deepEqual(denyingList('claude', ['claude']), { key: 'governance.agentActors', clause: 'an agent identity' });
+  assert.deepEqual(denyingList('CLAUDE', ['claude']), { key: 'governance.agentActors', clause: 'an agent identity' },
+    'logins fold case on both providers');
+  assert.deepEqual(denyingList('csrinaldibot', ['claude']), { key: 'governance.reviewActors', clause: 'a review identity' });
+
+  const label = evaluateActor({
+    ...humanApproved,
+    labeledEvents: labelledBy('claude'),
+    denyActors: ['claude'],
+    agentActors: ['claude'],
+  });
+  assert.match(label.reason, /governance\.agentActors/, 'the label branch names the agent key');
+  assert.doesNotMatch(label.reason, /registered in governance\.reviewActors/,
+    'and never sends the operator to the wrong config line');
+});
+
+// ── #124 round 6: the SIGN path names its key too, end to end ────────────────
+// Rule 15 was the branch this PR repaired in round 1 and the only one left
+// without an end-to-end regression test — the exact shape the file's own
+// comments describe having happened three times: "the same message repaired on
+// one path and left wrong on the other".
+
+test('#124: rule 15 names governance.agentActors when the signer is an AGENT identity', () => {
+  const result = evaluateSignedDecision({
+    decisions: [decisionReview({ head_sha: HEAD_SHA, actor: 'alice-agent', author: 'alice-agent' })],
+    headSha: HEAD_SHA,
+    denyActors: ['alice-agent'],      // the union the reader produces
+    agentActors: ['alice-agent'],
+  });
+  assert.equal(result.admitted, false, 'an agent may not sign an approval either');
+  assert.match(result.note, /governance\.agentActors/, 'and the note names the key the operator must edit');
+  assert.doesNotMatch(result.note, /governance\.reviewActors/, 'never the wrong one');
+});
+
+test('#124: rule 15 still names governance.reviewActors for a review identity', () => {
+  const result = evaluateSignedDecision({
+    decisions: [decisionReview({ head_sha: HEAD_SHA, actor: 'brain-reviewer[bot]', author: 'brain-reviewer[bot]' })],
+    headSha: HEAD_SHA,
+    denyActors: ['brain-reviewer[bot]'],
+    agentActors: ['alice-agent'],
+  });
+  assert.equal(result.admitted, false);
+  assert.match(result.note, /governance\.reviewActors/, 'the pre-existing message is unchanged for its own identity');
 });

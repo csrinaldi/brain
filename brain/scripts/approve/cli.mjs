@@ -46,6 +46,7 @@ import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 
 import { getVcs } from '../vcs/cli.mjs';
+import { approvalDenySet, denyingList, isDeniedActor } from '../vcs/actor-check.mjs';
 import { loadBrainConfig } from '../lib/brain-config.mjs';
 import { currentBranch } from '../lib/git-branch.mjs';
 import { renderDecision } from '../review/lib/decision-block.mjs';
@@ -101,14 +102,38 @@ export function parseArgs(argv) {
   return { ok: true, number: positionals.length === 1 ? Number(positionals[0]) : null };
 }
 
-/** Reads `governance.reviewActors` (issue #375's DENY list) — the SAME key
- * L5's read side denies against (actor-check.mjs rule 15). Read via
- * `loadBrainConfig`, matching identity.mjs's own config access. Never
+/** The approval deny-set — `governance.reviewActors` ∪ `governance.agentActors`.
+ *
+ * The RULE is imported, not restated (#124 review round 2). This file used to
+ * carry its own copy reading `reviewActors` alone while its comment claimed to
+ * be "the write-side twin of L5's read rule 15" — so when #124 widened the read
+ * side, the twin silently stopped being one and `brain:approve` would have let
+ * a registered agent sign. One rule, two implementations, and the second one
+ * wrong: the exact shape `brain/core/anti-patterns/` names.
+ *
+ * Read via `loadBrainConfig`, matching identity.mjs's own config access. Never
  * throws: an unreadable/missing config denies nobody. */
 function defaultReadDenyActors() {
   try {
+    return approvalDenySet(loadBrainConfig());
+  } catch {
+    return [];
+  }
+}
+
+/** The AGENT identity list, for naming which key denied the actor (#124).
+ *
+ * A sibling reader with the same never-throws guarantee and the same injection
+ * point as its twin above — NOT a second `loadBrainConfig()` inside the deny
+ * branch, which is what the first cut did. `loadBrainConfig` throws by contract
+ * on a missing or malformed config, so calling it there turned a graceful
+ * refusal into a raw exception for exactly the callers the injectable exists to
+ * serve: a test harness, a different config source, a repo without the file
+ * (review round 3). A message must never be able to crash a verdict. */
+function defaultReadAgentActors() {
+  try {
     const config = loadBrainConfig();
-    return Array.isArray(config?.governance?.reviewActors) ? config.governance.reviewActors : [];
+    return Array.isArray(config?.governance?.agentActors) ? config.governance.agentActors : [];
   } catch {
     return [];
   }
@@ -126,6 +151,8 @@ function defaultReadDenyActors() {
  * @param {Function} [ctx.readDenyActorsFn]  () => string[]
  * @param {Function} [ctx.branchFn]      () => string|null — current branch, only consulted when no PR number is given.
  * @param {Function} ctx.readLineFn      async () => string|null|undefined — reads the typed confirmation.
+ * @param {Function} [ctx.readAgentActorsFn] () => string[] — `governance.agentActors`, used only to name
+ *   which config key denied an actor. Injectable and never-throwing for the same reason its twin is.
  * @param {Function} [ctx.nowFn]         () => string ISO-8601, for the block's `at` field.
  * @param {Function} [ctx.write]         (chunk) => void
  * @returns {Promise<{exitCode:number, output:string, url?:string}>}
@@ -137,6 +164,7 @@ export async function runApprove({
   provider,
   getVcsFn = getVcs,
   readDenyActorsFn = defaultReadDenyActors,
+  readAgentActorsFn = defaultReadAgentActors,
   branchFn,
   readLineFn,
   nowFn = () => new Date().toISOString(),
@@ -204,8 +232,21 @@ export async function runApprove({
   }
 
   const denyActors = readDenyActorsFn();
-  if (Array.isArray(denyActors) && denyActors.includes(actor)) {
-    say(`✗ "${actor}" is registered in governance.reviewActors — a review identity may never sign an approval.`);
+  // The SAME predicate L5's read gate uses, imported rather than restated
+  // (#124 round 5). This lock's own docstring calls itself "the write-side twin
+  // of L5 read rule 15", and it stopped being one twice in this PR: first when
+  // the read side widened to the union, then again when the read side learned
+  // to fold case and this one kept an exact `.includes()` — so a denied
+  // identity spelled with different case walked past it and posted a signed
+  // block. A twin that restates its sibling's rule is not a twin.
+  if (isDeniedActor(actor, denyActors)) {
+    // Guarded at the CALL SITE as well as in the default reader: the property
+    // wanted here is not "our reader is safe" but "a message cannot turn a
+    // refusal into a crash", and that must hold for whatever a caller injects.
+    let agents = [];
+    try { agents = readAgentActorsFn() ?? []; } catch { agents = []; }
+    const denied = denyingList(actor, agents);
+    say(`✗ "${actor}" is registered in ${denied.key} — ${denied.clause} may never sign an approval.`);
     say('  This is the write-side twin of L5 read rule 15 (design.md §E3).');
     return done(1);
   }

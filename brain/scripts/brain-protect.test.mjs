@@ -227,3 +227,47 @@ test('#94: the run REPORTS the armed count and the tier that produced it', async
   assert.match(reported, /\b0\b/, 'the armed value must appear');
   assert.match(reported, /lite/, 'and the tier it came from — a number with no origin is what this ticket closes');
 });
+
+test('#348: a PARTIAL success is ANNOUNCED — enforced with a reason prints the note', async () => {
+  // Round 2's blocker: branchProtect was taught to report the approval count it
+  // could not apply, and this caller read `reason` only in the failure branch —
+  // so brain:protect printed "activated successfully" and nothing else. The
+  // value became honest while the surface stayed silent, which is the same
+  // defect one layer up from the one this ticket closes.
+  const partial = {
+    calls: [],
+    branchProtect: async (args) => {
+      partial.calls.push(args);
+      return {
+        enforced: true,
+        reason: 'the branch is protected, but the 1-approval requirement was NOT applied — needs GitLab Premium',
+      };
+    },
+  };
+  const lines = [];
+  const realLog = console.log;
+  console.log = (...a) => lines.push(a.join(' '));
+  try {
+    await activateProtection({ _config: CONFIG('standard'), _providerModule: partial });
+  } finally {
+    console.log = realLog;
+  }
+
+  const out = lines.join('\n');
+  assert.match(out, /activated successfully/, 'the protection did succeed, and still says so');
+  assert.match(out, /NOT applied/, 'and what it could NOT do is on screen — not only in a return value nobody reads');
+});
+
+test('#348: a full success stays quiet — nothing unapplied, nothing announced', async () => {
+  const provider = spyProvider();   // returns { enforced: true } with no reason
+  const lines = [];
+  const realLog = console.log;
+  console.log = (...a) => lines.push(a.join(' '));
+  try {
+    await activateProtection({ _config: CONFIG('lite'), _providerModule: provider });
+  } finally {
+    console.log = realLog;
+  }
+  assert.ok(!lines.some(l => /Note   :/.test(l)),
+    'announcing an unapplied count nobody asked for is the noise that makes real signals unread');
+});
