@@ -25,7 +25,7 @@ Memory operates in two layers:
 2. **Memory backend (live)**: implementation chosen by `MEMORY_BACKEND`. Engram indexes `.memory/` into its local store for semantic search. The symlink `.engram → .memory` (created by `scripts/memory/backends/engram.mjs setup`) is required because the engram CLI has no configurable directory flag.
 
 The canonical flow:
-- `memory:pull` → churn-resilient sync: restores the regenerated `.memory/manifest.json`, runs `git pull`, then imports. Use this instead of a raw `git pull` (see the note below).
+- `memory:pull` → churn-resilient sync: runs `git pull`, then hydrates the active backend from `.memory/records/`. *(Its manifest-restore step is the engram adapter's, not the layer's — the note below is superseded by Amendment 1, and the step retires with #864 task 2.4.)* Use this instead of a raw `git pull`.
 - `memory:import` → imports `.memory/` into the active backend (no `git pull`).
 - `memory:index` → reprojects the durable `brain/` into the active backend.
 - `memory:share` → materializes the active backend to `.memory/` before push.

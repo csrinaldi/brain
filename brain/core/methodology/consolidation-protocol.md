@@ -183,34 +183,22 @@ The human is the final authority over conflicts of type `architecture`, `decisio
 3. If it is stale context: `mem_review --action mark_reviewed` after
    explicit human confirmation — never automatically
 
-## 5. Memory Synchronization (Engram git-based)
+## 5. Memory Synchronization
 
-`npm run brain:day:start` closes the full cycle at the start of the workday:
+`npm run brain:day:start` closes the cycle at the start of the workday:
 
-1. **import** (`engram sync --import`) — pulls `.engram/` from the repo → local `~/.engram`
-2. **index** (`brain-to-engram.mjs`) — reprojects `brain/` → `~/.engram`
-3. **export** (`engram sync --export`) — publishes `~/.engram` → `.engram/` in the repo
+1. **hydrate** (`memory:pull` — `git pull`, then `cli.mjs import`) — `.memory/records/` → the active backend, idempotent by record id (`memory-backend-contract.md` rule 1)
+2. **index** (`memory:index`) — re-projects `brain/` doctrine into the active backend, where it supports it
+3. **materialize** (`memory:share`) — what the durable layer does not yet hold → `.memory/records/`, and `index.jsonl` rebuilt
 
-The export in step 3 captures the memory accumulated from the previous session and the reprojection of `brain/`. Memory generated during the active workday (in-session `mem_save` calls) is exported with the next `brain:day:start` or manually:
-
-```bash
-npm run memory:share   # export explícito en cualquier momento
-```
-
-Before pushing the branch, confirm that `.engram/` reflects the current state:
+A capture made in session is a record first (`npm run memory:save --issue N`, rule 2). Until the memory lane (#862) exists, records still travel with the branch — before pushing:
 
 ```bash
-npm run memory:share && git add .engram/ && git status
+npm run memory:share && git add .memory/ && git status
 ```
 
-From #81 onwards, a **pre-push hook** (`scripts/hooks/pre-push`) automates that
-check: it runs `engram sync --export` before every push and aborts if `.engram/`
-was left uncommitted, indicating how to materialize it. It auto-installs via `core.hooksPath`
-(the `prepare` script in `npm install` + self-heal in `brain:day:start`), so it does not depend on
-re-running `brain:env:init`. The export is client-side by design — it only happens on the
-dev's machine; the hook maximizes its reach but does not make it unbypassable (`git push --no-verify` remains
-the emergency escape).
+The **pre-push hook** (`brain/scripts/hooks/pre-push`) runs `memory:share` and **warns, never blocks**, when `.memory/` holds uncommitted records. `.engram` is the engram adapter's gitignored symlink (ADR-0002 Amendment 1): it is never added and never committed. The hook auto-installs via `core.hooksPath`; `git push --no-verify` remains the emergency escape.
 
-Once the MR is merged, the team absorbs the memory with `npm run memory:pull` or on the next `brain:day:start`.
+Once the MR is merged, the team absorbs the memory with `npm run memory:pull` or on the next `brain:day:start`. **This sentence is under ruling #862**: on the memory lane, records reach `main` on their own pull request, not the feature's — measured cost of the current flow: p50 21.6 h learn→main (#864 baseline).
 
 The **durable** layer (decisions, anti-patterns) is promoted to `brain/` in Markdown, which is the source of truth; engram is the shared **live** layer. See the consuming project's two-layer memory ADR.
