@@ -23,6 +23,7 @@ Reusable documentation — applies to any project that adopts this system.
 - [Agent authorities](core/methodology/agent-authorities.md) — what AI agents can and cannot do
 - [Harness contract](core/methodology/harness-contract.md) — abstract SDD verbs any harness must implement
 - [SDD canonical layout](core/methodology/sdd-layout.md) — normative openspec/changes/** layout: naming, required artifacts, operational artifacts, single-source accessor
+- [Memory backend contract](core/methodology/memory-backend-contract.md) — the four required verbs, three rules and the agnosticism test any memory backend must satisfy (#863)
 - [VCS contract](core/methodology/vcs-contract.md) — abstract VCS verbs any provider (gh/glab) must implement
 - [Feature-working-memory contract](core/methodology/feature-working-memory-contract.md) — the resume.md schema + feature-checkpoint/resume verbs
 - [Memory record format](core/methodology/memory-format.md) — the brain-owned durable .memory/ record format (schema, union merge, index)
