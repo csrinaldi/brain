@@ -115,8 +115,8 @@ and must say so.
 #862 lane ruling ──► #805 supersedes ──┐                                      │
                  └──► 2.5 mrAutoMerge ──┼──► 3.1a collector ─► 3.1b push/PR ──┼──► 6.1 exit
                  └──► #738 provenance ──┤    3.1c path+gov ─► 3.1d surfaces   │   (memory:audit
-#863 contract ─────► #247 chunks ──────┼──► 2.4 artifacts ─┘                  │    under both
-                 └──► 3.2 record-first + capture door ─────────────────────────┤    backends)
+#863 contract ─────► #247 chunks ──► 3.2 record-first ──► 2.4 artifacts ─┘   │    under both
+                 └──► 1.2a heal (3 pre-guard rows) ─────────────────────────────┤    backends)
                  └──► #361 reindex parity                                     │
 2.6 memory:audit (measurement) ───────────────────────────────────────────────┤
 #461 · #712 · #714 · #638 (independent hardening) ────────────────────────────┘
@@ -125,10 +125,13 @@ and must say so.
 - Wave 0: 0.0 (reopen the tracker — a human act), #820 mitigation, **2.6 `memory:audit`**
   (the measurement must exist before anything is claimed to have moved).
 - Wave 1: #862, #863 (rulings; may run in parallel). Each ruling closes the rows §2 assigns it.
-- Wave 2: #805, #738, #247, **2.4 artifact retirement, 2.5 `mrAutoMerge`** (prerequisites;
-  parallel once their ruling lands).
-- Wave 3: 3.1a-d lane implementation (under #862; **3.1c/3.1d depend on 2.4**), 3.2
-  record-first capture + door (under #863).
+- Wave 2: #805, #738, #247, **2.5 `mrAutoMerge`**, 1.2a heal (prerequisites; parallel once their
+  ruling lands). **[rev #863 D3]** 2.4 artifact retirement is NOT a Wave 2 parallel: it depends
+  on 3.2 — manifest, chunks and symlink exist only because `share` calls `engram sync --export`,
+  and retiring the manifest while `share` still writes it reproduces #803 on every push. Order:
+  #247 (2.3) → 3.2 (#874) → 2.4.
+- Wave 3: 3.2 record-first capture + door (#874, under #863), then 2.4; 3.1a-d lane
+  implementation (under #862; **3.1c/3.1d depend on 2.4**).
 - Wave 4: #361, #461, #712, #714, #638.
 - Close #795 in favour of #862 when the lane's first scenario passes **and** its acceptance
   1 and 3 are answered in `memory-presence.mjs`'s header.

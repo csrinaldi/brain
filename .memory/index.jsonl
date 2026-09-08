@@ -1598,6 +1598,7 @@
 {"id":"rec-aa1acdb166f451e0","ts":"2026-07-13T00:21:41Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-aa1acdb166f451e0.jsonl"}
 {"id":"rec-aa22d208e9d5d0ef","ts":"2026-07-29T14:28:42Z","actor":"@legacy","type":"pattern","project":"brain","file":"2026-07-rec-aa22d208e9d5d0ef.jsonl"}
 {"id":"rec-aa4a03850fc8945f","ts":"2026-07-25T21:50:41Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-07-rec-aa4a03850fc8945f.jsonl"}
+{"id":"rec-aa4cae8ab8b76b5d","ts":"2026-09-08T16:44:11Z","actor":"feat/issue-863-featmemory-the-truth-is-records-and-the","type":"decision","project":"brain","issue":863,"file":"2026-09-rec-aa4cae8ab8b76b5d.jsonl"}
 {"id":"rec-aa6de15c13316d86","ts":"2026-08-07T22:13:34Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-08-rec-aa6de15c13316d86.jsonl"}
 {"id":"rec-aa71ec3b84d1c10f","ts":"2026-07-25T21:51:01Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-aa71ec3b84d1c10f.jsonl"}
 {"id":"rec-aab0de78ea6d353f","ts":"2026-07-25T00:47:42Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07-rec-aab0de78ea6d353f.jsonl"}
