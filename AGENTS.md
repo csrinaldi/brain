@@ -31,6 +31,7 @@ Reusable documentation — applies to any project that adopts this system.
 - [Agent authorities](brain/core/methodology/agent-authorities.md) — what AI agents can and cannot do
 - [Harness contract](brain/core/methodology/harness-contract.md) — abstract SDD verbs any harness must implement
 - [SDD canonical layout](brain/core/methodology/sdd-layout.md) — normative openspec/changes/** layout: naming, required artifacts, operational artifacts, single-source accessor
+- [Memory backend contract](brain/core/methodology/memory-backend-contract.md) — the four required verbs, three rules and the agnosticism test any memory backend must satisfy (#863)
 - [VCS contract](brain/core/methodology/vcs-contract.md) — abstract VCS verbs any provider (gh/glab) must implement
 - [Feature-working-memory contract](brain/core/methodology/feature-working-memory-contract.md) — the resume.md schema + feature-checkpoint/resume verbs
 - [Memory record format](brain/core/methodology/memory-format.md) — the brain-owned durable .memory/ record format (schema, union merge, index)
@@ -59,7 +60,7 @@ See [`brain/project/README.md`](brain/project/README.md) for directory conventio
 - [ADR-0001](brain/project/decisions/adr-0001-arquitectura-3-capas-harness-reemplazable.md) — 3-layer architecture with replaceable harness
 - [ADR-0002](brain/project/decisions/adr-0002-memoria-git-based-dos-capas.md) — Git-based team memory in two layers (**Amendment 1, 08/09/2026** — the manifest note is withdrawn — records are the truth (ADR-0017), the manifest was the chunk transport's index and that transport is retired; manifest, symlink and merge driver are the engram adapter's private artifacts, governed by memory-backend-contract.md rule 3, #863)
 - [ADR-0003](brain/project/decisions/adr-0003-split-core-project-self-hosting.md) — core/project split and self-hosting
-- [ADR-0004](brain/project/decisions/adr-0004-adapter-memoria-memory-backend.md) — Memory adapter: MEMORY_BACKEND selector
+- [ADR-0004](brain/project/decisions/adr-0004-adapter-memoria-memory-backend.md) — Memory adapter: MEMORY_BACKEND selector (**Amendment 1, 08/09/2026** — the interface exists — memory-backend-contract.md names the required verbs, the three rules and the agnosticism test; "manifest required for all backends" is withdrawn (plainfiles is the proof) and the manifest, symlink and driver are the engram adapter's, #863)
 - [ADR-0005](brain/project/decisions/adr-0005-adapter-harness-sdd-harness.md) — Harness adapter: SDD_HARNESS selector
 - [ADR-0006](brain/project/decisions/adr-0006-distribucion-installer-versionado.md) — Distribution: versioned installer via git tags (**Amendment 1, 13/08/2026** — **SUPERSEDED by ADR-0030** — the private-repo premise that chose git tags no longer exists; distribution moves to a scoped registry package, #617; **Amendment 2, 18/08/2026** — Amendment 1's own text named `@csrinaldi/brain`, a scope nothing was ever published under, and described a mechanism that has since shipped — the scope is `@logikas/brain` and the accepted loss it recorded is paid, #729)
 - [ADR-0007](brain/project/decisions/adr-0007-config-vcs-agnostica-y-checkrefs.md) — VCS-agnostic config and check-refs engine
