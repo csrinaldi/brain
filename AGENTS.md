@@ -57,7 +57,7 @@ See [`brain/project/README.md`](brain/project/README.md) for directory conventio
 ### Architecture decisions
 
 - [ADR-0001](brain/project/decisions/adr-0001-arquitectura-3-capas-harness-reemplazable.md) — 3-layer architecture with replaceable harness
-- [ADR-0002](brain/project/decisions/adr-0002-memoria-git-based-dos-capas.md) — Git-based team memory in two layers
+- [ADR-0002](brain/project/decisions/adr-0002-memoria-git-based-dos-capas.md) — Git-based team memory in two layers (**Amendment 1, 08/09/2026** — the manifest note is withdrawn — records are the truth (ADR-0017), the manifest was the chunk transport's index and that transport is retired; manifest, symlink and merge driver are the engram adapter's private artifacts, governed by memory-backend-contract.md rule 3, #863)
 - [ADR-0003](brain/project/decisions/adr-0003-split-core-project-self-hosting.md) — core/project split and self-hosting
 - [ADR-0004](brain/project/decisions/adr-0004-adapter-memoria-memory-backend.md) — Memory adapter: MEMORY_BACKEND selector
 - [ADR-0005](brain/project/decisions/adr-0005-adapter-harness-sdd-harness.md) — Harness adapter: SDD_HARNESS selector

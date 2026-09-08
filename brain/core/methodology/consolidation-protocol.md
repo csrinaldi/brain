@@ -123,7 +123,7 @@ CI round trip — not that nothing catches it.
 | `openspec/changes/*/brain-drafts/**` | Agent (draft)     | create, update         | None — proposal zone                            |
 | `openspec/changes/archive/**`        | Agent or human    | create (on archive)    | None                                            |
 | `openspec/specs/**`                  | Agent or human    | create, update         | `npm run brain:repo:check` validates references |
-| `.engram/**`                         | Agent or human    | create, update         | Merge driver content-addressed                  |
+| `.memory/records/**`                 | Agent or human    | create (append-only)   | One content-addressed record per file (ADR-0017 A2); corrections are new records with `supersedes`; never edited, never deleted (`memory-backend-contract.md`) |
 | `scripts/**`, `package.json`         | Agent or human    | create, update, delete | `npm run brain:repo:check`                      |
 | `.gitlab-ci.yml`, `settings.xml`     | Human recommended | update                 | Requires issue + MR (not mechanical)            |
 
