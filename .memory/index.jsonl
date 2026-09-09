@@ -800,6 +800,7 @@
 {"id":"rec-56ffd0469f66c885","ts":"2026-07-29T14:27:19Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-56ffd0469f66c885.jsonl"}
 {"id":"rec-5719ee33d54ef91d","ts":"2026-07-29T14:26:41Z","actor":"@legacy","type":"pattern","project":"brain","file":"2026-07-rec-5719ee33d54ef91d.jsonl"}
 {"id":"rec-572c638923574c8f","ts":"2026-06-26T21:06:25Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-06-rec-572c638923574c8f.jsonl"}
+{"id":"rec-573fd33abe4d2335","ts":"2026-09-09T14:25:01Z","actor":"feat/issue-862-decisionmemory-memory-rides-the-features","type":"decision","project":"brain","issue":862,"file":"2026-09-rec-573fd33abe4d2335.jsonl"}
 {"id":"rec-5742fbf3421c6f2a","ts":"2026-07-25T00:47:55Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-5742fbf3421c6f2a.jsonl"}
 {"id":"rec-5762e3e125f6c31e","ts":"2026-07-10T15:19:35Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-5762e3e125f6c31e.jsonl"}
 {"id":"rec-57785fe1736a6f7c","ts":"2026-08-31T17:29:13Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-08-rec-57785fe1736a6f7c.jsonl"}
