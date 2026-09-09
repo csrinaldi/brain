@@ -12,6 +12,7 @@ import { vcsToken } from '../lib/token.mjs';
 import { currentIdentity } from '../lib/identity-context.mjs';
 import { assertNoApprovalLabel } from '../lib/approval-deny.mjs';
 import { uncomputable, UNCOMPUTABLE_REASONS } from '../lib/uncomputable-cause.mjs';
+import { armed, refused, AUTO_MERGE_REASONS } from '../lib/auto-merge-outcome.mjs';
 
 export const PROVIDER = 'github';
 
@@ -592,6 +593,55 @@ export async function mrCreate({
   const r = gh(args);
   if (r.ok) return { url: r.stdout.trim() };
   return { url: null, error: r.stderr.trim() || `gh pr create failed (status ${r.status})` };
+}
+
+// fixtures/github-mrAutoMerge-unsupported.json, `recorded: true` as of the
+// task 2.1 live capture (2026-09-09, PR #895, csrinaldi/brain,
+// allow_auto_merge:false): `GraphQL: Auto merge is not allowed for this
+// repository (enablePullRequestAutoMerge)`. Note the real text has a SPACE
+// ("Auto merge"), not a hyphen ("auto-merge") — the pre-capture placeholder
+// assumed the hyphenated form and would have silently misclassified this as
+// `transport`. `[- ]?` tolerates either separator (and none) so a future
+// GraphQL message-wording tweak on either side doesn't reopen this gap.
+const GITHUB_MR_AUTO_MERGE_UNSUPPORTED_RE = /auto[- ]?merge is not allowed/i;
+
+/**
+ * Arms auto-merge (squash, hardcoded) via `gh pr merge --auto --squash`, or
+ * refuses when `requiredReviews` says a human gate is still required.
+ * The refusal is the FIRST statement (design A4) — no `gh` call is ever
+ * made on that path. Never throws.
+ *
+ * `url` is unconditionally `null` (design A2): `gh pr merge --auto` prints a
+ * human confirmation line, not a URL, so stdout is never parsed.
+ *
+ * @param {{ project: string, number: number, requiredReviews?: number }} params
+ * @returns {Promise<{enabled:true,url:null}|{enabled:false,reason:string}|{enabled:false,reason:string,error:string}>}
+ */
+export async function mrAutoMerge({ project, number, requiredReviews = 1 } = {}) {
+  // Only the NUMBER 0 may arm (cold-review blocker 1). `> 0` is false for
+  // null/NaN/-1 too — a naive predicate ARMS on all three, a fail-open gate
+  // on a mutating write verb. `!== 0` makes exact-zero the only permission;
+  // a string `'0'` stays refused because strict equality never coerces.
+  if (requiredReviews !== 0) return refused({ reason: AUTO_MERGE_REASONS.REQUIRES_HUMAN_APPROVAL });
+
+  // The seam itself can THROW (e.g. a launch failure re-raised instead of
+  // returned) — `run()`/`gh()` carry no try/catch of their own. Without
+  // this wrapper such a throw would reject the returned promise, breaking
+  // the never-throws contract (correction 4).
+  let r;
+  try {
+    r = gh(['pr', 'merge', String(number), '--auto', '--squash', '--repo', project]);
+  } catch (err) {
+    const message = err?.message ?? String(err);
+    return refused({ reason: AUTO_MERGE_REASONS.TRANSPORT, error: message });
+  }
+  if (r.ok) return armed({ url: null });
+
+  const text = r.stderr.trim() || `gh pr merge failed (status ${r.status})`;
+  if (GITHUB_MR_AUTO_MERGE_UNSUPPORTED_RE.test(text)) {
+    return refused({ reason: AUTO_MERGE_REASONS.UNSUPPORTED, error: text });
+  }
+  return refused({ reason: AUTO_MERGE_REASONS.TRANSPORT, error: text });
 }
 
 /**

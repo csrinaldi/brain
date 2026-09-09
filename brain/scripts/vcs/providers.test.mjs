@@ -600,6 +600,64 @@ test('gitlab.branchProtect never throws even on non-zero exit', async () => {
   assert.equal(threw, false, 'branchProtect must not throw');
 });
 
+// ── mrAutoMerge (issue #886) — provider detail the contract layer
+// deliberately does not assert (design A6): exact `gh` argv, exact GitLab
+// path + payload. `--repo <project>` is pinned because `mrCreate` resolves
+// the repo from the git remote instead (github.mjs:579) — a real
+// behavioural difference worth pinning here.
+
+test('github.mrAutoMerge sends the exact argv `pr merge <n> --auto --squash --repo <project>`', async () => {
+  let captured = null;
+  setSpawn((cmd, args) => {
+    captured = { cmd, args };
+    return { status: 0, stdout: '', stderr: '' };
+  });
+
+  const result = await github.mrAutoMerge({ project: 'o/r', number: 42, requiredReviews: 0 });
+
+  assert.equal(captured.cmd, 'gh');
+  assert.deepEqual(captured.args, ['pr', 'merge', '42', '--auto', '--squash', '--repo', 'o/r']);
+  assert.deepEqual(result, { enabled: true, url: null });
+});
+
+test('gitlab.mrAutoMerge PUTs the exact path and payload', async () => {
+  let seenUrl;
+  let seenOptions;
+  const result = await gitlab.mrAutoMerge({
+    project: 'g/r',
+    number: 42,
+    requiredReviews: 0,
+    apiBase: 'https://gitlab.example.com/api/v4',
+    token: 'tok-abc',
+    fetchImpl: async (url, options) => {
+      seenUrl = url;
+      seenOptions = options;
+      return { ok: true, json: async () => ({ web_url: 'https://gitlab.example.com/g/r/-/merge_requests/42' }) };
+    },
+  });
+
+  assert.equal(seenUrl, 'https://gitlab.example.com/api/v4/projects/g%2Fr/merge_requests/42/merge');
+  assert.equal(seenOptions.method, 'PUT');
+  assert.equal(seenOptions.headers['PRIVATE-TOKEN'], 'tok-abc');
+  assert.deepEqual(JSON.parse(seenOptions.body), { merge_when_pipeline_succeeds: true, squash: true });
+  assert.deepEqual(result, { enabled: true, url: 'https://gitlab.example.com/g/r/-/merge_requests/42' });
+});
+
+// A3 false-positive regression: an MR whose iid happens to be 405 must not
+// have a genuine 500 outage misread as "this forge will never do this".
+// Sibling precedent: gitlab.branchProtect's anchored `': 409'` test above.
+test('gitlab.mrAutoMerge: a 500 on iid 405 classifies transport, not unsupported', async () => {
+  const result = await gitlab.mrAutoMerge({
+    project: 'x/y',
+    number: 405,
+    requiredReviews: 0,
+    fetchImpl: async () => ({ ok: false, status: 500 }),
+  });
+  assert.equal(result.enabled, false);
+  assert.equal(result.reason, 'transport', 'a 500 status must never be misread as unsupported merely because the iid is 405');
+  assert.match(result.error, /API failed: 500/);
+});
+
 // ── capabilities ──────────────────────────────────────────────────────────────
 
 test('github.capabilities returns {hardEnforcement:"available"} when probe succeeds (200)', async () => {

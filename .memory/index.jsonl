@@ -53,6 +53,7 @@
 {"id":"rec-04faf75a7faaf5b8","ts":"2026-07-25T21:50:29Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-04faf75a7faaf5b8.jsonl"}
 {"id":"rec-050498ca545d86be","ts":"2026-07-25T00:47:09Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-050498ca545d86be.jsonl"}
 {"id":"rec-05708333f9bf0db9","ts":"2026-07-21T14:58:55Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07-rec-05708333f9bf0db9.jsonl"}
+{"id":"rec-05767bed7024aee4","ts":"2026-09-09T17:46:55Z","actor":"feat/issue-886-featvcs-mrautomerge-merge-by-tier-on-the","type":"architecture","project":"brain","issue":886,"file":"2026-09-rec-05767bed7024aee4.jsonl"}
 {"id":"rec-05913626af4a1aa1","ts":"2026-07-29T13:59:29Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-05913626af4a1aa1.jsonl"}
 {"id":"rec-05a9cf329df0182d","ts":"2026-08-18T22:04:39Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-08-rec-05a9cf329df0182d.jsonl"}
 {"id":"rec-05f5eb07bf6ac7ac","ts":"2026-07-29T14:26:39Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-05f5eb07bf6ac7ac.jsonl"}

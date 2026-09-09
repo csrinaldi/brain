@@ -35,10 +35,17 @@ import { loadBrainConfig } from '../lib/brain-config.mjs';
 // resolve REQ-L5-1's tiered evidence (lite's distinct-act head-commit
 // timestamp; regulated's approver-authored-no-commit check) — see
 // providers/github.mjs#prCommits / providers/gitlab.mjs#prCommits.
+// mrAutoMerge (issue #886, ADR-0034 L2): arms auto-merge by tier
+// (requiredReviews), never merges, never throws. No flag parsing needed —
+// the CLI takes one JSON blob (see below), so requiredReviews arrives as a
+// JSON key exactly as branchProtect's does. Adding this entry fires the
+// drift guard's check :82 by design (D5) until the maintainer's
+// `brain:promote` commit lands the vcs-contract.md doc row on this same
+// branch — see openspec/changes/issue-886-mr-auto-merge/design.md.
 export const VERBS = [
   'authCheck', 'authLogin', 'whoami',
   'issueView', 'issueList', 'issueCreate', 'issueUpdate', 'issueRelations',
-  'mrList', 'prView', 'mrCreate', 'labelEvents', 'prReviews',
+  'mrList', 'prView', 'mrCreate', 'mrAutoMerge', 'labelEvents', 'prReviews',
   'commitStatus', 'repoCloneUrl', 'patSetupUrl', 'projectResolve',
   'branchProtect', 'capabilities',
   'prReviewComment', 'issueComment', 'labelAdd', 'labelRemove',

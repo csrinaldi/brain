@@ -14,6 +14,7 @@ import { currentIdentity } from '../lib/identity-context.mjs';
 import { gitlabApiFetch } from '../gitlab-api.mjs';
 import { assertNoApprovalLabel } from '../lib/approval-deny.mjs';
 import { uncomputable, UNCOMPUTABLE_REASONS } from '../lib/uncomputable-cause.mjs';
+import { armed, refused, AUTO_MERGE_REASONS } from '../lib/auto-merge-outcome.mjs';
 
 export const PROVIDER = 'gitlab';
 
@@ -1143,5 +1144,65 @@ export async function mrCreate({
     return { url: r.web_url };
   } catch (err) {
     return { url: null, error: err.message };
+  }
+}
+
+// Anchored on `API failed:` (gitlab-api.mjs:65's own wrapper text), never a
+// bare `\b405\b` — an MR whose iid happens to be 405 would otherwise produce
+// `GitLab API failed: 500 (projects/x%2Fy/merge_requests/405/merge)` and a
+// bare digit rule would misread that outage as "this forge will never do
+// this" (design A3). Sibling precedent: gitlab.branchProtect's anchored
+// `': 409'` check.
+const GITLAB_MR_AUTO_MERGE_UNSUPPORTED_RE = /API failed:\s*(?:405|406)\b/;
+
+/**
+ * Arms auto-merge (squash, hardcoded, pipeline-gated) via
+ * `PUT projects/{enc}/merge_requests/{number}/merge`, or refuses when
+ * `requiredReviews` says a human gate is still required. The refusal is the
+ * FIRST statement (design A4) — no `gitlabApiFetch` call is ever made on
+ * that path. Never throws.
+ *
+ * @param {{ project: string, number: number, requiredReviews?: number,
+ *   apiBase?: string, token?: string, proxyUrl?: string, fetchImpl?: Function }} params
+ * @returns {Promise<{enabled:true,url:string|null}|{enabled:false,reason:string}|{enabled:false,reason:string,error:string}>}
+ */
+export async function mrAutoMerge({
+  project,
+  number,
+  requiredReviews = 1,
+  apiBase,
+  token,
+  proxyUrl,
+  fetchImpl,
+} = {}) {
+  // Only the NUMBER 0 may arm (cold-review blocker 1). `> 0` is false for
+  // null/NaN/-1 too — a naive predicate ARMS on all three, a fail-open gate
+  // on a mutating write verb. `!== 0` makes exact-zero the only permission;
+  // a string `'0'` stays refused because strict equality never coerces.
+  if (requiredReviews !== 0) return refused({ reason: AUTO_MERGE_REASONS.REQUIRES_HUMAN_APPROVAL });
+
+  const encoded = encodeURIComponent(project);
+  try {
+    const r = await gitlabApiFetch({
+      apiBase: apiBase ?? 'https://gitlab.com/api/v4',
+      token: glToken(token),
+      proxyUrl: proxyUrl ?? null,
+      path: `projects/${encoded}/merge_requests/${number}/merge`,
+      method: 'PUT',
+      body: { merge_when_pipeline_succeeds: true, squash: true },
+      fetchImpl,
+    });
+    return armed({ url: r?.web_url ?? null });
+  } catch (err) {
+    // `err` is not always an `Error` — a `fetchImpl` may reject with a bare
+    // string or `null` (correction 4). `err?.message` is safe on `null`
+    // (optional chaining short-circuits to `undefined`, never throws), and
+    // `?? String(err)` covers the non-Error case instead of leaving `error`
+    // `undefined` and breaking the pinned transport key set.
+    const message = err?.message ?? String(err);
+    if (GITLAB_MR_AUTO_MERGE_UNSUPPORTED_RE.test(message)) {
+      return refused({ reason: AUTO_MERGE_REASONS.UNSUPPORTED, error: message });
+    }
+    return refused({ reason: AUTO_MERGE_REASONS.TRANSPORT, error: message });
   }
 }
