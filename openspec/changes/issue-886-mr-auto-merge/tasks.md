@@ -15,7 +15,7 @@ run the full `npm test` before each commit.
 
 ## 1. Artifact status bumps
 
-- [ ] 1.1 Bump `status:` frontmatter on `explore.md`, `proposal.md`, `spec.md`, `design.md` from
+- [x] 1.1 Bump `status:` frontmatter on `explore.md`, `proposal.md`, `spec.md`, `design.md` from
       `draft`/`proposed` to `tasked`, alongside this file — one shared value across the change
       dir, the way #862 (task 1.1) and #863 moved their artifacts together
       (`phase-order-check.mjs`'s `STATUS_LADDER` is forward-only; unknown/custom values no-op).
@@ -23,7 +23,9 @@ run the full `npm test` before each commit.
 
 ## 2. The live capture (evidence BEFORE any regex — design A5, non-negotiable order)
 
-- [ ] 2.1 Capture GitHub's real "auto-merge is not allowed" stderr, READ-ONLY-SAFE. Do **not**
+- [ ] 2.1 DEFERRED (live capture requires a mutating write against a real repo — out of scope
+      for this apply batch, left for the maintainer/next batch against this change's own PR).
+      Capture GitHub's real "auto-merge is not allowed" stderr, READ-ONLY-SAFE. Do **not**
       create a throwaway PR — creating a PR is itself a WRITE. Instead run the mutating
       merge-arm command against an ALREADY-OPEN, pre-existing PR: GitHub validates
       `allow_auto_merge` on the **repository** before it touches the PR at all, so on
@@ -39,7 +41,9 @@ run the full `npm test` before each commit.
       the stderr back verbatim. Do not invent the string under any circumstance — an invented
       pattern is green in test and inert in production (D2). Record in `_provenance` which path
       was actually taken.
-- [ ] 2.2 Create `brain/scripts/vcs/fixtures/github-mrAutoMerge-unsupported.json`:
+- [x] 2.2 PARTIAL — fixture created, but as a `derived:true` PLACEHOLDER (obviously-fake
+      stderr), not the `recorded:true` live text 2.1 defers. Create
+      `brain/scripts/vcs/fixtures/github-mrAutoMerge-unsupported.json`:
       ```json
       {
         "_provenance": {
@@ -60,7 +64,7 @@ source change yet.
 
 ## 3. Unit layer — `lib/auto-merge-outcome.mjs` (the only writer of these keys)
 
-- [ ] 3.1 RED: `brain/scripts/vcs/lib/auto-merge-outcome.test.mjs` — `AUTO_MERGE_REASONS` is
+- [x] 3.1 RED: `brain/scripts/vcs/lib/auto-merge-outcome.test.mjs` — `AUTO_MERGE_REASONS` is
       frozen and exposes exactly `REQUIRES_HUMAN_APPROVAL`/`UNSUPPORTED`/`TRANSPORT`; `armed({url})`
       returns keys `['enabled','url']` sorted, `enabled:true`; `refused({reason})` (tier case)
       returns keys `['enabled','reason']`, no `error`; `refused({reason,error})` (unsupported /
@@ -69,7 +73,7 @@ source change yet.
       `uncomputable-cause.mjs` precedent).
       Focused: `node --test brain/scripts/vcs/lib/auto-merge-outcome.test.mjs` — RED (module
       does not exist).
-- [ ] 3.2 GREEN: `brain/scripts/vcs/lib/auto-merge-outcome.mjs` — `AUTO_MERGE_REASONS` (frozen),
+- [x] 3.2 GREEN: `brain/scripts/vcs/lib/auto-merge-outcome.mjs` — `AUTO_MERGE_REASONS` (frozen),
       `armed({url})`, `refused({reason, error})`; `error` present iff passed (never fabricated
       for the tier-refusal branch, per A1). Imported, never re-exported, by both providers.
       Focused: same command — GREEN. `npm test` — still green project-wide (nothing imports the
@@ -79,7 +83,7 @@ Commit: `feat(vcs): add auto-merge outcome constructor (#886)`.
 
 ## 4. Contract layer — `MR_AUTO_MERGE_PROVIDERS` (both providers, RED first)
 
-- [ ] 4.1 RED: add the `MR_AUTO_MERGE_PROVIDERS` block to
+- [x] 4.1 RED: add the `MR_AUTO_MERGE_PROVIDERS` block to
       `brain/scripts/vcs/providers/vcs.contract.test.mjs`, mirroring
       `BRANCH_PROTECT_PROVIDERS` (`:2168-2228`): a `{module, ok(args), fail(args)}` map per
       provider, GitHub glue via `setSpawn` (`lib/exec.mjs:11`), GitLab glue via injected
@@ -96,14 +100,15 @@ Commit: `feat(vcs): add auto-merge outcome constructor (#886)`.
       5. `url is null when the provider reports none`
       6. `armed shape carries no merged/sha field`
       7. `gh: captured "auto-merge not allowed" stderr → unsupported` — feeds the section-2
-         fixture into `failSpawn`.
+         fixture into `failSpawn`. SHIPPED AS `{ todo: 'fixture pending live capture (tasks
+         2.1)' }` — the fixture is a placeholder, not a real capture (see 2.1/2.2).
       8. `gl: 405/406 merge response → unsupported`
       9. `network/5xx/401/403 → transport, carries error`
       10. `outcome key set is pinned, exactly`
       11. `never throws, even under a mocked transport failure`
       Focused: `node --test brain/scripts/vcs/providers/vcs.contract.test.mjs` — RED (neither
       provider exports `mrAutoMerge`; every case fails on "not a function").
-- [ ] 4.2 GREEN (github only): implement `mrAutoMerge` in `brain/scripts/vcs/providers/github.mjs`
+- [x] 4.2 GREEN (github only): implement `mrAutoMerge` in `brain/scripts/vcs/providers/github.mjs`
       after `mrCreate` (`:595`), via the `gh()` chokepoint (`:68`):
       `if (requiredReviews > 0) return refused({ reason: REQUIRES_HUMAN_APPROVAL })` as the
       first line (A4); else `gh(['pr','merge',String(number),'--auto','--squash','--repo',project])`;
@@ -112,7 +117,7 @@ Commit: `feat(vcs): add auto-merge outcome constructor (#886)`.
       `transport` with `r.stderr.trim()` or `` `gh pr merge failed (status ${r.status})` ``.
       Focused: same command — GitHub cases (1,2,3,5,6,7,9,10,11 for `gh:`) GREEN; GitLab cases
       still RED (`gitlab.mjs` does not export the verb yet).
-- [ ] 4.3 GREEN (gitlab): implement `mrAutoMerge` in `brain/scripts/vcs/providers/gitlab.mjs`
+- [x] 4.3 GREEN (gitlab): implement `mrAutoMerge` in `brain/scripts/vcs/providers/gitlab.mjs`
       after `mrCreate` (`:1147`): same refusal-first line; else `gitlabApiFetch` PUT
       `projects/{enc}/merge_requests/{number}/merge` with
       `{ merge_when_pipeline_succeeds: true, squash: true }` inside `try/catch`; on success
@@ -129,7 +134,7 @@ leave an intermediate commit red by construction).
 
 ## 5. Provider-specific pins and the regression guard
 
-- [ ] 5.1 RED then GREEN, `brain/scripts/vcs/providers.test.mjs`, beside `branchProtect`'s argv
+- [x] 5.1 RED then GREEN, `brain/scripts/vcs/providers.test.mjs`, beside `branchProtect`'s argv
       tests (`:357-568`): GitHub — exact argv is
       `['pr','merge','<n>','--auto','--squash','--repo','<project>']`. GitLab — exact path
       `projects/{enc}/merge_requests/{number}/merge` and exact payload
@@ -137,7 +142,7 @@ leave an intermediate commit red by construction).
       contract layer deliberately does not (A6) — `--repo <project>` matters because `mrCreate`
       resolves the repo from the git remote instead (`github.mjs:579`), a real behavioural
       difference worth pinning.
-- [ ] 5.2 RED then GREEN, same file: the A3 false-positive regression — a GitLab `500` on
+- [x] 5.2 RED then GREEN, same file: the A3 false-positive regression — a GitLab `500` on
       iid **405** classifies `transport`, not `unsupported` (`GitLab API failed: 500
       (projects/x%2Fy/merge_requests/405/merge)` must NOT match the unsupported regex). Sibling
       precedent: `gitlab.branchProtect`'s anchored `': 409'` test (`providers.test.mjs:543`).
@@ -147,7 +152,7 @@ Commit: `test(vcs): pin mrAutoMerge argv/payload and the gitlab 405-vs-500 regre
 
 ## 6. `cli.mjs` — one `VERBS` entry, the guard goes red by design
 
-- [ ] 6.1 Add `'mrAutoMerge'` to `cli.mjs`'s `VERBS` array (`:38-46`). No flag parsing needed —
+- [x] 6.1 Add `'mrAutoMerge'` to `cli.mjs`'s `VERBS` array (`:38-46`). No flag parsing needed —
       the CLI takes one JSON blob (`cli.mjs:184-192`), so `requiredReviews` arrives as a JSON
       key exactly as `branchProtect`'s does; `bindIdentity` (`:159-168`) wraps every export
       exhaustively, so credential binding needs no extra wiring.
@@ -163,7 +168,7 @@ Commit: `feat(vcs): dispatch mrAutoMerge from cli.mjs (#886)`.
 
 ## 7. The doc draft — `brain-drafts/vcs-contract.draft.md` (Tier 1: agent drafts; Tier 2: maintainer promotes)
 
-- [ ] 7.1 Create
+- [x] 7.1 Create
       `openspec/changes/issue-886-mr-auto-merge/brain-drafts/vcs-contract.draft.md`, a
       `brain-amendment/1` non-ADR draft (no `amendment:`/`home-summary:` keys — ADR-only, hard
       parse error otherwise):
@@ -179,7 +184,7 @@ Commit: `feat(vcs): dispatch mrAutoMerge from cli.mjs (#886)`.
       2. the `` | `mrCreate` | implemented | implemented (A3 — issue #239) | `` **Phase 3
          adapter** row (`:99`) → itself + `` | `mrAutoMerge` | implemented | implemented (#886)
          | ``.
-      - [ ] 7.2 Verify before handing over (`planAmendment`, no disk write, no confirmation
+      - [x] 7.2 Verify before handing over (`planAmendment`, no disk write, no confirmation
       prompt):
       ```bash
       node --input-type=module -e "
@@ -198,6 +203,11 @@ Commit: `feat(vcs): dispatch mrAutoMerge from cli.mjs (#886)`.
       hand-edit the target (agents may not commit to `brain/core/**`).
 
 Commit: `docs(vcs): draft mrAutoMerge contract row amendment (#886)`.
+
+**Sections 1–7 done as of this apply batch (sdd-apply, 2026-09-09).** Local commits only, in
+this worktree, on this branch — no push, no PR, no `brain:promote`, no `brain:review`. Sections
+8–9 below (push, `memory:save`, epic tick, PR body, `brain:review`) are the orchestrator's/
+maintainer's next steps, not this batch's. Task 2.1's live capture stays open — see its note.
 
 ## 8. Wrap-up before the push
 
