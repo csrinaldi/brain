@@ -132,6 +132,17 @@ Commit: `feat(vcs): implement mrAutoMerge on github and gitlab providers (#886)`
 as one work unit — the contract test and both adapters ship together; splitting them would
 leave an intermediate commit red by construction).
 
+**Review corrections (cold review, 2026-09-09, follow-up apply batch).** A cold review of
+this branch found a fail-open gate in the section-4 refusal line: `requiredReviews > 0` is
+`false` for `null`/`NaN`/`-1`, so those values ARMED instead of refusing. Fixed to
+`requiredReviews !== 0` in both providers (`d8eb3aa5`), with new contract cases and updated
+`spec.md`/draft wording. Also fixed two never-throws holes in the section-4 classifiers
+(`gitlab.mjs` assumed the thrown value was an `Error`; `github.mjs` had no try/catch around
+the `gh` seam) and added a provenance gate to the section-2/4 `todo` unsupported test so it
+cannot be un-`todo`'d without a real live capture (`9956d9d6`). Test hygiene follow-ups
+(source-guard regex width, `reason ∈ AUTO_MERGE_REASONS` pin per design.md's test map row 6)
+landed in `bdf499c5`. See `sdd/issue-886-mr-auto-merge/apply-progress` for full detail.
+
 ## 5. Provider-specific pins and the regression guard
 
 - [x] 5.1 RED then GREEN, `brain/scripts/vcs/providers.test.mjs`, beside `branchProtect`'s argv
