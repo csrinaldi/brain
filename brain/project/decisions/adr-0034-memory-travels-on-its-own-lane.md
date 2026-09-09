@@ -96,8 +96,8 @@ it does not remove that race, it only narrows the window.
 
 ### L4 + C2 — The collector: plumbing, no checkout, deterministic on divergence
 
-`brain/scripts/memory/lane/` — a pure planner (`plan.mjs`) plus a thin IO
-shell (`collect.mjs`), the same seam shape as
+A new `memory/lane/` directory under `brain/scripts/` (#887 creates it) — a
+pure planner (`plan.mjs`) plus a thin IO shell (`collect.mjs`), the same seam shape as
 `governance/postmerge/git-seam.mjs`. No worktree's working tree or index is
 touched:
 
