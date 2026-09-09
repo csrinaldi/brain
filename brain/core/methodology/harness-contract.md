@@ -24,14 +24,16 @@ this contract — without changes to `project-workflow.md` or `developer-environ
 |---|---|---|---|
 | `npm run brain:env:init` | `env:init` | — | Environment bootstrap: installs tools, configures auth, imports memory, refreshes skill registry. Idempotent. |
 | `npm run brain:day:start` | `day:start` | — | Daily startup: VCS auth, ecosystem updates, team memory, ticket board. |
-| `npm run brain:session:start` | `session:start` | — | Session context loader: restores manifest churn, hydrates local engram, resolves active change and ticket memory. Read-only, local-only, no network. |
+| `npm run brain:session:start` | `session:start` | — | Session context loader: restores `.memory/manifest.json` churn (step 1 — required by `openspec/specs/session-start/spec.md` REQ-3 today; the manifest is the engram adapter's artifact per ADR-0002 Amendment 1, and #864 task 2.4 retires the step and amends REQ-3 together), hydrates the active memory backend from `.memory/records/`, resolves the active change and ticket memory, reports memory recency. Read-only, local-only, no network. |
 | `npm run brain:ticket:start -- <id> [--base <tracker>]` | `ticket:start -- <id>` | `/ticket-start <id>` | Task start. Creates the branch `{type}/issue-{number}-{slug}` in an ISOLATED WORKTREE off `<tracker>` — **that is the DEFAULT, no flag required (#782)**. **Always an isolated worktree; NEVER a branch in the main checkout when parallel work is possible.** `--in-place` is the named opt-out, for strictly solo serial work only, and the verb says which mode it took. `<tracker>` is the integration base (e.g. `feature/v2.0.0`), not `main`, while an epic is in flight. |
 | `npm run brain:project:feature -- --issue <id>` | `project:feature -- --issue <id>` | `/sdd-new <id>` | Starts an SDD change: creates `openspec/changes/issue-<id>-<slug>/` with `proposal.md`, `design.md`, `tasks.md`, `spec.md`. |
 | `npm run brain:repo:check` | `repo:check` | — | Validates prohibited references across the entire tree. Minimum gate before any commit. |
 | `npm run brain:change:verify` | `change:verify` | `/sdd-verify` | Validates the scope of the active change: classifies the diff, runs only the necessary verifications. |
-| `npm run memory:share` | — | — | Exports local engram → `.memory/` (versioned in git). Run before pushing. |
-| `npm run memory:pull` | — | — | Imports `.memory/` → local engram. Brings the team's memory. |
-| `npm run memory:index` | — | — | Reprojects `brain/` → local engram. Needed when ADRs or glossary change. |
+| `npm run memory:share` | — | — | Materializes what `.memory/records/` does not yet hold and rebuilds `index.jsonl`; reports the duplicate accounting. Under record-first (#864 task 3.2) it exports nothing from the backend. |
+| `npm run memory:pull` | — | — | `git pull`, then hydrates the active backend from `.memory/records/` (idempotent by record id — `memory-backend-contract.md` rule 1). Brings the team's memory. |
+| `npm run memory:index` | — | — | Re-projects `brain/` doctrine into the active backend, where the backend supports it (`plainfiles` does not, by design). Needed when ADRs or glossary change. |
+| `npm run memory:save` | — | — | The producer path: writes a record to `.memory/records/` first (provenance, `--issue`; `--supersedes` lands with #805). Today it is pinned to `plainfiles` and the active backend picks the record up on its next hydration (`session:start`, `cli.mjs import`); direct hydration lands with #874. `memory-backend-contract.md` rule 2. |
+| `npm run memory:audit` | — | — | The five numbers of memory 2.0 (#870) from records and `git log` alone; the backend row degrades to a stated reason. |
 
 > **Worktree convention (load-bearing):** task start is
 > `npm run brain:ticket:start -- <id> [--base <tracker>]`, and **the isolated worktree is what
@@ -88,10 +90,15 @@ refreshed automatically on `brain:day:start` and `brain:env:init`.
 
 ## Implementation note — materialized memory layer
 
-`.memory/` is the canonical directory versioned in git for the team's materialized memory.
-The binding to engram (current implementation) uses a symlink `/.engram → .memory/`, so that
-engram writes to `.engram/` (its internal convention) and files land in `.memory/`.
-ADR-0003 documents the memory model; this symlink is an implementation-agnostic detail.
+`.memory/records/` is the canonical, versioned record log — the durable truth (ADR-0017);
+whatever `MEMORY_BACKEND` selects is a derived index hydrated from it
+(`memory-backend-contract.md`). What the engram adapter needs privately in the tree is the
+adapter's, not the layer's (rule 3; ADR-0002 Amendment 1): its `.engram → .memory` symlink and
+its chunk directory are gitignored and created by `setup`/`share`; its manifest is **still
+tracked today**, with its merge driver still registered in `.gitattributes`, and `session:start`
+still restores it (REQ-3). Rule 3 forbids any reader of the records from depending on them;
+#864 task 2.4 untracks the manifest, removes the driver, confines the symlink to `setup` and
+amends REQ-3. ADR-0002 records the memory model.
 
 ## Worktree default (issue #782)
 
