@@ -80,7 +80,7 @@ producer is listed here with the four things it declares. A writer that skips th
 | Producer | Trigger | Provenance from | Write target | Lane | Hydration |
 |----------|---------|-----------------|--------------|------|-----------|
 | memory CLI — `memory:save` | an agent or human, in session | flags (`--issue`; `--supersedes` with #805), `actor` per #738 (a handle, never a branch) | the invoking checkout's `.memory/records/` | #862 memory lane (until it exists: the slice PR, as today) | next hydration today; `hydrate({recordId})` with #874 |
-| cold-review poster — `brain/scripts/review/poster.mjs` (#851 slice 1) | each posted review round | the reviewer identity; `issue`, `pr`, `rev`, `head_sha`, `verdict`; `supersedes` = the previous round's record | the **invoking** checkout's `.memory/records/`, never the cold `/tmp/brain-review-<sha>` tree | #862 memory lane, never the PR head (a verdict pins `head_sha`, ADR-0026 Amendment 5); ships after #864 task 3.1a | `hydrate({recordId})` |
+| cold-review poster — `brain/scripts/review/poster.mjs` (#851 slice 1) | each posted review round | the reviewer identity; `issue`, `pr`, `rev`, `head_sha`, `verdict`; `supersedes` = the previous round's record | the **invoking** checkout's `.memory/records/`, never the cold `/tmp/brain-review-<sha>` tree | #862 memory lane, never the PR head (a verdict pins `head_sha`, ADR-0026 Amendment 5); ships after #864 task 3.1a | next hydration today; `hydrate({recordId})` with #874 |
 
 Adding a producer is a row here and a slice ticket under #864 — never a new write path into
 the backend. The `type` a producer emits is owned by `memory-format.md`'s enum; a producer

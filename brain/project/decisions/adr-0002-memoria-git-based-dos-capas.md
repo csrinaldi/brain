@@ -43,9 +43,8 @@ The canonical flow:
 > **Superseded.** This note was written for the chunk transport, and the measurement below
 > is still accurate for it. Hydration is records-only since C4 (#229, #433): a fresh machine
 > reads `.memory/records/` and never a chunk, so the manifest is no longer load-bearing for
-> anyone but the engram adapter's own export. It is untracked, its merge driver removed and
-> the `.engram` symlink confined to the adapter by #864 task 2.4, under
-> `memory-backend-contract.md` rule 3. Kept for the record; do not act on it.
+> anyone but the engram adapter's own export. #864 task 2.4 untracks it, removes its merge driver and confines the
+> `.engram` symlink to the adapter, under `memory-backend-contract.md` rule 3. Kept for the record; do not act on it.
 
 `.memory/manifest.json` is **engram's authoritative chunk index for sync**, not a derived convenience. Verified empirically (spike, 2026-06-27): a fresh engram (isolated via `ENGRAM_DATA_DIR`) pointed at `.memory/` **with** the manifest reports `Remote chunks: 6, Pending import: 6`; **without** the manifest it reports `Remote chunks: 0` and imports nothing — even though the `*.jsonl.gz` chunk files are physically present. So gitignoring the manifest would **silently lose all memory on every fresh machine**.
 

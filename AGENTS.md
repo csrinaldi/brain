@@ -286,11 +286,13 @@ refreshed automatically on `brain:day:start` and `brain:env:init`.
 
 `.memory/records/` is the canonical, versioned record log — the durable truth (ADR-0017);
 whatever `MEMORY_BACKEND` selects is a derived index hydrated from it
-(`memory-backend-contract.md`). Anything a backend needs privately in the tree — engram's
-`.engram → .memory` symlink, its manifest, its chunk directory — is created by that backend's
-`setup`, is gitignored, and is never load-bearing for a reader of the records (rule 3; all
-four retire under #864 task 2.4).
-ADR-0003 documents the memory model; this symlink is an implementation-agnostic detail.
+(`memory-backend-contract.md`). What the engram adapter needs privately in the tree is the
+adapter's, not the layer's (rule 3; ADR-0002 Amendment 1): its `.engram → .memory` symlink and
+its chunk directory are gitignored and created by `setup`/`share`; its manifest is **still
+tracked today**, with its merge driver still registered in `.gitattributes`, and `session:start`
+still restores it (REQ-3). Rule 3 forbids any reader of the records from depending on them;
+#864 task 2.4 untracks the manifest, removes the driver, confines the symlink to `setup` and
+amends REQ-3. ADR-0002 records the memory model.
 
 ## Worktree default (issue #782)
 
