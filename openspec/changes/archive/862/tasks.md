@@ -199,27 +199,21 @@ maintainer's act, same split as #863's 3.2.
 
 ## 5. The PR
 
-- [ ] 5.1 Run `brain:review` before announcing. Branch `docs/issue-862-memory-lane` (or
-      equivalent `docs/` name — this PR is docs-only under `openspec/**`, no code, same as #863's
-      #875).
-- [ ] 5.2 Open the PR: `Closes #862`; `Parent: #864` stated in prose only, never a closing
-      keyword against the epic; label `type:docs` (matching #863's PR type). Body: the four
-      drafts, the five filed ticket numbers, the epic tasks.md edit, the #864 comment — all listed
-      in the Changes Table.
-- [ ] 5.3 File a follow-up ticket for the promotion sitting itself (the maintainer's Tier 2 act:
-      running `brain:promote` on the three `brain-amendment/1`/new-ADR drafts and editing
-      `openspec/README.md` rule 3 by hand) — the same shape #863's sitting became (#876 for #875).
-      Do not fold that sitting into this PR; state its ticket number in the PR body as a
-      "Follow-up" line.
+- [x] 5.1 Run `brain:review` before announcing. Done on PR #891 (branch
+      `feat/issue-862-decisionmemory-memory-rides-the-features`, the ticket's own branch rather
+      than a `docs/` name): round 1 APPROVE at 3fe0fde3 with two citation corrections
+      (7c46401b), round 2 APPROVE clean; 9 gates green.
+- [x] 5.2 Open the PR: PR #891, `Closes #862`, `Parent: #864` in prose, label `type:docs`;
+      body lists the four drafts, #886–#890, the epic tasks.md edit and the #864 comment.
+      Merged as a14ff426 on 2026-09-09.
+- [x] 5.3 Follow-up ticket for the promotion sitting: #892 (`type:chore`), the #876 analogue.
+      Its PR #893 carried the maintainer's three promotes (ADR-0034, ADR-0002 Amendment 2,
+      consolidation-protocol §5) and the `openspec/README.md` rule 3 patch; cold review round 1
+      APPROVE with four citation corrections, round 2 APPROVE; merged as 2c2105a6 on 2026-09-09.
 
-**Section 5 deferred, out of this apply run's authorized scope.** The apply run's own
-instructions authorised filing only the five Wave 3 tickets (3.1) and the #864 comment (4.2) — not
-pushing, not opening the PR, and by extension not filing 5.3's follow-up ticket, whose body is
-meant to reference the PR this section opens. `brain:review` (5.1) also refuses without a PR
-number (`node ./brain/scripts/review/cli.mjs`: *"Usage: npm run brain:review -- <pr-number>"*) —
-it cannot run before 5.2. All of section 5 stays for the orchestrator/maintainer's own sitting:
-push the branch, open the PR, run `brain:review` against it, then file 5.3 and link it in the PR
-body.
+**Section 5 closed at the maintainer's sitting on 2026-09-09.** The apply run had deferred it
+(it was authorised to file the five Wave 3 tickets and the #864 comment only); the orchestrator
+then pushed, opened #891, ran `brain:review`, filed #892, and the maintainer merged #891 and #893.
 
 ## Review Workload Forecast
 
