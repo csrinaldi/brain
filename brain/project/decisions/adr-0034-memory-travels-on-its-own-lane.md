@@ -49,8 +49,9 @@ A PR is a **lane** only when *both* hold: its head branch matches
 `^memory/[a-z0-9][a-z0-9-]*-\d{4}-\d{2}-\d{2}(-\d+)?$`, **and** every diff
 path is an addition under `.memory/records/`. Either alone is not enough —
 the branch name is a claim, the path check (3.1c's `lane-paths`, a required
-status context) is the proof. `issue-link` and `actor-check` recognise a lane
-above their default refusal (`run-check.mjs:313`, `actor-check.mjs:671`); the
+status context) is the proof. 3.1c (#889) teaches `issue-link` and `actor-check`
+to recognise a lane above their default refusal (today `runIssueLinkCheck`,
+`run-check.mjs:313`, and `evaluateActor`, `actor-check.mjs:671`, know no lane); the
 pure evaluators stay context-unaware (ADR-0016 — the lane lives in the IO
 wrapper, not the rule). A lane PR carries `Memory lane: <host> <date>` in its
 body and closes no issue — the standing-issue alternative was rejected
@@ -74,7 +75,7 @@ GitHub `gh pr merge --auto --squash`; GitLab
 `PUT merge_requests/{iid}/merge` with `merge_when_pipeline_succeeds=true`.
 
 **C1 (the maintainer's condition, non-waivable).** The secret scrub (#469/#214
-lineage, `scripts/memory/lib/secret-scrub.mjs`) runs as its own **required**
+lineage, `brain/scripts/memory/lib/secret-scrub.mjs`) runs as its own **required**
 status context, `lane-scrub`, over every added `.memory/records/*.jsonl`
 path. Fail-closed, no bypass flag — the only escape hatch is the committed
 `memorySecretAllowPatterns`. **A lane never auto-merges without a green
@@ -117,7 +118,7 @@ git push --no-verify origin <commit>:refs/heads/memory/<host>-<date>
 Identical bytes across worktrees collapse to one copy. When copies
 **diverge** (`source` is not hashed), the collector applies the **same
 first-wins rule the reader already uses**
-(`scripts/memory/lib/duplicates.mjs:20-24` — earliest month file, earliest
+(`brain/scripts/memory/lib/duplicates.mjs:20-24` — earliest month file, earliest
 physical line), with one added tiebreak because same-named copies tie on
 month order: candidates are ordered by **lexicographic worktree path**, then
 by physical line. Divergences are reported, never refused, in
