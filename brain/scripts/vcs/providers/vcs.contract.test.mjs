@@ -39,8 +39,10 @@ import { parseVerdict } from '../../review/lib/parse-verdict.mjs';
 import * as github from './github.mjs';
 import * as gitlab from './gitlab.mjs';
 import { UNCOMPUTABLE_REASONS } from '../lib/uncomputable-cause.mjs';
+import { AUTO_MERGE_REASONS } from '../lib/auto-merge-outcome.mjs';
 
 const UNCOMPUTABLE_REASON_VALUES = Object.values(UNCOMPUTABLE_REASONS);
+const AUTO_MERGE_REASON_VALUES = Object.values(AUTO_MERGE_REASONS);
 
 afterEach(() => setSpawn(spawnSync));
 
@@ -2332,6 +2334,7 @@ for (const providerName of Object.keys(MR_AUTO_MERGE_PROVIDERS)) {
     const result = await vcs.mrAutoMerge({ project: 'x/y', number: 1, requiredReviews: 0, ...transportArgs() });
     assert.equal(result.enabled, false);
     assert.equal(result.reason, 'transport');
+    assert.ok(AUTO_MERGE_REASON_VALUES.includes(result.reason), 'reason must be a member of the closed AUTO_MERGE_REASONS vocabulary (editorial 6)');
     assert.equal(typeof result.error, 'string');
     assert.deepEqual(Object.keys(result).sort(), ['enabled', 'error', 'reason']);
   });
@@ -2339,10 +2342,12 @@ for (const providerName of Object.keys(MR_AUTO_MERGE_PROVIDERS)) {
   test(`${providerName}.mrAutoMerge (contract): outcome key set is pinned, exactly`, async () => {
     const tier = await vcs.mrAutoMerge({ project: 'x/y', number: 1 });
     assert.deepEqual(Object.keys(tier).sort(), ['enabled', 'reason']);
+    assert.ok(AUTO_MERGE_REASON_VALUES.includes(tier.reason), 'reason must be a member of the closed AUTO_MERGE_REASONS vocabulary (editorial 6)');
     const ok = await vcs.mrAutoMerge({ project: 'x/y', number: 1, requiredReviews: 0, ...armedArgs() });
     assert.deepEqual(Object.keys(ok).sort(), ['enabled', 'url']);
     const bad = await vcs.mrAutoMerge({ project: 'x/y', number: 1, requiredReviews: 0, ...transportArgs() });
     assert.deepEqual(Object.keys(bad).sort(), ['enabled', 'error', 'reason']);
+    assert.ok(AUTO_MERGE_REASON_VALUES.includes(bad.reason), 'reason must be a member of the closed AUTO_MERGE_REASONS vocabulary (editorial 6)');
   });
 
   test(`${providerName}.mrAutoMerge (contract): never throws, even under a mocked transport failure`, async () => {
@@ -2363,6 +2368,7 @@ for (const providerName of Object.keys(MR_AUTO_MERGE_PROVIDERS)) {
     const result = await vcs.mrAutoMerge({ project: 'x/y', number: 1, requiredReviews: 0, ...throwingArgs() });
     assert.equal(result.enabled, false);
     assert.equal(result.reason, 'transport', 'a thrown seam must still classify as transport, never crash the caller');
+    assert.ok(AUTO_MERGE_REASON_VALUES.includes(result.reason), 'reason must be a member of the closed AUTO_MERGE_REASONS vocabulary (editorial 6)');
     assert.equal(typeof result.error, 'string');
     assert.deepEqual(Object.keys(result).sort(), ['enabled', 'error', 'reason']);
   });
@@ -2403,6 +2409,7 @@ test('gitlab.mrAutoMerge (contract): a fetchImpl that rejects with a bare string
   });
   assert.equal(result.enabled, false);
   assert.equal(result.reason, 'transport');
+  assert.ok(AUTO_MERGE_REASON_VALUES.includes(result.reason), 'reason must be a member of the closed AUTO_MERGE_REASONS vocabulary (editorial 6)');
   assert.equal(typeof result.error, 'string', 'error must be a string even when the rejection value was not an Error');
   assert.deepEqual(Object.keys(result).sort(), ['enabled', 'error', 'reason']);
 });
@@ -2414,6 +2421,7 @@ test('gitlab.mrAutoMerge (contract): a fetchImpl that rejects with null never th
   });
   assert.equal(result.enabled, false);
   assert.equal(result.reason, 'transport');
+  assert.ok(AUTO_MERGE_REASON_VALUES.includes(result.reason), 'reason must be a member of the closed AUTO_MERGE_REASONS vocabulary (editorial 6)');
   assert.equal(typeof result.error, 'string');
   assert.deepEqual(Object.keys(result).sort(), ['enabled', 'error', 'reason']);
 });
@@ -2434,6 +2442,7 @@ test('github.mrAutoMerge (contract): captured "auto-merge not allowed" stderr �
   assert.equal(fixture._provenance.recorded, true, 'the unsupported class must come from a live capture (design A5)');
   const result = await github.mrAutoMerge({ project: 'x/y', number: 1, requiredReviews: 0 });
   assert.deepEqual(result, { enabled: false, reason: 'unsupported', error: fixture.stderr });
+  assert.ok(AUTO_MERGE_REASON_VALUES.includes(result.reason), 'reason must be a member of the closed AUTO_MERGE_REASONS vocabulary (editorial 6)');
 });
 
 test('gitlab.mrAutoMerge (contract): 405/406 merge response → unsupported', async () => {
@@ -2444,6 +2453,7 @@ test('gitlab.mrAutoMerge (contract): 405/406 merge response → unsupported', as
     });
     assert.equal(result.enabled, false, `status ${status} must classify unsupported`);
     assert.equal(result.reason, 'unsupported');
+    assert.ok(AUTO_MERGE_REASON_VALUES.includes(result.reason), 'reason must be a member of the closed AUTO_MERGE_REASONS vocabulary (editorial 6)');
     assert.match(result.error, new RegExp(`API failed: ${status}`));
   }
 });

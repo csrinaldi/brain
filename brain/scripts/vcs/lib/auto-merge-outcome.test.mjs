@@ -73,14 +73,21 @@ test('refused({reason,error}): error is present iff explicitly passed — never 
 test('source guard: neither provider source hand-constructs `enabled:` — both import armed/refused from this module', () => {
   for (const providerFile of ['github.mjs', 'gitlab.mjs']) {
     const src = readFileSync(fileURLToPath(new URL(`../providers/${providerFile}`, import.meta.url)), 'utf8');
+    // Editorial 7: `\s+` (at least one space) missed a hand-written COMPACT
+    // literal like `enabled:true` (no space) — the exact style Prettier
+    // would never emit but a hand-edit could. Widened to `\s*` so both
+    // spaced and compact hand-constructions are caught. JSDoc `@returns`
+    // type annotations (e.g. `{enabled:true,url:...}`) legitimately use the
+    // compact form for documentation, so lines whose trimmed form starts
+    // with `*` (JSDoc comment body lines) are excluded before matching —
+    // real code in this repo is never indented with a leading `*`.
+    const codeOnly = src
+      .split('\n')
+      .filter((line) => !line.trim().startsWith('*'))
+      .join('\n');
     assert.doesNotMatch(
-      src,
-      // Requires at least one space after the colon — real object-literal
-      // JS in this repo writes `enabled: true` (Prettier/ESLint style);
-      // the compact `enabled:true` this file's own JSDoc `@returns` type
-      // annotations use (no space) is deliberately NOT matched, so the
-      // guard does not false-positive on documentation.
-      /\benabled:\s+(true|false)\b/,
+      codeOnly,
+      /\benabled:\s*(true|false)\b/,
       `${providerFile} must never hand-construct the { enabled, ... } shape — call armed()/refused() from vcs/lib/auto-merge-outcome.mjs instead`,
     );
   }
