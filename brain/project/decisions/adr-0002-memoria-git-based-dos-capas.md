@@ -1,6 +1,6 @@
 # ADR-0002 — Two-Layer Git-Based Team Memory
 
-**Status**: Accepted · **amended 08/09/2026** (Amendment 1 — see below)  
+**Status**: Accepted · **amended 09/09/2026** (Amendments 1-2 — see below)  
 **Date**: 2026-06-26
 
 ## Context
@@ -28,8 +28,8 @@ The canonical flow:
 - `memory:pull` → churn-resilient sync: runs `git pull`, then hydrates the active backend from `.memory/records/`. *(Its manifest-restore step is the engram adapter's, not the layer's — the note below is superseded by Amendment 1, and the step retires with #864 task 2.4.)* Use this instead of a raw `git pull`.
 - `memory:import` → imports `.memory/` into the active backend (no `git pull`).
 - `memory:index` → reprojects the durable `brain/` into the active backend.
-- `memory:share` → materializes the active backend to `.memory/` before push.
-- The `pre-push` hook runs `memory:share`; the `post-merge` hook runs `memory:import` after any pull/merge.
+- `memory:share` → materializes the active backend to `.memory/` before push. *(On the lane, ADR-0034: a record does not wait for a push — `brain:memory:ship` collects and pushes it independently, on its own PR. `share`'s role here narrows once 3.1d ships, per the ordering ADR-0034 states.)*
+- The `pre-push` hook runs `memory:share`; the `post-merge` hook runs `memory:import` after any pull/merge. *(The `pre-push` call retires in 3.1d — after 3.1b's first scenario and #874 land, per ADR-0034 — because by then a record has already reached `main` on the lane before any feature branch is pushed.)*
 
 ## Consequences
 
@@ -68,6 +68,33 @@ marked superseded with its evidence kept, and the two Consequences are withdrawn
 ### What this does NOT change
 
 The two-layer decision stands: durable in git, live in a backend, the live layer a derived
-index. The canonical flow's verbs keep their names until #862 settles the lane. Retiring the
+index. The canonical flow's verbs keep their names; #862 (ADR-0034) settles the lane as a
+new governance mechanism carrying records to `main`, not a change to this ADR's two-layer
+model — see Amendment 2 for what that ruling touches in the flow above. Retiring the
 manifest, the driver and the symlink from the tree is #864 task 2.4, under the rule that
 governs it — `brain/core/methodology/memory-backend-contract.md` rule 3 (ruling #863).
+
+## Amendment 2 — the canonical flow points at the lane (issue #862)
+
+**Signed**: 09/09/2026 — Cristian Rinaldi
+
+### What this changes
+
+The canonical flow's `memory:share` and `pre-push` bullets described a record
+waiting for a push and travelling with whatever branch that push was on.
+#862 (ADR-0034) rules a `memory/<host>-<date>` pull request as the lane a
+record travels on instead — `brain:memory:ship`, triggered by the
+session-end hook, `day:start`'s sweep, or by hand, collects and pushes it
+independently of any feature branch. The two bullets are annotated with what
+changes and when, and Amendment 1's deferral to #862 is resolved.
+
+### What this does NOT change
+
+The two-layer decision itself: durable in git, live in a backend, the live
+layer a derived index. This amendment touches only the canonical-flow
+bullets and the deferred note — the durable format (ADR-0017), the live
+backend's contract (`memory-backend-contract.md`, #863), and everything
+Amendment 1 already settled about the manifest, driver and symlink are
+untouched. The feature-PR surfaces that make a record ride the branch today
+(`pre-push:70`, `contributor-scaffold.mjs:274`, and three more, ADR-0034's
+own inventory) retire in 3.1d — sequenced, not by this amendment.
