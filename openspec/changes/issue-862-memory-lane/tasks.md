@@ -54,7 +54,7 @@ pre-#877 line numbers cited in earlier drafts of this design.
       (absent today) and `transformDraft` returns `{ ok: true, number: '0034', title }`.
 
       **Filename correction, found during apply.** `DRAFT_BASENAME_RE` in
-      `amendment-draft.mjs` (`/^adr-(\d{4})-([a-z0-9][a-z0-9-]*)\.md$/`) does
+      `brain-promote.mjs:89` (`/^adr-(\d{4})-([a-z0-9][a-z0-9-]*)\.md$/`) does
       not match a `.draft.md` suffix — a `.draft.md` name makes
       `destinationFor` return `null`, and `brain-promote.mjs`'s
       `amendmentShapeRefusal` states the convention explicitly: *"A NEW ADR
@@ -154,7 +154,7 @@ maintainer's act, same split as #863's 3.2.
 
 - [x] 3.4 **File path restriction + lane class + governance (epic task 3.1c)** — the CI check
       `lane-paths` as a required status context (path restriction to `.memory/records/` additions
-      only), the `issue-link`/`actor-check` lane branch (`run-check.mjs:313,671` — before the
+      only), the `issue-link`/`actor-check` lane branch (`run-check.mjs:313`, `actor-check.mjs:671` — before the
       closing-keyword refusal, per L1's table), `brain:audit`'s `[LANE]` row
       (`brain-audit.mjs:326,334-344`), and the required `lane-scrub` check (C1 — reuses
       `secret-scrub.mjs`'s `scrubRecordsFile`, registered in `vcs-contract.md:43`'s `checks`
