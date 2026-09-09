@@ -22,5 +22,8 @@ openspec/
 
 1. **MD wins.** If engram and these files diverge, these files win.
 2. **One change per ticket.** `change-id` is linked to the GitLab issue ID.
-3. **Always committed.** Artifacts travel with the code in the same MR.
+3. **Always committed**, with one exception: `.memory/records/**` travels on
+   its own memory lane (ADR-0034, #862), not with the code's MR. Every other
+   artifact under `openspec/` and `brain/` still travels with the code in the
+   same MR.
 4. **Replaces** the previous `docs/sdd/tasks/` convention (deprecated).
