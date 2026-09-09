@@ -1,6 +1,7 @@
 # ADR-0034 — Memory travels on its own lane: records reach `main` on their own pull request, never the feature's
 
-> **status:** proposed — pending human promotion | **date:** 2026-09-09 | **owner:** @crinaldi
+**Status**: Accepted
+**Date**: 2026-09-09 — Cristian Rinaldi
 
 ## Context
 
