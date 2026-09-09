@@ -2263,22 +2263,34 @@ const MR_AUTO_MERGE_PROVIDERS = {
       setSpawn(seam);
       return { args: {}, state };
     },
+    // Correction 4: the `gh` seam itself THROWS (not a failing spawn
+    // result) — e.g. a launch failure the wrapper re-throws instead of
+    // returning. `providers/github.mjs#mrAutoMerge` had no try/catch around
+    // the `gh()` call, so this used to reject the promise instead of
+    // classifying to `transport`.
+    throwingArgs: () => { setSpawn(() => { throw new Error('gh: spawn EACCES'); }); return {}; },
   },
   gitlab: {
     module: gitlab,
     armedArgs: () => ({ fetchImpl: async () => ({ ok: true, json: async () => ({ web_url: 'https://gitlab.test/x/y/-/merge_requests/1' }) }) }),
-    unsupportedArgs: () => ({ fetchImpl: async () => ({ ok: false, status: 405 }) }),
+    unsupportedArgs: (status = 405) => ({ fetchImpl: async () => ({ ok: false, status }) }),
     transportArgs: () => ({ fetchImpl: async () => ({ ok: false, status: 500 }) }),
     countingArgs: () => {
       const state = { calls: 0 };
       const fetchImpl = async () => { state.calls += 1; return { ok: false, status: 500 }; };
       return { args: { fetchImpl }, state };
     },
+    // Correction 4: `fetchImpl` REJECTS with an Error, the well-behaved
+    // case — `err.message` reading is safe. The string/null-rejection edge
+    // cases (`err.message` throwing a TypeError on `null`) are pinned by
+    // dedicated standalone tests below, since they need per-case shapes a
+    // shared loop test cannot express.
+    throwingArgs: () => ({ fetchImpl: async () => { throw new Error('network exploded'); } }),
   },
 };
 
 for (const providerName of Object.keys(MR_AUTO_MERGE_PROVIDERS)) {
-  const { module: vcs, armedArgs, transportArgs, countingArgs } = MR_AUTO_MERGE_PROVIDERS[providerName];
+  const { module: vcs, armedArgs, transportArgs, countingArgs, throwingArgs } = MR_AUTO_MERGE_PROVIDERS[providerName];
 
   test(`${providerName}.mrAutoMerge (contract): an omitted requiredReviews refuses`, async () => {
     const result = await vcs.mrAutoMerge({ project: 'x/y', number: 1 });
@@ -2339,6 +2351,21 @@ for (const providerName of Object.keys(MR_AUTO_MERGE_PROVIDERS)) {
       `${providerName}.mrAutoMerge must resolve, not throw, on a mocked transport failure`,
     );
   });
+
+  // Correction 4: the prior "never throws" case reused `transportArgs()` —
+  // a non-throwing FAILING RESULT — which duplicates the assertions of
+  // "network/5xx/401/403 → transport, carries error" above without ever
+  // exercising a seam that actually throws. This is the real case: the
+  // provider seam itself THROWS synchronously (a launch failure the
+  // wrapper re-raises, or any other exception), never a returned failure
+  // object.
+  test(`${providerName}.mrAutoMerge (contract): never throws — not even when the provider seam itself throws`, async () => {
+    const result = await vcs.mrAutoMerge({ project: 'x/y', number: 1, requiredReviews: 0, ...throwingArgs() });
+    assert.equal(result.enabled, false);
+    assert.equal(result.reason, 'transport', 'a thrown seam must still classify as transport, never crash the caller');
+    assert.equal(typeof result.error, 'string');
+    assert.deepEqual(Object.keys(result).sort(), ['enabled', 'error', 'reason']);
+  });
 }
 
 test('github.mrAutoMerge (contract): armed → {enabled:true,url} via gh pr merge --auto --squash', async () => {
@@ -2363,17 +2390,48 @@ test('gitlab.mrAutoMerge (contract): url is null when the provider reports none'
   assert.deepEqual(result, { enabled: true, url: null });
 });
 
+// Correction 4: `providers/gitlab.mjs#mrAutoMerge` assumed the thrown value
+// was an `Error`. A `fetchImpl` rejecting with a bare STRING left `error`
+// undefined (`err.message` is `undefined` on a string) — breaking the
+// pinned `['enabled','error','reason']` transport key set. A `fetchImpl`
+// rejecting with `null` threw a `TypeError` reading `.message` off `null`,
+// which propagated out and broke the never-throws contract outright.
+test('gitlab.mrAutoMerge (contract): a fetchImpl that rejects with a bare string still classifies as transport, key set pinned', async () => {
+  const result = await gitlab.mrAutoMerge({
+    project: 'x/y', number: 1, requiredReviews: 0,
+    fetchImpl: async () => { throw 'network exploded'; },
+  });
+  assert.equal(result.enabled, false);
+  assert.equal(result.reason, 'transport');
+  assert.equal(typeof result.error, 'string', 'error must be a string even when the rejection value was not an Error');
+  assert.deepEqual(Object.keys(result).sort(), ['enabled', 'error', 'reason']);
+});
+
+test('gitlab.mrAutoMerge (contract): a fetchImpl that rejects with null never throws a TypeError reading .message', async () => {
+  const result = await gitlab.mrAutoMerge({
+    project: 'x/y', number: 1, requiredReviews: 0,
+    fetchImpl: async () => { throw null; },
+  });
+  assert.equal(result.enabled, false);
+  assert.equal(result.reason, 'transport');
+  assert.equal(typeof result.error, 'string');
+  assert.deepEqual(Object.keys(result).sort(), ['enabled', 'error', 'reason']);
+});
+
 // Deferred: task 2.1's live capture has not landed yet (the fixture ships
 // derived:true with an obviously-placeholder stderr string — see
 // fixtures/github-mrAutoMerge-unsupported.json). The classifier regex this
 // test exercises is a marked TODO in providers/github.mjs#mrAutoMerge until
 // that capture lands. Marked `todo` so the suite stays green in the
 // meantime — this is NOT a passing assertion on real GitHub behavior yet.
+// Correction 3: the `_provenance.recorded` assertion below is the gate — it
+// forces this test to keep failing (RED, still `todo`-shielded) until the
+// fixture is a REAL live capture, so un-todoing it without task 2.1's
+// capture landing fails loudly instead of silently passing on a
+// placeholder string.
 test('github.mrAutoMerge (contract): captured "auto-merge not allowed" stderr → unsupported', { todo: 'fixture pending live capture (tasks 2.1)' }, async () => {
-  const fixtureName = 'github-mrAutoMerge-unsupported.json';
-  const fixture = loadFixture(fixtureName);
-  assertProvenance(fixture, fixtureName);
-  setSpawn(failSpawn(fixture.stderr));
+  const { fixture } = MR_AUTO_MERGE_PROVIDERS.github.unsupportedArgs();
+  assert.equal(fixture._provenance.recorded, true, 'the unsupported class must come from a live capture (design A5)');
   const result = await github.mrAutoMerge({ project: 'x/y', number: 1, requiredReviews: 0 });
   assert.deepEqual(result, { enabled: false, reason: 'unsupported', error: fixture.stderr });
 });
@@ -2382,7 +2440,7 @@ test('gitlab.mrAutoMerge (contract): 405/406 merge response → unsupported', as
   for (const status of [405, 406]) {
     const result = await gitlab.mrAutoMerge({
       project: 'x/y', number: 1, requiredReviews: 0,
-      fetchImpl: async () => ({ ok: false, status }),
+      ...MR_AUTO_MERGE_PROVIDERS.gitlab.unsupportedArgs(status),
     });
     assert.equal(result.enabled, false, `status ${status} must classify unsupported`);
     assert.equal(result.reason, 'unsupported');

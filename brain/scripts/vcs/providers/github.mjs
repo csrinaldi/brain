@@ -623,7 +623,17 @@ export async function mrAutoMerge({ project, number, requiredReviews = 1 } = {})
   // a string `'0'` stays refused because strict equality never coerces.
   if (requiredReviews !== 0) return refused({ reason: AUTO_MERGE_REASONS.REQUIRES_HUMAN_APPROVAL });
 
-  const r = gh(['pr', 'merge', String(number), '--auto', '--squash', '--repo', project]);
+  // The seam itself can THROW (e.g. a launch failure re-raised instead of
+  // returned) — `run()`/`gh()` carry no try/catch of their own. Without
+  // this wrapper such a throw would reject the returned promise, breaking
+  // the never-throws contract (correction 4).
+  let r;
+  try {
+    r = gh(['pr', 'merge', String(number), '--auto', '--squash', '--repo', project]);
+  } catch (err) {
+    const message = err?.message ?? String(err);
+    return refused({ reason: AUTO_MERGE_REASONS.TRANSPORT, error: message });
+  }
   if (r.ok) return armed({ url: null });
 
   const text = r.stderr.trim() || `gh pr merge failed (status ${r.status})`;

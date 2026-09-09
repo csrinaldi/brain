@@ -1194,9 +1194,15 @@ export async function mrAutoMerge({
     });
     return armed({ url: r?.web_url ?? null });
   } catch (err) {
-    if (GITLAB_MR_AUTO_MERGE_UNSUPPORTED_RE.test(err.message)) {
-      return refused({ reason: AUTO_MERGE_REASONS.UNSUPPORTED, error: err.message });
+    // `err` is not always an `Error` — a `fetchImpl` may reject with a bare
+    // string or `null` (correction 4). `err?.message` is safe on `null`
+    // (optional chaining short-circuits to `undefined`, never throws), and
+    // `?? String(err)` covers the non-Error case instead of leaving `error`
+    // `undefined` and breaking the pinned transport key set.
+    const message = err?.message ?? String(err);
+    if (GITLAB_MR_AUTO_MERGE_UNSUPPORTED_RE.test(message)) {
+      return refused({ reason: AUTO_MERGE_REASONS.UNSUPPORTED, error: message });
     }
-    return refused({ reason: AUTO_MERGE_REASONS.TRANSPORT, error: err.message });
+    return refused({ reason: AUTO_MERGE_REASONS.TRANSPORT, error: message });
   }
 }
