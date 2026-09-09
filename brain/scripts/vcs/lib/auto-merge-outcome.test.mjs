@@ -75,7 +75,12 @@ test('source guard: neither provider source hand-constructs `enabled:` — both 
     const src = readFileSync(fileURLToPath(new URL(`../providers/${providerFile}`, import.meta.url)), 'utf8');
     assert.doesNotMatch(
       src,
-      /\benabled\s*:\s*(true|false)\b/,
+      // Requires at least one space after the colon — real object-literal
+      // JS in this repo writes `enabled: true` (Prettier/ESLint style);
+      // the compact `enabled:true` this file's own JSDoc `@returns` type
+      // annotations use (no space) is deliberately NOT matched, so the
+      // guard does not false-positive on documentation.
+      /\benabled:\s+(true|false)\b/,
       `${providerFile} must never hand-construct the { enabled, ... } shape — call armed()/refused() from vcs/lib/auto-merge-outcome.mjs instead`,
     );
   }

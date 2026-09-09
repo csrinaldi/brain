@@ -12,6 +12,7 @@ import { vcsToken } from '../lib/token.mjs';
 import { currentIdentity } from '../lib/identity-context.mjs';
 import { assertNoApprovalLabel } from '../lib/approval-deny.mjs';
 import { uncomputable, UNCOMPUTABLE_REASONS } from '../lib/uncomputable-cause.mjs';
+import { armed, refused, AUTO_MERGE_REASONS } from '../lib/auto-merge-outcome.mjs';
 
 export const PROVIDER = 'github';
 
@@ -592,6 +593,40 @@ export async function mrCreate({
   const r = gh(args);
   if (r.ok) return { url: r.stdout.trim() };
   return { url: null, error: r.stderr.trim() || `gh pr create failed (status ${r.status})` };
+}
+
+// TODO(#886 task 2.1): derived from a PLACEHOLDER fixture — see
+// fixtures/github-mrAutoMerge-unsupported.json, currently `derived: true`
+// with an obviously-fake stderr string, not yet a live capture. Design A5's
+// order is non-negotiable: evidence BEFORE regex. Once the maintainer runs
+// the read-only-safe capture command against an already-open PR on
+// csrinaldi/brain and the fixture flips to `recorded: true`, revisit this
+// pattern against the REAL verbatim text — it may need to change.
+const GITHUB_MR_AUTO_MERGE_UNSUPPORTED_RE = /auto-merge is not allowed for this repository/i;
+
+/**
+ * Arms auto-merge (squash, hardcoded) via `gh pr merge --auto --squash`, or
+ * refuses when `requiredReviews` says a human gate is still required.
+ * The refusal is the FIRST statement (design A4) — no `gh` call is ever
+ * made on that path. Never throws.
+ *
+ * `url` is unconditionally `null` (design A2): `gh pr merge --auto` prints a
+ * human confirmation line, not a URL, so stdout is never parsed.
+ *
+ * @param {{ project: string, number: number, requiredReviews?: number }} params
+ * @returns {Promise<{enabled:true,url:null}|{enabled:false,reason:string}|{enabled:false,reason:string,error:string}>}
+ */
+export async function mrAutoMerge({ project, number, requiredReviews = 1 } = {}) {
+  if (requiredReviews > 0) return refused({ reason: AUTO_MERGE_REASONS.REQUIRES_HUMAN_APPROVAL });
+
+  const r = gh(['pr', 'merge', String(number), '--auto', '--squash', '--repo', project]);
+  if (r.ok) return armed({ url: null });
+
+  const text = r.stderr.trim() || `gh pr merge failed (status ${r.status})`;
+  if (GITHUB_MR_AUTO_MERGE_UNSUPPORTED_RE.test(text)) {
+    return refused({ reason: AUTO_MERGE_REASONS.UNSUPPORTED, error: text });
+  }
+  return refused({ reason: AUTO_MERGE_REASONS.TRANSPORT, error: text });
 }
 
 /**

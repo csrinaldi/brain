@@ -2227,6 +2227,151 @@ for (const providerName of Object.keys(BRANCH_PROTECT_PROVIDERS)) {
   });
 }
 
+// ── mrAutoMerge (issue #886, design.md) — mutating write verb. `({ project,
+// number, requiredReviews?, apiBase?, token?, proxyUrl?, fetchImpl? }) ->
+// {enabled:true,url}|{enabled:false,reason}|{enabled:false,reason,error}`.
+// GitHub via the `gh` spawn seam (setSpawn); GitLab via the injected
+// `fetchImpl`. The refusal (`requiredReviews > 0`) is the FIRST statement in
+// both implementations (design A4) — proved with a COUNTING seam, never a
+// throwing one: a throwing seam would fail the never-throws test for the
+// wrong reason (design A4's own trap note).
+
+/** A github spawn glue that counts calls instead of answering — proves the
+ * tier refusal never reaches `gh` (design A4). */
+function countingFailSpawn() {
+  const state = { calls: 0 };
+  const seam = () => { state.calls += 1; return { status: 1, stdout: '', stderr: 'seam must not be called' }; };
+  return { state, seam };
+}
+
+const MR_AUTO_MERGE_PROVIDERS = {
+  github: {
+    module: github,
+    // `gh pr merge --auto` prints a human confirmation line, not a URL (A2) —
+    // stdout content is irrelevant, `url` is unconditionally `null`.
+    armedArgs: () => { setSpawn(rawSpawn('✓ Auto-merge enabled for pull request #1\n', 0)); return {}; },
+    unsupportedArgs: () => {
+      const fixtureName = 'github-mrAutoMerge-unsupported.json';
+      const fixture = loadFixture(fixtureName);
+      assertProvenance(fixture, fixtureName);
+      setSpawn(failSpawn(fixture.stderr));
+      return { fixture };
+    },
+    transportArgs: () => { setSpawn(failSpawn('HTTP 500: Internal Server Error')); return {}; },
+    countingArgs: () => {
+      const { state, seam } = countingFailSpawn();
+      setSpawn(seam);
+      return { args: {}, state };
+    },
+  },
+  gitlab: {
+    module: gitlab,
+    armedArgs: () => ({ fetchImpl: async () => ({ ok: true, json: async () => ({ web_url: 'https://gitlab.test/x/y/-/merge_requests/1' }) }) }),
+    unsupportedArgs: () => ({ fetchImpl: async () => ({ ok: false, status: 405 }) }),
+    transportArgs: () => ({ fetchImpl: async () => ({ ok: false, status: 500 }) }),
+    countingArgs: () => {
+      const state = { calls: 0 };
+      const fetchImpl = async () => { state.calls += 1; return { ok: false, status: 500 }; };
+      return { args: { fetchImpl }, state };
+    },
+  },
+};
+
+for (const providerName of Object.keys(MR_AUTO_MERGE_PROVIDERS)) {
+  const { module: vcs, armedArgs, transportArgs, countingArgs } = MR_AUTO_MERGE_PROVIDERS[providerName];
+
+  test(`${providerName}.mrAutoMerge (contract): an omitted requiredReviews refuses`, async () => {
+    const result = await vcs.mrAutoMerge({ project: 'x/y', number: 1 });
+    assert.deepEqual(result, { enabled: false, reason: 'requires-human-approval' });
+  });
+
+  test(`${providerName}.mrAutoMerge (contract): requiredReviews>0 refuses, provider seam UNCALLED`, async () => {
+    const { args, state } = countingArgs();
+    const result = await vcs.mrAutoMerge({ project: 'x/y', number: 1, requiredReviews: 1, ...args });
+    assert.deepEqual(result, { enabled: false, reason: 'requires-human-approval' });
+    assert.equal(state.calls, 0, 'the provider seam must never be touched when the tier refuses');
+  });
+
+  test(`${providerName}.mrAutoMerge (contract): armed shape carries no merged/sha field`, async () => {
+    const result = await vcs.mrAutoMerge({ project: 'x/y', number: 1, requiredReviews: 0, ...armedArgs() });
+    assert.equal(result.enabled, true);
+    assert.deepEqual(Object.keys(result).sort(), ['enabled', 'url'], 'armed must carry exactly enabled+url — no merged, no sha');
+  });
+
+  test(`${providerName}.mrAutoMerge (contract): network/5xx/401/403 → transport, carries error`, async () => {
+    const result = await vcs.mrAutoMerge({ project: 'x/y', number: 1, requiredReviews: 0, ...transportArgs() });
+    assert.equal(result.enabled, false);
+    assert.equal(result.reason, 'transport');
+    assert.equal(typeof result.error, 'string');
+    assert.deepEqual(Object.keys(result).sort(), ['enabled', 'error', 'reason']);
+  });
+
+  test(`${providerName}.mrAutoMerge (contract): outcome key set is pinned, exactly`, async () => {
+    const tier = await vcs.mrAutoMerge({ project: 'x/y', number: 1 });
+    assert.deepEqual(Object.keys(tier).sort(), ['enabled', 'reason']);
+    const ok = await vcs.mrAutoMerge({ project: 'x/y', number: 1, requiredReviews: 0, ...armedArgs() });
+    assert.deepEqual(Object.keys(ok).sort(), ['enabled', 'url']);
+    const bad = await vcs.mrAutoMerge({ project: 'x/y', number: 1, requiredReviews: 0, ...transportArgs() });
+    assert.deepEqual(Object.keys(bad).sort(), ['enabled', 'error', 'reason']);
+  });
+
+  test(`${providerName}.mrAutoMerge (contract): never throws, even under a mocked transport failure`, async () => {
+    await assert.doesNotReject(
+      () => vcs.mrAutoMerge({ project: 'x/y', number: 1, requiredReviews: 0, ...transportArgs() }),
+      `${providerName}.mrAutoMerge must resolve, not throw, on a mocked transport failure`,
+    );
+  });
+}
+
+test('github.mrAutoMerge (contract): armed → {enabled:true,url} via gh pr merge --auto --squash', async () => {
+  setSpawn(rawSpawn('✓ Auto-merge enabled for pull request #1\n', 0));
+  const result = await github.mrAutoMerge({ project: 'x/y', number: 1, requiredReviews: 0 });
+  assert.deepEqual(result, { enabled: true, url: null }, 'GitHub never parses stdout for a URL (design A2)');
+});
+
+test('gitlab.mrAutoMerge (contract): armed → {enabled:true,url} via PUT .../merge, pipeline+squash', async () => {
+  const result = await gitlab.mrAutoMerge({
+    project: 'x/y', number: 1, requiredReviews: 0,
+    fetchImpl: async () => ({ ok: true, json: async () => ({ web_url: 'https://gitlab.test/x/y/-/merge_requests/1' }) }),
+  });
+  assert.deepEqual(result, { enabled: true, url: 'https://gitlab.test/x/y/-/merge_requests/1' });
+});
+
+test('gitlab.mrAutoMerge (contract): url is null when the provider reports none', async () => {
+  const result = await gitlab.mrAutoMerge({
+    project: 'x/y', number: 1, requiredReviews: 0,
+    fetchImpl: async () => ({ ok: true, json: async () => ({}) }),
+  });
+  assert.deepEqual(result, { enabled: true, url: null });
+});
+
+// Deferred: task 2.1's live capture has not landed yet (the fixture ships
+// derived:true with an obviously-placeholder stderr string — see
+// fixtures/github-mrAutoMerge-unsupported.json). The classifier regex this
+// test exercises is a marked TODO in providers/github.mjs#mrAutoMerge until
+// that capture lands. Marked `todo` so the suite stays green in the
+// meantime — this is NOT a passing assertion on real GitHub behavior yet.
+test('github.mrAutoMerge (contract): captured "auto-merge not allowed" stderr → unsupported', { todo: 'fixture pending live capture (tasks 2.1)' }, async () => {
+  const fixtureName = 'github-mrAutoMerge-unsupported.json';
+  const fixture = loadFixture(fixtureName);
+  assertProvenance(fixture, fixtureName);
+  setSpawn(failSpawn(fixture.stderr));
+  const result = await github.mrAutoMerge({ project: 'x/y', number: 1, requiredReviews: 0 });
+  assert.deepEqual(result, { enabled: false, reason: 'unsupported', error: fixture.stderr });
+});
+
+test('gitlab.mrAutoMerge (contract): 405/406 merge response → unsupported', async () => {
+  for (const status of [405, 406]) {
+    const result = await gitlab.mrAutoMerge({
+      project: 'x/y', number: 1, requiredReviews: 0,
+      fetchImpl: async () => ({ ok: false, status }),
+    });
+    assert.equal(result.enabled, false, `status ${status} must classify unsupported`);
+    assert.equal(result.reason, 'unsupported');
+    assert.match(result.error, new RegExp(`API failed: ${status}`));
+  }
+});
+
 // ── rerunWorkflowRun (GitHub-only, issue #328) ──────────────────────────────
 // No GitLab equivalent is implemented (deliberately out of scope) — this verb
 // is absent from cli.mjs's VERBS array on purpose (that array is reserved for
