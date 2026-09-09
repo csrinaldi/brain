@@ -2426,18 +2426,15 @@ test('gitlab.mrAutoMerge (contract): a fetchImpl that rejects with null never th
   assert.deepEqual(Object.keys(result).sort(), ['enabled', 'error', 'reason']);
 });
 
-// Deferred: task 2.1's live capture has not landed yet (the fixture ships
-// derived:true with an obviously-placeholder stderr string — see
-// fixtures/github-mrAutoMerge-unsupported.json). The classifier regex this
-// test exercises is a marked TODO in providers/github.mjs#mrAutoMerge until
-// that capture lands. Marked `todo` so the suite stays green in the
-// meantime — this is NOT a passing assertion on real GitHub behavior yet.
-// Correction 3: the `_provenance.recorded` assertion below is the gate — it
-// forces this test to keep failing (RED, still `todo`-shielded) until the
-// fixture is a REAL live capture, so un-todoing it without task 2.1's
-// capture landing fails loudly instead of silently passing on a
-// placeholder string.
-test('github.mrAutoMerge (contract): captured "auto-merge not allowed" stderr → unsupported', { todo: 'fixture pending live capture (tasks 2.1)' }, async () => {
+// Task 2.1's live capture landed 2026-09-09 against this change's own PR
+// (#895, csrinaldi/brain, allow_auto_merge:false): `gh pr merge 895 --auto
+// --squash --repo csrinaldi/brain` → GraphQL: Auto merge is not allowed for
+// this repository (enablePullRequestAutoMerge). The fixture now ships
+// recorded:true with that verbatim stderr — see
+// fixtures/github-mrAutoMerge-unsupported.json. The `_provenance.recorded`
+// assertion below stays as the gate against any future regression back to a
+// placeholder/derived fixture (correction 3).
+test('github.mrAutoMerge (contract): captured "auto-merge not allowed" stderr → unsupported', async () => {
   const { fixture } = MR_AUTO_MERGE_PROVIDERS.github.unsupportedArgs();
   assert.equal(fixture._provenance.recorded, true, 'the unsupported class must come from a live capture (design A5)');
   const result = await github.mrAutoMerge({ project: 'x/y', number: 1, requiredReviews: 0 });

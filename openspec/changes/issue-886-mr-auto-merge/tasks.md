@@ -23,44 +23,26 @@ run the full `npm test` before each commit.
 
 ## 2. The live capture (evidence BEFORE any regex — design A5, non-negotiable order)
 
-- [ ] 2.1 DEFERRED (live capture requires a mutating write against a real repo — out of scope
-      for this apply batch, left for the maintainer/next batch against this change's own PR).
-      Capture GitHub's real "auto-merge is not allowed" stderr, READ-ONLY-SAFE. Do **not**
-      create a throwaway PR — creating a PR is itself a WRITE. Instead run the mutating
-      merge-arm command against an ALREADY-OPEN, pre-existing PR: GitHub validates
-      `allow_auto_merge` on the **repository** before it touches the PR at all, so on
-      `csrinaldi/brain` (measured live in `explore.md`: `allow_auto_merge:false`) the call is
-      guaranteed to reject before any state change — no merge happens, no auto-merge is armed,
-      regardless of which PR number is targeted.
+- [x] 2.1 DONE — live capture landed 2026-09-09, by the maintainer, against this change's own
+      PR (#895, `csrinaldi/brain`, `allow_auto_merge:false`):
       ```bash
-      n=$(gh pr list --repo csrinaldi/brain --state open --limit 1 --json number -q '.[0].number')
-      gh pr merge "$n" --auto --squash --repo csrinaldi/brain 2>&1 | tee /tmp/mrAutoMerge-capture.txt
+      gh pr merge 895 --auto --squash --repo csrinaldi/brain
       ```
-      **Fallback (Tier 2, only if no PR is open in `csrinaldi/brain` at execution time):** ask
-      the maintainer to run the same command against any PR that happens to be open, and paste
-      the stderr back verbatim. Do not invent the string under any circumstance — an invented
-      pattern is green in test and inert in production (D2). Record in `_provenance` which path
-      was actually taken.
-- [x] 2.2 PARTIAL — fixture created, but as a `derived:true` PLACEHOLDER (obviously-fake
-      stderr), not the `recorded:true` live text 2.1 defers. Create
-      `brain/scripts/vcs/fixtures/github-mrAutoMerge-unsupported.json`:
-      ```json
-      {
-        "_provenance": {
-          "recorded": true,
-          "endpoint": "gh pr merge <n> --auto --squash --repo csrinaldi/brain",
-          "date": "2026-09-09"
-        },
-        "stderr": "<verbatim text captured in 2.1>"
-      }
+      Exit non-zero, stdout empty, stderr verbatim (one line):
       ```
-      Loaded through the existing `loadFixture` + `assertProvenance`
-      (`vcs.contract.test.mjs:50-64`). The classifier regex in task 5.3 is written FROM this
-      fixture's own words — if the live text differs from "auto-merge is not allowed for this
-      repository", this fixture is the truth and the design's prose is wrong, not the capture.
+      GraphQL: Auto merge is not allowed for this repository (enablePullRequestAutoMerge)
+      ```
+      Confirms the design A5 order paid off: the real text has a SPACE ("Auto merge"), not the
+      hyphen ("auto-merge") the pre-capture placeholder/regex had assumed — the un-todoed
+      contract test proved this RED (misclassified `transport`) before the classifier regex in
+      `providers/github.mjs#mrAutoMerge` was widened to `/auto[- ]?merge is not allowed/i`.
+- [x] 2.2 DONE — `brain/scripts/vcs/fixtures/github-mrAutoMerge-unsupported.json` now ships
+      `_provenance.recorded: true` (dropped `derived: true`) with the verbatim 2.1 capture,
+      `captured_at`/`captured_by`/`command`/`repo`/`pr` provenance fields, loaded through the
+      existing `loadFixture` + `assertProvenance` (`vcs.contract.test.mjs:57-66`).
 
-Commit: `chore(vcs): capture github mrAutoMerge unsupported fixture (#886)` — fixture only, no
-source change yet.
+Commit: `test(vcs): the github unsupported class is the live-captured "Auto merge is not
+allowed" — fixture recorded, regex matched, todo lifted (#886)`.
 
 ## 3. Unit layer — `lib/auto-merge-outcome.mjs` (the only writer of these keys)
 
@@ -100,8 +82,9 @@ Commit: `feat(vcs): add auto-merge outcome constructor (#886)`.
       5. `url is null when the provider reports none`
       6. `armed shape carries no merged/sha field`
       7. `gh: captured "auto-merge not allowed" stderr → unsupported` — feeds the section-2
-         fixture into `failSpawn`. SHIPPED AS `{ todo: 'fixture pending live capture (tasks
-         2.1)' }` — the fixture is a placeholder, not a real capture (see 2.1/2.2).
+         fixture into `failSpawn`. Shipped as `{ todo: 'fixture pending live capture (tasks
+         2.1)' }` until task 2.1 landed (2026-09-09); un-todoed once the fixture carried
+         `recorded: true` and the classifier regex matched the live text (see 2.1/2.2).
       8. `gl: 405/406 merge response → unsupported`
       9. `network/5xx/401/403 → transport, carries error`
       10. `outcome key set is pinned, exactly`
@@ -218,7 +201,8 @@ Commit: `docs(vcs): draft mrAutoMerge contract row amendment (#886)`.
 **Sections 1–7 done as of this apply batch (sdd-apply, 2026-09-09).** Local commits only, in
 this worktree, on this branch — no push, no PR, no `brain:promote`, no `brain:review`. Sections
 8–9 below (push, `memory:save`, epic tick, PR body, `brain:review`) are the orchestrator's/
-maintainer's next steps, not this batch's. Task 2.1's live capture stays open — see its note.
+maintainer's next steps, not this batch's. Task 2.1's live capture landed 2026-09-09 against
+this change's own PR (#895) — see its note; the todo it gated is lifted.
 
 ## 8. Wrap-up before the push
 

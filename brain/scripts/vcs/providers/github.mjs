@@ -595,14 +595,15 @@ export async function mrCreate({
   return { url: null, error: r.stderr.trim() || `gh pr create failed (status ${r.status})` };
 }
 
-// TODO(#886 task 2.1): derived from a PLACEHOLDER fixture — see
-// fixtures/github-mrAutoMerge-unsupported.json, currently `derived: true`
-// with an obviously-fake stderr string, not yet a live capture. Design A5's
-// order is non-negotiable: evidence BEFORE regex. Once the maintainer runs
-// the read-only-safe capture command against an already-open PR on
-// csrinaldi/brain and the fixture flips to `recorded: true`, revisit this
-// pattern against the REAL verbatim text — it may need to change.
-const GITHUB_MR_AUTO_MERGE_UNSUPPORTED_RE = /auto-merge is not allowed for this repository/i;
+// fixtures/github-mrAutoMerge-unsupported.json, `recorded: true` as of the
+// task 2.1 live capture (2026-09-09, PR #895, csrinaldi/brain,
+// allow_auto_merge:false): `GraphQL: Auto merge is not allowed for this
+// repository (enablePullRequestAutoMerge)`. Note the real text has a SPACE
+// ("Auto merge"), not a hyphen ("auto-merge") — the pre-capture placeholder
+// assumed the hyphenated form and would have silently misclassified this as
+// `transport`. `[- ]?` tolerates either separator (and none) so a future
+// GraphQL message-wording tweak on either side doesn't reopen this gap.
+const GITHUB_MR_AUTO_MERGE_UNSUPPORTED_RE = /auto[- ]?merge is not allowed/i;
 
 /**
  * Arms auto-merge (squash, hardcoded) via `gh pr merge --auto --squash`, or

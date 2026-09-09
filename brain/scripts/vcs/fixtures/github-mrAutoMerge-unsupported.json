@@ -1,9 +1,13 @@
 {
   "_provenance": {
+    "recorded": true,
     "endpoint": "gh pr merge <n> --auto --squash --repo csrinaldi/brain",
     "date": "2026-09-09",
-    "derived": true,
-    "note": "PLACEHOLDER — pending live capture (tasks.md task 2.1). The maintainer must run the read-only-safe capture command against an already-open PR on csrinaldi/brain (allow_auto_merge:false) and replace this fixture with the verbatim stderr, flipping this to `recorded: true` and dropping this note. The classifier regex in providers/github.mjs#mrAutoMerge is a marked TODO until that capture lands — see the TODO comment there."
+    "captured_at": "2026-09-09",
+    "captured_by": "maintainer",
+    "command": "gh pr merge 895 --auto --squash --repo csrinaldi/brain",
+    "repo": "csrinaldi/brain",
+    "pr": 895
   },
-  "stderr": "PLACEHOLDER-PENDING-LIVE-CAPTURE (tasks.md 2.1): auto-merge is not allowed for this repository"
+  "stderr": "GraphQL: Auto merge is not allowed for this repository (enablePullRequestAutoMerge)"
 }
