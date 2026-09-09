@@ -617,7 +617,11 @@ const GITHUB_MR_AUTO_MERGE_UNSUPPORTED_RE = /auto-merge is not allowed for this 
  * @returns {Promise<{enabled:true,url:null}|{enabled:false,reason:string}|{enabled:false,reason:string,error:string}>}
  */
 export async function mrAutoMerge({ project, number, requiredReviews = 1 } = {}) {
-  if (requiredReviews > 0) return refused({ reason: AUTO_MERGE_REASONS.REQUIRES_HUMAN_APPROVAL });
+  // Only the NUMBER 0 may arm (cold-review blocker 1). `> 0` is false for
+  // null/NaN/-1 too — a naive predicate ARMS on all three, a fail-open gate
+  // on a mutating write verb. `!== 0` makes exact-zero the only permission;
+  // a string `'0'` stays refused because strict equality never coerces.
+  if (requiredReviews !== 0) return refused({ reason: AUTO_MERGE_REASONS.REQUIRES_HUMAN_APPROVAL });
 
   const r = gh(['pr', 'merge', String(number), '--auto', '--squash', '--repo', project]);
   if (r.ok) return armed({ url: null });

@@ -24,14 +24,23 @@ proxyUrl?, fetchImpl? })`. An omitted `requiredReviews` MUST refuse, mirroring
 
 ### Requirement: tier refusal never touches the provider (D1)
 
-When `requiredReviews > 0`, the verb MUST refuse WITHOUT calling the provider seam (`gh`
-spawn / `fetchImpl`).
+The verb arms ONLY when `requiredReviews` is exactly the number `0`; any other value —
+including `null`, `NaN`, negative numbers, or a non-number such as the string `'0'` — MUST
+refuse WITHOUT calling the provider seam (`gh` spawn / `fetchImpl`). The check is strict
+identity to `0`, never a truthiness or magnitude comparison.
 
 #### Scenario: refusal is provable, not assumed
 - GIVEN `requiredReviews: 1` and a provider seam that fails the test if invoked
 - WHEN `mrAutoMerge` is called
 - THEN it returns `{enabled:false,reason:'requires-human-approval'}` AND the seam records
   zero calls
+
+#### Scenario: only exact zero arms
+- GIVEN `requiredReviews` is `null`, `NaN`, `-1`, or the string `'0'`, each with a provider
+  seam that fails the test if invoked
+- WHEN `mrAutoMerge` is called
+- THEN it returns `{enabled:false,reason:'requires-human-approval'}` AND the seam records
+  zero calls, for every one of those values
 
 ### Requirement: armed merge, squash hardcoded (D2 happy path, D3)
 

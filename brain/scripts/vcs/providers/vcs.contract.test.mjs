@@ -2292,6 +2292,24 @@ for (const providerName of Object.keys(MR_AUTO_MERGE_PROVIDERS)) {
     assert.equal(state.calls, 0, 'the provider seam must never be touched when the tier refuses');
   });
 
+  // Cold-review blocker 1: only the NUMBER 0 may arm. `requiredReviews > 0`
+  // is false for null/NaN/-1 too, so a naive predicate ARMS on all three —
+  // a fail-open gate on a mutating write verb. The fix is `!== 0`, the only
+  // permission is exact-zero. `'0'` (a string) is included to pin that
+  // strict equality, not loose coercion, decides the gate.
+  test(`${providerName}.mrAutoMerge (contract): only requiredReviews===0 arms — null/NaN/-1/"0" all refuse, seam UNCALLED`, async () => {
+    for (const requiredReviews of [null, NaN, -1, '0']) {
+      const { args, state } = countingArgs();
+      const result = await vcs.mrAutoMerge({ project: 'x/y', number: 1, requiredReviews, ...args });
+      assert.deepEqual(
+        result,
+        { enabled: false, reason: 'requires-human-approval' },
+        `requiredReviews=${String(requiredReviews)} must refuse — only the number 0 may arm`,
+      );
+      assert.equal(state.calls, 0, `requiredReviews=${String(requiredReviews)} must never touch the provider seam`);
+    }
+  });
+
   test(`${providerName}.mrAutoMerge (contract): armed shape carries no merged/sha field`, async () => {
     const result = await vcs.mrAutoMerge({ project: 'x/y', number: 1, requiredReviews: 0, ...armedArgs() });
     assert.equal(result.enabled, true);

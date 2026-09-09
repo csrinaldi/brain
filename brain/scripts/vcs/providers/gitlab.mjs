@@ -1175,7 +1175,11 @@ export async function mrAutoMerge({
   proxyUrl,
   fetchImpl,
 } = {}) {
-  if (requiredReviews > 0) return refused({ reason: AUTO_MERGE_REASONS.REQUIRES_HUMAN_APPROVAL });
+  // Only the NUMBER 0 may arm (cold-review blocker 1). `> 0` is false for
+  // null/NaN/-1 too — a naive predicate ARMS on all three, a fail-open gate
+  // on a mutating write verb. `!== 0` makes exact-zero the only permission;
+  // a string `'0'` stays refused because strict equality never coerces.
+  if (requiredReviews !== 0) return refused({ reason: AUTO_MERGE_REASONS.REQUIRES_HUMAN_APPROVAL });
 
   const encoded = encodeURIComponent(project);
   try {
