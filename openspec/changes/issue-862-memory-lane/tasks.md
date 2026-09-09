@@ -212,6 +212,15 @@ maintainer's act, same split as #863's 3.2.
       Do not fold that sitting into this PR; state its ticket number in the PR body as a
       "Follow-up" line.
 
+**Section 5 deferred, out of this apply run's authorized scope.** The apply run's own
+instructions authorised filing only the five Wave 3 tickets (3.1) and the #864 comment (4.2) — not
+pushing, not opening the PR, and by extension not filing 5.3's follow-up ticket, whose body is
+meant to reference the PR this section opens. `brain:review` (5.1) also refuses without a PR
+number (`node ./brain/scripts/review/cli.mjs`: *"Usage: npm run brain:review -- <pr-number>"*) —
+it cannot run before 5.2. All of section 5 stays for the orchestrator/maintainer's own sitting:
+push the branch, open the PR, run `brain:review` against it, then file 5.3 and link it in the PR
+body.
+
 ## Review Workload Forecast
 
 - Estimated changed lines: ~+300 / −20. All under `openspec/changes/issue-862-memory-lane/**`
