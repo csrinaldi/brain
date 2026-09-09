@@ -206,15 +206,22 @@ this change's own PR (#895) — see its note; the todo it gated is lifted.
 
 ## 8. Wrap-up before the push
 
-- [ ] 8.1 `npm test` full run — every file green except
-      `verb-contract-drift-guard.test.mjs` check `:82` (expected red, task 6.1's note).
-- [ ] 8.2 `memory:save --issue 886` — record-first, BEFORE the push (ADR-0034 lane discipline).
-- [ ] 8.3 Tick epic task 2.5 in `openspec/changes/issue-864-memory-2-0/tasks.md` if not already
-      reflecting `#886` as filed/in-progress.
+- [x] 8.1 `npm test` full run — before the promotion commit: 4924 pass, 1 designed-red (drift
+      guard `:82`), 1 todo; after the live capture (a83890be): 4925 pass, 1 designed-red, 0 todo;
+      after the maintainer's promotion commit (960c1767): drift guard 4/4, suite fully green.
+- [x] 8.2 `memory:save --issue 886` — record `rec-05767bed7024aee4`, committed as e14560a8 before
+      the first push.
+- [x] 8.3 Epic task 2.5 ticked in `openspec/changes/issue-864-memory-2-0/tasks.md` on the archive
+      branch (this change's closing PR), with #895's merge commit.
 
 ## 9. The PR
 
-- [ ] 9.1 Push `feat/issue-886-featvcs-mrautomerge-merge-by-tier-on-the`. Open the PR:
+- [x] 9.1 Pushed; PR #895 opened with `Closes #886`, `Parent: #864` in prose, `type:feature`, the
+      handover section (live capture + `brain:promote`). Fifteen commits: 8 apply, 4 fresh-review
+      corrections (a fail-open `> 0` guard found before the push, fixed as exact-zero-arms),
+      record-first, the live capture, the maintainer's promotion commit. Merged as 6d1452a5 on
+      2026-09-09.
+      Original instructions kept for the record:
       `Closes #886`, `Parent: #864` in prose, label `type:feature`. Body: summary, changes
       table (the File changes table in design.md), test plan (the `npm test` output, noting the
       one expected-red check and why), the D5 handover note verbatim:
@@ -231,8 +238,9 @@ this change's own PR (#895) — see its note; the todo it gated is lifted.
       Commit order on the branch, non-negotiable: (1) this PR's own commits (sections 2–8,
       agent-authored) land first; (2) the maintainer's `brain:promote` commit lands second, on
       the same branch; (3) CI green; (4) `brain:review`; (5) merge.
-- [ ] 9.2 Run `brain:review` only after (1) and (2) above are both on the branch — a review
-      against the red-by-design state would flag a false blocker.
+- [x] 9.2 `brain:review` ran after the promotion commit: APPROVE at 960c1767, 10 gates green,
+      one correction (a stale JSDoc line in `lib/auto-merge-outcome.mjs` still described the gate
+      as `> 0`; corrected on the archive branch) plus the expected `tier2-frontier` note.
 
 ## 10. Non-goals (D6 — restated, no work items)
 
