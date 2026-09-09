@@ -25,7 +25,7 @@ import {
   serializeRecord,
   validateWritableRecord,
   computeRecordId,
-  canonicalJson,
+  canonicalOrNull,
 } from './format.mjs';
 import { summarizeDuplicates } from './duplicates.mjs';
 
@@ -399,25 +399,7 @@ export function readRecords({ recordsDir }) {
   return { records, duplicates: summarizeDuplicates(occurrences, divergentIds) };
 }
 
-/**
- * canonicalJson() over a record neither reader has fully vetted, so a value
- * canonicalJson cannot express yields `null` instead of throwing. Used by BOTH
- * `rebuildIndex()` and `readRecords()`: the comparison is an equality proof, and
- * failing to prove equality must never escalate into refusing the store.
- *
- * The reachable cases are non-finite numbers (`JSON.parse('1e999')` is
- * `Infinity`, and `validateRecord` does not police fields outside the schema)
- * and nesting deep enough to overflow the recursion. NOT an array value —
- * `canonicalJson` handles arrays; this docblock said otherwise and was wrong.
- *
- * A null compares as divergent, which is the safe direction: it over-reports a
- * pair it cannot vouch for, instead of claiming two lines agree when nobody
- * checked.
- */
-function canonicalOrNull(record) {
-  try {
-    return canonicalJson(record);
-  } catch {
-    return null;
-  }
-}
+// canonicalOrNull() moved to ./format.mjs (A7, issue #887) — imported above.
+// format.mjs has no `fs` import, so it is the correct shared floor for a rule
+// BOTH this module's readers and the lane planner (lane/plan.mjs) must agree
+// on; copying it here would let the two silently drift.

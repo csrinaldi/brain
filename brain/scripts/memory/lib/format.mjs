@@ -272,6 +272,40 @@ export function serializeIndex(entriesById) {
 }
 
 /**
+ * canonicalOrNull() — canonicalJson() over a value neither caller has fully
+ * vetted, so a value canonicalJson cannot express yields `null` instead of
+ * throwing. Used by store.mjs's rebuildIndex() and readRecords() (dedup
+ * divergence, issue #574) and by the lane planner's C2 tiebreak (issue #887,
+ * A6/A7): the comparison is an equality proof, and failing to prove equality
+ * must never escalate into refusing the store or the lane.
+ *
+ * The reachable cases are non-finite numbers (`JSON.parse('1e999')` is
+ * `Infinity`, and `validateRecord` does not police fields outside the schema)
+ * and nesting deep enough to overflow the recursion. NOT an array value —
+ * `canonicalJson` handles arrays; an earlier docblock here said otherwise and
+ * was wrong.
+ *
+ * A null compares as divergent, which is the safe direction: it over-reports a
+ * pair it cannot vouch for, instead of claiming two lines/copies agree when
+ * nobody checked.
+ *
+ * Moved here from store.mjs (A7, issue #887): this module has no `fs` import,
+ * so it is the correct floor for a rule both a pure planner and an I/O module
+ * must share. Kept as the ONE definition — copying it would let the reader and
+ * the lane collector disagree about which pairs are divergent, silently.
+ *
+ * @param {unknown} record
+ * @returns {string | null}
+ */
+export function canonicalOrNull(record) {
+  try {
+    return canonicalJson(record);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * nowUtcSeconds() — a seam-injected clock producing the C2a canonical
  * UTC-seconds `ts` (`YYYY-MM-DDTHH:MM:SSZ`) that `UTC_TS_RE` (above) accepts.
  * Strips millisecond precision the same way `engram-export.mjs#toUtcSeconds`
