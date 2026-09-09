@@ -126,21 +126,23 @@ epic pattern in epic tasks.md's header) and the REQ id(s) it owns from spec.md's
 ownership" table. Filing an issue is within agent authority (Tier 1); `status:approved` is the
 maintainer's act, same split as #863's 3.2.
 
-- [ ] 3.1 **File `mrAutoMerge` (epic task 2.5)** — VCS port verb: `vcs-contract.md` row after
+- [x] 3.1 **File `mrAutoMerge` (epic task 2.5)** — VCS port verb: `vcs-contract.md` row after
       `mrCreate` (`:33`) plus the Phase 3 adapter table (`:95-104`); GH `gh pr merge --auto
       --squash`; GL `PUT .../merge_requests/{iid}/merge` with
       `merge_when_pipeline_succeeds=true`; refuses `{enabled:false, reason:'requires-human-approval'}`
       when tier `requiredReviews > 0`, never throws. Owns REQ "merge by tier". No dependency —
       files first; 3.1b cannot open-and-merge without it (design.md dependency order).
+      **Filed: #886.**
 
-- [ ] 3.2 **File the collector (epic task 3.1a)** — `brain/scripts/memory/lane/plan.mjs`
+- [x] 3.2 **File the collector (epic task 3.1a)** — `brain/scripts/memory/lane/plan.mjs`
       (`planLaneCommit`, pure) + `lane/collect.mjs` (the git-in/git-out shell, seam pattern of
       `governance/postmerge/git-seam.mjs:27,54`). Owns REQ "collector, deterministic dedup" (C2:
       same first-wins rule the reader uses, tiebroken by lexicographic worktree path then physical
       line — `duplicates.mjs:20-24`). State design.md Risk 2 in the ticket: `--no-verify` on the
       push is deliberate and documented in ADR-0034, not incidental. Depends on 3.1 (2.5).
+      **Filed: #887.**
 
-- [ ] 3.3 **File push + PR (epic task 3.1b)** — through the port (`mrCreate` + `mrAutoMerge`);
+- [x] 3.3 **File push + PR (epic task 3.1b)** — through the port (`mrCreate` + `mrAutoMerge`);
       poster credential never in the capturing session (ADR-0033); PR body per L1 (`Memory lane:
       <host> <date>`, no issue reference, `Records: <n>`, file list). Owns REQ "trigger +
       credential". Scenario to prove: "a record does not wait for its feature". State design.md
@@ -148,8 +150,9 @@ maintainer's act, same split as #863's 3.2.
       alone, asserted via `withoutCredentials` everywhere else. Depends on 3.2 (3.1a); **auto-merge
       is not *enabled* until #805 (`supersedes`) lands** — the ticket states this as an enablement
       gate, not a filing blocker (design.md Risk 6).
+      **Filed: #888.**
 
-- [ ] 3.4 **File path restriction + lane class + governance (epic task 3.1c)** — the CI check
+- [x] 3.4 **File path restriction + lane class + governance (epic task 3.1c)** — the CI check
       `lane-paths` as a required status context (path restriction to `.memory/records/` additions
       only), the `issue-link`/`actor-check` lane branch (`run-check.mjs:313,671` — before the
       closing-keyword refusal, per L1's table), `brain:audit`'s `[LANE]` row
@@ -164,8 +167,9 @@ maintainer's act, same split as #863's 3.2.
       if a concrete conflict forces it. Depends on 3.3 (3.1b) and on epic task 2.4 (artifact
       retirement) landing first — manifest churn would trip the path check (design.md dependency
       diagram, epic tasks.md:33).
+      **Filed: #889.**
 
-- [ ] 3.5 **File retirement of feature-PR surfaces + template wording (epic task 3.1d)** —
+- [x] 3.5 **File retirement of feature-PR surfaces + template wording (epic task 3.1d)** —
       `pre-push:70`'s `share` call on feature branches, `ticket.nextSteps.step3` (en/es),
       `brain-save.mjs`, `contributor-scaffold.mjs:274`, `day.done.checkCmd`; the PR template's
       memory line rewritten to "captured as a record (`memory:save --issue N`); it reaches `main`
@@ -174,14 +178,15 @@ maintainer's act, same split as #863's 3.2.
       first feature PR after merge. Sequencing (spec.md's "retirement is sequenced" requirement,
       non-negotiable): ships only after 3.1b's first scenario has passed AND #874 (record-first,
       epic task 3.2) has landed. Depends on 3.4 (3.1c).
+      **Filed: #890.**
 
 ## 4. Write ticket numbers back into the epic
 
-- [ ] 4.1 Edit `openspec/changes/issue-864-memory-2-0/tasks.md`: replace `2.5`'s
+- [x] 4.1 Edit `openspec/changes/issue-864-memory-2-0/tasks.md`: replace `2.5`'s
       `**(ticket: file under #862)**` and `3.1a`–`3.1d`'s same markers with the five numbers filed
       in section 3. Leave the existing uncommitted edit on task 2.4 (`depends on 3.2`) exactly as
       it stands in this worktree — it rides this PR unchanged.
-- [ ] 4.2 Comment on #864 stating: the five tickets and their numbers; the dependency order (2.5 →
+- [x] 4.2 Comment on #864 stating: the five tickets and their numbers; the dependency order (2.5 →
       3.1a → 3.1b → 3.1c → 3.1d, with #805 gating 3.1b's auto-merge *enablement* and #874 → epic
       2.4 gating 3.1c and 3.1d); and which acts are Tier 2 (maintainer-only) vs agent-doable:
       - **Tier 2 (maintainer)**: the promotion sitting — running `brain:promote`'s typed
