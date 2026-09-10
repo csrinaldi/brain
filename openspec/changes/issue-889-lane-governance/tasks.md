@@ -302,7 +302,7 @@ branch once it is opened. PR 2 body: `Closes #889`, `Parent: #864`.
 
 ### B1. Unit — `brain-audit.mjs`: the `[LANE]` audit row (spec "brain:audit reports [LANE] on both signals"; design A8)
 
-- [ ] B1.1 RED: extend `brain/scripts/brain-audit.test.mjs` — synthetic-walk fixtures matching
+- [x] B1.1 RED: extend `brain/scripts/brain-audit.test.mjs` — synthetic-walk fixtures matching
   the file's existing fixture style (fake `fetchPrMeta`/`readMergeDiff`, or a temp-repo
   squashed merge if that is the file's established pattern):
   - a merge whose diff is records-only additions under `.memory/records/` AND whose
@@ -317,7 +317,7 @@ branch once it is opened. PR 2 body: `Closes #889`, `Parent: #864`.
   - this file proves only that the walk reads `lanePaths` with `sourceBranch: null` — the
     `lane === laneBranch && lanePaths` invariant itself is A1's test, not re-asserted here
   Focused: `node --test brain/scripts/brain-audit.test.mjs` — RED.
-- [ ] B1.2 GREEN: `brain/scripts/brain-audit.mjs` — after `issueLinkBody` is computed and
+- [x] B1.2 GREEN: `brain/scripts/brain-audit.mjs` — after `issueLinkBody` is computed and
   after the `[UNCOMPUTABLE]` guard (`:315-324`), before `evaluateMerge` (`:326`), add:
   ```js
   const laneMerge = classifyLane({ sourceBranch: null, changedFiles, addedFiles });
@@ -335,7 +335,7 @@ Commit: `feat(vcs): print [LANE] for a records-only lane merge in brain:audit (#
 
 ### B2. Unit — `memory/index-lag.mjs`: non-mutating rebuild + compare (spec "local-checks warns on index lag, never fails"; design A9, discovered requirement)
 
-- [ ] B2.1 RED: `brain/scripts/memory/index-lag.test.mjs` (new) —
+- [x] B2.1 RED: `brain/scripts/memory/index-lag.test.mjs` (new) —
   - the committed `index.jsonl`'s id set differs from `readRecords()`'s id set ⇒
     `compareIndexToRecords` reports `lagged: true` with `indexed`/`rebuilt` counts, `main()`
     prints a warning naming both counts, exits 0
@@ -345,14 +345,14 @@ Commit: `feat(vcs): print [LANE] for a records-only lane merge in brain:audit (#
     file are IDENTICAL before and after `main()` runs (the comparison must use `readRecords`,
     never `rebuildIndex`, which writes)
   Focused: `node --test brain/scripts/memory/index-lag.test.mjs` — RED (module absent).
-- [ ] B2.2 RED (discovered requirement, design A9): extend
+- [x] B2.2 RED (discovered requirement, design A9): extend
   `brain/scripts/vcs/engine-blind-gates.test.mjs` — `brain/scripts/memory/index-lag.mjs` MUST
   be declared in `VERIFICATION_SURFACE.scripts` (beside `check-refs.mjs`, `:128`) because it
   is outside every declared `dirs` entry (`:143-157`). Confirm this assertion is RED before
   the `governance-tiers.mjs` edit below — this is `npm test`'s own signal that the script
   exists but is unverified.
   Focused: `node --test brain/scripts/vcs/engine-blind-gates.test.mjs` — RED.
-- [ ] B2.3 GREEN: `brain/scripts/memory/index-lag.mjs` — pure
+- [x] B2.3 GREEN: `brain/scripts/memory/index-lag.mjs` — pure
   `compareIndexToRecords({indexLines, records}) -> {lagged, indexed, rebuilt, missingFromIndex, staleInIndex}`
   comparing id SETS, never bytes (`serializeIndex` is deterministic, so a byte compare would
   also flag a harmless key-order/newline difference as "lag" — never cry wolf), plus a thin
@@ -368,9 +368,10 @@ Commit: `feat(memory): warn on index lag without blocking or mutating (#889)`.
 
 ### Wrap-up B
 
-- [ ] B.W1 `npm test` full run — record pass count in apply-progress before pushing.
+- [x] B.W1 `npm test` full run — record pass count in apply-progress before pushing. 5091/5091
+  green (baseline 5078 + B1's 4 + B2's 9).
 - [ ] B.W2 `memory:save --issue 889` — record-first, committed before the first push.
-- [ ] B.W3 Tick epic task 3.1c in `openspec/changes/issue-864-memory-2-0/tasks.md`, referencing
+- [x] B.W3 Tick epic task 3.1c in `openspec/changes/issue-864-memory-2-0/tasks.md`, referencing
   PR 2's number once known — on THIS PR, the closing PR for #889.
 - [ ] B.W4 Fresh-context review of the diff before opening PR 2.
 - [ ] B.W5 Push; open PR 2 with `Closes #889`, `Parent: #864` in prose, label `type:feature`.
