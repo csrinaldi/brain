@@ -273,10 +273,10 @@ ${gateRows}
 - [ ] Exactly one \`type:*\` label added, from the list above
 - [ ] Diff size within the tier's budget (or \`size:exception\` labelled and justified)
 - [ ] Conventional commit format (\`type(scope): description\`, no AI-attribution trailers)
-- [ ] Session memory captured with \`npm run memory:share\`, and the record carries the
-      linked issue number. Where the pipeline hands \`memory-gate\` this description,
-      an unscoped record does NOT satisfy it. \`skip:memory-gate\` is named in the docs
-      but no gate reads it — applying it exempts nothing.
+- [ ] Session memory captured as a record (\`memory:save --issue N\`); it reaches \`main\`
+      on the lane. Where the pipeline hands \`memory-gate\` this description, an unscoped
+      record does NOT satisfy it. \`skip:memory-gate\` is named in the docs but no gate
+      reads it — applying it exempts nothing.
 
 <!-- Emitted from brain/scripts/vcs/contributor-scaffold.mjs — edit the source, not
      {{path}}. A hand-edit here is refused by contributor-scaffold.test.mjs. -->

@@ -779,3 +779,42 @@ test('the scaffold does not promise that `skip:memory-gate` exempts anything (#5
     }
   }
 });
+
+// ── the template sentence describes the lane (#905, spec.md "the template
+// sentence describes the lane", design.md D5/L6, ADR-0034:158-160) ─────────
+//
+// The emitted checklist item's FIRST line now describes memory as reaching
+// `main` on the lane (`memory:save --issue N`), not the pre-lane
+// `memory:share` wording — the last three lines (memory-gate/skip:memory-gate
+// discipline) stay verbatim.
+
+test('the memory checklist item describes the lane, verbatim, on every provider (#905)', () => {
+  for (const provider of SCAFFOLD_PROVIDERS) {
+    const rendered = renderScaffold(provider);
+    assert.match(
+      rendered,
+      /- \[ \] Session memory captured as a record \(`memory:save --issue N`\); it reaches `main`\n\s+on the lane\./,
+      `${provider}: the checklist item must describe the lane, not the pre-lane memory:share wording`
+    );
+    assert.doesNotMatch(
+      rendered,
+      /Session memory captured with `npm run memory:share`/,
+      `${provider}: the pre-lane wording must be fully replaced, not left alongside the new sentence`
+    );
+    // memory-gate/skip:memory-gate discipline sentence, unchanged in substance.
+    assert.match(
+      rendered,
+      /on the lane\. Where the pipeline hands `memory-gate` this description, an unscoped\n\s+record does NOT satisfy it\. `skip:memory-gate` is named in the docs but no gate\n\s+reads it — applying it exempts nothing\./,
+    );
+  }
+});
+
+test('the emitted PULL_REQUEST_TEMPLATE.md matches the COMMITTED file byte-for-byte, including the lane sentence (#905)', () => {
+  if (!IS_BRAIN_SOURCE) return;
+  const { path } = scaffoldDelivery('github');
+  const onDisk = join(REPO_ROOT, path);
+  const emitted = renderScaffold('github');
+  assert.equal(readFileSync(onDisk, 'utf8'), emitted,
+    `${path} has been hand-edited — regenerate it from contributor-scaffold.mjs instead`);
+  assert.match(emitted, /Session memory captured as a record \(`memory:save --issue N`\); it reaches `main`/);
+});
