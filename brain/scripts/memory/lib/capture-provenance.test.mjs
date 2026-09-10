@@ -98,7 +98,11 @@ test("deriveIssue: 'feat/issue-738-x' branch ⇒ 738, derived", () => {
   assert.ok(ISSUE_BRANCH_RE.test('feat/issue-738-x'));
 });
 
-for (const branch of ['main', 'unknown', 'feat/issue-abc']) {
+// Digit-bearing branches that are NOT the `issue-<N>` shape (MINOR-3b,
+// fresh-context review): a loose digit-matching mutant of ISSUE_BRANCH_RE
+// would only be caught by a branch that HAS digits but is not the pinned
+// shape.
+for (const branch of ['main', 'unknown', 'feat/issue-abc', 'chore/bump-node-22', 'release/v2-rc1', 'fix/2026-cleanup', 'feat/issue-738x']) {
   test(`deriveIssue: '${branch}' does not match ⇒ issue absent, never fabricated`, () => {
     const r = deriveIssue({ declared: undefined, branch });
     assert.equal(r.issue, undefined);
@@ -131,6 +135,21 @@ test('composeSource: a 300-char env value is whitespace-collapsed and sliced to 
   assert.ok(match[1].length <= 64, `expected <= 64 chars, got ${match[1].length}`);
   assert.ok(!/\s{2,}/.test(match[1]), 'expected whitespace collapsed to single spaces (no run of 2+)');
 });
+
+test(
+  'composeSource: a whitespace-free 100-char env value is sliced to EXACTLY 64 chars (MINOR-3a, fresh-context review — ' +
+    'the sibling test above is whitespace-bearing, so its \\S+ capture only ever sees the first word)',
+  () => {
+    const actor = resolveActor({ configured: '@csrinaldi' });
+    const raw = 'y'.repeat(100);
+    const kind = resolveActorKind({ env: { [AGENT_ENV_DEFAULT]: raw } });
+    const issue = deriveIssue({ declared: undefined, branch: 'main' });
+    const line = composeSource({ host: 'devbox', actor, kind, issue });
+    const tail = line.slice(line.indexOf('AI_AGENT=') + 'AI_AGENT='.length);
+    assert.equal(tail.length, 64, `expected the truncated tail to be exactly 64 chars, got ${tail.length}: ${tail}`);
+    assert.equal(tail, 'y'.repeat(64));
+  },
+);
 
 test(
   'composeSource: an agent-marker value carrying "#N" is stripped, so it cannot forge an ' +

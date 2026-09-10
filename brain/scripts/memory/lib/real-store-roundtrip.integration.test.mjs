@@ -86,6 +86,15 @@ test('REQ-C4-1: round-trip id-equality holds for every record in the REAL .memor
     `REQ-C4-1: round-trip id-equality exercised over ${records.length} real records from .memory/records/ ` +
       `(${branchShapeRejections.length} pre-existing branch-shaped-actor records excluded, #738 A5)`,
   );
+  // Bound the exclusion bucket (fresh-context review NIT): a regression that
+  // widens the "branch-shaped" classification to swallow every record would
+  // silently EMPTY `failures` above instead of failing loudly — this pin
+  // makes that regression visible instead of quietly turning the test vacuous.
+  assert.ok(
+    branchShapeRejections.length < records.length,
+    `every one of ${records.length} records was classified as branch-shaped-actor and excluded — ` +
+      'this empties the failure set silently; the exclusion classifier is almost certainly over-matching',
+  );
   assert.deepEqual(
     failures,
     [],
@@ -213,6 +222,12 @@ test('REQ-C4-1 / #404: real records re-stamped with an `issue` still round-trip 
     `REQ-C4-1/#404: issue-carrying round-trip exercised over ${samples.length} records derived from the real store ` +
       `(${branchShapeRejections.length} pre-existing branch-shaped-actor records excluded, #738 A5)`,
   );
+  // Same exclusion-bucket bound as the sibling test above (fresh-context review NIT).
+  assert.ok(
+    branchShapeRejections.length < samples.length,
+    `every one of ${samples.length} sampled records was classified as branch-shaped-actor and excluded — ` +
+      'this empties the failure set silently; the exclusion classifier is almost certainly over-matching',
+  );
   assert.deepEqual(failures, [], `${failures.length}/${samples.length} issue-carrying records failed:\n${failures.join('\n')}`);
 });
 
@@ -244,5 +259,17 @@ test('W1 (#404): every record in the REAL store already satisfies the write-path
     .filter((r) => nonW3Errors(r).length > 0)
     .map((r) => `${r.id}: ${nonW3Errors(r).join('; ')}`);
   console.log(`W1/#404: write-path rules measured over ${records.length} real records`);
+  // Bound the W3 exclusion bucket (fresh-context review NIT): the known
+  // ~183-record branch-shaped-actor population (design.md's measured audit)
+  // must actually PRODUCE a W3 error for this filter to be doing anything. A
+  // regression that stops `classifyActor` from ever returning 'branch' would
+  // make `nonW3Errors` a no-op filter over an already-empty set, and
+  // `offenders` would stay silently empty for the wrong reason.
+  const w3Count = records.filter((r) => validateWritableRecord(r).errors.some((e) => e.includes('W3'))).length;
+  assert.ok(
+    w3Count > 0,
+    'expected at least one real record to trip the W3 branch-shaped-actor rule (the known historical population) — ' +
+      'zero means the W3 exclusion below is filtering nothing, not that the store is clean',
+  );
   assert.deepEqual(offenders, [], `${offenders.length}/${records.length} real records violate a write-path rule:\n${offenders.join('\n')}`);
 });

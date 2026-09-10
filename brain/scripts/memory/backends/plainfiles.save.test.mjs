@@ -110,6 +110,29 @@ test('save: actorKind follows the injected agent-marker env', async () => {
   }
 });
 
+test(
+  'save: a configured brain.agentEnv name is wired through to resolveActorKind, not just the default AI_AGENT ' +
+    '(MINOR-3c, fresh-context review)',
+  async () => {
+    const root = tmpRoot();
+    try {
+      const result = await save('t', 'c', { type: 'discovery', project: 'brain' }, {
+        root, getBranch: () => 'main', getTimestamp: () => '2026-07-12T09:00:00Z', getHostname: () => 'h',
+        getGitConfig: (key) => {
+          if (key === 'brain.actor') return '@test';
+          if (key === 'brain.agentEnv') return 'MY_AGENT';
+          return null;
+        },
+        getEnv: () => ({ MY_AGENT: 'x' }),
+      });
+      const record = JSON.parse(readFileSync(result.file, 'utf8').trim());
+      assert.equal(record.actorKind, 'agent', 'a non-default agentEnv name must still be measured as agent');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+);
+
 test('save: source names the host and both instruments (actor + actorKind)', async () => {
   const root = tmpRoot();
   try {

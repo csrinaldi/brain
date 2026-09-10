@@ -117,25 +117,32 @@ test('memory search under plainfiles with no match prints an empty-results messa
 
 // ── #738 — capture refuses without a configured handle ──────────────────────
 
-test('#738: with an isolated HOME and no brain.actor configured, save exits non-zero naming the remedy', () => {
-  const testRoot = mkdtempSync(join(tmpdir(), 'brain-cli-save-noactor-'));
-  const isolatedHome = mkdtempSync(join(tmpdir(), 'brain-cli-save-noactor-home-'));
-  spawnSync('git', ['init', '-q'], { cwd: testRoot, encoding: 'utf8', env: { ...process.env, ...ISOLATED_GIT_ENV } });
-  // deliberately NO `git config --local brain.actor` — a fresh clone.
+test(
+  '#738: with an isolated HOME, no brain.actor configured, and a handle-shaped `user.name` present, save ' +
+    'still exits non-zero naming the remedy (MINOR-3d, fresh-context review — `user.name` must never substitute for brain.actor)',
+  () => {
+    const testRoot = mkdtempSync(join(tmpdir(), 'brain-cli-save-noactor-'));
+    const isolatedHome = mkdtempSync(join(tmpdir(), 'brain-cli-save-noactor-home-'));
+    const gitEnv = { ...process.env, ...ISOLATED_GIT_ENV };
+    spawnSync('git', ['init', '-q'], { cwd: testRoot, encoding: 'utf8', env: gitEnv });
+    // A handle-shaped `user.name` set LOCALLY — a decoy this refusal must not honor.
+    spawnSync('git', ['config', '--local', 'user.name', '@sneaky'], { cwd: testRoot, encoding: 'utf8', env: gitEnv });
+    // deliberately NO `git config --local brain.actor` — a fresh clone.
 
-  const result = spawnSync(process.execPath, [cliPath, 'save', 't', 'c', '--type', 'discovery', '--project', 'brain'], {
-    encoding: 'utf8',
-    env: {
-      ...ENV_NO_AI_AGENT,
-      ...ISOLATED_GIT_ENV,
-      HOME: isolatedHome,
-      MEMORY_BACKEND: 'plainfiles',
-      BRAIN_MEMORY_TEST_ROOT: testRoot,
-    },
-  });
+    const result = spawnSync(process.execPath, [cliPath, 'save', 't', 'c', '--type', 'discovery', '--project', 'brain'], {
+      encoding: 'utf8',
+      env: {
+        ...ENV_NO_AI_AGENT,
+        ...ISOLATED_GIT_ENV,
+        HOME: isolatedHome,
+        MEMORY_BACKEND: 'plainfiles',
+        BRAIN_MEMORY_TEST_ROOT: testRoot,
+      },
+    });
 
-  assert.notEqual(result.status, 0, 'a save with no configured handle must exit non-zero');
-  assert.match(result.stderr, /git config --local brain\.actor/, 'the refusal must name the remedy');
-  const recordsDir = join(testRoot, '.memory', 'records');
-  assert.equal(existsSync(recordsDir), false, 'nothing may be appended when the actor is unset');
-});
+    assert.notEqual(result.status, 0, 'a save with no configured handle must exit non-zero');
+    assert.match(result.stderr, /git config --local brain\.actor/, 'the refusal must name the remedy');
+    const recordsDir = join(testRoot, '.memory', 'records');
+    assert.equal(existsSync(recordsDir), false, 'nothing may be appended when the actor is unset');
+  },
+);
