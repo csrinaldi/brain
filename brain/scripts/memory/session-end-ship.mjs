@@ -10,7 +10,11 @@
 //      exit 0, spawn nothing, print nothing (loadBrainConfig parses raw JSON,
 //      no migration, so an absent key reads as undefined — false by
 //      construction).
-//   2. `openSync(log, 'a')` — one fd, reused for the child's stdout+stderr.
+//   2. `openSync(log, O_WRONLY|O_CREAT|O_APPEND|O_NOFOLLOW, 0o600)` — one fd,
+//      reused for the child's stdout+stderr. `O_NOFOLLOW` refuses a
+//      pre-existing symlink at the log path instead of following it (#906
+//      cold review C2); `0o600` keeps a freshly created log unreadable to
+//      other local users. Either failure routes through step 5's catch.
 //   3. `_spawn(execPath, [cli.mjs, 'ship', '--json'], { detached: true,
 //      stdio: ['ignore', fd, fd] })`, then `.unref()`, then `closeSync(fd)`.
 //   4. Return / exit 0, ALWAYS — the child's own exit code is never read.
@@ -28,7 +32,7 @@
 // the operator's `docs.language` — a locale-dependent postmortem. `ship`
 // writes its stderr evidence regardless of `--json`, so the log keeps both.
 
-import { openSync, closeSync } from 'node:fs';
+import { openSync, closeSync, constants as fsConstants } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { hostname, tmpdir as osTmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -62,7 +66,20 @@ export function shipOnSessionEnd({
 
     const date = _now().toISOString().slice(0, 10);
     const logPath = join(_tmpdir(), `brain-lane-ship-${hostname()}-${date}.log`);
-    const fd = openSync(logPath, 'a');
+    // `tmpdir()` is a predictable, world-writable directory: a local user
+    // can pre-create `logPath` as a symlink before this ever runs. A plain
+    // `openSync(logPath, 'a')` (default flags, default mode 0664) would
+    // FOLLOW that symlink and append the ship op's stderr evidence into
+    // whatever file the attacker named (#906 cold review C2). `O_NOFOLLOW`
+    // refuses instead of following — the resulting ELOOP is caught by the
+    // outer `catch` below, which already does exactly the right thing: one
+    // stderr line, exit 0, no spawn. `0o600` denies read to every other
+    // local user for a freshly created file.
+    const fd = openSync(
+      logPath,
+      fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_APPEND | fsConstants.O_NOFOLLOW,
+      0o600,
+    );
     try {
       const child = _spawn(
         process.execPath,
