@@ -149,7 +149,7 @@ second `main`-targeted branch cut after Slice A merges — see the PR section).
 
 ### B1. `lane/collect.integration.test.mjs` — RED, real temp repo
 
-- [ ] B1.1 RED `brain/scripts/memory/lane/collect.integration.test.mjs` — scaffold: `testTmp
+- [x] B1.1 RED `brain/scripts/memory/lane/collect.integration.test.mjs` — scaffold: `testTmp
       ('brain-lane-')` (`lib/test-tmp.mjs:35`), `git init -q -b main`, a **bare** origin
       (`git init --bare` + `remote add origin <path>` + push) so `fetch` works offline, two real
       `git worktree add` trees (`bootstrap.worktree.test.mjs:82`'s pattern). Fixtures per
@@ -157,26 +157,26 @@ second `main`-targeted branch cut after Slice A merges — see the PR section).
       a secret-bearing record, an already-on-`origin/main` record, a modified-tracked record.
       Focused: `node --test brain/scripts/memory/lane/collect.integration.test.mjs` — RED
       (`collectLane` does not exist).
-- [ ] B1.2 RED, same file — the no-mutation invariant (design's 3a): `git status --porcelain
+- [x] B1.2 RED, same file — the no-mutation invariant (design's 3a): `git status --porcelain
       -uall` in both worktrees **and** the main checkout, snapshotted before the run, asserted
       byte-identical after; `rev-parse HEAD` unchanged in each. `-uall` is load-bearing here (A8):
       the fixture starts with `.memory/records/` wholly untracked, so a regression to the default
       `-unormal` would collapse the directory into one `?? .memory/records/` entry and silently
       collect zero candidates — this case is written so that mistake fails loudly, not silently.
-- [ ] B1.3 RED, same file — the secret path (design's 3c): compute the would-be blob id with
+- [x] B1.3 RED, same file — the secret path (design's 3c): compute the would-be blob id with
       `git hash-object --stdin` (no `-w`) and assert `git cat-file -e <oid>` exits non-zero;
       assert the path is absent from `git ls-tree -r <commit>`; assert the matched literal
       appears in neither stdout nor stderr; assert every other clean candidate in the batch was
       still collected.
-- [ ] B1.4 RED, same file — the ref lifecycle (design's 3d): first run creates
+- [x] B1.4 RED, same file — the ref lifecycle (design's 3d): first run creates
       `refs/heads/memory/<host>-<date>` with parent `origin/main`; a same-day re-run with new
       candidates **appends** (`rev-list --count` 2, exactly one `refs/heads/memory/*` entry, never
       a `-<n>` branch); a third run with zero new candidates writes nothing (`commit: null`, ref
       sha unchanged).
-- [ ] B1.5 RED, same file — CAS (design's 3e, A9): pre-move the ref behind the planner's back
+- [x] B1.5 RED, same file — CAS (design's 3e, A9): pre-move the ref behind the planner's back
       (simulating a racing writer), then run — exit non-zero, `memory.collect.raced`, ref left
       untouched, no retry.
-- [ ] B1.6 RED, same file — scope + seam guard (design's 3b, spec "scope boundary"): a counting
+- [x] B1.6 RED, same file — scope + seam guard (design's 3b, spec "scope boundary"): a counting
       `git` seam asserts every recorded argv containing `-C` has `status` as its verb
       (behavioural, not a source regex — #886 A4's precedent); no `push`, no PR-body string, and
       no hook invocation is present in `lane/collect.mjs`; main checkout counted as a worktree
@@ -188,7 +188,7 @@ no-mutation and no-secret invariants (#887)`.
 
 ### B2. `lane/collect.mjs` — GREEN
 
-- [ ] B2.1 GREEN `brain/scripts/memory/lane/collect.mjs` — `collectLane({ root, date, host, git =
+- [x] B2.1 GREEN `brain/scripts/memory/lane/collect.mjs` — `collectLane({ root, date, host, git =
       defaultGit, loadConfig = _defaultLoadConfig })` per the design's data flow: `fetch origin
       main` (failure → `baseFetched:false`, continue on local `origin/main`); one `worktree list
       --porcelain`; one `ls-tree origin/main` for `mainPaths`; one `status -z -uall` per worktree
@@ -209,7 +209,7 @@ Commit: `feat(memory): implement collectLane — the IO shell, temp index, one l
 
 ### B3. `cli.collect.test.mjs` — RED
 
-- [ ] B3.1 RED `brain/scripts/memory/cli.collect.test.mjs` — the op end to end under
+- [x] B3.1 RED `brain/scripts/memory/cli.collect.test.mjs` — the op end to end under
       `BRAIN_MEMORY_TEST_ROOT` (`cli.audit.test.mjs:17-43`'s pattern, `cli.mjs:43-55`'s ambient-
       state trap this seam exists for): a run with candidates prints `memory.collect.done` and
       exits 0 with `{ref, commit, collected, skipped, duplicates}` populated; a run with nothing
@@ -226,17 +226,17 @@ Commit: `test(memory): add cli.collect.test.mjs — the collect op end to end (#
 
 ### B4. The `collect` op, i18n, `package.json` — GREEN
 
-- [ ] B4.1 GREEN `brain/scripts/memory/cli.mjs` — add `'collect'` to `VALID_OPS` (`:103-118`) and
+- [x] B4.1 GREEN `brain/scripts/memory/cli.mjs` — add `'collect'` to `VALID_OPS` (`:103-118`) and
       a dispatch block after `split-records` (`:231` area), **before** backend selection, calling
       `collectLane` with `root` from `BRAIN_MEMORY_TEST_ROOT ?? repoRoot` (A9), wrapped in the
       existing top-level try/catch so a genuine failure exits 1 with `memory.collect.failed`. No
       `unsupportedOp` path — `collect` is never backend-dispatched.
-- [ ] B4.2 GREEN `brain/scripts/i18n/en.mjs` + `es.mjs` — the eight `memory.collect.*` keys
+- [x] B4.2 GREEN `brain/scripts/i18n/en.mjs` + `es.mjs` — the eight `memory.collect.*` keys
       (`done`, `nothing`, `offline`, `failed`, `badHost`, `raced`, and the two skip-reason
       surface strings used by `reportDuplicates`'s call site), shape of `en.mjs:306-307`, landed
       in **both** catalogs in the same commit — `i18n/coverage.test.mjs:96-102` fails `npm test`
       on a missing Spanish entry.
-- [ ] B4.3 GREEN `package.json` — `"memory:collect": "node ./brain/scripts/memory/cli.mjs
+- [x] B4.3 GREEN `package.json` — `"memory:collect": "node ./brain/scripts/memory/cli.mjs
       collect"` beside the other `memory:*` scripts (`:65-73`).
       Focused: `node --test brain/scripts/memory/cli.collect.test.mjs` — GREEN, all of B3. Then
       `node --test brain/scripts/i18n/coverage.test.mjs` — GREEN (unmodified test, green only
@@ -244,6 +244,48 @@ Commit: `test(memory): add cli.collect.test.mjs — the collect op end to end (#
       `npm test` — full green.
 
 Commit: `feat(memory): dispatch collect from cli.mjs, wire i18n and memory:collect (#887)`.
+
+### Slice B correction batch (issue #897, fresh cold review)
+
+Applied after B1-B4 above were already `[x]`-ticked, on the same worktree/branch, four commits:
+
+- C1 — `collected`/the commit subject counted `plan.files.length` (group winners), not new
+  blobs; a same-day re-run over-reported. Fixed via a `git diff-tree` read between the commit's
+  parent tree and the tree just written. `collect.mjs`, `collect.integration.test.mjs`.
+- E2 — any non-zero `update-ref` was tagged `raced`; gated on git's actual CAS-lock stderr
+  shapes (`cannot lock ref` / `reference already exists` / `is at ... but expected`), everything
+  else now reports as a genuine failure. `collect.mjs`, `collect.integration.test.mjs`.
+- E3 — `parseWorktrees`'s unread `locked` field dropped; design.md:234 already documents that a
+  locked worktree is scanned like any other. `collect.mjs`.
+- E4 — `collect`'s `--json` detection scoped to `process.argv.slice(3)`, matching `audit`.
+  `cli.mjs`.
+- C2 — `removeTempTree` moved from `__fixtures__/tmp-tree.mjs` to `brain/scripts/lib/tmp-tree.mjs`
+  (a production location); `__fixtures__/tmp-tree.mjs` now re-exports it. Recorded as design.md
+  D8. `lib/tmp-tree.mjs` (new), `__fixtures__/tmp-tree.mjs`, `__fixtures__/tmp-tree-adoption.test.mjs`,
+  `collect.mjs`.
+- E1 — spec.md's output shape widened from five to six fields (`baseFetched` included), matching
+  design.md's module map, which already sanctioned six. `spec.md`.
+
+### CI + review round 1 (issue #897, batch 4)
+
+Applied after the "Slice B correction batch" above, on the same worktree/branch, three commits:
+
+- CI blocker — the GitHub runner (git 2.55, no configured identity) failed every collector test
+  with `git commit-tree ... exited 128: Author identity unknown`. `collectLane()`'s own
+  `commit-tree` call intentionally never gets an `env` override (D6: ambient identity, never a
+  token) — the fixtures were the bug, relying on the developer's global git identity. Fixed with
+  repo-local `git config user.name`/`user.email` in both scratch repos, mirroring
+  `records-merge.integration.test.mjs`'s precedent. A new test pins the CORRECT failure behavior:
+  no identity anywhere (repo, global, system) still fails loudly with git's own message,
+  surfaced verbatim via `memory.collect.failed`. `collect.integration.test.mjs`,
+  `cli.collect.test.mjs`.
+- cold-1 — `parseStatusZ()` mis-parsed a rename/copy record's second NUL-terminated part (the
+  bare old path) as its own status-tagged entry, manufacturing a bogus candidate. Fixed: a
+  status starting with `R`/`C` now consumes the following part as the old path.
+  `collect.mjs`, `collect.integration.test.mjs`.
+- cold-2 — `cli.collect.test.mjs` never exercised the `memory.collect.secretSkipped`/
+  `.modifiedTrackedSkipped` stderr lines. Added coverage; no implementation change was needed.
+  `cli.collect.test.mjs`.
 
 ## Apply-time action item — not a code change in this slice
 
@@ -278,7 +320,7 @@ Explicitly out of scope, unchanged by this slice:
 
 Each PR (Slice A, Slice B) does its own wrap-up before its own push:
 
-- [ ] W1 `npm test` full run, green, on that slice's branch.
+- [x] W1 `npm test` full run, green, on that slice's branch.
 - [ ] W2 `memory:save --issue 887` — record-first, BEFORE the push (ADR-0034 lane discipline).
       Run once per PR that lands new behaviour worth recording (both slices qualify).
 - [ ] W3 Tick epic task 3.1a in `openspec/changes/issue-864-memory-2-0/tasks.md:37` — do this in

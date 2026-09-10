@@ -109,6 +109,7 @@ const VALID_OPS = [
   "audit",
   "resolve-index",
   "split-records",
+  "collect",
   "migrate-v1",
   "setup",
   "feature-checkpoint",
@@ -280,6 +281,79 @@ if (op === "split-records") {
     process.exit(0);
   } catch (err) {
     console.error(`memory/cli: ${await t("memory.splitRecords.failed", { message: err.message })}`);
+    process.exit(1);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// "collect" — the lane collector (issue #887, ADR-0034 L4/C2). Backend-
+// agnostic like "reindex": it materializes ONE local commit from every
+// worktree's uncommitted `.memory/records/` candidates onto
+// `refs/heads/memory/<host>-<date>`. No backend is ever consulted — this
+// block always exits before backend selection runs — and neither this op
+// nor `lane/collect.mjs` ever pushes a ref, opens a PR, or is called from a
+// hook (D7; the scope boundary is asserted behaviourally in
+// `lane/collect.integration.test.mjs`).
+//
+// BRAIN_MEMORY_TEST_ROOT — honoured, like "reindex"/"audit"/"split-records"
+// above (design.md A9): without it, `cli.collect.test.mjs` would enumerate
+// every worktree of the maintainer's real clone.
+//
+// `--json` prints the result object on stdout ONLY; the duplicate/skip
+// evidence always goes to stderr via `reportDuplicates`, so `--json` stdout
+// stays parseable regardless of what the run found.
+// ---------------------------------------------------------------------------
+if (op === "collect") {
+  const { collectLane } = await import("./lane/collect.mjs");
+  const memoryRoot = process.env.BRAIN_MEMORY_TEST_ROOT ?? repoRoot;
+  // E4: scoped to argv AFTER `node cli.mjs collect`, like `audit` above —
+  // `process.argv.includes("--json")` would also match a `--json` that
+  // happened to appear earlier in argv (the node binary path, the script
+  // path), which is never the intent for this op's own flag.
+  const rest = process.argv.slice(3);
+  const asJson = rest.includes("--json");
+  try {
+    const result = collectLane({ root: memoryRoot });
+    if (asJson) {
+      console.log(JSON.stringify(result));
+    } else if (result.commit === null) {
+      console.log(`memory/cli: ${await t("memory.collect.nothing", { ref: result.ref })}`);
+    } else {
+      console.log(
+        `memory/cli: ${await t("memory.collect.done", {
+          collected: result.collected,
+          ref: result.ref,
+          commit: result.commit,
+        })}`,
+      );
+    }
+    if (!result.baseFetched) {
+      console.error(`memory/cli: ${await t("memory.collect.offline")}`);
+    }
+    // D4's audibility half: a secret hit is surfaced by COUNT — never the
+    // matched line, never even the file — because the run itself already
+    // refused to let the line text travel any further than `pattern` +
+    // `lineNumber` (A1 in design.md).
+    const secretCount = result.skipped.filter((s) => s.reason === "secret").length;
+    if (secretCount > 0) {
+      console.error(`memory/cli: ${await t("memory.collect.secretSkipped", { count: secretCount })}`);
+    }
+    const modifiedCount = result.skipped.filter((s) => s.reason === "modified-tracked").length;
+    if (modifiedCount > 0) {
+      console.error(`memory/cli: ${await t("memory.collect.modifiedTrackedSkipped", { count: modifiedCount })}`);
+    }
+    reportDuplicates(result.duplicates, { surface: "the lane commit" });
+    process.exit(0);
+  } catch (err) {
+    // `raced` and `badHost` are named failures `lane/collect.mjs` tags on the
+    // thrown error (A9, A5) — everything else is a genuine git failure.
+    if (err?.raced) {
+      console.error(`memory/cli: ${await t("memory.collect.raced", { message: err.message })}`);
+    } else if (err?.badHost) {
+      console.error(`memory/cli: ${await t("memory.collect.badHost", { message: err.message })}`);
+    } else {
+      console.error(`memory/cli: ${await t("memory.collect.failed", { message: err.message })}`);
+    }
     process.exit(1);
   }
 }
