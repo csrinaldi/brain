@@ -333,10 +333,15 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       // A shipped memory lane is not a governance-relevant merge — it is
       // recognized structurally (every changed path an addition under
       // `.memory/records/`) AND declared (the `/^Memory lane: /m` marker in
-      // `issueLinkBody`, which is already the PR-metadata-checked evidence
-      // above — never the raw commit body, so an unreachable PR never
-      // fabricates a [LANE] verdict on a fallback body). Paths alone or the
-      // marker alone are NOT a lane — the conjunction is the whole point.
+      // `issueLinkBody` — the PR body when the PR is reachable, the commit body
+      // as `selectIssueLinkBody`'s fallback otherwise (design A8); this is the
+      // SAME evidence `issueLink` would have read, never something extra).
+      // The `[UNCOMPUTABLE]` guard above (`prMetaError !== null`) is what stops
+      // a failed PR fetch from ever reaching this line — without it, a fetch
+      // failure would still fall back to the commit body here and could
+      // fabricate a [LANE] verdict from evidence the audit never actually read.
+      // Paths alone or the marker alone are NOT a lane — the conjunction is the
+      // whole point.
       const laneMerge = classifyLane({ sourceBranch: null, changedFiles, addedFiles });
       if (laneMerge.lanePaths && /^Memory lane: /m.test(issueLinkBody ?? '')) {
         console.log(`[LANE] ${sha.slice(0, 7)} ${subject}`);

@@ -823,14 +823,18 @@ function writeFailingGhStub(binDir) {
  * adrPresence's imprecision, which is what #510 removes. Giving it a resolvable PR is what
  * makes the fixture pin the invariant that now does the work, rather than a leftover.
  *
+ * `pr.body` overrides the default `Closes #<number>` PR description — used to plant
+ * evidence (e.g. the `Memory lane:` marker) that must be read from `prBody`, never
+ * fabricated by the stub matching the commit body by coincidence.
+ *
  * @param {string} binDir
- * @param {{ number: number, author: string, reviews: Array<{state: string, login: string}> }} pr
+ * @param {{ number: number, author: string, reviews: Array<{state: string, login: string}>, body?: string }} pr
  */
 function writeReviewedGhStub(binDir, pr) {
   mkdirSync(binDir, { recursive: true });
   const gh = join(binDir, 'gh');
   const view = JSON.stringify({
-    number: pr.number, labels: [], body: `Closes #${pr.number}`,
+    number: pr.number, labels: [], body: pr.body ?? `Closes #${pr.number}`,
     author: { login: pr.author }, headRefOid: 'deadbeef',
   });
   const reviews = JSON.stringify(pr.reviews.map(r => ({ state: r.state, user: { login: r.login }, body: '' })));
@@ -1912,7 +1916,7 @@ test('#518: with no window base, the command is VISIBLY a placeholder rather tha
 // memory lane. Paths alone or the marker alone must NOT classify as a lane.
 // ═══════════════════════════════════════════════════════════════════════════
 
-test('B1: a records-only squash carrying the lane marker prints [LANE], never a verdict', (t) => {
+test('B1 (fallback path, no resolvable PR): a records-only squash carrying the lane marker in the COMMIT BODY prints [LANE], never a verdict', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'audit-lane-'));
   t.after(() => removeTempTree(dir));
 
@@ -1930,6 +1934,54 @@ test('B1: a records-only squash carrying the lane marker prints [LANE], never a 
 
   assert.ok(r.stdout.includes(`[LANE] ${sq.slice(0, 7)}`),
     `expected a [LANE] line naming the squash:\n${r.stdout}\n${r.stderr}`);
+  assert.ok(!/\[(PASS|FAIL|SKIP)\]/.test(r.stdout),
+    `a lane merge must never reach evaluateMerge — no verdict line expected:\n${r.stdout}`);
+  assert.equal(r.status, 0, `a lane merge is clean, not a failure:\n${r.stdout}\n${r.stderr}`);
+});
+
+// This is the SHAPE PR 2 actually ships: a squash subject carrying `(#N)` (so
+// `parsePrNumber` resolves a PR), `gh pr view` answering with the `Memory lane:`
+// marker in the PR BODY (the body `ship.mjs` writes — design A8), and NO marker in
+// the raw commit body at all. The fallback test above cannot exercise `issueLinkBody`
+// taking its PR-body branch — its subject has no `(#N)`, so `prNum` is null,
+// `fetchPrMeta` never calls `gh`, and `selectIssueLinkBody` falls back to the commit
+// body by construction. That gap is exactly what let `issueLinkBody` → `body`
+// (`brain-audit.mjs:341`) survive: with the marker present in BOTH bodies in the
+// fallback fixture, the fallback test cannot tell which one the code actually read.
+test('B1 (production shape): the marker lives in the PR body via `gh pr view`; the commit body carries none', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-lane-prbody-'));
+  t.after(() => removeTempTree(dir));
+
+  const git = makeRepo(dir);
+  commit(git, dir, {
+    'README.md': 'init',
+    'brain.config.json': JSON.stringify({
+      vcs: { provider: 'github' },
+      project: { slug: 'acme/x' },
+    }),
+  }, 'chore: initial (#0)');
+  const base = headShaOf(git);
+
+  // Squash subject only — NO body, so the raw commit body is empty and carries no marker.
+  const sq = squashCommit(
+    git, dir,
+    { '.memory/records/2026-09-10.jsonl': makeSessionSummaryRecord() },
+    'memory: host1 2026-09-10 (1 records) (#912)',
+  );
+
+  const binDir = join(dir, '.stubbin');
+  writeReviewedGhStub(binDir, {
+    number: 912, author: 'brain-bot', reviews: [],
+    body: 'Memory lane: host1 2026-09-10\nRecords: 1\n',
+  });
+
+  const r = spawnSync('node', [AUDIT_SCRIPT, `${base}..HEAD`], {
+    cwd: dir, encoding: 'utf8',
+    env: { ...process.env, PATH: `${binDir}:${process.env.PATH}`, GH_TOKEN: 'x' },
+  });
+
+  assert.ok(r.stdout.includes(`[LANE] ${sq.slice(0, 7)}`),
+    `the marker fetched from the PR body (gh pr view), not the marker-free commit body, must classify this as a lane:\n${r.stdout}\n${r.stderr}`);
   assert.ok(!/\[(PASS|FAIL|SKIP)\]/.test(r.stdout),
     `a lane merge must never reach evaluateMerge — no verdict line expected:\n${r.stdout}`);
   assert.equal(r.status, 0, `a lane merge is clean, not a failure:\n${r.stdout}\n${r.stderr}`);
