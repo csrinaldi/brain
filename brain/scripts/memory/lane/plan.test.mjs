@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-import { buildRecord, serializeRecord } from '../lib/format.mjs';
+import { buildRecord, serializeRecord, validateRecord } from '../lib/format.mjs';
 import { emptyDuplicates } from '../lib/duplicates.mjs';
 import { planLaneCommit } from './plan.mjs';
 
@@ -78,6 +78,20 @@ test('modified-tracked, invalid, and already-on-main candidates each skip with t
   assert.equal(reasons[invalid.file], 'invalid');
   assert.equal(reasons[onMain.file], 'already-on-main');
   assert.equal(p.skipped.length, 3);
+});
+
+test('well-formed JSON that fails the record schema skips as invalid, carrying validateRecord errors (C1)', () => {
+  const parsed = { foo: 'bar' };
+  const p = plan({
+    candidates: [
+      candidate({ worktree: '/repo/wt-a', file: '2026-09-rec-2222222222222222.jsonl', content: JSON.stringify(parsed) }),
+    ],
+  });
+  assert.equal(p.files.length, 0);
+  assert.equal(p.skipped.length, 1);
+  assert.equal(p.skipped[0].reason, 'invalid');
+  assert.deepEqual(p.skipped[0].errors, validateRecord(parsed).errors);
+  assert.ok(p.skipped[0].errors.length > 0, 'a schema failure must carry at least one error');
 });
 
 test('an unexpected status code skips as unexpected-status, carrying the code', () => {
@@ -248,16 +262,23 @@ test('stability: all 6 permutations of worktree-block enumeration order yield a 
   const divB = { ...divA, source: 'issue #887 / widened' };
   const onlyC = recordFixture('solo in wt-c');
 
-  /** Fixed per-worktree candidate blocks — only the BLOCK order is permuted. */
+  /** Fixed per-worktree candidate blocks — only the BLOCK order is permuted.
+   * C2: `stray.txt` (not-a-record) is placed in TWO of the three blocks
+   * (wt-a, wt-b), same filename, so the skip entries can only agree across
+   * block-order permutations if `skipped` is sorted (file, then worktree) —
+   * without the sort, the pre-sort push order tracks block order and the
+   * `deepStrictEqual` below would fail on at least one permutation. */
   const byWorktree = {
     '/repo/wt-a': [
       candidate({ worktree: '/repo/wt-a', file: solo.file, content: solo.content }),
       candidate({ worktree: '/repo/wt-a', file: shared.file, content: shared.content }),
       candidate({ worktree: '/repo/wt-a', file: divFile, content: serializeRecord(divA) }),
+      candidate({ worktree: '/repo/wt-a', file: 'stray.txt', content: 'not a record' }),
     ],
     '/repo/wt-b': [
       candidate({ worktree: '/repo/wt-b', file: shared.file, content: shared.content }),
       candidate({ worktree: '/repo/wt-b', file: divFile, content: serializeRecord(divB) }),
+      candidate({ worktree: '/repo/wt-b', file: 'stray.txt', content: 'not a record either' }),
     ],
     '/repo/wt-c': [
       candidate({ worktree: '/repo/wt-c', file: onlyC.file, content: onlyC.content }),
@@ -277,6 +298,52 @@ test('stability: all 6 permutations of worktree-block enumeration order yield a 
 
   const repeat = plan({ candidates: worktrees.flatMap((wt) => byWorktree[wt]) });
   assert.deepStrictEqual(repeat, reference, 'a repeated call on identical input returns an identical plan');
+
+  // C3: files must come out sorted by path.
+  const paths = reference.files.map((f) => f.path);
+  const sortedPaths = [...paths].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  assert.deepStrictEqual(paths, sortedPaths, 'files must be sorted by path');
+
+  // C2: skipped must come out sorted by (file, then worktree).
+  function skipCompare(a, b) {
+    if (a.file !== b.file) return a.file < b.file ? -1 : 1;
+    const wa = a.worktree ?? '';
+    const wb = b.worktree ?? '';
+    return wa < wb ? -1 : wa > wb ? 1 : 0;
+  }
+  const sortedSkipped = [...reference.skipped].sort(skipCompare);
+  assert.deepStrictEqual(reference.skipped, sortedSkipped, 'skipped must be sorted by file, then worktree');
+  assert.ok(
+    reference.skipped.some((s) => s.file === 'stray.txt' && s.worktree === '/repo/wt-a')
+    && reference.skipped.some((s) => s.file === 'stray.txt' && s.worktree === '/repo/wt-b'),
+    'both stray.txt skips must be present',
+  );
+});
+
+test('files are sorted by path, not by grouping/basename push order (C3)', () => {
+  // Basename order (X before Y) and path order (Y before X, via the '!'
+  // prefix) deliberately disagree, so this fails if `files.sort()` is removed
+  // and the grouping loop's push order leaks through unsorted.
+  const recX = buildRecord({ ...base, content: 'group X' });
+  const recY = buildRecord({ ...base, content: 'group Y' });
+  const fileX = '2026-09-rec-0000000000000000.jsonl';
+  const fileY = '2026-09-rec-ffffffffffffffff.jsonl';
+  const p = plan({
+    candidates: [
+      candidate({ worktree: '/repo/wt-a', file: fileX, content: serializeRecord(recX) }),
+      candidate({
+        worktree: '/repo/wt-a',
+        file: fileY,
+        content: serializeRecord(recY),
+        path: `!zzz-worktree/.memory/records/${fileY}`,
+      }),
+    ],
+  });
+  assert.equal(p.files.length, 2);
+  assert.deepEqual(p.files.map((f) => f.path), [
+    `!zzz-worktree/.memory/records/${fileY}`,
+    `.memory/records/${fileX}`,
+  ]);
 });
 
 // ── A1.4 ref/message naming and empty-input shape ───────────────────────────
@@ -284,6 +351,15 @@ test('stability: all 6 permutations of worktree-block enumeration order yield a 
 test('host slug: lowercase, non-alnum collapsed to -, trimmed, truncated to 40', () => {
   const p = plan({ host: '  My.Host_Name!!  ' });
   assert.equal(p.ref, 'refs/heads/memory/my-host-name-2026-09-09');
+});
+
+test('slug truncation to 40 that lands exactly on a dash is stripped again (C4)', () => {
+  // 39 'a's + a single space (becomes '-' at index 39) + 5 'b's — slice(0, 40)
+  // keeps the 39 'a's plus that dash as its 40th char; the post-truncation
+  // strip must remove the trailing dash it lands on.
+  const host = `${'a'.repeat(39)} ${'b'.repeat(5)}`;
+  const p = plan({ host });
+  assert.equal(p.ref, `refs/heads/memory/${'a'.repeat(39)}-2026-09-09`);
 });
 
 test('the finished ref matches L1s grammar exactly', () => {
