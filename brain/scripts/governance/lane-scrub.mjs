@@ -132,6 +132,20 @@ export async function main(deps = {}) {
     return resultToExit(result);
   }
 
+  // Compute the added-records subset BEFORE touching the secret config at
+  // all (cold review, PR #908): resolving/compiling the config is only ever
+  // relevant when there is at least one `.memory/records/*.jsonl` path to
+  // scan. A PR that adds none of those paths (the overwhelming majority of
+  // PRs on this repo) must pass without ever reading the config — otherwise
+  // a single bad regex in `governance.memorySecretPatterns` blocks EVERY PR,
+  // not just the ones lane-scrub actually needs to check.
+  const recordPaths = (addedFiles ?? []).filter((path) => LANE_PATH_RE.test(path));
+  if (recordPaths.length === 0) {
+    const result = { pass: true, reason: 'no added record paths — nothing to scan' };
+    console.log(result.reason);
+    return resultToExit(result);
+  }
+
   const config = readConfig();
 
   // Compile patterns OUTSIDE the read loop's try/catch (cold-1, PR #907 cold
@@ -140,7 +154,8 @@ export async function main(deps = {}) {
   // per-record read loop below misattributed a bad secret-config pattern to
   // "cannot read an added record" — a config problem and a read problem are
   // both UNCOMPUTABLE (2), but they are different failures and must report
-  // different reasons.
+  // different reasons. Still computed only once there is at least one
+  // record path (see the early return above).
   let patterns;
   let allowPatterns;
   try {
@@ -159,7 +174,7 @@ export async function main(deps = {}) {
 
   let result;
   try {
-    result = evaluateLaneScrub({ addedFiles, patterns, allowPatterns, readFile });
+    result = evaluateLaneScrub({ addedFiles: recordPaths, patterns, allowPatterns, readFile });
   } catch (err) {
     // An added record that cannot be read (e.g. deleted between the diff and
     // this run) is UNCOMPUTABLE, never a false violation: C1 is non-waivable,

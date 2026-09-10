@@ -331,3 +331,49 @@ after work unit 1, 61 → 62/62 green after work unit 2 (unchanged by work unit 
 Working tree clean, all three commits local (no push). Remaining before PR 2 opens, unchanged from
 batch 3: B.W2 (`memory:save --issue 889`), B.W4 (fresh-context review of THIS batch), B.W5 (push +
 open PR 2), B.W6 (`brain:review`) — none attempted in this batch, out of its assigned scope.
+
+## Batch 5 — one cold-review blocker on PR #908 (2026-09-10)
+
+**Context at batch start**: PR 2 (#889 lane governance) opened as PR #908 (`f9e93ca1` on
+`feat/issue-889-featgovernance-the-lane-is-recognised-pa`, on top of batch 4's tip). A fresh cold
+reviewer reproduced a blocker: `main({ diffNameOnlyAdded: () => ['src/unrelated-file.mjs'],
+readConfig: () => ({ governance: { memorySecretPatterns: ['(unclosed'] } }), readFile: () => {
+throw ... } })` — a PR adding ZERO `.memory/records/` paths — now exits 2 ("invalid secret pattern
+in config") instead of the pre-batch-3 exit 0. Root cause: batch 3's cold-1 fix
+(`60af7abc`/PR #907 prep) moved `resolveSecretConfig` + `compilePatterns` above the per-record
+read loop UNCONDITIONALLY, so config resolution now ran even when there was nothing to scan — one
+bad regex in `governance.memorySecretPatterns` blocked EVERY PR on the repo, not just lanes or PRs
+that actually touch `.memory/records/`.
+
+RED: added `main: zero added records + an invalid secret pattern in config → exit 0, config never
+resolved` to `lane-scrub.test.mjs`, reproducing the reviewer's exact call shape (no `ctx`,
+`diffNameOnlyAdded` returning an unrelated path, a `readConfig` spy counting calls and returning
+the same invalid-regex config, `readFile` throwing if ever called). Confirmed failing against the
+un-fixed code: `2 !== 0`.
+
+GREEN: `main()` now computes the added-records subset (`LANE_PATH_RE` filter over `addedFiles`,
+the same filter `evaluateLaneScrub` applies internally) BEFORE calling `readConfig()` at all. When
+that subset is empty, `main()` returns `{ pass: true, reason: 'no added record paths — nothing to
+scan' }` immediately — `readConfig`, `resolveSecretConfig`, and `compilePatterns` are never
+reached. Only when there is at least one record path does `main()` proceed to read the config and
+compile patterns (still in their own try/catch, still before the read loop — cold-1's fix is
+otherwise unchanged). `evaluateLaneScrub` is then called with the pre-filtered `recordPaths`
+instead of the raw `addedFiles` (harmless: its own internal `LANE_PATH_RE` filter is idempotent on
+an already-filtered list).
+
+Both other cold-1 scenarios stay green unmodified: one added record + invalid regex → exit 2 with
+the config reason; one added record + unreadable file → exit 2 with the read reason.
+
+Single commit `fix(governance): lane-scrub compiles the secret patterns only when there is a
+record to scan — a bad regex no longer blocks every PR (#889)` (fix + test + this doc note, one
+work unit, per the batch's one-commit boundary). Focused suite (`lane-scrub.test.mjs`) 12 → 13/13
+green. Full `npm test` 5099 → 5100/5100 green (the new test is the only addition to the total).
+
+**Files touched this batch**: `brain/scripts/governance/lane-scrub.mjs`,
+`brain/scripts/governance/lane-scrub.test.mjs` (one work unit); this file (docs). Never touched
+`brain/core/**`, `brain/project/**`, or `.memory/**`.
+
+**Status**: the one cold-review blocker on PR #908 is fixed and tested. Working tree has this
+batch's commit local (no push, no PR write). B.W4 (fresh-context review of this batch), B.W5 (push
+the fix), and B.W6 (`brain:review`) remain maintainer/orchestrator acts, out of this batch's
+assigned scope.
