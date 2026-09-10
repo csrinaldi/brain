@@ -63,14 +63,18 @@ branch before calling `mrCreate`. When a match exists, `mrCreate` MUST NOT be ca
 
 ### Requirement: PR grammar and target (D2, ADR-0034 L1)
 
-`mrCreate` MUST be called with `title`/body line `Memory lane: <host> <date>`, no closing
-keyword, no issue reference, `base: 'main'`, `labels: []`.
+`mrCreate` MUST be called with title `memory: <host> <date> (<n> records)` (or
+`(records: unknown)` when the base could not be fetched), a body whose first line is
+`Memory lane: <host> <date>` followed by `Records: <n>` and the file list, no closing keyword, no
+issue reference, `base: 'main'`, `labels: []`. (Grammar reconciled to ticket #888 during apply,
+tasks.md §0.1; the original wording made the title equal the body's first line.)
 
-#### Scenario: the body matches the grammar exactly
+#### Scenario: the title and body match the grammar exactly
 - GIVEN a ship run creates a PR
 - WHEN the `mrCreate` call is inspected
-- THEN `title` and the body's first line equal `Memory lane: <host> <date>` verbatim, with no
-  closing keyword or issue number anywhere in the body
+- THEN `title` equals `memory: <host> <date> (<n> records)` and the body's first line equals
+  `Memory lane: <host> <date>` verbatim, with no closing keyword or issue number anywhere in
+  the body
 
 ### Requirement: the PR number is derived, never guessed (D2)
 
