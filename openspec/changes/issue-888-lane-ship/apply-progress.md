@@ -394,3 +394,51 @@ trailer on commits. This repo's own `commit-msg` hook (`agent-authorities.md` Ti
 attribution trailers outright, and the user's own global instructions say the same ("Never add
 `Co-Authored-By` or AI attribution to commits — Use conventional commits only"). All four commits
 in this batch were made without the trailer, per the repo's actual, enforced policy.
+
+## Seam hardening (batch 5) — this worktree, on top of batch 4's four commits
+
+A second, independent re-review of PR 2's `BRAIN_VCS_TEST_MODULE` seam (introduced in batch 4)
+found three further findings — one measured symlink escape, two lower-severity gaps. All fixed
+TDD (RED confirmed: 3 new tests failed against the unfixed code; GREEN after the fix), one commit:
+
+`f071ea39 fix(memory): the test seam resolves symlinks, refuses a blank value, and the fixture
+never echoes script content (#888)`
+
+- **M1**: `resolveVcsTestModulePath()` (`cli.mjs`) checked containment lexically only
+  (`resolve()` + `relative()` against `FIXTURE_ROOT`). A symlink placed inside `__fixtures__/`
+  pointing outside it resolved lexically inside the fixture dir while `import()` still followed
+  the link to the real target — measured: a marker file written by an "outside" module was
+  readable after a run that should have been refused. Fixed: containment now runs against
+  `realpathSync()` of both the candidate path and `FIXTURE_ROOT` (each wrapped in try/catch,
+  falling back to the lexical path when the target does not exist — needed for the pre-existing
+  `/tmp/x.mjs` escape test, which points at a path that is never created). New test creates a
+  uniquely-named symlink inside the real `__fixtures__/` directory during the test (removed in a
+  `finally`, never committed), pointing at a temp "leak" module that writes a marker on import;
+  asserts refusal (exit 1, the same containment message), empty stdout, and — critically — that
+  the marker was never written (proving the leak module was never imported).
+- **L1**: `BRAIN_VCS_TEST_MODULE=""` (set but blank) is falsy, so the ship op's ternary silently
+  treated it as unset and would have bound the REAL `getVcs()` port. Fixed: an explicit check at
+  the top of the `try` block refuses a set-but-blank value before that ternary is ever reached.
+- **L2**: `__fixtures__/fake-vcs-port.mjs`'s `loadScript()` let a raw `JSON.parse` failure on a
+  malformed `BRAIN_VCS_TEST_SCRIPT` file propagate its default error message, which echoes a
+  prefix of the offending file's content (confirmed: `Unexpected token 'h', "this is not"... is
+  not valid JSON`). Fixed: read+parse wrapped together, re-thrown with a message naming only the
+  path. New test writes a non-JSON file containing a token-looking string and asserts it never
+  appears in stderr.
+
+`design.md`'s A5 section gained a short paragraph documenting the test seam (not originally
+planned — added during implementation across batches 4-5) and noting containment is real-path
+based, not lexical.
+
+**Test results**: focused (`cli.ship.test.mjs`): 20/20 (was 17/17 before this batch — +3: M1, L1,
+L2). Full `npm test`: 5025/5025 (was 5022/5022 before this batch). The symlink probe in the M1
+test is confirmed refused and cleaned up in a `finally` — verified no stray symlink survives
+in `__fixtures__/` after the run (`git status --porcelain` clean post-test).
+
+**Files touched this batch**: `brain/scripts/memory/cli.mjs`, `brain/scripts/memory/cli.ship.test.mjs`,
+`brain/scripts/memory/__fixtures__/fake-vcs-port.mjs`, `openspec/changes/issue-888-lane-ship/design.md`.
+
+### Remaining tasks (after batch 5)
+
+- [ ] 7.2/7.3/7.4 `memory:save --issue 888`, `brain:review` — left for the orchestrator.
+- [ ] 9. The PR — open PR 2 (`Closes #888`, `Parent: #864`). Left for the orchestrator.
