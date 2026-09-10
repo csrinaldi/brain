@@ -10,6 +10,14 @@ Implements `spec.md` under the ratified ruling `sdd/issue-888-lane-ship/ruling` 
 Branch: `feat/issue-888-lane-ship`. Delivery: `ask-on-risk`, single PR pre-agreed, split at the
 library/CLI seam (`stacked-to-main`) only if apply overruns the 400-line budget.
 
+**Slice split, realized.** Apply landed as design.md's own pre-agreed fallback split: **#901 (the
+library)** — sections 1–5 below (status bumps, the credential denylist, `lane/ship.mjs` +
+`ship.test.mjs`, the bare-remote integration test, the `pre-push` non-invocation pin) — and
+**#888 (the CLI)** — section 6 (the `ship` op, i18n, `package.json`), still pending. The split
+needed the maintainer's `no-verify-bypass` exemption for `ship.mjs`/its tests, landed as its own
+commit `4e3625ed` ahead of #901's library work (`check-refs-rules.mjs` is outside this slice's
+edit authority — `brain/project/**`).
+
 STRICT TDD MODE IS ACTIVE. Every implementation task below is preceded by its failing test task.
 Test runner: `npm test` (node:test). Run the focused `node --test` command after each RED/GREEN
 pair; run the full `npm test` before each commit.
@@ -64,13 +72,13 @@ The ticket body of #888 (`gh issue view 888`) was read for the first time in thi
 
 ## 1. Artifact status bumps
 
-- [ ] 1.1 Bump `status:` frontmatter on `explore.md`, `proposal.md`, `spec.md`, `design.md` from
+- [x] 1.1 Bump `status:` frontmatter on `explore.md`, `proposal.md`, `spec.md`, `design.md` from
       `draft`/`proposed` to `tasked`, alongside this file — one shared value across the change dir
       (`phase-order-check.mjs`'s `STATUS_LADDER` is forward-only). No code touched by this task.
 
 ## 2. Unit — `lib/credential-env.mjs`: `MEMORY_TOKEN_ENV` in the default denylist (D3/A5)
 
-- [ ] 2.1 RED: extend `brain/scripts/lib/credential-env.test.mjs`:
+- [x] 2.1 RED: extend `brain/scripts/lib/credential-env.test.mjs`:
       - a new test asserting `MEMORY_TOKEN_ENV === 'BRAIN_MEMORY_TOKEN'` is exported and appears in
         `credentialEnvNames()`'s default set with **no** `extra: [...]` argument (mirrors the
         existing `DEFAULT_TOKEN_ENV`/`REVIEWER_TOKEN_ENV` membership tests at `:29,34`);
@@ -82,7 +90,7 @@ The ticket body of #888 (`gh issue view 888`) was read for the first time in thi
         intended RED signal for the whole file, not a side effect.
       Focused: `node --test brain/scripts/lib/credential-env.test.mjs` — RED (`MEMORY_TOKEN_ENV`
       undefined, pinned list mismatches).
-- [ ] 2.2 GREEN: `brain/scripts/lib/credential-env.mjs` — export
+- [x] 2.2 GREEN: `brain/scripts/lib/credential-env.mjs` — export
       `MEMORY_TOKEN_ENV = 'BRAIN_MEMORY_TOKEN'` beside `REVIEWER_TOKEN_ENV`, add it to
       `credentialEnvNames()`'s default `names` array (design A5: "derived where there is a source,
       literal where there is not" — this is a literal, labelled as one, same treatment as
@@ -94,7 +102,7 @@ Commit: `feat(memory): denylist BRAIN_MEMORY_TOKEN by default (#888)`.
 
 ## 3. Unit — `lane/ship.mjs` (D1/D2/A1–A7)
 
-- [ ] 3.1 RED: `brain/scripts/memory/lane/ship.test.mjs` — unit, every injected fn a fake, per
+- [x] 3.1 RED: `brain/scripts/memory/lane/ship.test.mjs` — unit, every injected fn a fake, per
       `spec.md`'s STRICT TDD test map and `design.md`'s testing-strategy row 1/1a/1b:
       - full run: fakes all succeed → the outcome shape populated, `pushed: true`, `pr.number` set;
       - `commit: null` **and** `ahead: 0` ⇒ zero `git`/`mrList`/`mrCreate`/`mrAutoMerge` calls, exit
@@ -126,7 +134,7 @@ Commit: `feat(memory): denylist BRAIN_MEMORY_TOKEN by default (#888)`.
       - the result object, `JSON.stringify`d, contains no value of `BRAIN_MEMORY_TOKEN` under
         either credential path (`identityBound` is a boolean, never the token).
       Focused: `node --test brain/scripts/memory/lane/ship.test.mjs` — RED (module does not exist).
-- [ ] 3.2 GREEN: `brain/scripts/memory/lane/ship.mjs` — `shipLane({root, project, tier, host, date,
+- [x] 3.2 GREEN: `brain/scripts/memory/lane/ship.mjs` — `shipLane({root, project, tier, host, date,
       dryRun = false, identityBound = false, collect = collectLane, git = defaultGit, vcs})`
       implementing design A1's six-step sequence exactly (resolve branch → collect → survey → push
       → find → create → arm), A2's single bound `vcs` port parameter (never three separate
@@ -141,7 +149,7 @@ Commit: `feat(memory): add shipLane orchestration (#888)`.
 
 ## 4. Integration — `lane/ship.integration.test.mjs` (D2/D5/D6, design A3/A7)
 
-- [ ] 4.1 RED: `brain/scripts/memory/lane/ship.integration.test.mjs` — `testTmp('brain-lane-ship-')`
+- [x] 4.1 RED: `brain/scripts/memory/lane/ship.integration.test.mjs` — `testTmp('brain-lane-ship-')`
       temp repo + a **local bare remote** as `origin` + real `git` + a recording fake `vcs` port
       (no network):
       - the pushed ref lands on the remote with the expected tree;
@@ -155,7 +163,7 @@ Commit: `feat(memory): add shipLane orchestration (#888)`.
         outside the declared file list").
       Focused: `node --test brain/scripts/memory/lane/ship.integration.test.mjs` — RED (module
       under test does not exist yet / fixtures absent).
-- [ ] 4.2 GREEN: no new production code — this test exercises `ship.mjs` (task 3.2) against a real
+- [x] 4.2 GREEN: no new production code — this test exercises `ship.mjs` (task 3.2) against a real
       git repo. If it goes red on anything beyond fixture setup, fix `ship.mjs`'s push/survey logic,
       not the test's assertions.
       Focused: same command — GREEN. `npm test` — green.
@@ -171,7 +179,7 @@ not by source grep."* The existing `pre-push.test.mjs` harness already IS that b
 the ticket's ask without adding a source-grep guard the spec rules out; noted here so `sdd-verify`
 does not flag a missing grep test.
 
-- [ ] 5.1 RED: extend `brain/scripts/hooks/pre-push.test.mjs` with one more assertion on the
+- [x] 5.1 RED: extend `brain/scripts/hooks/pre-push.test.mjs` with one more assertion on the
       existing call log (reuse `createMockBin`/`runHook`/`readCallLog`, no new fixture shape): after
       running the hook, `ops` contains `share` and `feature-checkpoint` (already asserted) and
       **does not** contain `ship`. Since `ship` is never invoked, this assertion is true against the
@@ -187,6 +195,9 @@ own `test(hooks):` commit, whichever keeps the story readable at review time.
 Commit: `test(hooks): pin that pre-push never invokes memory:ship (#888)`.
 
 ## 6. CLI — the `ship` op, i18n, `package.json` (D1, design A5, ticket item (d))
+
+**Deferred to #888** (the slice split, see the note at the top of this file) — pending, not part
+of #901's library PR.
 
 - [ ] 6.1 RED: `brain/scripts/memory/cli.ship.test.mjs` — under `BRAIN_MEMORY_TEST_ROOT`, reusing
       `cli.collect.test.mjs`'s bare-origin fixture (network-free by construction):
