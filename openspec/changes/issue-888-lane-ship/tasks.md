@@ -199,7 +199,7 @@ Commit: `test(hooks): pin that pre-push never invokes memory:ship (#888)`.
 **Deferred to #888** (the slice split, see the note at the top of this file) — pending, not part
 of #901's library PR.
 
-- [ ] 6.1 RED: `brain/scripts/memory/cli.ship.test.mjs` — under `BRAIN_MEMORY_TEST_ROOT`, reusing
+- [x] 6.1 RED: `brain/scripts/memory/cli.ship.test.mjs` — under `BRAIN_MEMORY_TEST_ROOT`, reusing
       `cli.collect.test.mjs`'s bare-origin fixture (network-free by construction):
       - `"ship"` added to `VALID_OPS`, dispatched **before backend selection** (mirrors `collect`,
         `cli.mjs:306-359`);
@@ -217,7 +217,7 @@ of #901's library PR.
       - `npm run memory:ship` resolves from `package.json` (added in 6.2).
       Focused: `node --test brain/scripts/memory/cli.ship.test.mjs` — RED (`"ship"` not in
       `VALID_OPS`, no dispatch block, no npm script).
-- [ ] 6.2 GREEN: `brain/scripts/memory/cli.mjs` — add `"ship"` to `VALID_OPS` (`:103-119`), a
+- [x] 6.2 GREEN: `brain/scripts/memory/cli.mjs` — add `"ship"` to `VALID_OPS` (`:103-119`), a
       dispatch block beside `collect`'s (`:359`) that: `loadBrainConfig()` for `project.slug`,
       `vcs.provider`, `governance.tier`; reads `BRAIN_MEMORY_TOKEN` once
       (`const identity = process.env[MEMORY_TOKEN_ENV] ?? null`); `vcs = dryRun ? null : await
@@ -226,7 +226,7 @@ of #901's library PR.
       `process.argv.slice(3)` (E4's scoping, never bare `process.argv.includes`).
       `package.json`: add `"memory:ship": "node ./brain/scripts/memory/cli.mjs ship"`.
       Focused: same command — GREEN. `npm test` — still red on i18n coverage until 6.3.
-- [ ] 6.3 RED → GREEN: add the fourteen `memory.ship.*` keys to
+- [x] 6.3 RED → GREEN: add the fourteen `memory.ship.*` keys to
       `brain/scripts/i18n/en.mjs` **and** `es.mjs` in the same commit, matching design's exit table
       (A6) and `en.mjs:319-327`'s shape: `done`, `nothing`, `dryRun`, `pushed`, `prExisting`,
       `armed`, `autoMergeRefused`, `identityAmbient`, `diverged`, `pushFailed`, `prLookupFailed`,
@@ -236,9 +236,74 @@ of #901's library PR.
 
 Commit: `feat(memory): add the ship CLI op, i18n and npm script (#888)`.
 
+**PR 2 — closing note (this apply batch).**
+
+- **Split, realized**: #901 (the library — `lane/ship.mjs`, `credential-env.mjs`'s denylist,
+  sections 1–5 above) merged as **PR #902**, commit `16493771`. This change (#888, the CLI `ship`
+  op, section 6) is **PR 2**, and closes the ticket.
+- **Ruling D4's scope deviation, reconfirmed here**: trigger wiring (a `SessionEnd` hook, a
+  `day:start` sweep) stays deferred to #889 per task 0.2 above. `pre-push`'s non-invocation was
+  already pinned in PR 1 (section 5) — not re-tested in this batch.
+- **PR grammar**: this slice implements the ticket's literal grammar (task 0.1), a delta from
+  `design.md`'s original A4 wording — `title` carries `(<n> records)`, the body's first line does
+  not. Reconciled, not re-opened.
+- **cold-1 (PR #902's cold review) fixed in this batch**: `buildTitleAndBody()` ran unconditionally
+  right after `collect()`, so a ref that had never been created locally (first run, nothing to
+  ship) made the three-dot diff against `origin/main` fail on a bad revision — misreported as
+  "origin/main could not be fetched" rather than "this ref never existed." Deferred the call to the
+  two places it is actually needed (the `--dry-run` report, and once more just before
+  find/create-PR after a real push), both of which already proved the ref exists. Full RED→GREEN
+  evidence: `sdd/issue-888-lane-ship/apply-progress` (engram).
+- **CLI test hardening**: `cli.ship.test.mjs` constructed the real, bound `vcs` port via `getVcs()`
+  on every non-dry-run case, one fixture mistake away from reaching the real GitHub provider (see
+  that file's own near-miss account). Added `BRAIN_VCS_TEST_MODULE`, a test-only seam in
+  `cli.mjs`'s `ship` block that imports a fake port module directly instead of ever calling
+  `getVcs()`, plus a full success-path test through the real CLI and a source-guard test pinning
+  `getVcs()` behind the seam's absence — both proven to catch a real mutation before landing.
+  **Correction (fresh cold review, next batch)**: this claim overstated the fix — `runCli()`, the
+  helper FOUR of this file's own tests used, never set the new seam, so those four cases still
+  constructed the real `getVcs()` port on every run (never invoked a verb, but bound a real
+  credential to a real provider all the same). See "PR 2 review corrections" below for the actual
+  closing state.
+
+**PR 2 review corrections (fresh cold review, this batch)** — B1/C1/C2/C3/E1/E2/E3/E4 fixed, see
+`sdd/issue-888-lane-ship/apply-progress` (engram) for full RED→GREEN evidence per finding:
+- **B1 (blocker)**: `BRAIN_VCS_TEST_MODULE` is now constrained to resolve inside a committed
+  `brain/scripts/memory/__fixtures__/` directory (`resolveVcsTestModulePath()` in `cli.mjs`) —
+  an env-selected arbitrary-path import in the same process that reads `BRAIN_MEMORY_TOKEN` is a
+  credential-adjacent attack surface no other seam in `brain/scripts/**` carries. The fixture
+  module itself (`__fixtures__/fake-vcs-port.mjs`) is committed, reviewed code; its per-test
+  answers are driven by DATA from a second, unconstrained env var, `BRAIN_VCS_TEST_SCRIPT`.
+- **C1**: `runCli()` now sets the constrained seam on every call; a source-guard test pins this,
+  and the prior batch's overstated closing note above is corrected.
+- **C2**: `identityBound` is now proven both directions (bound `true` + unbound `false`, with the
+  matching stderr message) — the mutant `identityBound: false` (hardcoded) is confirmed dead.
+- **C3**: `shipLane`'s nothing-to-ship branch now returns `title: null, body: null` (was: the keys
+  absent entirely), matching design.md's module map — see that file's own new C3 note.
+- **E1**: a fixture script driving `mrCreate` to an unparseable URL + an empty `mrList` rescan
+  proves the `prNumberUnknown` exit path (exit 0).
+- **E2**: `shipLane` wraps `vcs.mrAutoMerge()` in try/catch — a throw maps to a non-fatal refusal
+  (`{enabled:false, reason}`) rather than propagating and failing a run whose push and PR already
+  landed.
+- **E3**: `cli.mjs`'s `ship` catch now passes through `raced`/`badHost` the same way `collect`'s
+  own catch does, with the matching `memory.ship.raced`/`memory.ship.badHost` i18n keys (en/es).
+- **E4**: the divergent-lane CLI test now asserts the fixture's own pre-seeded `ref` appears in
+  the CLI's diverged-error output — a UTC-midnight straddle between fixture setup and the CLI's
+  own independent `hostname()`/date computation now fails loudly instead of silently taking the
+  port path.
+
 ## 7. Wrap-up before the push
 
-- [ ] 7.1 `npm test` full run — record pass count before the promotion/handover note.
+- [x] 7.1 `npm test` full run — record pass count before the promotion/handover note.
+      **5022/5022 pass** (this batch's PR 2 review corrections; was 5015/5015 before this batch,
+      +7: 6 new `cli.ship.test.mjs` tests — B1 escape/positive, C1 guard, C2, E1, E3 — and 1 new
+      `ship.test.mjs` test — E2). Focused
+      (`cli.ship.test.mjs` + `ship.test.mjs` + `ship.integration.test.mjs`), both in the normal
+      shell and under `GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 HOME=$(mktemp -d)`:
+      52/52 pass. Two mutants proven dead by scratch-copy mutation (never via `git checkout`): B1's
+      `FIXTURE_ROOT` containment check removed → the escape test fails; C2's `identityBound`
+      hardcoded to `false` → the bound-token assertion fails. Both restored from a pre-mutation
+      backup, confirmed byte-identical, before continuing.
 - [ ] 7.2 `memory:save --issue 888` — record-first, committed before the first push (mirrors
       `archive/886/tasks.md` task 8.2's shape).
 - [ ] 7.3 Tick epic task 3.1b in `openspec/changes/issue-864-memory-2-0/tasks.md` on this change's

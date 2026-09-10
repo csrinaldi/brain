@@ -71,6 +71,7 @@
     "memory:audit": "node ./brain/scripts/memory/cli.mjs audit",
     "memory:split-records": "node ./brain/scripts/memory/cli.mjs split-records",
     "memory:collect": "node ./brain/scripts/memory/cli.mjs collect",
+    "memory:ship": "node ./brain/scripts/memory/cli.mjs ship",
     "memory:migrate-v1": "node ./brain/scripts/memory/cli.mjs migrate-v1",
     "feature:checkpoint": "node ./brain/scripts/memory/cli.mjs feature-checkpoint",
     "feature:resume": "node ./brain/scripts/memory/cli.mjs feature-resume",

@@ -19,9 +19,10 @@
 //
 // Pattern mirrors SDD_HARNESS dispatch in brain/scripts/bootstrap.sh §6.
 
-import { readFileSync, existsSync } from "node:fs";
-import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { readFileSync, existsSync, realpathSync } from "node:fs";
+import { join, dirname, relative, isAbsolute, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { hostname } from "node:os";
 
 import { t } from "../i18n/t.mjs";
 import { formatDuplicateReport } from "./lib/duplicates.mjs";
@@ -36,6 +37,21 @@ import {
 } from "./lib/backend-selection.mjs";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../../..");
+
+// B1 (#888 cold review, PR 2): the ONLY directory `BRAIN_VCS_TEST_MODULE`
+// (the ship op's test-only vcs-port seam, below) is ever allowed to import
+// from. A test-only seam that imports an ARBITRARY absolute path is CODE
+// executed inside the same process that reads `BRAIN_MEMORY_TOKEN` — unlike
+// `BRAIN_MEMORY_TEST_ROOT`/`BRAIN_MEMORY_ENV_FILE`, which only ever point at
+// DATA (a directory to read records from, an env file to parse), never at a
+// module this process then `import()`s and executes. Constraining the path
+// to a COMMITTED fixture directory means the only code that can ever run
+// through this seam is code that was reviewed and merged — never an
+// arbitrary path a misconfigured or malicious env could point at. See
+// `vcs/cli.mjs`'s own `getVcs()` for the same discipline applied to its
+// provider-name seam (a regex allowlist there; a path-containment check
+// here, because this seam takes a path rather than a bare identifier).
+const FIXTURE_ROOT = join(repoRoot, "brain/scripts/memory/__fixtures__");
 
 // ---------------------------------------------------------------------------
 // Read MEMORY_BACKEND: env var > .env file > default "engram"
@@ -110,6 +126,7 @@ const VALID_OPS = [
   "resolve-index",
   "split-records",
   "collect",
+  "ship",
   "migrate-v1",
   "setup",
   "feature-checkpoint",
@@ -356,6 +373,162 @@ if (op === "collect") {
     }
     process.exit(1);
   }
+}
+
+// ---------------------------------------------------------------------------
+// "ship" — the lane ship: one push, one PR, one credential this op reads and
+// this op alone (issue #888, ADR-0034 L1/L2/L5, design.md A1-A7). Dispatched
+// BEFORE backend selection, like "collect" above — no backend is ever
+// consulted, and this is the only user-invocable surface this slice adds
+// (the trigger wiring — a SessionEnd hook, a day:start sweep — is deferred to
+// #889; D4).
+//
+// BRAIN_MEMORY_TEST_ROOT — honoured, like "collect" above.
+//
+// The credential: `MEMORY_TOKEN_ENV` (`BRAIN_MEMORY_TOKEN`) is read from
+// `process.env` in EXACTLY ONE place, right here. It is handed to
+// `getVcs({identity})`, which binds it and returns the PORT — `shipLane`
+// receives that bound port plus `identityBound: boolean`, never the token
+// itself (A5's structural leak-regression guarantee: the string is never in
+// `shipLane`'s scope at all).
+//
+// `--json` prints the result object on stdout ONLY; every other line this op
+// prints goes to stderr, so `--json` stdout stays parseable regardless of
+// what the run found (mirrors "collect"'s own contract).
+//
+// BRAIN_VCS_TEST_MODULE (test-only seam, mirrors BRAIN_MEMORY_TEST_ROOT):
+// when set, its value is a path to a fake port module (the same shape
+// `getVcs()` itself returns — `mrList`/`mrCreate`/`mrAutoMerge`), and that
+// module is imported DIRECTLY instead of ever calling `getVcs()`. This
+// exists because `getVcs()` has no seam of its own reachable through a CLI
+// subprocess (unlike `_import`, its in-process-only test hook): without it,
+// EVERY non-dry-run CLI-level test of this op resolves the REAL provider
+// from this repo's own `brain.config.json`, and any test fixture that fails
+// to short-circuit before `shipLane`'s find/create step reaches the real,
+// unfakeable GitHub port (see `cli.ship.test.mjs`'s own account of the near
+// -miss this seam closes). NEVER set this outside tests.
+//
+// B1 (cold review, PR 2): the resolved path MUST fall inside `FIXTURE_ROOT`
+// (`resolveVcsTestModulePath` below) — see that constant's own comment for
+// why. The fixture module itself carries no test-case-specific behavior;
+// its ANSWERS are read at call time from the JSON file named by the second,
+// DATA-only env var `BRAIN_VCS_TEST_SCRIPT` (see
+// `__fixtures__/fake-vcs-port.mjs`).
+//
+// M1 (re-review, PR 2): containment is checked on the REAL path, not the
+// lexical one — a symlink placed inside `FIXTURE_ROOT` pointing outside it
+// would resolve lexically inside the fixture dir while `import()` still
+// follows the link to wherever it points. `realpathSync` is best-effort
+// (wrapped in try/catch) because the target may legitimately not exist yet
+// (the escape test below points at `/tmp/x.mjs`, which is never created) —
+// in that case the lexical path is the closest honest answer and the
+// containment check still runs against it.
+// ---------------------------------------------------------------------------
+
+/** Resolves `BRAIN_VCS_TEST_MODULE` against `FIXTURE_ROOT`, refusing (before
+ * any `import()` is attempted) anything that would resolve outside it — a
+ * path traversal (`../..`), an absolute path elsewhere on disk, or a
+ * symlink planted inside `FIXTURE_ROOT` whose real target lands outside it
+ * (M1, re-review). See B1's comment on `FIXTURE_ROOT` for the rationale. */
+function resolveVcsTestModulePath(vcsTestModule) {
+  const lexical = resolve(vcsTestModule);
+  let abs;
+  try { abs = realpathSync(lexical); } catch { abs = lexical; }
+  let root;
+  try { root = realpathSync(FIXTURE_ROOT); } catch { root = FIXTURE_ROOT; }
+  const rel = relative(root, abs);
+  if (rel === "" || rel.startsWith("..") || isAbsolute(rel)) {
+    throw new Error(`memory/cli: BRAIN_VCS_TEST_MODULE must resolve inside ${FIXTURE_ROOT}`);
+  }
+  return lexical;
+}
+
+if (op === "ship") {
+  const { shipLane } = await import("./lane/ship.mjs");
+  const { MEMORY_TOKEN_ENV } = await import("../lib/credential-env.mjs");
+  const { loadBrainConfig } = await import("../lib/brain-config.mjs");
+  const memoryRoot = process.env.BRAIN_MEMORY_TEST_ROOT ?? repoRoot;
+  const vcsTestModule = process.env.BRAIN_VCS_TEST_MODULE;
+  const rest = process.argv.slice(3);
+  const dryRun = rest.includes("--dry-run");
+  const asJson = rest.includes("--json");
+
+  try {
+    // L1 (re-review): a set-but-blank BRAIN_VCS_TEST_MODULE is falsy, so the
+    // ternary below would silently treat it as unset and bind the REAL vcs
+    // port — refused here, before that ternary is ever reached.
+    if (vcsTestModule !== undefined && vcsTestModule.trim() === "") {
+      throw new Error("memory/cli: BRAIN_VCS_TEST_MODULE is set but empty — unset it to use the real port");
+    }
+    const config = loadBrainConfig();
+    const identity = process.env[MEMORY_TOKEN_ENV] ?? null; // ONE read, in ONE place (A5)
+    const vcs = dryRun
+      ? null
+      : vcsTestModule
+        ? await import(pathToFileURL(resolveVcsTestModulePath(vcsTestModule)).href)
+        : await (await import("../vcs/cli.mjs")).getVcs({ config, identity });
+    const result = await shipLane({
+      root: memoryRoot,
+      project: config.project.slug,
+      tier: config.governance.tier,
+      host: hostname(),
+      date: new Date().toISOString().slice(0, 10),
+      dryRun,
+      identityBound: identity !== null,
+      vcs,
+    });
+
+    if (asJson) {
+      console.log(JSON.stringify(result));
+    } else {
+      console.log(`memory/cli: ${await t(`memory.ship.${shipOutcomeKey(result)}`, {
+        ref: result.ref,
+        number: result.pr?.number ?? null,
+        reason: result.autoMerge?.reason ?? "",
+      })}`);
+    }
+
+    // Evidence, always on stderr — never gated by --json (mirrors "collect").
+    if (!result.dryRun) {
+      if (result.pushed) console.error(`memory/cli: ${await t("memory.ship.pushed", { ref: result.ref })}`);
+      if (result.pr && result.pr.url === null && result.pr.number !== null) {
+        console.error(`memory/cli: ${await t("memory.ship.prExisting", { number: result.pr.number })}`);
+      }
+      if (result.autoMerge?.enabled === true) {
+        console.error(`memory/cli: ${await t("memory.ship.armed", { number: result.pr?.number ?? null })}`);
+      }
+      if (!result.identityBound) {
+        console.error(`memory/cli: ${await t("memory.ship.identityAmbient")}`);
+      }
+    }
+    process.exit(0);
+  } catch (err) {
+    // E3 (cold review): `raced`/`badHost` are named failures `collect()`
+    // (called internally by `shipLane`) tags on the thrown error (A9, A5 —
+    // same two tags the "collect" op's own catch above passes through)
+    // — everything else here is a genuine ship-specific failure.
+    const key = err?.raced ? "raced"
+      : err?.badHost ? "badHost"
+      : err?.diverged ? "diverged"
+      : err?.pushFailed ? "pushFailed"
+      : err?.prLookupFailed ? "prLookupFailed"
+      : err?.prCreateFailed ? "prCreateFailed"
+      : "failed";
+    console.error(`memory/cli: ${await t(`memory.ship.${key}`, { message: err.message })}`);
+    process.exit(1);
+  }
+}
+
+/** shipOutcomeKey() — maps `shipLane`'s outcome shape to one of the
+ * `memory.ship.*` primary message keys (design.md A6's exit table). Kept a
+ * pure function of the result, never of the error path (that is the `catch`
+ * block above's job, off the THROWN, fatal branches only). */
+function shipOutcomeKey(result) {
+  if (result.dryRun) return "dryRun";
+  if (result.pr && result.pr.number === null) return "prNumberUnknown";
+  if (result.pushed === false && result.pr === null) return "nothing";
+  if (result.autoMerge?.enabled === false) return "autoMergeRefused";
+  return "done";
 }
 
 // ---------------------------------------------------------------------------

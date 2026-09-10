@@ -202,21 +202,20 @@ export async function shipLane({
   const { ref, commit, collected: collectedCount, skipped, duplicates, baseFetched } = collected;
   const branch = ref.replace(/^refs\/heads\//, '');
 
-  const { title, body } = buildTitleAndBody({ git, root, ref, branch });
-
   const base = {
-    ref, branch, host, date, title, body,
+    ref, branch, host, date,
     commit, collected: collectedCount, skipped, duplicates, baseFetched,
     identityBound, dryRun,
   };
 
   // A7: under --dry-run, steps 3-6 are never reached (vcs:null, no push, no
-  // fetch/rev-list survey either — only the diff read above, needed for the
+  // fetch/rev-list survey either — only the diff read below, needed for the
   // plan the operator sees). `collect` above still ran and made its own
   // best-effort `git fetch origin main` — that qualifier is A7's own.
   if (dryRun) {
+    const { title, body } = buildTitleAndBody({ git, root, ref, branch });
     return {
-      ...base,
+      ...base, title, body,
       ahead: null, behind: null, remoteRefPresent: null,
       pushed: false, diverged: false, pr: null, autoMerge: null,
     };
@@ -227,9 +226,28 @@ export async function shipLane({
   // A1's REFINED predicate: not `commit === null` alone — see design.md's
   // rationale for why the literal D2 form makes a failed push unrecoverable
   // inside the same day.
+  //
+  // cold-1 (PR #902 review): `buildTitleAndBody()` is deferred past THIS
+  // check — it is only ever called once we already know a push or PR will
+  // actually happen (see the call site further down). Before this fix it ran
+  // unconditionally right after `collect()`, so a ref that had NEVER been
+  // created (first run, nothing to ship: `rev-parse <ref>` fails, `commit`
+  // is null) made the three-dot diff fail on a bad revision — and that
+  // failure was reported as "origin/main could not be fetched", conflating
+  // "the local ref never existed" with "the remote base is unreachable".
+  // Every path past this `return` already proved the ref exists (either
+  // `surveyRef`'s own `rev-parse` succeeded to produce a real
+  // `ahead`/`behind`, or `commit` is non-null), so a diff failure reached
+  // from here on can only mean a genuinely unfetchable base — see test `C`
+  // below for that legitimate case, which is unaffected by this change.
   if (commit === null && ahead === 0) {
+    // C3 (cold review): `title`/`body` are `null` here, not simply absent
+    // from the returned object — the module map (design.md) declares them
+    // UNCONDITIONAL in the outcome shape. `null` says "there is nothing to
+    // title, by design" without making the key's presence itself the signal
+    // a caller has to special-case.
     return {
-      ...base, ahead, behind, remoteRefPresent,
+      ...base, title: null, body: null, ahead, behind, remoteRefPresent,
       pushed: false, diverged: false, pr: null, autoMerge: null,
     };
   }
@@ -256,6 +274,10 @@ export async function shipLane({
     throw err;
   }
 
+  // Only reached once the push has actually happened — see the comment
+  // above the nothing-to-ship check for why this call moved here (cold-1).
+  const { title, body } = buildTitleAndBody({ git, root, ref, branch });
+
   const pr = await findOrCreatePr({ vcs, project, branch, title, body });
 
   // Both derivations (URL parse + the one-shot mrList re-scan) failing
@@ -266,10 +288,23 @@ export async function shipLane({
   // from `mrList`'s own shape, the same way an `mrAutoMerge` refusal
   // self-heals one row below it in the same table.
   if (pr.number === null) {
-    return { ...base, ahead, behind, remoteRefPresent, pushed: true, diverged: false, pr, autoMerge: null };
+    return { ...base, title, body, ahead, behind, remoteRefPresent, pushed: true, diverged: false, pr, autoMerge: null };
   }
 
-  const autoMerge = await vcs.mrAutoMerge({ project, number: pr.number, requiredReviews: tierParams(tier).requiredReviews });
+  // E2 (cold review): the port's own contract says `mrAutoMerge` never
+  // throws (design A6; both providers catch internally, github.mjs/
+  // gitlab.mjs) — but a throw here would otherwise propagate straight
+  // through `shipLane` and fail the WHOLE run over an arm-only step, AFTER
+  // the push and the PR have already landed durably. Catching here keeps
+  // A6's "every mrAutoMerge refusal reason is non-fatal" guarantee true BY
+  // CONSTRUCTION, rather than by trusting every current and future provider
+  // to honor a contract this module cannot enforce on their behalf.
+  let autoMerge;
+  try {
+    autoMerge = await vcs.mrAutoMerge({ project, number: pr.number, requiredReviews: tierParams(tier).requiredReviews });
+  } catch (err) {
+    autoMerge = { enabled: false, reason: err?.message ?? String(err) };
+  }
 
-  return { ...base, ahead, behind, remoteRefPresent, pushed: true, diverged: false, pr, autoMerge };
+  return { ...base, title, body, ahead, behind, remoteRefPresent, pushed: true, diverged: false, pr, autoMerge };
 }

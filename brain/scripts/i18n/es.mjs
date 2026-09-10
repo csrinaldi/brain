@@ -296,6 +296,24 @@ export default {
   'memory.collect.secretSkipped':          '{count} registro(s) con secreto salteado(s) — solo patrón y número de línea, nunca la línea encontrada.',
   'memory.collect.modifiedTrackedSkipped': '{count} registro(s) trackeado(s) y modificado(s) salteado(s) — hacé commit o stash y volvé a correrlo.',
 
+  // ── memory/cli.mjs — ship (issue #888, ADR-0034 L1/L2/L5) ────────────────────
+  'memory.ship.done':             '✓ se envió {ref} — el pull request #{number} quedó armado.',
+  'memory.ship.nothing':          'nada nuevo para enviar — {ref} ya coincide con origin.',
+  'memory.ship.dryRun':           'plan — {ref} se enviaría. No se hizo push ni ninguna llamada al puerto.',
+  'memory.ship.pushed':           '✓ se hizo push de {ref} a origin.',
+  'memory.ship.prExisting':       'el pull request #{number} ya estaba abierto — se reutilizó, no se recreó.',
+  'memory.ship.armed':            '✓ auto-merge armado en el pull request #{number}.',
+  'memory.ship.autoMergeRefused': 'el auto-merge fue rechazado ({reason}) — el pull request queda abierto; la próxima corrida lo vuelve a armar.',
+  'memory.ship.identityAmbient':  'BRAIN_MEMORY_TOKEN no está configurado — esta corrida se autenticó con la credencial ambiente de la sesión.',
+  'memory.ship.diverged':         '✗ el envío falló — {ref} divergió de origin; no se forzó nada. {message}',
+  'memory.ship.pushFailed':       '✗ el envío falló — el push no se concretó. {message}',
+  'memory.ship.prLookupFailed':   '✗ el envío falló — no se pudo consultar el pull request, así que su existencia es incomputable; el push ya se concretó y es durable. {message}',
+  'memory.ship.prCreateFailed':   '✗ el envío falló — no se pudo crear el pull request. {message}',
+  'memory.ship.prNumberUnknown':  'el pull request está abierto pero no se pudo derivar su número — se salteó el auto-merge; la próxima corrida lo recupera.',
+  'memory.ship.failed':           '✗ el envío falló — {message}',
+  'memory.ship.raced':            '✗ el envío falló — la ref del lane se movió durante esta corrida (raced); no se perdió nada, sus blobs se vuelven a juntar en la próxima corrida: {message}',
+  'memory.ship.badHost':          '✗ el envío falló — el nombre de host produjo un slug de ref vacío o inválido: {message}',
+
   // ── memory/cli.mjs — qué backend corrió realmente (issue #641) ───────────────
   'memory.backend.substituted': 'el binario `{from}` no está instalado acá, así que `{op}` corrió sobre el backend `{fallback}` (solo registros) — mismos registros, misma validación, sin backend requerido (ADR-0017). MEMORY_BACKEND no estaba seteado, así que no se pisó ninguna elección explícita; seteálo para fijar cualquiera de los dos backends.',
   'memory.backend.statedButAbsent': 'MEMORY_BACKEND={backend} está seteado explícitamente, pero el binario `{backend}` no está en PATH acá — un selector explícito nunca se pisa (ADR-0004), así que esta corrida va a fallar. La captura solo-registros no necesita backend: `MEMORY_BACKEND={fallback} npm run memory:{op}`.',

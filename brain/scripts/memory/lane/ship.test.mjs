@@ -108,8 +108,38 @@ test('commit:null and ahead:0 (already shipped) is a no-op: zero push/list/creat
   assert.equal(result.pushed, false);
   assert.equal(result.pr, null);
   assert.equal(result.autoMerge, null);
+  // C3 (cold review): unconditional title/body in the outcome shape, null
+  // rather than absent — see the "cold-1" test below for the full rationale.
+  assert.equal(result.title, null);
+  assert.equal(result.body, null);
   assert.ok(!calls.some((a) => a[0] === 'push'), 'must never push when nothing to ship');
   assert.deepEqual(vcsCalls, { mrList: 0, mrCreate: 0, mrAutoMerge: 0 });
+});
+
+test('cold-1 (PR #902 review): a ref that never existed locally is nothing-to-ship with NO diff call and no misleading reason', async () => {
+  const { git, calls } = fakeGit([
+    { match: (a) => a[0] === 'rev-parse', result: fail("fatal: ambiguous argument 'refs/heads/memory/test-host-2026-09-09': unknown revision or path not in the working tree.") },
+  ]);
+  const { vcs, calls: vcsCalls } = fakeVcs();
+
+  const result = await shipLane({
+    root: '/repo', project: 'x/y', tier: 'lite', host: 'test-host', date: '2026-09-09',
+    collect: fakeCollect({ commit: null }), git, vcs,
+  });
+
+  assert.equal(result.pushed, false);
+  assert.equal(result.pr, null);
+  assert.ok(
+    !calls.some((a) => a[0] === 'diff'),
+    'a ref that was never created must never be diffed against origin/main — there is nothing to derive a title from',
+  );
+  // C3 (cold review): design.md's module map declares `title`/`body`
+  // unconditional in the outcome shape — `null` here, not an absent key, is
+  // how "nothing to derive a title from" is signaled, never a fabricated
+  // title/body and never a misleading "could not be fetched" reason for a
+  // ref that simply never existed.
+  assert.equal(result.title, null, 'nothing-to-ship must carry title:null, not a fabricated title');
+  assert.equal(result.body, null, 'nothing-to-ship must carry body:null, not a fabricated body');
 });
 
 test("A1 recovery case: commit:null but ahead:1 (a prior push failed) still pushes and opens/arms", async () => {
@@ -444,6 +474,23 @@ for (const reason of ['requires-human-approval', 'unsupported', 'transport']) {
     assert.equal(result.autoMerge.reason, reason);
   });
 }
+
+test('E2 (cold review): a throwing mrAutoMerge is mapped to a non-fatal refusal, never propagates — the push and PR already landed', async () => {
+  const { git } = fakeGit([...surveyOkRules(), { match: (a) => a[0] === 'push', result: ok() }]);
+  const { vcs } = fakeVcs({
+    mrAutoMerge: async () => { throw new Error('gh api pulls/42/merge failed: 503 Service Unavailable'); },
+  });
+
+  const result = await shipLane({
+    root: '/repo', project: 'x/y', tier: 'lite', host: 'test-host', date: '2026-09-09',
+    collect: fakeCollect(), git, vcs,
+  });
+
+  assert.equal(result.pushed, true);
+  assert.equal(result.pr.number, 42);
+  assert.equal(result.autoMerge.enabled, false);
+  assert.match(result.autoMerge.reason, /503 Service Unavailable/);
+});
 
 // ── Requirement: mrList throwing is the one fatal port failure ──────────────
 
