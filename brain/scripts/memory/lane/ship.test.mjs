@@ -216,8 +216,9 @@ test('PR already open by headBranch: mrCreate never called, mrAutoMerge still ca
     ...surveyOkRules(),
     { match: (a) => a[0] === 'push', result: ok() },
   ]);
+  let mrListArgs;
   const { vcs, calls: vcsCalls } = fakeVcs({
-    mrList: async () => { vcsCalls.mrList++; return [{ number: 7, title: 't', headBranch: BRANCH }]; },
+    mrList: async (args) => { vcsCalls.mrList++; mrListArgs = args; return [{ number: 7, title: 't', headBranch: BRANCH }]; },
   });
 
   const result = await shipLane({
@@ -228,6 +229,26 @@ test('PR already open by headBranch: mrCreate never called, mrAutoMerge still ca
   assert.equal(vcsCalls.mrCreate, 0);
   assert.equal(vcsCalls.mrAutoMerge, 1);
   assert.equal(result.pr.number, 7);
+  // spec.md:51 — mrList MUST be called with { project, state: 'open' }, not an
+  // all-states list (which would match a CLOSED lane PR by head and skip
+  // mrCreate forever).
+  assert.deepEqual(mrListArgs, { project: 'x/y', state: 'open' });
+});
+
+test('mrCreate returning {url:null, error} is fatal: prCreateFailed, mrAutoMerge never called', async () => {
+  const { git } = fakeGit([...surveyOkRules(), { match: (a) => a[0] === 'push', result: ok() }]);
+  const { vcs, calls: vcsCalls } = fakeVcs({
+    mrCreate: async () => { vcsCalls.mrCreate++; return { url: null, error: 'gh: already exists' }; },
+  });
+
+  await assert.rejects(
+    () => shipLane({
+      root: '/repo', project: 'x/y', tier: 'lite', host: 'test-host', date: '2026-09-09',
+      collect: fakeCollect(), git, vcs,
+    }),
+    (err) => { assert.equal(err.prCreateFailed, true); return true; },
+  );
+  assert.equal(vcsCalls.mrAutoMerge, 0);
 });
 
 // ── Requirement: PR grammar and target ───────────────────────────────────────
