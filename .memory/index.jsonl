@@ -1081,6 +1081,7 @@
 {"id":"rec-74aea59eae57417e","ts":"2026-07-25T00:46:43Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-74aea59eae57417e.jsonl"}
 {"id":"rec-74afd226758ea183","ts":"2026-07-29T14:29:11Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07-rec-74afd226758ea183.jsonl"}
 {"id":"rec-7517830a9da07470","ts":"2026-08-04T11:19:14Z","actor":"claude/brain-architecture-review-qe5bo2","type":"session_summary","project":"brain","file":"2026-08-rec-7517830a9da07470.jsonl"}
+{"id":"rec-752890976ce40df7","ts":"2026-09-10T21:33:31Z","actor":"fix/issue-247-fixmemory-complete-the-c4-chunkrecords-m","type":"architecture","project":"brain","issue":247,"file":"2026-09-rec-752890976ce40df7.jsonl"}
 {"id":"rec-753cbde68ef51e45","ts":"2026-07-25T00:47:05Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-753cbde68ef51e45.jsonl"}
 {"id":"rec-7554b13e9a43b0e0","ts":"2026-07-13T00:21:46Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-7554b13e9a43b0e0.jsonl"}
 {"id":"rec-756fb043c5831d6d","ts":"2026-07-25T00:46:24Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-756fb043c5831d6d.jsonl"}
