@@ -267,9 +267,26 @@ export function collectLane({
       return { ref: plan.ref, commit: null, collected: 0, skipped: plan.skipped, duplicates: plan.duplicates, baseFetched };
     }
 
+    // C1: `plan.files.length` counts GROUP WINNERS, not new blobs. On a
+    // same-day re-run, a file already baked into the ref's prior tip
+    // re-enters `plan.files` unchanged — it is still an untracked candidate
+    // on disk, and `mainPaths` is filtered against origin/main, never the
+    // lane ref the parent is actually built from. The tree diff between the
+    // parent this commit is built on and the tree just written is the only
+    // reliable measure of what is genuinely NEW; `collected` and the commit
+    // message are both derived from THAT, not from the planner's per-run
+    // winner count. Kept as a tree-diff read rather than teaching the
+    // planner about the ref's tip, so `plan.mjs` stays pure and untouched.
+    const addedPaths = gitOrThrow(
+      git,
+      ['diff-tree', '-r', '--name-only', '--no-commit-id', parentTreeSha, newTreeSha],
+      { cwd: root },
+    ).split('\n').filter(Boolean);
+    const message = plan.message.replace(/\(\d+ records\)$/, `(${addedPaths.length} records)`);
+
     const newCommitSha = gitOrThrow(
       git,
-      ['commit-tree', newTreeSha, '-p', plan.parent, '-m', plan.message],
+      ['commit-tree', newTreeSha, '-p', plan.parent, '-m', message],
       { cwd: root },
     ).trim();
 
@@ -277,15 +294,27 @@ export function collectLane({
     //     its blobs are harmless loose objects, and a re-run collects them.
     const updateRefResult = git(['update-ref', plan.ref, newCommitSha, oldTipArg], { cwd: root });
     if (updateRefResult.status !== 0) {
-      const err = new Error(`memory.collect.raced: ${plan.ref} moved during this run — ${updateRefResult.stderr.trim()}`);
-      err.raced = true;
+      // E2: `update-ref` can fail for reasons that are NOT a lost race (a
+      // malformed ref, a permissions error, disk pressure...). Only tag
+      // `raced` when git's own stderr names exactly the CAS-lock shapes it
+      // actually produces on a lost compare-and-swap — "cannot lock ref"
+      // (covers both the old-value-mismatch and the must-not-exist
+      // collision) and, defensively, the two more specific phrasings the
+      // review flagged. Anything else is a genuine failure and must say so.
+      if (/cannot lock ref|reference already exists|is at .* but expected/.test(updateRefResult.stderr)) {
+        const err = new Error(`memory.collect.raced: ${plan.ref} moved during this run — ${updateRefResult.stderr.trim()}`);
+        err.raced = true;
+        throw err;
+      }
+      const err = new Error(`git update-ref ${plan.ref} exited ${updateRefResult.status}: ${updateRefResult.stderr.trim()}`);
+      err.status = updateRefResult.status;
       throw err;
     }
 
     return {
       ref: plan.ref,
       commit: newCommitSha,
-      collected: plan.files.length,
+      collected: addedPaths.length,
       skipped: plan.skipped,
       duplicates: plan.duplicates,
       baseFetched,

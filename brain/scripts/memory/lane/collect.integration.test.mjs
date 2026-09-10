@@ -250,6 +250,19 @@ test('B1.4 — ref lifecycle: first run creates, same-day re-run appends, a thir
   assert.equal(parentOfSecond, first.commit, 'the append parents off the ref\'s prior tip, not origin/main again');
   const refList2 = git(repo.mainDir, 'for-each-ref', 'refs/heads/memory/').split('\n').filter(Boolean);
   assert.equal(refList2.length, 1, 'still exactly one refs/heads/memory/* entry after the append');
+  // C1: the identical/divergent winners re-enter `plan.files` on this second
+  // run (they are still untracked candidates on disk, and `mainPaths` is
+  // filtered against origin/main, never the lane ref) — but only `newFile`
+  // is an actual NEW blob relative to the ref's prior tip. `collected` and
+  // the commit subject must both reflect that, not the planner's per-run
+  // winner count.
+  assert.equal(second.collected, 1, 'only the genuinely new file counts as collected on a same-day re-run');
+  const secondSubject = git(repo.mainDir, 'log', '-1', '--format=%s', second.commit).trim();
+  assert.match(
+    secondSubject,
+    /\(1 records\)$/,
+    'the commit subject must count only the newly-added file, not the group winners re-included from the ref tip',
+  );
 
   // a third run with nothing new.
   const tipBeforeThird = git(repo.mainDir, 'rev-parse', second.ref).trim();
