@@ -141,14 +141,19 @@ git's own error.
 
 `memory/cli.mjs` MUST expose `collect` in `VALID_OPS`, dispatched before backend selection,
 never routed through a backend's `share`. On success it MUST print `memory.collect.done`
-(en/es) and return `{ ref, commit, collected, skipped, duplicates }`, exit 0. On a genuine
-failure it MUST print `memory.collect.failed` and exit 1. It MUST NOT require `MEMORY_BACKEND`.
+(en/es) and return `{ ref, commit, collected, skipped, duplicates, baseFetched }`, exit 0.
+`baseFetched` reports whether the run's best-effort `git fetch origin main` succeeded
+(design.md A9/data-flow step 1) — useful for a caller deciding whether to trust
+`collected`/`skipped` against a fresh `origin/main`, and already part of `collectLane`'s own
+return shape (design.md's module map), so `--json` surfacing it is a spec gap being closed
+here, not new behavior. On a genuine failure it MUST print `memory.collect.failed` and exit
+1. It MUST NOT require `MEMORY_BACKEND`.
 
 #### Scenario: successful run reports the shape
 - GIVEN a run with candidates and no failures
 - WHEN `npm run memory:collect` completes
 - THEN it prints `memory.collect.done` and exits 0 with `{ ref, commit, collected, skipped,
-  duplicates }` populated
+  duplicates, baseFetched }` populated
 
 #### Scenario: dispatch never touches a backend
 - GIVEN any `MEMORY_BACKEND` value or none set
