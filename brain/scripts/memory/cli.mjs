@@ -20,7 +20,7 @@
 // Pattern mirrors SDD_HARNESS dispatch in brain/scripts/bootstrap.sh §6.
 
 import { readFileSync, existsSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { join, dirname, relative, isAbsolute, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { hostname } from "node:os";
 
@@ -37,6 +37,21 @@ import {
 } from "./lib/backend-selection.mjs";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../../..");
+
+// B1 (#888 cold review, PR 2): the ONLY directory `BRAIN_VCS_TEST_MODULE`
+// (the ship op's test-only vcs-port seam, below) is ever allowed to import
+// from. A test-only seam that imports an ARBITRARY absolute path is CODE
+// executed inside the same process that reads `BRAIN_MEMORY_TOKEN` — unlike
+// `BRAIN_MEMORY_TEST_ROOT`/`BRAIN_MEMORY_ENV_FILE`, which only ever point at
+// DATA (a directory to read records from, an env file to parse), never at a
+// module this process then `import()`s and executes. Constraining the path
+// to a COMMITTED fixture directory means the only code that can ever run
+// through this seam is code that was reviewed and merged — never an
+// arbitrary path a misconfigured or malicious env could point at. See
+// `vcs/cli.mjs`'s own `getVcs()` for the same discipline applied to its
+// provider-name seam (a regex allowlist there; a path-containment check
+// here, because this seam takes a path rather than a bare identifier).
+const FIXTURE_ROOT = join(repoRoot, "brain/scripts/memory/__fixtures__");
 
 // ---------------------------------------------------------------------------
 // Read MEMORY_BACKEND: env var > .env file > default "engram"
@@ -382,9 +397,9 @@ if (op === "collect") {
 // what the run found (mirrors "collect"'s own contract).
 //
 // BRAIN_VCS_TEST_MODULE (test-only seam, mirrors BRAIN_MEMORY_TEST_ROOT):
-// when set, its value is an absolute path to a fake port module (the same
-// shape `getVcs()` itself returns — `mrList`/`mrCreate`/`mrAutoMerge`), and
-// that module is imported DIRECTLY instead of ever calling `getVcs()`. This
+// when set, its value is a path to a fake port module (the same shape
+// `getVcs()` itself returns — `mrList`/`mrCreate`/`mrAutoMerge`), and that
+// module is imported DIRECTLY instead of ever calling `getVcs()`. This
 // exists because `getVcs()` has no seam of its own reachable through a CLI
 // subprocess (unlike `_import`, its in-process-only test hook): without it,
 // EVERY non-dry-run CLI-level test of this op resolves the REAL provider
@@ -392,7 +407,28 @@ if (op === "collect") {
 // to short-circuit before `shipLane`'s find/create step reaches the real,
 // unfakeable GitHub port (see `cli.ship.test.mjs`'s own account of the near
 // -miss this seam closes). NEVER set this outside tests.
+//
+// B1 (cold review, PR 2): the resolved path MUST fall inside `FIXTURE_ROOT`
+// (`resolveVcsTestModulePath` below) — see that constant's own comment for
+// why. The fixture module itself carries no test-case-specific behavior;
+// its ANSWERS are read at call time from the JSON file named by the second,
+// DATA-only env var `BRAIN_VCS_TEST_SCRIPT` (see
+// `__fixtures__/fake-vcs-port.mjs`).
 // ---------------------------------------------------------------------------
+
+/** Resolves `BRAIN_VCS_TEST_MODULE` against `FIXTURE_ROOT`, refusing (before
+ * any `import()` is attempted) anything that would resolve outside it — a
+ * path traversal (`../..`) or an absolute path elsewhere on disk. See B1's
+ * comment on `FIXTURE_ROOT` for the rationale. */
+function resolveVcsTestModulePath(vcsTestModule) {
+  const abs = resolve(vcsTestModule);
+  const rel = relative(FIXTURE_ROOT, abs);
+  if (rel.startsWith("..") || isAbsolute(rel)) {
+    throw new Error(`memory/cli: BRAIN_VCS_TEST_MODULE must resolve inside ${FIXTURE_ROOT}`);
+  }
+  return abs;
+}
+
 if (op === "ship") {
   const { shipLane } = await import("./lane/ship.mjs");
   const { MEMORY_TOKEN_ENV } = await import("../lib/credential-env.mjs");
@@ -409,7 +445,7 @@ if (op === "ship") {
     const vcs = dryRun
       ? null
       : vcsTestModule
-        ? await import(pathToFileURL(vcsTestModule).href)
+        ? await import(pathToFileURL(resolveVcsTestModulePath(vcsTestModule)).href)
         : await (await import("../vcs/cli.mjs")).getVcs({ config, identity });
     const result = await shipLane({
       root: memoryRoot,

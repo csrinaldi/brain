@@ -91,10 +91,44 @@ function fixtureRepoDiverged() {
   return { mainDir, originDir };
 }
 
+// B1/C1 (#888 cold review, PR 2): the committed, DATA-driven fixture module
+// — never an arbitrary path — that `BRAIN_VCS_TEST_MODULE` points every CLI
+// -level test in this file at. See `__fixtures__/fake-vcs-port.mjs` and
+// `memory/cli.mjs`'s `resolveVcsTestModulePath()` for the constraint this
+// closes: before this batch, `runCli()` never set the seam at all, so every
+// case that used it (four of the tests below) constructed the REAL, bound
+// `getVcs()` port — reading this repo's own `brain.config.json` — on every
+// run, one fixture mistake away from a real network call (see this file's
+// own header comment for the near-miss that seam was built to close in the
+// first place).
+const FAKE_VCS_MODULE = join(HERE, '__fixtures__', 'fake-vcs-port.mjs');
+
+/** Writes a `BRAIN_VCS_TEST_SCRIPT` data file for the committed fixture
+ * module. The module itself never changes between tests — only the JSON
+ * this returns does (B1: data varies, code does not). */
+function writeVcsTestScript(base, script) {
+  const path = join(base, 'vcs-script.json');
+  writeFileSync(path, JSON.stringify(script), 'utf8');
+  return path;
+}
+
+/** C1: every non-dry-run CLI run in this file goes through `runCli()` (or
+ * sets the seam explicitly, for the handful of cases that need per-test
+ * `mrCreate`/`mrAutoMerge` answers) — never the real `getVcs()`. The default
+ * script here is intentionally empty: none of the cases that use plain
+ * `runCli()` ever reach a `vcs` verb at all (nothing-to-ship and diverged
+ * both short-circuit inside `shipLane` before `vcs` is touched), so the
+ * fixture's own loud "not configured" fallback (see that file) is never hit
+ * in practice — it exists as backstop, not as this default's real behavior. */
 function runCli(root, ...args) {
   return spawnSync(process.execPath, [CLI, 'ship', ...args], {
     encoding: 'utf8',
-    env: { ...process.env, BRAIN_MEMORY_TEST_ROOT: root, MEMORY_BACKEND: 'no-such-backend' },
+    env: {
+      ...process.env,
+      BRAIN_MEMORY_TEST_ROOT: root,
+      MEMORY_BACKEND: 'no-such-backend',
+      BRAIN_VCS_TEST_MODULE: FAKE_VCS_MODULE,
+    },
   });
 }
 
@@ -163,14 +197,20 @@ test('BRAIN_MEMORY_TOKEN never appears in stdout or stderr, on any path', () => 
   const { mainDir: nothingRoot } = fixtureRepo({ withCandidate: false });
   const runNothing = spawnSync(process.execPath, [CLI, 'ship', '--json'], {
     encoding: 'utf8',
-    env: { ...process.env, BRAIN_MEMORY_TEST_ROOT: nothingRoot, MEMORY_BACKEND: 'no-such-backend', BRAIN_MEMORY_TOKEN: sentinel },
+    env: {
+      ...process.env, BRAIN_MEMORY_TEST_ROOT: nothingRoot, MEMORY_BACKEND: 'no-such-backend',
+      BRAIN_MEMORY_TOKEN: sentinel, BRAIN_VCS_TEST_MODULE: FAKE_VCS_MODULE,
+    },
   });
   assert.doesNotMatch(runNothing.stdout + runNothing.stderr, new RegExp(sentinel));
 
   const { mainDir: divergedRoot } = fixtureRepoDiverged();
   const runDiverged = spawnSync(process.execPath, [CLI, 'ship'], {
     encoding: 'utf8',
-    env: { ...process.env, BRAIN_MEMORY_TEST_ROOT: divergedRoot, MEMORY_BACKEND: 'no-such-backend', BRAIN_MEMORY_TOKEN: sentinel },
+    env: {
+      ...process.env, BRAIN_MEMORY_TEST_ROOT: divergedRoot, MEMORY_BACKEND: 'no-such-backend',
+      BRAIN_MEMORY_TOKEN: sentinel, BRAIN_VCS_TEST_MODULE: FAKE_VCS_MODULE,
+    },
   });
   assert.doesNotMatch(runDiverged.stdout + runDiverged.stderr, new RegExp(sentinel));
 });
@@ -182,26 +222,49 @@ test('the op reads BRAIN_MEMORY_TOKEN exactly once (source guard) and threads on
   assert.doesNotMatch(source, /shipLane\([^)]*identity\b(?!Bound)/, 'shipLane must never receive the raw token — only identityBound');
 });
 
-/** Writes a fake vcs port module (the same shape `getVcs()` returns) and
- * returns its absolute path, for `BRAIN_VCS_TEST_MODULE`. */
-function writeFakeVcsModule(base) {
-  const path = join(base, 'fake-vcs.mjs');
-  writeFileSync(
-    path,
-    [
-      "export const mrList = async () => [];",
-      "export const mrCreate = async () => ({ url: 'https://fake-vcs.invalid/pull/999' });",
-      "export const mrAutoMerge = async () => ({ enabled: true, url: null });",
-      '',
-    ].join('\n'),
-    'utf8',
+test('C1 (cold review) guard: runCli() always sets BRAIN_VCS_TEST_MODULE — combined with the source guard below (getVcs gated behind the ternary\'s false branch), no test in this file that goes through runCli() can ever reach the real getVcs()', () => {
+  const source = readFileSync(fileURLToPath(import.meta.url), 'utf8');
+  const fnStart = source.indexOf('function runCli(');
+  assert.notEqual(fnStart, -1, 'runCli() must exist in this file');
+  const fnEnd = source.indexOf('\n}', fnStart);
+  const fnBody = source.slice(fnStart, fnEnd);
+  assert.match(
+    fnBody,
+    /BRAIN_VCS_TEST_MODULE:\s*FAKE_VCS_MODULE/,
+    'runCli() must set BRAIN_VCS_TEST_MODULE to the committed fixture on EVERY call — before this batch, none of the four runCli()-driven non-dry-run tests set it at all, so each one constructed the real, bound getVcs() port on every run',
   );
-  return path;
-}
+});
 
-test('a full success run (push + PR create + arm) goes through an injected fake vcs module, never the real getVcs()/gh port', () => {
+test('B1 (cold review): BRAIN_VCS_TEST_MODULE outside the committed fixture root is refused before any import is attempted, exit 1', () => {
+  const { mainDir } = fixtureRepo({ withCandidate: false });
+  const run = spawnSync(process.execPath, [CLI, 'ship', '--json'], {
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      BRAIN_MEMORY_TEST_ROOT: mainDir,
+      MEMORY_BACKEND: 'no-such-backend',
+      BRAIN_VCS_TEST_MODULE: '/tmp/x.mjs',
+    },
+  });
+  assert.equal(run.status, 1);
+  assert.match(run.stderr, /BRAIN_VCS_TEST_MODULE must resolve inside/);
+  assert.equal(run.stdout, '', 'a refused seam must never print a JSON result — nothing was imported, nothing ran');
+});
+
+test('B1 (cold review): the committed fixture module itself resolves and works (positive case, mirrors the escape test above)', () => {
+  const { mainDir } = fixtureRepo({ withCandidate: false });
+  const run = runCli(mainDir, '--json');
+  assert.equal(run.status, 0, run.stderr);
+  assert.doesNotMatch(run.stderr, /BRAIN_VCS_TEST_MODULE must resolve inside/);
+});
+
+test('a full success run (push + PR create + arm) goes through the committed fixture vcs module, never the real getVcs()/gh port', () => {
   const { mainDir, originDir } = fixtureRepo({ withCandidate: true });
-  const fakeVcsPath = writeFakeVcsModule(testTmp('cli-ship-fake-vcs-'));
+  const scriptPath = writeVcsTestScript(testTmp('cli-ship-fake-vcs-'), {
+    mrList: [],
+    mrCreate: { url: 'https://fake-vcs.invalid/pull/999' },
+    mrAutoMerge: { enabled: true, url: null },
+  });
 
   const run = spawnSync(process.execPath, [CLI, 'ship', '--json'], {
     encoding: 'utf8',
@@ -209,7 +272,8 @@ test('a full success run (push + PR create + arm) goes through an injected fake 
       ...process.env,
       BRAIN_MEMORY_TEST_ROOT: mainDir,
       MEMORY_BACKEND: 'no-such-backend',
-      BRAIN_VCS_TEST_MODULE: fakeVcsPath,
+      BRAIN_VCS_TEST_MODULE: FAKE_VCS_MODULE,
+      BRAIN_VCS_TEST_SCRIPT: scriptPath,
     },
   });
 
@@ -233,7 +297,7 @@ test('the real getVcs()/gh port is only ever imported when BRAIN_VCS_TEST_MODULE
   assert.equal(getVcsRefs.length, 1, `getVcs must be referenced exactly once in the ship block, found ${getVcsRefs.length}`);
   assert.match(
     shipBlock,
-    /vcsTestModule\s*\?\s*await import\(pathToFileURL\(vcsTestModule\)\.href\)\s*:\s*await \(await import\("\.\.\/vcs\/cli\.mjs"\)\)\.getVcs\(/,
+    /vcsTestModule\s*\?\s*await import\(pathToFileURL\(resolveVcsTestModulePath\(vcsTestModule\)\)\.href\)\s*:\s*await \(await import\("\.\.\/vcs\/cli\.mjs"\)\)\.getVcs\(/,
     "getVcs must be gated behind the ternary's false branch — only reached when BRAIN_VCS_TEST_MODULE is unset",
   );
 });
