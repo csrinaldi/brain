@@ -21,7 +21,7 @@
 
 import { readFileSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { hostname } from "node:os";
 
 import { t } from "../i18n/t.mjs";
@@ -380,13 +380,25 @@ if (op === "collect") {
 // `--json` prints the result object on stdout ONLY; every other line this op
 // prints goes to stderr, so `--json` stdout stays parseable regardless of
 // what the run found (mirrors "collect"'s own contract).
+//
+// BRAIN_VCS_TEST_MODULE (test-only seam, mirrors BRAIN_MEMORY_TEST_ROOT):
+// when set, its value is an absolute path to a fake port module (the same
+// shape `getVcs()` itself returns — `mrList`/`mrCreate`/`mrAutoMerge`), and
+// that module is imported DIRECTLY instead of ever calling `getVcs()`. This
+// exists because `getVcs()` has no seam of its own reachable through a CLI
+// subprocess (unlike `_import`, its in-process-only test hook): without it,
+// EVERY non-dry-run CLI-level test of this op resolves the REAL provider
+// from this repo's own `brain.config.json`, and any test fixture that fails
+// to short-circuit before `shipLane`'s find/create step reaches the real,
+// unfakeable GitHub port (see `cli.ship.test.mjs`'s own account of the near
+// -miss this seam closes). NEVER set this outside tests.
 // ---------------------------------------------------------------------------
 if (op === "ship") {
   const { shipLane } = await import("./lane/ship.mjs");
-  const { getVcs } = await import("../vcs/cli.mjs");
   const { MEMORY_TOKEN_ENV } = await import("../lib/credential-env.mjs");
   const { loadBrainConfig } = await import("../lib/brain-config.mjs");
   const memoryRoot = process.env.BRAIN_MEMORY_TEST_ROOT ?? repoRoot;
+  const vcsTestModule = process.env.BRAIN_VCS_TEST_MODULE;
   const rest = process.argv.slice(3);
   const dryRun = rest.includes("--dry-run");
   const asJson = rest.includes("--json");
@@ -394,7 +406,11 @@ if (op === "ship") {
   try {
     const config = loadBrainConfig();
     const identity = process.env[MEMORY_TOKEN_ENV] ?? null; // ONE read, in ONE place (A5)
-    const vcs = dryRun ? null : await getVcs({ config, identity });
+    const vcs = dryRun
+      ? null
+      : vcsTestModule
+        ? await import(pathToFileURL(vcsTestModule).href)
+        : await (await import("../vcs/cli.mjs")).getVcs({ config, identity });
     const result = await shipLane({
       root: memoryRoot,
       project: config.project.slug,

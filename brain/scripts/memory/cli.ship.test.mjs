@@ -182,6 +182,62 @@ test('the op reads BRAIN_MEMORY_TOKEN exactly once (source guard) and threads on
   assert.doesNotMatch(source, /shipLane\([^)]*identity\b(?!Bound)/, 'shipLane must never receive the raw token — only identityBound');
 });
 
+/** Writes a fake vcs port module (the same shape `getVcs()` returns) and
+ * returns its absolute path, for `BRAIN_VCS_TEST_MODULE`. */
+function writeFakeVcsModule(base) {
+  const path = join(base, 'fake-vcs.mjs');
+  writeFileSync(
+    path,
+    [
+      "export const mrList = async () => [];",
+      "export const mrCreate = async () => ({ url: 'https://fake-vcs.invalid/pull/999' });",
+      "export const mrAutoMerge = async () => ({ enabled: true, url: null });",
+      '',
+    ].join('\n'),
+    'utf8',
+  );
+  return path;
+}
+
+test('a full success run (push + PR create + arm) goes through an injected fake vcs module, never the real getVcs()/gh port', () => {
+  const { mainDir, originDir } = fixtureRepo({ withCandidate: true });
+  const fakeVcsPath = writeFakeVcsModule(testTmp('cli-ship-fake-vcs-'));
+
+  const run = spawnSync(process.execPath, [CLI, 'ship', '--json'], {
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      BRAIN_MEMORY_TEST_ROOT: mainDir,
+      MEMORY_BACKEND: 'no-such-backend',
+      BRAIN_VCS_TEST_MODULE: fakeVcsPath,
+    },
+  });
+
+  assert.equal(run.status, 0, run.stderr);
+  const parsed = JSON.parse(run.stdout);
+  assert.equal(parsed.pushed, true);
+  assert.equal(parsed.pr.number, 999, "the PR number must come from the injected fake — a real gh/glab call could never return this value");
+  assert.equal(parsed.autoMerge.enabled, true);
+
+  const afterOriginRefs = git(originDir, 'for-each-ref', '--format=%(refname)', 'refs/heads/memory/');
+  assert.notEqual(afterOriginRefs, '', 'the push itself is real git, against the LOCAL bare origin fixture — never GitHub');
+});
+
+test('the real getVcs()/gh port is only ever imported when BRAIN_VCS_TEST_MODULE is unset (source guard)', () => {
+  const source = readFileSync(CLI, 'utf8');
+  assert.match(source, /BRAIN_VCS_TEST_MODULE/, 'the ship op must expose the vcs test-substitution seam');
+  const shipBlockStart = source.indexOf('if (op === "ship")');
+  const shipBlockEnd = source.indexOf('if (op === "migrate-v1")');
+  const shipBlock = source.slice(shipBlockStart, shipBlockEnd);
+  const getVcsRefs = shipBlock.match(/\.getVcs\(/g) ?? [];
+  assert.equal(getVcsRefs.length, 1, `getVcs must be referenced exactly once in the ship block, found ${getVcsRefs.length}`);
+  assert.match(
+    shipBlock,
+    /vcsTestModule\s*\?\s*await import\(pathToFileURL\(vcsTestModule\)\.href\)\s*:\s*await \(await import\("\.\.\/vcs\/cli\.mjs"\)\)\.getVcs\(/,
+    "getVcs must be gated behind the ternary's false branch — only reached when BRAIN_VCS_TEST_MODULE is unset",
+  );
+});
+
 test('memory:ship resolves from package.json, beside the other memory:* scripts', () => {
   const pkg = JSON.parse(readFileSync(join(HERE, '../../../package.json'), 'utf8'));
   assert.equal(pkg.scripts['memory:ship'], 'node ./brain/scripts/memory/cli.mjs ship');
