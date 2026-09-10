@@ -192,6 +192,28 @@ retried** — the loser's plan is stale, its blobs are harmless loose objects, a
 them. The empty-string form of `<old>` is documented in `git help update-ref`; the integration
 test pins it empirically rather than trusting the man page.
 
+### D8 — `removeTempTree` moves to `lib/tmp-tree.mjs`; `__fixtures__/tmp-tree.mjs` re-exports it
+
+**Choice**: `collect.mjs` (Slice B) needs `removeTempTree` to dispose of the temp index directory
+it builds for `read-tree`/`write-tree` (A1). Before this slice, `removeTempTree` lived at
+`__fixtures__/tmp-tree.mjs`, and exactly two production modules (`review/cold-boot.mjs`,
+`memory/backends/engram.mjs`) already imported it — #802's own scope note flagged that layering
+question ("should the helper move out of `__fixtures__`, whose name reads test-only?") and
+deliberately deferred it. `collect.mjs` becoming a THIRD production importer is the point at
+which deferring further stopped being reasonable for this slice. Resolved by moving the
+implementation to `brain/scripts/lib/tmp-tree.mjs` — the directory this repo already uses for
+fs/git-adjacent production helpers — and turning `__fixtures__/tmp-tree.mjs` into a one-line
+re-export, so every existing `import ... from '.../__fixtures__/tmp-tree.mjs'` across the test
+suite keeps working unchanged.
+**Rejected**: leaving the import as-is with only a comment justifying it. That would have been the
+smaller diff, but it repeats #802's exact deferral a third time instead of resolving it, and it
+keeps a genuinely production-owned helper filed under a directory name that tells the next reader
+the opposite of what is true.
+**Scope note**: this decision resolves ONLY the helper's location. It does not touch
+`cold-boot.mjs`'s or `engram.mjs`'s own bare-`rmSync` calls (`tmp-tree-adoption.test.mjs`'s
+ALLOWLIST) — whether those two should also adopt `removeTempTree` is a separate question, still
+open, still not this slice's to decide in passing.
+
 ## Data flow
 
 ```

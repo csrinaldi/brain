@@ -19,8 +19,11 @@ import { planLaneCommit } from './plan.mjs';
 import { scanTextForSecrets, resolveSecretConfig, compilePatterns } from '../lib/secret-scrub.mjs';
 // removeTempTree, not a bare rmSync: this module spawns git AND recursively
 // removes a directory (the temp index's mkdtemp dir) — issue #800/#802's
-// adoption rule for exactly that combination.
-import { removeTempTree } from '../../__fixtures__/tmp-tree.mjs';
+// adoption rule for exactly that combination. Imported from `lib/`, not
+// `__fixtures__/` (issue #887 correction C2): this is a production module,
+// and `lib/tmp-tree.mjs` is now the production home for the helper —
+// `__fixtures__/tmp-tree.mjs` re-exports it for every existing test import.
+import { removeTempTree } from '../../lib/tmp-tree.mjs';
 
 // Node's execFileSync defaults to a 1 MiB output buffer — the same ceiling
 // governance/postmerge/git-seam.mjs raises for the same reason (#332): a
