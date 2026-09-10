@@ -199,7 +199,7 @@ Commit: `test(hooks): pin that pre-push never invokes memory:ship (#888)`.
 **Deferred to #888** (the slice split, see the note at the top of this file) — pending, not part
 of #901's library PR.
 
-- [ ] 6.1 RED: `brain/scripts/memory/cli.ship.test.mjs` — under `BRAIN_MEMORY_TEST_ROOT`, reusing
+- [x] 6.1 RED: `brain/scripts/memory/cli.ship.test.mjs` — under `BRAIN_MEMORY_TEST_ROOT`, reusing
       `cli.collect.test.mjs`'s bare-origin fixture (network-free by construction):
       - `"ship"` added to `VALID_OPS`, dispatched **before backend selection** (mirrors `collect`,
         `cli.mjs:306-359`);
@@ -217,7 +217,7 @@ of #901's library PR.
       - `npm run memory:ship` resolves from `package.json` (added in 6.2).
       Focused: `node --test brain/scripts/memory/cli.ship.test.mjs` — RED (`"ship"` not in
       `VALID_OPS`, no dispatch block, no npm script).
-- [ ] 6.2 GREEN: `brain/scripts/memory/cli.mjs` — add `"ship"` to `VALID_OPS` (`:103-119`), a
+- [x] 6.2 GREEN: `brain/scripts/memory/cli.mjs` — add `"ship"` to `VALID_OPS` (`:103-119`), a
       dispatch block beside `collect`'s (`:359`) that: `loadBrainConfig()` for `project.slug`,
       `vcs.provider`, `governance.tier`; reads `BRAIN_MEMORY_TOKEN` once
       (`const identity = process.env[MEMORY_TOKEN_ENV] ?? null`); `vcs = dryRun ? null : await
@@ -226,7 +226,7 @@ of #901's library PR.
       `process.argv.slice(3)` (E4's scoping, never bare `process.argv.includes`).
       `package.json`: add `"memory:ship": "node ./brain/scripts/memory/cli.mjs ship"`.
       Focused: same command — GREEN. `npm test` — still red on i18n coverage until 6.3.
-- [ ] 6.3 RED → GREEN: add the fourteen `memory.ship.*` keys to
+- [x] 6.3 RED → GREEN: add the fourteen `memory.ship.*` keys to
       `brain/scripts/i18n/en.mjs` **and** `es.mjs` in the same commit, matching design's exit table
       (A6) and `en.mjs:319-327`'s shape: `done`, `nothing`, `dryRun`, `pushed`, `prExisting`,
       `armed`, `autoMergeRefused`, `identityAmbient`, `diverged`, `pushFailed`, `prLookupFailed`,
@@ -235,6 +235,31 @@ of #901's library PR.
       catalogs carry all fourteen keys. `npm test` — full suite green.
 
 Commit: `feat(memory): add the ship CLI op, i18n and npm script (#888)`.
+
+**PR 2 — closing note (this apply batch).**
+
+- **Split, realized**: #901 (the library — `lane/ship.mjs`, `credential-env.mjs`'s denylist,
+  sections 1–5 above) merged as **PR #902**, commit `16493771`. This change (#888, the CLI `ship`
+  op, section 6) is **PR 2**, and closes the ticket.
+- **Ruling D4's scope deviation, reconfirmed here**: trigger wiring (a `SessionEnd` hook, a
+  `day:start` sweep) stays deferred to #889 per task 0.2 above. `pre-push`'s non-invocation was
+  already pinned in PR 1 (section 5) — not re-tested in this batch.
+- **PR grammar**: this slice implements the ticket's literal grammar (task 0.1), a delta from
+  `design.md`'s original A4 wording — `title` carries `(<n> records)`, the body's first line does
+  not. Reconciled, not re-opened.
+- **cold-1 (PR #902's cold review) fixed in this batch**: `buildTitleAndBody()` ran unconditionally
+  right after `collect()`, so a ref that had never been created locally (first run, nothing to
+  ship) made the three-dot diff against `origin/main` fail on a bad revision — misreported as
+  "origin/main could not be fetched" rather than "this ref never existed." Deferred the call to the
+  two places it is actually needed (the `--dry-run` report, and once more just before
+  find/create-PR after a real push), both of which already proved the ref exists. Full RED→GREEN
+  evidence: `sdd/issue-888-lane-ship/apply-progress` (engram).
+- **CLI test hardening**: `cli.ship.test.mjs` constructed the real, bound `vcs` port via `getVcs()`
+  on every non-dry-run case, one fixture mistake away from reaching the real GitHub provider (see
+  that file's own near-miss account). Added `BRAIN_VCS_TEST_MODULE`, a test-only seam in
+  `cli.mjs`'s `ship` block that imports a fake port module directly instead of ever calling
+  `getVcs()`, plus a full success-path test through the real CLI and a source-guard test pinning
+  `getVcs()` behind the seam's absence — both proven to catch a real mutation before landing.
 
 ## 7. Wrap-up before the push
 
