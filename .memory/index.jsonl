@@ -1743,6 +1743,7 @@
 {"id":"rec-b8ff378e17332b2a","ts":"2026-07-25T21:50:58Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-b8ff378e17332b2a.jsonl"}
 {"id":"rec-b9191ca27183b92c","ts":"2026-07-12T21:17:32Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07-rec-b9191ca27183b92c.jsonl"}
 {"id":"rec-b922509748739a41","ts":"2026-07-25T21:51:27Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-b922509748739a41.jsonl"}
+{"id":"rec-b92ccb361910a065","ts":"2026-09-10T13:04:04Z","actor":"feat/issue-888-featmemory-the-lane-ships-push-and-pr-th","type":"architecture","project":"brain","issue":888,"file":"2026-09-rec-b92ccb361910a065.jsonl"}
 {"id":"rec-b92f38696b08ba17","ts":"2026-07-25T21:50:59Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-b92f38696b08ba17.jsonl"}
 {"id":"rec-b97c016b6dd4b883","ts":"2026-07-29T14:25:57Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-b97c016b6dd4b883.jsonl"}
 {"id":"rec-b9bf1a04c46c15dd","ts":"2026-07-25T21:50:23Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-b9bf1a04c46c15dd.jsonl"}
