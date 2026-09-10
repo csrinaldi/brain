@@ -2358,3 +2358,4 @@
 {"id":"rec-ffa569c06c3ab605","ts":"2026-07-25T00:48:24Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-07-rec-ffa569c06c3ab605.jsonl"}
 {"id":"rec-ffacb2bc03a6872d","ts":"2026-07-25T21:51:15Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-ffacb2bc03a6872d.jsonl"}
 {"id":"rec-ffe76add88219b01","ts":"2026-07-25T00:47:37Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-ffe76add88219b01.jsonl"}
+{"id":"rec-96965eb1cf95f9a0","ts":"2026-09-10T22:02:59Z","actor":"@csrinaldi","type":"architecture","project":"brain","issue":738,"file":"2026-09-rec-96965eb1cf95f9a0.jsonl"}
