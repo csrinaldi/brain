@@ -304,11 +304,13 @@ Commit: `feat(memory): add the ship CLI op, i18n and npm script (#888)`.
       `FIXTURE_ROOT` containment check removed → the escape test fails; C2's `identityBound`
       hardcoded to `false` → the bound-token assertion fails. Both restored from a pre-mutation
       backup, confirmed byte-identical, before continuing.
-- [ ] 7.2 `memory:save --issue 888` — record-first, committed before the first push (mirrors
-      `archive/886/tasks.md` task 8.2's shape).
-- [ ] 7.3 Tick epic task 3.1b in `openspec/changes/issue-864-memory-2-0/tasks.md` on this change's
-      closing PR, referencing this PR's number once known.
-- [ ] 7.4 `brain:review` before requesting human review.
+- [x] 7.2 Record-first per PR: `rec-bc8b2c1a93dee0f3` (`--issue 901`, PR #902) and
+      `rec-b92ccb361910a065` (`--issue 888`, PR #903), each committed before its push.
+- [x] 7.3 Epic task 3.1b ticked in PR #903.
+- [x] 7.4 Fresh cold reviews before each push: PR #902 APPROVE with three corrections landed first;
+      PR #903 REVISE (a blocker: the first test seam imported an arbitrary env-selected path in the
+      token-holding process) → constrained to the committed fixture directory by real path →
+      APPROVE on re-verification with three hardenings folded in.
 
 ## 8. Non-goals (D6 — restated, no work items)
 
@@ -326,8 +328,10 @@ This slice ships the verb and its own tests only. Explicitly out of scope, uncha
 
 ## 9. The PR
 
-- [ ] 9.1 Push; open the PR with `Closes #888`, `Parent: #864` in prose, label `type:feature`.
-      Body, in this order:
+- [x] 9.1 Shipped as two PRs (the maintainer chose a sub-ticket for the library, as #887 did):
+      PR #902 (`Closes #901`, merged 16493771) and PR #903 (`Closes #888`, merged 2d97cf61,
+      2026-09-10), the second carrying every body section below. Original instructions, for the
+      record — body, in this order:
       1. Summary — three bullets: the push, the idempotent find-or-create PR, the tier-gated arm.
       2. Changes table (design.md's File changes table).
       3. Test plan — the `npm test` output and each `node --test` command from section-by-section
@@ -351,8 +355,10 @@ This slice ships the verb and its own tests only. Explicitly out of scope, uncha
          - `issue-link`/`actor-check` lane recognition + `lane-paths`/`lane-scrub` contexts;
          - the `SessionEnd` hook + `day:start` sweep.
       6. Contributor checklist per `branch-pr` skill.
-- [ ] 9.2 `brain:review` on the pushed branch; address any correction before requesting human
-      review.
+- [x] 9.2 `brain:review`: #902 APPROVE at 766874cb (one correction, carried into #903 as the
+      title/body-after-decision fix); #903 APPROVE at 1350b876 (one correction — a set-but-blank
+      `BRAIN_MEMORY_TOKEN` was reported as bound while the port ran ambient — fixed as a loud
+      refusal in the archive PR, 204b467d). Both verdicts posted on GitHub.
 
 ## Review Workload Forecast
 

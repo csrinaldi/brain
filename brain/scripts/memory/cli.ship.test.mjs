@@ -302,6 +302,45 @@ test('C2 (cold review): identityBound reflects whether BRAIN_MEMORY_TOKEN was se
   assert.match(unboundRun.stderr, /BRAIN_MEMORY_TOKEN is not set/);
 });
 
+test('cold review correction: BRAIN_MEMORY_TOKEN set but blank is refused, exit 1, never reported as identityBound', () => {
+  const { mainDir } = fixtureRepo({ withCandidate: false });
+  const run = spawnSync(process.execPath, [CLI, 'ship', '--json'], {
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      BRAIN_MEMORY_TEST_ROOT: mainDir,
+      MEMORY_BACKEND: 'no-such-backend',
+      BRAIN_VCS_TEST_MODULE: FAKE_VCS_MODULE,
+      BRAIN_MEMORY_TOKEN: '',
+    },
+  });
+  assert.equal(run.status, 1);
+  assert.match(run.stderr, /BRAIN_MEMORY_TOKEN is set but empty/);
+  // Proves the fake port was never reached: the fixture's own loud "not
+  // configured" fallback (see fake-vcs-port.mjs) never fires, because the
+  // refusal above happens before any vcs verb is called.
+  assert.doesNotMatch(run.stderr, /not configured for this run/);
+  assert.equal(run.stdout, '', 'a refused blank token must never print a JSON result — identityBound must never appear as true');
+});
+
+test('cold review correction: BRAIN_MEMORY_TOKEN set to whitespace-only is refused the same way as empty', () => {
+  const { mainDir } = fixtureRepo({ withCandidate: false });
+  const run = spawnSync(process.execPath, [CLI, 'ship', '--json'], {
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      BRAIN_MEMORY_TEST_ROOT: mainDir,
+      MEMORY_BACKEND: 'no-such-backend',
+      BRAIN_VCS_TEST_MODULE: FAKE_VCS_MODULE,
+      BRAIN_MEMORY_TOKEN: '   ',
+    },
+  });
+  assert.equal(run.status, 1);
+  assert.match(run.stderr, /BRAIN_MEMORY_TOKEN is set but empty/);
+  assert.doesNotMatch(run.stderr, /not configured for this run/);
+  assert.equal(run.stdout, '', 'a refused whitespace-only token must never print a JSON result');
+});
+
 test('a full success run (push + PR create + arm) goes through the committed fixture vcs module, never the real getVcs()/gh port', () => {
   const { mainDir, originDir } = fixtureRepo({ withCandidate: true });
   const scriptPath = writeVcsTestScript(testTmp('cli-ship-fake-vcs-'), {
