@@ -266,6 +266,27 @@ Applied after B1-B4 above were already `[x]`-ticked, on the same worktree/branch
 - E1 — spec.md's output shape widened from five to six fields (`baseFetched` included), matching
   design.md's module map, which already sanctioned six. `spec.md`.
 
+### CI + review round 1 (issue #897, batch 4)
+
+Applied after the "Slice B correction batch" above, on the same worktree/branch, three commits:
+
+- CI blocker — the GitHub runner (git 2.55, no configured identity) failed every collector test
+  with `git commit-tree ... exited 128: Author identity unknown`. `collectLane()`'s own
+  `commit-tree` call intentionally never gets an `env` override (D6: ambient identity, never a
+  token) — the fixtures were the bug, relying on the developer's global git identity. Fixed with
+  repo-local `git config user.name`/`user.email` in both scratch repos, mirroring
+  `records-merge.integration.test.mjs`'s precedent. A new test pins the CORRECT failure behavior:
+  no identity anywhere (repo, global, system) still fails loudly with git's own message,
+  surfaced verbatim via `memory.collect.failed`. `collect.integration.test.mjs`,
+  `cli.collect.test.mjs`.
+- cold-1 — `parseStatusZ()` mis-parsed a rename/copy record's second NUL-terminated part (the
+  bare old path) as its own status-tagged entry, manufacturing a bogus candidate. Fixed: a
+  status starting with `R`/`C` now consumes the following part as the old path.
+  `collect.mjs`, `collect.integration.test.mjs`.
+- cold-2 — `cli.collect.test.mjs` never exercised the `memory.collect.secretSkipped`/
+  `.modifiedTrackedSkipped` stderr lines. Added coverage; no implementation change was needed.
+  `cli.collect.test.mjs`.
+
 ## Apply-time action item — not a code change in this slice
 
 - [ ] X1 During apply, after Slice A or B lands (whichever apply batch reaches it first), post
