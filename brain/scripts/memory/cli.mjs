@@ -22,6 +22,7 @@
 import { readFileSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { hostname } from "node:os";
 
 import { t } from "../i18n/t.mjs";
 import { formatDuplicateReport } from "./lib/duplicates.mjs";
@@ -110,6 +111,7 @@ const VALID_OPS = [
   "resolve-index",
   "split-records",
   "collect",
+  "ship",
   "migrate-v1",
   "setup",
   "feature-checkpoint",
@@ -356,6 +358,99 @@ if (op === "collect") {
     }
     process.exit(1);
   }
+}
+
+// ---------------------------------------------------------------------------
+// "ship" — the lane ship: one push, one PR, one credential this op reads and
+// this op alone (issue #888, ADR-0034 L1/L2/L5, design.md A1-A7). Dispatched
+// BEFORE backend selection, like "collect" above — no backend is ever
+// consulted, and this is the only user-invocable surface this slice adds
+// (the trigger wiring — a SessionEnd hook, a day:start sweep — is deferred to
+// #889; D4).
+//
+// BRAIN_MEMORY_TEST_ROOT — honoured, like "collect" above.
+//
+// The credential: `MEMORY_TOKEN_ENV` (`BRAIN_MEMORY_TOKEN`) is read from
+// `process.env` in EXACTLY ONE place, right here. It is handed to
+// `getVcs({identity})`, which binds it and returns the PORT — `shipLane`
+// receives that bound port plus `identityBound: boolean`, never the token
+// itself (A5's structural leak-regression guarantee: the string is never in
+// `shipLane`'s scope at all).
+//
+// `--json` prints the result object on stdout ONLY; every other line this op
+// prints goes to stderr, so `--json` stdout stays parseable regardless of
+// what the run found (mirrors "collect"'s own contract).
+// ---------------------------------------------------------------------------
+if (op === "ship") {
+  const { shipLane } = await import("./lane/ship.mjs");
+  const { getVcs } = await import("../vcs/cli.mjs");
+  const { MEMORY_TOKEN_ENV } = await import("../lib/credential-env.mjs");
+  const { loadBrainConfig } = await import("../lib/brain-config.mjs");
+  const memoryRoot = process.env.BRAIN_MEMORY_TEST_ROOT ?? repoRoot;
+  const rest = process.argv.slice(3);
+  const dryRun = rest.includes("--dry-run");
+  const asJson = rest.includes("--json");
+
+  try {
+    const config = loadBrainConfig();
+    const identity = process.env[MEMORY_TOKEN_ENV] ?? null; // ONE read, in ONE place (A5)
+    const vcs = dryRun ? null : await getVcs({ config, identity });
+    const result = await shipLane({
+      root: memoryRoot,
+      project: config.project.slug,
+      tier: config.governance.tier,
+      host: hostname(),
+      date: new Date().toISOString().slice(0, 10),
+      dryRun,
+      identityBound: identity !== null,
+      vcs,
+    });
+
+    if (asJson) {
+      console.log(JSON.stringify(result));
+    } else {
+      console.log(`memory/cli: ${await t(`memory.ship.${shipOutcomeKey(result)}`, {
+        ref: result.ref,
+        number: result.pr?.number ?? null,
+        reason: result.autoMerge?.reason ?? "",
+      })}`);
+    }
+
+    // Evidence, always on stderr — never gated by --json (mirrors "collect").
+    if (!result.dryRun) {
+      if (result.pushed) console.error(`memory/cli: ${await t("memory.ship.pushed", { ref: result.ref })}`);
+      if (result.pr && result.pr.url === null && result.pr.number !== null) {
+        console.error(`memory/cli: ${await t("memory.ship.prExisting", { number: result.pr.number })}`);
+      }
+      if (result.autoMerge?.enabled === true) {
+        console.error(`memory/cli: ${await t("memory.ship.armed", { number: result.pr?.number ?? null })}`);
+      }
+      if (!result.identityBound) {
+        console.error(`memory/cli: ${await t("memory.ship.identityAmbient")}`);
+      }
+    }
+    process.exit(0);
+  } catch (err) {
+    const key = err?.diverged ? "diverged"
+      : err?.pushFailed ? "pushFailed"
+      : err?.prLookupFailed ? "prLookupFailed"
+      : err?.prCreateFailed ? "prCreateFailed"
+      : "failed";
+    console.error(`memory/cli: ${await t(`memory.ship.${key}`, { message: err.message })}`);
+    process.exit(1);
+  }
+}
+
+/** shipOutcomeKey() — maps `shipLane`'s outcome shape to one of the
+ * `memory.ship.*` primary message keys (design.md A6's exit table). Kept a
+ * pure function of the result, never of the error path (that is the `catch`
+ * block above's job, off the THROWN, fatal branches only). */
+function shipOutcomeKey(result) {
+  if (result.dryRun) return "dryRun";
+  if (result.pr && result.pr.number === null) return "prNumberUnknown";
+  if (result.pushed === false && result.pr === null) return "nothing";
+  if (result.autoMerge?.enabled === false) return "autoMergeRefused";
+  return "done";
 }
 
 // ---------------------------------------------------------------------------

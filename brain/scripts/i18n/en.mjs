@@ -326,6 +326,22 @@ export default {
   'memory.collect.secretSkipped':          '{count} secret-bearing record(s) skipped — pattern and line number only, never the matched line.',
   'memory.collect.modifiedTrackedSkipped': '{count} tracked-and-modified record(s) skipped — commit or stash them, then re-run.',
 
+  // ── memory/cli.mjs — ship (issue #888, ADR-0034 L1/L2/L5) ────────────────────
+  'memory.ship.done':             '✓ shipped {ref} — pull request #{number} is armed.',
+  'memory.ship.nothing':          'nothing new to ship — {ref} already matches origin.',
+  'memory.ship.dryRun':           'plan — {ref} would ship. Nothing was pushed, no port call was made.',
+  'memory.ship.pushed':           '✓ pushed {ref} to origin.',
+  'memory.ship.prExisting':       'pull request #{number} was already open — reused, not recreated.',
+  'memory.ship.armed':            '✓ auto-merge armed on pull request #{number}.',
+  'memory.ship.autoMergeRefused': 'auto-merge was refused ({reason}) — the pull request stays open; the next run re-arms it.',
+  'memory.ship.identityAmbient':  'BRAIN_MEMORY_TOKEN is not set — this run authenticated with the ambient session credential.',
+  'memory.ship.diverged':         '✗ ship failed — {ref} diverged from origin; nothing was forced. {message}',
+  'memory.ship.pushFailed':       '✗ ship failed — the push did not land. {message}',
+  'memory.ship.prLookupFailed':   '✗ ship failed — the pull request lookup could not run, so its existence is uncomputable; the push already landed and is durable. {message}',
+  'memory.ship.prCreateFailed':   '✗ ship failed — the pull request could not be created. {message}',
+  'memory.ship.prNumberUnknown':  'the pull request is open but its number could not be derived — auto-merge was skipped; the next run recovers it.',
+  'memory.ship.failed':           '✗ ship failed — {message}',
+
   // ── memory/cli.mjs — which backend actually ran (issue #641) ─────────────────
   // Each of these is a case where the backend that ran is not the one a reader
   // would assume. Silence is the whole defect: `MEMORY_BACKEND=plainfiles`
