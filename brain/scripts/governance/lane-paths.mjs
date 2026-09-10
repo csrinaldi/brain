@@ -68,6 +68,8 @@ function buildDefaultDiffNameOnlyAdded(ctx, exec) {
  * @param {{ sourceBranch: string|null, changedFiles: string[]|null, addedFiles: string[]|null }} input
  * @returns {{ pass: boolean, reason: string }}
  */
+const MAX_OFFENDING_PATHS_SHOWN = 20;
+
 export function evaluateLanePaths({ sourceBranch, changedFiles, addedFiles }) {
   const result = classifyLane({ sourceBranch, changedFiles, addedFiles });
   if (!result.laneBranch) {
@@ -76,7 +78,16 @@ export function evaluateLanePaths({ sourceBranch, changedFiles, addedFiles }) {
   if (result.lane) {
     return { pass: true };
   }
-  return { pass: false, reason: `lane-paths: offending path(s): ${result.offending.join(', ')}` };
+  if (result.offending.length === 0) {
+    // lanePaths:false with no named path (e.g. an empty diff) is not a
+    // foreign-path violation — print classifyLane's own reason instead of a
+    // blank "offending path(s): ".
+    return { pass: false, reason: result.reason };
+  }
+  const shown = result.offending.slice(0, MAX_OFFENDING_PATHS_SHOWN);
+  const rest = result.offending.length - shown.length;
+  const suffix = rest > 0 ? `, … and ${rest} more` : '';
+  return { pass: false, reason: `lane-paths: offending path(s): ${shown.join(', ')}${suffix}` };
 }
 
 /**

@@ -123,7 +123,21 @@ export async function main(deps = {}) {
   }
 
   const config = readConfig();
-  const result = evaluateLaneScrub({ addedFiles, config, readFile });
+  let result;
+  try {
+    result = evaluateLaneScrub({ addedFiles, config, readFile });
+  } catch (err) {
+    // An added record that cannot be read (e.g. deleted between the diff and
+    // this run) is UNCOMPUTABLE, never a false violation: C1 is non-waivable,
+    // so "cannot verify" must never surface as "verified clean" (1 would be
+    // just as wrong the other way — it would report a secret that was never
+    // actually scanned).
+    result = {
+      pass: false,
+      uncomputable: true,
+      reason: `lane-scrub: cannot read an added record — failing closed (uncomputable): ${err.message}`,
+    };
+  }
   if (result.reason) console.log(result.reason);
   return resultToExit(result);
 }

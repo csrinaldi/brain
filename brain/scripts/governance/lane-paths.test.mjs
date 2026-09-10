@@ -59,6 +59,32 @@ test('evaluateLanePaths: a lane-branch head whose diff cleanly satisfies the pre
   assert.deepEqual(result, { pass: true });
 });
 
+test('evaluateLanePaths: a lane-branch head with an EMPTY diff → fail, printing classifyLane\'s own reason ("lane: empty diff"), never a blank "offending path(s): "', () => {
+  const result = evaluateLanePaths({
+    sourceBranch: 'memory/host1-2026-09-10',
+    changedFiles: [],
+    addedFiles: [],
+  });
+  assert.equal(result.pass, false);
+  assert.equal(result.reason, 'lane: empty diff');
+});
+
+test('evaluateLanePaths: more than 20 offending paths → the reason lists only the first 20 and states the rest as a count', () => {
+  const offendingCount = 25;
+  const changedFiles = Array.from({ length: offendingCount }, (_, i) => `src/file-${i}.mjs`);
+  const result = evaluateLanePaths({
+    sourceBranch: 'memory/host1-2026-09-10',
+    changedFiles,
+    addedFiles: changedFiles,
+  });
+  assert.equal(result.pass, false);
+  for (let i = 0; i < 20; i += 1) {
+    assert.match(result.reason, new RegExp(`src/file-${i}\\.mjs`));
+  }
+  assert.doesNotMatch(result.reason, /src\/file-20\.mjs/, 'the 21st offending path must not be printed');
+  assert.match(result.reason, /… and 5 more/);
+});
+
 // ── main() — the CLI wrapper (0/1/2 contract via resultToExit) ─────────────
 
 test('main: a diff with an offending path → exit 1, prints the offending path', async () => {

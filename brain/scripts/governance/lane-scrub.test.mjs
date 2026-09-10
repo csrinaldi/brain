@@ -58,20 +58,17 @@ test('evaluateLaneScrub: no added record path → pass, "nothing to scan"', () =
   assert.match(result.reason, /nothing to scan/);
 });
 
-test('evaluateLaneScrub: a lane-branch head and a non-lane-branch head are scanned IDENTICALLY — design A6, no lane input at all', () => {
-  const files = { '.memory/records/a.jsonl': 'clean content, no secret here' };
-  const laneResult = evaluateLaneScrub({
-    addedFiles: ['.memory/records/a.jsonl'],
-    config: {},
-    readFile: (path) => files[path],
-  });
-  const nonLaneResult = evaluateLaneScrub({
-    addedFiles: ['.memory/records/a.jsonl'],
-    config: {},
-    readFile: (path) => files[path],
-  });
-  assert.deepEqual(laneResult, nonLaneResult);
-  assert.equal(laneResult.pass, true);
+test('main: a feat/* branch (not a lane) with a planted secret in an added record still fails — design A6, lane-scrub consults no lane input at all', async () => {
+  const files = { '.memory/records/a.jsonl': 'line one\n{"token":"ghp_ABCDEFGHIJ0123456789ZZ"}\nline three' };
+  const exitCode = await captureLog(() =>
+    main({
+      ctx: { sourceBranch: 'feat/some-feature' },
+      diffNameOnlyAdded: () => ['.memory/records/a.jsonl'],
+      readConfig: () => ({}),
+      readFile: (path) => files[path],
+    })
+  );
+  assert.equal(exitCode, 1, 'a feature branch gets NO exemption from lane-scrub — the same secret fails it identically to a lane branch');
 });
 
 test('evaluateLaneScrub: a clean added record (no secret) → pass', () => {
@@ -130,6 +127,18 @@ test('main: an uncomputable added-diff → exit 2, failing closed (C1 is non-wai
     })
   );
   assert.equal(exitCode, 2);
+});
+
+test('main: readFile throws for an added record (deleted before the run) → exit 2, failing closed as uncomputable — never a raw crash exiting 1', async () => {
+  const exitCode = await captureLog(() =>
+    main({
+      ctx: {},
+      diffNameOnlyAdded: () => ['.memory/records/a.jsonl'],
+      readConfig: () => ({}),
+      readFile: () => { throw new Error('ENOENT: no such file or directory, open \'.memory/records/a.jsonl\''); },
+    })
+  );
+  assert.equal(exitCode, 2, 'an unreadable added record must fail closed as UNCOMPUTABLE (2), never as a violation (1)');
 });
 
 test('main: runs and passes explicitly on a non-lane PR (a feature branch adding a clean record)', async () => {
