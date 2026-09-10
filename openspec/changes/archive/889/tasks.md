@@ -271,10 +271,14 @@ Commit: `docs(vcs): describe the lane in the contributor template sentence (#905
 
 ### Wrap-up A
 
-- [ ] A.W1 `npm test` full run — record pass count in apply-progress before pushing.
-- [ ] A.W2 `memory:save --issue 905` — record-first, committed before the first push.
-- [ ] A.W3 Fresh-context review of the diff before opening PR 1.
-- [ ] A.W4 Push; open PR 1 with `Closes #905`, `Part of #889`, `Parent: #864` in prose, label
+- [x] A.W1 `npm test` full run — 5078/5078 after slice A, 5081/5081 after the review corrections.
+- [x] A.W2 `memory:save --issue 905` — `rec-c66b567ee099e321`, committed before the first push.
+- [x] A.W3 Fresh-context review before PR 1: APPROVE with three corrections (an unreadable record
+  as uncomputable, the empty-diff reason, a tautological A6 test), all landed first; thirteen
+  bypass attempts refused, 17/17 mutants killed.
+- [x] A.W4 Shipped as PR #907 (`Closes #905`, `size:exception`, ~514 counted — the maintainer's
+  choice over splitting the registration from the scripts), merged as ffe038a0 on 2026-09-10.
+      Original body instructions, for the record: open PR 1 with `Closes #905`, `Part of #889`, `Parent: #864` in prose, label
   `type:feature`. Body: summary (three bullets — the predicate, the recomputed exemption, the
   two required contexts), changes table, test plan (every `node --test` command above plus the
   full `npm test`), the reconciliation notes (D5's template-ownership departure from
@@ -282,7 +286,9 @@ Commit: `docs(vcs): describe the lane in the contributor template sentence (#905
   wording — `lane-scrub` scans every PR, not only lane PRs, flagged for the maintainer as an
   open question, non-blocking), dependency diagram (chained-pr skill, marking this PR 📍),
   contributor checklist per `branch-pr` skill.
-- [ ] A.W5 `brain:review` before requesting human review.
+- [x] A.W5 `brain:review` on #907: APPROVE at 698dc86f, twelve checks green (the two new contexts
+  reporting for the first time), one correction (the config-vs-read reason in `lane-scrub`,
+  carried into PR 2), verdict posted.
 
 **Maintainer act, after PR 1 merges — not in any diff, no code task:**
 ```
@@ -380,24 +386,39 @@ Commit: `feat(memory): warn on index lag without blocking or mutating (#889)`.
 
 ### Wrap-up B
 
-- [x] B.W1 `npm test` full run — record pass count in apply-progress before pushing. 5091/5091
-  green (baseline 5078 + B1's 4 + B2's 9).
-- [ ] B.W2 `memory:save --issue 889` — record-first, committed before the first push.
+- [x] B.W1 `npm test` full run — 5091/5091 after slice B on the pre-rebase base (baseline 5078 +
+  B1's 5 + B2's 10, corrected by the cold review), 5100/5100 at PR 2's final head 176e0f50.
+- [x] B.W2 `memory:save --issue 889` — `rec-564da1c907fe7ba6`, committed before the first push.
 - [x] B.W3 Tick epic task 3.1c in `openspec/changes/issue-864-memory-2-0/tasks.md`, referencing
   PR 2's number once known — on THIS PR, the closing PR for #889.
-- [ ] B.W4 Fresh-context review of the diff before opening PR 2.
-- [ ] B.W5 Push; open PR 2 with `Closes #889`, `Parent: #864` in prose, label `type:feature`.
+- [x] B.W4 Fresh-context review before PR 2: REVISE — the only `[LANE]` happy-path test rode the
+  commit-body fallback (GitHub squash bodies never carry the PR description), a comment claimed
+  a fail-closed property the code lacked, the warning's counts could contradict themselves; all
+  fixed before the push (0088f536, 210a38ec, 8f5b5612).
+- [x] B.W5 Shipped as PR #908 (`Closes #889`), rebased onto #907's squash; merged as ec117141 on
+  2026-09-10. Original instructions: open PR 2 with `Closes #889`, `Parent: #864` in prose, label `type:feature`.
   Body: summary (the `[LANE]` audit row, the non-mutating index-lag warning), changes table,
   test plan, dependency diagram marking this PR 📍 and PR 1 as the merged prerequisite
   (chained-pr skill), the D7 exit sequence stated as the NEXT steps after merge (not part of
   this PR's own scope — see below), contributor checklist per `branch-pr` skill.
-- [ ] B.W6 `brain:review` before requesting human review.
+- [x] B.W6 `brain:review` on #908: round 1 REVISE at f9e93ca1 (a blocker: compiling the secret
+  patterns before checking for records made a bad config regex fail every PR — fixed as
+  compile-only-when-there-is-a-record, 176e0f50); round 2 APPROVE at 176e0f50, twelve checks
+  green, both verdicts posted.
 
 ---
 
 ## D7 — exit sequence (maintainer/orchestrator acts after PR 2 merges; no code, not part of any PR diff)
 
-- [ ] D7.1 `npm run brain:protect` then `npm run brain:governance-status` — confirm BOTH
+**Handed over at archive (2026-09-10).** The four items below are the maintainer's sitting, not
+code, and stay open past this change's archive on purpose: they are tracked in the archive
+report, in #906's proposal (the triggers must not be enabled before D7.2 lands) and in the
+follow-up PR that records D7.3's fixture for #886. The first `brain:protect` was run from a
+stale `main` (six contexts); D7.1 is the re-run from `ffe038a0` or later.
+
+- [x] D7.1 Done by the maintainer on 2026-09-10: live branch protection on `main` lists eight
+  required contexts ending in `lane-paths`, `lane-scrub` (verified read-only at archive via
+  `gh api repos/{owner}/{repo}/branches/main/protection`). Original: `npm run brain:protect` then `npm run brain:governance-status` — confirm BOTH
   `lane-paths` and `lane-scrub` report armed on `main` (repeat of the slice-A maintainer act if
   not already done, or its confirmation if it was).
 - [ ] D7.2 The FIRST REAL `memory:ship` lane PR from this machine, merged BY HAND
