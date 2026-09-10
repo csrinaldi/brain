@@ -308,6 +308,35 @@ test('B1.5 — a lost CAS race exits non-zero as `raced`, leaves the ref untouch
   assert.equal(git(repo.mainDir, 'rev-parse', first.ref).trim(), raceCommit, 'the racing writer\'s ref move survives — our run did not overwrite it');
 });
 
+test('E2 — an update-ref failure with a non-CAS stderr shape is reported as a genuine failure, never tagged `raced`', () => {
+  const repo = buildFixtureRepo();
+  const first = collectLane({ root: repo.mainDir, date: '2026-09-09', host: 'test-host' });
+  assert.ok(first.commit);
+
+  const newFile = '2026-09-rec-7777777777777777.jsonl';
+  writeFileSync(join(repo.wtBDir, '.memory', 'records', newFile), recordJson('rec-7777777777777777', 'e2 batch'), 'utf8');
+
+  // a stubbed `update-ref` failure that is NOT one of git's real CAS-lock
+  // shapes ("cannot lock ref", "reference already exists", "is at ... but
+  // expected") — a disk-pressure/permissions-class failure, say.
+  const failingGit = (argv, opts) => {
+    if (argv[0] === 'update-ref') {
+      return { status: 128, stdout: '', stderr: 'fatal: Unable to create directory: No space left on device' };
+    }
+    return defaultGit(argv, opts);
+  };
+
+  assert.throws(
+    () => collectLane({ root: repo.mainDir, date: '2026-09-09', host: 'test-host', git: failingGit }),
+    (err) => {
+      assert.notEqual(err.raced, true, 'a non-lock/non-CAS stderr must never be tagged raced');
+      assert.match(err.message, /No space left on device/, 'the genuine git failure message must survive, unrewritten');
+      assert.doesNotMatch(err.message, /memory\.collect\.raced/, 'the raced prefix belongs only to a real CAS loss');
+      return true;
+    },
+  );
+});
+
 test('B1.6 — scope + seam guard: every `-C` call is a `status`, no push, no worktree prune, no PR/hook code', () => {
   const repo = buildFixtureRepo();
 

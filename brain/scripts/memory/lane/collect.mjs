@@ -96,20 +96,28 @@ function _defaultLoadConfig(root) {
   }
 }
 
-/** Parse `git worktree list --porcelain` into `{path, bare, prunable, locked}` stanzas. */
+/**
+ * Parse `git worktree list --porcelain` into `{path, bare, prunable}` stanzas.
+ *
+ * E3: a `locked` stanza is deliberately NOT tracked here. Per design.md's
+ * scope table (:234), a locked worktree is INCLUDED in the scan by design —
+ * `git worktree lock` only guards against accidental `worktree remove`/
+ * `prune`, it has no bearing on whether this collector should read the
+ * worktree's `.memory/records/` candidates, and an unreadable path already
+ * degrades to a per-candidate `unreadable` skip regardless of lock state.
+ * Carrying a field nothing ever reads would be dead state, not a real gate.
+ */
 function parseWorktrees(stdout) {
   const stanzas = [];
   let current = null;
   for (const line of stdout.split('\n')) {
     if (line.startsWith('worktree ')) {
-      current = { path: line.slice('worktree '.length), bare: false, prunable: false, locked: false };
+      current = { path: line.slice('worktree '.length), bare: false, prunable: false };
       stanzas.push(current);
     } else if (current && line === 'bare') {
       current.bare = true;
     } else if (current && line.startsWith('prunable')) {
       current.prunable = true;
-    } else if (current && line.startsWith('locked')) {
-      current.locked = true;
     }
   }
   return stanzas;

@@ -306,7 +306,12 @@ if (op === "split-records") {
 if (op === "collect") {
   const { collectLane } = await import("./lane/collect.mjs");
   const memoryRoot = process.env.BRAIN_MEMORY_TEST_ROOT ?? repoRoot;
-  const asJson = process.argv.includes("--json");
+  // E4: scoped to argv AFTER `node cli.mjs collect`, like `audit` above —
+  // `process.argv.includes("--json")` would also match a `--json` that
+  // happened to appear earlier in argv (the node binary path, the script
+  // path), which is never the intent for this op's own flag.
+  const rest = process.argv.slice(3);
+  const asJson = rest.includes("--json");
   try {
     const result = collectLane({ root: memoryRoot });
     if (asJson) {
