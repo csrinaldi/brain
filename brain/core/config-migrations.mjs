@@ -178,7 +178,22 @@ export const migrations = [
       "immediately regardless — deriveKnownPaths walks every migration's defaults " +
       "with no version filter (config-verb.mjs). Version 1.5.0 was rejected: " +
       "migrateConfig stamps schemaVersion = targetVersion, so a consumer already " +
-      "stamped 1.5.0 would silently skip a same-numbered entry forever.",
+      "stamped 1.5.0 would silently skip a same-numbered entry forever. " +
+      "EXCEPTION (measured, #906 cold review C1): dormancy is a property of " +
+      "migrateConfig()'s targetVersion filter, not of this list — " +
+      "buildDefaultConfig() (lib/brain-config.mjs) applies EVERY migration " +
+      "UNFILTERED and stamps schemaVersion to the latest entry, so a config " +
+      "built fresh on this codebase already carries schemaVersion=1.6.0 and " +
+      "memory.lane.enabled=false even while package.json reads 1.5.0. Two " +
+      "measured consequences follow from that gap between the file on disk and " +
+      "the version that shipped it: (1) release-debt.mjs reports " +
+      "severity:'migration' from the moment this entry merges, not from the " +
+      "1.6.0 cut; (2) a consumer whose config was built on this exact codebase " +
+      "cannot `brain:upgrade` to any version below 1.6.0 without " +
+      "--allow-downgrade, because its stamped schemaVersion already reads " +
+      "ahead of its own package.json. The real remedy is cutting 1.6.0 " +
+      "promptly, not a code change to this entry — recorded in design.md's " +
+      "Risks table for the maintainer.",
     defaults: {
       memory: {
         lane: {

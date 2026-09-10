@@ -44,3 +44,41 @@ test('#906 A6: every migration version is unique (never reused, per config-migra
   const versions = migrations.map((m) => m.version);
   assert.equal(new Set(versions).size, versions.length, 'a duplicated version number names two indistinguishable states');
 });
+
+// #906 cold review C1: the entry's own description claims dormancy until
+// 1.6.0 is cut — this pins that claim against the SAME migrateConfig()
+// walk a real `brain:config`/`brain:upgrade` caller uses (targetVersion is
+// the installed package.json version, still 1.5.0 at the time this test
+// was written). buildDefaultConfig() (lib/brain-config.mjs) is a DELIBERATE
+// exception to this dormancy — it applies every migration unfiltered and is
+// pinned separately below.
+test('#906 A6/C1: dormant against a real caller — targetVersion 1.5.0 never applies the 1.6.0 entry, memory stays absent', () => {
+  const { config, applied } = migrateConfig({ schemaVersion: '0.1.0' }, migrations, '1.5.0');
+  assert.ok(!applied.includes('1.6.0'), '1.6.0 must not be in the applied list when targetVersion is 1.5.0');
+  assert.equal(config.memory, undefined, 'memory must be entirely absent, not just enabled:false — the entry never ran');
+});
+
+// #906 cold review C1's other half: lib/brain-config.mjs's private
+// buildDefaultConfig() applies every migration's defaults UNFILTERED — no
+// targetVersion, no package.json read at all (its own real behavior is
+// pinned directly in brain-config.test.mjs's full-default-schema assertion,
+// since the function itself is module-private and not exported here). This
+// test reproduces the same math migrateConfig() performs when its
+// targetVersion filter cannot exclude anything (targetVersion = the latest
+// migration's own version) as an honest proxy for "unfiltered", proving the
+// entry's description's named EXCEPTION is real: a real caller through
+// migrateConfig() with a real (lower) targetVersion stays dormant (pin
+// above); a walk with nothing left to filter does not.
+test('#906 C1: a migration walk with nothing left to filter DOES plant 1.6.0 — the same shape as buildDefaultConfig()\'s documented exception to dormancy', () => {
+  const ordered = [...migrations].sort((a, b) => {
+    const va = a.version.split('.').map(Number);
+    const vb = b.version.split('.').map(Number);
+    for (let i = 0; i < 3; i++) {
+      if (va[i] !== vb[i]) return va[i] - vb[i];
+    }
+    return 0;
+  });
+  const { config: cfg } = migrateConfig({}, ordered, ordered.at(-1).version);
+  assert.equal(cfg.memory.lane.enabled, false, 'a config built from every migration, unfiltered, DOES carry the 1.6.0 default');
+  assert.equal(cfg.schemaVersion, '1.6.0', 'and its schemaVersion is stamped to the latest entry — ahead of package.json until the 1.6.0 cut');
+});
