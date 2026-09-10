@@ -33,14 +33,25 @@ function git(cwd, ...args) {
 
 /** A bare origin, a `main` checkout pushed to it, and (by default) one
  * untracked, clean, off-main record in `main`'s own `.memory/records/` —
- * the main checkout counts as a worktree like any other. */
-function fixtureRepo({ withCandidate = true } = {}) {
+ * the main checkout counts as a worktree like any other.
+ *
+ * `configureIdentity` defaults to `true`: `collectLane()`'s own `commit-tree`
+ * call (collect.mjs) never receives an `env` override, so it resolves the
+ * AMBIENT identity — repo-local config, not the `GIT_ENV` this file's own
+ * `git()` helper uses only for the setup commands above. Set `false` only
+ * to build a repo that deliberately carries no identity anywhere (the
+ * `memory.collect.failed` / "Author identity unknown" case below). */
+function fixtureRepo({ withCandidate = true, configureIdentity = true } = {}) {
   const base = testTmp('cli-collect-');
   const originDir = join(base, 'origin.git');
   const mainDir = join(base, 'main');
   git(base, 'init', '--bare', '-q', originDir);
   git(base, 'init', '-q', '-b', 'main', mainDir);
   git(mainDir, 'remote', 'add', 'origin', originDir);
+  if (configureIdentity) {
+    git(mainDir, 'config', 'user.email', 'test@example.invalid');
+    git(mainDir, 'config', 'user.name', 'brain-test');
+  }
   git(mainDir, 'commit', '-q', '--allow-empty', '-m', 'root');
   git(mainDir, 'push', '-q', '-u', 'origin', 'main');
   git(mainDir, 'fetch', '-q', 'origin');
@@ -107,6 +118,35 @@ test('memory:collect fails loudly with memory.collect.failed and exits 1 on a ge
   const run = runCli(root);
   assert.equal(run.status, 1);
   assert.match(run.stderr, /memory\/cli:/);
+});
+
+test('memory:collect fails with git\'s own author-identity message (memory.collect.failed) when no identity is configured anywhere', () => {
+  // D6: the collector uses the AMBIENT git identity, never a fabricated or
+  // token-based one — so when NOTHING configures an identity (no repo-local
+  // config, no global config, no system config), `commit-tree` must fail
+  // loudly with git's own message, and the CLI must surface it verbatim via
+  // `memory.collect.failed`, never mask it as something else. This is the
+  // exact failure the #897 cold review found on the GitHub runner: git 2.55,
+  // no `~/.gitconfig`. Isolated here the same way, but scoped to this one
+  // subprocess only.
+  const root = fixtureRepo({ configureIdentity: false });
+  const isolatedHome = testTmp('cli-collect-no-home-');
+  // eslint-disable-next-line no-unused-vars
+  const { GIT_AUTHOR_NAME, GIT_AUTHOR_EMAIL, GIT_COMMITTER_NAME, GIT_COMMITTER_EMAIL, ...cleanEnv } = process.env;
+  const run = spawnSync(process.execPath, [CLI, 'collect'], {
+    encoding: 'utf8',
+    env: {
+      ...cleanEnv,
+      BRAIN_MEMORY_TEST_ROOT: root,
+      MEMORY_BACKEND: 'no-such-backend',
+      HOME: isolatedHome,
+      GIT_CONFIG_GLOBAL: '/dev/null',
+      GIT_CONFIG_NOSYSTEM: '1',
+    },
+  });
+  assert.equal(run.status, 1, run.stderr);
+  assert.match(run.stderr, /memory\/cli: .*collect failed/);
+  assert.match(run.stderr, /Author identity unknown/, 'the surfaced message must be git\'s own, unrewritten');
 });
 
 test('memory:collect resolves from package.json, beside the other memory:* scripts', () => {

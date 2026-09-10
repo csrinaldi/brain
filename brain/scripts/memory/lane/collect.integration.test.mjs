@@ -81,6 +81,19 @@ function buildFixtureRepo() {
   git(base, 'init', '--bare', '-q', originDir);
   git(base, 'init', '-q', '-b', 'main', mainDir);
   git(mainDir, 'remote', 'add', 'origin', originDir);
+  // Repo-local identity, not env: `collectLane()`'s own `commit-tree` call
+  // (collect.mjs) never receives an `env` override, so it runs under
+  // whatever identity the AMBIENT environment resolves — exactly D6's
+  // "ambient identity, never a token" contract. `GIT_ENV` above only covers
+  // the git commands THIS fixture builder issues directly; it never reaches
+  // `collectLane`'s internal git calls. On a machine/CI runner with no
+  // global/system identity configured, `commit-tree` fails with git's own
+  // "Author identity unknown" (issue #897 cold-review CI finding) unless the
+  // repo itself carries one — a linked `git worktree add` shares the common
+  // `.git/config`, so setting it once here on `mainDir` covers `wt-a`/`wt-b`
+  // too (same precedent as `records-merge.integration.test.mjs:56-57`).
+  git(mainDir, 'config', 'user.email', 'test@example.invalid');
+  git(mainDir, 'config', 'user.name', 'brain-test');
 
   // root commit WITHOUT the already-on-main file — both worktree branches
   // fork from here, so neither tracks it. If the file were already on `main`
