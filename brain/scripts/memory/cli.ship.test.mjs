@@ -14,7 +14,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readFileSync, symlinkSync, rmSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { hostname } from 'node:os';
@@ -392,6 +392,92 @@ test('the real getVcs()/gh port is only ever imported when BRAIN_VCS_TEST_MODULE
     /vcsTestModule\s*\?\s*await import\(pathToFileURL\(resolveVcsTestModulePath\(vcsTestModule\)\)\.href\)\s*:\s*await \(await import\("\.\.\/vcs\/cli\.mjs"\)\)\.getVcs\(/,
     "getVcs must be gated behind the ternary's false branch — only reached when BRAIN_VCS_TEST_MODULE is unset",
   );
+});
+
+test('M1 (re-review): a symlink placed inside FIXTURE_ROOT pointing outside it is refused via real-path containment, not just a lexical check', () => {
+  const outsideDir = testTmp('cli-ship-symlink-target-');
+  const markerPath = join(outsideDir, 'imported.marker');
+  const leakModulePath = join(outsideDir, 'leak.mjs');
+  writeFileSync(
+    leakModulePath,
+    [
+      "import { writeFileSync } from 'node:fs';",
+      `writeFileSync(${JSON.stringify(markerPath)}, 'imported');`,
+      'export const mrList = async () => [];',
+      "export const mrCreate = async () => ({ url: null });",
+      'export const mrAutoMerge = async () => ({ enabled: false });',
+      '',
+    ].join('\n'),
+    'utf8',
+  );
+
+  const symlinkPath = join(HERE, '__fixtures__', `zz-escape-${process.pid}.mjs`);
+  try {
+    symlinkSync(leakModulePath, symlinkPath);
+
+    const { mainDir } = fixtureRepo({ withCandidate: false });
+    const run = spawnSync(process.execPath, [CLI, 'ship', '--json'], {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        BRAIN_MEMORY_TEST_ROOT: mainDir,
+        MEMORY_BACKEND: 'no-such-backend',
+        BRAIN_VCS_TEST_MODULE: symlinkPath,
+      },
+    });
+
+    assert.equal(run.status, 1);
+    assert.match(run.stderr, /BRAIN_VCS_TEST_MODULE must resolve inside/);
+    assert.equal(run.stdout, '', 'a refused seam must never print a JSON result — nothing was imported, nothing ran');
+    assert.equal(
+      existsSync(markerPath),
+      false,
+      'the symlink target must never be imported — a lexical-only containment check would have followed it and written this marker',
+    );
+  } finally {
+    rmSync(symlinkPath, { force: true });
+  }
+});
+
+test('L1 (re-review): BRAIN_VCS_TEST_MODULE set but blank is refused, not silently treated as unset (which would bind the real port)', () => {
+  const { mainDir } = fixtureRepo({ withCandidate: false });
+  const run = spawnSync(process.execPath, [CLI, 'ship', '--json'], {
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      BRAIN_MEMORY_TEST_ROOT: mainDir,
+      MEMORY_BACKEND: 'no-such-backend',
+      BRAIN_VCS_TEST_MODULE: '',
+    },
+  });
+  assert.equal(run.status, 1);
+  assert.match(run.stderr, /BRAIN_VCS_TEST_MODULE is set but empty/);
+  assert.equal(run.stdout, '', 'a refused blank seam must never print a JSON result');
+});
+
+test('L2 (re-review): a non-JSON BRAIN_VCS_TEST_SCRIPT fails with a path-only message — the fixture never echoes the file\'s content', () => {
+  const scriptDir = testTmp('cli-ship-fake-vcs-badjson-');
+  const scriptPath = join(scriptDir, 'vcs-script.json');
+  const sentinelMarker = 'FAKE_SECRET_TOKEN_should_never_reach_stderr';
+  writeFileSync(scriptPath, `this is not json, contains a ${sentinelMarker}`, 'utf8');
+
+  const { mainDir } = fixtureRepo({ withCandidate: true });
+  const run = spawnSync(process.execPath, [CLI, 'ship', '--json'], {
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      BRAIN_MEMORY_TEST_ROOT: mainDir,
+      MEMORY_BACKEND: 'no-such-backend',
+      BRAIN_VCS_TEST_MODULE: FAKE_VCS_MODULE,
+      BRAIN_VCS_TEST_SCRIPT: scriptPath,
+    },
+  });
+
+  assert.equal(run.status, 1);
+  assert.doesNotMatch(run.stderr, new RegExp(sentinelMarker), 'the error must never echo the bad file\'s content');
+  assert.doesNotMatch(run.stderr, /this is not json/, 'the error must never echo the bad file\'s content');
+  assert.match(run.stderr, /BRAIN_VCS_TEST_SCRIPT at .* is not valid JSON/, 'the error must name the path, not the content');
+  assert.ok(run.stderr.includes(scriptPath), "the error must name the offending path so it's still debuggable");
 });
 
 test('memory:ship resolves from package.json, beside the other memory:* scripts', () => {

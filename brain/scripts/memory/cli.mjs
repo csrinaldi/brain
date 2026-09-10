@@ -19,7 +19,7 @@
 //
 // Pattern mirrors SDD_HARNESS dispatch in brain/scripts/bootstrap.sh §6.
 
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, realpathSync } from "node:fs";
 import { join, dirname, relative, isAbsolute, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { hostname } from "node:os";
@@ -414,19 +414,33 @@ if (op === "collect") {
 // its ANSWERS are read at call time from the JSON file named by the second,
 // DATA-only env var `BRAIN_VCS_TEST_SCRIPT` (see
 // `__fixtures__/fake-vcs-port.mjs`).
+//
+// M1 (re-review, PR 2): containment is checked on the REAL path, not the
+// lexical one — a symlink placed inside `FIXTURE_ROOT` pointing outside it
+// would resolve lexically inside the fixture dir while `import()` still
+// follows the link to wherever it points. `realpathSync` is best-effort
+// (wrapped in try/catch) because the target may legitimately not exist yet
+// (the escape test below points at `/tmp/x.mjs`, which is never created) —
+// in that case the lexical path is the closest honest answer and the
+// containment check still runs against it.
 // ---------------------------------------------------------------------------
 
 /** Resolves `BRAIN_VCS_TEST_MODULE` against `FIXTURE_ROOT`, refusing (before
  * any `import()` is attempted) anything that would resolve outside it — a
- * path traversal (`../..`) or an absolute path elsewhere on disk. See B1's
- * comment on `FIXTURE_ROOT` for the rationale. */
+ * path traversal (`../..`), an absolute path elsewhere on disk, or a
+ * symlink planted inside `FIXTURE_ROOT` whose real target lands outside it
+ * (M1, re-review). See B1's comment on `FIXTURE_ROOT` for the rationale. */
 function resolveVcsTestModulePath(vcsTestModule) {
-  const abs = resolve(vcsTestModule);
-  const rel = relative(FIXTURE_ROOT, abs);
-  if (rel.startsWith("..") || isAbsolute(rel)) {
+  const lexical = resolve(vcsTestModule);
+  let abs;
+  try { abs = realpathSync(lexical); } catch { abs = lexical; }
+  let root;
+  try { root = realpathSync(FIXTURE_ROOT); } catch { root = FIXTURE_ROOT; }
+  const rel = relative(root, abs);
+  if (rel === "" || rel.startsWith("..") || isAbsolute(rel)) {
     throw new Error(`memory/cli: BRAIN_VCS_TEST_MODULE must resolve inside ${FIXTURE_ROOT}`);
   }
-  return abs;
+  return lexical;
 }
 
 if (op === "ship") {
@@ -440,6 +454,12 @@ if (op === "ship") {
   const asJson = rest.includes("--json");
 
   try {
+    // L1 (re-review): a set-but-blank BRAIN_VCS_TEST_MODULE is falsy, so the
+    // ternary below would silently treat it as unset and bind the REAL vcs
+    // port — refused here, before that ternary is ever reached.
+    if (vcsTestModule !== undefined && vcsTestModule.trim() === "") {
+      throw new Error("memory/cli: BRAIN_VCS_TEST_MODULE is set but empty — unset it to use the real port");
+    }
     const config = loadBrainConfig();
     const identity = process.env[MEMORY_TOKEN_ENV] ?? null; // ONE read, in ONE place (A5)
     const vcs = dryRun

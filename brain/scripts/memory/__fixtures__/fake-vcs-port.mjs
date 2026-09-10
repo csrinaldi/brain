@@ -33,10 +33,19 @@
 
 import { readFileSync } from 'node:fs';
 
+// L2 (re-review): read + parse are wrapped together and the thrown message
+// names only the PATH, never the file's content — a raw JSON.parse failure
+// echoes a prefix of the offending text (e.g. `Unexpected token 'h', "this
+// is not"... is not valid JSON`), which would leak whatever the fixture
+// script happens to contain into stderr.
 function loadScript() {
   const path = process.env.BRAIN_VCS_TEST_SCRIPT;
   if (!path) return {};
-  return JSON.parse(readFileSync(path, 'utf8'));
+  try {
+    return JSON.parse(readFileSync(path, 'utf8'));
+  } catch {
+    throw new Error(`fake-vcs-port: BRAIN_VCS_TEST_SCRIPT at ${path} is not valid JSON`);
+  }
 }
 
 export const mrList = async () => {

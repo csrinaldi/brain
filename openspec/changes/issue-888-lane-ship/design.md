@@ -164,6 +164,18 @@ const vcs = dryRun ? null : await getVcs({ config, identity });
 await shipLane({ …, vcs, identityBound: identity !== null });
 ```
 
+**Test seam (added during implementation, cold-reviewed twice)**: `cli.mjs`'s `ship` op is the only
+in-process caller of `getVcs()`, and it has no seam of its own reachable through a CLI subprocess —
+so `BRAIN_VCS_TEST_MODULE` lets a test point it at a fake port module instead, constrained by
+`resolveVcsTestModulePath()` to resolve inside a committed `__fixtures__/` directory before any
+`import()` is attempted. Containment is checked against the **real path** (`realpathSync`, with a
+best-effort fallback to the lexical path when the target does not exist), not the lexical one — a
+symlink planted inside `__fixtures__/` pointing outside it would otherwise pass a lexical-only
+check while `import()` still follows the link (re-review finding M1). A set-but-blank value is
+refused rather than silently falling through to the real port (L1); the fixture module's own
+`BRAIN_VCS_TEST_SCRIPT` data file never echoes its content on a parse failure (L2). See `cli.mjs`'s
+own comment above `resolveVcsTestModulePath()` and `__fixtures__/fake-vcs-port.mjs`.
+
 **Rejected**: passing `identityToken` into `shipLane`.
 **Rationale**: once `getVcs` has bound the port, the token has no remaining job — `bindIdentity`
 carries it in an `AsyncLocalStorage` frame (`vcs/lib/identity-context.mjs:28,41-44`) and
