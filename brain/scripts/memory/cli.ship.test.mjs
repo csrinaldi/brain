@@ -88,7 +88,7 @@ function fixtureRepoDiverged() {
   const raceTree = git(mainDir, 'rev-parse', `${collected.commit}^{tree}`).trim();
   const raceCommit = git(mainDir, 'commit-tree', raceTree, '-m', 'racing writer').trim();
   git(mainDir, 'push', '--force', 'origin', `${raceCommit}:${collected.ref}`);
-  return { mainDir, originDir };
+  return { mainDir, originDir, ref: collected.ref };
 }
 
 // B1/C1 (#888 cold review, PR 2): the committed, DATA-driven fixture module
@@ -174,12 +174,28 @@ test('--dry-run prints the plan and makes zero of ship\'s own network calls (pus
 });
 
 test('a pre-seeded divergent origin lane: exit 1 + memory.ship.diverged, this path never reaches the port', () => {
-  const { mainDir, originDir } = fixtureRepoDiverged();
+  const { mainDir, originDir, ref } = fixtureRepoDiverged();
   const beforeSha = git(originDir, 'for-each-ref', '--format=%(objectname)', 'refs/heads/memory/').trim();
 
   const run = runCli(mainDir);
   assert.equal(run.status, 1);
   assert.match(run.stderr, /memory\/cli:.*diverged/i);
+  // E4: `fixtureRepoDiverged()` computes its own `host`/`date` once, at
+  // fixture-build time; the real CLI process computes its own `hostname()`/
+  // today's date independently, moments later. `ship.mjs`'s own diverged
+  // error interpolates the exact ref IT computed (`${ref} is behind
+  // origin's matching ref`) into `err.message`, which flows straight
+  // through to stderr here — so asserting this fixture's `ref` literally
+  // appears in stderr is a real proof the two computations agreed. A
+  // UTC-midnight straddle between fixture setup and this `runCli()` call
+  // would silently mint a DIFFERENT, non-diverged ref inside the CLI
+  // process, sail past this pre-check, and reach the real `vcs` port
+  // instead — exactly the failure mode this assertion turns into a loud,
+  // attributable test failure rather than a rare, unexplained flake.
+  assert.ok(
+    run.stderr.includes(ref),
+    `expected the CLI's own diverged-ref message to include this fixture's ref (${ref}); stderr: ${run.stderr}`,
+  );
 
   const afterSha = git(originDir, 'for-each-ref', '--format=%(objectname)', 'refs/heads/memory/').trim();
   assert.equal(afterSha, beforeSha, 'the diverged remote ref must be left exactly as it was');
@@ -258,6 +274,32 @@ test('B1 (cold review): the committed fixture module itself resolves and works (
   assert.doesNotMatch(run.stderr, /BRAIN_VCS_TEST_MODULE must resolve inside/);
 });
 
+test('C2 (cold review): identityBound reflects whether BRAIN_MEMORY_TOKEN was set for this run', () => {
+  const sentinel = 'not-a-real-credential-just-a-presence-check';
+  const { mainDir: boundRoot } = fixtureRepo({ withCandidate: false });
+  const boundRun = spawnSync(process.execPath, [CLI, 'ship', '--json'], {
+    encoding: 'utf8',
+    env: {
+      ...process.env, BRAIN_MEMORY_TEST_ROOT: boundRoot, MEMORY_BACKEND: 'no-such-backend',
+      BRAIN_VCS_TEST_MODULE: FAKE_VCS_MODULE, BRAIN_MEMORY_TOKEN: sentinel,
+    },
+  });
+  assert.equal(boundRun.status, 0, boundRun.stderr);
+  assert.equal(JSON.parse(boundRun.stdout).identityBound, true);
+  assert.doesNotMatch(boundRun.stderr, /BRAIN_MEMORY_TOKEN is not set/);
+
+  const { mainDir: unboundRoot } = fixtureRepo({ withCandidate: false });
+  const unboundEnv = {
+    ...process.env, BRAIN_MEMORY_TEST_ROOT: unboundRoot, MEMORY_BACKEND: 'no-such-backend',
+    BRAIN_VCS_TEST_MODULE: FAKE_VCS_MODULE,
+  };
+  delete unboundEnv.BRAIN_MEMORY_TOKEN;
+  const unboundRun = spawnSync(process.execPath, [CLI, 'ship', '--json'], { encoding: 'utf8', env: unboundEnv });
+  assert.equal(unboundRun.status, 0, unboundRun.stderr);
+  assert.equal(JSON.parse(unboundRun.stdout).identityBound, false);
+  assert.match(unboundRun.stderr, /BRAIN_MEMORY_TOKEN is not set/);
+});
+
 test('a full success run (push + PR create + arm) goes through the committed fixture vcs module, never the real getVcs()/gh port', () => {
   const { mainDir, originDir } = fixtureRepo({ withCandidate: true });
   const scriptPath = writeVcsTestScript(testTmp('cli-ship-fake-vcs-'), {
@@ -285,6 +327,37 @@ test('a full success run (push + PR create + arm) goes through the committed fix
 
   const afterOriginRefs = git(originDir, 'for-each-ref', '--format=%(refname)', 'refs/heads/memory/');
   assert.notEqual(afterOriginRefs, '', 'the push itself is real git, against the LOCAL bare origin fixture — never GitHub');
+});
+
+test('E1 (cold review): mrCreate returns a URL with no derivable PR number and the rescan finds nothing: exit 0, prNumberUnknown', () => {
+  const scriptFor = () => writeVcsTestScript(testTmp('cli-ship-fake-vcs-'), {
+    mrList: [],
+    mrCreate: { url: 'https://fake-vcs.invalid/pull/' },
+  });
+
+  const { mainDir: jsonRoot } = fixtureRepo({ withCandidate: true });
+  const jsonRun = spawnSync(process.execPath, [CLI, 'ship', '--json'], {
+    encoding: 'utf8',
+    env: {
+      ...process.env, BRAIN_MEMORY_TEST_ROOT: jsonRoot, MEMORY_BACKEND: 'no-such-backend',
+      BRAIN_VCS_TEST_MODULE: FAKE_VCS_MODULE, BRAIN_VCS_TEST_SCRIPT: scriptFor(),
+    },
+  });
+  assert.equal(jsonRun.status, 0, jsonRun.stderr);
+  const parsed = JSON.parse(jsonRun.stdout);
+  assert.equal(parsed.pr.number, null);
+  assert.equal(parsed.autoMerge, null);
+
+  const { mainDir: textRoot } = fixtureRepo({ withCandidate: true });
+  const textRun = spawnSync(process.execPath, [CLI, 'ship'], {
+    encoding: 'utf8',
+    env: {
+      ...process.env, BRAIN_MEMORY_TEST_ROOT: textRoot, MEMORY_BACKEND: 'no-such-backend',
+      BRAIN_VCS_TEST_MODULE: FAKE_VCS_MODULE, BRAIN_VCS_TEST_SCRIPT: scriptFor(),
+    },
+  });
+  assert.equal(textRun.status, 0, textRun.stderr);
+  assert.match(textRun.stdout, /memory\/cli:.*number could not be derived/i);
 });
 
 test('the real getVcs()/gh port is only ever imported when BRAIN_VCS_TEST_MODULE is unset (source guard)', () => {
