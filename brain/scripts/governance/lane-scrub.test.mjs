@@ -143,6 +143,54 @@ test('main: readFile throws for an added record (deleted before the run) → exi
   assert.equal(exitCode, 2, 'an unreadable added record must fail closed as UNCOMPUTABLE (2), never as a violation (1)');
 });
 
+// cold-1 (PR #907 cold review): a single try/catch around evaluateLaneScrub
+// previously misattributed a bad regex in the secret config (thrown by
+// compilePatterns, secret-scrub.mjs:42-44) to the "cannot read an added
+// record" reason. Patterns must be compiled OUTSIDE the read loop, with
+// their own uncomputable reason.
+// cold review (PR #908): batch 3's fix moved resolveSecretConfig +
+// compilePatterns before the read loop UNCONDITIONALLY — even when the diff
+// adds zero `.memory/records/` paths. A single bad regex in the secret
+// config then blocked every PR on the repo, not just lane PRs, because
+// config resolution now ran before evaluateLaneScrub's own "nothing to
+// scan" short-circuit could ever be reached. Fix: compute the added-records
+// subset first; skip config resolution entirely when it is empty.
+test('main: zero added records + an invalid secret pattern in config → exit 0, config never resolved (a bad regex must not block every PR)', async () => {
+  let readConfigCalls = 0;
+  const exitCode = await captureLog(() =>
+    main({
+      diffNameOnlyAdded: () => ['src/unrelated-file.mjs'],
+      readConfig: () => {
+        readConfigCalls += 1;
+        return { governance: { memorySecretPatterns: ['(unclosed'] } };
+      },
+      readFile: () => { throw new Error('must not be called — no added records to scan'); },
+    })
+  );
+  assert.equal(exitCode, 0, 'a PR with zero added .memory/records/ paths must pass without ever resolving or compiling the secret config');
+  assert.equal(readConfigCalls, 0, 'readConfig must not be called when there are no added records to scan');
+});
+
+test('main: an invalid secret pattern in config → exit 2 with a config-specific reason, never "cannot read"', async () => {
+  const logs = [];
+  const orig = console.log;
+  console.log = (msg) => { logs.push(msg); };
+  let exitCode;
+  try {
+    exitCode = await main({
+      ctx: {},
+      diffNameOnlyAdded: () => ['.memory/records/a.jsonl'],
+      readConfig: () => ({ governance: { memorySecretPatterns: ['(unclosed'] } }),
+      readFile: () => { throw new Error('must not be called — pattern compilation fails before any read'); },
+    });
+  } finally {
+    console.log = orig;
+  }
+  assert.equal(exitCode, 2, 'an invalid secret pattern in config must fail closed as UNCOMPUTABLE (2)');
+  assert.match(logs.join('\n'), /lane-scrub: invalid secret pattern in config — failing closed \(uncomputable\)/);
+  assert.doesNotMatch(logs.join('\n'), /cannot read an added record/, 'a config error must never be misreported as a read failure');
+});
+
 test('main: runs and passes explicitly on a non-lane PR (a feature branch adding a clean record)', async () => {
   const files = { '.memory/records/a.jsonl': 'nothing sensitive here' };
   const exitCode = await captureLog(() =>

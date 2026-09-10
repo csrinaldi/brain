@@ -67,22 +67,32 @@ function defaultReadConfig() {
  * `{pattern, lineNumber}` from a hit and drops `.line` — the matched text
  * itself is never surfaced (C1's own output discipline).
  *
- * @param {{ addedFiles?: string[]|null, config?: object, readFile: (path: string) => string }} args
+ * `patterns`/`allowPatterns` may be passed pre-compiled (main() does this —
+ * see cold-1, PR #907 cold review — so a bad regex in the secret config
+ * surfaces as ITS OWN uncomputable reason, never misattributed to the
+ * per-record read loop below). Falls back to compiling from `config` when
+ * they are omitted, for direct unit-level calls.
+ *
+ * @param {{ addedFiles?: string[]|null, config?: object, patterns?: RegExp[], allowPatterns?: RegExp[], readFile: (path: string) => string }} args
  * @returns {{ pass: boolean, reason?: string }}
  */
-export function evaluateLaneScrub({ addedFiles, config, readFile }) {
+export function evaluateLaneScrub({ addedFiles, config, patterns, allowPatterns, readFile }) {
   const recordPaths = (addedFiles ?? []).filter((path) => LANE_PATH_RE.test(path));
   if (recordPaths.length === 0) {
     return { pass: true, reason: 'no added record paths — nothing to scan' };
   }
 
-  const { patternSources, allowPatternSources } = resolveSecretConfig(config);
-  const patterns = compilePatterns(patternSources);
-  const allowPatterns = compilePatterns(allowPatternSources);
+  let compiledPatterns = patterns;
+  let compiledAllowPatterns = allowPatterns;
+  if (!compiledPatterns || !compiledAllowPatterns) {
+    const { patternSources, allowPatternSources } = resolveSecretConfig(config);
+    compiledPatterns = compiledPatterns ?? compilePatterns(patternSources);
+    compiledAllowPatterns = compiledAllowPatterns ?? compilePatterns(allowPatternSources);
+  }
 
   for (const path of recordPaths) {
     const text = readFile(path);
-    const hit = scanTextForSecrets(text, patterns, allowPatterns);
+    const hit = scanTextForSecrets(text, compiledPatterns, compiledAllowPatterns);
     if (hit) {
       // {pattern, lineNumber} only — `hit.line` is dropped, never printed.
       return {
@@ -122,10 +132,49 @@ export async function main(deps = {}) {
     return resultToExit(result);
   }
 
+  // Compute the added-records subset BEFORE touching the secret config at
+  // all (cold review, PR #908): resolving/compiling the config is only ever
+  // relevant when there is at least one `.memory/records/*.jsonl` path to
+  // scan. A PR that adds none of those paths (the overwhelming majority of
+  // PRs on this repo) must pass without ever reading the config — otherwise
+  // a single bad regex in `governance.memorySecretPatterns` blocks EVERY PR,
+  // not just the ones lane-scrub actually needs to check.
+  const recordPaths = (addedFiles ?? []).filter((path) => LANE_PATH_RE.test(path));
+  if (recordPaths.length === 0) {
+    const result = { pass: true, reason: 'no added record paths — nothing to scan' };
+    console.log(result.reason);
+    return resultToExit(result);
+  }
+
   const config = readConfig();
+
+  // Compile patterns OUTSIDE the read loop's try/catch (cold-1, PR #907 cold
+  // review): compilePatterns() throws on an invalid regex source
+  // (secret-scrub.mjs:42-44). A single try/catch wrapping both this AND the
+  // per-record read loop below misattributed a bad secret-config pattern to
+  // "cannot read an added record" — a config problem and a read problem are
+  // both UNCOMPUTABLE (2), but they are different failures and must report
+  // different reasons. Still computed only once there is at least one
+  // record path (see the early return above).
+  let patterns;
+  let allowPatterns;
+  try {
+    const { patternSources, allowPatternSources } = resolveSecretConfig(config);
+    patterns = compilePatterns(patternSources);
+    allowPatterns = compilePatterns(allowPatternSources);
+  } catch (err) {
+    const result = {
+      pass: false,
+      uncomputable: true,
+      reason: `lane-scrub: invalid secret pattern in config — failing closed (uncomputable): ${err.message}`,
+    };
+    console.log(result.reason);
+    return resultToExit(result);
+  }
+
   let result;
   try {
-    result = evaluateLaneScrub({ addedFiles, config, readFile });
+    result = evaluateLaneScrub({ addedFiles: recordPaths, patterns, allowPatterns, readFile });
   } catch (err) {
     // An added record that cannot be read (e.g. deleted between the diff and
     // this run) is UNCOMPUTABLE, never a false violation: C1 is non-waivable,

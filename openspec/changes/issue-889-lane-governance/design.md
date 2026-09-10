@@ -157,6 +157,20 @@ which `scanTextForSecrets` does return (`memory/lib/secret-scrub.mjs:87`). Patte
 is. `scrubRecordsFile` is fail-fast (first hit per file, `:137-139`) — accepted and named, since
 either way the merge stops.
 
+**Two distinct UNCOMPUTABLE reasons (cold-1, PR #907 cold review, fixed ahead of PR 2):**
+`main()` can fail closed (exit 2) for two different causes, and they must never share one message.
+(1) **config failure** — `resolveSecretConfig(config)` + `compilePatterns(...)` (A6, `secret-scrub.mjs:42-44`)
+run OUTSIDE the per-record read loop, in their own try/catch, before any file is read; an invalid
+regex source reports `lane-scrub: invalid secret pattern in config — failing closed (uncomputable):
+<message>`. (2) **read failure** — an added record deleted between the diff and the run throws
+inside `readFile`, caught by a separate try/catch around the loop itself, reporting `lane-scrub:
+cannot read an added record — failing closed (uncomputable): <message>`. The original single
+try/catch wrapped both steps together, so a broken secret-config pattern was misreported as an
+unreadable record — a config author's mistake read as a corrupted checkout. Splitting the two
+try/catches (and passing pre-compiled `patterns`/`allowPatterns` into `evaluateLaneScrub` from
+`main()`, bypassing its internal config-compile path) makes the two failures independently
+diagnosable while both still exit 2.
+
 ### A7 — Registration order is asserted; `NEVER_TIERED` is not touched
 
 `governance-checks.test.mjs:91` asserts the **order** of `governance.yml`'s job `name:` fields equals
@@ -200,6 +214,16 @@ which is why `lanePaths` is exported as its own field rather than being folded i
 The walk passes `sourceBranch: null` and reads `lanePaths`: the same conjunction, minus a branch
 claim that does not exist post-merge. `lane === laneBranch && lanePaths` is asserted in the unit
 test so the three booleans cannot drift apart.
+
+**Operational fact (for the release note):** `[LANE]` depends on `gh pr view` actually returning
+the PR body — an unauthenticated `brain:audit` run over a window that contains a lane merge does
+NOT silently treat it as a plain merge. `fetchPrMeta` sets `prMetaError` on that failure, the
+`[UNCOMPUTABLE]` guard (above `laneMerge`) fires first, and the run prints `[UNCOMPUTABLE]` and
+exits 2 — fail-closed, by design, not a defect to file. And a `[LANE]` row skips ALL of
+`evaluateMerge` — diff-size, memory presence, AND the human-review gate — for that merge; that is
+the surface the `[LANE]` ruling deliberately trades away in exchange for not rendering a
+governance verdict on a shipped memory lane (D4). Anyone auditing "what did `[LANE]` actually
+exempt" should read it as those three checks, not as "nothing was checked."
 
 ### A9 — Index-lag compares **id sets**, never bytes, and the script must join the verification surface
 

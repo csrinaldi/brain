@@ -206,5 +206,174 @@ unit 2. `npm run check-refs` clean after both commits.
 
 7/7 assigned slice-A tasks complete, PLUS the #905 correction batch above (3 code/test fixes + 5
 editorial nits, 2 commits, 5081/5081 full-suite green). Working tree clean, all commits local (no
-push). Ready for the orchestrator to cut the #905 PR branch and continue with Wrap-up A, or to
-launch batch 2 for slice B.
+push). Slice A shipped separately as PR #907 (merged to `main` at `ffe038a0`, `size:exception`) —
+see "Batch 3 — PR 2 prep" below for what happened after that merge; full engram history for slice
+B (B1/B2) lives at topic `sdd/issue-889-lane-governance/apply-progress` (observation #3287).
+
+## Batch 3 — PR 2 prep (2026-09-10)
+
+**Context at batch start**: slice A (#905) already merged as PR #907 (`ffe038a0`,
+`size:exception`). Worktree rebased onto it with slice B's three commits already present
+(`3aa152c8` [LANE] audit row, `3388187d` index-lag, `4e68bb16` docs ticking B1.1-B2.3/B.W1 and
+epic 3.1c) — B1/B2 were NOT redone in this batch, they were already done; see engram observation
+#3287 for their full RED/GREEN detail, since this file's slice-B section was not carried forward
+by that earlier batch.
+
+**This batch's own work — cold-1 from PR #907's cold review** (`lane-scrub.mjs:126-140`):
+`main()`'s single try/catch around `evaluateLaneScrub` reported every thrown error as `lane-scrub:
+cannot read an added record — failing closed (uncomputable): <message>`, but `compilePatterns()`
+(`memory/lib/secret-scrub.mjs:42-44`, throws on an invalid regex source) also runs inside that
+same call — via `evaluateLaneScrub`'s internal `resolveSecretConfig`/`compilePatterns` step —
+misattributing a bad secret-config pattern to a record-read failure.
+
+RED: added `main: an invalid secret pattern in config → exit 2 with a config-specific reason,
+never "cannot read"` to `lane-scrub.test.mjs`, confirmed failing against the un-fixed code (it
+printed the "cannot read" reason for a config error).
+
+GREEN: `evaluateLaneScrub` now accepts optional pre-compiled `patterns`/`allowPatterns` (falls
+back to compiling from `config` when omitted, for direct unit-level calls — backward compatible
+with the existing pure-function tests). `main()` compiles patterns via `resolveSecretConfig` +
+`compilePatterns` in its OWN try/catch, before and outside the per-record read loop, reporting
+`lane-scrub: invalid secret pattern in config — failing closed (uncomputable): <message>` on
+failure; the read-loop's try/catch (now wrapping only `evaluateLaneScrub` with pre-compiled
+patterns passed in) keeps its original `cannot read an added record` reason, now only ever
+reported for an actual read failure. Both paths still exit 2 (`resultToExit`'s `uncomputable`
+dominance, unchanged).
+
+Commit `60af7abc` (fix + test, work unit 1). Focused suite (`lane-scrub.test.mjs` +
+`brain-audit.test.mjs` + `index-lag.test.mjs`) 71 → 72/72 green. Full `npm test` 5081 → 5097/5097
+green (the jump includes slice B's tests already present from the prior batch, not just this
+one).
+
+Docs: this note (tasks.md's "PR 2 prep note" under the Slice B header) and design.md's A6 section
+(the two distinct UNCOMPUTABLE reasons — config-compile vs. read failure). Commit `13bec541`
+(docs, work unit 2).
+
+**Status**: cold-1 fixed and tested. Working tree clean, both commits local (no push). Remaining
+before PR 2 opens: B.W2 (`memory:save --issue 889`), B.W4 (fresh-context review), B.W5 (push +
+open PR 2), B.W6 (`brain:review`) — none attempted in this batch, out of its assigned scope.
+
+## Batch 4 — slice B corrections (2026-09-10)
+
+**Context at batch start**: a fresh cold reviewer of PR 2 prep (post-batch-3, worktree at
+`22d0bc72`) found two coverage/wording defects in `brain-audit.mjs`'s `[LANE]` branch (A8) and one
+wording issue each in `index-lag.mjs`'s warning, its own test's assertion strength, and the epic
+tracker. None were behavior bugs in the shipped `[LANE]`/index-lag logic itself — this batch is
+test coverage, comment accuracy, and docs.
+
+**MAJOR 1 — `[LANE]`'s production PR-body shape had zero test coverage.** The existing B1
+happy-path test (`brain-audit.test.mjs:1915`, now renamed "fallback path, no resolvable PR")
+put the `Memory lane:` marker in the COMMIT body with a subject carrying no `(#N)`, so `prNum`
+resolved to `null`, `fetchPrMeta` never called `gh`, and `selectIssueLinkBody` fell back to the
+commit body by construction. The shape PR 2 actually ships — marker only in the PR body via
+`gh pr view`, since GitHub squash bodies carry the branch's commit messages and never the PR
+description — had no test at all: mutating `issueLinkBody` → `body` at `brain-audit.mjs:341` left
+52/52 green. Added a new "production shape" test: records-only addition, squash subject carrying
+`(#N)`, `writeReviewedGhStub` (extended with an optional `body` override) stubbing the marker into
+the PR body, and an empty commit body. RED/mutant proof: applied the `issueLinkBody` → `body`
+mutation directly to `brain-audit.mjs` (scratch text saved first, reverted via the same Edit
+after), confirmed the new test fails (`[FAIL] … issueLink: no issue reference found` instead of
+`[LANE]`) while the renamed fallback test still passes against the same mutant, then reverted —
+`git diff --stat` confirmed byte-identical to pre-mutation. Never used `git checkout --`. Commit
+`0088f536`.
+
+**MAJOR 2 — the neighboring comment claimed the marker is "never the raw commit body."** False:
+`selectIssueLinkBody` (`lib/audit-helpers.mjs:52-54`) falls back to the commit body exactly when
+`prBody` is absent — that fallback is what makes the fallback test above meaningful in the first
+place. Reworded per design A8: the marker is read from `issueLinkBody` (PR body when reachable,
+commit body as the fallback), and it is the `[UNCOMPUTABLE]` guard above this line — not the
+choice of `issueLinkBody` itself — that stops a failed PR fetch from ever reaching the `[LANE]`
+check. Same commit `0088f536` (kept with the test it explains, not split into a docs-only unit).
+
+**MINOR 3 — `index-lag.mjs`'s warning could read in-sync when it was not.** `indexed N, rebuilt M`
+alone can pass with equal counts even when one id was swapped for another (one missing, one
+stale) — the message never said which direction the lag actually ran. RED: added an assertion to
+the existing lagged-index test expecting `(1 missing from the index, 0 stale in it)`, confirmed it
+failed against the un-fixed message. GREEN: appended the missing/stale counts (counts only, never
+raw ids — those stay in `result` for a caller that wants them) to the warning string in
+`index-lag.mjs`. TRIANGULATE: added a second `main()` test where the index lags in BOTH directions
+at once (`indexed 2, rebuilt 2` — equal, but genuinely lagged), asserting
+`(1 missing from the index, 1 stale in it)`. Commit `210a38ec`.
+
+**SUGGESTION 4 — the "NO FILE IS WRITTEN" test only snapshotted `index.jsonl`.** A writer that
+touched a record file under `.memory/records/` instead (added/removed/rewrote one) would have
+gone uncaught. Added a `snapshotDir()` helper (names + bytes + mtime, keyed by filename) and
+widened the existing test to snapshot the whole `recordsDir` before/after `main()`, plus a fixture
+invariant asserting the pre-snapshot is non-empty (so the "untouched" assertion cannot pass
+vacuously on an empty directory). Same commit `210a38ec` as MINOR 3 — one work unit, one
+deliverable ("the index-lag warning is precise and its non-mutation guarantee is real").
+
+**SUGGESTION 5 — `openspec/changes/issue-864-memory-2-0/tasks.md:39`.** The ticked 3.1c bullet
+still described the CI check as refusing "any path outside `.memory/records/` additions +
+`index.jsonl`" — stale wording from before A9/L3 established that `index.jsonl` is NEVER an
+allowed lane-PR path, only a byproduct `memory:reindex` regenerates separately. Amended to
+"additions only; `index.jsonl` never (L3)."
+
+**design.md A8** gained an "Operational fact (for the release note)" paragraph: `[LANE]` depends
+on `gh pr view` returning the PR body — an unauthenticated `brain:audit` run over a window
+containing a lane merge does NOT silently pass it as a plain merge; the `[UNCOMPUTABLE]` guard
+fires first and the run exits 2, fail-closed by design. And a `[LANE]` row skips ALL of
+`evaluateMerge` (diff-size, memory presence, human-review gate) for that merge — the surface the
+ruling deliberately trades away.
+
+**Verification**: focused suite (`brain-audit.test.mjs` + `index-lag.test.mjs`) 60 → 61/61 green
+after work unit 1, 61 → 62/62 green after work unit 2 (unchanged by work unit 3, docs-only). Full
+`npm test` 5097 → 5098/5098 green after work unit 1, 5098 → 5099/5099 green after work unit 2.
+
+**Files touched this batch**: `brain/scripts/brain-audit.mjs`, `brain/scripts/brain-audit.test.mjs`
+(work unit 1, commit `0088f536`); `brain/scripts/memory/index-lag.mjs`,
+`brain/scripts/memory/index-lag.test.mjs` (work unit 2, commit `210a38ec`);
+`openspec/changes/issue-889-lane-governance/design.md`,
+`openspec/changes/issue-864-memory-2-0/tasks.md`, this file (work unit 3, docs). Never touched
+`brain/core/**`, `brain/project/**`, or `.memory/**`.
+
+**Status**: all five cold-review findings (2 MAJOR, 1 MINOR, 2 SUGGESTION) addressed and tested.
+Working tree clean, all three commits local (no push). Remaining before PR 2 opens, unchanged from
+batch 3: B.W2 (`memory:save --issue 889`), B.W4 (fresh-context review of THIS batch), B.W5 (push +
+open PR 2), B.W6 (`brain:review`) — none attempted in this batch, out of its assigned scope.
+
+## Batch 5 — one cold-review blocker on PR #908 (2026-09-10)
+
+**Context at batch start**: PR 2 (#889 lane governance) opened as PR #908 (`f9e93ca1` on
+`feat/issue-889-featgovernance-the-lane-is-recognised-pa`, on top of batch 4's tip). A fresh cold
+reviewer reproduced a blocker: `main({ diffNameOnlyAdded: () => ['src/unrelated-file.mjs'],
+readConfig: () => ({ governance: { memorySecretPatterns: ['(unclosed'] } }), readFile: () => {
+throw ... } })` — a PR adding ZERO `.memory/records/` paths — now exits 2 ("invalid secret pattern
+in config") instead of the pre-batch-3 exit 0. Root cause: batch 3's cold-1 fix
+(`60af7abc`/PR #907 prep) moved `resolveSecretConfig` + `compilePatterns` above the per-record
+read loop UNCONDITIONALLY, so config resolution now ran even when there was nothing to scan — one
+bad regex in `governance.memorySecretPatterns` blocked EVERY PR on the repo, not just lanes or PRs
+that actually touch `.memory/records/`.
+
+RED: added `main: zero added records + an invalid secret pattern in config → exit 0, config never
+resolved` to `lane-scrub.test.mjs`, reproducing the reviewer's exact call shape (no `ctx`,
+`diffNameOnlyAdded` returning an unrelated path, a `readConfig` spy counting calls and returning
+the same invalid-regex config, `readFile` throwing if ever called). Confirmed failing against the
+un-fixed code: `2 !== 0`.
+
+GREEN: `main()` now computes the added-records subset (`LANE_PATH_RE` filter over `addedFiles`,
+the same filter `evaluateLaneScrub` applies internally) BEFORE calling `readConfig()` at all. When
+that subset is empty, `main()` returns `{ pass: true, reason: 'no added record paths — nothing to
+scan' }` immediately — `readConfig`, `resolveSecretConfig`, and `compilePatterns` are never
+reached. Only when there is at least one record path does `main()` proceed to read the config and
+compile patterns (still in their own try/catch, still before the read loop — cold-1's fix is
+otherwise unchanged). `evaluateLaneScrub` is then called with the pre-filtered `recordPaths`
+instead of the raw `addedFiles` (harmless: its own internal `LANE_PATH_RE` filter is idempotent on
+an already-filtered list).
+
+Both other cold-1 scenarios stay green unmodified: one added record + invalid regex → exit 2 with
+the config reason; one added record + unreadable file → exit 2 with the read reason.
+
+Single commit `fix(governance): lane-scrub compiles the secret patterns only when there is a
+record to scan — a bad regex no longer blocks every PR (#889)` (fix + test + this doc note, one
+work unit, per the batch's one-commit boundary). Focused suite (`lane-scrub.test.mjs`) 12 → 13/13
+green. Full `npm test` 5099 → 5100/5100 green (the new test is the only addition to the total).
+
+**Files touched this batch**: `brain/scripts/governance/lane-scrub.mjs`,
+`brain/scripts/governance/lane-scrub.test.mjs` (one work unit); this file (docs). Never touched
+`brain/core/**`, `brain/project/**`, or `.memory/**`.
+
+**Status**: the one cold-review blocker on PR #908 is fixed and tested. Working tree has this
+batch's commit local (no push, no PR write). B.W4 (fresh-context review of this batch), B.W5 (push
+the fix), and B.W6 (`brain:review`) remain maintainer/orchestrator acts, out of this batch's
+assigned scope.

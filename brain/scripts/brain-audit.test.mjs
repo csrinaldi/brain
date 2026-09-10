@@ -823,14 +823,18 @@ function writeFailingGhStub(binDir) {
  * adrPresence's imprecision, which is what #510 removes. Giving it a resolvable PR is what
  * makes the fixture pin the invariant that now does the work, rather than a leftover.
  *
+ * `pr.body` overrides the default `Closes #<number>` PR description — used to plant
+ * evidence (e.g. the `Memory lane:` marker) that must be read from `prBody`, never
+ * fabricated by the stub matching the commit body by coincidence.
+ *
  * @param {string} binDir
- * @param {{ number: number, author: string, reviews: Array<{state: string, login: string}> }} pr
+ * @param {{ number: number, author: string, reviews: Array<{state: string, login: string}>, body?: string }} pr
  */
 function writeReviewedGhStub(binDir, pr) {
   mkdirSync(binDir, { recursive: true });
   const gh = join(binDir, 'gh');
   const view = JSON.stringify({
-    number: pr.number, labels: [], body: `Closes #${pr.number}`,
+    number: pr.number, labels: [], body: pr.body ?? `Closes #${pr.number}`,
     author: { login: pr.author }, headRefOid: 'deadbeef',
   });
   const reviews = JSON.stringify(pr.reviews.map(r => ({ state: r.state, user: { login: r.login }, body: '' })));
@@ -1902,4 +1906,160 @@ test('#518: with no window base, the command is VISIBLY a placeholder rather tha
     'a fabricated sha in a force-with-lease is worse than an obvious blank');
   assert.match(audit.stdout, /cursor\.mjs window/,
     'and it must say where to get the real values');
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// B1 (#889, design A8, spec "brain:audit reports [LANE] on both signals") —
+// a merge/squash classified as a lane by BOTH signals (records-only additions
+// AND the `/^Memory lane: /m` body marker) is reported `[LANE]` and never
+// reaches `evaluateMerge` — no governance verdict is rendered for a shipped
+// memory lane. Paths alone or the marker alone must NOT classify as a lane.
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('B1 (fallback path, no resolvable PR): a records-only squash carrying the lane marker in the COMMIT BODY prints [LANE], never a verdict', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-lane-'));
+  t.after(() => removeTempTree(dir));
+
+  const git = makeRepo(dir);
+  commit(git, dir, { 'README.md': 'init' }, 'chore: initial (#0)');
+  const base = headShaOf(git);
+
+  const sq = squashCommit(
+    git, dir,
+    { '.memory/records/2026-07.jsonl': makeSessionSummaryRecord() },
+    'feat: ship a session record\n\nMemory lane: host1-2026-09-10\n',
+  );
+
+  const r = spawnSync('node', [AUDIT_SCRIPT, `${base}..HEAD`], { cwd: dir, encoding: 'utf8' });
+
+  assert.ok(r.stdout.includes(`[LANE] ${sq.slice(0, 7)}`),
+    `expected a [LANE] line naming the squash:\n${r.stdout}\n${r.stderr}`);
+  assert.ok(!/\[(PASS|FAIL|SKIP)\]/.test(r.stdout),
+    `a lane merge must never reach evaluateMerge — no verdict line expected:\n${r.stdout}`);
+  assert.equal(r.status, 0, `a lane merge is clean, not a failure:\n${r.stdout}\n${r.stderr}`);
+});
+
+// This is the SHAPE PR 2 actually ships: a squash subject carrying `(#N)` (so
+// `parsePrNumber` resolves a PR), `gh pr view` answering with the `Memory lane:`
+// marker in the PR BODY (the body `ship.mjs` writes — design A8), and NO marker in
+// the raw commit body at all. The fallback test above cannot exercise `issueLinkBody`
+// taking its PR-body branch — its subject has no `(#N)`, so `prNum` is null,
+// `fetchPrMeta` never calls `gh`, and `selectIssueLinkBody` falls back to the commit
+// body by construction. That gap is exactly what let `issueLinkBody` → `body`
+// (`brain-audit.mjs:341`) survive: with the marker present in BOTH bodies in the
+// fallback fixture, the fallback test cannot tell which one the code actually read.
+test('B1 (production shape): the marker lives in the PR body via `gh pr view`; the commit body carries none', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-lane-prbody-'));
+  t.after(() => removeTempTree(dir));
+
+  const git = makeRepo(dir);
+  commit(git, dir, {
+    'README.md': 'init',
+    'brain.config.json': JSON.stringify({
+      vcs: { provider: 'github' },
+      project: { slug: 'acme/x' },
+    }),
+  }, 'chore: initial (#0)');
+  const base = headShaOf(git);
+
+  // Squash subject only — NO body, so the raw commit body is empty and carries no marker.
+  const sq = squashCommit(
+    git, dir,
+    { '.memory/records/2026-09-10.jsonl': makeSessionSummaryRecord() },
+    'memory: host1 2026-09-10 (1 records) (#912)',
+  );
+
+  const binDir = join(dir, '.stubbin');
+  writeReviewedGhStub(binDir, {
+    number: 912, author: 'brain-bot', reviews: [],
+    body: 'Memory lane: host1 2026-09-10\nRecords: 1\n',
+  });
+
+  const r = spawnSync('node', [AUDIT_SCRIPT, `${base}..HEAD`], {
+    cwd: dir, encoding: 'utf8',
+    env: { ...process.env, PATH: `${binDir}:${process.env.PATH}`, GH_TOKEN: 'x' },
+  });
+
+  assert.ok(r.stdout.includes(`[LANE] ${sq.slice(0, 7)}`),
+    `the marker fetched from the PR body (gh pr view), not the marker-free commit body, must classify this as a lane:\n${r.stdout}\n${r.stderr}`);
+  assert.ok(!/\[(PASS|FAIL|SKIP)\]/.test(r.stdout),
+    `a lane merge must never reach evaluateMerge — no verdict line expected:\n${r.stdout}`);
+  assert.equal(r.status, 0, `a lane merge is clean, not a failure:\n${r.stdout}\n${r.stderr}`);
+});
+
+test('B1: the SAME records-only payload WITHOUT the marker is evaluated normally', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-lane-nomarker-'));
+  t.after(() => removeTempTree(dir));
+
+  const git = makeRepo(dir);
+  commit(git, dir, { 'README.md': 'init' }, 'chore: initial (#0)');
+  const base = headShaOf(git);
+
+  squashCommit(
+    git, dir,
+    { '.memory/records/2026-07.jsonl': makeSessionSummaryRecord() },
+    'feat: ship a session record (no lane marker)',
+  );
+
+  const r = spawnSync('node', [AUDIT_SCRIPT, `${base}..HEAD`], { cwd: dir, encoding: 'utf8' });
+
+  assert.ok(!r.stdout.includes('[LANE]'),
+    `paths alone must not classify as a lane — the marker is required too:\n${r.stdout}`);
+  assert.ok(/\[(PASS|FAIL)\]/.test(r.stdout),
+    `without the marker, evaluateMerge must still run and produce a verdict:\n${r.stdout}`);
+});
+
+test('B1: a code path alongside records, WITH the marker, is evaluated normally (lanePaths false)', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-lane-mixed-'));
+  t.after(() => removeTempTree(dir));
+
+  const git = makeRepo(dir);
+  commit(git, dir, { 'README.md': 'init' }, 'chore: initial (#0)');
+  const base = headShaOf(git);
+
+  squashCommit(
+    git, dir,
+    {
+      '.memory/records/2026-07.jsonl': makeSessionSummaryRecord(),
+      'src/feature.mjs': 'export const x = 1;\n',
+    },
+    'feat: ship a record alongside code\n\nMemory lane: host1-2026-09-10\n',
+  );
+
+  const r = spawnSync('node', [AUDIT_SCRIPT, `${base}..HEAD`], { cwd: dir, encoding: 'utf8' });
+
+  assert.ok(!r.stdout.includes('[LANE]'),
+    `the marker alone must not classify as a lane — a non-record path must fail lanePaths:\n${r.stdout}`);
+  assert.ok(/\[(PASS|FAIL)\]/.test(r.stdout),
+    `a mixed payload must still be evaluated by evaluateMerge:\n${r.stdout}`);
+});
+
+test('B1: the [UNCOMPUTABLE] guard short-circuits BEFORE lane classification', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-lane-uncomputable-'));
+  t.after(() => removeTempTree(dir));
+
+  const git = makeRepo(dir);
+  commit(git, dir, {
+    'README.md': 'init',
+    'brain.config.json': JSON.stringify({
+      vcs: { provider: 'github' },
+      project: { slug: 'csrinaldi/brain' },
+    }),
+  }, 'chore: initial (#0)');
+  const base = headShaOf(git);
+
+  git('checkout', '-b', 'memory/host1-2026-09-10');
+  commit(git, dir, { '.memory/records/2026-07.jsonl': makeSessionSummaryRecord() }, 'feat: lane ship');
+  git('checkout', 'main');
+  // The lane marker lives in the PR description, which an unauthenticated
+  // fetch cannot read — never fall back to the raw merge commit body to
+  // manufacture a [LANE] verdict the evidence does not support.
+  git('merge', '--no-ff', 'memory/host1-2026-09-10', '-m', 'Merge pull request #472 from csrinaldi/memory/host1-2026-09-10');
+
+  const r = runAuditUnauthenticated(dir, `${base}..HEAD`);
+
+  assert.ok(!r.stdout.includes('[LANE]'),
+    `a merge whose PR metadata failed must never be classified as a lane on a fallback body:\n${r.stdout}`);
+  assert.ok(r.stdout.includes('[UNCOMPUTABLE]'), `expected [UNCOMPUTABLE]:\n${r.stdout}\n${r.stderr}`);
+  assert.equal(r.status, 2, `uncomputable dominates:\n${r.stdout}\n${r.stderr}`);
 });

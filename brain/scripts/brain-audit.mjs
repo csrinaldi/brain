@@ -52,6 +52,11 @@ import { join } from 'node:path';
 import { isAfterBaseline, selectIssueLinkBody, auditedBase, auditedTip } from './lib/audit-helpers.mjs';
 import { readRecordObservations } from './memory/lib/store.mjs';
 import { makeGit } from './governance/postmerge/resolution.mjs';
+// B1 (#889, design A8) — the lane predicate (A1) reused post-merge. brain-audit
+// has no head branch at this point (fetchPrMeta exposes none), so it classifies
+// on `lanePaths` alone plus the `/^Memory lane: /m` body marker — never on
+// `sourceBranch`, which is always null here.
+import { classifyLane } from './governance/checks/lane.mjs';
 // The first-parent merge walk (EVIDENCE + VERDICT layers) is SHARED with
 // brain-metrics — see lib/merge-walk.mjs's module header (design D1, issue
 // #324). Emission ([PASS]/[FAIL]/[SKIP], [FAIL-SHA] dedup, crossCheckExit)
@@ -322,6 +327,26 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       // actual Closes/Part of #N reference).  Fall back to the raw commit body
       // when the PR description is absent or empty.
       const issueLinkBody = selectIssueLinkBody(prBody, body);
+
+      // ── Lane merge (D4, design A8, spec "brain:audit reports [LANE] on both
+      // signals") ───────────────────────────────────────────────────────────
+      // A shipped memory lane is not a governance-relevant merge — it is
+      // recognized structurally (every changed path an addition under
+      // `.memory/records/`) AND declared (the `/^Memory lane: /m` marker in
+      // `issueLinkBody` — the PR body when the PR is reachable, the commit body
+      // as `selectIssueLinkBody`'s fallback otherwise (design A8); this is the
+      // SAME evidence `issueLink` would have read, never something extra).
+      // The `[UNCOMPUTABLE]` guard above (`prMetaError !== null`) is what stops
+      // a failed PR fetch from ever reaching this line — without it, a fetch
+      // failure would still fall back to the commit body here and could
+      // fabricate a [LANE] verdict from evidence the audit never actually read.
+      // Paths alone or the marker alone are NOT a lane — the conjunction is the
+      // whole point.
+      const laneMerge = classifyLane({ sourceBranch: null, changedFiles, addedFiles });
+      if (laneMerge.lanePaths && /^Memory lane: /m.test(issueLinkBody ?? '')) {
+        console.log(`[LANE] ${sha.slice(0, 7)} ${subject}`);
+        continue;
+      }
 
       const rec = evaluateMerge(sha, {
         numstat, changedFiles, addedFiles, issueLinkBody, prLabels, ignoreList, allObservations,
