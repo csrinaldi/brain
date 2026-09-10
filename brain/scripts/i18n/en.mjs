@@ -316,6 +316,16 @@ export default {
   'memory.splitRecords.repeats': '{count} repeated line(s) collapsed first-wins ({divergent} divergent — same id, different bytes). The winner is the line the readers already resolved to.',
   'memory.splitRecords.failed':  '✗ split-records failed — {message}',
 
+  // ── memory/cli.mjs — collect (issue #887, ADR-0034 L4/C2) ────────────────────
+  'memory.collect.done':    '✓ collected {collected} record(s) into {ref} ({commit}).',
+  'memory.collect.nothing': 'nothing new to collect — {ref} unchanged.',
+  'memory.collect.offline': 'origin/main could not be fetched; continued on the local origin/main ref.',
+  'memory.collect.failed':  '✗ collect failed — {message}',
+  'memory.collect.badHost': '✗ collect failed — the host name produced an empty or invalid ref slug: {message}',
+  'memory.collect.raced':   '✗ collect failed — the lane ref moved during this run (raced); nothing was lost, its blobs are re-collected on the next run: {message}',
+  'memory.collect.secretSkipped':          '{count} secret-bearing record(s) skipped — pattern and line number only, never the matched line.',
+  'memory.collect.modifiedTrackedSkipped': '{count} tracked-and-modified record(s) skipped — commit or stash them, then re-run.',
+
   // ── memory/cli.mjs — which backend actually ran (issue #641) ─────────────────
   // Each of these is a case where the backend that ran is not the one a reader
   // would assume. Silence is the whole defect: `MEMORY_BACKEND=plainfiles`
