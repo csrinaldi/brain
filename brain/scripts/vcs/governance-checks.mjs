@@ -47,6 +47,10 @@ export const GOVERNANCE_JOBS = [
   'phase-order',
   'actor-check',
   'brain-writes-reviewed',
+  // #905 (ADR-0034 L1/C1) — APPENDED AT THE END: governance-checks.test.mjs's
+  // order-guard asserts governance.yml's job order equals this array exactly.
+  'lane-paths',
+  'lane-scrub',
 ];
 
 /**

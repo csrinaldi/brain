@@ -216,6 +216,21 @@ export const GATE_MATRIX = Object.freeze({
     standard: Object.freeze({ policy: 'required', evidence: 'human-approved-review' }),
     regulated: Object.freeze({ policy: 'required', evidence: 'human-approved-review+codeowners-rung1' }),
   }),
+  // #905 (ADR-0034 L1/C1) — APPENDED AT THE END, mirroring GOVERNANCE_JOBS'
+  // append order (design.md A7). Required at every tier by POSITION (not
+  // added to NEVER_TIERED — REQ-TIER-2's six-gate core stays untouched; these
+  // two are simply matrix rows whose policy happens to be 'required'
+  // everywhere, same shape 'diff-size' already has).
+  'lane-paths': Object.freeze({
+    lite: Object.freeze({ policy: 'required', evidence: 'lane-path-restriction' }),
+    standard: Object.freeze({ policy: 'required', evidence: 'lane-path-restriction' }),
+    regulated: Object.freeze({ policy: 'required', evidence: 'lane-path-restriction' }),
+  }),
+  'lane-scrub': Object.freeze({
+    lite: Object.freeze({ policy: 'required', evidence: 'secret-scan' }),
+    standard: Object.freeze({ policy: 'required', evidence: 'secret-scan' }),
+    regulated: Object.freeze({ policy: 'required', evidence: 'secret-scan' }),
+  }),
 });
 
 /**

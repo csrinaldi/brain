@@ -173,3 +173,22 @@ brain-writes-reviewed:
   stage: test
   script:
     - node brain/scripts/vcs/brain-writes-reviewed.mjs
+
+# ── Invariant 9 (L1, ADR-0034, #905) — the memory lane's path predicate ─────
+# REQUIRED at every tier (GATE_MATRIX['lane-paths']) — self-reporting: runs
+# and passes explicitly on a non-lane MR too ("not a lane — nothing to
+# check"), never skipped.
+lane-paths:
+  extends: .governance_mr_rules
+  stage: test
+  script:
+    - node brain/scripts/governance/lane-paths.mjs
+
+# ── Invariant 10 (C1, ADR-0034, #905) — non-waivable secret scan ───────────
+# REQUIRED at every tier (GATE_MATRIX['lane-scrub']) — scans every ADDED
+# `.memory/records/*.jsonl` path on every MR, lane or not (design A6).
+lane-scrub:
+  extends: .governance_mr_rules
+  stage: test
+  script:
+    - node brain/scripts/governance/lane-scrub.mjs
