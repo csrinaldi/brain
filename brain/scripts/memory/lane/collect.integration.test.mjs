@@ -376,3 +376,47 @@ test('B1.6 — scope + seam guard: every `-C` call is a `status`, no push, no wo
 
   git(repo.mainDir, 'worktree', 'prune');
 });
+
+test('cold-1 — a staged rename record is one candidate (the new path), never split into a bogus old-path entry from parseStatusZ\'s NUL split', () => {
+  // `git status --porcelain -z -uall` emits a rename/copy record as TWO
+  // NUL-terminated parts: `R  <newpath>\0<oldpath>\0` — the second part is
+  // the bare pre-image path, with no status-code prefix at all. A parser
+  // that treats every NUL-delimited part as its own `{status, path}` entry
+  // slices two arbitrary characters off the front of that bare path as if
+  // they were a status code, manufacturing a second, bogus candidate that
+  // was never a real status line.
+  const base = testTmp('brain-lane-rename-');
+  const originDir = join(base, 'origin.git');
+  const mainDir = join(base, 'main');
+  git(base, 'init', '--bare', '-q', originDir);
+  git(base, 'init', '-q', '-b', 'main', mainDir);
+  git(mainDir, 'remote', 'add', 'origin', originDir);
+  git(mainDir, 'config', 'user.email', 'test@example.invalid');
+  git(mainDir, 'config', 'user.name', 'brain-test');
+
+  const recordsDir = join(mainDir, '.memory', 'records');
+  mkdirSync(recordsDir, { recursive: true });
+  const oldFile = '2026-09-rec-aaaaaaaaaaaaaaaa.jsonl';
+  const newFile = '2026-09-rec-bbbbbbbbbbbbbbbb.jsonl';
+  writeFileSync(join(recordsDir, oldFile), recordJson('rec-aaaaaaaaaaaaaaaa', 'renamed record'), 'utf8');
+  git(mainDir, 'add', join('.memory', 'records', oldFile));
+  git(mainDir, 'commit', '-q', '-m', 'track the record that will be renamed');
+  git(mainDir, 'push', '-q', '-u', 'origin', 'main');
+  git(mainDir, 'fetch', '-q', 'origin');
+
+  // `git mv` stages both sides of the rename in one step; content is
+  // byte-identical, so git's default rename detection reports it as a
+  // single `R ` record, not a delete+add pair.
+  git(mainDir, 'mv', join('.memory', 'records', oldFile), join('.memory', 'records', newFile));
+
+  const statusZOut = git(mainDir, 'status', '--porcelain', '-z', '-uall', '--', '.memory/records');
+  assert.match(statusZOut, /^R {2}/, 'the fixture must actually produce a staged rename record, or this test proves nothing');
+
+  const result = collectLane({ root: mainDir, date: '2026-09-09', host: 'test-host' });
+
+  const relevant = result.skipped.filter((s) => s.file === oldFile || s.file === newFile);
+  assert.equal(relevant.length, 1, 'the rename must route to exactly one skip entry — the bare old-path NUL part must never become its own candidate');
+  assert.equal(relevant[0].file, newFile, 'the surviving entry must be the new path, not a mangled slice of the old one');
+  assert.equal(relevant[0].reason, 'unexpected-status');
+  assert.equal(relevant[0].code, 'R ', 'the header comment\'s own claim: a rename falls through as unexpected-status');
+});

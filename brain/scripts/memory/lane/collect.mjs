@@ -128,17 +128,31 @@ function parseWorktrees(stdout) {
 
 /**
  * Parse `git status --porcelain -z -uall -- .memory/records` output.
- * NUL-delimited, two-char status code + space + repo-relative path. Does not
- * decode the rename two-path form (`R  new\0old\0`) — a renamed path is
- * unreachable for this pathspec under normal use (records are appended, not
- * renamed) and would fall through as `unexpected-status`, which is the
- * closed reason set's correct bucket for it.
+ * NUL-delimited, two-char status code + space + repo-relative path. A
+ * rename/copy record (`status[0]` is `R` or `C`) carries a SECOND
+ * NUL-terminated part immediately after: the pre-image (old) path, with no
+ * status-code prefix of its own — `R  new\0old\0`. That second part is
+ * consumed here as the old path, never parsed as a separate `{status, path}`
+ * entry (cold review #897, C1-adjacent): slicing two arbitrary characters
+ * off a bare path as if they were a status code would otherwise manufacture
+ * a bogus second candidate that was never a real status line. The surviving
+ * (new-path) entry itself is still routed to `unexpected-status` by the
+ * planner — a renamed path is unreachable for this pathspec under normal use
+ * (records are appended, not renamed), and `unexpected-status` is the closed
+ * reason set's correct bucket for it.
  */
 function parseStatusZ(stdout) {
+  const parts = stdout.split('\0');
   const entries = [];
-  for (const part of stdout.split('\0')) {
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i];
     if (part.length < 4) continue;
-    entries.push({ status: part.slice(0, 2), path: part.slice(3) });
+    const status = part.slice(0, 2);
+    const path = part.slice(3);
+    entries.push({ status, path });
+    if ((status[0] === 'R' || status[0] === 'C') && i + 1 < parts.length) {
+      i += 1; // consume the old-path NUL part; it is not its own entry.
+    }
   }
   return entries;
 }
