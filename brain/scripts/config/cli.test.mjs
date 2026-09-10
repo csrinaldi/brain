@@ -67,3 +67,17 @@ test('#823 cli: usage on a missing op or path', (t) => {
   assert.equal(r.status, 1);
   assert.match(r.stderr, /Usage/);
 });
+
+// #906 A6 (measured): the 1.6.0 migration entry is DORMANT until package.json
+// is cut to >=1.6.0 — but `deriveKnownPaths` (config-verb.mjs) walks every
+// migration's `defaults` with no version filter, so the leaf is settable
+// TODAY, version-independent of the installed package.json.
+test('#906 A6: memory.lane.enabled is a known settable leaf today, get/set round-trips', (t) => {
+  const root = world(t, { docs: { language: 'en' }, schemaVersion: '0.2.0' });
+  const setResult = run(root, 'set', 'memory.lane.enabled', 'true');
+  assert.equal(setResult.status, 0, setResult.stderr);
+
+  const getResult = run(root, 'get', 'memory.lane.enabled');
+  assert.equal(getResult.status, 0, getResult.stderr);
+  assert.equal(getResult.stdout.trim(), 'true');
+});

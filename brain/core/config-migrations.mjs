@@ -161,6 +161,32 @@ export const migrations = [
       }
     }
   },
+  {
+    version: "1.6.0",
+    description:
+      "Add memory.lane.enabled: the runtime guard both #906 triggers (the detaching " +
+      "SessionEnd launcher and the synchronous day:start sweep) read before spawning " +
+      "`memory/cli.mjs ship` (ADR-0034 L5, issue #906 A6). Default false on EVERY " +
+      "tier, always — flipping it is a maintainer act, gated on #889 D7.2's first " +
+      "manual lane PR merging, never a migration default. NOTE (A6, measured): this " +
+      "entry is DORMANT until package.json is cut to >=1.6.0 (migrateConfig applies " +
+      "only m.version <= targetVersion, and targetVersion is the installed " +
+      "package.json version — 1.5.0 at the time this entry was written). " +
+      "Correctness does not depend on it: the launcher and the sweep both treat an " +
+      "absent memory.lane.enabled as false (loadBrainConfig reads raw JSON, no " +
+      "migration), and `brain:config set memory.lane.enabled true` is accepted " +
+      "immediately regardless — deriveKnownPaths walks every migration's defaults " +
+      "with no version filter (config-verb.mjs). Version 1.5.0 was rejected: " +
+      "migrateConfig stamps schemaVersion = targetVersion, so a consumer already " +
+      "stamped 1.5.0 would silently skip a same-numbered entry forever.",
+    defaults: {
+      memory: {
+        lane: {
+          enabled: false,
+        },
+      },
+    },
+  },
 ];
 
 // NOTE (issue #231 A2, human ruling in tasks.md/design.md): this entry is versioned
