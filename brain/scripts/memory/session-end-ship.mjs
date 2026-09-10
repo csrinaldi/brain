@@ -101,11 +101,20 @@ function ensurePrivateDir(dir, uid) {
  * `ensurePrivateDir` above: it defeats a pre-created 0o666 regular file at
  * the log path, which `O_NOFOLLOW` and `open`'s create-only `mode`
  * argument do not.
+ *
+ * Does NOT close `fd` itself on refusal — `shipOnSessionEnd`'s single
+ * `finally` is the only place that closes `fd`, on every path (refusal,
+ * `_spawn`/`.unref()` throwing after this check already passed, or
+ * success). A prior version closed `fd` here AND guarded a second close in
+ * the caller's `finally` with a boolean; that guard collapsed any
+ * post-check failure (this function throwing vs. `_spawn` throwing) into
+ * the same branch, so a `_spawn`/`.unref()` throw AFTER this check passed
+ * skipped the `finally` close entirely and leaked the fd. One close site
+ * has no such ambiguity.
  */
 function ensureTrustedFd(fd, uid, logPath) {
   const st = fstatSync(fd);
   if (!st.isFile() || st.uid !== uid || (st.mode & 0o077) !== 0 || st.nlink !== 1) {
-    closeSync(fd);
     throw new Error(`refusing untrusted log file: ${logPath}`);
   }
 }
@@ -115,7 +124,7 @@ function ensureTrustedFd(fd, uid, logPath) {
  * never reports a non-zero outcome to its caller — the hook that invokes
  * this must always see exit 0.
  *
- * @param {{ _loadConfig?: Function, _spawn?: Function, _tmpdir?: Function, _now?: Function, _uid?: Function }} [seams]
+ * @param {{ _loadConfig?: Function, _spawn?: Function, _tmpdir?: Function, _now?: Function, _uid?: Function, _closeSync?: Function }} [seams]
  * @returns {{ spawned: boolean, logPath: string|null }}
  */
 export function shipOnSessionEnd({
@@ -124,6 +133,7 @@ export function shipOnSessionEnd({
   _tmpdir = osTmpdir,
   _now = () => new Date(),
   _uid = defaultUid,
+  _closeSync = closeSync,
 } = {}) {
   try {
     const config = _loadConfig();
@@ -157,7 +167,10 @@ export function shipOnSessionEnd({
       fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_APPEND | fsConstants.O_NOFOLLOW,
       0o600,
     );
-    let fdClosed = false;
+    // Single close site, unconditional: whether ensureTrustedFd refuses,
+    // _spawn/.unref() throws AFTER the fd was already trusted, or the spawn
+    // succeeds outright, this is the only place `fd` is closed — no bool
+    // guard, no branch that can skip it and leak the fd (post-merge fix).
     try {
       ensureTrustedFd(fd, uid, logPath);
       const child = _spawn(
@@ -171,13 +184,8 @@ export function shipOnSessionEnd({
         },
       );
       child.unref();
-    } catch (err) {
-      // ensureTrustedFd already closed fd on its own refusal path; guard
-      // against a double closeSync() in the finally below.
-      fdClosed = true;
-      throw err;
     } finally {
-      if (!fdClosed) closeSync(fd);
+      _closeSync(fd);
     }
 
     return { spawned: true, logPath };
