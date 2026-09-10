@@ -1,17 +1,23 @@
-// brain/core/config-migrations.test.mjs — unit tests for the `1.6.0` entry
-// (#906 A6): `memory.lane.enabled` defaults to false, additive-only, never
-// overwriting an already-set value.
+// brain/scripts/lib/config-migrations.test.mjs — unit tests for the `1.6.0`
+// entry (#906 A6): `memory.lane.enabled` defaults to false, additive-only,
+// never overwriting an already-set value.
 //
 // This file did not exist before #906 — the migrations were previously
 // exercised only indirectly, through installer.test.mjs, vcs/cli.test.mjs,
 // and stage-engine.test.mjs (each importing `migrations` for their own
 // purpose). This is the first test file that owns the migration LIST itself.
+//
+// Lives here, not beside brain/core/config-migrations.mjs: `npm test`'s
+// globs (test-hygiene's #850 guard) only reach `brain/scripts/**/*.test.mjs`
+// and `test/**/*.e2e.test.mjs` — a test under brain/core/ is never run. Same
+// precedent as brain/scripts/lib/managed-paths.test.mjs, whose subject
+// (brain/core/managed-paths.mjs) lives one directory over too.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { migrations } from './config-migrations.mjs';
-import { migrateConfig } from '../scripts/lib/installer.mjs';
+import { migrations } from '../../core/config-migrations.mjs';
+import { migrateConfig } from './installer.mjs';
 
 const ENTRY = migrations.find((m) => m.version === '1.6.0');
 
