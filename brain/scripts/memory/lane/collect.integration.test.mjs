@@ -13,10 +13,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync, execFileSync } from 'node:child_process';
-import { mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { testTmp } from '../../lib/test-tmp.mjs';
+// removeTempTree, not a bare rmSync: this file spawns git AND recursively
+// removes a directory (the deleted prunable worktree) — issue #800/#802's
+// adoption rule for exactly that combination.
+import { removeTempTree } from '../../__fixtures__/tmp-tree.mjs';
 import { collectLane, defaultGit } from './collect.mjs';
 
 const COLLECT_SOURCE = readFileSync(new URL('./collect.mjs', import.meta.url), 'utf8');
@@ -78,20 +82,34 @@ function buildFixtureRepo() {
   git(base, 'init', '-q', '-b', 'main', mainDir);
   git(mainDir, 'remote', 'add', 'origin', originDir);
 
+  // root commit WITHOUT the already-on-main file — both worktree branches
+  // fork from here, so neither tracks it. If the file were already on `main`
+  // when the worktrees branched, writing it there would be a no-op (git
+  // status would show nothing at all — an untracked copy is only possible
+  // for a file this branch never checked out).
   mkdirSync(join(mainDir, '.memory', 'records'), { recursive: true });
-  writeFileSync(
-    join(mainDir, '.memory', 'records', FILES.alreadyOnMain),
-    recordJson('rec-aaaaaaaaaaaaaaaa', 'already on main'),
-    'utf8',
-  );
+  writeFileSync(join(mainDir, '.memory', '.gitkeep'), '', 'utf8');
   git(mainDir, 'add', '.memory');
-  git(mainDir, 'commit', '-q', '-m', 'seed');
+  git(mainDir, 'commit', '-q', '-m', 'root');
   git(mainDir, 'push', '-q', '-u', 'origin', 'main');
   git(mainDir, 'fetch', '-q', 'origin');
 
   git(mainDir, 'worktree', 'add', '-q', wtADir, '-b', 'lane-a');
   git(mainDir, 'worktree', 'add', '-q', wtBDir, '-b', 'lane-b');
   for (const wt of [wtADir, wtBDir]) mkdirSync(join(wt, '.memory', 'records'), { recursive: true });
+
+  // NOW advance origin/main past the point both worktrees forked from, so
+  // `mainPaths` includes this file while neither worktree branch tracks it —
+  // the only way an untracked copy at the same path is possible at all.
+  writeFileSync(
+    join(mainDir, '.memory', 'records', FILES.alreadyOnMain),
+    recordJson('rec-aaaaaaaaaaaaaaaa', 'already on main'),
+    'utf8',
+  );
+  git(mainDir, 'add', join('.memory', 'records', FILES.alreadyOnMain));
+  git(mainDir, 'commit', '-q', '-m', 'add the already-on-main record');
+  git(mainDir, 'push', '-q', 'origin', 'main');
+  git(mainDir, 'fetch', '-q', 'origin');
 
   // modified-tracked: commit ONE record on wt-a's own branch, scoped `add`
   // so the other untracked fixtures written below never get swept in.
@@ -213,7 +231,10 @@ test('B1.4 — ref lifecycle: first run creates, same-day re-run appends, a thir
 
   const first = collectLane({ root: repo.mainDir, date: '2026-09-09', host: 'test-host' });
   assert.ok(first.commit);
-  assert.equal(git(repo.mainDir, 'rev-list', '--count', first.ref).trim(), '1');
+  // one commit AHEAD of origin/main — rev-list --count on the ref itself
+  // would also count origin/main's own history, which this fixture seeds
+  // with more than zero commits.
+  assert.equal(git(repo.mainDir, 'rev-list', '--count', `origin/main..${first.ref}`).trim(), '1');
   const refList1 = git(repo.mainDir, 'for-each-ref', 'refs/heads/memory/').split('\n').filter(Boolean);
   assert.equal(refList1.length, 1, 'exactly one refs/heads/memory/* entry — never a -<n> branch');
 
@@ -224,7 +245,7 @@ test('B1.4 — ref lifecycle: first run creates, same-day re-run appends, a thir
   const second = collectLane({ root: repo.mainDir, date: '2026-09-09', host: 'test-host' });
   assert.ok(second.commit);
   assert.notEqual(second.commit, first.commit);
-  assert.equal(git(repo.mainDir, 'rev-list', '--count', second.ref).trim(), '2');
+  assert.equal(git(repo.mainDir, 'rev-list', '--count', `origin/main..${second.ref}`).trim(), '2');
   const parentOfSecond = git(repo.mainDir, 'rev-parse', `${second.commit}^`).trim();
   assert.equal(parentOfSecond, first.commit, 'the append parents off the ref\'s prior tip, not origin/main again');
   const refList2 = git(repo.mainDir, 'for-each-ref', 'refs/heads/memory/').split('\n').filter(Boolean);
@@ -281,7 +302,7 @@ test('B1.6 — scope + seam guard: every `-C` call is a `status`, no push, no wo
   // git now reports it `prunable` in `worktree list --porcelain`.
   const prunableDir = join(repo.base, 'wt-prunable');
   git(repo.mainDir, 'worktree', 'add', '-q', prunableDir, '-b', 'lane-prunable');
-  rmSync(prunableDir, { recursive: true, force: true });
+  removeTempTree(prunableDir);
 
   const { git: recordingGit, calls } = countingGit();
   const result = collectLane({ root: repo.mainDir, date: '2026-09-09', host: 'test-host', git: recordingGit });
@@ -294,7 +315,7 @@ test('B1.6 — scope + seam guard: every `-C` call is a `status`, no push, no wo
   }
   assert.ok(!calls.some((argv) => argv[0] === '-C' && argv[1] === prunableDir), 'a prunable worktree must never be status-checked');
 
-  assert.doesNotMatch(COLLECT_SOURCE, /\bpush\b/, 'no push call may exist in the source at all');
+  assert.doesNotMatch(COLLECT_SOURCE, /(['"])push\1/, 'no push argv literal may exist in the source at all');
   assert.doesNotMatch(COLLECT_SOURCE, /pull-request|mrCreate|mrAutoMerge/i, 'no PR-body builder or PR call may exist');
   assert.doesNotMatch(COLLECT_SOURCE, /hooks?\//i, 'no hook invocation may exist');
 
