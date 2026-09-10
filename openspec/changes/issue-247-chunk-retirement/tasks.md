@@ -142,7 +142,7 @@ Commit: `docs(openspec): rewrite epic task 2.3 to the read-back boundary wording
   green throughout).
 - [x] W2 `memory:save --issue 247` — record-first, committed before the first push. **Evidence**:
   record `rec-752890976ce40df7`, committed on the feature branch before push.
-- [ ] W3 Epic task 2.3 — **NOT ticked.** It is REWRITTEN (Work Unit 5.2) to state the read-back
+- [x] W3 (done as designed: the line was rewritten in #913, not ticked) Epic task 2.3 — **NOT ticked.** It is REWRITTEN (Work Unit 5.2) to state the read-back
   half is done here; the export half (`share` stops calling `engram sync --export`) moves to task
   3.2 (#874). Ticking 2.3 now would claim the whole chunk-materialization retirement is done,
   which is false per D0/D1. **Confirmed at archive**: `issue-864-memory-2-0/tasks.md:32` still
