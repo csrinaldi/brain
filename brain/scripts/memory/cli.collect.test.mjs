@@ -70,6 +70,63 @@ function fixtureRepo({ withCandidate = true, configureIdentity = true } = {}) {
   return mainDir;
 }
 
+/** A bare origin plus a `main` checkout carrying ONE tracked-then-locally-
+ * modified record (` M`, `modified-tracked`) and one untracked secret-
+ * bearing record (`secret`) — the two skip reasons `memory:collect`'s own
+ * stderr lines (`memory.collect.secretSkipped` / `.modifiedTrackedSkipped`)
+ * exist to summarize by count. Neither is a candidate that ever gets
+ * collected, so the run's `collected` count is irrelevant to this fixture's
+ * purpose. */
+function fixtureRepoWithSkips() {
+  const base = testTmp('cli-collect-skiplines-');
+  const originDir = join(base, 'origin.git');
+  const mainDir = join(base, 'main');
+  git(base, 'init', '--bare', '-q', originDir);
+  git(base, 'init', '-q', '-b', 'main', mainDir);
+  git(mainDir, 'remote', 'add', 'origin', originDir);
+  git(mainDir, 'config', 'user.email', 'test@example.invalid');
+  git(mainDir, 'config', 'user.name', 'brain-test');
+
+  const dir = join(mainDir, '.memory', 'records');
+  mkdirSync(dir, { recursive: true });
+
+  const modifiedFile = join(dir, '2026-09-rec-cccccccccccccccc.jsonl');
+  writeFileSync(
+    modifiedFile,
+    JSON.stringify({
+      id: 'rec-cccccccccccccccc', ts: '2026-09-09T00:00:00Z', actor: '@t',
+      actorKind: 'agent', type: 'discovery', project: 'brain', content: 'original',
+    }) + '\n',
+    'utf8',
+  );
+  git(mainDir, 'add', join('.memory', 'records', '2026-09-rec-cccccccccccccccc.jsonl'));
+  git(mainDir, 'commit', '-q', '-m', 'track one record');
+  git(mainDir, 'push', '-q', '-u', 'origin', 'main');
+  git(mainDir, 'fetch', '-q', 'origin');
+
+  // tracked, then edited locally without committing — ` M`, modified-tracked.
+  writeFileSync(
+    modifiedFile,
+    JSON.stringify({
+      id: 'rec-cccccccccccccccc', ts: '2026-09-09T00:00:00Z', actor: '@t',
+      actorKind: 'agent', type: 'discovery', project: 'brain', content: 'edited locally, uncommitted',
+    }) + '\n',
+    'utf8',
+  );
+
+  // untracked, secret-bearing.
+  writeFileSync(
+    join(dir, '2026-09-rec-dddddddddddddddd.jsonl'),
+    JSON.stringify({
+      id: 'rec-dddddddddddddddd', ts: '2026-09-09T00:00:00Z', actor: '@t',
+      actorKind: 'agent', type: 'discovery', project: 'brain', content: `token ghp_${'x'.repeat(24)}`,
+    }) + '\n',
+    'utf8',
+  );
+
+  return mainDir;
+}
+
 /** `MEMORY_BACKEND` deliberately points at a backend that cannot be
  * imported — if `collect` ever fell through to backend dispatch, every one
  * of these runs would fail with "backend 'no-such-backend' not found". */
@@ -110,6 +167,16 @@ test('memory:collect never invokes a backend, regardless of MEMORY_BACKEND', () 
   const run = runCli(fixtureRepo());
   assert.equal(run.status, 0, run.stderr);
   assert.doesNotMatch(run.stderr, /backend 'no-such-backend' not found/);
+});
+
+test('cold-2 — memory:collect prints memory.collect.secretSkipped and memory.collect.modifiedTrackedSkipped on stderr with the right counts', () => {
+  const run = runCli(fixtureRepoWithSkips());
+  assert.equal(run.status, 0, run.stderr);
+  assert.match(run.stderr, /memory\/cli:.*1 secret-bearing record\(s\) skipped/i);
+  assert.match(run.stderr, /memory\/cli:.*1 tracked-and-modified record\(s\) skipped/i);
+  // D4's guarantee, restated at the CLI surface: the matched secret literal
+  // itself must never appear anywhere in the process output, count-only.
+  assert.doesNotMatch(run.stdout + run.stderr, /ghp_x{24}/);
 });
 
 test('memory:collect fails loudly with memory.collect.failed and exits 1 on a genuine git failure', () => {
