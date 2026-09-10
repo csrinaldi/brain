@@ -334,15 +334,124 @@ consistent with the measured evidence gathered in Section 0.6):
 - [ ] W6 Repo's own review gate on the PR.
 - [ ] W7 After merge: confirm `memory:audit`'s fresh-window handle count off 0.
 
+## Review corrections — correction batch (2026-09-10, this run)
+
+A second, distinct fresh-context reviewer pass (after the Tier-2 split above)
+found 3 MINOR findings and 1 NIT bucket-of-exclusions gap in the already-
+applied #738 code. All fixed here, STRICT TDD, on top of `aa240ca3`.
+
+**What**: two work-unit commits landed on this branch:
+
+1. `be19db89` — MINOR-2 + MINOR-1.
+   - MINOR-2 (`#461` class): `capture-provenance.mjs`'s `collapseAndTruncate`
+     composed agent-controlled instrument text (e.g. `AI_AGENT`) into
+     `source` unfiltered. Measured: `AI_AGENT="issue #999 runner"` produced a
+     `source` line containing `#999`, and `provenance.mjs`'s
+     `issueFromFuente` (`/issue #(\d+)/`) fabricated `issue: 999` on
+     re-import from a record that never declared or derived that issue.
+     Fixed by stripping every `#` from the instrument value before slicing:
+     `value.replace(/\s+/g, ' ').trim().replace(/#/g, '').slice(0, 64)`.
+   - MINOR-1: `capture-provenance.mjs` carried a private literal copy of
+     `HANDLE_RE`, "asserted identical" to `format.mjs`'s copy only by two
+     separate test suites, not by a code pin. Now imports `HANDLE_RE` from
+     `format.mjs` (no import cycle — `format.mjs` has no `fs`/
+     `child_process` dependency either). `DEFAULT_BRANCHES` in `format.mjs`
+     went back to a private (non-exported) `const`, since nothing outside
+     `classifyActor` reads the set.
+2. `feb2feca` — MINOR-3 (4 surviving mutants) + the NIT exclusion-bucket
+   bound.
+   - (a) The 300-char truncation test's `/AI_AGENT=(\S+)/` regex only ever
+     captured the fixture's first word (6 chars, whitespace-bearing) —
+     vacuous. Added a whitespace-free 100-char case asserting the truncated
+     tail is exactly 64 chars.
+   - (b) `deriveIssue`'s "no derivation" loop had no digit-bearing non-issue
+     branch. Added `chore/bump-node-22`, `release/v2-rc1`,
+     `fix/2026-cleanup`, and the near-miss `feat/issue-738x` (digits present,
+     but not the `issue-<N>(-|$)` shape).
+   - (c) No test pinned `plainfiles.mjs save()`'s wiring of a *configured*
+     `brain.agentEnv` name (only the default `AI_AGENT` was exercised). Added
+     a case with `getGitConfig('brain.agentEnv') → 'MY_AGENT'` and
+     `getEnv() → { MY_AGENT: 'x' }`, asserting `actorKind: 'agent'`.
+   - (d, optional — included) The CLI no-actor refusal fixture now also sets
+     a handle-shaped `user.name` locally (`@sneaky`) and asserts the refusal
+     still fires — proving `user.name` is never honored as a substitute for
+     `brain.actor`.
+   - NIT: `real-store-roundtrip.integration.test.mjs`'s three exclusion
+     buckets (`branchShapeRejections` in the two REQ-C4-1 tests,
+     `nonW3Errors` in the W1 test) had no bound — a classifier regression
+     that widened "branch-shaped"/W3 to match everything would have silently
+     emptied the failure set instead of failing loudly. Added
+     `assert.ok(branchShapeRejections.length < records.length, ...)` (and
+     the samples.length equivalent), plus a `w3Count > 0` sanity assertion
+     for the W1 test proving the W3 filter is excluding something real
+     (~183 known historical records), not filtering an already-empty set.
+
+**Why**: enforce mutation-testing discipline and close a real provenance-
+integrity gap (agent-controlled text could forge an `issue` citation) found
+by a fresh-context adversarial review, independent of the original
+implementer's own test suite.
+
+**Where**:
+- `brain/scripts/memory/lib/capture-provenance.mjs` — `collapseAndTruncate`
+  strips `#`; imports `HANDLE_RE` from `format.mjs` instead of duplicating it.
+- `brain/scripts/memory/lib/capture-provenance.test.mjs` — new MINOR-2
+  end-to-end test (imports `issueFromFuente` from `provenance.mjs`
+  test-only); replaced the vacuous truncation test; extended the
+  no-derivation branch loop.
+- `brain/scripts/memory/lib/format.mjs` — `DEFAULT_BRANCHES` no longer
+  exported.
+- `brain/scripts/memory/backends/plainfiles.save.test.mjs` — new
+  `brain.agentEnv` wiring test.
+- `brain/scripts/memory/cli.save-search.test.mjs` — no-actor fixture now
+  also sets a decoy `user.name`.
+- `brain/scripts/memory/lib/real-store-roundtrip.integration.test.mjs` —
+  three new exclusion-bucket bound assertions.
+
+**Learned**:
+1. Mutant-alive-then-dead was proven in scratch copies for both production
+   changes before committing: (a) `.slice(0, 64)` → `.slice(0, 10)` failed
+   the strengthened truncation test, reverting made it pass again; (c)
+   hardcoding `agentEnvConfig: null` in `plainfiles.mjs`'s `save()` failed
+   the new wiring test, reverting made it pass again. Neither mutation was
+   ever committed to the branch.
+2. `issueFromFuente`'s regex (`provenance.mjs:34`, `/issue #(\d+)/`) is the
+   ONE place that decides what counts as an issue citation in the §4 Fuente
+   prose — any text producer that can put a literal `#<digits>` into
+   `source` is a citation-forgery surface against it, not just against a
+   hypothetical "issue" field. `collapseAndTruncate` is the correct single
+   chokepoint to close it at, since every instrument value (currently only
+   `AI_AGENT`, but any future `brain.agentEnv` name) flows through it before
+   reaching `composeSource`.
+3. `git config brain.actor` was NEVER set on this clone during this batch —
+   every mutation probe used either a scratch copy of a single file (restored
+   byte-for-byte via `diff` before proceeding) or the pre-existing isolated
+   temp-repo CLI fixtures. Consistent with the delegation rule for this
+   worktree.
+
+Full `npm test` after both commits: **5202/5202 passing, 0 failures**
+(baseline before this batch: 5195/5195 per the section above's prior
+Tier-2-split measurement — net +5195→+5202 across intervening commits
+tracked in this file; this batch alone added +7 tests: +1 in commit
+`be19db89`, +6 in commit `feb2feca`).
+
+NIT noted but NOT fixed here (outside this batch's allowed edit paths):
+`openspec/changes/issue-864-memory-2-0/tasks.md:31` still reads "PR TBD" —
+left for the orchestrator.
+
 ## Status
 
 8/8 units complete (unit 5 folded into unit 4). Section 0 measurements
 0.1–0.5, 0.7 complete; 0.6 half-complete (refusal + audit-before done here;
 audit-after + real capture deferred to W1/W3, the maintainer's identity
-step). Full `npm test`: 5195/5195, confirmed again after the Tier-2 split
-correction below. Ready for `sdd-verify`.
+step). Full `npm test`: 5195/5195 after the original Tier-2 split
+correction, **5202/5202 after this review-corrections batch**. Ready for
+`sdd-verify`.
 
 Tier-2 split (correction batch): applied, 2 commits (`07246112` code+drafts,
 plus the SDD-artifacts commit). Tripwire measured GREEN without the doctrine
 text landing — not red-by-design. Maintainer handover (2 `brain:promote`
 commands) recorded above and in `tasks.md` 8.2.
+
+Review-corrections (this batch): applied, 2 commits (`be19db89` MINOR-2 +
+MINOR-1, `feb2feca` MINOR-3 + NIT). HEAD is now `feb2feca`. `npm test`:
+5202/5202.
