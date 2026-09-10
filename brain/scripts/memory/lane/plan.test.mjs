@@ -451,20 +451,26 @@ test('parent resolves to the given tip when present, else the input ref', () => 
   assert.equal(p2.parent, 'deadbeefdeadbeef');
 });
 
-test('a plan built from zero candidates returns commit: null and an empty duplicates shape', () => {
+test('a plan built from zero candidates returns an empty duplicates/files/skipped shape and no commit key (E5)', () => {
   const p = plan();
-  assert.equal(p.commit, null);
   assert.deepStrictEqual(p.duplicates, emptyDuplicates());
   assert.deepStrictEqual(p.files, []);
   assert.deepStrictEqual(p.skipped, []);
+  // E5: the planner is pure and never touches git — `commit` is the shell's
+  // (collect.mjs) field to own, after it actually runs `commit-tree`.
+  assert.ok(!('commit' in p), 'planLaneCommit must not return a commit field at all');
 });
 
 // ── source guard: pure module, no fs/spawn/clock/os ─────────────────────────
 
-test('plan.mjs imports no node:fs, node:child_process, node:os, and reads no wall clock', () => {
+test('plan.mjs imports no node:fs, node:child_process, node:os, and reads no wall clock, env, or dynamic module (E3)', () => {
   const src = readFileSync(PLAN_MJS_PATH, 'utf8');
   assert.doesNotMatch(src, /from ['"]node:fs['"]/);
   assert.doesNotMatch(src, /from ['"]node:child_process['"]/);
   assert.doesNotMatch(src, /from ['"]node:os['"]/);
   assert.doesNotMatch(src, /new Date\(/);
+  assert.doesNotMatch(src, /Date\.now\(/);
+  assert.doesNotMatch(src, /process\.env/);
+  assert.doesNotMatch(src, /createRequire/);
+  assert.doesNotMatch(src, /import\(/);
 });

@@ -92,7 +92,7 @@ function parseCandidateJson(content) {
  * }} input
  * @returns {{ref: string, parent: string, files: Array<{path: string, file: string,
  *   content: string, worktree: string}>, duplicates: object,
- *   skipped: Array<object>, message: string, commit: null}}
+ *   skipped: Array<object>, message: string}}
  */
 export function planLaneCommit({ candidates, mainPaths, host, date, parent }) {
   const mainSet = new Set(mainPaths);
@@ -209,5 +209,10 @@ export function planLaneCommit({ candidates, mainPaths, host, date, parent }) {
   const resolvedParent = parent?.tip ? parent.tip : parent?.ref;
   const message = `memory: ${hostSlug} ${date} (${files.length} records)`;
 
-  return { ref, parent: resolvedParent, files, duplicates, skipped, message, commit: null };
+  // E5: no `commit` field — design.md's output shape does not list one, and
+  // the shell (collect.mjs) never reads `plan.commit`; it builds its own
+  // return object with the real commit sha (or `null` on the no-op path)
+  // after running `commit-tree` itself. A static placeholder here would be
+  // dead weight this module has no business owning.
+  return { ref, parent: resolvedParent, files, duplicates, skipped, message };
 }

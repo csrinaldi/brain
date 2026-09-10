@@ -29,7 +29,7 @@
 import { existsSync, readdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { parseRecordLine, computeRecordId, canonicalJson } from './format.mjs';
+import { parseRecordLine, computeRecordId, canonicalOrNull } from './format.mjs';
 import { recordFilename } from './store.mjs';
 
 /** `2026-08.jsonl` — the month log this migration consumes. */
@@ -188,19 +188,4 @@ export function runSplit({ recordsDir, apply = false, _writeFile = writeFileSync
   result.applied = true;
   result.verified = true;
   return result;
-}
-
-/**
- * canonicalJson() over a line whose comparison is an equality PROOF: failing to
- * prove equality must never escalate into refusing the store. Mirrors
- * `store.mjs#canonicalOrNull` — a null compares as divergent, which over-reports
- * a pair it cannot vouch for instead of claiming two lines agree when nobody
- * checked.
- */
-function canonicalOrNull(record) {
-  try {
-    return canonicalJson(record);
-  } catch {
-    return null;
-  }
 }
