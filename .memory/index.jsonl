@@ -1144,6 +1144,7 @@
 {"id":"rec-7b0d98e3dd5b2175","ts":"2026-07-29T14:25:49Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-7b0d98e3dd5b2175.jsonl"}
 {"id":"rec-7b0e005cb8664c83","ts":"2026-08-16T15:19:18Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-08-rec-7b0e005cb8664c83.jsonl"}
 {"id":"rec-7b2244da5bd5d82c","ts":"2026-07-25T00:47:21Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-7b2244da5bd5d82c.jsonl"}
+{"id":"rec-7b2e1e8f09bcf068","ts":"2026-09-10T00:44:18Z","actor":"feat/issue-887-featmemory-the-lane-collector-worktree-p","type":"architecture","project":"brain","issue":887,"file":"2026-09-rec-7b2e1e8f09bcf068.jsonl"}
 {"id":"rec-7b309aeac7fc9e1e","ts":"2026-07-13T00:22:00Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-7b309aeac7fc9e1e.jsonl"}
 {"id":"rec-7b48b701ef319c2c","ts":"2026-07-25T21:50:41Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-7b48b701ef319c2c.jsonl"}
 {"id":"rec-7b5be1e7bc4dd344","ts":"2026-07-29T14:27:33Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-7b5be1e7bc4dd344.jsonl"}
