@@ -14,8 +14,9 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import {
   writeFileSync, readFileSync, symlinkSync, lstatSync, statSync, existsSync,
+  mkdirSync, chmodSync,
 } from 'node:fs';
-import { hostname, tmpdir } from 'node:os';
+import { hostname, tmpdir, userInfo } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
 
@@ -33,6 +34,19 @@ const FIXED_DATE = '2026-09-10';
 /** The exact filename shipOnSessionEnd computes for `FIXED_NOW()`. */
 function fixedLogName() {
   return `brain-lane-ship-${hostname()}-${FIXED_DATE}.log`;
+}
+
+/** The uid `shipOnSessionEnd`'s default `_uid` seam resolves to, for tests
+ * that don't override it — same fallback order as the module itself
+ * (#906 cold review C7). */
+function realUid() {
+  return typeof process.getuid === 'function' ? process.getuid() : userInfo().username;
+}
+
+/** The private directory `shipOnSessionEnd` computes for a given tmpdir
+ * root and uid (#906 cold review C7). */
+function privateDirPath(root, uid) {
+  return join(root, `brain-lane-${uid}`);
 }
 
 /** A fake `_spawn` seam whose returned "child" records `.unref()` calls. */
@@ -153,7 +167,7 @@ test('flag true: one _spawn call, detached+unref, stdio[1]===stdio[2] (tmp-log f
   assert.ok(!printed.includes(memFixture), 'BRAIN_MEMORY_TOKEN value must never be printed, on any channel');
 });
 
-test('flag true, fresh log path: the created file is mode 0600 (POSIX) — C2 (#906 cold review)', { skip: process.platform === 'win32' ? 'POSIX mode bits only' : false }, (t) => {
+test('flag true, fresh private dir and log: dir created 0700, log created 0600 (POSIX) — C2/C7 (#906 cold review)', { skip: process.platform === 'win32' ? 'POSIX mode bits only' : false }, (t) => {
   const dir = testTmp('906-lane-');
   t.after(() => removeTempTree(dir));
 
@@ -167,15 +181,123 @@ test('flag true, fresh log path: the created file is mode 0600 (POSIX) — C2 (#
 
   assert.equal(result.spawned, true);
   assert.equal(calls.length, 1);
-  const mode = statSync(result.logPath).mode & 0o777;
-  assert.equal(mode, 0o600, `a freshly created log file must be mode 0600, got 0${mode.toString(8)}`);
+
+  const dirMode = statSync(privateDirPath(dir, realUid())).mode & 0o777;
+  assert.equal(dirMode, 0o700, `a freshly created private dir must be mode 0700, got 0${dirMode.toString(8)}`);
+
+  const logMode = statSync(result.logPath).mode & 0o777;
+  assert.equal(logMode, 0o600, `a freshly created log file must be mode 0600, got 0${logMode.toString(8)}`);
 });
 
-test('flag true, log path is a pre-existing symlink: refused via O_NOFOLLOW — no spawn, one stderr line, exit-0 path, symlink left untouched — C2 (#906 cold review)', (t) => {
+test('log path pre-created as a 0666 regular file inside an otherwise-valid private dir: refused before any spawn — no spawn, one stderr line, exit-0 path, contents unchanged — C7 (#906 cold review)', { skip: process.platform === 'win32' ? 'POSIX mode bits only' : false }, (t) => {
   const dir = testTmp('906-lane-');
   t.after(() => removeTempTree(dir));
 
-  const logPath = join(dir, fixedLogName());
+  const dirPath = privateDirPath(dir, realUid());
+  mkdirSync(dirPath, { mode: 0o700 });
+  const logPath = join(dirPath, fixedLogName());
+  writeFileSync(logPath, 'sentinel-untouched', 'utf8');
+  chmodSync(logPath, 0o666);
+  // `O_NOFOLLOW` only refuses a SYMLINK at the log path — it does nothing
+  // for a pre-created ORDINARY file, and `open`'s `mode` argument (0o600)
+  // only applies when the call itself CREATES the file. Without an
+  // `fstatSync` check on the opened fd, this pre-created 0o666 file would
+  // be opened, appended to, and left world-readable — the reviewer's exact
+  // attack against the shipped code.
+  const calls = [];
+  const writes = [];
+  const origWrite = process.stderr.write;
+  process.stderr.write = (chunk) => { writes.push(chunk); return true; };
+
+  let result;
+  try {
+    result = shipOnSessionEnd({
+      _loadConfig: () => ({ memory: { lane: { enabled: true } } }),
+      _spawn: fakeSpawn(calls),
+      _tmpdir: () => dir,
+      _now: FIXED_NOW,
+    });
+  } finally {
+    process.stderr.write = origWrite;
+  }
+
+  assert.equal(calls.length, 0, 'a pre-created world-writable log file must be refused before _spawn is ever reached');
+  assert.deepEqual(result, { spawned: false, logPath: null });
+  assert.equal(writes.length, 1, 'exactly one stderr line on refusal');
+  assert.equal(readFileSync(logPath, 'utf8'), 'sentinel-untouched', 'the pre-created file must never be opened for append and written through');
+});
+
+test('a pre-existing private dir with mode 0755 (group/other readable): refused before any spawn — C7 (#906 cold review)', { skip: process.platform === 'win32' ? 'POSIX mode bits only' : false }, (t) => {
+  const dir = testTmp('906-lane-');
+  t.after(() => removeTempTree(dir));
+
+  const dirPath = privateDirPath(dir, realUid());
+  mkdirSync(dirPath, { mode: 0o755 });
+
+  const calls = [];
+  const writes = [];
+  const origWrite = process.stderr.write;
+  process.stderr.write = (chunk) => { writes.push(chunk); return true; };
+
+  let result;
+  try {
+    result = shipOnSessionEnd({
+      _loadConfig: () => ({ memory: { lane: { enabled: true } } }),
+      _spawn: fakeSpawn(calls),
+      _tmpdir: () => dir,
+      _now: FIXED_NOW,
+    });
+  } finally {
+    process.stderr.write = origWrite;
+  }
+
+  assert.equal(calls.length, 0, 'a group/other-permissioned private dir must be refused before _spawn');
+  assert.deepEqual(result, { spawned: false, logPath: null });
+  assert.equal(writes.length, 1, 'exactly one stderr line on refusal');
+});
+
+test('a pre-existing private dir owned by a different uid (simulated via the _uid seam): refused before any spawn — C7 (#906 cold review)', (t) => {
+  const dir = testTmp('906-lane-');
+  t.after(() => removeTempTree(dir));
+
+  // The dir is owned by the REAL test-runner uid; the seam tells
+  // shipOnSessionEnd to resolve a DIFFERENT uid, so the ownership check
+  // must see a mismatch — this is how "owned by another local user" is
+  // simulated without root/chown.
+  const fakeUid = 999999;
+  const dirPath = privateDirPath(dir, fakeUid);
+  mkdirSync(dirPath, { mode: 0o700 });
+
+  const calls = [];
+  const writes = [];
+  const origWrite = process.stderr.write;
+  process.stderr.write = (chunk) => { writes.push(chunk); return true; };
+
+  let result;
+  try {
+    result = shipOnSessionEnd({
+      _loadConfig: () => ({ memory: { lane: { enabled: true } } }),
+      _spawn: fakeSpawn(calls),
+      _tmpdir: () => dir,
+      _now: FIXED_NOW,
+      _uid: () => fakeUid,
+    });
+  } finally {
+    process.stderr.write = origWrite;
+  }
+
+  assert.equal(calls.length, 0, 'a private dir not owned by the resolved uid must be refused before _spawn');
+  assert.deepEqual(result, { spawned: false, logPath: null });
+  assert.equal(writes.length, 1, 'exactly one stderr line on refusal');
+});
+
+test('flag true, log path is a pre-existing symlink inside the private dir: refused via O_NOFOLLOW — no spawn, one stderr line, exit-0 path, symlink left untouched — C2/C7 (#906 cold review)', (t) => {
+  const dir = testTmp('906-lane-');
+  t.after(() => removeTempTree(dir));
+
+  const dirPath = privateDirPath(dir, realUid());
+  mkdirSync(dirPath, { mode: 0o700 });
+  const logPath = join(dirPath, fixedLogName());
   const elsewhere = join(dir, 'elsewhere-target.txt');
   writeFileSync(elsewhere, 'not the real log', 'utf8');
   // A predictable tmpdir path pre-created as a symlink by another local user
@@ -243,6 +365,8 @@ test('real entrypoint run against this repo\'s own config (flag false) exits 0, 
   // real run WOULD have used (real _tmpdir + real hostname + today's date)
   // does not exist, making the test's title an assertion, not a claim.
   const today = new Date().toISOString().slice(0, 10);
-  const realLogPath = join(tmpdir(), `brain-lane-ship-${hostname()}-${today}.log`);
+  const realDirPath = privateDirPath(tmpdir(), realUid());
+  const realLogPath = join(realDirPath, `brain-lane-ship-${hostname()}-${today}.log`);
+  assert.equal(existsSync(realDirPath), false, 'flag false must never create the real private dir');
   assert.equal(existsSync(realLogPath), false, 'flag false must never create the real tmp log file');
 });
