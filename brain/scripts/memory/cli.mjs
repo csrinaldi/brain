@@ -461,7 +461,20 @@ if (op === "ship") {
       throw new Error("memory/cli: BRAIN_VCS_TEST_MODULE is set but empty — unset it to use the real port");
     }
     const config = loadBrainConfig();
-    const identity = process.env[MEMORY_TOKEN_ENV] ?? null; // ONE read, in ONE place (A5)
+    const rawToken = process.env[MEMORY_TOKEN_ENV]; // ONE read, in ONE place (A5)
+    // (cold review, PR 2): a set-but-blank BRAIN_MEMORY_TOKEN reads as '' —
+    // not null/undefined, so `identity` below would have stayed truthy and
+    // `identityBound` (below) would have reported `true`, while
+    // `vcs/cli.mjs`'s own `bound = identity ?? _token(name)` treats '' as
+    // falsy and silently falls through to the AMBIENT credential: the run
+    // would authenticate ambiently while reporting a bound identity.
+    // Refused here, loudly, before either consumer sees it — an unattended
+    // host that exports an empty token is misconfigured, not merely
+    // "unset" (ADR-0033's own failure mode).
+    if (rawToken !== undefined && rawToken.trim() === "") {
+      throw new Error(`memory/cli: ${MEMORY_TOKEN_ENV} is set but empty — unset it to use the ambient identity`);
+    }
+    const identity = rawToken ?? null;
     const vcs = dryRun
       ? null
       : vcsTestModule

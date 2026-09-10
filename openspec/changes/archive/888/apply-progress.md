@@ -440,5 +440,31 @@ in `__fixtures__/` after the run (`git status --porcelain` clean post-test).
 
 ### Remaining tasks (after batch 5)
 
-- [ ] 7.2/7.3/7.4 `memory:save --issue 888`, `brain:review` — left for the orchestrator.
-- [ ] 9. The PR — open PR 2 (`Closes #888`, `Parent: #864`). Left for the orchestrator.
+- [x] 7.2/7.3/7.4 `memory:save --issue 888` — session record committed (`1350b876`).
+- [ ] `brain:review` — left for the orchestrator.
+- [x] 9. The PR — opened as **PR #903**, now under cold review.
+
+## PR #903 cold review correction (batch 6) — this worktree, on top of batch 5
+
+A cold review of PR #903 (APPROVE overall) found one further finding: `cli.mjs`'s `ship` op read
+`process.env[MEMORY_TOKEN_ENV]` with `?? null`, which only normalizes `undefined`/`null` — a
+set-but-blank `BRAIN_MEMORY_TOKEN=''` produced `identity === ''`, a truthy-for-`??` value, so
+`identityBound: true` was reported (suppressing the `memory.ship.identityAmbient` warning) while
+`vcs/cli.mjs`'s own `bound = identity ?? _token(name)` treats `''` as falsy and silently falls
+through to the AMBIENT credential — the run used the ambient identity while reporting a bound
+one. Fixed TDD (RED: 2 new tests failed against the unfixed code — `identityBound` would have
+read `true` on an empty-string token; GREEN after the fix): `cli.mjs` now refuses a set-but-blank
+(or whitespace-only) `BRAIN_MEMORY_TOKEN` loudly, exit 1, before either consumer ever sees it —
+mirroring the existing `BRAIN_VCS_TEST_MODULE` set-but-blank refusal pattern (L1, batch 5) rather
+than adding a dedicated i18n key, since that precedent also uses a plain thrown `Error` caught by
+the generic `memory.ship.failed` catch-all. `process.env[MEMORY_TOKEN_ENV]` is still read exactly
+once (the existing source-guard test still passes unmodified). One commit:
+`fix(memory): a set-but-blank BRAIN_MEMORY_TOKEN is refused, never reported as bound (#888)`.
+
+**Test results**: focused (`cli.ship.test.mjs`): 22/22 (was 20/20 — +2: blank token, whitespace
+-only token). Full `npm test`: 5027/5027 (was 5025/5025). `check-refs.mjs` clean.
+
+### Remaining tasks (after batch 6)
+
+- [ ] `brain:review` — left for the orchestrator.
+- [ ] Any further PR #903 review rounds — left for the orchestrator.
