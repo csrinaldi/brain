@@ -246,6 +246,43 @@ test('#738: brain.actor unset ⇒ throws, nothing appended (records dir stays em
   }
 });
 
+// ── #738 unit 7 — brain's own capture path can never emit @legacy ───────────
+// `@legacy` is the export fallback's sentinel (engram-export.mjs). Without
+// `resolveActor`'s reserved-value refusal, `git config brain.actor @legacy`
+// would mint that sentinel through THIS door too, making "brain's own capture
+// path never emits @legacy" true only by convention. Kills the mutant "a
+// fallback in buildRecord defaults to @legacy" — no new production code here,
+// true once units 2 (resolveActor) and 4 (plainfiles wiring) land.
+
+test('#738 pin: brain.actor=@legacy is refused (reserved), never reaches a written record', async () => {
+  const root = tmpRoot();
+  try {
+    await assert.rejects(() =>
+      save('t', 'c', { type: 'discovery', project: 'brain' }, {
+        root, getBranch: () => 'main', getTimestamp: () => '2026-07-12T09:00:00Z', getHostname: () => 'h',
+        getGitConfig: (key) => (key === 'brain.actor' ? '@legacy' : null), getEnv: () => ({}),
+      }),
+    );
+    assert.equal(existsSync(join(root, '.memory', 'records')), false, '@legacy must never be appended through the capture door');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('#738 pin: a normal-handle capture never produces a record with actor === @legacy', async () => {
+  const root = tmpRoot();
+  try {
+    const result = await save('t', 'c', { type: 'discovery', project: 'brain' }, {
+      root, getBranch: () => 'main', getTimestamp: () => '2026-07-12T09:00:00Z', getHostname: () => 'h',
+      ...identitySeams,
+    });
+    const record = JSON.parse(readFileSync(result.file, 'utf8').trim());
+    assert.notEqual(record.actor, '@legacy');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('#738: brain.actor malformed (not handle-shaped) ⇒ throws, nothing appended', async () => {
   const root = tmpRoot();
   try {
