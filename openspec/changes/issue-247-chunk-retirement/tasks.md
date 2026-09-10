@@ -97,39 +97,39 @@ Commit: `test(memory): pin brain-audit/brain-check as records-only readers (#247
   re-proof) → `engram.share.test.mjs` (row 5) → symlink ensure (row 6, 2.4) → legacy gz/allowlist
   (row 7, 2.4). Nothing that runs changes; `share`, `dualWriteRecords`, and the scrub subsystem
   stay byte-unchanged.
-- [ ] 4.2 `governance/run-check.test.mjs:32`'s prose comment gains a one-line pointer to
-  `chunk-boundary.test.mjs` instead of restating the now-stale narrative.
+- [x] 4.2 `governance/run-check.test.mjs:32`'s prose comment gains a one-line pointer to
+  `chunk-boundary.test.mjs` instead of restating the now-stale narrative. Done in commit
+  `75afb500` (correction batch), re-wrapped to ~72 cols alongside the WALK_GLOBS widening in
+  the guard-hardening commit.
 
 Commit: `docs(memory): point each chunk seam at its #874 ledger row (#247)`.
 
 ## Work Unit 5 — the ledger, the epic 2.3 rewrite, the #874 comment draft
 
-- [x] 5.1 Confirm the seven-row ledger below is present, byte-identical, in both this file and
-  `design.md` (corrected anchors: row 3 at `:345` not the proposal's `:323`; row 4 split into
+- [x] 5.1 Confirm the seven-row ledger below is restated, substance-identical, in both this file
+  and `design.md` (corrected anchors: row 3 at `:345` not the proposal's `:323`; row 4 split into
   three measured anchors instead of one grouped range; all `engram.mjs` anchors re-measured
   **after** Work Unit 4.1's header note — that insertion shifted every line below it by exactly
-  +13, per tasks.md 0.5).
+  +13, per tasks.md 0.5). Wording is copied verbatim from `design.md`'s table so a drift between
+  the two files cannot hide behind a paraphrase.
 
   | # | surface (file:line) | dies at | note |
   |---|---|---|---|
   | 1 | `engram.mjs#_defaultShareExport` `:486-493` | **3.2** | the `engram sync --export` call itself |
-  | 2 | `engram.mjs#_defaultReadObservations` `:273-275` + import `:61` | **3.2** | the read-back; allowlist row 1 |
-  | 3 | `dualWriteRecords`'s `_readObservations` seam — default `share():199`, call `:345` | **3.2** | proposal said `:323`; measured `:345` (post-header-note) |
-  | 4 | `_defaultChangedChunkFiles` `:578-609`, `scrubMaterializedChunks` `:686`, `assertExportDestinationIsRead` `:653` | **3.2, last** | delete only after #469's fail-closed guarantee is re-proved over record-first `save` |
-  | 5 | `engram.share.test.mjs` (~1069 lines, ~15 chunk-scrub tests) | **3.2** | largest line count in 3.2; not an allowlist row (mocks the seam) |
-  | 6 | `.engram → .memory` symlink ensure `engram.mjs:221`; `bootstrap.sh:304`; `.gitattributes:5`; `.memory/manifest.json` untracked | **2.4** | D3's order: after 3.2, or #803's manifest churn returns |
-  | 7 | `secret-scrub.mjs`'s gunzip/`scrubChunkFile`; `collectChunkObservations` in `migrate-v1.mjs:42` + `cli.mjs:615`; `.memory/legacy/*.jsonl.gz` (48 files); `.gitignore:81-84` | **2.4** | legacy gz reader story: zero readers outside `migrate-v1 --rollback` (`cli.mjs:578`) |
+  | 2 | `engram.mjs#_defaultReadObservations` `:273-275` + the import `:61` | **3.2** | the read-back; allowlist row 1 |
+  | 3 | `dualWriteRecords`'s `_readObservations` seam — default `share():199`, call `:345` | **3.2** | proposal said `:323`; **measured `:345`** (post-header-note) |
+  | 4 | `_defaultChangedChunkFiles` `:578-609`, `scrubMaterializedChunks` `:686`, `assertExportDestinationIsRead` `:653` | **3.2, last** | delete **only after** #469's fail-closed guarantee is re-proved over record-first `save`. Proposal grouped all three at `:565-596`; **measured separately** |
+  | 5 | `engram.share.test.mjs` (~1069 lines, ~15 chunk-scrub tests) | **3.2** | largest line count in 3.2; not an allowlist row (it mocks the seam) |
+  | 6 | `.engram → .memory` symlink ensure `engram.mjs:221` → confined to `setup()`; `brain/scripts/bootstrap.sh:302-308` delegates driver registration to `cli.mjs setup` (does not register `engram-manifest` itself); `.gitattributes:5` (`merge=engram-manifest`) + `merge-engram-manifest.mjs`; `.memory/manifest.json` untracked | **2.4** | D3's order: after 3.2, or the manifest churn of #803 returns |
+  | 7 | `secret-scrub.mjs`'s `gunzipSync`/`scrubChunkFile`; `collectChunkObservations` in `migrate-v1.mjs:42` + `cli.mjs:615`; `.memory/legacy/*.jsonl.gz` (47 files) + `migration-rejected.json` (48 tracked files total); the `.gitignore` chunk block `:81-84` | **2.4** | the legacy gz **reader story**: zero readers outside `migrate-v1 --rollback` (`cli.mjs:578`); historical value only — stated *by 2.4, when it deletes them*, not by #247 |
 
 - [x] 5.2 Rewrite `openspec/changes/issue-864-memory-2-0/tasks.md:32` (epic task 2.3) to:
   ```markdown
   - [ ] 2.3 #247 — **[rev 2026-09-10, per #863 D3]** the **read-back boundary only**: `chunk-reader.mjs`'s verdict is *deleted* (PR #258) and `readChunkObservations` has zero importers; a guard test pins that plus `collectChunkObservations`'s annotated allowlist (`migrate-v1.mjs`, `engram.mjs`, `cli.mjs`'s `migrate-v1`); the ledger of what 3.2 deletes is written. **`share` keeps calling `engram sync --export`** — retiring it here would leave engram with no producer path (`save` is `unsupportedOp`), so "`share` reads no chunk file" moves to **3.2 (#874)**.
   ```
-- [ ] 5.3 Draft (agent may post, verify `status:approved`/issue-comment permissions first) a
-  comment on #874 restating the seven-row ledger above verbatim, prefixed: "Carried over from
-  #247 (this change) — task 3.2 must delete these seven surfaces, row 4 only after the #469
-  re-proof." **Drafted** in apply-progress (`sdd/issue-247-chunk-retirement/apply-progress`) with
-  the re-measured `:61`/`:273-275`/`:345`/`:486-493`/`:578-609`/`:653`/`:686`/`:221` anchors;
-  posting is the orchestrator's per this batch's `gh`-write restriction — left unticked.
+- [x] 5.3 Post a comment on #874 restating the seven-row ledger above verbatim, prefixed: "Carried
+  over from #247 (this change) — task 3.2 must delete these seven surfaces, row 4 only after the
+  #469 re-proof." **Posted**: issuecomment-5625476087.
 
 Commit: `docs(openspec): rewrite epic task 2.3 to the read-back boundary wording, restate ledger on #874 (#247)`.
 

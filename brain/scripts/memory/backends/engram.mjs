@@ -17,7 +17,7 @@
 
 // #247/#863 D3 — the chunk read-back is a boundary now (guard:
 // brain/scripts/memory/chunk-boundary.test.mjs), the export retires at task
-// 3.2 (#874). The seven-row ledger of what 3.2 deletes lives byte-identical
+// 3.2 (#874). The seven-row ledger of what 3.2 deletes is restated
 // in openspec/changes/issue-247-chunk-retirement/{tasks,design}.md; each
 // chunk seam below points at its row so a reader never has to rediscover it:
 //   _defaultShareExport                          → ledger row 1
