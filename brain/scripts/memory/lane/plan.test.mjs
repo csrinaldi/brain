@@ -138,6 +138,21 @@ test('a candidate that fails to read (unreadable) skips with its error, never in
   assert.equal(p.skipped[0].error, 'ENOENT');
 });
 
+test('an unreadable candidate without a readError omits the error field entirely (E6)', () => {
+  const p = plan({
+    candidates: [
+      candidate({ worktree: '/repo/wt-a', file: '2026-09-rec-3333333333333333.jsonl', content: null }),
+    ],
+  });
+  assert.equal(p.skipped.length, 1);
+  assert.deepStrictEqual(p.skipped[0], {
+    file: '2026-09-rec-3333333333333333.jsonl',
+    worktree: '/repo/wt-a',
+    reason: 'unreadable',
+  });
+  assert.ok(!('error' in p.skipped[0]), 'no readError means no error key at all — not error: undefined');
+});
+
 test('a secret-marked candidate routes to skipped with pattern+lineNumber, never appears in files', () => {
   const { file, content } = recordFixture('has a secret in it');
   const p = plan({
@@ -161,7 +176,7 @@ test('a secret-marked candidate routes to skipped with pattern+lineNumber, never
   });
 });
 
-test('a secret-marked WINNER skips the whole group — no fall-through to the runner-up', () => {
+test('a secret-marked WINNER skips the whole group — no fall-through to the runner-up, and the group is not reported as a duplicate (C5)', () => {
   const rec = buildRecord({ ...base, content: 'group with a secret winner' });
   const month = rec.ts.slice(0, 7);
   const file = `${month}-${rec.id}.jsonl`;
@@ -181,6 +196,50 @@ test('a secret-marked WINNER skips the whole group — no fall-through to the ru
   assert.equal(p.skipped.length, 1);
   assert.equal(p.skipped[0].reason, 'secret');
   assert.equal(p.skipped[0].worktree, '/repo/wt-a');
+  // C5: a group whose WINNER is secret-skipped must never be counted as a
+  // duplicate — occurrences are only registered once the winner clears the
+  // secret guard.
+  assert.deepStrictEqual(p.duplicates, emptyDuplicates());
+});
+
+test('a secret-marked LOSER also gets its own skip; the clean winner is still collected (C6)', () => {
+  const rec = buildRecord({ ...base, content: 'clean winner, secret loser' });
+  const month = rec.ts.slice(0, 7);
+  const file = `${month}-${rec.id}.jsonl`;
+  const p = plan({
+    candidates: [
+      candidate({ worktree: '/repo/wt-a', file, content: serializeRecord(rec) }),
+      candidate({
+        worktree: '/repo/wt-b',
+        file,
+        content: serializeRecord(rec),
+        secret: { pattern: 'ghp_[A-Za-z0-9]{20,}', lineNumber: 3 },
+      }),
+    ],
+  });
+  assert.equal(p.files.length, 1);
+  assert.equal(p.files[0].worktree, '/repo/wt-a', 'the clean, lexicographically-first candidate still wins');
+  const secretSkips = p.skipped.filter((s) => s.reason === 'secret');
+  assert.equal(secretSkips.length, 1, 'the secret loser must be reported somewhere, not silently dropped');
+  assert.equal(secretSkips[0].worktree, '/repo/wt-b');
+  assert.equal(secretSkips[0].file, file);
+  assert.equal(secretSkips[0].pattern, 'ghp_[A-Za-z0-9]{20,}');
+  assert.equal(secretSkips[0].lineNumber, 3);
+});
+
+test('a duplicate occurrence location is built from the candidate\'s own path, not a hardcoded records/ prefix (E1)', () => {
+  const { file, content } = recordFixture('nested worktree layout');
+  const p = plan({
+    candidates: [
+      candidate({ worktree: '/repo/wt-a', file, content, path: `sub/.memory/records/${file}` }),
+      candidate({ worktree: '/repo/wt-b', file, content }),
+    ],
+  });
+  assert.equal(p.duplicates.groups.length, 1);
+  assert.deepEqual(p.duplicates.groups[0].occurrences, [
+    `/repo/wt-a/sub/.memory/records/${file}:1`,
+    `/repo/wt-b/.memory/records/${file}:1`,
+  ]);
 });
 
 // ── A1.2 deterministic dedup on divergence (D3/C2) ──────────────────────────
@@ -369,6 +428,14 @@ test('the finished ref matches L1s grammar exactly', () => {
 
 test('an empty host slug throws memory.collect.badHost', () => {
   assert.throws(() => plan({ host: '!!!' }), /memory\.collect\.badHost/);
+});
+
+test('a malformed date throws memory.collect.badDate — never badHost, when the host is fine (E2)', () => {
+  assert.throws(() => plan({ host: 'valid-host', date: '2026/09/09' }), /memory\.collect\.badDate/);
+});
+
+test('an empty host slug with a well-formed date still throws memory.collect.badHost, not badDate (E2)', () => {
+  assert.throws(() => plan({ host: '!!!', date: '2026-09-09' }), /memory\.collect\.badHost/);
 });
 
 test('message is "memory: <host-slug> <date> (<n> records)"', () => {

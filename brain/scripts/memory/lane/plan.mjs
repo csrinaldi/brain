@@ -41,7 +41,9 @@ const MODIFIED_STATUSES = new Set([' M', 'M ', 'MM']);
 /** L1's ref grammar, asserted against the finished ref before it is returned. */
 const REF_GRAMMAR_RE = /^refs\/heads\/memory\/[a-z0-9][a-z0-9-]*-\d{4}-\d{2}-\d{2}$/;
 
-const RECORDS_PATH_PREFIX = '.memory/records/';
+/** The `date` input's own grammar — checked separately from the host slug
+ * (E2) so a malformed `date` is never misreported as `memory.collect.badHost`. */
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 /** Plain code-unit comparator — A6, never `localeCompare`. */
 function byteCompare(a, b) {
@@ -126,7 +128,12 @@ export function planLaneCommit({ candidates, mainPaths, host, date, parent }) {
     }
 
     if (c.content === null || c.content === undefined) {
-      skipped.push({ file: c.file, worktree: c.worktree, reason: 'unreadable', error: c.readError });
+      skipped.push({
+        file: c.file,
+        worktree: c.worktree,
+        reason: 'unreadable',
+        ...(c.readError !== undefined ? { error: c.readError } : {}),
+      });
       continue;
     }
 
@@ -150,23 +157,33 @@ export function planLaneCommit({ candidates, mainPaths, host, date, parent }) {
     const group = groups.get(file);
     const sorted = [...group].sort((a, b) => byteCompare(a.worktree, b.worktree));
 
-    if (sorted.length > 1) {
-      occurrences.set(file, sorted.map((g) => `${g.worktree}/${RECORDS_PATH_PREFIX}${file}:1`));
-      const canonicals = sorted.map((g) => canonicalOrNull(parseCandidateJson(g.content)));
-      const allAgree = canonicals.every((v) => v !== null && v === canonicals[0]);
-      if (!allAgree) divergentFiles.add(file);
+    // C6: every secret-marked member of the group gets its own skip — winner
+    // or loser. A loser that never becomes a selector of record content must
+    // still be REPORTED, not silently dropped.
+    for (const member of sorted) {
+      if (!member.secret) continue;
+      skipped.push({
+        file,
+        worktree: member.worktree,
+        reason: 'secret',
+        pattern: member.secret.pattern,
+        lineNumber: member.secret.lineNumber,
+      });
     }
 
     const winner = sorted[0];
-    if (winner.secret) {
-      skipped.push({
-        file,
-        worktree: winner.worktree,
-        reason: 'secret',
-        pattern: winner.secret.pattern,
-        lineNumber: winner.secret.lineNumber,
-      });
-      continue;
+    // C5: a secret-marked winner drops the whole group — never falls through
+    // to the runner-up, and the group is never registered as a duplicate (its
+    // occurrences are not — and must not become — a fact this run vouches
+    // for). Registering occurrences only AFTER this guard is what keeps a
+    // secret-skipped group out of `duplicates`.
+    if (winner.secret) continue;
+
+    if (sorted.length > 1) {
+      occurrences.set(file, sorted.map((g) => `${g.worktree}/${g.path}:1`));
+      const canonicals = sorted.map((g) => canonicalOrNull(parseCandidateJson(g.content)));
+      const allAgree = canonicals.every((v) => v !== null && v === canonicals[0]);
+      if (!allAgree) divergentFiles.add(file);
     }
 
     files.push({ path: winner.path, file, content: winner.content, worktree: winner.worktree });
@@ -176,6 +193,12 @@ export function planLaneCommit({ candidates, mainPaths, host, date, parent }) {
   skipped.sort((a, b) => byteCompare(a.file, b.file) || byteCompare(a.worktree, b.worktree));
 
   const duplicates = occurrences.size ? summarizeDuplicates(occurrences, divergentFiles) : emptyDuplicates();
+
+  // E2: validate `date` on its OWN, before it is folded into the ref — a
+  // malformed date must never be blamed on the host.
+  if (!DATE_RE.test(String(date ?? ''))) {
+    throw new Error(`memory.collect.badDate: date ${JSON.stringify(date)} is not YYYY-MM-DD`);
+  }
 
   const hostSlug = slugifyHost(host);
   const ref = `refs/heads/memory/${hostSlug}-${date}`;
