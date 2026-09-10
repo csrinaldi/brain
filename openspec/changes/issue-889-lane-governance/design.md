@@ -157,6 +157,20 @@ which `scanTextForSecrets` does return (`memory/lib/secret-scrub.mjs:87`). Patte
 is. `scrubRecordsFile` is fail-fast (first hit per file, `:137-139`) — accepted and named, since
 either way the merge stops.
 
+**Two distinct UNCOMPUTABLE reasons (cold-1, PR #907 cold review, fixed ahead of PR 2):**
+`main()` can fail closed (exit 2) for two different causes, and they must never share one message.
+(1) **config failure** — `resolveSecretConfig(config)` + `compilePatterns(...)` (A6, `secret-scrub.mjs:42-44`)
+run OUTSIDE the per-record read loop, in their own try/catch, before any file is read; an invalid
+regex source reports `lane-scrub: invalid secret pattern in config — failing closed (uncomputable):
+<message>`. (2) **read failure** — an added record deleted between the diff and the run throws
+inside `readFile`, caught by a separate try/catch around the loop itself, reporting `lane-scrub:
+cannot read an added record — failing closed (uncomputable): <message>`. The original single
+try/catch wrapped both steps together, so a broken secret-config pattern was misreported as an
+unreadable record — a config author's mistake read as a corrupted checkout. Splitting the two
+try/catches (and passing pre-compiled `patterns`/`allowPatterns` into `evaluateLaneScrub` from
+`main()`, bypassing its internal config-compile path) makes the two failures independently
+diagnosable while both still exit 2.
+
 ### A7 — Registration order is asserted; `NEVER_TIERED` is not touched
 
 `governance-checks.test.mjs:91` asserts the **order** of `governance.yml`'s job `name:` fields equals

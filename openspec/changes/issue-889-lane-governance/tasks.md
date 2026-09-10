@@ -300,6 +300,18 @@ for it.
 Stacked on slice A per `stacked-to-main`: branch `feat/issue-889-lane-audit-index`, cut from PR 1's
 branch once it is opened. PR 2 body: `Closes #889`, `Parent: #864`.
 
+**PR 2 prep note (2026-09-10):** slice A (#905) shipped as PR #907, merged to `main` at `ffe038a0`
+under `size:exception` (measured ~514 counted lines vs. the ~277 forecast — see task 0.4). PR #907's
+cold review found one carry-forward defect in `lane-scrub.mjs` (cold-1): `main()`'s single
+try/catch around `evaluateLaneScrub` reported every thrown error — including a bad regex thrown by
+`compilePatterns()` (`memory/lib/secret-scrub.mjs:42-44`), which runs inside that same call — as
+"cannot read an added record", misattributing a secret-config problem to a read failure. Fixed here,
+ahead of PR 2, in the same worktree/branch slice B stacks on: patterns are now compiled OUTSIDE the
+read loop's try, with their own `lane-scrub: invalid secret pattern in config — failing closed
+(uncomputable)` reason; the read-loop's `cannot read an added record` reason is unchanged and now
+only ever reported for an actual read failure. Both cases still exit 2 (fail closed). Commit
+`60af7abc`, focused suite 71→72 green, full `npm test` 5081→5097 green.
+
 ### B1. Unit — `brain-audit.mjs`: the `[LANE]` audit row (spec "brain:audit reports [LANE] on both signals"; design A8)
 
 - [x] B1.1 RED: extend `brain/scripts/brain-audit.test.mjs` — synthetic-walk fixtures matching
