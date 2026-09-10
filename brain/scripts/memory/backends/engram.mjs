@@ -15,6 +15,19 @@
 //                          these observations (CONFIRMED: engram sync --export is project-
 //                          scoped; feature obs under brain-feature-<X> stay out of .memory/)
 
+// #247/#863 D3 — the chunk read-back is a boundary now (guard:
+// brain/scripts/memory/chunk-boundary.test.mjs), the export retires at task
+// 3.2 (#874). The seven-row ledger of what 3.2 deletes lives byte-identical
+// in openspec/changes/issue-247-chunk-retirement/{tasks,design}.md; each
+// chunk seam below points at its row so a reader never has to rediscover it:
+//   _defaultShareExport                          → ledger row 1
+//   _defaultReadObservations + this file's import → ledger row 2
+//   dualWriteRecords's _readObservations seam     → ledger row 3
+//   the scrub subsystem (delete only after #469's re-proof over record-first save) → ledger row 4
+//   engram.share.test.mjs                         → ledger row 5 (2.4: symlink/legacy gz → rows 6-7)
+// Nothing here changes what runs; share(), dualWriteRecords(), and the scrub
+// subsystem stay byte-unchanged.
+
 import { execFileSync, spawnSync } from "node:child_process";
 import {
   existsSync,
