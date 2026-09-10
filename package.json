@@ -73,6 +73,7 @@
     "memory:collect": "node ./brain/scripts/memory/cli.mjs collect",
     "memory:ship": "node ./brain/scripts/memory/cli.mjs ship",
     "memory:migrate-v1": "node ./brain/scripts/memory/cli.mjs migrate-v1",
+    "brain:memory:session-end": "node ./brain/scripts/memory/session-end-ship.mjs",
     "feature:checkpoint": "node ./brain/scripts/memory/cli.mjs feature-checkpoint",
     "feature:resume": "node ./brain/scripts/memory/cli.mjs feature-resume",
     "tools:install": "bash ./brain/scripts/install-tools.sh",

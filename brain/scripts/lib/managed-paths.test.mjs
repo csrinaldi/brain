@@ -131,14 +131,51 @@ test('a managed glob covers brain/scripts/lib/home-index.mjs (REQ-7)', () => {
     'brain/scripts/lib/home-index.mjs must be reachable by a managed glob (e.g. brain/scripts/**)');
 });
 
-// S5 + #154: MANAGED_SCRIPT_KEYS must have exactly 9 entries, all prefixed brain:.
-test('MANAGED_SCRIPT_KEYS has exactly 9 entries, all prefixed brain: (S5)', () => {
-  assert.equal(MANAGED_SCRIPT_KEYS.length, 9,
-    'MANAGED_SCRIPT_KEYS must contain exactly 9 brain:* verb keys');
+// S5 + #154 + #906 A5: MANAGED_SCRIPT_KEYS must have exactly 10 entries, all
+// prefixed brain:. #906 A5 (measured): brain:upgrade injects package.json
+// scripts ONLY for keys listed here — the launcher FILE travels via
+// brain/scripts/** regardless, but its npm script does not exist on any
+// consumer unless the key is in this list.
+test('MANAGED_SCRIPT_KEYS has exactly 10 entries, all prefixed brain: (S5, #906 A5)', () => {
+  assert.equal(MANAGED_SCRIPT_KEYS.length, 10,
+    'MANAGED_SCRIPT_KEYS must contain exactly 10 brain:* verb keys');
   for (const key of MANAGED_SCRIPT_KEYS) {
     assert.ok(key.startsWith('brain:'),
       `every key must start with "brain:" — got "${key}"`);
   }
+});
+
+test('MANAGED_SCRIPT_KEYS includes brain:memory:session-end (#906 A5)', () => {
+  assert.ok(
+    MANAGED_SCRIPT_KEYS.includes('brain:memory:session-end'),
+    'brain:memory:session-end must be a managed script key or the SessionEnd hook ' +
+      'points at a script that does not exist on any adopter (#906 A5, measured)',
+  );
+});
+
+test('#906 A5: mergePackageJson delivers brain:memory:session-end into an empty consumer package.json', async (t) => {
+  const { mergePackageJson } = await import('./installer.mjs');
+  const { mkdtempSync, writeFileSync, readFileSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const { tmpdir } = await import('node:os');
+  const { removeTempTree } = await import('../__fixtures__/tmp-tree.mjs');
+
+  const root = mkdtempSync(join(tmpdir(), 'brain-906-managed-'));
+  t.after(() => removeTempTree(root));
+  const dest = join(root, 'package.json');
+  const src = join(root, 'package.json.incoming');
+  writeFileSync(dest, JSON.stringify({ name: 'consumer', scripts: {} }, null, 2), 'utf8');
+  writeFileSync(src, JSON.stringify({
+    scripts: Object.fromEntries(MANAGED_SCRIPT_KEYS.map((k) => [k, `node ./brain/scripts/${k}.mjs`])),
+  }, null, 2), 'utf8');
+
+  mergePackageJson(dest, src);
+
+  const merged = JSON.parse(readFileSync(dest, 'utf8'));
+  assert.ok(
+    Object.hasOwn(merged.scripts, 'brain:memory:session-end'),
+    'an empty consumer package.json must receive the brain:memory:session-end script on upgrade',
+  );
 });
 
 // issue #231, A2 phase 3: the GitLab governance pipeline fragment ships as a
