@@ -40,7 +40,10 @@ const INSTRUCTION_RE = new RegExp(`\\b(?:${VERBS})${WORD_END}[\\s\\S]{0,60}?${SA
 const FENCE_RE = new RegExp("```[\\s\\S]*?" + SAVE_INVOCATION + "[\\s\\S]*?```", "i");
 
 // A reference to the actorKind decision the ruling requires alongside any such instruction.
-const DECISION_REFERENCE_RE = /(sdd\/issue-246-c3\/constraints|obs\s*#?578|actorKind decision|actorKind ruling)/i;
+// #738 (provenance at capture) is accepted alongside obs #578: the doc edits
+// this change makes (memory-format.md's `git config --local brain.actor`
+// remedy, near a `memory save` invocation) must carry a decision anchor too.
+const DECISION_REFERENCE_RE = /(sdd\/issue-246-c3\/constraints|obs\s*#?578|actorKind decision|actorKind ruling|#738)/i;
 
 // SDD planning artifacts (spec.md/design.md/tasks.md/proposal.md, etc.) under
 // openspec/changes/** legitimately discuss `memory save` at length while
@@ -134,6 +137,24 @@ test('scanDocsForActorKindTripwire: a doc with no memory-save instruction at all
     _readFile: () => UNRELATED_DOC,
   });
   assert.equal(result.clean, true);
+});
+
+// #738: the reference alone (no obs #578 / actorKind wording needed).
+const CLEAN_DOC_WITH_738_REFERENCE = `
+# Some runbook
+
+To store a decision by hand, run \`MEMORY_BACKEND=plainfiles memory save "title" "content"\`.
+
+Unset \`brain.actor\`? Run \`git config --local brain.actor @<handle>\` once per clone (#738).
+`;
+
+test('scanDocsForActorKindTripwire: #738 alone is an accepted decision reference, alongside obs #578', () => {
+  const result = scanDocsForActorKindTripwire({
+    _listFiles: () => ['docs/inbox/fake-runbook-738.md'],
+    _readFile: () => CLEAN_DOC_WITH_738_REFERENCE,
+  });
+  assert.equal(result.clean, true, 'a #738 reference alone must satisfy the tripwire');
+  assert.deepEqual(result.violations, []);
 });
 
 // ── Live assertion over the REAL tracked docs (default seams) ────────────────
