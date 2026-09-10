@@ -795,6 +795,7 @@
 {"id":"rec-564324c98291d8cf","ts":"2026-07-25T00:48:53Z","actor":"@legacy","type":"bugfix","project":"brain","file":"2026-07-rec-564324c98291d8cf.jsonl"}
 {"id":"rec-5643dd4ab99f8e8e","ts":"2026-08-12T00:33:02Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-08-rec-5643dd4ab99f8e8e.jsonl"}
 {"id":"rec-5647fdeb868857ee","ts":"2026-07-29T13:59:23Z","actor":"@legacy","type":"pattern","project":"brain","file":"2026-07-rec-5647fdeb868857ee.jsonl"}
+{"id":"rec-564da1c907fe7ba6","ts":"2026-09-10T15:33:11Z","actor":"feat/issue-889-featgovernance-the-lane-is-recognised-pa","type":"architecture","project":"brain","issue":889,"file":"2026-09-rec-564da1c907fe7ba6.jsonl"}
 {"id":"rec-565e948e2b80226c","ts":"2026-07-08T09:59:54Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-565e948e2b80226c.jsonl"}
 {"id":"rec-566682297203a800","ts":"2026-07-13T00:22:17Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-566682297203a800.jsonl"}
 {"id":"rec-56ebe0bb9ad0e628","ts":"2026-07-02T02:10:28Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-56ebe0bb9ad0e628.jsonl"}
