@@ -252,3 +252,82 @@ Docs: this note (tasks.md's "PR 2 prep note" under the Slice B header) and desig
 **Status**: cold-1 fixed and tested. Working tree clean, both commits local (no push). Remaining
 before PR 2 opens: B.W2 (`memory:save --issue 889`), B.W4 (fresh-context review), B.W5 (push +
 open PR 2), B.W6 (`brain:review`) — none attempted in this batch, out of its assigned scope.
+
+## Batch 4 — slice B corrections (2026-09-10)
+
+**Context at batch start**: a fresh cold reviewer of PR 2 prep (post-batch-3, worktree at
+`22d0bc72`) found two coverage/wording defects in `brain-audit.mjs`'s `[LANE]` branch (A8) and one
+wording issue each in `index-lag.mjs`'s warning, its own test's assertion strength, and the epic
+tracker. None were behavior bugs in the shipped `[LANE]`/index-lag logic itself — this batch is
+test coverage, comment accuracy, and docs.
+
+**MAJOR 1 — `[LANE]`'s production PR-body shape had zero test coverage.** The existing B1
+happy-path test (`brain-audit.test.mjs:1915`, now renamed "fallback path, no resolvable PR")
+put the `Memory lane:` marker in the COMMIT body with a subject carrying no `(#N)`, so `prNum`
+resolved to `null`, `fetchPrMeta` never called `gh`, and `selectIssueLinkBody` fell back to the
+commit body by construction. The shape PR 2 actually ships — marker only in the PR body via
+`gh pr view`, since GitHub squash bodies carry the branch's commit messages and never the PR
+description — had no test at all: mutating `issueLinkBody` → `body` at `brain-audit.mjs:341` left
+52/52 green. Added a new "production shape" test: records-only addition, squash subject carrying
+`(#N)`, `writeReviewedGhStub` (extended with an optional `body` override) stubbing the marker into
+the PR body, and an empty commit body. RED/mutant proof: applied the `issueLinkBody` → `body`
+mutation directly to `brain-audit.mjs` (scratch text saved first, reverted via the same Edit
+after), confirmed the new test fails (`[FAIL] … issueLink: no issue reference found` instead of
+`[LANE]`) while the renamed fallback test still passes against the same mutant, then reverted —
+`git diff --stat` confirmed byte-identical to pre-mutation. Never used `git checkout --`. Commit
+`0088f536`.
+
+**MAJOR 2 — the neighboring comment claimed the marker is "never the raw commit body."** False:
+`selectIssueLinkBody` (`lib/audit-helpers.mjs:52-54`) falls back to the commit body exactly when
+`prBody` is absent — that fallback is what makes the fallback test above meaningful in the first
+place. Reworded per design A8: the marker is read from `issueLinkBody` (PR body when reachable,
+commit body as the fallback), and it is the `[UNCOMPUTABLE]` guard above this line — not the
+choice of `issueLinkBody` itself — that stops a failed PR fetch from ever reaching the `[LANE]`
+check. Same commit `0088f536` (kept with the test it explains, not split into a docs-only unit).
+
+**MINOR 3 — `index-lag.mjs`'s warning could read in-sync when it was not.** `indexed N, rebuilt M`
+alone can pass with equal counts even when one id was swapped for another (one missing, one
+stale) — the message never said which direction the lag actually ran. RED: added an assertion to
+the existing lagged-index test expecting `(1 missing from the index, 0 stale in it)`, confirmed it
+failed against the un-fixed message. GREEN: appended the missing/stale counts (counts only, never
+raw ids — those stay in `result` for a caller that wants them) to the warning string in
+`index-lag.mjs`. TRIANGULATE: added a second `main()` test where the index lags in BOTH directions
+at once (`indexed 2, rebuilt 2` — equal, but genuinely lagged), asserting
+`(1 missing from the index, 1 stale in it)`. Commit `210a38ec`.
+
+**SUGGESTION 4 — the "NO FILE IS WRITTEN" test only snapshotted `index.jsonl`.** A writer that
+touched a record file under `.memory/records/` instead (added/removed/rewrote one) would have
+gone uncaught. Added a `snapshotDir()` helper (names + bytes + mtime, keyed by filename) and
+widened the existing test to snapshot the whole `recordsDir` before/after `main()`, plus a fixture
+invariant asserting the pre-snapshot is non-empty (so the "untouched" assertion cannot pass
+vacuously on an empty directory). Same commit `210a38ec` as MINOR 3 — one work unit, one
+deliverable ("the index-lag warning is precise and its non-mutation guarantee is real").
+
+**SUGGESTION 5 — `openspec/changes/issue-864-memory-2-0/tasks.md:39`.** The ticked 3.1c bullet
+still described the CI check as refusing "any path outside `.memory/records/` additions +
+`index.jsonl`" — stale wording from before A9/L3 established that `index.jsonl` is NEVER an
+allowed lane-PR path, only a byproduct `memory:reindex` regenerates separately. Amended to
+"additions only; `index.jsonl` never (L3)."
+
+**design.md A8** gained an "Operational fact (for the release note)" paragraph: `[LANE]` depends
+on `gh pr view` returning the PR body — an unauthenticated `brain:audit` run over a window
+containing a lane merge does NOT silently pass it as a plain merge; the `[UNCOMPUTABLE]` guard
+fires first and the run exits 2, fail-closed by design. And a `[LANE]` row skips ALL of
+`evaluateMerge` (diff-size, memory presence, human-review gate) for that merge — the surface the
+ruling deliberately trades away.
+
+**Verification**: focused suite (`brain-audit.test.mjs` + `index-lag.test.mjs`) 60 → 61/61 green
+after work unit 1, 61 → 62/62 green after work unit 2 (unchanged by work unit 3, docs-only). Full
+`npm test` 5097 → 5098/5098 green after work unit 1, 5098 → 5099/5099 green after work unit 2.
+
+**Files touched this batch**: `brain/scripts/brain-audit.mjs`, `brain/scripts/brain-audit.test.mjs`
+(work unit 1, commit `0088f536`); `brain/scripts/memory/index-lag.mjs`,
+`brain/scripts/memory/index-lag.test.mjs` (work unit 2, commit `210a38ec`);
+`openspec/changes/issue-889-lane-governance/design.md`,
+`openspec/changes/issue-864-memory-2-0/tasks.md`, this file (work unit 3, docs). Never touched
+`brain/core/**`, `brain/project/**`, or `.memory/**`.
+
+**Status**: all five cold-review findings (2 MAJOR, 1 MINOR, 2 SUGGESTION) addressed and tested.
+Working tree clean, all three commits local (no push). Remaining before PR 2 opens, unchanged from
+batch 3: B.W2 (`memory:save --issue 889`), B.W4 (fresh-context review of THIS batch), B.W5 (push +
+open PR 2), B.W6 (`brain:review`) — none attempted in this batch, out of its assigned scope.

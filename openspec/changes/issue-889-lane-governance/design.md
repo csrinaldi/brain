@@ -215,6 +215,16 @@ The walk passes `sourceBranch: null` and reads `lanePaths`: the same conjunction
 claim that does not exist post-merge. `lane === laneBranch && lanePaths` is asserted in the unit
 test so the three booleans cannot drift apart.
 
+**Operational fact (for the release note):** `[LANE]` depends on `gh pr view` actually returning
+the PR body — an unauthenticated `brain:audit` run over a window that contains a lane merge does
+NOT silently treat it as a plain merge. `fetchPrMeta` sets `prMetaError` on that failure, the
+`[UNCOMPUTABLE]` guard (above `laneMerge`) fires first, and the run prints `[UNCOMPUTABLE]` and
+exits 2 — fail-closed, by design, not a defect to file. And a `[LANE]` row skips ALL of
+`evaluateMerge` — diff-size, memory presence, AND the human-review gate — for that merge; that is
+the surface the `[LANE]` ruling deliberately trades away in exchange for not rendering a
+governance verdict on a shipped memory lane (D4). Anyone auditing "what did `[LANE]` actually
+exempt" should read it as those three checks, not as "nothing was checked."
+
 ### A9 — Index-lag compares **id sets**, never bytes, and the script must join the verification surface
 
 There is no non-mutating rebuild today: `rebuildIndex` writes at `store.mjs:238-239`. The
