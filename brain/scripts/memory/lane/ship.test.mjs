@@ -112,6 +112,29 @@ test('commit:null and ahead:0 (already shipped) is a no-op: zero push/list/creat
   assert.deepEqual(vcsCalls, { mrList: 0, mrCreate: 0, mrAutoMerge: 0 });
 });
 
+test('cold-1 (PR #902 review): a ref that never existed locally is nothing-to-ship with NO diff call and no misleading reason', async () => {
+  const { git, calls } = fakeGit([
+    { match: (a) => a[0] === 'rev-parse', result: fail("fatal: ambiguous argument 'refs/heads/memory/test-host-2026-09-09': unknown revision or path not in the working tree.") },
+  ]);
+  const { vcs, calls: vcsCalls } = fakeVcs();
+
+  const result = await shipLane({
+    root: '/repo', project: 'x/y', tier: 'lite', host: 'test-host', date: '2026-09-09',
+    collect: fakeCollect({ commit: null }), git, vcs,
+  });
+
+  assert.equal(result.pushed, false);
+  assert.equal(result.pr, null);
+  assert.ok(
+    !calls.some((a) => a[0] === 'diff'),
+    'a ref that was never created must never be diffed against origin/main — there is nothing to derive a title from',
+  );
+  assert.ok(
+    !('title' in result),
+    'nothing-to-ship must not carry a fabricated title/body — no misleading "could not be fetched" reason for a ref that simply never existed',
+  );
+});
+
 test("A1 recovery case: commit:null but ahead:1 (a prior push failed) still pushes and opens/arms", async () => {
   const { git, calls } = fakeGit([
     ...surveyOkRules({ ahead: '1' }),
