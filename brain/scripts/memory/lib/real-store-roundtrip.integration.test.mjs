@@ -53,10 +53,21 @@ test('REQ-C4-1: round-trip id-equality holds for every record in the REAL .memor
     return;
   }
 
+  // #738: a real record whose OWN stored `actor` is branch-shaped now gets a
+  // documented A5 soft-reject on re-export (W3, #738) — this is the exact
+  // historical population (~183 records, design.md's measured audit) #738
+  // exists to stop GROWING, not to backfill (Non-Goals: no `HANDLE_RE`
+  // grammar change, no backfill of legacy shapes). Counted and reported
+  // separately from a genuine round-trip failure, never silently dropped.
   const failures = [];
+  const branchShapeRejections = [];
   for (const record of records) {
     const observation = importRecord(record);
     const { record: exported, rejected, skipped } = exportObservation(observation);
+    if (rejected?.reason?.includes('branch-shaped')) {
+      branchShapeRejections.push(record.id);
+      continue;
+    }
     if (rejected || skipped) {
       failures.push(
         `${record.id ?? '(missing id)'}: round-trip was ${rejected ? 'REJECTED' : 'SKIPPED'} — ${JSON.stringify(rejected ?? skipped)}`,
@@ -71,7 +82,10 @@ test('REQ-C4-1: round-trip id-equality holds for every record in the REAL .memor
     }
   }
 
-  console.log(`REQ-C4-1: round-trip id-equality exercised over ${records.length} real records from .memory/records/`);
+  console.log(
+    `REQ-C4-1: round-trip id-equality exercised over ${records.length} real records from .memory/records/ ` +
+      `(${branchShapeRejections.length} pre-existing branch-shaped-actor records excluded, #738 A5)`,
+  );
   assert.deepEqual(
     failures,
     [],
@@ -148,7 +162,12 @@ test('REQ-C4-1 / #404: real records re-stamped with an `issue` still round-trip 
   const samples = [...withSource, ...withoutSource];
   assert.ok(samples.length > 0, 'the real store must yield at least one sample record');
 
+  // #738 (A5): a sampled record whose OWN stored `actor` is already
+  // branch-shaped gets a documented soft-reject on re-export — excluded from
+  // `failures` the same way the sibling test above excludes it, not silently
+  // dropped from the count.
   const failures = [];
+  const branchShapeRejections = [];
   for (const sample of samples) {
     // Rebuild through buildRecord() so the id is the one this record WOULD
     // have carried had its author populated `issue` — never a hand-computed
@@ -172,6 +191,10 @@ test('REQ-C4-1 / #404: real records re-stamped with an `issue` still round-trip 
     }
 
     const { record: exported, rejected, skipped } = exportObservation(importRecord(issued));
+    if (rejected?.reason?.includes('branch-shaped')) {
+      branchShapeRejections.push(sample.id);
+      continue;
+    }
     if (rejected || skipped) {
       failures.push(`${sample.id}: round-trip was ${rejected ? 'REJECTED' : 'SKIPPED'}`);
       continue;
@@ -187,7 +210,8 @@ test('REQ-C4-1 / #404: real records re-stamped with an `issue` still round-trip 
   }
 
   console.log(
-    `REQ-C4-1/#404: issue-carrying round-trip exercised over ${samples.length} records derived from the real store`,
+    `REQ-C4-1/#404: issue-carrying round-trip exercised over ${samples.length} records derived from the real store ` +
+      `(${branchShapeRejections.length} pre-existing branch-shaped-actor records excluded, #738 A5)`,
   );
   assert.deepEqual(failures, [], `${failures.length}/${samples.length} issue-carrying records failed:\n${failures.join('\n')}`);
 });
