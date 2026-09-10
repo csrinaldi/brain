@@ -255,3 +255,81 @@ test('#530: an absent --issue is still allowed — tagging is encouraged, not co
     assert.ok(!('issue' in rec), 'the field is optional and must stay absent rather than land null');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// #805 — the supersedes gate: two injectable seams (_readRecordIds,
+// _upstreamRecordEntries), placed between the `issue` refusal and
+// `buildRecord`, short-circuiting entirely when `supersedes` is absent.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const defaultSaveSeams = (root, extra = {}) => ({
+  root,
+  getBranch: () => 'main',
+  getTimestamp: () => '2026-09-10T09:00:00Z',
+  getHostname: () => 'h',
+  ...extra,
+});
+
+test('#805: a supersedes value reaches buildRecord — the written record carries the field', async () => {
+  const root = tmpRoot();
+  try {
+    const target = 'rec-0123456789abcdef';
+    const r = await save('t', 'c', { type: 'discovery', project: 'brain', supersedes: target }, defaultSaveSeams(root, {
+      _readRecordIds: () => new Set([target]),
+      _upstreamRecordEntries: () => { throw new Error('must not be called on a local hit'); },
+    }));
+    const rec = JSON.parse(readFileSync(r.file, 'utf8').trim().split('\n').pop());
+    assert.equal(rec.supersedes, target);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('#805: supersedes absent — neither new seam is called, the gate is a no-op', async () => {
+  const root = tmpRoot();
+  let readRecordIdsCalls = 0;
+  let upstreamCalls = 0;
+  try {
+    await save('t', 'c', { type: 'discovery', project: 'brain' }, defaultSaveSeams(root, {
+      _readRecordIds: () => { readRecordIdsCalls += 1; return new Set(); },
+      _upstreamRecordEntries: () => { upstreamCalls += 1; return { ok: true, byId: new Map() }; },
+    }));
+    assert.equal(readRecordIdsCalls, 0, 'no supersedes flag means no local read at all');
+    assert.equal(upstreamCalls, 0);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('#805: a local hit never calls the upstream seam (thunk discipline, A1)', async () => {
+  const root = tmpRoot();
+  let upstreamCalls = 0;
+  try {
+    const target = 'rec-0123456789abcdef';
+    await save('t', 'c', { type: 'discovery', project: 'brain', supersedes: target }, defaultSaveSeams(root, {
+      _readRecordIds: () => new Set([target]),
+      _upstreamRecordEntries: () => { upstreamCalls += 1; return { ok: true, byId: new Map() }; },
+    }));
+    assert.equal(upstreamCalls, 0);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+for (const [label, opts] of [
+  ['malformed', { supersedes: 'not-a-valid-id', _readRecordIds: () => new Set(), _upstreamRecordEntries: () => { throw new Error('must not be called'); } }],
+  ['not-in-store', { supersedes: 'rec-0123456789abcdef', _readRecordIds: () => new Set(), _upstreamRecordEntries: () => ({ ok: true, ref: 'origin/main', byId: new Map() }) }],
+  ['could-not-verify', { supersedes: 'rec-0123456789abcdef', _readRecordIds: () => new Set(), _upstreamRecordEntries: () => ({ ok: false, ref: null, reason: 'no upstream ref resolved (tried origin/HEAD, origin/main)' }) }],
+]) {
+  test(`#805: a ${label} supersedes refusal rejects with no write, no index change, no indexFailed`, async () => {
+    const root = tmpRoot();
+    const { supersedes, _readRecordIds, _upstreamRecordEntries } = opts;
+    try {
+      await assert.rejects(
+        () => save('t', 'c', { type: 'discovery', project: 'brain', supersedes }, defaultSaveSeams(root, {
+          _readRecordIds, _upstreamRecordEntries,
+        })),
+        (err) => {
+          assert.equal(err.indexFailed, undefined, 'a refusal must never carry indexFailed — nothing was written');
+          return true;
+        },
+      );
+      assert.equal(existsSync(join(root, '.memory', 'records')), false, `no records/ dir should be created on a ${label} refusal`);
+      assert.equal(existsSync(join(root, '.memory', 'index.jsonl')), false, `no index should be written on a ${label} refusal`);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+}
