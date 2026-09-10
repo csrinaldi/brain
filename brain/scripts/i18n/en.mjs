@@ -77,6 +77,11 @@ export default {
   'day.memory.notAvailable':   'engram not available — skipping shared memory.',
   'day.memory.install':        'Install: gentle-ai install   or   npm run tools:install',
 
+  // Lane sweep (#906, design.md A7) — one line, only when memory.lane.enabled is true.
+  'day.memory.laneSweep.shipped': 'Lane sweep: shipped {ref} (PR #{number}).',
+  'day.memory.laneSweep.nothing': 'Lane sweep: nothing to ship.',
+  'day.memory.laneSweep.warn':    'Lane sweep: {detail} — see the tmp log; the morning sweep will retry tomorrow.',
+
   // Done footer
   'day.done.withTicket':      'With a ticket:',
   'day.done.ticketStart':     'brain:ticket:start -- <iid>   (terminal)',
