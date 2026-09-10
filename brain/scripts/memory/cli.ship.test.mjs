@@ -21,6 +21,8 @@ import { hostname } from 'node:os';
 
 import { testTmp } from '../lib/test-tmp.mjs';
 import { collectLane } from './lane/collect.mjs';
+import en from '../i18n/en.mjs';
+import es from '../i18n/es.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CLI = join(HERE, 'cli.mjs');
@@ -358,6 +360,23 @@ test('E1 (cold review): mrCreate returns a URL with no derivable PR number and t
   });
   assert.equal(textRun.status, 0, textRun.stderr);
   assert.match(textRun.stdout, /memory\/cli:.*number could not be derived/i);
+});
+
+test('E3 (cold review): raced/badHost are mapped the same way "collect" maps them (source guard — neither op has a host/date CLI override, so neither is exercised behaviorally; see cli.collect.test.mjs\'s own precedent)', () => {
+  const source = readFileSync(CLI, 'utf8');
+  const shipBlockStart = source.indexOf('if (op === "ship")');
+  const shipBlockEnd = source.indexOf('function shipOutcomeKey');
+  const shipBlock = source.slice(shipBlockStart, shipBlockEnd);
+  assert.match(shipBlock, /err\?\.raced \? "raced"/, 'a raced collect() failure must be tagged distinctly from a generic ship failure');
+  assert.match(shipBlock, /err\?\.badHost \? "badHost"/, 'a badHost collect() failure must be tagged distinctly from a generic ship failure');
+  // The i18n key is built via a template literal (`memory.ship.${key}`), so
+  // it never appears as a literal string in cli.mjs's own source — checked
+  // instead against both catalogs, mirroring "collect"'s own precedent
+  // (`memory.collect.raced`/`memory.collect.badHost`).
+  assert.equal(typeof en['memory.ship.raced'], 'string', 'en.mjs must carry memory.ship.raced');
+  assert.equal(typeof en['memory.ship.badHost'], 'string', 'en.mjs must carry memory.ship.badHost');
+  assert.equal(typeof es['memory.ship.raced'], 'string', 'es.mjs must carry memory.ship.raced');
+  assert.equal(typeof es['memory.ship.badHost'], 'string', 'es.mjs must carry memory.ship.badHost');
 });
 
 test('the real getVcs()/gh port is only ever imported when BRAIN_VCS_TEST_MODULE is unset (source guard)', () => {

@@ -341,6 +341,8 @@ export default {
   'memory.ship.prCreateFailed':   '✗ ship failed — the pull request could not be created. {message}',
   'memory.ship.prNumberUnknown':  'the pull request is open but its number could not be derived — auto-merge was skipped; the next run recovers it.',
   'memory.ship.failed':           '✗ ship failed — {message}',
+  'memory.ship.raced':            '✗ ship failed — the lane ref moved during this run (raced); nothing was lost, its blobs are re-collected on the next run: {message}',
+  'memory.ship.badHost':          '✗ ship failed — the host name produced an empty or invalid ref slug: {message}',
 
   // ── memory/cli.mjs — which backend actually ran (issue #641) ─────────────────
   // Each of these is a case where the backend that ran is not the one a reader

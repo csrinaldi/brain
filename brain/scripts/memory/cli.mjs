@@ -483,7 +483,13 @@ if (op === "ship") {
     }
     process.exit(0);
   } catch (err) {
-    const key = err?.diverged ? "diverged"
+    // E3 (cold review): `raced`/`badHost` are named failures `collect()`
+    // (called internally by `shipLane`) tags on the thrown error (A9, A5 —
+    // same two tags the "collect" op's own catch above passes through)
+    // — everything else here is a genuine ship-specific failure.
+    const key = err?.raced ? "raced"
+      : err?.badHost ? "badHost"
+      : err?.diverged ? "diverged"
       : err?.pushFailed ? "pushFailed"
       : err?.prLookupFailed ? "prLookupFailed"
       : err?.prCreateFailed ? "prCreateFailed"

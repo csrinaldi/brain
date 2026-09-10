@@ -311,6 +311,8 @@ export default {
   'memory.ship.prCreateFailed':   '✗ el envío falló — no se pudo crear el pull request. {message}',
   'memory.ship.prNumberUnknown':  'el pull request está abierto pero no se pudo derivar su número — se salteó el auto-merge; la próxima corrida lo recupera.',
   'memory.ship.failed':           '✗ el envío falló — {message}',
+  'memory.ship.raced':            '✗ el envío falló — la ref del lane se movió durante esta corrida (raced); no se perdió nada, sus blobs se vuelven a juntar en la próxima corrida: {message}',
+  'memory.ship.badHost':          '✗ el envío falló — el nombre de host produjo un slug de ref vacío o inválido: {message}',
 
   // ── memory/cli.mjs — qué backend corrió realmente (issue #641) ───────────────
   'memory.backend.substituted': 'el binario `{from}` no está instalado acá, así que `{op}` corrió sobre el backend `{fallback}` (solo registros) — mismos registros, misma validación, sin backend requerido (ADR-0017). MEMORY_BACKEND no estaba seteado, así que no se pisó ninguna elección explícita; seteálo para fijar cualquiera de los dos backends.',

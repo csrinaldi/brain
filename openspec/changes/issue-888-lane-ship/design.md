@@ -39,6 +39,14 @@ brain/scripts/memory/lane/ship.mjs
 `vcs` is the whole bound port (`{ mrList, mrCreate, mrAutoMerge, … }`), **not** three separate
 function parameters — see A2. `identityBound` is a **boolean**, never a token — see A5.
 
+**C3 (PR 2's cold review)**: `title`/`body` are **unconditional keys** in the outcome shape, as
+declared above — on the "nothing to ship" branch (`commit === null && ahead === 0`) they are
+`title: null, body: null`, never simply absent. This was a real gap introduced by the cold-1 fix
+(PR #902's review): deferring `buildTitleAndBody()` past the nothing-to-ship check (so a ref that
+never existed is never diffed) left that branch's `return` without a `title`/`body` key at all,
+contradicting this module map. `null` communicates "nothing to derive a title from" without making
+key-presence itself the signal a caller has to special-case.
+
 ## Architecture decisions
 
 ### A1 — The sequence, and the predicate for "nothing to ship"

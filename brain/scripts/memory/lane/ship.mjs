@@ -241,8 +241,13 @@ export async function shipLane({
   // from here on can only mean a genuinely unfetchable base — see test `C`
   // below for that legitimate case, which is unaffected by this change.
   if (commit === null && ahead === 0) {
+    // C3 (cold review): `title`/`body` are `null` here, not simply absent
+    // from the returned object — the module map (design.md) declares them
+    // UNCONDITIONAL in the outcome shape. `null` says "there is nothing to
+    // title, by design" without making the key's presence itself the signal
+    // a caller has to special-case.
     return {
-      ...base, ahead, behind, remoteRefPresent,
+      ...base, title: null, body: null, ahead, behind, remoteRefPresent,
       pushed: false, diverged: false, pr: null, autoMerge: null,
     };
   }
@@ -286,7 +291,20 @@ export async function shipLane({
     return { ...base, title, body, ahead, behind, remoteRefPresent, pushed: true, diverged: false, pr, autoMerge: null };
   }
 
-  const autoMerge = await vcs.mrAutoMerge({ project, number: pr.number, requiredReviews: tierParams(tier).requiredReviews });
+  // E2 (cold review): the port's own contract says `mrAutoMerge` never
+  // throws (design A6; both providers catch internally, github.mjs/
+  // gitlab.mjs) — but a throw here would otherwise propagate straight
+  // through `shipLane` and fail the WHOLE run over an arm-only step, AFTER
+  // the push and the PR have already landed durably. Catching here keeps
+  // A6's "every mrAutoMerge refusal reason is non-fatal" guarantee true BY
+  // CONSTRUCTION, rather than by trusting every current and future provider
+  // to honor a contract this module cannot enforce on their behalf.
+  let autoMerge;
+  try {
+    autoMerge = await vcs.mrAutoMerge({ project, number: pr.number, requiredReviews: tierParams(tier).requiredReviews });
+  } catch (err) {
+    autoMerge = { enabled: false, reason: err?.message ?? String(err) };
+  }
 
   return { ...base, title, body, ahead, behind, remoteRefPresent, pushed: true, diverged: false, pr, autoMerge };
 }
