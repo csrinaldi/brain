@@ -2233,7 +2233,7 @@ for (const providerName of Object.keys(BRANCH_PROTECT_PROVIDERS)) {
 // number, requiredReviews?, apiBase?, token?, proxyUrl?, fetchImpl? }) ->
 // {enabled:true,url}|{enabled:false,reason}|{enabled:false,reason,error}`.
 // GitHub via the `gh` spawn seam (setSpawn); GitLab via the injected
-// `fetchImpl`. The refusal (`requiredReviews > 0`) is the FIRST statement in
+// `fetchImpl`. The refusal (`requiredReviews !== 0`) is the FIRST statement in
 // both implementations (design A4) — proved with a COUNTING seam, never a
 // throwing one: a throwing seam would fail the never-throws test for the
 // wrong reason (design A4's own trap note).

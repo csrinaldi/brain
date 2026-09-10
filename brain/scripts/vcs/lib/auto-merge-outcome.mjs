@@ -30,7 +30,7 @@ export function armed({ url }) {
 
 /**
  * The ONLY constructor of the "refused" shape. `error` is present IFF it is
- * explicitly passed — the tier-refusal branch (`requiredReviews > 0`) never
+ * explicitly passed — the tier-refusal branch (`requiredReviews !== 0`) never
  * fabricates one, because no provider was ever asked (design A1): a local
  * decision carries no provider text to report. The unsupported/transport
  * branches always pass `error`, since a provider spoke.
