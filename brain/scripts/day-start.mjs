@@ -19,7 +19,7 @@ import { currentBranch } from './lib/git-branch.mjs';
 import { restoreManifestChurn } from './lib/memory-manifest.mjs';
 import { agentRuntimeReport, platformEnvVars, platformConfig } from './harness/backends/agent-runtime.mjs';
 import { readEnv } from './lib/env-read.mjs';
-import { runLaneSweep } from './memory/day-start-sweep.mjs';
+import { laneSweepEnabled, runLaneSweep, laneSweepLine } from './memory/day-start-sweep.mjs';
 
 const ROOT = process.cwd();
 const NODE = process.execPath;
@@ -382,23 +382,24 @@ if (engram.status === 0) {
   console.log(`       ${await t('day.memory.install')}`);
 }
 
-// 5b. Lane sweep — a synchronous sub-step, own timeout (#906, design.md A7).
+// 5a. Lane sweep — a synchronous sub-step, own timeout (#906, design.md A7).
 // NOT its own sep(): TOTAL stays 6 (test/bootstrap-smoke/smoke.mjs pins the
 // literal 6/6), the same reasoning as the AI-runtime block above (4b).
 // Silent skip when memory.lane.enabled is false or absent; exactly one line
-// when it ran; a non-zero or unparseable outcome WARNS, never fails day:start.
+// when it ran; a non-zero or unparseable outcome WARNS, never fails
+// day:start — this block only ever renders what the PURE laneSweepLine()
+// decides (day-start.test.mjs pins that it never calls die; day-start-
+// sweep.test.mjs pins laneSweepLine's own four branches, #906 cold review C5).
 {
-  const sweep = runLaneSweep({ config });
-  if (!sweep.skipped) {
-    if (sweep.unparsed) {
-      warn(await t('day.memory.laneSweep.warn', { detail: 'unparseable ship output' }));
-    } else if (sweep.status !== 0) {
-      warn(await t('day.memory.laneSweep.warn', { detail: `ship exited ${sweep.status ?? 'unknown'}` }));
-    } else if (sweep.outcome?.pushed) {
-      ok(await t('day.memory.laneSweep.shipped', { ref: sweep.outcome.ref ?? '', number: sweep.outcome.pr?.number ?? '?' }));
-    } else {
-      ok(await t('day.memory.laneSweep.nothing'));
-    }
+  if (laneSweepEnabled(config)) {
+    console.log(`  ${C.dim}${await t('day.memory.laneSweep.running')}${C.reset}`);
+  }
+  const line = laneSweepLine(runLaneSweep({ config }));
+  if (line.level === 'warn') {
+    const detail = await t(line.params.detailKey, line.params.detailParams);
+    warn(await t(line.key, { detail }));
+  } else if (line.level === 'ok') {
+    ok(await t(line.key, line.params));
   }
 }
 
