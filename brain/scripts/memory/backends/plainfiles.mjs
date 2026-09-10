@@ -15,8 +15,10 @@ import { execFileSync, spawnSync } from "node:child_process";
 
 import { _getGitBranch } from "./engram.mjs";
 import { buildRecord, serializeRecord, nowUtcSeconds, RECORD_TYPES } from "../lib/format.mjs";
-import { appendRecord, rebuildIndex, readRecords } from "../lib/store.mjs";
+import { appendRecord, rebuildIndex, readRecords, readRecordIds } from "../lib/store.mjs";
 import { normalizeDuplicates } from "../lib/duplicates.mjs";
+import { upstreamRecordEntries } from "../lib/upstream-records.mjs";
+import { classifySupersedes } from "../lib/supersedes.mjs";
 
 /** The repository this record belongs to, from config, falling back to the checkout
  *  directory name. Records in this repo carry the bare name ("brain"), not the slug. */
@@ -73,7 +75,7 @@ export async function save(
   // format has no home for them (out of scope for C3), so they are ignored
   // LOUDLY (a console.warn naming them, never a silent drop) rather than
   // erroring (an error would break the arg-shape parity the mirror exists for).
-  { type, project, issue, scope, topic } = {},
+  { type, project, issue, supersedes, scope, topic } = {},
   {
     root = repoRoot,
     getBranch = _getGitBranch,
@@ -82,6 +84,8 @@ export async function save(
     _appendRecord = appendRecord,
     _rebuildIndex = rebuildIndex,
     _loadConfig = _defaultLoadBrainConfig,
+    _readRecordIds = readRecordIds,
+    _upstreamRecordEntries = upstreamRecordEntries,
   } = {},
 ) {
   const ignoredOpts = [scope && "scope", topic && "topic"].filter(Boolean);
@@ -121,7 +125,35 @@ export async function save(
     throw new Error(await t("memory.plainfiles.save.issueInvalid", { value: String(issue) }));
   }
 
-  const candidate = buildRecord({ ts, actor, actorKind, type, project: resolvedProject, issue, content, title, source });
+  const recordsDir = join(root, ".memory", "records");
+
+  // `--supersedes` (#805) — local store first, `origin/main` only on a local
+  // miss (design.md A1); the whole gate is a no-op when the flag is absent,
+  // so an ordinary save reads no directory and spawns no git.
+  if (supersedes !== undefined) {
+    // `localIds` is a thunk (cold-review blocker, #805): `classifySupersedes`
+    // checks the id's grammar FIRST, with no IO, and only calls this when the
+    // shape is valid. Reading the store eagerly here — before the shape check
+    // — would mean a malformed id still touched disk before being rejected.
+    const verdict = classifySupersedes({
+      id: supersedes,
+      localIds: () => _readRecordIds({ recordsDir }),
+      upstream: () => _upstreamRecordEntries({ root }),
+    });
+    if (verdict.configError !== undefined) {
+      console.warn(await t("memory.plainfiles.save.supersedesConfigError", { error: verdict.configError }));
+    }
+    if (!verdict.ok) {
+      const key = {
+        malformed: "memory.plainfiles.save.supersedesMalformed",
+        "not-in-store": "memory.plainfiles.save.supersedesNotInStore",
+        "could-not-verify": "memory.plainfiles.save.supersedesUnverifiable",
+      }[verdict.reason];
+      throw new Error(await t(key, verdict.detail));
+    }
+  }
+
+  const candidate = buildRecord({ ts, actor, actorKind, type, project: resolvedProject, issue, supersedes, content, title, source });
 
   const { patternSources, allowPatternSources } = resolveSecretConfig(config);
   const patterns = compilePatterns(patternSources);
@@ -133,7 +165,6 @@ export async function save(
     );
   }
 
-  const recordsDir = join(root, ".memory", "records");
   const indexPath = join(root, ".memory", "index.jsonl");
 
   const { file } = _appendRecord(candidate, { recordsDir });

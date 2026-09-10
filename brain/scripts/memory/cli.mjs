@@ -772,13 +772,40 @@ if (op === "save") {
   const rest = process.argv.slice(3);
   const positionals = [];
   const flags = {};
+  // `--supersedes` (#805): the generic `flags[key] = rest[++i]` parser below is
+  // uniformly last-wins and cannot tell "absent" from "present with no value" —
+  // measured, design.md A5. Neither hole is safe for a field the backend cannot
+  // see twice, so the count and the final value are tracked here, at the parser,
+  // and refused before any backend is ever reached.
+  let supersedesCount = 0;
   for (let i = 0; i < rest.length; i++) {
     const arg = rest[i];
     if (arg.startsWith("--")) {
-      flags[arg.slice(2)] = rest[++i];
+      const key = arg.slice(2);
+      // fresh-context review MINOR-1: `--supersedes=<id>` is NOT the
+      // space-separated form this parser recognizes for ANY flag — left
+      // unhandled, `key` becomes the bogus flag name `"supersedes=<id>"`,
+      // `flags.supersedes` stays undefined, and the NEXT argv token is
+      // consumed as that bogus key's value. That silently wrote a record
+      // missing the field the caller asked for (exit 0). Counted and
+      // refused the same way a value-less `--supersedes` is refused below,
+      // instead of accepted by splitting on `=` — every other flag in this
+      // parser only understands the space-separated form, so accepting `=`
+      // here alone would be an inconsistent one-off carve-out.
+      if (key === "supersedes" || key.startsWith("supersedes=")) supersedesCount += 1;
+      if (key.startsWith("supersedes=")) continue;
+      flags[key] = rest[++i];
     } else {
       positionals.push(arg);
     }
+  }
+  if (supersedesCount > 1) {
+    console.error(`memory/cli: ${await t("memory.save.supersedesRepeated")}`);
+    process.exit(1);
+  }
+  if (supersedesCount === 1 && flags.supersedes === undefined) {
+    console.error(`memory/cli: ${await t("memory.save.supersedesMissingValue")}`);
+    process.exit(1);
   }
   const [title, content] = positionals;
   // `--issue` (#530): the record format has carried an `issue` field all along and
@@ -788,7 +815,10 @@ if (op === "save") {
   // refuses a non-integer, so a typo fails closed at the chokepoint rather than
   // landing a string in a durable field.
   const issue = flags.issue === undefined ? undefined : Number(flags.issue);
-  const opts = { type: flags.type, project: flags.project, issue, scope: flags.scope, topic: flags.topic };
+  // `--supersedes` is forwarded UNPARSED to every backend (design.md — the CLI
+  // enforces arity, plainfiles.mjs owns the store check, engram.mjs's catalog
+  // message just names the flag).
+  const opts = { type: flags.type, project: flags.project, issue, supersedes: flags.supersedes, scope: flags.scope, topic: flags.topic };
   const seams = memoryTestRoot ? { root: memoryTestRoot } : {};
   try {
     const result = await backend.save(title, content, opts, seams);
