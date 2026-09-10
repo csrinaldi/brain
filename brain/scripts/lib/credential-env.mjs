@@ -107,6 +107,17 @@ import { tokenEnvVar } from '../vcs/lib/token.mjs';
 export const REVIEWER_TOKEN_ENV = 'BRAIN_REVIEWER_TOKEN';
 
 /**
+ * The lane ship op's credential env var NAME (issue #888, D3/A5) — the name
+ * `memory/lane/ship.mjs`'s caller reads to bind an unattended host's identity.
+ * A LITERAL, labelled as one: there is no module this name is derived FROM
+ * (unlike `REVIEWER_TOKEN_ENV`/`tokenEnvVar()` above) — the `ship` op is the
+ * one and only reader, so this constant IS the source, exported here so the
+ * denylist and the op agree on the same name by construction rather than by
+ * two independently spelled literals drifting apart.
+ */
+export const MEMORY_TOKEN_ENV = 'BRAIN_MEMORY_TOKEN';
+
+/**
  * Forge-CLI credentials — a LITERAL, and labelled as one. See the header: these
  * are read by `gh`/`glab`, not declared by brain, so there is no constant to
  * derive them from and inventing one would be the defect this file avoids.
@@ -133,7 +144,7 @@ export const FORGE_TOKEN_ENV = Object.freeze([
  * @returns {string[]}
  */
 export function credentialEnvNames({ extra = [] } = {}) {
-  const names = [REVIEWER_TOKEN_ENV, tokenEnvVar(), ...FORGE_TOKEN_ENV, ...extra];
+  const names = [REVIEWER_TOKEN_ENV, tokenEnvVar(), MEMORY_TOKEN_ENV, ...FORGE_TOKEN_ENV, ...extra];
   return [...new Set(names.filter((n) => typeof n === 'string' && n.trim() !== ''))];
 }
 

@@ -1762,6 +1762,7 @@
 {"id":"rec-bc2b13833fe0d3ec","ts":"2026-08-29T22:32:20Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-08-rec-bc2b13833fe0d3ec.jsonl"}
 {"id":"rec-bc5da6742dc9fc76","ts":"2026-07-29T14:28:26Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-bc5da6742dc9fc76.jsonl"}
 {"id":"rec-bc8910c4483195ac","ts":"2026-06-27T22:22:16Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-06-rec-bc8910c4483195ac.jsonl"}
+{"id":"rec-bc8b2c1a93dee0f3","ts":"2026-09-10T11:35:54Z","actor":"feat/issue-901-featmemory-shiplane-the-lane-ship-library","type":"architecture","project":"brain","issue":901,"file":"2026-09-rec-bc8b2c1a93dee0f3.jsonl"}
 {"id":"rec-bc8c012067d02405","ts":"2026-07-25T00:48:19Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-bc8c012067d02405.jsonl"}
 {"id":"rec-bc91c861c1d62948","ts":"2026-07-25T00:47:28Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-07-rec-bc91c861c1d62948.jsonl"}
 {"id":"rec-bcbe0b2545645f40","ts":"2026-07-25T21:51:31Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07-rec-bcbe0b2545645f40.jsonl"}
