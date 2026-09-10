@@ -82,7 +82,11 @@ const BRANCH_GRAMMAR = /^memory\/(?<host>[a-z0-9][a-z0-9-]*)-(?<date>\d{4}-\d{2}
  * "never a second clock read" rationale, applied to the slug too). `n` and
  * the path list come from ONE source — the three-dot diff against
  * `origin/main` — never `collected` (#887's own C1 lesson: `collected`
- * counts this run's additions, not the lane's).
+ * counts this run's additions, not the lane's). The diff's own exit status
+ * is honored: when `origin/main` cannot be resolved (a missing/unfetched
+ * base, `git diff` exits non-zero), `paths` is unknowable — reporting it as
+ * `[]`/`(0 records)` would be a false "nothing shipped" claim on a run that
+ * pushed real records, so the count is reported as unknown instead.
  */
 function buildTitleAndBody({ git, root, ref, branch }) {
   const m = BRANCH_GRAMMAR.exec(branch);
@@ -90,6 +94,14 @@ function buildTitleAndBody({ git, root, ref, branch }) {
   const date = m ? m.groups.date : '';
 
   const diffResult = git(['diff', '--name-only', `origin/main...${ref}`], { cwd: root });
+  if (diffResult.status !== 0) {
+    const title = `memory: ${host} ${date} (records: unknown)`;
+    const bodyLines = [
+      `Memory lane: ${host} ${date}`,
+      'Records: unknown — origin/main could not be fetched, the diff could not be computed',
+    ];
+    return { title, body: `${bodyLines.join('\n')}\n` };
+  }
   const paths = String(diffResult.stdout ?? '').split('\n').filter(Boolean).sort();
   const n = paths.length;
   const title = `memory: ${host} ${date} (${n} records)`;

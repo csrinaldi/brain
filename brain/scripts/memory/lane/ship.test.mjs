@@ -281,6 +281,30 @@ test("title/body match the ticket's grammar byte for byte, Records: n from the t
   assert.deepEqual(createArgs.labels, []);
 });
 
+test('C: a non-zero diff exit (origin/main unfetchable) reports the count as unknown, never 0', async () => {
+  const { git } = fakeGit([
+    { match: (a) => a[0] === 'rev-parse', result: ok('deadbeef') },
+    { match: (a) => a[0] === 'fetch', result: ok() },
+    { match: (a) => a[0] === 'rev-list' && a[2] === `${REF}..refs/remotes/origin/${BRANCH}`, result: ok('0') },
+    { match: (a) => a[0] === 'rev-list' && a[2] === `refs/remotes/origin/${BRANCH}..${REF}`, result: ok('1') },
+    { match: (a) => a[0] === 'diff', result: fail("fatal: ambiguous argument 'origin/main...refs/heads/memory/test-host-2026-09-09': unknown revision or path not in the working tree.") },
+    { match: (a) => a[0] === 'push', result: ok() },
+  ]);
+  let createArgs;
+  const { vcs } = fakeVcs({ mrCreate: async (args) => { createArgs = args; return { url: 'https://example.invalid/pull/42' }; } });
+
+  await shipLane({
+    root: '/repo', project: 'x/y', tier: 'lite', host: 'test-host', date: '2026-09-09',
+    collect: fakeCollect({ baseFetched: false }), git, vcs,
+  });
+
+  assert.equal(createArgs.title, 'memory: test-host 2026-09-09 (records: unknown)');
+  assert.doesNotMatch(createArgs.title, /\(0 records\)/, 'a missing base must never be reported as zero records');
+  const bodyLines = createArgs.body.split('\n');
+  assert.equal(bodyLines[0], 'Memory lane: test-host 2026-09-09');
+  assert.match(bodyLines[1], /could not be fetched/i, 'the body must say the base could not be fetched, not claim zero records');
+});
+
 test('A4: title/body are parsed from the branch, not the raw host param — a host needing slugification', async () => {
   const slugRef = 'refs/heads/memory/my-host-lab-2026-09-09';
   const slugBranch = 'memory/my-host-lab-2026-09-09';
