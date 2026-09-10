@@ -19,11 +19,15 @@ export const SUPERSEDES_ID_RE = /^rec-[0-9a-f]{16}$/;
 /**
  * @param {object} args
  * @param {unknown} args.id             the raw `--supersedes` value
- * @param {Set<string>} args.localIds   `store.mjs#readRecordIds({recordsDir})`'s result
+ * @param {() => Set<string>} args.localIds
+ *   Deferred reader over `store.mjs#readRecordIds({recordsDir})`'s result — a
+ *   THUNK, mirroring `upstream` below. Called at most once, and only after
+ *   `id` passes the grammar check: a malformed id must cost zero IO, not just
+ *   zero upstream IO (cold-review blocker, #805).
  * @param {() => {ok:true, ref?:string, byId:Map<string,string>, configError?:string}
  *            | {ok:false, ref:string|null, reason:string, configError?:string}} args.upstream
  *   Deferred reader (`upstream-records.mjs#upstreamRecordEntries`'s shape). Called
- *   at most once, and only when `localIds` misses.
+ *   at most once, and only when `localIds()` misses.
  * @returns {{ok:true, source:'local'|'upstream', configError?:string}
  *          |{ok:false, reason:'malformed'|'not-in-store'|'could-not-verify',
  *            detail:object, configError?:string}}
@@ -37,7 +41,7 @@ export function classifySupersedes({ id, localIds, upstream }) {
     return { ok: false, reason: 'malformed', detail: { value: id } };
   }
 
-  if (localIds.has(id)) {
+  if (localIds().has(id)) {
     return { ok: true, source: 'local' };
   }
 

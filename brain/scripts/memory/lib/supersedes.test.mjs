@@ -25,11 +25,13 @@ function spyUpstream(result) {
 
 for (const bad of ['rec-XYZ', 'rec-abcdef0123456789a', 'rec-ABCDEF0123456789', '', 42, null, undefined]) {
   test(`classifySupersedes: malformed value ${JSON.stringify(bad)} is refused before any read`, () => {
+    const localIds = spyUpstream(new Set());
     const upstream = spyUpstream({ ok: true, byId: new Map() });
-    const result = classifySupersedes({ id: bad, localIds: new Set(), upstream });
+    const result = classifySupersedes({ id: bad, localIds, upstream });
     assert.equal(result.ok, false);
     assert.equal(result.reason, 'malformed');
     assert.deepEqual(result.detail, { value: bad });
+    assert.equal(localIds.calls, 0, 'a malformed id must be refused with zero IO — the local store must never be read');
     assert.equal(upstream.calls, 0);
   });
 }
@@ -41,7 +43,7 @@ for (const bad of ['rec-XYZ', 'rec-abcdef0123456789a', 'rec-ABCDEF0123456789', '
 test('classifySupersedes: a local hit succeeds and never calls the upstream thunk', () => {
   const id = 'rec-0123456789abcdef';
   const upstream = spyUpstream({ ok: true, byId: new Map() });
-  const result = classifySupersedes({ id, localIds: new Set([id]), upstream });
+  const result = classifySupersedes({ id, localIds: () => new Set([id]), upstream });
   assert.deepEqual(result, { ok: true, source: 'local' });
   assert.equal(upstream.calls, 0);
 });
@@ -53,7 +55,7 @@ test('classifySupersedes: a local hit succeeds and never calls the upstream thun
 test('classifySupersedes: a local miss with an upstream hit succeeds, source upstream', () => {
   const id = 'rec-0123456789abcdef';
   const upstream = spyUpstream({ ok: true, ref: 'origin/main', byId: new Map([[id, 'blob']]) });
-  const result = classifySupersedes({ id, localIds: new Set(), upstream });
+  const result = classifySupersedes({ id, localIds: () => new Set(), upstream });
   assert.deepEqual(result, { ok: true, source: 'upstream' });
   assert.equal(upstream.calls, 1);
 });
@@ -65,7 +67,7 @@ test('classifySupersedes: a local miss with an upstream hit succeeds, source ups
 test('classifySupersedes: a local miss with an upstream miss is refused not-in-store', () => {
   const id = 'rec-0123456789abcdef';
   const upstream = spyUpstream({ ok: true, ref: 'origin/main', byId: new Map() });
-  const result = classifySupersedes({ id, localIds: new Set(), upstream });
+  const result = classifySupersedes({ id, localIds: () => new Set(), upstream });
   assert.equal(result.ok, false);
   assert.equal(result.reason, 'not-in-store');
   assert.deepEqual(result.detail, { id, ref: 'origin/main' });
@@ -79,7 +81,7 @@ test('classifySupersedes: a local miss with an upstream miss is refused not-in-s
 test('classifySupersedes: a degraded upstream is refused could-not-verify, reason verbatim', () => {
   const id = 'rec-0123456789abcdef';
   const upstream = spyUpstream({ ok: false, ref: null, reason: 'no upstream ref resolved (tried origin/HEAD, origin/main)' });
-  const result = classifySupersedes({ id, localIds: new Set(), upstream });
+  const result = classifySupersedes({ id, localIds: () => new Set(), upstream });
   assert.equal(result.ok, false);
   assert.equal(result.reason, 'could-not-verify');
   assert.deepEqual(result.detail, {
@@ -98,7 +100,7 @@ test('classifySupersedes: a degraded upstream is refused could-not-verify, reaso
 test('classifySupersedes: configError on an ok:true upstream arm is carried through on success', () => {
   const id = 'rec-0123456789abcdef';
   const upstream = spyUpstream({ ok: true, ref: 'origin/main', byId: new Map([[id, 'blob']]), configError: 'bad json' });
-  const result = classifySupersedes({ id, localIds: new Set(), upstream });
+  const result = classifySupersedes({ id, localIds: () => new Set(), upstream });
   assert.equal(result.ok, true);
   assert.equal(result.configError, 'bad json');
 });
@@ -106,7 +108,7 @@ test('classifySupersedes: configError on an ok:true upstream arm is carried thro
 test('classifySupersedes: configError on an ok:false upstream arm is carried through on refusal', () => {
   const id = 'rec-0123456789abcdef';
   const upstream = spyUpstream({ ok: false, ref: null, reason: 'no upstream ref resolved', configError: 'bad json' });
-  const result = classifySupersedes({ id, localIds: new Set(), upstream });
+  const result = classifySupersedes({ id, localIds: () => new Set(), upstream });
   assert.equal(result.ok, false);
   assert.equal(result.configError, 'bad json');
 });
@@ -123,7 +125,7 @@ test('classifySupersedes: the upstream thunk is called at most once per call', (
     { ok: false, ref: null, reason: 'no upstream ref resolved' },
   ]) {
     const upstream = spyUpstream(upstreamResult);
-    classifySupersedes({ id, localIds: new Set(), upstream });
+    classifySupersedes({ id, localIds: () => new Set(), upstream });
     assert.ok(upstream.calls <= 1, `expected at most one call, got ${upstream.calls}`);
   }
 });

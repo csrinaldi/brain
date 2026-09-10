@@ -335,6 +335,26 @@ test('#805: a configError on an otherwise-ok upstream verdict warns but still wr
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+// cold-review blocker — a malformed id must be refused by grammar alone,
+// with ZERO IO: no local store read, no upstream check. Before this fix,
+// `_readRecordIds` ran unconditionally one statement before the shape check,
+// so a malformed id still read the store from disk before being rejected.
+test('#805: a malformed supersedes id is refused before the store is read — no IO at all', async () => {
+  const root = tmpRoot();
+  let readRecordIdsCalls = 0;
+  let upstreamCalls = 0;
+  try {
+    await assert.rejects(
+      () => save('t', 'c', { type: 'discovery', project: 'brain', supersedes: 'not-a-valid-id' }, defaultSaveSeams(root, {
+        _readRecordIds: () => { readRecordIdsCalls += 1; return new Set(); },
+        _upstreamRecordEntries: () => { upstreamCalls += 1; return { ok: true, byId: new Map() }; },
+      })),
+    );
+    assert.equal(readRecordIdsCalls, 0, 'a malformed id is refused by grammar alone — the store must never be read');
+    assert.equal(upstreamCalls, 0, 'a malformed id must never reach the upstream check either');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 for (const [label, opts] of [
   ['malformed', { supersedes: 'not-a-valid-id', _readRecordIds: () => new Set(), _upstreamRecordEntries: () => { throw new Error('must not be called'); } }],
   ['not-in-store', { supersedes: 'rec-0123456789abcdef', _readRecordIds: () => new Set(), _upstreamRecordEntries: () => ({ ok: true, ref: 'origin/main', byId: new Map() }) }],

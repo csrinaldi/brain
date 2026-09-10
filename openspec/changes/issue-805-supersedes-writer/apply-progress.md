@@ -134,6 +134,43 @@ One local commit (no push), staged by explicit path, ending `(#805)`, no AI attr
 
 `fix(memory): --supersedes=<id> is refused, never silently dropped; the config-error warn branch and the mismatched-issue rule are tested (#805)`
 
+## Review corrections (batch 3 — one cold-review blocker)
+
+A fresh cold reviewer found one blocker in batch 2's state, on top of the 7
+commits already in the branch (the 6 listed above plus `e0d75682`, a
+`docs(805)` session-record commit — not authored by this apply run).
+
+| # | Severity | Finding | Fix |
+|---|---|---|---|
+| BLOCKER | Blocker | `plainfiles.mjs:134` called `_readRecordIds({ recordsDir })` unconditionally, one statement before `classifySupersedes` checked the id's shape — so a malformed `--supersedes` id still read the whole local store from disk before being rejected. `classifySupersedes` itself already checked the grammar first (line 36, before touching `localIds`), but the eager read at the call site defeated that ordering from outside. | Made `localIds` a thunk, mirroring the existing `upstream` thunk: `classifySupersedes({ id, localIds, upstream })` now calls `localIds()` only after the id passes `SUPERSEDES_ID_RE`, never before. The caller in `plainfiles.mjs` changed from `const localIds = _readRecordIds({ recordsDir })` (eager) to `localIds: () => _readRecordIds({ recordsDir })` (deferred). `supersedes.test.mjs`'s `localIds: new Set(...)` fixtures were all updated to `localIds: () => new Set(...)`, and the malformed-value test loop now spies on `localIds` the same way it already spied on `upstream`, asserting zero calls. |
+
+### TDD Cycle Evidence — batch 3
+
+| Item | RED | GREEN | REFACTOR |
+|---|---|---|---|
+| BLOCKER | confirmed — new test `#805: a malformed supersedes id is refused before the store is read — no IO at all` failed pre-fix (`_readRecordIds` was called once even though the id was malformed) | passes after `localIds` became a thunk called only post-shape-check, in both `supersedes.mjs` and its caller in `plainfiles.mjs` | none needed |
+
+### Files changed — batch 3
+
+| File | Action | What |
+|---|---|---|
+| `brain/scripts/memory/lib/supersedes.mjs` | Modified | `localIds` is now a thunk (`() => Set<string>`), called only after the grammar check passes; JSDoc updated to match |
+| `brain/scripts/memory/lib/supersedes.test.mjs` | Modified | all `localIds: new Set(...)` fixtures → `localIds: () => new Set(...)`; the malformed-value loop now spies on `localIds` and asserts 0 calls, alongside the existing `upstream` spy |
+| `brain/scripts/memory/backends/plainfiles.mjs` | Modified | the eager `const localIds = _readRecordIds({ recordsDir })` call site is now a deferred thunk passed straight to `classifySupersedes` |
+| `brain/scripts/memory/backends/plainfiles.save.test.mjs` | Modified | +1 test: a malformed id with counting seams on both `_readRecordIds` and `_upstreamRecordEntries` — asserts 0 calls on each |
+| `openspec/changes/issue-805-supersedes-writer/apply-progress.md` | Modified | this section |
+
+### Test results — batch 3
+
+- Focused: `node --test brain/scripts/memory/lib/supersedes.test.mjs brain/scripts/memory/backends/plainfiles.save.test.mjs` → **35/35 pass**, 0 fail (RED confirmed first: 34/35, the new test failing; then GREEN after the fix).
+- Full `npm test`: **5177/5177 pass**, 0 fail (up from batch 2's final 5176/5176 — +1 new test).
+
+### Commit — batch 3
+
+One local commit (no push), staged by explicit path (`brain/scripts/memory/lib/supersedes.mjs`, `brain/scripts/memory/lib/supersedes.test.mjs`, `brain/scripts/memory/backends/plainfiles.mjs`, `brain/scripts/memory/backends/plainfiles.save.test.mjs`, this file), ending `(#805)`, no AI attribution:
+
+`fix(memory): a malformed --supersedes id is refused before the store is read (#805)`
+
 ## Next
 
 Ready for a fresh-context re-review and `sdd-verify`. Wrap-up (W1–W6: `memory:save --issue 805`, ticking epic task 2.1, opening the PR) remains orchestrator-owned per the original launch prompt.

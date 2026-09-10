@@ -131,10 +131,13 @@ export async function save(
   // miss (design.md A1); the whole gate is a no-op when the flag is absent,
   // so an ordinary save reads no directory and spawns no git.
   if (supersedes !== undefined) {
-    const localIds = _readRecordIds({ recordsDir });
+    // `localIds` is a thunk (cold-review blocker, #805): `classifySupersedes`
+    // checks the id's grammar FIRST, with no IO, and only calls this when the
+    // shape is valid. Reading the store eagerly here — before the shape check
+    // — would mean a malformed id still touched disk before being rejected.
     const verdict = classifySupersedes({
       id: supersedes,
-      localIds,
+      localIds: () => _readRecordIds({ recordsDir }),
       upstream: () => _upstreamRecordEntries({ root }),
     });
     if (verdict.configError !== undefined) {
