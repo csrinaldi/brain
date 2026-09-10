@@ -40,6 +40,26 @@ test('NEVER_TIERED enumerates the six REQ-TIER-2 gates', () => {
   );
 });
 
+// ── lane governance (#905, spec.md "job registration is atomic", design.md A7) ─
+//
+// Both gates are `required` at EVERY tier — but via position-required matrix
+// rows, never by widening NEVER_TIERED (the REQ-TIER-2 doctrinal core stays
+// at six; governance-tiers.test.mjs:36 above pins that enumeration and this
+// slice does not touch it).
+
+test('lane governance (#905): NEVER_TIERED stays at six entries — lane-paths/lane-scrub are NOT added to the doctrinal core', () => {
+  assert.equal(NEVER_TIERED.length, 6);
+  assert.ok(!NEVER_TIERED.includes('lane-paths'));
+  assert.ok(!NEVER_TIERED.includes('lane-scrub'));
+});
+
+test('lane governance (#905): GATE_MATRIX rows for lane-paths/lane-scrub are required at every tier', () => {
+  for (const tier of TIERS) {
+    assert.equal(resolveGatePolicy('lane-paths', tier), 'required', `lane-paths must be required at "${tier}"`);
+    assert.equal(resolveGatePolicy('lane-scrub', tier), 'required', `lane-scrub must be required at "${tier}"`);
+  }
+});
+
 // ── REQ-TIER-1 — monotonicity ────────────────────────────────────────────────
 
 test('REQ-TIER-1: no gate is required at a lower tier and detection at a higher one', () => {
@@ -154,7 +174,7 @@ test('REQ-TIER-8 (regression): GOVERNANCE_JOBS and GATE_MATRIX keys are the SAME
 // ratified departure from that guarantee (design §4.1), so `standard` now
 // also requires the three promoted gates.
 
-test("REQ-TIER-9: requiredJobs('standard') includes the Q5 Phase 5 promotions (phase-order, actor-check, brain-writes-reviewed), preserving GATE_MATRIX order", () => {
+test("REQ-TIER-9: requiredJobs('standard') includes the Q5 Phase 5 promotions (phase-order, actor-check, brain-writes-reviewed) and #905's lane-paths/lane-scrub, preserving GATE_MATRIX order", () => {
   assert.deepEqual(requiredJobs('standard'), [
     'issue-link',
     'diff-size',
@@ -164,10 +184,12 @@ test("REQ-TIER-9: requiredJobs('standard') includes the Q5 Phase 5 promotions (p
     'phase-order',
     'actor-check',
     'brain-writes-reviewed',
+    'lane-paths',
+    'lane-scrub',
   ]);
 });
 
-test("requiredJobs('lite') demotes memory-gate and phase-order by position (proportionality, design §2.B); promotes actor-check/brain-writes-reviewed by evidence tiering (REQ-TIER-2, Phase 5)", () => {
+test("requiredJobs('lite') demotes memory-gate and phase-order by position (proportionality, design §2.B); promotes actor-check/brain-writes-reviewed by evidence tiering (REQ-TIER-2, Phase 5); lane-paths/lane-scrub required at every tier (#905)", () => {
   assert.deepEqual(requiredJobs('lite'), [
     'issue-link',
     'diff-size',
@@ -175,6 +197,8 @@ test("requiredJobs('lite') demotes memory-gate and phase-order by position (prop
     'decision-gate',
     'actor-check',
     'brain-writes-reviewed',
+    'lane-paths',
+    'lane-scrub',
   ]);
 });
 

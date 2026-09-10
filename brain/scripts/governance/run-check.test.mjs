@@ -1731,3 +1731,151 @@ test('#603: uncomputable is never softened — absent evidence is not a passing 
   });
   assert.equal(code, 2, 'uncomputable stays 2 at a detection tier — the helper refuses to soften it');
 });
+
+// ── issue-link — recomputes the lane predicate before exempting (#905, spec.md
+// "issue-link recomputes the predicate before exempting", design.md A4) ─────
+//
+// `runIssueLinkCheck` short-circuits on `ctx.sourceBranch` against
+// `LANE_BRANCH_RE` BEFORE touching git (property 1) — a non-`memory/*` head
+// never calls the diff closures at all. Only when the branch matches does it
+// call `classifyLane` (needing the three-dot diff); a lane PR skips
+// `issueLink()` entirely. `deps.issueLink` overrides the real evaluator so
+// these tests can assert it was never consulted with a literal call-count spy.
+
+test('runCheck: issue-link — a lane-classified ctx passes with no closing keyword, and issueLink() is never consulted (spy asserts zero calls)', async () => {
+  let issueLinkCalls = 0;
+  const spyIssueLink = () => {
+    issueLinkCalls += 1;
+    return { pass: false, reason: 'no issue reference found' };
+  };
+  const result = await runCheck('issue-link', {
+    ctx: {
+      body: 'memory: host1 2026-09-10 (2 records)', // no closing keyword, no Part-of
+      provider: 'github',
+      sourceBranch: 'memory/host1-2026-09-10',
+      targetBranch: 'main',
+      defaultBranch: 'main',
+    },
+    diffNameOnly: () => ['.memory/records/a.jsonl', '.memory/records/b.jsonl'],
+    diffNameOnlyAdded: () => ['.memory/records/a.jsonl', '.memory/records/b.jsonl'],
+    issueLink: spyIssueLink,
+    fetchIssue: async () => { throw new Error('must not be called — a lane PR never fetches the issue'); },
+    readConfig: () => ({}),
+  });
+  assert.deepEqual(result, { pass: true });
+  assert.equal(issueLinkCalls, 0, 'a lane-classified PR must skip issueLink() entirely');
+});
+
+test('runCheck: issue-link — a memory/x-2026-09-10 branch whose diff includes one path outside .memory/records/ is refused by the ordinary issueLink rule, not silently exempted', async () => {
+  const result = await runCheck('issue-link', {
+    ctx: {
+      body: 'no reference at all',
+      provider: 'github',
+      sourceBranch: 'memory/host1-2026-09-10',
+      targetBranch: 'main',
+      defaultBranch: 'main',
+    },
+    diffNameOnly: () => ['.memory/records/a.jsonl', 'src/index.mjs'],
+    diffNameOnlyAdded: () => ['.memory/records/a.jsonl', 'src/index.mjs'],
+    fetchIssue: async () => { throw new Error('must not be called — no reference was found'); },
+    readConfig: () => ({}),
+  });
+  assert.equal(result.pass, false);
+  assert.match(result.reason, /no issue reference found/);
+});
+
+test('runCheck: issue-link — a memory/x-2026-09-10 branch with one MODIFIED path under .memory/records/ is refused by the ordinary rule, not silently exempted', async () => {
+  const result = await runCheck('issue-link', {
+    ctx: {
+      body: 'no reference at all',
+      provider: 'github',
+      sourceBranch: 'memory/host1-2026-09-10',
+      targetBranch: 'main',
+      defaultBranch: 'main',
+    },
+    diffNameOnly: () => ['.memory/records/a.jsonl'],
+    diffNameOnlyAdded: () => [], // a.jsonl was modified, never added
+    fetchIssue: async () => { throw new Error('must not be called — no reference was found'); },
+    readConfig: () => ({}),
+  });
+  assert.equal(result.pass, false);
+  assert.match(result.reason, /no issue reference found/);
+});
+
+test('runCheck: issue-link — a THROWING diff on a lane-shaped branch demotes to standard rules, NEVER reported as uncomputable', async () => {
+  const result = await runCheck('issue-link', {
+    ctx: {
+      body: 'Closes #42',
+      provider: 'github',
+      sourceBranch: 'memory/host1-2026-09-10',
+      targetBranch: 'main',
+      defaultBranch: 'main',
+    },
+    diffNameOnly: () => { throw new Error('git exited with status 128'); },
+    diffNameOnlyAdded: () => ['.memory/records/a.jsonl'],
+    fetchIssue: async () => ({ labels: ['status:approved'] }),
+    readConfig: () => ({}),
+  });
+  // Standard rules apply: "Closes #42" satisfies issueLink() and the
+  // default-branch closing-keyword policy, so this passes on the ORDINARY
+  // path — never on a silent lane exemption, and never uncomputable:true.
+  assert.equal(result.pass, true);
+  assert.notEqual(result.uncomputable, true);
+});
+
+test('runCheck: issue-link — a THROWING diff on a lane-shaped branch, body carries no reference → fails on the ordinary rule, never uncomputable', async () => {
+  const result = await runCheck('issue-link', {
+    ctx: {
+      body: 'no reference here',
+      provider: 'github',
+      sourceBranch: 'memory/host1-2026-09-10',
+      targetBranch: 'main',
+      defaultBranch: 'main',
+    },
+    diffNameOnly: () => { throw new Error('git exited with status 128'); },
+    diffNameOnlyAdded: () => { throw new Error('git exited with status 128'); },
+    fetchIssue: async () => { throw new Error('must not be called'); },
+    readConfig: () => ({}),
+  });
+  assert.equal(result.pass, false);
+  assert.notEqual(result.uncomputable, true);
+  assert.match(result.reason, /no issue reference found/);
+});
+
+test('runCheck: issue-link — a non-memory/* head never calls the diff closures (spy asserts zero calls) — short-circuit before touching git', async () => {
+  let diffCalls = 0;
+  const result = await runCheck('issue-link', {
+    ctx: {
+      body: 'Closes #42',
+      provider: 'github',
+      sourceBranch: 'feat/some-feature',
+      targetBranch: 'main',
+      defaultBranch: 'main',
+    },
+    diffNameOnly: () => { diffCalls += 1; return []; },
+    diffNameOnlyAdded: () => { diffCalls += 1; return []; },
+    fetchIssue: async () => ({ labels: ['status:approved'] }),
+    readConfig: () => ({}),
+  });
+  assert.equal(diffCalls, 0, 'a non-memory/* head must never touch git for the lane predicate');
+  assert.deepEqual(result, { pass: true });
+});
+
+test('runCheck: issue-link — ctx.sourceBranch absent/null → standard rules apply, diff closures never called', async () => {
+  let diffCalls = 0;
+  const result = await runCheck('issue-link', {
+    ctx: {
+      body: 'Closes #42',
+      provider: 'github',
+      sourceBranch: null,
+      targetBranch: 'main',
+      defaultBranch: 'main',
+    },
+    diffNameOnly: () => { diffCalls += 1; return []; },
+    diffNameOnlyAdded: () => { diffCalls += 1; return []; },
+    fetchIssue: async () => ({ labels: ['status:approved'] }),
+    readConfig: () => ({}),
+  });
+  assert.equal(diffCalls, 0, 'an absent sourceBranch must never touch git for the lane predicate');
+  assert.deepEqual(result, { pass: true });
+});

@@ -162,6 +162,8 @@ export function buildFixture({
   const jobs = [
     'issue-link', 'local-checks', 'decision-gate', 'diff-size',
     'actor-check', 'brain-writes-reviewed', 'memory-gate', 'phase-order',
+    // #905 (ADR-0034 L1/C1) — required at every tier, same as the eight above.
+    'lane-paths', 'lane-scrub',
   ];
   // Every gate green by default (#443 landed): the deterministic finding of
   // design D4 is the DIFF-BUDGET BREACH again — 250 lines against regulated's

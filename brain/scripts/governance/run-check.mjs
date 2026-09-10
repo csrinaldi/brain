@@ -65,6 +65,7 @@ import { memoryRetrieval } from './checks/memory-retrieval.mjs';
 import { adrPresence } from './checks/adr-presence.mjs';
 import { issueLink } from './checks/issue-link.mjs';
 import { diffSize } from './checks/diff-size.mjs';
+import { LANE_BRANCH_RE, classifyLane } from './checks/lane.mjs';
 import { CLOSING_RE, CHAIN_RE } from './checks/issue-ref-patterns.mjs';
 import { resolveApprovedLabel } from './approved-label.mjs';
 import { readRecordObservations } from '../memory/lib/store.mjs';
@@ -324,7 +325,35 @@ async function runIssueLinkCheck(ctx, deps) {
       reason: 'issue-link: MR body uncomputable (context API fetch failed) — failing closed',
     };
   }
-  const linkResult = issueLink(ctx.body);
+
+  // Lane recomputation (D1a, design.md A4): a `memory/*` head is NEVER
+  // trusted by branch name alone — the wrapper recomputes classifyLane's
+  // predicate itself, before deciding whether to skip the closing-keyword
+  // requirement. Property 1: short-circuit on the branch regex BEFORE
+  // touching git — a non-`memory/*` head (every PR today) never calls the
+  // diff closures at all, so a diff failure can never affect it.
+  if (LANE_BRANCH_RE.test(ctx.sourceBranch ?? '')) {
+    const diffNameOnly = deps.diffNameOnly ?? (() => defaultDiffNameOnly(ctx));
+    const diffNameOnlyAdded = deps.diffNameOnlyAdded ?? (() => defaultDiffNameOnlyAdded(ctx));
+    let laneResult = { lane: false };
+    try {
+      const changedFiles = diffNameOnly();
+      const addedFiles = diffNameOnlyAdded();
+      laneResult = classifyLane({ sourceBranch: ctx.sourceBranch, changedFiles, addedFiles });
+    } catch {
+      // Property 2: an uncomputable diff is demoted to "not a lane", NEVER
+      // returned/reported as `uncomputable: true` — falling through to the
+      // standard rules refuses it with the message the repo already
+      // understands, rather than turning every shallow-clone `memory/*` PR
+      // into exit 2.
+    }
+    if (laneResult.lane) {
+      return { pass: true };
+    }
+  }
+
+  const issueLinkFn = deps.issueLink ?? issueLink;
+  const linkResult = issueLinkFn(ctx.body);
   if (!linkResult.pass) return linkResult;
 
   const closingRequired = requiresClosingKeyword(ctx);

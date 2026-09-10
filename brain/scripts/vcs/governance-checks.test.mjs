@@ -128,6 +128,34 @@ test('resolveJobSets(tier).required ∪ .detection reproduces GOVERNANCE_JOBS at
   }
 });
 
+// ── lane governance (#905, spec.md "job registration is atomic", design.md A7) ─
+//
+// GOVERNANCE_JOBS gains 'lane-paths' and 'lane-scrub', APPENDED AT THE END —
+// order matters (the drift-guard regression test above asserts YAML job order
+// equals this array). Both are `required` at every tier (governance-tiers.mjs
+// GATE_MATRIX), so checkContexts(tier) carries both at 'lite' too.
+
+test('lane governance (#905): GOVERNANCE_JOBS gains lane-paths and lane-scrub, appended at the end', () => {
+  assert.deepEqual(GOVERNANCE_JOBS.slice(-2), ['lane-paths', 'lane-scrub']);
+});
+
+test('lane governance (#905): checkContexts("lite") contains both lane-paths and lane-scrub (required at every tier)', () => {
+  const contexts = checkContexts('lite');
+  assert.ok(contexts.includes('lane-paths'), 'checkContexts("lite") must include lane-paths');
+  assert.ok(contexts.includes('lane-scrub'), 'checkContexts("lite") must include lane-scrub');
+});
+
+test('lane governance (#905): ten jobs, matching order, in GOVERNANCE_JOBS/checkContexts("standard")/governance.yml', () => {
+  const yamlPath = resolve(REPO_ROOT, '.github/workflows/governance.yml');
+  const yamlText = readFileSync(yamlPath, 'utf8');
+  const matches = [...yamlText.matchAll(/^    name: (\S+)\s*$/mg)];
+  const yamlJobNames = matches.map(m => m[1]);
+
+  assert.equal(GOVERNANCE_JOBS.length, 10, `GOVERNANCE_JOBS must list ten jobs: ${JSON.stringify(GOVERNANCE_JOBS)}`);
+  assert.deepEqual(checkContexts('standard'), GOVERNANCE_JOBS, 'every gate is required at "standard"');
+  assert.deepEqual(yamlJobNames, GOVERNANCE_JOBS, 'governance.yml must declare the same ten names in the same order');
+});
+
 // ── L1 local-checks job (REQ-L1-1) ──────────────────────────────────────────────
 
 test('local-checks is present in REQUIRED_JOBS', () => {
@@ -154,8 +182,9 @@ test('local-checks is present in the parsed governance.yml job names', () => {
 
 test('checkContexts returns bare job names (no workflow-name prefix)', () => {
   // issue #358 Q5 Phase 5: phase-order/actor-check/brain-writes-reviewed
-  // promoted out of PENDING_PROMOTION — checkContexts('standard') (the
-  // default tier) now includes all eight GOVERNANCE_JOBS.
+  // promoted out of PENDING_PROMOTION; #905 appends lane-paths/lane-scrub,
+  // required at every tier — checkContexts('standard') (the default tier)
+  // now includes all ten GOVERNANCE_JOBS.
   assert.deepEqual(checkContexts(), [
     'issue-link',
     'diff-size',
@@ -165,6 +194,8 @@ test('checkContexts returns bare job names (no workflow-name prefix)', () => {
     'phase-order',
     'actor-check',
     'brain-writes-reviewed',
+    'lane-paths',
+    'lane-scrub',
   ]);
 });
 

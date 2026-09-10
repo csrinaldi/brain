@@ -132,6 +132,8 @@ export const GATE_SUMMARY = Object.freeze({
   'phase-order': 'The change\'s SDD artifacts progressed in order. A real violation fails at every tier; only an UNCOMPUTABLE diff is downgraded to a warning at the lightest one.',
   'actor-check': 'The approval is not self-approval. At the lightest tier that means a distinct ACT (approving after your own last commit is enough); above it, a distinct ACTOR — approving your own {{noun}} or your own issue fails — and at the strictest tier the approver must also have authored no commit on the branch.',
   'brain-writes-reviewed': 'Writes to the knowledge half are not agent-authored — that half never tiers. Above the lightest tier an approving review from someone other than the author is also required, though a {{noun}} with NO reviews yet warns and passes rather than failing on absent evidence.',
+  'lane-paths': 'Runs on every {{noun}}, not only a memory lane one. On the lane branch it verifies every changed path under `.memory/records/` is an ADDED file and nothing else changed; on any other {{noun}} it passes with nothing to check. Never tiers.',
+  'lane-scrub': 'Runs on every {{noun}}, lane or not. Every record file added under `.memory/records/` is scanned for a committed secret and fails closed on a match, naming only the pattern and line number — never the matched text. Not softened at any tier.',
 });
 
 /**
@@ -271,10 +273,10 @@ ${gateRows}
 - [ ] Exactly one \`type:*\` label added, from the list above
 - [ ] Diff size within the tier's budget (or \`size:exception\` labelled and justified)
 - [ ] Conventional commit format (\`type(scope): description\`, no AI-attribution trailers)
-- [ ] Session memory captured with \`npm run memory:share\`, and the record carries the
-      linked issue number. Where the pipeline hands \`memory-gate\` this description,
-      an unscoped record does NOT satisfy it. \`skip:memory-gate\` is named in the docs
-      but no gate reads it — applying it exempts nothing.
+- [ ] Session memory captured as a record (\`memory:save --issue N\`); it reaches \`main\`
+      on the lane. Where the pipeline hands \`memory-gate\` this description, an unscoped
+      record does NOT satisfy it. \`skip:memory-gate\` is named in the docs but no gate
+      reads it — applying it exempts nothing.
 
 <!-- Emitted from brain/scripts/vcs/contributor-scaffold.mjs — edit the source, not
      {{path}}. A hand-edit here is refused by contributor-scaffold.test.mjs. -->

@@ -913,6 +913,63 @@ test('main: pass verdict → exit code 0', async () => {
   assert.equal(lines[0], 'actor-check: pass');
 });
 
+// ── D2 pins (#905, spec.md "actor-check stays unmodified", ruling D2) ───────
+//
+// `actor-check` gains NO lane-specific code: a lane PR already warns and
+// exits 0 today (no issue number in the body → `labeledEvents: []` →
+// `evaluateActor` returns `warn` → `main()` maps anything not `fail` to exit
+// 0), and `denyActors` = `governance.reviewActors` = `[csrinaldibot]` IS the
+// unattended lane's poster identity — an author-side deny check would fail
+// every unattended lane. These are NEW named tests even though both
+// assertions are already true today: RED here means "the assertion is absent
+// from the file", not "the code fails it" — once added they are green
+// without touching actor-check.mjs.
+
+test('D2 pin: a lane-shaped PR body (no issue number) → evaluateActor returns warn, main() exits 0', async () => {
+  const deps = {
+    author: 'csrinaldibot',
+    prBody: 'memory: host1 2026-09-10 (2 records)', // no issue reference at all
+    baseBranch: 'main',
+    repo: 'org/repo',
+    fetchLabeledEvents: () => { throw new Error('must not be called — no issue number to fetch events for'); },
+    fetchIssue: () => { throw new Error('must not be called — no issue number extracted'); },
+    readBotAllowlist: () => [],
+  };
+  let exitCode;
+  const lines = await captureLogs(async () => {
+    exitCode = await main(deps);
+  });
+  assert.equal(exitCode, 0);
+  assert.equal(lines[0], 'actor-check: warn');
+});
+
+test('D2 pin: a labeled PR whose approver is in denyActors → evaluateActor returns fail, main() exits 1', async () => {
+  const result = evaluateActor({
+    author: 'alice',
+    labeledEvents: [{ actor: { login: 'csrinaldibot' } }],
+    denyActors: ['csrinaldibot'], // governance.reviewActors
+  });
+  assert.equal(result.level, 'fail');
+
+  const deps = {
+    author: 'alice',
+    prBody: 'Closes #144',
+    baseBranch: 'main',
+    repo: 'org/repo',
+    tier: 'standard',
+    fetchLabeledEvents: () => [{ actor: { login: 'csrinaldibot' } }],
+    fetchIssue: () => ({ labels: ['status:approved'], author: 'alice' }),
+    readBotAllowlist: () => [],
+    readDenyActors: () => ['csrinaldibot'],
+  };
+  let exitCode;
+  const lines = await captureLogs(async () => {
+    exitCode = await main(deps);
+  });
+  assert.equal(exitCode, 1);
+  assert.equal(lines[0], 'actor-check: fail');
+});
+
 // ── ci-context seam wiring (ADR-0016) ─────────────────────────────────────────
 //
 // `author`, `prBody`, `baseBranch`, `repo` now source from an injected
