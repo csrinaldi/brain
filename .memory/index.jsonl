@@ -2003,6 +2003,7 @@
 {"id":"rec-d833561a423f12b5","ts":"2026-09-02T23:23:47Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-09-rec-d833561a423f12b5.jsonl"}
 {"id":"rec-d88c4a980590c18d","ts":"2026-07-29T14:28:10Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-d88c4a980590c18d.jsonl"}
 {"id":"rec-d89dd084823dd9cc","ts":"2026-07-25T00:47:12Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-d89dd084823dd9cc.jsonl"}
+{"id":"rec-d8ab89bef71f56e3","ts":"2026-09-10T18:05:26Z","actor":"feat/issue-906-featmemory-the-lanes-triggers-sessionend","type":"architecture","project":"brain","issue":906,"file":"2026-09-rec-d8ab89bef71f56e3.jsonl"}
 {"id":"rec-d8c5127d23f058d4","ts":"2026-07-01T00:08:36Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-d8c5127d23f058d4.jsonl"}
 {"id":"rec-d8dbee344ec264c2","ts":"2026-07-12T03:59:57Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-d8dbee344ec264c2.jsonl"}
 {"id":"rec-d8fc73a17c7655e4","ts":"2026-07-29T13:59:25Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-d8fc73a17c7655e4.jsonl"}

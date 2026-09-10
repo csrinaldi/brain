@@ -14,8 +14,18 @@
 //   **  matches anything, including path separators (recursive)
 //   A trailing `/**` matches every file under that directory.
 
-// The 9 brain:* verb keys that brain:upgrade injects into consumer package.json.
+// The 10 brain:* verb keys that brain:upgrade injects into consumer package.json.
 // Single source of truth — imported by installer.mjs mergePackageJson.
+//
+// brain:memory:session-end (#906 A5, measured): the launcher FILE travels to
+// every consumer via the brain/scripts/** glob below regardless of this list,
+// but the npm SCRIPT that the compiled SessionEnd hook runs
+// (`npm run brain:memory:session-end`) is injected into a consumer's
+// package.json ONLY for keys listed here (mergePackageJson,
+// lib/installer.mjs:1379-1402). Without this entry, every adopter's
+// SessionEnd hook prints an npm "missing script" error to a surface Claude
+// shows the user — the inert hook this slice ships would not actually be
+// inert, it would be noisy.
 export const MANAGED_SCRIPT_KEYS = [
   'brain:env:init',
   'brain:day:start',
@@ -26,6 +36,7 @@ export const MANAGED_SCRIPT_KEYS = [
   'brain:tracker:board',
   'brain:repo:check',
   'brain:change:verify',
+  'brain:memory:session-end',
 ];
 
 // The .gitattributes line declaring git's BUILT-IN `union` merge driver for the

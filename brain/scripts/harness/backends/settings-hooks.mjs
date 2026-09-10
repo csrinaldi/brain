@@ -34,6 +34,16 @@ export const NO_VERIFY_GUARD_COMMAND =
 export const SESSION_START_COMMAND = 'npm run brain:session:start';
 
 /**
+ * The SessionEnd hook every platform runs on teardown (#906, ADR-0034 L5,
+ * ruling D1/D2). Emitted UNCONDITIONALLY, on every consumer, regardless of
+ * `memory.lane.enabled` — the compiler stays argument-free and the drift
+ * guard byte-stable in both flag states. Safety lives entirely in the
+ * launcher this command invokes (`memory/session-end-ship.mjs`), which reads
+ * the flag FIRST and is silent when it is false or absent.
+ */
+export const SESSION_END_COMMAND = 'npm run brain:memory:session-end';
+
+/**
  * Compiles the native settings-hooks JSON shared by every platform backend.
  * Pure, fs-free, deterministic — the same bytes on every call.
  *
@@ -59,6 +69,16 @@ export function compileSettingsHooksJson() {
             {
               type: 'command',
               command: SESSION_START_COMMAND,
+            },
+          ],
+        },
+      ],
+      SessionEnd: [
+        {
+          hooks: [
+            {
+              type: 'command',
+              command: SESSION_END_COMMAND,
             },
           ],
         },
