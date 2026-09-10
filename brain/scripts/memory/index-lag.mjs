@@ -95,9 +95,15 @@ export function main({ recordsDir, indexPath, readFile = readFileSync, log = con
   const result = compareIndexToRecords({ indexLines, records });
 
   if (result.lagged) {
+    // "indexed N, rebuilt M" alone can read as in-sync when it is not (equal counts
+    // with one id swapped for another still passes N === M) and never says WHICH
+    // direction the lag runs. Name the missing/stale counts too — counts only, never
+    // the ids themselves, which stay in `result` for a caller that wants them.
     log(
       `WARNING: .memory/index.jsonl is out of sync with .memory/records/ — `
-      + `indexed ${result.indexed}, rebuilt ${result.rebuilt} record id(s). `
+      + `indexed ${result.indexed}, rebuilt ${result.rebuilt} record id(s) `
+      + `(${result.missingFromIndex.length} missing from the index, `
+      + `${result.staleInIndex.length} stale in it). `
       + 'Run `npm run memory:reindex` to resync. Non-blocking — this check never fails.',
     );
   }
