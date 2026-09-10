@@ -12,10 +12,12 @@ import { evaluateLaneScrub, main } from './lane-scrub.mjs';
 
 const LANE_SCRUB_PATH = fileURLToPath(new URL('./lane-scrub.mjs', import.meta.url));
 
+// Swallows console.log for the duration of `fn` — no test in this file
+// inspects the printed text, only the returned exit code, so there is no
+// `logs` array/`args` param to keep alive here.
 async function captureLog(fn) {
-  const logs = [];
   const orig = console.log;
-  console.log = (...args) => logs.push(args.join(' '));
+  console.log = () => {};
   try { return await fn(); } finally { console.log = orig; }
 }
 

@@ -1744,7 +1744,7 @@ test('#603: uncomputable is never softened — absent evidence is not a passing 
 
 test('runCheck: issue-link — a lane-classified ctx passes with no closing keyword, and issueLink() is never consulted (spy asserts zero calls)', async () => {
   let issueLinkCalls = 0;
-  const spyIssueLink = (...args) => {
+  const spyIssueLink = () => {
     issueLinkCalls += 1;
     return { pass: false, reason: 'no issue reference found' };
   };

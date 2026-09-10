@@ -1,6 +1,8 @@
 # governance.yml — Workflow Governance Layer (ADR-0014)
 #
-# Enforces four process invariants as PR checks. Each job name becomes the
+# Enforces process invariants as PR checks — ten jobs as of #905 (memory-gate,
+# decision-gate, phase-order, actor-check, brain-writes-reviewed, issue-link,
+# diff-size, local-checks, lane-paths, lane-scrub). Each job name becomes the
 # GitHub check context reported as "governance / <job-name>". These names are
 # load-bearing: brain/scripts/vcs/governance-checks.mjs (S3) derives the required
 # status-check list from them, and branch protection references them by context.

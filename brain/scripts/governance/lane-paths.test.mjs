@@ -11,10 +11,13 @@ import assert from 'node:assert/strict';
 
 import { evaluateLanePaths, main } from './lane-paths.mjs';
 
+// Swallows console.log for the duration of `fn` — every call site below only
+// inspects the returned exit code, so there is no `logs` array/`args` param
+// to keep alive here. The two tests further down that DO assert on printed
+// text build their own local capture instead (they need the array).
 async function captureLog(fn) {
-  const logs = [];
   const orig = console.log;
-  console.log = (...args) => logs.push(args.join(' '));
+  console.log = () => {};
   try { return await fn(); } finally { console.log = orig; }
 }
 

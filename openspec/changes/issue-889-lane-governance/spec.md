@@ -15,8 +15,10 @@ closed by PR 1 — the gate surface) and **B** (#889, closed by PR 2 — audit +
 ### Requirement: the lane predicate is narrow and structural (L1, refines archive/862/spec.md:14-18)
 
 `classifyLane({sourceBranch, changedFiles, addedFiles})` MUST return `lane: true` only when
-`sourceBranch` matches `^memory/[a-z0-9][a-z0-9-]*-\d{4}-\d{2}-\d{2}(-\d+)?$` AND every path in
-the three-dot diff (`baseSha...headSha`) is present in the added-only diff, under
+`sourceBranch` matches `^memory/[a-z0-9][a-z0-9-]*-\d{4}-\d{2}-\d{2}$` — no optional numeric
+suffix: `plan.mjs`'s own producer grammar never appends one (a same-day second `collect`
+appends to the SAME ref, #887 D2), so accepting one would widen the exemption for free — AND
+every path in the three-dot diff (`baseSha...headSha`) is present in the added-only diff, under
 `.memory/records/`. Any modification, deletion, rename, out-of-prefix path, or `index.jsonl`
 MUST classify as not-a-lane. When `sourceBranch` is absent or a diff is uncomputable, the PR
 MUST NOT be classified as a lane.
@@ -37,7 +39,8 @@ Test: `governance/checks/lane.test.mjs` — branch+paths lane; branch-only/paths
 ### Requirement: `issue-link` recomputes the predicate before exempting (D1a, L1)
 
 `runIssueLinkCheck` MUST call `classifyLane` on `ctx` before evaluating `issueLink(ctx.body)`.
-A lane PR MUST skip the closing-keyword requirement. A `memory/*` head carrying any non-lane
+A lane PR MUST skip both the closing-keyword requirement AND the issue lookup entirely (no
+`fetchIssue` call, no approved-label check). A `memory/*` head carrying any non-lane
 path MUST be refused under the ordinary `issueLink` rule — the exemption MUST NEVER be wider
 than the predicate it recomputes.
 
@@ -67,9 +70,10 @@ Test: `vcs/actor-check.test.mjs` — lane-shaped PR ⇒ warn/exit 0; labeled PR 
 
 ### Requirement: `lane-paths` is a required, self-reporting context (D3)
 
-`lane-paths` MUST run `classifyLane` over the three-dot diff and exit 1 naming the first
-offending path when the PR is not a lane by the path predicate. On a non-lane PR it MUST run
-and exit 0, printing "not a lane — nothing to check" — never skipped.
+`lane-paths` MUST run `classifyLane` over the three-dot diff and exit 1 naming every
+offending path when the PR is not a lane by the path predicate (truncated to the first 20,
+with a "… and N more" count for the rest). On a non-lane PR it MUST run and exit 0, printing
+"not a lane — nothing to check" — never skipped.
 
 #### Scenario: named refusal and explicit pass
 - GIVEN a diff with a path outside `.memory/records/`
