@@ -127,6 +127,25 @@ test('memory save --supersedes as the final argument (no value) exits 1, no reco
   assert.equal(existsSync(recordsDir), false, 'a value-less --supersedes must never reach a write');
 });
 
+// fresh-context review MINOR-1 — the `--supersedes=<id>` equals-form is not the
+// space-separated shape this parser recognizes for ANY flag: `key` becomes
+// `"supersedes=<id>"`, so the loop's `key === "supersedes"` check misses it and
+// `flags.supersedes` is left undefined while the next argv token is consumed as
+// that bogus key's value. Measured before the fix: exit 0, record written
+// WITHOUT the field — silently contradicting the catalog's "never saved
+// silently without the field you asked for". Refused here the same way a
+// value-less `--supersedes` is refused.
+test('memory save --supersedes=<id> (equals form) exits 1, no record written', () => {
+  const testRoot = mkdtempSync(join(tmpdir(), 'brain-cli-save-supersedes-eq-'));
+  const result = runCli(
+    ['save', 't', 'c', '--type', 'discovery', '--project', 'brain', '--supersedes=rec-0123456789abcdef'],
+    { testRoot },
+  );
+  assert.equal(result.status, 1, `expected exit 1, got ${result.status}. stdout: ${result.stdout}`);
+  const recordsDir = join(testRoot, '.memory', 'records');
+  assert.equal(existsSync(recordsDir), false, 'the equals form must never reach a write');
+});
+
 test('memory save --supersedes <unknown id> under the non-git test root exits 1 with could-not-verify, quoted', () => {
   // BRAIN_MEMORY_TEST_ROOT is a bare mkdtempSync dir, not a git repo (design.md
   // A8) — an unknown id here is honestly could-not-verify, never not-in-store.

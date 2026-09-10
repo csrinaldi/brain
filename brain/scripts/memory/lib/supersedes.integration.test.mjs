@@ -10,7 +10,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, existsSync, readFileSync, readdirSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, existsSync, readFileSync } from 'node:fs';
 import { removeTempTree } from '../../__fixtures__/tmp-tree.mjs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
@@ -172,6 +172,27 @@ test('#805: a chain (C supersedes B supersedes A) is accepted; A, B, C all stay 
   const recC = records.find((r) => r.id === c.id);
   assert.equal(recB.supersedes, a.id);
   assert.equal(recC.supersedes, b.id);
+});
+
+// fresh-context review SUGGESTION-5 — spec.md's "a mismatched `--issue` is
+// allowed" scenario had no test: no rule ties `supersedes` to `issue`
+// equality, so a record saved under a DIFFERENT `--issue` than its target
+// still succeeds.
+test('#805: superseding a record written under a different --issue succeeds — no issue/supersedes equality rule', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'brain-805-mismatched-issue-'));
+  t.after(() => removeTempTree(root));
+  const seams = { root, getBranch: () => 'main', getTimestamp: () => '2026-09-10T09:00:00Z', getHostname: () => 'h' };
+
+  const a = await save('A', 'first, filed under issue 100', { type: 'discovery', project: 'brain', issue: 100 }, seams);
+  const b = await save('B', 'corrects A, filed under a different issue', {
+    type: 'discovery', project: 'brain', issue: 805, supersedes: a.id,
+  }, seams);
+
+  assert.equal(b.written, true, 'a mismatched --issue must not block the supersedes write');
+  const { records } = readRecords({ recordsDir: join(root, '.memory', 'records') });
+  const recB = records.find((r) => r.id === b.id);
+  assert.equal(recB.supersedes, a.id);
+  assert.equal(recB.issue, 805, "B's own --issue must be recorded as given, unrelated to A's");
 });
 
 // ---------------------------------------------------------------------------

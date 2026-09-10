@@ -310,6 +310,31 @@ test('#805: a local hit never calls the upstream seam (thunk discipline, A1)', a
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+// fresh-context review MINOR-2 — the `verdict.configError` warn branch
+// (plainfiles.mjs:140-142) had no direct test: it fires when the upstream
+// check still succeeds (ok:true, the id IS in the store) but
+// `brain.config.json` itself could not be read while resolving the ref.
+test('#805: a configError on an otherwise-ok upstream verdict warns but still writes the record', async () => {
+  const root = tmpRoot();
+  try {
+    const target = 'rec-0123456789abcdef';
+    const { result, warnings } = await captureWarn(() =>
+      save('t', 'c', { type: 'discovery', project: 'brain', supersedes: target }, defaultSaveSeams(root, {
+        _readRecordIds: () => new Set(),
+        _upstreamRecordEntries: () => ({
+          ok: true,
+          ref: 'origin/main',
+          byId: new Map([[target, 'b']]),
+          configError: 'bad json',
+        }),
+      })),
+    );
+    assert.equal(result.written, true, 'a configError must not block the write once the id is verified');
+    assert.equal(warnings.length, 1, `expected exactly one warning, got: ${JSON.stringify(warnings)}`);
+    assert.ok(warnings[0].includes('bad json'), `warning must carry the configError detail: ${warnings[0]}`);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 for (const [label, opts] of [
   ['malformed', { supersedes: 'not-a-valid-id', _readRecordIds: () => new Set(), _upstreamRecordEntries: () => { throw new Error('must not be called'); } }],
   ['not-in-store', { supersedes: 'rec-0123456789abcdef', _readRecordIds: () => new Set(), _upstreamRecordEntries: () => ({ ok: true, ref: 'origin/main', byId: new Map() }) }],

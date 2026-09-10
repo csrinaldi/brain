@@ -782,7 +782,18 @@ if (op === "save") {
     const arg = rest[i];
     if (arg.startsWith("--")) {
       const key = arg.slice(2);
-      if (key === "supersedes") supersedesCount += 1;
+      // fresh-context review MINOR-1: `--supersedes=<id>` is NOT the
+      // space-separated form this parser recognizes for ANY flag — left
+      // unhandled, `key` becomes the bogus flag name `"supersedes=<id>"`,
+      // `flags.supersedes` stays undefined, and the NEXT argv token is
+      // consumed as that bogus key's value. That silently wrote a record
+      // missing the field the caller asked for (exit 0). Counted and
+      // refused the same way a value-less `--supersedes` is refused below,
+      // instead of accepted by splitting on `=` — every other flag in this
+      // parser only understands the space-separated form, so accepting `=`
+      // here alone would be an inconsistent one-off carve-out.
+      if (key === "supersedes" || key.startsWith("supersedes=")) supersedesCount += 1;
+      if (key.startsWith("supersedes=")) continue;
       flags[key] = rest[++i];
     } else {
       positionals.push(arg);

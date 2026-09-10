@@ -87,6 +87,53 @@ No AI attribution trailers — the repo's `commit-msg` hook hard-refuses them (T
 
 Delivery strategy `ask-on-risk` resolved to single PR by `sdd-tasks` (forecast ~106, Low risk, `Decision needed before apply: No`). The real 133-line count confirms that decision still holds — no chaining needed.
 
+## Review corrections (batch 2 — fresh-context reviewer findings)
+
+A fresh-context cold reviewer found two real defects and three lower-severity
+gaps in batch 1. All fixed/covered here, STRICT TDD, in the same worktree and
+branch, on top of the 6 commits already in the branch (the 5 above plus
+`d3309949`, a docs(sdd) commit that persisted the explore/proposal/spec/
+design/tasks artifacts to the filesystem between batch 1 and this batch — not
+authored by this apply run).
+
+| # | Severity | Finding | Fix |
+|---|---|---|---|
+| MINOR-1 | Minor (real bug) | `cli.mjs`'s save-flag loop only recognized `--supersedes <id>` (space-separated). `--supersedes=<id>` (the `=` form) produced `key === "supersedes=rec-…"`, which missed the `key === "supersedes"` check: `supersedesCount` stayed 0, `flags.supersedes` stayed `undefined`, and the bogus key silently consumed the NEXT argv token as its own value. Measured before the fix: `memory save t c --type discovery --project brain --supersedes=rec-…` exited **0** and wrote the record **without** the `supersedes` field — contradicting the en/es catalog's `supersedesMissingValue` promise ("never saved silently without the field you asked for"). | Widened the loop's supersedes-count check to `key === "supersedes" \|\| key.startsWith("supersedes=")`, and made the `=` form a no-op `continue` (never sets `flags.supersedes`, never consumes the next token). This routes it into the existing `supersedesCount === 1 && flags.supersedes === undefined` branch, which already refuses with the existing `memory.save.supersedesMissingValue` i18n key — no new i18n key added (none of the four files this batch was scoped to touch include the i18n catalogs). Chose REFUSE over accept-by-splitting-on-`=`: every other flag in this parser understands only the space-separated form, so silently accepting `=` for `--supersedes` alone would be an inconsistent one-off carve-out at the one flag where silent inconsistency is least acceptable. |
+| MINOR-2 | Minor (coverage gap) | `plainfiles.mjs:140-142`'s `verdict.configError` warn branch (fires when the upstream check still resolves `ok:true` — the id IS verified in the store — but `brain.config.json` itself could not be read while resolving the ref) had no direct test. | Added a test to `plainfiles.save.test.mjs` stubbing `_upstreamRecordEntries` to return `{ok:true, ref:'origin/main', byId:new Map([[id,'b']]), configError:'bad json'}`; asserts exactly one `console.warn` naming the configError detail AND that the record is still written (`result.written === true`) — the warn never blocks the write once the id is verified. |
+| NIT-3 | Nit | `lib/supersedes.integration.test.mjs:13` imported `readdirSync` from `node:fs` and never used it. | Removed the unused import. |
+| SUGGESTION-5 | Suggestion | `spec.md:84`'s "a mismatched `--issue` is allowed" scenario (no rule ties `supersedes` to `issue` equality) had no test. | Added a test on the local-root chain fixture (same shape as the existing "chain" test): A saved under `--issue 100`, B saved under `--issue 805` with `--supersedes <A's id>` — asserts the write succeeds, B's `supersedes` points at A, and B's own `issue` is recorded as given (805), independent of A's. |
+| NIT-4 | Nit | Commit `1a5f87c8` (`docs(brain-drafts): draft the record-first correction sequence for #805 promotion`) lacks the `(#805)` suffix the rest of the branch's commits carry. | Noted here, not fixed — the commit is already in the branch history and this batch's instructions were explicit: do not rewrite history. This batch's own commit carries the `(#805)` suffix. |
+
+### TDD Cycle Evidence — batch 2
+
+| Item | RED | GREEN | REFACTOR |
+|---|---|---|---|
+| MINOR-1 | confirmed — `--supersedes=<id>` test failed pre-fix: exit 0 (expected 1), stdout showed the record WAS saved (`✓ saved rec-…`) | passes after the `cli.mjs` loop change — exit 1, no `records/` dir created | none needed |
+| MINOR-2 | N/A — coverage-only, no production defect; the warn branch already existed and behaved correctly | test passes immediately against unchanged `plainfiles.mjs` | none |
+| SUGGESTION-5 | N/A — coverage-only; no rule to fix | test passes immediately against unchanged production code | none |
+| NIT-3 | N/A — lint-only cleanup | file still passes all its tests after the import removal | none |
+
+### Files changed — batch 2
+
+| File | Action | What |
+|---|---|---|
+| `brain/scripts/memory/cli.mjs` | Modified | MINOR-1 fix: `--supersedes=<id>` now refused, never silently dropped |
+| `brain/scripts/memory/cli.save-search.test.mjs` | Modified | +1 test (MINOR-1 RED→GREEN) |
+| `brain/scripts/memory/backends/plainfiles.save.test.mjs` | Modified | +1 test (MINOR-2 coverage) |
+| `brain/scripts/memory/lib/supersedes.integration.test.mjs` | Modified | −1 unused import (NIT-3), +1 test (SUGGESTION-5 coverage) |
+| `openspec/changes/issue-805-supersedes-writer/apply-progress.md` | Modified | this section |
+
+### Test results — batch 2
+
+- Focused: `node --test cli.save-search.test.mjs backends/plainfiles.save.test.mjs lib/supersedes.integration.test.mjs` → **34/34 pass**, 0 fail (9 + 19 + 6).
+- Full `npm test`: **5176/5176 pass**, 0 fail (up from batch 1's final 5173/5173 — +3 new tests: the `=`-form refusal, the configError-warn coverage, the mismatched-`--issue` coverage).
+
+### Commit — batch 2
+
+One local commit (no push), staged by explicit path, ending `(#805)`, no AI attribution:
+
+`fix(memory): --supersedes=<id> is refused, never silently dropped; the config-error warn branch and the mismatched-issue rule are tested (#805)`
+
 ## Next
 
-Ready for wrap-up (W1–W6, orchestrator-owned per the launch prompt) and `sdd-verify`.
+Ready for a fresh-context re-review and `sdd-verify`. Wrap-up (W1–W6: `memory:save --issue 805`, ticking epic task 2.1, opening the PR) remains orchestrator-owned per the original launch prompt.
