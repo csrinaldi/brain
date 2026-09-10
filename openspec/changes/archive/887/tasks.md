@@ -289,8 +289,8 @@ Applied after the "Slice B correction batch" above, on the same worktree/branch,
 
 ## Apply-time action item — not a code change in this slice
 
-- [ ] X1 During apply, after Slice A or B lands (whichever apply batch reaches it first), post
-      this exact sentence on **#889** (an agent may comment; this is not a #887 code change):
+- [x] X1 Posted on #889 on 2026-09-09 (issuecomment-5610489542), after Slice A's first apply
+      batch. The exact sentence, for the record:
 
       > #887 D2 makes a same-day second `collect` **append** a commit onto
       > `refs/heads/memory/<host>-<date>`, so the lane's tree descends from `origin/main` as it
@@ -321,12 +321,12 @@ Explicitly out of scope, unchanged by this slice:
 Each PR (Slice A, Slice B) does its own wrap-up before its own push:
 
 - [x] W1 `npm test` full run, green, on that slice's branch.
-- [ ] W2 `memory:save --issue 887` — record-first, BEFORE the push (ADR-0034 lane discipline).
-      Run once per PR that lands new behaviour worth recording (both slices qualify).
-- [ ] W3 Tick epic task 3.1a in `openspec/changes/issue-864-memory-2-0/tasks.md:37` — do this in
-      the **closing** PR only (the one that carries `Closes #887`), not in an earlier
-      non-closing slice, so the epic tracker and the issue state move together.
-- [ ] W4 `brain:review` per PR, after that PR's own tests are green and before requesting merge.
+- [x] W2 Record-first per PR: `rec-fa2869c4792a5941` (`--issue 897`, PR A) and
+      `rec-7b2e1e8f09bcf068` (`--issue 887`, PR B), each committed before its push.
+- [x] W3 Epic task 3.1a ticked in PR B (with 1.1, which #862's archive had left unticked).
+- [x] W4 `brain:review` per PR: #898 APPROVE at 4973ce4a (round 1, after a fresh review's
+      corrections landed before the push); #899 REVISE at 09d58bff (CI identity blocker,
+      `parseStatusZ` rename record, a CLI stderr test) then APPROVE at 2db6a1ee.
 
 Merge order: Slice A merges (or is approved and integrated per the chosen chain shape) before
 Slice B is opened for final review — Slice B's `collect.mjs` imports nothing from Slice A that
@@ -335,9 +335,11 @@ recommendation (planner → shell/verb) should hold for merge order too.
 
 ## The PR — Slice A
 
-- [ ] PR-A.1 Push the branch. Body: summary, changes table (`lane/plan.mjs`, `lane/plan.test.mjs`,
-      `format.mjs`/`store.mjs`), test plan (`npm test` output), label `type:feature`.
-      **Issue-link line depends on the pending PR-mechanics decision:**
+- [x] PR-A.1 Shipped as PR #898 from `feat/issue-897-featmemory-the-lane-planner`, `Closes #897`
+      (the maintainer chose a sub-ticket for slice A so both PRs stack to `main` without closing
+      #887 early — shape 1 with a child issue, not shape 2 or 3), `Part of #887` and
+      `Parent: #864` in prose, `type:feature`; merged as 35fd2926 on 2026-09-09.
+      Original decision notes, for the record:
       - Shape 2 (feature-branch chain): target is not `main`; body carries `Part of #887` and
         `Parent: #864` in prose. Does not close the issue.
       - Shape 3 (single PR): this task list collapses into one PR — see "Single-PR fallback"
@@ -347,7 +349,8 @@ recommendation (planner → shell/verb) should hold for merge order too.
 
 ## The PR — Slice B
 
-- [ ] PR-B.1 Push the branch (on top of Slice A's merged/landed state). Body: summary, changes
+- [x] PR-B.1 Shipped as PR #899, rebased onto #898's squash, `Closes #887`; merged as 2ec28558 on
+      2026-09-10. Original notes: push the branch (on top of Slice A's merged/landed state). Body: summary, changes
       table (`lane/collect.mjs`, `cli.mjs`, `i18n/{en,es}.mjs`, `package.json`,
       `collect.integration.test.mjs`, `cli.collect.test.mjs`), test plan, label `type:feature`.
       Body carries `Closes #887`, `Parent: #864` in prose — this is the PR that makes the
@@ -355,7 +358,8 @@ recommendation (planner → shell/verb) should hold for merge order too.
 
 ## Single-PR fallback (shape 3, `size:exception`)
 
-- [ ] SP.1 If the orchestrator/maintainer chooses shape 3 instead of two PRs: combine A1–A3 and
+- [x] SP.1 Not taken — the maintainer chose two PRs (#898, #899). Kept for the record: if shape 3
+      had been chosen, combine A1–A3 and
       B1–B4 onto one branch, one PR, `Closes #887`, label `type:feature` plus the `size:exception`
       label (request it from the maintainer before pushing — `runDiffSizeCheck` only honors the
       label at tiers where `honorSizeException` is true; confirm the project's tier first,
