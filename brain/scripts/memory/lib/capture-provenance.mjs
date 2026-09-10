@@ -11,6 +11,8 @@
 // already the §4 prose parser (`engram-export.mjs`) — it must not become two
 // things.
 
+import { HANDLE_RE } from './format.mjs';
+
 /** Default agent-marker env var name, overridable via `git config brain.agentEnv`. */
 export const AGENT_ENV_DEFAULT = 'AI_AGENT';
 
@@ -26,14 +28,13 @@ export const RESERVED_ACTORS = new Set(['@legacy']);
 /** `<type>/issue-<N>` or `<type>/issue-<N>-<slug>` — never a bare number, never case-insensitive. */
 export const ISSUE_BRANCH_RE = /^[a-z]+\/issue-(\d+)(?:-|$)/;
 
-// The positive handle shape (design A2). Also rehomed to `format.mjs` as
-// `HANDLE_RE` (#738 unit 3) for the write-gate's own classification; kept as
-// a private literal copy here rather than importing `format.mjs`, because
-// this module's contract is "pure, zero dependency" and a schema-owner
-// import would blur that line for no behavioural gain — the two patterns are
-// asserted identical by both modules' own test suites.
-const HANDLE_RE = /^@[A-Za-z0-9][A-Za-z0-9-]*$/;
-
+// The positive handle shape (design A2). Owned by `format.mjs` as `HANDLE_RE`
+// (#738 unit 3, also used there for the write-gate's own classification) and
+// imported here rather than duplicated: `format.mjs` has no `fs`/`child_process`
+// dependency either, so importing it does not weaken this module's "pure, zero
+// I/O" contract, and a single definition is the only way both modules are
+// GUARANTEED to agree on the shape instead of merely being asserted to by two
+// separate test suites (MINOR-1, fresh-context review).
 /**
  * Resolves `actor` from the raw `git config brain.actor` read.
  *
@@ -105,9 +106,17 @@ export function deriveIssue({ declared, branch }) {
   return { issue: undefined, derived: false, evidence: null };
 }
 
-/** Whitespace-collapsed, 64-char-sliced — agent-controlled text landing in a durable field (design A2). */
+/**
+ * Whitespace-collapsed, `#`-stripped, 64-char-sliced — agent-controlled text
+ * landing in a durable field (design A2). `#` is stripped because `source`
+ * shares the `**Fuente:**` line the §4 parser reads back (`provenance.mjs`'s
+ * `issueFromFuente`, `/issue #(\d+)/`): an unfiltered instrument value like
+ * `AI_AGENT="issue #999 runner"` would fabricate `issue: 999` on re-import
+ * even though the record never declared or derived that issue (MINOR-2,
+ * #461 class).
+ */
 function collapseAndTruncate(value) {
-  return value.replace(/\s+/g, ' ').trim().slice(0, 64);
+  return value.replace(/\s+/g, ' ').trim().replace(/#/g, '').slice(0, 64);
 }
 
 /**

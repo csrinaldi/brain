@@ -56,7 +56,9 @@ const EMAIL_ACTOR_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export const HANDLE_RE = /^@[A-Za-z0-9][A-Za-z0-9-]*$/;
 // A bare default-branch name is a branch too: records captured from the main
 // checkout carry `actor: "main"` (measured: 2 of them) — no `/` to catch.
-export const DEFAULT_BRANCHES = new Set(['main', 'master', 'develop', 'trunk']);
+// Not exported (MINOR-1, fresh-context review): no consumer outside this
+// module reads the set itself, only `classifyActor`'s verdict.
+const DEFAULT_BRANCHES = new Set(['main', 'master', 'develop', 'trunk']);
 
 /**
  * The four actor shapes (#738). `@legacy` is the export fallback; a `/` or a

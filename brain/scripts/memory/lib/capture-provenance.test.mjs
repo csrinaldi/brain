@@ -17,6 +17,7 @@ import {
   deriveIssue,
   composeSource,
 } from './capture-provenance.mjs';
+import { issueFromFuente } from './provenance.mjs';
 
 // ---------------------------------------------------------------------------
 // resolveActor
@@ -130,6 +131,24 @@ test('composeSource: a 300-char env value is whitespace-collapsed and sliced to 
   assert.ok(match[1].length <= 64, `expected <= 64 chars, got ${match[1].length}`);
   assert.ok(!/\s{2,}/.test(match[1]), 'expected whitespace collapsed to single spaces (no run of 2+)');
 });
+
+test(
+  'composeSource: an agent-marker value carrying "#N" is stripped, so it cannot forge an ' +
+    "issue citation on re-import (MINOR-2, #461 class)",
+  () => {
+    const actor = resolveActor({ configured: '@csrinaldi' });
+    const kind = resolveActorKind({ env: { [AGENT_ENV_DEFAULT]: 'issue #999 runner' } });
+    const issue = deriveIssue({ declared: undefined, branch: 'main' });
+    const line = composeSource({ host: 'devbox', actor, kind, issue });
+    assert.ok(!/#/.test(line), `source must not carry a literal '#' from instrument text: ${line}`);
+    assert.equal(issue.issue, undefined, 'precondition: no issue was declared or derived here');
+    assert.equal(
+      issueFromFuente(line),
+      undefined,
+      'the Fuente parser must not fabricate an issue from agent-controlled instrument text',
+    );
+  },
+);
 
 test('composeSource: declared vs derived issue are spelled in words', () => {
   const actor = resolveActor({ configured: '@csrinaldi' });
