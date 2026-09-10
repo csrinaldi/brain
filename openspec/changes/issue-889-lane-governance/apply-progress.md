@@ -206,5 +206,49 @@ unit 2. `npm run check-refs` clean after both commits.
 
 7/7 assigned slice-A tasks complete, PLUS the #905 correction batch above (3 code/test fixes + 5
 editorial nits, 2 commits, 5081/5081 full-suite green). Working tree clean, all commits local (no
-push). Ready for the orchestrator to cut the #905 PR branch and continue with Wrap-up A, or to
-launch batch 2 for slice B.
+push). Slice A shipped separately as PR #907 (merged to `main` at `ffe038a0`, `size:exception`) —
+see "Batch 3 — PR 2 prep" below for what happened after that merge; full engram history for slice
+B (B1/B2) lives at topic `sdd/issue-889-lane-governance/apply-progress` (observation #3287).
+
+## Batch 3 — PR 2 prep (2026-09-10)
+
+**Context at batch start**: slice A (#905) already merged as PR #907 (`ffe038a0`,
+`size:exception`). Worktree rebased onto it with slice B's three commits already present
+(`3aa152c8` [LANE] audit row, `3388187d` index-lag, `4e68bb16` docs ticking B1.1-B2.3/B.W1 and
+epic 3.1c) — B1/B2 were NOT redone in this batch, they were already done; see engram observation
+#3287 for their full RED/GREEN detail, since this file's slice-B section was not carried forward
+by that earlier batch.
+
+**This batch's own work — cold-1 from PR #907's cold review** (`lane-scrub.mjs:126-140`):
+`main()`'s single try/catch around `evaluateLaneScrub` reported every thrown error as `lane-scrub:
+cannot read an added record — failing closed (uncomputable): <message>`, but `compilePatterns()`
+(`memory/lib/secret-scrub.mjs:42-44`, throws on an invalid regex source) also runs inside that
+same call — via `evaluateLaneScrub`'s internal `resolveSecretConfig`/`compilePatterns` step —
+misattributing a bad secret-config pattern to a record-read failure.
+
+RED: added `main: an invalid secret pattern in config → exit 2 with a config-specific reason,
+never "cannot read"` to `lane-scrub.test.mjs`, confirmed failing against the un-fixed code (it
+printed the "cannot read" reason for a config error).
+
+GREEN: `evaluateLaneScrub` now accepts optional pre-compiled `patterns`/`allowPatterns` (falls
+back to compiling from `config` when omitted, for direct unit-level calls — backward compatible
+with the existing pure-function tests). `main()` compiles patterns via `resolveSecretConfig` +
+`compilePatterns` in its OWN try/catch, before and outside the per-record read loop, reporting
+`lane-scrub: invalid secret pattern in config — failing closed (uncomputable): <message>` on
+failure; the read-loop's try/catch (now wrapping only `evaluateLaneScrub` with pre-compiled
+patterns passed in) keeps its original `cannot read an added record` reason, now only ever
+reported for an actual read failure. Both paths still exit 2 (`resultToExit`'s `uncomputable`
+dominance, unchanged).
+
+Commit `60af7abc` (fix + test, work unit 1). Focused suite (`lane-scrub.test.mjs` +
+`brain-audit.test.mjs` + `index-lag.test.mjs`) 71 → 72/72 green. Full `npm test` 5081 → 5097/5097
+green (the jump includes slice B's tests already present from the prior batch, not just this
+one).
+
+Docs: this note (tasks.md's "PR 2 prep note" under the Slice B header) and design.md's A6 section
+(the two distinct UNCOMPUTABLE reasons — config-compile vs. read failure). Commit `13bec541`
+(docs, work unit 2).
+
+**Status**: cold-1 fixed and tested. Working tree clean, both commits local (no push). Remaining
+before PR 2 opens: B.W2 (`memory:save --issue 889`), B.W4 (fresh-context review), B.W5 (push +
+open PR 2), B.W6 (`brain:review`) — none attempted in this batch, out of its assigned scope.
