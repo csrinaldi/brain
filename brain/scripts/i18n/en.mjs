@@ -415,7 +415,7 @@ export default {
 
   // ── memory/lib/unsupported-op.mjs — the shared never-cryptic deferral helper (C3, issue #246) ──
   'memory.op.unsupported':            "op '{op}' is not supported by the '{backend}' memory backend (deferred — see openspec/changes/issue-246-c3).",
-  'memory.save.engramUnsupported': "'{op}' is not a cli verb for the '{backend}' backend — use engram's native mem_save / 'engram save'. If engram is not installed here (the agent environment), capture records directly with `MEMORY_BACKEND=plainfiles npm run memory:save -- \"title\" \"content\" --type <type>` — same records, same validation, no backend (#530).",
+  'memory.save.engramUnsupported': "'{op}' is not a cli verb for the '{backend}' backend — use engram's native mem_save / 'engram save'. If engram is not installed here (the agent environment), capture records directly with `MEMORY_BACKEND=plainfiles npm run memory:save -- \"title\" \"content\" --type <type>` — same records, same validation, no backend (#530). `--supersedes <id>` is plainfiles-only too, for the same reason (#805).",
   'memory.search.engramUnsupported':  "'{op}' is not a cli verb for the '{backend}' backend — use engram's native mem_search / 'engram search' instead.",
 
   // ── memory/backends/plainfiles.mjs — save/search CLI verbs (C3, issue #246) ──
@@ -433,6 +433,13 @@ export default {
   'memory.plainfiles.save.actorReserved': "brain.actor is set to '{value}', a reserved value used internally for unattributed/legacy records — it cannot be used as a capture actor. Run `git config --local brain.actor @<handle>` with your own handle.",
   'memory.plainfiles.save.issueDerived': 'issue {issue} derived from branch {branch} (no --issue given).',
   'memory.save.plainfilesIgnoredOpts': 'ignored option(s) {opts} — the plainfiles record format has no field for them (scope/topic are engram-only concepts); the record was still written normally.',
+  // ── --supersedes (#805): a supersedes id is checked against the store, local first, before any write ──
+  'memory.plainfiles.save.supersedesMalformed': "--supersedes '{value}' is not shaped rec-<16 hex chars> — refused before any filesystem or git call, and no record was written.",
+  'memory.plainfiles.save.supersedesNotInStore': "--supersedes {id} is not in the store — checked local .memory/records/ and {ref}. Ship it on the lane first, then correct it; no record was written.",
+  'memory.plainfiles.save.supersedesUnverifiable': "--supersedes {id} could not be verified: {reason}. Fix it with `git fetch origin main`, or point BRAIN_MEMORY_UPSTREAM_REF / memory.upstreamRef at a ref that resolves; no record was written.",
+  'memory.plainfiles.save.supersedesConfigError': 'brain.config.json could not be read while checking --supersedes: {error}. The check still ran against whatever ref resolved without it.',
+  'memory.save.supersedesRepeated': '--supersedes accepts exactly one id per save — fan-in (multiple records superseding the same id) is deferred (#805). Refused before any write.',
+  'memory.save.supersedesMissingValue': '--supersedes requires a value (the id it supersedes) — refused before any write, so the record is never saved silently without the field you asked for.',
   'memory.plainfiles.search.empty': 'ℹ no matching records found.',
   'memory.plainfiles.search.summary': '{count} matching record(s):',
 

@@ -95,6 +95,21 @@ test('buildRecord: present optionals are carried through', () => {
   assert.equal(rec.source, 'issue #205');
 });
 
+// ── supersedes (#805) — pin only, no format.mjs edit; the field already
+// round-trips through hashInput (R2/R3) and the writable-record gates. ────
+
+test('buildRecord: a supersedes value changes the id versus the same content without it (#805)', () => {
+  const withoutSupersedes = buildRecord({ ...base });
+  const withSupersedes = buildRecord({ ...base, supersedes: 'rec-0123456789abcdef' });
+  assert.notEqual(withSupersedes.id, withoutSupersedes.id);
+  assert.equal(withSupersedes.supersedes, 'rec-0123456789abcdef');
+});
+
+test('buildRecord: an absent supersedes stays omitted, never null (R3, #805)', () => {
+  const rec = buildRecord({ ...base });
+  assert.equal('supersedes' in rec, false);
+});
+
 // ── validateRecord (REQ-MF-1, REQ-MF-5 partial) ───────────────────────────────
 
 test('validateRecord: accepts a well-formed record', () => {
@@ -138,6 +153,12 @@ test('validateRecord: rejects a null optional field (R3)', () => {
   const { valid, errors } = validateRecord(rec);
   assert.equal(valid, false);
   assert.ok(errors.some((e) => e.includes('issue')));
+});
+
+test('validateRecord: accepts a record carrying supersedes (#805)', () => {
+  const rec = buildRecord({ ...base, supersedes: 'rec-0123456789abcdef' });
+  const { valid, errors } = validateRecord(rec);
+  assert.equal(valid, true, errors.join('; '));
 });
 
 // ── W1/W2 (issue #404): the WRITE-path rules ────────────────────────────────

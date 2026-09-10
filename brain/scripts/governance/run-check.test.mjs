@@ -30,8 +30,9 @@ async function captureLog(fn) {
 //
 // The #227 transitional chunks/records union is retired: the gate computes
 // its observation set from `records/` ALONE. `readChunkObservations` is no
-// longer imported by run-check.mjs at all. `readRecords` is injectable so
-// these tests never touch the real filesystem.
+// longer imported by run-check.mjs at all (pinned repo-wide by
+// `brain/scripts/memory/chunk-boundary.test.mjs`, #247). `readRecords` is
+// injectable so these tests never touch the real filesystem.
 
 test('runCheck: memory-gate — records has session_summary → pass', async () => {
   const result = await runCheck('memory-gate', {

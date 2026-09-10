@@ -146,3 +146,96 @@ test(
     assert.equal(existsSync(recordsDir), false, 'nothing may be appended when the actor is unset');
   },
 );
+
+// ── --supersedes (#805): the CLI enforces "exactly one id"; the backend cannot ──
+//
+// MERGE NOTE (#738 × #805): these fixtures predate the actor rule. Every one of
+// them now calls `initIdentity` first — not cosmetics: without it the arity and
+// shape refusals below would still exit 1, but for the WRONG reason (the actor
+// refusal, which fires inside the backend), and the tests would keep passing
+// while the guard they exist to pin was gone. With a configured handle, the
+// only thing that can refuse is the parser rule under test.
+
+test('memory save --supersedes <local id> writes the field and exits 0', () => {
+  const testRoot = mkdtempSync(join(tmpdir(), 'brain-cli-save-supersedes-'));
+  initIdentity(testRoot);
+  const seed = runCli(['save', 'A', 'first record', '--type', 'discovery', '--project', 'brain'], { testRoot });
+  assert.equal(seed.status, 0, `seed save failed: ${seed.stderr}`);
+  const recordsDir = join(testRoot, '.memory', 'records');
+  const seedFile = readdirSync(recordsDir).filter((f) => f.endsWith('.jsonl'))[0];
+  const targetId = JSON.parse(readFileSync(join(recordsDir, seedFile), 'utf8').trim()).id;
+
+  const result = runCli(
+    ['save', 'B', 'a correction', '--type', 'discovery', '--project', 'brain', '--supersedes', targetId],
+    { testRoot },
+  );
+  assert.equal(result.status, 0, `expected exit 0, got ${result.status}. stderr: ${result.stderr}`);
+  const files = readdirSync(recordsDir).filter((f) => f.endsWith('.jsonl'));
+  const record = files
+    .map((f) => JSON.parse(readFileSync(join(recordsDir, f), 'utf8').trim().split('\n').pop()))
+    .find((r) => r.supersedes === targetId);
+  assert.ok(record, 'the written record must carry the supersedes field');
+});
+
+test('memory save --supersedes given twice exits 1, naming fan-in as deferred', () => {
+  const testRoot = mkdtempSync(join(tmpdir(), 'brain-cli-save-supersedes-repeat-'));
+  initIdentity(testRoot);
+  const result = runCli(
+    ['save', 't', 'c', '--type', 'discovery', '--project', 'brain', '--supersedes', 'rec-0123456789abcdef', '--supersedes', 'rec-fedcba9876543210'],
+    { testRoot },
+  );
+  assert.equal(result.status, 1, `expected exit 1, got ${result.status}. stdout: ${result.stdout}`);
+  assert.match(result.stderr, /fan-in|deferred/i, `must name fan-in as deferred: ${result.stderr}`);
+  const recordsDir = join(testRoot, '.memory', 'records');
+  assert.equal(existsSync(recordsDir), false, 'a repeated --supersedes must never reach a write');
+});
+
+test('memory save --supersedes as the final argument (no value) exits 1, no record written', () => {
+  const testRoot = mkdtempSync(join(tmpdir(), 'brain-cli-save-supersedes-noval-'));
+  initIdentity(testRoot);
+  const result = runCli(
+    ['save', 't', 'c', '--type', 'discovery', '--project', 'brain', '--supersedes'],
+    { testRoot },
+  );
+  assert.equal(result.status, 1, `expected exit 1, got ${result.status}. stdout: ${result.stdout}`);
+  const recordsDir = join(testRoot, '.memory', 'records');
+  assert.equal(existsSync(recordsDir), false, 'a value-less --supersedes must never reach a write');
+});
+
+// fresh-context review MINOR-1 — the `--supersedes=<id>` equals-form is not the
+// space-separated shape this parser recognizes for ANY flag: `key` becomes
+// `"supersedes=<id>"`, so the loop's `key === "supersedes"` check misses it and
+// `flags.supersedes` is left undefined while the next argv token is consumed as
+// that bogus key's value. Measured before the fix: exit 0, record written
+// WITHOUT the field — silently contradicting the catalog's "never saved
+// silently without the field you asked for". Refused here the same way a
+// value-less `--supersedes` is refused.
+test('memory save --supersedes=<id> (equals form) exits 1, no record written', () => {
+  const testRoot = mkdtempSync(join(tmpdir(), 'brain-cli-save-supersedes-eq-'));
+  initIdentity(testRoot);
+  const result = runCli(
+    ['save', 't', 'c', '--type', 'discovery', '--project', 'brain', '--supersedes=rec-0123456789abcdef'],
+    { testRoot },
+  );
+  assert.equal(result.status, 1, `expected exit 1, got ${result.status}. stdout: ${result.stdout}`);
+  const recordsDir = join(testRoot, '.memory', 'records');
+  assert.equal(existsSync(recordsDir), false, 'the equals form must never reach a write');
+});
+
+test('memory save --supersedes <unknown id> under the non-git test root exits 1 with could-not-verify, quoted', () => {
+  // The test root is a git repo with NO remote (it must be one at all so #738's
+  // `brain.actor` can be configured locally) — `origin/HEAD` and `origin/main`
+  // still fail to resolve, so design.md A8's premise holds unchanged: an unknown
+  // id here is honestly could-not-verify, never not-in-store.
+  const testRoot = mkdtempSync(join(tmpdir(), 'brain-cli-save-supersedes-unknown-'));
+  initIdentity(testRoot);
+  const result = runCli(
+    ['save', 't', 'c', '--type', 'discovery', '--project', 'brain', '--supersedes', 'rec-0123456789abcdef'],
+    { testRoot },
+  );
+  assert.equal(result.status, 1, `expected exit 1, got ${result.status}. stdout: ${result.stdout}`);
+  assert.match(result.stderr, /no upstream ref resolved \(tried origin\/HEAD, origin\/main\)/,
+    `the could-not-verify reason must be quoted verbatim: ${result.stderr}`);
+  const recordsDir = join(testRoot, '.memory', 'records');
+  assert.equal(existsSync(recordsDir), false);
+});

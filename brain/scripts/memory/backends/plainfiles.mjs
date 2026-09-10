@@ -15,10 +15,12 @@ import { execFileSync, spawnSync } from "node:child_process";
 
 import { _getGitBranch } from "./engram.mjs";
 import { buildRecord, serializeRecord, nowUtcSeconds, RECORD_TYPES } from "../lib/format.mjs";
-import { appendRecord, rebuildIndex, readRecords } from "../lib/store.mjs";
+import { appendRecord, rebuildIndex, readRecords, readRecordIds } from "../lib/store.mjs";
 import { normalizeDuplicates } from "../lib/duplicates.mjs";
 import { gitConfigGet } from "../../lib/git-config.mjs";
 import { resolveActor, resolveActorKind, deriveIssue, composeSource } from "../lib/capture-provenance.mjs";
+import { upstreamRecordEntries } from "../lib/upstream-records.mjs";
+import { classifySupersedes } from "../lib/supersedes.mjs";
 
 /** The repository this record belongs to, from config, falling back to the checkout
  *  directory name. Records in this repo carry the bare name ("brain"), not the slug. */
@@ -73,8 +75,8 @@ function _defaultLoadBrainConfig(root) {
  *
  * @param {string} title
  * @param {string} content
- * @param {{type: string, project: string, issue?: number, scope?: string, topic?: string}} [opts]
- * @param {object} [seams]  root, getBranch, getTimestamp, getHostname, getGitConfig, getEnv, _appendRecord, _rebuildIndex, _loadConfig
+ * @param {{type: string, project: string, issue?: number, supersedes?: string, scope?: string, topic?: string}} [opts]
+ * @param {object} [seams]  root, getBranch, getTimestamp, getHostname, getGitConfig, getEnv, _appendRecord, _rebuildIndex, _loadConfig, _readRecordIds, _upstreamRecordEntries
  * @returns {Promise<{id: string, file: string, written: boolean}>}
  */
 export async function save(
@@ -84,7 +86,7 @@ export async function save(
   // format has no home for them (out of scope for C3), so they are ignored
   // LOUDLY (a console.warn naming them, never a silent drop) rather than
   // erroring (an error would break the arg-shape parity the mirror exists for).
-  { type, project, issue, scope, topic } = {},
+  { type, project, issue, supersedes, scope, topic } = {},
   {
     root = repoRoot,
     getBranch = _getGitBranch,
@@ -95,6 +97,8 @@ export async function save(
     _appendRecord = appendRecord,
     _rebuildIndex = rebuildIndex,
     _loadConfig = _defaultLoadBrainConfig,
+    _readRecordIds = readRecordIds,
+    _upstreamRecordEntries = upstreamRecordEntries,
   } = {},
 ) {
   const ignoredOpts = [scope && "scope", topic && "topic"].filter(Boolean);
@@ -133,6 +137,23 @@ export async function save(
     throw new Error(await t("memory.plainfiles.save.issueInvalid", { value: String(issue) }));
   }
 
+  // TWO GATES, BOTH BEFORE `buildRecord` (merge of #738 and #805).
+  //
+  // ORDER: provenance (#738) FIRST, then `--supersedes` (#805), then the build.
+  // Either order is contract-conformant on its own — both refuse before
+  // anything is hashed, scanned, appended or indexed — but only this one keeps
+  // BOTH of the orders' own promises at once:
+  //   - #805 promises a MALFORMED `--supersedes` id touches no IO. Kept: the
+  //     grammar check inside `classifySupersedes` runs before either thunk, so
+  //     the gate's position is irrelevant to that promise.
+  //   - #738 promises the store is not read before the actor refusal fires. A
+  //     WELL-SHAPED but absent id makes `classifySupersedes` read
+  //     `.memory/records/` (and possibly spawn git for `origin/main`); running
+  //     that first would mean an unconfigured machine scanned the store before
+  //     being told it may not write to it. So the actor gate goes first.
+  // The two caller-mistake refusals above (`type`, `--issue` shape) still come
+  // first of all: they are fixable in the same second.
+
   // #738 — the actor refusal is a machine-setup question, kept AFTER the two
   // caller-mistake refusals above so no existing "first failure" message changes.
   const actorResult = resolveActor({ configured: getGitConfig("brain.actor") });
@@ -156,8 +177,37 @@ export async function save(
 
   const source = composeSource({ host: getHostname(), actor: actorResult, kind: kindResult, issue: issueResult });
 
+  const recordsDir = join(root, ".memory", "records");
+
+  // `--supersedes` (#805) — local store first, `origin/main` only on a local
+  // miss (design.md A1); the whole gate is a no-op when the flag is absent,
+  // so an ordinary save reads no directory and spawns no git.
+  if (supersedes !== undefined) {
+    // `localIds` is a thunk (cold-review blocker, #805): `classifySupersedes`
+    // checks the id's grammar FIRST, with no IO, and only calls this when the
+    // shape is valid. Reading the store eagerly here — before the shape check
+    // — would mean a malformed id still touched disk before being rejected.
+    const verdict = classifySupersedes({
+      id: supersedes,
+      localIds: () => _readRecordIds({ recordsDir }),
+      upstream: () => _upstreamRecordEntries({ root }),
+    });
+    if (verdict.configError !== undefined) {
+      console.warn(await t("memory.plainfiles.save.supersedesConfigError", { error: verdict.configError }));
+    }
+    if (!verdict.ok) {
+      const key = {
+        malformed: "memory.plainfiles.save.supersedesMalformed",
+        "not-in-store": "memory.plainfiles.save.supersedesNotInStore",
+        "could-not-verify": "memory.plainfiles.save.supersedesUnverifiable",
+      }[verdict.reason];
+      throw new Error(await t(key, verdict.detail));
+    }
+  }
+
   const candidate = buildRecord({
-    ts, actor, actorKind, type, project: resolvedProject, issue: issueResult.issue, content, title, source,
+    ts, actor, actorKind, type, project: resolvedProject,
+    issue: issueResult.issue, supersedes, content, title, source,
   });
 
   const { patternSources, allowPatternSources } = resolveSecretConfig(config);
@@ -170,7 +220,6 @@ export async function save(
     );
   }
 
-  const recordsDir = join(root, ".memory", "records");
   const indexPath = join(root, ".memory", "index.jsonl");
 
   const { file } = _appendRecord(candidate, { recordsDir });

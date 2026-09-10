@@ -372,7 +372,7 @@ export default {
 
   // ── memory/lib/unsupported-op.mjs — helper compartido de rechazo explícito (C3, issue #246) ──
   'memory.op.unsupported':            "la operación '{op}' no está soportada por el backend de memoria '{backend}' (diferida — ver openspec/changes/issue-246-c3).",
-  'memory.save.engramUnsupported': "'{op}' no es un verbo de cli para el backend '{backend}' — usá el mem_save nativo de engram / 'engram save'. Si engram no está instalado acá (el entorno del agente), capturá registros directo con `MEMORY_BACKEND=plainfiles npm run memory:save -- \"título\" \"contenido\" --type <tipo>` — mismos registros, misma validación, sin backend (#530).",
+  'memory.save.engramUnsupported': "'{op}' no es un verbo de cli para el backend '{backend}' — usá el mem_save nativo de engram / 'engram save'. Si engram no está instalado acá (el entorno del agente), capturá registros directo con `MEMORY_BACKEND=plainfiles npm run memory:save -- \"título\" \"contenido\" --type <tipo>` — mismos registros, misma validación, sin backend (#530). `--supersedes <id>` también es exclusivo de plainfiles, por la misma razón (#805).",
   'memory.search.engramUnsupported':  "'{op}' no es un verbo de cli para el backend '{backend}' — usá el mem_search nativo de engram / 'engram search' en su lugar.",
 
   // ── memory/backends/plainfiles.mjs — verbos cli save/search (C3, issue #246) ──
@@ -387,6 +387,13 @@ export default {
   'memory.plainfiles.save.actorReserved': "brain.actor está configurado como '{value}', un valor reservado de uso interno para registros sin atribución/legacy — no se puede usar como actor de captura. Corré `git config --local brain.actor @<handle>` con tu propio handle.",
   'memory.plainfiles.save.issueDerived': 'issue {issue} derivado de la rama {branch} (no se pasó --issue).',
   'memory.save.plainfilesIgnoredOpts': 'se ignoraron la(s) opción(es) {opts} — el formato de registro de plainfiles no tiene un campo para ellas (scope/topic son conceptos exclusivos de engram); el registro se guardó igualmente.',
+  // ── --supersedes (#805): un id de supersedes se verifica contra el store, local primero, antes de cualquier escritura ──
+  'memory.plainfiles.save.supersedesMalformed': "--supersedes '{value}' no tiene la forma rec-<16 hex> — se rechazó antes de tocar el filesystem o git, y no se escribió ningún registro.",
+  'memory.plainfiles.save.supersedesNotInStore': "--supersedes {id} no está en el store — se revisó .memory/records/ local y {ref}. Subilo en la lane primero y después corregilo; no se escribió ningún registro.",
+  'memory.plainfiles.save.supersedesUnverifiable': "--supersedes {id} no se pudo verificar: {reason}. Arreglalo con `git fetch origin main`, o apuntá BRAIN_MEMORY_UPSTREAM_REF / memory.upstreamRef a un ref que resuelva; no se escribió ningún registro.",
+  'memory.plainfiles.save.supersedesConfigError': 'no se pudo leer brain.config.json mientras se verificaba --supersedes: {error}. La verificación igual corrió contra el ref que resolvió sin él.',
+  'memory.save.supersedesRepeated': '--supersedes acepta exactamente un id por guardado — el fan-in (varios registros superando el mismo id) está diferido (#805). Se rechazó antes de cualquier escritura.',
+  'memory.save.supersedesMissingValue': '--supersedes necesita un valor (el id que supera) — se rechazó antes de cualquier escritura, para que el registro nunca se guarde en silencio sin el campo que pediste.',
   'memory.plainfiles.search.empty': 'ℹ no se encontraron registros coincidentes.',
   'memory.plainfiles.search.summary': '{count} registro(s) coincidente(s):',
 
