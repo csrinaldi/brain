@@ -14,7 +14,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import {
   writeFileSync, readFileSync, symlinkSync, lstatSync, statSync, existsSync,
-  mkdirSync, chmodSync,
+  mkdirSync, chmodSync, closeSync, fstatSync,
 } from 'node:fs';
 import { hostname, tmpdir, userInfo } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -353,6 +353,41 @@ test('_spawn throws: exactly one stderr line, still returns spawned:false (exit 
   assert.equal(writes.length, 1, 'exactly one stderr line');
   assert.match(writes[0], /boom: no such file/);
   assert.deepEqual(result, { spawned: false, logPath: null });
+});
+
+test('_spawn throws AFTER the fd was trusted: the fd is closed exactly once — not leaked (post-merge fix, #906)', (t) => {
+  const dir = testTmp('906-lane-');
+  t.after(() => removeTempTree(dir));
+
+  const writes = [];
+  const origWrite = process.stderr.write;
+  process.stderr.write = (chunk) => { writes.push(chunk); return true; };
+
+  const closeCalls = [];
+  let result;
+  try {
+    result = shipOnSessionEnd({
+      _loadConfig: () => ({ memory: { lane: { enabled: true } } }),
+      // ensureTrustedFd runs and succeeds BEFORE this throws — the fd is
+      // already trusted and open when the failure happens.
+      _spawn: () => { throw new Error('boom: spawn failed after fd was trusted'); },
+      _tmpdir: () => dir,
+      _now: FIXED_NOW,
+      _closeSync: (fd) => { closeCalls.push(fd); closeSync(fd); },
+    });
+  } finally {
+    process.stderr.write = origWrite;
+  }
+
+  assert.equal(writes.length, 1, 'exactly one stderr line');
+  assert.match(writes[0], /boom: spawn failed after fd was trusted/);
+  assert.deepEqual(result, { spawned: false, logPath: null });
+  assert.equal(closeCalls.length, 1, 'the fd must be closed exactly once — zero means a leak, two means a double-close (EBADF)');
+  assert.throws(
+    () => fstatSync(closeCalls[0]),
+    /EBADF/,
+    'the fd must actually be closed at the OS level once shipOnSessionEnd returns',
+  );
 });
 
 test('real entrypoint run against this repo\'s own config (flag false) exits 0, prints nothing, writes no log file', () => {
