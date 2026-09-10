@@ -137,7 +137,7 @@ local-checks:
   extends: .governance_mr_rules
   stage: test
   script:
-    - npm run repo:check && npm run brain:nav && npm test
+    - npm run repo:check && npm run brain:nav && node brain/scripts/memory/index-lag.mjs && npm test
 
 # ── Invariant 4 (L3) — session memory was captured (REQUIRED) ──────────────
 memory-gate:

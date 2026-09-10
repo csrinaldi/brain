@@ -130,6 +130,9 @@ jobs:
       - name: brain:nav (navigation/link integrity)
         run: npm run brain:nav
 
+      - name: memory:index-lag (warn on index/records drift, never fails)
+        run: node brain/scripts/memory/index-lag.mjs
+
       - name: test (brain internal unit suite — brain source only)
         if: ${{ hashFiles('.brain-source') != '' }}
         run: npm test

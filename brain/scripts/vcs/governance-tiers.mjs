@@ -126,6 +126,7 @@ export const VERIFICATION_SURFACE = Object.freeze({
   ]),
   scripts: Object.freeze([
     'brain/scripts/check-refs.mjs',    // local-checks, reached via npm-script indirection (reader 3)
+    'brain/scripts/memory/index-lag.mjs', // local-checks — warns on index/records drift, never fails (#889)
     'brain/scripts/brain-audit.mjs',   // the postmerge/release audit — a gate that runs after merge
     'brain/scripts/archive.mjs',       // change:archive (reader 4)
     'brain/scripts/lib/archive-logic.mjs',
