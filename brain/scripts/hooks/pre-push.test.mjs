@@ -156,6 +156,16 @@ test('pre-push hook: calls feature-checkpoint after share when node is in PATH',
     ops.includes('feature-checkpoint'),
     `expected 'feature-checkpoint' in call log, got: ${JSON.stringify(ops)}`,
   );
+  // #888 (D4, trigger/credential boundary): `pre-push` MUST NOT invoke
+  // `ship` — asserted BEHAVIOURALLY against the same call log every other
+  // op assertion above already reads, not by a source grep (spec.md's own
+  // scenario text rules that out explicitly). Since `ship` is never called
+  // by the CURRENT, unmodified `pre-push`, this is a PIN, not a red-then-
+  // green pair on the hook itself.
+  assert.ok(
+    !ops.includes('ship'),
+    `pre-push must never invoke 'ship' (D4 — trigger wiring is deferred to #889), got: ${JSON.stringify(ops)}`,
+  );
   assert.equal(
     result.status,
     0,
