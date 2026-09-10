@@ -20,6 +20,7 @@ import { fileURLToPath } from 'node:url';
 
 import {
   NO_VERIFY_GUARD_COMMAND,
+  SESSION_END_COMMAND,
   compileSettingsHooksJson,
 } from './settings-hooks.mjs';
 
@@ -41,6 +42,37 @@ test('compileSettingsHooksJson() is deterministic and pretty-printed with a trai
   assert.equal(a, compileSettingsHooksJson());
   assert.ok(a.endsWith('\n'));
   assert.equal(a, JSON.stringify(JSON.parse(a), null, 2) + '\n');
+});
+
+// ── #906: the SessionEnd hook — the second trigger ADR-0034 L5 ratifies ──────
+
+test('#906: compileSettingsHooksJson() emits a SessionEnd block whose sole command is SESSION_END_COMMAND', () => {
+  const parsed = JSON.parse(compileSettingsHooksJson());
+
+  assert.equal(SESSION_END_COMMAND, 'npm run brain:memory:session-end');
+  assert.equal(parsed.hooks.SessionEnd[0].hooks[0].type, 'command');
+  assert.equal(parsed.hooks.SessionEnd[0].hooks[0].command, SESSION_END_COMMAND);
+  assert.equal(parsed.hooks.SessionEnd.length, 1);
+  assert.equal(parsed.hooks.SessionEnd[0].hooks.length, 1);
+});
+
+test('#906: the SessionEnd block carries no matcher, timeout, or async key', () => {
+  const parsed = JSON.parse(compileSettingsHooksJson());
+  const block = parsed.hooks.SessionEnd[0];
+  const hook = block.hooks[0];
+  assert.equal(block.matcher, undefined);
+  assert.equal(hook.timeout, undefined);
+  assert.equal(hook.async, undefined);
+});
+
+test('#906: the SessionEnd payload stays deterministic and argument-free across three calls', () => {
+  const calls = [compileSettingsHooksJson(), compileSettingsHooksJson(), compileSettingsHooksJson()];
+  assert.equal(calls[0], calls[1]);
+  assert.equal(calls[1], calls[2]);
+  for (const c of calls) {
+    const cmd = JSON.parse(c).hooks.SessionEnd[0].hooks[0].command;
+    assert.equal(cmd, 'npm run brain:memory:session-end', 'argument-free — no flags, no interpolation');
+  }
 });
 
 // ── the guard string is executable, not just present ─────────────────────────
