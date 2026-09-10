@@ -161,6 +161,49 @@ literal call and the ordering it pins are both still present in the block.
 | `openspec/changes/issue-906-lane-triggers/design.md` | Modified — A1 step 2, A1 seams list, A3, and a new C7 risk row |
 | `openspec/changes/issue-906-lane-triggers/apply-progress.md` | This section |
 
+## Post-merge fix (after PR #910 merged) — fd leak on a post-check `_spawn` throw
+
+Worktree `/home/gandalf/IA/brain-issue-906-archive`, branch `docs/issue-906-archive` off
+`origin/main` `51ff915f` (PR #910 already merged). Cold review of the merged code found a second,
+narrower defect in the same `try/catch/finally` block batch 3 introduced for C7: the `fdClosed`
+boolean set `true` inside the single `catch` for ANY thrown error, whether `ensureTrustedFd` itself
+threw (which used to close `fd` on its own refusal path) or `_spawn`/`.unref()` threw AFTER
+`ensureTrustedFd` had already succeeded. In the latter case nobody had ever closed `fd`, yet
+`fdClosed` was still set `true`, so the `finally`'s `if (!fdClosed) closeSync(fd)` skipped the
+close — a genuine fd leak on that path (harmless at process-exit-always-closes-fds scale for this
+short-lived launcher, but a defect worth fixing since strict TDD ships as sole-fix-of-record).
+
+**Fix**: removed `ensureTrustedFd`'s own `closeSync(fd)` on refusal, so the function only ever
+throws; `shipOnSessionEnd` now has exactly ONE close site — an unconditional `finally { _closeSync(fd); }`
+around the `ensureTrustedFd` + `_spawn` + `.unref()` block — reached on every path (refusal, a
+post-check `_spawn`/`.unref()` throw, or success). No boolean guard, no branch that can skip the
+close. Added a `_closeSync` seam (default `closeSync`) so tests can assert the fd is closed exactly
+once and is actually invalid (`EBADF`) afterward, without relying on `/proc/self/fd` introspection.
+
+### TDD Cycle Evidence
+
+| Step | Evidence |
+|---|---|
+| RED | New test `_spawn throws AFTER the fd was trusted: the fd is closed exactly once` added to `session-end-ship.test.mjs`, using a `_closeSync` seam that records calls and delegates to the real `closeSync`. Run against the merged (unfixed) code: `node --test brain/scripts/memory/session-end-ship.test.mjs` → **10/11 passing, 1 failing** — `closeCalls.length` was `0` (expected `1`): the fd was never closed on this path, confirming the leak. |
+| GREEN | `ensureTrustedFd` no longer closes `fd` itself; `shipOnSessionEnd` wraps the `ensureTrustedFd`/`_spawn`/`.unref()` block in a single `try { ... } finally { _closeSync(fd); }`. Same command → **11/11 green**; `closeCalls.length === 1` and `fstatSync(closeCalls[0])` throws `EBADF` after the call returns, proving the fd is actually closed at the OS level. |
+| REFACTOR | `ensureTrustedFd`'s JSDoc rewritten to state the single-close-site contract and why the old two-close-site design collapsed refusal and post-check failure into the same branch. Header/inline comments in `shipOnSessionEnd` updated to match; no further behavior change. |
+
+### Test results
+
+- Focused (`node --test brain/scripts/memory/session-end-ship.test.mjs`): **11/11 green** (10 pre-existing + 1 new).
+- Full `npm test`: **5140/5140 green**, ~28s.
+
+### Files changed (post-merge fix)
+
+| File | Action |
+|---|---|
+| `brain/scripts/memory/session-end-ship.mjs` | Modified — single unconditional close site (`_closeSync` seam), `ensureTrustedFd` no longer closes `fd` itself |
+| `brain/scripts/memory/session-end-ship.test.mjs` | Modified — 1 new regression test for the fd-leak-on-post-check-throw path |
+| `openspec/changes/issue-906-lane-triggers/apply-progress.md` | This section |
+
+(`tasks.md` was being edited concurrently by the orchestrator in this same worktree during this
+batch — not touched here, per the launch instructions' write-allowlist.)
+
 ## Files changed (this batch)
 
 | File | Action |

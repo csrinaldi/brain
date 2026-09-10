@@ -140,7 +140,8 @@ Commit: `test(hooks): re-pin that pre-push never invokes memory:ship (#906)`.
 
 ## 7. Wrap-up before the push
 
-- [ ] 7.1 Record-first: `memory:save --issue 906` committed before the push.
+- [x] 7.1 Record-first: `rec-d8ab89bef71f56e3` (`memory:save --issue 906`), committed as bc7f76ca
+      before the first push.
 - [x] 7.2 Epic note, not a new tick: append ONE LINE under 3.1b in
       `openspec/changes/issue-864-memory-2-0/tasks.md` (3.1b/3.1c already both reference
       #906 — "triggers deferred to #889" / "triggers #906") pointing at this PR once its
@@ -148,8 +149,12 @@ Commit: `test(hooks): re-pin that pre-push never invokes memory:ship (#906)`.
       triggers themselves.
       Done — one sub-line added under 3.1b, referencing #906 and this change's own tasks.md
       §9 for the PR number (not yet opened at apply time — no `[x]` flipped, 3.1c untouched).
-- [ ] 7.3 `npm test` full run recorded before commit/push; evidence into apply-progress.
-- [ ] 7.4 Fresh cold review before push (mandatory review-workload gate).
+- [x] 7.3 `npm test`: 5122/5122 after the six units, 5136/5136 before the first push, 5139/5139
+      at the merged head 9ea9b6c0.
+- [x] 7.4 Fresh cold review before the push: REVISE with six corrections (a symlink-followable
+      world-readable tmp log, token-leak assertions on the wrong channel, a leaked test file,
+      no coverage of the `day:start` wiring, the hook's real wall time, the migration's
+      `buildDefaultConfig` exception), all landed (6e0205a9, 765e6538, da3d5aaa) before the push.
 
 ## 8. Non-goals (spec.md + design A8 — restated, no work items)
 
@@ -161,8 +166,9 @@ is not a manual step.
 
 ## 9. The PR
 
-- [ ] 9.1 Open one PR, `Closes #906`, `Parent: #864` stated in prose, label `type:feature`,
-      branch `feat/issue-906-lane-triggers` → `main`. Body, in order:
+- [x] 9.1 Shipped as PR #910 (`Closes #906`, `type:feature`, branch
+      `feat/issue-906-featmemory-the-lanes-triggers-sessionend`), merged as 51ff915f on
+      2026-09-10, with every body section below. Original instructions, for the record:
       1. Summary — three bullets: the detaching `SessionEnd` launcher, the synchronous
          `day:start` sweep, both gated behind `memory.lane.enabled` (default false).
       2. Changes table (design.md's module map).
@@ -178,7 +184,12 @@ is not a manual step.
          (0.5); the tmpdir log path and "no rotation, stated not mitigated" (A3).
       8. Non-goals (section 8).
       9. Contributor checklist per `branch-pr` skill.
-- [ ] 9.2 `brain:review` (fresh cold context) before merge; post the verdict on GitHub.
+- [x] 9.2 `brain:review` on #910, both verdicts posted: round 1 REVISE at bc7f76ca with a
+      blocker the fresh review had not caught (a pre-created 0666 regular file defeats
+      `O_NOFOLLOW` and the create-only mode; fixed in 1f04e993 with an owner-verified 0700
+      per-uid directory and `fstat` on the opened fd); round 2 APPROVE at 9ea9b6c0 with one
+      correction (an fd left open when `spawn` throws after the fd was trusted — carried into
+      the archive PR with its test).
 
 ## 10. Maintainer acts (post-merge — no code, recorded for the record)
 

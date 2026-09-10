@@ -1105,6 +1105,7 @@
 {"id":"rec-76def16ae7658aed","ts":"2026-07-21T16:05:00Z","actor":"feat/issue-259-d2-pr3-net-parity-reverter-skip","type":"decision","project":"brain","file":"2026-07-rec-76def16ae7658aed.jsonl"}
 {"id":"rec-76ee2094a3a2375a","ts":"2026-07-30T11:45:42Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07-rec-76ee2094a3a2375a.jsonl"}
 {"id":"rec-7722754fe9ed40ac","ts":"2026-07-13T21:49:03Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-7722754fe9ed40ac.jsonl"}
+{"id":"rec-7723969eb495debe","ts":"2026-09-10T21:24:25Z","actor":"fix/issue-805-fixmemory-corrections-must-carry-superse","type":"architecture","project":"brain","issue":805,"file":"2026-09-rec-7723969eb495debe.jsonl"}
 {"id":"rec-7730f668e63bb3de","ts":"2026-07-11T12:33:13Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-7730f668e63bb3de.jsonl"}
 {"id":"rec-777d8755f256bd63","ts":"2026-07-13T00:22:11Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-777d8755f256bd63.jsonl"}
 {"id":"rec-779629c781a9b1d0","ts":"2026-07-22T00:20:00Z","actor":"fix/issue-259-d2-pr3c-a10-modify-channel","type":"decision","project":"brain","file":"2026-07-rec-779629c781a9b1d0.jsonl"}
@@ -2359,3 +2360,4 @@
 {"id":"rec-ffa569c06c3ab605","ts":"2026-07-25T00:48:24Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-07-rec-ffa569c06c3ab605.jsonl"}
 {"id":"rec-ffacb2bc03a6872d","ts":"2026-07-25T21:51:15Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-ffacb2bc03a6872d.jsonl"}
 {"id":"rec-ffe76add88219b01","ts":"2026-07-25T00:47:37Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-ffe76add88219b01.jsonl"}
+{"id":"rec-3afb00eb127d31a6","ts":"2026-09-10T21:36:14Z","actor":"fix/issue-805-fixmemory-corrections-must-carry-superse","type":"discovery","project":"brain","issue":805,"supersedes":"rec-7723969eb495debe","file":"2026-09-rec-3afb00eb127d31a6.jsonl"}

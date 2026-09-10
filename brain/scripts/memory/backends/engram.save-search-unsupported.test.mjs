@@ -21,6 +21,16 @@ test('engram.save: rejects with a message pointing to native mem_save', async ()
   );
 });
 
+test('engram.save: names --supersedes explicitly, with no new behaviour (#805, design.md A6)', async () => {
+  await assert.rejects(
+    () => save(),
+    (err) => {
+      assert.ok(err.message.includes('--supersedes'), `expected the refusal to name --supersedes: ${err.message}`);
+      return true;
+    },
+  );
+});
+
 test('engram.search: rejects with a message pointing to native mem_search', async () => {
   await assert.rejects(
     () => search(),

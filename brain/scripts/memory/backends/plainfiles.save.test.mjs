@@ -255,3 +255,126 @@ test('#530: an absent --issue is still allowed — tagging is encouraged, not co
     assert.ok(!('issue' in rec), 'the field is optional and must stay absent rather than land null');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// #805 — the supersedes gate: two injectable seams (_readRecordIds,
+// _upstreamRecordEntries), placed between the `issue` refusal and
+// `buildRecord`, short-circuiting entirely when `supersedes` is absent.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const defaultSaveSeams = (root, extra = {}) => ({
+  root,
+  getBranch: () => 'main',
+  getTimestamp: () => '2026-09-10T09:00:00Z',
+  getHostname: () => 'h',
+  ...extra,
+});
+
+test('#805: a supersedes value reaches buildRecord — the written record carries the field', async () => {
+  const root = tmpRoot();
+  try {
+    const target = 'rec-0123456789abcdef';
+    const r = await save('t', 'c', { type: 'discovery', project: 'brain', supersedes: target }, defaultSaveSeams(root, {
+      _readRecordIds: () => new Set([target]),
+      _upstreamRecordEntries: () => { throw new Error('must not be called on a local hit'); },
+    }));
+    const rec = JSON.parse(readFileSync(r.file, 'utf8').trim().split('\n').pop());
+    assert.equal(rec.supersedes, target);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('#805: supersedes absent — neither new seam is called, the gate is a no-op', async () => {
+  const root = tmpRoot();
+  let readRecordIdsCalls = 0;
+  let upstreamCalls = 0;
+  try {
+    await save('t', 'c', { type: 'discovery', project: 'brain' }, defaultSaveSeams(root, {
+      _readRecordIds: () => { readRecordIdsCalls += 1; return new Set(); },
+      _upstreamRecordEntries: () => { upstreamCalls += 1; return { ok: true, byId: new Map() }; },
+    }));
+    assert.equal(readRecordIdsCalls, 0, 'no supersedes flag means no local read at all');
+    assert.equal(upstreamCalls, 0);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('#805: a local hit never calls the upstream seam (thunk discipline, A1)', async () => {
+  const root = tmpRoot();
+  let upstreamCalls = 0;
+  try {
+    const target = 'rec-0123456789abcdef';
+    await save('t', 'c', { type: 'discovery', project: 'brain', supersedes: target }, defaultSaveSeams(root, {
+      _readRecordIds: () => new Set([target]),
+      _upstreamRecordEntries: () => { upstreamCalls += 1; return { ok: true, byId: new Map() }; },
+    }));
+    assert.equal(upstreamCalls, 0);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+// fresh-context review MINOR-2 — the `verdict.configError` warn branch
+// (plainfiles.mjs:140-142) had no direct test: it fires when the upstream
+// check still succeeds (ok:true, the id IS in the store) but
+// `brain.config.json` itself could not be read while resolving the ref.
+test('#805: a configError on an otherwise-ok upstream verdict warns but still writes the record', async () => {
+  const root = tmpRoot();
+  try {
+    const target = 'rec-0123456789abcdef';
+    const { result, warnings } = await captureWarn(() =>
+      save('t', 'c', { type: 'discovery', project: 'brain', supersedes: target }, defaultSaveSeams(root, {
+        _readRecordIds: () => new Set(),
+        _upstreamRecordEntries: () => ({
+          ok: true,
+          ref: 'origin/main',
+          byId: new Map([[target, 'b']]),
+          configError: 'bad json',
+        }),
+      })),
+    );
+    assert.equal(result.written, true, 'a configError must not block the write once the id is verified');
+    assert.equal(warnings.length, 1, `expected exactly one warning, got: ${JSON.stringify(warnings)}`);
+    assert.ok(warnings[0].includes('bad json'), `warning must carry the configError detail: ${warnings[0]}`);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+// cold-review blocker — a malformed id must be refused by grammar alone,
+// with ZERO IO: no local store read, no upstream check. Before this fix,
+// `_readRecordIds` ran unconditionally one statement before the shape check,
+// so a malformed id still read the store from disk before being rejected.
+test('#805: a malformed supersedes id is refused before the store is read — no IO at all', async () => {
+  const root = tmpRoot();
+  let readRecordIdsCalls = 0;
+  let upstreamCalls = 0;
+  try {
+    await assert.rejects(
+      () => save('t', 'c', { type: 'discovery', project: 'brain', supersedes: 'not-a-valid-id' }, defaultSaveSeams(root, {
+        _readRecordIds: () => { readRecordIdsCalls += 1; return new Set(); },
+        _upstreamRecordEntries: () => { upstreamCalls += 1; return { ok: true, byId: new Map() }; },
+      })),
+    );
+    assert.equal(readRecordIdsCalls, 0, 'a malformed id is refused by grammar alone — the store must never be read');
+    assert.equal(upstreamCalls, 0, 'a malformed id must never reach the upstream check either');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+for (const [label, opts] of [
+  ['malformed', { supersedes: 'not-a-valid-id', _readRecordIds: () => new Set(), _upstreamRecordEntries: () => { throw new Error('must not be called'); } }],
+  ['not-in-store', { supersedes: 'rec-0123456789abcdef', _readRecordIds: () => new Set(), _upstreamRecordEntries: () => ({ ok: true, ref: 'origin/main', byId: new Map() }) }],
+  ['could-not-verify', { supersedes: 'rec-0123456789abcdef', _readRecordIds: () => new Set(), _upstreamRecordEntries: () => ({ ok: false, ref: null, reason: 'no upstream ref resolved (tried origin/HEAD, origin/main)' }) }],
+]) {
+  test(`#805: a ${label} supersedes refusal rejects with no write, no index change, no indexFailed`, async () => {
+    const root = tmpRoot();
+    const { supersedes, _readRecordIds, _upstreamRecordEntries } = opts;
+    try {
+      await assert.rejects(
+        () => save('t', 'c', { type: 'discovery', project: 'brain', supersedes }, defaultSaveSeams(root, {
+          _readRecordIds, _upstreamRecordEntries,
+        })),
+        (err) => {
+          assert.equal(err.indexFailed, undefined, 'a refusal must never carry indexFailed — nothing was written');
+          return true;
+        },
+      );
+      assert.equal(existsSync(join(root, '.memory', 'records')), false, `no records/ dir should be created on a ${label} refusal`);
+      assert.equal(existsSync(join(root, '.memory', 'index.jsonl')), false, `no index should be written on a ${label} refusal`);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+}
