@@ -173,3 +173,24 @@ test('readChunkObservations: no definition anywhere in brain/scripts/** or test/
   });
   assert.deepEqual(defined, [], 'readChunkObservations must not be redefined anywhere');
 });
+
+// ── D4 guard 4 — PR #258's readers stay records-only (spec.md, pin) ────────
+
+test('brain-audit.mjs and brain-check.mjs import readRecordObservations, never a chunk reader (D4 guard 4)', () => {
+  // Green on arrival, not red-first — PR #258 already migrated both readers.
+  // Stated as a regression pin, not a red-first, per spec.md's scenario.
+  for (const relFile of ['brain/scripts/brain-audit.mjs', 'brain/scripts/brain-check.mjs']) {
+    const src = readFileSync(join(repoRoot, relFile), 'utf8');
+    assert.match(
+      src,
+      /import\s*\{[^}]*\breadRecordObservations\b[^}]*\}\s*from\s*['"][^'"]*store\.mjs['"]/,
+      `${relFile} must import readRecordObservations`,
+    );
+    assert.doesNotMatch(src, /\breadChunkObservations\b/, `${relFile} must never reference readChunkObservations`);
+    assert.doesNotMatch(
+      src,
+      /\bcollectChunkObservations\b/,
+      `${relFile} must never reference collectChunkObservations`,
+    );
+  }
+});
