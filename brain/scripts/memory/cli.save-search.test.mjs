@@ -81,3 +81,63 @@ test('memory search under plainfiles with no match prints an empty-results messa
   const result = runCli(['search', 'nothing-will-match-this-xyz'], { testRoot });
   assert.equal(result.status, 0, `expected exit 0, got ${result.status}. stderr: ${result.stderr}`);
 });
+
+// ── --supersedes (#805): the CLI enforces "exactly one id"; the backend cannot ──
+
+test('memory save --supersedes <local id> writes the field and exits 0', () => {
+  const testRoot = mkdtempSync(join(tmpdir(), 'brain-cli-save-supersedes-'));
+  const seed = runCli(['save', 'A', 'first record', '--type', 'discovery', '--project', 'brain'], { testRoot });
+  assert.equal(seed.status, 0, `seed save failed: ${seed.stderr}`);
+  const recordsDir = join(testRoot, '.memory', 'records');
+  const seedFile = readdirSync(recordsDir).filter((f) => f.endsWith('.jsonl'))[0];
+  const targetId = JSON.parse(readFileSync(join(recordsDir, seedFile), 'utf8').trim()).id;
+
+  const result = runCli(
+    ['save', 'B', 'a correction', '--type', 'discovery', '--project', 'brain', '--supersedes', targetId],
+    { testRoot },
+  );
+  assert.equal(result.status, 0, `expected exit 0, got ${result.status}. stderr: ${result.stderr}`);
+  const files = readdirSync(recordsDir).filter((f) => f.endsWith('.jsonl'));
+  const record = files
+    .map((f) => JSON.parse(readFileSync(join(recordsDir, f), 'utf8').trim().split('\n').pop()))
+    .find((r) => r.supersedes === targetId);
+  assert.ok(record, 'the written record must carry the supersedes field');
+});
+
+test('memory save --supersedes given twice exits 1, naming fan-in as deferred', () => {
+  const testRoot = mkdtempSync(join(tmpdir(), 'brain-cli-save-supersedes-repeat-'));
+  const result = runCli(
+    ['save', 't', 'c', '--type', 'discovery', '--project', 'brain', '--supersedes', 'rec-0123456789abcdef', '--supersedes', 'rec-fedcba9876543210'],
+    { testRoot },
+  );
+  assert.equal(result.status, 1, `expected exit 1, got ${result.status}. stdout: ${result.stdout}`);
+  assert.match(result.stderr, /fan-in|deferred/i, `must name fan-in as deferred: ${result.stderr}`);
+  const recordsDir = join(testRoot, '.memory', 'records');
+  assert.equal(existsSync(recordsDir), false, 'a repeated --supersedes must never reach a write');
+});
+
+test('memory save --supersedes as the final argument (no value) exits 1, no record written', () => {
+  const testRoot = mkdtempSync(join(tmpdir(), 'brain-cli-save-supersedes-noval-'));
+  const result = runCli(
+    ['save', 't', 'c', '--type', 'discovery', '--project', 'brain', '--supersedes'],
+    { testRoot },
+  );
+  assert.equal(result.status, 1, `expected exit 1, got ${result.status}. stdout: ${result.stdout}`);
+  const recordsDir = join(testRoot, '.memory', 'records');
+  assert.equal(existsSync(recordsDir), false, 'a value-less --supersedes must never reach a write');
+});
+
+test('memory save --supersedes <unknown id> under the non-git test root exits 1 with could-not-verify, quoted', () => {
+  // BRAIN_MEMORY_TEST_ROOT is a bare mkdtempSync dir, not a git repo (design.md
+  // A8) — an unknown id here is honestly could-not-verify, never not-in-store.
+  const testRoot = mkdtempSync(join(tmpdir(), 'brain-cli-save-supersedes-unknown-'));
+  const result = runCli(
+    ['save', 't', 'c', '--type', 'discovery', '--project', 'brain', '--supersedes', 'rec-0123456789abcdef'],
+    { testRoot },
+  );
+  assert.equal(result.status, 1, `expected exit 1, got ${result.status}. stdout: ${result.stdout}`);
+  assert.match(result.stderr, /no upstream ref resolved \(tried origin\/HEAD, origin\/main\)/,
+    `the could-not-verify reason must be quoted verbatim: ${result.stderr}`);
+  const recordsDir = join(testRoot, '.memory', 'records');
+  assert.equal(existsSync(recordsDir), false);
+});
