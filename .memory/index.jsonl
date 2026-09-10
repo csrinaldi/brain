@@ -2297,6 +2297,7 @@
 {"id":"rec-f9f12efe97c49ece","ts":"2026-07-25T00:48:18Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-f9f12efe97c49ece.jsonl"}
 {"id":"rec-fa11a68c8745cf15","ts":"2026-07-25T21:51:53Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07-rec-fa11a68c8745cf15.jsonl"}
 {"id":"rec-fa22a86ab5996838","ts":"2026-07-11T12:32:44Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07-rec-fa22a86ab5996838.jsonl"}
+{"id":"rec-fa2869c4792a5941","ts":"2026-09-10T00:26:26Z","actor":"feat/issue-897-featmemory-the-lane-planner","type":"architecture","project":"brain","issue":897,"file":"2026-09-rec-fa2869c4792a5941.jsonl"}
 {"id":"rec-fa5e73b2473e75ef","ts":"2026-07-13T00:21:18Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-fa5e73b2473e75ef.jsonl"}
 {"id":"rec-fa8622e2cab4fd1d","ts":"2026-07-10T16:18:41Z","actor":"@legacy","type":"pattern","project":"brain","file":"2026-07-rec-fa8622e2cab4fd1d.jsonl"}
 {"id":"rec-faadf116a891f9b9","ts":"2026-07-25T21:51:46Z","actor":"@legacy","type":"bugfix","project":"brain","file":"2026-07-rec-faadf116a891f9b9.jsonl"}
