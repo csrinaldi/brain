@@ -1,0 +1,302 @@
+// collect.integration.test.mjs — collectLane() against a REAL temp repo with a
+// bare origin and two real `git worktree add` trees (#887 Slice B).
+//
+// A pure unit suite (plan.test.mjs) cannot prove the two invariants this
+// slice exists for: "no working tree is touched" and "the secret never
+// reaches the object database" are facts about a real git object database,
+// not about a function's return value. This file proves them against real
+// git plumbing, mirroring bootstrap.worktree.test.mjs's real-worktree
+// pattern and cli.audit.test.mjs's fixture-repo pattern.
+//
+// See openspec/changes/issue-887-lane-collector/{spec,design}.md.
+
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { spawnSync, execFileSync } from 'node:child_process';
+import { mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+
+import { testTmp } from '../../lib/test-tmp.mjs';
+import { collectLane, defaultGit } from './collect.mjs';
+
+const COLLECT_SOURCE = readFileSync(new URL('./collect.mjs', import.meta.url), 'utf8');
+
+const GIT_ENV = {
+  ...process.env,
+  GIT_AUTHOR_NAME: 'brain-test',
+  GIT_AUTHOR_EMAIL: 'brain-test@example.com',
+  GIT_COMMITTER_NAME: 'brain-test',
+  GIT_COMMITTER_EMAIL: 'brain-test@example.com',
+};
+
+function git(cwd, ...args) {
+  const r = spawnSync('git', args, { cwd, encoding: 'utf8', env: GIT_ENV });
+  if (r.status !== 0) throw new Error(`git ${args.join(' ')} (cwd=${cwd}) failed: ${r.stderr}`);
+  return r.stdout;
+}
+
+/** A minimal valid record body, one physical JSON line. */
+function recordJson(id, content) {
+  return JSON.stringify({
+    id, ts: '2026-09-09T00:00:00Z', actor: '@brain-test', actorKind: 'agent',
+    type: 'discovery', project: 'brain', content,
+  }) + '\n';
+}
+
+const FILES = {
+  alreadyOnMain: '2026-09-rec-aaaaaaaaaaaaaaaa.jsonl',
+  identical: '2026-09-rec-1111111111111111.jsonl',
+  divergent: '2026-09-rec-2222222222222222.jsonl',
+  secretRecord: '2026-09-rec-3333333333333333.jsonl',
+  modified: '2026-09-rec-4444444444444444.jsonl',
+};
+
+/**
+ * Builds: a bare `origin`, a `main` checkout pushed to it (carrying one
+ * record already tracked on main — the "already-on-main" fixture's path),
+ * and two linked worktrees (`wt-a`, `wt-b`) each on their own branch.
+ *
+ *   wt-a: a tracked-then-locally-edited record (modified-tracked, ' M'),
+ *         an untracked identical-bytes copy, an untracked divergent copy,
+ *         an untracked secret-bearing record.
+ *   wt-b: an untracked identical-bytes copy, an untracked divergent copy
+ *         (different bytes, same filename), an untracked copy of the
+ *         already-on-main filename (candidate-shaped, but skipped because
+ *         the path is already in origin/main's tree).
+ *
+ * `wt-a` sorts lexicographically before `wt-b` (same prefix, 'a' < 'b'), so
+ * the divergent group's winner is always wt-a's bytes — C2's tiebreak.
+ */
+function buildFixtureRepo() {
+  const base = testTmp('brain-lane-');
+  const originDir = join(base, 'origin.git');
+  const mainDir = join(base, 'main');
+  const wtADir = join(base, 'wt-a');
+  const wtBDir = join(base, 'wt-b');
+
+  git(base, 'init', '--bare', '-q', originDir);
+  git(base, 'init', '-q', '-b', 'main', mainDir);
+  git(mainDir, 'remote', 'add', 'origin', originDir);
+
+  mkdirSync(join(mainDir, '.memory', 'records'), { recursive: true });
+  writeFileSync(
+    join(mainDir, '.memory', 'records', FILES.alreadyOnMain),
+    recordJson('rec-aaaaaaaaaaaaaaaa', 'already on main'),
+    'utf8',
+  );
+  git(mainDir, 'add', '.memory');
+  git(mainDir, 'commit', '-q', '-m', 'seed');
+  git(mainDir, 'push', '-q', '-u', 'origin', 'main');
+  git(mainDir, 'fetch', '-q', 'origin');
+
+  git(mainDir, 'worktree', 'add', '-q', wtADir, '-b', 'lane-a');
+  git(mainDir, 'worktree', 'add', '-q', wtBDir, '-b', 'lane-b');
+  for (const wt of [wtADir, wtBDir]) mkdirSync(join(wt, '.memory', 'records'), { recursive: true });
+
+  // modified-tracked: commit ONE record on wt-a's own branch, scoped `add`
+  // so the other untracked fixtures written below never get swept in.
+  const modifiedPath = join('.memory', 'records', FILES.modified);
+  writeFileSync(join(wtADir, modifiedPath), recordJson('rec-4444444444444444', 'original'), 'utf8');
+  git(wtADir, 'add', modifiedPath);
+  git(wtADir, 'commit', '-q', '-m', 'track one record on lane-a');
+  writeFileSync(join(wtADir, modifiedPath), recordJson('rec-4444444444444444', 'edited locally, uncommitted'), 'utf8');
+
+  // identical-bytes copy in both worktrees.
+  const identicalContent = recordJson('rec-1111111111111111', 'identical copy');
+  writeFileSync(join(wtADir, '.memory', 'records', FILES.identical), identicalContent, 'utf8');
+  writeFileSync(join(wtBDir, '.memory', 'records', FILES.identical), identicalContent, 'utf8');
+
+  // divergent copy: same filename, different bytes.
+  writeFileSync(join(wtADir, '.memory', 'records', FILES.divergent), recordJson('rec-2222222222222222', 'version from wt-a'), 'utf8');
+  writeFileSync(join(wtBDir, '.memory', 'records', FILES.divergent), recordJson('rec-2222222222222222', 'version from wt-b'), 'utf8');
+
+  // secret-bearing record, wt-a only.
+  writeFileSync(
+    join(wtADir, '.memory', 'records', FILES.secretRecord),
+    recordJson('rec-3333333333333333', `token ghp_${'x'.repeat(24)}`),
+    'utf8',
+  );
+
+  // already-on-main: untracked in wt-b, same path as the file main already carries.
+  writeFileSync(
+    join(wtBDir, '.memory', 'records', FILES.alreadyOnMain),
+    recordJson('rec-aaaaaaaaaaaaaaaa', 'already on main'),
+    'utf8',
+  );
+
+  return { base, originDir, mainDir, wtADir, wtBDir };
+}
+
+/** `git status --porcelain -uall` snapshots, main + both worktrees. */
+function statusSnapshot({ mainDir, wtADir, wtBDir }) {
+  return {
+    main: git(mainDir, 'status', '--porcelain', '-uall'),
+    wtA: git(wtADir, 'status', '--porcelain', '-uall'),
+    wtB: git(wtBDir, 'status', '--porcelain', '-uall'),
+  };
+}
+
+function headSnapshot({ mainDir, wtADir, wtBDir }) {
+  return {
+    main: git(mainDir, 'rev-parse', 'HEAD'),
+    wtA: git(wtADir, 'rev-parse', 'HEAD'),
+    wtB: git(wtBDir, 'rev-parse', 'HEAD'),
+  };
+}
+
+/** Wraps defaultGit, recording every argv this module issues. */
+function countingGit() {
+  const calls = [];
+  const git = (argv, opts) => {
+    calls.push(argv);
+    return defaultGit(argv, opts);
+  };
+  return { git, calls };
+}
+
+test('B1.1/B1.2 — collects clean candidates, routes every skip, and touches no working tree or index', () => {
+  const repo = buildFixtureRepo();
+  const before = { status: statusSnapshot(repo), head: headSnapshot(repo) };
+
+  const result = collectLane({ root: repo.mainDir, date: '2026-09-09', host: 'test-host' });
+
+  assert.equal(result.ref, 'refs/heads/memory/test-host-2026-09-09');
+  assert.ok(result.commit, 'a run with candidates must produce a commit');
+  assert.equal(result.baseFetched, true);
+
+  // identical (1) + divergent winner (1) = 2 collected; secret/already-on-main/modified-tracked all skipped.
+  assert.equal(result.collected, 2);
+
+  const reasons = Object.fromEntries(result.skipped.map((s) => [s.file, s.reason]));
+  assert.equal(reasons[FILES.alreadyOnMain], 'already-on-main');
+  assert.equal(reasons[FILES.modified], 'modified-tracked');
+  assert.equal(reasons[FILES.secretRecord], 'secret');
+  const secretSkip = result.skipped.find((s) => s.file === FILES.secretRecord);
+  assert.ok(secretSkip.pattern && secretSkip.lineNumber, 'a secret skip carries pattern + lineNumber only');
+  assert.ok(!('line' in secretSkip), 'the matched line text must never be attached to the skip entry');
+
+  // both the identical-bytes filename and the divergent filename repeat
+  // across the two worktrees, so both are duplicate GROUPS; only the
+  // divergent one is marked divergent (A6: byte difference drives the
+  // tiebreak, canonical difference drives the `divergent` flag).
+  assert.equal(result.duplicates.ids, 2);
+  assert.equal(result.duplicates.divergent, 1);
+
+  const after = { status: statusSnapshot(repo), head: headSnapshot(repo) };
+  assert.deepEqual(after.status, before.status, 'git status --porcelain -uall must be byte-identical before/after in every worktree');
+  assert.deepEqual(after.head, before.head, 'HEAD must be unchanged in every worktree');
+
+  const winnerBlob = git(repo.mainDir, 'cat-file', '-p', `${result.commit}:${'.memory/records/' + FILES.divergent}`);
+  assert.match(winnerBlob, /version from wt-a/, 'C2 tiebreak: the lexicographically-first worktree path wins');
+});
+
+test('B1.3 — the secret never reaches the object database', () => {
+  const repo = buildFixtureRepo();
+  const secretContent = readFileSync(join(repo.wtADir, '.memory', 'records', FILES.secretRecord), 'utf8');
+
+  const result = collectLane({ root: repo.mainDir, date: '2026-09-09', host: 'test-host' });
+
+  // the would-be blob id, computed the same way the shell would have (no -w: never written for real here).
+  const wouldBeOid = execFileSync('git', ['hash-object', '--stdin'], { cwd: repo.mainDir, input: secretContent, encoding: 'utf8' }).trim();
+  const catFile = spawnSync('git', ['cat-file', '-e', wouldBeOid], { cwd: repo.mainDir, encoding: 'utf8' });
+  assert.notEqual(catFile.status, 0, 'the secret-bearing blob must never have been written with hash-object -w');
+
+  const lsTree = git(repo.mainDir, 'ls-tree', '-r', result.commit);
+  assert.doesNotMatch(lsTree, new RegExp(FILES.secretRecord), 'the secret-bearing path must be absent from the committed tree');
+
+  const dump = JSON.stringify(result);
+  assert.doesNotMatch(dump, /ghp_x{24}/, 'the matched secret literal must never appear in the returned shape');
+});
+
+test('B1.4 — ref lifecycle: first run creates, same-day re-run appends, a third no-op run leaves it untouched', () => {
+  const repo = buildFixtureRepo();
+
+  const first = collectLane({ root: repo.mainDir, date: '2026-09-09', host: 'test-host' });
+  assert.ok(first.commit);
+  assert.equal(git(repo.mainDir, 'rev-list', '--count', first.ref).trim(), '1');
+  const refList1 = git(repo.mainDir, 'for-each-ref', 'refs/heads/memory/').split('\n').filter(Boolean);
+  assert.equal(refList1.length, 1, 'exactly one refs/heads/memory/* entry — never a -<n> branch');
+
+  // a new candidate appears after the first run.
+  const newFile = '2026-09-rec-5555555555555555.jsonl';
+  writeFileSync(join(repo.wtBDir, '.memory', 'records', newFile), recordJson('rec-5555555555555555', 'second batch'), 'utf8');
+
+  const second = collectLane({ root: repo.mainDir, date: '2026-09-09', host: 'test-host' });
+  assert.ok(second.commit);
+  assert.notEqual(second.commit, first.commit);
+  assert.equal(git(repo.mainDir, 'rev-list', '--count', second.ref).trim(), '2');
+  const parentOfSecond = git(repo.mainDir, 'rev-parse', `${second.commit}^`).trim();
+  assert.equal(parentOfSecond, first.commit, 'the append parents off the ref\'s prior tip, not origin/main again');
+  const refList2 = git(repo.mainDir, 'for-each-ref', 'refs/heads/memory/').split('\n').filter(Boolean);
+  assert.equal(refList2.length, 1, 'still exactly one refs/heads/memory/* entry after the append');
+
+  // a third run with nothing new.
+  const tipBeforeThird = git(repo.mainDir, 'rev-parse', second.ref).trim();
+  const third = collectLane({ root: repo.mainDir, date: '2026-09-09', host: 'test-host' });
+  assert.equal(third.commit, null);
+  assert.equal(git(repo.mainDir, 'rev-parse', second.ref).trim(), tipBeforeThird, 'the ref sha is unchanged when there is nothing new to collect');
+});
+
+test('B1.5 — a lost CAS race exits non-zero as `raced`, leaves the ref untouched by this run, and is never retried', () => {
+  const repo = buildFixtureRepo();
+  const first = collectLane({ root: repo.mainDir, date: '2026-09-09', host: 'test-host' });
+  assert.ok(first.commit);
+
+  // a new candidate for the second run.
+  const newFile = '2026-09-rec-6666666666666666.jsonl';
+  writeFileSync(join(repo.wtBDir, '.memory', 'records', newFile), recordJson('rec-6666666666666666', 'raced batch'), 'utf8');
+
+  // a racing writer: right when OUR run issues `update-ref`, force-move the
+  // ref out from under it first, using a raw git call outside the seam —
+  // simulating a second collector that won the race in between our plan-time
+  // tip observation and our own update-ref call.
+  const raceTree = git(repo.mainDir, 'rev-parse', `${first.commit}^{tree}`).trim();
+  const raceCommit = git(repo.mainDir, 'commit-tree', raceTree, '-m', 'racing writer').trim();
+  let updateRefCalls = 0;
+  const racingGit = (argv, opts) => {
+    if (argv[0] === 'update-ref') {
+      updateRefCalls += 1;
+      git(repo.mainDir, 'update-ref', first.ref, raceCommit);
+    }
+    return defaultGit(argv, opts);
+  };
+
+  assert.throws(
+    () => collectLane({ root: repo.mainDir, date: '2026-09-09', host: 'test-host', git: racingGit }),
+    (err) => {
+      assert.equal(err.raced, true);
+      assert.match(err.message, /raced|memory\.collect\.raced/i);
+      return true;
+    },
+  );
+
+  assert.equal(updateRefCalls, 1, 'the CAS is attempted exactly once — a lost race is never retried');
+  assert.equal(git(repo.mainDir, 'rev-parse', first.ref).trim(), raceCommit, 'the racing writer\'s ref move survives — our run did not overwrite it');
+});
+
+test('B1.6 — scope + seam guard: every `-C` call is a `status`, no push, no worktree prune, no PR/hook code', () => {
+  const repo = buildFixtureRepo();
+
+  // a real prunable worktree: add one, then delete its directory from disk —
+  // git now reports it `prunable` in `worktree list --porcelain`.
+  const prunableDir = join(repo.base, 'wt-prunable');
+  git(repo.mainDir, 'worktree', 'add', '-q', prunableDir, '-b', 'lane-prunable');
+  rmSync(prunableDir, { recursive: true, force: true });
+
+  const { git: recordingGit, calls } = countingGit();
+  const result = collectLane({ root: repo.mainDir, date: '2026-09-09', host: 'test-host', git: recordingGit });
+  assert.ok(result.commit);
+
+  for (const argv of calls) {
+    if (argv[0] === '-C') assert.equal(argv[2], 'status', `every -C call must be a status call, got: ${argv.join(' ')}`);
+    assert.notEqual(argv[0], 'push', 'lane/collect.mjs must never push');
+    assert.notEqual(argv.includes('prune'), true, 'git worktree prune must never be invoked');
+  }
+  assert.ok(!calls.some((argv) => argv[0] === '-C' && argv[1] === prunableDir), 'a prunable worktree must never be status-checked');
+
+  assert.doesNotMatch(COLLECT_SOURCE, /\bpush\b/, 'no push call may exist in the source at all');
+  assert.doesNotMatch(COLLECT_SOURCE, /pull-request|mrCreate|mrAutoMerge/i, 'no PR-body builder or PR call may exist');
+  assert.doesNotMatch(COLLECT_SOURCE, /hooks?\//i, 'no hook invocation may exist');
+
+  git(repo.mainDir, 'worktree', 'prune');
+});
