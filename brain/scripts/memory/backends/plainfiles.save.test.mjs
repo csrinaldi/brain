@@ -1,6 +1,15 @@
 // plainfiles.save.test.mjs — unit tests for backends/plainfiles.mjs#save (C3,
-// issue #246, REQ-C3-2). Every seam is injected (root, getBranch, getTimestamp,
-// getHostname) so no real git/clock/hostname dependency runs in `npm test`.
+// issue #246, REQ-C3-2; provenance rewired at #738). Every seam is injected
+// (root, getBranch, getTimestamp, getHostname, getGitConfig, getEnv) so no
+// real git/clock/hostname/env dependency runs in `npm test`.
+//
+// #738: `actor` is now the configured `brain.actor` handle (never the
+// branch); `actorKind` is measured from the agent-marker env (never a
+// door-typed constant); `issue` is declared or derived from the branch. Every
+// call site below injects `getGitConfig`/`getEnv` explicitly — leaving either
+// to its real default would read this MACHINE's ambient git config / process
+// env (this very session has `AI_AGENT` set), making the suite's verdict
+// depend on where it runs.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -8,12 +17,18 @@ import { mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-// RED: plainfiles.mjs does not exist yet.
 import { save } from './plainfiles.mjs';
 
 function tmpRoot() {
   return mkdtempSync(join(tmpdir(), 'plainfiles-save-'));
 }
+
+// A deterministic identity: `brain.actor` resolves, no agent marker set.
+// Spread into a seam bag and override individual keys per test as needed.
+const identitySeams = {
+  getGitConfig: (key) => (key === 'brain.actor' ? '@test' : null),
+  getEnv: () => ({}),
+};
 
 // ── 2.1 — a secret hit aborts BEFORE appendRecord: no write, no index change ──
 
@@ -25,7 +40,10 @@ test('save: a secret hit aborts before any write (fail-closed, no index change)'
         'leaked token',
         'ghp_abcdefghijklmnopqrstuvwx',
         { type: 'discovery', project: 'brain' },
-        { root, getBranch: () => 'main', getTimestamp: () => '2026-07-12T09:00:00Z', getHostname: () => 'host1' },
+        {
+          root, getBranch: () => 'main', getTimestamp: () => '2026-07-12T09:00:00Z', getHostname: () => 'host1',
+          ...identitySeams,
+        },
       ),
     );
     assert.equal(existsSync(join(root, '.memory', 'records')), false, 'no records/ dir should be created on a secret hit');
@@ -37,7 +55,7 @@ test('save: a secret hit aborts before any write (fail-closed, no index change)'
 
 // ── 2.2 — a successful save records MEASURED provenance, not caller input ────
 
-test('save: argument shape has no actor/actorKind/ts field; the appended record uses measured provenance', async () => {
+test('save: argument shape has no actor/actorKind/ts field; actor is the configured handle, never the branch', async () => {
   const root = tmpRoot();
   try {
     const opts = { type: 'discovery', project: 'brain' };
@@ -52,6 +70,7 @@ test('save: argument shape has no actor/actorKind/ts field; the appended record 
       getBranch: () => 'feat/some-branch',
       getTimestamp: () => '2026-07-12T09:41:07Z',
       getHostname: () => 'my-host',
+      ...identitySeams,
     });
 
     assert.equal(result.written, true);
@@ -60,8 +79,9 @@ test('save: argument shape has no actor/actorKind/ts field; the appended record 
 
     const raw = readFileSync(result.file, 'utf8').trim();
     const record = JSON.parse(raw);
-    assert.equal(record.actor, 'feat/some-branch', 'actor must come from the injected getBranch seam');
-    assert.equal(record.actorKind, 'agent', 'actorKind must be the door-typed constant \'agent\'');
+    assert.equal(record.actor, '@test', 'actor must come from the configured brain.actor handle, never the branch');
+    assert.notEqual(record.actor, 'feat/some-branch', 'the branch must never reach actor');
+    assert.equal(record.actorKind, 'human', 'actorKind is measured — no agent marker means human');
     assert.equal(record.ts, '2026-07-12T09:41:07Z', 'ts must come from the injected getTimestamp seam');
     assert.equal(record.id, result.id);
 
@@ -70,6 +90,61 @@ test('save: argument shape has no actor/actorKind/ts field; the appended record 
     assert.ok(existsSync(indexPath), 'index.jsonl must be rebuilt after a successful save');
     const indexRaw = readFileSync(indexPath, 'utf8');
     assert.ok(indexRaw.includes(record.id), 'the rebuilt index must include the new record id');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('save: actorKind follows the injected agent-marker env', async () => {
+  const root = tmpRoot();
+  try {
+    const result = await save('t', 'c', { type: 'discovery', project: 'brain' }, {
+      root, getBranch: () => 'main', getTimestamp: () => '2026-07-12T09:00:00Z', getHostname: () => 'h',
+      getGitConfig: (key) => (key === 'brain.actor' ? '@test' : null),
+      getEnv: () => ({ AI_AGENT: 'claude-code' }),
+    });
+    const record = JSON.parse(readFileSync(result.file, 'utf8').trim());
+    assert.equal(record.actorKind, 'agent');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test(
+  'save: a configured brain.agentEnv name is wired through to resolveActorKind, not just the default AI_AGENT ' +
+    '(MINOR-3c, fresh-context review)',
+  async () => {
+    const root = tmpRoot();
+    try {
+      const result = await save('t', 'c', { type: 'discovery', project: 'brain' }, {
+        root, getBranch: () => 'main', getTimestamp: () => '2026-07-12T09:00:00Z', getHostname: () => 'h',
+        getGitConfig: (key) => {
+          if (key === 'brain.actor') return '@test';
+          if (key === 'brain.agentEnv') return 'MY_AGENT';
+          return null;
+        },
+        getEnv: () => ({ MY_AGENT: 'x' }),
+      });
+      const record = JSON.parse(readFileSync(result.file, 'utf8').trim());
+      assert.equal(record.actorKind, 'agent', 'a non-default agentEnv name must still be measured as agent');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+);
+
+test('save: source names the host and both instruments (actor + actorKind)', async () => {
+  const root = tmpRoot();
+  try {
+    const result = await save('t', 'c', { type: 'discovery', project: 'brain' }, {
+      root, getBranch: () => 'main', getTimestamp: () => '2026-07-12T09:00:00Z', getHostname: () => 'my-host',
+      getGitConfig: (key) => (key === 'brain.actor' ? '@test' : null),
+      getEnv: () => ({ AI_AGENT: 'claude-code' }),
+    });
+    const record = JSON.parse(readFileSync(result.file, 'utf8').trim());
+    assert.match(record.source, /my-host/);
+    assert.match(record.source, /brain\.actor/);
+    assert.match(record.source, /AI_AGENT/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -90,6 +165,7 @@ test('save: warns when --scope/--topic are passed (ignored — no home in the re
     const { result, warnings } = await captureWarn(() =>
       save('t', 'c', { type: 'discovery', project: 'brain', scope: 'project', topic: 'sdd/x/y' }, {
         root, getBranch: () => 'main', getTimestamp: () => '2026-07-12T09:00:00Z', getHostname: () => 'h',
+        ...identitySeams,
       }),
     );
     assert.equal(result.written, true, 'the record must still be written normally');
@@ -107,6 +183,7 @@ test('save: does NOT warn when scope/topic are absent', async () => {
     const { result, warnings } = await captureWarn(() =>
       save('t', 'c', { type: 'discovery', project: 'brain' }, {
         root, getBranch: () => 'main', getTimestamp: () => '2026-07-12T09:00:00Z', getHostname: () => 'h',
+        ...identitySeams,
       }),
     );
     assert.equal(result.written, true);
@@ -117,18 +194,128 @@ test('save: does NOT warn when scope/topic are absent', async () => {
 });
 
 // ── 2.4 — seam defaults: getBranch/getTimestamp/getHostname default to the real impls ──
+// (getGitConfig/getEnv are still injected — this test is about the OTHER seams'
+// real defaults, not about the ambient git identity of the machine running it.)
 
 test('save: getBranch/getTimestamp/getHostname default to real implementations when not injected', async () => {
   const root = tmpRoot(); // NOT a git repo — real getBranch must fall back to 'unknown'
   try {
-    const result = await save('another title', 'another body', { type: 'discovery', project: 'brain' }, { root });
+    const result = await save('another title', 'another body', { type: 'discovery', project: 'brain' }, {
+      root, ...identitySeams,
+    });
     assert.equal(result.written, true);
 
     const raw = readFileSync(result.file, 'utf8').trim();
     const record = JSON.parse(raw);
-    assert.equal(record.actor, 'unknown', 'default getBranch on a non-git tmp dir must resolve to \'unknown\'');
+    assert.equal(record.actor, '@test', 'actor comes from the injected getGitConfig seam, never getBranch');
     assert.match(record.ts, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/, 'default getTimestamp must be C2a canonical UTC-seconds');
     assert.ok(record.source.startsWith('plainfiles save on '), 'source must fold in the (real or injected) hostname');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// ── #738 — issue derivation from the branch ─────────────────────────────────
+
+test('#738: --issue absent + a matching branch ⇒ issue derived + a stdout notice', async () => {
+  const root = tmpRoot();
+  const origLog = console.log;
+  const logs = [];
+  console.log = (...args) => logs.push(args.join(' '));
+  try {
+    const result = await save('t', 'c', { type: 'discovery', project: 'brain' }, {
+      root, getBranch: () => 'feat/issue-738-x', getTimestamp: () => '2026-07-12T09:00:00Z', getHostname: () => 'h',
+      ...identitySeams,
+    });
+    const record = JSON.parse(readFileSync(result.file, 'utf8').trim());
+    assert.equal(record.issue, 738);
+    // The notice's exact wording (naming '738' and the branch) is asserted
+    // once the i18n catalog carries it — unit 5. Here: a notice fires at all.
+    assert.equal(logs.length, 1, `expected exactly one stdout notice, got: ${JSON.stringify(logs)}`);
+  } finally {
+    console.log = origLog;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('#738: --issue absent + a non-matching branch ⇒ issue stays absent', async () => {
+  const root = tmpRoot();
+  try {
+    const result = await save('t', 'c', { type: 'discovery', project: 'brain' }, {
+      root, getBranch: () => 'main', getTimestamp: () => '2026-07-12T09:00:00Z', getHostname: () => 'h',
+      ...identitySeams,
+    });
+    const record = JSON.parse(readFileSync(result.file, 'utf8').trim());
+    assert.ok(!('issue' in record), 'issue must stay absent, never fabricated');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// ── #738 — capture refuses without a configured handle ──────────────────────
+
+test('#738: brain.actor unset ⇒ throws, nothing appended (records dir stays empty)', async () => {
+  const root = tmpRoot();
+  try {
+    await assert.rejects(() =>
+      save('t', 'c', { type: 'discovery', project: 'brain' }, {
+        root, getBranch: () => 'main', getTimestamp: () => '2026-07-12T09:00:00Z', getHostname: () => 'h',
+        getGitConfig: () => null, getEnv: () => ({}),
+      }),
+    );
+    assert.equal(existsSync(join(root, '.memory', 'records')), false, 'nothing may be appended when the actor is unset');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// ── #738 unit 7 — brain's own capture path can never emit @legacy ───────────
+// `@legacy` is the export fallback's sentinel (engram-export.mjs). Without
+// `resolveActor`'s reserved-value refusal, `git config brain.actor @legacy`
+// would mint that sentinel through THIS door too, making "brain's own capture
+// path never emits @legacy" true only by convention. Kills the mutant "a
+// fallback in buildRecord defaults to @legacy" — no new production code here,
+// true once units 2 (resolveActor) and 4 (plainfiles wiring) land.
+
+test('#738 pin: brain.actor=@legacy is refused (reserved), never reaches a written record', async () => {
+  const root = tmpRoot();
+  try {
+    await assert.rejects(() =>
+      save('t', 'c', { type: 'discovery', project: 'brain' }, {
+        root, getBranch: () => 'main', getTimestamp: () => '2026-07-12T09:00:00Z', getHostname: () => 'h',
+        getGitConfig: (key) => (key === 'brain.actor' ? '@legacy' : null), getEnv: () => ({}),
+      }),
+    );
+    assert.equal(existsSync(join(root, '.memory', 'records')), false, '@legacy must never be appended through the capture door');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('#738 pin: a normal-handle capture never produces a record with actor === @legacy', async () => {
+  const root = tmpRoot();
+  try {
+    const result = await save('t', 'c', { type: 'discovery', project: 'brain' }, {
+      root, getBranch: () => 'main', getTimestamp: () => '2026-07-12T09:00:00Z', getHostname: () => 'h',
+      ...identitySeams,
+    });
+    const record = JSON.parse(readFileSync(result.file, 'utf8').trim());
+    assert.notEqual(record.actor, '@legacy');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('#738: brain.actor malformed (not handle-shaped) ⇒ throws, nothing appended', async () => {
+  const root = tmpRoot();
+  try {
+    await assert.rejects(() =>
+      save('t', 'c', { type: 'discovery', project: 'brain' }, {
+        root, getBranch: () => 'main', getTimestamp: () => '2026-07-12T09:00:00Z', getHostname: () => 'h',
+        getGitConfig: (key) => (key === 'brain.actor' ? 'csrinaldi' : null), getEnv: () => ({}),
+      }),
+    );
+    assert.equal(existsSync(join(root, '.memory', 'records')), false);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -153,7 +340,7 @@ test('#530: save without a type REFUSES by name, listing the choices — never a
   try {
     await assert.rejects(
       () => save('t', 'c', { project: 'brain' },
-        { root, getBranch: () => 'main', getTimestamp: () => '2026-08-11T09:00:00Z', getHostname: () => 'h' }),
+        { root, getBranch: () => 'main', getTimestamp: () => '2026-08-11T09:00:00Z', getHostname: () => 'h', ...identitySeams }),
       (err) => {
         assert.match(err.message, /--type/, 'the refusal must name the flag the caller has to supply');
         assert.match(err.message, /session_summary/, 'and list the valid values, or it is a riddle');
@@ -174,6 +361,7 @@ test('#530: save without a project DERIVES it from the config slug — a fact, n
       getTimestamp: () => '2026-08-11T09:00:00Z',
       getHostname: () => 'h',
       _loadConfig: () => ({ project: { slug: 'csrinaldi/brain' } }),
+      ...identitySeams,
     });
     const line = readFileSync(r.file, 'utf8').trim().split('\n').pop();
     assert.equal(JSON.parse(line).project, 'brain',
@@ -191,7 +379,7 @@ test('#530: the derivation falls back slug → name → directory, and never lan
     try {
       const r = await save('t', 'c', { type: 'discovery' }, {
         root, getBranch: () => 'main', getTimestamp: () => '2026-08-11T09:00:00Z',
-        getHostname: () => 'h', _loadConfig: () => config,
+        getHostname: () => 'h', _loadConfig: () => config, ...identitySeams,
       });
       const rec = JSON.parse(readFileSync(r.file, 'utf8').trim().split('\n').pop());
       assert.equal(typeof rec.project, 'string', why);
@@ -206,7 +394,7 @@ test('#530: an explicit project still wins over the derivation', async () => {
   try {
     const r = await save('t', 'c', { type: 'discovery', project: 'explicit' }, {
       root, getBranch: () => 'main', getTimestamp: () => '2026-08-11T09:00:00Z',
-      getHostname: () => 'h', _loadConfig: () => ({ project: { slug: 'o/derived' } }),
+      getHostname: () => 'h', _loadConfig: () => ({ project: { slug: 'o/derived' } }), ...identitySeams,
     });
     assert.equal(JSON.parse(readFileSync(r.file, 'utf8').trim().split('\n').pop()).project, 'explicit');
   } finally { rmSync(root, { recursive: true, force: true }); }
@@ -216,7 +404,7 @@ test('#530: --issue lands as an INTEGER, so a record can be tied to its ticket',
   const root = tmpRoot();
   try {
     const r = await save('t', 'c', { type: 'discovery', project: 'brain', issue: 530 }, {
-      root, getBranch: () => 'main', getTimestamp: () => '2026-08-11T09:00:00Z', getHostname: () => 'h',
+      root, getBranch: () => 'main', getTimestamp: () => '2026-08-11T09:00:00Z', getHostname: () => 'h', ...identitySeams,
     });
     const rec = JSON.parse(readFileSync(r.file, 'utf8').trim().split('\n').pop());
     assert.equal(rec.issue, 530);
@@ -234,7 +422,7 @@ test('#530: a non-integer --issue is refused BY NAME, not by an internal seriali
   try {
     await assert.rejects(
       () => save('t', 'c', { type: 'discovery', project: 'brain', issue: Number('abc') }, {
-        root, getBranch: () => 'main', getTimestamp: () => '2026-08-11T09:00:00Z', getHostname: () => 'h',
+        root, getBranch: () => 'main', getTimestamp: () => '2026-08-11T09:00:00Z', getHostname: () => 'h', ...identitySeams,
       }),
       (err) => {
         assert.match(err.message, /--issue/, 'name the flag the caller typed');
@@ -249,7 +437,7 @@ test('#530: an absent --issue is still allowed — tagging is encouraged, not co
   const root = tmpRoot();
   try {
     const r = await save('t', 'c', { type: 'discovery', project: 'brain' }, {
-      root, getBranch: () => 'main', getTimestamp: () => '2026-08-11T09:00:00Z', getHostname: () => 'h',
+      root, getBranch: () => 'main', getTimestamp: () => '2026-08-11T09:00:00Z', getHostname: () => 'h', ...identitySeams,
     });
     const rec = JSON.parse(readFileSync(r.file, 'utf8').trim().split('\n').pop());
     assert.ok(!('issue' in rec), 'the field is optional and must stay absent rather than land null');
@@ -267,6 +455,11 @@ const defaultSaveSeams = (root, extra = {}) => ({
   getBranch: () => 'main',
   getTimestamp: () => '2026-09-10T09:00:00Z',
   getHostname: () => 'h',
+  // MERGE NOTE (#738 × #805): `identitySeams` is not optional garnish here.
+  // These tests are about the supersedes gate, and the actor gate now runs
+  // BEFORE it — without a configured handle every case below would reject for
+  // the actor reason and the supersedes assertions would never be reached.
+  ...identitySeams,
   ...extra,
 });
 

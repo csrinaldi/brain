@@ -23,6 +23,13 @@ function tmpRoot(prefix) {
   return mkdtempSync(join(tmpdir(), prefix));
 }
 
+// #738: a deterministic identity, so this suite's verdict does not depend on
+// this machine's ambient git config / process env.
+const identitySeams = {
+  getGitConfig: (key) => (key === 'brain.actor' ? '@fixture' : null),
+  getEnv: () => ({}),
+};
+
 // Every RECORD_TYPES member + a supersedes chain (REQ-C3-6). §4 prose
 // (renderProvenance) makes actor/actorKind/supersedes RECOVERED (not the
 // @legacy fallback), matching a real first-class-writer observation shape.
@@ -82,7 +89,10 @@ test('REQ-C3-6: engram → plainfiles round-trips with record-level equality, no
 test('REQ-C3-6: plainfiles → engram round-trips with record-level equality, no live engram/git', async () => {
   const root = tmpRoot('c3-roundtrip-p2e-');
   try {
-    const seams = { getBranch: () => 'fixture-branch', getTimestamp: () => '2026-07-01T00:00:00Z', getHostname: () => 'fixture-host' };
+    const seams = {
+      getBranch: () => 'fixture-branch', getTimestamp: () => '2026-07-01T00:00:00Z', getHostname: () => 'fixture-host',
+      ...identitySeams,
+    };
     const saved = [];
     for (const type of RECORD_TYPES) {
       const result = await save(`P2E ${type}`, `${type} content from plainfiles`, { type, project: 'brain' }, { root, ...seams });
@@ -122,7 +132,10 @@ test('REQ-C3-6: plainfiles → engram round-trips with record-level equality, no
 test('REQ-C3-6: durability is executable — a plain Node grep of records/*.jsonl answers a decision topic, no engram/rg', async () => {
   const root = tmpRoot('c3-roundtrip-durability-');
   try {
-    const seams = { getBranch: () => 'main', getTimestamp: () => '2026-07-01T00:00:00Z', getHostname: () => 'h' };
+    const seams = {
+      getBranch: () => 'main', getTimestamp: () => '2026-07-01T00:00:00Z', getHostname: () => 'h',
+      ...identitySeams,
+    };
     const decisionText = 'the durability decision: plainfiles ships as the second real backend';
     await save('Durability decision', decisionText, { type: 'decision', project: 'brain' }, { root, ...seams });
 

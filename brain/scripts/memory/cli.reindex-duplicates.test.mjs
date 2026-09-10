@@ -15,12 +15,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { buildRecord, serializeRecord } from './lib/format.mjs';
+import { removeTempTree } from '../lib/tmp-tree.mjs';
 
 const CLI = join(dirname(fileURLToPath(import.meta.url)), 'cli.mjs');
 
@@ -32,9 +33,19 @@ const base = {
   project: 'brain',
 };
 
+// #738 (design A6, #897 precedent): `memory:save` now reads `brain.actor`
+// from the real `git config --get` (cwd = root). Isolated from ambient
+// global/system config so this suite's verdict does not depend on the
+// machine it runs on.
+const ISOLATED_GIT_ENV = { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' };
+
 function fixtureRoot(t, lines) {
   const root = mkdtempSync(join(tmpdir(), 'brain-cli-dup-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  // #802: this fixture now `git init`s root (#738's isolation fixture) — a
+  // bare recursive rmSync here would trip the drift guard; removeTempTree instead.
+  t.after(() => removeTempTree(root));
+  spawnSync('git', ['init', '-q'], { cwd: root, encoding: 'utf8', env: { ...process.env, ...ISOLATED_GIT_ENV } });
+  spawnSync('git', ['config', '--local', 'brain.actor', '@test'], { cwd: root, encoding: 'utf8', env: { ...process.env, ...ISOLATED_GIT_ENV } });
   const recordsDir = join(root, '.memory', 'records');
   mkdirSync(recordsDir, { recursive: true });
   writeFileSync(join(recordsDir, '2026-07.jsonl'), lines.map((l) => l + '\n').join(''), 'utf8');
@@ -44,7 +55,7 @@ function fixtureRoot(t, lines) {
 function runCli(root, ...args) {
   return spawnSync(process.execPath, [CLI, ...args], {
     encoding: 'utf8',
-    env: { ...process.env, BRAIN_MEMORY_TEST_ROOT: root, MEMORY_BACKEND: 'plainfiles' },
+    env: { ...process.env, BRAIN_MEMORY_TEST_ROOT: root, MEMORY_BACKEND: 'plainfiles', ...ISOLATED_GIT_ENV },
   });
 }
 

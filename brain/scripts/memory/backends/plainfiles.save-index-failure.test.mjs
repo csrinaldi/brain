@@ -27,8 +27,16 @@ import { fileURLToPath } from 'node:url';
 import { save } from './plainfiles.mjs';
 import { buildRecord, serializeRecord } from '../lib/format.mjs';
 import { recordFilename } from '../lib/store.mjs';
+import { removeTempTree } from '../../lib/tmp-tree.mjs';
 
 const CLI = join(dirname(fileURLToPath(import.meta.url)), '..', 'cli.mjs');
+
+// #738: a deterministic identity for the backend-function tests below, so
+// they don't read this machine's ambient git config / process env.
+const identitySeams = {
+  getGitConfig: (key) => (key === 'brain.actor' ? '@test' : null),
+  getEnv: () => ({}),
+};
 
 // The record-file grammar `store.mjs#recordFilename` writes: `<yyyy-mm>-<id>.jsonl`,
 // ONE record per file (issue #677). The month is a PATTERN here, never a literal.
@@ -40,10 +48,27 @@ const RECORD_FILE_RE = new RegExp(`${RECORD_FILE}$`);          // a PATH ending 
 const RECORD_FILE_IN_TEXT_RE = new RegExp(RECORD_FILE);        // the name quoted inside a message
 const RECORD_FILE_NAME_RE = new RegExp(`^${RECORD_FILE}$`);    // a bare basename, for the dir filter
 
+// #738 (design A6, #897 precedent): the CLI-spawn tests below (`runCli`) read
+// `brain.actor` from the real `git config --get`, with `cwd: root`. `root`
+// must therefore be its OWN git repo carrying a local `brain.actor`, and the
+// spawn must isolate HOME/GIT_CONFIG_GLOBAL/GIT_CONFIG_NOSYSTEM — otherwise a
+// developer's ambient `brain.actor` makes this suite pass locally and fail on
+// a machine (or CI runner) without one.
+const ISOLATED_GIT_ENV = { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' };
+
+function gitInit(root) {
+  spawnSync('git', ['init', '-q'], { cwd: root, encoding: 'utf8', env: { ...process.env, ...ISOLATED_GIT_ENV } });
+  spawnSync('git', ['config', '--local', 'brain.actor', '@test'], { cwd: root, encoding: 'utf8', env: { ...process.env, ...ISOLATED_GIT_ENV } });
+}
+
 /** A temp store. `tampered: true` plants a line whose bytes no longer hash to its id. */
 function store(t, { tampered = false } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'brain-637-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  // #802: this file now `git init`s `root` (git-config isolation fixture,
+  // #738), so a bare recursive rmSync here would trip the drift guard
+  // (tmp-tree-adoption.test.mjs) — use removeTempTree instead.
+  t.after(() => removeTempTree(root));
+  gitInit(root);
   const recordsDir = join(root, '.memory', 'records');
   mkdirSync(recordsDir, { recursive: true });
 
@@ -66,7 +91,7 @@ function store(t, { tampered = false } = {}) {
 const runCli = (root, ...args) =>
   spawnSync(process.execPath, [CLI, 'save', ...args], {
     encoding: 'utf8',
-    env: { ...process.env, BRAIN_MEMORY_TEST_ROOT: root, MEMORY_BACKEND: 'plainfiles' },
+    env: { ...process.env, BRAIN_MEMORY_TEST_ROOT: root, MEMORY_BACKEND: 'plainfiles', ...ISOLATED_GIT_ENV },
   });
 
 // #677 — one record per file, so "the record lines" is a question about the
@@ -92,6 +117,7 @@ test('#637 save(): a reindex failure REJECTS, but the record is on disk and the 
   await assert.rejects(
     () => save('T', 'C', { type: 'discovery', project: 'brain' }, {
       root,
+      ...identitySeams,
       _rebuildIndex: () => { throw boom; },
     }),
     (err) => {
@@ -114,6 +140,7 @@ test('#637 save(): the ORIGINAL error is rethrown, not wrapped — the diagnosis
   await assert.rejects(
     () => save('T', 'C', { type: 'discovery', project: 'brain' }, {
       root,
+      ...identitySeams,
       _rebuildIndex: () => { throw boom; },
     }),
     (err) => {
@@ -135,6 +162,7 @@ test('#637 save(): a PRIMITIVE throw is still reported accurately, not replaced 
   await assert.rejects(
     () => save('T', 'C', { type: 'discovery', project: 'brain' }, {
       root,
+      ...identitySeams,
       _rebuildIndex: () => { throw 'boom'; },
     }),
     (err) => {
@@ -150,7 +178,7 @@ test('#637 save(): a PRIMITIVE throw is still reported accurately, not replaced 
 
 test('#637 save(): a HEALTHY store is untouched — no annotation, no behaviour change', async (t) => {
   const { root, recordsDir } = store(t);
-  const result = await save('T', 'C', { type: 'discovery', project: 'brain' }, { root });
+  const result = await save('T', 'C', { type: 'discovery', project: 'brain' }, { root, ...identitySeams });
 
   assert.equal(result.written, true);
   assert.match(result.id, /^rec-[0-9a-f]{16}$/);
@@ -166,7 +194,7 @@ test('#637 save(): a failure BEFORE the append is still a plain refusal — noth
   const { root, recordsDir } = store(t);
 
   await assert.rejects(
-    () => save('T', 'C', { project: 'brain' }, { root }),   // no --type
+    () => save('T', 'C', { project: 'brain' }, { root, ...identitySeams }),   // no --type
     (err) => {
       assert.equal(err.indexFailed, undefined, 'a genuine refusal must not claim a record landed');
       assert.match(err.message, /--type is required/);

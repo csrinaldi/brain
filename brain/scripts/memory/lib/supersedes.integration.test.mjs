@@ -7,6 +7,15 @@
 // Fixture mirrors upstream-records.integration.test.mjs:36-75 — a bare
 // "remote" plus a trunk clone plus a worktree clone, the worktree branching
 // BEFORE the trunk record it needs to see lands.
+//
+// MERGE NOTE (#738 × #805): `save()` now refuses when `brain.actor` is unset,
+// and these roots are temp dirs that inherit nothing from this checkout. Where
+// the fixture is a REAL repo (tests 1-3) the handle is configured the way an
+// operator would — `git config --local brain.actor` — because that is the path
+// under test here. Where the root is deliberately NOT a repo (tests 4-6, plain
+// `mkdtempSync` dirs), the `getGitConfig` seam is injected instead: `git init`
+// there would change the fixture's premise for the sake of a field none of
+// those assertions are about.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -45,6 +54,7 @@ function setupRemoteAndTrunk(prefix) {
   git(trunk, ['init', '-q', '-b', 'main']);
   git(trunk, ['config', 'user.email', 'test@example.invalid']);
   git(trunk, ['config', 'user.name', 'brain-test']);
+  git(trunk, ['config', '--local', 'brain.actor', '@tester']);
   git(trunk, ['remote', 'add', 'origin', remote]);
   return { remote, trunk };
 }
@@ -55,6 +65,7 @@ function cloneWorktree(remote, prefix) {
   git(worktree, ['clone', '-q', remote, '.']);
   git(worktree, ['config', 'user.email', 'test@example.invalid']);
   git(worktree, ['config', 'user.name', 'brain-test']);
+  git(worktree, ['config', '--local', 'brain.actor', '@tester']);
   git(worktree, ['checkout', '-q', '-b', 'feature/805']);
   return worktree;
 }
@@ -154,7 +165,10 @@ test('#805: a clone with origin removed is refused could-not-verify, naming the 
 test('#805: a chain (C supersedes B supersedes A) is accepted; A, B, C all stay readable and indexed', async (t) => {
   const root = mkdtempSync(join(tmpdir(), 'brain-805-chain-'));
   t.after(() => removeTempTree(root));
-  const seams = { root, getBranch: () => 'main', getTimestamp: () => '2026-09-10T09:00:00Z', getHostname: () => 'h' };
+  const seams = {
+    root, getBranch: () => 'main', getTimestamp: () => '2026-09-10T09:00:00Z', getHostname: () => 'h',
+    getGitConfig: (key) => (key === 'brain.actor' ? '@tester' : null), getEnv: () => ({}),
+  };
 
   const a = await save('A', 'first', { type: 'discovery', project: 'brain' }, seams);
   const b = await save('B', 'corrects A', { type: 'discovery', project: 'brain', supersedes: a.id }, seams);
@@ -181,7 +195,10 @@ test('#805: a chain (C supersedes B supersedes A) is accepted; A, B, C all stay 
 test('#805: superseding a record written under a different --issue succeeds — no issue/supersedes equality rule', async (t) => {
   const root = mkdtempSync(join(tmpdir(), 'brain-805-mismatched-issue-'));
   t.after(() => removeTempTree(root));
-  const seams = { root, getBranch: () => 'main', getTimestamp: () => '2026-09-10T09:00:00Z', getHostname: () => 'h' };
+  const seams = {
+    root, getBranch: () => 'main', getTimestamp: () => '2026-09-10T09:00:00Z', getHostname: () => 'h',
+    getGitConfig: (key) => (key === 'brain.actor' ? '@tester' : null), getEnv: () => ({}),
+  };
 
   const a = await save('A', 'first, filed under issue 100', { type: 'discovery', project: 'brain', issue: 100 }, seams);
   const b = await save('B', 'corrects A, filed under a different issue', {
@@ -211,7 +228,10 @@ test('#805: superseding a record written under a different --issue succeeds — 
 test("#805: the epic's 6.1 exit — memory:audit's coverage.supersedes goes 0 → 1, and B's supersedes field survives memory:reindex", async (t) => {
   const root = mkdtempSync(join(tmpdir(), 'brain-805-6-1-'));
   t.after(() => removeTempTree(root));
-  const seams = { root, getBranch: () => 'main', getTimestamp: () => '2026-09-10T09:00:00Z', getHostname: () => 'h' };
+  const seams = {
+    root, getBranch: () => 'main', getTimestamp: () => '2026-09-10T09:00:00Z', getHostname: () => 'h',
+    getGitConfig: (key) => (key === 'brain.actor' ? '@tester' : null), getEnv: () => ({}),
+  };
 
   // `memory:audit` refuses when `.memory/records/` does not exist yet
   // (measured: audit-io.mjs's "records dir not found") — a fresh store with
