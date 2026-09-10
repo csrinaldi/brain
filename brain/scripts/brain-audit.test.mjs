@@ -1903,3 +1903,111 @@ test('#518: with no window base, the command is VISIBLY a placeholder rather tha
   assert.match(audit.stdout, /cursor\.mjs window/,
     'and it must say where to get the real values');
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// B1 (#889, design A8, spec "brain:audit reports [LANE] on both signals") —
+// a merge/squash classified as a lane by BOTH signals (records-only additions
+// AND the `/^Memory lane: /m` body marker) is reported `[LANE]` and never
+// reaches `evaluateMerge` — no governance verdict is rendered for a shipped
+// memory lane. Paths alone or the marker alone must NOT classify as a lane.
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('B1: a records-only squash carrying the lane marker prints [LANE], never a verdict', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-lane-'));
+  t.after(() => removeTempTree(dir));
+
+  const git = makeRepo(dir);
+  commit(git, dir, { 'README.md': 'init' }, 'chore: initial (#0)');
+  const base = headShaOf(git);
+
+  const sq = squashCommit(
+    git, dir,
+    { '.memory/records/2026-07.jsonl': makeSessionSummaryRecord() },
+    'feat: ship a session record\n\nMemory lane: host1-2026-09-10\n',
+  );
+
+  const r = spawnSync('node', [AUDIT_SCRIPT, `${base}..HEAD`], { cwd: dir, encoding: 'utf8' });
+
+  assert.ok(r.stdout.includes(`[LANE] ${sq.slice(0, 7)}`),
+    `expected a [LANE] line naming the squash:\n${r.stdout}\n${r.stderr}`);
+  assert.ok(!/\[(PASS|FAIL|SKIP)\]/.test(r.stdout),
+    `a lane merge must never reach evaluateMerge — no verdict line expected:\n${r.stdout}`);
+  assert.equal(r.status, 0, `a lane merge is clean, not a failure:\n${r.stdout}\n${r.stderr}`);
+});
+
+test('B1: the SAME records-only payload WITHOUT the marker is evaluated normally', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-lane-nomarker-'));
+  t.after(() => removeTempTree(dir));
+
+  const git = makeRepo(dir);
+  commit(git, dir, { 'README.md': 'init' }, 'chore: initial (#0)');
+  const base = headShaOf(git);
+
+  squashCommit(
+    git, dir,
+    { '.memory/records/2026-07.jsonl': makeSessionSummaryRecord() },
+    'feat: ship a session record (no lane marker)',
+  );
+
+  const r = spawnSync('node', [AUDIT_SCRIPT, `${base}..HEAD`], { cwd: dir, encoding: 'utf8' });
+
+  assert.ok(!r.stdout.includes('[LANE]'),
+    `paths alone must not classify as a lane — the marker is required too:\n${r.stdout}`);
+  assert.ok(/\[(PASS|FAIL)\]/.test(r.stdout),
+    `without the marker, evaluateMerge must still run and produce a verdict:\n${r.stdout}`);
+});
+
+test('B1: a code path alongside records, WITH the marker, is evaluated normally (lanePaths false)', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-lane-mixed-'));
+  t.after(() => removeTempTree(dir));
+
+  const git = makeRepo(dir);
+  commit(git, dir, { 'README.md': 'init' }, 'chore: initial (#0)');
+  const base = headShaOf(git);
+
+  squashCommit(
+    git, dir,
+    {
+      '.memory/records/2026-07.jsonl': makeSessionSummaryRecord(),
+      'src/feature.mjs': 'export const x = 1;\n',
+    },
+    'feat: ship a record alongside code\n\nMemory lane: host1-2026-09-10\n',
+  );
+
+  const r = spawnSync('node', [AUDIT_SCRIPT, `${base}..HEAD`], { cwd: dir, encoding: 'utf8' });
+
+  assert.ok(!r.stdout.includes('[LANE]'),
+    `the marker alone must not classify as a lane — a non-record path must fail lanePaths:\n${r.stdout}`);
+  assert.ok(/\[(PASS|FAIL)\]/.test(r.stdout),
+    `a mixed payload must still be evaluated by evaluateMerge:\n${r.stdout}`);
+});
+
+test('B1: the [UNCOMPUTABLE] guard short-circuits BEFORE lane classification', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-lane-uncomputable-'));
+  t.after(() => removeTempTree(dir));
+
+  const git = makeRepo(dir);
+  commit(git, dir, {
+    'README.md': 'init',
+    'brain.config.json': JSON.stringify({
+      vcs: { provider: 'github' },
+      project: { slug: 'csrinaldi/brain' },
+    }),
+  }, 'chore: initial (#0)');
+  const base = headShaOf(git);
+
+  git('checkout', '-b', 'memory/host1-2026-09-10');
+  commit(git, dir, { '.memory/records/2026-07.jsonl': makeSessionSummaryRecord() }, 'feat: lane ship');
+  git('checkout', 'main');
+  // The lane marker lives in the PR description, which an unauthenticated
+  // fetch cannot read — never fall back to the raw merge commit body to
+  // manufacture a [LANE] verdict the evidence does not support.
+  git('merge', '--no-ff', 'memory/host1-2026-09-10', '-m', 'Merge pull request #472 from csrinaldi/memory/host1-2026-09-10');
+
+  const r = runAuditUnauthenticated(dir, `${base}..HEAD`);
+
+  assert.ok(!r.stdout.includes('[LANE]'),
+    `a merge whose PR metadata failed must never be classified as a lane on a fallback body:\n${r.stdout}`);
+  assert.ok(r.stdout.includes('[UNCOMPUTABLE]'), `expected [UNCOMPUTABLE]:\n${r.stdout}\n${r.stderr}`);
+  assert.equal(r.status, 2, `uncomputable dominates:\n${r.stdout}\n${r.stderr}`);
+});
