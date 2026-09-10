@@ -109,13 +109,22 @@ function buildTitleAndBody({ git, root, ref, branch }) {
   return { title, body: `${bodyLines.join('\n')}\n` };
 }
 
-/** parsePrNumber() — A6/spec "PR number is derived, never guessed": the
- * trailing integer of the URL, covering both `.../pull/123` and
- * `.../-/merge_requests/12`. */
+/** parsePrNumber() — A6/spec "PR number is derived, never guessed". Query
+ * strings and fragments are stripped first so `.../pull/123?tab=files` and
+ * `.../pull/123#comment` both still parse. The PRIMARY form requires an
+ * explicit `/pull/<n>` or `/merge_requests/<n>` segment (covers both
+ * `.../pull/123` and `.../-/merge_requests/12`); a trailing-integer form is
+ * only the FALLBACK, and even then it requires the digits to be their own
+ * path segment (preceded by `/`) — a URL like `https://host/g/p2` must
+ * never be misread as PR number 2 just because its last character is a
+ * digit. */
 function parsePrNumber(url) {
   if (typeof url !== 'string') return null;
-  const m = url.match(/(\d+)\/?$/);
-  return m ? Number(m[1]) : null;
+  const clean = url.split(/[?#]/)[0];
+  const primary = clean.match(/\/(?:pull|merge_requests)\/(\d+)\/?$/);
+  if (primary) return Number(primary[1]);
+  const fallback = clean.match(/\/(\d+)\/?$/);
+  return fallback ? Number(fallback[1]) : null;
 }
 
 /** findOrCreatePr() — A1 steps 4-5. `mrList` is the ONE port verb that
@@ -250,10 +259,9 @@ export async function shipLane({
   const pr = await findOrCreatePr({ vcs, project, branch, title, body });
 
   // Both derivations (URL parse + the one-shot mrList re-scan) failing
-  // leaves the PR open and unarmed — NOT fatal (deviation from design.md's
-  // A6 table, which lists this row as exit:1; spec.md's own scenario says
-  // exit:0 and this implementation follows spec.md — see apply-progress's
-  // Deviations section for the full reconciliation). The state self-heals:
+  // leaves the PR open and unarmed — NOT fatal, per spec.md's own scenario
+  // (exit:0). See design.md's A6 table for the reconciliation against an
+  // earlier draft that listed this row as exit:1. The state self-heals:
   // the very next run's `mrList`-based idempotent find recovers `number`
   // from `mrList`'s own shape, the same way an `mrAutoMerge` refusal
   // self-heals one row below it in the same table.

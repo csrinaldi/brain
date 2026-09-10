@@ -184,7 +184,7 @@ prose in the tree pins the count numerically.
 | push failed otherwise | ref stays local | 1 | `memory.ship.pushFailed` |
 | **`mrList` throws** | pushed; PR existence **uncomputable** | **1** | `memory.ship.prLookupFailed` |
 | `mrCreate` → `{url:null,error}` | pushed, no PR | 1 | `memory.ship.prCreateFailed` |
-| PR number underivable after re-scan | PR open, unarmable | 1 | `memory.ship.prNumberUnknown` |
+| PR number underivable after re-scan | PR open, unarmable | 1 → **0** | `memory.ship.prNumberUnknown` |
 | `mrAutoMerge` refuses — **any** reason | PR open, correct | **0** | `memory.ship.autoMergeRefused` |
 | armed | done | 0 | `memory.ship.done` |
 
@@ -197,6 +197,13 @@ that lookup fails, the precondition for a **mutating write** is unreadable and c
 risks a duplicate. Fail closed, exit 1, retry next run: the push already landed and is durable. A
 refused `mrAutoMerge`, by contrast, leaves a correct open PR that the very next run re-arms (step 6
 is unconditional, D2), so failing the ship on it would convert a self-healing state into a red exit.
+
+**Reconciled during apply (#901):** this table originally listed "PR number underivable after
+re-scan" as exit 1. `spec.md`'s own scenario for the identical case ("both derivations fail, arm is
+skipped") says exit 0. The implementation follows `spec.md`: the state self-heals the same way an
+`mrAutoMerge` refusal self-heals one row below — the very next run's `mrList`-based idempotent find
+recovers `number` without any manual intervention, so treating it as fatal would convert a
+self-healing state into a red exit for no operational gain. This row is corrected to exit 0 above.
 
 ### A7 — `--dry-run` means zero **mutating** calls, and D5's wording gets a qualifier
 

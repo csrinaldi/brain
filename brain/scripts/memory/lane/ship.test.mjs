@@ -372,6 +372,32 @@ test('an unparseable URL triggers exactly one mrList re-scan and recovers the nu
   assert.equal(armArgs.number, 9);
 });
 
+test('E2: a non-PR URL whose last path segment merely ends in a digit is never mistaken for a PR number', async () => {
+  const { git } = fakeGit([...surveyOkRules(), { match: (a) => a[0] === 'push', result: ok() }]);
+  let mrListCalls = 0;
+  const { vcs } = fakeVcs({
+    mrList: async () => { mrListCalls++; return []; },
+    mrCreate: async () => ({ url: 'https://host/g/p2' }),
+  });
+
+  const result = await shipLane({ root: '/repo', project: 'x/y', tier: 'lite', host: 'test-host', date: '2026-09-09', collect: fakeCollect(), git, vcs });
+  assert.equal(mrListCalls, 2, 'a non-PR-shaped URL must trigger the one-shot re-scan, not a false parse');
+  assert.equal(result.pr.number, null);
+  assert.equal(result.autoMerge, null);
+});
+
+test('E2: a pull URL with a query string or fragment still parses to the PR number', async () => {
+  const { git } = fakeGit([...surveyOkRules(), { match: (a) => a[0] === 'push', result: ok() }]);
+  let armArgs;
+  const { vcs } = fakeVcs({
+    mrCreate: async () => ({ url: 'https://github.invalid/x/y/pull/123?tab=files#issuecomment-1' }),
+    mrAutoMerge: async (args) => { armArgs = args; return { enabled: true, url: null }; },
+  });
+
+  await shipLane({ root: '/repo', project: 'x/y', tier: 'lite', host: 'test-host', date: '2026-09-09', collect: fakeCollect(), git, vcs });
+  assert.equal(armArgs.number, 123);
+});
+
 test('both derivations failing: pr.number is null, mrAutoMerge never called, run still exits 0 (non-fatal, self-heals)', async () => {
   const { git } = fakeGit([...surveyOkRules(), { match: (a) => a[0] === 'push', result: ok() }]);
   const { vcs, calls: vcsCalls } = fakeVcs({
