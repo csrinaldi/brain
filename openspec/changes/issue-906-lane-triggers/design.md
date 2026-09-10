@@ -57,13 +57,14 @@ Order, seams, and exits:
 | step | code | why |
 |---|---|---|
 | 1 | `_loadConfig()` → `config.memory?.lane?.enabled === true` | `loadBrainConfig` (`lib/brain-config.mjs:29-45`) parses raw JSON — **no migration** — so an absent key reads as `undefined` ⇒ false. Guard-first is what makes emit-always safe |
-| 2 | `openSync(log, 'a')` → one fd | one open, reused for stdout+stderr; the only IO in the hot path |
+| 2 | `ensurePrivateDir(${tmpdir()}/brain-lane-<uid>/, uid)`, then `openSync(log, O_WRONLY\|O_CREAT\|O_APPEND\|O_NOFOLLOW, 0o600)` → one fd, then `fstatSync(fd)` re-verified | `tmpdir()` is predictable and world-writable; a local user can pre-create *anything* at a predictable path in it before this ever runs. The directory is confined to an owner-only (`0o700`) subdirectory scoped by uid, verified (not a symlink, a real directory, owned by `uid`, no group/other bits) whether `ensurePrivateDir` created it or found it pre-existing. `O_NOFOLLOW` refuses a pre-existing symlink at the log path (cold review C2), but `open`'s `mode` argument only applies when the call *creates* the file — a pre-created ordinary file at that path keeps its own mode, so `fstatSync` re-checks the opened fd the same way (regular file, owned by `uid`, no group/other bits, one hard link) before anything is written to it (**measured, cold review C7**, see the risk row below) |
 | 3 | `_spawn(execPath, argv, { detached: true, stdio: ['ignore', fd, fd], cwd, env: process.env })` then `.unref()`, `closeSync(fd)` | stdin `'ignore'`: the hook's payload is never read, so Claude's and Gemini's differing `reason` vocabularies are irrelevant by construction |
 | 4 | `return`/exit 0, always | the child's code is never read — `ship` exits 1 on `pushFailed`/`diverged` (`memory/cli.mjs:518-532`) and a session must not end red because a push raced |
 | 5 | `catch` ⇒ one stderr line, still exit 0 | Claude shows `SessionEnd` stderr to the user |
 
-Seams `_spawn`, `_loadConfig`, `_tmpdir`, `_now`; main-module guard as in `lib/brain-config.mjs:240`
-and `config/cli.mjs:71`, so the file is both importable (tests) and executable (hook).
+Seams `_spawn`, `_loadConfig`, `_tmpdir`, `_now`, `_uid`; main-module guard as in
+`lib/brain-config.mjs:240` and `config/cli.mjs:71`, so the file is both importable (tests) and
+executable (hook).
 
 ### A2 — `env: process.env`, inherited unchanged — `withoutCredentials()` is the trap
 
@@ -72,11 +73,12 @@ reflexive scrub drops `GH_TOKEN`/`GITLAB_TOKEN` and the ambient `lite` identity 
 dies **invisibly, inside a detached child**. The automatic path must be credential-identical to the
 manual verb. A comment naming this must sit on the line, or a future reader "hardens" it.
 
-### A3 — `${tmpdir()}/brain-lane-ship-<host>-<date>.log`, append, no rotation
+### A3 — `${tmpdir()}/brain-lane-<uid>/brain-lane-ship-<host>-<date>.log`, append, no rotation
 
 Not a repo-tree path: `.gitignore` is not a managed path and #414 is the open ticket for that hole.
-One file per host per day; nothing rotates it and nothing reads it programmatically — the OS owns
-tmp cleanup. Stated, not mitigated.
+One file per host per day, inside a private (`0o700`) directory scoped by uid (A1 step 2, cold
+review C7); nothing rotates it and nothing reads it programmatically — the OS owns tmp cleanup.
+Stated, not mitigated.
 
 ### A4 — The compiler gains a constant and a block; purity and drift both stay green
 
@@ -214,6 +216,7 @@ does not exist yet is not a shippable slice. `delivery_strategy: ask-on-risk`; g
 | The migration lies dormant until the next release cut (A6) | arming still works (`deriveKnownPaths` is version-independent); the PR body must say the default lands with the cut |
 | A detached failure is invisible | the tmpdir log plus the **synchronous** morning sweep, which reports the same outcome to a human |
 | **Measured, cold review C1**: `buildDefaultConfig()` (`lib/brain-config.mjs:119-137`) is an EXCEPTION to A6's dormancy — it applies every migration unfiltered and stamps `schemaVersion` to the latest entry (`1.6.0`) on a config built FRESH on this codebase, regardless of `package.json` still reading `1.5.0`. Confirmed empirically: `test/bootstrap-smoke/smoke.mjs`'s fresh-consumer fixture reports `schemaVersion=1.6.0` today. Two consequences: (1) `release-debt.mjs` reports `severity: 'migration'` from the moment this entry merges, not from the `1.6.0` cut; (2) a consumer whose config was built on this exact codebase cannot `brain:upgrade` below `1.6.0` without `--allow-downgrade` (its stamped `schemaVersion` already reads ahead of its own `package.json`). | **Not mitigated in this slice — a maintainer act.** The real remedy is cutting `1.6.0` promptly; the entry's own description now names both consequences so the gap is discoverable without re-deriving it. `config-migrations.test.mjs` pins the dormancy claim against a real `migrateConfig()` caller (`targetVersion: '1.5.0'` ⇒ `memory` absent) alongside a test showing the unfiltered-walk shape plants it — the two pins together are the proof the description's EXCEPTION clause is accurate, not just asserted. |
+| **Measured, cold review C7**: `O_NOFOLLOW` (C2) only refuses a pre-existing SYMLINK at the log path — it does nothing against a pre-existing ORDINARY file, and `open`'s `mode` argument (`0o600`) only applies when the call itself creates the file. A local user who pre-creates `${tmpdir()}/brain-lane-ship-<host>-<date>.log` as a regular `0o666` file before the launcher ever runs defeated both defenses at once: the open succeeded, the mode stayed world-readable, and the detached `ship` child's stdout/stderr (which can echo `oauth2:TOKEN@host` on a git failure) landed in an attacker-readable file. Reproduced against the shipped code by the cold reviewer, driven through the real `shipOnSessionEnd` with a fake `_spawn` writing through the inherited fd. | **Mitigated**: two independent checks, both required. (1) The log now lives inside `${tmpdir()}/brain-lane-<uid>/`, an owner-only (`0o700`) directory `ensurePrivateDir` creates if absent and — whether created or pre-existing — verifies is a real directory, not a symlink, owned by `uid`, with no group/other permission bit. (2) The opened log fd is `fstatSync`-verified the same way (regular file, owned by `uid`, no group/other bits, `nlink === 1`) before anything is written to it — the check that still catches a pre-created file even if (1) were somehow bypassed. `session-end-ship.test.mjs` pins all five shapes: the reviewer's exact attack (pre-created `0o666` file inside an otherwise-valid private dir, content unchanged after refusal), a `0o755` pre-existing private dir, a private dir owned by a different uid (simulated via the `_uid` seam), the symlink case from C2 (relocated inside the private dir), and the happy path (fresh `0o700` dir, fresh `0o600` log, spawn reached). |
 
 ## Open questions
 

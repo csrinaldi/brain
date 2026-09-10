@@ -391,10 +391,11 @@ if (engram.status === 0) {
 // decides (day-start.test.mjs pins that it never calls die; day-start-
 // sweep.test.mjs pins laneSweepLine's own four branches, #906 cold review C5).
 {
-  if (laneSweepEnabled(config)) {
+  const laneEnabled = laneSweepEnabled(config);
+  if (laneEnabled) {
     console.log(`  ${C.dim}${await t('day.memory.laneSweep.running')}${C.reset}`);
   }
-  const line = laneSweepLine(runLaneSweep({ config }));
+  const line = laneSweepLine(runLaneSweep({ config, enabled: laneEnabled }));
   if (line.level === 'warn') {
     const detail = await t(line.params.detailKey, line.params.detailParams);
     warn(await t(line.key, { detail }));

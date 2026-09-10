@@ -23,11 +23,17 @@ export function laneSweepEnabled(config) {
  * Runs `memory/cli.mjs ship --json` synchronously, with a 60s timeout this
  * module owns outright, and parses its single stdout line.
  *
- * @param {{ config: object, _spawnSync?: Function }} [args]
+ * `enabled` lets a caller that already computed `laneSweepEnabled(config)`
+ * (day-start.mjs step 5, to decide whether to print the progress line
+ * first) pass that result through instead of this function re-deriving it
+ * from `config` a second time. Callers that have not computed it get the
+ * same default either way.
+ *
+ * @param {{ config: object, enabled?: boolean, _spawnSync?: Function }} [args]
  * @returns {{ skipped: boolean, status: number|null, outcome: object|null, unparsed: boolean }}
  */
-export function runLaneSweep({ config, _spawnSync = spawnSync } = {}) {
-  if (!laneSweepEnabled(config)) {
+export function runLaneSweep({ config, enabled = laneSweepEnabled(config), _spawnSync = spawnSync } = {}) {
+  if (!enabled) {
     return { skipped: true, status: null, outcome: null, unparsed: false };
   }
 

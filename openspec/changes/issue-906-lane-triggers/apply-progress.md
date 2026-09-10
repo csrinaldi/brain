@@ -83,6 +83,84 @@ mechanics (detach, unref, fd inheritance, process independence) without ever inv
   path), then `brain:review` fresh-context and post the verdict.
 - Section 10: post-merge maintainer acts — no code, not part of this PR's scope.
 
+## Batch 3 — cold-review BLOCKER: the log fd was mode-check-only, not fstat-verified (C7)
+
+Worktree/branch unchanged. PR #910 was already open (opened in an earlier, undocumented batch —
+see the note below); cold review returned REVISE on one BLOCKER. Strict TDD, RED confirmed against
+the shipped code before any fix, `npm test` green before commit.
+
+**Note on batches 1→3 continuity**: this file and `tasks.md` were last updated at commit `da3d5aaa`
+(end of batch 1). Commits `765e6538` (day-start `laneSweepLine` extraction + coverage),
+`6e0205a9` (symlink refusal, C2), `da3d5aaa` is the same commit as above, `5affcb48` (explore/
+proposal/spec docs commit) and `bc7f76ca` (session record) landed after that without a
+corresponding apply-progress update — that gap predates this batch and is out of this batch's
+write-allowlist (`tasks.md` is not writable here). This section documents batch 3 only; the
+cumulative doc gap for batches 1–2 is a finding, not something this batch silently backfills.
+
+### The blocker
+
+`session-end-ship.mjs` opened the tmp log with
+`O_WRONLY|O_CREAT|O_APPEND|O_NOFOLLOW`, mode `0o600`. `O_NOFOLLOW` refuses a pre-existing
+**symlink** (C2, already fixed in batch 2) but does nothing against a pre-existing **ordinary**
+file, and `open`'s `mode` argument only applies when the call itself **creates** the file. A local
+user who pre-created the predictable `${tmpdir()}/brain-lane-ship-<host>-<date>.log` path as a
+regular `0o666` file before the launcher ever ran defeated both defenses: the open succeeded, the
+mode stayed world-readable, and the detached `ship` child's stdout/stderr (which can echo
+`oauth2:TOKEN@host` on a git failure) landed in an attacker-readable file. The cold reviewer
+reproduced this against the shipped code, driving the real `shipOnSessionEnd` with a fake `_spawn`
+writing through the inherited fd.
+
+### The fix — defense in depth, both required
+
+1. **Private directory**: the log now lives in `${tmpdir()}/brain-lane-<uid>/` (`uid` from
+   `process.getuid()`, falling back to `os.userInfo().username` where `getuid` is unavailable).
+   `ensurePrivateDir` creates it (mode `0o700`) if absent; whether created or pre-existing,
+   `lstatSync` verifies it is a real directory (not a symlink), owned by `uid`, with no
+   group/other permission bit — refusing (one stderr line, exit 0, no spawn) otherwise.
+2. **fstat-verified fd**: the log is opened inside that directory with the same
+   `O_NOFOLLOW|O_CREAT|O_WRONLY|O_APPEND` flags and `0o600` mode, then `fstatSync(fd)` verifies a
+   regular file, owned by `uid`, no group/other bits, `nlink === 1` — the check that defeats a
+   pre-created `0o666` file even if the directory check were somehow bypassed.
+3. Seams: `_tmpdir`, `_uid` (default `process.getuid`/`userInfo().username`), `_spawn`, `_now`;
+   the log filename inside the private dir is unchanged (`brain-lane-ship-<host>-<date>.log`).
+
+### TDD Cycle Evidence
+
+| Step | Evidence |
+|---|---|
+| RED | `session-end-ship.test.mjs` extended with 3 new tests (pre-created `0o666` regular file inside an otherwise-valid private dir; pre-existing `0o755` private dir; pre-existing private dir owned by a different uid via the `_uid` seam) and 2 existing tests relocated/extended (the mode-0600 happy path now also asserts the dir is `0o700`; the C2 symlink test moved inside the private dir). Run against the **unfixed** code: `node --test brain/scripts/memory/session-end-ship.test.mjs` → **5/10 failing** (the reviewer's attack test, the 0755-dir test, the wrong-uid-dir test, and the relocated symlink test all failed for the right reason — the vulnerable code has no directory concept and no fd re-verification). |
+| GREEN | `ensurePrivateDir` + `ensureTrustedFd` implemented in `session-end-ship.mjs`, wired into `shipOnSessionEnd` before the `_spawn` call, with a `fdClosed` guard so `ensureTrustedFd`'s own `closeSync` on refusal never double-closes in the `finally`. Same command → **10/10 green**. |
+| REFACTOR | Header comment (steps 1–5 table) and the two new helper functions' JSDoc rewritten to state the C7 contract and cite the reviewer's reproduction; no behavior change after GREEN. |
+
+### Test results
+
+- Focused (`node --test brain/scripts/memory/session-end-ship.test.mjs brain/scripts/day-start.test.mjs brain/scripts/memory/day-start-sweep.test.mjs`): **27/27 green** — `session-end-ship.test.mjs` went from 7 tests (state at `HEAD` before this batch's edits) to 10 (3 new: pre-created-file, `0755`-dir, wrong-uid-dir; 2 renamed/relocated in place, not duplicated); `day-start.test.mjs` (3) and `day-start-sweep.test.mjs` (14) unchanged by this batch.
+- Same command under `GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 HOME=$(mktemp -d)`: **27/27 green**, identical.
+- Full `npm test`: **5139/5139 green**, ~24s. This batch's own net contribution is +3 tests (the new session-end-ship.test.mjs cases). The remaining delta from batch 1's recorded 5122 baseline is undocumented in this doc — it covers commits `765e6538`/`6e0205a9` (batch 2's `day-start.test.mjs` creation and the C2 symlink fix's own test additions, neither backfilled here per the continuity note above) and possibly branch sync with `main`, which has advanced well past this branch's `ec117141` base per this session's own git-status snapshot.
+
+### Editorial (folded in per the launch instructions)
+
+`day-start.mjs` step 5 called `laneSweepEnabled(config)` directly (to decide whether to print the
+progress line) and then `runLaneSweep({ config })`, which called `laneSweepEnabled(config)` again
+internally — the same pure function evaluated twice per run for no reason. Fixed: `day-start.mjs`
+now computes `laneSweepEnabled(config)` once into `laneEnabled` and passes it through
+(`runLaneSweep({ config, enabled: laneEnabled })`); `runLaneSweep` gained an `enabled` parameter
+defaulting to `laneSweepEnabled(config)` so every other caller (all of `day-start-sweep.test.mjs`)
+is unaffected. `day-start.test.mjs`'s source-guard regex
+(`/laneSweepEnabled\(config\)[\s\S]*console\.log[\s\S]*runLaneSweep\(/`) still matches — the
+literal call and the ordering it pins are both still present in the block.
+
+### Files changed (batch 3)
+
+| File | Action |
+|---|---|
+| `brain/scripts/memory/session-end-ship.mjs` | Modified — `ensurePrivateDir` + `ensureTrustedFd`, wired into `shipOnSessionEnd` |
+| `brain/scripts/memory/session-end-ship.test.mjs` | Modified — 3 new tests, 2 relocated/extended |
+| `brain/scripts/memory/day-start-sweep.mjs` | Modified — `runLaneSweep` gained `enabled` param (editorial) |
+| `brain/scripts/day-start.mjs` | Modified — computes `laneSweepEnabled(config)` once (editorial) |
+| `openspec/changes/issue-906-lane-triggers/design.md` | Modified — A1 step 2, A1 seams list, A3, and a new C7 risk row |
+| `openspec/changes/issue-906-lane-triggers/apply-progress.md` | This section |
+
 ## Files changed (this batch)
 
 | File | Action |
