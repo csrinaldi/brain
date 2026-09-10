@@ -138,8 +138,73 @@ not new to this batch.
 - [ ] Wrap-up B (B.W1-B.W6)
 - [ ] D7 exit sequence (post-PR2-merge, no code)
 
+## Slice A corrections (sub-ticket #905, cold-review batch, commits `dc4d24f9`/`a0231d1f` on
+top of `e11b45a9`)
+
+A fresh cold reviewer of the slice-A PR branch found three code/test corrections plus five
+editorial nits. All three corrections were driven RED-first; the editorial batch is prose +
+two dead-local removals, verified by the same full-suite gate. Both commits are LOCAL only, on
+`feat/issue-905-featgovernance-the-lane-class-in-issue-link` — the sibling worktree building
+slice B rebases on top of this branch, so no file outside the sub-ticket's allowed write list
+was touched.
+
+**Work unit 1 — `dc4d24f9`** (corrections 1-3, tests first):
+1. `lane-scrub.mjs`'s `main()` called `evaluateLaneScrub` (which invokes the injected `readFile`)
+   OUTSIDE any try/catch — an added record deleted between the diff and the run threw raw and
+   exited 1 (a false VIOLATION), inverting C1's own "cannot verify must fail closed as
+   uncomputable" rule. RED confirmed (new test threw the real ENOENT instead of returning 2).
+   Fixed: wrapped the `evaluateLaneScrub` call, catch → `{ pass:false, uncomputable:true, reason:
+   'lane-scrub: cannot read an added record — failing closed (uncomputable): <message>' }`, exit 2.
+2. `lane-paths.mjs`'s `evaluateLanePaths` printed a blank `"lane-paths: offending path(s): "` on
+   an empty diff (`classifyLane`'s `lanePaths:false` branch with `offending:[]`, e.g. an empty
+   three-dot diff on a lane branch). RED confirmed (asserted the printed reason equalled
+   `classifyLane`'s own `"lane: empty diff"`, got the blank message instead). Fixed: when
+   `offending.length === 0`, return `classifyLane`'s own `result.reason` instead of joining an
+   empty array.
+3. `lane-scrub.test.mjs:61-75`'s A6 test was tautological (`evaluateLaneScrub` takes no
+   `sourceBranch` param at all — both calls in the old test were byte-identical, so it proved
+   nothing about lane exemption). Replaced with a `main()`-level assertion: `ctx: { sourceBranch:
+   'feat/some-feature' }` plus a planted `ghp_…`-shaped secret in an added record → exit 1 — the
+   same fixture-embedding style (`{"token":"..."}`,  JSON-quote-adjacent so the repo's
+   `check-refs.mjs` hardcoded-secret rule's `token[=:]"..."` pattern does not match it — verified
+   `npm run check-refs` clean both before and after) already used by the file's other secret
+   tests. This test was ALREADY-TRUE against the unmodified `main()` (lane-scrub consults no
+   `ctx.sourceBranch` input by design — A6), so it is a pin, not a RED→GREEN cycle — same
+   shape as slice A's own A3 pins.
+
+**Work unit 2 — `a0231d1f`** (editorial, folded into one commit):
+- `spec.md:18` — dropped the `(-\d+)?` suffix group from the documented lane-branch grammar to
+  match `lane.mjs:15`'s actual `LANE_BRANCH_RE` (design A3: the producer grammar never emits a
+  suffixed ref; a same-day second `collect` appends to the SAME ref, #887 D2), with a one-line
+  note carrying the rationale into the spec text itself.
+- `spec.md:71` (`lane-paths` requirement) — "naming the first offending path" corrected to
+  "naming every offending path (truncated to the first 20, with a count of the rest)", paired
+  with an ACTUAL code change: `evaluateLanePaths` now slices `offending` to 20 entries and
+  appends `", … and N more"` when there are more. New test with 25 synthetic offending paths
+  confirms the first 20 are named, the 21st is absent, and the count reads "… and 5 more". RED
+  confirmed before the truncation code landed.
+- `spec.md:40` — clarified that a lane PR skips BOTH the closing-keyword requirement AND the
+  issue lookup itself (no `fetchIssue` call, no approved-label check) — `runIssueLinkCheck`
+  already returns `{ pass: true }` immediately on a lane match, before `extractIssueNumber`/
+  `fetchIssue` are ever reached; the prior wording only named the keyword half.
+- Removed the unused `args` param from `run-check.test.mjs`'s `spyIssueLink` spy (it never reads
+  its arguments) and the write-only `logs` arrays inside `lane-scrub.test.mjs`'s and
+  `lane-paths.test.mjs`'s shared `captureLog` helpers — every call site in both files only
+  consumes the returned exit code, never the suppressed console output, so `console.log = (...args)
+  => logs.push(...)` was dead weight; simplified to `console.log = () => {}`. (The two
+  `lane-paths.test.mjs` tests that DO assert on printed text already build their own local
+  capture closure, untouched.)
+- `governance.yml:3` — "Enforces four process invariants" corrected to name the actual job
+  count (ten, listed by name) rather than carry a stale number from before A5's registration.
+
+**Verification**: focused suite (`lane-scrub.test.mjs` + `lane-paths.test.mjs` + `lane.test.mjs`
++ `run-check.test.mjs`) 148 → 151/151 green after work unit 1 (no change in work unit 2, same
+151). Full `npm test` 5078 → 5081/5081 green after work unit 1, 5081/5081 unchanged after work
+unit 2. `npm run check-refs` clean after both commits.
+
 ## Status
 
-7/7 assigned slice-A tasks complete. Working tree clean, all commits local (no push). Ready for
-the orchestrator to cut the #905 PR branch and continue with Wrap-up A, or to launch batch 2 for
-slice B.
+7/7 assigned slice-A tasks complete, PLUS the #905 correction batch above (3 code/test fixes + 5
+editorial nits, 2 commits, 5081/5081 full-suite green). Working tree clean, all commits local (no
+push). Ready for the orchestrator to cut the #905 PR branch and continue with Wrap-up A, or to
+launch batch 2 for slice B.
