@@ -1848,6 +1848,7 @@
 {"id":"rec-c5da93f6cd248ad1","ts":"2026-07-25T00:47:29Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-c5da93f6cd248ad1.jsonl"}
 {"id":"rec-c5db070dfcdd23af","ts":"2026-07-11T12:33:42Z","actor":"@legacy","type":"pattern","project":"brain","file":"2026-07-rec-c5db070dfcdd23af.jsonl"}
 {"id":"rec-c5ddda79f5befd08","ts":"2026-07-25T00:47:36Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-c5ddda79f5befd08.jsonl"}
+{"id":"rec-c66b567ee099e321","ts":"2026-09-10T14:40:49Z","actor":"feat/issue-905-featgovernance-the-lane-class-in-issue-link","type":"architecture","project":"brain","issue":905,"file":"2026-09-rec-c66b567ee099e321.jsonl"}
 {"id":"rec-c673b86269ac7651","ts":"2026-07-08T13:35:18Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-c673b86269ac7651.jsonl"}
 {"id":"rec-c6a71bfa4c07a1ec","ts":"2026-07-08T10:47:57Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-c6a71bfa4c07a1ec.jsonl"}
 {"id":"rec-c6b3fcaa0fac09ff","ts":"2026-07-29T14:25:57Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-c6b3fcaa0fac09ff.jsonl"}
