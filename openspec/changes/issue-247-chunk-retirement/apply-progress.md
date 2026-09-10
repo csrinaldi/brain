@@ -46,18 +46,15 @@ scope — not attempted here.
 - [x] **Work Unit 3** — brain-audit/brain-check records-only pin, same file
   as Work Unit 1, new case. Task 3.1 done (green-on-arrival, stated as such).
   Commit `d6379b42`.
-- [~] **Work Unit 4** — `engram.mjs` header note. Task 4.1 done (commit
-  `ba5dcf08`). **Task 4.2 (`governance/run-check.test.mjs:32` prose →
-  cross-reference) NOT done** — `run-check.test.mjs` is outside this batch's
-  allowed-write list (`brain/scripts/memory/chunk-boundary.test.mjs`, the
-  plainfiles share test file, `engram.mjs` header only, and the two openspec
-  paths). Flagged as a risk below for the orchestrator to resolve (amend
-  scope for a follow-up batch, or accept as a stated gap in the PR body).
-- [x] **Work Unit 5** — ledger, epic 2.3 rewrite, #874 comment draft. Tasks
-  5.1-5.2 done (commit `031434ce`, which also carries the #247 SDD planning
-  trail — proposal/explore/spec/design/tasks were untracked in this worktree
-  before this batch). **Task 5.3 drafted, not posted** — see below; posting
-  is the orchestrator's per this batch's `gh`-write restriction.
+- [x] **Work Unit 4** — `engram.mjs` header note. Task 4.1 done (commit
+  `ba5dcf08`). Task 4.2 (`governance/run-check.test.mjs:32` prose →
+  cross-reference) done in the review-correction batch, commit `75afb500`,
+  re-wrapped to ~72 cols in `aea77892` — see "Review corrections" below.
+- [x] **Work Unit 5** — ledger, epic 2.3 rewrite, #874 comment. Tasks 5.1-5.2
+  done (commit `031434ce`, which also carries the #247 SDD planning trail —
+  proposal/explore/spec/design/tasks were untracked in this worktree before
+  this batch). Task 5.3 posted in the review-correction batch as
+  issuecomment-5625476087 — see "Review corrections" below.
 - [ ] **Wrap-up (W1-W6)** — explicitly out of this batch's scope per the
   launch instructions ("leave the wrap-up/PR for the orchestrator"). `npm
   test` full-suite numbers are recorded below for W1's record.
@@ -136,7 +133,16 @@ holds — counted is 13, far under budget.
   Worth flagging for any future source-scanning guard test in this repo that
   plants fixture import syntax as a string literal.
 
-## Draft #874 ledger comment (NOT posted — orchestrator's to post)
+## #874 ledger comment — posted as issuecomment-5625476087
+
+Posted (by the orchestrator, between batch 1 and this correction batch)
+using the wording drafted below, which predates this batch's row 6/7
+wording fixes (MINOR-1, MINOR-2). The posted GitHub comment therefore still
+reads `bootstrap.sh:304` and `.jsonl.gz` (48 files) rather than the
+corrected `brain/scripts/bootstrap.sh:302-308` / "47 files +
+migration-rejected.json (48 tracked total)" wording now in `tasks.md`/
+`design.md`. Flagged as a residual risk below — no `gh`-write scope in this
+batch to edit the already-posted comment.
 
 > Carried over from #247 (this change) — task 3.2 must delete these seven
 > surfaces, row 4 only after the #469 re-proof.
@@ -155,9 +161,148 @@ holds — counted is 13, far under budget.
 > that pins rows 1-3, 5, and part of 7 (the `collectChunkObservations`
 > allowlist) as the current state; task 3.2 is what deletes them.
 
+## Review corrections (batch 2, cold-reviewer findings)
+
+A fresh-context reviewer measured the batch-1 output against the real repo
+and found 2 MAJOR + 2 MINOR doc-accuracy issues plus a guard-strength gap
+(7 mutants the chunk-boundary guard did not catch). Worktree unchanged
+(`/home/gandalf/IA/brain-issue-247`, same branch, base still `51ff915f`).
+Two new local commits on top of the 7 from batch 1.
+
+### Findings and fixes
+
+- **MAJOR-1** — `engram.mjs:20-21` claimed the seven-row ledger "lives
+  byte-identical" in `tasks.md`/`design.md`; measured only row 1 actually
+  matched (rows 2-7 differed in wording, not substance). Fixed: the header
+  comment now says "is restated"; `tasks.md`'s task 5.1 dropped the
+  `byte-identical,` claim it could not back; `tasks.md`'s ledger rows 2-7
+  were replaced with `design.md`'s exact wording so the two tables are now
+  word-for-word identical (confirmed via diff, ignoring leading indentation
+  only).
+- **MAJOR-2** — `run-check.test.mjs:33-34` said the guard is "pinned
+  repo-wide", but `WALK_GLOBS` was `['brain/scripts/**/*.mjs',
+  'test/**/*.mjs']` and three tracked production modules lived outside it
+  (`brain/core/config-migrations.mjs`, `brain/core/managed-paths.mjs`,
+  `brain/project/check-refs-rules.mjs`); a planted importer in `brain/core/`
+  was measured to pass the guard 8/8 (undetected). Fixed: `WALK_GLOBS`
+  widened to `['brain/**/*.mjs', 'test/**/*.mjs']`; measured live that none
+  of the three modules imports a chunk symbol today, so the real
+  `ALLOWLIST`/found set is unchanged. The comment is now literally true and
+  was re-wrapped to ~72 cols.
+- **MINOR-1** — ledger row 7 said `.memory/legacy/*.jsonl.gz` (48 files);
+  measured: 47 `.jsonl.gz` + `migration-rejected.json` = 48 tracked files
+  total. Fixed the wording in both `tasks.md` and `design.md`.
+- **MINOR-2** — ledger row 6 cited `bootstrap.sh:304`; measured the real
+  range is `brain/scripts/bootstrap.sh:302-308`, and that block *delegates*
+  driver registration to `cli.mjs setup` rather than registering
+  `engram-manifest` itself. Fixed the wording (with the corrected anchor and
+  the delegation clarification) in both `tasks.md` and `design.md`.
+- **MINOR-3** — the guard's importer detection survived 7 planted evasions,
+  each proven against a scratch copy of the *old* detection logic before any
+  edit landed, then proven to die against the hardened version: (C)
+  `export { collectChunkObservations } from '...'` re-export; (E)
+  `import { collectChunkObservations as grabChunks }` aliasing; (F)
+  `import * as mig from '...'` + `mig.collectChunkObservations(...)`; (G)
+  `const mod = await import(...)` + `mod.collectChunkObservations`; (H1-H3)
+  `readChunkObservations` redefined as `export async function`, `export
+  const`, or a bare (non-exported) `function` paired with a separate
+  `export { readChunkObservations }` list. Hardening: `CHUNK_IMPORT_RE`
+  gained an `export` alternative and alias-stripping (`s.split(/\s+as\s+/)
+  [0]`) on named-import lists; a new `NAMESPACE_BINDING_RE` + syntax-
+  anchored `<name>.collectChunkObservations` member-access check covers F/G
+  (deliberately NOT a free-text substring scan — that would self-match the
+  guard's own fixture-building source, discovered and fixed mid-batch, see
+  "Issues found" below); `readChunkObservations`'s definition scan gained
+  two more anchored patterns (`export (async )?function|const|let|var`, a
+  bare `function`, and a line-anchored `export { }` list). One test added
+  per mutant (7 new tests, all using the same string-concatenation trick as
+  batch 1's fixture test to avoid the guard self-matching its own source).
+- Ticked task 4.2 (done in `75afb500`, already on the branch before this
+  correction batch started — re-wrapped for length in this batch) and task
+  5.3 (the #874 ledger comment was posted: `issuecomment-5625476087`).
+
+### TDD evidence — guard hardening (mutant-survival proof)
+
+| Mutant | RED (old logic, scratch copy) | GREEN (hardened logic) |
+|---|---|---|
+| C re-export | Confirmed NOT caught — `chunkImporters` returned `[]` for the fixture | New test: `found.length === 1` after adding the `export` alternative |
+| E aliased import | Confirmed NOT caught — names array kept `"collectChunkObservations as grabChunks"` whole | New test: `found.length === 1` after alias-stripping |
+| F namespace import + member access | Confirmed NOT caught — `{ }` destructuring required, none present | New test: `found.length === 1` after `NAMESPACE_BINDING_RE` |
+| G non-destructured dynamic import + member access | Confirmed NOT caught — same gap as F | New test: `found.length === 1` |
+| H1 `export async function` | Confirmed NOT caught — old pattern required `export function` (no `async`) | New test: file listed in `definesReadChunkObservations` |
+| H2 `export const` | Confirmed NOT caught — old pattern required `function`, not `const` | New test: file listed |
+| H3 bare `function` + `export { }` list | Confirmed NOT caught — neither half alone matched `export function` | New test: file listed |
+
+Proof method: a scratch copy of the pre-edit detection logic
+(`/tmp/.../scratchpad/mutant-proof/old-logic.mjs`, deleted after use) run
+against isolated fixture files for each of the 7 mutants, confirming all 7
+passed through undetected; then the same fixtures re-run against the
+hardened logic (`new-logic.mjs`) confirming all 7 are now caught; then the
+hardened logic applied to the real tracked file and re-verified against the
+real repo tree (found set unchanged: still exactly `engram.mjs`, `cli.mjs`,
+`migrate-v1.test.mjs`) before committing.
+
+### Issues found (this batch)
+
+- The `namespaceImporters` JSDoc and the top-of-file `NAMESPACE_BINDING_RE`
+  comment originally spelled out the real exploit pattern in prose (e.g.
+  `` `import * as mig from '...migrate-v1.mjs'` `` immediately followed by
+  `` `mig.collectChunkObservations(...)` ``) — this made the guard's own
+  file self-match when scanning the real repo tree (`assert.deepEqual`
+  failure, `chunk-boundary.test.mjs` appearing in `found`). Same root cause
+  as batch 1's fixture-string issue, different location: explanatory prose,
+  not fixture-building code. Fixed by (a) genericizing the doc comments to
+  use `<name>` placeholders instead of concrete `mig`/`mod` bound next to
+  the member-access phrase, (b) never writing a real quoted specifier ending
+  in `migrate-v1.mjs` directly after `from`/`import(` in prose (use bare
+  `migrate-v1.mjs` without quotes, or an ellipsis-only placeholder), and (c)
+  anchoring `BARE_EXPORT_LIST_RE` to line-start (`^\s*export\s*\{`) so an
+  unrelated prose mention of the phrase cannot match mid-line. Worth
+  flagging generally: any source-scanning guard test whose OWN file lives
+  inside its walked roots must audit not just fixture-building code strings
+  (batch 1's lesson) but also its explanatory comments for the same
+  self-match risk.
+
+### Test results (this batch)
+
+- Focused: `node --test brain/scripts/memory/chunk-boundary.test.mjs
+  brain/scripts/governance/run-check.test.mjs` — **128/128 pass, 0 fail**
+  (121 pre-existing + 7 new mutant tests).
+- Full `npm test`: **5155/5155 pass, 0 fail** (+7 over batch 1's 5148),
+  run before each of the two commits below.
+
+### Commits (this batch, both local, none pushed)
+
+| SHA | Message |
+|---|---|
+| `aea77892` | `test(memory): harden chunk-boundary guard against 7 review-found evasions (#247)` |
+| `55fa7d81` | `docs(sdd): fix ledger wording, bootstrap.sh anchor, legacy file count, tick 4.2/5.3 (#247)` |
+
+### Files changed (this batch)
+
+| File | Action | What |
+|---|---|---|
+| `brain/scripts/memory/chunk-boundary.test.mjs` | Modified | Widened `WALK_GLOBS`; hardened `CHUNK_IMPORT_RE` (export + alias-stripping); added `NAMESPACE_BINDING_RE` + `namespaceImporters`; hardened `definesReadChunkObservations` (extracted as a function, 3 anchored patterns); 7 new tests |
+| `brain/scripts/governance/run-check.test.mjs` | Modified | Comment-only: re-wrapped the cross-reference line to ~72 cols |
+| `brain/scripts/memory/backends/engram.mjs` | Modified | Header-comment-only: "lives byte-identical" → "is restated" |
+| `openspec/changes/issue-247-chunk-retirement/tasks.md` | Modified | Task 5.1 wording fix; ledger rows 2-7 synced to `design.md`; row 6/7 corrections; ticked 4.2, 5.3 |
+| `openspec/changes/issue-247-chunk-retirement/design.md` | Modified | Ledger row 6 (bootstrap.sh anchor + delegation wording) and row 7 (48-file breakdown) corrections |
+
+### Deviations from design (this batch)
+
+None — all fixes are corrections toward what the design/spec already
+intended (accurate cross-file claims, a guard that actually covers its
+stated surface); no new design decision was made.
+
+### Risks (this batch)
+
+- The already-posted `issuecomment-5625476087` on #874 now lags the
+  corrected local ledger wording (MINOR-1/MINOR-2, see above) — a follow-up
+  comment or edit is needed before #874 is worked, or a reader will see two
+  slightly different versions of row 6/7.
+
 ## Remaining tasks
 
-- [ ] 4.2 `governance/run-check.test.mjs:32` prose → cross-reference (blocked
-  by write scope this batch)
-- [ ] 5.3 post the #874 comment (drafted above; orchestrator's to post)
-- [ ] W1-W6 wrap-up and PR opening (orchestrator's per launch scope)
+- [ ] W1-W6 wrap-up and PR opening (orchestrator's per launch scope) —
+  W1's `npm test` numbers: baseline 5139/5139 (batch 1), 5155/5155 final
+  (this batch, after both correction commits)
