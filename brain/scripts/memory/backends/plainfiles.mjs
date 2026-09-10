@@ -17,6 +17,8 @@ import { _getGitBranch } from "./engram.mjs";
 import { buildRecord, serializeRecord, nowUtcSeconds, RECORD_TYPES } from "../lib/format.mjs";
 import { appendRecord, rebuildIndex, readRecords } from "../lib/store.mjs";
 import { normalizeDuplicates } from "../lib/duplicates.mjs";
+import { gitConfigGet } from "../../lib/git-config.mjs";
+import { resolveActor, resolveActorKind, deriveIssue, composeSource } from "../lib/capture-provenance.mjs";
 
 /** The repository this record belongs to, from config, falling back to the checkout
  *  directory name. Records in this repo carry the bare name ("brain"), not the slug. */
@@ -33,14 +35,6 @@ import { t } from "../../i18n/t.mjs";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../../../..");
 
-/**
- * The door-typed `actorKind` for every `save()` record (obs #578): records
- * the entry DOOR (cli save is agent-by-construction), never a caller input —
- * spoof-resistant since it can never be overridden. See the doc-scan
- * tripwire test if a human-authored save path ever emerges.
- */
-export const PLAINFILES_ACTOR_KIND = "agent";
-
 /** Reads brain.config.json for governance.memorySecret* keys. Never throws. */
 function _defaultLoadBrainConfig(root) {
   try {
@@ -53,17 +47,34 @@ function _defaultLoadBrainConfig(root) {
 /**
  * save() — scan-then-write: appends one validated record to
  * `.memory/records/<yyyy-mm>.jsonl` with MEASURED, never-flagged provenance
- * (REQ-C3-2). Mirrors `_defaultEngramSave`'s arg shape; `scope`/`topic` are
- * accepted for shape parity but not persisted (no home in the record
- * format, C0/C1). No `actor`/`actorKind`/`ts` field accepted anywhere:
- * `actor` ← getBranch seam, `actorKind` ← PLAINFILES_ACTOR_KIND,
- * `ts` ← getTimestamp seam (C2a canonical, never `new Date()` directly).
- * Order mirrors dualWriteRecords: scan for secrets BEFORE any write.
+ * (REQ-C3-2; rewired at #738). Mirrors `_defaultEngramSave`'s arg shape;
+ * `scope`/`topic` are accepted for shape parity but not persisted (no home
+ * in the record format, C0/C1). No `actor`/`actorKind`/`ts` field accepted
+ * anywhere:
+ *
+ *   - `actor`     ← `resolveActor(getGitConfig('brain.actor'))` — the
+ *                   configured handle. Refused (throws), by name, when
+ *                   unset, not handle-shaped, or the reserved `@legacy`
+ *                   sentinel (#738; never the branch — #542's "not a
+ *                   defect" is overturned, the branch answers WHERE, not
+ *                   WHO).
+ *   - `actorKind` ← `resolveActorKind(getEnv(), getGitConfig('brain.agentEnv'))`
+ *                   — MEASURED from the agent-marker env, never a
+ *                   door-typed constant.
+ *   - `issue`     ← the caller's `--issue` when given, else DERIVED from
+ *                   `getBranch(root)` via `deriveIssue` (a stdout notice
+ *                   fires when derived), else absent — never fabricated.
+ *   - `ts`        ← getTimestamp seam (C2a canonical, never `new Date()`
+ *                   directly).
+ *
+ * Order mirrors dualWriteRecords: scan for secrets BEFORE any write. `type`
+ * and `--issue` shape refusals stay FIRST — both are caller mistakes fixable
+ * in the same second; the actor refusal is a machine-setup question.
  *
  * @param {string} title
  * @param {string} content
- * @param {{type: string, project: string, scope?: string, topic?: string}} [opts]
- * @param {object} [seams]  root, getBranch, getTimestamp, getHostname, _appendRecord, _rebuildIndex, _loadConfig
+ * @param {{type: string, project: string, issue?: number, scope?: string, topic?: string}} [opts]
+ * @param {object} [seams]  root, getBranch, getTimestamp, getHostname, getGitConfig, getEnv, _appendRecord, _rebuildIndex, _loadConfig
  * @returns {Promise<{id: string, file: string, written: boolean}>}
  */
 export async function save(
@@ -79,6 +90,8 @@ export async function save(
     getBranch = _getGitBranch,
     getTimestamp = nowUtcSeconds,
     getHostname = () => osHostname(),
+    getGitConfig = (key) => gitConfigGet(key, root),
+    getEnv = () => process.env,
     _appendRecord = appendRecord,
     _rebuildIndex = rebuildIndex,
     _loadConfig = _defaultLoadBrainConfig,
@@ -90,9 +103,8 @@ export async function save(
   }
 
   const ts = getTimestamp();
-  const actor = getBranch(root);
-  const actorKind = PLAINFILES_ACTOR_KIND;
-  const source = `plainfiles save on ${getHostname()}`;
+  // `getBranch` SURVIVES (#738) — it now feeds `issue`, never `actor`.
+  const branch = getBranch(root);
   const config = _loadConfig(root);
 
   // DERIVE WHAT IS DERIVABLE, REFUSE WHAT IS A CHOICE (issue #530).
@@ -121,7 +133,32 @@ export async function save(
     throw new Error(await t("memory.plainfiles.save.issueInvalid", { value: String(issue) }));
   }
 
-  const candidate = buildRecord({ ts, actor, actorKind, type, project: resolvedProject, issue, content, title, source });
+  // #738 — the actor refusal is a machine-setup question, kept AFTER the two
+  // caller-mistake refusals above so no existing "first failure" message changes.
+  const actorResult = resolveActor({ configured: getGitConfig("brain.actor") });
+  if (!actorResult.ok) {
+    const key = actorResult.reason === "reserved"
+      ? "memory.plainfiles.save.actorReserved"
+      : actorResult.reason === "malformed"
+        ? "memory.plainfiles.save.actorMalformed"
+        : "memory.plainfiles.save.actorUnset";
+    throw new Error(await t(key, { value: String(actorResult.value ?? "") }));
+  }
+  const actor = actorResult.actor;
+
+  const kindResult = resolveActorKind({ env: getEnv(), agentEnvConfig: getGitConfig("brain.agentEnv") });
+  const actorKind = kindResult.actorKind;
+
+  const issueResult = deriveIssue({ declared: issue, branch });
+  if (issueResult.derived) {
+    console.log(await t("memory.plainfiles.save.issueDerived", { issue: String(issueResult.issue), branch }));
+  }
+
+  const source = composeSource({ host: getHostname(), actor: actorResult, kind: kindResult, issue: issueResult });
+
+  const candidate = buildRecord({
+    ts, actor, actorKind, type, project: resolvedProject, issue: issueResult.issue, content, title, source,
+  });
 
   const { patternSources, allowPatternSources } = resolveSecretConfig(config);
   const patterns = compilePatterns(patternSources);

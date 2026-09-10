@@ -201,6 +201,12 @@ test('W1 (#404): every record in the REAL store already satisfies the write-path
   // Honest about its reach: this is THIS repo. A consumer's `.memory/**` is
   // consumer-owned (managed-paths.mjs's `local` array) and is not covered by
   // any test here — which is the reason the rule is not on the read path.
+  //
+  // W3 (#738) is EXCLUDED from this measurement, on purpose: it is a NEW,
+  // forward-only rule — the whole reason #738 exists is that ~183 of this
+  // repo's own historical records carry a branch-shaped `actor` (design.md's
+  // measured audit). Backfilling them is explicitly a Non-Goal (#864 task
+  // 1.2a / #368); W1/W2 (measured here) are the rules this pin still owns.
   const records = readRecordObservations({ recordsDir });
   if (records.length === 0) {
     t.skip(
@@ -209,9 +215,10 @@ test('W1 (#404): every record in the REAL store already satisfies the write-path
     );
     return;
   }
+  const nonW3Errors = (r) => validateWritableRecord(r).errors.filter((e) => !e.includes('W3'));
   const offenders = records
-    .filter((r) => !validateWritableRecord(r).valid)
-    .map((r) => `${r.id}: ${validateWritableRecord(r).errors.join('; ')}`);
+    .filter((r) => nonW3Errors(r).length > 0)
+    .map((r) => `${r.id}: ${nonW3Errors(r).join('; ')}`);
   console.log(`W1/#404: write-path rules measured over ${records.length} real records`);
   assert.deepEqual(offenders, [], `${offenders.length}/${records.length} real records violate a write-path rule:\n${offenders.join('\n')}`);
 });

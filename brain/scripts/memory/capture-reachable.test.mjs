@@ -64,19 +64,30 @@ test('#530: the CLI actually forwards --issue — the parser is a layer of its o
   // deleting `--issue` from it left the whole suite green. Proving a behaviour at one
   // layer says nothing about the layer above it, which is the same shape that let a
   // `readMergeParent` guard sit unexercised on #518.
-  const { mkdtempSync, rmSync, mkdirSync, readFileSync: read, readdirSync } = await import('node:fs');
+  const { mkdtempSync, mkdirSync, readFileSync: read, readdirSync } = await import('node:fs');
   const { tmpdir } = await import('node:os');
   const { join } = await import('node:path');
   const { spawnSync } = await import('node:child_process');
+  const { removeTempTree } = await import('../lib/tmp-tree.mjs');
 
   const root = mkdtempSync(join(tmpdir(), 'capture-cli-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  // #802: this test now `git init`s root (#738's isolation fixture) — a bare
+  // recursive rmSync here would trip the drift guard; removeTempTree instead.
+  t.after(() => removeTempTree(root));
   mkdirSync(join(root, '.memory', 'records'), { recursive: true });
+
+  // #738 (design A6, #897 precedent): `save` reads `brain.actor` from the
+  // real `git config --get` (cwd = root) — isolated from ambient
+  // global/system config so this test's verdict does not depend on the
+  // machine it runs on.
+  const isolatedGitEnv = { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' };
+  spawnSync('git', ['init', '-q'], { cwd: root, encoding: 'utf8', env: { ...process.env, ...isolatedGitEnv } });
+  spawnSync('git', ['config', '--local', 'brain.actor', '@test'], { cwd: root, encoding: 'utf8', env: { ...process.env, ...isolatedGitEnv } });
 
   const r = spawnSync('node', [`${REPO}/brain/scripts/memory/cli.mjs`, 'save', 'title', 'content',
     '--type', 'discovery', '--issue', '530'], {
     encoding: 'utf8',
-    env: { ...process.env, MEMORY_BACKEND: 'plainfiles', BRAIN_MEMORY_TEST_ROOT: root },
+    env: { ...process.env, MEMORY_BACKEND: 'plainfiles', BRAIN_MEMORY_TEST_ROOT: root, ...isolatedGitEnv },
   });
   assert.equal(r.status, 0, `the CLI must save:\n${r.stdout}\n${r.stderr}`);
 

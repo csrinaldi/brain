@@ -427,6 +427,11 @@ export default {
   // "save() failed" sent the operator to the single action that makes it worse.
   'memory.plainfiles.save.indexFailed': 'the record WAS written — {id} → {file}. What failed is the INDEX rebuild, which reads the whole store, so the cause is almost certainly a record that was already broken before this run: {message}\n  Do NOT run memory:save again — the record is already on disk, and a retry mints a SECOND record with a later `ts`, hence a different id, which no deduplication will ever collapse.\n  Repair the store, then rebuild the index with `npm run memory:reindex`.',
   'memory.plainfiles.save.secretFound': 'Secret detected in the candidate record (line {line}) — pattern "{pattern}" matched. Aborted BEFORE the records/ append (add an allowlist entry in governance.memorySecretAllowPatterns if this is a false positive).',
+  // ── #738 — provenance at capture: actor/actorKind/issue ──────────────────
+  'memory.plainfiles.save.actorUnset': 'no configured actor — run `git config --local brain.actor @<handle>` once per clone, then retry. brain.actor is unset.',
+  'memory.plainfiles.save.actorMalformed': "brain.actor is set to '{value}', which is not handle-shaped (must start with @, e.g. @yourhandle). Run `git config --local brain.actor @<handle>` to fix it.",
+  'memory.plainfiles.save.actorReserved': "brain.actor is set to '{value}', a reserved value used internally for unattributed/legacy records — it cannot be used as a capture actor. Run `git config --local brain.actor @<handle>` with your own handle.",
+  'memory.plainfiles.save.issueDerived': 'issue {issue} derived from branch {branch} (no --issue given).',
   'memory.save.plainfilesIgnoredOpts': 'ignored option(s) {opts} — the plainfiles record format has no field for them (scope/topic are engram-only concepts); the record was still written normally.',
   'memory.plainfiles.search.empty': 'ℹ no matching records found.',
   'memory.plainfiles.search.summary': '{count} matching record(s):',
