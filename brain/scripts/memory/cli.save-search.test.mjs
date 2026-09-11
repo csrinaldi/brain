@@ -4,6 +4,15 @@
 // file location, not `cwd`, so these tests redirect via BRAIN_MEMORY_TEST_ROOT
 // (a test-only seam, see cli.mjs) — every invocation here points at a fresh
 // temp dir, NEVER the real `.memory/`.
+//
+// #738 (design A6, #897 precedent): `save` now reads `brain.actor`/
+// `brain.agentEnv` from the real `git config --get` (cwd = testRoot) and
+// `actorKind` from the real process env. Every fixture below therefore
+// `git init`s the test root and sets a LOCAL `brain.actor`, and every spawn
+// isolates GIT_CONFIG_GLOBAL/GIT_CONFIG_NOSYSTEM and controls AI_AGENT
+// explicitly — otherwise this suite's verdict would depend on the machine
+// (or CI runner) it happens to run on, exactly the trap #897 already found
+// once for a different CLI-spawn suite.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -15,10 +24,27 @@ import { fileURLToPath } from 'node:url';
 
 const cliPath = join(dirname(fileURLToPath(import.meta.url)), 'cli.mjs');
 
-function runCli(args, { backend = 'plainfiles', testRoot } = {}) {
+const ISOLATED_GIT_ENV = { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' };
+// eslint-disable-next-line no-unused-vars
+const { AI_AGENT: _ambientAiAgent, ...ENV_NO_AI_AGENT } = process.env;
+
+/** `git init`s `root` and configures a LOCAL `brain.actor` — the one-command
+ * setup #738 requires before any capture. Isolated from ambient global/system
+ * config (A6) so this fixture behaves the same on every machine. */
+function initIdentity(root, actor = '@test') {
+  const env = { ...process.env, ...ISOLATED_GIT_ENV };
+  spawnSync('git', ['init', '-q'], { cwd: root, encoding: 'utf8', env });
+  spawnSync('git', ['config', '--local', 'brain.actor', actor], { cwd: root, encoding: 'utf8', env });
+}
+
+/** `withAgent: true` sets a deterministic AI_AGENT value (⇒ actorKind agent);
+ * `false` strips it from the child's env entirely (⇒ actorKind human) — never
+ * left to whatever happens to be ambient in the runner's own shell. */
+function runCli(args, { backend = 'plainfiles', testRoot, withAgent = true } = {}) {
+  const base = withAgent ? { ...ENV_NO_AI_AGENT, AI_AGENT: 'test-agent' } : ENV_NO_AI_AGENT;
   return spawnSync(process.execPath, [cliPath, ...args], {
     encoding: 'utf8',
-    env: { ...process.env, MEMORY_BACKEND: backend, ...(testRoot ? { BRAIN_MEMORY_TEST_ROOT: testRoot } : {}) },
+    env: { ...base, ...ISOLATED_GIT_ENV, MEMORY_BACKEND: backend, ...(testRoot ? { BRAIN_MEMORY_TEST_ROOT: testRoot } : {}) },
   });
 }
 
@@ -26,6 +52,7 @@ function runCli(args, { backend = 'plainfiles', testRoot } = {}) {
 
 test('MEMORY_BACKEND=plainfiles + memory save <title> <content> --type ... dispatches to plainfiles save and writes a record', () => {
   const testRoot = mkdtempSync(join(tmpdir(), 'brain-cli-save-'));
+  initIdentity(testRoot);
   const result = runCli(
     ['save', 'A title', 'The body', '--type', 'discovery', '--project', 'brain', '--scope', 'project', '--topic', 'x/y'],
     { testRoot },
@@ -42,12 +69,15 @@ test('MEMORY_BACKEND=plainfiles + memory save <title> <content> --type ... dispa
   assert.equal(record.project, 'brain');
   assert.ok(record.content.includes('A title'));
   assert.ok(record.content.includes('The body'));
+  assert.equal(record.actor, '@test', 'actor comes from the configured brain.actor handle');
   // NO --actor/--actor-kind/--ts flag is recognized anywhere in the parser.
+  // actorKind is MEASURED from the (controlled, here-deterministic) agent-marker env.
   assert.equal(record.actorKind, 'agent');
 });
 
 test('memory save recognizes NO --actor/--actor-kind/--ts flag anywhere in the parser', () => {
   const testRoot = mkdtempSync(join(tmpdir(), 'brain-cli-save-noflag-'));
+  initIdentity(testRoot);
   const result = runCli(
     ['save', 't', 'c', '--type', 'discovery', '--project', 'brain', '--actor', 'spoofed', '--actor-kind', 'human', '--ts', '1999-01-01T00:00:00Z'],
     { testRoot },
@@ -56,6 +86,7 @@ test('memory save recognizes NO --actor/--actor-kind/--ts flag anywhere in the p
   const recordsDir = join(testRoot, '.memory', 'records');
   const files = readdirSync(recordsDir).filter((f) => f.endsWith('.jsonl'));
   const record = JSON.parse(readFileSync(join(recordsDir, files[0]), 'utf8').trim());
+  assert.equal(record.actor, '@test', 'a --actor flag must be silently ignored — actor is never spoofable');
   assert.equal(record.actorKind, 'agent', 'a --actor-kind flag must be silently ignored — actorKind is never spoofable');
   assert.notEqual(record.ts, '1999-01-01T00:00:00Z', 'a --ts flag must be silently ignored — ts is always measured');
 });
@@ -64,6 +95,7 @@ test('memory save recognizes NO --actor/--actor-kind/--ts flag anywhere in the p
 
 test('MEMORY_BACKEND=plainfiles + memory search <query> dispatches to plainfiles search and finds a prior save', () => {
   const testRoot = mkdtempSync(join(tmpdir(), 'brain-cli-search-'));
+  initIdentity(testRoot);
   const saveResult = runCli(
     ['save', 'Findable title', 'unique-search-needle-xyz', '--type', 'discovery', '--project', 'brain'],
     { testRoot },
@@ -78,14 +110,55 @@ test('MEMORY_BACKEND=plainfiles + memory search <query> dispatches to plainfiles
 
 test('memory search under plainfiles with no match prints an empty-results message and exits 0', () => {
   const testRoot = mkdtempSync(join(tmpdir(), 'brain-cli-search-empty-'));
+  initIdentity(testRoot);
   const result = runCli(['search', 'nothing-will-match-this-xyz'], { testRoot });
   assert.equal(result.status, 0, `expected exit 0, got ${result.status}. stderr: ${result.stderr}`);
 });
 
+// ── #738 — capture refuses without a configured handle ──────────────────────
+
+test(
+  '#738: with an isolated HOME, no brain.actor configured, and a handle-shaped `user.name` present, save ' +
+    'still exits non-zero naming the remedy (MINOR-3d, fresh-context review — `user.name` must never substitute for brain.actor)',
+  () => {
+    const testRoot = mkdtempSync(join(tmpdir(), 'brain-cli-save-noactor-'));
+    const isolatedHome = mkdtempSync(join(tmpdir(), 'brain-cli-save-noactor-home-'));
+    const gitEnv = { ...process.env, ...ISOLATED_GIT_ENV };
+    spawnSync('git', ['init', '-q'], { cwd: testRoot, encoding: 'utf8', env: gitEnv });
+    // A handle-shaped `user.name` set LOCALLY — a decoy this refusal must not honor.
+    spawnSync('git', ['config', '--local', 'user.name', '@sneaky'], { cwd: testRoot, encoding: 'utf8', env: gitEnv });
+    // deliberately NO `git config --local brain.actor` — a fresh clone.
+
+    const result = spawnSync(process.execPath, [cliPath, 'save', 't', 'c', '--type', 'discovery', '--project', 'brain'], {
+      encoding: 'utf8',
+      env: {
+        ...ENV_NO_AI_AGENT,
+        ...ISOLATED_GIT_ENV,
+        HOME: isolatedHome,
+        MEMORY_BACKEND: 'plainfiles',
+        BRAIN_MEMORY_TEST_ROOT: testRoot,
+      },
+    });
+
+    assert.notEqual(result.status, 0, 'a save with no configured handle must exit non-zero');
+    assert.match(result.stderr, /git config --local brain\.actor/, 'the refusal must name the remedy');
+    const recordsDir = join(testRoot, '.memory', 'records');
+    assert.equal(existsSync(recordsDir), false, 'nothing may be appended when the actor is unset');
+  },
+);
+
 // ── --supersedes (#805): the CLI enforces "exactly one id"; the backend cannot ──
+//
+// MERGE NOTE (#738 × #805): these fixtures predate the actor rule. Every one of
+// them now calls `initIdentity` first — not cosmetics: without it the arity and
+// shape refusals below would still exit 1, but for the WRONG reason (the actor
+// refusal, which fires inside the backend), and the tests would keep passing
+// while the guard they exist to pin was gone. With a configured handle, the
+// only thing that can refuse is the parser rule under test.
 
 test('memory save --supersedes <local id> writes the field and exits 0', () => {
   const testRoot = mkdtempSync(join(tmpdir(), 'brain-cli-save-supersedes-'));
+  initIdentity(testRoot);
   const seed = runCli(['save', 'A', 'first record', '--type', 'discovery', '--project', 'brain'], { testRoot });
   assert.equal(seed.status, 0, `seed save failed: ${seed.stderr}`);
   const recordsDir = join(testRoot, '.memory', 'records');
@@ -106,6 +179,7 @@ test('memory save --supersedes <local id> writes the field and exits 0', () => {
 
 test('memory save --supersedes given twice exits 1, naming fan-in as deferred', () => {
   const testRoot = mkdtempSync(join(tmpdir(), 'brain-cli-save-supersedes-repeat-'));
+  initIdentity(testRoot);
   const result = runCli(
     ['save', 't', 'c', '--type', 'discovery', '--project', 'brain', '--supersedes', 'rec-0123456789abcdef', '--supersedes', 'rec-fedcba9876543210'],
     { testRoot },
@@ -118,6 +192,7 @@ test('memory save --supersedes given twice exits 1, naming fan-in as deferred', 
 
 test('memory save --supersedes as the final argument (no value) exits 1, no record written', () => {
   const testRoot = mkdtempSync(join(tmpdir(), 'brain-cli-save-supersedes-noval-'));
+  initIdentity(testRoot);
   const result = runCli(
     ['save', 't', 'c', '--type', 'discovery', '--project', 'brain', '--supersedes'],
     { testRoot },
@@ -137,6 +212,7 @@ test('memory save --supersedes as the final argument (no value) exits 1, no reco
 // value-less `--supersedes` is refused.
 test('memory save --supersedes=<id> (equals form) exits 1, no record written', () => {
   const testRoot = mkdtempSync(join(tmpdir(), 'brain-cli-save-supersedes-eq-'));
+  initIdentity(testRoot);
   const result = runCli(
     ['save', 't', 'c', '--type', 'discovery', '--project', 'brain', '--supersedes=rec-0123456789abcdef'],
     { testRoot },
@@ -147,9 +223,12 @@ test('memory save --supersedes=<id> (equals form) exits 1, no record written', (
 });
 
 test('memory save --supersedes <unknown id> under the non-git test root exits 1 with could-not-verify, quoted', () => {
-  // BRAIN_MEMORY_TEST_ROOT is a bare mkdtempSync dir, not a git repo (design.md
-  // A8) — an unknown id here is honestly could-not-verify, never not-in-store.
+  // The test root is a git repo with NO remote (it must be one at all so #738's
+  // `brain.actor` can be configured locally) — `origin/HEAD` and `origin/main`
+  // still fail to resolve, so design.md A8's premise holds unchanged: an unknown
+  // id here is honestly could-not-verify, never not-in-store.
   const testRoot = mkdtempSync(join(tmpdir(), 'brain-cli-save-supersedes-unknown-'));
+  initIdentity(testRoot);
   const result = runCli(
     ['save', 't', 'c', '--type', 'discovery', '--project', 'brain', '--supersedes', 'rec-0123456789abcdef'],
     { testRoot },

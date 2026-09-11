@@ -28,6 +28,9 @@
 //        displacing the issue citation and prepending bytes to the hashed `content`.
 //   W2 — `issue`, when present, MUST be a finite integer `number` — the type the schema
 //        declares. `issue: "404"` re-imports as the number `404`, a different `id`.
+//   W3 — `actor` MUST NOT be branch-shaped (#738): no `/`, and not a bare default branch
+//        (`main`/`master`/`develop`/`trunk`). A branch answers WHERE a record was captured
+//        from, not WHO captured it — that question belongs in `issue`, not `actor`.
 
 import { createHash } from 'node:crypto';
 
@@ -44,6 +47,33 @@ const UTC_TS_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
 // Partial PII heuristic (REQ-MF-5): flags an email-shaped actor. Does not catch
 // a bare legal name — full enforcement is the C1b secret-scrubbing hook, not this validator.
 const EMAIL_ACTOR_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// The actor-shape predicate (#738, design A4) — rehomed here from `audit.mjs`
+// so the schema owner holds the rule; `audit.mjs` imports these instead of
+// redefining them. `HANDLE_RE` is also the positive requirement
+// `capture-provenance.mjs#resolveActor` enforces at the point a handle is
+// minted (kept as a private literal there — see that module's header).
+export const HANDLE_RE = /^@[A-Za-z0-9][A-Za-z0-9-]*$/;
+// A bare default-branch name is a branch too: records captured from the main
+// checkout carry `actor: "main"` (measured: 2 of them) — no `/` to catch.
+// Not exported (MINOR-1, fresh-context review): no consumer outside this
+// module reads the set itself, only `classifyActor`'s verdict.
+const DEFAULT_BRANCHES = new Set(['main', 'master', 'develop', 'trunk']);
+
+/**
+ * The four actor shapes (#738). `@legacy` is the export fallback; a `/` or a
+ * bare default-branch name is a git branch; `@name` is a handle; anything
+ * else is "other" and worth a look.
+ * @param {unknown} actor
+ * @returns {'legacy'|'branch'|'handle'|'other'}
+ */
+export function classifyActor(actor) {
+  if (typeof actor !== 'string' || actor === '') return 'other';
+  if (actor === '@legacy') return 'legacy';
+  if (actor.includes('/') || DEFAULT_BRANCHES.has(actor)) return 'branch';
+  if (HANDLE_RE.test(actor)) return 'handle';
+  return 'other';
+}
 
 /**
  * canonicalJson() — RFC 8785 (JCS) canonical serialization for this schema's
@@ -196,6 +226,18 @@ export function validateWritableRecord(record) {
     }
     if (record.issue !== undefined && record.issue !== null && !Number.isInteger(record.issue)) {
       writeErrors.push(`issue must be an integer number, not ${typeof record.issue} ${JSON.stringify(record.issue)} (W2)`);
+    }
+    // W3 — `actor` must not be branch-shaped: no `/`, and not a bare default
+    // branch (`main`/`master`/`develop`/`trunk`). Refuses the SHAPE only,
+    // never "not a handle" — a recovered non-handle actor (`other`, e.g.
+    // §4-recovered bare names) must still pass this gate; only `resolveActor`
+    // (capture-provenance.mjs) enforces the positive handle requirement,
+    // at the point a value is minted rather than recovered (#738 [rev #870]).
+    if (classifyActor(record.actor) === 'branch') {
+      writeErrors.push(
+        `actor is branch-shaped: '${record.actor}' — a branch answers WHERE, not WHO (W3, #738); ` +
+          `the branch belongs in 'issue'`,
+      );
     }
   }
   return { valid: writeErrors.length === 0, errors: writeErrors };

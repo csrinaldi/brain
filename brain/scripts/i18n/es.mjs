@@ -381,6 +381,11 @@ export default {
   'memory.plainfiles.save.done':    '✓ guardado {id} → {file}',
   'memory.plainfiles.save.indexFailed': 'el registro SÍ se escribió — {id} → {file}. Lo que falló es la reconstrucción del ÍNDICE, que lee el store entero, así que la causa casi seguro es un registro que ya estaba roto antes de esta corrida: {message}\n  NO vuelvas a correr memory:save — el registro ya está en disco, y reintentar acuña un SEGUNDO registro con un `ts` posterior, y por lo tanto otro id, que ninguna deduplicación va a colapsar jamás.\n  Repará el store y después reconstruí el índice con `npm run memory:reindex`.',
   'memory.plainfiles.save.secretFound': 'Se detectó un secreto en el registro candidato (línea {line}) — coincide con el patrón "{pattern}". Se abortó ANTES de agregarlo a records/ (agregá una entrada en governance.memorySecretAllowPatterns si es un falso positivo).',
+  // ── #738 — proveniencia en la captura: actor/actorKind/issue ─────────────
+  'memory.plainfiles.save.actorUnset': 'no hay un actor configurado — corré `git config --local brain.actor @<handle>` una vez por clon y reintentá. brain.actor no está configurado.',
+  'memory.plainfiles.save.actorMalformed': "brain.actor está configurado como '{value}', que no tiene forma de handle (tiene que empezar con @, por ejemplo @tuhandle). Corré `git config --local brain.actor @<handle>` para arreglarlo.",
+  'memory.plainfiles.save.actorReserved': "brain.actor está configurado como '{value}', un valor reservado de uso interno para registros sin atribución/legacy — no se puede usar como actor de captura. Corré `git config --local brain.actor @<handle>` con tu propio handle.",
+  'memory.plainfiles.save.issueDerived': 'issue {issue} derivado de la rama {branch} (no se pasó --issue).',
   'memory.save.plainfilesIgnoredOpts': 'se ignoraron la(s) opción(es) {opts} — el formato de registro de plainfiles no tiene un campo para ellas (scope/topic son conceptos exclusivos de engram); el registro se guardó igualmente.',
   // ── --supersedes (#805): un id de supersedes se verifica contra el store, local primero, antes de cualquier escritura ──
   'memory.plainfiles.save.supersedesMalformed': "--supersedes '{value}' no tiene la forma rec-<16 hex> — se rechazó antes de tocar el filesystem o git, y no se escribió ningún registro.",
