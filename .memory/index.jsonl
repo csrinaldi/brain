@@ -104,6 +104,7 @@
 {"id":"rec-09f5089d4624d7c1","ts":"2026-07-25T00:47:23Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-09f5089d4624d7c1.jsonl"}
 {"id":"rec-09fb99ba58b87280","ts":"2026-08-16T22:39:31Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-08-rec-09fb99ba58b87280.jsonl"}
 {"id":"rec-09fe18db3ce6f950","ts":"2026-07-11T12:33:33Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-09fe18db3ce6f950.jsonl"}
+{"id":"rec-0a1859a961ccbd96","ts":"2026-09-11T02:21:19Z","actor":"@csrinaldi","type":"decision","project":"brain","issue":924,"file":"2026-09-rec-0a1859a961ccbd96.jsonl"}
 {"id":"rec-0a406d072e5fb340","ts":"2026-07-13T00:22:19Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-0a406d072e5fb340.jsonl"}
 {"id":"rec-0a40aa1dbf122b1a","ts":"2026-08-16T14:35:43Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-08-rec-0a40aa1dbf122b1a.jsonl"}
 {"id":"rec-0a633c3d3ec93610","ts":"2026-07-25T00:47:02Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07-rec-0a633c3d3ec93610.jsonl"}
@@ -524,6 +525,7 @@
 {"id":"rec-3acf62f78161a5c6","ts":"2026-08-17T01:10:00Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-08-rec-3acf62f78161a5c6.jsonl"}
 {"id":"rec-3ad16aaec0e4bbba","ts":"2026-07-25T21:50:57Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-3ad16aaec0e4bbba.jsonl"}
 {"id":"rec-3aeea763656db518","ts":"2026-07-25T21:50:46Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-3aeea763656db518.jsonl"}
+{"id":"rec-3afb00eb127d31a6","ts":"2026-09-10T21:36:14Z","actor":"fix/issue-805-fixmemory-corrections-must-carry-superse","type":"discovery","project":"brain","issue":805,"supersedes":"rec-7723969eb495debe","file":"2026-09-rec-3afb00eb127d31a6.jsonl"}
 {"id":"rec-3b1a8a2f42625aa9","ts":"2026-07-25T21:50:14Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-3b1a8a2f42625aa9.jsonl"}
 {"id":"rec-3b87bc84e838cf4d","ts":"2026-07-13T00:21:44Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-3b87bc84e838cf4d.jsonl"}
 {"id":"rec-3b96eeeb7c84fc7b","ts":"2026-07-29T14:26:22Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-07-rec-3b96eeeb7c84fc7b.jsonl"}
@@ -1413,6 +1415,7 @@
 {"id":"rec-964735d2098984cf","ts":"2026-07-02T12:39:42Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-07-rec-964735d2098984cf.jsonl"}
 {"id":"rec-9657ff805e2bdf1d","ts":"2026-07-11T12:33:28Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-9657ff805e2bdf1d.jsonl"}
 {"id":"rec-9662ca5df7c08459","ts":"2026-07-13T00:22:07Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-9662ca5df7c08459.jsonl"}
+{"id":"rec-96965eb1cf95f9a0","ts":"2026-09-10T22:02:59Z","actor":"@csrinaldi","type":"architecture","project":"brain","issue":738,"file":"2026-09-rec-96965eb1cf95f9a0.jsonl"}
 {"id":"rec-969ff094d0857885","ts":"2026-07-25T00:48:27Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07-rec-969ff094d0857885.jsonl"}
 {"id":"rec-96c1253197cbdf2e","ts":"2026-07-25T00:47:30Z","actor":"@legacy","type":"bugfix","project":"brain","file":"2026-07-rec-96c1253197cbdf2e.jsonl"}
 {"id":"rec-96d01c1564e10122","ts":"2026-07-25T21:51:34Z","actor":"@legacy","type":"bugfix","project":"brain","file":"2026-07-rec-96d01c1564e10122.jsonl"}
@@ -2360,5 +2363,3 @@
 {"id":"rec-ffa569c06c3ab605","ts":"2026-07-25T00:48:24Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-07-rec-ffa569c06c3ab605.jsonl"}
 {"id":"rec-ffacb2bc03a6872d","ts":"2026-07-25T21:51:15Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-ffacb2bc03a6872d.jsonl"}
 {"id":"rec-ffe76add88219b01","ts":"2026-07-25T00:47:37Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-ffe76add88219b01.jsonl"}
-{"id":"rec-3afb00eb127d31a6","ts":"2026-09-10T21:36:14Z","actor":"fix/issue-805-fixmemory-corrections-must-carry-superse","type":"discovery","project":"brain","issue":805,"supersedes":"rec-7723969eb495debe","file":"2026-09-rec-3afb00eb127d31a6.jsonl"}
-{"id":"rec-96965eb1cf95f9a0","ts":"2026-09-10T22:02:59Z","actor":"@csrinaldi","type":"architecture","project":"brain","issue":738,"file":"2026-09-rec-96965eb1cf95f9a0.jsonl"}
