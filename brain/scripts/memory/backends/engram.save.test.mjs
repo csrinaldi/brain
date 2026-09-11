@@ -17,6 +17,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { save } from './engram.mjs';
+import { appendRecord as appendRecordReal, rebuildIndex as rebuildIndexReal } from '../lib/store.mjs';
 
 function tmpRoot() {
   return mkdtempSync(join(tmpdir(), 'engram-save-'));
@@ -207,6 +208,55 @@ test('save: warns when --scope/--topic are passed, naming both', async () => {
 });
 
 // ── #637 — index rebuild failure is an annotated rethrow, not "save failed" ─
+
+// ── #469 re-proof (R10): a secret in `content` never reaches disk — neither
+// `.memory/records/*.jsonl` nor the engram store. Two tests: (i) the refusal
+// itself, with every downstream seam proved unreachable; (ii) the call order
+// on a clean input, scan → append → hydrate, never any other order.
+
+test('save (R10, i): a secret in content throws — _appendRecord, _rebuildIndex, and _engramSave (via _hydrate) are never called', async () => {
+  const root = tmpRoot();
+  try {
+    let appendCalled = false;
+    let rebuildCalled = false;
+    let hydrateCalled = false;
+    await assert.rejects(() =>
+      save('leaked token', 'ghp_abcdefghijklmnopqrstuvwx', { type: 'discovery', project: 'brain' }, {
+        root, getBranch: () => 'main', getTimestamp: () => '2026-09-10T09:00:00Z', getHostname: () => 'h',
+        ...identitySeams,
+        _appendRecord: () => { appendCalled = true; return { file: 'x' }; },
+        _rebuildIndex: () => { rebuildCalled = true; return { count: 0 }; },
+        _hydrate: async () => { hydrateCalled = true; return { written: 0, skipped: 0 }; },
+      }),
+    );
+    assert.equal(appendCalled, false, 'appendRecord must never run when a secret is found');
+    assert.equal(rebuildCalled, false, 'rebuildIndex must never run when a secret is found');
+    assert.equal(hydrateCalled, false, 'hydrate (and so _engramSave) must never run when a secret is found');
+    assert.equal(existsSync(join(root, '.memory', 'records')), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('save (R10, ii): on a clean input, the call order is scan → append → hydrate — never any other order', async () => {
+  const root = tmpRoot();
+  try {
+    const order = [];
+    await save('t', 'clean content, no secret here', { type: 'discovery', project: 'brain' }, {
+      root, getBranch: () => 'main', getTimestamp: () => '2026-09-10T09:00:00Z', getHostname: () => 'h',
+      ...identitySeams,
+      _appendRecord: (record, opts) => { order.push('append'); return appendRecordReal(record, opts); },
+      _rebuildIndex: (opts) => { order.push('rebuildIndex'); return rebuildIndexReal(opts); },
+      _hydrate: async () => { order.push('hydrate'); return { written: 1, skipped: 0 }; },
+    });
+    // The scan itself has no seam (scanTextForSecrets runs inline, synchronously,
+    // before _appendRecord is ever reached) — its position is proved by the FIRST
+    // logged call being 'append', never 'hydrate' or 'rebuildIndex' out of order.
+    assert.deepEqual(order, ['append', 'rebuildIndex', 'hydrate']);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test('save: a rebuildIndex failure is annotated and rethrown (#637) — the record is already durable', async () => {
   const root = tmpRoot();
