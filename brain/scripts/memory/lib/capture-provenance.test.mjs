@@ -118,7 +118,7 @@ test('composeSource: one trimmed, single-physical-line string (W1-safe)', () => 
   const actor = resolveActor({ configured: '@csrinaldi' });
   const kind = resolveActorKind({ env: {} });
   const issue = deriveIssue({ declared: undefined, branch: 'main' });
-  const line = composeSource({ host: 'devbox', actor, kind, issue });
+  const line = composeSource({ host: 'devbox', backend: 'plainfiles', actor, kind, issue });
   assert.equal(typeof line, 'string');
   assert.equal(line, line.trim());
   assert.ok(!/[\n\r]/.test(line));
@@ -129,7 +129,7 @@ test('composeSource: a 300-char env value is whitespace-collapsed and sliced to 
   const raw = ('claude   code  ' + 'x'.repeat(280)).repeat(1).slice(0, 300);
   const kind = resolveActorKind({ env: { [AGENT_ENV_DEFAULT]: raw } });
   const issue = deriveIssue({ declared: undefined, branch: 'main' });
-  const line = composeSource({ host: 'devbox', actor, kind, issue });
+  const line = composeSource({ host: 'devbox', backend: 'plainfiles', actor, kind, issue });
   const match = /AI_AGENT=(\S+)/.exec(line);
   assert.ok(match, `expected an AI_AGENT= value in: ${line}`);
   assert.ok(match[1].length <= 64, `expected <= 64 chars, got ${match[1].length}`);
@@ -144,7 +144,7 @@ test(
     const raw = 'y'.repeat(100);
     const kind = resolveActorKind({ env: { [AGENT_ENV_DEFAULT]: raw } });
     const issue = deriveIssue({ declared: undefined, branch: 'main' });
-    const line = composeSource({ host: 'devbox', actor, kind, issue });
+    const line = composeSource({ host: 'devbox', backend: 'plainfiles', actor, kind, issue });
     const tail = line.slice(line.indexOf('AI_AGENT=') + 'AI_AGENT='.length);
     assert.equal(tail.length, 64, `expected the truncated tail to be exactly 64 chars, got ${tail.length}: ${tail}`);
     assert.equal(tail, 'y'.repeat(64));
@@ -158,7 +158,7 @@ test(
     const actor = resolveActor({ configured: '@csrinaldi' });
     const kind = resolveActorKind({ env: { [AGENT_ENV_DEFAULT]: 'issue #999 runner' } });
     const issue = deriveIssue({ declared: undefined, branch: 'main' });
-    const line = composeSource({ host: 'devbox', actor, kind, issue });
+    const line = composeSource({ host: 'devbox', backend: 'plainfiles', actor, kind, issue });
     assert.ok(!/#/.test(line), `source must not carry a literal '#' from instrument text: ${line}`);
     assert.equal(issue.issue, undefined, 'precondition: no issue was declared or derived here');
     assert.equal(
@@ -169,13 +169,29 @@ test(
   },
 );
 
+test(
+  'composeSource: backend names the caller — "engram save on <host>" vs "plainfiles save on <host>" ' +
+    '(cold review C1, #924)',
+  () => {
+    const actor = resolveActor({ configured: '@csrinaldi' });
+    const kind = resolveActorKind({ env: {} });
+    const issue = deriveIssue({ declared: undefined, branch: 'main' });
+
+    const engramLine = composeSource({ host: 'devbox', backend: 'engram', actor, kind, issue });
+    assert.ok(engramLine.startsWith('engram save on devbox'), `got: ${engramLine}`);
+
+    const plainfilesLine = composeSource({ host: 'devbox', backend: 'plainfiles', actor, kind, issue });
+    assert.ok(plainfilesLine.startsWith('plainfiles save on devbox'), `got: ${plainfilesLine}`);
+  },
+);
+
 test('composeSource: declared vs derived issue are spelled in words', () => {
   const actor = resolveActor({ configured: '@csrinaldi' });
   const kind = resolveActorKind({ env: {} });
 
-  const declared = composeSource({ host: 'devbox', actor, kind, issue: deriveIssue({ declared: 738, branch: undefined }) });
+  const declared = composeSource({ host: 'devbox', backend: 'plainfiles', actor, kind, issue: deriveIssue({ declared: 738, branch: undefined }) });
   assert.match(declared, /declared via --issue/);
 
-  const derived = composeSource({ host: 'devbox', actor, kind, issue: deriveIssue({ declared: undefined, branch: 'feat/issue-738-x' }) });
+  const derived = composeSource({ host: 'devbox', backend: 'plainfiles', actor, kind, issue: deriveIssue({ declared: undefined, branch: 'feat/issue-738-x' }) });
   assert.match(derived, /derived from branch/);
 });

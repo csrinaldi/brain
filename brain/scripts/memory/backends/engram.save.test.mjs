@@ -66,6 +66,30 @@ test('save: a clean input writes a record, rebuilds the index, and calls hydrate
   }
 });
 
+// ── cold review C1 (#924): composeSource() must name the backend that
+// actually ran, not a hardcoded 'plainfiles' ─────────────────────────────
+
+test('save: source names "engram", not "plainfiles" (cold review C1)', async () => {
+  const root = tmpRoot();
+  try {
+    const result = await save('t', 'c', { type: 'discovery', project: 'brain' }, {
+      root,
+      getBranch: () => 'main',
+      getTimestamp: () => '2026-09-10T09:00:00Z',
+      getHostname: () => 'my-host',
+      ...identitySeams,
+      _hydrate: noopHydrate,
+    });
+    const record = JSON.parse(readFileSync(result.file, 'utf8').trim());
+    assert.ok(
+      record.source.startsWith('engram save on '),
+      `expected source to start with 'engram save on ', got: ${record.source}`,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 // ── caller-mistake refusals — FIRST of all, fixable in the same second ─────
 
 test('save: refuses when type is missing, naming the seven-member enum', async () => {

@@ -121,13 +121,21 @@ function collapseAndTruncate(value) {
 
 /**
  * Composes ONE trimmed physical line (W1-safe, `format.mjs`'s `source` rule)
- * from the other three resolvers' results plus the capturing host.
+ * from the other three resolvers' results plus the capturing host and the
+ * backend that actually ran.
  *
- * @param {{ host: string, actor: {evidence:string}, kind: {actorKind:string, marker:string|null, rawValue:string|null, evidence:string}, issue: {evidence:string|null} }} input
+ * `backend` is the caller's own identity string — `plainfiles.mjs#save()` and
+ * `engram.mjs#save()` each pass the same literal they already use elsewhere
+ * in that file (e.g. `unsupportedOp("search", "engram", ...)`); this function
+ * does not invent a new identity string (cold review C1, #924 — engram is the
+ * default backend after the #874 unpin, so a hardcoded "plainfiles" here
+ * mislabeled every engram-backed capture's `source` field).
+ *
+ * @param {{ host: string, backend: string, actor: {evidence:string}, kind: {actorKind:string, marker:string|null, rawValue:string|null, evidence:string}, issue: {evidence:string|null} }} input
  * @returns {string}
  */
-export function composeSource({ host, actor, kind, issue }) {
-  const parts = [`plainfiles save on ${host}`];
+export function composeSource({ host, backend, actor, kind, issue }) {
+  const parts = [`${backend} save on ${host}`];
   if (actor && actor.evidence) parts.push(actor.evidence);
   if (kind) {
     if (kind.actorKind === 'agent' && kind.rawValue) {
