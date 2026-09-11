@@ -146,3 +146,29 @@ test('hydrate: an unknown recordId with no record passed THROWS (D4) — never d
     ),
   );
 });
+
+// ── fresh-review F2 (#924): a title/content starting with `-` cannot be
+// spawned safely as an `engram save` argv token — `engram save --help` shows
+// no `--` escape (measured), so a leading `-` would be parsed as an option
+// instead of a positional. `hydrate` must refuse to spawn rather than hand
+// engram an argv it will misparse. The proper fix (an escape in the engram
+// CLI itself) is upstream — nothing to file in this repo. ─────────────────
+
+test('hydrate: a record whose title starts with "-" is deferred with reason "engram-argv-unsafe" — _engramSave is never called', async () => {
+  const dashRecord = { ...CLEAN_RECORD, content: '**-x**\n\na title that starts with a dash' };
+  const { guard } = heldGuard();
+  let engramSaveCalled = false;
+  const result = await hydrate(
+    { root: '/tmp/unused', recordId: dashRecord.id, record: dashRecord },
+    {
+      _probe: () => ({ available: true }),
+      _guard: () => guard,
+      _engramSave: () => { engramSaveCalled = true; },
+      _warn: () => {},
+    },
+  );
+  assert.equal(engramSaveCalled, false, 'a leading "-" in the title must never reach the engram CLI spawn');
+  assert.equal(result.written, 0);
+  assert.equal(result.deferred, true);
+  assert.equal(result.reason, 'engram-argv-unsafe');
+});

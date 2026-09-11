@@ -1324,6 +1324,19 @@ export async function search() {
 }
 
 /**
+ * isEngramArgvUnsafe() — fresh-review F2 (#924): `engram save --help` offers
+ * no `--` escape (measured), so a value beginning with `-` would be parsed
+ * as an option, not a positional. `hydrate()` checks its `title`/`content`
+ * against this BEFORE spawning; never used to sanitize, only to refuse.
+ *
+ * @param {unknown} value
+ * @returns {boolean}
+ */
+function isEngramArgvUnsafe(value) {
+  return typeof value === "string" && value.startsWith("-");
+}
+
+/**
  * hydrate() — project ONE durable record into the active engram store, keyed
  * by the record's own id as `topic_key` (#874, split A, R3/R4/D1/D2/D9).
  *
@@ -1393,6 +1406,19 @@ export async function hydrate(
 
   try {
     const observation = _importRecord(resolved);
+    // fresh-review F2 (#924): `engram save --help` offers no `--` escape
+    // (measured) — a `title`/`content` starting with `-` would be parsed as
+    // an option, not a positional, and either misbehave or fail in a way
+    // that looks like an unrelated engram error. Refused BEFORE the spawn,
+    // never thrown (R5 shape): this is a data shape the caller cannot fix by
+    // retrying, so it is reported the same way a deferred hydration is. The
+    // proper fix — an escape in the engram CLI itself — is upstream; nothing
+    // to change here beyond refusing to hand it an unsafe argv.
+    if (isEngramArgvUnsafe(observation.title) || isEngramArgvUnsafe(observation.content)) {
+      const reason = "engram-argv-unsafe";
+      _warn(await t("memory.save.hydrateDeferred", { recordId, reason }));
+      return { written: 0, skipped: 0, deferred: true, reason };
+    }
     _engramSave(observation.title, observation.content, {
       type: observation.type,
       project: observation.project,
