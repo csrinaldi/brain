@@ -16,8 +16,10 @@ topic_key `sdd/issue-874-record-first/apply-progress`).
 - [x] A6 — retire `memory.save.engramUnsupported` (D7)
 - [x] A7 — D8: retarget `capture-reachable.test.mjs` and `cli.backend-fallback.test.mjs:131-145`
 - [x] A8 — R7 probe (isolated temp store, one-off) — see below
-- [ ] A9 — `brain-drafts/memory-backend-contract.save.draft.md` (R13 draft 1)
-- [ ] A10 — unpin `package.json:65`; full-suite gate; closing record
+- [x] A9 — `brain-drafts/memory-backend-contract.save.draft.md` (R13 draft 1)
+- [x] A10 — unpin `package.json:65`; full-suite gate; closing record
+
+**All 11 tasks (A0–A10) complete. PR A ready for verify.**
 
 ## TDD Cycle Evidence
 
@@ -30,8 +32,8 @@ topic_key `sdd/issue-874-record-first/apply-progress`).
 | A5 | `cli.save-search.test.mjs` (extended) | CLI (child-process) | ✅ 10/10 (baseline) | ✅ Written — RED confirmed (exit 1, actor-unset, because sandbox PATH lacked `git`; fixed the fixture, re-confirmed RED on the real subject: missing `deferred` stderr) | ✅ 11/11 after wiring `_hydrate` default → real `hydrate`, adding i18n keys, updating backend-selection.mjs comment | ➖ single CLI-level case is the full close-the-loop proof; unit-level triangulation already done in A2/A4 | ➖ None needed |
 | A6 | `engram.search-unsupported.test.mjs` (renamed+trimmed) | Unit | ✅ 1/1 (search case, pre-existing) | N/A — trim-then-delete-key, not new behavior | ✅ 1/1 after key deletion; `unsupported-op.test.mjs` retargeted to `memory.search.engramUnsupported` (was pointing at the retiring key) | ➖ None needed | ➖ None needed |
 | A7 | `capture-reachable.test.mjs`, `cli.backend-fallback.test.mjs` (retargeted) | Unit + CLI | ✅ prior cases in both files stayed green | ✅ Written | ⚠️ 4/5 in capture-reachable.test.mjs green immediately (the "must NOT pin" assertion is a KNOWN, INTENTIONAL red until A10 unpins `package.json:65` — see Deviations); cli.backend-fallback.test.mjs 11/11 green | ✅ D8's full case list (not-pinned, reachable-with-no-binary, search-key-retarget) | ➖ None needed |
-| A9 | — (docs only, no test) | — | — | — | — | — | — |
-| A10 | full suite | — | — | — | — | — | — |
+| A9 | — (docs only, no test); validated via `parseAmendmentDraft()` (pure function, imported directly — not a test file) and a manual uniqueness check of all 4 `amend-find` blocks against the live target | — | — | — | — | — | — |
+| A10 | full suite (`npm test`, both backends) | — | ✅ 5280/5280 green pre-unpin (engram default) | N/A — chore, no new test | ✅ 5280/5280 post-unpin under `MEMORY_BACKEND=engram` (ambient default) AND `MEMORY_BACKEND=plainfiles` (explicit) | N/A | N/A |
 
 ### Test Summary
 - **Total tests written/modified this batch**: ~40 (5 new files: save-parity, engram.save, engram.hydrate, plus extensions to cli.save-search, capture-reachable, cli.backend-fallback, unsupported-op)
@@ -90,7 +92,41 @@ This verdict is carried into epic #864's task 6.1 exit as measured evidence.
 
 ## Line budget vs. origin/main
 
-- `git diff --stat origin/main...HEAD | tail -1`: **filled in at A10**, after the full-suite gate and the closing record (the diff is not final until the unpin + closing-record commits land).
+`git diff --stat origin/main...HEAD | tail -1`:
+
+```
+26 files changed, 1997 insertions(+), 102 deletions(-)
+```
+
+`size:exception` per R14/tasks.md's Review Workload Forecast (PR A was
+pre-approved to exceed 400 lines on test volume). Breakdown by category:
+
+| Category | Files | Approx. lines |
+|---|---|---|
+| Production code | `engram.mjs` (275), `cli.mjs` (6), `backend-selection.mjs` (13), `unsupported-op.mjs` (8), `i18n/en.mjs`+`es.mjs` (16), `package.json` (2) | **~320** |
+| Tests (new + extended) | `engram.save.test.mjs` (285), `engram.hydrate.test.mjs` (148), `save-parity.test.mjs` (116), `capture-reachable.test.mjs` (Δ70), `cli.backend-fallback.test.mjs` (Δ45), `cli.save-search.test.mjs` (Δ59), `engram.search-unsupported.test.mjs` (24, net −18 after deleting the old file), `unsupported-op.test.mjs` (Δ9) | **~740** |
+| SDD planning docs (this change's own trail) | `proposal.md` (136), `spec.md` (113), `design.md` (216), `explore.md` (177), `tasks.md` (59), `apply-progress.md` (143 initial) | **~845** |
+| Other docs | epic tracker edits (9), R13 draft (122) | **~130** |
+| Generated (record-first closing record) | `.memory/index.jsonl` (+3/−2, see Deviation 5), `.memory/records/2026-09-rec-0a1859a961ccbd96.jsonl` (+1) | **~4** |
+
+Commits, in order (`git log --oneline origin/main..HEAD`, oldest first):
+
+```
+63e5dca9 docs(sdd): commit epic tracker edits (6.1, 4.3-4.10) (#924)
+d3bf8f51 docs(sdd): add issue-874-record-first planning artifacts (#924)
+2cf9af19 test(memory): add cross-backend save parity table (R2) (#924)
+b6cab0cf feat(memory): mirror plainfiles.save() gate order in engram adapter (R1) (#924)
+4518e08f test(memory): re-prove #469 on engram — secret never reaches disk (R10) (#924)
+68736d8f feat(memory): add hydrate({recordId}) single-record upsert (R3/R4/D1/D2/D9) (#924)
+f1a41ae1 feat(memory): call hydrate from save(); surface deferred/contended (R5/D3) (#924)
+b3f052d1 refactor(memory): retire memory.save.engramUnsupported with its call site (D7) (#924)
+0e7e481c test(memory): retarget capture-reachable & backend-fallback to deferred save (D8) (#924)
+72f6be7e test(memory): use removeTempTree for cli.backend-fallback's git fixture (#802) (#924)
+ef421c65 docs(sdd): record R7 probe verdict in apply-progress (#924)
+a8bf66da docs(sdd): draft contract amendment — save column flip (R13) (#924)
+24c318f9 chore(memory): unpin MEMORY_BACKEND=plainfiles default (R8) (#924)
+6d3c7f6c docs(memory): record PR A of #874 (#924)
+```
 
 ## Deviations from tasks.md / design.md
 
@@ -105,14 +141,14 @@ This verdict is carried into epic #864's task 6.1 exit as measured evidence.
    spec/design/tasks never reach review. Docs-only, zero production-code
    review-budget impact.
 2. **A7's "confirm GREEN against A2–A5"**: `capture-reachable.test.mjs`'s
-   rewritten assertion "the verb must NOT pin a backend" is INTENTIONALLY red
+   rewritten assertion "the verb must NOT pin a backend" was INTENTIONALLY red
    from A7 through A9 — `package.json:65` is only unpinned in A10 (R8: "the
    unpin lands inside split A, as its LAST commit"). D8's own testing table
    describes the target shape of the retargeted test file; it does not claim
    every assertion in it is provable before the unpin. All OTHER assertions in
    both retargeted files (capture-reachable.test.mjs, cli.backend-fallback.test.mjs)
-   are green as of A7. The full-suite gate at A10 (after the unpin) is the
-   authoritative GREEN checkpoint for this specific assertion — confirmed below.
+   were green as of A7. Confirmed GREEN at A10, after the unpin: `node --test
+   brain/scripts/memory/capture-reachable.test.mjs` → 5/5 passing.
 3. **Test-fixture gaps discovered while writing A5/A7's CLI-level tests**: the
    sandboxed `PATH` fixtures in `cli.backend-fallback.test.mjs`'s `world()`
    only ever needed `which` (+ optionally `engram`) before this batch, because
@@ -134,6 +170,40 @@ This verdict is carried into epic #864's task 6.1 exit as measured evidence.
    module map or scope, and editing a shared pure function used by BOTH
    backends' `save()` was not ratified by any ruling (R1–R14). Flagged for a
    follow-up ticket rather than silently patched or silently left undocumented.
+5. **`#802` drift-guard regression, fixed same-batch**: adding `initIdentity()`
+   (git init + `git config --local brain.actor`) to
+   `cli.backend-fallback.test.mjs` for A7's retargeted `save` test made that
+   file both spawn `git` AND recursively `rmSync` its fixture directory
+   (`world()`'s pre-existing `t.after` cleanup) — exactly the shape
+   `brain-repo-hygiene`'s `#802` guard (`__fixtures__/tmp-tree-adoption.test.mjs`)
+   refuses, because a bare `rmSync` has no retry for a `.git/objects` ENOTEMPTY
+   race. Fixed in the same batch (commit `72f6be7e`) by switching that one
+   `t.after` to `removeTempTree` (`lib/tmp-tree.mjs`), the repo's own answer to
+   this exact class. Not a tasks.md line item — discovered via the full-suite
+   run before A9's commit, fixed immediately rather than left for A10 or
+   `sdd-verify`.
+6. **A10's closing-record index diff is `+3/−2`, not `+1`**: the harness's
+   verify step for the record-first closing commit expects `git diff --cached
+   --stat` to show the index growing by exactly one line, with a fallback of
+   `git checkout -- .memory/index.jsonl` + retry if not. Measured: `HEAD~1`'s
+   *committed* `.memory/index.jsonl` already carried two entries
+   (`rec-3afb00eb127d31a6`, `rec-96965eb1cf95f9a0`) appended OUT OF SORTED
+   ORDER at the file's tail — a pre-existing inconsistency in the repository,
+   unrelated to this change and present before this worktree's branch was cut
+   (confirmed via `git show HEAD~1:.memory/index.jsonl`). `rebuildIndex()` is
+   deterministic and always emits a canonically SORTED index
+   (`serializeIndex()`, `format.mjs`), so running it moved those two
+   pre-existing lines into their sorted position as a side effect — `git diff
+   --cached` reads that move as `-2/+2` (delete from the tail, insert in the
+   middle) on top of the one genuinely new line (`+1`), for a net `+3/-2`.
+   **The retry fallback was NOT taken**: this is a deterministic, structural
+   property of the already-committed index, not a transient glitch — retrying
+   would reproduce the identical `+3/-2` diff every time. Verified safe to
+   proceed: `git status --short` showed exactly the two intended paths staged
+   (`.memory/index.jsonl`, the one new record file), no `manifest.json`, no
+   other record files, and the record/index CONTENT is correct — only the
+   byte-diff SIZE differs from the task's `+1`-line expectation, for a reason
+   predating this change.
 
 ## R7 probe outcome carried to epic #864 (informational)
 
