@@ -440,6 +440,11 @@ export default {
   'memory.plainfiles.save.supersedesConfigError': 'brain.config.json could not be read while checking --supersedes: {error}. The check still ran against whatever ref resolved without it.',
   'memory.save.supersedesRepeated': '--supersedes accepts exactly one id per save — fan-in (multiple records superseding the same id) is deferred (#805). Refused before any write.',
   'memory.save.supersedesMissingValue': '--supersedes requires a value (the id it supersedes) — refused before any write, so the record is never saved silently without the field you asked for.',
+  // ── #874 — hydrate({recordId}): the record is already durable before this runs, so a
+  // backend failure here is reported, never thrown (R5) ──
+  'memory.save.hydrateDeferred': 'record {recordId} is on disk, but hydrating it into engram was deferred — {reason}. The record is NOT lost; re-run `npm run memory:pull` (or `memory:share`) once engram is reachable to catch it up.',
+  'memory.save.hydrateContended': 'record {recordId} is on disk, but hydrating it into engram was skipped — another process (pid {pid}, {age}s) holds the #820 hydration guard. The record is NOT lost; it will be picked up on the next pull/share.',
+  'memory.hydrate.recordNotFound': "hydrate: no record with id '{recordId}' found under .memory/records/ — pass the record itself when hydrating one that has not been read back from disk yet.",
   'memory.plainfiles.search.empty': 'ℹ no matching records found.',
   'memory.plainfiles.search.summary': '{count} matching record(s):',
 

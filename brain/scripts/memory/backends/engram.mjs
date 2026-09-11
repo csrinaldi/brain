@@ -1175,7 +1175,7 @@ export async function save(
     _loadConfig = _defaultLoadBrainConfig,
     _readRecordIds = readRecordIds,
     _upstreamRecordEntries = upstreamRecordEntries,
-    _hydrate = async () => ({ written: 0, skipped: 0 }),
+    _hydrate = hydrate,
   } = {},
 ) {
   const ignoredOpts = [scope && "scope", topic && "topic"].filter(Boolean);
@@ -1362,7 +1362,7 @@ export async function hydrate(
   const guard = _guard();
   if (!guard.held) {
     const age = Math.round((guard.owner?.ageMs ?? 0) / 1000);
-    _warn(await t("memory.save.hydrateContended", { pid: guard.owner?.pid ?? "?", age }));
+    _warn(await t("memory.save.hydrateContended", { recordId, pid: guard.owner?.pid ?? "?", age }));
     return { written: 0, skipped: 0, deferred: true, contended: true };
   }
 

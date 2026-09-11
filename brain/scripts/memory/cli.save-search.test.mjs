@@ -16,8 +16,8 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
-import { mkdtempSync, existsSync, readdirSync, readFileSync } from 'node:fs';
+import { spawnSync, execFileSync } from 'node:child_process';
+import { mkdtempSync, mkdirSync, symlinkSync, existsSync, readdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -220,6 +220,61 @@ test('memory save --supersedes=<id> (equals form) exits 1, no record written', (
   assert.equal(result.status, 1, `expected exit 1, got ${result.status}. stdout: ${result.stdout}`);
   const recordsDir = join(testRoot, '.memory', 'records');
   assert.equal(existsSync(recordsDir), false, 'the equals form must never reach a write');
+});
+
+// ── #874 — save is REACHABLE under MEMORY_BACKEND=engram with no binary: the
+// record lands durably, the index is rebuilt, and hydrate defers (never
+// refuses, never throws, exits 0). This is the required CLI-level proof:
+// unlike the unit-level engram.save.test.mjs / engram.hydrate.test.mjs, this
+// drives the REAL cli.mjs in a child process with a PATH engineered so the
+// engram binary is MEASURABLY absent (a `which` shim with nothing else on
+// it) — never an inherited, ambient PATH that might or might not have engram
+// installed on the machine this happens to run on.
+
+const REAL_WHICH = execFileSync('sh', ['-c', 'command -v which'], { encoding: 'utf8' }).trim();
+const REAL_GIT = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
+
+/** A sandbox PATH carrying ONLY `which` + `git` (real) — `engram` is measurably absent. */
+function noEngramPath() {
+  const dir = mkdtempSync(join(tmpdir(), 'brain-cli-save-engram-nobin-'));
+  const bin = join(dir, 'bin');
+  mkdirSync(bin);
+  symlinkSync(REAL_WHICH, join(bin, 'which'));
+  symlinkSync(REAL_GIT, join(bin, 'git'));
+  return bin;
+}
+
+test('MEMORY_BACKEND=engram + no engram binary: save exits 0, writes exactly one record + one index line, id on stdout, deferred on stderr', () => {
+  const testRoot = mkdtempSync(join(tmpdir(), 'brain-cli-save-engram-'));
+  initIdentity(testRoot);
+  const bin = noEngramPath();
+
+  const result = spawnSync(process.execPath, [cliPath, 'save', 'A title', 'The body', '--type', 'discovery', '--project', 'brain'], {
+    encoding: 'utf8',
+    env: {
+      HOME: process.env.HOME,
+      PATH: bin,
+      ...ISOLATED_GIT_ENV,
+      MEMORY_BACKEND: 'engram',
+      BRAIN_MEMORY_TEST_ROOT: testRoot,
+    },
+  });
+
+  assert.equal(result.status, 0, `expected exit 0, got ${result.status}. stdout: ${result.stdout} stderr: ${result.stderr}`);
+
+  const recordsDir = join(testRoot, '.memory', 'records');
+  const recordFiles = readdirSync(recordsDir).filter((f) => f.endsWith('.jsonl'));
+  assert.equal(recordFiles.length, 1, 'exactly one record file must exist');
+  const recordLines = readFileSync(join(recordsDir, recordFiles[0]), 'utf8').trim().split('\n').filter(Boolean);
+  assert.equal(recordLines.length, 1, 'exactly one record line');
+
+  const indexPath = join(testRoot, '.memory', 'index.jsonl');
+  const indexLines = readFileSync(indexPath, 'utf8').trim().split('\n').filter(Boolean);
+  assert.equal(indexLines.length, 1, 'exactly one index line');
+
+  const record = JSON.parse(recordLines[0]);
+  assert.ok(result.stdout.includes(record.id), `stdout must carry the record id: ${result.stdout}`);
+  assert.match(result.stderr, /deferred/i, `stderr must say the hydration deferred: ${result.stderr}`);
 });
 
 test('memory save --supersedes <unknown id> under the non-git test root exits 1 with could-not-verify, quoted', () => {

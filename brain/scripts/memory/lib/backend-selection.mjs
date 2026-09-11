@@ -51,7 +51,7 @@ export const ENGRAM_BIN = "engram";
  *   pull    → engram binary not found            ← genuinely blocked, covered
  *   import  → engram binary not found            ← blocked, but see below
  *   setup   → ✓ merge driver registered, EXIT 0  ← never needed the binary
- *   save    → 'save' is not a cli verb for engram ← a deliberate refusal
+ *   save    → record durable, hydrate deferred, EXIT 0 (#874) ← no longer a refusal, see below
  *   search  → 'search' is not a cli verb for engram ← a deliberate refusal
  *   index   → "0 documentos indexados", EXIT 0    ← never calls requireEngram
  *
@@ -64,9 +64,14 @@ export const ENGRAM_BIN = "engram";
  *     Substituting `plainfiles.setup()` — which deliberately does NEITHER —
  *     silently dropped the merge driver on every machine without engram, which
  *     is the very mechanism ADR-0017's union safety rests on.
- *   - `save`/`search` are not blocked either: engram REFUSES them by design
- *     (C3 Decision 5), and its refusal already names the records-only route
- *     (#530's `memory.save.engramUnsupported`). Substituting would make that
+ *   - `save` is NOT blocked (#874, split A): `engram.save()` is now the
+ *     record-first producer path, mirroring `plainfiles.save()` and hydrating
+ *     the backend as a terminal step that DEFERS rather than throws when the
+ *     binary is absent — the whole point of `FALLBACK_OPS` is to replace a
+ *     FAILURE, and `save` no longer has one on this axis. `search` is
+ *     unchanged and still excluded: engram REFUSES it by design (C3 Decision
+ *     5), and its refusal already names the native route
+ *     (`memory.search.engramUnsupported`). Substituting would make that
  *     signpost unreachable on the default backend — replacing a designed
  *     refusal with different behaviour rather than repairing a failure.
  *

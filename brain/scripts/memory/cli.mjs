@@ -821,6 +821,12 @@ if (op === "save") {
   const opts = { type: flags.type, project: flags.project, issue, supersedes: flags.supersedes, scope: flags.scope, topic: flags.topic };
   const seams = memoryTestRoot ? { root: memoryTestRoot } : {};
   try {
+    // #874 — a deferred/contended hydration is already reported on stderr by
+    // engram.mjs#hydrate() itself (mirrors importMemory()'s own `_warn`
+    // convention); the record is ALREADY durable by the time save() returns
+    // (appended + indexed before hydrate ever runs), so `save` still exits 0
+    // exactly as it does when the engram backend was never selected at all —
+    // a backend failure here must never read as a lost capture (R5).
     const result = await backend.save(title, content, opts, seams);
     console.log(`memory/cli: ${await t("memory.plainfiles.save.done", { id: result?.id, file: result?.file })}`);
     reportDuplicates(result?.duplicates, { indexCount: result?.indexCount });

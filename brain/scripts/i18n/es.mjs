@@ -394,6 +394,11 @@ export default {
   'memory.plainfiles.save.supersedesConfigError': 'no se pudo leer brain.config.json mientras se verificaba --supersedes: {error}. La verificación igual corrió contra el ref que resolvió sin él.',
   'memory.save.supersedesRepeated': '--supersedes acepta exactamente un id por guardado — el fan-in (varios registros superando el mismo id) está diferido (#805). Se rechazó antes de cualquier escritura.',
   'memory.save.supersedesMissingValue': '--supersedes necesita un valor (el id que supera) — se rechazó antes de cualquier escritura, para que el registro nunca se guarde en silencio sin el campo que pediste.',
+  // ── #874 — hydrate({recordId}): el registro ya es durable antes de que esto corra, así que
+  // una falla del backend acá se reporta, nunca se lanza (R5) ──
+  'memory.save.hydrateDeferred': 'el registro {recordId} está en disco, pero hidratarlo en engram quedó diferido — {reason}. El registro NO se perdió; volvé a correr `npm run memory:pull` (o `memory:share`) cuando engram esté disponible para ponerlo al día.',
+  'memory.save.hydrateContended': 'el registro {recordId} está en disco, pero hidratarlo en engram se saltó — otro proceso (pid {pid}, {age}s) tiene tomado el guard de hidratación #820. El registro NO se perdió; se va a recoger en el próximo pull/share.',
+  'memory.hydrate.recordNotFound': "hydrate: no se encontró ningún registro con id '{recordId}' bajo .memory/records/ — pasá el registro mismo al hidratar uno que todavía no se leyó de disco.",
   'memory.plainfiles.search.empty': 'ℹ no se encontraron registros coincidentes.',
   'memory.plainfiles.search.summary': '{count} registro(s) coincidente(s):',
 
