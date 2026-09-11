@@ -23,7 +23,7 @@ A source-level test MUST assert `readChunkObservations` has zero importers acros
 - THEN it fails, naming the importing file
 - AND WHEN run against the real tree today, THEN it passes — the module has zero importers now
 
-Test: `governance/chunk-boundary.test.mjs`.
+Test: `memory/chunk-boundary.test.mjs`.
 
 ### Requirement: `collectChunkObservations`'s importers are an annotated allowlist (D4 guard 2)
 
@@ -40,7 +40,7 @@ removed from the list.
 - AND GIVEN `engram.mjs`'s import is removed from code but its allowlist entry remains
 - WHEN the guard test runs, THEN it fails — the list and the code MUST agree
 
-Test: `governance/chunk-boundary.test.mjs`.
+Test: `memory/chunk-boundary.test.mjs`.
 
 ### Requirement: `share` under `plainfiles` writes no chunk (D4 guard 3, pinned)
 
@@ -67,7 +67,7 @@ Test: `memory/backends/plainfiles.share.test.mjs`.
   a chunk reader
 
 Test: existing `brain-audit.test.mjs` / `brain-check.test.mjs`, cross-referenced by
-`governance/chunk-boundary.test.mjs`.
+`memory/chunk-boundary.test.mjs`.
 
 ### Requirement: the #874 ledger is a written obligation, not a rediscovery
 

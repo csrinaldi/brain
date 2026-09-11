@@ -186,36 +186,54 @@ Commit: `docs(brain-drafts): draft the record-first correction sequence for #805
 
 ## Wrap-up
 
-- [ ] W1 `npm test` full run, green, recorded with before/after counts.
-- [ ] W2 `memory:save --issue 805` — record-first, committed before the first push.
-- [ ] W3 Tick epic task 2.1 in `openspec/changes/issue-864-memory-2-0/tasks.md` (`:30`),
-  referencing this PR's number once known.
-- [ ] W4 Fresh-context review before the PR: adversarial pass over the refusal shape (A7), the
+- [x] W1 `npm test` full run, green, recorded with before/after counts. Baseline 5139/5139 →
+  5173/5173 after Units 1-6 → 5176/5176 after the fresh-context review corrections (3b018a50) →
+  5177/5177 at the final applied head (2dbc0197, the cold-review blocker fix). Re-verified at
+  archive time against the merged tree (c410259e, PR #912 + later unrelated work): 5194/5194,
+  0 fail. Focused files also green: `node --test brain/scripts/memory/lib/supersedes.test.mjs
+  brain/scripts/memory/lib/supersedes.integration.test.mjs
+  brain/scripts/memory/backends/plainfiles.save.test.mjs
+  brain/scripts/memory/cli.save-search.test.mjs brain/scripts/memory/lib/format.test.mjs` —
+  88/88. `node brain/scripts/check-refs.mjs` — green.
+- [x] W2 `memory:save --issue 805` — record-first, committed before the first push. Record
+  `rec-7723969eb495debe` written and committed first; a fresh cold review then measured its
+  "eight i18n keys" claim wrong (six new + one edited per locale), so a CORRECTION record
+  `rec-3afb00eb127d31a6` was written with `memory:save --supersedes rec-7723969eb495debe` — the
+  writer's first real use of the flag it built — and committed. A staging mistake (a hydrated
+  stray record plus 119 index lines) was reverted in c58ccb16 so the merged branch carries
+  exactly the two records above and their two `.memory/index.jsonl` lines (confirmed via
+  `git diff --stat 51ff915f 376d6a31 -- .memory/`: 2 records + `index.jsonl \| 2 ++`). The
+  correction record's `supersedes` field points at `rec-7723969eb495debe`, verbatim.
+- [x] W3 (ticked on the archive branch, PR #912 named) Tick epic task 2.1 in `openspec/changes/issue-864-memory-2-0/tasks.md` (`:30`),
+  referencing this PR's number once known. **NOT DONE** — verify-time inspection of the merged
+  tree (`git log -p --all -S"2.1 #805" -- openspec/changes/issue-864-memory-2-0/tasks.md`) shows
+  the line has never been ticked in any commit reachable from `main`; it still reads `- [ ] 2.1
+  #805 — a writer for \`supersedes\`...`. This is out of this executor's write scope (restricted
+  to this change's `tasks.md`/`verify-report.md`) — flagged as a WARNING finding below for the
+  orchestrator/maintainer to close as a small follow-up edit.
+- [x] W4 Fresh-context review before the PR: adversarial pass over the refusal shape (A7), the
   thunk-discipline pin (A1), and the CLI arity guards (A5) — the three places a careless commit
-  most likely regresses.
-- [ ] W5 Open the PR: `Closes #805`, `Parent: #864` in prose, label `type:bug`. Body sections:
-  - Summary: the pure classifier, the two-seam gate, the two CLI arity guards, the engram
-    catalog edit, the doctrine draft.
-  - Changes table (all touched files plus the new module and the draft).
-  - Test plan: every `node --test` command above plus the full `npm test`, with
-    `i18n/coverage.test.mjs` and `capture-reachable.test.mjs` named explicitly (measurement 0.6).
-  - **Reconciliation note — the deletion ruling vs. the ticket's own sequence**: doctrine
-    (`memory-backend-contract.md:90-95`) already rules deletion; the ticket's four-step sequence
-    was never in conflict with it, only unwritten — the Unit 6 draft closes that gap, it does not
-    change the ruling.
-  - **D2's fail-closed on a shallow clone**: an unfetched/shallow clone with no target upstream
-    record refuses with `could-not-verify`, naming both remedies (`git fetch origin main`, or
-    pointing `BRAIN_MEMORY_UPSTREAM_REF`/`memory.upstreamRef` at a resolving ref) — never a
-    silent pass.
-  - **The reader is deferred** to #874/#880 — this PR writes `supersedes`, it does not resolve or
-    hide superseded records on read.
-  - **The promotion sitting as a follow-up**: the Unit 6 draft is not applied by this PR — it
-    waits on the maintainer's `npm run brain:promote` session (non-TTY-refusing by design).
-  - **What this unblocks**: `allow_auto_merge` enablement per ADR-0034 L2 and #889 D7.2 (the
-    first real `memory:ship` lane PR merged by hand) name #805 as their prerequisite — state
-    that dependency in the PR body; do not action D7.2 here.
-  - Contributor checklist per `branch-pr` skill.
-- [ ] W6 `brain:review` on the PR — post the verdict; land any corrections before merge.
+  most likely regresses. Verdict APPROVE, nine mutants killed (upstream-before-local,
+  allow-on-refusal, loosened grammar, gate-after-append, dropped arity guards, `supersedes`
+  dropped from `buildRecord`, remapped reason, catalog clause removed, plus the `=`-form gap);
+  its corrections landed in commit 3b018a50 (`--supersedes=<id>` refused; the config-error warn
+  branch tested; the mismatched-issue rule tested).
+- [x] W5 Open the PR: `Closes #805`, `Parent: #864` in prose, label `type:bug`. PR #912, merged
+  as `376d6a31` on 2026-09-10. Confirmed via `gh pr view 912`: state MERGED, body opens "Closes
+  #805", names "Parent: #864 (memory 2.0), task 2.1" in prose, label `type:bug` present (plus a
+  `needs-decision` label carrying the two open maintainer questions — see Handover in
+  `verify-report.md`). Body includes the Summary, Changes table, Test plan (every `node --test`
+  command plus full `npm test`, `i18n/coverage.test.mjs` and `capture-reachable.test.mjs` named),
+  the reconciliation note, D2's fail-closed-on-shallow-clone note, the deferred-reader note, the
+  promotion-sitting-as-follow-up note, the auto-merge-unblock note, and the contributor
+  checklist.
+- [x] W6 `brain:review` on the PR — post the verdict; land any corrections before merge. Round 1
+  at `e0d75682`: verdict REVISE (blocker: a malformed `--supersedes` id read the local store
+  before the grammar check ran; fixed in `2dbc0197` by making `localIds` a thunk consulted only
+  after `classifySupersedes` validates the id shape; editorial: the session record's i18n-key
+  count corrected via the `--supersedes` correction record). Round 2 at `c58ccb16`: verdict
+  APPROVE, `findings: []`, `conditions: []`. Both reviews confirmed posted as PR review comments
+  via `gh pr view 912 --json reviews` (author `csrinaldibot`, `head_sha` matching each round).
 
 **Maintainer acts, after this PR merges — not in any diff, no code task:**
 1. Sit the Unit 6 draft: `npm run brain:promote` against
