@@ -52,7 +52,7 @@ const EMAIL_ACTOR_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 // so the schema owner holds the rule; `audit.mjs` imports these instead of
 // redefining them. `HANDLE_RE` is also the positive requirement
 // `capture-provenance.mjs#resolveActor` enforces at the point a handle is
-// minted (kept as a private literal there — see that module's header).
+// minted (imported from here, so the two can never drift).
 export const HANDLE_RE = /^@[A-Za-z0-9][A-Za-z0-9-]*$/;
 // A bare default-branch name is a branch too: records captured from the main
 // checkout carry `actor: "main"` (measured: 2 of them) — no `/` to catch.
