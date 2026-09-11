@@ -175,7 +175,7 @@ by apply-progress.
    once and tick W7, rather than carry it forward indefinitely as unverified.
 
 **SUGGESTION**:
-1. **Stale comment at `brain/scripts/memory/lib/format.mjs:55` — FIXED on this archive branch (commit c21914fb, one second before this report was committed; the cold review of PR #917 caught the report still describing it as open).** At verify time the comment read: *"`HANDLE_RE`
+1. **Stale comment at `brain/scripts/memory/lib/format.mjs:55` — fixed on this archive branch in commit c21914fb.** At verify time the comment read: *"`HANDLE_RE`
    is also the positive requirement `capture-provenance.mjs#resolveActor` enforces at the point a
    handle is minted (kept as a private literal there — see that module's header)."* This describes
    the PRE-MINOR-1 state. The MINOR-1 fix (commit `be19db89`, part of PR #914) changed
