@@ -74,6 +74,47 @@ test('exportObservation: §4 prose present → recovers structured actor/issue/s
   assert.equal(record.content, `**${obs.title}**\n\nA decision with recovered provenance.`);
 });
 
+// ── #738 — a recovered branch-shaped actor is soft-rejected, never thrown ───
+// A5 (design.md): W3 (format.mjs) refuses a branch-shaped `actor` at the
+// write gate. A §4 block CAN recover a branch-shaped value (`ACTOR_LINE_RE`
+// accepts any `\S+`), and letting it reach `buildRecord`/`appendRecord`
+// unchecked would turn a genuine recovery into a THROW inside `share` — the
+// #529 trap #542 already declined. So export soft-rejects it BEFORE
+// `buildRecord`, the same shape as the non-enum-type rejection above.
+
+test('exportObservation: a recovered branch-shaped actor is soft-rejected, never thrown', () => {
+  const obs = {
+    ...baseObs,
+    content: '**Actor:** feat/issue-738-x (agente)\n\nA decision recovered with a branch-shaped actor.',
+  };
+  assert.doesNotThrow(() => exportObservation(obs));
+  const result = exportObservation(obs);
+  assert.equal(result.record, undefined);
+  assert.ok(result.rejected, 'a recovered branch-shaped actor must be rejected, not silently exported');
+  assert.equal(result.rejected.id, 'obs-1034b42dcca30459');
+  assert.equal(result.rejected.title, baseObs.title);
+  assert.equal(result.rejected.type, baseObs.type);
+  assert.match(result.rejected.reason, /branch-shaped/);
+});
+
+test('exportObservation: a recovered HANDLE-shaped actor is unaffected by the branch-shape guard', () => {
+  const obs = {
+    ...baseObs,
+    content: '**Actor:** @crinaldi (humano)\n\nA decision recovered with a handle actor.',
+  };
+  const { record, recovered, rejected } = exportObservation(obs);
+  assert.equal(rejected, undefined);
+  assert.equal(recovered, true);
+  assert.equal(record.actor, '@crinaldi');
+});
+
+test('exportObservation: the no-recovery @legacy/human fallback path is UNCHANGED by the branch-shape guard', () => {
+  const { record, recovered, rejected } = exportObservation(baseObs);
+  assert.equal(rejected, undefined);
+  assert.equal(recovered, false);
+  assert.equal(record.actor, LEGACY_ACTOR);
+});
+
 // ── Ruling 3b: malformed / partial §4 prose → fallback preserves it verbatim ──
 // A leading Actor line missing its (kind) is NOT a recoverable block (all-or-
 // nothing anchor). The export must NOT recover it, must fall back to @legacy,

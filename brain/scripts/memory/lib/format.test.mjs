@@ -19,6 +19,7 @@ import {
   buildIndexEntry,
   serializeIndex,
   nowUtcSeconds,
+  classifyActor,
 } from './format.mjs';
 
 // ── canonicalJson (RFC 8785 JCS) ──────────────────────────────────────────────
@@ -220,6 +221,42 @@ test('validateWritableRecord: accepts the shapes brain actually writes', () => {
     assert.equal(valid, true, `${JSON.stringify(fields)} must be writable — ${errors.join('; ')}`);
   }
 });
+
+// ── W3 (#738): the write gate refuses a branch-shaped actor ─────────────────
+// `HANDLE_RE`/`DEFAULT_BRANCHES`/`classifyActor` move here from `audit.mjs`
+// (design A4) so the schema owner holds the predicate; `audit.mjs` imports
+// them instead of redefining them, and `audit.test.mjs` stays green
+// UNMODIFIED — the proof the move is behaviour-preserving.
+
+test('classifyActor: exported from format.mjs, identical behaviour to the prior audit.mjs definition', () => {
+  assert.equal(classifyActor('@csrinaldi'), 'handle');
+  assert.equal(classifyActor('@legacy'), 'legacy');
+  assert.equal(classifyActor('feat/issue-738-x'), 'branch');
+  assert.equal(classifyActor('main'), 'branch');
+  assert.equal(classifyActor('crinaldi'), 'other');
+});
+
+for (const actor of ['feat/x', 'main', 'master', 'develop', 'trunk']) {
+  test(`validateWritableRecord: W3 refuses a branch-shaped actor ('${actor}')`, () => {
+    const rec = { ...buildRecord({ ...base, actor }) };
+    const { valid, errors } = validateWritableRecord(rec);
+    assert.equal(valid, false);
+    assert.ok(errors.some((e) => e.includes('W3')), `errors were: ${errors.join('; ')}`);
+  });
+
+  test(`validateRecord: the READ gate still ADMITS a branch-shaped actor ('${actor}'), unchanged`, () => {
+    const rec = { ...buildRecord({ ...base, actor }) };
+    assert.equal(validateRecord(rec).valid, true, 'a read-path rejection would brick a consumer store');
+  });
+}
+
+for (const actor of ['@legacy', '@csrinaldi', 'crinaldi']) {
+  test(`validateWritableRecord: W3 admits a non-branch-shaped actor ('${actor}')`, () => {
+    const rec = { ...buildRecord({ ...base, actor }) };
+    const { valid, errors } = validateWritableRecord(rec);
+    assert.equal(valid, true, `${actor} must be writable — ${errors.join('; ')}`);
+  });
+}
 
 test('validateWritableRecord: still reports every read-gate error (it is a superset, not a replacement)', () => {
   const { valid, errors } = validateWritableRecord({ ...buildRecord({ ...base }), issue: null, type: 'nope' });
