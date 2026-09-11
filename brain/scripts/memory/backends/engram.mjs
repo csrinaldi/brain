@@ -18,12 +18,12 @@
 // #247/#863 D3 — the chunk read-back is a boundary now (guard:
 // brain/scripts/memory/chunk-boundary.test.mjs). The seven-row ledger of what
 // 3.2 (#874) deletes is restated in
-// openspec/changes/issue-247-chunk-retirement/{tasks,design}.md. Rows 1, 2
-// and 5 are gone — `share()` (#874 split B) no longer calls
-// `engram sync --export`, has no observation reader left, and
-// `engram.share.test.mjs`'s old shape retired with them:
+// openspec/changes/issue-247-chunk-retirement/{tasks,design}.md. Rows 1, 2, 4
+// and 5 are gone — `share()` (#874 split B) no longer calls `engram sync
+// --export`, has no observation reader and no chunk-scrub subsystem left,
+// and `engram.share.test.mjs`'s old shape retired with them. Only row 3
+// remains, kept per the ratified O1 disposition (handed to epic task 2.4):
 //   dualWriteRecords's _readObservations seam     → ledger row 3 (kept — O1)
-//   the scrub subsystem (delete only after #469's re-proof over record-first save) → ledger row 4
 // (2.4 handles what is left after 3.2:
 //   the symlink and the legacy gz path → rows 6-7)
 
@@ -37,7 +37,6 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
-  statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -50,7 +49,7 @@ import { changeDir, OPERATIONAL_ARTIFACTS } from "../../lib/sdd-layout.mjs";
 import { parseFrontmatter, serializeFrontmatter } from "../lib/resume-frontmatter.mjs";
 import { validateResume } from "../lib/resume-schema.mjs";
 import { currentBranch } from "../../lib/git-branch.mjs";
-import { resolveSecretConfig, compilePatterns, scrubChunkFile, scanTextForSecrets } from "../lib/secret-scrub.mjs";
+import { resolveSecretConfig, compilePatterns, scanTextForSecrets } from "../lib/secret-scrub.mjs";
 import { exportObservation } from "../lib/engram-export.mjs";
 import { importRecord } from "../lib/engram-import.mjs";
 import { appendRecord, rebuildIndex, readRecordIds, readRecords } from "../lib/store.mjs";
@@ -481,49 +480,14 @@ function _defaultLoadBrainConfig(root) {
  * An entry that cannot be stat'd fails CLOSED for the same reason the directory
  * read does: "cannot look" must never be reported as "nothing to scan".
  *
- * @param {string} root
- * @param {object} [opts]
- * @param {(dir: string, opts: object) => import("node:fs").Dirent[]} [opts._listDir]
- * @param {(p: string) => import("node:fs").Stats} [opts._stat]
- * @returns {string[]}  Absolute paths.
- */
-export function _defaultChangedChunkFiles(root, { _listDir = readdirSync, _stat = statSync } = {}) {
-  const dir = join(root, ".memory", "chunks");
-  let entries;
-  try {
-    entries = _listDir(dir, { withFileTypes: true });
-  } catch (err) {
-    throw new Error(
-      `secret-scrub: cannot read ${dir} — cannot determine which chunks this run materialized; refusing to share (fail closed): ${err?.code ?? ""} ${err?.message ?? err}`.replace(
-        /\s+/g,
-        " ",
-      ),
-    );
-  }
-  const out = [];
-  for (const e of entries) {
-    if (!e.name.endsWith(".jsonl.gz")) continue;
-    const full = join(dir, e.name);
-    let st;
-    try {
-      st = _stat(full);
-    } catch (err) {
-      throw new Error(
-        `secret-scrub: cannot stat ${full} — a chunk the reader may still follow cannot be classified; refusing to share (fail closed): ${err?.code ?? ""} ${err?.message ?? err}`.replace(
-          /\s+/g,
-          " ",
-        ),
-      );
-    }
-    if (st.isFile()) out.push(full);
-  }
-  return out;
-}
-
 /**
  * Default seam: resolve a path through symlinks, or `null` when it does not
- * exist (issue #469, REQ-469-3). Separated so `share()`'s export-destination
- * check is testable without building a real symlink.
+ * exist (issue #469, REQ-469-3). Was separated so `share()`'s former
+ * export-destination check (`assertExportDestinationIsRead`, retired #874
+ * split B row 4) was testable without building a real symlink. No current
+ * caller — left for the maintainer/2.4 to retire alongside the rest of the
+ * chunk estate rather than expanding this PR's ledger past what tasks.md
+ * names.
  *
  * @param {string} p
  * @returns {string|null}
@@ -533,91 +497,6 @@ export function _defaultResolveDir(p) {
     return realpathSync(p);
   } catch {
     return null;
-  }
-}
-
-/**
- * Throws when `engram sync --export` writes to a directory `share()` does not
- * read from (issue #469, REQ-469-3).
- *
- * engram writes under `.engram/`; every reader here — `_defaultReadObservations`,
- * `_defaultChangedChunkFiles` — reads under `.memory/`. `ensureMemorySymlink`
- * keeps those the same directory, but its case 3 (`.engram` is a REAL directory)
- * only `console.warn`s and does not clobber, which is right. Nothing downstream
- * checked, so the export succeeded, printed `Created chunk …`, zero records were
- * appended, and the run reported success. Reproduced in the maintainer's own
- * checkout.
- *
- * Compares RESOLVED paths rather than symlink type: what matters is that the two
- * land on the same directory, and `realpathSync` answers that for a symlink, a
- * bind mount, or anything else that makes them agree.
- *
- * An ABSENT `.engram` passes — engram then writes to `.memory` directly, the
- * normal post-migration state on a fresh clone.
- *
- * Throws rather than warns: a warning is what `ensureMemorySymlink` already does,
- * and the defect reached production with that warning in place.
- *
- * @param {string} root
- * @param {object} [opts]
- * @param {(p: string) => string|null} [opts._resolveDir]
- */
-export function assertExportDestinationIsRead(root, { _resolveDir = _defaultResolveDir } = {}) {
-  const engramPath = join(root, ".engram");
-  const engramResolved = _resolveDir(engramPath);
-  if (engramResolved === null) return;
-
-  const memoryPath = join(root, ".memory");
-  const memoryResolved = _resolveDir(memoryPath);
-  if (engramResolved === memoryResolved) return;
-
-  throw new Error(
-    `memory:share: 'engram sync --export' writes under ${engramPath} (${engramResolved}), ` +
-      `but this run reads chunks and records from ${memoryPath} (${memoryResolved ?? "missing"}). ` +
-      `Every chunk the export just wrote would be invisible: the secret scrub would scan nothing and ` +
-      `zero records would be appended, while the run reported success. ` +
-      `Fix: make .engram a symlink to .memory (npm run memory:setup, after pulling the migration), ` +
-      `or remove the real .engram directory once its contents are merged.`,
-  );
-}
-
-/**
- * scrubMaterializedChunks() — the fail-closed core, independent of requireEngram()
- * so it is unit-testable with zero real engram/git/gzip dependency. Resolves
- * the effective pattern set (defaults + `governance.memorySecretPatterns`,
- * additive) and the allowlist (`governance.memorySecretAllowPatterns`, the sole
- * bypass — no CLI flag), then scans every changed chunk. Throws on the FIRST
- * hit, naming the matched pattern and the file:line location.
- *
- * @param {string} root
- * @param {object} [opts]
- * @param {(root: string) => string[]} [opts._changedChunkFiles]
- * @param {(root: string) => object} [opts._loadConfig]
- * @param {(path: string, patterns: RegExp[], allowPatterns: RegExp[]) => object|null} [opts._scrubChunk]
- */
-export async function scrubMaterializedChunks(
-  root,
-  {
-    _changedChunkFiles = _defaultChangedChunkFiles,
-    _loadConfig = _defaultLoadBrainConfig,
-    _scrubChunk = scrubChunkFile,
-  } = {},
-) {
-  const { patternSources, allowPatternSources } = resolveSecretConfig(_loadConfig(root));
-  const patterns = compilePatterns(patternSources);
-  const allowPatterns = compilePatterns(allowPatternSources);
-
-  for (const chunkPath of _changedChunkFiles(root)) {
-    const hit = _scrubChunk(chunkPath, patterns, allowPatterns);
-    if (hit) {
-      throw new Error(
-        await t("memory.share.secretFound", {
-          file: chunkPath,
-          line: hit.lineNumber,
-          pattern: hit.pattern,
-        }),
-      );
-    }
   }
 }
 
