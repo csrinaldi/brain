@@ -64,7 +64,7 @@ import { acquireHydrationGuard } from "../lib/hydration-guard.mjs";
 import { ENGRAM_BIN, probeBinary } from "../lib/backend-selection.mjs";
 import { gitConfigGet } from "../../lib/git-config.mjs";
 import { resolveActor, resolveActorKind, deriveIssue, composeSource } from "../lib/capture-provenance.mjs";
-import { classifySupersedes } from "../lib/supersedes.mjs";
+import { classifySupersedes, SUPERSEDES_ID_RE } from "../lib/supersedes.mjs";
 import { t } from "../../i18n/t.mjs";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../../../..");
@@ -316,7 +316,7 @@ export function _defaultReadObservations(root) {
  *   still short-circuits before it (no git spawn on a steady-state share), and the scan
  *   above it still covers every candidate, including the ones this widens the decline to.
  * @returns {Promise<{written: number, deduped: number, dedupedUpstream: number, errored: number,
- *   rejected: number, skippedPersonal: number, unprovenanced: number, unparseableChunks: number,
+ *   rejected: number, skippedPersonal: number, unprovenanced: number, skippedHydrated: number, unparseableChunks: number,
  *   emptyObservationsChunks: number, indexCount?: number,
  *   duplicates: {ids: number, lines: number, divergent: number, groups: object[]},
  *   upstreamScope?: {applied: boolean, ref: string|null, stated: boolean, reason: string|null,
@@ -363,7 +363,27 @@ export async function dualWriteRecords(
   // ruling refused for `memory-gate`. Visibility first; the gate only once the emitter
   // exists to satisfy it.
   let unprovenanced = 0;
+  // fresh-review F1 (#924): an observation whose `topic_key` already matches
+  // the record-id grammar (`SUPERSEDES_ID_RE`, `rec-[0-9a-f]{16}` — the same
+  // constant `--supersedes` is validated against, not redefined here) was
+  // WRITTEN BY `hydrate()` (#874 split A) — `_defaultEngramSave` shells
+  // `engram save … --topic <record id>` with no `--created-at`, so engram
+  // stamps its own `created_at`; `exportObservation()` derives `ts` FROM that
+  // `created_at`, and `ts` feeds `computeRecordId` (format.mjs). Re-exporting
+  // such an observation therefore risks a SECOND record with a DIFFERENT id
+  // the instant the two clocks disagree by even a second — a duplicate this
+  // share would have manufactured itself. Skipped on grammar alone, never on
+  // local presence: `records/` is additions-only and a partial index at
+  // best, so a `rec-…` topic with no local match is still proof the row was
+  // born from a record somewhere, never proof it is safe to re-derive. B
+  // (row 1, #874 split B) removes this gate together with the exporter it
+  // protects — see openspec/changes/issue-874-record-first/tasks.md.
+  let skippedHydrated = 0;
   for (const obs of observations) {
+    if (typeof obs?.topic_key === "string" && SUPERSEDES_ID_RE.test(obs.topic_key)) {
+      skippedHydrated += 1;
+      continue;
+    }
     let result;
     try {
       result = _exportObservation(obs);
@@ -395,6 +415,11 @@ export async function dualWriteRecords(
     rejected,
     skippedPersonal,
     unprovenanced,
+    // fresh-review F1 (#924) — observations gated out above because their
+    // `topic_key` already names a record; a bucket of its own, never folded
+    // into `deduped` (that bucket means "read as far as the dedup check and
+    // declined there" — these never reach `_exportObservation` at all).
+    skippedHydrated,
     unparseableChunks: unparseable.length,
     emptyObservationsChunks: emptyObservations.length,
     // #574. `deduped` above counts candidates this RUN declined to append; this

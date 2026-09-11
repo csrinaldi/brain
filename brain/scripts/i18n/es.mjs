@@ -332,6 +332,7 @@ export default {
 
   // ── memory/backends/engram.mjs — share() secret scrub (issue #214, C1b) ──────
   'memory.share.unprovenanced': '{count} observación(es) llegaron sin bloque de provenance, así que se materializaron como `@legacy` y sin `issue` — todavía nada emite el bloque en el camino de captura (#541). Contadas, no rechazadas: rechazarlas voltearía el store que ya existe.',
+  'memory.share.skippedHydrated': 'Se omitieron {count} observación(es) — su topic ya nombraba un registro (escrito por hydrate(), #874), así que reexportarlas habría generado un id duplicado.',
   'memory.share.secretFound': 'Se detectó un secreto en {file}:{line} — coincide con el patrón "{pattern}". Eliminá el secreto o agregá una entrada en governance.memorySecretAllowPatterns si es un falso positivo. Ejecutá `gunzip -c {file} | jq .` para inspeccionar (el número de línea corresponde a esa vista formateada).',
 
   // ── memory/backends/engram.mjs — share() records dual-write scrub (issue #221, C2b-1) ──

@@ -662,6 +662,9 @@ test('dualWriteRecords: no observations → resolves without appending or reinde
     rejected: 0,
     skippedPersonal: 0,
     unprovenanced: 0,
+    // fresh-review F1 (#924): no observation's `topic_key` matched the
+    // record-id grammar here, so the gate skipped none.
+    skippedHydrated: 0,
     unparseableChunks: 0,
     emptyObservationsChunks: 0,
     // #574: zero here means "no reindex ran, so nothing was measured" — the
@@ -716,6 +719,7 @@ test('dualWriteRecords: skipped/rejected/errored observations are ALL accounted 
     // #541 — the surviving candidate carried no §4 block, which is what the whole
     // store looks like: 2070 of 2163 records materialised that way.
     unprovenanced: 1,
+    skippedHydrated: 0,
     unparseableChunks: 0,
     emptyObservationsChunks: 0,
     indexCount: 1,
@@ -804,6 +808,7 @@ test('dualWriteRecords: unparseable/empty-observations chunk buckets are surface
     rejected: 0,
     skippedPersonal: 0,
     unprovenanced: 0,
+    skippedHydrated: 0,
     unparseableChunks: 1,
     emptyObservationsChunks: 1,
     duplicates: { ids: 0, lines: 0, divergent: 0, groups: [] },

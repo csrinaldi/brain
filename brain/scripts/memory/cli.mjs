@@ -918,6 +918,14 @@ try {
     console.log(`memory/cli: ${await t("memory.share.unprovenanced", { count: result.unprovenanced })}`);
   }
 
+  // fresh-review F1 (#924) — observations `hydrate()` itself wrote (their
+  // `topic_key` already names a record) are gated out of the re-export
+  // before they can mint a duplicate id (see dualWriteRecords()'s own docs).
+  // Printed like `dedupedUpstream`: a correctly-working gate, not a warning.
+  if (op === "share" && typeof result?.skippedHydrated === "number" && result.skippedHydrated > 0) {
+    console.log(`memory/cli: ${await t("memory.share.skippedHydrated", { count: result.skippedHydrated })}`);
+  }
+
   // issue #701 — the upstream-base export scope. `upstreamScope` is absent on
   // the zero-candidate early return (nothing was measured — see
   // dualWriteRecords()'s own docs), so every branch below is keyed on its
