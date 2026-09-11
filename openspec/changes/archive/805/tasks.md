@@ -205,12 +205,9 @@ Commit: `docs(brain-drafts): draft the record-first correction sequence for #805
   `git diff --stat 51ff915f 376d6a31 -- .memory/`: 2 records + `index.jsonl \| 2 ++`). The
   correction record's `supersedes` field points at `rec-7723969eb495debe`, verbatim.
 - [x] W3 (ticked on the archive branch, PR #912 named) Tick epic task 2.1 in `openspec/changes/issue-864-memory-2-0/tasks.md` (`:30`),
-  referencing this PR's number once known. **NOT DONE** — verify-time inspection of the merged
-  tree (`git log -p --all -S"2.1 #805" -- openspec/changes/issue-864-memory-2-0/tasks.md`) shows
-  the line has never been ticked in any commit reachable from `main`; it still reads `- [ ] 2.1
-  #805 — a writer for \`supersedes\`...`. This is out of this executor's write scope (restricted
-  to this change's `tasks.md`/`verify-report.md`) — flagged as a WARNING finding below for the
-  orchestrator/maintainer to close as a small follow-up edit.
+  referencing this PR's number once known. Done on the archive branch (commit 82b1e80f ticks
+  epic 2.1 naming PR #912); the verify report's WARNING 1 recorded that it had never been
+  ticked on `main` before that commit.
 - [x] W4 Fresh-context review before the PR: adversarial pass over the refusal shape (A7), the
   thunk-discipline pin (A1), and the CLI arity guards (A5) — the three places a careless commit
   most likely regresses. Verdict APPROVE, nine mutants killed (upstream-before-local,
