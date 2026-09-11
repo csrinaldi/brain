@@ -175,7 +175,7 @@ export async function save(
     console.log(await t("memory.plainfiles.save.issueDerived", { issue: String(issueResult.issue), branch }));
   }
 
-  const source = composeSource({ host: getHostname(), actor: actorResult, kind: kindResult, issue: issueResult });
+  const source = composeSource({ host: getHostname(), backend: "plainfiles", actor: actorResult, kind: kindResult, issue: issueResult });
 
   const recordsDir = join(root, ".memory", "records");
 

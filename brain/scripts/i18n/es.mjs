@@ -332,6 +332,7 @@ export default {
 
   // ── memory/backends/engram.mjs — share() secret scrub (issue #214, C1b) ──────
   'memory.share.unprovenanced': '{count} observación(es) llegaron sin bloque de provenance, así que se materializaron como `@legacy` y sin `issue` — todavía nada emite el bloque en el camino de captura (#541). Contadas, no rechazadas: rechazarlas voltearía el store que ya existe.',
+  'memory.share.skippedHydrated': 'Se omitieron {count} observación(es) — su topic ya nombraba un registro (escrito por hydrate(), #874), así que reexportarlas habría generado un id duplicado.',
   'memory.share.secretFound': 'Se detectó un secreto en {file}:{line} — coincide con el patrón "{pattern}". Eliminá el secreto o agregá una entrada en governance.memorySecretAllowPatterns si es un falso positivo. Ejecutá `gunzip -c {file} | jq .` para inspeccionar (el número de línea corresponde a esa vista formateada).',
 
   // ── memory/backends/engram.mjs — share() records dual-write scrub (issue #221, C2b-1) ──
@@ -372,7 +373,8 @@ export default {
 
   // ── memory/lib/unsupported-op.mjs — helper compartido de rechazo explícito (C3, issue #246) ──
   'memory.op.unsupported':            "la operación '{op}' no está soportada por el backend de memoria '{backend}' (diferida — ver openspec/changes/issue-246-c3).",
-  'memory.save.engramUnsupported': "'{op}' no es un verbo de cli para el backend '{backend}' — usá el mem_save nativo de engram / 'engram save'. Si engram no está instalado acá (el entorno del agente), capturá registros directo con `MEMORY_BACKEND=plainfiles npm run memory:save -- \"título\" \"contenido\" --type <tipo>` — mismos registros, misma validación, sin backend (#530). `--supersedes <id>` también es exclusivo de plainfiles, por la misma razón (#805).",
+  // memory.save.engramUnsupported se retiró en #874, split A (D7) — su único
+  // call site (engram.mjs#save) ahora es el camino productor record-first.
   'memory.search.engramUnsupported':  "'{op}' no es un verbo de cli para el backend '{backend}' — usá el mem_search nativo de engram / 'engram search' en su lugar.",
 
   // ── memory/backends/plainfiles.mjs — verbos cli save/search (C3, issue #246) ──
@@ -387,6 +389,7 @@ export default {
   'memory.plainfiles.save.actorReserved': "brain.actor está configurado como '{value}', un valor reservado de uso interno para registros sin atribución/legacy — no se puede usar como actor de captura. Corré `git config --local brain.actor @<handle>` con tu propio handle.",
   'memory.plainfiles.save.issueDerived': 'issue {issue} derivado de la rama {branch} (no se pasó --issue).',
   'memory.save.plainfilesIgnoredOpts': 'se ignoraron la(s) opción(es) {opts} — el formato de registro de plainfiles no tiene un campo para ellas (scope/topic son conceptos exclusivos de engram); el registro se guardó igualmente.',
+  'memory.save.engramIgnoredOpts': "se ignoraron la(s) opción(es) {opts} — la hidratación siempre define su propio scope ('project') y topic (el id del propio registro); los valores pasados acá se descartaron, no se combinaron, y el registro se guardó igualmente.",
   // ── --supersedes (#805): un id de supersedes se verifica contra el store, local primero, antes de cualquier escritura ──
   'memory.plainfiles.save.supersedesMalformed': "--supersedes '{value}' no tiene la forma rec-<16 hex> — se rechazó antes de tocar el filesystem o git, y no se escribió ningún registro.",
   'memory.plainfiles.save.supersedesNotInStore': "--supersedes {id} no está en el store — se revisó .memory/records/ local y {ref}. Subilo en la lane primero y después corregilo; no se escribió ningún registro.",
@@ -394,6 +397,11 @@ export default {
   'memory.plainfiles.save.supersedesConfigError': 'no se pudo leer brain.config.json mientras se verificaba --supersedes: {error}. La verificación igual corrió contra el ref que resolvió sin él.',
   'memory.save.supersedesRepeated': '--supersedes acepta exactamente un id por guardado — el fan-in (varios registros superando el mismo id) está diferido (#805). Se rechazó antes de cualquier escritura.',
   'memory.save.supersedesMissingValue': '--supersedes necesita un valor (el id que supera) — se rechazó antes de cualquier escritura, para que el registro nunca se guarde en silencio sin el campo que pediste.',
+  // ── #874 — hydrate({recordId}): el registro ya es durable antes de que esto corra, así que
+  // una falla del backend acá se reporta, nunca se lanza (R5) ──
+  'memory.save.hydrateDeferred': 'el registro {recordId} está en disco, pero hidratarlo en engram quedó diferido — {reason}. El registro NO se perdió; volvé a correr `npm run memory:pull` (o `memory:share`) cuando engram esté disponible para ponerlo al día.',
+  'memory.save.hydrateContended': 'el registro {recordId} está en disco, pero hidratarlo en engram se saltó — otro proceso (pid {pid}, {age}s) tiene tomado el guard de hidratación #820. El registro NO se perdió; se va a recoger en el próximo pull/share.',
+  'memory.hydrate.recordNotFound': "hydrate: no se encontró ningún registro con id '{recordId}' bajo .memory/records/ — pasá el registro mismo al hidratar uno que todavía no se leyó de disco.",
   'memory.plainfiles.search.empty': 'ℹ no se encontraron registros coincidentes.',
   'memory.plainfiles.search.summary': '{count} registro(s) coincidente(s):',
 

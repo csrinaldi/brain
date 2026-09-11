@@ -821,6 +821,12 @@ if (op === "save") {
   const opts = { type: flags.type, project: flags.project, issue, supersedes: flags.supersedes, scope: flags.scope, topic: flags.topic };
   const seams = memoryTestRoot ? { root: memoryTestRoot } : {};
   try {
+    // #874 — a deferred/contended hydration is already reported on stderr by
+    // engram.mjs#hydrate() itself (mirrors importMemory()'s own `_warn`
+    // convention); the record is ALREADY durable by the time save() returns
+    // (appended + indexed before hydrate ever runs), so `save` still exits 0
+    // exactly as it does when the engram backend was never selected at all —
+    // a backend failure here must never read as a lost capture (R5).
     const result = await backend.save(title, content, opts, seams);
     console.log(`memory/cli: ${await t("memory.plainfiles.save.done", { id: result?.id, file: result?.file })}`);
     reportDuplicates(result?.duplicates, { indexCount: result?.indexCount });
@@ -910,6 +916,14 @@ try {
   // `issue` and read exactly like a healthy one.
   if (op === "share" && result && typeof result.unprovenanced === "number" && result.unprovenanced > 0) {
     console.log(`memory/cli: ${await t("memory.share.unprovenanced", { count: result.unprovenanced })}`);
+  }
+
+  // fresh-review F1 (#924) — observations `hydrate()` itself wrote (their
+  // `topic_key` already names a record) are gated out of the re-export
+  // before they can mint a duplicate id (see dualWriteRecords()'s own docs).
+  // Printed like `dedupedUpstream`: a correctly-working gate, not a warning.
+  if (op === "share" && typeof result?.skippedHydrated === "number" && result.skippedHydrated > 0) {
+    console.log(`memory/cli: ${await t("memory.share.skippedHydrated", { count: result.skippedHydrated })}`);
   }
 
   // issue #701 — the upstream-base export scope. `upstreamScope` is absent on

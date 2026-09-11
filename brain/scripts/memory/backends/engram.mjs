@@ -57,11 +57,14 @@ import { importRecord } from "../lib/engram-import.mjs";
 import { appendRecord, rebuildIndex, readRecordIds, readRecords } from "../lib/store.mjs";
 import { upstreamRecordEntries } from "../lib/upstream-records.mjs";
 import { emptyDuplicates, normalizeDuplicates } from "../lib/duplicates.mjs";
-import { serializeRecord } from "../lib/format.mjs";
+import { buildRecord, serializeRecord, nowUtcSeconds, RECORD_TYPES } from "../lib/format.mjs";
 import { collectChunkObservations } from "../lib/migrate-v1.mjs";
 import { unsupportedOp } from "../lib/unsupported-op.mjs";
 import { acquireHydrationGuard } from "../lib/hydration-guard.mjs";
 import { ENGRAM_BIN, probeBinary } from "../lib/backend-selection.mjs";
+import { gitConfigGet } from "../../lib/git-config.mjs";
+import { resolveActor, resolveActorKind, deriveIssue, composeSource } from "../lib/capture-provenance.mjs";
+import { classifySupersedes, SUPERSEDES_ID_RE } from "../lib/supersedes.mjs";
 import { t } from "../../i18n/t.mjs";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../../../..");
@@ -313,7 +316,7 @@ export function _defaultReadObservations(root) {
  *   still short-circuits before it (no git spawn on a steady-state share), and the scan
  *   above it still covers every candidate, including the ones this widens the decline to.
  * @returns {Promise<{written: number, deduped: number, dedupedUpstream: number, errored: number,
- *   rejected: number, skippedPersonal: number, unprovenanced: number, unparseableChunks: number,
+ *   rejected: number, skippedPersonal: number, unprovenanced: number, skippedHydrated: number, unparseableChunks: number,
  *   emptyObservationsChunks: number, indexCount?: number,
  *   duplicates: {ids: number, lines: number, divergent: number, groups: object[]},
  *   upstreamScope?: {applied: boolean, ref: string|null, stated: boolean, reason: string|null,
@@ -360,7 +363,27 @@ export async function dualWriteRecords(
   // ruling refused for `memory-gate`. Visibility first; the gate only once the emitter
   // exists to satisfy it.
   let unprovenanced = 0;
+  // fresh-review F1 (#924): an observation whose `topic_key` already matches
+  // the record-id grammar (`SUPERSEDES_ID_RE`, `rec-[0-9a-f]{16}` — the same
+  // constant `--supersedes` is validated against, not redefined here) was
+  // WRITTEN BY `hydrate()` (#874 split A) — `_defaultEngramSave` shells
+  // `engram save … --topic <record id>` with no `--created-at`, so engram
+  // stamps its own `created_at`; `exportObservation()` derives `ts` FROM that
+  // `created_at`, and `ts` feeds `computeRecordId` (format.mjs). Re-exporting
+  // such an observation therefore risks a SECOND record with a DIFFERENT id
+  // the instant the two clocks disagree by even a second — a duplicate this
+  // share would have manufactured itself. Skipped on grammar alone, never on
+  // local presence: `records/` is additions-only and a partial index at
+  // best, so a `rec-…` topic with no local match is still proof the row was
+  // born from a record somewhere, never proof it is safe to re-derive. B
+  // (row 1, #874 split B) removes this gate together with the exporter it
+  // protects — see openspec/changes/issue-874-record-first/tasks.md.
+  let skippedHydrated = 0;
   for (const obs of observations) {
+    if (typeof obs?.topic_key === "string" && SUPERSEDES_ID_RE.test(obs.topic_key)) {
+      skippedHydrated += 1;
+      continue;
+    }
     let result;
     try {
       result = _exportObservation(obs);
@@ -392,6 +415,11 @@ export async function dualWriteRecords(
     rejected,
     skippedPersonal,
     unprovenanced,
+    // fresh-review F1 (#924) — observations gated out above because their
+    // `topic_key` already names a record; a bucket of its own, never folded
+    // into `deduped` (that bucket means "read as far as the dedup check and
+    // declined there" — these never reach `_exportObservation` at all).
+    skippedHydrated,
     unparseableChunks: unparseable.length,
     emptyObservationsChunks: emptyObservations.length,
     // #574. `deduped` above counts candidates this RUN declined to append; this
@@ -1110,21 +1138,328 @@ export async function pull() {
 }
 
 // ---------------------------------------------------------------------------
-// save / search — the Q1 asymmetry's engram side (design Decision 5, obs
-// #578's "engram.search stub: YES" ruling). engram already has a native
-// `mem_save`/`mem_search`; a second CLI-mediated door would create a second
-// surface to keep in parity forever. Both refuse loudly via the shared
-// unsupportedOp helper — never cryptic, never a silent no-op, on either verb.
+// save — the record-first producer path (#874, split A). `search` keeps the
+// Q1 asymmetry's engram-side refusal below; `save` no longer shares it
+// (D7) — engram already has a native `mem_search`, but `save`'s route is now
+// THIS one, mirrored from `plainfiles.save()` (R1) rather than deferred to
+// `mem_save`, which writes past `.memory/records/` entirely.
 // ---------------------------------------------------------------------------
 
-/** @returns {Promise<never>} */
-export async function save() {
-  await unsupportedOp("save", "engram", { key: "memory.save.engramUnsupported" });
+/** The repository this record belongs to, from config, falling back to the checkout
+ *  directory name. Duplicated from plainfiles.mjs verbatim (R1) — no shared-core
+ *  extraction; the correctness-critical logic already lives in the shared libs
+ *  this function calls into. */
+function deriveProject(config, root) {
+  const slug = config?.project?.slug;
+  if (typeof slug === "string" && slug.trim() !== "") return slug.split("/").pop();
+  const name = config?.project?.name;
+  if (typeof name === "string" && name.trim() !== "") return name;
+  return String(root).replace(/\/+$/, "").split("/").pop();
+}
+
+/**
+ * save() — the engram-side mirror of `plainfiles.save()` (R1): scan-then-write
+ * to `.memory/records/<yyyy-mm>-<id>.jsonl`, rebuild the index, THEN hydrate
+ * the active backend from that one record via `hydrate()` as the terminal
+ * step. The record is durable BEFORE hydrate ever runs (spec: "a capture is
+ * durable before the backend runs") — a hydrate failure never makes the
+ * capture appear lost (R5), it is reported as `deferred`/`contended`.
+ *
+ * Gate order is IDENTICAL to `plainfiles.save()`, pinned by the cross-backend
+ * parity test (save-parity.test.mjs, R2): caller-mistake refusals (`type`,
+ * `--issue` shape) → actor/provenance (#738) → `classifySupersedes` (#805) →
+ * `buildRecord` → `scanTextForSecrets` over the serialized candidate →
+ * `appendRecord` → `rebuildIndex` → `hydrate`.
+ *
+ * @param {string} title
+ * @param {string} content
+ * @param {{type: string, project: string, issue?: number, supersedes?: string, scope?: string, topic?: string}} [opts]
+ * @param {object} [seams]  root, getBranch, getTimestamp, getHostname, getGitConfig, getEnv,
+ *   _appendRecord, _rebuildIndex, _loadConfig, _readRecordIds, _upstreamRecordEntries, _hydrate
+ * @returns {Promise<{id: string, file: string, written: boolean, hydrated: boolean,
+ *   deferred?: true, contended?: true, reason?: string, indexCount?: number, duplicates: object}>}
+ */
+export async function save(
+  title,
+  content,
+  // scope/topic are accepted for _defaultEngramSave arg-shape parity — the record
+  // format has no home for them (out of scope, same as plainfiles), so they are
+  // ignored LOUDLY (a console.warn naming them) rather than erroring. `hydrate()`
+  // NEVER reads the caller's `topic`: the topic_key it hydrates under is always
+  // the record's own id (R6), never this field.
+  { type, project, issue, supersedes, scope, topic } = {},
+  {
+    root = repoRoot,
+    getBranch = _getGitBranch,
+    getTimestamp = nowUtcSeconds,
+    getHostname = () => osHostname(),
+    getGitConfig = (key) => gitConfigGet(key, root),
+    getEnv = () => process.env,
+    _appendRecord = appendRecord,
+    _rebuildIndex = rebuildIndex,
+    _loadConfig = _defaultLoadBrainConfig,
+    _readRecordIds = readRecordIds,
+    _upstreamRecordEntries = upstreamRecordEntries,
+    _hydrate = hydrate,
+  } = {},
+) {
+  const ignoredOpts = [scope && "scope", topic && "topic"].filter(Boolean);
+  if (ignoredOpts.length > 0) {
+    console.warn(await t("memory.save.engramIgnoredOpts", { opts: ignoredOpts.join(", ") }));
+  }
+
+  const ts = getTimestamp();
+  const branch = getBranch(root);
+  const config = _loadConfig(root);
+
+  const resolvedProject = project ?? deriveProject(config, root);
+  if (!type) {
+    throw new Error(await t("memory.plainfiles.save.typeRequired", { types: RECORD_TYPES.join(", ") }));
+  }
+  if (issue !== undefined && issue !== null && !Number.isInteger(issue)) {
+    throw new Error(await t("memory.plainfiles.save.issueInvalid", { value: String(issue) }));
+  }
+
+  // #738 — the actor refusal, AFTER the two caller-mistake refusals above,
+  // BEFORE the supersedes gate (which may read the store).
+  const actorResult = resolveActor({ configured: getGitConfig("brain.actor") });
+  if (!actorResult.ok) {
+    const key = actorResult.reason === "reserved"
+      ? "memory.plainfiles.save.actorReserved"
+      : actorResult.reason === "malformed"
+        ? "memory.plainfiles.save.actorMalformed"
+        : "memory.plainfiles.save.actorUnset";
+    throw new Error(await t(key, { value: String(actorResult.value ?? "") }));
+  }
+  const actor = actorResult.actor;
+
+  const kindResult = resolveActorKind({ env: getEnv(), agentEnvConfig: getGitConfig("brain.agentEnv") });
+  const actorKind = kindResult.actorKind;
+
+  const issueResult = deriveIssue({ declared: issue, branch });
+  if (issueResult.derived) {
+    console.log(await t("memory.plainfiles.save.issueDerived", { issue: String(issueResult.issue), branch }));
+  }
+
+  const source = composeSource({ host: getHostname(), backend: "engram", actor: actorResult, kind: kindResult, issue: issueResult });
+
+  const recordsDir = join(root, ".memory", "records");
+
+  if (supersedes !== undefined) {
+    const verdict = classifySupersedes({
+      id: supersedes,
+      localIds: () => _readRecordIds({ recordsDir }),
+      upstream: () => _upstreamRecordEntries({ root }),
+    });
+    if (verdict.configError !== undefined) {
+      console.warn(await t("memory.plainfiles.save.supersedesConfigError", { error: verdict.configError }));
+    }
+    if (!verdict.ok) {
+      const key = {
+        malformed: "memory.plainfiles.save.supersedesMalformed",
+        "not-in-store": "memory.plainfiles.save.supersedesNotInStore",
+        "could-not-verify": "memory.plainfiles.save.supersedesUnverifiable",
+      }[verdict.reason];
+      throw new Error(await t(key, verdict.detail));
+    }
+  }
+
+  const candidate = buildRecord({
+    ts, actor, actorKind, type, project: resolvedProject,
+    issue: issueResult.issue, supersedes, content, title, source,
+  });
+
+  const { patternSources, allowPatternSources } = resolveSecretConfig(config);
+  const patterns = compilePatterns(patternSources);
+  const allowPatterns = compilePatterns(allowPatternSources);
+  const hit = scanTextForSecrets(serializeRecord(candidate), patterns, allowPatterns);
+  if (hit) {
+    throw new Error(
+      await t("memory.plainfiles.save.secretFound", { line: hit.lineNumber, pattern: hit.pattern }),
+    );
+  }
+
+  const indexPath = join(root, ".memory", "index.jsonl");
+
+  const { file } = _appendRecord(candidate, { recordsDir });
+
+  // THE APPEND IS ALREADY DONE (#637, mirrored from plainfiles.save() verbatim):
+  // `rebuildIndex` reads the WHOLE store, so it can only run after the line it
+  // has to see. The original error is ANNOTATED AND RETHROWN rather than
+  // wrapped — every caller keeps the fail-closed throw it already had.
+  let reindex;
+  try {
+    reindex = _rebuildIndex({ recordsDir, indexPath });
+  } catch (err) {
+    const annotated = (err !== null && (typeof err === "object" || typeof err === "function"))
+      ? err
+      : new Error(String(err));
+    annotated.indexFailed = true;
+    annotated.recordId = candidate.id;
+    annotated.recordFile = file;
+    throw annotated;
+  }
+
+  // THE ONE STEP plainfiles.save() has no equivalent of: the record is durable
+  // (appended + indexed) BEFORE this runs, so a backend failure here can never
+  // make the capture appear lost (spec: "a capture is durable before the
+  // backend runs"; R5).
+  const hydrateResult = await _hydrate({ root, recordId: candidate.id, record: candidate });
+
+  return {
+    id: candidate.id,
+    file,
+    written: true,
+    hydrated: hydrateResult?.written === 1,
+    ...(hydrateResult?.deferred ? { deferred: true, reason: hydrateResult.reason } : {}),
+    ...(hydrateResult?.contended ? { contended: true } : {}),
+    indexCount: reindex?.count,
+    duplicates: normalizeDuplicates(reindex?.duplicates),
+  };
 }
 
 /** @returns {Promise<never>} */
 export async function search() {
   await unsupportedOp("search", "engram", { key: "memory.search.engramUnsupported" });
+}
+
+/**
+ * isEngramArgvUnsafe() — fresh-review F2 (#924): `engram save --help` offers
+ * no `--` escape (measured), so a value beginning with `-` would be parsed
+ * as an option, not a positional. `hydrate()` checks its `title`/`content`
+ * against this BEFORE spawning; never used to sanitize, only to refuse.
+ *
+ * @param {unknown} value
+ * @returns {boolean}
+ */
+function isEngramArgvUnsafe(value) {
+  return typeof value === "string" && value.startsWith("-");
+}
+
+/**
+ * hydrate() — project ONE durable record into the active engram store, keyed
+ * by the record's own id as `topic_key` (#874, split A, R3/R4/D1/D2/D9).
+ *
+ * ONE `_engramSave` call, never the bulk `importMemory()` path (R3): the
+ * primitive already exists and is already in production (`featureResume`),
+ * and the bulk path pays a whole-store read back for a single record.
+ *
+ * Order: resolve the record (D2 — an already-materialized `record` is used as
+ * given, at zero extra IO; absent, `_readRecords` finds it by id, and an
+ * unknown id THROWS — D4, a caller mistake, never `deferred`) → probe the
+ * binary (D3 — `probeBinary`, never `requireEngram()`, which throws) →
+ * acquire the #820 guard, non-blocking (R4) → one `_engramSave` call built
+ * via `importRecord()` (D1 — the SAME pure record→observation transform
+ * `importMemory` uses) with `topic: recordId` (R6 — always the record's own
+ * id, never the caller's `topic`).
+ *
+ * Never throws past this function except D4's unknown-id case: an absent
+ * binary, a contended guard, or a throwing `_engramSave` all DEFER (R5) —
+ * the record is already durable before this runs, so a backend failure here
+ * must never read as a lost capture.
+ *
+ * @param {{root?: string, recordId: string, record?: object}} args
+ * @param {object} [seams]
+ * @param {(title: string, content: string, opts: object) => void} [seams._engramSave]
+ * @param {() => {held: boolean, release?: () => void, owner?: object}} [seams._guard]  #820 guard, non-blocking.
+ * @param {() => {available: boolean|null, reason?: string}} [seams._probe]
+ * @param {(opts: {recordsDir: string}) => {records: object[], duplicates: object}} [seams._readRecords]
+ * @param {(record: object) => object} [seams._importRecord]
+ * @param {(msg: string) => void} [seams._warn]
+ * @returns {Promise<{written: 0|1, skipped: number, deferred?: true, contended?: true, reason?: string}>}
+ */
+export async function hydrate(
+  { root = repoRoot, recordId, record } = {},
+  {
+    _engramSave = _defaultEngramSave,
+    _guard = acquireHydrationGuard,
+    _probe = () => probeBinary(ENGRAM_BIN),
+    _readRecords = readRecords,
+    _importRecord = importRecord,
+    _warn = console.error,
+  } = {},
+) {
+  let resolved = record;
+  if (resolved === undefined) {
+    const { records } = _readRecords({ recordsDir: join(root, ".memory", "records") });
+    resolved = records.find((r) => r?.id === recordId);
+    if (resolved === undefined) {
+      throw new Error(await t("memory.hydrate.recordNotFound", { recordId }));
+    }
+  }
+
+  const probe = _probe();
+  if (probe.available !== true) {
+    const reason = probe.available === false
+      ? "engram binary not found"
+      : (probe.reason ?? "engram binary could not be resolved");
+    _warn(await t("memory.save.hydrateDeferred", { recordId, reason }));
+    return { written: 0, skipped: 0, deferred: true, reason };
+  }
+
+  // B1 (cold review #924): `acquireHydrationGuard()` is not exception-free —
+  // its `mkdirSync(staging)` is unguarded (ENOSPC, EACCES, …), and a rename
+  // error other than ENOTEMPTY/EEXIST/EPERM is rethrown. Acquiring the guard
+  // is folded into the SAME failure envelope as `_engramSave` below: a throw
+  // here is a backend failure like any other and must defer (R5), never
+  // escape `save()` and make an already-durable record look like it failed.
+  // The guard is never actually taken on this path, so there is nothing to
+  // release.
+  let guard;
+  try {
+    guard = _guard();
+  } catch (err) {
+    const reason = `guard-failed: ${err?.code ?? err?.message ?? String(err)}`;
+    _warn(await t("memory.save.hydrateDeferred", { recordId, reason }));
+    return { written: 0, skipped: 0, deferred: true, reason };
+  }
+  if (!guard.held) {
+    const age = Math.round((guard.owner?.ageMs ?? 0) / 1000);
+    _warn(await t("memory.save.hydrateContended", { recordId, pid: guard.owner?.pid ?? "?", age }));
+    return { written: 0, skipped: 0, deferred: true, contended: true };
+  }
+
+  try {
+    const observation = _importRecord(resolved);
+    // fresh-review F2 (#924), widened by cold-review E1 (#924): `engram save
+    // --help` offers no `--` escape (measured) — any positional/option VALUE
+    // starting with `-` would be parsed as an option, not the value, and
+    // either misbehave or fail in a way that looks like an unrelated engram
+    // error. Checked here: `title`/`content` (agent-controlled, F2) and
+    // `project` (E1 — `save()`'s `deriveProject()` falls back to the checkout
+    // directory's basename, `String(root).split('/').pop()`, which may itself
+    // start with `-`). NOT checked: `type` is one of format.mjs's fixed
+    // `RECORD_TYPES` enum, `scope` is always the constant `'project'` set by
+    // `importRecord()`, and `topic` is always the record's own id — always
+    // `rec-`-prefixed per format.mjs#computeRecordId — so none of those three
+    // can start with `-`. Refused BEFORE the spawn, never thrown (R5 shape):
+    // this is a data shape the caller cannot fix by retrying, so it is
+    // reported the same way a deferred hydration is. The proper fix — an
+    // escape in the engram CLI itself — is upstream; nothing to change here
+    // beyond refusing to hand it an unsafe argv.
+    if (
+      isEngramArgvUnsafe(observation.title)
+      || isEngramArgvUnsafe(observation.content)
+      || isEngramArgvUnsafe(observation.project)
+    ) {
+      const reason = "engram-argv-unsafe";
+      _warn(await t("memory.save.hydrateDeferred", { recordId, reason }));
+      return { written: 0, skipped: 0, deferred: true, reason };
+    }
+    _engramSave(observation.title, observation.content, {
+      type: observation.type,
+      project: observation.project,
+      scope: observation.scope,
+      topic: recordId,
+    });
+    return { written: 1, skipped: 0 };
+  } catch (err) {
+    const reason = explainEngramFailure(err);
+    _warn(await t("memory.save.hydrateDeferred", { recordId, reason }));
+    return { written: 0, skipped: 0, deferred: true, reason };
+  } finally {
+    guard.release();
+  }
 }
 
 /**
