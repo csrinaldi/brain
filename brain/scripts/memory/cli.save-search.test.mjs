@@ -301,7 +301,10 @@ function fakeEngramPath(markerFile) {
   return bin;
 }
 
-test('MEMORY_BACKEND=engram + a throwing hydration guard: save STILL exits 0, writes exactly one record + one index line, deferred on stderr, engram never spawned', () => {
+test('MEMORY_BACKEND=engram + a throwing hydration guard: save STILL exits 0, writes exactly one record + one index line, deferred on stderr, engram never spawned', (t) => {
+  // A read-only directory does not stop root (mode bits are not consulted for
+  // uid 0), so the EACCES this fixture relies on never happens there.
+  if (typeof process.getuid === 'function' && process.getuid() === 0) { t.skip('root ignores directory mode bits'); return; }
   const testRoot = mkdtempSync(join(tmpdir(), 'brain-cli-save-engram-guardfail-root-'));
   initIdentity(testRoot);
   const markerFile = join(mkdtempSync(join(tmpdir(), 'brain-cli-save-engram-guardfail-marker-')), 'engram-was-spawned');
