@@ -18,11 +18,10 @@
 // #247/#863 D3 — the chunk read-back is a boundary now (guard:
 // brain/scripts/memory/chunk-boundary.test.mjs). The seven-row ledger of what
 // 3.2 (#874) deletes is restated in
-// openspec/changes/issue-247-chunk-retirement/{tasks,design}.md. Row 1
-// (`_defaultShareExport`) is gone — `share()` (#874 split B) no longer calls
-// `engram sync --export` at all, and row 5 (`engram.share.test.mjs`'s old
-// shape) retired with it:
-//   _defaultReadObservations + this file's import → ledger row 2
+// openspec/changes/issue-247-chunk-retirement/{tasks,design}.md. Rows 1, 2
+// and 5 are gone — `share()` (#874 split B) no longer calls
+// `engram sync --export`, has no observation reader left, and
+// `engram.share.test.mjs`'s old shape retired with them:
 //   dualWriteRecords's _readObservations seam     → ledger row 3 (kept — O1)
 //   the scrub subsystem (delete only after #469's re-proof over record-first save) → ledger row 4
 // (2.4 handles what is left after 3.2:
@@ -58,7 +57,6 @@ import { appendRecord, rebuildIndex, readRecordIds, readRecords } from "../lib/s
 import { upstreamRecordEntries } from "../lib/upstream-records.mjs";
 import { emptyDuplicates, normalizeDuplicates } from "../lib/duplicates.mjs";
 import { buildRecord, serializeRecord, nowUtcSeconds, RECORD_TYPES } from "../lib/format.mjs";
-import { collectChunkObservations } from "../lib/migrate-v1.mjs";
 import { unsupportedOp } from "../lib/unsupported-op.mjs";
 import { acquireHydrationGuard } from "../lib/hydration-guard.mjs";
 import { ENGRAM_BIN, probeBinary } from "../lib/backend-selection.mjs";
@@ -186,22 +184,6 @@ export async function share({
 }
 
 /**
- * Default seam: the observations materialized by this run's `engram sync
- * --export` — read back from the gzip chunks it just wrote under
- * `.memory/chunks` (reuses migrate-v1.mjs's collectChunkObservations, never a
- * second reader). Returns the FULL bucket shape — `observations` plus the
- * `unparseable`/`emptyObservations` chunk-level buckets — so dualWriteRecords()
- * can account for every chunk, not just the ones that parsed into observations
- * (issue #221 fix pass, MAJOR).
- *
- * @param {string} root
- * @returns {{observations: object[], unparseable: string[], emptyObservations: string[]}}
- */
-export function _defaultReadObservations(root) {
-  return collectChunkObservations(join(root, ".memory", "chunks"));
-}
-
-/**
  * dualWriteRecords() — scan-then-write over the RECORDS log (issue #221,
  * C2b-1; design.md Decision 1, REQ-C2B1-3). Independent of requireEngram()/
  * the real export so it is unit-testable with zero engram/git dependency,
@@ -229,6 +211,12 @@ export function _defaultReadObservations(root) {
  * @param {string} root
  * @param {object} [opts]
  * @param {(root: string) => {observations: object[], unparseable?: string[], emptyObservations?: string[]}} [opts._readObservations]
+ *   Defaults to an empty read (row 2, #874 split B: the chunk-backed
+ *   `_defaultReadObservations`/`collectChunkObservations` reader retired —
+ *   `share()` no longer has an observation source at all). Every current
+ *   caller of this function is a direct test that injects its own
+ *   `_readObservations`; a future production caller (epic task 2.4) must do
+ *   the same.
  * @param {typeof exportObservation} [opts._exportObservation]
  * @param {typeof appendRecord} [opts._appendRecord]
  * @param {typeof rebuildIndex} [opts._rebuildIndex]
@@ -260,7 +248,7 @@ export function _defaultReadObservations(root) {
 export async function dualWriteRecords(
   root,
   {
-    _readObservations = _defaultReadObservations,
+    _readObservations = () => ({ observations: [] }),
     _exportObservation = exportObservation,
     _appendRecord = appendRecord,
     _rebuildIndex = rebuildIndex,
@@ -433,9 +421,10 @@ function _defaultLoadBrainConfig(root) {
 
 /**
  * Default seam: every `.memory/chunks/*.jsonl.gz` present, read from the
- * FILESYSTEM (issue #469, design D1). Same directory `_defaultReadObservations`
- * already enumerates via `collectChunkObservations` — one source of truth for
- * what a share run touches, not two.
+ * FILESYSTEM (issue #469, design D1). (Row 2's sibling reader,
+ * `_defaultReadObservations`/`collectChunkObservations`, retired in #874
+ * split B — this scanner is row 4, deleted last, after the R10 pair
+ * re-proof.)
  *
  * This used to ask `git status --porcelain -- .memory/chunks` and describe the
  * result as the "materialized THIS run" boundary. `.memory/chunks/` is

@@ -162,13 +162,11 @@ const EXPORT_KW = 'ex' + 'port';
 // allowlist (spec.md, design A2-A4) ─────────────────────────────────────────
 
 // The annotated allowlist itself (design A4's literal) — each row names the
-// ticket that retires it. Measured live on this worktree (tasks.md 0.1):
-// exactly `engram.mjs:48`, `cli.mjs:615`, `migrate-v1.test.mjs:13`.
-// Line 61 (not 48): the #247 header note above `engram.mjs`'s import block
-// (Work Unit 4.1) inserted 13 lines ahead of it — re-measured after that
-// edit landed, per tasks.md 0.5's "re-read every ledger anchor" rule.
+// ticket that retires it. #874 split B, task B2 retires row 2:
+// `engram.mjs`'s import of `collectChunkObservations` (and its
+// `_defaultReadObservations` caller) is gone — `share()` has no observation
+// reader left at all. Only the two rows below remain.
 const ALLOWLIST = [
-  { file: 'brain/scripts/memory/backends/engram.mjs', line: 61, retiredBy: '3.2 (#874) — ledger row 2' },
   { file: 'brain/scripts/memory/cli.mjs', line: 615, retiredBy: '2.4 — ledger row 7' },
   { file: 'brain/scripts/memory/lib/migrate-v1.test.mjs', line: 13, retiredBy: '2.4 — ledger row 7' },
 ];

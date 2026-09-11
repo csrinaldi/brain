@@ -20,7 +20,6 @@ import {
   dualWriteRecords,
   assertExportDestinationIsRead,
   _defaultChangedChunkFiles,
-  _defaultReadObservations,
 } from './engram.mjs';
 import { DEFAULT_SECRET_PATTERNS, scrubChunkFile } from '../lib/secret-scrub.mjs';
 import { buildRecord } from '../lib/format.mjs';
@@ -725,30 +724,6 @@ test('dualWriteRecords: id-dedup — two identical observations in the SAME batc
     assert.equal(result.deduped, 1);
     const lines = physicalRecordLines(dir);
     assert.equal(lines.length, 1);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-// ---------------------------------------------------------------------------
-// _defaultReadObservations() — must surface unparseable/empty-observations
-// chunk buckets, not just the flattened observations (issue #221 fix pass,
-// MAJOR — mirrors migrate-v1.mjs's collectChunkObservations() contract).
-// ---------------------------------------------------------------------------
-
-test('_defaultReadObservations: surfaces unparseable + emptyObservations chunk buckets, never just the flattened list', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'brain-read-observations-'));
-  try {
-    const chunksDir = join(dir, '.memory', 'chunks');
-    mkdirSync(chunksDir, { recursive: true });
-    writeFileSync(join(chunksDir, 'good.jsonl.gz'), gzipSync(JSON.stringify({ observations: [{ id: 1, type: 'decision' }] })));
-    writeFileSync(join(chunksDir, 'empty.jsonl.gz'), gzipSync(JSON.stringify({ sessions: [{}], observations: null })));
-    writeFileSync(join(chunksDir, 'corrupt.jsonl.gz'), Buffer.from('not gzip at all'));
-
-    const result = _defaultReadObservations(dir);
-    assert.deepEqual(result.observations, [{ id: 1, type: 'decision' }]);
-    assert.deepEqual(result.unparseable, ['corrupt.jsonl.gz']);
-    assert.deepEqual(result.emptyObservations, ['empty.jsonl.gz']);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
