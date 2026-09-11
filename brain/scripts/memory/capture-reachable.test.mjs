@@ -15,8 +15,11 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, mkdtempSync, mkdirSync, symlinkSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { spawnSync, execFileSync } from 'node:child_process';
 
 const REPO = fileURLToPath(new URL('../../..', import.meta.url));
 const pkg = JSON.parse(readFileSync(`${REPO}/package.json`, 'utf8'));
@@ -26,36 +29,63 @@ test('#530: capture is exposed as a managed verb', () => {
     'the capture half had no npm verb at all — index/share/pull/reindex existed, save did not');
 });
 
-test('#530: the verb pins the backend that works without engram', () => {
-  // Not a suggestion in a doc: the verb itself carries it, so the operator does
-  // not have to know that the default backend refuses this op.
-  assert.match(pkg.scripts['memory:save'], /MEMORY_BACKEND=plainfiles/,
-    'under the default backend this verb refuses — pinning it here is what makes the verb usable');
+test('#874 (D8, strengthens #530): the verb does NOT pin a backend — the record-first producer path (#874) makes engram reachable too', () => {
+  // Before #874 the default backend (engram) REFUSED `save` outright, so
+  // pinning `MEMORY_BACKEND=plainfiles` here was the only way to make this
+  // verb usable at all. Since split A, `engram.save()` is a record-first
+  // producer in its own right — it writes the durable record and DEFERS
+  // (never refuses) the hydration step when the binary is absent (R5, R8).
+  // A pin here would now be a LIE about which backend the verb needs.
+  assert.doesNotMatch(pkg.scripts['memory:save'], /MEMORY_BACKEND=/,
+    'the verb must not pin a backend — save is reachable under every backend now (#874, R8)');
   assert.match(pkg.scripts['memory:save'], /cli\.mjs save/);
 });
 
-test('#530: engram\'s refusal names a route that exists HERE, not only the native tool', async () => {
-  // The old message said "use engram's native mem_save / 'engram save' instead."
-  // That is actionable on a machine with engram and unactionable in the agent
-  // environment, which is the environment the outage happened in. A refusal that
-  // points at an absent binary is a dead end wearing a helpful tone.
+test('#874 (D8): capture stays reachable with NO engram installed — save defers rather than refuses, end to end', () => {
+  // #530's guarantee, PROVED END-TO-END instead of by a pin: even with the
+  // default backend (engram) selected and the binary measurably absent from
+  // PATH, `memory:save` still writes a durable record and exits 0 — it never
+  // refuses, and it never needs the plainfiles pin to do so.
+  const REAL_WHICH = execFileSync('sh', ['-c', 'command -v which'], { encoding: 'utf8' }).trim();
+  const REAL_GIT = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
+
+  const root = mkdtempSync(join(tmpdir(), 'capture-reachable-engram-'));
+  const bin = join(root, 'bin');
+  mkdirSync(bin);
+  symlinkSync(REAL_WHICH, join(bin, 'which'));
+  symlinkSync(REAL_GIT, join(bin, 'git'));
+  mkdirSync(join(root, '.memory', 'records'), { recursive: true });
+
+  const isolatedGitEnv = { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' };
+  spawnSync('git', ['init', '-q'], { cwd: root, encoding: 'utf8', env: { ...process.env, ...isolatedGitEnv, PATH: bin } });
+  spawnSync('git', ['config', '--local', 'brain.actor', '@test'], { cwd: root, encoding: 'utf8', env: { ...process.env, ...isolatedGitEnv, PATH: bin } });
+
+  const r = spawnSync(process.execPath, [`${REPO}/brain/scripts/memory/cli.mjs`, 'save', 'title', 'content', '--type', 'discovery'], {
+    encoding: 'utf8',
+    env: { HOME: process.env.HOME, PATH: bin, MEMORY_BACKEND: 'engram', BRAIN_MEMORY_TEST_ROOT: root, ...isolatedGitEnv },
+  });
+
+  assert.equal(r.status, 0, `save must be reachable with no engram installed:\n${r.stdout}\n${r.stderr}`);
+  assert.match(r.stderr, /deferred/i, 'the hydration must be reported as deferred, never as a refusal');
+  const dir = join(root, '.memory', 'records');
+  const files = readdirSync(dir).filter((f) => f.endsWith('.jsonl'));
+  assert.equal(files.length, 1, `exactly one record file should exist: ${files.join(', ')}`);
+});
+
+test('#874 (D7/D8): engram\'s search refusal still names the native tool — save no longer routes through this key', async () => {
+  // `memory.save.engramUnsupported` retired with its only call site (D7):
+  // `save` is no longer deferred/refused at all. `memory.search.engramUnsupported`
+  // stays (R14 scope — `search` is still unsupported under engram).
   const { t } = await import('../i18n/t.mjs');
-  const say = (locale) => t('memory.save.engramUnsupported', { op: 'save', backend: 'engram' }, { locale });
+  const say = (locale) => t('memory.search.engramUnsupported', { op: 'search', backend: 'engram' }, { locale });
 
   const en = await say('en');
   const es = await say('es');
 
-  // The option is `locale`. The first version of this test passed `{ lang }`, which
-  // `t` ignores — so it resolved the ambient catalogue twice and asserted one
-  // language while reporting two. N=1 wearing an N=2 loop, in the file whose subject
-  // is measuring honestly. This line is what makes the collapse impossible: if the
-  // option is ever renamed or dropped, the two come back equal and this fails.
   assert.notEqual(en, es, 'both locales resolved to the same string — the locale option is not being honoured');
 
   for (const [locale, msg] of [['en', en], ['es', es]]) {
-    assert.match(msg, /plainfiles/, `[${locale}] the refusal must name the backend that works here`);
-    assert.match(msg, /memory:save/, `[${locale}] and the verb that reaches it`);
-    assert.match(msg, /--type/, `[${locale}] including the flag that is required, since it has no default`);
+    assert.match(msg, /mem_search/, `[${locale}] the refusal must name the native engram tool`);
   }
 });
 

@@ -48,6 +48,18 @@ const SUBSTITUTED = /ran on the records-only `plainfiles` backend instead/;
 
 /** The real `which`, resolved once — the sandbox PATH still needs it to work. */
 const REAL_WHICH = execFileSync('sh', ['-c', 'command -v which'], { encoding: 'utf8' }).trim();
+/** The real `git`, resolved once — needed by any test that drives `save` far
+ *  enough to reach the #738 actor gate (D8: `save` no longer refuses outright). */
+const REAL_GIT = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
+const ISOLATED_GIT_ENV = { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' };
+
+/** `git init`s `root` and configures a LOCAL `brain.actor`, isolated from ambient
+ *  global/system config (mirrors cli.save-search.test.mjs's `initIdentity`). */
+function initIdentity(root, actor = '@test') {
+  const env = { ...process.env, ...ISOLATED_GIT_ENV };
+  spawnSync('git', ['init', '-q'], { cwd: root, encoding: 'utf8', env });
+  spawnSync('git', ['config', '--local', 'brain.actor', actor], { cwd: root, encoding: 'utf8', env });
+}
 
 /**
  * A temp world: a records fixture, an isolated PATH, and an isolated `.env`.
@@ -128,20 +140,23 @@ test('#641 the substitution notice goes to STDERR, not stdout', (t) => {
   assert.doesNotMatch(r.stdout, SUBSTITUTED);
 });
 
-test('#641 `save` is NOT substituted — engram refuses it by design, and the refusal already names the route', (t) => {
-  // MEASURED: `save` does not fail on the missing binary. `engram.save` refuses
-  // it deliberately (C3 Decision 5) and #530 made that refusal name the
-  // records-only route. Substituting here would make the signpost unreachable
-  // on the default backend — replacing a designed refusal with different
-  // behaviour rather than repairing a failure. `npm run memory:save` is pinned
-  // to plainfiles in package.json, so the documented verb is unaffected.
+test('#874 (D8): `save` is NOT substituted — engram no longer fails on the missing binary at all, it defers', (t) => {
+  // MEASURED, post-#874: before split A, `save` failed on a DESIGNED refusal
+  // (`unsupportedOp`, D7's now-retired `memory.save.engramUnsupported` key),
+  // never on the missing binary — so it was never a candidate for the
+  // fallback either way. Since split A, `engram.save()` is a record-first
+  // producer: it writes the record, then `hydrate()` DEFERS (never throws)
+  // when the binary is absent (R5). There is still no FAILURE on this op for
+  // `FALLBACK_OPS` to replace — for a new reason.
   const w = world(t);
+  symlinkSync(REAL_GIT, join(w.bin, 'git'));
+  initIdentity(w.root);
+
   const r = runCli(w, ['save', 'a title', 'some content', '--type', 'decision', '--issue', '641']);
 
-  assert.notEqual(r.status, 0);
+  assert.equal(r.status, 0, `save must exit 0 — the record is durable even with no engram installed:\n${r.stdout}\n${r.stderr}`);
   assert.doesNotMatch(r.stderr, SUBSTITUTED, 'nothing failed on the binary, so nothing may be substituted');
-  assert.match(r.stderr, /is not a cli verb for the 'engram' backend/, "engram's own refusal must survive");
-  assert.match(r.stderr, /MEMORY_BACKEND=plainfiles/, '#530\'s signpost must still reach the caller');
+  assert.match(r.stderr, /deferred/i, 'the hydration must be reported as deferred, never as a refusal');
 });
 
 test('#641 `setup` is NOT substituted — engram.setup() needs no binary, and owns the merge driver', (t) => {
