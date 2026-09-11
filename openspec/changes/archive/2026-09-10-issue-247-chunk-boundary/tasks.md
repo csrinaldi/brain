@@ -135,26 +135,36 @@ Commit: `docs(openspec): rewrite epic task 2.3 to the read-back boundary wording
 
 ## Wrap-up
 
-- [ ] W1 `npm test` full run before the first commit (baseline, measurement 0.3) and again before
-  push — record both counts.
-- [ ] W2 `memory:save --issue 247` — record-first, committed before the first push.
-- [ ] W3 Epic task 2.3 — **NOT ticked.** It is REWRITTEN (Work Unit 5.2) to state the read-back
+- [x] W1 `npm test` full run before the first commit (baseline, measurement 0.3) and again before
+  push — record both counts. **Evidence**: 5139/5139 baseline → 5148/5148 after Work Unit 1-5 →
+  5155/5155 at the final review-correction head `257de47f` (the PR-review head). Post-merge on
+  `main` at `c410259e`: 5194/5194 pass, 0 fail (later PRs added tests; #247's own slice stayed
+  green throughout).
+- [x] W2 `memory:save --issue 247` — record-first, committed before the first push. **Evidence**:
+  record `rec-752890976ce40df7`, committed on the feature branch before push.
+- [x] W3 (done as designed: the line was rewritten in #913, not ticked) Epic task 2.3 — **NOT ticked.** It is REWRITTEN (Work Unit 5.2) to state the read-back
   half is done here; the export half (`share` stops calling `engram sync --export`) moves to task
   3.2 (#874). Ticking 2.3 now would claim the whole chunk-materialization retirement is done,
-  which is false per D0/D1.
-- [ ] W4 Fresh-context review before opening the PR (PR rule) — a ~12-counted-line diff invites a
+  which is false per D0/D1. **Confirmed at archive**: `issue-864-memory-2-0/tasks.md:32` still
+  reads the rewritten read-back-only wording, unticked — this is by design, not an oversight.
+- [x] W4 Fresh-context review before opening the PR (PR rule) — a ~12-counted-line diff invites a
   reviewer to assume "nothing happened"; the review must confirm the guard is actually red-first
-  where claimed and that the ledger/epic-line changes are present.
-- [ ] W5 Open the PR: `Closes #247`, `Parent: #864` in prose, label `type:bug`. **Body leads with
-  D0's reconciliation** (a near-zero-diff PR must explain itself before anything else): the ticket
-  and epic wording said "retire chunk materialization"; the ratified #863 D3 sequencing (2.3 →
-  3.2 → 2.4) means 2.3 is read-back only, because `engram.mjs:1108` `save()` is `unsupportedOp` —
-  retiring the export now would break the only capture path reaching `records/`. Then: summary
-  (the guard, the pin, the ledger), changes table, test plan (every `node --test` command above
-  plus full `npm test`), the Non-goals section below, dependency note (this PR feeds #874's task
-  3.2), contributor checklist per `branch-pr` skill.
-- [ ] W6 After merge: confirm the #874 comment (5.3) posted; confirm #247's earlier
-  reconciliation comment (issuecomment-5625044748) and this PR are cross-linked.
+  where claimed and that the ledger/epic-line changes are present. **Evidence**: cold-context
+  review before the PR returned REVISE — two false claims (`byte-identical` for the ledger rows,
+  `repo-wide` for the guard's walk coverage), two anchor-wording fixes, seven guard-evasion gaps
+  (re-export, aliased import, namespace import, non-destructured dynamic import, three
+  `readChunkObservations` redefinition shapes). All findings landed before the PR opened:
+  `aea77892` (guard hardening + 7 mutant tests), `55fa7d81` (doc/ledger fixes + ticks),
+  `891dd68c` (apply-progress merge).
+- [x] W5 Open the PR: `Closes #247`, `Parent: #864` in prose, label `type:bug`. **Evidence**: PR
+  #913 ("fix(memory): the chunk read-back becomes an enforced boundary — an allowlist guard, two
+  pins, and #874's deletion ledger (#247)"), merged as `c410259e` on 2026-09-10.
+- [x] W6 After merge: confirm the #874 comment (5.3) posted; confirm #247's earlier
+  reconciliation comment (issuecomment-5625044748) and this PR are cross-linked. **Evidence**: the
+  #874 ledger comment (`issuecomment-5625476087`) posted and later PATCHED with the row 6/7
+  corrections found in the cold review; the #247 re-scope comment (`issuecomment-5625044748`)
+  posted; a second cold review at the PR's final head (`257de47f`) returned APPROVE, posted as a
+  PR review.
 
 ## Non-goals
 
