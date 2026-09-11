@@ -1299,6 +1299,92 @@ export async function search() {
 }
 
 /**
+ * hydrate() — project ONE durable record into the active engram store, keyed
+ * by the record's own id as `topic_key` (#874, split A, R3/R4/D1/D2/D9).
+ *
+ * ONE `_engramSave` call, never the bulk `importMemory()` path (R3): the
+ * primitive already exists and is already in production (`featureResume`),
+ * and the bulk path pays a whole-store read back for a single record.
+ *
+ * Order: resolve the record (D2 — an already-materialized `record` is used as
+ * given, at zero extra IO; absent, `_readRecords` finds it by id, and an
+ * unknown id THROWS — D4, a caller mistake, never `deferred`) → probe the
+ * binary (D3 — `probeBinary`, never `requireEngram()`, which throws) →
+ * acquire the #820 guard, non-blocking (R4) → one `_engramSave` call built
+ * via `importRecord()` (D1 — the SAME pure record→observation transform
+ * `importMemory` uses) with `topic: recordId` (R6 — always the record's own
+ * id, never the caller's `topic`).
+ *
+ * Never throws past this function except D4's unknown-id case: an absent
+ * binary, a contended guard, or a throwing `_engramSave` all DEFER (R5) —
+ * the record is already durable before this runs, so a backend failure here
+ * must never read as a lost capture.
+ *
+ * @param {{root?: string, recordId: string, record?: object}} args
+ * @param {object} [seams]
+ * @param {(title: string, content: string, opts: object) => void} [seams._engramSave]
+ * @param {() => {held: boolean, release?: () => void, owner?: object}} [seams._guard]  #820 guard, non-blocking.
+ * @param {() => {available: boolean|null, reason?: string}} [seams._probe]
+ * @param {(opts: {recordsDir: string}) => {records: object[], duplicates: object}} [seams._readRecords]
+ * @param {(record: object) => object} [seams._importRecord]
+ * @param {(msg: string) => void} [seams._warn]
+ * @returns {Promise<{written: 0|1, skipped: number, deferred?: true, contended?: true, reason?: string}>}
+ */
+export async function hydrate(
+  { root = repoRoot, recordId, record } = {},
+  {
+    _engramSave = _defaultEngramSave,
+    _guard = acquireHydrationGuard,
+    _probe = () => probeBinary(ENGRAM_BIN),
+    _readRecords = readRecords,
+    _importRecord = importRecord,
+    _warn = console.error,
+  } = {},
+) {
+  let resolved = record;
+  if (resolved === undefined) {
+    const { records } = _readRecords({ recordsDir: join(root, ".memory", "records") });
+    resolved = records.find((r) => r?.id === recordId);
+    if (resolved === undefined) {
+      throw new Error(await t("memory.hydrate.recordNotFound", { recordId }));
+    }
+  }
+
+  const probe = _probe();
+  if (probe.available !== true) {
+    const reason = probe.available === false
+      ? "engram binary not found"
+      : (probe.reason ?? "engram binary could not be resolved");
+    _warn(await t("memory.save.hydrateDeferred", { recordId, reason }));
+    return { written: 0, skipped: 0, deferred: true, reason };
+  }
+
+  const guard = _guard();
+  if (!guard.held) {
+    const age = Math.round((guard.owner?.ageMs ?? 0) / 1000);
+    _warn(await t("memory.save.hydrateContended", { pid: guard.owner?.pid ?? "?", age }));
+    return { written: 0, skipped: 0, deferred: true, contended: true };
+  }
+
+  try {
+    const observation = _importRecord(resolved);
+    _engramSave(observation.title, observation.content, {
+      type: observation.type,
+      project: observation.project,
+      scope: observation.scope,
+      topic: recordId,
+    });
+    return { written: 1, skipped: 0 };
+  } catch (err) {
+    const reason = explainEngramFailure(err);
+    _warn(await t("memory.save.hydrateDeferred", { recordId, reason }));
+    return { written: 0, skipped: 0, deferred: true, reason };
+  } finally {
+    guard.release();
+  }
+}
+
+/**
  * index() — project brain/ documents into engram.
  * Delegates entirely to brain-to-engram.mjs — no logic duplication.
  */
