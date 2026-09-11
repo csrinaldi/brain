@@ -1205,7 +1205,7 @@ export async function save(
 ) {
   const ignoredOpts = [scope && "scope", topic && "topic"].filter(Boolean);
   if (ignoredOpts.length > 0) {
-    console.warn(await t("memory.save.plainfilesIgnoredOpts", { opts: ignoredOpts.join(", ") }));
+    console.warn(await t("memory.save.engramIgnoredOpts", { opts: ignoredOpts.join(", ") }));
   }
 
   const ts = getTimestamp();

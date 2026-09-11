@@ -225,6 +225,18 @@ test('save: warns when --scope/--topic are passed, naming both', async () => {
     });
     assert.equal(result.written, true);
     assert.ok(warnings.some((w) => w.includes('scope') && w.includes('topic')), `expected a warning naming scope/topic: ${JSON.stringify(warnings)}`);
+    // E2 (cold review #924): engram's own warning must not reuse plainfiles'
+    // text — on engram, scope/topic are not "unsupported by the format", they
+    // are DISCARDED and replaced by hydrate's own values (scope: 'project',
+    // topic: the record's own id).
+    assert.ok(
+      !warnings.some((w) => w.toLowerCase().includes('plainfiles')),
+      `engram save() must not warn with plainfiles-flavored text: ${JSON.stringify(warnings)}`,
+    );
+    assert.ok(
+      warnings.some((w) => w.toLowerCase().includes('discard')),
+      `expected the warning to say scope/topic are discarded, not merely unsupported: ${JSON.stringify(warnings)}`,
+    );
   } finally {
     console.warn = orig;
     rmSync(root, { recursive: true, force: true });

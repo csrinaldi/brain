@@ -389,6 +389,7 @@ export default {
   'memory.plainfiles.save.actorReserved': "brain.actor está configurado como '{value}', un valor reservado de uso interno para registros sin atribución/legacy — no se puede usar como actor de captura. Corré `git config --local brain.actor @<handle>` con tu propio handle.",
   'memory.plainfiles.save.issueDerived': 'issue {issue} derivado de la rama {branch} (no se pasó --issue).',
   'memory.save.plainfilesIgnoredOpts': 'se ignoraron la(s) opción(es) {opts} — el formato de registro de plainfiles no tiene un campo para ellas (scope/topic son conceptos exclusivos de engram); el registro se guardó igualmente.',
+  'memory.save.engramIgnoredOpts': "se ignoraron la(s) opción(es) {opts} — la hidratación siempre define su propio scope ('project') y topic (el id del propio registro); los valores pasados acá se descartaron, no se combinaron, y el registro se guardó igualmente.",
   // ── --supersedes (#805): un id de supersedes se verifica contra el store, local primero, antes de cualquier escritura ──
   'memory.plainfiles.save.supersedesMalformed': "--supersedes '{value}' no tiene la forma rec-<16 hex> — se rechazó antes de tocar el filesystem o git, y no se escribió ningún registro.",
   'memory.plainfiles.save.supersedesNotInStore': "--supersedes {id} no está en el store — se revisó .memory/records/ local y {ref}. Subilo en la lane primero y después corregilo; no se escribió ningún registro.",

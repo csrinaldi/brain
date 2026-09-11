@@ -435,6 +435,7 @@ export default {
   'memory.plainfiles.save.actorReserved': "brain.actor is set to '{value}', a reserved value used internally for unattributed/legacy records — it cannot be used as a capture actor. Run `git config --local brain.actor @<handle>` with your own handle.",
   'memory.plainfiles.save.issueDerived': 'issue {issue} derived from branch {branch} (no --issue given).',
   'memory.save.plainfilesIgnoredOpts': 'ignored option(s) {opts} — the plainfiles record format has no field for them (scope/topic are engram-only concepts); the record was still written normally.',
+  'memory.save.engramIgnoredOpts': "ignored option(s) {opts} — hydrate always sets its own scope ('project') and topic (the record's own id); the values passed here were discarded, not merged, and the record was still written normally.",
   // ── --supersedes (#805): a supersedes id is checked against the store, local first, before any write ──
   'memory.plainfiles.save.supersedesMalformed': "--supersedes '{value}' is not shaped rec-<16 hex chars> — refused before any filesystem or git call, and no record was written.",
   'memory.plainfiles.save.supersedesNotInStore': "--supersedes {id} is not in the store — checked local .memory/records/ and {ref}. Ship it on the lane first, then correct it; no record was written.",
