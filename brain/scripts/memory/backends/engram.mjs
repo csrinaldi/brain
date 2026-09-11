@@ -57,11 +57,14 @@ import { importRecord } from "../lib/engram-import.mjs";
 import { appendRecord, rebuildIndex, readRecordIds, readRecords } from "../lib/store.mjs";
 import { upstreamRecordEntries } from "../lib/upstream-records.mjs";
 import { emptyDuplicates, normalizeDuplicates } from "../lib/duplicates.mjs";
-import { serializeRecord } from "../lib/format.mjs";
+import { buildRecord, serializeRecord, nowUtcSeconds, RECORD_TYPES } from "../lib/format.mjs";
 import { collectChunkObservations } from "../lib/migrate-v1.mjs";
 import { unsupportedOp } from "../lib/unsupported-op.mjs";
 import { acquireHydrationGuard } from "../lib/hydration-guard.mjs";
 import { ENGRAM_BIN, probeBinary } from "../lib/backend-selection.mjs";
+import { gitConfigGet } from "../../lib/git-config.mjs";
+import { resolveActor, resolveActorKind, deriveIssue, composeSource } from "../lib/capture-provenance.mjs";
+import { classifySupersedes } from "../lib/supersedes.mjs";
 import { t } from "../../i18n/t.mjs";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../../../..");
@@ -1110,16 +1113,184 @@ export async function pull() {
 }
 
 // ---------------------------------------------------------------------------
-// save / search — the Q1 asymmetry's engram side (design Decision 5, obs
-// #578's "engram.search stub: YES" ruling). engram already has a native
-// `mem_save`/`mem_search`; a second CLI-mediated door would create a second
-// surface to keep in parity forever. Both refuse loudly via the shared
-// unsupportedOp helper — never cryptic, never a silent no-op, on either verb.
+// save — the record-first producer path (#874, split A). `search` keeps the
+// Q1 asymmetry's engram-side refusal below; `save` no longer shares it
+// (D7) — engram already has a native `mem_search`, but `save`'s route is now
+// THIS one, mirrored from `plainfiles.save()` (R1) rather than deferred to
+// `mem_save`, which writes past `.memory/records/` entirely.
 // ---------------------------------------------------------------------------
 
-/** @returns {Promise<never>} */
-export async function save() {
-  await unsupportedOp("save", "engram", { key: "memory.save.engramUnsupported" });
+/** The repository this record belongs to, from config, falling back to the checkout
+ *  directory name. Duplicated from plainfiles.mjs verbatim (R1) — no shared-core
+ *  extraction; the correctness-critical logic already lives in the shared libs
+ *  this function calls into. */
+function deriveProject(config, root) {
+  const slug = config?.project?.slug;
+  if (typeof slug === "string" && slug.trim() !== "") return slug.split("/").pop();
+  const name = config?.project?.name;
+  if (typeof name === "string" && name.trim() !== "") return name;
+  return String(root).replace(/\/+$/, "").split("/").pop();
+}
+
+/**
+ * save() — the engram-side mirror of `plainfiles.save()` (R1): scan-then-write
+ * to `.memory/records/<yyyy-mm>-<id>.jsonl`, rebuild the index, THEN hydrate
+ * the active backend from that one record via `hydrate()` as the terminal
+ * step. The record is durable BEFORE hydrate ever runs (spec: "a capture is
+ * durable before the backend runs") — a hydrate failure never makes the
+ * capture appear lost (R5), it is reported as `deferred`/`contended`.
+ *
+ * Gate order is IDENTICAL to `plainfiles.save()`, pinned by the cross-backend
+ * parity test (save-parity.test.mjs, R2): caller-mistake refusals (`type`,
+ * `--issue` shape) → actor/provenance (#738) → `classifySupersedes` (#805) →
+ * `buildRecord` → `scanTextForSecrets` over the serialized candidate →
+ * `appendRecord` → `rebuildIndex` → `hydrate`.
+ *
+ * @param {string} title
+ * @param {string} content
+ * @param {{type: string, project: string, issue?: number, supersedes?: string, scope?: string, topic?: string}} [opts]
+ * @param {object} [seams]  root, getBranch, getTimestamp, getHostname, getGitConfig, getEnv,
+ *   _appendRecord, _rebuildIndex, _loadConfig, _readRecordIds, _upstreamRecordEntries, _hydrate
+ * @returns {Promise<{id: string, file: string, written: boolean, hydrated: boolean,
+ *   deferred?: true, contended?: true, reason?: string, indexCount?: number, duplicates: object}>}
+ */
+export async function save(
+  title,
+  content,
+  // scope/topic are accepted for _defaultEngramSave arg-shape parity — the record
+  // format has no home for them (out of scope, same as plainfiles), so they are
+  // ignored LOUDLY (a console.warn naming them) rather than erroring. `hydrate()`
+  // NEVER reads the caller's `topic`: the topic_key it hydrates under is always
+  // the record's own id (R6), never this field.
+  { type, project, issue, supersedes, scope, topic } = {},
+  {
+    root = repoRoot,
+    getBranch = _getGitBranch,
+    getTimestamp = nowUtcSeconds,
+    getHostname = () => osHostname(),
+    getGitConfig = (key) => gitConfigGet(key, root),
+    getEnv = () => process.env,
+    _appendRecord = appendRecord,
+    _rebuildIndex = rebuildIndex,
+    _loadConfig = _defaultLoadBrainConfig,
+    _readRecordIds = readRecordIds,
+    _upstreamRecordEntries = upstreamRecordEntries,
+    _hydrate = async () => ({ written: 0, skipped: 0 }),
+  } = {},
+) {
+  const ignoredOpts = [scope && "scope", topic && "topic"].filter(Boolean);
+  if (ignoredOpts.length > 0) {
+    console.warn(await t("memory.save.plainfilesIgnoredOpts", { opts: ignoredOpts.join(", ") }));
+  }
+
+  const ts = getTimestamp();
+  const branch = getBranch(root);
+  const config = _loadConfig(root);
+
+  const resolvedProject = project ?? deriveProject(config, root);
+  if (!type) {
+    throw new Error(await t("memory.plainfiles.save.typeRequired", { types: RECORD_TYPES.join(", ") }));
+  }
+  if (issue !== undefined && issue !== null && !Number.isInteger(issue)) {
+    throw new Error(await t("memory.plainfiles.save.issueInvalid", { value: String(issue) }));
+  }
+
+  // #738 — the actor refusal, AFTER the two caller-mistake refusals above,
+  // BEFORE the supersedes gate (which may read the store).
+  const actorResult = resolveActor({ configured: getGitConfig("brain.actor") });
+  if (!actorResult.ok) {
+    const key = actorResult.reason === "reserved"
+      ? "memory.plainfiles.save.actorReserved"
+      : actorResult.reason === "malformed"
+        ? "memory.plainfiles.save.actorMalformed"
+        : "memory.plainfiles.save.actorUnset";
+    throw new Error(await t(key, { value: String(actorResult.value ?? "") }));
+  }
+  const actor = actorResult.actor;
+
+  const kindResult = resolveActorKind({ env: getEnv(), agentEnvConfig: getGitConfig("brain.agentEnv") });
+  const actorKind = kindResult.actorKind;
+
+  const issueResult = deriveIssue({ declared: issue, branch });
+  if (issueResult.derived) {
+    console.log(await t("memory.plainfiles.save.issueDerived", { issue: String(issueResult.issue), branch }));
+  }
+
+  const source = composeSource({ host: getHostname(), actor: actorResult, kind: kindResult, issue: issueResult });
+
+  const recordsDir = join(root, ".memory", "records");
+
+  if (supersedes !== undefined) {
+    const verdict = classifySupersedes({
+      id: supersedes,
+      localIds: () => _readRecordIds({ recordsDir }),
+      upstream: () => _upstreamRecordEntries({ root }),
+    });
+    if (verdict.configError !== undefined) {
+      console.warn(await t("memory.plainfiles.save.supersedesConfigError", { error: verdict.configError }));
+    }
+    if (!verdict.ok) {
+      const key = {
+        malformed: "memory.plainfiles.save.supersedesMalformed",
+        "not-in-store": "memory.plainfiles.save.supersedesNotInStore",
+        "could-not-verify": "memory.plainfiles.save.supersedesUnverifiable",
+      }[verdict.reason];
+      throw new Error(await t(key, verdict.detail));
+    }
+  }
+
+  const candidate = buildRecord({
+    ts, actor, actorKind, type, project: resolvedProject,
+    issue: issueResult.issue, supersedes, content, title, source,
+  });
+
+  const { patternSources, allowPatternSources } = resolveSecretConfig(config);
+  const patterns = compilePatterns(patternSources);
+  const allowPatterns = compilePatterns(allowPatternSources);
+  const hit = scanTextForSecrets(serializeRecord(candidate), patterns, allowPatterns);
+  if (hit) {
+    throw new Error(
+      await t("memory.plainfiles.save.secretFound", { line: hit.lineNumber, pattern: hit.pattern }),
+    );
+  }
+
+  const indexPath = join(root, ".memory", "index.jsonl");
+
+  const { file } = _appendRecord(candidate, { recordsDir });
+
+  // THE APPEND IS ALREADY DONE (#637, mirrored from plainfiles.save() verbatim):
+  // `rebuildIndex` reads the WHOLE store, so it can only run after the line it
+  // has to see. The original error is ANNOTATED AND RETHROWN rather than
+  // wrapped — every caller keeps the fail-closed throw it already had.
+  let reindex;
+  try {
+    reindex = _rebuildIndex({ recordsDir, indexPath });
+  } catch (err) {
+    const annotated = (err !== null && (typeof err === "object" || typeof err === "function"))
+      ? err
+      : new Error(String(err));
+    annotated.indexFailed = true;
+    annotated.recordId = candidate.id;
+    annotated.recordFile = file;
+    throw annotated;
+  }
+
+  // THE ONE STEP plainfiles.save() has no equivalent of: the record is durable
+  // (appended + indexed) BEFORE this runs, so a backend failure here can never
+  // make the capture appear lost (spec: "a capture is durable before the
+  // backend runs"; R5).
+  const hydrateResult = await _hydrate({ root, recordId: candidate.id, record: candidate });
+
+  return {
+    id: candidate.id,
+    file,
+    written: true,
+    hydrated: hydrateResult?.written === 1,
+    ...(hydrateResult?.deferred ? { deferred: true, reason: hydrateResult.reason } : {}),
+    ...(hydrateResult?.contended ? { contended: true } : {}),
+    indexCount: reindex?.count,
+    duplicates: normalizeDuplicates(reindex?.duplicates),
+  };
 }
 
 /** @returns {Promise<never>} */
