@@ -24,12 +24,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync, execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { buildRecord, serializeRecord } from './lib/format.mjs';
+import { removeTempTree } from '../lib/tmp-tree.mjs';
 
 const CLI = join(dirname(fileURLToPath(import.meta.url)), 'cli.mjs');
 
@@ -71,7 +72,12 @@ function initIdentity(root, actor = '@test') {
  */
 function world(t, { engram = false, envFile = '' } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'brain-641-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  // removeTempTree, not a bare rmSync: `initIdentity()` below (used by the
+  // #874 save test) makes this a fixture that spawns git — issue #802's guard
+  // (`brain-repo-hygiene.test.mjs`) refuses a bare recursive rmSync teardown
+  // anywhere `git` was spawned, because `.git/objects` can race a concurrent
+  // writer mid-delete (ENOTEMPTY), and a bare rmSync has no retry for that.
+  t.after(() => removeTempTree(root));
 
   const recordsDir = join(root, '.memory', 'records');
   mkdirSync(recordsDir, { recursive: true });
