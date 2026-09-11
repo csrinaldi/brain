@@ -175,7 +175,7 @@ by apply-progress.
    once and tick W7, rather than carry it forward indefinitely as unverified.
 
 **SUGGESTION**:
-1. **Stale comment at `brain/scripts/memory/lib/format.mjs:55`.** The comment reads: *"`HANDLE_RE`
+1. **Stale comment at `brain/scripts/memory/lib/format.mjs:55` — FIXED on this archive branch (commit c21914fb, one second before this report was committed; the cold review of PR #917 caught the report still describing it as open).** At verify time the comment read: *"`HANDLE_RE`
    is also the positive requirement `capture-provenance.mjs#resolveActor` enforces at the point a
    handle is minted (kept as a private literal there — see that module's header)."* This describes
    the PRE-MINOR-1 state. The MINOR-1 fix (commit `be19db89`, part of PR #914) changed
@@ -201,5 +201,6 @@ Zero CRITICAL — nothing blocks archive. Two WARNINGs: the posted APPROVE cover
 rather than the actual merged commit (this verify pass's own post-merge audit substitutes but does
 not replace a real cold round), and W7's fresh-window audit re-run is still open though its
 substance is very likely already satisfied by the one real capture already on record. One cosmetic
-SUGGESTION: a stale docstring at `format.mjs:55` describing `HANDLE_RE` as a private literal copy in
-`capture-provenance.mjs`, which the #914 review's own MINOR-1 fix turned into a real import.
+SUGGESTION (fixed in c21914fb on this branch): a stale docstring at `format.mjs:55` describing
+`HANDLE_RE` as a private literal copy in `capture-provenance.mjs`, which the #914 review's own
+MINOR-1 fix turned into a real import.
