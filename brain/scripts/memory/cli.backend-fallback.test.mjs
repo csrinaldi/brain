@@ -184,31 +184,31 @@ test('#641 `setup` is NOT substituted — engram.setup() needs no binary, and ow
 
 // ── each precondition, measured through the real CLI ────────────────────────
 
-test('#641 engram PRESENT: no substitution, no notice — the existing path is untouched', (t) => {
+test('#641 engram PRESENT: no substitution — the run goes to ENGRAM, and #874 split B means it succeeds without ever touching the stub', (t) => {
+  // R11 (#874 split B): engram.share() no longer calls the binary at all, so
+  // an inert stub (exits 0, exports nothing) can no longer make it fail —
+  // there is nothing left downstream of ensureSymlink+rebuildIndex to fail on.
   const w = world(t, { engram: true });
   const r = runCli(w, ['share']);
 
+  assert.equal(r.status, 0, `share must succeed — engram.share() no longer calls the binary:\n${r.stdout}\n${r.stderr}`);
   assert.doesNotMatch(r.stderr, SUBSTITUTED, 'nothing was substituted, so nothing may claim it was');
-  // The stub `engram` exits 0 without exporting, so `share` fails downstream —
-  // which is the point: the run went to ENGRAM, exactly as it does today.
-  assert.match(r.stderr, /engram\./, `the failure must come from the engram backend; got:\n${r.stderr}`);
 });
 
-test('#641 MEMORY_BACKEND=engram STATED via the environment: not overridden, but the alternative is named', (t) => {
+test('#641 MEMORY_BACKEND=engram STATED via the environment: not overridden, the signpost still prints, and #874 split B means the run now succeeds', (t) => {
   const w = world(t);
   const r = runCli(w, ['share'], { MEMORY_BACKEND: 'engram' });
 
-  assert.notEqual(r.status, 0, 'a stated selector that cannot run must still fail');
+  assert.equal(r.status, 0, `a stated selector runs the real engram.share(), which no longer fails on the missing binary (R11):\n${r.stdout}\n${r.stderr}`);
   assert.doesNotMatch(r.stderr, SUBSTITUTED, 'a stated selector is never silently swapped');
-  assert.match(r.stderr, /MEMORY_BACKEND=plainfiles/, 'the working route must be named — this is the signpost #641 says was missing');
-  assert.match(r.stderr, /engram binary not found/, 'and the original failure must still be reported');
+  assert.match(r.stderr, /MEMORY_BACKEND=plainfiles/, 'the working route must still be named — this is the signpost #641 says was missing');
 });
 
 test('#641 MEMORY_BACKEND=engram STATED via .env: same ruling — the file is a statement too', (t) => {
   const w = world(t, { envFile: 'MEMORY_BACKEND=engram\n' });
   const r = runCli(w, ['share']);
 
-  assert.notEqual(r.status, 0);
+  assert.equal(r.status, 0);
   assert.doesNotMatch(r.stderr, SUBSTITUTED);
   assert.match(r.stderr, /MEMORY_BACKEND=plainfiles/);
 });
@@ -251,8 +251,9 @@ test('#641 a BROKEN probe is reported as itself and substitutes nothing', (t) =>
 
   assert.match(r.stderr, /could not determine/, 'the probe outage must be reported as an outage');
   assert.doesNotMatch(r.stderr, SUBSTITUTED, 'an unmeasured absence must not substitute a backend');
-  assert.match(r.stderr, /could not be resolved/, 'and the engram refusal must not claim "not found" either');
-  assert.notEqual(r.status, 0);
+  // #874 split B (R11): the unsubstituted run reaches the real engram.share(),
+  // which no longer probes or requires the binary itself — so it succeeds.
+  assert.equal(r.status, 0, `share must succeed even on a probe outage — it no longer calls requireEngram():\n${r.stdout}\n${r.stderr}`);
 });
 
 // ── the message is a catalog key, not a literal (so `es` is not handed English) ──

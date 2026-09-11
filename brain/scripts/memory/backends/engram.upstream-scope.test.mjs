@@ -1,9 +1,13 @@
-// engram.upstream-scope.test.mjs — issue #701: dualWriteRecords()/share() decline
-// a candidate whose id is already durable at the upstream base, IN ADDITION to
+// engram.upstream-scope.test.mjs — issue #701: dualWriteRecords() declines a
+// candidate whose id is already durable at the upstream base, IN ADDITION to
 // the existing own-records dedup. Seam-injected (`_upstreamRecordIds`) —
 // `upstream-records.test.mjs` covers the real predicate. The ONE exception is
 // the last test in this file, which uses the real predicate on purpose to pin
 // the exporter's call shape; it says so where it sits.
+//
+// #874 split B (O1): `share()` no longer calls `dualWriteRecords` — this file
+// exercises `dualWriteRecords` directly throughout, per the ratified O1
+// disposition (kept, seam removed, handed to 2.4).
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -11,7 +15,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { share, dualWriteRecords } from './engram.mjs';
+import { dualWriteRecords } from './engram.mjs';
 import { buildRecord } from '../lib/format.mjs';
 
 /**
@@ -187,36 +191,11 @@ test('dualWriteRecords: zero candidates never calls the upstream seam — no git
 });
 
 // ---------------------------------------------------------------------------
-// Task 2.9 — share() threads _upstreamRecordIds into its dualWriteRecords() call
-// ---------------------------------------------------------------------------
-
-test('share: threads _upstreamRecordIds through to dualWriteRecords — the seam share cannot pass is the seam end-to-end never reaches', async () => {
-  const rec = buildRecord({ ...baseRecordFields, content: 'threaded' });
-  let upstreamSeamCalled = false;
-
-  const result = await share({
-    root: '/fake/root',
-    _requireEngram: () => 'engram',
-    _export: () => {},
-    _resolveDir: () => null,
-    _changedChunkFiles: () => [],
-    _readObservations: () => ({ observations: [{ id: 1 }] }),
-    _exportObservation: () => ({ record: rec, recovered: true }),
-    _appendRecord: () => { throw new Error('must not append — the seam must have declined it'); },
-    _readRecordIds: () => new Set(),
-    _upstreamRecordIds: () => {
-      upstreamSeamCalled = true;
-      return { ok: true, ref: 'origin/main', stated: false, byId: new Map([[rec.id, 'oid']]), byPath: new Map(), unnamed: [] };
-    },
-    _rebuildIndex: () => ({ count: 0, duplicates: { ids: 0, lines: 0, divergent: 0, groups: [] } }),
-    _loadConfig: () => ({}),
-  });
-
-  assert.equal(upstreamSeamCalled, true, 'share() must thread its own _upstreamRecordIds seam into dualWriteRecords()');
-  assert.equal(result.written, 0);
-  assert.equal(result.dedupedUpstream, 1);
-});
-
+// #874 split B: `share()` no longer calls `dualWriteRecords` (row 1), so it no
+// longer threads `_upstreamRecordIds` anywhere — the former "Task 2.9" test
+// pinned that threading through `share()`'s own call and is retired with the
+// exporter. `dualWriteRecords()` itself is unchanged (O1 — kept, seam
+// removed) and every direct-call test above still exercises the real thing.
 // ---------------------------------------------------------------------------
 // The exporter's own CALL SHAPE honors memory.upstreamRef (cold review of #708)
 //
