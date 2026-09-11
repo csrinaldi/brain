@@ -387,7 +387,7 @@ Commits, in order (`git log --oneline 414c41b8..HEAD`, oldest first):
 72497fb4 refactor(memory): delete row 2 — _defaultReadObservations; retire chunk-boundary allowlist row (#874)
 7187ce65 docs(sdd): record O1 disposition — dualWriteRecords kept, handed to 2.4 (#874)
 5154a3a2 test(memory): replace engram.share.test.mjs with plainfiles-mirror assertions (R11/R12, row 5) (#874)
-96f9e6e3 refactor(memory): delete row 4 — chunk scrub subsystem, citing A's #469 pair (R10) (#874)
+50f83669 refactor(memory): delete row 4 — chunk scrub subsystem, citing A's #469 pair (R10) (#874)
 fef2a229 docs(sdd): draft contract amendment — rule 2 flip (R13) (#874)
 0b42a91e docs(memory): record PR B of #874 (#874)
 ea4d34c7 docs(sdd): tick B1-B7 complete in tasks.md (#874)

@@ -185,8 +185,9 @@ export async function share({
 /**
  * dualWriteRecords() — scan-then-write over the RECORDS log (issue #221,
  * C2b-1; design.md Decision 1, REQ-C2B1-3). Independent of requireEngram()/
- * the real export so it is unit-testable with zero engram/git dependency,
- * mirroring scrubMaterializedChunks()'s testable-core pattern.
+ * the real export so it is unit-testable with zero engram/git dependency —
+ * the same testable-core pattern `_defaultChangedChunkFiles` used before its
+ * retirement (row 4, #874 split B).
  *
  * Order: read observations → transform each into a CANDIDATE record via
  * exportObservation() → scan the candidate record LINES for secrets → only

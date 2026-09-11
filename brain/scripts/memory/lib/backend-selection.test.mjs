@@ -81,7 +81,10 @@ const ABSENT = { available: false };
 const PRESENT = { available: true };
 
 test('#641 selectBackend: defaulted + absent + covered op → SUBSTITUTED', () => {
-  const r = selectBackend({ requested: DEFAULT_BACKEND, stated: false, op: 'share', probe: ABSENT });
+  // `share` was the original covered example; it left FALLBACK_OPS in #874
+  // split B (R11/B4a fix) since engram.share() no longer needs the binary.
+  // `pull` is FALLBACK_OPS' one remaining covered op.
+  const r = selectBackend({ requested: DEFAULT_BACKEND, stated: false, op: 'pull', probe: ABSENT });
   assert.equal(r.backend, FALLBACK_BACKEND);
   assert.equal(r.substituted, true);
   assert.equal(r.reason, REASON.SUBSTITUTED);
@@ -89,7 +92,7 @@ test('#641 selectBackend: defaulted + absent + covered op → SUBSTITUTED', () =
 });
 
 test('#641 selectBackend: PRECONDITION 1 removed — a STATED engram is never overridden', () => {
-  const r = selectBackend({ requested: DEFAULT_BACKEND, stated: true, op: 'share', probe: ABSENT });
+  const r = selectBackend({ requested: DEFAULT_BACKEND, stated: true, op: 'pull', probe: ABSENT });
   assert.equal(r.backend, DEFAULT_BACKEND, 'an operator-stated selector wins (ADR-0004)');
   assert.equal(r.substituted, false);
   assert.equal(r.reason, REASON.STATED_BUT_ABSENT);
@@ -105,9 +108,10 @@ test('#641 selectBackend: PRECONDITION 2 removed — engram PRESENT means engram
 test('#641 selectBackend: PRECONDITION 3 removed — an op that is not BLOCKED by the binary keeps engram', () => {
   // Measured, not reasoned about. `setup` and `index` exit 0 with no engram
   // installed; `save`/`search` are refused by design and their refusal already
-  // names the records-only route. Only a genuine binary-not-found failure may be
+  // names the records-only route; `share` (#874 split B, R11) no longer calls
+  // the binary at all. Only a genuine binary-not-found failure may be
   // replaced — see FALLBACK_OPS for the full measurement.
-  for (const op of ['setup', 'save', 'search', 'index', 'import', 'feature-checkpoint', 'feature-resume']) {
+  for (const op of ['setup', 'save', 'search', 'share', 'index', 'import', 'feature-checkpoint', 'feature-resume']) {
     const r = selectBackend({ requested: DEFAULT_BACKEND, stated: false, op, probe: ABSENT });
     assert.equal(r.substituted, false, `${op} must not be substituted`);
     assert.equal(r.reason, REASON.OP_NOT_COVERED);
@@ -120,9 +124,14 @@ test('#641 FALLBACK_OPS covers ONLY the ops that engram cannot run without its b
   // needs no binary — it creates the `.engram → .memory` symlink and registers
   // the `merge=union` driver (ADR-0002). Substituting `plainfiles.setup()`,
   // which does neither, silently dropped the merge driver on every machine
-  // without engram.
-  assert.deepStrictEqual([...FALLBACK_OPS], ['share', 'pull']);
-  for (const op of ['setup', 'save', 'search', 'index']) {
+  // without engram. `share` was removed for the same reason (#874 split B,
+  // R11/B4a fix): `engram.share()` no longer calls `requireEngram()` or the
+  // binary at all, so there is no longer a failure on this op for the
+  // fallback to replace — and the fallback's own `plainfiles.share()` skips
+  // R12's `_ensureSymlink` self-heal, which a live substitution would have
+  // silently dropped, mirroring the `setup` regression this test already pins.
+  assert.deepStrictEqual([...FALLBACK_OPS], ['pull']);
+  for (const op of ['setup', 'save', 'search', 'share', 'index']) {
     assert.ok(!FALLBACK_OPS.includes(op), `'${op}' exits without the binary — there is no failure to replace`);
   }
 });

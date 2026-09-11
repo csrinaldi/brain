@@ -84,7 +84,7 @@ function walk(dir, base = '') {
   return out;
 }
 
-test('share: over a real temp store with no engram binary anywhere on PATH, share() still completes — the .memory/ tree is index.jsonl + records/, no chunks/ (rule 3, D4 guard 3)', async () => {
+test('share: over a real temp store with no engram binary anywhere on PATH, share() still completes — the .memory/ tree is index.jsonl + records/, no chunks/ (rule 3, D4 guard 3)', async (t) => {
   const root = testTmp('engram-share-');
   const recordsDir = join(root, '.memory', 'records');
   const rec = buildRecord({
@@ -96,6 +96,15 @@ test('share: over a real temp store with no engram binary anywhere on PATH, shar
     content: 'seed record',
   });
   const { filename } = appendRecord(rec, { recordsDir });
+
+  // Genuinely scrub PATH, not merely claim to — an EMPTY temp dir, no `engram`
+  // (or anything else) resolvable, restored on cleanup. Before this fix the
+  // title's claim was true only BY CONSTRUCTION (share() never shells out at
+  // all, per the source guard test above) and never actually measured.
+  const emptyBin = testTmp('engram-share-empty-path-');
+  const realPath = process.env.PATH;
+  process.env.PATH = emptyBin;
+  t.after(() => { process.env.PATH = realPath; });
 
   const result = await share({ root });
 
