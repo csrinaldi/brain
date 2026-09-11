@@ -211,3 +211,30 @@ test(
     assert.equal(result.reason, 'engram-argv-unsafe');
   },
 );
+
+// ── cold review B1 (#924): a throwing _guard() must fold into the SAME
+// deferred envelope as every other backend failure. `acquireHydrationGuard`'s
+// `mkdirSync(staging)` is unguarded and can throw (ENOSPC, EACCES, …), and a
+// rename error other than ENOTEMPTY/EEXIST/EPERM is rethrown too — either way
+// R5's promise ("the record is durable before this runs; a backend failure
+// here can never make the capture appear lost") must still hold. `_engramSave`
+// must never be called, and since the guard was never actually taken, no
+// release must happen either (there is nothing to release). ────────────────
+
+test('hydrate: a throwing _guard() ⇒ {deferred:true, reason: "guard-failed: <code>"}, no throw propagates, _engramSave never called', async () => {
+  let engramSaveCalled = false;
+  const result = await hydrate(
+    { root: '/tmp/unused', recordId: CLEAN_RECORD.id, record: CLEAN_RECORD },
+    {
+      _probe: () => ({ available: true }),
+      _guard: () => { throw Object.assign(new Error('no space'), { code: 'ENOSPC' }); },
+      _engramSave: () => { engramSaveCalled = true; },
+      _warn: () => {},
+    },
+  );
+  assert.equal(engramSaveCalled, false, 'a guard that never acquired must never reach _engramSave');
+  assert.equal(result.written, 0);
+  assert.equal(result.deferred, true);
+  assert.match(result.reason, /guard-failed/);
+  assert.match(result.reason, /ENOSPC/);
+});

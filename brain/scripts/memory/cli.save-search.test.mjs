@@ -17,7 +17,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync, execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, symlinkSync, existsSync, readdirSync, readFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, symlinkSync, existsSync, readdirSync, readFileSync, chmodSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -275,6 +275,75 @@ test('MEMORY_BACKEND=engram + no engram binary: save exits 0, writes exactly one
   const record = JSON.parse(recordLines[0]);
   assert.ok(result.stdout.includes(record.id), `stdout must carry the record id: ${result.stdout}`);
   assert.match(result.stderr, /deferred/i, `stderr must say the hydration deferred: ${result.stderr}`);
+});
+
+// ── cold review B1 (#924): a throwing hydration guard (e.g. `mkdirSync`
+// hitting ENOSPC/EACCES in `acquireHydrationGuard`'s unguarded staging step)
+// must still fold into the SAME deferred envelope — `save` durably writes the
+// record and index, then exits 0, exactly as when the binary is absent. This
+// drives the REAL `acquireHydrationGuard` (not a seam): the child's `TMPDIR`
+// is pointed at a directory with its write bit removed, so the guard's own
+// `mkdirSync(staging)` throws for real. `engram` is put on PATH as a fake
+// executable that must NEVER be invoked — the guard throw happens before
+// `_engramSave` would ever spawn it.
+
+/** A `PATH` carrying real `which`/`git` plus a FAKE `engram` that, if ever
+ * invoked, marks `markerFile` — proving `_engramSave` was reached (which
+ * this test asserts never happens). */
+function fakeEngramPath(markerFile) {
+  const dir = mkdtempSync(join(tmpdir(), 'brain-cli-save-engram-guardfail-'));
+  const bin = join(dir, 'bin');
+  mkdirSync(bin);
+  symlinkSync(REAL_WHICH, join(bin, 'which'));
+  symlinkSync(REAL_GIT, join(bin, 'git'));
+  const engramScript = join(bin, 'engram');
+  writeFileSync(engramScript, `#!/bin/sh\ntouch "${markerFile}"\nexit 0\n`, { mode: 0o755 });
+  return bin;
+}
+
+test('MEMORY_BACKEND=engram + a throwing hydration guard: save STILL exits 0, writes exactly one record + one index line, deferred on stderr, engram never spawned', () => {
+  const testRoot = mkdtempSync(join(tmpdir(), 'brain-cli-save-engram-guardfail-root-'));
+  initIdentity(testRoot);
+  const markerFile = join(mkdtempSync(join(tmpdir(), 'brain-cli-save-engram-guardfail-marker-')), 'engram-was-spawned');
+  const bin = fakeEngramPath(markerFile);
+
+  const readonlyTmp = mkdtempSync(join(tmpdir(), 'brain-cli-save-engram-guardfail-tmp-'));
+  chmodSync(readonlyTmp, 0o500); // read+execute only — the guard's own mkdirSync must throw EACCES
+
+  let result;
+  try {
+    result = spawnSync(process.execPath, [cliPath, 'save', 'A title', 'The body', '--type', 'discovery', '--project', 'brain'], {
+      encoding: 'utf8',
+      env: {
+        HOME: process.env.HOME,
+        PATH: bin,
+        TMPDIR: readonlyTmp,
+        ...ISOLATED_GIT_ENV,
+        MEMORY_BACKEND: 'engram',
+        BRAIN_MEMORY_TEST_ROOT: testRoot,
+      },
+    });
+  } finally {
+    chmodSync(readonlyTmp, 0o700); // restore so the test harness can clean it up
+  }
+
+  assert.equal(result.status, 0, `expected exit 0, got ${result.status}. stdout: ${result.stdout} stderr: ${result.stderr}`);
+  assert.equal(existsSync(markerFile), false, 'engram must never be spawned once the guard itself has thrown');
+
+  const recordsDir = join(testRoot, '.memory', 'records');
+  const recordFiles = readdirSync(recordsDir).filter((f) => f.endsWith('.jsonl'));
+  assert.equal(recordFiles.length, 1, 'exactly one record file must exist');
+  const recordLines = readFileSync(join(recordsDir, recordFiles[0]), 'utf8').trim().split('\n').filter(Boolean);
+  assert.equal(recordLines.length, 1, 'exactly one record line');
+
+  const indexPath = join(testRoot, '.memory', 'index.jsonl');
+  const indexLines = readFileSync(indexPath, 'utf8').trim().split('\n').filter(Boolean);
+  assert.equal(indexLines.length, 1, 'exactly one index line');
+
+  const record = JSON.parse(recordLines[0]);
+  assert.ok(result.stdout.includes(record.id), `stdout must carry the record id: ${result.stdout}`);
+  assert.match(result.stderr, /deferred/i, `stderr must say the hydration deferred: ${result.stderr}`);
+  assert.match(result.stderr, /guard-failed/i, `stderr must name the guard failure: ${result.stderr}`);
 });
 
 test('memory save --supersedes <unknown id> under the non-git test root exits 1 with could-not-verify, quoted', () => {

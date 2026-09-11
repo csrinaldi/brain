@@ -1397,7 +1397,22 @@ export async function hydrate(
     return { written: 0, skipped: 0, deferred: true, reason };
   }
 
-  const guard = _guard();
+  // B1 (cold review #924): `acquireHydrationGuard()` is not exception-free —
+  // its `mkdirSync(staging)` is unguarded (ENOSPC, EACCES, …), and a rename
+  // error other than ENOTEMPTY/EEXIST/EPERM is rethrown. Acquiring the guard
+  // is folded into the SAME failure envelope as `_engramSave` below: a throw
+  // here is a backend failure like any other and must defer (R5), never
+  // escape `save()` and make an already-durable record look like it failed.
+  // The guard is never actually taken on this path, so there is nothing to
+  // release.
+  let guard;
+  try {
+    guard = _guard();
+  } catch (err) {
+    const reason = `guard-failed: ${err?.code ?? err?.message ?? String(err)}`;
+    _warn(await t("memory.save.hydrateDeferred", { recordId, reason }));
+    return { written: 0, skipped: 0, deferred: true, reason };
+  }
   if (!guard.held) {
     const age = Math.round((guard.owner?.ageMs ?? 0) / 1000);
     _warn(await t("memory.save.hydrateContended", { recordId, pid: guard.owner?.pid ?? "?", age }));
