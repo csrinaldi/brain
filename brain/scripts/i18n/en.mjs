@@ -415,7 +415,8 @@ export default {
 
   // ── memory/lib/unsupported-op.mjs — the shared never-cryptic deferral helper (C3, issue #246) ──
   'memory.op.unsupported':            "op '{op}' is not supported by the '{backend}' memory backend (deferred — see openspec/changes/issue-246-c3).",
-  'memory.save.engramUnsupported': "'{op}' is not a cli verb for the '{backend}' backend — use engram's native mem_save / 'engram save'. If engram is not installed here (the agent environment), capture records directly with `MEMORY_BACKEND=plainfiles npm run memory:save -- \"title\" \"content\" --type <type>` — same records, same validation, no backend (#530). `--supersedes <id>` is plainfiles-only too, for the same reason (#805).",
+  // memory.save.engramUnsupported retired at #874, split A (D7) — its only call
+  // site (engram.mjs#save) is now the record-first producer path.
   'memory.search.engramUnsupported':  "'{op}' is not a cli verb for the '{backend}' backend — use engram's native mem_search / 'engram search' instead.",
 
   // ── memory/backends/plainfiles.mjs — save/search CLI verbs (C3, issue #246) ──

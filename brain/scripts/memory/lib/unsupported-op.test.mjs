@@ -38,11 +38,14 @@ test('unsupportedOp: defaults to the memory.op.unsupported key', async () => {
   );
 });
 
-test('unsupportedOp: an explicit key + params selects a different message (e.g. the engram save refusal)', async () => {
+test('unsupportedOp: an explicit key + params selects a different message (e.g. the engram search refusal)', async () => {
+  // `memory.save.engramUnsupported` retired at #874, split A (D7) — `save` is
+  // no longer deferred through this helper. `memory.search.engramUnsupported`
+  // stays (R14 scope: `search` is still unsupported under engram).
   await assert.rejects(
-    () => unsupportedOp('save', 'engram', { key: 'memory.save.engramUnsupported' }),
+    () => unsupportedOp('search', 'engram', { key: 'memory.search.engramUnsupported' }),
     (err) => {
-      assert.ok(err.message.includes('mem_save'), `expected the engram save refusal to name mem_save: ${err.message}`);
+      assert.ok(err.message.includes('mem_search'), `expected the engram search refusal to name mem_search: ${err.message}`);
       return true;
     },
   );

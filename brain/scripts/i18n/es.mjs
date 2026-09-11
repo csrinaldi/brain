@@ -372,7 +372,8 @@ export default {
 
   // ── memory/lib/unsupported-op.mjs — helper compartido de rechazo explícito (C3, issue #246) ──
   'memory.op.unsupported':            "la operación '{op}' no está soportada por el backend de memoria '{backend}' (diferida — ver openspec/changes/issue-246-c3).",
-  'memory.save.engramUnsupported': "'{op}' no es un verbo de cli para el backend '{backend}' — usá el mem_save nativo de engram / 'engram save'. Si engram no está instalado acá (el entorno del agente), capturá registros directo con `MEMORY_BACKEND=plainfiles npm run memory:save -- \"título\" \"contenido\" --type <tipo>` — mismos registros, misma validación, sin backend (#530). `--supersedes <id>` también es exclusivo de plainfiles, por la misma razón (#805).",
+  // memory.save.engramUnsupported se retiró en #874, split A (D7) — su único
+  // call site (engram.mjs#save) ahora es el camino productor record-first.
   'memory.search.engramUnsupported':  "'{op}' no es un verbo de cli para el backend '{backend}' — usá el mem_search nativo de engram / 'engram search' en su lugar.",
 
   // ── memory/backends/plainfiles.mjs — verbos cli save/search (C3, issue #246) ──
