@@ -1406,15 +1406,27 @@ export async function hydrate(
 
   try {
     const observation = _importRecord(resolved);
-    // fresh-review F2 (#924): `engram save --help` offers no `--` escape
-    // (measured) — a `title`/`content` starting with `-` would be parsed as
-    // an option, not a positional, and either misbehave or fail in a way
-    // that looks like an unrelated engram error. Refused BEFORE the spawn,
-    // never thrown (R5 shape): this is a data shape the caller cannot fix by
-    // retrying, so it is reported the same way a deferred hydration is. The
-    // proper fix — an escape in the engram CLI itself — is upstream; nothing
-    // to change here beyond refusing to hand it an unsafe argv.
-    if (isEngramArgvUnsafe(observation.title) || isEngramArgvUnsafe(observation.content)) {
+    // fresh-review F2 (#924), widened by cold-review E1 (#924): `engram save
+    // --help` offers no `--` escape (measured) — any positional/option VALUE
+    // starting with `-` would be parsed as an option, not the value, and
+    // either misbehave or fail in a way that looks like an unrelated engram
+    // error. Checked here: `title`/`content` (agent-controlled, F2) and
+    // `project` (E1 — `save()`'s `deriveProject()` falls back to the checkout
+    // directory's basename, `String(root).split('/').pop()`, which may itself
+    // start with `-`). NOT checked: `type` is one of format.mjs's fixed
+    // `RECORD_TYPES` enum, `scope` is always the constant `'project'` set by
+    // `importRecord()`, and `topic` is always the record's own id — always
+    // `rec-`-prefixed per format.mjs#computeRecordId — so none of those three
+    // can start with `-`. Refused BEFORE the spawn, never thrown (R5 shape):
+    // this is a data shape the caller cannot fix by retrying, so it is
+    // reported the same way a deferred hydration is. The proper fix — an
+    // escape in the engram CLI itself — is upstream; nothing to change here
+    // beyond refusing to hand it an unsafe argv.
+    if (
+      isEngramArgvUnsafe(observation.title)
+      || isEngramArgvUnsafe(observation.content)
+      || isEngramArgvUnsafe(observation.project)
+    ) {
       const reason = "engram-argv-unsafe";
       _warn(await t("memory.save.hydrateDeferred", { recordId, reason }));
       return { written: 0, skipped: 0, deferred: true, reason };

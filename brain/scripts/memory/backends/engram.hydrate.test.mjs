@@ -178,3 +178,36 @@ test('hydrate: a record whose title starts with "-" is deferred with reason "eng
   assert.equal(result.deferred, true);
   assert.equal(result.reason, 'engram-argv-unsafe');
 });
+
+// ── cold review E1 (#924): the argv guard skipped `project` — `_defaultEngramSave`
+// also spawns `--project <project>`, and `save()`'s `deriveProject()` falls back to
+// the checkout directory's basename (`String(root).split('/').pop()`) when no
+// `project` is configured or passed, which may itself start with `-` (e.g. a
+// worktree checked out as `/path/to/-repo`). `type` (one of format.mjs's
+// RECORD_TYPES enum), `scope` (always the constant `'project'` from
+// importRecord()), and `topic` (always the record's own id, always
+// `rec-`-prefixed per format.mjs#computeRecordId) cannot start with `-`, so
+// only `project` needs the same guard as title/content. ─────────────────────
+
+test(
+  'hydrate: a record whose project starts with "-" (deriveProject\'s checkout-basename fallback, e.g. a ' +
+    '"-repo" worktree) is deferred with reason "engram-argv-unsafe" — _engramSave is never called',
+  async () => {
+    const dashProjectRecord = { ...CLEAN_RECORD, project: '-repo' };
+    const { guard } = heldGuard();
+    let engramSaveCalled = false;
+    const result = await hydrate(
+      { root: '/tmp/unused', recordId: dashProjectRecord.id, record: dashProjectRecord },
+      {
+        _probe: () => ({ available: true }),
+        _guard: () => guard,
+        _engramSave: () => { engramSaveCalled = true; },
+        _warn: () => {},
+      },
+    );
+    assert.equal(engramSaveCalled, false, 'a leading "-" in project must never reach the engram CLI spawn');
+    assert.equal(result.written, 0);
+    assert.equal(result.deferred, true);
+    assert.equal(result.reason, 'engram-argv-unsafe');
+  },
+);
