@@ -19,7 +19,11 @@ topic_key `sdd/issue-874-record-first/apply-progress`).
 - [x] A9 — `brain-drafts/memory-backend-contract.save.draft.md` (R13 draft 1)
 - [x] A10 — unpin `package.json:65`; full-suite gate; closing record
 
-**All 11 tasks (A0–A10) complete. PR A ready for verify.**
+**All 11 tasks (A0–A10) complete.**
+
+Fresh-review fix batch (sub-ticket #924) applied after an adversarial review
+of PR A — see "Fresh-review fix batch" below for F1/F2/F4/F5 and the tasks.md
+notes for F6/B1. PR A ready for verify.
 
 ## TDD Cycle Evidence
 
@@ -204,6 +208,35 @@ a8bf66da docs(sdd): draft contract amendment — save column flip (R13) (#924)
    other record files, and the record/index CONTENT is correct — only the
    byte-diff SIZE differs from the task's `+1`-line expectation, for a reason
    predating this change.
+
+## Fresh-review fix batch (sub-ticket #924, after adversarial review of PR A)
+
+Batch scope: F1 (HIGH), F2 (MEDIUM), F4 (LOW), F5 (LOW) from the fresh review,
+plus tasks.md notes for F1's PR-B retirement and F6's PR-B follow-up. Mode:
+Strict TDD (`node --test`), one work-unit commit per finding. No edits to
+`brain/core/**`/`brain/project/**`; no push/PR; `.memory/index.jsonl` and
+`.memory/manifest.json` never staged this batch (this section is a docs-only
+edit to an already-tracked file).
+
+### TDD Cycle Evidence
+
+| Finding | Test File | RED | GREEN | Notes |
+|---|---|---|---|---|
+| F1 | `backends/engram.dualwrite-hydrated-gate.test.mjs` (new, 3 cases) | ✅ 3/3 red (import + behavior — `skippedHydrated` did not exist) | ✅ 3/3 green after the `SUPERSEDES_ID_RE`/`topic_key` gate landed in `dualWriteRecords`; 3 pre-existing `engram.share.test.mjs` deepEqual assertions updated for the new `skippedHydrated: 0` field | Gate is grammar-only (no local-presence check) — records are additions-only, so a `rec-…` topic with no local match is still skipped (second test case). `cli.mjs` gained a `skippedHydrated` stdout line (`memory.share.skippedHydrated`, en+es). |
+| F2 | `backends/engram.hydrate.test.mjs` (extended, +1 case) | ✅ red (`_engramSave` was called; no `deferred`) | ✅ green after `isEngramArgvUnsafe()` gate in `hydrate()` — a leading `-` in `observation.title`/`.content` now defers with `reason: 'engram-argv-unsafe'` before spawning | Upstream fix (a `--` escape in `engram save` itself) is out of this repo's scope — noted, not filed here. |
+| F4 | `backends/engram.hydrate.test.mjs` (strengthened, existing case) | N/A — verified by TEMPORARY mutation, not by a new failing case: reverted `topic: recordId` → a constant string, re-ran, got 2/7 red (the new key-assertion + the pre-existing byte-equality case), then reverted the production line back (confirmed `git diff` empty on `engram.mjs`) | ✅ 7/7 green with the mutation reverted | The fake store now asserts its one key IS `CLEAN_RECORD.id`, not just that its size is 1 — closes the "constant topic still passes" gap named by the review. |
+| F5 | `capture-reachable.test.mjs` (fixture teardown) | N/A — measured, not asserted: 14 stray `capture-reachable-engram-*` dirs found under `/tmp` before the fix (leaked by every prior run of this file); confirmed the fix stops the leak (0 new dirs after a run with the pre-existing stray dirs cleared) rather than inventing a directory-existence assertion | ✅ `t.after(() => removeTempTree(root))` added, consistent with this file's other git-spawning fixture (~line 101) | Stray `/tmp` dirs from before this fix were removed as housekeeping (outside the repo, not committed). |
+
+### Test Summary
+- New/modified test files: `engram.dualwrite-hydrated-gate.test.mjs` (new), `engram.share.test.mjs` (3 assertions updated), `engram.hydrate.test.mjs` (+2 cases: F2 new, F4 strengthened), `capture-reachable.test.mjs` (+1 import, +1 `t.after`).
+- Focused suite (F1+F4 hydrate/duplicates/share + F5 capture-reachable + cli.backend-fallback + i18n coverage): **123/123 green**.
+- Full suite: **5284/5284 green** under `MEMORY_BACKEND=engram` (ambient default) AND explicit `MEMORY_BACKEND=plainfiles`.
+
+### Deviations from the review batch prompt
+1. **F1's `reason`/message wording**: the review's parenthetical `(e.g. skippedHydrated: n ... and a line in --json/stderr)` was read as illustrative, not literal — `share` has no `--json` flag today (only `save`/`search`/`collect` do), so the new count is printed to **stdout** via `console.log`, mirroring the existing `dedupedUpstream` line (a correctly-working, non-warning count), not to stderr. `cli.mjs`'s comment states the reasoning inline.
+2. **F2's `reason` string**: kept literally `'engram-argv-unsafe'` (a stable machine token) on `result.reason`, reusing the existing `memory.save.hydrateDeferred` i18n key (interpolating that token as `{reason}`) rather than adding a new catalog key — avoids widening the i18n coverage surface for a one-line message; the CLI's stderr line still names the reason verbatim.
+3. **No production diff for F4**: the review's own instruction ("strengthen … so a mutation to a constant topic still fails") described a TEST-only fix; verified via a temporary, reverted mutation of `engram.mjs` rather than shipping a code change, exactly as the finding asked.
+4. **B8 (F6) is planning-only this batch**: added to `tasks.md` as instructed, not implemented — `composeSource()` is out of scope for PR A (design.md's module map never named `capture-provenance.mjs`) and B already touches the engram adapter.
 
 ## R7 probe outcome carried to epic #864 (informational)
 
