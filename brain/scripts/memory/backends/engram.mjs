@@ -446,68 +446,6 @@ function _defaultLoadBrainConfig(root) {
 }
 
 /**
- * Default seam: every `.memory/chunks/*.jsonl.gz` present, read from the
- * FILESYSTEM (issue #469, design D1). (Row 2's sibling reader,
- * `_defaultReadObservations`/`collectChunkObservations`, retired in #874
- * split B — this scanner is row 4, deleted last, after the R10 pair
- * re-proof.)
- *
- * This used to ask `git status --porcelain -- .memory/chunks` and describe the
- * result as the "materialized THIS run" boundary. `.memory/chunks/` is
- * GITIGNORED (`.gitignore:84`), and `git status --porcelain` never reports
- * ignored paths, so the set was **always empty**: the scrub had never scanned a
- * chunk. An empty set is not an error, so the fail-closed guard below never
- * tripped — it fails closed on a git ERROR and passed on a git result that was
- * empty for a structural reason. `evidence-reader-empty-on-failure` with a
- * third case neither branch modelled: the query cannot ever return anything.
- *
- * `--ignored` is NOT the fix, measured rather than argued (design D1): three of
- * the four git spellings report `!! .memory/chunks/` — the DIRECTORY — which the
- * `.jsonl.gz` suffix filter then dropped, leaving the scan at zero. Only plain
- * `--ignored -uall` lists files, while `--ignored=matching -uall`, which reads as
- * the tighter request, does not. A gate one plausible flag edit silently disarms
- * is the defect being fixed, re-armed and harder to see.
- *
- * The "materialized THIS run" boundary is gone, and was never real for
- * gitignored chunks: it did not narrow the scan, it emptied it. This scans the
- * WHOLE store, deliberately — the premise that an untouched chunk was cleared by
- * an earlier run is false, because no earlier run scanned anything. Restoring a
- * real boundary (pre/post-export snapshot) trades completeness for speed in a
- * gate whose whole job is completeness; deferred to a ticket with a measurement.
- *
- * Directories are dropped on their TYPE, not their name — the git spellings that
- * returned a directory path are exactly what a suffix-only filter cannot see.
- *
- * Fail CLOSED on any read error, including ENOENT. `share()` reaches here only
- * AFTER `engram sync --export` ran, so a missing chunk directory means the export
- * wrote where this process does not read — the REQ-469-3 failure, caught twice.
- * An EMPTY directory is not an error: a fresh clone with no memory yet is
- * legitimate, and that is the distinction the git version could not draw.
- *
- * ## The scanned set must CONTAIN the read set (round-1 cold review, BLOCKER)
- *
- * The invariant is not that this function and `_defaultReadObservations` agree;
- * it is that **nothing reaches `records/` unscanned**. The first draft of this
- * fix used `Dirent.isFile()` to drop directories (E5) and thereby dropped
- * SYMLINKS too — `isFile()` is false for a symlink entry — while the reader's
- * `readFileSync` follows them. Measured on a chunks directory holding one
- * symlink to a chunk carrying `ghp_…`:
- *
- * ```
- * SCANNER sees : [ 'plain.jsonl.gz' ]
- * READER  sees : [{"text":"ghp_0123…"},{"text":"fine"}]
- * ```
- *
- * The secret bypassed the scrub and landed in the append-only log, in a public
- * repository — the one outcome this gate exists to prevent, opened by the guard
- * added to close a different one. So the type test is `statSync`, which FOLLOWS
- * symlinks: a symlink to a chunk is scanned, a directory (or a symlink to one)
- * is not, and the reader can read nothing this does not see.
- *
- * An entry that cannot be stat'd fails CLOSED for the same reason the directory
- * read does: "cannot look" must never be reported as "nothing to scan".
- *
-/**
  * Default seam: resolve a path through symlinks, or `null` when it does not
  * exist (issue #469, REQ-469-3). Was separated so `share()`'s former
  * export-destination check (`assertExportDestinationIsRead`, retired #874
