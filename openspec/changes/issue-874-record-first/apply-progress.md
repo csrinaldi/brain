@@ -480,3 +480,44 @@ unused-key check, so none of the following were removed, only noted:
 4. **O1's own "stay green untouched" claim did not hold for
    `cli.upstream-config.test.mjs`** — see "Collateral discovered" item 5 and
    design.md's O1 section, which now carries the correction.
+
+## Fresh-review fix batch (PR B, worktree `brain-issue-874-b`)
+
+Answers a fresh adversarial review of PR B (B1-B4 findings below). Mode:
+Strict TDD (`node --test`), one work-unit commit per finding, same hard
+constraints as PR A's own fresh/cold-review batches (no edits to
+`brain/core/**`/`brain/project/**`; no push/PR/`--force`/`--no-verify`/
+`rebase`/`merge`; `.memory/index.jsonl`/`.memory/manifest.json` never staged
+this batch; temp dirs + fake seams only; no real engram binary/store touched
+by any test).
+
+### TDD Cycle Evidence
+
+| Finding | Test File | RED | GREEN | Notes |
+|---|---|---|---|---|
+| B1 (BLOCKER) | `engram.dualwrite-hydrated-gate.test.mjs` (restored, first two tests only) | ✅ 2/2 red (import worked — `dualWriteRecords` still exists — but `result.skippedHydrated` was `undefined`, both assertions failed) | ✅ 2/2 green after restoring the `SUPERSEDES_ID_RE` gate, the `skippedHydrated` counter, its JSDoc entries, and the `SUPERSEDES_ID_RE` import to `engram.mjs`, exactly as they read on `origin/main` (8e1e8bc7) | O1 (ratified) keeps `dualWriteRecords` intact; B1's original commit wrongly deleted the gate along with the exporter it protects. Restored verbatim, diffed against `git show origin/main:brain/scripts/memory/backends/engram.mjs`. The file's third original test (`share: surfaces skippedHydrated…`) is intentionally NOT restored — it drove the gate through `share()`'s retired `_readObservations`/`_exportObservation` seams, which B1 legitimately removed; the file's header states this explicitly. `memory.share.skippedHydrated` (en/es) stays orphaned-but-harmless — its `cli.mjs` print site was already removed by B1's own commit (confirmed: no remaining reference), not a new caller. |
+| B2 (MAJOR) | N/A — no test drives a JSDoc comment; verified by `node --check` + reading the diff | N/A | ✅ `node --check` passes before and after; visually confirmed `_defaultResolveDir`'s doc is now its own well-formed `/**...*/` block | `_defaultChangedChunkFiles`'s 62-line doc comment lost its `*/` when the function was deleted (row 4, B5), silently swallowing `_defaultResolveDir`'s own doc into one malformed block. Deleted the dead doc entirely (lines 448-509 pre-fix); `_defaultResolveDir`'s doc (already well-formed on its own, lines 510-521 pre-fix) needed no further edit. |
+| B3 (MEDIUM) | `engram.duplicates.test.mjs` (+1 case) | ✅ red — `dualWriteRecords('/fake/root')` with no injected `_readObservations` returned `{written:0,...}` silently instead of rejecting | ✅ green after the default `_readObservations` throws a clear message (`evidence-reader-empty-on-failure` — see `requireEngram()`'s own doc comment) instead of returning `{observations:[]}` | Audited all 9 call sites across `engram.duplicates.test.mjs`, `engram.upstream-scope.test.mjs`, and the restored `engram.dualwrite-hydrated-gate.test.mjs`: every one already injects its own `_readObservations`, so this only changes behavior for an un-injected call (a future production caller — epic 2.4/1.2a — that forgot to wire a reader). |
+| B4(a) (MINOR) | `backend-selection.test.mjs` (2 assertions retargeted, `share` added to the not-covered loop), `cli.backend-fallback.test.mjs` (5 tests retargeted), `engram.duplicates`/`upstream-scope`/`hydrated-gate` unaffected | ✅ red on the retargeted assertions (`FALLBACK_OPS` still listed `share`; two `selectBackend` unit tests hard-coded `op: 'share'` as the covered example; five CLI-level tests asserted substitution/signpost behavior that no longer occurs) | ✅ green after removing `"share"` from `FALLBACK_OPS` and updating its doc comment (mirrors `save`'s existing precedent) | **Decision** (measured, not assumed): removed `share` from `FALLBACK_OPS`. End-to-end confirmed `engram.share()` never touches the binary (it only calls `_ensureSymlink` + `rebuildIndex`, both pure filesystem ops — no `requireEngram()`, no binary probe, no shell-out; the existing source-guard test in `engram.share.test.mjs` already pins this). Leaving `share` covered would have repeated the `setup` regression this same file documents: `plainfiles.share()` does not call `_ensureSymlink`, so a live substitution on a fresh machine would have silently skipped R12's `.engram → .memory` self-heal. `pull` is now `FALLBACK_OPS`' one remaining covered op; the CLI-level "substitution notice goes to stderr, names the backend/verb" coverage and the i18n-catalog test were retargeted to drive it instead of `share` (the notice prints before dispatch, so `pull` failing afterward on the absent `git`/manifest in the hermetic `world()` fixture does not invalidate the assertions). |
+| B4(b) (MINOR) | `engram.share.test.mjs` (1 test strengthened) | N/A — behavioral outcome unchanged, only the test's rigor; verified by temporarily reverting the fix and confirming the title's claim really was untested before (the test passed purely BY CONSTRUCTION — `share()` never shells out, per the source-guard test — never because PATH was actually empty) | ✅ still 5/5 green with `process.env.PATH` genuinely scrubbed to an empty temp dir for the call's duration, restored via `t.after` | Prefers "make the test real" per the finding: PATH is now measurably empty during the call, not merely asserted-by-title. |
+| B4(c) (MINOR) | N/A — docs only | N/A | N/A | Fixed the stale `scrubMaterializedChunks()` doc reference at `dualWriteRecords()`'s own doc comment (that function was deleted in row 4/B5); now names `_defaultChangedChunkFiles` and its retirement instead. |
+| B4(d) (MINOR) | N/A — docs only | N/A | N/A | Corrected this file's own line ~390 citing the pre-rebase hash `96f9e6e3` for the "delete row 4" commit; the post-rebase hash is `50f83669` (confirmed via `git log --oneline 414c41b8..HEAD`). |
+
+### Test Summary
+- New/modified test files: `engram.dualwrite-hydrated-gate.test.mjs` (restored, 2 of the original 3 tests), `engram.duplicates.test.mjs` (+1 case), `backend-selection.test.mjs` (2 assertions retargeted + `share` added to a not-covered loop), `cli.backend-fallback.test.mjs` (5 tests retargeted), `engram.share.test.mjs` (1 test strengthened, PATH genuinely scrubbed).
+- Focused suite (`engram.share`, `engram.duplicates`, `engram.upstream-scope`, the restored `engram.dualwrite-hydrated-gate`, `chunk-boundary`, `cli.backend-fallback`, `engram.save`, `save-parity`, `i18n/coverage`, `backend-selection`): **131/131 green**.
+- Full suite: **5240/5240 green** under `MEMORY_BACKEND=plainfiles` AND `MEMORY_BACKEND=engram` (up from B7's 5237/5237 baseline — net +3 from B1's restored gate test file, whose original 3 tests are now 2).
+
+### Commits (this batch, oldest first)
+
+```
+649b394a fix(memory): restore F1 hydrated-topic gate per O1 (#874)
+0cec0280 fix(memory): delete orphaned unterminated JSDoc block (#874)
+b64c5460 fix(memory): unwired _readObservations throws, not silent-empty (#874)
+da4d2fdd fix(memory): remove share from FALLBACK_OPS (#874)
+```
+
+### Deviations from the review batch prompt
+None — all four findings (B1-B4) were fixed exactly as scoped; B4(a)'s
+decision (remove `share` from `FALLBACK_OPS`) was made and pinned with tests
+as the finding required, rather than left undecided.
