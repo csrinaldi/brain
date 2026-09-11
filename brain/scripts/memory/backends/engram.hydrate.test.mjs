@@ -71,6 +71,12 @@ test('hydrate: idempotent — two hydrations of the same record leave exactly on
     );
   }
   assert.equal(store.size, 1, 'a topic-keyed store must hold exactly one row per record id, no matter how many times it is hydrated');
+  // fresh-review F4 (#924): a fake store keyed on ANY constant topic would
+  // also converge to size 1 — that alone does not prove `hydrate` used the
+  // RECORD's id as the topic. Asserting the one key IS `CLEAN_RECORD.id`
+  // closes that gap: a regression to a constant topic now fails HERE too,
+  // not only in the byte-equality test above.
+  assert.deepEqual([...store.keys()], [CLEAN_RECORD.id]);
 });
 
 // ── binary absent ⇒ deferred + stderr, no throw ─────────────────────────────
