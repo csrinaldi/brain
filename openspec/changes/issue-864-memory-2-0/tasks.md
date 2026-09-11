@@ -44,9 +44,14 @@ The last task is the epic's exit.
 ## Wave 4 — hardening
 - [ ] 4.1 #361 — reindex parity between backends, per the contract.
 - [ ] 4.2 #461 — `source` citing an undeclared issue no longer fabricates `issue`.
-- [ ] 4.3 #712 — unparseable `brain.config.json` is "could not look", never "found nothing", on the `share` path.
+- [ ] 4.3 #712 — unparseable `brain.config.json` is "could not look", never "found nothing", on the `share` path — **[rev 2026-09-10, audit M2]** widened to the lane collector (`collect.mjs#_defaultLoadConfig`) and `engram.mjs#_defaultLoadBrainConfig`; lands BEFORE the first real `memory:ship`.
 - [ ] 4.4 #714 — suite verdict independent of `BRAIN_MEMORY_UPSTREAM_REF`.
 - [ ] 4.5 #638 — duplicate-report strings in the i18n catalogs.
+- [ ] 4.6 #920 — **[audit M1, priority:high]** `shipLane` reconciles the PR and the auto-merge on a retry after a successful push, even with nothing new to push; never an empty PR, never a re-delivery of a merged lane. Lands BEFORE the first real `memory:ship`.
+- [ ] 4.7 #921 — **[audit M3]** the collector reports the worktrees it could not inspect instead of dropping them.
+- [ ] 4.8 #922 — **[audit]** `MANAGED_SCRIPT_KEYS` carries every npm entry the doctrine tells an agent to run (`memory:save`, `memory:ship`, `memory:audit`, `brain:config`); before 1.6.0 is cut.
+- [ ] 4.9 #923 — **[audit]** session-start preserves the hydration failure cause; `step5SynthesizeContext` is either wired or retired (#267).
+- [ ] 4.10 **[audit M4, maintainer decision pending]** Codex sessions classify `human` without `brain.agentEnv` — onboarding step vs default marker list.
 
 ## Close / amend
 - [ ] 5.1 #795 closed in favour of #862 once 3.1b's first scenario passes **and [rev]** its acceptance 1 and 3 are answered: `memory-presence.mjs`'s header cites the ruling and names the export trigger and the backend→file lag bound.
@@ -54,7 +59,7 @@ The last task is the epic's exit.
 - [ ] 5.3 **[rev]** `openspec/README.md` rule 3 ("Artifacts travel with the code in the same MR") gains the lane exception, and `docs/KNOWN-LIMITATIONS.md`'s memory entries are refreshed.
 
 ## Exit
-- [ ] 6.1 **[rev]** `npm run memory:audit` on a fresh clone under `MEMORY_BACKEND=engram` AND `MEMORY_BACKEND=plainfiles`; both outputs on #864 beside the numbers they replace (p50 learn→main vs 10.9 h, target p50 ≤ 1 h / p90 ≤ 24 h at `lite`; `rec-` distinct = rows vs 2336/2339; `actor` handle share vs 0/94, `@legacy` vs 66/94; `supersedes` > 0 vs 0); the four do-it-once scenarios linked (unmerged-branch record on `main`; feature PR with zero records; lane refused on a foreign path; two lanes one index); the vacuity table filled for the `plainfiles` run; `brain:change:verify` green for the structural half; a human closes #864.
+- [ ] 6.1 **[rev]** `npm run memory:audit` on a fresh clone under `MEMORY_BACKEND=engram` AND `MEMORY_BACKEND=plainfiles`; both outputs on #864 beside the numbers they replace (p50 learn→main vs 10.9 h, target p50 ≤ 1 h / p90 ≤ 24 h at `lite`; `rec-` distinct = rows vs 2336/2339; `actor` handle share vs 0/94, `@legacy` vs 66/94; `supersedes` > 0 vs 0); the four do-it-once scenarios linked (unmerged-branch record on `main`; feature PR with zero records; lane refused on a foreign path; two lanes one index); the vacuity table filled for the `plainfiles` run; `brain:change:verify` green for the structural half; **[rev 2026-09-10, per the independent audit `docs/inbox/memory-audit-handoff-2026-09-10.md` §"Criterio de cierre"]** the exit is NOT a module or test count: one demonstration from a CONSUMER install (not this repo) — capture → persist → ship on the lane → gates → `main` → recover on another checkout under the other backend → query the correction (`supersedes`) — with one injected failure between each adjacent pair of steps (hydrate fails after the record is on disk; push succeeds and the PR lookup fails, then retry; gate refuses; index lag on the consumer), each recovery observed and linked; the report keeps "durable record", "delivery completed", "backend updated" and "context delivered to the agent" as four separate columns; a human closes #864.
 
 ## Review Workload Forecast
 - Estimated changed lines (this revision): ~+300 / −60, all under `openspec/changes/issue-864-memory-2-0/` — planning artifacts, no code; `.memory/**` and `openspec/changes/**` are in `governance.ignoreList`.
