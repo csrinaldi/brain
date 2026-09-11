@@ -20,6 +20,7 @@ import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync, execFileSync } from 'node:child_process';
+import { removeTempTree } from '../lib/tmp-tree.mjs';
 
 const REPO = fileURLToPath(new URL('../../..', import.meta.url));
 const pkg = JSON.parse(readFileSync(`${REPO}/package.json`, 'utf8'));
@@ -41,7 +42,7 @@ test('#874 (D8, strengthens #530): the verb does NOT pin a backend — the recor
   assert.match(pkg.scripts['memory:save'], /cli\.mjs save/);
 });
 
-test('#874 (D8): capture stays reachable with NO engram installed — save defers rather than refuses, end to end', () => {
+test('#874 (D8): capture stays reachable with NO engram installed — save defers rather than refuses, end to end', (t) => {
   // #530's guarantee, PROVED END-TO-END instead of by a pin: even with the
   // default backend (engram) selected and the binary measurably absent from
   // PATH, `memory:save` still writes a durable record and exits 0 — it never
@@ -50,6 +51,12 @@ test('#874 (D8): capture stays reachable with NO engram installed — save defer
   const REAL_GIT = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
 
   const root = mkdtempSync(join(tmpdir(), 'capture-reachable-engram-'));
+  // fresh-review F5 (#924): this fixture `git init`s `root` (below) and had NO
+  // teardown at all — every run leaked a fresh temp tree (measured: 14 stray
+  // `capture-reachable-engram-*` dirs under /tmp before this fix). `t.after`
+  // + `removeTempTree`, consistent with this file's OTHER git-spawning
+  // fixture (~line 101) and the #802 guard's answer to this exact class.
+  t.after(() => removeTempTree(root));
   const bin = join(root, 'bin');
   mkdirSync(bin);
   symlinkSync(REAL_WHICH, join(bin, 'which'));
