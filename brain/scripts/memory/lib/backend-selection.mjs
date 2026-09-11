@@ -44,14 +44,14 @@ export const ENGRAM_BIN = "engram";
 /**
  * The ops the fallback covers: EXACTLY the ops that fail BECAUSE the binary is
  * missing. Measured on a machine with no `engram`, not reasoned about — the
- * first version of this list was reasoned about, and three of its five entries
+ * first version of this list was reasoned about, and most of its entries
  * were wrong:
  *
- *   share   → engram binary not found            ← genuinely blocked, covered
  *   pull    → engram binary not found            ← genuinely blocked, covered
  *   import  → engram binary not found            ← blocked, but see below
  *   setup   → ✓ merge driver registered, EXIT 0  ← never needed the binary
  *   save    → record durable, hydrate deferred, EXIT 0 (#874) ← no longer a refusal, see below
+ *   share   → ✓ indexCount/duplicates, EXIT 0 (#874 split B) ← never needed the binary, see below
  *   search  → 'search' is not a cli verb for engram ← a deliberate refusal
  *   index   → "0 documentos indexados", EXIT 0    ← never calls requireEngram
  *
@@ -74,6 +74,16 @@ export const ENGRAM_BIN = "engram";
  *     (`memory.search.engramUnsupported`). Substituting would make that
  *     signpost unreachable on the default backend — replacing a designed
  *     refusal with different behaviour rather than repairing a failure.
+ *   - `share` is NOT blocked either, as of #874 split B (R11): `engram.share()`
+ *     dropped `requireEngram()` entirely — it only ensures the `.engram →
+ *     .memory` symlink (R12) and rebuilds the index, exactly like
+ *     `plainfiles.share()`'s own shape, and neither step touches the binary.
+ *     Leaving `share` in this list after R11 would have been a SECOND `setup`
+ *     regression, quieter than the first: `plainfiles.share()` does not call
+ *     `_ensureSymlink`, so a live substitution on a fresh machine would have
+ *     silently skipped R12's self-heal of the `.engram → .memory` binding —
+ *     the exact "replacing a designed behaviour rather than repairing a
+ *     failure" mistake `setup`'s own history already names above.
  *
  * `import` IS genuinely blocked, and is still excluded — but on its own ground:
  * `plainfiles` has no `importMemory` at all, so substituting would trade
@@ -82,7 +92,7 @@ export const ENGRAM_BIN = "engram";
  * caller never chose. `index` and `feature-*` project into engram's own store
  * and are excluded for the same reason plus never failing on the binary.
  */
-export const FALLBACK_OPS = Object.freeze(["share", "pull"]);
+export const FALLBACK_OPS = Object.freeze(["pull"]);
 
 /**
  * Reasons `selectBackend` can return. Exported so callers branch on a value

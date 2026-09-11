@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { share, dualWriteRecords, pullMemory, buildImportPayload, importMemory } from './engram.mjs';
+import { dualWriteRecords, pullMemory, buildImportPayload, importMemory } from './engram.mjs';
 import { buildRecord } from '../lib/format.mjs';
 
 // #820: a faked backend has no store to protect — never take the real machine guard from a test.
@@ -17,30 +17,26 @@ const baseRecordFields = {
 };
 
 // ── share ────────────────────────────────────────────────────────────────────
+//
+// #874 split B: `share()` no longer calls `dualWriteRecords` (row 1) — it is
+// the bare `_ensureSymlink` + `rebuildIndex()` mirror of `plainfiles.share()`
+// (R11/R12), covered by `engram.share.test.mjs`'s own "returns the
+// accounting" test. The `unprovenanced` field this test used to check for on
+// `share()`'s return no longer exists there — `dualWriteRecords()` still
+// returns it (see below), it is just never routed through `share()` any more.
 
-test('share: RETURNS the accounting — it used to return undefined, so nothing it measured could be printed', async () => {
-  const recA = buildRecord({ ...baseRecordFields, content: 'A' });
-  const duplicates = { ids: 3, lines: 7, divergent: 0, groups: [{ id: 'rec-a', occurrences: ['2026-07.jsonl:4', '2026-07.jsonl:8'] }] };
-
-  const result = await share({
-    root: '/fake/root',
-    _requireEngram: () => 'engram',
-    _export: () => {},
-    _resolveDir: () => null,
-    _changedChunkFiles: () => [],
-    _readObservations: () => ({ observations: [{ id: 1 }] }),
-    _exportObservation: () => ({ record: recA, recovered: true }),
-    _appendRecord: () => {},
-    _rebuildIndex: () => ({ count: 2038, duplicates }),
-    _loadConfig: () => ({}),
-  });
-
-  assert.ok(result, 'share must hand its accounting back to cli.mjs');
-  assert.deepEqual(result.duplicates, duplicates);
-  assert.equal(result.indexCount, 2038);
-  // Same regression, same cause: the #541 `unprovenanced` line in cli.mjs reads
-  // `result.unprovenanced`, and on this backend there was never a result.
-  assert.equal(typeof result.unprovenanced, 'number');
+test('dualWriteRecords: the default _readObservations seam throws — #874 split B retired the only production reader (row 2); this seam has no production wiring and a caller must inject a real reader', async () => {
+  // `evidence-reader-empty-on-failure` (see requireEngram()'s own doc comment
+  // above, and design.md's D9): a silently-empty default reports "nothing to
+  // scan" for what is really "cannot look — no reader is wired". Every
+  // current caller of dualWriteRecords() is a direct test that already
+  // injects its own _readObservations; a bare, un-injected call is either a
+  // test bug or a future production caller (epic 2.4/1.2a) that forgot to
+  // wire a reader, and both deserve a throw, not a quiet zero.
+  await assert.rejects(
+    () => dualWriteRecords('/fake/root'),
+    /_readObservations/,
+  );
 });
 
 test('dualWriteRecords: a steady-state run with nothing new STILL reindexes, so a merged-in duplicate is still seen', async () => {

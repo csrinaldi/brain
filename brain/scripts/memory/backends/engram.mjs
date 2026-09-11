@@ -16,17 +16,16 @@
 //                          scoped; feature obs under brain-feature-<X> stay out of .memory/)
 
 // #247/#863 D3 — the chunk read-back is a boundary now (guard:
-// brain/scripts/memory/chunk-boundary.test.mjs), the export retires at task
-// 3.2 (#874). The seven-row ledger of what 3.2 deletes is restated
-// in openspec/changes/issue-247-chunk-retirement/{tasks,design}.md; each
-// chunk seam below points at its row so a reader never has to rediscover it:
-//   _defaultShareExport                          → ledger row 1
-//   _defaultReadObservations + this file's import → ledger row 2
-//   dualWriteRecords's _readObservations seam     → ledger row 3
-//   the scrub subsystem (delete only after #469's re-proof over record-first save) → ledger row 4
-//   engram.share.test.mjs                         → ledger row 5 (2.4: symlink/legacy gz → rows 6-7)
-// Nothing here changes what runs; share(), dualWriteRecords(), and the scrub
-// subsystem stay byte-unchanged.
+// brain/scripts/memory/chunk-boundary.test.mjs). The seven-row ledger of what
+// 3.2 (#874) deletes is restated in
+// openspec/changes/issue-247-chunk-retirement/{tasks,design}.md. Rows 1, 2, 4
+// and 5 are gone — `share()` (#874 split B) no longer calls `engram sync
+// --export`, has no observation reader and no chunk-scrub subsystem left,
+// and `engram.share.test.mjs`'s old shape retired with them. Only row 3
+// remains, kept per the ratified O1 disposition (handed to epic task 2.4):
+//   dualWriteRecords's _readObservations seam     → ledger row 3 (kept — O1)
+// (2.4 handles what is left after 3.2:
+//   the symlink and the legacy gz path → rows 6-7)
 
 import { execFileSync, spawnSync } from "node:child_process";
 import {
@@ -38,7 +37,6 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
-  statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -51,14 +49,13 @@ import { changeDir, OPERATIONAL_ARTIFACTS } from "../../lib/sdd-layout.mjs";
 import { parseFrontmatter, serializeFrontmatter } from "../lib/resume-frontmatter.mjs";
 import { validateResume } from "../lib/resume-schema.mjs";
 import { currentBranch } from "../../lib/git-branch.mjs";
-import { resolveSecretConfig, compilePatterns, scrubChunkFile, scanTextForSecrets } from "../lib/secret-scrub.mjs";
+import { resolveSecretConfig, compilePatterns, scanTextForSecrets } from "../lib/secret-scrub.mjs";
 import { exportObservation } from "../lib/engram-export.mjs";
 import { importRecord } from "../lib/engram-import.mjs";
 import { appendRecord, rebuildIndex, readRecordIds, readRecords } from "../lib/store.mjs";
 import { upstreamRecordEntries } from "../lib/upstream-records.mjs";
 import { emptyDuplicates, normalizeDuplicates } from "../lib/duplicates.mjs";
 import { buildRecord, serializeRecord, nowUtcSeconds, RECORD_TYPES } from "../lib/format.mjs";
-import { collectChunkObservations } from "../lib/migrate-v1.mjs";
 import { unsupportedOp } from "../lib/unsupported-op.mjs";
 import { acquireHydrationGuard } from "../lib/hydration-guard.mjs";
 import { ENGRAM_BIN, probeBinary } from "../lib/backend-selection.mjs";
@@ -150,138 +147,47 @@ function requireEngram() {
 }
 
 /**
- * share() — export live engram memory to .memory/ (idempotent, content-addressed),
- * fail-closed secret-scrub whatever chunks were materialized this run as the
- * transitional backstop (issue #214, C1b), THEN dual-write the exported
- * observations into `.memory/records/` under scan-then-write (issue #221,
- * C2b-1, design.md Decision 1).
+ * share() — the `plainfiles.share()` mirror (R11, D6, #874 split B row —
+ * ledger row list below). The exporter is retired: `share` is no longer a
+ * producer (spec: "share commits what is already true"). It ensures the
+ * `.engram → .memory` binding (R12 — `_ensureSymlink` is the one seam this
+ * function keeps from the pre-#874 shape), then runs a bare `rebuildIndex()`
+ * self-check exactly like `plainfiles.share()` — records already ARE the
+ * store, so there is no data movement left to orchestrate.
  *
- * Order (issue #221 fix pass, MINOR): the chunk backstop runs BEFORE the
- * records dual-write. Rationale — `dualWriteRecords()` APPENDS to the
- * append-only `records/` log; if it ran first and a LATER gate (the chunk
- * backstop) then failed, `records/` would already be mutated on an aborted
- * share. Scanning chunks first means a chunk-only secret (e.g. a
- * `scope:personal` observation the records candidate filter already
- * excluded) aborts the share before `records/` is ever touched.
+ * Completes with the engram binary ABSENT (rule 3, R11): there is no
+ * `_requireEngram()` call here any more — nothing downstream of this
+ * function touches the binary.
  *
- * Scrub scope: TWO independent fail-closed scans run, never one gating
- * the other's write:
- *   1. scrubMaterializedChunks() — the chunks engram's export just wrote are
- *      scanned AFTER materialization (C1b's original design, unchanged): a
- *      hit blocks the push but the chunk itself was already written locally.
- *   2. dualWriteRecords() — candidate records (transformed from observations
- *      via exportObservation) are scanned BEFORE any `records/` append; a hit
- *      aborts before the append-only log is ever touched (Decision 1). It
- *      also dedups by content-addressed `id` against what `records/` already
- *      has (issue #221 fix pass, BLOCKER) — a retry after ANY abort is safe.
- * There is NO `--no-scrub` flag for either path; the only bypass is the
- * config allowlist (`governance.memorySecretAllowPatterns`).
- *
- * @param {object} [opts]  Injectable seams for testing — production defaults
- *   call the real engram binary, git, and filesystem.
+ * @param {object} [opts]  Injectable seams for testing.
  * @param {string} [opts.root]  Repo root.
- * @param {() => string} [opts._requireEngram]  Resolves the engram binary; throws if absent.
- * @param {(engram: string) => void} [opts._export]  Runs `engram sync --export`.
- * @param {(root: string) => {observations: object[], unparseable: string[], emptyObservations: string[]}} [opts._readObservations]
- *   Observations materialized this run, plus the chunk-level accounting buckets.
- * @param {typeof exportObservation} [opts._exportObservation]
- * @param {typeof appendRecord} [opts._appendRecord]
+ * @param {(root: string) => void} [opts._ensureSymlink]  Ensures `.engram → .memory` (R12).
  * @param {typeof rebuildIndex} [opts._rebuildIndex]
- * @param {(root: string) => string[]} [opts._changedChunkFiles]  Every chunk present (issue #469).
- * @param {(root: string) => object} [opts._loadConfig]  Reads brain.config.json.
- * @param {(path: string, patterns: RegExp[], allowPatterns: RegExp[]) => object|null} [opts._scrubChunk]
- * @param {(p: string) => string|null} [opts._resolveDir]  Resolves .engram/.memory (issue #469, REQ-469-3).
- * @param {typeof upstreamRecordEntries} [opts._upstreamRecordIds]  The issue #701 predicate,
- *   threaded into `dualWriteRecords()`'s own call — see that function's docs.
+ * @returns {Promise<{indexCount: number, duplicates: object}>}
  */
 export async function share({
   root = repoRoot,
-  _requireEngram = requireEngram,
   _ensureSymlink = ensureMemorySymlink,
-  _export = _defaultShareExport,
-  _readObservations = _defaultReadObservations,
-  _exportObservation = exportObservation,
-  _appendRecord = appendRecord,
   _rebuildIndex = rebuildIndex,
-  _changedChunkFiles = _defaultChangedChunkFiles,
-  _loadConfig = _defaultLoadBrainConfig,
-  _scrubChunk = scrubChunkFile,
-  _resolveDir = _defaultResolveDir,
-  _upstreamRecordIds = upstreamRecordEntries,
 } = {}) {
-  const engram = _requireEngram();
-  // BEFORE the export (issue #657): the `.engram → .memory` binding is LOCAL and
-  // gitignored (.gitignore:68), so it exists only in the tree where `setup()` ran.
-  // Every worktree created afterwards has `.memory/` checked out and NO binding —
-  // and `AGENTS.md:212` makes worktree-per-task mandatory, so that is the common
-  // case, not the exotic one. Without the binding `engram sync --export` (no --dir
-  // flag, ADR-0002 §21) creates a REAL `.engram/` beside the worktree's `.memory/`
-  // and every chunk it writes is invisible to the readers below.
-  //
-  // Ensuring it HERE makes the binding a precondition of the export instead of a
-  // side effect of setup. Idempotent and non-clobbering by construction (see
-  // ensureMemorySymlink cases 1-4), so this is a no-op wherever setup already ran.
+  // BEFORE the reindex (issue #657 heritage): the `.engram → .memory` binding is
+  // LOCAL and gitignored (.gitignore:68), so it exists only in the tree where
+  // `setup()` ran. Ensuring it here keeps `share` idempotent and non-clobbering
+  // (ensureMemorySymlink cases 1-4) wherever setup already ran — a no-op there.
   _ensureSymlink(root);
-  _export(engram, root);
-  // BEFORE the scrub, not after (issue #469, REQ-469-3): if the export wrote
-  // somewhere this process does not read, the scrub would scan an unrelated
-  // directory and pass, which is the failure being caught. Ordering the check
-  // ahead of it means the run cannot report a clean scrub it never performed.
-  assertExportDestinationIsRead(root, { _resolveDir });
-  await scrubMaterializedChunks(root, { _changedChunkFiles, _loadConfig, _scrubChunk });
-  // Record-write is UNCONDITIONAL (design.md Decision 1, D3/C4, issue #229 — the
-  // `memory.dualWrite` gate is retired BY DELETION). Records-only is the only
-  // path; there is no flag left to condition on. The transitional cutover state
-  // marker (C2b-1/C2b-2) served its purpose: the key is also removed from
-  // brain.config.json (move 2) and the 0.6.0 migration entry that introduced it
-  // is removed too (move 3) — it was never shipped to any released consumer.
-  // RETURNED, not discarded (#574). Every number dualWriteRecords measures used
-  // to die here: cli.mjs printed `unprovenanced` only because the generic
-  // dispatch tail happened to see the value, and it never saw one from `share`
-  // because `share` returned undefined. The duplicate accounting would have
-  // died the same way.
-  const accounting = await dualWriteRecords(
-    root, { _readObservations, _exportObservation, _appendRecord, _rebuildIndex, _loadConfig, _upstreamRecordIds },
-  );
-
-  // The self-check, for the one path dualWriteRecords returns from before it
-  // ever reads `records/`: engram exported nothing project-scoped, so there
-  // were no candidates. That run still SHARES a store, and the store may have
-  // been union-merged since — leaving `share` silent there would reproduce this
-  // ticket's bug on the quietest path there is. Mirrors plainfiles.share(),
-  // which has always been a bare rebuildIndex() self-check.
-  if (accounting.indexCount === undefined) {
-    const { count, duplicates } = _rebuildIndex({
-      recordsDir: join(root, ".memory", "records"),
-      indexPath: join(root, ".memory", "index.jsonl"),
-    });
-    accounting.indexCount = count;
-    accounting.duplicates = normalizeDuplicates(duplicates);
-  }
-  return accounting;
-}
-
-/**
- * Default seam: the observations materialized by this run's `engram sync
- * --export` — read back from the gzip chunks it just wrote under
- * `.memory/chunks` (reuses migrate-v1.mjs's collectChunkObservations, never a
- * second reader). Returns the FULL bucket shape — `observations` plus the
- * `unparseable`/`emptyObservations` chunk-level buckets — so dualWriteRecords()
- * can account for every chunk, not just the ones that parsed into observations
- * (issue #221 fix pass, MAJOR).
- *
- * @param {string} root
- * @returns {{observations: object[], unparseable: string[], emptyObservations: string[]}}
- */
-export function _defaultReadObservations(root) {
-  return collectChunkObservations(join(root, ".memory", "chunks"));
+  const { count, duplicates } = _rebuildIndex({
+    recordsDir: join(root, ".memory", "records"),
+    indexPath: join(root, ".memory", "index.jsonl"),
+  });
+  return { indexCount: count, duplicates: normalizeDuplicates(duplicates) };
 }
 
 /**
  * dualWriteRecords() — scan-then-write over the RECORDS log (issue #221,
  * C2b-1; design.md Decision 1, REQ-C2B1-3). Independent of requireEngram()/
- * the real export so it is unit-testable with zero engram/git dependency,
- * mirroring scrubMaterializedChunks()'s testable-core pattern.
+ * the real export so it is unit-testable with zero engram/git dependency —
+ * the same testable-core pattern `_defaultChangedChunkFiles` used before its
+ * retirement (row 4, #874 split B).
  *
  * Order: read observations → transform each into a CANDIDATE record via
  * exportObservation() → scan the candidate record LINES for secrets → only
@@ -305,6 +211,16 @@ export function _defaultReadObservations(root) {
  * @param {string} root
  * @param {object} [opts]
  * @param {(root: string) => {observations: object[], unparseable?: string[], emptyObservations?: string[]}} [opts._readObservations]
+ *   No default reader (row 2, #874 split B: the chunk-backed
+ *   `_defaultReadObservations`/`collectChunkObservations` reader retired —
+ *   `share()` no longer has an observation source at all). An un-injected
+ *   call THROWS rather than silently reading zero observations —
+ *   `evidence-reader-empty-on-failure` (see `requireEngram()`'s doc comment
+ *   above): this seam has no production wiring after #874 split B, and
+ *   "no reader was wired" must never report as "nothing to scan". Every
+ *   current caller of this function is a direct test that injects its own
+ *   `_readObservations`; a future production caller (epic task 2.4) must do
+ *   the same.
  * @param {typeof exportObservation} [opts._exportObservation]
  * @param {typeof appendRecord} [opts._appendRecord]
  * @param {typeof rebuildIndex} [opts._rebuildIndex]
@@ -336,7 +252,13 @@ export function _defaultReadObservations(root) {
 export async function dualWriteRecords(
   root,
   {
-    _readObservations = _defaultReadObservations,
+    _readObservations = () => {
+      throw new Error(
+        "dualWriteRecords: no _readObservations seam was injected — this reader " +
+          "has no production wiring after #874 split B (row 2); pass a real " +
+          "_readObservations to read observations, do not rely on a default.",
+      );
+    },
     _exportObservation = exportObservation,
     _appendRecord = appendRecord,
     _rebuildIndex = rebuildIndex,
@@ -372,12 +294,19 @@ export async function dualWriteRecords(
   // `created_at`, and `ts` feeds `computeRecordId` (format.mjs). Re-exporting
   // such an observation therefore risks a SECOND record with a DIFFERENT id
   // the instant the two clocks disagree by even a second — a duplicate this
-  // share would have manufactured itself. Skipped on grammar alone, never on
-  // local presence: `records/` is additions-only and a partial index at
+  // function would have manufactured itself. Skipped on grammar alone, never
+  // on local presence: `records/` is additions-only and a partial index at
   // best, so a `rec-…` topic with no local match is still proof the row was
-  // born from a record somewhere, never proof it is safe to re-derive. B
-  // (row 1, #874 split B) removes this gate together with the exporter it
-  // protects — see openspec/changes/issue-874-record-first/tasks.md.
+  // born from a record somewhere, never proof it is safe to re-derive.
+  //
+  // O1 (ratified 2026-09-11, #874 split B): `share()` (row 1) stopped calling
+  // this function, but the function, its logic and this gate stay intact —
+  // deletion is epic task 2.4's (or 1.2a's), not split B's. The gate must not
+  // outlive its test: a future caller handing `dualWriteRecords` an
+  // observation source (2.4/1.2a heal) still needs this guard, since
+  // `hydrate()` still shells `engram save --topic <rec-id>` with no
+  // `--created-at`. See openspec/changes/issue-874-record-first/tasks.md,
+  // task B1.
   let skippedHydrated = 0;
   for (const obs of observations) {
     if (typeof obs?.topic_key === "string" && SUPERSEDES_ID_RE.test(obs.topic_key)) {
@@ -511,15 +440,6 @@ export async function dualWriteRecords(
   return accounting;
 }
 
-export function _defaultShareExport(engram, root, { _exec = execFileSync } = {}) {
-  // `cwd` is EXPLICIT (issue #657). engram resolves `.engram/` relative to the
-  // process cwd, and git runs its hooks with cwd set to the worktree that invoked
-  // them — so inheriting it is precisely what let a push from one worktree
-  // materialize memory into that worktree instead of the root `share()` reads.
-  // Anchoring the export to `root` keeps the writer and the readers on one tree.
-  _exec(engram, ["sync", "--export"], { stdio: "inherit", cwd: root });
-}
-
 /**
  * Default seam: reads `brain.config.json` for the `governance.memorySecret*`
  * keys. Never throws — an absent/unparseable config falls back to `{}`, which
@@ -537,109 +457,13 @@ function _defaultLoadBrainConfig(root) {
 }
 
 /**
- * Default seam: every `.memory/chunks/*.jsonl.gz` present, read from the
- * FILESYSTEM (issue #469, design D1). Same directory `_defaultReadObservations`
- * already enumerates via `collectChunkObservations` — one source of truth for
- * what a share run touches, not two.
- *
- * This used to ask `git status --porcelain -- .memory/chunks` and describe the
- * result as the "materialized THIS run" boundary. `.memory/chunks/` is
- * GITIGNORED (`.gitignore:84`), and `git status --porcelain` never reports
- * ignored paths, so the set was **always empty**: the scrub had never scanned a
- * chunk. An empty set is not an error, so the fail-closed guard below never
- * tripped — it fails closed on a git ERROR and passed on a git result that was
- * empty for a structural reason. `evidence-reader-empty-on-failure` with a
- * third case neither branch modelled: the query cannot ever return anything.
- *
- * `--ignored` is NOT the fix, measured rather than argued (design D1): three of
- * the four git spellings report `!! .memory/chunks/` — the DIRECTORY — which the
- * `.jsonl.gz` suffix filter then dropped, leaving the scan at zero. Only plain
- * `--ignored -uall` lists files, while `--ignored=matching -uall`, which reads as
- * the tighter request, does not. A gate one plausible flag edit silently disarms
- * is the defect being fixed, re-armed and harder to see.
- *
- * The "materialized THIS run" boundary is gone, and was never real for
- * gitignored chunks: it did not narrow the scan, it emptied it. This scans the
- * WHOLE store, deliberately — the premise that an untouched chunk was cleared by
- * an earlier run is false, because no earlier run scanned anything. Restoring a
- * real boundary (pre/post-export snapshot) trades completeness for speed in a
- * gate whose whole job is completeness; deferred to a ticket with a measurement.
- *
- * Directories are dropped on their TYPE, not their name — the git spellings that
- * returned a directory path are exactly what a suffix-only filter cannot see.
- *
- * Fail CLOSED on any read error, including ENOENT. `share()` reaches here only
- * AFTER `engram sync --export` ran, so a missing chunk directory means the export
- * wrote where this process does not read — the REQ-469-3 failure, caught twice.
- * An EMPTY directory is not an error: a fresh clone with no memory yet is
- * legitimate, and that is the distinction the git version could not draw.
- *
- * ## The scanned set must CONTAIN the read set (round-1 cold review, BLOCKER)
- *
- * The invariant is not that this function and `_defaultReadObservations` agree;
- * it is that **nothing reaches `records/` unscanned**. The first draft of this
- * fix used `Dirent.isFile()` to drop directories (E5) and thereby dropped
- * SYMLINKS too — `isFile()` is false for a symlink entry — while the reader's
- * `readFileSync` follows them. Measured on a chunks directory holding one
- * symlink to a chunk carrying `ghp_…`:
- *
- * ```
- * SCANNER sees : [ 'plain.jsonl.gz' ]
- * READER  sees : [{"text":"ghp_0123…"},{"text":"fine"}]
- * ```
- *
- * The secret bypassed the scrub and landed in the append-only log, in a public
- * repository — the one outcome this gate exists to prevent, opened by the guard
- * added to close a different one. So the type test is `statSync`, which FOLLOWS
- * symlinks: a symlink to a chunk is scanned, a directory (or a symlink to one)
- * is not, and the reader can read nothing this does not see.
- *
- * An entry that cannot be stat'd fails CLOSED for the same reason the directory
- * read does: "cannot look" must never be reported as "nothing to scan".
- *
- * @param {string} root
- * @param {object} [opts]
- * @param {(dir: string, opts: object) => import("node:fs").Dirent[]} [opts._listDir]
- * @param {(p: string) => import("node:fs").Stats} [opts._stat]
- * @returns {string[]}  Absolute paths.
- */
-export function _defaultChangedChunkFiles(root, { _listDir = readdirSync, _stat = statSync } = {}) {
-  const dir = join(root, ".memory", "chunks");
-  let entries;
-  try {
-    entries = _listDir(dir, { withFileTypes: true });
-  } catch (err) {
-    throw new Error(
-      `secret-scrub: cannot read ${dir} — cannot determine which chunks this run materialized; refusing to share (fail closed): ${err?.code ?? ""} ${err?.message ?? err}`.replace(
-        /\s+/g,
-        " ",
-      ),
-    );
-  }
-  const out = [];
-  for (const e of entries) {
-    if (!e.name.endsWith(".jsonl.gz")) continue;
-    const full = join(dir, e.name);
-    let st;
-    try {
-      st = _stat(full);
-    } catch (err) {
-      throw new Error(
-        `secret-scrub: cannot stat ${full} — a chunk the reader may still follow cannot be classified; refusing to share (fail closed): ${err?.code ?? ""} ${err?.message ?? err}`.replace(
-          /\s+/g,
-          " ",
-        ),
-      );
-    }
-    if (st.isFile()) out.push(full);
-  }
-  return out;
-}
-
-/**
  * Default seam: resolve a path through symlinks, or `null` when it does not
- * exist (issue #469, REQ-469-3). Separated so `share()`'s export-destination
- * check is testable without building a real symlink.
+ * exist (issue #469, REQ-469-3). Was separated so `share()`'s former
+ * export-destination check (`assertExportDestinationIsRead`, retired #874
+ * split B row 4) was testable without building a real symlink. No current
+ * caller — left for the maintainer/2.4 to retire alongside the rest of the
+ * chunk estate rather than expanding this PR's ledger past what tasks.md
+ * names.
  *
  * @param {string} p
  * @returns {string|null}
@@ -649,91 +473,6 @@ export function _defaultResolveDir(p) {
     return realpathSync(p);
   } catch {
     return null;
-  }
-}
-
-/**
- * Throws when `engram sync --export` writes to a directory `share()` does not
- * read from (issue #469, REQ-469-3).
- *
- * engram writes under `.engram/`; every reader here — `_defaultReadObservations`,
- * `_defaultChangedChunkFiles` — reads under `.memory/`. `ensureMemorySymlink`
- * keeps those the same directory, but its case 3 (`.engram` is a REAL directory)
- * only `console.warn`s and does not clobber, which is right. Nothing downstream
- * checked, so the export succeeded, printed `Created chunk …`, zero records were
- * appended, and the run reported success. Reproduced in the maintainer's own
- * checkout.
- *
- * Compares RESOLVED paths rather than symlink type: what matters is that the two
- * land on the same directory, and `realpathSync` answers that for a symlink, a
- * bind mount, or anything else that makes them agree.
- *
- * An ABSENT `.engram` passes — engram then writes to `.memory` directly, the
- * normal post-migration state on a fresh clone.
- *
- * Throws rather than warns: a warning is what `ensureMemorySymlink` already does,
- * and the defect reached production with that warning in place.
- *
- * @param {string} root
- * @param {object} [opts]
- * @param {(p: string) => string|null} [opts._resolveDir]
- */
-export function assertExportDestinationIsRead(root, { _resolveDir = _defaultResolveDir } = {}) {
-  const engramPath = join(root, ".engram");
-  const engramResolved = _resolveDir(engramPath);
-  if (engramResolved === null) return;
-
-  const memoryPath = join(root, ".memory");
-  const memoryResolved = _resolveDir(memoryPath);
-  if (engramResolved === memoryResolved) return;
-
-  throw new Error(
-    `memory:share: 'engram sync --export' writes under ${engramPath} (${engramResolved}), ` +
-      `but this run reads chunks and records from ${memoryPath} (${memoryResolved ?? "missing"}). ` +
-      `Every chunk the export just wrote would be invisible: the secret scrub would scan nothing and ` +
-      `zero records would be appended, while the run reported success. ` +
-      `Fix: make .engram a symlink to .memory (npm run memory:setup, after pulling the migration), ` +
-      `or remove the real .engram directory once its contents are merged.`,
-  );
-}
-
-/**
- * scrubMaterializedChunks() — the fail-closed core, independent of requireEngram()
- * so it is unit-testable with zero real engram/git/gzip dependency. Resolves
- * the effective pattern set (defaults + `governance.memorySecretPatterns`,
- * additive) and the allowlist (`governance.memorySecretAllowPatterns`, the sole
- * bypass — no CLI flag), then scans every changed chunk. Throws on the FIRST
- * hit, naming the matched pattern and the file:line location.
- *
- * @param {string} root
- * @param {object} [opts]
- * @param {(root: string) => string[]} [opts._changedChunkFiles]
- * @param {(root: string) => object} [opts._loadConfig]
- * @param {(path: string, patterns: RegExp[], allowPatterns: RegExp[]) => object|null} [opts._scrubChunk]
- */
-export async function scrubMaterializedChunks(
-  root,
-  {
-    _changedChunkFiles = _defaultChangedChunkFiles,
-    _loadConfig = _defaultLoadBrainConfig,
-    _scrubChunk = scrubChunkFile,
-  } = {},
-) {
-  const { patternSources, allowPatternSources } = resolveSecretConfig(_loadConfig(root));
-  const patterns = compilePatterns(patternSources);
-  const allowPatterns = compilePatterns(allowPatternSources);
-
-  for (const chunkPath of _changedChunkFiles(root)) {
-    const hit = _scrubChunk(chunkPath, patterns, allowPatterns);
-    if (hit) {
-      throw new Error(
-        await t("memory.share.secretFound", {
-          file: chunkPath,
-          line: hit.lineNumber,
-          pattern: hit.pattern,
-        }),
-      );
-    }
   }
 }
 

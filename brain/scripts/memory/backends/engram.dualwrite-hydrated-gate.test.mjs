@@ -1,18 +1,34 @@
 // engram.dualwrite-hydrated-gate.test.mjs — fresh-review F1 (#924, PR A of
-// #874): `dualWriteRecords()` (called by `share()`) must never re-export an
-// observation that `hydrate()` (#874 split A) itself produced.
+// #874): `dualWriteRecords()` must never re-export an observation that
+// `hydrate()` (#874 split A) itself produced.
+//
+// Restored by the PR B fresh-review fix batch (finding B1): O1 (ratified
+// 2026-09-11) keeps `dualWriteRecords()` intact — its deletion belongs to
+// epic task 2.4 (or 1.2a), not split B. Split B only retires `share()`'s
+// call into it (row 1); the gate itself, and its direct-call tests, must
+// survive that.
+//
+// Only the first two tests from the original file are restored here — the
+// two that call `dualWriteRecords()` DIRECTLY. The original file's third
+// test ("share: surfaces skippedHydrated in its returned accounting") drove
+// the gate THROUGH `share()`'s old `_readObservations`/`_exportObservation`
+// seams, which B1 legitimately retired along with the exporter (row 1);
+// `share()` has no observation source to thread that test through anymore,
+// so it is intentionally NOT restored.
 //
 // Why this is a duplicate, not merely redundant: `_defaultEngramSave`
 // (engram.mjs's `hydrate()` terminal step) shells `engram save … --topic
 // <record id>` with NO `--created-at` flag, so engram stamps its OWN
 // `created_at` on the row. `exportObservation()` (engram-export.mjs) derives
 // `ts` from `created_at`, and `ts` is hashed by `computeRecordId`
-// (format.mjs) — so a hydrated observation, re-exported by `share()`, mints a
-// SECOND record with a DIFFERENT id the moment the two clocks disagree by
-// even one second. An observation whose `topic_key` already matches the
-// record-id grammar (`rec-[0-9a-f]{16}`) was BORN from a record; re-deriving
-// one from it can only ever reproduce (best case) or duplicate (every other
-// case) a record `dualWriteRecords` did not need to rediscover.
+// (format.mjs) — so a hydrated observation, re-exported through this
+// function, mints a SECOND record with a DIFFERENT id the moment the two
+// clocks disagree by even one second. An observation whose `topic_key`
+// already matches the record-id grammar (`rec-[0-9a-f]{16}`) was BORN from a
+// record; re-deriving one from it can only ever reproduce (best case) or
+// duplicate (every other case) a record `dualWriteRecords` did not need to
+// rediscover. The gate must not outlive its test: any future caller handing
+// `dualWriteRecords` an observation source (2.4/1.2a heal) needs this guard.
 //
 // Gated on grammar alone, not on local presence (see the second test below):
 // records are additions-only and this repo's local `.memory/records/` is
@@ -23,7 +39,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { share, dualWriteRecords } from './engram.mjs';
+import { dualWriteRecords } from './engram.mjs';
 import { buildRecord } from '../lib/format.mjs';
 
 const baseRecordFields = {
@@ -73,23 +89,4 @@ test('dualWriteRecords: a rec-topic observation is skipped even when NO local re
   assert.equal(result.skippedHydrated, 1);
   assert.equal(result.written, 0);
   assert.equal(result.deduped, 0, 'skippedHydrated is its own bucket, never folded into deduped');
-});
-
-test('share: surfaces skippedHydrated in its returned accounting so cli.mjs can report it', async () => {
-  const hydrated = { id: 4, topic_key: 'rec-aaaaaaaaaaaaaaaa', scope: 'project', type: 'decision', project: 'brain', title: '', content: 'x', created_at: '2026-09-10 09:00:00' };
-
-  const result = await share({
-    root: '/fake/root',
-    _requireEngram: () => 'engram',
-    _export: () => {},
-    _resolveDir: () => null,
-    _changedChunkFiles: () => [],
-    _readObservations: () => ({ observations: [hydrated] }),
-    _exportObservation: () => { throw new Error('must never be called'); },
-    _appendRecord: () => {},
-    _rebuildIndex: () => ({ count: 0, duplicates: { ids: 0, lines: 0, divergent: 0, groups: [] } }),
-    _loadConfig: () => ({}),
-  });
-
-  assert.equal(result.skippedHydrated, 1);
 });

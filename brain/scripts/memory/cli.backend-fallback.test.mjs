@@ -121,28 +121,43 @@ function runCli({ root, bin, envPath }, args, extraEnv = {}) {
 
 // ── the defect, in the environment where it happened ────────────────────────
 
-test('#641 memory:share with NO engram and NO stated backend: SUCCEEDS on the fallback and says so', (t) => {
+test('#874 (R11, B4a): memory:share with NO engram and NO stated backend now succeeds DIRECTLY on engram — no failure left for the fallback to replace', (t) => {
+  // MEASURED, post-#874 split B: this test used to be the #641 flagship
+  // (share substitutes and says so). R11 changed the underlying defect:
+  // engram.share() dropped requireEngram() entirely (B1), so share() no
+  // longer fails on a missing binary at all — leaving it in FALLBACK_OPS
+  // would itself have been a regression (plainfiles.share() skips R12's
+  // _ensureSymlink self-heal). See backend-selection.mjs's FALLBACK_OPS doc.
   const w = world(t);
   const r = runCli(w, ['share']);
 
   assert.equal(r.status, 0, `share must succeed with no backend installed; stderr:\n${r.stderr}`);
-  assert.match(r.stderr, SUBSTITUTED);
-  assert.match(r.stderr, /plainfiles/, 'the notice must name the backend that actually ran');
-  assert.match(r.stderr, /share/, 'and the verb it ran');
+  assert.doesNotMatch(
+    r.stderr,
+    SUBSTITUTED,
+    'engram.share() no longer fails on the missing binary (R11) — FALLBACK_OPS no longer covers it, so there is nothing to substitute',
+  );
   assert.doesNotMatch(
     r.stderr,
     /engram binary not found/,
-    'the old error must not survive alongside the fallback — that is the message that read as "capture is impossible here"',
+    'the old error must not survive either — that is the message that read as "capture is impossible here"',
   );
 });
 
-test('#641 the substitution notice goes to STDERR, not stdout', (t) => {
+test('#641 the substitution notice (still exercised by `pull`, FALLBACK_OPS\' one remaining covered op) names the backend/verb and goes to STDERR, not stdout', (t) => {
+  // `pull` needs git and a manifest to actually COMPLETE, neither of which
+  // this hermetic world provides — irrelevant here: the notice is printed by
+  // cli.mjs's dispatch BEFORE the backend op runs, so it is on stderr
+  // regardless of what pull does afterward (see cli.mjs:698-706).
+  //
   // pre-push and post-merge run these verbs with stdout redirected to /dev/null.
   // A notice on stdout would be discarded exactly where a substitution is most
   // likely, which is the same outage in a different pipe.
   const w = world(t);
-  const r = runCli(w, ['share']);
+  const r = runCli(w, ['pull']);
   assert.match(r.stderr, SUBSTITUTED);
+  assert.match(r.stderr, /plainfiles/, 'the notice must name the backend that actually ran');
+  assert.match(r.stderr, /pull/, 'and the verb it ran');
   assert.doesNotMatch(r.stdout, SUBSTITUTED);
 });
 
@@ -184,33 +199,42 @@ test('#641 `setup` is NOT substituted — engram.setup() needs no binary, and ow
 
 // ── each precondition, measured through the real CLI ────────────────────────
 
-test('#641 engram PRESENT: no substitution, no notice — the existing path is untouched', (t) => {
+test('#641 engram PRESENT: no substitution — the run goes to ENGRAM, and #874 split B means it succeeds without ever touching the stub', (t) => {
+  // R11 (#874 split B): engram.share() no longer calls the binary at all, so
+  // an inert stub (exits 0, exports nothing) can no longer make it fail —
+  // there is nothing left downstream of ensureSymlink+rebuildIndex to fail on.
   const w = world(t, { engram: true });
   const r = runCli(w, ['share']);
 
+  assert.equal(r.status, 0, `share must succeed — engram.share() no longer calls the binary:\n${r.stdout}\n${r.stderr}`);
   assert.doesNotMatch(r.stderr, SUBSTITUTED, 'nothing was substituted, so nothing may claim it was');
-  // The stub `engram` exits 0 without exporting, so `share` fails downstream —
-  // which is the point: the run went to ENGRAM, exactly as it does today.
-  assert.match(r.stderr, /engram\./, `the failure must come from the engram backend; got:\n${r.stderr}`);
 });
 
-test('#641 MEMORY_BACKEND=engram STATED via the environment: not overridden, but the alternative is named', (t) => {
+test('#874 (R11, B4a): MEMORY_BACKEND=engram STATED via the environment: not overridden, and the run succeeds silently — nothing failed, so there is no signpost to print', (t) => {
+  // MEASURED, post-B4a: `share` left FALLBACK_OPS, so selectBackend now
+  // returns OP_NOT_COVERED for it — even when stated — before the `stated`
+  // branch is ever reached (backend-selection.mjs's precondition order).
+  // OP_NOT_COVERED prints nothing (cli.mjs:698-724): correctly so, since
+  // engram.share() does not fail here at all.
   const w = world(t);
   const r = runCli(w, ['share'], { MEMORY_BACKEND: 'engram' });
 
-  assert.notEqual(r.status, 0, 'a stated selector that cannot run must still fail');
+  assert.equal(r.status, 0, `a stated selector runs the real engram.share(), which no longer fails on the missing binary (R11):\n${r.stdout}\n${r.stderr}`);
   assert.doesNotMatch(r.stderr, SUBSTITUTED, 'a stated selector is never silently swapped');
-  assert.match(r.stderr, /MEMORY_BACKEND=plainfiles/, 'the working route must be named — this is the signpost #641 says was missing');
-  assert.match(r.stderr, /engram binary not found/, 'and the original failure must still be reported');
+  assert.doesNotMatch(
+    r.stderr,
+    /MEMORY_BACKEND=plainfiles/,
+    'no signpost is owed here — nothing about this run failed for the fallback to have replaced',
+  );
 });
 
-test('#641 MEMORY_BACKEND=engram STATED via .env: same ruling — the file is a statement too', (t) => {
+test('#874 (R11, B4a): MEMORY_BACKEND=engram STATED via .env: same ruling — the file is a statement too', (t) => {
   const w = world(t, { envFile: 'MEMORY_BACKEND=engram\n' });
   const r = runCli(w, ['share']);
 
-  assert.notEqual(r.status, 0);
+  assert.equal(r.status, 0);
   assert.doesNotMatch(r.stderr, SUBSTITUTED);
-  assert.match(r.stderr, /MEMORY_BACKEND=plainfiles/);
+  assert.doesNotMatch(r.stderr, /MEMORY_BACKEND=plainfiles/);
 });
 
 test('#641 `import` — an op the fallback does not serve — keeps engram\'s error, which names the real fix', (t) => {
@@ -251,15 +275,18 @@ test('#641 a BROKEN probe is reported as itself and substitutes nothing', (t) =>
 
   assert.match(r.stderr, /could not determine/, 'the probe outage must be reported as an outage');
   assert.doesNotMatch(r.stderr, SUBSTITUTED, 'an unmeasured absence must not substitute a backend');
-  assert.match(r.stderr, /could not be resolved/, 'and the engram refusal must not claim "not found" either');
-  assert.notEqual(r.status, 0);
+  // #874 split B (R11): the unsubstituted run reaches the real engram.share(),
+  // which no longer probes or requires the binary itself — so it succeeds.
+  assert.equal(r.status, 0, `share must succeed even on a probe outage — it no longer calls requireEngram():\n${r.stdout}\n${r.stderr}`);
 });
 
 // ── the message is a catalog key, not a literal (so `es` is not handed English) ──
 
 test('#641 the notices resolve from the catalogs in es, not English (#638 is about this exact leak)', (t) => {
+  // `pull` (FALLBACK_OPS' one remaining covered op) drives the SUBSTITUTED
+  // notice; `share` left FALLBACK_OPS in #874 split B (R11, B4a).
   const w = world(t);
-  const rEn = runCli(w, ['share']);
+  const rEn = runCli(w, ['pull']);
   assert.match(rEn.stderr, SUBSTITUTED);
 
   // brain.config.json's docs.language drives the locale; assert the catalog has
