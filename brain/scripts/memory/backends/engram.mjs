@@ -210,10 +210,14 @@ export async function share({
  * @param {string} root
  * @param {object} [opts]
  * @param {(root: string) => {observations: object[], unparseable?: string[], emptyObservations?: string[]}} [opts._readObservations]
- *   Defaults to an empty read (row 2, #874 split B: the chunk-backed
+ *   No default reader (row 2, #874 split B: the chunk-backed
  *   `_defaultReadObservations`/`collectChunkObservations` reader retired —
- *   `share()` no longer has an observation source at all). Every current
- *   caller of this function is a direct test that injects its own
+ *   `share()` no longer has an observation source at all). An un-injected
+ *   call THROWS rather than silently reading zero observations —
+ *   `evidence-reader-empty-on-failure` (see `requireEngram()`'s doc comment
+ *   above): this seam has no production wiring after #874 split B, and
+ *   "no reader was wired" must never report as "nothing to scan". Every
+ *   current caller of this function is a direct test that injects its own
  *   `_readObservations`; a future production caller (epic task 2.4) must do
  *   the same.
  * @param {typeof exportObservation} [opts._exportObservation]
@@ -247,7 +251,13 @@ export async function share({
 export async function dualWriteRecords(
   root,
   {
-    _readObservations = () => ({ observations: [] }),
+    _readObservations = () => {
+      throw new Error(
+        "dualWriteRecords: no _readObservations seam was injected — this reader " +
+          "has no production wiring after #874 split B (row 2); pass a real " +
+          "_readObservations to read observations, do not rely on a default.",
+      );
+    },
     _exportObservation = exportObservation,
     _appendRecord = appendRecord,
     _rebuildIndex = rebuildIndex,

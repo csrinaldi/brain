@@ -25,6 +25,20 @@ const baseRecordFields = {
 // `share()`'s return no longer exists there — `dualWriteRecords()` still
 // returns it (see below), it is just never routed through `share()` any more.
 
+test('dualWriteRecords: the default _readObservations seam throws — #874 split B retired the only production reader (row 2); this seam has no production wiring and a caller must inject a real reader', async () => {
+  // `evidence-reader-empty-on-failure` (see requireEngram()'s own doc comment
+  // above, and design.md's D9): a silently-empty default reports "nothing to
+  // scan" for what is really "cannot look — no reader is wired". Every
+  // current caller of dualWriteRecords() is a direct test that already
+  // injects its own _readObservations; a bare, un-injected call is either a
+  // test bug or a future production caller (epic 2.4/1.2a) that forgot to
+  // wire a reader, and both deserve a throw, not a quiet zero.
+  await assert.rejects(
+    () => dualWriteRecords('/fake/root'),
+    /_readObservations/,
+  );
+});
+
 test('dualWriteRecords: a steady-state run with nothing new STILL reindexes, so a merged-in duplicate is still seen', async () => {
   const recA = buildRecord({ ...baseRecordFields, content: 'A' });
   const duplicates = { ids: 1, lines: 1, divergent: 0, groups: [{ id: recA.id, occurrences: ['2026-07.jsonl:1', '2026-07.jsonl:5'] }] };
