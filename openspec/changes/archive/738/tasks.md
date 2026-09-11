@@ -215,7 +215,7 @@ Commit: `test(memory): pin — brain's own capture path can never emit @legacy (
     the typed word, then stages and stops for the maintainer's own commit.
   Focused: `node --test brain/scripts/memory/lib/plainfiles-actorkind-doc-tripwire.test.mjs` —
   GREEN. `npm test` — full suite green (5195/5195), both before and after this correction.
-- [ ] 8.3 Non-code, orchestrator act (not part of this diff): post the draft correction comment
+- [x] 8.3 (posted on #738 and #542 at archive time) Non-code, orchestrator act (not part of this diff): post the draft correction comment
   (`proposal.md`, "For the maintainer" §3) on #542 and #738 once the PR opens.
 
 Commit (a): `docs(sdd): epic task 2.2 ticked; the actor doctrine moves to brain-drafts for the maintainer's promote (#738)`.
@@ -224,15 +224,15 @@ Commit (a): `docs(sdd): epic task 2.2 ticked; the actor doctrine moves to brain-
 
 ## Wrap-up
 
-- [ ] W1 **Pre-step, maintainer act, not a diff**: `git config --local brain.actor @csrinaldi` in
+- [x] W1 (done: `brain.actor @csrinaldi` set `--local` on the clone, chosen by the maintainer over `@crinaldi`) **Pre-step, maintainer act, not a diff**: `git config --local brain.actor @csrinaldi` in
   this worktree, before W3 — the maintainer's own identity. Worktrees share `.git/config` (0.2),
   so one command covers both checkouts. This makes W3 the **first real capture under the new
   rule**.
-- [ ] W2 `npm test` full run — record before/after counts in `apply-progress`.
-- [ ] W3 **Record-first**: `memory:save --issue 738` — depends on W1. Paste the resulting record
+- [x] W2 (5195 after apply, 5202 after the review corrections, 5257 on main after the merge with #912/#913) `npm test` full run — record before/after counts in `apply-progress`.
+- [x] W3 (`rec-96965eb1cf95f9a0`: actor `@csrinaldi`, actorKind `agent` — the first real capture under the rule; committed ce7f724c) **Record-first**: `memory:save --issue 738` — depends on W1. Paste the resulting record
   line and the separately-captured refusal message (0.6) in `apply-progress`.
-- [ ] W4 Fresh-context review before opening the PR.
-- [ ] W5 Open the PR: `Closes #738`, `Parent: #864` in prose, label `type:bug`. Body sections:
+- [x] W4 Fresh-context review before opening the PR: REVISE (the `#` forging hole in `source`, a comment claiming a test that did not exist, four surviving mutants, unbounded exclusion buckets), all landed (be19db89, feb2feca).
+- [x] W5 Shipped as PR #914, merged 5a928804 on 2026-09-10 after a merge with main resolving #912/#913 (both gates kept before `buildRecord`). Original: open the PR: `Closes #738`, `Parent: #864` in prose, label `type:bug`. Body sections:
   - **The #542 reversal** — D0's correction: #542 ruled branch-derived `actor` "not a defect";
     the premise stands, the conclusion is reversed; `plainfiles.actorkind-consistency.test.mjs`
     is rewritten, not deleted.
@@ -255,9 +255,9 @@ Commit (a): `docs(sdd): epic task 2.2 ticked; the actor doctrine moves to brain-
     #368); no `HANDLE_RE` grammar change; no ADR-0017 amendment, no `actorKind: unknown`; no
     `--actor`/`--actor-kind`/`BRAIN_ACTOR` flag or env var; no network call on the capture path.
   - **Review Workload Forecast** — verbatim, below.
-- [ ] W6 Repo's own review gate (`brain:review` or equivalent) on the PR; land any corrections
+- [x] W6 (cold review APPROVE posted at e84b2ce3, pre-merge; the post-merge head was audited by the orchestrator — see verify-report) Repo's own review gate (`brain:review` or equivalent) on the PR; land any corrections
   before merge.
-- [ ] W7 After merge: confirm `npm run memory:audit`'s fresh-window `handle` count has moved off
+- [ ] W7 (open — the fresh-window audit is the maintainer's after their next capture) After merge: confirm `npm run memory:audit`'s fresh-window `handle` count has moved off
   the all-time 0 (D5, feeds #864 exit 6.1).
 
 ## Non-goals
