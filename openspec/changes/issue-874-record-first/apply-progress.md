@@ -238,6 +238,40 @@ edit to an already-tracked file).
 3. **No production diff for F4**: the review's own instruction ("strengthen … so a mutation to a constant topic still fails") described a TEST-only fix; verified via a temporary, reverted mutation of `engram.mjs` rather than shipping a code change, exactly as the finding asked.
 4. **B8 (F6) is planning-only this batch**: added to `tasks.md` as instructed, not implemented — `composeSource()` is out of scope for PR A (design.md's module map never named `capture-provenance.mjs`) and B already touches the engram adapter.
 
+## Cold-review fix batch (sub-ticket #924, second round — C1/E1)
+
+Answers the cold review's two remaining code findings, C1 (correction, HIGH)
+and E1 (editorial). Mode: Strict TDD (`node --test`), one work-unit commit per
+finding, same hard constraints as the earlier fresh-review batch (no edits to
+`brain/core/**`/`brain/project/**`; no push/PR/`--force`/`--no-verify`;
+`.memory/index.jsonl`/`.memory/manifest.json` never staged; temp dirs + fake
+seams only; no real engram binary/store touched by any test).
+
+This batch also retires task **B8** from `tasks.md` — C1 is the same defect
+fresh-review finding F6 named, fixed here instead of deferred to PR B.
+
+### TDD Cycle Evidence
+
+| Finding | Test File | RED | GREEN | Notes |
+|---|---|---|---|---|
+| C1 | `lib/capture-provenance.test.mjs` (+1 case), `backends/engram.save.test.mjs` (+1 case) | ✅ both red — `composeSource()` had no `backend` param; engram's `save()` wrote `source` starting `"plainfiles save on "` | ✅ both green after `composeSource({ host, backend, actor, kind, issue })` names `${backend} save on ${host}` and both `save()` call sites (`plainfiles.mjs`, `engram.mjs`) pass their own literal (`"plainfiles"` / `"engram"` — the same strings each file already uses elsewhere, e.g. `unsupportedOp("search", "engram", ...)`; no new identity string invented) | The 5 pre-existing `composeSource()` calls in `capture-provenance.test.mjs` were also updated to pass `backend: 'plainfiles'` explicitly (previously implicit/hardcoded) — none of those assertions checked the prefix text, so this was a cleanliness update, not a behavior fix; confirmed `plainfiles.save.test.mjs:212`'s `record.source.startsWith('plainfiles save on ')` assertion is untouched and still passes (backend-of-record unchanged for that path). `source` stays outside `computeRecordId`'s hash (`format.mjs`), so no record id changed for either backend. |
+| E1 | `backends/engram.hydrate.test.mjs` (+1 case) | ✅ red — `isEngramArgvUnsafe()` only checked `title`/`content`; a record with `project: '-repo'` still reached `_engramSave` | ✅ green after `hydrate()`'s guard also checks `observation.project`, same `deferred`/`reason: 'engram-argv-unsafe'` outcome, same "never spawn" contract as the F2 title/content case | `type` (fixed `RECORD_TYPES` enum), `scope` (always the constant `'project'` from `importRecord()`), and `topic` (always the record's own `rec-`-prefixed id) are NOT guarded — documented inline as to why each is safe. The scenario named in the review (`deriveProject()`'s checkout-basename fallback, `String(root).split('/').pop()`, producing a leading `-` for a worktree like `/path/to/-repo`) is captured as the test's own doc comment and record fixture (`project: '-repo'`), mirroring the file's existing `dashRecord` pattern for F2 rather than driving the scenario through `save()`'s own `deriveProject()` (which is unexported and would require an unstubbed real-`hydrate` call through `save()`, i.e. a PATH-isolated CLI-level test — out of proportion for this fix). |
+
+### Test Summary
+- New/modified test files: `lib/capture-provenance.test.mjs` (+1 case, 5 pre-existing calls updated), `backends/engram.save.test.mjs` (+1 case), `backends/engram.hydrate.test.mjs` (+1 case).
+- Focused suite (`engram.hydrate.test.mjs`, `engram.save.test.mjs`, `save-parity.test.mjs`, `capture-provenance.test.mjs`, `plainfiles.save.test.mjs`, `cli.save-search.test.mjs`): **95/95 green**.
+- Full suite: **5287/5287 green** (up from the prior batch's 5284 baseline + this batch's 3 new cases).
+
+### Commits (this batch, oldest first)
+
+```
+fix(memory): composeSource() names the backend that ran (#924)
+fix(memory): hydrate() argv guard also covers project (#924)
+```
+
+### Deviations
+None — both fixes match the review's stated scope exactly; no design.md changes needed (design.md's D1/D3 aren't touched — `composeSource` and `isEngramArgvUnsafe` are both implementation detail below the design's module map, not named decisions).
+
 ## R7 probe outcome carried to epic #864 (informational)
 
 Task 6.1 of `issue-864-memory-2-0/tasks.md` asks for `MEMORY_BACKEND=engram`
