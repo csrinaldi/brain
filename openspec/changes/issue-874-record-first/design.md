@@ -199,18 +199,30 @@ the **promoted** `brain/core/methodology/memory-backend-contract.md`, promoted b
 | B lands without A | stacked PRs; B's body names A's merge commit | — | — |
 | An older checkout still runs `engram sync --export` | — | harmless: local chunks nobody reads back; stated in the PR body | — |
 
-## Open question
+## Open question — RESOLVED
 
-**O1 — `dualWriteRecords`'s disposition (ledger gap, needs the maintainer's word before B applies).**
-Ledger row 3 says "seam removed, function reshaped", written when something was still expected to
-call it. Measured: after R11's `share`, `dualWriteRecords` (`engram.mjs:333-~485`, ~150 lines) has
-**no production caller** — its only input source was the export — and it carries #701's upstream-base
-dedup, exercised by `engram.upstream-scope.test.mjs` (295 lines, entirely built on it), one test in
-`engram.duplicates.test.mjs:46-65`, and part of `cli.upstream-config.test.mjs` (317 lines, extent to
-be audited at apply time). Options: **(a)** delete it with rows 1–3 — honest, but retires #701's
-observation→record direction and 300+ test lines the ledger never named; **(b)** keep it exported
-with the seam removed — dead production code with a live suite, the exact shape the explore flagged
-on `scrubRecordsFile()`; **(c)** keep it in B, hand its disposition to 2.4 alongside the rest of the
-chunk estate. Design recommendation: **(c)** — it keeps B's blast radius equal to the ratified ledger
-and does not retire a shipped behaviour inside a slice whose subject is the producer path. B's
-`share` stops calling it either way, which is what R11 requires.
+**O1 — `dualWriteRecords`'s disposition (ledger gap) — RATIFIED 2026-09-11 (issue #874 comment):
+option (c).**
+Ledger row 3 said "seam removed, function reshaped", written when something was still expected to
+call it. Measured: after R11's `share`, `dualWriteRecords` (`engram.mjs`, ~150 lines) has **no
+production caller** — its only input source was the export — and it carries #701's upstream-base
+dedup, exercised by `engram.upstream-scope.test.mjs`, one test in `engram.duplicates.test.mjs:46-65`,
+and part of `cli.upstream-config.test.mjs`. Options were: **(a)** delete it with rows 1–3; **(b)**
+keep it exported with the seam removed — dead production code with a live suite; **(c)** keep it in
+B, hand its disposition to epic task 2.4 alongside the rest of the chunk estate, unless task 1.2a
+claims it first as its one-shot heal tool and then owns the deletion. **Ratified: (c).** PR B
+(task B3) makes NO production change to `dualWriteRecords` — the function, its shape, and its direct
+unit tests (`engram.upstream-scope.test.mjs`, `engram.duplicates.test.mjs:46-65`) are untouched.
+`share()` stopped calling it in task B1, which is what R11 required either way.
+
+One measured correction to this ruling's own premise, found while applying B1: the
+`cli.upstream-config.test.mjs` audit named above assumed that file exercises `dualWriteRecords`
+directly, the same way `engram.upstream-scope.test.mjs` and `engram.duplicates.test.mjs` do. It does
+not — all 8 of its cases drive the REAL `memory:share` CLI end to end and assert on `upstreamScope`/
+`configError` text that only ever reached `cli.mjs` THROUGH `share()`'s old call into
+`dualWriteRecords()`. Once B1 retired that call (R11), `share()`'s return value can never carry
+`upstreamScope` again, so the entire file — and the three now-dead `cli.mjs` print blocks
+(`unprovenanced`, `upstreamScope`, `dedupedUpstream`) that fed off it — were retired in task B1's
+commit as an unavoidable, structural consequence, not a scope expansion of O1 itself. See
+`apply-progress.md`'s B1 section for the detail. `dualWriteRecords()` the function is unaffected;
+only its former CLI-reachable print path is gone.
