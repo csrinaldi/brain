@@ -73,6 +73,9 @@ export default {
   'day.memory.laneSweep.shipped':        'Lane sweep: se envió {ref} (PR #{number}).',
   'day.memory.laneSweep.reconciled':     'Lane sweep: se reconcilió {ref} (PR #{number}) — nada nuevo para enviar.',
   'day.memory.laneSweep.nothing':        'Lane sweep: nada para enviar.',
+  // F2 (cold review, #921/#923): nada pendiente, pero un worktree no se pudo
+  // inspeccionar — distinto de la línea "nada para enviar" de arriba.
+  'day.memory.laneSweep.worktreeSkipped': 'Lane sweep: nada para enviar, pero {count} worktree(s) no se pudieron inspeccionar: {paths}',
   'day.memory.laneSweep.warn':           'Lane sweep: {detail} — ver el log en tmp; el sweep de mañana reintenta.',
   // El texto propio de {detail} — una key, no un literal, para que un
   // docs.language no inglés nunca vea una palabra en inglés dentro de una
@@ -276,6 +279,7 @@ export default {
   'session.change.ambiguous':   'cambio:    ambiguo ({count}): {list}',
   'session.memory.ok':          'memoria:   engram hidratado',
   'session.memory.skip':        'memoria:   engram no disponible (omitido)',
+  'session.memory.skip.reason': 'memoria:   engram no disponible (omitido) — {reason}',
   'session.memory.recency.stale':   'memoria:  el registro durable más nuevo tiene {days} días — nada capturado desde entonces (ver #519)',
   'session.memory.recency.unknown': 'memoria:  sin registro durable — no se puede determinar cuándo se capturó memoria por última vez',
   'session.manifest.restored':  'manifest:  cambios descartados (seguro)',
@@ -307,6 +311,7 @@ export default {
   'memory.collect.raced':   '✗ collect falló — la ref del lane se movió durante esta corrida (raced); no se perdió nada, sus blobs se vuelven a juntar en la próxima corrida: {message}',
   'memory.collect.secretSkipped':          '{count} registro(s) con secreto salteado(s) — solo patrón y número de línea, nunca la línea encontrada.',
   'memory.collect.modifiedTrackedSkipped': '{count} registro(s) trackeado(s) y modificado(s) salteado(s) — hacé commit o stash y volvé a correrlo.',
+  'memory.collect.worktreeSkipped': '{count} worktree(s) no se pudieron inspeccionar y quedaron excluidos de esta corrida: {paths}',
 
   // ── memory/cli.mjs — ship (issue #888, ADR-0034 L1/L2/L5) ────────────────────
   'memory.ship.done':             '✓ se envió {ref} — el pull request #{number} quedó armado.',

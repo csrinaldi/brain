@@ -48,9 +48,9 @@ The last task is the epic's exit.
 - [ ] 4.4 #714 — suite verdict independent of `BRAIN_MEMORY_UPSTREAM_REF`.
 - [ ] 4.5 #638 — duplicate-report strings in the i18n catalogs.
 - [x] 4.6 #920 — **[audit M1, priority:high]** `shipLane` reconciles the PR and the auto-merge on a retry after a successful push, even with nothing new to push; never an empty PR, never a re-delivery of a merged lane. Lands BEFORE the first real `memory:ship`.
-- [ ] 4.7 #921 — **[audit M3]** the collector reports the worktrees it could not inspect instead of dropping them.
+- [x] 4.7 #921 — **[audit M3]** the collector reports the worktrees it could not inspect instead of dropping them. Done via `issue-921-923-observability`.
 - [ ] 4.8 #922 — **[audit]** `MANAGED_SCRIPT_KEYS` carries every npm entry the doctrine tells an agent to run (`memory:save`, `memory:ship`, `memory:audit`, `brain:config`); before 1.6.0 is cut.
-- [ ] 4.9 #923 — **[audit]** session-start preserves the hydration failure cause; `step5SynthesizeContext` is either wired or retired (#267).
+- [x] 4.9 #923 — **[audit]** session-start preserves the hydration failure cause. **F5 (cold review):** this row's original text also demanded `step5SynthesizeContext` be "either wired or retired (#267)" — neither happened, so the box is reworded rather than left overpromising. Delivered via `issue-921-923-observability`: the cause-preservation half is complete; `step5SynthesizeContext` wiring is an explicit open product decision (not a bug this task owns), recorded as a code comment on `runSessionStart` and tracked at #267.
 - [ ] 4.10 #939 — **[audit M4, RULED 2026-09-12]** a session carrying a known AI-platform marker is recorded as an agent, never a human: the default marker list widens beyond `AI_AGENT`; `brain.agentEnv` still wins. The accepted cost is stated in the doctrine — a person typing inside an agent terminal is recorded as an agent, because the session is one.
 
 ## Close / amend

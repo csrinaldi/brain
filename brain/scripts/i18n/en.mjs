@@ -82,6 +82,10 @@ export default {
   'day.memory.laneSweep.shipped':        'Lane sweep: shipped {ref} (PR #{number}).',
   'day.memory.laneSweep.reconciled':     'Lane sweep: reconciled {ref} (PR #{number}) — nothing new to push.',
   'day.memory.laneSweep.nothing':        'Lane sweep: nothing to ship.',
+  // F2 (cold review, #921/#923): nothing pending, but a worktree could not be
+  // inspected — distinct from the plain "nothing to ship" line above, so the
+  // operator never mistakes "incomplete inspection" for "confirmed clean".
+  'day.memory.laneSweep.worktreeSkipped': 'Lane sweep: nothing to ship, but {count} worktree(s) could not be inspected: {paths}',
   'day.memory.laneSweep.warn':           'Lane sweep: {detail} — see the tmp log; the morning sweep will retry tomorrow.',
   // {detail}'s own text — a key, not a literal, so a non-English docs.language
   // never sees an English word inside a translated line (#906 cold review, editorial).
@@ -305,6 +309,8 @@ export default {
   'session.change.ambiguous':   'change:   ambiguous ({count}): {list}',
   'session.memory.ok':          'memory:   engram hydrated',
   'session.memory.skip':        'memory:   engram unavailable (skipped)',
+  // #923 — the hydration failure cause, when available (see step2HydrateEngram).
+  'session.memory.skip.reason': 'memory:   engram unavailable (skipped) — {reason}',
   'session.memory.recency.stale':   'memory:   newest durable record is {days} days old — nothing captured since (see #519)',
   'session.memory.recency.unknown': 'memory:   no durable record found — cannot determine when memory was last captured',
   'session.manifest.restored':  'manifest: churn restored (safe)',
@@ -336,6 +342,8 @@ export default {
   'memory.collect.raced':   '✗ collect failed — the lane ref moved during this run (raced); nothing was lost, its blobs are re-collected on the next run: {message}',
   'memory.collect.secretSkipped':          '{count} secret-bearing record(s) skipped — pattern and line number only, never the matched line.',
   'memory.collect.modifiedTrackedSkipped': '{count} tracked-and-modified record(s) skipped — commit or stash them, then re-run.',
+  // #921 — an unreadable worktree is a distinct fact from "nothing pending"; surfaced by count + path, never silently dropped.
+  'memory.collect.worktreeSkipped': '{count} worktree(s) could not be inspected and were excluded from this run: {paths}',
 
   // ── memory/cli.mjs — ship (issue #888, ADR-0034 L1/L2/L5) ────────────────────
   'memory.ship.done':             '✓ shipped {ref} — pull request #{number} is armed.',

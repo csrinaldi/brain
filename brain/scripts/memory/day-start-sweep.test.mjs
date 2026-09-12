@@ -191,6 +191,55 @@ test('laneSweepLine: exit 0, nothing pushed → level "ok", the nothing key, no 
   assert.deepEqual(line.params, {});
 });
 
+// F2 (cold review, #921/#923): before this fix, `laneSweepLine()` read only
+// `pushed`/`reconciled` off the parsed outcome and fell through to
+// `.nothing` whenever neither was true — even when `ship --json`'s own
+// outcome carried a non-empty `skippedWorktrees` (#921). That is exactly the
+// indistinguishability the ticket named, on the one surface (`day:start`)
+// that discards the ship child's stderr entirely (see runLaneSweep() above:
+// it never reads `result.stderr`).
+
+test('laneSweepLine: nothing pending, and nothing skipped → still the plain "nothing" line (regression guard)', () => {
+  const line = laneSweepLine({
+    skipped: false,
+    status: 0,
+    unparsed: false,
+    outcome: { pushed: false, collected: 0, skippedWorktrees: [] },
+  });
+  assert.equal(line.level, 'ok');
+  assert.equal(line.key, 'day.memory.laneSweep.nothing');
+  assert.deepEqual(line.params, {});
+});
+
+test('laneSweepLine: nothing pending, but a worktree was skipped → level "ok", the worktreeSkipped key, count+paths (never the plain "nothing" line)', () => {
+  const line = laneSweepLine({
+    skipped: false,
+    status: 0,
+    unparsed: false,
+    outcome: {
+      pushed: false, collected: 0,
+      skippedWorktrees: [{ path: '/repo/wt-b', reason: 'fatal: not a git repository' }],
+    },
+  });
+  assert.equal(line.level, 'ok');
+  assert.equal(line.key, 'day.memory.laneSweep.worktreeSkipped');
+  assert.deepEqual(line.params, { count: 1, paths: '/repo/wt-b (fatal: not a git repository)' });
+});
+
+test('laneSweepLine: pushed:true with a skipped worktree still renders "shipped" (documented scope boundary — the skip is still visible via --json and the SessionEnd log, not duplicated here)', () => {
+  const line = laneSweepLine({
+    skipped: false,
+    status: 0,
+    unparsed: false,
+    outcome: {
+      pushed: true, pr: { number: 42 }, ref: 'refs/heads/memory/x-2026-09-10',
+      skippedWorktrees: [{ path: '/repo/wt-b', reason: 'fatal: not a git repository' }],
+    },
+  });
+  assert.equal(line.level, 'ok');
+  assert.equal(line.key, 'day.memory.laneSweep.shipped');
+});
+
 test('laneSweepLine: non-zero exit (ship failure) → level "warn", never "die" — an i18n detail KEY, not a literal string', () => {
   const line = laneSweepLine({ skipped: false, status: 1, unparsed: false, outcome: null });
   assert.equal(line.level, 'warn');

@@ -163,6 +163,7 @@ const SESSION_STRINGS = {
   changeAmbiguous:  en['session.change.ambiguous'],
   memoryOk:         en['session.memory.ok'],
   memorySkip:       en['session.memory.skip'],
+  memorySkipReason: en['session.memory.skip.reason'],
   manifestRestored: en['session.manifest.restored'],
   ticketLabel:      en['session.ticket.label'],
   ticketNone:       en['session.ticket.none'],
@@ -253,6 +254,22 @@ test('renderContextBlock: engram skipped (unavailable)', () => {
     '========================',
   ].join('\n');
   assert.equal(renderContextBlock(model, SESSION_STRINGS), expected);
+});
+
+// #923 (acceptance A): the rendered context block must surface the hydration
+// failure CAUSE, not a bare "unavailable (skipped)" — while staying additive
+// (a caller/older test that never supplies `reason` still renders the old
+// generic line, see the `engram skipped (unavailable)` test above).
+test('#923: renderContextBlock: engram failed WITH a reason surfaces the cause, not the bare skip line', () => {
+  const model = {
+    manifest: { restored: false },
+    engram: { ok: false, reason: 'engram: import failed — ENOENT' },
+    change: { branch: 'main', token: null, matches: [] },
+    ticket: null,
+  };
+  const output = renderContextBlock(model, SESSION_STRINGS);
+  assert.match(output, /engram: import failed — ENOENT/, 'the failure cause must appear in the rendered block');
+  assert.doesNotMatch(output, /engram unavailable \(skipped\)$/m, 'the bare generic line must not appear once a reason is available');
 });
 
 test('renderContextBlock: no ticket memory (null branch / detached HEAD)', () => {
@@ -400,15 +417,27 @@ test('step2HydrateEngram: spawn exits 0 → {ok:true}', () => {
   assert.deepEqual(step2HydrateEngram('/repo', { _spawn }), { ok: true });
 });
 
-test('step2HydrateEngram: spawn exits non-zero → {ok:false}', () => {
-  const _spawn = () => ({ status: 1, stdout: '' });
-  assert.deepEqual(step2HydrateEngram('/repo', { _spawn }), { ok: false });
+// #923 (acceptance A): a non-zero exit or a thrown exception must not
+// collapse to a bare {ok:false} — the failure CAUSE (stderr / exit code /
+// exception message) must survive on the return shape, without becoming
+// fatal to the caller (runSessionStart still always resolves exitCode:0).
+test('#923: step2HydrateEngram: spawn exits non-zero → {ok:false, reason} carrying stderr', () => {
+  const _spawn = () => ({ status: 1, stdout: '', stderr: 'engram: import failed — ENOENT\n' });
+  assert.deepEqual(
+    step2HydrateEngram('/repo', { _spawn }),
+    { ok: false, reason: 'engram: import failed — ENOENT' },
+  );
 });
 
-test('step2HydrateEngram: _spawn throws → {ok:false}, never throws', () => {
+test('#923: step2HydrateEngram: spawn exits non-zero with no stderr → {ok:false, reason} naming the exit code', () => {
+  const _spawn = () => ({ status: 1, stdout: '' });
+  assert.deepEqual(step2HydrateEngram('/repo', { _spawn }), { ok: false, reason: 'exited 1' });
+});
+
+test('#923: step2HydrateEngram: _spawn throws → {ok:false, reason} carrying the exception message, never throws', () => {
   const _spawn = () => { throw new Error('engram not found'); };
   assert.doesNotThrow(() => step2HydrateEngram('/repo', { _spawn }));
-  assert.deepEqual(step2HydrateEngram('/repo', { _spawn }), { ok: false });
+  assert.deepEqual(step2HydrateEngram('/repo', { _spawn }), { ok: false, reason: 'engram not found' });
 });
 
 test('step2HydrateEngram: only ever calls the allowlisted memory/cli.mjs import argv', () => {
