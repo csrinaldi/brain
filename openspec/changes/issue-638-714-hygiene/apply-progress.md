@@ -117,6 +117,98 @@ distinct — no dropped translation.
 `GIT_CONFIG_GLOBAL=/dev/null npm test` → 5277/5277, both with
 `BRAIN_MEMORY_UPSTREAM_REF` unset and exported to `origin/leaked`.
 
+## Cold review response (F1/F2/F3, branch `fix/issue-638-714-hygiene`)
+
+A fresh adversarial review of this branch returned SHIP with two MEDIUM
+findings and one LOW. Answered without touching `brain/core/**` or
+`brain/project/**`, without any push/PR/`gh` write, and without staging
+`.memory/index.jsonl`/`.memory/manifest.json` (commit `6df58c8f` — the
+record commit — is untouched).
+
+### F1 (MEDIUM) — three of the four unguarded `await reportDuplicates` sites, honestly
+
+The review named four unguarded call sites in `cli.mjs`: `:224`
+(resolve-index), `:297` (split-records), `:362` (collect), `:938` (the
+generic backend dispatch, e.g. `import`/`share`/`pull`).
+
+- **`:297` (split-records) and `:362` (collect) — genuinely raced, now
+  guarded.** Both call `process.exit(0)` immediately after
+  `await reportDuplicates(...)`; dropping the `await` there races the exit
+  and drops every report line. Added one CLI-level test per site
+  (`cli.split-records-duplicates.test.mjs`, a new duplicate-candidate
+  fixture in `cli.collect.test.mjs`). Both are RED with the `await`
+  dropped and GREEN restored — see the mutation table below.
+- **`:224` (resolve-index) — genuinely NOT drivable at the CLI level
+  without inventing a seam.** `resolveIndex({ repoRoot })` itself takes an
+  injectable `repoRoot` (that is how `resolve-index.integration.test.mjs`
+  already drives it, at the function level). But `cli.mjs`'s own
+  `resolve-index` dispatch hardcodes `repoRoot` to the CLI script's own
+  real checkout location — unlike `reindex`/`split-records`/`collect`/
+  `save`/`search`, it never reads `BRAIN_MEMORY_TEST_ROOT`. Spawning
+  `cli.mjs resolve-index` in any test would therefore run against THIS
+  repo's real `.memory/index.jsonl`, which the task's own hard constraints
+  forbid. Wiring a test-root seam into that dispatch would fix the
+  testability gap, but it is a production behavior change to a
+  doctrine-fixed, merge-conflict-resolution code path (adr-0017), not a
+  test — out of scope to invent under review pressure, and not attempted.
+  The file's own `split-records` comment already flags this exact gap as
+  `#633/T11`. The race is still real in principle (`process.exit(0)` at
+  cli.mjs:225 follows the same shape as the two guarded sites) — left
+  unguarded, documented, and reported rather than silently claimed fixed.
+- **`:938` (generic dispatch) — MEASURED to not race at all.** This block
+  (covers `share`, `pull`, `import`, `setup`, etc.) never calls
+  `process.exit(0)` on success — only `process.exit(1)` in its `catch`.
+  Dropping the `await` there and running the full suite (both directly and
+  via `cli.reindex-duplicates.test.mjs`'s existing `share` duplicate-report
+  test, which already exercises this exact line) left everything green:
+  Node's event loop stays alive until the unawaited promise settles,
+  because nothing calls `process.exit()` afterward. Verified empirically
+  before writing anything — a test asserting a defect that measurably does
+  not exist here would have been exactly the kind of paper-over F1 warns
+  against. No test added for this site; no fix needed.
+
+**Mutation table — F1 (drop the `await`, confirm RED; restore, confirm GREEN):**
+
+| Site | Test file | Before fix existed | RED (await dropped) | GREEN (restored) |
+|---|---|---|---|---|
+| `:297` split-records | `cli.split-records-duplicates.test.mjs` | n/a (new test) | 0/1 pass | 1/1 pass |
+| `:362` collect | `cli.collect.test.mjs` | 8/9 pass (new test not yet added) | 8/9 pass, new test fails | 9/9 pass |
+| `:224` resolve-index | — | — | not drivable at CLI level (see above) | — |
+| `:938` generic dispatch | `cli.reindex-duplicates.test.mjs` (existing `share` test) | 7/7 pass | 7/7 pass — no regression, confirms no race | 7/7 pass |
+
+### F2 (MEDIUM) — Spanish content for `memory.duplicates.*`, now pinned
+
+Added `scripts/memory/lib/duplicates.i18n.test.mjs`: one `translate()`-based
+test per rendering family (`summary`/`summaryWithIndex`, `why`,
+`divergent`, `brief`, `moreOccurrences`/`moreGroups`, `unknownId`) —
+matched on a distinctive Spanish phrase, not twelve brittle full-string
+equalities, mirroring `cli.ship.test.mjs` / `plainfiles.save-index-
+failure.test.mjs` / `coverage.test.mjs`'s own `translate()` precedent.
+
+`group`/`groupDivergent` are the one pair left without a content
+assertion: `es.mjs` and `en.mjs` are byte-identical there by design (only
+`{id}`/`{count}`/`{locations}` placeholders and the untranslated
+`[divergent]` marker — no prose to mistranslate). Asserted instead as a
+documented exception plus interpolation correctness.
+
+**Mutation proof:** corrupted `es.mjs`'s `memory.duplicates.why` value to
+`'TOTALLY WRONG TEXT'` → 6 pass / 1 fail (of 7, this file only) → restored
+→ 7/7 pass again.
+
+### F3 (LOW) — the closing record names only #714; the format cannot carry two
+
+`rec-3550472a1b62c33b` (commit `6df58c8f`, untouched — no rewrite, no
+second record added) carries `"issue":714` only, though the branch also
+closes #638. Checked `format.mjs`'s own schema (W2): `issue` MUST be a
+single finite integer `number`, and it is part of `computeRecordId`'s hash
+input — there is no array/list form. **The record format cannot carry two
+issues at all.** This is a format limitation worth stating as its own
+finding, not a defect in this specific record or something to silently
+work around (e.g. by picking one of the two arbitrarily, or splicing a
+second number into the string) — a real fix would be a schema change
+(multi-issue support, or a second `record`) affecting the hash and every
+existing consumer, well beyond this hygiene batch's scope.
+
 ## Not done / deferred
 
 - The broader ambient-env audit above (candidate follow-up ticket, not filed here).
