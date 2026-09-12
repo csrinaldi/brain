@@ -3,11 +3,12 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
-import { ensureProjectIdentity, providerFromHost, ensureBrainConfig } from './brain-config.mjs';
+import { ensureProjectIdentity, providerFromHost, ensureBrainConfig, loadBrainConfigOrThrow } from './brain-config.mjs';
+import { testTmp } from './test-tmp.mjs';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -243,6 +244,44 @@ test('ensureBrainConfig: idempotent — second call does not recreate', () => {
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// ── loadBrainConfigOrThrow (issue #942, R3 — REQ-DENY-1) ────────────────────
+//
+// Distinguishes ABSENT (`{}`, no throw) from UNREADABLE/UNPARSEABLE (throw,
+// naming the path and the failure kind) — the one shared primitive every
+// hardened deny reader calls. Mirrors `memory/lib/upstream-records.mjs`'s
+// `loadBrainConfigAt` byte-for-byte in behaviour (the house model).
+
+test('T1: loadBrainConfigOrThrow — no file at all → returns {} (absence is not unreadability)', () => {
+  const dir = testTmp('brain-config-throw-');
+  assert.deepEqual(loadBrainConfigOrThrow(dir), {});
+});
+
+test('T2: loadBrainConfigOrThrow — malformed JSON → throws, message names the path and "could not be parsed"', () => {
+  const dir = testTmp('brain-config-throw-');
+  writeFileSync(join(dir, 'brain.config.json'), '{oops');
+  assert.throws(
+    () => loadBrainConfigOrThrow(dir),
+    (err) => {
+      assert.match(err.message, /brain\.config\.json/, 'names the file');
+      assert.match(err.message, new RegExp(dir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), 'names the path');
+      assert.match(err.message, /could not be parsed/, 'names the failure kind');
+      return true;
+    },
+  );
+});
+
+test('T3: loadBrainConfigOrThrow — config path is a directory → throws "could not be read" (ENOENT is the ONLY exemption)', () => {
+  const dir = testTmp('brain-config-throw-');
+  mkdirSync(join(dir, 'brain.config.json'));
+  assert.throws(
+    () => loadBrainConfigOrThrow(dir),
+    (err) => {
+      assert.match(err.message, /could not be read/, 'a directory in the file\'s place is "could not look", not absence');
+      return true;
+    },
+  );
 });
 
 test('ensureBrainConfig: no origin (null host) → creates file but empty provider/host/slug', () => {

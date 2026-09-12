@@ -45,6 +45,52 @@ export function loadBrainConfig() {
 }
 
 /**
+ * Loads brain.config.json from `root`, distinguishing ABSENCE from
+ * UNREADABILITY (issue #942, R3 — REQ-DENY-1). Mirrors
+ * `memory/lib/upstream-records.mjs`'s `loadBrainConfigAt` byte-for-byte in
+ * behaviour — the house model, and the only reader in the tree that already
+ * made this distinction before this issue.
+ *
+ * ENOENT is the ONE "there is nothing to read" case, and returns `{}` — a
+ * fresh consumer install has no config file, and that must stay green
+ * (R11). Every OTHER read failure (a directory in the file's place, a
+ * permission error) or any JSON.parse failure is "could not look", and
+ * THROWS a named error identifying the file and the failure kind — the
+ * parse wrapper says "could not be parsed", never "is not valid JSON",
+ * because the wrapped `JSON.parse` message already ends that way (#701 cold
+ * review round 2).
+ *
+ * This is NOT a shared deny/allow list and NOT a shared policy function
+ * (explicitly rejected — R3's "why"): it shares the READ only. Each caller
+ * still handles the throw per its own direction — a deny/exclusion reader
+ * propagates it, an allow/exemption reader may still degrade it to `[]`.
+ *
+ * `loadBrainConfig()` (below) is UNCHANGED (R8): it keeps throwing on BOTH
+ * absence and malformation for its five existing callers, which correctly
+ * read any throw as "absent". This is a second, additive export for callers
+ * that need absence and unreadability to mean different things.
+ *
+ * @param {string} [root] - Repository root (defaults to this module's repo root).
+ * @returns {object} `{}` when brain.config.json is absent; the parsed object otherwise.
+ * @throws {Error} when brain.config.json exists but cannot be read or parsed.
+ */
+export function loadBrainConfigOrThrow(root = REPO_ROOT) {
+  const path = join(root, 'brain.config.json');
+  let raw;
+  try {
+    raw = readFileSync(path, 'utf8');
+  } catch (err) {
+    if (err?.code === 'ENOENT') return {};
+    throw new Error(`brain.config.json at ${path} could not be read: ${err.message}`);
+  }
+  try {
+    return JSON.parse(raw);
+  } catch (err) {
+    throw new Error(`brain.config.json at ${path} could not be parsed: ${err.message}`);
+  }
+}
+
+/**
  * Fills empty project.gitHost and project.slug in brain.config.json from the
  * git origin. Idempotent: never overwrites non-empty values.
  *
