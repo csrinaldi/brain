@@ -111,3 +111,49 @@ I did not file any issue.
 ## Remaining Tasks
 
 None. Ready for `sdd-verify`.
+
+## Batch 2 — fresh adversarial-review fix batch (G1, G2)
+
+Test-only follow-up on the same branch, after the first sdd-verify pass found
+two gaps. Strict TDD (`node --test <file>` / `npm test`). No production logic
+changed (out of scope per launch prompt).
+
+### G1 (MEDIUM) — pinned the unpinned failure branch
+`ship.mjs:114-116` (`undeliveredDiff.status !== 0 → delivered:null/diffFailed`)
+was previously reachable only by the FIRST diff failing; the second (`--`
+pathspec) diff's own failure was never driven to non-zero status by any test.
+Added `surveyDelivery: the SECOND (-- pathspec) delivery diff exits non-zero
+while the first succeeds …` to `ship.test.mjs`, ordering a fail-rule for
+`a[0]==='diff' && a.includes('--')` before `surveyOkRules()`'s own rules.
+**Mutation proof**: temporarily changed `ship.mjs:114-116` to `return {
+delivered: true, reason: null }` → new test went RED (`false !== true` on
+`result.delivered`). Reverted → 38/38 `ship.test.mjs` GREEN again.
+
+### G2 (LOW) — exercised the dead `undeliveredPaths` knob
+`surveyOkRules()`'s `undeliveredPaths` param was declared/defaulted but never
+overridden by any unit test — genuine content-containment (`delivered:true`
+via non-empty `lanePaths` + empty `undelivered`) was reached only by the
+integration squash test, not the unit-level `lanePaths.length===0` shortcut.
+Added `surveyDelivery: non-empty lanePaths but the -- pathspec diff reports
+zero undelivered paths … delivered:true, zero push/list/create/arm`,
+overriding `undeliveredPaths: []` with non-empty `diffPaths`. The knob is now
+genuinely used — kept, not deleted.
+
+### Files Changed (Batch 2)
+| File | Action | What Was Done |
+|------|--------|---------------|
+| `brain/scripts/memory/lane/ship.test.mjs` | Modified | +2 unit tests (G1 second-diff-failure pin, G2 genuine-containment pin); +48 lines |
+
+### Commit (Batch 2)
+| Commit | Subject |
+|---|---|
+| `09ccdf99` | `test(memory): pin ship.mjs second-diff failure and genuine containment (#920)` |
+
+### Test Evidence (Batch 2)
+- `ship.test.mjs`: 38/38 green (was 36; +2)
+- `ship.integration.test.mjs` + `day-start-sweep.test.mjs` + `cli.ship.test.mjs` combined: 47/47 green
+- Full `npm test`: 5254/5254 green (was 5252; +2)
+- G1 mutation RED confirmed, then reverted to GREEN (see above)
+
+### Remaining
+None. Both G1 and G2 closed. Ready for re-verify.
