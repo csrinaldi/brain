@@ -123,7 +123,7 @@ this table is updated by the slice that turns a "not yet" into a "yes".
 
 ## Amendment 1 — `save` column flip: engram.save() is a record-first producer (issue #874, split A)
 
-**Signed**: 12/09/2026 — Cristian Rinaldi
+**Signed**: 11/09/2026 — Cristian Rinaldi
 
 ### What this does NOT change
 
@@ -166,7 +166,7 @@ rather than assumed.
 
 ## Amendment 2 — rule 2 flip: engram.share() no longer produces (issue #874, split B)
 
-**Signed**: 12/09/2026 — Cristian Rinaldi
+**Signed**: 11/09/2026 — Cristian Rinaldi
 
 ### What this does NOT change
 
