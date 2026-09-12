@@ -138,6 +138,7 @@
 {"id":"rec-0d8f1aa1bbd6c211","ts":"2026-07-18T20:30:57Z","actor":"fix/issue-291-coldboot-fetch-base","type":"decision","project":"brain","file":"2026-07-rec-0d8f1aa1bbd6c211.jsonl"}
 {"id":"rec-0d9a4b01490b8214","ts":"2026-08-29T15:13:34Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-08-rec-0d9a4b01490b8214.jsonl"}
 {"id":"rec-0daf3122a2d6bc94","ts":"2026-07-25T00:48:05Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-0daf3122a2d6bc94.jsonl"}
+{"id":"rec-0dc0cba56156e57c","ts":"2026-09-12T14:04:39Z","actor":"@csrinaldi","type":"decision","project":"brain","issue":942,"file":"2026-09-rec-0dc0cba56156e57c.jsonl"}
 {"id":"rec-0ddcd7b5e431c55c","ts":"2026-07-29T14:29:15Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-0ddcd7b5e431c55c.jsonl"}
 {"id":"rec-0ddde1863b6c80bd","ts":"2026-07-29T13:59:37Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-0ddde1863b6c80bd.jsonl"}
 {"id":"rec-0dfb28de9fea0e5f","ts":"2026-07-21T15:57:03Z","actor":"@legacy","type":"bugfix","project":"brain","file":"2026-07-rec-0dfb28de9fea0e5f.jsonl"}
