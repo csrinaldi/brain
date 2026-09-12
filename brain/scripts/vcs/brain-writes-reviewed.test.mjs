@@ -874,3 +874,26 @@ test('T8: runBrainWritesReviewedCheck — unparseable config, gate policy forced
   assert.equal(result.level, 'warn', 'a detection-tier policy must degrade to warn, never fail');
   assert.match(result.reason, /detection-tier/);
 });
+
+// ── issue #942 review (F2): resolveTierForFailure must never throw, even on ──
+// an invalid injected `deps.tier` — it runs INSIDE runBrainWritesReviewedCheck's
+// catch, after a prior failure has already occurred; a second throw here would
+// escape uncaught and break this function's documented never-throws contract.
+
+test('T13: runBrainWritesReviewedCheck — invalid injected tier during a config failure → never throws, degrades to a valid tier', async () => {
+  const dir = testTmp('brain-config-');
+  writeFileSync(join(dir, 'brain.config.json'), '{oops');
+  const result = await runBrainWritesReviewedCheck({
+    baseSha: 'base',
+    headSha: 'head',
+    prNumber: 144,
+    repo: 'org/repo',
+    author: 'alice',
+    cwd: dir,
+    tier: 'bogus-tier',
+    diffNameOnly: () => ['README.md'],
+    fetchReviews: () => [],
+  }).catch(err => ({ threw: err }));
+  assert.ok(!result.threw, `runBrainWritesReviewedCheck must never throw: ${result.threw?.message}`);
+  assert.equal(result.level, 'fail', 'an invalid tier must degrade fail-closed, not silently pass or warn');
+});

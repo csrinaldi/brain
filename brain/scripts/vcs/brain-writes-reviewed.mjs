@@ -19,7 +19,7 @@ import { fileURLToPath } from 'node:url';
 import { loadBrainConfigOrThrow } from '../lib/brain-config.mjs';
 import { loadContext, gitlabApiConfig } from './ci-context.mjs';
 import { getVcs } from './cli.mjs';
-import { resolveTier, tierParams, resolveGatePolicy } from './governance-tiers.mjs';
+import { resolveTier, tierParams, resolveGatePolicy, TIERS } from './governance-tiers.mjs';
 
 // ── Pure evaluator (design §6.1) ────────────────────────────────────────────
 
@@ -252,7 +252,7 @@ function defaultFetchReviews(repo, provider, { getVcs: getVcsFn = getVcs } = {})
  * `loadBrainConfigOrThrow(cwd)` and does NOT catch. An absent config still
  * resolves to `{}` → `[]` (R11, unchanged); only a present-but-unreadable or
  * unparseable config throws, propagating into `runBrainWritesReviewedCheck`'s
- * tier-aware catch (`:407-415`).
+ * tier-aware catch (`:458-476`).
  */
 function defaultReadBotAllowlist(cwd) {
   return () => {
@@ -272,12 +272,12 @@ function defaultReadBotAllowlist(cwd) {
  *
  * ALLOW-DIRECTION, hardened in scope anyway (issue #942, D3 — a measured
  * correction, not a deviation): feeds `overrideActors` → `overrideLabelPresent`
- * (`:358`), where empty means NO override is honoured — the STRICTER answer,
+ * (`:396`), where empty means NO override is honoured — the STRICTER answer,
  * so hardening it violates nothing (R1 only REQUIRES the deny direction to
  * propagate; it does not forbid an allow reader from doing so too). Calls
  * `loadBrainConfigOrThrow(cwd)` and does NOT catch. Behaviourally
  * unobservable in production: `readBotAllowlist()` (above) runs first
- * (`:354`) and throws before this reader is ever reached.
+ * (`:392`) and throws before this reader is ever reached.
  */
 function defaultReadApprovalActors(cwd) {
   return () => {
@@ -307,15 +307,29 @@ function defaultReadConfig(cwd) {
  * #942), WITHOUT ever throwing itself — this runs from inside
  * `runBrainWritesReviewedCheck`'s catch, after `gatherBrainWritesReviewedInputs`
  * has already failed, so a second failure here (a corrupt config, an unknown
- * `governance.tier`) must degrade rather than escape. Defaults to
- * `'standard'` on any resolution failure — `'standard'` also resolves
- * `brain-writes-reviewed` to `required` (REQ-TIER-2's never-tiered core), so
- * this default is fail-closed-safe regardless of the repo's real tier.
+ * `governance.tier`, OR an unrecognized `deps.tier` injected directly) must
+ * degrade rather than escape. Defaults to `'standard'` on any resolution
+ * failure — `'standard'` also resolves `brain-writes-reviewed` to `required`
+ * (REQ-TIER-2's never-tiered core), so this default is fail-closed-safe
+ * regardless of the repo's real tier.
+ *
+ * `deps.tier` is validated against `TIERS` before being trusted (issue #942
+ * review, F2): an invalid `deps.tier` used to be returned as-is, which the
+ * caller then fed straight into `resolveGatePolicy` OUTSIDE this function's
+ * own try/catch — an unknown tier there throws (no matrix cell), escaping
+ * uncaught and breaking this function's documented never-throws contract.
+ * An invalid `deps.tier` now falls through to the same config-based
+ * resolution (and its catch) as a missing one, exactly like `resolveTier`
+ * already fails closed to `'standard'` for an unrecognized
+ * `governance.tier` read from disk.
  *
  * DELIBERATELY DUPLICATED from `actor-check.mjs`'s identical-shaped helper
  * (`:1181-1189`) rather than imported: an L5→L6 gate-to-gate import edge is a
  * worse coupling than a ~10-line helper whose whole body is "resolve the
- * tier without throwing" (R4).
+ * tier without throwing" (R4). `actor-check.mjs:1181`'s copy carries the
+ * same pre-existing unvalidated-`deps.tier` hazard as this function did
+ * before this fix; out of scope here (issue #942 review, F2) — tracked
+ * separately, not fixed alongside this one.
  *
  * @param {string} cwd
  * @param {{ tier?: string, readConfig?: () => object }} deps
@@ -323,7 +337,7 @@ function defaultReadConfig(cwd) {
  */
 function resolveTierForFailure(cwd, deps) {
   try {
-    if (deps.tier) return deps.tier;
+    if (deps.tier && TIERS.includes(deps.tier)) return deps.tier;
     const readConfig = deps.readConfig ?? defaultReadConfig(cwd);
     return resolveTier(readConfig());
   } catch {
