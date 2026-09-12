@@ -112,5 +112,28 @@ export function laneSweepLine(sweep) {
       params: { ref: sweep.outcome.ref ?? '', number: sweep.outcome.pr?.number ?? '?' },
     };
   }
+  // F2 (cold review): `ship --json`'s own `--json` outcome already carries
+  // `skippedWorktrees` (#921) — read from it directly, never from stderr
+  // (this function never sees stderr at all; `runLaneSweep()` above discards
+  // it, by design, since the SessionEnd trigger's own redirect of the ship
+  // child's stdout+stderr is the surface that needs it, not this one).
+  // Checked ONLY as a replacement for the `nothing` fallback below: this is
+  // the exact indistinguishability #921/#923 named — an operator reading
+  // `Lane sweep: nothing to ship.` while a worktree silently went
+  // uninspected. A `pushed`/`reconciled` run that ALSO skipped a worktree
+  // still renders as "shipped"/"reconciled" above — that combination is not
+  // this fix's scope; the count+paths are still available via `--json` and
+  // the SessionEnd log either way.
+  const skippedWorktrees = sweep.outcome?.skippedWorktrees ?? [];
+  if (skippedWorktrees.length > 0) {
+    return {
+      level: 'ok',
+      key: 'day.memory.laneSweep.worktreeSkipped',
+      params: {
+        count: skippedWorktrees.length,
+        paths: skippedWorktrees.map((w) => `${w.path} (${w.reason})`).join(', '),
+      },
+    };
+  }
   return { level: 'ok', key: 'day.memory.laneSweep.nothing', params: {} };
 }

@@ -21,6 +21,7 @@ function fakeCollect(overrides = {}) {
     skipped: [],
     duplicates: { ids: 0, divergent: 0 },
     baseFetched: true,
+    skippedWorktrees: [],
     ...overrides,
   });
 }
@@ -101,6 +102,39 @@ test('a full run produces the outcome shape, pushed:true, pr.number set', async 
   assert.equal(result.autoMerge.enabled, true);
   assert.equal(result.identityBound, false);
   assert.equal(result.dryRun, false);
+});
+
+// ── #921 — shipLane() must forward collectLane()'s skippedWorktrees, never drop it ──
+
+test('#921 — a full run forwards collect()\'s skippedWorktrees verbatim into the outcome shape', async () => {
+  const { git } = fakeGit([
+    ...surveyOkRules(),
+    { match: (a) => a[0] === 'push', result: ok() },
+  ]);
+  const { vcs } = fakeVcs();
+  const skippedWorktrees = [{ path: '/repo/wt-b', reason: 'fatal: could not read worktree' }];
+
+  const result = await shipLane({
+    root: '/repo', project: 'x/y', tier: 'lite', host: 'test-host', date: '2026-09-09',
+    collect: fakeCollect({ skippedWorktrees }), git, vcs,
+  });
+
+  assert.deepEqual(result.skippedWorktrees, skippedWorktrees, 'a worktree collect() could not inspect must survive into shipLane\'s own outcome shape, not be dropped in translation');
+});
+
+test('#921 — a --dry-run run also forwards skippedWorktrees (collect() already ran before the dry-run short-circuit)', async () => {
+  const dryRunGit = (argv) => {
+    if (argv[0] === 'diff') return ok('.memory/records/2026-09-rec-1.jsonl');
+    throw new Error(`unexpected argv under --dry-run: ${JSON.stringify(argv)}`);
+  };
+  const skippedWorktrees = [{ path: '/repo/wt-b', reason: 'fatal: could not read worktree' }];
+
+  const result = await shipLane({
+    root: '/repo', project: 'x/y', tier: 'lite', host: 'test-host', date: '2026-09-09',
+    dryRun: true, collect: fakeCollect({ skippedWorktrees }), git: dryRunGit, vcs: null,
+  });
+
+  assert.deepEqual(result.skippedWorktrees, skippedWorktrees);
 });
 
 test('(a) ref exists, remote matches, lane delivered ⇒ no-op: zero push/list/create/arm calls', async () => {

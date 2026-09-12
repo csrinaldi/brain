@@ -17,6 +17,41 @@ import { HANDLE_RE } from './format.mjs';
 export const AGENT_ENV_DEFAULT = 'AI_AGENT';
 
 /**
+ * Default agent-marker env NAMES checked, in this order, absent a
+ * `git config brain.agentEnv` override (#939, audit finding M4: a Codex
+ * session exporting only `CODEX_THREAD_ID` — no `AI_AGENT` — was recorded
+ * `human`, because `AI_AGENT` was the only marker this list ever consulted).
+ * `brain.agentEnv` still wins over every entry here (`resolveActorKind`
+ * below never consults this list when an override is configured) — this is
+ * the way an operator adds a runtime the list below does not know.
+ *
+ * Each entry is a runtime brain has ACTUALLY verified, not a guess at what
+ * a platform "probably" exports:
+ *
+ *   - `AI_AGENT`        — brain's own generic marker (pre-existing default;
+ *                         any adapter/runner may export it directly for a
+ *                         decisive signal with no platform coupling).
+ *   - `CLAUDECODE`      — Claude Code CLI (Anthropic). Verified LIVE: this
+ *                         module was edited from inside a Claude Code
+ *                         session, and `env | rg CLAUDECODE` in that same
+ *                         session prints `CLAUDECODE=1`.
+ *   - `CODEX_THREAD_ID` — OpenAI Codex CLI. Verified by the #939 audit
+ *                         session itself (finding M4): present on that
+ *                         Codex run while `AI_AGENT` was absent — the exact
+ *                         case this widening exists to close.
+ *
+ * A runtime NOT in this list is not "unsupported" — it is "not yet
+ * independently verified here". Add it via `brain.agentEnv` first; promote
+ * it to this list once verified, per the pattern above, not on inference.
+ *
+ * Accepted cost (#939 ruling, 2026-09-12): a human typing inside a terminal
+ * that exports one of these markers is recorded `actorKind: agent`, because
+ * the session genuinely carries the marker — this list cannot and does not
+ * try to tell a human's keystrokes apart from the agent runtime hosting them.
+ */
+export const AGENT_ENV_DEFAULTS = [AGENT_ENV_DEFAULT, 'CLAUDECODE', 'CODEX_THREAD_ID'];
+
+/**
  * Actor values `resolveActor` refuses regardless of shape. `@legacy` is the
  * export fallback's sentinel (`engram-export.mjs`) — without this refusal,
  * `git config brain.actor @legacy` mints that sentinel through the capture
@@ -52,10 +87,11 @@ export function resolveActor({ configured }) {
 /**
  * Resolves `actorKind` by MEASURING the agent-marker env, never a hardcoded
  * constant. `agentEnvConfig` is the raw `git config brain.agentEnv` value —
- * a comma-separated list of variable NAMES (default: `AGENT_ENV_DEFAULT`
- * alone). The first name whose value is non-empty wins. A marker set but
- * EMPTY counts as absent (⇒ `human`), recorded in evidence rather than
- * silently treated the same as "never set" (#888 set-but-blank discipline).
+ * a comma-separated list of variable NAMES (default: `AGENT_ENV_DEFAULTS`,
+ * the widened list above). The first name whose value is non-empty wins. A
+ * marker set but EMPTY counts as absent (⇒ `human`), recorded in evidence
+ * rather than silently treated the same as "never set" (#888 set-but-blank
+ * discipline).
  *
  * @param {{ env: Record<string,string|undefined>, agentEnvConfig?: string|null }} input
  * @returns {{actorKind:'human'|'agent', marker:string|null, rawValue:string|null, evidence:string}}
@@ -63,7 +99,7 @@ export function resolveActor({ configured }) {
 export function resolveActorKind({ env = {}, agentEnvConfig } = {}) {
   const names = typeof agentEnvConfig === 'string' && agentEnvConfig.trim()
     ? agentEnvConfig.split(',').map((s) => s.trim()).filter(Boolean)
-    : [AGENT_ENV_DEFAULT];
+    : [...AGENT_ENV_DEFAULTS];
 
   const emptyNames = [];
   for (const name of names) {
@@ -73,6 +109,13 @@ export function resolveActorKind({ env = {}, agentEnvConfig } = {}) {
       emptyNames.push(name);
       continue;
     }
+    // `emptyNames` gathered so far is deliberately DROPPED on this path
+    // (fresh-context review F6): the record is already decisively `agent` —
+    // a blank sibling marker (e.g. `AI_AGENT=''` beside a set `CLAUDECODE`)
+    // is not evidence the decision needs, only the marker that actually won
+    // is. The #888 set-but-blank discipline this array exists for applies to
+    // the HUMAN path below, where "checked but blank" is the only fact
+    // available; here a stronger fact (a live marker) already settled it.
     return { actorKind: 'agent', marker: name, rawValue: raw, evidence: `actorKind agent from env ${name}` };
   }
 
