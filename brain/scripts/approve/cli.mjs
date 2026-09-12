@@ -47,7 +47,7 @@ import { fileURLToPath } from 'node:url';
 
 import { getVcs } from '../vcs/cli.mjs';
 import { approvalDenySet, denyingList, isDeniedActor } from '../vcs/actor-check.mjs';
-import { loadBrainConfig } from '../lib/brain-config.mjs';
+import { loadBrainConfigOrThrow } from '../lib/brain-config.mjs';
 import { currentBranch } from '../lib/git-branch.mjs';
 import { renderDecision } from '../review/lib/decision-block.mjs';
 import { originIdentity } from '../vcs/lib/repo.mjs';
@@ -111,32 +111,33 @@ export function parseArgs(argv) {
  * a registered agent sign. One rule, two implementations, and the second one
  * wrong: the exact shape `brain/core/anti-patterns/` names.
  *
- * Read via `loadBrainConfig`, matching identity.mjs's own config access. Never
- * throws: an unreadable/missing config denies nobody. */
-function defaultReadDenyActors() {
-  try {
-    return approvalDenySet(loadBrainConfig());
-  } catch {
-    return [];
-  }
+ * DENY-DIRECTION (issue #942, R1, R5): calls `loadBrainConfigOrThrow(root)` and
+ * does NOT catch — an absent config still resolves to `{}` → `[]` (R11,
+ * unchanged); only a present-but-unreadable/unparseable config throws. `root`
+ * is optional: omitted (or `undefined`) falls through to `loadBrainConfigOrThrow`'s
+ * own `REPO_ROOT` default, so the production call site (below) is unchanged.
+ * EXPORTED (D2, D4.4) so a test can drive it against a temp dir directly
+ * (T9/T10) without going through `runApprove`. The throw is caught at the ONE
+ * call site below, never here — a reader that swallows its own failure is the
+ * exact fail-open this hardening closes (REQ-DENY-2). */
+export function defaultReadDenyActors(root) {
+  return approvalDenySet(loadBrainConfigOrThrow(root));
 }
 
 /** The AGENT identity list, for naming which key denied the actor (#124).
  *
- * A sibling reader with the same never-throws guarantee and the same injection
- * point as its twin above — NOT a second `loadBrainConfig()` inside the deny
- * branch, which is what the first cut did. `loadBrainConfig` throws by contract
- * on a missing or malformed config, so calling it there turned a graceful
- * refusal into a raw exception for exactly the callers the injectable exists to
- * serve: a test harness, a different config source, a repo without the file
- * (review round 3). A message must never be able to crash a verdict. */
-function defaultReadAgentActors() {
-  try {
-    const config = loadBrainConfig();
-    return Array.isArray(config?.governance?.agentActors) ? config.governance.agentActors : [];
-  } catch {
-    return [];
-  }
+ * A sibling reader with the same injection point as its twin above — NOT a
+ * second config read inside the deny branch, which is what the first cut did.
+ *
+ * DENY-DIRECTION (issue #942, R1, R5): same shape as `defaultReadDenyActors`
+ * — calls `loadBrainConfigOrThrow(root)`, does not catch, exported for the
+ * same reason (T9/T10). Guarded at its OWN call site too (`:246-247`, KEPT
+ * unchanged): the property that call site needs is "a message cannot turn a
+ * refusal into a crash", which must hold for whatever a caller injects, not
+ * only for this default. */
+export function defaultReadAgentActors(root) {
+  const config = loadBrainConfigOrThrow(root);
+  return Array.isArray(config?.governance?.agentActors) ? config.governance.agentActors : [];
 }
 
 /**
@@ -231,7 +232,19 @@ export async function runApprove({
     return done(1);
   }
 
-  const denyActors = readDenyActorsFn();
+  // ── issue #942 (REQ-DENY-2): a deny list that cannot be read denies nobody —
+  // refuse instead of crashing. `readDenyActorsFn` (default: `defaultReadDenyActors`,
+  // above) now THROWS on a present-but-unreadable/unparseable brain.config.json
+  // rather than swallowing it to `[]`. Guarded at THIS call site, mirroring the
+  // `whoami` guard at `:220-227` — never a raw stack trace in a TTY.
+  let denyActors;
+  try {
+    denyActors = readDenyActorsFn();
+  } catch (err) {
+    say(`✗ could not read the approval deny list: ${err.message}`);
+    say('  A deny list that cannot be read denies nobody — refusing to sign until it parses.');
+    return done(1);
+  }
   // The SAME predicate L5's read gate uses, imported rather than restated
   // (#124 round 5). This lock's own docstring calls itself "the write-side twin
   // of L5 read rule 15", and it stopped being one twice in this PR: first when

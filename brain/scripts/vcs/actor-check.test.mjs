@@ -2456,3 +2456,44 @@ test('#124: rule 15 still names governance.reviewActors for a review identity', 
   assert.equal(result.admitted, false);
   assert.match(result.note, /governance\.reviewActors/, 'the pre-existing message is unchanged for its own identity');
 });
+
+// ── issue #942 (R1, R3, R11): a deny reader propagates; an absent config stays green ──
+//
+// `defaultReadDenyActors` used to `catch { return [] }` — an unreadable
+// brain.config.json denied nobody. It now calls `loadBrainConfigOrThrow(cwd)`
+// and drops the catch, so the throw routes through `runActorCheck`'s existing
+// tiered catch (`resolveTierForFailure` + `resolveGatePolicy`, D4.1 — no new
+// plumbing).
+
+test('T4: runActorCheck — unparseable brain.config.json, no readDenyActors injected → fail, reason names the file', async () => {
+  const dir = testTmp('brain-config-throw-');
+  writeFileSync(join(dir, 'brain.config.json'), '{oops');
+  const result = await runActorCheck({
+    author: 'alice',
+    repo: 'org/repo',
+    baseBranch: 'main',
+    cwd: dir,
+  });
+  assert.equal(result.level, 'fail', 'an unparseable deny-list config must fail closed, not warn');
+  assert.match(result.reason, /brain\.config\.json/);
+});
+
+test('T5: runActorCheck — no brain.config.json at all → not "fail" for a config-read reason; deny set empty (R11)', async () => {
+  const dir = testTmp('brain-config-throw-');
+  const inputs = await gatherActorCheckInputs({
+    author: 'alice',
+    repo: 'org/repo',
+    baseBranch: 'main',
+    cwd: dir,
+  });
+  assert.deepEqual(inputs.denyActors, [], 'an absent config denies nobody (R11)');
+
+  const result = await runActorCheck({
+    author: 'alice',
+    repo: 'org/repo',
+    baseBranch: 'main',
+    cwd: dir,
+  });
+  assert.notEqual(result.level, 'fail', 'must not fail for a config-read reason on an absent config');
+  assert.doesNotMatch(result.reason ?? '', /brain\.config\.json/, 'an absent config must never be reported as unreadable');
+});
