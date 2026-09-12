@@ -167,7 +167,7 @@ const EXPORT_KW = 'ex' + 'port';
 // `_defaultReadObservations` caller) is gone — `share()` has no observation
 // reader left at all. Only the two rows below remain.
 const ALLOWLIST = [
-  { file: 'brain/scripts/memory/cli.mjs', line: 620, retiredBy: '2.4 — ledger row 7' },
+  { file: 'brain/scripts/memory/cli.mjs', line: 624, retiredBy: '2.4 — ledger row 7' },
   { file: 'brain/scripts/memory/lib/migrate-v1.test.mjs', line: 13, retiredBy: '2.4 — ledger row 7' },
 ];
 
