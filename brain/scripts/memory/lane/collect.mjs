@@ -196,7 +196,7 @@ function buildCandidate(worktreePath, entry, patterns, allowPatterns) {
  *   loadConfig?: (root: string) => object,
  * }} opts
  * @returns {{ref: string, commit: string|null, collected: number, skipped: object[],
- *   duplicates: object, baseFetched: boolean}}
+ *   duplicates: object, baseFetched: boolean, skippedWorktrees: Array<{path: string, reason: string}>}}
  */
 export function collectLane({
   root,
@@ -233,14 +233,28 @@ export function collectLane({
   //    `-C` call in this module (the seam guard, design's 3b, asserts this).
   //    `prunable`/`bare` stanzas are skipped without ever calling `status`
   //    on them, and `git worktree prune` is never invoked anywhere here.
+  //
+  // #921: a `status` invocation that exits non-zero is NOT the same fact as
+  // "this worktree has nothing pending" — the former means part of the scan
+  // universe could not be inspected at all, and collapsing it into silence
+  // makes `collected: 0` ambiguous between "confirmed nothing" and
+  // "incomplete inspection". Every such worktree is now recorded, by path
+  // and reason, in `skippedWorktrees` — a SEPARATE list from `skipped`
+  // (plan.mjs's per-candidate skip list): this is a worktree-level failure,
+  // never a candidate the planner ever saw.
   const candidates = [];
+  const skippedWorktrees = [];
   for (const stanza of stanzas) {
     if (stanza.bare || stanza.prunable) continue;
     const statusResult = git(
       ['-C', stanza.path, 'status', '--porcelain', '-z', '-uall', '--', '.memory/records'],
       { cwd: root },
     );
-    if (statusResult.status !== 0) continue; // an unreadable worktree degrades to "nothing found here"
+    if (statusResult.status !== 0) {
+      const reason = statusResult.stderr.trim() || `git status exited ${statusResult.status}`;
+      skippedWorktrees.push({ path: stanza.path, reason });
+      continue;
+    }
     for (const entry of parseStatusZ(statusResult.stdout)) {
       candidates.push(buildCandidate(stanza.path, entry, patterns, allowPatterns));
     }
@@ -291,7 +305,10 @@ export function collectLane({
     if (newTreeSha === parentTreeSha) {
       // Nothing new: the ref is left exactly as it was, `update-ref` is never
       // called — the "nothing new is a no-op" scenario, verbatim.
-      return { ref: plan.ref, commit: null, collected: 0, skipped: plan.skipped, duplicates: plan.duplicates, baseFetched };
+      return {
+        ref: plan.ref, commit: null, collected: 0, skipped: plan.skipped,
+        duplicates: plan.duplicates, baseFetched, skippedWorktrees,
+      };
     }
 
     // C1: `plan.files.length` counts GROUP WINNERS, not new blobs. On a
@@ -345,6 +362,7 @@ export function collectLane({
       skipped: plan.skipped,
       duplicates: plan.duplicates,
       baseFetched,
+      skippedWorktrees,
     };
   } finally {
     removeTempTree(tmpDir);
