@@ -71,6 +71,7 @@ export default {
   // Lane sweep (#906, design.md A7) — una línea, sólo cuando memory.lane.enabled es true.
   'day.memory.laneSweep.running':        'Chequeando el lane sweep...',
   'day.memory.laneSweep.shipped':        'Lane sweep: se envió {ref} (PR #{number}).',
+  'day.memory.laneSweep.reconciled':     'Lane sweep: se reconcilió {ref} (PR #{number}) — nada nuevo para enviar.',
   'day.memory.laneSweep.nothing':        'Lane sweep: nada para enviar.',
   'day.memory.laneSweep.warn':           'Lane sweep: {detail} — ver el log en tmp; el sweep de mañana reintenta.',
   // El texto propio de {detail} — una key, no un literal, para que un
@@ -309,6 +310,7 @@ export default {
 
   // ── memory/cli.mjs — ship (issue #888, ADR-0034 L1/L2/L5) ────────────────────
   'memory.ship.done':             '✓ se envió {ref} — el pull request #{number} quedó armado.',
+  'memory.ship.reconciled':       '✓ se reconcilió {ref} — el pull request #{number} quedó armado. No se envió nada nuevo.',
   'memory.ship.nothing':          'nada nuevo para enviar — {ref} ya coincide con origin.',
   'memory.ship.dryRun':           'plan — {ref} se enviaría. No se hizo push ni ninguna llamada al puerto.',
   'memory.ship.pushed':           '✓ se hizo push de {ref} a origin.',

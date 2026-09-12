@@ -164,6 +164,89 @@ test('a killed push (remote ref absent, local ref ahead) recovers on re-run — 
   assert.equal(remoteSha, collected.commit);
 });
 
+/** A `recordingVcs()` whose `mrList` throws on the FIRST call only —
+ * reproduces the audit's M1 finding: a push that already landed, an
+ * `mrList` outage on the same run, and a retry that collects zero new
+ * records. */
+function recordingVcsThrowOnce() {
+  const calls = { mrList: 0, mrCreate: 0, mrAutoMerge: 0 };
+  const prs = [];
+  let nextNumber = 200;
+  let mrListCallCount = 0;
+  const vcs = {
+    mrList: async () => {
+      calls.mrList++;
+      mrListCallCount++;
+      if (mrListCallCount === 1) throw new Error('gh api pulls failed: rate limited');
+      return prs.map((p) => ({ number: p.number, title: p.title, headBranch: p.headBranch }));
+    },
+    mrCreate: async ({ head, title }) => {
+      calls.mrCreate++;
+      const number = nextNumber++;
+      prs.push({ number, headBranch: head, title });
+      return { url: `https://example.invalid/pull/${number}` };
+    },
+    mrAutoMerge: async () => {
+      calls.mrAutoMerge++;
+      return { enabled: true, url: null };
+    },
+  };
+  return { vcs, calls };
+}
+
+test('M1 repro: push OK, mrList throws once; the retry with zero new records finds/creates the PR and arms it', async () => {
+  const { mainDir, originDir } = buildFixtureRepo();
+  addCandidate(mainDir, '2026-09-rec-1111111111111111.jsonl', recordJson('rec-1111111111111111', 'x'));
+  const { vcs, calls } = recordingVcsThrowOnce();
+
+  await assert.rejects(
+    () => shipLane({ root: mainDir, project: 'x/y', tier: 'lite', host: 'test-host', date: '2026-09-09', vcs }),
+    (err) => { assert.equal(err.prLookupFailed, true); return true; },
+  );
+  const remoteShaAfterRun1 = git(originDir, 'rev-parse', 'refs/heads/memory/test-host-2026-09-09').trim();
+  assert.ok(remoteShaAfterRun1, 'the push already landed even though mrList failed');
+
+  const second = await shipLane({ root: mainDir, project: 'x/y', tier: 'lite', host: 'test-host', date: '2026-09-09', vcs });
+
+  assert.equal(second.pushed, false, 'zero new records means nothing new to push');
+  assert.equal(second.reconciled, true);
+  assert.ok(second.pr && second.pr.number, 'the M1 retry must find/create the PR');
+  assert.equal(calls.mrCreate, 1, 'exactly one PR is created across both runs');
+  const remoteShaAfterRun2 = git(originDir, 'rev-parse', 'refs/heads/memory/test-host-2026-09-09').trim();
+  assert.equal(remoteShaAfterRun2, remoteShaAfterRun1, 'the remote sha must not move on the reconcile-only retry');
+});
+
+test('R3 under a real squash: squash-merging the lane into main makes a same-day retry a true no-op (delivered:true)', async () => {
+  const { mainDir, originDir } = buildFixtureRepo();
+  addCandidate(mainDir, '2026-09-rec-1111111111111111.jsonl', recordJson('rec-1111111111111111', 'x'));
+  const { vcs, calls } = recordingVcs();
+
+  const first = await shipLane({ root: mainDir, project: 'x/y', tier: 'lite', host: 'test-host', date: '2026-09-09', vcs });
+  assert.equal(first.pushed, true);
+  assert.equal(calls.mrCreate, 1);
+
+  // Simulate a real squash-merge of the lane's PR into `main` — auto-merge
+  // is hardcoded `--squash` on both providers (R3), so `main`'s tree gains
+  // the lane's tree EXACTLY, with no commit-ancestry relationship to the
+  // lane ref at all (a `--is-ancestor` read would see this lane as pending
+  // forever, re-pushing and re-opening a PR on every run).
+  const mainHead = git(mainDir, 'rev-parse', 'main').trim();
+  const laneTree = git(mainDir, 'rev-parse', `${first.commit}^{tree}`).trim();
+  const squashCommit = git(mainDir, 'commit-tree', laneTree, '-p', mainHead, '-m', 'squash merge lane').trim();
+  git(mainDir, 'update-ref', 'refs/heads/main', squashCommit);
+  git(mainDir, 'push', 'origin', 'main');
+
+  const callsBeforeSecond = { ...calls };
+  const second = await shipLane({ root: mainDir, project: 'x/y', tier: 'lite', host: 'test-host', date: '2026-09-09', vcs });
+
+  assert.equal(second.pushed, false, 'the lane is already on main — nothing to push');
+  assert.equal(second.delivered, true);
+  assert.equal(second.reconciled, false);
+  assert.deepEqual(calls, callsBeforeSecond, 'a delivered lane must make zero push/list/create/arm calls');
+  const remoteLaneSha = git(originDir, 'rev-parse', `refs/heads/${first.branch}`).trim();
+  assert.equal(remoteLaneSha, first.commit, 'the lane ref itself is untouched by the squash-merge no-op');
+});
+
 test('the main checkout is untouched: git status and HEAD are byte-identical before and after', async () => {
   const { mainDir } = buildFixtureRepo();
   addCandidate(mainDir, '2026-09-rec-1111111111111111.jsonl', recordJson('rec-1111111111111111', 'x'));

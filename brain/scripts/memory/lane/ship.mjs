@@ -43,26 +43,79 @@ function parseCount(result) {
  *                                     as "nothing to do" — the push attempt
  *                                     itself is the authoritative check, A3).
  * - local ref exists, fetch succeeds -> real ahead/behind via rev-list.
+ *
+ * R2 (#920): also returns `tip` — the ref's own sha, or `null` when the ref
+ * has never been created locally. `tip === null` is the STRUCTURAL cold-1
+ * no-op condition the caller now branches on, replacing the old inferred
+ * `ahead === 0` reading (`ahead === 0` is also true for a ref that exists
+ * and is simply unreconciled — the exact state #920 repairs).
  */
 function surveyRef({ git, root, ref, branch }) {
   const tipResult = git(['rev-parse', '--verify', '--quiet', ref], { cwd: root });
   if (tipResult.status !== 0) {
-    return { ahead: 0, behind: 0, remoteRefPresent: null };
+    return { ahead: 0, behind: 0, remoteRefPresent: null, tip: null };
   }
+  const tip = tipResult.stdout.trim();
 
   const remoteRef = `refs/remotes/origin/${branch}`;
   const fetchResult = git(['fetch', 'origin', `+refs/heads/${branch}:${remoteRef}`], { cwd: root });
   if (fetchResult.status !== 0) {
     if (/couldn't find remote ref/.test(fetchResult.stderr)) {
       const aheadAll = git(['rev-list', '--count', ref], { cwd: root });
-      return { ahead: parseCount(aheadAll), behind: 0, remoteRefPresent: false };
+      return { ahead: parseCount(aheadAll), behind: 0, remoteRefPresent: false, tip };
     }
-    return { ahead: 1, behind: null, remoteRefPresent: null };
+    return { ahead: 1, behind: null, remoteRefPresent: null, tip };
   }
 
   const behindResult = git(['rev-list', '--count', `${ref}..${remoteRef}`], { cwd: root });
   const aheadResult = git(['rev-list', '--count', `${remoteRef}..${ref}`], { cwd: root });
-  return { ahead: parseCount(aheadResult), behind: parseCount(behindResult), remoteRefPresent: true };
+  return { ahead: parseCount(aheadResult), behind: parseCount(behindResult), remoteRefPresent: true, tip };
+}
+
+/**
+ * surveyDelivery() — R3/R4 (#920): "did these records reach `origin/main`'s
+ * CONTENT?", via content containment, never commit ancestry (`merge-base
+ * --is-ancestor` would report every squash-merged lane as pending forever —
+ * see proposal R3). Runs on the existing injected `git` seam, no new seam,
+ * no network:
+ *
+ *   lanePaths   = git diff --name-only origin/main...<ref>   # what this lane adds
+ *   undelivered = git diff --name-only <ref> origin/main -- <lanePaths>
+ *   delivered   ⟺ lanePaths is empty, or undelivered is empty
+ *
+ * R5: an unreadable precondition is NAMED, never resolved to `delivered:
+ * true` — `baseFetched === false` (stale `origin/main`) short-circuits with
+ * NO git call at all; a non-zero diff exit (unresolvable revision) is the
+ * other `unknown` case. Both report `delivered: null` with a reason; the
+ * caller still acts (push if pending, always attempt reconciliation) rather
+ * than silently assume delivery — a false "delivered" strands memory
+ * forever, while a spurious extra `mrList` scan costs one API call.
+ *
+ * The first call is byte-identical to `buildTitleAndBody`'s own three-dot
+ * diff (R4's deliberate argv collision — same question, same answer); the
+ * second is distinguished by its `--` pathspec (see `surveyOkRules` in
+ * ship.test.mjs for the ordered fake-git pair this requires).
+ */
+function surveyDelivery({ git, root, ref, baseFetched }) {
+  if (baseFetched === false) {
+    return { delivered: null, reason: 'baseStale' };
+  }
+
+  const laneDiff = git(['diff', '--name-only', `origin/main...${ref}`], { cwd: root });
+  if (laneDiff.status !== 0) {
+    return { delivered: null, reason: 'diffFailed' };
+  }
+  const lanePaths = String(laneDiff.stdout ?? '').split('\n').filter(Boolean);
+  if (lanePaths.length === 0) {
+    return { delivered: true, reason: null };
+  }
+
+  const undeliveredDiff = git(['diff', '--name-only', ref, 'origin/main', '--', ...lanePaths], { cwd: root });
+  if (undeliveredDiff.status !== 0) {
+    return { delivered: null, reason: 'diffFailed' };
+  }
+  const undeliveredPaths = String(undeliveredDiff.stdout ?? '').split('\n').filter(Boolean);
+  return { delivered: undeliveredPaths.length === 0, reason: null };
 }
 
 // A4: the branch's own grammar (ADR-0034 L1, adr-0034:49) — tolerating the
@@ -218,29 +271,34 @@ export async function shipLane({
       ...base, title, body,
       ahead: null, behind: null, remoteRefPresent: null,
       pushed: false, diverged: false, pr: null, autoMerge: null,
+      // R12: shape uniformity only — `vcs: null` under `--dry-run` means a
+      // "would reconcile" claim could never consult `mrList`, so this never
+      // surveys delivery and never attempts reconciliation (A7).
+      delivered: null, deliveredReason: 'dryRun', reconciled: false,
     };
   }
 
-  const { ahead, behind, remoteRefPresent } = surveyRef({ git, root, ref, branch });
+  const { ahead, behind, remoteRefPresent, tip } = surveyRef({ git, root, ref, branch });
 
-  // A1's REFINED predicate: not `commit === null` alone — see design.md's
-  // rationale for why the literal D2 form makes a failed push unrecoverable
-  // inside the same day.
+  // R2 (#920): `tip === null` is the STRUCTURAL cold-1 no-op — the ref was
+  // never created locally, so there is nothing to survey for delivery
+  // either. Replaces the old `commit === null && ahead === 0` inference,
+  // which also read true for a ref that exists and is simply unreconciled —
+  // the exact state #920 repairs (see proposal R2).
   //
   // cold-1 (PR #902 review): `buildTitleAndBody()` is deferred past THIS
   // check — it is only ever called once we already know a push or PR will
-  // actually happen (see the call site further down). Before this fix it ran
+  // actually happen (see the call site further down). Before that fix it ran
   // unconditionally right after `collect()`, so a ref that had NEVER been
-  // created (first run, nothing to ship: `rev-parse <ref>` fails, `commit`
-  // is null) made the three-dot diff fail on a bad revision — and that
+  // created (first run, nothing to ship: `rev-parse <ref>` fails, `tip` is
+  // `null`) made the three-dot diff fail on a bad revision — and that
   // failure was reported as "origin/main could not be fetched", conflating
   // "the local ref never existed" with "the remote base is unreachable".
-  // Every path past this `return` already proved the ref exists (either
-  // `surveyRef`'s own `rev-parse` succeeded to produce a real
-  // `ahead`/`behind`, or `commit` is non-null), so a diff failure reached
-  // from here on can only mean a genuinely unfetchable base — see test `C`
-  // below for that legitimate case, which is unaffected by this change.
-  if (commit === null && ahead === 0) {
+  // Every path past this `return` already proved the ref exists, so a diff
+  // failure reached from here on can only mean a genuinely unfetchable base
+  // — see test `C` below for that legitimate case, which is unaffected by
+  // this change.
+  if (tip === null) {
     // C3 (cold review): `title`/`body` are `null` here, not simply absent
     // from the returned object — the module map (design.md) declares them
     // UNCONDITIONAL in the outcome shape. `null` says "there is nothing to
@@ -249,6 +307,38 @@ export async function shipLane({
     return {
       ...base, title: null, body: null, ahead, behind, remoteRefPresent,
       pushed: false, diverged: false, pr: null, autoMerge: null,
+      delivered: null, deliveredReason: 'noRef', reconciled: false,
+    };
+  }
+
+  // R1 (#920): "is anything queued to push?" and "is anything queued to
+  // reconcile?" are two independent questions — `pendingPush` is the exact
+  // predicate the old single early-return used to gate everything on.
+  //
+  // Scope boundary this predicate does NOT cover (both filed, both R10 of
+  // #920's proposal): #936 tracks that this whole call graph always
+  // computes `date = today` (`cli.mjs:488`), so a lane stranded by an
+  // outage across midnight is never revisited by anything here — a
+  // caller-side sweep of prior-day refs, a different module, is that
+  // follow-up's own shape. #930 tracks that the VCS port's `mrList` shape
+  // (`{number, title, headBranch}`) carries no merge-state field, so
+  // `surveyDelivery` below reads git directly instead of asking the port.
+  const pendingPush = commit !== null || ahead > 0;
+
+  // R3/R4/R5 (#920): the delivery read — content containment against
+  // `origin/main`, never commit ancestry (a squash-merged lane is never an
+  // ancestor of `main` — see surveyDelivery()'s own doc comment).
+  const { delivered, reason: deliveredReason } = surveyDelivery({ git, root, ref, baseFetched });
+
+  // R6/R7 (#920): the lane's records are already on `origin/main`'s
+  // content — a true no-op regardless of `ahead`/`remoteRefPresent`. This
+  // is the row where a naive `--is-ancestor` read would have re-pushed a
+  // merged, deleted branch and opened a duplicate PR forever (R3).
+  if (delivered === true) {
+    return {
+      ...base, title: null, body: null, ahead, behind, remoteRefPresent,
+      pushed: false, diverged: false, pr: null, autoMerge: null,
+      delivered: true, deliveredReason: null, reconciled: false,
     };
   }
 
@@ -262,20 +352,25 @@ export async function shipLane({
     throw err;
   }
 
-  const pushResult = git(['push', '--no-verify', 'origin', `${ref}:${ref}`], { cwd: root });
-  if (pushResult.status !== 0) {
-    if (/non-fast-forward|fetch first|rejected/.test(pushResult.stderr)) {
-      const err = new Error(`memory.ship.diverged: push refused — ${pushResult.stderr.trim()}`);
-      err.diverged = true;
+  let pushed = false;
+  if (pendingPush) {
+    const pushResult = git(['push', '--no-verify', 'origin', `${ref}:${ref}`], { cwd: root });
+    if (pushResult.status !== 0) {
+      if (/non-fast-forward|fetch first|rejected/.test(pushResult.stderr)) {
+        const err = new Error(`memory.ship.diverged: push refused — ${pushResult.stderr.trim()}`);
+        err.diverged = true;
+        throw err;
+      }
+      const err = new Error(`memory.ship.pushFailed: git push exited ${pushResult.status} — ${pushResult.stderr.trim()}`);
+      err.pushFailed = true;
       throw err;
     }
-    const err = new Error(`memory.ship.pushFailed: git push exited ${pushResult.status} — ${pushResult.stderr.trim()}`);
-    err.pushFailed = true;
-    throw err;
+    pushed = true;
   }
 
-  // Only reached once the push has actually happened — see the comment
-  // above the nothing-to-ship check for why this call moved here (cold-1).
+  // Reached whenever the lane is not yet delivered, with or without a
+  // pending push (R1) — `buildTitleAndBody` stays deferred until here, only
+  // once we know a push already happened or a reconcile is about to run.
   const { title, body } = buildTitleAndBody({ git, root, ref, branch });
 
   const pr = await findOrCreatePr({ vcs, project, branch, title, body });
@@ -288,7 +383,10 @@ export async function shipLane({
   // from `mrList`'s own shape, the same way an `mrAutoMerge` refusal
   // self-heals one row below it in the same table.
   if (pr.number === null) {
-    return { ...base, title, body, ahead, behind, remoteRefPresent, pushed: true, diverged: false, pr, autoMerge: null };
+    return {
+      ...base, title, body, ahead, behind, remoteRefPresent, pushed, diverged: false, pr, autoMerge: null,
+      delivered, deliveredReason, reconciled: true,
+    };
   }
 
   // E2 (cold review): the port's own contract says `mrAutoMerge` never
@@ -306,5 +404,8 @@ export async function shipLane({
     autoMerge = { enabled: false, reason: err?.message ?? String(err) };
   }
 
-  return { ...base, title, body, ahead, behind, remoteRefPresent, pushed: true, diverged: false, pr, autoMerge };
+  return {
+    ...base, title, body, ahead, behind, remoteRefPresent, pushed, diverged: false, pr, autoMerge,
+    delivered, deliveredReason, reconciled: true,
+  };
 }

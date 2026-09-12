@@ -140,6 +140,45 @@ test('laneSweepLine: exit 0, pushed → level "ok", the shipped key with ref/num
   assert.deepEqual(line.params, { ref: 'refs/heads/memory/x-2026-09-10', number: 42 });
 });
 
+// R11 (#920): a reconciliation-without-a-push (find/create + arm ran, with
+// zero new commits) must render as work, never as "nothing" — a false
+// negative about memory delivery.
+
+test('laneSweepLine: reconciled without a push → level "ok", the reconciled key with ref/number params', () => {
+  const line = laneSweepLine({
+    skipped: false,
+    status: 0,
+    unparsed: false,
+    outcome: { pushed: false, reconciled: true, pr: { number: 42 }, ref: 'refs/heads/memory/x-2026-09-10' },
+  });
+  assert.equal(line.level, 'ok');
+  assert.equal(line.key, 'day.memory.laneSweep.reconciled');
+  assert.deepEqual(line.params, { ref: 'refs/heads/memory/x-2026-09-10', number: 42 });
+});
+
+test('laneSweepLine: pushed:true still wins over reconciled:true (pushed is checked first)', () => {
+  const line = laneSweepLine({
+    skipped: false,
+    status: 0,
+    unparsed: false,
+    outcome: { pushed: true, reconciled: true, pr: { number: 7 }, ref: 'refs/heads/memory/x-2026-09-10' },
+  });
+  assert.equal(line.level, 'ok');
+  assert.equal(line.key, 'day.memory.laneSweep.shipped');
+});
+
+test('laneSweepLine: pushed:false and reconciled:false still falls through to "nothing"', () => {
+  const line = laneSweepLine({
+    skipped: false,
+    status: 0,
+    unparsed: false,
+    outcome: { pushed: false, reconciled: false, collected: 0 },
+  });
+  assert.equal(line.level, 'ok');
+  assert.equal(line.key, 'day.memory.laneSweep.nothing');
+  assert.deepEqual(line.params, {});
+});
+
 test('laneSweepLine: exit 0, nothing pushed → level "ok", the nothing key, no params', () => {
   const line = laneSweepLine({
     skipped: false,

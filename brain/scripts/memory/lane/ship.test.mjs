@@ -45,14 +45,27 @@ const ok = (stdout = '') => ({ status: 0, stdout, stderr: '' });
 const fail = (stderr, status = 1) => ({ status, stdout: '', stderr });
 
 /** The standard "ahead of origin by one, no divergence" survey + diff rules,
- * shared by every test that reaches the push step. */
-function surveyOkRules({ behind = '0', ahead = '1', diffPaths = ['.memory/records/2026-09-rec-1.jsonl'] } = {}) {
+ * shared by every test that reaches the push step.
+ *
+ * `diffPaths` answers `surveyDelivery`'s first call (three-dot, `origin/main
+ * ...<ref>` — byte-identical to `buildTitleAndBody`'s own diff, R4's
+ * deliberate collision) and `undeliveredPaths` answers its second (`--`
+ * pathspec). The `--` rule is checked FIRST (first-match-wins, R4's ordered
+ * pair) so the two argvs are never confused. `undeliveredPaths` defaults to
+ * `diffPaths` (undelivered) so every pre-#920 test keeps its behavior and
+ * assertions verbatim. */
+function surveyOkRules({
+  behind = '0', ahead = '1',
+  diffPaths = ['.memory/records/2026-09-rec-1.jsonl'],
+  undeliveredPaths = diffPaths,
+} = {}) {
   return [
     { match: (a) => a[0] === 'rev-parse', result: ok('deadbeef') },
     { match: (a) => a[0] === 'fetch', result: ok() },
     { match: (a) => a[0] === 'rev-list' && a[2] === `${REF}..refs/remotes/origin/${BRANCH}`, result: ok(behind) },
     { match: (a) => a[0] === 'rev-list' && a[2] === `refs/remotes/origin/${BRANCH}..${REF}`, result: ok(ahead) },
-    { match: (a) => a[0] === 'diff', result: ok(diffPaths.join('\n')) },
+    { match: (a) => a[0] === 'diff' && a.includes('--'), result: ok(undeliveredPaths.join('\n')) },
+    { match: (a) => a[0] === 'diff' && a[2] === `origin/main...${REF}`, result: ok(diffPaths.join('\n')) },
   ];
 }
 
@@ -90,7 +103,7 @@ test('a full run produces the outcome shape, pushed:true, pr.number set', async 
   assert.equal(result.dryRun, false);
 });
 
-test('commit:null and ahead:0 (already shipped) is a no-op: zero push/list/create/arm calls', async () => {
+test('(a) ref exists, remote matches, lane delivered ⇒ no-op: zero push/list/create/arm calls', async () => {
   const { git, calls } = fakeGit([
     { match: (a) => a[0] === 'rev-parse', result: ok('deadbeef') },
     { match: (a) => a[0] === 'fetch', result: ok() },
@@ -113,6 +126,190 @@ test('commit:null and ahead:0 (already shipped) is a no-op: zero push/list/creat
   assert.equal(result.title, null);
   assert.equal(result.body, null);
   assert.ok(!calls.some((a) => a[0] === 'push'), 'must never push when nothing to ship');
+  assert.deepEqual(vcsCalls, { mrList: 0, mrCreate: 0, mrAutoMerge: 0 });
+  // R6/R13: delivered content-containment makes this a true no-op.
+  assert.equal(result.delivered, true);
+  assert.equal(result.deliveredReason, null);
+  assert.equal(result.reconciled, false);
+});
+
+test('(b) M1 regression pin: ref exists, ahead:0, records absent from origin/main ⇒ no push, but find/create + arm run', async () => {
+  const { git, calls } = fakeGit([
+    { match: (a) => a[0] === 'rev-parse', result: ok('deadbeef') },
+    { match: (a) => a[0] === 'fetch', result: ok() },
+    { match: (a) => a[0] === 'rev-list' && a[2] === `${REF}..refs/remotes/origin/${BRANCH}`, result: ok('0') },
+    { match: (a) => a[0] === 'rev-list' && a[2] === `refs/remotes/origin/${BRANCH}..${REF}`, result: ok('0') },
+    { match: (a) => a[0] === 'diff' && a.includes('--'), result: ok('.memory/records/2026-09-rec-1.jsonl') },
+    { match: (a) => a[0] === 'diff', result: ok('.memory/records/2026-09-rec-1.jsonl') },
+  ]);
+  const { vcs, calls: vcsCalls } = fakeVcs();
+
+  const result = await shipLane({
+    root: '/repo', project: 'x/y', tier: 'lite', host: 'test-host', date: '2026-09-09',
+    collect: fakeCollect({ commit: null }), git, vcs,
+  });
+
+  assert.equal(result.pushed, false, 'nothing new is queued, so no push happens');
+  assert.equal(result.reconciled, true, 'the reconcile tail must still run for an undelivered lane');
+  assert.ok(result.pr && result.pr.number === 42);
+  assert.deepEqual(vcsCalls, { mrList: 1, mrCreate: 1, mrAutoMerge: 1 });
+  assert.ok(!calls.some((a) => a[0] === 'push'), 'the M1 retry must never push when nothing is queued');
+});
+
+test('row 7: PR merged, remote branch auto-deleted (remoteRefPresent:false, ahead:3), delivered ⇒ zero push/list/create/arm', async () => {
+  const { git, calls } = fakeGit([
+    { match: (a) => a[0] === 'rev-parse', result: ok('deadbeef') },
+    { match: (a) => a[0] === 'fetch', result: fail(`fatal: couldn't find remote ref refs/heads/${BRANCH}`) },
+    { match: (a) => a[0] === 'rev-list' && a[1] === '--count' && a[2] === REF, result: ok('3') },
+    { match: (a) => a[0] === 'diff', result: ok('') },
+  ]);
+  const { vcs, calls: vcsCalls } = fakeVcs();
+
+  const result = await shipLane({
+    root: '/repo', project: 'x/y', tier: 'lite', host: 'test-host', date: '2026-09-09',
+    collect: fakeCollect({ commit: null }), git, vcs,
+  });
+
+  assert.equal(result.remoteRefPresent, false);
+  assert.equal(result.ahead, 3);
+  assert.equal(result.delivered, true);
+  assert.equal(result.pushed, false);
+  assert.ok(!calls.some((a) => a[0] === 'push'), 'a delivered lane must never re-push a merged, deleted branch');
+  assert.deepEqual(vcsCalls, { mrList: 0, mrCreate: 0, mrAutoMerge: 0 });
+});
+
+test('reconcile-only path (M1 shape): mrList throwing is still fatal prLookupFailed, mrCreate never called', async () => {
+  const { git } = fakeGit([
+    { match: (a) => a[0] === 'rev-parse', result: ok('deadbeef') },
+    { match: (a) => a[0] === 'fetch', result: ok() },
+    { match: (a) => a[0] === 'rev-list' && a[2] === `${REF}..refs/remotes/origin/${BRANCH}`, result: ok('0') },
+    { match: (a) => a[0] === 'rev-list' && a[2] === `refs/remotes/origin/${BRANCH}..${REF}`, result: ok('0') },
+    { match: (a) => a[0] === 'diff' && a.includes('--'), result: ok('.memory/records/2026-09-rec-1.jsonl') },
+    { match: (a) => a[0] === 'diff', result: ok('.memory/records/2026-09-rec-1.jsonl') },
+  ]);
+  const { vcs, calls: vcsCalls } = fakeVcs({
+    mrList: async () => { throw new Error('gh api pulls failed: rate limited'); },
+  });
+
+  await assert.rejects(
+    () => shipLane({
+      root: '/repo', project: 'x/y', tier: 'lite', host: 'test-host', date: '2026-09-09',
+      collect: fakeCollect({ commit: null }), git, vcs,
+    }),
+    (err) => { assert.equal(err.prLookupFailed, true); return true; },
+  );
+  assert.equal(vcsCalls.mrCreate, 0);
+});
+
+test('argv collision (Risk 4): on a pushing, undelivered run both the three-dot and the -- pathspec diff argvs appear, distinct', async () => {
+  const { git, calls } = fakeGit([...surveyOkRules(), { match: (a) => a[0] === 'push', result: ok() }]);
+  const { vcs } = fakeVcs();
+
+  await shipLane({
+    root: '/repo', project: 'x/y', tier: 'lite', host: 'test-host', date: '2026-09-09',
+    collect: fakeCollect(), git, vcs,
+  });
+
+  const diffCalls = calls.filter((a) => a[0] === 'diff');
+  const threeDot = diffCalls.filter((a) => a[2] === `origin/main...${REF}` && !a.includes('--'));
+  const pathspec = diffCalls.filter((a) => a.includes('--'));
+  assert.ok(threeDot.length >= 1, 'the three-dot diff argv must appear');
+  assert.ok(pathspec.length >= 1, 'the -- pathspec diff argv must appear');
+  for (const argv of pathspec) assert.notDeepEqual(argv, threeDot[0], 'the two diff argvs must never be confused');
+});
+
+test('surveyDelivery: baseFetched:false short-circuits with zero delivery-diff calls, the run still acts, delivered:null/baseStale', async () => {
+  const { git, calls } = fakeGit([
+    { match: (a) => a[0] === 'rev-parse', result: ok('deadbeef') },
+    { match: (a) => a[0] === 'fetch', result: ok() },
+    { match: (a) => a[0] === 'rev-list' && a[2] === `${REF}..refs/remotes/origin/${BRANCH}`, result: ok('0') },
+    { match: (a) => a[0] === 'rev-list' && a[2] === `refs/remotes/origin/${BRANCH}..${REF}`, result: ok('1') },
+    { match: (a) => a[0] === 'diff', result: ok('.memory/records/2026-09-rec-1.jsonl') }, // only buildTitleAndBody may reach this
+    { match: (a) => a[0] === 'push', result: ok() },
+  ]);
+  const { vcs } = fakeVcs();
+
+  const result = await shipLane({
+    root: '/repo', project: 'x/y', tier: 'lite', host: 'test-host', date: '2026-09-09',
+    collect: fakeCollect({ baseFetched: false }), git, vcs,
+  });
+
+  assert.equal(result.pushed, true, 'an unreadable delivery state must never block a pending push');
+  assert.equal(result.delivered, null);
+  assert.equal(result.deliveredReason, 'baseStale');
+  assert.equal(result.reconciled, true);
+  const diffCalls = calls.filter((a) => a[0] === 'diff');
+  assert.equal(diffCalls.length, 1, 'surveyDelivery must make zero diff calls when baseFetched is false — only buildTitleAndBody\'s own call may run');
+});
+
+test('surveyDelivery: the delivery diff exits non-zero ⇒ the run still acts, delivered:null/diffFailed', async () => {
+  const { git } = fakeGit([
+    { match: (a) => a[0] === 'rev-parse', result: ok('deadbeef') },
+    { match: (a) => a[0] === 'fetch', result: ok() },
+    { match: (a) => a[0] === 'rev-list' && a[2] === `${REF}..refs/remotes/origin/${BRANCH}`, result: ok('0') },
+    { match: (a) => a[0] === 'rev-list' && a[2] === `refs/remotes/origin/${BRANCH}..${REF}`, result: ok('1') },
+    { match: (a) => a[0] === 'diff', result: fail("fatal: ambiguous argument 'origin/main...refs/heads/memory/test-host-2026-09-09': unknown revision or path not in the working tree.") },
+    { match: (a) => a[0] === 'push', result: ok() },
+  ]);
+  const { vcs, calls: vcsCalls } = fakeVcs();
+
+  const result = await shipLane({
+    root: '/repo', project: 'x/y', tier: 'lite', host: 'test-host', date: '2026-09-09',
+    collect: fakeCollect(), git, vcs,
+  });
+
+  assert.equal(result.pushed, true);
+  assert.equal(result.delivered, null);
+  assert.equal(result.deliveredReason, 'diffFailed');
+  assert.equal(result.reconciled, true);
+  assert.equal(vcsCalls.mrCreate, 1);
+});
+
+test('surveyDelivery: the SECOND (-- pathspec) delivery diff exits non-zero while the first succeeds ⇒ delivered:null/diffFailed, the run still reconciles', async () => {
+  // Adversarial-review regression pin: mutating ship.mjs's undeliveredDiff
+  // failure branch to `delivered: true` must fail THIS test — a false
+  // "delivered" on an unreadable second diff would strand the lane's
+  // records on origin forever (R5).
+  const { git, calls } = fakeGit([
+    { match: (a) => a[0] === 'diff' && a.includes('--'), result: fail("fatal: ambiguous argument 'refs/heads/memory/test-host-2026-09-09': unknown revision or path not in the working tree.") },
+    ...surveyOkRules(),
+    { match: (a) => a[0] === 'push', result: ok() },
+  ]);
+  const { vcs, calls: vcsCalls } = fakeVcs();
+
+  const result = await shipLane({
+    root: '/repo', project: 'x/y', tier: 'lite', host: 'test-host', date: '2026-09-09',
+    collect: fakeCollect(), git, vcs,
+  });
+
+  assert.equal(result.pushed, true);
+  assert.equal(result.delivered, null);
+  assert.equal(result.deliveredReason, 'diffFailed');
+  assert.equal(result.reconciled, true, 'a failed second diff must still attempt reconciliation, never skip it');
+  assert.equal(vcsCalls.mrCreate, 1);
+  const diffCalls = calls.filter((a) => a[0] === 'diff');
+  assert.ok(
+    diffCalls.some((a) => a[2] === `origin/main...${REF}` && !a.includes('--')),
+    'the first (three-dot) diff must have succeeded before the second one failed',
+  );
+});
+
+test('surveyDelivery: non-empty lanePaths but the -- pathspec diff reports zero undelivered paths ⇒ genuine content containment, delivered:true, zero push/list/create/arm', async () => {
+  const { git, calls } = fakeGit([
+    ...surveyOkRules({ ahead: '0', undeliveredPaths: [] }),
+  ]);
+  const { vcs, calls: vcsCalls } = fakeVcs();
+
+  const result = await shipLane({
+    root: '/repo', project: 'x/y', tier: 'lite', host: 'test-host', date: '2026-09-09',
+    collect: fakeCollect({ commit: null }), git, vcs,
+  });
+
+  assert.equal(result.delivered, true);
+  assert.equal(result.deliveredReason, null);
+  assert.equal(result.pushed, false);
+  assert.equal(result.pr, null);
+  assert.ok(!calls.some((a) => a[0] === 'push'));
   assert.deepEqual(vcsCalls, { mrList: 0, mrCreate: 0, mrAutoMerge: 0 });
 });
 
@@ -140,6 +337,10 @@ test('cold-1 (PR #902 review): a ref that never existed locally is nothing-to-sh
   // ref that simply never existed.
   assert.equal(result.title, null, 'nothing-to-ship must carry title:null, not a fabricated title');
   assert.equal(result.body, null, 'nothing-to-ship must carry body:null, not a fabricated body');
+  // R2: tip === null is the structural no-op — never surveyed for delivery.
+  assert.equal(result.delivered, null);
+  assert.equal(result.deliveredReason, 'noRef');
+  assert.equal(result.reconciled, false);
 });
 
 test("A1 recovery case: commit:null but ahead:1 (a prior push failed) still pushes and opens/arms", async () => {
@@ -190,7 +391,10 @@ test('behind > 0 (diverged) refuses before push: diverged, exit non-zero, zero p
     { match: (a) => a[0] === 'fetch', result: ok() },
     { match: (a) => a[0] === 'rev-list' && a[2] === `${REF}..refs/remotes/origin/${BRANCH}`, result: ok('2') },
     { match: (a) => a[0] === 'rev-list' && a[2] === `refs/remotes/origin/${BRANCH}..${REF}`, result: ok('1') },
-    { match: (a) => a[0] === 'diff', result: ok('') },
+    // Non-empty: an undelivered lane (delivered:false/null), never true — a
+    // delivered lane would short-circuit as a no-op before this divergence
+    // check is ever reached (see the decision table's `behind>0` row).
+    { match: (a) => a[0] === 'diff', result: ok('.memory/records/2026-09-rec-1.jsonl') },
   ]);
   const { vcs, calls: vcsCalls } = fakeVcs();
 
@@ -553,6 +757,10 @@ test('--dry-run: vcs is null and a git fake that throws on push/fetch still lets
   assert.equal(result.pr, null);
   assert.equal(result.dryRun, true);
   assert.equal(result.autoMerge, null);
+  // R12: shape uniformity only — dry-run never surveys delivery.
+  assert.equal(result.delivered, null);
+  assert.equal(result.deliveredReason, 'dryRun');
+  assert.equal(result.reconciled, false);
 });
 
 // ── Requirement: no credential value ever appears in the returned shape ─────

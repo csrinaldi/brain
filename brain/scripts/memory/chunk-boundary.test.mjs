@@ -7,7 +7,7 @@
 // runs is changed by this file; it only asserts what already imports what.
 //
 // RED-first (design A4, the one real trap): `lane-scrub.test.mjs:88-94`'s
-// `source.split('\n')` + `/^\s*import\b/` idiom cannot see `cli.mjs:615-617`,
+// `source.split('\n')` + `/^\s*import\b/` idiom cannot see `cli.mjs:620-622`,
 // a 3-line `const { … } = await import(\n  "./lib/migrate-v1.mjs"\n);`. This
 // guard matches over the WHOLE source with one regex covering both the
 // static and the dynamic spelling, so it sees the edge the line-filtered
@@ -167,7 +167,7 @@ const EXPORT_KW = 'ex' + 'port';
 // `_defaultReadObservations` caller) is gone — `share()` has no observation
 // reader left at all. Only the two rows below remain.
 const ALLOWLIST = [
-  { file: 'brain/scripts/memory/cli.mjs', line: 615, retiredBy: '2.4 — ledger row 7' },
+  { file: 'brain/scripts/memory/cli.mjs', line: 620, retiredBy: '2.4 — ledger row 7' },
   { file: 'brain/scripts/memory/lib/migrate-v1.test.mjs', line: 13, retiredBy: '2.4 — ledger row 7' },
 ];
 
