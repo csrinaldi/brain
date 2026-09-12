@@ -119,6 +119,19 @@ test('resolveActorKind: no default marker present, none configured ⇒ human, ev
   }
 });
 
+test(
+  'resolveActorKind: a blank sibling marker (AI_AGENT) is dropped from the evidence once a LATER marker ' +
+    '(CODEX_THREAD_ID) decisively wins ⇒ agent, evidence names only the winner (F6, fresh-context review — ' +
+    'pinned so a future edit does not silently start mentioning blank siblings on the agent path)',
+  () => {
+    const r = resolveActorKind({ env: { [AGENT_ENV_DEFAULT]: '', CODEX_THREAD_ID: 't' } });
+    assert.equal(r.actorKind, 'agent');
+    assert.equal(r.marker, 'CODEX_THREAD_ID');
+    assert.equal(r.evidence, 'actorKind agent from env CODEX_THREAD_ID');
+    assert.equal(r.evidence.includes(AGENT_ENV_DEFAULT), false, `blank sibling must not appear: ${r.evidence}`);
+  },
+);
+
 test('resolveActorKind: CODEX_THREAD_ID set but EMPTY ⇒ human, evidence names it "set but empty" (#888 discipline)', () => {
   const r = resolveActorKind({ env: { CODEX_THREAD_ID: '' } });
   assert.equal(r.actorKind, 'human');
@@ -130,6 +143,19 @@ test('resolveActorKind: explicit brain.agentEnv still wins over the widened defa
   const r = resolveActorKind({ env: { CODEX_THREAD_ID: 'thread-abc123', ONLY_THIS: 'yes' }, agentEnvConfig: 'ONLY_THIS' });
   assert.equal(r.actorKind, 'agent');
   assert.equal(r.marker, 'ONLY_THIS');
+});
+
+// A mutation from REPLACE to APPEND semantics kills zero tests above: the
+// prior override test puts the configured name (`ONLY_THIS`) first in the
+// env object, so it is checked first whether the defaults are replaced OR
+// merely appended to. This case puts a DEFAULT marker in the env while the
+// CONFIGURED name is absent — REPLACE (correct) never consults the default,
+// so this must stay 'human'; an APPEND mutant would find the default and
+// wrongly return 'agent' (fresh-context review, F2).
+test('resolveActorKind: brain.agentEnv REPLACES the defaults — a default marker present while the configured name is absent still yields human', () => {
+  const r = resolveActorKind({ env: { [AGENT_ENV_DEFAULT]: 'claude-code' }, agentEnvConfig: 'ONLY_THIS' });
+  assert.equal(r.actorKind, 'human', `defaults must not leak in when an override is configured: ${JSON.stringify(r)}`);
+  assert.equal(r.marker, null);
 });
 
 // ---------------------------------------------------------------------------

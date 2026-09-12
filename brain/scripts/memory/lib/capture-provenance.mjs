@@ -43,6 +43,11 @@ export const AGENT_ENV_DEFAULT = 'AI_AGENT';
  * A runtime NOT in this list is not "unsupported" — it is "not yet
  * independently verified here". Add it via `brain.agentEnv` first; promote
  * it to this list once verified, per the pattern above, not on inference.
+ *
+ * Accepted cost (#939 ruling, 2026-09-12): a human typing inside a terminal
+ * that exports one of these markers is recorded `actorKind: agent`, because
+ * the session genuinely carries the marker — this list cannot and does not
+ * try to tell a human's keystrokes apart from the agent runtime hosting them.
  */
 export const AGENT_ENV_DEFAULTS = [AGENT_ENV_DEFAULT, 'CLAUDECODE', 'CODEX_THREAD_ID'];
 
@@ -94,7 +99,7 @@ export function resolveActor({ configured }) {
 export function resolveActorKind({ env = {}, agentEnvConfig } = {}) {
   const names = typeof agentEnvConfig === 'string' && agentEnvConfig.trim()
     ? agentEnvConfig.split(',').map((s) => s.trim()).filter(Boolean)
-    : AGENT_ENV_DEFAULTS;
+    : [...AGENT_ENV_DEFAULTS];
 
   const emptyNames = [];
   for (const name of names) {
@@ -104,6 +109,13 @@ export function resolveActorKind({ env = {}, agentEnvConfig } = {}) {
       emptyNames.push(name);
       continue;
     }
+    // `emptyNames` gathered so far is deliberately DROPPED on this path
+    // (fresh-context review F6): the record is already decisively `agent` —
+    // a blank sibling marker (e.g. `AI_AGENT=''` beside a set `CLAUDECODE`)
+    // is not evidence the decision needs, only the marker that actually won
+    // is. The #888 set-but-blank discipline this array exists for applies to
+    // the HUMAN path below, where "checked but blank" is the only fact
+    // available; here a stronger fact (a live marker) already settled it.
     return { actorKind: 'agent', marker: name, rawValue: raw, evidence: `actorKind agent from env ${name}` };
   }
 
