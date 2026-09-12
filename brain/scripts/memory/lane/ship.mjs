@@ -314,15 +314,20 @@ export async function shipLane({
   // R1 (#920): "is anything queued to push?" and "is anything queued to
   // reconcile?" are two independent questions — `pendingPush` is the exact
   // predicate the old single early-return used to gate everything on.
+  //
+  // Scope boundary this predicate does NOT cover (both filed, both R10 of
+  // #920's proposal): #936 tracks that this whole call graph always
+  // computes `date = today` (`cli.mjs:488`), so a lane stranded by an
+  // outage across midnight is never revisited by anything here — a
+  // caller-side sweep of prior-day refs, a different module, is that
+  // follow-up's own shape. #930 tracks that the VCS port's `mrList` shape
+  // (`{number, title, headBranch}`) carries no merge-state field, so
+  // `surveyDelivery` below reads git directly instead of asking the port.
   const pendingPush = commit !== null || ahead > 0;
 
   // R3/R4/R5 (#920): the delivery read — content containment against
   // `origin/main`, never commit ancestry (a squash-merged lane is never an
-  // ancestor of `main` — see surveyDelivery()'s own doc comment). Its
-  // #936 (R10 follow-up) tracks the ONE case this predicate cannot see:
-  // a ref from a PRIOR day, since every caller in this call graph always
-  // computes `date = today` (cli.mjs:488) — out of scope here by design,
-  // filed separately, referenced again at the outcome-shape return below.
+  // ancestor of `main` — see surveyDelivery()'s own doc comment).
   const { delivered, reason: deliveredReason } = surveyDelivery({ git, root, ref, baseFetched });
 
   // R6/R7 (#920): the lane's records are already on `origin/main`'s
