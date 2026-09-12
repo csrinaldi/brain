@@ -115,3 +115,86 @@ production, as design predicted — not presented as carrying the fix.
 ## Issues found
 
 None.
+
+## Review response batch (fresh adversarial review, post-32/32)
+
+Answers a second, fresh adversarial review of this fix. New commits `af425cd5`, `bea5eedd`
+on top of the 7 already recorded above (still on `fix/issue-942-deny-fail-closed`, worktree
+`brain-issue-942`). Strict TDD throughout.
+
+### F1 (HIGH) — T6 was guarded only transitively, not isolated — FIXED
+
+Confirmed the reviewer's measurement: with the 270b71cf fixup alone (diffNameOnly/fetchReviews
+injected), reverting `defaultReadBotAllowlist` (`:257-262`, the DENY reader R6/R7 exist for)
+back to `catch { return [] }` left T6 green (47/47) — the sibling ALLOW reader
+`defaultReadApprovalActors` (`:282-287`) throws on the same malformed config right after
+`readBotAllowlist` runs (`:392-393`), producing the identical `fail` verdict and masking the
+regression.
+
+Fix: injected `readOverrideActors: () => []` and `readConfig: () => ({})` into T6
+(`brain-writes-reviewed.test.mjs`), with a comment naming why all four deps are pinned.
+Commit `af425cd5`.
+
+**Isolation proof (mutation guard, re-run after the fix):**
+- Reverted ONLY `defaultReadBotAllowlist` (`:257-262`) to `catch { return []; }`.
+  `node --test vcs/brain-writes-reviewed.test.mjs` → **46/47, T6 RED**
+  (`AssertionError: 'pass' !== 'fail'`, `expected: 'fail'`, `actual: 'pass'`).
+- Reverted the mutation. Re-ran → **47/48 → 47/47 GREEN** (T13 didn't exist yet at that point
+  in the sequence; both proof runs were against the T6-isolation-only state).
+
+**T9/T9b (approve/cli.mjs) checked, found already genuinely isolated — no change needed.**
+Both call `defaultReadDenyActors(dir)`/`defaultReadAgentActors(dir)` DIRECTLY as standalone
+unit tests (`approve/cli.test.mjs:315-342`) — no wrapper, no sibling reader in the call path,
+so there is nothing for a sibling to mask. T4 (`actor-check.test.mjs:2468`) independently
+re-confirmed genuinely isolated for the same reason the reviewer gave (sibling readers there
+still swallow, so only `defaultReadDenyActors`'s own throw can produce the `fail`).
+
+### F2 (LOW) — resolveTierForFailure's never-throws contract had a real hole — FIXED
+
+Confirmed via RED test before fixing: `deps.tier` was returned unvalidated
+(`if (deps.tier) return deps.tier;`), and the caller's `resolveGatePolicy(gate, tier)`
+(`:468`, OUTSIDE `resolveTierForFailure`'s own try) throws for a tier with no matrix cell —
+escaping uncaught. Added T13, ran RED first:
+`runBrainWritesReviewedCheck must never throw: governance-tiers: gate "brain-writes-reviewed"
+has no matrix cell for tier "bogus-tier"` (48 tests, 1 failing).
+
+**Choice**: made the helper genuinely never-throwing (did NOT just correct the docstring).
+Reason: `resolveTierForFailure` runs INSIDE a catch that is already handling a prior failure —
+correcting only the docstring would leave `runBrainWritesReviewedCheck` able to throw from
+inside its own catch block, which is a worse contract for a function whose entire purpose is
+"attribute a failure to a tier without ever failing itself." Validated `deps.tier` against
+the imported `TIERS` set before trusting it; an invalid value now falls through to the
+existing config-based resolution path (and its catch), mirroring how `resolveTier()` already
+fail-closes to `'standard'` for an unrecognized `governance.tier` read from disk. Re-ran → GREEN
+(48/48). Commit `bea5eedd`.
+
+`actor-check.mjs:1181` carries the IDENTICAL pre-existing hazard (unvalidated `deps.tier` fed
+to `resolveGatePolicy` outside its own try). Left untouched per explicit scope — filed as a
+separate pre-existing issue, not fixed here, and noted in the commit message so it isn't lost.
+
+### F3 (trivial) — stale line references — FIXED
+
+In `brain-writes-reviewed.mjs`'s docstrings: `:354` → `:392` (readBotAllowlist call site),
+`:407-415` → `:458-476` (tier-aware catch), and `:358` → `:396` (`overrideLabelPresent`,
+found stale in the same block while fixing the other two, same commit).
+
+### Out of scope (explicitly, not touched)
+
+- `actor-check.mjs`/`approve/cli.mjs` read/write root asymmetry — pre-existing, filed
+  separately by the reviewer.
+- Rebase onto current `origin/main` — left to the maintainer before push (branch still 8
+  ahead / 1 behind `origin/main` at the time of this batch; no push/PR/gh performed here).
+- `.memory/index.jsonl`/`.memory/manifest.json` and the record commit `44e65db8` — untouched,
+  as instructed.
+
+### Test counts after this batch
+
+- Focused (`lib/brain-config.test.mjs` + `vcs/actor-check.test.mjs` +
+  `vcs/brain-writes-reviewed.test.mjs` + `approve/cli.test.mjs`): **256/256 pass**.
+- Full `npm test`: **5268/5268 pass** (5267 baseline + T13).
+
+### Status (updated)
+
+34/34 tasks + 2 review-response commits complete. Working tree clean. Ready for verify.
+No `brain/core/**`/`brain/project/**` edit; no push/PR/`gh`/`--force`/`--no-verify`/
+merge/rebase performed.
