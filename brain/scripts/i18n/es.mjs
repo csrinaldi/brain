@@ -291,6 +291,18 @@ export default {
   'memory.resolveIndex.staged': '✓ conflicto del índice resuelto — {count} registro(s) regenerados desde records/ y agregados al stage. Completá el merge con `git commit`.',
   'memory.resolveIndex.failed': '✗ resolve-index falló — {message}',
 
+  // ── memory/lib/duplicates.mjs — formatDuplicateReport() (issue #574, promovido #638) ──
+  'memory.duplicates.summary': '⚠ {ids} id(s) de registro duplicado(s) en .memory/records/ — {lines} línea(s) física(s) excedente(s) colapsada(s) en {surface}.',
+  'memory.duplicates.summaryWithIndex': '⚠ {ids} id(s) de registro duplicado(s) en .memory/records/ — {lines} línea(s) física(s) excedente(s) colapsada(s) en {surface} ({total} línea(s) física(s) → {indexCount} indexada(s)).',
+  'memory.duplicates.why': '  Deduplicado, no rechazado: `merge=union` concatena ambas copias cuando dos ramas tienen el mismo registro (ADR-0017, REQ-MF-3), así que esto es el transporte funcionando, no un store corrupto — pero `wc -l .memory/records/*.jsonl` sobreestima el store por {lines}, y solo se reporta porque estás leyendo esto.',
+  'memory.duplicates.divergent': '  {count} de ellos DISCREPAN fuera de los campos hasheados (`source` no está hasheado, así que dos copias de un mismo registro pueden diferir ahí — el propio export→import→export de brain lo ensancha). Resuelto first-wins: la línea más antigua del archivo mensual más antiguo es la que queda indexada, tal como resuelve el camino de lectura. Marcado [divergent] abajo — vale la pena mirarlo, no es un error.',
+  'memory.duplicates.brief': '  Corré `npm run memory:reindex` para ver las ubicaciones por id.',
+  'memory.duplicates.group': '  {id} ×{count} — {locations}',
+  'memory.duplicates.groupDivergent': '  {id} ×{count} [divergent] — {locations}',
+  'memory.duplicates.moreOccurrences': ', +{count} más',
+  'memory.duplicates.moreGroups': '  … +{count} id(s) duplicado(s) más.',
+  'memory.duplicates.unknownId': '(id desconocido)',
+
   // ── memory/cli.mjs — split-records (issue #677) ──────────────────────────────
   'memory.splitRecords.plan':    'plan — {lines} línea(s) de registro en {months} archivo(s) mensual(es) pasan a ser {writes} archivo(s) por registro. NO se escribió nada. Volvé a correrlo con --apply para ejecutarlo.',
   'memory.splitRecords.done':    '✓ split completo — {written} archivo(s) de registro escritos, {alreadyPresent} ya presentes, {months} archivo(s) mensual(es) borrados después de verificar que cada registro se relee.',
