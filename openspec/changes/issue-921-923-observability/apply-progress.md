@@ -82,3 +82,112 @@ its own RED run before implementation (2/40 failed, then 40/40 after).
   did not open a PR, did not hit a real remote.
 - Epic tasks 4.7 and 4.9 in `openspec/changes/issue-864-memory-2-0/tasks.md`
   ticked `[x]`, cross-referencing this change.
+
+## Fresh adversarial review batch (F1–F5)
+
+Branch `fix/issue-921-923-observability`, worktree
+`/home/gandalf/IA/brain-fix-observability`. All five review findings closed.
+
+### Commits
+
+| Commit | Summary |
+|---|---|
+| `6f123ff2` | fix(memory): cover the ship op's worktreeSkipped print, guard and name the reason (#921) |
+| `8741100f` | fix(memory): day:start lane sweep distinguishes a skipped worktree from "nothing to ship" (#921, #923) |
+| `84926cb3` | docs(sdd): reword 4.9's checkbox to what issue-921-923-observability actually delivered |
+
+### F1 (HIGH) — ship op's print had zero coverage
+
+Added `#921 — memory:ship prints memory.collect.worktreeSkipped...` to
+`cli.ship.test.mjs`, mirroring `cli.collect.test.mjs`'s own equivalent.
+
+RED/GREEN proof (temporary mutation, reverted before commit):
+- Deleted the entire skippedWorktrees print block in the `ship` op →
+  `node --test cli.ship.test.mjs`: **23/24 pass, 1 fail** — only the new
+  test failed; all 23 pre-existing ship tests stayed green (confirms the
+  reviewer's "zero coverage" claim: nothing else depended on this block).
+- Restored the block → **24/24 pass** (GREEN).
+
+### F2 (HIGH) — day:start sweep masked the skipped-worktree fact
+
+`laneSweepLine()` (`day-start-sweep.mjs`) now branches on the already-parsed
+`outcome.skippedWorktrees` (never reads stderr — `runLaneSweep()` above never
+captures it) as a replacement for the `nothing` fallback only. Added
+`day.memory.laneSweep.worktreeSkipped` to `en.mjs`/`es.mjs`.
+
+Operator-visible text, before vs. after:
+- Nothing pending, nothing skipped: `Lane sweep: nothing to ship.` (unchanged).
+- Nothing pending, 1 worktree skipped: **before** — identical line, the skip
+  was invisible; **after** — `Lane sweep: nothing to ship, but 1 worktree(s)
+  could not be inspected: /repo/wt-b (fatal: not a git repository)`.
+
+Scope boundary (documented, not silently narrowed): a `pushed`/`reconciled`
+run that also skipped a worktree still renders `shipped`/`reconciled` —
+checked and pinned by its own test
+(`pushed:true with a skipped worktree still renders "shipped"`). That
+combination's count/paths remain available via `--json` and the SessionEnd
+log; folding it into the single-line render was judged out of this fix's
+scope.
+
+SessionEnd half: confirmed unchanged and correct —
+`session-end-ship.mjs:176-186` passes `stdio: ['ignore', fd, fd]`, so
+stdout+stderr both land in the same fd; it already inherits the ship
+child's stderr verbatim, no code change needed there.
+
+RED/GREEN proof (temporary stash of `day-start-sweep.mjs` only, test file
+kept): pre-fix → **19/20 pass, 1 fail** (only the new worktreeSkipped test);
+post-fix (stash popped) → **20/20 pass**.
+
+### F3 (LOW) — unguarded reads at cli.mjs:365/523
+
+Both sites now read `result.skippedWorktrees ?? []`, mirroring `ship.mjs`'s
+own defensive default. No new automated regression test was added for this
+guard specifically: both real producers (`collect.mjs`, `ship.mjs`) always
+populate the field today and there is no CLI-level seam to inject a fake
+`collect` step (unlike `ship`'s own `BRAIN_VCS_TEST_MODULE` seam, which only
+fakes the vcs port, not `collect`) — so no reachable path exists, through
+production code or any existing test harness, that produces the pre-guard
+crash. Inventing an artificial seam solely to exercise this LOW-risk,
+no-live-bug defensive line was judged disproportionate. Full suite re-run
+green with the guard in place (see Test counts below).
+
+### F4 (LOW) — text surface named the path but never the reason
+
+Both `cli.mjs` stderr lines now append `(${w.reason})` per worktree, matching
+what `--json` already carried. Extended (not duplicated) the existing
+worktree-skip tests in `cli.collect.test.mjs` and `cli.ship.test.mjs` with a
+`/not a git repository/i` assertion, proven RED against the pre-fix line
+(count+path only) and GREEN after.
+
+### F5 (LOW) — honest checkbox
+
+`openspec/changes/issue-864-memory-2-0/tasks.md` 4.9 reworded (not unticked):
+the row's own text demanded `step5SynthesizeContext` be "either wired or
+retired (#267)" — neither happened. Chose reword over untick because the
+task's actually-scoped, deliverable half (hydration-failure-cause
+preservation) is genuinely complete; the wiring question is an explicit open
+product decision this task never owned, not an unresolved bug the checkbox
+should keep flagging as open work.
+
+### Test counts (this batch)
+
+- Focused (9 files, includes every touched suite): **178/178 green**.
+- Full `npm test` under `GIT_CONFIG_GLOBAL=/dev/null`: **5289/5289 green**
+  (prior baseline 5285/5285; net +4 — 1 new ship-op test (F1), 3 new
+  day-start-sweep tests (F2): the worktreeSkipped case, its "still nothing"
+  regression guard, and the pushed-wins-over-skip scope-boundary test). F4's
+  assertions extended two EXISTING tests rather than adding new ones.
+- No `brain/scripts/scratch/` debris present before or after.
+- No forbidden paths touched (`brain/core/**`, `brain/project/**`); no
+  `.memory/index.jsonl`/`manifest.json` staged; no push, PR, `gh` write,
+  `memory:ship`/`collect`/`share` against a real remote, `--force`,
+  `--no-verify`, merge, or rebase.
+
+### Where (this batch)
+
+- `brain/scripts/memory/cli.mjs`, `cli.collect.test.mjs`, `cli.ship.test.mjs`
+- `brain/scripts/memory/day-start-sweep.mjs`, `day-start-sweep.test.mjs`
+- `brain/scripts/memory/chunk-boundary.test.mjs` (pinned-line re-fix, 644→655)
+- `brain/scripts/i18n/en.mjs`, `brain/scripts/i18n/es.mjs`
+- `openspec/changes/issue-864-memory-2-0/tasks.md` (4.9 reworded)
+- `openspec/changes/issue-921-923-observability/apply-progress.md` (this file)
