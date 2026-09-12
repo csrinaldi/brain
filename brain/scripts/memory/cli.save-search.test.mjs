@@ -25,8 +25,15 @@ import { fileURLToPath } from 'node:url';
 const cliPath = join(dirname(fileURLToPath(import.meta.url)), 'cli.mjs');
 
 const ISOLATED_GIT_ENV = { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' };
+// #714: `BRAIN_MEMORY_UPSTREAM_REF` is stripped alongside `AI_AGENT` — the
+// `--supersedes` refusal test below spawns the real CLI, which resolves the
+// upstream ref through the real, unstubbed predicate. Left ambient, an
+// exported `BRAIN_MEMORY_UPSTREAM_REF` (the variable an operator debugging
+// `memory:share`/#701 would set) overrides the derived origin/HEAD /
+// origin/main lookup and changes the could-not-verify wording this suite
+// pins, making the verdict depend on the developer's shell.
 // eslint-disable-next-line no-unused-vars
-const { AI_AGENT: _ambientAiAgent, ...ENV_NO_AI_AGENT } = process.env;
+const { AI_AGENT: _ambientAiAgent, BRAIN_MEMORY_UPSTREAM_REF: _ambientUpstreamRef, ...ENV_NO_AI_AGENT } = process.env;
 
 /** `git init`s `root` and configures a LOCAL `brain.actor` — the one-command
  * setup #738 requires before any capture. Isolated from ambient global/system

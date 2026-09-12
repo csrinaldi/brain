@@ -109,8 +109,8 @@ const MEMORY_BACKEND = STATED_BACKEND ?? DEFAULT_BACKEND;
 // files are outside this ticket's file claim — flagged, not silently worked
 // around.)
 // ---------------------------------------------------------------------------
-function reportDuplicates(duplicates, { indexCount, surface, brief } = {}) {
-  for (const line of formatDuplicateReport(duplicates, { indexCount, surface, brief })) console.error(line);
+async function reportDuplicates(duplicates, { indexCount, surface, brief } = {}) {
+  for (const line of await formatDuplicateReport(duplicates, { indexCount, surface, brief })) console.error(line);
 }
 
 // ---------------------------------------------------------------------------
@@ -166,7 +166,7 @@ if (op === "reindex") {
       indexPath: join(memoryRoot, ".memory", "index.jsonl"),
     });
     console.log(`memory/cli: ${await t("memory.reindex.done", { count })}`);
-    reportDuplicates(duplicates, { indexCount: count });
+    await reportDuplicates(duplicates, { indexCount: count });
     process.exit(0);
   } catch (err) {
     console.error(`memory/cli: ${await t("memory.reindex.failed", { message: err.message })}`);
@@ -221,7 +221,7 @@ if (op === "resolve-index") {
     console.log(`memory/cli: ${await t(key, { count })}`);
     // The op that exists BECAUSE two branches merged is the last one that
     // should stay quiet about what the merge duplicated (#574).
-    reportDuplicates(duplicates, { indexCount: count });
+    await reportDuplicates(duplicates, { indexCount: count });
     process.exit(0);
   } catch (err) {
     console.error(`memory/cli: ${await t("memory.resolveIndex.failed", { message: err.message })}`);
@@ -294,7 +294,7 @@ if (op === "split-records") {
       indexPath: join(memoryRoot, ".memory", "index.jsonl"),
     });
     console.log(`memory/cli: ${await t("memory.reindex.done", { count })}`);
-    reportDuplicates(duplicates, { indexCount: count });
+    await reportDuplicates(duplicates, { indexCount: count });
     process.exit(0);
   } catch (err) {
     console.error(`memory/cli: ${await t("memory.splitRecords.failed", { message: err.message })}`);
@@ -376,7 +376,7 @@ if (op === "collect") {
         paths: skippedWorktreesHere.map((w) => `${w.path} (${w.reason})`).join(", "),
       })}`);
     }
-    reportDuplicates(result.duplicates, { surface: "the lane commit" });
+    await reportDuplicates(result.duplicates, { surface: "the lane commit" });
     process.exit(0);
   } catch (err) {
     // `raced` and `badHost` are named failures `lane/collect.mjs` tags on the
@@ -869,7 +869,7 @@ if (op === "save") {
     // a backend failure here must never read as a lost capture (R5).
     const result = await backend.save(title, content, opts, seams);
     console.log(`memory/cli: ${await t("memory.plainfiles.save.done", { id: result?.id, file: result?.file })}`);
-    reportDuplicates(result?.duplicates, { indexCount: result?.indexCount });
+    await reportDuplicates(result?.duplicates, { indexCount: result?.indexCount });
     process.exit(0);
   } catch (err) {
     // #637 — the index rebuild is the ONE gate that cannot run before the
@@ -915,7 +915,7 @@ if (op === "search") {
     // query that matched nothing "collapsed into the result set" would name a
     // collapse that did not happen there. And `brief`, because a search is a
     // question about records, not a maintenance run on the store.
-    reportDuplicates(result?.duplicates, { surface: 'the records read', brief: true });
+    await reportDuplicates(result?.duplicates, { surface: 'the records read', brief: true });
     process.exit(0);
   } catch (err) {
     console.error(`memory/cli: ${BACKEND}.search() failed — ${err.message}`);
@@ -966,7 +966,7 @@ try {
   // `import` gets its own surface: it hydrates engram from `records/` and never
   // writes the index (only `pullMemory` reindexes), so the default wording
   // would have it claim a collapse into an index it did not touch.
-  reportDuplicates(result?.duplicates, {
+  await reportDuplicates(result?.duplicates, {
     indexCount: result?.indexCount,
     surface: op === "import" ? "the records read" : undefined,
   });

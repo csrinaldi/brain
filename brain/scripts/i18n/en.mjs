@@ -326,6 +326,18 @@ export default {
   'memory.resolveIndex.staged': '✓ index conflict resolved — {count} record(s) regenerated from records/ and staged. Finish the merge with `git commit`.',
   'memory.resolveIndex.failed': '✗ resolve-index failed — {message}',
 
+  // ── memory/lib/duplicates.mjs — formatDuplicateReport() (issue #574, promoted #638) ──
+  'memory.duplicates.summary': '⚠ {ids} duplicate record id(s) in .memory/records/ — {lines} excess physical line(s) collapsed into {surface}.',
+  'memory.duplicates.summaryWithIndex': '⚠ {ids} duplicate record id(s) in .memory/records/ — {lines} excess physical line(s) collapsed into {surface} ({total} physical line(s) → {indexCount} indexed).',
+  'memory.duplicates.why': '  Deduplicated, not refused: `merge=union` concatenates both copies when two branches hold the same record (ADR-0017, REQ-MF-3), so this is the transport working, not a corrupt store — but `wc -l .memory/records/*.jsonl` over-counts the store by {lines}, and it is only reported because you are reading this.',
+  'memory.duplicates.divergent': '  {count} of them DISAGREE outside the hashed fields (`source` is not hashed, so two copies of one record can differ there — brain\'s own export→import→export widens it). Resolved first-wins: the earliest line of the earliest month file is the one indexed, exactly as the read path resolves it. Marked [divergent] below — worth a look, not an error.',
+  'memory.duplicates.brief': '  Run `npm run memory:reindex` for the per-id locations.',
+  'memory.duplicates.group': '  {id} ×{count} — {locations}',
+  'memory.duplicates.groupDivergent': '  {id} ×{count} [divergent] — {locations}',
+  'memory.duplicates.moreOccurrences': ', +{count} more',
+  'memory.duplicates.moreGroups': '  … +{count} more duplicated id(s).',
+  'memory.duplicates.unknownId': '(unknown id)',
+
   // ── memory/cli.mjs — split-records (issue #677) ──────────────────────────────
   'memory.splitRecords.plan':    'plan — {lines} record line(s) across {months} month file(s) become {writes} per-record file(s). NOTHING was written. Re-run with --apply to perform it.',
   'memory.splitRecords.done':    '✓ split complete — {written} record file(s) written, {alreadyPresent} already present, {months} month file(s) removed after verifying every record reads back.',

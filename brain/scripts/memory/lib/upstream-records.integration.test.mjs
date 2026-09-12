@@ -20,6 +20,7 @@ import { spawnSync } from 'node:child_process';
 import { buildRecord, serializeRecord } from './format.mjs';
 import { appendRecord, readRecords } from './store.mjs';
 import { dualWriteRecords } from '../backends/engram.mjs';
+import { withoutEnv } from '../__fixtures__/env.mjs';
 
 function git(cwd, args, { allowFailure = false } = {}) {
   const r = spawnSync('git', args, { cwd, encoding: 'utf8' });
@@ -34,6 +35,14 @@ const BASE = {
 };
 
 test('issue #701: a record already merged to origin/main is not re-exported, and stays readable after sync', async (t) => {
+  // #714: `dualWriteRecords` calls `_upstreamRecordIds({ root })` with neither
+  // `env` nor `config` (deliberately — see engram.upstream-scope.test.mjs's
+  // comment), so this file's real, unstubbed predicate falls back to
+  // `process.env`. An exported `BRAIN_MEMORY_UPSTREAM_REF` would win over the
+  // ref this test needs resolved (origin/main) and turn the suite's verdict
+  // into a function of the developer's shell.
+  withoutEnv(t, 'BRAIN_MEMORY_UPSTREAM_REF');
+
   // A bare "remote" plus one working clone stands in for "the trunk".
   const remote = mkdtempSync(join(tmpdir(), 'brain-701-remote-'));
   const trunk = mkdtempSync(join(tmpdir(), 'brain-701-trunk-'));

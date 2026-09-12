@@ -480,6 +480,7 @@
 {"id":"rec-3535700473c021ad","ts":"2026-06-27T14:06:27Z","actor":"@legacy","type":"bugfix","project":"brain","file":"2026-06-rec-3535700473c021ad.jsonl"}
 {"id":"rec-353885b73ac328d8","ts":"2026-07-25T21:50:12Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-353885b73ac328d8.jsonl"}
 {"id":"rec-354c3691839343f2","ts":"2026-08-19T16:17:53Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-08-rec-354c3691839343f2.jsonl"}
+{"id":"rec-3550472a1b62c33b","ts":"2026-09-12T18:31:26Z","actor":"@csrinaldi","type":"bugfix","project":"brain","issue":714,"file":"2026-09-rec-3550472a1b62c33b.jsonl"}
 {"id":"rec-3577be294be160c7","ts":"2026-07-29T14:26:13Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-3577be294be160c7.jsonl"}
 {"id":"rec-3593bc93b539532b","ts":"2026-07-25T00:48:38Z","actor":"feat/issue-266-h1-1-review-core-cold-boot","type":"decision","project":"brain","file":"2026-07-rec-3593bc93b539532b.jsonl"}
 {"id":"rec-35b469ed9429ddc6","ts":"2026-07-25T00:48:12Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-35b469ed9429ddc6.jsonl"}
