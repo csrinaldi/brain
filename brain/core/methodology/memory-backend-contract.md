@@ -58,7 +58,7 @@ never sees a backend-specific field.
 | Verb | Signature | Normalized return | Required |
 |------|-----------|-------------------|----------|
 | `setup` | `({ root }) -> void` | Prepares whatever the backend privately needs (engram: the `.engram → .memory` symlink, the merge driver — both retiring). Idempotent, non-clobbering. Never throws on an already-set-up tree. | **yes** |
-| `share` | `({ root }) -> { indexCount, duplicates, ... }` | Materializes what the durable layer does not yet hold and rebuilds `index.jsonl`; returns the accounting (#574) so the caller can say it. Under record-first (#864 task 3.2) this is "commit what is already true": it exports nothing from the backend. | **yes** |
+| `share` | `({ root }) -> { indexCount, duplicates, ... }` | Materializes what the durable layer does not yet hold and rebuilds `index.jsonl`; returns the accounting (#574) so the caller can say it. Under record-first (#864 task 3.2, `engram` since #874) this commits what is already true: it exports nothing from the backend. | **yes** |
 | `hydrate` | `({ root, recordId? }) -> { written, skipped, deferred?, contended? }` | Projects `.memory/records/` into the backend, idempotently (rule 1). With `recordId`, projects that one record — a producer's fast path after its own write. `deferred: true` when hydration could not run (store unreadable, guard contended) with the reason on stderr — never a throw, never a zero that reads as "nothing to do". The single-record form, `hydrate({recordId})`, exists on `engram` as of #874 (3.2); the bulk form is still spelled `pull` (with `git pull`) and `cli.mjs import` (without) — the contract names the operation, those verbs keep their names until #862 settles the lane. | **yes** |
 | `save` | `(title, content, { type, project, issue?, supersedes? }) -> { id, file, written }` | The producer path: a record on disk, then `hydrate({recordId})`. **Required on every backend** — a backend without `save` has no record-first capture (D2). **Today**: `engram.save()` mirrors `plainfiles.save()` (provenance #738, `--supersedes` #805) and calls `hydrate({recordId})` as its terminal step, deferring rather than throwing when the backend cannot be reached (#874, 3.2); `memory:save`'s `package.json` pin is removed. `search` stays `unsupportedOp` (R14 scope, unchanged). | **yes** |
 | `search` | `(query, opts) -> [{ id, title, ts, ... }]` | Over the durable layer or the backend's index. | no |
@@ -106,7 +106,7 @@ walks the index.
 | backend | rule 1 | rule 2 | rule 3 | `save` |
 |---------|--------|--------|--------|--------|
 | `plainfiles` | by construction (`hydrate` is `rebuildIndex`) | by construction | by construction | yes |
-| `engram` | delta under guard (#820) — three pre-guard rows await the one-time heal (#864 task 1.2a) | **not yet** — `mem_save` is the first home today; closes with #864 task 3.2 | **not yet** — manifest, chunks, symlink, driver; closes with #864 tasks 2.3/2.4 | yes |
+| `engram` | delta under guard (#820) — three pre-guard rows await the one-time heal (#864 task 1.2a) | yes — `share()` no longer exports; closed by #864 task 3.2 (#874, split B) | **not yet** — manifest, chunks, symlink, driver; closes with #864 tasks 2.3/2.4 | yes |
 
 The exit of memory 2.0 (#864 task 6.1) re-runs the spec's scenarios under both backends;
 this table is updated by the slice that turns a "not yet" into a "yes".
@@ -163,3 +163,37 @@ installed binary, v1.20.0, in an isolated temp store — see this change's
 `apply-progress.md`). Re-hydrating one record therefore leaves exactly one row,
 which is what makes `hydrate({recordId})`'s idempotence claim (rule 1) provable
 rather than assumed.
+
+## Amendment 2 — rule 2 flip: engram.share() no longer produces (issue #874, split B)
+
+**Signed**: 12/09/2026 — Cristian Rinaldi
+
+### What this does NOT change
+
+Rule 1 (hydration idempotent by record id) and rule 3 (no backend artifact is
+load-bearing for the durable layer) are untouched by this amendment. Rule 3
+stays `not yet` for `engram`: the `.engram → .memory` symlink, the manifest,
+the chunk directory and the merge driver are all still present and still
+matter to `setup()`/`pull()` — their retirement is epic task 2.4, not this
+change. The `save` column (Amendment 1) is untouched here too.
+
+### What landed (split B)
+
+- `engram.share()` (`brain/scripts/memory/backends/engram.mjs`) is now the
+  `plainfiles.share()` mirror: `_ensureSymlink(root)` → `rebuildIndex()` →
+  `{indexCount, duplicates}`. It no longer calls `requireEngram()`, runs
+  `engram sync --export`, reads observations from chunks, scans chunks for
+  secrets, or dual-writes candidate records — every one of those surfaces
+  (ledger rows 1, 2 and 4) is deleted.
+- `dualWriteRecords()` — the function rule 2 used to route observations
+  through — is UNCHANGED in shape and still exported (ratified O1,
+  2026-09-11): `share()` simply no longer calls it. Its disposition (keep,
+  reshape, or delete) is handed to epic task 2.4, alongside the rest of the
+  chunk estate, unless task 1.2a claims it first as its one-shot heal tool.
+- `engram.share.test.mjs` (ledger row 5) is replaced with a ~90-line suite
+  modelled on `plainfiles.share.test.mjs`, including a source guard asserting
+  `share()`'s own body names none of the retired seams
+  (`requireEngram`/`_export`/`_readObservations`/`dualWriteRecords`).
+- Completes with the `engram` binary ABSENT (rule 3's own "may be absent"
+  clause, now also true of rule 2's producer path): there is nothing left in
+  `share()` that touches the binary at all.
