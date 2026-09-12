@@ -12,7 +12,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -315,6 +315,56 @@ test('save: a rebuildIndex failure is annotated and rethrown (#637) — the reco
     // the record itself IS on disk — the append happened before the index rebuild.
     const recordsDir = join(root, '.memory', 'records');
     assert.ok(existsSync(recordsDir));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// ── #712 — a secret policy that cannot be read is not the default secret
+// policy. `_loadConfig` is NOT injected in either test below — it is the
+// unit. Every OTHER seam a step past the read could throw on is neutralized
+// with `identitySeams` (a VALID `@test` handle) — without it, an unset
+// `brain.actor` would throw its OWN refusal just three lines after the
+// config read (`engram.mjs:964`, right after `:952`), and T-E1 would pass
+// for that wrong reason instead of the config read under test.
+
+test('T-E1 — an unreadable brain.config.json makes save() reject with the primitive\'s message, and _appendRecord is never called (#712, REQ-SCAN-1/4)', async () => {
+  const root = tmpRoot();
+  try {
+    // present but unparseable, at `root` — the exact path `_defaultLoadBrainConfig` reads.
+    writeFileSync(join(root, 'brain.config.json'), '{ not valid json', 'utf8');
+
+    let appendCalled = false;
+    await assert.rejects(
+      () => save('t', 'c', { type: 'discovery', project: 'brain' }, {
+        root, getBranch: () => 'main', getTimestamp: () => '2026-09-10T09:00:00Z', getHostname: () => 'h',
+        ...identitySeams,
+        _appendRecord: () => { appendCalled = true; return { file: 'x' }; },
+        _rebuildIndex: () => ({ count: 0 }),
+        _hydrate: noopHydrate,
+      }),
+      (err) => {
+        assert.match(err.message, /brain\.config\.json/, 'the message must name the file');
+        assert.match(err.message, /could not be parsed/, 'the message must name the failure kind');
+        return true;
+      },
+    );
+    assert.equal(appendCalled, false, '_appendRecord must never run when the config read refuses');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('T-E2 — no brain.config.json at all leaves save() on the default pattern set, record written (#712, REQ-SCAN-3)', async () => {
+  const root = tmpRoot();
+  try {
+    // no brain.config.json written — tmpRoot() never creates one.
+    const result = await save('t', 'c', { type: 'discovery', project: 'brain' }, {
+      root, getBranch: () => 'main', getTimestamp: () => '2026-09-10T09:00:00Z', getHostname: () => 'h',
+      ...identitySeams,
+      _hydrate: noopHydrate,
+    });
+    assert.equal(result.written, true, 'the absent-config case must not refuse — the default pattern set applies');
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

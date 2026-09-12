@@ -17,6 +17,7 @@ import { join, basename } from 'node:path';
 
 import { planLaneCommit } from './plan.mjs';
 import { scanTextForSecrets, resolveSecretConfig, compilePatterns } from '../lib/secret-scrub.mjs';
+import { loadBrainConfigOrThrow } from '../../lib/brain-config.mjs';
 // removeTempTree, not a bare rmSync: this module spawns git AND recursively
 // removes a directory (the temp index's mkdtemp dir) — issue #800/#802's
 // adoption rule for exactly that combination. Imported from `lib/`, not
@@ -83,20 +84,21 @@ function gitOrThrow(git, argv, opts = {}) {
 
 /**
  * _defaultLoadConfig() — reads `brain.config.json` for the
- * `governance.memorySecret*` keys, mirroring backends/engram.mjs's
- * `_defaultLoadBrainConfig`. Never throws: an absent/unparseable config
- * falls back to `{}`, which resolveSecretConfig() turns into the default
- * pattern set.
+ * `governance.memorySecret*` keys, via `loadBrainConfigOrThrow` (#942).
+ *
+ * DIRECTION RULE (#712, R1): `memorySecretPatterns` is DENY-direction and
+ * `memorySecretAllowPatterns` is ALLOW-direction, but ONE read carries both
+ * — a read cannot be half-propagated, so the deny-direction key decides for
+ * the whole read. ENOENT still returns `{}` (absence stays green, R12/
+ * REQ-SCAN-3); every OTHER read/parse failure PROPAGATES (REQ-SCAN-1) —
+ * this reader no longer swallows it. The call site (`cli.mjs`'s `collect`
+ * catch arm) decides the refusal; this function only reads.
  *
  * @param {string} root
  * @returns {object}
  */
 function _defaultLoadConfig(root) {
-  try {
-    return JSON.parse(readFileSync(join(root, 'brain.config.json'), 'utf8'));
-  } catch {
-    return {};
-  }
+  return loadBrainConfigOrThrow(root);
 }
 
 /**

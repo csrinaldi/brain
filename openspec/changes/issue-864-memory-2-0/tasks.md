@@ -44,7 +44,7 @@ The last task is the epic's exit.
 ## Wave 4 — hardening
 - [ ] 4.1 #361 — reindex parity between backends, per the contract.
 - [ ] 4.2 #461 — `source` citing an undeclared issue no longer fabricates `issue`.
-- [ ] 4.3 #712 — unparseable `brain.config.json` is "could not look", never "found nothing", on the `share` path — **[rev 2026-09-10, audit M2]** widened to the lane collector (`collect.mjs#_defaultLoadConfig`) and `engram.mjs#_defaultLoadBrainConfig`; lands BEFORE the first real `memory:ship`.
+- [x] 4.3 #712 — unparseable `brain.config.json` is "could not look", never "found nothing", on the `share` path — **[rev 2026-09-10, audit M2]** widened to the lane collector (`collect.mjs#_defaultLoadConfig`) and `engram.mjs#_defaultLoadBrainConfig`; lands BEFORE the first real `memory:ship`.
 - [ ] 4.4 #714 — suite verdict independent of `BRAIN_MEMORY_UPSTREAM_REF`.
 - [ ] 4.5 #638 — duplicate-report strings in the i18n catalogs.
 - [x] 4.6 #920 — **[audit M1, priority:high]** `shipLane` reconciles the PR and the auto-merge on a retry after a successful push, even with nothing new to push; never an empty PR, never a re-delivery of a merged lane. Lands BEFORE the first real `memory:ship`.
