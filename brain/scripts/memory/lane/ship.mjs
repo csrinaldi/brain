@@ -252,12 +252,20 @@ export async function shipLane({
   vcs,
 }) {
   const collected = collect({ root, host, date, git });
-  const { ref, commit, collected: collectedCount, skipped, duplicates, baseFetched } = collected;
+  // #921: `skippedWorktrees` is collectLane()'s own worktree-level failure
+  // list — distinct from `skipped` (plan.mjs's per-candidate skip list).
+  // Defaulted to [] here so a `collect` fake predating this field (existing
+  // tests) never turns into `undefined` in the outcome shape or `--json`.
+  const {
+    ref, commit, collected: collectedCount, skipped, duplicates, baseFetched,
+    skippedWorktrees = [],
+  } = collected;
   const branch = ref.replace(/^refs\/heads\//, '');
 
   const base = {
     ref, branch, host, date,
     commit, collected: collectedCount, skipped, duplicates, baseFetched,
+    skippedWorktrees,
     identityBound, dryRun,
   };
 

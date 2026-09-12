@@ -359,6 +359,15 @@ if (op === "collect") {
     if (modifiedCount > 0) {
       console.error(`memory/cli: ${await t("memory.collect.modifiedTrackedSkipped", { count: modifiedCount })}`);
     }
+    // #921: an unreadable worktree is a distinct fact from "nothing pending
+    // here" — always reported on stderr (never gated by --json) whenever the
+    // list is non-empty, mirroring the secret/modified-tracked lines above.
+    if (result.skippedWorktrees.length > 0) {
+      console.error(`memory/cli: ${await t("memory.collect.worktreeSkipped", {
+        count: result.skippedWorktrees.length,
+        paths: result.skippedWorktrees.map((w) => w.path).join(", "),
+      })}`);
+    }
     reportDuplicates(result.duplicates, { surface: "the lane commit" });
     process.exit(0);
   } catch (err) {
@@ -506,6 +515,17 @@ if (op === "ship") {
     }
 
     // Evidence, always on stderr — never gated by --json (mirrors "collect").
+    // #921: skippedWorktrees is evidence from the `collect()` step shipLane()
+    // runs internally, unconditionally — reported here regardless of
+    // --dry-run, so the SessionEnd trigger's log (which redirects this op's
+    // stdout+stderr verbatim, see session-end-ship.mjs) surfaces it instead
+    // of a silent "nothing to ship".
+    if (result.skippedWorktrees.length > 0) {
+      console.error(`memory/cli: ${await t("memory.collect.worktreeSkipped", {
+        count: result.skippedWorktrees.length,
+        paths: result.skippedWorktrees.map((w) => w.path).join(", "),
+      })}`);
+    }
     if (!result.dryRun) {
       if (result.pushed) console.error(`memory/cli: ${await t("memory.ship.pushed", { ref: result.ref })}`);
       if (result.pr && result.pr.url === null && result.pr.number !== null) {

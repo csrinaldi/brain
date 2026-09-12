@@ -179,6 +179,34 @@ test('cold-2 — memory:collect prints memory.collect.secretSkipped and memory.c
   assert.doesNotMatch(run.stdout + run.stderr, /ghp_x{24}/);
 });
 
+test('memory:collect --json always carries skippedWorktrees, even when empty (#921)', () => {
+  const run = runCli(fixtureRepo(), '--json');
+  assert.equal(run.status, 0, run.stderr);
+  const parsed = JSON.parse(run.stdout);
+  assert.ok(Array.isArray(parsed.skippedWorktrees), 'skippedWorktrees must always be an array, never absent or undefined');
+  assert.deepEqual(parsed.skippedWorktrees, []);
+});
+
+test('#921 — memory:collect prints memory.collect.worktreeSkipped on stderr with count + path when a worktree could not be inspected', () => {
+  // Registers a SECOND worktree, then corrupts its `.git` file to point at a
+  // nonexistent gitdir. The directory itself still exists, so
+  // `git worktree list --porcelain` never marks it `prunable` (proven below)
+  // — but `git -C <path> status` fails for real ("fatal: not a git
+  // repository"), exactly the unreadable-worktree case #921 describes,
+  // distinct from the intentional prunable/bare skip.
+  const root = fixtureRepo();
+  const wtDir = join(dirname(root), 'wt-unreadable');
+  git(root, 'worktree', 'add', '-q', wtDir, '-b', 'lane-unreadable');
+  writeFileSync(join(wtDir, '.git'), 'gitdir: /nonexistent/gitdir/path\n', 'utf8');
+  const porcelain = git(root, 'worktree', 'list', '--porcelain');
+  assert.doesNotMatch(porcelain, /prunable/, 'a corrupted-but-present worktree must not be reported prunable — this test must exercise the unreadable path, not the pre-existing prunable skip');
+
+  const run = runCli(root);
+  assert.equal(run.status, 0, run.stderr);
+  assert.match(run.stderr, /memory\/cli:.*1 worktree\(s\) could not be inspected/i);
+  assert.match(run.stderr, new RegExp(wtDir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+});
+
 test('memory:collect fails loudly with memory.collect.failed and exits 1 on a genuine git failure', () => {
   const root = testTmp('cli-collect-nogit-'); // not a git repository at all
   mkdirSync(root, { recursive: true });
