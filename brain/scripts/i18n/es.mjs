@@ -73,6 +73,9 @@ export default {
   'day.memory.laneSweep.shipped':        'Lane sweep: se envió {ref} (PR #{number}).',
   'day.memory.laneSweep.reconciled':     'Lane sweep: se reconcilió {ref} (PR #{number}) — nada nuevo para enviar.',
   'day.memory.laneSweep.nothing':        'Lane sweep: nada para enviar.',
+  // F2 (cold review, #921/#923): nada pendiente, pero un worktree no se pudo
+  // inspeccionar — distinto de la línea "nada para enviar" de arriba.
+  'day.memory.laneSweep.worktreeSkipped': 'Lane sweep: nada para enviar, pero {count} worktree(s) no se pudieron inspeccionar: {paths}',
   'day.memory.laneSweep.warn':           'Lane sweep: {detail} — ver el log en tmp; el sweep de mañana reintenta.',
   // El texto propio de {detail} — una key, no un literal, para que un
   // docs.language no inglés nunca vea una palabra en inglés dentro de una

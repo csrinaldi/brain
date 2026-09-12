@@ -82,6 +82,10 @@ export default {
   'day.memory.laneSweep.shipped':        'Lane sweep: shipped {ref} (PR #{number}).',
   'day.memory.laneSweep.reconciled':     'Lane sweep: reconciled {ref} (PR #{number}) — nothing new to push.',
   'day.memory.laneSweep.nothing':        'Lane sweep: nothing to ship.',
+  // F2 (cold review, #921/#923): nothing pending, but a worktree could not be
+  // inspected — distinct from the plain "nothing to ship" line above, so the
+  // operator never mistakes "incomplete inspection" for "confirmed clean".
+  'day.memory.laneSweep.worktreeSkipped': 'Lane sweep: nothing to ship, but {count} worktree(s) could not be inspected: {paths}',
   'day.memory.laneSweep.warn':           'Lane sweep: {detail} — see the tmp log; the morning sweep will retry tomorrow.',
   // {detail}'s own text — a key, not a literal, so a non-English docs.language
   // never sees an English word inside a translated line (#906 cold review, editorial).
