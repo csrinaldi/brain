@@ -47,7 +47,7 @@ The last task is the epic's exit.
 - [ ] 4.3 #712 — unparseable `brain.config.json` is "could not look", never "found nothing", on the `share` path — **[rev 2026-09-10, audit M2]** widened to the lane collector (`collect.mjs#_defaultLoadConfig`) and `engram.mjs#_defaultLoadBrainConfig`; lands BEFORE the first real `memory:ship`.
 - [ ] 4.4 #714 — suite verdict independent of `BRAIN_MEMORY_UPSTREAM_REF`.
 - [ ] 4.5 #638 — duplicate-report strings in the i18n catalogs.
-- [ ] 4.6 #920 — **[audit M1, priority:high]** `shipLane` reconciles the PR and the auto-merge on a retry after a successful push, even with nothing new to push; never an empty PR, never a re-delivery of a merged lane. Lands BEFORE the first real `memory:ship`.
+- [x] 4.6 #920 — **[audit M1, priority:high]** `shipLane` reconciles the PR and the auto-merge on a retry after a successful push, even with nothing new to push; never an empty PR, never a re-delivery of a merged lane. Lands BEFORE the first real `memory:ship`.
 - [ ] 4.7 #921 — **[audit M3]** the collector reports the worktrees it could not inspect instead of dropping them.
 - [ ] 4.8 #922 — **[audit]** `MANAGED_SCRIPT_KEYS` carries every npm entry the doctrine tells an agent to run (`memory:save`, `memory:ship`, `memory:audit`, `brain:config`); before 1.6.0 is cut.
 - [ ] 4.9 #923 — **[audit]** session-start preserves the hydration failure cause; `step5SynthesizeContext` is either wired or retired (#267).
