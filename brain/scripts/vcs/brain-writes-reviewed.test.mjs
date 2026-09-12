@@ -462,7 +462,13 @@ test('runBrainWritesReviewedCheck: lite end-to-end — human-authored brain/core
 // failure. Async as of A3 TASK2 (the default fetchReviews wrapper awaits the
 // prReviews CONTRACT verb dispatched via getVcs — a Promise-returning call).
 
-test('runBrainWritesReviewedCheck: gh api failure inside the wrapper → warn + pass, never throws', async () => {
+test('runBrainWritesReviewedCheck: gh api failure inside the wrapper → fails closed at a required tier (issue #942, R6 — mirrors actor-check.mjs\'s existing discipline), never throws', async () => {
+  // UPDATED BY ISSUE #942 (R6, R7): this catch was an unconditional `warn` —
+  // a throwing input-gathering failure behind that warn was cosmetic, and the
+  // stale docstring claiming the job was "detection-only" was the stated (but
+  // false) justification. It is now tier-aware, exactly like actor-check.mjs's
+  // own gh-api-failure catch: a "cannot verify" is not "no evidence yet"
+  // (REQ-L6-2), and `brain-writes-reviewed` is `required` at every tier.
   const deps = {
     baseSha: 'base',
     headSha: 'head',
@@ -482,7 +488,8 @@ test('runBrainWritesReviewedCheck: gh api failure inside the wrapper → warn + 
     readBotAllowlist: () => [],
   };
   const result = await runBrainWritesReviewedCheck(deps);
-  assert.equal(result.level, 'warn');
+  assert.equal(result.level, 'fail', 'an unverifiable required gate must fail closed, not warn');
+  assert.match(result.reason, /rate limited/);
 });
 
 test('runBrainWritesReviewedCheck: missing BASE_SHA/HEAD_SHA/PR_NUMBER/repo/author context → warn + pass, never throws', async () => {
@@ -789,4 +796,67 @@ test('REQ-266-6 t2 (lock-3, issue #266): reviewer identity in governance.reviewA
   });
   assert.notEqual(result.level, 'pass', 'an APPROVED review authored only by the reviewer identity must never satisfy the Tier-2 human-review gate');
   assert.equal(result.level, 'fail', 'the only APPROVED reviewer is bot-allow-listed (via governance.reviewActors) — same outcome as any bot-only approval');
+});
+
+// ── issue #942 (R1, R6, R7, R11): a deny reader propagates; the catch is tier-aware ──
+//
+// `defaultReadBotAllowlist`/`defaultReadApprovalActors` used to `catch { return
+// [] }` — an unreadable brain.config.json excluded nobody from L6's human-
+// approver count. They now call `loadBrainConfigOrThrow(cwd)` and drop the
+// catch, and the wrapper's own catch (`:407-415`) is now tier-aware
+// (`resolveTierForFailure` + `resolveGatePolicy`, mirroring actor-check.mjs) —
+// an unconditional `warn` behind a throwing deny reader is cosmetic (R6).
+
+test('T6: runBrainWritesReviewedCheck — unparseable brain.config.json, no reader injected → fail, not warn (R6\'s lock)', async () => {
+  const dir = testTmp('brain-config-');
+  writeFileSync(join(dir, 'brain.config.json'), '{oops');
+  const result = await runBrainWritesReviewedCheck({
+    baseSha: 'base',
+    headSha: 'head',
+    prNumber: 144,
+    repo: 'org/repo',
+    author: 'alice',
+    cwd: dir,
+  });
+  assert.equal(result.level, 'fail', 'a deny/exclusion-list read failure must fail closed, never warn (R6)');
+  assert.match(result.reason, /brain\.config\.json/);
+});
+
+test('T7: gatherBrainWritesReviewedInputs — no brain.config.json at all → botAllowlist: [] (R11), normal verdict', async () => {
+  const dir = testTmp('brain-config-');
+  const inputs = await gatherBrainWritesReviewedInputs({
+    baseSha: 'base',
+    headSha: 'head',
+    prNumber: 144,
+    repo: 'org/repo',
+    author: 'alice',
+    cwd: dir,
+    deps: {
+      diffNameOnly: () => ['README.md'],
+      fetchReviews: () => [],
+    },
+  });
+  assert.deepEqual(inputs.botAllowlist, [], 'an absent config excludes nobody from the human-approver count (R11)');
+  assert.equal(evaluateBrainWritesReviewed(inputs).level, 'pass', 'no brain/** files touched — Tier-2 review not required');
+});
+
+test('T8: runBrainWritesReviewedCheck — unparseable config, gate policy forced to "detection" → the warn arm is reachable (guards the dead branch)', async () => {
+  // brain-writes-reviewed is `required` at every REAL tier today (GATE_MATRIX),
+  // so the `warn` arm has no live route — this test drives it directly via the
+  // same injectable override the wrapper's other I/O already uses, proving the
+  // branch is correctly SHAPED rather than merely absent (design.md D4, T8).
+  const dir = testTmp('brain-config-');
+  writeFileSync(join(dir, 'brain.config.json'), '{oops');
+  const result = await runBrainWritesReviewedCheck({
+    baseSha: 'base',
+    headSha: 'head',
+    prNumber: 144,
+    repo: 'org/repo',
+    author: 'alice',
+    cwd: dir,
+    tier: 'lite',
+    resolveGatePolicy: () => 'detection',
+  });
+  assert.equal(result.level, 'warn', 'a detection-tier policy must degrade to warn, never fail');
+  assert.match(result.reason, /detection-tier/);
 });

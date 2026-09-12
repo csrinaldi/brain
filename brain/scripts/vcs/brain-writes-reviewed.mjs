@@ -16,9 +16,10 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { loadBrainConfigOrThrow } from '../lib/brain-config.mjs';
 import { loadContext, gitlabApiConfig } from './ci-context.mjs';
 import { getVcs } from './cli.mjs';
-import { resolveTier, tierParams } from './governance-tiers.mjs';
+import { resolveTier, tierParams, resolveGatePolicy } from './governance-tiers.mjs';
 
 // ── Pure evaluator (design §6.1) ────────────────────────────────────────────
 
@@ -245,15 +246,18 @@ function defaultFetchReviews(repo, provider, { getVcs: getVcsFn = getVcs } = {})
  * human-approver count, register it in `reviewActors`; to let an identity
  * apply `status:approved`, register it in `approvalActors`; both effects
  * require both registrations — explicit, never implicit.
+ *
+ * DENY-DIRECTION (issue #942, R1): excludes an identity from L6's human-
+ * approver count, so empty is the PERMISSIVE answer — calls
+ * `loadBrainConfigOrThrow(cwd)` and does NOT catch. An absent config still
+ * resolves to `{}` → `[]` (R11, unchanged); only a present-but-unreadable or
+ * unparseable config throws, propagating into `runBrainWritesReviewedCheck`'s
+ * tier-aware catch (`:407-415`).
  */
 function defaultReadBotAllowlist(cwd) {
   return () => {
-    try {
-      const config = JSON.parse(readFileSync(join(cwd, 'brain.config.json'), 'utf8'));
-      return Array.isArray(config?.governance?.reviewActors) ? config.governance.reviewActors : [];
-    } catch {
-      return [];
-    }
+    const config = loadBrainConfigOrThrow(cwd);
+    return Array.isArray(config?.governance?.reviewActors) ? config.governance.reviewActors : [];
   };
 }
 
@@ -265,15 +269,20 @@ function defaultReadBotAllowlist(cwd) {
  * pure identity list — one key, one meaning. `approvalActors` is the same
  * human-trust grant that authorizes `status:approved` at L5
  * (`actor-check.mjs`); the reviewer handle is in neither.
+ *
+ * ALLOW-DIRECTION, hardened in scope anyway (issue #942, D3 — a measured
+ * correction, not a deviation): feeds `overrideActors` → `overrideLabelPresent`
+ * (`:358`), where empty means NO override is honoured — the STRICTER answer,
+ * so hardening it violates nothing (R1 only REQUIRES the deny direction to
+ * propagate; it does not forbid an allow reader from doing so too). Calls
+ * `loadBrainConfigOrThrow(cwd)` and does NOT catch. Behaviourally
+ * unobservable in production: `readBotAllowlist()` (above) runs first
+ * (`:354`) and throws before this reader is ever reached.
  */
 function defaultReadApprovalActors(cwd) {
   return () => {
-    try {
-      const config = JSON.parse(readFileSync(join(cwd, 'brain.config.json'), 'utf8'));
-      return Array.isArray(config?.governance?.approvalActors) ? config.governance.approvalActors : [];
-    } catch {
-      return [];
-    }
+    const config = loadBrainConfigOrThrow(cwd);
+    return Array.isArray(config?.governance?.approvalActors) ? config.governance.approvalActors : [];
   };
 }
 
@@ -291,6 +300,35 @@ function defaultReadConfig(cwd) {
       return {};
     }
   };
+}
+
+/**
+ * Resolves the tier to attribute a config-read-failure verdict to (issue
+ * #942), WITHOUT ever throwing itself — this runs from inside
+ * `runBrainWritesReviewedCheck`'s catch, after `gatherBrainWritesReviewedInputs`
+ * has already failed, so a second failure here (a corrupt config, an unknown
+ * `governance.tier`) must degrade rather than escape. Defaults to
+ * `'standard'` on any resolution failure — `'standard'` also resolves
+ * `brain-writes-reviewed` to `required` (REQ-TIER-2's never-tiered core), so
+ * this default is fail-closed-safe regardless of the repo's real tier.
+ *
+ * DELIBERATELY DUPLICATED from `actor-check.mjs`'s identical-shaped helper
+ * (`:1181-1189`) rather than imported: an L5→L6 gate-to-gate import edge is a
+ * worse coupling than a ~10-line helper whose whole body is "resolve the
+ * tier without throwing" (R4).
+ *
+ * @param {string} cwd
+ * @param {{ tier?: string, readConfig?: () => object }} deps
+ * @returns {'lite'|'standard'|'regulated'}
+ */
+function resolveTierForFailure(cwd, deps) {
+  try {
+    if (deps.tier) return deps.tier;
+    const readConfig = deps.readConfig ?? defaultReadConfig(cwd);
+    return resolveTier(readConfig());
+  } catch {
+    return 'standard';
+  }
 }
 
 /**
@@ -364,10 +402,22 @@ export async function gatherBrainWritesReviewedInputs({
 
 /**
  * Runs the full L6 brain-writes-reviewed check: gathers inputs (git + gh API),
- * evaluates the pure rule. Never throws — a gh/git failure, or missing
- * PR/diff context, degrades to `warn` rather than `fail`, keeping the
- * zero-false-positive detection goal intact while this job is
- * detection-only (DETECTION_JOBS).
+ * evaluates the pure rule. Never throws — but a gh/git/config failure inside
+ * `gatherBrainWritesReviewedInputs` no longer unconditionally degrades to
+ * `warn` (issue #942, R6, R7). This job is `required` at EVERY tier
+ * (`GATE_MATRIX['brain-writes-reviewed']`, promoted out of detection in
+ * Phase 5) — the docstring's former claim that it is "detection-only
+ * (DETECTION_JOBS)" was FALSE (`DETECTION_JOBS` is empty,
+ * `checkContexts('standard')` returns ten required contexts): a gh/git
+ * failure, or a `brain.config.json` a hardened deny/exclusion reader could
+ * not read or parse, means the Tier-2 human-review evidence CANNOT BE
+ * VERIFIED, which is not the same thing as "no reviews yet" (the
+ * genuinely-computed missing-evidence branches still handled inside
+ * `evaluateBrainWritesReviewed`, unchanged). The catch resolves the tier via
+ * `resolveTierForFailure` (never throws) and `resolveGatePolicy` — `fail`
+ * when `required`, `warn` only if a future matrix change ever demotes this
+ * gate's position to `detection` (not true today), mirroring
+ * `actor-check.mjs`'s identical catch shape exactly.
  *
  * baseSha/headSha/prNumber/repo/author/prLabels source from the normalized
  * ci-context (`ctx.*`, ADR-0016) — never from process.env directly (a
@@ -408,9 +458,24 @@ export async function runBrainWritesReviewedCheck(deps = {}) {
   try {
     inputs = await gatherBrainWritesReviewedInputs({ baseSha, headSha, prNumber, repo, author, provider, prLabels, cwd, deps });
   } catch (err) {
+    const tier = resolveTierForFailure(cwd, deps);
+    // `resolveGatePolicy` is injectable via `deps` for the same reason every
+    // other I/O in this wrapper already is (test discipline, above) — the
+    // production default is always the real, imported function. `required`
+    // at every tier today (GATE_MATRIX), so the `warn` branch is
+    // dead-but-correct, exactly as in `actor-check.mjs` (guarded by T8).
+    const resolvePolicy = deps.resolveGatePolicy ?? resolveGatePolicy;
+    if (resolvePolicy('brain-writes-reviewed', tier) === 'required') {
+      return {
+        level: 'fail',
+        reason:
+          `brain-writes-reviewed: could not gather inputs (gh/git or brain.config.json failure) — ` +
+          `${err.message} — failing closed: this gate is required at the "${tier}" tier.`,
+      };
+    }
     return {
       level: 'warn',
-      reason: `brain-writes-reviewed: could not gather inputs (gh api or git failure?) — ${err.message}`,
+      reason: `brain-writes-reviewed: could not gather inputs (gh/git or brain.config.json failure) — ${err.message} (detection-tier at "${tier}").`,
     };
   }
 
