@@ -99,7 +99,11 @@ test('issue #701 gate: staging a byte-identical re-export of the trunk record RE
   writeFileSync(path, serializeRecord(record) + '\n', 'utf8');
   git(worktree, ['add', '.memory/records']);
 
-  const result = runStagedRecordsCheck({ root: worktree });
+  // #714: `runStagedRecordsCheck` defaults `env` to `process.env`. An exported
+  // `BRAIN_MEMORY_UPSTREAM_REF` is level 1 and would override the ref this
+  // dedup check needs resolved (origin/main), turning the suite's verdict into
+  // a function of the developer's shell — see the `env: {}` note below.
+  const result = runStagedRecordsCheck({ root: worktree, env: {} });
   assert.equal(result.level, 'fail');
   assert.deepEqual(result.offending, [`.memory/records/2026-07-${record.id}.jsonl`]);
 });
@@ -136,7 +140,9 @@ test('issue #701 gate main(): a refusal exits 1 and prints the lossless remedy',
   console.log = (...args) => logs.push(args.join(' '));
   let code;
   try {
-    code = await main({ root: worktree });
+    // #714: see the `env: {}` note further below — `main()` forwards to
+    // `runStagedRecordsCheck`, whose default `env` is `process.env`.
+    code = await main({ root: worktree, env: {} });
   } finally {
     console.log = originalLog;
   }
@@ -319,7 +325,8 @@ test('#821 gate: mid-merge, a re-export the merge is NOT carrying is still REFUS
   writeFileSync(join(recordsDir, `2026-07-${record.id}.jsonl`), serializeRecord(record) + '\n', 'utf8');
   git(worktree, ['add', '.memory/records']);
 
-  const result = runStagedRecordsCheck({ root: worktree });
+  // #714: same leak as the byte-identical-refusal test above — neutralise it.
+  const result = runStagedRecordsCheck({ root: worktree, env: {} });
 
   assert.equal(result.level, 'fail', 'the gate must keep its keep mid-merge');
   assert.deepEqual(result.offending, [`.memory/records/2026-07-${record.id}.jsonl`]);
