@@ -362,10 +362,18 @@ if (op === "collect") {
     // #921: an unreadable worktree is a distinct fact from "nothing pending
     // here" — always reported on stderr (never gated by --json) whenever the
     // list is non-empty, mirroring the secret/modified-tracked lines above.
-    if (result.skippedWorktrees.length > 0) {
+    // F3 (cold review): `?? []` guards this consumer the same way ship.mjs's
+    // own destructuring already defaults the field — collectLane() always
+    // populates it today (no live bug), but this consumer had no defence of
+    // its own if that producer contract ever changed.
+    // F4 (cold review): the text surface now names WHY, not just which —
+    // the operator reading stderr sees the same reason `--json` already
+    // carries, instead of having to cross-reference the two.
+    const skippedWorktreesHere = result.skippedWorktrees ?? [];
+    if (skippedWorktreesHere.length > 0) {
       console.error(`memory/cli: ${await t("memory.collect.worktreeSkipped", {
-        count: result.skippedWorktrees.length,
-        paths: result.skippedWorktrees.map((w) => w.path).join(", "),
+        count: skippedWorktreesHere.length,
+        paths: skippedWorktreesHere.map((w) => `${w.path} (${w.reason})`).join(", "),
       })}`);
     }
     reportDuplicates(result.duplicates, { surface: "the lane commit" });
@@ -520,10 +528,13 @@ if (op === "ship") {
     // --dry-run, so the SessionEnd trigger's log (which redirects this op's
     // stdout+stderr verbatim, see session-end-ship.mjs) surfaces it instead
     // of a silent "nothing to ship".
-    if (result.skippedWorktrees.length > 0) {
+    // F3/F4 (cold review): same `?? []` guard and reason-bearing text as the
+    // "collect" op above — see that block's comment.
+    const skippedWorktreesHere = result.skippedWorktrees ?? [];
+    if (skippedWorktreesHere.length > 0) {
       console.error(`memory/cli: ${await t("memory.collect.worktreeSkipped", {
-        count: result.skippedWorktrees.length,
-        paths: result.skippedWorktrees.map((w) => w.path).join(", "),
+        count: skippedWorktreesHere.length,
+        paths: skippedWorktreesHere.map((w) => `${w.path} (${w.reason})`).join(", "),
       })}`);
     }
     if (!result.dryRun) {

@@ -205,6 +205,9 @@ test('#921 — memory:collect prints memory.collect.worktreeSkipped on stderr wi
   assert.equal(run.status, 0, run.stderr);
   assert.match(run.stderr, /memory\/cli:.*1 worktree\(s\) could not be inspected/i);
   assert.match(run.stderr, new RegExp(wtDir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  // F4 (cold review): the text surface must carry WHY, not just which path —
+  // the reason git itself gave, not merely count + path.
+  assert.match(run.stderr, /not a git repository/i);
 });
 
 test('memory:collect fails loudly with memory.collect.failed and exits 1 on a genuine git failure', () => {
