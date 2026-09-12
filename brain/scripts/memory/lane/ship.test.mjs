@@ -265,6 +265,54 @@ test('surveyDelivery: the delivery diff exits non-zero ⇒ the run still acts, d
   assert.equal(vcsCalls.mrCreate, 1);
 });
 
+test('surveyDelivery: the SECOND (-- pathspec) delivery diff exits non-zero while the first succeeds ⇒ delivered:null/diffFailed, the run still reconciles', async () => {
+  // Adversarial-review regression pin: mutating ship.mjs's undeliveredDiff
+  // failure branch to `delivered: true` must fail THIS test — a false
+  // "delivered" on an unreadable second diff would strand the lane's
+  // records on origin forever (R5).
+  const { git, calls } = fakeGit([
+    { match: (a) => a[0] === 'diff' && a.includes('--'), result: fail("fatal: ambiguous argument 'refs/heads/memory/test-host-2026-09-09': unknown revision or path not in the working tree.") },
+    ...surveyOkRules(),
+    { match: (a) => a[0] === 'push', result: ok() },
+  ]);
+  const { vcs, calls: vcsCalls } = fakeVcs();
+
+  const result = await shipLane({
+    root: '/repo', project: 'x/y', tier: 'lite', host: 'test-host', date: '2026-09-09',
+    collect: fakeCollect(), git, vcs,
+  });
+
+  assert.equal(result.pushed, true);
+  assert.equal(result.delivered, null);
+  assert.equal(result.deliveredReason, 'diffFailed');
+  assert.equal(result.reconciled, true, 'a failed second diff must still attempt reconciliation, never skip it');
+  assert.equal(vcsCalls.mrCreate, 1);
+  const diffCalls = calls.filter((a) => a[0] === 'diff');
+  assert.ok(
+    diffCalls.some((a) => a[2] === `origin/main...${REF}` && !a.includes('--')),
+    'the first (three-dot) diff must have succeeded before the second one failed',
+  );
+});
+
+test('surveyDelivery: non-empty lanePaths but the -- pathspec diff reports zero undelivered paths ⇒ genuine content containment, delivered:true, zero push/list/create/arm', async () => {
+  const { git, calls } = fakeGit([
+    ...surveyOkRules({ ahead: '0', undeliveredPaths: [] }),
+  ]);
+  const { vcs, calls: vcsCalls } = fakeVcs();
+
+  const result = await shipLane({
+    root: '/repo', project: 'x/y', tier: 'lite', host: 'test-host', date: '2026-09-09',
+    collect: fakeCollect({ commit: null }), git, vcs,
+  });
+
+  assert.equal(result.delivered, true);
+  assert.equal(result.deliveredReason, null);
+  assert.equal(result.pushed, false);
+  assert.equal(result.pr, null);
+  assert.ok(!calls.some((a) => a[0] === 'push'));
+  assert.deepEqual(vcsCalls, { mrList: 0, mrCreate: 0, mrAutoMerge: 0 });
+});
+
 test('cold-1 (PR #902 review): a ref that never existed locally is nothing-to-ship with NO diff call and no misleading reason', async () => {
   const { git, calls } = fakeGit([
     { match: (a) => a[0] === 'rev-parse', result: fail("fatal: ambiguous argument 'refs/heads/memory/test-host-2026-09-09': unknown revision or path not in the working tree.") },
