@@ -43,7 +43,7 @@ The last task is the epic's exit.
 
 ## Wave 4 — hardening
 - [ ] 4.1 #361 — reindex parity between backends, per the contract.
-- [ ] 4.2 #461 — `source` citing an undeclared issue no longer fabricates `issue`.
+- [ ] 4.2 #461 — `source` citing an undeclared issue no longer fabricates `issue`. **[apply attempt 2026-09-12]** NOT implementable as a code fix: the issue body and `provenance.mjs#renderProvenance`'s own header both state the shape is ambiguous ON THE WIRE and needs an architecture decision (a new §4 marker, doctrine change; or a validation rule, previously ruled OUT on PR #460) — "Tracked as a decision, not patched here: issue #461." Analysis in `openspec/changes/issue-939-461-provenance/`.
 - [x] 4.3 #712 — unparseable `brain.config.json` is "could not look", never "found nothing", on the `share` path — **[rev 2026-09-10, audit M2]** widened to the lane collector (`collect.mjs#_defaultLoadConfig`) and `engram.mjs#_defaultLoadBrainConfig`; lands BEFORE the first real `memory:ship`.
 - [ ] 4.4 #714 — suite verdict independent of `BRAIN_MEMORY_UPSTREAM_REF`.
 - [ ] 4.5 #638 — duplicate-report strings in the i18n catalogs.
@@ -51,7 +51,7 @@ The last task is the epic's exit.
 - [ ] 4.7 #921 — **[audit M3]** the collector reports the worktrees it could not inspect instead of dropping them.
 - [ ] 4.8 #922 — **[audit]** `MANAGED_SCRIPT_KEYS` carries every npm entry the doctrine tells an agent to run (`memory:save`, `memory:ship`, `memory:audit`, `brain:config`); before 1.6.0 is cut.
 - [ ] 4.9 #923 — **[audit]** session-start preserves the hydration failure cause; `step5SynthesizeContext` is either wired or retired (#267).
-- [ ] 4.10 #939 — **[audit M4, RULED 2026-09-12]** a session carrying a known AI-platform marker is recorded as an agent, never a human: the default marker list widens beyond `AI_AGENT`; `brain.agentEnv` still wins. The accepted cost is stated in the doctrine — a person typing inside an agent terminal is recorded as an agent, because the session is one.
+- [x] 4.10 #939 — **[audit M4, RULED 2026-09-12, shipped 2026-09-12]** a session carrying a known AI-platform marker is recorded as an agent, never a human: `AGENT_ENV_DEFAULTS` widens beyond `AI_AGENT` to `CLAUDECODE`/`CODEX_THREAD_ID` (each commented with runtime + how verified); `brain.agentEnv` still wins over the defaults; set-but-blank still yields `human` with that fact in evidence; `evidence` names the deciding marker. **Doctrine statement of the accepted cost is a DRAFT pending promotion** — `openspec/changes/issue-939-461-provenance/brain-drafts/memory-format-actorkind.md` (cannot edit `brain/core/**` directly).
 
 ## Close / amend
 - [ ] 5.1 #795 closed in favour of #862 once 3.1b's first scenario passes **and [rev]** its acceptance 1 and 3 are answered: `memory-presence.mjs`'s header cites the ruling and names the export trigger and the backend→file lag bound.
