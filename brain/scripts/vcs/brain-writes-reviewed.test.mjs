@@ -817,6 +817,14 @@ test('T6: runBrainWritesReviewedCheck — unparseable brain.config.json, no read
     repo: 'org/repo',
     author: 'alice',
     cwd: dir,
+    // Injected so the ONLY possible failure in this run is the config reader
+    // — the real readers throw before either of these is ever reached, so
+    // this has no effect while the fix holds, but it ISOLATES the assertion
+    // from git's own "not a repository" failure in a non-git testTmp() dir,
+    // which would independently produce the same `fail` verdict and mask a
+    // reader regression (a mutation-guard requirement, T12).
+    diffNameOnly: () => ['README.md'],
+    fetchReviews: () => [],
   });
   assert.equal(result.level, 'fail', 'a deny/exclusion-list read failure must fail closed, never warn (R6)');
   assert.match(result.reason, /brain\.config\.json/);
