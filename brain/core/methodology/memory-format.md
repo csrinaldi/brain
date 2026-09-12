@@ -55,7 +55,7 @@ object:
 |-------|------|-----|---------|
 | `id` | string | ✅ | `"rec-" + sha256(canonicalJson(hashInput))[:16]` — a **content hash**. See "Identity". |
 | `ts` | string | ✅ | ISO-8601 UTC, `YYYY-MM-DDTHH:MM:SSZ`. Must carry the `Z` (UTC) — no naive local timestamps. |
-| `actor` | string | ✅ | Stable handle of the author (`@crinaldi`, `claude-sonnet-4-6`). **A handle, never PII.** |
+| `actor` | string | ✅ | Stable handle of the author (`@crinaldi`, `@claude-sonnet-4-6`). **A handle, never PII.** |
 | `actorKind` | string | ✅ | `"human"` \| `"agent"`. |
 | `type` | string | ✅ | One of `decision` \| `architecture` \| `pattern` \| `bugfix` \| `config` \| `discovery` \| `session_summary`. |
 | `project` | string | ✅ | Owning project (`brain`). |
@@ -275,6 +275,13 @@ durability guarantee. Therefore:
 
 - Actor is a **stable handle**, never an email, legal name, or other PII. `actorKind` is the
   coarse `human|agent` only.
+- **`plainfiles.save` capture (#738):** `actor` comes from `git config brain.actor` — a fresh
+  clone's first `memory save` is refused, naming the remedy, until you run
+  `git config --local brain.actor @<handle>` once. An **agent-driven** capture still carries the
+  OPERATOR's handle, never an agent identity (`@claude-code`, `@gemini-cli`, …) — only
+  `actorKind: agent` changes, measured from the session's agent-marker environment variable
+  (`AI_AGENT` by default, configurable via `git config brain.agentEnv`). The branch a capture ran
+  from is never the actor — see `issue`, which derives from it when `--issue` is not given.
 - **Only `scope: project` durable knowledge becomes a record.** Engram `scope: personal`
   memories are never promoted — they have no brain home and no place in a shared repo.
 - Records hold **development knowledge** (decisions, patterns, discoveries), never secrets,
