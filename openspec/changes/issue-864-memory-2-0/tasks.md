@@ -51,7 +51,7 @@ The last task is the epic's exit.
 - [ ] 4.7 #921 — **[audit M3]** the collector reports the worktrees it could not inspect instead of dropping them.
 - [ ] 4.8 #922 — **[audit]** `MANAGED_SCRIPT_KEYS` carries every npm entry the doctrine tells an agent to run (`memory:save`, `memory:ship`, `memory:audit`, `brain:config`); before 1.6.0 is cut.
 - [ ] 4.9 #923 — **[audit]** session-start preserves the hydration failure cause; `step5SynthesizeContext` is either wired or retired (#267).
-- [ ] 4.10 **[audit M4, maintainer decision pending]** Codex sessions classify `human` without `brain.agentEnv` — onboarding step vs default marker list.
+- [ ] 4.10 #939 — **[audit M4, RULED 2026-09-12]** a session carrying a known AI-platform marker is recorded as an agent, never a human: the default marker list widens beyond `AI_AGENT`; `brain.agentEnv` still wins. The accepted cost is stated in the doctrine — a person typing inside an agent terminal is recorded as an agent, because the session is one.
 
 ## Close / amend
 - [ ] 5.1 #795 closed in favour of #862 once 3.1b's first scenario passes **and [rev]** its acceptance 1 and 3 are answered: `memory-presence.mjs`'s header cites the ruling and names the export trigger and the backend→file lag bound.
