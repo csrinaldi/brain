@@ -305,6 +305,8 @@ export default {
   'session.change.ambiguous':   'change:   ambiguous ({count}): {list}',
   'session.memory.ok':          'memory:   engram hydrated',
   'session.memory.skip':        'memory:   engram unavailable (skipped)',
+  // #923 — the hydration failure cause, when available (see step2HydrateEngram).
+  'session.memory.skip.reason': 'memory:   engram unavailable (skipped) — {reason}',
   'session.memory.recency.stale':   'memory:   newest durable record is {days} days old — nothing captured since (see #519)',
   'session.memory.recency.unknown': 'memory:   no durable record found — cannot determine when memory was last captured',
   'session.manifest.restored':  'manifest: churn restored (safe)',
