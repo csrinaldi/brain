@@ -127,6 +127,41 @@ function fixtureRepoWithSkips() {
   return mainDir;
 }
 
+/** A bare origin, `main` pushed to it, and ONE linked worktree (`wt`) — the
+ * minimum shape that lets `collectLane()` see the SAME candidate filename
+ * twice (main counts as a worktree like any other; see `fixtureRepo()`'s own
+ * comment above). Both copies are byte-identical, untracked, and never
+ * committed anywhere — the exact residue a union merge, or two clones
+ * capturing the same record independently, leaves behind (#574's opening
+ * case, exercised here through `collect` specifically for cli.mjs:362's
+ * `await reportDuplicates(...)`). */
+function fixtureRepoWithDuplicateCandidate() {
+  const base = testTmp('cli-collect-dup-');
+  const originDir = join(base, 'origin.git');
+  const mainDir = join(base, 'main');
+  const wtDir = join(base, 'wt');
+  git(base, 'init', '--bare', '-q', originDir);
+  git(base, 'init', '-q', '-b', 'main', mainDir);
+  git(mainDir, 'remote', 'add', 'origin', originDir);
+  git(mainDir, 'config', 'user.email', 'test@example.invalid');
+  git(mainDir, 'config', 'user.name', 'brain-test');
+  git(mainDir, 'commit', '-q', '--allow-empty', '-m', 'root');
+  git(mainDir, 'push', '-q', '-u', 'origin', 'main');
+  git(mainDir, 'fetch', '-q', 'origin');
+  git(mainDir, 'worktree', 'add', '-q', wtDir, '-b', 'lane-wt');
+
+  const dupRecord = JSON.stringify({
+    id: 'rec-2222222222222222', ts: '2026-09-09T00:00:00Z', actor: '@t',
+    actorKind: 'agent', type: 'discovery', project: 'brain', content: 'same record, two worktrees',
+  }) + '\n';
+  for (const dir of [mainDir, wtDir]) {
+    const recordsDir = join(dir, '.memory', 'records');
+    mkdirSync(recordsDir, { recursive: true });
+    writeFileSync(join(recordsDir, '2026-09-rec-2222222222222222.jsonl'), dupRecord, 'utf8');
+  }
+  return mainDir;
+}
+
 /** `MEMORY_BACKEND` deliberately points at a backend that cannot be
  * imported — if `collect` ever fell through to backend dispatch, every one
  * of these runs would fail with "backend 'no-such-backend' not found". */
@@ -161,6 +196,14 @@ test('memory:collect --json carries the full shape on stdout only', () => {
   assert.equal(parsed.collected, 1);
   assert.ok(Array.isArray(parsed.skipped));
   assert.ok(parsed.duplicates && typeof parsed.duplicates === 'object');
+});
+
+test('memory:collect REPORTS a duplicate candidate shared by two worktrees on stderr (cli.mjs:362 — must not race process.exit(0))', () => {
+  const run = runCli(fixtureRepoWithDuplicateCandidate());
+  assert.equal(run.status, 0, run.stderr);
+  assert.match(run.stderr, /1 duplicate record id\(s\)/, 'the duplicate must be REPORTED, not dropped by an unawaited reportDuplicates racing process.exit(0)');
+  assert.match(run.stderr, /the lane commit/, 'collect names its own surface, not the default "the index"');
+  assert.ok(run.stderr.includes('rec-2222222222222222'), 'the duplicated id is named');
 });
 
 test('memory:collect never invokes a backend, regardless of MEMORY_BACKEND', () => {
