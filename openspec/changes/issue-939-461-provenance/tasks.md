@@ -20,12 +20,33 @@
 - [x] 1.6 Tick epic task 4.10 in `issue-864-memory-2-0/tasks.md`, noting the
       doctrine draft is pending promotion.
 
-## #461 — investigated, not implementable here
+## #461 — write-time W4 rule (apply attempt 2, fresh-review finding F1)
 
 - [x] 2.1 Read the issue and the existing code
       (`provenance.mjs#renderProvenance`'s own "KNOWN-AMBIGUOUS... issue
       #461" header) to confirm whether a code fix exists.
-- [x] 2.2 Conclusion: no code fix is possible without an architecture
-      decision the issue itself defers (new §4 marker = doctrine change, or
-      a validation rule already ruled OUT on PR #460). Documented in
-      `proposal.md`; epic task 4.2 left UNCHECKED with that note.
+- [x] 2.2 (superseded — see 2.3-2.6) A first apply attempt concluded no code
+      fix was possible; a fresh review corrected that: the issue itself
+      names a write-time-only option (`validateWritableRecord`, added in
+      #460) explicitly out of that ruling's scope.
+- [x] 2.3 RED: add `format.test.mjs` tests for `validateWritableRecord`'s new
+      W4 (rejects absent `issue`, rejects a disagreeing `issue`, admits an
+      agreeing `issue`, does not fire absent an `issue #N` citation) plus a
+      READ-gate test proving `validateRecord`/`parseRecordLine` still admit
+      the shape unchanged.
+- [x] 2.4 GREEN: add W4 to `validateWritableRecord` (`format.mjs`) — refuses
+      a `source` citing `issue #N` when the record's own `issue` is absent
+      or a different number.
+- [x] 2.5 Mutation proof: revert the `format.mjs` W4 addition alone
+      (`git stash`), confirm the 2 new "rejects" tests go RED; restore,
+      confirm all 57 GREEN.
+- [x] 2.6 Measured blast radius over this repo's `.memory/records/`,
+      2026-09-12: 0/2374 records carry the disagreeing shape (2 records cite
+      an issue in `source`, both already agree with their declared `issue`).
+      Fixed one pre-existing test fixture (`store.test.mjs`'s "DIVERGENT
+      bytes" test) that incidentally used the now-refused shape, by
+      declaring the `issue` it already implied.
+- [x] 2.7 Ticked epic task 4.2 in `issue-864-memory-2-0/tasks.md`; corrected
+      `proposal.md`/`spec.md` to state what W4 delivers (write-time closure)
+      versus what genuinely remains (pre-existing records carrying the
+      shape, blocked on the same architecture decision as before).

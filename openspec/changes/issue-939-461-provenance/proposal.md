@@ -22,19 +22,30 @@ session genuinely is one — the two errors (agent-as-human vs human-as-agent)
 are not symmetric; the former launders machine content as human-authored
 (ADR-0031), the latter merely under-credits a person.
 
-## #461 status: not implemented — this is a finding, not a fix
+## #461 status: partially closed — a write-time guard, not the full fix
 
-Both the issue body and the code's own header
-(`provenance.mjs#renderProvenance`, "KNOWN-AMBIGUOUS, and NOT resolved here")
-say the same thing: a record with no `issue` whose `source` cites `issue #N`
-is byte-identical on the wire to a record with `issue: N` — no renderer or
-parser change can distinguish them, because the distinguishing information
-was never encoded. Closing it needs an architecture decision between two
-non-trivial options (a new §4 doctrine marker, or a validation rule
-previously ruled OUT on PR #460) — not a bug fix this apply session can make
-unilaterally, and the first option touches `brain/core/**` doctrine, which is
-out of scope here regardless. See the issue for the full analysis; no code
-changed for #461 in this change.
+A first apply attempt refused #461 outright, reasoning that both options the
+issue names (a new §4 doctrine marker, or the `R4` validation rule #460
+dropped) needed an architecture decision. A fresh review corrected that: the
+issue itself names a THIRD option, already shipped and explicitly out of
+that ruling's scope — `validateWritableRecord` ("added in #460... available
+and safe, but it does not fix records that already exist"). This change adds
+**W4** to it: `validateWritableRecord` now refuses a record whose `source`
+cites `issue #N` while the record's own `issue` is absent or a different
+number. `brain/scripts/memory/lib/format.mjs`.
+
+This closes the WRITE path: brain itself can no longer create the shape.
+`validateRecord`/`parseRecordLine` — the READ path — stay untouched, per
+#460's ruling that a read-path rejection would brick a pre-existing consumer
+store (`.memory/**` is consumer-owned). What genuinely remains, and is NOT a
+code fix: records that ALREADY carry the shape before this change — closing
+that still needs the architecture decision between a new §4 marker (doctrine
+change, `brain/core/**`, out of scope here) or overturning #460's read-path
+ruling. Measured over this repo's `.memory/records/`, 2026-09-12: 0/2374
+records carry the shape (2 records cite an issue in `source`; both agree
+with their own declared `issue`) — the corruption W4 closes was latent here,
+not active. See the issue for the full two-option analysis this change does
+NOT resolve.
 
 ## Non-goals
 

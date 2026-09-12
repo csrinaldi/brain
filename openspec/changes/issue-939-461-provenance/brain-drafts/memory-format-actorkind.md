@@ -2,15 +2,19 @@
 
 Not applied to `brain/core/**` (out of scope for this apply session — the
 maintainer promotes). Proposed patch to
-`brain/core/methodology/memory-format.md` lines 282-283, for issue #939
+`brain/core/methodology/memory-format.md` lines 280-283, for issue #939
 (RULED 2026-09-12).
 
 ## Current text
 
-> An **agent-driven** capture still carries the OPERATOR's handle, never an
-> agent identity (`@claude-code`, `@gemini-cli`, …) — only `actorKind: agent`
-> changes, measured from the session's agent-marker environment variable
-> (`AI_AGENT` by default, configurable via `git config brain.agentEnv`).
+Quoted byte-for-byte, same line breaks (and continuation-line indent) as the
+source (the sentence starts mid-line-280, inside the `plainfiles.save
+capture (#738)` bullet):
+
+> An **agent-driven** capture still carries the
+>   OPERATOR's handle, never an agent identity (`@claude-code`, `@gemini-cli`, …) — only
+>   `actorKind: agent` changes, measured from the session's agent-marker environment variable
+>   (`AI_AGENT` by default, configurable via `git config brain.agentEnv`).
 
 ## Proposed replacement
 
