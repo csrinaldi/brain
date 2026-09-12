@@ -363,7 +363,11 @@ if (op === "collect") {
     process.exit(0);
   } catch (err) {
     // `raced` and `badHost` are named failures `lane/collect.mjs` tags on the
-    // thrown error (A9, A5) — everything else is a genuine git failure.
+    // thrown error (A9, A5) — everything else falls through to
+    // `memory.collect.failed` below, which is no longer only "a genuine git
+    // failure": since #712, an unreadable `brain.config.json` propagates
+    // from the same reader and lands here too (REQ-SCAN-4). The string
+    // itself (`en.mjs`) is already neutral and needs no change (R10).
     if (err?.raced) {
       console.error(`memory/cli: ${await t("memory.collect.raced", { message: err.message })}`);
     } else if (err?.badHost) {

@@ -420,3 +420,41 @@ test('cold-1 — a staged rename record is one candidate (the new path), never s
   assert.equal(relevant[0].reason, 'unexpected-status');
   assert.equal(relevant[0].code, 'R ', 'the header comment\'s own claim: a rename falls through as unexpected-status');
 });
+
+// ── #712 — a secret policy that cannot be read is not the default secret
+// policy. T-C1/T-C2 use `buildFixtureRepo()` — the SAME real git repo every
+// other test in this file drives — rather than a hand-rolled canned `git`
+// seam: every sibling git step (fetch, rev-parse, worktree list, ls-tree,
+// status) runs for real and succeeds, so the read under test is the ONLY
+// thing that can make either test fail. `loadConfig` is NOT injected in
+// either test — it is the unit.
+
+test('T-C1 — an unreadable brain.config.json makes collectLane throw, naming the file and the parse failure (#712, REQ-SCAN-1/4)', () => {
+  const repo = buildFixtureRepo();
+  // present but unparseable, at the scanned root (`collectLane`'s `root`,
+  // not the git plumbing) — a real repo means every sibling git call below
+  // this read (worktree list, ls-tree, status) has already succeeded before
+  // the read runs, so a git failure cannot make this test pass for the
+  // wrong reason.
+  writeFileSync(join(repo.mainDir, 'brain.config.json'), '{ not valid json', 'utf8');
+
+  assert.throws(
+    () => collectLane({ root: repo.mainDir, date: '2026-09-09', host: 'test-host' }),
+    (err) => {
+      assert.match(err.message, /brain\.config\.json/, 'the message must name the file');
+      assert.match(err.message, /could not be parsed/, 'the message must name the failure kind');
+      return true;
+    },
+  );
+});
+
+test('T-C2 — no brain.config.json at all leaves collectLane on the default pattern set, ref minted (#712, REQ-SCAN-3)', () => {
+  const repo = buildFixtureRepo();
+  // buildFixtureRepo() never writes a brain.config.json — this is the
+  // absent case by construction, no extra setup needed.
+
+  const result = collectLane({ root: repo.mainDir, date: '2026-09-09', host: 'test-host' });
+
+  assert.ok(result.ref, 'a run with candidates must still mint a ref when no config exists at all');
+  assert.ok(result.commit, 'the absent-config case must not refuse — the default pattern set applies');
+});
