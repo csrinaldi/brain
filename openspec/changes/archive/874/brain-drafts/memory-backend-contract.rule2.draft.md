@@ -6,7 +6,7 @@
 > before, and never by this agent (agents never edit `brain/core/**`):
 >
 > ```
-> npm run brain:promote -- openspec/changes/issue-874-record-first/brain-drafts/memory-backend-contract.rule2.draft.md
+> npm run brain:promote -- openspec/changes/archive/874/brain-drafts/memory-backend-contract.rule2.draft.md
 > ```
 >
 > This amendment does NOT change the contract's rules. It records that

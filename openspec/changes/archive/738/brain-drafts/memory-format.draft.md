@@ -1,6 +1,6 @@
 # Amendment draft — `memory-format.md`, the `actor` example and capture doctrine (issue #738)
 
-**For**: `npm run brain:promote -- openspec/changes/issue-738-provenance-at-capture/brain-drafts/memory-format.draft.md`
+**For**: `npm run brain:promote -- openspec/changes/archive/738/brain-drafts/memory-format.draft.md`
 
 > Drafted by agent, applied by the maintainer. `brain/core/**` is Tier 2 and
 > `brain:promote` is the sanctioned path: it renders this draft, shows the plan,
