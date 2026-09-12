@@ -817,14 +817,20 @@ test('T6: runBrainWritesReviewedCheck — unparseable brain.config.json, no read
     repo: 'org/repo',
     author: 'alice',
     cwd: dir,
-    // Injected so the ONLY possible failure in this run is the config reader
-    // — the real readers throw before either of these is ever reached, so
-    // this has no effect while the fix holds, but it ISOLATES the assertion
-    // from git's own "not a repository" failure in a non-git testTmp() dir,
-    // which would independently produce the same `fail` verdict and mask a
-    // reader regression (a mutation-guard requirement, T12).
+    // Injected so the ONLY possible failure in this run is `readBotAllowlist`
+    // (`defaultReadBotAllowlist`, the DENY reader this test exists to pin) —
+    // without these four, THREE other things independently produce the same
+    // `fail` verdict and mask a `readBotAllowlist` regression: `diffNameOnly`'s
+    // real `git diff` throwing "not a repository" in this non-git testTmp()
+    // dir, AND the sibling ALLOW reader `readOverrideActors`
+    // (`defaultReadApprovalActors`) ALSO throwing on the same malformed
+    // config right after `readBotAllowlist` runs (`:392-393`) — reverting
+    // `readBotAllowlist`'s hardening alone left this test green (measured,
+    // issue #942 review). A mutation-guard requirement (T12).
     diffNameOnly: () => ['README.md'],
     fetchReviews: () => [],
+    readOverrideActors: () => [],
+    readConfig: () => ({}),
   });
   assert.equal(result.level, 'fail', 'a deny/exclusion-list read failure must fail closed, never warn (R6)');
   assert.match(result.reason, /brain\.config\.json/);
