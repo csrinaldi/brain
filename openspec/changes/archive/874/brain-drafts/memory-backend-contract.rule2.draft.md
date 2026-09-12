@@ -6,7 +6,7 @@
 > before, and never by this agent (agents never edit `brain/core/**`):
 >
 > ```
-> npm run brain:promote -- openspec/changes/issue-874-record-first/brain-drafts/memory-backend-contract.rule2.draft.md
+> npm run brain:promote -- openspec/changes/archive/874/brain-drafts/memory-backend-contract.rule2.draft.md
 > ```
 >
 > This amendment does NOT change the contract's rules. It records that
@@ -20,7 +20,7 @@
 > `engram` × rule 2 cell — never rule 1, rule 3, or the `save` column
 > (Amendment 1 owns that one).**
 
-```brain-amendment/2
+```brain-amendment/1
 target: brain/core/methodology/memory-backend-contract.md
 issue: 874
 body: ## Amendment 2 — rule 2 flip: engram.share() no longer produces (issue #874, split B)

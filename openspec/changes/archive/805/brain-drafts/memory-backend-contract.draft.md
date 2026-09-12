@@ -1,6 +1,6 @@
 # Amendment draft — `memory-backend-contract.md`, the record-first correction sequence (issue #805)
 
-**For**: `npm run brain:promote -- openspec/changes/issue-805-supersedes-writer/brain-drafts/memory-backend-contract.draft.md`
+**For**: `npm run brain:promote -- openspec/changes/archive/805/brain-drafts/memory-backend-contract.draft.md`
 
 > Drafted by agent, applied by the maintainer. `brain/core/**` is Tier 2 and
 > `brain:promote` is the sanctioned path: it renders this draft, shows the plan,
