@@ -307,6 +307,7 @@ export default {
   'memory.collect.raced':   '✗ collect falló — la ref del lane se movió durante esta corrida (raced); no se perdió nada, sus blobs se vuelven a juntar en la próxima corrida: {message}',
   'memory.collect.secretSkipped':          '{count} registro(s) con secreto salteado(s) — solo patrón y número de línea, nunca la línea encontrada.',
   'memory.collect.modifiedTrackedSkipped': '{count} registro(s) trackeado(s) y modificado(s) salteado(s) — hacé commit o stash y volvé a correrlo.',
+  'memory.collect.worktreeSkipped': '{count} worktree(s) no se pudieron inspeccionar y quedaron excluidos de esta corrida: {paths}',
 
   // ── memory/cli.mjs — ship (issue #888, ADR-0034 L1/L2/L5) ────────────────────
   'memory.ship.done':             '✓ se envió {ref} — el pull request #{number} quedó armado.',

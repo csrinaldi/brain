@@ -336,6 +336,8 @@ export default {
   'memory.collect.raced':   '✗ collect failed — the lane ref moved during this run (raced); nothing was lost, its blobs are re-collected on the next run: {message}',
   'memory.collect.secretSkipped':          '{count} secret-bearing record(s) skipped — pattern and line number only, never the matched line.',
   'memory.collect.modifiedTrackedSkipped': '{count} tracked-and-modified record(s) skipped — commit or stash them, then re-run.',
+  // #921 — an unreadable worktree is a distinct fact from "nothing pending"; surfaced by count + path, never silently dropped.
+  'memory.collect.worktreeSkipped': '{count} worktree(s) could not be inspected and were excluded from this run: {paths}',
 
   // ── memory/cli.mjs — ship (issue #888, ADR-0034 L1/L2/L5) ────────────────────
   'memory.ship.done':             '✓ shipped {ref} — pull request #{number} is armed.',
