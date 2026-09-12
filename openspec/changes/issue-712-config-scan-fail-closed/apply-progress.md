@@ -54,7 +54,7 @@ identical — no drift left behind).
 | M3 | `plainfiles.mjs` reader → `catch { return {} }` | `_defaultLoadBrainConfig` | **T-P1** | `node --test memory/backends/plainfiles.save.test.mjs` | 31/31 pass | 30 pass, **1 fail: T-P1** ("Missing expected rejection") | Yes — 31/31 pass, diff clean |
 | M4 | `lane-scrub.mjs` reader → `catch { return {} }` | `defaultReadConfig` | **T-L1** | `node --test governance/lane-scrub.test.mjs` | 16/16 pass | 15 pass, **1 fail: T-L1** — T-L2 (call-site) did NOT die, confirming M4/M5 are isolated as designed | Yes — 16/16 pass, diff clean |
 | M5 | delete the new `try/catch` at `lane-scrub.mjs:149` (throw escapes `main()`) | call site | **T-L2** | `node --test governance/lane-scrub.test.mjs` | 16/16 pass | 15 pass, **1 fail: T-L2** — uncaught throw propagated out of `main()`, matching the mutation exactly | Yes — 16/16 pass, diff clean |
-| M6 | move the new arm **above** the `recordPaths.length === 0` early return | call site (ordering) | **T-L3** | `node --test governance/lane-scrub.test.mjs` | 16/16 pass | 15 pass, **1 fail (test #11, the readConfigCalls===0 R8 proof)** — confirmed by name via `grep "not ok"` | Yes — 16/16 pass, diff clean |
+| M6 | move the new arm **above** the `recordPaths.length === 0` early return | call site (ordering) | the existing `readConfigCalls === 0` test (there is no `T-L3`) | `node --test governance/lane-scrub.test.mjs` | 16/16 pass | 15 pass, **1 fail (test #11, the readConfigCalls===0 R8 proof)** — confirmed by name via `grep "not ok"` | Yes — 16/16 pass, diff clean |
 | — | `engram.mjs:266` (`dualWireRecords`) | n/a | none, by construction | n/a | — | — | No production caller (O1/D4); its behaviour is M2's, same function — stated in the docblock added at `:443-451`. |
 
 Every reader was isolated: no row's mutation moved any OTHER named test to
@@ -153,7 +153,7 @@ held).
 - [x] 8.1 — T-L1 added (RED via missing export — first-ever unit coverage)
 - [x] 8.2 — T-L1b added
 - [x] 8.3 — T-L2 added, confirmed RED
-- [x] 8.4 — T-L3 (existing `readConfigCalls===0` test) re-asserted, stayed green after 9.x
+- [x] 8.4 — the existing `readConfigCalls===0` test (no `T-L3` label exists) re-asserted, stayed green after 9.x
 - [x] 9.1 — `loadBrainConfig` → `loadBrainConfigOrThrow`; `defaultReadConfig(root)` exported
 - [x] 9.2 — new try/catch inserted between the early return and the compile block
 - [x] 9.3 — GREEN (16/16) + commit
