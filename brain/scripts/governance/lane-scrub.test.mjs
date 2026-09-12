@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-import { evaluateLaneScrub, main } from './lane-scrub.mjs';
+import { evaluateLaneScrub, main, defaultReadConfig } from './lane-scrub.mjs';
 
 const LANE_SCRUB_PATH = fileURLToPath(new URL('./lane-scrub.mjs', import.meta.url));
 
@@ -202,4 +202,66 @@ test('main: runs and passes explicitly on a non-lane PR (a feature branch adding
     })
   );
   assert.equal(exitCode, 0);
+});
+
+// ── #712 — a secret policy that cannot be read is not the default secret
+// policy. T-L1/T-L1b are direct calls against `defaultReadConfig(root)` — no
+// injection, the #942 T9/T10 shape — the FIRST-EVER coverage of this reader:
+// every other test in this file injects `readConfig`. T-L2 is the call-site
+// test (main()'s new try/catch, distinct from T-L1's reader).
+
+test('T-L1 — defaultReadConfig(root) throws on an unparseable brain.config.json, naming the path (#712, REQ-SCAN-1)', async () => {
+  const { mkdtempSync, writeFileSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const root = mkdtempSync(join(tmpdir(), 'lane-scrub-readconfig-'));
+  try {
+    writeFileSync(join(root, 'brain.config.json'), '{ not valid json', 'utf8');
+    assert.throws(
+      () => defaultReadConfig(root),
+      (err) => {
+        assert.match(err.message, /brain\.config\.json/, 'the message must name the file');
+        return true;
+      },
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('T-L1b — defaultReadConfig(root) with no file returns {} (#712, REQ-SCAN-3) — first-ever coverage of the absent case', async () => {
+  const { mkdtempSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const root = mkdtempSync(join(tmpdir(), 'lane-scrub-readconfig-'));
+  try {
+    // no brain.config.json written — this IS the absent case.
+    assert.deepEqual(defaultReadConfig(root), {});
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('T-L2 — main({readConfig: throwing}) exits 2, uncomputable, "cannot read the secret config" (#712, REQ-SCAN-5)', async () => {
+  const logs = [];
+  const orig = console.log;
+  console.log = (msg) => { logs.push(msg); };
+  let exitCode;
+  try {
+    exitCode = await main({
+      ctx: {},
+      // must match LANE_PATH_RE, else the recordPaths.length === 0 early
+      // return passes with 0 before the config is ever read.
+      diffNameOnlyAdded: () => ['.memory/records/2026-09-x.jsonl'],
+      readConfig: () => { throw new Error('brain.config.json at /fake/root/brain.config.json could not be parsed: boom'); },
+      // readFile/execFileSync must never be reached — the config refusal
+      // fires before the per-record read loop.
+      readFile: () => { throw new Error('must not be called — the config read refuses first'); },
+    });
+  } finally {
+    console.log = orig;
+  }
+  assert.equal(exitCode, 2, 'an uncomputable secret config must fail closed as UNCOMPUTABLE (2)');
+  assert.match(logs.join('\n'), /uncomputable/);
+  assert.match(logs.join('\n'), /cannot read the secret config/);
 });
