@@ -541,6 +541,11 @@ function shipOutcomeKey(result) {
   if (result.pr && result.pr.number === null) return "prNumberUnknown";
   if (result.pushed === false && result.pr === null) return "nothing";
   if (result.autoMerge?.enabled === false) return "autoMergeRefused";
+  // R11 (#920): a reconciliation without a push (find/create + arm ran, zero
+  // new commits) is still work — checked after `autoMergeRefused` (a refused
+  // arm keeps its own precedence) and before the final `done`, so a run that
+  // also pushed still reports "done".
+  if (result.pushed === false && result.reconciled === true) return "reconciled";
   return "done";
 }
 

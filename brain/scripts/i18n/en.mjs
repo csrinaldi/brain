@@ -80,6 +80,7 @@ export default {
   // Lane sweep (#906, design.md A7) — one line, only when memory.lane.enabled is true.
   'day.memory.laneSweep.running':        'Checking the lane sweep...',
   'day.memory.laneSweep.shipped':        'Lane sweep: shipped {ref} (PR #{number}).',
+  'day.memory.laneSweep.reconciled':     'Lane sweep: reconciled {ref} (PR #{number}) — nothing new to push.',
   'day.memory.laneSweep.nothing':        'Lane sweep: nothing to ship.',
   'day.memory.laneSweep.warn':           'Lane sweep: {detail} — see the tmp log; the morning sweep will retry tomorrow.',
   // {detail}'s own text — a key, not a literal, so a non-English docs.language
@@ -338,6 +339,7 @@ export default {
 
   // ── memory/cli.mjs — ship (issue #888, ADR-0034 L1/L2/L5) ────────────────────
   'memory.ship.done':             '✓ shipped {ref} — pull request #{number} is armed.',
+  'memory.ship.reconciled':       '✓ reconciled {ref} — pull request #{number} is armed. Nothing new was pushed.',
   'memory.ship.nothing':          'nothing new to ship — {ref} already matches origin.',
   'memory.ship.dryRun':           'plan — {ref} would ship. Nothing was pushed, no port call was made.',
   'memory.ship.pushed':           '✓ pushed {ref} to origin.',

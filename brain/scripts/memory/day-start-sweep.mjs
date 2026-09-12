@@ -101,5 +101,16 @@ export function laneSweepLine(sweep) {
       params: { ref: sweep.outcome.ref ?? '', number: sweep.outcome.pr?.number ?? '?' },
     };
   }
+  // R11 (#920): a reconciliation-without-a-push (find/create + arm ran, zero
+  // new commits) is still work — never "nothing to ship". Checked after
+  // `pushed` so a run that both pushed AND reconciled still renders as
+  // "shipped" (pushed wins), and before the `nothing` fallback.
+  if (sweep.outcome?.reconciled) {
+    return {
+      level: 'ok',
+      key: 'day.memory.laneSweep.reconciled',
+      params: { ref: sweep.outcome.ref ?? '', number: sweep.outcome.pr?.number ?? '?' },
+    };
+  }
   return { level: 'ok', key: 'day.memory.laneSweep.nothing', params: {} };
 }

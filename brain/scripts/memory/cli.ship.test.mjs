@@ -370,6 +370,66 @@ test('a full success run (push + PR create + arm) goes through the committed fix
   assert.notEqual(afterOriginRefs, '', 'the push itself is real git, against the LOCAL bare origin fixture — never GitHub');
 });
 
+test('R11 (#920): pushed:false && reconciled:true renders as "reconciled", never "nothing" — a same-day retry that finds/creates the PR with zero new records', () => {
+  const { mainDir, originDir } = fixtureRepo({ withCandidate: true });
+
+  // Run 1: a full success (push + create + arm), same shape as the fixture
+  // above — the lane lands on origin but is never merged into main.
+  const firstScript = writeVcsTestScript(testTmp('cli-ship-fake-vcs-'), {
+    mrList: [],
+    mrCreate: { url: 'https://fake-vcs.invalid/pull/999' },
+    mrAutoMerge: { enabled: true, url: null },
+  });
+  const first = spawnSync(process.execPath, [CLI, 'ship', '--json'], {
+    encoding: 'utf8',
+    env: {
+      ...process.env, BRAIN_MEMORY_TEST_ROOT: mainDir, MEMORY_BACKEND: 'no-such-backend',
+      BRAIN_VCS_TEST_MODULE: FAKE_VCS_MODULE, BRAIN_VCS_TEST_SCRIPT: firstScript,
+    },
+  });
+  assert.equal(first.status, 0, first.stderr);
+  const firstParsed = JSON.parse(first.stdout);
+  assert.equal(firstParsed.pushed, true);
+
+  // Run 2: zero new candidates, the lane ref already matches origin
+  // (ahead:0), and the PR from run 1 is still open by headBranch — records
+  // are still absent from `origin/main` (never merged), so this is the M1
+  // shape: no push, but find/create + arm must still run. `branch` is read
+  // from run 1's own outcome, never reconstructed — `plan.mjs`'s
+  // `slugifyHost()` can rewrite a raw `hostname()` that this fixture must
+  // not have to re-derive.
+  const secondScript = writeVcsTestScript(testTmp('cli-ship-fake-vcs-'), {
+    mrList: [{ number: 999, title: 't', headBranch: firstParsed.branch }],
+    mrAutoMerge: { enabled: true, url: null },
+  });
+  const jsonRun = spawnSync(process.execPath, [CLI, 'ship', '--json'], {
+    encoding: 'utf8',
+    env: {
+      ...process.env, BRAIN_MEMORY_TEST_ROOT: mainDir, MEMORY_BACKEND: 'no-such-backend',
+      BRAIN_VCS_TEST_MODULE: FAKE_VCS_MODULE, BRAIN_VCS_TEST_SCRIPT: secondScript,
+    },
+  });
+  assert.equal(jsonRun.status, 0, jsonRun.stderr);
+  const parsed = JSON.parse(jsonRun.stdout);
+  assert.equal(parsed.pushed, false);
+  assert.equal(parsed.reconciled, true);
+  assert.equal(parsed.pr.number, 999);
+
+  const textRun = spawnSync(process.execPath, [CLI, 'ship'], {
+    encoding: 'utf8',
+    env: {
+      ...process.env, BRAIN_MEMORY_TEST_ROOT: mainDir, MEMORY_BACKEND: 'no-such-backend',
+      BRAIN_VCS_TEST_MODULE: FAKE_VCS_MODULE, BRAIN_VCS_TEST_SCRIPT: secondScript,
+    },
+  });
+  assert.equal(textRun.status, 0, textRun.stderr);
+  assert.match(textRun.stdout, /memory\/cli:.*reconcil/i, 'a reconciliation-without-a-push must never print "nothing new to ship"');
+  assert.doesNotMatch(textRun.stdout, /nothing new to ship/i);
+
+  const afterOriginMainRefs = git(originDir, 'for-each-ref', '--format=%(refname)', 'refs/heads/memory/');
+  assert.notEqual(afterOriginMainRefs, '', 'the lane ref itself must still be present on origin');
+});
+
 test('E1 (cold review): mrCreate returns a URL with no derivable PR number and the rescan finds nothing: exit 0, prNumberUnknown', () => {
   const scriptFor = () => writeVcsTestScript(testTmp('cli-ship-fake-vcs-'), {
     mrList: [],
