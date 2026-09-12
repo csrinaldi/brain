@@ -59,8 +59,8 @@ never sees a backend-specific field.
 |------|-----------|-------------------|----------|
 | `setup` | `({ root }) -> void` | Prepares whatever the backend privately needs (engram: the `.engram → .memory` symlink, the merge driver — both retiring). Idempotent, non-clobbering. Never throws on an already-set-up tree. | **yes** |
 | `share` | `({ root }) -> { indexCount, duplicates, ... }` | Materializes what the durable layer does not yet hold and rebuilds `index.jsonl`; returns the accounting (#574) so the caller can say it. Under record-first (#864 task 3.2) this is "commit what is already true": it exports nothing from the backend. | **yes** |
-| `hydrate` | `({ root, recordId? }) -> { written, skipped, deferred?, contended? }` | Projects `.memory/records/` into the backend, idempotently (rule 1). With `recordId`, projects that one record — a producer's fast path after its own write. `deferred: true` when hydration could not run (store unreadable, guard contended) with the reason on stderr — never a throw, never a zero that reads as "nothing to do". Today spelled `pull` (with `git pull`) and `cli.mjs import` (without); the contract names the operation, the verbs keep their names until #862 settles the lane. | **yes** |
-| `save` | `(title, content, { type, project, issue?, supersedes? }) -> { id, file, written }` | The producer path: a record on disk, then `hydrate({recordId})`. **Required on every backend** — a backend without `save` has no record-first capture (D2). **Today**: `memory:save` is pinned to `plainfiles` (`package.json`), engram's `save` is `unsupportedOp`, no `hydrate({recordId})` exists and `supersedes` is not forwarded by the CLI — #874 (3.2) and #805 close those; until then the record is picked up by the next hydration. | **yes** |
+| `hydrate` | `({ root, recordId? }) -> { written, skipped, deferred?, contended? }` | Projects `.memory/records/` into the backend, idempotently (rule 1). With `recordId`, projects that one record — a producer's fast path after its own write. `deferred: true` when hydration could not run (store unreadable, guard contended) with the reason on stderr — never a throw, never a zero that reads as "nothing to do". The single-record form, `hydrate({recordId})`, exists on `engram` as of #874 (3.2); the bulk form is still spelled `pull` (with `git pull`) and `cli.mjs import` (without) — the contract names the operation, those verbs keep their names until #862 settles the lane. | **yes** |
+| `save` | `(title, content, { type, project, issue?, supersedes? }) -> { id, file, written }` | The producer path: a record on disk, then `hydrate({recordId})`. **Required on every backend** — a backend without `save` has no record-first capture (D2). **Today**: `engram.save()` mirrors `plainfiles.save()` (provenance #738, `--supersedes` #805) and calls `hydrate({recordId})` as its terminal step, deferring rather than throwing when the backend cannot be reached (#874, 3.2); `memory:save`'s `package.json` pin is removed. `search` stays `unsupportedOp` (R14 scope, unchanged). | **yes** |
 | `search` | `(query, opts) -> [{ id, title, ts, ... }]` | Over the durable layer or the backend's index. | no |
 | `index` | `({ root }) -> void` | Re-projects `brain/` doctrine into the backend. `plainfiles`: `unsupportedOp` by design (obs #578) — it projects doctrine, not captures. | no |
 | `featureCheckpoint` / `featureResume` | see `feature-working-memory-contract.md` | Working memory for a change (`resume.md` and the `brain-feature-*` projection). Non-durable by rule 2. | no |
@@ -79,7 +79,7 @@ producer is listed here with the four things it declares. A writer that skips th
 
 | Producer | Trigger | Provenance from | Write target | Lane | Hydration |
 |----------|---------|-----------------|--------------|------|-----------|
-| memory CLI — `memory:save` | an agent or human, in session | flags (`--issue`; `--supersedes` with #805), `actor` per #738 (a handle, never a branch) | the invoking checkout's `.memory/records/` | #862 memory lane (until it exists: the slice PR, as today) | next hydration today; `hydrate({recordId})` with #874 |
+| memory CLI — `memory:save` | an agent or human, in session | flags (`--issue`; `--supersedes` with #805), `actor` per #738 (a handle, never a branch) | the invoking checkout's `.memory/records/` | #862 memory lane (until it exists: the slice PR, as today) | `hydrate({recordId})` (#874) |
 | cold-review poster — `brain/scripts/review/poster.mjs` (#851 slice 1) | each posted review round | the reviewer identity; `issue`, `pr`, `rev`, `head_sha`, `verdict`; `supersedes` = the previous round's record | the **invoking** checkout's `.memory/records/`, never the cold `/tmp/brain-review-<sha>` tree | #862 memory lane, never the PR head (a verdict pins `head_sha`, ADR-0026 Amendment 5); ships after #864 task 3.1a | next hydration today; `hydrate({recordId})` with #874 |
 
 Adding a producer is a row here and a slice ticket under #864 — never a new write path into
@@ -106,7 +106,7 @@ walks the index.
 | backend | rule 1 | rule 2 | rule 3 | `save` |
 |---------|--------|--------|--------|--------|
 | `plainfiles` | by construction (`hydrate` is `rebuildIndex`) | by construction | by construction | yes |
-| `engram` | delta under guard (#820) — three pre-guard rows await the one-time heal (#864 task 1.2a) | **not yet** — `mem_save` is the first home today; closes with #864 task 3.2 | **not yet** — manifest, chunks, symlink, driver; closes with #864 tasks 2.3/2.4 | `unsupportedOp` today; closes with 3.2 |
+| `engram` | delta under guard (#820) — three pre-guard rows await the one-time heal (#864 task 1.2a) | **not yet** — `mem_save` is the first home today; closes with #864 task 3.2 | **not yet** — manifest, chunks, symlink, driver; closes with #864 tasks 2.3/2.4 | yes |
 
 The exit of memory 2.0 (#864 task 6.1) re-runs the spec's scenarios under both backends;
 this table is updated by the slice that turns a "not yet" into a "yes".
@@ -120,3 +120,46 @@ this table is updated by the slice that turns a "not yet" into a "yes".
    under `MEMORY_BACKEND=<name>` — the agnosticism test is the acceptance filter.
 4. If the backend needs a private artifact in the tree, its `setup` creates it, `.gitignore`
    hides it, and no reader of `.memory/records/` ever depends on it.
+
+## Amendment 1 — `save` column flip: engram.save() is a record-first producer (issue #874, split A)
+
+**Signed**: 12/09/2026 — Cristian Rinaldi
+
+### What this does NOT change
+
+Rule 2 ("a capture becomes a durable record before the backend is touched")
+stays `not yet` for `engram` — `share()` still runs `engram sync --export` →
+read the chunks it just wrote → scrub → dual-write until split B (`#874`,
+`Closes #874`) reshapes it into the `plainfiles.share()` mirror. Rule 3 (the
+backend's binary/private files may be absent) is untouched by this amendment
+too. This amendment closes exactly ONE cell: the `save` column's `unsupportedOp`
+→ `yes`, because `save` is a standalone verb whose own requirement (D2: "a
+backend without `save` has no record-first capture") is now satisfied on
+`engram` independently of rule 2's `share()`-side gap.
+
+### What landed (split A)
+
+- `engram.save()` (`brain/scripts/memory/backends/engram.mjs`) is no longer
+  `unsupportedOp` — it mirrors `plainfiles.save()`'s gate order (caller-mistake
+  refusals → actor/provenance #738 → `--supersedes` #805 → `buildRecord` →
+  secret scan → `appendRecord` → `rebuildIndex`) and adds ONE new terminal
+  step: `hydrate({root, recordId, record})`.
+- `hydrate({recordId})` (new export on `engram.mjs`) projects exactly one
+  record into the active engram store via ONE `engram save --topic <id>` call,
+  under the `#820` hydration guard, non-blocking. Binary absent, a non-zero
+  exit, or a contended guard all **defer** (`{deferred: true, reason}`,
+  reported on stderr) rather than throw — the record is already durable by the
+  time `hydrate` runs, so a backend failure here can never read as a lost
+  capture.
+- `package.json`'s `memory:save` script no longer pins `MEMORY_BACKEND=plainfiles`
+  — `save` is reachable, and durable, under every backend now.
+- `search` is UNCHANGED — still `unsupportedOp` on `engram` (R14 scope; engram
+  already has a native `mem_search`).
+
+### Measured (R7 probe, split A)
+
+`engram save --topic <id>` **upserts** by `topic_key` (measured against the
+installed binary, v1.20.0, in an isolated temp store — see this change's
+`apply-progress.md`). Re-hydrating one record therefore leaves exactly one row,
+which is what makes `hydrate({recordId})`'s idempotence claim (rule 1) provable
+rather than assumed.
