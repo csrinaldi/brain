@@ -10,6 +10,7 @@ import assert from 'node:assert/strict';
 
 import {
   AGENT_ENV_DEFAULT,
+  AGENT_ENV_DEFAULTS,
   RESERVED_ACTORS,
   ISSUE_BRANCH_RE,
   resolveActor,
@@ -79,6 +80,56 @@ test('resolveActorKind: a 3-name brain.agentEnv list, second name set ⇒ agent,
   assert.equal(r.actorKind, 'agent');
   assert.equal(r.marker, 'VAR2');
   assert.match(r.evidence, /VAR2/);
+});
+
+// ---------------------------------------------------------------------------
+// resolveActorKind — widened default marker list (#939, audit finding M4:
+// a Codex session exporting only CODEX_THREAD_ID, no AI_AGENT, was recorded
+// human). Every case here uses an INJECTED env object, never process.env —
+// this repo's own checkout exports both AI_AGENT and CLAUDECODE, so a test
+// reading the real env would pass for the wrong reason (task brief).
+// ---------------------------------------------------------------------------
+
+test('AGENT_ENV_DEFAULTS: widens beyond AI_AGENT and still includes it', () => {
+  assert.ok(Array.isArray(AGENT_ENV_DEFAULTS));
+  assert.ok(AGENT_ENV_DEFAULTS.includes(AGENT_ENV_DEFAULT));
+  assert.ok(AGENT_ENV_DEFAULTS.length > 1, 'must widen beyond the single legacy default');
+});
+
+test('resolveActorKind: a session exporting ONLY CODEX_THREAD_ID (no AI_AGENT) ⇒ agent (audit finding M4)', () => {
+  const r = resolveActorKind({ env: { CODEX_THREAD_ID: 'thread-abc123' } });
+  assert.equal(r.actorKind, 'agent');
+  assert.equal(r.marker, 'CODEX_THREAD_ID');
+  assert.match(r.evidence, /CODEX_THREAD_ID/);
+});
+
+test('resolveActorKind: a session exporting ONLY CLAUDECODE (no AI_AGENT) ⇒ agent', () => {
+  const r = resolveActorKind({ env: { CLAUDECODE: '1' } });
+  assert.equal(r.actorKind, 'agent');
+  assert.equal(r.marker, 'CLAUDECODE');
+  assert.match(r.evidence, /CLAUDECODE/);
+});
+
+test('resolveActorKind: no default marker present, none configured ⇒ human, evidence lists the checked names', () => {
+  const r = resolveActorKind({ env: { UNRELATED_VAR: 'x' } });
+  assert.equal(r.actorKind, 'human');
+  assert.equal(r.marker, null);
+  for (const name of AGENT_ENV_DEFAULTS) {
+    assert.ok(r.evidence.includes(name), `evidence must mention ${name}: ${r.evidence}`);
+  }
+});
+
+test('resolveActorKind: CODEX_THREAD_ID set but EMPTY ⇒ human, evidence names it "set but empty" (#888 discipline)', () => {
+  const r = resolveActorKind({ env: { CODEX_THREAD_ID: '' } });
+  assert.equal(r.actorKind, 'human');
+  assert.match(r.evidence, /CODEX_THREAD_ID/);
+  assert.match(r.evidence, /set but empty/);
+});
+
+test('resolveActorKind: explicit brain.agentEnv still wins over the widened defaults', () => {
+  const r = resolveActorKind({ env: { CODEX_THREAD_ID: 'thread-abc123', ONLY_THIS: 'yes' }, agentEnvConfig: 'ONLY_THIS' });
+  assert.equal(r.actorKind, 'agent');
+  assert.equal(r.marker, 'ONLY_THIS');
 });
 
 // ---------------------------------------------------------------------------
