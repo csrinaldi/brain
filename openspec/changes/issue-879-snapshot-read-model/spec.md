@@ -39,6 +39,10 @@ collapses "could not read" into `[]` or `null`.
 - **WHEN** `.memory/records/` is absent
 - **THEN** `records` and `actors` are `{ok: false, reason}` naming the path — never `[]`
 
+#### Scenario: forge reachable, one issue body unreadable
+- **WHEN** `issueList` answers and `issueView` fails for one issue
+- **THEN** that issue is still a node — number, title, labels and state came from the list — carrying `{ok: false, reason}` with `status: "unreadable"` and `declared: null`, listed in `graph.issuesUnreadable`; it is never byte-identical to an issue that declared no block, and an edge another issue declares into it still blocks
+
 #### Scenario: forge reachable, one PR thread unreadable
 - **WHEN** `mrList` answers and `prReviews` fails for one PR
 - **THEN** `reviews.value` carries that PR as `{pr, ok: false, reason}` and the other PRs' verdicts intact

@@ -40,7 +40,15 @@ what it deduped.
 `graph`, `prs` and `reviews` each depend on the forge and each fails on its
 own. Inside `reviews`, one PR whose thread cannot be read is
 `{pr, ok: false, reason}` beside the readable ones — the field-level
-degradation `status/cli.mjs` established. `issueRelations` is NOT read: the
+degradation `status/cli.mjs` established. Inside `graph`, one issue whose body
+`issueView` did not hand over is the same case and gets the same answer: the
+node stays, built from what `issueList` DID say (number, title, labels, open
+state), and carries `{ok: false, reason}`, `status: "unreadable"` and
+`declared: null` — never the `''` body that made it byte-identical to an issue
+that declared nothing (cold review of #953, rev 1;
+`evidence-reader-empty-on-failure`). Its `blockedBy` and `roadmap` are still
+facts, because other issues' declarations and the PR list are what compute
+them; its own edges, track and files are unknown and are not asserted. `issueRelations` is NOT read: the
 graph is built from `issueList` + `issueView` (bodies carry the declared
 block), and `buildGraph` treats `relations: undefined` as "not asked", so the
 edges' `sources` say `declared` and nothing pretends the native side was

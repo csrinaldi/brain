@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { makeSnapshotFixture as makeFixture } from '../__fixtures__/snapshot-tree.mjs';
 import {
   buildSnapshot, roadmapState, aggregateActors, projectRecord, readChanges, readRecordRows, reviewRows,
-  issueOfBranch, renderSnapshotText, PLANNED, IN_FLIGHT, DONE,
+  issueOfBranch, renderSnapshotText, PLANNED, IN_FLIGHT, DONE, UNREADABLE,
 } from './snapshot.mjs';
 
 const NOW = '2026-09-13T00:00:00Z';
@@ -158,6 +158,46 @@ test('#879: with a port the graph carries roadmap per node, and one unreadable t
   assert.deepEqual(t11, { pr: 11, ok: false, reason: 'thread 11 timed out' });
   // JSON-safe end to end: a Map or an undefined would not survive this.
   assert.deepEqual(JSON.parse(JSON.stringify(s)), s);
+});
+
+test('#879: one issue body that cannot be read is a node that says so — never an issue that declared nothing', async () => {
+  const issues = [
+    { number: 5, title: 'five', labels: ['status:approved'], assignees: [] },
+    { number: 6, title: 'six', labels: [], assignees: null },
+  ];
+  const body5 = '```brain-graph/1\ntrack: UI\nblocks: []\nneeds: [6]\nfiles: []\n```';
+  const port = (view6) => readOnlyPort({
+    issueList: async () => issues,
+    issueView: async ({ number }) => {
+      if (number === 6) return view6();
+      return { body: body5, assignees: null };
+    },
+    mrList: async () => [],
+    prReviews: async () => [],
+  });
+  const root = makeFixture();
+  const failed = await buildSnapshot({ root, now: NOW, vcs: port(() => { throw new Error('issue 6 timed out'); }), project: 'o/r' });
+  const undeclared = await buildSnapshot({ root, now: NOW, vcs: port(() => ({ body: '', assignees: null })), project: 'o/r' });
+
+  const n6 = failed.graph.value.nodes.find((n) => n.number === 6);
+  assert.equal(n6.ok, false);
+  assert.match(n6.reason, /issue 6 timed out/);
+  assert.equal(n6.status, UNREADABLE, 'not "unclassified" — nobody knows whether it declared a block');
+  assert.equal(n6.declared, null);
+  assert.deepEqual(failed.graph.value.issuesUnreadable, [{ number: 6, reason: 'issue 6 timed out' }]);
+  assert.equal(n6.roadmap.value.state, PLANNED, 'state and PRs came from the list, so the roadmap is still a fact');
+  // What the LIST said still counts: #5 declared it needs #6, and #6 is open.
+  assert.deepEqual(failed.graph.value.nodes.find((n) => n.number === 5).blockedBy, [6]);
+  assert.deepEqual(failed.graph.value.tracks, { UI: [5] }, 'an unknown track is not the "?" track');
+  assert.match(renderSnapshotText(failed), /1 issue body\(ies\) unreadable/);
+
+  // The measurement the review made, inverted: the two cases must NOT be byte-identical.
+  const u6 = undeclared.graph.value.nodes.find((n) => n.number === 6);
+  assert.equal(u6.ok, true);
+  assert.equal(u6.status, 'unclassified');
+  assert.deepEqual(undeclared.graph.value.issuesUnreadable, []);
+  assert.deepEqual(undeclared.graph.value.tracks, { '?': [6], UI: [5] });
+  assert.notDeepEqual(n6, u6);
 });
 
 test('#879: an issue list that fails takes only the graph; a PR list that fails takes prs and reviews', async () => {

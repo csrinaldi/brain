@@ -45,6 +45,8 @@ export const HOME_PATH = 'brain/HOME.md';
 export const PLANNED = 'planned';
 export const IN_FLIGHT = 'in-flight';
 export const DONE = 'done';
+/** A node whose body the forge did not hand over: not `unclassified` (nobody declared a block), UNKNOWN. */
+export const UNREADABLE = 'unreadable';
 
 // ── derivations: facts in, rows out ─────────────────────────────────────────
 
@@ -187,15 +189,41 @@ async function readForge({ vcs, project }) {
   try {
     const listed = await vcs.issueList({ project, state: 'open' });
     const issues = [];
+    const unreadable = new Map();
     for (const i of listed) {
       let full;
-      try { full = await vcs.issueView({ project, number: i.number }); } catch { full = { body: '', assignees: null }; }
+      try {
+        full = await vcs.issueView({ project, number: i.number });
+      } catch (err) {
+        // The body is UNKNOWN, not empty. Substituting '' here placed the node as
+        // "declared nothing" — byte-identical to a real undeclared issue, the
+        // pattern `evidence-reader-empty-on-failure.md` names verbatim (cold
+        // review of #953, rev 1). The issue still enters the graph with what the
+        // LIST did say — number, title, labels, open state — so an edge another
+        // issue declares INTO it still blocks; what the body would have said
+        // (its own edges, track, files) is unknown, and the node says so below.
+        unreadable.set(i.number, err?.message ?? String(err));
+        full = null;
+      }
       issues.push({ number: i.number, title: i.title, labels: i.labels ?? [], state: 'open', body: full?.body ?? '', assignees: i.assignees ?? full?.assignees ?? null });
     }
     const g = buildGraph(issues);
+    const nodes = g.nodes.map((n) => (unreadable.has(n.number)
+      ? { ...n, ok: false, reason: `the issue body could not be read: ${unreadable.get(n.number)}`, status: UNREADABLE, declared: null, track: null, files: [], sources: [] }
+      : { ...n, ok: true }));
     // `tracks` is a Map, which JSON drops to `{}`; the verb and the module must
-    // print one shape, so it is a sorted object of member numbers here.
-    graph = field({ ...g, tracks: Object.fromEntries([...g.tracks].sort(([a], [b]) => a.localeCompare(b)).map(([k, ms]) => [k, ms.map((n) => n.number)])) });
+    // print one shape, so it is a sorted object of member numbers here. An
+    // unreadable node has no known track and is listed in `issuesUnreadable`
+    // instead of under `?`, which is the track of issues that DECLARED none.
+    const tracks = Object.fromEntries(
+      [...g.tracks].sort(([a], [b]) => a.localeCompare(b))
+        .map(([k, ms]) => [k, ms.map((n) => n.number).filter((num) => !unreadable.has(num))])
+        .filter(([, members]) => members.length > 0),
+    );
+    graph = field({
+      ...g, nodes, tracks,
+      issuesUnreadable: [...unreadable].map(([number, reason]) => ({ number, reason })),
+    });
   } catch (err) {
     graph = uncomputable(`the issue list could not be read: ${err?.message ?? err}`);
   }
@@ -285,7 +313,7 @@ export function renderSnapshotText(s) {
   const line = (name, sec, count) => (sec.ok ? `${name.padEnd(14)} ${count(sec.value)}` : `${name.padEnd(14)} not computed — ${sec.reason}`);
   const out = [
     `brain snapshot · ${s.generatedAt} · tier ${s.tier}`,
-    line('graph', s.graph, (g) => `${g.nodes.length} node(s), ${g.edges.length} edge(s)`),
+    line('graph', s.graph, (g) => `${g.nodes.length} node(s), ${g.edges.length} edge(s)${g.issuesUnreadable.length ? `, ${g.issuesUnreadable.length} issue body(ies) unreadable` : ''}`),
     line('changes', s.changes, (c) => `${c.length} change dir(s)`),
     line('prs', s.prs, (p) => `${p.length} open`),
     line('reviews', s.reviews, (r) => `${r.filter((x) => x.ok).length} thread(s) read, ${r.filter((x) => !x.ok).length} unreadable`),
