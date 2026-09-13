@@ -173,7 +173,7 @@ does not control. The gate is now checkable: the danger-path e2e suite (#401) mu
   already receives `state`/`merged_at` from the API and discards them before returning; there
   is no `mrGet`/`mrView` verb either. (#930)
 - **The full test suite's verdict depends on `VCS_PROVIDER`.** Exporting
-  `VCS_PROVIDER=gitlab` turns 29 tests red (5248/5277 pass) that pass with no provider
+  `VCS_PROVIDER=gitlab` turns 29 tests red (measured on `32b70db9`) that pass with no provider
   variable exported — the same class of defect as the now-fixed #714/#638 shell dependency,
   on a different variable and a larger blast radius. (#947)
 
