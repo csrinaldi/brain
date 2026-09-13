@@ -22,7 +22,9 @@ const HEADING = '### Architecture decisions';
 const HEADING_RE = /^###\s+Architecture decisions\s*$/;
 // Bounds the section: the next `---` separator or any `## ` heading closes it.
 const SECTION_BOUNDARY_RE = /^(---|## )/;
-const ADR_LINE_RE = /^- \[ADR-(\d{4})\]\(project\/decisions\/[^)]+\)/;
+// Exported for `status/adr-index.mjs`'s drift check (#879): the ONE definition
+// of what a HOME.md ADR line is, so the writer and the reader cannot disagree.
+export const ADR_LINE_RE = /^- \[ADR-(\d{4})\]\(project\/decisions\/[^)]+\)/;
 
 function formatLine({ number, slug, description }) {
   const nnnn = String(number).padStart(4, '0');
