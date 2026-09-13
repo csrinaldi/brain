@@ -57,8 +57,8 @@ The body says this supersedes ADR-0001, which is prose, not a relation.
 });
 
 test('#879: an unparseable ADR is "could not read", never absent', () => {
-  const noStatus = parseAdr('# ADR-0099 — Title only\n\nno status line\n', { path: 'p/adr-0099-x.md' });
-  assert.deepEqual(noStatus, { ok: false, path: 'p/adr-0099-x.md', reason: 'no `**Status**:` line' });
+  const noStatus = parseAdr('# ADR-0001 — Title only\n\nno status line\n', { path: 'p/adr-0001-x.md' });
+  assert.deepEqual(noStatus, { ok: false, path: 'p/adr-0001-x.md', reason: 'no `**Status**:` line' });
   const noTitle = parseAdr('**Status**: Accepted\n', { path: 'q' });
   assert.equal(noTitle.ok, false);
   assert.match(noTitle.reason, /Title/);
