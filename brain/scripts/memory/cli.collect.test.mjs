@@ -127,6 +127,41 @@ function fixtureRepoWithSkips() {
   return mainDir;
 }
 
+/** A bare origin, `main` pushed to it, and ONE linked worktree (`wt`) — the
+ * minimum shape that lets `collectLane()` see the SAME candidate filename
+ * twice (main counts as a worktree like any other; see `fixtureRepo()`'s own
+ * comment above). Both copies are byte-identical, untracked, and never
+ * committed anywhere — the exact residue a union merge, or two clones
+ * capturing the same record independently, leaves behind (#574's opening
+ * case, exercised here through `collect` specifically for cli.mjs:362's
+ * `await reportDuplicates(...)`). */
+function fixtureRepoWithDuplicateCandidate() {
+  const base = testTmp('cli-collect-dup-');
+  const originDir = join(base, 'origin.git');
+  const mainDir = join(base, 'main');
+  const wtDir = join(base, 'wt');
+  git(base, 'init', '--bare', '-q', originDir);
+  git(base, 'init', '-q', '-b', 'main', mainDir);
+  git(mainDir, 'remote', 'add', 'origin', originDir);
+  git(mainDir, 'config', 'user.email', 'test@example.invalid');
+  git(mainDir, 'config', 'user.name', 'brain-test');
+  git(mainDir, 'commit', '-q', '--allow-empty', '-m', 'root');
+  git(mainDir, 'push', '-q', '-u', 'origin', 'main');
+  git(mainDir, 'fetch', '-q', 'origin');
+  git(mainDir, 'worktree', 'add', '-q', wtDir, '-b', 'lane-wt');
+
+  const dupRecord = JSON.stringify({
+    id: 'rec-2222222222222222', ts: '2026-09-09T00:00:00Z', actor: '@t',
+    actorKind: 'agent', type: 'discovery', project: 'brain', content: 'same record, two worktrees',
+  }) + '\n';
+  for (const dir of [mainDir, wtDir]) {
+    const recordsDir = join(dir, '.memory', 'records');
+    mkdirSync(recordsDir, { recursive: true });
+    writeFileSync(join(recordsDir, '2026-09-rec-2222222222222222.jsonl'), dupRecord, 'utf8');
+  }
+  return mainDir;
+}
+
 /** `MEMORY_BACKEND` deliberately points at a backend that cannot be
  * imported — if `collect` ever fell through to backend dispatch, every one
  * of these runs would fail with "backend 'no-such-backend' not found". */
@@ -163,6 +198,14 @@ test('memory:collect --json carries the full shape on stdout only', () => {
   assert.ok(parsed.duplicates && typeof parsed.duplicates === 'object');
 });
 
+test('memory:collect REPORTS a duplicate candidate shared by two worktrees on stderr (cli.mjs:362 — must not race process.exit(0))', () => {
+  const run = runCli(fixtureRepoWithDuplicateCandidate());
+  assert.equal(run.status, 0, run.stderr);
+  assert.match(run.stderr, /1 duplicate record id\(s\)/, 'the duplicate must be REPORTED, not dropped by an unawaited reportDuplicates racing process.exit(0)');
+  assert.match(run.stderr, /the lane commit/, 'collect names its own surface, not the default "the index"');
+  assert.ok(run.stderr.includes('rec-2222222222222222'), 'the duplicated id is named');
+});
+
 test('memory:collect never invokes a backend, regardless of MEMORY_BACKEND', () => {
   const run = runCli(fixtureRepo());
   assert.equal(run.status, 0, run.stderr);
@@ -177,6 +220,37 @@ test('cold-2 — memory:collect prints memory.collect.secretSkipped and memory.c
   // D4's guarantee, restated at the CLI surface: the matched secret literal
   // itself must never appear anywhere in the process output, count-only.
   assert.doesNotMatch(run.stdout + run.stderr, /ghp_x{24}/);
+});
+
+test('memory:collect --json always carries skippedWorktrees, even when empty (#921)', () => {
+  const run = runCli(fixtureRepo(), '--json');
+  assert.equal(run.status, 0, run.stderr);
+  const parsed = JSON.parse(run.stdout);
+  assert.ok(Array.isArray(parsed.skippedWorktrees), 'skippedWorktrees must always be an array, never absent or undefined');
+  assert.deepEqual(parsed.skippedWorktrees, []);
+});
+
+test('#921 — memory:collect prints memory.collect.worktreeSkipped on stderr with count + path when a worktree could not be inspected', () => {
+  // Registers a SECOND worktree, then corrupts its `.git` file to point at a
+  // nonexistent gitdir. The directory itself still exists, so
+  // `git worktree list --porcelain` never marks it `prunable` (proven below)
+  // — but `git -C <path> status` fails for real ("fatal: not a git
+  // repository"), exactly the unreadable-worktree case #921 describes,
+  // distinct from the intentional prunable/bare skip.
+  const root = fixtureRepo();
+  const wtDir = join(dirname(root), 'wt-unreadable');
+  git(root, 'worktree', 'add', '-q', wtDir, '-b', 'lane-unreadable');
+  writeFileSync(join(wtDir, '.git'), 'gitdir: /nonexistent/gitdir/path\n', 'utf8');
+  const porcelain = git(root, 'worktree', 'list', '--porcelain');
+  assert.doesNotMatch(porcelain, /prunable/, 'a corrupted-but-present worktree must not be reported prunable — this test must exercise the unreadable path, not the pre-existing prunable skip');
+
+  const run = runCli(root);
+  assert.equal(run.status, 0, run.stderr);
+  assert.match(run.stderr, /memory\/cli:.*1 worktree\(s\) could not be inspected/i);
+  assert.match(run.stderr, new RegExp(wtDir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  // F4 (cold review): the text surface must carry WHY, not just which path —
+  // the reason git itself gave, not merely count + path.
+  assert.match(run.stderr, /not a git repository/i);
 });
 
 test('memory:collect fails loudly with memory.collect.failed and exits 1 on a genuine git failure', () => {

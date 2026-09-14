@@ -62,6 +62,7 @@ import { ENGRAM_BIN, probeBinary } from "../lib/backend-selection.mjs";
 import { gitConfigGet } from "../../lib/git-config.mjs";
 import { resolveActor, resolveActorKind, deriveIssue, composeSource } from "../lib/capture-provenance.mjs";
 import { classifySupersedes, SUPERSEDES_ID_RE } from "../lib/supersedes.mjs";
+import { loadBrainConfigOrThrow } from "../../lib/brain-config.mjs";
 import { t } from "../../i18n/t.mjs";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../../../..");
@@ -442,18 +443,24 @@ export async function dualWriteRecords(
 
 /**
  * Default seam: reads `brain.config.json` for the `governance.memorySecret*`
- * keys. Never throws — an absent/unparseable config falls back to `{}`, which
- * resolveSecretConfig() turns into the default pattern set.
+ * keys, via `loadBrainConfigOrThrow` (#942). ENOENT still returns `{}`
+ * (absence stays green, R12/REQ-SCAN-3); every OTHER read/parse failure
+ * PROPAGATES (#712, REQ-SCAN-1) — a read carrying both a DENY-direction key
+ * (`memorySecretPatterns`) and an ALLOW-direction key
+ * (`memorySecretAllowPatterns`) cannot be half-propagated (R1/REQ-SCAN-2).
+ *
+ * D4 (design.md): this function has TWO wiring points — `save()` (`:952`,
+ * the only production caller) and `dualWriteRecords()` (`:266`, callerless
+ * since #874 split B, kept for a future caller per O1). Both are hardened
+ * together, deliberately: a function kept for a future caller must not be
+ * kept with the wrong failure policy, and two implementations of one rule
+ * is the exact shape `brain/core/anti-patterns/` names.
  *
  * @param {string} root
  * @returns {object}
  */
 function _defaultLoadBrainConfig(root) {
-  try {
-    return JSON.parse(readFileSync(join(root, "brain.config.json"), "utf8"));
-  } catch {
-    return {};
-  }
+  return loadBrainConfigOrThrow(root);
 }
 
 /**

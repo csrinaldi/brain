@@ -420,3 +420,78 @@ test('cold-1 — a staged rename record is one candidate (the new path), never s
   assert.equal(relevant[0].reason, 'unexpected-status');
   assert.equal(relevant[0].code, 'R ', 'the header comment\'s own claim: a rename falls through as unexpected-status');
 });
+
+// ── #712 — a secret policy that cannot be read is not the default secret
+// policy. T-C1/T-C2 use `buildFixtureRepo()` — the SAME real git repo every
+// other test in this file drives — rather than a hand-rolled canned `git`
+// seam: every sibling git step (fetch, rev-parse, worktree list, ls-tree,
+// status) runs for real and succeeds, so the read under test is the ONLY
+// thing that can make either test fail. `loadConfig` is NOT injected in
+// either test — it is the unit.
+
+test('T-C1 — an unreadable brain.config.json makes collectLane throw, naming the file and the parse failure (#712, REQ-SCAN-1/4)', () => {
+  const repo = buildFixtureRepo();
+  // present but unparseable, at the scanned root (`collectLane`'s `root`,
+  // not the git plumbing) — a real repo means every sibling git call below
+  // this read (worktree list, ls-tree, status) has already succeeded before
+  // the read runs, so a git failure cannot make this test pass for the
+  // wrong reason.
+  writeFileSync(join(repo.mainDir, 'brain.config.json'), '{ not valid json', 'utf8');
+
+  assert.throws(
+    () => collectLane({ root: repo.mainDir, date: '2026-09-09', host: 'test-host' }),
+    (err) => {
+      assert.match(err.message, /brain\.config\.json/, 'the message must name the file');
+      assert.match(err.message, /could not be parsed/, 'the message must name the failure kind');
+      return true;
+    },
+  );
+});
+
+// ── #921 — an unreadable worktree is reported, never silently dropped ──────
+
+test('#921 — a worktree whose `git status` fails is recorded in skippedWorktrees with its path and reason, and does not silence the other worktree\'s real candidates', () => {
+  const repo = buildFixtureRepo();
+
+  // wt-b's `-C status` call fails (simulating an unreadable worktree —
+  // permissions, a corrupted .git file, whatever the real cause); every
+  // other call (including wt-a's own status) passes straight through to
+  // the real git plumbing.
+  const flakyGit = (argv, opts) => {
+    if (argv[0] === '-C' && argv[1] === repo.wtBDir && argv[2] === 'status') {
+      return { status: 128, stdout: '', stderr: 'fatal: could not read worktree' };
+    }
+    return defaultGit(argv, opts);
+  };
+
+  const result = collectLane({ root: repo.mainDir, date: '2026-09-09', host: 'test-host', git: flakyGit });
+
+  assert.equal(result.skippedWorktrees.length, 1, 'exactly one worktree must be reported skipped');
+  assert.equal(result.skippedWorktrees[0].path, repo.wtBDir);
+  assert.match(result.skippedWorktrees[0].reason, /could not read worktree/);
+
+  // wt-a was still fully inspected — its own candidates (identical + secret +
+  // modified-tracked) were never silenced by wt-b's failure. `collected: 0`
+  // must be distinguishable here (there IS a skip to report), but this run
+  // still had real inspectable work: at least the modified-tracked/secret
+  // skips from wt-a's own candidates must be present.
+  const wtAReasons = result.skipped.filter((s) => s.worktree === repo.wtADir).map((s) => s.reason);
+  assert.ok(wtAReasons.length > 0, 'wt-a\'s own candidates must still be collected/skipped normally — one failing worktree must not blank out the rest');
+});
+
+test('#921 — no skipped worktrees on a clean run leaves skippedWorktrees an empty array (never absent, never undefined)', () => {
+  const repo = buildFixtureRepo();
+  const result = collectLane({ root: repo.mainDir, date: '2026-09-09', host: 'test-host' });
+  assert.deepEqual(result.skippedWorktrees, []);
+});
+
+test('T-C2 — no brain.config.json at all leaves collectLane on the default pattern set, ref minted (#712, REQ-SCAN-3)', () => {
+  const repo = buildFixtureRepo();
+  // buildFixtureRepo() never writes a brain.config.json — this is the
+  // absent case by construction, no extra setup needed.
+
+  const result = collectLane({ root: repo.mainDir, date: '2026-09-09', host: 'test-host' });
+
+  assert.ok(result.ref, 'a run with candidates must still mint a ref when no config exists at all');
+  assert.ok(result.commit, 'the absent-config case must not refuse — the default pattern set applies');
+});

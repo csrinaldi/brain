@@ -7,7 +7,7 @@
 // issue-246-c3/design.md. Q1 asymmetry (obs #578): save/search/share/pull/
 // setup are real here; index/featureCheckpoint/featureResume defer loudly.
 
-import { mkdirSync, readFileSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { hostname as osHostname } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -21,6 +21,7 @@ import { gitConfigGet } from "../../lib/git-config.mjs";
 import { resolveActor, resolveActorKind, deriveIssue, composeSource } from "../lib/capture-provenance.mjs";
 import { upstreamRecordEntries } from "../lib/upstream-records.mjs";
 import { classifySupersedes } from "../lib/supersedes.mjs";
+import { loadBrainConfigOrThrow } from "../../lib/brain-config.mjs";
 
 /** The repository this record belongs to, from config, falling back to the checkout
  *  directory name. Records in this repo carry the bare name ("brain"), not the slug. */
@@ -37,13 +38,16 @@ import { t } from "../../i18n/t.mjs";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../../../..");
 
-/** Reads brain.config.json for governance.memorySecret* keys. Never throws. */
+/**
+ * Reads brain.config.json for governance.memorySecret* keys, via
+ * `loadBrainConfigOrThrow` (#942). ENOENT still returns `{}` (absence stays
+ * green, R12/REQ-SCAN-3); every OTHER read/parse failure PROPAGATES (#712,
+ * REQ-SCAN-1) — the same read also feeds `deriveProject` above (R5), so a
+ * refusal here now also protects that fallback from writing a wrong,
+ * durable `project` label.
+ */
 function _defaultLoadBrainConfig(root) {
-  try {
-    return JSON.parse(readFileSync(join(root, "brain.config.json"), "utf8"));
-  } catch {
-    return {};
-  }
+  return loadBrainConfigOrThrow(root);
 }
 
 /**

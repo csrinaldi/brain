@@ -159,6 +159,7 @@
 {"id":"rec-0fae6383990c2892","ts":"2026-07-13T00:21:27Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-0fae6383990c2892.jsonl"}
 {"id":"rec-105903628b44a076","ts":"2026-07-25T00:47:13Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-105903628b44a076.jsonl"}
 {"id":"rec-108398c43933a163","ts":"2026-07-13T00:22:04Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-108398c43933a163.jsonl"}
+{"id":"rec-10beeeecb4be97f6","ts":"2026-09-12T20:18:03Z","actor":"@csrinaldi","type":"bugfix","project":"brain","issue":361,"file":"2026-09-rec-10beeeecb4be97f6.jsonl"}
 {"id":"rec-10c9267ed6645dea","ts":"2026-07-25T00:48:32Z","actor":"feat/issue-266-h0a-reviewer-protocol-doctrine","type":"discovery","project":"brain","file":"2026-07-rec-10c9267ed6645dea.jsonl"}
 {"id":"rec-10f7ec61d8ea26a0","ts":"2026-07-11T12:32:59Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-10f7ec61d8ea26a0.jsonl"}
 {"id":"rec-110af43f531499b8","ts":"2026-07-25T00:47:48Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07-rec-110af43f531499b8.jsonl"}
@@ -404,6 +405,7 @@
 {"id":"rec-2bf85459f655fd0f","ts":"2026-08-18T13:18:02Z","actor":"feat/issue-435-featdistribution-supersede-adr-0006-make","type":"bugfix","project":"brain","issue":435,"file":"2026-08-rec-2bf85459f655fd0f.jsonl"}
 {"id":"rec-2bfd4511c01dc139","ts":"2026-07-25T21:50:24Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-2bfd4511c01dc139.jsonl"}
 {"id":"rec-2c21f621dc1b7867","ts":"2026-07-25T00:47:33Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-2c21f621dc1b7867.jsonl"}
+{"id":"rec-2c496dae8cfa5577","ts":"2026-09-14T09:31:11Z","actor":"@csrinaldi","type":"bugfix","project":"brain","issue":879,"file":"2026-09-rec-2c496dae8cfa5577.jsonl"}
 {"id":"rec-2c4b2f585e51e9e0","ts":"2026-07-05T21:05:26Z","actor":"@legacy","type":"bugfix","project":"brain","file":"2026-07-rec-2c4b2f585e51e9e0.jsonl"}
 {"id":"rec-2c68d25e8c34e046","ts":"2026-07-25T00:48:16Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-2c68d25e8c34e046.jsonl"}
 {"id":"rec-2c6a688fb3d0e807","ts":"2026-07-25T00:47:30Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-2c6a688fb3d0e807.jsonl"}
@@ -480,6 +482,7 @@
 {"id":"rec-3535700473c021ad","ts":"2026-06-27T14:06:27Z","actor":"@legacy","type":"bugfix","project":"brain","file":"2026-06-rec-3535700473c021ad.jsonl"}
 {"id":"rec-353885b73ac328d8","ts":"2026-07-25T21:50:12Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-353885b73ac328d8.jsonl"}
 {"id":"rec-354c3691839343f2","ts":"2026-08-19T16:17:53Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-08-rec-354c3691839343f2.jsonl"}
+{"id":"rec-3550472a1b62c33b","ts":"2026-09-12T18:31:26Z","actor":"@csrinaldi","type":"bugfix","project":"brain","issue":714,"file":"2026-09-rec-3550472a1b62c33b.jsonl"}
 {"id":"rec-3577be294be160c7","ts":"2026-07-29T14:26:13Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-3577be294be160c7.jsonl"}
 {"id":"rec-3593bc93b539532b","ts":"2026-07-25T00:48:38Z","actor":"feat/issue-266-h1-1-review-core-cold-boot","type":"decision","project":"brain","file":"2026-07-rec-3593bc93b539532b.jsonl"}
 {"id":"rec-35b469ed9429ddc6","ts":"2026-07-25T00:48:12Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-35b469ed9429ddc6.jsonl"}
@@ -938,7 +941,9 @@
 {"id":"rec-65aa65c477e1ac0b","ts":"2026-07-24T16:36:06Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07-rec-65aa65c477e1ac0b.jsonl"}
 {"id":"rec-65b1b6fc9900ba53","ts":"2026-07-25T00:48:33Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-07-rec-65b1b6fc9900ba53.jsonl"}
 {"id":"rec-65bb29025899a564","ts":"2026-07-10T15:19:35Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-65bb29025899a564.jsonl"}
+{"id":"rec-65f26d59f5a6ed09","ts":"2026-09-12T18:13:47Z","actor":"@csrinaldi","type":"bugfix","project":"brain","issue":939,"file":"2026-09-rec-65f26d59f5a6ed09.jsonl"}
 {"id":"rec-65fc16fc40513d93","ts":"2026-07-29T13:59:28Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-65fc16fc40513d93.jsonl"}
+{"id":"rec-6626aae0c7598303","ts":"2026-09-12T18:19:45Z","actor":"@csrinaldi","type":"bugfix","project":"brain","issue":921,"file":"2026-09-rec-6626aae0c7598303.jsonl"}
 {"id":"rec-66bfcf5ae155cfaf","ts":"2026-07-29T14:28:13Z","actor":"@legacy","type":"bugfix","project":"brain","file":"2026-07-rec-66bfcf5ae155cfaf.jsonl"}
 {"id":"rec-66c7a9ceaa64942d","ts":"2026-07-29T14:28:45Z","actor":"@legacy","type":"bugfix","project":"brain","file":"2026-07-rec-66c7a9ceaa64942d.jsonl"}
 {"id":"rec-66d3d8263817ae8a","ts":"2026-07-25T00:47:23Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-66d3d8263817ae8a.jsonl"}
@@ -1935,6 +1940,7 @@
 {"id":"rec-d044f694a81b5142","ts":"2026-07-25T21:50:24Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-d044f694a81b5142.jsonl"}
 {"id":"rec-d0497dfd16be3b47","ts":"2026-07-13T00:21:59Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-d0497dfd16be3b47.jsonl"}
 {"id":"rec-d090439593ebf11f","ts":"2026-06-27T21:56:11Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-06-rec-d090439593ebf11f.jsonl"}
+{"id":"rec-d09f0cd0317befc7","ts":"2026-09-12T21:37:20Z","actor":"@csrinaldi","type":"decision","project":"brain","issue":864,"file":"2026-09-rec-d09f0cd0317befc7.jsonl"}
 {"id":"rec-d0b18f69463fec37","ts":"2026-08-16T14:32:23Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-08-rec-d0b18f69463fec37.jsonl"}
 {"id":"rec-d0b1cdeb94316947","ts":"2026-07-29T14:28:43Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07-rec-d0b1cdeb94316947.jsonl"}
 {"id":"rec-d0be805b13ff5ace","ts":"2026-07-25T00:48:20Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-d0be805b13ff5ace.jsonl"}
@@ -1999,6 +2005,7 @@
 {"id":"rec-d6ebfa2fa17a5080","ts":"2026-07-29T14:27:19Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-d6ebfa2fa17a5080.jsonl"}
 {"id":"rec-d6f48f5ca092dcd8","ts":"2026-08-17T01:10:15Z","actor":"@legacy","type":"pattern","project":"brain","file":"2026-08-rec-d6f48f5ca092dcd8.jsonl"}
 {"id":"rec-d715f8eb4042af61","ts":"2026-07-29T14:25:47Z","actor":"@legacy","type":"bugfix","project":"brain","file":"2026-07-rec-d715f8eb4042af61.jsonl"}
+{"id":"rec-d72503b3b252f445","ts":"2026-09-12T16:10:21Z","actor":"@csrinaldi","type":"decision","project":"brain","issue":712,"file":"2026-09-rec-d72503b3b252f445.jsonl"}
 {"id":"rec-d7380426f645a784","ts":"2026-07-29T14:27:54Z","actor":"@legacy","type":"bugfix","project":"brain","file":"2026-07-rec-d7380426f645a784.jsonl"}
 {"id":"rec-d774076abbbe5681","ts":"2026-07-11T12:41:10Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-d774076abbbe5681.jsonl"}
 {"id":"rec-d7bffffb0a324540","ts":"2026-07-25T00:47:31Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-d7bffffb0a324540.jsonl"}

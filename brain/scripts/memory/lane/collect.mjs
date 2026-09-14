@@ -17,6 +17,7 @@ import { join, basename } from 'node:path';
 
 import { planLaneCommit } from './plan.mjs';
 import { scanTextForSecrets, resolveSecretConfig, compilePatterns } from '../lib/secret-scrub.mjs';
+import { loadBrainConfigOrThrow } from '../../lib/brain-config.mjs';
 // removeTempTree, not a bare rmSync: this module spawns git AND recursively
 // removes a directory (the temp index's mkdtemp dir) — issue #800/#802's
 // adoption rule for exactly that combination. Imported from `lib/`, not
@@ -83,20 +84,21 @@ function gitOrThrow(git, argv, opts = {}) {
 
 /**
  * _defaultLoadConfig() — reads `brain.config.json` for the
- * `governance.memorySecret*` keys, mirroring backends/engram.mjs's
- * `_defaultLoadBrainConfig`. Never throws: an absent/unparseable config
- * falls back to `{}`, which resolveSecretConfig() turns into the default
- * pattern set.
+ * `governance.memorySecret*` keys, via `loadBrainConfigOrThrow` (#942).
+ *
+ * DIRECTION RULE (#712, R1): `memorySecretPatterns` is DENY-direction and
+ * `memorySecretAllowPatterns` is ALLOW-direction, but ONE read carries both
+ * — a read cannot be half-propagated, so the deny-direction key decides for
+ * the whole read. ENOENT still returns `{}` (absence stays green, R12/
+ * REQ-SCAN-3); every OTHER read/parse failure PROPAGATES (REQ-SCAN-1) —
+ * this reader no longer swallows it. The call site (`cli.mjs`'s `collect`
+ * catch arm) decides the refusal; this function only reads.
  *
  * @param {string} root
  * @returns {object}
  */
 function _defaultLoadConfig(root) {
-  try {
-    return JSON.parse(readFileSync(join(root, 'brain.config.json'), 'utf8'));
-  } catch {
-    return {};
-  }
+  return loadBrainConfigOrThrow(root);
 }
 
 /**
@@ -194,7 +196,7 @@ function buildCandidate(worktreePath, entry, patterns, allowPatterns) {
  *   loadConfig?: (root: string) => object,
  * }} opts
  * @returns {{ref: string, commit: string|null, collected: number, skipped: object[],
- *   duplicates: object, baseFetched: boolean}}
+ *   duplicates: object, baseFetched: boolean, skippedWorktrees: Array<{path: string, reason: string}>}}
  */
 export function collectLane({
   root,
@@ -231,14 +233,28 @@ export function collectLane({
   //    `-C` call in this module (the seam guard, design's 3b, asserts this).
   //    `prunable`/`bare` stanzas are skipped without ever calling `status`
   //    on them, and `git worktree prune` is never invoked anywhere here.
+  //
+  // #921: a `status` invocation that exits non-zero is NOT the same fact as
+  // "this worktree has nothing pending" — the former means part of the scan
+  // universe could not be inspected at all, and collapsing it into silence
+  // makes `collected: 0` ambiguous between "confirmed nothing" and
+  // "incomplete inspection". Every such worktree is now recorded, by path
+  // and reason, in `skippedWorktrees` — a SEPARATE list from `skipped`
+  // (plan.mjs's per-candidate skip list): this is a worktree-level failure,
+  // never a candidate the planner ever saw.
   const candidates = [];
+  const skippedWorktrees = [];
   for (const stanza of stanzas) {
     if (stanza.bare || stanza.prunable) continue;
     const statusResult = git(
       ['-C', stanza.path, 'status', '--porcelain', '-z', '-uall', '--', '.memory/records'],
       { cwd: root },
     );
-    if (statusResult.status !== 0) continue; // an unreadable worktree degrades to "nothing found here"
+    if (statusResult.status !== 0) {
+      const reason = statusResult.stderr.trim() || `git status exited ${statusResult.status}`;
+      skippedWorktrees.push({ path: stanza.path, reason });
+      continue;
+    }
     for (const entry of parseStatusZ(statusResult.stdout)) {
       candidates.push(buildCandidate(stanza.path, entry, patterns, allowPatterns));
     }
@@ -289,7 +305,10 @@ export function collectLane({
     if (newTreeSha === parentTreeSha) {
       // Nothing new: the ref is left exactly as it was, `update-ref` is never
       // called — the "nothing new is a no-op" scenario, verbatim.
-      return { ref: plan.ref, commit: null, collected: 0, skipped: plan.skipped, duplicates: plan.duplicates, baseFetched };
+      return {
+        ref: plan.ref, commit: null, collected: 0, skipped: plan.skipped,
+        duplicates: plan.duplicates, baseFetched, skippedWorktrees,
+      };
     }
 
     // C1: `plan.files.length` counts GROUP WINNERS, not new blobs. On a
@@ -343,6 +362,7 @@ export function collectLane({
       skipped: plan.skipped,
       duplicates: plan.duplicates,
       baseFetched,
+      skippedWorktrees,
     };
   } finally {
     removeTempTree(tmpDir);

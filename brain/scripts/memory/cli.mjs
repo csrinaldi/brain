@@ -109,8 +109,8 @@ const MEMORY_BACKEND = STATED_BACKEND ?? DEFAULT_BACKEND;
 // files are outside this ticket's file claim — flagged, not silently worked
 // around.)
 // ---------------------------------------------------------------------------
-function reportDuplicates(duplicates, { indexCount, surface, brief } = {}) {
-  for (const line of formatDuplicateReport(duplicates, { indexCount, surface, brief })) console.error(line);
+async function reportDuplicates(duplicates, { indexCount, surface, brief } = {}) {
+  for (const line of await formatDuplicateReport(duplicates, { indexCount, surface, brief })) console.error(line);
 }
 
 // ---------------------------------------------------------------------------
@@ -166,7 +166,7 @@ if (op === "reindex") {
       indexPath: join(memoryRoot, ".memory", "index.jsonl"),
     });
     console.log(`memory/cli: ${await t("memory.reindex.done", { count })}`);
-    reportDuplicates(duplicates, { indexCount: count });
+    await reportDuplicates(duplicates, { indexCount: count });
     process.exit(0);
   } catch (err) {
     console.error(`memory/cli: ${await t("memory.reindex.failed", { message: err.message })}`);
@@ -221,7 +221,7 @@ if (op === "resolve-index") {
     console.log(`memory/cli: ${await t(key, { count })}`);
     // The op that exists BECAUSE two branches merged is the last one that
     // should stay quiet about what the merge duplicated (#574).
-    reportDuplicates(duplicates, { indexCount: count });
+    await reportDuplicates(duplicates, { indexCount: count });
     process.exit(0);
   } catch (err) {
     console.error(`memory/cli: ${await t("memory.resolveIndex.failed", { message: err.message })}`);
@@ -294,7 +294,7 @@ if (op === "split-records") {
       indexPath: join(memoryRoot, ".memory", "index.jsonl"),
     });
     console.log(`memory/cli: ${await t("memory.reindex.done", { count })}`);
-    reportDuplicates(duplicates, { indexCount: count });
+    await reportDuplicates(duplicates, { indexCount: count });
     process.exit(0);
   } catch (err) {
     console.error(`memory/cli: ${await t("memory.splitRecords.failed", { message: err.message })}`);
@@ -359,11 +359,32 @@ if (op === "collect") {
     if (modifiedCount > 0) {
       console.error(`memory/cli: ${await t("memory.collect.modifiedTrackedSkipped", { count: modifiedCount })}`);
     }
-    reportDuplicates(result.duplicates, { surface: "the lane commit" });
+    // #921: an unreadable worktree is a distinct fact from "nothing pending
+    // here" — always reported on stderr (never gated by --json) whenever the
+    // list is non-empty, mirroring the secret/modified-tracked lines above.
+    // F3 (cold review): `?? []` guards this consumer the same way ship.mjs's
+    // own destructuring already defaults the field — collectLane() always
+    // populates it today (no live bug), but this consumer had no defence of
+    // its own if that producer contract ever changed.
+    // F4 (cold review): the text surface now names WHY, not just which —
+    // the operator reading stderr sees the same reason `--json` already
+    // carries, instead of having to cross-reference the two.
+    const skippedWorktreesHere = result.skippedWorktrees ?? [];
+    if (skippedWorktreesHere.length > 0) {
+      console.error(`memory/cli: ${await t("memory.collect.worktreeSkipped", {
+        count: skippedWorktreesHere.length,
+        paths: skippedWorktreesHere.map((w) => `${w.path} (${w.reason})`).join(", "),
+      })}`);
+    }
+    await reportDuplicates(result.duplicates, { surface: "the lane commit" });
     process.exit(0);
   } catch (err) {
     // `raced` and `badHost` are named failures `lane/collect.mjs` tags on the
-    // thrown error (A9, A5) — everything else is a genuine git failure.
+    // thrown error (A9, A5) — everything else falls through to
+    // `memory.collect.failed` below, which is no longer only "a genuine git
+    // failure": since #712, an unreadable `brain.config.json` propagates
+    // from the same reader and lands here too (REQ-SCAN-4). The string
+    // itself (`en.mjs`) is already neutral and needs no change (R10).
     if (err?.raced) {
       console.error(`memory/cli: ${await t("memory.collect.raced", { message: err.message })}`);
     } else if (err?.badHost) {
@@ -502,6 +523,20 @@ if (op === "ship") {
     }
 
     // Evidence, always on stderr — never gated by --json (mirrors "collect").
+    // #921: skippedWorktrees is evidence from the `collect()` step shipLane()
+    // runs internally, unconditionally — reported here regardless of
+    // --dry-run, so the SessionEnd trigger's log (which redirects this op's
+    // stdout+stderr verbatim, see session-end-ship.mjs) surfaces it instead
+    // of a silent "nothing to ship".
+    // F3/F4 (cold review): same `?? []` guard and reason-bearing text as the
+    // "collect" op above — see that block's comment.
+    const skippedWorktreesHere = result.skippedWorktrees ?? [];
+    if (skippedWorktreesHere.length > 0) {
+      console.error(`memory/cli: ${await t("memory.collect.worktreeSkipped", {
+        count: skippedWorktreesHere.length,
+        paths: skippedWorktreesHere.map((w) => `${w.path} (${w.reason})`).join(", "),
+      })}`);
+    }
     if (!result.dryRun) {
       if (result.pushed) console.error(`memory/cli: ${await t("memory.ship.pushed", { ref: result.ref })}`);
       if (result.pr && result.pr.url === null && result.pr.number !== null) {
@@ -834,7 +869,7 @@ if (op === "save") {
     // a backend failure here must never read as a lost capture (R5).
     const result = await backend.save(title, content, opts, seams);
     console.log(`memory/cli: ${await t("memory.plainfiles.save.done", { id: result?.id, file: result?.file })}`);
-    reportDuplicates(result?.duplicates, { indexCount: result?.indexCount });
+    await reportDuplicates(result?.duplicates, { indexCount: result?.indexCount });
     process.exit(0);
   } catch (err) {
     // #637 — the index rebuild is the ONE gate that cannot run before the
@@ -880,7 +915,7 @@ if (op === "search") {
     // query that matched nothing "collapsed into the result set" would name a
     // collapse that did not happen there. And `brief`, because a search is a
     // question about records, not a maintenance run on the store.
-    reportDuplicates(result?.duplicates, { surface: 'the records read', brief: true });
+    await reportDuplicates(result?.duplicates, { surface: 'the records read', brief: true });
     process.exit(0);
   } catch (err) {
     console.error(`memory/cli: ${BACKEND}.search() failed — ${err.message}`);
@@ -931,7 +966,7 @@ try {
   // `import` gets its own surface: it hydrates engram from `records/` and never
   // writes the index (only `pullMemory` reindexes), so the default wording
   // would have it claim a collapse into an index it did not touch.
-  reportDuplicates(result?.duplicates, {
+  await reportDuplicates(result?.duplicates, {
     indexCount: result?.indexCount,
     surface: op === "import" ? "the records read" : undefined,
   });

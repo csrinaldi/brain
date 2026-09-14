@@ -579,6 +579,25 @@ test('L2 (re-review): a non-JSON BRAIN_VCS_TEST_SCRIPT fails with a path-only me
   assert.ok(run.stderr.includes(scriptPath), "the error must name the offending path so it's still debuggable");
 });
 
+// F1 (cold review): before this test, cli.mjs's own `ship`-op print of the
+// #921 worktreeSkipped line (the automated surface — SessionEnd and
+// day:start invoke `ship`, never `collect` by hand) had ZERO coverage;
+// deleting the print block left the whole suite green. Mirrors
+// cli.collect.test.mjs's own equivalent test for the "collect" op.
+test('#921 — memory:ship prints memory.collect.worktreeSkipped on stderr with count + path + reason when a worktree could not be inspected', () => {
+  const { mainDir } = fixtureRepo({ withCandidate: false });
+  const wtDir = join(dirname(mainDir), 'wt-unreadable');
+  git(mainDir, 'worktree', 'add', '-q', wtDir, '-b', 'lane-unreadable');
+  writeFileSync(join(wtDir, '.git'), 'gitdir: /nonexistent/gitdir/path\n', 'utf8');
+
+  const run = runCli(mainDir);
+  assert.equal(run.status, 0, run.stderr);
+  assert.match(run.stderr, /memory\/cli:.*1 worktree\(s\) could not be inspected/i);
+  assert.match(run.stderr, new RegExp(wtDir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  // F4 (cold review): reason, not just count + path.
+  assert.match(run.stderr, /not a git repository/i);
+});
+
 test('memory:ship resolves from package.json, beside the other memory:* scripts', () => {
   const pkg = JSON.parse(readFileSync(join(HERE, '../../../package.json'), 'utf8'));
   assert.equal(pkg.scripts['memory:ship'], 'node ./brain/scripts/memory/cli.mjs ship');

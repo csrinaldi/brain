@@ -209,7 +209,12 @@ export function renderContextBlock(model, strings) {
     RULE_DOUBLE,
     fill(s.branch, { branch: change.branch ?? s.branchUnknown }),
     formatChangeLine(change, s),
-    engram.ok ? s.memoryOk : s.memorySkip,
+    // #923 (acceptance A): when a failure reason is available, surface it —
+    // additive over the bare skip line so a caller/test that never supplies
+    // `engram.reason` still renders exactly the old generic line.
+    engram.ok
+      ? s.memoryOk
+      : (engram.reason ? fill(s.memorySkipReason, { reason: engram.reason }) : s.memorySkip),
   ];
 
   // Only when it is worth saying. A store captured today needs no line; an unknown or
@@ -285,7 +290,14 @@ export function step1RestoreManifest(cwd, deps = {}) {
  * Step 2 — hydrate local engram from `.memory/` via the allowlisted
  * `memory/cli.mjs import` (REQ-4). Local-only: gated by `assertLocalArgv`.
  *
- * @returns {{ ok: boolean }}
+ * #923 (acceptance A): a non-zero exit or a thrown exception used to
+ * collapse to a bare `{ok:false}` — the failure CAUSE (stderr, exit code, or
+ * the caught exception's own message) is now preserved on the return shape,
+ * so the printed context block can say WHY hydration failed, not just THAT
+ * it did. This is additive to the contract, never fatal: `runSessionStart()`
+ * still always resolves `exitCode: 0` regardless of what this step reports.
+ *
+ * @returns {{ ok: true } | { ok: false, reason: string }}
  */
 export function step2HydrateEngram(cwd, deps = {}) {
   try {
@@ -293,9 +305,12 @@ export function step2HydrateEngram(cwd, deps = {}) {
     const cmd = process.execPath;
     const args = ['brain/scripts/memory/cli.mjs', 'import'];
     const r = spawn(cmd, args, { cwd, encoding: 'utf8' });
-    return { ok: Boolean(r) && r.status === 0 };
-  } catch {
-    return { ok: false };
+    if (Boolean(r) && r.status === 0) return { ok: true };
+    const stderr = typeof r?.stderr === 'string' ? r.stderr.trim() : '';
+    const reason = stderr || `exited ${r?.status ?? 'unknown'}`;
+    return { ok: false, reason };
+  } catch (err) {
+    return { ok: false, reason: err?.message ?? String(err) };
   }
 }
 
@@ -430,6 +445,18 @@ export async function step5SynthesizeContext(cwd, deps = {}) {
  * degrade to a printed note, never a non-zero exit (an agent's session must
  * not be blocked by a context-load failure).
  *
+ * #923 (acceptance B, triage finding, deliberate — NOT a bug fix): this
+ * orchestrator calls steps 1-4b only. `step5SynthesizeContext` is defined,
+ * exported, and independently tested (see its own test above), but nothing
+ * wires it in here. Whether it is dead code or an intended-but-unwired stage
+ * is a product decision, not something this fix resolves — wiring it in
+ * changes runSessionStart()'s output shape and (being `async`, unlike every
+ * step before it) its performance profile, both consumer-facing decisions
+ * that belong with #267 (the consumption/diagnostics ticket this triage
+ * question is linked to), not silently bundled into an observability fix.
+ * Recorded here so the open question has one canonical home instead of
+ * being rediscovered from scratch.
+ *
  * @param {string} cwd
  * @param {{ _spawn?: Function, _branch?: Function, _changes?: Function, _resume?: Function }} [deps]
  * @param {object} strings  Resolved `session.*` templates (placeholders intact),
@@ -465,6 +492,7 @@ const SESSION_I18N_KEYS = {
   changeAmbiguous:  'session.change.ambiguous',
   memoryOk:         'session.memory.ok',
   memorySkip:       'session.memory.skip',
+  memorySkipReason: 'session.memory.skip.reason',
   memoryRecencyStale:   'session.memory.recency.stale',
   memoryRecencyUnknown: 'session.memory.recency.unknown',
   manifestRestored: 'session.manifest.restored',

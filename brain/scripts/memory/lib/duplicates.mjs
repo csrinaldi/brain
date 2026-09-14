@@ -97,12 +97,21 @@
 //
 // ── Strings ─────────────────────────────────────────────────────────────────
 //
-// The operator text lives here as literals rather than as `memory.*` keys in
-// `brain/scripts/i18n/{en,es}.mjs`, because issue #574 claims
-// `brain/scripts/memory/**` and only that. Precedent for operator notices
-// carrying their text inside this tree already exists (`engram.mjs`'s manifest-
-// restore and symlink notices). Promoting them is a mechanical follow-up, and
-// this module is the single site it has to touch.
+// Issue #638: the operator text used to live here as literals rather than as
+// `memory.duplicates.*` keys in `brain/scripts/i18n/{en,es}.mjs`, on the
+// reasoning that issue #574 claimed `brain/scripts/memory/**` and only that.
+// The file claim was real, but it made this the one `docs.language: "es"`
+// surface that answers in English regardless — `coverage.test.mjs` enforces
+// parity for keys that EXIST, and a literal that never became a key is
+// invisible to it. Promoted here, mechanically: same English bytes, `es`
+// translations added, `formatDuplicateReport()` now async because `t()` is.
+//
+// Other operator notices still carry their text inline elsewhere in this tree
+// (`engram.mjs`'s manifest-restore and symlink lines, `cli.mjs`'s dispatch
+// errors) — #638 promotes only this module's strings and leaves the
+// inline-vs-catalog rule for the rest of the tree to a follow-up decision.
+
+import { t } from '../../i18n/t.mjs';
 
 /** The zero accounting — the shape every caller sees when nothing repeats. */
 export function emptyDuplicates() {
@@ -180,37 +189,34 @@ const MAX_OCCURRENCES = 6;
  * store's history. The counts still travel — `memory:reindex` prints the
  * locations — so brevity never becomes silence.
  *
+ * Issue #638: every line is now a `memory.duplicates.*` catalog key (`t()` is
+ * async, so this function is too) — `docs.language: "es"` answers in Spanish
+ * for this surface exactly as it already does for `memory.reindex.*` and
+ * `memory.share.*`. English bytes are unchanged; see duplicates.test.mjs.
+ *
  * @param {{ids: number, lines: number, divergent: number, groups: object[]}} duplicates
  * @param {{indexCount?: number, surface?: string, brief?: boolean}} [opts]
- * @returns {string[]}
+ * @returns {Promise<string[]>}
  */
-export function formatDuplicateReport(duplicates, { indexCount, surface = 'the index', brief = false } = {}) {
+export async function formatDuplicateReport(duplicates, { indexCount, surface = 'the index', brief = false } = {}) {
   const { ids, lines, divergent, groups } = normalizeDuplicates(duplicates);
   // `divergent` is in the gate too: it is the channel this ticket added, so it
   // is the last thing that may be silent. A half-filled accounting reaching
   // here with only a divergence count would otherwise print nothing.
   if (ids === 0 && lines === 0 && divergent === 0) return [];
 
-  const store = indexCount === undefined ? '' : ` (${indexCount + lines} physical line(s) → ${indexCount} indexed)`;
-  const out = [
-    `⚠ ${ids} duplicate record id(s) in .memory/records/ — ${lines} excess physical line(s) collapsed into ${surface}${store}.`,
-    '  Deduplicated, not refused: `merge=union` concatenates both copies when two branches hold the same '
-    + 'record (ADR-0017, REQ-MF-3), so this is the transport working, not a corrupt store — but '
-    + `\`wc -l .memory/records/*.jsonl\` over-counts the store by ${lines}, and it is only reported because `
-    + 'you are reading this.',
-  ];
+  const summary = indexCount === undefined
+    ? await t('memory.duplicates.summary', { ids, lines, surface })
+    : await t('memory.duplicates.summaryWithIndex', { ids, lines, surface, total: indexCount + lines, indexCount });
+
+  const out = [summary, await t('memory.duplicates.why', { lines })];
 
   if (divergent > 0) {
-    out.push(
-      `  ${divergent} of them DISAGREE outside the hashed fields (\`source\` is not hashed, so two copies of one `
-      + 'record can differ there — brain\'s own export→import→export widens it). Resolved first-wins: the '
-      + 'earliest line of the earliest month file is the one indexed, exactly as the read path resolves it. '
-      + 'Marked [divergent] below — worth a look, not an error.',
-    );
+    out.push(await t('memory.duplicates.divergent', { count: divergent }));
   }
 
   if (brief) {
-    out.push('  Run `npm run memory:reindex` for the per-id locations.');
+    out.push(await t('memory.duplicates.brief'));
     return out;
   }
 
@@ -222,11 +228,15 @@ export function formatDuplicateReport(duplicates, { indexCount, surface = 'the i
     // A reporter may never be the thing that fails the operation it reports on.
     const occurrences = Array.isArray(g?.occurrences) ? g.occurrences : [];
     const shown = occurrences.slice(0, MAX_OCCURRENCES).join(', ');
-    const more = occurrences.length > MAX_OCCURRENCES ? `, +${occurrences.length - MAX_OCCURRENCES} more` : '';
-    out.push(`  ${g?.id ?? '(unknown id)'} ×${occurrences.length}${g?.divergent ? ' [divergent]' : ''} — ${shown}${more}`);
+    const more = occurrences.length > MAX_OCCURRENCES
+      ? await t('memory.duplicates.moreOccurrences', { count: occurrences.length - MAX_OCCURRENCES })
+      : '';
+    const id = g?.id ?? await t('memory.duplicates.unknownId');
+    const key = g?.divergent ? 'memory.duplicates.groupDivergent' : 'memory.duplicates.group';
+    out.push(await t(key, { id, count: occurrences.length, locations: `${shown}${more}` }));
   }
   if (groups.length > MAX_GROUPS) {
-    out.push(`  … +${groups.length - MAX_GROUPS} more duplicated id(s).`);
+    out.push(await t('memory.duplicates.moreGroups', { count: groups.length - MAX_GROUPS }));
   }
   return out;
 }

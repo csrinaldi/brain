@@ -17,6 +17,7 @@ import { join } from 'node:path';
 
 import { dualWriteRecords } from './engram.mjs';
 import { buildRecord } from '../lib/format.mjs';
+import { withoutEnv } from '../__fixtures__/env.mjs';
 
 /**
  * A tmpdir that is REMOVED when the test ends — the convention
@@ -222,16 +223,6 @@ test('dualWriteRecords: zero candidates never calls the upstream seam — no git
 // (`_upstreamRecordIds`), and this test is precisely the one that must NOT use
 // it.
 // ---------------------------------------------------------------------------
-
-/** Removes an env var for one test and restores it exactly, unset included. */
-function withoutEnv(t, name) {
-  const prior = process.env[name];
-  delete process.env[name];
-  t.after(() => {
-    if (prior === undefined) delete process.env[name];
-    else process.env[name] = prior;
-  });
-}
 
 test('withoutEnv: the variable is restored exactly — a helper that only neutralises leaks into every later test', async (t) => {
   process.env.BRAIN_MEMORY_UPSTREAM_REF = 'sentinel-set-by-this-test';

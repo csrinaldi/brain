@@ -571,3 +571,48 @@ for (const [label, opts] of [
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 }
+
+// ── #712 — a secret policy that cannot be read is not the default secret
+// policy. `_loadConfig` is NOT injected in either test below — it is the
+// unit. `_readRecordIds`/`_upstreamRecordEntries` are injected as no-ops
+// only for shape parity with engram.save.test.mjs's T-E1/T-E2 (this file's
+// `save()` never reaches them without `--supersedes`); `identitySeams` (via
+// `defaultSaveSeams`) neutralizes the actor gate, which otherwise throws
+// its own refusal a few lines after the config read.
+
+test('T-P1 — an unreadable brain.config.json makes save() reject, and _appendRecord is never called (#712, REQ-SCAN-1/4/5)', async () => {
+  const root = tmpRoot();
+  try {
+    // present but unparseable, at `root` — the exact path `_defaultLoadBrainConfig` reads.
+    const { writeFileSync } = await import('node:fs');
+    writeFileSync(join(root, 'brain.config.json'), '{ not valid json', 'utf8');
+
+    let appendCalled = false;
+    await assert.rejects(
+      () => save('t', 'c', { type: 'discovery', project: 'brain' }, defaultSaveSeams(root, {
+        _appendRecord: () => { appendCalled = true; return { file: 'x' }; },
+        _readRecordIds: () => new Set(),
+        _upstreamRecordEntries: () => ({ ok: true, ids: new Set() }),
+      })),
+      (err) => {
+        assert.match(err.message, /brain\.config\.json/, 'the message must name the file');
+        assert.match(err.message, /could not be parsed/, 'the message must name the failure kind');
+        return true;
+      },
+    );
+    assert.equal(appendCalled, false, '_appendRecord must never run when the config read refuses');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('T-P2 — no brain.config.json at all leaves save() on the default pattern set, record written (#712, REQ-SCAN-3)', async () => {
+  const root = tmpRoot();
+  try {
+    // no brain.config.json written — tmpRoot() never creates one.
+    const result = await save('t', 'c', { type: 'discovery', project: 'brain' }, defaultSaveSeams(root));
+    assert.equal(result.written, true, 'the absent-config case must not refuse — the default pattern set applies');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

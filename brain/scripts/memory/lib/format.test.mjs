@@ -265,6 +265,54 @@ test('validateWritableRecord: still reports every read-gate error (it is a super
   assert.ok(errors.some((e) => e.includes('invalid type')), `errors were: ${errors.join('; ')}`);
 });
 
+// ── W4 (#461 "Case 4"): a source citing an issue the record does not declare
+// fabricates that issue on round-trip. `issue` and `source` share ONE
+// '**Fuente:**' line (provenance.mjs's renderFuente), so `{source: 'issue
+// #201 / PR #204'}` (no `issue`) renders byte-identical to `{issue: 201,
+// source: 'PR #204'}` — the two are indistinguishable on the wire. WRITE-time
+// only, same asymmetry as W1-W3: #460's ruling against a READ-path rule for
+// this exact shape stands, so a record already carrying it must still parse.
+
+test('validateWritableRecord: W4 rejects a source citing an issue the record does not declare', () => {
+  const rec = { ...buildRecord({ ...base }), source: 'issue #201 / PR #204' };
+  const { valid, errors } = validateWritableRecord(rec);
+  assert.equal(valid, false);
+  assert.ok(errors.some((e) => e.includes('W4')), `errors were: ${errors.join('; ')}`);
+});
+
+test('validateWritableRecord: W4 rejects a source citing a DIFFERENT issue than the one declared', () => {
+  const rec = { ...buildRecord({ ...base, issue: 405 }), source: 'issue #201 / PR #204' };
+  const { valid, errors } = validateWritableRecord(rec);
+  assert.equal(valid, false);
+  assert.ok(errors.some((e) => e.includes('W4')), `errors were: ${errors.join('; ')}`);
+});
+
+test('validateWritableRecord: W4 admits a source citing the SAME issue the record declares', () => {
+  const rec = buildRecord({ ...base, issue: 201, source: 'issue #201 / PR #204' });
+  const { valid, errors } = validateWritableRecord(rec);
+  assert.equal(valid, true, errors.join('; '));
+});
+
+test('validateWritableRecord: W4 does not fire on a source with no issue citation at all', () => {
+  const rec = buildRecord({ ...base, source: 'PR #405' });
+  const { valid, errors } = validateWritableRecord(rec);
+  assert.equal(valid, true, errors.join('; '));
+});
+
+test(
+  "validateRecord/parseRecordLine: the READ gate does NOT reject the W4 shape — a pre-existing record " +
+    "carrying it must still parse (#461, #460's ruling against a read-path rule stands)",
+  () => {
+    const rec = { ...buildRecord({ ...base }), source: 'issue #201 / PR #204' };
+    assert.equal(
+      validateRecord(rec).valid,
+      true,
+      'a read-path rejection would brick a consumer store — #460 ruled this OUT',
+    );
+    assert.deepEqual(parseRecordLine(serializeRecord(rec)), rec);
+  },
+);
+
 test('validateRecord: flags an email-shaped actor (REQ-MF-5 partial heuristic)', () => {
   const rec = { ...buildRecord({ ...base }), actor: 'someone@example.com' };
   const { valid, errors } = validateRecord(rec);

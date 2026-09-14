@@ -82,6 +82,10 @@ export default {
   'day.memory.laneSweep.shipped':        'Lane sweep: shipped {ref} (PR #{number}).',
   'day.memory.laneSweep.reconciled':     'Lane sweep: reconciled {ref} (PR #{number}) — nothing new to push.',
   'day.memory.laneSweep.nothing':        'Lane sweep: nothing to ship.',
+  // F2 (cold review, #921/#923): nothing pending, but a worktree could not be
+  // inspected — distinct from the plain "nothing to ship" line above, so the
+  // operator never mistakes "incomplete inspection" for "confirmed clean".
+  'day.memory.laneSweep.worktreeSkipped': 'Lane sweep: nothing to ship, but {count} worktree(s) could not be inspected: {paths}',
   'day.memory.laneSweep.warn':           'Lane sweep: {detail} — see the tmp log; the morning sweep will retry tomorrow.',
   // {detail}'s own text — a key, not a literal, so a non-English docs.language
   // never sees an English word inside a translated line (#906 cold review, editorial).
@@ -305,6 +309,8 @@ export default {
   'session.change.ambiguous':   'change:   ambiguous ({count}): {list}',
   'session.memory.ok':          'memory:   engram hydrated',
   'session.memory.skip':        'memory:   engram unavailable (skipped)',
+  // #923 — the hydration failure cause, when available (see step2HydrateEngram).
+  'session.memory.skip.reason': 'memory:   engram unavailable (skipped) — {reason}',
   'session.memory.recency.stale':   'memory:   newest durable record is {days} days old — nothing captured since (see #519)',
   'session.memory.recency.unknown': 'memory:   no durable record found — cannot determine when memory was last captured',
   'session.manifest.restored':  'manifest: churn restored (safe)',
@@ -319,6 +325,18 @@ export default {
   'memory.resolveIndex.done':   '✓ index regenerated from records/ — {count} record(s). Nothing was unmerged, so nothing was staged.',
   'memory.resolveIndex.staged': '✓ index conflict resolved — {count} record(s) regenerated from records/ and staged. Finish the merge with `git commit`.',
   'memory.resolveIndex.failed': '✗ resolve-index failed — {message}',
+
+  // ── memory/lib/duplicates.mjs — formatDuplicateReport() (issue #574, promoted #638) ──
+  'memory.duplicates.summary': '⚠ {ids} duplicate record id(s) in .memory/records/ — {lines} excess physical line(s) collapsed into {surface}.',
+  'memory.duplicates.summaryWithIndex': '⚠ {ids} duplicate record id(s) in .memory/records/ — {lines} excess physical line(s) collapsed into {surface} ({total} physical line(s) → {indexCount} indexed).',
+  'memory.duplicates.why': '  Deduplicated, not refused: `merge=union` concatenates both copies when two branches hold the same record (ADR-0017, REQ-MF-3), so this is the transport working, not a corrupt store — but `wc -l .memory/records/*.jsonl` over-counts the store by {lines}, and it is only reported because you are reading this.',
+  'memory.duplicates.divergent': '  {count} of them DISAGREE outside the hashed fields (`source` is not hashed, so two copies of one record can differ there — brain\'s own export→import→export widens it). Resolved first-wins: the earliest line of the earliest month file is the one indexed, exactly as the read path resolves it. Marked [divergent] below — worth a look, not an error.',
+  'memory.duplicates.brief': '  Run `npm run memory:reindex` for the per-id locations.',
+  'memory.duplicates.group': '  {id} ×{count} — {locations}',
+  'memory.duplicates.groupDivergent': '  {id} ×{count} [divergent] — {locations}',
+  'memory.duplicates.moreOccurrences': ', +{count} more',
+  'memory.duplicates.moreGroups': '  … +{count} more duplicated id(s).',
+  'memory.duplicates.unknownId': '(unknown id)',
 
   // ── memory/cli.mjs — split-records (issue #677) ──────────────────────────────
   'memory.splitRecords.plan':    'plan — {lines} record line(s) across {months} month file(s) become {writes} per-record file(s). NOTHING was written. Re-run with --apply to perform it.',
@@ -336,6 +354,8 @@ export default {
   'memory.collect.raced':   '✗ collect failed — the lane ref moved during this run (raced); nothing was lost, its blobs are re-collected on the next run: {message}',
   'memory.collect.secretSkipped':          '{count} secret-bearing record(s) skipped — pattern and line number only, never the matched line.',
   'memory.collect.modifiedTrackedSkipped': '{count} tracked-and-modified record(s) skipped — commit or stash them, then re-run.',
+  // #921 — an unreadable worktree is a distinct fact from "nothing pending"; surfaced by count + path, never silently dropped.
+  'memory.collect.worktreeSkipped': '{count} worktree(s) could not be inspected and were excluded from this run: {paths}',
 
   // ── memory/cli.mjs — ship (issue #888, ADR-0034 L1/L2/L5) ────────────────────
   'memory.ship.done':             '✓ shipped {ref} — pull request #{number} is armed.',

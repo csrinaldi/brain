@@ -28,6 +28,7 @@ import { spawnSync } from 'node:child_process';
 
 import { save } from '../backends/plainfiles.mjs';
 import { readRecords } from './store.mjs';
+import { withoutEnv } from '../__fixtures__/env.mjs';
 
 const cliPath = join(dirname(fileURLToPath(import.meta.url)), '..', 'cli.mjs');
 
@@ -82,6 +83,11 @@ function commitAndPushRecords(trunk) {
 // ---------------------------------------------------------------------------
 
 test('#805: an id present only at origin/main after a fetch is accepted', async (t) => {
+  // #714: `save()`'s `--supersedes` path calls the real `_upstreamRecordEntries`
+  // unstubbed (no `getEnv`/`env` threaded — same deliberate seam discipline as
+  // `dualWriteRecords`), so an exported `BRAIN_MEMORY_UPSTREAM_REF` would win
+  // over `origin/main` and this test's verdict would depend on the shell.
+  withoutEnv(t, 'BRAIN_MEMORY_UPSTREAM_REF');
   const { remote, trunk } = setupRemoteAndTrunk('brain-805-upstream-only');
   const worktree = cloneWorktree(remote, 'brain-805-upstream-only');
   t.after(() => { removeTempTree(remote); removeTempTree(trunk); removeTempTree(worktree); });
@@ -110,6 +116,9 @@ test('#805: an id present only at origin/main after a fetch is accepted', async 
 // ---------------------------------------------------------------------------
 
 test('#805: an id in neither local nor upstream is refused not-in-store, no file appended', async (t) => {
+  // #714: see the sibling test above — the real upstream predicate must
+  // resolve origin/main, not whatever the developer's shell happens to export.
+  withoutEnv(t, 'BRAIN_MEMORY_UPSTREAM_REF');
   const { remote, trunk } = setupRemoteAndTrunk('brain-805-not-in-store');
   const worktree = cloneWorktree(remote, 'brain-805-not-in-store');
   t.after(() => { removeTempTree(remote); removeTempTree(trunk); removeTempTree(worktree); });
@@ -138,6 +147,12 @@ test('#805: an id in neither local nor upstream is refused not-in-store, no file
 // ---------------------------------------------------------------------------
 
 test('#805: a clone with origin removed is refused could-not-verify, naming the degradation', async (t) => {
+  // #714: without this, a stated `BRAIN_MEMORY_UPSTREAM_REF` changes which
+  // could-not-verify message the real predicate reports (a "stated ref does
+  // not resolve" message instead of "no upstream ref resolved (tried
+  // origin/HEAD, origin/main)"), and the assertion below is pinned to the
+  // latter wording.
+  withoutEnv(t, 'BRAIN_MEMORY_UPSTREAM_REF');
   const { remote, trunk } = setupRemoteAndTrunk('brain-805-degraded');
   const worktree = cloneWorktree(remote, 'brain-805-degraded');
   t.after(() => { removeTempTree(remote); removeTempTree(trunk); removeTempTree(worktree); });

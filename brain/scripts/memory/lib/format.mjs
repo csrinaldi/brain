@@ -31,6 +31,13 @@
 //   W3 — `actor` MUST NOT be branch-shaped (#738): no `/`, and not a bare default branch
 //        (`main`/`master`/`develop`/`trunk`). A branch answers WHERE a record was captured
 //        from, not WHO captured it — that question belongs in `issue`, not `actor`.
+//   W4 — `source`, when it cites `issue #N` (issue #461 "Case 4"), MUST agree with the
+//        record's own `issue`: `issue` MUST be present and equal to N. `issue` and `source`
+//        share ONE `**Fuente:**` line (provenance.mjs's renderFuente), so a record with no
+//        `issue` whose `source` cites one is byte-identical on the wire to a record that DOES
+//        declare it — no renderer/parser change can tell them apart, only refusing the write
+//        can. #460 ruled the READ-path version of this rule OUT (same reasoning as W1-W3
+//        above); this is the WRITE-time variant #460 itself said was "available and safe".
 
 import { createHash } from 'node:crypto';
 
@@ -59,6 +66,14 @@ export const HANDLE_RE = /^@[A-Za-z0-9][A-Za-z0-9-]*$/;
 // Not exported (MINOR-1, fresh-context review): no consumer outside this
 // module reads the set itself, only `classifyActor`'s verdict.
 const DEFAULT_BRANCHES = new Set(['main', 'master', 'develop', 'trunk']);
+
+// The same "does this text cite an issue" grammar provenance.mjs's
+// `ISSUE_IN_FUENTE_RE`/`issueFromFuente` use for the composed `**Fuente:**`
+// line — kept as a local, deliberately NOT imported: format.mjs stays a
+// zero-dependency pure schema module (this file's header), and W4 below
+// checks the raw `source` field a caller is about to write, not composed §4
+// prose. Same pattern, independent module boundary.
+const ISSUE_CITED_IN_SOURCE_RE = /issue #(\d+)/;
 
 /**
  * The four actor shapes (#738). `@legacy` is the export fallback; a `/` or a
@@ -201,6 +216,11 @@ export function validateRecord(record) {
  *   W2 — `issue`, when present, MUST be a finite integer `number`. The schema
  *        declares `number`; `issue: "404"` is admitted by validateRecord() but
  *        re-imports as the number `404`, which is a different `id`.
+ *   W4 — `source`, when it cites `issue #N` (issue #461), MUST agree with the
+ *        record's own `issue` (present AND equal to N). Otherwise the two
+ *        fields disagree about a fact that shares one rendered line, and the
+ *        record fabricates `issue: N` for any reader that recovers it from
+ *        `source` alone.
  *
  * These are NOT in validateRecord() on purpose: that runs on the read path via
  * parseRecordLine(), where a rejection turns one bad line into a store-wide
@@ -238,6 +258,20 @@ export function validateWritableRecord(record) {
         `actor is branch-shaped: '${record.actor}' — a branch answers WHERE, not WHO (W3, #738); ` +
           `the branch belongs in 'issue'`,
       );
+    }
+    if (typeof record.source === 'string') {
+      const cited = ISSUE_CITED_IN_SOURCE_RE.exec(record.source);
+      if (cited) {
+        const citedIssue = Number(cited[1]);
+        if (record.issue !== citedIssue) {
+          const declared = record.issue === undefined || record.issue === null ? 'absent' : JSON.stringify(record.issue);
+          writeErrors.push(
+            `source cites 'issue #${citedIssue}' but the record's own issue is ${declared} — issue and source ` +
+              `share one '**Fuente:**' line, so this fabricates 'issue: ${citedIssue}' for any reader that ` +
+              `recovers it from source alone (W4, #461): ${JSON.stringify(record.source)}`,
+          );
+        }
+      }
     }
   }
   return { valid: writeErrors.length === 0, errors: writeErrors };

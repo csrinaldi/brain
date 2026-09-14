@@ -30,7 +30,7 @@ import {
   resolveSecretConfig,
   scanTextForSecrets,
 } from '../memory/lib/secret-scrub.mjs';
-import { loadBrainConfig } from '../lib/brain-config.mjs';
+import { loadBrainConfigOrThrow } from '../lib/brain-config.mjs';
 import { loadContext } from '../vcs/ci-context.mjs';
 
 /** Same shape as lane-paths.mjs's default — the ADDED half of a three-dot diff. */
@@ -50,12 +50,24 @@ function buildDefaultDiffNameOnlyAdded(ctx, exec) {
   };
 }
 
-function defaultReadConfig() {
-  try {
-    return loadBrainConfig();
-  } catch {
-    return {};
-  }
+/**
+ * Reads `brain.config.json` for the `governance.memorySecret*` keys, via
+ * `loadBrainConfigOrThrow` (#942). ENOENT still returns `{}` (absence stays
+ * green, R12/REQ-SCAN-3); every OTHER read/parse failure PROPAGATES (#712,
+ * REQ-SCAN-1) — `main()`'s own try/catch below turns that into `uncomputable`
+ * (D2/REQ-SCAN-5), this function only reads.
+ *
+ * `root` is forwarded to `loadBrainConfigOrThrow`; omitted, it defaults to
+ * the primitive's own repo-root resolution, so the production call site
+ * below (unchanged) still reads brain's own root exactly as before. Exported
+ * (D3) so a test can drive the REAL reader against a fixture root, the same
+ * reasoning `approve/cli.mjs`'s `defaultReadDenyActors` already applied.
+ *
+ * @param {string} [root]
+ * @returns {object}
+ */
+export function defaultReadConfig(root) {
+  return loadBrainConfigOrThrow(root);
 }
 
 /**
@@ -146,7 +158,28 @@ export async function main(deps = {}) {
     return resultToExit(result);
   }
 
-  const config = readConfig();
+  // #712, D2: this try/catch wraps ONLY `readConfig()` — a NEW, separate
+  // try/catch from the pattern-compile block just below, on purpose (design
+  // A6/D2's own cold-review lesson, PR #907/#908): a config that cannot be
+  // READ and a config that parses but holds an INVALID pattern are both
+  // UNCOMPUTABLE (2), but they are different failures with different
+  // reasons — folding the read into the compile block's try would print
+  // "invalid secret pattern in config" for an unreadable file, which is a
+  // lie. It also stays AFTER the `recordPaths.length === 0` early return
+  // above (R8): the config is only relevant once there is at least one
+  // record path to scan.
+  let config;
+  try {
+    config = readConfig();
+  } catch (err) {
+    const result = {
+      pass: false,
+      uncomputable: true,
+      reason: `lane-scrub: cannot read the secret config — failing closed (uncomputable): ${err.message}`,
+    };
+    console.log(result.reason);
+    return resultToExit(result);
+  }
 
   // Compile patterns OUTSIDE the read loop's try/catch (cold-1, PR #907 cold
   // review): compilePatterns() throws on an invalid regex source
