@@ -102,3 +102,34 @@ test('#881: A5 — every route this PR ships completes with a forge-cache-compos
     await server.close();
   }
 });
+
+// ── R881-5 S1: mutation methods are rejected on every route this PR ships ──
+
+test('#881: R881-5 S1 — POST/PUT/PATCH/DELETE against / and /api/snapshot all return 405 with Allow: GET, HEAD', async () => {
+  const server = createUiServer({ root: makeFixture(), _now: now });
+  await server.listen(0);
+  try {
+    const base = `http://127.0.0.1:${server.port}`;
+    for (const path of ['/', '/api/snapshot']) {
+      for (const method of ['POST', 'PUT', 'PATCH', 'DELETE']) {
+        const res = await fetch(`${base}${path}`, { method });
+        assert.equal(res.status, 405, `${method} ${path}`);
+        assert.equal(res.headers.get('allow'), 'GET, HEAD', `${method} ${path}`);
+      }
+    }
+  } finally {
+    await server.close();
+  }
+});
+
+test('#881: R881-5 S1 — the method check runs before routing, so an unmatched path still answers 405, not 404, on a mutation method', async () => {
+  const server = createUiServer({ root: makeFixture(), _now: now });
+  await server.listen(0);
+  try {
+    const res = await fetch(`http://127.0.0.1:${server.port}/does-not-exist`, { method: 'POST' });
+    assert.equal(res.status, 405);
+    assert.equal(res.headers.get('allow'), 'GET, HEAD');
+  } finally {
+    await server.close();
+  }
+});

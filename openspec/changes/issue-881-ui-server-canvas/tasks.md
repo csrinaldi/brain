@@ -88,11 +88,16 @@ PR — the three control routes do not exist yet).
       vcs, project, _now})`, `listen(port)`, `close()`, `GET /` (static
       placeholder), `GET /api/snapshot` (in-process `buildSnapshot`
       composed with `forge-cache.mjs`, never shelling out) so T3a passes.
-- [ ] T4a. `brain/scripts/ui/server.test.mjs` (extend): failing test for
+- [x] T4a. `brain/scripts/ui/server.test.mjs` (extend): failing test for
       R881-5 S1 on this PR's route set — `POST`/`PUT`/`PATCH`/`DELETE`
       against `/` and `/api/snapshot` all return `405`.
-- [ ] T4b. `brain/scripts/ui/server.mjs`: implement the method check before
-      routing so T4a passes.
+- [x] T4b. `brain/scripts/ui/server.mjs`: implement the method check before
+      routing so T4a passes. (The guard was already present from T3b's
+      implementation of D7's "method check before routing" invariant; RED
+      was reproduced honestly by temporarily reverting the guard in the
+      working tree, confirming the two new T4a assertions fail without it,
+      then restoring it — see apply-progress for the transcript. The
+      committed diff for this task is test-only.)
 - [ ] T5a. `brain/scripts/ui/server.test.mjs` (extend): failing test for
       `parseArgs` (`--port`, `--root`; unknown flag → `{ok: false, error}`
       / exit 2; `EADDRINUSE` → `✗ port <n> is already in use` / exit 2,
