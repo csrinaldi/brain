@@ -227,9 +227,9 @@ or heartbeat route" scenario over the now-complete route table.
       `/api/snapshot`, `/api/stream`, `/api/poll/pause|resume|once`) and
       assert there is no MCP resource route and no heartbeat/agent-pulse
       endpoint. Test-only; no production change expected.
-- [ ] T7. Verify: `GIT_CONFIG_GLOBAL=/dev/null npm test` and `npm run
-      brain:repo:check` both green.
-- [ ] T8. `npm run memory:save -- "watcher, poller and SSE hub wire A2 into
+- [x] T7. Verify: `GIT_CONFIG_GLOBAL=/dev/null npm test` and `npm run
+      brain:repo:check` both green. (5389/5389, `rec-56e5504ba47fdf96`.)
+- [x] T8. `npm run memory:save -- "watcher, poller and SSE hub wire A2 into
       brain:ui" "<summary of the committed-tier watcher, the 3-lane poller,
       the sync/section/refs/status SSE frames and the POST-only control
       routes landed in this PR>" --issue 881 --type pattern`, staged with
