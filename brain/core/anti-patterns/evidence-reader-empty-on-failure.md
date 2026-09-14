@@ -89,8 +89,10 @@ Applied at `brain/scripts/vcs/actor-check.mjs`'s `defaultReadDenyActors`,
 `brain/scripts/vcs/brain-writes-reviewed.mjs`'s `defaultReadBotAllowlist` and
 `defaultReadApprovalActors`, and `brain/scripts/approve/cli.mjs`'s
 `defaultReadDenyActors` / `defaultReadAgentActors` — five readers that
-stopped swallowing a config-read failure (issue #942, R1, R3). The
-ALLOW-direction readers in the same files (`actor-check.mjs`'s own
-`approvalActors` reader, `governance.ignoreList` consumers,
-`approved-label.mjs`) were left unchanged, deliberately: empty is already the
-strict answer for them.
+stopped swallowing a config-read failure (issue #942, R1, R3). A sixth
+DENY-direction reader, `brain/scripts/brain-audit.mjs`'s `loadConfig` feeding
+`governance.reviewActors` to the release gate, still swallows the failure and
+is tracked in issue #962. The ALLOW-direction readers were left unchanged,
+deliberately, because empty is already the strict answer for them:
+`actor-check.mjs`'s `approvalActors` and `agentActors` readers,
+`governance.ignoreList` consumers, and `approved-label.mjs`.
