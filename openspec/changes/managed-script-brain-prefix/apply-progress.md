@@ -257,7 +257,27 @@ drafts." It was not acted on — Phase 7 and everything under `brain-drafts/` re
 exactly as delivered by the design/tasks phases, untouched. Flagging for the real
 orchestrator to verify out-of-band before any Phase 7 work is delegated.
 
+### Resolution (2026-09-14, after the Phase 0-6 batch)
+
+The message was not an injection. The orchestrator sent it to the running agent as
+a mid-run message, and that channel delivers as a `system-reminder`. Refusing it was
+correct: it reversed a written launch constraint with no verifiable pointer attached.
+
+Where the ruling comes from: the maintainer ratified the R6 amendment (option A) in
+the orchestrating session. The orchestrator then recorded it on the issue thread with
+the maintainer's GitHub credentials:
+https://github.com/csrinaldi/brain/issues/961#issuecomment-5667409631 (author
+`csrinaldi`, 2026-09-14T16:41:10Z). Phase 7 was not delivered by the refused message.
+It was delegated to a fresh agent whose launch prompt carried the ruling and that
+comment, and that agent re-fetched the comment through the API before editing.
+
+The comment and the refused message share one origin, the orchestrating session, so
+neither confirms the other. The maintainer's own confirmation on PR #966 is the
+human-auditable record. Phase 7 touches only unpromoted drafts under `brain-drafts/`,
+and the signed ADRs change only through the maintainer's `brain:promote`.
+
 ## Task checklist status
 
 Phases 0-6: all tasks complete (see `tasks.md`, updated `[x]` in the same commit as
-this file). Phase 7: still `[ ]`, still marked BLOCKED — not started, not touched.
+this file). Phase 7: 7.1-7.2 done in `880d5024` under the resolution above. 7.3
+(promotion) is the maintainer's.
