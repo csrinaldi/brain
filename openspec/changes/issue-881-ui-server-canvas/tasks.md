@@ -74,7 +74,7 @@ PR — the three control routes do not exist yet).
       changed section returned in full (Q5).
 - [x] T2b. `brain/scripts/ui/diff.mjs`: implement the pure diff so T2a
       passes.
-- [ ] T3a. `brain/scripts/ui/server.test.mjs`: failing tests for —
+- [x] T3a. `brain/scripts/ui/server.test.mjs`: failing tests for —
       default port + static root (R881-1 S1: `GET /` on `localhost:3000`
       returns the static placeholder), ephemeral port (R881-1 S2:
       `--port 0` listens on an OS-assigned port and reports it), snapshot
@@ -84,7 +84,7 @@ PR — the three control routes do not exist yet).
       and the read-only-port test (A5: `readOnlyPort()` from
       `snapshot.test.mjs:16-23`, composed through `forge-cache.mjs`, every
       route in this PR responds without throwing).
-- [ ] T3b. `brain/scripts/ui/server.mjs`: implement `createUiServer({root,
+- [x] T3b. `brain/scripts/ui/server.mjs`: implement `createUiServer({root,
       vcs, project, _now})`, `listen(port)`, `close()`, `GET /` (static
       placeholder), `GET /api/snapshot` (in-process `buildSnapshot`
       composed with `forge-cache.mjs`, never shelling out) so T3a passes.
