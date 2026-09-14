@@ -167,6 +167,41 @@ test('#881: A5 — composed with a write-throwing port, a full tick completes wi
   poller.close();
 });
 
+// ── hardening: close() during an in-flight tick must leave no timer, and must
+// FAIL, not HANG, if that guarantee ever regresses ──────────────────────────
+//
+// Mutation-testing the fix in c2352550 found a gap: removing `closed = true`
+// from `close()` did not turn any existing test red — it made `node --test`
+// HANG instead, because those tests use the REAL setTimeout/clearTimeout, so
+// the leaked scheduleNext() after close() arms a real, uncleared timer that
+// keeps the process alive. A CI job with no per-test timeout would sit there,
+// not report a failure. This test uses the injected fake scheduler so the
+// same regression turns into a fast, deterministic assertion failure instead.
+
+test('#881: poller.close() during an in-flight tick leaves no timer scheduled once that tick settles — fails fast, never hangs', async () => {
+  const scheduler = fakeScheduler();
+  const now = { t: 0 };
+  let resolveIssueList;
+  const gate = new Promise((resolve) => { resolveIssueList = resolve; });
+  const vcs = {
+    issueList: async () => { await gate; return []; },
+    mrList: async () => [],
+    issueView: async () => ({}),
+    prReviews: async () => [],
+  };
+  const poller = createPoller({
+    vcs, cache: createForgeCache(), project: 'o/r', interval: 60000,
+    _setTimeout: scheduler.setTimeout, _clearTimeout: scheduler.clearTimeout, _now: () => new Date(now.t),
+  });
+
+  const inFlight = poller.start(); // begins tick(), which awaits `gate` — still in flight
+  poller.close(); // close() while that tick has not settled yet
+  resolveIssueList();
+  await inFlight; // let the in-flight tick's .finally() (which calls scheduleNext()) run to completion
+
+  assert.equal(scheduler.pending(), 0, 'no timer remains scheduled once the in-flight tick settles after close()');
+});
+
 // ── Q1/D2: the call-count budget over 30 simulated ticks ───────────────────
 
 test('#881: Q1/D2 — 30 simulated ticks hold the budget: cold start once, then 2 + min(P,10) + B per steady tick', async () => {
