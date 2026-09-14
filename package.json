@@ -10,6 +10,9 @@
     "access": "public"
   },
   "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
   "_files_note": "Derived from `managed` in brain/core/managed-paths.mjs — every path whose strategy needs BRAIN'S BYTES at install time. Verified against a real `npm pack` by test/publish-allowlist.e2e.test.mjs, never against this array alone. AGENTS.md is deliberately absent: it is `regenerate`, compiled in the consumer from SOURCE_DOCS, and shipping brain's own would be a file describing the wrong repository (#397).",
   "files": [
     "brain/core",
@@ -96,6 +99,7 @@
     "context:compile": "node ./brain/scripts/context/cli.mjs",
     "test:danger-paths": "bash test/upgrade/danger-paths.sh",
     "brain:status": "node ./brain/scripts/status/cli.mjs",
-    "brain:snapshot": "node ./brain/scripts/status/snapshot-cli.mjs"
+    "brain:snapshot": "node ./brain/scripts/status/snapshot-cli.mjs",
+    "brain:ui": "node ./brain/scripts/ui/server.mjs"
   }
 }
