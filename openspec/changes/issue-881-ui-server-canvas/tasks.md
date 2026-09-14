@@ -68,11 +68,11 @@ PR — the three control routes do not exist yet).
       served from the `Map` with no re-fetch (D1).
 - [x] T1b. `brain/scripts/ui/forge-cache.mjs`: implement the memoising
       cache-only port so T1a passes.
-- [ ] T2a. `brain/scripts/ui/diff.test.mjs`: failing test for the
+- [x] T2a. `brain/scripts/ui/diff.test.mjs`: failing test for the
       section-level diff — `isDeepStrictEqual` over the snapshot's
       top-level keys, `generatedAt` and `tier` excluded from comparison, a
       changed section returned in full (Q5).
-- [ ] T2b. `brain/scripts/ui/diff.mjs`: implement the pure diff so T2a
+- [x] T2b. `brain/scripts/ui/diff.mjs`: implement the pure diff so T2a
       passes.
 - [ ] T3a. `brain/scripts/ui/server.test.mjs`: failing tests for —
       default port + static root (R881-1 S1: `GET /` on `localhost:3000`
