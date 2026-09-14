@@ -61,12 +61,12 @@ Estimated: ~300 source, ~260 test, **~560 total**. Closes R881-1 (all
 scenarios), R881-5 (mutation-method 405 on the routes that exist in this
 PR — the three control routes do not exist yet).
 
-- [ ] T1a. `brain/scripts/ui/forge-cache.test.mjs`: failing test for the
+- [x] T1a. `brain/scripts/ui/forge-cache.test.mjs`: failing test for the
       cache-only port — exposes exactly the four read verbs `readForge`
       calls (`issueList`, `issueView`, `mrList`, `prReviews`), a cache miss
       throws `the first forge poll has not completed`, a filled entry is
       served from the `Map` with no re-fetch (D1).
-- [ ] T1b. `brain/scripts/ui/forge-cache.mjs`: implement the memoising
+- [x] T1b. `brain/scripts/ui/forge-cache.mjs`: implement the memoising
       cache-only port so T1a passes.
 - [ ] T2a. `brain/scripts/ui/diff.test.mjs`: failing test for the
       section-level diff — `isDeepStrictEqual` over the snapshot's
