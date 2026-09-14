@@ -289,17 +289,6 @@ test('renderContextBlock: no ticket memory (null branch / detached HEAD)', () =>
   assert.equal(renderContextBlock(model, SESSION_STRINGS), expected);
 });
 
-test('renderContextBlock: manifest line omitted when nothing to restore', () => {
-  const model = {
-    manifest: { restored: false },
-    engram: { ok: true },
-    change: { branch: 'main', token: null, matches: [] },
-    ticket: null,
-  };
-  const lines = renderContextBlock(model, SESSION_STRINGS).split('\n');
-  assert.ok(!lines.some((l) => l.startsWith('manifest:')), 'manifest line must be omitted when restored:false');
-});
-
 // SS3 (#955, R9/R6) — the manifest render line is retired entirely: a
 // `manifest` field in the model (of any shape) must render byte-identically
 // to no field at all, since renderContextBlock no longer branches on it.

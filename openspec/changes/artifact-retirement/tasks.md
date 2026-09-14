@@ -105,6 +105,7 @@ Slice B's over-budget forecast was already ruled (engram `sdd/artifact-retiremen
 - [ ] B3.7 `i18n/{en,es}.mjs`: delete `memory.migrateV1.rollbackSummary`; add `memory.migrateV1.rollbackRetired`.
 - [ ] B3.8 `migrate-v1.test.mjs`: delete `:321-371` (keep the `:13` import as one line). `secret-scrub.test.mjs`: delete `:11,21,112-146`. `cli.migrate-v1.test.mjs`: delete `:1-2,110-126`, replace with the B3.1 refusal test (keep `:60`, R3's forward-migration proof).
 - [ ] B3.9 Confirm B3.1 GREEN (including the re-pinned `chunk-boundary.test.mjs`). Run the existing `cli.migrate-v1.test.mjs:60` and confirm it still passes (forward migration unaffected).
+- [ ] B3.10 `CHANGELOG.md` `## Unreleased`: add the rollback bullet in the same commit as B3.3 — "`memory:migrate-v1 --rollback` is removed and refuses with a reason. Forward `migrate-v1` and `--dry-run` are unchanged." PR 1 shipped without it: its cold review (judgment:cold-1) blocked a bullet that described the refusal before the refusal existed.
 
 ### Phase B4: Legacy archive deletion (last, irreversible — R1)
 - [ ] B4.1 `git rm -r .memory/legacy` (47 `.jsonl.gz` + `migration-rejected.json`, 48 paths). This is the LAST content commit of Slice B. PR body names the last SHA that carried these files.

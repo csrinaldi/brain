@@ -17,8 +17,6 @@ driver again. Two inert leftovers stay in YOUR repo and nothing reads them. To r
 
 - `session:start`, `day:start` and `memory:pull` no longer restore a manifest; `memory:share`
   no longer creates the `.engram` symlink (`brain:env:init` / `cli.mjs setup` still does).
-- (slice B) `memory:migrate-v1 --rollback` is removed and refuses with a reason. Forward
-  `migrate-v1` and `--dry-run` are unchanged.
 
 ## v1.5.0 — the governance surface stops trusting what it cannot measure
 
