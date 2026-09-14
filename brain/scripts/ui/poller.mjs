@@ -147,8 +147,16 @@ export function createPoller({
     }
   }
 
+  let closed = false;
+
   function scheduleNext() {
-    if (paused || interval <= 0) return;
+    // `closed` matters here, not just in `close()` itself: a tick already
+    // in flight when `close()` runs keeps resolving in the background, and
+    // its own `.finally()` calls `scheduleNext()` — without this guard that
+    // would arm a brand-new real timer AFTER the server believes it has shut
+    // down, leaking a handle that keeps the process alive (measured: a
+    // `node --test` run that passes every assertion but never exits).
+    if (closed || paused || interval <= 0) return;
     timer = _setTimeout(runTick, interval);
   }
 
@@ -164,7 +172,7 @@ export function createPoller({
 
   return {
     start() { return paused ? undefined : runTick(); },
-    close() { if (timer) { _clearTimeout(timer); timer = null; } },
+    close() { closed = true; if (timer) { _clearTimeout(timer); timer = null; } },
     pause() {
       paused = true;
       if (timer) { _clearTimeout(timer); timer = null; }
