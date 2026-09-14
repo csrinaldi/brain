@@ -146,6 +146,12 @@ test('#879: with a port the graph carries roadmap per node, and one unreadable t
   });
   const s = await buildSnapshot({ root: makeFixture(), now: NOW, vcs: port, project: 'o/r' });
   assert.equal(s.graph.ok, true);
+  // #6 answered with an EMPTY body. That is a real reply from the forge, so #6
+  // is an issue that declared nothing: readable, `unclassified`, in the `?`
+  // track. The forge NOT answering is the next test, and the two must never
+  // look alike (cold review of #953, rev 1).
+  assert.deepEqual(s.graph.value.issuesUnreadable, []);
+  assert.equal(s.graph.value.nodes.find((n) => n.number === 6).ok, true);
   assert.deepEqual(s.graph.value.tracks, { '?': [6], UI: [5] }, 'tracks is a plain object, JSON-safe');
   const n5 = s.graph.value.nodes.find((n) => n.number === 5);
   assert.deepEqual(n5.roadmap.value, { state: IN_FLIGHT, evidence: { prs: [10], verdict: { pr: 10, rev: 2, verdict: 'APPROVE' } } });
@@ -172,6 +178,13 @@ test('#879: one issue body that cannot be read is a node that says so — never 
       if (number === 6) return view6();
       return { body: body5, assignees: null };
     },
+    // Siblings neutralized: `prs` and `reviews` are read in sequence after the
+    // graph and this test is about the issue reader alone. Empty lists keep
+    // both sections `ok` while contributing no roadmap PR and no verdict, so a
+    // change in THOSE readers cannot turn this test red, and a red here means
+    // the issue reader. The fixture tree plays the same role for the local
+    // readers (changes, records, ADRs): present so `buildSnapshot` reaches the
+    // graph, asserted nowhere below.
     mrList: async () => [],
     prReviews: async () => [],
   });
