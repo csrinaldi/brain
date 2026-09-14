@@ -116,11 +116,11 @@ PR — the three control routes do not exist yet).
       10-entry `MANAGED_SCRIPT_KEYS` pin is untouched — `brain:ui` is a
       repo-local verb like `brain:snapshot`, not a managed key, same as
       #879's micro-decision).
-- [ ] T7. `npm run memory:save -- "brain:ui server serves the read model
+- [x] T7. `npm run memory:save -- "brain:ui server serves the read model
       in-process" "<summary of forge-cache.mjs, diff.mjs, the 405 surface
       and the A4/A5 parity tests landed in this PR>" --issue 881 --type
       architecture`, staged with only the new `.memory/records/*.jsonl`
-      file and `.memory/index.jsonl`.
+      file and `.memory/index.jsonl`. (`rec-b9a5a16c68582663`.)
 
 **Done when**: `npm run brain:ui` (or `--port 0`) serves `/` and
 `/api/snapshot`, every other verb returns `405`, A4 and A5 hold under test,
