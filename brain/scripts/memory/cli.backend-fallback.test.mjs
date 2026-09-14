@@ -126,8 +126,9 @@ test('#874 (R11, B4a): memory:share with NO engram and NO stated backend now suc
   // (share substitutes and says so). R11 changed the underlying defect:
   // engram.share() dropped requireEngram() entirely (B1), so share() no
   // longer fails on a missing binary at all — leaving it in FALLBACK_OPS
-  // would itself have been a regression (plainfiles.share() skips R12's
-  // _ensureSymlink self-heal). See backend-selection.mjs's FALLBACK_OPS doc.
+  // would itself have been a regression (a live substitution would silently
+  // switch which reindex implementation runs). See backend-selection.mjs's
+  // FALLBACK_OPS doc.
   const w = world(t);
   const r = runCli(w, ['share']);
 
@@ -180,13 +181,12 @@ test('#874 (D8): `save` is NOT substituted — engram no longer fails on the mis
   assert.match(r.stderr, /deferred/i, 'the hydration must be reported as deferred, never as a refusal');
 });
 
-test('#641 `setup` is NOT substituted — engram.setup() needs no binary, and owns the merge driver', (t) => {
+test('#641 `setup` is NOT substituted — engram.setup() needs no binary, and owns the .engram symlink', (t) => {
   // THE REGRESSION THIS PINS. `engram.setup()` exits 0 with no engram
-  // installed: it creates the `.engram → .memory` symlink and registers the
-  // `merge=union` driver for `.memory/manifest.json` (ADR-0002).
-  // `plainfiles.setup()` does NEITHER. Substituting silently dropped the merge
-  // driver on every machine without engram — the mechanism ADR-0017's union
-  // safety rests on.
+  // installed: it creates the `.engram → .memory` symlink (R7, #955 —
+  // the ONLY place that symlink is created or repaired). `plainfiles.setup()`
+  // does NOT. Substituting silently dropped the one binding `share`/`pull`
+  // depend on for the backend to be reachable at all.
   const w = world(t);
   const r = runCli(w, ['setup']);
 

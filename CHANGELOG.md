@@ -6,6 +6,18 @@ registry (ADR-0030, superseding ADR-0006's git tags); consumers upgrade with
 changes** before upgrading — additive `brain.config.json` migrations apply
 automatically, but renames need manual action.
 
+## Unreleased — engram's transport artifacts retire (#955)
+
+**Manual step (consumers upgrading from an older brain).** The upgrade drops the
+`merge=engram-manifest` attribute (`.gitattributes` is managed), so git never runs the old
+driver again. Two inert leftovers stay in YOUR repo and nothing reads them. To remove them:
+
+    git rm .memory/manifest.json
+    git config --unset merge.engram-manifest.driver
+
+- `session:start`, `day:start` and `memory:pull` no longer restore a manifest; `memory:share`
+  no longer creates the `.engram` symlink (`brain:env:init` / `cli.mjs setup` still does).
+
 ## v1.5.0 — the governance surface stops trusting what it cannot measure
 
 **No manual step.** No migration was promoted since v1.4.0, so nothing is
