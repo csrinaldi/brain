@@ -67,6 +67,36 @@ function spyWatchEmitter() {
   return fn;
 }
 
+/**
+ * A `fs.watch`-shaped spy that throws `ENOENT` the FIRST time it is asked to
+ * register `throwOncePath`, then behaves like `spyWatch()` for every other
+ * call — including later calls for `throwOncePath` itself. `.attempts`
+ * counts every registration ATTEMPT for a path (successful or not), unlike
+ * `.calls`, which only records attempts that returned a handle.
+ */
+function spyWatchThrowOnceFor(throwOncePath) {
+  const calls = [];
+  const attempts = new Map();
+  const closesByPath = new Map();
+  let thrown = false;
+  const fn = (path, _opts, listener) => {
+    attempts.set(path, (attempts.get(path) ?? 0) + 1);
+    if (path === throwOncePath && !thrown) {
+      thrown = true;
+      const e = new Error('ENOENT: no such file or directory');
+      e.code = 'ENOENT';
+      throw e;
+    }
+    calls.push({ path, listener });
+    return { close: () => closesByPath.set(path, (closesByPath.get(path) ?? 0) + 1) };
+  };
+  fn.calls = calls;
+  fn.attempts = attempts;
+  fn.closesByPath = closesByPath;
+  fn.fire = (path) => { const c = calls.find((entry) => entry.path === path); if (c) c.listener('change', null); };
+  return fn;
+}
+
 /** A controllable `setTimeout`/`clearTimeout` pair: `runLatest()` fires only the most recently scheduled callback — the trailing-debounce shape. */
 function fakeScheduler() {
   let seq = 0;
@@ -164,6 +194,59 @@ test('#881: a <git-common>/worktrees/ event re-scans and opens/closes watchers t
   stanzas = `worktree ${root}\n\nworktree ${betaPath}\n`;
   _watch.fire(join(gitCommonDir, 'worktrees'));
   assert.equal(_watch.closesByPath.get(alphaLogs), 1, 'the vanished worktree watcher is closed on re-scan');
+  w.close();
+});
+
+// ── cold review of PR #971 rev 1 (judgment:cold-1), R881-3: a worktree whose
+// watch failed is retried on the next rescan, never marked watched forever ──
+
+test("#881: a worktree whose watch failed is retried on the next rescan, never left permanently unwatched", async () => {
+  const root = makeWatcherFixture();
+  const gitCommonDir = makeGitCommonFixture();
+  const alphaPath = join(dirname(root), 'alpha');
+  const betaPath = join(dirname(root), 'beta');
+  const alphaLogs = join(gitCommonDir, 'worktrees', 'alpha', 'logs');
+  const betaLogs = join(gitCommonDir, 'worktrees', 'beta', 'logs');
+  let stanzas = `worktree ${root}\n\nworktree ${alphaPath}\n`;
+  const _run = () => stanzas;
+  const _watch = spyWatchThrowOnceFor(alphaLogs);
+  const scheduler = fakeScheduler();
+  const recomputes = [];
+  const w = createWatcher({
+    root, gitCommonDir, _watch, _run,
+    _setTimeout: scheduler.setTimeout, _clearTimeout: scheduler.clearTimeout,
+    onRecompute: async (evt) => { recomputes.push(evt); },
+  });
+  w.start();
+
+  assert.equal(_watch.attempts.get(alphaLogs), 1, 'the first rescan attempted alpha/logs exactly once');
+  assert.ok(
+    w.state().failed.some((f) => f.path === '<git-common>/worktrees/alpha/logs/'),
+    'the failed watch is recorded in state()',
+  );
+
+  // a second worktree appears -> a `<git-common>/worktrees/` event re-scans
+  stanzas = `worktree ${root}\n\nworktree ${alphaPath}\n\nworktree ${betaPath}\n`;
+  _watch.fire(join(gitCommonDir, 'worktrees'));
+
+  assert.equal(
+    _watch.attempts.get(alphaLogs), 2,
+    'the rescan retried alpha/logs — a worktree that never got watched must not be skipped forever',
+  );
+  assert.ok(
+    !w.state().failed.some((f) => f.path === '<git-common>/worktrees/alpha/logs/'),
+    'the failure entry is cleared once the retry succeeds — state() stops lying about alpha',
+  );
+  assert.ok(_watch.calls.some((c) => c.path === betaLogs), 'the newly added worktree is watched too');
+
+  // the retried handle is really open, not a bookkeeping-only success
+  _watch.fire(alphaLogs);
+  assert.equal(scheduler.pending(), 1, 'the retried alpha handle really fires the debounce');
+  scheduler.runLatest();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(recomputes.length, 1, 'a commit in alpha is no longer silently invisible for the rest of the process');
+
   w.close();
 });
 

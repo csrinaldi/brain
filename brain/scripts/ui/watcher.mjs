@@ -113,7 +113,7 @@ export function createWatcher({
     failed.push({ path: label, reason: err?.message ?? String(err) });
   }
 
-  function watchDir(absPath, label, kind, worktreePath) {
+  function watchDir(absPath, label, kind, worktreePath, worktreeId) {
     if (handles.has(absPath)) return;
     try {
       const handle = _watch(absPath, { persistent: false }, () => onFire(absPath));
@@ -130,7 +130,7 @@ export function createWatcher({
           closeWatch(absPath); // a failed handle cannot fire again
         });
       }
-      handles.set(absPath, { handle, label, kind, worktreePath });
+      handles.set(absPath, { handle, label, kind, worktreePath, worktreeId });
       failed = failed.filter((f) => f.path !== label);
     } catch (err) {
       recordFailure(label, err);
@@ -142,6 +142,14 @@ export function createWatcher({
     if (!entry) return;
     try { entry.handle.close(); } catch { /* best effort */ }
     handles.delete(absPath);
+    // A worktree's logs/ handle carries its `worktreeId`. Closing it — either
+    // because the worktree vanished (rescanWorktrees' removal loop) or because
+    // its handle errored asynchronously (the `handle.on('error', ...)` path
+    // above) — must make the worktree eligible for `watchDir()` again on the
+    // NEXT rescan. `watchedWorktrees` only ever records a worktree whose watch
+    // is actually open right now (see rescanWorktrees()), so it must be
+    // cleared here too, not just on removal.
+    if (entry.worktreeId !== undefined) watchedWorktrees.delete(entry.worktreeId);
   }
 
   function onFire(absPath) {
@@ -206,10 +214,21 @@ export function createWatcher({
         watchedWorktrees.delete(id);
       }
     }
+    // Retry is driven by rescan events only (a `<git-common>/worktrees/` dir
+    // event), never by a timer of its own — this is what the cold review of
+    // PR #971 rev 1 (judgment:cold-1) measured. `watchedWorktrees.has(w.id)`
+    // is true ONLY when a handle for that worktree is actually open right
+    // now (see below and closeWatch()), so a worktree whose watchDir() call
+    // failed — or whose live handle later errored — stays eligible and gets
+    // retried the next time this function runs, instead of being marked
+    // watched forever after one failed attempt (R881-3: a commit in a linked
+    // worktree must be seen, not silently invisible for the rest of the
+    // process).
     for (const w of current) {
       if (!watchedWorktrees.has(w.id)) {
-        watchDir(join(resolvedGitCommonDir, 'worktrees', w.id, 'logs'), `<git-common>/worktrees/${w.id}/logs/`, 'refs', w.path);
-        watchedWorktrees.set(w.id, w.path);
+        const absPath = join(resolvedGitCommonDir, 'worktrees', w.id, 'logs');
+        watchDir(absPath, `<git-common>/worktrees/${w.id}/logs/`, 'refs', w.path, w.id);
+        if (handles.has(absPath)) watchedWorktrees.set(w.id, w.path);
       }
     }
   }
