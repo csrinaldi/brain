@@ -144,7 +144,7 @@ control routes and their 405 boundary), R881-9 (watcher/poller failure
 surfaced in `/api/meta` and the `status` SSE frame), and the R881-10 "no MCP
 or heartbeat route" scenario over the now-complete route table.
 
-- [ ] T1a. `brain/scripts/ui/watcher.test.mjs`: failing tests for —
+- [x] T1a. `brain/scripts/ui/watcher.test.mjs`: failing tests for —
       an uncommitted working-tree edit produces no event (R881-3 S1: the
       watcher registers watches **only** for the Q3 table's enumerated
       directories — root, `brain/`, `brain/project/decisions/`, each
@@ -162,7 +162,7 @@ or heartbeat route" scenario over the now-complete route table.
       (`ENOSPC`/`EPERM`/`ENOENT`) leaves the server running and shapes
       `{ok: false, reason, watched: <n>, failed: [<paths>]}` (Q3 "when the
       watcher fails").
-- [ ] T1b. `brain/scripts/ui/watcher.mjs`: implement directory watchers
+- [x] T1b. `brain/scripts/ui/watcher.mjs`: implement directory watchers
       (non-recursive, no `recursive: true`) over the Q3 set, the 250 ms
       trailing debounce with serialised recompute (at most one queued
       follow-up), worktree re-scan, and per-directory failure handling so

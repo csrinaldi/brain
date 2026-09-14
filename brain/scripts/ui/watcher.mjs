@@ -1,0 +1,237 @@
+// watcher.mjs — directory watchers over the committed tier only (Q3, D4,
+// #881 PR 2). Every watch target is a DIRECTORY, never a file: git replaces
+// `HEAD`/`packed-refs` by writing a `.lock` file and renaming over the
+// target, which orphans a file-bound `fs.watch` the moment it fires once. A
+// directory watch survives the rename and keeps seeing every write after it.
+//
+// The watched set is exactly Q3's table — root, `brain/`,
+// `brain/project/decisions/`, each `ANTI_PATTERN_DIRS` entry,
+// `.memory/records/`, `openspec/changes/`, each
+// `openspec/changes/issue-*/`, `<git-common>/`, `<git-common>/logs/`,
+// `<git-common>/worktrees/`, and `<git-common>/worktrees/<n>/logs/` per
+// worktree — and NOTHING else. A worktree's own working tree is never
+// watched, which doubles as R881-10's "no uncommitted content is ever read".
+//
+// The reflog (`logs/HEAD`) is the load-bearing choice: it is APPENDED on
+// every HEAD movement — commit, `commit --amend`, fast-forward merge, reset,
+// rebase step, checkout — and it is one flat path per worktree, unlike
+// `logs/refs/heads/<branch>` which nests one dir per branch-name segment.
+//
+// Every fired watch is funnelled through one 250 ms trailing debounce (D5).
+// Recomputes are serialised: an event that lands while a recompute is
+// already running schedules exactly ONE follow-up, so a `git rebase` that
+// moves HEAD forty times in a burst produces at most two recomputes, never
+// forty.
+//
+// `<git-common>/worktrees/` re-scans on its own event, using `git worktree
+// list --porcelain` — the same stanza grammar as
+// `memory/lane/collect.mjs:115-129`'s `parseWorktrees()`, DUPLICATED here
+// rather than imported: this PR's file scope (tasks.md's
+// `brain-slice-scope/1` fence) is `server.mjs`/`watcher.mjs`/`poller.mjs`
+// only, and `collect.mjs` is not in it (see apply-progress for the
+// deviation this records). Git's own convention makes the worktree's `<n>`
+// id under `.git/worktrees/` the basename of its path — confirmed against
+// this very repo's own linked worktrees before relying on it.
+//
+// A watch that cannot be registered (`ENOSPC`, `EPERM`, a path that does not
+// exist in this root) is caught PER DIRECTORY. The watcher never throws out
+// of the constructor or `start()`: the server keeps running, and `state()`
+// reports which paths failed and why (Q3 "when the watcher fails").
+
+import { watch as fsWatch, readdirSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { basename, isAbsolute, join } from 'node:path';
+
+import { ANTI_PATTERN_DIRS } from '../status/anti-patterns.mjs';
+import { CHANGES_ROOT, parseChangeId } from '../lib/sdd-layout.mjs';
+
+const DEBOUNCE_MS = 250;
+
+/** `git worktree list --porcelain` → `{path, bare}` stanzas, one per worktree. */
+function parseWorktreeStanzas(stdout) {
+  const stanzas = [];
+  let current = null;
+  for (const line of stdout.split('\n')) {
+    if (line.startsWith('worktree ')) {
+      current = { path: line.slice('worktree '.length), bare: false };
+      stanzas.push(current);
+    } else if (current && line === 'bare') {
+      current.bare = true;
+    }
+  }
+  return stanzas;
+}
+
+function defaultRun(root) {
+  return (file, args) => execFileSync(file, args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+}
+
+/** `git rev-parse --git-common-dir`, resolved to an absolute path. */
+export function resolveGitCommonDir({ root, _run } = {}) {
+  const run = _run ?? defaultRun(root);
+  const out = run('git', ['rev-parse', '--git-common-dir']).trim();
+  return isAbsolute(out) ? out : join(root, out);
+}
+
+/**
+ * createWatcher() — directory watchers, debounce, worktree re-scan.
+ *
+ * @param {{
+ *   root: string,
+ *   gitCommonDir?: string|null,
+ *   _watch?: Function, _run?: Function, _readdir?: Function, _now?: () => Date,
+ *   debounceMs?: number, _setTimeout?: Function, _clearTimeout?: Function,
+ *   onRecompute?: (evt: {causes: string[], refWorktrees: string[], at: Date}) => Promise<void>|void,
+ * }} opts
+ * @returns {{start(): void, close(): void, state(): {ok: boolean, reason?: string, watched: number, failed: Array<{path:string,reason:string}>}}}
+ */
+export function createWatcher({
+  root,
+  gitCommonDir = null,
+  _watch = fsWatch,
+  _run,
+  _readdir = readdirSync,
+  _now = () => new Date(),
+  debounceMs = DEBOUNCE_MS,
+  _setTimeout = setTimeout,
+  _clearTimeout = clearTimeout,
+  onRecompute = () => {},
+} = {}) {
+  const run = _run ?? defaultRun(root);
+  const handles = new Map(); // absPath -> {handle, label, kind, worktreePath}
+  const watchedWorktrees = new Map(); // id -> path
+  let failed = [];
+  let resolvedGitCommonDir = gitCommonDir;
+  let debounceTimer = null;
+  let pendingCauses = new Set();
+  let pendingRefWorktrees = new Set();
+  let recomputing = false;
+  let queuedAfterRecompute = false;
+
+  function recordFailure(label, err) {
+    failed = failed.filter((f) => f.path !== label);
+    failed.push({ path: label, reason: err?.message ?? String(err) });
+  }
+
+  function watchDir(absPath, label, kind, worktreePath) {
+    if (handles.has(absPath)) return;
+    try {
+      const handle = _watch(absPath, { persistent: false }, () => onFire(absPath));
+      handles.set(absPath, { handle, label, kind, worktreePath });
+      failed = failed.filter((f) => f.path !== label);
+    } catch (err) {
+      recordFailure(label, err);
+    }
+  }
+
+  function closeWatch(absPath) {
+    const entry = handles.get(absPath);
+    if (!entry) return;
+    try { entry.handle.close(); } catch { /* best effort */ }
+    handles.delete(absPath);
+  }
+
+  function onFire(absPath) {
+    const entry = handles.get(absPath);
+    if (!entry) return;
+    pendingCauses.add(`watch:${entry.label}`);
+    if (entry.kind === 'refs') pendingRefWorktrees.add(entry.worktreePath ?? root);
+    if (entry.kind === 'worktrees') rescanWorktrees();
+    scheduleDebounce();
+  }
+
+  function scheduleDebounce() {
+    if (debounceTimer) _clearTimeout(debounceTimer);
+    debounceTimer = _setTimeout(fireDebounce, debounceMs);
+  }
+
+  function fireDebounce() {
+    debounceTimer = null;
+    if (recomputing) { queuedAfterRecompute = true; return; }
+    dispatch();
+  }
+
+  async function dispatch() {
+    const causes = [...pendingCauses];
+    const refWorktrees = [...pendingRefWorktrees];
+    pendingCauses = new Set();
+    pendingRefWorktrees = new Set();
+    recomputing = true;
+    try {
+      await onRecompute({ causes, refWorktrees, at: _now() });
+    } finally {
+      recomputing = false;
+      if (queuedAfterRecompute) {
+        queuedAfterRecompute = false;
+        dispatch();
+      }
+    }
+  }
+
+  function listChangeDirs() {
+    try {
+      return _readdir(join(root, CHANGES_ROOT)).filter((n) => parseChangeId(n) !== null);
+    } catch {
+      return [];
+    }
+  }
+
+  /** The linked worktrees `git worktree list --porcelain` reports right now, minus the primary checkout (always listed first) and any bare stanza. */
+  function activeWorktrees() {
+    let stdout;
+    try { stdout = run('git', ['worktree', 'list', '--porcelain']); } catch (err) { recordFailure('<git-common>/worktrees', err); return []; }
+    return parseWorktreeStanzas(stdout).slice(1).filter((s) => !s.bare).map((s) => ({ path: s.path, id: basename(s.path) }));
+  }
+
+  function rescanWorktrees() {
+    if (!resolvedGitCommonDir) return;
+    const current = activeWorktrees();
+    const currentIds = new Set(current.map((w) => w.id));
+    for (const [id] of watchedWorktrees) {
+      if (!currentIds.has(id)) {
+        closeWatch(join(resolvedGitCommonDir, 'worktrees', id, 'logs'));
+        watchedWorktrees.delete(id);
+      }
+    }
+    for (const w of current) {
+      if (!watchedWorktrees.has(w.id)) {
+        watchDir(join(resolvedGitCommonDir, 'worktrees', w.id, 'logs'), `<git-common>/worktrees/${w.id}/logs/`, 'refs', w.path);
+        watchedWorktrees.set(w.id, w.path);
+      }
+    }
+  }
+
+  function start() {
+    watchDir(root, '<root>', 'tree');
+    watchDir(join(root, 'brain'), 'brain/', 'tree');
+    watchDir(join(root, 'brain/project/decisions'), 'brain/project/decisions/', 'tree');
+    for (const { dir } of ANTI_PATTERN_DIRS) watchDir(join(root, dir), `${dir}/`, 'tree');
+    watchDir(join(root, '.memory/records'), '.memory/records/', 'tree');
+    watchDir(join(root, CHANGES_ROOT), `${CHANGES_ROOT}/`, 'tree');
+    for (const name of listChangeDirs()) watchDir(join(root, CHANGES_ROOT, name), `${CHANGES_ROOT}/${name}/`, 'tree');
+
+    if (resolvedGitCommonDir === null) {
+      try { resolvedGitCommonDir = resolveGitCommonDir({ root, _run: run }); } catch (err) { recordFailure('<git-common>', err); }
+    }
+    if (resolvedGitCommonDir) {
+      watchDir(resolvedGitCommonDir, '<git-common>/', 'refs', root);
+      watchDir(join(resolvedGitCommonDir, 'logs'), '<git-common>/logs/', 'refs', root);
+      watchDir(join(resolvedGitCommonDir, 'worktrees'), '<git-common>/worktrees/', 'worktrees');
+      rescanWorktrees();
+    }
+  }
+
+  function close() {
+    if (debounceTimer) { _clearTimeout(debounceTimer); debounceTimer = null; }
+    for (const absPath of [...handles.keys()]) closeWatch(absPath);
+    watchedWorktrees.clear();
+  }
+
+  function state() {
+    return failed.length === 0
+      ? { ok: true, watched: handles.size, failed: [] }
+      : { ok: false, reason: `${failed.length} watch(es) failed`, watched: handles.size, failed: failed.map((f) => ({ ...f })) };
+  }
+
+  return { start, close, state };
+}
