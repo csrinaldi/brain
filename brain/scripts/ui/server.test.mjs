@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { EventEmitter } from 'node:events';
@@ -46,6 +46,23 @@ function readOnlyWriteVerbs(reads) {
     port[w] = async () => { throw new Error(`write verb ${w} called`); };
   }
   return Object.assign(port, reads);
+}
+
+/** Same as `readOnlyWriteVerbs`, plus every write verb's name is pushed to `calls` before it throws — so a test can assert a call COUNT, not just "it would have thrown". */
+function countedWriteVerbs(calls, reads) {
+  const port = {};
+  for (const w of ['mrCreate', 'mrAutoMerge', 'issueCreate', 'issueUpdate', 'prReviewComment', 'issueComment', 'labelAdd', 'labelRemove', 'branchProtect']) {
+    port[w] = async () => { calls.push(w); throw new Error(`write verb ${w} called`); };
+  }
+  return Object.assign(port, reads);
+}
+
+/** `{path}:{dir-or-size}:{mtimeMs}` for every entry under `root`, sorted — the same walker `snapshot.test.mjs`'s `snapshotTree()` uses, so a before/after diff catches ANY write, not just the ones a specific assertion names. */
+function snapshotTree(root) {
+  const out = [];
+  const walk = (dir) => { for (const n of readdirSync(dir)) { const p = join(dir, n); const s = statSync(p); out.push(`${p}:${s.isDirectory() ? 'd' : s.size}:${s.mtimeMs}`); if (s.isDirectory()) walk(p); } };
+  walk(root);
+  return out.sort();
 }
 
 /** Reads one `event: ...\ndata: ...\n\n` frame at a time off an SSE response body. */
@@ -472,6 +489,51 @@ test('#881: R881-5 S2 — the three poll-control routes accept POST only, and PO
 
     const resumeRes = await fetch(`${base}/api/poll/resume`, { method: 'POST' });
     assert.equal((await resumeRes.json()).paused, false);
+  } finally {
+    await server.close();
+  }
+});
+
+// ── D7: "asserts after a POST /api/poll/pause that no file under the served
+// root, no git ref and no forge stub call changed" ──────────────────────────
+
+test('#881: D7 — POST /api/poll/pause, /resume and /once leave the served root, the refs and the forge untouched', async () => {
+  const root = makeFixture();
+  const writeCalls = [];
+  const readCalls = [];
+  const forgeSource = countedWriteVerbs(writeCalls, {
+    issueList: async () => { readCalls.push('issueList'); return []; },
+    mrList: async () => { readCalls.push('mrList'); return []; },
+    issueView: async () => { readCalls.push('issueView'); return {}; },
+    prReviews: async () => { readCalls.push('prReviews'); return []; },
+  });
+  const server = createUiServer({ root, project: 'o/r', _now: now, forgeSource, poll: false });
+  await server.listen(0);
+  try {
+    const base = `http://127.0.0.1:${server.port}`;
+    const before = snapshotTree(root);
+
+    const pauseRes = await fetch(`${base}/api/poll/pause`, { method: 'POST' });
+    assert.equal(pauseRes.status, 200);
+    const resumeRes = await fetch(`${base}/api/poll/resume`, { method: 'POST' });
+    assert.equal(resumeRes.status, 200);
+    // `once` may legitimately read the forge (it triggers a real poll on
+    // demand) — the assertion below is only about WRITE verbs, never about
+    // whether a read happened.
+    const onceRes = await fetch(`${base}/api/poll/once`, { method: 'POST' });
+    assert.equal(onceRes.status, 200);
+
+    const after = snapshotTree(root);
+    assert.deepEqual(after, before, 'no file under the served root changed for pause, resume or once');
+    assert.equal(writeCalls.length, 0, 'no write verb was ever invoked by any poll control');
+    assert.ok(readCalls.includes('issueList'), 'once actually ran a poll against the composed port (proves this is not a vacuous pass)');
+
+    // The fixture root `makeFixture()` builds (`__fixtures__/snapshot-tree.mjs`)
+    // never runs `git init` — there is no `.git` to rev-parse here, so the
+    // "no git ref changed" leg of D7's promise is skipped for that stated
+    // reason. It is a no-op by construction: none of these three routes ever
+    // calls `run('git', [...])` in the first place (`server.mjs`'s
+    // `servePollControl` only calls the poller's own pause/resume/once).
   } finally {
     await server.close();
   }
