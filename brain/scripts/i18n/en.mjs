@@ -381,8 +381,8 @@ export default {
   // worked all along, and because nothing ever said so, the engram-only error
   // read as "capture is impossible here".
   'memory.backend.substituted': 'the `{from}` binary is not installed here, so `{op}` ran on the records-only `{fallback}` backend instead — same records, same validation, no backend required (ADR-0017). MEMORY_BACKEND was not set, so no stated choice was overridden; set it to pin either backend explicitly.',
-  'memory.backend.statedButAbsent': 'MEMORY_BACKEND={backend} is set explicitly, but the `{backend}` binary is not on PATH here — a stated selector is never overridden (ADR-0004), so this run will fail. Records-only capture needs no backend: `MEMORY_BACKEND={fallback} npm run memory:{op}`.',
-  'memory.backend.probeFailed': 'could not determine whether the `{backend}` binary is present — {reason}. That is the CHECK failing, not the binary being absent, so nothing was substituted and `{op}` continues on `{backend}`. If it fails, the records-only route is `MEMORY_BACKEND={fallback} npm run memory:{op}`.',
+  'memory.backend.statedButAbsent': 'MEMORY_BACKEND={backend} is set explicitly, but the `{backend}` binary is not on PATH here — a stated selector is never overridden (ADR-0004), so this run will fail. Records-only capture needs no backend: `MEMORY_BACKEND={fallback} npm run brain:memory:{op}`.',
+  'memory.backend.probeFailed': 'could not determine whether the `{backend}` binary is present — {reason}. That is the CHECK failing, not the binary being absent, so nothing was substituted and `{op}` continues on `{backend}`. If it fails, the records-only route is `MEMORY_BACKEND={fallback} npm run brain:memory:{op}`.',
 
   // ── memory/backends/engram.mjs — share() secret scrub (issue #214, C1b) ──────
   'memory.share.unprovenanced': '{count} observation(s) arrived with no provenance block, so they materialised as `@legacy` with no `issue` — nothing emits the block on the capture path yet (#541). Counted, not refused: refusing would reject the store that already exists.',

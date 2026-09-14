@@ -345,8 +345,8 @@ export default {
 
   // ── memory/cli.mjs — qué backend corrió realmente (issue #641) ───────────────
   'memory.backend.substituted': 'el binario `{from}` no está instalado acá, así que `{op}` corrió sobre el backend `{fallback}` (solo registros) — mismos registros, misma validación, sin backend requerido (ADR-0017). MEMORY_BACKEND no estaba seteado, así que no se pisó ninguna elección explícita; seteálo para fijar cualquiera de los dos backends.',
-  'memory.backend.statedButAbsent': 'MEMORY_BACKEND={backend} está seteado explícitamente, pero el binario `{backend}` no está en PATH acá — un selector explícito nunca se pisa (ADR-0004), así que esta corrida va a fallar. La captura solo-registros no necesita backend: `MEMORY_BACKEND={fallback} npm run memory:{op}`.',
-  'memory.backend.probeFailed': 'no se pudo determinar si el binario `{backend}` está presente — {reason}. Eso es la VERIFICACIÓN fallando, no el binario faltando, así que no se sustituyó nada y `{op}` sigue sobre `{backend}`. Si falla, la ruta solo-registros es `MEMORY_BACKEND={fallback} npm run memory:{op}`.',
+  'memory.backend.statedButAbsent': 'MEMORY_BACKEND={backend} está seteado explícitamente, pero el binario `{backend}` no está en PATH acá — un selector explícito nunca se pisa (ADR-0004), así que esta corrida va a fallar. La captura solo-registros no necesita backend: `MEMORY_BACKEND={fallback} npm run brain:memory:{op}`.',
+  'memory.backend.probeFailed': 'no se pudo determinar si el binario `{backend}` está presente — {reason}. Eso es la VERIFICACIÓN fallando, no el binario faltando, así que no se sustituyó nada y `{op}` sigue sobre `{backend}`. Si falla, la ruta solo-registros es `MEMORY_BACKEND={fallback} npm run brain:memory:{op}`.',
 
   // ── memory/backends/engram.mjs — share() secret scrub (issue #214, C1b) ──────
   'memory.share.unprovenanced': '{count} observación(es) llegaron sin bloque de provenance, así que se materializaron como `@legacy` y sin `issue` — todavía nada emite el bloque en el camino de captura (#541). Contadas, no rechazadas: rechazarlas voltearía el store que ya existe.',
