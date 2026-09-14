@@ -33,4 +33,4 @@
 
 - [x] 5.1 Commit the test + fix together (one work unit, strict TDD).
 - [x] 5.2 Commit the SDD docs (`proposal.md`, `spec.md`, `tasks.md`, `apply-progress.md`) and the doctrine draft separately.
-- [ ] 5.3 Record-first commit: `npm run memory:save -- "<title>" "<content>"`, staging only the new `.memory/records/*.jsonl` plus `.memory/index.jsonl`.
+- [x] 5.3 Record-first commit: `npm run memory:save -- "<title>" "<content>" --type bugfix`, staging only the new `.memory/records/*.jsonl` plus `.memory/index.jsonl`.

@@ -16,8 +16,8 @@ Strict TDD — `GIT_CONFIG_GLOBAL=/dev/null npm test` (node --test).
 - [x] 4.1 Mutation table (below)
 - [x] 4.2 Full suite run, both post-revert and post-restore (below)
 - [x] 5.1 Commit test+fix (commit `442912c`)
-- [x] 5.2 Commit SDD docs + draft (this commit)
-- [ ] 5.3 Record-first commit (pending)
+- [x] 5.2 Commit SDD docs + draft (commit `2eb403ae`)
+- [x] 5.3 Record-first commit (commit `0713c18`, record `rec-98ccc978278facb6`)
 
 ## TDD Cycle Evidence
 
@@ -144,8 +144,9 @@ draft addresses it, as a draft only).
   `brain/core/**` directly.
 
 ## Remaining tasks
-- [ ] 5.3 Record-first commit (`npm run memory:save`)
+None. All 19 tasks complete.
 
 ## Status
-18/19 tasks complete. Test+fix committed (`442912c`); this commit lands the
-SDD docs and the doctrine draft. Only the record-first commit remains.
+19/19 tasks complete. Commits: `442912c` (test+fix), `2eb403ae` (SDD docs +
+doctrine draft), `0713c18` (record-first memory commit). Ready for
+`sdd-verify`.
