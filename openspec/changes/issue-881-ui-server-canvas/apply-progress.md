@@ -284,3 +284,17 @@ grammar.
 - `watcher.mjs`'s `resolveGitCommonDir` and `poller.mjs`'s three lanes are
   process-internal; PR 3 has no reason to import either directly (it ships
   pure `lib/*.mjs` parsers plus one new IO route).
+
+## Cold review of PR #971 rev 1 (2026-09-14) — REVISE → fixed
+
+`judgment:cold-1` (blocker, R881-3): `rescanWorktrees()` set `watchedWorktrees`
+unconditionally after `watchDir()`, so a worktree whose watch failed once was
+never retried on later rescans and stayed silently invisible. Fixed by only
+recording a worktree as watched when `handles.has(absPath)` is true after
+`watchDir()`, and by having `closeWatch()` also clear `watchedWorktrees` (so
+the async handle-error path from `94fc6788` re-enables retry too). RED: a
+`_watch` double throwing `ENOENT` once for alpha's `logs/` kept
+`attempts.get(alphaLogs)` at 1 and alpha in `failed` after a second rescan.
+GREEN after the fix. Mutation check: restoring the unconditional `set()` on
+watchedWorktrees turned exactly this test red (9/10), reverted. Commit
+`f253e5ca`.
