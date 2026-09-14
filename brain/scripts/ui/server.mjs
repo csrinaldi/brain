@@ -1,29 +1,51 @@
 #!/usr/bin/env node
-// server.mjs — `brain:ui`: the local read-model server (#881, PR 1 / A1).
+// server.mjs — `brain:ui`: the local read-model server (#881, PR 1 / A1 +
+// PR 2 / A2).
 //
-// Serves the static SPA at `/` and the snapshot at `GET /api/snapshot`,
-// built IN-PROCESS via `buildSnapshot` — never shelling out to a CLI
-// (R881-1). `buildSnapshot` is composed with a cache-only `vcs` port
-// (`forge-cache.mjs`, D1): before the poller lands (#881 PR 2), every forge
-// read misses and the forge sections degrade to `{ok:false, reason}` in band
-// (R881-9), never a crash and never a live network call from this path.
+// Serves the static SPA at `/`, the snapshot at `GET /api/snapshot`, and a
+// push stream at `GET /api/stream` — built IN-PROCESS via `buildSnapshot`,
+// never shelling out to a CLI (R881-1). `buildSnapshot` is composed with a
+// cache-only `vcs` port (`forge-cache.mjs`, D1); `poller.mjs` is the only
+// module that ever calls the real forge, filling that cache on a schedule
+// (Q1). `watcher.mjs` watches the committed tier (Q3) and triggers a
+// debounced recompute; both triggers funnel through ONE in-memory `current`
+// snapshot (D1's "rejected — recompute per HTTP request"): `/api/snapshot`
+// and the SSE stream's `sync` frame always agree because they serve the
+// SAME held value, refreshed only by a completed poll or a debounced watch
+// event, never per-request.
 //
-// Every route this PR ships accepts GET/HEAD only; the method check runs
-// BEFORE routing (D7), so any other verb gets 405 on any path, known or
-// unknown — the three poller-control routes (`/api/poll/*`) that accept
-// POST ship in PR 2, not here.
+// Every route accepts GET/HEAD only, EXCEPT the three poller controls
+// (`/api/poll/pause|resume|once`), which accept POST only — the method
+// check runs BEFORE routing (D7), so any other verb gets 405 on any path,
+// known or unknown.
 
 import { createServer as createHttpServer } from 'node:http';
+import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { buildSnapshot } from '../status/snapshot.mjs';
 import { createForgeCache } from './forge-cache.mjs';
+import { diffSections } from './diff.mjs';
+import { createWatcher } from './watcher.mjs';
+import { createPoller } from './poller.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const STATIC_DIR = join(__dirname, 'static');
 const ALLOWED_METHODS = new Set(['GET', 'HEAD']);
+const POST_ONLY_PATHS = new Set(['/api/poll/pause', '/api/poll/resume', '/api/poll/once']);
+
+/** Every route this server knows — the R881-10 S3 guard test pins this set: no MCP resource route, no heartbeat/agent-pulse endpoint. */
+export const KNOWN_ROUTES = Object.freeze(['/', '/api/snapshot', '/api/stream', '/api/poll/pause', '/api/poll/resume', '/api/poll/once']);
+
+const NO_FORGE_REASON = 'no forge port was supplied to the poller';
+const noForgeVcs = {
+  issueList: async () => { throw new Error(NO_FORGE_REASON); },
+  mrList: async () => { throw new Error(NO_FORGE_REASON); },
+  issueView: async () => { throw new Error(NO_FORGE_REASON); },
+  prReviews: async () => { throw new Error(NO_FORGE_REASON); },
+};
 
 /**
  * createUiServer() — the one factory every caller uses: the CLI entry below
@@ -31,28 +53,102 @@ const ALLOWED_METHODS = new Set(['GET', 'HEAD']);
  * process-level concern (argv, signals, exit codes) lives past this
  * factory's boundary — `listen()`/`close()` are the only lifecycle surface.
  *
- * @param {{root?: string, port?: number, vcs?: object|null, project?: string|null, _now?: () => Date}} opts
+ * @param {{
+ *   root?: string, port?: number, vcs?: object|null, project?: string|null, _now?: () => Date,
+ *   forgeSource?: object|null, interval?: number, poll?: boolean,
+ *   gitCommonDir?: string|null, _watch?: Function, _run?: Function, _readdir?: Function,
+ *   _setTimeout?: Function, _clearTimeout?: Function,
+ * }} opts
  */
-export function createUiServer({ root = process.cwd(), port = 3000, vcs = null, project = null, _now = () => new Date() } = {}) {
+export function createUiServer({
+  root = process.cwd(), port = 3000, vcs = null, project = null, _now = () => new Date(),
+  forgeSource = null, interval = 60000, poll = true,
+  gitCommonDir = null, _watch, _run, _readdir,
+  _setTimeout = setTimeout, _clearTimeout = clearTimeout,
+} = {}) {
+  const run = _run ?? ((file, args) => execFileSync(file, args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }));
+
   // D1's invariant: `buildSnapshot` NEVER sees a live forge port, only the
-  // cache. When no `vcs` is injected (the real CLI entry, always — the
-  // poller that fills a cache ships in PR 2), the server owns its own,
-  // permanently-empty one.
-  const forgeVcs = vcs ?? createForgeCache().port;
+  // cache. The server always owns a cache instance so the poller always has
+  // somewhere to write; when a caller injects `vcs` directly (tests, mostly),
+  // `buildSnapshot` reads THAT instead and the poller's writes into its own
+  // cache go unread — harmless, and it keeps PR 1's read-only-port tests
+  // untouched by PR 2's wiring.
+  const forgeCache = createForgeCache();
+  const forgeVcs = vcs ?? forgeCache.port;
+
+  // The ONE in-memory snapshot every route serves (D1 — "rejected: recompute
+  // per HTTP request"). Refreshed only by a completed poll or a debounced
+  // watch event, never by an HTTP request itself.
+  let current = null;
+  const clients = new Set();
+
+  function sendEvent(res, event, data) {
+    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  }
+
+  function broadcast(event, data) {
+    for (const client of clients) sendEvent(client, event, data);
+  }
+
+  function buildMeta() {
+    return { project, watcher: watcher.state(), poller: poller.state() };
+  }
+
+  async function recomputeCurrent() {
+    current = await buildSnapshot({ root, now: _now(), vcs: forgeVcs, project });
+    return current;
+  }
+
+  /**
+   * Recompute `current`, diff it against what was held before, and push one
+   * `section` frame per changed key (Q5/D6), one `refs` frame per worktree
+   * whose ref-tracking dir fired (Q3), then a `status` frame. Never throws:
+   * a recompute failure must not crash the server, the watcher's debounce
+   * loop, or the poller's tick loop that triggered it — it simply has
+   * nothing new to broadcast this cycle.
+   */
+  async function recomputeAndBroadcast({ causes = ['poll'], refWorktrees = [] } = {}) {
+    try {
+      const previous = current;
+      await recomputeCurrent();
+      for (const { name, section } of diffSections(previous, current)) {
+        broadcast('section', { name, section, generatedAt: current.generatedAt, cause: causes[0] ?? 'poll' });
+      }
+      for (const worktreePath of refWorktrees) {
+        let head = null;
+        try { head = run('git', ['-C', worktreePath, 'rev-parse', '--abbrev-ref', 'HEAD']).trim(); } catch { head = null; }
+        broadcast('refs', { worktree: worktreePath, head, at: _now().toISOString() });
+      }
+      broadcast('status', buildMeta());
+    } catch { /* a failed recompute leaves `current` at its last good value; nothing to broadcast */ }
+  }
+
+  const watcher = createWatcher({ root, gitCommonDir, _watch, _run: run, _readdir, _now, _setTimeout, _clearTimeout, onRecompute: recomputeAndBroadcast });
+  const poller = createPoller({
+    vcs: forgeSource ?? noForgeVcs, cache: forgeCache, project, interval, enabled: poll, _setTimeout, _clearTimeout, _now,
+    onTick: () => { recomputeAndBroadcast({ causes: ['poll'] }); },
+  });
 
   const httpServer = createHttpServer((req, res) => {
     handleRequest(req, res).catch((err) => sendInternalError(res, err));
   });
 
   async function handleRequest(req, res) {
-    if (!ALLOWED_METHODS.has(req.method)) {
+    const { pathname } = new URL(req.url, 'http://localhost');
+    if (POST_ONLY_PATHS.has(pathname)) {
+      if (req.method !== 'POST') { res.writeHead(405, { allow: 'POST' }); res.end(); return; }
+    } else if (!ALLOWED_METHODS.has(req.method)) {
       res.writeHead(405, { allow: 'GET, HEAD' });
       res.end();
       return;
     }
-    const { pathname } = new URL(req.url, 'http://localhost');
     if (pathname === '/') return serveIndex(res);
     if (pathname === '/api/snapshot') return serveSnapshot(res);
+    if (pathname === '/api/stream') return serveStream(req, res);
+    if (pathname === '/api/poll/pause') return servePollControl(res, poller.pause);
+    if (pathname === '/api/poll/resume') return servePollControl(res, poller.resume);
+    if (pathname === '/api/poll/once') return servePollControl(res, poller.once);
     res.writeHead(404, { 'content-type': 'text/plain' });
     res.end('not found');
   }
@@ -64,9 +160,23 @@ export function createUiServer({ root = process.cwd(), port = 3000, vcs = null, 
   }
 
   async function serveSnapshot(res) {
-    const snapshot = await buildSnapshot({ root, now: _now(), vcs: forgeVcs, project });
+    if (current === null) await recomputeCurrent();
     res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify(snapshot));
+    res.end(JSON.stringify(current));
+  }
+
+  async function serveStream(req, res) {
+    if (current === null) await recomputeCurrent();
+    res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });
+    clients.add(res);
+    req.on('close', () => clients.delete(res));
+    sendEvent(res, 'sync', { generatedAt: current.generatedAt, snapshot: current, meta: buildMeta() });
+  }
+
+  async function servePollControl(res, action) {
+    const state = await action();
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify(state));
   }
 
   function sendInternalError(res, err) {
@@ -80,9 +190,12 @@ export function createUiServer({ root = process.cwd(), port = 3000, vcs = null, 
     listen(overridePort = api.port) {
       return new Promise((resolve, reject) => {
         const onError = (err) => { httpServer.removeListener('listening', onListening); reject(err); };
-        const onListening = () => {
+        const onListening = async () => {
           httpServer.removeListener('error', onError);
           api.port = httpServer.address().port;
+          await recomputeCurrent();
+          watcher.start();
+          poller.start();
           resolve(api.port);
         };
         httpServer.once('error', onError);
@@ -91,6 +204,10 @@ export function createUiServer({ root = process.cwd(), port = 3000, vcs = null, 
       });
     },
     close() {
+      poller.close();
+      watcher.close();
+      for (const client of clients) { try { client.end(); } catch { /* best effort */ } }
+      clients.clear();
       return new Promise((resolve, reject) => {
         httpServer.close((err) => (err ? reject(err) : resolve()));
       });

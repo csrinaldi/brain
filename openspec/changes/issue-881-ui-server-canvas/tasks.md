@@ -184,7 +184,7 @@ or heartbeat route" scenario over the now-complete route table.
       round-robin), the body lane (`issueView`, cap 5 steady state plus up
       to 20 brand-new numbers in the tick they appear), pause/resume/once,
       and failure handling so T2a passes.
-- [ ] T3a. `brain/scripts/ui/server.test.mjs` (extend): failing SSE tests
+- [x] T3a. `brain/scripts/ui/server.test.mjs` (extend): failing SSE tests
       using the Q4 reader pattern (`AbortController`, `res.body.getReader()`,
       `TextDecoder`, ephemeral port) — initial connect gets the current
       state first (R881-2 S1: the first frame is `event: sync` carrying the
@@ -197,11 +197,11 @@ or heartbeat route" scenario over the now-complete route table.
       naming `graph` on the next tick); `server.close()` ends every open
       SSE response before closing the listener (no hang under
       `node --test`, D15/Q4).
-- [ ] T3b. `brain/scripts/ui/server.mjs`: implement `GET /api/stream` (the
+- [x] T3b. `brain/scripts/ui/server.mjs`: implement `GET /api/stream` (the
       SSE hub: `sync` first, then `section`/`refs`/`status` frames, no
       heartbeats, D6) wired to `watcher.mjs` and `poller.mjs`, and full
       `close()` teardown so T3a passes.
-- [ ] T4a. `brain/scripts/ui/server.test.mjs` (extend): failing tests for —
+- [x] T4a. `brain/scripts/ui/server.test.mjs` (extend): failing tests for —
       mutation methods rejected outside the poller controls (R881-5 S1,
       re-run over the now-complete route table including `/api/stream`);
       poller controls accept POST only (R881-5 S2: `POST /api/poll/pause`
@@ -210,7 +210,7 @@ or heartbeat route" scenario over the now-complete route table.
       `/resume` and `/once`); the read-only-port test re-run with the
       poller wired in — a full poll cycle plus every route completes with
       no write verb ever invoked (R881-5 S3 / A5, now covering the poller).
-- [ ] T4b. `brain/scripts/ui/server.mjs`: implement `POST
+- [x] T4b. `brain/scripts/ui/server.mjs`: implement `POST
       /api/poll/pause|resume|once`, extend the method check so exactly
       these three routes accept `POST` only (`Allow: POST`) and every other
       route accepts `GET`/`HEAD` only (`Allow: GET, HEAD`) so T4a passes.
@@ -222,7 +222,7 @@ or heartbeat route" scenario over the now-complete route table.
       60 s default.
 - [ ] T5b. `brain/scripts/ui/server.mjs`: implement the signal handlers and
       the `--interval`/`--no-poll` argv extensions so T5a passes.
-- [ ] T6. `brain/scripts/ui/server.test.mjs` (extend): guard test for
+- [x] T6. `brain/scripts/ui/server.test.mjs` (extend): guard test for
       R881-10 S3 — inspect the now-complete route table (`/`,
       `/api/snapshot`, `/api/stream`, `/api/poll/pause|resume|once`) and
       assert there is no MCP resource route and no heartbeat/agent-pulse

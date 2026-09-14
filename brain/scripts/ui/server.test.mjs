@@ -1,16 +1,66 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { buildSnapshot } from '../status/snapshot.mjs';
 import { makeSnapshotFixture as makeFixture } from '../__fixtures__/snapshot-tree.mjs';
 import { createForgeCache } from './forge-cache.mjs';
-import { createUiServer, parseArgs, main } from './server.mjs';
+import { createUiServer, parseArgs, main, KNOWN_ROUTES } from './server.mjs';
 
 const NOW = '2026-09-14T00:00:00Z';
 const now = () => new Date(NOW);
+
+/** A `fs.watch`-shaped spy: records every registration, fires listeners on demand. */
+function spyWatch() {
+  const calls = [];
+  const fn = (path, _opts, listener) => {
+    calls.push({ path, listener });
+    return { close() {} };
+  };
+  fn.calls = calls;
+  fn.fire = (path) => { const c = calls.find((entry) => entry.path === path); if (c) c.listener('change', null); };
+  return fn;
+}
+
+/** A controllable `setTimeout`/`clearTimeout` pair with exactly one pending timer at a time. */
+function fakeScheduler() {
+  let seq = 0;
+  const timers = new Map();
+  return {
+    setTimeout: (fn) => { const id = ++seq; timers.set(id, fn); return id; },
+    clearTimeout: (id) => { timers.delete(id); },
+    pending: () => timers.size,
+    runLatest: () => { const id = [...timers.keys()].at(-1); const fn = timers.get(id); timers.delete(id); return fn(); },
+    runNext: () => { const id = [...timers.keys()][0]; const fn = timers.get(id); timers.delete(id); return fn(); },
+  };
+}
+
+/** Every write verb throws — proves a composed port never gets written to. */
+function readOnlyWriteVerbs(reads) {
+  const port = {};
+  for (const w of ['mrCreate', 'mrAutoMerge', 'issueCreate', 'issueUpdate', 'prReviewComment', 'issueComment', 'labelAdd', 'labelRemove', 'branchProtect']) {
+    port[w] = async () => { throw new Error(`write verb ${w} called`); };
+  }
+  return Object.assign(port, reads);
+}
+
+/** Reads one `event: ...\ndata: ...\n\n` frame at a time off an SSE response body. */
+function frameReader(res) {
+  const reader = res.body.getReader();
+  const dec = new TextDecoder();
+  let buf = '';
+  const readFrame = async () => {
+    while (!buf.includes('\n\n')) buf += dec.decode((await reader.read()).value, { stream: true });
+    const frame = buf.slice(0, buf.indexOf('\n\n'));
+    buf = buf.slice(buf.indexOf('\n\n') + 2);
+    return frame;
+  };
+  readFrame.reader = reader;
+  return readFrame;
+}
 
 // ── R881-1 S1/S2: default port, static root, ephemeral port ────────────────
 
@@ -175,6 +225,223 @@ test('#881: main succeeds on a free (ephemeral) port and reports where it listen
   assert.notEqual(typeof result, 'number', 'success returns the started server, not an exit code');
   assert.match(messages.join('\n'), /brain:ui listening on http:\/\/127\.0\.0\.1:\d+/);
   await result.close();
+});
+
+// ── R881-2 S1/Q4: GET /api/stream — sync frame first ────────────────────────
+
+test('#881: R881-2 S1 — the first SSE frame is `sync`, carrying the whole current snapshot', async () => {
+  const root = makeFixture();
+  const cache = createForgeCache();
+  cache.setIssueList([]);
+  cache.setMrList([]);
+  const server = createUiServer({ root, vcs: cache.port, project: 'o/r', _now: now, poll: false });
+  await server.listen(0);
+  const ac = new AbortController();
+  try {
+    const res = await fetch(`http://127.0.0.1:${server.port}/api/stream`, { signal: ac.signal });
+    assert.equal(res.headers.get('content-type'), 'text/event-stream');
+    const readFrame = frameReader(res);
+    const frame = await readFrame();
+    assert.match(frame, /^event: sync\ndata: \{/);
+    const payload = JSON.parse(frame.slice('event: sync\ndata: '.length));
+    assert.equal(payload.snapshot.graph.ok, true);
+    assert.equal(payload.meta.project, 'o/r');
+    ac.abort();
+  } finally {
+    await server.close();
+  }
+});
+
+// ── R881-2 S2/A2: a committed-tier change reaches the client ────────────────
+
+test('#881: R881-2 S2/A2 — a committed-tier change (via the watcher) yields a `section` frame within the debounce, no reconnect', async () => {
+  const root = makeFixture();
+  const cache = createForgeCache();
+  cache.setIssueList([]);
+  cache.setMrList([]);
+  const scheduler = fakeScheduler();
+  const _watch = spyWatch();
+  const server = createUiServer({
+    root, vcs: cache.port, project: 'o/r', _now: now, poll: false,
+    _watch, _setTimeout: scheduler.setTimeout, _clearTimeout: scheduler.clearTimeout,
+  });
+  await server.listen(0);
+  const ac = new AbortController();
+  try {
+    const res = await fetch(`http://127.0.0.1:${server.port}/api/stream`, { signal: ac.signal });
+    const readFrame = frameReader(res);
+    await readFrame(); // sync
+
+    writeFileSync(join(root, 'openspec/changes/issue-1-a/tasks.md'), '- [x] done\n- [x] next one\n');
+    _watch.fire(join(root, 'openspec/changes/issue-1-a'));
+    scheduler.runLatest();
+
+    const frame = await readFrame();
+    assert.match(frame, /^event: section\ndata: \{"name":"changes"/);
+    ac.abort();
+  } finally {
+    await server.close();
+  }
+});
+
+// ── R881-2 S2 (refs): a ref-tracking watch yields a `refs` frame ───────────
+
+test('#881: R881-2 S2 (refs) — a ref-tracking watch (<git-common>/logs) yields a `refs` frame naming {worktree, head}', async () => {
+  const root = makeFixture();
+  const cache = createForgeCache();
+  cache.setIssueList([]);
+  cache.setMrList([]);
+  const scheduler = fakeScheduler();
+  const _watch = spyWatch();
+  const gitCommonDir = join(root, '.git'); // never touched on disk — `_watch` is a spy
+  const _run = (file, args) => {
+    if (args[0] === 'worktree') return `worktree ${root}\n`;
+    if (args.includes('rev-parse') && args.includes('--abbrev-ref')) return 'feat/example\n';
+    throw new Error(`unexpected git call: ${args.join(' ')}`);
+  };
+  const server = createUiServer({
+    root, vcs: cache.port, project: 'o/r', _now: now, poll: false,
+    gitCommonDir, _watch, _run, _setTimeout: scheduler.setTimeout, _clearTimeout: scheduler.clearTimeout,
+  });
+  await server.listen(0);
+  const ac = new AbortController();
+  try {
+    const res = await fetch(`http://127.0.0.1:${server.port}/api/stream`, { signal: ac.signal });
+    const readFrame = frameReader(res);
+    await readFrame(); // sync
+
+    _watch.fire(join(gitCommonDir, 'logs'));
+    scheduler.runLatest();
+
+    const frame = await readFrame();
+    assert.match(frame, /^event: refs\ndata: \{/);
+    const payload = JSON.parse(frame.slice('event: refs\ndata: '.length));
+    assert.equal(payload.worktree, root);
+    assert.equal(payload.head, 'feat/example');
+    ac.abort();
+  } finally {
+    await server.close();
+  }
+});
+
+// ── R881-2 S3: a forge change reaches the client ─────────────────────────────
+
+test('#881: R881-2 S3 — a forge change (via the poller) yields a `section` frame on the next tick', async () => {
+  const root = makeFixture();
+  const scheduler = fakeScheduler();
+  let issues = [{ number: 5, title: 'five', labels: [], assignees: [] }];
+  const forgeSource = {
+    issueList: async () => issues.map((i) => ({ ...i })),
+    mrList: async () => [],
+    issueView: async ({ number }) => ({ number, body: '' }),
+    prReviews: async () => [],
+  };
+  const server = createUiServer({
+    root, project: 'o/r', _now: now, forgeSource,
+    _setTimeout: scheduler.setTimeout, _clearTimeout: scheduler.clearTimeout,
+  });
+  await server.listen(0); // the cold-start tick runs immediately
+  const ac = new AbortController();
+  try {
+    const res = await fetch(`http://127.0.0.1:${server.port}/api/stream`, { signal: ac.signal });
+    const readFrame = frameReader(res);
+    await readFrame(); // sync
+
+    issues = [{ number: 5, title: 'five', labels: ['status:approved'], assignees: [] }]; // the label moves
+    assert.equal(scheduler.pending(), 1);
+    scheduler.runNext();
+
+    const frame = await readFrame();
+    assert.match(frame, /^event: section\ndata: \{"name":"graph"/);
+    ac.abort();
+  } finally {
+    await server.close();
+  }
+});
+
+// ── D15/Q4: server.close() ends every open SSE response ─────────────────────
+
+test('#881: D15/Q4 — server.close() ends every open SSE response before closing the listener, no hang under node --test', async () => {
+  const server = createUiServer({ root: makeFixture(), _now: now, poll: false });
+  await server.listen(0);
+  const res = await fetch(`http://127.0.0.1:${server.port}/api/stream`);
+  const readFrame = frameReader(res);
+  await readFrame(); // the connection is live
+  await server.close();
+  const { done } = await readFrame.reader.read();
+  assert.equal(done, true, 'the SSE response was ended by close(), not left hanging');
+});
+
+// ── R881-5 S1 (re-run) / R881-5 S2: the now-complete route table ────────────
+
+test('#881: R881-5 S1 (re-run) — mutation methods are rejected on every non-control route, including /api/stream', async () => {
+  const server = createUiServer({ root: makeFixture(), _now: now, poll: false });
+  await server.listen(0);
+  try {
+    const base = `http://127.0.0.1:${server.port}`;
+    for (const path of ['/', '/api/snapshot', '/api/stream']) {
+      for (const method of ['POST', 'PUT', 'PATCH', 'DELETE']) {
+        const res = await fetch(`${base}${path}`, { method });
+        assert.equal(res.status, 405, `${method} ${path}`);
+        assert.equal(res.headers.get('allow'), 'GET, HEAD', `${method} ${path}`);
+      }
+    }
+  } finally {
+    await server.close();
+  }
+});
+
+test('#881: R881-5 S2 — the three poll-control routes accept POST only, and POST mutates only in-process state', async () => {
+  const server = createUiServer({ root: makeFixture(), _now: now, poll: false });
+  await server.listen(0);
+  try {
+    const base = `http://127.0.0.1:${server.port}`;
+    for (const path of ['/api/poll/pause', '/api/poll/resume', '/api/poll/once']) {
+      for (const method of ['GET', 'PUT', 'PATCH', 'DELETE']) {
+        const res = await fetch(`${base}${path}`, { method });
+        assert.equal(res.status, 405, `${method} ${path}`);
+        assert.equal(res.headers.get('allow'), 'POST', `${method} ${path}`);
+      }
+    }
+    const pauseRes = await fetch(`${base}/api/poll/pause`, { method: 'POST' });
+    assert.equal(pauseRes.status, 200);
+    assert.equal(pauseRes.headers.get('content-type'), 'application/json');
+    assert.equal((await pauseRes.json()).paused, true);
+
+    const resumeRes = await fetch(`${base}/api/poll/resume`, { method: 'POST' });
+    assert.equal((await resumeRes.json()).paused, false);
+  } finally {
+    await server.close();
+  }
+});
+
+test('#881: R881-5 S3 / A5 (re-run) — with the poller wired in, a full poll cycle plus every route completes with no write verb ever invoked', async () => {
+  const root = makeFixture();
+  const callLog = [];
+  const forgeSource = readOnlyWriteVerbs({
+    issueList: async () => { callLog.push('issueList'); return []; },
+    mrList: async () => { callLog.push('mrList'); return []; },
+    issueView: async () => { callLog.push('issueView'); return {}; },
+    prReviews: async () => { callLog.push('prReviews'); return []; },
+  });
+  const server = createUiServer({ root, project: 'o/r', _now: now, forgeSource });
+  await server.listen(0); // the cold-start tick runs against the write-throwing port
+  try {
+    const base = `http://127.0.0.1:${server.port}`;
+    assert.equal((await fetch(`${base}/`)).status, 200);
+    assert.equal((await fetch(`${base}/api/snapshot`)).status, 200);
+    assert.equal((await fetch(`${base}/api/poll/once`, { method: 'POST' })).status, 200);
+    assert.ok(callLog.includes('issueList'), 'the poller actually ran against the composed port');
+  } finally {
+    await server.close();
+  }
+});
+
+// ── R881-10 S3: no MCP resource route, no heartbeat/agent-pulse endpoint ────
+
+test('#881: R881-10 S3 — the route table has no MCP resource route and no heartbeat/agent-pulse endpoint', () => {
+  assert.deepEqual(KNOWN_ROUTES, ['/', '/api/snapshot', '/api/stream', '/api/poll/pause', '/api/poll/resume', '/api/poll/once']);
+  assert.ok(!KNOWN_ROUTES.some((r) => /mcp|heartbeat|pulse/i.test(r)));
 });
 
 // ── package.json: brain:ui verb and engines (D8, D16) ───────────────────────
