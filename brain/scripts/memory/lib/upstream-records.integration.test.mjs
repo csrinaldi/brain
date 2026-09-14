@@ -83,7 +83,7 @@ test('issue #701: a record already merged to origin/main is not re-exported, and
   // `git fetch` a real pre-push/day-start would run.
   git(worktree, ['fetch', '-q', 'origin']);
 
-  // memory:share in the worktree re-materializes the SAME record (the bug):
+  // brain:memory:share in the worktree re-materializes the SAME record (the bug):
   // its own engram DB holds it too, and pre-#701 nothing scoped the export.
   const worktreeRecordsDir = join(worktree, '.memory', 'records');
   const accounting = await dualWriteRecords(worktree, {

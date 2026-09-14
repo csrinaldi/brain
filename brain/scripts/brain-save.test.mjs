@@ -1,7 +1,7 @@
 // brain-save.test.mjs — TDD tests for brain:save (REQ-S5-3)
 //
 // brain:save:
-//   1. Calls memory:share (materialises .memory/)
+//   1. Calls brain:memory:share (materialises .memory/)
 //   2. Detects new uncommitted .memory/ changes via git status --porcelain
 //   3. If none → exits 1 with prompt for session summary
 //   4. Commits .memory/ with message `chore(memory): sync .memory [brain:save]`
@@ -46,7 +46,7 @@ test('brain-save: new .memory/ changes exist → commits and exits 0', async () 
     `commit message should follow conventional commit: ${commits[0]}`);
 });
 
-test('brain-save: no .memory/ changes after memory:share → exits 1 with prompt', async () => {
+test('brain-save: no .memory/ changes after brain:memory:share → exits 1 with prompt', async () => {
   const { runSave } = await import('./brain-save.mjs');
 
   const result = await runSave(makeCtx({
@@ -59,7 +59,7 @@ test('brain-save: no .memory/ changes after memory:share → exits 1 with prompt
     `message should prompt for session summary: ${result.message}`);
 });
 
-test('brain-save: memory:share failure → exits 1 with error message', async () => {
+test('brain-save: brain:memory:share failure → exits 1 with error message', async () => {
   const { runSave } = await import('./brain-save.mjs');
 
   const result = await runSave(makeCtx({
@@ -67,7 +67,7 @@ test('brain-save: memory:share failure → exits 1 with error message', async ()
   }));
 
   assert.equal(result.exitCode, 1,
-    `expected exit 1 on memory:share failure, got ${result.exitCode}`);
+    `expected exit 1 on brain:memory:share failure, got ${result.exitCode}`);
   assert.ok(result.message.toLowerCase().includes('share') || result.message.toLowerCase().includes('memory'),
     `message should mention the failure: ${result.message}`);
 });

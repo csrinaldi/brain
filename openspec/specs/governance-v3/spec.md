@@ -985,7 +985,7 @@ MUST refuse instead of scanning under `DEFAULT_SECRET_PATTERNS`. Call sites:
 #### Scenario: A policy that cannot be read is not an empty policy
 
 - GIVEN `brain.config.json` is present at the scanned root but is not valid JSON
-- WHEN `memory:save` (either backend), `memory:collect`, or `lane-scrub` reads the
+- WHEN `brain:memory:save` (either backend), `brain:memory:collect`, or `lane-scrub` reads the
   secret-scan config
 - THEN that call site refuses instead of scanning under `DEFAULT_SECRET_PATTERNS`
 
@@ -1011,20 +1011,20 @@ today: `DEFAULT_SECRET_PATTERNS` apply, the allowlist is empty, nothing refuses.
 #### Scenario: An absent config is not an unreadable one
 
 - GIVEN no `brain.config.json` exists at the scanned root
-- WHEN `memory:save`, `memory:collect`, `memory:ship`, or `lane-scrub` runs
+- WHEN `brain:memory:save`, `brain:memory:collect`, `brain:memory:ship`, or `lane-scrub` runs
 - THEN all four proceed on the default pattern set and none refuses
 - AND this is `lane-scrub`'s first assertion of this case — it has zero coverage today
 
 ### Requirement: REQ-SCAN-4 — The Write Operations Refuse and Say So
 
-`memory:save` (both backends), `memory:collect`, and `memory:ship` MUST exit non-zero
+`brain:memory:save` (both backends), `brain:memory:collect`, and `brain:memory:ship` MUST exit non-zero
 when their secret-scan config read fails per REQ-SCAN-1, through their existing error
 handling, naming the unreadable file.
 
 #### Scenario: The write ops refuse and say so
 
 - GIVEN `brain.config.json` is present but unparseable
-- WHEN `memory:save`, `memory:collect`, or `memory:ship` runs
+- WHEN `brain:memory:save`, `brain:memory:collect`, or `brain:memory:ship` runs
 - THEN each exits 1 through its existing catch, naming the file, and no record or lane
   commit is written
 

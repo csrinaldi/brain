@@ -1,4 +1,4 @@
-// cli.ship.test.mjs — `memory:ship` through the real CLI (#888), against a
+// cli.ship.test.mjs — `brain:memory:ship` through the real CLI (#888), against a
 // fixture repo under BRAIN_MEMORY_TEST_ROOT, mirroring cli.collect.test.mjs's
 // real-CLI pattern.
 //
@@ -134,7 +134,7 @@ function runCli(root, ...args) {
   });
 }
 
-test('memory:ship is a valid op, dispatched before backend selection', () => {
+test('brain:memory:ship is a valid op, dispatched before backend selection', () => {
   const { mainDir } = fixtureRepo({ withCandidate: false });
   const run = runCli(mainDir);
   assert.equal(run.status, 0, run.stderr);
@@ -584,7 +584,7 @@ test('L2 (re-review): a non-JSON BRAIN_VCS_TEST_SCRIPT fails with a path-only me
 // day:start invoke `ship`, never `collect` by hand) had ZERO coverage;
 // deleting the print block left the whole suite green. Mirrors
 // cli.collect.test.mjs's own equivalent test for the "collect" op.
-test('#921 — memory:ship prints memory.collect.worktreeSkipped on stderr with count + path + reason when a worktree could not be inspected', () => {
+test('#921 — brain:memory:ship prints memory.collect.worktreeSkipped on stderr with count + path + reason when a worktree could not be inspected', () => {
   const { mainDir } = fixtureRepo({ withCandidate: false });
   const wtDir = join(dirname(mainDir), 'wt-unreadable');
   git(mainDir, 'worktree', 'add', '-q', wtDir, '-b', 'lane-unreadable');
@@ -598,7 +598,7 @@ test('#921 — memory:ship prints memory.collect.worktreeSkipped on stderr with 
   assert.match(run.stderr, /not a git repository/i);
 });
 
-test('memory:ship resolves from package.json, beside the other memory:* scripts', () => {
+test('brain:memory:ship resolves from package.json, beside the other memory:* scripts', () => {
   const pkg = JSON.parse(readFileSync(join(HERE, '../../../package.json'), 'utf8'));
   assert.equal(pkg.scripts['memory:ship'], 'node ./brain/scripts/memory/cli.mjs ship');
 });

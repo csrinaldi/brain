@@ -213,8 +213,8 @@ test('#637 CLI on a broken store: states the record survived, names the file, an
   assert.equal(r.status, 1, 'the run did not fully succeed, so the exit code must say so');
   assert.match(r.stderr, /record WAS written/, 'the fact the old message denied');
   assert.match(r.stderr, RECORD_FILE_IN_TEXT_RE, 'and WHERE, so it can be found');
-  assert.match(r.stderr, /memory:reindex/, 'and what to run instead');
-  assert.match(r.stderr, /Do NOT run memory:save again/, 'and the action that would make it worse');
+  assert.match(r.stderr, /npm run brain:memory:reindex/, 'and what to run instead');
+  assert.match(r.stderr, /Do NOT run brain:memory:save again/, 'and the action that would make it worse');
   assert.match(r.stderr, /id mismatch at 2026-07\.jsonl:1/, "rebuildIndex's own diagnosis must survive");
   assert.doesNotMatch(
     r.stderr,

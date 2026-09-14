@@ -311,7 +311,7 @@ export function renderMarkdown({
         `  - ${memCoverage.total} indexed + ${dup.lines} repeated = ${memCoverage.total + dup.lines} `
         + `record line(s) read; the ${dup.lines} repeats cover ${dup.ids} id(s) and are collapsed into `
         + 'the count above. Normal for `merge=union` (ADR-0017, REQ-MF-3) — run '
-        + '`npm run memory:reindex` for the per-id locations.',
+        + '`npm run brain:memory:reindex` for the per-id locations.',
       );
     }
   }
@@ -337,7 +337,7 @@ export function renderJson({ rows, memGate, memCoverage }) {
   // and `memoryRecordsCoverage` is denormalized onto every row, so passing it
   // through whole was measured at 6871 bytes per row against 111 without — 62×,
   // and ~79 KiB of byte-identical repetition on a 12-period run. The locations
-  // have a home already: `npm run memory:reindex` prints them once.
+  // have a home already: `npm run brain:memory:reindex` prints them once.
   //
   // Projected explicitly rather than by deleting a key, so a field added to
   // `duplicates` later cannot silently start bloating this output again.
