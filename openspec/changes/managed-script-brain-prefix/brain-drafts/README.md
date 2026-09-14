@@ -18,25 +18,30 @@ Commit after each promotion — every one of them stages `AGENTS.md` or `brain/H
 7. `anti-patterns-readme.draft.md`
 8. `adr-0002-amendment-3.draft.md`, `adr-0011-amendment-1.draft.md`, `adr-0014-amendment-1.draft.md`,
    `adr-0017-amendment-3.draft.md`, `adr-0034-amendment-1.draft.md` — each writes a `brain/HOME.md`
-   marker, and `HOME.md` is a `SOURCE_DOCS` member, so each regenerates `AGENTS.md`. **Blocked on the
-   ruling gap below.**
+   marker, and `HOME.md` is a `SOURCE_DOCS` member, so each regenerates `AGENTS.md`.
 9. The two hand edits (R8 checklist).
 
 Every fenced contract opens with the FORMAT tag `brain-amendment/1` — never an amendment number (#931).
 
-## Ruling gap — decide before step 8
+## Ruling gap — resolved 2026-09-14 (option A)
 
 `parseAmendmentDraft` refuses an ADR draft with no `amend-find`/`amend-replace` pair
-(`brain/scripts/lib/amendment-draft.mjs:171-177`, §1c act 2). Ruling R6 says the ADR bodies stay
-untouched. The five ADR drafts are written to R6, so `brain:promote` refuses them as they stand — loudly,
-before writing anything. Choose one:
+(`brain/scripts/lib/amendment-draft.mjs:171-177`, §1c act 2). Ruling R6, as originally ratified, said
+the ADR bodies stay untouched, so the five ADR drafts (written to R6) were refused by `brain:promote` as
+they stood — loudly, before writing anything. The maintainer amended R6 on 2026-09-14 (issue #961
+comment; engram `sdd/managed-script-brain-prefix/ruling-r6-amendment`):
 
-- **A.** Rule one §1c annotation per ADR. In each ADR draft, change the two `text` fences under
-  "Notes for the promoter" to `amend-find` and `amend-replace`; the anchors are verified.
-- **B.** Keep R6 literal: apply act 1 (Status line), act 3 (append the section between `body:` and
-  `body-end:`, stamping `**Signed**`), act 4 (the `brain/HOME.md` marker, using `home-summary:`) by hand,
-  then `AGENT_PLATFORM=antigravity npm run brain:env:init` to regenerate `AGENTS.md`. Off the verb path,
-  you are the enforcement (`consolidation-protocol.md` §1c).
+- **Option A, chosen.** Every ADR line that names a bare `memory:*` script is annotated in place —
+  one `amend-find`/`amend-replace` pair per line, verified against this ADR on this branch (`assessEdit`
+  reports `free = 1`), the historical name stays visible, and the appended signed amendment with its
+  rename table stays too. `brain:promote` applies the whole §1c cascade (Status line, in-place edits, the
+  signed section, the `brain/HOME.md` marker).
+- **Option B, rejected.** Applying the signed sections by hand without the verb keeps R6's original
+  wording but breaks §1c act 2 and gives up the guarantees the tool exists to provide.
+
+Each draft's own "Notes for the promoter" section carries its full set of `amend-find`/`amend-replace`
+pairs. `brain:memory:ship` (already correctly prefixed at `adr-0002…:86` and `adr-0034…:136,143`) is
+never annotated — doing so would double-prefix it.
 
 ## R8 checklist — `.mjs` files `brain:promote` cannot take
 

@@ -6,10 +6,11 @@
 > npm run brain:promote -- openspec/changes/managed-script-brain-prefix/brain-drafts/adr-0002-amendment-3.draft.md
 > ```
 >
-> **As written, the verb REFUSES this draft** (`amendment-draft.mjs:171-177`: an ADR amendment must declare
-> at least one `amend-find`/`amend-replace` pair). Ruling R6 says the ADR body stays untouched. Resolve the
-> ruling gap in `README.md` first: option A converts the two `text` blocks under "Notes for the promoter" into
-> an edit pair; option B applies acts 1, 3 and 4 by hand from this draft.
+> **Ruling gap resolved 2026-09-14 — R6 amended (option A).** Every ADR line naming a bare `memory:*`
+> script is annotated in place, one `amend-find`/`amend-replace` pair per line, per
+> `consolidation-protocol.md` §1c act 2; the appended signed amendment below still carries the full
+> rename table. See `README.md` and the maintainer ruling (issue #961 comment, 2026-09-14; engram
+> `sdd/managed-script-brain-prefix/ruling-r6-amendment`).
 
 ```brain-amendment/1
 target: brain/project/decisions/adr-0002-memoria-git-based-dos-capas.md
@@ -51,17 +52,66 @@ those aliases are never installed into a consumer.
 
 ### Notes for the promoter
 
-Option A (only if the maintainer rules it — it adds one §1c act-2 annotation, which R6 as ratified does
-not). Change the first fence tag below to `amend-find` and the second to `amend-replace`. The anchor is
-the only line of the target naming `memory:index` (line 30), so it occurs exactly once; it is a prefix
-of its replacement (k = 1), which `assessEdit` accounts for.
+Every line of the Decision, the Note and Amendment 2 above that names a bare `memory:*` script gets one
+`amend-find`/`amend-replace` pair — seven anchors, three scripts (`pull`, `index`, `share`; `memory:import`
+is not a script and is left alone). Each anchor was verified against this ADR on this branch with
+`assessEdit`: it occurs exactly once (`free = 1`), and none collides with `brain:memory:ship`, already
+correctly prefixed at line 86 — left untouched, since annotating it would double-prefix it.
 
-```text
+```amend-find
+- `memory:pull` → churn-resilient sync:
+```
+
+```amend-replace
+- `memory:pull` (renamed `brain:memory:pull`; see Amendment 3) → churn-resilient sync:
+```
+
+```amend-find
 - `memory:index` → reprojects the durable `brain/` into the active backend.
 ```
 
-```text
-- `memory:index` → reprojects the durable `brain/` into the active backend. **[Amended by Amendment 3 (#961) — the memory scripts this flow names are now `brain:memory:*`]**
+```amend-replace
+- `memory:index` (renamed `brain:memory:index`; see Amendment 3) → reprojects the durable `brain/` into the active backend.
+```
+
+```amend-find
+- `memory:share` → materializes the active backend to `.memory/` before push.
+```
+
+```amend-replace
+- `memory:share` (renamed `brain:memory:share`; see Amendment 3) → materializes the active backend to `.memory/` before push.
+```
+
+```amend-find
+The `pre-push` hook runs `memory:share`;
+```
+
+```amend-replace
+The `pre-push` hook runs `memory:share` (renamed `brain:memory:share`; see Amendment 3);
+```
+
+```amend-find
+rewrites the manifest on every `memory:share`, which blocks a raw `git pull`
+```
+
+```amend-replace
+rewrites the manifest on every `memory:share` (renamed `brain:memory:share`; see Amendment 3), which blocks a raw `git pull`
+```
+
+```amend-find
+the churn-resilient `memory:pull` (restore → pull → import)
+```
+
+```amend-replace
+the churn-resilient `memory:pull` (renamed `brain:memory:pull`; see Amendment 3) (restore → pull → import)
+```
+
+```amend-find
+The canonical flow's `memory:share` and `pre-push` bullets
+```
+
+```amend-replace
+The canonical flow's `memory:share` (renamed `brain:memory:share`; see Amendment 3) and `pre-push` bullets
 ```
 
 Promote after the seven `brain/core` drafts in this folder; see `README.md` for the order.

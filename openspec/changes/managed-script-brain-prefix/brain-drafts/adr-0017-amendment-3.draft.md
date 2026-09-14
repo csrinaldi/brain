@@ -6,8 +6,10 @@
 > npm run brain:promote -- openspec/changes/managed-script-brain-prefix/brain-drafts/adr-0017-amendment-3.draft.md
 > ```
 >
-> **As written, the verb REFUSES this draft** (`amendment-draft.mjs:171-177`). Resolve the ruling gap in
-> `README.md` first (option A: convert the `text` blocks below into an edit pair; option B: acts 1, 3, 4 by hand).
+> **Ruling gap resolved 2026-09-14 — R6 amended (option A).** Every ADR line naming a bare `memory:*`
+> script is annotated in place, one `amend-find`/`amend-replace` pair per line, per
+> `consolidation-protocol.md` §1c act 2. See `README.md` and the maintainer ruling (issue #961 comment,
+> 2026-09-14; engram `sdd/managed-script-brain-prefix/ruling-r6-amendment`).
 >
 > The older `issue-635…/adr-0017-amendment-1.draft.md` and `issue-677…/adr-0017-amendment-2.draft.md` are
 > promoted; once this lands, re-running either is refused at act 1 (the target stands at Amendment 3).
@@ -49,13 +51,95 @@ name as a byte-identical alias, never installed into a consumer.
 
 ### Notes for the promoter
 
-Option A only if ruled. The anchor is the only line of the target ending the index-conflict rule (line 182);
-it occurs exactly once and is a prefix of its replacement (k = 1).
+This ADR names five scripts (`save`, `share`, `reindex`, `resolve-index`, `split-records`) across eleven
+lines (two of them — the index-churn-discipline line and the Amendment 1 quote — each name two scripts
+side by side, so they share one combined anchor). Every anchor was verified against this ADR on this
+branch with `assessEdit`: it occurs exactly once (`free = 1`).
 
-```text
+```amend-find
+it runs `memory:split-records`, which refuses any line it cannot read
+```
+
+```amend-replace
+it runs `memory:split-records` (renamed `brain:memory:split-records`; see Amendment 3), which refuses any line it cannot read
+```
+
+```amend-find
+via a future `memory:reindex`.
+```
+
+```amend-replace
+via a future `memory:reindex` (renamed `brain:memory:reindex`; see Amendment 3).
+```
+
+```amend-find
 running `memory:reindex`**, never by hand- or union-merging it.
 ```
 
-```text
-running `memory:reindex`**, never by hand- or union-merging it. **[Amended by Amendment 3 (#961) — the memory scripts this ADR names are now `brain:memory:*`]**
+```amend-replace
+running `memory:reindex` (renamed `brain:memory:reindex`; see Amendment 3)**, never by hand- or union-merging it.
+```
+
+```amend-find
+`memory:share` / `memory:reindex` **MUST NOT produce whole-file churn in `index.jsonl`**
+```
+
+```amend-replace
+`memory:share` / `memory:reindex` **MUST NOT produce whole-file churn in `index.jsonl`** (renamed `brain:memory:share` / `brain:memory:reindex`; see Amendment 3)
+```
+
+```amend-find
+the entire manifest each `memory:share` and blocked a raw
+```
+
+```amend-replace
+the entire manifest each `memory:share` (renamed `brain:memory:share`; see Amendment 3) and blocked a raw
+```
+
+```amend-find
+`memory:resolve-index`, and the answer for `records/` is the layout, not a driver.)
+```
+
+```amend-replace
+`memory:resolve-index` (renamed `brain:memory:resolve-index`; see Amendment 3), and the answer for `records/` is the layout, not a driver.)
+```
+
+```amend-find
+has not run `memory:split-records` still carries the month log
+```
+
+```amend-replace
+has not run `memory:split-records` (renamed `brain:memory:split-records`; see Amendment 3) still carries the month log
+```
+
+```amend-find
+The record said `memory:share` / `memory:reindex`
+```
+
+```amend-replace
+The record said `memory:share` / `memory:reindex` (renamed `brain:memory:share` / `brain:memory:reindex`; see Amendment 3)
+```
+
+```amend-find
+`memory:save` appends one line to `records/<yyyy-mm>.jsonl`;
+```
+
+```amend-replace
+`memory:save` (renamed `brain:memory:save`; see Amendment 3) appends one line to `records/<yyyy-mm>.jsonl`;
+```
+
+```amend-find
+`memory:split-records` performs the migration: report-only unless `--apply`,
+```
+
+```amend-replace
+`memory:split-records` (renamed `brain:memory:split-records`; see Amendment 3) performs the migration: report-only unless `--apply`,
+```
+
+```amend-find
+loses a pointer that `memory:share` rebuilds, not a durable
+```
+
+```amend-replace
+loses a pointer that `memory:share` (renamed `brain:memory:share`; see Amendment 3) rebuilds, not a durable
 ```

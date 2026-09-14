@@ -6,8 +6,10 @@
 > npm run brain:promote -- openspec/changes/managed-script-brain-prefix/brain-drafts/adr-0011-amendment-1.draft.md
 > ```
 >
-> **As written, the verb REFUSES this draft** (`amendment-draft.mjs:171-177`). Resolve the ruling gap in
-> `README.md` first (option A: convert the `text` blocks below into an edit pair; option B: acts 1, 3, 4 by hand).
+> **Ruling gap resolved 2026-09-14 — R6 amended (option A).** The one line naming a bare `memory:*`
+> script is annotated in place via one `amend-find`/`amend-replace` pair, per `consolidation-protocol.md`
+> §1c act 2. See `README.md` and the maintainer ruling (issue #961 comment, 2026-09-14; engram
+> `sdd/managed-script-brain-prefix/ruling-r6-amendment`).
 
 ```brain-amendment/1
 target: brain/project/decisions/adr-0011-feature-scoped-working-memory.md
@@ -42,13 +44,13 @@ name as a byte-identical alias, never installed into a consumer.
 
 ### Notes for the promoter
 
-Option A only if ruled. The anchor names the only occurrence of `memory:share` in the target (line 37);
-it is a prefix of its replacement (k = 1).
+The anchor names the only occurrence of `memory:share` in the target (line 37), verified with `assessEdit`
+(`free = 1`).
 
-```text
+```amend-find
 are not materialized by `memory:share`.
 ```
 
-```text
-are not materialized by `memory:share`. **[Amended by Amendment 1 (#961) — now `brain:memory:share`]**
+```amend-replace
+are not materialized by `memory:share` (renamed `brain:memory:share`; see Amendment 1).
 ```

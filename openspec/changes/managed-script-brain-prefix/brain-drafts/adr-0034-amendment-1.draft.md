@@ -6,8 +6,10 @@
 > npm run brain:promote -- openspec/changes/managed-script-brain-prefix/brain-drafts/adr-0034-amendment-1.draft.md
 > ```
 >
-> **As written, the verb REFUSES this draft** (`amendment-draft.mjs:171-177`). Resolve the ruling gap in
-> `README.md` first (option A: convert the `text` blocks below into an edit pair; option B: acts 1, 3, 4 by hand).
+> **Ruling gap resolved 2026-09-14 — R6 amended (option A).** Every ADR line naming a bare `memory:*`
+> script is annotated in place, one `amend-find`/`amend-replace` pair per line, per
+> `consolidation-protocol.md` §1c act 2. See `README.md` and the maintainer ruling (issue #961 comment,
+> 2026-09-14; engram `sdd/managed-script-brain-prefix/ruling-r6-amendment`).
 
 ```brain-amendment/1
 target: brain/project/decisions/adr-0034-memory-travels-on-its-own-lane.md
@@ -45,13 +47,83 @@ brain's own `package.json` keeps each bare name as a byte-identical alias, never
 
 ### Notes for the promoter
 
-Option A only if ruled. The anchor (line 13) occurs exactly once in the target — the baseline figures
-reappear on line 185 in a different form — and it is a prefix of its replacement (k = 1).
+This ADR names three scripts (`save`, `share`, `audit`) across nine lines. `brain:memory:ship` at
+lines 136 and 143 already carries the correct prefix (L5's trigger) and is left untouched — annotating
+it would double-prefix it. Every anchor below was verified against this ADR on this branch with
+`assessEdit`: it occurs exactly once (`free = 1`).
 
-```text
-2026-08-01): **p50 21.6 h, p90 399.7 h** learn→main.
+```amend-find
+(`memory:save`),
 ```
 
-```text
-2026-08-01): **p50 21.6 h, p90 399.7 h** learn→main. **[Amended by Amendment 1 (#961) — the memory scripts this ADR names are now `brain:memory:*`]**
+```amend-replace
+(`memory:save` (renamed `brain:memory:save`; see Amendment 1)),
+```
+
+```amend-find
+`memory:share` materializes it into `.memory/records/` before
+```
+
+```amend-replace
+`memory:share` (renamed `brain:memory:share`; see Amendment 1) materializes it into `.memory/records/` before
+```
+
+```amend-find
+`memory:audit`'s baseline on `main @ 96cd30c8`
+```
+
+```amend-replace
+`memory:audit` (renamed `brain:memory:audit`; see Amendment 1)'s baseline on `main @ 96cd30c8`
+```
+
+```amend-find
+and the next `memory:share`
+on whatever PR touches memory refreshes the committed copy.
+```
+
+```amend-replace
+and the next `memory:share` (renamed `brain:memory:share`; see Amendment 1)
+on whatever PR touches memory refreshes the committed copy.
+```
+
+```amend-find
+captured with `memory:share`
+```
+
+```amend-replace
+captured with `memory:share` (renamed `brain:memory:share`; see Amendment 1)
+```
+
+```amend-find
+captured as a record (`memory:save
+--issue N`)
+```
+
+```amend-replace
+captured as a record (`memory:save
+--issue N`) (renamed `brain:memory:save`; see Amendment 1)
+```
+
+```amend-find
+(record-first: `memory:save` writes a record before any backend, under
+```
+
+```amend-replace
+(record-first: `memory:save` (renamed `brain:memory:save`; see Amendment 1) writes a record before any backend, under
+```
+
+```amend-find
+`memory:audit` MUST report, at `lite`,
+```
+
+```amend-replace
+`memory:audit` (renamed `brain:memory:audit`; see Amendment 1) MUST report, at `lite`,
+```
+
+```amend-find
+records between a lane merge and the next `memory:share`.
+```
+
+```amend-replace
+records between a lane merge and the next `memory:share` (renamed `brain:memory:share`; see Amendment 1).
 ```
