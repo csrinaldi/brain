@@ -298,3 +298,54 @@ the async handle-error path from `94fc6788` re-enables retry too). RED: a
 GREEN after the fix. Mutation check: restoring the unconditional `set()` on
 watchedWorktrees turned exactly this test red (9/10), reverted. Commit
 `f253e5ca`.
+
+## Second cold review of PR #971 (head 342e46cc, 2026-09-14) — REVISE → fixed
+
+`judgment:cold-1` (blocker, `poller.mjs:122`): `const reviewTargets =
+previousIssues === null ? prNumbers : pickReviewTargets(prNumbers)` bypassed
+the review-lane cap on the cold-start tick — with 50 open PRs, `prReviews`
+was called 50 times, not `min(50,10)=10`. The header comment
+(`poller.mjs:6-8`) promises "every tick, capped at 10 PRs" with no
+cold-start exception for the review lane, unlike the body lane, which IS
+documented uncapped on cold start (`poller.mjs:9-11`). The existing
+steady-tick budget test uses `PR_COUNT=3`, under the cap, so it could not
+distinguish capped from uncapped. RED: new test
+`judgment:cold-1 — the review lane is capped at REVIEW_CAP on the very
+first (cold-start) tick...` (`poller.test.mjs`) with 50 PRs asserted 10
+`prReviews` calls on the cold tick — got 50. Fixed by always routing
+through `pickReviewTargets()` (it already no-ops when `P <= REVIEW_CAP`,
+so small forges are unaffected). GREEN after the fix, plus a round-robin
+assertion that all 50 PRs are read at least once within 5 consecutive
+ticks. Mutation check: restoring the ternary turned exactly this one test
+red (7 pass / 1 fail), reverted. Also corrected `design.md`'s cold-start
+budget row (`1 + I + 1 + P` → `2 + min(P,10) + I`) — same numeric total
+(95) for this repo's `I=90`/`P=3` example, since `P=3` is under the cap.
+Commit `41ab8729`.
+
+`judgment:cold-2` (correction, `server.mjs:195`): `listen()`'s
+`onListening` callback ran `await recomputeCurrent()` with no try/catch and
+no `.catch()` — the only unprotected call site into `buildSnapshot`
+(`handleRequest`'s `.catch` and `recomputeAndBroadcast`'s try/catch already
+cover the others). A throw there became an unhandled rejection: `listen()`'s
+outer `Promise` never settled and the `httpServer` stayed bound to the port
+forever. Added the `_recomputeCurrent` seam to `createUiServer` (default:
+the real `buildSnapshot({ root, now: _now(), vcs: forgeVcs, project })`,
+reusing the existing `recomputeCurrent()` wrapper every call site already
+goes through) and forwarded it through `main()`'s `deps` the same way
+`deps.vcs`/`deps.forgeSource` already are. RED: two new tests —
+`judgment:cold-2 — a throwing startup recompute rejects listen()...`
+(direct on `server.listen()`, `failureType: unhandledRejection` before the
+fix) and `judgment:cold-2 — main() exits 2 with the message...` (through
+the CLI). Fixed by wrapping the startup recompute in try/catch: on
+failure, `httpServer.close()` first (releasing the port), then reject
+`listen()`'s promise with the original error; `main()` now treats any
+`listen()` rejection the same exit-code class as `EADDRINUSE` (D15's own
+framing) instead of letting the error escape uncaught. GREEN after the
+fix, including a check that a second, independent server can bind the
+exact port number the failed server had been holding. Mutation check:
+removing the try/catch turned exactly these two tests red (27 pass / 2
+fail), with the file-level run itself timing out from the same
+leaked-listener symptom the finding describes — reverted. Commit
+`28647280`.
+
+`brain:repo:check` green on every commit; tree clean after each.
