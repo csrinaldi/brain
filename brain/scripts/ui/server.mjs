@@ -57,7 +57,7 @@ const noForgeVcs = {
  *   root?: string, port?: number, vcs?: object|null, project?: string|null, _now?: () => Date,
  *   forgeSource?: object|null, interval?: number, poll?: boolean,
  *   gitCommonDir?: string|null, _watch?: Function, _run?: Function, _readdir?: Function,
- *   _setTimeout?: Function, _clearTimeout?: Function,
+ *   _setTimeout?: Function, _clearTimeout?: Function, _recomputeCurrent?: () => Promise<object>,
  * }} opts
  */
 export function createUiServer({
@@ -65,6 +65,7 @@ export function createUiServer({
   forgeSource = null, interval = 60000, poll = true,
   gitCommonDir = null, _watch, _run, _readdir,
   _setTimeout = setTimeout, _clearTimeout = clearTimeout,
+  _recomputeCurrent = null,
 } = {}) {
   const run = _run ?? ((file, args) => execFileSync(file, args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }));
 
@@ -95,8 +96,17 @@ export function createUiServer({
     return { project, watcher: watcher.state(), poller: poller.state() };
   }
 
+  // `_recomputeCurrent` is a test-only seam (default: the real recompute
+  // below) — it lets a test force `listen()`'s startup recompute to throw
+  // without reaching into `buildSnapshot` itself. Every caller in this
+  // module goes through the same `recomputeCurrent()` wrapper, so the seam
+  // covers the startup path, `serveSnapshot`, `serveStream`, and
+  // `recomputeAndBroadcast` alike — only the startup path (`listen()`) is
+  // unprotected against a throw, which is what judgment:cold-2 found.
+  const computeSnapshot = _recomputeCurrent ?? (() => buildSnapshot({ root, now: _now(), vcs: forgeVcs, project }));
+
   async function recomputeCurrent() {
-    current = await buildSnapshot({ root, now: _now(), vcs: forgeVcs, project });
+    current = await computeSnapshot();
     return current;
   }
 
@@ -193,7 +203,19 @@ export function createUiServer({
         const onListening = async () => {
           httpServer.removeListener('error', onError);
           api.port = httpServer.address().port;
-          await recomputeCurrent();
+          // Every other recompute call site is protected (`handleRequest`'s
+          // `.catch`, `recomputeAndBroadcast`'s try/catch); this startup call
+          // was not — an uncaught throw here became an unhandled rejection
+          // and left `listen()`'s promise settled never, hanging the caller
+          // while the httpServer stayed bound. Fail loudly instead: close
+          // the listener so the port is released, then reject with the
+          // original error.
+          try {
+            await recomputeCurrent();
+          } catch (err) {
+            httpServer.close(() => reject(err));
+            return;
+          }
           watcher.start();
           poller.start();
           resolve(api.port);
@@ -265,15 +287,21 @@ export async function main(argv = [], deps = {}) {
   const server = createUiServer({
     root: parsed.root, vcs: deps.vcs ?? null, project: deps.project ?? null,
     forgeSource: deps.forgeSource ?? null, interval: parsed.interval, poll: parsed.poll,
+    _recomputeCurrent: deps._recomputeCurrent ?? null,
   });
   try {
     await server.listen(parsed.port);
   } catch (err) {
+    // EADDRINUSE and a throwing startup recompute are the same class of
+    // failure (D15): the operator gave this verb something it cannot use,
+    // right now, on this host — both exit 2 with the message, never an
+    // uncaught throw out of `main()`.
     if (err?.code === 'EADDRINUSE') {
       error(`✗ port ${parsed.port} is already in use`);
-      return 2;
+    } else {
+      error(`✗ ${err?.message ?? err}`);
     }
-    throw err;
+    return 2;
   }
   say(`brain:ui listening on http://127.0.0.1:${server.port}`);
 

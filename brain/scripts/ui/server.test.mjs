@@ -267,6 +267,53 @@ test('#881: EADDRINUSE prints "port <n> is already in use" and exits 2 (D15 — 
   }
 });
 
+// ── judgment:cold-2: a throwing startup recompute must reject listen(), not hang ─
+//
+// `listen()`'s `onListening` callback runs `await recomputeCurrent()` with no
+// try/catch and no `.catch()`. If `buildSnapshot()` ever threw there, the
+// exception would become an unhandled rejection and the outer `new Promise`
+// in `listen()` would never resolve or reject — the caller hangs forever.
+// Every other call site IS protected (`handleRequest`'s `.catch`,
+// `recomputeAndBroadcast`'s try/catch). The `_recomputeCurrent` seam lets a
+// test force that throw without reaching into `buildSnapshot` itself; it
+// defaults to the real recompute (`buildSnapshot({ root, now: _now(), vcs:
+// forgeVcs, project })`) for every other test in this file.
+//
+// A short `timeout` turns a regression back into a HANG (this test itself
+// would time out and fail, not the process locking up silently) instead of a
+// clean assertion failure — RED for this test must be a failure either way.
+
+test('#881: judgment:cold-2 — a throwing startup recompute rejects listen() and releases the port instead of hanging', { timeout: 3000 }, async () => {
+  const root = makeFixture();
+  const boom = new Error('boom: startup recompute failed');
+  const server = createUiServer({ root, _now: now, _recomputeCurrent: async () => { throw boom; } });
+
+  await assert.rejects(server.listen(0), /boom: startup recompute failed/);
+  const failedPort = server.port;
+  assert.ok(Number.isInteger(failedPort) && failedPort > 0, 'the port was assigned before the recompute failed');
+
+  // The port must be released, not held by a half-started server: a second,
+  // independent server can bind the EXACT same port number right after.
+  const second = createUiServer({ root, _now: now });
+  await second.listen(failedPort);
+  try {
+    assert.equal(second.port, failedPort);
+  } finally {
+    await second.close();
+  }
+});
+
+test('#881: judgment:cold-2 — main() exits 2 with the message when listen() rejects for a reason other than EADDRINUSE (D15\'s own "same exit-code class" convention)', async () => {
+  const root = makeFixture();
+  const errors = [];
+  const code = await main(['--port', '0', '--root', root], {
+    say: () => {}, error: (m) => errors.push(m),
+    _recomputeCurrent: async () => { throw new Error('boom: startup recompute failed'); },
+  });
+  assert.equal(code, 2);
+  assert.match(errors.join('\n'), /boom: startup recompute failed/);
+});
+
 test('#881: main succeeds on a free (ephemeral) port and reports where it listens', async () => {
   const messages = [];
   const result = await main(['--port', '0', '--root', makeFixture()], { say: (m) => messages.push(m), error: () => {} });
