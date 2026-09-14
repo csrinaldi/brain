@@ -167,7 +167,7 @@ or heartbeat route" scenario over the now-complete route table.
       trailing debounce with serialised recompute (at most one queued
       follow-up), worktree re-scan, and per-directory failure handling so
       T1a passes.
-- [ ] T2a. `brain/scripts/ui/poller.test.mjs`: failing tests for — unchanged
+- [x] T2a. `brain/scripts/ui/poller.test.mjs`: failing tests for — unchanged
       issues cost nothing on the next poll (R881-4 S1: N unchanged
       `issueList` rows issue zero `issueView` calls on tick 2); disable and
       manual poll (R881-4 S2: the timer stops firing when disabled, "poll
@@ -179,7 +179,7 @@ or heartbeat route" scenario over the now-complete route table.
       calls/tick, cold start `1 + I + 1 + P`; a poll failure keeps the
       previous cache and sets `poller.lastError`/`lastOkAt` without
       emptying any section (R881-9 S2, D2).
-- [ ] T2b. `brain/scripts/ui/poller.mjs`: implement the fast lane
+- [x] T2b. `brain/scripts/ui/poller.mjs`: implement the fast lane
       (`issueList` + `mrList`), the review lane (`prReviews`, cap 10,
       round-robin), the body lane (`issueView`, cap 5 steady state plus up
       to 20 brand-new numbers in the tick they appear), pause/resume/once,
