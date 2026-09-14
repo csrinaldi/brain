@@ -6,6 +6,15 @@ registry (ADR-0030, superseding ADR-0006's git tags); consumers upgrade with
 changes** before upgrading — additive `brain.config.json` migrations apply
 automatically, but renames need manual action.
 
+## Unreleased — memory scripts join the `brain:` namespace (#961)
+
+**No manual step.** The eleven `memory:*` scripts are now `brain:memory:*` (`save`,
+`index`, `share`, `pull`, `resolve-index`, `audit`, `ship`, `reindex`, `split-records`,
+`collect`, `migrate-v1`), like `brain:memory:session-end`. brain's own `package.json`
+keeps the bare names as identical aliases, so commands in history and records still
+run. Consumers never had these scripts. The managed seven arrive with #922 under their
+`brain:memory:*` names only.
+
 ## v1.5.0 — the governance surface stops trusting what it cannot measure
 
 **No manual step.** No migration was promoted since v1.4.0, so nothing is
