@@ -98,18 +98,20 @@ PR — the three control routes do not exist yet).
       working tree, confirming the two new T4a assertions fail without it,
       then restoring it — see apply-progress for the transcript. The
       committed diff for this task is test-only.)
-- [ ] T5a. `brain/scripts/ui/server.test.mjs` (extend): failing test for
+- [x] T5a. `brain/scripts/ui/server.test.mjs` (extend): failing test for
       `parseArgs` (`--port`, `--root`; unknown flag → `{ok: false, error}`
       / exit 2; `EADDRINUSE` → `✗ port <n> is already in use` / exit 2,
       D15) and a test reading `package.json` asserting `scripts["brain:ui"]
       === "node ./brain/scripts/ui/server.mjs"` and `engines.node ===
-      ">=22"`.
-- [ ] T5b. `brain/scripts/ui/server.mjs` + `package.json`: implement
+      ">=22"`. (`parseArgs`/`main`/`EADDRINUSE` production code already
+      existed from T3b — see apply-progress; only the `package.json`
+      assertion was genuinely red here.)
+- [x] T5b. `brain/scripts/ui/server.mjs` + `package.json`: implement
       `parseArgs`, the `EADDRINUSE` handler, add `"brain:ui"` and
       `"engines": {"node": ">=22"}` to `package.json`, add
       `brain/scripts/ui/static/index.html` (placeholder — the real SPA
       ships in PR 4) so T5a passes.
-- [ ] T6. Verify: `GIT_CONFIG_GLOBAL=/dev/null npm test` and `npm run
+- [x] T6. Verify: `GIT_CONFIG_GLOBAL=/dev/null npm test` and `npm run
       brain:repo:check` both green (confirms `managed-paths.test.mjs`'s
       10-entry `MANAGED_SCRIPT_KEYS` pin is untouched — `brain:ui` is a
       repo-local verb like `brain:snapshot`, not a managed key, same as

@@ -1,10 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
 import { buildSnapshot } from '../status/snapshot.mjs';
 import { makeSnapshotFixture as makeFixture } from '../__fixtures__/snapshot-tree.mjs';
 import { createForgeCache } from './forge-cache.mjs';
-import { createUiServer, parseArgs } from './server.mjs';
+import { createUiServer, parseArgs, main } from './server.mjs';
 
 const NOW = '2026-09-14T00:00:00Z';
 const now = () => new Date(NOW);
@@ -132,4 +135,53 @@ test('#881: R881-5 S1 — the method check runs before routing, so an unmatched 
   } finally {
     await server.close();
   }
+});
+
+// ── D15: parseArgs, EADDRINUSE ──────────────────────────────────────────────
+
+test('#881: parseArgs — --port and --root, defaults, unknown flags refused', () => {
+  assert.deepEqual(parseArgs([]), { ok: true, port: 3000, root: process.cwd() });
+  assert.deepEqual(parseArgs(['--port', '4500']), { ok: true, port: 4500, root: process.cwd() });
+  assert.deepEqual(parseArgs(['--root', '/tmp/some-dir']), { ok: true, port: 3000, root: '/tmp/some-dir' });
+  assert.equal(parseArgs(['--bogus']).ok, false);
+  assert.equal(parseArgs(['--port', 'nope']).ok, false);
+  assert.equal(parseArgs(['--port', '-1']).ok, false);
+});
+
+test('#881: main exits 2 on an unknown argument', async () => {
+  const errors = [];
+  const code = await main(['--bogus'], { say: () => {}, error: (m) => errors.push(m) });
+  assert.equal(code, 2);
+  assert.match(errors.join('\n'), /unknown argument: --bogus/);
+});
+
+test('#881: EADDRINUSE prints "port <n> is already in use" and exits 2 (D15 — same class as a bad argument)', async () => {
+  const blocker = createUiServer({ root: makeFixture() });
+  await blocker.listen(0);
+  try {
+    const port = blocker.port;
+    const errors = [];
+    const code = await main(['--port', String(port), '--root', makeFixture()], { say: () => {}, error: (m) => errors.push(m) });
+    assert.equal(code, 2);
+    assert.match(errors.join('\n'), new RegExp(`port ${port} is already in use`));
+  } finally {
+    await blocker.close();
+  }
+});
+
+test('#881: main succeeds on a free (ephemeral) port and reports where it listens', async () => {
+  const messages = [];
+  const result = await main(['--port', '0', '--root', makeFixture()], { say: (m) => messages.push(m), error: () => {} });
+  assert.notEqual(typeof result, 'number', 'success returns the started server, not an exit code');
+  assert.match(messages.join('\n'), /brain:ui listening on http:\/\/127\.0\.0\.1:\d+/);
+  await result.close();
+});
+
+// ── package.json: brain:ui verb and engines (D8, D16) ───────────────────────
+
+test('#881: package.json exposes "brain:ui" and "engines.node" >= 22', () => {
+  const pkgPath = fileURLToPath(new URL('../../../package.json', import.meta.url));
+  const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'));
+  assert.equal(pkg.scripts['brain:ui'], 'node ./brain/scripts/ui/server.mjs');
+  assert.equal(pkg.engines.node, '>=22');
 });
