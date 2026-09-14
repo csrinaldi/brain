@@ -405,6 +405,7 @@
 {"id":"rec-2bf85459f655fd0f","ts":"2026-08-18T13:18:02Z","actor":"feat/issue-435-featdistribution-supersede-adr-0006-make","type":"bugfix","project":"brain","issue":435,"file":"2026-08-rec-2bf85459f655fd0f.jsonl"}
 {"id":"rec-2bfd4511c01dc139","ts":"2026-07-25T21:50:24Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-2bfd4511c01dc139.jsonl"}
 {"id":"rec-2c21f621dc1b7867","ts":"2026-07-25T00:47:33Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-2c21f621dc1b7867.jsonl"}
+{"id":"rec-2c496dae8cfa5577","ts":"2026-09-14T09:31:11Z","actor":"@csrinaldi","type":"bugfix","project":"brain","issue":879,"file":"2026-09-rec-2c496dae8cfa5577.jsonl"}
 {"id":"rec-2c4b2f585e51e9e0","ts":"2026-07-05T21:05:26Z","actor":"@legacy","type":"bugfix","project":"brain","file":"2026-07-rec-2c4b2f585e51e9e0.jsonl"}
 {"id":"rec-2c68d25e8c34e046","ts":"2026-07-25T00:48:16Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-2c68d25e8c34e046.jsonl"}
 {"id":"rec-2c6a688fb3d0e807","ts":"2026-07-25T00:47:30Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-2c6a688fb3d0e807.jsonl"}
