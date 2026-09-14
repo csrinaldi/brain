@@ -18,13 +18,21 @@ const EXCLUDED_KEYS = new Set(['generatedAt', 'tier']);
 /**
  * @param {object} previous the last snapshot this server held, or null/undefined for "none yet"
  * @param {object} next the freshly computed snapshot
- * @returns {Array<{name: string, section: unknown}>} one entry per top-level key whose value changed, in `next`'s key order
+ * @returns {Array<{name: string, section: unknown}>} one entry per top-level key whose value changed, in `next`'s key order, then keys that `previous` had and `next` does not, each with `section: null`
  */
 export function diffSections(previous, next) {
   const changed = [];
   for (const name of Object.keys(next)) {
     if (EXCLUDED_KEYS.has(name)) continue;
     if (!isDeepStrictEqual(previous?.[name], next[name])) changed.push({ name, section: next[name] });
+  }
+  // A key the previous snapshot had and this one lacks is a change too. The
+  // snapshot's key set is a fixed literal today (`status/snapshot.mjs`), so
+  // this branch is unreachable until that changes — which is exactly when a
+  // diff that only walked the new keys would have gone quiet.
+  for (const name of Object.keys(previous ?? {})) {
+    if (EXCLUDED_KEYS.has(name) || name in next) continue;
+    changed.push({ name, section: null });
   }
   return changed;
 }

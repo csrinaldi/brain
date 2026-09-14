@@ -31,3 +31,9 @@ test('#881: two sections changed in the same recompute are both reported, in top
     { name: 'prs', section: { ok: true, value: 2 } },
   ]);
 });
+
+test('#881: a section present before and absent now is reported as gone, not silently dropped (fresh review of slice 1, minor 1)', () => {
+  const a = { generatedAt: 't0', tier: 'committed', graph: { ok: true, value: 1 }, prs: { ok: true, value: 1 } };
+  const b = { generatedAt: 't1', tier: 'committed', graph: { ok: true, value: 1 } };
+  assert.deepEqual(diffSections(a, b), [{ name: 'prs', section: null }], 'a diff that walks only the new keys would have said "nothing changed"');
+});
