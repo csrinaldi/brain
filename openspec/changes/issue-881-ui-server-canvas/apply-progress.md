@@ -205,6 +205,67 @@ Confirmed fixed: the same full run that previously hung completed in
    siblings was touched, except the one-line `poller.mjs` bugfix (already
    in scope) and `tasks.md`/`apply-progress.md` bookkeeping.
 
+## PR 2 / A2 — review round (2026-09-14, fresh-context review → REVISE)
+
+A fresh-context review of the branch (`feat/issue-881-slice-2-stream`, 8
+commits ahead of `origin/feature/brain-ui` at review time) returned REVISE
+with three findings, all verified against the code. Fixed as a targeted
+follow-up on the same branch, STRICT TDD (failing test first where the
+defect was live code, mutation-proof where the defect was a missing test):
+
+1. **BLOCKER — async `'error'` on a live `fs.watch` handle crashed the
+   process.** `watcher.mjs`'s `watchDir()` only caught the *synchronous*
+   throw at registration; a live `FSWatcher` firing `'error'` later (late
+   `ENOSPC`/`EPERM`, watched path removed) is an uncaught exception with no
+   listener registered — violates R881-9 / design Q3 ("a watcher failure is
+   a said state, never a crash"). RED reproduced with an injected `_watch`
+   returning an `EventEmitter`: `emit('error', ...)` on a live handle
+   crashed the test (`error: 'ENOSPC: no space left'`). Fixed by
+   registering an `'error'` listener on every live handle (guarded by
+   `typeof handle.on === 'function'` so existing plain-object test doubles
+   are unaffected) that records the failure in the same `{path, reason}`
+   shape the synchronous case uses and closes that handle so it cannot fire
+   again. Commit `94fc678`.
+
+2. **MAJOR — the negative assertion design.md D7 promises was missing.**
+   D7 says the test "asserts after a `POST /api/poll/pause` that no file
+   under the served root, no git ref and no forge stub call changed";
+   `server.test.mjs`'s R881-5 S2 only checked the 405 matrix and the
+   `{paused}` JSON. Added a test using the `snapshotTree()` walker pattern
+   from `status/snapshot.test.mjs` (before/after deep-equal over the whole
+   fixture tree) plus a `countedWriteVerbs()` helper (extends
+   `readOnlyWriteVerbs` with a call count) across pause/resume/once,
+   asserting zero write-verb calls while allowing `once`'s legitimate
+   reads. The fixture root has no `.git` (`snapshot-tree.mjs` never runs
+   `git init`), so the git-ref leg is skipped with a stated reason — also a
+   structural no-op since `servePollControl` never calls `run('git', ...)`.
+   Proven by mutation: `servePollControl` was temporarily made to write a
+   marker file under the root, the tree-snapshot assertion went red exactly
+   on that file, then reverted (`server.mjs` has no diff from before the
+   mutation). Commit `5f4e57eb`.
+
+3. **Hardening from the mutation results.** Mutation-testing the earlier
+   `poller.close()` leak fix (`c2352550`) found that removing `closed =
+   true` did not turn any existing test red — it made `node --test` HANG
+   instead, because those tests use the real timer pair, so the leaked
+   `scheduleNext()` after `close()` arms a real, uncleared timer. A CI job
+   with no per-test timeout would sit there, not fail. Added a test using
+   the poller's own injected `_setTimeout`/`_clearTimeout` seam: `start()`
+   a tick, `close()` while it is still in flight (a controlled gate holds
+   `issueList`), let it settle, assert `scheduler.pending() === 0`. Proven
+   by the same mutation: removing `closed = true` turns this test red in
+   under a millisecond, then reverted (`poller.mjs` has no diff from before
+   the mutation). Commit `f74890ba`.
+
+**Carried to PR 3 as a follow-up, accepted as minor:** the `parseWorktrees`
+duplication (deviation 1 above) is not resolved by this round — the two
+copies (`watcher.mjs`'s and `memory/lane/collect.mjs`'s) already diverge on
+the `prunable` field: `collect.mjs`'s stanza parser tracks it, `watcher.mjs`'s
+copy does not (it only needs `path`/`bare` for this slice's re-scan). PR 3
+should export `parseWorktrees` from `collect.mjs` and import it in
+`watcher.mjs` instead of carrying a second, narrower copy of the same
+grammar.
+
 ## What PR 3 (B1) needs to know
 
 - `createUiServer`'s route table is now final for the server-side surface
