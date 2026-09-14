@@ -56,7 +56,7 @@ function unmergedPaths(repo) {
 }
 
 /**
- * Two branches that each ran the equivalent of `memory:share`, merged, leaving
+ * Two branches that each ran the equivalent of `brain:memory:share`, merged, leaving
  * `.memory/index.jsonl` genuinely conflicted. `records/*.jsonl` keeps its
  * built-in union attribute, so ONLY the index conflicts — which is the state
  * an operator actually meets.
@@ -180,5 +180,5 @@ test('the repo declares NO merge strategy for /.memory/index.jsonl (adr-0017: ne
   // Asserting ABSENCE cannot be satisfied by a wrong value — unlike a check
   // that merely requires "some merge= attribute", which any value would pass.
   assert.deepEqual(indexRules, [],
-    'index.jsonl must fall through to the default merge; conflicts are resolved by `npm run memory:resolve-index`');
+    'index.jsonl must fall through to the default merge; conflicts are resolved by `npm run brain:memory:resolve-index`');
 });

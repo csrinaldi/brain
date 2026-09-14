@@ -784,7 +784,7 @@ test('the scaffold does not promise that `skip:memory-gate` exempts anything (#5
 // sentence describes the lane", design.md D5/L6, ADR-0034:158-160) ─────────
 //
 // The emitted checklist item's FIRST line now describes memory as reaching
-// `main` on the lane (`memory:save --issue N`), not the pre-lane
+// `main` on the lane (`brain:memory:save --issue N`), not the pre-lane
 // `memory:share` wording — the last three lines (memory-gate/skip:memory-gate
 // discipline) stay verbatim.
 
@@ -793,8 +793,8 @@ test('the memory checklist item describes the lane, verbatim, on every provider 
     const rendered = renderScaffold(provider);
     assert.match(
       rendered,
-      /- \[ \] Session memory captured as a record \(`memory:save --issue N`\); it reaches `main`\n\s+on the lane\./,
-      `${provider}: the checklist item must describe the lane, not the pre-lane memory:share wording`
+      /- \[ \] Session memory captured as a record \(`brain:memory:save --issue N`\); it reaches `main`\n\s+on the lane\./,
+      `${provider}: the checklist item must describe the lane, not the pre-lane brain:memory:share wording`
     );
     assert.doesNotMatch(
       rendered,
@@ -816,5 +816,5 @@ test('the emitted PULL_REQUEST_TEMPLATE.md matches the COMMITTED file byte-for-b
   const emitted = renderScaffold('github');
   assert.equal(readFileSync(onDisk, 'utf8'), emitted,
     `${path} has been hand-edited — regenerate it from contributor-scaffold.mjs instead`);
-  assert.match(emitted, /Session memory captured as a record \(`memory:save --issue N`\); it reaches `main`/);
+  assert.match(emitted, /Session memory captured as a record \(`brain:memory:save --issue N`\); it reaches `main`/);
 });

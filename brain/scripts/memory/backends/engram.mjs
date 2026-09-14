@@ -11,7 +11,7 @@
 //   setup()              — ensure .engram → .memory symlink
 //   featureCheckpoint()  — dehydrate: stamp + validate + write resume.md (REQ-S2-1, REQ-E-1)
 //   featureResume()      — hydrate: project openspec/changes/<feature>/*.md into LOCAL engram
-//                          under a DISTINCT project namespace so memory:share never exports
+//                          under a DISTINCT project namespace so brain:memory:share never exports
 //                          these observations (CONFIRMED: engram sync --export is project-
 //                          scoped; feature obs under brain-feature-<X> stay out of .memory/)
 
@@ -778,7 +778,7 @@ export async function importMemory({
  * rather than after. (Two lines claiming one id with different bytes is NOT
  * that case: it is reported as divergent and resolved first-wins.)
  *
- * Use pullMemory() for cross-machine syncs (npm run memory:pull).
+ * Use pullMemory() for cross-machine syncs (npm run brain:memory:pull).
  * Use importMemory() when git pull already ran (post-merge hook, day-start step 5).
  *
  * Injectable seams make the function fully unit-testable without real git/engram:
@@ -1398,7 +1398,7 @@ export async function featureCheckpoint(
  * Project all .md files in openspec/changes/<feature>/ into the LOCAL engram
  * under the distinct project namespace 'brain-feature-<feature>'.
  *
- * This namespace separation ensures that a subsequent `memory:share`
+ * This namespace separation ensures that a subsequent `brain:memory:share`
  * (= engram sync --export, which defaults to the 'brain' project) does NOT
  * pick up these observations and write them to .memory/ — keeping feature
  * obs out of the durable committed store.
@@ -1464,7 +1464,7 @@ export async function featureResume(
 
   // 5. Project each .md file into engram under 'brain-feature-<feature>'.
   //    Modeled on brain-to-engram.mjs — one save per file, topic as upsert key.
-  //    The distinct project namespace keeps these obs out of memory:share exports.
+  //    The distinct project namespace keeps these obs out of brain:memory:share exports.
   const featureProject = `brain-feature-${resolvedFeature}`;
   let files;
   try {

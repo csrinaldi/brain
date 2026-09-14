@@ -73,7 +73,7 @@ export default {
   'day.memory.reprojecting':   'Reprojecting brain/ to engram...',
   'day.memory.exporting':      'Exporting memory to repo (.memory/)...',
   'day.memory.exported':       'Memory exported to .memory/ — ready to commit with the next push.',
-  'day.memory.exportFailed':   'engram export failed — run {pm} run memory:share manually.',
+  'day.memory.exportFailed':   'engram export failed — run {pm} run brain:memory:share manually.',
   'day.memory.notAvailable':   'engram not available — skipping shared memory.',
   'day.memory.install':        'Install: gentle-ai install   or   npm run tools:install',
 
@@ -100,7 +100,7 @@ export default {
   'day.done.sddExplore':      '/sdd-explore <idea>             explore before committing',
   'day.done.gitlabIssue':     '/gitlab-issue                   create an issue from an idea',
   'day.done.beforePush':      'Before pushing:',
-  'day.done.checkCmd':        '{pm} run brain:repo:check && {pm} run memory:share',
+  'day.done.checkCmd':        '{pm} run brain:repo:check && {pm} run brain:memory:share',
 
   // ── tracker-board.mjs (PR2) ───────────────────────────────────────────────────
   'tracker.noRemote':        '⚠ Could not detect origin remote.',
@@ -198,9 +198,9 @@ export default {
   'bootstrap.memory.engram.ok':      'engram backend configured (symlink + merge driver)',
   'bootstrap.memory.engram.failed':  'memory setup failed (non-blocking)',
   'bootstrap.memory.pull.ok':        'memory imported (.memory/ → engram)',
-  'bootstrap.memory.pull.failed':    'memory:pull failed (non-blocking)',
+  'bootstrap.memory.pull.failed':    'brain:memory:pull failed (non-blocking)',
   'bootstrap.memory.index.ok':       'durable index reprojected (brain/ → engram)',
-  'bootstrap.memory.index.failed':   'memory:index failed (non-blocking)',
+  'bootstrap.memory.index.failed':   'brain:memory:index failed (non-blocking)',
   // {backend} = unknown backend name
   'bootstrap.memory.unknownBackend': "backend '{backend}' has no known init routine — configure it manually",
 
@@ -291,7 +291,7 @@ export default {
   'ticket.nextSteps.cd':          '    0. cd {path}   (open your work session here)',
   'ticket.nextSteps.step1':       '    1. Implement — use /sdd-new {id} if the change is complex',
   'ticket.nextSteps.step2':       '    2. {pm} run brain:repo:check before each commit',
-  'ticket.nextSteps.step3':       '    3. {pm} run memory:share && git add .memory/ before pushing',
+  'ticket.nextSteps.step3':       '    3. {pm} run brain:memory:share && git add .memory/ before pushing',
   'ticket.nextSteps.step4':       '    4. git push -u origin {branch}',
 
   // ── ticket-start.mjs — feature working memory (Slice 3) ─────────────────────
@@ -330,7 +330,7 @@ export default {
   'memory.duplicates.summaryWithIndex': '⚠ {ids} duplicate record id(s) in .memory/records/ — {lines} excess physical line(s) collapsed into {surface} ({total} physical line(s) → {indexCount} indexed).',
   'memory.duplicates.why': '  Deduplicated, not refused: `merge=union` concatenates both copies when two branches hold the same record (ADR-0017, REQ-MF-3), so this is the transport working, not a corrupt store — but `wc -l .memory/records/*.jsonl` over-counts the store by {lines}, and it is only reported because you are reading this.',
   'memory.duplicates.divergent': '  {count} of them DISAGREE outside the hashed fields (`source` is not hashed, so two copies of one record can differ there — brain\'s own export→import→export widens it). Resolved first-wins: the earliest line of the earliest month file is the one indexed, exactly as the read path resolves it. Marked [divergent] below — worth a look, not an error.',
-  'memory.duplicates.brief': '  Run `npm run memory:reindex` for the per-id locations.',
+  'memory.duplicates.brief': '  Run `npm run brain:memory:reindex` for the per-id locations.',
   'memory.duplicates.group': '  {id} ×{count} — {locations}',
   'memory.duplicates.groupDivergent': '  {id} ×{count} [divergent] — {locations}',
   'memory.duplicates.moreOccurrences': ', +{count} more',
@@ -381,8 +381,8 @@ export default {
   // worked all along, and because nothing ever said so, the engram-only error
   // read as "capture is impossible here".
   'memory.backend.substituted': 'the `{from}` binary is not installed here, so `{op}` ran on the records-only `{fallback}` backend instead — same records, same validation, no backend required (ADR-0017). MEMORY_BACKEND was not set, so no stated choice was overridden; set it to pin either backend explicitly.',
-  'memory.backend.statedButAbsent': 'MEMORY_BACKEND={backend} is set explicitly, but the `{backend}` binary is not on PATH here — a stated selector is never overridden (ADR-0004), so this run will fail. Records-only capture needs no backend: `MEMORY_BACKEND={fallback} npm run memory:{op}`.',
-  'memory.backend.probeFailed': 'could not determine whether the `{backend}` binary is present — {reason}. That is the CHECK failing, not the binary being absent, so nothing was substituted and `{op}` continues on `{backend}`. If it fails, the records-only route is `MEMORY_BACKEND={fallback} npm run memory:{op}`.',
+  'memory.backend.statedButAbsent': 'MEMORY_BACKEND={backend} is set explicitly, but the `{backend}` binary is not on PATH here — a stated selector is never overridden (ADR-0004), so this run will fail. Records-only capture needs no backend: `MEMORY_BACKEND={fallback} npm run brain:memory:{op}`.',
+  'memory.backend.probeFailed': 'could not determine whether the `{backend}` binary is present — {reason}. That is the CHECK failing, not the binary being absent, so nothing was substituted and `{op}` continues on `{backend}`. If it fails, the records-only route is `MEMORY_BACKEND={fallback} npm run brain:memory:{op}`.',
 
   // ── memory/backends/engram.mjs — share() secret scrub (issue #214, C1b) ──────
   'memory.share.unprovenanced': '{count} observation(s) arrived with no provenance block, so they materialised as `@legacy` with no `issue` — nothing emits the block on the capture path yet (#541). Counted, not refused: refusing would reject the store that already exists.',
@@ -405,7 +405,7 @@ export default {
   // resolved (cold review round 2 of #701). The "next line" it points at is
   // memory.share.upstreamUnavailable, which always follows on this branch.
   'memory.share.upstreamConfigUnreadableNoRef': '{error}. Any memory.upstreamRef stated there was NOT honored, and no upstream base resolved either — see the next line for what was tried. Fix brain.config.json (a mid-merge conflict marker is the usual cause) if you meant to scope against a different ref.',
-  'memory.share.upstreamUnnamed': '{count} file(s) under .memory/records/ at the upstream base do not match the per-record filename shape and are invisible to the export-scope check. Run `npm run memory:split-records` to fix.',
+  'memory.share.upstreamUnnamed': '{count} file(s) under .memory/records/ at the upstream base do not match the per-record filename shape and are invisible to the export-scope check. Run `npm run brain:memory:split-records` to fix.',
   'memory.share.dedupedUpstream': '{count} record(s) already present on the upstream base ({ref}) were not re-exported.',
 
   // ── memory/staged-records-check.mjs — pre-commit gate (issue #701) ───────────
@@ -448,7 +448,7 @@ export default {
   // #637 — the index rebuild is the ONE gate that cannot run before the append,
   // so its failure is never a refusal: the record is already durable. Saying
   // "save() failed" sent the operator to the single action that makes it worse.
-  'memory.plainfiles.save.indexFailed': 'the record WAS written — {id} → {file}. What failed is the INDEX rebuild, which reads the whole store, so the cause is almost certainly a record that was already broken before this run: {message}\n  Do NOT run memory:save again — the record is already on disk, and a retry mints a SECOND record with a later `ts`, hence a different id, which no deduplication will ever collapse.\n  Repair the store, then rebuild the index with `npm run memory:reindex`.',
+  'memory.plainfiles.save.indexFailed': 'the record WAS written — {id} → {file}. What failed is the INDEX rebuild, which reads the whole store, so the cause is almost certainly a record that was already broken before this run: {message}\n  Do NOT run brain:memory:save again — the record is already on disk, and a retry mints a SECOND record with a later `ts`, hence a different id, which no deduplication will ever collapse.\n  Repair the store, then rebuild the index with `npm run brain:memory:reindex`.',
   'memory.plainfiles.save.secretFound': 'Secret detected in the candidate record (line {line}) — pattern "{pattern}" matched. Aborted BEFORE the records/ append (add an allowlist entry in governance.memorySecretAllowPatterns if this is a false positive).',
   // ── #738 — provenance at capture: actor/actorKind/issue ──────────────────
   'memory.plainfiles.save.actorUnset': 'no configured actor — run `git config --local brain.actor @<handle>` once per clone, then retry. brain.actor is unset.',
@@ -466,7 +466,7 @@ export default {
   'memory.save.supersedesMissingValue': '--supersedes requires a value (the id it supersedes) — refused before any write, so the record is never saved silently without the field you asked for.',
   // ── #874 — hydrate({recordId}): the record is already durable before this runs, so a
   // backend failure here is reported, never thrown (R5) ──
-  'memory.save.hydrateDeferred': 'record {recordId} is on disk, but hydrating it into engram was deferred — {reason}. The record is NOT lost; re-run `npm run memory:pull` (or `memory:share`) once engram is reachable to catch it up.',
+  'memory.save.hydrateDeferred': 'record {recordId} is on disk, but hydrating it into engram was deferred — {reason}. The record is NOT lost; re-run `npm run brain:memory:pull` (or `brain:memory:share`) once engram is reachable to catch it up.',
   'memory.save.hydrateContended': 'record {recordId} is on disk, but hydrating it into engram was skipped — another process (pid {pid}, {age}s) holds the #820 hydration guard. The record is NOT lost; it will be picked up on the next pull/share.',
   'memory.hydrate.recordNotFound': "hydrate: no record with id '{recordId}' found under .memory/records/ — pass the record itself when hydrating one that has not been read back from disk yet.",
   'memory.plainfiles.search.empty': 'ℹ no matching records found.',

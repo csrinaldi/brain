@@ -45,7 +45,7 @@ test('#874 (D8, strengthens #530): the verb does NOT pin a backend — the recor
 test('#874 (D8): capture stays reachable with NO engram installed — save defers rather than refuses, end to end', (t) => {
   // #530's guarantee, PROVED END-TO-END instead of by a pin: even with the
   // default backend (engram) selected and the binary measurably absent from
-  // PATH, `memory:save` still writes a durable record and exits 0 — it never
+  // PATH, `brain:memory:save` still writes a durable record and exits 0 — it never
   // refuses, and it never needs the plainfiles pin to do so.
   const REAL_WHICH = execFileSync('sh', ['-c', 'command -v which'], { encoding: 'utf8' }).trim();
   const REAL_GIT = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();

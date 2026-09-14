@@ -1,4 +1,4 @@
-// cli.collect.test.mjs — `memory:collect` through the real CLI (#887 Slice B),
+// cli.collect.test.mjs — `brain:memory:collect` through the real CLI (#887 Slice B),
 // against a fixture repo under BRAIN_MEMORY_TEST_ROOT, mirroring
 // cli.audit.test.mjs's real-CLI pattern (#870).
 //
@@ -72,7 +72,7 @@ function fixtureRepo({ withCandidate = true, configureIdentity = true } = {}) {
 
 /** A bare origin plus a `main` checkout carrying ONE tracked-then-locally-
  * modified record (` M`, `modified-tracked`) and one untracked secret-
- * bearing record (`secret`) — the two skip reasons `memory:collect`'s own
+ * bearing record (`secret`) — the two skip reasons `brain:memory:collect`'s own
  * stderr lines (`memory.collect.secretSkipped` / `.modifiedTrackedSkipped`)
  * exist to summarize by count. Neither is a candidate that ever gets
  * collected, so the run's `collected` count is irrelevant to this fixture's
@@ -172,13 +172,13 @@ function runCli(root, ...args) {
   });
 }
 
-test('memory:collect prints memory.collect.done and exits 0 with candidates present', () => {
+test('brain:memory:collect prints memory.collect.done and exits 0 with candidates present', () => {
   const run = runCli(fixtureRepo());
   assert.equal(run.status, 0, run.stderr);
   assert.match(run.stdout, /memory\/cli:.*collected 1 record/i);
 });
 
-test('memory:collect prints memory.collect.nothing and exits 0 once the lane already carries everything', () => {
+test('brain:memory:collect prints memory.collect.nothing and exits 0 once the lane already carries everything', () => {
   const root = fixtureRepo();
   const first = runCli(root);
   assert.equal(first.status, 0, first.stderr);
@@ -187,7 +187,7 @@ test('memory:collect prints memory.collect.nothing and exits 0 once the lane alr
   assert.match(second.stdout, /memory\/cli:.*nothing new/i);
 });
 
-test('memory:collect --json carries the full shape on stdout only', () => {
+test('brain:memory:collect --json carries the full shape on stdout only', () => {
   const run = runCli(fixtureRepo(), '--json');
   assert.equal(run.status, 0, run.stderr);
   const parsed = JSON.parse(run.stdout);
@@ -198,7 +198,7 @@ test('memory:collect --json carries the full shape on stdout only', () => {
   assert.ok(parsed.duplicates && typeof parsed.duplicates === 'object');
 });
 
-test('memory:collect REPORTS a duplicate candidate shared by two worktrees on stderr (cli.mjs:362 — must not race process.exit(0))', () => {
+test('brain:memory:collect REPORTS a duplicate candidate shared by two worktrees on stderr (cli.mjs:362 — must not race process.exit(0))', () => {
   const run = runCli(fixtureRepoWithDuplicateCandidate());
   assert.equal(run.status, 0, run.stderr);
   assert.match(run.stderr, /1 duplicate record id\(s\)/, 'the duplicate must be REPORTED, not dropped by an unawaited reportDuplicates racing process.exit(0)');
@@ -206,13 +206,13 @@ test('memory:collect REPORTS a duplicate candidate shared by two worktrees on st
   assert.ok(run.stderr.includes('rec-2222222222222222'), 'the duplicated id is named');
 });
 
-test('memory:collect never invokes a backend, regardless of MEMORY_BACKEND', () => {
+test('brain:memory:collect never invokes a backend, regardless of MEMORY_BACKEND', () => {
   const run = runCli(fixtureRepo());
   assert.equal(run.status, 0, run.stderr);
   assert.doesNotMatch(run.stderr, /backend 'no-such-backend' not found/);
 });
 
-test('cold-2 — memory:collect prints memory.collect.secretSkipped and memory.collect.modifiedTrackedSkipped on stderr with the right counts', () => {
+test('cold-2 — brain:memory:collect prints memory.collect.secretSkipped and memory.collect.modifiedTrackedSkipped on stderr with the right counts', () => {
   const run = runCli(fixtureRepoWithSkips());
   assert.equal(run.status, 0, run.stderr);
   assert.match(run.stderr, /memory\/cli:.*1 secret-bearing record\(s\) skipped/i);
@@ -222,7 +222,7 @@ test('cold-2 — memory:collect prints memory.collect.secretSkipped and memory.c
   assert.doesNotMatch(run.stdout + run.stderr, /ghp_x{24}/);
 });
 
-test('memory:collect --json always carries skippedWorktrees, even when empty (#921)', () => {
+test('brain:memory:collect --json always carries skippedWorktrees, even when empty (#921)', () => {
   const run = runCli(fixtureRepo(), '--json');
   assert.equal(run.status, 0, run.stderr);
   const parsed = JSON.parse(run.stdout);
@@ -230,7 +230,7 @@ test('memory:collect --json always carries skippedWorktrees, even when empty (#9
   assert.deepEqual(parsed.skippedWorktrees, []);
 });
 
-test('#921 — memory:collect prints memory.collect.worktreeSkipped on stderr with count + path when a worktree could not be inspected', () => {
+test('#921 — brain:memory:collect prints memory.collect.worktreeSkipped on stderr with count + path when a worktree could not be inspected', () => {
   // Registers a SECOND worktree, then corrupts its `.git` file to point at a
   // nonexistent gitdir. The directory itself still exists, so
   // `git worktree list --porcelain` never marks it `prunable` (proven below)
@@ -253,7 +253,7 @@ test('#921 — memory:collect prints memory.collect.worktreeSkipped on stderr wi
   assert.match(run.stderr, /not a git repository/i);
 });
 
-test('memory:collect fails loudly with memory.collect.failed and exits 1 on a genuine git failure', () => {
+test('brain:memory:collect fails loudly with memory.collect.failed and exits 1 on a genuine git failure', () => {
   const root = testTmp('cli-collect-nogit-'); // not a git repository at all
   mkdirSync(root, { recursive: true });
   const run = runCli(root);
@@ -261,7 +261,7 @@ test('memory:collect fails loudly with memory.collect.failed and exits 1 on a ge
   assert.match(run.stderr, /memory\/cli:/);
 });
 
-test('memory:collect fails with git\'s own author-identity message (memory.collect.failed) when no identity is configured anywhere', () => {
+test('brain:memory:collect fails with git\'s own author-identity message (memory.collect.failed) when no identity is configured anywhere', () => {
   // D6: the collector uses the AMBIENT git identity, never a fabricated or
   // token-based one — so when NOTHING configures an identity (no repo-local
   // config, no global config, no system config), `commit-tree` must fail
@@ -290,7 +290,7 @@ test('memory:collect fails with git\'s own author-identity message (memory.colle
   assert.match(run.stderr, /Author identity unknown/, 'the surfaced message must be git\'s own, unrewritten');
 });
 
-test('memory:collect resolves from package.json, beside the other memory:* scripts', () => {
+test('brain:memory:collect resolves from package.json, beside the other memory:* scripts', () => {
   const pkg = JSON.parse(readFileSync(join(HERE, '../../../package.json'), 'utf8'));
   assert.equal(pkg.scripts['memory:collect'], 'node ./brain/scripts/memory/cli.mjs collect');
 });

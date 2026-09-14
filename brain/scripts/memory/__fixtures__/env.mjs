@@ -9,7 +9,7 @@
 // correct that it wins. The defect #714 is about is narrower: the SUITE's
 // verdict must not depend on whether the developer running it happens to have
 // that variable exported, which is exactly the case for anyone debugging
-// `memory:share` or the #701 gate.
+// `brain:memory:share` or the #701 gate.
 //
 // `withoutEnv` was originally local to
 // `backends/engram.upstream-scope.test.mjs` (the one test file that first

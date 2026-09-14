@@ -228,8 +228,8 @@ test('#805: superseding a record written under a different --issue succeeds — 
 });
 
 // ---------------------------------------------------------------------------
-// 5. the epic's 6.1 exit scenario: memory:audit coverage.supersedes 0 → 1,
-//    and B's supersedes field survives a memory:reindex round trip.
+// 5. the epic's 6.1 exit scenario: brain:memory:audit coverage.supersedes 0 → 1,
+//    and B's supersedes field survives a brain:memory:reindex round trip.
 //
 // Measured correction: the ticket phrase "B's `**Supersede:**` line" names
 // provenance.mjs's SUPERSEDE_MARKER, which renderProvenance() emits only on
@@ -240,7 +240,7 @@ test('#805: superseding a record written under a different --issue succeeds — 
 // the round trip.
 // ---------------------------------------------------------------------------
 
-test("#805: the epic's 6.1 exit — memory:audit's coverage.supersedes goes 0 → 1, and B's supersedes field survives memory:reindex", async (t) => {
+test("#805: the epic's 6.1 exit — brain:memory:audit's coverage.supersedes goes 0 → 1, and B's supersedes field survives brain:memory:reindex", async (t) => {
   const root = mkdtempSync(join(tmpdir(), 'brain-805-6-1-'));
   t.after(() => removeTempTree(root));
   const seams = {
@@ -248,7 +248,7 @@ test("#805: the epic's 6.1 exit — memory:audit's coverage.supersedes goes 0 �
     getGitConfig: (key) => (key === 'brain.actor' ? '@tester' : null), getEnv: () => ({}),
   };
 
-  // `memory:audit` refuses when `.memory/records/` does not exist yet
+  // `brain:memory:audit` refuses when `.memory/records/` does not exist yet
   // (measured: audit-io.mjs's "records dir not found") — a fresh store with
   // zero writes is created explicitly so the baseline reads a real 0, not a
   // refusal.
@@ -279,5 +279,5 @@ test("#805: the epic's 6.1 exit — memory:audit's coverage.supersedes goes 0 �
   const indexPath = join(root, '.memory', 'index.jsonl');
   const indexLines = readFileSync(indexPath, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l));
   const indexB = indexLines.find((e) => e.id === b.id);
-  assert.equal(indexB.supersedes, a.id, "B's supersedes field must survive the memory:reindex round trip in index.jsonl");
+  assert.equal(indexB.supersedes, a.id, "B's supersedes field must survive the brain:memory:reindex round trip in index.jsonl");
 });

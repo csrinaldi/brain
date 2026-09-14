@@ -3,7 +3,7 @@
 //
 // Doctrine fixes the resolution and forbids the alternatives: the index is
 // DERIVED and regenerable, so a merge conflict on it "is resolved by discarding
-// both sides and running memory:reindex — it is NEVER hand-merged and NEVER
+// both sides and running brain:memory:reindex — it is NEVER hand-merged and NEVER
 // union-merged" (memory-format.md:145-153, adr-0017:121-129). The conflict
 // ergonomics "MAY be a helper or a post-merge hook, but MUST NOT require a
 // custom merge driver for index.jsonl" (adr-0017:143-147). This is that helper.

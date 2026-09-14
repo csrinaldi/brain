@@ -163,7 +163,7 @@ test('formatDuplicateReport: `brief` keeps the counts and drops the evidence', a
 
   assert.match(report[0], /12 duplicate record id\(s\)/, 'brief is not silent');
   assert.equal(report.some((l) => /^ {2}rec-/.test(l)), false, 'no per-id lines');
-  assert.match(report.at(-1), /memory:reindex/, 'and it names where the locations live');
+  assert.match(report.at(-1), /brain:memory:reindex/, 'and it names where the locations live');
 });
 
 test('formatDuplicateReport: caps the per-id locations too, counting the rest', async () => {
