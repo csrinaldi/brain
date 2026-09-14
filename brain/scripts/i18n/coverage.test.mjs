@@ -401,7 +401,6 @@ test('PR3 session: all session.* keys exist in en with the planned English templ
   assert.equal(en['session.change.ambiguous'],   'change:   ambiguous ({count}): {list}');
   assert.equal(en['session.memory.ok'],          'memory:   engram hydrated');
   assert.equal(en['session.memory.skip'],        'memory:   engram unavailable (skipped)');
-  assert.equal(en['session.manifest.restored'],  'manifest: churn restored (safe)');
   assert.equal(en['session.ticket.label'],       'ticket:');
   assert.equal(en['session.ticket.none'],        '(no active ticket memory)');
 });

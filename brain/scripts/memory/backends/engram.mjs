@@ -8,7 +8,7 @@
 //   share()              — export live memory to .memory/ (engram sync)
 //   pull()               — import .memory/records/ into engram (records-only, D2/C4)
 //   index()              — project brain/ docs into engram (delegates to brain-to-engram.mjs)
-//   setup()              — ensure .engram → .memory symlink + register merge driver
+//   setup()              — ensure .engram → .memory symlink
 //   featureCheckpoint()  — dehydrate: stamp + validate + write resume.md (REQ-S2-1, REQ-E-1)
 //   featureResume()      — hydrate: project openspec/changes/<feature>/*.md into LOCAL engram
 //                          under a DISTINCT project namespace so brain:memory:share never exports
@@ -150,11 +150,13 @@ function requireEngram() {
 /**
  * share() — the `plainfiles.share()` mirror (R11, D6, #874 split B row —
  * ledger row list below). The exporter is retired: `share` is no longer a
- * producer (spec: "share commits what is already true"). It ensures the
- * `.engram → .memory` binding (R12 — `_ensureSymlink` is the one seam this
- * function keeps from the pre-#874 shape), then runs a bare `rebuildIndex()`
- * self-check exactly like `plainfiles.share()` — records already ARE the
- * store, so there is no data movement left to orchestrate.
+ * producer (spec: "share commits what is already true"). It runs a bare
+ * `rebuildIndex()` self-check exactly like `plainfiles.share()` — records
+ * already ARE the store, so there is no data movement left to orchestrate.
+ *
+ * Symlink confinement (#955, R7): `share()` no longer touches `.engram` —
+ * ensuring it is `setup()`'s job alone. `share`/`pull` MUST NOT create or
+ * repair the symlink on the way.
  *
  * Completes with the engram binary ABSENT (rule 3, R11): there is no
  * `_requireEngram()` call here any more — nothing downstream of this
@@ -162,20 +164,13 @@ function requireEngram() {
  *
  * @param {object} [opts]  Injectable seams for testing.
  * @param {string} [opts.root]  Repo root.
- * @param {(root: string) => void} [opts._ensureSymlink]  Ensures `.engram → .memory` (R12).
  * @param {typeof rebuildIndex} [opts._rebuildIndex]
  * @returns {Promise<{indexCount: number, duplicates: object}>}
  */
 export async function share({
   root = repoRoot,
-  _ensureSymlink = ensureMemorySymlink,
   _rebuildIndex = rebuildIndex,
 } = {}) {
-  // BEFORE the reindex (issue #657 heritage): the `.engram → .memory` binding is
-  // LOCAL and gitignored (.gitignore:68), so it exists only in the tree where
-  // `setup()` ran. Ensuring it here keeps `share` idempotent and non-clobbering
-  // (ensureMemorySymlink cases 1-4) wherever setup already ran — a no-op there.
-  _ensureSymlink(root);
   const { count, duplicates } = _rebuildIndex({
     recordsDir: join(root, ".memory", "records"),
     indexPath: join(root, ".memory", "index.jsonl"),
@@ -488,42 +483,6 @@ export function _defaultResolveDir(p) {
 // ---------------------------------------------------------------------------
 
 /**
- * Default seam: check whether .memory/manifest.json has uncommitted local changes.
- *
- * @param {string} root  Repo root.
- * @returns {boolean}
- */
-function _defaultIsManifestDirty(root) {
-  const r = spawnSync(
-    "git",
-    ["status", "--porcelain", "--", ".memory/manifest.json"],
-    { encoding: "utf8", cwd: root },
-  );
-  return !!r.stdout?.trim();
-}
-
-/**
- * Default seam: discard uncommitted local changes to .memory/manifest.json.
- * Non-fatal: logs a warning on failure instead of throwing.
- *
- * @param {string} root  Repo root.
- */
-function _defaultRestoreManifest(root) {
-  const r = spawnSync("git", ["checkout", "--", ".memory/manifest.json"], {
-    stdio: "pipe",
-    cwd: root,
-  });
-  if (r.status !== 0) {
-    console.warn(
-      "  ⚠ could not restore .memory/manifest.json —",
-      r.stderr?.toString().trim() || "unknown error",
-    );
-  } else {
-    console.log("  ✓ .memory/manifest.json restored (discarded local churn)");
-  }
-}
-
-/**
  * Default seam: run `git pull` in the repo root.
  * Throws (via execFileSync) on non-zero exit so callers can detect failure.
  *
@@ -799,25 +758,20 @@ export async function importMemory({
 /**
  * pullMemory() — churn-resilient memory pull (issue #59).
  *
- * Problem: `engram sync --export` (run by brain:memory:share / pre-push) rewrites
- * .memory/manifest.json, leaving it dirty in the working tree. A subsequent
- * `git pull` aborts with "your local changes would be overwritten by merge"
- * because manifest.json is a tracked file with uncommitted local changes.
- * The union-merge driver only helps with COMMITTED conflicts, not dirty-tree blocks.
+ * The manifest-churn-discard step this function once ran first is retired
+ * (#955, R6): the tracked derived-index file it discarded churn from has had
+ * no writer since #874 split B, so there is nothing left to discard before a
+ * pull. This function now:
+ *   1. Runs `git pull` (the `merge=union` driver handles any record conflicts).
+ *   2. Rebuilds `.memory/index.jsonl` from the merged `records/` (#574).
+ *   3. Calls importMemory() to hydrate local engram from the merged .memory/.
  *
- * Solution: the manifest is a DERIVED index that engram regenerates on every
- * export. Discarding local churn is therefore always safe. This function:
- *   1. Detects and discards uncommitted manifest churn before pulling.
- *   2. Runs `git pull` (the union-merge driver handles any committed-manifest merges).
- *   3. Rebuilds `.memory/index.jsonl` from the merged `records/` (#574).
- *   4. Calls importMemory() to hydrate local engram from the merged .memory/.
- *
- * Step 3 is new, and it is where #574's rule reaches the engram side of
- * `pull()`. The `git pull` in step 2 is the exact event that MINTS a duplicate
- * physical line (`merge=union`, ADR-0017 REQ-MF-3), and this path used to walk
- * straight from there into hydrating the live layer — never rebuilding the
- * derived index, never reading the log, reporting nothing. `plainfiles.pull()`
- * has always been `git pull` + reindex; both backends now say the same thing
+ * Step 2 is where #574's rule reaches the engram side of `pull()`. The `git
+ * pull` in step 1 is the exact event that MINTS a duplicate physical line
+ * (`merge=union`, ADR-0017 REQ-MF-3), and this path used to walk straight
+ * from there into hydrating the live layer — never rebuilding the derived
+ * index, never reading the log, reporting nothing. `plainfiles.pull()` has
+ * always been `git pull` + reindex; both backends now say the same thing
  * about the same store. Ordering matters as much as presence: the reindex is
  * the fail-closed gate, so a store that cannot be indexed — a TAMPERED line,
  * which is the only refusal left — refuses BEFORE engram is hydrated from it,
@@ -831,10 +785,6 @@ export async function importMemory({
  *
  * @param {object} [opts]
  * @param {string}  [opts.root]              Repo root (defaults to this package's root).
- * @param {(root: string) => boolean}  [opts._isManifestDirty]
- *   Returns true when manifest.json has uncommitted local changes.
- * @param {(root: string) => void}     [opts._restoreManifest]
- *   Discards uncommitted manifest changes (non-fatal, best-effort).
  * @param {(root: string) => void}     [opts._gitPull]
  *   Runs `git pull`; MUST throw on non-zero exit so import is not called on failure.
  * @param {() => void | Promise<void>} [opts._import]
@@ -842,24 +792,14 @@ export async function importMemory({
  */
 export async function pullMemory({
   root = repoRoot,
-  _isManifestDirty = _defaultIsManifestDirty,
-  _restoreManifest = _defaultRestoreManifest,
   _gitPull = _defaultGitPull,
   _rebuildIndex = rebuildIndex,
   _import = importMemory,
 } = {}) {
-  // Step 1: discard regenerable manifest churn so git pull can proceed.
-  if (_isManifestDirty(root)) {
-    console.log(
-      "  ℹ .memory/manifest.json has uncommitted local changes — restoring before pull",
-    );
-    _restoreManifest(root);
-  }
-
-  // Step 2: pull latest commits (throws on failure — import must not run).
+  // Step 1: pull latest commits (throws on failure — import must not run).
   _gitPull(root);
 
-  // Step 3: rebuild the derived index from the just-merged records/ (#574).
+  // Step 2: rebuild the derived index from the just-merged records/ (#574).
   // Throws on a store the merge left unindexable — hydration must not run on
   // one, so this deliberately sits BEFORE the import.
   const { count, duplicates } = _rebuildIndex({
@@ -867,7 +807,7 @@ export async function pullMemory({
     indexPath: join(root, ".memory", "index.jsonl"),
   });
 
-  // Step 4: hydrate local engram from the newly merged .memory/.
+  // Step 3: hydrate local engram from the newly merged .memory/.
   await _import();
 
   return { indexCount: count, duplicates: normalizeDuplicates(duplicates) };
@@ -1224,30 +1164,20 @@ export async function index() {
 }
 
 /**
- * setup() — idempotent setup for the engram backend:
- *   1. Ensure .engram → .memory symlink (delegates to ensureMemorySymlink).
- *   2. Register the merge driver for .memory/manifest.json (ADR-0002).
+ * setup() — idempotent setup for the engram backend: ensure the `.engram →
+ * .memory` symlink (delegates to ensureMemorySymlink). This is the ONLY
+ * place the symlink is created or repaired (#955, R7 — symlink confinement);
+ * `share()`/`pull()` never touch it.
+ *
+ * The merge-driver registration this function used to also perform is
+ * retired (#955, R7): the tracked derived-index file it registered a merge
+ * driver for has had no writer since #874 split B, so there is nothing left
+ * for a driver to merge.
  *
  * Called by bootstrap.sh §7 via: node brain/scripts/memory/cli.mjs setup
  */
 export async function setup() {
-  // 1. Ensure symlink .engram → .memory using the hardened helper.
   ensureMemorySymlink();
-
-  // 2. Register merge driver for .memory/manifest.json.
-  const result = spawnSync(
-    "git",
-    [
-      "config",
-      "merge.engram-manifest.driver",
-      "node brain/scripts/merge-engram-manifest.mjs %O %A %B",
-    ],
-    { stdio: "inherit", cwd: repoRoot },
-  );
-  if (result.status !== 0) {
-    throw new Error("Failed to register engram-manifest merge driver");
-  }
-  console.log("  ✓ merge driver engram-manifest registered");
 }
 
 // ---------------------------------------------------------------------------

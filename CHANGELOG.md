@@ -15,6 +15,19 @@ keeps the bare names as identical aliases, so commands in history and records st
 run. Consumers never had these scripts. The managed seven arrive with #922 under their
 `brain:memory:*` names only.
 
+## Unreleased — engram's transport artifacts retire (#955)
+
+**Manual step (consumers upgrading from an older brain).** The upgrade drops the
+`merge=engram-manifest` attribute (`.gitattributes` is managed), so git never runs the old
+driver again. Two inert leftovers stay in YOUR repo and nothing reads them. To remove them:
+
+    git rm .memory/manifest.json
+    git config --unset merge.engram-manifest.driver
+
+- `session:start`, `day:start` and `brain:memory:pull` no longer restore a manifest;
+  `brain:memory:share` no longer creates the `.engram` symlink (`brain:env:init` /
+  `cli.mjs setup` still does).
+
 ## v1.5.0 — the governance surface stops trusting what it cannot measure
 
 **No manual step.** No migration was promoted since v1.4.0, so nothing is
