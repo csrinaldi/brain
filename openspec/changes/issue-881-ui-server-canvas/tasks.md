@@ -8,9 +8,13 @@ issue: 881
 Strict TDD is active for this project (`npm test` = `node --test
 "brain/scripts/**/*.test.mjs" "test/**/*.e2e.test.mjs"`). Every task that adds
 behaviour is preceded by the task that writes its failing test. Chain
-strategy: **stacked-to-main** — each PR below targets `main` in order; PR
-*n+1* branches off PR *n*'s branch (or off `main` once PR *n* is merged), not
-off a tracker branch.
+strategy (maintainer ruling, 2026-09-14, supersedes the stacked-to-main text
+below): **feature-branch-chain** on the tracker `feature/brain-ui`. PR 1
+(#964) is squash-merged into the tracker as `8d074e44`. PR *n* targets the
+tracker branch once PR *n-1* is merged into it, or targets PR *n-1*'s branch
+directly while that PR is still open. The tracker PR (#970, draft) is the
+only PR in this chain that targets `main`, and it closes #881 once every
+child PR has landed on the tracker.
 
 ## Ticket reconciliation
 
