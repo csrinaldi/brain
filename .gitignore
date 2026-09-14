@@ -61,11 +61,16 @@ temp/
 *.zip
 
 # MEMORIA ENGRAM
-# .memory/ (chunks + manifest) SÍ se commitea: es la memoria durable de equipo,
+# .memory/ (chunks) SÍ se commitea: es la memoria durable de equipo,
 # vinculada a la rama/ticket. Ver brain/project/decisions/adr-0002-memoria-git-based-dos-capas.md
 # .engram es un symlink LOCAL → .memory (convención interna de engram); NO se trackea.
 # La DB local de engram vive fuera del repo (~/.engram) y NO se trackea.
 .engram
+
+# MANIFEST RETIRADO (issue #955): sin escritor desde #874 split B. La línea
+# evita que un binario de engram viejo o un checkout previo lo vuelva a
+# trackear tras el upgrade (ver CHANGELOG.md, sección Unreleased).
+.memory/manifest.json
 
 # ÍNDICE DE SKILLS (reconstruible): .atl/ lo regenera `gentle-ai skill-registry refresh`.
 # Es cache local, no fuente de verdad — cada SKILL.md manda.

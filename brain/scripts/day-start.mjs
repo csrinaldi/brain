@@ -16,7 +16,6 @@ import { vcsToken } from './vcs/lib/token.mjs';
 import { detectPM } from './lib/pm.mjs';
 import { t } from './i18n/t.mjs';
 import { currentBranch } from './lib/git-branch.mjs';
-import { restoreManifestChurn } from './lib/memory-manifest.mjs';
 import { agentRuntimeReport, platformEnvVars, platformConfig } from './harness/backends/agent-runtime.mjs';
 import { readEnv } from './lib/env-read.mjs';
 import { laneSweepEnabled, runLaneSweep, laneSweepLine } from './memory/day-start-sweep.mjs';
@@ -111,18 +110,6 @@ if (!vcs) {
         warn(await t('day.vcs.authFailed'));
       }
     }
-  }
-}
-
-// ── Pre-sync: restore manifest churn so git merge can proceed ────────────────
-// .memory/manifest.json is rewritten by `engram sync --export` (a derived index,
-// not user content). Discarding uncommitted local churn before the git merge is
-// safe and prevents the "your local changes would be overwritten" abort.
-// This is the "pull EARLY" step described in issue #59 / ADR-0002.
-{
-  const { restored } = restoreManifestChurn(ROOT);
-  if (restored) {
-    info(await t('day.memory.manifestRestored') || `manifest.json churn discarded (safe)`);
   }
 }
 
@@ -359,9 +346,9 @@ if (!existsSync(hookFile)) {
 const engram = capture('engram', ['--version']);
 if (engram.status === 0) {
   // 4a. Import team memory from .memory/ → local engram (import-only, no git pull).
-  //     Step 2 already ran git fetch + merge (guarded by the early manifest restore),
-  //     so the working tree is up-to-date. Using "import" avoids a redundant network
-  //     call and eliminates any risk of post-merge hook recursion.
+  //     Step 2 already ran git fetch + merge, so the working tree is up-to-date.
+  //     Using "import" avoids a redundant network call and eliminates any risk
+  //     of post-merge hook recursion.
   console.log(`  ${C.dim}${await t('day.memory.importing')}${C.reset}`);
   await run(NODE, ['brain/scripts/memory/cli.mjs', 'import']);
 

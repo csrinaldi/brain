@@ -127,9 +127,9 @@ test('#641 FALLBACK_OPS covers ONLY the ops that engram cannot run without its b
   // without engram. `share` was removed for the same reason (#874 split B,
   // R11/B4a fix): `engram.share()` no longer calls `requireEngram()` or the
   // binary at all, so there is no longer a failure on this op for the
-  // fallback to replace — and the fallback's own `plainfiles.share()` skips
-  // R12's `_ensureSymlink` self-heal, which a live substitution would have
-  // silently dropped, mirroring the `setup` regression this test already pins.
+  // fallback to replace — and a live substitution would silently switch
+  // which reindex implementation runs, mirroring the `setup` regression this
+  // test already pins.
   assert.deepStrictEqual([...FALLBACK_OPS], ['pull']);
   for (const op of ['setup', 'save', 'search', 'share', 'index']) {
     assert.ok(!FALLBACK_OPS.includes(op), `'${op}' exits without the binary — there is no failure to replace`);

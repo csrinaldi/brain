@@ -16,7 +16,6 @@ import {
   deriveChangeFromBranch,
   assertLocalArgv,
   renderContextBlock,
-  step1RestoreManifest,
   step2HydrateEngram,
   step3ResolveChange,
   step4LoadTicketMemory,
@@ -164,16 +163,14 @@ const SESSION_STRINGS = {
   memoryOk:         en['session.memory.ok'],
   memorySkip:       en['session.memory.skip'],
   memorySkipReason: en['session.memory.skip.reason'],
-  manifestRestored: en['session.manifest.restored'],
   ticketLabel:      en['session.ticket.label'],
   ticketNone:       en['session.ticket.none'],
   memoryRecencyStale:   en['session.memory.recency.stale'],
   memoryRecencyUnknown: en['session.memory.recency.unknown'],
 };
 
-test('renderContextBlock: full success — resolved change, engram ok, manifest restored, ticket present', () => {
+test('renderContextBlock: full success — resolved change, engram ok, ticket present', () => {
   const model = {
-    manifest: { restored: true },
     engram: { ok: true },
     change: { branch: 'feat/issue-138-s2-core', token: ISSUE_138, matches: ['issue-138-session-start'] },
     ticket: '  Feature:      issue-138-session-start\n  Next action:  implement PR2\n',
@@ -184,7 +181,6 @@ test('renderContextBlock: full success — resolved change, engram ok, manifest 
     'branch:   feat/issue-138-s2-core',
     'change:   issue-138-session-start',
     'memory:   engram hydrated',
-    'manifest: churn restored (safe)',
     '------------------------------------------',
     'ticket:',
     '  Feature:      issue-138-session-start\n  Next action:  implement PR2\n',
@@ -304,13 +300,29 @@ test('renderContextBlock: manifest line omitted when nothing to restore', () => 
   assert.ok(!lines.some((l) => l.startsWith('manifest:')), 'manifest line must be omitted when restored:false');
 });
 
+// SS3 (#955, R9/R6) — the manifest render line is retired entirely: a
+// `manifest` field in the model (of any shape) must render byte-identically
+// to no field at all, since renderContextBlock no longer branches on it.
+test('SS3 (#955): a manifest field in the model renders byte-identically to no field', () => {
+  const base = {
+    engram: { ok: true },
+    change: { branch: 'main', token: null, matches: [] },
+    ticket: null,
+  };
+  const withManifest = { ...base, manifest: { restored: true } };
+  const withoutManifest = { ...base };
+  assert.equal(
+    renderContextBlock(withManifest, SESSION_STRINGS),
+    renderContextBlock(withoutManifest, SESSION_STRINGS),
+  );
+});
+
 // Proves `strings` is actually consumed by the renderer (not a hardcoded
 // English literal that merely happens to match en.mjs's current values) —
 // without this test, a production implementation that ignores its 2nd
 // argument would still pass every snapshot above.
 test('renderContextBlock: consumes the provided strings map, not a hardcoded literal (i18n wiring proof)', () => {
   const model = {
-    manifest: { restored: true },
     engram: { ok: true },
     change: { branch: 'feat/issue-138-x', token: ISSUE_138, matches: ['issue-138-session-start'] },
     ticket: 'next_action: ship it\n',
@@ -324,7 +336,6 @@ test('renderContextBlock: consumes the provided strings map, not a hardcoded lit
     changeAmbiguous:  'MARKER_CHANGE_AMBIGUOUS ({count}): {list}',
     memoryOk:         'MARKER_MEMORY_OK',
     memorySkip:       'MARKER_MEMORY_SKIP',
-    manifestRestored: 'MARKER_MANIFEST_RESTORED',
     ticketLabel:      'MARKER_TICKET_LABEL',
     ticketNone:       'MARKER_TICKET_NONE',
   };
@@ -333,7 +344,6 @@ test('renderContextBlock: consumes the provided strings map, not a hardcoded lit
   assert.ok(output.includes('MARKER_BRANCH feat/issue-138-x'), 'branch line must interpolate {branch} into strings.branch');
   assert.ok(output.includes('MARKER_CHANGE issue-138-session-start'), 'change line must interpolate {change} into strings.changeOne');
   assert.ok(output.includes('MARKER_MEMORY_OK'), 'memory line must come from strings.memoryOk');
-  assert.ok(output.includes('MARKER_MANIFEST_RESTORED'), 'manifest line must come from strings.manifestRestored');
   assert.ok(output.includes('MARKER_TICKET_LABEL'), 'ticket label must come from strings.ticketLabel');
   assert.ok(!output.includes('brain · session context'), 'must NOT fall back to the old hardcoded English literal');
 });
@@ -389,28 +399,9 @@ test('renderContextBlock: deterministic — same input → same output (no clock
 });
 
 // ---------------------------------------------------------------------------
-// step1RestoreManifest / step2HydrateEngram / step3ResolveChange /
+// step2HydrateEngram / step3ResolveChange /
 // step4LoadTicketMemory — ordered step functions, injectable deps (design §1.1)
 // ---------------------------------------------------------------------------
-
-test('step1RestoreManifest: churn present → {restored:true}', () => {
-  const _spawn = (cmd, args) => {
-    if (args[0] === 'status') return { status: 0, stdout: ' M .memory/manifest.json\n' };
-    return { status: 0, stdout: '' };
-  };
-  assert.deepEqual(step1RestoreManifest('/repo', { _spawn }), { restored: true });
-});
-
-test('step1RestoreManifest: clean → {restored:false}', () => {
-  const _spawn = () => ({ status: 0, stdout: '' });
-  assert.deepEqual(step1RestoreManifest('/repo', { _spawn }), { restored: false });
-});
-
-test('step1RestoreManifest: _spawn throws → {restored:false}, never throws', () => {
-  const _spawn = () => { throw new Error('spawn git ENOENT'); };
-  assert.doesNotThrow(() => step1RestoreManifest('/repo', { _spawn }));
-  assert.deepEqual(step1RestoreManifest('/repo', { _spawn }), { restored: false });
-});
 
 test('step2HydrateEngram: spawn exits 0 → {ok:true}', () => {
   const _spawn = () => ({ status: 0, stdout: '' });
@@ -556,11 +547,10 @@ test('runSessionStart: returns {exitCode:0, output} even when every step fails',
   assert.ok(result.output.includes('brain · session context'));
 });
 
-test('runSessionStart: executes steps in order manifest → engram → branch/change → ticket', async () => {
+test('runSessionStart: executes steps in order engram → branch/change → ticket', async () => {
   const order = [];
   const _spawn = (cmd, args) => {
-    if (args[0] === 'status') order.push('manifest');
-    else if (typeof args[0] === 'string' && args[0].includes('memory/cli.mjs') && args[1] === 'import') {
+    if (typeof args[0] === 'string' && args[0].includes('memory/cli.mjs') && args[1] === 'import') {
       order.push('engram');
     }
     return { status: 0, stdout: '' };
@@ -571,7 +561,7 @@ test('runSessionStart: executes steps in order manifest → engram → branch/ch
 
   await runSessionStart('/repo', { _spawn, _branch, _changes, _resume }, SESSION_STRINGS);
 
-  assert.deepEqual(order, ['manifest', 'engram', 'branch', 'ticket']);
+  assert.deepEqual(order, ['engram', 'branch', 'ticket']);
 });
 
 test('runSessionStart: output composition matches renderContextBlock for the resolved step results', async () => {
@@ -605,9 +595,7 @@ test('runSessionStart: output composition matches renderContextBlock for the res
 // assertLocalArgv(cmd, args) — runtime local-op allowlist gate (design §1.5b)
 // ---------------------------------------------------------------------------
 
-test('assertLocalArgv: allowlisted git status|restore|rev-parse pass through', () => {
-  assert.doesNotThrow(() => assertLocalArgv('git', ['status', '--porcelain', '--', '.memory/manifest.json']));
-  assert.doesNotThrow(() => assertLocalArgv('git', ['restore', '--', '.memory/manifest.json']));
+test('assertLocalArgv: allowlisted git rev-parse passes through', () => {
   assert.doesNotThrow(() => assertLocalArgv('git', ['rev-parse', '--abbrev-ref', 'HEAD']));
 });
 
@@ -659,6 +647,18 @@ test('assertLocalArgv: throws synchronously (no promise rejection)', () => {
   assert.ok(threw, 'must throw synchronously, not return a rejected promise');
 });
 
+// SS1/SS2 (#955, D3) — the gate narrows to ['rev-parse'] once the manifest
+// restore (the only user of `git status`/`git restore`) is retired. A dead
+// `restore`/`status` entry would let a read-only loader run a tree-mutating
+// git verb.
+test('SS1 (#955): assertLocalArgv rejects git restore — no longer allowlisted', () => {
+  assert.throws(() => assertLocalArgv('git', ['restore', '--', '.memory/manifest.json']));
+});
+
+test('SS2 (#955): assertLocalArgv rejects git status — no longer allowlisted', () => {
+  assert.throws(() => assertLocalArgv('git', ['status', '--porcelain']));
+});
+
 // ---------------------------------------------------------------------------
 // No-network — import-graph allowlist (structural, design §1.5a)
 // ---------------------------------------------------------------------------
@@ -668,7 +668,6 @@ const SESSION_START_PATH = join(dirname(fileURLToPath(import.meta.url)), 'sessio
 const ALLOWED_IMPORT_SPECIFIERS = [
   /^node:/,
   './lib/git-branch.mjs',
-  './lib/memory-manifest.mjs',
   './memory/lib/auto-resume.mjs',
   './context/synthesizer.mjs',
   './i18n/t.mjs',
@@ -721,7 +720,6 @@ test('no-network: spy _spawn over the full loop — every argv allowlisted, none
   const _spawn = (cmd, args) => {
     calls.push({ cmd, args });
     if (cmd === 'git' && args[0] === 'rev-parse') return { status: 0, stdout: 'feat/issue-138-x\n' };
-    if (cmd === 'git' && args[0] === 'status') return { status: 0, stdout: '' }; // clean — no restore call
     if (typeof args[0] === 'string' && args[0].includes('memory/cli.mjs') && args[1] === 'feature-resume') {
       return { status: 0, stdout: 'next_action: ship it\n' };
     }
@@ -743,34 +741,16 @@ test('no-network: spy _spawn over the full loop — every argv allowlisted, none
     );
   }
 
-  // Proof that all 4 controlled spawn sites were actually exercised (not
-  // stubbed away): manifest restore, branch resolution, engram hydrate, and
-  // ticket memory must all be present, all flowing through the same spy.
+  // Proof that all 3 controlled spawn sites were actually exercised (not
+  // stubbed away): branch resolution, engram hydrate, and ticket memory must
+  // all be present, all flowing through the same spy.
   const kinds = calls.map((c) => (c.cmd === 'git' ? `git:${c.args[0]}` : `node:${c.args[1]}`));
-  assert.ok(kinds.includes('git:status'), 'manifest restore (git status) must flow through the spy');
   assert.ok(kinds.includes('git:rev-parse'), 'branch resolution (git rev-parse) must flow through the spy');
   assert.ok(kinds.includes('node:import'), 'engram hydrate (memory/cli.mjs import) must flow through the spy');
   assert.ok(
     kinds.includes('node:feature-resume'),
     'ticket memory (memory/cli.mjs feature-resume) must flow through the spy',
   );
-});
-
-test('no-network: the pull codepath is never reached even when manifest churn is present', async () => {
-  const calls = [];
-  const _spawn = (cmd, args) => {
-    calls.push({ cmd, args });
-    if (args[0] === 'status') return { status: 0, stdout: ' M .memory/manifest.json\n' };
-    return { status: 0, stdout: '' };
-  };
-  const _changes = () => [];
-
-  await runSessionStart('/repo', { _spawn, _changes }, SESSION_STRINGS);
-
-  assert.ok(calls.some((c) => c.args[0] === 'restore'), 'manifest restore should have run');
-  for (const { args } of calls) {
-    assert.ok(!FORBIDDEN_VERBS.test(args.join(' ')), `forbidden verb found: ${args.join(' ')}`);
-  }
 });
 
 // ---------------------------------------------------------------------------

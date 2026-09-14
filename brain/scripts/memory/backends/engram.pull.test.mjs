@@ -3,8 +3,9 @@
 // Acceptance criteria:
 //
 //   pullMemory():
-//   (a) dirty manifest → restore called, then pull, then import, in order.
-//   (b) clean manifest → no restore, pull + import (in order).
+//   (a) pull → import, in order (the manifest-churn-discard step this used
+//       to run first is retired — #955, R6 — there is no writer left to
+//       discard churn from).
 //   (c) failing git pull → error is propagated and import is NOT called.
 //   (f) reindex parity (issue #361) — pullMemory rebuilds the index BETWEEN
 //       git pull and import, unconditionally, exactly like
@@ -38,38 +39,15 @@ import assert from 'node:assert/strict';
 import { pullMemory, importMemory } from './engram.mjs';
 
 // ---------------------------------------------------------------------------
-// pullMemory (a) dirty manifest → restore → pull → import in order
+// pullMemory (a) pull → import, in order
 // ---------------------------------------------------------------------------
 
-test('pullMemory: dirty manifest → restore → pull → import in order', async () => {
+test('pullMemory: pull → import in order', async () => {
   const callLog = [];
 
   await pullMemory({
-    _isManifestDirty: () => true,
-    _restoreManifest: () => { callLog.push('restore'); },
-    _gitPull:         () => { callLog.push('pull'); },
-    _import:          () => { callLog.push('import'); },
-  });
-
-  assert.deepEqual(
-    callLog,
-    ['restore', 'pull', 'import'],
-    `expected ['restore','pull','import'], got ${JSON.stringify(callLog)}`,
-  );
-});
-
-// ---------------------------------------------------------------------------
-// pullMemory (b) clean manifest → pull → import (no restore)
-// ---------------------------------------------------------------------------
-
-test('pullMemory: clean manifest → pull → import (no restore)', async () => {
-  const callLog = [];
-
-  await pullMemory({
-    _isManifestDirty: () => false,
-    _restoreManifest: () => { callLog.push('restore'); },
-    _gitPull:         () => { callLog.push('pull'); },
-    _import:          () => { callLog.push('import'); },
+    _gitPull: () => { callLog.push('pull'); },
+    _import:  () => { callLog.push('import'); },
   });
 
   assert.deepEqual(
@@ -88,10 +66,8 @@ test('pullMemory: failing git pull propagates error and skips import', async () 
 
   await assert.rejects(
     () => pullMemory({
-      _isManifestDirty: () => false,
-      _restoreManifest: () => {},
-      _gitPull:         () => { throw new Error('git pull failed: exit 1'); },
-      _import:          () => { importCalled = true; },
+      _gitPull: () => { throw new Error('git pull failed: exit 1'); },
+      _import:  () => { importCalled = true; },
     }),
     (err) => {
       assert.ok(
@@ -127,8 +103,6 @@ test('pullMemory: rebuilds the index between git pull and import, in order (#361
   const calls = [];
   const result = await pullMemory({
     root: '/fake/root',
-    _isManifestDirty: () => false,
-    _restoreManifest: () => { calls.push(['restore']); },
     _gitPull: () => { calls.push(['pull']); },
     _rebuildIndex: (opts) => { calls.push(['rebuildIndex', opts]); return { count: 7 }; },
     _import: () => { calls.push(['import']); },
@@ -157,8 +131,6 @@ test('pullMemory: reindexes even on a no-op pull — unconditional, not gated on
   let rebuildCalled = false;
   const result = await pullMemory({
     root: '/fake/root',
-    _isManifestDirty: () => false,
-    _restoreManifest: () => {},
     _gitPull: () => { /* no-op: already up to date */ },
     _rebuildIndex: () => { rebuildCalled = true; return { count: 0 }; },
     _import: () => ({ written: 0, skipped: 0 }),
@@ -193,8 +165,6 @@ test('pullMemory default _import seam is importMemory', async () => {
   // (Uses other mocked seams to avoid real git/engram calls.)
   let called = false;
   await pullMemory({
-    _isManifestDirty: () => false,
-    _restoreManifest: () => {},
     _gitPull: () => {},
     _import: async () => { called = true; },  // stand-in for importMemory
   });

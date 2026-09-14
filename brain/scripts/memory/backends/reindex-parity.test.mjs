@@ -40,7 +40,6 @@ test('reindex-parity: share() reindexes unconditionally on BOTH backends, even w
   );
   const engramResult = await engramShare({
     root: '/fake/engram-root',
-    _ensureSymlink: () => {},
     _rebuildIndex: () => { calls.engram += 1; return { count: 0 }; },
   });
 
@@ -66,8 +65,6 @@ test('reindex-parity: the pull path reindexes unconditionally on BOTH backends, 
   const engramCalls = [];
   const engramResult = await engramPullMemory({
     root: '/fake/engram-root',
-    _isManifestDirty: () => false,
-    _restoreManifest: () => {},
     _gitPull: () => { engramCalls.push('gitPull'); },
     _rebuildIndex: (opts) => { engramCalls.push('rebuildIndex'); return { count: 0, opts }; },
     _import: () => { engramCalls.push('import'); },
@@ -94,7 +91,6 @@ test('reindex-parity: both backends derive the SAME recordsDir/indexPath shape f
   );
   await engramShare({
     root: '/r',
-    _ensureSymlink: () => {},
     _rebuildIndex: (opts) => { shapes.push(['engram.share', opts]); return { count: 0 }; },
   });
   await plainfilesPull(
@@ -106,8 +102,6 @@ test('reindex-parity: both backends derive the SAME recordsDir/indexPath shape f
   );
   await engramPullMemory({
     root: '/r',
-    _isManifestDirty: () => false,
-    _restoreManifest: () => {},
     _gitPull: () => {},
     _rebuildIndex: (opts) => { shapes.push(['engram.pullMemory', opts]); return { count: 0 }; },
     _import: () => {},

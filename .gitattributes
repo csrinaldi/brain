@@ -1,11 +1,5 @@
-# Register the union-merge driver for .memory/manifest.json.
-# The driver is installed locally via: npm run brain:env:init  (scripts/bootstrap.sh)
-# or manually: git config merge.engram-manifest.driver \
-#   "node scripts/merge-engram-manifest.mjs %O %A %B"
-/.memory/manifest.json merge=engram-manifest
-
 # Union-merge for the brain-owned durable record log (ADR-0017, REQ-MF-3,
-# issue #214/C1b). Unlike the line above, this uses git's BUILT-IN `union`
+# issue #214/C1b). This uses git's BUILT-IN `union`
 # merge driver — no per-clone `git config` registration required.
 #
 # NO LONGER LOAD-BEARING (issue #677). A merge driver — built-in or not — is a

@@ -6,7 +6,7 @@
 
 Defines the observable behavior of `session:start` — a universal, read-only,
 local-only context loader that any agent or human can run to restore brain's
-operational context (manifest, engram, active change, ticket memory) without
+operational context (engram, active change, ticket memory) without
 the cost or network surface of `day:start`.
 
 ## Requirements
@@ -39,20 +39,13 @@ reads) are permitted.
 - WHEN inspected/tested
 - THEN no code path calls `memory/cli.mjs pull` or any non-allowlisted op
 
-### Requirement: REQ-3 Manifest Restore Before Other Ops
+### Requirement: REQ-3 (Removed — #955)
 
-The system MUST restore `.memory/manifest.json` churn before any git or
-engram operation, and this restore MUST be idempotent and safe to repeat.
-
-#### Scenario: Manifest restored first
-- GIVEN a `.memory/manifest.json` with local churn
-- WHEN `session:start` runs
-- THEN the manifest is restored before engram hydration or branch resolution begins
-
-#### Scenario: Idempotent on repeat runs
-- GIVEN `session:start` already ran once in the session
-- WHEN it runs again
-- THEN the manifest restore produces no errors and no unintended state change
+(Reason: no writer of the tracked derived-index file this requirement
+restored remains since #874 split B; the restore step is dead weight.)
+(Migration: behavior replaced by the "No Manifest Operation" requirement in
+the artifact-retirement change delta. REQ-4 through REQ-9 keep their
+numbers — this entry stays a stub so nothing is renumbered.)
 
 ### Requirement: REQ-4 Local Engram Hydration
 
@@ -110,7 +103,7 @@ containing: brain version (optional/best-effort), current branch, resolved
 change(s) (or "none"), and the ticket resume summary (or "none").
 
 #### Scenario: Full context available
-- GIVEN manifest restore, engram hydration, branch resolution, and resume all succeed
+- GIVEN engram hydration, branch resolution, and resume all succeed
 - WHEN `session:start` completes
 - THEN stdout contains all four sections in a stable, parseable order
 
@@ -131,9 +124,9 @@ All user-facing strings produced by `session:start` MUST be sourced from
 
 ### Requirement: REQ-9 day:start Non-Regression
 
-After extracting `lib/git-branch.mjs` and `lib/memory-manifest.mjs` for reuse
-by `session:start`, `day:start` MUST preserve its existing observable
-behavior (networked steps, output, exit codes).
+After extracting `lib/git-branch.mjs` for reuse by `session:start`,
+`day:start` MUST preserve its existing observable behavior (networked steps,
+output, exit codes) and MUST NOT reintroduce a manifest-restore call site.
 
 #### Scenario: day:start behavior unchanged after extraction
 - GIVEN the pre-extraction `day:start` test suite
