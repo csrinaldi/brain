@@ -1,6 +1,6 @@
-// secret-scrub.mjs — fail-closed secret scanner for `memory:share` (issue #214, C1b).
+// secret-scrub.mjs — fail-closed secret scanner for `brain:memory:share` (issue #214, C1b).
 //
-// Scans ONLY the content materialized in the CURRENT `memory:share` run — never
+// Scans ONLY the content materialized in the CURRENT `brain:memory:share` run — never
 // the whole store (C1a design.md Decision 5). Today "materialized this run"
 // means the engram gzip chunks `share()` writes to `.memory/chunks/*.jsonl.gz`
 // (see backends/engram.mjs#scrubMaterializedChunks) — a deliberate pre-C2 scrub

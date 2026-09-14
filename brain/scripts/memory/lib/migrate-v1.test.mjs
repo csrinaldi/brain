@@ -1,4 +1,4 @@
-// migrate-v1.test.mjs — unit tests for the memory:migrate-v1 dry-run report
+// migrate-v1.test.mjs — unit tests for the brain:memory:migrate-v1 dry-run report
 // (issue #217, C2a scope: dry-run + histograms only; the persisting real run
 // is C2b — see design.md).
 //

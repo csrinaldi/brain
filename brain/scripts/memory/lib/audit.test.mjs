@@ -1,4 +1,4 @@
-// audit.test.mjs — the pure half of `memory:audit` (#870, memory 2.0 task 0.2).
+// audit.test.mjs — the pure half of `brain:memory:audit` (#870, memory 2.0 task 0.2).
 // Every number the command prints is computed here from plain data; these tests
 // pin each definition design.md D3 fixes, so the baseline on #864 and the exit
 // report are comparable by construction rather than by memory.

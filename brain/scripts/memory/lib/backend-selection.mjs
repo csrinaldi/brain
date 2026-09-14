@@ -10,13 +10,13 @@
 //
 // ADR-0017 makes the durable record format brain-owned and the backend mere
 // transport, so capture is supposed to be possible with NO backend installed —
-// that is why `plainfiles` exists. But only `memory:save` was pinned to it
+// that is why `plainfiles` exists. But only `brain:memory:save` was pinned to it
 // (REQ-530-1); `share`/`pull` kept the `engram` default, so in the agent
 // environment the verb the PR template names died with
 //
 //   memory/cli: engram.share() failed — engram binary not found. Install via: gentle-ai install
 //
-// while `MEMORY_BACKEND=plainfiles npm run memory:share` exited clean the whole
+// while `MEMORY_BACKEND=plainfiles npm run brain:memory:share` exited clean the whole
 // time. #641 reports four PRs whose memory capture was skipped on the strength
 // of that message: it reads as "capture is impossible here" when it means "you
 // asked for the wrong transport".

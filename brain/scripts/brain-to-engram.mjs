@@ -3,7 +3,7 @@
 //   MD (brain/) = fuente de verdad   ·   engram = índice reconstruible.
 // Indexa los documentos DURABLES del cerebro a engram de forma idempotente
 // (--topic derivado del path → upsert, no duplica al re-correr).
-// Si se pierde engram: `npm run memory:index` lo reconstruye desde brain/.
+// Si se pierde engram: `npm run brain:memory:index` lo reconstruye desde brain/.
 
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, relative, basename } from "node:path";

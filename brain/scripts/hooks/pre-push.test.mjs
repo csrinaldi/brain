@@ -4,7 +4,7 @@
 // Acceptance criteria:
 //
 //   (a) When node is available, the hook calls feature-checkpoint AFTER
-//       memory:share — both ops appear in the mock node call log.
+//       brain:memory:share — both ops appear in the mock node call log.
 //   (b) When node is not in PATH the hook exits 0 immediately (command -v
 //       node guard) and feature-checkpoint is NOT called.
 //   (c) When feature-checkpoint exits non-zero the hook continues and

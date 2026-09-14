@@ -29,7 +29,7 @@ const ISOLATED_GIT_ENV = { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: 
 // `--supersedes` refusal test below spawns the real CLI, which resolves the
 // upstream ref through the real, unstubbed predicate. Left ambient, an
 // exported `BRAIN_MEMORY_UPSTREAM_REF` (the variable an operator debugging
-// `memory:share`/#701 would set) overrides the derived origin/HEAD /
+// `brain:memory:share`/#701 would set) overrides the derived origin/HEAD /
 // origin/main lookup and changes the could-not-verify wording this suite
 // pins, making the verdict depend on the developer's shell.
 // eslint-disable-next-line no-unused-vars

@@ -111,7 +111,7 @@ test('.memory/index.jsonl is excluded by filename grammar — never in files or 
   assert.equal(p.skipped.length, 0);
 });
 
-test('a not-a-record name, including a pre-#677 month log, skips pointing at memory:split-records', () => {
+test('a not-a-record name, including a pre-#677 month log, skips pointing at brain:memory:split-records', () => {
   const p = plan({
     candidates: [
       candidate({ worktree: '/repo/wt-a', file: '2026-09.jsonl', content: '{}' }),
@@ -122,7 +122,7 @@ test('a not-a-record name, including a pre-#677 month log, skips pointing at mem
   assert.equal(p.skipped.length, 2);
   for (const s of p.skipped) {
     assert.equal(s.reason, 'not-a-record');
-    assert.match(s.hint, /memory:split-records/);
+    assert.match(s.hint, /brain:memory:split-records/);
   }
 });
 
