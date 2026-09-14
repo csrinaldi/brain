@@ -181,7 +181,7 @@ test('#874 (D8): `save` is NOT substituted — engram no longer fails on the mis
   assert.match(r.stderr, /deferred/i, 'the hydration must be reported as deferred, never as a refusal');
 });
 
-test('#641 `setup` is NOT substituted — engram.setup() needs no binary, and owns the merge driver', (t) => {
+test('#641 `setup` is NOT substituted — engram.setup() needs no binary, and owns the .engram symlink', (t) => {
   // THE REGRESSION THIS PINS. `engram.setup()` exits 0 with no engram
   // installed: it creates the `.engram → .memory` symlink (R7, #955 —
   // the ONLY place that symlink is created or repaired). `plainfiles.setup()`

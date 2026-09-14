@@ -54,6 +54,10 @@ test('share: the function body names none of the retired exporter seams — a so
       `share() must not reference ${retired} — it was retired by #874 split B, not merely left uncalled`,
     );
   }
+  assert.doesNotMatch(
+    src, /_ensureSymlink/,
+    'share() must not reference _ensureSymlink — #958 confined the .engram symlink to setup()',
+  );
 });
 
 // ── rule 3 (R11) — share completes with the engram binary ABSENT ─────────────
