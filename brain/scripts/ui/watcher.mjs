@@ -117,6 +117,19 @@ export function createWatcher({
     if (handles.has(absPath)) return;
     try {
       const handle = _watch(absPath, { persistent: false }, () => onFire(absPath));
+      // A LIVE `FSWatcher` can fail asynchronously, well after registration
+      // succeeded — a late `ENOSPC`, `EPERM`, or the watched path itself
+      // disappearing. `fs.watch`'s `EventEmitter` throws synchronously out of
+      // `.emit()` if 'error' has no listener, which would crash this whole
+      // process (R881-9: a watcher failure is a said state, never a crash).
+      // Guarded by `typeof handle.on === 'function'` so test doubles that
+      // return a plain `{close()}` (no EventEmitter) keep working unchanged.
+      if (typeof handle.on === 'function') {
+        handle.on('error', (err) => {
+          recordFailure(label, err);
+          closeWatch(absPath); // a failed handle cannot fire again
+        });
+      }
       handles.set(absPath, { handle, label, kind, worktreePath });
       failed = failed.filter((f) => f.path !== label);
     } catch (err) {

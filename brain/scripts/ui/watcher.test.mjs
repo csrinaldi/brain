@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import { mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { EventEmitter } from 'node:events';
 
 import { testTmp } from '../lib/test-tmp.mjs';
 import { createWatcher, resolveGitCommonDir } from './watcher.mjs';
@@ -42,6 +43,26 @@ function spyWatch() {
   };
   fn.calls = calls;
   fn.closesByPath = closesByPath;
+  fn.fire = (path) => { const c = calls.find((entry) => entry.path === path); if (c) c.listener('change', null); };
+  return fn;
+}
+
+/**
+ * A `fs.watch`-shaped spy whose handles are REAL `EventEmitter`s, so a test
+ * can fire an async `'error'` on a specific registered handle the way a live
+ * `FSWatcher` does — late `ENOSPC`/`EPERM`/watched-path-removed, well after
+ * registration succeeded. Shaped like `spyWatch()` above (`.calls`, `.fire`)
+ * plus each call's `.handle` for direct emission.
+ */
+function spyWatchEmitter() {
+  const calls = [];
+  const fn = (path, _opts, listener) => {
+    const handle = new EventEmitter();
+    handle.close = () => { handle.closed = true; };
+    calls.push({ path, listener, handle });
+    return handle;
+  };
+  fn.calls = calls;
   fn.fire = (path) => { const c = calls.find((entry) => entry.path === path); if (c) c.listener('change', null); };
   return fn;
 }
@@ -201,6 +222,56 @@ test('#881: a caught fs.watch failure leaves the server running and shapes {ok:f
   assert.match(state.reason, /1 watch\(es\) failed/);
   assert.deepEqual(state.failed, [{ path: 'brain/project/anti-patterns/', reason: 'ENOSPC: no space left' }]);
   assert.ok(state.watched > 0, 'every OTHER directory is still watched — one failure does not stop the rest');
+  w.close();
+});
+
+// ── R881-9 / Q3 "when the watcher fails": a live handle's ASYNC error ──────
+
+test("#881: a live watcher handle's async 'error' is a said state, not a crash — the OTHER handles stay open and a healthy one still fires", async () => {
+  const root = makeWatcherFixture();
+  const gitCommonDir = makeGitCommonFixture();
+  const _run = () => `worktree ${root}\n`;
+  const _watch = spyWatchEmitter();
+  const scheduler = fakeScheduler();
+  const recomputes = [];
+  const w = createWatcher({
+    root, gitCommonDir, _watch, _run,
+    _setTimeout: scheduler.setTimeout, _clearTimeout: scheduler.clearTimeout,
+    onRecompute: async (evt) => { recomputes.push(evt); },
+  });
+  w.start();
+
+  const failingPath = join(root, 'brain/project/anti-patterns');
+  const failingEntry = _watch.calls.find((c) => c.path === failingPath);
+  assert.ok(failingEntry, 'the fixture registers a watch for this directory');
+
+  // A live handle emitting 'error' with no listener would throw synchronously
+  // out of this very call (Node's EventEmitter special-cases 'error') and
+  // crash the test/process — so simply reaching the assertions below proves
+  // the process did not crash.
+  failingEntry.handle.emit('error', new Error('ENOSPC: no space left'));
+
+  const state = w.state();
+  assert.equal(state.ok, false);
+  assert.deepEqual(
+    state.failed.find((f) => f.path === 'brain/project/anti-patterns/'),
+    { path: 'brain/project/anti-patterns/', reason: 'ENOSPC: no space left' },
+    'the failure is recorded in the same {path, reason} shape as a synchronous registration failure',
+  );
+
+  const otherEntries = _watch.calls.filter((c) => c.path !== failingPath);
+  assert.ok(otherEntries.length > 0);
+  assert.ok(otherEntries.every((c) => !c.handle.closed), 'every OTHER handle stays open — one handle\'s async error does not touch the rest');
+
+  // a later event on a healthy handle still triggers the debounced callback
+  const healthyPath = join(root, 'brain');
+  _watch.fire(healthyPath);
+  assert.equal(scheduler.pending(), 1);
+  scheduler.runLatest();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(recomputes.length, 1, 'a healthy handle keeps firing after a sibling handle failed asynchronously');
+
   w.close();
 });
 
