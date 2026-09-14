@@ -119,7 +119,13 @@ export function createPoller({
       forgeAsOf = { ...forgeAsOf, issues: attemptAt.toISOString() };
 
       const prNumbers = mrRows.map((p) => p.number);
-      const reviewTargets = previousIssues === null ? prNumbers : pickReviewTargets(prNumbers);
+      // No cold-start exception here (unlike the body lane below): the
+      // header comment promises "every tick, capped at 10 PRs" with no
+      // carve-out, and `pickReviewTargets` already returns every PR
+      // untouched when `prNumbers.length <= REVIEW_CAP`, so a small forge
+      // still gets every PR reviewed on the first tick — only a forge with
+      // more than REVIEW_CAP open PRs is actually capped, cold or not.
+      const reviewTargets = pickReviewTargets(prNumbers);
       await Promise.all(reviewTargets.map(async (number) => {
         try { cache.setPrReviews(number, await vcs.prReviews({ project, number })); } catch { /* previous value stays cached (R881-9) */ }
       }));

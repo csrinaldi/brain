@@ -202,6 +202,51 @@ test('#881: poller.close() during an in-flight tick leaves no timer scheduled on
   assert.equal(scheduler.pending(), 0, 'no timer remains scheduled once the in-flight tick settles after close()');
 });
 
+// ── judgment:cold-1: the review lane is capped on the cold-start tick too ──
+//
+// The header comment (poller.mjs:6-8) promises "every tick, capped at 10
+// PRs, round-robin beyond the cap" for the review lane, with no cold-start
+// exception — unlike the body lane, which IS documented uncapped on cold
+// start (poller.mjs:9-11). The steady-tick budget test above uses
+// PR_COUNT=3, under REVIEW_CAP, so it cannot tell a capped cold tick from an
+// uncapped one. This test uses 50 open PRs specifically to distinguish them.
+
+test('#881: judgment:cold-1 — the review lane is capped at REVIEW_CAP on the very first (cold-start) tick, round-robin catches every PR within 5 ticks', async () => {
+  const scheduler = fakeScheduler();
+  const now = { t: 0 };
+  const callLog = [];
+  const PR_COUNT = 50;
+  const REVIEW_CAP = 10;
+  const prs = Array.from({ length: PR_COUNT }, (_, i) => ({ number: 2000 + i, title: `pr ${i}`, headBranch: `feat/x-${i}` }));
+  const vcs = {
+    issueList: async () => { callLog.push('issueList'); return []; },
+    mrList: async () => { callLog.push('mrList'); return prs.map((p) => ({ ...p })); },
+    issueView: async ({ number }) => { callLog.push(`issueView:${number}`); return { number, body: 'b' }; },
+    prReviews: async ({ number }) => { callLog.push(`prReviews:${number}`); return []; },
+  };
+  const poller = createPoller({
+    vcs, cache: createForgeCache(), project: 'o/r', interval: 60000,
+    _setTimeout: scheduler.setTimeout, _clearTimeout: scheduler.clearTimeout, _now: () => new Date(now.t),
+  });
+
+  await poller.start(); // tick 1 — cold start (previousIssues === null)
+  const seen = new Set();
+  let reviewedThisTick = 0;
+  for (const c of callLog) {
+    if (c.startsWith('prReviews:')) { reviewedThisTick += 1; seen.add(Number(c.split(':')[1])); }
+  }
+  assert.equal(reviewedThisTick, Math.min(PR_COUNT, REVIEW_CAP), 'the cold-start tick reviews min(P,10) PRs, not all 50');
+
+  for (let i = 0; i < 4; i++) {
+    now.t += 60000;
+    await scheduler.runNext();
+    for (const c of callLog) if (c.startsWith('prReviews:')) seen.add(Number(c.split(':')[1]));
+  }
+  assert.equal(seen.size, PR_COUNT, 'round-robin across 5 consecutive ticks (cold + 4 steady) reads every one of the 50 PRs at least once');
+
+  poller.close();
+});
+
 // ── Q1/D2: the call-count budget over 30 simulated ticks ───────────────────
 
 test('#881: Q1/D2 — 30 simulated ticks hold the budget: cold start once, then 2 + min(P,10) + B per steady tick', async () => {

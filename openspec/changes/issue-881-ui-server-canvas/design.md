@@ -109,7 +109,7 @@ With `I` open issues, `P` open PRs, interval `T = 60 s` → 60 ticks/h.
 
 | Case | Calls/tick | Calls/hour | vs. 5,000/h |
 |---|---|---|---|
-| Cold start (once, at boot) | `1 + I + 1 + P` = 95 | — | one-off |
+| Cold start (once, at boot) | `2 + min(P,10) + I` = 95 | — | one-off |
 | Steady state | `2 + min(P,10) + B` = 2 + 3 + 5 = **10** | **600** | 12 % |
 | Worst bounded case | `2 + 10 + 5` = **17** | **1,020** | 20 % |
 | Full fan-out per poll (**rejected**, ruling 2) | `2 + I + P` = 95 | **5,700** | **114 % — over** |
