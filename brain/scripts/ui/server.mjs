@@ -218,9 +218,9 @@ export function createUiServer({
 
 // ── argv: a manual loop, the same grammar as `status/snapshot-cli.mjs:18-34` ─
 
-/** @returns {{ok:true,port:number,root:string}|{ok:false,error:string}} */
+/** @returns {{ok:true,port:number,root:string,interval:number,poll:boolean}|{ok:false,error:string}} */
 export function parseArgs(argv = []) {
-  const out = { ok: true, port: 3000, root: process.cwd() };
+  const out = { ok: true, port: 3000, root: process.cwd(), interval: 60000, poll: true };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--port') {
@@ -232,6 +232,13 @@ export function parseArgs(argv = []) {
       const v = argv[++i];
       if (!v) return { ok: false, error: '--root needs a directory' };
       out.root = v;
+    } else if (a === '--interval') {
+      const v = argv[++i];
+      const n = Number(v);
+      if (v === undefined || !Number.isInteger(n) || n < 0) return { ok: false, error: '--interval needs a non-negative integer (milliseconds)' };
+      out.interval = n;
+    } else if (a === '--no-poll') {
+      out.poll = false;
     } else return { ok: false, error: `unknown argument: ${a}` };
   }
   return out;
@@ -249,12 +256,16 @@ export function parseArgs(argv = []) {
 export async function main(argv = [], deps = {}) {
   const say = deps.say ?? console.log;
   const error = deps.error ?? console.error;
+  const proc = deps.process ?? process;
   const parsed = parseArgs(argv);
   if (!parsed.ok) {
-    error(`✗ ${parsed.error}\n  Usage: npm run brain:ui -- [--port <n>] [--root <dir>]`);
+    error(`✗ ${parsed.error}\n  Usage: npm run brain:ui -- [--port <n>] [--root <dir>] [--interval <ms>] [--no-poll]`);
     return 2;
   }
-  const server = createUiServer({ root: parsed.root, vcs: deps.vcs ?? null, project: deps.project ?? null });
+  const server = createUiServer({
+    root: parsed.root, vcs: deps.vcs ?? null, project: deps.project ?? null,
+    forgeSource: deps.forgeSource ?? null, interval: parsed.interval, poll: parsed.poll,
+  });
   try {
     await server.listen(parsed.port);
   } catch (err) {
@@ -265,6 +276,21 @@ export async function main(argv = [], deps = {}) {
     throw err;
   }
   say(`brain:ui listening on http://127.0.0.1:${server.port}`);
+
+  // D15: SIGINT/SIGTERM stop the poll timer, close every watcher, end every
+  // open SSE response, close the listener, then exit 0. A second signal
+  // after shutdown has already started is a no-op, not a second exit.
+  let shuttingDown = false;
+  const shutdown = async (signal) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    say(`brain:ui received ${signal}, shutting down`);
+    await server.close();
+    proc.exit(0);
+  };
+  proc.on('SIGINT', () => { shutdown('SIGINT'); });
+  proc.on('SIGTERM', () => { shutdown('SIGTERM'); });
+
   return server;
 }
 

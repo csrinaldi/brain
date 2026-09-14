@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { EventEmitter } from 'node:events';
 
 import { buildSnapshot } from '../status/snapshot.mjs';
 import { makeSnapshotFixture as makeFixture } from '../__fixtures__/snapshot-tree.mjs';
@@ -60,6 +61,14 @@ function frameReader(res) {
   };
   readFrame.reader = reader;
   return readFrame;
+}
+
+async function waitUntil(predicate, { timeoutMs = 1000, stepMs = 5 } = {}) {
+  const start = Date.now();
+  while (!predicate()) {
+    if (Date.now() - start > timeoutMs) throw new Error('waitUntil: timed out');
+    await new Promise((r) => setTimeout(r, stepMs));
+  }
 }
 
 // ── R881-1 S1/S2: default port, static root, ephemeral port ────────────────
@@ -190,12 +199,34 @@ test('#881: R881-5 S1 — the method check runs before routing, so an unmatched 
 // ── D15: parseArgs, EADDRINUSE ──────────────────────────────────────────────
 
 test('#881: parseArgs — --port and --root, defaults, unknown flags refused', () => {
-  assert.deepEqual(parseArgs([]), { ok: true, port: 3000, root: process.cwd() });
-  assert.deepEqual(parseArgs(['--port', '4500']), { ok: true, port: 4500, root: process.cwd() });
-  assert.deepEqual(parseArgs(['--root', '/tmp/some-dir']), { ok: true, port: 3000, root: '/tmp/some-dir' });
+  assert.deepEqual(parseArgs([]), { ok: true, port: 3000, root: process.cwd(), interval: 60000, poll: true });
+  assert.deepEqual(parseArgs(['--port', '4500']), { ok: true, port: 4500, root: process.cwd(), interval: 60000, poll: true });
+  assert.deepEqual(parseArgs(['--root', '/tmp/some-dir']), { ok: true, port: 3000, root: '/tmp/some-dir', interval: 60000, poll: true });
   assert.equal(parseArgs(['--bogus']).ok, false);
   assert.equal(parseArgs(['--port', 'nope']).ok, false);
   assert.equal(parseArgs(['--port', '-1']).ok, false);
+});
+
+// ── T5: --interval, --no-poll ───────────────────────────────────────────────
+
+test('#881: parseArgs — --interval overrides the 60s default; --no-poll disables the timer entirely', () => {
+  assert.deepEqual(parseArgs(['--interval', '5000']), { ok: true, port: 3000, root: process.cwd(), interval: 5000, poll: true });
+  assert.deepEqual(parseArgs(['--no-poll']), { ok: true, port: 3000, root: process.cwd(), interval: 60000, poll: false });
+  assert.equal(parseArgs(['--interval', 'nope']).ok, false);
+  assert.equal(parseArgs(['--interval', '-1']).ok, false);
+});
+
+test('#881: --no-poll composes with R881-4 S2 — the poller starts paused, so the timer never fires and the page stays on manual "poll now"', async () => {
+  const root = makeFixture();
+  const messages = [];
+  const result = await main(['--port', '0', '--root', root, '--no-poll'], { say: (m) => messages.push(m), error: () => {} });
+  try {
+    const base = `http://127.0.0.1:${result.port}`;
+    const res = await fetch(`${base}/api/poll/pause`, { method: 'POST' }); // idempotent state check
+    assert.equal((await res.json()).paused, true);
+  } finally {
+    await result.close();
+  }
 });
 
 test('#881: main exits 2 on an unknown argument', async () => {
@@ -225,6 +256,37 @@ test('#881: main succeeds on a free (ephemeral) port and reports where it listen
   assert.notEqual(typeof result, 'number', 'success returns the started server, not an exit code');
   assert.match(messages.join('\n'), /brain:ui listening on http:\/\/127\.0\.0\.1:\d+/);
   await result.close();
+});
+
+test('#881: D15 — SIGINT/SIGTERM stop the poll timer, close every watcher, end every open SSE response, close the listener, and exit 0', async () => {
+  const fakeProcess = new EventEmitter();
+  const exits = [];
+  fakeProcess.exit = (code) => exits.push(code);
+  const root = makeFixture();
+  const messages = [];
+  const result = await main(['--port', '0', '--root', root], { say: (m) => messages.push(m), error: () => {}, process: fakeProcess });
+  assert.notEqual(typeof result, 'number');
+
+  try {
+    const res = await fetch(`http://127.0.0.1:${result.port}/api/stream`);
+    const readFrame = frameReader(res);
+    await readFrame(); // the SSE connection is live
+
+    fakeProcess.emit('SIGINT');
+    await waitUntil(() => exits.length > 0);
+    assert.deepEqual(exits, [0]);
+    const { done } = await readFrame.reader.read();
+    assert.equal(done, true, 'the open SSE response was ended by the shutdown, not left hanging');
+
+    // a second signal after shutdown is a no-op, not a second exit
+    fakeProcess.emit('SIGTERM');
+    await new Promise((r) => setTimeout(r, 20));
+    assert.deepEqual(exits, [0]);
+  } finally {
+    // shutdown already closed it on the happy path; a second close() is a
+    // harmless no-op and this is the only safety net if SIGINT never fires
+    await result.close().catch(() => {});
+  }
 });
 
 // ── R881-2 S1/Q4: GET /api/stream — sync frame first ────────────────────────

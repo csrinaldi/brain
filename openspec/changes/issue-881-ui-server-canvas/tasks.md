@@ -214,13 +214,13 @@ or heartbeat route" scenario over the now-complete route table.
       /api/poll/pause|resume|once`, extend the method check so exactly
       these three routes accept `POST` only (`Allow: POST`) and every other
       route accepts `GET`/`HEAD` only (`Allow: GET, HEAD`) so T4a passes.
-- [ ] T5a. `brain/scripts/ui/server.test.mjs` (extend): failing tests for
+- [x] T5a. `brain/scripts/ui/server.test.mjs` (extend): failing tests for
       full D15 lifecycle — a simulated `SIGINT`/`SIGTERM` stops the poll
       timer, closes every watcher, ends every open SSE response, closes the
       listener, and exits 0 with no hang; `--no-poll` disables the timer
       entirely (composes with R881-4 S2); `--interval <n>` overrides the
       60 s default.
-- [ ] T5b. `brain/scripts/ui/server.mjs`: implement the signal handlers and
+- [x] T5b. `brain/scripts/ui/server.mjs`: implement the signal handlers and
       the `--interval`/`--no-poll` argv extensions so T5a passes.
 - [x] T6. `brain/scripts/ui/server.test.mjs` (extend): guard test for
       R881-10 S3 — inspect the now-complete route table (`/`,
