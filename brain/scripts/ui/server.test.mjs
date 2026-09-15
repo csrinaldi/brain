@@ -11,6 +11,7 @@ import { makeSnapshotFixture as makeFixture } from '../__fixtures__/snapshot-tre
 import { testTmp } from '../lib/test-tmp.mjs';
 import { createForgeCache } from './forge-cache.mjs';
 import { createUiServer, parseArgs, main, KNOWN_ROUTES, resolveForgeSource } from './server.mjs';
+import { buildChangeView } from './change-route.mjs';
 
 const NOW = '2026-09-14T00:00:00Z';
 const now = () => new Date(NOW);
@@ -793,8 +794,52 @@ test('#881: R881-5 S3 / A5 (re-run) — with the poller wired in, a full poll cy
 // ── R881-10 S3: no MCP resource route, no heartbeat/agent-pulse endpoint ────
 
 test('#881: R881-10 S3 — the route table has no MCP resource route and no heartbeat/agent-pulse endpoint', () => {
-  assert.deepEqual(KNOWN_ROUTES, ['/', '/api/snapshot', '/api/stream', '/api/poll/pause', '/api/poll/resume', '/api/poll/once']);
+  assert.deepEqual(KNOWN_ROUTES, ['/', '/api/snapshot', '/api/stream', '/api/poll/pause', '/api/poll/resume', '/api/poll/once', '/api/change/{issue}']);
   assert.ok(!KNOWN_ROUTES.some((r) => /mcp|heartbeat|pulse/i.test(r)));
+});
+
+// ── T7: GET /api/change/{issue} — the drawer's IO (D8, D11) ────────────────
+
+test('#881: GET /api/change/<N> deep-equals buildChangeView() on the same held snapshot; GET /api/change/x is 404; mutation methods are 405', async () => {
+  const root = makeFixture();
+  mkdirSync(join(root, 'openspec/changes/issue-1-a'), { recursive: true });
+  writeFileSync(join(root, 'openspec/changes/issue-1-a/spec.md'), '### R1-1: a\n#### Scenario: s\n- **WHEN** w\n- **THEN** t\n');
+  writeFileSync(join(root, 'openspec/changes/issue-1-a/tasks.md'), '- [x] done\n- [ ] next one\n');
+  const gitCalls = [];
+  const _run = (file, args) => {
+    gitCalls.push(args);
+    if (args[0] === 'blame') return 'abc1234abc1234abc1234abc1234abc1234abc1 1 1 1\nauthor csrinaldi\nauthor-time 1694700000\n\tdone\n';
+    if (args[0] === 'branch') return '';
+    throw new Error(`unexpected git call: ${args.join(' ')}`);
+  };
+  const server = createUiServer({ root, project: 'o/r', _now: now, poll: false, _run });
+  await server.listen(0);
+  try {
+    const base = `http://127.0.0.1:${server.port}`;
+    const res = await fetch(`${base}/api/change/1`);
+    assert.equal(res.status, 200);
+    assert.equal(res.headers.get('content-type'), 'application/json');
+    const fromRoute = await res.json();
+
+    const snapshot = await (await fetch(`${base}/api/snapshot`)).json();
+    const fromDirect = buildChangeView({ root, issue: 1, snapshot, project: 'o/r', _run });
+    assert.deepEqual(fromRoute, JSON.parse(JSON.stringify(fromDirect)));
+    assert.equal(fromRoute.ok, true);
+    assert.equal(fromRoute.value.spec.ok, true);
+
+    const notFound = await fetch(`${base}/api/change/x`);
+    assert.equal(notFound.status, 404);
+
+    const mutation = await fetch(`${base}/api/change/1`, { method: 'POST' });
+    assert.equal(mutation.status, 405);
+    assert.equal(mutation.headers.get('allow'), 'GET, HEAD');
+
+    const blameCall = gitCalls.find((args) => args[0] === 'blame');
+    assert.ok(blameCall.includes('HEAD'), 'the blame argv must carry HEAD — the committed version, never the working tree');
+    assert.ok(!gitCalls.some((args) => args.includes('-C')), 'no git call in this route ever opens a worktree with -C (R881-3)');
+  } finally {
+    await server.close();
+  }
 });
 
 // ── package.json: brain:ui verb and engines (D8, D16) ───────────────────────
