@@ -39,8 +39,8 @@ act was never updated to match. This amendment rewrites it to state what the act
 
 ### What this does NOT change
 
-The rename table and the nine in-place annotations Amendment 3 made were already correct under R6
-as amended — this touches no other line.
+The rename table and the in-place annotations Amendment 3 made were already correct under R6 as
+amended — this touches no other line.
 
 ### Notes for the promoter
 
