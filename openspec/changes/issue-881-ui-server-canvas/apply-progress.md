@@ -791,7 +791,7 @@ the fix; 13/13 green again.
 | `watcher.mjs:144` `watchDir()` | `recordFailure(label, err)` | said failure — OK |
 | `watcher.mjs:152` `closeWatch()` | `catch { /* best effort */ }`, already-deleted handle | commented, OK |
 | `watcher.mjs:203-209` `listChangeDirs()` | was `catch { return []; }` | **fixed this round** |
-| `watcher.mjs:240` `activeWorktrees()` | `recordFailure('<git-common>/worktrees', err); return []` | records the failure (OK on its own) — see discrepancy below |
+| `watcher.mjs:264` `activeWorktrees()` | was `recordFailure(...); return []` | **fixed in `f132056` (round 7)** — see below |
 | `watcher.mjs:283` gitCommonDir resolution | `recordFailure('<git-common>', err)` | said failure — OK |
 | `poller.mjs:160,170` per-PR/per-issue fetch | `catch { /* previous value stays cached (R881-9) */ }` | commented, preserves last-good value, does not overwrite with empty — OK |
 | `poller.mjs:177` fast-lane tick | `catch (err) { lastError = ... }` | said failure via `lastError`, no cache setter ran — OK |
@@ -831,14 +831,14 @@ premise does not fully hold on inspection:
    success path, unlike the `CHANGES_ROOT` entry this round's fix
    clears explicitly in `rescanChangeDirs()`.
 
-Both are real, currently untested gaps in `rescanWorktrees()` /
+Both were real, untested gaps in `rescanWorktrees()` /
 `activeWorktrees()`, not something this round introduced or was asked to
 fix — the task scope and diff budget were specific to `listChangeDirs()`.
-Recorded here as a **follow-up finding** for a future round: give
-`activeWorktrees()` the same `null`-on-failure sentinel and have
-`rescanWorktrees()` skip reconciliation on it, and clear the
-`<git-common>/worktrees` failure entry on the next successful call —
-the same shape `listChangeDirs()`/`rescanChangeDirs()` now have.
+Recorded here as a follow-up finding; **fixed in round 7, commit
+`f132056`** — `activeWorktrees()` now returns the same `null`-on-failure
+sentinel `listChangeDirs()` returns, `rescanWorktrees()` skips
+reconciliation on it, and the `<git-common>/worktrees` failure entry
+clears on the next successful call (see "Seventh round" below).
 
 **Files changed**: `brain/scripts/ui/watcher.mjs` (`listChangeDirs()`
 returns `null` on failure and records it; `rescanChangeDirs()` skips
@@ -858,3 +858,56 @@ lines). Commit this round: `fc964900`. No push, no PR (per task
 instructions) — branch `feat/issue-881-slice-2-stream` stays ahead of
 its last-pushed state (origin still at `3fe0e510` before this round's
 two commits).
+
+## Seventh round — the `activeWorktrees()`/`rescanWorktrees()` follow-up finding, fixed in `f132056`
+
+The sixth round's follow-up finding is fixed: `activeWorktrees()`
+(`watcher.mjs:264`) recorded a `git worktree list` failure via
+`recordFailure('<git-common>/worktrees', err)` but still returned `[]`,
+and `rescanWorktrees()` diffed that empty list against `watchedWorktrees`
+with no "could not read" check, so a failed `git worktree list
+--porcelain` closed every linked-worktree watch as "vanished" — same
+class as `fc964900`, same R881-9 violation. Its failure entry also never
+cleared on a later success.
+
+**Fix**: `activeWorktrees()` now returns `null` on failure (after
+recording it), mirroring `listChangeDirs()`. `rescanWorktrees()` checks
+for `null` first and returns immediately, skipping reconciliation and
+leaving every current watch untouched, and clears the stale
+`<git-common>/worktrees` failure entry on a later successful read
+before reconciling.
+
+**Test first (RED)**: one new test in `watcher.test.mjs` — start with
+two linked worktrees (`alpha`, `beta`) watched, arm `_run` to throw
+`ENOSPC` on the next `git worktree list` call, fire the
+`<git-common>/worktrees` event, assert both worktree handles are still
+open, `state().failed` carries a `<git-common>/worktrees` entry with
+the ENOSPC message, and `state().ok` is `false`; then disarm `_run`,
+fire the event again, and assert the failure entry is gone and
+`state().ok` is `true`. RED confirmed against the pre-fix code: `alpha
+stays open` failed — `1 !== undefined` (the handle really was closed).
+GREEN after the fix: 14/14 in `watcher.test.mjs`.
+
+**Mutation**: restored `catch { ...; return []; }` in `activeWorktrees()`
+(production code only, test unchanged) — reproduced red on exactly the
+new test (`a <git-common>/worktrees/ rescan that cannot list worktrees
+keeps every currently-watched worktree open, then recovers`), all 13
+other `watcher.test.mjs` tests stayed green. Restored the fix; 14/14
+green again.
+
+**Files changed**: `brain/scripts/ui/watcher.mjs` (`activeWorktrees()`
+returns `null` on failure and records it; `rescanWorktrees()` skips
+reconciliation on `null` and clears the failure entry on success),
+`brain/scripts/ui/watcher.test.mjs` (one new test).
+
+**Verification**: `GIT_CONFIG_GLOBAL=/dev/null node --test
+brain/scripts/ui/*.test.mjs` = 70/70 green, run 3 times identically (was
+69/69 before this round's 1 new test). `GIT_CONFIG_GLOBAL=/dev/null npm
+test` = 5411/5411 green, one full run (~31s; was 5410/5410 before this
+round). `brain:repo:check` green before the commit; tree clean after.
+Counted diff (excluding `.test.mjs`, `openspec/`, `.memory/`) against
+`origin/feature/brain-ui...HEAD`: **954 / 1000** (was 947/1000 before
+this round; this round's production delta in `watcher.mjs` is +9/-2
+lines). Commit this round: `f132056` (fix). No push, no PR (per task
+instructions) — branch `feat/issue-881-slice-2-stream` stays ahead of
+its last-pushed state (origin still at `3fe0e510`).
