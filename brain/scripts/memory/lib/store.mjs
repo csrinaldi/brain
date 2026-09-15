@@ -98,7 +98,7 @@ export function recordFilename(record) {
  * Reading is unchanged and needs no migration: every reader here globs
  * `*.jsonl` under `records/` and parses line by line, so a month-file store, a
  * per-record store, and a half-migrated store all read identically. Splitting
- * an existing store is `memory:split-records`, which a repository runs when it
+ * an existing store is `brain:memory:split-records`, which a repository runs when it
  * wants the conflict-free property — brain never rewrites a consumer's
  * `.memory/**` on upgrade.
  *

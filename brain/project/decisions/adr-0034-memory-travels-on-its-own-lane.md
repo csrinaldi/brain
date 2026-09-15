@@ -1,15 +1,15 @@
 # ADR-0034 — Memory travels on its own lane: records reach `main` on their own pull request, never the feature's
 
-**Status**: Accepted
+**Status**: Accepted · **amended 15/09/2026** (Amendments 1-2 — see below)
 **Date**: 2026-09-09 — Cristian Rinaldi
 
 ## Context
 
 Memory rides the feature's pull request today. A capture becomes a record
-(`memory:save`), `memory:share` materializes it into `.memory/records/` before
+(`memory:save` (renamed `brain:memory:save`; see Amendment 1)), `memory:share` (renamed `brain:memory:share`; see Amendment 1) materializes it into `.memory/records/` before
 `git push`, the `pre-push` hook re-runs `share` on every push regardless of
 branch, and the record reaches `main` only when the feature PR does —
-`memory:audit`'s baseline on `main @ 96cd30c8` (n=350, first-parent, since
+`memory:audit` (renamed `brain:memory:audit`; see Amendment 1)'s baseline on `main @ 96cd30c8` (n=350, first-parent, since
 2026-08-01): **p50 21.6 h, p90 399.7 h** learn→main.
 
 Two costs follow directly from riding the feature branch, both measured
@@ -88,7 +88,7 @@ and never a revert of a record — records are append-only
 ### L3 — The index stays off the lane
 
 The lane commits **records only**. `.memory/index.jsonl` is derived
-(ADR-0017): `post-merge` regenerates it locally, and the next `memory:share`
+(ADR-0017): `post-merge` regenerates it locally, and the next `memory:share` (renamed `brain:memory:share`; see Amendment 1)
 on whatever PR touches memory refreshes the committed copy. The lag is made
 audible by a `local-checks` **warning**, never a failure — *"index ≠
 rebuild(records)"*. This is what lets two hosts' lane PRs both merge without
@@ -156,15 +156,15 @@ discipline, not a new one.
 `memory-gate` reads the PR **tree**, not the diff — a feature PR rebased on a
 `main` that already carries the lane's record for its issue passes the scoped
 gate **unchanged**. Only the PR template's wording changes (3.1d): from
-*"captured with `memory:share`"* to *"captured as a record (`memory:save
---issue N`); it reaches `main` on the lane"*.
+*"captured with `memory:share` (renamed `brain:memory:share`; see Amendment 1)"* to *"captured as a record (`memory:save
+--issue N`) (renamed `brain:memory:save`; see Amendment 1); it reaches `main` on the lane"*.
 
 `pre-push:70`'s `share` call, `ticket.nextSteps.step3` (en/es),
 `brain-save.mjs`, `contributor-scaffold.mjs:274`, and `day.done.checkCmd` are
 the five feature-PR surfaces that make a record ride the branch today. They
 retire in 3.1d, and **not before**: only after 3.1b's first scenario ("a
 record does not wait for its feature") has passed, **and** after #874
-(record-first: `memory:save` writes a record before any backend, under
+(record-first: `memory:save` (renamed `brain:memory:save`; see Amendment 1) writes a record before any backend, under
 `MEMORY_BACKEND=engram` too) has landed. Retiring them earlier would leave a
 capture with nowhere to go the moment the lane is not yet proven.
 
@@ -181,7 +181,7 @@ maintainer in one sitting — the same shape #863's six drafts became (PR
 
 ### L9 — Targets are ratified, not claimed
 
-`memory:audit` MUST report, at `lite`, **p50 ≤ 1 h, p90 ≤ 24 h** learn→main,
+`memory:audit` (renamed `brain:memory:audit`; see Amendment 1) MUST report, at `lite`, **p50 ≤ 1 h, p90 ≤ 24 h** learn→main,
 against the baseline **21.6 h / 399.7 h**. The exit is the command's own
 number (#864 task 6.1), not a claim made here.
 
@@ -204,7 +204,7 @@ review; it is the correct absence of a hook that has nothing to check.
   enter every clone's branch protection and CI workflow — one more thing a
   fork must configure correctly, same as every required check already there.
 - **Negative, accepted.** The committed `index.jsonl` can lag `main`'s
-  records between a lane merge and the next `memory:share`. `local-checks`
+  records between a lane merge and the next `memory:share` (renamed `brain:memory:share`; see Amendment 1). `local-checks`
   makes the lag audible; nothing depends on the index being current, because
   every reader can rebuild it from records.
 - **Deferred, not avoided.** Auto-merge without `supersedes` (#805) is a
@@ -246,3 +246,52 @@ index-lag warning inside `local-checks`, and whether `lane-paths` also
 tolerates a committed `index.jsonl` addition — L3 above rules records-only as
 the default; 3.1c's implementer decides only if a concrete conflict forces
 it.
+
+## Amendment 1 — the memory script names move to the `brain:memory:` namespace (issue #961)
+
+**Signed**: 15/09/2026 — Cristian Rinaldi
+
+### What this changes
+
+L5 named the lane's trigger `brain:memory:ship` while the script was still `memory:ship`. The eleven
+memory scripts now live in the `brain:` namespace that brain's verbs use in a consumer's `package.json`,
+so that name is real, and the other scripts this ADR cites read through this table:
+
+| as written above | the script today |
+|---|---|
+| `memory:save` | `brain:memory:save` |
+| `memory:share` | `brain:memory:share` |
+| `memory:audit` | `brain:memory:audit` |
+| `brain:memory:ship` | unchanged — now the real script |
+
+Every superseded line in the body above is annotated in place under ruling R6 on #961 as amended
+(option A, 2026-09-14): the historical name stays visible next to its `brain:memory:` rename, and
+this table is the whole mapping. **[Amended by Amendment 2 (#973) — rewritten: the previous
+sentence said the body was not rewritten, although Amendment 1's own promotion had annotated it in
+place.]** No line of this ADR runs a script with a literal `npm run`, so the decision reads the
+same.
+
+### What this does NOT change
+
+L1-L9, C1 and C2, the targets and the dependency order. Every verb keeps its behaviour and arguments;
+brain's own `package.json` keeps each bare name as a byte-identical alias, never installed into a consumer.
+
+## Amendment 2 — erratum: the body Amendment 1 called untouched was annotated in place (issue #973)
+
+**Signed**: 15/09/2026 — Cristian Rinaldi
+
+### What this changes
+
+Amendment 1's signed section (above) said, before this amendment rewrote it: "The body above is not
+rewritten (ruling R6 on #961): no line of this ADR runs a script with a literal `npm run`, so the
+decision reads the same and this table is the whole mapping." That sentence was drafted under
+ruling R6 as first ratified — an appended amendment, body untouched. The maintainer amended R6 to
+option A on 2026-09-14 (issue #961 comment, confirmed on PR #966), and Amendment 1's own promotion
+(PR #972) applied that ruling: every line of the body superseded by the rename table was annotated
+in place. The sentence describing that act was never updated to match. This amendment rewrites it
+to state what the act did.
+
+### What this does NOT change
+
+The rename table and the in-place annotations Amendment 1 made were already correct under R6 as
+amended — this rewrites no other line of the body or of an earlier amendment.

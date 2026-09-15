@@ -1,4 +1,4 @@
-// audit-io.mjs — the reading half of `memory:audit` (#870). Everything that
+// audit-io.mjs — the reading half of `brain:memory:audit` (#870). Everything that
 // touches fs, git or a backend lives here behind seams; the numbers themselves
 // are computed by audit.mjs, which is pure and tested. This file is deliberately
 // small: read records with their file names, read the landing commit of each
@@ -19,7 +19,7 @@ import { topicKeysFromExport } from '../backends/engram.mjs';
  * "could not read" is not "zero records".
  */
 export function readRecordLines(recordsDir, { _readdir = readdirSync, _read = readFileSync, _exists = existsSync } = {}) {
-  if (!_exists(recordsDir)) throw new Error(`memory:audit: records dir not found — ${recordsDir}`);
+  if (!_exists(recordsDir)) throw new Error(`brain:memory:audit: records dir not found — ${recordsDir}`);
   const out = [];
   for (const file of _readdir(recordsDir).filter((f) => f.endsWith('.jsonl')).sort()) {
     for (const line of _read(join(recordsDir, file), 'utf8').split('\n')) {

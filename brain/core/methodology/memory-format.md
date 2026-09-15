@@ -40,9 +40,9 @@ C1–C4); this document is the contract they implement.
   `records/` and parses line by line, so a store still holding `<yyyy-mm>.jsonl` month files, a
   store split into per-record files, and any mixture of the two read identically. `.memory/**`
   is consumer-owned, so brain never rewrites it on upgrade: a repository moves to the new layout
-  by running `memory:split-records`, and one that does not keeps working exactly as before —
+  by running `brain:memory:split-records`, and one that does not keeps working exactly as before —
   it just keeps the merge conflict the split removes.
-- **`index.jsonl`** — **derived** from the records and regenerable via a future `memory:reindex`.
+- **`index.jsonl`** — **derived** from the records and regenerable via a future `brain:memory:reindex`.
   It is committed for zero-tool querying and as the materialized dedup surface, but it is never
   the truth. If it is lost, deleted, or conflicts, it is rebuilt from `records/`.
 
@@ -217,7 +217,7 @@ and the measurements.
 `supersedes`, and the `records/<yyyy-mm>-<id>.jsonl` file it lives in). It is:
 
 - **Derived** — the inverse of ADR-0002's *authoritative* manifest. The records are the truth;
-  the index is rebuilt from them by `memory:reindex`. Losing or conflicting on the index is a
+  the index is rebuilt from them by `brain:memory:reindex`. Losing or conflicting on the index is a
   no-op — regenerate it.
 - **Serialized one entry per physical line, sorted by `id`, deterministically.** This is
   normative. Because `id`s are content hashes, parallel insertions distribute **uniformly**
@@ -231,7 +231,7 @@ and the measurements.
   per-clone registration — but since #677 that is not why the records log is safe: a merge
   driver, built-in or custom, is applied by the git that performs the merge, and the forge's
   merge button applies neither. The answer for `index.jsonl` is regeneration; the answer for
-  `records/` is the layout. That helper is **`npm run memory:resolve-index`** (issue #330), and it is layered
+  `records/` is the layout. That helper is **`npm run brain:memory:resolve-index`** (issue #330), and it is layered
   in exactly that order: the command is the unit of truth and works in every clone with **zero
   installation**, while the `post-merge` hook is a thin, non-blocking caller of the same command
   and holds no resolution logic of its own.
@@ -244,8 +244,8 @@ and the measurements.
   duplicate and stale entries, not a clean merge. The index is fully regenerable from
   `records/`, so a git merge conflict on `index.jsonl` is resolved by **discarding both sides and
   regenerating from `records/`** — it is NEVER hand-merged and NEVER union-merged.
-  `npm run memory:resolve-index` is that resolution as one command: it discards the conflicted
-  working-tree file, regenerates the index (the same `rebuildIndex()` that `memory:reindex` runs),
+  `npm run brain:memory:resolve-index` is that resolution as one command: it discards the conflicted
+  working-tree file, regenerates the index (the same `rebuildIndex()` that `brain:memory:reindex` runs),
   and `git add`s the path **only if** git still reports it unmerged — so the operator finishes the
   merge with `git commit` and no judgment call, and a hook-triggered call on an already-clean tree
   normalizes the file while staging nothing.
@@ -253,11 +253,11 @@ and the measurements.
   It fails **closed**: if any `records/*.jsonl` carries conflict markers it refuses and leaves the
   index untouched, because the index is derived from that log and regenerating over a conflicted
   one would bake the markers in and report success.
-- **Low-churn** — `memory:reindex` / `memory:share` **MUST NOT produce whole-file churn in the
+- **Low-churn** — `brain:memory:reindex` / `brain:memory:share` **MUST NOT produce whole-file churn in the
   index**. Entries are stable-ordered by `id`; a reindex adds/updates only entries for newly
   appended records and leaves every other entry byte-identical, so `git diff index.jsonl` is
   proportional to the new records, not to the store size. This is the direct lesson of the
-  ADR-0002 manifest churn that rewrote the full file each `memory:share` and blocked a raw
+  ADR-0002 manifest churn that rewrote the full file each `brain:memory:share` and blocked a raw
   `git pull`.
 
   **The rule is about the DIFF, not the write.** `rebuildIndex` regenerates the whole file from
@@ -337,6 +337,6 @@ record is lossy in both directions. This enumeration is the migration contract f
 Per ADR-0002 /
 ADR-0004, the live backend
 (engram) remains a *derived index* for semantic search. This format governs the **durable**
-layer only. `memory:share` materializes durable knowledge into `records/`; `memory:import`
+layer only. `brain:memory:share` materializes durable knowledge into `records/`; `memory:import`
 projects `records/` into the active backend. The gzip chunks are engram's private transport and
 are no longer the durable truth.

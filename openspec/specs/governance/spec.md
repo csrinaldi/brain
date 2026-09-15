@@ -684,21 +684,21 @@ if any component fails. It MUST be fast (skip heavy checks if `--fast` flag is p
 
 ### Requirement REQ-S5-3: brain:save Gates Session Summary + Memory
 
-`brain:save` MUST: (a) call `memory:share` to materialize memory, (b) verify that
+`brain:save` MUST: (a) call `brain:memory:share` to materialize memory, (b) verify that
 `.memory/` now has uncommitted changes (i.e., new observations exist), (c) commit the
 `.memory/` changes. It MUST exit non-zero if no new memory was materialized.
 
-[**unit-testable**: stub memory:share and git commands; assert exit non-zero when no .memory/ changes appear]
+[**unit-testable**: stub brain:memory:share and git commands; assert exit non-zero when no .memory/ changes appear]
 
 #### Scenario: No new memory causes refusal
 
-- GIVEN `memory:share` runs but produces no new .memory/ changes
+- GIVEN `brain:memory:share` runs but produces no new .memory/ changes
 - WHEN `brain:save` runs
 - THEN it exits non-zero with a message asking the user to capture a session summary
 
 #### Scenario: New memory present — commits and exits zero
 
-- GIVEN `memory:share` produces new .memory/ changes
+- GIVEN `brain:memory:share` produces new .memory/ changes
 - WHEN `brain:save` runs
 - THEN the .memory/ changes are committed and the command exits zero
 
@@ -828,7 +828,7 @@ This coordination MUST NOT be automated.
 |---|-----------------|
 | G1 | **CI-behavior requirements (REQ-S2-1, REQ-S2-2, REQ-S2-4)** cannot be covered by `node --test`. Verification: (a) the S2 PR is a live self-governing PR proving Gates I+II on real input; (b) each slice PR description includes a numbered manual E2E checklist mapping to acceptance criteria. |
 | G2 | **Architectural-surface pattern set**: the `decision-gate` heuristic from v1-S4 is removed from the CI layer (moved to the floor). Its file-path patterns are an implementation decision for the `adrPresence` check in S4. |
-| G3 | **Invariant-3 honest residual (REQ-S4-4)**: `memoryPresence` proves `memory:share` ran (`.memory/` changed), NOT that a `session_summary` was written nor that it was good. The full check is Phase 3, contingent on: (a) confirmed engram JSONL record shape, (b) `session/{issue}` topic_key convention. |
+| G3 | **Invariant-3 honest residual (REQ-S4-4)**: `memoryPresence` proves `brain:memory:share` ran (`.memory/` changed), NOT that a `session_summary` was written nor that it was good. The full check is Phase 3, contingent on: (a) confirmed engram JSONL record shape, (b) `session/{issue}` topic_key convention. |
 | G4 | **Bootstrap activation window (REQ-E-1, REQ-S3-6)**: between S2 merging and `brain:protect` running, `governance.yml` is live but non-blocking. Intentional seam, not a defect. |
 | G5 | **Lockout risk during S3 rollback**: if protection is on and CI is red, all merges block. Mitigation: repo-admin override (`enforce_admins:false`) + `gh api -X DELETE .../protection` disables in one call. Documented operational risk. |
 | G6 | **brain:next state derivation**: the canonical state representation (git branch + open PRs + .memory/ + brain.config) is an implementation decision for S5. The spec requires the correct command per state; the state model is design-level. |

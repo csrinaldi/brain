@@ -235,7 +235,7 @@ does not control. The gate is now checkable: the danger-path e2e suite (#401) mu
 > the rest are open today, verified against `gh issue view` rather than assumed from prior notes.
 
 - ~~Record-first capture rides `mem_save`, and the backend hydrates after the fact~~ **Shipped.**
-  #874 (PRs #925/#926): `memory:save` writes a record before any backend; `share()` is now
+  #874 (PRs #925/#926): `brain:memory:save` writes a record before any backend; `share()` is now
   "commit what is already true" and reads no chunk file.
 - ~~A same-day retry after a successful lane push can skip PR reconciliation~~ **Shipped.** #920.
 - ~~An agent session without `AI_AGENT` set is recorded as human~~ **Shipped.** #939 — a known
@@ -254,7 +254,7 @@ does not control. The gate is now checkable: the danger-path e2e suite (#401) mu
 - **A chunk-boundary guard test pins a production import by hardcoded line number**, so an
   unrelated edit above that line in the same file turns the guard red until the number is
   re-pinned by hand. (#937)
-- **`memory:save`'s missing-positional error is cryptic.** `title`/`content` are positionals;
+- **`brain:memory:save`'s missing-positional error is cryptic.** `title`/`content` are positionals;
   passing them as `--flags` instead is silently accepted by the generic parser, leaves the
   positionals empty, and the run dies inside the hash with
   `canonicalJson: unsupported value type 'undefined'` — on both backends. (#928)

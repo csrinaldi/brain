@@ -15,7 +15,7 @@ const MANUAL_FLOW_STEPS = [
   'Edit the four artifacts by hand, in order: proposal.md → spec.md → design.md → tasks.md.',
   "Implement the code, checking off tasks.md items as you go.",
   'npm run brain:repo:check + npm test + npm run brain:change:verify — the gates.',
-  'npm run memory:share — persist team memory before pushing.',
+  'npm run brain:memory:share — persist team memory before pushing.',
   'Commit + open the PR with Closes #<id>.',
 ];
 

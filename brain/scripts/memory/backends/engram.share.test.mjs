@@ -1,8 +1,9 @@
 // engram.share.test.mjs — unit tests for backends/engram.mjs#share (#874
 // split B, row 5). share() is now the plainfiles.share() mirror (R11, D6):
-// a bare _ensureSymlink(root) + rebuildIndex() self-check. It no longer
-// exports, reads observations, scans chunks, or dual-writes records — those
-// surfaces (rows 1-4) are retired or in the process of retiring; see
+// a bare rebuildIndex() self-check. It no longer exports, reads
+// observations, scans chunks, dual-writes records, or touches the `.engram`
+// symlink (#955, R7 confines that to `setup()` alone) — those surfaces are
+// retired or in the process of retiring; see
 // openspec/changes/issue-874-record-first/{design,tasks}.md.
 //
 // Modelled on plainfiles.share.test.mjs (82 lines) — the twin this function
@@ -10,7 +11,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, lstatSync, mkdirSync, readdirSync, readlinkSync, statSync } from 'node:fs';
+import { readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { share } from './engram.mjs';
@@ -18,18 +19,16 @@ import { buildRecord } from '../lib/format.mjs';
 import { appendRecord } from '../lib/store.mjs';
 import { testTmp } from '../../lib/test-tmp.mjs';
 
-test('share: calls _ensureSymlink then _rebuildIndex, in that order — no export, no observation read, no engram binary required (R11/R12)', async () => {
+test('share: calls _rebuildIndex — no export, no observation read, no engram binary, no .engram symlink required (R11, #955 R7)', async () => {
   const calls = [];
   const result = await share({
     root: '/fake/root',
-    _ensureSymlink: (root) => calls.push(['ensureSymlink', root]),
     _rebuildIndex: (opts) => { calls.push(['rebuildIndex', opts]); return { count: 3 }; },
   });
 
-  assert.deepEqual(calls.map((c) => c[0]), ['ensureSymlink', 'rebuildIndex'], 'ensureSymlink must run before rebuildIndex');
-  assert.equal(calls[0][1], '/fake/root');
-  assert.equal(calls[1][1].recordsDir, '/fake/root/.memory/records');
-  assert.equal(calls[1][1].indexPath, '/fake/root/.memory/index.jsonl');
+  assert.deepEqual(calls.map((c) => c[0]), ['rebuildIndex']);
+  assert.equal(calls[0][1].recordsDir, '/fake/root/.memory/records');
+  assert.equal(calls[0][1].indexPath, '/fake/root/.memory/index.jsonl');
   assert.deepEqual(result, { indexCount: 3, duplicates: { ids: 0, lines: 0, divergent: 0, groups: [] } });
 });
 
@@ -55,20 +54,10 @@ test('share: the function body names none of the retired exporter seams — a so
       `share() must not reference ${retired} — it was retired by #874 split B, not merely left uncalled`,
     );
   }
-});
-
-// ── R12 — _ensureSymlink is the ONE seam kept from the pre-#874 shape ────────
-
-test('share: over a real temp store, a FRESH WORKTREE self-heals the .engram → .memory binding via the REAL ensureMemorySymlink (R12)', async () => {
-  const root = testTmp('engram-share-');
-  mkdirSync(join(root, '.memory'), { recursive: true });
-  assert.ok(!existsSync(join(root, '.engram')), 'precondition: a fresh worktree has no .engram');
-
-  await assert.doesNotReject(() => share({ root, _rebuildIndex: () => ({ count: 0 }) }));
-
-  const stat = lstatSync(join(root, '.engram'));
-  assert.ok(stat.isSymbolicLink(), 'share() must leave .engram a symlink, never a real directory');
-  assert.equal(readlinkSync(join(root, '.engram')), '.memory');
+  assert.doesNotMatch(
+    src, /_ensureSymlink/,
+    'share() must not reference _ensureSymlink — #958 confined the .engram symlink to setup()',
+  );
 });
 
 // ── rule 3 (R11) — share completes with the engram binary ABSENT ─────────────

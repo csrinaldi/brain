@@ -67,8 +67,6 @@ test('pullMemory: reindexes BETWEEN git pull and hydration, and reports what the
 
   const result = await pullMemory({
     root: '/fake/root',
-    _isManifestDirty: () => false,
-    _restoreManifest: () => { throw new Error('not dirty — must not restore'); },
     _gitPull: () => { order.push('gitPull'); },
     _rebuildIndex: (opts) => {
       order.push('rebuildIndex');
@@ -95,7 +93,6 @@ test('pullMemory: a store the merge left unindexable REFUSES before engram is hy
     () =>
       pullMemory({
         root: '/fake/root',
-        _isManifestDirty: () => false,
         _gitPull: () => {},
         _rebuildIndex: () => {
           throw new Error(

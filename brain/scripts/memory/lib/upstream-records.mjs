@@ -297,7 +297,7 @@ export function upstreamRecordEntries({
   if (!resolved) {
     // No "— writing every candidate this run (pre-#701 behaviour)" tail. That
     // clause described the EXPORTER's degradation, and `reason` is read by two
-    // consumers: `memory:share`, whose own catalog wrapper already says "This
+    // consumers: `brain:memory:share`, whose own catalog wrapper already says "This
     // run wrote every candidate (the pre-#701 behaviour); nothing was scoped."
     // immediately after — the identical sentence twice, consecutively, in one
     // printed line — and the pre-commit gate, which WRITES NOTHING, so the

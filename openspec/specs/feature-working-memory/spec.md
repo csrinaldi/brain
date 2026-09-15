@@ -50,18 +50,18 @@ the symlink already exists.
 ### Requirement REQ-S0-2: Pre-push Memory Guard
 
 The pre-push hook MUST inspect `git status --porcelain -- .memory` after
-`memory:share` and MUST exit 1 with an actionable message when uncommitted
+`brain:memory:share` and MUST exit 1 with an actionable message when uncommitted
 changes remain under `.memory/`.
 
 #### Scenario: Blocks push on uncommitted memory
 
-- GIVEN `memory:share` writes uncommitted chunks to `.memory/`
+- GIVEN `brain:memory:share` writes uncommitted chunks to `.memory/`
 - WHEN `git push` triggers the hook
 - THEN the hook exits 1 with a message that references `.memory/`
 
 #### Scenario: Passes when memory is clean
 
-- GIVEN `.memory/` has no uncommitted changes after `memory:share`
+- GIVEN `.memory/` has no uncommitted changes after `brain:memory:share`
 - WHEN `git push` triggers the hook
 - THEN the hook exits 0
 
@@ -166,7 +166,7 @@ of `feature-resume` MUST NOT abort checkout, env-copy, or VCS steps.
 
 ### Requirement REQ-S4-1: Pre-push Checkpoint Automation
 
-The pre-push hook MUST call `feature-checkpoint <feature>` after `memory:share`
+The pre-push hook MUST call `feature-checkpoint <feature>` after `brain:memory:share`
 completes and before the uncommitted-memory guard check, when a matching
 `openspec/changes/<feature>/` directory exists for the active branch.
 
@@ -174,15 +174,15 @@ completes and before the uncommitted-memory guard check, when a matching
 
 - GIVEN the active branch has a matching `openspec/changes/<feature>/` directory
 - WHEN `git push` triggers the pre-push hook
-- THEN `feature-checkpoint <feature>` runs after `memory:share` and before the guard check exits
+- THEN `feature-checkpoint <feature>` runs after `brain:memory:share` and before the guard check exits
 
 ---
 
 ### Requirement REQ-E-1: Feature Memory Isolation (Epic Invariant)
 
 Feature working memory MUST NOT enter `.memory/` as unversioned ephemeral
-engram state via `memory:share`. `featureCheckpoint()` MUST write only to the
-filesystem (`resume.md`). After any `memory:share` run, `.memory/` MUST NOT
+engram state via `brain:memory:share`. `featureCheckpoint()` MUST write only to the
+filesystem (`resume.md`). After any `brain:memory:share` run, `.memory/` MUST NOT
 contain observations whose sole origin is a call to `featureCheckpoint()`.
 
 #### Scenario: feature-checkpoint writes only to filesystem

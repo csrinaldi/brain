@@ -1,4 +1,4 @@
-// cli.migrate-v1.test.mjs — CLI-level tests for `memory:migrate-v1` un-refusing
+// cli.migrate-v1.test.mjs — CLI-level tests for `brain:memory:migrate-v1` un-refusing
 // (REQ-C2B2-1) and the `--rollback` flag (REQ-C2B2-2).
 //
 // cli.mjs resolves `.memory/` from its own file location (`repoRoot`), not

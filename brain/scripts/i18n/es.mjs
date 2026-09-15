@@ -64,7 +64,7 @@ export default {
   'day.memory.reprojecting':   'Reproyectando brain/ a engram...',
   'day.memory.exporting':      'Exportando memoria al repo (.memory/)...',
   'day.memory.exported':       'Memoria exportada a .memory/ — lista para commitear con el próximo push.',
-  'day.memory.exportFailed':   'Export de engram falló — corré {pm} run memory:share manualmente.',
+  'day.memory.exportFailed':   'Export de engram falló — corré {pm} run brain:memory:share manualmente.',
   'day.memory.notAvailable':   'engram no disponible — skipping memoria compartida.',
   'day.memory.install':        'Instalar: gentle-ai install   o   npm run tools:install',
 
@@ -90,7 +90,7 @@ export default {
   'day.done.sddExplore':      '/sdd-explore <idea>             investigar antes de comprometerse',
   'day.done.gitlabIssue':     '/gitlab-issue                   crear un issue desde una idea',
   'day.done.beforePush':      'Antes de pushear:',
-  'day.done.checkCmd':        '{pm} run brain:repo:check && {pm} run memory:share',
+  'day.done.checkCmd':        '{pm} run brain:repo:check && {pm} run brain:memory:share',
 
   // ── tracker-board.mjs (PR2) ───────────────────────────────────────────────────
   'tracker.noRemote':        '⚠ No se pudo detectar el remote de origin.',
@@ -182,9 +182,9 @@ export default {
   'bootstrap.memory.engram.ok':      'backend engram configurado (symlink + merge driver)',
   'bootstrap.memory.engram.failed':  'memory setup falló (no bloqueante)',
   'bootstrap.memory.pull.ok':        'memoria importada (.memory/ → engram)',
-  'bootstrap.memory.pull.failed':    'memory:pull falló (no bloqueante)',
+  'bootstrap.memory.pull.failed':    'brain:memory:pull falló (no bloqueante)',
   'bootstrap.memory.index.ok':       'índice durable reproyectado (brain/ → engram)',
-  'bootstrap.memory.index.failed':   'memory:index falló (no bloqueante)',
+  'bootstrap.memory.index.failed':   'brain:memory:index falló (no bloqueante)',
   'bootstrap.memory.unknownBackend': "backend '{backend}' sin rutina de init conocida — configuralo a mano",
 
   // §8 Ticket board
@@ -264,7 +264,7 @@ export default {
   'ticket.nextSteps.cd':          '    0. cd {path}   (abrí tu sesión de trabajo acá)',
   'ticket.nextSteps.step1':       '    1. Implementar — usá /sdd-new {id} si el cambio es complejo',
   'ticket.nextSteps.step2':       '    2. {pm} run brain:repo:check antes de cada commit',
-  'ticket.nextSteps.step3':       '    3. {pm} run memory:share && git add .memory/ antes de pushear',
+  'ticket.nextSteps.step3':       '    3. {pm} run brain:memory:share && git add .memory/ antes de pushear',
   'ticket.nextSteps.step4':       '    4. git push -u origin {branch}',
 
   // ── ticket-start.mjs — feature working memory (Slice 3) ─────────────────────
@@ -282,7 +282,6 @@ export default {
   'session.memory.skip.reason': 'memoria:   engram no disponible (omitido) — {reason}',
   'session.memory.recency.stale':   'memoria:  el registro durable más nuevo tiene {days} días — nada capturado desde entonces (ver #519)',
   'session.memory.recency.unknown': 'memoria:  sin registro durable — no se puede determinar cuándo se capturó memoria por última vez',
-  'session.manifest.restored':  'manifest:  cambios descartados (seguro)',
   'session.ticket.label':       'ticket:',
   'session.ticket.none':        '(sin memoria de ticket activa)',
 
@@ -300,7 +299,7 @@ export default {
   'memory.duplicates.summaryWithIndex': '⚠ {ids} id(s) de registro duplicado(s) en .memory/records/ — {lines} línea(s) física(s) excedente(s) colapsada(s) en {surface} ({total} línea(s) física(s) → {indexCount} indexada(s)).',
   'memory.duplicates.why': '  Deduplicado, no rechazado: `merge=union` concatena ambas copias cuando dos ramas tienen el mismo registro (ADR-0017, REQ-MF-3), así que esto es el transporte funcionando, no un store corrupto — pero `wc -l .memory/records/*.jsonl` sobreestima el store por {lines}, y solo se reporta porque estás leyendo esto.',
   'memory.duplicates.divergent': '  {count} de ellos DISCREPAN fuera de los campos hasheados (`source` no está hasheado, así que dos copias de un mismo registro pueden diferir ahí — el propio export→import→export de brain lo ensancha). Resuelto first-wins: la línea más antigua del archivo mensual más antiguo es la que queda indexada, tal como resuelve el camino de lectura. Marcado [divergent] abajo — vale la pena mirarlo, no es un error.',
-  'memory.duplicates.brief': '  Corré `npm run memory:reindex` para ver las ubicaciones por id.',
+  'memory.duplicates.brief': '  Corré `npm run brain:memory:reindex` para ver las ubicaciones por id.',
   'memory.duplicates.group': '  {id} ×{count} — {locations}',
   'memory.duplicates.groupDivergent': '  {id} ×{count} [divergent] — {locations}',
   'memory.duplicates.moreOccurrences': ', +{count} más',
@@ -346,8 +345,8 @@ export default {
 
   // ── memory/cli.mjs — qué backend corrió realmente (issue #641) ───────────────
   'memory.backend.substituted': 'el binario `{from}` no está instalado acá, así que `{op}` corrió sobre el backend `{fallback}` (solo registros) — mismos registros, misma validación, sin backend requerido (ADR-0017). MEMORY_BACKEND no estaba seteado, así que no se pisó ninguna elección explícita; seteálo para fijar cualquiera de los dos backends.',
-  'memory.backend.statedButAbsent': 'MEMORY_BACKEND={backend} está seteado explícitamente, pero el binario `{backend}` no está en PATH acá — un selector explícito nunca se pisa (ADR-0004), así que esta corrida va a fallar. La captura solo-registros no necesita backend: `MEMORY_BACKEND={fallback} npm run memory:{op}`.',
-  'memory.backend.probeFailed': 'no se pudo determinar si el binario `{backend}` está presente — {reason}. Eso es la VERIFICACIÓN fallando, no el binario faltando, así que no se sustituyó nada y `{op}` sigue sobre `{backend}`. Si falla, la ruta solo-registros es `MEMORY_BACKEND={fallback} npm run memory:{op}`.',
+  'memory.backend.statedButAbsent': 'MEMORY_BACKEND={backend} está seteado explícitamente, pero el binario `{backend}` no está en PATH acá — un selector explícito nunca se pisa (ADR-0004), así que esta corrida va a fallar. La captura solo-registros no necesita backend: `MEMORY_BACKEND={fallback} npm run brain:memory:{op}`.',
+  'memory.backend.probeFailed': 'no se pudo determinar si el binario `{backend}` está presente — {reason}. Eso es la VERIFICACIÓN fallando, no el binario faltando, así que no se sustituyó nada y `{op}` sigue sobre `{backend}`. Si falla, la ruta solo-registros es `MEMORY_BACKEND={fallback} npm run brain:memory:{op}`.',
 
   // ── memory/backends/engram.mjs — share() secret scrub (issue #214, C1b) ──────
   'memory.share.unprovenanced': '{count} observación(es) llegaron sin bloque de provenance, así que se materializaron como `@legacy` y sin `issue` — todavía nada emite el bloque en el camino de captura (#541). Contadas, no rechazadas: rechazarlas voltearía el store que ya existe.',
@@ -361,7 +360,7 @@ export default {
   'memory.share.upstreamUnavailable': 'no se pudo consultar la base upstream — {reason}. Esta corrida escribió todos los candidatos (comportamiento pre-#701); no se acotó nada.',
   'memory.share.upstreamConfigUnreadable': '{error}. Cualquier memory.upstreamRef declarado ahí NO fue respetado — la base upstream se derivó como {ref} en su lugar. Arreglá brain.config.json (un marcador de conflicto a medio merge es la causa habitual) si querías apuntar a otro ref.',
   'memory.share.upstreamConfigUnreadableNoRef': '{error}. Cualquier memory.upstreamRef declarado ahí NO fue respetado, y tampoco resolvió ninguna base upstream — la línea siguiente dice qué se intentó. Arreglá brain.config.json (un marcador de conflicto a medio merge es la causa habitual) si querías apuntar a otro ref.',
-  'memory.share.upstreamUnnamed': '{count} archivo(s) bajo .memory/records/ en la base upstream no coinciden con el formato de nombre por registro y son invisibles para el chequeo de alcance del export. Corré `npm run memory:split-records` para arreglarlo.',
+  'memory.share.upstreamUnnamed': '{count} archivo(s) bajo .memory/records/ en la base upstream no coinciden con el formato de nombre por registro y son invisibles para el chequeo de alcance del export. Corré `npm run brain:memory:split-records` para arreglarlo.',
   'memory.share.dedupedUpstream': '{count} registro(s) ya presentes en la base upstream ({ref}) no se re-exportaron.',
 
   // ── memory/staged-records-check.mjs — gate de pre-commit (issue #701) ────────
@@ -400,7 +399,7 @@ export default {
   'memory.plainfiles.save.issueInvalid': '--issue tiene que ser un NÚMERO de issue; llegó {value}. Se guarda como entero para que el registro quede atado a su ticket.',
   'memory.plainfiles.save.typeRequired': '--type es obligatorio y no tiene default seguro — es una elección, no un dato que la herramienta pueda derivar. Uno de: {types}.',
   'memory.plainfiles.save.done':    '✓ guardado {id} → {file}',
-  'memory.plainfiles.save.indexFailed': 'el registro SÍ se escribió — {id} → {file}. Lo que falló es la reconstrucción del ÍNDICE, que lee el store entero, así que la causa casi seguro es un registro que ya estaba roto antes de esta corrida: {message}\n  NO vuelvas a correr memory:save — el registro ya está en disco, y reintentar acuña un SEGUNDO registro con un `ts` posterior, y por lo tanto otro id, que ninguna deduplicación va a colapsar jamás.\n  Repará el store y después reconstruí el índice con `npm run memory:reindex`.',
+  'memory.plainfiles.save.indexFailed': 'el registro SÍ se escribió — {id} → {file}. Lo que falló es la reconstrucción del ÍNDICE, que lee el store entero, así que la causa casi seguro es un registro que ya estaba roto antes de esta corrida: {message}\n  NO vuelvas a correr brain:memory:save — el registro ya está en disco, y reintentar acuña un SEGUNDO registro con un `ts` posterior, y por lo tanto otro id, que ninguna deduplicación va a colapsar jamás.\n  Repará el store y después reconstruí el índice con `npm run brain:memory:reindex`.',
   'memory.plainfiles.save.secretFound': 'Se detectó un secreto en el registro candidato (línea {line}) — coincide con el patrón "{pattern}". Se abortó ANTES de agregarlo a records/ (agregá una entrada en governance.memorySecretAllowPatterns si es un falso positivo).',
   // ── #738 — proveniencia en la captura: actor/actorKind/issue ─────────────
   'memory.plainfiles.save.actorUnset': 'no hay un actor configurado — corré `git config --local brain.actor @<handle>` una vez por clon y reintentá. brain.actor no está configurado.',
@@ -418,7 +417,7 @@ export default {
   'memory.save.supersedesMissingValue': '--supersedes necesita un valor (el id que supera) — se rechazó antes de cualquier escritura, para que el registro nunca se guarde en silencio sin el campo que pediste.',
   // ── #874 — hydrate({recordId}): el registro ya es durable antes de que esto corra, así que
   // una falla del backend acá se reporta, nunca se lanza (R5) ──
-  'memory.save.hydrateDeferred': 'el registro {recordId} está en disco, pero hidratarlo en engram quedó diferido — {reason}. El registro NO se perdió; volvé a correr `npm run memory:pull` (o `memory:share`) cuando engram esté disponible para ponerlo al día.',
+  'memory.save.hydrateDeferred': 'el registro {recordId} está en disco, pero hidratarlo en engram quedó diferido — {reason}. El registro NO se perdió; volvé a correr `npm run brain:memory:pull` (o `brain:memory:share`) cuando engram esté disponible para ponerlo al día.',
   'memory.save.hydrateContended': 'el registro {recordId} está en disco, pero hidratarlo en engram se saltó — otro proceso (pid {pid}, {age}s) tiene tomado el guard de hidratación #820. El registro NO se perdió; se va a recoger en el próximo pull/share.',
   'memory.hydrate.recordNotFound': "hydrate: no se encontró ningún registro con id '{recordId}' bajo .memory/records/ — pasá el registro mismo al hidratar uno que todavía no se leyó de disco.",
   'memory.plainfiles.search.empty': 'ℹ no se encontraron registros coincidentes.',

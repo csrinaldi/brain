@@ -33,7 +33,7 @@ const base = {
   project: 'brain',
 };
 
-// #738 (design A6, #897 precedent): `memory:save` now reads `brain.actor`
+// #738 (design A6, #897 precedent): `brain:memory:save` now reads `brain.actor`
 // from the real `git config --get` (cwd = root). Isolated from ambient
 // global/system config so this suite's verdict does not depend on the
 // machine it runs on.
@@ -59,7 +59,7 @@ function runCli(root, ...args) {
   });
 }
 
-test('memory:reindex REPORTS the duplicate accounting — the silence #574 opened on', (t) => {
+test('brain:memory:reindex REPORTS the duplicate accounting — the silence #574 opened on', (t) => {
   const a = buildRecord({ ...base, content: 'A' });
   const b = buildRecord({ ...base, content: 'B' });
   const root = fixtureRoot(t, [serializeRecord(a), serializeRecord(b), serializeRecord(a)]);
@@ -76,7 +76,7 @@ test('memory:reindex REPORTS the duplicate accounting — the silence #574 opene
   assert.equal(/duplicate record id/.test(run.stdout), false, 'on stderr, which the hooks preserve — never stdout');
 });
 
-test('memory:reindex on a clean store reports NOTHING at all', (t) => {
+test('brain:memory:reindex on a clean store reports NOTHING at all', (t) => {
   const a = buildRecord({ ...base, content: 'A' });
   const root = fixtureRoot(t, [serializeRecord(a)]);
 
@@ -90,7 +90,7 @@ test('memory:reindex on a clean store reports NOTHING at all', (t) => {
   );
 });
 
-test('memory:reindex REPORTS a divergent duplicate as divergent, exits 0, and still writes the index', (t) => {
+test('brain:memory:reindex REPORTS a divergent duplicate as divergent, exits 0, and still writes the index', (t) => {
   // Not a refusal: `source` is hash-excluded, and brain's own round-trip
   // widens it, so this pair is a record brain itself writes.
   const a = buildRecord({ ...base, content: 'A', source: 'issue #574' });
@@ -108,7 +108,7 @@ test('memory:reindex REPORTS a divergent duplicate as divergent, exits 0, and st
 
 // ── the verbs the ticket actually names ──────────────────────────────────────
 
-test('memory:share REPORTS it too — the verb #574 measured as printing nothing', (t) => {
+test('brain:memory:share REPORTS it too — the verb #574 measured as printing nothing', (t) => {
   const a = buildRecord({ ...base, content: 'A' });
   const root = fixtureRoot(t, [serializeRecord(a), serializeRecord(a)]);
 
@@ -119,7 +119,7 @@ test('memory:share REPORTS it too — the verb #574 measured as printing nothing
   assert.match(run.stderr, /1 excess physical line\(s\)/);
 });
 
-test('memory:save REPORTS it, with the store/index gap — the first verb run after a pull', (t) => {
+test('brain:memory:save REPORTS it, with the store/index gap — the first verb run after a pull', (t) => {
   const a = buildRecord({ ...base, content: 'A' });
   const root = fixtureRoot(t, [serializeRecord(a), serializeRecord(a)]);
 
