@@ -109,8 +109,8 @@ Slice B's over-budget forecast was already ruled (engram `sdd/artifact-retiremen
 
 ### Phase B4: Legacy archive deletion (last, irreversible — R1)
 - [x] B4.0 (folded in during apply, not in the original plan) `brain/scripts/hooks/pre-push`: the "uncommitted .memory/ check" comment (~line 115) said `brain:memory:share` "re-materializes the manifest" — stale since slice A retired the manifest. Reworded to say it rebuilds `.memory/index.jsonl` instead (that is the actual non-deterministic, churning artifact `share()` still writes). Comment-only; no behavior change.
-- [ ] B4.1 `git rm -r .memory/legacy` (47 `.jsonl.gz` + `migration-rejected.json`, 48 paths). This is the LAST content commit of Slice B. PR body names the last SHA that carried these files.
-- [ ] B4.2 Run full `GIT_CONFIG_GLOBAL=/dev/null node --test` suite; confirm all green, including the re-pinned `chunk-boundary.test.mjs` and `cli.migrate-v1.test.mjs:60`.
+- [x] B4.1 `git rm -r .memory/legacy` — 48 paths staged for deletion (47 `.jsonl.gz` + `migration-rejected.json`), confirmed via `git diff --cached --name-status -- .memory` showing only `D` lines. This is the LAST content commit of Slice B.
+- [x] B4.2 Full `GIT_CONFIG_GLOBAL=/dev/null node --test` suite: 5343/5343 pass, 0 fail — including the re-pinned `chunk-boundary.test.mjs` and `cli.migrate-v1.test.mjs`'s forward-migration test.
 
 ### Phase B5: Mutation matrix + close
 - [ ] B5.1 Run the Slice B rows of design.md's mutation matrix (dualWriteRecords deletion, rollback refusal branch, the three static-guard deletions, zlib import, forward-migration-kept row via `cli.migrate-v1.test.mjs:60`). Revert one production change at a time; confirm exactly its named test dies. Record the table in `apply-progress.md`.
