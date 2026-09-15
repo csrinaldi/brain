@@ -27,23 +27,27 @@ just not repeated.
 Baseline moved from slice A's final 5344 to 5361 because `main` gained new
 tests between slice A's merge and this merge (#961 brain: prefix rename,
 #954 MANAGED_SCRIPT_KEYS, #962 brain-audit, plus the #850 orphan-test guard
-now also covering this worktree's tree). Net -18 across this batch (Phase
-B2/B3 deletions: dualWriteRecords' 2 tests, 3 whole test files removed
-(engram.upstream-scope, engram.dualwrite-hydrated-gate,
-upstream-records.integration — the last one missed by R5's original list),
-the engram→plainfiles round-trip test, rollbackMigration's 2 tests,
-scrubChunkFile's 3 tests, the old rollback-restore CLI test; +2 new CLI
-refusal tests (B3.1); B4's legacy deletion removed no tests, only data).
+now also covering this worktree's tree). Net -18 across this batch, measured
+per file (`node --test` on each file, baseline vs final commit — not
+recomputed by hand): `dualWriteRecords`' 2 tests in `engram.duplicates.test.mjs`
+(-2); 3 whole test files removed — `engram.upstream-scope.test.mjs` (-12),
+`engram.dualwrite-hydrated-gate.test.mjs` (-2),
+`upstream-records.integration.test.mjs` (-1, missed by R5's original list);
+the engram→plainfiles round-trip test (-1); `rollbackMigration`'s 2 tests
+(-2); `scrubChunkFile`'s 3 tests (-3); the old rollback-restore CLI test
+(-1); +2 new CLI refusal tests (B3.1); +4 new B1-B4 static guards in
+`retired-artifacts.static.test.mjs`; B4's legacy deletion removed no tests,
+only data. Sum: -2-12-2-1-2-3-1+2+4 = -18, matching the measured 5361→5343.
 
 ### Commits (this batch, local only — not pushed)
 
 1. `8981e41b` `fix(memory): retire dualWriteRecords, the rollback branch and scrubChunkFile (#955)` — B2-B3 (production + tests + i18n + CHANGELOG + pre-push comment), 19 files, +221/-1133 (includes 3 deleted test files).
 2. `d2ba7bce` `fix(memory): delete the v1 legacy chunk archive (#955)` — B4.1, 49 files (48 `.memory/legacy/**` deletions + `tasks.md`), +2/-32.
-3. (pending) record-first close commit — B5.2, `rec-43b45e3fef3310ff` + `.memory/index.jsonl`, verified exactly one net new id.
+3. `6fe451a6` `docs(memory): record slice B of the artifact-retirement decision (#955)` — B5.2, `rec-43b45e3fef3310ff` + `.memory/index.jsonl`, verified exactly one net new id.
 
 `origin/main` was merged (`git merge`, not rebase) as B1.1: `94d1b5a1` (conflicts in `CHANGELOG.md`/`README.md` resolved to main's version — main's versions were already correct/newer).
 
-### Counted production diff (tests, `.memory/**`, `openspec/**`, `AGENTS.md` excluded — via `brain/scripts/vcs/diff-size-count.mjs`, the same tool `governance-tiers.mjs` uses)
+### Counted production diff (tests, `.memory/**`, `openspec/**`, `AGENTS.md` excluded — via `brain/scripts/vcs/diff-size-count.mjs`'s `parseDiffNumstat`, the same helper `brain/scripts/governance/checks/diff-size.mjs` and the pre-push hook use)
 
 ```
 CHANGELOG.md                              |   2 +
@@ -79,7 +83,7 @@ clean (`git diff --stat`) after every revert.
 | Production change | Mutation applied | Test(s) that died | Matches design's "sole killer"? |
 |---|---|---|---|
 | `dualWriteRecords` deleted | Reinstated a trivial `export async function dualWriteRecords() { return {}; }` in `engram.mjs` | B1 static guard only | Yes |
-| `--rollback` refusal branch added (D1) | Disabled the refusal `if` (`if (false && ...)`), falling through toward the forward branch | Both new CLI tests — `--rollback refuses` **and** `--rollback --dry-run also refuses` | Yes — matches design (a matched pair by construction: both assert the same branch) |
+| `--rollback` refusal branch added (D1) | Disabled the refusal `if` (`if (false && ...)`), falling through toward the forward branch | Both new CLI tests — `--rollback refuses` **and** `--rollback --dry-run also refuses` | No — design named one CLI refusal test; it became two, both killed |
 | `scrubChunkFile` deleted | Reinstated a trivial `export function scrubChunkFile() { return null; }` in `secret-scrub.mjs` | B3 static guard only | Yes |
 | `node:zlib` import deleted | Reinstated `import { gunzipSync } from 'node:zlib'` (unused) in `secret-scrub.mjs` | B4 static guard only | Yes |
 | forward `runMigration` branch kept (R3) | Disabled the `!process.argv.includes("--dry-run")` branch (`if (false && ...)`) | **Two** existing `cli.migrate-v1.test.mjs` tests — the un-refused-migration test **and** the abort-if-populated test | **No — two killers, not the single `:60` test design named.** Both existing forward-migration tests route through the same disabled branch: the plain-migration test because `runMigration` never runs, and the "already migrated" abort test because without `runMigration` ever executing, its throw-before-any-work guard never fires either — the request instead falls through to the dry-run report path and exits 0. Both are legitimate — the branch really does guard both behaviors — recorded honestly rather than trimmed to match the design doc's single-test prediction (same "measured reality has a stronger/wider guard than predicted" pattern as slice A's own two discrepancy rows). |
@@ -91,9 +95,13 @@ missing guard.**
 
 ### Deviations from Design
 
-- `#937` pin landed at `cli.mjs:651`, not design's estimated `:645` — the
-  refusal-branch wording (comment block sizes) differs slightly from the
-  estimate; re-measured fresh per B3.2, not assumed.
+- `#937` pin landed at `cli.mjs:651` at the end of Slice B's own apply batch,
+  not design's estimated `:645` — the refusal-branch wording (comment block
+  sizes) differs slightly from the estimate; re-measured fresh per B3.2, not
+  assumed. A later comment-accuracy pass on this same branch (post-apply,
+  citing #955) added one more line to the `--rollback` header comment,
+  moving the pin to `:652` — re-measured and re-pinned in that pass, not
+  assumed either.
 - Counted diff (474) exceeds even design's own `~415-430` estimate by
   ~44-59 lines — mostly `cli.mjs`'s D1 refusal-branch comments (the
   do-not-delete-the-`if` warning) and the reworded `_defaultLoadBrainConfig`

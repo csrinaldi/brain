@@ -69,7 +69,7 @@ This change is almost all deletion, in two stacked PRs to `main` (R11). Slice A 
 
 ## `--rollback` after slice B
 
-`node brain/scripts/memory/cli.mjs migrate-v1 --rollback`, with or without `--dry-run`, prints `memory/cli: ` followed by the `memory.migrateV1.rollbackRetired` message on stderr, then exits 1. Nothing is read or written. English text: `migrate-v1 --rollback was retired (#955): it restored v1 chunks from .memory/legacy/ and then deleted .memory/records/, destroying every record captured since the migration. Nothing was changed. The archived chunks remain in git history: git show <sha>:.memory/legacy/<file>`.
+`node brain/scripts/memory/cli.mjs migrate-v1 --rollback`, with or without `--dry-run`, prints `memory/cli: ` followed by the `memory.migrateV1.rollbackRetired` message on stderr, then exits 1. Nothing is read or written. English text: `migrate-v1 --rollback was retired (#955): it used to restore v1 chunks from .memory/legacy/ and then delete .memory/records/, destroying every record captured since the migration. This refusal reads and writes nothing — the v1 chunks are wherever they already were: still in .memory/legacy/ if that directory exists locally, or in git history otherwise: git show <sha>:.memory/legacy/<file>`.
 
 ## Sanctioned `.memory/**` staging
 
@@ -115,6 +115,17 @@ Slice A never edits `cli.mjs`. In slice B, the `cli.mjs` edits at `:599-632` mov
 | refusal branch | delete it | CLI refusal |
 | three deletions / zlib import | re-add | B1–B3 / B4 |
 | forward migration kept (R3) | delete the `runMigration` branch | `cli.migrate-v1.test.mjs:60` (existing) |
+
+**Outcome note (apply, #955 Slice B).** Measured mutation testing found two
+rows with more than one killer, both recorded in `apply-progress.md`'s
+mutation matrix rather than silently forced to match this table: the
+refusal-branch mutation killed both new CLI refusal tests (`--rollback` and
+`--rollback --dry-run`), a matched pair by construction, not the single
+"CLI refusal" this table implies; and disabling the `runMigration` branch
+(R3 row) killed **two** existing `cli.migrate-v1.test.mjs` tests, not just
+`:60` — the plain-migration test and the abort-if-populated test, since both
+route through the same disabled branch. 3/5 Slice B rows matched a sole
+killer exactly; these 2/5 did not.
 
 ## Migration / Rollout — CHANGELOG (`/CHANGELOG.md`, newest first, no Unreleased section exists yet)
 
