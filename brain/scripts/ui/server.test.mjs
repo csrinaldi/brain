@@ -9,7 +9,7 @@ import { EventEmitter } from 'node:events';
 import { buildSnapshot } from '../status/snapshot.mjs';
 import { makeSnapshotFixture as makeFixture } from '../__fixtures__/snapshot-tree.mjs';
 import { createForgeCache } from './forge-cache.mjs';
-import { createUiServer, parseArgs, main, KNOWN_ROUTES } from './server.mjs';
+import { createUiServer, parseArgs, main, KNOWN_ROUTES, resolveForgeSource } from './server.mjs';
 
 const NOW = '2026-09-14T00:00:00Z';
 const now = () => new Date(NOW);
@@ -97,6 +97,18 @@ function makeFakeProcess() {
   const p = new EventEmitter();
   p.exit = () => {};
   return p;
+}
+
+/**
+ * #881, judgment:cold-6: `main()` now defaults to a REAL `resolveForgeSource()`
+ * whenever `deps.forgeSource` is omitted and polling is requested — every
+ * test below that calls `main()` without exercising that resolution
+ * explicitly MUST inject this, or `node --test` would spawn real dynamic
+ * imports against `vcs/cli.mjs` (and, once the poller ticks, a real `gh`
+ * subprocess) on every run. Mirrors the old, safe default: no forge port.
+ */
+function noRealForgeResolution() {
+  return async () => ({ ok: false, reason: 'test stub: forge resolution not exercised by this test' });
 }
 
 // ── R881-1 S1/S2: default port, static root, ephemeral port ────────────────
@@ -270,7 +282,7 @@ test('#881: EADDRINUSE prints "port <n> is already in use" and exits 2 (D15 — 
   try {
     const port = blocker.port;
     const errors = [];
-    const code = await main(['--port', String(port), '--root', makeFixture()], { say: () => {}, error: (m) => errors.push(m), process: makeFakeProcess() });
+    const code = await main(['--port', String(port), '--root', makeFixture()], { say: () => {}, error: (m) => errors.push(m), process: makeFakeProcess(), _resolveForgeSource: noRealForgeResolution() });
     assert.equal(code, 2);
     assert.match(errors.join('\n'), new RegExp(`port ${port} is already in use`));
   } finally {
@@ -320,6 +332,7 @@ test('#881: judgment:cold-2 — main() exits 2 with the message when listen() re
   const code = await main(['--port', '0', '--root', root], {
     say: () => {}, error: (m) => errors.push(m), process: makeFakeProcess(),
     _recomputeCurrent: async () => { throw new Error('boom: startup recompute failed'); },
+    _resolveForgeSource: noRealForgeResolution(),
   });
   assert.equal(code, 2);
   assert.match(errors.join('\n'), /boom: startup recompute failed/);
@@ -327,7 +340,7 @@ test('#881: judgment:cold-2 — main() exits 2 with the message when listen() re
 
 test('#881: main succeeds on a free (ephemeral) port and reports where it listens', async () => {
   const messages = [];
-  const result = await main(['--port', '0', '--root', makeFixture()], { say: (m) => messages.push(m), error: () => {}, process: makeFakeProcess() });
+  const result = await main(['--port', '0', '--root', makeFixture()], { say: (m) => messages.push(m), error: () => {}, process: makeFakeProcess(), _resolveForgeSource: noRealForgeResolution() });
   assert.notEqual(typeof result, 'number', 'success returns the started server, not an exit code');
   assert.match(messages.join('\n'), /brain:ui listening on http:\/\/127\.0\.0\.1:\d+/);
   await result.close();
@@ -339,7 +352,7 @@ test('#881: D15 — SIGINT/SIGTERM stop the poll timer, close every watcher, end
   fakeProcess.exit = (code) => exits.push(code);
   const root = makeFixture();
   const messages = [];
-  const result = await main(['--port', '0', '--root', root], { say: (m) => messages.push(m), error: () => {}, process: fakeProcess });
+  const result = await main(['--port', '0', '--root', root], { say: (m) => messages.push(m), error: () => {}, process: fakeProcess, _resolveForgeSource: noRealForgeResolution() });
   assert.notEqual(typeof result, 'number');
 
   try {
@@ -602,7 +615,7 @@ test('#881: sweep — a post-bind httpServer "error" event (e.g. EMFILE, fired a
 test('#881: judgment:cold-5 — main() removes its SIGINT/SIGTERM listeners once the server closes, whether closed by a signal or directly', async () => {
   const proc = makeFakeProcess();
   const root = makeFixture();
-  const result = await main(['--port', '0', '--root', root], { say: () => {}, error: () => {}, process: proc });
+  const result = await main(['--port', '0', '--root', root], { say: () => {}, error: () => {}, process: proc, _resolveForgeSource: noRealForgeResolution() });
   assert.equal(proc.listenerCount('SIGINT'), 1);
   assert.equal(proc.listenerCount('SIGTERM'), 1);
 
@@ -755,6 +768,118 @@ test('#881: a post-bind httpServer "error" is printed by the CLI, not only recor
     assert.match(errors.join('\n'), /still serving/);
     const res = await fetch(`http://127.0.0.1:${result.port}/api/snapshot`);
     assert.equal(res.status, 200, 'still serving means still serving');
+  } finally {
+    await result.close();
+  }
+});
+
+// ── judgment:cold-6 (cold review round 4 of PR #971): the real entry point ──
+// never resolved a live forge port ──────────────────────────────────────────
+//
+// `server.mjs`'s guard resolved `project` via `originIdentity()` but never
+// resolved a `forgeSource` — `main()` always ran with `deps.forgeSource`
+// undefined, `createUiServer` composed the poller with `noForgeVcs`, and
+// every one of its four verbs threw "no forge port was supplied to the
+// poller". Every real `npm run brain:ui` invocation ticked forever against a
+// throwing port: `prs`, `reviews` and issue bodies never left `{ok:false}`
+// in production, ever. `resolveForgeSource()` (mirroring
+// `snapshot-cli.mjs:54-69`) closes that gap; `main()` calls it whenever
+// `deps.forgeSource` is omitted and polling was requested.
+
+test('#881: resolveForgeSource — a throwing _getVcs degrades to {ok:false, reason}, never throws', async () => {
+  const result = await resolveForgeSource({
+    _originIdentity: () => ({ host: 'github.com', project: 'o/r' }),
+    _getVcs: async () => { throw new Error('vcs: no provider configured. Set "vcs": { "provider": "github" } …'); },
+  });
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /no provider configured/);
+});
+
+test('#881: resolveForgeSource — a resolving _getVcs and a real origin yield {ok:true, vcs, project}', async () => {
+  const stub = { issueList: async () => [] };
+  const result = await resolveForgeSource({
+    _originIdentity: () => ({ host: 'github.com', project: 'o/r' }),
+    _getVcs: async () => stub,
+  });
+  assert.deepEqual(result, { ok: true, vcs: stub, project: 'o/r' });
+});
+
+test('#881: resolveForgeSource — no origin remote degrades to {ok:false, reason} without ever calling _getVcs', async () => {
+  let called = false;
+  const result = await resolveForgeSource({
+    _originIdentity: () => ({ host: null, project: null }),
+    _getVcs: async () => { called = true; return {}; },
+  });
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /origin/);
+  assert.equal(called, false, 'a project-less origin is not worth resolving a port for');
+});
+
+test('#881: judgment:cold-6 — main() resolves a live forge port for the poller when deps.forgeSource is omitted, and the poller actually uses it', async () => {
+  const root = makeFixture();
+  const calls = [];
+  const stubVcs = readOnlyWriteVerbs({
+    issueList: async () => { calls.push('issueList'); return [
+      { number: 1, title: 'one', labels: [], assignees: [] },
+      { number: 2, title: 'two', labels: [], assignees: [] },
+    ]; },
+    mrList: async () => { calls.push('mrList'); return [{ number: 10, title: 'pr ten', headBranch: 'feat/issue-1-x' }]; },
+    issueView: async ({ number }) => { calls.push(`issueView:${number}`); return { number, body: '' }; },
+    prReviews: async () => { calls.push('prReviews'); return []; },
+  });
+  const result = await main(['--port', '0', '--root', root], {
+    say: () => {}, error: () => {}, process: makeFakeProcess(),
+    _resolveForgeSource: async () => ({ ok: true, vcs: stubVcs, project: 'o/r' }),
+  });
+  try {
+    const base = `http://127.0.0.1:${result.port}`;
+    await fetch(`${base}/api/poll/once`, { method: 'POST' }); // drives (or joins) the first tick
+
+    // `once()` awaits the tick itself; the recompute it triggers is a
+    // separate fire-and-forget step (`onTick` -> `recomputeAndBroadcast`),
+    // so poll for `/api/snapshot` to catch up rather than assume one fetch
+    // is enough — this is RED today regardless, because the poller never
+    // even sees `stubVcs`.
+    let snap = null;
+    for (let i = 0; i < 40; i++) {
+      snap = await (await fetch(`${base}/api/snapshot`)).json();
+      if (snap.prs.ok === true) break;
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    assert.equal(snap.prs.ok, true, 'RED today: main() never resolved a forge port, so the poller only ever saw noForgeVcs');
+    assert.equal(snap.prs.value.length, 1);
+    assert.equal(snap.graph.ok, true);
+    assert.equal(snap.graph.value.nodes.length, 2);
+    assert.ok(calls.includes('issueList'), 'the resolved stub actually served the poller, not noForgeVcs');
+  } finally {
+    await result.close();
+  }
+});
+
+test('#881: judgment:cold-6 — a failed forge resolution says the reason on stderr, starts the poller paused with that reason, and the reason reaches /api/snapshot in band', async () => {
+  const root = makeFixture();
+  const errors = [];
+  const result = await main(['--port', '0', '--root', root], {
+    say: () => {}, error: (m) => errors.push(m), process: makeFakeProcess(),
+    _resolveForgeSource: async () => ({ ok: false, reason: 'no VCS token' }),
+  });
+  try {
+    assert.match(errors.join('\n'), /✗ forge: no VCS token — polling paused; tree sections still served/);
+
+    const base = `http://127.0.0.1:${result.port}`;
+    const snap = await (await fetch(`${base}/api/snapshot`)).json();
+    assert.equal(snap.prs.ok, false);
+    assert.match(snap.prs.reason, /no VCS token/);
+    assert.equal(snap.graph.ok, false);
+    assert.match(snap.graph.reason, /no VCS token/);
+    assert.equal(snap.reviews.ok, false);
+    assert.match(snap.reviews.reason, /no VCS token/);
+
+    const pauseRes = await fetch(`${base}/api/poll/pause`, { method: 'POST' }); // idempotent state read
+    const state = await pauseRes.json();
+    assert.equal(state.paused, true);
+    assert.match(state.lastError, /no VCS token/);
+    assert.ok(state.lastPolledAt, 'the reason carries a time, not just text');
   } finally {
     await result.close();
   }

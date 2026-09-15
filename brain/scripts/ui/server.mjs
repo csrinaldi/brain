@@ -55,14 +55,14 @@ const noForgeVcs = {
  *
  * @param {{
  *   root?: string, port?: number, vcs?: object|null, project?: string|null, _now?: () => Date,
- *   forgeSource?: object|null, interval?: number, poll?: boolean,
+ *   forgeSource?: object|null, forgeUnavailable?: string|null, interval?: number, poll?: boolean,
  *   gitCommonDir?: string|null, _watch?: Function, _run?: Function, _readdir?: Function,
  *   _setTimeout?: Function, _clearTimeout?: Function, _recomputeCurrent?: () => Promise<object>,
  * }} opts
  */
 export function createUiServer({
   root = process.cwd(), port = 3000, vcs = null, project = null, _now = () => new Date(),
-  forgeSource = null, interval = 60000, poll = true,
+  forgeSource = null, forgeUnavailable = null, interval = 60000, poll = true,
   gitCommonDir = null, _watch, _run, _readdir,
   _setTimeout = setTimeout, _clearTimeout = clearTimeout,
   _recomputeCurrent = null, onServerError = null} = {}) {
@@ -128,7 +128,23 @@ export function createUiServer({
   // covers the startup path, `serveSnapshot`, `serveStream`, and
   // `recomputeAndBroadcast` alike — only the startup path (`listen()`) is
   // unprotected against a throw, which is what judgment:cold-2 found.
-  const computeSnapshot = _recomputeCurrent ?? (() => buildSnapshot({ root, now: _now(), vcs: forgeVcs, project }));
+  //
+  // `forgeUnavailable` (#881, judgment:cold-6): set when `main()` could not
+  // resolve a live forge port at all (no origin remote, no provider
+  // configured, `getVcs()` threw). The poller is constructed paused with
+  // the same reason (below), so the cache-only port never fills — but
+  // `buildSnapshot`'s own `readForge` would otherwise report a generic
+  // "the first forge poll has not completed" forever, which is TRUE but not
+  // the actual reason an operator needs. Overriding the three forge
+  // sections here says the real reason in band without `buildSnapshot`
+  // ever seeing a live port (D1 is unchanged: no forge call happens either
+  // way).
+  const computeSnapshot = _recomputeCurrent ?? (async () => {
+    const snapshot = await buildSnapshot({ root, now: _now(), vcs: forgeVcs, project });
+    if (!forgeUnavailable) return snapshot;
+    const unreachable = { ok: false, reason: forgeUnavailable };
+    return { ...snapshot, graph: unreachable, prs: unreachable, reviews: unreachable };
+  });
 
   async function recomputeCurrent() {
     current = await computeSnapshot();
@@ -161,7 +177,8 @@ export function createUiServer({
 
   const watcher = createWatcher({ root, gitCommonDir, _watch, _run: run, _readdir, _now, _setTimeout, _clearTimeout, onRecompute: recomputeAndBroadcast });
   const poller = createPoller({
-    vcs: forgeSource ?? noForgeVcs, cache: forgeCache, project, interval, enabled: poll, _setTimeout, _clearTimeout, _now,
+    vcs: forgeSource ?? noForgeVcs, cache: forgeCache, project, interval, enabled: poll,
+    initialError: forgeUnavailable, _setTimeout, _clearTimeout, _now,
     onTick: () => { recomputeAndBroadcast({ causes: ['poll'] }); },
   });
 
@@ -318,6 +335,36 @@ export function parseArgs(argv = []) {
 }
 
 /**
+ * resolveForgeSource() — mirrors `status/snapshot-cli.mjs:54-69`: resolves a
+ * REAL, live forge port (D1's ONLY legitimate holder is the poller). Every
+ * failure mode — no git origin remote, no provider configured
+ * (`resolveProviderName` throws), `getVcs()`'s dynamic import failing —
+ * degrades to `{ok:false, reason}` rather than throwing, so `main()` never
+ * has to guard a throw from this call: the entry point that used to run
+ * with an unresolved, always-throwing forge port (#881, judgment:cold-6)
+ * now either gets a real one or a said reason, never a crash.
+ *
+ * `_getVcs`/`_originIdentity` are the same test seams `snapshot-cli.mjs`
+ * exposes — a fixture with no remote or no token exercises this function
+ * directly, with no dynamic import and no real `git`/`gh` process.
+ *
+ * @param {{ _getVcs?: Function, _originIdentity?: Function }} [opts]
+ * @returns {Promise<{ok:true, vcs:object, project:string}|{ok:false, reason:string}>}
+ */
+export async function resolveForgeSource({ _getVcs, _originIdentity } = {}) {
+  try {
+    const originIdentityFn = _originIdentity ?? (await import('../vcs/lib/repo.mjs')).originIdentity;
+    const { project } = originIdentityFn() ?? {};
+    if (!project) return { ok: false, reason: 'no git origin remote — cannot resolve a forge project' };
+    const getVcsFn = _getVcs ?? (await import('../vcs/cli.mjs')).getVcs;
+    const vcs = await getVcsFn();
+    return { ok: true, vcs, project };
+  } catch (err) {
+    return { ok: false, reason: err?.message ?? String(err) };
+  }
+}
+
+/**
  * main() — the CLI's own logic, deps-injected for tests. `EADDRINUSE` is
  * D15's same class of error as a bad argument (the operator gave this verb
  * something it cannot use), so it takes the same exit code, 2.
@@ -335,9 +382,32 @@ export async function main(argv = [], deps = {}) {
     error(`✗ ${parsed.error}\n  Usage: npm run brain:ui -- [--port <n>] [--root <dir>] [--interval <ms>] [--no-poll]`);
     return 2;
   }
+
+  // #881, judgment:cold-6: the real entry point never resolved a live forge
+  // port — `deps.forgeSource` was always `undefined` here, so the poller's
+  // four verbs always threw and `prs`/`reviews`/issue bodies never left
+  // `{ok:false}` outside a test that injected a stub. Resolve one now,
+  // exactly when a caller has not already supplied `forgeSource` AND
+  // polling was even requested — `--no-poll` means no forge resolution is
+  // attempted at all, matching R881-4 S2's existing contract.
+  let project = deps.project ?? null;
+  let forgeSource = deps.forgeSource ?? null;
+  let forgeUnavailable = null;
+  if (deps.forgeSource === undefined && parsed.poll) {
+    const resolve = deps._resolveForgeSource ?? resolveForgeSource;
+    const resolved = await resolve();
+    if (resolved.ok) {
+      forgeSource = resolved.vcs;
+      if (project === null) project = resolved.project;
+    } else {
+      forgeUnavailable = resolved.reason;
+      error(`✗ forge: ${resolved.reason} — polling paused; tree sections still served`);
+    }
+  }
+
   const server = createUiServer({
-    root: parsed.root, vcs: deps.vcs ?? null, project: deps.project ?? null,
-    forgeSource: deps.forgeSource ?? null, interval: parsed.interval, poll: parsed.poll,
+    root: parsed.root, vcs: deps.vcs ?? null, project,
+    forgeSource, forgeUnavailable, interval: parsed.interval, poll: parsed.poll,
     _recomputeCurrent: deps._recomputeCurrent ?? null,
     onServerError: (err) => error(`✗ server error: ${err?.message ?? err} — still serving`),
   });
@@ -393,9 +463,18 @@ export async function main(argv = [], deps = {}) {
 }
 
 // Guarded like `status/snapshot-cli.mjs:54-69`: importing this module never
-// starts a server or reaches the forge. `vcs` is deliberately never resolved
-// here (D1) — the real CLI entry always runs with an empty, in-process
-// forge-cache until the poller (#881 PR 2) fills it.
+// starts a server or reaches the forge on its own. `project` is resolved
+// here the same cheap way `snapshot-cli.mjs` does (`originIdentity()`, one
+// local `git` call, no network) so it is available even on a path that
+// never touches the forge (`--no-poll`, or a resolution failure inside
+// `main()` below). The forge PORT itself is NOT resolved here — that used
+// to be true by design (D1) and is now true by an unfixed bug instead
+// (#881, judgment:cold-6): `main()` never resolved one, so every real
+// `npm run brain:ui` run polled with `deps.forgeSource` undefined and the
+// poller's four verbs always threw. `main()` now resolves a live port
+// itself (unless `--no-poll`), with the poller starting paused and the
+// reason said in band on any resolution failure — this guard stays thin on
+// purpose and lets `main()` own that decision.
 if (import.meta.url === `file://${process.argv[1]}`) {
   let project = null;
   try {

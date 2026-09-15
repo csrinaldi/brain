@@ -52,6 +52,7 @@ function rowsEqual(a, b) {
  *   interval?: number, enabled?: boolean,
  *   _setTimeout?: Function, _clearTimeout?: Function, _now?: () => Date,
  *   onTick?: (state: object) => void,
+ *   initialError?: string|null,
  * }} opts
  */
 export function createPoller({
@@ -64,8 +65,16 @@ export function createPoller({
   _clearTimeout = clearTimeout,
   _now = () => new Date(),
   onTick = () => {},
+  initialError = null,
 } = {}) {
-  let paused = !enabled;
+  // `initialError` (#881, judgment:cold-6): the CALLER already knows, before
+  // any tick, that `vcs` cannot be polled (forge resolution failed) —
+  // forcing `paused` regardless of `enabled` means `start()` is a no-op and
+  // no tick ever runs against a port that would only throw. The reason and
+  // a time are visible on `state()` immediately, the same shape a real
+  // failed tick would leave, so a caller reading `/api/poll/pause`'s
+  // response cannot tell the two apart.
+  let paused = !enabled || Boolean(initialError);
   let timer = null;
   let inFlight = null;
   let lastOnceAt = -Infinity;
@@ -75,9 +84,9 @@ export function createPoller({
   let tickCount = 0;
   let reviewOffset = 0;
 
-  let lastPolledAt = null;
+  let lastPolledAt = initialError ? _now().toISOString() : null;
   let lastOkAt = null;
-  let lastError = null;
+  let lastError = initialError;
   let forgeAsOf = { issues: null, bodies: null, reviews: null };
 
   function state() {

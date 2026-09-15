@@ -151,6 +151,40 @@ test('#881: R881-9 S2 — a failed poll keeps the previous cache and sets lastEr
   poller.close();
 });
 
+// ── #881 judgment:cold-6: an `initialError` starts the poller paused, in band ──
+//
+// The real CLI entry never resolved a live forge port (server.mjs:394-397's
+// own comment claimed this was deliberate) — `deps.forgeSource` was always
+// `undefined`, so the poller's four verbs always threw
+// "no forge port was supplied to the poller" and `prs`/`reviews`/issue
+// bodies never left `{ok:false}` outside a test. `main()` now resolves a
+// real port and, on failure, constructs the poller with `initialError` so
+// the reason is visible on `state()` before any tick, and `start()` is a
+// no-op — no tick ever runs against a port that would only throw.
+
+test('#881: judgment:cold-6 — createPoller({ initialError }) starts paused with lastError and lastPolledAt set, no tick runs even via start()', () => {
+  const now = { t: 1726272000000 };
+  const callLog = [];
+  const vcs = makeVcs({ callLog });
+  const scheduler = fakeScheduler();
+  const poller = createPoller({
+    vcs, cache: createForgeCache(), project: 'o/r', _now: () => new Date(now.t),
+    initialError: 'no VCS token',
+    _setTimeout: scheduler.setTimeout, _clearTimeout: scheduler.clearTimeout,
+  });
+
+  const state = poller.state();
+  assert.equal(state.paused, true);
+  assert.match(state.lastError, /no VCS token/);
+  assert.equal(state.lastPolledAt, new Date(now.t).toISOString(), 'the reason carries a time, the same shape a real failed tick would leave');
+  assert.equal(state.lastOkAt, null);
+
+  poller.start(); // paused: a no-op, exactly like `enabled: false`
+  assert.equal(scheduler.pending(), 0, 'no timer was armed');
+  assert.deepEqual(callLog, [], 'the port was never called — an initial resolution error means no tick, ever, until a manual resume');
+  poller.close();
+});
+
 // ── A5: the poller only ever calls the four read verbs ─────────────────────
 
 test('#881: A5 — composed with a write-throwing port, a full tick completes with no write verb invoked', async () => {
