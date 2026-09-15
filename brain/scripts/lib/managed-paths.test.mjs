@@ -131,16 +131,29 @@ test('a managed glob covers brain/scripts/lib/home-index.mjs (REQ-7)', () => {
     'brain/scripts/lib/home-index.mjs must be reachable by a managed glob (e.g. brain/scripts/**)');
 });
 
-// S5 + #154 + #906 A5: MANAGED_SCRIPT_KEYS must have exactly 10 entries, all
-// prefixed brain:. #906 A5 (measured): brain:upgrade injects package.json
-// scripts ONLY for keys listed here — the launcher FILE travels via
-// brain/scripts/** regardless, but its npm script does not exist on any
-// consumer unless the key is in this list.
-test('MANAGED_SCRIPT_KEYS has exactly 10 entries, all prefixed brain: (S5, #906 A5)', () => {
-  assert.equal(MANAGED_SCRIPT_KEYS.length, 10,
-    'MANAGED_SCRIPT_KEYS must contain exactly 10 brain:* verb keys');
+// S5 + #154 + #906 A5 + #922: the invariants every managed script key must
+// hold. #906 A5 (measured): brain:upgrade injects package.json scripts ONLY for
+// keys listed here — the launcher FILE travels via brain/scripts/** regardless,
+// but its npm script does not exist on any consumer unless the key is in this
+// list.
+//
+// #922 replaced the exact-count assertion (`length === 10`) with invariants.
+// The catalog's CONTENT is pinned by managed-script-keys-doctrine.test.mjs,
+// against two independent sources: every script the doctrine tells an agent to
+// `npm run` must be in this list, and every entry must be a real package.json
+// script. An exact count added nothing to those, broke on every legitimate
+// addition, and still passed when one key was swapped for another. Do not
+// reintroduce it. If a count is ever wanted, compare against an independent
+// source — never against MANAGED_SCRIPT_KEYS.length itself, which cannot fail.
+//
+// Every key is `brain:`-namespaced (#961 R2): the memory verbs a consumer
+// receives are `brain:memory:*`. Bare `memory:*` names survive only as
+// repo-only aliases in brain's own package.json (#961 R4) and are never managed.
+test('MANAGED_SCRIPT_KEYS entries are unique and namespaced brain: (S5, #906 A5, #922, #961)', () => {
+  assert.equal(new Set(MANAGED_SCRIPT_KEYS).size, MANAGED_SCRIPT_KEYS.length,
+    'MANAGED_SCRIPT_KEYS must not repeat a key');
   for (const key of MANAGED_SCRIPT_KEYS) {
-    assert.ok(key.startsWith('brain:'),
+    assert.match(key, /^brain:[a-z]/,
       `every key must start with "brain:" — got "${key}"`);
   }
 });
