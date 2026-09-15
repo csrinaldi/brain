@@ -601,8 +601,9 @@ function shipOutcomeKey(result) {
 //   unconditionally — on this repo (and any consumer past cutover) that
 //   destroys every record written since migration to restore a transport
 //   nothing reads. The refusal branch below runs BEFORE the `--dry-run`
-//   check and must never be deleted outright: doing so lets `--rollback`
-//   fall through into the real forward `runMigration()` two branches down.
+//   check. Without it, `--rollback` falls through into the real forward
+//   `runMigration()` in the next branch (and `--rollback --dry-run` prints
+//   a migration report and exits 0).
 //
 // BRAIN_MIGRATE_V1_TEST_ROOT (test-only seam): when set, this op resolves
 // `.memory/` under `<value>/.memory` instead of the real repo root. NEVER
@@ -618,10 +619,10 @@ if (op === "migrate-v1") {
   const legacyDir = join(memoryRoot, "legacy");
   const indexPath = join(memoryRoot, "index.jsonl");
 
-  // D1 refusal branch — do NOT delete this `if`. Removing it lets
-  // `--rollback` (with or without `--dry-run`) fall through into the real
-  // forward `runMigration()` two branches below, silently running a
-  // migration instead of refusing one.
+  // D1 refusal branch — do NOT delete this `if`. Without it, `--rollback`
+  // falls through into the real forward `runMigration()` in the next
+  // branch below (and `--rollback --dry-run` prints a migration report
+  // and exits 0 instead of refusing).
   if (process.argv.includes("--rollback")) {
     console.error(`memory/cli: ${await t("memory.migrateV1.rollbackRetired")}`);
     process.exit(1);

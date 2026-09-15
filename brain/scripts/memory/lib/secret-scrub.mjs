@@ -95,9 +95,9 @@ export function scanTextForSecrets(text, patterns, allowPatterns = []) {
  * physical JSON line per record, R1 — see format.mjs) and scan it for
  * secrets. Plaintext only — no gzip step: REQ-C2B1-2's re-point target
  * (issue #221, C2b-1) is already plaintext. The gzip-chunk scrubber this
- * once mirrored (`scrubChunkFile`) retired with the chunk-reading exporter
- * it served (#955 R4, epic task 2.4) — nothing in this file reads a
- * `.jsonl.gz` any more.
+ * once mirrored (`scrubChunkFile`) had no production caller after #874
+ * split B removed `share()`'s chunk scan; #955 (R4, epic task 2.4) deleted
+ * it — nothing in this file reads a `.jsonl.gz` any more.
  *
  * @param {string} recordsPath
  * @param {RegExp[]} patterns

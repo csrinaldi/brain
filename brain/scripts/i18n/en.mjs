@@ -427,7 +427,7 @@ export default {
 
   // ── memory/cli.mjs — migrate-v1 (issue #217, C2a / #219 C2-migrate / #222 C2b-2) ──
   'memory.migrateV1.realRunSummary':        '✓ migration complete — written: {written} | rejected: {rejected} | skipped (personal): {skipped} | unparseable chunks: {unparseable} | empty-observations chunks: {emptyObservations} | index: {indexCount} record(s). records/ is now the sole write path (memory.dualWrite retired, D3/C4).',
-  'memory.migrateV1.rollbackRetired':       'migrate-v1 --rollback was retired (#955): it restored v1 chunks from .memory/legacy/ and then deleted .memory/records/, destroying every record captured since the migration. Nothing was changed. The archived chunks remain in git history: git show <sha>:.memory/legacy/<file>',
+  'memory.migrateV1.rollbackRetired':       'migrate-v1 --rollback was retired (#955): it used to restore v1 chunks from .memory/legacy/ and then delete .memory/records/, destroying every record captured since the migration. This refusal reads and writes nothing — the v1 chunks are wherever they already were: still in .memory/legacy/ if that directory exists locally, or in git history otherwise: git show <sha>:.memory/legacy/<file>',
   'memory.migrateV1.dryRunHeader':          'Dry-run migration report (issue #217, C2):',
   'memory.migrateV1.summary':               'records: {records} | skipped (personal): {skipped} | rejected: {rejected} | unparseable chunks: {unparseable} | empty-observations chunks: {emptyObservations}',
   'memory.migrateV1.typesHistogramHeader':  'Types histogram:',

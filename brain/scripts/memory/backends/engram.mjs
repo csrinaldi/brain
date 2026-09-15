@@ -18,15 +18,17 @@
 // #247/#863 D3 — the chunk read-back is a boundary now (guard:
 // brain/scripts/memory/chunk-boundary.test.mjs). The seven-row ledger of what
 // 3.2 (#874) deletes is restated in
-// openspec/changes/issue-247-chunk-retirement/{tasks,design}.md. Rows 1, 2, 4
-// and 5 are gone — `share()` (#874 split B) no longer calls `engram sync
-// --export`, has no observation reader and no chunk-scrub subsystem left,
-// and `engram.share.test.mjs`'s old shape retired with them. Row 3 (the
-// records dual-write exporter's own `_readObservations` seam) is retired
-// too now — #955 (epic task 2.4) deleted the function that owned it instead
-// of giving it the future caller the O1 disposition held it open for. Rows
-// 6-7 (symlink confinement, legacy gz path) were finished by #955 slice A
-// and this slice respectively — all seven rows are closed.
+// openspec/changes/archive/2026-09-10-issue-247-chunk-boundary/{tasks,design}.md.
+// Rows 1, 2, 4 and 5 are gone — `share()` (#874 split B) no longer calls
+// `engram sync --export`, has no observation reader and no chunk-scrub
+// subsystem left, and `engram.share.test.mjs`'s old shape retired with
+// them. Row 3 (the records dual-write exporter's own `_readObservations`
+// seam) is retired too now — #955 (epic task 2.4) deleted the function
+// that owned it instead of giving it the future caller the O1 disposition
+// held it open for. Row 6 (symlink confinement) closed with #955 (Slice A,
+// PR #965). Row 7 (legacy gz path): #955 Slice B deleted `scrubChunkFile`
+// and `.memory/legacy/`; `collectChunkObservations` is KEPT (R3) — forward
+// `migrate-v1` still calls it. All seven rows are closed.
 
 import { execFileSync, spawnSync } from "node:child_process";
 import {
@@ -186,7 +188,7 @@ export async function share({
  * (`memorySecretPatterns`) and an ALLOW-direction key
  * (`memorySecretAllowPatterns`) cannot be half-propagated (R1/REQ-SCAN-2).
  *
- * D4 (design.md): `save()` (`:952`) is this function's only wiring point.
+ * D4 (design.md): `save()` is this function's only wiring point.
  * The records dual-write exporter this doc once ALSO named as a wiring
  * point (kept callerless since #874 split B "for a future caller per O1")
  * is gone now — #955 R5 (epic task 2.4) deleted it outright rather than

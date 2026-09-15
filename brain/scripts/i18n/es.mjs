@@ -382,7 +382,7 @@ export default {
 
   // ── memory/cli.mjs — migrate-v1 (issue #217, C2a / #219 C2-migrate / #222 C2b-2) ──
   'memory.migrateV1.realRunSummary':        '✓ migración completa — escritos: {written} | rechazados: {rejected} | omitidos (personal): {skipped} | chunks no parseables: {unparseable} | chunks sin observaciones: {emptyObservations} | índice: {indexCount} registro(s). records/ es ahora la única vía de escritura (memory.dualWrite retirado, D3/C4).',
-  'memory.migrateV1.rollbackRetired':       'migrate-v1 --rollback fue retirado (#955): restauraba los chunks v1 desde .memory/legacy/ y después borraba .memory/records/, destruyendo cada registro capturado desde la migración. No se cambió nada. Los chunks archivados siguen en el historial de git: git show <sha>:.memory/legacy/<file>',
+  'memory.migrateV1.rollbackRetired':       'migrate-v1 --rollback fue retirado (#955): antes restauraba los chunks v1 desde .memory/legacy/ y después borraba .memory/records/, destruyendo cada registro capturado desde la migración. Este rechazo no lee ni escribe nada — los chunks v1 están donde ya estaban: en .memory/legacy/ si ese directorio existe localmente, o en el historial de git si no: git show <sha>:.memory/legacy/<file>',
   'memory.migrateV1.dryRunHeader':          'Reporte de migración en dry-run (issue #217, C2):',
   'memory.migrateV1.summary':               'registros: {records} | omitidos (personal): {skipped} | rechazados: {rejected} | chunks no parseables: {unparseable} | chunks sin observaciones: {emptyObservations}',
   'memory.migrateV1.typesHistogramHeader':  'Histograma de tipos:',
