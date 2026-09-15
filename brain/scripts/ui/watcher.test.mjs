@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { EventEmitter } from 'node:events';
 
@@ -247,6 +247,66 @@ test("#881: a worktree whose watch failed is retried on the next rescan, never l
   await Promise.resolve();
   assert.equal(recomputes.length, 1, 'a commit in alpha is no longer silently invisible for the rest of the process');
 
+  w.close();
+});
+
+// ── cold review of PR #971 rev 5 (judgment:cold-7), R881-3, design.md:228:
+// a change dir created AFTER start() is watched from then on — the CHANGES_ROOT
+// event re-syncs its children exactly like the worktrees root re-syncs worktrees ──
+
+test('#881: a change dir created after start() is watched — the CHANGES_ROOT event re-syncs its children like the worktrees root', async () => {
+  const root = makeWatcherFixture();
+  const gitCommonDir = makeGitCommonFixture();
+  const _run = () => `worktree ${root}\n`;
+  const _watch = spyWatch();
+  const scheduler = fakeScheduler();
+  const recomputes = [];
+  const w = createWatcher({
+    root, gitCommonDir, _watch, _run,
+    _setTimeout: scheduler.setTimeout, _clearTimeout: scheduler.clearTimeout,
+    onRecompute: async (evt) => { recomputes.push(evt); },
+  });
+  w.start();
+
+  const newDir = join(root, 'openspec/changes/issue-999-test');
+  mkdirSync(newDir, { recursive: true });
+  _watch.fire(join(root, 'openspec/changes')); // the CHANGES_ROOT event
+  assert.ok(_watch.calls.some((c) => c.path === newDir), 'the new change dir is watched after the CHANGES_ROOT re-sync');
+
+  // drain the debounce+recompute the root event itself scheduled, so the
+  // assertion below isolates the NEW dir's own event
+  scheduler.runLatest();
+  await Promise.resolve();
+  await Promise.resolve();
+  recomputes.length = 0;
+
+  writeFileSync(join(newDir, 'tasks.md'), '- [ ] one\n');
+  _watch.fire(newDir);
+  assert.equal(scheduler.pending(), 1, 'the new dir is really watched — an edit inside it schedules a debounce');
+  scheduler.runLatest();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(recomputes.length, 1, 'the edit inside the new change dir fires a second recompute — previously zero, ever');
+  w.close();
+});
+
+test('#881: a removed change dir has its watch closed on the next CHANGES_ROOT event', () => {
+  const root = makeWatcherFixture();
+  const gitCommonDir = makeGitCommonFixture();
+  const _run = () => `worktree ${root}\n`;
+  const _watch = spyWatch();
+  const w = createWatcher({ root, gitCommonDir, _watch, _run });
+  w.start();
+
+  const dirPath = join(root, 'openspec/changes/issue-1-a');
+  assert.ok(_watch.calls.some((c) => c.path === dirPath));
+  const before = w.state().watched;
+
+  rmSync(dirPath, { recursive: true, force: true });
+  _watch.fire(join(root, 'openspec/changes'));
+
+  assert.equal(_watch.closesByPath.get(dirPath), 1, 'the vanished change dir watcher is closed on re-sync');
+  assert.equal(w.state().watched, before - 1, 'the handle count goes back down');
   w.close();
 });
 

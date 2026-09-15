@@ -33,6 +33,14 @@
 // id under `.git/worktrees/` the basename of its path — confirmed against
 // this very repo's own linked worktrees before relying on it.
 //
+// `openspec/changes/` re-syncs its children the SAME way, on its own event
+// (`rescanChangeDirs()`): a change dir created after `start()` — the normal
+// case for `/sdd-new` on a long-lived server — gets watched from then on,
+// and a removed one has its watch closed (cold review of PR #971 rev 5,
+// judgment:cold-7, R881-3, design.md:228). `watchDir()`/`closeWatch()` share
+// one generic `trackingId`/`trackingMap` bookkeeping pair between the two
+// resync paths rather than each root growing its own copy.
+//
 // A watch that cannot be registered (`ENOSPC`, `EPERM`, a path that does not
 // exist in this root) is caught PER DIRECTORY. The watcher never throws out
 // of the constructor or `start()`: the server keeps running, and `state()`
@@ -100,6 +108,7 @@ export function createWatcher({
   const run = _run ?? defaultRun(root);
   const handles = new Map(); // absPath -> {handle, label, kind, worktreePath}
   const watchedWorktrees = new Map(); // id -> path
+  const watchedChangeDirs = new Map(); // name -> absPath
   let failed = [];
   let resolvedGitCommonDir = gitCommonDir;
   let debounceTimer = null;
@@ -113,7 +122,7 @@ export function createWatcher({
     failed.push({ path: label, reason: err?.message ?? String(err) });
   }
 
-  function watchDir(absPath, label, kind, worktreePath, worktreeId) {
+  function watchDir(absPath, label, kind, worktreePath, trackingId, trackingMap) {
     if (handles.has(absPath)) return;
     try {
       const handle = _watch(absPath, { persistent: false }, () => onFire(absPath));
@@ -130,7 +139,7 @@ export function createWatcher({
           closeWatch(absPath); // a failed handle cannot fire again
         });
       }
-      handles.set(absPath, { handle, label, kind, worktreePath, worktreeId });
+      handles.set(absPath, { handle, label, kind, worktreePath, trackingId, trackingMap });
       failed = failed.filter((f) => f.path !== label);
     } catch (err) {
       recordFailure(label, err);
@@ -142,14 +151,15 @@ export function createWatcher({
     if (!entry) return;
     try { entry.handle.close(); } catch { /* best effort */ }
     handles.delete(absPath);
-    // A worktree's logs/ handle carries its `worktreeId`. Closing it — either
-    // because the worktree vanished (rescanWorktrees' removal loop) or because
-    // its handle errored asynchronously (the `handle.on('error', ...)` path
-    // above) — must make the worktree eligible for `watchDir()` again on the
-    // NEXT rescan. `watchedWorktrees` only ever records a worktree whose watch
-    // is actually open right now (see rescanWorktrees()), so it must be
-    // cleared here too, not just on removal.
-    if (entry.worktreeId !== undefined) watchedWorktrees.delete(entry.worktreeId);
+    // A tracked child (a worktree's logs/, a change dir) handle carries its
+    // `trackingId` + `trackingMap`. Closing it — either because the child
+    // vanished (a rescan's removal loop) or because its handle errored
+    // asynchronously (the `handle.on('error', ...)` path above) — must make
+    // the child eligible for `watchDir()` again on the NEXT rescan. The
+    // tracking map only ever records a child whose watch is actually open
+    // right now (see rescanWorktrees()/rescanChangeDirs()), so it must be
+    // cleared here too, not just on removal (R881-3, judgment:cold-1, cold-7).
+    if (entry.trackingId !== undefined) entry.trackingMap.delete(entry.trackingId);
   }
 
   function onFire(absPath) {
@@ -158,6 +168,7 @@ export function createWatcher({
     pendingCauses.add(`watch:${entry.label}`);
     if (entry.kind === 'refs') pendingRefWorktrees.add(entry.worktreePath ?? root);
     if (entry.kind === 'worktrees') rescanWorktrees();
+    if (entry.kind === 'changes') rescanChangeDirs();
     scheduleDebounce();
   }
 
@@ -197,6 +208,32 @@ export function createWatcher({
     }
   }
 
+  /**
+   * A `<root>/openspec/changes/` event re-syncs its children exactly like a
+   * `<git-common>/worktrees/` event re-syncs worktrees (rescanWorktrees()
+   * below): open a watch for every change dir now present and not yet
+   * watched, close the watches of dirs that vanished. Same retry-on-next-
+   * event rule as judgment:cold-1 — a dir whose `watchDir()` call failed
+   * stays eligible and is retried on the NEXT `CHANGES_ROOT` event, never
+   * marked watched after one failed attempt (R881-3, cold-7).
+   */
+  function rescanChangeDirs() {
+    const current = new Set(listChangeDirs());
+    for (const [name] of watchedChangeDirs) {
+      if (!current.has(name)) {
+        closeWatch(join(root, CHANGES_ROOT, name));
+        watchedChangeDirs.delete(name);
+      }
+    }
+    for (const name of current) {
+      if (!watchedChangeDirs.has(name)) {
+        const absPath = join(root, CHANGES_ROOT, name);
+        watchDir(absPath, `${CHANGES_ROOT}/${name}/`, 'tree', undefined, name, watchedChangeDirs);
+        if (handles.has(absPath)) watchedChangeDirs.set(name, absPath);
+      }
+    }
+  }
+
   /** The linked worktrees `git worktree list --porcelain` reports right now, minus the primary checkout (always listed first) and any bare stanza. */
   function activeWorktrees() {
     let stdout;
@@ -227,7 +264,7 @@ export function createWatcher({
     for (const w of current) {
       if (!watchedWorktrees.has(w.id)) {
         const absPath = join(resolvedGitCommonDir, 'worktrees', w.id, 'logs');
-        watchDir(absPath, `<git-common>/worktrees/${w.id}/logs/`, 'refs', w.path, w.id);
+        watchDir(absPath, `<git-common>/worktrees/${w.id}/logs/`, 'refs', w.path, w.id, watchedWorktrees);
         if (handles.has(absPath)) watchedWorktrees.set(w.id, w.path);
       }
     }
@@ -239,8 +276,8 @@ export function createWatcher({
     watchDir(join(root, 'brain/project/decisions'), 'brain/project/decisions/', 'tree');
     for (const { dir } of ANTI_PATTERN_DIRS) watchDir(join(root, dir), `${dir}/`, 'tree');
     watchDir(join(root, '.memory/records'), '.memory/records/', 'tree');
-    watchDir(join(root, CHANGES_ROOT), `${CHANGES_ROOT}/`, 'tree');
-    for (const name of listChangeDirs()) watchDir(join(root, CHANGES_ROOT, name), `${CHANGES_ROOT}/${name}/`, 'tree');
+    watchDir(join(root, CHANGES_ROOT), `${CHANGES_ROOT}/`, 'changes');
+    rescanChangeDirs();
 
     if (resolvedGitCommonDir === null) {
       try { resolvedGitCommonDir = resolveGitCommonDir({ root, _run: run }); } catch (err) { recordFailure('<git-common>', err); }
