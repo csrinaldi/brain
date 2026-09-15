@@ -4,11 +4,10 @@
 
 Five ADRs under `brain/project/decisions/` currently carry a signed amendment section whose
 sentence claims the ADR body "is not rewritten (ruling R6 on #961)". That claim is false: the
-same act (PR #972) annotated every superseded line in place — in the body for four ADRs, and also
-inside an earlier amendment section for ADR-0002 (Amendment 2) and ADR-0017 (Amendments 1-2) — per
-`consolidation-protocol.md` §1c act 2, because the maintainer had already amended ruling R6 to
-option A on 2026-09-14. This change adds one new signed amendment per ADR that corrects only that
-sentence.
+same act (PR #972) annotated every superseded line in place — in the body of all five ADRs, and
+also inside Amendment 2 of ADR-0002 and Amendments 1-2 of ADR-0017 — because the maintainer had
+already amended ruling R6 to option A on 2026-09-14. This change adds one new signed amendment per
+ADR that corrects only that sentence.
 
 ## Scenarios
 
@@ -41,10 +40,9 @@ sentence.
 - **When** run before promotion
 - **Then** it returns exactly 5 hits (one per target ADR), each a live, uncorrected claim
 - **And** once all five drafts in this change are promoted by the maintainer, no remaining hit is
-  a live claim — the sentence is corrected in every ADR's signed section. `rg` can still match
-  inside an erratum's own "What this changes" text, which quotes the superseded sentence verbatim
-  as part of explaining the correction (and it misses that quotation in ADR-0017, whose line wrap
-  splits the pattern across two lines) — a match there is not evidence of an uncorrected claim
+  a live claim — the sentence is corrected in every ADR's signed section. `rg` may still match an
+  erratum's own quotation of the old sentence in its "What this changes" text — a match there is
+  not evidence of an uncorrected claim
 
 ## Out of scope
 

@@ -3,8 +3,9 @@
 - [x] 1. Read the contract: `brain/scripts/lib/amendment-draft.mjs`, `brain/scripts/brain-promote.mjs`,
       `consolidation-protocol.md` §1c, and the merged precedent drafts in
       `openspec/changes/managed-script-brain-prefix/brain-drafts/adr-*.draft.md`.
-- [x] 2. Confirm each ADR's current Status line and amendment number on this branch (all five stand
-      one amendment above what PR #972 landed: 0002→3, 0011→1, 0014→1, 0017→3, 0034→1).
+- [x] 2. Confirm each ADR's current Status line and amendment number against `origin/main`: each
+      stands at the amendment #972 landed (ADR-0002→3, ADR-0011→1, ADR-0014→1, ADR-0017→3,
+      ADR-0034→1); the erratum takes the next number.
 - [x] 3. Write `adr-0002-amendment-4.draft.md` — one `amend-find`/`amend-replace` pair rewriting the
       false sentence at `adr-0002-memoria-git-based-dos-capas.md:121-122`.
 - [x] 4. Write `adr-0011-amendment-2.draft.md` — one pair rewriting the sentence at
@@ -20,7 +21,8 @@
       per draft — parses ok; the edit assesses `pending` with `free = 1`; applying it leaves no
       remaining `not rewritten (ruling R6` in that ADR and changes no other line.
 - [x] 9. Run the issue's acceptance-criterion `rg` across `brain/project/decisions/` — confirms 5
-      hits pre-promotion (one per target ADR), which is what the five drafts remove.
+      hits pre-promotion (one per target ADR); the five drafts reduce this to zero live claims —
+      quotations may still match (see `spec.md`).
 - [x] 10. Write `proposal.md`, `tasks.md`, `apply-progress.md`, `brain-drafts/README.md`.
 - [x] 11. Mirror `proposal.md`, `tasks.md`, `apply-progress.md` to engram under
       `sdd/issue-973-adr-r6-erratum/{proposal,tasks,apply-progress}` (project `brain`,
