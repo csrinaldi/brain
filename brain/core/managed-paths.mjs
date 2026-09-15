@@ -14,8 +14,12 @@
 //   **  matches anything, including path separators (recursive)
 //   A trailing `/**` matches every file under that directory.
 
-// The 10 brain:* verb keys that brain:upgrade injects into consumer package.json.
-// Single source of truth — imported by installer.mjs mergePackageJson.
+// The brain:* verb keys that brain:upgrade injects into consumer package.json,
+// reconciled against every doctrine `npm run …` mention (#922). Single source
+// of truth — imported by installer.mjs mergePackageJson, drift-guarded by
+// brain/scripts/lib/managed-script-keys-doctrine.test.mjs. Every key is
+// brain:-namespaced (#961 R2): the memory verbs ship as brain:memory:*; the bare
+// memory:* names are repo-only aliases in brain's own package.json, never managed.
 //
 // brain:memory:session-end (#906 A5, measured): the launcher FILE travels to
 // every consumer via the brain/scripts/** glob below regardless of this list,
@@ -54,14 +58,13 @@ export const MANAGED_SCRIPT_KEYS = [
   'brain:ship',
   'brain:start',
   'brain:upgrade',
-  'memory:audit',
-  'memory:index',
-  'memory:pull',
-  'memory:ship',
-  'memory:resolve-index',
-  'memory:save',
-  'memory:share',
-
+  'brain:memory:audit',
+  'brain:memory:index',
+  'brain:memory:pull',
+  'brain:memory:ship',
+  'brain:memory:resolve-index',
+  'brain:memory:save',
+  'brain:memory:share',
 ];
 
 // The .gitattributes line declaring git's BUILT-IN `union` merge driver for the
