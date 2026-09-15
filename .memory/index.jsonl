@@ -809,6 +809,7 @@
 {"id":"rec-564da1c907fe7ba6","ts":"2026-09-10T15:33:11Z","actor":"feat/issue-889-featgovernance-the-lane-is-recognised-pa","type":"architecture","project":"brain","issue":889,"file":"2026-09-rec-564da1c907fe7ba6.jsonl"}
 {"id":"rec-565e948e2b80226c","ts":"2026-07-08T09:59:54Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-565e948e2b80226c.jsonl"}
 {"id":"rec-566682297203a800","ts":"2026-07-13T00:22:17Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-566682297203a800.jsonl"}
+{"id":"rec-56e5504ba47fdf96","ts":"2026-09-14T20:35:12Z","actor":"@csrinaldi","type":"pattern","project":"brain","issue":881,"file":"2026-09-rec-56e5504ba47fdf96.jsonl"}
 {"id":"rec-56ebe0bb9ad0e628","ts":"2026-07-02T02:10:28Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-56ebe0bb9ad0e628.jsonl"}
 {"id":"rec-56ffd0469f66c885","ts":"2026-07-29T14:27:19Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-56ffd0469f66c885.jsonl"}
 {"id":"rec-5719ee33d54ef91d","ts":"2026-07-29T14:26:41Z","actor":"@legacy","type":"pattern","project":"brain","file":"2026-07-rec-5719ee33d54ef91d.jsonl"}
@@ -1768,6 +1769,7 @@
 {"id":"rec-b92ccb361910a065","ts":"2026-09-10T13:04:04Z","actor":"feat/issue-888-featmemory-the-lane-ships-push-and-pr-th","type":"architecture","project":"brain","issue":888,"file":"2026-09-rec-b92ccb361910a065.jsonl"}
 {"id":"rec-b92f38696b08ba17","ts":"2026-07-25T21:50:59Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-b92f38696b08ba17.jsonl"}
 {"id":"rec-b97c016b6dd4b883","ts":"2026-07-29T14:25:57Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-b97c016b6dd4b883.jsonl"}
+{"id":"rec-b9a5a16c68582663","ts":"2026-09-14T16:59:11Z","actor":"@csrinaldi","type":"architecture","project":"brain","issue":881,"file":"2026-09-rec-b9a5a16c68582663.jsonl"}
 {"id":"rec-b9bf1a04c46c15dd","ts":"2026-07-25T21:50:23Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-b9bf1a04c46c15dd.jsonl"}
 {"id":"rec-b9c65e339263650d","ts":"2026-08-07T22:49:08Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-08-rec-b9c65e339263650d.jsonl"}
 {"id":"rec-b9dc1aa267f00e19","ts":"2026-07-25T21:51:57Z","actor":"@legacy","type":"pattern","project":"brain","file":"2026-07-rec-b9dc1aa267f00e19.jsonl"}
