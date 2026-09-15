@@ -1,5 +1,5 @@
 // cli.split-records-duplicates.test.mjs — the reindex `reportDuplicates` call
-// `memory:split-records --apply` runs AFTER the migration (cli.mjs:291-297),
+// `brain:memory:split-records --apply` runs AFTER the migration (cli.mjs:291-297),
 // end to end through the real CLI.
 //
 // This is a SEPARATE surface from the duplicate-lines-WITHIN-a-month-file
@@ -50,7 +50,7 @@ function runCli(root, ...args) {
   });
 }
 
-test('memory:split-records --apply REPORTS a duplicate the post-split reindex finds across the whole records/ dir', () => {
+test('brain:memory:split-records --apply REPORTS a duplicate the post-split reindex finds across the whole records/ dir', () => {
   const { root, recordsDir } = fixtureRoot();
   const a = buildRecord({ ...base, content: 'A' });
 

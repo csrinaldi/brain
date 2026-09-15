@@ -10,13 +10,13 @@
 //
 // ADR-0017 makes the durable record format brain-owned and the backend mere
 // transport, so capture is supposed to be possible with NO backend installed —
-// that is why `plainfiles` exists. But only `memory:save` was pinned to it
+// that is why `plainfiles` exists. But only `brain:memory:save` was pinned to it
 // (REQ-530-1); `share`/`pull` kept the `engram` default, so in the agent
 // environment the verb the PR template names died with
 //
 //   memory/cli: engram.share() failed — engram binary not found. Install via: gentle-ai install
 //
-// while `MEMORY_BACKEND=plainfiles npm run memory:share` exited clean the whole
+// while `MEMORY_BACKEND=plainfiles npm run brain:memory:share` exited clean the whole
 // time. #641 reports four PRs whose memory capture was skipped on the strength
 // of that message: it reads as "capture is impossible here" when it means "you
 // asked for the wrong transport".
@@ -49,7 +49,7 @@ export const ENGRAM_BIN = "engram";
  *
  *   pull    → engram binary not found            ← genuinely blocked, covered
  *   import  → engram binary not found            ← blocked, but see below
- *   setup   → ✓ merge driver registered, EXIT 0  ← never needed the binary
+ *   setup   → ✓ .engram symlink ensured, EXIT 0  ← never needed the binary
  *   save    → record durable, hydrate deferred, EXIT 0 (#874) ← no longer a refusal, see below
  *   share   → ✓ indexCount/duplicates, EXIT 0 (#874 split B) ← never needed the binary, see below
  *   search  → 'search' is not a cli verb for engram ← a deliberate refusal
@@ -59,11 +59,12 @@ export const ENGRAM_BIN = "engram";
  * fallback, it is a silent behaviour change:
  *
  *   - `setup` was the regression. `engram.setup()` creates the `.engram →
- *     .memory` symlink and registers the `merge=union` driver for
- *     `.memory/manifest.json` (ADR-0002), and needs no binary to do either.
- *     Substituting `plainfiles.setup()` — which deliberately does NEITHER —
- *     silently dropped the merge driver on every machine without engram, which
- *     is the very mechanism ADR-0017's union safety rests on.
+ *     .memory` symlink and needs no binary to do it (the merge-driver
+ *     registration this bullet used to also describe is retired — #955, R7 —
+ *     the tracked file it merged has had no writer since #874 split B).
+ *     Substituting `plainfiles.setup()` — which deliberately does NOT create
+ *     the symlink — silently dropped the very binding `share`/`pull` depend
+ *     on for the backend to be reachable at all.
  *   - `save` is NOT blocked (#874, split A): `engram.save()` is now the
  *     record-first producer path, mirroring `plainfiles.save()` and hydrating
  *     the backend as a terminal step that DEFERS rather than throws when the
@@ -75,15 +76,15 @@ export const ENGRAM_BIN = "engram";
  *     signpost unreachable on the default backend — replacing a designed
  *     refusal with different behaviour rather than repairing a failure.
  *   - `share` is NOT blocked either, as of #874 split B (R11): `engram.share()`
- *     dropped `requireEngram()` entirely — it only ensures the `.engram →
- *     .memory` symlink (R12) and rebuilds the index, exactly like
- *     `plainfiles.share()`'s own shape, and neither step touches the binary.
- *     Leaving `share` in this list after R11 would have been a SECOND `setup`
- *     regression, quieter than the first: `plainfiles.share()` does not call
- *     `_ensureSymlink`, so a live substitution on a fresh machine would have
- *     silently skipped R12's self-heal of the `.engram → .memory` binding —
- *     the exact "replacing a designed behaviour rather than repairing a
- *     failure" mistake `setup`'s own history already names above.
+ *     dropped `requireEngram()` entirely — it only rebuilds the index,
+ *     exactly like `plainfiles.share()`'s own shape (the `.engram → .memory`
+ *     symlink it used to also ensure is now confined to `setup()` alone —
+ *     #955, R7), and neither step touches the binary. Leaving `share` in
+ *     this list would still be a regression, quieter than the `setup` one:
+ *     a live substitution on a fresh machine would silently switch which
+ *     reindex implementation runs — the exact "replacing a designed
+ *     behaviour rather than repairing a failure" mistake `setup`'s own
+ *     history already names above.
  *
  * `import` IS genuinely blocked, and is still excluded — but on its own ground:
  * `plainfiles` has no `importMemory` at all, so substituting would trade

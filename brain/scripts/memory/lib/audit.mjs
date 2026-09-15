@@ -1,4 +1,4 @@
-// audit.mjs — the pure half of `memory:audit` (#870; memory 2.0 task 0.2).
+// audit.mjs — the pure half of `brain:memory:audit` (#870; memory 2.0 task 0.2).
 //
 // The five numbers that opened memory 2.0 (#864) were hand queries nobody could
 // re-run. This module computes them from plain data — no fs, no git, no backend —
@@ -141,7 +141,7 @@ const h = (x) => (x === null ? 'n/a' : `${x.toFixed(1)} h`);
 export function renderReport(r) {
   const L = r.latency;
   const lines = [
-    `memory:audit — ${r.generatedAt} — window since ${r.window.sinceIso} (${r.window.records} records)`,
+    `brain:memory:audit — ${r.generatedAt} — window since ${r.window.sinceIso} (${r.window.records} records)`,
     L.measured === false
       ? `learn→main: not measured — ${L.reason}`
       : `learn→main   n ${L.n} · p50 ${h(L.p50h)} · p75 ${h(L.p75h)} · p90 ${h(L.p90h)} · max ${h(L.maxH)} · ≤1h ${L.within1h} · >24h ${L.over24h} · >72h ${L.over72h} · not landed ${L.notLanded}`,

@@ -83,7 +83,7 @@ npm test                        # full test suite
 npm run brain:change:verify     # scope-aware verification of the active change
 
 # 6. Persist team memory before pushing
-npm run memory:share            # export local engram → .memory/ (versioned in git)
+npm run brain:memory:share            # export local engram → .memory/ (versioned in git)
 
 # 7. Commit and open the PR with a "Closes #<id>" reference
 ```

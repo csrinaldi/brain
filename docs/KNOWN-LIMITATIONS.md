@@ -149,6 +149,10 @@ does not control. The gate is now checkable: the danger-path e2e suite (#401) mu
     repo, carries the condition `the judgment half is enabled but no transport is configured`.
     It is a condition and not a blocker: `buildVerdict` never reads `conditions[]`, so it cannot
     move a verdict. Declared here because the ruling declared it rather than discovering it.
+  - **A cold review that runs while a required context is still `pending` returns `REVISE`
+    with `findings: []`, and the anti-loop guard then refuses to post a corrected verdict on
+    the same head** — a transient rejection (review ran before CI finished) becomes permanent.
+    (#945)
 
 ## Governance provider parity
 
@@ -160,8 +164,18 @@ does not control. The gate is now checkable: the danger-path e2e suite (#401) mu
   audit-then-tag (`workflow_dispatch`): the tag is created only after `brain-audit` exits 0.
 - Live provider asymmetries under the M10 seam-coverage epic: #348 (GitLab `requiredReviews`
   accepted but unenforced), #349 (GitHub `branchProtect` throws on undefined `checks`),
-  #386/#387/#388 (clone/PAT URL host + encoding), #361 (index reindex asymmetry engram vs
-  plainfiles).
+  #386/#387/#388 (clone/PAT URL host + encoding).
+  ~~#361 (index reindex asymmetry engram vs plainfiles)~~ **Fixed.** Both asymmetries were
+  already closed independently before the ticket's own fix landed (`pull` reindex via #574,
+  `share` unconditional reindex via #874 split B); #950 adds the cross-backend
+  `reindex-parity.test.mjs` pin so the parity does not silently regress.
+- **The VCS port cannot say whether a merge request was merged.** `mrList` on both providers
+  already receives `state`/`merged_at` from the API and discards them before returning; there
+  is no `mrGet`/`mrView` verb either. (#930)
+- **The full test suite's verdict depends on `VCS_PROVIDER`.** Exporting
+  `VCS_PROVIDER=gitlab` turns 29 tests red (measured on `32b70db9`) that pass with no provider
+  variable exported — the same class of defect as the now-fixed #714/#638 shell dependency,
+  on a different variable and a larger blast radius. (#947)
 
 ## Post-merge audit coverage
 
@@ -214,6 +228,42 @@ does not control. The gate is now checkable: the danger-path e2e suite (#401) mu
   with no issue reference now fails `issueLink`, where before it was invisible. `--first-parent`
   is untouched, so a `Part of #N` commit inside a merged feature branch is still not audited as
   though it had landed on its own.
+
+## Memory
+
+> Refreshed 2026-09-13 against epic #864's Wave 3/4 progress. Struck items below are shipped;
+> the rest are open today, verified against `gh issue view` rather than assumed from prior notes.
+
+- ~~Record-first capture rides `mem_save`, and the backend hydrates after the fact~~ **Shipped.**
+  #874 (PRs #925/#926): `brain:memory:save` writes a record before any backend; `share()` is now
+  "commit what is already true" and reads no chunk file.
+- ~~A same-day retry after a successful lane push can skip PR reconciliation~~ **Shipped.** #920.
+- ~~An agent session without `AI_AGENT` set is recorded as human~~ **Shipped.** #939 — a known
+  agent marker means agent, never human; W4 refuses a fabricating `source`. (#939 also closed
+  #461's write-time half — see below for what it did **not** close.)
+- ~~A worktree that could not be inspected is silently dropped from `collectLane()`'s result~~
+  **Shipped.** #921/#923 — an unreadable worktree is now reported, not dropped.
+- **The memory lane exists in doctrine (ADR-0034) but has not shipped a real merge yet.**
+  `memory.lane.enabled` defaults to `false` on every tier (config schema 1.6.0); flipping it is
+  a maintainer act, never a migration default. `git ls-remote --heads origin 'memory/*'` returns
+  nothing on this repo as of this writing. The feature-PR memory surfaces (`pre-push`'s `share`,
+  `brain-save.mjs`, `contributor-scaffold.mjs`, `ticket.nextSteps.step3`) are **not** retired —
+  that is task 3.1d / issue #890, still open.
+- **A lane branch left unreconciled across midnight is never revisited.** #920 (above) repairs
+  the same-day retry; nothing repairs the cross-midnight case. (#936)
+- **A chunk-boundary guard test pins a production import by hardcoded line number**, so an
+  unrelated edit above that line in the same file turns the guard red until the number is
+  re-pinned by hand. (#937)
+- **`brain:memory:save`'s missing-positional error is cryptic.** `title`/`content` are positionals;
+  passing them as `--flags` instead is silently accepted by the generic parser, leaves the
+  positionals empty, and the run dies inside the hash with
+  `canonicalJson: unsupported value type 'undefined'` — on both backends. (#928)
+- **A record whose `source` cites an issue it does not declare can still fabricate `issue` on
+  round-trip for records that already exist.** #461's write-time guard (`validateWritableRecord`
+  W1/W2) closes the shape for *new* records only — closed 2026-09-11 by #939/#948, but only for
+  the write path. A decision on the existing-records case (a new structural §4 marker vs. a
+  read-path validation rule) is still open; measured 0/2157 in this repo, so the gap is latent
+  here, not active.
 
 ## Agent / SDD neutrality
 

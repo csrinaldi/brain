@@ -285,9 +285,9 @@ test('PR3 bootstrap: team memory section keys exist in en', () => {
   assert.equal(en['bootstrap.memory.engram.ok'],       'engram backend configured (symlink + merge driver)');
   assert.equal(en['bootstrap.memory.engram.failed'],   'memory setup failed (non-blocking)');
   assert.equal(en['bootstrap.memory.pull.ok'],         'memory imported (.memory/ → engram)');
-  assert.equal(en['bootstrap.memory.pull.failed'],     'memory:pull failed (non-blocking)');
+  assert.equal(en['bootstrap.memory.pull.failed'],     'brain:memory:pull failed (non-blocking)');
   assert.equal(en['bootstrap.memory.index.ok'],        'durable index reprojected (brain/ → engram)');
-  assert.equal(en['bootstrap.memory.index.failed'],    'memory:index failed (non-blocking)');
+  assert.equal(en['bootstrap.memory.index.failed'],    'brain:memory:index failed (non-blocking)');
   assert.equal(en['bootstrap.memory.unknownBackend'],  "backend '{backend}' has no known init routine — configure it manually");
 });
 
@@ -401,7 +401,6 @@ test('PR3 session: all session.* keys exist in en with the planned English templ
   assert.equal(en['session.change.ambiguous'],   'change:   ambiguous ({count}): {list}');
   assert.equal(en['session.memory.ok'],          'memory:   engram hydrated');
   assert.equal(en['session.memory.skip'],        'memory:   engram unavailable (skipped)');
-  assert.equal(en['session.manifest.restored'],  'manifest: churn restored (safe)');
   assert.equal(en['session.ticket.label'],       'ticket:');
   assert.equal(en['session.ticket.none'],        '(no active ticket memory)');
 });

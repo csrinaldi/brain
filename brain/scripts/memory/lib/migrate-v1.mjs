@@ -212,7 +212,7 @@ export function runMigration({
     _existsSync(recordsDir) && _readdirSync(recordsDir).some((f) => f.endsWith('.jsonl'));
   if (alreadyMigrated) {
     throw new Error(
-      `runMigration: '${recordsDir}' already has migrated records — refusing to re-run this one-shot migration; run the cutover runbook (C2b) instead of memory:migrate-v1`,
+      `runMigration: '${recordsDir}' already has migrated records — refusing to re-run this one-shot migration; run the cutover runbook (C2b) instead of brain:memory:migrate-v1`,
     );
   }
 

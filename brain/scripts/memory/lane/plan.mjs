@@ -109,7 +109,7 @@ export function planLaneCommit({ candidates, mainPaths, host, date, parent }) {
         file: c.file,
         worktree: c.worktree,
         reason: 'not-a-record',
-        hint: `'${c.file}' does not match the record filename grammar — run \`memory:split-records\` if this is a pre-#677 month log`,
+        hint: `'${c.file}' does not match the record filename grammar — run \`brain:memory:split-records\` if this is a pre-#677 month log`,
       });
       continue;
     }
