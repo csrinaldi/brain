@@ -184,7 +184,8 @@ are corrected as of this revision:
    round-2 marker read "this sentence was drafted under R6's original wording, before the
    2026-09-14 amendment" — true, but not what §1c act 2 asks the marker to say. Every draft's
    marker now reads "rewritten: the previous sentence said the body [and Amendments 1-2, for
-   ADR-0017] was/were not rewritten, although the same act had annotated it/them in place."
+   ADR-0017] was/were not rewritten, although Amendment N's own promotion had annotated it/them in
+   place." (N is the #961 amendment being corrected: 3 for ADR-0002 and ADR-0017, 1 for the others.)
 5. **ADR-0002's and ADR-0017's own precision** (round 2 → round 3). ADR-0002's draft said PR #972
    annotated only "the body"; on `origin/main` it also annotated one line inside ADR-0002's own
    Amendment 2 (line 83). ADR-0017's draft already said "the body and Amendments 1-2" — verified
