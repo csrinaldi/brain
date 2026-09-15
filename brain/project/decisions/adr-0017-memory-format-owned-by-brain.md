@@ -1,6 +1,6 @@
 # ADR-0017 — The Durable Memory Record Format Is Owned By Brain, Not By Engram
 
-**Status**: Accepted · **amended 16/08/2026** (Amendments 1-2 — see below)
+**Status**: Accepted · **amended 15/09/2026** (Amendments 1-3 — see below)
 **Date**: 2026-07-04 (amended 2026-07-07, C1b/issue #214: `index.json` → `index.jsonl` rename +
 union-exclusion rationale correction)
 
@@ -111,7 +111,7 @@ ADR-0002's manifest merge driver exists to manage. Brain resolves it structurall
    **Migration is opt-in, never automatic.** `.memory/**` is consumer-owned, so a brain upgrade
    does not rewrite it. Every reader globs `*.jsonl` under `records/` and parses line by line,
    so a month-file store, a per-record store and a half-migrated store all read identically; a
-   repository moves when it runs `memory:split-records`, which refuses any line it cannot read
+   repository moves when it runs `memory:split-records` (renamed `brain:memory:split-records`; see Amendment 3), which refuses any line it cannot read
    and proves every record reads back before deleting a month file.
 2. **Content-hash `id`.** `id = "rec-" + sha256(canonicalJson({ type, actor, actorKind, ts,
    project, issue?, supersedes?, content }))[:16]`, where `canonicalJson` is **RFC 8785 (JSON
@@ -168,7 +168,7 @@ and are correctly NOT deduped — they are distinct memories, not one.)
 
 ADR-0002's manifest was **authoritative and non-regenerable** — lose it and you lose the
 memory; hence a mandatory, careful merge driver. Brain's `index.jsonl` is the inversion:
-**derived and regenerable** from the plaintext records via a future `memory:reindex`. The
+**derived and regenerable** from the plaintext records via a future `memory:reindex` (renamed `brain:memory:reindex`; see Amendment 3). The
 records JSONL is the durable truth; the index is throwaway. Even if the index ever conflicts or
 is deleted, it is rebuilt from the records — the failure mode ADR-0002 could not tolerate
 becomes a no-op here. Note the union driver is scoped to `records/*.jsonl` **only** and
@@ -179,12 +179,12 @@ and REORDERS the index's lines on every run (stable-sorted by `id`), so a line-b
 two independently regenerated indexes would concatenate both sides' now-superseded snapshots —
 producing duplicate and stale entries, not a clean merge. The index is fully regenerable from
 `records/`, so a merge conflict on `index.jsonl` is resolved by **discarding both sides and
-running `memory:reindex`**, never by hand- or union-merging it.
+running `memory:reindex` (renamed `brain:memory:reindex`; see Amendment 3)**, never by hand- or union-merging it.
 
 ### Index churn discipline (the manifest-churn lesson)
 
-`memory:share` / `memory:reindex` **MUST NOT produce whole-file churn in `index.jsonl`** — the
-ADR-0002 export-churn that rewrote the entire manifest each `memory:share` and blocked a raw
+`memory:share` / `memory:reindex` **MUST NOT produce whole-file churn in `index.jsonl`** (renamed `brain:memory:share` / `brain:memory:reindex`; see Amendment 3) — the
+ADR-0002 export-churn that rewrote the entire manifest each `memory:share` (renamed `brain:memory:share`; see Amendment 3) and blocked a raw
 `git pull`. The index is stable-ordered by `id`; a reindex adds/updates only the entries for
 newly appended records and leaves every other entry byte-identical, so `git diff index.jsonl` is
 proportional to the *new* records, not to the store size.
@@ -209,7 +209,7 @@ eliminates. (Amendment 2, #677: `records/*.jsonl` still declares the built-in `m
 it needs no per-clone registration — but a merge driver, built-in or custom, is applied by the
 git that performs the merge, and the forge's merge button applies neither. So this passage's
 conclusion holds for a stronger reason than the one it gave: the answer for `index.jsonl` is
-`memory:resolve-index`, and the answer for `records/` is the layout, not a driver.)
+`memory:resolve-index` (renamed `brain:memory:resolve-index`; see Amendment 3), and the answer for `records/` is the layout, not a driver.)
 
 ### Public-repo exposure — an explicit stance
 
@@ -238,7 +238,7 @@ whole durability guarantee. Consequently:
 - **Negative (honest residual)**: one file per record is one filesystem entry per record —
   2052 of them on this repository at the time of Amendment 2. Measured rather than feared:
   reading the store got faster, `git status` did not move, and the packed size grew ≈15% once.
-  A store that has not run `memory:split-records` still carries the month log and still
+  A store that has not run `memory:split-records` (renamed `brain:memory:split-records`; see Amendment 3) still carries the month log and still
   conflicts; the migration is opt-in by design, because `.memory/**` is consumer-owned.
 - **Negative (honest residual)**: a duplicate physical line can still exist — a half-migrated
   store, or the union driver resolving a divergent same-`id` pair into two lines — and survives
@@ -327,7 +327,7 @@ the old premise.
 
 ### The churn MUST NOT, restated at the right altitude
 
-The record said `memory:share` / `memory:reindex` *"MUST NOT rewrite the whole
+The record said `memory:share` / `memory:reindex` (renamed `brain:memory:share` / `brain:memory:reindex`; see Amendment 3) *"MUST NOT rewrite the whole
 `index.jsonl` on every run"*. `rebuildIndex` has always written the whole file —
 it regenerates from `records/` rather than patching — so the letter was dead
 from the first implementation and only the spirit was ever alive: the **diff**
@@ -388,7 +388,7 @@ the driver.
 
 The cost scales with how well the memory discipline is followed, which is the
 wrong direction for a rule to point. The PR template requires memory capture;
-`memory:save` appends one line to `records/<yyyy-mm>.jsonl`; every open PR
+`memory:save` (renamed `brain:memory:save`; see Amendment 3) appends one line to `records/<yyyy-mm>.jsonl`; every open PR
 therefore appends a different line at the same position of the same file. The
 first merges clean and **every subsequent one conflicts**.
 
@@ -418,7 +418,7 @@ exists.
   by line, so both layouts and any mixture of them read identically. This is
   what makes the migration opt-in rather than a forced rewrite of a store brain
   does not own.
-- `memory:split-records` performs the migration: report-only unless `--apply`,
+- `memory:split-records` (renamed `brain:memory:split-records`; see Amendment 3) performs the migration: report-only unless `--apply`,
   refuses any corrupt or tampered line before writing anything, and deletes a
   month file only after every record it held has been read back out of the new
   layout. A verification failure leaves BOTH layouts on disk — a duplicated
@@ -447,6 +447,32 @@ deliberately, with the reason stated rather than omitted. `manifest.json` indexe
 the legacy engram **chunk** transport (`.memory/chunks/`, gitignored;
 `.memory/legacy/` for what was migrated), not the durable records. It is derived
 and regenerable — `day-start` already discards its local churn as safe — so a
-bad merge of it loses a pointer that `memory:share` rebuilds, not a durable
+bad merge of it loses a pointer that `memory:share` (renamed `brain:memory:share`; see Amendment 3) rebuilds, not a durable
 record that nothing can recover. Retiring it belongs with the chunks
 decommission (C4/D1, #247), not here.
+
+## Amendment 3 — the memory script names move to the `brain:memory:` namespace (issue #961)
+
+**Signed**: 15/09/2026 — Cristian Rinaldi
+
+### What this changes
+
+The npm scripts this ADR and its amendments name were renamed into the `brain:` namespace that brain's
+verbs use in a consumer's `package.json`:
+
+| as written above | the script today |
+|---|---|
+| `memory:save` | `brain:memory:save` |
+| `memory:share` | `brain:memory:share` |
+| `memory:reindex` | `brain:memory:reindex` |
+| `memory:resolve-index` | `brain:memory:resolve-index` |
+| `memory:split-records` | `brain:memory:split-records` |
+
+The body and Amendments 1-2 above are not rewritten (ruling R6 on #961): no line of this ADR runs a
+script with a literal `npm run`, so the decision reads the same and this table is the whole mapping.
+
+### What this does NOT change
+
+The record schema, the content-addressed `id`, the append-only rule, the layout Amendment 2 set, and the
+low-churn rule. Every verb keeps its behaviour and arguments; brain's own `package.json` keeps each bare
+name as a byte-identical alias, never installed into a consumer.
