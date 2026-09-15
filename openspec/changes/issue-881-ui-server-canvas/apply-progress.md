@@ -1094,3 +1094,51 @@ round). Commits this round: `d8a311d6` (fix), `fcbb4e60` (diff-tightening
 refactor), plus this docs commit. No push, no PR (per task instructions) —
 branch `feat/issue-881-slice-2-stream` stays ahead of its last-pushed
 state.
+
+## Tenth round — seventh cold review of PR #971 (head `bf41ec05`, 2026-09-14): two Tier-boundary blockers, fixed in `b8030800` + `b2edf7dc`
+
+Between the ninth round and this one, `bf41ec05` dropped the `HEAD` entries
+from R881-3's list that the watcher never reads (a pre-push fresh review
+caught the self-contradiction). The cold review on that head then found:
+
+**cold-1 (blocker, `watcher.mjs`)**: a repository that has never had a
+linked worktree has no `<git-common>/worktrees/` directory until the first
+`git worktree add`. `start()`'s watch on it and `activeWorktrees()`'s
+readdir both failed with ENOENT, `state()` showed two failed entries, and
+nothing could repair it: only the `<git-common>/` watch could notice the
+directory appearing, and `onFire()` rescanned worktrees only for
+`kind === 'worktrees'`. The first worktree ever created in the life of a
+long-running server was invisible. Fix: ENOENT on the admin dir is "no
+worktrees yet", a fact, not a read failure (any other error keeps the
+`null` contract of `f1320560`); the common dir's own event opens the
+worktrees watch when the directory exists and runs the rescan. Test: a
+fixture WITHOUT `worktrees/` starts `ok`, then `worktrees/alpha/{logs/,gitdir}`
+appears, the common-dir event fires, and an event on `alpha/logs/` reaches
+the callback. RED before, GREEN after; mutation: removing the
+open-on-common-dir-event call turns exactly that test red.
+
+**cold-2 (blocker, `server.mjs`)**: the branch name of a worktree was
+resolved with `git -C <worktree> rev-parse --abbrev-ref HEAD`, and strace
+shows `git -C` opens `<worktree>/.git` first — the file R881-3 forbids by
+name. Fix: `git --git-dir <git-common>/worktrees/<id> rev-parse
+--abbrev-ref HEAD` for a linked worktree and `--git-dir <git-common>` for
+the primary; the watcher hands the server the worktree's admin id. strace on
+this repository's own linked worktree: every `openat` is under
+`/home/gandalf/IA/brain/.git/`, none under `/home/gandalf/IA/brain-issue-881/`.
+The refs-frame tests now assert the exact argv; mutation: restoring `-C`
+turns exactly those two tests red.
+
+**Spec**: R881-3 regains `worktrees/*/HEAD`, "read by `git --git-dir` for
+the branch name, never through the worktree" (`5c8a2890`); the watcher
+itself still watches `logs/`, not `HEAD`.
+
+**Budget**: the counted diff reached 1000 after cold-1 and closed at
+985 after cold-2 by trimming `watcher.mjs`'s header comment (27 lines of
+prose to a shorter version that keeps every citation); the non-comment
+diff of that trim is empty, checked by the pre-push review.
+
+**Verification**: `GIT_CONFIG_GLOBAL=/dev/null node --test
+brain/scripts/ui/*.test.mjs` = 75/75, three identical runs (was 73/73);
+`GIT_CONFIG_GLOBAL=/dev/null npm test` = 5416/5416; `brain:repo:check`
+green before each commit. Counted diff 985/1000. Pre-push fresh review of
+these commits: APPROVE on the code, with this entry as its one finding.
