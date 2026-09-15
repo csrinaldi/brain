@@ -1121,8 +1121,11 @@ open-on-common-dir-event call turns exactly that test red.
 resolved with `git -C <worktree> rev-parse --abbrev-ref HEAD`, and strace
 shows `git -C` opens `<worktree>/.git` first — the file R881-3 forbids by
 name. Fix: `git --git-dir <git-common>/worktrees/<id> rev-parse
---abbrev-ref HEAD` for a linked worktree and `--git-dir <git-common>` for
-the primary; the watcher hands the server the worktree's admin id. strace on
+--abbrev-ref HEAD` for a linked worktree, and a plain `git rev-parse
+--abbrev-ref HEAD` with no `--git-dir` flag (default cwd) for the primary —
+correct, not an oversight, because the primary checkout's own `.git`
+directory already IS the common dir, so no separate `--git-dir` is needed;
+the watcher hands the server the worktree's admin id. strace on
 this repository's own linked worktree: every `openat` is under
 `/home/gandalf/IA/brain/.git/`, none under `/home/gandalf/IA/brain-issue-881/`.
 The refs-frame tests now assert the exact argv; mutation: restoring `-C`
