@@ -734,3 +734,127 @@ Counted diff (excluding `.test.mjs`, `openspec/`, `.memory/`) against
 `67b0bec` (judgment:cold-7 fix + tests + sweep). No push, no PR (per task
 instructions) — branch `feat/issue-881-slice-2-stream` is ahead of its
 last-pushed state (origin still at `d666fc29`).
+
+## Sixth round — pre-push cold review of PR #971 (head `3fe0e510`), a second `evidence-reader-empty-on-failure` instance found in `listChangeDirs()`
+
+A fresh-context review before push (PR #971) found `listChangeDirs()`
+(`watcher.mjs:203-209`) still caught `readdirSync` errors and returned
+`[]` — the same "genuinely empty" vs. "could not be read" collapse
+`brain/core/anti-patterns/evidence-reader-empty-on-failure.md` names, and
+the same class already fixed once for `activeWorktrees()` in PR 2. Its
+claimed mirror `activeWorktrees()` (`watcher.mjs:238-242`) calls
+`recordFailure('<git-common>/worktrees', err)` on the same kind of
+failure; `listChangeDirs()` recorded nothing at all. Since the fifth
+round wired `listChangeDirs()` into `rescanChangeDirs()` on every
+`openspec/changes/` event, one transient `EMFILE`/`EACCES` on a live
+server made `current = new Set([])` and closed every watched change dir
+as "vanished", with `state().ok === true` and `failed === []` — a said
+state that lied. Recovery needed another root event to succeed, and an
+edit inside a now-unwatched dir could never fire one. Reproduced:
+`_readdir` throwing `EMFILE` on one rescan closed two previously-watched
+change dirs (`issue-1-a`, `issue-2-b`) with the handle count dropping and
+`state().failed` empty. Violates R881-9.
+
+**Fix**: `listChangeDirs()` now catches internally, calls
+`recordFailure(CHANGES_ROOT, err)`, and returns `null` — never `[]` —
+so the sentinel cannot be mistaken for a real (if empty) listing.
+`rescanChangeDirs()` checks for `null` first and returns immediately,
+skipping reconciliation entirely and leaving every currently-watched
+change dir untouched; on a later successful read it clears the stale
+`CHANGES_ROOT` failure entry before reconciling. `start()` already only
+reaches `listChangeDirs()` through `rescanChangeDirs()`, so the startup
+path is covered by the same fix with no separate change.
+
+**Test first (RED)**: one new test in `watcher.test.mjs` — start with two
+change dirs watched, arm a `readdirSync`-shaped spy to throw `EMFILE` on
+the changes root, fire the `CHANGES_ROOT` event, assert both change-dir
+handles are still open, `state().failed` carries an `openspec/changes`
+entry with the EMFILE message, and `state().ok` is `false`; then disarm
+the spy, fire the root event again, and assert the failure entry is
+gone and `state().ok` is `true`. RED confirmed against the pre-fix code
+(`git stash` of the production change, run the suite): `issue-1-a stays
+open` failed — `1 !== undefined` (the handle really was closed). GREEN
+after the fix: 13/13 in `watcher.test.mjs`.
+
+**Mutation**: restored `catch { return []; }` in place of the fixed
+`listChangeDirs()` body (production code only, test unchanged) —
+reproduced red on exactly the new test (`a CHANGES_ROOT rescan that
+cannot read the dir keeps every currently-watched change dir open, then
+recovers`), all 12 other `watcher.test.mjs` tests stayed green. Restored
+the fix; 13/13 green again.
+
+**Sweep of every `catch` in `watcher.mjs`, `poller.mjs`, `server.mjs`,
+`forge-cache.mjs`** (`rg -n 'catch' <files>`):
+
+| Site | Behavior | Verdict |
+|---|---|---|
+| `watcher.mjs:144` `watchDir()` | `recordFailure(label, err)` | said failure — OK |
+| `watcher.mjs:152` `closeWatch()` | `catch { /* best effort */ }`, already-deleted handle | commented, OK |
+| `watcher.mjs:203-209` `listChangeDirs()` | was `catch { return []; }` | **fixed this round** |
+| `watcher.mjs:240` `activeWorktrees()` | `recordFailure('<git-common>/worktrees', err); return []` | records the failure (OK on its own) — see discrepancy below |
+| `watcher.mjs:283` gitCommonDir resolution | `recordFailure('<git-common>', err)` | said failure — OK |
+| `poller.mjs:160,170` per-PR/per-issue fetch | `catch { /* previous value stays cached (R881-9) */ }` | commented, preserves last-good value, does not overwrite with empty — OK |
+| `poller.mjs:177` fast-lane tick | `catch (err) { lastError = ... }` | said failure via `lastError`, no cache setter ran — OK |
+| `server.mjs:108` `sendEvent()` | drops one dead client, commented | OK |
+| `server.mjs:171` ref-head lookup | `catch { head = null }` | explicit said-unknown, broadcast as `head: null` — OK |
+| `server.mjs:175` `recomputeAndBroadcast()` | `catch { /* leaves current at its last good value */ }` | commented, preserves prior state — OK |
+| `server.mjs:186` `handleRequest(...).catch(...)` | reports to the client via `sendInternalError` | fail-loud to the caller — OK |
+| `server.mjs:274` startup recompute | closes the listener and rejects with the original error | fail-loud — OK |
+| `server.mjs:290` client shutdown | `catch { /* best effort */ }`, commented | OK |
+| `server.mjs:362` `resolveForgeSource()` | returns `{ok:false, reason}` | explicit said state — OK |
+| `server.mjs:416` `main()` listen failure | prints the error, exits 2 | fail-loud — OK |
+| `server.mjs:483` CLI-guard project resolution | `catch { /* degrades to uncomputable forge sections, never a crash */ }`, `project` stays `null` | commented, explicit said-unknown feeding a `?? null` default — OK |
+| `forge-cache.mjs` | no `catch` blocks in this file | N/A |
+
+Only `listChangeDirs()` matched the anti-pattern; every other catch site
+either rethrows, records a said failure, or preserves the prior known
+value with a comment explaining why. No further sibling found.
+
+**Discrepancy found and NOT fixed this round (reported, not silently
+patched)**: the task brief describing this round asserted `listChangeDirs()`
+should be fixed "exactly as `activeWorktrees()`/`rescanWorktrees()` do." That
+premise does not fully hold on inspection:
+
+1. `activeWorktrees()` records the failure but still returns `[]`, the
+   same ambiguous-empty sentinel `listChangeDirs()` used to return.
+   `rescanWorktrees()` does not check for a "could not read" signal at
+   all — it diffs `activeWorktrees()`'s result directly against
+   `watchedWorktrees`, so a `git worktree list --porcelain` failure
+   (transient `EMFILE`/process spawn failure, etc.) closes every
+   currently-watched linked worktree exactly the way the pre-fix
+   `listChangeDirs()` did, even though the failure IS recorded in
+   `state().failed`. Recording the failure does not stop the
+   reconciliation from running on the empty list.
+2. `activeWorktrees()`'s `recordFailure('<git-common>/worktrees', err)`
+   entry is never cleared on a later successful call — there is no
+   `failed = failed.filter(...)` for that label anywhere in the
+   success path, unlike the `CHANGES_ROOT` entry this round's fix
+   clears explicitly in `rescanChangeDirs()`.
+
+Both are real, currently untested gaps in `rescanWorktrees()` /
+`activeWorktrees()`, not something this round introduced or was asked to
+fix — the task scope and diff budget were specific to `listChangeDirs()`.
+Recorded here as a **follow-up finding** for a future round: give
+`activeWorktrees()` the same `null`-on-failure sentinel and have
+`rescanWorktrees()` skip reconciliation on it, and clear the
+`<git-common>/worktrees` failure entry on the next successful call —
+the same shape `listChangeDirs()`/`rescanChangeDirs()` now have.
+
+**Files changed**: `brain/scripts/ui/watcher.mjs` (`listChangeDirs()`
+returns `null` on failure and records it; `rescanChangeDirs()` skips
+reconciliation on `null` and clears the failure entry on success),
+`brain/scripts/ui/watcher.test.mjs` (one new test, one new `readdirSync`-
+shaped spy helper `readdirThrowsFor()`).
+
+**Verification**: `GIT_CONFIG_GLOBAL=/dev/null node --test
+brain/scripts/ui/*.test.mjs` = 69/69 green, run 3 times identically (was
+68/68 before this round's 1 new test). `GIT_CONFIG_GLOBAL=/dev/null npm
+test` = 5410/5410 green, one full run (~31s; was 5409/5409 before this
+round). `brain:repo:check` green before the commit; tree clean after.
+Counted diff (excluding `.test.mjs`, `openspec/`, `.memory/`) against
+`origin/feature/brain-ui...HEAD`: **947 / 1000** (was 926/1000 before
+this round; this round's production delta in `watcher.mjs` is +24/-3
+lines). Commit this round: `fc964900`. No push, no PR (per task
+instructions) — branch `feat/issue-881-slice-2-stream` stays ahead of
+its last-pushed state (origin still at `3fe0e510` before this round's
+two commits).
