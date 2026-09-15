@@ -1,6 +1,6 @@
 # ADR-0017 — The Durable Memory Record Format Is Owned By Brain, Not By Engram
 
-**Status**: Accepted · **amended 15/09/2026** (Amendments 1-3 — see below)
+**Status**: Accepted · **amended 15/09/2026** (Amendments 1-4 — see below)
 **Date**: 2026-07-04 (amended 2026-07-07, C1b/issue #214: `index.json` → `index.jsonl` rename +
 union-exclusion rationale correction)
 
@@ -468,11 +468,34 @@ verbs use in a consumer's `package.json`:
 | `memory:resolve-index` | `brain:memory:resolve-index` |
 | `memory:split-records` | `brain:memory:split-records` |
 
-The body and Amendments 1-2 above are not rewritten (ruling R6 on #961): no line of this ADR runs a
-script with a literal `npm run`, so the decision reads the same and this table is the whole mapping.
+Every superseded line above and in Amendments 1-2 is annotated in place under R6 as amended
+(option A, 2026-09-14): the historical name stays visible next to its `brain:memory:` rename, and
+this table is the whole mapping. **[Amended by Amendment 4 (#973) — this sentence was drafted
+under R6's original wording, before the 2026-09-14 amendment.]** No line of this ADR runs a script
+with a literal `npm run`, so the decision reads the same.
 
 ### What this does NOT change
 
 The record schema, the content-addressed `id`, the append-only rule, the layout Amendment 2 set, and the
 low-churn rule. Every verb keeps its behaviour and arguments; brain's own `package.json` keeps each bare
 name as a byte-identical alias, never installed into a consumer.
+
+## Amendment 4 — erratum: Amendment 3's body was annotated in place, not left untouched (issue #973)
+
+**Signed**: 15/09/2026 — Cristian Rinaldi
+
+### What this changes
+
+Amendment 3's signed section (above) says: "The body and Amendments 1-2 above are not rewritten
+(ruling R6 on #961): no line of this ADR runs a script with a literal `npm run`, so the decision
+reads the same and this table is the whole mapping." That sentence was drafted under ruling R6 as
+first ratified — an appended amendment, body untouched. The maintainer amended R6 to option A on
+2026-09-14 (issue #961 comment, confirmed on PR #966), and Amendment 3's own promotion (PR #972)
+applied that ruling: every line of the body and of Amendments 1-2 superseded by the rename table
+was annotated in place, per `consolidation-protocol.md` §1c act 2. The sentence describing that
+act was never updated to match. This amendment rewrites it to state what the act did.
+
+### What this does NOT change
+
+The rename table and the in-place annotations Amendment 3 made were already correct under R6 as
+amended — this touches no other line.
