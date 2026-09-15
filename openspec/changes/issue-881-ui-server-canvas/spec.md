@@ -53,9 +53,10 @@ every connected client within one poll interval, with no page reload (A2).
 
 ### R881-3: the watcher only ever sees the committed tier
 
-The watcher MUST read only: the git common dir's own metadata (`HEAD`,
-`logs/`, `worktrees/*/HEAD`, `worktrees/*/logs/`, and `worktrees/*/gitdir` to
-resolve each linked worktree's admin id), enumerated the way `collect.mjs`'s
+The watcher MUST read only: the git common dir's own metadata (`logs/`,
+`worktrees/`, `worktrees/*/logs/`, and `worktrees/*/gitdir` to resolve each
+linked worktree's admin id; no `HEAD` file is read or watched, the reflogs
+carry every ref move), enumerated the way `collect.mjs`'s
 `parseWorktrees()` does, plus `openspec/changes/**` and `.memory/records/**`
 under the served root. It MUST NOT read or watch any working-tree content —
 not even a linked worktree's own `.git` file.
