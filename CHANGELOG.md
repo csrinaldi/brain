@@ -6,7 +6,7 @@ registry (ADR-0030, superseding ADR-0006's git tags); consumers upgrade with
 changes** before upgrading — additive `brain.config.json` migrations apply
 automatically, but renames need manual action.
 
-## Unreleased — engram's transport artifacts retire (#955)
+## Unreleased
 
 **Manual step (consumers upgrading from an older brain).** The upgrade drops the
 `merge=engram-manifest` attribute (`.gitattributes` is managed), so git never runs the old
@@ -15,8 +15,22 @@ driver again. Two inert leftovers stay in YOUR repo and nothing reads them. To r
     git rm .memory/manifest.json
     git config --unset merge.engram-manifest.driver
 
-- `session:start`, `day:start` and `memory:pull` no longer restore a manifest; `memory:share`
-  no longer creates the `.engram` symlink (`brain:env:init` / `cli.mjs setup` still does).
+### Memory scripts join the `brain:` namespace (#961)
+
+Nothing to do for this one. The eleven `memory:*` scripts are now `brain:memory:*` (`save`,
+`index`, `share`, `pull`, `resolve-index`, `audit`, `ship`, `reindex`, `split-records`,
+`collect`, `migrate-v1`), like `brain:memory:session-end`. brain's own `package.json`
+keeps the bare names as identical aliases, so commands in history and records still
+run. Consumers never had these scripts. The managed seven arrive with #922 under their
+`brain:memory:*` names only.
+
+### Engram's transport artifacts retire (#955)
+
+The manual step above belongs to this change.
+
+- `session:start`, `day:start` and `brain:memory:pull` no longer restore a manifest;
+  `brain:memory:share` no longer creates the `.engram` symlink (`brain:env:init` /
+  `cli.mjs setup` still does).
 
 ## v1.5.0 — the governance surface stops trusting what it cannot measure
 

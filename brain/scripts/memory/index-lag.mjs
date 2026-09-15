@@ -42,7 +42,7 @@ function readIndexLines(indexPath, readFile) {
  * compareIndexToRecords() — pure comparator over ID SETS (spec "local-checks
  * warns on index lag, never fails"; design A9). `missingFromIndex` is a
  * record id present in `.memory/records/` but absent from the committed
- * index (a lag the next `memory:index`/`memory:reindex` resolves);
+ * index (a lag the next `brain:memory:index`/`brain:memory:reindex` resolves);
  * `staleInIndex` is the reverse (an index entry whose record no longer
  * exists — a stale carry-over). Either direction is `lagged: true`.
  *
@@ -104,7 +104,7 @@ export function main({ recordsDir, indexPath, readFile = readFileSync, log = con
       + `indexed ${result.indexed}, rebuilt ${result.rebuilt} record id(s) `
       + `(${result.missingFromIndex.length} missing from the index, `
       + `${result.staleInIndex.length} stale in it). `
-      + 'Run `npm run memory:reindex` to resync. Non-blocking — this check never fails.',
+      + 'Run `npm run brain:memory:reindex` to resync. Non-blocking — this check never fails.',
     );
   }
 

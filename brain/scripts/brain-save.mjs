@@ -2,7 +2,7 @@
 // brain-save.mjs — Golden-path verb: materialise and commit session memory (REQ-S5-3).
 //
 // Usage: npm run brain:save
-//   1. Runs `memory:share` (materialises .memory/ from engram).
+//   1. Runs `brain:memory:share` (materialises .memory/ from engram).
 //   2. Checks for new uncommitted .memory/ changes via `git status --porcelain`.
 //   3. If no new changes → exits 1 with a prompt to capture a session summary.
 //   4. Commits .memory/ with message `chore(memory): sync .memory [brain:save]`.
@@ -30,7 +30,7 @@ export async function runSave({ memoryShareFn, memoryStatusFn, gitAddFn, gitComm
   if (!shareResult.ok) {
     return {
       exitCode: 1,
-      message: `brain:save: memory:share failed — ${shareResult.error ?? 'unknown error'}.\n  Run "npm run memory:share" manually and retry.`,
+      message: `brain:save: brain:memory:share failed — ${shareResult.error ?? 'unknown error'}.\n  Run "npm run brain:memory:share" manually and retry.`,
     };
   }
 
@@ -40,7 +40,7 @@ export async function runSave({ memoryShareFn, memoryStatusFn, gitAddFn, gitComm
     return {
       exitCode: 1,
       message:
-        'brain:save: no new .memory/ changes after memory:share.\n' +
+        'brain:save: no new .memory/ changes after brain:memory:share.\n' +
         '  Capture a session summary first:\n' +
         '    • In your AI session: ask the agent to run mem_session_summary\n' +
         '    • Then re-run:  npm run brain:save',

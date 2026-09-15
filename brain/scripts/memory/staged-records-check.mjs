@@ -12,7 +12,7 @@
 //
 // `pre-commit`, not `pre-push` (design.md Decision 6): `pre-push`'s
 // `.memory/` check is WARN-only by an explicit, recorded decision
-// (`pre-push:114-119`, ADR-0014 §9) — `memory:share` runs earlier in that same
+// (`pre-push:114-119`, ADR-0014 §9) — `brain:memory:share` runs earlier in that same
 // hook and churns the manifest, so a hard block there self-blocks the push it
 // runs on. After the exporter fix (#701 PR 2) `pre-push`'s own `share` no
 // longer produces byte-identical records in the first place, so the pre-push

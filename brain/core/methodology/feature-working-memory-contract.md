@@ -142,7 +142,7 @@ not be coupled.
 
 - Projects `openspec/changes/<feature>/*.md` into the **local** backend store (one save per file).
 - Feature observations are stored under a **distinct project namespace** (not the durable
-  `brain` project) to prevent leakage into the export that `memory:share` writes to `.memory/`.
+  `brain` project) to prevent leakage into the export that `brain:memory:share` writes to `.memory/`.
 - If `resume.md` is absent: prints "no resume point", exit 0.
 - Projection is a session-start ritual; it is **never called** from the pre-push hook.
 - If the backend binary is absent: degrades to printing `resume.md` content directly; exit 0.

@@ -309,8 +309,8 @@ case "$MEMORY_BACKEND" in
     else
       warn "$I18N_BOOTSTRAP_MEMORY_NODEABSENT"
     fi
-    $PM run --silent memory:pull  && ok "$I18N_BOOTSTRAP_MEMORY_PULL_OK"  || warn "$I18N_BOOTSTRAP_MEMORY_PULL_FAILED"
-    $PM run --silent memory:index && ok "$I18N_BOOTSTRAP_MEMORY_INDEX_OK" || warn "$I18N_BOOTSTRAP_MEMORY_INDEX_FAILED"
+    $PM run --silent brain:memory:pull  && ok "$I18N_BOOTSTRAP_MEMORY_PULL_OK"  || warn "$I18N_BOOTSTRAP_MEMORY_PULL_FAILED"
+    $PM run --silent brain:memory:index && ok "$I18N_BOOTSTRAP_MEMORY_INDEX_OK" || warn "$I18N_BOOTSTRAP_MEMORY_INDEX_FAILED"
     ;;
   *)
     warn "$(printf "$I18N_BOOTSTRAP_MEMORY_UNKNOWNBACKEND" "$MEMORY_BACKEND")"
@@ -331,7 +331,7 @@ cat <<'EOT'
        (pulls memory, shows open tickets, checks for brain updates)
     3. Pick a ticket and create your branch: {type}/issue-{iid}-{slug}.
     4. Plan a feature with SDD: brain:project:feature -- --issue [ID]
-    5. Before pushing: brain:repo:check && npm run memory:share
+    5. Before pushing: brain:repo:check && npm run brain:memory:share
 EOT
 if [ "${#MISSING_OPTIONAL[@]}" -gt 0 ]; then
   printf "  $I18N_BOOTSTRAP_DONE_PENDING\n" "${MISSING_OPTIONAL[*]}"

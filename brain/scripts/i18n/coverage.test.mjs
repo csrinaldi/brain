@@ -285,9 +285,9 @@ test('PR3 bootstrap: team memory section keys exist in en', () => {
   assert.equal(en['bootstrap.memory.engram.ok'],       'engram backend configured (symlink + merge driver)');
   assert.equal(en['bootstrap.memory.engram.failed'],   'memory setup failed (non-blocking)');
   assert.equal(en['bootstrap.memory.pull.ok'],         'memory imported (.memory/ → engram)');
-  assert.equal(en['bootstrap.memory.pull.failed'],     'memory:pull failed (non-blocking)');
+  assert.equal(en['bootstrap.memory.pull.failed'],     'brain:memory:pull failed (non-blocking)');
   assert.equal(en['bootstrap.memory.index.ok'],        'durable index reprojected (brain/ → engram)');
-  assert.equal(en['bootstrap.memory.index.failed'],    'memory:index failed (non-blocking)');
+  assert.equal(en['bootstrap.memory.index.failed'],    'brain:memory:index failed (non-blocking)');
   assert.equal(en['bootstrap.memory.unknownBackend'],  "backend '{backend}' has no known init routine — configure it manually");
 });
 

@@ -1,6 +1,6 @@
 # ADR-0002 — Two-Layer Git-Based Team Memory
 
-**Status**: Accepted · **amended 09/09/2026** (Amendments 1-2 — see below)  
+**Status**: Accepted · **amended 15/09/2026** (Amendments 1-4 — see below)  
 **Date**: 2026-06-26
 
 ## Context
@@ -25,11 +25,11 @@ Memory operates in two layers:
 2. **Memory backend (live)**: implementation chosen by `MEMORY_BACKEND`. Engram indexes `.memory/` into its local store for semantic search. The symlink `.engram → .memory` (created by `scripts/memory/backends/engram.mjs setup`) is required because the engram CLI has no configurable directory flag.
 
 The canonical flow:
-- `memory:pull` → churn-resilient sync: runs `git pull`, then hydrates the active backend from `.memory/records/`. *(Its manifest-restore step is the engram adapter's, not the layer's — the note below is superseded by Amendment 1, and the step retires with #864 task 2.4.)* Use this instead of a raw `git pull`.
+- `memory:pull` (renamed `brain:memory:pull`; see Amendment 3) → churn-resilient sync: runs `git pull`, then hydrates the active backend from `.memory/records/`. *(Its manifest-restore step is the engram adapter's, not the layer's — the note below is superseded by Amendment 1, and the step retires with #864 task 2.4.)* Use this instead of a raw `git pull`.
 - `memory:import` → imports `.memory/` into the active backend (no `git pull`).
-- `memory:index` → reprojects the durable `brain/` into the active backend.
-- `memory:share` → materializes the active backend to `.memory/` before push. *(On the lane, ADR-0034: a record does not wait for a push — `brain:memory:ship` collects and pushes it independently, on its own PR. `share`'s role here narrows once 3.1d ships, per the ordering ADR-0034 states.)*
-- The `pre-push` hook runs `memory:share`; the `post-merge` hook runs `memory:import` after any pull/merge. *(The `pre-push` call retires in 3.1d — after 3.1b's first scenario and #874 land, per ADR-0034 — because by then a record has already reached `main` on the lane before any feature branch is pushed.)*
+- `memory:index` (renamed `brain:memory:index`; see Amendment 3) → reprojects the durable `brain/` into the active backend.
+- `memory:share` (renamed `brain:memory:share`; see Amendment 3) → materializes the active backend to `.memory/` before push. *(On the lane, ADR-0034: a record does not wait for a push — `brain:memory:ship` collects and pushes it independently, on its own PR. `share`'s role here narrows once 3.1d ships, per the ordering ADR-0034 states.)*
+- The `pre-push` hook runs `memory:share` (renamed `brain:memory:share`; see Amendment 3); the `post-merge` hook runs `memory:import` after any pull/merge. *(The `pre-push` call retires in 3.1d — after 3.1b's first scenario and #874 land, per ADR-0034 — because by then a record has already reached `main` on the lane before any feature branch is pushed.)*
 
 ## Consequences
 
@@ -48,7 +48,7 @@ The canonical flow:
 
 `.memory/manifest.json` is **engram's authoritative chunk index for sync**, not a derived convenience. Verified empirically (spike, 2026-06-27): a fresh engram (isolated via `ENGRAM_DATA_DIR`) pointed at `.memory/` **with** the manifest reports `Remote chunks: 6, Pending import: 6`; **without** the manifest it reports `Remote chunks: 0` and imports nothing — even though the `*.jsonl.gz` chunk files are physically present. So gitignoring the manifest would **silently lose all memory on every fresh machine**.
 
-Therefore: the manifest stays committed; the merge driver (`merge-engram-manifest.mjs`) resolves concurrent merges; and the export churn (engram rewrites the manifest on every `memory:share`, which blocks a raw `git pull` against the dirty file) is **managed, not eliminated**, by the churn-resilient `memory:pull` (restore → pull → import) and the `post-merge` hook. The only root-cause fix lives upstream in engram (have `engram sync --import` fall back to globbing `.memory/chunks/` when no manifest is present) — a feature request, outside brain's control.
+Therefore: the manifest stays committed; the merge driver (`merge-engram-manifest.mjs`) resolves concurrent merges; and the export churn (engram rewrites the manifest on every `memory:share` (renamed `brain:memory:share`; see Amendment 3), which blocks a raw `git pull` against the dirty file) is **managed, not eliminated**, by the churn-resilient `memory:pull` (renamed `brain:memory:pull`; see Amendment 3) (restore → pull → import) and the `post-merge` hook. The only root-cause fix lives upstream in engram (have `engram sync --import` fall back to globbing `.memory/chunks/` when no manifest is present) — a feature request, outside brain's control.
 
 ## Amendment 1 — the manifest was the transport's index, and the transport is gone (issue #863)
 
@@ -80,7 +80,7 @@ governs it — `brain/core/methodology/memory-backend-contract.md` rule 3 (rulin
 
 ### What this changes
 
-The canonical flow's `memory:share` and `pre-push` bullets described a record
+The canonical flow's `memory:share` (renamed `brain:memory:share`; see Amendment 3) and `pre-push` bullets described a record
 waiting for a push and travelling with whatever branch that push was on.
 #862 (ADR-0034) rules a `memory/<host>-<date>` pull request as the lane a
 record travels on instead — `brain:memory:ship`, triggered by the
@@ -98,3 +98,56 @@ Amendment 1 already settled about the manifest, driver and symlink are
 untouched. The feature-PR surfaces that make a record ride the branch today
 (`pre-push:70`, `contributor-scaffold.mjs:274`, and three more, ADR-0034's
 own inventory) retire in 3.1d — sequenced, not by this amendment.
+
+## Amendment 3 — the memory script names move to the `brain:memory:` namespace (issue #961)
+
+**Signed**: 15/09/2026 — Cristian Rinaldi
+
+### What this changes
+
+The npm scripts this ADR names were renamed into the `brain:` namespace that brain's verbs use in a
+consumer's `package.json` — the namespace `brain:memory:session-end` already followed. Read the
+canonical flow above through this table:
+
+| as written above | the script today |
+|---|---|
+| `memory:pull` | `brain:memory:pull` |
+| `memory:index` | `brain:memory:index` |
+| `memory:share` | `brain:memory:share` |
+
+`brain:memory:ship`, which the flow and Amendment 2 already cite, is now the real name of that script
+rather than a name ahead of it. `memory:import` is not an npm script and is not renamed.
+
+Every superseded line in the body above and in Amendment 2 is annotated in place under ruling R6 on
+#961 as amended (option A, 2026-09-14): the historical name stays visible next to its
+`brain:memory:` rename, and this table is the whole mapping. **[Amended by Amendment 4 (#973) —
+rewritten: the previous sentence said the body was not rewritten, although Amendment 3's own
+promotion had annotated it in place.]** No line of this ADR runs a script with a literal `npm run`,
+so the decision reads the same.
+
+### What this does NOT change
+
+The two-layer decision, and everything Amendments 1 and 2 settled. Every verb keeps its behaviour, its
+CLI (`brain/scripts/memory/cli.mjs <verb>`) and its arguments. brain's own `package.json` keeps each
+bare name as a byte-identical alias, so a command quoted from a record or an older document still runs;
+those aliases are never installed into a consumer.
+
+## Amendment 4 — erratum: the body Amendment 3 called untouched was annotated in place (issue #973)
+
+**Signed**: 15/09/2026 — Cristian Rinaldi
+
+### What this changes
+
+Amendment 3's signed section (above) said, before this amendment rewrote it: "The body above is not
+rewritten (ruling R6 on #961): no line of this ADR runs a script with a literal `npm run`, so the
+decision reads the same and this table is the whole mapping." That sentence was drafted under
+ruling R6 as first ratified — an appended amendment, body untouched. The maintainer amended R6 to
+option A on 2026-09-14 (issue #961 comment, confirmed on PR #966), and Amendment 3's own promotion
+(PR #972) applied that ruling: every line of the body and of Amendment 2 superseded by the rename
+table was annotated in place. The sentence describing that act was never updated to match. This
+amendment rewrites it to state what the act did.
+
+### What this does NOT change
+
+The rename table and the in-place annotations Amendment 3 made were already correct under R6 as
+amended — this rewrites no other line of the body or of an earlier amendment.

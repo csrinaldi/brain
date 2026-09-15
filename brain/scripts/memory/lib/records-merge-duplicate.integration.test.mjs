@@ -24,7 +24,7 @@
 //      resolves into a two-line file rather than a conflict.
 //
 // If `rebuildIndex` refused a duplicate, case 1 would leave the store
-// unindexable mid-migration, and `memory:reindex` — the command doctrine
+// unindexable mid-migration, and `brain:memory:reindex` — the command doctrine
 // prescribes for finishing a merge — would be the thing that could no longer
 // run.
 

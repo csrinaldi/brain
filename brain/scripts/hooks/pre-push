@@ -3,11 +3,11 @@
 #
 # La capa Viva de memoria (sesión, errores, contexto) viaja en .memory/ commiteado
 # y entra a main al mergear el MR. Este hook garantiza que esa materialización
-# ocurra ANTES del push, en lugar de depender de que el dev recuerde memory:share.
+# ocurra ANTES del push, en lugar de depender de que el dev recuerde brain:memory:share.
 #
 # Comportamiento:
 #   - Sin node instalado (CI, clone fresco) → no bloquea (exit 0).
-#   - Dispatcha `memory:share` vía brain/scripts/memory/cli.mjs (backend-agnóstico, MEMORY_BACKEND).
+#   - Dispatcha `brain:memory:share` vía brain/scripts/memory/cli.mjs (backend-agnóstico, MEMORY_BACKEND).
 #   - Si .memory/ queda con cambios sin commitear (staged, unstaged o untracked)
 #     → aborta el push con instrucciones.
 #   - Bypass de emergencia: git push --no-verify.
@@ -112,7 +112,7 @@ if [ -n "$base" ]; then
 fi
 
 # ── uncommitted .memory/ check (WARNING — reliability-first, never blocks) ────
-# Rationale (ADR-0014 §9): `memory:share` above re-materializes the manifest,
+# Rationale (ADR-0014 §9): `brain:memory:share` above re-materializes the manifest,
 # which is non-deterministic (it churns), so a hard block here would self-block
 # the very push it runs on → developers reach for --no-verify, silencing the
 # whole hook. `brain:save` is the proper materialize-and-commit point, and

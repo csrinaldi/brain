@@ -45,11 +45,11 @@
 // configuration, uniform and therefore visible — surfaced as one [WARN]).
 
 import { execSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 
 import { isAfterBaseline, selectIssueLinkBody, auditedBase, auditedTip } from './lib/audit-helpers.mjs';
+import { loadBrainConfigOrThrow } from './lib/brain-config.mjs';
 import { readRecordObservations } from './memory/lib/store.mjs';
 import { makeGit } from './governance/postmerge/resolution.mjs';
 // B1 (#889, design A8) — the lane predicate (A1) reused post-merge. brain-audit
@@ -156,13 +156,29 @@ function payloadSignature(resolutionGit, sha) {
     .join('\n');
 }
 
-/** Load the full brain.config.json; returns {} on any error (never throws). */
+/**
+ * Loads brain.config.json for the release gate — DENY-DIRECTION (issue #962,
+ * the sixth reader named in `evidence-reader-empty-on-failure.md`'s "Applied
+ * at" paragraph, extending #942 R1). `governance.reviewActors` (read at
+ * `:354` below) is a DENY/exclusion list — the set of reviewer identities
+ * EXCLUDED from the human-approver count — so a config-read failure here must
+ * PROPAGATE rather than degrade to `{}`: an empty `{}` excludes nobody, which
+ * is the PERMISSIVE (fail-open) answer in a DENY direction. `brain-audit.mjs`
+ * IS the release gate (`.github/workflows/release.yml` tags only after it
+ * exits 0), so the old `catch { return {}; }` let a release through on a
+ * policy the audit never actually read.
+ *
+ * `loadBrainConfigOrThrow(cwd)` (`./lib/brain-config.mjs`, shipped by #942)
+ * distinguishes ABSENCE (`ENOENT` → `{}`, R11 — an un-migrated repo with no
+ * brain.config.json keeps auditing exactly as before) from UNREADABILITY (any
+ * other read failure, or a `JSON.parse` failure → throws, naming the file and
+ * the failure). The throw is NOT caught here: it propagates to the top-level
+ * `.catch` below (REQ-D2-12, "no error path produces a PASS/violation
+ * verdict"), which prints `[FAIL] governance:audit-uncomputable — …` and
+ * exits 2 — before any merge is evaluated, never a silent PASS.
+ */
 function loadConfig(cwd) {
-  try {
-    return JSON.parse(readFileSync(join(cwd, 'brain.config.json'), 'utf8'));
-  } catch {
-    return {};
-  }
+  return loadBrainConfigOrThrow(cwd);
 }
 
 function resolveRange(cwd) {

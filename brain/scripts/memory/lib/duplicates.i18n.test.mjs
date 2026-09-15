@@ -57,12 +57,12 @@ test('memory.duplicates.divergent renders "DISCREPAN fuera de los campos hashead
   assert.doesNotMatch(s, /DISAGREE/);
 });
 
-// ── brief — the pointer to `memory:reindex` ──────────────────────────────────
+// ── brief — the pointer to `brain:memory:reindex` ──────────────────────────────────
 
 test('memory.duplicates.brief uses the Spanish imperative "Corré", not "Run"', () => {
   const s = translate('memory.duplicates.brief', {}, es, en);
-  assert.match(s, /Corré `npm run memory:reindex`/);
-  assert.doesNotMatch(s, /\bRun `npm run memory:reindex`/);
+  assert.match(s, /Corré `npm run brain:memory:reindex`/);
+  assert.doesNotMatch(s, /\bRun `npm run brain:memory:reindex`/);
 });
 
 // ── moreOccurrences / moreGroups — the truncation tails ──────────────────────

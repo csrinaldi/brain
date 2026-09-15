@@ -29,11 +29,11 @@ this contract — without changes to `project-workflow.md` or `developer-environ
 | `npm run brain:project:feature -- --issue <id>` | `project:feature -- --issue <id>` | `/sdd-new <id>` | Starts an SDD change: creates `openspec/changes/issue-<id>-<slug>/` with `proposal.md`, `design.md`, `tasks.md`, `spec.md`. |
 | `npm run brain:repo:check` | `repo:check` | — | Validates prohibited references across the entire tree. Minimum gate before any commit. |
 | `npm run brain:change:verify` | `change:verify` | `/sdd-verify` | Validates the scope of the active change: classifies the diff, runs only the necessary verifications. |
-| `npm run memory:share` | — | — | Materializes what `.memory/records/` does not yet hold and rebuilds `index.jsonl`; reports the duplicate accounting. Under record-first (#864 task 3.2) it exports nothing from the backend. |
-| `npm run memory:pull` | — | — | `git pull`, then hydrates the active backend from `.memory/records/` (idempotent by record id — `memory-backend-contract.md` rule 1). Brings the team's memory. |
-| `npm run memory:index` | — | — | Re-projects `brain/` doctrine into the active backend, where the backend supports it (`plainfiles` does not, by design). Needed when ADRs or glossary change. |
-| `npm run memory:save` | — | — | The producer path: writes a record to `.memory/records/` first (provenance, `--issue`; `--supersedes` lands with #805). Today it is pinned to `plainfiles` and the active backend picks the record up on its next hydration (`session:start`, `cli.mjs import`); direct hydration lands with #874. `memory-backend-contract.md` rule 2. |
-| `npm run memory:audit` | — | — | The five numbers of memory 2.0 (#870) from records and `git log` alone; the backend row degrades to a stated reason. |
+| `npm run brain:memory:share` | — | — | Materializes what `.memory/records/` does not yet hold and rebuilds `index.jsonl`; reports the duplicate accounting. Under record-first (#864 task 3.2) it exports nothing from the backend. |
+| `npm run brain:memory:pull` | — | — | `git pull`, then hydrates the active backend from `.memory/records/` (idempotent by record id — `memory-backend-contract.md` rule 1). Brings the team's memory. |
+| `npm run brain:memory:index` | — | — | Re-projects `brain/` doctrine into the active backend, where the backend supports it (`plainfiles` does not, by design). Needed when ADRs or glossary change. |
+| `npm run brain:memory:save` | — | — | The producer path: writes a record to `.memory/records/` first (provenance, `--issue`; `--supersedes` lands with #805). Today it is pinned to `plainfiles` and the active backend picks the record up on its next hydration (`session:start`, `cli.mjs import`); direct hydration lands with #874. `memory-backend-contract.md` rule 2. |
+| `npm run brain:memory:audit` | — | — | The five numbers of memory 2.0 (#870) from records and `git log` alone; the backend row degrades to a stated reason. |
 
 > **Worktree convention (load-bearing):** task start is
 > `npm run brain:ticket:start -- <id> [--base <tracker>]`, and **the isolated worktree is what

@@ -190,8 +190,8 @@ to core go **upstream first** (PR to the brain repo), then you bump the version.
 | `npm run brain:upgrade -- <tag>` | Install/update brain core at a tag; copies managed paths only. |
 | `npm run feature:checkpoint` / `feature:resume` | Save / restore per-feature working memory (`resume.md`). |
 | `npm run brain:repo:check` | Check for prohibited references and structural violations. |
-| `npm run memory:share` | Materialize memory to `.memory/` before pushing. |
-| `npm run memory:pull` | **Cross-machine sync**: runs `git pull`, rebuilds `.memory/index.jsonl`, then imports `.memory/` into local engram. |
+| `npm run brain:memory:share` | Materialize memory to `.memory/` before pushing. |
+| `npm run brain:memory:pull` | **Cross-machine sync**: runs `git pull`, rebuilds `.memory/index.jsonl`, then imports `.memory/` into local engram. |
 | `npm test` | Harness unit tests (`node --test`). |
 | `npm run brain:start` / `check` / `save` / `ship` / `next` | **Golden path** — self-gating workflow verbs (start a ticket → check → save memory → ship a PR; `next` tells you the next step). |
 | `npm run brain:audit` | Re-verify the 4 governance invariants on merged history (the tool-independent teeth). |

@@ -2063,3 +2063,61 @@ test('B1: the [UNCOMPUTABLE] guard short-circuits BEFORE lane classification', (
   assert.ok(r.stdout.includes('[UNCOMPUTABLE]'), `expected [UNCOMPUTABLE]:\n${r.stdout}\n${r.stderr}`);
   assert.equal(r.status, 2, `uncomputable dominates:\n${r.stdout}\n${r.stderr}`);
 });
+
+// ── Config-read failure — DENY-direction fail-closed (issue #962) ───────────
+//
+// `governance.reviewActors` (`:354`) is the DENY/exclusion list `loadConfig`
+// feeds to `evaluateMerge`'s `botAllowlist` — it decides which reviewers are
+// EXCLUDED from the human-approver count. Before this fix `loadConfig` caught
+// ANY read/parse failure and returned `{}` ("never throws"), so an unparseable
+// brain.config.json silently excluded nobody — the PERMISSIVE answer in a DENY
+// direction (`evidence-reader-empty-on-failure.md`, "Direction decides whether
+// empty is safe", issue #942). `brain-audit.mjs` IS the release gate
+// (`.github/workflows/release.yml` tags only after it exits 0), so that silent
+// `{}` let a release through on a policy the audit never actually read.
+//
+// A source-level fixture test (a temp repo, never the real clone), per the
+// acceptance criteria. `loadConfig` now runs `loadBrainConfigOrThrow` and does
+// NOT catch, so the throw propagates to the top-level `.catch` (REQ-D2-12)
+// BEFORE any merge is evaluated — no sibling reader (ignoreList, tier,
+// baseline, the VCS adapter, reviewActors itself) ever runs on this path, so
+// reverting ONLY this reader (restoring `catch { return {}; }`) is what turns
+// this test red; nothing else on the path can fail it.
+test('#962: unparseable brain.config.json fails the release gate closed, naming the config (never a silent {})', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-config-unparseable-'));
+  t.after(() => removeTempTree(dir));
+
+  const git = makeRepo(dir);
+  commit(git, dir, { 'README.md': 'init' }, 'chore: initial (#0)');
+  commit(git, dir, { 'brain.config.json': '{oops' }, 'chore: corrupt config');
+
+  // A genuinely EMPTY range (`HEAD..HEAD`, same shape as the "genuinely EMPTY
+  // range" test above): with the fix, `loadConfig` throws unconditionally
+  // BEFORE `listAuditedCommits` ever runs, so zero commits in range still
+  // fails closed. This also means no commit's issueLink/memoryPresence/etc
+  // content can flip this assertion — the walk never starts.
+  const r = spawnSync('node', [AUDIT_SCRIPT, 'HEAD..HEAD'], { cwd: dir, encoding: 'utf8' });
+
+  assert.notEqual(r.status, 0,
+    `an unparseable brain.config.json must not read as a clean release gate:\n${r.stdout}\n${r.stderr}`);
+  assert.match(r.stdout, /brain\.config\.json/,
+    `the failure must name the config as the cause:\n${r.stdout}`);
+  assert.match(r.stdout, /could not be parsed/,
+    `the failure must name WHY (loadBrainConfigOrThrow's message), not a generic error:\n${r.stdout}`);
+});
+
+test('#962: no brain.config.json at all — behaviour unchanged (ENOENT still resolves to {}, R11)', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-config-absent-'));
+  t.after(() => removeTempTree(dir));
+
+  const git = makeRepo(dir);
+  commit(git, dir, { 'README.md': 'init' }, 'chore: initial (#0)');
+
+  // No merges at all in range — the genuinely-empty-range path, scoped here to
+  // an explicitly ABSENT config so an ENOENT must not turn it into a failure.
+  const r = spawnSync('node', [AUDIT_SCRIPT, 'HEAD..HEAD'], { cwd: dir, encoding: 'utf8' });
+
+  assert.equal(r.status, 0,
+    `an absent brain.config.json must audit exactly as before (R11):\n${r.stdout}\n${r.stderr}`);
+  assert.match(r.stdout, /No commits found/);
+});

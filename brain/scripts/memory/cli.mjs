@@ -5,7 +5,7 @@
 //   op: share | pull | import | index | reindex | setup | feature-checkpoint | feature-resume
 //
 //   pull    — churn-resilient full pull: manifest restore + git pull + engram import.
-//             Use for cross-machine sync (npm run memory:pull).
+//             Use for cross-machine sync (npm run brain:memory:pull).
 //   import  — import-only: records-only engram hydrate (D2/C4), no git pull.
 //             Use after git already pulled (post-merge hook, day-start step 5).
 //   reindex — regenerate .memory/index.jsonl from .memory/records/ alone

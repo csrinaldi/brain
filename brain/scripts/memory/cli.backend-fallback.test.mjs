@@ -1,7 +1,7 @@
 // cli.backend-fallback.test.mjs — issue #641, end to end.
 //
 // The ticket is not "a fallback was missing": `MEMORY_BACKEND=plainfiles npm run
-// memory:share` exited clean the whole time. The ticket is that the documented
+// brain:memory:share` exited clean the whole time. The ticket is that the documented
 // verb died and no message ever pointed at the working route, so four PRs'
 // worth of capture was skipped on the belief that capture was impossible here.
 // A unit test over `selectBackend` cannot fail for that. So this drives the REAL
@@ -121,7 +121,7 @@ function runCli({ root, bin, envPath }, args, extraEnv = {}) {
 
 // ── the defect, in the environment where it happened ────────────────────────
 
-test('#874 (R11, B4a): memory:share with NO engram and NO stated backend now succeeds DIRECTLY on engram — no failure left for the fallback to replace', (t) => {
+test('#874 (R11, B4a): brain:memory:share with NO engram and NO stated backend now succeeds DIRECTLY on engram — no failure left for the fallback to replace', (t) => {
   // MEASURED, post-#874 split B: this test used to be the #641 flagship
   // (share substitutes and says so). R11 changed the underlying defect:
   // engram.share() dropped requireEngram() entirely (B1), so share() no

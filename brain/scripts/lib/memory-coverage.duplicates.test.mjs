@@ -97,7 +97,7 @@ test('#634 renderMarkdown: a store WITH duplicates states the gap and how to loc
   assert.match(out, /1 indexed \+ 2 repeated = 3 record line\(s\) read/, 'the reconciliation the reader cannot otherwise do');
   assert.match(out, /repeats cover 1 id\(s\)/);
   assert.match(out, /collapsed into the count above/, 'and the link back to the number it printed');
-  assert.match(out, /memory:reindex/, 'and where the per-id locations live');
+  assert.match(out, /brain:memory:reindex/, 'and where the per-id locations live');
 });
 
 test('#634 renderMarkdown: the line accounts for what was READ, never claiming the file\'s line count', (t) => {
@@ -146,7 +146,7 @@ test('#634 renderJson: emits the duplicate COUNTS and drops `groups`', (t) => {
   // every repeated id with its file:line occurrences. Measured on this repo:
   // 6871 bytes per row with groups against 111 without — 62×, roughly 79 KiB of
   // byte-identical repetition on a 12-period run. The locations already have a
-  // home: `memory:reindex` prints them once.
+  // home: `brain:memory:reindex` prints them once.
   const memCoverage = computeMemoryCoverage(storeWith(t, { copies: 3 }));
   assert.ok(memCoverage.duplicates.groups.length > 0, 'precondition: the snapshot really does carry groups');
 

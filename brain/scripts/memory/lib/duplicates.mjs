@@ -10,7 +10,7 @@
 //      nothing. Measured on `main` when this was written: 2177 physical lines,
 //      2038 unique ids, 49 repeated ids, 139 excess lines — an index 139
 //      entries shorter than the store, reported by no one, on a path where
-//      `memory:share` printed nothing at all.
+//      `brain:memory:share` printed nothing at all.
 //
 // One mode was guarded and the other was mute, and the mute one is the one
 // git merges produce.
@@ -32,7 +32,7 @@
 // (`.gitattributes`, REQ-MF-3). When two branches both hold the same record, a
 // git merge concatenates both copies BY CONSTRUCTION — that is not a
 // malfunction, it is the mechanism working. Refusing would turn the
-// designed-for, conflict-free path into a hard failure: `memory:reindex` — the
+// designed-for, conflict-free path into a hard failure: `brain:memory:reindex` — the
 // very command doctrine prescribes for finishing a merge (adr-0017:121-129) —
 // would refuse to run right after an ordinary merge, and `share`, `pull`,
 // `save` and `setup` would go down with it, since every one of them reindexes.
@@ -186,7 +186,7 @@ const MAX_OCCURRENCES = 6;
  *
  * `brief` drops the per-id evidence and keeps the counts, for the query verbs:
  * a `search` that matched nothing should not answer with twelve lines about the
- * store's history. The counts still travel — `memory:reindex` prints the
+ * store's history. The counts still travel — `brain:memory:reindex` prints the
  * locations — so brevity never becomes silence.
  *
  * Issue #638: every line is now a `memory.duplicates.*` catalog key (`t()` is

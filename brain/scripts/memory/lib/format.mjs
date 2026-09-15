@@ -224,7 +224,7 @@ export function validateRecord(record) {
  *
  * These are NOT in validateRecord() on purpose: that runs on the read path via
  * parseRecordLine(), where a rejection turns one bad line into a store-wide
- * failure of `memory:share`, `memory:pull`, `plainfiles.save` and `setup` —
+ * failure of `brain:memory:share`, `brain:memory:pull`, `plainfiles.save` and `setup` —
  * in a directory brain does not manage and therefore cannot migrate.
  *
  * Measured vacuous over this repo's store at the time of writing (0/2157
