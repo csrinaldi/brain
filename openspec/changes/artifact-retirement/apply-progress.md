@@ -1,6 +1,6 @@
 # Apply Progress: artifact-retirement
 
-## Slice B (PR 2, `Closes #955`, `size:exception`)
+## Slice B (PR 2, `Closes #955`, no exception label)
 
 Batch: SECOND (continues from Slice A below, which merged to `main` as PR
 #965, commit `f5ea51f4`). Worktree: `/home/gandalf/IA/brain-artifact-retirement`,
@@ -61,10 +61,10 @@ brain/scripts/memory/lib/secret-scrub.mjs |  42 +----
 8 files changed, 58 insertions(+), 416 deletions(-)
 ```
 
-Total counted: **474 changed lines** (design estimated ~415-430). Ships
-with `size:exception`, pre-accepted 2026-09-14 (engram
-`sdd/artifact-retirement/design-decisions`) — this was known and ruled
-before apply started; no new decision gate was needed.
+Total counted: **474 changed lines** (design estimated ~415-430), or
+**474/1000** under the repository's `lite` tier. The maintainer's 2026-09-15
+ruling supersedes the 2026-09-14 exception decision: no exception label is
+needed, and R4 stays in Slice B.
 
 ### TDD Cycle Evidence (Strict TDD Mode)
 
@@ -106,7 +106,7 @@ missing guard.**
   ~44-59 lines — mostly `cli.mjs`'s D1 refusal-branch comments (the
   do-not-delete-the-`if` warning) and the reworded `_defaultLoadBrainConfig`
   JSDoc in `engram.mjs`, both written to stay accurate rather than terse.
-  Still covered by the pre-accepted `size:exception`.
+  The measured total remains within the `lite` tier's 1000-line budget.
 - The `memory.share.upstream*`/`dedupedUpstream` i18n keys were NOT deleted
   alongside `secretFoundRecords`, even though they too lost their only
   in-code trace (they were never actually read via `t()` in production —
@@ -126,7 +126,7 @@ missing guard.**
 - B5.3 (open PR 2) is not done — commits are local only, per the hard
   constraint against `git push`/`gh` writes. The maintainer pushes
   `feat/epic-864-artifact-retirement` and opens PR 2 with body `Closes
-  #955`, label `size:exception`.
+  #955` and no exception label.
 
 ---
 
@@ -137,9 +137,9 @@ Batch: FIRST (no previous apply-progress existed). Worktree:
 
 ## Status
 
-Slice A: **6/6 phases complete, 18/18 tasks ticked** in `tasks.md` (A6.3 — opening
-PR 1 — intentionally left `[ ]`: the agent may not `git push` or run `gh` writes;
-the maintainer pushes and opens the PR).
+Slice A: **6/6 phases complete, 23/23 tasks ticked** in `tasks.md`. A6.3 is
+complete: PR #965 opened with `Closes #958` and `Part of #955`, then merged
+as `f5ea51f4`.
 
 ## Baseline / final test counts (both `GIT_CONFIG_GLOBAL=/dev/null node --test`)
 
@@ -156,7 +156,7 @@ codepath` test removed), (a)+(b) merged into one `engram.pull.test.mjs` test
 + 3 SS1/SS2/SS3 in `session-start.test.mjs`). Net arithmetic checked against the
 actual `node --test` summary line, not recomputed by hand.
 
-## Commits (this batch, local only — not pushed)
+## Commits (this batch; merged through PR #965)
 
 1. `e0b7b1fe` `docs(sdd): add artifact-retirement proposal, spec, design and doctrine drafts (#958)` — A1.2.
 2. `024d7d7e` `fix(memory): retire the manifest, its merge driver and share's symlink self-heal (#958)` — A2-A5 (production + tests + spec + docs), 27 files, +576/-1710.
@@ -186,8 +186,8 @@ Total counted: **363 changed lines** (design estimated ~290; the gap is mostly
 `engram.mjs` JSDoc rewording to avoid re-introducing the literal string
 `manifest.json` in prose — S1's static guard is literal-substring, not
 semantic, so explaining the retirement without naming the retired file cost
-extra words). Well under the 400 budget — matches the tasks.md forecast
-(`400-line budget risk: Low`).
+extra words). At 363/1000 counted lines, Slice A is within the repository's
+`lite` budget and matches the tasks.md forecast.
 
 ## TDD Cycle Evidence (Strict TDD Mode)
 
@@ -237,14 +237,12 @@ mutation work under the session's time budget).**
   substring match over ALL of `brain/scripts/**`, comments included), so the
   wording differs from what a naive "just remove the driver bullet" edit
   would have produced. This cost ~70 extra changed lines against the
-  design's ~290 estimate (363 actual), still well inside the 400 budget.
+  design's ~290 estimate (363 actual), still within the 1000-line `lite` budget.
 
 ## Open Items for Slice B (not this batch)
 
 - B1-B4 rows of `retired-artifacts.static.test.mjs` (dualWriteRecords,
   rollbackMigration, scrubChunkFile, zlib import) — not written this batch,
   correctly out of Slice A scope per tasks.md.
-- PR 1 is not opened (A6.3) — commits are local only, per the hard
-  constraint against `git push`/`gh` writes. The maintainer pushes
-  `feat/epic-864-artifact-retirement` and opens PR 1 with body `Part of
-  #955`, `Closes #958`.
+- A6.3 is complete: PR #965 opened with body `Part of #955`, `Closes #958`
+  and merged as `f5ea51f4`.

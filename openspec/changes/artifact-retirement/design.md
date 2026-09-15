@@ -145,12 +145,12 @@ driver again. Two inert leftovers stay in YOUR repo and nothing reads them. To r
   `migrate-v1` and `--dry-run` are unchanged.
 ```
 
-## Line budget (400; `governance.ignoreList` excludes tests, `.memory/**`, `openspec/**`, `AGENTS.md`)
+## Line budget (`lite`: 1000; `governance.ignoreList` excludes tests, `.memory/**`, `openspec/**`, `AGENTS.md`)
 
 | Slice | Counted estimate | Risk |
 |---|---|---|
 | A | engram.mjs ~107, memory-manifest 32, driver 42, session-start ~49, day-start 13, backend-selection ~10, i18n 2, .gitattributes ~10, .gitignore ~6, README 2, CHANGELOG ~16 → **~290** | Low |
-| B | engram.mjs ~275, migrate-v1 ~73, cli.mjs ~30 (+11 if the `:952` comment is edited), secret-scrub ~36, i18n 6 → **~415-430** | **High — exceeds 400** |
+| B | engram.mjs ~275, migrate-v1 ~73, cli.mjs ~30 (+11 if the `:952` comment is edited), secret-scrub ~36, i18n 6 → **~415-430 estimated; 474 measured** | **Low — 474/1000** |
 
 ## Failure modes
 
@@ -169,5 +169,8 @@ driver again. Two inert leftovers stay in YOUR repo and nothing reads them. To r
 ## Open Questions
 
 - [ ] **D5**: R12 says `cli.mjs import` completes under plainfiles, but plainfiles does not implement `import` (`cli.mjs:787`). Is proving that leg by named-refusal vacuity acceptable, or is `plainfiles.importMemory` in scope?
-- [ ] **Slice B budget**: ~415-430 counted lines, above 400. Take a `size:exception`, or re-rule a part (for example R4) into A?
+- [x] **Slice B budget — decided 2026-09-15**: the repository tier is `lite`,
+  so its budget is 1000 counted lines. Slice B measures 474/1000, requires
+  no exception label, and R4 stays in Slice B. This supersedes the
+  2026-09-14 exception decision.
 - [ ] The spec delta's REQ-4 scenario (`spec.md:63`, "exported chunks") is stale but outside R9's line list. Should the spec phase fix it?
