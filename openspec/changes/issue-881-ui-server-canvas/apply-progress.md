@@ -504,3 +504,124 @@ run, ~32s). `brain:repo:check` green on every commit; tree clean after each.
 Commits this round, in order: `3a461fd6` (cold-3), `986d079a` (cold-4 +
 `design.md` correction), `bfe71787` (sweep: httpServer error), `ddbab09e`
 (cold-5).
+
+## Fourth cold review of PR #971 (head d666fc29, 2026-09-14) — REVISE → fixed, and proven against the real forge
+
+One blocker, fixed on the same branch, then proven against `csrinaldi/brain`
+with a real, running `brain:ui` process (not a stub) — the first time this
+slice's poller has ever actually reached GitHub.
+
+`judgment:cold-6` (blocker, `server.mjs:399-407`, the real entry-point
+guard): the guard resolved `project` via `originIdentity()` but never
+resolved a `forgeSource`, so `main(process.argv.slice(2), { project })`
+always ran with `deps.forgeSource` undefined. `main()` built `createUiServer`
+with `forgeSource: deps.forgeSource ?? null`, and `createUiServer` wired the
+poller with `vcs: forgeSource ?? noForgeVcs`, whose four verbs each throw
+`"no forge port was supplied to the poller"`. Every real `npm run brain:ui`
+invocation therefore ticked forever against a throwing port:
+`poller.state().lastError` was permanently that message, and `prs`,
+`reviews`, and every issue's body stayed `{ok:false}` in production —
+forever, since the poller never called anything else. The comment above the
+guard (`"vcs is deliberately never resolved here (D1) — the real CLI entry
+always runs with an empty forge-cache until the poller fills it"`) was a
+stale leftover from before the poller (PR 2 / A2) existed: it correctly
+described PR 1's behaviour and was never updated once PR 2 added a poller
+that needed a real port to fill anything. No test exercised the entry guard
+or asserted `main()` wires a live port when `deps.forgeSource` is omitted —
+every existing `main()` test either passed `--no-poll` or never checked
+`prs`/`graph` at all.
+
+Fixed with `resolveForgeSource({ _getVcs, _originIdentity })` in
+`server.mjs`, mirroring `status/snapshot-cli.mjs:54-69` exactly: dynamic
+-imports `vcs/cli.mjs`'s `getVcs()` and `vcs/lib/repo.mjs`'s
+`originIdentity()`, and degrades every failure mode (no origin remote, no
+provider configured, `getVcs()` throwing) to `{ok:false, reason}` — never a
+throw. `main()` calls it whenever `deps.forgeSource` is omitted AND polling
+was requested (`--no-poll` still means no forge resolution is attempted at
+all, R881-4 S2's existing contract, unchanged). On `{ok:true}`, the resolved
+port and project are handed to `createUiServer` so the poller's first tick
+fills the cache exactly as PR 2 designed. On `{ok:false}`, `main()` prints
+`✗ forge: <reason> — polling paused; tree sections still served` on stderr,
+and `createUiServer` gets a new `forgeUnavailable` option: `computeSnapshot`
+overrides the three forge sections (`graph`/`prs`/`reviews`) of every
+computed snapshot to `{ok:false, reason: forgeUnavailable}` — the REAL
+reason, not the generic `"the first forge poll has not completed"`
+`forge-cache.mjs` would otherwise report forever (that message is true but
+useless to an operator who will never see it become false). `poller.mjs`
+gained a new `initialError` option: when set, `paused` is forced `true`
+regardless of `enabled`, and `lastError`/`lastPolledAt` are set immediately
+from `_now()` — so `start()` is a no-op and no tick ever runs against
+`noForgeVcs`, matching the required behaviour ("no tick runs against a
+throwing port") exactly. The stale D1 comment on the entry guard is
+rewritten to say what is true now: `project` is still resolved there
+cheaply (one local `git` call, matching `snapshot-cli.mjs`'s own pattern),
+but the forge PORT is resolved inside `main()`, not the guard, and a
+resolution failure degrades to a paused, said state rather than silence.
+
+RED: two new `main()` integration tests in `server.test.mjs` — one asserts
+that a `_resolveForgeSource` stub returning `{ok:true, vcs, project:'o/r'}`
+actually serves the poller (`prs.ok`/`graph.ok` true after `POST
+/api/poll/once`); the other asserts that `{ok:false, reason:'no VCS
+token'}` reaches stderr, all three forge sections of `/api/snapshot`, and
+the poller's own `state().lastError`/`paused`. Both failed before the fix —
+the first because `prs.ok` stayed `false` (the poller only ever saw
+`noForgeVcs`), the second because `main()` never called anything and never
+printed the line. Also RED (by construction, before the fix existed at
+all): three new unit tests for `resolveForgeSource` itself (a throwing
+`_getVcs` degrades to `{ok:false, reason}`; a resolving one yields
+`{ok:true, vcs, project}`; no origin remote short-circuits to `{ok:false,
+reason}` without ever calling `_getVcs`) and one new `poller.mjs` unit test
+for `createPoller({ initialError })` (`paused: true`, `lastError`/
+`lastPolledAt` set immediately, `start()` a no-op, the port never called) —
+each confirmed RED by temporarily reverting its half of the implementation
+(`poller.mjs`'s `initialError` wiring: 9/10 pass, 1 fail; the whole
+`server.mjs` change before `resolveForgeSource` existed: import-time
+`SyntaxError`, 0/38 pass) and GREEN after restoring.
+
+Five pre-existing `main()` call sites in `server.test.mjs` that do not pass
+`--no-poll` (EADDRINUSE, `judgment:cold-2`'s exit-2 test, "main succeeds on
+a free port", the D15 SIGINT/SIGTERM test, `judgment:cold-5`) now inject a
+`noRealForgeResolution()` stub via `_resolveForgeSource` — `main()`'s new
+default (a REAL `resolveForgeSource`) would otherwise run a real dynamic
+import against `vcs/cli.mjs` on every `node --test` invocation, and — once
+the poller's first tick fired — a real `gh` subprocess, on every single run
+of this file. None of those five tests assert anything about forge/poller
+state, so the stub is a pure hermeticity fix, not a behaviour change.
+
+Mutation check: reverting `main()`'s resolution block to the literal
+pre-fix line, `forgeSource: deps.forgeSource ?? null` (no resolution
+attempted, `resolveForgeSource` itself left intact and still exported)
+reproduced exactly: the two new `main()` integration tests red (test 37 —
+`prs.ok` stays `false`; test 38 — no stderr line, no reason in
+`/api/snapshot`, `paused` stays the interval-driven default rather than
+carrying the reason), while the three `resolveForgeSource` unit tests
+stayed green (they call the function directly, not through `main()`) —
+36/38 pass, 2 fail. Restored: 38/38 green.
+
+**Proven against the real forge**, not a stub — `csrinaldi/brain`, this
+machine's own `gh` and token, worktree `/home/gandalf/IA/brain-issue-881`:
+`GIT_CONFIG_GLOBAL=/dev/null timeout 120 npm run brain:ui -- --port 0
+--interval 5000` (no `--no-poll`), server reported listening on an
+OS-assigned port with no `✗ forge:` line on stderr (resolution succeeded).
+After ~15s, `GET /api/snapshot`: `graph.ok: true` with **89 nodes**,
+`prs.ok: true` with **3 open PRs**, `reviews.ok: true` with **3 review
+rows**. The SSE stream's first (`sync`) frame carried `meta.project:
+"csrinaldi/brain"` and `meta.poller: {paused: false, lastError: null,
+lastOkAt: <a real timestamp>, forgeAsOf: {issues, bodies, reviews: all set}}`
+— the poller had actually ticked against the real forge, not `noForgeVcs`.
+`POST /api/poll/pause` then returned `paused: true`. Server killed by PID
+(never `pkill -f`) once the check completed; `ps aux` confirmed no orphaned
+`node ./brain/scripts/ui/server.mjs` process survived (the `npm run`
+wrapper spawns a child `sh -c` and a grandchild `node` process under a
+different PID than `npm`'s own — both were found via `ps aux` and killed
+explicitly).
+
+Full local verification this round (actual, measured, not assumed):
+`node --test brain/scripts/ui/*.test.mjs` = 66/66 green, run 3 times
+identically. Full `npm test` = 5407/5407 green (one run, ~31s).
+`brain:repo:check` green before the commit; tree clean after. Commit this
+round: `79cb3bf` (judgment:cold-6 fix + tests + real-forge proof, all in
+one commit — the mutation and real-forge verification were done against
+the working tree before committing, not as separate commits). No push, no
+PR (per task instructions) — branch `feat/issue-881-slice-2-stream` is
+ahead of its last-pushed state (origin still at `d666fc29`).
