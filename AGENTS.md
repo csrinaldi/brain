@@ -67,7 +67,7 @@ See [`brain/project/README.md`](brain/project/README.md) for directory conventio
 - [ADR-0008](brain/project/decisions/adr-0008-adapter-vcs-provider.md) — VCS adapter: explicit provider + verb contract
 - [ADR-0009](brain/project/decisions/adr-0009-documentation-language-policy.md) — Documentation language policy: core English, project docs configurable
 - [ADR-0010](brain/project/decisions/adr-0010-cli-output-i18n.md) — CLI output i18n: message catalogs with English fallback
-- [ADR-0011](brain/project/decisions/adr-0011-feature-scoped-working-memory.md) — Feature-scoped working memory: branch-local resume.md
+- [ADR-0011](brain/project/decisions/adr-0011-feature-scoped-working-memory.md) — Feature-scoped working memory: branch-local resume.md (**Amendment 1, 15/09/2026** — the export this ADR cites is now `brain:memory:share`; the bare name stays as a repo-only alias and the decision is unchanged, #961)
 - [ADR-0012](brain/project/decisions/adr-0012-harness-init-adapter.md) — Harness-init adapter: each harness defines its init
 - [ADR-0013](brain/project/decisions/adr-0013-auto-adr-onboarding.md) — Auto-ADR onboarding: bootstrap notices, agent drafts, human signs
 - [ADR-0014](brain/project/decisions/adr-0014-workflow-governance.md) — Workflow governance: enforce load-bearing invariants server-side
