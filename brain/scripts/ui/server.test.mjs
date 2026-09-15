@@ -498,6 +498,60 @@ test('#881: D15/Q4 — server.close() ends every open SSE response before closin
   assert.equal(done, true, 'the SSE response was ended by close(), not left hanging');
 });
 
+// ── judgment:cold-3: a dead SSE client's write error never crashes the server ─
+//
+// `ServerResponse.write()` after the response has ended does NOT throw
+// synchronously — it emits an ASYNC 'error' event
+// (`ERR_STREAM_WRITE_AFTER_END`) and, with no `res.on('error')` handler,
+// crashes the process. `sendEvent()`/`broadcast()` wrote to every client
+// with no error handler at all; the only removal path was `req.on('close',
+// ...)`, asynchronous and not guaranteed to have run before the next
+// broadcast iterates `clients`. A fake, `EventEmitter`-shaped dead `res` —
+// injected through the `_registerClient`/`_clients` test-only seam — makes
+// this deterministic instead of racing a real socket teardown against a
+// real broadcast.
+
+test('#881: judgment:cold-3 — a dead SSE client\'s write error is handled per client, never crashes the process, and the client is dropped', { timeout: 3000 }, async () => {
+  const root = makeFixture();
+  const cache = createForgeCache();
+  cache.setIssueList([]);
+  cache.setMrList([]);
+  const server = createUiServer({ root, vcs: cache.port, project: 'o/r', _now: now, poll: false });
+  await server.listen(0);
+  const ac = new AbortController();
+  try {
+    const res = await fetch(`http://127.0.0.1:${server.port}/api/stream`, { signal: ac.signal });
+    const readFrame = frameReader(res);
+    await readFrame(); // sync frame — the real client is live
+
+    // A `res` whose underlying socket has already gone away: `write()`
+    // does not throw synchronously, it schedules an async 'error' — exactly
+    // Node's own documented behaviour for `ERR_STREAM_WRITE_AFTER_END`.
+    const dead = new EventEmitter();
+    dead.writableEnded = false;
+    dead.destroyed = false;
+    dead.write = () => { queueMicrotask(() => dead.emit('error', Object.assign(new Error('write after end'), { code: 'ERR_STREAM_WRITE_AFTER_END' }))); };
+    dead.end = () => {};
+    server._registerClient(dead);
+    assert.equal(server._clients.size, 2, 'both the real and the fake dead client are registered');
+
+    // Trigger a broadcast through the real recompute path every other SSE
+    // test in this file already uses — the dead client's async write error
+    // must not stop it, and must not crash the process.
+    const pollRes = await fetch(`http://127.0.0.1:${server.port}/api/poll/once`, { method: 'POST' });
+    assert.equal(pollRes.status, 200, 'the request completed normally — the dead client\'s write error did not crash the server');
+
+    const frame = await readFrame();
+    assert.match(frame, /^event: status\ndata: \{/, 'the surviving client still receives the next frame');
+
+    await waitUntil(() => server._clients.size === 1);
+    assert.ok(!server._clients.has(dead), 'the dead client was dropped after its write errored');
+    ac.abort();
+  } finally {
+    await server.close();
+  }
+});
+
 // ── R881-5 S1 (re-run) / R881-5 S2: the now-complete route table ────────────
 
 test('#881: R881-5 S1 (re-run) — mutation methods are rejected on every non-control route, including /api/stream', async () => {

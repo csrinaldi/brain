@@ -84,8 +84,34 @@ export function createUiServer({
   let current = null;
   const clients = new Set();
 
+  // `ServerResponse.write()` after its socket has already gone away does NOT
+  // throw synchronously — it emits an ASYNC 'error' event
+  // (`ERR_STREAM_WRITE_AFTER_END`/`ERR_STREAM_DESTROYED`). An EventEmitter
+  // with no 'error' listener throws out of `.emit()`, crashing this whole
+  // process (judgment:cold-3). `registerClient()` is the only place a `res`
+  // enters `clients`, so it is the one place that attaches the listener —
+  // covering both the real path (`serveStream`) and the test-only seam
+  // below. `dropClient()` removes a client from every path that can learn it
+  // is gone: a write error, the request's own 'close' event, and shutdown.
+  function dropClient(res) {
+    clients.delete(res);
+  }
+
+  function registerClient(res) {
+    clients.add(res);
+    if (typeof res.on === 'function') res.on('error', () => dropClient(res));
+  }
+
   function sendEvent(res, event, data) {
-    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    if (res.writableEnded || res.destroyed) { dropClient(res); return; }
+    try {
+      res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    } catch {
+      // a synchronous write failure (rare, but not impossible) drops the
+      // client the same way an async 'error' does — never lets one dead
+      // client stop the broadcast loop for the others
+      dropClient(res);
+    }
   }
 
   function broadcast(event, data) {
@@ -178,8 +204,8 @@ export function createUiServer({
   async function serveStream(req, res) {
     if (current === null) await recomputeCurrent();
     res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });
-    clients.add(res);
-    req.on('close', () => clients.delete(res));
+    registerClient(res);
+    req.on('close', () => dropClient(res));
     sendEvent(res, 'sync', { generatedAt: current.generatedAt, snapshot: current, meta: buildMeta() });
   }
 
@@ -234,6 +260,11 @@ export function createUiServer({
         httpServer.close((err) => (err ? reject(err) : resolve()));
       });
     },
+    // Test-only seam (judgment:cold-3): lets a test put a fake,
+    // EventEmitter-shaped dead `res` into the broadcast set without a real
+    // socket race. Not read by any production code path above.
+    _clients: clients,
+    _registerClient: registerClient,
   };
   return api;
 }
