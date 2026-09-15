@@ -625,3 +625,112 @@ one commit — the mutation and real-forge verification were done against
 the working tree before committing, not as separate commits). No push, no
 PR (per task instructions) — branch `feat/issue-881-slice-2-stream` is
 ahead of its last-pushed state (origin still at `d666fc29`).
+
+## Fifth cold-review round (PR #971, head `8f45c327`)
+
+**Verdict**: REVISE, one blocker — `judgment:cold-7`.
+
+**Finding (verbatim, reproduced)**: started a watcher on a fresh git root,
+created `openspec/changes/issue-999-test/` after `start()` (fires the
+`CHANGES_ROOT` watch, kind `'tree'`, one recompute), then wrote to
+`tasks.md` inside that new directory 600 ms later — zero further
+recomputes. `watcher.mjs`'s `onFire()` only special-cased
+`kind === 'worktrees'` (calls `rescanWorktrees()`, `watcher.mjs:160`); a
+`CHANGES_ROOT` event ran no equivalent re-sync, so `listChangeDirs()` +
+`watchDir()` (`watcher.mjs:243`) only ran once, inside `start()`. Any
+change dir created after the watcher starts — the normal case for
+`/sdd-new` on a long-lived server — was watched only at its parent's
+granularity: no edit to any file inside it ever fired a recompute again.
+Contradicted `design.md:228` ("a change dir appearing or disappearing →
+re-sync children", the same contract worktrees get at
+`watcher.mjs:217-233`) and R881-3 (`openspec/changes/**`).
+
+**Fix**: `rescanChangeDirs()` added to `watcher.mjs`, mirroring
+`rescanWorktrees()`: opens a watch for every change dir now present and
+not yet watched, closes the watches of dirs that vanished, records
+failures per label as before, and retries a failed dir on the next
+`CHANGES_ROOT` event — never marks a failed dir as watched (the
+`judgment:cold-1` round-1 rule, now shared by both resync paths). The
+`CHANGES_ROOT` directory's own `watchDir()` call changed `kind` from
+`'tree'` to `'changes'` so `onFire()` can special-case it exactly like
+`kind === 'worktrees'`. `start()`'s old manual "loop over
+`listChangeDirs()`" was replaced by a `rescanChangeDirs()` call, so the
+tracking map (`watchedChangeDirs`) is populated correctly at boot too —
+symmetric with `rescanWorktrees()` already being called at the end of
+`start()`.
+
+`watchDir()` and `closeWatch()` were generalized to take a
+`trackingId`/`trackingMap` pair instead of a worktree-only
+`worktreeId`/`watchedWorktrees` pair, so the "clear the tracking entry on
+close (including an async `handle.on('error', ...)` close), so a failed
+child is retried on the next rescan, never left permanently marked
+watched" bookkeeping is shared by both `rescanWorktrees()` and
+`rescanChangeDirs()` instead of duplicated.
+
+**Considered and rejected**: a single generic `resyncChildren(rootKind)`
+function folding both resync loops (worktrees' `git worktree list
+--porcelain` + parse, changes' `readdirSync` + filter) into one body, per
+the review's stated preference. Rejected because it would require
+touching the already-working, already-tested `rescanWorktrees()` body —
+net diff growth for no functional gain — under this PR's tight remaining
+diff budget (889/1000 counted lines before this round). The shared
+`trackingId`/`trackingMap` primitive in `watchDir()`/`closeWatch()`
+captures the actual duplicated risk (the async-error/retry bookkeeping)
+without that cost; the two `rescan*()` functions stay separate, thin, and
+symmetrical.
+
+**Test first (RED)**: two new tests in `watcher.test.mjs` — (1) create a
+change dir after `start()`, fire the `CHANGES_ROOT` event via the injected
+`_watch` double, assert the new dir is watched, then write `tasks.md`
+inside it and fire that dir's event, assert a second debounced recompute
+(previously zero, ever); (2) remove an existing change dir, fire the
+`CHANGES_ROOT` event, assert its handle is closed (`closesByPath` bumps,
+`state().watched` count drops by one). Both failed before the fix — RED
+confirmed with `GIT_CONFIG_GLOBAL=/dev/null node --test
+brain/scripts/ui/watcher.test.mjs` (10 pass / 2 fail). After the fix: 12/12
+green (GREEN confirmed).
+
+**Mutation**: removed the `if (entry.kind === 'changes') rescanChangeDirs();`
+line from `onFire()` — reproduced red on exactly the two new tests (5 and
+6), all ten other `watcher.test.mjs` tests stayed green. Restored; 12/12
+green again.
+
+**Sweep of the class** — every watched root's children, enumerated from
+`start()`:
+
+| Watched root | Children are | Re-sync needed? |
+|---|---|---|
+| `<root>/` | files (`brain.config.json`) | No — dir-granularity watch is complete |
+| `<root>/brain/` | files (`brain/HOME.md`) | No |
+| `<root>/brain/project/decisions/` | files (one `.md` per ADR — verified: `ls brain/project/decisions` returns only `.md` files) | No |
+| each `ANTI_PATTERN_DIRS` entry | files (verified: `brain/core/anti-patterns`, `brain/project/anti-patterns` each list only `.md` files) | No |
+| `<root>/.memory/records/` | files, flat (verified: `ls .memory/records` returns only `*.jsonl` files, no subdirectories) | No |
+| `<root>/openspec/changes/` | **directories** (one per change) | **Yes — fixed this round** (`rescanChangeDirs()`, test named above) |
+| each `<root>/openspec/changes/issue-*/` | files (`spec.md`, `tasks.md`, …) | No — dir-granularity watch is complete |
+| `<git-common>/` | files (`HEAD`, `packed-refs`, `ORIG_HEAD`, `MERGE_HEAD`) | No |
+| `<git-common>/logs/` | file (`HEAD` reflog) | No |
+| `<git-common>/worktrees/` | **directories** (one per linked worktree) | Already fixed (`rescanWorktrees()`, PR 2/A2 original work) — unaffected by this round except the shared `trackingId`/`trackingMap` generalization |
+| each `<git-common>/worktrees/<n>/logs/` | file (`HEAD` reflog) | No |
+
+Every watched-root class with directory children now re-syncs on its own
+event; every class with file children was already complete at
+dir-granularity. No further sibling found.
+
+**Files changed**: `brain/scripts/ui/watcher.mjs` (`rescanChangeDirs()`
+added; `watchDir()`/`closeWatch()` generalized to `trackingId`/
+`trackingMap`; `CHANGES_ROOT`'s own watch `kind` changed `'tree'` →
+`'changes'`; `onFire()` gained the `kind === 'changes'` branch; `start()`'s
+manual change-dir loop replaced by a `rescanChangeDirs()` call; top-of-file
+comment updated), `brain/scripts/ui/watcher.test.mjs` (2 new tests, per
+above).
+
+**Verification**: `GIT_CONFIG_GLOBAL=/dev/null node --test
+brain/scripts/ui/*.test.mjs` = 68/68 green, run 3 times identically (was
+66/66 before this round's 2 new tests). `GIT_CONFIG_GLOBAL=/dev/null npm
+test` = 5409/5409 green, one full run (~31s; was 5407/5407 before this
+round). `brain:repo:check` green before the commit; tree clean after.
+Counted diff (excluding `.test.mjs`, `openspec/`, `.memory/`) against
+`origin/feature/brain-ui...HEAD`: **926 / 1000**. Commit this round:
+`67b0bec` (judgment:cold-7 fix + tests + sweep). No push, no PR (per task
+instructions) — branch `feat/issue-881-slice-2-stream` is ahead of its
+last-pushed state (origin still at `d666fc29`).
