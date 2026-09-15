@@ -5,59 +5,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { dualWriteRecords, pullMemory, buildImportPayload, importMemory } from './engram.mjs';
-import { buildRecord } from '../lib/format.mjs';
+import { pullMemory, buildImportPayload, importMemory } from './engram.mjs';
 
 // #820: a faked backend has no store to protect — never take the real machine guard from a test.
 const noGuard = () => ({ held: true, release() {} });
-
-
-const baseRecordFields = {
-  ts: '2026-07-04T12:00:00Z', actor: '@crinaldi', actorKind: 'human', type: 'decision', project: 'brain',
-};
-
-// ── share ────────────────────────────────────────────────────────────────────
-//
-// #874 split B: `share()` no longer calls `dualWriteRecords` (row 1) — it is
-// the bare `_ensureSymlink` + `rebuildIndex()` mirror of `plainfiles.share()`
-// (R11/R12), covered by `engram.share.test.mjs`'s own "returns the
-// accounting" test. The `unprovenanced` field this test used to check for on
-// `share()`'s return no longer exists there — `dualWriteRecords()` still
-// returns it (see below), it is just never routed through `share()` any more.
-
-test('dualWriteRecords: the default _readObservations seam throws — #874 split B retired the only production reader (row 2); this seam has no production wiring and a caller must inject a real reader', async () => {
-  // `evidence-reader-empty-on-failure` (see requireEngram()'s own doc comment
-  // above, and design.md's D9): a silently-empty default reports "nothing to
-  // scan" for what is really "cannot look — no reader is wired". Every
-  // current caller of dualWriteRecords() is a direct test that already
-  // injects its own _readObservations; a bare, un-injected call is either a
-  // test bug or a future production caller (epic 2.4/1.2a) that forgot to
-  // wire a reader, and both deserve a throw, not a quiet zero.
-  await assert.rejects(
-    () => dualWriteRecords('/fake/root'),
-    /_readObservations/,
-  );
-});
-
-test('dualWriteRecords: a steady-state run with nothing new STILL reindexes, so a merged-in duplicate is still seen', async () => {
-  const recA = buildRecord({ ...baseRecordFields, content: 'A' });
-  const duplicates = { ids: 1, lines: 1, divergent: 0, groups: [{ id: recA.id, occurrences: ['2026-07.jsonl:1', '2026-07.jsonl:5'] }] };
-  let reindexCalled = false;
-
-  const result = await dualWriteRecords('/fake/root', {
-    _readObservations: () => ({ observations: [{ id: 1 }] }),
-    _exportObservation: () => ({ record: recA, recovered: true }),
-    _appendRecord: () => { throw new Error('nothing new — appendRecord must not run'); },
-    _readRecordIds: () => new Set([recA.id]),   // already in records/ from a prior run
-    _rebuildIndex: () => { reindexCalled = true; return { count: 1, duplicates }; },
-    _loadConfig: () => ({}),
-  });
-
-  assert.equal(result.written, 0);
-  assert.equal(result.deduped, 1, 'the candidate was already present — that is this run\'s dedup');
-  assert.equal(reindexCalled, true, 'the store is still read: a git pull may have merged duplicates in since');
-  assert.deepEqual(result.duplicates, duplicates, 'and the union-merge residual is reported');
-});
 
 // ── pull ─────────────────────────────────────────────────────────────────────
 

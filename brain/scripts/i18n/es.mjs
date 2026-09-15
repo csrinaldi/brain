@@ -353,10 +353,12 @@ export default {
   'memory.share.skippedHydrated': 'Se omitieron {count} observación(es) — su topic ya nombraba un registro (escrito por hydrate(), #874), así que reexportarlas habría generado un id duplicado.',
   'memory.share.secretFound': 'Se detectó un secreto en {file}:{line} — coincide con el patrón "{pattern}". Eliminá el secreto o agregá una entrada en governance.memorySecretAllowPatterns si es un falso positivo. Ejecutá `gunzip -c {file} | jq .` para inspeccionar (el número de línea corresponde a esa vista formateada).',
 
-  // ── memory/backends/engram.mjs — share() records dual-write scrub (issue #221, C2b-1) ──
-  'memory.share.secretFoundRecords': 'Se detectó un secreto en un registro candidato (línea {line}) — coincide con el patrón "{pattern}". Se abortó ANTES de agregarlo a records/ (agregá una entrada en governance.memorySecretAllowPatterns si es un falso positivo).',
-
-  // ── memory/backends/engram.mjs — dualWriteRecords() alcance del export contra la base upstream (issue #701) ──
+  // ── memory/backends/engram.mjs — alcance del export contra la base upstream del
+  // exportador de records en dual-write (issue #701). Huérfana desde #874 split B
+  // junto al resto de `memory.share.*` (D6) — el exportador también se retiró
+  // ahora (#955 R5, epic task 2.4), así que estas claves ya no tienen lector.
+  // Se dejan como están: ninguna ruling cubre borrar claves huérfanas del catálogo,
+  // solo el código que las producía.
   'memory.share.upstreamUnavailable': 'no se pudo consultar la base upstream — {reason}. Esta corrida escribió todos los candidatos (comportamiento pre-#701); no se acotó nada.',
   'memory.share.upstreamConfigUnreadable': '{error}. Cualquier memory.upstreamRef declarado ahí NO fue respetado — la base upstream se derivó como {ref} en su lugar. Arreglá brain.config.json (un marcador de conflicto a medio merge es la causa habitual) si querías apuntar a otro ref.',
   'memory.share.upstreamConfigUnreadableNoRef': '{error}. Cualquier memory.upstreamRef declarado ahí NO fue respetado, y tampoco resolvió ninguna base upstream — la línea siguiente dice qué se intentó. Arreglá brain.config.json (un marcador de conflicto a medio merge es la causa habitual) si querías apuntar a otro ref.',
@@ -380,7 +382,7 @@ export default {
 
   // ── memory/cli.mjs — migrate-v1 (issue #217, C2a / #219 C2-migrate / #222 C2b-2) ──
   'memory.migrateV1.realRunSummary':        '✓ migración completa — escritos: {written} | rechazados: {rejected} | omitidos (personal): {skipped} | chunks no parseables: {unparseable} | chunks sin observaciones: {emptyObservations} | índice: {indexCount} registro(s). records/ es ahora la única vía de escritura (memory.dualWrite retirado, D3/C4).',
-  'memory.migrateV1.rollbackSummary':       '✓ rollback completo — chunk(s) restaurado(s): {restored} | índice: {indexCount} registro(s).',
+  'memory.migrateV1.rollbackRetired':       'migrate-v1 --rollback fue retirado (#955): restauraba los chunks v1 desde .memory/legacy/ y después borraba .memory/records/, destruyendo cada registro capturado desde la migración. No se cambió nada. Los chunks archivados siguen en el historial de git: git show <sha>:.memory/legacy/<file>',
   'memory.migrateV1.dryRunHeader':          'Reporte de migración en dry-run (issue #217, C2):',
   'memory.migrateV1.summary':               'registros: {records} | omitidos (personal): {skipped} | rechazados: {rejected} | chunks no parseables: {unparseable} | chunks sin observaciones: {emptyObservations}',
   'memory.migrateV1.typesHistogramHeader':  'Histograma de tipos:',

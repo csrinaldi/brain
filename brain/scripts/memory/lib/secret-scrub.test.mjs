@@ -1,14 +1,15 @@
 // secret-scrub.test.mjs — unit tests for the fail-closed secret scanner
-// (issue #214, C1b). Pure-function contract: no filesystem access beyond the
-// one explicit gzip-decompress helper, which is exercised with a real temp
-// gzip fixture (no engram/child-process dependency).
+// (issue #214, C1b). Pure-function contract: no filesystem access beyond a
+// real temp plaintext fixture read by `scrubRecordsFile` (no engram/
+// child-process dependency). The gzip-chunk reader this once also tested
+// (`scrubChunkFile`) retired with the chunk-reading exporter it served
+// (#955 R4, epic task 2.4).
 //
 // RED: these imports fail until secret-scrub.mjs is created.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { gzipSync } from 'node:zlib';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -18,7 +19,6 @@ import {
   compilePatterns,
   resolveSecretConfig,
   scanTextForSecrets,
-  scrubChunkFile,
   scrubRecordsFile,
 } from './secret-scrub.mjs';
 
@@ -107,42 +107,6 @@ test('scanTextForSecrets: the allowlist does not suppress an unrelated match on 
   );
   assert.ok(hit, 'the second, non-allowlisted line must still be reported');
   assert.equal(hit.lineNumber, 2);
-});
-
-// ── scrubChunkFile — real gzip fixture, no engram dependency ──────────────────
-
-function tmpGzChunk(obj) {
-  const dir = mkdtempSync(join(tmpdir(), 'brain-secret-scrub-'));
-  const file = join(dir, 'chunk.jsonl.gz');
-  writeFileSync(file, gzipSync(Buffer.from(JSON.stringify(obj), 'utf8')));
-  return { dir, file };
-}
-
-test('scrubChunkFile: detects a secret inside a gzipped chunk, reporting a line number', (t) => {
-  const { dir, file } = tmpGzChunk({
-    observations: [{ content: 'token: ghp_abcdefghijklmnopqrstuvwxyz01' }],
-  });
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
-
-  const patterns = compilePatterns(DEFAULT_SECRET_PATTERNS);
-  const hit = scrubChunkFile(file, patterns);
-  assert.ok(hit, 'expected a hit inside the decompressed chunk');
-  assert.ok(hit.lineNumber > 0, 'must report a positive line number');
-});
-
-test('scrubChunkFile: a clean gzipped chunk returns null', (t) => {
-  const { dir, file } = tmpGzChunk({ observations: [{ content: 'just a normal decision' }] });
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
-
-  const patterns = compilePatterns(DEFAULT_SECRET_PATTERNS);
-  const hit = scrubChunkFile(file, patterns);
-  assert.equal(hit, null);
-});
-
-test('scrubChunkFile: a missing chunk path returns null instead of throwing ENOENT (defense-in-depth, finding 7 id:388)', () => {
-  const patterns = compilePatterns(DEFAULT_SECRET_PATTERNS);
-  const hit = scrubChunkFile('/nonexistent/does-not-exist/chunk.jsonl.gz', patterns);
-  assert.equal(hit, null);
 });
 
 // ── scrubRecordsFile — plaintext JSONL reader, no gunzip (REQ-C2B1-2, #221 C2b-1) ──

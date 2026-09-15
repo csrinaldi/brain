@@ -166,9 +166,15 @@ const EXPORT_KW = 'ex' + 'port';
 // `engram.mjs`'s import of `collectChunkObservations` (and its
 // `_defaultReadObservations` caller) is gone — `share()` has no observation
 // reader left at all. Only the two rows below remain.
+//
+// R3 (#955, epic task 2.4) corrects the #874 ledger row 7 note this
+// allowlist used to carry: `collectChunkObservations` is KEPT, not
+// retired — it reads a consumer's own `chunks/`, not `legacy/`, and forward
+// `migrate-v1` still calls it. `retiredBy` below names that ruling, not a
+// pending deletion.
 const ALLOWLIST = [
-  { file: 'brain/scripts/memory/cli.mjs', line: 655, retiredBy: '2.4 — ledger row 7' },
-  { file: 'brain/scripts/memory/lib/migrate-v1.test.mjs', line: 13, retiredBy: '2.4 — ledger row 7' },
+  { file: 'brain/scripts/memory/cli.mjs', line: 651, retiredBy: 'kept — R3 (#955)' },
+  { file: 'brain/scripts/memory/lib/migrate-v1.test.mjs', line: 13, retiredBy: 'kept — R3 (#955)' },
 ];
 
 test('collectChunkObservations: the real importer set equals the annotated allowlist, both directions (D4 guard 2, A3)', () => {

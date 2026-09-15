@@ -21,11 +21,12 @@
 // openspec/changes/issue-247-chunk-retirement/{tasks,design}.md. Rows 1, 2, 4
 // and 5 are gone — `share()` (#874 split B) no longer calls `engram sync
 // --export`, has no observation reader and no chunk-scrub subsystem left,
-// and `engram.share.test.mjs`'s old shape retired with them. Only row 3
-// remains, kept per the ratified O1 disposition (handed to epic task 2.4):
-//   dualWriteRecords's _readObservations seam     → ledger row 3 (kept — O1)
-// (2.4 handles what is left after 3.2:
-//   the symlink and the legacy gz path → rows 6-7)
+// and `engram.share.test.mjs`'s old shape retired with them. Row 3 (the
+// records dual-write exporter's own `_readObservations` seam) is retired
+// too now — #955 (epic task 2.4) deleted the function that owned it instead
+// of giving it the future caller the O1 disposition held it open for. Rows
+// 6-7 (symlink confinement, legacy gz path) were finished by #955 slice A
+// and this slice respectively — all seven rows are closed.
 
 import { execFileSync, spawnSync } from "node:child_process";
 import {
@@ -50,18 +51,17 @@ import { parseFrontmatter, serializeFrontmatter } from "../lib/resume-frontmatte
 import { validateResume } from "../lib/resume-schema.mjs";
 import { currentBranch } from "../../lib/git-branch.mjs";
 import { resolveSecretConfig, compilePatterns, scanTextForSecrets } from "../lib/secret-scrub.mjs";
-import { exportObservation } from "../lib/engram-export.mjs";
 import { importRecord } from "../lib/engram-import.mjs";
 import { appendRecord, rebuildIndex, readRecordIds, readRecords } from "../lib/store.mjs";
 import { upstreamRecordEntries } from "../lib/upstream-records.mjs";
-import { emptyDuplicates, normalizeDuplicates } from "../lib/duplicates.mjs";
+import { normalizeDuplicates } from "../lib/duplicates.mjs";
 import { buildRecord, serializeRecord, nowUtcSeconds, RECORD_TYPES } from "../lib/format.mjs";
 import { unsupportedOp } from "../lib/unsupported-op.mjs";
 import { acquireHydrationGuard } from "../lib/hydration-guard.mjs";
 import { ENGRAM_BIN, probeBinary } from "../lib/backend-selection.mjs";
 import { gitConfigGet } from "../../lib/git-config.mjs";
 import { resolveActor, resolveActorKind, deriveIssue, composeSource } from "../lib/capture-provenance.mjs";
-import { classifySupersedes, SUPERSEDES_ID_RE } from "../lib/supersedes.mjs";
+import { classifySupersedes } from "../lib/supersedes.mjs";
 import { loadBrainConfigOrThrow } from "../../lib/brain-config.mjs";
 import { t } from "../../i18n/t.mjs";
 
@@ -179,264 +179,6 @@ export async function share({
 }
 
 /**
- * dualWriteRecords() — scan-then-write over the RECORDS log (issue #221,
- * C2b-1; design.md Decision 1, REQ-C2B1-3). Independent of requireEngram()/
- * the real export so it is unit-testable with zero engram/git dependency —
- * the same testable-core pattern `_defaultChangedChunkFiles` used before its
- * retirement (row 4, #874 split B).
- *
- * Order: read observations → transform each into a CANDIDATE record via
- * exportObservation() → scan the candidate record LINES for secrets → only
- * if clean, dedup by content-addressed `id` against what `records/` already
- * has (issue #221 fix pass, BLOCKER) → append every NEW candidate to
- * `records/` + rebuild the index. A secret hit aborts BEFORE any
- * `appendRecord` call — the append-only `records/` log is never written with
- * a secret.
- *
- * Accounting (issue #221 fix pass, MAJOR — mirrors migrate-v1.mjs's
- * buildMigrationReport() honesty contract): every observation is accounted
- * for exactly once, never silently dropped. `errored` (a throwing
- * exportObservation), `rejected` (non-enum type), and `skippedPersonal`
- * (scope:personal) each get their own counter — none of them abort the run
- * for the others (per-observation isolation) — and the chunk-level
- * `unparseableChunks`/`emptyObservationsChunks` buckets from
- * `_readObservations()` are surfaced too. `deduped` counts candidates whose
- * `id` was already present in `records/` (a prior run) OR earlier in THIS
- * batch (two observations exporting to the same content-addressed record).
- *
- * @param {string} root
- * @param {object} [opts]
- * @param {(root: string) => {observations: object[], unparseable?: string[], emptyObservations?: string[]}} [opts._readObservations]
- *   No default reader (row 2, #874 split B: the chunk-backed
- *   `_defaultReadObservations`/`collectChunkObservations` reader retired —
- *   `share()` no longer has an observation source at all). An un-injected
- *   call THROWS rather than silently reading zero observations —
- *   `evidence-reader-empty-on-failure` (see `requireEngram()`'s doc comment
- *   above): this seam has no production wiring after #874 split B, and
- *   "no reader was wired" must never report as "nothing to scan". Every
- *   current caller of this function is a direct test that injects its own
- *   `_readObservations`; a future production caller (epic task 2.4) must do
- *   the same.
- * @param {typeof exportObservation} [opts._exportObservation]
- * @param {typeof appendRecord} [opts._appendRecord]
- * @param {typeof rebuildIndex} [opts._rebuildIndex]
- * @param {typeof readRecordIds} [opts._readRecordIds]
- * @param {(root: string) => object} [opts._loadConfig]
- * @param {typeof upstreamRecordEntries} [opts._upstreamRecordIds]  issue #701 — the id set
- *   already durable at the upstream base. Defaulted, called AFTER the secret scan and
- *   BEFORE the dedup loop (design.md Decision 4): the zero-candidate early return above
- *   still short-circuits before it (no git spawn on a steady-state share), and the scan
- *   above it still covers every candidate, including the ones this widens the decline to.
- * @returns {Promise<{written: number, deduped: number, dedupedUpstream: number, errored: number,
- *   rejected: number, skippedPersonal: number, unprovenanced: number, skippedHydrated: number, unparseableChunks: number,
- *   emptyObservationsChunks: number, indexCount?: number,
- *   duplicates: {ids: number, lines: number, divergent: number, groups: object[]},
- *   upstreamScope?: {applied: boolean, ref: string|null, stated: boolean, reason: string|null,
- *   configError: string|null, entries: number, unnamed: number}}>}
- *   `upstreamScope.ref` is `null` when NO ref answered — `upstream-records.mjs`
- *   returns no name for a run in which no name was used, so nothing downstream
- *   can print one (issue #701, cold review round 4).
- *   `duplicates` (#574) is the union-merge residual already sitting in
- *   `records/`, distinct from `deduped` (candidates THIS run declined to
- *   append). Zero on the early return, which measured nothing. `dedupedUpstream`
- *   is `deduped`'s own-reason sub-bucket (issue #701) — `deduped` stays the
- *   TOTAL of every decline (own-records ∪ in-batch ∪ upstream), never folded
- *   silently. `upstreamScope` is absent (not `{applied:false,...}`) on the
- *   zero-candidate early return, mirroring `indexCount`'s own "undefined means
- *   never measured" contract just below.
- */
-export async function dualWriteRecords(
-  root,
-  {
-    _readObservations = () => {
-      throw new Error(
-        "dualWriteRecords: no _readObservations seam was injected — this reader " +
-          "has no production wiring after #874 split B (row 2); pass a real " +
-          "_readObservations to read observations, do not rely on a default.",
-      );
-    },
-    _exportObservation = exportObservation,
-    _appendRecord = appendRecord,
-    _rebuildIndex = rebuildIndex,
-    _readRecordIds = readRecordIds,
-    _loadConfig = _defaultLoadBrainConfig,
-    _upstreamRecordIds = upstreamRecordEntries,
-  } = {},
-) {
-  const { observations, unparseable = [], emptyObservations = [] } = _readObservations(root);
-
-  const candidates = [];
-  let errored = 0;
-  let rejected = 0;
-  let skippedPersonal = 0;
-  // #541: observations that arrived with NO §4 provenance block. `exportObservation`
-  // has always returned this flag and the loop has always discarded it, so the
-  // fallback — actor `@legacy`, no `issue` — was applied silently and the resulting
-  // record looked like any other. Counting it is what turns "the emitter does not
-  // exist" from a thing you discover by reading 2000 records into a number printed on
-  // every share.
-  //
-  // Counted, NOT rejected. Failing here would refuse the 2070 historical observations
-  // this repository already holds and make `share` unusable — the same trap #529's
-  // ruling refused for `memory-gate`. Visibility first; the gate only once the emitter
-  // exists to satisfy it.
-  let unprovenanced = 0;
-  // fresh-review F1 (#924): an observation whose `topic_key` already matches
-  // the record-id grammar (`SUPERSEDES_ID_RE`, `rec-[0-9a-f]{16}` — the same
-  // constant `--supersedes` is validated against, not redefined here) was
-  // WRITTEN BY `hydrate()` (#874 split A) — `_defaultEngramSave` shells
-  // `engram save … --topic <record id>` with no `--created-at`, so engram
-  // stamps its own `created_at`; `exportObservation()` derives `ts` FROM that
-  // `created_at`, and `ts` feeds `computeRecordId` (format.mjs). Re-exporting
-  // such an observation therefore risks a SECOND record with a DIFFERENT id
-  // the instant the two clocks disagree by even a second — a duplicate this
-  // function would have manufactured itself. Skipped on grammar alone, never
-  // on local presence: `records/` is additions-only and a partial index at
-  // best, so a `rec-…` topic with no local match is still proof the row was
-  // born from a record somewhere, never proof it is safe to re-derive.
-  //
-  // O1 (ratified 2026-09-11, #874 split B): `share()` (row 1) stopped calling
-  // this function, but the function, its logic and this gate stay intact —
-  // deletion is epic task 2.4's (or 1.2a's), not split B's. The gate must not
-  // outlive its test: a future caller handing `dualWriteRecords` an
-  // observation source (2.4/1.2a heal) still needs this guard, since
-  // `hydrate()` still shells `engram save --topic <rec-id>` with no
-  // `--created-at`. See openspec/changes/issue-874-record-first/tasks.md,
-  // task B1.
-  let skippedHydrated = 0;
-  for (const obs of observations) {
-    if (typeof obs?.topic_key === "string" && SUPERSEDES_ID_RE.test(obs.topic_key)) {
-      skippedHydrated += 1;
-      continue;
-    }
-    let result;
-    try {
-      result = _exportObservation(obs);
-    } catch {
-      errored += 1; // one bad observation must never abort the whole share
-      continue;
-    }
-    if (result.skipped) {
-      skippedPersonal += 1;
-      continue;
-    }
-    if (result.rejected) {
-      rejected += 1;
-      continue;
-    }
-    if (!result.recovered) unprovenanced += 1;
-    candidates.push(result.record);
-  }
-
-  const accounting = {
-    written: 0,
-    deduped: 0,
-    // issue #701 — `deduped`'s own-reason sub-bucket: candidates declined
-    // because their id is already durable at the upstream base, distinct from
-    // an own-worktree or in-batch repeat. `deduped` itself is unchanged in
-    // meaning: the TOTAL of every decline reason.
-    dedupedUpstream: 0,
-    errored,
-    rejected,
-    skippedPersonal,
-    unprovenanced,
-    // fresh-review F1 (#924) — observations gated out above because their
-    // `topic_key` already names a record; a bucket of its own, never folded
-    // into `deduped` (that bucket means "read as far as the dedup check and
-    // declined there" — these never reach `_exportObservation` at all).
-    skippedHydrated,
-    unparseableChunks: unparseable.length,
-    emptyObservationsChunks: emptyObservations.length,
-    // #574. `deduped` above counts candidates this RUN declined to append; this
-    // counts physical lines already sitting in `records/` under a repeated id —
-    // the union-merge residual. Zero here means "measured, none", and on the
-    // early returns below it means "no reindex ran, so nothing was measured":
-    // never a number this function did not observe.
-    duplicates: emptyDuplicates(),
-  };
-
-  if (candidates.length === 0) return accounting;
-
-  const { patternSources, allowPatternSources } = resolveSecretConfig(_loadConfig(root));
-  const patterns = compilePatterns(patternSources);
-  const allowPatterns = compilePatterns(allowPatternSources);
-
-  const candidateText = candidates.map(serializeRecord).join("\n");
-  const hit = scanTextForSecrets(candidateText, patterns, allowPatterns);
-  if (hit) {
-    throw new Error(
-      await t("memory.share.secretFoundRecords", {
-        line: hit.lineNumber,
-        pattern: hit.pattern,
-      }),
-    );
-  }
-
-  const recordsDir = join(root, ".memory", "records");
-  const indexPath = join(root, ".memory", "index.jsonl");
-
-  const existingIds = _readRecordIds({ recordsDir });
-  // issue #701 — the id set already durable at the upstream base, beside
-  // `_readRecordIds` (design.md Decision 4). `ok: false` degrades to an EMPTY
-  // scope below — never treated as "found nothing" for the write decision
-  // (Decision 3): the accounting still records `applied: false` so the report
-  // can tell "checked, empty" from "could not check" apart.
-  //
-  // `config` is DELIBERATELY not passed: `upstream-records.mjs` owns the
-  // `memory.upstreamRef` key and reads it from `root` when `config` is omitted.
-  // Passing `{}` here (or defaulting it anywhere in that chain) is not nullish
-  // and would silently kill the config level — the defect cold review of #708
-  // found, where every layer defaulted `config = {}` and the read never fired.
-  const upstream = _upstreamRecordIds({ root });
-  accounting.upstreamScope = {
-    applied: upstream.ok === true,
-    ref: upstream.ref,
-    stated: upstream.stated,
-    reason: upstream.ok ? null : upstream.reason,
-    // Independent of `applied`: an unreadable `brain.config.json` no longer
-    // stops the lookup, so the scope can be APPLIED against a derived ref while
-    // a ref stated in that config went unread. Reported either way.
-    configError: upstream.configError ?? null,
-    entries: upstream.ok ? upstream.byId.size : 0,
-    unnamed: upstream.ok ? upstream.unnamed.length : 0,
-  };
-
-  const seenInBatch = new Set();
-  const toAppend = [];
-  for (const record of candidates) {
-    const dedupedOwn = existingIds.has(record.id) || seenInBatch.has(record.id);
-    const dedupedUp = !dedupedOwn && upstream.ok === true && upstream.byId.has(record.id);
-    if (dedupedOwn || dedupedUp) {
-      accounting.deduped += 1;
-      if (dedupedUp) accounting.dedupedUpstream += 1;
-      continue;
-    }
-    seenInBatch.add(record.id);
-    toAppend.push(record);
-  }
-
-  for (const record of toAppend) {
-    _appendRecord(record, { recordsDir });
-  }
-  accounting.written = toAppend.length;
-  // Reindex UNCONDITIONALLY from here on (#574) — the former `toAppend.length > 0`
-  // guard was the churn discipline reading of ADR-0017, but it also meant that
-  // the steady-state share (engram exported, everything already in `records/`,
-  // nothing to append) never read the log and so could never notice the
-  // duplicates a `git pull` had merged in since. The guard bought nothing it
-  // was meant to: `rebuildIndex` is deterministic, so re-running it over an
-  // unchanged store rewrites byte-identical content and `git diff` stays empty
-  // — the churn rule is about the DIFF, not the write (measured: rebuilding
-  // over this repo's 2038-record store reproduces the committed index
-  // byte-for-byte). The zero-candidate early return above still short-circuits
-  // before this; `share()` covers that path with its own self-check.
-  const { count, duplicates } = _rebuildIndex({ recordsDir, indexPath });
-  accounting.indexCount = count;
-  accounting.duplicates = normalizeDuplicates(duplicates);
-  return accounting;
-}
-
-/**
  * Default seam: reads `brain.config.json` for the `governance.memorySecret*`
  * keys, via `loadBrainConfigOrThrow` (#942). ENOENT still returns `{}`
  * (absence stays green, R12/REQ-SCAN-3); every OTHER read/parse failure
@@ -444,12 +186,12 @@ export async function dualWriteRecords(
  * (`memorySecretPatterns`) and an ALLOW-direction key
  * (`memorySecretAllowPatterns`) cannot be half-propagated (R1/REQ-SCAN-2).
  *
- * D4 (design.md): this function has TWO wiring points — `save()` (`:952`,
- * the only production caller) and `dualWriteRecords()` (`:266`, callerless
- * since #874 split B, kept for a future caller per O1). Both are hardened
- * together, deliberately: a function kept for a future caller must not be
- * kept with the wrong failure policy, and two implementations of one rule
- * is the exact shape `brain/core/anti-patterns/` names.
+ * D4 (design.md): `save()` (`:952`) is this function's only wiring point.
+ * The records dual-write exporter this doc once ALSO named as a wiring
+ * point (kept callerless since #874 split B "for a future caller per O1")
+ * is gone now — #955 R5 (epic task 2.4) deleted it outright rather than
+ * giving it that caller, so there is only ever one implementation of this
+ * rule to keep hardened.
  *
  * @param {string} root
  * @returns {object}
