@@ -349,3 +349,158 @@ leaked-listener symptom the finding describes — reverted. Commit
 `28647280`.
 
 `brain:repo:check` green on every commit; tree clean after each.
+
+## Third cold review of PR #971 (head e23123e1, 2026-09-14) — REVISE → fixed, plus an adversarial sweep
+
+Two blockers and one correction, all fixed on the same branch, plus one more
+fix found during the mandated sweep for the same defect class.
+
+`judgment:cold-3` (blocker, `server.mjs:87-93`, `sendEvent`/`broadcast`):
+`ServerResponse.write()` after the response has ended does NOT throw
+synchronously — it emits an async `'error'` event
+(`ERR_STREAM_WRITE_AFTER_END`), and an `EventEmitter` with no `'error'`
+listener throws out of `.emit()`, crashing the whole process. `sendEvent()`
+wrote to every client in `clients` with no error handler at all; `broadcast()`
+had no per-client try/catch. The only removal path was `req.on('close', ()
+=> clients.delete(res))` — asynchronous, not guaranteed to have run before
+the next `recomputeAndBroadcast()` iterated `clients`, and
+`recomputeAndBroadcast`'s own try/catch does not catch an `EventEmitter`
+`'error'` (it is not thrown into that call stack). Fixed by adding
+`registerClient()`/`dropClient()`: every client entering `clients` gets a
+`res.on('error', () => dropClient(res))` listener, and `sendEvent()` now
+skips a client whose `res.writableEnded || res.destroyed` and wraps the
+write itself in try/catch, dropping the client on any failure — one dead
+client never stops the broadcast loop for the others. Test-only seams
+`_clients`/`_registerClient` were added to `createUiServer`'s return value
+so a test can inject a fake, `EventEmitter`-shaped dead `res` (its `write()`
+schedules an async `'error'` via `queueMicrotask`, matching Node's own
+documented behaviour) without racing a real socket teardown against a real
+broadcast. RED: `node --test`'s own uncaught-exception reporter —
+`"A resource generated asynchronous activity after the test ended... Error:
+write after end"` — confirming this is a real process crash, not a
+benign-looking assertion failure. GREEN after adding the error handler and
+the write guard. Mutation check: removing `res.on('error', ...)` from
+`registerClient()` and the try/catch + `writableEnded`/`destroyed` guard
+from `sendEvent()` reproduced the exact same uncaught-exception crash;
+restored. Commit `3a461fd6`.
+
+`judgment:cold-4` (blocker, `poller.mjs:86-107`, `pickBodyTargets`): with 90
+open issues, a single tick where all 90 issues' labels change at once (a
+bulk label rename, one ordinary GitHub action) made `pickBodyTargets()`
+fetch `issueView` for all 90. `changed` was never capped — only `newNumbers`
+was capped at `NEW_BODY_CAP=20`, and `rest` only ever took whatever budget
+remained after `changed`, which could itself already exceed the intended
+`B=5` steady-state budget with no ceiling. `design.md`'s Q1/D2 stated the
+body lane costs `≤ B` calls with `B=5` steady state and a worst bounded case
+of `2 + 10 + 5 = 17` calls/tick — this implementation had no upper bound at
+all once more than `BODY_CAP` issues changed in one tick. Fixed by adding a
+persistent, insertion-ordered `pendingBodyRefresh` set: every number whose
+fast-lane row changed is added to it (numbers leave it once their body is
+actually fetched, or once they leave the open-issue set); each tick,
+`changed` is sliced off the FRONT of that set up to
+`BODY_CAP + NEW_BODY_CAP = 25` minus however much `newNumbers` already used,
+so the tick's grand total (new + changed + LRU rest) never exceeds 25 no
+matter how many issues changed at once. Overflow is never dropped — it
+stays in `pendingBodyRefresh` and drains oldest-first on later ticks.
+Corrected `design.md`'s worst-bounded-case row from `2 + 10 + 5 = 17` to
+`2 + 10 + 25 = 37` calls/tick (2,220/h, 44% of the 5,000/h ceiling — still
+well under budget), with a dated correction note explaining the original
+figure only ever accounted for the (already-broken) `B=5` ceiling. RED: new
+test `judgment:cold-4` (`poller.test.mjs`) — 90 issues, a steady cold-start
+tick, then every one of the 90 issues' labels moving on tick 2 — asserted
+`issueView` calls on tick 2 `<= 25`; got 90. Fixed → GREEN, plus an
+assertion that every one of the 90 changed issues is refreshed within
+`ceil(90/25) = 4` ticks of the mass change (drains via 3 further ticks after
+the saturated tick 2: 25 + 25 + 25 + 15 = 90). Mutation check: removing the
+cap on `changed` (`const changed = [...pendingBodyRefresh];` with no
+`.slice()`) reproduced exactly the RED failure (90 calls on tick 2, over the
+25 bound); restored. Confirmed the existing Q1/D2 30-tick budget test (one
+label moves per tick, well under the cap) still asserts the same
+`2 + min(P,10) + 5 = 10` calls/tick — the fix is a no-op for that case since
+`pendingBodyRefresh` fully drains every tick when only 1 issue changes.
+Commit `986d079a`.
+
+`judgment:cold-5` (correction, `server.mjs:319`, `main`): `main()` attached
+`proc.on('SIGINT'/'SIGTERM', ...)` with no matching removal, tied to the
+real `process` whenever `deps.process` was not overridden. Five `main()`
+calls in `server.test.mjs` (the `--no-poll` composition test, the unknown-
+argument test, the EADDRINUSE test, the `judgment:cold-2` exit-2 test, and
+the "main succeeds" test) ran against the real process with no fake, each
+leaking two listeners; the listener itself also outlived a caller's own
+`server.close()` whenever no signal ever fired, which is the common case in
+this file's tests (only the dedicated SIGINT/SIGTERM test ever emits a
+signal). Fixed by wrapping `server.close` once, right after the listeners
+are attached in `main()`: the wrapped `close()` removes both listeners
+(`proc.off(...)`) before delegating to the original `close()`, so whichever
+path closes the server — a real signal via `shutdown()`, or a caller/test
+closing it directly — the listeners come off too. All five `main()` calls
+in `server.test.mjs` that do not themselves assert on signal handling now
+pass a fresh `makeFakeProcess()` double (an `EventEmitter` with a no-op
+`exit()`), so the real process is never touched by this test file except
+through the one test that deliberately exercises real signal semantics
+(that one keeps its own local `fakeProcess`, already an `EventEmitter`).
+RED: new test `judgment:cold-5` — `main()` against a fake process, assert
+one `SIGINT`/`SIGTERM` listener each after start, `result.close()` directly
+(no signal), assert zero listeners after — failed `1 !== 0` before the fix.
+GREEN after wrapping `close()`. Mutation check: removing the `server.close`
+wrapper (leaving only the original `proc.on(...)` calls) reproduced the
+exact same `1 !== 0` failure; restored. Commit `ddbab09e`.
+
+**Adversarial sweep** (same defect class: an unhandled `EventEmitter`
+`'error'`, or a loop over an external count with no bound), reading
+`server.mjs`, `poller.mjs`, and `watcher.mjs` once more end to end:
+
+- **Fixed** — `httpServer`'s own `'error'` event (`server.mjs`): `listen()`'s
+  `once('error', onError)` listener is removed the moment `'listening'`
+  fires (`onListening` calls `httpServer.removeListener('error', onError)`),
+  so a live `httpServer` had ZERO `'error'` listeners for its entire
+  post-bind lifetime. A post-bind failure (`EMFILE` on `accept()` is the
+  documented Node case) would have crashed the process the same way
+  `judgment:cold-3` did, one level up the object hierarchy. Fixed with a
+  persistent baseline `httpServer.on('error', (err) => { lastServerError =
+  err; })` attached once at server construction, alongside test-only seams
+  `_httpServer`/`_lastServerError`. RED: `node --test`'s uncaught-exception
+  reporter (`failureType: 'uncaughtException'`, `error: 'EMFILE: too many
+  open files'`) when the baseline listener was temporarily removed and a
+  post-bind `'error'` was emitted on the live server. GREEN after adding the
+  listener; the server stays alive and answers `/api/snapshot` normally
+  right after. Commit `bfe71787`.
+- **Checked, sound** — each `fs.watch` handle (`watcher.mjs:127-132`):
+  already carries a `handle.on('error', ...)` listener from the first
+  fresh-context review round (commit `94fc6788`); a failed handle is
+  recorded and closed, never left to throw. No sibling gap found.
+- **Checked, sound** — `httpServer`'s `'clientError'` event: unlisted by
+  design. Node's documented default behaviour for an http `Server` with no
+  `'clientError'` listener is to write `HTTP/1.1 400 Bad Request` (or 431)
+  and destroy the offending socket itself — there is nothing this server
+  needs to add, and adding a listener would only change that safe default.
+- **Checked, sound** — per-request `req`/`res` on the four one-shot routes
+  (`/`, `/api/snapshot`, `/api/poll/*`): each writes and ends its response
+  exactly once, synchronously within `handleRequest`, which is already
+  wrapped in `.catch((err) => sendInternalError(res, err))` at the
+  `http.Server`'s own request-handler callback. Unlike the SSE `clients` set
+  (a long-lived response accumulating many writes over the life of a
+  connection that can go stale at any point), there is no window here where
+  a stale `res` accumulates repeat writes — the request/response pair is
+  born and dies in one handler invocation.
+- **Checked, sound** — the poller's per-item review/body fetches
+  (`poller.mjs`'s two `Promise.all(...map(async (n) => { try {...} catch
+  {...} }))` blocks): already wrap each item's fetch in its own try/catch,
+  so one item's rejection cannot crash the tick or stop the others (R881-9).
+- **Checked, sound** — `watcher.mjs`'s `rescanWorktrees()` and
+  `listChangeDirs()` loops: bounded by the actual number of linked
+  worktrees / `openspec/changes/issue-*/` directories on disk, which are
+  operator-controlled repository state, not an external, adversarial,
+  or unboundedly large count the way open issues/PRs are.
+- **Checked, sound** — the poller's own scheduling (`scheduleNext()`/
+  `runTick()`): a tick already in flight is never overlapped by
+  `scheduleNext()`, which only runs from `tick().finally(...)` after the
+  current tick has fully settled — no unbounded backlog can accumulate.
+
+Full local verification this round (actual, measured, not assumed):
+`node --test brain/scripts/ui/*.test.mjs` = 59/59 green, run 3 times
+identically (447ms/458ms/548ms). Full `npm test` = 5400/5400 green (one
+run, ~32s). `brain:repo:check` green on every commit; tree clean after each.
+Commits this round, in order: `3a461fd6` (cold-3), `986d079a` (cold-4 +
+`design.md` correction), `bfe71787` (sweep: httpServer error), `ddbab09e`
+(cold-5).
