@@ -247,6 +247,63 @@ test('#881: judgment:cold-1 — the review lane is capped at REVIEW_CAP on the v
   poller.close();
 });
 
+// ── judgment:cold-4: the body lane is bounded even when every issue changes ─
+//
+// `pickBodyTargets()` (poller.mjs) never capped `changed` — only
+// `newNumbers` was capped at NEW_BODY_CAP=20. A tick where every one of 90
+// open issues' labels move at once (a bulk label rename, one ordinary
+// GitHub action) made `issueView` uncapped: 90 calls in one tick, over 2x
+// the corrected worst-bounded-case budget (design.md Q1/D2, `2 + 10 + 25 =
+// 37` calls/tick after this fix). The fix bounds the tick's total at
+// BODY_CAP + NEW_BODY_CAP = 25; anything that does not fit stays pending and
+// drains FIFO on later ticks.
+
+test('#881: judgment:cold-4 — the body lane is bounded to BODY_CAP + NEW_BODY_CAP per tick even when every issue changes at once; the rest drains FIFO', async () => {
+  const scheduler = fakeScheduler();
+  const now = { t: 0 };
+  const callLog = [];
+  const ISSUE_COUNT = 90;
+  const BOUND = 25; // BODY_CAP (5) + NEW_BODY_CAP (20)
+  let allLabelsMoved = false;
+  const baseIssues = Array.from({ length: ISSUE_COUNT }, (_, i) => ({ number: i + 1, title: `issue ${i + 1}`, labels: [], assignees: [] }));
+  const vcs = {
+    issueList: async () => {
+      callLog.push('issueList');
+      return baseIssues.map((r) => (allLabelsMoved ? { ...r, labels: ['status:approved'] } : { ...r }));
+    },
+    mrList: async () => { callLog.push('mrList'); return []; },
+    issueView: async ({ number }) => { callLog.push(`issueView:${number}`); return { number, body: 'b' }; },
+    prReviews: async () => [],
+  };
+  const poller = createPoller({
+    vcs, cache: createForgeCache(), project: 'o/r', interval: 60000,
+    _setTimeout: scheduler.setTimeout, _clearTimeout: scheduler.clearTimeout, _now: () => new Date(now.t),
+  });
+
+  await poller.start(); // tick 1 — cold start, steady: every issue's body is fetched once, no fast-lane change recorded yet
+  callLog.length = 0;
+
+  allLabelsMoved = true;
+  now.t += 60000;
+  await scheduler.runNext(); // tick 2 — every one of the 90 issues' labels move at once
+  const tick2Calls = callLog.filter((c) => c.startsWith('issueView:')).length;
+  assert.ok(tick2Calls <= BOUND, `tick 2 spent ${tick2Calls} issueView calls, over the ${BOUND} bound`);
+  assert.equal(tick2Calls, BOUND, 'the tick is saturated: 90 changed issues against a 25-call bound spends the whole budget');
+
+  const seen = new Set();
+  for (const c of callLog) if (c.startsWith('issueView:')) seen.add(Number(c.split(':')[1]));
+
+  const totalTicksNeeded = Math.ceil(ISSUE_COUNT / BOUND); // tick 2 is the first of these
+  for (let i = 1; i < totalTicksNeeded; i++) {
+    now.t += 60000;
+    await scheduler.runNext();
+    for (const c of callLog) if (c.startsWith('issueView:')) seen.add(Number(c.split(':')[1]));
+  }
+  assert.equal(seen.size, ISSUE_COUNT, `every one of the ${ISSUE_COUNT} changed issues is refreshed within ${totalTicksNeeded} ticks of the mass change`);
+
+  poller.close();
+});
+
 // ── Q1/D2: the call-count budget over 30 simulated ticks ───────────────────
 
 test('#881: Q1/D2 — 30 simulated ticks hold the budget: cold start once, then 2 + min(P,10) + B per steady tick', async () => {

@@ -17,6 +17,14 @@
 // least-recently-refreshed fallback only rounds out an already-nonempty
 // batch, it never manufactures work alone.
 //
+// The body lane's TOTAL per tick is bounded at BODY_CAP + NEW_BODY_CAP (25)
+// even when every open issue changes in the same tick (a bulk label rename
+// is one ordinary GitHub action, not an adversarial input). `changed` rows
+// that do not fit this tick's budget are never dropped — they stay in a
+// FIFO pending set and drain on the following ticks, oldest-changed-first,
+// until every one of them has had its body refreshed at least once (see
+// `pendingBodyRefresh` below; judgment:cold-4).
+//
 // A poll failure NEVER empties a section it once filled (R881-9): the fast
 // lane's own failure aborts the whole tick before any cache setter runs, so
 // every previously-cached section keeps its last known value; per-item
@@ -63,6 +71,7 @@ export function createPoller({
   let lastOnceAt = -Infinity;
   let previousIssues = null; // Map<number, row> | null — null means "no tick has completed yet"
   const lastBodyRefreshTick = new Map();
+  const pendingBodyRefresh = new Set(); // numbers whose fast-lane row changed but have not yet had a body refresh — drains FIFO (judgment:cold-4)
   let tickCount = 0;
   let reviewOffset = 0;
 
@@ -87,20 +96,32 @@ export function createPoller({
     const numbers = issueRows.map((r) => r.number);
     if (previousIssues === null) return numbers; // cold start: every open issue, uncapped
 
+    const numberSet = new Set(numbers);
+    for (const n of pendingBodyRefresh) if (!numberSet.has(n)) pendingBodyRefresh.delete(n); // closed issues cannot be refreshed
+
     const newNumbers = numbers.filter((n) => !previousIssues.has(n)).slice(0, NEW_BODY_CAP);
     const newSet = new Set(newNumbers);
-    const changed = numbers.filter((n) => {
-      if (newSet.has(n)) return false;
+    for (const n of numbers) {
+      if (newSet.has(n)) continue;
       const prev = previousIssues.get(n);
       const row = issueRows.find((r) => r.number === n);
-      return prev !== undefined && !rowsEqual(prev, row);
-    });
-    if (newNumbers.length === 0 && changed.length === 0) return []; // R881-4 S1: nothing moved, nothing fetched
+      if (prev !== undefined && !rowsEqual(prev, row)) pendingBodyRefresh.add(n); // insertion order = FIFO drain order
+    }
+    if (newNumbers.length === 0 && pendingBodyRefresh.size === 0) return []; // R881-4 S1: nothing moved, nothing fetched
+
+    // The tick's total is bounded at BODY_CAP + NEW_BODY_CAP even when every
+    // open issue changed at once — `changed` on its own has no cap, unlike
+    // `newNumbers` above. Anything in `pendingBodyRefresh` that does not fit
+    // this tick's slice stays there and is picked up, oldest-first, on a
+    // later tick (see the `.delete()` in `tick()` below, which only fires on
+    // an actual successful fetch).
+    const cap = BODY_CAP + NEW_BODY_CAP;
+    const changed = [...pendingBodyRefresh].slice(0, Math.max(cap - newNumbers.length, 0));
 
     const changedSet = new Set(changed);
     const remaining = Math.max(BODY_CAP - newNumbers.length - changed.length, 0);
     const rest = numbers
-      .filter((n) => !newSet.has(n) && !changedSet.has(n))
+      .filter((n) => !newSet.has(n) && !changedSet.has(n) && !pendingBodyRefresh.has(n))
       .sort((a, b) => (lastBodyRefreshTick.get(a) ?? -1) - (lastBodyRefreshTick.get(b) ?? -1))
       .slice(0, remaining);
     return [...newNumbers, ...changed, ...rest];
@@ -136,6 +157,7 @@ export function createPoller({
         try {
           cache.setIssueView(number, await vcs.issueView({ project, number }));
           lastBodyRefreshTick.set(number, tickCount);
+          pendingBodyRefresh.delete(number); // drained — a failed fetch stays pending and is retried next tick
         } catch { /* previous value stays cached (R881-9) */ }
       }));
       if (bodyTargets.length > 0) forgeAsOf = { ...forgeAsOf, bodies: attemptAt.toISOString() };
