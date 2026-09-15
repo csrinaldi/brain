@@ -25,11 +25,10 @@
 // instead of drifting silently again the way `memory:save`/`memory:ship`/
 // `memory:audit`/`brain:config` did.
 //
-// Not a novel pattern: `sdd-layout-doc-promotion-tripwire.test.mjs` (#253) is
-// an existing, already-merged test of the same "EXPECTED RED until promotion"
-// shape, currently green on `main` because its target doc was promoted. `npm
-// test` on THIS branch will report one new failing test by design — that is
-// the tracked defect, not a CI regression to silence.
+// Same shape as `sdd-layout-doc-promotion-tripwire.test.mjs` (#253): it was
+// red while the catalog lagged the doctrine, and it went green when the
+// maintainer applied the catalog (#922, PR #954). A red run now is a real
+// regression — doctrine or catalog drifted — never an expected failure.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
