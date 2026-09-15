@@ -911,3 +911,80 @@ this round; this round's production delta in `watcher.mjs` is +9/-2
 lines). Commit this round: `f132056` (fix). No push, no PR (per task
 instructions) — branch `feat/issue-881-slice-2-stream` stays ahead of
 its last-pushed state (origin still at `3fe0e510`).
+
+## Eighth round — `activeWorktrees()`'s `basename(path)` id collision, fixed in `7459836`
+
+Targeted fix from the cold review of PR #971 on head `f21f649a` (REVISE,
+one blocker), reproduced by the reviewer on a real repo: `activeWorktrees()`
+(`watcher.mjs:267`) derived each linked worktree's tracking id as
+`basename(s.path)`. `git worktree add /tmp/a/foo -b br1` then `git worktree
+add /tmp/b/foo -b br2` land distinct admin dirs (`.git/worktrees/foo`,
+`.git/worktrees/foo1`), but `git worktree list --porcelain` reports both
+paths ending in `foo` with no id field, so both stanzas got id `foo`. In
+`rescanWorktrees()`, the first worktree claimed `watchedWorktrees.set('foo',
+A)`; the second hit `watchedWorktrees.has('foo')` and was skipped forever —
+`.git/worktrees/foo1/logs` was never watched, so a commit in the second
+worktree was invisible for the server's lifetime. Violates R881-3 "a commit
+in a linked worktree is seen" (spec.md:64-66). The header comment at
+`watcher.mjs:26-34` claimed the basename assumption was "confirmed against
+this very repo's own linked worktrees" — true only absent a collision; it
+was never actually exercised against two worktrees sharing a leaf name.
+
+**Id source chosen**: kept `git worktree list --porcelain` for the path
+list — this PR's file scope (`server.mjs`/`watcher.mjs`/`poller.mjs` only,
+per the existing deviation note) excludes `collect.mjs`'s `parseWorktrees()`,
+so switching to a porcelain-free admin-dir listing would have meant
+reshaping `parseWorktreeStanzas()` and every `_run`-based test fixture with
+no budget benefit. Instead, the id is resolved per-path by reading that
+worktree's own `.git` file (`gitdir: <git-common>/worktrees/<id>`) — git's
+own metadata, written once when the worktree is created, never a path
+guess. A worktree whose `.git` file is unreadable or whose path is gone is
+a said failure (`recordFailure()`, labelled `<git-common>/worktrees
+(<path>)`) and is skipped, not silently dropped from the rest of the list —
+the `evidence-reader-empty-on-failure` rule again, consistent with the
+`null`-on-whole-list-failure contract `f132056` established for the
+`git worktree list` call itself (unchanged this round).
+
+**Test first (RED)**: one new test in `watcher.test.mjs` — two linked
+worktrees whose paths share the leaf name `foo` (`.../a/foo`, `.../b/foo`),
+admin ids `foo` and `foo1`, each given a real `.git` file via a new
+`writeWorktreeGitFile()` fixture helper. After `start()`: assert both
+`worktrees/foo/logs` and `worktrees/foo1/logs` are watched, then fire an
+event on `foo1/logs` and assert it schedules a debounce and fires exactly
+one recompute. RED confirmed against the pre-fix code: `the second "foo"
+worktree (admin id foo1) is ALSO watched` failed — `false !== true` (only
+`foo` was watched, `foo1` was silently skipped). GREEN after the fix:
+15/15 in `watcher.test.mjs`. The four other worktree-fixture tests
+(`alphaPath`/`betaPath`) were updated to also write real `.git` files via
+the same helper, since `activeWorktrees()` no longer trusts `basename()`
+and needs a readable `.git` file to resolve an id at all.
+
+**Mutation**: restored `parseWorktreeStanzas(stdout).slice(1).filter((s) =>
+!s.bare).map((s) => ({ path: s.path, id: basename(s.path) }))` in place of
+the fixed `activeWorktrees()` body (production code only, test unchanged)
+— reproduced red on exactly the new test (`two worktrees whose paths share
+a leaf name ("foo") are both watched under their own admin-dir ids`), all
+14 other `watcher.test.mjs` tests stayed green. Restored the fix; 15/15
+green again.
+
+**Files changed**: `brain/scripts/ui/watcher.mjs` (`activeWorktrees()`
+resolves each worktree's id from its own `.git` file instead of
+`basename(path)`; header comment at lines 26-34 rewritten to state the
+collision risk instead of a false "confirmed" claim; `_readFile` injectable
+added, defaulting to `readFileSync`), `brain/scripts/ui/watcher.test.mjs`
+(one new `writeWorktreeGitFile()` fixture helper, one new test, four
+existing worktree tests updated to write real `.git` files).
+
+**Verification**: `GIT_CONFIG_GLOBAL=/dev/null node --test
+brain/scripts/ui/*.test.mjs` = 71/71 green, run 3 times identically (was
+70/70 before this round's 1 new test). `GIT_CONFIG_GLOBAL=/dev/null npm
+test` = 5412/5412 green, one full run (~31s; was 5411/5411 before this
+round). `brain:repo:check` green before the commit; tree clean after.
+Counted diff (excluding `.test.mjs`, `openspec/`, `.memory/`) against
+`origin/feature/brain-ui...HEAD`: **977 / 1000** (was 954/1000 before this
+round; this round's production delta in `watcher.mjs` is +23 lines, no
+deletions — the whole file is new relative to `origin/feature/brain-ui`,
+so `git diff --numstat` reports its full line count each round, not just
+the round's own delta). Commit this round: `7459836` (fix). No push, no PR
+(per task instructions) — branch `feat/issue-881-slice-2-stream` stays
+ahead of its last-pushed state (origin still at `3fe0e510`).
