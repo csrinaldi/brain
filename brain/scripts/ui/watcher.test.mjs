@@ -31,6 +31,17 @@ function makeGitCommonFixture() {
   return gitCommonDir;
 }
 
+/**
+ * Writes a REAL linked-worktree `.git` file at `path` pointing back to
+ * `<gitCommonDir>/worktrees/<id>` — the id-resolution source `activeWorktrees()`
+ * reads instead of `basename(path)` (cold review of PR #971 round 6, R881-3).
+ */
+function writeWorktreeGitFile(gitCommonDir, path, id) {
+  mkdirSync(join(gitCommonDir, 'worktrees', id, 'logs'), { recursive: true });
+  mkdirSync(path, { recursive: true });
+  writeFileSync(join(path, '.git'), `gitdir: ${join(gitCommonDir, 'worktrees', id)}\n`);
+}
+
 // ── test doubles ─────────────────────────────────────────────────────────
 
 /** A `fs.watch`-shaped spy: records every registration, fires listeners on demand, counts `.close()` calls. */
@@ -165,6 +176,7 @@ test('#881: a commit in a linked worktree fires exactly one debounced recompute 
   const root = makeWatcherFixture();
   const gitCommonDir = makeGitCommonFixture();
   const alphaPath = join(dirname(root), 'alpha');
+  writeWorktreeGitFile(gitCommonDir, alphaPath, 'alpha');
   const _run = () => `worktree ${root}\n\nworktree ${alphaPath}\n`;
   const _watch = spyWatch();
   const scheduler = fakeScheduler();
@@ -194,6 +206,8 @@ test('#881: a <git-common>/worktrees/ event re-scans and opens/closes watchers t
   const gitCommonDir = makeGitCommonFixture();
   const alphaPath = join(dirname(root), 'alpha');
   const betaPath = join(dirname(root), 'beta');
+  writeWorktreeGitFile(gitCommonDir, alphaPath, 'alpha');
+  writeWorktreeGitFile(gitCommonDir, betaPath, 'beta');
   let stanzas = `worktree ${root}\n\nworktree ${alphaPath}\n`;
   const _run = () => stanzas;
   const _watch = spyWatch();
@@ -214,6 +228,46 @@ test('#881: a <git-common>/worktrees/ event re-scans and opens/closes watchers t
   w.close();
 });
 
+// ── cold review of PR #971 round 6, R881-3: two worktrees whose paths share
+// a leaf directory name get DISTINCT ids from git — `basename(path)` would
+// collide and silently drop the second one from `watchedWorktrees` forever ──
+
+test('#881: two worktrees whose paths share a leaf name ("foo") are both watched under their own admin-dir ids', async () => {
+  const root = makeWatcherFixture();
+  const gitCommonDir = makeGitCommonFixture();
+  const parent = dirname(root);
+  const fooPath = join(parent, 'a', 'foo');
+  const foo1Path = join(parent, 'b', 'foo'); // same LEAF name "foo", different worktree
+  writeWorktreeGitFile(gitCommonDir, fooPath, 'foo');
+  writeWorktreeGitFile(gitCommonDir, foo1Path, 'foo1'); // git's own admin dir, never "foo" again
+  const _run = () => `worktree ${root}\n\nworktree ${fooPath}\n\nworktree ${foo1Path}\n`;
+  const _watch = spyWatch();
+  const scheduler = fakeScheduler();
+  const recomputes = [];
+  const w = createWatcher({
+    root, gitCommonDir, _watch, _run,
+    _setTimeout: scheduler.setTimeout, _clearTimeout: scheduler.clearTimeout,
+    onRecompute: async (evt) => { recomputes.push(evt); },
+  });
+  w.start();
+
+  const fooLogs = join(gitCommonDir, 'worktrees', 'foo', 'logs');
+  const foo1Logs = join(gitCommonDir, 'worktrees', 'foo1', 'logs');
+  assert.ok(_watch.calls.some((c) => c.path === fooLogs), 'the first "foo" worktree is watched');
+  assert.ok(
+    _watch.calls.some((c) => c.path === foo1Logs),
+    'the second "foo" worktree (admin id foo1) is ALSO watched — not skipped as a duplicate of the first',
+  );
+
+  _watch.fire(foo1Logs);
+  assert.equal(scheduler.pending(), 1, "an event on the second worktree really schedules a debounce — its handle is live, not a bookkeeping ghost");
+  scheduler.runLatest();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(recomputes.length, 1, 'a commit in the second "foo" worktree is seen, not silently invisible behind the first');
+  w.close();
+});
+
 // ── cold review of PR #971 rev 1 (judgment:cold-1), R881-3: a worktree whose
 // watch failed is retried on the next rescan, never marked watched forever ──
 
@@ -222,6 +276,8 @@ test("#881: a worktree whose watch failed is retried on the next rescan, never l
   const gitCommonDir = makeGitCommonFixture();
   const alphaPath = join(dirname(root), 'alpha');
   const betaPath = join(dirname(root), 'beta');
+  writeWorktreeGitFile(gitCommonDir, alphaPath, 'alpha');
+  writeWorktreeGitFile(gitCommonDir, betaPath, 'beta');
   const alphaLogs = join(gitCommonDir, 'worktrees', 'alpha', 'logs');
   const betaLogs = join(gitCommonDir, 'worktrees', 'beta', 'logs');
   let stanzas = `worktree ${root}\n\nworktree ${alphaPath}\n`;
@@ -383,6 +439,8 @@ test('#881: a <git-common>/worktrees/ rescan that cannot list worktrees keeps ev
   const gitCommonDir = makeGitCommonFixture();
   const alphaPath = join(dirname(root), 'alpha');
   const betaPath = join(dirname(root), 'beta');
+  writeWorktreeGitFile(gitCommonDir, alphaPath, 'alpha');
+  writeWorktreeGitFile(gitCommonDir, betaPath, 'beta');
   const stanzas = `worktree ${root}\n\nworktree ${alphaPath}\n\nworktree ${betaPath}\n`;
   const enospc = Object.assign(new Error('ENOSPC: no space left on device'), { code: 'ENOSPC' });
   let armed = false;

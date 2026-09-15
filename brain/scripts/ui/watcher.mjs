@@ -29,9 +29,12 @@
 // rather than imported: this PR's file scope (tasks.md's
 // `brain-slice-scope/1` fence) is `server.mjs`/`watcher.mjs`/`poller.mjs`
 // only, and `collect.mjs` is not in it (see apply-progress for the
-// deviation this records). Git's own convention makes the worktree's `<n>`
-// id under `.git/worktrees/` the basename of its path — confirmed against
-// this very repo's own linked worktrees before relying on it.
+// deviation this records). The worktree's `<n>` id is NEVER the basename
+// of its path — `git worktree add /a/foo` and `git worktree add /b/foo`
+// both land a `foo` LEAF, but git deduplicates the admin dirs (`worktrees/foo`,
+// `worktrees/foo1`), so the id is read from each worktree's own `.git` file
+// (`gitdir: <git-common>/worktrees/<n>`) instead (cold review of PR #971
+// round 6, R881-3).
 //
 // `openspec/changes/` re-syncs its children the SAME way, on its own event
 // (`rescanChangeDirs()`): a change dir created after `start()` — the normal
@@ -46,7 +49,7 @@
 // of the constructor or `start()`: the server keeps running, and `state()`
 // reports which paths failed and why (Q3 "when the watcher fails").
 
-import { watch as fsWatch, readdirSync } from 'node:fs';
+import { watch as fsWatch, readdirSync, readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { basename, isAbsolute, join } from 'node:path';
 
@@ -87,7 +90,7 @@ export function resolveGitCommonDir({ root, _run } = {}) {
  * @param {{
  *   root: string,
  *   gitCommonDir?: string|null,
- *   _watch?: Function, _run?: Function, _readdir?: Function, _now?: () => Date,
+ *   _watch?: Function, _run?: Function, _readdir?: Function, _readFile?: Function, _now?: () => Date,
  *   debounceMs?: number, _setTimeout?: Function, _clearTimeout?: Function,
  *   onRecompute?: (evt: {causes: string[], refWorktrees: string[], at: Date}) => Promise<void>|void,
  * }} opts
@@ -99,6 +102,7 @@ export function createWatcher({
   _watch = fsWatch,
   _run,
   _readdir = readdirSync,
+  _readFile = readFileSync,
   _now = () => new Date(),
   debounceMs = DEBOUNCE_MS,
   _setTimeout = setTimeout,
@@ -259,12 +263,31 @@ export function createWatcher({
    * `null` on failure — NEVER `[]` — same sentinel as `listChangeDirs()`
    * above, for the same reason: a `git worktree list` failure must read as
    * "could not be read right now", not "zero linked worktrees" (R881-9,
-   * pre-push cold review of PR #971 round 6 — the sibling this round fixes).
+   * pre-push cold review of PR #971 round 6).
+   *
+   * The id is NEVER `basename(path)` (cold review round 6, R881-3): two
+   * worktrees whose paths share a leaf name (`/a/foo`, `/b/foo`) get
+   * DISTINCT admin dirs from `git worktree add` (`worktrees/foo`,
+   * `worktrees/foo1`), so the id is read from each worktree's own `.git`
+   * file (`gitdir: <git-common>/worktrees/<id>`) instead. A worktree whose
+   * `.git` file is unreadable or whose path is gone is a said failure
+   * (`recordFailure()`) and is skipped, not silently dropped from the rest.
    */
   function activeWorktrees() {
     let stdout;
     try { stdout = run('git', ['worktree', 'list', '--porcelain']); } catch (err) { recordFailure('<git-common>/worktrees', err); return null; }
-    return parseWorktreeStanzas(stdout).slice(1).filter((s) => !s.bare).map((s) => ({ path: s.path, id: basename(s.path) }));
+    const current = [];
+    for (const s of parseWorktreeStanzas(stdout).slice(1)) {
+      if (s.bare) continue;
+      const label = `<git-common>/worktrees (${s.path})`;
+      try {
+        const match = /^gitdir:\s*(.+?)\s*$/m.exec(_readFile(join(s.path, '.git'), 'utf8'));
+        if (!match) throw new Error(`unrecognized .git file at ${s.path}`);
+        failed = failed.filter((f) => f.path !== label);
+        current.push({ path: s.path, id: basename(match[1]) });
+      } catch (err) { recordFailure(label, err); }
+    }
+    return current;
   }
 
   function rescanWorktrees() {
