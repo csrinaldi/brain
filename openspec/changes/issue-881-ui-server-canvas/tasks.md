@@ -309,7 +309,7 @@ ships in PR 4).
       `validateResume` is not used as a gate.
 - [x] T6b. `brain/scripts/ui/lib/resume-view.mjs`: implement the shaper so
       T6a passes.
-- [ ] T7a. `brain/scripts/ui/change-route.test.mjs`: failing tests for —
+- [x] T7a. `brain/scripts/ui/change-route.test.mjs`: failing tests for —
       full drawer for a change with a spec and tasks (R881-8 S1: `GET
       /api/change/881` returns `spec.md` and `tasks.md` raw text with their
       paths); no change dir (R881-8 S2: both tabs get "no change dir" +
@@ -320,13 +320,16 @@ ships in PR 4).
       renders none; a resolved branch with no `resume.md` states "the
       uncommitted working tree is slice 5 / #883"); reviews carry their
       source and URL (R881-8 S4: two posted rounds render oldest first,
-      each with its PR comment URL built from `/api/meta`'s `project`,
-      and the tab states its source is the forge pending #880 — per
-      reconciliation item 2 above, **not** conditioned on #880).
-- [ ] T7b. `brain/scripts/ui/change-route.mjs`: implement `GET
+      each with its PR comment URL built from `project`, and the tab
+      states its source is the forge pending #880 — per reconciliation
+      item 2 above, **not** conditioned on #880).
+- [x] T7b. `brain/scripts/ui/change-route.mjs`: implement `GET
       /api/change/{issue}` (injected `_read`/`_run`, the one caller of
       `resume-frontmatter.mjs`'s `parseFrontmatter`, D11/D12) so T7a
-      passes.
+      passes. Landed in a follow-up apply run (2026-09-15, commit
+      `90699431`) after T1–T6/T8–T11 shipped `lib/`'s module set — see
+      the "PR 3 (continued)" note in apply-progress for the full RED/
+      GREEN/mutation evidence and the fixture matrix (10 cases).
 - [x] T8. `brain/scripts/ui/lib/source-guard.test.mjs`: guard test — no
       file under `ui/lib/**` imports anything outside `ui/lib/**` (no
       `node:` builtin, no `../status/*`, D9). Scans import lines of every
@@ -335,19 +338,10 @@ ships in PR 4).
       the fixture change, every object emitted by `spec-cards.mjs` and
       `tasks-list.mjs`/`blame.mjs`, plus every `resume-view.mjs` field
       (including one that failed to shape), has a non-empty `source.path`
-      or `source.url`. No DOM; test-only, composes T1–T6's modules. Scoped
-      to this run's split — `change-route.mjs`'s reviews rows (T7) get
-      their own property-test coverage when that task lands (see the T7
-      deferral note below).
-
-**T7 deferred to a follow-up run of this PR.** This apply batch was scoped
-by the orchestrator to `ui/lib/**` only — the six modules `D8`'s module map
-lists under `lib/` (T1–T6), plus the cross-cutting guard/property tests
-(T8/T9). `change-route.mjs` is deliberately NOT under `lib/`: it is the one
-file in this slice that does IO (`_read`/`_run`), not a module the browser
-imports directly, so it falls outside "the pure page logic" boundary this
-batch was handed. T7a/T7b stay unchecked; a follow-up apply run implements
-`GET /api/change/{issue}` against the now-complete `lib/` module set.
+      or `source.url`. No DOM; test-only, composes T1–T6's modules.
+      Extended in the T7 follow-up run to cover `change-route.mjs`'s own
+      composed view (Spec/Tasks/Working-memory/Reviews leaves, plus the
+      "no change dir" tab-level source).
 - [x] T10. Verify: `GIT_CONFIG_GLOBAL=/dev/null npm test` and `npm run
       brain:repo:check` both green.
 - [x] T11. `npm run memory:save -- "pure drawer parsers and the layout
@@ -359,9 +353,10 @@ batch was handed. T7a/T7b stay unchecked; a follow-up apply run implements
 
 **Done when**: the layout is deterministic and cycle-tolerant under test
 (R881-7), every constant colour.mjs maps is exhaustive (R881-6), and every
-value `spec-cards.mjs`/`tasks-list.mjs`/`resume-view.mjs` emit carries a
-`source` (A3) — all without a browser. `change-route.mjs` (T7) and its
-Reviews-tab provenance ship in a follow-up run of this PR.
+value `spec-cards.mjs`/`tasks-list.mjs`/`resume-view.mjs`/`change-route.mjs`
+emit carries a `source` (A3) — all without a browser. PR 3 is complete:
+`GET /api/change/{issue}` composes the full `lib/` module set behind its
+own `KNOWN_ROUTES` entry.
 
 ---
 

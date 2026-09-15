@@ -1256,3 +1256,114 @@ tree clean after each. Counted diff (excluding `.test.mjs`, `openspec/`,
 
 No push, no PR (per task instructions) — branch `feat/issue-881-slice-3-lib`
 has not been pushed this run.
+
+---
+
+## PR 3 / B1 — T7 completes, PR 3 done (2026-09-15, follow-up run)
+
+Branch `feat/issue-881-slice-3-lib`, on top of the previous run's head
+(`4a8bc16e`). Scope this run: exactly the deferred T7 — `change-route.mjs`
+(`GET /api/change/{issue}`), its dedicated test file, the `server.mjs`
+route wiring, and `provenance.test.mjs`'s change-route property coverage —
+per the fence the "Scope decision" section above drew. No other file
+touched.
+
+### T7 — task done, with commit SHA
+
+| Task | What | Commit |
+|---|---|---|
+| T7a/T7b | `change-route.mjs` + `change-route.test.mjs` + `server.mjs` route wiring + `provenance.test.mjs` extension | `90699431` |
+
+`change-route.mjs` composes the six `ui/lib/**` shapers this slice already
+shipped (`spec-cards`, `tasks-list`, `blame`, `resume-view`) with
+`snapshot.changes`/`prs`/`reviews` into the four R881-8 tabs — Spec, Tasks,
+Working memory, Reviews — every leaf inside a tab's `value` carrying
+`source` (A3, D11). `server.mjs` adds `GET /api/change/<N digits>` through
+the existing method-check-before-routing path (a non-numeric id falls
+through to the existing 404; a mutation method to the existing 405) and a
+new `KNOWN_ROUTES` entry, `'/api/change/{issue}'` — the R881-10 S3 route-
+table assertion in `server.test.mjs` was updated to match.
+
+**Design decisions this run had to make, not spelled out verbatim in
+design.md:**
+
+1. **`project` is an added, optional parameter** to `buildChangeView`
+   (`{root, issue, snapshot, project, _read, _run, _exists}`) — D8's module
+   map lists `change-route.mjs`'s signature as `{root, issue, snapshot}`
+   plus the injected `_read`/`_run`, but D14 requires a PR URL
+   (`https://<host>/<project>/pull/<pr>`) and `project` is the only fact
+   that can build one; `server.mjs` already threads it to `buildMeta()`.
+   Defaults to `null`, degrading to a relative `pull/<n>` reference (still
+   a non-empty `source.url`, never a crash) rather than throwing.
+2. **Per-task `attribution` leaf, distinct from `actor`/`ts`.** The T7a
+   task list asked for "attribution `{ok:false, reason}` per row, never
+   dropped" on a blame failure, but `tasks-list.mjs` (shipped last run,
+   out of this run's file fence) only accepts an `attribution` INPUT array
+   of `{line, actor, ts}` and always renders `actor: 'unknown'` on a miss
+   — it has no `{ok, reason}` output shape of its own. `change-route.mjs`
+   post-processes every returned item, attaching its own `attribution:
+   {ok:true, value:{actor, ts}} | {ok:false, reason}` field beside the
+   existing `actor`/`ts` fields — the checklist itself still renders in
+   full either way (never dropped), and the failure is now said per row,
+   not folded into "unknown" silently.
+3. **`noChangeDirTab`'s reason and `source.path`** use the literal glob
+   `openspec/changes/issue-<N>-*` for both Spec and Tasks — matching the
+   brief's exact reason text verbatim, so a reviewer or an operator can
+   copy it into a shell glob and get the real answer.
+4. **Reviews tab's `sourceNote`** is `'forge comments until #880 lands'` —
+   the "What T7 delivers" section's exact string, not design.md's D14
+   prose ("source: forge comments, until #880 lands `type: review`
+   records") nor the brief's `spec.md`-input paraphrase ("source: forge
+   comments until #880"). One literal string, exported as
+   `REVIEWS_SOURCE_NOTE`, used by both the tab and its tests.
+
+### TDD Cycle Evidence
+
+RED confirmed by the established "move-aside" technique (`change-route.mjs`
+moved to `/tmp`, all three consuming test files — `change-route.test.mjs`,
+`provenance.test.mjs`, `server.test.mjs` — failed with `ERR_MODULE_NOT_FOUND`
+against the same, already-written-first test files), then restored (GREEN).
+
+| Unit | RED | GREEN | Mutation (targeted, reverted) |
+|---|---|---|---|
+| `change-route.mjs` (all four tabs, 10-case fixture matrix + 2 top-level guards) | `ERR_MODULE_NOT_FOUND` across `change-route.test.mjs`, `provenance.test.mjs`, `server.test.mjs` (57 tests) | 57/57 pass, stable across 3 consecutive runs | (1) dropped `HEAD` from the blame argv → 2 tests red (`change-route.test.mjs` case 6, `server.test.mjs`'s parity/argv test); reverted, 57/57 green. (2) `noChangeDirTab` collapsed to `{ok:true, value:[]}` → 2 tests red (`change-route.test.mjs` case 4, `provenance.test.mjs`'s "no change dir" leaf test); reverted, 15/15 (subset) green. (3) dropped the `names.length > 1` ambiguity check → 1 test red (`change-route.test.mjs` case 3, "two matching branches"); reverted, 11/11 (subset) green. |
+
+One genuine test bug found and fixed while writing the tests (not a
+production defect): `current_slice` in the resume.md fixture parses as the
+STRING `'3'`, not the number `3` — `resume-frontmatter.mjs`'s
+`parseFrontmatter` does no type coercion on scalars (confirmed against its
+own `resume-frontmatter.test.mjs`, which asserts string values
+throughout). Two assertions in `change-route.test.mjs` that wrote `value:
+3` were corrected to `value: '3'`.
+
+### Verification
+
+`GIT_CONFIG_GLOBAL=/dev/null node --test brain/scripts/ui/change-route.test.mjs
+brain/scripts/ui/lib/provenance.test.mjs brain/scripts/ui/server.test.mjs` =
+57/57 green, 3 consecutive runs, no flake. `GIT_CONFIG_GLOBAL=/dev/null
+node --test brain/scripts/ui/**/*.test.mjs brain/scripts/ui/*.test.mjs` =
+132/132 green (was 117/117 before this run's 15 net new tests).
+`brain:repo:check` green before the commit; tree clean after. Counted diff
+(excluding `.test.mjs`, `openspec/`, `.memory/`) against
+`origin/feature/brain-ui...HEAD`, measured directly after this run's
+commit: **687/1000**, still well inside the lite-tier 1000-line/PR budget
+(this run's two production files: `change-route.mjs` +196/-0, `server.mjs`
++18/-1, on top of the previous run's 472).
+
+### Deviations from tasks.md / design.md
+
+Superseding deviation 1 from the previous section ("T7 deferred"): T7 is
+now complete. The four numbered design decisions above (this section) are
+the only new deviations this run introduces; deviations 2-5 from the
+previous section stand unchanged.
+
+### PR 3 status: COMPLETE
+
+All of T1-T11 are `[x]` in `tasks.md`. PR 3 / B1 — the pure page logic — is
+done: `lib/**`'s six modules, the source-guard and provenance property
+tests, and `change-route.mjs`'s composition of all four over the real
+route table. PR 4 (B2, the page) can now build against a complete `GET
+/api/change/{issue}` contract.
+
+No push, no PR (per task instructions) — branch `feat/issue-881-slice-3-lib`
+has not been pushed this run.
