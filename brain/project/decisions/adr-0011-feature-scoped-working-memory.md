@@ -1,6 +1,6 @@
 # ADR-0011 — Feature-Scoped Working Memory
 
-**Status**: Accepted · **amended 15/09/2026** (Amendments 1-2 — see below)  
+**Status**: Accepted · **amended 15/09/2026** (Amendment 1 — see below)  
 **Date**: 2026-06-26
 
 ## Context
@@ -65,34 +65,11 @@ consumer's `package.json`:
 |---|---|
 | `memory:share` | `brain:memory:share` |
 
-Every superseded line above is annotated in place under R6 as amended (option A, 2026-09-14): the
-historical name stays visible next to its `brain:memory:` rename, and this table is the whole
-mapping. **[Amended by Amendment 2 (#973) — this sentence was drafted under R6's original
-wording, before the 2026-09-14 amendment.]** No line of this ADR runs a script with a literal
-`npm run`, so the decision reads the same.
+The body above is not rewritten (ruling R6 on #961): no line of this ADR runs a script with a literal
+`npm run`, so the decision reads the same and this table is the whole mapping.
 
 ### What this does NOT change
 
 Feature-scoped working memory, `resume.md`, and the namespace isolation that keeps feature observations
 out of the export. The verb keeps its behaviour and arguments; brain's own `package.json` keeps the bare
 name as a byte-identical alias, never installed into a consumer.
-
-## Amendment 2 — erratum: Amendment 1's body was annotated in place, not left untouched (issue #973)
-
-**Signed**: 15/09/2026 — Cristian Rinaldi
-
-### What this changes
-
-Amendment 1's signed section (above) says: "The body above is not rewritten (ruling R6 on #961): no
-line of this ADR runs a script with a literal `npm run`, so the decision reads the same and this
-table is the whole mapping." That sentence was drafted under ruling R6 as first ratified — an
-appended amendment, body untouched. The maintainer amended R6 to option A on 2026-09-14 (issue #961
-comment, confirmed on PR #966), and Amendment 1's own promotion (PR #972) applied that ruling: the
-one line of the body superseded by the rename table was annotated in place, per
-`consolidation-protocol.md` §1c act 2. The sentence describing that act was never updated to match.
-This amendment rewrites it to state what the act did.
-
-### What this does NOT change
-
-The rename table and the one in-place annotation Amendment 1 made were already correct under R6 as
-amended — this touches no other line.
