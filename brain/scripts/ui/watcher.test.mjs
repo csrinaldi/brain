@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { EventEmitter } from 'node:events';
 
@@ -94,6 +94,23 @@ function spyWatchThrowOnceFor(throwOncePath) {
   fn.attempts = attempts;
   fn.closesByPath = closesByPath;
   fn.fire = (path) => { const c = calls.find((entry) => entry.path === path); if (c) c.listener('change', null); };
+  return fn;
+}
+
+/**
+ * A `readdirSync`-shaped spy: delegates to the real `readdirSync` for every
+ * path, EXCEPT it throws the given error for `flakyPath` while armed via
+ * `.throwNext()`. `.stopThrowing()` disarms it, so a test can simulate a
+ * transient failure that later recovers on its own — no permanent stub.
+ */
+function readdirThrowsFor(flakyPath, err) {
+  let armed = false;
+  const fn = (path, ...rest) => {
+    if (path === flakyPath && armed) throw err;
+    return readdirSync(path, ...rest);
+  };
+  fn.throwNext = () => { armed = true; };
+  fn.stopThrowing = () => { armed = false; };
   return fn;
 }
 
@@ -307,6 +324,52 @@ test('#881: a removed change dir has its watch closed on the next CHANGES_ROOT e
 
   assert.equal(_watch.closesByPath.get(dirPath), 1, 'the vanished change dir watcher is closed on re-sync');
   assert.equal(w.state().watched, before - 1, 'the handle count goes back down');
+  w.close();
+});
+
+// ── pre-push cold review of PR #971, R881-9: an unreadable changes root is a
+// said failure that keeps the current watches, never an empty list that
+// closes them (mirrors activeWorktrees()/rescanWorktrees() above) ─────────
+
+test('#881: a CHANGES_ROOT rescan that cannot read the dir keeps every currently-watched change dir open, then recovers', () => {
+  const root = testTmp('watcher-');
+  mkdirSync(join(root, 'openspec/changes/issue-1-a'), { recursive: true });
+  mkdirSync(join(root, 'openspec/changes/issue-2-b'), { recursive: true });
+  const gitCommonDir = makeGitCommonFixture();
+  const _run = () => `worktree ${root}\n`;
+  const _watch = spyWatch();
+  const changesRoot = join(root, 'openspec/changes');
+  const emfile = Object.assign(new Error('EMFILE: too many open files'), { code: 'EMFILE' });
+  const _readdir = readdirThrowsFor(changesRoot, emfile);
+  const w = createWatcher({ root, gitCommonDir, _watch, _run, _readdir });
+  w.start();
+
+  const dirA = join(changesRoot, 'issue-1-a');
+  const dirB = join(changesRoot, 'issue-2-b');
+  assert.ok(_watch.calls.some((c) => c.path === dirA));
+  assert.ok(_watch.calls.some((c) => c.path === dirB));
+  const watchedBefore = w.state().watched;
+
+  _readdir.throwNext();
+  _watch.fire(changesRoot); // the CHANGES_ROOT event — readdir throws EMFILE this time
+
+  assert.equal(_watch.closesByPath.get(dirA), undefined, 'issue-1-a stays open — an unreadable root must not close it');
+  assert.equal(_watch.closesByPath.get(dirB), undefined, 'issue-2-b stays open — an unreadable root must not close it');
+  assert.equal(w.state().watched, watchedBefore, 'the handle count is unchanged — no reconciliation ran on a failed read');
+  assert.equal(w.state().ok, false);
+  assert.ok(
+    w.state().failed.some((f) => f.path === 'openspec/changes' && /EMFILE/.test(f.reason)),
+    'the unreadable root is recorded as a said failure',
+  );
+
+  _readdir.stopThrowing();
+  _watch.fire(changesRoot); // a later root event, the root is readable again
+
+  assert.ok(
+    !w.state().failed.some((f) => f.path === 'openspec/changes'),
+    'the failure entry clears once the root is readable again',
+  );
+  assert.equal(w.state().ok, true);
   w.close();
 });
 

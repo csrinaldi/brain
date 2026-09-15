@@ -200,11 +200,22 @@ export function createWatcher({
     }
   }
 
+  /**
+   * `null` on failure — NEVER `[]` — so a caller can tell "the root could not
+   * be read right now" apart from "the root really has zero change dirs".
+   * Collapsing those two into the same empty value is exactly the shape
+   * `brain/core/anti-patterns/evidence-reader-empty-on-failure.md` names, and
+   * is what let a transient `EMFILE`/`EACCES` close every watched change dir
+   * as "vanished" (cold review of PR #971 pre-push, R881-9). Mirrors
+   * `activeWorktrees()` above: catch here, record the failure here, return a
+   * sentinel the caller cannot mistake for real data.
+   */
   function listChangeDirs() {
     try {
       return _readdir(join(root, CHANGES_ROOT)).filter((n) => parseChangeId(n) !== null);
-    } catch {
-      return [];
+    } catch (err) {
+      recordFailure(CHANGES_ROOT, err);
+      return null;
     }
   }
 
@@ -216,9 +227,19 @@ export function createWatcher({
    * event rule as judgment:cold-1 — a dir whose `watchDir()` call failed
    * stays eligible and is retried on the NEXT `CHANGES_ROOT` event, never
    * marked watched after one failed attempt (R881-3, cold-7).
+   *
+   * When the root itself cannot be read (`listChangeDirs()` returns `null`),
+   * the failure is already recorded and reconciliation is SKIPPED entirely —
+   * every currently-watched change dir stays open. Treating an unreadable
+   * root as "zero change dirs" would close all of them on one transient
+   * error, with no root event left to ever re-open them (R881-9, pre-push
+   * cold review of PR #971).
    */
   function rescanChangeDirs() {
-    const current = new Set(listChangeDirs());
+    const names = listChangeDirs();
+    if (names === null) return;
+    failed = failed.filter((f) => f.path !== CHANGES_ROOT); // the root is readable again — drop a stale failure entry
+    const current = new Set(names);
     for (const [name] of watchedChangeDirs) {
       if (!current.has(name)) {
         closeWatch(join(root, CHANGES_ROOT, name));
