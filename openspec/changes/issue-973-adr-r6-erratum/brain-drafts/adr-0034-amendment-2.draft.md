@@ -56,7 +56,7 @@ The body above is not rewritten (ruling R6 on #961): no line of this ADR runs a 
 ```amend-replace
 Every superseded line above is annotated in place under R6 as amended (option A, 2026-09-14): the
 historical name stays visible next to its `brain:memory:` rename, and this table is the whole
-mapping. **[Corrected by Amendment 2 (#973) — this sentence was drafted under R6's original
+mapping. **[Amended by Amendment 2 (#973) — this sentence was drafted under R6's original
 wording, before the 2026-09-14 amendment.]** No line of this ADR runs a script with a literal
 `npm run`, so the decision reads the same.
 ```

@@ -83,13 +83,25 @@ for its own promotion order.
 
 None. Field names, fence tags, and the "Notes for the promoter" section follow
 `openspec/changes/managed-script-brain-prefix/brain-drafts/adr-*.draft.md` exactly. The only
-addition is the `**[Corrected by Amendment N (#973) — …]**` marker inside the replaced sentence,
-which follows `consolidation-protocol.md` §1c act 2's own annotation format
-(`**[Amended by Amendment N (#issue) — <what changed>]**`).
+addition is the `**[Amended by Amendment N (#973) — …]**` marker inside the replaced sentence, the
+literal `consolidation-protocol.md` §1c act 2 prescribes (`**[Amended by Amendment N (#issue) —
+<what changed>]**`).
 
 ## Issues found
 
-None.
+Found by the cold review of PR #974 on its first head, `e6bfa06c`, and corrected:
+
+1. **The marker word was wrong.** The first drafts used `**[Corrected by Amendment N …]**` and this
+   section claimed that followed §1c act 2. It did not: §1c act 2 and every precedent in
+   `brain/project/decisions/` use `Amended by`. The drafts now use the literal. The maintainer
+   reverts the five promotions and promotes the corrected drafts again; the amendment numbers do not
+   change, because the revert restores each ADR to its pre-promotion state.
+2. **The record-first record was corrupt.** `memory:save` was called with one positional, and it wrote
+   a record with no title whose content ended in the literal string `undefined`
+   (`rec-40608e884821068a`). It was never merged, so it is removed from this branch and saved again
+   with both positionals. The silent write is evidence on #928.
+3. **Stated annotation counts were wrong** (ADR-0017 said nine, not eleven). The counts were removed
+   before the first promotion, in `c2a0378e`.
 
 ## Remaining tasks
 

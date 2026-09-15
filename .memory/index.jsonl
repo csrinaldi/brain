@@ -584,7 +584,6 @@
 {"id":"rec-4018e03d2a3eb6f2","ts":"2026-08-14T09:39:20Z","actor":"chore/issue-648-drop-foreign-environment","type":"pattern","project":"brain","file":"2026-08-rec-4018e03d2a3eb6f2.jsonl"}
 {"id":"rec-402321595814b052","ts":"2026-07-13T00:21:39Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-402321595814b052.jsonl"}
 {"id":"rec-405a9160402dfca0","ts":"2026-07-29T13:59:32Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-405a9160402dfca0.jsonl"}
-{"id":"rec-40608e884821068a","ts":"2026-09-15T00:52:21Z","actor":"@csrinaldi","type":"architecture","project":"brain","issue":973,"file":"2026-09-rec-40608e884821068a.jsonl"}
 {"id":"rec-4065f0ac8b652b18","ts":"2026-07-25T00:47:14Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-4065f0ac8b652b18.jsonl"}
 {"id":"rec-406d487d45d33916","ts":"2026-07-08T15:00:44Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-406d487d45d33916.jsonl"}
 {"id":"rec-406ea4df4180c0b4","ts":"2026-07-25T21:50:51Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-406ea4df4180c0b4.jsonl"}

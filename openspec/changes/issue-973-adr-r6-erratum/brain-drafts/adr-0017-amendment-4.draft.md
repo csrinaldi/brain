@@ -56,7 +56,7 @@ script with a literal `npm run`, so the decision reads the same and this table i
 ```amend-replace
 Every superseded line above and in Amendments 1-2 is annotated in place under R6 as amended
 (option A, 2026-09-14): the historical name stays visible next to its `brain:memory:` rename, and
-this table is the whole mapping. **[Corrected by Amendment 4 (#973) — this sentence was drafted
+this table is the whole mapping. **[Amended by Amendment 4 (#973) — this sentence was drafted
 under R6's original wording, before the 2026-09-14 amendment.]** No line of this ADR runs a script
 with a literal `npm run`, so the decision reads the same.
 ```
