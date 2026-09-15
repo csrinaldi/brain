@@ -988,3 +988,109 @@ so `git diff --numstat` reports its full line count each round, not just
 the round's own delta). Commit this round: `7459836` (fix). No push, no PR
 (per task instructions) — branch `feat/issue-881-slice-2-stream` stays
 ahead of its last-pushed state (origin still at `3fe0e510`).
+
+## Ninth round — a linked worktree's `.git` file was still a Tier boundary violation; the id now comes from `<git-common>/worktrees/*/gitdir`, fixed in `d8a311d6` + `fcbb4e60`
+
+Targeted fix from a fresh-context review before push, round 8 of PR #971
+(head `3223fbd5`). Two findings:
+
+1. (Blocking) `activeWorktrees()` (`watcher.mjs:284`, the eighth round's
+   own fix) read `join(s.path, '.git')` — a file under the LINKED
+   WORKTREE'S OWN ROOT. R881-3 (`spec.md:54-60`) is an allow-list of what
+   the watcher may read, and a worktree path was never on it. The eighth
+   round's fix traded a path-basename guess for a read that stayed inside
+   the letter of "committed tier" in spirit (git-written metadata) but not
+   in the spec's actual text, and the code was silent on that gap.
+2. `_readFile` was injectable but never overridden in `watcher.test.mjs` —
+   the "malformed/unreadable `.git` file is a said failure, the other
+   worktree stays watched" behaviour had no committed test.
+
+**Fix chosen**: git stores, for every linked worktree, a `<git-common>/
+worktrees/<id>/gitdir` file whose one line is `<worktree-path>/.git`. Build
+the path→id map by listing `<git-common>/worktrees/` (an `_readdir`
+already-injectable seam) and reading each entry's `gitdir` file — never
+anything under the worktree's own path. Every read now stays inside
+`<git-common>/`, which is git's own metadata, never a working tree. A
+`gitdir` that is missing, unreadable, or malformed is a said failure
+(`recordFailure()`, label `<git-common>/worktrees/<id>/gitdir`) for that
+one admin entry and is skipped, not silently dropped from the rest of the
+scan. A porcelain path left unmatched after every admin entry is read is
+said too (same generic `<git-common>/worktrees` label, message naming the
+path) — never silently dropped. Dropped the `_readFile`-of-`<worktree>/
+.git` path entirely and the now-unused `basename` import; `_readFile`
+itself stays, reused for the admin-dir `gitdir` reads.
+
+**Fixture change**: `writeWorktreeGitFile()` now writes `<git-common>/
+worktrees/<id>/gitdir` (content `<path>/.git\n`) instead of `<worktree>/
+.git`, and no longer creates the worktree's own directory at all — nothing
+under a worktree path is read anymore, so nothing needs to exist there.
+`makeGitCommonFixture()` no longer pre-creates `worktrees/alpha/logs` and
+`worktrees/beta/logs` unconditionally: under the new `_readdir`-based
+resolution those phantom admin dirs (no `gitdir` file) would surface as
+spurious read failures in every test that reuses the fixture without
+actually wanting alpha/beta as worktrees — including the exact-array
+`state().failed` assertion at the `fs.watch` ENOSPC test, which would have
+broken. `makeGitCommonFixture()` now creates an empty `worktrees/` dir;
+`writeWorktreeGitFile()` populates it per test.
+
+**RED/GREEN evidence**: updated `writeWorktreeGitFile()` and
+`makeGitCommonFixture()` first, production code untouched — 5 tests failed
+red (`false !== true` continuity — `_watch.calls.some(...)` for
+`alphaLogs`/`betaLogs`/`foo1Logs` and the two retry/rescan assertions),
+because the fixture no longer wrote `<worktree>/.git` and production still
+read it. Added two new tests (also red under old production: a malformed
+`gitdir` and an unmatched porcelain path). Rewrote `activeWorktrees()` and
+removed the now-redundant clear-on-recover line in `rescanWorktrees()`
+(that responsibility moved into `activeWorktrees()` itself, since it now
+also records failures for the *mismatch* case, not just the list-command
+case) — GREEN: 17/17 in `watcher.test.mjs`.
+
+**Mutation**: dropped the `recordFailure(label, err)` call in the
+`gitdir`-read catch block, so a malformed/unreadable `gitdir` was silently
+skipped instead of said — reproduced red on exactly the new "a worktree
+whose gitdir file is malformed is a said failure" test, all 16 other
+`watcher.test.mjs` tests stayed green. Restored the fix; 17/17 green
+again. Run against the final (diff-tightened) shape of `activeWorktrees()`.
+
+**Diff-budget correction**: the first shape of this fix (commit
+`d8a311d6`) grew `watcher.mjs` by a net +28 production lines — over the
+"~15 lines" ceiling — and pushed the counted diff to **1005/1000**, over
+budget. A same-session follow-up commit (`fcbb4e60`) tightened it: dropped
+a redundant `anyGitdirReadFailed`-style guard that existed only to avoid a
+second, more generic failure entry alongside a specific `gitdir`-read
+failure for the same worktree — the tests assert failure presence via
+`.some()`, never array-length or entry-count, so recording both a specific
+`.../gitdir` failure and the generic "no admin entry matches" failure for
+the same unmatched path costs no coverage — and trimmed the JSDoc/comments
+to state the same facts more tersely. Net production growth from the
+eighth round's baseline is now **+10 lines**; counted diff is
+**987/1000**.
+
+**Source guard**: `rg -n "join\(s\.path|\.path, '\.git'" brain/scripts/
+ui/watcher.mjs` returns no matches, confirmed after both commits.
+
+**Spec alignment**: R881-3 (`spec.md:54-60`) previously enumerated `.git/
+HEAD` and `.git/worktrees/*/HEAD` — stale even before this round, since the
+watcher (design.md Q3) watches `logs/` reflogs, not `HEAD` files directly,
+and never read `worktrees/*/gitdir` at all until now. Rewrote the list to
+what the watcher actually reads: the git common dir's own metadata
+(`HEAD`, `logs/`, `worktrees/*/HEAD`, `worktrees/*/logs/`,
+`worktrees/*/gitdir`), `openspec/changes/**`, `.memory/records/**`; kept
+the "no working-tree content, not even a linked worktree's own `.git`
+file" sentence. `design.md`'s Q3 table (`Watched directory | Catches`)
+enumerates directories `fs.watch` is bound to, not the smaller set of
+files the watcher additionally *reads* synchronously during a rescan
+(`gitdir` is read, never watched) — it did not duplicate R881-3's stale
+wording and needed no matching edit this round.
+
+**Verification**: `GIT_CONFIG_GLOBAL=/dev/null node --test
+brain/scripts/ui/*.test.mjs` = 73/73 green, 3 identical runs (was 71/71
+before this round's 2 new tests). `GIT_CONFIG_GLOBAL=/dev/null npm test` =
+5414/5414 green, one full run (~31s; was 5412/5412 before this round).
+`brain:repo:check` green before each commit; tree clean after. Counted
+diff (excluding `.test.mjs`, `openspec/`, `.memory/`) against
+`origin/feature/brain-ui...HEAD`: **987/1000** (was 977/1000 before this
+round). Commits this round: `d8a311d6` (fix), `fcbb4e60` (diff-tightening
+refactor), plus this docs commit. No push, no PR (per task instructions) —
+branch `feat/issue-881-slice-2-stream` stays ahead of its last-pushed
+state.

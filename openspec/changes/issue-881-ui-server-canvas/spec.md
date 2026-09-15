@@ -53,11 +53,12 @@ every connected client within one poll interval, with no page reload (A2).
 
 ### R881-3: the watcher only ever sees the committed tier
 
-The watcher MUST read only: `.git/HEAD` of the primary checkout,
-`.git/worktrees/*/HEAD` for every linked worktree (enumerated the way
-`collect.mjs`'s `parseWorktrees()` does), `openspec/changes/**`, and
-`.memory/records/**` under the served root. It MUST NOT read or watch any
-other working-tree content.
+The watcher MUST read only: the git common dir's own metadata (`HEAD`,
+`logs/`, `worktrees/*/HEAD`, `worktrees/*/logs/`, and `worktrees/*/gitdir` to
+resolve each linked worktree's admin id), enumerated the way `collect.mjs`'s
+`parseWorktrees()` does, plus `openspec/changes/**` and `.memory/records/**`
+under the served root. It MUST NOT read or watch any working-tree content —
+not even a linked worktree's own `.git` file.
 
 #### Scenario: an uncommitted edit produces no event
 - **WHEN** a file in a worktree's working tree is edited but not committed
