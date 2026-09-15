@@ -255,16 +255,23 @@ export function createWatcher({
     }
   }
 
-  /** The linked worktrees `git worktree list --porcelain` reports right now, minus the primary checkout (always listed first) and any bare stanza. */
+  /**
+   * `null` on failure — NEVER `[]` — same sentinel as `listChangeDirs()`
+   * above, for the same reason: a `git worktree list` failure must read as
+   * "could not be read right now", not "zero linked worktrees" (R881-9,
+   * pre-push cold review of PR #971 round 6 — the sibling this round fixes).
+   */
   function activeWorktrees() {
     let stdout;
-    try { stdout = run('git', ['worktree', 'list', '--porcelain']); } catch (err) { recordFailure('<git-common>/worktrees', err); return []; }
+    try { stdout = run('git', ['worktree', 'list', '--porcelain']); } catch (err) { recordFailure('<git-common>/worktrees', err); return null; }
     return parseWorktreeStanzas(stdout).slice(1).filter((s) => !s.bare).map((s) => ({ path: s.path, id: basename(s.path) }));
   }
 
   function rescanWorktrees() {
     if (!resolvedGitCommonDir) return;
     const current = activeWorktrees();
+    if (current === null) return; // the failure is already recorded — skip reconciliation, leave every current watch untouched
+    failed = failed.filter((f) => f.path !== '<git-common>/worktrees'); // the worktree list is readable again — drop a stale failure entry
     const currentIds = new Set(current.map((w) => w.id));
     for (const [id] of watchedWorktrees) {
       if (!currentIds.has(id)) {

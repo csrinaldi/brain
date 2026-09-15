@@ -373,6 +373,53 @@ test('#881: a CHANGES_ROOT rescan that cannot read the dir keeps every currently
   w.close();
 });
 
+// ── pre-push cold review of PR #971 round 6 (judgment:cold-8), R881-9: an
+// unreadable worktree list is a said failure that keeps the current watches,
+// never an empty list that closes them — the sibling of the listChangeDirs
+// EMFILE fix above, for activeWorktrees()/rescanWorktrees() ────────────────
+
+test('#881: a <git-common>/worktrees/ rescan that cannot list worktrees keeps every currently-watched worktree open, then recovers', () => {
+  const root = makeWatcherFixture();
+  const gitCommonDir = makeGitCommonFixture();
+  const alphaPath = join(dirname(root), 'alpha');
+  const betaPath = join(dirname(root), 'beta');
+  const stanzas = `worktree ${root}\n\nworktree ${alphaPath}\n\nworktree ${betaPath}\n`;
+  const enospc = Object.assign(new Error('ENOSPC: no space left on device'), { code: 'ENOSPC' });
+  let armed = false;
+  const _run = () => { if (armed) throw enospc; return stanzas; };
+  const _watch = spyWatch();
+  const w = createWatcher({ root, gitCommonDir, _watch, _run });
+  w.start();
+
+  const alphaLogs = join(gitCommonDir, 'worktrees', 'alpha', 'logs');
+  const betaLogs = join(gitCommonDir, 'worktrees', 'beta', 'logs');
+  assert.ok(_watch.calls.some((c) => c.path === alphaLogs));
+  assert.ok(_watch.calls.some((c) => c.path === betaLogs));
+  const watchedBefore = w.state().watched;
+
+  armed = true;
+  _watch.fire(join(gitCommonDir, 'worktrees')); // the worktrees root event — `git worktree list` fails this time
+
+  assert.equal(_watch.closesByPath.get(alphaLogs), undefined, 'alpha stays open — an unreadable worktree list must not close it');
+  assert.equal(_watch.closesByPath.get(betaLogs), undefined, 'beta stays open — an unreadable worktree list must not close it');
+  assert.equal(w.state().watched, watchedBefore, 'the handle count is unchanged — no reconciliation ran on a failed read');
+  assert.equal(w.state().ok, false);
+  assert.ok(
+    w.state().failed.some((f) => f.path === '<git-common>/worktrees' && /ENOSPC/.test(f.reason)),
+    'the unreadable worktree list is recorded as a said failure',
+  );
+
+  armed = false;
+  _watch.fire(join(gitCommonDir, 'worktrees')); // a later root event, `git worktree list` succeeds again
+
+  assert.ok(
+    !w.state().failed.some((f) => f.path === '<git-common>/worktrees'),
+    'the failure entry clears once the worktree list is readable again',
+  );
+  assert.equal(w.state().ok, true);
+  w.close();
+});
+
 // ── D5: a rebase-sized burst collapses to at most two recomputes ───────────
 
 test('#881: a rebase-sized burst of HEAD moves collapses to at most two recomputes, never forty', async () => {
