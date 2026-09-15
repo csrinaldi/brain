@@ -5,22 +5,27 @@ below is the equivalent verification for this artifact type).
 
 ## Completed tasks
 
-All 13 tasks in `tasks.md` are done. The five drafts are written and proved promotable. This SDD
-change's own commits never run `npm run brain:promote` — but the maintainer has, twice, on this
-branch (see "Promotion history" below and `proposal.md`'s section of the same name). This revision
-of this document applies the corrections found by a pre-promotion adversarial simulation of round 3
-against `origin/main` (see "Promotion history" item 4 and "Round 3 simulated result" below) to the
-drafts and to this folder's own claims, for the pending third round.
+All 13 tasks in `tasks.md` are done. The five drafts were written and proved promotable, then
+promoted by the maintainer in a third round: revert `c096754e` (undoing round 2's
+`49d35565`…`21325498`), followed by promotions `73b34ebd`, `c0fff7b3`, `a6a27ce7`, `64a0590c`,
+`ae1d5301` (ADR-0002, ADR-0011, ADR-0014, ADR-0017, ADR-0034 respectively). This SDD change's own
+commits never ran `npm run brain:promote` — the maintainer has, three times, on this branch (see
+"Promotion history" below and `proposal.md`'s section of the same name). This revision of this
+document records the corrections found by a pre-promotion adversarial simulation of round 3 (see
+"Promotion history" item 4 and "Round 3 simulated result" below); the maintainer's third round
+matched that prediction byte-for-byte (item 5).
 
 ## Per-ADR simulation table
 
 Produced by a throwaway script (`prove-drafts-v2.mjs`, never committed) that imports
 `parseAmendmentDraft`, `assessEdit`, `applyEdits` from the real
 `brain/scripts/lib/amendment-draft.mjs`, run against each (corrected) draft and its target ADR **as
-it stands on `origin/main`** — the exact text the maintainer's pending revert of
-`49d35565`…`21325498` restores. (The ADR files on this branch's current `HEAD` are NOT that text:
-they carry the second round's promotion, wrong-marker-content and all — simulating against the
-working tree here would test the wrong state.)
+it stands on `origin/main`** — the exact text the maintainer's revert of `49d35565`…`21325498`
+(`c096754e`) restored. (At the time this proof ran, the ADR files on this branch's `HEAD` were NOT
+that text: they carried the second round's promotion, wrong-marker-content and all — simulating
+against the working tree then would have tested the wrong state. The maintainer's revert and
+third-round promotions have since landed — see "Promotion history" item 5 — and `HEAD` now carries
+the corrected text this proof predicted.)
 
 | Draft | Target | Parse | Edits | `assessEdit` state | `free` | Apply | Marker starts `**[Amended by Amendment N (#973) — ` | Prefix/suffix outside the edit span | Residual `not rewritten (ruling R6` |
 |---|---|---|---|---|---|---|---|---|---|
@@ -42,16 +47,18 @@ rg -n "not rewritten \(ruling R6" brain/project/decisions/
 ```
 
 Returns exactly 5 hits, one per target ADR (lines 121, 68, 152, 471, 267) — the count the five
-drafts are designed to bring to 0 as a *live* claim once promoted. See `brain-drafts/README.md`
+drafts were designed to bring to 0 as a *live* claim once promoted. See `brain-drafts/README.md`
 and `spec.md` for what "0 as a live claim" means precisely — `rg` may still match an erratum's
 quotation of the old sentence after promotion; no match is a live claim (see `spec.md`'s
-acceptance-criterion scenario).
+acceptance-criterion scenario). Confirmed after the maintainer's third-round promotion (`ae1d5301`):
+`rg -n "not rewritten \(ruling R6" brain/project/decisions/` now returns exactly 1 hit — inside
+ADR-0017's own "What this changes" quotation — not a live claim, matching this prediction.
 
 ## Promotion history
 
-The maintainer has run `npm run brain:promote` for these five drafts twice on this branch, in two
-rounds that did not stand — record here because `proposal.md`'s "Promotion history" section only
-summarizes; this is the full account with reasons:
+The maintainer has run `npm run brain:promote` for these five drafts three times on this branch:
+the first two rounds did not stand, the third did — record here because `proposal.md`'s "Promotion
+history" section only summarizes; this is the full account with reasons:
 
 1. **First promotion** (`bc44d8f1` ADR-0002 … `e6bfa06c` ADR-0034). The five drafts used the
    marker literal `**[Corrected by Amendment N (#973) — …]**`. This document, at that revision,
@@ -100,51 +107,58 @@ summarizes; this is the full account with reasons:
    above were fixed in the five drafts and this folder's documentation before the maintainer's
    revert and the final promotion.
 
-This apply batch (this revision) corrects all of the above in the five UNPROMOTED drafts under
-`brain-drafts/` and in this folder's documentation. It does not touch `brain/project/decisions/`,
-`brain/HOME.md`, or `AGENTS.md` — those still carry round 2's promotion as of this revision. The
-maintainer's next step is a third round: revert `49d35565`…`21325498`, then promote the drafts as
-corrected here.
+5. **Third promotion (round 3, final)**. The maintainer reverted `49d35565`…`21325498`
+   (`c096754e`), then promoted the five corrected drafts: `73b34ebd` (ADR-0002 Amendment 4),
+   `c0fff7b3` (ADR-0011 Amendment 2), `a6a27ce7` (ADR-0014 Amendment 2), `64a0590c` (ADR-0017
+   Amendment 4), `ae1d5301` (ADR-0034 Amendment 2). The promoted ADRs, `brain/HOME.md`, and
+   `AGENTS.md` are byte-identical to the "Round 3 simulated result" below, which the pre-promotion
+   adversarial simulation (item 4) predicted. The full suite passed 5359/5359 on `ae1d5301`.
+
+This apply batch corrected all of the above in the five drafts under `brain-drafts/` and in this
+folder's documentation, ahead of the maintainer's third round (item 5). This SDD change's own
+commits still never touch `brain/project/decisions/`, `brain/HOME.md`, or `AGENTS.md` directly —
+the maintainer's separate `brain:promote` commits do.
 
 ## Promotion order and commands
 
 No cross-ADR dependency exists between the five drafts (each touches a different target file), so
-any order is safe. Listed in issue #973's own table order. These are the commands for the pending
-third round, after the maintainer reverts `49d35565`…`21325498`:
+any order is safe. Listed in issue #973's own table order. These were the commands for the third
+round, run after the maintainer reverted `49d35565`…`21325498` (`c096754e`); see "Promotion
+history" item 5 for the resulting commit SHAs:
 
 1. ADR-0002 Amendment 4
    ```
    npm run brain:promote -- openspec/changes/issue-973-adr-r6-erratum/brain-drafts/adr-0002-amendment-4.draft.md
    ```
-   Suggested commit subject:
+   Commit subject (landed as `73b34ebd`):
    `docs(brain): ADR-0002 Amendment 4 — erratum: the body Amendment 3 called untouched was annotated in place (#973)`
 
 2. ADR-0011 Amendment 2
    ```
    npm run brain:promote -- openspec/changes/issue-973-adr-r6-erratum/brain-drafts/adr-0011-amendment-2.draft.md
    ```
-   Suggested commit subject:
+   Commit subject (landed as `c0fff7b3`):
    `docs(brain): ADR-0011 Amendment 2 — erratum: the body Amendment 1 called untouched was annotated in place (#973)`
 
 3. ADR-0014 Amendment 2
    ```
    npm run brain:promote -- openspec/changes/issue-973-adr-r6-erratum/brain-drafts/adr-0014-amendment-2.draft.md
    ```
-   Suggested commit subject:
+   Commit subject (landed as `a6a27ce7`):
    `docs(brain): ADR-0014 Amendment 2 — erratum: the body Amendment 1 called untouched was annotated in place (#973)`
 
 4. ADR-0017 Amendment 4
    ```
    npm run brain:promote -- openspec/changes/issue-973-adr-r6-erratum/brain-drafts/adr-0017-amendment-4.draft.md
    ```
-   Suggested commit subject:
+   Commit subject (landed as `64a0590c`):
    `docs(brain): ADR-0017 Amendment 4 — erratum: Amendment 3 called the body and Amendments 1-2 untouched; they were annotated in place (#973)`
 
 5. ADR-0034 Amendment 2
    ```
    npm run brain:promote -- openspec/changes/issue-973-adr-r6-erratum/brain-drafts/adr-0034-amendment-2.draft.md
    ```
-   Suggested commit subject:
+   Commit subject (landed as `ae1d5301`):
    `docs(brain): ADR-0034 Amendment 2 — erratum: the body Amendment 1 called untouched was annotated in place (#973)`
 
 Every promotion stages both `brain/HOME.md` and `AGENTS.md` (§1d act 3 always runs); commit after
@@ -223,6 +237,10 @@ Re-run against `origin/main` after the pre-promotion adversarial simulation abov
 pristine `origin/main` copy of the five target ADRs, `brain/HOME.md` and `AGENTS.md` first, since a
 prior run of the script had already mutated that export against the pre-correction drafts).
 `planAmendment` was invoked for all five drafts, in issue #973's table order, against `origin/main`.
+This simulation ran before the maintainer's third round landed; the actual promotion (revert
+`c096754e`, then `73b34ebd`, `c0fff7b3`, `a6a27ce7`, `64a0590c`, `ae1d5301` — see "Promotion
+history" item 5) matches this prediction byte-for-byte, including the paragraphs, headings, and
+`brain/HOME.md` lines quoted below.
 
 | Draft | Act 1 (Status) | Act 2 (edit) | Act 3 (append) | Act 4 (HOME) | `f` | `r` | `k` |
 |---|---|---|---|---|---|---|---|
@@ -492,16 +510,20 @@ only one that stays true across wording revisions.
 
 ## Remaining tasks
 
-None of the 13 tasks in `tasks.md` are incomplete. The one action left for this issue is the
-maintainer's: revert `49d35565`…`21325498`, then promote the five drafts as corrected by this
-revision — see "Promotion history" above and `tasks.md`'s "Explicitly out of scope" section, which
-this agent never performs.
+None of the 13 tasks in `tasks.md` are incomplete, and the maintainer's third round — revert
+`49d35565`…`21325498` (`c096754e`), then promote the five corrected drafts (`73b34ebd`, `c0fff7b3`,
+`a6a27ce7`, `64a0590c`, `ae1d5301`) — has landed; see "Promotion history" item 5. No task remains
+for this change beyond PR #974 review and merge; `tasks.md`'s "Explicitly out of scope" section
+still correctly records that this SDD-apply agent itself never runs `brain:promote`.
 
 ## Status
 
 13/13 tasks complete. The five drafts, `brain-drafts/README.md`, `proposal.md`, `spec.md`, and
-`tasks.md` are corrected for the pending third promotion round, including the wording fixes found
-by the pre-promotion adversarial simulation of round 3 (C1-C4, E1, E2, E4, and the openspec/PR-body
-corrections — see "Promotion history" item 4). The simulation re-run against `origin/main` shows
-every act pending (`f = 1, r = 0, k = 0`) for all five drafts — see "Round 3 simulated result".
-Ready for verify / maintainer revert-and-repromote.
+`tasks.md` were corrected ahead of the maintainer's third promotion round, including the wording
+fixes found by the pre-promotion adversarial simulation of round 3 (C1-C4, E1, E2, E4, and the
+openspec/PR-body corrections — see "Promotion history" item 4). That round has since landed: revert
+`c096754e` (undoing round 2's `49d35565`…`21325498`), then promotions `73b34ebd`, `c0fff7b3`,
+`a6a27ce7`, `64a0590c`, `ae1d5301` — byte-identical to the "Round 3 simulated result" predicted (see
+"Promotion history" item 5). The full suite passed 5359/5359 on `ae1d5301`.
+
+**Status**: Done — promoted; awaiting PR #974 review/merge.

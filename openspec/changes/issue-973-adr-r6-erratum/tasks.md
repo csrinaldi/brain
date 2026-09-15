@@ -35,8 +35,10 @@
 ## Explicitly out of scope for this change
 
 - [ ] Running `npm run brain:promote` against any of the five drafts (maintainer-only, per the
-      task's hard constraints) — this SDD-apply agent never runs it. The maintainer already has,
-      twice on this branch (see `proposal.md`'s "Promotion history" and `apply-progress.md`); a
-      third round, promoting the drafts as corrected by this batch, is pending after this change.
+      task's hard constraints) — this SDD-apply agent never runs it. The maintainer has, three
+      times on this branch (see `proposal.md`'s "Promotion history" and `apply-progress.md`): the
+      third round — revert `49d35565`…`21325498` (`c096754e`), then promote the drafts as
+      corrected by this batch (`73b34ebd`, `c0fff7b3`, `a6a27ce7`, `64a0590c`, `ae1d5301`) — is
+      done.
 - [ ] Editing `brain/core/**`, `brain/project/**`, `brain/HOME.md`, or `AGENTS.md` directly — none
       of this change's own commits do; the maintainer's separate `brain:promote` commits do.
