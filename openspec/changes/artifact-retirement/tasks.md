@@ -113,9 +113,9 @@ Slice B's over-budget forecast was already ruled (engram `sdd/artifact-retiremen
 - [x] B4.2 Full `GIT_CONFIG_GLOBAL=/dev/null node --test` suite: 5343/5343 pass, 0 fail — including the re-pinned `chunk-boundary.test.mjs` and `cli.migrate-v1.test.mjs`'s forward-migration test.
 
 ### Phase B5: Mutation matrix + close
-- [ ] B5.1 Run the Slice B rows of design.md's mutation matrix (dualWriteRecords deletion, rollback refusal branch, the three static-guard deletions, zlib import, forward-migration-kept row via `cli.migrate-v1.test.mjs:60`). Revert one production change at a time; confirm exactly its named test dies. Record the table in `apply-progress.md`.
-- [ ] B5.2 Record-first close: `npm run memory:save -- "<title>" "<content>" --issue 955 --type <type>` (positional title/content). Parse the `rec-` id from stdout; stage only that record file plus `.memory/index.jsonl`; verify exactly one net new id.
-- [ ] B5.3 Open PR 2: body `Closes #955`, label `size:exception` (pre-accepted per engram `sdd/artifact-retirement/design-decisions`).
+- [x] B5.1 Ran the Slice B rows of design.md's mutation matrix (dualWriteRecords reinstated, rollback refusal branch disabled, scrubChunkFile reinstated, zlib import reinstated, forward-migration branch disabled). Each mutation reverted immediately after measuring. Full table in `apply-progress.md` — 3/5 rows matched "sole killer", 2/5 had legitimate multi-killer overlaps (rollback refusal is a matched PAIR by design; forward-migration removal broke BOTH existing forward-migration tests, not just one, differing from design's single-test prediction — recorded honestly, not forced to match).
+- [x] B5.2 Record-first close: `npm run brain:memory:save`. Saved `rec-43b45e3fef3310ff` → `.memory/records/2026-09-rec-43b45e3fef3310ff.jsonl`. Verified exactly one net new id via `diff` over the sorted `"id":"..."` sets of the old (`git show HEAD:.memory/index.jsonl`) vs new `.memory/index.jsonl`. Staged only that record file plus `.memory/index.jsonl` (confirmed via `git status --short -- .memory`).
+- [ ] B5.3 Open PR 2: body `Closes #955`, label `size:exception` (pre-accepted per engram `sdd/artifact-retirement/design-decisions`). NOT DONE — agent may not push/open PRs; the maintainer pushes and opens PR 2.
 
 ### Review Workload Forecast — Slice B
 

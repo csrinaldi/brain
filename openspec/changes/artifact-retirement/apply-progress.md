@@ -1,3 +1,127 @@
+# Apply Progress: artifact-retirement
+
+## Slice B (PR 2, `Closes #955`, `size:exception`)
+
+Batch: SECOND (continues from Slice A below, which merged to `main` as PR
+#965, commit `f5ea51f4`). Worktree: `/home/gandalf/IA/brain-artifact-retirement`,
+branch `feat/epic-864-artifact-retirement`.
+
+### Status
+
+Slice B: **5/5 phases complete, 21/22 tasks ticked** in `tasks.md` (B4.0
+folded in during apply — a stale pre-push hook comment found while auditing
+for stale claims, bringing the total from the plan's original 21 to 22;
+B5.3 — opening PR 2 — intentionally left `[ ]`: the agent may not `git
+push` or run `gh` writes). Note: the tasks artifact's own header said
+"0/19" for Slice B before this batch started — that count was already
+wrong (21 tasks were listed, not 19); not corrected retroactively here,
+just not repeated.
+
+### Baseline / final test counts (both `GIT_CONFIG_GLOBAL=/dev/null node --test`)
+
+| | tests | pass | fail |
+|---|---|---|---|
+| Baseline (B1.2, post-merge, pre-edit) | 5361 | 5361 | 0 |
+| Final (B4.2, post-legacy-deletion)     | 5343 | 5343 | 0 |
+
+Baseline moved from slice A's final 5344 to 5361 because `main` gained new
+tests between slice A's merge and this merge (#961 brain: prefix rename,
+#954 MANAGED_SCRIPT_KEYS, #962 brain-audit, plus the #850 orphan-test guard
+now also covering this worktree's tree). Net -18 across this batch (Phase
+B2/B3 deletions: dualWriteRecords' 2 tests, 3 whole test files removed
+(engram.upstream-scope, engram.dualwrite-hydrated-gate,
+upstream-records.integration — the last one missed by R5's original list),
+the engram→plainfiles round-trip test, rollbackMigration's 2 tests,
+scrubChunkFile's 3 tests, the old rollback-restore CLI test; +2 new CLI
+refusal tests (B3.1); B4's legacy deletion removed no tests, only data).
+
+### Commits (this batch, local only — not pushed)
+
+1. `8981e41b` `fix(memory): retire dualWriteRecords, the rollback branch and scrubChunkFile (#955)` — B2-B3 (production + tests + i18n + CHANGELOG + pre-push comment), 19 files, +221/-1133 (includes 3 deleted test files).
+2. `d2ba7bce` `fix(memory): delete the v1 legacy chunk archive (#955)` — B4.1, 49 files (48 `.memory/legacy/**` deletions + `tasks.md`), +2/-32.
+3. (pending) record-first close commit — B5.2, `rec-43b45e3fef3310ff` + `.memory/index.jsonl`, verified exactly one net new id.
+
+`origin/main` was merged (`git merge`, not rebase) as B1.1: `94d1b5a1` (conflicts in `CHANGELOG.md`/`README.md` resolved to main's version — main's versions were already correct/newer).
+
+### Counted production diff (tests, `.memory/**`, `openspec/**`, `AGENTS.md` excluded — via `brain/scripts/vcs/diff-size-count.mjs`, the same tool `governance-tiers.mjs` uses)
+
+```
+CHANGELOG.md                              |   2 +
+brain/scripts/hooks/pre-push              |   2 +-
+brain/scripts/i18n/en.mjs                 |  11 +-
+brain/scripts/i18n/es.mjs                 |  12 +-
+brain/scripts/memory/backends/engram.mjs  | 286 ++----------------------------
+brain/scripts/memory/cli.mjs              |  46 +++--
+brain/scripts/memory/lib/migrate-v1.mjs   |  73 +-------
+brain/scripts/memory/lib/secret-scrub.mjs |  42 +----
+8 files changed, 58 insertions(+), 416 deletions(-)
+```
+
+Total counted: **474 changed lines** (design estimated ~415-430). Ships
+with `size:exception`, pre-accepted 2026-09-14 (engram
+`sdd/artifact-retirement/design-decisions`) — this was known and ruled
+before apply started; no new decision gate was needed.
+
+### TDD Cycle Evidence (Strict TDD Mode)
+
+| Task | RED | GREEN | REFACTOR |
+|---|---|---|---|
+| B1-B4 static guards (`retired-artifacts.static.test.mjs`) | all 4 red before any production edit (dualWriteRecords/rollbackMigration/scrubChunkFile definitions present; `node:zlib` imported) | all 4 green after B2.2/B3.5/B3.6 | n/a |
+| `--rollback` / `--rollback --dry-run` refusal (`cli.migrate-v1.test.mjs`) | confirmed red by stashing the `cli.mjs` refusal-branch edit and re-running (2/5 failed: exit 0 instead of 1), then restoring | green after B3.3 | n/a |
+| Existing suite (`engram.duplicates.test.mjs`, `plainfiles-roundtrip.integration.test.mjs`, `migrate-v1.test.mjs`, `secret-scrub.test.mjs`, `chunk-boundary.test.mjs`, `i18n/coverage.test.mjs`) | broke on first GREEN pass (stale imports / stale allowlist pin) | fixed in B2.3/B3.4/B3.8, all green | n/a |
+
+### Mutation Matrix (B5.1) — measured, not asserted
+
+Each row: one production change reverted in isolation (immediately
+re-applied after measuring), full relevant test subset run, diff confirmed
+clean (`git diff --stat`) after every revert.
+
+| Production change | Mutation applied | Test(s) that died | Matches design's "sole killer"? |
+|---|---|---|---|
+| `dualWriteRecords` deleted | Reinstated a trivial `export async function dualWriteRecords() { return {}; }` in `engram.mjs` | B1 static guard only | Yes |
+| `--rollback` refusal branch added (D1) | Disabled the refusal `if` (`if (false && ...)`), falling through toward the forward branch | Both new CLI tests — `--rollback refuses` **and** `--rollback --dry-run also refuses` | Yes — matches design (a matched pair by construction: both assert the same branch) |
+| `scrubChunkFile` deleted | Reinstated a trivial `export function scrubChunkFile() { return null; }` in `secret-scrub.mjs` | B3 static guard only | Yes |
+| `node:zlib` import deleted | Reinstated `import { gunzipSync } from 'node:zlib'` (unused) in `secret-scrub.mjs` | B4 static guard only | Yes |
+| forward `runMigration` branch kept (R3) | Disabled the `!process.argv.includes("--dry-run")` branch (`if (false && ...)`) | **Two** existing `cli.migrate-v1.test.mjs` tests — the un-refused-migration test **and** the abort-if-populated test | **No — two killers, not the single `:60` test design named.** Both existing forward-migration tests route through the same disabled branch: the plain-migration test because `runMigration` never runs, and the "already migrated" abort test because without `runMigration` ever executing, its throw-before-any-work guard never fires either — the request instead falls through to the dry-run report path and exits 0. Both are legitimate — the branch really does guard both behaviors — recorded honestly rather than trimmed to match the design doc's single-test prediction (same "measured reality has a stronger/wider guard than predicted" pattern as slice A's own two discrepancy rows). |
+
+**3/5 rows matched "sole killer" exactly; 2/5 had multiple killers, both
+explained above and both legitimate (a designed matched pair, and a wider
+guard than the design doc predicted) — neither is a false-negative or a
+missing guard.**
+
+### Deviations from Design
+
+- `#937` pin landed at `cli.mjs:651`, not design's estimated `:645` — the
+  refusal-branch wording (comment block sizes) differs slightly from the
+  estimate; re-measured fresh per B3.2, not assumed.
+- Counted diff (474) exceeds even design's own `~415-430` estimate by
+  ~44-59 lines — mostly `cli.mjs`'s D1 refusal-branch comments (the
+  do-not-delete-the-`if` warning) and the reworded `_defaultLoadBrainConfig`
+  JSDoc in `engram.mjs`, both written to stay accurate rather than terse.
+  Still covered by the pre-accepted `size:exception`.
+- The `memory.share.upstream*`/`dedupedUpstream` i18n keys were NOT deleted
+  alongside `secretFoundRecords`, even though they too lost their only
+  in-code trace (they were never actually read via `t()` in production —
+  confirmed via `rg`). They were already orphaned since #874 split B per
+  D6 ("the other `memory.share.*` keys have been orphaned... out of
+  scope"), and no ruling covers deleting orphaned catalog keys, only the
+  code that produced them. Comment headers reworded to say so explicitly
+  rather than silently left stale.
+- B4.0 (pre-push hook comment fix) was not in the original task list —
+  folded in during the stale-claims sweep per the orchestrator's
+  instructions (a comment named the retired manifest as what `share()`
+  "re-materializes"; reworded to name `.memory/index.jsonl`, the actual
+  churning artifact).
+
+### Open Items for Slice B
+
+- B5.3 (open PR 2) is not done — commits are local only, per the hard
+  constraint against `git push`/`gh` writes. The maintainer pushes
+  `feat/epic-864-artifact-retirement` and opens PR 2 with body `Closes
+  #955`, label `size:exception`.
+
+---
+
 # Apply Progress: artifact-retirement — Slice A (PR 1, `Part of #955`, `Closes #958`)
 
 Batch: FIRST (no previous apply-progress existed). Worktree:
