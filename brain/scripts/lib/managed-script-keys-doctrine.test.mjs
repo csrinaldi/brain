@@ -47,10 +47,11 @@ const DOCTRINE_ROOTS = ['brain/core', 'brain/project', 'AGENTS.md', 'CLAUDE.md',
 // EXCEPT docs/inbox/**: `docs/inbox/AGENT-REVIEW-HANDOFF.md` states explicitly
 // "`docs/inbox/**` is a capture zone (issue #327) — not a source of truth,
 // never governed." A script mentioned only there is a PROPOSAL, not doctrine
-// telling an agent to run something today (measured: `brain:snapshot`,
-// `brain:ui`, `brain:credentials`, `brain:status`, `brain:review:queue`,
-// `brain:protect-server` appear only under docs/inbox/** and do not exist as
-// real npm scripts yet — a different bug than #922, out of scope here).
+// telling an agent to run something. `brain:snapshot`, `brain:status`,
+// `brain:review:queue` and `brain:protect-server` are real scripts, and
+// `brain:ui` and `brain:credentials` are not; all six appear as `npm run`
+// only under docs/inbox/**, so none is a doctrine recommendation today. If
+// governed doctrine starts recommending one, this test requires it managed.
 const EXCLUDED_DIR_PREFIXES = [join('docs', 'inbox')];
 
 const SCAN_EXTENSIONS = new Set(['.md', '.html', '.mjs', '.js']);
