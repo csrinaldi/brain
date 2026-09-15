@@ -1,6 +1,6 @@
 # ADR-0011 Amendment 2 — draft (issue #973)
 
-> **Tier 3 draft. Not yet promoted.** ADR-0011 is signed and stands at Amendment 1.
+> **Tier 3 draft, promoted by the maintainer in PR #974 (round 3, `c0fff7b3`).** At drafting time ADR-0011 was signed and stood at Amendment 1.
 >
 > ```
 > npm run brain:promote -- openspec/changes/issue-973-adr-r6-erratum/brain-drafts/adr-0011-amendment-2.draft.md

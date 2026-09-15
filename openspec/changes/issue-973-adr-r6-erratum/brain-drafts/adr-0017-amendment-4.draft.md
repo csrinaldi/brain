@@ -1,6 +1,6 @@
 # ADR-0017 Amendment 4 — draft (issue #973)
 
-> **Tier 3 draft. Not yet promoted.** ADR-0017 is signed and stands at Amendments 1-3.
+> **Tier 3 draft, promoted by the maintainer in PR #974 (round 3, `64a0590c`).** At drafting time ADR-0017 was signed and stood at Amendments 1-3.
 >
 > ```
 > npm run brain:promote -- openspec/changes/issue-973-adr-r6-erratum/brain-drafts/adr-0017-amendment-4.draft.md
