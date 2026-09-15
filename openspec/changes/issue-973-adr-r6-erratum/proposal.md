@@ -15,9 +15,11 @@ That sentence is false as written. It was drafted under ruling R6 as first ratif
 amendment, body untouched). The maintainer amended R6 to option A on 2026-09-14 ([issue #961
 comment](https://github.com/csrinaldi/brain/issues/961#issuecomment-5667409631), confirmed on
 PR #966) before any of the five amendments promoted, so the same promotion that produced them
-(PR #972) annotated every superseded line of each ADR's body in place — the opposite of what the
-sentence says. Nobody updated the sentence to match. Neither the fresh review of #966 nor the
-apply of #972 caught it; the cold review of #972 did, after merge (`judgment:cold-1`).
+(PR #972) annotated every superseded line in place — in the body for four of the five ADRs, and
+also inside an earlier amendment section for ADR-0002 (Amendment 2) and ADR-0017 (Amendments 1-2)
+— the opposite of what the sentence says. Nobody updated the sentence to match. Neither the fresh
+review of #966 nor the apply of #972 caught it; the cold review of #972 did, after merge
+(`judgment:cold-1`).
 
 This change adds one erratum amendment per ADR. Each rewrites only that sentence to state what the
 act did: superseded lines above are annotated in place under R6 as amended (option A), the
@@ -31,9 +33,34 @@ rename tables and the in-place annotations from the #961 amendments were already
 - `AGENTS.md` and `brain/HOME.md` regenerate byte-equal (drift test green).
 - Full suite green.
 
-These are satisfied once a human promotes the five drafts in this folder through
-`npm run brain:promote` (see `apply-progress.md` for the exact commands and order) — this change
-only prepares and proves the drafts. It never runs the promote verb itself.
+These are satisfied once a human promotes the five (corrected) drafts in this folder through
+`npm run brain:promote` (see `apply-progress.md` for the exact commands and order) — the commits
+this SDD change is itself responsible for only prepare and prove the drafts. The maintainer runs
+`brain:promote` by hand, separately; this SDD-apply agent never runs it.
+
+## Promotion history
+
+On this branch the maintainer has already run `brain:promote` for these five drafts twice, in two
+rounds that did not stand:
+
+1. **First promotion** (`bc44d8f1`…`e6bfa06c`). The drafts used the marker literal
+   `**[Corrected by Amendment N …]**`. The cold review of PR #974 on that head (`e6bfa06c`) found
+   the word wrong: `consolidation-protocol.md` §1c act 2 and every precedent in
+   `brain/project/decisions/` (e.g. `adr-0026*.md`) use `Amended by`, not `Corrected by`.
+2. **Revert** (`6a28b90e`) undid the five promotions so they could be re-promoted with the correct
+   literal.
+3. **Re-promotion** (`49d35565`…`21325498`) used `**[Amended by Amendment N (#973) — …]**`, but the
+   text after the em dash stated a *reason* ("this sentence was drafted under R6's original
+   wording, before the 2026-09-14 amendment") rather than *what changed*, which §1c act 2 requires.
+   An adversarial pre-push review of that round also found: ADR-0002's and ADR-0017's signed text
+   and `home-summary` under-stated where PR #972 had annotated the false sentence (body only,
+   when ADR-0002 also carries one inside Amendment 2, and ADR-0017 inside Amendments 1-2); the
+   promised `rg 'not rewritten \(ruling R6' brain/project/decisions/` result after promotion; and
+   several other imprecise claims in this folder (see `apply-progress.md`'s "Issues found").
+
+This SDD apply batch corrects those defects in the five drafts (unpromoted, on this branch) and in
+this folder's documentation. The maintainer's next step is a third round: revert
+`49d35565`…`21325498` and promote the corrected drafts — pending as of this revision.
 
 ## Scope
 
@@ -52,9 +79,13 @@ identified above. No other line of any target ADR changes.
 
 ## Non-goals
 
-- Does not touch `brain/core/**`, `brain/project/**`, `brain/HOME.md`, or `AGENTS.md` directly —
-  those are Tier 2/3 and are only written by a human running `brain:promote`.
+- The commits this SDD change itself is responsible for (the files under this
+  `openspec/changes/issue-973-adr-r6-erratum/` folder) do not touch `brain/core/**`,
+  `brain/project/**`, `brain/HOME.md`, or `AGENTS.md` directly — those are Tier 2/3, written only
+  when the maintainer runs `brain:promote` by hand. On this branch the maintainer has already run
+  `brain:promote` for these five drafts, in the two rounds recorded under "Promotion history"
+  above; those are the maintainer's own commits, not part of this change's diff.
 - Does not re-litigate ruling R6 or option A — the maintainer's 2026-09-14 ruling
   (issue #961 comment, confirmed on PR #966) is taken as settled.
-- Does not change the rename tables, the in-place `amend-find`/`amend-replace` pairs the #961
-  amendments already applied, or any other content in the five ADRs.
+- Does not change the rename tables, the inline `(renamed \`brain:memory:X\`; see Amendment N)`
+  notes the #961 amendments already applied, or any other content in the five ADRs.

@@ -27,11 +27,15 @@ One `amend-find`/`amend-replace` pair, replacing the two-line sentence that clai
 was not rewritten with a sentence that states what actually happened: every superseded line is
 annotated in place under R6 as amended (option A, 2026-09-14), the historical names stay visible,
 and the rename table is the full mapping. The still-true clause — no line of the ADR runs a script
-with a literal `npm run` — is kept, verified per-ADR (the only occurrence of `npm run` in each
-target is inside the sentence being rewritten).
+with a literal `npm run` — is kept. Before promotion, that literal is the only occurrence of
+`npm run` in each target ADR — it is inside the sentence being rewritten. After promotion the
+erratum's own "What this changes" text quotes the superseded sentence verbatim, so `npm run` then
+occurs more than once in the ADR; that second occurrence is a quotation, not a live claim.
 
-Nothing else changes. The rename tables and the in-place `amend-find`/`amend-replace` annotations
-the #961 amendments already applied are correct as they stand.
+Nothing else changes. The rename tables and the inline `(renamed \`brain:memory:X\`; see
+Amendment N)` notes the #961 amendments already applied — not `amend-find`/`amend-replace`
+pairs; those are how the amendment itself was promoted, not what it left behind — are correct as
+they stand.
 
 ## After promotion — checks
 
@@ -39,8 +43,15 @@ the #961 amendments already applied are correct as they stand.
 rg -n "not rewritten \(ruling R6" brain/project/decisions/
 ```
 
-Expected: no hits. Then `npm test` for the full suite, and confirm `AGENTS.md` /
-`brain/HOME.md` regenerate byte-equal (the drift test).
+Expected: no *live* occurrence of the false claim — each of the five ADRs' bodies (and, for
+ADR-0002, its Amendment 2, and for ADR-0017, its Amendments 1-2) is corrected. This `rg` can still
+report hits after promotion: each erratum's own "What this changes" text quotes the superseded
+sentence verbatim, and for four of the five ADRs that quotation sits on one unwrapped line, so `rg`
+matches it. ADR-0017's quotation wraps its line break between "not rewritten" and "(ruling R6 on
+#961)", so `rg` does not match it there. None of these quotations is a live claim — read any hit
+and confirm it sits inside a `### What this changes` paragraph, not a signed section's own
+assertion. Then `npm test` for the full suite, and confirm `AGENTS.md` / `brain/HOME.md`
+regenerate byte-equal (the drift test).
 
 ## Proof, before promotion
 

@@ -4,7 +4,8 @@
 
 Five ADRs under `brain/project/decisions/` currently carry a signed amendment section whose
 sentence claims the ADR body "is not rewritten (ruling R6 on #961)". That claim is false: the
-same act (PR #972) annotated every superseded line of the body in place, per
+same act (PR #972) annotated every superseded line in place — in the body for four ADRs, and also
+inside an earlier amendment section for ADR-0002 (Amendment 2) and ADR-0017 (Amendments 1-2) — per
 `consolidation-protocol.md` §1c act 2, because the maintainer had already amended ruling R6 to
 option A on 2026-09-14. This change adds one new signed amendment per ADR that corrects only that
 sentence.
@@ -21,15 +22,16 @@ sentence.
 
 ### Scenario: the edit is pending and uniquely anchored
 
-- **Given** a draft's single edit and its target ADR's current text on this branch
+- **Given** a draft's single edit and its target ADR's pre-promotion text (`origin/main`, or
+  equivalently this branch once the pending revert lands)
 - **When** `assessEdit` runs
 - **Then** the state is `pending` and `free === 1` — the false sentence occurs exactly once and
   the corrected sentence does not yet appear
 
 ### Scenario: applying the edit removes the false claim and nothing else
 
-- **Given** a draft's edit applied to its target ADR's text via `applyEdits`
-- **When** the result is compared against the target's current text
+- **Given** a draft's edit applied to its target ADR's pre-promotion text via `applyEdits`
+- **When** the result is compared against that pre-promotion text
 - **Then** the only difference is the replaced sentence — `applyEdits` succeeds, and the result
   contains zero occurrences of `not rewritten (ruling R6`
 
@@ -37,8 +39,12 @@ sentence.
 
 - **Given** `rg -n "not rewritten \(ruling R6" brain/project/decisions/`
 - **When** run before promotion
-- **Then** it returns exactly 5 hits (one per target ADR)
-- **And** once all five drafts in this change are promoted by the maintainer, it returns 0 hits
+- **Then** it returns exactly 5 hits (one per target ADR), each a live, uncorrected claim
+- **And** once all five drafts in this change are promoted by the maintainer, no remaining hit is
+  a live claim — the sentence is corrected in every ADR's signed section. `rg` can still match
+  inside an erratum's own "What this changes" text, which quotes the superseded sentence verbatim
+  as part of explaining the correction (and it misses that quotation in ADR-0017, whose line wrap
+  splits the pattern across two lines) — a match there is not evidence of an uncorrected claim
 
 ## Out of scope
 

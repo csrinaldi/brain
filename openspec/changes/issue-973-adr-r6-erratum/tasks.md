@@ -26,11 +26,15 @@
       `sdd/issue-973-adr-r6-erratum/{proposal,tasks,apply-progress}` (project `brain`,
       `capture_prompt: false`).
 - [x] 12. Commit as work units citing `#973`.
-- [x] 13. Record-first commit: `npm run memory:save -- "<title>" "<content>"`, staging only the new
-      `.memory/records/*.jsonl` plus `.memory/index.jsonl`.
+- [x] 13. Record-first commit: `npm run brain:memory:save -- "<title>" "<content>"` (renamed from
+      `memory:save` by #966), staging only the new `.memory/records/*.jsonl` plus
+      `.memory/index.jsonl`.
 
 ## Explicitly out of scope for this change
 
 - [ ] Running `npm run brain:promote` against any of the five drafts (maintainer-only, per the
-      task's hard constraints).
-- [ ] Editing `brain/core/**`, `brain/project/**`, `brain/HOME.md`, or `AGENTS.md` directly.
+      task's hard constraints) — this SDD-apply agent never runs it. The maintainer already has,
+      twice on this branch (see `proposal.md`'s "Promotion history" and `apply-progress.md`); a
+      third round, promoting the drafts as corrected by this batch, is pending after this change.
+- [ ] Editing `brain/core/**`, `brain/project/**`, `brain/HOME.md`, or `AGENTS.md` directly — none
+      of this change's own commits do; the maintainer's separate `brain:promote` commits do.
