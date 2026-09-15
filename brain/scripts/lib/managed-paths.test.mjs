@@ -145,12 +145,16 @@ test('a managed glob covers brain/scripts/lib/home-index.mjs (REQ-7)', () => {
 // addition, and still passed when one key was swapped for another. Do not
 // reintroduce it. If a count is ever wanted, compare against an independent
 // source — never against MANAGED_SCRIPT_KEYS.length itself, which cannot fail.
-test('MANAGED_SCRIPT_KEYS entries are unique and namespaced brain: or memory: (S5, #906 A5, #922)', () => {
+//
+// Every key is `brain:`-namespaced (#961 R2): the memory verbs a consumer
+// receives are `brain:memory:*`. Bare `memory:*` names survive only as
+// repo-only aliases in brain's own package.json (#961 R4) and are never managed.
+test('MANAGED_SCRIPT_KEYS entries are unique and namespaced brain: (S5, #906 A5, #922, #961)', () => {
   assert.equal(new Set(MANAGED_SCRIPT_KEYS).size, MANAGED_SCRIPT_KEYS.length,
     'MANAGED_SCRIPT_KEYS must not repeat a key');
   for (const key of MANAGED_SCRIPT_KEYS) {
-    assert.match(key, /^(brain|memory):[a-z]/,
-      `every key must start with "brain:" or "memory:" — got "${key}"`);
+    assert.match(key, /^brain:[a-z]/,
+      `every key must start with "brain:" — got "${key}"`);
   }
 });
 

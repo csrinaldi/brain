@@ -5,15 +5,18 @@
 // to run it. Mirrors the existing `.gitattributes` drift guard in
 // managed-paths.test.mjs (same file, "drift guard" pattern).
 //
-// EXPECTED RED until the brain-draft under
-// openspec/changes/issue-922-managed-scripts/brain-drafts/ is PROMOTED by a
-// maintainer into brain/core/managed-paths.mjs. `brain/core/**` is Tier 2 —
-// this repo's own doctrine (agent-authorities.md Tier 2/3,
-// consolidation-protocol.md §2) forbids an agent from committing there
-// directly, so the fix cannot land through this PR. Do NOT weaken this
-// assertion to pass against the pre-promotion catalog: the gap it reports is
-// real and measured (see openspec/changes/issue-922-managed-scripts/proposal.md).
-// It turns green on its own once the draft is promoted — no test edit needed.
+// The catalog lives in brain/core/managed-paths.mjs, which is Tier 2
+// (agent-authorities.md Tier 2/3, consolidation-protocol.md §2): a maintainer
+// edits it by hand, following the draft under
+// openspec/changes/issue-922-managed-scripts/brain-drafts/. If this test goes
+// red, doctrine gained an `npm run` the catalog lacks. Fix the catalog, never
+// this assertion.
+//
+// A bare `npm run memory:<verb>` in doctrine still counts: the bare names are
+// real scripts in brain's package.json (repo-only aliases, #961 R4) but never
+// managed keys (#961 R2), so such a mention fails here. That is the intended
+// tripwire for doctrine that forgot the `brain:` prefix. Removing the aliases
+// would silently blind it.
 //
 // Data-driven ON PURPOSE (issue #922 acceptance criteria: "full set reconciled
 // against every doctrine `npm run …` mention"): the expected set is EXTRACTED
@@ -123,9 +126,8 @@ test('every brain:*/memory:* script doctrine tells an agent to `npm run` is in M
     [],
     `MANAGED_SCRIPT_KEYS is missing ${missing.length} script(s) the doctrine tells an agent to ` +
       `\`npm run\`: ${missing.join(', ')}.\n` +
-      'EXPECTED RED until openspec/changes/issue-922-managed-scripts/brain-drafts/ is promoted ' +
-      '(#922) — brain/core/** is Tier 2, this repo cannot edit it directly. ' +
-      'See openspec/changes/issue-922-managed-scripts/proposal.md for the full measurement.',
+      'Add them to brain/core/managed-paths.mjs (Tier 2, a maintainer edit). A bare `memory:<verb>` ' +
+      'here means the doctrine forgot the `brain:` prefix (#961): fix the doctrine, not the catalog.',
   );
 });
 
