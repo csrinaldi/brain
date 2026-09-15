@@ -9,9 +9,11 @@ confirmed on PR #966) before that promotion ran. See `../proposal.md` for the fu
 ## Promotion order
 
 No draft depends on another — each targets a different ADR file. Commit after each promotion:
-every one stages `AGENTS.md` and/or `brain/HOME.md`, and `antigravity.drift.test.mjs` checks
-byte-equality on every commit (same discipline as
-`openspec/changes/managed-script-brain-prefix/brain-drafts/README.md`).
+every one stages both `brain/HOME.md` and `AGENTS.md`, and `npm test` runs
+`antigravity.drift.test.mjs`, which checks `AGENTS.md` for byte-equality against its 5 source docs
+(same discipline as `openspec/changes/managed-script-brain-prefix/brain-drafts/README.md`). The
+drift test does not regenerate or check `brain/HOME.md` itself — `brain-promote.mjs` patches that
+file directly.
 
 1. `adr-0002-amendment-4.draft.md`
 2. `adr-0011-amendment-2.draft.md`
@@ -43,19 +45,15 @@ they stand.
 rg -n "not rewritten \(ruling R6" brain/project/decisions/
 ```
 
-Expected: no *live* occurrence of the false claim — each of the five ADRs' bodies (and, for
-ADR-0002, its Amendment 2, and for ADR-0017, its Amendments 1-2) is corrected. This `rg` can still
-report hits after promotion: each erratum's own "What this changes" text quotes the superseded
-sentence verbatim, and for four of the five ADRs that quotation sits on one unwrapped line, so `rg`
-matches it. ADR-0017's quotation wraps its line break between "not rewritten" and "(ruling R6 on
-#961)", so `rg` does not match it there. None of these quotations is a live claim — read any hit
-and confirm it sits inside a `### What this changes` paragraph, not a signed section's own
-assertion. Then `npm test` for the full suite, and confirm `AGENTS.md` / `brain/HOME.md`
-regenerate byte-equal (the drift test).
+Expected: no *live* occurrence of the false claim — the false sentence in each #961 amendment
+section is rewritten. `rg` may still match an erratum's own quotation of the old sentence inside
+its `### What this changes` text; no match there is a live claim — read any hit and confirm it
+sits inside a `### What this changes` paragraph, not a signed section's own assertion. Then
+`npm test` for the full suite, and confirm `AGENTS.md` regenerates byte-equal (the drift test).
 
 ## Proof, before promotion
 
 Each draft was proved promotable without promoting: `parseAmendmentDraft` accepts it, its one edit
-assesses as `pending` with `free = 1` against the target ADR on this branch, and applying the edit
+assesses as `pending` with `free = 1` against the target ADR on `origin/main`, and applying the edit
 leaves no remaining "not rewritten (ruling R6" in that ADR while changing no other line. See
 `../apply-progress.md` for the per-ADR table.
