@@ -25,11 +25,17 @@ test time (data-driven, not a hardcoded list) and asserts
 `.gitattributes` drift guard (`managed-paths.test.mjs`).
 
 **Acceptance**: `brain/scripts/lib/managed-script-keys-doctrine.test.mjs`
-exists, is data-driven, and FAILS against today's `MANAGED_SCRIPT_KEYS`
-(proving the gap is real). It is expected to stay RED until a maintainer
-promotes the brain-draft — this is an accepted, precedented pattern in this
-repo (`sdd-layout-doc-promotion-tripwire.test.mjs`, #253), not something to
+exists and is data-driven. At the time this spec was written, it FAILED
+against the 10-key `MANAGED_SCRIPT_KEYS` (proving the gap was real), and was
+expected to stay RED until a maintainer promoted the brain-draft — an
+accepted, precedented pattern in this repo
+(`sdd-layout-doc-promotion-tripwire.test.mjs`, #253), not something to
 silence by weakening the assertion.
+
+**Outcome**: the maintainer promoted the draft in commit `525f7c0a` (34-key,
+`brain:`-only catalog); the drift test has been GREEN since, with no test
+edit required. Commit `2ae18386` also replaced `managed-paths.test.mjs`'s
+`length === 10` assertion with invariants (unique keys, `^brain:[a-z]`).
 
 ## REQ-922-3 — the production fix ships as a draft, never a direct edit
 
@@ -47,6 +53,8 @@ the real `parseAmendmentDraft`).
 
 ## REQ-922-4 — lands before 1.6.0
 
-Out of this change's control (depends on promotion), but recorded: the fix
-must land before 1.6.0 is cut, per the issue and epic tasks.md (#864 task
-4.8, `memory.lane.enabled`).
+Recorded per the issue and epic tasks.md (#864 task 4.8,
+`memory.lane.enabled`): the fix must land before 1.6.0 is cut. At the time
+this spec was written, landing was out of this change's control (it depended
+on maintainer promotion). **Outcome**: the promotion happened in commit
+`525f7c0a`, and epic task 4.8 is ticked `[x]` (commit `79d24ba4`).

@@ -39,9 +39,13 @@
 - [x] 4.1 Write `proposal.md` with the three measured sets and the
       expected-red decision + reasoning.
 - [x] 4.2 Update `openspec/changes/issue-864-memory-2-0/tasks.md` task 4.8 —
-      left unticked, noted why (promotion pending).
+      originally left unticked, noted why (promotion pending). **Outcome**:
+      ticked `[x]` in commit `79d24ba4`, after the maintainer promoted the
+      catalog in `525f7c0a`.
 - [x] 5.1 Run focused test (`managed-script-keys-doctrine.test.mjs`) —
-      confirm expected RED shape and content match the measurement.
+      at the time, confirmed the expected RED shape and content matched the
+      measurement. **Outcome**: green since the catalog promotion
+      (`525f7c0a`); re-verified 34/34 passing at `c740bc1c`.
 - [x] 5.2 Run full `npm test` — confirm exactly one new failing test (this
       one), no other regressions vs. the `origin/main` baseline.
 - [x] 6.1 Record-first closing commit via `npm run memory:save`.
