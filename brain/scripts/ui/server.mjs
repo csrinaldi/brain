@@ -170,6 +170,18 @@ export function createUiServer({
     handleRequest(req, res).catch((err) => sendInternalError(res, err));
   });
 
+  // A post-bind failure (`EMFILE` on `accept()` is the documented case) fires
+  // an ASYNC 'error' event on the live `httpServer`, not just during
+  // `listen()`'s own startup window — `listen()`'s `once('error', onError)`
+  // below is removed the moment 'listening' fires (see `onListening`). Same
+  // defect class as judgment:cold-3: an EventEmitter throws out of `.emit()`
+  // when 'error' has no listener, which would crash an otherwise-recoverable
+  // accept failure into a process death. This baseline listener never comes
+  // off, so 'error' always has somewhere to go for the server's whole
+  // lifetime; `_lastServerError` is a test-only seam to observe it.
+  let lastServerError = null;
+  httpServer.on('error', (err) => { lastServerError = err; });
+
   async function handleRequest(req, res) {
     const { pathname } = new URL(req.url, 'http://localhost');
     if (POST_ONLY_PATHS.has(pathname)) {
@@ -265,6 +277,10 @@ export function createUiServer({
     // socket race. Not read by any production code path above.
     _clients: clients,
     _registerClient: registerClient,
+    // Test-only seam (sweep): lets a test force the server's own post-bind
+    // 'error' path deterministically, without a real EMFILE.
+    _httpServer: httpServer,
+    get _lastServerError() { return lastServerError; },
   };
   return api;
 }

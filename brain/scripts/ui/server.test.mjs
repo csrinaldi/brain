@@ -552,6 +552,33 @@ test('#881: judgment:cold-3 — a dead SSE client\'s write error is handled per 
   }
 });
 
+// ── sweep: a post-bind httpServer 'error' event never crashes the process ──
+//
+// Same defect class as judgment:cold-3, one level up: `listen()`'s own
+// `once('error', onError)` is removed the moment 'listening' fires
+// (`onListening` calls `httpServer.removeListener('error', onError)`), so
+// after a successful `listen()` the live `httpServer` has NO 'error'
+// listener at all. A post-bind failure (`EMFILE` on `accept()` is the
+// documented case) fires an async 'error' on the server itself — with zero
+// listeners, that throws out of `.emit()` and crashes an otherwise
+// recoverable accept failure into a process death.
+
+test('#881: sweep — a post-bind httpServer "error" event (e.g. EMFILE, fired after listen() already resolved) never crashes the process', { timeout: 3000 }, async () => {
+  const server = createUiServer({ root: makeFixture(), _now: now, poll: false });
+  await server.listen(0);
+  try {
+    setImmediate(() => server._httpServer.emit('error', new Error('EMFILE: too many open files')));
+    await waitUntil(() => server._lastServerError !== null);
+    assert.match(server._lastServerError.message, /EMFILE/);
+
+    // the server is still alive and answering requests after the error
+    const res = await fetch(`http://127.0.0.1:${server.port}/api/snapshot`);
+    assert.equal(res.status, 200);
+  } finally {
+    await server.close();
+  }
+});
+
 // ── R881-5 S1 (re-run) / R881-5 S2: the now-complete route table ────────────
 
 test('#881: R881-5 S1 (re-run) — mutation methods are rejected on every non-control route, including /api/stream', async () => {
