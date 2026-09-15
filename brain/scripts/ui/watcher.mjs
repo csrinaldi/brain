@@ -32,9 +32,10 @@
 // deviation this records). The worktree's `<n>` id is NEVER the basename
 // of its path — `git worktree add /a/foo` and `git worktree add /b/foo`
 // both land a `foo` LEAF, but git deduplicates the admin dirs (`worktrees/foo`,
-// `worktrees/foo1`), so the id is read from each worktree's own `.git` file
-// (`gitdir: <git-common>/worktrees/<n>`) instead (cold review of PR #971
-// round 6, R881-3).
+// `worktrees/foo1`), so the id is read from `<git-common>/worktrees/<n>/gitdir`
+// (one line: `<path>/.git`) instead — every read stays inside `<git-common>/`,
+// git's own metadata, and NEVER touches anything under a worktree's own path
+// (cold review of PR #971 round 8, R881-3).
 //
 // `openspec/changes/` re-syncs its children the SAME way, on its own event
 // (`rescanChangeDirs()`): a change dir created after `start()` — the normal
@@ -51,7 +52,7 @@
 
 import { watch as fsWatch, readdirSync, readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { basename, isAbsolute, join } from 'node:path';
+import { isAbsolute, join, resolve } from 'node:path';
 
 import { ANTI_PATTERN_DIRS } from '../status/anti-patterns.mjs';
 import { CHANGES_ROOT, parseChangeId } from '../lib/sdd-layout.mjs';
@@ -268,24 +269,48 @@ export function createWatcher({
    * The id is NEVER `basename(path)` (cold review round 6, R881-3): two
    * worktrees whose paths share a leaf name (`/a/foo`, `/b/foo`) get
    * DISTINCT admin dirs from `git worktree add` (`worktrees/foo`,
-   * `worktrees/foo1`), so the id is read from each worktree's own `.git`
-   * file (`gitdir: <git-common>/worktrees/<id>`) instead. A worktree whose
-   * `.git` file is unreadable or whose path is gone is a said failure
-   * (`recordFailure()`) and is skipped, not silently dropped from the rest.
+   * `worktrees/foo1`). The map from porcelain path to admin id is built by
+   * listing `<git-common>/worktrees/` and reading each entry's `gitdir` file
+   * (one line: `<path>/.git`) — NEVER by reading anything under the
+   * worktree's own path, because `<git-common>/` is git's own metadata and a
+   * worktree's path is a working tree (cold review of PR #971 round 8,
+   * R881-3). A `gitdir` that is missing, unreadable, or malformed is a said
+   * failure (`recordFailure()`) for that one admin entry and is skipped, not
+   * silently dropped from the rest. A porcelain path left unmatched once
+   * every readable admin entry is mapped is said too — never silently
+   * dropped — unless a `gitdir` read failed this round, in which case that
+   * failure already explains the gap.
    */
   function activeWorktrees() {
     let stdout;
     try { stdout = run('git', ['worktree', 'list', '--porcelain']); } catch (err) { recordFailure('<git-common>/worktrees', err); return null; }
-    const current = [];
-    for (const s of parseWorktreeStanzas(stdout).slice(1)) {
-      if (s.bare) continue;
-      const label = `<git-common>/worktrees (${s.path})`;
+    const stanzas = parseWorktreeStanzas(stdout).slice(1).filter((s) => !s.bare);
+
+    const worktreesAdminDir = join(resolvedGitCommonDir, 'worktrees');
+    let ids;
+    try { ids = _readdir(worktreesAdminDir); } catch (err) { recordFailure('<git-common>/worktrees', err); return null; }
+
+    const idByPath = new Map();
+    let anyGitdirReadFailed = false;
+    for (const id of ids) {
+      const label = `<git-common>/worktrees/${id}/gitdir`;
       try {
-        const match = /^gitdir:\s*(.+?)\s*$/m.exec(_readFile(join(s.path, '.git'), 'utf8'));
-        if (!match) throw new Error(`unrecognized .git file at ${s.path}`);
+        const raw = _readFile(join(worktreesAdminDir, id, 'gitdir'), 'utf8').trim();
+        if (!raw.endsWith('/.git')) throw new Error(`malformed gitdir contents at ${label}`);
+        idByPath.set(resolve(raw.slice(0, -'/.git'.length)), id);
         failed = failed.filter((f) => f.path !== label);
-        current.push({ path: s.path, id: basename(match[1]) });
-      } catch (err) { recordFailure(label, err); }
+      } catch (err) { recordFailure(label, err); anyGitdirReadFailed = true; }
+    }
+
+    failed = failed.filter((f) => f.path !== '<git-common>/worktrees');
+    const current = [];
+    for (const s of stanzas) {
+      const id = idByPath.get(resolve(s.path));
+      if (id === undefined) {
+        if (!anyGitdirReadFailed) recordFailure('<git-common>/worktrees', new Error(`no worktrees/*/gitdir admin entry matches ${s.path}`));
+        continue;
+      }
+      current.push({ path: s.path, id });
     }
     return current;
   }
@@ -294,7 +319,10 @@ export function createWatcher({
     if (!resolvedGitCommonDir) return;
     const current = activeWorktrees();
     if (current === null) return; // the failure is already recorded — skip reconciliation, leave every current watch untouched
-    failed = failed.filter((f) => f.path !== '<git-common>/worktrees'); // the worktree list is readable again — drop a stale failure entry
+    // `activeWorktrees()` owns the `<git-common>/worktrees` failure entry's
+    // whole lifecycle now (list failure, admin-dir read failure, and an
+    // unmatched porcelain path) — clearing it here again would erase a
+    // mismatch it just recorded THIS round.
     const currentIds = new Set(current.map((w) => w.id));
     for (const [id] of watchedWorktrees) {
       if (!currentIds.has(id)) {

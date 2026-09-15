@@ -26,20 +26,19 @@ function makeGitCommonFixture() {
   const gitCommonDir = testTmp('git-common-');
   const mk = (p) => mkdirSync(join(gitCommonDir, p), { recursive: true });
   mk('logs');
-  mk('worktrees/alpha/logs');
-  mk('worktrees/beta/logs');
+  mk('worktrees');
   return gitCommonDir;
 }
 
 /**
- * Writes a REAL linked-worktree `.git` file at `path` pointing back to
- * `<gitCommonDir>/worktrees/<id>` — the id-resolution source `activeWorktrees()`
- * reads instead of `basename(path)` (cold review of PR #971 round 6, R881-3).
+ * Writes a REAL `<gitCommonDir>/worktrees/<id>/gitdir` file — the
+ * id-resolution source `activeWorktrees()` reads instead of anything under
+ * `path` (cold review of PR #971 round 8, R881-3). Content is exactly what
+ * git itself writes: `<path>/.git`, one line.
  */
 function writeWorktreeGitFile(gitCommonDir, path, id) {
   mkdirSync(join(gitCommonDir, 'worktrees', id, 'logs'), { recursive: true });
-  mkdirSync(path, { recursive: true });
-  writeFileSync(join(path, '.git'), `gitdir: ${join(gitCommonDir, 'worktrees', id)}\n`);
+  writeFileSync(join(gitCommonDir, 'worktrees', id, 'gitdir'), `${join(path, '.git')}\n`);
 }
 
 // ── test doubles ─────────────────────────────────────────────────────────
@@ -320,6 +319,63 @@ test("#881: a worktree whose watch failed is retried on the next rescan, never l
   await Promise.resolve();
   assert.equal(recomputes.length, 1, 'a commit in alpha is no longer silently invisible for the rest of the process');
 
+  w.close();
+});
+
+// ── cold review of PR #971 round 8, R881-3: the id comes ONLY from
+// `<git-common>/worktrees/<id>/gitdir` — a malformed or unreadable one is a
+// said failure for that one admin entry, never a crash, and never takes
+// down the rest of the scan ─────────────────────────────────────────────────
+
+test('#881: a worktree whose gitdir file is malformed is a said failure — the OTHER worktree stays watched and still fires', async () => {
+  const root = makeWatcherFixture();
+  const gitCommonDir = makeGitCommonFixture();
+  const alphaPath = join(dirname(root), 'alpha');
+  const betaPath = join(dirname(root), 'beta');
+  mkdirSync(join(gitCommonDir, 'worktrees', 'alpha', 'logs'), { recursive: true });
+  writeFileSync(join(gitCommonDir, 'worktrees', 'alpha', 'gitdir'), '   \n'); // malformed — no trailing "/.git"
+  writeWorktreeGitFile(gitCommonDir, betaPath, 'beta');
+  const _run = () => `worktree ${root}\n\nworktree ${alphaPath}\n\nworktree ${betaPath}\n`;
+  const _watch = spyWatch();
+  const scheduler = fakeScheduler();
+  const recomputes = [];
+  const w = createWatcher({
+    root, gitCommonDir, _watch, _run,
+    _setTimeout: scheduler.setTimeout, _clearTimeout: scheduler.clearTimeout,
+    onRecompute: async (evt) => { recomputes.push(evt); },
+  });
+  w.start();
+
+  assert.ok(
+    w.state().failed.some((f) => f.path === '<git-common>/worktrees/alpha/gitdir' && /malformed/.test(f.reason)),
+    'the malformed gitdir file is recorded as a said failure naming that admin entry',
+  );
+  assert.equal(w.state().ok, false);
+
+  const betaLogs = join(gitCommonDir, 'worktrees', 'beta', 'logs');
+  assert.ok(_watch.calls.some((c) => c.path === betaLogs), 'the OTHER worktree is still watched');
+  _watch.fire(betaLogs);
+  scheduler.runLatest();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(recomputes.length, 1, 'the other worktree still fires — one malformed gitdir does not take down the scan');
+  w.close();
+});
+
+test('#881: a porcelain worktree path with no matching worktrees/*/gitdir admin entry is a said failure, not silently dropped', () => {
+  const root = makeWatcherFixture();
+  const gitCommonDir = makeGitCommonFixture();
+  const ghostPath = join(dirname(root), 'ghost'); // reported by `git worktree list`, but no admin dir maps back to it
+  const _run = () => `worktree ${root}\n\nworktree ${ghostPath}\n`;
+  const _watch = spyWatch();
+  const w = createWatcher({ root, gitCommonDir, _watch, _run });
+  w.start();
+
+  assert.ok(
+    w.state().failed.some((f) => f.path === '<git-common>/worktrees' && f.reason.includes(ghostPath)),
+    'the unmatched porcelain path is recorded as a said failure naming the path',
+  );
+  assert.equal(w.state().ok, false);
   w.close();
 });
 
