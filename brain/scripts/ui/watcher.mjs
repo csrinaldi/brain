@@ -1,53 +1,26 @@
 // watcher.mjs — directory watchers over the committed tier only (Q3, D4,
-// #881 PR 2). Every watch target is a DIRECTORY, never a file: git replaces
-// `HEAD`/`packed-refs` by writing a `.lock` file and renaming over the
-// target, which orphans a file-bound `fs.watch` the moment it fires once. A
-// directory watch survives the rename and keeps seeing every write after it.
+// #881 PR 2). Every watch is a DIRECTORY, never a file: git replaces
+// `HEAD`/`packed-refs` via a `.lock`-then-rename, which orphans a file-bound
+// `fs.watch`; a directory watch survives the rename (R881-10).
 //
-// The watched set is exactly Q3's table — root, `brain/`,
-// `brain/project/decisions/`, each `ANTI_PATTERN_DIRS` entry,
-// `.memory/records/`, `openspec/changes/`, each
-// `openspec/changes/issue-*/`, `<git-common>/`, `<git-common>/logs/`,
-// `<git-common>/worktrees/`, and `<git-common>/worktrees/<n>/logs/` per
-// worktree — and NOTHING else. A worktree's own working tree is never
-// watched, which doubles as R881-10's "no uncommitted content is ever read".
+// The reflog (`logs/HEAD`) is APPENDED on every HEAD movement and is one
+// flat path per worktree — the load-bearing watch target, not `HEAD` itself.
+// Every fire is funnelled through one 250 ms trailing debounce (D5),
+// serialised so a `git rebase` burst produces at most two recomputes.
 //
-// The reflog (`logs/HEAD`) is the load-bearing choice: it is APPENDED on
-// every HEAD movement — commit, `commit --amend`, fast-forward merge, reset,
-// rebase step, checkout — and it is one flat path per worktree, unlike
-// `logs/refs/heads/<branch>` which nests one dir per branch-name segment.
+// `<git-common>/worktrees/` re-scans on its own event via `git worktree list
+// --porcelain` — the same grammar as `collect.mjs:115-129`'s
+// `parseWorktrees()`, DUPLICATED here (out of this PR's file-scope fence,
+// see apply-progress). A worktree's `<n>` id is NEVER `basename(path)` (two
+// worktrees can share a leaf) — it comes from `<git-common>/worktrees/<n>/gitdir`,
+// never a path under the worktree itself (round 8, R881-3).
 //
-// Every fired watch is funnelled through one 250 ms trailing debounce (D5).
-// Recomputes are serialised: an event that lands while a recompute is
-// already running schedules exactly ONE follow-up, so a `git rebase` that
-// moves HEAD forty times in a burst produces at most two recomputes, never
-// forty.
+// `openspec/changes/` re-syncs its children the same way (`rescanChangeDirs()`,
+// judgment:cold-7); `watchDir()`/`closeWatch()` share one generic
+// `trackingId`/`trackingMap` pair between the two resync paths.
 //
-// `<git-common>/worktrees/` re-scans on its own event, using `git worktree
-// list --porcelain` — the same stanza grammar as
-// `memory/lane/collect.mjs:115-129`'s `parseWorktrees()`, DUPLICATED here
-// rather than imported: this PR's file scope (tasks.md's
-// `brain-slice-scope/1` fence) is `server.mjs`/`watcher.mjs`/`poller.mjs`
-// only, and `collect.mjs` is not in it (see apply-progress for the
-// deviation this records). The worktree's `<n>` id is NEVER the basename
-// of its path — `git worktree add /a/foo` and `git worktree add /b/foo`
-// both land a `foo` LEAF, but git deduplicates the admin dirs (`worktrees/foo`,
-// `worktrees/foo1`), so the id is read from `<git-common>/worktrees/<n>/gitdir`
-// (`<path>/.git`, one line) instead — every read stays inside `<git-common>/`
-// (git's own metadata), never under a worktree's own path (round 8, R881-3).
-//
-// `openspec/changes/` re-syncs its children the SAME way, on its own event
-// (`rescanChangeDirs()`): a change dir created after `start()` — the normal
-// case for `/sdd-new` on a long-lived server — gets watched from then on,
-// and a removed one has its watch closed (cold review of PR #971 rev 5,
-// judgment:cold-7, R881-3, design.md:228). `watchDir()`/`closeWatch()` share
-// one generic `trackingId`/`trackingMap` bookkeeping pair between the two
-// resync paths rather than each root growing its own copy.
-//
-// A watch that cannot be registered (`ENOSPC`, `EPERM`, a path that does not
-// exist in this root) is caught PER DIRECTORY. The watcher never throws out
-// of the constructor or `start()`: the server keeps running, and `state()`
-// reports which paths failed and why (Q3 "when the watcher fails").
+// A watch that cannot be registered is caught PER DIRECTORY — the watcher
+// never throws, `state()` reports which paths failed and why.
 
 import { watch as fsWatch, readdirSync, readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';

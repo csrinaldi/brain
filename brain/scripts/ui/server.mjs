@@ -28,7 +28,7 @@ import { fileURLToPath } from 'node:url';
 import { buildSnapshot } from '../status/snapshot.mjs';
 import { createForgeCache } from './forge-cache.mjs';
 import { diffSections } from './diff.mjs';
-import { createWatcher } from './watcher.mjs';
+import { createWatcher, resolveGitCommonDir } from './watcher.mjs';
 import { createPoller } from './poller.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -81,6 +81,7 @@ export function createUiServer({
   // per HTTP request"). Refreshed only by a completed poll or a debounced
   // watch event, never by an HTTP request itself.
   let current = null;
+  let resolvedGitCommonDir = gitCommonDir; // lazily resolved below — needed for a linked worktree's --git-dir
   const clients = new Set();
 
   // `ServerResponse.write()` after its socket has already gone away does NOT
@@ -166,9 +167,20 @@ export function createUiServer({
       for (const { name, section } of diffSections(previous, current)) {
         broadcast('section', { name, section, generatedAt: current.generatedAt, cause: causes[0] ?? 'poll' });
       }
-      for (const worktreePath of refWorktrees) {
+      // A worktree's branch is read via `--git-dir` on its own admin dir under
+      // the common dir — never `-C worktreePath` — so no path under the
+      // worktree itself is ever opened (R881-3: "not even a linked worktree's
+      // own `.git` file"). The primary checkout has no admin dir; a plain
+      // call (default cwd) resolves its own HEAD instead.
+      for (const { path: worktreePath, id } of refWorktrees) {
         let head = null;
-        try { head = run('git', ['-C', worktreePath, 'rev-parse', '--abbrev-ref', 'HEAD']).trim(); } catch { head = null; }
+        try {
+          if (id && resolvedGitCommonDir === null) resolvedGitCommonDir = resolveGitCommonDir({ root, _run: run });
+          const args = id
+            ? ['--git-dir', join(resolvedGitCommonDir, 'worktrees', id), 'rev-parse', '--abbrev-ref', 'HEAD']
+            : ['rev-parse', '--abbrev-ref', 'HEAD'];
+          head = run('git', args).trim();
+        } catch { head = null; }
         broadcast('refs', { worktree: worktreePath, head, at: _now().toISOString() });
       }
       broadcast('status', buildMeta());

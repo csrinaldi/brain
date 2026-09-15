@@ -1,13 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { readFileSync, writeFileSync, readdirSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { readFileSync, writeFileSync, readdirSync, statSync, mkdirSync } from 'node:fs';
+import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { EventEmitter } from 'node:events';
 
 import { buildSnapshot } from '../status/snapshot.mjs';
 import { makeSnapshotFixture as makeFixture } from '../__fixtures__/snapshot-tree.mjs';
+import { testTmp } from '../lib/test-tmp.mjs';
 import { createForgeCache } from './forge-cache.mjs';
 import { createUiServer, parseArgs, main, KNOWN_ROUTES, resolveForgeSource } from './server.mjs';
 
@@ -444,7 +445,9 @@ test('#881: R881-2 S2 (refs) — a ref-tracking watch (<git-common>/logs) yields
   const scheduler = fakeScheduler();
   const _watch = spyWatch();
   const gitCommonDir = join(root, '.git'); // never touched on disk — `_watch` is a spy
+  const gitCalls = [];
   const _run = (file, args) => {
+    gitCalls.push(args);
     if (args[0] === 'worktree') return `worktree ${root}\n`;
     if (args.includes('rev-parse') && args.includes('--abbrev-ref')) return 'feat/example\n';
     throw new Error(`unexpected git call: ${args.join(' ')}`);
@@ -468,6 +471,58 @@ test('#881: R881-2 S2 (refs) — a ref-tracking watch (<git-common>/logs) yields
     const payload = JSON.parse(frame.slice('event: refs\ndata: '.length));
     assert.equal(payload.worktree, root);
     assert.equal(payload.head, 'feat/example');
+
+    // R881-3, cold review round 9: the primary checkout's own branch is read
+    // with a plain call (default cwd), never `-C` on the worktree path.
+    const headCall = gitCalls.find((args) => args.includes('rev-parse') && args.includes('--abbrev-ref'));
+    assert.deepEqual(headCall, ['rev-parse', '--abbrev-ref', 'HEAD']);
+    ac.abort();
+  } finally {
+    await server.close();
+  }
+});
+
+test('#881: R881-3 cold review round 9 — a linked worktree resolves its branch via --git-dir on its own admin dir, never -C on the worktree path', async () => {
+  const root = makeFixture();
+  const cache = createForgeCache();
+  cache.setIssueList([]);
+  cache.setMrList([]);
+  const scheduler = fakeScheduler();
+  const _watch = spyWatch();
+  const gitCommonDir = testTmp('server-git-common-'); // REAL dir — activeWorktrees() reads its own worktrees/<id>/gitdir file
+  const alphaPath = join(dirname(root), 'alpha');
+  mkdirSync(join(gitCommonDir, 'worktrees', 'alpha', 'logs'), { recursive: true });
+  writeFileSync(join(gitCommonDir, 'worktrees', 'alpha', 'gitdir'), `${join(alphaPath, '.git')}\n`);
+  const gitCalls = [];
+  const _run = (file, args) => {
+    gitCalls.push(args);
+    if (args[0] === 'worktree') return `worktree ${root}\n\nworktree ${alphaPath}\n`;
+    if (args.includes('rev-parse') && args.includes('--abbrev-ref')) return 'feat/alpha\n';
+    throw new Error(`unexpected git call: ${args.join(' ')}`);
+  };
+  const server = createUiServer({
+    root, vcs: cache.port, project: 'o/r', _now: now, poll: false,
+    gitCommonDir, _watch, _run, _setTimeout: scheduler.setTimeout, _clearTimeout: scheduler.clearTimeout,
+  });
+  await server.listen(0);
+  const ac = new AbortController();
+  try {
+    const res = await fetch(`http://127.0.0.1:${server.port}/api/stream`, { signal: ac.signal });
+    const readFrame = frameReader(res);
+    await readFrame(); // sync
+
+    _watch.fire(join(gitCommonDir, 'worktrees', 'alpha', 'logs'));
+    scheduler.runLatest();
+
+    const frame = await readFrame();
+    assert.match(frame, /^event: refs\ndata: \{/);
+    const payload = JSON.parse(frame.slice('event: refs\ndata: '.length));
+    assert.equal(payload.worktree, alphaPath);
+    assert.equal(payload.head, 'feat/alpha');
+
+    const headCall = gitCalls.find((args) => args.includes('rev-parse') && args.includes('--abbrev-ref'));
+    assert.deepEqual(headCall, ['--git-dir', join(gitCommonDir, 'worktrees', 'alpha'), 'rev-parse', '--abbrev-ref', 'HEAD']);
+    assert.ok(!headCall.includes('-C'), 'never opens the worktree path itself');
     ac.abort();
   } finally {
     await server.close();
