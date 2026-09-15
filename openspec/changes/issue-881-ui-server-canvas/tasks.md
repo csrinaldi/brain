@@ -253,7 +253,7 @@ Estimated: ~420 source, ~380 test, **~800 total**. Depends on PR 2 merged
 R881-7, and R881-8's data shaping (the SPA wiring that renders these tabs
 ships in PR 4).
 
-- [ ] T1a. `brain/scripts/ui/lib/layout.test.mjs`: failing tests for — same
+- [x] T1a. `brain/scripts/ui/lib/layout.test.mjs`: failing tests for — same
       input, same output (R881-7 S1: two calls with the same `{nodes,
       edges}`, including a run over a shuffled input array, return
       byte-identical coordinates, D10 "rejected: a convergence loop"); a
@@ -264,11 +264,11 @@ ships in PR 4).
       D10 point 2); nodes with no edges land in the trailing `unlinked`
       band, never dropped (ruling 1 / R881-6 S1's node-universe guarantee,
       the layout half of it).
-- [ ] T1b. `brain/scripts/ui/lib/layout.mjs`: implement the four passes —
+- [x] T1b. `brain/scripts/ui/lib/layout.mjs`: implement the four passes —
       DFS cycle-breaking with `reversed: true` markers, longest-path
       layering, exactly 4 fixed barycentre sweeps (ties break on issue
       number), coordinates plus bounding box — so T1a passes.
-- [ ] T2a. `brain/scripts/ui/lib/colour.test.mjs`: failing tests for — no
+- [x] T2a. `brain/scripts/ui/lib/colour.test.mjs`: failing tests for — no
       node is filtered away (R881-6 S1: a 90-node fixture including
       undeclared `?`-track and `unreadable` nodes all receive a colour
       class); roadmap not computed is never mistaken for planned (R881-6
@@ -279,35 +279,35 @@ ships in PR 4).
       `node.status` constants from `snapshot.mjs`/`epic-graph.mjs` and
       asserting every one maps to a class (D9 note — a renamed constant
       fails this test instead of painting a node grey).
-- [ ] T2b. `brain/scripts/ui/lib/colour.mjs`: implement the state/status →
+- [x] T2b. `brain/scripts/ui/lib/colour.mjs`: implement the state/status →
       CSS-class map so T2a passes.
-- [ ] T3a. `brain/scripts/ui/lib/spec-cards.test.mjs`: failing test parsing
+- [x] T3a. `brain/scripts/ui/lib/spec-cards.test.mjs`: failing test parsing
       a fixture `spec.md`'s `### R<issue>-<n>: <title>` /
       `#### Scenario: <name>` / `- **WHEN** … **THEN** …` grammar into
       requirement/scenario cards, each carrying `{path, line}` (R881-8's
       Spec-tab shape, D11).
-- [ ] T3b. `brain/scripts/ui/lib/spec-cards.mjs`: implement the
+- [x] T3b. `brain/scripts/ui/lib/spec-cards.mjs`: implement the
       deterministic parser so T3a passes.
-- [ ] T4a. `brain/scripts/ui/lib/tasks-list.test.mjs`: failing test parsing
+- [x] T4a. `brain/scripts/ui/lib/tasks-list.test.mjs`: failing test parsing
       a fixture `tasks.md`'s `- [ ]`/`- [x]`/`- [X]` lines (case-
       insensitive, mirroring `AGENTS.md:377-379`) into checklist items with
       line numbers (R881-8's Tasks-tab shape).
-- [ ] T4b. `brain/scripts/ui/lib/tasks-list.mjs`: implement the pure line
+- [x] T4b. `brain/scripts/ui/lib/tasks-list.mjs`: implement the pure line
       parser so T4a passes.
-- [ ] T5a. `brain/scripts/ui/lib/blame.test.mjs`: failing test parsing a
+- [x] T5a. `brain/scripts/ui/lib/blame.test.mjs`: failing test parsing a
       fixture `git blame --porcelain` text (injected, no shell inside
       `lib/`) into per-line `{author, authorTime, sha}` (Q2/D13); a
       malformed/absent blame input yields `{ok: false, reason}` per item,
       never a blank.
-- [ ] T5b. `brain/scripts/ui/lib/blame.mjs`: implement the pure porcelain
+- [x] T5b. `brain/scripts/ui/lib/blame.mjs`: implement the pure porcelain
       parser so T5a passes.
-- [ ] T6a. `brain/scripts/ui/lib/resume-view.test.mjs`: failing test
+- [x] T6a. `brain/scripts/ui/lib/resume-view.test.mjs`: failing test
       shaping an already-parsed frontmatter object into the three
       ruling-3 fields (`next_action`, `current_slice`, `blockers`, D12); a
       missing field renders `{ok: false, reason: "resume.md on <branch>
       has no next_action"}` beside the fields that are present; confirms
       `validateResume` is not used as a gate.
-- [ ] T6b. `brain/scripts/ui/lib/resume-view.mjs`: implement the shaper so
+- [x] T6b. `brain/scripts/ui/lib/resume-view.mjs`: implement the shaper so
       T6a passes.
 - [ ] T7a. `brain/scripts/ui/change-route.test.mjs`: failing tests for —
       full drawer for a change with a spec and tasks (R881-8 S1: `GET
@@ -327,28 +327,41 @@ ships in PR 4).
       /api/change/{issue}` (injected `_read`/`_run`, the one caller of
       `resume-frontmatter.mjs`'s `parseFrontmatter`, D11/D12) so T7a
       passes.
-- [ ] T8. `brain/scripts/ui/lib/source-guard.test.mjs`: guard test — no
+- [x] T8. `brain/scripts/ui/lib/source-guard.test.mjs`: guard test — no
       file under `ui/lib/**` imports anything outside `ui/lib/**` (no
       `node:` builtin, no `../status/*`, D9). Scans import lines of every
       module in `lib/` written in T1–T6; test-only.
-- [ ] T9. `brain/scripts/ui/provenance.test.mjs`: A3 property test — over
-      the fixture change, every object emitted by `spec-cards.mjs`,
-      `tasks-list.mjs`, `blame.mjs`/`resume-view.mjs` and
-      `change-route.mjs`'s reviews rows has a non-empty `source.path` or
-      `source.url`. No DOM; test-only, composes T1–T7's modules.
-- [ ] T10. Verify: `GIT_CONFIG_GLOBAL=/dev/null npm test` and `npm run
+- [x] T9. `brain/scripts/ui/lib/provenance.test.mjs`: A3 property test — over
+      the fixture change, every object emitted by `spec-cards.mjs` and
+      `tasks-list.mjs`/`blame.mjs`, plus every `resume-view.mjs` field
+      (including one that failed to shape), has a non-empty `source.path`
+      or `source.url`. No DOM; test-only, composes T1–T6's modules. Scoped
+      to this run's split — `change-route.mjs`'s reviews rows (T7) get
+      their own property-test coverage when that task lands (see the T7
+      deferral note below).
+
+**T7 deferred to a follow-up run of this PR.** This apply batch was scoped
+by the orchestrator to `ui/lib/**` only — the six modules `D8`'s module map
+lists under `lib/` (T1–T6), plus the cross-cutting guard/property tests
+(T8/T9). `change-route.mjs` is deliberately NOT under `lib/`: it is the one
+file in this slice that does IO (`_read`/`_run`), not a module the browser
+imports directly, so it falls outside "the pure page logic" boundary this
+batch was handed. T7a/T7b stay unchecked; a follow-up apply run implements
+`GET /api/change/{issue}` against the now-complete `lib/` module set.
+- [x] T10. Verify: `GIT_CONFIG_GLOBAL=/dev/null npm test` and `npm run
       brain:repo:check` both green.
-- [ ] T11. `npm run memory:save -- "pure drawer parsers and the layout
+- [x] T11. `npm run memory:save -- "pure drawer parsers and the layout
       module land for #881" "<summary of layout.mjs's determinism/cycle
-      handling, colour.mjs's exhaustive map, and change-route.mjs's
-      branch-resolution order landed in this PR>" --issue 881 --type
-      pattern`, staged with only the new `.memory/records/*.jsonl` file and
-      `.memory/index.jsonl`.
+      handling, colour.mjs's exhaustive map, and the tasks-list/blame/
+      resume-view/spec-cards shapers landed this run — change-route.mjs
+      deferred>" --issue 881 --type pattern`, staged with only the new
+      `.memory/records/*.jsonl` file and `.memory/index.jsonl`.
 
 **Done when**: the layout is deterministic and cycle-tolerant under test
 (R881-7), every constant colour.mjs maps is exhaustive (R881-6), and every
-value the four tab shapers emit carries a `source` (A3) — all without a
-browser.
+value `spec-cards.mjs`/`tasks-list.mjs`/`resume-view.mjs` emit carries a
+`source` (A3) — all without a browser. `change-route.mjs` (T7) and its
+Reviews-tab provenance ship in a follow-up run of this PR.
 
 ---
 
