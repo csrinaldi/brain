@@ -363,8 +363,26 @@ export async function main(argv = [], deps = {}) {
     await server.close();
     proc.exit(0);
   };
-  proc.on('SIGINT', () => { shutdown('SIGINT'); });
-  proc.on('SIGTERM', () => { shutdown('SIGTERM'); });
+  const onSigint = () => { shutdown('SIGINT'); };
+  const onSigterm = () => { shutdown('SIGTERM'); };
+  proc.on('SIGINT', onSigint);
+  proc.on('SIGTERM', onSigterm);
+
+  // judgment:cold-5: nothing ever removed these two listeners. Every
+  // successful `main()` call leaked them on whatever `process` it was given
+  // — against the real process (the default), enough calls print
+  // `MaxListenersExceededWarning`, and the listener itself keeps the process
+  // alive past a caller's own `server.close()`. Whichever path closes the
+  // server — a real signal via `shutdown()` above, or a caller/test closing
+  // it directly without a signal ever firing — the listeners come off too,
+  // by wrapping `close()` once here rather than duplicating the removal in
+  // both places.
+  const realClose = server.close.bind(server);
+  server.close = () => {
+    proc.off('SIGINT', onSigint);
+    proc.off('SIGTERM', onSigterm);
+    return realClose();
+  };
 
   return server;
 }

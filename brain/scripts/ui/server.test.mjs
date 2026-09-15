@@ -88,6 +88,17 @@ async function waitUntil(predicate, { timeoutMs = 1000, stepMs = 5 } = {}) {
   }
 }
 
+/** A minimal fake `process` double — an `EventEmitter` with a no-op `exit()`
+ * — so every `main()` call in this file that does not itself assert on
+ * signal handling attaches its SIGINT/SIGTERM listeners here, never on the
+ * real process (judgment:cold-5). Named distinctly from the SIGINT/SIGTERM
+ * test's own local `fakeProcess`, which asserts on `exit()` directly. */
+function makeFakeProcess() {
+  const p = new EventEmitter();
+  p.exit = () => {};
+  return p;
+}
+
 // ── R881-1 S1/S2: default port, static root, ephemeral port ────────────────
 
 test('#881: R881-1 S1 — no --port defaults to port 3000 (parity checked via parseArgs; binding 3000 in a test run would flake CI)', () => {
@@ -236,7 +247,7 @@ test('#881: parseArgs — --interval overrides the 60s default; --no-poll disabl
 test('#881: --no-poll composes with R881-4 S2 — the poller starts paused, so the timer never fires and the page stays on manual "poll now"', async () => {
   const root = makeFixture();
   const messages = [];
-  const result = await main(['--port', '0', '--root', root, '--no-poll'], { say: (m) => messages.push(m), error: () => {} });
+  const result = await main(['--port', '0', '--root', root, '--no-poll'], { say: (m) => messages.push(m), error: () => {}, process: makeFakeProcess() });
   try {
     const base = `http://127.0.0.1:${result.port}`;
     const res = await fetch(`${base}/api/poll/pause`, { method: 'POST' }); // idempotent state check
@@ -248,7 +259,7 @@ test('#881: --no-poll composes with R881-4 S2 — the poller starts paused, so t
 
 test('#881: main exits 2 on an unknown argument', async () => {
   const errors = [];
-  const code = await main(['--bogus'], { say: () => {}, error: (m) => errors.push(m) });
+  const code = await main(['--bogus'], { say: () => {}, error: (m) => errors.push(m), process: makeFakeProcess() });
   assert.equal(code, 2);
   assert.match(errors.join('\n'), /unknown argument: --bogus/);
 });
@@ -259,7 +270,7 @@ test('#881: EADDRINUSE prints "port <n> is already in use" and exits 2 (D15 — 
   try {
     const port = blocker.port;
     const errors = [];
-    const code = await main(['--port', String(port), '--root', makeFixture()], { say: () => {}, error: (m) => errors.push(m) });
+    const code = await main(['--port', String(port), '--root', makeFixture()], { say: () => {}, error: (m) => errors.push(m), process: makeFakeProcess() });
     assert.equal(code, 2);
     assert.match(errors.join('\n'), new RegExp(`port ${port} is already in use`));
   } finally {
@@ -307,7 +318,7 @@ test('#881: judgment:cold-2 — main() exits 2 with the message when listen() re
   const root = makeFixture();
   const errors = [];
   const code = await main(['--port', '0', '--root', root], {
-    say: () => {}, error: (m) => errors.push(m),
+    say: () => {}, error: (m) => errors.push(m), process: makeFakeProcess(),
     _recomputeCurrent: async () => { throw new Error('boom: startup recompute failed'); },
   });
   assert.equal(code, 2);
@@ -316,7 +327,7 @@ test('#881: judgment:cold-2 — main() exits 2 with the message when listen() re
 
 test('#881: main succeeds on a free (ephemeral) port and reports where it listens', async () => {
   const messages = [];
-  const result = await main(['--port', '0', '--root', makeFixture()], { say: (m) => messages.push(m), error: () => {} });
+  const result = await main(['--port', '0', '--root', makeFixture()], { say: (m) => messages.push(m), error: () => {}, process: makeFakeProcess() });
   assert.notEqual(typeof result, 'number', 'success returns the started server, not an exit code');
   assert.match(messages.join('\n'), /brain:ui listening on http:\/\/127\.0\.0\.1:\d+/);
   await result.close();
@@ -577,6 +588,28 @@ test('#881: sweep — a post-bind httpServer "error" event (e.g. EMFILE, fired a
   } finally {
     await server.close();
   }
+});
+
+// ── judgment:cold-5: main() removes its SIGINT/SIGTERM listeners on close ──
+//
+// `main()` attached `proc.on('SIGINT'/'SIGTERM', ...)` with no matching
+// removal, tied to the real `process` whenever `deps.process` was not
+// overridden. Every successful `main()` call in this file (five of them, no
+// fake process) leaked two listeners on the real process; the listener
+// itself also outlives a caller's own `server.close()` when no signal ever
+// fires, which is the common case in this file's tests.
+
+test('#881: judgment:cold-5 — main() removes its SIGINT/SIGTERM listeners once the server closes, whether closed by a signal or directly', async () => {
+  const proc = makeFakeProcess();
+  const root = makeFixture();
+  const result = await main(['--port', '0', '--root', root], { say: () => {}, error: () => {}, process: proc });
+  assert.equal(proc.listenerCount('SIGINT'), 1);
+  assert.equal(proc.listenerCount('SIGTERM'), 1);
+
+  await result.close(); // closed directly, not via a signal — this is the leak main() had
+
+  assert.equal(proc.listenerCount('SIGINT'), 0, 'the SIGINT listener came off when the server closed, even without a signal firing');
+  assert.equal(proc.listenerCount('SIGTERM'), 0, 'the SIGTERM listener came off too');
 });
 
 // ── R881-5 S1 (re-run) / R881-5 S2: the now-complete route table ────────────
