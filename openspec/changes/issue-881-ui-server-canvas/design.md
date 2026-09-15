@@ -109,9 +109,9 @@ With `I` open issues, `P` open PRs, interval `T = 60 s` → 60 ticks/h.
 
 | Case | Calls/tick | Calls/hour | vs. 5,000/h |
 |---|---|---|---|
-| Cold start (once, at boot) | `1 + I + 1 + P` = 95 | — | one-off |
+| Cold start (once, at boot) | `2 + min(P,10) + I` = 95 | — | one-off |
 | Steady state | `2 + min(P,10) + B` = 2 + 3 + 5 = **10** | **600** | 12 % |
-| Worst bounded case | `2 + 10 + 5` = **17** | **1,020** | 20 % |
+| Worst bounded case | `2 + 10 + 25` = **37** | **2,220** | 44 % |
 | Full fan-out per poll (**rejected**, ruling 2) | `2 + I + P` = 95 | **5,700** | **114 % — over** |
 
 `I = 90`, `P = 3` from `proposal.md:70-77`. The rejected row is the arithmetic
@@ -119,6 +119,25 @@ ruling 2 already did; the design reproduces it because the bound is the whole
 point. `issueList` is `--paginate`d (`github.mjs:442`) so `I ≤ 100` costs one
 request; beyond 100 open issues the fast lane costs `ceil(I/100)` and the table
 shifts by ≤ 1 call/tick.
+
+**Correction (2026-09-14, judgment:cold-4, third cold review of PR #971):**
+the worst-bounded-case row originally read `2 + 10 + 5 = 17` — `B = 5` was the
+only figure used for the body lane's ceiling. That was wrong: the
+implementation never capped the "changed" bucket (issues whose fast-lane row
+moved), only the "new" bucket (`NEW_BODY_CAP = 20`), so a tick where every
+open issue changed at once (a bulk label rename) had no upper bound at all —
+`issueView` was called once per open issue, not `min(I, B)`. The fix bounds
+the body lane's TOTAL per tick at `BODY_CAP + NEW_BODY_CAP = 5 + 20 = 25`
+(new issues and already-known changed issues share one ceiling); the
+corrected worst bounded case is `2 + min(P,10) + 25 = 37` calls/tick, 2,220/h,
+44 % of the 5,000/h ceiling — still well under budget. Issues that changed
+but did not fit a tick's slice are never dropped: they queue in a FIFO
+pending set (`poller.mjs`'s `pendingBodyRefresh`) and drain oldest-first on
+later ticks, so a mass change of all 90 open issues fully drains within
+`ceil(90/25) = 4` ticks, not the 18-tick `ceil(I/B)` figure below (that
+figure describes the *unforced*, least-recently-refreshed fallback only,
+which still uses `B = 5` as its per-tick share once the pending queue is
+empty).
 
 **Full-refresh latency of body-only facts**: `ceil(I / B)` ticks = `ceil(90/5)` =
 18 ticks = 18 minutes worst case *with no other signal*. A body edit that also

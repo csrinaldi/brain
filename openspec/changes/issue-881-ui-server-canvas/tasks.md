@@ -8,9 +8,13 @@ issue: 881
 Strict TDD is active for this project (`npm test` = `node --test
 "brain/scripts/**/*.test.mjs" "test/**/*.e2e.test.mjs"`). Every task that adds
 behaviour is preceded by the task that writes its failing test. Chain
-strategy: **stacked-to-main** — each PR below targets `main` in order; PR
-*n+1* branches off PR *n*'s branch (or off `main` once PR *n* is merged), not
-off a tracker branch.
+strategy (maintainer ruling, 2026-09-14, supersedes the stacked-to-main text
+below): **feature-branch-chain** on the tracker `feature/brain-ui`. PR 1
+(#964) is squash-merged into the tracker as `8d074e44`. PR *n* targets the
+tracker branch once PR *n-1* is merged into it, or targets PR *n-1*'s branch
+directly while that PR is still open. The tracker PR (#970, draft) is the
+only PR in this chain that targets `main`, and it closes #881 once every
+child PR has landed on the tracker.
 
 ## Ticket reconciliation
 
@@ -140,7 +144,7 @@ control routes and their 405 boundary), R881-9 (watcher/poller failure
 surfaced in `/api/meta` and the `status` SSE frame), and the R881-10 "no MCP
 or heartbeat route" scenario over the now-complete route table.
 
-- [ ] T1a. `brain/scripts/ui/watcher.test.mjs`: failing tests for —
+- [x] T1a. `brain/scripts/ui/watcher.test.mjs`: failing tests for —
       an uncommitted working-tree edit produces no event (R881-3 S1: the
       watcher registers watches **only** for the Q3 table's enumerated
       directories — root, `brain/`, `brain/project/decisions/`, each
@@ -158,12 +162,12 @@ or heartbeat route" scenario over the now-complete route table.
       (`ENOSPC`/`EPERM`/`ENOENT`) leaves the server running and shapes
       `{ok: false, reason, watched: <n>, failed: [<paths>]}` (Q3 "when the
       watcher fails").
-- [ ] T1b. `brain/scripts/ui/watcher.mjs`: implement directory watchers
+- [x] T1b. `brain/scripts/ui/watcher.mjs`: implement directory watchers
       (non-recursive, no `recursive: true`) over the Q3 set, the 250 ms
       trailing debounce with serialised recompute (at most one queued
       follow-up), worktree re-scan, and per-directory failure handling so
       T1a passes.
-- [ ] T2a. `brain/scripts/ui/poller.test.mjs`: failing tests for — unchanged
+- [x] T2a. `brain/scripts/ui/poller.test.mjs`: failing tests for — unchanged
       issues cost nothing on the next poll (R881-4 S1: N unchanged
       `issueList` rows issue zero `issueView` calls on tick 2); disable and
       manual poll (R881-4 S2: the timer stops firing when disabled, "poll
@@ -175,12 +179,12 @@ or heartbeat route" scenario over the now-complete route table.
       calls/tick, cold start `1 + I + 1 + P`; a poll failure keeps the
       previous cache and sets `poller.lastError`/`lastOkAt` without
       emptying any section (R881-9 S2, D2).
-- [ ] T2b. `brain/scripts/ui/poller.mjs`: implement the fast lane
+- [x] T2b. `brain/scripts/ui/poller.mjs`: implement the fast lane
       (`issueList` + `mrList`), the review lane (`prReviews`, cap 10,
       round-robin), the body lane (`issueView`, cap 5 steady state plus up
       to 20 brand-new numbers in the tick they appear), pause/resume/once,
       and failure handling so T2a passes.
-- [ ] T3a. `brain/scripts/ui/server.test.mjs` (extend): failing SSE tests
+- [x] T3a. `brain/scripts/ui/server.test.mjs` (extend): failing SSE tests
       using the Q4 reader pattern (`AbortController`, `res.body.getReader()`,
       `TextDecoder`, ephemeral port) — initial connect gets the current
       state first (R881-2 S1: the first frame is `event: sync` carrying the
@@ -193,11 +197,11 @@ or heartbeat route" scenario over the now-complete route table.
       naming `graph` on the next tick); `server.close()` ends every open
       SSE response before closing the listener (no hang under
       `node --test`, D15/Q4).
-- [ ] T3b. `brain/scripts/ui/server.mjs`: implement `GET /api/stream` (the
+- [x] T3b. `brain/scripts/ui/server.mjs`: implement `GET /api/stream` (the
       SSE hub: `sync` first, then `section`/`refs`/`status` frames, no
       heartbeats, D6) wired to `watcher.mjs` and `poller.mjs`, and full
       `close()` teardown so T3a passes.
-- [ ] T4a. `brain/scripts/ui/server.test.mjs` (extend): failing tests for —
+- [x] T4a. `brain/scripts/ui/server.test.mjs` (extend): failing tests for —
       mutation methods rejected outside the poller controls (R881-5 S1,
       re-run over the now-complete route table including `/api/stream`);
       poller controls accept POST only (R881-5 S2: `POST /api/poll/pause`
@@ -206,26 +210,26 @@ or heartbeat route" scenario over the now-complete route table.
       `/resume` and `/once`); the read-only-port test re-run with the
       poller wired in — a full poll cycle plus every route completes with
       no write verb ever invoked (R881-5 S3 / A5, now covering the poller).
-- [ ] T4b. `brain/scripts/ui/server.mjs`: implement `POST
+- [x] T4b. `brain/scripts/ui/server.mjs`: implement `POST
       /api/poll/pause|resume|once`, extend the method check so exactly
       these three routes accept `POST` only (`Allow: POST`) and every other
       route accepts `GET`/`HEAD` only (`Allow: GET, HEAD`) so T4a passes.
-- [ ] T5a. `brain/scripts/ui/server.test.mjs` (extend): failing tests for
+- [x] T5a. `brain/scripts/ui/server.test.mjs` (extend): failing tests for
       full D15 lifecycle — a simulated `SIGINT`/`SIGTERM` stops the poll
       timer, closes every watcher, ends every open SSE response, closes the
       listener, and exits 0 with no hang; `--no-poll` disables the timer
       entirely (composes with R881-4 S2); `--interval <n>` overrides the
       60 s default.
-- [ ] T5b. `brain/scripts/ui/server.mjs`: implement the signal handlers and
+- [x] T5b. `brain/scripts/ui/server.mjs`: implement the signal handlers and
       the `--interval`/`--no-poll` argv extensions so T5a passes.
-- [ ] T6. `brain/scripts/ui/server.test.mjs` (extend): guard test for
+- [x] T6. `brain/scripts/ui/server.test.mjs` (extend): guard test for
       R881-10 S3 — inspect the now-complete route table (`/`,
       `/api/snapshot`, `/api/stream`, `/api/poll/pause|resume|once`) and
       assert there is no MCP resource route and no heartbeat/agent-pulse
       endpoint. Test-only; no production change expected.
-- [ ] T7. Verify: `GIT_CONFIG_GLOBAL=/dev/null npm test` and `npm run
-      brain:repo:check` both green.
-- [ ] T8. `npm run memory:save -- "watcher, poller and SSE hub wire A2 into
+- [x] T7. Verify: `GIT_CONFIG_GLOBAL=/dev/null npm test` and `npm run
+      brain:repo:check` both green. (5389/5389, `rec-56e5504ba47fdf96`.)
+- [x] T8. `npm run memory:save -- "watcher, poller and SSE hub wire A2 into
       brain:ui" "<summary of the committed-tier watcher, the 3-lane poller,
       the sync/section/refs/status SSE frames and the POST-only control
       routes landed in this PR>" --issue 881 --type pattern`, staged with
