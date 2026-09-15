@@ -1,6 +1,6 @@
 # ADR-0011 — Feature-Scoped Working Memory
 
-**Status**: Accepted  
+**Status**: Accepted · **amended 15/09/2026** (Amendment 1 — see below)  
 **Date**: 2026-06-26
 
 ## Context
@@ -34,7 +34,7 @@ This decision builds on the foundation restored in the same change: ADR-0002's `
 - **Positive**: feature work survives a machine switch or hand-off — `next_action`, blockers, and in-flight decisions travel with the branch in a plain committed file.
 - **Positive**: the same adapter discipline as ADR-0004 — switching memory backend or adding one means implementing the two verbs in `scripts/memory/backends/<name>.mjs`; the `resume.md` contract is untouched.
 - **Positive**: zero-tooling recovery — the resume point is readable with any text editor after `git clone`.
-- **Negative**: the engram-projection convenience (`mem_search` over feature context) requires saving feature observations under a distinct project namespace — local `engram sync --export` is project-scoped (confirmed: "exports project-scoped chunks to `.engram/` by default"), so feature obs in their own namespace are not materialized by `memory:share`. The cost is that recall must target that namespace rather than the default `brain` project. File-only hydration remains the backstop for backends without project isolation.
+- **Negative**: the engram-projection convenience (`mem_search` over feature context) requires saving feature observations under a distinct project namespace — local `engram sync --export` is project-scoped (confirmed: "exports project-scoped chunks to `.engram/` by default"), so feature obs in their own namespace are not materialized by `memory:share` (renamed `brain:memory:share`; see Amendment 1). The cost is that recall must target that namespace rather than the default `brain` project. File-only hydration remains the backstop for backends without project isolation.
 - **Negative**: the automatic pre-push checkpoint guarantees *delivery* of `resume.md`, not its *richness* — keeping the body current remains the working agent's responsibility.
 - **Negative**: a second working-state location (`resume.md`) coexists with the convention-specified-but-unimplemented `state.yaml`; if `state.yaml` is implemented later, `resume.md` should migrate into it.
 
@@ -51,3 +51,25 @@ This decision builds on the foundation restored in the same change: ADR-0002's `
 - ADR-0001 — 3-layer architecture with replaceable harness (the adapter principle this mirrors).
 - ADR-0002 — two-layer git-based team memory (durable layer; the foundation restored by Slice 0).
 - ADR-0004 — memory adapter (`MEMORY_BACKEND` selector + dispatch; the symmetric discipline applied here).
+
+## Amendment 1 — the memory script names move to the `brain:memory:` namespace (issue #961)
+
+**Signed**: 15/09/2026 — Cristian Rinaldi
+
+### What this changes
+
+The npm script this ADR names was renamed into the `brain:` namespace that brain's verbs use in a
+consumer's `package.json`:
+
+| as written above | the script today |
+|---|---|
+| `memory:share` | `brain:memory:share` |
+
+The body above is not rewritten (ruling R6 on #961): no line of this ADR runs a script with a literal
+`npm run`, so the decision reads the same and this table is the whole mapping.
+
+### What this does NOT change
+
+Feature-scoped working memory, `resume.md`, and the namespace isolation that keeps feature observations
+out of the export. The verb keeps its behaviour and arguments; brain's own `package.json` keeps the bare
+name as a byte-identical alias, never installed into a consumer.

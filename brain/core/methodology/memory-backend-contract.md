@@ -42,8 +42,8 @@ skipped.
    active backend. Anything that writes to the backend without first writing a record is a
    **working-memory writer**, not a producer, and its writes are non-durable by definition:
    `share` never exports them.
-3. **The backend owns no artifact the durable layer needs.** `session:start`, `memory:share`,
-   `memory:pull` and `cli.mjs import` complete, and hydrate the active backend from
+3. **The backend owns no artifact the durable layer needs.** `session:start`, `brain:memory:share`,
+   `brain:memory:pull` and `cli.mjs import` complete, and hydrate the active backend from
    `.memory/records/` alone, when every backend-private file is absent. What a backend needs
    for its own transport — a manifest, a chunk directory, a symlink, a merge driver — lives
    under the adapter's control, is created by the adapter's `setup`, and is never load-bearing
@@ -60,7 +60,7 @@ never sees a backend-specific field.
 | `setup` | `({ root }) -> void` | Prepares whatever the backend privately needs (engram: the `.engram → .memory` symlink, the merge driver — both retiring). Idempotent, non-clobbering. Never throws on an already-set-up tree. | **yes** |
 | `share` | `({ root }) -> { indexCount, duplicates, ... }` | Materializes what the durable layer does not yet hold and rebuilds `index.jsonl`; returns the accounting (#574) so the caller can say it. Under record-first (#864 task 3.2, `engram` since #874) this commits what is already true: it exports nothing from the backend. | **yes** |
 | `hydrate` | `({ root, recordId? }) -> { written, skipped, deferred?, contended? }` | Projects `.memory/records/` into the backend, idempotently (rule 1). With `recordId`, projects that one record — a producer's fast path after its own write. `deferred: true` when hydration could not run (store unreadable, guard contended) with the reason on stderr — never a throw, never a zero that reads as "nothing to do". The single-record form, `hydrate({recordId})`, exists on `engram` as of #874 (3.2); the bulk form is still spelled `pull` (with `git pull`) and `cli.mjs import` (without) — the contract names the operation, those verbs keep their names until #862 settles the lane. | **yes** |
-| `save` | `(title, content, { type, project, issue?, supersedes? }) -> { id, file, written }` | The producer path: a record on disk, then `hydrate({recordId})`. **Required on every backend** — a backend without `save` has no record-first capture (D2). **Today**: `engram.save()` mirrors `plainfiles.save()` (provenance #738, `--supersedes` #805) and calls `hydrate({recordId})` as its terminal step, deferring rather than throwing when the backend cannot be reached (#874, 3.2); `memory:save`'s `package.json` pin is removed. `search` stays `unsupportedOp` (R14 scope, unchanged). | **yes** |
+| `save` | `(title, content, { type, project, issue?, supersedes? }) -> { id, file, written }` | The producer path: a record on disk, then `hydrate({recordId})`. **Required on every backend** — a backend without `save` has no record-first capture (D2). **Today**: `engram.save()` mirrors `plainfiles.save()` (provenance #738, `--supersedes` #805) and calls `hydrate({recordId})` as its terminal step, deferring rather than throwing when the backend cannot be reached (#874, 3.2); `brain:memory:save`'s `package.json` pin is removed. `search` stays `unsupportedOp` (R14 scope, unchanged). | **yes** |
 | `search` | `(query, opts) -> [{ id, title, ts, ... }]` | Over the durable layer or the backend's index. | no |
 | `index` | `({ root }) -> void` | Re-projects `brain/` doctrine into the backend. `plainfiles`: `unsupportedOp` by design (obs #578) — it projects doctrine, not captures. | no |
 | `featureCheckpoint` / `featureResume` | see `feature-working-memory-contract.md` | Working memory for a change (`resume.md` and the `brain-feature-*` projection). Non-durable by rule 2. | no |
@@ -79,7 +79,7 @@ producer is listed here with the four things it declares. A writer that skips th
 
 | Producer | Trigger | Provenance from | Write target | Lane | Hydration |
 |----------|---------|-----------------|--------------|------|-----------|
-| memory CLI — `memory:save` | an agent or human, in session | flags (`--issue`; `--supersedes` with #805), `actor` from `git config brain.actor` (#738, delivered — a configured handle, never a branch; refused when unset) | the invoking checkout's `.memory/records/` | #862 memory lane (until it exists: the slice PR, as today) | `hydrate({recordId})` (#874) |
+| memory CLI — `brain:memory:save` | an agent or human, in session | flags (`--issue`; `--supersedes` with #805), `actor` from `git config brain.actor` (#738, delivered — a configured handle, never a branch; refused when unset) | the invoking checkout's `.memory/records/` | #862 memory lane (until it exists: the slice PR, as today) | `hydrate({recordId})` (#874) |
 | cold-review poster — `brain/scripts/review/poster.mjs` (#851 slice 1) | each posted review round | the reviewer identity; `issue`, `pr`, `rev`, `head_sha`, `verdict`; `supersedes` = the previous round's record | the **invoking** checkout's `.memory/records/`, never the cold `/tmp/brain-review-<sha>` tree | #862 memory lane, never the PR head (a verdict pins `head_sha`, ADR-0026 Amendment 5); ships after #864 task 3.1a | next hydration today; `hydrate({recordId})` with #874 |
 
 Adding a producer is a row here and a slice ticket under #864 — never a new write path into
@@ -94,10 +94,10 @@ MAY delete its own rows for reconciliation (a duplicated key, a working-namespac
 **Records are never deleted.** A wrong record is corrected by a new record carrying
 `supersedes` (#805) — the only correction the durable layer admits.
 
-The correction is record-first, in this order: (1) `memory:save --supersedes <id>` writes the
-correcting record; (2) the lane ships it — `memory:share` or the record-first save path
+The correction is record-first, in this order: (1) `brain:memory:save --supersedes <id>` writes the
+correcting record; (2) the lane ships it — `brain:memory:share` or the record-first save path
 materializes it into the active backend; (3) the stale record is left untouched in
-`.memory/records/` — nothing is edited or removed; (4) `memory:reindex` regenerates
+`.memory/records/` — nothing is edited or removed; (4) `brain:memory:reindex` regenerates
 `.memory/index.jsonl` from records alone, so the correction is visible to every reader that
 walks the index.
 

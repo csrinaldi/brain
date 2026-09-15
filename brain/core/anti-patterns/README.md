@@ -19,7 +19,7 @@ consolidated.
    `guice-singleton-eager.md`.
 3. **Promoted in the MR**, within the same commit as the code that discovered it —
    before removing _Draft_ status.
-4. **Indexed** with `npm run memory:index` whenever the durable knowledge in `brain/`
+4. **Indexed** with `npm run brain:memory:index` whenever the durable knowledge in `brain/`
    needs to be re-projected into engram.
 
 ## Suggested format per entry

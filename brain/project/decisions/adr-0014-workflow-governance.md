@@ -1,6 +1,6 @@
 # ADR-0014 — Workflow Governance: Enforce Load-Bearing Invariants Server-Side
 
-**Status**: Accepted  
+**Status**: Accepted · **amended 15/09/2026** (Amendment 1 — see below)  
 **Date**: 2026-06-27
 
 ## Context
@@ -62,7 +62,7 @@ to L1 and make the judgment path the low-friction one.
   a configurable `governance.ignoreList` (lock files, `.memory/**`, `openspec/changes/**`);
   `>400` without a `size:exception` label fails.
 - **(3) Memory dumped — partially enforceable (the proxy).** CI verifies `.memory/` changed in
-  the PR (⇒ `memory:share` ran). It proves the *step happened*, **not** capture quality; pure-docs
+  the PR (⇒ `memory:share` (renamed `brain:memory:share`; see Amendment 1) ran). It proves the *step happened*, **not** capture quality; pure-docs
   PRs use `skip:memory-gate`. The full `session_summary`-referencing-this-issue check is Phase 2
   (see residual below).
 - **(4) ADR for decisions — partially enforceable.** A PR labeled `decision` MUST add an
@@ -135,3 +135,25 @@ a documented operator step, never automated.
 - [ADR-0013](adr-0013-auto-adr-onboarding.md) — the prior governance pattern (bootstrap notices →
   Tier 1 draft → Tier 2 human signs); this ADR enforces the *output* (an ADR exists for a labeled
   decision) that ADR-0013 helps author.
+
+## Amendment 1 — the memory script names move to the `brain:memory:` namespace (issue #961)
+
+**Signed**: 15/09/2026 — Cristian Rinaldi
+
+### What this changes
+
+The npm script this ADR names was renamed into the `brain:` namespace that brain's verbs use in a
+consumer's `package.json`:
+
+| as written above | the script today |
+|---|---|
+| `memory:share` | `brain:memory:share` |
+
+The body above is not rewritten (ruling R6 on #961): no line of this ADR runs a script with a literal
+`npm run`, so the decision reads the same and this table is the whole mapping.
+
+### What this does NOT change
+
+The load-bearing invariants, and what invariant (3)'s proxy proves and does not prove. The verb keeps its
+behaviour and arguments; brain's own `package.json` keeps the bare name as a byte-identical alias, never
+installed into a consumer.
