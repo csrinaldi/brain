@@ -117,7 +117,7 @@ export function createWatcher({
   let resolvedGitCommonDir = gitCommonDir;
   let debounceTimer = null;
   let pendingCauses = new Set();
-  let pendingRefWorktrees = new Set();
+  let pendingRefWorktrees = new Map(); // path -> admin id (null for the primary checkout)
   let recomputing = false;
   let queuedAfterRecompute = false;
 
@@ -126,7 +126,7 @@ export function createWatcher({
     failed.push({ path: label, reason: err?.message ?? String(err) });
   }
 
-  function watchDir(absPath, label, kind, worktreePath, trackingId, trackingMap) {
+  function watchDir(absPath, label, kind, worktreePath, trackingId, trackingMap, { ignoreEnoent = false } = {}) {
     if (handles.has(absPath)) return;
     try {
       const handle = _watch(absPath, { persistent: false }, () => onFire(absPath));
@@ -146,6 +146,7 @@ export function createWatcher({
       handles.set(absPath, { handle, label, kind, worktreePath, trackingId, trackingMap });
       failed = failed.filter((f) => f.path !== label);
     } catch (err) {
+      if (ignoreEnoent && err?.code === 'ENOENT') return; // not created yet — retried on the next <git-common>/ event, round 9
       recordFailure(label, err);
     }
   }
@@ -170,7 +171,8 @@ export function createWatcher({
     const entry = handles.get(absPath);
     if (!entry) return;
     pendingCauses.add(`watch:${entry.label}`);
-    if (entry.kind === 'refs') pendingRefWorktrees.add(entry.worktreePath ?? root);
+    if (absPath === resolvedGitCommonDir) maybeOpenWorktreesRoot();
+    if (entry.kind === 'refs') pendingRefWorktrees.set(entry.worktreePath ?? root, entry.trackingId ?? null);
     if (entry.kind === 'worktrees') rescanWorktrees();
     if (entry.kind === 'changes') rescanChangeDirs();
     scheduleDebounce();
@@ -189,9 +191,9 @@ export function createWatcher({
 
   async function dispatch() {
     const causes = [...pendingCauses];
-    const refWorktrees = [...pendingRefWorktrees];
+    const refWorktrees = [...pendingRefWorktrees].map(([path, id]) => ({ path, id }));
     pendingCauses = new Set();
-    pendingRefWorktrees = new Set();
+    pendingRefWorktrees = new Map();
     recomputing = true;
     try {
       await onRecompute({ causes, refWorktrees, at: _now() });
@@ -280,7 +282,10 @@ export function createWatcher({
     const stanzas = parseWorktreeStanzas(stdout).slice(1).filter((s) => !s.bare);
     const adminDir = join(resolvedGitCommonDir, 'worktrees');
     let ids;
-    try { ids = _readdir(adminDir); } catch (err) { recordFailure('<git-common>/worktrees', err); return null; }
+    try { ids = _readdir(adminDir); } catch (err) {
+      if (err?.code === 'ENOENT') return []; // no worktrees/ yet — genuinely zero, not a read failure (round 9)
+      recordFailure('<git-common>/worktrees', err); return null;
+    }
     const idByPath = new Map();
     for (const id of ids) {
       const label = `<git-common>/worktrees/${id}/gitdir`;
@@ -298,6 +303,14 @@ export function createWatcher({
       recordFailure('<git-common>/worktrees', new Error(`no gitdir admin entry matches ${s.path}`));
     }
     return current;
+  }
+
+  /** The only watch that can notice `worktrees/` appear after a start() that found none — swallowed ENOENT is retried here (round 9, R881-9). */
+  function maybeOpenWorktreesRoot() {
+    const absPath = join(resolvedGitCommonDir, 'worktrees');
+    if (handles.has(absPath)) return;
+    watchDir(absPath, '<git-common>/worktrees/', 'worktrees', undefined, undefined, undefined, { ignoreEnoent: true });
+    if (handles.has(absPath)) rescanWorktrees();
   }
 
   function rescanWorktrees() {
@@ -346,7 +359,7 @@ export function createWatcher({
     if (resolvedGitCommonDir) {
       watchDir(resolvedGitCommonDir, '<git-common>/', 'refs', root);
       watchDir(join(resolvedGitCommonDir, 'logs'), '<git-common>/logs/', 'refs', root);
-      watchDir(join(resolvedGitCommonDir, 'worktrees'), '<git-common>/worktrees/', 'worktrees');
+      watchDir(join(resolvedGitCommonDir, 'worktrees'), '<git-common>/worktrees/', 'worktrees', undefined, undefined, undefined, { ignoreEnoent: true });
       rescanWorktrees();
     }
   }

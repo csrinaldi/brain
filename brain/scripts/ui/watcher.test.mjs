@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { EventEmitter } from 'node:events';
 
@@ -27,6 +27,13 @@ function makeGitCommonFixture() {
   const mk = (p) => mkdirSync(join(gitCommonDir, p), { recursive: true });
   mk('logs');
   mk('worktrees');
+  return gitCommonDir;
+}
+
+/** Like `makeGitCommonFixture()`, but WITHOUT `worktrees/` — a fresh repo that has never had a linked worktree (round 9, R881-9). */
+function makeGitCommonFixtureNoWorktrees() {
+  const gitCommonDir = testTmp('git-common-');
+  mkdirSync(join(gitCommonDir, 'logs'), { recursive: true });
   return gitCommonDir;
 }
 
@@ -103,6 +110,24 @@ function spyWatchThrowOnceFor(throwOncePath) {
   fn.calls = calls;
   fn.attempts = attempts;
   fn.closesByPath = closesByPath;
+  fn.fire = (path) => { const c = calls.find((entry) => entry.path === path); if (c) c.listener('change', null); };
+  return fn;
+}
+
+/**
+ * A `fs.watch`-shaped spy that mirrors REAL directory existence: throws
+ * `ENOENT` for a path not yet on disk, succeeds once it exists — round 9's
+ * "worktrees/ does not exist until the first worktree" needs a real ENOENT,
+ * unlike `spyWatch()`'s always-succeeds registration.
+ */
+function spyWatchRealFs() {
+  const calls = [];
+  const fn = (path, _opts, listener) => {
+    if (!existsSync(path)) { const e = new Error('ENOENT: no such file or directory'); e.code = 'ENOENT'; throw e; }
+    calls.push({ path, listener });
+    return { close() {} };
+  };
+  fn.calls = calls;
   fn.fire = (path) => { const c = calls.find((entry) => entry.path === path); if (c) c.listener('change', null); };
   return fn;
 }
@@ -194,7 +219,55 @@ test('#881: a commit in a linked worktree fires exactly one debounced recompute 
   await Promise.resolve();
   assert.equal(recomputes.length, 1);
   assert.deepEqual(recomputes[0].causes, ['watch:<git-common>/worktrees/alpha/logs/']);
-  assert.deepEqual(recomputes[0].refWorktrees, [alphaPath]);
+  assert.deepEqual(recomputes[0].refWorktrees, [{ path: alphaPath, id: 'alpha' }]);
+  w.close();
+});
+
+// ── cold review round 9, R881-9: a fresh repo that has never had a linked
+// worktree has no `<git-common>/worktrees/` dir yet — that is "zero
+// worktrees so far", not a failure, and the FIRST worktree ever created must
+// still be watched once `<git-common>/` itself notices it appear ─────────
+
+test('#881: a repo with no worktrees/ dir yet reports ok, and the first worktree ever created is watched once <git-common>/ fires', async () => {
+  const root = makeWatcherFixture();
+  const gitCommonDir = makeGitCommonFixtureNoWorktrees();
+  let stanzas = `worktree ${root}\n`;
+  const _run = () => stanzas;
+  const _watch = spyWatchRealFs();
+  const scheduler = fakeScheduler();
+  const recomputes = [];
+  const w = createWatcher({
+    root, gitCommonDir, _watch, _run,
+    _setTimeout: scheduler.setTimeout, _clearTimeout: scheduler.clearTimeout,
+    onRecompute: async (evt) => { recomputes.push(evt); },
+  });
+  w.start();
+
+  assert.equal(w.state().ok, true, 'a worktrees/ dir that does not exist yet is not a failure');
+  assert.ok(!w.state().failed.some((f) => f.path.includes('worktrees')), 'no failed entry names worktrees');
+
+  const alphaPath = join(dirname(root), 'alpha');
+  writeWorktreeGitFile(gitCommonDir, alphaPath, 'alpha'); // creates worktrees/alpha/logs/ and .../gitdir for real
+  stanzas = `worktree ${root}\n\nworktree ${alphaPath}\n`;
+  _watch.fire(gitCommonDir); // the <git-common>/ event itself — the only watch alive that can notice worktrees/ appear
+
+  const worktreesRoot = join(gitCommonDir, 'worktrees');
+  const alphaLogs = join(worktreesRoot, 'alpha', 'logs');
+  assert.ok(_watch.calls.some((c) => c.path === worktreesRoot), 'the worktrees/ root is now watched');
+  assert.ok(_watch.calls.some((c) => c.path === alphaLogs), 'the first worktree ever created is watched too');
+
+  // drain the debounce the <git-common>/ event itself scheduled, isolating the assertion below to alpha's own event
+  scheduler.runLatest();
+  await Promise.resolve();
+  await Promise.resolve();
+  recomputes.length = 0;
+
+  _watch.fire(alphaLogs);
+  assert.equal(scheduler.pending(), 1, 'an event on the first worktree ever created really fires the debounce');
+  scheduler.runLatest();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(recomputes.length, 1, 'the first worktree ever created is no longer permanently unwatched');
   w.close();
 });
 
