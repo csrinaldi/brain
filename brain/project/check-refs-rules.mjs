@@ -78,7 +78,7 @@ export const prohibitedRefs = [
     //   • memory/lane/ship.mjs — the ONE sanctioned invocation: ADR-0034's
     //                            declared lane push (`git push --no-verify`),
     //                            which exists because pre-push runs
-    //                            memory:share and would re-export into the
+    //                            brain:memory:share and would re-export into the
     //                            tree the collector just read (#862 L5, #888)
     //   • memory/lane/ship.test.mjs — asserts that exact argv literal
     exempt: [
