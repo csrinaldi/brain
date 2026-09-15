@@ -65,8 +65,7 @@ export function createUiServer({
   forgeSource = null, interval = 60000, poll = true,
   gitCommonDir = null, _watch, _run, _readdir,
   _setTimeout = setTimeout, _clearTimeout = clearTimeout,
-  _recomputeCurrent = null,
-} = {}) {
+  _recomputeCurrent = null, onServerError = null} = {}) {
   const run = _run ?? ((file, args) => execFileSync(file, args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }));
 
   // D1's invariant: `buildSnapshot` NEVER sees a live forge port, only the
@@ -180,7 +179,12 @@ export function createUiServer({
   // off, so 'error' always has somewhere to go for the server's whole
   // lifetime; `_lastServerError` is a test-only seam to observe it.
   let lastServerError = null;
-  httpServer.on('error', (err) => { lastServerError = err; });
+  httpServer.on('error', (err) => {
+    lastServerError = err;
+    // Recorded is not said: the CLI passes `onServerError` so the operator
+    // reads the reason on stderr; a library caller may pass nothing.
+    if (onServerError) onServerError(err);
+  });
 
   async function handleRequest(req, res) {
     const { pathname } = new URL(req.url, 'http://localhost');
@@ -335,6 +339,7 @@ export async function main(argv = [], deps = {}) {
     root: parsed.root, vcs: deps.vcs ?? null, project: deps.project ?? null,
     forgeSource: deps.forgeSource ?? null, interval: parsed.interval, poll: parsed.poll,
     _recomputeCurrent: deps._recomputeCurrent ?? null,
+    onServerError: (err) => error(`✗ server error: ${err?.message ?? err} — still serving`),
   });
   try {
     await server.listen(parsed.port);

@@ -737,3 +737,25 @@ test('#881: package.json exposes "brain:ui" and "engines.node" >= 22', () => {
   assert.equal(pkg.scripts['brain:ui'], 'node ./brain/scripts/ui/server.mjs');
   assert.equal(pkg.engines.node, '>=22');
 });
+
+// ── fresh review of round 3, suggestion 2: a post-bind server error reaches the operator ──
+//
+// The baseline `httpServer.on('error')` keeps the process alive, but a value
+// only a test-only getter can read is a silent degradation for whoever runs
+// `npm run brain:ui`. The CLI must print the reason and say it is still
+// serving, the same in-band vocabulary every other section uses.
+
+test('#881: a post-bind httpServer "error" is printed by the CLI, not only recorded for tests', { timeout: 3000 }, async () => {
+  const errors = [];
+  const result = await main(['--port', '0', '--root', makeFixture(), '--no-poll'], { say: () => {}, error: (m) => errors.push(m), process: makeFakeProcess() });
+  try {
+    setImmediate(() => result._httpServer.emit('error', new Error('EMFILE: too many open files')));
+    await waitUntil(() => errors.some((m) => /EMFILE/.test(m)));
+    assert.match(errors.join('\n'), /server error: EMFILE: too many open files/);
+    assert.match(errors.join('\n'), /still serving/);
+    const res = await fetch(`http://127.0.0.1:${result.port}/api/snapshot`);
+    assert.equal(res.status, 200, 'still serving means still serving');
+  } finally {
+    await result.close();
+  }
+});
