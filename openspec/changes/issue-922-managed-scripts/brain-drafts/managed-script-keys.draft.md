@@ -60,6 +60,10 @@ export const MANAGED_SCRIPT_KEYS = [
 
 ## Proposed text
 
+Revised after #961 (PR #966 renamed the memory scripts, PR #972 promoted the doctrine): every managed
+key is `brain:`-namespaced (#961 R2), so the seven memory verbs ship as `brain:memory:*`. The first
+version of this draft also missed `brain:audit`, which the drift test found. Final catalog, 34 keys:
+
 ```js
 export const MANAGED_SCRIPT_KEYS = [
   'brain:env:init',
@@ -72,25 +76,11 @@ export const MANAGED_SCRIPT_KEYS = [
   'brain:repo:check',
   'brain:change:verify',
   'brain:memory:session-end',
-  // issue #922: reconciled against every doctrine `npm run …` mention across
-  // brain/core/**, brain/project/**, AGENTS.md, docs/** (excluding
-  // docs/inbox/**, an ungoverned capture zone) — measured by
-  // brain/scripts/lib/managed-script-keys-doctrine.test.mjs, which fails on
-  // future drift. `memory:save`/`memory:ship`/`memory:audit`/`brain:config`
-  // are the ticket's named minimum; the rest is the full reconciliation the
-  // acceptance criteria also require. `memory:ship` and `brain:config` are
-  // referenced by verb name in ADR prose (adr-0002, adr-0034, adr-0023)
-  // rather than a literal `npm run` mention, so the automated drift test
-  // cannot detect them by itself — they are added here from the manual
-  // measurement in proposal.md and stay covered by the sanity test's other
-  // direction (every managed key names a real script).
-  'memory:save',
-  'memory:ship',
-  'memory:audit',
-  'brain:config',
   'brain:adopt',
+  'brain:audit',
   'brain:change:archive',
   'brain:check',
+  'brain:config',
   'brain:governance-status',
   'brain:metrics',
   'brain:nav',
@@ -103,49 +93,35 @@ export const MANAGED_SCRIPT_KEYS = [
   'brain:ship',
   'brain:start',
   'brain:upgrade',
-  'memory:index',
-  'memory:pull',
-  'memory:resolve-index',
-  'memory:share',
+  'brain:memory:audit',
+  'brain:memory:index',
+  'brain:memory:pull',
+  'brain:memory:ship',
+  'brain:memory:resolve-index',
+  'brain:memory:save',
+  'brain:memory:share',
 ];
 ```
 
-## Docstring update (lines 17-28)
+`brain:memory:ship` and `brain:config` are named in ADR prose (adr-0002, adr-0034, adr-0023) rather
+than as a literal `npm run` mention, so the drift test cannot find them by itself. They come from the
+manual measurement in proposal.md and stay covered by the sanity test's other direction: every managed
+key names a real script.
 
-The comment above the array currently says "The 10 `brain:*` verb keys...".
-Once promoted, that stops being true on two axes: it is 34 keys, and it is no
-longer `brain:*`-only. Suggested rewrite (human should adjust wording to
-taste, this is prose not code):
+## Docstring update
 
-```js
-// The brain:*/memory:* verb keys that brain:upgrade injects into consumer
-// package.json — reconciled against every doctrine `npm run …` mention
-// (issue #922). Single source of truth — imported by installer.mjs
-// mergePackageJson, and drift-guarded by
-// brain/scripts/lib/managed-script-keys-doctrine.test.mjs.
-//
-// brain:memory:session-end (#906 A5, measured): [... existing paragraph
-// unchanged ...]
-```
+The comment above the array said "The 10 `brain:*` verb keys...". It now names no count, cites the
+drift test, and states the namespace rule: every key is `brain:`, and the bare `memory:*` names are
+repo-only aliases, never managed.
 
-## Companion test change (already applied directly, brain/scripts/** is Tier 1 code)
+## Companion test changes (brain/scripts/** is Tier 1)
 
-`brain/scripts/lib/managed-paths.test.mjs` line ~139-146 currently pins:
-
-```js
-test('MANAGED_SCRIPT_KEYS has exactly 10 entries, all prefixed brain: (S5, #906 A5)', () => {
-  assert.equal(MANAGED_SCRIPT_KEYS.length, 10, ...);
-  for (const key of MANAGED_SCRIPT_KEYS) {
-    assert.ok(key.startsWith('brain:'), ...);
-  }
-});
-```
-
-This assertion is now FALSE ON PURPOSE once this draft promotes (34 entries,
-some `memory:*`). The human promoting this draft should update that test in
-the same commit — it was left untouched by this PR (not a Tier-2 file, but
-editing it ahead of the promotion would make `npm test` fail against the
-*current*, un-promoted catalog, which is still correct today).
+- `brain/scripts/lib/managed-paths.test.mjs`: the exact-count assertion (`length === 10`) is replaced
+  by invariants: keys are unique, and every key matches `^brain:[a-z]`. A count added nothing the
+  drift test does not already pin, and it broke on every legitimate addition.
+- `brain/scripts/lib/managed-script-keys-doctrine.test.mjs`: its "EXPECTED RED until promotion" header
+  is retired. A bare `npm run memory:<verb>` in doctrine still fails it, because the aliases are real
+  scripts but never managed keys. That is the tripwire for doctrine that forgot the prefix.
 
 ## Verification after promotion
 
