@@ -12,7 +12,7 @@
 // `/lib/<module>.mjs` route, which serves the very same files node imports.
 // No bundler, no dependency, no CDN (maintainer ruling, 2026-09-14).
 
-import { initialPageState, applyFrame, parseFrame, streamFailed, controlFailed, sectionOf } from './lib/frames.mjs';
+import { initialPageState, applyFrame, parseFrame, streamFailed, controlFailed, sectionOf, requestSequence } from './lib/frames.mjs';
 import { degradationBands, pollIndicator } from './lib/banners.mjs';
 import { buildCanvasModel } from './lib/canvas-model.mjs';
 import { buildDrawerModel } from './lib/drawer-model.mjs';
@@ -246,7 +246,9 @@ function renderEntry(item) {
 }
 
 /** The drawer's own IO. A failed read is a reason IN the drawer, never a drawer that stays empty. */
+const changeRequests = requestSequence();
 async function loadChange(issue) {
+  const token = changeRequests.next();
   let next;
   try {
     const res = await fetch(`/api/change/${issue}`);
@@ -255,9 +257,10 @@ async function loadChange(issue) {
   } catch (err) {
     next = { ok: false, reason: `the change view for #${issue} could not be read: ${err.message}` };
   }
-  // A slower answer for a node the operator has already moved away from must
-  // not overwrite the one now on screen.
-  if (selectedIssue !== issue) return;
+  // A slower answer for a node the operator has moved away from, or an older
+  // answer for the SAME node (a burst of refs frames), never overwrites the
+  // one now on screen.
+  if (!changeRequests.isCurrent(token) || selectedIssue !== issue) return;
   changeView = next;
   renderDrawer();
 }

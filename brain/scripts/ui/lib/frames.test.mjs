@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { initialPageState, applyFrame, parseFrame, streamFailed, controlFailed, sectionOf } from './frames.mjs';
+import { initialPageState, applyFrame, parseFrame, streamFailed, controlFailed, sectionOf, requestSequence } from './frames.mjs';
 
 const snapshot = (over = {}) => ({ generatedAt: '2026-09-16T00:00:00Z', graph: { ok: true, value: { nodes: [], edges: [] } }, changes: { ok: true, value: [] }, ...over });
 const meta = (over = {}) => ({ project: 'o/r', watcher: { ok: true, watched: 3, failed: [] }, poller: { paused: false, lastPolledAt: '2026-09-16T00:00:00Z', lastOkAt: '2026-09-16T00:00:00Z', lastError: null, forgeAsOf: {} }, ...over });
@@ -118,4 +118,15 @@ test('#881: sectionOf never returns undefined — a missing section is a stated 
   assert.match(sectionOf(live, 'nope').reason, /"nope" is not in the snapshot/);
   assert.equal(sectionOf(initialPageState(), 'graph').ok, false);
   assert.match(sectionOf(initialPageState(), 'graph').reason, /no snapshot has been read yet/);
+});
+
+// ── cold review of #982, correction 2: a stale drawer answer never overwrites a fresher one ──
+
+test('#881: requestSequence — only the latest token is current, so a slower earlier answer is dropped', () => {
+  const seq = requestSequence();
+  const first = seq.next();
+  const second = seq.next();
+  assert.equal(seq.isCurrent(first), false, 'the earlier request is stale once a later one started');
+  assert.equal(seq.isCurrent(second), true);
+  assert.equal(seq.isCurrent(seq.next()), true);
 });

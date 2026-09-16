@@ -1682,3 +1682,24 @@ ticket.
 
 No push, no PR (per task instructions) — branch `feat/issue-881-slice-4-page`
 has not been pushed this run.
+
+## Slice 4 — cold review of PR #982 (head `22a0ae20`, 2026-09-16): APPROVE rev 1, two corrections landed as their own PR
+
+The chain's four PRs are merged into `feature/brain-ui`. The two corrections
+of the approving review were not worth burning the approved head; they land
+in one small PR against the tracker, before the tracker's own review:
+
+- **correction 2, `app.js` `loadChange`**: the `refs` handler reloads the
+  drawer on every frame and the only staleness guard compared the selected
+  issue, so two loads for the SAME issue could finish out of order and the
+  older answer render last. `lib/frames.mjs` gains `requestSequence()`
+  (tested); `loadChange` takes a token before the fetch and checks it after.
+  Wiring pinned by the source guard; mutation: dropping the check turns that
+  test red (`e2e35d0f`).
+- **correction 1, `app-source-guard.test.mjs`**: the whole-file import scan
+  could chain a bare `import "…";` to a later `from "lodash-es"` in a comment.
+  The from-clause body now spans lines but never a `;` or a quote; pinned by
+  the phantom-comment fixture and a real multi-line bare import; injecting
+  the latter into `app.js` still turns the guard red (`60c28bf3`).
+
+Counts after: 206 tests under `ui/`.
