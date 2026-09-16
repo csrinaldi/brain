@@ -24,7 +24,7 @@ const ROADMAP_STATE_CLASS = {
 };
 
 const NODE_STATUS_CLASS = {
-  ready: 'status-ready', // never looked up directly — a ready node's colour comes from ROADMAP_STATE_CLASS (step 5); kept so the map stays exhaustive over all eight constants (D9-note)
+  ready: 'status-ready', // a ready node's colour comes from ROADMAP_STATE_CLASS (step 5), so this class is never returned; the entry is what makes `ready` a KNOWN status, and keeps the map exhaustive (D9-note)
   blocked: 'status-blocked',
   'awaiting-human': 'status-awaiting-review',
   unclassified: 'status-unclassified',
@@ -44,6 +44,9 @@ export function colourClass(node) {
   if (Array.isArray(node.blockedBy) && node.blockedBy.length > 0) return classFor(NODE_STATUS_CLASS, 'blocked');
   if (node.status === 'awaiting-human') return classFor(NODE_STATUS_CLASS, 'awaiting-human');
   if (node.status === 'unclassified') return classFor(NODE_STATUS_CLASS, 'unclassified');
+  // A status this file has never heard of must not inherit the roadmap's
+  // colour: it would paint an unclassified node as if something had placed it.
+  if (!Object.hasOwn(NODE_STATUS_CLASS, node.status)) throw new Error(`colour.mjs: unknown node status "${node.status}" — a constant was renamed, or a new status shipped without updating this map`);
   return classFor(ROADMAP_STATE_CLASS, node.roadmap.value.state);
 }
 

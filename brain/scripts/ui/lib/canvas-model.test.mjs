@@ -80,6 +80,17 @@ test('#881: one node with an unknown state cannot blank the canvas — it is mar
   assert.equal(byNumber[3].className, 'state-planned');
 });
 
+test('#881 R881-6: a node with an unknown status is marked unknown, not painted with the roadmap colour', () => {
+  const model = buildCanvasModel(graph({
+    nodes: [node(1), node(2, { status: 'weird' }), node(3)],
+  }));
+  const byNumber = Object.fromEntries(model.value.nodes.map((n) => [n.number, n]));
+  assert.equal(byNumber[2].className, 'node-unknown', 'a status nothing here knows must not read as "planned"');
+  assert.ok(byNumber[2].marks.some((m) => /unknown state/.test(m) && /weird/.test(m)), `the status is said on the node: ${byNumber[2].marks.join(' | ')}`);
+  assert.equal(byNumber[1].className, 'state-planned', 'every sibling keeps its colour');
+  assert.equal(byNumber[3].className, 'state-planned');
+});
+
 test('#881 R881-7: a reversed (back) edge is flagged for the renderer, and an edge to an unknown node is reported, not swallowed', () => {
   const model = buildCanvasModel(graph({
     nodes: [node(1), node(2)],
