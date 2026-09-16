@@ -52,6 +52,11 @@ export function applyFrame(state, event, data = {}) {
     if (state.snapshot === null) {
       return { ...state, stream: { ok: false, reason: `a "${data.name}" section frame arrived before the first sync — waiting for a full sync` } };
     }
+    // A name this snapshot does not carry is the same class of fact as an
+    // unknown event: said, never written — an invented key would draw as data.
+    if (!Object.hasOwn(state.snapshot, data.name)) {
+      return { ...state, stream: { ok: false, reason: `a section frame named "${data.name}", which is not in the snapshot this server serves — the page may be older than the server` } };
+    }
     return {
       ...state,
       snapshot: { ...state.snapshot, [data.name]: data.section, generatedAt: data.generatedAt ?? state.snapshot.generatedAt },

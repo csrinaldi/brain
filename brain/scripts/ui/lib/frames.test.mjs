@@ -47,6 +47,20 @@ test('#881: a section frame before the first sync is SAID, not dropped and not a
   assert.match(state.stream.reason, /before the first sync/);
 });
 
+test('#881 R881-9: a section frame naming a section this snapshot does not have is SAID, never written blindly', () => {
+  const live = applyFrame(initialPageState(), 'sync', { generatedAt: 'a', snapshot: snapshot(), meta: meta() });
+
+  const unknown = applyFrame(live, 'section', { name: 'nosuchsection', section: { ok: true }, generatedAt: 'b' });
+  assert.equal(unknown.snapshot, live.snapshot, 'the held snapshot is untouched — a frame cannot invent a section this server does not serve');
+  assert.equal(unknown.stream.ok, false);
+  assert.match(unknown.stream.reason, /"nosuchsection"/, 'the unknown name is named, the way an unknown event name is');
+
+  const nameless = applyFrame(live, 'section', { section: { ok: true }, generatedAt: 'b' });
+  assert.equal(nameless.snapshot, live.snapshot, 'a frame with no name must not write a section called "undefined"');
+  assert.equal(nameless.stream.ok, false);
+  assert.ok(!('undefined' in nameless.snapshot), 'the string "undefined" is not a section name');
+});
+
 test('#881: Q3/A2 — a refs frame records the worktree head, newest first, capped', () => {
   let state = applyFrame(initialPageState(), 'sync', { generatedAt: 'a', snapshot: snapshot(), meta: meta() });
   for (let i = 0; i < 25; i++) state = applyFrame(state, 'refs', { worktree: `/w/${i}`, head: `feat/${i}`, at: 'now' });
