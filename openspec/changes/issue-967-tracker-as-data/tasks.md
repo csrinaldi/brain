@@ -150,13 +150,18 @@ and R967-10's "no `needs`-edge parent fallback" scenario.
       loop, lift the per-body entries into graph-level `declarationDivergences`
       as `{number, key, value, reason}` and append the cross-node
       `parent-not-epic` entry (D5), so A4a passes.
-- [ ] A5a. `epic-map.test.mjs`: failing test — `renderSummary` takes one optional
+- [x] A5a. `epic-map.test.mjs`: failing test — `renderSummary` takes one optional
       `declarationDivergences` parameter defaulting to `[]`, prints one line per
       entry naming the issue, the key and the reason, and every existing caller's
       output is byte-identical when the array is empty. **Mutation**: making the
       parameter required turns the existing `renderSummary` assertions red — the
       proof that no current caller changed.
-- [ ] A5b. `brain/scripts/status/epic-render.mjs`: implement the optional
+      *Measured*: every existing call site passes a whole `buildGraph` result, which
+      now carries the field, so no pre-existing assertion can go red on it. The
+      byte-identity test therefore calls `renderSummary` a second time with the key
+      REMOVED — the exact shape every caller had before this change — and that call
+      is what the mutation kills.
+- [x] A5b. `brain/scripts/status/epic-render.mjs`: implement the optional
       parameter (+1 line at the formatter) so A5a passes.
 - [ ] A6a. `brain/scripts/status/snapshot.test.mjs`: a **new** fake-port case
       beside `:133-167` — `#5` declares `kind: epic` + `tracker: feature/brain-ui`,

@@ -608,6 +608,33 @@ test('#459: the summary reports the unplaced COUNT rather than hiding them', () 
   assert.ok(!/Listos ahora:\*\* [^\n]*#8/.test(s));
 });
 
+// ── #967: the summary says the declaration divergences ─────────────────────
+
+test('#967: the summary prints one line per declaration divergence, naming the issue, the key and the reason', () => {
+  const g = buildGraph([
+    issue(1, { body: rawBlock('track: A', 'tracker: main') }),
+    issue(881, { body: rawBlock('track: UI', 'parent: 878') }),
+    issue(878, { body: rawBlock('track: UI', 'tracker: feature/brain-ui') }),
+  ]);
+  const line = renderSummary(g).match(/^.*Declaraciones.*$/m)[0];
+  assert.match(line, /\(3\)/, 'the count, so nothing is quietly absorbed');
+  assert.match(line, /#1[^·]*tracker[^·]*main[^·]*tracker-grammar/);
+  assert.match(line, /#878[^·]*tracker[^·]*feature\/brain-ui[^·]*tracker-without-kind-epic/);
+  assert.match(line, /#881[^·]*parent[^·]*878[^·]*parent-not-epic/);
+});
+
+test('#967: with nothing to say the summary is BYTE-IDENTICAL, and a caller that never heard of the field still renders', () => {
+  // The proof that no current caller changed. The parameter is optional and
+  // defaults to `[]`: removing that default turns this red, because the second
+  // call passes an object without the key — exactly the shape every caller had
+  // before this change.
+  const g = buildGraph([issue(1), issue(2, { body: 'prosa' })]);
+  const { declarationDivergences, ...asItWasBefore } = g;
+  assert.deepEqual(declarationDivergences, []);
+  assert.equal(renderSummary(g), renderSummary(asItWasBefore));
+  assert.ok(!renderSummary(g).includes('Declaraciones'), 'an empty array prints no line at all');
+});
+
 // ── the body write ──────────────────────────────────────────────────────────
 
 test('#459: everything outside the markers is byte-identical afterwards', () => {
