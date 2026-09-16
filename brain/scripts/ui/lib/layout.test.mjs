@@ -6,7 +6,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { layout } from './layout.mjs';
+import { layout, NODE_W, NODE_H, GAP_X, GAP_Y } from './layout.mjs';
 
 function node(number, extra = {}) {
   return { number, ...extra };
@@ -73,6 +73,32 @@ test('#881: a node with no edges lands in the trailing unlinked band, never drop
   assert.deepEqual(result.unlinked, [9]);
   assert.ok(result.nodes[9], 'the unlinked node still has a coordinate');
   assert.ok(!result.layers.flat().includes(9), 'an unlinked node is never placed in a layer');
+});
+
+test('#881: the unlinked band wraps — 81 nodes with no edges are 9 columns and 9 rows, not one row 81 columns wide', () => {
+  // The live repo hands the canvas 81 unlinked issues. In one row that is a
+  // canvas 16,160px wide and a `?` track nobody can read.
+  const nodes = Array.from({ length: 81 }, (_, i) => node(i + 1));
+  const result = layout({ nodes, edges: [] });
+
+  const columns = Math.ceil(Math.sqrt(81)); // 9
+  assert.ok(
+    result.width <= columns * (NODE_W + GAP_X),
+    `the band is ${result.width}px wide, wider than ${columns} columns`,
+  );
+  assert.equal(result.height, 9 * (NODE_H + GAP_Y) - GAP_Y, 'the wrapped band is 9 rows tall');
+  assert.equal(new Set(Object.values(result.nodes).map((c) => c.y)).size, 9, 'the band has 9 distinct rows');
+
+  assert.deepEqual({ x: result.nodes[1].x, y: result.nodes[1].y }, { x: 0, y: 0 }, 'the lowest number takes the first slot');
+  assert.deepEqual(
+    { x: result.nodes[81].x, y: result.nodes[81].y },
+    { x: 8 * (NODE_W + GAP_X), y: 8 * (NODE_H + GAP_Y) },
+    'the highest number takes the last slot',
+  );
+  for (const n of nodes) assert.ok(result.nodes[n.number], `node ${n.number} has no coordinate`);
+
+  const shuffled = layout({ nodes: [...nodes].reverse(), edges: [] });
+  assert.equal(JSON.stringify(shuffled), JSON.stringify(result), 'a shuffled node array is byte-identical');
 });
 
 test('#881: an empty graph returns an empty layout, not a throw', () => {
