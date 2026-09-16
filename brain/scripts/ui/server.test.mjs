@@ -177,7 +177,7 @@ test('#881: A4 — GET /api/snapshot deep-equals in-process buildSnapshot on the
     const fromModule = await buildSnapshot({ root, now: now(), vcs: cache.port, project: 'o/r' });
     assert.deepEqual(fromServer, JSON.parse(JSON.stringify(fromModule)));
     assert.equal(fromServer.graph.ok, true, 'the seeded cache answered issueList — proof the route composed buildSnapshot with the injected port, not a stub');
-    assert.deepEqual(fromServer.graph.value.issuesUnreadable, [{ number: 5, reason: 'the first forge poll has not completed' }], 'issueView was never seeded, so the per-issue read misses in band');
+    assert.deepEqual(fromServer.graph.value.issuesUnreadable, [{ number: 5, reason: "this issue's body has not been fetched yet (queued)" }], 'issueView was never seeded, so the per-issue read misses in band — and the cache holds lists, so the miss is a queued body, not an un-started poll');
   } finally {
     await server.close();
   }
