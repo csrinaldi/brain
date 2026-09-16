@@ -404,6 +404,103 @@ test('#709 D6: an unterminated brain-graph/1-tagged fence hides the declaration 
   assert.match(r.error, /never closed/);
 });
 
+// ── #967 D4/D5: the node carries the four fields; the graph lifts what was said ──
+
+test('#967 R967-1 S1: the four fields land on the node literal beside track', () => {
+  const g = buildGraph([issue(1, { body: rawBlock('track: UI', 'kind: epic', 'tracker: feature/brain-ui', 'parent: 851') })]);
+  const n = g.nodes[0];
+  assert.equal(n.track, 'UI');
+  assert.equal(n.kind, 'epic');
+  assert.equal(n.tracker, 'feature/brain-ui');
+  assert.equal(n.parent, 851);
+  assert.equal(n.parentSource, 'block');
+  assert.deepEqual(g.declarationDivergences, [], 'a parent outside the set is not a divergence');
+});
+
+test('#967 R967-1 S3: track and tracker are read from their OWN keys and cannot collide', () => {
+  const g = buildGraph([issue(1, { body: rawBlock('track: UI', 'kind: epic', 'tracker: feature/brain-ui') })]);
+  const n = g.nodes[0];
+  assert.equal(n.track, 'UI', '`scalar` is anchored `^track:`, which never matches a `tracker:` line');
+  assert.equal(n.tracker, 'feature/brain-ui');
+});
+
+test('#967 R967-1 S4: an unknown key is still ignored, and ignoring it is not a divergence', () => {
+  const g = buildGraph([issue(1, { body: rawBlock('track: A', 'colour: red') })]);
+  const n = g.nodes[0];
+  assert.equal(n.track, 'A');
+  assert.equal(n.declared, true);
+  assert.deepEqual(g.declarationDivergences, [],
+    'no key-schema validation is introduced anywhere — forward compatibility is free without it');
+});
+
+test('#967 R967-9 S1: an epic(...) TITLE with no kind: key is not an epic', () => {
+  const g = buildGraph([issue(878, { title: 'epic(ui): Brain UI — the whole thing', body: rawBlock('track: UI') })]);
+  assert.equal(g.nodes[0].kind, null, 'the title prefix stays decorative; nothing is inferred from it');
+  assert.equal(g.nodes[0].tracker, null);
+});
+
+test('#967: what each body said is lifted to the graph, stamped with the issue number', () => {
+  const g = buildGraph([
+    issue(1, { body: rawBlock('track: A', 'tracker: main') }),
+    issue(2, { body: rawBlock('track: B', 'parent: abc') }),
+  ]);
+  assert.deepEqual(g.declarationDivergences, [
+    { number: 1, key: 'tracker', value: 'main', reason: 'tracker-grammar' },
+    { number: 2, key: 'parent', value: 'abc', reason: 'parent-grammar' },
+  ]);
+});
+
+test('#967 R967-4 S1: a parent IN the set that declares no kind: epic is one said entry, not an inference', () => {
+  const g = buildGraph([
+    issue(881, { body: rawBlock('track: UI', 'parent: 878') }),
+    issue(878, { body: rawBlock('track: UI', 'tracker: feature/brain-ui') }),
+  ]);
+  const n878 = g.nodes.find((n) => n.number === 878);
+  const n881 = g.nodes.find((n) => n.number === 881);
+
+  assert.deepEqual(g.declarationDivergences, [
+    // #878 says its own half: it declared a tracker without declaring `kind: epic`.
+    { number: 878, key: 'tracker', value: 'feature/brain-ui', reason: 'tracker-without-kind-epic' },
+    // and the cross-node half, which only the builder can see — both nodes named.
+    { number: 881, key: 'parent', value: 878, reason: 'parent-not-epic' },
+  ]);
+  assert.equal(n878.kind, null, 'never inferred to be an epic because someone pointed at it');
+  assert.deepEqual(g.edges, [], 'a parent is not an edge — it draws nothing');
+  assert.equal(n881.status, READY, 'and it changes no status');
+  assert.equal(n878.status, READY);
+});
+
+test('#967: a parent IN the set that DOES declare kind: epic says nothing', () => {
+  const g = buildGraph([
+    issue(881, { body: rawBlock('track: UI', 'parent: 878') }),
+    issue(878, { body: rawBlock('track: UI', 'kind: epic', 'tracker: feature/brain-ui') }),
+  ]);
+  assert.deepEqual(g.declarationDivergences, []);
+  assert.equal(g.nodes.find((n) => n.number === 878).tracker, 'feature/brain-ui');
+});
+
+test('#967 R967-4 S2: a parent ABSENT from the set says nothing — "not in this list" is not "not an epic"', () => {
+  // It may be closed, or in another repository. Reporting either as a divergence
+  // would manufacture one out of the shape of the query, the same distinction
+  // `buildGraph` already makes for a native read it could not perform.
+  const g = buildGraph([issue(881, { body: rawBlock('track: UI', 'parent: 9999') })]);
+  assert.equal(g.nodes[0].parent, 9999, 'the declaration is kept');
+  assert.deepEqual(g.declarationDivergences, []);
+});
+
+test('#967: an unreadable block contributes no divergence and carries none of the four fields', () => {
+  const dupes = [block({ track: 'A' }), '', block({ track: 'Z' })].join('\n');
+  const g = buildGraph([{ number: 9, title: 'dos bloques', labels: [], state: 'open', body: dupes }]);
+  const n9 = g.nodes[0];
+  assert.equal(n9.kind, null);
+  assert.equal(n9.tracker, null);
+  assert.equal(n9.parent, null);
+  assert.equal(n9.parentSource, null);
+  assert.deepEqual(g.declarationDivergences, [],
+    'an unreadable block asserts nothing — including nothing to diverge about');
+  assert.deepEqual(g.blocksUnreadable.map((b) => b.number), [9], 'it is still carried out as unreadable');
+});
+
 // ── the classification ──────────────────────────────────────────────────────
 
 test('#459: an undeclared issue is UNCLASSIFIED, never dropped and never a free leaf', () => {

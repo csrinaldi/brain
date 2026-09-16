@@ -447,7 +447,7 @@ export const SRC_NATIVE = 'native';
  * is done or out of scope. An edge to an OPEN issue does.
  *
  * @param {Array<{number:number,title:string,labels:string[],state:string,body?:string,assignees?:string[]|null,relations?:{blocks:number[],needs:number[],foreign?:number}|null}>} issues
- * @returns {{ nodes: Array, edges: Array<{from:number,to:number,sources:string[]}>, tracks: Map, divergences: Array, relationsUnreadable: number[], blocksUnreadable: Array<{number:number,error:string}>, foreignRelations: number }}
+ * @returns {{ nodes: Array, edges: Array<{from:number,to:number,sources:string[]}>, tracks: Map, divergences: Array, declarationDivergences: Array<{number:number,key:string,value:string|number|null,reason:string}>, relationsUnreadable: number[], blocksUnreadable: Array<{number:number,error:string}>, foreignRelations: number }}
  */
 export function buildGraph(issues = []) {
   const byNumber = new Map(issues.map(i => [i.number, i]));
@@ -460,6 +460,9 @@ export function buildGraph(issues = []) {
   };
   const relationsUnreadable = [];
   const blocksUnreadable = [];
+  /** What the bodies said about their own declarations (#967 D2), stamped with the
+   * issue that said it, plus the one thing only this function can see (D5). */
+  const declarationDivergences = [];
   let foreignRelations = 0;
 
   for (const issue of issues) {
@@ -471,6 +474,7 @@ export function buildGraph(issues = []) {
     const g = parsed?.ok === false ? null : parsed;
     // `needs` → an edge INTO this node. `blocks` → an edge OUT of it. Same relation,
     // two ends; declaring either is enough.
+    for (const d of g?.declarationDivergences ?? []) declarationDivergences.push({ number: issue.number, ...d });
     for (const n of g?.needs ?? []) addEdge(`${n}->${issue.number}`, SRC_DECLARED);
     for (const b of g?.blocks ?? []) addEdge(`${issue.number}->${b}`, SRC_DECLARED);
 
@@ -497,6 +501,13 @@ export function buildGraph(issues = []) {
       labels: issue.labels ?? [],
       state: issue.state,
       track: g?.track ?? null,
+      // #967 D4: four further declared values, beside `track` and read the same way.
+      // Nothing else in the tree reads them yet — the verb and the gate that do
+      // arrive in the next two slices, and the UI's node projection is #882's.
+      kind: g?.kind ?? null,
+      tracker: g?.tracker ?? null,
+      parent: g?.parent ?? null,
+      parentSource: g?.parentSource ?? null,
       files: g?.files ?? [],
       declared: g !== null,
       sources,
@@ -505,6 +516,21 @@ export function buildGraph(issues = []) {
       // erase exactly the distinction the port was widened to carry.
       assignees: issue.assignees ?? null,
     });
+  }
+
+  // D5 / ruling 4: the one divergence no single body can see. A node named as
+  // `parent` that does not itself declare `kind: epic` is SAID — never inferred to
+  // be an epic because someone pointed at it, never a tracker, never a failure.
+  //
+  // A parent ABSENT from the set produces nothing: it may be closed or in another
+  // repository, and "not in this list" is not "not an epic" — the same distinction
+  // the native-read gate below makes for exactly the same reason.
+  const byNode = new Map(nodes.map(n => [n.number, n]));
+  for (const node of nodes) {
+    const p = node.parent === null ? undefined : byNode.get(node.parent);
+    if (p && p.kind !== 'epic') {
+      declarationDivergences.push({ number: node.number, key: 'parent', value: node.parent, reason: 'parent-not-epic' });
+    }
   }
 
   const edges = [...edgeSources].map(([k, srcs]) => {
@@ -565,5 +591,5 @@ export function buildGraph(issues = []) {
     }
   }
 
-  return { nodes, edges, tracks, divergences, relationsUnreadable, blocksUnreadable, foreignRelations };
+  return { nodes, edges, tracks, divergences, declarationDivergences, relationsUnreadable, blocksUnreadable, foreignRelations };
 }

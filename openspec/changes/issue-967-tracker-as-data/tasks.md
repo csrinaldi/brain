@@ -135,7 +135,7 @@ and R967-10's "no `needs`-edge parent fallback" scenario.
 - [x] A3b. `epic-graph.mjs`: implement `/^Parent:[ \t]*#(\d+)\b/m` over the body
       with block-key precedence and no salvage on an unreadable block, so A3a
       passes.
-- [ ] A4a. `epic-map.test.mjs`: failing `buildGraph` tests — the four fields land
+- [x] A4a. `epic-map.test.mjs`: failing `buildGraph` tests — the four fields land
       beside `track` on the node literal (R967-1 S1); `track: UI` +
       `tracker: feature/brain-ui` read from their own keys (R967-1 S3); an unknown
       key is still ignored with no divergence (R967-1 S4); a parent **in** the set
@@ -145,7 +145,7 @@ and R967-10's "no `needs`-edge parent fallback" scenario.
       (R967-4 S2, amended); an `epic(…)` title with no `kind:` gives `kind: null`
       (R967-9 S1). **Mutation**: emitting an entry for the absent parent turns
       that case red; inferring `kind` from the title turns R967-9 S1 red.
-- [ ] A4b. `epic-graph.mjs:394-407`: add `kind`, `tracker`, `parent`,
+- [x] A4b. `epic-graph.mjs:394-407`: add `kind`, `tracker`, `parent`,
       `parentSource` as `g?.x ?? null` beside `track` at `:399`; after the node
       loop, lift the per-body entries into graph-level `declarationDivergences`
       as `{number, key, value, reason}` and append the cross-node
