@@ -111,3 +111,14 @@ export function sectionOf(state, name) {
   if (section === undefined) return { ok: false, reason: `"${name}" is not in the snapshot this server serves` };
   return section;
 }
+
+/**
+ * requestSequence() — one counter per kind of in-flight read. `next()` starts
+ * a request; `isCurrent(token)` is true only for the latest one, so a slower
+ * earlier answer is dropped instead of rendering over a fresher one (cold
+ * review of #982, correction 2: a burst of `refs` frames reloads the drawer).
+ */
+export function requestSequence() {
+  let latest = 0;
+  return { next: () => ++latest, isCurrent: (token) => token === latest };
+}

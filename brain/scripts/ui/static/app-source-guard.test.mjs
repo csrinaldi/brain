@@ -94,3 +94,14 @@ test('#881 T2a: index.html loads no external resource, no inline handler, and no
   assert.ok(!/\son[a-z]+=/i.test(html), 'index.html must not carry an inline event handler — app.js wires every listener');
   assert.match(html, /<script type="module" src="\/app\.js"><\/script>/, 'the page loads app.js directly as an ES module: no bundler, no build step');
 });
+
+// ── cold review of #982, correction 2: loadChange drops a stale answer ──
+
+test('#881: loadChange guards its answer with a request token from lib/frames.mjs — a burst of refs frames cannot render an older answer over a newer one', () => {
+  const text = readFileSync(APP_JS, 'utf8');
+  assert.match(text, /import \{[^}]*\brequestSequence\b[^}]*\} from '\.\/lib\/frames\.mjs'/);
+  const body = text.slice(text.indexOf('async function loadChange('));
+  const fn = body.slice(0, body.indexOf('\n}\n') + 3);
+  assert.match(fn, /const token = \w+\.next\(\)/, 'a token is taken before the fetch');
+  assert.match(fn, /isCurrent\(token\)/, 'and checked after the answer, before rendering');
+});
