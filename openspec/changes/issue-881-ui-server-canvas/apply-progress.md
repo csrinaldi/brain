@@ -1121,8 +1121,11 @@ open-on-common-dir-event call turns exactly that test red.
 resolved with `git -C <worktree> rev-parse --abbrev-ref HEAD`, and strace
 shows `git -C` opens `<worktree>/.git` first — the file R881-3 forbids by
 name. Fix: `git --git-dir <git-common>/worktrees/<id> rev-parse
---abbrev-ref HEAD` for a linked worktree and `--git-dir <git-common>` for
-the primary; the watcher hands the server the worktree's admin id. strace on
+--abbrev-ref HEAD` for a linked worktree, and a plain `git rev-parse
+--abbrev-ref HEAD` with no `--git-dir` flag (default cwd) for the primary —
+correct, not an oversight, because the primary checkout's own `.git`
+directory already IS the common dir, so no separate `--git-dir` is needed;
+the watcher hands the server the worktree's admin id. strace on
 this repository's own linked worktree: every `openat` is under
 `/home/gandalf/IA/brain/.git/`, none under `/home/gandalf/IA/brain-issue-881/`.
 The refs-frame tests now assert the exact argv; mutation: restoring `-C`
@@ -1142,3 +1145,251 @@ brain/scripts/ui/*.test.mjs` = 75/75, three identical runs (was 73/73);
 `GIT_CONFIG_GLOBAL=/dev/null npm test` = 5416/5416; `brain:repo:check`
 green before each commit. Counted diff 985/1000. Pre-push fresh review of
 these commits: APPROVE on the code, with this entry as its one finding.
+
+---
+
+## PR 3 / B1 (partial) — the pure page logic, `ui/lib/**` only (2026-09-15)
+
+Branch `feat/issue-881-slice-3-lib`, on top of `1d2c6f09` (= PR 1 `8d074e44`
++ PR 2 squash-merged into the tracker `feature/brain-ui` as `origin/feature/
+brain-ui`, plus `origin/main`). This run's scope, set by the orchestrator
+for exactly this reason (see "Scope decision" below): the six pure modules
+`design.md`'s D8 module map lists under `ui/lib/**` (T1–T6), plus the two
+cross-cutting guard/property tests (T8/T9). `change-route.mjs` (T7) —
+tasks.md's other PR 3 file, the one that does IO (`_read`/`_run`) — is
+explicitly OUT of this run and deferred to a follow-up apply batch.
+
+### Scope decision: why `change-route.mjs` was left out, not a budget cut
+
+Unlike every earlier round in this file, this was not a diff-budget
+split — the counted diff at the end of this run is 472/1000, with ~530
+lines of headroom still open. The split is structural: design.md's D8
+table draws `lib/` as "pure, imported by the browser AND by node:test" —
+`layout.mjs`, `spec-cards.mjs`, `tasks-list.mjs`, `blame.mjs`,
+`resume-view.mjs`, `colour.mjs`. `change-route.mjs` sits OUTSIDE that
+directory in the same table, described as "the drawer's IO (injected
+`_read`/`_run`)" — it is not one of the modules `static/app.js` imports
+directly (PR 4's job), and it is the one file in tasks.md's PR 3 file list
+that is not "the pure page logic" by the design's own words. The
+orchestrator's task order named five modules explicitly and "whatever
+provenance/shaping module the design names" for the sixth — resolved here
+as `blame.mjs`, the only other `lib/` entry in D8's table, whose job (Q2)
+is exactly shaping git-blame porcelain into provenance-carrying per-line
+attribution.
+
+### T1–T6 — tasks done, with commit SHAs
+
+| Task | What | Commit |
+|---|---|---|
+| — | docs(sdd): correct the tenth round's claim about the primary checkout's branch resolution (exception A, cold review of #971 rev on `f46782f6`) | `b902a811` |
+| — | refactor(ui): `watcher.mjs` imports `parseWorktrees` from `memory/lane/collect.mjs` instead of a diverging copy (exception B, carried from PR 2's review) | `727e026a` |
+| T1a/T1b | `layout.mjs` + test — DFS back-edge reversal, longest-path layering, 4-sweep barycentre ordering, coordinates | `f5a00d8f` |
+| T2a/T2b | `colour.mjs` + test — exhaustive roadmap-state/node-status → CSS-class map | `381d0aef` |
+| T3a/T3b | `spec-cards.mjs` + test — `spec.md`'s requirement/scenario grammar | `81504af5` |
+| T4a/T4b | `tasks-list.mjs` + test — `tasks.md`'s checklist grammar, attribution injected | `5d3cc9f3` |
+| T5a/T5b | `blame.mjs` + test — pure `git blame --porcelain` parser | `2c03b5d8` |
+| T6a/T6b | `resume-view.mjs` + test — shapes parsed `resume.md` frontmatter | `125e3f23` |
+| T8/T9 | source-guard test + A3 provenance property test (scoped to T1–T6's modules) | `c71313cd` |
+| T7a/T7b | **deferred** — `change-route.mjs`, out of this run's scope (see above) | — |
+| T10 | Verify: full suite + `brain:repo:check` green | (this docs commit) |
+| T11 | `npm run memory:save` — `rec-9cf68574b1310920` | `236e5b75` |
+
+### TDD Cycle Evidence
+
+Strict TDD was followed for every module: the test file was written and
+run first (RED, `ERR_MODULE_NOT_FOUND` or an assertion failure against
+code that did not yet exist), then the implementation (GREEN), then one
+targeted mutation per module to prove the test actually pins the behaviour
+it claims to (REFACTOR — the mutation was reverted after confirming red,
+no production code changed by the mutation round-trip).
+
+| Module | RED | GREEN | Mutation (targeted, reverted) |
+|---|---|---|---|
+| `source-guard.test.mjs` | 3/3 fail — `lib/` had zero non-test modules yet | 3/3 pass once `layout.mjs` existed | N/A — this file IS the guard; its own regression coverage is the modules that follow it staying inside the boundary |
+| `layout.mjs` | `ERR_MODULE_NOT_FOUND` (no `layout.mjs`) | 8/8 pass | dropped the back-edge reversal (`{from:n,to}` instead of `{from:to,to:n}`) — the cycle test's pinned `layer(1)===0` assertion went red; reverted, 8/8 green |
+| `colour.mjs` | `ERR_MODULE_NOT_FOUND` | 5/5 pass | removed the `blockedBy`-length override branch — "blocked overrides state colour" went red; reverted, 5/5 green |
+| `spec-cards.mjs` | `ERR_MODULE_NOT_FOUND` | 6/6 pass | forced `complete = true` unconditionally on WHEN — the "WHEN but no THEN" test went red; reverted, 6/6 green |
+| `tasks-list.mjs` | `ERR_MODULE_NOT_FOUND` | 7/7 pass | dropped `.toLowerCase()` on the checkbox marker — the `- [X]` (uppercase) case went red; reverted, 7/7 green |
+| `blame.mjs` | `ERR_MODULE_NOT_FOUND` | 5/5 pass | dropped the commit-metadata cache reuse (`commits.get(current.sha) ?? {}` → `{}`) — the repeated-commit-line assertion went red; reverted, 5/5 green |
+| `resume-view.mjs` | `ERR_MODULE_NOT_FOUND` | 5/5 pass | genericized the per-field failure reason (dropped the field name) — two tests asserting the field name in the reason went red; reverted, 5/5 green |
+| `provenance.test.mjs` | N/A — composes already-implemented modules, no new production code | 3/3 pass on first write | dropped `source` from a `spec-cards.mjs` scenario object — the property test caught it (1/3 red); reverted, 3/3 green |
+
+### Verification
+
+`GIT_CONFIG_GLOBAL=/dev/null node --test brain/scripts/ui/lib/*.test.mjs` =
+42/42 green. `GIT_CONFIG_GLOBAL=/dev/null node --test brain/scripts/ui/*.test.mjs
+brain/scripts/ui/lib/*.test.mjs` = 117/117 green (was 75/75 before this
+run's 42 new tests). `GIT_CONFIG_GLOBAL=/dev/null npm test` = 5478/5478
+green, one full run (~37s). `brain:repo:check` green before every commit;
+tree clean after each. Counted diff (excluding `.test.mjs`, `openspec/`,
+`.memory/`) against `origin/feature/brain-ui...HEAD`: **472/1000**.
+
+### Deviations from tasks.md / design.md
+
+1. **T7 (`change-route.mjs`) deferred** — see "Scope decision" above; not a
+   budget cut, a structural one drawn by the orchestrator's task order.
+2. **`provenance.test.mjs` lives at `brain/scripts/ui/lib/provenance.test.mjs`**,
+   not `brain/scripts/ui/provenance.test.mjs` as tasks.md's T9 originally
+   named it — it composes only `lib/` modules this run (no `change-route.mjs`
+   to reach outside `lib/` for), so it colocates with them; `tasks.md`'s own
+   T9 line is corrected to match.
+3. **`layout.mjs`'s edge `points`** are always exactly two endpoints (start,
+   end), including for a layer-skip > 1 edge — design.md says "for a layer
+   skip > 1, straight-line points; no spline routing in v1," read here as
+   "still a straight line, no curve," which two endpoints already draw; no
+   extra midpoints were added since nothing in R881-7 or the test plan (A1)
+   requires more than two.
+4. **`colour.mjs`'s priority order** (unreadable → not-computed → blocked →
+   awaiting-human → unclassified → roadmap state) is a design decision this
+   run makes explicit: R881-6's prose states the roadmap-state base colour
+   plus two named overrides (blocked, awaiting-review/approval) but does not
+   spell out the full ordering over all eight constants the D9-note's
+   exhaustive test requires covering. `awaiting-review/approval` is read as
+   `node.status === 'awaiting-human'` (epic-graph.mjs's own name for exactly
+   that state); `unclassified` (no declaring source at all) gets its own
+   mark rather than falling through to a roadmap state that describes a node
+   nothing ever placed.
+5. **Scope** — no file outside this run's stated boundary
+   (`brain/scripts/ui/lib/**` plus the two named exceptions, `watcher.mjs`
+   and `memory/lane/collect.mjs`) was touched, except `tasks.md`/
+   `apply-progress.md` bookkeeping and the one memory record.
+
+No push, no PR (per task instructions) — branch `feat/issue-881-slice-3-lib`
+has not been pushed this run.
+
+---
+
+## PR 3 / B1 — T7 completes, PR 3 done (2026-09-15, follow-up run)
+
+Branch `feat/issue-881-slice-3-lib`, on top of the previous run's head
+(`4a8bc16e`). Scope this run: exactly the deferred T7 — `change-route.mjs`
+(`GET /api/change/{issue}`), its dedicated test file, the `server.mjs`
+route wiring, and `provenance.test.mjs`'s change-route property coverage —
+per the fence the "Scope decision" section above drew. No other file
+touched.
+
+### T7 — task done, with commit SHA
+
+| Task | What | Commit |
+|---|---|---|
+| T7a/T7b | `change-route.mjs` + `change-route.test.mjs` + `server.mjs` route wiring + `provenance.test.mjs` extension | `90699431` |
+
+`change-route.mjs` composes the six `ui/lib/**` shapers this slice already
+shipped (`spec-cards`, `tasks-list`, `blame`, `resume-view`) with
+`snapshot.changes`/`prs`/`reviews` into the four R881-8 tabs — Spec, Tasks,
+Working memory, Reviews — every leaf inside a tab's `value` carrying
+`source` (A3, D11). `server.mjs` adds `GET /api/change/<N digits>` through
+the existing method-check-before-routing path (a non-numeric id falls
+through to the existing 404; a mutation method to the existing 405) and a
+new `KNOWN_ROUTES` entry, `'/api/change/{issue}'` — the R881-10 S3 route-
+table assertion in `server.test.mjs` was updated to match.
+
+**Design decisions this run had to make, not spelled out verbatim in
+design.md:**
+
+1. **`project` is an added, optional parameter** to `buildChangeView`
+   (`{root, issue, snapshot, project, _read, _run, _exists}`) — D8's module
+   map lists `change-route.mjs`'s signature as `{root, issue, snapshot}`
+   plus the injected `_read`/`_run`, but D14 requires a PR URL
+   (`https://<host>/<project>/pull/<pr>`) and `project` is the only fact
+   that can build one; `server.mjs` already threads it to `buildMeta()`.
+   Defaults to `null`, degrading to a relative `pull/<n>` reference (still
+   a non-empty `source.url`, never a crash) rather than throwing.
+2. **Per-task `attribution` leaf, distinct from `actor`/`ts`.** The T7a
+   task list asked for "attribution `{ok:false, reason}` per row, never
+   dropped" on a blame failure, but `tasks-list.mjs` (shipped last run,
+   out of this run's file fence) only accepts an `attribution` INPUT array
+   of `{line, actor, ts}` and always renders `actor: 'unknown'` on a miss
+   — it has no `{ok, reason}` output shape of its own. `change-route.mjs`
+   post-processes every returned item, attaching its own `attribution:
+   {ok:true, value:{actor, ts}} | {ok:false, reason}` field beside the
+   existing `actor`/`ts` fields — the checklist itself still renders in
+   full either way (never dropped), and the failure is now said per row,
+   not folded into "unknown" silently.
+3. **`noChangeDirTab`'s reason and `source.path`** use the literal glob
+   `openspec/changes/issue-<N>-*` for both Spec and Tasks — matching the
+   brief's exact reason text verbatim, so a reviewer or an operator can
+   copy it into a shell glob and get the real answer.
+4. **Reviews tab's `sourceNote`** is `'forge comments until #880 lands'` —
+   the "What T7 delivers" section's exact string, not design.md's D14
+   prose ("source: forge comments, until #880 lands `type: review`
+   records") nor the brief's `spec.md`-input paraphrase ("source: forge
+   comments until #880"). One literal string, exported as
+   `REVIEWS_SOURCE_NOTE`, used by both the tab and its tests.
+
+### TDD Cycle Evidence
+
+RED confirmed by the established "move-aside" technique (`change-route.mjs`
+moved to `/tmp`, all three consuming test files — `change-route.test.mjs`,
+`provenance.test.mjs`, `server.test.mjs` — failed with `ERR_MODULE_NOT_FOUND`
+against the same, already-written-first test files), then restored (GREEN).
+
+| Unit | RED | GREEN | Mutation (targeted, reverted) |
+|---|---|---|---|
+| `change-route.mjs` (all four tabs, 10-case fixture matrix + 2 top-level guards) | `ERR_MODULE_NOT_FOUND` across `change-route.test.mjs`, `provenance.test.mjs`, `server.test.mjs` (57 tests) | 57/57 pass, stable across 3 consecutive runs | (1) dropped `HEAD` from the blame argv → 2 tests red (`change-route.test.mjs` case 6, `server.test.mjs`'s parity/argv test); reverted, 57/57 green. (2) `noChangeDirTab` collapsed to `{ok:true, value:[]}` → 2 tests red (`change-route.test.mjs` case 4, `provenance.test.mjs`'s "no change dir" leaf test); reverted, 15/15 (subset) green. (3) dropped the `names.length > 1` ambiguity check → 1 test red (`change-route.test.mjs` case 3, "two matching branches"); reverted, 11/11 (subset) green. |
+
+One genuine test bug found and fixed while writing the tests (not a
+production defect): `current_slice` in the resume.md fixture parses as the
+STRING `'3'`, not the number `3` — `resume-frontmatter.mjs`'s
+`parseFrontmatter` does no type coercion on scalars (confirmed against its
+own `resume-frontmatter.test.mjs`, which asserts string values
+throughout). Two assertions in `change-route.test.mjs` that wrote `value:
+3` were corrected to `value: '3'`.
+
+### Verification
+
+`GIT_CONFIG_GLOBAL=/dev/null node --test brain/scripts/ui/change-route.test.mjs
+brain/scripts/ui/lib/provenance.test.mjs brain/scripts/ui/server.test.mjs` =
+57/57 green, 3 consecutive runs, no flake. `GIT_CONFIG_GLOBAL=/dev/null
+node --test brain/scripts/ui/**/*.test.mjs brain/scripts/ui/*.test.mjs` =
+132/132 green (was 117/117 before this run's 15 net new tests).
+`brain:repo:check` green before the commit; tree clean after. Counted diff
+(excluding `.test.mjs`, `openspec/`, `.memory/`) against
+`origin/feature/brain-ui...HEAD`, measured directly after this run's
+commit: **687/1000**, still well inside the lite-tier 1000-line/PR budget
+(this run's two production files: `change-route.mjs` +196/-0, `server.mjs`
++18/-1, on top of the previous run's 472).
+
+### Deviations from tasks.md / design.md
+
+Superseding deviation 1 from the previous section ("T7 deferred"): T7 is
+now complete. The four numbered design decisions above (this section) are
+the only new deviations this run introduces; deviations 2-5 from the
+previous section stand unchanged.
+
+### PR 3 status: COMPLETE
+
+All of T1-T11 are `[x]` in `tasks.md`. PR 3 / B1 — the pure page logic — is
+done: `lib/**`'s six modules, the source-guard and provenance property
+tests, and `change-route.mjs`'s composition of all four over the real
+route table. PR 4 (B2, the page) can now build against a complete `GET
+/api/change/{issue}` contract.
+
+No push, no PR (per task instructions) — branch `feat/issue-881-slice-3-lib`
+has not been pushed this run.
+
+## Slice 3 — pre-push fresh review (2026-09-16): one blocker, three minors
+
+**Blocker, `change-route.mjs` `buildReviewsTab`**: a per-PR review row that
+`reviewRows` marked `{ok:false, reason}` was skipped with `continue`, so the
+tab came back `ok:true` with an empty list — the reading of "no rounds ever
+posted" (`evidence-reader-empty-on-failure.md`, R881-9). Fixed in `bdfe86f8`:
+the tab carries `unreadable: [{pr, ok:false, reason, source:{url}}]` beside
+the readable rounds and is `ok:false` naming every thread when none could be
+read; the provenance property walks the new entries. Two tests red first;
+mutation: restoring the `continue` turns exactly those two red.
+
+**Minor, `source-guard.test.mjs`**: the forbidden-pattern list omitted
+`import.meta`; `51f0b06c` adds it, proven by injecting `import.meta.url` into
+`colour.mjs` (red) and restoring (green).
+
+**Minor, `layout.mjs`**: an edge to a number that is not a node was filtered
+silently; `caeee362` reports it in `droppedEdges: [{from, to, reason}]`, nodes
+still never dropped. Test first; mutation: emptying the collection turns
+exactly that test red.
+
+**Minor, left as is**: `colour.mjs` throws on an unknown state, deliberately.
+PR 4's renderer MUST catch per node so one unknown state cannot blank the
+canvas.
+
+Counts after this round: 135 tests under `ui/`, counted diff 699/1000.

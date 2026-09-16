@@ -9,9 +9,9 @@
 // serialised so a `git rebase` burst produces at most two recomputes.
 //
 // `<git-common>/worktrees/` re-scans on its own event via `git worktree list
-// --porcelain` — the same grammar as `collect.mjs:115-129`'s
-// `parseWorktrees()`, DUPLICATED here (out of this PR's file-scope fence,
-// see apply-progress). A worktree's `<n>` id is NEVER `basename(path)` (two
+// --porcelain`, parsed by `collect.mjs`'s exported `parseWorktrees()` — one
+// grammar, one reader, no diverging copy (PR 3 follow-up). A worktree's
+// `<n>` id is NEVER `basename(path)` (two
 // worktrees can share a leaf) — it comes from `<git-common>/worktrees/<n>/gitdir`,
 // never a path under the worktree itself (round 8, R881-3).
 //
@@ -28,23 +28,9 @@ import { isAbsolute, join, resolve } from 'node:path';
 
 import { ANTI_PATTERN_DIRS } from '../status/anti-patterns.mjs';
 import { CHANGES_ROOT, parseChangeId } from '../lib/sdd-layout.mjs';
+import { parseWorktrees } from '../memory/lane/collect.mjs';
 
 const DEBOUNCE_MS = 250;
-
-/** `git worktree list --porcelain` → `{path, bare}` stanzas, one per worktree. */
-function parseWorktreeStanzas(stdout) {
-  const stanzas = [];
-  let current = null;
-  for (const line of stdout.split('\n')) {
-    if (line.startsWith('worktree ')) {
-      current = { path: line.slice('worktree '.length), bare: false };
-      stanzas.push(current);
-    } else if (current && line === 'bare') {
-      current.bare = true;
-    }
-  }
-  return stanzas;
-}
 
 function defaultRun(root) {
   return (file, args) => execFileSync(file, args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
@@ -252,7 +238,7 @@ export function createWatcher({
   function activeWorktrees() {
     let stdout;
     try { stdout = run('git', ['worktree', 'list', '--porcelain']); } catch (err) { recordFailure('<git-common>/worktrees', err); return null; }
-    const stanzas = parseWorktreeStanzas(stdout).slice(1).filter((s) => !s.bare);
+    const stanzas = parseWorktrees(stdout).slice(1).filter((s) => !s.bare);
     const adminDir = join(resolvedGitCommonDir, 'worktrees');
     let ids;
     try { ids = _readdir(adminDir); } catch (err) {

@@ -30,14 +30,17 @@ import { createForgeCache } from './forge-cache.mjs';
 import { diffSections } from './diff.mjs';
 import { createWatcher, resolveGitCommonDir } from './watcher.mjs';
 import { createPoller } from './poller.mjs';
+import { buildChangeView } from './change-route.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const STATIC_DIR = join(__dirname, 'static');
 const ALLOWED_METHODS = new Set(['GET', 'HEAD']);
 const POST_ONLY_PATHS = new Set(['/api/poll/pause', '/api/poll/resume', '/api/poll/once']);
+/** `GET /api/change/<N digits>` — a non-numeric id falls through to the 404 below (D8's `change-route.mjs`). */
+const CHANGE_ROUTE_RE = /^\/api\/change\/(\d+)$/;
 
 /** Every route this server knows — the R881-10 S3 guard test pins this set: no MCP resource route, no heartbeat/agent-pulse endpoint. */
-export const KNOWN_ROUTES = Object.freeze(['/', '/api/snapshot', '/api/stream', '/api/poll/pause', '/api/poll/resume', '/api/poll/once']);
+export const KNOWN_ROUTES = Object.freeze(['/', '/api/snapshot', '/api/stream', '/api/poll/pause', '/api/poll/resume', '/api/poll/once', '/api/change/{issue}']);
 
 const NO_FORGE_REASON = 'no forge port was supplied to the poller';
 const noForgeVcs = {
@@ -230,6 +233,8 @@ export function createUiServer({
     if (pathname === '/api/poll/pause') return servePollControl(res, poller.pause);
     if (pathname === '/api/poll/resume') return servePollControl(res, poller.resume);
     if (pathname === '/api/poll/once') return servePollControl(res, poller.once);
+    const changeMatch = CHANGE_ROUTE_RE.exec(pathname);
+    if (changeMatch) return serveChange(res, Number(changeMatch[1]));
     res.writeHead(404, { 'content-type': 'text/plain' });
     res.end('not found');
   }
@@ -258,6 +263,18 @@ export function createUiServer({
     const state = await action();
     res.writeHead(200, { 'content-type': 'application/json' });
     res.end(JSON.stringify(state));
+  }
+
+  // D8/D11: the drawer's IO — `buildChangeView` composes the six `ui/lib/**`
+  // shapers over the SAME `current` snapshot every other route serves (D1 —
+  // one held value, never a per-request recompute); its own `git blame`/
+  // `git show` reads run through the same `run` seam `recomputeAndBroadcast`
+  // uses above, on the served root's own git dir, never a worktree's.
+  async function serveChange(res, issueNumber) {
+    if (current === null) await recomputeCurrent();
+    const view = buildChangeView({ root, issue: issueNumber, snapshot: current, project, _run: run });
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify(view));
   }
 
   function sendInternalError(res, err) {
