@@ -72,9 +72,24 @@ issue number and the offending text.
 ### R967-2: a parent read from prose, one hop, and said as such
 
 When the block declares no `parent:`, the reader MUST look for a
-**line-initial** `Parent: #<digits>` in the body, matched with exactly
+**line-initial** `Parent: #<digits>` in the **prose**, matched with exactly
 `/^Parent:[ \t]*#(\d+)\b/m` — column zero, exact case, no leading-whitespace
-tolerance, arbitrary prose allowed after the number. A block key MUST win over
+tolerance, arbitrary prose allowed after the number.
+
+The scan MUST run over the body with every **fenced region removed** — every
+fence the splitter reports, the `brain-graph/1` fence included, plus an
+unterminated fence's run to the end of the document. A fence is the canonical
+"this is an example" shape, and #709 already settled that an illustration and a
+declaration MUST NOT be byte-identical to a reader; the same rule governs prose.
+(Amended 2026-09-16, review of PR A: the code was conformant to the sentence
+above and the sentence was the defect. Measured on the pre-amendment tree: a
+column-zero `Parent: #999` inside a plain fence declared a parent, as did one
+inside the `brain-graph/1` fence itself, and a fenced example standing above a
+real `Parent:` line DELETED the real declaration by manufacturing an ambiguity
+with it.) Masking an **HTML comment** is NOT part of this requirement — the
+splitter reports no span for one — and is recorded as a follow-up.
+
+A block key MUST win over
 prose, and when it does the prose line MUST NOT be read at all. The node MUST
 state where its parent came from in `parentSource` (`'block' | 'prose' |
 null`). `Epic: #N` MUST NOT be read as a synonym for `Parent: #N`. A line the
@@ -98,6 +113,10 @@ first-match-wins guess.
 #### Scenario: a mid-line match declares nothing, silently
 - **WHEN** a body carries `Issue: #337 — M10 Phase 3. Parent: #335. Epic: #313.` and no block `parent:`
 - **THEN** `node.parent` and `node.parentSource` are `null` and nothing is said — a line the regex does not match is not a malformed declaration, it is not a declaration
+
+#### Scenario: a fenced `Parent:` line is an illustration, not a declaration
+- **WHEN** a body carries a column-zero `Parent: #999` inside a fence — a plain one, the `brain-graph/1` one, or an unterminated one — and a real line-initial `Parent: #878` outside every fence
+- **THEN** `node.parent` is `878` with `parentSource: 'prose'`, nothing is said, and the fenced line is neither a second declaration nor a disagreement with the first
 
 #### Scenario: two line-initial matches are refused and named
 - **WHEN** a body carries two line-initial `Parent: #N` lines with different numbers

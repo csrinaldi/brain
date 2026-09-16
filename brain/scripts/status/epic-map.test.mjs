@@ -232,6 +232,44 @@ test('#967: an indented or quoted Parent: line declares nothing — column zero,
   }
 });
 
+test('#967 R967-2: a column-zero Parent: inside a FENCE is an illustration, never a declaration', () => {
+  // The same rule the fence selector itself settled in #709: a body that ILLUSTRATES
+  // the protocol and a body that DECLARES it must not be byte-identical to the reader.
+  // `> Parent: #999` and `  Parent: #999` were already refused by column zero; a
+  // fenced example is at column zero and was read — and the third case below is the
+  // damaging one, where the illustration does not merely add a parent, it DELETES a
+  // real declaration by manufacturing an ambiguity with it.
+  const inPlainFence = ['```', 'Parent: #999', '```', '', rawBlock('track: A')].join('\n');
+  const a = parseGraphBlock(inPlainFence);
+  assert.equal(a.parent, null, 'a fenced example declares nothing');
+  assert.equal(a.parentSource, null);
+  assert.deepEqual(a.declarationDivergences, [], 'and it is not a malformed declaration either');
+
+  // The graph fence is a fence like any other: `Parent:` is not its `parent:` key
+  // (`scalar` is exact-case, anchored `^parent:`), so it is not read there either.
+  const inGraphFence = parseGraphBlock(rawBlock('track: A', 'Parent: #999'));
+  assert.equal(inGraphFence.parent, null, 'the block declares with `parent:`, not with prose inside itself');
+  assert.equal(inGraphFence.parentSource, null);
+  assert.deepEqual(inGraphFence.declarationDivergences, []);
+
+  // An unterminated foreign fence runs to the end of the document, so everything
+  // below it is content on the author's screen too.
+  const swallowed = [rawBlock('track: A'), '', '```console', 'Parent: #999'].join('\n');
+  const s = parseGraphBlock(swallowed);
+  assert.equal(s.parent, null);
+  assert.deepEqual(s.declarationDivergences, []);
+
+  // THE MEASURED DAMAGE: an example above a REAL declaration used to make the two
+  // disagree, and the refusal fell on the real one.
+  const exampleThenReal = ['Here is how a slice declares its epic:', '',
+    '```', 'Parent: #999', '```', '', 'Parent: #878 (Brain UI) — slice 3, Wave B.', '',
+    rawBlock('track: UI')].join('\n');
+  const r = parseGraphBlock(exampleThenReal);
+  assert.equal(r.parent, 878, 'the one declaration outside the fence is the only one there is');
+  assert.equal(r.parentSource, 'prose');
+  assert.deepEqual(r.declarationDivergences, [], 'an illustration cannot disagree with a declaration');
+});
+
 test('#967 R967-2 S3: Epic: #N is NOT a synonym for Parent: #N', () => {
   const body = ['Epic: #313', '', rawBlock('track: A')].join('\n');
   const g = parseGraphBlock(body);

@@ -129,9 +129,53 @@ const TRACKER_GRAMMAR = /^feature\/[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*$/;
  * a quoted or list-item `> Parent: #999` inside an example must declare nothing.
  * `Epic: #N` is NOT a synonym — #337 carries both, naming different issues.
  *
+ * IT IS MATCHED AGAINST PROSE, NOT AGAINST THE WHOLE BODY — see `outsideFences`.
+ *
  * `g` is for `matchAll`, which clones the regex rather than advancing this one.
  */
 const PARENT_PROSE_LINE = /^Parent:[ \t]*#(\d+)\b/gm;
+
+/**
+ * The body with every FENCED REGION blanked out, line count preserved.
+ *
+ * The prose reader must see what a READER of the rendered page sees, which is the
+ * same argument `fenced-blocks.mjs` settles for the splitter: anywhere the reader
+ * and the author's screen disagree, the reader has fabricated something. A fence is
+ * the canonical "this is an example, not a statement" shape — it is how this very
+ * module's header illustrates the block — and #709 already refused to let an
+ * illustration and a declaration be byte-identical to the selector. The prose scan
+ * was still reading the whole body, so column zero INSIDE a fence declared a parent.
+ *
+ * MEASURED, and the third shape is the damaging one: a fenced `Parent: #999` added a
+ * parent (plain fence, and inside the `brain-graph/1` fence itself, where `Parent:`
+ * is not the block's exact-case `parent:` key); and a fenced example standing ABOVE
+ * a real `Parent:` line did not merely add one, it DELETED the real declaration by
+ * manufacturing an ambiguity with it.
+ *
+ * An UNTERMINATED fence is blanked to the end of the document, because that is how
+ * far it runs on the page — `fenced-blocks.mjs`'s own contract.
+ *
+ * Blanking rather than deleting keeps every surviving line at its own index, so
+ * nothing below a fence shifts and the `m`-anchored pattern still sees line starts.
+ * The span is derived from the splitter's own report, never re-scanned: this module
+ * grows no second fence reader (#340). `content === ''` is the one ambiguous count
+ * (zero lines, or one empty line), and it is resolved to ZERO — an UNDER-estimate, so
+ * the two lines the span may leave uncovered are an empty line and a fence
+ * delimiter, neither of which can match a `Parent:` declaration.
+ *
+ * @param {string} body
+ * @param {{content:string, line:number}[]} blocks
+ * @param {{line:number}|null} unterminated
+ * @returns {string}
+ */
+function outsideFences(body, blocks, unterminated) {
+  const lines = body.split(/\r?\n/);
+  const blank = (from, to) => { for (let i = Math.max(from, 0); i < Math.min(to, lines.length); i++) lines[i] = ''; };
+  // `line` is the 1-based OPENER; the closer sits one line past the content.
+  for (const b of blocks) blank(b.line - 1, b.line + (b.content === '' ? 0 : b.content.split('\n').length) + 1);
+  if (unterminated) blank(unterminated.line - 1, lines.length);
+  return lines.join('\n');
+}
 
 /** Node states, in the order a reader cares about them. */
 export const READY = 'ready';
@@ -351,7 +395,7 @@ export function parseGraphBlock(body) {
       say('parent', parentRaw, 'parent-grammar');
     }
   } else {
-    const prose = [...new Set([...body.matchAll(PARENT_PROSE_LINE)].map(m => Number(m[1])))];
+    const prose = [...new Set([...outsideFences(body, blocks, unterminated).matchAll(PARENT_PROSE_LINE)].map(m => Number(m[1])))];
     // Two line-initial lines naming DIFFERENT issues is ambiguity, and the answer is
     // the one `parseGraphBlock` already gives for two graph blocks: stop picking. Two
     // lines naming the same issue is a restatement, not a disagreement — there is
