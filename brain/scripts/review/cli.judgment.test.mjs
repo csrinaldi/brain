@@ -10,7 +10,7 @@
 // axis, the id space, the conclusion, and the generator's failure modes. Each
 // one is now driven end to end through the real verb.
 
-import { test } from 'node:test';
+import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { main } from './cli.mjs';
@@ -59,6 +59,12 @@ const honestWhoami = (logins) => async ({ token }) => {
  */
 const LOGGED_OUT = () => ({ status: 1, stderr: 'not logged into any hosts' });
 
+// Candidate snapshots are a production precondition. Give the cold-boot double
+// a real empty directory so composition tests exercise that precondition instead
+// of accidentally asking snapshotCandidate() to read an impossible placeholder.
+const coldWorktrees = [];
+after(() => coldWorktrees.forEach((dir) => rmSync(dir, { recursive: true, force: true })));
+
 function deps({ config, protocol, generate, tier = 'regulated', refuterRunner } = {}) {
   const d = {
     project: 'csrinaldi/brain',
@@ -77,7 +83,7 @@ function deps({ config, protocol, generate, tier = 'regulated', refuterRunner } 
       // A worktree path, because production always has one: cold-boot builds a
       // detached checkout and judgment:cold-3 makes the stage REFUSE without it.
       // A double that omits it is less faithful than the code it stands in for.
-      cloneDetached: async () => ({ detached: true, worktreePath: '/cold/worktree' }),
+      cloneDetached: async () => { const worktreePath = mkdtempSync(join(tmpdir(), 'cli-cold-worktree-')); coldWorktrees.push(worktreePath); return { detached: true, worktreePath }; },
       readRecords: () => [],
       fetchReviews: async () => [],
     },

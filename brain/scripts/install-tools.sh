@@ -105,7 +105,28 @@ else
   ok "$I18N_TOOLS_CLAUDE_INSTALLED"
 fi
 
-# ── 4. gentle-ai (manages engram + gga + skills) ──────────────────────────────
+# ── 4. Codex (only for an effective Codex cold-review route) ──────────────────
+# The generic stage resolver keeps model identifiers opaque. This route-specific
+# helper is intentionally the only setup reader that pins the Codex contract.
+CODEX_REQUIRED="$(node brain/scripts/harness/codex-readiness.mjs --required)"
+say "Codex cold-review"
+if [ "$CODEX_REQUIRED" = "yes" ]; then
+  if command -v codex >/dev/null 2>&1; then
+    skip "codex $(codex --version 2>/dev/null | head -1)"
+  else
+    npm install -g @openai/codex
+    ok "Codex CLI installed"
+  fi
+  if CODEX_READINESS="$(node brain/scripts/harness/codex-readiness.mjs --check 2>&1)"; then
+    ok "$CODEX_READINESS"
+  else
+    warn "$CODEX_READINESS"
+  fi
+else
+  skip "codex (cold-review route does not select Codex)"
+fi
+
+# ── 5. gentle-ai (manages engram + gga + skills) ──────────────────────────────
 say "$I18N_TOOLS_GENTLEAI_SECTION"
 if command -v gentle-ai >/dev/null 2>&1; then
   skip "gentle-ai $(gentle-ai --version 2>/dev/null | head -1)"

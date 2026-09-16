@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>brain:ui — the read model</title>
+    <link rel="stylesheet" href="/app.css" />
+  </head>
+  <body>
+    <!--
+      The shell, and only the shell: four mounts `app.js` renders into. No
+      markup here describes data, because every value on this page comes from
+      the read model at runtime (R881-9 — a hard-coded row would be a second
+      source of truth, and an empty one would read as "there is nothing here").
+
+      No script from the network, no stylesheet from the network, no inline
+      handler: `app.js` is loaded directly as an ES module and wires every
+      listener itself (maintainer ruling, 2026-09-14 — no dependency, no CDN,
+      no vendored library, no build step). `app-source-guard.test.mjs` asserts
+      all of that by scan, since no DOM test runner exists in this repo.
+    -->
+    <header id="status" class="status-bar"></header>
+    <div id="banners" class="banners" role="status" aria-live="polite"></div>
+    <main id="canvas" class="canvas"></main>
+    <aside id="drawer" class="drawer" hidden></aside>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

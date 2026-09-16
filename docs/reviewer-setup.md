@@ -5,6 +5,21 @@
 `brain/core/methodology/reviewer-protocol.md` for why the token is never
 distributed.
 
+## Codex cold-review setup
+
+This repository routes `cold-review` through Codex using `gpt-5.5`. Install a
+supported CLI (`0.154.0` or newer) with `npm install -g @openai/codex`, then
+authenticate it outside the repository with `codex login`. `npm run
+brain:env:init` reports the route-specific readiness result; consumers whose
+effective route remains Claude are not required to install or probe Codex.
+
+The review run creates its own writable, private `CODEX_HOME`, ignores user
+configuration, and runs the detached candidate in the read-only sandbox. It
+still needs the operator's valid Codex authentication, `gpt-5.5` access, network
+reachability to OpenAI, and a host with the sandbox prerequisites. Setup never
+stores credentials in `brain.config.json`; runtime failures refuse publication
+and leave the parent-owned reviewer credential and poster unchanged.
+
 **`BRAIN_REVIEWER_TOKEN` is the one that matters.** It gates the run AND, since
 #501, authenticates the write. The forge var is a fallback for unbound callers —
 see [What the binding changed](#what-the-binding-changed) for what this section

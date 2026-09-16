@@ -35,6 +35,11 @@ export const ALLOWED_REAL = Object.freeze({
   'gitlab.com': 'the second forge brain integrates with (ADR-0018)',
   'docs.gitlab.com': 'cited as the source shape for hand-authored fixtures',
   'registry.npmjs.org': 'the registry ADR-0030 publishes to',
+  // Not an integration: `document.createElementNS` compares this string by
+  // value to decide an element is SVG, so brain:ui's canvas (#881) must ship
+  // it literally. Nothing ever resolves or contacts it, and the page's own
+  // source guard pins it as the ONLY absolute URL `static/app.js` may contain.
+  'www.w3.org': 'the SVG namespace identifier brain:ui\'s canvas passes to createElementNS (#881) — compared by value, never contacted',
 });
 
 /** RFC 2606 / RFC 6761 names, reserved precisely so fixtures can use them. */

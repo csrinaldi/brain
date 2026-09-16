@@ -741,6 +741,7 @@
 {"id":"rec-4f858a6090a80047","ts":"2026-07-12T17:38:43Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-4f858a6090a80047.jsonl"}
 {"id":"rec-4f95f832fe0f6e18","ts":"2026-09-11T13:45:58Z","actor":"@csrinaldi","type":"decision","project":"brain","issue":874,"file":"2026-09-rec-4f95f832fe0f6e18.jsonl"}
 {"id":"rec-4f9d945589b3d822","ts":"2026-07-25T21:51:24Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-4f9d945589b3d822.jsonl"}
+{"id":"rec-4f9ec48022e3ca14","ts":"2026-09-16T12:33:14Z","actor":"@csrinaldi","type":"decision","project":"brain","issue":976,"file":"2026-09-rec-4f9ec48022e3ca14.jsonl"}
 {"id":"rec-4fa0115724899a8c","ts":"2026-07-29T14:26:05Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-4fa0115724899a8c.jsonl"}
 {"id":"rec-4fae57d8ebb5f937","ts":"2026-08-16T15:19:37Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-08-rec-4fae57d8ebb5f937.jsonl"}
 {"id":"rec-4fb032a6831f47aa","ts":"2026-06-30T22:14:07Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-06-rec-4fb032a6831f47aa.jsonl"}
@@ -810,6 +811,7 @@
 {"id":"rec-564da1c907fe7ba6","ts":"2026-09-10T15:33:11Z","actor":"feat/issue-889-featgovernance-the-lane-is-recognised-pa","type":"architecture","project":"brain","issue":889,"file":"2026-09-rec-564da1c907fe7ba6.jsonl"}
 {"id":"rec-565e948e2b80226c","ts":"2026-07-08T09:59:54Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-565e948e2b80226c.jsonl"}
 {"id":"rec-566682297203a800","ts":"2026-07-13T00:22:17Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-566682297203a800.jsonl"}
+{"id":"rec-56e5504ba47fdf96","ts":"2026-09-14T20:35:12Z","actor":"@csrinaldi","type":"pattern","project":"brain","issue":881,"file":"2026-09-rec-56e5504ba47fdf96.jsonl"}
 {"id":"rec-56ebe0bb9ad0e628","ts":"2026-07-02T02:10:28Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-56ebe0bb9ad0e628.jsonl"}
 {"id":"rec-56ffd0469f66c885","ts":"2026-07-29T14:27:19Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-56ffd0469f66c885.jsonl"}
 {"id":"rec-5719ee33d54ef91d","ts":"2026-07-29T14:26:41Z","actor":"@legacy","type":"pattern","project":"brain","file":"2026-07-rec-5719ee33d54ef91d.jsonl"}
@@ -943,6 +945,7 @@
 {"id":"rec-656357c5ad4bba1a","ts":"2026-07-25T21:51:07Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07-rec-656357c5ad4bba1a.jsonl"}
 {"id":"rec-659fe253b6f56e1b","ts":"2026-07-13T00:21:43Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-659fe253b6f56e1b.jsonl"}
 {"id":"rec-65aa65c477e1ac0b","ts":"2026-07-24T16:36:06Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07-rec-65aa65c477e1ac0b.jsonl"}
+{"id":"rec-65adeb9548b7fc1b","ts":"2026-09-16T13:31:32Z","actor":"@csrinaldi","type":"bugfix","project":"brain","issue":975,"file":"2026-09-rec-65adeb9548b7fc1b.jsonl"}
 {"id":"rec-65b1b6fc9900ba53","ts":"2026-07-25T00:48:33Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-07-rec-65b1b6fc9900ba53.jsonl"}
 {"id":"rec-65bb29025899a564","ts":"2026-07-10T15:19:35Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-65bb29025899a564.jsonl"}
 {"id":"rec-65f26d59f5a6ed09","ts":"2026-09-12T18:13:47Z","actor":"@csrinaldi","type":"bugfix","project":"brain","issue":939,"file":"2026-09-rec-65f26d59f5a6ed09.jsonl"}
@@ -1492,6 +1495,7 @@
 {"id":"rec-9cc697575c468255","ts":"2026-07-13T00:22:09Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-9cc697575c468255.jsonl"}
 {"id":"rec-9cd26f2282b40df4","ts":"2026-07-12T15:37:30Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07-rec-9cd26f2282b40df4.jsonl"}
 {"id":"rec-9ce5bda312bc9498","ts":"2026-07-11T12:32:55Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07-rec-9ce5bda312bc9498.jsonl"}
+{"id":"rec-9cf68574b1310920","ts":"2026-09-15T14:38:37Z","actor":"@csrinaldi","type":"pattern","project":"brain","issue":881,"file":"2026-09-rec-9cf68574b1310920.jsonl"}
 {"id":"rec-9cf6ee05d9169c6a","ts":"2026-07-29T14:28:05Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07-rec-9cf6ee05d9169c6a.jsonl"}
 {"id":"rec-9cfdf8f6aa51359a","ts":"2026-07-02T21:00:47Z","actor":"@legacy","type":"bugfix","project":"brain","file":"2026-07-rec-9cfdf8f6aa51359a.jsonl"}
 {"id":"rec-9d0ed1a4bfab7afd","ts":"2026-07-11T12:33:44Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-9d0ed1a4bfab7afd.jsonl"}
@@ -1631,6 +1635,7 @@
 {"id":"rec-aabad0b782f68f7b","ts":"2026-08-18T17:48:48Z","actor":"chore/issue-682-ruling-memory","type":"architecture","project":"brain","issue":682,"file":"2026-08-rec-aabad0b782f68f7b.jsonl"}
 {"id":"rec-aad23607f8826a70","ts":"2026-07-29T14:27:05Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-aad23607f8826a70.jsonl"}
 {"id":"rec-aad89260732fa3b6","ts":"2026-07-13T00:21:19Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-aad89260732fa3b6.jsonl"}
+{"id":"rec-aaeb5b317c39db5e","ts":"2026-09-16T12:23:40Z","actor":"@csrinaldi","type":"decision","project":"brain","issue":881,"file":"2026-09-rec-aaeb5b317c39db5e.jsonl"}
 {"id":"rec-aaecc2c2991c3caa","ts":"2026-07-29T14:28:51Z","actor":"@legacy","type":"bugfix","project":"brain","file":"2026-07-rec-aaecc2c2991c3caa.jsonl"}
 {"id":"rec-aaf20d94e57f169b","ts":"2026-07-25T00:47:41Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-aaf20d94e57f169b.jsonl"}
 {"id":"rec-aafac352703634c1","ts":"2026-07-29T14:27:45Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-aafac352703634c1.jsonl"}
@@ -1769,6 +1774,7 @@
 {"id":"rec-b92ccb361910a065","ts":"2026-09-10T13:04:04Z","actor":"feat/issue-888-featmemory-the-lane-ships-push-and-pr-th","type":"architecture","project":"brain","issue":888,"file":"2026-09-rec-b92ccb361910a065.jsonl"}
 {"id":"rec-b92f38696b08ba17","ts":"2026-07-25T21:50:59Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-b92f38696b08ba17.jsonl"}
 {"id":"rec-b97c016b6dd4b883","ts":"2026-07-29T14:25:57Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-b97c016b6dd4b883.jsonl"}
+{"id":"rec-b9a5a16c68582663","ts":"2026-09-14T16:59:11Z","actor":"@csrinaldi","type":"architecture","project":"brain","issue":881,"file":"2026-09-rec-b9a5a16c68582663.jsonl"}
 {"id":"rec-b9bf1a04c46c15dd","ts":"2026-07-25T21:50:23Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-b9bf1a04c46c15dd.jsonl"}
 {"id":"rec-b9c65e339263650d","ts":"2026-08-07T22:49:08Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-08-rec-b9c65e339263650d.jsonl"}
 {"id":"rec-b9dc1aa267f00e19","ts":"2026-07-25T21:51:57Z","actor":"@legacy","type":"pattern","project":"brain","file":"2026-07-rec-b9dc1aa267f00e19.jsonl"}

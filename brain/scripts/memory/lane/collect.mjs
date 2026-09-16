@@ -112,7 +112,7 @@ function _defaultLoadConfig(root) {
  * degrades to a per-candidate `unreadable` skip regardless of lock state.
  * Carrying a field nothing ever reads would be dead state, not a real gate.
  */
-function parseWorktrees(stdout) {
+export function parseWorktrees(stdout) {
   const stanzas = [];
   let current = null;
   for (const line of stdout.split('\n')) {
