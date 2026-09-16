@@ -57,6 +57,7 @@ test('#881: no ui/lib/** module reaches for wall-clock time, randomness, process
     [/\bMath\.random\s*\(/, 'Math.random()'],
     [/\bprocess\./, 'process.*'],
     [/\bfetch\s*\(/, 'fetch()'],
+    [/\bimport\.meta\b/, 'import.meta'], // environment-dependent: the browser and node disagree on it
   ];
   for (const name of modules) {
     const text = readFileSync(join(LIB_DIR, name), 'utf8');
