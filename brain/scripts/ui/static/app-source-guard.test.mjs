@@ -34,15 +34,20 @@ function read(path) {
   return readFileSync(path, 'utf8');
 }
 
-/** Every `from '<spec>'` / `import('<spec>')` specifier, line by line. */
+/**
+ * Every import specifier in the file, collected over the WHOLE text: a
+ * line-based scan reads `import {\n  debounce,\n} from 'lodash-es';` as four
+ * lines none of which carries both an `import` and a `from`, so the bare
+ * package it pulls into the browser passes the guard unseen. The three forms
+ * an ES module has: `… from '<spec>'`, a bare `import '<spec>'` for side
+ * effects, and a dynamic `import('<spec>')`.
+ */
 function importSpecifiers(text) {
   const specs = [];
-  for (const line of text.split('\n')) {
-    if (!/^\s*import\b/.test(line) && !/\bimport\(/.test(line)) continue;
-    const m = /from\s+['"]([^'"]+)['"]/.exec(line) ?? /import\(\s*['"]([^'"]+)['"]/.exec(line);
-    if (m) specs.push(m[1]);
-  }
-  return specs;
+  for (const m of text.matchAll(/\bimport\b[\s\S]*?\bfrom\s*['"]([^'"]+)['"]/g)) specs.push(m[1]);
+  for (const m of text.matchAll(/\bimport\s*['"]([^'"]+)['"]/g)) specs.push(m[1]);
+  for (const m of text.matchAll(/\bimport\s*\(\s*['"]([^'"]+)['"]/g)) specs.push(m[1]);
+  return [...new Set(specs)];
 }
 
 test('#881 T2a: app.js exists and imports only ./lib/*.mjs — never a node: builtin, a URL, or a bare package', () => {
