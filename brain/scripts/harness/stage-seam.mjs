@@ -72,7 +72,7 @@ export const RUN_STAGE_OP = 'run-stage';
  * @returns {(args: {stage: string, prompt: string, model?: string|null,
  *                   engine: string, cwd?: string, credentialEnv?: string[],
  *                   routed?: object, changeId?: string,
- *                   forgeConfigDir?: string, timeoutMs?: number})
+ *                   forgeConfigDir?: string, timeoutMs?: number, output?: object})
  *            => Promise<{ok: boolean, reason?: string}>}
  */
 export function makeRunStageSeam({ dispatch = defaultDispatch } = {}) {
@@ -82,7 +82,7 @@ export function makeRunStageSeam({ dispatch = defaultDispatch } = {}) {
   // The same defect, relearned with S4's evidence payload: the backends demand
   // bound evidence, and a seam that swallows it turns every lifecycle dispatch
   // into a guard refusal about a field the caller DID pass.
-  return async function runStage({ engine, stage, prompt, model = null, cwd, credentialEnv, forgeConfigDir, timeoutMs, routed, changeId } = {}) {
+  return async function runStage({ engine, stage, prompt, model = null, cwd, credentialEnv, forgeConfigDir, timeoutMs, output, routed, changeId } = {}) {
     if (typeof engine !== 'string' || engine.trim() === '') {
       return {
         ok: false,
@@ -96,7 +96,7 @@ export function makeRunStageSeam({ dispatch = defaultDispatch } = {}) {
       // list to walk: the only name that can reach `dispatch` is the one the
       // operator wrote. That is what makes "does not fall back" a property of
       // the code's shape rather than a promise in a comment.
-      result = await dispatch(engine, RUN_STAGE_OP, [{ stage, prompt, model, cwd, credentialEnv, forgeConfigDir, timeoutMs, routed, changeId }]);
+      result = await dispatch(engine, RUN_STAGE_OP, [{ stage, prompt, model, cwd, credentialEnv, forgeConfigDir, timeoutMs, output, routed, changeId }]);
     } catch (err) {
       // EVERY throw is a refusal, not just the two `dispatch` spells out
       // (backend not found; backend does not implement the op). Matching on
