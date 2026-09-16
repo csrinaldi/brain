@@ -87,12 +87,17 @@ it.
 
 Applied at `brain/scripts/vcs/actor-check.mjs`'s `defaultReadDenyActors`,
 `brain/scripts/vcs/brain-writes-reviewed.mjs`'s `defaultReadBotAllowlist` and
-`defaultReadApprovalActors`, and `brain/scripts/approve/cli.mjs`'s
-`defaultReadDenyActors` / `defaultReadAgentActors` — five readers that
-stopped swallowing a config-read failure (issue #942, R1, R3). A sixth
-DENY-direction reader, `brain/scripts/brain-audit.mjs`'s `loadConfig` feeding
-`governance.reviewActors` to the release gate, still swallows the failure and
-is tracked in issue #962. The ALLOW-direction readers were left unchanged,
-deliberately, because empty is already the strict answer for them:
-`actor-check.mjs`'s `approvalActors` and `agentActors` readers,
-`governance.ignoreList` consumers, and `approved-label.mjs`.
+`defaultReadApprovalActors`, `brain/scripts/approve/cli.mjs`'s
+`defaultReadDenyActors` / `defaultReadAgentActors`, and
+`brain/scripts/brain-audit.mjs`'s `loadConfig` (feeding `governance.reviewActors`
+to the release gate) — six readers that stopped swallowing a config-read
+failure (issue #942, R1, R3 for the first five; issue #962 for the sixth).
+The ALLOW-direction readers were left unchanged, deliberately, because empty
+is already the strict answer for them: `actor-check.mjs`'s `approvalActors`
+and `agentActors` readers, and `governance.ignoreList` consumers.
+`approved-label.mjs`'s `resolveApprovedLabel` is not one of them:
+`governance.approvedLabel` is a single string, not a list, and a config-read
+failure degrades to the ratified constant `'status:approved'`
+(`approved-label.mjs:19,56-60`) — the same fixed-fallback shape as
+`governance-tiers.mjs`'s `resolveTier` (the Exemption paragraph above), not
+an empty-list exemption.
