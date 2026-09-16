@@ -37,6 +37,11 @@ const graphShape = (o = {}) => ({
   blocks: [], needs: [], files: [], declarationDivergences: [], ...o,
 });
 
+/** A `brain-graph/1` block carrying exactly the lines a case needs. The matrix
+ * below declares keys the fixed-shape `block()` builder knows nothing about, and
+ * malformed values it would never produce. */
+const rawBlock = (...lines) => ['```brain-graph/1', ...lines, '```'].join('\n');
+
 const issue = (number, o = {}) => ({
   number, title: o.title ?? `t${number}`, labels: o.labels ?? ['status:approved'],
   state: o.state ?? 'open', body: o.body ?? block(o),
@@ -101,6 +106,76 @@ test('#612: a node with track: (whitespace-only) groups under the SAME tracks-ma
   assert.ok(tracks.has('?'));
   assert.equal(tracks.get('?').length, 2, 'both nodes land in the SAME fallback group');
   assert.equal(tracks.has(''), false, 'the pre-repair "" group no longer exists');
+});
+
+// ── #967 D2: a malformed declaration is SAID, never dropped and never guessed ──
+//
+// The channel is NEW (`declarationDivergences`), not the graph's existing
+// `divergences`: that array carries `{from, to, only}` edge entries, its formatter
+// reads those three fields, and it is gated on a native relations read that the
+// snapshot path never performs. A declaration divergence routed through it would
+// print `#undefined→#undefined` in the one surface that needs it, and be `[]` in
+// the other.
+//
+// `reason` is a STABLE TOKEN, not a sentence: the gate in this change's third slice
+// has to branch on "the tracker is malformed", and a reader that string-matches
+// prose to decide is a reader one wording change away from silence.
+
+test('#967 R967-1 S6: a tracker outside the feature/ grammar is refused and said, never repaired', () => {
+  const g = parseGraphBlock(rawBlock('kind: epic', 'tracker: main'));
+  assert.equal(g.tracker, null, 'never silently rewritten to feature/main');
+  assert.deepEqual(g.declarationDivergences, [{ key: 'tracker', value: 'main', reason: 'tracker-grammar' }]);
+});
+
+test('#967 R967-1 S6: a tracker with a .. segment is refused — the character class alone would admit it', () => {
+  // `..` is spelled entirely out of `[A-Za-z0-9._-]`, so the grammar matches it and
+  // the explicit refusal is what stops a traversal-shaped branch name being read as
+  // a tracker. Dropping that clause turns exactly this case green again.
+  const g = parseGraphBlock(rawBlock('kind: epic', 'tracker: feature/../x'));
+  assert.equal(g.tracker, null);
+  assert.deepEqual(g.declarationDivergences, [{ key: 'tracker', value: 'feature/../x', reason: 'tracker-grammar' }]);
+});
+
+test('#967: a nested feature/ path IS the grammar — the refusal above is about .., not about depth', () => {
+  const g = parseGraphBlock(rawBlock('kind: epic', 'tracker: feature/brain-ui/wave-b'));
+  assert.equal(g.tracker, 'feature/brain-ui/wave-b');
+  assert.deepEqual(g.declarationDivergences, []);
+});
+
+test('#967 R967-1 S5: a tracker on a node that is not an epic is CARRIED and said, not dropped', () => {
+  const g = parseGraphBlock(rawBlock('track: UI', 'tracker: feature/brain-ui'));
+  assert.equal(g.tracker, 'feature/brain-ui', 'carried — the divergence is what keeps it from being honoured');
+  assert.equal(g.kind, null);
+  assert.deepEqual(g.declarationDivergences,
+    [{ key: 'tracker', value: 'feature/brain-ui', reason: 'tracker-without-kind-epic' }]);
+});
+
+test('#967: a MALFORMED tracker on a non-epic says the grammar once, not twice', () => {
+  // The grammar runs first and leaves `tracker: null`. There is no carried value left
+  // to not-honour, so the second rule has nothing to say about it — one declaration,
+  // one entry.
+  const g = parseGraphBlock(rawBlock('track: UI', 'tracker: brain-ui'));
+  assert.equal(g.tracker, null);
+  assert.deepEqual(g.declarationDivergences, [{ key: 'tracker', value: 'brain-ui', reason: 'tracker-grammar' }]);
+});
+
+test('#967 R967-1 S7: a non-numeric parent is refused, never coerced to 0, NaN or a string', () => {
+  for (const bad of ['abc', 'main', '#878', '0', '-3', '87.5', '878x']) {
+    const g = parseGraphBlock(rawBlock('track: A', `parent: ${bad}`));
+    assert.equal(g.parent, null, `parent: ${bad} must not become a number`);
+    assert.equal(g.parentSource, null);
+    assert.deepEqual(g.declarationDivergences, [{ key: 'parent', value: bad, reason: 'parent-grammar' }],
+      `parent: ${bad} must be said, not dropped`);
+  }
+});
+
+test('#967 R967-2 S5: two line-initial Parent: lines with different numbers is ambiguity, never a first match', () => {
+  const body = ['Parent: #878 (Brain UI) — slice 3, Wave B.', '', 'and later, wrongly:', '',
+    'Parent: #879 (something else).', '', block({ track: 'A' })].join('\n');
+  const g = parseGraphBlock(body);
+  assert.equal(g.parent, null, 'neither wins — two values for one key is ambiguity');
+  assert.equal(g.parentSource, null);
+  assert.deepEqual(g.declarationDivergences, [{ key: 'parent', value: '878, 879', reason: 'parent-ambiguous' }]);
 });
 
 // ── the locator: the `protocol:` scalar, not the position (#639) ────────────

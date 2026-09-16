@@ -105,6 +105,34 @@ function firstWord(tag) {
   return tag.split(/\s+/)[0];
 }
 
+/**
+ * A tracker branch name, as a `brain-graph/1` block may declare it (#967 D2).
+ *
+ * `..` is spelled entirely out of the character class, so the pattern alone admits
+ * `feature/../x`; the segment is refused separately below. Anything else that fails
+ * this is refused OUT LOUD and left `null` — never repaired into the shape it
+ * nearly had, which is the whole point of reading a declaration rather than
+ * guessing at one.
+ */
+const TRACKER_GRAMMAR = /^feature\/[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*$/;
+
+/**
+ * A parent declared in PROSE: line-initial, exact case, trailing text free (#967 Q3).
+ *
+ * Measured against the corpus rather than sketched. #881's body reads
+ * `Parent: #878 (Brain UI) — slice 3, Wave B.`, which a `$`-anchored pattern would
+ * miss entirely — the one real body this reader exists for. And the mid-line shape
+ * `Issue: #337 — M10 Phase 3. Parent: #335. Epic: #313.` must NOT match: there the
+ * parent is not the epic, and reading it would mint an edge nobody declared.
+ *
+ * No leading-whitespace tolerance, for the same reason the fence tag is exact case:
+ * a quoted or list-item `> Parent: #999` inside an example must declare nothing.
+ * `Epic: #N` is NOT a synonym — #337 carries both, naming different issues.
+ *
+ * `g` is for `matchAll`, which clones the regex rather than advancing this one.
+ */
+const PARENT_PROSE_LINE = /^Parent:[ \t]*#(\d+)\b/gm;
+
 /** Node states, in the order a reader cares about them. */
 export const READY = 'ready';
 export const BLOCKED = 'blocked';
@@ -286,18 +314,61 @@ export function parseGraphBlock(body) {
   // `track` and `tracker` cannot collide in either direction: `scalar`'s pattern is
   // anchored `^<key>:`, so `^track:` never matches a `tracker:` line.
   const kind = scalar(block, 'kind');
-  const tracker = scalar(block, 'tracker');
+
+  // D2: every malformed declaration below is SAID — one entry, naming the key, the
+  // offending text and a stable reason token. It is never dropped silently, never
+  // repaired into the value it nearly was, and never allowed to throw. `reason` is a
+  // token rather than a sentence because a later reader has to branch on it, and a
+  // reader that string-matches prose is one wording change away from going quiet.
+  const declarationDivergences = [];
+  const say = (key, value, reason) => { declarationDivergences.push({ key, value, reason }); };
+
+  const trackerRaw = scalar(block, 'tracker');
+  let tracker = trackerRaw;
+  if (trackerRaw !== null && !(TRACKER_GRAMMAR.test(trackerRaw) && !trackerRaw.includes('..'))) {
+    tracker = null;
+    say('tracker', trackerRaw, 'tracker-grammar');
+  } else if (trackerRaw !== null && kind !== 'epic') {
+    // Q7: parsed and carried, honoured nowhere. The mismatch is a said divergence and
+    // nothing more — refusing it would make a typo in `kind:` delete a declaration.
+    // A tracker already refused on grammar is `null` by now, so there is no carried
+    // value left to not-honour and this branch correctly says nothing about it.
+    say('tracker', trackerRaw, 'tracker-without-kind-epic');
+  }
+
+  // D3: the block key wins and the prose line is then NEVER READ — not even to
+  // disagree with it. A `parent:` key present but unreadable is malformed, not
+  // absent, so it does not fall through to prose either: salvaging one would make a
+  // refused declaration quietly succeed by another door.
+  const parentRaw = scalar(block, 'parent');
+  let parent = null;
+  let parentSource = null;
+  if (parentRaw !== null) {
+    if (/^\d+$/.test(parentRaw) && Number(parentRaw) > 0) {
+      parent = Number(parentRaw);
+      parentSource = 'block';
+    } else {
+      say('parent', parentRaw, 'parent-grammar');
+    }
+  } else {
+    const prose = [...new Set([...body.matchAll(PARENT_PROSE_LINE)].map(m => Number(m[1])))];
+    // Two line-initial lines naming DIFFERENT issues is ambiguity, and the answer is
+    // the one `parseGraphBlock` already gives for two graph blocks: stop picking. Two
+    // lines naming the same issue is a restatement, not a disagreement — there is
+    // exactly one answer, so it is read.
+    if (prose.length > 1) say('parent', prose.join(', '), 'parent-ambiguous');
+  }
 
   return {
     track: track ?? null,
     kind,
     tracker,
-    parent: null,
-    parentSource: null,
+    parent,
+    parentSource,
     blocks: nums('blocks'),
     needs: nums('needs'),
     files: strs('files'),
-    declarationDivergences: [],
+    declarationDivergences,
   };
 }
 

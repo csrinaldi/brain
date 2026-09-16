@@ -110,7 +110,7 @@ and R967-10's "no `needs`-edge parent fallback" scenario.
       `tracker` via `scalar(block, …)` after the `track` read at `:272` and return
       `{track, kind, tracker, parent, parentSource, blocks, needs, files,
       declarationDivergences}` so A1a passes.
-- [ ] A2a. `epic-map.test.mjs`: failing tests for D2's four divergence reasons —
+- [x] A2a. `epic-map.test.mjs`: failing tests for D2's four divergence reasons —
       `tracker: main` and `tracker: feature/../x` → `tracker-grammar` with
       `tracker: null` (R967-1 S6); `tracker:` with no `kind: epic` → the value
       carried plus `tracker-without-kind-epic` (R967-1 S5); `parent: abc` and
@@ -119,7 +119,7 @@ and R967-10's "no `needs`-edge parent fallback" scenario.
       `parent-ambiguous` (R967-2 S5). Exactly one `{key, value, reason}` entry
       each. **Mutation**: dropping the `..` clause turns the `feature/../x` case
       red; first-match-wins on two `Parent:` lines turns the ambiguity case red.
-- [ ] A2b. `epic-graph.mjs`: implement the grammar check, the digit check and the
+- [x] A2b. `epic-graph.mjs`: implement the grammar check, the digit check and the
       ambiguity rule (the shape `parseGraphBlock` already holds for two blocks at
       `:170-175`), pushing one entry per condition, so A2a passes.
 - [ ] A3a. `epic-map.test.mjs`: failing tests for parent resolution — a block
