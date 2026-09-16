@@ -34,13 +34,28 @@ import { buildChangeView } from './change-route.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const STATIC_DIR = join(__dirname, 'static');
+const LIB_DIR = join(__dirname, 'lib');
+const JS_TYPE = 'application/javascript';
 const ALLOWED_METHODS = new Set(['GET', 'HEAD']);
+
+// The page is plain ES modules with no build step: the browser loads
+// `/app.js`, which imports `./lib/<module>.mjs` — the SAME files `node:test`
+// imports (D9). So exactly two directories are served, through an ALLOW-LIST:
+// a literal map plus one anchored pattern. No request path is ever joined
+// onto a filesystem path, so `..`, an encoded `%2e%2e` (both normalised away
+// by the URL parser before routing), a nested path or a `.test.mjs` file
+// simply match nothing and fall through to the 404 below.
+const STATIC_FILES = new Map([
+  ['/app.js', { dir: STATIC_DIR, name: 'app.js', type: JS_TYPE }],
+  ['/app.css', { dir: STATIC_DIR, name: 'app.css', type: 'text/css' }],
+]);
+const LIB_MODULE_RE = /^\/lib\/([a-z][a-z0-9-]*)\.mjs$/;
 const POST_ONLY_PATHS = new Set(['/api/poll/pause', '/api/poll/resume', '/api/poll/once']);
 /** `GET /api/change/<N digits>` — a non-numeric id falls through to the 404 below (D8's `change-route.mjs`). */
 const CHANGE_ROUTE_RE = /^\/api\/change\/(\d+)$/;
 
 /** Every route this server knows — the R881-10 S3 guard test pins this set: no MCP resource route, no heartbeat/agent-pulse endpoint. */
-export const KNOWN_ROUTES = Object.freeze(['/', '/api/snapshot', '/api/stream', '/api/poll/pause', '/api/poll/resume', '/api/poll/once', '/api/change/{issue}']);
+export const KNOWN_ROUTES = Object.freeze(['/', '/app.js', '/app.css', '/lib/{module}.mjs', '/api/snapshot', '/api/stream', '/api/poll/pause', '/api/poll/resume', '/api/poll/once', '/api/change/{issue}']);
 
 const NO_FORGE_REASON = 'no forge port was supplied to the poller';
 const noForgeVcs = {
@@ -227,7 +242,11 @@ export function createUiServer({
       res.end();
       return;
     }
-    if (pathname === '/') return serveIndex(res);
+    if (pathname === '/') return serveStaticFile(res, { dir: STATIC_DIR, name: 'index.html', type: 'text/html' });
+    const staticFile = STATIC_FILES.get(pathname);
+    if (staticFile) return serveStaticFile(res, staticFile);
+    const libMatch = LIB_MODULE_RE.exec(pathname);
+    if (libMatch) return serveStaticFile(res, { dir: LIB_DIR, name: `${libMatch[1]}.mjs`, type: JS_TYPE });
     if (pathname === '/api/snapshot') return serveSnapshot(res);
     if (pathname === '/api/stream') return serveStream(req, res);
     if (pathname === '/api/poll/pause') return servePollControl(res, poller.pause);
@@ -239,10 +258,24 @@ export function createUiServer({
     res.end('not found');
   }
 
-  function serveIndex(res) {
-    const html = readFileSync(join(STATIC_DIR, 'index.html'), 'utf8');
-    res.writeHead(200, { 'content-type': 'text/html' });
-    res.end(html);
+  /**
+   * The only filesystem read on the page's path: `dir` and `name` come from
+   * the allow-list above, never from the request. A name the list allows but
+   * this checkout does not have (a module renamed without updating `app.js`)
+   * is a 404, not a 500 — the browser then says which import failed, which is
+   * the fact an operator needs.
+   */
+  function serveStaticFile(res, { dir, name, type }) {
+    let body;
+    try {
+      body = readFileSync(join(dir, name), 'utf8');
+    } catch {
+      res.writeHead(404, { 'content-type': 'text/plain' });
+      res.end('not found');
+      return;
+    }
+    res.writeHead(200, { 'content-type': type });
+    res.end(body);
   }
 
   async function serveSnapshot(res) {

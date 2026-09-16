@@ -29,10 +29,10 @@
 // filters a node away silently, and a node absent from every edge has no
 // layer to belong to.
 
-const NODE_W = 160;
-const NODE_H = 60;
-const GAP_X = 40;
-const GAP_Y = 60;
+export const NODE_W = 160;
+export const NODE_H = 60;
+export const GAP_X = 40;
+export const GAP_Y = 60;
 
 /**
  * Pass 1 — DFS back-edge reversal. Returns the edge list pass 2 should
@@ -130,9 +130,14 @@ function computeCoordinates(layers, unlinked) {
       nodes[n] = { x: orderIdx * (NODE_W + GAP_X), y: layerIdx * (NODE_H + GAP_Y), w: NODE_W, h: NODE_H, layer: layerIdx, order: orderIdx };
     });
   });
+  // The band wraps into a square-ish grid: ceil(sqrt(n)) columns, widened to the
+  // widest layer so it reuses the width the layers already claim, never more.
+  const columns = Math.max(1, Math.ceil(Math.sqrt(unlinked.length)), ...layers.map((l) => l.length));
   const unlinkedY = layers.length * (NODE_H + GAP_Y);
   unlinked.forEach((n, i) => {
-    nodes[n] = { x: i * (NODE_W + GAP_X), y: unlinkedY, w: NODE_W, h: NODE_H, layer: layers.length, order: i };
+    const row = Math.floor(i / columns);
+    const column = i % columns;
+    nodes[n] = { x: column * (NODE_W + GAP_X), y: unlinkedY + row * (NODE_H + GAP_Y), w: NODE_W, h: NODE_H, layer: layers.length + row, order: column };
   });
   return nodes;
 }

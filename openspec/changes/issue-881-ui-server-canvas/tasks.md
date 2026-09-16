@@ -381,22 +381,22 @@ checkable (imports, served content-type, banner strings, absence of
 management-view routes) and name the remainder as a manual verification
 step per the work-unit-commits checklist's "N/A with reason."
 
-- [ ] T1a. `brain/scripts/ui/server.test.mjs` (extend): failing test — `GET
+- [x] T1a. `brain/scripts/ui/server.test.mjs` (extend): failing test — `GET
       /`, `GET /lib/app.js`, `GET /app.css` (once real files replace PR 1's
       placeholder) return `200` with the right `content-type`
       (`text/html`, `application/javascript`, `text/css`) and the SPA's
       `index.html` (R881-1 S1, now against the real page instead of the
       placeholder).
-- [ ] T1b. `brain/scripts/ui/static/index.html` +
+- [x] T1b. `brain/scripts/ui/static/index.html` +
       `brain/scripts/ui/static/app.css`: implement the page skeleton
       (canvas container, drawer container with four tab slots, poll-control
       markup) and the static-file serving path in `server.mjs` needed for
       T1a to pass.
-- [ ] T2a. `brain/scripts/ui/static/app-source-guard.test.mjs`: failing
+- [x] T2a. `brain/scripts/ui/static/app-source-guard.test.mjs`: failing
       text-scan test extending D9's guard to the browser entrypoint —
       `app.js` imports only from `/lib/*.mjs` and never a `node:` builtin
       (the same rule as PR 3's T8, applied to the file the browser loads).
-- [ ] T2b. `brain/scripts/ui/static/app.js`: implement the SVG canvas
+- [x] T2b. `brain/scripts/ui/static/app.js`: implement the SVG canvas
       renderer (consumes `layout.mjs` + `colour.mjs`), the drawer's four
       tabs (fetch `GET /api/change/{issue}`), the poll controls (`POST
       /api/poll/pause|resume|once`, render `/api/meta`'s last-polled/paused
@@ -405,22 +405,22 @@ step per the work-unit-commits checklist's "N/A with reason."
       re-reads the open drawer's Working-memory tab, `status` renders the
       degradation bands) — so T1a and T2a pass, and so A1/A2 hold when
       exercised manually (T5).
-- [ ] T3a. `brain/scripts/ui/static/degradation-banner.test.mjs`: failing
+- [x] T3a. `brain/scripts/ui/static/degradation-banner.test.mjs`: failing
       text-scan test asserting the exact banner strings from Q3/D2 appear
       verbatim in `app.js`'s template strings — the watcher-failure banner
       ("the watcher failed: <reason> — the canvas updates on the forge poll
       only; press Refresh for repo changes.") and the poll-failure banner
       ("forge as of <time> — last poll failed: <reason>") — a regression
       guard so a future edit cannot silently drop them (R881-9 S1/S2).
-- [ ] T3b. `brain/scripts/ui/static/app.js`: implement the two banners (and
+- [x] T3b. `brain/scripts/ui/static/app.js`: implement the two banners (and
       the per-section `{ok: false, reason}` inline rendering, R881-9 S1)
       so T3a passes.
-- [ ] T4. `brain/scripts/ui/static/no-management-views.test.mjs`: guard
+- [x] T4. `brain/scripts/ui/static/no-management-views.test.mjs`: guard
       test for R881-10 S2 — scan `app.js`'s route/view table and assert no
       roadmap, decisions, anti-patterns, or by-actor/history view
       identifier exists; only the canvas and the four-tab drawer. Test-
       only, no new production code beyond T2/T3.
-- [ ] T5. Manual verification (no automated harness exists for this step —
+- [x] T5. Manual verification (no automated harness exists for this step —
       N/A is the honest answer, not a gap): with `npm run brain:ui` running
       against this repo, confirm (a) 90 nodes render, click one opens the
       drawer with its Spec/Tasks/Working memory/Reviews tabs sourced (A1,
@@ -430,9 +430,9 @@ step per the work-unit-commits checklist's "N/A with reason."
       `fs.watch` artificially (rename the watched dir) surfaces the
       watcher-failure banner from T3. Record the exact steps run and their
       result in the apply-progress note for this slice.
-- [ ] T6. Verify: `GIT_CONFIG_GLOBAL=/dev/null npm test` and `npm run
+- [x] T6. Verify: `GIT_CONFIG_GLOBAL=/dev/null npm test` and `npm run
       brain:repo:check` both green.
-- [ ] T7. `npm run memory:save -- "the DAG canvas and inspector drawer ship
+- [x] T7. `npm run memory:save -- "the DAG canvas and inspector drawer ship
       for #881" "<summary of the SVG renderer, the four-tab drawer, the
       poll controls and the degradation bands landed in this PR, plus the
       manual verification result from T5>" --issue 881 --type decision`,

@@ -45,6 +45,17 @@ test('#881: unreadable is a distinct mark from every other status', () => {
   assert.notEqual(colourClass(unreadable), colourClass(notComputed));
 });
 
+test('#881 R881-6: a node.status this map does not know THROWS, naming it — it never inherits the roadmap colour', () => {
+  // `node.status` is only ever compared against three literals, so a status
+  // nobody here knows fell through to `roadmap.value.state` and painted as if
+  // the node had been classified. The same refusal an unknown state gets.
+  assert.throws(
+    () => colourClass(node({ status: 'weird', roadmap: { ok: true, value: { state: PLANNED } } })),
+    /weird/,
+    'the unknown status must be named in the reason canvas-model.mjs marks the node with',
+  );
+});
+
 test('#881: the exhaustive map — every one of the eight roadmap.value.state / node.status constants maps to a defined, non-empty class', () => {
   const roadmapStates = [PLANNED, IN_FLIGHT, DONE];
   for (const state of roadmapStates) {
