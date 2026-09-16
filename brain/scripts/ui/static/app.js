@@ -13,6 +13,7 @@
 // No bundler, no dependency, no CDN (maintainer ruling, 2026-09-14).
 
 import { initialPageState, applyFrame, streamFailed, sectionOf } from './lib/frames.mjs';
+import { degradationBands, pollIndicator } from './lib/banners.mjs';
 
 const mounts = {
   status: document.getElementById('status'),
@@ -44,13 +45,45 @@ function said(text) {
 // ── render ─────────────────────────────────────────────────────────────────
 
 function render() {
+  renderStatus();
   renderBands();
   renderCanvas();
 }
 
+/** R881-9: one band per degraded thing, each one BESIDE the data, never instead of it. */
 function renderBands() {
   clear(mounts.banners);
-  if (!state.stream.ok) mounts.banners.appendChild(el('div', 'band', state.stream.reason));
+  for (const band of degradationBands({ stream: state.stream, meta: state.meta, snapshot: state.snapshot })) {
+    const node = el('div', 'band');
+    node.appendChild(el('span', null, band.text));
+    if (band.detail?.length) {
+      const list = el('ul', 'said-list');
+      for (const line of band.detail) list.appendChild(el('li', null, line));
+      node.appendChild(list);
+    }
+    mounts.banners.appendChild(node);
+  }
+}
+
+/**
+ * The maintainer's poll ruling, rendered: a visible "forge polled N s ago /
+ * paused" indicator, a control that disables polling, and a button for one
+ * manual poll. Both controls POST — the only mutation verbs this server
+ * accepts (R881-5).
+ */
+function renderStatus() {
+  const indicator = pollIndicator({ poller: state.meta?.poller ?? null, nowMs: Date.now() });
+  clear(mounts.status);
+  mounts.status.appendChild(el('strong', 'title', 'brain:ui'));
+  mounts.status.appendChild(el('span', indicator.paused ? 'poll-indicator paused' : 'poll-indicator', indicator.text));
+  mounts.status.appendChild(el('span', 'spacer'));
+
+  const toggle = el('button', 'poll-toggle', indicator.paused ? 'resume polling' : 'disable polling');
+  toggle.addEventListener('click', () => postPoll(indicator.paused ? 'resume' : 'pause'));
+  const once = el('button', 'poll-once', 'poll now');
+  once.addEventListener('click', () => postPoll('once'));
+  mounts.status.appendChild(toggle);
+  mounts.status.appendChild(once);
 }
 
 function renderCanvas() {
@@ -76,6 +109,18 @@ async function readSnapshot() {
   render();
 }
 
+/** The poller's own three controls. Its answer IS the new poller state, so no extra read is needed. */
+async function postPoll(action) {
+  try {
+    const res = await fetch(`/api/poll/${action}`, { method: 'POST' });
+    if (!res.ok) throw new Error(`POST /api/poll/${action} answered ${res.status}`);
+    state = { ...state, meta: { ...(state.meta ?? {}), poller: await res.json() } };
+  } catch (err) {
+    state = streamFailed(state, `the poll control failed: ${err.message}`);
+  }
+  render();
+}
+
 function subscribe() {
   const stream = new EventSource('/api/stream');
   for (const name of ['sync', 'section', 'refs', 'status']) {
@@ -95,3 +140,6 @@ function subscribe() {
 
 render();
 readSnapshot().then(subscribe);
+// "polled 5 s ago" is a claim that goes stale by itself, so the indicator
+// re-renders on a clock of its own; nothing is re-fetched here.
+setInterval(renderStatus, 5000);
