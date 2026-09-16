@@ -160,7 +160,11 @@ test('#967: a MALFORMED tracker on a non-epic says the grammar once, not twice',
 });
 
 test('#967 R967-1 S7: a non-numeric parent is refused, never coerced to 0, NaN or a string', () => {
-  for (const bad of ['abc', 'main', '#878', '0', '-3', '87.5', '878x']) {
+  // `007` and `0007` join the list: `Number()` normalised them to 7, and 7 is not the
+  // byte the body wrote. "A bare positive integer" is the grammar, and a repair is
+  // exactly what R967-1 forbids for the other two keys — the parser does not get to
+  // decide the author meant a different issue than the one they typed.
+  for (const bad of ['abc', 'main', '#878', '0', '-3', '87.5', '878x', '007', '0007']) {
     const g = parseGraphBlock(rawBlock('track: A', `parent: ${bad}`));
     assert.equal(g.parent, null, `parent: ${bad} must not become a number`);
     assert.equal(g.parentSource, null);
@@ -176,6 +180,23 @@ test('#967 R967-2 S5: two line-initial Parent: lines with different numbers is a
   assert.equal(g.parent, null, 'neither wins — two values for one key is ambiguity');
   assert.equal(g.parentSource, null);
   assert.deepEqual(g.declarationDivergences, [{ key: 'parent', value: '878, 879', reason: 'parent-ambiguous' }]);
+});
+
+test('#967: an issue number is bare positive digits in PROSE too — one grammar, not two', () => {
+  // Measured: the prose path carried no positivity check at all, so `Parent: #0`
+  // yielded `parent: 0` — a value the block path names in its own refused list. The
+  // two paths read the same fact out of the same body and must not disagree about
+  // what an issue number is.
+  //
+  // The block path SAYS `parent-grammar` because a `parent:` key is a declaration that
+  // failed; a prose line that does not match the pattern is not a declaration at all
+  // and says nothing (R967-2), which is the same rule that already governs `#878x`.
+  for (const line of ['Parent: #0', 'Parent: #00', 'Parent: #007', 'Parent: #0007']) {
+    const g = parseGraphBlock([line, '', rawBlock('track: A')].join('\n'));
+    assert.equal(g.parent, null, `${line} must not become a number`);
+    assert.equal(g.parentSource, null);
+    assert.deepEqual(g.declarationDivergences, []);
+  }
 });
 
 test('#967 R967-2 S5: TWO numbers on ONE Parent: line is the same ambiguity as two lines', () => {

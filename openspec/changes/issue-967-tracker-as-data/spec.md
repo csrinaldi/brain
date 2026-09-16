@@ -20,7 +20,7 @@ no requirement is satisfied by an empty result, a silent default, or a throw.
 |---|---|---|
 | `kind` | a scalar; only the literal `epic` carries meaning | `null` |
 | `tracker` | MUST match `/^feature\/[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*$/` and MUST NOT contain `..` | `null` |
-| `parent` | a bare positive integer | `null` |
+| `parent` | bare positive digits, **no leading zero** (`/^[1-9]\d*$/`) | `null` |
 
 Everything this requirement calls a **said divergence** MUST be said in a NEW
 channel, `declarationDivergences` — entries `{key, value, reason}` per body,
@@ -69,14 +69,27 @@ issue number and the offending text.
 - **WHEN** a block declares `parent: main` or `parent: #878`
 - **THEN** `node.parent` and `node.parentSource` are `null`, a divergence names the issue number and the offending text, and the value never becomes `0`, `NaN` or a string
 
+#### Scenario: a leading zero is refused, not normalised
+- **WHEN** a block declares `parent: 007`
+- **THEN** `node.parent` is `null` and a divergence names `007` with reason `parent-grammar` — `7` is not the byte the body wrote, and R967-1 forbids repairing a declaration for the other two keys on exactly this ground (decided 2026-09-16, review of PR A; `Number()` normalisation was the pre-amendment behaviour and is rejected)
+
 ### R967-2: a parent read from prose, one hop, and said as such
 
 When the block declares no `parent:`, the reader MUST look for a
 **line-initial** `Parent: #<digits>` in the **prose**. A line DECLARES exactly
-when it matches `/^Parent:[ \t]*#\d+\b/m` — column zero, exact case, no
+when it matches `/^Parent:[ \t]*#[1-9]\d*\b/m` — column zero, exact case, no
 leading-whitespace tolerance, arbitrary prose allowed after the number. The
 numbers a declaring line names are then read from the WHOLE line, not from the
 prefix the anchor matched (see the ambiguity rule below).
+
+The issue-number grammar is the SAME one R967-1 states for the `parent:` block
+key — bare positive digits, no leading zero. The two paths read the same fact out
+of the same body and MUST NOT disagree about what a number is. They differ only
+in what silence means: a `parent:` key present and malformed is SAID
+(`parent-grammar`), whereas a prose line that does not match is not a declaration
+and says nothing. (Amended 2026-09-16, review of PR A: the prose path carried no
+positivity check at all, so `Parent: #0` yielded `parent: 0` — a value the block
+key's own refused list already names — and `Parent: #007` yielded `7`.)
 
 The scan MUST run over the body with every **fenced region removed** — every
 fence the splitter reports, the `brain-graph/1` fence included, plus an
@@ -117,6 +130,10 @@ to admit.
 #### Scenario: prose parent with trailing text
 - **WHEN** the block declares no `parent:` and the body carries a line starting `Parent: #864 (memory 2.0), task 1.2 (Wave 1).`
 - **THEN** `node.parent` is `864` and `node.parentSource` is `'prose'`
+
+#### Scenario: a leading zero declares nothing in prose either
+- **WHEN** a body carries `Parent: #0`, `Parent: #00` or `Parent: #007` and no block `parent:`
+- **THEN** `node.parent` and `node.parentSource` are `null` and nothing is said — the line does not match, so it is not a declaration, and `0` and `7` are values the block key's own grammar already refuses
 
 #### Scenario: `Epic: #N` is not a synonym
 - **WHEN** a body carries `Epic: #313` and no `Parent:` line and no block `parent:`

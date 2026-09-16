@@ -117,6 +117,24 @@ function firstWord(tag) {
 const TRACKER_GRAMMAR = /^feature\/[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*$/;
 
 /**
+ * AN ISSUE NUMBER, wherever this module reads one: bare positive digits, no leading
+ * zero. Spelled ONCE and composed into the three patterns below, so the block key and
+ * the prose line cannot drift into disagreeing about what a number is — which they
+ * had, measured: `parent: 007` and `Parent: #007` both became `7` through `Number()`,
+ * and `Parent: #0` became `0`, a value the block key's own refused list already names.
+ *
+ * A leading zero is REFUSED, not normalised, on R967-1's own rule for the other two
+ * keys: a declaration is read, never repaired. `7` is not the byte the author wrote,
+ * and a parser that quietly decides they meant a different issue than the one they
+ * typed is the failure mode this whole channel exists to stop.
+ */
+const ISSUE_NUMBER = String.raw`[1-9]\d*`;
+
+/** The `parent:` BLOCK key. A key that is present and fails this is MALFORMED and is
+ *  said as `parent-grammar` — unlike a prose line, which is simply not a declaration. */
+const PARENT_KEY_GRAMMAR = new RegExp(String.raw`^${ISSUE_NUMBER}$`);
+
+/**
  * A parent declared in PROSE: line-initial, exact case, trailing text free (#967 Q3).
  *
  * Measured against the corpus rather than sketched. #881's body reads
@@ -140,7 +158,7 @@ const TRACKER_GRAMMAR = /^feature\/[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*$/;
  *
  * `g` is for `matchAll`, which clones the regex rather than advancing this one.
  */
-const PARENT_PROSE_LINE = /^Parent:[ \t]*#\d+\b.*$/gm;
+const PARENT_PROSE_LINE = new RegExp(String.raw`^Parent:[ \t]*#${ISSUE_NUMBER}\b.*$`, 'gm');
 
 /**
  * Every issue reference on a line already known to declare one.
@@ -150,7 +168,7 @@ const PARENT_PROSE_LINE = /^Parent:[ \t]*#\d+\b.*$/gm;
  * restatement: `Parent: #878 — see #878` reads 878, exactly as two `Parent: #878`
  * lines do.
  */
-const ISSUE_REF = /#(\d+)/g;
+const ISSUE_REF = new RegExp(String.raw`#(${ISSUE_NUMBER})`, 'g');
 
 /**
  * The body with every FENCED REGION blanked out, line count preserved.
@@ -405,7 +423,7 @@ export function parseGraphBlock(body) {
   let parent = null;
   let parentSource = null;
   if (parentRaw !== null) {
-    if (/^\d+$/.test(parentRaw) && Number(parentRaw) > 0) {
+    if (PARENT_KEY_GRAMMAR.test(parentRaw)) {
       parent = Number(parentRaw);
       parentSource = 'block';
     } else {
