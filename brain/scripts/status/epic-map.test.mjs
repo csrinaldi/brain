@@ -178,6 +178,37 @@ test('#967 R967-2 S5: two line-initial Parent: lines with different numbers is a
   assert.deepEqual(g.declarationDivergences, [{ key: 'parent', value: '878, 879', reason: 'parent-ambiguous' }]);
 });
 
+test('#967 R967-2 S5: TWO numbers on ONE Parent: line is the same ambiguity as two lines', () => {
+  // The two-line rule refused to pick; the one-line shape slipped past it, because the
+  // pattern stopped reading at the first number and the rest of the line was never
+  // looked at. "Two values for one key" is the fact being refused, and it does not
+  // become one value by being written with a comma.
+  const body = ['Parent: #878, #879', '', rawBlock('track: A')].join('\n');
+  const g = parseGraphBlock(body);
+  assert.equal(g.parent, null, 'neither wins — and 878 must not win by writing order');
+  assert.equal(g.parentSource, null);
+  assert.deepEqual(g.declarationDivergences, [{ key: 'parent', value: '878, 879', reason: 'parent-ambiguous' }]);
+});
+
+test('#967: #881’s real line survives the one-line ambiguity rule — it carries no second #N', () => {
+  // The guard is a SECOND ISSUE NUMBER, not trailing prose. The one real body this
+  // reader exists for has parentheses, an em dash, a slice and a wave after the
+  // number, and must still read.
+  const g = parseGraphBlock(['Parent: #878 (Brain UI) — slice 3, Wave B.', '', rawBlock('track: A')].join('\n'));
+  assert.equal(g.parent, 878);
+  assert.equal(g.parentSource, 'prose');
+  assert.deepEqual(g.declarationDivergences, []);
+});
+
+test('#967: the SAME number twice on one line is a restatement, exactly as it is across two lines', () => {
+  // The rule is stated over the SET of numbers, so the one-line and two-line shapes
+  // cannot disagree with each other about what counts as a restatement.
+  const g = parseGraphBlock(['Parent: #878 — see #878 for the epic body.', '', rawBlock('track: A')].join('\n'));
+  assert.equal(g.parent, 878, 'one answer, said twice on one line');
+  assert.equal(g.parentSource, 'prose');
+  assert.deepEqual(g.declarationDivergences, []);
+});
+
 // ── #967 D3: the parent — block key, else the prose line, else null. One hop. ──
 //
 // The two bodies below are VERBATIM from the forge, not sketched: #881's line is

@@ -72,9 +72,11 @@ issue number and the offending text.
 ### R967-2: a parent read from prose, one hop, and said as such
 
 When the block declares no `parent:`, the reader MUST look for a
-**line-initial** `Parent: #<digits>` in the **prose**, matched with exactly
-`/^Parent:[ \t]*#(\d+)\b/m` — column zero, exact case, no leading-whitespace
-tolerance, arbitrary prose allowed after the number.
+**line-initial** `Parent: #<digits>` in the **prose**. A line DECLARES exactly
+when it matches `/^Parent:[ \t]*#\d+\b/m` — column zero, exact case, no
+leading-whitespace tolerance, arbitrary prose allowed after the number. The
+numbers a declaring line names are then read from the WHOLE line, not from the
+prefix the anchor matched (see the ambiguity rule below).
 
 The scan MUST run over the body with every **fenced region removed** — every
 fence the splitter reports, the `brain-graph/1` fence included, plus an
@@ -89,14 +91,24 @@ real `Parent:` line DELETED the real declaration by manufacturing an ambiguity
 with it.) Masking an **HTML comment** is NOT part of this requirement — the
 splitter reports no span for one — and is recorded as a follow-up.
 
-A block key MUST win over
-prose, and when it does the prose line MUST NOT be read at all. The node MUST
+A block key MUST win over prose, and when it does the prose line MUST NOT be
+read at all. The node MUST
 state where its parent came from in `parentSource` (`'block' | 'prose' |
 null`). `Epic: #N` MUST NOT be read as a synonym for `Parent: #N`. A line the
 regex does not match is simply not a declaration: it yields no parent and
-says nothing. More than one line-initial match with different numbers MUST
-yield no parent plus a said `declarationDivergences` entry — never a
-first-match-wins guess.
+says nothing. More than one **distinct issue number** across the line-initial
+matches MUST yield no parent plus a said `declarationDivergences` entry — never
+a first-match-wins guess.
+
+The count is over the NUMBERS, not over the lines (amended 2026-09-16, review of
+PR A). `Parent: #878, #879` on a single line is the same "two values for one
+key" fact as the same pair on two lines, and resolved to `878` by writing order
+until the rule was stated this way — exactly the guess this requirement refuses.
+A line-initial `Parent:` whose remainder carries a second `#<digits>` is
+therefore ambiguous. Symmetrically, one number said twice — on one line or on
+two — stays a restatement and is read: `Parent: #878 (Brain UI) — slice 3,
+Wave B.` carries no second `#<digits>` and is still the body this reader exists
+to admit.
 
 #### Scenario: the block key wins and the prose line is never read
 - **WHEN** a body declares `parent: 878` in the block and also carries a line-initial `Parent: #879`
@@ -121,6 +133,10 @@ first-match-wins guess.
 #### Scenario: two line-initial matches are refused and named
 - **WHEN** a body carries two line-initial `Parent: #N` lines with different numbers
 - **THEN** `node.parent` is `null` and a `declarationDivergences` entry names the ambiguity; neither wins
+
+#### Scenario: two numbers on ONE line is the same refusal
+- **WHEN** a body carries the single line-initial line `Parent: #878, #879`
+- **THEN** `node.parent` is `null`, `parentSource` is `null`, and a `declarationDivergences` entry names `878, 879` with reason `parent-ambiguous` — 878 does not win by being written first
 
 ### R967-3: the snapshot carries all four fields, and an unreadable node carries none
 

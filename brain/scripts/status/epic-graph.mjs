@@ -131,9 +131,26 @@ const TRACKER_GRAMMAR = /^feature\/[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*$/;
  *
  * IT IS MATCHED AGAINST PROSE, NOT AGAINST THE WHOLE BODY — see `outsideFences`.
  *
+ * It matches to END OF LINE rather than stopping at the number, because the numbers
+ * are counted afterwards by `ISSUE_REF` and THE REST OF THE LINE has to be counted
+ * too: `Parent: #878, #879` is two values for one key, and a pattern that stopped at
+ * the first one resolved it to 878 BY WRITING ORDER — the first-match-wins guess this
+ * requirement already refuses when the two numbers are on two lines. `\b` is still
+ * what refuses `#878x`, and it is checked before `.*` can swallow the `x`.
+ *
  * `g` is for `matchAll`, which clones the regex rather than advancing this one.
  */
-const PARENT_PROSE_LINE = /^Parent:[ \t]*#(\d+)\b/gm;
+const PARENT_PROSE_LINE = /^Parent:[ \t]*#\d+\b.*$/gm;
+
+/**
+ * Every issue reference on a line already known to declare one.
+ *
+ * The ambiguity rule is stated over the SET of numbers found, not over the count of
+ * matches, so the one-line and two-line shapes cannot disagree about what counts as a
+ * restatement: `Parent: #878 — see #878` reads 878, exactly as two `Parent: #878`
+ * lines do.
+ */
+const ISSUE_REF = /#(\d+)/g;
 
 /**
  * The body with every FENCED REGION blanked out, line count preserved.
@@ -395,11 +412,16 @@ export function parseGraphBlock(body) {
       say('parent', parentRaw, 'parent-grammar');
     }
   } else {
-    const prose = [...new Set([...outsideFences(body, blocks, unterminated).matchAll(PARENT_PROSE_LINE)].map(m => Number(m[1])))];
-    // Two line-initial lines naming DIFFERENT issues is ambiguity, and the answer is
-    // the one `parseGraphBlock` already gives for two graph blocks: stop picking. Two
-    // lines naming the same issue is a restatement, not a disagreement — there is
-    // exactly one answer, so it is read.
+    const prose = [...new Set(
+      [...outsideFences(body, blocks, unterminated).matchAll(PARENT_PROSE_LINE)]
+        .flatMap(m => [...m[0].matchAll(ISSUE_REF)].map(r => Number(r[1]))),
+    )];
+    // DIFFERENT issues named for one key is ambiguity, and the answer is the one
+    // `parseGraphBlock` already gives for two graph blocks: stop picking. The count is
+    // over the numbers, not over the lines, so `Parent: #878, #879` on ONE line is the
+    // same refusal as the same pair on two — it was resolved to 878 by writing order
+    // until this rule was stated over the set. One number said twice, on one line or
+    // two, is a restatement rather than a disagreement: exactly one answer, so it reads.
     if (prose.length > 1) say('parent', prose.join(', '), 'parent-ambiguous');
     else if (prose.length === 1) { parent = prose[0]; parentSource = 'prose'; }
   }
