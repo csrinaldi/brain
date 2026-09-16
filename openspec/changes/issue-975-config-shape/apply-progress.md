@@ -233,10 +233,9 @@ names:
 None. All 20 tasks complete.
 
 ## Status
-20/20 tasks complete. Commits: `<fix-commit-sha>` (test+fix), `<docs-commit-sha>`
-(SDD docs + doctrine draft), `<record-commit-sha>` (record-first commit,
-record `<record-id>`) — filled in by the follow-up "mark tasks complete"
-commit once all three SHAs exist, mirroring the `#962` precedent
-(`git log` shows that batch used a fourth commit for the same reason: a
-commit cannot cite the SHA of a commit that does not exist yet). Ready for
-`sdd-verify` once that follow-up commit lands.
+20/20 tasks complete. Commits: `4db97ac2` (test+fix), `646e80bb` (SDD docs +
+doctrine draft), `9f7a8438` (record-first commit, record
+`rec-126c024bef05133d`), and this follow-up commit recording all three SHAs
+— mirroring the `#962` precedent (`git log` shows that batch used a fourth
+commit for the same reason: a commit cannot cite the SHA of a commit that
+does not exist yet). Ready for `sdd-verify`.
