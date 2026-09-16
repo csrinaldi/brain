@@ -302,7 +302,7 @@ lines**. Closes R967-5, R967-6, R967-9's resolver half.
       without its `es` twin (R967-6 S6) — add the `en` keys first, watch it go
       red, then the `es` twins. No new doctrine-oracle test:
       `harness-contract.md:28` already carries the rule (design D8, proposal R4).
-- [ ] B4. `brain/scripts/ticket-start.mjs`: call `resolveBase` between the
+- [x] B4. `brain/scripts/ticket-start.mjs`: call `resolveBase` between the
       `issueView` at `:93` and the `ticket.updatingBase` line at `:132`, building
       the `fetchIssue` closure from the `vcs`/`project` already in scope; print
       `await t(say.key, say.params)`; on a refusal print `t(refusal.key, params)`
