@@ -1530,15 +1530,24 @@ above rendered exactly that band from a synthetic watcher state.
 
 ### Verification
 
-`GIT_CONFIG_GLOBAL=/dev/null npm test` = **5554/5554 green** (tracker
-baseline 5496; +58 tests this run: 10 frames, 12 banners, 7 canvas-model, 12
-drawer-model, 4 source-guard, 4 degradation-banner, 5 no-management-views,
-4 server). `npm run brain:repo:check` green before every commit; tree clean
-after each. Counted diff (excluding `*.test.mjs`, `openspec/`, `.memory/`)
-against `origin/feature/brain-ui...HEAD`: **892 / 1000** (tier `lite`) —
-tasks.md forecast ~440 for this PR; the overage is the four `lib/` modules
-the "no logic in the browser file" rule pulled out of `app.js`, all of them
-tested, none of them optional.
+Numbers as of the pre-push review round below (2026-09-16), which is the
+state of the branch today; the figures this section carried before that round
+were 5554/5554 and 892/1000, and the band wrap plus the six review fixes have
+moved both.
+
+`GIT_CONFIG_GLOBAL=/dev/null npm test` = **5564/5564 green** (tracker
+baseline 5496; +68 tests on this branch: 58 for the page itself — 10 frames,
+12 banners, 7 canvas-model, 12 drawer-model, 4 source-guard, 4
+degradation-banner, 5 no-management-views, 4 server — plus 1 for the unlinked
+band wrap and 9 for the pre-push review round). The `ui/**` suite alone is
+**203/203**, run three consecutive times. `npm run brain:repo:check` green
+before every commit; tree clean after each. Counted diff (excluding
+`*.test.mjs`, `openspec/`, `.memory/`) against
+`origin/feature/brain-ui...HEAD`: **954 / 1000** (tier `lite`) — 892 for the
+page, 15 for the band wrap, 47 for the review fixes. tasks.md forecast ~440
+for this PR; the overage is the four `lib/` modules the "no logic in the
+browser file" rule pulled out of `app.js`, all of them tested, none of them
+optional.
 
 ### Deviations from tasks.md / design.md
 
@@ -1591,6 +1600,85 @@ tested, none of them optional.
    `brain:ui --root <other repo>` serves that repo's tree with THIS repo's
    issues — two sources of truth in one snapshot. Pre-existing since PR 1/2;
    worth its own ticket.
+
+## Slice 4 — pre-push fresh review (2026-09-16): APPROVE with minors, five promoted and fixed
+
+A cold-context review of the branch at `1c5c07f0` returned **APPROVE with
+minors** — seven, by the reviewer's own count. Five items were fixed here,
+test-first, one commit each: four are minors this repo's reading rules promote
+to blocking (a failure that produces no sentence anywhere, or a guard that
+cannot catch what it claims to catch), and the fifth, the `colour.mjs`
+fall-through, is slice 3's own written obligation restated inside this slice's
+R881-6 claims rather than a new finding. The three minors left untouched are
+editorial; each one's reason is stated below.
+
+### Fixed this round
+
+| # | Finding | Commit |
+|---|---|---|
+| 1 | `frames.mjs` applied a `section` frame blindly: an unknown `name` invented a snapshot key the canvas would read as data, and a frame with no `name` wrote a section literally called `"undefined"` | `6551c288` |
+| 2 | `app.js`'s `JSON.parse(event.data)` sat unguarded inside the `EventSource` listener: a non-JSON frame threw where nothing on the page can catch it — the frame lost AND no band said so | `df3b6a52` |
+| 3 | a failed poll-control POST wrote its reason into `state.stream`, so the page said "the live stream dropped" about a button that did not take | `12963635` |
+| 4 | `app-source-guard.test.mjs`'s `importSpecifiers()` scanned line by line, so a multi-line `import {\n … \n} from 'lodash-es';` passed the no-bare-package guard | `87ee66ad` |
+| 5 | `colour.mjs` compared `node.status` against three literals and fell through to the roadmap colour, so an unknown status painted as if something had classified the node (slice 3's obligation, inside this slice's R881-6 claims) | `98e26b9f` |
+
+### RED → GREEN → mutation, per fix
+
+1. **Section-frame guard.** RED — two probes (`name: 'nosuchsection'` adds a
+   key; a frame with no `name` writes `"undefined"`) failed, 10 pass / 1 fail.
+   GREEN — 11/11. Mutation — `if (false && !Object.hasOwn(...))` → red,
+   reverted. The unknown name is now said through `state.stream`, the same
+   place an unknown event name is said.
+2. **`parseFrame(text)`.** RED — `frames.test.mjs` would not even load
+   (`parseFrame` is not exported) and the new `app.js` wiring scan failed.
+   GREEN — 197/197 across `ui/**`. Mutation — parse outside the `try` → red on
+   exactly the new test, reverted. `parseFrame('{nope')` returns
+   `{ok:false, reason}` naming the position; `app.js` routes a failed parse to
+   the stream band and renders.
+3. **The `controls` band.** RED — four failures (the `controlBanner` value,
+   the `degradationBands` band, `controlFailed` in page state, the `app.js`
+   wiring scan). GREEN — 201/201. Mutation — routing the failure back through
+   `streamFailed` → red on the wiring scan, reverted. The page state now
+   carries `controls: {ok, action, reason}`, distinct from `stream`, and the
+   band is rendered beside the transport band, never as it.
+4. **The whole-file import scan.** Proven the other way round, because the
+   defect was in the test: a multi-line `lodash-es` import was injected into
+   `app.js` and the OLD guard passed 4/4 — that is the bug. With the scanner
+   fixed the same injection fails 2 of 4 (the specifier assertion and the
+   "module exists under `ui/lib/`" assertion); the injection was then removed
+   and the file is byte-identical to its committed state. The scan now covers
+   all three module forms: `… from '<spec>'`, bare `import '<spec>'`, and
+   dynamic `import('<spec>')`.
+5. **Unknown `node.status`.** RED — 12 pass / 2 fail (`colour.test.mjs`'s
+   throw assertion and `canvas-model.test.mjs`'s `node-unknown` assertion).
+   GREEN — 203/203. Mutation — `if (false && …)` restores the fall-through →
+   the same 2 red, reverted. `status/epic-graph.mjs` assigns exactly four
+   statuses and `snapshot.mjs` one more, all five present in
+   `NODE_STATUS_CLASS`, so no live node changes colour; what changes is that a
+   sixth would be marked `node-unknown` with its reason on the node instead of
+   drawn as `planned`, while every sibling still draws.
+
+### Left as follow-ups, with the reason
+
+1. **`LIB_MODULE_RE`'s comment wording** (`server.mjs`). The reviewer found
+   the comment's description of the pattern looser than the pattern itself.
+   The regex is correct and pinned by a mutation test; rewording a comment is
+   not worth a line of this PR's remaining budget. A later ticket.
+2. **The `www.w3.org` allow-list width** (`lib/shipped-hostnames.mjs`). The
+   entry allows the host, where only the exact SVG namespace string
+   `http://www.w3.org/2000/svg` is needed. Narrowing it touches #648's guard —
+   a shared file outside this slice's fence, with its own tests and its own
+   reviewers. A later ticket, named there.
+3. **The editorials about focus / Space / CLOSED** — keyboard focus handling
+   on the canvas nodes, the `' '` key comparison, and the wording of the
+   CLOSED-issue note. All three are suggestions about behaviour nobody has
+   reported as wrong, none of them a silent failure. Deliberately not taken in
+   a pre-push round: they are product decisions, not corrections.
+
+The two findings recorded in "Findings for follow-up" above are unchanged:
+finding 1 (the unlinked band) stays FIXED, finding 2 (`main()` resolves the
+forge from `process.cwd()`, not `--root`) stays OPEN and still wants its own
+ticket.
 
 No push, no PR (per task instructions) — branch `feat/issue-881-slice-4-page`
 has not been pushed this run.
