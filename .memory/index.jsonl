@@ -1632,6 +1632,7 @@
 {"id":"rec-aabad0b782f68f7b","ts":"2026-08-18T17:48:48Z","actor":"chore/issue-682-ruling-memory","type":"architecture","project":"brain","issue":682,"file":"2026-08-rec-aabad0b782f68f7b.jsonl"}
 {"id":"rec-aad23607f8826a70","ts":"2026-07-29T14:27:05Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-aad23607f8826a70.jsonl"}
 {"id":"rec-aad89260732fa3b6","ts":"2026-07-13T00:21:19Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-aad89260732fa3b6.jsonl"}
+{"id":"rec-aaeb5b317c39db5e","ts":"2026-09-16T12:23:40Z","actor":"@csrinaldi","type":"decision","project":"brain","issue":881,"file":"2026-09-rec-aaeb5b317c39db5e.jsonl"}
 {"id":"rec-aaecc2c2991c3caa","ts":"2026-07-29T14:28:51Z","actor":"@legacy","type":"bugfix","project":"brain","file":"2026-07-rec-aaecc2c2991c3caa.jsonl"}
 {"id":"rec-aaf20d94e57f169b","ts":"2026-07-25T00:47:41Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-aaf20d94e57f169b.jsonl"}
 {"id":"rec-aafac352703634c1","ts":"2026-07-29T14:27:45Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-aafac352703634c1.jsonl"}
