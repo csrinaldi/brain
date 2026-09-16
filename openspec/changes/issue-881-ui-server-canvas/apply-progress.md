@@ -1703,3 +1703,109 @@ in one small PR against the tracker, before the tracker's own review:
   the latter into `app.js` still turns the guard red (`60c28bf3`).
 
 Counts after: 206 tests under `ui/`.
+
+## Tracker PR #970 — cold review (head `7c1de343`, `judgment:cold-1`, 2026-09-16): one blocker, fixed
+
+The cold review of the tracker PR reproduced, with a fake scheduler, a node
+that renders `status: UNREADABLE` forever on a working server. Branch
+`fix/issue-881-poller-bulk-import` off `origin/feature/brain-ui`
+(`7c1de343`), two commits, not pushed.
+
+### The finding
+
+After a cold-start tick with 5 issues, a second tick introduces 30 brand-new
+issue numbers at once (a bulk import). `pickBodyTargets()` capped
+`newNumbers` at `NEW_BODY_CAP = 20`, so 10 of the 30 never got an `issueView`
+call that tick — and the cap simply DROPPED them. Those 10 have
+`prev === undefined` in `previousIssues`, so the
+`if (prev !== undefined && !rowsEqual(prev, row))` check at `poller.mjs:117`
+could never add them to `pendingBodyRefresh` either; once recorded in
+`previousIssues` at the end of that same tick they stopped being "new", and
+their row never changes, so they could never enter the "changed" bucket
+later. On every following tick `newNumbers.length === 0 &&
+pendingBodyRefresh.size === 0` held, so the early return at `poller.mjs:119`
+fired BEFORE the least-recently-refreshed `rest` bucket was computed.
+Measured: 20 ticks later, issues 120–129 still had zero `issueView` calls. In
+`snapshot.mjs:196` a never-cached number throws forge-cache's miss reason, so
+the node rendered permanently `status: UNREADABLE` saying "the first forge
+poll has not completed" — about a server that had polled twenty times.
+design.md:96-100 promises (a) new issues in the same tick capped at 20 and
+(c) a least-recently-refreshed catch-up for anything that misses (a)/(b); the
+early return foreclosed (c).
+
+### The two commits
+
+| Commit | What |
+|---|---|
+| `756da921` | `fix(ui)`: the overflow is queued, the `rest` bucket is never foreclosed |
+| `a2f824ff` | `fix(ui)`: a never-fetched body says it is queued, not that the first poll has not completed |
+
+**`756da921`.** The brand-new numbers are taken ascending; the overflow
+beyond `NEW_BODY_CAP` is added to the same FIFO `pendingBodyRefresh` set
+instead of being dropped, and is deliberately NOT spent in the tick that
+queued it — bucket (a)'s cap is `NEW_BODY_CAP`, so the per-tick ceiling stays
+`BODY_CAP + NEW_BODY_CAP = 25` and design.md's budget table does not move.
+The early return is gone, so bucket (c) runs whenever (a) and (b) leave it
+room; a number that has never been fetched has refresh tick `-1` and wins
+that ordering outright.
+
+Both halves are needed. Queueing is not made redundant by (c): `rest`'s share
+is `BODY_CAP - new - changed`, so a forge with sustained churn saturating the
+`changed` bucket starves it at zero forever, and the overflow would wait
+behind every later change. The queue puts it ahead of them. Conversely (c) is
+not made redundant by the queue: it is the only thing that ever re-reads a
+body whose list-level row never moves.
+
+**`a2f824ff`.** `forge-cache.mjs`'s single `MISS_REASON` covered two
+different facts and `snapshot.mjs` renders it verbatim. It now names which:
+`the first forge poll has not completed` while the cache holds no answer at
+all, and `this issue's body has not been fetched yet (queued)` /
+`this PR's reviews have not been fetched yet (queued)` once it holds any. The
+two list verbs keep the first-poll wording unconditionally — the fast lane
+fetches both on every tick, so a missing list can only mean no tick ran.
+
+### RED → GREEN → mutation
+
+| Test | RED | GREEN | Mutation |
+|---|---|---|---|
+| bulk import drains under the bound | issues 120–129 never fetched | 13/13 in `poller.test.mjs` | — (see below) |
+| the `rest` bucket runs with nothing new or changed | `0 !== 5` calls | idem | restoring the early return before `rest` → this test and R881-4 S1 red; reverted |
+| a queued overflow drains ahead of later churn | overflow starved at 0 | idem | `deferred = new Set()` (drop the overflow again) → this test alone red; reverted |
+| a never-fetched number says it is queued | old sentence thrown | 5/5 in `forge-cache.test.mjs` | `holdsAnyAnswer() ? … : …` → `FIRST_POLL_REASON` → 3 tests red across two files; reverted |
+
+The first mutation attempt is worth recording because it FAILED to go red:
+dropping the overflow again left the first bulk-import test green, since with
+the early return gone bucket (c) picks the ten never-fetched numbers up at 5
+a tick. That test alone therefore did not pin the queueing, so the third test
+(sustained churn saturating the `changed` bucket) was written specifically to
+discriminate the two halves. Both are now pinned independently.
+
+### The spec amendment this fix required
+
+`spec.md` R881-4's first scenario read: "unchanged issues cost nothing on the
+next poll — the second poll issues no per-issue `issueView` call for any of
+those N issues", and `poller.test.mjs` asserted exactly 0 calls. That
+absolute reading is what foreclosed design.md's bucket (c) in the first
+place, and PR 2's deviation (2) had already recorded the conflict as "spec
+R881-4 S1 wins over design prose". The review shows the spec was the side
+that was wrong: a body-only edit moves no list-level field, so under the
+absolute reading a body the poller never fetched could never be fetched
+again. The scenario is amended to the bounded claim ruling 2 actually bought
+— at most `B` calls on the next poll regardless of N, never one per open
+issue — and a second scenario is added for the bulk import. The test now uses
+N = 60 so a bounded tick and an unconditional re-fetch cannot be confused.
+
+`design.md` carries a matching correction. **No number in the budget table
+moves**: the steady-state row already priced bucket (c) at `B = 5` every tick
+(`2 + min(P,10) + B` = 10 calls/tick, 600/h). What changed is that the
+implementation now actually spends that `B` instead of spending 0 on a tick
+where no row moved — reality moved up to the figure the design had always
+stated, not past it. Worst bounded case is still `2 + min(P,10) + 25 = 37`.
+
+### Verification
+
+`ui/**` 211/211, three consecutive runs. `GIT_CONFIG_GLOBAL=/dev/null npm
+test` 5582/5582 (baseline 5577; +5 = 3 new poller tests, 2 new forge-cache
+tests). `brain:repo:check` green before each commit; tree clean after each.
+Counted diff excluding `*.test.mjs`, `openspec/` and `.memory/` against
+`origin/feature/brain-ui...HEAD`: see the return summary. No push, no PR.
