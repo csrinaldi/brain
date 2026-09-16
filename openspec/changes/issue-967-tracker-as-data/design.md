@@ -62,8 +62,10 @@ A `$`-anchored regex matches nothing there — the one real body this ticket exi
 to read would parse to `null`. (The proposal flagged this line as unverified; it
 is now verified against the forge dump, and it fails the proposed shape.)
 
-**Chosen:** `/^Parent:[ \t]*#(\d+)\b/m` — column zero, exact case, trailing prose
-free. It admits #881 and refuses `issue-337-efficacy-probes/proposal.md:3`
+**Chosen:** `/^Parent:[ \t]*#[1-9]\d*\b/m` — column zero, exact case, trailing
+prose free. (Amended 2026-09-16, review of PR A: `#(\d+)` admitted `Parent: #0`
+and `Parent: #007`, which the block key's own grammar refuses. One grammar for an
+issue number, not two.) It admits #881 and refuses `issue-337-efficacy-probes/proposal.md:3`
 (`Issue: #337 — M10 Phase 3. Parent: #335. Epic: #313.`), where the parent is not
 the epic. No leading-whitespace tolerance: a quoted or list-item `> Parent: #999`
 inside an example must not declare anything. Exact case follows the block's own
@@ -71,9 +73,17 @@ rule — `BRAIN-GRAPH/1` does not declare (`epic-map.test.mjs:165-170`, "no
 whitelist of near-misses to forgive").
 
 **`Epic: #N` is NOT a synonym** (#337 is the counterexample: parent #335, epic
-#313, one line). **Two `Parent:` lines with different numbers is ambiguity, not a
+#313, one line). **More than one distinct issue number is ambiguity, not a
 first-match**: parent stays `null` and a divergence is recorded — the rule
 `parseGraphBlock` already holds for two graph blocks (`epic-graph.mjs:170-175`).
+
+**The scan runs over PROSE, not over the whole body** (amended 2026-09-16, review
+of PR A). Every fenced region is removed first, the `brain-graph/1` fence
+included. #709 had already settled for the fence SELECTOR that an illustration
+and a declaration must not be byte-identical to a reader; this document left
+prose out of that ruling, and the measured cost was not only a fabricated parent
+but a DELETED one — a fenced example above a real `Parent:` line manufactured an
+ambiguity with it, and the refusal fell on the real declaration.
 
 ## Q4 / Q5 — B2 confirmed; the gate never scans the forge
 
@@ -138,8 +148,23 @@ New per-body array, entries `{key, value, reason}`:
 |---|---|---|
 | `tracker:` does not match `/^feature\/[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*$/` or contains `..` | `tracker-grammar` | `null` |
 | `tracker:` present, `kind !== 'epic'` (Q7) | `tracker-without-kind-epic` | carried, not honoured |
-| `parent:` key is not `#?<digits>` | `parent-grammar` | `null` |
-| two `^Parent:` lines with different numbers | `parent-ambiguous` | `null` |
+| `parent:` key is not `/^[1-9]\d*$/` | `parent-grammar` | `null` |
+| more than one distinct issue number across the `^Parent:` lines | `parent-ambiguous` | `null` |
+
+**Two rows above are amended (2026-09-16, review of PR A); this table's original
+wording is overruled by `spec.md` and `tasks.md`, which were right.**
+
+1. The parent grammar was written `#?<digits>`, which ADMITS `parent: #878`.
+   `spec.md` R967-1's scenario and `tasks.md` A2a both demand that exact value be
+   REFUSED, and the implementation refuses it — the `#` belongs to the prose
+   spelling, not to the block key. The grammar is bare positive digits, and since
+   the same review it also refuses a LEADING ZERO: `parent: 007` was normalised to
+   `7` by `Number()`, and `7` is not the byte the body wrote. One repair is the
+   same defect class as another.
+2. The ambiguity row counted LINES. `Parent: #878, #879` is two values for one key
+   on one line, and the line-counting rule resolved it to `878` by writing order —
+   the first-match-wins guess this very row exists to refuse. The count is now over
+   the SET of issue numbers, so the one-line and two-line shapes cannot disagree.
 
 `buildGraph` lifts them to a graph-level `declarationDivergences:
 [{number, key, value, reason}]` and appends the one cross-node entry,

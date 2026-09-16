@@ -139,8 +139,17 @@ title with no `kind:`.
   `snapshot-cli.test.mjs` are byte-identical: `git diff` over those four paths
   is empty.
 - No sub-issues endpoint, no new port verb, no title pattern matched anywhere.
-- `ui/lib`'s `canvas-model.mjs` / `drawer-model.mjs` untouched: they do not
-  exist on this base, and their three lines belong to #882.
+- `ui/lib`'s `canvas-model.mjs` and `drawer-model.mjs` are untouched, and the
+  reason recorded here first — "they do not exist on this base" — WAS FALSE.
+  Corrected 2026-09-16 after the fresh-context review measured it:
+  `git ls-tree -r --name-only origin/feature/issue-967 | rg ui/lib` lists both.
+  What is true is that they are INERT to this slice.
+  `canvas-model.mjs:58-68` builds its drawn node from an explicit object literal
+  — `number`, `label`, `className`, `marks`, `track`, `x`, `y`, `w`, `h` — so it
+  projects node fields BY NAME and never spreads the node; four new keys on a
+  graph node cannot reach it. `drawer-model.mjs` reads no graph node at all (its
+  entries come from spec cards, review rounds and threads). Surfacing `kind`,
+  `tracker` and `parent` in the UI is #882's three lines, not this slice's.
 
 ## Workload / PR boundary
 
@@ -155,8 +164,118 @@ title with no `kind:`.
   fields are inert until a body declares them (design R5), and activation is
   maintainer task A9 on the forge.
 
+## Review round 1 — 2026-09-16, fresh context, before push
+
+Verdict REVISE: two majors, four minors, four editorials. Three code fixes and
+one documentation fix landed on top of the ten original commits. Nothing pushed;
+no PR opened. Every item below was MEASURED on the pre-fix tree before a line was
+written, and every fix was written test-first with the stated mutation run.
+
+### M2 — a column-zero `Parent:` inside a fenced block was read as a declaration
+
+**Commit** `7b2c212b`. **Finding**: the prose scan ran over the whole body,
+fences included. Measured, three shapes: `Parent: #999` inside a plain ``` fence
+yielded parent 999; the same line inside the `brain-graph/1` fence itself yielded
+999 too (`Parent:` is not the block's exact-case `parent:` key, so `scalar` never
+reads it and the prose scan did); and — the damaging one, found while writing the
+test — a fenced example standing ABOVE a real `Parent: #878` line did not merely
+add a parent, it DELETED the real declaration by manufacturing a
+`parent-ambiguous` refusal with it.
+
+**Fix**: the scan runs over the body with every fenced region blanked, derived
+from `fencedBlocks`'s own report rather than from a second fence reader (#340).
+An unterminated fence is blanked to the end of the document — that is how far it
+runs on the page — which the review did not ask for and is included because
+leaving it out reproduces the same defect class one shape over; it carries its
+own assertion. **RED**: the new test failed `999 !== null` on its first case.
+**GREEN**: 98/98 in `epic-map.test.mjs`. **Mutation**: scanning the raw `body`
+again → 97 pass, 1 fail, and the one failure is exactly this test.
+
+**`spec.md` R967-2 amended in the same commit.** The code was conformant to the
+sentence it had; the sentence was the defect. #709 had already settled for the
+fence selector that an illustration and a declaration must not be byte-identical
+to a reader, and R967-2 left prose out of that ruling.
+
+### m1 — `Parent: #878, #879` on one line resolved to 878 silently
+
+**Commit** `3c6a3336`. **Finding**: two `Parent:` lines naming different issues
+were refused as `parent-ambiguous`; one line naming two was not, because the
+pattern stopped at the first number and the rest of the line was never read. 878
+won BY WRITING ORDER — the first-match-wins guess R967-2 refuses in the two-line
+shape, reached by a different door.
+
+**Fix**: the rule is stated over the SET of issue numbers a declaring line names,
+not over the count of lines, so the one-line and two-line shapes cannot disagree
+about what counts as a restatement either. `Parent: #878 (Brain UI) — slice 3,
+Wave B.` carries no second `#<digits>` and still reads — it is the one real body
+this reader exists for, and it has its own guard test. **RED**: 100 pass, 1 fail,
+on the new ambiguity case only; the two guard tests were green from the start,
+which is what they are for. **GREEN**: 113/113 across both suites. **Mutation**:
+`.slice(0, 1)` on the per-line number list → 100 pass, 1 fail, exactly this test.
+
+**`spec.md` R967-2 amended**: it said "more than one line-initial match with
+different numbers", the line-counting statement the defect hid behind, and it
+quoted a regex the code no longer uses verbatim.
+
+### m2 — the decision: a leading zero is REFUSED, not normalised
+
+**Commit** `8c941474`. **Decided: refusal.** `parent: 007` became `7` through
+`Number()`, and `7` is not the byte the body wrote. R967-1 forbids repairing a
+declaration for `tracker:` on exactly this ground, and a parser that quietly
+decides the author meant a different issue than the one they typed is the failure
+mode the `declarationDivergences` channel exists to stop. Documented normalisation
+was the alternative and is rejected.
+
+**Measured beyond the review's finding**: the PROSE path was worse than the block
+path — it carried no positivity check at all, so `Parent: #0` yielded `parent: 0`,
+a value the block key's own refused list already names, and `Parent: #007` yielded
+`7`. Fixing only the block key would have left the two paths disagreeing about
+what an issue number is.
+
+**Fix**: the grammar is spelled ONCE (`ISSUE_NUMBER`, `[1-9]\d*`) and composed
+into the block key, the prose line and the ambiguity rescan. The two paths still
+differ in what SILENCE means, and that asymmetry is the module's existing rule
+rather than a new one: a `parent:` key present and malformed is SAID as
+`parent-grammar`, while a prose line that does not match is not a declaration and
+says nothing — the treatment `Parent: #878x` already got. **RED**: 100 pass, 2
+fail (`007`/`0007` added to the block key's refused list, and the new prose case).
+**GREEN**: 114/114. **Mutation**: `ISSUE_NUMBER` back to `\d+` with the old
+`Number(parentRaw) > 0` guard → 100 pass, 2 fail, exactly those two tests.
+
+**`spec.md` R967-1 and R967-2 amended** with the decision and the measurement.
+
+### M1 — a false absence claim in this file, and a stale design line
+
+**Commit**: the documentation commit this section ships in. The "they do not exist on this base"
+sentence under *Absence guards* was false and is corrected above with what was
+actually measured. `design.md:141` still wrote the parent grammar as
+`#?<digits>`, which ADMITS `parent: #878` — the exact value `spec.md` R967-1 and
+`tasks.md` A2a demand be refused, and which the implementation refuses. The
+design line is overruled by the spec and the tasks, and is corrected with a dated
+note rather than silently rewritten. The D2 ambiguity row and the Q3 regex carry
+dated notes for m1 and m2 as well.
+
+## Follow-ups, recorded not fixed
+
+- **m3 — a dangling parent is invisible by spec.** R967-4 states that a parent
+  ABSENT from the issue set produces no entry, on the "not in this list is not
+  not-an-epic" rule. That is the settled behaviour and the code honours it, but
+  it means a typo'd `parent: 8778` is silent. Flagged for **#882**, which owns
+  the surface where a human could see it.
+- **m4 — the self-parent wording.** A node naming ITSELF as parent is not called
+  out by any token in D2's table. No code change; the wording is owed.
+- **An HTML comment is not masked.** `outsideFences` removes fenced regions only.
+  A column-zero `Parent: #999` inside `<!-- … -->` renders as nothing and would
+  still be read. `fencedBlocks` reports no SPAN for a comment — only
+  `unterminatedComment` — so masking one needs the splitter to grow a field, and
+  that is #709's splitter half, not this slice. Blockquoted and four-space
+  indented lines are already refused by the column-zero anchor.
+- **e2 — the proposal's "six sites".** `proposal.md` Q8 still says six where
+  seven were measured. Belongs to the archive pass, outside PR A's slice fence.
+- **e4 — `scalar()` trims whitespace.** Pre-existing behaviour of
+  `review/lib/yaml-block.mjs`, not introduced or changed here.
+
 ## Next
 
-Fresh-context review of the diff, then push and open PR A against
-`feature/issue-967`. PR B (`resolveBase`) and PR C (the `base-branch` gate)
-follow in later batches.
+Push and open PR A against `feature/issue-967`. PR B (`resolveBase`) and PR C
+(the `base-branch` gate) follow in later batches.
