@@ -411,3 +411,13 @@ test('#814 T4: the served role text opens the assembled prompt VERBATIM', () => 
   assert.ok(prompt.startsWith(ROLE.text), 'content first, protocol after — the split is visible in the output');
   assert.match(prompt, /## What you must produce/, 'and the protocol half is still there');
 });
+
+test('output mode switches only the delivery instruction, not the reviewer role or artifact schema', () => {
+  const filePrompt = assembleReviewPrompt({ role: ROLE, prNumber: PR });
+  const finalMessagePrompt = assembleReviewPrompt({ role: ROLE, prNumber: PR, outputMode: 'final-message' });
+
+  assert.match(filePrompt, /Write exactly one file/, 'the omitted mode remains compatible with file-writing backends');
+  assert.match(finalMessagePrompt, /Return exactly the artifact bytes as your final message/, 'a host-owned output transport receives bytes, not a candidate path');
+  assert.ok(finalMessagePrompt.includes(`\`\`\`${ARTIFACT_TAG}`), 'the exact existing artifact schema remains in the returned-message mode');
+  assert.ok(finalMessagePrompt.startsWith(ROLE.text), 'the first-party reviewer role remains verbatim');
+});

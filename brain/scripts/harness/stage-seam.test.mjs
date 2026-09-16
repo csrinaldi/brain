@@ -201,6 +201,7 @@ test('the arguments reach the backend as ONE options object, not spread position
     // field the seam knows and never threads. `CALL` sets none, so it arrives
     // undefined and the backend's no-shadow branch holds.
     forgeConfigDir: undefined,
+    output: undefined,
     // #836: S4's evidence rides the same object — absent here because CALL names neither.
     routed: undefined,
     changeId: undefined,
@@ -360,4 +361,18 @@ test('runStage seam: it invents no directory when the caller names none', async 
   });
   await runStage({ engine: 'claude', stage: 'cold-review', prompt: 'p', cwd: '/tmp' });
   assert.equal(seen.forgeConfigDir, undefined);
+});
+
+test('runStage seam: it preserves an opaque host output descriptor', async () => {
+  let seen = null;
+  const output = { mode: 'final-message', tempPath: '/tmp/message.tmp', artifactPath: '/tmp/artifact.md' };
+  const runStage = makeRunStageSeam({
+    dispatch: async (_engine, _op, [args]) => { seen = args; return { ok: true }; },
+  });
+
+  await runStage({ engine: 'codex', stage: 'cold-review', prompt: 'p', output });
+  assert.equal(seen.output, output, 'the seam must not reinterpret or rebuild host-owned output paths');
+
+  await runStage({ engine: 'claude', stage: 'cold-review', prompt: 'p' });
+  assert.equal(seen.output, undefined, 'an omitted descriptor preserves the existing Claude backend contract');
 });
