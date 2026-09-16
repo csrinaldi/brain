@@ -315,9 +315,9 @@ lines**. Closes R967-5, R967-6, R967-9's resolver half.
       `git worktree list` and `git branch` are unchanged; the same command with
       `--off-tracker` says it went off tracker. Record the exact commands and
       output in apply-progress.
-- [ ] B6. Verify: `GIT_CONFIG_GLOBAL=/dev/null npm test` and
+- [x] B6. Verify: `GIT_CONFIG_GLOBAL=/dev/null npm test` and
       `npm run brain:repo:check` both green.
-- [ ] B7. `npm run memory:save -- "brain:ticket:start resolves its base from the
+- [x] B7. `npm run memory:save -- "brain:ticket:start resolves its base from the
       epic's declared tracker" "<summary of baseExplicit, the resolveBase leaf,
       the fail-open rule, --off-tracker and the six new i18n pairs landed in this
       PR>" --issue 967 --type decision`, staged with only the new
