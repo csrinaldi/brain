@@ -8,14 +8,15 @@
 // every tick, capped at 10 PRs, round-robin beyond the cap (`min(P,10)`).
 // Body lane: on the very first tick ever ("cold start"), every open issue,
 // uncapped — the page cannot render a graph at all otherwise, and this
-// happens exactly once per process. On every later tick, the body lane only
-// spends its budget when the fast lane's own rows say something moved:
-// brand-new issue numbers (same tick, capped at 20, so a new issue never
-// sits `unreadable`) plus issues whose fast-lane row changed, rounded out to
-// B = 5 total with the longest-unrefreshed issues. When NEITHER bucket has
-// anything — R881-4 S1 — the body lane costs nothing that tick; the
-// least-recently-refreshed fallback only rounds out an already-nonempty
-// batch, it never manufactures work alone.
+// happens exactly once per process. On every later tick the body lane spends
+// at most B = 5 calls in three priority buckets: brand-new issue numbers
+// (same tick, capped at 20, so a new issue never sits `unreadable`), then
+// issues whose fast-lane row changed, then the longest-unrefreshed issues.
+// That last bucket runs even when the first two are empty — it is what bounds
+// the staleness of body-only facts, which no list-level field can signal
+// (design.md Q1/D2 (c)). A brand-new number beyond the cap of 20 is queued,
+// not dropped: it has no previous row, so the "changed" test could never see
+// it again, and by the end of its own tick it has stopped being new.
 //
 // The body lane's TOTAL per tick is bounded at BODY_CAP + NEW_BODY_CAP (25)
 // even when every open issue changes in the same tick (a bulk label rename
@@ -108,15 +109,27 @@ export function createPoller({
     const numberSet = new Set(numbers);
     for (const n of pendingBodyRefresh) if (!numberSet.has(n)) pendingBodyRefresh.delete(n); // closed issues cannot be refreshed
 
-    const newNumbers = numbers.filter((n) => !previousIssues.has(n)).slice(0, NEW_BODY_CAP);
+    // (a) brand-new numbers, ascending, capped at NEW_BODY_CAP. The overflow
+    // of a bulk import is QUEUED, never dropped (judgment:cold-1, tracker PR
+    // #970): an overflow number has `prev === undefined`, so the `changed`
+    // loop below can never queue it, and by the end of this tick it is
+    // recorded in `previousIssues` and stops being new — without this queue
+    // its body would never be fetched at all and its node would render
+    // `UNREADABLE` forever. It is deliberately NOT spent this tick: (a)'s cap
+    // is NEW_BODY_CAP, so the overflow drains on the ticks that follow.
+    const allNew = numbers.filter((n) => !previousIssues.has(n)).sort((a, b) => a - b);
+    const newNumbers = allNew.slice(0, NEW_BODY_CAP);
     const newSet = new Set(newNumbers);
+    const deferred = new Set(allNew.slice(NEW_BODY_CAP));
+    for (const n of deferred) pendingBodyRefresh.add(n); // insertion order = FIFO drain order
+
+    // (b) numbers whose fast-lane row moved.
     for (const n of numbers) {
-      if (newSet.has(n)) continue;
+      if (newSet.has(n) || deferred.has(n)) continue;
       const prev = previousIssues.get(n);
       const row = issueRows.find((r) => r.number === n);
-      if (prev !== undefined && !rowsEqual(prev, row)) pendingBodyRefresh.add(n); // insertion order = FIFO drain order
+      if (prev !== undefined && !rowsEqual(prev, row)) pendingBodyRefresh.add(n);
     }
-    if (newNumbers.length === 0 && pendingBodyRefresh.size === 0) return []; // R881-4 S1: nothing moved, nothing fetched
 
     // The tick's total is bounded at BODY_CAP + NEW_BODY_CAP even when every
     // open issue changed at once — `changed` on its own has no cap, unlike
@@ -125,8 +138,15 @@ export function createPoller({
     // later tick (see the `.delete()` in `tick()` below, which only fires on
     // an actual successful fetch).
     const cap = BODY_CAP + NEW_BODY_CAP;
-    const changed = [...pendingBodyRefresh].slice(0, Math.max(cap - newNumbers.length, 0));
+    const changed = [...pendingBodyRefresh]
+      .filter((n) => !newSet.has(n) && !deferred.has(n))
+      .slice(0, Math.max(cap - newNumbers.length, 0));
 
+    // (c) the least-recently-refreshed catch-up. There is no early return
+    // above it: when nothing is new and nothing is pending this bucket is the
+    // ONLY thing the body lane does, and foreclosing it is what made the
+    // overflow of (a) unreachable forever. A number that has never been
+    // fetched has refresh tick -1 and therefore wins this ordering outright.
     const changedSet = new Set(changed);
     const remaining = Math.max(BODY_CAP - newNumbers.length - changed.length, 0);
     const rest = numbers

@@ -78,11 +78,30 @@ a UI control, and MUST expose a manual-refresh control that triggers exactly
 one poll on demand. The UI MUST show when the forge was last polled and
 whether polling is currently paused. A poll MUST NOT unconditionally re-fetch
 `issueView`/`prReviews` for every open issue/PR on every cycle (ruling 2); it
-MUST re-read only the issues/PRs the list-level data indicates moved.
+MUST re-read the issues/PRs the list-level data indicates moved, and beyond
+those MAY spend only a bounded least-recently-refreshed slice per cycle, so
+that the per-cycle cost never scales with the number of open issues.
 
-#### Scenario: unchanged issues cost nothing on the next poll
+**Amended 2026-09-16 (tracker PR #970 cold review).** This scenario read
+"unchanged issues cost nothing on the next poll — the second poll issues no
+per-issue `issueView` call for any of those N issues". That absolute reading
+foreclosed design.md Q1/D2's bucket (c), the least-recently-refreshed
+catch-up, and a body-only edit moves no list-level field, so a body the poller
+had never fetched could never be fetched again. The claim ruling 2 actually
+bought is *bounded*, not *zero*: N unchanged issues must not cost N calls.
+
+#### Scenario: unchanged issues cost a bounded poll, never one call each
 - **WHEN** N open issues are unchanged between two consecutive polls
-- **THEN** the second poll issues no per-issue `issueView` call for any of those N issues
+- **THEN** the second poll issues at most `B` per-issue `issueView` calls in
+  total, regardless of how large N is, and spends them on the
+  least-recently-refreshed bodies
+
+#### Scenario: a bulk import is never left unreadable
+- **WHEN** more issues appear between two polls than a single cycle's new-issue
+  cap allows
+- **THEN** the cycle stays inside its per-cycle bound, and every one of the new
+  issues has its body read within a bounded number of later cycles, even while
+  other issues keep changing
 
 #### Scenario: disable and manual poll
 - **WHEN** the operator disables polling

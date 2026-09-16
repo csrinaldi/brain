@@ -139,6 +139,30 @@ figure describes the *unforced*, least-recently-refreshed fallback only,
 which still uses `B = 5` as its per-tick share once the pending queue is
 empty).
 
+**Correction (2026-09-16, judgment:cold-1, cold review of tracker PR #970):**
+the implementation returned early — before bucket (c) ran at all — whenever
+nothing was new and nothing was pending, and it DROPPED the brand-new numbers
+beyond `NEW_BODY_CAP` instead of queueing them. Together those two made a
+bulk import permanently unreadable: an overflow number has no previous row, so
+the "changed" test can never see it, it stops being new at the end of its own
+tick, and with (c) foreclosed nothing else would ever reach it — measured, 20
+ticks after a 30-issue import, ten issues still had zero `issueView` calls and
+rendered `status: UNREADABLE` forever. The fix queues the overflow into the
+same FIFO pending set (ascending number, drained ahead of any churn that
+arrives later) and removes the early return, so (c) runs whenever the first
+two buckets leave it room.
+
+**The budget table is unchanged by this correction**, because it already
+priced bucket (c): the steady-state row is `2 + min(P,10) + B` = 10
+calls/tick, 600/h. What changed is that the implementation now actually spends
+that `B` every tick instead of spending 0 on a tick where no row moved — the
+reality moved up to the figure the design had always stated, not past it. The
+worst bounded case is still `2 + min(P,10) + 25 = 37` calls/tick: the overflow
+is queued, not spent in the same tick, so the new-issue bucket's ceiling
+remains `NEW_BODY_CAP = 20`. Spec R881-4's first scenario, which had read
+"unchanged issues cost nothing on the next poll", was amended to the bounded
+claim ruling 2 actually bought — at most `B` calls, never one per open issue.
+
 **Full-refresh latency of body-only facts**: `ceil(I / B)` ticks = `ceil(90/5)` =
 18 ticks = 18 minutes worst case *with no other signal*. A body edit that also
 moves a label, a title, or the PR list is picked up on the next tick through
