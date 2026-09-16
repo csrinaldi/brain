@@ -93,8 +93,11 @@ Base: `feature/issue-967` (the tracker). Estimated **65–85 counted source line
 ≈290 review lines**. Closes R967-1, R967-2, R967-3, R967-4, R967-9 scenario 1,
 and R967-10's "no `needs`-edge parent fallback" scenario.
 
-- [ ] A0. Amend `spec.md` per the nine reconciliation points above — first commit,
+- [x] A0. Amend `spec.md` per the nine reconciliation points above — first commit,
       artifact-only (`openspec/changes/**` is uncounted, `brain.config.json:18-29`).
+      Point 7 stated no count in `spec.md` to correct, so it landed as an added
+      `AND` clause under R967-1 scenario 2 naming the seven measured sites and
+      the no-weakening rule; `proposal.md`'s own count is outside PR A's fence.
 - [ ] A1a. `brain/scripts/status/epic-map.test.mjs`: add the D11 `graphShape()`
       helper (full shape, new keys at their defaults) and rewrite the **seven**
       `assert.deepEqual` sites — `:40`, `:91`, `:97`, `:103`, `:174`, `:180`,

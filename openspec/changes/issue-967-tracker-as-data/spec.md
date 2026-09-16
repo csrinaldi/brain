@@ -19,18 +19,26 @@ no requirement is satisfied by an empty result, a silent default, or a throw.
 | Key | Grammar | Absent |
 |---|---|---|
 | `kind` | a scalar; only the literal `epic` carries meaning | `null` |
-| `tracker` | MUST match `^feature/\S+$` | `null` |
+| `tracker` | MUST match `/^feature\/[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*$/` and MUST NOT contain `..` | `null` |
 | `parent` | a bare positive integer | `null` |
+
+Everything this requirement calls a **said divergence** MUST be said in a NEW
+channel, `declarationDivergences` — entries `{key, value, reason}` per body,
+lifted by `buildGraph` to `{number, key, value, reason}`. It MUST NOT reuse the
+graph's existing `divergences` array: that array carries `{from, to, only}`
+edge entries and is gated on a native relations read that the snapshot path
+never performs, so a declaration divergence routed through it would be
+invisible in exactly the surface that needs it.
 
 The node literal built by `buildGraph` MUST gain `kind`, `tracker`, `parent`
 and `parentSource`. Unknown keys MUST remain ignored — no key-schema
 validation is introduced anywhere. A `tracker:` declared on a node whose
 `kind` is not `epic` MUST be parsed and carried, MUST NOT be used for base
 resolution (R967-5) or by the gate (R967-7), and MUST be reported as a said
-divergence. A malformed `tracker:` or `parent:` value MUST NOT throw, MUST
-NOT be repaired, and MUST NOT fall back to a default: it yields `null` for
-that field plus a said divergence naming the issue number and the offending
-text.
+`declarationDivergences` entry. A malformed `tracker:` or `parent:` value MUST
+NOT throw, MUST NOT be repaired, and MUST NOT fall back to a default: it yields
+`null` for that field plus a said `declarationDivergences` entry naming the
+issue number and the offending text.
 
 #### Scenario: an epic declares all three
 - **WHEN** a body declares `kind: epic`, `tracker: feature/brain-ui` and `parent: 851` in its `brain-graph/1` block
@@ -39,6 +47,7 @@ text.
 #### Scenario: a body that declares none of them parses as today
 - **WHEN** a body's block declares only `track`, `blocks`, `needs` and `files`
 - **THEN** every pre-existing node field deep-equals the value it had before this change, and `kind`, `tracker`, `parent` and `parentSource` are all `null`
+- **AND** all **seven** `parseGraphBlock` full-shape assertions in `epic-map.test.mjs` (`:40`, `:91`, `:97`, `:103`, `:174`, `:180`, `:747-748` — measured, one more than the proposal listed) stay `assert.deepEqual` over the full expected shape: a stray key MUST still fail, so neither `partialDeepStrictEqual` nor per-key `assert.equal` may replace them
 
 #### Scenario: `track` and `tracker` do not collide
 - **WHEN** a block declares both `track: UI` and `tracker: feature/brain-ui`
@@ -63,17 +72,20 @@ text.
 ### R967-2: a parent read from prose, one hop, and said as such
 
 When the block declares no `parent:`, the reader MUST look for a
-**line-initial** `Parent: #<digits>` in the body — anchored at the start of a
-line, case as written, arbitrary prose allowed after the number. A block key
-MUST win over prose. The node MUST state where its parent came from in
-`parentSource` (`'block' | 'prose' | null`). `Epic: #N` MUST NOT be read as a
-synonym for `Parent: #N`. A match that is not line-initial, or more than one
-line-initial match, MUST yield no parent plus a said divergence — never a
+**line-initial** `Parent: #<digits>` in the body, matched with exactly
+`/^Parent:[ \t]*#(\d+)\b/m` — column zero, exact case, no leading-whitespace
+tolerance, arbitrary prose allowed after the number. A block key MUST win over
+prose, and when it does the prose line MUST NOT be read at all. The node MUST
+state where its parent came from in `parentSource` (`'block' | 'prose' |
+null`). `Epic: #N` MUST NOT be read as a synonym for `Parent: #N`. A line the
+regex does not match is simply not a declaration: it yields no parent and
+says nothing. More than one line-initial match with different numbers MUST
+yield no parent plus a said `declarationDivergences` entry — never a
 first-match-wins guess.
 
-#### Scenario: the block key wins and says so
+#### Scenario: the block key wins and the prose line is never read
 - **WHEN** a body declares `parent: 878` in the block and also carries a line-initial `Parent: #879`
-- **THEN** `node.parent` is `878`, `node.parentSource` is `'block'`, and a divergence names the disagreement between the block and the prose line
+- **THEN** `node.parent` is `878`, `node.parentSource` is `'block'`, and nothing is said — the block key is the declaration and the prose line is not a second one to disagree with
 
 #### Scenario: prose parent with trailing text
 - **WHEN** the block declares no `parent:` and the body carries a line starting `Parent: #864 (memory 2.0), task 1.2 (Wave 1).`
@@ -83,13 +95,13 @@ first-match-wins guess.
 - **WHEN** a body carries `Epic: #313` and no `Parent:` line and no block `parent:`
 - **THEN** `node.parent` and `node.parentSource` are `null`, and no epic number is inferred from the `Epic:` spelling
 
-#### Scenario: a mid-line match is refused and named
+#### Scenario: a mid-line match declares nothing, silently
 - **WHEN** a body carries `Issue: #337 — M10 Phase 3. Parent: #335. Epic: #313.` and no block `parent:`
-- **THEN** `node.parent` is `null` and a divergence quotes the line and states the parent must be line-initial to be read
+- **THEN** `node.parent` and `node.parentSource` are `null` and nothing is said — a line the regex does not match is not a malformed declaration, it is not a declaration
 
 #### Scenario: two line-initial matches are refused and named
 - **WHEN** a body carries two line-initial `Parent: #N` lines with different numbers
-- **THEN** `node.parent` is `null` and a divergence names both lines; neither wins
+- **THEN** `node.parent` is `null` and a `declarationDivergences` entry names the ambiguity; neither wins
 
 ### R967-3: the snapshot carries all four fields, and an unreadable node carries none
 
@@ -97,18 +109,19 @@ first-match-wins guess.
 `parentSource`. The hand-enumerated unreadable-node reset (`snapshot.mjs:211-212`)
 MUST null all four alongside `declared`, `track`, `files` and `sources`, so a
 node whose body could not be read never carries a tracker or a parent it never
-declared. The verb-versus-module parity assertion for these fields MUST run
-over a graph that has nodes — i.e. with an injected fake port, as
-`snapshot.test.mjs:133-215` does — not over a root with no VCS port, where the
-graph is not computed at all.
+declared. The parity assertion for these fields MUST run in
+`snapshot.test.mjs`, over a graph that has nodes — i.e. with an injected fake
+port, as `snapshot.test.mjs:133-215` does. `snapshot-cli.test.mjs` MUST NOT be
+touched: it runs with no VCS port and asserts the graph is not computed
+(`snapshot-cli.test.mjs:39`), so it never sees a node field at all.
 
 #### Scenario: the fields reach the snapshot
 - **WHEN** `buildSnapshot` runs against a fake port whose `issueView` returns an epic body declaring `kind: epic` and `tracker: feature/brain-ui`, and a child body carrying `Parent: #878`
 - **THEN** the epic's snapshot node carries `kind: 'epic'` and `tracker: 'feature/brain-ui'`, and the child's carries `parent: 878` and `parentSource: 'prose'`
 
-#### Scenario: verb JSON and module return are one shape, new fields included
-- **WHEN** `brain:snapshot --json` and an in-process `buildSnapshot()` run over the same fixture root, the same fake port and the same pinned clock
-- **THEN** the parsed JSON deep-equals the module's return value, including the four new node fields
+#### Scenario: the JSON form and the module return are one shape, new fields included
+- **WHEN** `snapshot.test.mjs` round-trips the fake-port snapshot through `JSON.parse(JSON.stringify(s))`
+- **THEN** it deep-equals the module's return value, the four new node fields included — none of them is a `Map`, an `undefined` or anything else JSON would drop on the way to the verb's `--json` output
 
 #### Scenario: an unreadable node declares nothing
 - **WHEN** `issueView` throws for an issue that is in the list
@@ -116,18 +129,21 @@ graph is not computed at all.
 
 ### R967-4: a parent that is not an epic is a said divergence, never an inference
 
-A node named as `parent` by another node that does not itself declare
-`kind: epic` MUST produce a said divergence in the graph's existing
-`divergences` output. It MUST NOT be inferred to be an epic, MUST NOT yield a
-tracker, and MUST NOT cause any gate to fail.
+A node named as `parent` by another node **that is present in the issue set**
+and does not itself declare `kind: epic` MUST produce a said entry in the
+graph's `declarationDivergences` output. It MUST NOT be inferred to be an
+epic, MUST NOT yield a tracker, and MUST NOT cause any gate to fail. A parent
+**absent** from the issue set MUST produce no entry: "not in this list" is not
+"not an epic", the same distinction `buildGraph` already makes for a native
+read it could not perform.
 
 #### Scenario: the parent declares no kind
-- **WHEN** node `#A` declares `parent: B` and node `#B` declares no `kind`
-- **THEN** a divergence names `#A` and `#B` and states `#B` does not declare `kind: epic`, `#B.kind` stays `null`, and no gate result changes because of it
+- **WHEN** node `#A` declares `parent: B`, node `#B` is in the issue set and declares no `kind`
+- **THEN** a `declarationDivergences` entry names `#A` and `#B` and states `#B` does not declare `kind: epic`, `#B.kind` stays `null`, and no gate result changes because of it
 
 #### Scenario: the parent is not in the graph at all
 - **WHEN** node `#A` declares `parent: 9999` and no node `#9999` is in the issue set
-- **THEN** `node.parent` stays `9999` and a divergence states the parent is not present in the graph; nothing throws and no tracker is resolved
+- **THEN** `node.parent` stays `9999`, no entry is added, nothing throws and no tracker is resolved — the parent may be closed or in another repository, and neither is a divergence to report
 
 ### R967-5: `brain:ticket:start` resolves the base from the epic, and fails open
 
@@ -241,7 +257,10 @@ epics: it reads at most the linked issue and its parent.
 The doctrine sentence naming the required-at-`lite` exception, the doctrine for
 the three new block keys, and the ratified tracker-PR timing ("opened when it
 has a diff; `stranded.mjs` reports it until then") MUST ship as drafts under
-`openspec/changes/issue-967-tracker-as-data/brain-drafts/`. Nothing in this
+`openspec/changes/issue-967-tracker-as-data/brain-drafts/` — **two** files, not
+three: the tracker-PR timing sentence rides inside the required-at-`lite`
+draft, because it targets the same doctrine file
+(`brain/core/methodology/workflow-governance.md`). Nothing in this
 change MUST be committed under `brain/core/**` or `brain/project/**`. The gate's
 tier row is code (`GATE_MATRIX`), not prose, and the change MUST NOT add a test
 that asserts a doctrine sentence the maintainer has not yet signed.
@@ -252,7 +271,7 @@ that asserts a doctrine sentence the maintainer has not yet signed.
 
 #### Scenario: the drafts exist and say the exception
 - **WHEN** `openspec/changes/issue-967-tracker-as-data/brain-drafts/` is read
-- **THEN** it contains a draft naming the `base-branch` required-at-`lite` exception, a draft for the `kind`/`tracker`/`parent` keys, and the settled tracker-PR timing
+- **THEN** it contains exactly two files: one naming the `base-branch` required-at-`lite` exception and carrying the settled tracker-PR timing, and one for the `kind`/`tracker`/`parent` keys
 
 #### Scenario: the tier is derived from code
 - **WHEN** the required-job set for tier `lite` is computed
