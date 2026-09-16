@@ -26,13 +26,13 @@ paragraph is stale on two counts:
 The fix already exists as a draft on `main`:
 `openspec/changes/issue-962-release-gate-deny-reader/brain-drafts/deny-readers-roster-sixth.draft.md`.
 Its contract says `issue: 962`, which is now CLOSED — the issue-link gate
-needs an open, approved issue — so the draft moves under #976 (opened for
+needs an open, approved issue — so the draft is copied under #976 (opened for
 exactly this promotion) rather than being re-targeted at a closed issue.
 
 ## Scope
 
 - Create this change folder (`openspec/changes/issue-976-evidence-reader-roster/`)
-  carrying the moved draft, with `issue: 976` in its contract and a preamble
+  carrying the copied draft, with `issue: 976` in its contract and a preamble
   that is true as of this branch (off `origin/main`, 2026-09-16): #962 closed,
   PR #969 merged and fixed `brain-audit.mjs`, and the known gap #975 tracks
   (a non-object config shape still degrading DENY readers) is noted as OPEN
@@ -45,7 +45,10 @@ exactly this promotion) rather than being re-targeted at a closed issue.
   maintainer promotes it out of band.
 - No edits to the `openspec/changes/issue-962-release-gate-deny-reader/`
   folder — its draft stays as a historical record of what #962's own apply
-  batch produced; this change does not touch it.
+  batch produced; this change does not touch it. After this promotion lands,
+  that copy still reads "Not yet promoted" and its own promote command would
+  refuse (`assessEdit` reports `done`, `free: 0`, because the anchor no longer
+  occurs), which is the intended end state for a historical draft.
 
 Out of scope: fixing the non-object-config-shape gap (#975) — that is a
 separate, still-open issue and this paragraph does not claim it is fixed.
@@ -88,7 +91,7 @@ a different reader category the doc's "Applied at" paragraph does not cover:
 
 | File | What it reads | Failure behavior |
 |---|---|---|
-| `brain/scripts/governance/lane-scrub.mjs:171-179` | `governance.memorySecret*` via `readConfig()` | `try { … } catch (err) { return { verdict: 'uncomputable', reason: '… failing closed (uncomputable): …' } }` — explicit, named, fail-closed |
+| `brain/scripts/governance/lane-scrub.mjs:171-182` | `governance.memorySecret*` via `readConfig()` | `try { config = readConfig(); } catch (err) { … }` builds `{ pass: false, uncomputable: true, reason: 'lane-scrub: cannot read the secret config — failing closed (uncomputable): …' }`, logs the reason and returns `resultToExit(result)` — explicit, named, fail-closed |
 | `brain/scripts/memory/backends/engram.mjs` (secret-scrub config reader) | same keys | Same category — not an actor list |
 | `brain/scripts/memory/backends/plainfiles.mjs` (secret-scrub config reader) | same keys | Same category — not an actor list |
 

@@ -9,7 +9,7 @@
   code changes. No edits to `brain/core/**`, `brain/project/**`,
   `brain/HOME.md`, or `AGENTS.md`.
 
-## Phase 1: Move and update the draft
+## Phase 1: Copy and update the draft
 
 - [x] 1.1 Create `openspec/changes/issue-976-evidence-reader-roster/` with
       `brain-drafts/`.
@@ -70,7 +70,7 @@
 
 ## Phase 5: Commit + record
 
-- [x] 5.1 Commit the moved/updated draft plus the SDD docs
+- [x] 5.1 Commit the copied, updated draft plus the SDD docs
       (`proposal.md`, `spec.md`, `tasks.md`, `apply-progress.md`) as one or
       two work units citing `#976`.
 - [x] 5.2 Record-first commit:

@@ -9,7 +9,7 @@ issue: 976
 
 ### Requirement: the draft carries an open, approved issue link
 
-#### Scenario: the moved draft's contract
+#### Scenario: the copied draft's contract
 - **WHEN** the `brain-amendment/1` contract in `deny-readers-roster-sixth.draft.md` is parsed
 - **THEN** its `target` is `brain/core/anti-patterns/evidence-reader-empty-on-failure.md` and its `issue` is `976` (an OPEN, `status:approved` issue), not `962` (CLOSED)
 
