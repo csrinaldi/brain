@@ -79,7 +79,8 @@ Throwaway script (never committed):
 `/tmp/claude-1000/-home-gandalf-IA-brain/71e1249b-9491-4e33-857a-096458f6eeb2/scratchpad/sim-roster-976.mjs`,
 importing `parseAmendmentDraft`, `assessEdit`, `applyEdits` directly from the
 real `brain/scripts/lib/amendment-draft.mjs`, reading the real draft and the
-real target file on disk. `brain:promote` was never invoked.
+real target file on disk. This apply batch never invoked `brain:promote`; the
+maintainer ran it afterwards (`4310d1b1`).
 
 ```
 parse: ok
@@ -118,7 +119,7 @@ Only lines 90-103 differ (the "Applied at" paragraph, which grows from 9 to
 104-line file — including the "Exemption" paragraph above it and everything
 before line 88 — is byte-identical before and after.
 
-## Promote command (for the maintainer — never run by this change)
+## Promote command (run by the maintainer, `4310d1b1`; never by this apply batch)
 
 ```
 npm run brain:promote -- openspec/changes/issue-976-evidence-reader-roster/brain-drafts/deny-readers-roster-sixth.draft.md
@@ -135,21 +136,19 @@ Computed by a throwaway script (`subject-check.mjs`) calling the real
 docs(brain): amend brain/core/anti-patterns/evidence-reader-empty-on-failure.md (#976)
 ```
 
-## What the maintainer must check after promoting
+## Checked after the promotion (`4310d1b1`)
 
-1. The promoted file is **byte-identical** to the simulated result above —
-   diff the post-promote `evidence-reader-empty-on-failure.md` against
-   `/tmp/.../scratchpad/simulated-result.md` (or re-run the simulation
-   script against the post-promote tree; it should report `cascadeComplete`
-   / every act `done`, not `pending`).
-2. The `AGENTS.md` drift test is green (`node --test` on whichever test
-   covers `AGENTS.md` regeneration — this change never touches `AGENTS.md`,
-   so it should already be green before and after promotion).
-3. Full suite green: `GIT_CONFIG_GLOBAL=/dev/null npm test`.
+1. The promoted paragraph is **byte-identical** to the simulated result: the
+   14-line paragraph in `evidence-reader-empty-on-failure.md` occurs verbatim
+   inside the adversarial review's `simulated-result.md`. The promotion touched
+   one file, 14 insertions and 9 deletions.
+2. `AGENTS.md` and `brain/HOME.md` are untouched, as a non-ADR target requires,
+   and the drift test is green.
+3. Full suite after the promotion: **5361 pass / 0 fail**.
 4. `npm run brain:repo:check` clean.
-5. The promotion commit itself should NOT be authored by this SDD change —
-   `brain:promote` stages and the maintainer commits, per the hard
-   constraint that this change never runs `brain:promote`.
+5. The promotion commit is the maintainer's: `brain:promote` staged and the
+   maintainer committed. No agent ran the verb, per the hard constraint on this
+   apply batch.
 
 ## Suite baseline (this change, before any promotion)
 
@@ -176,14 +175,16 @@ were modified.
 None — the task's instructions map directly onto the scope above.
 
 ## Issues found
-None beyond the doctrine staleness the issue itself flagged (addressed by
-moving/updating the draft, per the hard constraint never to promote it).
+None beyond the doctrine staleness the issue itself flagged, which the copied
+draft corrects. The apply batch itself never promoted it, per the hard
+constraint; the maintainer did.
 
 ## Risks
-- The draft remains UNAPPLIED. `evidence-reader-empty-on-failure.md`'s
-  roster paragraph reads as stale until a human runs `brain:promote` on it —
-  deliberate, per the hard constraint never to run `brain:promote` or edit
-  `brain/core/**` directly.
+- The paragraph is now promoted (`4310d1b1`), so nothing about it reads as
+  stale. The cold review of `4310d1b1` then found a memory record whose title
+  said "move" where its body said "Copied"; that record had not reached `main`,
+  so it was dropped (`4a0da8e9`) and saved again as `rec-4f9ec48022e3ca14`
+  (`fbd067c4`).
 - Issue #975's gap (non-object config shape) is unrelated and unfixed;
   anyone reading this paragraph in isolation should not assume it covers
   that case.
@@ -192,9 +193,15 @@ moving/updating the draft, per the hard constraint never to promote it).
 None. All tasks in `tasks.md` complete.
 
 ## Status
-All tasks complete. Commits: `ea8c9cdc` (SDD docs + the copied, updated draft),
-`3c74332a` (record this file's own SHA), `26c47e9c` (record-first commit,
-record `rec-8573584eb01dc8bf`), `44471a4d` (note the SHAs). A pre-promotion
-adversarial review then verdicted PROMOTE-READY and corrected three statements
-in this folder: a fabricated `lane-scrub.mjs` code quote, "moved" where the
-draft was copied, and a shell transcript that was never run.
+Promoted; the PR is open for review. Commits, in order: `ea8c9cdc` (SDD docs
+plus the copied, updated draft), `3c74332a` and `44471a4d` (record the SHAs),
+`26c47e9c` (the first record-first commit), `4f419ee2` (the pre-promotion
+adversarial review's three corrections: a fabricated `lane-scrub.mjs` code
+quote, "moved" where the draft was copied, and a shell transcript that was
+never run), `4310d1b1` (the maintainer's promotion), `4a0da8e9` (drop the
+unmerged record whose title said "move") and `fbd067c4` (the record that
+stands, `rec-4f9ec48022e3ca14`).
+
+`rec-8573584eb01dc8bf` does not exist at HEAD: it was dropped in `4a0da8e9`,
+before ever reaching `main`, because a record is never rewritten in place
+(ADR-0017).

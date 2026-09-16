@@ -49,8 +49,8 @@ issue: 976
 - **WHEN** the draft's preamble and this change's proposal describe `loadBrainConfigOrThrow`'s remaining gap (JSON that parses but is not an object)
 - **THEN** they cite issue #975 as OPEN and unfixed, and do not claim PR #969 or this draft closes it
 
-### Requirement: brain:promote is never invoked by this change
+### Requirement: no agent invokes brain:promote
 
-#### Scenario: promotion left to the maintainer
+#### Scenario: promotion is the maintainer's act
 - **WHEN** this change's apply batch runs
-- **THEN** no `npm run brain:promote` invocation occurs; the promotion command is recorded in `proposal.md`/`apply-progress.md` for the maintainer to run
+- **THEN** no `npm run brain:promote` invocation occurs; the promotion command is recorded in `proposal.md`/`apply-progress.md`, and the maintainer alone runs it — on this branch, as commit `4310d1b1`

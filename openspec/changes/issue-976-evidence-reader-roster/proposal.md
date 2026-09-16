@@ -40,9 +40,10 @@ exactly this promotion) rather than being re-targeted at a closed issue.
 - Verify every reader the rewritten paragraph names against source, with
   file:line, before trusting the draft's claims — see "Reader classification"
   below.
-- No edits to `brain/core/**`, `brain/project/**`, `brain/HOME.md`, or
-  `AGENTS.md` (hard constraint) — the doctrine fix stays a draft only. The
-  maintainer promotes it out of band.
+- No agent edits `brain/core/**`, `brain/project/**`, `brain/HOME.md`, or
+  `AGENTS.md` (hard constraint): the apply batch produced a draft and nothing
+  else. The maintainer then ran `brain:promote` on this branch, and that
+  promotion is commit `4310d1b1` in this PR.
 - No edits to the `openspec/changes/issue-962-release-gate-deny-reader/`
   folder — its draft stays as a historical record of what #962's own apply
   batch produced; this change does not touch it. After this promotion lands,
@@ -109,7 +110,7 @@ Issue #975 (OPEN, `status:approved`) tracks this; it is NOT fixed by PR #969
 or by this draft. The draft's preamble notes this explicitly so a future
 reader does not assume the roster paragraph covers it.
 
-## Promotion (never run by this change)
+## Promotion (run by the maintainer, `4310d1b1`)
 
 ```
 npm run brain:promote -- openspec/changes/issue-976-evidence-reader-roster/brain-drafts/deny-readers-roster-sixth.draft.md
@@ -118,5 +119,7 @@ npm run brain:promote -- openspec/changes/issue-976-evidence-reader-roster/brain
 Proven to parse and assess as `pending`, `free: 1` against the real target
 file with a throwaway script that imports the real
 `brain/scripts/lib/amendment-draft.mjs` (see `apply-progress.md` for the
-run and the simulated-result diff). `brain:promote` was never invoked by
-this change — that is the maintainer's step.
+run and the simulated-result diff). No agent invoked `brain:promote`: the
+maintainer ran the command above on this branch after a pre-promotion
+adversarial review verdicted PROMOTE-READY, and the promoted file is
+byte-identical to the simulated result.
