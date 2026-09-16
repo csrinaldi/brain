@@ -284,6 +284,79 @@ test('T3: loadBrainConfigOrThrow — config path is a directory → throws "coul
   );
 });
 
+// ── loadBrainConfigOrThrow shape check (issue #975) ──────────────────────────
+//
+// The parse can succeed on JSON that is not a plain object; every caller
+// reads through optional chaining, so a non-object value used to degrade
+// exactly like `{}` — the #942 class reached through a shape gap instead of
+// a parse error. `null`, `[]`, `42`, `"x"` must all throw, naming the path
+// and the JSON type found; absence and a valid object are unchanged.
+
+test('T4: loadBrainConfigOrThrow — brain.config.json is `null` → throws, names the path and "got null"', () => {
+  const dir = testTmp('brain-config-shape-');
+  writeFileSync(join(dir, 'brain.config.json'), 'null');
+  assert.throws(
+    () => loadBrainConfigOrThrow(dir),
+    (err) => {
+      assert.match(err.message, /brain\.config\.json/, 'names the file');
+      assert.match(err.message, new RegExp(dir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), 'names the path');
+      assert.match(err.message, /must contain a JSON object/, 'names the failure kind');
+      assert.match(err.message, /got null/, 'names the type found');
+      return true;
+    },
+  );
+});
+
+test('T5: loadBrainConfigOrThrow — brain.config.json is `[]` → throws "got array"', () => {
+  const dir = testTmp('brain-config-shape-');
+  writeFileSync(join(dir, 'brain.config.json'), '[]');
+  assert.throws(
+    () => loadBrainConfigOrThrow(dir),
+    (err) => {
+      assert.match(err.message, /must contain a JSON object/);
+      assert.match(err.message, /got array/);
+      return true;
+    },
+  );
+});
+
+test('T6: loadBrainConfigOrThrow — brain.config.json is `42` → throws "got number"', () => {
+  const dir = testTmp('brain-config-shape-');
+  writeFileSync(join(dir, 'brain.config.json'), '42');
+  assert.throws(
+    () => loadBrainConfigOrThrow(dir),
+    (err) => {
+      assert.match(err.message, /must contain a JSON object/);
+      assert.match(err.message, /got number/);
+      return true;
+    },
+  );
+});
+
+test('T7: loadBrainConfigOrThrow — brain.config.json is `"x"` → throws "got string"', () => {
+  const dir = testTmp('brain-config-shape-');
+  writeFileSync(join(dir, 'brain.config.json'), '"x"');
+  assert.throws(
+    () => loadBrainConfigOrThrow(dir),
+    (err) => {
+      assert.match(err.message, /must contain a JSON object/);
+      assert.match(err.message, /got string/);
+      return true;
+    },
+  );
+});
+
+test('T8: loadBrainConfigOrThrow — no file at all → still returns {} (unchanged by the shape check, R11)', () => {
+  const dir = testTmp('brain-config-shape-');
+  assert.deepEqual(loadBrainConfigOrThrow(dir), {});
+});
+
+test('T9: loadBrainConfigOrThrow — a valid object → still returns the parsed object unchanged', () => {
+  const dir = testTmp('brain-config-shape-');
+  writeFileSync(join(dir, 'brain.config.json'), JSON.stringify({ governance: { reviewActors: ['bot'] } }));
+  assert.deepEqual(loadBrainConfigOrThrow(dir), { governance: { reviewActors: ['bot'] } });
+});
+
 test('ensureBrainConfig: no origin (null host) → creates file but empty provider/host/slug', () => {
   const dir = mkdtempSync(join(tmpdir(), 'brain-ensure-'));
   try {

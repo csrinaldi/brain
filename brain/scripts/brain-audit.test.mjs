@@ -2106,6 +2106,36 @@ test('#962: unparseable brain.config.json fails the release gate closed, naming 
     `the failure must name WHY (loadBrainConfigOrThrow's message), not a generic error:\n${r.stdout}`);
 });
 
+// ── Config-shape failure — the #942 class through a shape gap (issue #975) ──
+//
+// `loadBrainConfigOrThrow` used to return whatever `JSON.parse` produced,
+// with no check that it was a plain object. `loadConfig(cwd)` (`:181`) feeds
+// that value straight to `governance.reviewActors` (`:370`) via optional
+// chaining, so `null`, `[]`, or `42` degraded exactly like `{}` — nobody
+// excluded, the PERMISSIVE answer in a DENY direction. A source-level
+// fixture test (a temp repo, never the real clone), same shape as the #962
+// test above: a genuinely-empty range means `loadConfig`'s throw is the ONLY
+// thing that can flip this assertion.
+test('#975: a non-object brain.config.json ([]) fails the release gate closed, naming the type found', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-config-shape-'));
+  t.after(() => removeTempTree(dir));
+
+  const git = makeRepo(dir);
+  commit(git, dir, { 'README.md': 'init' }, 'chore: initial (#0)');
+  commit(git, dir, { 'brain.config.json': '[]' }, 'chore: non-object config');
+
+  const r = spawnSync('node', [AUDIT_SCRIPT, 'HEAD..HEAD'], { cwd: dir, encoding: 'utf8' });
+
+  assert.notEqual(r.status, 0,
+    `a non-object brain.config.json must not read as a clean release gate:\n${r.stdout}\n${r.stderr}`);
+  assert.match(r.stdout, /brain\.config\.json/,
+    `the failure must name the config as the cause:\n${r.stdout}`);
+  assert.match(r.stdout, /must contain a JSON object/,
+    `the failure must name WHY (loadBrainConfigOrThrow's shape-check message):\n${r.stdout}`);
+  assert.match(r.stdout, /got array/,
+    `the failure must name the JSON type found:\n${r.stdout}`);
+});
+
 test('#962: no brain.config.json at all — behaviour unchanged (ENOENT still resolves to {}, R11)', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'audit-config-absent-'));
   t.after(() => removeTempTree(dir));
