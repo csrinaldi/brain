@@ -5,7 +5,7 @@ Applied (see `apply-progress.md`).
 
 ## Intent
 
-`loadBrainConfigOrThrow` (`brain/scripts/lib/brain-config.mjs:77-91`) already
+`loadBrainConfigOrThrow` (`brain/scripts/lib/brain-config.mjs:77-91` pre-fix) already
 distinguishes ABSENCE (`ENOENT` → `{}`) from UNREADABILITY/UNPARSEABILITY
 (any other read failure, or a `JSON.parse` failure → throws) — issue #942's
 fix. It never checked that the parsed value is a plain object, though: a
@@ -98,9 +98,10 @@ acceptance criteria's explicit minimum. The other eight are not
 independently re-driven through their own CLI/pipeline entry points in this
 change (scope discipline — the issue's acceptance criteria names exactly
 `brain-audit.mjs` and `approve/cli.mjs`), but the shape check protecting
-them is the same nine loader-level tests (`T4`-`T7` for `null`/`[]`/`42`/`"x"`,
-`T8`-`T9` for the unchanged absence/valid-object cases) plus `T1`-`T3`
-(pre-existing) — the mutation table below shows reverting the shape check
+them is the same six loader-level tests (`T4`-`T9`: `T4`-`T7` for
+`null`/`[]`/`42`/`"x"`, `T8`-`T9` for the unchanged absence/valid-object
+cases) plus `T1`-`T3` (pre-existing) — nine loader-level tests in total —
+the mutation table below shows reverting the shape check
 turns every one of the eight new tests red and nothing else, confirming the
 fix is isolated to the one shared primitive every call site imports.
 
@@ -115,7 +116,11 @@ contract for its callers, which correctly read any throw as "absent."
 
 **Decision: leave it unchanged.** Its callers were re-derived from source
 (`rg -n "loadBrainConfig\\(" brain/scripts`, excluding the `Or Throw`
-variant and comment-only matches):
+variant and comment-only matches): **22 call sites across 18 files — 19
+direct invocations plus 3 by-reference defaults**, where the function
+itself is passed as a default value rather than being called directly
+(`governance/approved-label.mjs:54`, `review/evaluators/tranche.mjs:323`,
+`memory/session-end-ship.mjs:131`):
 
 | Caller | File:Line | Reads | Category |
 |---|---|---|---|
@@ -138,14 +143,14 @@ variant and comment-only matches):
 | `vcs/governance-tiers.mjs` | `:520` | `governance.tier` via `resolveTier()` | **Doctrine-ratified fixed fallback** (`evidence-reader-empty-on-failure.md`'s own "Exemption" paragraph) — not a deny/allow reader at all |
 | `vcs/phase-order-check.mjs` | `:487-493` (`defaultReadConfig`) | whole config for `resolveTier()` | Already wraps the call in `try { … } catch { return {}; }` |
 
-No caller of `loadBrainConfig()` reads a DENY/exclusion identity list
-(`governance.reviewActors`, `governance.agentActors`, or
-`governance.approvalActors` — all three are read exclusively through
-`loadBrainConfigOrThrow`'s ten call sites above). The two callers with the
-widest blast radius if left unguarded (`run-check.mjs`,
+No `loadBrainConfig()` caller reads a DENY/exclusion identity list. Two
+ALLOW-direction readers in `actor-check.mjs` (`:1059-1067`, `:1148-1157`)
+read `approvalActors`/`agentActors` through their own guarded
+`readFileSync`, outside this loader, and are unaffected. The two callers
+with the widest blast radius if left unguarded (`run-check.mjs`,
 `phase-order-check.mjs`) already wrap the call in a local
 `try { … } catch { return {}; }`, so a shape check added here would only
-change ONE observable case across all seventeen call sites: a top-level
+change ONE observable case across all 22 call sites: a top-level
 `null` value stops crashing with an unguarded `TypeError` on the caller's
 first `.` access (every other rejected shape — `[]`, `42`, `"x"` — already
 degrades silently via property access returning `undefined`, exactly as
@@ -159,10 +164,18 @@ absence/malformation.
 `brain-drafts/loader-shape-gap-closed.draft.md` — a `brain-amendment/1` draft
 targeting `brain/core/anti-patterns/evidence-reader-empty-on-failure.md`,
 anchored on the paragraph text AS IT WILL STAND after PR #980 (issue #976)
-merges — **PR #980 is still open at the time of this change**; the anchor
-text below was read directly from `gh pr diff 980`, not assumed. #980's own
-PR description names this exact gap explicitly: "Known gap, not closed
-here… That is #975, open and approved." Once #975 (this change) lands, that
+merges — **PR #980 was open at the time the anchor text was drafted** (read
+directly from `gh pr diff 980`, not assumed); it has since **merged** into
+`origin/main` at `0dfac874` (2026-09-16T13:07:59Z), on top of `dd3ace05`,
+the exact commit this branch forked from. `git show
+origin/main:brain/core/anti-patterns/evidence-reader-empty-on-failure.md`
+confirms the merged paragraph matches the draft's anchor text verbatim.
+This branch itself has not been rebased past `dd3ace05`, so the doctrine
+file in this worktree still predates #980 — the draft therefore still
+assesses `blocked` here (see `apply-progress.md`); it will assess `pending`
+once this branch or its target rebases past #980's merge. #980's own PR
+description names this exact gap explicitly: "Known gap, not closed here…
+That is #975, open and approved." Once #975 (this change) lands, that
 "known gap" framing is stale — the draft appends one sentence recording that
 the shape gap is now closed, without touching anything #980 changed. See
 the draft file for the full contract; it is NOT promoted by this change

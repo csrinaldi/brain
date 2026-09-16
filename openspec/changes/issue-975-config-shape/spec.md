@@ -1,5 +1,5 @@
 ---
-status: applying
+status: verified
 issue: 975
 ---
 
@@ -48,5 +48,5 @@ issue: 975
 ### Requirement: `loadBrainConfig()` is unchanged
 
 #### Scenario: no caller of the legacy loader needs the shape check
-- **WHEN** any of `loadBrainConfig()`'s seventeen call sites reads a non-object config
+- **WHEN** any of `loadBrainConfig()`'s twenty-two call sites (across eighteen files) reads a non-object config
 - **THEN** behaviour is exactly as before this change — no DENY/exclusion-list caller exists for this function, so extending the shape check to it is out of scope (see `proposal.md`'s classification table)

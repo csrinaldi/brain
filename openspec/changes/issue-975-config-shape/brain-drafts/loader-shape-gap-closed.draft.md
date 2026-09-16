@@ -1,4 +1,4 @@
-# The #975 fix closes the shape gap the #980/#976 paragraph still calls open — draft (issue #975)
+# The #975 fix closes the shape gap #980's PR description names as open — draft (issue #975)
 
 > **Tier 2 draft. Not yet promoted.** `evidence-reader-empty-on-failure.md` is a
 > non-ADR anti-pattern doc, so this is an in-place edit under §1c's shape minus
@@ -9,8 +9,11 @@
 > ```
 >
 > **Why.** PR #980 (issue #976, OPEN at the time this draft was written —
-> verified via `gh pr view 980` / `gh pr diff 980`, not assumed) rewrites the
-> "Applied at" paragraph to name six DENY-direction readers as readers that
+> verified via `gh pr view 980` / `gh pr diff 980`, not assumed; #980 has
+> since **merged** into `origin/main` at `0dfac874`, and `git show
+> origin/main:brain/core/anti-patterns/evidence-reader-empty-on-failure.md`
+> confirms the merged text matches the anchor below verbatim) rewrites the
+> "Applied at" paragraph to name six readers as readers that
 > "stopped swallowing a config-read **failure**" — a true statement, and
 > exactly what #969/#962 fixed. #980's own PR description says explicitly:
 > "`loadBrainConfigOrThrow` still accepts JSON that parses but is not an
@@ -28,12 +31,16 @@
 >    the doctrine file (not the PR description, which is not doctrine) sees
 >    the closure.
 >
-> **Ordering — this draft cannot apply before #980 does.** The `amend-find`
-> block is the POST-#980 paragraph text. `assessEdit` against the file as it
-> stands NOW (pre-#980, still on `origin/main` at the time of this draft)
-> reports the anchor NOT FOUND — proven below in `apply-progress.md`, not
-> assumed. Promoting this draft before #980 merges is a no-op refusal, not a
-> silent corruption; promoting it after #980 merges is the intended use.
+> **Ordering — this draft cannot apply before this branch includes #980.**
+> The `amend-find` block is the POST-#980 paragraph text. #980 has merged
+> into `origin/main` (`0dfac874`), but this branch forked from `dd3ace05`
+> (#980's parent) and has not been rebased past it, so its copy of the
+> doctrine file is still the PRE-#980 text. `assessEdit` against that file
+> as it stands in this worktree reports the anchor NOT FOUND — proven below
+> in `apply-progress.md`, not assumed. Promoting this draft before the
+> target file includes #980 is a no-op refusal, not a silent corruption;
+> promoting it once the target rebases past #980 (or after this branch
+> merges and a fresh worktree picks up `origin/main`) is the intended use.
 > `brain:promote` was never invoked for this draft.
 
 ```brain-amendment/1
@@ -78,7 +85,7 @@ failure degrades to the ratified constant `'status:approved'`
 `governance-tiers.mjs`'s `resolveTier` (the Exemption paragraph above), not
 an empty-list exemption. Issue #975 closed a second failure mode on the same
 loader: JSON that parses but is not a plain object (`null`, an array, a
-number, a string) used to degrade exactly like `{}`, the same fail-open one
+number, a string) used to degrade exactly like `{}`, the same fail-open, one
 shape gap removed from a read failure. `loadBrainConfigOrThrow` now throws
 on that shape too, naming the path and the JSON type found, so every reader
 named above propagates it the same way it already propagates a read/parse

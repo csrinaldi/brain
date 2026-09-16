@@ -26,7 +26,7 @@
 - [x] 3.1 List every `loadBrainConfigOrThrow` call site (measured via `rg`, not assumed from the issue's non-exhaustive evidence list) with key, direction, and how it is proven — written into `proposal.md`.
 - [x] 3.2 Classify `loadBrainConfig()` (issue #975, Expected item 3) for the same gap. Re-derive its full caller list from source, classify each, and record the decision (leave unchanged, with justification) in `proposal.md`.
 - [x] 3.3 Draft (never promote) `brain-drafts/loader-shape-gap-closed.draft.md`, anchored on the doctrine paragraph text as it will stand after PR #980 (issue #976) merges — read directly from `gh pr diff 980`, not assumed.
-- [x] 3.4 Prove the draft parses and its edit assesses as `pending` against the CURRENT (pre-#980) doctrine text with a throwaway script, and note explicitly that the anchor will only match after #980 merges (so promotion, if ever done, must wait).
+- [x] 3.4 Prove the draft parses and its edit assesses as `blocked` against the CURRENT (pre-#980) doctrine text and `pending` against a simulated post-#980 text, with a throwaway script, and note explicitly that the anchor will only match after #980 merges (so promotion, if ever done, must wait).
 
 ## Phase 4: Verification
 

@@ -12,7 +12,7 @@ Strict TDD — `GIT_CONFIG_GLOBAL=/dev/null npm test` (node --test).
 - [x] 2.1 GREEN — `isPlainObject`/`describeJsonType` helpers + shape check added to `loadBrainConfigOrThrow`
 - [x] 2.2 Confirmed GREEN (below)
 - [x] 3.1 Every `loadBrainConfigOrThrow` call site listed (10, not the issue's non-exhaustive 6) — table below, mirrors `proposal.md`
-- [x] 3.2 `loadBrainConfig()` classified — 17 call sites, none DENY-direction, decision: leave unchanged — table below, mirrors `proposal.md`
+- [x] 3.2 `loadBrainConfig()` classified — 22 call sites across 18 files (19 direct invocations plus 3 by-reference defaults), none DENY-direction, decision: leave unchanged — table below, mirrors `proposal.md`
 - [x] 3.3 Doctrine draft written (`brain-drafts/loader-shape-gap-closed.draft.md`), anchored on the doctrine paragraph text as `gh pr diff 980` shows it landing
 - [x] 3.4 Draft proven: parses; `assessEdit` against the REAL current (pre-#980) file returns `blocked` (anchor not found, ordering-safe); against a simulated post-#980 file (built by applying #980's own diff in memory, never written to disk) returns `pending`
 - [x] 4.1 Mutation table (below)
@@ -71,11 +71,12 @@ explicit minimum ("at least `brain-audit.mjs` and `approve/cli.mjs`").
 
 ## `loadBrainConfig()` classification (Expected item 3)
 
-Full 17-row caller table in `proposal.md`. Summary: no caller reads a
-DENY/exclusion identity list (`governance.reviewActors`/`agentActors`/
-`approvalActors` — all three are read exclusively through
-`loadBrainConfigOrThrow`'s ten call sites above, never through
-`loadBrainConfig()`). `governance/run-check.mjs:172-178` and
+Full 18-row caller table (22 call sites — 19 direct invocations plus 3
+by-reference defaults) in `proposal.md`. Summary: no `loadBrainConfig()`
+caller reads a DENY/exclusion identity list. Two ALLOW-direction readers in
+`actor-check.mjs` (`:1059-1067`, `:1148-1157`) read
+`approvalActors`/`agentActors` through their own guarded `readFileSync`,
+outside this loader, and are unaffected. `governance/run-check.mjs:172-178` and
 `vcs/phase-order-check.mjs:487-493` already wrap the call in
 `try { … } catch { return {}; }`; `i18n/t.mjs:18` wraps it in its own
 `try/catch`; `governance/approved-label.mjs` degrades to a ratified constant
@@ -95,9 +96,18 @@ malformation, unchanged") to cover shape as well.
 `brain-drafts/loader-shape-gap-closed.draft.md` — a `brain-amendment/1` draft
 targeting `brain/core/anti-patterns/evidence-reader-empty-on-failure.md`,
 anchored on the "Applied at" paragraph text AS IT WILL STAND after PR #980
-(issue #976) merges — **#980 is still OPEN** at the time of this change
-(verified via `gh pr view 980`). #980's own PR description names this exact
-gap: "`loadBrainConfigOrThrow` still accepts JSON that parses but is not an
+(issue #976) merges — **#980 was open when the anchor text was drafted**;
+it has since **merged** into `origin/main` at `0dfac874`
+(2026-09-16T13:07:59Z, `gh pr view 980` confirms `state: MERGED`), on top of
+`dd3ace05`, the exact commit this branch forked from. `git show
+origin/main:brain/core/anti-patterns/evidence-reader-empty-on-failure.md`
+confirms the merged paragraph matches the draft's anchor text verbatim, so
+the draft was anchored correctly even though the PR was still open at the
+time. This branch has not been rebased past `dd3ace05`, so its doctrine
+file still predates #980 — the draft still assesses `blocked` against it
+(below); it will assess `pending` once this branch or its target rebases
+past #980's merge. #980's own PR description names this exact gap:
+"`loadBrainConfigOrThrow` still accepts JSON that parses but is not an
 object … That is #975, open and approved" — a "known gap, not closed here"
 framing that becomes stale once #975 lands. The draft appends one sentence
 to the promoted paragraph recording the closure, without touching anything
@@ -137,6 +147,28 @@ text was built by applying #980's own diff (read verbatim via
 not already present. The script imports `parseAmendmentDraft`/`assessEdit`
 directly from the real `brain/scripts/lib/amendment-draft.mjs`. `brain:promote`
 was never invoked.
+
+**Re-verification (this batch, after #980 merged):** #980 merged into
+`origin/main` at `0dfac874` (2026-09-16T13:07:59Z), so the "post-#980" text
+is no longer hypothetical. Re-ran the same check with the REAL merged text
+(`git show origin/main:brain/core/anti-patterns/evidence-reader-empty-on-failure.md`)
+in place of the simulated one:
+
+```
+$ node /tmp/claude-1000/-home-gandalf-IA-brain/71e1249b-9491-4e33-857a-096458f6eeb2/scratchpad/verify-975-draft.mjs
+parse: ok
+edits count: 1
+pre-#980 (real, current worktree file) edit 1: {"state":"blocked","f":0,"r":0,"k":1,"free":0}
+post-#980 (real, origin/main) edit 1: {"state":"pending","f":1,"r":0,"k":1,"free":1}
+OK: draft parses; blocked against the real pre-#980 file in this worktree; pending against the real merged post-#980 text on origin/main.
+```
+
+Same result as the original simulated proof (`blocked` / `pending`), now
+confirmed against the actual merged text rather than a diff-applied
+simulation — the anchor matches `origin/main`'s merged paragraph verbatim.
+This branch itself has not been rebased past `dd3ace05`, so its own copy of
+the doctrine file remains pre-#980 and the draft remains unpromotable here;
+`brain:promote` was never invoked.
 
 ## Mutation table
 
@@ -228,6 +260,11 @@ names:
 - `loadBrainConfig()` is left unchanged by design (see classification
   above); if a future caller of `loadBrainConfig()` ever reads a
   DENY/exclusion list, this decision should be revisited.
+- Commit `646e80bb`'s subject (`docs(sdd): issue #975 change docs + Tier 2
+  loader-shape-gap draft`) omits the `(#975)` issue reference other commits
+  in this batch carry. Rewriting committed history is out of scope for this
+  batch; a squash-merge takes the PR title regardless, so this is a known
+  cosmetic gap flagged for the pre-merge repo audit, not a functional risk.
 
 ## Remaining tasks
 None. All 20 tasks complete.
