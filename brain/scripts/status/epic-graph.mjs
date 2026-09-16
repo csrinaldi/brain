@@ -357,6 +357,7 @@ export function parseGraphBlock(body) {
     // lines naming the same issue is a restatement, not a disagreement — there is
     // exactly one answer, so it is read.
     if (prose.length > 1) say('parent', prose.join(', '), 'parent-ambiguous');
+    else if (prose.length === 1) { parent = prose[0]; parentSource = 'prose'; }
   }
 
   return {

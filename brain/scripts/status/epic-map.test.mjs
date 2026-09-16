@@ -178,6 +178,116 @@ test('#967 R967-2 S5: two line-initial Parent: lines with different numbers is a
   assert.deepEqual(g.declarationDivergences, [{ key: 'parent', value: '878, 879', reason: 'parent-ambiguous' }]);
 });
 
+// ── #967 D3: the parent — block key, else the prose line, else null. One hop. ──
+//
+// The two bodies below are VERBATIM from the forge, not sketched: #881's line is
+// the one real declaration this reader exists to admit, and #337's is the one real
+// line it must refuse. A `$`-anchored pattern (the shape the proposal carried)
+// matches neither correctly — it misses #881 entirely.
+
+test('#967 R967-2 S1: a block parent: wins and the prose line is never read — no disagreement to report', () => {
+  const body = ['Parent: #879 (the prose line)', '', rawBlock('track: A', 'parent: 878')].join('\n');
+  const g = parseGraphBlock(body);
+  assert.equal(g.parent, 878);
+  assert.equal(g.parentSource, 'block', 'the node says where its answer came from');
+  assert.deepEqual(g.declarationDivergences, [],
+    'the block key is the declaration; the prose line is not a second one to disagree with');
+});
+
+test('#967 R967-2 S1: a block parent: beside TWO differing prose lines is still not ambiguity', () => {
+  const body = ['Parent: #879', '', 'Parent: #880', '', rawBlock('track: A', 'parent: 878')].join('\n');
+  const g = parseGraphBlock(body);
+  assert.equal(g.parent, 878);
+  assert.equal(g.parentSource, 'block');
+  assert.deepEqual(g.declarationDivergences, [], 'unread lines cannot disagree with each other');
+});
+
+test('#967 R967-2 S2: #881’s real line is read, trailing prose and all', () => {
+  const body = ['# Issue #881 [OPEN] feat(ui): slice 3 — local server and the DAG canvas', '',
+    'Parent: #878 (Brain UI) — slice 3, Wave B.', '',
+    'No HTTP server exists in brain yet.', '', rawBlock('track: UI', 'needs: [879]')].join('\n');
+  const g = parseGraphBlock(body);
+  assert.equal(g.parent, 878, 'the one real body this reader exists for');
+  assert.equal(g.parentSource, 'prose');
+  assert.deepEqual(g.declarationDivergences, []);
+});
+
+test('#967 R967-2 S4: #337’s real mid-line Parent: declares nothing, and says nothing either', () => {
+  // There the parent is #335 and the epic is #313 — one line, two different issues.
+  // A relaxed `/Parent:/` would mint an edge to #335 that nobody declared. And a
+  // line the pattern does not match is not a MALFORMED declaration, it is not a
+  // declaration: there is nothing to say about it.
+  const body = ['Issue: #337 — M10 Phase 3. Parent: #335. Epic: #313.', '', rawBlock('track: A')].join('\n');
+  const g = parseGraphBlock(body);
+  assert.equal(g.parent, null);
+  assert.equal(g.parentSource, null);
+  assert.deepEqual(g.declarationDivergences, []);
+});
+
+test('#967: an indented or quoted Parent: line declares nothing — column zero, like the fence tag', () => {
+  for (const line of ['> Parent: #999', '  Parent: #999', '- Parent: #999']) {
+    const g = parseGraphBlock([line, '', rawBlock('track: A')].join('\n'));
+    assert.equal(g.parent, null, `${line} must not declare`);
+    assert.deepEqual(g.declarationDivergences, []);
+  }
+});
+
+test('#967 R967-2 S3: Epic: #N is NOT a synonym for Parent: #N', () => {
+  const body = ['Epic: #313', '', rawBlock('track: A')].join('\n');
+  const g = parseGraphBlock(body);
+  assert.equal(g.parent, null, '#337 is the counterexample: parent #335, epic #313, one line');
+  assert.equal(g.parentSource, null);
+  assert.deepEqual(g.declarationDivergences, []);
+});
+
+test('#967 R967-10 S2: a needs: edge is never read as a parent', () => {
+  // Measured, not assumed: #881 declares `needs: [879]`, a SIBLING, and #878 — the
+  // real parent — declares `needs: []`. The fallback would resolve to the wrong node.
+  const g = parseGraphBlock(rawBlock('track: UI', 'needs: [879]'));
+  assert.deepEqual(g.needs, [879]);
+  assert.equal(g.parent, null);
+  assert.equal(g.parentSource, null);
+  assert.deepEqual(g.declarationDivergences, []);
+});
+
+test('#967: two Parent: lines naming the SAME issue is a restatement, not ambiguity', () => {
+  const body = ['Parent: #878 (Brain UI) — slice 3, Wave B.', '', 'Restated: ', '',
+    'Parent: #878 again, for the reader who skipped the header.', '', rawBlock('track: A')].join('\n');
+  const g = parseGraphBlock(body);
+  assert.equal(g.parent, 878, 'one answer, said twice');
+  assert.equal(g.parentSource, 'prose');
+  assert.deepEqual(g.declarationDivergences, []);
+});
+
+test('#967: a MALFORMED block parent: does not fall through to the prose line', () => {
+  // Malformed is not absent. Salvaging the prose here would make a refused
+  // declaration quietly succeed by another door, and the divergence would name a
+  // value the node did not end up carrying.
+  const body = ['Parent: #879', '', rawBlock('track: A', 'parent: abc')].join('\n');
+  const g = parseGraphBlock(body);
+  assert.equal(g.parent, null);
+  assert.equal(g.parentSource, null);
+  assert.deepEqual(g.declarationDivergences, [{ key: 'parent', value: 'abc', reason: 'parent-grammar' }]);
+});
+
+test('#967 D3 / risk R3: a body whose BLOCK is unreadable salvages no prose parent', () => {
+  // "An unreadable block asserts NOTHING — it is not half a declaration to be
+  // salvaged" is this module's own rule, and reading a parent out of one would make
+  // `declared: false` a lie about the same body.
+  const dupes = ['Parent: #878 (Brain UI)', '', block({ track: 'A' }), '', block({ track: 'Z' })].join('\n');
+  const r = parseGraphBlock(dupes);
+  assert.equal(r.ok, false);
+  assert.equal(r.parent, undefined, 'a refusal carries no fields to read');
+
+  const hiddenBlock = ['Parent: #878 (Brain UI)', '', '```brain-graph/1', 'track: A'].join('\n');
+  const h = parseGraphBlock(hiddenBlock);
+  assert.equal(h.ok, false);
+  assert.equal(h.parent, undefined);
+
+  const noBlockAtAll = 'Parent: #878 (Brain UI) — and not one brain-graph fence in sight.';
+  assert.equal(parseGraphBlock(noBlockAtAll), null, 'absent is still absent — and still not half a declaration');
+});
+
 // ── the locator: the `protocol:` scalar, not the position (#639) ────────────
 //
 // WHAT WAS MEASURED, because the ticket's stated repro is not the defect. Its

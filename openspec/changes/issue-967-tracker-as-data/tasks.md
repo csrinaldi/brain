@@ -122,7 +122,7 @@ and R967-10's "no `needs`-edge parent fallback" scenario.
 - [x] A2b. `epic-graph.mjs`: implement the grammar check, the digit check and the
       ambiguity rule (the shape `parseGraphBlock` already holds for two blocks at
       `:170-175`), pushing one entry per condition, so A2a passes.
-- [ ] A3a. `epic-map.test.mjs`: failing tests for parent resolution — a block
+- [x] A3a. `epic-map.test.mjs`: failing tests for parent resolution — a block
       `parent: 878` beside a prose `Parent: #879` yields `878`/`'block'` and no
       divergence (R967-2 S1, amended); #881's line verbatim yields `878`/`'prose'`
       (R967-2 S2); #337's line verbatim
@@ -132,7 +132,7 @@ and R967-10's "no `needs`-edge parent fallback" scenario.
       body whose block is hidden or duplicated returns `{ok: false}` with **no**
       prose salvage (D3, risk R3). **Mutation**: relaxing the anchor to `/Parent:/`
       turns the #337 case red; reading `Epic:` as a synonym turns R967-2 S3 red.
-- [ ] A3b. `epic-graph.mjs`: implement `/^Parent:[ \t]*#(\d+)\b/m` over the body
+- [x] A3b. `epic-graph.mjs`: implement `/^Parent:[ \t]*#(\d+)\b/m` over the body
       with block-key precedence and no salvage on an unreadable block, so A3a
       passes.
 - [ ] A4a. `epic-map.test.mjs`: failing `buildGraph` tests — the four fields land
