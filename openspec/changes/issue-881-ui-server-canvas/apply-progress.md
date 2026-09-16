@@ -1507,6 +1507,18 @@ through the exact modules the browser imports, in node.
 * poll indicator over the real poller state: `polling is paused — forge
   polled 27 s ago`.
 
+**Width after the band wrap.** The finding below was fixed on this branch
+(`366b3ed2`): `layout.mjs` now wraps the unlinked band into
+`max(1, ceil(sqrt(n)), widest layer)` columns. The same live rendering was
+re-run afterwards — a server on port 0 over this worktree, its `/api/snapshot`
+fed through `canvas-model.mjs`, killed by its recorded PID — and the canvas is
+now **1960 x 1380 px** for 92 nodes and 82 unlinked (10 columns), against
+**16 160 x 420 px** before. Nothing was dropped: the node count, the unlinked
+count and the 7 edges are unchanged. Note that `--no-poll` cannot produce this
+measurement at all — without a forge poll the graph section is `{ok:false}`
+("the first forge poll has not completed") and the canvas model refuses to
+build, so this run polled for real exactly as the walkthrough above did.
+
 **What the maintainer still has to confirm by eye** (the honest N/A, per the
 work-unit checklist): open `http://localhost:3000` once after `npm run
 brain:ui` and check that the canvas paints, that clicking a node opens the
@@ -1564,12 +1576,14 @@ tested, none of them optional.
 
 ### Findings for follow-up — neither inside this slice's fence
 
-1. **`layout.mjs` lays the unlinked band in ONE row.** With 81 unlinked
-   nodes the live canvas is **16 160 px wide** (`width` in the model above)
-   against a 420 px height. Nothing is lost — the area scrolls and every node
-   is drawn — but the `?` track is unusable at that width. The fix belongs in
-   `layout.mjs` (slice 3's file): wrap the trailing band into rows of N. Not
-   done here: it needs its own test and it is outside PR 4's fence.
+1. **`layout.mjs` laid the unlinked band in ONE row — FIXED on this branch,
+   `366b3ed2`.** With 81 unlinked nodes the live canvas was **16 160 px wide**
+   against a 420 px height. Nothing was lost — the area scrolled and every node
+   was drawn — but the `?` track was unusable at that width. The band now wraps
+   into `max(1, ceil(sqrt(n)), widest layer)` columns, ascending issue number,
+   left to right then top to bottom, with its own RED-first test (81 unlinked
+   nodes: 9 columns, 9 rows, byte-identical under a shuffled input). Live width
+   after the fix: 1960 px.
 2. **`main()` resolves the forge from `process.cwd()`, not `--root`.**
    Running `--root /tmp/.../noforge` (a fresh repo with no remote) still
    polled `csrinaldi/brain`, because `resolveForgeSource()` →
