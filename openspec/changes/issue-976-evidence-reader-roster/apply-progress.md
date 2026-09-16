@@ -189,4 +189,5 @@ moving/updating the draft, per the hard constraint never to promote it).
 None. All tasks in `tasks.md` complete.
 
 ## Status
-All tasks complete. Ready for `sdd-verify`.
+All tasks complete. Commits: `ea8c9cdc` (SDD docs + moved/updated draft),
+record-first commit pending. Ready for `sdd-verify`.
