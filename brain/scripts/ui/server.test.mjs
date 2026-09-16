@@ -794,7 +794,7 @@ test('#881: R881-5 S3 / A5 (re-run) — with the poller wired in, a full poll cy
 // ── R881-10 S3: no MCP resource route, no heartbeat/agent-pulse endpoint ────
 
 test('#881: R881-10 S3 — the route table has no MCP resource route and no heartbeat/agent-pulse endpoint', () => {
-  assert.deepEqual(KNOWN_ROUTES, ['/', '/api/snapshot', '/api/stream', '/api/poll/pause', '/api/poll/resume', '/api/poll/once', '/api/change/{issue}']);
+  assert.deepEqual(KNOWN_ROUTES, ['/', '/app.js', '/app.css', '/lib/{module}.mjs', '/api/snapshot', '/api/stream', '/api/poll/pause', '/api/poll/resume', '/api/poll/once', '/api/change/{issue}']);
   assert.ok(!KNOWN_ROUTES.some((r) => /mcp|heartbeat|pulse/i.test(r)));
 });
 
@@ -980,6 +980,97 @@ test('#881: judgment:cold-6 — a failed forge resolution says the reason on std
     assert.equal(state.paused, true);
     assert.match(state.lastError, /no VCS token/);
     assert.ok(state.lastPolledAt, 'the reason carries a time, not just text');
+  } finally {
+    await result.close();
+  }
+});
+
+// ── PR 4 / B2: the static assets the browser loads ─────────────────────────
+//
+// The page is plain ES modules with no build step and no dependency
+// (maintainer ruling, 2026-09-14): the browser loads `/app.js`, which imports
+// `./lib/*.mjs` — the SAME files `node:test` imports — so the server has to
+// serve two directories and nothing else. The allow-list is a literal set
+// plus one anchored pattern; no request path is ever joined onto a filesystem
+// path, so traversal cannot reach a file the list does not name.
+
+test('#881: R881-1 S1 — GET / serves the real SPA shell: the canvas, drawer, banner and status mounts app.js writes into', async () => {
+  const server = createUiServer({ root: makeFixture(), _now: now });
+  await server.listen(0);
+  try {
+    const res = await fetch(`http://127.0.0.1:${server.port}/`);
+    assert.equal(res.status, 200);
+    assert.equal(res.headers.get('content-type'), 'text/html');
+    const body = await res.text();
+    for (const id of ['banners', 'canvas', 'drawer', 'status']) {
+      assert.match(body, new RegExp(`id="${id}"`), `the shell must mount #${id} for app.js to render into`);
+    }
+    assert.match(body, /<script type="module" src="\/app\.js"><\/script>/, 'the page loads app.js as a module, with no build step');
+    assert.doesNotMatch(body, /src="https?:/, 'no external resource: no CDN, no vendored library (ruling)');
+    assert.doesNotMatch(body, /\son[a-z]+=/, 'no inline event handler — app.js wires every listener');
+  } finally {
+    await server.close();
+  }
+});
+
+test('#881: the three static assets answer with their own content-type: /app.js, /app.css, /lib/<module>.mjs', async () => {
+  const server = createUiServer({ root: makeFixture(), _now: now });
+  await server.listen(0);
+  try {
+    const base = `http://127.0.0.1:${server.port}`;
+    const cases = [
+      ['/app.js', 'application/javascript', /import .* from '\.\/lib\//],
+      ['/app.css', 'text/css', /\.state-planned/],
+      ['/lib/layout.mjs', 'application/javascript', /export function layout/],
+      ['/lib/colour.mjs', 'application/javascript', /export function colourClass/],
+    ];
+    for (const [path, type, bodyRe] of cases) {
+      const res = await fetch(`${base}${path}`);
+      assert.equal(res.status, 200, `${path} must be served`);
+      assert.equal(res.headers.get('content-type'), type, `${path} content-type`);
+      assert.match(await res.text(), bodyRe, `${path} must be the real file, not an empty 200`);
+    }
+  } finally {
+    await server.close();
+  }
+});
+
+test('#881: the static allow-list refuses everything it does not name — traversal, test files, other directories', async () => {
+  const server = createUiServer({ root: makeFixture(), _now: now });
+  await server.listen(0);
+  try {
+    const base = `http://127.0.0.1:${server.port}`;
+    const refused = [
+      '/lib/%2e%2e/server.mjs', // encoded traversal, normalised by the URL parser before routing
+      '/lib/../server.mjs',
+      '/%2e%2e/%2e%2e/etc/passwd',
+      '/lib/layout.test.mjs', // a test file is not part of the page
+      '/lib//layout.mjs',
+      '/lib/sub/layout.mjs',
+      '/index.html', // the shell is served at / only
+      '/server.mjs',
+      '/lib/',
+    ];
+    for (const path of refused) {
+      const res = await fetch(`${base}${path}`);
+      assert.equal(res.status, 404, `${path} must not be served`);
+    }
+  } finally {
+    await server.close();
+  }
+});
+
+test('#881: the static routes answer through main() too, with every seam defaulted except the forge resolver', async () => {
+  const result = await main(['--port', '0', '--root', makeFixture()], {
+    say: () => {}, error: () => {}, process: makeFakeProcess(), _resolveForgeSource: noRealForgeResolution(),
+  });
+  try {
+    const base = `http://127.0.0.1:${result.port}`;
+    assert.equal((await fetch(`${base}/`)).status, 200);
+    assert.equal((await fetch(`${base}/app.js`)).status, 200);
+    assert.equal((await fetch(`${base}/app.css`)).status, 200);
+    assert.equal((await fetch(`${base}/lib/layout.mjs`)).status, 200);
+    assert.equal((await fetch(`${base}/lib/nope.mjs`)).status, 404);
   } finally {
     await result.close();
   }
