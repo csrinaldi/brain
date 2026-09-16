@@ -294,7 +294,7 @@ lines**. Closes R967-5, R967-6, R967-9's resolver half.
       returning `{ok, base, say: {key, params}}` or
       `{ok: false, refusal: {key, params}}`, **never** a rendered message and
       never `t()`; no `_now`. So B2a passes.
-- [ ] B3. `brain/scripts/i18n/en.mjs` (after `:289`) and `es.mjs`: add
+- [x] B3. `brain/scripts/i18n/en.mjs` (after `:289`) and `es.mjs`: add
       `ticket.base.fromEpic`, `.noEpic`, `.epicUnreadable`, `.offTracker` and
       `ticket.error.baseIsTracked`, and add the `--off-tracker` spelling to
       `ticket.error.usage` (`en.mjs:262`). The failing test already exists:
