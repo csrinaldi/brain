@@ -23,6 +23,25 @@ const legacyBlock = ({ track = 'A', needs = [], blocks = [], files = [] } = {}) 
     `needs: ${JSON.stringify(needs)}`, `blocks: ${JSON.stringify(blocks)}`,
     `files: ${JSON.stringify(files)}`, '```'].join('\n');
 
+/**
+ * The FULL shape `parseGraphBlock` returns, with #967's keys at their defaults.
+ *
+ * Every site below keeps `assert.deepEqual` against this, so the assertion stays a
+ * full-shape comparison and a STRAY KEY STILL FAILS (design D11). Rewriting any of
+ * them to `partialDeepStrictEqual` or to per-key `assert.equal` would be the
+ * weakening this helper exists to avoid: both stop noticing an extra key, which is
+ * precisely what these assertions have been catching since #459.
+ */
+const graphShape = (o = {}) => ({
+  track: null, kind: null, tracker: null, parent: null, parentSource: null,
+  blocks: [], needs: [], files: [], declarationDivergences: [], ...o,
+});
+
+/** A `brain-graph/1` block carrying exactly the lines a case needs. The matrix
+ * below declares keys the fixed-shape `block()` builder knows nothing about, and
+ * malformed values it would never produce. */
+const rawBlock = (...lines) => ['```brain-graph/1', ...lines, '```'].join('\n');
+
 const issue = (number, o = {}) => ({
   number, title: o.title ?? `t${number}`, labels: o.labels ?? ['status:approved'],
   state: o.state ?? 'open', body: o.body ?? block(o),
@@ -37,7 +56,24 @@ const noRelations = { blocks: [], needs: [], foreign: 0 };
 
 test('#459: the block is read from the body as DATA', () => {
   const g = parseGraphBlock(block({ track: 'B', needs: [1], blocks: [2, 3], files: ['a/**'] }));
-  assert.deepEqual(g, { track: 'B', needs: [1], blocks: [2, 3], files: ['a/**'] });
+  assert.deepEqual(g, graphShape({ track: 'B', needs: [1], blocks: [2, 3], files: ['a/**'] }));
+});
+
+test('#967 R967-1 S2: a block declaring none of the three keys parses EXACTLY as it did before this change', () => {
+  // The regression pin for the whole slice. The four new fields are `null` and
+  // `declarationDivergences` is empty, and — the half a `graphShape()` comparison
+  // cannot prove on its own — every pre-existing field still holds the byte-identical
+  // value it held before #967, compared against the literal copied out of the
+  // pre-change assertion rather than against a freshly derived one.
+  const g = parseGraphBlock(block({ track: 'B', needs: [1], blocks: [2, 3], files: ['a/**'] }));
+  const beforeThisChange = { track: 'B', needs: [1], blocks: [2, 3], files: ['a/**'] };
+  const { kind, tracker, parent, parentSource, declarationDivergences, ...preExisting } = g;
+  assert.deepEqual(preExisting, beforeThisChange, 'not one pre-existing field moved');
+  assert.equal(kind, null);
+  assert.equal(tracker, null);
+  assert.equal(parent, null);
+  assert.equal(parentSource, null);
+  assert.deepEqual(declarationDivergences, [], 'declaring nothing is not a divergence');
 });
 
 test('#459: a body with no block yields null — absent is not empty', () => {
@@ -72,6 +108,276 @@ test('#612: a node with track: (whitespace-only) groups under the SAME tracks-ma
   assert.equal(tracks.has(''), false, 'the pre-repair "" group no longer exists');
 });
 
+// ── #967 D2: a malformed declaration is SAID, never dropped and never guessed ──
+//
+// The channel is NEW (`declarationDivergences`), not the graph's existing
+// `divergences`: that array carries `{from, to, only}` edge entries, its formatter
+// reads those three fields, and it is gated on a native relations read that the
+// snapshot path never performs. A declaration divergence routed through it would
+// print `#undefined→#undefined` in the one surface that needs it, and be `[]` in
+// the other.
+//
+// `reason` is a STABLE TOKEN, not a sentence: the gate in this change's third slice
+// has to branch on "the tracker is malformed", and a reader that string-matches
+// prose to decide is a reader one wording change away from silence.
+
+test('#967 R967-1 S6: a tracker outside the feature/ grammar is refused and said, never repaired', () => {
+  const g = parseGraphBlock(rawBlock('kind: epic', 'tracker: main'));
+  assert.equal(g.tracker, null, 'never silently rewritten to feature/main');
+  assert.deepEqual(g.declarationDivergences, [{ key: 'tracker', value: 'main', reason: 'tracker-grammar' }]);
+});
+
+test('#967 R967-1 S6: a tracker with a .. segment is refused — the character class alone would admit it', () => {
+  // `..` is spelled entirely out of `[A-Za-z0-9._-]`, so the grammar matches it and
+  // the explicit refusal is what stops a traversal-shaped branch name being read as
+  // a tracker. Dropping that clause turns exactly this case green again.
+  const g = parseGraphBlock(rawBlock('kind: epic', 'tracker: feature/../x'));
+  assert.equal(g.tracker, null);
+  assert.deepEqual(g.declarationDivergences, [{ key: 'tracker', value: 'feature/../x', reason: 'tracker-grammar' }]);
+});
+
+test('#967: a nested feature/ path IS the grammar — the refusal above is about .., not about depth', () => {
+  const g = parseGraphBlock(rawBlock('kind: epic', 'tracker: feature/brain-ui/wave-b'));
+  assert.equal(g.tracker, 'feature/brain-ui/wave-b');
+  assert.deepEqual(g.declarationDivergences, []);
+});
+
+test('#967 R967-1 S5: a tracker on a node that is not an epic is CARRIED and said, not dropped', () => {
+  const g = parseGraphBlock(rawBlock('track: UI', 'tracker: feature/brain-ui'));
+  assert.equal(g.tracker, 'feature/brain-ui', 'carried — the divergence is what keeps it from being honoured');
+  assert.equal(g.kind, null);
+  assert.deepEqual(g.declarationDivergences,
+    [{ key: 'tracker', value: 'feature/brain-ui', reason: 'tracker-without-kind-epic' }]);
+});
+
+test('#967: a MALFORMED tracker on a non-epic says the grammar once, not twice', () => {
+  // The grammar runs first and leaves `tracker: null`. There is no carried value left
+  // to not-honour, so the second rule has nothing to say about it — one declaration,
+  // one entry.
+  const g = parseGraphBlock(rawBlock('track: UI', 'tracker: brain-ui'));
+  assert.equal(g.tracker, null);
+  assert.deepEqual(g.declarationDivergences, [{ key: 'tracker', value: 'brain-ui', reason: 'tracker-grammar' }]);
+});
+
+test('#967 R967-1 S7: a non-numeric parent is refused, never coerced to 0, NaN or a string', () => {
+  // `007` and `0007` join the list: `Number()` normalised them to 7, and 7 is not the
+  // byte the body wrote. "A bare positive integer" is the grammar, and a repair is
+  // exactly what R967-1 forbids for the other two keys — the parser does not get to
+  // decide the author meant a different issue than the one they typed.
+  for (const bad of ['abc', 'main', '#878', '0', '-3', '87.5', '878x', '007', '0007']) {
+    const g = parseGraphBlock(rawBlock('track: A', `parent: ${bad}`));
+    assert.equal(g.parent, null, `parent: ${bad} must not become a number`);
+    assert.equal(g.parentSource, null);
+    assert.deepEqual(g.declarationDivergences, [{ key: 'parent', value: bad, reason: 'parent-grammar' }],
+      `parent: ${bad} must be said, not dropped`);
+  }
+});
+
+test('#967 R967-2 S5: two line-initial Parent: lines with different numbers is ambiguity, never a first match', () => {
+  const body = ['Parent: #878 (Brain UI) — slice 3, Wave B.', '', 'and later, wrongly:', '',
+    'Parent: #879 (something else).', '', block({ track: 'A' })].join('\n');
+  const g = parseGraphBlock(body);
+  assert.equal(g.parent, null, 'neither wins — two values for one key is ambiguity');
+  assert.equal(g.parentSource, null);
+  assert.deepEqual(g.declarationDivergences, [{ key: 'parent', value: '878, 879', reason: 'parent-ambiguous' }]);
+});
+
+test('#967: an issue number is bare positive digits in PROSE too — one grammar, not two', () => {
+  // Measured: the prose path carried no positivity check at all, so `Parent: #0`
+  // yielded `parent: 0` — a value the block path names in its own refused list. The
+  // two paths read the same fact out of the same body and must not disagree about
+  // what an issue number is.
+  //
+  // The block path SAYS `parent-grammar` because a `parent:` key is a declaration that
+  // failed; a prose line that does not match the pattern is not a declaration at all
+  // and says nothing (R967-2), which is the same rule that already governs `#878x`.
+  for (const line of ['Parent: #0', 'Parent: #00', 'Parent: #007', 'Parent: #0007']) {
+    const g = parseGraphBlock([line, '', rawBlock('track: A')].join('\n'));
+    assert.equal(g.parent, null, `${line} must not become a number`);
+    assert.equal(g.parentSource, null);
+    assert.deepEqual(g.declarationDivergences, []);
+  }
+});
+
+test('#967 R967-2 S5: TWO numbers on ONE Parent: line is the same ambiguity as two lines', () => {
+  // The two-line rule refused to pick; the one-line shape slipped past it, because the
+  // pattern stopped reading at the first number and the rest of the line was never
+  // looked at. "Two values for one key" is the fact being refused, and it does not
+  // become one value by being written with a comma.
+  const body = ['Parent: #878, #879', '', rawBlock('track: A')].join('\n');
+  const g = parseGraphBlock(body);
+  assert.equal(g.parent, null, 'neither wins — and 878 must not win by writing order');
+  assert.equal(g.parentSource, null);
+  assert.deepEqual(g.declarationDivergences, [{ key: 'parent', value: '878, 879', reason: 'parent-ambiguous' }]);
+});
+
+test('#967: #881’s real line survives the one-line ambiguity rule — it carries no second #N', () => {
+  // The guard is a SECOND ISSUE NUMBER, not trailing prose. The one real body this
+  // reader exists for has parentheses, an em dash, a slice and a wave after the
+  // number, and must still read.
+  const g = parseGraphBlock(['Parent: #878 (Brain UI) — slice 3, Wave B.', '', rawBlock('track: A')].join('\n'));
+  assert.equal(g.parent, 878);
+  assert.equal(g.parentSource, 'prose');
+  assert.deepEqual(g.declarationDivergences, []);
+});
+
+test('#967: the SAME number twice on one line is a restatement, exactly as it is across two lines', () => {
+  // The rule is stated over the SET of numbers, so the one-line and two-line shapes
+  // cannot disagree with each other about what counts as a restatement.
+  const g = parseGraphBlock(['Parent: #878 — see #878 for the epic body.', '', rawBlock('track: A')].join('\n'));
+  assert.equal(g.parent, 878, 'one answer, said twice on one line');
+  assert.equal(g.parentSource, 'prose');
+  assert.deepEqual(g.declarationDivergences, []);
+});
+
+// ── #967 D3: the parent — block key, else the prose line, else null. One hop. ──
+//
+// The two bodies below are VERBATIM from the forge, not sketched: #881's line is
+// the one real declaration this reader exists to admit, and #337's is the one real
+// line it must refuse. A `$`-anchored pattern (the shape the proposal carried)
+// matches neither correctly — it misses #881 entirely.
+
+test('#967 R967-2 S1: a block parent: wins and the prose line is never read — no disagreement to report', () => {
+  const body = ['Parent: #879 (the prose line)', '', rawBlock('track: A', 'parent: 878')].join('\n');
+  const g = parseGraphBlock(body);
+  assert.equal(g.parent, 878);
+  assert.equal(g.parentSource, 'block', 'the node says where its answer came from');
+  assert.deepEqual(g.declarationDivergences, [],
+    'the block key is the declaration; the prose line is not a second one to disagree with');
+});
+
+test('#967 R967-2 S1: a block parent: beside TWO differing prose lines is still not ambiguity', () => {
+  const body = ['Parent: #879', '', 'Parent: #880', '', rawBlock('track: A', 'parent: 878')].join('\n');
+  const g = parseGraphBlock(body);
+  assert.equal(g.parent, 878);
+  assert.equal(g.parentSource, 'block');
+  assert.deepEqual(g.declarationDivergences, [], 'unread lines cannot disagree with each other');
+});
+
+test('#967 R967-2 S2: #881’s real line is read, trailing prose and all', () => {
+  const body = ['# Issue #881 [OPEN] feat(ui): slice 3 — local server and the DAG canvas', '',
+    'Parent: #878 (Brain UI) — slice 3, Wave B.', '',
+    'No HTTP server exists in brain yet.', '', rawBlock('track: UI', 'needs: [879]')].join('\n');
+  const g = parseGraphBlock(body);
+  assert.equal(g.parent, 878, 'the one real body this reader exists for');
+  assert.equal(g.parentSource, 'prose');
+  assert.deepEqual(g.declarationDivergences, []);
+});
+
+test('#967 R967-2 S4: #337’s real mid-line Parent: declares nothing, and says nothing either', () => {
+  // There the parent is #335 and the epic is #313 — one line, two different issues.
+  // A relaxed `/Parent:/` would mint an edge to #335 that nobody declared. And a
+  // line the pattern does not match is not a MALFORMED declaration, it is not a
+  // declaration: there is nothing to say about it.
+  const body = ['Issue: #337 — M10 Phase 3. Parent: #335. Epic: #313.', '', rawBlock('track: A')].join('\n');
+  const g = parseGraphBlock(body);
+  assert.equal(g.parent, null);
+  assert.equal(g.parentSource, null);
+  assert.deepEqual(g.declarationDivergences, []);
+});
+
+test('#967: an indented or quoted Parent: line declares nothing — column zero, like the fence tag', () => {
+  for (const line of ['> Parent: #999', '  Parent: #999', '- Parent: #999']) {
+    const g = parseGraphBlock([line, '', rawBlock('track: A')].join('\n'));
+    assert.equal(g.parent, null, `${line} must not declare`);
+    assert.deepEqual(g.declarationDivergences, []);
+  }
+});
+
+test('#967 R967-2: a column-zero Parent: inside a FENCE is an illustration, never a declaration', () => {
+  // The same rule the fence selector itself settled in #709: a body that ILLUSTRATES
+  // the protocol and a body that DECLARES it must not be byte-identical to the reader.
+  // `> Parent: #999` and `  Parent: #999` were already refused by column zero; a
+  // fenced example is at column zero and was read — and the third case below is the
+  // damaging one, where the illustration does not merely add a parent, it DELETES a
+  // real declaration by manufacturing an ambiguity with it.
+  const inPlainFence = ['```', 'Parent: #999', '```', '', rawBlock('track: A')].join('\n');
+  const a = parseGraphBlock(inPlainFence);
+  assert.equal(a.parent, null, 'a fenced example declares nothing');
+  assert.equal(a.parentSource, null);
+  assert.deepEqual(a.declarationDivergences, [], 'and it is not a malformed declaration either');
+
+  // The graph fence is a fence like any other: `Parent:` is not its `parent:` key
+  // (`scalar` is exact-case, anchored `^parent:`), so it is not read there either.
+  const inGraphFence = parseGraphBlock(rawBlock('track: A', 'Parent: #999'));
+  assert.equal(inGraphFence.parent, null, 'the block declares with `parent:`, not with prose inside itself');
+  assert.equal(inGraphFence.parentSource, null);
+  assert.deepEqual(inGraphFence.declarationDivergences, []);
+
+  // An unterminated foreign fence runs to the end of the document, so everything
+  // below it is content on the author's screen too.
+  const swallowed = [rawBlock('track: A'), '', '```console', 'Parent: #999'].join('\n');
+  const s = parseGraphBlock(swallowed);
+  assert.equal(s.parent, null);
+  assert.deepEqual(s.declarationDivergences, []);
+
+  // THE MEASURED DAMAGE: an example above a REAL declaration used to make the two
+  // disagree, and the refusal fell on the real one.
+  const exampleThenReal = ['Here is how a slice declares its epic:', '',
+    '```', 'Parent: #999', '```', '', 'Parent: #878 (Brain UI) — slice 3, Wave B.', '',
+    rawBlock('track: UI')].join('\n');
+  const r = parseGraphBlock(exampleThenReal);
+  assert.equal(r.parent, 878, 'the one declaration outside the fence is the only one there is');
+  assert.equal(r.parentSource, 'prose');
+  assert.deepEqual(r.declarationDivergences, [], 'an illustration cannot disagree with a declaration');
+});
+
+test('#967 R967-2 S3: Epic: #N is NOT a synonym for Parent: #N', () => {
+  const body = ['Epic: #313', '', rawBlock('track: A')].join('\n');
+  const g = parseGraphBlock(body);
+  assert.equal(g.parent, null, '#337 is the counterexample: parent #335, epic #313, one line');
+  assert.equal(g.parentSource, null);
+  assert.deepEqual(g.declarationDivergences, []);
+});
+
+test('#967 R967-10 S2: a needs: edge is never read as a parent', () => {
+  // Measured, not assumed: #881 declares `needs: [879]`, a SIBLING, and #878 — the
+  // real parent — declares `needs: []`. The fallback would resolve to the wrong node.
+  const g = parseGraphBlock(rawBlock('track: UI', 'needs: [879]'));
+  assert.deepEqual(g.needs, [879]);
+  assert.equal(g.parent, null);
+  assert.equal(g.parentSource, null);
+  assert.deepEqual(g.declarationDivergences, []);
+});
+
+test('#967: two Parent: lines naming the SAME issue is a restatement, not ambiguity', () => {
+  const body = ['Parent: #878 (Brain UI) — slice 3, Wave B.', '', 'Restated: ', '',
+    'Parent: #878 again, for the reader who skipped the header.', '', rawBlock('track: A')].join('\n');
+  const g = parseGraphBlock(body);
+  assert.equal(g.parent, 878, 'one answer, said twice');
+  assert.equal(g.parentSource, 'prose');
+  assert.deepEqual(g.declarationDivergences, []);
+});
+
+test('#967: a MALFORMED block parent: does not fall through to the prose line', () => {
+  // Malformed is not absent. Salvaging the prose here would make a refused
+  // declaration quietly succeed by another door, and the divergence would name a
+  // value the node did not end up carrying.
+  const body = ['Parent: #879', '', rawBlock('track: A', 'parent: abc')].join('\n');
+  const g = parseGraphBlock(body);
+  assert.equal(g.parent, null);
+  assert.equal(g.parentSource, null);
+  assert.deepEqual(g.declarationDivergences, [{ key: 'parent', value: 'abc', reason: 'parent-grammar' }]);
+});
+
+test('#967 D3 / risk R3: a body whose BLOCK is unreadable salvages no prose parent', () => {
+  // "An unreadable block asserts NOTHING — it is not half a declaration to be
+  // salvaged" is this module's own rule, and reading a parent out of one would make
+  // `declared: false` a lie about the same body.
+  const dupes = ['Parent: #878 (Brain UI)', '', block({ track: 'A' }), '', block({ track: 'Z' })].join('\n');
+  const r = parseGraphBlock(dupes);
+  assert.equal(r.ok, false);
+  assert.equal(r.parent, undefined, 'a refusal carries no fields to read');
+
+  const hiddenBlock = ['Parent: #878 (Brain UI)', '', '```brain-graph/1', 'track: A'].join('\n');
+  const h = parseGraphBlock(hiddenBlock);
+  assert.equal(h.ok, false);
+  assert.equal(h.parent, undefined);
+
+  const noBlockAtAll = 'Parent: #878 (Brain UI) — and not one brain-graph fence in sight.';
+  assert.equal(parseGraphBlock(noBlockAtAll), null, 'absent is still absent — and still not half a declaration');
+});
+
 // ── the locator: the `protocol:` scalar, not the position (#639) ────────────
 //
 // WHAT WAS MEASURED, because the ticket's stated repro is not the defect. Its
@@ -88,19 +394,19 @@ test('#612: a node with track: (whitespace-only) groups under the SAME tracks-ma
 
 test('#639: an UNTAGGED fence above the block does not hide it — the locator reads the protocol, not the position', () => {
   const body = ['```', 'some log excerpt', '```', '', block({ track: 'C' })].join('\n');
-  assert.deepEqual(parseGraphBlock(body), { track: 'C', needs: [], blocks: [], files: [] });
+  assert.deepEqual(parseGraphBlock(body), graphShape({ track: 'C', needs: [], blocks: [], files: [] }));
 });
 
 test('#639: a ```yaml fence of ANOTHER protocol above the block does not hide it', () => {
   const other = '```yaml\nprotocol: brain-review/2\nverdict: APPROVE\n```';
   const body = [other, '', block({ track: 'D', needs: [7] })].join('\n');
-  assert.deepEqual(parseGraphBlock(body), { track: 'D', needs: [7], blocks: [], files: [] });
+  assert.deepEqual(parseGraphBlock(body), graphShape({ track: 'D', needs: [7], blocks: [], files: [] }));
 });
 
 test('#639: a ```js snippet above the block still parses — pinned, and it was already green', () => {
   const body = ['Here is the failing call:', '', '```js', "requiredArtifactsFor('lite')", '```', '',
     block({ track: 'A', blocks: [435, 94] })].join('\n');
-  assert.deepEqual(parseGraphBlock(body), { track: 'A', needs: [], blocks: [435, 94], files: [] });
+  assert.deepEqual(parseGraphBlock(body), graphShape({ track: 'A', needs: [], blocks: [435, 94], files: [] }));
 });
 
 test('#639: TWO graph blocks is an error naming the count, never a silent pick of one', () => {
@@ -171,13 +477,13 @@ test('#709 D1/axis 12: BRAIN-GRAPH/1 and Brain-Graph/1 (wrong case) do not decla
 
 test('#709 D1/axis 11: trailing attributes after the tag still declare — only the first word is compared', () => {
   const withAttrs = '```brain-graph/1 title="x"\ntrack: A\nneeds: []\nblocks: []\nfiles: []\n```';
-  assert.deepEqual(parseGraphBlock(withAttrs), { track: 'A', needs: [], blocks: [], files: [] });
+  assert.deepEqual(parseGraphBlock(withAttrs), graphShape({ track: 'A', needs: [], blocks: [], files: [] }));
 });
 
 test('#709 D1/axis 13: one declared block plus a yaml-tagged illustration of the same protocol is NOT ambiguity', () => {
   const illustration = '```yaml\nprotocol: brain-graph/1\ntrack: ignored-because-not-declared\n```';
   const body = [illustration, '', block({ track: 'A', blocks: [5] })].join('\n');
-  assert.deepEqual(parseGraphBlock(body), { track: 'A', needs: [], blocks: [5], files: [] },
+  assert.deepEqual(parseGraphBlock(body), graphShape({ track: 'A', needs: [], blocks: [5], files: [] }),
     'the illustration is not a declaration, so the tagged block reads alone');
 });
 
@@ -186,6 +492,103 @@ test('#709 D6: an unterminated brain-graph/1-tagged fence hides the declaration 
   const r = parseGraphBlock(body);
   assert.equal(r.ok, false);
   assert.match(r.error, /never closed/);
+});
+
+// ── #967 D4/D5: the node carries the four fields; the graph lifts what was said ──
+
+test('#967 R967-1 S1: the four fields land on the node literal beside track', () => {
+  const g = buildGraph([issue(1, { body: rawBlock('track: UI', 'kind: epic', 'tracker: feature/brain-ui', 'parent: 851') })]);
+  const n = g.nodes[0];
+  assert.equal(n.track, 'UI');
+  assert.equal(n.kind, 'epic');
+  assert.equal(n.tracker, 'feature/brain-ui');
+  assert.equal(n.parent, 851);
+  assert.equal(n.parentSource, 'block');
+  assert.deepEqual(g.declarationDivergences, [], 'a parent outside the set is not a divergence');
+});
+
+test('#967 R967-1 S3: track and tracker are read from their OWN keys and cannot collide', () => {
+  const g = buildGraph([issue(1, { body: rawBlock('track: UI', 'kind: epic', 'tracker: feature/brain-ui') })]);
+  const n = g.nodes[0];
+  assert.equal(n.track, 'UI', '`scalar` is anchored `^track:`, which never matches a `tracker:` line');
+  assert.equal(n.tracker, 'feature/brain-ui');
+});
+
+test('#967 R967-1 S4: an unknown key is still ignored, and ignoring it is not a divergence', () => {
+  const g = buildGraph([issue(1, { body: rawBlock('track: A', 'colour: red') })]);
+  const n = g.nodes[0];
+  assert.equal(n.track, 'A');
+  assert.equal(n.declared, true);
+  assert.deepEqual(g.declarationDivergences, [],
+    'no key-schema validation is introduced anywhere — forward compatibility is free without it');
+});
+
+test('#967 R967-9 S1: an epic(...) TITLE with no kind: key is not an epic', () => {
+  const g = buildGraph([issue(878, { title: 'epic(ui): Brain UI — the whole thing', body: rawBlock('track: UI') })]);
+  assert.equal(g.nodes[0].kind, null, 'the title prefix stays decorative; nothing is inferred from it');
+  assert.equal(g.nodes[0].tracker, null);
+});
+
+test('#967: what each body said is lifted to the graph, stamped with the issue number', () => {
+  const g = buildGraph([
+    issue(1, { body: rawBlock('track: A', 'tracker: main') }),
+    issue(2, { body: rawBlock('track: B', 'parent: abc') }),
+  ]);
+  assert.deepEqual(g.declarationDivergences, [
+    { number: 1, key: 'tracker', value: 'main', reason: 'tracker-grammar' },
+    { number: 2, key: 'parent', value: 'abc', reason: 'parent-grammar' },
+  ]);
+});
+
+test('#967 R967-4 S1: a parent IN the set that declares no kind: epic is one said entry, not an inference', () => {
+  const g = buildGraph([
+    issue(881, { body: rawBlock('track: UI', 'parent: 878') }),
+    issue(878, { body: rawBlock('track: UI', 'tracker: feature/brain-ui') }),
+  ]);
+  const n878 = g.nodes.find((n) => n.number === 878);
+  const n881 = g.nodes.find((n) => n.number === 881);
+
+  assert.deepEqual(g.declarationDivergences, [
+    // #878 says its own half: it declared a tracker without declaring `kind: epic`.
+    { number: 878, key: 'tracker', value: 'feature/brain-ui', reason: 'tracker-without-kind-epic' },
+    // and the cross-node half, which only the builder can see — both nodes named.
+    { number: 881, key: 'parent', value: 878, reason: 'parent-not-epic' },
+  ]);
+  assert.equal(n878.kind, null, 'never inferred to be an epic because someone pointed at it');
+  assert.deepEqual(g.edges, [], 'a parent is not an edge — it draws nothing');
+  assert.equal(n881.status, READY, 'and it changes no status');
+  assert.equal(n878.status, READY);
+});
+
+test('#967: a parent IN the set that DOES declare kind: epic says nothing', () => {
+  const g = buildGraph([
+    issue(881, { body: rawBlock('track: UI', 'parent: 878') }),
+    issue(878, { body: rawBlock('track: UI', 'kind: epic', 'tracker: feature/brain-ui') }),
+  ]);
+  assert.deepEqual(g.declarationDivergences, []);
+  assert.equal(g.nodes.find((n) => n.number === 878).tracker, 'feature/brain-ui');
+});
+
+test('#967 R967-4 S2: a parent ABSENT from the set says nothing — "not in this list" is not "not an epic"', () => {
+  // It may be closed, or in another repository. Reporting either as a divergence
+  // would manufacture one out of the shape of the query, the same distinction
+  // `buildGraph` already makes for a native read it could not perform.
+  const g = buildGraph([issue(881, { body: rawBlock('track: UI', 'parent: 9999') })]);
+  assert.equal(g.nodes[0].parent, 9999, 'the declaration is kept');
+  assert.deepEqual(g.declarationDivergences, []);
+});
+
+test('#967: an unreadable block contributes no divergence and carries none of the four fields', () => {
+  const dupes = [block({ track: 'A' }), '', block({ track: 'Z' })].join('\n');
+  const g = buildGraph([{ number: 9, title: 'dos bloques', labels: [], state: 'open', body: dupes }]);
+  const n9 = g.nodes[0];
+  assert.equal(n9.kind, null);
+  assert.equal(n9.tracker, null);
+  assert.equal(n9.parent, null);
+  assert.equal(n9.parentSource, null);
+  assert.deepEqual(g.declarationDivergences, [],
+    'an unreadable block asserts nothing — including nothing to diverge about');
+  assert.deepEqual(g.blocksUnreadable.map((b) => b.number), [9], 'it is still carried out as unreadable');
 });
 
 // ── the classification ──────────────────────────────────────────────────────
@@ -293,6 +696,33 @@ test('#459: the summary reports the unplaced COUNT rather than hiding them', () 
   // The count is the point: an undeclared issue must not be quietly absorbed into
   // "Listos ahora", which would make the map overstate what is startable.
   assert.ok(!/Listos ahora:\*\* [^\n]*#8/.test(s));
+});
+
+// ── #967: the summary says the declaration divergences ─────────────────────
+
+test('#967: the summary prints one line per declaration divergence, naming the issue, the key and the reason', () => {
+  const g = buildGraph([
+    issue(1, { body: rawBlock('track: A', 'tracker: main') }),
+    issue(881, { body: rawBlock('track: UI', 'parent: 878') }),
+    issue(878, { body: rawBlock('track: UI', 'tracker: feature/brain-ui') }),
+  ]);
+  const line = renderSummary(g).match(/^.*Declaraciones.*$/m)[0];
+  assert.match(line, /\(3\)/, 'the count, so nothing is quietly absorbed');
+  assert.match(line, /#1[^·]*tracker[^·]*main[^·]*tracker-grammar/);
+  assert.match(line, /#878[^·]*tracker[^·]*feature\/brain-ui[^·]*tracker-without-kind-epic/);
+  assert.match(line, /#881[^·]*parent[^·]*878[^·]*parent-not-epic/);
+});
+
+test('#967: with nothing to say the summary is BYTE-IDENTICAL, and a caller that never heard of the field still renders', () => {
+  // The proof that no current caller changed. The parameter is optional and
+  // defaults to `[]`: removing that default turns this red, because the second
+  // call passes an object without the key — exactly the shape every caller had
+  // before this change.
+  const g = buildGraph([issue(1), issue(2, { body: 'prosa' })]);
+  const { declarationDivergences, ...asItWasBefore } = g;
+  assert.deepEqual(declarationDivergences, []);
+  assert.equal(renderSummary(g), renderSummary(asItWasBefore));
+  assert.ok(!renderSummary(g).includes('Declaraciones'), 'an empty array prints no line at all');
 });
 
 // ── the body write ──────────────────────────────────────────────────────────
@@ -745,5 +1175,5 @@ test('#723: an unterminated foreign fence with the protocol only ABOVE it stays 
 
 test('#723: a well-formed declaration is untouched by any of this', () => {
   assert.deepEqual(parseGraphBlock(block({ track: 'B', blocks: [2] })),
-    { track: 'B', blocks: [2], needs: [], files: [] });
+    graphShape({ track: 'B', blocks: [2], needs: [], files: [] }));
 });

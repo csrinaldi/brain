@@ -105,6 +105,113 @@ function firstWord(tag) {
   return tag.split(/\s+/)[0];
 }
 
+/**
+ * A tracker branch name, as a `brain-graph/1` block may declare it (#967 D2).
+ *
+ * `..` is spelled entirely out of the character class, so the pattern alone admits
+ * `feature/../x`; the segment is refused separately below. Anything else that fails
+ * this is refused OUT LOUD and left `null` — never repaired into the shape it
+ * nearly had, which is the whole point of reading a declaration rather than
+ * guessing at one.
+ */
+const TRACKER_GRAMMAR = /^feature\/[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*$/;
+
+/**
+ * AN ISSUE NUMBER, wherever this module reads one: bare positive digits, no leading
+ * zero. Spelled ONCE and composed into the three patterns below, so the block key and
+ * the prose line cannot drift into disagreeing about what a number is — which they
+ * had, measured: `parent: 007` and `Parent: #007` both became `7` through `Number()`,
+ * and `Parent: #0` became `0`, a value the block key's own refused list already names.
+ *
+ * A leading zero is REFUSED, not normalised, on R967-1's own rule for the other two
+ * keys: a declaration is read, never repaired. `7` is not the byte the author wrote,
+ * and a parser that quietly decides they meant a different issue than the one they
+ * typed is the failure mode this whole channel exists to stop.
+ */
+const ISSUE_NUMBER = String.raw`[1-9]\d*`;
+
+/** The `parent:` BLOCK key. A key that is present and fails this is MALFORMED and is
+ *  said as `parent-grammar` — unlike a prose line, which is simply not a declaration. */
+const PARENT_KEY_GRAMMAR = new RegExp(String.raw`^${ISSUE_NUMBER}$`);
+
+/**
+ * A parent declared in PROSE: line-initial, exact case, trailing text free (#967 Q3).
+ *
+ * Measured against the corpus rather than sketched. #881's body reads
+ * `Parent: #878 (Brain UI) — slice 3, Wave B.`, which a `$`-anchored pattern would
+ * miss entirely — the one real body this reader exists for. And the mid-line shape
+ * `Issue: #337 — M10 Phase 3. Parent: #335. Epic: #313.` must NOT match: there the
+ * parent is not the epic, and reading it would mint an edge nobody declared.
+ *
+ * No leading-whitespace tolerance, for the same reason the fence tag is exact case:
+ * a quoted or list-item `> Parent: #999` inside an example must declare nothing.
+ * `Epic: #N` is NOT a synonym — #337 carries both, naming different issues.
+ *
+ * IT IS MATCHED AGAINST PROSE, NOT AGAINST THE WHOLE BODY — see `outsideFences`.
+ *
+ * It matches to END OF LINE rather than stopping at the number, because the numbers
+ * are counted afterwards by `ISSUE_REF` and THE REST OF THE LINE has to be counted
+ * too: `Parent: #878, #879` is two values for one key, and a pattern that stopped at
+ * the first one resolved it to 878 BY WRITING ORDER — the first-match-wins guess this
+ * requirement already refuses when the two numbers are on two lines. `\b` is still
+ * what refuses `#878x`, and it is checked before `.*` can swallow the `x`.
+ *
+ * `g` is for `matchAll`, which clones the regex rather than advancing this one.
+ */
+const PARENT_PROSE_LINE = new RegExp(String.raw`^Parent:[ \t]*#${ISSUE_NUMBER}\b.*$`, 'gm');
+
+/**
+ * Every issue reference on a line already known to declare one.
+ *
+ * The ambiguity rule is stated over the SET of numbers found, not over the count of
+ * matches, so the one-line and two-line shapes cannot disagree about what counts as a
+ * restatement: `Parent: #878 — see #878` reads 878, exactly as two `Parent: #878`
+ * lines do.
+ */
+const ISSUE_REF = new RegExp(String.raw`#(${ISSUE_NUMBER})`, 'g');
+
+/**
+ * The body with every FENCED REGION blanked out, line count preserved.
+ *
+ * The prose reader must see what a READER of the rendered page sees, which is the
+ * same argument `fenced-blocks.mjs` settles for the splitter: anywhere the reader
+ * and the author's screen disagree, the reader has fabricated something. A fence is
+ * the canonical "this is an example, not a statement" shape — it is how this very
+ * module's header illustrates the block — and #709 already refused to let an
+ * illustration and a declaration be byte-identical to the selector. The prose scan
+ * was still reading the whole body, so column zero INSIDE a fence declared a parent.
+ *
+ * MEASURED, and the third shape is the damaging one: a fenced `Parent: #999` added a
+ * parent (plain fence, and inside the `brain-graph/1` fence itself, where `Parent:`
+ * is not the block's exact-case `parent:` key); and a fenced example standing ABOVE
+ * a real `Parent:` line did not merely add one, it DELETED the real declaration by
+ * manufacturing an ambiguity with it.
+ *
+ * An UNTERMINATED fence is blanked to the end of the document, because that is how
+ * far it runs on the page — `fenced-blocks.mjs`'s own contract.
+ *
+ * Blanking rather than deleting keeps every surviving line at its own index, so
+ * nothing below a fence shifts and the `m`-anchored pattern still sees line starts.
+ * The span is derived from the splitter's own report, never re-scanned: this module
+ * grows no second fence reader (#340). `content === ''` is the one ambiguous count
+ * (zero lines, or one empty line), and it is resolved to ZERO — an UNDER-estimate, so
+ * the two lines the span may leave uncovered are an empty line and a fence
+ * delimiter, neither of which can match a `Parent:` declaration.
+ *
+ * @param {string} body
+ * @param {{content:string, line:number}[]} blocks
+ * @param {{line:number}|null} unterminated
+ * @returns {string}
+ */
+function outsideFences(body, blocks, unterminated) {
+  const lines = body.split(/\r?\n/);
+  const blank = (from, to) => { for (let i = Math.max(from, 0); i < Math.min(to, lines.length); i++) lines[i] = ''; };
+  // `line` is the 1-based OPENER; the closer sits one line past the content.
+  for (const b of blocks) blank(b.line - 1, b.line + (b.content === '' ? 0 : b.content.split('\n').length) + 1);
+  if (unterminated) blank(unterminated.line - 1, lines.length);
+  return lines.join('\n');
+}
+
 /** Node states, in the order a reader cares about them. */
 export const READY = 'ready';
 export const BLOCKED = 'blocked';
@@ -157,7 +264,10 @@ export const UNCLASSIFIED = 'unclassified';
  * envelope exists to distinguish elsewhere.
  *
  * @param {string} body
- * @returns {{ track: string|null, blocks: number[], needs: number[], files: string[] }
+ * @returns {{ track: string|null, kind: string|null, tracker: string|null,
+ *            parent: number|null, parentSource: 'block'|'prose'|null,
+ *            blocks: number[], needs: number[], files: string[],
+ *            declarationDivergences: Array<{key:string,value:string|null,reason:string}> }
  *          |{ ok: false, error: string }
  *          |null}
  */
@@ -270,7 +380,81 @@ export function parseGraphBlock(body) {
   };
 
   const track = scalar(block, 'track');
-  return { track: track ?? null, blocks: nums('blocks'), needs: nums('needs'), files: strs('files') };
+
+  // #967 D1: three further keys, read from the SAME block by the same reader. One
+  // body, one selector — a second parser function for the new keys would have to
+  // re-run the fence selection above, the most guard-heavy code in the module.
+  //
+  // `kind` takes any value verbatim and only `'epic'` ever carries meaning. There is
+  // no validation, for the same reason `scalar()` reads only the keys a caller names:
+  // unknown-key validation is nowhere in this parser, and forward compatibility is
+  // free without it.
+  //
+  // `track` and `tracker` cannot collide in either direction: `scalar`'s pattern is
+  // anchored `^<key>:`, so `^track:` never matches a `tracker:` line.
+  const kind = scalar(block, 'kind');
+
+  // D2: every malformed declaration below is SAID — one entry, naming the key, the
+  // offending text and a stable reason token. It is never dropped silently, never
+  // repaired into the value it nearly was, and never allowed to throw. `reason` is a
+  // token rather than a sentence because a later reader has to branch on it, and a
+  // reader that string-matches prose is one wording change away from going quiet.
+  const declarationDivergences = [];
+  const say = (key, value, reason) => { declarationDivergences.push({ key, value, reason }); };
+
+  const trackerRaw = scalar(block, 'tracker');
+  let tracker = trackerRaw;
+  if (trackerRaw !== null && !(TRACKER_GRAMMAR.test(trackerRaw) && !trackerRaw.includes('..'))) {
+    tracker = null;
+    say('tracker', trackerRaw, 'tracker-grammar');
+  } else if (trackerRaw !== null && kind !== 'epic') {
+    // Q7: parsed and carried, honoured nowhere. The mismatch is a said divergence and
+    // nothing more — refusing it would make a typo in `kind:` delete a declaration.
+    // A tracker already refused on grammar is `null` by now, so there is no carried
+    // value left to not-honour and this branch correctly says nothing about it.
+    say('tracker', trackerRaw, 'tracker-without-kind-epic');
+  }
+
+  // D3: the block key wins and the prose line is then NEVER READ — not even to
+  // disagree with it. A `parent:` key present but unreadable is malformed, not
+  // absent, so it does not fall through to prose either: salvaging one would make a
+  // refused declaration quietly succeed by another door.
+  const parentRaw = scalar(block, 'parent');
+  let parent = null;
+  let parentSource = null;
+  if (parentRaw !== null) {
+    if (PARENT_KEY_GRAMMAR.test(parentRaw)) {
+      parent = Number(parentRaw);
+      parentSource = 'block';
+    } else {
+      say('parent', parentRaw, 'parent-grammar');
+    }
+  } else {
+    const prose = [...new Set(
+      [...outsideFences(body, blocks, unterminated).matchAll(PARENT_PROSE_LINE)]
+        .flatMap(m => [...m[0].matchAll(ISSUE_REF)].map(r => Number(r[1]))),
+    )];
+    // DIFFERENT issues named for one key is ambiguity, and the answer is the one
+    // `parseGraphBlock` already gives for two graph blocks: stop picking. The count is
+    // over the numbers, not over the lines, so `Parent: #878, #879` on ONE line is the
+    // same refusal as the same pair on two — it was resolved to 878 by writing order
+    // until this rule was stated over the set. One number said twice, on one line or
+    // two, is a restatement rather than a disagreement: exactly one answer, so it reads.
+    if (prose.length > 1) say('parent', prose.join(', '), 'parent-ambiguous');
+    else if (prose.length === 1) { parent = prose[0]; parentSource = 'prose'; }
+  }
+
+  return {
+    track: track ?? null,
+    kind,
+    tracker,
+    parent,
+    parentSource,
+    blocks: nums('blocks'),
+    needs: nums('needs'),
+    files: strs('files'),
+    declarationDivergences,
+  };
 }
 
 /**
@@ -347,7 +531,7 @@ export const SRC_NATIVE = 'native';
  * is done or out of scope. An edge to an OPEN issue does.
  *
  * @param {Array<{number:number,title:string,labels:string[],state:string,body?:string,assignees?:string[]|null,relations?:{blocks:number[],needs:number[],foreign?:number}|null}>} issues
- * @returns {{ nodes: Array, edges: Array<{from:number,to:number,sources:string[]}>, tracks: Map, divergences: Array, relationsUnreadable: number[], blocksUnreadable: Array<{number:number,error:string}>, foreignRelations: number }}
+ * @returns {{ nodes: Array, edges: Array<{from:number,to:number,sources:string[]}>, tracks: Map, divergences: Array, declarationDivergences: Array<{number:number,key:string,value:string|number|null,reason:string}>, relationsUnreadable: number[], blocksUnreadable: Array<{number:number,error:string}>, foreignRelations: number }}
  */
 export function buildGraph(issues = []) {
   const byNumber = new Map(issues.map(i => [i.number, i]));
@@ -360,6 +544,9 @@ export function buildGraph(issues = []) {
   };
   const relationsUnreadable = [];
   const blocksUnreadable = [];
+  /** What the bodies said about their own declarations (#967 D2), stamped with the
+   * issue that said it, plus the one thing only this function can see (D5). */
+  const declarationDivergences = [];
   let foreignRelations = 0;
 
   for (const issue of issues) {
@@ -371,6 +558,7 @@ export function buildGraph(issues = []) {
     const g = parsed?.ok === false ? null : parsed;
     // `needs` → an edge INTO this node. `blocks` → an edge OUT of it. Same relation,
     // two ends; declaring either is enough.
+    for (const d of g?.declarationDivergences ?? []) declarationDivergences.push({ number: issue.number, ...d });
     for (const n of g?.needs ?? []) addEdge(`${n}->${issue.number}`, SRC_DECLARED);
     for (const b of g?.blocks ?? []) addEdge(`${issue.number}->${b}`, SRC_DECLARED);
 
@@ -397,6 +585,13 @@ export function buildGraph(issues = []) {
       labels: issue.labels ?? [],
       state: issue.state,
       track: g?.track ?? null,
+      // #967 D4: four further declared values, beside `track` and read the same way.
+      // Nothing else in the tree reads them yet — the verb and the gate that do
+      // arrive in the next two slices, and the UI's node projection is #882's.
+      kind: g?.kind ?? null,
+      tracker: g?.tracker ?? null,
+      parent: g?.parent ?? null,
+      parentSource: g?.parentSource ?? null,
       files: g?.files ?? [],
       declared: g !== null,
       sources,
@@ -405,6 +600,21 @@ export function buildGraph(issues = []) {
       // erase exactly the distinction the port was widened to carry.
       assignees: issue.assignees ?? null,
     });
+  }
+
+  // D5 / ruling 4: the one divergence no single body can see. A node named as
+  // `parent` that does not itself declare `kind: epic` is SAID — never inferred to
+  // be an epic because someone pointed at it, never a tracker, never a failure.
+  //
+  // A parent ABSENT from the set produces nothing: it may be closed or in another
+  // repository, and "not in this list" is not "not an epic" — the same distinction
+  // the native-read gate below makes for exactly the same reason.
+  const byNode = new Map(nodes.map(n => [n.number, n]));
+  for (const node of nodes) {
+    const p = node.parent === null ? undefined : byNode.get(node.parent);
+    if (p && p.kind !== 'epic') {
+      declarationDivergences.push({ number: node.number, key: 'parent', value: node.parent, reason: 'parent-not-epic' });
+    }
   }
 
   const edges = [...edgeSources].map(([k, srcs]) => {
@@ -465,5 +675,5 @@ export function buildGraph(issues = []) {
     }
   }
 
-  return { nodes, edges, tracks, divergences, relationsUnreadable, blocksUnreadable, foreignRelations };
+  return { nodes, edges, tracks, divergences, declarationDivergences, relationsUnreadable, blocksUnreadable, foreignRelations };
 }
