@@ -44,7 +44,9 @@ function read(path) {
  */
 function importSpecifiers(text) {
   const specs = [];
-  for (const m of text.matchAll(/\bimport\b[\s\S]*?\bfrom\s*['"]([^'"]+)['"]/g)) specs.push(m[1]);
+  // Anchored to one statement: the clause body may span lines but never a
+  // `;` or a quote, so a bare import cannot chain to a later `from` elsewhere.
+  for (const m of text.matchAll(/\bimport\s+[^;'"]*?\bfrom\s*['"]([^'"]+)['"]/g)) specs.push(m[1]);
   for (const m of text.matchAll(/\bimport\s*['"]([^'"]+)['"]/g)) specs.push(m[1]);
   for (const m of text.matchAll(/\bimport\s*\(\s*['"]([^'"]+)['"]/g)) specs.push(m[1]);
   return [...new Set(specs)];
@@ -104,4 +106,13 @@ test('#881: loadChange guards its answer with a request token from lib/frames.mj
   const fn = body.slice(0, body.indexOf('\n}\n') + 3);
   assert.match(fn, /const token = \w+\.next\(\)/, 'a token is taken before the fetch');
   assert.match(fn, /isCurrent\(token\)/, 'and checked after the answer, before rendering');
+});
+
+// ── cold review of #982, correction 1: the scanner must not span statements ──
+
+test('#881: importSpecifiers never chains a bare import to a later "from" in a comment, and still catches a multi-line bare package import', () => {
+  const phantom = 'import "./lib/setup.mjs";\n\n// naming convention borrowed from "lodash-es" for readability\nimport { buildX } from "./lib/x.mjs";\n';
+  assert.deepEqual(importSpecifiers(phantom).sort(), ['./lib/setup.mjs', './lib/x.mjs'], 'a word in a comment is not a specifier');
+  const multi = 'import {\n  a,\n  b,\n}\nfrom \'lodash-es\';\nimport { c } from "./lib/c.mjs";\n';
+  assert.deepEqual(importSpecifiers(multi).sort(), ['./lib/c.mjs', 'lodash-es']);
 });
