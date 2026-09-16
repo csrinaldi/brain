@@ -1367,3 +1367,29 @@ route table. PR 4 (B2, the page) can now build against a complete `GET
 
 No push, no PR (per task instructions) — branch `feat/issue-881-slice-3-lib`
 has not been pushed this run.
+
+## Slice 3 — pre-push fresh review (2026-09-16): one blocker, three minors
+
+**Blocker, `change-route.mjs` `buildReviewsTab`**: a per-PR review row that
+`reviewRows` marked `{ok:false, reason}` was skipped with `continue`, so the
+tab came back `ok:true` with an empty list — the reading of "no rounds ever
+posted" (`evidence-reader-empty-on-failure.md`, R881-9). Fixed in `bdfe86f8`:
+the tab carries `unreadable: [{pr, ok:false, reason, source:{url}}]` beside
+the readable rounds and is `ok:false` naming every thread when none could be
+read; the provenance property walks the new entries. Two tests red first;
+mutation: restoring the `continue` turns exactly those two red.
+
+**Minor, `source-guard.test.mjs`**: the forbidden-pattern list omitted
+`import.meta`; `51f0b06c` adds it, proven by injecting `import.meta.url` into
+`colour.mjs` (red) and restoring (green).
+
+**Minor, `layout.mjs`**: an edge to a number that is not a node was filtered
+silently; `caeee362` reports it in `droppedEdges: [{from, to, reason}]`, nodes
+still never dropped. Test first; mutation: emptying the collection turns
+exactly that test red.
+
+**Minor, left as is**: `colour.mjs` throws on an unknown state, deliberately.
+PR 4's renderer MUST catch per node so one unknown state cannot blank the
+canvas.
+
+Counts after this round: 135 tests under `ui/`, counted diff 699/1000.
