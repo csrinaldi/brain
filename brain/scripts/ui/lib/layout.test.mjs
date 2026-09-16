@@ -105,3 +105,15 @@ test('#881: every layout edge carries two coordinate points', () => {
     assert.equal(typeof p.y, 'number');
   }
 });
+
+// ── pre-push review of slice 3, minor: a dropped edge is said, not swallowed ──
+
+test('#881: an edge whose endpoint is not a node is reported in droppedEdges, never silently filtered; the known nodes keep their coordinates', () => {
+  const nodes = [{ number: 1 }, { number: 2 }];
+  const clean = layout({ nodes, edges: [{ from: 1, to: 2 }] });
+  const withGhost = layout({ nodes, edges: [{ from: 1, to: 2 }, { from: 2, to: 999 }] });
+  assert.deepEqual(clean.droppedEdges, []);
+  assert.deepEqual(withGhost.droppedEdges, [{ from: 2, to: 999, reason: 'unknown node' }]);
+  assert.deepEqual(withGhost.nodes, clean.nodes, 'the ghost edge changes nothing for the known nodes');
+  assert.deepEqual(withGhost.edges, clean.edges);
+});

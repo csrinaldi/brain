@@ -138,7 +138,7 @@ function computeCoordinates(layers, unlinked) {
 }
 
 /**
- * layout({nodes, edges}) -> {layers, nodes, edges, width, height, unlinked}
+ * layout({nodes, edges}) -> {layers, nodes, edges, width, height, unlinked, droppedEdges}
  * (see design.md's "Layout output" data shape). Pure — no clock, no random,
  * no DOM.
  *
@@ -148,6 +148,9 @@ export function layout({ nodes = [], edges = [] } = {}) {
   const nodeNumbers = nodes.map((n) => n.number);
   const numberSet = new Set(nodeNumbers);
   const validEdges = edges.filter((e) => numberSet.has(e.from) && numberSet.has(e.to));
+  // Said, not swallowed: an edge to a number that is not a node is reported so
+  // the page can show it (pre-push review of slice 3); nodes are never dropped.
+  const droppedEdges = edges.filter((e) => !(numberSet.has(e.from) && numberSet.has(e.to))).map((e) => ({ from: e.from, to: e.to, reason: 'unknown node' }));
 
   const inEdge = new Set();
   for (const e of validEdges) { inEdge.add(e.from); inEdge.add(e.to); }
@@ -184,5 +187,6 @@ export function layout({ nodes = [], edges = [] } = {}) {
     width,
     height,
     unlinked,
+    droppedEdges,
   };
 }
