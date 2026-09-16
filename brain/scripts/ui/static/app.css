@@ -1,0 +1,118 @@
+/*
+ * app.css — the page's whole stylesheet (#881 PR 4 / B2). No framework, no
+ * CDN, no build step (maintainer ruling, 2026-09-14): one file, served by
+ * `server.mjs` at `/app.css`.
+ *
+ * The node classes below are the OUTPUT of `lib/colour.mjs` — that module
+ * owns which class a node gets, this file owns what the class looks like.
+ * Every class `colour.mjs` can return has a rule here, plus `.node-unknown`
+ * for the one case `colour.mjs` refuses to map (it throws by design; the
+ * renderer catches per node so one unknown state cannot blank the canvas).
+ */
+
+:root {
+  --ink: #1b1b1f;
+  --muted: #5d5d6b;
+  --line: #c9c9d1;
+  --paper: #fbfbfd;
+  --warn: #8a4b00;
+  --warn-bg: #fff4e0;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font: 14px/1.45 ui-sans-serif, system-ui, sans-serif;
+  color: var(--ink);
+  background: var(--paper);
+}
+
+/* ── the status bar: the poll indicator and its two controls (R881-4) ───── */
+
+.status-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--line);
+  background: #fff;
+}
+
+.status-bar .poll-indicator { font-variant-numeric: tabular-nums; }
+.status-bar .poll-indicator.paused { color: var(--warn); }
+.status-bar button {
+  font: inherit;
+  padding: 3px 10px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: #fff;
+  cursor: pointer;
+}
+.status-bar .spacer { flex: 1; }
+
+/* ── the degradation bands: never a blank area, always a said reason ───── */
+
+.banners:empty { display: none; }
+.band {
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--warn-bg);
+  color: var(--warn);
+}
+
+/* ── the canvas ────────────────────────────────────────────────────────── */
+
+.canvas { padding: 14px; overflow: auto; }
+.canvas .said { margin: 0 0 10px; color: var(--warn); }
+.canvas .said-list { margin: 0 0 10px 18px; color: var(--warn); padding: 0; }
+
+.edge { stroke: #8d8d99; stroke-width: 1.4; fill: none; }
+.edge.reversed { stroke-dasharray: 5 4; }
+
+.node { cursor: pointer; }
+.node rect { stroke: #6a6a78; stroke-width: 1.2; rx: 6; }
+.node text { font-size: 11px; fill: var(--ink); pointer-events: none; }
+.node .mark { font-size: 10px; fill: var(--warn); }
+.node.selected rect { stroke: #1b1b1f; stroke-width: 2.4; }
+
+.node.state-planned rect { fill: #eef1f8; }
+.node.state-in-flight rect { fill: #d8ecff; }
+.node.state-done rect { fill: #d9f2e0; }
+.node.status-ready rect { fill: #e7f5ea; }
+.node.status-blocked rect { fill: #ffd9d4; }
+.node.status-awaiting-review rect { fill: #ffe9b8; }
+.node.status-unclassified rect { fill: #ececf2; stroke-dasharray: 4 3; }
+.node.status-unreadable rect { fill: #f3e3f6; stroke-dasharray: 2 2; }
+.node.roadmap-not-computed rect { fill: #fff; stroke-dasharray: 6 3; }
+.node.node-unknown rect { fill: #fff; stroke: var(--warn); stroke-dasharray: 1 3; }
+
+/* ── the inspector drawer: four tabs, every value with its source ───────── */
+
+.drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  width: min(520px, 100%);
+  height: 100%;
+  overflow: auto;
+  padding: 14px 16px;
+  border-left: 1px solid var(--line);
+  background: #fff;
+  box-shadow: -2px 0 8px rgba(0, 0, 0, 0.08);
+}
+.drawer[hidden] { display: none; }
+.drawer h2 { margin: 0 0 8px; font-size: 16px; }
+.drawer .tabs { display: flex; gap: 6px; margin-bottom: 10px; }
+.drawer .tabs button[aria-selected='true'] { background: #eef1f8; font-weight: 600; }
+.drawer .card {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+}
+.drawer .card.pending { border-style: dashed; }
+.drawer .source { display: block; margin-top: 4px; font-size: 11px; color: var(--muted); word-break: break-all; }
+.drawer .said { color: var(--warn); }
+.drawer .note { color: var(--muted); font-size: 12px; }
+.drawer .close { float: right; }
