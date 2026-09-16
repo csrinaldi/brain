@@ -41,22 +41,37 @@ function fakeScheduler() {
   };
 }
 
-// ── R881-4 S1: unchanged issues cost nothing on the next poll ──────────────
+// ── R881-4 S1: an unchanged issue never costs a poll of its own ───────────
+//
+// The claim ruling 2 actually bought is that the body lane's cost does not
+// scale with the number of open issues: N unchanged issues do NOT produce N
+// `issueView` calls. It is not "zero calls" — the least-recently-refreshed
+// catch-up (design.md Q1/D2 (c)) still spends its B = 5 share, because a body
+// edit that moves no list-level field is invisible to the fast lane and would
+// otherwise never be re-read at all. N = 60 here precisely so a bounded tick
+// and an unconditional re-fetch cannot be confused for one another.
 
-test('#881: R881-4 S1 — unchanged issues cost nothing on the next poll', async () => {
+test('#881: R881-4 S1 — N unchanged issues cost at most B calls on the next poll, not N', async () => {
+  const scheduler = fakeScheduler();
   const now = { t: 0 };
   const callLog = [];
-  const issues = Array.from({ length: 6 }, (_, i) => ({ number: i + 1, title: `t${i + 1}`, labels: [], assignees: [] }));
+  const BODY_CAP = 5;
+  const ISSUE_COUNT = 60;
+  const issues = Array.from({ length: ISSUE_COUNT }, (_, i) => ({ number: i + 1, title: `t${i + 1}`, labels: [], assignees: [] }));
   const vcs = makeVcs({ callLog, issues });
-  const poller = createPoller({ vcs, cache: createForgeCache(), project: 'o/r', _now: () => new Date(now.t) });
+  const poller = createPoller({
+    vcs, cache: createForgeCache(), project: 'o/r', interval: 60000,
+    _setTimeout: scheduler.setTimeout, _clearTimeout: scheduler.clearTimeout, _now: () => new Date(now.t),
+  });
 
-  await poller.once(); // cold start — every issue's body is fetched once
-  assert.equal(callLog.filter((c) => c.startsWith('issueView:')).length, 6);
+  await poller.start(); // cold start — every issue's body is fetched once
+  assert.equal(callLog.filter((c) => c.startsWith('issueView:')).length, ISSUE_COUNT);
 
   callLog.length = 0;
   now.t += 60000;
-  await poller.once(); // nothing in issueList changed
-  assert.equal(callLog.filter((c) => c.startsWith('issueView:')).length, 0, 'no per-issue issueView call for any of the unchanged issues');
+  await scheduler.runNext(); // nothing in issueList changed
+  const spent = callLog.filter((c) => c.startsWith('issueView:'));
+  assert.equal(spent.length, BODY_CAP, 'the second poll re-reads only the B least-recently-refreshed bodies, never one call per unchanged issue');
   poller.close();
 });
 
@@ -382,6 +397,181 @@ test('#881: Q1/D2 — 30 simulated ticks hold the budget: cold start once, then 
     const spent = callLog.length - before;
     assert.equal(spent, 2 + Math.min(PR_COUNT, 10) + 5, `steady tick ${i + 2}: 2 + min(P,10) + B`);
   }
+
+  poller.close();
+});
+
+// ── judgment:cold-1 (tracker PR #970): a bulk import drains, and the ───────
+// least-recently-refreshed bucket is never foreclosed
+//
+// Two halves of one hole in `pickBodyTargets()`:
+//
+// (1) `newNumbers` was capped at NEW_BODY_CAP=20 and the overflow was simply
+//     DROPPED. An issue in the overflow has `prev === undefined`, so the
+//     `changed` check could never queue it either; by the end of that same
+//     tick it is recorded in `previousIssues` and stops being new. Its body
+//     was never fetched and never would be — `forge-cache` misses on it
+//     forever and the node renders permanently `status: UNREADABLE`.
+//
+// (2) The early return fired when nothing was new and nothing was pending,
+//     BEFORE the `rest` bucket was computed. design.md:96-100 promises (c) a
+//     least-recently-refreshed catch-up "to bound staleness of body-only
+//     facts"; the early return foreclosed it, so a body edit that moves no
+//     list-level field was invisible until something else happened to move.
+//     That is also what left the overflow of (1) unreachable.
+
+test('#881: a bulk import of new issues beyond NEW_BODY_CAP queues the overflow and drains it under the per-tick bound', async () => {
+  const scheduler = fakeScheduler();
+  const now = { t: 0 };
+  const callLog = [];
+  const NEW_BODY_CAP = 20;
+  const BODY_CAP = 5;
+  const BOUND = BODY_CAP + NEW_BODY_CAP;
+
+  const cold = Array.from({ length: 5 }, (_, i) => ({ number: i + 1, title: `old ${i + 1}`, labels: [], assignees: [] }));
+  const imported = Array.from({ length: 30 }, (_, i) => ({ number: 100 + i, title: `imported ${100 + i}`, labels: [], assignees: [] }));
+  let issues = cold;
+  const vcs = {
+    issueList: async () => { callLog.push('issueList'); return issues.map((r) => ({ ...r })); },
+    mrList: async () => { callLog.push('mrList'); return []; },
+    issueView: async ({ number }) => { callLog.push(`issueView:${number}`); return { number, body: 'b' }; },
+    prReviews: async () => [],
+  };
+  const poller = createPoller({
+    vcs, cache: createForgeCache(), project: 'o/r', interval: 60000,
+    _setTimeout: scheduler.setTimeout, _clearTimeout: scheduler.clearTimeout, _now: () => new Date(now.t),
+  });
+
+  const bodiesSince = (from) => callLog.slice(from).filter((c) => c.startsWith('issueView:')).map((c) => Number(c.split(':')[1]));
+
+  await poller.start(); // tick 1 — cold start over the 5 pre-existing issues
+  assert.deepEqual(bodiesSince(0).sort((a, b) => a - b), [1, 2, 3, 4, 5], 'cold start fetches every open body once');
+
+  issues = [...cold, ...imported]; // the bulk import lands between tick 1 and tick 2
+  let mark = callLog.length;
+  now.t += 60000;
+  await scheduler.runNext(); // tick 2
+  const tick2 = bodiesSince(mark);
+  assert.ok(tick2.length <= NEW_BODY_CAP, `tick 2 spent ${tick2.length} issueView calls on brand-new issues, over the NEW_BODY_CAP of ${NEW_BODY_CAP}`);
+
+  const seen = new Set(tick2);
+  const drainTicks = Math.ceil((imported.length - NEW_BODY_CAP) / BODY_CAP);
+  for (let i = 0; i < drainTicks; i++) {
+    mark = callLog.length;
+    now.t += 60000;
+    await scheduler.runNext();
+    const spent = bodiesSince(mark);
+    assert.ok(spent.length <= BOUND, `a drain tick spent ${spent.length} issueView calls, over the ${BOUND} per-tick bound`);
+    for (const n of spent) seen.add(n);
+  }
+
+  const neverFetched = imported.map((r) => r.number).filter((n) => !seen.has(n));
+  assert.deepEqual(neverFetched, [], `every imported issue must have its body fetched within ${drainTicks} ticks of the import; these never were`);
+
+  poller.close();
+});
+
+test('#881: with nothing new and nothing changed, the body lane still refreshes up to BODY_CAP least-recently-refreshed bodies, oldest first', async () => {
+  const scheduler = fakeScheduler();
+  const now = { t: 0 };
+  const callLog = [];
+  const BODY_CAP = 5;
+  const ISSUE_COUNT = 12;
+
+  const rows = Array.from({ length: ISSUE_COUNT }, (_, i) => ({ number: i + 1, title: `issue ${i + 1}`, labels: [], assignees: [] }));
+  const moveRow = (number) => { const r = rows.find((x) => x.number === number); r.labels = ['moved']; };
+  const vcs = {
+    issueList: async () => {
+      callLog.push('issueList');
+      return rows.map((r) => ({ ...r }));
+    },
+    mrList: async () => { callLog.push('mrList'); return []; },
+    issueView: async ({ number }) => { callLog.push(`issueView:${number}`); return { number, body: 'b' }; },
+    prReviews: async () => [],
+  };
+  const poller = createPoller({
+    vcs, cache: createForgeCache(), project: 'o/r', interval: 60000,
+    _setTimeout: scheduler.setTimeout, _clearTimeout: scheduler.clearTimeout, _now: () => new Date(now.t),
+  });
+
+  const bodiesSince = (from) => callLog.slice(from).filter((c) => c.startsWith('issueView:')).map((c) => Number(c.split(':')[1]));
+
+  await poller.start(); // tick 1 — every body refreshed, so every issue's refresh tick is 1
+
+  for (const n of [1, 2, 3]) moveRow(n); // tick 2 moves three rows, permanently; whatever tick 2 touches is now fresher than the rest
+  let mark = callLog.length;
+  now.t += 60000;
+  await scheduler.runNext();
+  const refreshedOnTick2 = new Set(bodiesSince(mark));
+
+  // tick 3 — the list is byte-for-byte what tick 2 already recorded: nothing moved
+  mark = callLog.length;
+  now.t += 60000;
+  await scheduler.runNext();
+  const tick3 = bodiesSince(mark);
+
+  assert.equal(tick3.length, BODY_CAP, 'the least-recently-refreshed catch-up (design.md:96-100 (c)) still spends its B=5 share when no row moved');
+  const stale = tick3.filter((n) => refreshedOnTick2.has(n));
+  assert.deepEqual(stale, [], 'the catch-up takes the oldest refresh ticks first — it must not re-read a body tick 2 just refreshed while older ones wait');
+
+  poller.close();
+});
+
+// The (c) bucket alone is NOT enough to save a bulk import's overflow, which
+// is why the overflow is queued as well: `rest`'s share is
+// `BODY_CAP - new - changed`, so a forge with sustained churn — every tick
+// saturating the `changed` bucket — leaves it at zero forever and a
+// never-fetched number starves indefinitely, exactly the permanent
+// `UNREADABLE` the tracker review found. Queueing the overflow puts it AHEAD
+// of that churn in the FIFO instead of behind it.
+
+test('#881: a queued import overflow drains ahead of later churn, even while the changed bucket is saturated every tick', async () => {
+  const scheduler = fakeScheduler();
+  const now = { t: 0 };
+  const callLog = [];
+  const NEW_BODY_CAP = 20;
+  const BOUND = 25; // BODY_CAP + NEW_BODY_CAP
+
+  const existing = Array.from({ length: 40 }, (_, i) => ({ number: i + 1, title: `old ${i + 1}`, labels: [], assignees: [] }));
+  const imported = Array.from({ length: 30 }, (_, i) => ({ number: 100 + i, title: `imported ${100 + i}`, labels: [], assignees: [] }));
+  let importLanded = false;
+  let churn = 0;
+  const vcs = {
+    issueList: async () => {
+      callLog.push('issueList');
+      const rows = existing.map((r) => ({ ...r, labels: churn > 0 ? [`churn-${churn}`] : [] }));
+      return importLanded ? [...rows, ...imported.map((r) => ({ ...r }))] : rows;
+    },
+    mrList: async () => { callLog.push('mrList'); return []; },
+    issueView: async ({ number }) => { callLog.push(`issueView:${number}`); return { number, body: 'b' }; },
+    prReviews: async () => [],
+  };
+  const poller = createPoller({
+    vcs, cache: createForgeCache(), project: 'o/r', interval: 60000,
+    _setTimeout: scheduler.setTimeout, _clearTimeout: scheduler.clearTimeout, _now: () => new Date(now.t),
+  });
+
+  const bodiesSince = (from) => callLog.slice(from).filter((c) => c.startsWith('issueView:')).map((c) => Number(c.split(':')[1]));
+
+  await poller.start(); // tick 1 — cold start over the 40 pre-existing issues
+
+  importLanded = true;
+  let mark = callLog.length;
+  now.t += 60000;
+  await scheduler.runNext(); // tick 2 — 30 arrive at once; 20 are fetched, 10 overflow
+  const tick2 = bodiesSince(mark);
+  assert.equal(tick2.length, NEW_BODY_CAP, 'tick 2 spends exactly the new-issue cap');
+  const overflow = imported.map((r) => r.number).filter((n) => !tick2.includes(n));
+  assert.equal(overflow.length, 10, 'ten imported issues did not fit tick 2');
+
+  churn = 1; // from here on every one of the 40 pre-existing rows moves on every tick
+  mark = callLog.length;
+  now.t += 60000;
+  await scheduler.runNext(); // tick 3 — the changed bucket is saturated, so `rest` gets nothing
+  const tick3 = bodiesSince(mark);
+  assert.ok(tick3.length <= BOUND, `tick 3 spent ${tick3.length} issueView calls, over the ${BOUND} per-tick bound`);
+  const starved = overflow.filter((n) => !tick3.includes(n));
+  assert.deepEqual(starved, [], 'the queued overflow is drained FIFO ahead of the churn that arrived after it');
 
   poller.close();
 });
