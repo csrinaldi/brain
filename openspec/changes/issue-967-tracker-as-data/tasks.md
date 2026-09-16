@@ -163,7 +163,7 @@ and R967-10's "no `needs`-edge parent fallback" scenario.
       is what the mutation kills.
 - [x] A5b. `brain/scripts/status/epic-render.mjs`: implement the optional
       parameter (+1 line at the formatter) so A5a passes.
-- [ ] A6a. `brain/scripts/status/snapshot.test.mjs`: a **new** fake-port case
+- [x] A6a. `brain/scripts/status/snapshot.test.mjs`: a **new** fake-port case
       beside `:133-167` — `#5` declares `kind: epic` + `tracker: feature/brain-ui`,
       `#6` declares a block and a line-initial `Parent: #5`; assert both nodes'
       four fields and that `JSON.parse(JSON.stringify(s))` still deep-equals `s`
@@ -174,7 +174,14 @@ and R967-10's "no `needs`-edge parent fallback" scenario.
       `assert.notDeepEqual(n6, u6)` at `:213` still holds (R967-3 S3).
       **Mutation**: omitting the four fields from the reset turns the unreadable
       case red. `snapshot-cli.test.mjs` is **not touched** (design D6).
-- [ ] A6b. `brain/scripts/status/snapshot.mjs:211-212`: add `kind: null,
+      *Measured — the stated mutation does NOT hold, and the test says so.*
+      `readForge` substitutes `body: ''` for a body it could not read
+      (`snapshot.mjs:208`), so the parse is `null` and all four fields arrive `null`
+      before the reset runs. They join `track`, `files` and `sources`, already in
+      that same reset and already equally free: the reset is the written guarantee,
+      not the mechanism. The assertion is pinned and LABELLED "already green",
+      the module's own precedent for exactly this shape.
+- [x] A6b. `brain/scripts/status/snapshot.mjs:211-212`: add `kind: null,
       tracker: null, parent: null, parentSource: null` to the unreadable-node
       reset so A6a passes. `declarationDivergences` needs no line — `graph` is
       built with `...g` at `:224`.

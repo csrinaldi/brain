@@ -208,8 +208,16 @@ async function readForge({ vcs, project }) {
       issues.push({ number: i.number, title: i.title, labels: i.labels ?? [], state: 'open', body: full?.body ?? '', assignees: i.assignees ?? full?.assignees ?? null });
     }
     const g = buildGraph(issues);
+    // The reset enumerates EVERY field a body would have contributed, so an
+    // unreadable node can never carry one. #967 adds `kind`, `tracker`, `parent` and
+    // `parentSource` to that list: a node whose body nobody could read must not
+    // report a tracker or a parent it never declared.
+    //
+    // `declarationDivergences` needs no line here — it is graph-level, `graph` is
+    // built with `...g` below, and an unreadable body enters `buildGraph` as `body:
+    // ''`, so it contributes none.
     const nodes = g.nodes.map((n) => (unreadable.has(n.number)
-      ? { ...n, ok: false, reason: `the issue body could not be read: ${unreadable.get(n.number)}`, status: UNREADABLE, declared: null, track: null, files: [], sources: [] }
+      ? { ...n, ok: false, reason: `the issue body could not be read: ${unreadable.get(n.number)}`, status: UNREADABLE, declared: null, track: null, kind: null, tracker: null, parent: null, parentSource: null, files: [], sources: [] }
       : { ...n, ok: true }));
     // `tracks` is a Map, which JSON drops to `{}`; the verb and the module must
     // print one shape, so it is a sorted object of member numbers here. An
