@@ -39,11 +39,18 @@ export const WORKTREE_FLAG = '--worktree';
  *  the default they never chose. */
 export const IN_PLACE_FLAG = '--in-place';
 
+/** The named opt-out off an epic's declared tracker (#967). Not a mode: a
+ *  statement that this branch deliberately does not start where its epic says,
+ *  which is why the refusal points at it by name. It takes no value, so the id
+ *  rule below is untouched by it. */
+export const OFF_TRACKER_FLAG = '--off-tracker';
+
 /**
  * parseTicketArgs() — argv in, intent out. PURE.
  *
  * @param {string[]} argv
- * @returns {{ok: true, id: string, baseBranch: string, useWorktree: boolean}
+ * @returns {{ok: true, id: string, baseBranch: string, baseExplicit: boolean,
+ *            offTracker: boolean, useWorktree: boolean}
  *          | {ok: false, error: 'usage'|'base-requires-arg'|'contradictory-modes'}}
  */
 export function parseTicketArgs(argv = []) {
@@ -61,6 +68,14 @@ export function parseTicketArgs(argv = []) {
   const baseBranch = baseIdx >= 0 ? args[baseIdx + 1] : 'main';
   if (baseIdx >= 0 && !baseBranch) return { ok: false, error: 'base-requires-arg' };
 
+  // THE DEFAULT SURVIVES AND THE FACT IS ADDED BESIDE IT (#967). `baseBranch`
+  // answers "what base"; it cannot answer "did anyone ask", and an explicit
+  // `--base main` against an epic that declares a tracker is refused while an
+  // absent `--base` is resolved from that epic. Making the default `null`
+  // instead would push it back into `ticket-start.mjs` — the direction #782
+  // moved it away from, for the reason written at the top of this file.
+  const baseExplicit = baseIdx >= 0;
+
   // The id is the first numeric argument that is NOT `--base`'s value: a tracker
   // branch may legitimately be all digits.
   const id = args.find((a, i) => /^\d+$/.test(a) && (baseIdx < 0 || i !== baseIdx + 1));
@@ -68,5 +83,12 @@ export function parseTicketArgs(argv = []) {
 
   // THE DEFAULT IS THE FIX. `--worktree` stays accepted and means what it always
   // meant; it is simply no longer load-bearing.
-  return { ok: true, id, baseBranch, useWorktree: !askedInPlace };
+  return {
+    ok: true,
+    id,
+    baseBranch,
+    baseExplicit,
+    offTracker: args.includes(OFF_TRACKER_FLAG),
+    useWorktree: !askedInPlace,
+  };
 }

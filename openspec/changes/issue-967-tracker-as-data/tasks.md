@@ -259,7 +259,7 @@ merges. Depends on A: `resolveBase` reads `parseGraphBlock`'s new `parent`,
 `kind` and `tracker`. Estimated **155–185 counted source lines, ≈360 review
 lines**. Closes R967-5, R967-6, R967-9's resolver half.
 
-- [ ] B1a. `brain/scripts/lib/ticket-args.test.mjs`: three added tests —
+- [x] B1a. `brain/scripts/lib/ticket-args.test.mjs`: three added tests —
       `parseTicketArgs(['881'])` returns `baseExplicit: false` and
       `parseTicketArgs(['881','--base','main'])` returns `baseExplicit: true`,
       both still `baseBranch: 'main'` (R967-6 S1); `--off-tracker` sets
@@ -268,7 +268,7 @@ lines**. Closes R967-5, R967-6, R967-9's resolver half.
       untouched and green. **Mutation**: returning `baseBranch: null` when absent
       turns those four existing assertions red — the measured reason the flag
       exists (design Q1).
-- [ ] B1b. `brain/scripts/lib/ticket-args.mjs`: add
+- [x] B1b. `brain/scripts/lib/ticket-args.mjs`: add
       `export const OFF_TRACKER_FLAG = '--off-tracker'`,
       `baseExplicit: baseIdx >= 0` and `offTracker: args.includes(OFF_TRACKER_FLAG)`,
       keeping `baseBranch`'s `'main'` default at `:60-61`, so B1a passes.
