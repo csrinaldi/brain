@@ -23,6 +23,9 @@ export function initialPageState() {
     snapshot: null,
     meta: null,
     stream: { ok: false, reason: 'the live stream has not connected yet' },
+    // The poll buttons' own health, separate from the transport's: a control
+    // that did not take says nothing about whether the page is live (R881-4).
+    controls: { ok: true },
     refs: [],
     lastFrameAt: null,
   };
@@ -89,6 +92,11 @@ export function parseFrame(text) {
 /** The transport failed (an `EventSource` error): keep every value, say why it is no longer live. */
 export function streamFailed(state, reason) {
   return { ...state, stream: { ok: false, reason } };
+}
+
+/** A poll control's POST failed. Distinct from `streamFailed`: the transport is fine, the button is not. */
+export function controlFailed(state, { action, reason }) {
+  return { ...state, controls: { ok: false, action, reason } };
 }
 
 /**

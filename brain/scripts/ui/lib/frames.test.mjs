@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { initialPageState, applyFrame, parseFrame, streamFailed, sectionOf } from './frames.mjs';
+import { initialPageState, applyFrame, parseFrame, streamFailed, controlFailed, sectionOf } from './frames.mjs';
 
 const snapshot = (over = {}) => ({ generatedAt: '2026-09-16T00:00:00Z', graph: { ok: true, value: { nodes: [], edges: [] } }, changes: { ok: true, value: [] }, ...over });
 const meta = (over = {}) => ({ project: 'o/r', watcher: { ok: true, watched: 3, failed: [] }, poller: { paused: false, lastPolledAt: '2026-09-16T00:00:00Z', lastOkAt: '2026-09-16T00:00:00Z', lastError: null, forgeAsOf: {} }, ...over });
@@ -100,6 +100,15 @@ test('#881: R881-9 — a dropped stream keeps the last snapshot and states the r
   assert.equal(dropped.snapshot, live.snapshot, 'previous values stay on screen');
   assert.equal(dropped.stream.ok, false);
   assert.match(dropped.stream.reason, /the connection closed/);
+});
+
+test('#881 R881-4: a poll control that failed is its own reason — the stream stays live and every value stays on screen', () => {
+  const live = applyFrame(initialPageState(), 'sync', { generatedAt: 'a', snapshot: snapshot(), meta: meta() });
+  const after = controlFailed(live, { action: 'once', reason: 'POST /api/poll/once answered 503' });
+  assert.deepEqual(after.controls, { ok: false, action: 'once', reason: 'POST /api/poll/once answered 503' });
+  assert.deepEqual(after.stream, { ok: true }, 'a button that did not take must not be reported as a dropped stream');
+  assert.equal(after.snapshot, live.snapshot);
+  assert.deepEqual(initialPageState().controls, { ok: true }, 'nothing has failed before anything has been pressed');
 });
 
 test('#881: sectionOf never returns undefined — a missing section is a stated reason, not a blank area', () => {

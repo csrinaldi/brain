@@ -32,6 +32,15 @@ export function pollBanner({ lastOkAt, lastPolledAt, lastError }) {
 }
 
 /**
+ * R881-4: a poll control's own POST failed. The stream is untouched and the
+ * values on screen are current — only the button did not take, so this is
+ * said as its own fact rather than as "the live stream dropped".
+ */
+export function controlBanner({ action, reason }) {
+  return `the "${action}" poll control failed: ${reason} — polling is unchanged and the page is still live.`;
+}
+
+/**
  * R881-9 S1: every section the snapshot could not compute, named with its
  * reason — including the ones no view on this page renders. A section that
  * fails silently is exactly the shape this repo has already paid for.
@@ -46,11 +55,12 @@ export function failedSections(snapshot) {
 /**
  * degradationBands({stream, meta, snapshot}) -> [{id, text, detail?}], in the
  * order the page shows them: the transport first (it explains why everything
- * else may be stale), then the watcher, then the poller, then the sections.
+ * else may be stale), then the controls, the watcher, the poller, the sections.
  */
-export function degradationBands({ stream, meta, snapshot }) {
+export function degradationBands({ stream, controls, meta, snapshot }) {
   const bands = [];
   if (stream && stream.ok === false) bands.push({ id: 'stream', text: stream.reason });
+  if (controls && controls.ok === false) bands.push({ id: 'controls', text: controlBanner(controls) });
   if (meta?.watcher && meta.watcher.ok === false) {
     bands.push({
       id: 'watcher',

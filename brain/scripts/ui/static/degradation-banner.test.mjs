@@ -35,7 +35,7 @@ test('#881 T3a / R881-9 S2: the poll-failure band is the design\'s sentence, unc
 
 test('#881 T3a: app.js wires the band builders into the page instead of writing its own sentences', () => {
   assert.match(APP_JS, /import \{[^}]*degradationBands[^}]*\} from '\.\/lib\/banners\.mjs'/, 'the bands come from the tested module');
-  assert.match(APP_JS, /degradationBands\(\{ stream: state\.stream, meta: state\.meta, snapshot: state\.snapshot \}\)/, 'every input the bands need is passed: transport, watcher/poller meta, and the snapshot sections');
+  assert.match(APP_JS, /degradationBands\(\{ stream: state\.stream, controls: state\.controls, meta: state\.meta, snapshot: state\.snapshot \}\)/, 'every input the bands need is passed: transport, poll controls, watcher/poller meta, and the snapshot sections');
   assert.ok(!/the watcher failed:/.test(APP_JS), 'the sentence must not be duplicated in the browser file — one owner, one test');
   assert.ok(!/last poll failed:/.test(APP_JS), 'the sentence must not be duplicated in the browser file — one owner, one test');
 });
@@ -43,6 +43,12 @@ test('#881 T3a: app.js wires the band builders into the page instead of writing 
 test('#881 R881-9: app.js parses a stream frame through the tested parser, never with a bare JSON.parse in the listener', () => {
   assert.match(APP_JS, /parseFrame\(/, 'a parse that throws inside the EventSource callback loses the frame AND says nothing');
   assert.ok(!/JSON\.parse\(/.test(APP_JS), 'the browser file must not parse a frame itself — the parse is a tested value in lib/frames.mjs');
+});
+
+test('#881 R881-4: a failed poll control goes to its own band, not to the stream band', () => {
+  assert.match(APP_JS, /controlFailed\(state,/, 'postPoll must report a control failure as a control failure');
+  assert.ok(!/state = streamFailed\(state, `the poll control/.test(APP_JS), 'a button that did not take must not be rendered as "the live stream dropped"');
+  assert.match(APP_JS, /degradationBands\(\{[^}]*controls: state\.controls/, 'the band builder must be given the control state, or the reason is held and never shown');
 });
 
 test('#881 R881-9: every {ok:false} branch in the page renders the reason, so no failure can show as an empty area', () => {

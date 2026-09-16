@@ -12,7 +12,7 @@
 // `/lib/<module>.mjs` route, which serves the very same files node imports.
 // No bundler, no dependency, no CDN (maintainer ruling, 2026-09-14).
 
-import { initialPageState, applyFrame, parseFrame, streamFailed, sectionOf } from './lib/frames.mjs';
+import { initialPageState, applyFrame, parseFrame, streamFailed, controlFailed, sectionOf } from './lib/frames.mjs';
 import { degradationBands, pollIndicator } from './lib/banners.mjs';
 import { buildCanvasModel } from './lib/canvas-model.mjs';
 import { buildDrawerModel } from './lib/drawer-model.mjs';
@@ -87,7 +87,7 @@ function render() {
 /** R881-9: one band per degraded thing, each one BESIDE the data, never instead of it. */
 function renderBands() {
   clear(mounts.banners);
-  for (const band of degradationBands({ stream: state.stream, meta: state.meta, snapshot: state.snapshot })) {
+  for (const band of degradationBands({ stream: state.stream, controls: state.controls, meta: state.meta, snapshot: state.snapshot })) {
     const node = el('div', 'band');
     node.appendChild(el('span', null, band.text));
     if (band.detail?.length) {
@@ -280,9 +280,11 @@ async function postPoll(action) {
   try {
     const res = await fetch(`/api/poll/${action}`, { method: 'POST' });
     if (!res.ok) throw new Error(`POST /api/poll/${action} answered ${res.status}`);
-    state = { ...state, meta: { ...(state.meta ?? {}), poller: await res.json() } };
+    state = { ...state, controls: { ok: true }, meta: { ...(state.meta ?? {}), poller: await res.json() } };
   } catch (err) {
-    state = streamFailed(state, `the poll control failed: ${err.message}`);
+    // Its own band: the stream is still connected and every value on screen
+    // is still current — only this button did not take (R881-4).
+    state = controlFailed(state, { action, reason: err.message });
   }
   render();
 }

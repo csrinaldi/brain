@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { watcherBanner, pollBanner, degradationBands, failedSections, pollIndicator } from './banners.mjs';
+import { watcherBanner, pollBanner, controlBanner, degradationBands, failedSections, pollIndicator } from './banners.mjs';
 
 const NOW = Date.parse('2026-09-16T12:00:00Z');
 const at = (secondsAgo) => new Date(NOW - secondsAgo * 1000).toISOString();
@@ -46,6 +46,23 @@ test('#881 R881-9: a failed watcher keeps polling and shows the band with the pa
   assert.equal(bands[0].id, 'watcher');
   assert.equal(bands[0].text, watcherBanner('2 watch(es) failed'));
   assert.deepEqual(bands[0].detail, ['/r/a: ENOENT', '/r/b: EPERM'], 'which watches failed is the fact an operator needs');
+});
+
+test('#881 R881-4: a poll control that failed names the control, and never claims the stream dropped', () => {
+  const text = controlBanner({ action: 'once', reason: 'POST /api/poll/once answered 503' });
+  assert.equal(text, 'the "once" poll control failed: POST /api/poll/once answered 503 — polling is unchanged and the page is still live.');
+});
+
+test('#881 R881-4: a failed control is its own band, beside a live stream — not a stream-failure band', () => {
+  const bands = degradationBands({
+    stream: { ok: true },
+    controls: { ok: false, action: 'pause', reason: 'POST /api/poll/pause answered 500' },
+    meta: meta(),
+    snapshot: {},
+  });
+  assert.deepEqual(bands.map((b) => b.id), ['controls'], 'a button that did not take is not a transport that dropped');
+  assert.equal(bands[0].text, controlBanner({ action: 'pause', reason: 'POST /api/poll/pause answered 500' }));
+  assert.ok(!/stream/.test(bands[0].text), `the control band must not mention the stream: ${bands[0].text}`);
 });
 
 test('#881 R881-9 S2: a failed poll shows its band while the watcher band stays absent', () => {
