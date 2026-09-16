@@ -193,11 +193,43 @@ and R967-10's "no `needs`-edge parent fallback" scenario.
       --issue 967 --type architecture`, staged with only the new
       `.memory/records/*.jsonl` file and `.memory/index.jsonl`.
 
-**Boundary — `ui/lib` is not in this PR.** `canvas-model.mjs` and
-`drawer-model.mjs` do not exist on `main`; `canvas-model.mjs:59-63` projects node
-fields by name, so carrying `kind`/`tracker`/`parent` there is **three added
-lines in #881 slice 4 / #882**, not here (design D6, risk R7). Naming it so it is
-a boundary and not an omission.
+**Boundary — `ui/lib` is not in this PR.** Corrected 2026-09-16 (review of PR A):
+this paragraph used to say `canvas-model.mjs` and `drawer-model.mjs` "do not
+exist on `main`", and that was FALSE — `git ls-tree -r --name-only origin/main`
+and the same over `origin/feature/issue-967` both list the two modules and their
+tests. They are untouched because they are INERT, which is a different and
+checkable fact: `canvas-model.mjs:58-68` builds its drawn node from an explicit
+object literal (`number`, `label`, `className`, `marks`, `track`, `x`, `y`, `w`,
+`h`) and never spreads the node, so it projects fields BY NAME and four new keys
+on a graph node cannot reach it; `drawer-model.mjs` reads no graph node at all.
+Carrying `kind`/`tracker`/`parent` to the canvas is **three added lines in #881
+slice 4 / #882**, not here (design D6, risk R7). Naming it so it is a boundary
+and not an omission — and naming it with the reason that is true.
+
+**Review round 1 remediation** (2026-09-16, fresh context, before push — REVISE:
+two majors, four minors, four editorials). Each item was measured before a line
+was written, fixed test-first, and its stated mutation run:
+
+- [x] A11. M2 — a column-zero `Parent:` inside a fenced block was read as a
+      declaration. The prose scan now runs over the body with every fenced region
+      blanked (the `brain-graph/1` fence and an unterminated fence included),
+      derived from `fencedBlocks`'s own report. Commit `7b2c212b`; `spec.md`
+      R967-2 amended in the same commit — the code was conformant and the SPEC was
+      the defect. Mutation: scan the raw body → exactly its own test red.
+- [x] A12. m1 — `Parent: #878, #879` on one line resolved to 878 by writing
+      order. The ambiguity rule is now stated over the SET of issue numbers, not
+      the count of lines. Commit `3c6a3336`; `spec.md` R967-2 amended. Mutation:
+      keep only the first number per line → exactly its own test red.
+- [x] A13. m2 — DECIDED: a leading zero is REFUSED as `parent-grammar`, not
+      normalised. `parent: 007` became `7` and `Parent: #0` became `0`; the
+      grammar is now spelled once and shared by the block key, the prose line and
+      the ambiguity rescan. Commit `8c941474`; `spec.md` R967-1 and R967-2 amended.
+      Mutation: grammar back to `\d+` with the old `> 0` guard → exactly its two
+      tests red.
+- [x] A14. M1 — the false absence claim in `apply-progress.md` and the stale
+      `#?<digits>` parent grammar in `design.md:141` corrected with dated notes;
+      the same false sentence in this file corrected above. m3, m4, the unmasked
+      HTML comment, e2 and e4 recorded as follow-ups in `apply-progress.md`.
 
 **Maintainer tasks after PR A merges into the tracker** (forge acts, Tier 2 —
 left unticked for the maintainer):
