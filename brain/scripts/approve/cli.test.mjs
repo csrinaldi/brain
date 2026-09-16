@@ -346,6 +346,56 @@ test('T10b: defaultReadAgentActors(tmpDir) — no config at all → returns [] (
   assert.deepEqual(defaultReadAgentActors(dir), []);
 });
 
+// ═══════════════════════════════════════════════════════════════════════════
+// issue #975: loadBrainConfigOrThrow's shape check — JSON that parses but is
+// not a plain object (`null`, `[]`, `42`, `"x"`) used to degrade exactly like
+// `{}` because every reader here uses optional chaining. `defaultReadDenyActors`
+// and `defaultReadAgentActors` call `loadBrainConfigOrThrow` unchanged, so
+// they propagate the new shape-check throw exactly like T9/T9b's parse-failure
+// throw.
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('#975: defaultReadDenyActors(tmpDir) — non-object brain.config.json ([]) → throws, names the type', () => {
+  const dir = testTmp('approve-cli-cfg-');
+  writeFileSync(join(dir, 'brain.config.json'), '[]');
+  assert.throws(
+    () => defaultReadDenyActors(dir),
+    (err) => {
+      assert.match(err.message, /brain\.config\.json/);
+      assert.match(err.message, /must contain a JSON object/);
+      assert.match(err.message, /got array/);
+      return true;
+    },
+  );
+});
+
+test('#975: defaultReadAgentActors(tmpDir) — non-object brain.config.json (null) → throws, names the type', () => {
+  const dir = testTmp('approve-cli-cfg-');
+  writeFileSync(join(dir, 'brain.config.json'), 'null');
+  assert.throws(
+    () => defaultReadAgentActors(dir),
+    (err) => {
+      assert.match(err.message, /brain\.config\.json/);
+      assert.match(err.message, /got null/);
+      return true;
+    },
+  );
+});
+
+test('#975: runApprove refuses closed when the REAL defaultReadDenyActors hits a non-object config — the real entry point, not the loader alone', async () => {
+  const dir = testTmp('approve-cli-cfg-');
+  writeFileSync(join(dir, 'brain.config.json'), '42');
+  const vcs = makeVcs();
+  const res = await runApprove(baseCtx(vcs, {
+    // Wires the REAL production reader (not a stub) against a fixture dir
+    // whose config is a non-object — proves the caller, not just the loader.
+    readDenyActorsFn: () => defaultReadDenyActors(dir),
+  })).catch((e) => ({ threw: e }));
+  assert.ok(!res.threw, `the refusal must not throw past runApprove: ${res.threw?.message}`);
+  assert.notEqual(res.exitCode, 0, 'a non-object config must refuse the approval, not let it through');
+  assert.equal(vcs.calls.prReviewComment, 0, 'without posting anything');
+});
+
 test('T11: runApprove — readDenyActorsFn throws → exitCode 1, stdout starts with ✗, promise does not reject, prReviewComment never called', async () => {
   const vcs = makeVcs();
   const res = await runApprove(baseCtx(vcs, {
