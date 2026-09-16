@@ -72,9 +72,14 @@ test('#881 T2a: app.js fetches /api/* and nothing else, and never evaluates a st
     assert.match(m[2], /^\/api\//, `app.js streams from "${m[2]}" — the page reads this server's own API only`);
   }
   assert.ok(/fetch\(/.test(text), 'app.js must actually read the API — a page that fetches nothing cannot be the SPA');
-  for (const [re, label] of [[/\beval\s*\(/, 'eval()'], [/new\s+Function\s*\(/, 'new Function()'], [/\bhttps?:\/\//, 'an absolute http(s) URL']]) {
+  for (const [re, label] of [[/\beval\s*\(/, 'eval()'], [/new\s+Function\s*\(/, 'new Function()']]) {
     assert.ok(!re.test(text), `app.js matched ${label} — forbidden in the page (no remote code, no third-party endpoint)`);
   }
+  // The ONE absolute URL the page may contain is the SVG namespace constant,
+  // which `createElementNS` requires literally: it is an identifier the
+  // browser compares by string, never a resource anything fetches.
+  const absolute = [...text.matchAll(/https?:\/\/\S*/g)].map((m) => m[0].replace(/['";,)]+$/, ''));
+  assert.deepEqual([...new Set(absolute)], ['http://www.w3.org/2000/svg'], 'the page must reach no host but this server');
 });
 
 test('#881 T2a: index.html loads no external resource, no inline handler, and no build artefact', () => {
