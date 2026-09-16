@@ -185,9 +185,9 @@ and R967-10's "no `needs`-edge parent fallback" scenario.
       tracker: null, parent: null, parentSource: null` to the unreadable-node
       reset so A6a passes. `declarationDivergences` needs no line — `graph` is
       built with `...g` at `:224`.
-- [ ] A7. Verify: `GIT_CONFIG_GLOBAL=/dev/null npm test` and
+- [x] A7. Verify: `GIT_CONFIG_GLOBAL=/dev/null npm test` and
       `npm run brain:repo:check` both green.
-- [ ] A8. `npm run memory:save -- "the brain-graph block carries kind, tracker and
+- [x] A8. `npm run memory:save -- "the brain-graph block carries kind, tracker and
       parent" "<summary of the three keys, the prose-parent reader, the
       declarationDivergences channel and the snapshot reset landed in this PR>"
       --issue 967 --type architecture`, staged with only the new
