@@ -145,13 +145,21 @@ function buildReviewsTab({ snapshot, project, issue }) {
 
   const prNumbers = new Set(snapshot.prs.value.filter((p) => p.issue === issue).map((p) => p.number));
   const rounds = [];
+  // A per-PR row can be `{pr, ok:false, reason}` (reviewRows fails per PR while
+  // the list resolves). It is SAID here, never skipped: skipping read as "no
+  // rounds ever posted" (evidence-reader-empty-on-failure.md, R881-9).
+  const unreadable = [];
   for (const row of snapshot.reviews.value) {
-    if (!prNumbers.has(row.pr) || !row.ok) continue; // an unreadable thread degrades, never crashes the tab
+    if (!prNumbers.has(row.pr)) continue;
+    if (!row.ok) { unreadable.push({ pr: row.pr, ok: false, reason: row.reason, source: { url: buildPrUrl(project, row.pr) } }); continue; }
     for (const verdict of row.verdicts) {
       rounds.push({ ...verdict, source: { url: verdict.commentUrl ?? buildPrUrl(project, row.pr) } });
     }
   }
-  return { ok: true, value: rounds, sourceNote: REVIEWS_SOURCE_NOTE };
+  if (rounds.length === 0 && unreadable.length > 0) {
+    return { ok: false, reason: `every review thread of this issue is unreadable: ${unreadable.map((u) => `#${u.pr} (${u.reason})`).join(', ')}`, unreadable, sourceNote: REVIEWS_SOURCE_NOTE };
+  }
+  return { ok: true, value: rounds, unreadable, sourceNote: REVIEWS_SOURCE_NOTE };
 }
 
 /**

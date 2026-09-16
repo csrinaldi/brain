@@ -144,6 +144,7 @@ test('#881: change-route.mjs\'s composed view — every Spec/Tasks/Working-memor
   for (const item of result.value.tasks.value) walkAndCheck(item, `change-route task item "${item.text}"`);
   for (const [key, field] of Object.entries(result.value.workingMemory.value)) walkAndCheck(field, `change-route working-memory field "${key}"`);
   for (const round of result.value.reviews.value) walkAndCheck(round, `change-route review round rev=${round.rev}`);
+  for (const u of result.value.reviews.unreadable ?? []) walkAndCheck(u, `change-route unreadable review thread pr=${u.pr}`);
 });
 
 test('#881: change-route.mjs\'s "no change dir" leaves still carry a non-empty source, naming the expected glob', () => {

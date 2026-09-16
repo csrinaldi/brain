@@ -279,3 +279,48 @@ test('#881: no snapshot supplied is a said failure, never a thrown error', () =>
   assert.equal(result.ok, false);
   assert.ok(result.reason.length > 0);
 });
+
+// ── pre-push review of slice 3, blocker: an unreadable review thread is said ──
+//
+// `reviewRows` in status/snapshot.mjs fails PER PR while the outer list still
+// resolves: a row is `{pr, ok:false, reason}`. Skipping it left the tab
+// `ok:true` with an empty list — the same reading as "no rounds ever posted"
+// (`evidence-reader-empty-on-failure.md`, R881-9).
+
+test('#881: one readable and one unreadable review thread — the rounds render and the unreadable PR is said with its reason and URL', () => {
+  const root = makeRoot();
+  const snapshot = makeSnapshot({
+    prs: [{ number: 957, title: 'x', headBranch: BRANCH, issue: ISSUE }, { number: 958, title: 'y', headBranch: 'feat/other', issue: ISSUE }],
+    reviews: [
+      { pr: 957, ok: true, verdicts: [{ pr: 957, head_sha: 'aaa1111', rev: 1, verdict: 'approve', author: 'reviewer-a', findings: 0, malformed: [] }], latest: null },
+      { pr: 958, ok: false, reason: 'thread unreadable: rate limited' },
+    ],
+  });
+  const run = recordingRun((args) => {
+    if (args[0] === 'blame') return BLAME_PORCELAIN;
+    if (args[0] === 'show') return RESUME_TEXT;
+    throw new Error(`unexpected git call: ${args.join(' ')}`);
+  });
+  const reviews = buildChangeView({ root, issue: ISSUE, snapshot, project: 'o/r', _run: run }).value.reviews;
+  assert.equal(reviews.ok, true);
+  assert.equal(reviews.value.length, 1, 'the readable round is still there');
+  assert.deepEqual(reviews.unreadable, [{ pr: 958, ok: false, reason: 'thread unreadable: rate limited', source: { url: 'https://github.com/o/r/pull/958' } }]);
+});
+
+test('#881: when every review thread of the issue is unreadable the tab is ok:false and names them — never an empty list', () => {
+  const root = makeRoot();
+  const snapshot = makeSnapshot({
+    prs: [{ number: 957, title: 'x', headBranch: BRANCH, issue: ISSUE }],
+    reviews: [{ pr: 957, ok: false, reason: 'thread unreadable: rate limited' }],
+  });
+  const run = recordingRun((args) => {
+    if (args[0] === 'blame') return BLAME_PORCELAIN;
+    if (args[0] === 'show') return RESUME_TEXT;
+    throw new Error(`unexpected git call: ${args.join(' ')}`);
+  });
+  const reviews = buildChangeView({ root, issue: ISSUE, snapshot, project: 'o/r', _run: run }).value.reviews;
+  assert.equal(reviews.ok, false);
+  assert.match(reviews.reason, /957.*rate limited/);
+  assert.equal(reviews.unreadable.length, 1);
+  assert.equal(reviews.sourceNote, REVIEWS_SOURCE_NOTE);
+});
