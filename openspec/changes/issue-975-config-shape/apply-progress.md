@@ -103,10 +103,11 @@ it has since **merged** into `origin/main` at `0dfac874`
 origin/main:brain/core/anti-patterns/evidence-reader-empty-on-failure.md`
 confirms the merged paragraph matches the draft's anchor text verbatim, so
 the draft was anchored correctly even though the PR was still open at the
-time. This branch has not been rebased past `dd3ace05`, so its doctrine
-file still predates #980 — the draft still assesses `blocked` against it
-(below); it will assess `pending` once this branch or its target rebases
-past #980's merge. #980's own PR description names this exact gap:
+time. This branch has since merged `origin/main` (merge commit `34e9c2b6`),
+so its doctrine file now carries #980's paragraph and the draft assesses
+`pending` (`f:1`, `free:1`) against it. The measurements below were taken
+before that merge, when the anchor did not yet exist here. #980's own PR
+description names this exact gap:
 "`loadBrainConfigOrThrow` still accepts JSON that parses but is not an
 object … That is #975, open and approved" — a "known gap, not closed here"
 framing that becomes stale once #975 lands. The draft appends one sentence
@@ -136,8 +137,8 @@ post-#980 (simulated) edit 1: {"state":"pending","f":1,"r":0,"k":1,"free":1}
 OK: draft parses; anchor is NOT FOUND against the real pre-#980 file (safe ordering); anchor IS pending against the simulated post-#980 file.
 ```
 
-Against the REAL current file (still pre-#980 on this branch, forked from
-`origin/main` at `dd3ace05`), the edit is `blocked` (`f:0`, find-count zero)
+Against the real file as it stood BEFORE this branch merged `origin/main`
+(forked from `dd3ace05`), the edit was `blocked` (`f:0`, find-count zero)
 — the draft's anchor genuinely does not exist yet, so promoting it now would
 be a safe no-op refusal, never a corruption. The "post-#980 (simulated)"
 text was built by applying #980's own diff (read verbatim via
@@ -166,9 +167,14 @@ OK: draft parses; blocked against the real pre-#980 file in this worktree; pendi
 Same result as the original simulated proof (`blocked` / `pending`), now
 confirmed against the actual merged text rather than a diff-applied
 simulation — the anchor matches `origin/main`'s merged paragraph verbatim.
-This branch itself has not been rebased past `dd3ace05`, so its own copy of
-the doctrine file remains pre-#980 and the draft remains unpromotable here;
-`brain:promote` was never invoked.
+
+**After merging `origin/main` into this branch (`34e9c2b6`)**, the same check
+against the worktree's own doctrine file reports
+`{"state":"pending","f":1,"r":0,"k":1,"free":1}`: the anchor now exists here
+exactly once, so the ordering constraint is satisfied and the draft is
+promotable. It stays unpromoted in this PR by the hard constraint —
+`brain:promote` was never invoked, and the promotion is a separate maintainer
+act.
 
 ## Mutation table
 
@@ -253,10 +259,11 @@ names:
 
 ## Risks
 - The doctrine draft (`brain-drafts/loader-shape-gap-closed.draft.md`) is
-  UNAPPLIED and cannot be safely promoted until PR #980 merges (proven
-  above — its anchor does not exist in the current file). Left for a human
-  decision after #980 lands, per the hard constraint never to run
-  `brain:promote` and never to edit `brain/core/**` directly.
+  UNAPPLIED. Its ordering dependency is satisfied: #980 merged and this branch
+  merged `origin/main` (`34e9c2b6`), so the anchor now matches once and the
+  edit assesses `pending`. Promotion is left to the maintainer, per the hard
+  constraint never to run `brain:promote` and never to edit `brain/core/**`
+  directly.
 - `loadBrainConfig()` is left unchanged by design (see classification
   above); if a future caller of `loadBrainConfig()` ever reads a
   DENY/exclusion list, this decision should be revisited.

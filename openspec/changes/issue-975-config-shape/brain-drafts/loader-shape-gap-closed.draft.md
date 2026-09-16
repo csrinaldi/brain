@@ -31,17 +31,16 @@
 >    the doctrine file (not the PR description, which is not doctrine) sees
 >    the closure.
 >
-> **Ordering — this draft cannot apply before this branch includes #980.**
-> The `amend-find` block is the POST-#980 paragraph text. #980 has merged
-> into `origin/main` (`0dfac874`), but this branch forked from `dd3ace05`
-> (#980's parent) and has not been rebased past it, so its copy of the
-> doctrine file is still the PRE-#980 text. `assessEdit` against that file
-> as it stands in this worktree reports the anchor NOT FOUND — proven below
-> in `apply-progress.md`, not assumed. Promoting this draft before the
-> target file includes #980 is a no-op refusal, not a silent corruption;
-> promoting it once the target rebases past #980 (or after this branch
-> merges and a fresh worktree picks up `origin/main`) is the intended use.
-> `brain:promote` was never invoked for this draft.
+> **Ordering — this draft applies only where the target includes #980.**
+> The `amend-find` block is the POST-#980 paragraph text. #980 merged into
+> `origin/main` (`0dfac874`), and this branch then merged `origin/main`
+> (`34e9c2b6`), so the target file here carries that paragraph and
+> `assessEdit` reports the anchor found exactly once (`pending`, `free: 1`) —
+> measured, not assumed, and recorded in `apply-progress.md` together with the
+> earlier `blocked` result from before the merge. Against a target that
+> predates #980 the anchor is simply not found, so a promotion there is a
+> no-op refusal rather than a silent corruption. `brain:promote` was never
+> invoked for this draft: promoting it is the maintainer's separate act.
 
 ```brain-amendment/1
 target: brain/core/anti-patterns/evidence-reader-empty-on-failure.md

@@ -170,10 +170,10 @@ directly from `gh pr diff 980`, not assumed); it has since **merged** into
 the exact commit this branch forked from. `git show
 origin/main:brain/core/anti-patterns/evidence-reader-empty-on-failure.md`
 confirms the merged paragraph matches the draft's anchor text verbatim.
-This branch itself has not been rebased past `dd3ace05`, so the doctrine
-file in this worktree still predates #980 — the draft therefore still
-assesses `blocked` here (see `apply-progress.md`); it will assess `pending`
-once this branch or its target rebases past #980's merge. #980's own PR
+This branch has since merged `origin/main` (`34e9c2b6`), so the doctrine file
+in this worktree carries #980's paragraph and the draft assesses `pending`
+against it (see `apply-progress.md`); before that merge it assessed `blocked`,
+which is the ordering the draft was written for. #980's own PR
 description names this exact gap explicitly: "Known gap, not closed here…
 That is #975, open and approved." Once #975 (this change) lands, that
 "known gap" framing is stale — the draft appends one sentence recording that
