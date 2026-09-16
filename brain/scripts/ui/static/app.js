@@ -12,7 +12,7 @@
 // `/lib/<module>.mjs` route, which serves the very same files node imports.
 // No bundler, no dependency, no CDN (maintainer ruling, 2026-09-14).
 
-import { initialPageState, applyFrame, streamFailed, sectionOf } from './lib/frames.mjs';
+import { initialPageState, applyFrame, parseFrame, streamFailed, sectionOf } from './lib/frames.mjs';
 import { degradationBands, pollIndicator } from './lib/banners.mjs';
 import { buildCanvasModel } from './lib/canvas-model.mjs';
 import { buildDrawerModel } from './lib/drawer-model.mjs';
@@ -291,7 +291,11 @@ function subscribe() {
   const stream = new EventSource('/api/stream');
   for (const name of ['sync', 'section', 'refs', 'status']) {
     stream.addEventListener(name, (event) => {
-      state = applyFrame(state, name, JSON.parse(event.data));
+      const parsed = parseFrame(event.data);
+      // A frame this page cannot read is a band, not an exception swallowed
+      // by the callback: every held value stays, the reason is on screen.
+      if (!parsed.ok) { state = streamFailed(state, parsed.reason); render(); return; }
+      state = applyFrame(state, name, parsed.frame);
       render();
       // Q3/A2: a worktree's head moved, so the open drawer's Working memory
       // tab (`git show <branch>:resume.md`) is the one value the snapshot

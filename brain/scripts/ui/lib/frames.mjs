@@ -73,6 +73,19 @@ export function applyFrame(state, event, data = {}) {
   return { ...state, stream: { ok: false, reason: `unknown stream frame "${event}" — the page may be older than the server` } };
 }
 
+/**
+ * parseFrame(text) -> {ok:true, frame} | {ok:false, reason}. The parse lives
+ * here, not in the listener, because a throw inside an `EventSource` callback
+ * loses the frame AND leaves the page with nothing to say about it.
+ */
+export function parseFrame(text) {
+  try {
+    return { ok: true, frame: JSON.parse(text) };
+  } catch (err) {
+    return { ok: false, reason: `a stream frame was not JSON and was dropped: ${err?.message ?? err}` };
+  }
+}
+
 /** The transport failed (an `EventSource` error): keep every value, say why it is no longer live. */
 export function streamFailed(state, reason) {
   return { ...state, stream: { ok: false, reason } };

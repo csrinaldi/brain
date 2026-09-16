@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { initialPageState, applyFrame, streamFailed, sectionOf } from './frames.mjs';
+import { initialPageState, applyFrame, parseFrame, streamFailed, sectionOf } from './frames.mjs';
 
 const snapshot = (over = {}) => ({ generatedAt: '2026-09-16T00:00:00Z', graph: { ok: true, value: { nodes: [], edges: [] } }, changes: { ok: true, value: [] }, ...over });
 const meta = (over = {}) => ({ project: 'o/r', watcher: { ok: true, watched: 3, failed: [] }, poller: { paused: false, lastPolledAt: '2026-09-16T00:00:00Z', lastOkAt: '2026-09-16T00:00:00Z', lastError: null, forgeAsOf: {} }, ...over });
@@ -81,6 +81,17 @@ test('#881: an unknown frame name never throws and never clears the page — it 
   assert.equal(after.snapshot, live.snapshot);
   assert.equal(after.stream.ok, false);
   assert.match(after.stream.reason, /unknown stream frame "wat"/);
+});
+
+test('#881 R881-9: a frame that is not JSON comes back as a reason, never as a throw inside the listener', () => {
+  // `JSON.parse(event.data)` in the EventSource callback throws where nothing
+  // on this page can catch it: the frame is lost AND no band ever says so.
+  assert.deepEqual(parseFrame('{"snapshot":null}'), { ok: true, frame: { snapshot: null } });
+  const bad = parseFrame('{nope');
+  assert.equal(bad.ok, false);
+  assert.equal(bad.frame, undefined, 'a failed parse hands back no frame to apply');
+  assert.match(bad.reason, /position/, `the reason must name where the text stopped being JSON, got: ${bad.reason}`);
+  assert.equal(parseFrame(undefined).ok, false, 'a frame with no data at all is a reason too, not a crash');
 });
 
 test('#881: R881-9 — a dropped stream keeps the last snapshot and states the reason', () => {

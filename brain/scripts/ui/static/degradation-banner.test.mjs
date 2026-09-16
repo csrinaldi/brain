@@ -40,6 +40,11 @@ test('#881 T3a: app.js wires the band builders into the page instead of writing 
   assert.ok(!/last poll failed:/.test(APP_JS), 'the sentence must not be duplicated in the browser file — one owner, one test');
 });
 
+test('#881 R881-9: app.js parses a stream frame through the tested parser, never with a bare JSON.parse in the listener', () => {
+  assert.match(APP_JS, /parseFrame\(/, 'a parse that throws inside the EventSource callback loses the frame AND says nothing');
+  assert.ok(!/JSON\.parse\(/.test(APP_JS), 'the browser file must not parse a frame itself — the parse is a tested value in lib/frames.mjs');
+});
+
 test('#881 R881-9: every {ok:false} branch in the page renders the reason, so no failure can show as an empty area', () => {
   // `.reason` is read wherever `.ok` is checked: the count is a floor, not an
   // exact shape — what matters is that no branch drops the reason on the way
