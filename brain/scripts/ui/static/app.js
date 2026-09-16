@@ -15,6 +15,7 @@
 import { initialPageState, applyFrame, streamFailed, sectionOf } from './lib/frames.mjs';
 import { degradationBands, pollIndicator } from './lib/banners.mjs';
 import { buildCanvasModel } from './lib/canvas-model.mjs';
+import { buildDrawerModel } from './lib/drawer-model.mjs';
 
 const mounts = {
   status: document.getElementById('status'),
@@ -26,6 +27,9 @@ const mounts = {
 let state = initialPageState();
 /** The issue whose node is activated; `null` until one is. The drawer follows it. */
 let selectedIssue = null;
+/** The last `GET /api/change/<N>` body for the selected issue; `null` while it is still being read. */
+let changeView = null;
+let activeTab = 'spec';
 
 // ── DOM helpers ────────────────────────────────────────────────────────────
 
@@ -77,6 +81,7 @@ function render() {
   renderStatus();
   renderBands();
   renderCanvas();
+  renderDrawer();
 }
 
 /** R881-9: one band per degraded thing, each one BESIDE the data, never instead of it. */
@@ -162,10 +167,99 @@ function renderCanvas() {
   }
 }
 
-/** Activating a node selects it; the inspector drawer follows the selection. */
+/** Activating a node selects it and opens the drawer on its Spec tab (R881-8). */
 function selectNode(issue) {
   selectedIssue = issue;
+  changeView = null;
+  activeTab = 'spec';
   render();
+  loadChange(issue);
+}
+
+function closeDrawer() {
+  selectedIssue = null;
+  changeView = null;
+  render();
+}
+
+/**
+ * The inspector drawer: four tabs, one entry shape, and a source string under
+ * every single value (A3). `drawer-model.mjs` decided all of it — including
+ * that a tab which failed keeps its reason and that an unreadable review
+ * thread is still an entry — so this renders one loop, with no per-tab
+ * branch to get wrong.
+ */
+function renderDrawer() {
+  clear(mounts.drawer);
+  mounts.drawer.hidden = selectedIssue === null;
+  if (selectedIssue === null) return;
+
+  const close = el('button', 'close', 'close');
+  close.addEventListener('click', closeDrawer);
+  mounts.drawer.appendChild(close);
+  mounts.drawer.appendChild(el('h2', null, `#${selectedIssue}`));
+
+  if (changeView === null) {
+    mounts.drawer.appendChild(el('p', 'note', 'reading this change…'));
+    return;
+  }
+  const model = buildDrawerModel(changeView);
+  if (!model.ok) {
+    mounts.drawer.appendChild(said(model.reason));
+    return;
+  }
+  mounts.drawer.appendChild(el('p', 'note', model.value.changeDir ? `change dir: ${model.value.changeDir}` : 'no change dir for this issue in the read model'));
+
+  const tabs = el('div', 'tabs');
+  for (const tab of model.value.tabs) {
+    const button = el('button', null, tab.ok ? tab.label : `${tab.label} !`);
+    button.setAttribute('aria-selected', String(tab.id === activeTab));
+    button.addEventListener('click', () => { activeTab = tab.id; renderDrawer(); });
+    tabs.appendChild(button);
+  }
+  mounts.drawer.appendChild(tabs);
+  mounts.drawer.appendChild(renderTab(model.value.tabs.find((t) => t.id === activeTab) ?? model.value.tabs[0]));
+}
+
+function renderTab(tab) {
+  const wrap = document.createElement('div');
+  if (tab.note) wrap.appendChild(el('p', 'note', `source: ${tab.note}`));
+  if (!tab.ok) {
+    wrap.appendChild(said(tab.reason));
+    if (tab.source) wrap.appendChild(el('span', 'source', tab.source));
+  }
+  for (const item of tab.entries) wrap.appendChild(renderEntry(item));
+  // "read, and empty" and "never read" are different facts, so they are
+  // different sentences — an empty area would say neither.
+  if (tab.ok && tab.entries.length === 0) wrap.appendChild(said('this tab\'s source was read and has nothing in it'));
+  return wrap;
+}
+
+function renderEntry(item) {
+  const card = el('div', item.pending ? 'card pending' : 'card');
+  const done = item.done === undefined ? '' : item.done ? '[x] ' : '[ ] ';
+  card.appendChild(el('strong', null, `${done}${item.title}`));
+  if (item.detail) card.appendChild(el('p', null, item.detail));
+  card.appendChild(el('span', 'source', item.source)); // A3: the path or the URL, beside the value itself
+  for (const child of item.children ?? []) card.appendChild(renderEntry(child));
+  return card;
+}
+
+/** The drawer's own IO. A failed read is a reason IN the drawer, never a drawer that stays empty. */
+async function loadChange(issue) {
+  let next;
+  try {
+    const res = await fetch(`/api/change/${issue}`);
+    if (!res.ok) throw new Error(`answered ${res.status}`);
+    next = await res.json();
+  } catch (err) {
+    next = { ok: false, reason: `the change view for #${issue} could not be read: ${err.message}` };
+  }
+  // A slower answer for a node the operator has already moved away from must
+  // not overwrite the one now on screen.
+  if (selectedIssue !== issue) return;
+  changeView = next;
+  renderDrawer();
 }
 
 // ── the API: one REST read, then the stream ────────────────────────────────
@@ -199,6 +293,10 @@ function subscribe() {
     stream.addEventListener(name, (event) => {
       state = applyFrame(state, name, JSON.parse(event.data));
       render();
+      // Q3/A2: a worktree's head moved, so the open drawer's Working memory
+      // tab (`git show <branch>:resume.md`) is the one value the snapshot
+      // diff cannot refresh on its own.
+      if (name === 'refs' && selectedIssue !== null) loadChange(selectedIssue);
     });
   }
   // `EventSource` reconnects on its own; the band says the page is no longer
