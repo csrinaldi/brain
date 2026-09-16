@@ -23,6 +23,20 @@ const legacyBlock = ({ track = 'A', needs = [], blocks = [], files = [] } = {}) 
     `needs: ${JSON.stringify(needs)}`, `blocks: ${JSON.stringify(blocks)}`,
     `files: ${JSON.stringify(files)}`, '```'].join('\n');
 
+/**
+ * The FULL shape `parseGraphBlock` returns, with #967's keys at their defaults.
+ *
+ * Every site below keeps `assert.deepEqual` against this, so the assertion stays a
+ * full-shape comparison and a STRAY KEY STILL FAILS (design D11). Rewriting any of
+ * them to `partialDeepStrictEqual` or to per-key `assert.equal` would be the
+ * weakening this helper exists to avoid: both stop noticing an extra key, which is
+ * precisely what these assertions have been catching since #459.
+ */
+const graphShape = (o = {}) => ({
+  track: null, kind: null, tracker: null, parent: null, parentSource: null,
+  blocks: [], needs: [], files: [], declarationDivergences: [], ...o,
+});
+
 const issue = (number, o = {}) => ({
   number, title: o.title ?? `t${number}`, labels: o.labels ?? ['status:approved'],
   state: o.state ?? 'open', body: o.body ?? block(o),
@@ -37,7 +51,24 @@ const noRelations = { blocks: [], needs: [], foreign: 0 };
 
 test('#459: the block is read from the body as DATA', () => {
   const g = parseGraphBlock(block({ track: 'B', needs: [1], blocks: [2, 3], files: ['a/**'] }));
-  assert.deepEqual(g, { track: 'B', needs: [1], blocks: [2, 3], files: ['a/**'] });
+  assert.deepEqual(g, graphShape({ track: 'B', needs: [1], blocks: [2, 3], files: ['a/**'] }));
+});
+
+test('#967 R967-1 S2: a block declaring none of the three keys parses EXACTLY as it did before this change', () => {
+  // The regression pin for the whole slice. The four new fields are `null` and
+  // `declarationDivergences` is empty, and — the half a `graphShape()` comparison
+  // cannot prove on its own — every pre-existing field still holds the byte-identical
+  // value it held before #967, compared against the literal copied out of the
+  // pre-change assertion rather than against a freshly derived one.
+  const g = parseGraphBlock(block({ track: 'B', needs: [1], blocks: [2, 3], files: ['a/**'] }));
+  const beforeThisChange = { track: 'B', needs: [1], blocks: [2, 3], files: ['a/**'] };
+  const { kind, tracker, parent, parentSource, declarationDivergences, ...preExisting } = g;
+  assert.deepEqual(preExisting, beforeThisChange, 'not one pre-existing field moved');
+  assert.equal(kind, null);
+  assert.equal(tracker, null);
+  assert.equal(parent, null);
+  assert.equal(parentSource, null);
+  assert.deepEqual(declarationDivergences, [], 'declaring nothing is not a divergence');
 });
 
 test('#459: a body with no block yields null — absent is not empty', () => {
@@ -88,19 +119,19 @@ test('#612: a node with track: (whitespace-only) groups under the SAME tracks-ma
 
 test('#639: an UNTAGGED fence above the block does not hide it — the locator reads the protocol, not the position', () => {
   const body = ['```', 'some log excerpt', '```', '', block({ track: 'C' })].join('\n');
-  assert.deepEqual(parseGraphBlock(body), { track: 'C', needs: [], blocks: [], files: [] });
+  assert.deepEqual(parseGraphBlock(body), graphShape({ track: 'C', needs: [], blocks: [], files: [] }));
 });
 
 test('#639: a ```yaml fence of ANOTHER protocol above the block does not hide it', () => {
   const other = '```yaml\nprotocol: brain-review/2\nverdict: APPROVE\n```';
   const body = [other, '', block({ track: 'D', needs: [7] })].join('\n');
-  assert.deepEqual(parseGraphBlock(body), { track: 'D', needs: [7], blocks: [], files: [] });
+  assert.deepEqual(parseGraphBlock(body), graphShape({ track: 'D', needs: [7], blocks: [], files: [] }));
 });
 
 test('#639: a ```js snippet above the block still parses — pinned, and it was already green', () => {
   const body = ['Here is the failing call:', '', '```js', "requiredArtifactsFor('lite')", '```', '',
     block({ track: 'A', blocks: [435, 94] })].join('\n');
-  assert.deepEqual(parseGraphBlock(body), { track: 'A', needs: [], blocks: [435, 94], files: [] });
+  assert.deepEqual(parseGraphBlock(body), graphShape({ track: 'A', needs: [], blocks: [435, 94], files: [] }));
 });
 
 test('#639: TWO graph blocks is an error naming the count, never a silent pick of one', () => {
@@ -171,13 +202,13 @@ test('#709 D1/axis 12: BRAIN-GRAPH/1 and Brain-Graph/1 (wrong case) do not decla
 
 test('#709 D1/axis 11: trailing attributes after the tag still declare — only the first word is compared', () => {
   const withAttrs = '```brain-graph/1 title="x"\ntrack: A\nneeds: []\nblocks: []\nfiles: []\n```';
-  assert.deepEqual(parseGraphBlock(withAttrs), { track: 'A', needs: [], blocks: [], files: [] });
+  assert.deepEqual(parseGraphBlock(withAttrs), graphShape({ track: 'A', needs: [], blocks: [], files: [] }));
 });
 
 test('#709 D1/axis 13: one declared block plus a yaml-tagged illustration of the same protocol is NOT ambiguity', () => {
   const illustration = '```yaml\nprotocol: brain-graph/1\ntrack: ignored-because-not-declared\n```';
   const body = [illustration, '', block({ track: 'A', blocks: [5] })].join('\n');
-  assert.deepEqual(parseGraphBlock(body), { track: 'A', needs: [], blocks: [5], files: [] },
+  assert.deepEqual(parseGraphBlock(body), graphShape({ track: 'A', needs: [], blocks: [5], files: [] }),
     'the illustration is not a declaration, so the tagged block reads alone');
 });
 
@@ -745,5 +776,5 @@ test('#723: an unterminated foreign fence with the protocol only ABOVE it stays 
 
 test('#723: a well-formed declaration is untouched by any of this', () => {
   assert.deepEqual(parseGraphBlock(block({ track: 'B', blocks: [2] })),
-    { track: 'B', blocks: [2], needs: [], files: [] });
+    graphShape({ track: 'B', blocks: [2], needs: [], files: [] }));
 });

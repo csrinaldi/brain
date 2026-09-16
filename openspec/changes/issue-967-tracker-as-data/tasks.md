@@ -98,7 +98,7 @@ and R967-10's "no `needs`-edge parent fallback" scenario.
       Point 7 stated no count in `spec.md` to correct, so it landed as an added
       `AND` clause under R967-1 scenario 2 naming the seven measured sites and
       the no-weakening rule; `proposal.md`'s own count is outside PR A's fence.
-- [ ] A1a. `brain/scripts/status/epic-map.test.mjs`: add the D11 `graphShape()`
+- [x] A1a. `brain/scripts/status/epic-map.test.mjs`: add the D11 `graphShape()`
       helper (full shape, new keys at their defaults) and rewrite the **seven**
       `assert.deepEqual` sites — `:40`, `:91`, `:97`, `:103`, `:174`, `:180`,
       `:747-748` — to `graphShape({…})`; add a "declares none of the three keys"
@@ -106,7 +106,7 @@ and R967-10's "no `needs`-edge parent fallback" scenario.
       `declarationDivergences: []` (R967-1 S2). RED: the parser returns four keys.
       **Mutation**: switching any site to `partialDeepStrictEqual` or per-key
       `assert.equal` must be refused — a stray key has to keep failing (D11).
-- [ ] A1b. `brain/scripts/status/epic-graph.mjs:259-273`: read `kind` and
+- [x] A1b. `brain/scripts/status/epic-graph.mjs:259-273`: read `kind` and
       `tracker` via `scalar(block, …)` after the `track` read at `:272` and return
       `{track, kind, tracker, parent, parentSource, blocks, needs, files,
       declarationDivergences}` so A1a passes.

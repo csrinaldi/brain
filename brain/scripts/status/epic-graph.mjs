@@ -157,7 +157,10 @@ export const UNCLASSIFIED = 'unclassified';
  * envelope exists to distinguish elsewhere.
  *
  * @param {string} body
- * @returns {{ track: string|null, blocks: number[], needs: number[], files: string[] }
+ * @returns {{ track: string|null, kind: string|null, tracker: string|null,
+ *            parent: number|null, parentSource: 'block'|'prose'|null,
+ *            blocks: number[], needs: number[], files: string[],
+ *            declarationDivergences: Array<{key:string,value:string|null,reason:string}> }
  *          |{ ok: false, error: string }
  *          |null}
  */
@@ -270,7 +273,32 @@ export function parseGraphBlock(body) {
   };
 
   const track = scalar(block, 'track');
-  return { track: track ?? null, blocks: nums('blocks'), needs: nums('needs'), files: strs('files') };
+
+  // #967 D1: three further keys, read from the SAME block by the same reader. One
+  // body, one selector — a second parser function for the new keys would have to
+  // re-run the fence selection above, the most guard-heavy code in the module.
+  //
+  // `kind` takes any value verbatim and only `'epic'` ever carries meaning. There is
+  // no validation, for the same reason `scalar()` reads only the keys a caller names:
+  // unknown-key validation is nowhere in this parser, and forward compatibility is
+  // free without it.
+  //
+  // `track` and `tracker` cannot collide in either direction: `scalar`'s pattern is
+  // anchored `^<key>:`, so `^track:` never matches a `tracker:` line.
+  const kind = scalar(block, 'kind');
+  const tracker = scalar(block, 'tracker');
+
+  return {
+    track: track ?? null,
+    kind,
+    tracker,
+    parent: null,
+    parentSource: null,
+    blocks: nums('blocks'),
+    needs: nums('needs'),
+    files: strs('files'),
+    declarationDivergences: [],
+  };
 }
 
 /**
