@@ -272,7 +272,7 @@ lines**. Closes R967-5, R967-6, R967-9's resolver half.
       `export const OFF_TRACKER_FLAG = '--off-tracker'`,
       `baseExplicit: baseIdx >= 0` and `offTracker: args.includes(OFF_TRACKER_FLAG)`,
       keeping `baseBranch`'s `'main'` default at `:60-61`, so B1a passes.
-- [ ] B2a. `brain/scripts/lib/ticket-base.test.mjs` (new): failing tests for the
+- [x] B2a. `brain/scripts/lib/ticket-base.test.mjs` (new): failing tests for the
       six rows of design D7 with an injected `fetchIssue` and no repository —
       row 1 tracker resolved, `say.key = 'ticket.base.fromEpic'` naming the epic
       and the source (R967-5 S1); row 2 the three no-tracker reasons, each with
@@ -289,7 +289,7 @@ lines**. Closes R967-5, R967-6, R967-9's resolver half.
       making row 3 refuse turns the fail-open test red; walking a second hop turns
       the one-hop test red; calling the port on row 6 turns its call-count
       assertion red.
-- [ ] B2b. `brain/scripts/lib/ticket-base.mjs` (new): implement
+- [x] B2b. `brain/scripts/lib/ticket-base.mjs` (new): implement
       `resolveBase({issue, args, fetchIssue, defaultBranch = 'main'})` — pure,
       returning `{ok, base, say: {key, params}}` or
       `{ok: false, refusal: {key, params}}`, **never** a rendered message and
