@@ -384,6 +384,26 @@ test('#682 cold-3: the engine writes into the operator tree and leaves the workt
   );
 });
 
+test('a candidate mutation after the engine starts refuses publication', async (t) => {
+  const root = makeRepo(t);
+  const candidate = makeWorktree(t);
+  writeFileSync(join(candidate, 'candidate.txt'), 'before\n');
+
+  const result = await runColdReviewStage({
+    config: ROUTED, prNumber: PR, root, worktreePath: candidate,
+    deps: { forgeProbe: LOGGED_OUT, runStage: async () => {
+      writeFileSync(join(candidate, 'candidate.txt'), 'after\n');
+      writeFileSync(join(root, artifactPathFor(PR)), `\`\`\`${ARTIFACT_TAG}\n[]\n\`\`\`\n`);
+      return { ok: true };
+    } },
+  });
+
+  assert.deepEqual(result, {
+    routed: true, ok: false,
+    reason: 'the cold-review candidate changed during execution; refusing publication',
+  });
+});
+
 // ── #682 C.5's verdict, judgment:cold-1 ──────────────────────────────────────
 
 test('#682 cold-1: a STALE artifact does not pass for one this run wrote', async (t) => {
@@ -837,4 +857,74 @@ test('a second run does not inherit the first run\'s directory', async (t) => {
   await run();
   assert.equal(seen.length, 2);
   assert.notEqual(seen[0], seen[1], 'a reused directory is a place a session could accumulate');
+});
+
+// ── #978 PR2: Codex final-message transport ─────────────────────────────────
+
+const CODEX_ROUTED = { sdd: { map: { [COLD_REVIEW_STAGE]: { engine: 'codex', model: 'gpt-5.5' } } } };
+
+test('Codex receives a host-owned final-message descriptor and only a valid atomically materialized artifact succeeds', async (t) => {
+  const root = makeRepo(t);
+  const worktree = makeWorktree(t);
+  let seen;
+
+  const result = await runColdReviewStage({
+    config: CODEX_ROUTED, prNumber: PR, root, worktreePath: worktree,
+    deps: {
+      forgeProbe: LOGGED_OUT,
+      runStage: async (args) => {
+        seen = args;
+        writeFileSync(args.output.tempPath, `\`\`\`${ARTIFACT_TAG}\n[]\n\`\`\`\n`);
+        return { ok: true };
+      },
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(seen.output.mode, 'final-message');
+  assert.equal(seen.output.artifactPath, join(root, artifactPathFor(PR)));
+  assert.notEqual(seen.output.tempPath, seen.output.artifactPath);
+  assert.ok(seen.prompt.includes('Return exactly the artifact bytes as your final message'));
+  assert.equal(existsSync(seen.output.tempPath), false, 'the temporary Codex message is consumed by the host rename');
+  assert.equal(existsSync(seen.output.artifactPath), true, 'the host-owned final artifact is available to the unchanged reader');
+});
+
+test('a Codex candidate mutation refuses before its temporary message is published', async (t) => {
+  const root = makeRepo(t);
+  const worktree = makeWorktree(t);
+  let output;
+
+  const result = await runColdReviewStage({
+    config: CODEX_ROUTED, prNumber: PR, root, worktreePath: worktree,
+    deps: {
+      forgeProbe: LOGGED_OUT,
+      runStage: async (args) => {
+        output = args.output;
+        writeFileSync(output.tempPath, `\`\`\`${ARTIFACT_TAG}\n[]\n\`\`\`\n`);
+        writeFileSync(join(worktree, 'mutation.txt'), 'forbidden\n');
+        return { ok: true };
+      },
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /candidate changed/i);
+  assert.equal(existsSync(output.artifactPath), false, 'a candidate mutation cannot reach the artifact reader');
+});
+
+test('a malformed Codex final message is refused by the existing findings reader', async (t) => {
+  const root = makeRepo(t);
+  const result = await runColdReviewStage({
+    config: CODEX_ROUTED, prNumber: PR, root, worktreePath: makeWorktree(t),
+    deps: {
+      forgeProbe: LOGGED_OUT,
+      runStage: async ({ output }) => {
+        writeFileSync(output.tempPath, 'not a brain findings artifact\n');
+        return { ok: true };
+      },
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /could not be read/i);
 });

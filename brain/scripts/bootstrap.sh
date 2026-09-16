@@ -184,6 +184,17 @@ for tool in "$VCS_CLI" engram gentle-ai gga claude; do
   fi
 done
 
+# Codex is not a general bootstrap dependency. Consult the effective route
+# before probing it so consumers that keep the Claude route never need a Codex
+# executable, state directory, authentication, or Linux sandbox support.
+say "Codex cold-review"
+if CODEX_READINESS="$(node brain/scripts/harness/codex-readiness.mjs --check 2>&1)"; then
+  ok "$CODEX_READINESS"
+else
+  warn "$CODEX_READINESS"
+  MISSING_OPTIONAL+=("Codex cold-review readiness")
+fi
+
 # --- 3. Personal PAT in .env --------------------------------------------------
 say "$I18N_BOOTSTRAP_PAT_SECTION"
 VCS_TOKEN="$(env_get "$VCS_TOKEN_VAR")"
