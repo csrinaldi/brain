@@ -190,4 +190,5 @@ None. All tasks in `tasks.md` complete.
 
 ## Status
 All tasks complete. Commits: `ea8c9cdc` (SDD docs + moved/updated draft),
-record-first commit pending. Ready for `sdd-verify`.
+`3c74332a` (record this file's own SHA), `26c47e9` (record-first commit,
+record `rec-8573584eb01dc8bf`). Ready for `sdd-verify`.
