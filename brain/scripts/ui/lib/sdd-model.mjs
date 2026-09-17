@@ -171,10 +171,15 @@ export function buildSddModel(changesSection, { tier } = {}) {
     .map(buildChangeRow)
     .sort((a, b) => a.issue - b.issue || Number(a.archived) - Number(b.archived));
 
+  // `archiveSkipped` rides in on the section snapshot.mjs's readChanges()
+  // returns (review of PR 4, fix 1) — an archive/ dir that is not a bare
+  // issue number, named rather than silently dropped from the rows above.
+  const skipped = Array.isArray(changesSection.archiveSkipped) ? changesSection.archiveSkipped : [];
   const totals = {
     active: changes.filter((c) => !c.archived).length,
     archived: changes.filter((c) => c.archived).length,
     withViolations: changes.filter((c) => c.phaseOrder.violations.length > 0).length,
+    archiveSkipped: { count: skipped.length, names: skipped.map((s) => s.name) },
   };
 
   return { ok: true, value: { changes, totals } };

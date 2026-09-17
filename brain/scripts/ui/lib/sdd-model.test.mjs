@@ -171,7 +171,21 @@ test('#998 R998-4: the local phase-order restatement agrees with the enforced ga
 
 test('#998 R998-4: totals count active, archived, and changes carrying a violation', () => {
   const model = buildSddModel({ ok: true, value: ALL });
-  assert.deepEqual(model.value.totals, { active: 5, archived: 1, withViolations: 1 });
+  assert.deepEqual(model.value.totals, { active: 5, archived: 1, withViolations: 1, archiveSkipped: { count: 0, names: [] } });
+});
+
+// ── review of PR 4, fix 1: archiveSkipped surfaces on totals ───────────────
+
+test('#998 fix1: totals.archiveSkipped counts and names the archive dirs snapshot.mjs said it skipped', () => {
+  const model = buildSddModel({
+    ok: true,
+    value: ALL,
+    archiveSkipped: [
+      { name: 'governance', reason: 'not an issue-numbered archive dir' },
+      { name: '2026-07-26-issue-334-brain-ship-labels', reason: 'not an issue-numbered archive dir' },
+    ],
+  });
+  assert.deepEqual(model.value.totals.archiveSkipped, { count: 2, names: ['governance', '2026-07-26-issue-334-brain-ship-labels'] });
 });
 
 test('#998 R998-4: the section says why when it could not be read', () => {

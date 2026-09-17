@@ -331,6 +331,11 @@ function renderSdd() {
   }
   const { changes, totals } = model.value;
   mounts.canvas.appendChild(el('p', 'canvas-summary', `${totals.active} active change(s), ${totals.archived} archived, ${totals.withViolations} with a phase-order violation`));
+  // Review of PR 4, fix 1: a not-issue-numbered archive/ dir is skipped from
+  // the rows above but never silently dropped — said here by name.
+  if (totals.archiveSkipped.count > 0) {
+    mounts.canvas.appendChild(said(`${totals.archiveSkipped.count} archive dir(s) skipped: ${totals.archiveSkipped.names.join(', ')}`));
+  }
 
   for (const change of changes.filter((c) => !c.archived)) mounts.canvas.appendChild(renderSddRow(change));
   const archived = changes.filter((c) => c.archived);
