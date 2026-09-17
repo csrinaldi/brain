@@ -45,6 +45,7 @@ but was invisible until `strace` named the syscall directly.
 | 4. refusal names paths | Extended existing test + new bound test; both failed (`actual` had no path list) | Fix applied; 39/39 pass | Dropping `describeCandidateChange(...)` from the reason reproduces the captured RED | `cfad1d6c` |
 | 5. claude backend disables hooks | New test added first; failed (`flagIndex === -1`) | Fix applied; 9/9 pass, 123/123 harness suite | Dropping the `--settings` args reproduces the captured RED | `7d4af22e` |
 | 5b. run-stage.test.mjs fallout | Full-suite run surfaced 1 failing test pinning the exact argv | Narrowed assertion to the model flag only; 22/22 pass | N/A — regression fix, not a new behavior | `205935e5` |
+| 6. cold-review prompt forbids writes under the candidate | New test added first; failed on missing "snapshotted"/"no scratch files"/etc. in the file-mode prompt | Fix applied to the DETACHED CHECKOUT paragraph; 21/21 pass, plain mode carries no dangling reference | Dropping the added paragraph reproduces the captured RED (confirmed explicitly by reverting and rerunning) | `803d7aeb` |
 
 ## Commits
 
@@ -53,22 +54,35 @@ but was invisible until `strace` named the syscall directly.
 3. `cfad1d6c` — fix(review): the candidate-changed refusal names the paths
 4. `7d4af22e` — fix(harness): claude backend disables every hook for the stage
 5. `205935e5` — test(harness): run-stage's model-flag test tolerates the new tail
+6. `803d7aeb` — fix(review): the cold-review prompt tells the engine the candidate tree is off-limits
 
 ## Final verification
 
 - Targeted suites (cli.backend-fallback, engram.setup, backend-selection,
-  candidate-snapshot, run-cold-review-stage, claude.test.mjs — 82 tests) ×3:
-  green every run, `.engram` never appeared in the real repo root.
-- `GIT_CONFIG_GLOBAL=/dev/null npm test`: **5590/5590 pass** (main was
-  5586 green after #1013; +4 net from the new tests added here, one
+  candidate-snapshot, run-cold-review-stage, claude.test.mjs,
+  assemble-review-prompt.test.mjs — 103 tests) ×3: green every run,
+  `.engram` never appeared in the real repo root.
+- `GIT_CONFIG_GLOBAL=/dev/null npm test`: **5591/5591 pass** (main was
+  5586 green after #1013; +5 net from the new tests added here, one
   regression test fixed inline). `.engram` absent before and after — unchanged.
 - `npm run brain:repo:check`: clean before every commit.
 - Counted diff (`git diff --numstat origin/main...HEAD`, excluding
-  `.test.mjs`/`openspec/`/`.memory/`): **94** lines — well under the 400
+  `.test.mjs`/`openspec/`/`.memory/`): **106** lines — well under the 400
   budget.
 - `git status --short`: clean except this `openspec/changes/` directory,
   which the record-first memory commit will not touch.
 
 ## Tasks
 
-All 5 tasks in `tasks.md` are marked `[x]`.
+All 6 tasks in `tasks.md` are marked `[x]`.
+
+## Unit 6 — measured on PR #1019's own cold review
+
+With units 1–5 live, the stage correctly refused instead of crashing or
+silently publishing: `"the cold-review candidate changed during execution;
+refusing publication — 1 path(s) changed: +scratch"`. The engine created
+`scratch` inside the candidate on its own initiative — the DETACHED CHECKOUT
+paragraph told it where it was (a detached checkout it must not treat as its
+own branch) but never told it the tree itself must not be touched. Fixed by
+stating the rule in the prompt's own voice, inside the same conditional
+paragraph (`artifactRoot && isAbsolute(artifactPath)` — file mode only).

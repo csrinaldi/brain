@@ -16,9 +16,17 @@
       bound. (R1010-3)
 - [x] 5. `claude.mjs`'s `runStage()` always passes `--settings
       {disableAllHooks:true}`; test asserts the spawned args. (R1010-4)
+- [x] 6. Measured on PR #1019's own cold review (R1010-1..4 already live):
+      the engine still created a `scratch` file inside the candidate on its
+      own initiative, correctly refused by name (`+scratch`) but never
+      forbidden by the prompt. The DETACHED CHECKOUT paragraph in
+      `assembleReviewPrompt()` now states the tree-is-off-limits rule in its
+      own voice; plain mode (no `artifactRoot`) carries no dangling
+      reference. (R1010-5)
 
 ## Review Workload Forecast
 
 - Decision needed before apply: No
 - Chained PRs recommended: No
-- 400-line budget risk: Low (counted diff ~94 lines, excluding tests/openspec)
+- 400-line budget risk: Low (counted diff ~94 lines through unit 5, +~30 for
+  unit 6, excluding tests/openspec)
