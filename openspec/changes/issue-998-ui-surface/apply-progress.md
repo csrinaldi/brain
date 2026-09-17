@@ -53,6 +53,31 @@ Full suite under `GIT_CONFIG_GLOBAL=/dev/null`: 5612/0 (PR 1 left it at 5611/0; 
 - The governance mode's content (the management views of #882) stays out of scope per `tasks.md`; only the tab and its placeholder exist.
 - `drawer-model.mjs`'s `TAB_IDS` growing a fifth tab (`sdd`) and `reviewEntries` gaining `findings[]`/`severity` are PR 5/6's work per the design's module map; untouched here.
 
+### Fresh review of PR 2 before push: REVISE → fixed
+- Major: the active mode button hard-coded `#eef1f8`, illegible in dark. A `--surface-active` token (light and dark) replaces it, and the token test now forbids ANY colour literal outside the token block, not only white.
+- Warning: `.memory/index.jsonl` gained two lines: this PR's record and `rec-deaea7613…` (issue #955), a record file already on the tracker that its index had never listed; `memory:save` re-indexed it. Kept: an index that lists every record on disk is the correct state; noted here rather than reverted.
+- Minor: T6 was done but unticked; ticked.
+## PR 3 — track lanes and the `?` holding lane (2026-09-17)
+
+Branch `feat/issue-998-pr3-lanes` off 998e7369 (PR 2). Commits: fe590bb0 `lib/lane-model.mjs` + test (RED ERR_MODULE_NOT_FOUND → GREEN 12/12; mutation: dropping the first holding-lane node turns the exactly-once and paging tests red); 834a1cba `renderCanvas` becomes `renderLanes`, lane styles from tokens (no DOM harness: verified by trace against the model's contract, 44/44 across the ui guards); 5774365d tasks ticked and R998-3 scenarios; ab9eee9f + 25b1d6b2 the memory record `rec-a6ba1a6a6fe52dd3`. Full suite 5624/0; counted diff 395 (the map planned 380; the lite budget is 1000).
+
+Deviations, said: `width`/`height` are per lane (independent rows, no shared coordinate space); `buildLaneModel` takes `{collapsedTracks, holdingPage}` (the paging needed a home); `canvas-model.mjs` is no longer imported by `app.js` and stays only for its own test — dead code to remove in PR 8 or a follow-up, not silently.
+
+Fresh review before push: APPROVE. Its warning that this section was missing from the file is what this section closes; its second warning (the dead module) is the carry above; its suggestion (`holdingPage` clamps silently in both directions) is left as is: spec-conformant, said here.
+
+### Cold review of PR 3 (#1005): REVISE → fixed
+
+- blocker: measured with `buildLaneModel` on two known nodes whose track is null and one edge `{from:1,to:2}` — the returned model had `holding.count=2`, `lanes=[]`, `crossEdges=[]`, `droppedEdges=[]`: the edge landed in no bucket and was not said anywhere (`lane-model.mjs:142`, the `if (fromTrack == null) continue;` branch for same-track null/null edges). R998-3 says every edge is classified exactly once into internal, cross-lane, or unknown-node; this branch silently skipped the case where both endpoints are undeclared.
+
+Fix (`c7aab45`): the holding lane is now a lane for edge classification too. An edge between two holding nodes is internal to the holding lane — collected into `holdingEdges`, filtered to the current page's node numbers, laid out with one `layout()` call over that page's own subgraph (mirroring how a track lane lays itself out), and exposed as `holding.edges` (with `holding.boardNodes`/`width`/`height` alongside it) plus a page-independent `holding.edgeCount` for the collapsed header. An edge between a holding node and a declared-track node was already routed into `crossEdges` with `fromTrack ?? '?'` (pre-existing, unaffected). `value.edgeSummary = {laneInternal, holdingInternal, crossLane, unknownNode, total}` is the classification invariant made visible: `total` is the sum of the four, which must equal the input edge count.
+
+RED → GREEN: added three tests to `lane-model.test.mjs` — the measured case (`holding.edges.length === 1`, `edgeSummary` deep-equal to `{laneInternal:0, holdingInternal:1, crossLane:0, unknownNode:0, total:1}`); a holding→track edge (`crossEdges` names `?`/`A`, `edgeSummary.crossLane === 1`); an `edgeSummary` assertion added to the existing 91-node fixture test (sums to 0, its edge count). RED 11/14 → GREEN 14/14. Mutation: reverted the fix (`if (fromTrack == null) { continue; }`, dropping the `holdingEdges.push`) → 13/14, the measured-case test red; reverted back to GREEN 14/14.
+
+`app.js` (untested — no DOM harness, D9, same precedent as PR2/PR3's other render changes, verified by trace against the now-covered model contract): the holding lane's collapsed header shows `holding.edgeCount`; expanded, a board section draws `holding.edges` via the same `renderLaneBoard` a track lane uses, fed `holding.boardNodes`/`width`/`height`; the map's summary line gained a second `<p class="edge-summary">` saying all four `edgeSummary` counts and the total.
+
+Verification: `lane-model.test.mjs` alone 3× GREEN (14/14 each run); the full UI glob (`brain/scripts/ui/**/*.test.mjs` `brain/scripts/ui/*.test.mjs`) 3× GREEN (251/251 each run); `npm run brain:repo:check` green; full suite `GIT_CONFIG_GLOBAL=/dev/null npm test` 5626/0 (was 5624/0, +2 new tests). Counted diff `origin/feature/issue-998-ui-surface...HEAD` (the whole PR3, excluding `*.test.mjs`/`openspec/`/`.memory/`): 437 (was 395 before this round; the lite budget is 1000).
+
+Deviation from the review's literal ask, said: the review's prose named `holding.edges` without specifying whether it is scoped to the current page or the whole holding set. It is scoped to the current page (`holding.edgeCount` carries the full total instead) — the same page-boundary a track lane's own `layout()` call respects, and the only board coordinates this model has computed for holding nodes; laying every page's edges out in one shared space would need a `holdingPage`-independent coordinate space this model does not have and R998-3 never asked for.
 ## PR 4 — the SDD view and the archive reader (R998-4) (2026-09-17)
 
 Branch `feat/issue-998-pr4-sdd` off `25b1d6b2` (PR 3 of #998, under review):

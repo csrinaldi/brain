@@ -128,6 +128,7 @@ export function buildLaneModel(graphSection, { collapsedTracks = new Set(['?']),
   const droppedEdges = [];
   const crossEdges = [];
   const perLaneEdges = new Map();
+  const holdingEdges = [];
   for (const e of edges) {
     if (!trackOf.has(e.from) || !trackOf.has(e.to)) {
       droppedEdges.push({ from: e.from, to: e.to, reason: 'unknown node' });
@@ -136,10 +137,11 @@ export function buildLaneModel(graphSection, { collapsedTracks = new Set(['?']),
     const fromTrack = trackOf.get(e.from);
     const toTrack = trackOf.get(e.to);
     if (fromTrack === toTrack) {
-      // Both undeclared: the `?` lane is a list, not a board, so there is no
-      // lane board for this edge to belong to — it is neither drawn nor
-      // reported as crossing, because it never leaves the holding lane.
-      if (fromTrack == null) continue;
+      // Both undeclared: internal to the HOLDING lane, not a track lane —
+      // the `?` lane is still a lane for edge classification (R998-3's
+      // cold review), so this edge is kept and counted, never silently
+      // continued past.
+      if (fromTrack == null) { holdingEdges.push({ from: e.from, to: e.to }); continue; }
       if (!perLaneEdges.has(fromTrack)) perLaneEdges.set(fromTrack, []);
       perLaneEdges.get(fromTrack).push({ from: e.from, to: e.to });
       continue;
@@ -148,6 +150,7 @@ export function buildLaneModel(graphSection, { collapsedTracks = new Set(['?']),
   }
   crossEdges.sort(byFromTo);
   droppedEdges.sort(byFromTo);
+  holdingEdges.sort(byFromTo);
 
   const trackNames = [...byTrack.keys()].sort((a, b) => a.localeCompare(b));
   const lanes = trackNames.map((track) => {
@@ -171,7 +174,19 @@ export function buildLaneModel(graphSection, { collapsedTracks = new Set(['?']),
   const holdingTotal = holdingSorted.length;
   const totalPages = Math.max(1, Math.ceil(holdingTotal / PAGE_SIZE));
   const page = Math.min(Math.max(0, holdingPage), totalPages - 1);
-  const pageNodes = holdingSorted.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE).map(holdingRow);
+  const pageNodesRaw = holdingSorted.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE);
+  const pageNodes = pageNodesRaw.map(holdingRow);
+
+  // holding.edges is a BOARD, laid out the same way a lane's own edges are
+  // (one layout() call, over that page's own subgraph) — it is never the
+  // full cross-page edge set, because only the current page's nodes have
+  // coordinates to draw a line between. holding.edgeCount, by contrast, is
+  // every holding-holding edge across every page, so the collapsed header
+  // can say the true total without expanding first.
+  const pageNumbers = new Set(pageNodesRaw.map((n) => n.number));
+  const pageHoldingEdges = holdingEdges.filter((e) => pageNumbers.has(e.from) && pageNumbers.has(e.to));
+  const placedHolding = layout({ nodes: pageNodesRaw, edges: pageHoldingEdges });
+  const boardNodes = pageNodesRaw.map((node) => drawnNode(node, placedHolding.nodes[node.number]));
 
   const holding = {
     track: '?',
@@ -180,10 +195,27 @@ export function buildLaneModel(graphSection, { collapsedTracks = new Set(['?']),
     page,
     totalPages,
     nodes: pageNodes,
+    boardNodes,
+    edges: placedHolding.edges,
+    edgeCount: holdingEdges.length,
+    width: placedHolding.width,
+    height: placedHolding.height,
     declareSnippet: DECLARE_SNIPPET,
     // Never empty-on-failure: a page with nothing currently visible and a
     // track with nothing left to declare are different facts.
     note: holdingTotal === 0 ? 'every open issue declares a track' : null,
+  };
+
+  // Every valid edge lands in EXACTLY one of these four counts — the
+  // classification invariant a cold review (#998 R998-3) found broken for
+  // same-track null/null edges, which used to vanish uncounted.
+  const laneInternal = lanes.reduce((sum, l) => sum + l.edges.length, 0);
+  const edgeSummary = {
+    laneInternal,
+    holdingInternal: holdingEdges.length,
+    crossLane: crossEdges.length,
+    unknownNode: droppedEdges.length,
+    total: laneInternal + holdingEdges.length + crossEdges.length + droppedEdges.length,
   };
 
   return {
@@ -194,6 +226,7 @@ export function buildLaneModel(graphSection, { collapsedTracks = new Set(['?']),
       holding,
       droppedEdges,
       issuesUnreadable,
+      edgeSummary,
       epicGrouping: { ok: false, reason: 'kind and parent are not data yet (#967)' },
     },
   };

@@ -188,8 +188,9 @@ function renderLanes() {
     mounts.canvas.appendChild(said(`the graph could not be computed: ${model.reason}`));
     return;
   }
-  const { lanes, crossEdges, holding, droppedEdges, issuesUnreadable } = model.value;
+  const { lanes, crossEdges, holding, droppedEdges, issuesUnreadable, edgeSummary } = model.value;
   mounts.canvas.appendChild(el('p', 'canvas-summary', `${lanes.length} track lane(s), ${holding.count} in the \`?\` holding lane`));
+  mounts.canvas.appendChild(el('p', 'edge-summary', `edges: ${edgeSummary.laneInternal} in lanes, ${edgeSummary.holdingInternal} in the \`?\` holding lane, ${edgeSummary.crossLane} crossing lanes, ${edgeSummary.unknownNode} to an unknown node (${edgeSummary.total} total)`));
 
   for (const lane of lanes) mounts.canvas.appendChild(renderLaneRow(lane));
   mounts.canvas.appendChild(renderHoldingLane(holding));
@@ -277,7 +278,9 @@ function renderHoldingLane(holding) {
   });
 
   const row = el('div', 'lane-row holding');
-  row.appendChild(renderLaneHeader('? — undeclared', holding.count, holding.nodes, toggle));
+  const header = renderLaneHeader('? — undeclared', holding.count, holding.nodes, toggle);
+  header.appendChild(el('span', 'lane-edge-count', `${holding.edgeCount} edge(s)`));
+  row.appendChild(header);
   if (holding.collapsed) return row;
 
   if (holding.note) {
@@ -293,6 +296,14 @@ function renderHoldingLane(holding) {
   const list = el('ul', 'holding-list');
   for (const node of holding.nodes) list.appendChild(el('li', null, `${node.state.mark} ${node.label}`));
   row.appendChild(list);
+
+  // Holding-holding edges are a board, drawn like a lane's own (#998 R998-3
+  // cold review): `lane-model.mjs` already laid it out over this same page's
+  // subgraph, this only turns that into elements, same as `renderLaneBoard`.
+  if (holding.edges.length > 0) {
+    row.appendChild(el('p', 'note', `${holding.edges.length} edge(s) on this page:`));
+    row.appendChild(renderLaneBoard({ nodes: holding.boardNodes, edges: holding.edges, width: holding.width, height: holding.height }));
+  }
 
   if (holding.totalPages > 1) row.appendChild(renderPager(holding));
   return row;
