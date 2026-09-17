@@ -115,6 +115,7 @@ they agree.
 | `brain-writes-reviewed` | Writes to the knowledge half are not agent-authored — that half never tiers. Above the lightest tier an approving review from someone other than the author is also required, though a merge request with NO reviews yet warns and passes rather than failing on absent evidence. |
 | `lane-paths` | Runs on every merge request, not only a memory lane one. On the lane branch it verifies every changed path under `.memory/records/` is an ADDED file and nothing else changed; on any other merge request it passes with nothing to check. Never tiers. |
 | `lane-scrub` | Runs on every merge request, lane or not. Every record file added under `.memory/records/` is scanned for a committed secret and fails closed on a match, naming only the pattern and line number — never the matched text. Not softened at any tier. |
+| `base-branch` | A merge request whose linked issue names a parent that declares a tracker must base on that tracker while the epic is in flight; a merge request with no linked issue, no parent, or an epic with no tracker passes untouched. Required at every tier, including the lightest. |
 
 ## Test plan
 
