@@ -50,7 +50,12 @@ const WRITE_CALL_RE = new RegExp(`\\b(${WRITE_FNS.join('|')})\\s*\\(`, 'g');
 // defect class as `join(process.cwd(), 'x.txt')` — the bare form has no use as
 // a write target, so the match ends at the first `,` or `)` after the dot
 // (PR #1022 cold review, blocker).
-const CWD_REF_RE = /process\.cwd\(\)|resolve\(\s*['"]\.['"]\s*[,)]/;
+// `path.resolve()` anchors an all-relative segment list to `process.cwd()`, so
+// a resolve whose FIRST segment is a relative string literal (`resolve('x')`,
+// `resolve('.', 'x')`) is the same write; an absolute literal (`resolve('/tmp/…')`)
+// is not. A variable first segment is out of scope (said non-goal: no
+// same-file variable tracing). PR #1022 cold review, rounds 1 and 2.
+const CWD_REF_RE = /process\.cwd\(\)|resolve\(\s*['"](?!\/)[^'"]*['"]\s*[,)]/;
 
 /** Returns the text between a call's own `(` (at `openParenIdx`) and its
  * matching `)`, tracking nested parens and skipping over string-literal
@@ -155,5 +160,31 @@ test("the scanner also catches resolve('.', ...) with further segments — the m
   assert.deepEqual(found, [
     { file: 'test/planted.e2e.test.mjs', line: 3, fn: 'writeFileSync' },
     { file: 'test/planted.e2e.test.mjs', line: 4, fn: 'writeFileSync' },
+  ]);
+});
+
+test("the scanner catches resolve() whose first segment is a RELATIVE string literal, and leaves an absolute literal alone (PR #1022 cold review round 2)", () => {
+  // path.resolve() anchors any all-relative segment list to process.cwd(), so
+  // `resolve('scratch-dir')` is the same real-root write as
+  // `join(process.cwd(), 'scratch-dir')` without spelling either token.
+  const fixtureRoot = testTmp('test-hygiene-fixture-relative-');
+  const fixtureDir = join(fixtureRoot, 'brain', 'scripts');
+  mkdirSync(fixtureDir, { recursive: true });
+  const MKDIR_KW = 'mkdir' + 'Sync';
+  const WRITE_KW = 'writeFile' + 'Sync';
+  const plantedSource = [
+    "import { mkdirSync, writeFileSync } from 'node:fs';",
+    "import { resolve } from 'node:path';",
+    `${MKDIR_KW}(resolve('scratch-dir'), { recursive: true });`,
+    `${WRITE_KW}(resolve("scratch", "x.txt"), 'data');`,
+    `${WRITE_KW}(resolve('/tmp/brain-fixture', 'x.txt'), 'data');`,
+    '',
+  ].join('\n');
+  writeFileSync(join(fixtureDir, 'planted.test.mjs'), plantedSource, 'utf8');
+
+  const { found } = findRealRootWriteViolations(fixtureRoot, WALK_GLOBS);
+  assert.deepEqual(found, [
+    { file: 'brain/scripts/planted.test.mjs', line: 3, fn: 'mkdirSync' },
+    { file: 'brain/scripts/planted.test.mjs', line: 4, fn: 'writeFileSync' },
   ]);
 });

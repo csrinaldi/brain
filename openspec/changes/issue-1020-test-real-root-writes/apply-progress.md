@@ -76,3 +76,8 @@ None — all tasks in tasks.md are `[x]`.
 ## Cold review of PR #1022 (round 1, head 69f679c3): REVISE → fixed
 
 - blocker: `CWD_REF_RE` matched only a bare `resolve('.')`; `writeFileSync(resolve('.', 'x.txt'), …)` — the multi-segment form, the same defect class as `join(process.cwd(), 'x.txt')` — passed the guard silently, and no test planted that form. Fix: the match ends at the first `,` or `)` after the dot; a second detection-proof test plants `resolve('.', 'x.txt')` and `resolve(".", "sub", "y.txt")` in a fixture root under `test/`. RED 2/3 → GREEN 3/3; mutation (the old regex back) → 2/3, reverted. R1020-2 wording amended to say "bare or with further segments".
+
+## Cold review of PR #1022 (round 2, head 84ff6724): APPROVE with two corrections
+
+- correction 1 (measured false, said here): the review states that commit e1a45499 already carried the "round 1" heading citing 69f679c3. `git show e1a45499:<apply-progress.md>` has no such heading; `git log -S"Cold review of PR #1022"` names 84ff6724 as the commit that introduced it, after 69f679c3 existed. The narrative is causally consistent; nothing changed.
+- correction 2 (real): `path.resolve()` anchors an all-relative segment list to the cwd, so `mkdirSync(resolve('scratch-dir'))` was the same defect and passed the guard. The guard now matches any `resolve()` whose first segment is a relative string literal and leaves an absolute literal alone (a variable first segment stays a said non-goal). RED 3/4 → GREEN 4/4; mutation (absolute-literal exclusion dropped) → the negative case red, reverted. R1020-2 amended.

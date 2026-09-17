@@ -28,8 +28,12 @@ capability: test-hygiene
   `brain/scripts/**` and `test/**`.
 - The guard MUST fail if any scanned file contains a write call
   (`mkdirSync`, `writeFileSync`, `symlinkSync`, or `cpSync`) whose own
-  argument list directly references `process.cwd()` or
-  `resolve('.')`/`resolve(".")`, unless the match is present in an
+  argument list directly references `process.cwd()`, or a `resolve()`
+  whose first segment is a relative string literal (`resolve('.')`,
+  `resolve('.', 'x.txt')`, `resolve('scratch')` — `path.resolve` anchors an
+  all-relative list to the cwd); an absolute literal first segment is not a
+  match, and a variable first segment is out of scope (no same-file variable
+  tracing, said non-goal). A match is a failure unless it is present in an
   annotated allowlist (file, line, reason).
 - The guard's scan root MUST be a parameter (not hardcoded to the real
   repo), so a test can point it at an isolated fixture root to prove
