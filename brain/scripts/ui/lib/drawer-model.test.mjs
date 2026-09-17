@@ -140,6 +140,20 @@ test('#881 R881-8 S4: Reviews list every round with its URL and state their sour
   assert.equal(reviews.entries[0].source, 'https://github.com/o/r/pull/971#c1');
 });
 
+test('#1009 cold review round 2: a STOP round\'s title carries the verdict word and its detail names the human escalation, distinct from an ordinary REVISE/APPROVE round', () => {
+  const model = buildDrawerModel(view({
+    reviews: {
+      ok: true,
+      sourceNote: 'forge comments until #880 lands',
+      unreadable: [],
+      value: [{ pr: 971, rev: 3, verdict: 'STOP', author: 'bob', findings: [], findingCount: 0, head_sha: 'abc', malformed: [], source: { url: 'https://github.com/o/r/pull/971#c3' } }],
+    },
+  }));
+  const [round] = model.value.tabs[3].entries;
+  assert.equal(round.title, '#971 rev 3 — STOP');
+  assert.match(round.detail, /human escalation/, 'a STOP round\'s detail must name the escalation, the same word app.js renders');
+});
+
 test('#998 R998-5: a round\'s findings become one child entry each, severity and id in the title, excerpt/cites in the detail; a finding with no file/line falls back to the round\'s own source', () => {
   const model = buildDrawerModel(view({
     reviews: {

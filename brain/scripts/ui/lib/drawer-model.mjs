@@ -102,9 +102,15 @@ function reviewEntries(rounds, unreadable) {
     // `round.malformed` names WHICH keys were unreadable, and dropping that
     // name here would leave this row indistinguishable from a round whose
     // finding count was merely uncomputable for some other reason.
+    // A STOP round names the human escalation explicitly (#1009 cold review
+    // round 2, reviewer-protocol.md §7's "a human must look now" state) —
+    // the same word app.js's renderReviewRound puts beside the mark, so the
+    // drawer never says less about a STOP round than the canvas does.
     const detail = round.malformed?.length
       ? `findings block unreadable: ${round.malformed.join(', ')} (${countPart})`
-      : `${round.author ?? 'unknown author'}, ${countPart}${round.head_sha ? `, head ${round.head_sha}` : ''}`;
+      : round.verdict === 'STOP'
+        ? `human escalation — ${round.author ?? 'unknown author'}, ${countPart}${round.head_sha ? `, head ${round.head_sha}` : ''}`
+        : `${round.author ?? 'unknown author'}, ${countPart}${round.head_sha ? `, head ${round.head_sha}` : ''}`;
     return entry({
       title: `#${round.pr} rev ${round.rev} — ${round.verdict}`,
       detail,
