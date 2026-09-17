@@ -25,7 +25,7 @@
 // uncertainty resolves to the default branch WITH THE REASON SAID. An epic that
 // cannot be read is an outage, and an outage must not stop a session.
 
-import { parseGraphBlock } from '../status/epic-graph.mjs';
+import { parseGraphBlock, declaredParent } from '../status/epic-graph.mjs';
 import { OFF_TRACKER_FLAG } from './ticket-args.mjs';
 
 /** The declaration is `kind: epic` and nothing else. Not the title, not a label,
@@ -142,12 +142,16 @@ export async function resolveBase({ issue, args, fetchIssue, defaultBranch = 'ma
 }
 
 /**
- * The issue's own declaration, read by the same parser the graph uses. An
- * unreadable or absent block declares no parent — it is never guessed at, and a
- * `needs:` edge is never read as one (R967-10).
+ * The issue's own declaration, read by the same reader the graph uses
+ * (`declaredParent` — #967 PR D, review round 2). An unreadable or absent
+ * block declares no parent, a MALFORMED block never falls back to prose, and
+ * a `needs:` edge is never read as one (R967-10) — but a body with NO block
+ * at all still resolves its prose `Parent:` line, which the old direct
+ * `parseGraphBlock` call here could not see (measured: it returns `null`
+ * before ever scanning prose when no graph-tagged fence exists).
  */
 function parentOf(body) {
-  const block = parseGraphBlock(body);
-  if (!block || block.ok === false || block.parent === null) return null;
-  return { number: block.parent, source: block.parentSource };
+  const { parent, parentSource } = declaredParent(body);
+  if (parent === null) return null;
+  return { number: parent, source: parentSource };
 }

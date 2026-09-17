@@ -200,6 +200,31 @@ test('#967 R967-3 S1/S2: the declared kind, tracker, parent and parentSource rea
   assert.deepEqual(JSON.parse(JSON.stringify(s)), s);
 });
 
+test('#967 R967-2 (PR D, review round 2): a slice body with Parent: prose and NO graph block at all still resolves its parent in the snapshot', async () => {
+  // A NEW case rather than an edit of the S1/S2 fixture above — #6 there already
+  // carries a `brain-graph/1` block (with no `parent:` key), so it exercises the
+  // block-exists prose fallback, not the no-block-at-all one this fix closes.
+  const issues = [
+    { number: 5, title: 'epic(ui): Brain UI', labels: ['status:approved'], assignees: [] },
+    { number: 7, title: 'seven', labels: [], assignees: null },
+  ];
+  const epic = '```brain-graph/1\nkind: epic\ntrack: UI\ntracker: feature/brain-ui\nblocks: []\nneeds: []\nfiles: []\n```';
+  const noBlockSlice = 'Parent: #5 (Brain UI) — slice 4, Wave B.';
+  const port = readOnlyPort({
+    issueList: async () => issues,
+    issueView: async ({ number }) => ({ body: number === 5 ? epic : noBlockSlice, assignees: null }),
+    mrList: async () => [],
+    prReviews: async () => [],
+  });
+  const s = await buildSnapshot({ root: makeFixture(), now: NOW, vcs: port, project: 'o/r' });
+  const n7 = s.graph.value.nodes.find((n) => n.number === 7);
+
+  assert.equal(n7.parent, 5, 'the prose parent resolves even with no brain-graph/1 block at all');
+  assert.equal(n7.parentSource, 'prose');
+  assert.equal(n7.declared, false, 'a prose-only parent is a relation, not a graph declaration');
+  assert.deepEqual(JSON.parse(JSON.stringify(s)), s);
+});
+
 test('#879: one issue body that cannot be read is a node that says so — never an issue that declared nothing', async () => {
   const issues = [
     { number: 5, title: 'five', labels: ['status:approved'], assignees: [] },

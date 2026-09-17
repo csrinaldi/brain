@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { parseGraphBlock, buildGraph, filesOverlap, READY, BLOCKED, AWAITING_HUMAN, UNCLASSIFIED } from './epic-graph.mjs';
+import { parseGraphBlock, buildGraph, filesOverlap, declaredParent, READY, BLOCKED, AWAITING_HUMAN, UNCLASSIFIED } from './epic-graph.mjs';
 import { renderMermaid, renderSummary, replaceMapRegion, outsideRegion, BEGIN, END } from './epic-render.mjs';
 import { parseArgs, composeMap, main } from './epic-map.mjs';
 
@@ -330,6 +330,47 @@ test('#967 R967-2 S3: Epic: #N is NOT a synonym for Parent: #N', () => {
   assert.deepEqual(g.declarationDivergences, []);
 });
 
+// ── #967 PR D (cold review round 2, 2026-09-17): `declaredParent` — the prose ──
+// fallback runs whether or not a `brain-graph/1` block exists at all.
+//
+// `parseGraphBlock` returns `null` BEFORE the prose scan whenever the body
+// carries no graph-tagged fence (`!body.includes(GRAPH_PROTOCOL)`), so
+// `Parent: #878` in a body that never declared a block was invisible to
+// `buildGraph`, to `lib/ticket-base.mjs`'s `parentOf`, and to the gate —
+// R967-2's own rule says the fallback applies "block or no block". This
+// export is the one entry both `buildGraph` and `parentOf` now share.
+
+test('#967 R967-2 (PR D): a body with Parent: #878 and NO block at all — parseGraphBlock alone still says null', () => {
+  const body = 'Parent: #878 (Brain UI) — slice 3, Wave B.';
+  assert.equal(parseGraphBlock(body), null, 'measured: no graph-tagged fence, so parseGraphBlock never runs its scan');
+});
+
+test('#967 R967-2 (PR D): declaredParent resolves the same body\'s prose parent with no block owed', () => {
+  const body = 'Parent: #878 (Brain UI) — slice 3, Wave B.';
+  assert.deepEqual(declaredParent(body), { parent: 878, parentSource: 'prose' });
+});
+
+test('#967 R967-2 (PR D): the same Parent: line INSIDE a fence, no block — declaredParent says null too', () => {
+  const body = ['```', 'Parent: #878', '```'].join('\n');
+  assert.deepEqual(declaredParent(body), { parent: null, parentSource: null });
+});
+
+test('#967 R967-2 (PR D): a block declaring parent: wins over declaredParent too', () => {
+  const body = rawBlock('track: A', 'parent: 878');
+  assert.deepEqual(declaredParent(body), { parent: 878, parentSource: 'block' });
+});
+
+test('#967 R967-2 (PR D): a body with neither a block nor a Parent: line — byte-identical either reader', () => {
+  const body = 'just prose, no declaration of any kind.';
+  assert.deepEqual(declaredParent(body), { parent: null, parentSource: null });
+  assert.equal(parseGraphBlock(body), null);
+});
+
+test('#967 R967-2 (PR D): a MALFORMED block never falls back to prose — malformed is not absent', () => {
+  const dupes = [rawBlock('track: A'), '', rawBlock('track: Z')].join('\n');
+  assert.deepEqual(declaredParent(dupes), { parent: null, parentSource: null });
+});
+
 test('#967 R967-10 S2: a needs: edge is never read as a parent', () => {
   // Measured, not assumed: #881 declares `needs: [879]`, a SIBLING, and #878 — the
   // real parent — declares `needs: []`. The fallback would resolve to the wrong node.
@@ -576,6 +617,18 @@ test('#967 R967-4 S2: a parent ABSENT from the set says nothing — "not in this
   const g = buildGraph([issue(881, { body: rawBlock('track: UI', 'parent: 9999') })]);
   assert.equal(g.nodes[0].parent, 9999, 'the declaration is kept');
   assert.deepEqual(g.declarationDivergences, []);
+});
+
+test('#967 R967-2 (PR D): buildGraph resolves a prose parent for a node with NO graph block at all', () => {
+  const g = buildGraph([
+    issue(878, { body: rawBlock('track: UI', 'kind: epic', 'tracker: feature/brain-ui') }),
+    { number: 881, title: 'no block, prose parent', labels: ['status:approved'], state: 'open',
+      body: 'Parent: #878 (Brain UI) — slice 3, Wave B.' },
+  ]);
+  const n881 = g.nodes.find((n) => n.number === 881);
+  assert.equal(n881.parent, 878, 'the prose parent resolves even with no brain-graph/1 block at all');
+  assert.equal(n881.parentSource, 'prose');
+  assert.equal(n881.declared, false, 'a prose-only parent is a relation, not a graph declaration');
 });
 
 test('#967: an unreadable block contributes no divergence and carries none of the four fields', () => {
