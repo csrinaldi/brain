@@ -511,11 +511,17 @@ async function runBaseBranchCheck(ctx, deps) {
 
   const headBranch = ctx.sourceBranch ?? null;
 
-  // Step 3 — a tracker's own integration PR. No port call: the predicate
-  // decides on branch names alone.
-  if (typeof headBranch === 'string' && headBranch.startsWith('feature/')) {
-    return baseBranchRule({ targetBranch: ctx.targetBranch, defaultBranch: ctx.defaultBranch, headBranch });
-  }
+  // Step 3 — a tracker's own integration PR is now decided inside the
+  // predicate, from the LINKED ISSUE's own declaration (`kind: epic` +
+  // `tracker:` naming `headBranch`), not from `headBranch`'s spelling alone
+  // (PR D review round 2: the prior no-port-call shortcut here trusted any
+  // `feature/…`-named head as a tracker before a declaration was ever read,
+  // the same bug `checks/base-branch.mjs` closed in its own predicate — this
+  // wrapper duplicated it via a separate branch-name-only fast path). There
+  // is no cheaper read left to skip: whether `headBranch` really is the
+  // linked issue's declared tracker can only be known from that issue's
+  // body, so this case now falls straight through to the same fetch every
+  // other head takes below.
 
   // Step 4 — no linked issue is the standing case (memory-lane / no-issue PRs).
   const closingRequired = requiresClosingKeyword(ctx);

@@ -1088,14 +1088,34 @@ test('runCheck: base-branch — targetBranch/defaultBranch uncomputable → fail
   assert.equal(result.uncomputable, true);
 });
 
-test('runCheck: base-branch — a feature/... head is checked with NO port call (step 3)', async () => {
-  let fetchCalled = false;
+// PR D (cold review round 2, 2026-09-17): the wrapper's own `feature/` prefix
+// shortcut duplicated the exact bug `checks/base-branch.mjs` closed in its
+// predicate — deciding "this head is a tracker" from the branch name alone,
+// with zero reads. There is no data-free path left: whether `headBranch`
+// really is the linked issue's declared tracker can only be known from that
+// issue's body, so a `feature/…` head now takes the SAME fetch every other
+// head does (still at most two calls total — the fan-out bound below).
+
+test('runCheck: base-branch — a feature/... head is checked against the linked issue\'s OWN declared tracker, one port call, not zero (step 3)', async () => {
+  let calls = 0;
   const result = await runCheck('base-branch', {
     ctx: { body: 'Closes #1', sourceBranch: 'feature/brain-ui', targetBranch: 'feature/other', defaultBranch: 'main' },
-    fetchIssue: async () => { fetchCalled = true; return { body: '' }; },
+    fetchIssue: async () => { calls += 1; return { body: EPIC_TRACKED_BODY }; },
   });
   assert.equal(result.pass, false);
-  assert.equal(fetchCalled, false, 'a tracker head decides on branch names alone — no fetchIssue call');
+  assert.ok(/default branch/.test(result.reason), `must state a tracker PR targets the default branch, got: ${result.reason}`);
+  assert.equal(calls, 1, 'the one fact the rule holds — the linked issue\'s own declaration, not the branch spelling');
+});
+
+test('runCheck: base-branch — a feature/... head that is NOT the linked issue\'s declared tracker is an ordinary slice head (measured bug)', async () => {
+  // The reviewed bug, at the wrapper: `sourceBranch: 'feature/issue-42-my-feature'`
+  // used to trip the old zero-read shortcut and fail a slice already correctly
+  // based on its epic's tracker, before the linked issue was ever fetched.
+  const result = await runCheck('base-branch', {
+    ctx: { body: 'Closes #337', sourceBranch: 'feature/issue-42-my-feature', targetBranch: 'feature/brain-ui', defaultBranch: 'main' },
+    fetchIssue: async (n) => (n === 337 ? { body: SLICE_BODY(878) } : { body: EPIC_TRACKED_BODY }),
+  });
+  assert.deepEqual(result, { pass: true });
 });
 
 test('runCheck: base-branch — no linked issue reference → pass untouched, the standing case (step 4)', async () => {
