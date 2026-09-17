@@ -94,6 +94,30 @@ body {
 }
 .status-bar .spacer { flex: 1; }
 
+/* ── the modes nav: the four buttons of lib/view-model.mjs (#998 R998-2) ── */
+
+.modes {
+  display: flex;
+  gap: 8px;
+  padding: 6px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+.modes button {
+  font: inherit;
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--muted);
+  cursor: pointer;
+}
+.modes button[aria-current='page'] {
+  color: var(--ink);
+  font-weight: 600;
+  background: #eef1f8;
+}
+
 /* ── the degradation bands: never a blank area, always a said reason ───── */
 
 .banners:empty { display: none; }

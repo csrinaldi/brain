@@ -16,16 +16,20 @@ import { initialPageState, applyFrame, parseFrame, streamFailed, controlFailed, 
 import { degradationBands, pollIndicator } from './lib/banners.mjs';
 import { buildCanvasModel } from './lib/canvas-model.mjs';
 import { buildDrawerModel } from './lib/drawer-model.mjs';
+import { MODES, PLACEHOLDERS, initialView, switchMode } from './lib/view-model.mjs';
 
 const mounts = {
   status: document.getElementById('status'),
+  modes: document.getElementById('modes'),
   banners: document.getElementById('banners'),
   canvas: document.getElementById('canvas'),
   drawer: document.getElementById('drawer'),
 };
 
 let state = initialPageState();
-/** The issue whose node is activated; `null` until one is. The drawer follows it. */
+/** The current mode id (#998 R998-2). `map` is the only one with content this PR; the router says so for the rest. */
+let view = initialView();
+/** The issue whose node is activated; `null` until one is. The drawer follows it — `map` mode only. */
 let selectedIssue = null;
 /** The last `GET /api/change/<N>` body for the selected issue; `null` while it is still being read. */
 let changeView = null;
@@ -79,9 +83,39 @@ function svgText(x, y, className, text) {
 
 function render() {
   renderStatus();
+  renderModes();
   renderBands();
-  renderCanvas();
-  renderDrawer();
+  renderContent();
+}
+
+/** The four mode buttons, drawn straight from `lib/view-model.mjs`'s table — no inline handler, no second copy of the labels. */
+function renderModes() {
+  clear(mounts.modes);
+  for (const mode of MODES) {
+    const button = el('button', null, mode.label);
+    button.type = 'button';
+    if (mode.id === view) button.setAttribute('aria-current', 'page');
+    button.addEventListener('click', () => switchToMode(mode.id));
+    mounts.modes.appendChild(button);
+  }
+}
+
+function switchToMode(mode) {
+  view = switchMode(view, mode);
+  render();
+}
+
+/** The router (#998 R998-2): `map` draws the existing canvas + drawer; the rest say which PR brings their content. */
+function renderContent() {
+  if (view === 'map') {
+    renderCanvas();
+    renderDrawer();
+    return;
+  }
+  clear(mounts.canvas);
+  mounts.canvas.appendChild(said(PLACEHOLDERS[view]));
+  mounts.drawer.hidden = true;
+  clear(mounts.drawer);
 }
 
 /** R881-9: one band per degraded thing, each one BESIDE the data, never instead of it. */
