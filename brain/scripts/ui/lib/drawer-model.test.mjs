@@ -124,8 +124,11 @@ test('#881 R881-8 S4: Reviews list every round with its URL and state their sour
       sourceNote: 'forge comments until #880 lands',
       unreadable: [],
       value: [
-        { pr: 971, rev: 1, verdict: 'REVISE', author: 'bob', findings: 3, head_sha: 'abc', malformed: [], source: { url: 'https://github.com/o/r/pull/971#c1' } },
-        { pr: 971, rev: 2, verdict: 'APPROVE', author: 'bob', findings: 0, head_sha: 'def', malformed: [], source: { url: 'https://github.com/o/r/pull/971#c2' } },
+        { pr: 971, rev: 1, verdict: 'REVISE', author: 'bob', findings: [
+          { id: 'F-1', severity: 'blocker', evidenceExcerpt: 'bad thing', cites: 'ADR-1' },
+          { id: 'F-2', severity: 'minor', evidenceExcerpt: 'small thing', cites: null },
+        ], findingCount: 2, head_sha: 'abc', malformed: [], source: { url: 'https://github.com/o/r/pull/971#c1' } },
+        { pr: 971, rev: 2, verdict: 'APPROVE', author: 'bob', findings: [], findingCount: 0, head_sha: 'def', malformed: [], source: { url: 'https://github.com/o/r/pull/971#c2' } },
       ],
     },
   }));
@@ -133,8 +136,43 @@ test('#881 R881-8 S4: Reviews list every round with its URL and state their sour
   assert.equal(reviews.note, 'forge comments until #880 lands');
   assert.deepEqual(reviews.entries.map((e) => e.title), ['#971 rev 1 — REVISE', '#971 rev 2 — APPROVE']);
   assert.match(reviews.entries[0].detail, /bob/);
-  assert.match(reviews.entries[0].detail, /3 finding/);
+  assert.match(reviews.entries[0].detail, /2 finding/);
   assert.equal(reviews.entries[0].source, 'https://github.com/o/r/pull/971#c1');
+});
+
+test('#998 R998-5: a round\'s findings become one child entry each, severity and id in the title, excerpt/cites in the detail, inheriting the round\'s own source (D14: no per-finding anchor exists)', () => {
+  const model = buildDrawerModel(view({
+    reviews: {
+      ok: true,
+      sourceNote: 'forge comments until #880 lands',
+      unreadable: [],
+      value: [{ pr: 971, rev: 1, verdict: 'REVISE', author: 'bob', findings: [
+        { id: 'F-1', severity: 'blocker', evidenceExcerpt: 'bad thing', cites: 'ADR-1' },
+        { id: 'F-2', severity: 'minor', evidenceExcerpt: 'small thing', cites: null },
+      ], findingCount: 2, head_sha: 'abc', malformed: [], source: { url: 'https://github.com/o/r/pull/971#c1' } }],
+    },
+  }));
+  const [round] = model.value.tabs[3].entries;
+  assert.equal(round.children.length, 2);
+  assert.equal(round.children[0].title, 'blocker — F-1');
+  assert.match(round.children[0].detail, /bad thing/);
+  assert.match(round.children[0].detail, /ADR-1/);
+  assert.equal(round.children[0].source, 'https://github.com/o/r/pull/971#c1', "a finding inherits the round's own source — no per-finding anchor exists (D14)");
+  assert.equal(round.children[1].title, 'minor — F-2');
+});
+
+test('#998 R998-5: the detail\'s finding count reads findingCount, not findings.length — a malformed verdict keeps it null, never 0', () => {
+  const model = buildDrawerModel(view({
+    reviews: {
+      ok: true,
+      sourceNote: 'forge comments until #880 lands',
+      unreadable: [],
+      value: [{ pr: 971, rev: 1, verdict: 'REVISE', author: 'bob', findings: [], findingCount: null, head_sha: 'abc', malformed: ['findings'], source: { url: 'https://github.com/o/r/pull/971#c1' } }],
+    },
+  }));
+  const [round] = model.value.tabs[3].entries;
+  assert.match(round.detail, /unknown finding count/, 'findingCount null (malformed/uncomputable) is said, never silently read as 0');
+  assert.deepEqual(round.children, []);
 });
 
 test('#881 R881-9: a review thread that could not be read is listed with its reason and its PR URL, never skipped', () => {
@@ -162,7 +200,7 @@ test('#881 R881-9: a readable round and an unreadable thread coexist — both ar
       ok: true,
       sourceNote: 'forge comments until #880 lands',
       unreadable: [{ pr: 972, ok: false, reason: 'rate limited', source: { url: 'https://github.com/o/r/pull/972' } }],
-      value: [{ pr: 971, rev: 1, verdict: 'APPROVE', author: 'bob', findings: 0, head_sha: 'abc', malformed: [], source: { url: 'https://github.com/o/r/pull/971#c1' } }],
+      value: [{ pr: 971, rev: 1, verdict: 'APPROVE', author: 'bob', findings: [], findingCount: 0, head_sha: 'abc', malformed: [], source: { url: 'https://github.com/o/r/pull/971#c1' } }],
     },
   }));
   const reviews = model.value.tabs[3];
@@ -175,7 +213,7 @@ test('#881 A3: every leaf the drawer renders carries a non-empty source label', 
     spec: { ok: true, value: [{ id: 'R1', title: 't', line: 1, source: { path: 'spec.md', line: 1 }, scenarios: [{ name: 's', when: 'w', then: 't', complete: true, source: { path: 'spec.md', line: 3 } }] }] },
     tasks: { ok: true, value: [{ line: 2, text: 'do it', done: false, actor: 'a', ts: null, source: { path: 'tasks.md', line: 2 }, attribution: { ok: true, value: { actor: 'a', ts: null } } }] },
     workingMemory: { ok: true, value: { next_action: { ok: true, value: 'x', source: { path: 'b:resume.md' } }, current_slice: { ok: false, reason: 'none', source: { path: 'b:resume.md' } }, blockers: { ok: true, value: 'none', source: { path: 'b:resume.md' } } } },
-    reviews: { ok: true, sourceNote: 'n', unreadable: [], value: [{ pr: 1, rev: 1, verdict: 'APPROVE', author: 'a', findings: 0, head_sha: 'h', malformed: [], source: { url: 'https://f/pull/1' } }] },
+    reviews: { ok: true, sourceNote: 'n', unreadable: [], value: [{ pr: 1, rev: 1, verdict: 'APPROVE', author: 'a', findings: [], findingCount: 0, head_sha: 'h', malformed: [], source: { url: 'https://f/pull/1' } }] },
   }));
   const all = leaves(model);
   assert.ok(all.length >= 6, `expected leaves from every tab, got ${all.length}`);
@@ -218,7 +256,7 @@ test('#998 R998-2: a review entry\'s stamp carries an href for a forge URL', () 
       ok: true,
       sourceNote: 'forge comments until #880 lands',
       unreadable: [],
-      value: [{ pr: 971, rev: 1, verdict: 'APPROVE', author: 'bob', findings: 0, head_sha: 'abc', malformed: [], source: { url: 'https://github.com/o/r/pull/971#c1' } }],
+      value: [{ pr: 971, rev: 1, verdict: 'APPROVE', author: 'bob', findings: [], findingCount: 0, head_sha: 'abc', malformed: [], source: { url: 'https://github.com/o/r/pull/971#c1' } }],
     },
   }));
   const [, , , reviews] = model.value.tabs;

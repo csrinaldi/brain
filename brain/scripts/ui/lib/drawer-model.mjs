@@ -76,11 +76,24 @@ function workingMemoryEntries(fields) {
   }));
 }
 
+/** One child row per finding (#998 R998-5) — severity and id in the title, the excerpt and cites in the detail, inheriting the round's own source: no per-finding anchor exists in this provider (D14). */
+function findingEntries(round) {
+  return (round.findings ?? []).map((f) => entry({
+    title: `${f.severity ?? 'unknown'} — ${f.id ?? '?'}`,
+    detail: `${f.evidenceExcerpt ?? ''}${f.cites ? ` (cites ${f.cites})` : ''}`,
+    source: round.source,
+  }));
+}
+
 function reviewEntries(rounds, unreadable) {
   const read = rounds.map((round) => entry({
     title: `#${round.pr} rev ${round.rev} — ${round.verdict}`,
-    detail: `${round.author ?? 'unknown author'}, ${round.findings ?? 0} finding(s)${round.head_sha ? `, head ${round.head_sha}` : ''}`,
+    // `findingCount`, not `findings.length` (#998 R998-5): a malformed
+    // verdict keeps `findings: []` with `findingCount: null` — reading
+    // `.length` there would silently say "0 findings" for "uncomputable".
+    detail: `${round.author ?? 'unknown author'}, ${round.findingCount === null ? 'unknown finding count' : `${round.findingCount} finding(s)`}${round.head_sha ? `, head ${round.head_sha}` : ''}`,
     source: round.source,
+    children: findingEntries(round),
   }));
   // After the rounds that WERE read, never instead of them.
   const missed = unreadable.map((thread) => entry({
