@@ -65,10 +65,10 @@ export default {
   'day.brain.upToDate':         'brain up to date ({installed}).',
 
   // Team memory
-  'day.memory.hookMissing':    'Pre-push hook missing at {path}/pre-push — memory will not materialize on push.',
+  'day.memory.hookMissing':    'Pre-push hook missing at {path}/pre-push — feature checkpointing will not run on push.',
   'day.memory.hookActivated':  'Pre-push hook activated (core.hooksPath={hooksPath}).',
   'day.memory.hookFailed':     'Could not activate the pre-push hook (core.hooksPath).',
-  'day.memory.hookActive':     'Pre-push hook active — materializes memory before push.',
+  'day.memory.hookActive':     'Pre-push hook active — checkpoints feature working memory before push.',
   'day.memory.importing':      'Importing chunks from .memory/ to local DB...',
   'day.memory.reprojecting':   'Reprojecting brain/ to engram...',
   'day.memory.exporting':      'Exporting memory to repo (.memory/)...',
@@ -100,7 +100,7 @@ export default {
   'day.done.sddExplore':      '/sdd-explore <idea>             explore before committing',
   'day.done.gitlabIssue':     '/gitlab-issue                   create an issue from an idea',
   'day.done.beforePush':      'Before pushing:',
-  'day.done.checkCmd':        '{pm} run brain:repo:check && {pm} run brain:memory:share',
+  'day.done.checkCmd':        '{pm} run brain:repo:check; capture durable memory with {pm} run brain:memory:save --issue <id> (the enabled memory lane ships it)',
 
   // ── tracker-board.mjs (PR2) ───────────────────────────────────────────────────
   'tracker.noRemote':        '⚠ Could not detect origin remote.',
@@ -192,7 +192,7 @@ export default {
   'bootstrap.memory.prompt':         'Which memory backend do you use? [engram]: ',
   // {backend} = backend name (e.g. engram)
   'bootstrap.memory.backend':        'memory backend: {backend} (.env)',
-  'bootstrap.memory.hookOk':         'pre-push hook activated (materializes .memory/ before push — ADR-0003)',
+  'bootstrap.memory.hookOk':         'pre-push hook activated (checkpoints feature working memory before push — ADR-0003)',
   'bootstrap.memory.hookFailed':     'could not activate core.hooksPath (pre-push hook)',
   'bootstrap.memory.nodeAbsent':     'node absent — engram backend setup skipped',
   'bootstrap.memory.engram.ok':      'engram backend configured (symlink + merge driver)',
@@ -301,7 +301,7 @@ export default {
   'ticket.nextSteps.cd':          '    0. cd {path}   (open your work session here)',
   'ticket.nextSteps.step1':       '    1. Implement — use /sdd-new {id} if the change is complex',
   'ticket.nextSteps.step2':       '    2. {pm} run brain:repo:check before each commit',
-  'ticket.nextSteps.step3':       '    3. {pm} run brain:memory:share && git add .memory/ before pushing',
+  'ticket.nextSteps.step3':       '    3. Capture durable memory with {pm} run brain:memory:save --issue {id}; the enabled memory lane ships it before pushing',
   'ticket.nextSteps.step4':       '    4. git push -u origin {branch}',
 
   // ── ticket-start.mjs — feature working memory (Slice 3) ─────────────────────

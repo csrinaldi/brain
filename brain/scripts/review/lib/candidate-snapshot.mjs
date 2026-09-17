@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, lstatSync } from 'node:fs';
+import { readdirSync, readFileSync, readlinkSync, lstatSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { relative, resolve } from 'node:path';
 
@@ -11,7 +11,14 @@ function entry(root, path) {
   const type = stat.isDirectory() ? 'directory' : stat.isSymbolicLink() ? 'symlink' : stat.isFile() ? 'file' : 'other';
   const item = { path: relative(root, path), type, mode: stat.mode & 0o7777 };
   if (type === 'file') item.sha256 = digest(readFileSync(path));
-  if (type === 'symlink') item.sha256 = digest(readFileSync(path));
+  // #1010 — a symlink's identity is its TARGET STRING, never what the target
+  // resolves to. `readFileSync` FOLLOWS the link: a link to a directory threw
+  // EISDIR (the crash the issue measured, on a candidate worktree carrying a
+  // `.engram -> .memory` symlink written mid-review), and a link to a file
+  // hashed the target's bytes instead of the link itself — so retargeting a
+  // symlink to an unrelated but byte-identical file snapshotted as "no
+  // change". `readlinkSync` reads the link, never through it.
+  if (type === 'symlink') item.sha256 = digest(readlinkSync(path));
   return item;
 }
 
