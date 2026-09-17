@@ -67,6 +67,19 @@ const VIOLATION = {
   sliceScopes: { ok: true, value: [] },
 };
 
+const UNREADABLE_TASKS = {
+  id: 'issue-7-unreadable', issue: 7, slug: 'unreadable', dir: 'openspec/changes/issue-7-unreadable', archived: false,
+  grandfathered: false,
+  missing: { ok: true, value: [] },
+  artefacts: { proposal: true, spec: true, design: true, tasks: true, apply: false, verify: false, archive: false },
+  tasks: {
+    checked: { ok: false, reason: 'openspec/changes/issue-7-unreadable/tasks.md is not valid markdown' },
+    open: { ok: false, reason: 'openspec/changes/issue-7-unreadable/tasks.md is not valid markdown' },
+    next: { ok: false, reason: 'openspec/changes/issue-7-unreadable/tasks.md is not valid markdown' },
+  },
+  sliceScopes: { ok: false, reason: 'no slice-scope block' },
+};
+
 const ALL = [FULL, ONLY_PROPOSAL, HALF_TICKED, GRANDFATHERED, ARCHIVED, VIOLATION];
 
 function stageOf(model, id, stageId) {
@@ -80,7 +93,7 @@ test('#998 R998-4: LIFECYCLE_ORDER (the browser-safe restatement) equals sdd-lay
 test('#998 R998-4: STAGE_IDS is exactly the seven, in order', () => {
   assert.deepEqual(STAGE_IDS, ['proposal', 'spec', 'design', 'tasks', 'apply', 'verify', 'archive']);
   for (const id of STAGE_IDS) assert.ok(id in { present: 1 } || true); // sanity: no throw building the constant
-  assert.deepEqual(Object.keys(STAGE_VOCAB).sort(), ['done', 'in-progress', 'missing', 'not-applicable', 'present'].sort());
+  assert.deepEqual(Object.keys(STAGE_VOCAB).sort(), ['done', 'in-progress', 'missing', 'not-applicable', 'present', 'unreadable'].sort());
 });
 
 test('#998 R998-4: a change with every artefact — proposal/spec/design/apply/verify present, tasks done, archive missing', () => {
@@ -114,6 +127,15 @@ test('#998 R998-4: a change with only proposal.md — every later stage is missi
 test('#998 R998-4: tasks half ticked is in-progress, not done', () => {
   const model = buildSddModel({ ok: true, value: [HALF_TICKED] });
   assert.equal(stageOf(model, 'issue-3-half', 'tasks').state, 'in-progress');
+});
+
+// ── review of PR 4, fix 5: tasks.md exists but could not be read/parsed ────
+
+test('#998 fix5: tasks.md exists but its checked count could not be read — the tasks stage is unreadable, distinct from missing, with the reason', () => {
+  const model = buildSddModel({ ok: true, value: [UNREADABLE_TASKS] });
+  const tasksStage = stageOf(model, 'issue-7-unreadable', 'tasks');
+  assert.equal(tasksStage.state, 'unreadable');
+  assert.match(tasksStage.reason, /not valid markdown/);
 });
 
 test('#998 R998-4: a grandfathered change claims no stage — not-applicable across all seven', () => {
