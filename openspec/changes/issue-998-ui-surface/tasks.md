@@ -34,7 +34,16 @@ Delivery: feature-branch-chain on the tracker `feature/issue-998-ui-surface` (cr
 - [ ] T6. `npm run memory:save -- "<title>" "<content>" --issue 998 --type decision`; stage only the record and `.memory/index.jsonl`.
 
 ## PR 3 — lane model and the `?` holding lane (R998-3)
-- [ ] Detailed when the PR starts (files: `lib/lane-model.mjs`, `static/app.js`, `static/app.css`).
+
+```brain-slice-scope/3
+{"slice": 3, "claims": ["R998-3"], "files": ["brain/scripts/ui/lib/lane-model.mjs", "brain/scripts/ui/static/app.js", "brain/scripts/ui/static/app.css"], "terminal_pr": "the tracker feature/issue-998-ui-surface -> main"}
+```
+
+- [x] T1a. `lib/lane-model.test.mjs`: the undeclared majority (67 of 91) lands in the `?` holding lane, collapsed by default, with a visible total; the holding lane pages at 24; a reversed edge inside a lane is kept and never treated as leaving it; a cross-lane edge is never dropped, reported with both lanes named; an edge to an unknown node is reported; every node carries a `state` word/mark alongside its existing `marks`; `epicGrouping.ok === false` with the reason; the declare snippet parses with `epic-graph.mjs`'s `parseGraphBlock`; a lane with zero nodes does not exist; the `?` lane with zero nodes says "every open issue declares a track"; the same graph shuffled (nodes and edges) gives a byte-identical model. RED (`ERR_MODULE_NOT_FOUND`).
+- [x] T1b. `lib/lane-model.mjs`: `buildLaneModel(graphSection, {collapsedTracks, holdingPage})` groups nodes by declared track into lanes, each laid out via its own `layout()` call over its own subgraph; undeclared/unreadable nodes (`track === null`) land in the `?` holding lane instead. Edges are classified once over the whole graph into per-lane, cross-lane, or unknown-node buckets before any lane's own `layout()` runs. `epicGrouping` always says "not data yet (#967)". GREEN 12/12. Mutation: dropping the first holding-lane node after sorting → the exactly-once count test and the paging test red (10/12); reverted.
+- [x] T2. `static/app.js`: `renderCanvas` becomes `renderLanes` — one row per lane (header with count and state chips, then that lane's own SVG board), then the `?` holding lane (header with a show/hide toggle, the declare snippet in a `<pre>`, 24 rows per page with prev/next). Cross-lane edges are said as a list under the lanes, never drawn as a line (lanes do not share a coordinate space). `drawnNodes()` (the R998-2 keyboard traversal) now walks every lane's board nodes, folding each lane's row index into a large `y` offset so reading order stays correct across stacked rows; the holding lane's paged rows are excluded (no board coordinates). `static/app.css`: lane row/header/chip/holding styles, from the existing token block. RED/GREEN: N/A — no DOM harness (D9), matching R998-2's own keyboard-listener precedent; verified by trace against `lane-model.test.mjs`'s already-covered contract. `views-owned.test.mjs` (18) and `app-source-guard.test.mjs` stayed green — 44/44 across views-owned/app-source-guard/lane-model/view-model/canvas-model.
+- [x] T3. `GIT_CONFIG_GLOBAL=/dev/null npm test` and `npm run brain:repo:check` green; counted diff 395/400.
+- [ ] T4. `npm run memory:save -- "<title>" "<content>" --issue 998 --type decision`; stage only the record and `.memory/index.jsonl`.
 
 ## PR 4 — the SDD view and the archive reader (R998-4)
 - [ ] Detailed when the PR starts (files: `lib/sdd-model.mjs`, `brain/scripts/status/snapshot.mjs`, `static/app.js`).

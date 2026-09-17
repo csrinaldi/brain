@@ -73,7 +73,40 @@ ids this PR owns.
 - **THEN** it finds exactly the four modes and their placeholders, the five mount ids (`banners, canvas, drawer, modes, status`), the same four endpoints, and no management-view data identifier — while `nav`, `modes` and `Governance` are allowed as labels this PR does draw
 
 ### R998-3: track lanes and the `?` holding lane
-Acceptance: no node is filtered; the undeclared render in a collapsed lane with a visible total and the declare snippet; epic grouping says "not data yet" until #967.
+
+`lib/lane-model.mjs` MUST define `buildLaneModel(graphSection, {collapsedTracks, holdingPage})`, grouping every node by its declared track into `lanes` (sorted by track name), each laid out with its own `layout()` call over its own subgraph — a lane is a grouping, not a second layout engine, and `layout.mjs` MUST NOT be extended for it. A node with no declared track (`track === null`, including an unreadable one) MUST land in the `?` holding lane instead, never be dropped; the holding lane starts collapsed (`collapsedTracks` defaults to `Set(['?'])`) and pages its nodes at 24 per page. An edge MUST be classified exactly once, before any lane's own layout runs, into: internal to a lane (both endpoints share a track, passed to that lane's `layout()`), cross-lane (endpoints in different lanes, reported in `crossEdges` naming both tracks, never dropped and never passed to a layout call), or to an unknown node (reported in `droppedEdges`). Every node MUST carry `state: {code, label, mark}` from `state-vocab.mjs`'s `stateOf`, alongside its existing `marks`. `epicGrouping` MUST always be `{ok:false, reason:'kind and parent are not data yet (#967)'}` — `node.kind`/`node.parent` carry no data until #967 lands (proposal.md ruling 5). `app.js`'s `renderLanes` (replacing `renderCanvas`) MUST render one row per lane — a header with the track, its node count, and a `mark word × n` chip per state present — then that lane's own SVG board, then the `?` holding lane last: a header with a show/hide toggle, the exact `brain-graph/1` declare snippet in a `<pre>`, and 24 rows per page with prev/next while expanded. A cross-lane edge MUST be said as text under the lanes (`#a → #b crosses lanes X → Y`), never drawn as a line — lane boards do not share a coordinate space.
+
+#### Scenario: the undeclared majority is never dropped
+- **WHEN** 67 of 91 open issues declare no track
+- **THEN** all 67 land in the `?` holding lane, which starts collapsed with its total visible, and every node still lands in exactly one lane or the holding lane
+
+#### Scenario: a reversed edge stays inside its lane
+- **WHEN** two nodes in the same track declare edges in both directions
+- **THEN** the lane's own board keeps both edges, one marked `reversed`, and neither is reported as crossing lanes
+
+#### Scenario: a cross-lane edge is reported, never drawn
+- **WHEN** an edge's two endpoints declare different tracks
+- **THEN** it is kept in `crossEdges` naming both tracks and appears nowhere in either lane's own `edges`; the page says it as text under the lanes, not as a line
+
+#### Scenario: an edge to an unknown node is said, not swallowed
+- **WHEN** an edge's `to` (or `from`) is not any node's number
+- **THEN** it is reported in `droppedEdges` with reason `unknown node`
+
+#### Scenario: epic grouping says it has no data yet
+- **WHEN** `buildLaneModel` runs against any graph
+- **THEN** `epicGrouping` is always `{ok:false, reason:'kind and parent are not data yet (#967)'}`, never a faked grouping
+
+#### Scenario: the declare snippet is a real declaration
+- **WHEN** the holding lane's `declareSnippet` is read back through `epic-graph.mjs`'s `parseGraphBlock`
+- **THEN** it parses into a non-empty `track`, `blocks: []`, `needs: []`, `files: []` — the exact shape an author pastes to leave the `?` lane
+
+#### Scenario: an empty holding lane says why
+- **WHEN** every open issue declares a track
+- **THEN** the `?` lane still exists, with `count: 0` and the note "every open issue declares a track" instead of a blank expanded area
+
+#### Scenario: determinism under shuffled input
+- **WHEN** the same graph is given twice with `nodes` and `edges` in different orders
+- **THEN** `buildLaneModel` returns a byte-identical model both times
 
 ### R998-4: the SDD view
 Acceptance: seven stages per change, phase-order violations named, grandfathered changes claim no stage, archived changes appear with their archive path.
