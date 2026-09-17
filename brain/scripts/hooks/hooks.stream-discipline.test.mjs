@@ -29,7 +29,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { readFileSync, readdirSync, writeFileSync, chmodSync, statSync } from 'node:fs';
+import { readFileSync, readdirSync, writeFileSync, chmodSync, statSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { testTmp } from '../lib/test-tmp.mjs';
@@ -48,8 +48,16 @@ const ERR_MARKER = 'MOCK-STDERR-SOMETHING-A-HUMAN-NEEDS';
  * the HOOK keeps, so the tool must always offer both. A mock that only wrote to
  * stderr would pass against a hook that discarded stdout too.
  */
-function mockBin({ repoRoot = '/fake/repo' } = {}) {
+function mockBin({ repoRoot } = {}) {
   const dir = testTmp('brain-633-bin-');
+  // Pre-push (issue #890) only checkpoints when an active
+  // openspec/changes/<feature>/ directory exists under the resolved repo
+  // root, so the mock root must be a REAL directory with that shape —
+  // unlike the old unconditional checkpoint call, a nonexistent fake path
+  // silently skips the checkpoint and empties this test's whole assertion.
+  const root = repoRoot ?? testTmp('brain-633-root-');
+  mkdirSync(join(root, 'openspec', 'changes', 'mock-feature'), { recursive: true });
+  repoRoot = root;
 
   writeFileSync(
     join(dir, 'node'),
@@ -100,13 +108,16 @@ const opsOnStderr = (stderr) =>
 
 // ── layer 1: the real hooks, measured ───────────────────────────────────────
 
-test('#633 pre-push: the memory verbs\' STDERR reaches the operator', () => {
+test('#633 pre-push: the memory verb\'s STDERR reaches the operator', () => {
+  // Issue #890 retires `share` from pre-push entirely — feature pushes no
+  // longer transport durable records, so `share` never runs here at all.
+  // `feature-checkpoint` is the one cli.mjs op pre-push still calls.
   const r = runHook('pre-push');
 
   const ops = opsOnStderr(r.stderr);
   assert.ok(
-    ops.includes('share'),
-    `share's stderr must survive — it is the last command before the store leaves the machine; got ops: ${JSON.stringify(ops)}`,
+    !ops.includes('share'),
+    `share is retired (#890) and must never run from pre-push; got ops: ${JSON.stringify(ops)}`,
   );
   assert.ok(
     ops.includes('feature-checkpoint'),

@@ -10,13 +10,16 @@
 // (`main`/entrypoint). Every case is tested against the evaluator; no test
 // spawns git.
 //
-// `pre-commit`, not `pre-push` (design.md Decision 6): `pre-push`'s
-// `.memory/` check is WARN-only by an explicit, recorded decision
-// (`pre-push:114-119`, ADR-0014 §9) — `brain:memory:share` runs earlier in that same
-// hook and churns the manifest, so a hard block there self-blocks the push it
-// runs on. After the exporter fix (#701 PR 2) `pre-push`'s own `share` no
-// longer produces byte-identical records in the first place, so the pre-push
-// case is closed by the exporter, not by a second gate here.
+// `pre-commit`, not `pre-push` (design.md Decision 6). Since #890 `pre-push`
+// does not touch `.memory/` at all: it checkpoints feature working memory and
+// runs the repository checks, and durable records reach `main` on the memory
+// lane (ADR-0034), never on a feature push. The gate was placed here for a
+// historical reason that no longer applies but explains the shape: `pre-push`'s
+// `.memory/` check was WARN-only by a recorded decision (ADR-0014 §9) because
+// its own `share` step churned the manifest, so a hard block there would have
+// self-blocked the push it ran on. After the exporter fix (#701 PR 2) `share`
+// no longer produced byte-identical records, so the pre-push case was closed by
+// the exporter, not by a second gate here.
 
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';

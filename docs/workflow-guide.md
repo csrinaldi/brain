@@ -82,8 +82,8 @@ npm run brain:repo:check        # prohibited-reference check (minimum gate)
 npm test                        # full test suite
 npm run brain:change:verify     # scope-aware verification of the active change
 
-# 6. Persist team memory before pushing
-npm run brain:memory:share            # export local engram → .memory/ (versioned in git)
+# 6. Capture durable issue memory before pushing
+npm run brain:memory:save --issue <id> # the enabled memory lane ships the record
 
 # 7. Commit and open the PR with a "Closes #<id>" reference
 ```
