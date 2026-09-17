@@ -125,16 +125,35 @@ export function projectRecord(r) {
 const EVIDENCE_EXCERPT_LEN = 240;
 
 /**
- * A `parseVerdict` finding entry, shaped for the UI (#998 R998-5). Only the
- * fields `reviewer-protocol.md` SS6.1/6.2 actually declares (`id`, `severity`,
- * `evidence`, `cites`) — no `file`/`line`: the protocol carries no such
- * fields, so none are invented here.
+ * A finding's `line` scalar, as `parseVerdict` hands it back (always a
+ * string — `unyamlScalar` never coerces). A non-negative integer parses;
+ * anything else (absent, `'abc'`, a negative) is `null` — never a fabricated
+ * `0`, and never the raw string leaking through as a number-shaped surprise.
+ */
+function parseFindingLine(raw) {
+  if (raw === undefined || raw === null) return null;
+  const n = Number(raw);
+  return Number.isInteger(n) && n >= 0 ? n : null;
+}
+
+/**
+ * A `parseVerdict` finding entry, shaped for the UI (#998 R998-5). `id`,
+ * `severity`, `evidence`, `cites` per the protocol prose; `file`/`line` ARE
+ * real emitted fields too — `verdict.mjs`'s `renderVerdict` posts them per
+ * finding when `hasUsableAnchor` holds (issue #405, REQ-405-2; measured on
+ * PR #1006's posted verdict, head e1c4aab3). An earlier revision of this
+ * function read the protocol prose as the schema and dropped them; the
+ * EMITTER is the schema, and `parseEntryList` (parse-verdict.mjs) is
+ * field-name-agnostic — it already captured whatever `renderVerdict` wrote,
+ * this function was just throwing the two fields away.
  */
 function shapeFinding(f) {
   return {
     id: f?.id ?? null,
     severity: f?.severity ?? null,
     cites: f?.cites ?? null,
+    file: f?.file ?? null,
+    line: parseFindingLine(f?.line),
     evidenceExcerpt: typeof f?.evidence === 'string' ? f.evidence.slice(0, EVIDENCE_EXCERPT_LEN) : '',
   };
 }

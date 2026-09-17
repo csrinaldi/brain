@@ -13,7 +13,7 @@ const NOW = '2026-09-13T00:00:00Z';
 
 const VERDICT = (sha, rev, verdict) => `Round ${rev}\n\n\`\`\`yaml\nprotocol: brain-review/2\nhead_sha: ${sha}\nrev: ${rev}\nverdict: ${verdict}\nfindings: []\n\`\`\`\n`;
 
-/** A verdict whose `findings:` block carries the given entries, in the ONE list encoding `renderVerdict` emits (#998 R998-5). */
+/** A verdict whose `findings:` block carries the given entries, in the ONE list encoding `renderVerdict` emits (#998 R998-5). `file`/`line` are real emitted fields (verdict.mjs's `hasUsableAnchor`, REQ-405-2, measured on PR #1006's posted verdict) — included here only when the fixture asks for them. */
 const VERDICT_WITH_FINDINGS = (sha, rev, verdict, findings) => {
   const lines = ['protocol: brain-review/2', `head_sha: ${sha}`, `rev: ${rev}`, `verdict: ${verdict}`, 'findings:'];
   for (const f of findings) {
@@ -21,6 +21,8 @@ const VERDICT_WITH_FINDINGS = (sha, rev, verdict, findings) => {
     lines.push(`    severity: ${f.severity}`);
     if (f.evidence !== undefined) lines.push(`    evidence: "${f.evidence}"`);
     if (f.cites !== undefined) lines.push(`    cites: ${f.cites}`);
+    if (f.file !== undefined) lines.push(`    file: ${f.file}`);
+    if (f.line !== undefined) lines.push(`    line: ${f.line}`);
   }
   return `Round ${rev}\n\n\`\`\`yaml\n${lines.join('\n')}\n\`\`\`\n`;
 };
@@ -302,10 +304,22 @@ test('#998 R998-5: reviewRows carries a verdict\'s findings as the shaped array,
   const r = reviewRows(5, [{ body, author: 'bot' }]);
   assert.equal(r.verdicts[0].findingCount, 2);
   assert.deepEqual(r.verdicts[0].findings, [
-    { id: 'F-1', severity: 'blocker', cites: 'ADR-1', evidenceExcerpt: longEvidence.slice(0, 240) },
-    { id: 'F-2', severity: 'correction', cites: null, evidenceExcerpt: 'short' },
+    { id: 'F-1', severity: 'blocker', cites: 'ADR-1', file: null, line: null, evidenceExcerpt: longEvidence.slice(0, 240) },
+    { id: 'F-2', severity: 'correction', cites: null, file: null, line: null, evidenceExcerpt: 'short' },
   ]);
   assert.equal(r.verdicts[0].findings[0].evidenceExcerpt.length, 240);
+});
+
+test('#998 R998-5: a finding carrying file/line (the real emitted anchor, verdict.mjs\'s hasUsableAnchor / REQ-405-2, measured on PR #1006) survives with both present; one without has both null', () => {
+  const body = VERDICT_WITH_FINDINGS('abc', 1, 'REVISE', [
+    { id: 'F-1', severity: 'blocker', evidence: 'e', cites: 'ADR-1', file: 'brain/scripts/governance/run-check.mjs', line: 556 },
+    { id: 'F-2', severity: 'correction', evidence: 'e' },
+  ]);
+  const r = reviewRows(8, [{ body, author: 'bot' }]);
+  assert.equal(r.verdicts[0].findings[0].file, 'brain/scripts/governance/run-check.mjs');
+  assert.equal(r.verdicts[0].findings[0].line, 556);
+  assert.equal(r.verdicts[0].findings[1].file, null);
+  assert.equal(r.verdicts[0].findings[1].line, null);
 });
 
 test('#998 R998-5: a malformed findings block keeps findings: [] with the reason said in malformed, not silently "no findings"', () => {
