@@ -25,6 +25,7 @@
   --warn: #8a4b00;
   --warn-bg: #fff4e0;
   --stamp: #5d5d6b;
+  --surface-active: #eef1f8;
   /* one fg/bg pair per state of lib/state-vocab.mjs; the class each state
      paints is the state's className, and the rule for it reads the pair */
   --state-planned-fg: #1b1b1f;        --state-planned-bg: #eef1f8;
@@ -50,6 +51,7 @@
     --warn: #fbbf24;
     --warn-bg: #2d1f03;
     --stamp: #64748b;
+    --surface-active: #1e293b;
     --state-planned-fg: #64748b;        --state-planned-bg: #1e293b;
     --state-in-flight-fg: #06b6d4;      --state-in-flight-bg: #083344;
     --state-done-fg: #6366f1;           --state-done-bg: #1e1b4b;
@@ -115,7 +117,7 @@ body {
 .modes button[aria-current='page'] {
   color: var(--ink);
   font-weight: 600;
-  background: #eef1f8;
+  background: var(--surface-active);
 }
 
 /* ── the degradation bands: never a blank area, always a said reason ───── */
