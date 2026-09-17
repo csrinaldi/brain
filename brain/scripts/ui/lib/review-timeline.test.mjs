@@ -9,7 +9,7 @@ import { buildReviewTimeline } from './review-timeline.mjs';
 const prs = (value) => ({ ok: true, value });
 const reviews = (value) => ({ ok: true, value });
 
-const finding = (severity, over = {}) => ({ id: 'F-1', severity, evidenceExcerpt: 'because', cites: null, ...over });
+const finding = (severity, over = {}) => ({ id: 'F-1', severity, evidenceExcerpt: 'because', cites: null, file: null, line: null, ...over });
 
 const verdict = (rev, verdictWord, over = {}) => ({
   pr: over.pr ?? 1, head_sha: 'abcdef0123', rev, verdict: verdictWord, author: 'bot',
@@ -45,6 +45,19 @@ test('#998 R998-5: a thread with no round is distinct from an unreadable one', (
   assert.equal(t.value.threads[0].noRound, true);
   assert.deepEqual(t.value.threads[0].rounds, []);
   assert.equal(t.value.threads[0].unreadable, undefined);
+});
+
+test('#998 R998-5: a finding with file/line gets source:{path,line}; one without gets a null source, never dropped', () => {
+  const t = buildReviewTimeline(
+    reviews([{ pr: 6, ok: true, verdicts: [verdict(1, 'REVISE', { pr: 6, findings: [
+      finding('blocker', { file: 'brain/scripts/governance/run-check.mjs', line: 556 }),
+      finding('correction'),
+    ] })], latest: null }]),
+    prs([{ number: 6, title: 'anchored', headBranch: 'feat/anchor', issue: 6 }]),
+  );
+  const [anchored, unanchored] = t.value.threads[0].rounds[0].findings;
+  assert.deepEqual(anchored.source, { path: 'brain/scripts/governance/run-check.mjs', line: 556 });
+  assert.equal(unanchored.source, null, 'no file/line — the source is null, never dropped from the finding');
 });
 
 test('#998 R998-5: an unreadable thread is a row with its reason, never a skip', () => {

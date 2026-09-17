@@ -1,7 +1,8 @@
 // review-timeline.mjs — the reviews mode's own model (#998 R998-5). Pure, no
 // DOM, no IO, imported by the browser and by node:test (D9). `reviewRows`
 // (status/snapshot.mjs) already parsed every verdict and shaped its findings
-// (`{id, severity, evidenceExcerpt, cites}`, no fabricated file/line); this
+// (`{id, severity, evidenceExcerpt, cites, file, line}` — `file`/`line` ARE
+// real emitted fields, `verdict.mjs`'s `hasUsableAnchor`/REQ-405-2); this
 // module only groups what it already produced into a thread per PR, oldest
 // round first, plus the verdict queue — no parsing happens here.
 
@@ -15,14 +16,26 @@ function bySeverity(findings) {
   return counts;
 }
 
+/**
+ * A finding's own anchor as a provenance object (D14, amended — a
+ * per-finding anchor DOES exist when the verdict carried one): `{path,
+ * line}` when `file` is present, `null` otherwise — never dropped, only
+ * `sourceStamp`/`sourceLabel` (provenance.mjs) turn a `null` into the said
+ * "no source was recorded" text at render time, same as every other value.
+ */
+function findingSource(f) {
+  return f.file ? { path: f.file, line: f.line } : null;
+}
+
 function shapeRound(v) {
+  const findings = v.findings.map((f) => ({ ...f, source: findingSource(f) }));
   return {
     rev: v.rev,
     verdict: v.verdict,
     headSha7: typeof v.head_sha === 'string' ? v.head_sha.slice(0, 7) : null,
     author: v.author,
-    findings: v.findings,
-    bySeverity: bySeverity(v.findings),
+    findings,
+    bySeverity: bySeverity(findings),
   };
 }
 
