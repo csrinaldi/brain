@@ -23,12 +23,15 @@ export const TAB_IDS = ['spec', 'tasks', 'workingMemory', 'reviews'];
 const TAB_LABELS = { spec: 'Spec', tasks: 'Tasks', workingMemory: 'Working memory', reviews: 'Reviews' };
 
 // A3: `sourceLabel` lives in provenance.mjs since #998; re-exported so every
-// importer of this module keeps working.
-import { sourceLabel } from './provenance.mjs';
+// importer of this module keeps working. `sourceStamp` is additive (#998
+// R998-2): `source` stays the same plain string every existing reader
+// already gets, `sourceStamp` is the design's bracketed form the door's
+// entries render from PR 2 on, with the href a forge/link chip may carry.
+import { sourceLabel, sourceStamp } from './provenance.mjs';
 export { sourceLabel };
 
 function entry({ title, detail, source, pending = false, ...rest }) {
-  return { title, detail, source: sourceLabel(source), pending, ...rest };
+  return { title, detail, source: sourceLabel(source), sourceStamp: sourceStamp(source), pending, ...rest };
 }
 
 /** A failed tab: the reason stays, and so does whatever path the failure knew about. */

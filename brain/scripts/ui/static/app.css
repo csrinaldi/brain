@@ -180,6 +180,7 @@ body {
 }
 .drawer .card.pending { border-style: dashed; }
 .drawer .source { display: block; margin-top: 4px; font-size: 11px; color: var(--muted); word-break: break-all; }
+.drawer .source-chip { margin-left: 6px; font-size: 11px; color: var(--stamp); }
 .drawer .said { color: var(--warn); }
 .drawer .note { color: var(--muted); font-size: 12px; }
 .drawer .close { float: right; }

@@ -274,9 +274,27 @@ function renderEntry(item) {
   const done = item.done === undefined ? '' : item.done ? '[x] ' : '[ ] ';
   card.appendChild(el('strong', null, `${done}${item.title}`));
   if (item.detail) card.appendChild(el('p', null, item.detail));
-  card.appendChild(el('span', 'source', item.source)); // A3: the path or the URL, beside the value itself
+  card.appendChild(renderSourceStamp(item.sourceStamp)); // #998 R998-2: the design's stamp, beside the value itself (A3)
   for (const child of item.children ?? []) card.appendChild(renderEntry(child));
   return card;
+}
+
+/**
+ * The stamp's label, plus a chip when it carries an href (#998 R998-2). The
+ * href is the model's own guarantee (only an https forge/link URL ever gets
+ * one) — this function sets it as an attribute, never as markup.
+ */
+function renderSourceStamp(stamp) {
+  const wrap = document.createDocumentFragment();
+  wrap.appendChild(el('span', 'source', stamp.label));
+  if (stamp.href) {
+    const chip = el('a', 'source-chip', 'open ↗');
+    chip.setAttribute('href', stamp.href);
+    chip.setAttribute('rel', 'noopener noreferrer');
+    chip.setAttribute('target', '_blank');
+    wrap.appendChild(chip);
+  }
+  return wrap;
 }
 
 /** The drawer's own IO. A failed read is a reason IN the drawer, never a drawer that stays empty. */
