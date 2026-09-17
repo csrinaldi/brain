@@ -260,16 +260,25 @@ export function parentFromProse(body) {
  * falls back to prose — malformed is not absent (#639), and salvaging a
  * refused declaration through a second door would make the refusal optional.
  *
+ * `ambiguousValue` carries the same thing `parseGraphBlock`'s own
+ * `declarationDivergences` carries for the block-bearing path: MORE THAN ONE
+ * distinct `Parent: #N` number, raw, for a caller that has no divergence
+ * channel of its own (#967 cold review round 1, finding 2) — `null` whenever
+ * a block resolved the parent (its own ambiguity, if any, is already said via
+ * `parseGraphBlock`'s `declarationDivergences`) or nothing was declared at all.
+ *
  * @param {string} body
- * @returns {{ parent: number|null, parentSource: 'block'|'prose'|null }}
+ * @returns {{ parent: number|null, parentSource: 'block'|'prose'|null, ambiguousValue: string|null }}
  */
 export function declaredParent(body) {
-  if (typeof body !== 'string') return { parent: null, parentSource: null };
+  if (typeof body !== 'string') return { parent: null, parentSource: null, ambiguousValue: null };
   const block = parseGraphBlock(body);
-  if (block && block.ok !== false) return { parent: block.parent, parentSource: block.parentSource };
-  if (block?.ok === false) return { parent: null, parentSource: null };
+  if (block && block.ok !== false) {
+    return { parent: block.parent, parentSource: block.parentSource, ambiguousValue: null };
+  }
+  if (block?.ok === false) return { parent: null, parentSource: null, ambiguousValue: null };
   const prose = parentFromProse(body);
-  return { parent: prose.parent, parentSource: prose.parentSource };
+  return { parent: prose.parent, parentSource: prose.parentSource, ambiguousValue: prose.ambiguousValue };
 }
 
 /** Node states, in the order a reader cares about them. */
@@ -626,6 +635,15 @@ export function buildGraph(issues = []) {
     // `needs` → an edge INTO this node. `blocks` → an edge OUT of it. Same relation,
     // two ends; declaring either is enough.
     for (const d of g?.declarationDivergences ?? []) declarationDivergences.push({ number: issue.number, ...d });
+    // #967 cold review round 1, finding 2: an ambiguous prose parent (`Parent: #878,
+    // #879`) for a body with NO block at all is said here too — `g` is `null` for
+    // such a body, so `g?.declarationDivergences` never carries it, the same gap
+    // `parseGraphBlock`'s own block-bearing fallback already closed for itself
+    // (~line 502-504). `dp.ambiguousValue` is `null` whenever a block resolved the
+    // parent, so this never double-reports a block's own ambiguity.
+    if (g === null && dp.ambiguousValue !== null) {
+      declarationDivergences.push({ number: issue.number, key: 'parent', value: dp.ambiguousValue, reason: 'parent-ambiguous' });
+    }
     for (const n of g?.needs ?? []) addEdge(`${n}->${issue.number}`, SRC_DECLARED);
     for (const b of g?.blocks ?? []) addEdge(`${issue.number}->${b}`, SRC_DECLARED);
 

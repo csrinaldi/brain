@@ -347,28 +347,33 @@ test('#967 R967-2 (PR D): a body with Parent: #878 and NO block at all — parse
 
 test('#967 R967-2 (PR D): declaredParent resolves the same body\'s prose parent with no block owed', () => {
   const body = 'Parent: #878 (Brain UI) — slice 3, Wave B.';
-  assert.deepEqual(declaredParent(body), { parent: 878, parentSource: 'prose' });
+  assert.deepEqual(declaredParent(body), { parent: 878, parentSource: 'prose', ambiguousValue: null });
 });
 
 test('#967 R967-2 (PR D): the same Parent: line INSIDE a fence, no block — declaredParent says null too', () => {
   const body = ['```', 'Parent: #878', '```'].join('\n');
-  assert.deepEqual(declaredParent(body), { parent: null, parentSource: null });
+  assert.deepEqual(declaredParent(body), { parent: null, parentSource: null, ambiguousValue: null });
 });
 
 test('#967 R967-2 (PR D): a block declaring parent: wins over declaredParent too', () => {
   const body = rawBlock('track: A', 'parent: 878');
-  assert.deepEqual(declaredParent(body), { parent: 878, parentSource: 'block' });
+  assert.deepEqual(declaredParent(body), { parent: 878, parentSource: 'block', ambiguousValue: null });
 });
 
 test('#967 R967-2 (PR D): a body with neither a block nor a Parent: line — byte-identical either reader', () => {
   const body = 'just prose, no declaration of any kind.';
-  assert.deepEqual(declaredParent(body), { parent: null, parentSource: null });
+  assert.deepEqual(declaredParent(body), { parent: null, parentSource: null, ambiguousValue: null });
   assert.equal(parseGraphBlock(body), null);
 });
 
 test('#967 R967-2 (PR D): a MALFORMED block never falls back to prose — malformed is not absent', () => {
   const dupes = [rawBlock('track: A'), '', rawBlock('track: Z')].join('\n');
-  assert.deepEqual(declaredParent(dupes), { parent: null, parentSource: null });
+  assert.deepEqual(declaredParent(dupes), { parent: null, parentSource: null, ambiguousValue: null });
+});
+
+test('#967-2 (PR #1006 review round 1, finding 2): declaredParent surfaces an ambiguous prose parent, no block owed', () => {
+  const body = 'Parent: #878, #879';
+  assert.deepEqual(declaredParent(body), { parent: null, parentSource: null, ambiguousValue: '878, 879' });
 });
 
 test('#967 R967-10 S2: a needs: edge is never read as a parent', () => {
@@ -629,6 +634,20 @@ test('#967 R967-2 (PR D): buildGraph resolves a prose parent for a node with NO 
   assert.equal(n881.parent, 878, 'the prose parent resolves even with no brain-graph/1 block at all');
   assert.equal(n881.parentSource, 'prose');
   assert.equal(n881.declared, false, 'a prose-only parent is a relation, not a graph declaration');
+});
+
+test('#967-2 (PR #1006 review round 1, finding 2): buildGraph says an ambiguous prose parent, no block at all', () => {
+  // `declaredParent` dropped `parentFromProse(...).ambiguousValue`, and the divergence
+  // lift in `buildGraph` iterates `g?.declarationDivergences` — `g` is `null` for a
+  // body with no block, so the ambiguity was silently lost instead of being SAID,
+  // unlike the block-bearing path (`parseGraphBlock` ~line 502-504) which already
+  // reports it.
+  const g = buildGraph([{ number: 881, title: 'no block, ambiguous prose parent', labels: ['status:approved'],
+    state: 'open', body: 'Parent: #878, #879' }]);
+  const n881 = g.nodes.find((n) => n.number === 881);
+  assert.equal(n881.parent, null, 'an ambiguous prose parent resolves to no parent, same as a block would refuse it');
+  assert.deepEqual(g.declarationDivergences,
+    [{ number: 881, key: 'parent', value: '878, 879', reason: 'parent-ambiguous' }]);
 });
 
 test('#967: an unreadable block contributes no divergence and carries none of the four fields', () => {
