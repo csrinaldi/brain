@@ -2229,6 +2229,7 @@
 {"id":"rec-ecf00c40557ba201","ts":"2026-08-28T02:17:06Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-08-rec-ecf00c40557ba201.jsonl"}
 {"id":"rec-ed1809d3efaf1f49","ts":"2026-07-25T00:48:26Z","actor":"@legacy","type":"bugfix","project":"brain","file":"2026-07-rec-ed1809d3efaf1f49.jsonl"}
 {"id":"rec-ed1c325e24addf22","ts":"2026-07-16T00:33:55Z","actor":"feat/issue-266-h0a-reviewer-protocol-doctrine","type":"discovery","project":"brain","file":"2026-07-rec-ed1c325e24addf22.jsonl"}
+{"id":"rec-ed554f8745fab2e7","ts":"2026-09-17T17:00:46Z","actor":"@csrinaldi","type":"decision","project":"brain","issue":998,"file":"2026-09-rec-ed554f8745fab2e7.jsonl"}
 {"id":"rec-ed5f8b5c0229c596","ts":"2026-07-13T00:21:56Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-ed5f8b5c0229c596.jsonl"}
 {"id":"rec-ed681795f2f51eb8","ts":"2026-07-12T18:54:23Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-ed681795f2f51eb8.jsonl"}
 {"id":"rec-eda961d75925e6cc","ts":"2026-07-13T00:22:08Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07-rec-eda961d75925e6cc.jsonl"}
