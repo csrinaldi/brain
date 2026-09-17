@@ -17,7 +17,9 @@ export const STATES = Object.freeze({
   'not-computed': Object.freeze({ code: 'not-computed', label: 'Not computed', mark: '—', className: 'roadmap-not-computed' }),
   blocked: Object.freeze({ code: 'blocked', label: 'Blocked', mark: '⊘', className: 'status-blocked' }),
   'awaiting-review': Object.freeze({ code: 'awaiting-review', label: 'Awaiting review', mark: '◇', className: 'status-awaiting-review' }),
-  undeclared: Object.freeze({ code: 'undeclared', label: 'Undeclared', mark: '?', className: 'status-unclassified' }),
+  // The code is the data's word (`unclassified`, epic-graph.mjs); the label is
+  // the screen's word (ruling 5 of 2026-09-16). One mapping, here.
+  unclassified: Object.freeze({ code: 'unclassified', label: 'Undeclared', mark: '?', className: 'status-unclassified' }),
   planned: Object.freeze({ code: 'planned', label: 'Planned', mark: '○', className: 'state-planned' }),
   'in-flight': Object.freeze({ code: 'in-flight', label: 'In flight', mark: '◐', className: 'state-in-flight' }),
   done: Object.freeze({ code: 'done', label: 'Done', mark: '●', className: 'state-done' }),
@@ -45,7 +47,7 @@ export function stateOf(node) {
   if (!node.roadmap || node.roadmap.ok !== true) return STATES['not-computed'];
   if (Array.isArray(node.blockedBy) && node.blockedBy.length > 0) return STATES.blocked;
   if (node.status === 'awaiting-human') return STATES['awaiting-review'];
-  if (node.status === 'unclassified') return STATES.undeclared;
+  if (node.status === 'unclassified') return STATES.unclassified;
   if (!KNOWN_STATUS.has(node.status)) throw new Error(`state-vocab.mjs: unknown node status "${node.status}" — a constant was renamed, or a new status shipped without updating this table`);
   const code = ROADMAP_STATE_CODE[node.roadmap.value?.state];
   if (!code) throw new Error(`state-vocab.mjs: no state for roadmap "${node.roadmap.value?.state}" — a constant was renamed without updating this table`);

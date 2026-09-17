@@ -53,3 +53,9 @@ test('#998: system font stacks, no downloadable face, no external resource in th
   const external = [...html.matchAll(/https?:\/\/[^"'\s>]+/g)].map((m) => m[0]);
   assert.deepEqual(external, [], 'no external resource in index.html');
 });
+
+test('#998: no surface is hard-coded white outside the token block — the drawer follows the dark palette too (cold review of PR 1, correction)', () => {
+  const withoutTokens = css.replace(/:root\s*\{[^}]*\}/g, '').replace(/@media \(prefers-color-scheme: dark\)\s*\{\s*:root\s*\{[^}]*\}\s*\}/g, '');
+  const whites = [...withoutTokens.matchAll(/#fff\b|#ffffff\b|\bwhite\b/g)].map((m) => m[0]);
+  assert.deepEqual(whites, [], 'a surface must read var(--surface), never a literal white');
+});

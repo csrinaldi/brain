@@ -21,7 +21,7 @@ const MATRIX = [
   ['not-computed', node({ roadmap: { ok: false, reason: 'the PR list could not be read' } })],
   ['blocked', node({ blockedBy: [2] })],
   ['awaiting-review', node({ status: AWAITING_HUMAN })],
-  ['undeclared', node({ status: UNCLASSIFIED })],
+  ['unclassified', node({ status: UNCLASSIFIED })],
   ['planned', node({ roadmap: { ok: true, value: { state: PLANNED } } })],
   ['in-flight', node({ roadmap: { ok: true, value: { state: IN_FLIGHT } } })],
   ['done', node({ roadmap: { ok: true, value: { state: DONE } } })],
@@ -43,8 +43,14 @@ test('#998: the priority is colour.mjs\'s — unreadable beats not-computed beat
   assert.equal(stateOf(node({ status: UNREADABLE, blockedBy: [2], roadmap: { ok: false } })).code, 'unreadable');
   assert.equal(stateOf(node({ status: AWAITING_HUMAN, blockedBy: [2], roadmap: { ok: false } })).code, 'not-computed');
   assert.equal(stateOf(node({ status: AWAITING_HUMAN, blockedBy: [2] })).code, 'blocked');
-  assert.equal(stateOf(node({ status: UNCLASSIFIED, blockedBy: [] })).code, 'undeclared');
+  assert.equal(stateOf(node({ status: UNCLASSIFIED, blockedBy: [] })).code, 'unclassified');
   assert.equal(stateOf(node({ status: BLOCKED, blockedBy: [], roadmap: { ok: true, value: { state: DONE } } })).code, 'done', 'a known status with no open blocker takes the roadmap state, as colour.mjs does');
+});
+
+test('#998: the code value is the data\'s word, the label is the screen\'s — unclassified is shown as Undeclared (ruling 5)', () => {
+  const s = stateOf(node({ status: UNCLASSIFIED }));
+  assert.equal(s.code, 'unclassified');
+  assert.equal(s.label, 'Undeclared');
 });
 
 test('#998: not-computed is not unknown — an unmapped status throws, and the two classes differ', () => {

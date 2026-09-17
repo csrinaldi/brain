@@ -32,7 +32,7 @@
   --state-done-fg: #1b1b1f;           --state-done-bg: #d9f2e0;
   --state-blocked-fg: #1b1b1f;        --state-blocked-bg: #ffd9d4;
   --state-awaiting-review-fg: #1b1b1f; --state-awaiting-review-bg: #ffe9b8;
-  --state-undeclared-fg: #1b1b1f;     --state-undeclared-bg: #ececf2;
+  --state-unclassified-fg: #1b1b1f;     --state-unclassified-bg: #ececf2;
   --state-unreadable-fg: #1b1b1f;     --state-unreadable-bg: #f3e3f6;
   --state-not-computed-fg: #1b1b1f;   --state-not-computed-bg: #ffffff;
   --state-unknown-fg: #8a4b00;        --state-unknown-bg: #ffffff;
@@ -55,7 +55,7 @@
     --state-done-fg: #6366f1;           --state-done-bg: #1e1b4b;
     --state-blocked-fg: #fb7185;        --state-blocked-bg: #4c0519;
     --state-awaiting-review-fg: #f59e0b; --state-awaiting-review-bg: #451a03;
-    --state-undeclared-fg: #d97706;     --state-undeclared-bg: #2d1f03;
+    --state-unclassified-fg: #d97706;     --state-unclassified-bg: #2d1f03;
     --state-unreadable-fg: #d946ef;     --state-unreadable-bg: #3b0764;
     --state-not-computed-fg: #475569;   --state-not-computed-bg: #0f172a;
     --state-unknown-fg: #fbbf24;        --state-unknown-bg: #0f172a;
@@ -89,7 +89,7 @@ body {
   padding: 3px 10px;
   border: 1px solid var(--line);
   border-radius: 4px;
-  background: #fff;
+  background: var(--surface);
   cursor: pointer;
 }
 .status-bar .spacer { flex: 1; }
@@ -125,7 +125,7 @@ body {
 .node.status-ready rect { fill: #e7f5ea; }
 .node.status-blocked rect { fill: var(--state-blocked-bg); }
 .node.status-awaiting-review rect { fill: var(--state-awaiting-review-bg); }
-.node.status-unclassified rect { fill: var(--state-undeclared-bg); stroke-dasharray: 4 3; }
+.node.status-unclassified rect { fill: var(--state-unclassified-bg); stroke-dasharray: 4 3; }
 .node.status-unreadable rect { fill: var(--state-unreadable-bg); stroke-dasharray: 2 2; }
 .node.roadmap-not-computed rect { fill: var(--state-not-computed-bg); stroke-dasharray: 6 3; }
 .node.node-unknown rect { fill: var(--state-unknown-bg); stroke: var(--state-unknown-fg); stroke-dasharray: 1 3; }
@@ -141,7 +141,7 @@ body {
   overflow: auto;
   padding: 14px 16px;
   border-left: 1px solid var(--line);
-  background: #fff;
+  background: var(--surface);
   box-shadow: -2px 0 8px rgba(0, 0, 0, 0.08);
 }
 .drawer[hidden] { display: none; }

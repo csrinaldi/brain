@@ -4,7 +4,7 @@ One requirement per PR of the chain; R998-1 is detailed because it ships first, 
 
 ### R998-1: the state vocabulary, provenance and the token block
 
-`lib/state-vocab.mjs` MUST map every node to `{code, label, mark, className}` for exactly the states the data can produce: `planned`, `in-flight`, `done`, `blocked`, `awaiting-review`, `undeclared` (code value `unclassified`), `unreadable`, `not-computed` (roadmap `ok:false`), `unknown` (the per-node guard's output), keeping `colour.mjs`'s priority order and its throw on an unmapped state. `lib/provenance.mjs` MUST own `sourceLabel`, rendering `[repo: <path>:<line>]`, `[repo: <path>]`, `[forge: #<n>]` (with the URL kept for the chip), `[git: <sha7>]`, and the existing sentence for a missing source. `app.css` MUST define a token per state (`--state-<code>-fg`, `--state-<code>-bg`), surfaces and text with the light values on bare `:root` and the design's dark values under `@media (prefers-color-scheme: dark)`, and the font stacks `--font-sans` / `--font-mono` as system stacks. No file under `static/` or `lib/` MAY reference an external URL.
+`lib/state-vocab.mjs` MUST map every node to `{code, label, mark, className}` for exactly the states the data can produce: `planned`, `in-flight`, `done`, `blocked`, `awaiting-review`, `undeclared` (code value `unclassified`), `unreadable`, `not-computed` (roadmap `ok:false`), `unknown` (the per-node guard's output), keeping `colour.mjs`'s priority order and its throw on an unmapped state. `lib/provenance.mjs` MUST own both provenance forms: `sourceLabel`, the plain form the current page shows beside every value (`<path>:<line>`, `<path>`, the URL, or the sentence for a missing source), unchanged so today's drawer stays byte-identical; and `sourceStamp`, the design's stamp for the redesigned screens (PRs 2–6): `[repo: <path>:<line>]`, `[repo: <path>]`, `[forge: #<n>]` with the URL kept for the chip, `[git: <sha7>]`, `[link: <url>]` for any other https URL, and the sentence in brackets for a missing source; only an https URL ever becomes an href. (Amended 2026-09-17 after the cold review of PR 1: the first wording named one function for both forms.) `stateOf` MUST return the data's word as `code` and the screen's word as `label`: `unclassified` is shown as `Undeclared` (ruling 5). `app.css` MUST define a token per state (`--state-<code>-fg`, `--state-<code>-bg`), surfaces and text with the light values on bare `:root` and the design's dark values under `@media (prefers-color-scheme: dark)`, and the font stacks `--font-sans` / `--font-mono` as system stacks. No file under `static/` or `lib/` MAY reference an external URL.
 
 #### Scenario: every state has a word, a mark and a class
 - **WHEN** `stateOf(node)` is called for each of the nine codes
@@ -15,8 +15,8 @@ One requirement per PR of the chain; R998-1 is detailed because it ships first, 
 - **THEN** the first is `not-computed` and the second throws, and the renderer's guard renders it `unknown`; the two classes differ
 
 #### Scenario: provenance forms
-- **WHEN** `sourceLabel` receives `{path:'a/b.md', line: 42}`, `{path:'a/b.md'}`, `{url:'https://github.com/o/r/issues/881'}`, `{sha:'4f9a2e1c9'}`, `{}`
-- **THEN** it returns `[repo: a/b.md:42]`, `[repo: a/b.md]`, `[forge: #881]` with the URL kept, `[git: 4f9a2e1]`, and the "no source was recorded" sentence
+- **WHEN** `sourceStamp` receives `{path:'a/b.md', line: 42}`, `{path:'a/b.md'}`, `{url:'https://github.com/o/r/issues/881'}`, `{sha:'4f9a2e1c9'}`, `{}`
+- **THEN** it returns `[repo: a/b.md:42]`, `[repo: a/b.md]`, `[forge: #881]` with the URL kept, `[git: 4f9a2e1]`, and the "no source was recorded" sentence in brackets; and `sourceLabel` on the same inputs returns the plain forms the current page shows
 
 #### Scenario: light is the base, dark is the media query, no external resource
 - **WHEN** `app.css` and `index.html` are scanned
