@@ -552,3 +552,142 @@ this precedent.
 **Next**: PR C is ready for the tracker PR (`feature/issue-967` → `main`,
 TR1–TR3). The maintainer's post-merge `npm run brain:protect` re-run (C9) is
 the one remaining unticked act, blocked on the tracker merging.
+
+---
+
+## PR D — cold review remediation of the tracker PR (round 2), 2026-09-17
+
+**What**: a fresh-context cold review of the tracker PR (`feature/issue-967`
+→ `main`, head `fe28b064`) found two REVISE blockers, both fixed strict-TDD
+in the same worktree, branch `fix/issue-967-d-tracker-review`. Two local
+commits, nothing pushed, no PR opened.
+
+### Blocker 1 — `base-branch.mjs:37`'s prefix short-circuit
+
+**Finding**: `baseBranchRule` classified ANY `headBranch` starting with
+`feature/` as "a tracker's own PR" before ever reading the linked issue —
+decided on the branch's spelling alone, with zero reads. Measured: issue
+declares `parent: 878`, `#878` is `kind: epic` + `tracker: feature/brain-ui`,
+`targetBranch: 'feature/brain-ui'` (correct), `headBranch:
+'feature/issue-42-my-feature'` (an ordinary slice branch that merely starts
+with `feature/`) → `pass: false`, naming a tracker-PR violation. This
+rejected a slice already correctly based on its epic's tracker.
+
+**Fix**: the classification now reads THE ONE FACT THE RULE HOLDS — a head
+is the tracker's own integration PR only when it equals the LINKED ISSUE'S
+OWN declared tracker (the issue is itself `kind: epic` and its `tracker:`
+key names `headBranch` exactly). Reordered to: (1) no linked issue → pass;
+(2) the issue is `kind: epic` and `headBranch` equals its own declared
+tracker → base must be the default branch; (3) otherwise (an ordinary slice,
+or the epic's own non-tracker work) → the existing parent → tracker → base
+comparison, unchanged. `status/stranded.mjs`'s own `feature/` prefix oracle
+answers a different question — "which open branches look like trackers,
+before they have a PR at all", where no declaration is yet readable — and
+was measured, confirmed correct for that purpose, and left untouched.
+
+**Duplicate found and fixed in the same commit**: `run-check.mjs:516`'s
+`runBaseBranchCheck` wrapper carried the SAME bug as its own "no port call"
+optimization — skip the fetch entirely for any `feature/…`-named head and
+decide on the branch name alone. Fixing the predicate alone would have
+broken this wrapper's existing (buggy) pinned test, since it calls
+`baseBranchRule` with no `issueBody` at all for such a head; there is no
+data-free path left once the classification needs a declaration, so the
+shortcut was removed and a `feature/…` head now takes the same fetch every
+other head does (still bounded at two calls total).
+
+**Files**: `brain/scripts/governance/checks/base-branch.mjs`,
+`base-branch.test.mjs` (2 tests replaced with 3: the two old tests asserted
+the bug itself — no `issueBody`, bare branch-name matching — and are
+replaced by tests that supply the real declaration); `run-check.mjs`,
+`run-check.test.mjs` (1 test replaced with 2, for the same reason).
+`openspec/changes/issue-967-tracker-as-data/spec.md` R967-7 amended: the
+classification sentence no longer says "matching the declared grammar
+`feature/…`"; a new scenario pins the measured slice-head case. The two
+doctrine drafts under `brain-drafts/` were checked for the word "prefix" —
+neither describes tracker-head classification that way (the one "prefix"
+hit is R967-9's unrelated `epic(...)` TITLE prefix), so neither needed
+amending.
+
+**TDD evidence**:
+- `base-branch.mjs`/`.test.mjs` — RED: 1/14 (the measured case). GREEN:
+  14/14. Mutation: reinstated the top-of-function `headBranch.startsWith
+  ('feature/')` short-circuit → 12/14 red (the two tracker-head-classification
+  tests, including the measured one).
+- `run-check.mjs`/`.test.mjs` — RED: 1/125 (the pre-existing "no port call"
+  test, broken by the predicate fix alone, as expected). GREEN: 125/125 after
+  removing the wrapper's own shortcut and replacing that one test with two.
+  Mutation: reinstated the wrapper's shortcut → 1/125 red (the replacement
+  "one port call" test).
+
+### Blocker 2 — `epic-graph.mjs:275`'s no-block prose gap
+
+**Finding**: `parseGraphBlock` returns `null` before the prose scan ever
+runs whenever the body carries no `brain-graph/1`-tagged fence at all (its
+`!body.includes(GRAPH_PROTOCOL)` guard fires first). R967-2's own rule says
+the prose fallback applies "block or no block", but the prose scan lived
+entirely inside the block-exists branch (the `parentRaw === null` case), so
+a body with a line-initial `Parent: #878` and literally no graph block was
+invisible to `buildGraph`'s node, to `lib/ticket-base.mjs`'s `parentOf`
+(and so to `resolveBase`), and to the gate.
+
+**Fix**: extracted the prose scan into an exported `parentFromProse(body)`
+(same `outsideFences`/fenced-region exclusion as before, HTML comments
+still unmasked — the standing follow-up), reused both by `parseGraphBlock`
+(its no-`parent:`-key fallback, unchanged behaviour) and by a new exported
+`declaredParent(body)` returning `{parent, parentSource}` — the block's
+answer when a block reads cleanly, else the prose answer, else
+`{parent: null, parentSource: null}`. A MALFORMED block (`{ok: false}`)
+never falls back to prose — malformed is not absent (#639); this was a
+deliberate design choice, not an oversight, consistent with the parser's
+existing rule for the block `parent:` key itself. `buildGraph` now resolves
+each node's `parent`/`parentSource` through `declaredParent(issue.body)`
+rather than through the parsed block alone; `declared` stays keyed on
+`g !== null` (the BLOCK's own presence) — a prose-only parent is a relation
+the issue stated, not a graph it declared, and the field says so via a
+comment at the call site. `lib/ticket-base.mjs`'s `parentOf` now calls
+`declaredParent` directly instead of `parseGraphBlock`.
+
+**Files**: `brain/scripts/status/epic-graph.mjs` (new exports
+`parentFromProse`, `declaredParent`; `buildGraph`'s node literal changed
+from `g?.parent ?? null` / `g?.parentSource ?? null` to `dp.parent` /
+`dp.parentSource`), `epic-map.test.mjs` (+7 tests: `declaredParent`'s four
+scenarios — prose with no block, prose inside a fence, block-wins, neither
+present — plus the malformed-block-never-falls-back case, plus a `buildGraph`
+node test), `brain/scripts/lib/ticket-base.mjs` (`parentOf` rewritten),
+`ticket-base.test.mjs` (+1 test — `resolveBase` honours a prose parent with
+no block at all), `brain/scripts/status/snapshot.test.mjs` (+1 new fixture
+case — a fresh `#7` node rather than editing the existing `#5`/`#6` pair,
+which already has a block and would not exercise the no-block path).
+`spec.md` R967-2 amended: the prose-fallback paragraph now states "block or
+no block" explicitly, with the measured `parseGraphBlock`-returns-null-first
+fact and a new scenario.
+
+**TDD evidence**: RED: module load failure across all three files
+(`declaredParent` did not exist — `epic-map.test.mjs` failed to import
+entirely; `ticket-base.test.mjs` 1/28 red; `snapshot.test.mjs` 1/28 red).
+GREEN: 137/137 across the three files combined. Mutation: made
+`declaredParent` return `{parent: null, parentSource: null}` unconditionally
+in its no-block branch (ignoring `parentFromProse` entirely) → exactly the
+4 tests exercising the no-block prose path went red (one in each of
+`epic-map.test.mjs` ×2, `ticket-base.test.mjs`, `snapshot.test.mjs`); every
+other test in all three files stayed green.
+
+### Verification
+
+`GIT_CONFIG_GLOBAL=/dev/null node --test
+brain/scripts/governance/checks/base-branch.test.mjs
+brain/scripts/status/epic-map.test.mjs brain/scripts/lib/ticket-base.test.mjs
+brain/scripts/status/snapshot.test.mjs` — green, three consecutive runs.
+`GIT_CONFIG_GLOBAL=/dev/null npm test` — **5674 pass / 0 fail** (baseline
+before this batch: 5663; +11 net: base-branch +1, run-check +1, epic-map +7,
+ticket-base +1, snapshot +1). `npm run brain:repo:check` green before every
+commit. Counted diff (tests and `openspec/changes/**` excluded):
+**180** — `base-branch.mjs` 51, `run-check.mjs` 16, `ticket-base.mjs` 18,
+`epic-graph.mjs` 95. Tree clean before the record-first memory commit; no
+`.memory/**` staged in the two code commits; no AI attribution; nothing
+pushed, no PR opened.
+
+**Next**: PR D is ready to open against the tracker branch
+(`feature/issue-967`), carrying both blocker fixes as review remediation.
+The maintainer's post-merge `npm run brain:protect` re-run (C9) is still the
+one remaining unticked act on the whole change, unaffected by this batch.
