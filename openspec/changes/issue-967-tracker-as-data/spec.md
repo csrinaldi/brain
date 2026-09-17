@@ -173,6 +173,10 @@ to admit.
 - **WHEN** a body carries a line-initial `Parent: #878` and no `brain-graph/1` fence anywhere
 - **THEN** `declaredParent(body)` resolves `parent: 878`, `parentSource: 'prose'` — the same answer as a body whose block exists but omits `parent:` — and this is what `buildGraph`'s node and `lib/ticket-base.mjs`'s `parentOf` both read; `parseGraphBlock(body)` alone still returns `null`, unchanged
 
+#### Scenario: an ambiguous prose parent with NO block is said too (amended 2026-09-17, PR #1006 review round 1, finding 2)
+- **WHEN** a body carries the single line-initial line `Parent: #878, #879` and no `brain-graph/1` fence anywhere
+- **THEN** `declaredParent(body)` resolves `parent: null`, `parentSource: null`, `ambiguousValue: '878, 879'`, and `buildGraph`'s own `declarationDivergences` output (not only `parseGraphBlock`'s, which never runs for a blockless body) carries a `{key: 'parent', value: '878, 879', reason: 'parent-ambiguous'}` entry for that node — the same fact the block-bearing path already says, not silently dropped because there was no block to carry it
+
 ### R967-3: the snapshot carries all four fields, and an unreadable node carries none
 
 `buildSnapshot`'s graph nodes MUST carry `kind`, `tracker`, `parent` and
@@ -321,6 +325,10 @@ unaffected by this amendment.)
 #### Scenario: a slice head that merely starts with feature/ is not the tracker (amended 2026-09-17, PR D)
 - **WHEN** a PR's linked issue declares `parent: 878`, `#878` is `kind: epic` with `tracker: feature/brain-ui`, the PR's head branch is `feature/issue-42-my-feature`, and its base is `feature/brain-ui`
 - **THEN** the check passes — the head is not the linked issue's own declared tracker, so this is an ordinary slice correctly based on it, not a tracker PR targeting the wrong branch
+
+#### Scenario: a parent declared only via prose (no block) still gets fetched and fails a slice-on-main PR (amended 2026-09-17, PR #1006 review round 1, finding 1)
+- **WHEN** a PR's linked issue carries a line-initial `Parent: #878` and no `brain-graph/1` fence at all, `#878` is `kind: epic` with `tracker: feature/brain-ui`, and the PR's base is `main`
+- **THEN** the gate fetches the parent (two reads total: the linked issue and `#878`) and fails, naming `feature/brain-ui` — the fetch decision and the predicate's own parent read both go through `declaredParent`, not `parseGraphBlock` alone, so a prose-only declaration is no longer invisible to either
 
 #### Scenario: a lane PR passes untouched — the standing case
 - **WHEN** a memory-lane PR with no linked issue, or a PR whose linked issue has no epic, targets `main`

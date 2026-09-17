@@ -691,3 +691,70 @@ pushed, no PR opened.
 (`feature/issue-967`), carrying both blocker fixes as review remediation.
 The maintainer's post-merge `npm run brain:protect` re-run (C9) is still the
 one remaining unticked act on the whole change, unaffected by this batch.
+
+## Review round 1 (PR #1006)
+
+Two cold-review findings fixed on `fix/issue-967-d-tracker-review`
+(worktree `/home/gandalf/IA/brain-issue-967`).
+
+**Finding 1 (blocker)** — `run-check.mjs`'s step 6 decided whether to fetch
+the linked issue's parent from `parseGraphBlock(issue.body)` alone, which is
+`null` for a body carrying no `brain-graph/1` block at all — so a parent
+declared only via prose (`Parent: #878 …`, no block) was never fetched, and
+the exact slice-on-main case the `base-branch` gate exists for (measured:
+issue #881, no block, parent #878 `kind: epic` + `tracker: feature/brain-ui`,
+PR base `main`) passed silently, fetching only `[881]`. Fixed by routing the
+fetch decision through `declaredParent(issue.body)` instead of
+`issueBlock.parent` (same short-circuits kept: an unreadable block or the
+issue itself `kind: epic` still resolve with no parent fetch). This alone
+was not sufficient: `checks/base-branch.mjs`'s own predicate re-derived
+`parent` from `parseGraphBlock(issueBody)` independently, so it kept
+returning `pass: true` even once the parent was fetched — it now reads
+`declaredParent(issueBody).parent` too. `checks/base-branch.mjs` was not one
+of the files this round named up front; it was brought in because the
+finding's own required test outcome (`pass: false`, not just the extra
+fetch) was unreachable without it.
+
+**Finding 2 (correction)** — `declaredParent` dropped
+`parentFromProse(...).ambiguousValue`, and `buildGraph`'s divergence lift
+iterates `g?.declarationDivergences`, which is empty for a blockless body
+(`g` is `null`) — so an ambiguous prose parent (`Parent: #878, #879`, no
+block) was silently lost instead of being said, unlike the block-bearing
+path `parseGraphBlock` already reports it through. Fixed: `declaredParent`
+now returns `ambiguousValue` alongside `parent`/`parentSource`, and
+`buildGraph` pushes a `{key: 'parent', value: '878, 879', reason:
+'parent-ambiguous'}` entry when no block resolved the parent.
+
+**TDD evidence**: both findings RED-seen before the fix (finding 1:
+`runCheck: base-branch — parent declared only via prose …` failing on
+`result.pass`; finding 2: `buildGraph says an ambiguous prose parent, no
+block at all` failing on `declarationDivergences`), GREEN after. One
+mutation per finding, each turning exactly its new test red then reverted:
+finding 1 — `dp.parent` reverted to `issueBlock?.parent`/`issueBlock.parent`
+in `run-check.mjs`; finding 2 — the `declarationDivergences.push(...)` for
+the no-block ambiguous case dropped from `buildGraph`.
+
+`spec.md` amended: R967-2 gained the "ambiguous prose parent with NO block"
+scenario (finding 2), R967-7 gained the "parent declared only via prose"
+scenario (finding 1) — both were missing before this round.
+
+**Verification**: `GIT_CONFIG_GLOBAL=/dev/null node --test
+brain/scripts/governance/run-check.test.mjs
+brain/scripts/governance/checks/base-branch.test.mjs
+brain/scripts/status/epic-map.test.mjs brain/scripts/lib/ticket-base.test.mjs
+brain/scripts/status/snapshot.test.mjs` — 280/280 green.
+`GIT_CONFIG_GLOBAL=/dev/null npm test` — 5677 pass / 1 fail (5678 total).
+The one failure, `session-end-ship.test.mjs`'s "real entrypoint run against
+this repo's own config … writes no log file", asserts a real OS-tmp private
+directory does not exist; this round's diff never touches
+`brain/scripts/memory/**`, so it is a pre-existing/environmental condition
+on this host, not caused by either fix — flagged, not chased, per the given
+file scope. `npm run brain:repo:check` green before both code commits.
+Counted diff since `origin/feature/issue-967` (tests, `openspec/`,
+`.memory/` excluded): **223** (was 180 before this round; +43 —
+`base-branch.mjs` +10, `run-check.mjs` +15, `epic-graph.mjs` +18;
+`ticket-base.mjs` untouched this round) — well under the 1000 budget. No AI attribution in either commit; nothing pushed,
+no PR opened, no `--force`/`--no-verify` used.
+
+Commits: `4ba0891f` (finding 1), `d80a60da` (finding 2). This paragraph
+lands in a third, docs-only commit.
