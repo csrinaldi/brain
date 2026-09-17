@@ -92,11 +92,11 @@ That is a one-shot migration input, not something a reader of records depends on
   `session:start`, `day:start` and `pullMemory`, and `lib/memory-manifest.mjs` is deleted. The
   `merge=engram-manifest` attribute, `merge-engram-manifest.mjs` and `setup()`'s driver
   registration are deleted. `share()` no longer ensures the `.engram` symlink; only `setup()`
-  does. A cross-backend test proves `session:start`, `memory:share`, `memory:pull` and
-  `cli.mjs import` complete on a fixture holding records alone.
-- Slice B: `dualWriteRecords()` and its seams, `rollbackMigration()` with
-  `migrate-v1 --rollback`, `scrubChunkFile()` and the tracked `.memory/legacy/` archive are
-  deleted.
+  does. A cross-backend test proves `session:start`, `brain:memory:share`, `brain:memory:pull`
+  and `cli.mjs import` complete on a fixture holding records alone.
+- Slice B: `dualWriteRecords()` and its seams, `rollbackMigration()`
+  (`brain:memory:migrate-v1 --rollback` now refuses with exit 1), `scrubChunkFile()` and the
+  tracked `.memory/legacy/` archive are deleted.
 
 ### Notes for the promoter
 

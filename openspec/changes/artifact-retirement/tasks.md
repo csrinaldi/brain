@@ -7,7 +7,7 @@ Base: `origin/main` has moved past `32b70db9` (worktree creation point). Both sl
 | Field | Value |
 |-------|-------|
 | Estimated changed lines | Slice A ~290, Slice B ~415-430 |
-| 400-line budget risk | Slice A: Low. Slice B: High |
+| 1000-line `lite` budget | Slice A: ~290. Slice B: 474 measured |
 | Chained PRs recommended | Yes |
 | Suggested split | PR 1 (Slice A) → PR 2 (Slice B) |
 | Delivery strategy | ask-on-risk (pre-resolved for this change) |
@@ -16,18 +16,20 @@ Base: `origin/main` has moved past `32b70db9` (worktree creation point). Both sl
 Decision needed before apply: No
 Chained PRs recommended: Yes
 Chain strategy: stacked-to-main
-400-line budget risk: High (Slice B only)
+1000-line `lite` budget risk: Low (Slice B is 474/1000 measured)
 
-Slice B's over-budget forecast was already ruled (engram `sdd/artifact-retirement/design-decisions`, 2026-09-14): ships as `size:exception`, R4 stays in B. No further decision gate before `sdd-apply`.
+The 2026-09-15 maintainer ruling supersedes the 2026-09-14 budget decision:
+this repository is tier `lite`, so Slice B is 474/1000 counted lines and
+needs no exception label. R4 stays in B. No further decision gate is needed.
 
 ### Suggested Work Units
 
 | Unit | Goal | PR | Base / notes |
 |------|------|----|----|
 | 1 | Retire manifest, driver, symlink confinement; R12 both-backends test + static guard; doctrine drafts; spec REQ-3 stub | PR 1 — `Part of #955`, closes #958 | `main` (after merge-in). Stacked-to-main: merges to `main` first. |
-| 2 | Retire `dualWriteRecords`, rollback (refusal branch kept), `scrubChunkFile`, `.memory/legacy/` (last) | PR 2 — `Closes #955`, label `size:exception` | Branches from PR 1's branch; retarget to `main` once PR 1 merges, then merge `origin/main` again before finishing. |
+| 2 | Retire `dualWriteRecords`, rollback (refusal branch kept), `scrubChunkFile`, `.memory/legacy/` (last) | PR 2 — `Closes #955`, no exception label | Branched from PR 1's branch; retargeted to `main` once PR 1 merged (`f5ea51f4`), then merged `origin/main` again before finishing (`94d1b5a1`). |
 
-**Coordination risk**: issue #961 (`brain:` prefix rename, parallel work) also edits `brain/scripts/memory/cli.mjs`, both `i18n/{en,es}.mjs` catalogs, and likely `package.json` (`memory:migrate-v1` script name). Overlap files: `cli.mjs`, `i18n/en.mjs`, `i18n/es.mjs`, possibly `package.json`. Whichever of #955-slice-B and #961 merges second must merge `main` and resolve conflicts by hand — both touch the same `cli.mjs` region (`:599-632`) and the same catalog keys' neighborhood.
+**Coordination risk (resolved)**: issue #961 (`brain:` prefix rename, parallel work) also edited `brain/scripts/memory/cli.mjs`, both `i18n/{en,es}.mjs` catalogs, and `package.json` (script names). Overlap files: `cli.mjs`, `i18n/en.mjs`, `i18n/es.mjs`, `package.json`. #961 merged to `origin/main` first; Slice B's B1.1 merge (`94d1b5a1`) picked it up with no `cli.mjs`/i18n conflict (only `CHANGELOG.md`/`README.md` conflicts, resolved to `main`'s version) — Slice B's own `cli.mjs`/i18n edits were then written on top of the already-renamed baseline.
 
 ---
 
@@ -68,60 +70,61 @@ Slice B's over-budget forecast was already ruled (engram `sdd/artifact-retiremen
 ### Phase A6: Mutation matrix + close
 - [x] A6.1 Run the Slice A rows of design.md's mutation matrix (session step 1, gate, render line, share symlink, pull restore, driver/lib modules, attribute/ignore lines). Revert one production change at a time; confirm exactly its named test dies. Record the table in `apply-progress.md`.
 - [x] A6.2 Record-first close: `npm run memory:save -- "<title>" "<content>" --issue 958 --type <type>` (positional title/content, per #928). Parse the `rec-` id from stdout; stage only that record file plus `.memory/index.jsonl`; verify exactly one net new id.
-- [ ] A6.3 Open PR 1: body `Closes #958` and `Part of #955`. (NOT DONE — agent may not push/open PRs per hard constraints; maintainer pushes and opens PR 1.)
+- [x] A6.3 PR 1 opened with body `Closes #958` and `Part of #955`, then merged as PR #965 (`f5ea51f4`).
 
 ### Review Workload Forecast — Slice A
 
 | Field | Value |
 |-------|-------|
 | Estimated changed lines | ~290 (tests/`.memory/**`/`openspec/**` excluded by `governance.ignoreList`) |
-| 400-line budget risk | Low |
+| 1000-line `lite` budget risk | Low |
 | Chained PRs recommended | N/A (this is PR 1 of 2) |
 | Decision needed before apply | No |
 
 ---
 
-## Slice B — PR 2 (`Closes #955`, label `size:exception`)
+## Slice B — PR 2 (`Closes #955`, no exception label)
 
 **`.memory/**` staging rule for this slice**: stage ONLY the 48 deletions under `.memory/legacy/`. Never stage `.memory/index.jsonl` or `.memory/records/**`; `.memory/manifest.json` was already handled in Slice A.
 
 ### Phase B1: Integration
-- [ ] B1.1 `git merge origin/main` into the branch (merge, not rebase) — picks up Slice A's squash-merge and any other `main` movement.
-- [ ] B1.2 Run `GIT_CONFIG_GLOBAL=/dev/null node --test` on the merged tree to record the new baseline before any production edit.
+- [x] B1.1 `git merge origin/main` into the branch (merge, not rebase) — picks up Slice A's squash-merge and any other `main` movement. Done as commit `94d1b5a1` (conflicts in CHANGELOG.md/README.md resolved to main's version).
+- [x] B1.2 Run `GIT_CONFIG_GLOBAL=/dev/null node --test` on the merged tree to record the new baseline before any production edit. Baseline: 5361/5361 pass, 0 fail.
 
 ### Phase B2: RED/GREEN — `dualWriteRecords` removal (R5)
-- [ ] B2.1 Extend `retired-artifacts.static.test.mjs` with B1 (no `dualWriteRecords` definition in `brain/**`). Confirm RED.
-- [ ] B2.2 `engram.mjs`: delete `:186-443` (`dualWriteRecords`, JSDoc, seams); header `:25-28`; imports `exportObservation` (`:53`), `emptyDuplicates` (`:57`), `SUPERSEDES_ID_RE` (`:64`); `_defaultLoadBrainConfig` doc `:452-457`. Keep `upstreamRecordEntries`, `readRecordIds`, `scanTextForSecrets`, `classifySupersedes` (used by `save`).
-- [ ] B2.3 Delete `engram.upstream-scope.test.mjs`, `engram.dualwrite-hydrated-gate.test.mjs`, `lib/upstream-records.integration.test.mjs` (R5's list missed this one — its only test drives `dualWriteRecords`), `plainfiles-roundtrip.integration.test.mjs:61-85` + its fixture helpers, `engram.duplicates.test.mjs:8,19-60`. Delete `memory.share.secretFoundRecords` from `i18n/{en,es}.mjs` (D6, its only reader was `engram.mjs:373`).
-- [ ] B2.4 Confirm B2.1 GREEN; confirm B1.2 baseline still passes.
+- [x] B2.1 Extend `retired-artifacts.static.test.mjs` with B1 (no `dualWriteRecords` definition in `brain/**`). Confirm RED. Done — 4 new static guards (B1-B4) all red before any production edit.
+- [x] B2.2 `engram.mjs`: deleted `dualWriteRecords` (JSDoc + function; re-measured at lines 180-436 post-import-cleanup, not the stale `:186-443`); reworded the top-of-file ledger comment (row 3); removed imports `exportObservation`, `emptyDuplicates`, `SUPERSEDES_ID_RE`. Kept `upstreamRecordEntries`, `readRecordIds`, `scanTextForSecrets`, `classifySupersedes`, `resolveSecretConfig`, `compilePatterns`, `normalizeDuplicates` (all still used by `save`/`share`/`pull`). Reworded `_defaultLoadBrainConfig`'s doc to drop its stale "two wiring points" claim — now one (`save()`).
+- [x] B2.3 Deleted `engram.upstream-scope.test.mjs`, `engram.dualwrite-hydrated-gate.test.mjs`, `lib/upstream-records.integration.test.mjs` (staged via `git add` — a plain `rm` alone left them in `git ls-files` and broke the #850 orphan-test guard, same #928-class lesson as slice A). `plainfiles-roundtrip.integration.test.mjs`: deleted the engram→plainfiles test + `buildFixtureObservations` helper, reworded the file header, trimmed now-unused imports. `engram.duplicates.test.mjs`: deleted the two `dualWriteRecords` tests + the `── share ──` comment block, trimmed now-unused `buildRecord` import and `baseRecordFields`. Deleted `memory.share.secretFoundRecords` from `i18n/{en,es}.mjs` (D6). The sibling `memory.share.upstream*`/`dedupedUpstream` keys are LEFT — zero production readers confirmed, but they were already orphaned since #874 split B per D6, and no ruling covers deleting orphaned catalog keys, only the code that produced them (comment headers reworded to say so).
+- [x] B2.4 Confirmed B2.1 GREEN (all 4 static guards). Confirmed B1.2 baseline still passes.
 
 ### Phase B3: RED/GREEN — rollback refusal, `scrubChunkFile`, #937 re-pin
-- [ ] B3.1 Extend `retired-artifacts.static.test.mjs` with B2 (no `rollbackMigration` definition), B3 (no `scrubChunkFile` definition), B4 (`secret-scrub.mjs` does not import `node:zlib`). Write a new CLI refusal test in `cli.migrate-v1.test.mjs` (fixture: one chunk, no records; both `--rollback` and `--rollback --dry-run` exit 1, stderr includes `en['memory.migrateV1.rollbackRetired']`, chunk untouched, no `records/`/`legacy/` created). Confirm all RED.
-- [ ] B3.2 Re-measure the `#937` pin on the current merged branch: locate `collectChunkObservations` import line in `cli.mjs` (currently pinned at `chunk-boundary.test.mjs:170`, expected to land near the design estimate of `:645` but must be re-measured fresh, since main moved this week).
-- [ ] B3.3 `cli.mjs`: comment edits `:599-601`; `:617-632` → D1 refusal branch (placed BEFORE the `--dry-run` check, catalog key `memory.migrateV1.rollbackRetired`, exit 1) — do NOT delete the `if`, or the flag falls through into real forward `runMigration`; comment `:952-959`. Keep forward branch `:634-653`, `--dry-run`, the `collectChunkObservations` import.
-- [ ] B3.4 In the SAME commit as B3.3: re-pin `chunk-boundary.test.mjs:170-171` to the line measured in B3.2, and add `retiredBy: 'kept — R3 (#955)'` annotation.
-- [ ] B3.5 `migrate-v1.mjs`: delete `rollbackMigration` (`:281-350`) and the `rmSync` import (`:14`). Keep `collectChunkObservations` (`:42`), `buildMigrationReport`, `runMigration` (`:196`), `REJECTION_REPORT_FILE`, `gunzipSync` (R3 — forward migration stays).
-- [ ] B3.6 `secret-scrub.mjs`: delete `scrubChunkFile` (`:94-123`) and the gunzip import (`:13`); `:128-130` doc stops citing `scrubChunkFile`. Keep `scrubRecordsFile` (R4).
-- [ ] B3.7 `i18n/{en,es}.mjs`: delete `memory.migrateV1.rollbackSummary`; add `memory.migrateV1.rollbackRetired`.
-- [ ] B3.8 `migrate-v1.test.mjs`: delete `:321-371` (keep the `:13` import as one line). `secret-scrub.test.mjs`: delete `:11,21,112-146`. `cli.migrate-v1.test.mjs`: delete `:1-2,110-126`, replace with the B3.1 refusal test (keep `:60`, R3's forward-migration proof).
-- [ ] B3.9 Confirm B3.1 GREEN (including the re-pinned `chunk-boundary.test.mjs`). Run the existing `cli.migrate-v1.test.mjs:60` and confirm it still passes (forward migration unaffected).
-- [ ] B3.10 `CHANGELOG.md` `## Unreleased`: add the rollback bullet in the same commit as B3.3 — "`memory:migrate-v1 --rollback` is removed and refuses with a reason. Forward `migrate-v1` and `--dry-run` are unchanged." PR 1 shipped without it: its cold review (judgment:cold-1) blocked a bullet that described the refusal before the refusal existed.
+- [x] B3.1 Extended `retired-artifacts.static.test.mjs` with B2/B3/B4. Wrote 2 new CLI refusal tests in `cli.migrate-v1.test.mjs` (`--rollback` and `--rollback --dry-run`, both exit 1, stderr includes `en['memory.migrateV1.rollbackRetired']`, chunk untouched, no `records/`/`legacy/` created). Confirmed RED by stashing the `cli.mjs` edit and re-running (2/5 failed for the stated reason: exit 0 instead of 1), then restoring.
+- [x] B3.2 Re-measured: `collectChunkObservations` import in `cli.mjs` was at `:655` pre-edit, landed at `:651` after B3.3's comment/refusal-branch edit — not the design estimate of `:645` (main's movement plus the exact refusal-branch wording differ from the estimate).
+- [x] B3.3 `cli.mjs`: reworded the `:599-601`-region comment (now names the retirement, R1/R2/D1, and the do-not-delete-the-`if` warning); replaced the old `rollbackMigration` if-block with the D1 refusal branch (placed BEFORE the `--dry-run` check, catalog key `memory.migrateV1.rollbackRetired`, exit 1); reworded the `:952-959`-region comment (dropped the "kept, per O1" claim — the exporter is deleted, not kept). Kept forward branch, `--dry-run`, the `collectChunkObservations` import.
+- [x] B3.4 Same commit as B3.3: re-pinned `chunk-boundary.test.mjs`'s allowlist to `{file: 'brain/scripts/memory/cli.mjs', line: 651, retiredBy: 'kept — R3 (#955)'}` and `{file: '.../migrate-v1.test.mjs', line: 13, retiredBy: 'kept — R3 (#955)'}` (both corrected from the stale `'2.4 — ledger row 7'` wording, which R3 explicitly overturns). A later comment-accuracy pass on this branch (post-apply, citing #955) added one more line to the `--rollback` header comment, moving the pin to `:652` — re-measured and re-pinned in that pass, not assumed.
+- [x] B3.5 `migrate-v1.mjs`: deleted `rollbackMigration` (JSDoc + function, ran to EOF) and the `rmSync` import. Kept `collectChunkObservations`, `buildMigrationReport`, `runMigration`, `REJECTION_REPORT_FILE`, `gunzipSync` (R3 — forward migration stays, `gunzipSync` still used by `collectChunkObservations`).
+- [x] B3.6 `secret-scrub.mjs`: deleted `scrubChunkFile` (JSDoc + function) and the `node:zlib`/`existsSync` imports (both callerless once `scrubChunkFile` is gone); reworded `scrubRecordsFile`'s doc to stop citing `scrubChunkFile`'s signature as a mirror. Kept `scrubRecordsFile` (R4).
+- [x] B3.7 `i18n/{en,es}.mjs`: deleted `memory.migrateV1.rollbackSummary`; added `memory.migrateV1.rollbackRetired` (static message, no interpolation, matches design.md's "`--rollback` after slice B" text exactly in en; a matching voseo es translation consistent with the rest of `es.mjs`).
+- [x] B3.8 `migrate-v1.test.mjs`: deleted the two `rollbackMigration` tests, kept the `:13` import as one line (dropped `rollbackMigration` from the destructure). `secret-scrub.test.mjs`: deleted the `gzipSync` import, `scrubChunkFile` from the import list, `tmpGzChunk` helper + its 3 tests, reworded the file header. `cli.migrate-v1.test.mjs`: replaced the old rollback-restores test with the 2 B3.1 refusal tests (kept the un-refused-migration and `--dry-run` tests — R3's forward-migration proof).
+- [x] B3.9 Confirmed B3.1 GREEN including the re-pinned `chunk-boundary.test.mjs`. `cli.migrate-v1.test.mjs`'s forward-migration test still passes.
+- [x] B3.10 `CHANGELOG.md` `## Unreleased`: added the rollback bullet in the same close-out pass as B3.3 (single `## Unreleased` heading with `###` subsections; bullet lands under `### Engram's transport artifacts retire (#955)`), naming `brain:memory:migrate-v1 --rollback`.
 
 ### Phase B4: Legacy archive deletion (last, irreversible — R1)
-- [ ] B4.1 `git rm -r .memory/legacy` (47 `.jsonl.gz` + `migration-rejected.json`, 48 paths). This is the LAST content commit of Slice B. PR body names the last SHA that carried these files.
-- [ ] B4.2 Run full `GIT_CONFIG_GLOBAL=/dev/null node --test` suite; confirm all green, including the re-pinned `chunk-boundary.test.mjs` and `cli.migrate-v1.test.mjs:60`.
+- [x] B4.0 (folded in during apply, not in the original plan) `brain/scripts/hooks/pre-push`: the "uncommitted .memory/ check" comment (~line 115) said `brain:memory:share` "re-materializes the manifest" — stale since slice A retired the manifest. Reworded to say it rebuilds `.memory/index.jsonl` instead (that is the actual non-deterministic, churning artifact `share()` still writes). Comment-only; no behavior change.
+- [x] B4.1 `git rm -r .memory/legacy` — 48 paths staged for deletion (47 `.jsonl.gz` + `migration-rejected.json`), confirmed via `git diff --cached --name-status -- .memory` showing only `D` lines. This is the last content commit before the record-first close.
+- [x] B4.2 Full `GIT_CONFIG_GLOBAL=/dev/null node --test` suite: 5343/5343 pass, 0 fail — including the re-pinned `chunk-boundary.test.mjs` and `cli.migrate-v1.test.mjs`'s forward-migration test.
 
 ### Phase B5: Mutation matrix + close
-- [ ] B5.1 Run the Slice B rows of design.md's mutation matrix (dualWriteRecords deletion, rollback refusal branch, the three static-guard deletions, zlib import, forward-migration-kept row via `cli.migrate-v1.test.mjs:60`). Revert one production change at a time; confirm exactly its named test dies. Record the table in `apply-progress.md`.
-- [ ] B5.2 Record-first close: `npm run memory:save -- "<title>" "<content>" --issue 955 --type <type>` (positional title/content). Parse the `rec-` id from stdout; stage only that record file plus `.memory/index.jsonl`; verify exactly one net new id.
-- [ ] B5.3 Open PR 2: body `Closes #955`, label `size:exception` (pre-accepted per engram `sdd/artifact-retirement/design-decisions`).
+- [x] B5.1 Ran the Slice B rows of design.md's mutation matrix (dualWriteRecords reinstated, rollback refusal branch disabled, scrubChunkFile reinstated, zlib import reinstated, forward-migration branch disabled). Each mutation reverted immediately after measuring. Full table in `apply-progress.md` — 3/5 rows matched design's "sole killer" prediction, 2/5 did not: the rollback refusal killed BOTH new CLI tests (design named only one), and forward-migration removal broke BOTH existing forward-migration tests, not just one — recorded honestly, not forced to match.
+- [x] B5.2 Record-first close: `npm run brain:memory:save`. Saved `rec-43b45e3fef3310ff` → `.memory/records/2026-09-rec-43b45e3fef3310ff.jsonl`. Verified exactly one net new id via `diff` over the sorted `"id":"..."` sets of the old (`git show HEAD:.memory/index.jsonl`) vs new `.memory/index.jsonl`. Staged only that record file plus `.memory/index.jsonl` (confirmed via `git status --short -- .memory`).
+- [ ] B5.3 Open PR 2 with body `Closes #955` and no exception label. NOT DONE — agent may not push/open PRs; the maintainer pushes and opens PR 2.
 
 ### Review Workload Forecast — Slice B
 
 | Field | Value |
 |-------|-------|
 | Estimated changed lines | ~415-430 (258 of them `dualWriteRecords` alone; tests/`.memory/**`/`openspec/**` excluded) |
-| 400-line budget risk | High — exceeds 400 |
+| 1000-line `lite` budget | 474/1000 measured — within budget |
 | Chained PRs recommended | N/A (this is PR 2 of 2, already the smaller irreversible slice) |
 | Chain strategy | stacked-to-main |
-| Decision needed before apply | No — `size:exception` already accepted (2026-09-14); do not move R4 into Slice A |
+| Decision needed before apply | No — 2026-09-15 ruling confirms 474/1000, no exception label; R4 stays in Slice B |

@@ -69,7 +69,7 @@ This change is almost all deletion, in two stacked PRs to `main` (R11). Slice A 
 
 ## `--rollback` after slice B
 
-`node brain/scripts/memory/cli.mjs migrate-v1 --rollback`, with or without `--dry-run`, prints `memory/cli: ` followed by the `memory.migrateV1.rollbackRetired` message on stderr, then exits 1. Nothing is read or written. English text: `migrate-v1 --rollback was retired (#955): it restored v1 chunks from .memory/legacy/ and then deleted .memory/records/, destroying every record captured since the migration. Nothing was changed. The archived chunks remain in git history: git show <sha>:.memory/legacy/<file>`.
+`node brain/scripts/memory/cli.mjs migrate-v1 --rollback`, with or without `--dry-run`, prints `memory/cli: ` followed by the `memory.migrateV1.rollbackRetired` message on stderr, then exits 1. Nothing is read or written. English text: `migrate-v1 --rollback was retired (#955): it used to restore v1 chunks from .memory/legacy/ and then delete .memory/records/, destroying every record captured since the migration. This refusal reads and writes nothing — the v1 chunks are wherever they already were: still in .memory/legacy/ if that directory exists locally, or in git history otherwise: git show <sha>:.memory/legacy/<file>`.
 
 ## Sanctioned `.memory/**` staging
 
@@ -116,6 +116,17 @@ Slice A never edits `cli.mjs`. In slice B, the `cli.mjs` edits at `:599-632` mov
 | three deletions / zlib import | re-add | B1–B3 / B4 |
 | forward migration kept (R3) | delete the `runMigration` branch | `cli.migrate-v1.test.mjs:60` (existing) |
 
+**Outcome note (apply, #955 Slice B).** Measured mutation testing found two
+rows with more than one killer, both recorded in `apply-progress.md`'s
+mutation matrix rather than silently forced to match this table: the
+refusal-branch mutation killed both new CLI refusal tests (`--rollback` and
+`--rollback --dry-run`), a matched pair by construction, not the single
+"CLI refusal" this table implies; and disabling the `runMigration` branch
+(R3 row) killed **two** existing `cli.migrate-v1.test.mjs` tests, not just
+`:60` — the plain-migration test and the abort-if-populated test, since both
+route through the same disabled branch. 3/5 Slice B rows matched a sole
+killer exactly; these 2/5 did not.
+
 ## Migration / Rollout — CHANGELOG (`/CHANGELOG.md`, newest first, no Unreleased section exists yet)
 
 ```
@@ -134,12 +145,12 @@ driver again. Two inert leftovers stay in YOUR repo and nothing reads them. To r
   `migrate-v1` and `--dry-run` are unchanged.
 ```
 
-## Line budget (400; `governance.ignoreList` excludes tests, `.memory/**`, `openspec/**`, `AGENTS.md`)
+## Line budget (`lite`: 1000; `governance.ignoreList` excludes tests, `.memory/**`, `openspec/**`, `AGENTS.md`)
 
 | Slice | Counted estimate | Risk |
 |---|---|---|
 | A | engram.mjs ~107, memory-manifest 32, driver 42, session-start ~49, day-start 13, backend-selection ~10, i18n 2, .gitattributes ~10, .gitignore ~6, README 2, CHANGELOG ~16 → **~290** | Low |
-| B | engram.mjs ~275, migrate-v1 ~73, cli.mjs ~30 (+11 if the `:952` comment is edited), secret-scrub ~36, i18n 6 → **~415-430** | **High — exceeds 400** |
+| B | engram.mjs ~275, migrate-v1 ~73, cli.mjs ~30 (+11 if the `:952` comment is edited), secret-scrub ~36, i18n 6 → **~415-430 estimated; 474 measured** | **Low — 474/1000** |
 
 ## Failure modes
 
@@ -158,5 +169,8 @@ driver again. Two inert leftovers stay in YOUR repo and nothing reads them. To r
 ## Open Questions
 
 - [ ] **D5**: R12 says `cli.mjs import` completes under plainfiles, but plainfiles does not implement `import` (`cli.mjs:787`). Is proving that leg by named-refusal vacuity acceptable, or is `plainfiles.importMemory` in scope?
-- [ ] **Slice B budget**: ~415-430 counted lines, above 400. Take a `size:exception`, or re-rule a part (for example R4) into A?
+- [x] **Slice B budget — decided 2026-09-15**: the repository tier is `lite`,
+  so its budget is 1000 counted lines. Slice B measures 474/1000, requires
+  no exception label, and R4 stays in Slice B. This supersedes the
+  2026-09-14 exception decision.
 - [ ] The spec delta's REQ-4 scenario (`spec.md:63`, "exported chunks") is stale but outside R9's line list. Should the spec phase fix it?

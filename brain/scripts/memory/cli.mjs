@@ -596,9 +596,14 @@ function shipOutcomeKey(result) {
 //   itself is retired (D3/C4, issue #229) — records-only write is now
 //   unconditional. The abort-if-populated guard in `runMigration()` still
 //   protects re-runs.
-// `--rollback` → the inverse (REQ-C2B2-2): restores chunks from `legacy/`,
-//   drops `records/`, reindexes. Rehearsed only in fixtures per the runbook;
-//   the real rollback runs only via the cutover runbook.
+// `--rollback` → RETIRED (#955 R1/R2/D1): it refuses and exits 1. The old
+//   behaviour restored chunks from `legacy/` and then deleted `records/`
+//   unconditionally — on this repo (and any consumer past cutover) that
+//   destroys every record written since migration to restore a transport
+//   nothing reads. The refusal branch below runs BEFORE the `--dry-run`
+//   check. Without it, `--rollback` falls through into the real forward
+//   `runMigration()` in the next branch (and `--rollback --dry-run` prints
+//   a migration report and exits 0).
 //
 // BRAIN_MIGRATE_V1_TEST_ROOT (test-only seam): when set, this op resolves
 // `.memory/` under `<value>/.memory` instead of the real repo root. NEVER
@@ -614,21 +619,13 @@ if (op === "migrate-v1") {
   const legacyDir = join(memoryRoot, "legacy");
   const indexPath = join(memoryRoot, "index.jsonl");
 
+  // D1 refusal branch — do NOT delete this `if`. Without it, `--rollback`
+  // falls through into the real forward `runMigration()` in the next
+  // branch below (and `--rollback --dry-run` prints a migration report
+  // and exits 0 instead of refusing).
   if (process.argv.includes("--rollback")) {
-    const { rollbackMigration } = await import("./lib/migrate-v1.mjs");
-    try {
-      const summary = rollbackMigration({ chunksDir, recordsDir, legacyDir, indexPath });
-      console.log(
-        await t("memory.migrateV1.rollbackSummary", {
-          restored: summary.restored,
-          indexCount: summary.indexCount,
-        }),
-      );
-      process.exit(0);
-    } catch (err) {
-      console.error(`memory/cli: ${err.message}`);
-      process.exit(1);
-    }
+    console.error(`memory/cli: ${await t("memory.migrateV1.rollbackRetired")}`);
+    process.exit(1);
   }
 
   if (!process.argv.includes("--dry-run")) {
@@ -949,14 +946,14 @@ try {
     : process.argv.slice(3);
   const result = await backend[fn](...forwarded);
 
-  // #874 split B (row 1, R11): `share()` no longer calls `dualWriteRecords()`,
-  // so its return value is now the bare `{indexCount, duplicates}` mirror of
-  // `plainfiles.share()` — `unprovenanced`, `upstreamScope` (issue #701), and
-  // `dedupedUpstream` never reach `result` for `op === "share"` any more. The
-  // three print blocks that used to surface them here retired with the
-  // exporter; `dualWriteRecords()` itself is unchanged (kept, per O1) and
-  // still returns those fields to a DIRECT caller — there is simply no longer
-  // one at this dispatch site.
+  // #874 split B (row 1, R11): `share()` no longer calls the records
+  // dual-write exporter, so its return value is now the bare
+  // `{indexCount, duplicates}` mirror of `plainfiles.share()` —
+  // `unprovenanced`, `upstreamScope` (issue #701), and `dedupedUpstream`
+  // never reach `result` for `op === "share"` any more. The three print
+  // blocks that used to surface them here retired with the exporter; the
+  // exporter itself is gone too now (#955 R5, epic task 2.4) — it had no
+  // production caller left after #874 split B, only its own tests.
 
   // #574 — the duplicate accounting, for every op that produced one (`share`,
   // `pull`, `setup`, `import`, and anything added later that reads the store).
