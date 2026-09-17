@@ -52,3 +52,27 @@ Full suite under `GIT_CONFIG_GLOBAL=/dev/null`: 5612/0 (PR 1 left it at 5611/0; 
 - `sdd`, `reviews`, `governance` render only the placeholder sentence this PR ships (naming PR 4, 5, 7); their real content is out of scope here.
 - The governance mode's content (the management views of #882) stays out of scope per `tasks.md`; only the tab and its placeholder exist.
 - `drawer-model.mjs`'s `TAB_IDS` growing a fifth tab (`sdd`) and `reviewEntries` gaining `findings[]`/`severity` are PR 5/6's work per the design's module map; untouched here.
+
+> PR 3 (lane model + `?` holding lane) and PR 4 (SDD view + archive reader) shipped on their own branches between PR 2 and PR 5; their full record lives in engram's `sdd/issue-998-ui-surface/apply-progress` topic (this file was not kept in sync for those two batches — noted here rather than silently reconstructed).
+
+## PR 5 — findings per verdict, the reviews timeline, the verdict queue (R998-5) (2026-09-17)
+
+Branch `feat/issue-998-pr5-reviews` off `25b1d6b2` (PR 4, under review). Resumed mid-unit after a rate-limit cutoff (176af423 — tasks detailed + R998-5 scenarios — already existed; the uncommitted findings-array edit was verified GREEN + mutation-tested, then committed as the unit below).
+
+| sha | unit | RED → GREEN | mutation |
+|---|---|---|---|
+| 0ef5f54b | `status/snapshot.mjs`: `reviewRows` maps each verdict's findings to `{id, severity, evidenceExcerpt, cites}` (excerpt truncated to 240 chars, no fabricated `file`/`line` — not in the real protocol schema) instead of a count, plus a separate `findingCount` (`null` uncomputable, `0` genuinely empty) | array-for-count → 20/20 | the array replaced by its `.length` → the two-finding parity assertion red (17/20) |
+| e6e96239 | `ui/lib/review-timeline.mjs` (new): `buildReviewTimeline(reviewsSection, prsSection, {issue?})` — one thread per PR, rounds oldest first, findings grouped `bySeverity` (any string kept), `noRound`/`unreadable` states, the verdict queue (no-round or latest-REVISE only, oldest-PR first) | ERR_MODULE_NOT_FOUND → 8/8 | the queue's REVISE filter loosened to also match APPROVE → red (7/8) |
+| 731c3826 | `ui/lib/drawer-model.mjs`: `reviewEntries` gains one child `entry()` per finding (severity + id, excerpt/cites, inheriting the round's own source, D14); the round's own detail reads `findingCount`, not `findings.length` | 3 red (migrated fixture + 2 new) → 16/16 | `findingCount` swapped for `findings.length` → the malformed-verdict test red (15/16) |
+| c5766b0c | `ui/lib/view-model.mjs`: `PLACEHOLDERS.reviews` is `null`. `ui/static/app.js`: the `reviews` router branch + `renderReviews`/`renderQueue`/`renderReviewThread`/`renderReviewRound`. `ui/static/app.css`: `--severity-blocker/-correction/-editorial` + `--severity-unknown` token pairs, both palettes | 2 red (`PLACEHOLDERS.reviews`) → 271/271 across `brain/scripts/ui/**`; `renderReviews()` itself N/A (D9), verified by trace | `PLACEHOLDERS.reviews` reverted to the old sentence → 2 red |
+| 32a3d7ac | docs: tasks.md T1a-T6 ticked; memory record `rec-6ba8d3282139154c` saved | — | — |
+
+Full suite `GIT_CONFIG_GLOBAL=/dev/null npm test`: 5651/5652 (PR 4 left it at 5639/0; +13 new tests). The one failure — `session-end-ship.test.mjs`'s real-entrypoint assertion that `/tmp/brain-lane-<uid>` does not exist — is unrelated to this PR (zero changes under `brain/scripts/memory/**`; the shared per-uid tmp path was created by another concurrent brain worktree session's real entrypoint run on this machine, reproduced deterministically, out of this batch's scope to isolate against). `npm run brain:repo:check` green before every commit. Counted diff `072c0861...HEAD` (tests, `openspec/changes/**`, `.memory/**` excluded): 228/400.
+
+### Deviations from the design/tasks sketch, said
+- `design.md`'s module-map row for `review-timeline.mjs` sketches `{rows:[{pr,issue,rounds,latest,headSha,ok,reason}], unreadable:[]}` — a stale sketch predating the detailed R998-5 acceptance this batch implements against (same staleness pattern as PR2/PR3); followed `spec.md`'s `{threads, queue, totals}` instead.
+- The orchestrator's batch brief sketched a finding shape with `file`/`line` and a wider severity vocabulary (`blocker | major | minor | editorial | correction | warning | suggestion`). Grounded instead in `reviewer-protocol.md` §6.1/6.2's actual declared schema — no `file`/`line` field exists on a finding, and the closed severity vocabulary is `blocker | correction | editorial` (already T1b's own task text, not new here). The `--severity-*` CSS tokens (T4) follow this real three-value grounding, with `--severity-unknown` as the fallback pair for any other string — R998-5 requires the TEXT never dropped; only the chip colour falls back.
+- The queue's `wait` uses `headSha7` (7-char), matching the round shape's own truncation and the repo's existing sha-display convention; the spec's prose just says "head sha" without a length.
+
+### Carried
+- PR 6 (the door's six tabs, the served branch, the countdown, R998-6) is next — `brain/scripts/ui/change-route.mjs`, `server.mjs`, `poller.mjs`, `lib/banners.mjs`, `static/app.js`.
