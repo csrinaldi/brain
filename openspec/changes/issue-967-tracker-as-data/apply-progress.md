@@ -815,3 +815,122 @@ pushed, no PR opened, no `--force`/`--no-verify` used.
 
 Commit: `30172672` (code + test, one unit). This paragraph lands in a
 second, docs-only commit.
+
+## PR E — a parent divergence is uncomputable, never a silent pass (tracker PR #1004 round 3)
+
+Round-3 cold review of the tracker PR (`feature/issue-967` → `main`, PR
+#1004) found one blocker, fixed strict-TDD in this worktree
+(`/home/gandalf/IA/brain-issue-967`), branch
+`fix/issue-967-e-parent-uncomputable`, base `origin/feature/issue-967`
+(`b7e3181b`). Three local commits, nothing pushed, no PR opened.
+
+**Finding (blocker)** — `baseBranchRule` (`base-branch.mjs:83-84`) read
+`declaredParent(issueBody).parent` alone: `dp.parent === null` is the SAME
+value a body that never mentions a parent produces AND a body whose
+`parent:` declaration could not be read produces, so line 84's
+`if (parent === null) return { pass: true }` could not tell the two
+apart. Measured: an issue body with `parent: abc` in its `brain-graph/1`
+block (fails `PARENT_KEY_GRAMMAR`) → `{pass: true}`, no `uncomputable`;
+an issue body with two disagreeing line-initial `Parent: #878` /
+`Parent: #879` lines, no block at all (`parent-ambiguous`) → `{pass:
+true}` too. Both are exactly the case this check's own header comment
+(lines 15-20) already refuses: "a graph block this module cannot parse …
+is uncomputable, never a silent pass" — only a declaration that reads
+cleanly and says nothing is the standing pass case, and a divergence is
+not that.
+
+**Root cause**: `declaredParent` (`epic-graph.mjs`) had no channel to say
+WHY the parent was null — it collapsed both the block's own
+`declarationDivergences` (`parent-grammar`) and `parentFromProse`'s
+`ambiguousValue` (`parent-ambiguous`) into `parent: null`, indistinguishable
+from "no parent mentioned at all". `run-check.mjs`'s `needsParentRead`
+(computed from `issueBlock` and `dp.parent`) evaluated `false` for the
+same reason, so the epic was never even fetched.
+
+**Fix**: `declaredParent` gains a `divergence` field —
+`null` when the parent resolved cleanly or nothing was declared, else
+`{key: 'parent', value, reason: 'parent-grammar'|'parent-ambiguous'}` —
+lifted straight from `parseGraphBlock`'s own `declarationDivergences`
+(filtered to `key === 'parent'`) for the block case, and built from
+`parentFromProse`'s `ambiguousValue` for the prose-only case. Every
+existing caller's fields (`parent`, `parentSource`, `ambiguousValue`) are
+unchanged — `divergence` is additive. `baseBranchRule` checks
+`dp.divergence` before the `parent === null` standing-pass line and fails
+closed, naming the reason and the offending value. `run-check.mjs` needed
+NO source change: `needsParentRead` already evaluates `false` for a
+divergent parent (`dp.parent` is `null` either way), so the wrapper's
+existing `!needsParentRead` branch already calls `baseBranchRule` with no
+`epicBody`, which now resolves the divergence correctly — the fix's own
+mutation (reverting `base-branch.mjs`'s check) turns the wrapper-level
+test red too, proving the two are the same fix seen from two callers, not
+two fixes. `lib/ticket-base.mjs`'s `resolveBase` had the identical defect
+at its OWN caller of `declaredParent` (via `parentOf`): a divergent parent
+silently reported `reason: 'no-parent'`, the same value a truly parentless
+body reports. Unlike the gate, this leaf is fail-OPEN by design (R967-5:
+"every uncertainty resolves to the default branch WITH THE REASON
+STATED", never a refusal for an unreadable declaration) — so the fix
+states the divergence's own reason token (`parent-grammar` /
+`parent-ambiguous`) instead of `no-parent`, still resolving to `main`
+with no forge call and no refusal.
+
+**Files**: `brain/scripts/status/epic-graph.mjs` (`declaredParent` gains
+`divergence`), `brain/scripts/status/epic-map.test.mjs` (+1 new test for
+the `parent-grammar` case; +6 existing `declaredParent` deepEqual
+assertions updated for the additive field — no behavioural change to
+those cases, just the new field's value);
+`brain/scripts/governance/checks/base-branch.mjs` (the divergence
+short-circuit), `base-branch.test.mjs` (+3 tests: `parent-grammar`,
+`parent-ambiguous`, and a regression pin for the clean no-parent standing
+case); `brain/scripts/governance/run-check.mjs` — unchanged, no source
+edit owed; `run-check.test.mjs` (+2 tests, wrapper-level: `fetchIssue`
+call-count proof that the epic is never fetched for either divergence);
+`brain/scripts/lib/ticket-base.mjs` (`parentOf` always returns an object
+carrying `divergence`; `resolveBase` states it), `ticket-base.test.mjs`
+(+1 test, both divergence cases in one table-driven test).
+
+**TDD evidence, one mutation per unit, each reverted after**:
+- Unit 1 (`base-branch.mjs`/`epic-graph.mjs`) — RED: 2/17 in
+  `base-branch.test.mjs` (the two new divergence tests; the other 15,
+  including the clean-no-parent regression pin, were already green).
+  GREEN: 17/17 `base-branch.test.mjs`, 112/112 `epic-map.test.mjs`.
+  Mutation: dropped the `if (dp.divergence) {...}` block back to reading
+  `parent` directly → exactly the same 2 tests red (15/17), nothing else.
+- Unit 2 (`run-check.test.mjs`, no source change) — RED (via the SAME
+  mutation as unit 1, applied first to demonstrate this test also depends
+  on it): 2/132 red (the two new wrapper-level tests). GREEN after
+  restoring unit 1's fix: 132/132. This unit adds no code of its own; it
+  pins that unit 1's fix is visible at the wrapper's own fetch bookkeeping
+  (`fetchIssue` called exactly once, for the linked issue, never the
+  epic).
+- Unit 3 (`ticket-base.mjs`) — RED: 1/16 (the new divergence-reason
+  test). GREEN: 16/16. Mutation: reverted `resolveBase`'s
+  `reason: parent.divergence ? parent.divergence.reason : 'no-parent'`
+  back to the bare `reason: 'no-parent'` → exactly the same test red
+  (15/16), reverted.
+
+**Verification**: `GIT_CONFIG_GLOBAL=/dev/null node --test
+brain/scripts/governance/run-check.test.mjs
+brain/scripts/governance/checks/base-branch.test.mjs
+brain/scripts/status/epic-map.test.mjs brain/scripts/lib/ticket-base.test.mjs
+brain/scripts/status/snapshot.test.mjs` — 290/290 green.
+`GIT_CONFIG_GLOBAL=/dev/null npm test` — 5687 pass / 1 fail (5688 total);
+the one failure is the same pre-existing/environmental
+`session-end-ship.test.mjs` "real entrypoint … writes no log file" case
+tracked as #1011 (this round's diff never touches
+`brain/scripts/memory/**`) — flagged, not chased, per the given file
+scope. `npm run brain:repo:check` green before every commit. `.memory/
+index.jsonl` was modified by the test run and restored with `git checkout
+-- .memory/index.jsonl` before this docs commit, never staged. Counted
+diff since `origin/feature/issue-967` (tests, `openspec/`, `.memory/`
+excluded): **82** — `base-branch.mjs` +22 (23 ins/1 del),
+`ticket-base.mjs` +16 (21 ins/5 del), `epic-graph.mjs` +22 (27 ins/5 del)
+— well under the 1000 budget. No AI attribution in any commit; nothing
+pushed, no PR opened, no `--force`/`--no-verify` used.
+
+Commits: `944d875d` (unit 1), `6f8d04b6` (unit 2, test-only),
+`a47505f8` (unit 3). This paragraph lands in a fourth, docs-only commit.
+
+**Next**: PR E is ready to fold into the tracker PR (#1004) as round-3
+review remediation. The maintainer's post-merge `npm run brain:protect`
+re-run (C9) remains the one standing unticked act on the whole change,
+unaffected by this batch.

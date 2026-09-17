@@ -342,6 +342,14 @@ unaffected by this amendment.)
 - **WHEN** the gate cannot read the linked issue's parent
 - **THEN** the result is `uncomputable` with the reason stated, and it is neither reported as a pass nor as a base violation
 
+#### Scenario: a parent-grammar divergence is uncomputable, never a silent pass (amended 2026-09-17, PR E — tracker PR #1004, round-3 cold review)
+- **WHEN** the linked issue's `brain-graph/1` block declares `parent: abc` (fails `PARENT_KEY_GRAMMAR`)
+- **THEN** the gate fails as `uncomputable`, the reason names `parent-grammar` and `abc`, and the parent is never fetched — `dp.parent === null` cannot be told apart from "no parent mentioned at all" without the divergence, and this measured case used to return `{pass: true}`
+
+#### Scenario: a parent-ambiguous divergence is uncomputable, never a silent pass (amended 2026-09-17, PR E — tracker PR #1004, round-3 cold review)
+- **WHEN** the linked issue's body carries two disagreeing line-initial `Parent: #N` declarations (e.g. `Parent: #878` and `Parent: #879`) and no `brain-graph/1` block at all
+- **THEN** the gate fails as `uncomputable`, the reason names `parent-ambiguous` and the two numbers, and the parent is never fetched — this measured case used to return `{pass: true}` for the same reason as the grammar case above
+
 #### Scenario: no forge fan-out
 - **WHEN** the gate runs against a PR
 - **THEN** it issues no issue-listing call, and at most two per-issue reads (the linked issue and its parent)
