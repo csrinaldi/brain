@@ -164,11 +164,26 @@ function renderBands() {
  * manual poll. Both controls POST — the only mutation verbs this server
  * accepts (R881-5).
  */
+/** The served branch, said with its own source stamp (#998 R998-6 T3) — a detached or unreadable HEAD is a said reason, never a blank header. */
+function renderServedBranch(servedBranch) {
+  const frag = document.createDocumentFragment();
+  if (servedBranch === null) {
+    frag.appendChild(el('span', 'served-branch', 'serving: unknown until the stream connects'));
+    return frag;
+  }
+  const text = servedBranch.ok ? `serving ${servedBranch.branch}` : `serving: unknown (${servedBranch.reason})`;
+  frag.appendChild(el('span', 'served-branch', text));
+  frag.appendChild(renderSourceStamp(sourceStamp(servedBranch.source)));
+  return frag;
+}
+
 function renderStatus() {
   const indicator = pollIndicator({ poller: state.meta?.poller ?? null, nowMs: Date.now() });
   clear(mounts.status);
   mounts.status.appendChild(el('strong', 'title', 'brain:ui'));
+  mounts.status.appendChild(renderServedBranch(state.meta?.servedBranch ?? null));
   mounts.status.appendChild(el('span', indicator.paused ? 'poll-indicator paused' : 'poll-indicator', indicator.text));
+  mounts.status.appendChild(el('span', 'poll-countdown', indicator.countdown));
   mounts.status.appendChild(el('span', 'spacer'));
 
   const toggle = el('button', 'poll-toggle', indicator.paused ? 'resume polling' : 'disable polling');
@@ -496,8 +511,9 @@ function closeDrawer() {
 }
 
 /**
- * The inspector drawer: four tabs, one entry shape, and a source string under
- * every single value (A3). `drawer-model.mjs` decided all of it — including
+ * The inspector drawer: six tabs (#998 R998-6), one entry shape, and a
+ * source string under every single value (A3). `drawer-model.mjs` decided
+ * all of it — including
  * that a tab which failed keeps its reason and that an unreadable review
  * thread is still an entry — so this renders one loop, with no per-tab
  * branch to get wrong.

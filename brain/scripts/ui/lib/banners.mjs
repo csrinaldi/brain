@@ -93,8 +93,8 @@ function ago(ms) {
  * armed, "paused" while paused (checked first — a paused poller may still
  * carry a stale `nextAttemptAt` from before it paused), "polling disabled"
  * when nothing is scheduled at all. Reads only the `now` this caller already
- * threads through every other clock read on this page — never `Date.now()`
- * itself (D9: no clock in `lib/`).
+ * threads through every other clock read on this page — never the wall
+ * clock itself (D9: no clock in `lib/`).
  */
 function pollCountdown({ poller, now }) {
   if (poller.paused) return 'paused';
