@@ -17,6 +17,7 @@ import { degradationBands, pollIndicator } from './lib/banners.mjs';
 import { buildLaneModel } from './lib/lane-model.mjs';
 import { buildDrawerModel } from './lib/drawer-model.mjs';
 import { buildSddModel, STAGE_VOCAB } from './lib/sdd-model.mjs';
+import { buildReviewTimeline } from './lib/review-timeline.mjs';
 import { sourceStamp } from './lib/provenance.mjs';
 import { MODES, PLACEHOLDERS, initialView, switchMode, keyAction } from './lib/view-model.mjs';
 
@@ -117,7 +118,7 @@ function switchToMode(mode) {
   render();
 }
 
-/** The router (#998 R998-2/R998-4): `map` draws the canvas + drawer, `sdd` draws the seven-stage matrix; the rest say which PR brings their content. */
+/** The router (#998 R998-2/R998-4/R998-5): `map` draws the canvas + drawer, `sdd` draws the seven-stage matrix, `reviews` draws the timeline + verdict queue; the rest say which PR brings their content. */
 function renderContent() {
   if (view === 'map') {
     renderLanes();
@@ -126,6 +127,12 @@ function renderContent() {
   }
   if (view === 'sdd') {
     renderSdd();
+    mounts.drawer.hidden = true;
+    clear(mounts.drawer);
+    return;
+  }
+  if (view === 'reviews') {
+    renderReviews();
     mounts.drawer.hidden = true;
     clear(mounts.drawer);
     return;
@@ -361,6 +368,76 @@ function renderSddRow(change) {
   }
   if (change.phaseOrder.violations.length > 0) {
     row.appendChild(saidList(`${change.phaseOrder.violations.length} phase-order violation(s):`, change.phaseOrder.violations.map((v) => `${v.stage}: ${v.reason}`)));
+  }
+  return row;
+}
+
+/**
+ * The reviews view (#998 R998-5): the verdict queue first ("waiting on a
+ * verdict right now"), then one card per PR thread with its rounds oldest
+ * first — verdict word + ✓/✕ mark, findings grouped by severity. An
+ * unreadable thread is a row with its reason; a thread with no round says
+ * so. `lib/review-timeline.mjs` decided all of it; this renders one loop
+ * over rows this page never re-derives.
+ */
+function renderReviews() {
+  const model = buildReviewTimeline(sectionOf(state, 'reviews'), sectionOf(state, 'prs'));
+  clear(mounts.canvas);
+  if (!model.ok) {
+    mounts.canvas.appendChild(said(`the reviews timeline could not be computed: ${model.reason}`));
+    return;
+  }
+  const { threads, queue, totals } = model.value;
+  mounts.canvas.appendChild(el('p', 'canvas-summary', `${totals.threads} thread(s), ${totals.queue} waiting on a verdict, ${totals.unreadable} unreadable`));
+  mounts.canvas.appendChild(renderQueue(queue));
+  for (const thread of threads) mounts.canvas.appendChild(renderReviewThread(thread));
+}
+
+function renderQueue(queue) {
+  const wrap = el('div', 'review-queue');
+  wrap.appendChild(el('h3', null, 'waiting on a verdict right now'));
+  if (queue.length === 0) {
+    wrap.appendChild(said('nothing is waiting on a verdict'));
+    return wrap;
+  }
+  const list = el('ul', 'queue-list');
+  for (const item of queue) list.appendChild(el('li', null, `#${item.pr}${item.title ? ` ${item.title}` : ''} — ${item.wait}`));
+  wrap.appendChild(list);
+  return wrap;
+}
+
+function renderReviewThread(thread) {
+  const card = el('div', 'review-card');
+  card.appendChild(el('strong', null, `#${thread.pr}${thread.title ? ` ${thread.title}` : ''}`));
+  if (thread.unreadable) {
+    card.appendChild(said(`this thread could not be read: ${thread.unreadable.reason}`));
+    return card;
+  }
+  if (thread.noRound) {
+    card.appendChild(said('no round posted'));
+    return card;
+  }
+  for (const round of thread.rounds) card.appendChild(renderReviewRound(round));
+  return card;
+}
+
+/** One round: its verdict word + mark, its findings grouped by severity (#998 R998-5) — findings carry no `file`/`line` (reviewer-protocol.md §6.1/6.2 declares none), so a finding shows only its excerpt and cites. */
+function renderReviewRound(round) {
+  const row = el('div', 'review-round');
+  const mark = round.verdict === 'APPROVE' ? '✓' : '✕';
+  row.appendChild(el('p', 'review-round-head', `${mark} ${round.verdict} — rev ${round.rev}, ${round.author ?? 'unknown author'}${round.headSha7 ? `, head ${round.headSha7}` : ''}`));
+  if (round.findings.length === 0) {
+    row.appendChild(said('no findings'));
+    return row;
+  }
+  const chips = el('div', 'severity-chips');
+  for (const [severity, count] of Object.entries(round.bySeverity)) chips.appendChild(el('span', `severity-chip severity-${severity}`, `${severity} × ${count}`));
+  row.appendChild(chips);
+  for (const f of round.findings) {
+    const item = el('div', 'finding');
+    item.appendChild(el('strong', null, `${f.severity ?? 'unknown'} — ${f.id ?? '?'}`));
+    item.appendChild(el('p', null, `${f.evidenceExcerpt ?? ''}${f.cites ? ` (cites ${f.cites})` : ''}`));
+    row.appendChild(item);
   }
   return row;
 }

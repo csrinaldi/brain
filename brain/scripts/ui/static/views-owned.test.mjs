@@ -46,12 +46,10 @@ test('#998 R998-2: the drawer still has four tabs and no fifth view hides among 
   assert.deepEqual(TAB_IDS, ['spec', 'tasks', 'workingMemory', 'reviews']);
 });
 
-test('#998 R998-2/R998-4: this PR owns exactly four modes; map and sdd have real content, the rest name the PR that brings them', () => {
+test('#998 R998-2/R998-4/R998-5: this PR owns exactly four modes; map, sdd and reviews have real content, governance names the PR that brings it', () => {
   assert.deepEqual(MODE_IDS, ['map', 'sdd', 'reviews', 'governance']);
-  for (const mode of ['map', 'sdd']) assert.equal(PLACEHOLDERS[mode], null, `mode "${mode}" has real content, not a placeholder`);
-  for (const mode of ['reviews', 'governance']) {
-    assert.match(PLACEHOLDERS[mode], /\bPR \d\b/, `mode "${mode}" must name the PR that brings it, not render blank`);
-  }
+  for (const mode of ['map', 'sdd', 'reviews']) assert.equal(PLACEHOLDERS[mode], null, `mode "${mode}" has real content, not a placeholder`);
+  assert.match(PLACEHOLDERS.governance, /\bPR \d\b/, 'mode "governance" must name the PR that brings it, not render blank');
 });
 
 test('#998 R998-2: no roadmap, decisions, anti-pattern or by-actor/history view identifier exists in the page', () => {

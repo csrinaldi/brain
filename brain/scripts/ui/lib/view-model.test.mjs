@@ -14,10 +14,10 @@ test('#998 R998-2: the four modes, in a fixed order, each with a non-empty label
   }
 });
 
-test('#998 R998-2/R998-4: map and sdd have content; reviews and governance name the PR that brings them', () => {
+test('#998 R998-2/R998-4/R998-5: map, sdd and reviews have content; governance names the PR that brings it', () => {
   assert.equal(PLACEHOLDERS.map, null, 'map draws the canvas + drawer, not a placeholder');
   assert.equal(PLACEHOLDERS.sdd, null, 'sdd draws the seven-stage matrix (R998-4), not a placeholder');
-  assert.match(PLACEHOLDERS.reviews, /PR 5/);
+  assert.equal(PLACEHOLDERS.reviews, null, 'reviews draws the timeline and verdict queue (R998-5), not a placeholder');
   assert.match(PLACEHOLDERS.governance, /PR 7/);
 });
 
