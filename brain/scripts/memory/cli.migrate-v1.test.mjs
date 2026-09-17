@@ -1,5 +1,7 @@
 // cli.migrate-v1.test.mjs — CLI-level tests for `brain:memory:migrate-v1` un-refusing
-// (REQ-C2B2-1) and the `--rollback` flag (REQ-C2B2-2).
+// (REQ-C2B2-1) and the `--rollback` refusal (#955 R1/R2/D1 — `--rollback`
+// itself is retired; it deleted `records/` unconditionally after restoring
+// `legacy/`, wiping every record captured since cutover).
 //
 // cli.mjs resolves `.memory/` from its own file location (`repoRoot`), not
 // from `cwd` — so these tests redirect it via the BRAIN_MIGRATE_V1_TEST_ROOT
@@ -15,6 +17,7 @@ import { gzipSync } from 'node:zlib';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { testTmp } from '../lib/test-tmp.mjs';
+import en from '../i18n/en.mjs';
 
 const cliPath = join(dirname(fileURLToPath(import.meta.url)), 'cli.mjs');
 
@@ -107,20 +110,32 @@ test('migrate-v1 --dry-run is unchanged: prints the report and never mutates the
   assert.ok(existsSync(join(chunksDir, 'chunk1.jsonl.gz')), '--dry-run must never move the chunk');
 });
 
-// ── REQ-C2B2-2: `--rollback` restores the pre-cutover state ─────────────────
+// ── `--rollback` is retired (#955 R1/R2/D1): it refuses, always ────────────
 
-test('migrate-v1 --rollback restores a migrated fixture (chunks back, records/ gone, index rebuilt)', () => {
+test('migrate-v1 --rollback refuses: exit 1, named reason, chunk untouched, no records/ or legacy/ created', () => {
   const { root, chunksDir } = tmpFixtureRoot();
   writeChunk(chunksDir, [baseObs()]);
 
-  const migrateResult = runCli(['migrate-v1'], root);
-  assert.equal(migrateResult.status, 0, 'sanity: the real migration must succeed first');
+  const result = runCli(['migrate-v1', '--rollback'], root);
 
-  const rollbackResult = runCli(['migrate-v1', '--rollback'], root);
-
-  assert.equal(rollbackResult.status, 0, `expected exit 0, got ${rollbackResult.status}. stderr: ${rollbackResult.stderr}`);
+  assert.equal(result.status, 1, `expected exit 1, got ${result.status}. stdout: ${result.stdout}`);
+  assert.ok(result.stderr.includes(en['memory.migrateV1.rollbackRetired']), `stderr must include the retirement reason. Got: ${result.stderr}`);
   const memoryRoot = join(root, '.memory');
-  assert.ok(existsSync(join(chunksDir, 'chunk1.jsonl.gz')), 'the chunk must be restored to chunks/');
-  assert.ok(!existsSync(join(memoryRoot, 'records')), 'records/ must be gone after rollback');
-  assert.ok(existsSync(join(memoryRoot, 'index.jsonl')), 'the index must be rebuilt');
+  assert.ok(existsSync(join(chunksDir, 'chunk1.jsonl.gz')), 'the chunk must still be in chunks/ — nothing moved');
+  assert.ok(!existsSync(join(memoryRoot, 'records')), '--rollback must never create records/');
+  assert.ok(!existsSync(join(memoryRoot, 'legacy')), '--rollback must never create legacy/');
+});
+
+test('migrate-v1 --rollback --dry-run also refuses (the refusal branch runs BEFORE the --dry-run check)', () => {
+  const { root, chunksDir } = tmpFixtureRoot();
+  writeChunk(chunksDir, [baseObs()]);
+
+  const result = runCli(['migrate-v1', '--rollback', '--dry-run'], root);
+
+  assert.equal(result.status, 1, `expected exit 1, got ${result.status}. stdout: ${result.stdout}`);
+  assert.ok(result.stderr.includes(en['memory.migrateV1.rollbackRetired']), `stderr must include the retirement reason. Got: ${result.stderr}`);
+  const memoryRoot = join(root, '.memory');
+  assert.ok(existsSync(join(chunksDir, 'chunk1.jsonl.gz')), 'the chunk must still be in chunks/ — nothing moved');
+  assert.ok(!existsSync(join(memoryRoot, 'records')), '--rollback --dry-run must never create records/');
+  assert.ok(!existsSync(join(memoryRoot, 'legacy')), '--rollback --dry-run must never create legacy/');
 });

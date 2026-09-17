@@ -112,7 +112,7 @@ if [ -n "$base" ]; then
 fi
 
 # ── uncommitted .memory/ check (WARNING — reliability-first, never blocks) ────
-# Rationale (ADR-0014 §9): `brain:memory:share` above re-materializes the manifest,
+# Rationale (ADR-0014 §9): `brain:memory:share` above rebuilds `.memory/index.jsonl`,
 # which is non-deterministic (it churns), so a hard block here would self-block
 # the very push it runs on → developers reach for --no-verify, silencing the
 # whole hook. `brain:save` is the proper materialize-and-commit point, and
