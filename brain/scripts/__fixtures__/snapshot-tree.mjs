@@ -22,6 +22,14 @@ export function makeSnapshotFixture({ records = true } = {}) {
   w('openspec/changes/issue-1-a/tasks.md', '```brain-slice-scope/1\n{"slice":1,"claims":["R1-1"],"terminal_pr":"this PR -> main"}\n```\n- [x] done\n- [ ] next one\n');
   w('openspec/changes/issue-2-no-tasks/spec.md', 's');
   w('openspec/changes/archive/.gitkeep', '');
+  // One archived change (R998-4), named the canonical way `archivePath(iid)`
+  // (sdd-layout.mjs) templates it: the bare issue number, no `issue-` prefix,
+  // no slug — every artefact present, every task checked.
+  w('openspec/changes/archive/9/proposal.md', 'p');
+  w('openspec/changes/archive/9/spec.md', 's');
+  w('openspec/changes/archive/9/design.md', 'd');
+  w('openspec/changes/archive/9/tasks.md', '- [x] done\n- [x] also done\n');
+  w('openspec/changes/archive/9/archive-report.md', 'archived');
   if (records) {
     const rec = (id, ts, actor, type, extra = {}) => JSON.stringify({ id, ts, actor, actorKind: actor.startsWith('@bot') ? 'agent' : 'human', type, project: 'x', content: 'c', ...extra });
     w('.memory/records/2026-06-rec-0000000000000001.jsonl', rec('rec-0000000000000001', '2026-06-01T00:00:00Z', '@a', 'decision', { issue: 1 }) + '\n');
