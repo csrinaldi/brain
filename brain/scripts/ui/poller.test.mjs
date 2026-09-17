@@ -291,6 +291,27 @@ test('#998 R998-6: createPoller({initialError}) starts with nextAttemptAt null �
   poller.close();
 });
 
+// ── cold review of #1008/PR6: once() DOES re-arm the countdown ─────────────
+//
+// The comment above `nextAttemptAt`'s declaration used to claim a manual
+// once() "does not itself re-arm the interval" — false, measured here:
+// once()'s own runTick() calls scheduleNext() in its .finally() on every
+// completed tick, the same path a regular scheduled tick already takes.
+
+test('#998 R998-6: a manual once() re-arms nextAttemptAt from the moment the tick settles, not the moment it was called', async () => {
+  const scheduler = fakeScheduler();
+  const now = { t: 5000 };
+  const vcs = makeVcs({ callLog: [] });
+  const poller = createPoller({
+    vcs, cache: createForgeCache(), project: 'o/r', interval: 60000,
+    _setTimeout: scheduler.setTimeout, _clearTimeout: scheduler.clearTimeout, _now: () => new Date(now.t),
+  });
+
+  await poller.once();
+  assert.equal(poller.state().nextAttemptAt, new Date(65000).toISOString(), 'once() at t=5000 with a 60000ms interval re-arms to 65000');
+  poller.close();
+});
+
 // ── judgment:cold-1: the review lane is capped on the cold-start tick too ──
 //
 // The header comment (poller.mjs:6-8) promises "every tick, capped at 10

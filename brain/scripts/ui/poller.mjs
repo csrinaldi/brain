@@ -89,10 +89,14 @@ export function createPoller({
   let lastOkAt = null;
   let lastError = initialError;
   let forgeAsOf = { issues: null, bodies: null, reviews: null };
-  // #998 R998-6: the status bar's countdown. Armed only by `scheduleNext()`
-  // (never by a manual `once()`, which does not itself re-arm the interval)
-  // — from the SAME injected `_now()` this whole module already uses, never
-  // `Date.now()` (D9: no clock in `lib/`, the caller passes it).
+  // #998 R998-6: the status bar's countdown. Armed by `scheduleNext()` from
+  // the SAME injected `_now()` this whole module already uses, never the
+  // wall clock (D9: no clock in `lib/`, the caller passes it). A manual
+  // `once()` clears any pending timer first, then re-arms the countdown
+  // anyway: `runTick()`'s own `.finally()` calls `scheduleNext()` on every
+  // completed tick, scheduled or manual alike — cold review of #1008/PR6
+  // measured this after an earlier revision of this comment claimed the
+  // opposite.
   let nextAttemptAt = null;
 
   function state() {
