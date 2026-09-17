@@ -1592,6 +1592,7 @@
 {"id":"rec-a690df7efe8dc477","ts":"2026-08-07T22:49:08Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-08-rec-a690df7efe8dc477.jsonl"}
 {"id":"rec-a6931b7c38e911ab","ts":"2026-07-13T00:21:40Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-a6931b7c38e911ab.jsonl"}
 {"id":"rec-a6a059dc3e797474","ts":"2026-07-29T17:02:44Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-a6a059dc3e797474.jsonl"}
+{"id":"rec-a6ba1a6a6fe52dd3","ts":"2026-09-17T14:28:10Z","actor":"@csrinaldi","type":"decision","project":"brain","issue":998,"file":"2026-09-rec-a6ba1a6a6fe52dd3.jsonl"}
 {"id":"rec-a6bfebd23f26fefe","ts":"2026-07-13T00:22:11Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-a6bfebd23f26fefe.jsonl"}
 {"id":"rec-a6df213fffe8df74","ts":"2026-07-25T21:50:40Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-a6df213fffe8df74.jsonl"}
 {"id":"rec-a6e92f882a3be903","ts":"2026-07-25T21:50:09Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07-rec-a6e92f882a3be903.jsonl"}
