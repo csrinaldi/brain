@@ -1599,7 +1599,9 @@ optional.
    `originIdentity()` reads the CURRENT directory's origin. So
    `brain:ui --root <other repo>` serves that repo's tree with THIS repo's
    issues — two sources of truth in one snapshot. Pre-existing since PR 1/2;
-   worth its own ticket.
+   worth its own ticket. **Filed as issue #981** (OPEN), "fix(ui): brain:ui
+   and brain:snapshot resolve the forge identity from the process cwd, not
+   from --root", carrying the `server.mjs:416-419` evidence.
 
 ## Slice 4 — pre-push fresh review (2026-09-16): APPROVE with minors, five promoted and fixed
 
@@ -1809,3 +1811,79 @@ test` 5582/5582 (baseline 5577; +5 = 3 new poller tests, 2 new forge-cache
 tests). `brain:repo:check` green before each commit; tree clean after each.
 Counted diff excluding `*.test.mjs`, `openspec/` and `.memory/` against
 `origin/feature/brain-ui...HEAD`: see the return summary. No push, no PR.
+
+## Final delivery — the two corrections and the tracker merge (recorded at archive time, 2026-09-16)
+
+Everything above ends before the last two PRs existed. This section closes the
+record: it names the two correction PRs by number, states each review verdict,
+and records the tracker merge that closed #881.
+
+### The two corrections
+
+| PR | Base | What it carried | Merge sha | Lines | Cold-review verdict |
+|---|---|---|---|---|---|
+| **#983** | `feature/brain-ui` | the two corrections of #982's approving review — `requestSequence()` in `lib/frames.mjs` + the `loadChange` staleness token (`e2e35d0f`), and the `app-source-guard` from-clause scan that a bare `import "…";` could chain to a later commented `from "lodash-es"` (`60c28bf3`) | `bb480809` | +74/-6 | **APPROVE** |
+| **#985** | `feature/brain-ui` | the tracker review's blocker — the bulk-import overflow is queued and bucket (c) is never foreclosed (`756da921`), and a never-fetched body says it is queued rather than that the first poll has not completed (`a2f824ff`), plus the R881-4 spec/design amendment those fixes required | `c1e4e7ca` | +452/-38 | **APPROVE**, with one correction: the wording of a comment. Taken before merge. |
+
+### The tracker
+
+| PR | Base | Merge sha | Lines | Verdict |
+|---|---|---|---|---|
+| **#970** (tracker) | `main` | **`c442533a`** | +11142/-2 (2784 counted) | **REVISE**, on two grounds |
+
+The tracker review's two grounds, and what happened to each:
+
+1. **`budget`.** The reviewer counted 2784 lines against `main` and returned
+   REVISE on size. It does not honour `size:exception`, and #970 carries that
+   label with a written justification. This is exactly **issue #752**, OPEN —
+   "a chained PR can never converge — the verdict judges the link, the chain
+   is what ships": every child PR (#964, #971, #979, #982, #983, #985) is
+   under this repo's `lite` 1000-line budget as the gate counts it and each
+   holds its own APPROVE, while the tracker is by construction their sum. No
+   further slicing could have changed the tracker's number.
+2. **`cold-1`.** The permanently-`UNREADABLE` node reproduced with a fake
+   scheduler — the real finding, documented in full in the section above. It
+   was **fixed by PR #985** and re-verified before the merge.
+
+**The maintainer merged the tracker on the child approvals**, with the
+`budget` ground recorded as the known #752 instance rather than acted on.
+`#881 is CLOSED` (`2026-09-16T17:01:19Z`).
+
+### The by-eye check PR 4's T5 still owed
+
+T5's walkthrough rendered the live `/api/snapshot` through the browser's own
+modules in node (91 nodes for 91 open issues, 0 unreadable) but could not
+prove a real browser paints it — no DOM runner exists here, and that gap was
+recorded as owed (`apply-progress.md:1522-1529`). **Discharged on the
+tracker**: the maintainer ran the server and opened `http://127.0.0.1:3000/`
+in a browser, and the page rendered. That is the whole claim — one by-eye
+confirmation that the page paints. It is not an automated assertion, nothing
+re-runs it, and A1's "clicking a node opens the drawer" interaction remains
+unpinned by any test.
+
+### Follow-ups carried past the archive
+
+None of these blocks the archive; all of them must survive it.
+
+| # | Item | Where | Ticket |
+|---|---|---|---|
+| 1 | Forge identity resolved from `process.cwd()`, not `--root` | `server.mjs:416-419`; finding 2 above | **#981, OPEN** |
+| 2 | The reviewer's budget control cannot converge a chain; `size:exception` is not honoured | tracker #970's `budget` REVISE, above | **#752, OPEN** — the #970 instance is worth a comment there |
+| 3 | **`poller.mjs`'s header understates its own bound** — `poller.mjs:11-12` says "On every later tick the body lane spends at most B = 5 calls" while the enforced per-tick ceiling is `BODY_CAP + NEW_BODY_CAP = 25` (`poller.mjs:21`, `:140`), ten lines apart in the same comment block. Recorded here for the first time: it appeared in no apply-progress note, no issue and no PR body until this archive. | `brain/scripts/ui/poller.mjs:11-12` | **to open** — one ticket with item 4 |
+| 4 | `LIB_MODULE_RE`'s comment is looser than the regex it describes | `server.mjs`; `:1663-1666` above | **to open** — same comment-wording ticket as item 3 |
+| 5 | The `www.w3.org` allow-list entry is host-wide where only `http://www.w3.org/2000/svg` is needed; narrowing it touches #648's guard, a shared file outside this slice's fence | `brain/scripts/lib/shipped-hostnames.mjs`; `:1667-1671` above | **to open** |
+| 6 | The focus / Space-key / CLOSED-note editorials — product decisions, deliberately declined in a pre-push round, not defects | `:1672-1676` above | **to open if wanted** — declined, not lost |
+
+Items 3 and 4 are both comment-wording defects in `brain/scripts/ui/**` and
+should be one ticket: *"docs(ui): `poller.mjs`'s header claims B = 5 where the
+bound is 25, and `LIB_MODULE_RE`'s comment is looser than the regex"*. Item 3
+is the more serious of the two — a comment that states a smaller bound than
+the code enforces is what makes a future reader "fix" the code to match it.
+
+### Final state
+
+All 53 tasks `[x]`. Full suite `5582/5582`, `brain/scripts/ui/**` `211/211`,
+`brain:repo:check` and `brain:nav` green at `c442533a`. Verify report:
+0 CRITICAL, 5 WARNING, 6 SUGGESTION — READY TO ARCHIVE. The five warnings were
+documentation-state defects and were fixed by the archive phase in this change
+dir (see `archive-report.md`).

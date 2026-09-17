@@ -9,12 +9,19 @@ Strict TDD is active for this project (`npm test` = `node --test
 "brain/scripts/**/*.test.mjs" "test/**/*.e2e.test.mjs"`). Every task that adds
 behaviour is preceded by the task that writes its failing test. Chain
 strategy (maintainer ruling, 2026-09-14, supersedes the stacked-to-main text
-below): **feature-branch-chain** on the tracker `feature/brain-ui`. PR 1
-(#964) is squash-merged into the tracker as `8d074e44`. PR *n* targets the
-tracker branch once PR *n-1* is merged into it, or targets PR *n-1*'s branch
-directly while that PR is still open. The tracker PR (#970, draft) is the
-only PR in this chain that targets `main`, and it closes #881 once every
-child PR has landed on the tracker.
+this file carried before that ruling): **feature-branch-chain** on the tracker
+`feature/brain-ui`. PR 1 (#964) is squash-merged into the tracker as
+`8d074e44`. PR *n* targets the tracker branch once PR *n-1* is merged into it,
+or targets PR *n-1*'s branch directly while that PR is still open. The tracker
+PR (#970) is the only PR in this chain that targets `main`, and it closes #881
+once every child PR has landed on the tracker.
+
+**What shipped — recorded at archive time, 2026-09-16.** Six child PRs landed
+on the tracker `feature/brain-ui`: #964 (`8d074e44`), #971 (`59903959`), #979
+(`21a37c21`), #982 (`35b6f7b4`), #983 (`bb480809`, the corrections of #982's
+approving review) and #985 (`c1e4e7ca`, the tracker review's blocker fix). No
+child PR ever targeted `main`. Tracker PR #970 merged into `main` as
+`c442533a` on 2026-09-16 and #881 is CLOSED.
 
 ## Ticket reconciliation
 
@@ -58,7 +65,7 @@ No other divergence found between the ticket bodies and spec.md/design.md.
 ## PR 1 / A1 — the server serves the read model
 
 ```brain-slice-scope/1
-{"slice": 1, "claims": ["R881-1", "R881-5"], "files": ["brain/scripts/ui/server.mjs", "brain/scripts/ui/forge-cache.mjs", "brain/scripts/ui/diff.mjs", "brain/scripts/ui/static/index.html", "package.json"], "terminal_pr": "this PR -> main"}
+{"slice": 1, "claims": ["R881-1", "R881-5"], "files": ["brain/scripts/ui/server.mjs", "brain/scripts/ui/forge-cache.mjs", "brain/scripts/ui/diff.mjs", "brain/scripts/ui/static/index.html", "package.json"], "terminal_pr": "this PR -> tracker (feature/brain-ui)"}
 ```
 
 Estimated: ~300 source, ~260 test, **~560 total**. Closes R881-1 (all
@@ -135,7 +142,7 @@ and no `gh` process, git write, or repo write happens on any request.
 ## PR 2 / A2 — the server notices
 
 ```brain-slice-scope/1
-{"slice": 2, "claims": ["R881-2", "R881-3", "R881-4", "R881-5", "R881-9", "R881-10"], "files": ["brain/scripts/ui/watcher.mjs", "brain/scripts/ui/poller.mjs", "brain/scripts/ui/server.mjs"], "terminal_pr": "this PR -> main"}
+{"slice": 2, "claims": ["R881-2", "R881-3", "R881-4", "R881-5", "R881-9", "R881-10"], "files": ["brain/scripts/ui/watcher.mjs", "brain/scripts/ui/poller.mjs", "brain/scripts/ui/server.mjs"], "terminal_pr": "this PR -> tracker (feature/brain-ui)"}
 ```
 
 Estimated: ~280 source, ~300 test, **~580 total**. Depends on PR 1 merged.
@@ -184,6 +191,14 @@ or heartbeat route" scenario over the now-complete route table.
       round-robin), the body lane (`issueView`, cap 5 steady state plus up
       to 20 brand-new numbers in the tick they appear), pause/resume/once,
       and failure handling so T2a passes.
+      **Archive note (2026-09-16):** T2a's "unchanged issues cost nothing on
+      the next poll … zero `issueView` calls on tick 2" is the superseded
+      reading of R881-4 S1. It foreclosed design Q1/D2's least-recently-
+      refreshed bucket and left bulk-imported bodies permanently unreadable;
+      the tracker review found it, PR #985 fixed it, and `spec.md` R881-4
+      carries the amendment ("at most `B` calls, regardless of N"). The task
+      text is left as written — it is the record of what was asked at the
+      time — with the correction named here.
 - [x] T3a. `brain/scripts/ui/server.test.mjs` (extend): failing SSE tests
       using the Q4 reader pattern (`AbortController`, `res.body.getReader()`,
       `TextDecoder`, ephemeral port) — initial connect gets the current
@@ -245,7 +260,7 @@ and R881-5's 405 boundary holds over the full route table.
 ## PR 3 / B1 — the pure page logic
 
 ```brain-slice-scope/1
-{"slice": 3, "claims": ["R881-6", "R881-7", "R881-8"], "files": ["brain/scripts/ui/lib/layout.mjs", "brain/scripts/ui/lib/colour.mjs", "brain/scripts/ui/lib/spec-cards.mjs", "brain/scripts/ui/lib/tasks-list.mjs", "brain/scripts/ui/lib/blame.mjs", "brain/scripts/ui/lib/resume-view.mjs", "brain/scripts/ui/change-route.mjs"], "terminal_pr": "this PR -> main"}
+{"slice": 3, "claims": ["R881-6", "R881-7", "R881-8"], "files": ["brain/scripts/ui/lib/layout.mjs", "brain/scripts/ui/lib/colour.mjs", "brain/scripts/ui/lib/spec-cards.mjs", "brain/scripts/ui/lib/tasks-list.mjs", "brain/scripts/ui/lib/blame.mjs", "brain/scripts/ui/lib/resume-view.mjs", "brain/scripts/ui/change-route.mjs"], "terminal_pr": "this PR -> tracker (feature/brain-ui)"}
 ```
 
 Estimated: ~420 source, ~380 test, **~800 total**. Depends on PR 2 merged
@@ -363,7 +378,7 @@ own `KNOWN_ROUTES` entry.
 ## PR 4 / B2 — the page
 
 ```brain-slice-scope/1
-{"slice": 4, "claims": ["R881-6", "R881-8", "R881-9", "R881-10"], "files": ["brain/scripts/ui/static/index.html", "brain/scripts/ui/static/app.js", "brain/scripts/ui/static/app.css"], "terminal_pr": "this PR -> main"}
+{"slice": 4, "claims": ["R881-6", "R881-8", "R881-9", "R881-10"], "files": ["brain/scripts/ui/static/index.html", "brain/scripts/ui/static/app.js", "brain/scripts/ui/static/app.css"], "terminal_pr": "this PR -> tracker (feature/brain-ui)"}
 ```
 
 Estimated: ~400 source, ~40 test, **~440 total**. Depends on PR 3 merged
@@ -451,7 +466,9 @@ scope (R881-1 through R881-10).
 Estimated changed lines: 2380 total (PR1 ~560, PR2 ~580, PR3 ~800, PR4 ~440)
 400-line budget risk: High (all four PRs exceed the skill's generic 400-line trigger — 560/580/800/440; this repo's own configured budget is governance tier `lite` = 1000 lines/PR (`governance-tiers.mjs:273-275`, `brain.config.json:15-17`), and all four PRs stay under that repo-specific budget)
 Chained PRs recommended: Yes
-Decision needed before apply: No — `delivery_strategy: ask-on-risk` and `chain_strategy: stacked-to-main` are already cached for this session; the four-PR stacked chain above resolves the ask-on-risk gate, so apply may proceed directly to PR 1 (slice 1)
+Decision needed before apply: No — `delivery_strategy: ask-on-risk` and `chain_strategy: feature-branch-chain` are cached for this session (maintainer ruling 2026-09-14, the header above); the four-PR chain on the tracker `feature/brain-ui` resolves the ask-on-risk gate, so apply may proceed directly to PR 1 (slice 1)
+
+Measured after the fact (archive time, 2026-09-16): six child PRs on the tracker — #964 +2710/-1, #971 +4006/-146, #979 +2029/-56, #982 +2146/-30, #983 +74/-6, #985 +452/-38 — each under this repo's `lite` 1000-line source budget as counted by the gate, and tracker PR #970 (+11142/-2 against `main`, 2784 counted lines) merged under a written `size:exception`. The forecast's per-PR shape held; its absolute line estimates did not.
 
 ## Out of scope
 
