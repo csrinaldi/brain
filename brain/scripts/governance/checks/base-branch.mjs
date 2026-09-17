@@ -80,7 +80,29 @@ export function baseBranchRule({ issueBody, epicBody, targetBranch, defaultBranc
   // `issueBlock` is `null` for such a body — the caller (`run-check.mjs`) now
   // fetches that parent, so this predicate must actually read it too, or the
   // fetch happens for nothing and the slice-on-main case keeps passing anyway.
-  const parent = declaredParent(issueBody).parent;
+  const dp = declaredParent(issueBody);
+
+  // PR E (tracker PR #1004, round-3 cold review): `dp.parent === null` alone
+  // cannot distinguish "nothing was declared" from "something was declared
+  // and could not be read" — a `parent:` key failing `PARENT_KEY_GRAMMAR`
+  // (e.g. `parent: abc`) or two disagreeing prose `Parent:` lines both land
+  // on `null` here, and the line below used to take both straight to a
+  // silent `pass: true`. That is the exact defect this module's own header
+  // comment refuses: "a graph block this module cannot parse … is
+  // uncomputable, never a silent pass" — only a declaration that reads
+  // cleanly and says nothing is the standing pass case, and a divergence is
+  // not that. `dp.divergence` is the one fact that tells the two apart.
+  if (dp.divergence) {
+    return {
+      pass: false,
+      uncomputable: true,
+      reason:
+        `base-branch: the issue's parent declaration is ${dp.divergence.reason} ` +
+        `(${dp.divergence.value}) — cannot resolve the epic, failing closed`,
+    };
+  }
+
+  const parent = dp.parent;
   if (parent === null) return { pass: true };
 
   // D10 step 7 — the parent's own declaration. An unreadable parent body is
