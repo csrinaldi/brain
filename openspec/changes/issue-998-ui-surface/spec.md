@@ -109,7 +109,44 @@ ids this PR owns.
 - **THEN** `buildLaneModel` returns a byte-identical model both times
 
 ### R998-4: the SDD view
-Acceptance: seven stages per change, phase-order violations named, grandfathered changes claim no stage, archived changes appear with their archive path.
+
+`status/snapshot.mjs`'s `readChanges` MUST list `openspec/changes/archive/<issue>` rows alongside the active `openspec/changes/<issue-N-slug>` ones, `archived: true`, same shape, plus a per-row `artefacts` map naming which of the seven stage files actually exist (asked directly, never filtered through the tier-scoped `missing` list — the SDD view always draws all seven, tier or no tier). A missing `archive/` dir is "no archived changes" (`exists()` checked before ever listing it); an archive dir that exists but cannot be listed is this whole section's reason, the same posture `CHANGES_ROOT` itself already has. `lib/sdd-model.mjs`'s `buildSddModel(changesSection, {tier})` MUST turn that section into one row per change with seven stage cells (`proposal, spec, design, tasks, apply, verify, archive`), each `present`, `missing`, `in-progress`, `done`, or `not-applicable` (`STAGE_VOCAB`: a mark plus a word, never a blank cell); a grandfathered change claims none of the seven ("the past is recorded, not edited" — `not-applicable` across all); an archived change's own `archived: true` IS its archive stage's fact, no `archive-report.md` required to prove it moved. The slice plan renders DECLARED SCOPE ONLY (proposal.md ruling: "PR state is not read") — a slice's claimed requirement ids and its terminal PR, nothing about whether that PR is open, merged, or exists. Phase order is evaluated as a local, pure restatement of `vcs/phase-order-check.mjs`'s Rule A intent (a later lifecycle artefact present while an earlier one is absent) rather than an import of that module, which is not browser-safe (D9: `node:child_process`/`node:fs` at module scope, and `sdd-model.mjs` is loaded directly by `app.js`). `app.js`'s `sdd` mode router draws this model — active changes first, archived ones under their own heading with their archive path — with every path rendered through `provenance.mjs`'s `sourceStamp`; `app.css` styles the matrix from the existing token block only.
+
+#### Scenario: the archive reader lists both kinds of change dir
+- **WHEN** `readChanges` runs against a tree carrying both active `openspec/changes/<issue-N-slug>` dirs and one `openspec/changes/archive/<issue>` dir
+- **THEN** the returned rows include the archived one (`archived: true`, `dir` pointing at the archive path, `missing`/`tasks`/`artefacts` computed the same way), and every active row stays byte-identical to before
+
+#### Scenario: a missing archive directory is a fact, not a failure
+- **WHEN** `openspec/changes/archive/` does not exist at all
+- **THEN** `readChanges` still succeeds, with zero archived rows — never an `uncomputable` section
+
+#### Scenario: an unreadable archive directory fails the whole section
+- **WHEN** `openspec/changes/archive/` exists but cannot be listed (a real I/O error, not absence)
+- **THEN** `readChanges` returns `{ok:false, reason}` naming that failure — the same posture a failure to list `openspec/changes` itself already has
+
+#### Scenario: seven stages, five words
+- **WHEN** `buildSddModel` computes a change's stages
+- **THEN** each of `proposal, spec, design, tasks, apply, verify, archive` is exactly one of `present`, `missing`, `in-progress`, `done`, or `not-applicable`, each with a mark and a word from `STAGE_VOCAB`
+
+#### Scenario: a grandfathered change claims no stage
+- **WHEN** `buildSddModel` computes a change whose `grandfathered` flag is `true`
+- **THEN** all seven stages are `not-applicable`, and no phase-order violation is computed for it either — the past is recorded, not edited
+
+#### Scenario: an archived change needs no archive-report.md to prove it moved
+- **WHEN** `buildSddModel` computes a change with `archived: true`
+- **THEN** its `archive` stage is `present`, sourced at the change's own (archive) `dir`, whether or not an `archive-report.md` file exists there
+
+#### Scenario: a later artefact present while an earlier one is missing is named
+- **WHEN** a change has `tasks.md` (and `design.md`) but no `spec.md`
+- **THEN** `phaseOrder.violations` names `tasks` (and `design`) against the missing `spec` stage — and `vcs/phase-order-check.mjs`'s enforced `evaluatePhaseOrder` agrees the same configuration is a Rule A failure
+
+#### Scenario: absence beyond the first stage present is not a violation
+- **WHEN** a change has only `proposal.md`, nothing later
+- **THEN** `phaseOrder.violations` is empty — every later stage is simply absent, not present out of order
+
+#### Scenario: the slice plan never claims to know PR state
+- **WHEN** a change's `tasks.md` carries a `brain-slice-scope/N` block
+- **THEN** the model's `slices` entry carries the slice's claimed requirement ids and its terminal PR only — nothing about whether that PR is open, merged, or exists
 
 ### R998-5: the reviews timeline and the verdict queue
 Acceptance: a round shows its findings with severity and the text it cites; an unreadable thread is a row with its reason; a PR with no verdict says "no round posted".

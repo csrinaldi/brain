@@ -76,18 +76,91 @@ test('#879: changes read tasks, slice scopes and missing artefacts; an absent ta
   const root = makeFixture();
   const c = readChanges({ root, tier: 'lite' });
   assert.equal(c.ok, true);
-  assert.deepEqual(c.value.map((x) => x.id), ['issue-1-a', 'issue-2-no-tasks'], 'archive/ is not a change');
-  const [a, b] = c.value;
+  const active = c.value.filter((x) => !x.archived);
+  assert.deepEqual(active.map((x) => x.id), ['issue-1-a', 'issue-2-no-tasks'], 'archive/ is not a change dir of its own');
+  const [a, b] = active;
   assert.deepEqual(a.tasks, { checked: { ok: true, value: 1 }, open: { ok: true, value: 1 }, next: { ok: true, value: 'next one' } });
   assert.deepEqual(a.sliceScopes, { ok: true, value: [{ slice: 1, claims: ['R1-1'], terminal_pr: 'this PR -> main' }] });
   assert.deepEqual(a.missing, { ok: true, value: [] });
   assert.equal(b.tasks.checked.ok, false);
   assert.match(b.tasks.checked.reason, /issue-2-no-tasks\/tasks\.md could not be read/);
   assert.deepEqual(b.missing.value, [], 'at lite only spec.md is required, and it is there');
-  assert.deepEqual(readChanges({ root, tier: 'standard' }).value[1].missing.value, ['proposal.md', 'design.md', 'tasks.md'], 'the tier decides the required set');
+  assert.deepEqual(readChanges({ root, tier: 'standard' }).value.filter((x) => !x.archived)[1].missing.value, ['proposal.md', 'design.md', 'tasks.md'], 'the tier decides the required set');
   assert.equal(readChanges({ root: '/nowhere', tier: 'lite' }).ok, false);
   const unresolved = readChanges({ root, tier: null });
-  assert.equal(unresolved.value[0].missing.ok, false, 'no tier → the required set cannot be resolved, and that is said');
+  assert.equal(unresolved.value.filter((x) => !x.archived)[0].missing.ok, false, 'no tier → the required set cannot be resolved, and that is said');
+});
+
+// ── R998-4: the archive reader ──────────────────────────────────────────────
+
+test('#998 R998-4: readChanges also lists openspec/changes/archive/<issue> rows, archived: true, same shape', () => {
+  const root = makeFixture();
+  const c = readChanges({ root, tier: 'lite' });
+  assert.equal(c.ok, true);
+  const archived = c.value.filter((x) => x.archived);
+  assert.deepEqual(archived.map((x) => x.id), ['9']);
+  const [nine] = archived;
+  assert.equal(nine.dir, 'openspec/changes/archive/9');
+  assert.equal(nine.issue, 9);
+  assert.equal(nine.slug, null);
+  assert.equal(nine.grandfathered, false);
+  assert.deepEqual(nine.artefacts, { proposal: true, spec: true, design: true, tasks: true, apply: false, verify: false, archive: true });
+  assert.deepEqual(nine.tasks, { checked: { ok: true, value: 2 }, open: { ok: true, value: 0 }, next: { ok: true, value: '—' } });
+  assert.deepEqual(nine.missing.value, [], 'at lite only spec.md is required, and it is there too');
+});
+
+test('#998 R998-4: a missing archive dir is "no archived changes", never an error', () => {
+  const files = { 'openspec/changes': ['issue-1-a'], 'openspec/changes/issue-1-a': ['tasks.md'] };
+  const c = readChanges({
+    root: '/fake',
+    tier: 'lite',
+    _list: (p) => { if (!(p in files)) throw new Error(`ENOENT: ${p}`); return files[p]; },
+    _exists: (p) => p === 'openspec/changes/issue-1-a/tasks.md',
+    _read: (p) => { if (p === 'openspec/changes/issue-1-a/tasks.md') return '- [ ] x'; throw new Error('missing'); },
+  });
+  assert.equal(c.ok, true);
+  assert.deepEqual(c.value.filter((x) => x.archived), []);
+});
+
+test('#998 R998-4: an archive dir that exists but cannot be listed is a reason on the whole section', () => {
+  const c = readChanges({
+    root: '/fake',
+    tier: 'lite',
+    _list: (p) => { if (p === 'openspec/changes') return []; throw new Error('permission denied'); },
+    _exists: () => true,
+    _read: () => { throw new Error('n/a'); },
+  });
+  assert.equal(c.ok, false);
+  assert.match(c.reason, /permission denied/);
+});
+
+// ── review of PR 4, fix 1: a not-issue-numbered archive dir is said, not dropped ────
+
+test('#998 fix1: an archive dir that is not a bare issue number is skipped from rows but named in archiveSkipped, never silently dropped', () => {
+  const files = {
+    'openspec/changes': [],
+    'openspec/changes/archive': ['5', '2026-07-26-issue-334-brain-ship-labels', 'governance'],
+    'openspec/changes/archive/5': ['spec.md'],
+  };
+  const c = readChanges({
+    root: '/fake',
+    tier: 'lite',
+    _list: (p) => { if (!(p in files)) throw new Error(`ENOENT: ${p}`); return files[p]; },
+    _exists: (p) => p === 'openspec/changes/archive' || p === 'openspec/changes/archive/5/spec.md',
+    _read: () => { throw new Error('n/a'); },
+  });
+  assert.equal(c.ok, true);
+  assert.deepEqual(c.value.filter((x) => x.archived).map((x) => x.id), ['5'], 'only the issue-numbered dir becomes a row');
+  assert.deepEqual(c.archiveSkipped, [
+    { name: '2026-07-26-issue-334-brain-ship-labels', reason: 'not an issue-numbered archive dir' },
+    { name: 'governance', reason: 'not an issue-numbered archive dir' },
+  ]);
+});
+
+test('#998 fix1: the fixture archive/ carries only its own .gitkeep as a non-issue-numbered entry — named, not dropped', () => {
+  const c = readChanges({ root: makeFixture(), tier: 'lite' });
+  assert.equal(c.ok, true);
+  assert.deepEqual(c.archiveSkipped, [{ name: '.gitkeep', reason: 'not an issue-numbered archive dir' }]);
 });
 
 // ── R879-5: roadmap ─────────────────────────────────────────────────────────

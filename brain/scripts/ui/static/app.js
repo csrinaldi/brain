@@ -16,6 +16,8 @@ import { initialPageState, applyFrame, parseFrame, streamFailed, controlFailed, 
 import { degradationBands, pollIndicator } from './lib/banners.mjs';
 import { buildLaneModel } from './lib/lane-model.mjs';
 import { buildDrawerModel } from './lib/drawer-model.mjs';
+import { buildSddModel, STAGE_VOCAB } from './lib/sdd-model.mjs';
+import { sourceStamp } from './lib/provenance.mjs';
 import { MODES, PLACEHOLDERS, initialView, switchMode, keyAction } from './lib/view-model.mjs';
 
 const mounts = {
@@ -115,11 +117,17 @@ function switchToMode(mode) {
   render();
 }
 
-/** The router (#998 R998-2): `map` draws the existing canvas + drawer; the rest say which PR brings their content. */
+/** The router (#998 R998-2/R998-4): `map` draws the canvas + drawer, `sdd` draws the seven-stage matrix; the rest say which PR brings their content. */
 function renderContent() {
   if (view === 'map') {
     renderLanes();
     renderDrawer();
+    return;
+  }
+  if (view === 'sdd') {
+    renderSdd();
+    mounts.drawer.hidden = true;
+    clear(mounts.drawer);
     return;
   }
   clear(mounts.canvas);
@@ -315,6 +323,83 @@ function renderPager(holding) {
   pager.appendChild(el('span', null, `page ${holding.page + 1} / ${holding.totalPages}`));
   pager.appendChild(next);
   return pager;
+}
+
+/**
+ * The SDD view (#998 R998-4): one row per change — active first, archived
+ * under their own heading with their archive path — each with its seven
+ * stage cells, its task count, its slice plan (declared scope only, "PR
+ * state is not read" said in band per the ruling), and its named
+ * phase-order violations. `lib/sdd-model.mjs` decided all of it; this
+ * renders one loop over rows this page never re-derives.
+ */
+function renderSdd() {
+  const model = buildSddModel(sectionOf(state, 'changes'));
+  clear(mounts.canvas);
+  if (!model.ok) {
+    mounts.canvas.appendChild(said(`the SDD view could not be computed: ${model.reason}`));
+    return;
+  }
+  const { changes, totals, sliceNote } = model.value;
+  mounts.canvas.appendChild(el('p', 'canvas-summary', `${totals.active} active change(s), ${totals.archived} archived, ${totals.withViolations} with a phase-order violation`));
+  // Review of PR 4, fix 1: a not-issue-numbered archive/ dir is skipped from
+  // the rows above but never silently dropped — said here by name.
+  if (totals.archiveSkipped.count > 0) {
+    mounts.canvas.appendChild(said(`${totals.archiveSkipped.count} archive dir(s) skipped: ${totals.archiveSkipped.names.join(', ')}`));
+  }
+
+  for (const change of changes.filter((c) => !c.archived)) mounts.canvas.appendChild(renderSddRow(change, sliceNote));
+  const archived = changes.filter((c) => c.archived);
+  if (archived.length > 0) {
+    mounts.canvas.appendChild(el('h3', 'sdd-archived-heading', 'Archived'));
+    for (const change of archived) mounts.canvas.appendChild(renderSddRow(change, sliceNote));
+  }
+}
+
+/**
+ * Every value this row draws carries its own source underneath it (A3,
+ * extended to the SDD view by review of PR 4, fix 2): the row header already
+ * stamped `change.dir`; each stage cell, the tasks line, and each slice line
+ * now stamp their own `source` the same way, rather than trusting the
+ * header's stamp to stand in for the whole row.
+ */
+function renderSddRow(change, sliceNote) {
+  const row = el('div', 'sdd-row');
+  const header = el('div', 'sdd-row-header');
+  header.appendChild(el('strong', null, `#${change.issue}${change.slug ? ` ${change.slug}` : ''}`));
+  header.appendChild(el('span', 'source', sourceStamp({ path: change.dir }).label));
+  row.appendChild(header);
+
+  const matrix = el('div', 'sdd-matrix');
+  for (const stage of change.stages) {
+    const cell = el('span', `sdd-stage sdd-stage-${stage.state}`, `${STAGE_VOCAB[stage.state].mark} ${stage.id} `);
+    cell.appendChild(el('span', 'source', sourceStamp(stage.source).label));
+    matrix.appendChild(cell);
+  }
+  row.appendChild(matrix);
+
+  const t = change.tasks;
+  const tasksLine = el('p', 'sdd-tasks', `tasks: ${t.checked} checked, ${t.open} open${t.next ? ` — next: ${t.next}` : ''} `);
+  tasksLine.appendChild(el('span', 'source', sourceStamp(t.source).label));
+  row.appendChild(tasksLine);
+
+  if (change.slices.length > 0) {
+    const wrap = document.createElement('div');
+    wrap.appendChild(said(`slice plan (declared scope only — ${sliceNote}):`));
+    const list = el('ul', 'said-list');
+    for (const s of change.slices) {
+      const li = document.createElement('li');
+      li.appendChild(document.createTextNode(`slice ${s.n}: claims ${s.claims.join(', ')} → ${s.terminalPr} `));
+      li.appendChild(el('span', 'source', sourceStamp(s.source).label));
+      list.appendChild(li);
+    }
+    wrap.appendChild(list);
+    row.appendChild(wrap);
+  }
+  if (change.phaseOrder.violations.length > 0) {
+    row.appendChild(saidList(`${change.phaseOrder.violations.length} phase-order violation(s):`, change.phaseOrder.violations.map((v) => `${v.stage}: ${v.reason}`)));
+  }
+  return row;
 }
 
 /** Activating a node selects it and opens the drawer on its Spec tab (R881-8). */

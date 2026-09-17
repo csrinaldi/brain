@@ -46,10 +46,10 @@ test('#998 R998-2: the drawer still has four tabs and no fifth view hides among 
   assert.deepEqual(TAB_IDS, ['spec', 'tasks', 'workingMemory', 'reviews']);
 });
 
-test('#998 R998-2: this PR owns exactly four modes, and names the PR behind every one it has not built yet', () => {
+test('#998 R998-2/R998-4: this PR owns exactly four modes; map and sdd have real content, the rest name the PR that brings them', () => {
   assert.deepEqual(MODE_IDS, ['map', 'sdd', 'reviews', 'governance']);
-  assert.equal(PLACEHOLDERS.map, null, 'map is the one mode with real content this PR');
-  for (const mode of ['sdd', 'reviews', 'governance']) {
+  for (const mode of ['map', 'sdd']) assert.equal(PLACEHOLDERS[mode], null, `mode "${mode}" has real content, not a placeholder`);
+  for (const mode of ['reviews', 'governance']) {
     assert.match(PLACEHOLDERS[mode], /\bPR \d\b/, `mode "${mode}" must name the PR that brings it, not render blank`);
   }
 });

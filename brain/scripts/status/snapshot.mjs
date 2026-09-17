@@ -32,7 +32,7 @@ import { buildGraph } from './epic-graph.mjs';
 import { gatherReleaseFacts, releaseDebt } from './release-debt.mjs';
 import { readAdrIndex, homeAdrList, adrDrift } from './adr-index.mjs';
 import { readAntiPatterns } from './anti-patterns.mjs';
-import { CHANGES_ROOT, changeDir, parseChangeId, isGrandfathered, missingRequiredArtifacts, parseSliceScopes } from '../lib/sdd-layout.mjs';
+import { CHANGES_ROOT, changeDir, archivePath, ARTEFACT_FILE, parseChangeId, isGrandfathered, missingRequiredArtifacts, parseSliceScopes } from '../lib/sdd-layout.mjs';
 import { requiredArtifactsFor, resolveTier } from '../vcs/governance-tiers.mjs';
 import { parseVerdict } from '../review/lib/parse-verdict.mjs';
 import { readRecords, recordFilename } from '../memory/lib/store.mjs';
@@ -139,7 +139,73 @@ export function reviewRows(prNumber, reviews) {
 
 // ── readers: the edges, each degrading on its own ───────────────────────────
 
-/** Every non-archived change dir, read through the layout accessor (R879-8). */
+const APPLY_PROGRESS_FILE = 'apply-progress.md';
+const ARCHIVE_REPORT_FILE = 'archive-report.md';
+/** Canonical archive dir naming (archive-sweep.mjs, `archivePath(iid)`): the bare issue number, no `issue-` prefix and no slug — unlike the pre-convention dated-slug dirs this repo still carries, which are not eligible rows here (R998-4). */
+const ARCHIVE_ID_RE = /^\d+$/;
+
+/**
+ * `hasSpec`'s own nested-convention tolerance (sdd-layout.mjs), restated
+ * against a raw dir path rather than a changeId — `hasSpec(changeId, ...)`
+ * builds its path through `changeDir(changeId)`, which the `archive/<issue>`
+ * location does not go through (R998-4).
+ */
+function specPresentAt(dir, { exists, list }) {
+  if (exists(`${dir}/spec.md`)) return true;
+  const specsDir = `${dir}/specs`;
+  if (!exists(specsDir)) return false;
+  try { return list(specsDir).some((name) => exists(`${specsDir}/${name}/spec.md`)); } catch { return false; }
+}
+
+/**
+ * The seven SDD stage artefacts' raw presence for one change dir (R998-4),
+ * independent of which subset the gate REQUIRES at this tier: the SDD view
+ * always draws all seven (spec.md's acceptance: "seven stages per change"),
+ * so presence is asked directly rather than filtered through
+ * `missingRequiredArtifacts`'s tier-scoped list.
+ */
+function readArtefactPresence(dir, { exists, list }) {
+  return {
+    proposal: exists(`${dir}/proposal.md`),
+    spec: specPresentAt(dir, { exists, list }),
+    design: exists(`${dir}/design.md`),
+    tasks: exists(`${dir}/tasks.md`),
+    apply: exists(`${dir}/${APPLY_PROGRESS_FILE}`),
+    verify: exists(`${dir}/${ARTEFACT_FILE.verification}`),
+    archive: exists(`${dir}/${ARCHIVE_REPORT_FILE}`),
+  };
+}
+
+/** One change dir's row, active or archived (R998-4) — same shape either way. `missingId` is the identifier `missingRequiredArtifacts`/`isGrandfathered` resolve a path from; for an archived row it is a synthetic `archive/<name>`, which `changeDir()` templates into the exact `openspec/changes/archive/<name>` location (no second path-building rule needed). */
+function readOneChange({ id, missingId, dir, issue, slug, archived, artefacts, read, list, exists }) {
+  let tasksText = null;
+  try { tasksText = read(`${dir}/tasks.md`); } catch { tasksText = null; }
+  const tasks = deriveTasks({ tasksText, reason: `${dir}/tasks.md could not be read` });
+  const scopes = parseSliceScopes(tasksText ?? '');
+  return {
+    id, issue, slug, dir, archived,
+    grandfathered: archived ? false : isGrandfathered(id),
+    missing: Array.isArray(artefacts)
+      ? field(missingRequiredArtifacts(missingId, { artefacts, exists, listDir: list }))
+      : uncomputable(`the required artefact set could not be resolved: ${artefacts.reason}`),
+    artefacts: readArtefactPresence(dir, { exists, list }),
+    tasks: Object.fromEntries(tasks.fields),
+    sliceScopes: scopes.refusal ? uncomputable(scopes.refusal) : field(scopes.scopes),
+  };
+}
+
+/**
+ * Every change dir, active AND archived, read through the layout accessor
+ * (R879-8, extended R998-4): `openspec/changes/<issue-N-slug>` rows plus
+ * `openspec/changes/archive/<issue>` rows (`archived: true`), same shape.
+ * A missing `archive/` dir is "no archived changes" (a fact, checked via
+ * `exists` before ever listing it); any OTHER failure to list an existing
+ * `archive/` dir is this whole section's reason, same as a failure to list
+ * `CHANGES_ROOT` itself. A dir under `archive/` that is not a bare issue
+ * number (a pre-convention dated-slug dir, a named one) is never silently
+ * dropped: it is excluded from `value`'s rows AND named on the returned
+ * section's own `archiveSkipped` array (review of PR 4, fix 1).
+ */
 export function readChanges({ root, tier, _read, _list, _exists } = {}) {
   const read = _read ?? ((p) => readFileSync(join(root, p), 'utf8'));
   const list = _list ?? ((p) => readdirSync(join(root, p)));
@@ -153,24 +219,33 @@ export function readChanges({ root, tier, _read, _list, _exists } = {}) {
   let artefacts = null;
   try { artefacts = requiredArtifactsFor(tier); } catch (err) { artefacts = { reason: err.message }; }
 
-  const value = names.map((id) => {
+  const activeRows = names.map((id) => {
     const { iid, slug } = parseChangeId(id);
-    const dir = changeDir(id);
-    let tasksText = null;
-    try { tasksText = read(`${dir}/tasks.md`); } catch { tasksText = null; }
-    const tasks = deriveTasks({ tasksText, reason: `${dir}/tasks.md could not be read` });
-    const scopes = parseSliceScopes(tasksText ?? '');
-    return {
-      id, issue: Number(iid), slug, dir,
-      grandfathered: isGrandfathered(id),
-      missing: Array.isArray(artefacts)
-        ? field(missingRequiredArtifacts(id, { artefacts, exists, listDir: list }))
-        : uncomputable(`the required artefact set could not be resolved: ${artefacts.reason}`),
-      tasks: Object.fromEntries(tasks.fields),
-      sliceScopes: scopes.refusal ? uncomputable(scopes.refusal) : field(scopes.scopes),
-    };
+    return readOneChange({ id, missingId: id, dir: changeDir(id), issue: Number(iid), slug, archived: false, artefacts, read, list, exists });
   });
-  return field(value);
+
+  const archiveDirRel = `${CHANGES_ROOT}/archive`;
+  let archivedRows = [];
+  const archiveSkipped = [];
+  if (exists(archiveDirRel)) {
+    let allNames;
+    try {
+      allNames = list(archiveDirRel).sort();
+    } catch (err) {
+      return uncomputable(`${archiveDirRel} could not be listed: ${err?.message ?? err}`);
+    }
+    const archiveNames = [];
+    for (const n of allNames) {
+      if (ARCHIVE_ID_RE.test(n)) archiveNames.push(n);
+      else archiveSkipped.push({ name: n, reason: 'not an issue-numbered archive dir' });
+    }
+    archiveNames.sort((a, b) => Number(a) - Number(b));
+    archivedRows = archiveNames.map((name) =>
+      readOneChange({ id: name, missingId: `archive/${name}`, dir: archivePath(name), issue: Number(name), slug: null, archived: true, artefacts, read, list, exists })
+    );
+  }
+
+  return { ...field([...activeRows, ...archivedRows]), archiveSkipped };
 }
 
 /** Records, projected (D3), with the duplicate accounting the store reports. */
