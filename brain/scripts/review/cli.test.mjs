@@ -1226,6 +1226,23 @@ test('parseArgs: every REVIEW_MODES entry is accepted', () => {
   }
 });
 
+test('parseArgs: --engine and --model are accepted and parsed', () => {
+  const args = parseArgs(['665', '--engine', 'gemini', '--model', 'gemini-2.5-pro']);
+  assert.equal(args.error, null);
+  assert.equal(args.engine, 'gemini');
+  assert.equal(args.model, 'gemini-2.5-pro');
+});
+
+test('parseArgs: --engine or --model with no value refuses', () => {
+  assert.match(parseArgs(['665', '--engine']).error, /"--engine" was given with no value/);
+  assert.match(parseArgs(['665', '--model']).error, /"--model" was given with no value/);
+});
+
+test('parseArgs: --engine=x and --model=y are refused with guidance', () => {
+  assert.match(parseArgs(['665', '--engine=gemini']).error, /write "--engine gemini"/);
+  assert.match(parseArgs(['665', '--model=gemini-2.5-pro']).error, /write "--model gemini-2.5-pro"/);
+});
+
 test('main: an unusable --mode refuses before any git or network call (G3)', async () => {
   const errors = [];
   const vcs = spyVcs();
@@ -1506,3 +1523,33 @@ test('#631: every gather*Inputs call in the bound region receives the reviewer-b
       'list this test exists to replace.',
   );
 });
+
+test('main: --engine and --model override config.sdd.map["cold-review"] in memory', async () => {
+  let capturedConfig = null;
+  const vcs = spyVcs();
+  const deps = readyDeps({ vcs });
+  delete deps.inferentialDeps;
+  deps.config = {
+    project: { slug: 'org/repo' },
+    sdd: { map: { 'cold-review': { engine: 'claude', model: 'sonnet' } } },
+  };
+  deps.runColdReviewStage = async ({ config }) => {
+    capturedConfig = config;
+    return { routed: true, ok: true };
+  };
+
+  const code = await main({
+    argv: ['42', '--engine', 'gemini', '--model', 'gemini-2.5-pro', '--dry-run'],
+    log: () => {},
+    error: () => {},
+    ...deps,
+  });
+
+  assert.equal(code, 0);
+  assert.deepEqual(capturedConfig?.sdd?.map?.['cold-review'], {
+    engine: 'gemini',
+    model: 'gemini-2.5-pro',
+  });
+  assert.equal(deps.config.sdd.map['cold-review'].engine, 'claude');
+});
+
