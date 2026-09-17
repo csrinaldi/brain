@@ -180,6 +180,17 @@ body {
 .holding-list li { padding: 2px 0; }
 .pager { display: flex; align-items: center; gap: 8px; padding: 6px 10px; }
 
+/* ── the SDD view (#998 R998-4): one row per change, seven stage cells ──── */
+
+.sdd-row { margin-bottom: 14px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; }
+.sdd-row-header { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.sdd-archived-heading { margin: 18px 0 8px; color: var(--muted); }
+.sdd-matrix { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; }
+.sdd-stage { font-size: 11px; padding: 2px 6px; border: 1px solid var(--line); border-radius: 4px; color: var(--muted); }
+.sdd-stage-present, .sdd-stage-done { color: var(--ink); border-color: var(--ink); }
+.sdd-stage-in-progress { color: var(--warn); border-color: var(--warn); }
+.sdd-tasks { margin: 0; color: var(--muted); font-size: 12px; }
+
 /* ── the inspector drawer: four tabs, every value with its source ───────── */
 
 .drawer {
