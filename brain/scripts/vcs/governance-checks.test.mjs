@@ -136,7 +136,9 @@ test('resolveJobSets(tier).required ∪ .detection reproduces GOVERNANCE_JOBS at
 // GATE_MATRIX), so checkContexts(tier) carries both at 'lite' too.
 
 test('lane governance (#905): GOVERNANCE_JOBS gains lane-paths and lane-scrub, appended at the end', () => {
-  assert.deepEqual(GOVERNANCE_JOBS.slice(-2), ['lane-paths', 'lane-scrub']);
+  // #967 PR C appended 'base-branch' after these two — the tail is now
+  // three long, lane-paths/lane-scrub still adjacent and in order.
+  assert.deepEqual(GOVERNANCE_JOBS.slice(-3), ['lane-paths', 'lane-scrub', 'base-branch']);
 });
 
 test('lane governance (#905): checkContexts("lite") contains both lane-paths and lane-scrub (required at every tier)', () => {
@@ -145,15 +147,15 @@ test('lane governance (#905): checkContexts("lite") contains both lane-paths and
   assert.ok(contexts.includes('lane-scrub'), 'checkContexts("lite") must include lane-scrub');
 });
 
-test('lane governance (#905): ten jobs, matching order, in GOVERNANCE_JOBS/checkContexts("standard")/governance.yml', () => {
+test('lane governance (#905) + base-branch (#967): eleven jobs, matching order, in GOVERNANCE_JOBS/checkContexts("standard")/governance.yml', () => {
   const yamlPath = resolve(REPO_ROOT, '.github/workflows/governance.yml');
   const yamlText = readFileSync(yamlPath, 'utf8');
   const matches = [...yamlText.matchAll(/^    name: (\S+)\s*$/mg)];
   const yamlJobNames = matches.map(m => m[1]);
 
-  assert.equal(GOVERNANCE_JOBS.length, 10, `GOVERNANCE_JOBS must list ten jobs: ${JSON.stringify(GOVERNANCE_JOBS)}`);
+  assert.equal(GOVERNANCE_JOBS.length, 11, `GOVERNANCE_JOBS must list eleven jobs: ${JSON.stringify(GOVERNANCE_JOBS)}`);
   assert.deepEqual(checkContexts('standard'), GOVERNANCE_JOBS, 'every gate is required at "standard"');
-  assert.deepEqual(yamlJobNames, GOVERNANCE_JOBS, 'governance.yml must declare the same ten names in the same order');
+  assert.deepEqual(yamlJobNames, GOVERNANCE_JOBS, 'governance.yml must declare the same eleven names in the same order');
 });
 
 // ── L1 local-checks job (REQ-L1-1) ──────────────────────────────────────────────
@@ -183,8 +185,9 @@ test('local-checks is present in the parsed governance.yml job names', () => {
 test('checkContexts returns bare job names (no workflow-name prefix)', () => {
   // issue #358 Q5 Phase 5: phase-order/actor-check/brain-writes-reviewed
   // promoted out of PENDING_PROMOTION; #905 appends lane-paths/lane-scrub,
-  // required at every tier — checkContexts('standard') (the default tier)
-  // now includes all ten GOVERNANCE_JOBS.
+  // #967 PR C appends base-branch — all required at every tier —
+  // checkContexts('standard') (the default tier) now includes all eleven
+  // GOVERNANCE_JOBS.
   assert.deepEqual(checkContexts(), [
     'issue-link',
     'diff-size',
@@ -196,6 +199,7 @@ test('checkContexts returns bare job names (no workflow-name prefix)', () => {
     'brain-writes-reviewed',
     'lane-paths',
     'lane-scrub',
+    'base-branch',
   ]);
 });
 

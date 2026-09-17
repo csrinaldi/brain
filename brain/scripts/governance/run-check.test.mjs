@@ -1848,6 +1848,24 @@ test('#603: uncomputable is never softened — absent evidence is not a passing 
   assert.equal(code, 2, 'uncomputable stays 2 at a detection tier — the helper refuses to soften it');
 });
 
+// ── #967 PR C ruling 1: base-branch is REQUIRED at every tier, lite included ─
+// A deliberate exception to "lite only detects" (design.md D9): detection
+// would only have warned about the exact failure this gate exists to prevent
+// (the #953 incident). Proven through the full registration surface — the
+// dispatch, GATE_MATRIX and mapDetectionToWarning all agree.
+
+test('#967 ruling 1: base-branch failing at LITE still exits 1 — mapDetectionToWarning does not soften it', async () => {
+  let code;
+  await captureLog(async () => {
+    code = await main('base-branch', {
+      ctx: { body: 'Closes #337', sourceBranch: 'slice/x', targetBranch: 'main', defaultBranch: 'main' },
+      fetchIssue: async (n) => (n === 337 ? { body: SLICE_BODY(878) } : { body: EPIC_TRACKED_BODY }),
+      readConfig: () => ({ governance: { tier: 'lite' } }),
+    });
+  });
+  assert.equal(code, 1, 'base-branch is required at every tier, including lite (ruling 1) — nothing softens it');
+});
+
 // ── issue-link — recomputes the lane predicate before exempting (#905, spec.md
 // "issue-link recomputes the predicate before exempting", design.md A4) ─────
 //
