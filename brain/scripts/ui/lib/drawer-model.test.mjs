@@ -192,3 +192,37 @@ test('#881 A3: a value whose source was lost says so instead of rendering a blan
   assert.equal(sourceLabel(null), 'no source was recorded for this value');
   assert.equal(sourceLabel({}), 'no source was recorded for this value');
 });
+
+// ── #998 R998-2: every entry also carries the design's stamp, alongside the
+// unchanged sourceLabel string (R998-1's byte-identical page stays byte
+// identical; the stamp is additive, for the redesigned screens) ──────────
+
+test('#998 R998-2: every entry carries a sourceStamp beside its unchanged source string', () => {
+  const model = buildDrawerModel(view({
+    spec: {
+      ok: true,
+      value: [{
+        id: 'R881-6', title: 'every open issue is a node', line: 121, source: { path: 'openspec/changes/issue-881-ui/spec.md', line: 121 },
+        scenarios: [],
+      }],
+    },
+  }));
+  const [spec] = model.value.tabs;
+  assert.equal(spec.entries[0].source, 'openspec/changes/issue-881-ui/spec.md:121', 'sourceLabel is unchanged');
+  assert.deepEqual(spec.entries[0].sourceStamp, { label: '[repo: openspec/changes/issue-881-ui/spec.md:121]', href: null, kind: 'repo' });
+});
+
+test('#998 R998-2: a review entry\'s stamp carries an href for a forge URL', () => {
+  const model = buildDrawerModel(view({
+    reviews: {
+      ok: true,
+      sourceNote: 'forge comments until #880 lands',
+      unreadable: [],
+      value: [{ pr: 971, rev: 1, verdict: 'APPROVE', author: 'bob', findings: 0, head_sha: 'abc', malformed: [], source: { url: 'https://github.com/o/r/pull/971#c1' } }],
+    },
+  }));
+  const [, , , reviews] = model.value.tabs;
+  assert.equal(reviews.entries[0].sourceStamp.href, 'https://github.com/o/r/pull/971#c1');
+  assert.equal(reviews.entries[0].sourceStamp.kind, 'forge');
+  assert.equal(reviews.entries[0].sourceStamp.label, '[forge: #971]');
+});

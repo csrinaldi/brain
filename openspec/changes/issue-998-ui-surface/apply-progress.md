@@ -27,3 +27,33 @@ Full suite under `GIT_CONFIG_GLOBAL=/dev/null`: see the PR body for the count (t
 - cold-1 (blocker): the spec said `sourceLabel` renders the stamps; the code keeps the plain form there and renders the stamps in `sourceStamp`. The spec was the defect: R998-1 amended to name both.
 - cold-2 (blocker): `stateOf` returned `code: 'undeclared'`; ruling 5 keeps `unclassified` as the code value and `Undeclared` as the label. Fixed with a test that pins code and label apart; the token names follow the code (`--state-unclassified-*`).
 - cold-3 (correction): the drawer and other surfaces hard-coded `#fff`; every surface now reads `var(--surface)`, pinned by a test that finds no literal white outside the token block.
+
+## PR 2 — view model, nav, router, keyboard (2026-09-17)
+
+Branch `feat/issue-998-pr2-views` off `df780d60` (PR 1, approved as #1001, pending merge into the tracker `feature/issue-998-ui-surface`):
+
+| sha | unit | RED → GREEN | mutation |
+|---|---|---|---|
+| b22be65e | docs: tasks.md T1-T6 + R998-2's detailed scenarios in spec.md | — | — |
+| d5c40ddf | `lib/view-model.mjs`: `MODES` (map, sdd, reviews, governance), `PLACEHOLDERS` naming PR 4/5/7, `initialView`/`switchMode`/`nextMode`, `keyAction(view, key, {nodes, selected})` — Tab cycles+wraps, Escape closes only with a selection, j/k traverse in reading order and wrap at both ends | ERR_MODULE_NOT_FOUND → 10/10 | `nextMode`'s `% length` dropped → the Tab-cycle test red (9/10) |
+| ebbb5122 | the `<nav id="modes">` mount (`index.html`) + `render()`'s mode router (`app.js`): `map` draws the existing canvas+drawer, the other three draw the placeholder `said()` sentence; `no-management-views.test.mjs` replaced by `views-owned.test.mjs` (its name and blanket `\bnav\b` prohibition no longer describe a page that now has one) | 2/7 (`#modes` missing, only 4 mount ids) → 18/18 across views-owned/app-source-guard/tokens | the 5-mount-id pin reverted to 4 → red (6/7) |
+| 9be6c2e8 | one `document` `keydown` listener wired through `keyAction`, skipping Cmd/Ctrl/Alt and any keystroke inside an input/textarea/contentEditable | N/A — no DOM harness (D9); the decision logic (`keyAction`) is already covered 10/10 by `view-model.test.mjs`; 24/24 across views-owned/app-source-guard/view-model stayed green | N/A, same reason |
+| b1c53541 | stamps in the door: `drawer-model.mjs`'s `entry()` adds `sourceStamp` alongside the unchanged `source` string (additive — R998-1's byte-identical page stays byte-identical); `app.js`'s `renderEntry` shows the stamp's label and an `<a rel="noopener noreferrer" target="_blank">` chip when it carries an href | 2/14 (`sourceStamp` missing) → 42/42 across drawer-model/views-owned/app-source-guard/tokens/view-model | `entry()` stamps `sourceStamp(null)` instead of `sourceStamp(source)` → 2/14 red |
+
+Full suite under `GIT_CONFIG_GLOBAL=/dev/null`: 5612/0 (PR 1 left it at 5611/0; net +11 view-model, +2 drawer-model, +7 views-owned, −5 no-management-views removed, plus each file's own subtests). `npm run brain:repo:check` green before every commit. Counted diff `df780d60...HEAD` (tests and `openspec/changes/**` excluded): 231/400.
+
+### Deviations from the design/tasks sketch, said
+- `design.md`'s "Component → module map" row for the nav/router (`{view, snapshot, selectedIssue} -> {views:[{id,label,badge,ok,reason}], active}`) is a stale sketch predating the detailed R998-2 acceptance this batch implements against; no badge/ok/reason shape exists anywhere in this PR. The shipped shape is simpler: a view IS the current mode id, and `keyAction` is the only thing that turns a keystroke into an action.
+- The slice-scope file list grew from the design's four files (`view-model.mjs`, `app.js`, `index.html`, `views-owned.test.mjs`) to also touch `drawer-model.mjs`, `provenance.mjs` (import only, unchanged) and `app.css`: rendering `sourceStamp` per entry needed the raw source carried alongside the existing plain label, and the nav + chip needed a few style rules. Both are additive, non-breaking changes to files `design.md` did not list for this PR but did already assign to PR 1 (`provenance.mjs`) or a later PR's extension (`drawer-model.mjs`); no existing consumer's shape changed.
+- `nav mount + router` and `the owned-views guard` were shipped as one commit, not two: splitting them would have left an intermediate commit with `no-management-views.test.mjs`'s mount-id pin failing on the page's own new markup — not a commit that "still makes sense" on its own (work-unit-commits checklist).
+- The `keyboard` work unit has no RED/GREEN/mutation of its own: this repo has no DOM test harness (D9) and the pure decision logic it wires (`keyAction`) is already fully covered by `view-model.test.mjs`. Stated as `N/A` rather than fabricated.
+
+### Carried
+- `sdd`, `reviews`, `governance` render only the placeholder sentence this PR ships (naming PR 4, 5, 7); their real content is out of scope here.
+- The governance mode's content (the management views of #882) stays out of scope per `tasks.md`; only the tab and its placeholder exist.
+- `drawer-model.mjs`'s `TAB_IDS` growing a fifth tab (`sdd`) and `reviewEntries` gaining `findings[]`/`severity` are PR 5/6's work per the design's module map; untouched here.
+
+### Fresh review of PR 2 before push: REVISE → fixed
+- Major: the active mode button hard-coded `#eef1f8`, illegible in dark. A `--surface-active` token (light and dark) replaces it, and the token test now forbids ANY colour literal outside the token block, not only white.
+- Warning: `.memory/index.jsonl` gained two lines: this PR's record and `rec-deaea7613…` (issue #955), a record file already on the tracker that its index had never listed; `memory:save` re-indexed it. Kept: an index that lists every record on disk is the correct state; noted here rather than reverted.
+- Minor: T6 was done but unticked; ticked.

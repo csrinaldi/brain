@@ -5,7 +5,7 @@
 // `lib/*.mjs` module with its own `node:test`, because this file has no test
 // runner (no DOM harness exists in this repo, design D9). What CAN be
 // asserted about it is asserted by scan: `app-source-guard.test.mjs`,
-// `degradation-banner.test.mjs`, `no-management-views.test.mjs`.
+// `degradation-banner.test.mjs`, `views-owned.test.mjs`.
 //
 // Loaded as a plain ES module (`<script type="module" src="/app.js">`): the
 // imports below are resolved by the browser against `server.mjs`'s
@@ -16,16 +16,20 @@ import { initialPageState, applyFrame, parseFrame, streamFailed, controlFailed, 
 import { degradationBands, pollIndicator } from './lib/banners.mjs';
 import { buildCanvasModel } from './lib/canvas-model.mjs';
 import { buildDrawerModel } from './lib/drawer-model.mjs';
+import { MODES, PLACEHOLDERS, initialView, switchMode, keyAction } from './lib/view-model.mjs';
 
 const mounts = {
   status: document.getElementById('status'),
+  modes: document.getElementById('modes'),
   banners: document.getElementById('banners'),
   canvas: document.getElementById('canvas'),
   drawer: document.getElementById('drawer'),
 };
 
 let state = initialPageState();
-/** The issue whose node is activated; `null` until one is. The drawer follows it. */
+/** The current mode id (#998 R998-2). `map` is the only one with content this PR; the router says so for the rest. */
+let view = initialView();
+/** The issue whose node is activated; `null` until one is. The drawer follows it — `map` mode only. */
 let selectedIssue = null;
 /** The last `GET /api/change/<N>` body for the selected issue; `null` while it is still being read. */
 let changeView = null;
@@ -79,9 +83,39 @@ function svgText(x, y, className, text) {
 
 function render() {
   renderStatus();
+  renderModes();
   renderBands();
-  renderCanvas();
-  renderDrawer();
+  renderContent();
+}
+
+/** The four mode buttons, drawn straight from `lib/view-model.mjs`'s table — no inline handler, no second copy of the labels. */
+function renderModes() {
+  clear(mounts.modes);
+  for (const mode of MODES) {
+    const button = el('button', null, mode.label);
+    button.type = 'button';
+    if (mode.id === view) button.setAttribute('aria-current', 'page');
+    button.addEventListener('click', () => switchToMode(mode.id));
+    mounts.modes.appendChild(button);
+  }
+}
+
+function switchToMode(mode) {
+  view = switchMode(view, mode);
+  render();
+}
+
+/** The router (#998 R998-2): `map` draws the existing canvas + drawer; the rest say which PR brings their content. */
+function renderContent() {
+  if (view === 'map') {
+    renderCanvas();
+    renderDrawer();
+    return;
+  }
+  clear(mounts.canvas);
+  mounts.canvas.appendChild(said(PLACEHOLDERS[view]));
+  mounts.drawer.hidden = true;
+  clear(mounts.drawer);
 }
 
 /** R881-9: one band per degraded thing, each one BESIDE the data, never instead of it. */
@@ -240,9 +274,27 @@ function renderEntry(item) {
   const done = item.done === undefined ? '' : item.done ? '[x] ' : '[ ] ';
   card.appendChild(el('strong', null, `${done}${item.title}`));
   if (item.detail) card.appendChild(el('p', null, item.detail));
-  card.appendChild(el('span', 'source', item.source)); // A3: the path or the URL, beside the value itself
+  card.appendChild(renderSourceStamp(item.sourceStamp)); // #998 R998-2: the design's stamp, beside the value itself (A3)
   for (const child of item.children ?? []) card.appendChild(renderEntry(child));
   return card;
+}
+
+/**
+ * The stamp's label, plus a chip when it carries an href (#998 R998-2). The
+ * href is the model's own guarantee (only an https forge/link URL ever gets
+ * one) — this function sets it as an attribute, never as markup.
+ */
+function renderSourceStamp(stamp) {
+  const wrap = document.createDocumentFragment();
+  wrap.appendChild(el('span', 'source', stamp.label));
+  if (stamp.href) {
+    const chip = el('a', 'source-chip', 'open ↗');
+    chip.setAttribute('href', stamp.href);
+    chip.setAttribute('rel', 'noopener noreferrer');
+    chip.setAttribute('target', '_blank');
+    wrap.appendChild(chip);
+  }
+  return wrap;
 }
 
 /** The drawer's own IO. A failed read is a reason IN the drawer, never a drawer that stays empty. */
@@ -264,6 +316,35 @@ async function loadChange(issue) {
   changeView = next;
   renderDrawer();
 }
+
+// ── keyboard (#998 R998-2) ───────────────────────────────────────────────
+
+/** The nodes `j`/`k` may traverse: only `map` mode ever has any on screen. */
+function drawnNodes() {
+  if (view !== 'map') return [];
+  const model = buildCanvasModel(sectionOf(state, 'graph'));
+  return model.ok ? model.value.nodes : [];
+}
+
+/**
+ * One listener for the whole page, routed entirely through
+ * `keyAction` — this function decides nothing, it only executes what that
+ * pure function returned. A Cmd/Ctrl/Alt combination or a keystroke while
+ * an input is focused is never this page's to take.
+ */
+function onKeyDown(event) {
+  if (event.metaKey || event.ctrlKey || event.altKey) return;
+  const target = event.target;
+  if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
+  const action = keyAction(view, event.key, { nodes: drawnNodes(), selected: selectedIssue });
+  if (action.type === 'none') return;
+  event.preventDefault();
+  if (action.type === 'mode') switchToMode(action.mode);
+  else if (action.type === 'select') selectNode(action.issue);
+  else if (action.type === 'close') closeDrawer();
+}
+
+document.addEventListener('keydown', onKeyDown);
 
 // ── the API: one REST read, then the stream ────────────────────────────────
 

@@ -23,7 +23,54 @@ One requirement per PR of the chain; R998-1 is detailed because it ships first, 
 - **THEN** every token defined under `prefers-color-scheme: dark` is also defined on bare `:root`, no `http://` or `https://` reference exists, and the font stacks name no downloadable face
 
 ### R998-2: four modes, a router, keyboard
-Acceptance: the four modes switch with `Tab`, `Esc` closes the door, `J/K` traverse nodes; the absence proof (`views-owned.test.mjs`) enumerates the views this PR owns.
+
+`lib/view-model.mjs` MUST define the four modes in a fixed order — `map`
+("Map & tracks"), `sdd` ("SDD & slices"), `reviews` ("Reviews"), `governance`
+("Governance") — and MUST expose `initialView()` (starts on `map`),
+`switchMode(view, mode)` (validates the target, throws on an unmapped
+mode), `nextMode(view)` (the mode `Tab` cycles to, wrapping past
+`governance` back to `map`), and `keyAction(view, key, {nodes, selected})`,
+which turns a keystroke into `{type: 'mode'|'select'|'close'|'none', ...}`
+without touching the DOM. Only `map` renders real content in this PR;
+`sdd`, `reviews` and `governance` render the said sentence naming the PR
+that brings them (4, 5, 7 respectively) instead of an empty area.
+`static/index.html` MUST mount a `<nav id="modes" aria-label="Modes">`
+between the status bar and the degradation bands, and `app.js` MUST render
+its buttons from the view model (no inline handler) with
+`aria-current="page"` on the active one. `app.js` MUST attach one
+`keydown` listener on `document` that routes through `keyAction`, ignoring
+any Cmd/Ctrl/Alt combination and any keystroke while an input is focused.
+The door's entries render `sourceStamp(source).label`, with an
+`<a rel="noopener noreferrer" target="_blank">` chip when the stamp
+carries an `href`; the tab-level source keeps the plain `sourceLabel`.
+`static/views-owned.test.mjs` (replacing `no-management-views.test.mjs`,
+whose name and `nav` prohibition no longer describe a page that has a
+nav) enumerates the four modes, the placeholder sentences, and the mount
+ids this PR owns.
+
+#### Scenario: Tab cycles the four modes and wraps
+- **WHEN** `Tab` fires four times starting from `map`
+- **THEN** the view visits `sdd`, `reviews`, `governance` and returns to `map`
+
+#### Scenario: only map has content, the rest say which PR brings them
+- **WHEN** the router draws `sdd`, `reviews`, or `governance`
+- **THEN** it renders the said sentence naming PR 4, PR 5, or PR 7 respectively, never an empty area
+
+#### Scenario: J/K traverse the drawn nodes in reading order and wrap
+- **WHEN** `j` or `k` fires with 0, 1, or many nodes drawn, with the selection at the first, the last, or none
+- **THEN** it selects the next/previous node in reading order (top-to-bottom, left-to-right), wrapping at either end instead of stopping silently, and does nothing on an empty canvas
+
+#### Scenario: Escape closes only what is open
+- **WHEN** `Escape` fires with a node selected, and again with none selected
+- **THEN** the first closes the door; the second is a no-op
+
+#### Scenario: an unknown mode throws, an unknown key is a no-op
+- **WHEN** `switchMode` or `nextMode` receives a mode this table does not know, and when `keyAction` receives an unmapped key
+- **THEN** the first two throw and the third returns `{type: 'none'}`
+
+#### Scenario: the absence proof enumerates this PR's own views
+- **WHEN** `views-owned.test.mjs` scans `app.js` and `index.html`
+- **THEN** it finds exactly the four modes and their placeholders, the five mount ids (`banners, canvas, drawer, modes, status`), the same four endpoints, and no management-view data identifier — while `nav`, `modes` and `Governance` are allowed as labels this PR does draw
 
 ### R998-3: track lanes and the `?` holding lane
 Acceptance: no node is filtered; the undeclared render in a collapsed lane with a visible total and the declare snippet; epic grouping says "not data yet" until #967.

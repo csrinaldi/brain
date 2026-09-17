@@ -25,6 +25,9 @@
   --warn: #8a4b00;
   --warn-bg: #fff4e0;
   --stamp: #5d5d6b;
+  --surface-active: #eef1f8;
+  --edge: #8d8d99;
+  --node-stroke: #6a6a78;
   /* one fg/bg pair per state of lib/state-vocab.mjs; the class each state
      paints is the state's className, and the rule for it reads the pair */
   --state-planned-fg: #1b1b1f;        --state-planned-bg: #eef1f8;
@@ -50,6 +53,9 @@
     --warn: #fbbf24;
     --warn-bg: #2d1f03;
     --stamp: #64748b;
+    --surface-active: #1e293b;
+    --edge: #475569;
+    --node-stroke: #64748b;
     --state-planned-fg: #64748b;        --state-planned-bg: #1e293b;
     --state-in-flight-fg: #06b6d4;      --state-in-flight-bg: #083344;
     --state-done-fg: #6366f1;           --state-done-bg: #1e1b4b;
@@ -94,6 +100,30 @@ body {
 }
 .status-bar .spacer { flex: 1; }
 
+/* ── the modes nav: the four buttons of lib/view-model.mjs (#998 R998-2) ── */
+
+.modes {
+  display: flex;
+  gap: 8px;
+  padding: 6px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+.modes button {
+  font: inherit;
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--muted);
+  cursor: pointer;
+}
+.modes button[aria-current='page'] {
+  color: var(--ink);
+  font-weight: 600;
+  background: var(--surface-active);
+}
+
 /* ── the degradation bands: never a blank area, always a said reason ───── */
 
 .banners:empty { display: none; }
@@ -110,19 +140,19 @@ body {
 .canvas .said { margin: 0 0 10px; color: var(--warn); }
 .canvas .said-list { margin: 0 0 10px 18px; color: var(--warn); padding: 0; }
 
-.edge { stroke: #8d8d99; stroke-width: 1.4; fill: none; }
+.edge { stroke: var(--edge); stroke-width: 1.4; fill: none; }
 .edge.reversed { stroke-dasharray: 5 4; }
 
 .node { cursor: pointer; }
-.node rect { stroke: #6a6a78; stroke-width: 1.2; rx: 6; }
+.node rect { stroke: var(--node-stroke); stroke-width: 1.2; rx: 6; }
 .node text { font-size: 11px; fill: var(--ink); pointer-events: none; }
 .node .mark { font-size: 10px; fill: var(--warn); }
-.node.selected rect { stroke: #1b1b1f; stroke-width: 2.4; }
+.node.selected rect { stroke: var(--ink); stroke-width: 2.4; }
 
 .node.state-planned rect { fill: var(--state-planned-bg); }
 .node.state-in-flight rect { fill: var(--state-in-flight-bg); }
 .node.state-done rect { fill: var(--state-done-bg); }
-.node.status-ready rect { fill: #e7f5ea; }
+.node.status-ready rect { fill: var(--state-planned-bg); } /* never returned by state-vocab; kept so the class stays defined */
 .node.status-blocked rect { fill: var(--state-blocked-bg); }
 .node.status-awaiting-review rect { fill: var(--state-awaiting-review-bg); }
 .node.status-unclassified rect { fill: var(--state-unclassified-bg); stroke-dasharray: 4 3; }
@@ -147,7 +177,7 @@ body {
 .drawer[hidden] { display: none; }
 .drawer h2 { margin: 0 0 8px; font-size: 16px; }
 .drawer .tabs { display: flex; gap: 6px; margin-bottom: 10px; }
-.drawer .tabs button[aria-selected='true'] { background: #eef1f8; font-weight: 600; }
+.drawer .tabs button[aria-selected='true'] { background: var(--surface-active); font-weight: 600; }
 .drawer .card {
   border: 1px solid var(--line);
   border-radius: 6px;
@@ -156,6 +186,7 @@ body {
 }
 .drawer .card.pending { border-style: dashed; }
 .drawer .source { display: block; margin-top: 4px; font-size: 11px; color: var(--muted); word-break: break-all; }
+.drawer .source-chip { margin-left: 6px; font-size: 11px; color: var(--stamp); }
 .drawer .said { color: var(--warn); }
 .drawer .note { color: var(--muted); font-size: 12px; }
 .drawer .close { float: right; }
