@@ -399,10 +399,11 @@ export default {
   'memory.share.skippedHydrated': '{count} observation(s) were skipped — their topic already named a record (written by hydrate(), #874), so re-exporting them would have minted a duplicate id.',
   'memory.share.secretFound': 'Secret detected in {file}:{line} — pattern "{pattern}" matched. Redact the secret, or add an allowlist entry in governance.memorySecretAllowPatterns if this is a false positive. Run `gunzip -c {file} | jq .` to inspect (the line number is against that pretty-printed view).',
 
-  // ── memory/backends/engram.mjs — share() records dual-write scrub (issue #221, C2b-1) ──
-  'memory.share.secretFoundRecords': 'Secret detected in a candidate record (line {line}) — pattern "{pattern}" matched. Aborted BEFORE the records/ append (add an allowlist entry in governance.memorySecretAllowPatterns if this is a false positive).',
-
-  // ── memory/backends/engram.mjs — dualWriteRecords() upstream-base export scope (issue #701) ──
+  // ── memory/backends/engram.mjs — the records dual-write exporter's upstream-base
+  // export scope (issue #701). Orphaned since #874 split B along with the rest of
+  // `memory.share.*` (D6) — the exporter itself is gone too now (#955 R5, epic
+  // task 2.4), so these keys have no reader left. Left in place: no ruling covers
+  // deleting orphaned catalog keys, only the code that produced them.
   // No `{ref}` slot: this fires on every unavailable lookup, including the one
   // where NO ref resolved and there is therefore no ref to name. `{reason}`
   // names the ref itself wherever one was involved.
@@ -436,7 +437,7 @@ export default {
 
   // ── memory/cli.mjs — migrate-v1 (issue #217, C2a / #219 C2-migrate / #222 C2b-2) ──
   'memory.migrateV1.realRunSummary':        '✓ migration complete — written: {written} | rejected: {rejected} | skipped (personal): {skipped} | unparseable chunks: {unparseable} | empty-observations chunks: {emptyObservations} | index: {indexCount} record(s). records/ is now the sole write path (memory.dualWrite retired, D3/C4).',
-  'memory.migrateV1.rollbackSummary':       '✓ rollback complete — chunk(s) restored: {restored} | index: {indexCount} record(s).',
+  'memory.migrateV1.rollbackRetired':       'migrate-v1 --rollback was retired (#955): it used to restore v1 chunks from .memory/legacy/ and then delete .memory/records/, destroying every record captured since the migration. This refusal reads and writes nothing — the v1 chunks are wherever they already were: still in .memory/legacy/ if that directory exists locally, or in git history otherwise: git show <sha>:.memory/legacy/<file>',
   'memory.migrateV1.dryRunHeader':          'Dry-run migration report (issue #217, C2):',
   'memory.migrateV1.summary':               'records: {records} | skipped (personal): {skipped} | rejected: {rejected} | unparseable chunks: {unparseable} | empty-observations chunks: {emptyObservations}',
   'memory.migrateV1.typesHistogramHeader':  'Types histogram:',

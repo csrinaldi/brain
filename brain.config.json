@@ -43,8 +43,8 @@
   "sdd": {
     "map": {
       "cold-review": {
-        "engine": "claude",
-        "model": "sonnet"
+        "engine": "codex",
+        "model": "gpt-5.5"
       }
     }
   }
