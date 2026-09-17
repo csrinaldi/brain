@@ -116,3 +116,8 @@ test('#881: importSpecifiers never chains a bare import to a later "from" in a c
   const multi = 'import {\n  a,\n  b,\n}\nfrom \'lodash-es\';\nimport { c } from "./lib/c.mjs";\n';
   assert.deepEqual(importSpecifiers(multi).sort(), ['./lib/c.mjs', 'lodash-es']);
 });
+
+test('#998: the page never assigns markup — no innerHTML, outerHTML, insertAdjacentHTML or document.write in app.js', () => {
+  const text = readFileSync(APP_JS, 'utf8');
+  assert.doesNotMatch(text, /\b(innerHTML|outerHTML|insertAdjacentHTML|document\.write)\b/, 'text from the forge and from files is rendered as text, never as markup');
+});

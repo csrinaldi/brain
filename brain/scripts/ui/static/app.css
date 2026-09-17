@@ -11,19 +11,62 @@
  */
 
 :root {
+  /* ── the token block (#998 R998-1). Light is the BASE: every token is
+     defined here; the dark palette below redefines the same names and
+     nothing else, so a token never has its only definition in a media
+     query. The values here are the page's colours before #998, unchanged. */
+  --font-sans: ui-sans-serif, system-ui, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
   --ink: #1b1b1f;
   --muted: #5d5d6b;
   --line: #c9c9d1;
   --paper: #fbfbfd;
+  --surface: #ffffff;
   --warn: #8a4b00;
   --warn-bg: #fff4e0;
+  --stamp: #5d5d6b;
+  /* one fg/bg pair per state of lib/state-vocab.mjs; the class each state
+     paints is the state's className, and the rule for it reads the pair */
+  --state-planned-fg: #1b1b1f;        --state-planned-bg: #eef1f8;
+  --state-in-flight-fg: #1b1b1f;      --state-in-flight-bg: #d8ecff;
+  --state-done-fg: #1b1b1f;           --state-done-bg: #d9f2e0;
+  --state-blocked-fg: #1b1b1f;        --state-blocked-bg: #ffd9d4;
+  --state-awaiting-review-fg: #1b1b1f; --state-awaiting-review-bg: #ffe9b8;
+  --state-unclassified-fg: #1b1b1f;     --state-unclassified-bg: #ececf2;
+  --state-unreadable-fg: #1b1b1f;     --state-unreadable-bg: #f3e3f6;
+  --state-not-computed-fg: #1b1b1f;   --state-not-computed-bg: #ffffff;
+  --state-unknown-fg: #8a4b00;        --state-unknown-bg: #ffffff;
+}
+
+/* The design's dark palette (Claude Design "Brain UI implementation
+   proposal"): followed when the system prefers dark, never persisted. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ink: #f1f5f9;
+    --muted: #94a3b8;
+    --line: rgba(255, 255, 255, 0.08);
+    --paper: #0b0f17;
+    --surface: #141b2d;
+    --warn: #fbbf24;
+    --warn-bg: #2d1f03;
+    --stamp: #64748b;
+    --state-planned-fg: #64748b;        --state-planned-bg: #1e293b;
+    --state-in-flight-fg: #06b6d4;      --state-in-flight-bg: #083344;
+    --state-done-fg: #6366f1;           --state-done-bg: #1e1b4b;
+    --state-blocked-fg: #fb7185;        --state-blocked-bg: #4c0519;
+    --state-awaiting-review-fg: #f59e0b; --state-awaiting-review-bg: #451a03;
+    --state-unclassified-fg: #d97706;     --state-unclassified-bg: #2d1f03;
+    --state-unreadable-fg: #d946ef;     --state-unreadable-bg: #3b0764;
+    --state-not-computed-fg: #475569;   --state-not-computed-bg: #0f172a;
+    --state-unknown-fg: #fbbf24;        --state-unknown-bg: #0f172a;
+  }
 }
 
 * { box-sizing: border-box; }
 
 body {
   margin: 0;
-  font: 14px/1.45 ui-sans-serif, system-ui, sans-serif;
+  font: 14px/1.45 var(--font-sans);
   color: var(--ink);
   background: var(--paper);
 }
@@ -36,7 +79,7 @@ body {
   gap: 12px;
   padding: 8px 14px;
   border-bottom: 1px solid var(--line);
-  background: #fff;
+  background: var(--surface);
 }
 
 .status-bar .poll-indicator { font-variant-numeric: tabular-nums; }
@@ -46,7 +89,7 @@ body {
   padding: 3px 10px;
   border: 1px solid var(--line);
   border-radius: 4px;
-  background: #fff;
+  background: var(--surface);
   cursor: pointer;
 }
 .status-bar .spacer { flex: 1; }
@@ -76,16 +119,16 @@ body {
 .node .mark { font-size: 10px; fill: var(--warn); }
 .node.selected rect { stroke: #1b1b1f; stroke-width: 2.4; }
 
-.node.state-planned rect { fill: #eef1f8; }
-.node.state-in-flight rect { fill: #d8ecff; }
-.node.state-done rect { fill: #d9f2e0; }
+.node.state-planned rect { fill: var(--state-planned-bg); }
+.node.state-in-flight rect { fill: var(--state-in-flight-bg); }
+.node.state-done rect { fill: var(--state-done-bg); }
 .node.status-ready rect { fill: #e7f5ea; }
-.node.status-blocked rect { fill: #ffd9d4; }
-.node.status-awaiting-review rect { fill: #ffe9b8; }
-.node.status-unclassified rect { fill: #ececf2; stroke-dasharray: 4 3; }
-.node.status-unreadable rect { fill: #f3e3f6; stroke-dasharray: 2 2; }
-.node.roadmap-not-computed rect { fill: #fff; stroke-dasharray: 6 3; }
-.node.node-unknown rect { fill: #fff; stroke: var(--warn); stroke-dasharray: 1 3; }
+.node.status-blocked rect { fill: var(--state-blocked-bg); }
+.node.status-awaiting-review rect { fill: var(--state-awaiting-review-bg); }
+.node.status-unclassified rect { fill: var(--state-unclassified-bg); stroke-dasharray: 4 3; }
+.node.status-unreadable rect { fill: var(--state-unreadable-bg); stroke-dasharray: 2 2; }
+.node.roadmap-not-computed rect { fill: var(--state-not-computed-bg); stroke-dasharray: 6 3; }
+.node.node-unknown rect { fill: var(--state-unknown-bg); stroke: var(--state-unknown-fg); stroke-dasharray: 1 3; }
 
 /* ── the inspector drawer: four tabs, every value with its source ───────── */
 
@@ -98,7 +141,7 @@ body {
   overflow: auto;
   padding: 14px 16px;
   border-left: 1px solid var(--line);
-  background: #fff;
+  background: var(--surface);
   box-shadow: -2px 0 8px rgba(0, 0, 0, 0.08);
 }
 .drawer[hidden] { display: none; }
