@@ -384,7 +384,7 @@ test('#682 cold-3: the engine writes into the operator tree and leaves the workt
   );
 });
 
-test('a candidate mutation after the engine starts refuses publication', async (t) => {
+test('a candidate mutation after the engine starts refuses publication and NAMES the path that changed', async (t) => {
   const root = makeRepo(t);
   const candidate = makeWorktree(t);
   writeFileSync(join(candidate, 'candidate.txt'), 'before\n');
@@ -398,10 +398,41 @@ test('a candidate mutation after the engine starts refuses publication', async (
     } },
   });
 
-  assert.deepEqual(result, {
-    routed: true, ok: false,
-    reason: 'the cold-review candidate changed during execution; refusing publication',
+  assert.equal(result.routed, true);
+  assert.equal(result.ok, false);
+  // #1010 — the refusal used to say only "the candidate changed", which is
+  // correct but leaves an operator re-running under a watcher to find out
+  // WHAT. `compareCandidateSnapshots` already carries added/removed/changed
+  // path lists; the reason now names them.
+  assert.equal(
+    result.reason,
+    'the cold-review candidate changed during execution; refusing publication — 1 path(s) changed: ~candidate.txt',
+  );
+});
+
+test('a candidate mutation with many changed paths bounds the refusal to the first 10 and a count (#1010)', async (t) => {
+  const root = makeRepo(t);
+  const candidate = makeWorktree(t);
+
+  const result = await runColdReviewStage({
+    config: ROUTED, prNumber: PR, root, worktreePath: candidate,
+    deps: { forgeProbe: LOGGED_OUT, runStage: async () => {
+      // 12 new files — one more than the 10-path bound — so the refusal must
+      // show exactly 10 and say "(+2 more)" rather than spam an unreadable
+      // wall of paths (the shape a mutated `npm test` run — #1010 — would
+      // otherwise produce, since it can touch hundreds of paths).
+      for (let i = 0; i < 12; i += 1) {
+        writeFileSync(join(candidate, `new-${String(i).padStart(2, '0')}.txt`), 'x\n');
+      }
+      writeFileSync(join(root, artifactPathFor(PR)), `\`\`\`${ARTIFACT_TAG}\n[]\n\`\`\`\n`);
+      return { ok: true };
+    } },
   });
+
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /^the cold-review candidate changed during execution; refusing publication — 12 path\(s\) changed: /);
+  assert.match(result.reason, /\(\+2 more\)$/, 'only the first 10 paths are named, with a count of what was elided');
+  assert.equal((result.reason.match(/\+new-/g) ?? []).length, 10, 'exactly 10 paths are named');
 });
 
 // ── #682 C.5's verdict, judgment:cold-1 ──────────────────────────────────────

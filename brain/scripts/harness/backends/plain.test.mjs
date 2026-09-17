@@ -33,7 +33,8 @@ test('3.1: plain init emits the header + all nine docs/workflow-guide.md §B ste
   assert.match(lines[5], /proposal\.md.*spec\.md.*design\.md.*tasks\.md/);
   assert.match(lines[6], /tasks\.md/i);
   assert.match(lines[7], /brain:repo:check/);
-  assert.match(lines[8], /npm run brain:memory:share/);
+  assert.match(lines[8], /npm run brain:memory:save --issue <id>/);
+  assert.match(lines[8], /memory lane/i);
   assert.match(lines[9], /Closes #/);
 });
 

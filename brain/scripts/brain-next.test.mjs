@@ -1,81 +1,80 @@
-// brain-next.test.mjs — TDD tests for brain:next (REQ-S5-5)
-//
-// brain:next derives state from (git branch, open PRs, .memory/ status, config)
-// and emits the correct next command. Tests each state independently.
+// TDD tests for the issue #890 brain:next state machine.
+// Durable capture is proven by issue provenance in records, never porcelain .memory/.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-// ── Import safety regression ───────────────────────────────────────────────────
-
-test('brain-next: importing is side-effect-free (CLI guard holds)', async () => {
+test('brain-next: importing is side-effect-free', async () => {
   const mod = await import('./brain-next.mjs');
-  assert.equal(typeof mod.deriveNext, 'function', 'deriveNext must be exported');
+  assert.equal(typeof mod.deriveNext, 'function');
 });
 
-// ── deriveNext state tests (injected dependencies) ────────────────────────────
+const base = (overrides = {}) => ({
+  branch: 'feature/42-demo',
+  openPRsFn: async () => [],
+  recordsFn: async () => [],
+  repoCheckFn: async () => ({ ok: true }),
+  config: { memory: { lane: { enabled: true } } },
+  ...overrides,
+});
 
-test('brain-next: state=no-branch → suggests brain:start <issue>', async () => {
+test('brain-next: no branch recommends brain:start', async () => {
   const { deriveNext } = await import('./brain-next.mjs');
-  const result = await deriveNext({
-    branch: 'main',
-    openPRsFn: async () => [],
-    memoryStatusFn: async () => '',
-    repoCheckFn: async () => ({ ok: true }),
-  });
-  assert.ok(result.nextCommand.includes('brain:start'),
-    `expected "brain:start" suggestion, got: "${result.nextCommand}"`);
+  const result = await deriveNext(base({ branch: 'main' }));
   assert.equal(result.state, 'no-branch');
+  assert.match(result.nextCommand, /brain:start/);
 });
 
-test('brain-next: state=open-PR → emits status message with PR info', async () => {
+test('brain-next: failed checks take precedence over capture state', async () => {
   const { deriveNext } = await import('./brain-next.mjs');
-  const result = await deriveNext({
-    branch: 'feature/42-my-feature',
-    openPRsFn: async () => [{ number: 99, title: 'My PR', headBranch: 'feature/42-my-feature' }],
-    memoryStatusFn: async () => '',
-    repoCheckFn: async () => ({ ok: true }),
-  });
-  assert.equal(result.state, 'open-pr');
-  assert.ok(result.nextCommand.includes('PR') || result.nextCommand.includes('99'),
-    `expected PR info in message: "${result.nextCommand}"`);
-});
-
-test('brain-next: state=no-memory → suggests brain:save', async () => {
-  const { deriveNext } = await import('./brain-next.mjs');
-  const result = await deriveNext({
-    branch: 'feature/13-add-i18n',
-    openPRsFn: async () => [],
-    memoryStatusFn: async () => '',  // no .memory/ changes
-    repoCheckFn: async () => ({ ok: true }),
-  });
-  assert.equal(result.state, 'no-memory');
-  assert.ok(result.nextCommand.includes('brain:save'),
-    `expected "brain:save" suggestion, got: "${result.nextCommand}"`);
-});
-
-test('brain-next: state=checks-failing → suggests brain:check', async () => {
-  const { deriveNext } = await import('./brain-next.mjs');
-  const result = await deriveNext({
-    branch: 'feature/7-fix-bug',
-    openPRsFn: async () => [],
-    memoryStatusFn: async () => '.memory/chunks/s.jsonl.gz',  // memory ok
-    repoCheckFn: async () => ({ ok: false }),  // checks fail
-  });
+  const result = await deriveNext(base({ repoCheckFn: async () => ({ ok: false }) }));
   assert.equal(result.state, 'checks-failing');
-  assert.ok(result.nextCommand.includes('brain:check'),
-    `expected "brain:check" suggestion, got: "${result.nextCommand}"`);
+  assert.match(result.nextCommand, /brain:check/);
 });
 
-test('brain-next: state=ready → suggests brain:ship', async () => {
+test('brain-next: missing issue-scoped record recommends canonical capture', async () => {
   const { deriveNext } = await import('./brain-next.mjs');
-  const result = await deriveNext({
-    branch: 'feature/5-implement-feature',
-    openPRsFn: async () => [],
-    memoryStatusFn: async () => '.memory/chunks/s.jsonl.gz',  // memory ok
-    repoCheckFn: async () => ({ ok: true }),  // checks pass
-  });
+  const result = await deriveNext(base({ recordsFn: async () => [{ type: 'decision', issue: 7 }] }));
+  assert.equal(result.state, 'needs-memory');
+  assert.match(result.nextCommand, /brain:memory:save --issue 42/);
+  assert.doesNotMatch(result.nextCommand, /brain:save(?!:)/);
+});
+
+test('brain-next: issue-scoped record plus enabled lane reaches brain:ship', async () => {
+  const { deriveNext } = await import('./brain-next.mjs');
+  const result = await deriveNext(base({ recordsFn: async () => [{ type: 'session_summary', issue: 42 }] }));
   assert.equal(result.state, 'ready');
-  assert.ok(result.nextCommand.includes('brain:ship'),
-    `expected "brain:ship" suggestion, got: "${result.nextCommand}"`);
+  assert.match(result.nextCommand, /brain:ship/);
+  assert.match(result.nextCommand, /lane/i);
+});
+
+test('brain-next: issue-scoped record with disabled lane reaches brain:ship', async () => {
+  const { deriveNext } = await import('./brain-next.mjs');
+  const result = await deriveNext(base({
+    recordsFn: async () => [{ type: 'session_summary', issue: 42 }],
+    config: {},
+  }));
+  assert.equal(result.state, 'ready');
+  assert.match(result.nextCommand, /brain:ship/);
+  assert.match(result.nextCommand, /capture is recorded; the memory lane is not enabled/);
+});
+
+test('brain-next: open PR reports status without reading records', async () => {
+  const { deriveNext } = await import('./brain-next.mjs');
+  let read = false;
+  const result = await deriveNext(base({
+    openPRsFn: async () => [{ number: 99, title: 'Demo', headBranch: 'feature/42-demo' }],
+    recordsFn: async () => { read = true; return []; },
+  }));
+  assert.equal(result.state, 'open-pr');
+  assert.match(result.nextCommand, /PR #99/);
+  assert.equal(read, false);
+});
+
+test('brain-next: never requests porcelain .memory/ input', async () => {
+  const { deriveNext } = await import('./brain-next.mjs');
+  let called = false;
+  const result = await deriveNext(base({ memoryStatusFn: async () => { called = true; return ''; } }));
+  assert.equal(result.state, 'needs-memory');
+  assert.equal(called, false);
 });
