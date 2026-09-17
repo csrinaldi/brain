@@ -53,6 +53,10 @@ Full suite under `GIT_CONFIG_GLOBAL=/dev/null`: 5612/0 (PR 1 left it at 5611/0; 
 - The governance mode's content (the management views of #882) stays out of scope per `tasks.md`; only the tab and its placeholder exist.
 - `drawer-model.mjs`'s `TAB_IDS` growing a fifth tab (`sdd`) and `reviewEntries` gaining `findings[]`/`severity` are PR 5/6's work per the design's module map; untouched here.
 
+### Fresh review of PR 2 before push: REVISE → fixed
+- Major: the active mode button hard-coded `#eef1f8`, illegible in dark. A `--surface-active` token (light and dark) replaces it, and the token test now forbids ANY colour literal outside the token block, not only white.
+- Warning: `.memory/index.jsonl` gained two lines: this PR's record and `rec-deaea7613…` (issue #955), a record file already on the tracker that its index had never listed; `memory:save` re-indexed it. Kept: an index that lists every record on disk is the correct state; noted here rather than reverted.
+- Minor: T6 was done but unticked; ticked.
 ## PR 3 — track lanes and the `?` holding lane (2026-09-17)
 
 Branch `feat/issue-998-pr3-lanes` off 998e7369 (PR 2). Commits: fe590bb0 `lib/lane-model.mjs` + test (RED ERR_MODULE_NOT_FOUND → GREEN 12/12; mutation: dropping the first holding-lane node turns the exactly-once and paging tests red); 834a1cba `renderCanvas` becomes `renderLanes`, lane styles from tokens (no DOM harness: verified by trace against the model's contract, 44/44 across the ui guards); 5774365d tasks ticked and R998-3 scenarios; ab9eee9f + 25b1d6b2 the memory record `rec-a6ba1a6a6fe52dd3`. Full suite 5624/0; counted diff 395 (the map planned 380; the lite budget is 1000).
