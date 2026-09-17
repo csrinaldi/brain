@@ -82,6 +82,6 @@ mismatch between a node and the file it links to as a bug in the node.
 
 The worked example's terminal blocks follow the same rule. The commands are real and the
 output follows the format the scripts emit (`brain:check`'s `[PASS] <check>` lines,
-`brain:save`'s commit message, `renderVerdict`'s fenced YAML, `day:start`'s section
+`brain:memory:save`'s durable record, `renderVerdict`'s fenced YAML, `day:start`'s section
 headings from the i18n catalog). The scenario around them — the repo, the issue, the
 findings — is invented, and the shas are not real shas.

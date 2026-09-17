@@ -53,6 +53,31 @@ import { artifactPathFor, readFindingsArtifact } from './findings-artifact.mjs';
 import { compareCandidateSnapshots, snapshotCandidate } from './candidate-snapshot.mjs';
 
 /**
+ * describeCandidateChange(changes) — names WHAT changed for the "candidate
+ * changed during execution" refusal (#1010). Before this, the refusal said
+ * only that the candidate changed, leaving an operator to re-run under a
+ * watcher (the exact measurement #1010's issue comments performed by hand)
+ * to find out what. `changes` is `compareCandidateSnapshots(...).changes` —
+ * `{added, removed, changed}` path arrays. Bounded to the first 10 (sorted,
+ * `+`/`-`/`~` prefixed) plus a count of the rest: a mutated `npm test` run
+ * can touch hundreds of paths, and an unbounded list is as unreadable as no
+ * list at all.
+ *
+ * @param {{added: string[], removed: string[], changed: string[]}} changes
+ * @returns {string}
+ */
+function describeCandidateChange(changes) {
+  const all = [
+    ...changes.added.map((path) => `+${path}`),
+    ...changes.removed.map((path) => `-${path}`),
+    ...changes.changed.map((path) => `~${path}`),
+  ].sort();
+  const shown = all.slice(0, 10);
+  const suffix = all.length > shown.length ? ` (+${all.length - shown.length} more)` : '';
+  return `${all.length} path(s) changed: ${shown.join(', ')}${suffix}`;
+}
+
+/**
  * runColdReviewStage() — runs the cold review for one PR.
  *
  * @param {{config: object, prNumber: number|string, baseRef?: string|null,
@@ -377,8 +402,13 @@ export async function runColdReviewStage({
     } catch (err) {
       return { routed: true, ok: false, reason: `the cold-review candidate cannot be re-snapshotted — ${err?.message ?? String(err)}` };
     }
-    if (!compareCandidateSnapshots(candidateBefore, candidateAfter).equal) {
-      return { routed: true, ok: false, reason: 'the cold-review candidate changed during execution; refusing publication' };
+    const candidateComparison = compareCandidateSnapshots(candidateBefore, candidateAfter);
+    if (!candidateComparison.equal) {
+      return {
+        routed: true,
+        ok: false,
+        reason: `the cold-review candidate changed during execution; refusing publication — ${describeCandidateChange(candidateComparison.changes)}`,
+      };
     }
 
     if (output) {

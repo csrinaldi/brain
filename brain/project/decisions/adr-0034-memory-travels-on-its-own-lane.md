@@ -1,6 +1,6 @@
 # ADR-0034 — Memory travels on its own lane: records reach `main` on their own pull request, never the feature's
 
-**Status**: Accepted · **amended 15/09/2026** (Amendments 1-2 — see below)
+**Status**: Accepted · **amended 17/09/2026** (Amendments 1-3 — see below)
 **Date**: 2026-09-09 — Cristian Rinaldi
 
 ## Context
@@ -151,13 +151,13 @@ hosts widens the credential surface ADR-0033 narrowed. It is scoped to the
 ship process and asserted via `withoutCredentials` everywhere else — the same
 discipline, not a new one.
 
-### L6 / L7 — `memory-gate` is unchanged; the feature-PR surfaces retire, sequenced
+### L6 / L7 — `memory-gate` is unchanged; the feature-PR surfaces retired (issue #890 — see Amendment 3)
 
 `memory-gate` reads the PR **tree**, not the diff — a feature PR rebased on a
 `main` that already carries the lane's record for its issue passes the scoped
 gate **unchanged**. Only the PR template's wording changes (3.1d): from
 *"captured with `memory:share` (renamed `brain:memory:share`; see Amendment 1)"* to *"captured as a record (`memory:save
---issue N`) (renamed `brain:memory:save`; see Amendment 1); it reaches `main` on the lane"*.
+--issue N`) (renamed `brain:memory:save`; see Amendment 1); it reaches `main` on the lane"*. **[Amended by Amendment 3 (#890) — this wording change shipped with the retirement below; the PR template now reads the "captured as a record" form.]**
 
 `pre-push:70`'s `share` call, `ticket.nextSteps.step3` (en/es),
 `brain-save.mjs`, `contributor-scaffold.mjs:274`, and `day.done.checkCmd` are
@@ -166,7 +166,7 @@ retire in 3.1d, and **not before**: only after 3.1b's first scenario ("a
 record does not wait for its feature") has passed, **and** after #874
 (record-first: `memory:save` (renamed `brain:memory:save`; see Amendment 1) writes a record before any backend, under
 `MEMORY_BACKEND=engram` too) has landed. Retiring them earlier would leave a
-capture with nowhere to go the moment the lane is not yet proven.
+capture with nowhere to go the moment the lane is not yet proven. **[Amended by Amendment 3 (#890) — all five surfaces are retired: `pre-push` no longer calls `share` or inspects `.memory/`; `brain-save.mjs` is deleted with no shim; `brain:next`'s memory-materialization state is replaced by issue-scoped record detection; `ticket.nextSteps` and the PR-template wording point at `brain:memory:save --issue N` and the lane. See Amendment 3 below.]**
 
 ### L8 — Doctrine
 
@@ -295,3 +295,28 @@ to state what the act did.
 
 The rename table and the in-place annotations Amendment 1 made were already correct under R6 as
 amended — this rewrites no other line of the body or of an earlier amendment.
+
+## Amendment 3 — the feature-PR memory surfaces retire; the lane is enabled (issue #890)
+
+**Signed**: 17/09/2026 — Cristian Rinaldi
+
+### What this changes
+
+3.1d completes: the five feature-PR surfaces L6/L7 named — `pre-push`'s `brain:memory:share`
+call and its dirty-`.memory/` warning, `brain:save` (command, implementation, and package
+script), `brain:next`'s memory-materialization state, and the `ticket.nextSteps`/PR-template
+wording — are retired. This repository sets `memory.lane.enabled: true` (a local,
+repository-specific decision; the config schema's own migration default is unchanged).
+`pre-push` now only checkpoints feature working memory and runs the repository
+reference/prohibition checks; it materializes nothing and inspects no `.memory/` state. A
+capture is a record first (`npm run brain:memory:save --issue N`), and the enabled lane
+collects and ships it to `main` on its own pull request, independent of the feature PR's review
+timeline — L6/L7's "sequenced" plan is now complete, not merely scheduled.
+
+### What this does NOT change
+
+`memory-gate`'s evaluation and its base-plus-head classification (L6) are unchanged — this
+amendment retires the feature-PR transport surfaces, not the gate that reads the PR tree.
+`brain:memory:share` is unaffected as a verb: it remains the backend's own materialization
+command (`brain:day:start`'s cycle, or run by hand); it is simply no longer invoked from
+`pre-push`. L1-L5, L8, L9, the targets and the dependency order are untouched.

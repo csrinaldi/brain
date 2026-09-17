@@ -24,7 +24,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync, execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, existsSync, lstatSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -33,6 +33,11 @@ import { buildRecord, serializeRecord } from './lib/format.mjs';
 import { removeTempTree } from '../lib/tmp-tree.mjs';
 
 const CLI = join(dirname(fileURLToPath(import.meta.url)), 'cli.mjs');
+// This file lives at brain/scripts/memory/ — three levels up is the repo root
+// (#1010: the real root a spawned `setup` must never touch, even though
+// BRAIN_MEMORY_TEST_ROOT points it at a sandboxed one).
+const REAL_REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+const REAL_ENGRAM_PATH = join(REAL_REPO_ROOT, '.engram');
 
 /**
  * The substitution notice, matched on a phrase UNIQUE to it.
@@ -195,6 +200,53 @@ test('#641 `setup` is NOT substituted — engram.setup() needs no binary, and ow
     SUBSTITUTED,
     'setup never failed on the binary, so there was no failure to replace',
   );
+});
+
+test('#1010 `setup` run through runCli() writes .engram ONLY into the sandboxed BRAIN_MEMORY_TEST_ROOT, never into the real repo root', (t) => {
+  // MEASURED (#1010, issue comment 2): `npm test` spawns this exact test —
+  // among others — as a REAL subprocess of `node brain/scripts/memory/cli.mjs
+  // setup`. `runCli()` already forwards BRAIN_MEMORY_TEST_ROOT (the seam
+  // cli.mjs's ROOTED_OPS reads for "setup"), but `engram.setup()` used to take
+  // no parameters at all, so the forwarded `{root}` was silently discarded and
+  // `ensureMemorySymlink()` fell through to its default (the REAL repo root).
+  // On a fresh worktree candidate that turns an idempotent no-op into a
+  // symlink written where nothing asked for one — the exact contamination the
+  // cold-review candidate-integrity check (#1010) exists to catch.
+  //
+  // Snapshot the real root's `.engram` state BEFORE running — an absence
+  // claim would be false on any checkout that already carries the symlink
+  // (the common case), so this is a before/after comparison, never a claim
+  // that the path does not exist.
+  const existedBefore = existsSync(REAL_ENGRAM_PATH);
+  const wasLinkBefore = existedBefore && lstatSync(REAL_ENGRAM_PATH).isSymbolicLink();
+
+  const w = world(t);
+  const r = runCli(w, ['setup']);
+
+  assert.equal(r.status, 0, `setup must exit 0:\n${r.stdout}\n${r.stderr}`);
+  assert.equal(
+    existsSync(join(w.root, '.engram')),
+    true,
+    'setup must create the symlink in the SANDBOXED root that BRAIN_MEMORY_TEST_ROOT names',
+  );
+  assert.ok(
+    lstatSync(join(w.root, '.engram')).isSymbolicLink(),
+    'the sandboxed .engram must be a real symlink, not a directory setup() gave up on',
+  );
+
+  const existedAfter = existsSync(REAL_ENGRAM_PATH);
+  assert.equal(
+    existedAfter,
+    existedBefore,
+    'this run must never create (or remove) .engram at the REAL repo root',
+  );
+  if (existedBefore) {
+    assert.equal(
+      lstatSync(REAL_ENGRAM_PATH).isSymbolicLink(),
+      wasLinkBefore,
+      'this run must never change what the real repo root .engram already was',
+    );
+  }
 });
 
 // ── each precondition, measured through the real CLI ────────────────────────

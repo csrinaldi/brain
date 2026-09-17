@@ -11,22 +11,17 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
 import {
-  writeFileSync, readFileSync, symlinkSync, lstatSync, statSync, existsSync,
-  mkdirSync, chmodSync, closeSync, fstatSync,
+  writeFileSync, readFileSync, readdirSync, symlinkSync, lstatSync, statSync,
+  existsSync, mkdirSync, chmodSync, closeSync, fstatSync,
 } from 'node:fs';
 import { hostname, tmpdir, userInfo } from 'node:os';
-import { fileURLToPath } from 'node:url';
-import { join, dirname } from 'node:path';
+import { join } from 'node:path';
 
 import { shipOnSessionEnd } from './session-end-ship.mjs';
+import { loadBrainConfig } from '../lib/brain-config.mjs';
 import { testTmp } from '../lib/test-tmp.mjs';
 import { removeTempTree } from '../lib/tmp-tree.mjs';
-
-const HERE = dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = join(HERE, '..', '..', '..');
-const ENTRY = join(HERE, 'session-end-ship.mjs');
 
 const FIXED_NOW = () => new Date('2026-09-10T00:00:00Z');
 const FIXED_DATE = '2026-09-10';
@@ -390,18 +385,68 @@ test('_spawn throws AFTER the fd was trusted: the fd is closed exactly once — 
   );
 });
 
-test('real entrypoint run against this repo\'s own config (flag false) exits 0, prints nothing, writes no log file', () => {
-  const r = spawnSync(process.execPath, [ENTRY], { cwd: REPO_ROOT, encoding: 'utf8' });
-  assert.equal(r.status, 0, `stderr: ${r.stderr}`);
-  assert.equal(r.stdout, '', 'no stdout');
-  assert.equal(r.stderr, '', 'no stderr');
-  // The flag is false in this repo's own tracked config, so the guard
-  // returns before ever computing/opening a log path — assert the file this
-  // real run WOULD have used (real _tmpdir + real hostname + today's date)
-  // does not exist, making the test's title an assertion, not a claim.
-  const today = new Date().toISOString().slice(0, 10);
+// A prior version of this test `spawnSync`'d the REAL, unmocked entrypoint
+// (`node session-end-ship.mjs`) against this repo's own working directory,
+// title-asserting the flag-false path leaves no trace. That premise broke
+// twice, for opposite reasons (#1011, #1012, incident on PR #1007):
+//   - a sibling branch flipped this repo's tracked `memory.lane.enabled` to
+//     true, so the unmocked spawn stopped being a no-op — it opened a real
+//     detached child that pushed a memory-lane branch, opened/reused a real
+//     PR, and armed auto-merge against the real `origin` remote on every
+//     `npm test` run (#1012's incident class);
+//   - independently, the test also asserted the real OS tmpdir's
+//     `brain-lane-<uid>` directory does NOT exist, which is false on any
+//     machine that has ever shipped a lane for real that day (#1011).
+//
+// This test must hold for BOTH lane-flag states without ever driving a real
+// subprocess or touching the real OS tmpdir. It reads THIS repo's real,
+// unmocked config via `loadBrainConfig()` and derives the expected outcome
+// from whatever the tracked flag currently says, instead of hardcoding one
+// state. `_spawn`/`_tmpdir` stay mocked/injected exactly like every other
+// test above, so no real child process and no real /tmp writes ever happen
+// here regardless of the flag.
+test('real loadBrainConfig() wiring drives shipOnSessionEnd consistently with the tracked lane flag, for either flag state — no real subprocess, no real /tmp writes (#1011, #1012)', (t) => {
+  const dir = testTmp('906-lane-');
+  t.after(() => removeTempTree(dir));
+
+  const config = loadBrainConfig(); // real file read — proves REPO_ROOT/CONFIG_PATH resolve correctly
+  const enabled = config?.memory?.lane?.enabled === true;
+
+  // Snapshot the real OS tmpdir's private-dir state BEFORE running, so the
+  // "never touches the real tmpdir" check is a comparison, not a claim of
+  // absence (#1011: absence does not hold once a lane has ever shipped).
   const realDirPath = privateDirPath(tmpdir(), realUid());
-  const realLogPath = join(realDirPath, `brain-lane-ship-${hostname()}-${today}.log`);
-  assert.equal(existsSync(realDirPath), false, 'flag false must never create the real private dir');
-  assert.equal(existsSync(realLogPath), false, 'flag false must never create the real tmp log file');
+  const realDirExistedBefore = existsSync(realDirPath);
+  const realDirEntriesBefore = realDirExistedBefore ? readdirSync(realDirPath).sort() : null;
+
+  const calls = [];
+  const result = shipOnSessionEnd({
+    _loadConfig: loadBrainConfig,
+    _spawn: fakeSpawn(calls),
+    _tmpdir: () => dir,
+    _now: FIXED_NOW,
+  });
+
+  assert.equal(
+    calls.length,
+    enabled ? 1 : 0,
+    `this repo's tracked lane.enabled=${enabled} must drive exactly ${enabled ? 1 : 0} spawn attempt(s)`,
+  );
+  assert.equal(result.spawned, enabled);
+  assert.equal(
+    existsSync(join(dir, `brain-lane-${realUid()}`)),
+    enabled,
+    'the private dir must exist under the injected tmpdir iff the flag is true, and never otherwise',
+  );
+
+  const realDirExistedAfter = existsSync(realDirPath);
+  if (!realDirExistedBefore) {
+    assert.equal(realDirExistedAfter, false, 'this run must never create the real private dir under the real OS tmpdir');
+  } else {
+    assert.deepEqual(
+      readdirSync(realDirPath).sort(),
+      realDirEntriesBefore,
+      'this run must never add or remove files in the real private dir under the real OS tmpdir',
+    );
+  }
 });
