@@ -928,3 +928,34 @@ test('a malformed Codex final message is refused by the existing findings reader
   assert.equal(result.ok, false);
   assert.match(result.reason, /could not be read/i);
 });
+
+// ── Gemini final-message transport ──────────────────────────────────────────
+
+const GEMINI_ROUTED = { sdd: { map: { [COLD_REVIEW_STAGE]: { engine: 'gemini', model: 'gemini-2.5-pro' } } } };
+
+test('Gemini receives a host-owned final-message descriptor and materializes the artifact atomically', async (t) => {
+  const root = makeRepo(t);
+  const worktree = makeWorktree(t);
+  let seen;
+
+  const result = await runColdReviewStage({
+    config: GEMINI_ROUTED, prNumber: PR, root, worktreePath: worktree,
+    deps: {
+      forgeProbe: LOGGED_OUT,
+      runStage: async (args) => {
+        seen = args;
+        writeFileSync(args.output.tempPath, `\`\`\`${ARTIFACT_TAG}\n[]\n\`\`\`\n`);
+        return { ok: true };
+      },
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(seen.output.mode, 'final-message');
+  assert.equal(seen.output.artifactPath, join(root, artifactPathFor(PR)));
+  assert.notEqual(seen.output.tempPath, seen.output.artifactPath);
+  assert.ok(seen.prompt.includes('Return exactly the artifact bytes as your final message'));
+  assert.equal(existsSync(seen.output.tempPath), false, 'the temporary Gemini message is consumed by the host rename');
+  assert.equal(existsSync(seen.output.artifactPath), true, 'the host-owned final artifact is available to the reader');
+});
+
