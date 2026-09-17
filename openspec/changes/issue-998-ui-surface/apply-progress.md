@@ -141,3 +141,29 @@ The original T1b/T4 work (and `spec.md`'s R998-5 text) claimed `reviewer-protoco
 
 ### Carried
 - PR 6 (the door's six tabs, the served branch, the countdown, R998-6) is next — `brain/scripts/ui/change-route.mjs`, `server.mjs`, `poller.mjs`, `lib/banners.mjs`, `static/app.js`.
+
+## PR 6 — the door's six tabs, the served branch, the countdown (R998-6) (2026-09-17)
+
+Branch `feat/issue-998-pr6-door` off `0f5d4480` (merge of PR 4 into PR 5's head, per the feature-branch-chain). Worktree `/home/gandalf/IA/brain-issue-998-6`.
+
+| sha | unit | RED → GREEN | mutation |
+|---|---|---|---|
+| 645c3e88 | `change-route.mjs`: `buildRecordsTab` (filters `snapshot.records` to the issue, newest first, `{id, ts, actor, actorKind, type, supersedes, source:{path:file}}`) and `buildSddTab` (the issue's own `snapshot.changes` row's `artefacts{}` map, R998-4's raw seven-stage presence, sourced to the change dir) — both reuse sections the route already holds, no new IO | RED (4 new failing) → GREEN 18/18 | drop the newest-first sort → red (17/18); invert the sdd presence check → red (17/18); both reverted |
+| cec89418 | `drawer-model.mjs`: `TAB_IDS` grows to the design's six — `spec, sdd, tasks, workingMemory, reviews, records` — via `sddEntries`/`recordsEntries` through the existing `entry()` helper; every downstream tab-index test reference shifted | RED 14/20 → GREEN 20/20 | the records tab's failed branch replaced by an unconditional `ok:true` → red (19/20); reverted |
+| ce049c3f | `server.mjs`: `buildMeta()` gains `servedBranch` — `git symbolic-ref --short HEAD` on the served root's own git dir, memoized after the first call, sourced to `{path:'HEAD'}`; a detached/unreadable HEAD is a said reason | RED 2/46 → GREEN 46/46 | the memo guard dropped → a forced second broadcast (`POST /api/poll/once`) trips the one-git-call assertion, red (45/46); reverted |
+| 0aab09e9 | `poller.mjs`: `state()` gains `intervalMs` and `nextAttemptAt` — armed by `scheduleNext()` from the injected `_now()`, cleared in `pause()`, re-armed on `resume()` | RED 2/15 → GREEN 15/15 | `nextAttemptAt` computed without adding `interval` → red (14/15); reverted |
+| db141eca | `lib/banners.mjs`: `pollIndicator` gains an additive `countdown` field ("next poll in N s" / "paused" / "polling disabled"), `text`/`paused` unchanged; existing exact-shape assertions updated to include it | RED 4/15 → GREEN 15/15 | the countdown math offset by `+intervalMs` → red (13/15, exactly its own two tests); reverted |
+| 715bd656 | `static/app.js`: `renderStatus` gains `renderServedBranch` (its own `sourceStamp`) and the countdown span, both refreshed on the existing `render()` call chain; the door's six tabs needed no new wiring (`renderDrawer`'s loop over `model.value.tabs` was already generic). `views-owned.test.mjs`: `TAB_IDS` to six, two new scan tests (the served-branch/`sourceStamp` call sites; the countdown field read plus a `Date.now()`-count pin) | RED 1/10 → GREEN 17/17 across `app-source-guard`/`views-owned`; the renderers themselves N/A (D9), verified by trace | the served-branch render call dropped from `renderStatus` → the scan test red (9/10); reverted |
+| 6280f4e7 | fix: the initial `SDD_STAGES` literal tripped `sdd-layout.test.mjs`'s real-tree rival-array scan (issue #456) — read as a bare-name rival of `LIFECYCLE_STAGES`. Imports `LIFECYCLE_STAGES` from `sdd-layout.mjs` (server-side file, no D9 constraint) and appends the three artefact-map-only stages, instead of growing the REVIEWED allowlist | RED 1/1 (the drift-guard's real-tree test) → GREEN 96/96 across `change-route.test.mjs`/`sdd-layout.test.mjs` | N/A — a said correction, found by the mandatory full-suite sweep, not a targeted unit |
+| 3ca07b39 | docs: `spec.md`'s R998-6 detailed with five scenarios; `tasks.md`'s PR 6 stub detailed into T1-T9 and ticked | — | — |
+| d4902bd0 | docs(memory): record `rec-ed554f8745fab2e7` saved | — | — |
+
+Full suite `GIT_CONFIG_GLOBAL=/dev/null npm test`: 5679/5680 (PR 5 left it at 5655/5656; +24 new tests). The one failure remains `session-end-ship.test.mjs`'s "real entrypoint … writes no log file" — unrelated to this PR (zero changes under `brain/scripts/memory/**`), reproduced identically before this batch on this machine. `npm run brain:repo:check` green before every commit. Counted diff `0f5d4480...HEAD` (tests, `openspec/changes/**`, `.memory/**` excluded): 163/400.
+
+### Deviations from the design/tasks sketch, said
+- `design.md`'s module-map row for "the door, six tabs" only names `sdd` and `records` growing `TAB_IDS`, with no detail on the sdd tab's own data source (a stale sketch predating this batch's detailed R998-6 acceptance, same staleness pattern as PR2/3/5) — implemented as the change row's own raw `artefacts{}` presence (R998-4's existing map) rather than re-deriving `lib/sdd-model.mjs`'s `STAGE_VOCAB` word/mark for a single row, keeping the door's per-tab budget light and avoiding a second computation of the same fact within one PR. If the maintainer wants the derived vocabulary word/mark in the door's sdd tab too, threading `sdd-model.mjs`'s row through `change-route.mjs` is a clean follow-up.
+- A same-file regression, found and fixed within the banners.mjs unit: a doc-comment literal `Date.now()` tripped `lib/source-guard.test.mjs`'s pure-module text scan (it reads full file text, not just code) — reworded the comment, no logic change.
+- The stage-array drift-guard fix (6280f4e7) is a said correction, not a planned unit: `change-route.mjs` is server-side only (no D9 constraint unlike `sdd-model.mjs`'s own PR-4 allowlist entry), so importing `LIFECYCLE_STAGES` directly was the cleaner fix over growing the REVIEWED allowlist a second time.
+
+### Carried
+- PR 7 (the governance view — ADR table, drift, anti-patterns, actors, release debt, history) is next, blocked on #882/#880 per `tasks.md`'s delivery plan.
