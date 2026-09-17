@@ -30,6 +30,7 @@ import { parseTasksList } from './lib/tasks-list.mjs';
 import { parseBlame } from './lib/blame.mjs';
 import { shapeResumeView } from './lib/resume-view.mjs';
 import { parseFrontmatter } from '../memory/lib/resume-frontmatter.mjs';
+import { LIFECYCLE_STAGES } from '../lib/sdd-layout.mjs';
 
 /** D14's caveat, verbatim in the UI, until #880 lands `type: review` records. */
 export const REVIEWS_SOURCE_NOTE = 'forge comments until #880 lands';
@@ -162,7 +163,12 @@ function buildReviewsTab({ snapshot, project, issue }) {
   return { ok: true, value: rounds, unreadable, sourceNote: REVIEWS_SOURCE_NOTE };
 }
 
-const SDD_STAGES = ['proposal', 'spec', 'design', 'tasks', 'apply', 'verify', 'archive'];
+// The seven raw artefact-presence keys `status/snapshot.mjs`'s
+// `readArtefactPresence` always computes (R998-4) — `LIFECYCLE_STAGES` is
+// sdd-layout.mjs's own canonical four (issue #456); this file is server-side
+// only (no D9 constraint), so it imports that instead of declaring a rival
+// literal, then names the three stages the door's own artefact map adds.
+const SDD_STAGES = [...LIFECYCLE_STAGES, 'apply', 'verify', 'archive'];
 
 /**
  * The door's own sdd tab (#998 R998-6, design.md's "TAB_IDS grows sdd and
