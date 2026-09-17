@@ -67,8 +67,17 @@ export async function resolveBase({ issue, args, fetchIssue, defaultBranch = 'ma
   }
 
   const parent = parentOf(issue?.body);
-  if (parent === null) {
-    return say('ticket.base.noEpic', { base: defaultBranch, reason: 'no-parent' });
+  if (parent.number === null) {
+    // PR E (tracker PR #1004, round-3 cold review): a parent that could not
+    // be read (parent-grammar, parent-ambiguous) is not the same fact as a
+    // body that never mentions one — R967-5's fail-open answer still applies
+    // (base: main, no refusal, no forge call for a number that does not
+    // exist), but the STATED reason must name which it was, the same
+    // distinction `declaredParent`'s own `divergence` field exists to carry.
+    return say('ticket.base.noEpic', {
+      base: defaultBranch,
+      reason: parent.divergence ? parent.divergence.reason : 'no-parent',
+    });
   }
 
   // ONE READ, and every way it can go wrong FAILS OPEN. The freshness check one
@@ -149,9 +158,16 @@ export async function resolveBase({ issue, args, fetchIssue, defaultBranch = 'ma
  * at all still resolves its prose `Parent:` line, which the old direct
  * `parseGraphBlock` call here could not see (measured: it returns `null`
  * before ever scanning prose when no graph-tagged fence exists).
+ *
+ * Always returns an object, never `null` (PR E, tracker PR #1004 round 3):
+ * `number` is `null` for BOTH "nothing declared" and "something declared and
+ * unreadable" (`declaredParent`'s own `parent === null` cannot tell them
+ * apart either), and `divergence` is the one field that does — carried
+ * through so `resolveBase` can state which it was rather than reading both
+ * as `reason: 'no-parent'`.
  */
 function parentOf(body) {
-  const { parent, parentSource } = declaredParent(body);
-  if (parent === null) return null;
-  return { number: parent, source: parentSource };
+  const { parent, parentSource, divergence } = declaredParent(body);
+  if (parent === null) return { number: null, source: null, divergence };
+  return { number: parent, source: parentSource, divergence: null };
 }

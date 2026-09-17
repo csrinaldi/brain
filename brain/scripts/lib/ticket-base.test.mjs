@@ -124,6 +124,28 @@ test('no parent, a parent that is not an epic, and an epic with no tracker each 
   }
 });
 
+test('a parent-grammar or parent-ambiguous divergence states its own reason, not "no-parent" (#967 PR E, tracker PR #1004 round 3)', async () => {
+  // `parentOf` used to collapse a divergent parent's `number` to `null`, the
+  // SAME value a body that never declares one produces — this leaf silently
+  // resolved both to `reason: 'no-parent'`, the exact defect base-branch.mjs's
+  // gate had at the other caller `declaredParent` serves. R967-5's fail-open
+  // philosophy still holds here (no refusal, base: main, never chases the
+  // forge for a number it does not have) — only the STATED reason changes.
+  const grammar = { number: 881, body: ['```brain-graph/1', 'parent: abc', '```'].join('\n') };
+  const ambiguous = { number: 881, body: ['Parent: #878', 'Parent: #879'].join('\n') };
+
+  for (const [reason, issue] of [['parent-grammar', grammar], ['parent-ambiguous', ambiguous]]) {
+    const { fetchIssue, calls } = reader({});
+    const r = await resolveBase({ issue, args: args(), fetchIssue });
+
+    assert.equal(r.ok, true, reason);
+    assert.equal(r.base, 'main', reason);
+    assert.equal(r.say.key, 'ticket.base.noEpic', reason);
+    assert.equal(r.say.params.reason, reason, 'the reason must name the divergence, not "no-parent"');
+    assert.deepEqual(calls, [], 'a parent that could not be read is not a parent to fetch');
+  }
+});
+
 test('a tracker declared without `kind: epic` is not honoured, and the reason is stated', async () => {
   // Q7 / R967-9: `kind` is the declaration. A `tracker:` on a node that never
   // said it was an epic is carried by the parser as a divergence and honoured
