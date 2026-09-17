@@ -149,7 +149,36 @@ ids this PR owns.
 - **THEN** the model's `slices` entry carries the slice's claimed requirement ids and its terminal PR only — nothing about whether that PR is open, merged, or exists
 
 ### R998-5: the reviews timeline and the verdict queue
-Acceptance: a round shows its findings with severity and the text it cites; an unreadable thread is a row with its reason; a PR with no verdict says "no round posted".
+
+`status/snapshot.mjs`'s `reviewRows` MUST carry each verdict's `findings` as the shaped array `parseVerdict` already extracts (`{id, severity, evidenceExcerpt, cites}`, `evidence` truncated to its first 240 characters), never a count, plus a separate `findingCount`; the protocol schema (`reviewer-protocol.md` §6.1/6.2) declares no `file`/`line` fields on a finding — only free-text `evidence` and `cites` are real, so none are fabricated. A verdict whose `findings:` block is malformed (`parseVerdict`'s `malformed` names it) keeps `findings: []` with the reason visible in `malformed`, never silently equal to "no findings were declared". `lib/review-timeline.mjs`'s `buildReviewTimeline(reviewsSection, prsSection, {issue?})` MUST turn the `{prs, reviews}` snapshot sections into `{threads, queue, totals}` — one thread per PR, its rounds oldest first, each round's findings grouped by severity (`bySeverity`, any severity string kept, never filtered against a closed vocabulary); a thread with zero rounds says so (`noRound: true`) rather than reading as approved; an unreadable thread is a row carrying its reason, never a skip. The queue holds only threads whose latest verdict is REVISE or which have no round at all — the two "waiting on a verdict right now" cases — ordered oldest-PR-first, each entry's `wait` naming the head sha that has no verdict, or the literal `'no round posted'` when there was never a round to name one from. `app.js`'s `reviews` mode router draws the queue first, then one card per PR thread with its rounds and findings; `lib/drawer-model.mjs`'s `reviewEntries` gains one child row per finding, each showing its severity, alongside the existing per-round entry.
+
+#### Scenario: findings survive the round trip as an array, not a count
+- **WHEN** `reviewRows` parses a verdict whose block carries two findings
+- **THEN** the verdict's `findings` is a two-element array (`id`, `severity`, `evidenceExcerpt`, `cites` per entry) and `findingCount` is `2`
+
+#### Scenario: a malformed findings block is named, not silently empty
+- **WHEN** a verdict's `findings:` block is unreadable (`parseVerdict` reports `malformed: ['findings']`)
+- **THEN** `reviewRows` keeps `findings: []` and `malformed` still names `'findings'` — indistinguishable from "no findings" only if a reader ignores `malformed`
+
+#### Scenario: a round's findings are grouped by severity, any value kept
+- **WHEN** a round carries findings whose severities include one value outside the declared protocol vocabulary
+- **THEN** `bySeverity` carries a count for that value too — an unknown severity is said, never dropped
+
+#### Scenario: a thread with no round is distinct from an unreadable one
+- **WHEN** a PR has posted zero verdicts (the reviews section is readable and simply has no rows for that PR)
+- **THEN** its thread has `noRound: true` and an empty `rounds` array — never the same shape as a thread whose reviews could not be read at all
+
+#### Scenario: an unreadable thread is a row with its reason
+- **WHEN** a PR's review thread could not be read (`reviews.value` carries `{pr, ok:false, reason}` for it)
+- **THEN** the thread appears with `unreadable: {reason}` and empty `rounds` — never skipped, never folded into "no round posted"
+
+#### Scenario: the queue holds exactly the two waiting cases, oldest first
+- **WHEN** the timeline has one thread with no round, one whose latest round is REVISE, one whose latest round is APPROVE, and one unreadable
+- **THEN** the queue contains only the first two, ordered by ascending PR number, each carrying a `wait` (the no-round thread's `wait` is `'no round posted'`; the REVISE thread's `wait` is its latest round's head sha)
+
+#### Scenario: the reviews tab shows a finding per row, with its severity
+- **WHEN** the drawer's Reviews tab renders a round with findings
+- **THEN** each finding is its own child entry naming its severity and id, its excerpt and `cites` in the detail, and the round's own source (no per-finding anchor exists in this provider, D14)
 
 ### R998-6: the door's six tabs, the served branch, the countdown
 Acceptance: six tabs each keeping its own reason on failure; the header names the branch served; the bands show the next poll.
