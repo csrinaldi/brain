@@ -46,7 +46,11 @@ const WRITE_FNS = ['mkdirSync', 'writeFileSync', 'symlinkSync', 'cpSync'];
 
 const WRITE_CALL_RE = new RegExp(`\\b(${WRITE_FNS.join('|')})\\s*\\(`, 'g');
 
-const CWD_REF_RE = /process\.cwd\(\)|resolve\(\s*['"]\.['"]\s*\)/;
+// `resolve('.')` with FURTHER segments (`resolve('.', 'x.txt')`) is the same
+// defect class as `join(process.cwd(), 'x.txt')` — the bare form has no use as
+// a write target, so the match ends at the first `,` or `)` after the dot
+// (PR #1022 cold review, blocker).
+const CWD_REF_RE = /process\.cwd\(\)|resolve\(\s*['"]\.['"]\s*[,)]/;
 
 /** Returns the text between a call's own `(` (at `openParenIdx`) and its
  * matching `)`, tracking nested parens and skipping over string-literal
@@ -131,4 +135,25 @@ test('the scanner detects the violation it exists to catch, in an isolated fixtu
 
   const { found } = findRealRootWriteViolations(fixtureRoot, WALK_GLOBS);
   assert.deepEqual(found, [{ file: 'brain/scripts/planted.test.mjs', line: 3, fn: 'mkdirSync' }]);
+});
+
+test("the scanner also catches resolve('.', ...) with further segments — the multi-segment form is the same defect class (PR #1022 cold review)", () => {
+  const fixtureRoot = testTmp('test-hygiene-fixture-resolve-');
+  const fixtureDir = join(fixtureRoot, 'test');
+  mkdirSync(fixtureDir, { recursive: true });
+  const WRITE_KW = 'writeFile' + 'Sync';
+  const plantedSource = [
+    "import { writeFileSync } from 'node:fs';",
+    "import { resolve } from 'node:path';",
+    `${WRITE_KW}(resolve('.', 'x.txt'), 'data');`,
+    `${WRITE_KW}(resolve(".", "sub", "y.txt"), 'data');`,
+    '',
+  ].join('\n');
+  writeFileSync(join(fixtureDir, 'planted.e2e.test.mjs'), plantedSource, 'utf8');
+
+  const { found } = findRealRootWriteViolations(fixtureRoot, WALK_GLOBS);
+  assert.deepEqual(found, [
+    { file: 'test/planted.e2e.test.mjs', line: 3, fn: 'writeFileSync' },
+    { file: 'test/planted.e2e.test.mjs', line: 4, fn: 'writeFileSync' },
+  ]);
 });

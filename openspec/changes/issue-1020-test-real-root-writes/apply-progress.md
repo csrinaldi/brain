@@ -72,3 +72,7 @@ None.
 ## Remaining Tasks
 
 None — all tasks in tasks.md are `[x]`.
+
+## Cold review of PR #1022 (round 1, head 69f679c3): REVISE → fixed
+
+- blocker: `CWD_REF_RE` matched only a bare `resolve('.')`; `writeFileSync(resolve('.', 'x.txt'), …)` — the multi-segment form, the same defect class as `join(process.cwd(), 'x.txt')` — passed the guard silently, and no test planted that form. Fix: the match ends at the first `,` or `)` after the dot; a second detection-proof test plants `resolve('.', 'x.txt')` and `resolve(".", "sub", "y.txt")` in a fixture root under `test/`. RED 2/3 → GREEN 3/3; mutation (the old regex back) → 2/3, reverted. R1020-2 wording amended to say "bare or with further segments".
