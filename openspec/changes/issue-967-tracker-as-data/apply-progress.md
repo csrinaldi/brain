@@ -406,3 +406,149 @@ fail-open shapes and the absence guard.
 
 B5's manual verification once #878's body carries `kind: epic` and
 `tracker: feature/brain-ui` on the forge, then PR C (the `base-branch` gate).
+
+## PR C — implemented ("the gate"), 2026-09-17
+
+**What**: PR C ("the gate") implemented in full, strict TDD, in this
+worktree (`/home/gandalf/IA/brain-issue-967`), branch
+`feat/issue-967-c-gate`, base `origin/feature/issue-967` (`c86e62cc`, PR A +
+PR B already squash-merged there as #997/#999). Five local commits, nothing
+pushed, no PR opened.
+
+**Tasks done**: C1a, C1b, C2a, C2b, C3a, C3b, C4 (verified — no code change
+owed), C5, C6, C7. C8 is this file's own closing record-first commit. **C9
+(maintainer, post-merge `brain:protect` re-run) left UNTICKED** — it cannot
+be performed until the tracker PR merges to `main`.
+
+**Commits** (`c86e62cc..HEAD`):
+- `02ad752c` feat(governance): base-branch is a pure rule — a slice's base
+  must equal its epic's declared tracker
+- `63830aac` feat(governance): wire runBaseBranchCheck — D10's eight steps,
+  at most two issue reads
+- `a841e08e` feat(governance): base-branch is registered and required at
+  every tier, lite included
+- `d6ece731` docs(sdd): two doctrine drafts for the maintainer —
+  base-branch's lite exception, ADR-0032's three keys
+
+**Where**: `brain/scripts/governance/checks/base-branch.mjs` (NEW, the pure
+predicate), `base-branch.test.mjs` (NEW, 13 tests); `run-check.mjs`
+(`runBaseBranchCheck`, dispatch, `SUBCOMMAND_PORT_REACH`), `run-check.test.mjs`
+(+11 tests); `brain/scripts/vcs/governance-checks.mjs` (`GOVERNANCE_JOBS`),
+`governance-tiers.mjs` (`GATE_MATRIX['base-branch']`); `.github/workflows/
+governance.yml` + `brain/scripts/ci/gitlab-governance.yml` (new job);
+`brain/scripts/vcs/contributor-scaffold.mjs` (`GATE_SUMMARY` row) +
+regenerated `.github/PULL_REQUEST_TEMPLATE.md` / `.gitlab/
+merge_request_templates/Default.md`; `test/review-regulated/fixture.mjs`
+(canned status rollup); `openspec/changes/issue-967-tracker-as-data/
+brain-drafts/lite-required-base-branch.md` + `graph-block-kind-tracker-
+parent.md` (NEW, two doctrine drafts). No path under `brain/core/**` or
+`brain/project/**`.
+
+**TDD evidence, one mutation per unit**:
+- C1 — RED: `ERR_MODULE_NOT_FOUND` (base-branch.mjs did not exist), 0/13.
+  GREEN 13/13. Mutation: `baseBranchRule` body replaced with a throw → 12/13
+  red (only the static import-scan test, which never calls the function,
+  survived).
+- C2 — RED (informal — implementation drafted alongside tests, then
+  verified by mutation rather than by a literal missing-file RED): GREEN
+  123/123 (full `run-check.test.mjs`). Mutation: step 5's `fetchIssue`
+  throw handler changed from fail-closed to `return { pass: true }` → exactly
+  one test red (`fetchIssue(linked) throws → fail closed…`).
+- C3 — RED (measured, C3a): registering `GOVERNANCE_JOBS` site 1 alone
+  turned 7 pre-existing tests red (governance-checks.test.mjs's order/lane-
+  count guards, governance-tiers.test.mjs's REQ-TIER-8 key-set parity, both
+  directions) — `run-check.test.mjs`'s T7 and `workflow-auth.test.mjs`'s
+  VCS_TOKEN guard did NOT go red at this point, because `SUBCOMMAND_PORT_REACH`
+  and the dispatch (site 5) were already wired in C2, and no CI job existed
+  yet for the VCS_TOKEN scanner to check — a narrower blast radius than the
+  task's "four pre-existing oracles" predicted, reported rather than forced
+  to match. GREEN after landing sites 2–4 (site 5 already landed in C2):
+  273/273 across the five drift-guard files. Mutation: `GATE_MATRIX['base-
+  branch'].lite.policy` flipped to `'detection'` → exactly the new "#967
+  ruling 1" test red (`0 !== 1`, `mapDetectionToWarning` softened it).
+- C4 — no RED/GREEN cycle: `local-ci-parity.test.mjs` run first (18/18
+  green, unaffected) and again after full registration (still 18/18). No
+  code change — see the tasks.md C4 outcome note for the full reasoning and
+  the two options considered and not taken.
+- C5/C6 — no unit test (doctrine drafts + absence verification); `git diff
+  --stat -- brain/core brain/project` empty, byte-identity and absence
+  guards re-run green.
+
+**Deviations from the design, all reported**:
+1. **The pure predicate's parameter names differ from D10's literal text.**
+   Design D10 writes `baseBranchRule({targetBranch, defaultBranch,
+   sourceBranch, linkedIssue, parentIssue})`; this apply's brief specified
+   `{issueBody, epicBody, targetBranch, defaultBranch, headBranch}` instead —
+   raw body strings the predicate parses itself via `parseGraphBlock`, rather
+   than pre-parsed issue objects. Followed as directed; the DECISION LOGIC
+   (all 8 of D10's steps) is unchanged, only the parameter shape.
+2. **C2's mapDetectionToWarning assertion moved from C2a's commit into C3's.**
+   `mapDetectionToWarning(result, 'lite', 'base-branch')` throws until
+   `GATE_MATRIX['base-branch']` exists (C3b) — testing it at C2 would either
+   throw or require a premature partial registration. The assertion (`main('
+   base-branch', …)` exits 1 at `lite`) was written and verified in C3's
+   commit instead, where it is naturally GREEN and its own mutation is clean.
+3. **An `ok: false` graph-block branch added to the predicate beyond D10's
+   literal 8 steps.** D10 step 6 only names `null` (no block) for the linked
+   issue's own declaration; an unreadable block (two declarations, an
+   unterminated fence) was not explicitly listed. Left unhandled it would
+   silently fall through to `pass: true` — a silent pass on an unreadable
+   declaration, the exact defect the deny-reader rule (#942) exists to
+   refuse. Added `uncomputable` handling for both the linked issue's and the
+   epic's own unreadable block, covered by two extra tests beyond C1a's
+   named scenario list.
+4. **A malformed-tracker branch distinguished from "no tracker" via
+   `declarationDivergences`.** `parseGraphBlock` already sets `tracker: null`
+   on a grammar failure and records the divergence separately
+   (`reason: 'tracker-grammar'`) — the predicate inspects that array to
+   fail (naming the epic and the bad value) rather than silently treating a
+   malformed tracker the same as "epic declares no tracker" (which passes).
+5. **Downstream drift, not anticipated by tasks.md, fixed in the same
+   commits it broke**: `workflow-auth.test.mjs`'s T4 fixture hardcoded the
+   manifest's 4-key set (fixed in C2); `governance-checks.test.mjs`'s
+   "ten jobs" test and two `governance-tiers.test.mjs` `requiredJobs()`
+   literal-array tests hardcoded the pre-#967 job count/set (fixed in C3);
+   `contributor-scaffold.mjs`'s `GATE_SUMMARY` and the two on-disk PR/MR
+   templates it byte-identity-guards needed a `base-branch` row (fixed in
+   C3); `test/review-regulated/fixture.mjs`'s canned status-check rollup
+   needed a `base-branch` entry or three e2e tests' causal-admission
+   evaluator flagged it as a required gate "not present in rollup" (fixed in
+   C3). None of these were named in tasks.md's C1–C8 list; all are the
+   direct, mechanical consequence of GOVERNANCE_JOBS growing from ten to
+   eleven, verified by running the full suite (not just the files tasks.md
+   named) before each commit.
+
+**Absence guards** (C6, re-run over the complete PR C diff):
+`git diff --stat origin/feature/issue-967...HEAD -- brain/core brain/project`
+is empty; `brain-ship.mjs`, `memory/lane/ship.mjs` and `status/stranded.mjs`
+byte-identity tests still green (246/246 in that file group); no `.title`
+reference in `base-branch.mjs` or the new `run-check.mjs` code; no new VCS
+port verb — `runBaseBranchCheck` reuses the existing injected `fetchIssue`
+closure, same shape `issue-link` already uses.
+
+**Verification**: full suite `GIT_CONFIG_GLOBAL=/dev/null npm test` →
+**5659 pass / 0 fail** (baseline before this batch: 5634, from PR B's close
+— +25: 13 base-branch.mjs unit tests + 11 run-check.mjs wrapper/ruling-1
+tests + 1 net new fixture-driven pass in the e2e suite). `npm run
+brain:repo:check` green before every commit. Tree clean, no `.memory/**`
+staged before the closing record-first commit, no AI attribution.
+
+**Learned (the transferable part)**: adding an 11th REQUIRED governance job
+touches more than the five sites design.md named — anything that snapshots
+`GOVERNANCE_JOBS`'s cardinality or membership as a literal (a "ten jobs"
+assertion, a hand-maintained `GATE_SUMMARY` table, a test fixture's canned
+CI status rollup) goes stale the moment the count changes, and the only way
+to find all of them honestly is to run the FULL suite after each
+registration step, not just the files a task list names in advance. The
+`local-ci-parity.test.mjs` risk (C4) turned out to be a non-event for a
+structural reason worth naming: that guard's scope is "the checks
+`brain-check.mjs` already runs," a hand-curated subset, not "every
+governance job" — so a CI-only gate can be added without ever entering that
+guard's field of view. That is a property of `brain-check.mjs`'s own design
+(a fixed literal list, not a `GOVERNANCE_JOBS` iteration), stated here so the
+next CI-only gate does not have its own local-parity risk overestimated by
+this precedent.
+
+**Next**: PR C is ready for the tracker PR (`feature/issue-967` → `main`,
+TR1–TR3). The maintainer's post-merge `npm run brain:protect` re-run (C9) is
+the one remaining unticked act, blocked on the tracker merging.

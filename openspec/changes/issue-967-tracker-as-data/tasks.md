@@ -340,7 +340,7 @@ Base: PR B's branch while B is open, retargeted to `feature/issue-967` once B
 merges. Estimated **150–175 counted source lines, ≈370 review lines**. Closes
 R967-7, R967-8, and R967-9/R967-10's absence scenarios over the complete diff.
 
-- [ ] C1a. `brain/scripts/governance/checks/base-branch.test.mjs` (new): failing
+- [x] C1a. `brain/scripts/governance/checks/base-branch.test.mjs` (new): failing
       tests for the **pure predicate alone** —
       `baseBranchRule({targetBranch, defaultBranch, sourceBranch, linkedIssue,
       parentIssue})`: a declared tracker with base `main` fails and the reason
@@ -352,9 +352,9 @@ R967-7, R967-8, and R967-9/R967-10's absence scenarios over the complete diff.
       tracker fails naming the epic and the bad value. **Mutation** (R967-7 S9,
       the revert proof): reverting `base-branch.mjs` alone turns exactly this file
       red — assert no other module imports it.
-- [ ] C1b. `brain/scripts/governance/checks/base-branch.mjs` (new, ~45 lines,
+- [x] C1b. `brain/scripts/governance/checks/base-branch.mjs` (new, ~45 lines,
       pure, `issue-link.mjs`'s shape, no IO) so C1a passes.
-- [ ] C2a. `brain/scripts/governance/run-check.test.mjs`: failing tests for
+- [x] C2a. `brain/scripts/governance/run-check.test.mjs`: failing tests for
       `runBaseBranchCheck(ctx, deps)` over design D10's eight steps with an
       injected `fetchIssue` — (1) non-string `ctx.body` → `uncomputable`; (2)
       `requiresClosingKeyword(ctx) === null` → **fail closed**; (3) a `feature/`
@@ -367,19 +367,19 @@ R967-7, R967-8, and R967-9/R967-10's absence scenarios over the complete diff.
       at tier `lite` does **not** soften this gate's `pass: false` (ruling 1).
       **Mutation**: setting the `lite` row to `detection` turns the last assertion
       red; returning a pass on step 5 turns the deny-reader test red (#942).
-- [ ] C2b. `brain/scripts/governance/run-check.mjs`: add `runBaseBranchCheck`
+- [x] C2b. `brain/scripts/governance/run-check.mjs`: add `runBaseBranchCheck`
       reusing the module-private `defaultFetchIssue` (`:197-207`),
       `extractIssueNumber` (`:235-247`) and `requiresClosingKeyword`
       (`:359-369`'s reason shape) in place — nothing exported, the file stays
       "entry point, never a library" (`detection-policy.mjs:5-15`). So C2a passes.
-- [ ] C3a. Register site 1 only — append `'base-branch'` after `'lane-scrub'` in
+- [x] C3a. Register site 1 only — append `'base-branch'` after `'lane-scrub'` in
       `brain/scripts/vcs/governance-checks.mjs:41-54` — and run the suite. RED via
       four **pre-existing** oracles: `governance-checks.test.mjs`'s YAML-order
       guard, `governance-tiers.test.mjs`'s REQ-TIER-8 key-set parity (both
       directions), `run-check.test.mjs`'s T7 manifest parity (both directions),
       and `workflow-auth.mjs:566-567`'s VCS_TOKEN rule. This partial state is the
       failing test for C3b (R967-7 S8).
-- [ ] C3b. Land the remaining four registration sites in the same commit:
+- [x] C3b. Land the remaining four registration sites in the same commit:
       (2) the `GATE_MATRIX` row after `lane-scrub` at
       `brain/scripts/vcs/governance-tiers.mjs:225-234`, `required` at **every**
       tier including `lite` with `evidence: 'declared-tracker'` (ruling 1);
@@ -391,7 +391,7 @@ R967-7, R967-8, and R967-9/R967-10's absence scenarios over the complete diff.
       `:122-126`; (5) `run-check.mjs:483-488` `'base-branch': true` in
       `SUBCOMMAND_PORT_REACH` plus the dispatch branch at `:542-547`. All four
       guards go green.
-- [ ] C4. Drift-guard check with no weakening allowed:
+- [x] C4. Drift-guard check with no weakening allowed:
       `brain/scripts/governance/local-ci-parity.test.mjs` feeds one fixture to
       both `brain-check.mjs` and `run-check.mjs` for the checks `brain:check`
       runs. `base-branch` is CI-only and has no local counterpart. If that suite
@@ -399,7 +399,19 @@ R967-7, R967-8, and R967-9/R967-10's absence scenarios over the complete diff.
       **never** a relaxed assertion (its rule is one-sided: local may never pass
       where CI fails). If a local implementation is needed, stop and report: it is
       a scope question, not an apply decision.
-- [ ] C5. `openspec/changes/issue-967-tracker-as-data/brain-drafts/` — two draft
+      **Outcome**: ran green, 18/18, unaffected — `local-ci-parity.test.mjs`'s
+      `CI_JOB` map (`{issueLink, memoryPresence}`) and `brain-check.mjs`'s check
+      list are both hand-curated literals, never derived from `GOVERNANCE_JOBS`;
+      `base-branch` was never taught to either, so it is outside this guard's
+      scope rather than caught failing it. The underlying risk the task names
+      stands regardless: `base-branch` has no local counterpart today. Two
+      options, not taken here (scope question, not an apply decision): (a) add
+      a `base-branch` row to `brain-check.mjs`'s fixed check list — small, but
+      requires a local `fetchIssue`/network substitute `brain:check` does not
+      otherwise need; (b) leave it CI-only, documented — cheaper, but a
+      contributor's local `brain:check` cannot warn them about a wrong base
+      before pushing.
+- [x] C5. `openspec/changes/issue-967-tracker-as-data/brain-drafts/` — two draft
       files for the maintainer, nothing under `brain/core/**` or `brain/project/**`
       (R967-8 S1):
       `lite-required-base-branch.md` (target
@@ -413,14 +425,14 @@ R967-7, R967-8, and R967-9/R967-10's absence scenarios over the complete diff.
       *Delivery note*: proposal.md put the block-keys draft in PR A; both land
       here. Drafts are uncounted (`openspec/changes/**` ignored), so the move
       costs no review budget in either slice.
-- [ ] C6. Absence guards over the complete diff — `git diff` shows no path under
+- [x] C6. Absence guards over the complete diff — `git diff` shows no path under
       `brain/core/**` or `brain/project/**` (R967-8 S1); `brain-ship.mjs:259`,
       `memory/lane/ship.mjs:206` and `status/stranded.mjs` are byte-identical
       (R967-10); no sub-issues endpoint and no new port verb (R967-10); no title
       pattern is matched in the parser, the leaf or the gate (R967-9 S2).
-- [ ] C7. Verify: `GIT_CONFIG_GLOBAL=/dev/null npm test` and
+- [x] C7. Verify: `GIT_CONFIG_GLOBAL=/dev/null npm test` and
       `npm run brain:repo:check` both green.
-- [ ] C8. `npm run memory:save -- "base-branch is a required gate at lite and
+- [x] C8. `npm run memory:save -- "base-branch is a required gate at lite and
       refuses a slice PR against main" "<summary of the pure rule, the
       run-check wrapper, the five registration sites, the fail-closed reader rule
       and the two doctrine drafts landed in this PR>" --issue 967 --type
