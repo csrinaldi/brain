@@ -127,6 +127,30 @@ test('#998 R998-4: readChanges also lists openspec/changes/archive/<issue> rows,
   assert.deepEqual(nine.missing.value, [], 'at lite only spec.md is required, and it is there too');
 });
 
+// ── cold review of #1008/PR6: hasSpec's nested-specs/ tolerance through the archive path ──
+
+test('#998 cold-1008: an archived row with the nested specs/*/spec.md convention still resolves spec:true', () => {
+  const files = {
+    'openspec/changes': [],
+    'openspec/changes/archive': ['12'],
+    'openspec/changes/archive/12': ['tasks.md', 'specs'],
+    'openspec/changes/archive/12/specs': ['a'],
+  };
+  const c = readChanges({
+    root: '/fake',
+    tier: 'lite',
+    _list: (p) => { if (!(p in files)) throw new Error(`ENOENT: ${p}`); return files[p]; },
+    _exists: (p) => p === 'openspec/changes/archive'
+      || p === 'openspec/changes/archive/12/tasks.md'
+      || p === 'openspec/changes/archive/12/specs'
+      || p === 'openspec/changes/archive/12/specs/a/spec.md',
+    _read: (p) => { if (p === 'openspec/changes/archive/12/tasks.md') return '- [ ] x'; throw new Error('missing'); },
+  });
+  assert.equal(c.ok, true);
+  const [twelve] = c.value.filter((x) => x.archived);
+  assert.equal(twelve.artefacts.spec, true, 'the nested specs/*/spec.md convention must resolve through the archive path too, the same as an active change dir');
+});
+
 test('#998 R998-4: a missing archive dir is "no archived changes", never an error', () => {
   const files = { 'openspec/changes': ['issue-1-a'], 'openspec/changes/issue-1-a': ['tasks.md'] };
   const c = readChanges({
