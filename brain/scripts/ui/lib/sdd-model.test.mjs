@@ -129,6 +129,27 @@ test('#998 R998-4: tasks half ticked is in-progress, not done', () => {
   assert.equal(stageOf(model, 'issue-3-half', 'tasks').state, 'in-progress');
 });
 
+// ── cold review of #1008/PR6: the '—' sentinel is not a "next" ─────────────
+//
+// `derive.mjs`'s `deriveTasks()` renders a done-or-task-less change's `next`
+// field as the literal '—' (its own display sentinel, printed verbatim by
+// other consumers) rather than `null`. `buildTasksSummary` used to forward
+// that sentinel unchanged, so the SDD row rendered "next: —" for every such
+// change — a "next" that IS the dash is no next at all.
+
+test('#998 cold-1008: a next value of the literal dash sentinel normalises to null — a done change has no "next"', () => {
+  const model = buildSddModel({ ok: true, value: [FULL] });
+  const c = model.value.changes[0];
+  assert.equal(c.tasks.checked, 3);
+  assert.equal(c.tasks.next, null, 'FULL\'s own next.value is the "—" sentinel (zero open items) — not a real next task');
+});
+
+test('#998 cold-1008: a real next task value survives untouched', () => {
+  const model = buildSddModel({ ok: true, value: [HALF_TICKED] });
+  const c = model.value.changes[0];
+  assert.equal(c.tasks.next, 'do the thing');
+});
+
 // ── review of PR 4, fix 5: tasks.md exists but could not be read/parsed ────
 
 test('#998 fix5: tasks.md exists but its checked count could not be read — the tasks stage is unreadable, distinct from missing, with the reason', () => {
