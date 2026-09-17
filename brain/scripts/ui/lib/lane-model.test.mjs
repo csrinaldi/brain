@@ -36,6 +36,32 @@ test('#998 R998-3: the undeclared majority lands in the `?` holding lane, collap
   assert.equal(model.value.holding.collapsed, true, 'the `?` lane is collapsed by default');
   const totalInLanes = model.value.lanes.reduce((sum, l) => sum + l.count, 0);
   assert.equal(totalInLanes + model.value.holding.count, 91, 'every node lands in exactly one lane or the holding lane');
+  const s = model.value.edgeSummary;
+  assert.equal(s.laneInternal + s.holdingInternal + s.crossLane + s.unknownNode, 0, 'no edges in this fixture, so every count and the sum is zero');
+  assert.equal(s.total, 0, "the 91-node fixture's edgeSummary sums to its edge count (0)");
+});
+
+test('#998 R998-3: an edge between two undeclared nodes belongs to the holding lane — it is classified, not swallowed', () => {
+  const model = buildLaneModel(graph({
+    nodes: [node(1, { track: null }), node(2, { track: null })],
+    edges: [{ from: 1, to: 2 }],
+  }));
+  assert.equal(model.value.holding.edges.length, 1, 'the holding-holding edge lands in holding.edges');
+  assert.equal(model.value.holding.edges[0].from, 1);
+  assert.equal(model.value.holding.edges[0].to, 2);
+  assert.equal(model.value.holding.edgeCount, 1, 'counted for the collapsed header');
+  assert.deepEqual(model.value.edgeSummary, { laneInternal: 0, holdingInternal: 1, crossLane: 0, unknownNode: 0, total: 1 });
+});
+
+test('#998 R998-3: an edge from the holding lane to a declared track crosses lanes, named `?`', () => {
+  const model = buildLaneModel(graph({
+    nodes: [node(1, { track: null }), node(2, { track: 'A' })],
+    edges: [{ from: 1, to: 2 }],
+  }));
+  assert.deepEqual(model.value.crossEdges, [{ from: 1, to: 2, fromTrack: '?', toTrack: 'A' }]);
+  assert.equal(model.value.holding.edges.length, 0, 'a cross-lane edge belongs to neither the holding board nor a lane board');
+  assert.equal(model.value.edgeSummary.crossLane, 1);
+  assert.equal(model.value.edgeSummary.total, 1);
 });
 
 test('#998 R998-3: the holding lane pages at 24 per page', () => {
