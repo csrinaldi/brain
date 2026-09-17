@@ -524,9 +524,29 @@ async function runBaseBranchCheck(ctx, deps) {
   // other head takes below.
 
   // Step 4 — no linked issue is the standing case (memory-lane / no-issue PRs).
+  // A `feature/…`-spelled head is not itself a decision (step 3 above: only
+  // the linked issue's own `tracker:` declaration can say a head IS a
+  // tracker), but with no issue linked there is no declaration left to read,
+  // so a `feature/…` head that targets anything but the default branch is
+  // evidence the gate cannot resolve either way — R967-7 makes a tracker's
+  // own integration PR unconditional, so this must fail closed and demand
+  // the issue link rather than pass silently (PR #1006 review round 2).
   const closingRequired = requiresClosingKeyword(ctx);
   const issueNumber = extractIssueNumber(ctx.body, closingRequired);
-  if (issueNumber == null) return { pass: true };
+  if (issueNumber == null) {
+    if (headBranch?.startsWith('feature/') && ctx.targetBranch !== ctx.defaultBranch) {
+      return {
+        pass: false,
+        uncomputable: true,
+        reason:
+          `base-branch: head "${headBranch}" looks like a tracker branch and targets ` +
+          `"${ctx.targetBranch}", not "${ctx.defaultBranch}" — link the issue whose epic ` +
+          'declares (or does not declare) this head as its tracker; without it the gate ' +
+          'cannot tell a tracker from a slice and fails closed',
+      };
+    }
+    return { pass: true };
+  }
 
   // Step 5 — the linked issue, fail closed on a throw or an unreadable body.
   const fetchIssue = deps.fetchIssue ?? defaultFetchIssue(ctx, deps);

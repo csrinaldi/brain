@@ -1128,6 +1128,54 @@ test('runCheck: base-branch — no linked issue reference → pass untouched, th
   assert.equal(fetchCalled, false);
 });
 
+// PR #1006 cold review round 2 (blocker): step 4 passed ANY no-issue PR before
+// the tracker rule (step 3/R967-7) ever ran, including a head that spells
+// itself like a tracker branch (`feature/…`) and targets something other than
+// the default branch — exactly the shape R967-7 says MUST target default,
+// unconditionally. The prefix alone can never decide tracker-vs-slice (that
+// still requires the linked issue's own declaration), but with no issue linked
+// at all there is no declaration to read, so the gate cannot tell a tracker
+// from a slice and must fail closed and ask for the evidence, not pass.
+
+test('runCheck: base-branch — no linked issue + feature/... head not targeting default → fails closed, names head/target/default, fetchIssue never called (measured bug, PR #1006 review round 2)', async () => {
+  let fetchCalled = false;
+  const result = await runCheck('base-branch', {
+    ctx: {
+      body: 'no issue reference at all, oops',
+      sourceBranch: 'feature/brain-ui',
+      targetBranch: 'feature/other-tracker',
+      defaultBranch: 'main',
+    },
+    fetchIssue: async () => { fetchCalled = true; throw new Error('should never be called'); },
+  });
+  assert.equal(result.pass, false);
+  assert.equal(result.uncomputable, true);
+  assert.ok(result.reason.includes('feature/brain-ui'), `must name the head, got: ${result.reason}`);
+  assert.ok(result.reason.includes('feature/other-tracker'), `must name the target, got: ${result.reason}`);
+  assert.ok(result.reason.includes('main'), `must name the default branch, got: ${result.reason}`);
+  assert.equal(fetchCalled, false, 'no issue is linked — there is nothing to fetch');
+});
+
+test('runCheck: base-branch — no linked issue + feature/... head targeting default → pass (the tracker rule is satisfied either way)', async () => {
+  let fetchCalled = false;
+  const result = await runCheck('base-branch', {
+    ctx: { body: 'no issue reference at all', sourceBranch: 'feature/brain-ui', targetBranch: 'main', defaultBranch: 'main' },
+    fetchIssue: async () => { fetchCalled = true; return { body: '' }; },
+  });
+  assert.deepEqual(result, { pass: true });
+  assert.equal(fetchCalled, false);
+});
+
+test('runCheck: base-branch — no linked issue + non-feature head → pass, unchanged (memory-lane / no-issue PRs remain the standing case)', async () => {
+  let fetchCalled = false;
+  const result = await runCheck('base-branch', {
+    ctx: { body: 'no issue reference at all', sourceBranch: 'fix/x', targetBranch: 'feature/other', defaultBranch: 'main' },
+    fetchIssue: async () => { fetchCalled = true; return { body: '' }; },
+  });
+  assert.deepEqual(result, { pass: true });
+  assert.equal(fetchCalled, false);
+});
+
 test('runCheck: base-branch — fetchIssue(linked) throws → fail closed and uncomputable, never a silent pass (step 5)', async () => {
   const result = await runCheck('base-branch', {
     ctx: { body: 'Closes #878', sourceBranch: 'slice/x', targetBranch: 'main', defaultBranch: 'main' },
