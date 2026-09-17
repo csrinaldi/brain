@@ -179,10 +179,17 @@ const SDD_STAGES = [...LIFECYCLE_STAGES, 'apply', 'verify', 'archive'];
  * (every change, at once); a single row's own tab draws the raw fact.
  */
 function buildSddTab({ snapshot, issue, dir }) {
+  // `dir` is `findChangeDir(snapshot, issue)` — the SAME `snapshot.changes
+  // .value.find(c => c.issue === issue)` predicate this function would
+  // otherwise re-run, over the same (already-checked-ok) `snapshot.changes`
+  // section. `!dir` already covers "the changes section could not be read"
+  // and "no row for this issue" — `readChanges` never yields a row without
+  // a `dir`, so a second, differently-worded reason for the same cause
+  // would only ever be a dead branch (found by cold review of #1008/PR6:
+  // the row-lookup branch below was unreachable — `noChangeDirTab` always
+  // fired first). One reason, said once, shared with the spec/tasks tabs.
   if (!dir) return noChangeDirTab(issue);
-  if (!snapshot?.changes?.ok) return { ok: false, reason: 'the changes section could not be read' };
   const row = snapshot.changes.value.find((c) => c.issue === issue);
-  if (!row) return { ok: false, reason: `issue ${issue} has no row in the changes section` };
   const artefacts = row.artefacts ?? {};
   return { ok: true, value: SDD_STAGES.map((stage) => ({ stage, present: Boolean(artefacts[stage]), source: { path: dir } })) };
 }

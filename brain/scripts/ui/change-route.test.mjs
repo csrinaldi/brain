@@ -377,7 +377,7 @@ test('#998 R998-6: the sdd tab lists the seven stages\' raw presence for this is
   ]);
 });
 
-test('#998 R998-6: no matching row in the changes section is the sdd tab\'s own said reason', () => {
+test('#998 R998-6: no change dir for this issue is the sdd tab\'s own said reason — the exact noChangeDirTab reason, the same fact the spec/tasks tabs already share for this cause, never a second wording for it', () => {
   const root = makeRoot();
   const snapshot = makeSnapshot({ changes: [] });
   const run = recordingRun((args) => {
@@ -386,8 +386,11 @@ test('#998 R998-6: no matching row in the changes section is the sdd tab\'s own 
     throw new Error(`unexpected git call: ${args.join(' ')}`);
   });
   const result = buildChangeView({ root, issue: ISSUE, snapshot, _run: run });
-  assert.equal(result.value.sdd.ok, false);
-  assert.match(result.value.sdd.reason, new RegExp(`${ISSUE}`));
+  assert.deepEqual(result.value.sdd, {
+    ok: false,
+    reason: `no change dir at openspec/changes/issue-${ISSUE}-*`,
+    source: { path: `openspec/changes/issue-${ISSUE}-*` },
+  });
 });
 
 test('#881: when every review thread of the issue is unreadable the tab is ok:false and names them — never an empty list', () => {
