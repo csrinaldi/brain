@@ -41,6 +41,6 @@ export function memoryPresence(observations) {
   if (obs.some(o => o?.type === 'session_summary')) return { pass: true };
   return {
     pass: false,
-    reason: 'no session_summary observation found in committed .memory/ — capture a session summary (mem_session_summary / brain:save) before closing',
+    reason: 'no session_summary observation found in committed .memory/ — capture a session summary (mem_session_summary) before closing',
   };
 }
