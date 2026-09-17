@@ -259,7 +259,7 @@ merges. Depends on A: `resolveBase` reads `parseGraphBlock`'s new `parent`,
 `kind` and `tracker`. Estimated **155–185 counted source lines, ≈360 review
 lines**. Closes R967-5, R967-6, R967-9's resolver half.
 
-- [x] B1a. `brain/scripts/lib/ticket-args.test.mjs`: three added tests —
+- [ ] B1a. `brain/scripts/lib/ticket-args.test.mjs`: three added tests —
       `parseTicketArgs(['881'])` returns `baseExplicit: false` and
       `parseTicketArgs(['881','--base','main'])` returns `baseExplicit: true`,
       both still `baseBranch: 'main'` (R967-6 S1); `--off-tracker` sets
@@ -268,11 +268,11 @@ lines**. Closes R967-5, R967-6, R967-9's resolver half.
       untouched and green. **Mutation**: returning `baseBranch: null` when absent
       turns those four existing assertions red — the measured reason the flag
       exists (design Q1).
-- [x] B1b. `brain/scripts/lib/ticket-args.mjs`: add
+- [ ] B1b. `brain/scripts/lib/ticket-args.mjs`: add
       `export const OFF_TRACKER_FLAG = '--off-tracker'`,
       `baseExplicit: baseIdx >= 0` and `offTracker: args.includes(OFF_TRACKER_FLAG)`,
       keeping `baseBranch`'s `'main'` default at `:60-61`, so B1a passes.
-- [x] B2a. `brain/scripts/lib/ticket-base.test.mjs` (new): failing tests for the
+- [ ] B2a. `brain/scripts/lib/ticket-base.test.mjs` (new): failing tests for the
       six rows of design D7 with an injected `fetchIssue` and no repository —
       row 1 tracker resolved, `say.key = 'ticket.base.fromEpic'` naming the epic
       and the source (R967-5 S1); row 2 the three no-tracker reasons, each with
@@ -289,12 +289,12 @@ lines**. Closes R967-5, R967-6, R967-9's resolver half.
       making row 3 refuse turns the fail-open test red; walking a second hop turns
       the one-hop test red; calling the port on row 6 turns its call-count
       assertion red.
-- [x] B2b. `brain/scripts/lib/ticket-base.mjs` (new): implement
+- [ ] B2b. `brain/scripts/lib/ticket-base.mjs` (new): implement
       `resolveBase({issue, args, fetchIssue, defaultBranch = 'main'})` — pure,
       returning `{ok, base, say: {key, params}}` or
       `{ok: false, refusal: {key, params}}`, **never** a rendered message and
       never `t()`; no `_now`. So B2a passes.
-- [x] B3. `brain/scripts/i18n/en.mjs` (after `:289`) and `es.mjs`: add
+- [ ] B3. `brain/scripts/i18n/en.mjs` (after `:289`) and `es.mjs`: add
       `ticket.base.fromEpic`, `.noEpic`, `.epicUnreadable`, `.offTracker` and
       `ticket.error.baseIsTracked`, and add the `--off-tracker` spelling to
       `ticket.error.usage` (`en.mjs:262`). The failing test already exists:
@@ -302,7 +302,7 @@ lines**. Closes R967-5, R967-6, R967-9's resolver half.
       without its `es` twin (R967-6 S6) — add the `en` keys first, watch it go
       red, then the `es` twins. No new doctrine-oracle test:
       `harness-contract.md:28` already carries the rule (design D8, proposal R4).
-- [x] B4. `brain/scripts/ticket-start.mjs`: call `resolveBase` between the
+- [ ] B4. `brain/scripts/ticket-start.mjs`: call `resolveBase` between the
       `issueView` at `:93` and the `ticket.updatingBase` line at `:132`, building
       the `fetchIssue` closure from the `vcs`/`project` already in scope; print
       `await t(say.key, say.params)`; on a refusal print `t(refusal.key, params)`
@@ -315,9 +315,9 @@ lines**. Closes R967-5, R967-6, R967-9's resolver half.
       `git worktree list` and `git branch` are unchanged; the same command with
       `--off-tracker` says it went off tracker. Record the exact commands and
       output in apply-progress.
-- [x] B6. Verify: `GIT_CONFIG_GLOBAL=/dev/null npm test` and
+- [ ] B6. Verify: `GIT_CONFIG_GLOBAL=/dev/null npm test` and
       `npm run brain:repo:check` both green.
-- [x] B7. `npm run memory:save -- "brain:ticket:start resolves its base from the
+- [ ] B7. `npm run memory:save -- "brain:ticket:start resolves its base from the
       epic's declared tracker" "<summary of baseExplicit, the resolveBase leaf,
       the fail-open rule, --off-tracker and the six new i18n pairs landed in this
       PR>" --issue 967 --type decision`, staged with only the new
