@@ -8,14 +8,14 @@ Delivery: feature-branch-chain on the tracker `feature/issue-998-ui-surface` (cr
 {"slice": 1, "claims": ["R998-1"], "files": ["brain/scripts/ui/lib/state-vocab.mjs", "brain/scripts/ui/lib/provenance.mjs", "brain/scripts/ui/lib/colour.mjs", "brain/scripts/ui/lib/drawer-model.mjs", "brain/scripts/ui/static/app.css", "brain/scripts/ui/static/index.html"], "terminal_pr": "the tracker feature/issue-998-ui-surface -> main"}
 ```
 
-- [ ] T1a. `lib/state-vocab.test.mjs`: the exhaustive matrix over the nine codes (label, mark, className), priority order, the throw on an unmapped state, `not-computed` ≠ `unknown`. RED.
-- [ ] T1b. `lib/state-vocab.mjs`: `stateOf(node)`; `colour.mjs` delegates to it (one table). Mutation: swap two priorities → red.
-- [ ] T2a. `lib/provenance.test.mjs` retargeted: the five forms; the property test over every shaper kept. RED.
-- [ ] T2b. `lib/provenance.mjs`: `sourceLabel`; `drawer-model.mjs` imports it. Mutation: raw URL instead of `[forge: #n]` → red.
-- [ ] T3a. `static/tokens.test.mjs`: every `--state-<code>-fg/bg` for every exported code; every dark token also on bare `:root`; no external URL in `app.css`/`index.html`; system font stacks. RED.
-- [ ] T3b. `static/app.css`: the token block; existing classes re-pointed; light values unchanged. Mutation: delete one state token → red.
-- [ ] T4. `lib/source-guard.test.mjs` / `static/app-source-guard.test.mjs`: the `innerHTML` assertion (if absent).
-- [ ] T5. `GIT_CONFIG_GLOBAL=/dev/null npm test` and `npm run brain:repo:check` green; counted diff under 1000.
+- [x] T1a. `lib/state-vocab.test.mjs`: the exhaustive matrix over the nine codes (label, mark, className), priority order, the throw on an unmapped state, `not-computed` ≠ `unknown`. RED.
+- [x] T1b. `lib/state-vocab.mjs`: `stateOf(node)`; `colour.mjs` delegates to it (one table). Mutation: swap two priorities → red.
+- [x] T2a. `lib/provenance.test.mjs` retargeted: the five forms; the property test over every shaper kept. RED.
+- [x] T2b. `lib/provenance.mjs`: `sourceLabel`; `drawer-model.mjs` imports it. Mutation: raw URL instead of `[forge: #n]` → red.
+- [x] T3a. `static/tokens.test.mjs`: every `--state-<code>-fg/bg` for every exported code; every dark token also on bare `:root`; no external URL in `app.css`/`index.html`; system font stacks. RED.
+- [x] T3b. `static/app.css`: the token block; existing classes re-pointed; light values unchanged. Mutation: delete one state token → red.
+- [x] T4. `lib/source-guard.test.mjs` / `static/app-source-guard.test.mjs`: the `innerHTML` assertion (if absent).
+- [x] T5. `GIT_CONFIG_GLOBAL=/dev/null npm test` and `npm run brain:repo:check` green; counted diff under 1000.
 - [ ] T6. `npm run memory:save -- "<title>" "<content>" --issue 998 --type decision`; stage only the record and `.memory/index.jsonl`.
 
 ## PR 2 — view model, nav, router, keyboard (R998-2)
