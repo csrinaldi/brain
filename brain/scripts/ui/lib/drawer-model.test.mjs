@@ -194,6 +194,21 @@ test('#998 R998-5: the detail\'s finding count reads findingCount, not findings.
   assert.deepEqual(round.children, []);
 });
 
+test('#1009 cold review finding 1: a malformed findings block is one entry saying its block is unreadable, naming the malformed keys, never conflated with a clean zero-findings round', () => {
+  const model = buildDrawerModel(view({
+    reviews: {
+      ok: true,
+      sourceNote: 'forge comments until #880 lands',
+      unreadable: [],
+      value: [{ pr: 971, rev: 3, verdict: 'REVISE', author: 'bob', findings: [], findingCount: null, malformed: ['findings'], head_sha: 'abc', source: { url: 'https://github.com/o/r/pull/971#c3' } }],
+    },
+  }));
+  const [round] = model.value.tabs[4].entries;
+  assert.match(round.detail, /findings block unreadable/, 'a malformed findings block must be said by name, not folded into a generic "unknown" count');
+  assert.match(round.detail, /findings/, 'the said text must name which keys were malformed');
+  assert.deepEqual(round.children, []);
+});
+
 test('#881 R881-9: a review thread that could not be read is listed with its reason and its PR URL, never skipped', () => {
   const model = buildDrawerModel(view({
     reviews: {

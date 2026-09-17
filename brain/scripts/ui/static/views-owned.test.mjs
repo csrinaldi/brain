@@ -80,6 +80,17 @@ test('#998 R998-5: a finding\'s own source goes through the same sourceStamp hel
   assert.match(APP_JS, /renderSourceStamp\(sourceStamp\(f\.source\)\)/, 'renderReviewRound must apply sourceStamp to each finding\'s own source (file:line when present)');
 });
 
+test('#1009 cold review finding 1: renderReviewRound checks round.malformed before the empty-findings case, so a malformed round is never rendered as "no findings"', () => {
+  const fnMatch = APP_JS.match(/function renderReviewRound\([^)]*\) \{[\s\S]*?\n}\n/);
+  assert.ok(fnMatch, 'renderReviewRound function must exist in app.js');
+  const body = fnMatch[0];
+  const malformedIdx = body.indexOf('round.malformed');
+  const emptyIdx = body.indexOf('round.findings.length === 0');
+  assert.ok(malformedIdx !== -1, 'renderReviewRound must check round.malformed');
+  assert.ok(emptyIdx !== -1, 'renderReviewRound must still check the empty-findings case');
+  assert.ok(malformedIdx < emptyIdx, 'the malformed check must come before the empty-findings case, so a malformed round is never read as "no findings"');
+});
+
 // ── #998 R998-6: the served branch and the poll countdown ───────────────────
 
 test('#998 R998-6 T3: the status bar names the served branch through the same sourceStamp helper the door uses', () => {

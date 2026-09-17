@@ -35,6 +35,12 @@ function shapeRound(v) {
     headSha7: typeof v.head_sha === 'string' ? v.head_sha.slice(0, 7) : null,
     author: v.author,
     findings,
+    // Carried forward, never dropped (#1009 cold review finding 1): a
+    // malformed findings block reaches here as {findings: [], findingCount:
+    // null, malformed: [...]} (reviewRows) — losing either field makes this
+    // round indistinguishable from a clean verdict with zero findings.
+    findingCount: v.findingCount ?? null,
+    malformed: v.malformed ?? [],
     bySeverity: bySeverity(findings),
   };
 }
@@ -47,11 +53,19 @@ function threadState(reviewRow) {
   return { rounds, latest: rounds.at(-1) ?? null, noRound: rounds.length === 0 };
 }
 
-/** The two "waiting on a verdict right now" cases (R998-5) — never an unreadable or an APPROVE-latest thread. */
+/**
+ * The two "waiting on a verdict right now" cases (R998-5) — never an
+ * unreadable or an APPROVE-latest thread. Returns `{waiting, head}`, never a
+ * bare string or null (#1009 cold review finding 2): `head` is `null` both
+ * when nothing is waiting AND when a REVISE thread's head_sha could not be
+ * parsed, so `waiting` — not a `!== null` check on the old string return —
+ * is what the queue filter must read; collapsing those two `null`s into one
+ * sentinel silently dropped an unparseable-head REVISE thread from the queue.
+ */
 function waitingOn(thread) {
-  if (thread.noRound) return 'no round posted';
-  if (thread.latest?.verdict === 'REVISE') return thread.latest.headSha7;
-  return null;
+  if (thread.noRound) return { waiting: true, head: null };
+  if (thread.latest?.verdict === 'REVISE') return { waiting: true, head: thread.latest.headSha7 };
+  return { waiting: false, head: null };
 }
 
 /**
@@ -75,8 +89,17 @@ export function buildReviewTimeline(reviewsSection, prsSection, { issue } = {}) 
     .sort((a, b) => a.pr - b.pr);
 
   const queue = threads
-    .filter((t) => waitingOn(t) !== null)
-    .map((t) => ({ pr: t.pr, issue: t.issue, title: t.title, wait: waitingOn(t) }));
+    .map((t) => ({ t, w: waitingOn(t) }))
+    .filter(({ w }) => w.waiting)
+    .map(({ t, w }) => ({
+      pr: t.pr,
+      issue: t.issue,
+      title: t.title,
+      // `noRound` and `REVISE with an unreadable head` are both "head is
+      // null" but distinct reasons (#1009 cold review finding 2) — never the
+      // same wait string.
+      wait: t.noRound ? 'no round posted' : (w.head ?? 'head not readable'),
+    }));
 
   const totals = { threads: threads.length, queue: queue.length, unreadable: threads.filter((t) => t.unreadable).length };
 
