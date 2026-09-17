@@ -118,6 +118,18 @@ test('#998 R998-5: a failed prs or reviews section is the timeline\'s own reason
   assert.deepEqual(failedReviews, { ok: false, reason: 'gh exploded' });
 });
 
+test('#1009 cold review finding 1: a malformed findings block keeps its malformed keys and null findingCount on the shaped round, never dropped to {findings: [], bySeverity: {}}', () => {
+  const t = buildReviewTimeline(
+    reviews([{ pr: 7, ok: true, verdicts: [verdict(1, 'REVISE', { pr: 7, findings: [], findingCount: null, malformed: ['findings'] })], latest: null }]),
+    prs([{ number: 7, title: 'malformed', headBranch: 'feat/malformed', issue: 7 }]),
+  );
+  const round = t.value.threads[0].rounds[0];
+  assert.deepEqual(round.malformed, ['findings'], 'shapeRound must carry the verdict\'s malformed keys forward');
+  assert.equal(round.findingCount, null, 'uncomputable, distinct from a verdict that declared zero findings');
+  assert.deepEqual(round.findings, []);
+  assert.deepEqual(round.bySeverity, {});
+});
+
 test('#998 R998-5: totals count threads, the queue, and unreadable threads', () => {
   const t = buildReviewTimeline(
     reviews([{ pr: 1, ok: true, verdicts: [verdict(1, 'REVISE', { pr: 1 })], latest: null }, { pr: 2, ok: false, reason: 'x' }]),

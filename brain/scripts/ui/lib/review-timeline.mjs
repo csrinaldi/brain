@@ -35,6 +35,12 @@ function shapeRound(v) {
     headSha7: typeof v.head_sha === 'string' ? v.head_sha.slice(0, 7) : null,
     author: v.author,
     findings,
+    // Carried forward, never dropped (#1009 cold review finding 1): a
+    // malformed findings block reaches here as {findings: [], findingCount:
+    // null, malformed: [...]} (reviewRows) — losing either field makes this
+    // round indistinguishable from a clean verdict with zero findings.
+    findingCount: v.findingCount ?? null,
+    malformed: v.malformed ?? [],
     bySeverity: bySeverity(findings),
   };
 }

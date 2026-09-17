@@ -95,15 +95,23 @@ function findingEntries(round) {
 }
 
 function reviewEntries(rounds, unreadable) {
-  const read = rounds.map((round) => entry({
-    title: `#${round.pr} rev ${round.rev} — ${round.verdict}`,
-    // `findingCount`, not `findings.length` (#998 R998-5): a malformed
-    // verdict keeps `findings: []` with `findingCount: null` — reading
-    // `.length` there would silently say "0 findings" for "uncomputable".
-    detail: `${round.author ?? 'unknown author'}, ${round.findingCount === null ? 'unknown finding count' : `${round.findingCount} finding(s)`}${round.head_sha ? `, head ${round.head_sha}` : ''}`,
-    source: round.source,
-    children: findingEntries(round),
-  }));
+  const read = rounds.map((round) => {
+    const countPart = round.findingCount === null ? 'unknown finding count' : `${round.findingCount} finding(s)`;
+    // A malformed findings block is named explicitly, not folded into the
+    // generic "unknown finding count" phrase (#1009 cold review finding 1):
+    // `round.malformed` names WHICH keys were unreadable, and dropping that
+    // name here would leave this row indistinguishable from a round whose
+    // finding count was merely uncomputable for some other reason.
+    const detail = round.malformed?.length
+      ? `findings block unreadable: ${round.malformed.join(', ')} (${countPart})`
+      : `${round.author ?? 'unknown author'}, ${countPart}${round.head_sha ? `, head ${round.head_sha}` : ''}`;
+    return entry({
+      title: `#${round.pr} rev ${round.rev} — ${round.verdict}`,
+      detail,
+      source: round.source,
+      children: findingEntries(round),
+    });
+  });
   // After the rounds that WERE read, never instead of them.
   const missed = unreadable.map((thread) => entry({
     title: `#${thread.pr} — unreadable`,
