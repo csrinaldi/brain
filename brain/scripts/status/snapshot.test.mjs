@@ -351,6 +351,14 @@ test('#998 R998-5: a finding carrying file/line (the real emitted anchor, verdic
   assert.equal(r.verdicts[0].findings[1].line, null);
 });
 
+test("#1009 cold review finding 3: a finding's line of 0 parses to null — hasUsableAnchor (verdict.mjs) never emits line 0, and provenance.mjs's falsy check would silently drop it", () => {
+  const body = VERDICT_WITH_FINDINGS('abc', 1, 'REVISE', [
+    { id: 'F-1', severity: 'blocker', evidence: 'e', file: 'brain/scripts/governance/run-check.mjs', line: 0 },
+  ]);
+  const r = reviewRows(11, [{ body, author: 'bot' }]);
+  assert.equal(r.verdicts[0].findings[0].line, null, 'line 0 is not a usable anchor — parseFindingLine must reject it, same as non-numeric input');
+});
+
 test('#998 R998-5: a malformed findings block keeps findings: [] with the reason said in malformed, not silently "no findings"', () => {
   const body = VERDICT_MALFORMED_FINDINGS('def', 2, 'REVISE');
   const r = reviewRows(6, [{ body, author: 'bot' }]);

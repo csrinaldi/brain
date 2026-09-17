@@ -126,14 +126,23 @@ const EVIDENCE_EXCERPT_LEN = 240;
 
 /**
  * A finding's `line` scalar, as `parseVerdict` hands it back (always a
- * string — `unyamlScalar` never coerces). A non-negative integer parses;
- * anything else (absent, `'abc'`, a negative) is `null` — never a fabricated
- * `0`, and never the raw string leaking through as a number-shaped surprise.
+ * string — `unyamlScalar` never coerces). Only a positive integer (>= 1)
+ * parses; anything else (absent, `'abc'`, `0`, a negative) is `null` — never
+ * a fabricated `0`, and never the raw string leaking through as a
+ * number-shaped surprise.
+ *
+ * `>= 1`, not `>= 0` (#1009 cold review finding 3): the emitter's own
+ * invariant is `hasUsableAnchor` (verdict.mjs), which never posts a finding
+ * with `line: 0` — only `line >= 1`. Accepting `0` here would let a line of
+ * `0` through as a real anchor, and `provenance.mjs`'s `sourceLabel`/
+ * `sourceStamp` use a falsy check (`source.line ? ... : ...`), so a `0`
+ * would silently render as `[repo: path]` with the line dropped rather than
+ * `[repo: path:0]` — a quiet loss, not a stated one.
  */
 function parseFindingLine(raw) {
   if (raw === undefined || raw === null) return null;
   const n = Number(raw);
-  return Number.isInteger(n) && n >= 0 ? n : null;
+  return Number.isInteger(n) && n >= 1 ? n : null;
 }
 
 /**
