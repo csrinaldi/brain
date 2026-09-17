@@ -109,3 +109,22 @@ test('runStage: without forgeConfigDir the env is exactly the scrubbed one', asy
   });
   assert.equal(seen.GH_CONFIG_DIR, '/home/x/.config/gh');
 });
+
+// ── #1010 — the producer must never mutate what it is asked to review ───────
+
+test('runStage: every run carries --settings {disableAllHooks: true} — this repo\'s committed .claude/settings.json SessionStart hook must never run for the engine reviewing its own candidate (#1010)', async () => {
+  let seenArgs = null;
+  await runStage({
+    stage: 'cold-review', prompt: 'p', cwd: '/tmp',
+    _env: { PATH: '/usr/bin' },
+    _run: (_bin, args) => { seenArgs = args; return { status: 0, stdout: '' }; },
+  });
+
+  const flagIndex = seenArgs.indexOf('--settings');
+  assert.notEqual(flagIndex, -1, 'the spawned claude CLI must be given --settings');
+  assert.deepEqual(
+    JSON.parse(seenArgs[flagIndex + 1]),
+    { disableAllHooks: true },
+    'the settings payload must disable every hook, including SessionStart',
+  );
+});

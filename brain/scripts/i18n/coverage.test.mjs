@@ -51,7 +51,7 @@ test('PR2 day-start: ecosystem + brain + memory + done keys exist in en', () => 
   assert.equal(en['day.ecosystem.updatesAvailable'], '{count} update(s) available:');
   assert.equal(en['day.brain.newVersion'],         'New brain version available: {installed} → {latest}');
   assert.equal(en['day.brain.upToDate'],           'brain up to date ({installed}).');
-  assert.equal(en['day.memory.hookActive'],        'Pre-push hook active — materializes memory before push.');
+  assert.equal(en['day.memory.hookActive'],        'Pre-push hook active — checkpoints feature working memory before push.');
   assert.equal(en['day.memory.exported'],          'Memory exported to .memory/ — ready to commit with the next push.');
   assert.equal(en['day.done.withTicket'],          'With a ticket:');
   assert.equal(en['day.done.noTicket'],            'No ticket — explore or propose:');
@@ -167,7 +167,7 @@ test('translate: day.brain.newVersion interpolates versions into Spanish', () =>
 test('translate: day.memory.hookMissing interpolates path into Spanish', () => {
   assert.equal(
     translate('day.memory.hookMissing', { path: 'brain/scripts/hooks' }, es, en),
-    'Hook pre-push ausente en brain/scripts/hooks/pre-push — la memoria no se materializa en el push.',
+    'Hook pre-push ausente en brain/scripts/hooks/pre-push — el checkpoint de la memoria de feature no corre en el push.',
   );
 });
 
@@ -279,7 +279,7 @@ test('PR3 bootstrap: team memory section keys exist in en', () => {
   assert.equal(en['bootstrap.memory.section'],         'Team memory');
   assert.equal(en['bootstrap.memory.prompt'],          'Which memory backend do you use? [engram]: ');
   assert.equal(en['bootstrap.memory.backend'],         'memory backend: {backend} (.env)');
-  assert.equal(en['bootstrap.memory.hookOk'],          'pre-push hook activated (materializes .memory/ before push — ADR-0003)');
+  assert.equal(en['bootstrap.memory.hookOk'],          'pre-push hook activated (checkpoints feature working memory before push — ADR-0003)');
   assert.equal(en['bootstrap.memory.hookFailed'],      'could not activate core.hooksPath (pre-push hook)');
   assert.equal(en['bootstrap.memory.nodeAbsent'],      'node absent — engram backend setup skipped');
   assert.equal(en['bootstrap.memory.engram.ok'],       'engram backend configured (symlink + merge driver)');

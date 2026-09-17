@@ -246,9 +246,9 @@ does not control. The gate is now checkable: the danger-path e2e suite (#401) mu
 - **The memory lane exists in doctrine (ADR-0034) but has not shipped a real merge yet.**
   `memory.lane.enabled` defaults to `false` on every tier (config schema 1.6.0); flipping it is
   a maintainer act, never a migration default. `git ls-remote --heads origin 'memory/*'` returns
-  nothing on this repo as of this writing. The feature-PR memory surfaces (`pre-push`'s `share`,
-  `brain-save.mjs`, `contributor-scaffold.mjs`, `ticket.nextSteps.step3`) are **not** retired —
-  that is task 3.1d / issue #890, still open.
+  nothing on this repo as of this writing. The feature-PR memory surfaces formerly used by
+  `pre-push` and `ticket.nextSteps.step3` are retired by issue #890; the feature workflow now
+  captures records through `brain:memory:save` and the lane.
 - **A lane branch left unreconciled across midnight is never revisited.** #920 (above) repairs
   the same-day retry; nothing repairs the cross-midnight case. (#936)
 - **A chunk-boundary guard test pins a production import by hardcoded line number**, so an

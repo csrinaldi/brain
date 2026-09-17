@@ -342,7 +342,7 @@ cat <<'EOT'
        (pulls memory, shows open tickets, checks for brain updates)
     3. Pick a ticket and create your branch: {type}/issue-{iid}-{slug}.
     4. Plan a feature with SDD: brain:project:feature -- --issue [ID]
-    5. Before pushing: brain:repo:check && npm run brain:memory:share
+    5. Before pushing: brain:repo:check; capture durable memory with brain:memory:save --issue <id> (the enabled memory lane ships it)
 EOT
 if [ "${#MISSING_OPTIONAL[@]}" -gt 0 ]; then
   printf "  $I18N_BOOTSTRAP_DONE_PENDING\n" "${MISSING_OPTIONAL[*]}"

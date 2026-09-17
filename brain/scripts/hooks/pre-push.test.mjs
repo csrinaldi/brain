@@ -1,228 +1,117 @@
-// scripts/hooks/pre-push.test.mjs — integration tests for the pre-push hook.
-// (Slice 4, task 4.1 / REQ-S4-1)
-//
-// Acceptance criteria:
-//
-//   (a) When node is available, the hook calls feature-checkpoint AFTER
-//       brain:memory:share — both ops appear in the mock node call log.
-//   (b) When node is not in PATH the hook exits 0 immediately (command -v
-//       node guard) and feature-checkpoint is NOT called.
-//   (c) When feature-checkpoint exits non-zero the hook continues and
-//       exits 0 — push is never blocked by checkpoint failure (|| true).
-//
-// Technique: synthetic PATH with mock node + git shell scripts that record
-// each invoked op to a temp log file.  No real node/engram subprocess is
-// spawned; all assertions are via the call log and hook exit code.
+// pre-push integration tests for the issue #890 feature-PR memory retirement.
+// The hook keeps checkpointing and repository checks, but no longer transports
+// durable records or inspects dirty .memory/ state.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  mkdtempSync,
-  mkdirSync,
-  writeFileSync,
-  readFileSync,
-  existsSync,
-  rmSync,
-  chmodSync,
-} from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
 
-// Absolute path to the hook under test.
 const HOOK_PATH = new URL('./pre-push', import.meta.url).pathname;
+const SAFE_SYSTEM_PATH = '/bin';
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
+function temp(prefix) { return mkdtempSync(join(tmpdir(), prefix)); }
 
-function makeTempDir(prefix) {
-  return mkdtempSync(join(tmpdir(), prefix));
-}
-
-/**
- * Create a mock bin directory with synthetic node and/or git binaries.
- *
- * The mock node script:
- *   - Records $2 (the op argument — e.g. "share", "feature-checkpoint") to
- *     callLog on every invocation.
- *   - Exits checkpointCode when op is "feature-checkpoint"; exits 0 otherwise.
- *
- * The mock git script:
- *   - Returns fakeRepoRoot on `git rev-parse --show-toplevel`.
- *   - Returns empty string on `git -C <root> status …` (no pending changes).
- *
- * @param {object}  opts
- * @param {string}  opts.callLog        Path where mock node records each op.
- * @param {string}  [opts.fakeRepoRoot] Value for `git rev-parse --show-toplevel`.
- * @param {number}  [opts.checkpointCode=0] Exit code for feature-checkpoint.
- * @param {boolean} [opts.includeNode=true]  Set false to omit the node binary.
- * @returns {string} Path to the mock bin directory.
- */
-function createMockBin({
-  callLog,
-  fakeRepoRoot = '/fake/repo',
-  checkpointCode = 0,
-  includeNode = true,
-}) {
-  const binDir = makeTempDir('pp-bin-');
-
+function createMockBin({ callLog, fakeRepoRoot, checkpointCode = 0, includeNode = true, rootFailure = false, branch = 'feat/issue-42-demo' }) {
+  const bin = temp('pp-bin-');
   if (includeNode) {
-    writeFileSync(
-      join(binDir, 'node'),
-      [
-        '#!/usr/bin/env sh',
-        // $1 = path to cli.mjs; $2 = op name (share, feature-checkpoint, …)
-        `echo "$2" >> "${callLog}"`,
-        `if [ "$2" = "feature-checkpoint" ]; then exit ${checkpointCode}; fi`,
-        'exit 0',
-      ].join('\n'),
-    );
-    chmodSync(join(binDir, 'node'), 0o755);
-  }
-
-  // mock git — handles both calls the hook makes
-  writeFileSync(
-    join(binDir, 'git'),
-    [
+    writeFileSync(join(bin, 'node'), [
       '#!/usr/bin/env sh',
-      'if [ "$1" = "rev-parse" ]; then',
-      `  printf '%s\\n' "${fakeRepoRoot}"`,
-      'elif [ "$1" = "-C" ]; then',
-      '  printf ""',   // empty output → no pending .memory/ changes
-      'fi',
+      `printf '%s\\n' "$*" >> "${callLog}"`,
+      `if [ "$2" = "feature-checkpoint" ]; then exit ${checkpointCode}; fi`,
       'exit 0',
-    ].join('\n'),
-  );
-  chmodSync(join(binDir, 'git'), 0o755);
-
-  return binDir;
+    ].join('\n'));
+    chmodSync(join(bin, 'node'), 0o755);
+  }
+  writeFileSync(join(bin, 'git'), [
+    '#!/usr/bin/env sh',
+    'if [ "$1" = "rev-parse" ] && [ "$2" = "--show-toplevel" ]; then',
+    rootFailure ? '  exit 1' : `  printf '%s\\n' "${fakeRepoRoot}"`,
+    'elif [ "$1" = "rev-parse" ] && [ "$2" = "--abbrev-ref" ]; then',
+    `  printf '%s\\n' "${branch}"`,
+    'elif [ "$1" = "merge-base" ]; then',
+    '  exit 1',
+    'elif [ "$1" = "-C" ]; then',
+    '  printf ""',
+    'fi',
+    'exit 0',
+  ].join('\n'));
+  chmodSync(join(bin, 'git'), 0o755);
+  return bin;
 }
 
-// Safe base PATH: includes system shell utilities but excludes nvm / user-local
-// paths where the real node lives.  This makes `command -v node` reliably fail
-// in test (b) while still allowing sh to find echo, [, etc. as fall-back when
-// they are not shell built-ins on the platform.
-const SAFE_SYSTEM_PATH = '/usr/local/bin:/usr/bin:/bin';
-
-/**
- * Run the pre-push hook with a controlled PATH.
- * binDir is prepended so mock node/git take precedence over system binaries.
- * nvm paths are excluded so the real node is never found (test (b) relies on this).
- */
-function runHook(binDir) {
-  return spawnSync('sh', [HOOK_PATH], {
-    env: {
-      PATH: `${binDir}:${SAFE_SYSTEM_PATH}`,
-      HOME: process.env.HOME ?? '/tmp',
-    },
+function runHook(bin, args = ['refs/heads/main', 'refs/heads/feature'], input = '') {
+  return spawnSync('sh', [HOOK_PATH, ...args], {
+    input,
+    env: { PATH: `${bin}:${SAFE_SYSTEM_PATH}`, HOME: process.env.HOME ?? '/tmp' },
     encoding: 'utf8',
     timeout: 5000,
   });
 }
 
-/**
- * Read recorded op lines from the mock node call log.
- */
-function readCallLog(callLog) {
-  if (!existsSync(callLog)) return [];
-  return readFileSync(callLog, 'utf8').trim().split('\n').filter(Boolean);
+function calls(path) {
+  return existsSync(path) ? readFileSync(path, 'utf8').trim().split('\n').filter(Boolean) : [];
 }
 
-// ---------------------------------------------------------------------------
-// (a) feature-checkpoint is called after share when node is available
-// ---------------------------------------------------------------------------
+function fixture(t, { feature = true, ...opts } = {}) {
+  const root = temp('pp-root-');
+  const log = join(root, 'calls.log');
+  if (feature) mkdirSync(join(root, 'openspec', 'changes', 'issue-42-demo'), { recursive: true });
+  const bin = createMockBin({ callLog: log, fakeRepoRoot: root, ...opts });
+  t.after(() => { rmSync(root, { recursive: true, force: true }); rmSync(bin, { recursive: true, force: true }); });
+  return { root, log, bin };
+}
 
-test('pre-push hook: calls feature-checkpoint after share when node is in PATH', (t) => {
-  const tmpRoot = makeTempDir('pp-root-');
-  const callLog = join(tmpRoot, 'calls.log');
-  t.after(() => rmSync(tmpRoot, { recursive: true, force: true }));
-
-  // Create an openspec feature dir (active feature context).
-  mkdirSync(join(tmpRoot, 'openspec', 'changes', 'my-feature'), { recursive: true });
-
-  const binDir = createMockBin({ callLog, fakeRepoRoot: tmpRoot });
-  t.after(() => rmSync(binDir, { recursive: true, force: true }));
-
-  const result = runHook(binDir);
-
-  const ops = readCallLog(callLog);
-  assert.ok(
-    ops.includes('share'),
-    `expected 'share' in call log, got: ${JSON.stringify(ops)}`,
-  );
-  assert.ok(
-    ops.includes('feature-checkpoint'),
-    `expected 'feature-checkpoint' in call log, got: ${JSON.stringify(ops)}`,
-  );
-  // #888 (D4, trigger/credential boundary): `pre-push` MUST NOT invoke
-  // `ship` — asserted BEHAVIOURALLY against the same call log every other
-  // op assertion above already reads, not by a source grep (spec.md's own
-  // scenario text rules that out explicitly). Since `ship` is never called
-  // by the CURRENT, unmodified `pre-push`, this is a PIN, not a red-then-
-  // green pair on the hook itself.
-  assert.ok(
-    !ops.includes('ship'),
-    `pre-push must never invoke 'ship' (D4 — trigger wiring is deferred to #889), got: ${JSON.stringify(ops)}`,
-  );
-  assert.equal(
-    result.status,
-    0,
-    `hook must exit 0; got ${result.status}\nstderr: ${result.stderr}`,
-  );
+test('pre-push: checkpoint runs for an active feature without share, ship, or brain:save', (t) => {
+  const { log, bin } = fixture(t);
+  const result = runHook(bin);
+  const lines = calls(log);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(lines.filter(line => line.includes('feature-checkpoint')).length, 1);
+  assert.equal(lines.some(line => /(^| )share( |$)|brain-save|(^| )ship( |$)/.test(line)), false,
+    `retired transport must not run: ${JSON.stringify(lines)}`);
 });
 
-// ---------------------------------------------------------------------------
-// (b) No node in PATH → hook exits 0, feature-checkpoint NOT called
-// ---------------------------------------------------------------------------
-
-test('pre-push hook: exits 0 without calling feature-checkpoint when node is absent', (t) => {
-  const tmpRoot = makeTempDir('pp-root-');
-  const callLog = join(tmpRoot, 'calls.log');
-  t.after(() => rmSync(tmpRoot, { recursive: true, force: true }));
-
-  // includeNode: false → no node binary in mock bin dir
-  const binDir = createMockBin({ callLog, fakeRepoRoot: tmpRoot, includeNode: false });
-  t.after(() => rmSync(binDir, { recursive: true, force: true }));
-
-  const result = runHook(binDir);
-
-  assert.equal(
-    result.status,
-    0,
-    `hook must exit 0 when node is absent; got ${result.status}`,
-  );
-  const ops = readCallLog(callLog);
-  assert.ok(
-    !ops.includes('feature-checkpoint'),
-    `feature-checkpoint must NOT be called when node is absent, got: ${JSON.stringify(ops)}`,
-  );
+test('pre-push: no feature directory means no checkpoint and no memory dependency', (t) => {
+  const { log, bin } = fixture(t, { feature: false });
+  const result = runHook(bin);
+  const lines = calls(log);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(lines.some(line => line.includes('feature-checkpoint')), false);
+  assert.equal(lines.some(line => line.includes('share') || line.includes('brain-save')), false);
 });
 
-// ---------------------------------------------------------------------------
-// (c) feature-checkpoint exits non-zero → hook still exits 0 (non-blocking)
-// ---------------------------------------------------------------------------
+test('pre-push: checkpoint failure remains isolated from push result', (t) => {
+  const { log, bin } = fixture(t, { checkpointCode: 1 });
+  const result = runHook(bin);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(calls(log).some(line => line.includes('feature-checkpoint')), true);
+});
 
-test('pre-push hook: exits 0 even when feature-checkpoint fails (|| true guarantee)', (t) => {
-  const tmpRoot = makeTempDir('pp-root-');
-  const callLog = join(tmpRoot, 'calls.log');
-  t.after(() => rmSync(tmpRoot, { recursive: true, force: true }));
+test('pre-push: root resolution failure stops before node work', (t) => {
+  const { log, bin } = fixture(t, { rootFailure: true });
+  const result = runHook(bin);
+  assert.notEqual(result.status, 0);
+  assert.equal(calls(log).length, 0, 'node must not run without a canonical root');
+  assert.match(result.stderr, /repo root|root/i);
+});
 
-  // checkpointCode: 1 simulates ambiguous resolution or any checkpoint error.
-  const binDir = createMockBin({ callLog, fakeRepoRoot: tmpRoot, checkpointCode: 1 });
-  t.after(() => rmSync(binDir, { recursive: true, force: true }));
+test('pre-push: node absence remains a non-blocking no-op', (t) => {
+  const { log, bin } = fixture(t, { includeNode: false });
+  const result = runHook(bin);
+  assert.equal(result.status, 0);
+  assert.equal(calls(log).length, 0);
+});
 
-  const result = runHook(binDir);
-
-  const ops = readCallLog(callLog);
-  assert.ok(
-    ops.includes('feature-checkpoint'),
-    `feature-checkpoint must be called before failure, got: ${JSON.stringify(ops)}`,
-  );
-  assert.equal(
-    result.status,
-    0,
-    `hook must exit 0 even when feature-checkpoint fails (|| true); got ${result.status}\nstderr: ${result.stderr}`,
-  );
+test('pre-push: tracking, first-push, and explicit-refspec forms share one checkpoint-only path', (t) => {
+  for (const args of [[], ['-u', 'origin', 'feat/issue-42-demo'], ['origin', 'HEAD:refs/heads/review']]) {
+    const { log, bin, root } = fixture(t);
+    const result = runHook(bin, args, `${root} refs/heads/main\n`);
+    const lines = calls(log);
+    assert.equal(result.status, 0, `args ${args.join(' ')}: ${result.stderr}`);
+    assert.equal(lines.filter(line => line.includes('feature-checkpoint')).length, 1);
+    assert.equal(lines.some(line => line.includes('share') || line.includes('brain-save') || line.includes('ship')), false);
+  }
 });
