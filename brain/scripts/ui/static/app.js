@@ -14,7 +14,7 @@
 
 import { initialPageState, applyFrame, parseFrame, streamFailed, controlFailed, sectionOf, requestSequence } from './lib/frames.mjs';
 import { degradationBands, pollIndicator } from './lib/banners.mjs';
-import { buildCanvasModel } from './lib/canvas-model.mjs';
+import { buildLaneModel } from './lib/lane-model.mjs';
 import { buildDrawerModel } from './lib/drawer-model.mjs';
 import { MODES, PLACEHOLDERS, initialView, switchMode, keyAction } from './lib/view-model.mjs';
 
@@ -34,6 +34,16 @@ let selectedIssue = null;
 /** The last `GET /api/change/<N>` body for the selected issue; `null` while it is still being read. */
 let changeView = null;
 let activeTab = 'spec';
+/**
+ * Which track lanes are collapsed (#998 R998-3): a local Set, the same kind
+ * of page-only interaction state `selectedIssue`/`activeTab` already are —
+ * not part of `frames.mjs`'s state, because it is never derived from a
+ * server frame. The `?` holding lane starts in it (lane-model.mjs's own
+ * default), so this page never has to decide that on its own.
+ */
+let collapsedTracks = new Set(['?']);
+/** The `?` holding lane's current page (#998 R998-3), 24 rows at a time. */
+let holdingPage = 0;
 
 // ── DOM helpers ────────────────────────────────────────────────────────────
 
@@ -108,7 +118,7 @@ function switchToMode(mode) {
 /** The router (#998 R998-2): `map` draws the existing canvas + drawer; the rest say which PR brings their content. */
 function renderContent() {
   if (view === 'map') {
-    renderCanvas();
+    renderLanes();
     renderDrawer();
     return;
   }
@@ -155,30 +165,78 @@ function renderStatus() {
 }
 
 /**
- * The DAG, drawn (R881-6/R881-7). Every decision — coordinates, colour, which
- * marks a node carries — was already made by `canvas-model.mjs`; this
- * function only turns that model into elements, which is why it has no
- * branches beyond "was the graph computable at all".
+ * The DAG, drawn as track lanes (#998 R998-3): one row per declared track —
+ * each with its OWN board, `layout()` run once per lane by `lane-model.mjs`
+ * — then the `?` holding lane last, as a paged list rather than a board
+ * (undeclared nodes carry no track to lay coordinates out against). Every
+ * decision — grouping, coordinates, colour, which marks a node carries —
+ * was already made by `lane-model.mjs`; this function only turns that model
+ * into elements.
  */
-function renderCanvas() {
-  const model = buildCanvasModel(sectionOf(state, 'graph'));
+function renderLanes() {
+  const model = buildLaneModel(sectionOf(state, 'graph'), { collapsedTracks, holdingPage });
   clear(mounts.canvas);
   if (!model.ok) {
     mounts.canvas.appendChild(said(`the graph could not be computed: ${model.reason}`));
     return;
   }
-  const { nodes, edges, droppedEdges, issuesUnreadable, unlinked, width, height } = model.value;
-  mounts.canvas.appendChild(el('p', 'canvas-summary', `${nodes.length} open issue(s), ${edges.length} edge(s), ${unlinked.length} in no edge`));
+  const { lanes, crossEdges, holding, droppedEdges, issuesUnreadable } = model.value;
+  mounts.canvas.appendChild(el('p', 'canvas-summary', `${lanes.length} track lane(s), ${holding.count} in the \`?\` holding lane`));
 
-  const board = svg('svg', { width: width + 4, height: height + 4, viewBox: `-2 -2 ${width + 4} ${height + 4}` });
-  for (const edge of edges) {
+  for (const lane of lanes) mounts.canvas.appendChild(renderLaneRow(lane));
+  mounts.canvas.appendChild(renderHoldingLane(holding));
+
+  // A cross-lane edge is never a line (R998-3: lanes have no shared
+  // coordinate space to draw one across) — it is said, like every other
+  // fact this page lists beside a drawing rather than folding into it.
+  if (crossEdges.length > 0) {
+    mounts.canvas.appendChild(saidList(`${crossEdges.length} edge(s) cross lanes:`, crossEdges.map((e) => `#${e.from} → #${e.to} crosses lanes ${e.fromTrack} → ${e.toTrack}`)));
+  }
+  if (droppedEdges.length > 0) {
+    mounts.canvas.appendChild(saidList(`${droppedEdges.length} edge(s) could not be drawn:`, droppedEdges.map((e) => `#${e.from} → #${e.to}: ${e.reason}`)));
+  }
+  if (issuesUnreadable.length > 0) {
+    mounts.canvas.appendChild(saidList(`${issuesUnreadable.length} issue body(ies) could not be read:`, issuesUnreadable.map((i) => `#${i.number}: ${i.reason}`)));
+  }
+}
+
+/** One state chip per code present in a lane's nodes, `mark word × n` — built from each node's own `state` (lane-model.mjs, state-vocab.mjs) so the header's summary cannot drift from the board below it. */
+function stateChips(nodes) {
+  const byCode = new Map();
+  for (const node of nodes) {
+    const entry = byCode.get(node.state.code) ?? { ...node.state, n: 0 };
+    entry.n += 1;
+    byCode.set(node.state.code, entry);
+  }
+  return [...byCode.values()];
+}
+
+function renderLaneHeader(label, count, nodes, toggle) {
+  const header = el('div', 'lane-header');
+  header.appendChild(el('strong', null, label));
+  header.appendChild(el('span', 'lane-count', String(count)));
+  const chips = el('span', 'lane-chips');
+  for (const chip of stateChips(nodes)) chips.appendChild(el('span', 'chip', `${chip.mark} ${chip.label} × ${chip.n}`));
+  header.appendChild(chips);
+  if (toggle) header.appendChild(toggle);
+  return header;
+}
+
+function renderLaneRow(lane) {
+  const row = el('div', 'lane-row');
+  row.appendChild(renderLaneHeader(lane.label, lane.count, lane.nodes, null));
+  row.appendChild(renderLaneBoard(lane));
+  return row;
+}
+
+/** One lane's own SVG board — the same drawing the single canvas used to be, now scoped to one lane's own coordinate space (R998-3). */
+function renderLaneBoard(lane) {
+  const board = svg('svg', { width: lane.width + 4, height: lane.height + 4, viewBox: `-2 -2 ${lane.width + 4} ${lane.height + 4}`, class: 'lane-board' });
+  for (const edge of lane.edges) {
     const [start, end] = edge.points;
-    // A reversed edge is a back edge the layout flipped to break a cycle: it
-    // is DRAWN dashed rather than hidden, because the cycle is a fact about
-    // the declarations, not a drawing problem (R881-7).
     board.appendChild(svg('line', { class: edge.reversed ? 'edge reversed' : 'edge', x1: start.x, y1: start.y, x2: end.x, y2: end.y }));
   }
-  for (const node of nodes) {
+  for (const node of lane.nodes) {
     const selected = node.number === selectedIssue ? ' selected' : '';
     const group = svg('g', { class: `node ${node.className}${selected}`, role: 'button', tabindex: 0, 'data-issue': node.number });
     group.appendChild(svg('rect', { x: node.x, y: node.y, width: node.w, height: node.h }));
@@ -191,14 +249,61 @@ function renderCanvas() {
     group.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') selectNode(node.number); });
     board.appendChild(group);
   }
-  mounts.canvas.appendChild(board);
+  return board;
+}
 
-  if (droppedEdges.length > 0) {
-    mounts.canvas.appendChild(saidList(`${droppedEdges.length} edge(s) could not be drawn:`, droppedEdges.map((e) => `#${e.from} → #${e.to}: ${e.reason}`)));
+/**
+ * The `?` holding lane (#998 R998-3): a header with a show/hide toggle
+ * (never a board), the fence an author pastes to leave it, and 24 rows at a
+ * time while expanded. A lane with zero nodes does not exist, but the
+ * holding lane always does — when empty, it says why instead of showing a
+ * blank expanded area.
+ */
+function renderHoldingLane(holding) {
+  const toggle = el('button', 'lane-toggle', holding.collapsed ? 'show' : 'hide');
+  toggle.type = 'button';
+  toggle.addEventListener('click', () => {
+    collapsedTracks = new Set(collapsedTracks);
+    if (collapsedTracks.has('?')) collapsedTracks.delete('?'); else collapsedTracks.add('?');
+    render();
+  });
+
+  const row = el('div', 'lane-row holding');
+  row.appendChild(renderLaneHeader('? — undeclared', holding.count, holding.nodes, toggle));
+  if (holding.collapsed) return row;
+
+  if (holding.note) {
+    row.appendChild(said(holding.note));
+    return row;
   }
-  if (issuesUnreadable.length > 0) {
-    mounts.canvas.appendChild(saidList(`${issuesUnreadable.length} issue body(ies) could not be read:`, issuesUnreadable.map((i) => `#${i.number}: ${i.reason}`)));
-  }
+
+  row.appendChild(el('p', 'note', "how to declare: paste this into the issue body, with your track's letter —"));
+  const pre = document.createElement('pre');
+  pre.textContent = holding.declareSnippet;
+  row.appendChild(pre);
+
+  const list = el('ul', 'holding-list');
+  for (const node of holding.nodes) list.appendChild(el('li', null, `${node.state.mark} ${node.label}`));
+  row.appendChild(list);
+
+  if (holding.totalPages > 1) row.appendChild(renderPager(holding));
+  return row;
+}
+
+function renderPager(holding) {
+  const pager = el('div', 'pager');
+  const prev = el('button', null, 'prev');
+  prev.type = 'button';
+  prev.disabled = holding.page === 0;
+  prev.addEventListener('click', () => { holdingPage = Math.max(0, holdingPage - 1); render(); });
+  const next = el('button', null, 'next');
+  next.type = 'button';
+  next.disabled = holding.page >= holding.totalPages - 1;
+  next.addEventListener('click', () => { holdingPage = Math.min(holding.totalPages - 1, holdingPage + 1); render(); });
+  pager.appendChild(prev);
+  pager.appendChild(el('span', null, `page ${holding.page + 1} / ${holding.totalPages}`));
+  pager.appendChild(next);
+  return pager;
 }
 
 /** Activating a node selects it and opens the drawer on its Spec tab (R881-8). */
@@ -319,11 +424,25 @@ async function loadChange(issue) {
 
 // ── keyboard (#998 R998-2) ───────────────────────────────────────────────
 
-/** The nodes `j`/`k` may traverse: only `map` mode ever has any on screen. */
+/**
+ * The nodes `j`/`k` may traverse (#998 R998-3): every board node across
+ * every lane — never the `?` holding lane's paged rows, which carry no
+ * board coordinates to traverse in reading order. Each lane lays itself out
+ * in its OWN space starting at (0, 0) (lane-model.mjs), so two lanes' nodes
+ * cannot be compared by `y` directly; folding the lane's row position into
+ * a large offset keeps `keyAction`'s existing top-to-bottom sort correct
+ * across the stacked rows without teaching `view-model.mjs` anything about
+ * lanes.
+ */
 function drawnNodes() {
   if (view !== 'map') return [];
-  const model = buildCanvasModel(sectionOf(state, 'graph'));
-  return model.ok ? model.value.nodes : [];
+  const model = buildLaneModel(sectionOf(state, 'graph'), { collapsedTracks, holdingPage });
+  if (!model.ok) return [];
+  const nodes = [];
+  model.value.lanes.forEach((lane, laneIndex) => {
+    for (const node of lane.nodes) nodes.push({ ...node, y: laneIndex * 1e6 + node.y });
+  });
+  return nodes;
 }
 
 /**
