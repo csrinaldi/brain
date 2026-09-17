@@ -158,3 +158,25 @@ test('#881: change-route.mjs\'s "no change dir" leaves still carry a non-empty s
   walkAndCheck(result.value.spec, 'change-route spec (no change dir)');
   walkAndCheck(result.value.tasks, 'change-route tasks (no change dir)');
 });
+
+// ── #998 R998-1: sourceLabel moved here, and the design's stamp forms ────────
+
+import { sourceLabel, sourceStamp } from './provenance.mjs';
+
+test('#998: sourceLabel keeps the plain forms the current page shows', () => {
+  assert.equal(sourceLabel({ path: 'a/b.md', line: 42 }), 'a/b.md:42');
+  assert.equal(sourceLabel({ path: 'a/b.md' }), 'a/b.md');
+  assert.equal(sourceLabel({ url: 'https://github.com/o/r/pull/971' }), 'https://github.com/o/r/pull/971');
+  assert.equal(sourceLabel({}), 'no source was recorded for this value');
+});
+
+test('#998: sourceStamp renders the design\'s stamps — [repo: path:line], [forge: #n] with the URL kept, [git: sha7] — and never an empty label', () => {
+  assert.deepEqual(sourceStamp({ path: 'a/b.md', line: 42 }), { label: '[repo: a/b.md:42]', href: null, kind: 'repo' });
+  assert.deepEqual(sourceStamp({ path: 'a/b.md' }), { label: '[repo: a/b.md]', href: null, kind: 'repo' });
+  assert.deepEqual(sourceStamp({ url: 'https://github.com/o/r/issues/881' }), { label: '[forge: #881]', href: 'https://github.com/o/r/issues/881', kind: 'forge' });
+  assert.deepEqual(sourceStamp({ url: 'https://github.com/o/r/pull/971#issuecomment-5' }), { label: '[forge: #971]', href: 'https://github.com/o/r/pull/971#issuecomment-5', kind: 'forge' });
+  assert.deepEqual(sourceStamp({ url: 'https://example.com/x' }), { label: '[link: https://example.com/x]', href: 'https://example.com/x', kind: 'link' }, 'a URL that is not a forge issue or PR is still shown, as a link');
+  assert.deepEqual(sourceStamp({ sha: '4f9a2e1c9d' }), { label: '[git: 4f9a2e1]', href: null, kind: 'git' });
+  assert.deepEqual(sourceStamp({}), { label: '[no source was recorded for this value]', href: null, kind: 'none' });
+  assert.deepEqual(sourceStamp({ url: 'javascript:alert(1)' }).href, null, 'only https forge links become hrefs');
+});

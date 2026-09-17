@@ -22,12 +22,10 @@
 export const TAB_IDS = ['spec', 'tasks', 'workingMemory', 'reviews'];
 const TAB_LABELS = { spec: 'Spec', tasks: 'Tasks', workingMemory: 'Working memory', reviews: 'Reviews' };
 
-/** A3: `{path, line}` / `{url}` -> the one string shown beside a value. Never empty. */
-export function sourceLabel(source) {
-  if (source?.url) return source.url;
-  if (source?.path) return source.line ? `${source.path}:${source.line}` : source.path;
-  return 'no source was recorded for this value';
-}
+// A3: `sourceLabel` lives in provenance.mjs since #998; re-exported so every
+// importer of this module keeps working.
+import { sourceLabel } from './provenance.mjs';
+export { sourceLabel };
 
 function entry({ title, detail, source, pending = false, ...rest }) {
   return { title, detail, source: sourceLabel(source), pending, ...rest };
