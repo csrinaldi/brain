@@ -1,0 +1,100 @@
+// view-model.mjs — the four-mode view and its router (#998 R998-2). Pure,
+// imported by the browser and by node:test (D9): no DOM, no clock, no
+// fetch. `app.js` owns turning what this module returns into elements and
+// listeners; every decision — which mode is next, which node a keystroke
+// selects — lives here.
+//
+// A "view" IS the current mode's id: there is nothing else to carry yet
+// (PR 6 may add per-mode state; until then the id is the whole state).
+
+/** The four modes, in the order they switch and the order Tab cycles. */
+export const MODES = Object.freeze([
+  Object.freeze({ id: 'map', label: 'Map & tracks' }),
+  Object.freeze({ id: 'sdd', label: 'SDD & slices' }),
+  Object.freeze({ id: 'reviews', label: 'Reviews' }),
+  Object.freeze({ id: 'governance', label: 'Governance' }),
+]);
+
+export const MODE_IDS = Object.freeze(MODES.map((mode) => mode.id));
+
+/**
+ * The said sentence a mode without content in this PR renders instead of an
+ * empty area (never empty-on-failure). `map` is `null`: it draws the
+ * existing canvas + drawer, not a placeholder.
+ */
+export const PLACEHOLDERS = Object.freeze({
+  map: null,
+  sdd: 'the SDD & slices view is not built yet — it lands in PR 4',
+  reviews: 'the reviews timeline is not built yet — it lands in PR 5',
+  governance: 'the governance view is not built yet — it lands in PR 7',
+});
+
+/** The page before anything has been chosen: the first mode. */
+export function initialView() {
+  return MODES[0].id;
+}
+
+/**
+ * switchMode(view, mode) -> the next view. `view` is accepted for symmetry
+ * with `nextMode` (a future mode may validate a transition against where it
+ * came from); today only the target is checked. Throws on a mode this
+ * table does not know — a renamed id fails loudly instead of drawing a nav
+ * button that goes nowhere.
+ */
+export function switchMode(view, mode) {
+  if (!MODE_IDS.includes(mode)) {
+    throw new Error(`view-model.mjs: unknown mode "${mode}" — a constant was renamed, or MODES is out of date`);
+  }
+  return mode;
+}
+
+/** nextMode(view) -> the mode Tab cycles to, wrapping past the last back to the first. */
+export function nextMode(view) {
+  const index = MODE_IDS.indexOf(view);
+  if (index === -1) {
+    throw new Error(`view-model.mjs: unknown mode "${view}" — cannot cycle from a mode this table does not know`);
+  }
+  return MODE_IDS[(index + 1) % MODE_IDS.length];
+}
+
+/** The drawn nodes, sorted top-to-bottom then left-to-right — how a reader's eye moves the canvas. */
+function readingOrder(nodes) {
+  return [...nodes].sort((a, b) => a.y - b.y || a.x - b.x);
+}
+
+/**
+ * traverse(key, nodes, selected) -> a `select` action, or `none` if there is
+ * nothing to select. `j`/`k` always land on a node when one exists: past
+ * either end the traversal wraps rather than stopping silently, so the
+ * result always says which node it moved to.
+ */
+function traverse(key, nodes, selected) {
+  if (nodes.length === 0) return { type: 'none' };
+  const ordered = readingOrder(nodes);
+  const index = ordered.findIndex((node) => node.number === selected);
+  let nextIndex;
+  if (index === -1) {
+    nextIndex = key === 'j' ? 0 : ordered.length - 1;
+  } else if (key === 'j') {
+    nextIndex = (index + 1) % ordered.length;
+  } else {
+    nextIndex = (index - 1 + ordered.length) % ordered.length;
+  }
+  return { type: 'select', issue: ordered[nextIndex].number };
+}
+
+/**
+ * keyAction(view, key, {nodes, selected}) -> {type, ...}. The only decision
+ * a keystroke makes, with no DOM in sight: `app.js` executes what this
+ * returns, it never re-derives it.
+ *
+ * @param {string} view the current mode id
+ * @param {string} key the `KeyboardEvent.key` value
+ * @param {{nodes?: Array<{number:number,x:number,y:number}>, selected?: number|null}} drawn what is currently on the canvas
+ */
+export function keyAction(view, key, { nodes = [], selected = null } = {}) {
+  if (key === 'Tab') return { type: 'mode', mode: nextMode(view) };
+  if (key === 'Escape') return selected === null ? { type: 'none' } : { type: 'close' };
+  if (key === 'j' || key === 'k') return traverse(key, nodes, selected);
+  return { type: 'none' };
+}
