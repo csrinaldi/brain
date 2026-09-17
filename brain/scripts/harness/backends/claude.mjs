@@ -168,7 +168,25 @@ export async function runStage({
   // The model rides as given. #323 ruled it an opaque pass-through, so brain
   // neither validates it nor supplies a default: an absent model means the
   // engine's own, which is the engine's business.
-  const args = ['-p', prompt, ...(model ? ['--model', model] : [])];
+  //
+  // --settings {disableAllHooks: true} (#1010): this repo's own committed
+  // `.claude/settings.json` wires a SessionStart hook that runs
+  // `npm run brain:session:start`. Every stage this backend runs, including a
+  // cold review over the repo's OWN candidate worktree, inherits that hook —
+  // so the producer's SessionStart side effects landed inside the very
+  // candidate the stage exists to judge (measured: `.engram -> .memory`
+  // appearing mid-review, `candidate-snapshot.mjs` then refusing or crashing
+  // on it). The CLI honours `disableAllHooks`, closing that path
+  // unconditionally rather than trusting every future hook addition to check
+  // "am I running inside a review candidate" for itself. Platform-specific by
+  // design: brain's contract with an engine is "must not mutate the
+  // candidate", not "must not run hooks" — this is how the claude backend
+  // keeps that contract.
+  const args = [
+    '-p', prompt,
+    ...(model ? ['--model', model] : []),
+    '--settings', JSON.stringify({ disableAllHooks: true }),
+  ];
 
   // Computed here, not at the call: an `env` built by the caller could be
   // handed in unscrubbed, and then the property would hold only for callers

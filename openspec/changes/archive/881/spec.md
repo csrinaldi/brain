@@ -231,14 +231,37 @@ the failure reason and the time of the failed attempt.
 
 ### R881-10: out of scope, asserted as absence
 
-Slice 3 MUST NOT read any worktree's uncommitted working tree, MUST NOT
-render roadmap/decisions/anti-patterns/actor-history management views
-(#882), and MUST NOT expose any MCP resource or agent-pulse/heartbeat
-endpoint (#884).
+Slice 3 MUST NOT read any *linked* worktree's working tree, MUST NOT add any
+reader of uncommitted state beyond the ones `buildSnapshot` already has over
+the SERVED ROOT's working tree, MUST NOT mark or overlay "uncommitted" state
+anywhere in the UI (#883), MUST NOT render
+roadmap/decisions/anti-patterns/actor-history management views (#882), and
+MUST NOT expose any MCP resource or agent-pulse/heartbeat endpoint (#884).
 
-#### Scenario: no uncommitted content is ever read
-- **WHEN** a worktree has uncommitted changes
-- **THEN** no server route, watcher event, or drawer tab reflects that uncommitted content
+**Amended 2026-09-16 (archive phase, verify report W5).** This requirement
+read "MUST NOT read any worktree's uncommitted working tree" and its first
+scenario read "no server route, watcher event, or drawer tab reflects that
+uncommitted content". Both are false as written, and were already false when
+R881-8 was accepted: `GET /api/change/{issue}` reads `spec.md` and `tasks.md`
+from the served root's working tree (`change-route.mjs:55`, `:79`, `:188`) —
+which R881-8 positively requires — so an uncommitted edit to either file does
+show in the Spec and Tasks tabs. The reading the implementation was built to
+is recorded in `design.md` Q3 ("committed tier here means *no new reader of
+uncommitted state beyond what `buildSnapshot` already reads*") and verbatim in
+the code's own header (`change-route.mjs:15-22`). R881-3 and R881-4 were
+amended to their true readings during the same review cycle; this one was
+missed, and is amended here on identical grounds — the implementation is
+right, the scenario text was stale.
+
+#### Scenario: no new reader of uncommitted state
+- **WHEN** a linked worktree has uncommitted changes, or the served root itself does
+- **THEN** no route, watcher event or drawer tab reads any linked worktree's
+  working tree at all (the watcher's set holds no working-tree path, blame is
+  pinned to `HEAD`, and the working-memory tab reads the object store via
+  `git show <branch>:resume.md`), and over the served root no reader of
+  uncommitted state exists beyond the ones `buildSnapshot` already has plus
+  the `spec.md`/`tasks.md` reads R881-8 requires — and nothing anywhere marks,
+  overlays or otherwise reports "uncommitted" state, which is #883's work
 
 #### Scenario: no management views are served
 - **WHEN** the SPA's routes/views are inspected

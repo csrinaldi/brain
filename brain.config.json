@@ -12,6 +12,11 @@
   "vcs": {
     "provider": "github"
   },
+  "memory": {
+    "lane": {
+      "enabled": true
+    }
+  },
   "governance": {
     "auditBaseline": "v1.0.0",
     "tier": "lite",
