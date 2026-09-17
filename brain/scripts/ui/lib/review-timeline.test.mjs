@@ -98,6 +98,15 @@ test('#998 R998-5: the queue holds exactly the no-round and REVISE-latest thread
   assert.equal(t.value.queue.find((q) => q.pr === 20).wait, 'abcdef0');
 });
 
+test('#1009 cold review finding 2: a REVISE-latest thread with an unparseable head_sha still enters the queue, saying "head not readable" — never silently excluded', () => {
+  const t = buildReviewTimeline(
+    reviews([{ pr: 40, ok: true, verdicts: [verdict(1, 'REVISE', { pr: 40, head_sha: null })], latest: null }]),
+    prs([{ number: 40, title: 'unparseable head', headBranch: 'feat/badhead', issue: 40 }]),
+  );
+  assert.deepEqual(t.value.queue.map((q) => q.pr), [40], 'a REVISE-latest thread must be in the queue even when its head cannot be parsed');
+  assert.equal(t.value.queue.find((q) => q.pr === 40).wait, 'head not readable');
+});
+
 test('#998 R998-5: threads are sorted by PR number, deterministic under input shuffle', () => {
   const a = buildReviewTimeline(
     reviews([{ pr: 9, ok: true, verdicts: [verdict(1, 'APPROVE', { pr: 9 })], latest: null }, { pr: 1, ok: true, verdicts: [], latest: null }]),
