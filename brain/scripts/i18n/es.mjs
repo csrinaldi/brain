@@ -232,7 +232,7 @@ export default {
 
   // ── ticket-start.mjs (PR2) ────────────────────────────────────────────────────
   'ticket.error.baseRequiresArg': '✗ --base requiere un nombre de rama. Ej: --base feature/issue-99-mi-historia',
-  'ticket.error.usage':           'Uso: brain:ticket:start -- <issue-id> [--worktree] [--base <rama>]',
+  'ticket.error.usage':           'Uso: brain:ticket:start -- <issue-id> [--worktree] [--base <rama>] [--off-tracker]',
   'ticket.error.usageExample1':   'Ejemplo: brain:ticket:start -- 42',
   'ticket.error.usageExample2':   '         brain:ticket:start -- 42 --worktree --base feature/issue-99-mi-historia',
   'ticket.error.noRemote':        '✗ No se pudo detectar el remote de origin.',
@@ -260,6 +260,16 @@ export default {
   'ticket.mode.worktree':         'Worktree aislado (el default — harness-contract.md lo exige para trabajo en paralelo).',
   'ticket.mode.inPlace':          'Rama IN-PLACE en el checkout principal — sólo válido para trabajo estrictamente individual y serial. Ningún otro agente puede trabajar en paralelo mientras esta rama esté acá.',
   'ticket.error.contradictoryModes': 'se pasaron --worktree y --in-place a la vez. Se rechaza en vez de elegir uno: pedí un solo modo.',
+
+  // ── ticket-start.mjs — la base sale de la épica (#967) ──────────────────────
+  // Todas dicen el motivo. Una base que nadie eligió y nadie puede explicar es
+  // la forma silenciosa en que una slice termina en la rama equivocada.
+  'ticket.base.fromEpic':         '→ Base: {tracker} — declarada por la épica #{epic} (parent leído del {source}).',
+  'ticket.base.noEpic':           '→ Base: {base} — no aplica ningún tracker de épica (motivo: {reason}).',
+  'ticket.base.epicUnreadable':   '→ Base: {base} — no se pudo leer la épica #{epic}, se continúa igual: {message}',
+  'ticket.base.offTracker':       '→ Base: {base} — FUERA DEL TRACKER: la épica #{epic} declara {tracker}, y se pasó --off-tracker.',
+  'ticket.error.baseIsTracked':   '✗ se pasó --base {base}, pero la épica #{epic} declara el tracker {tracker} — mientras esa épica está en vuelo una slice arranca de ahí. Usá --base {tracker}, o pasá {flag} para declarar que esta rama deliberadamente no lo hace.',
+
   'ticket.nextSteps.header':      'Próximos pasos:',
   'ticket.nextSteps.cd':          '    0. cd {path}   (abrí tu sesión de trabajo acá)',
   'ticket.nextSteps.step1':       '    1. Implementar — usá /sdd-new {id} si el cambio es complejo',
