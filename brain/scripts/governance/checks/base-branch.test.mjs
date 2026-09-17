@@ -199,14 +199,18 @@ test('base-branch mutation (revert-proof): only run-check.mjs imports checks/bas
   const self = fileURLToPath(new URL('./base-branch.mjs', import.meta.url));
   const thisTest = fileURLToPath(new URL('./base-branch.test.mjs', import.meta.url));
 
+  // An ACTUAL import statement, not a comment mentioning the filename
+  // (run-check.test.mjs's own doc comment names it in prose without
+  // importing it — that must not count as an importer).
+  const IMPORT_RE = /from\s+['"][^'"]*base-branch\.mjs['"]/;
   const importers = walk(scriptsDir)
     .filter((f) => f !== self && f !== thisTest)
-    .filter((f) => readFileSync(f, 'utf8').includes('base-branch.mjs'))
+    .filter((f) => IMPORT_RE.test(readFileSync(f, 'utf8')))
     .map((f) => f.replace(scriptsDir, ''));
 
   assert.deepEqual(
     importers,
-    importers.filter((f) => f === '/governance/run-check.mjs'),
+    importers.filter((f) => f === 'governance/run-check.mjs'),
     `base-branch.mjs must be imported by run-check.mjs alone (never a second implementation of ` +
       `the same rule, #340) — found: ${JSON.stringify(importers)}`,
   );

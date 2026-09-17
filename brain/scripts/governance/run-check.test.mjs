@@ -1059,6 +1059,121 @@ test('runCheck: issue-link — slice target, body has BOTH "Closes #42" and "Par
   assert.deepEqual(result, { pass: true });
 });
 
+// ── base-branch — D10's eight steps, an injected fetchIssue (issue #967 PR C) ──
+//
+// The DECISION lives in checks/base-branch.mjs (tested in isolation there).
+// These tests exercise the WRAPPER — the IO steps and the fan-out bound —
+// through the public `runCheck('base-branch', deps)` entry, same convention
+// `issue-link` above uses.
+
+const EPIC_TRACKED_BODY = ['```brain-graph/1', 'kind: epic', 'tracker: feature/brain-ui', '```'].join('\n');
+const SLICE_BODY = (parent) => ['```brain-graph/1', `parent: ${parent}`, '```'].join('\n');
+
+test('runCheck: base-branch — ctx.body is null (uncomputable) → fails closed (step 1)', async () => {
+  const result = await runCheck('base-branch', {
+    ctx: { body: null, targetBranch: 'main', defaultBranch: 'main' },
+    fetchIssue: async () => { throw new Error('must not be called — body is null'); },
+  });
+  assert.equal(result.pass, false);
+  assert.equal(result.uncomputable, true);
+  assert.match(result.reason, /PR body uncomputable/);
+});
+
+test('runCheck: base-branch — targetBranch/defaultBranch uncomputable → fails closed (step 2)', async () => {
+  const result = await runCheck('base-branch', {
+    ctx: { body: 'Closes #1', targetBranch: null, defaultBranch: null },
+    fetchIssue: async () => { throw new Error('must not be called'); },
+  });
+  assert.equal(result.pass, false);
+  assert.equal(result.uncomputable, true);
+});
+
+test('runCheck: base-branch — a feature/... head is checked with NO port call (step 3)', async () => {
+  let fetchCalled = false;
+  const result = await runCheck('base-branch', {
+    ctx: { body: 'Closes #1', sourceBranch: 'feature/brain-ui', targetBranch: 'feature/other', defaultBranch: 'main' },
+    fetchIssue: async () => { fetchCalled = true; return { body: '' }; },
+  });
+  assert.equal(result.pass, false);
+  assert.equal(fetchCalled, false, 'a tracker head decides on branch names alone — no fetchIssue call');
+});
+
+test('runCheck: base-branch — no linked issue reference → pass untouched, the standing case (step 4)', async () => {
+  let fetchCalled = false;
+  const result = await runCheck('base-branch', {
+    ctx: { body: 'just prose, no reference', sourceBranch: 'slice/x', targetBranch: 'main', defaultBranch: 'main' },
+    fetchIssue: async () => { fetchCalled = true; return { body: '' }; },
+  });
+  assert.deepEqual(result, { pass: true });
+  assert.equal(fetchCalled, false);
+});
+
+test('runCheck: base-branch — fetchIssue(linked) throws → fail closed and uncomputable, never a silent pass (step 5)', async () => {
+  const result = await runCheck('base-branch', {
+    ctx: { body: 'Closes #878', sourceBranch: 'slice/x', targetBranch: 'main', defaultBranch: 'main' },
+    fetchIssue: async () => { throw new Error('offline'); },
+  });
+  assert.equal(result.pass, false);
+  assert.equal(result.uncomputable, true);
+});
+
+test('runCheck: base-branch — the linked issue is itself kind: epic → pass, no second fetch (step 6)', async () => {
+  let calls = 0;
+  const result = await runCheck('base-branch', {
+    ctx: { body: 'Closes #878', sourceBranch: 'slice/x', targetBranch: 'main', defaultBranch: 'main' },
+    fetchIssue: async () => { calls += 1; return { body: EPIC_TRACKED_BODY }; },
+  });
+  assert.deepEqual(result, { pass: true });
+  assert.equal(calls, 1, 'the linked issue declaring kind: epic resolves without fetching a parent');
+});
+
+test('runCheck: base-branch — fetchIssue(parent) throws → fail closed, never a silent pass (step 7)', async () => {
+  const calls = [];
+  const result = await runCheck('base-branch', {
+    ctx: { body: 'Closes #337', sourceBranch: 'slice/x', targetBranch: 'main', defaultBranch: 'main' },
+    fetchIssue: async (n) => {
+      calls.push(n);
+      if (n === 337) return { body: SLICE_BODY(878) };
+      throw new Error('epic offline');
+    },
+  });
+  assert.equal(result.pass, false);
+  assert.equal(result.uncomputable, true);
+  assert.deepEqual(calls, [337, 878]);
+});
+
+test('runCheck: base-branch — base equals the parent\'s declared tracker → pass (step 8)', async () => {
+  const result = await runCheck('base-branch', {
+    ctx: { body: 'Closes #337', sourceBranch: 'slice/x', targetBranch: 'feature/brain-ui', defaultBranch: 'main' },
+    fetchIssue: async (n) => (n === 337 ? { body: SLICE_BODY(878) } : { body: EPIC_TRACKED_BODY }),
+  });
+  assert.deepEqual(result, { pass: true });
+});
+
+test('runCheck: base-branch — base ≠ the parent\'s declared tracker → fail, naming the tracker, epic and actual base (step 8)', async () => {
+  const result = await runCheck('base-branch', {
+    ctx: { body: 'Closes #337', sourceBranch: 'slice/x', targetBranch: 'main', defaultBranch: 'main' },
+    fetchIssue: async (n) => (n === 337 ? { body: SLICE_BODY(878) } : { body: EPIC_TRACKED_BODY }),
+  });
+  assert.equal(result.pass, false);
+  assert.ok(result.reason.includes('feature/brain-ui'), `must name the tracker, got: ${result.reason}`);
+  assert.ok(result.reason.includes('878'), `must name the epic, got: ${result.reason}`);
+  assert.ok(result.reason.includes('main'), `must name the actual base, got: ${result.reason}`);
+});
+
+test('runCheck: base-branch — no forge fan-out: zero issueList calls, at most two issueView (fetchIssue) calls', async () => {
+  const calls = [];
+  await runCheck('base-branch', {
+    ctx: { body: 'Closes #337', sourceBranch: 'slice/x', targetBranch: 'main', defaultBranch: 'main' },
+    fetchIssue: async (n) => {
+      calls.push(n);
+      return n === 337 ? { body: SLICE_BODY(878) } : { body: EPIC_TRACKED_BODY };
+    },
+  });
+  assert.ok(calls.length <= 2, `expected at most two fetchIssue calls, got ${calls.length}`);
+  assert.deepEqual(calls, [337, 878]);
+});
+
 // ── diff-size — size:exception from FRESH ctx.labels, never CI_MERGE_REQUEST_LABELS (task 2.3) ─
 
 test('runCheck: diff-size — ctx.labels includes "size:exception" → skips the budget check, pass', async () => {
