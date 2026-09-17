@@ -13,6 +13,22 @@ const NOW = '2026-09-13T00:00:00Z';
 
 const VERDICT = (sha, rev, verdict) => `Round ${rev}\n\n\`\`\`yaml\nprotocol: brain-review/2\nhead_sha: ${sha}\nrev: ${rev}\nverdict: ${verdict}\nfindings: []\n\`\`\`\n`;
 
+/** A verdict whose `findings:` block carries the given entries, in the ONE list encoding `renderVerdict` emits (#998 R998-5). */
+const VERDICT_WITH_FINDINGS = (sha, rev, verdict, findings) => {
+  const lines = ['protocol: brain-review/2', `head_sha: ${sha}`, `rev: ${rev}`, `verdict: ${verdict}`, 'findings:'];
+  for (const f of findings) {
+    lines.push(`  - id: ${f.id}`);
+    lines.push(`    severity: ${f.severity}`);
+    if (f.evidence !== undefined) lines.push(`    evidence: "${f.evidence}"`);
+    if (f.cites !== undefined) lines.push(`    cites: ${f.cites}`);
+  }
+  return `Round ${rev}\n\n\`\`\`yaml\n${lines.join('\n')}\n\`\`\`\n`;
+};
+
+/** A findings block in the FOREIGN 0-indent encoding (#452/#478): unreadable at any entry count, never a truncated prefix. */
+const VERDICT_MALFORMED_FINDINGS = (sha, rev, verdict) =>
+  `Round ${rev}\n\n\`\`\`yaml\nprotocol: brain-review/2\nhead_sha: ${sha}\nrev: ${rev}\nverdict: ${verdict}\nfindings:\n- id: F-1\n  severity: blocker\n\`\`\`\n`;
+
 /** A port whose every write verb throws — "read-only" proved, not promised. */
 function readOnlyPort(reads) {
   const port = {};
@@ -273,4 +289,35 @@ test('#879: reviewRows keeps verdicts oldest first and marks a review with no bl
   assert.equal(r.verdicts.length, 1);
   assert.equal(r.latest.rev, 1);
   assert.equal(reviewRows(4, []).latest, null);
+});
+
+// ── #998 R998-5: findings per verdict — the array, not the count ───────────
+
+test('#998 R998-5: reviewRows carries a verdict\'s findings as the shaped array, plus findingCount — the excerpt truncated to 240 chars', () => {
+  const longEvidence = 'e'.repeat(300);
+  const body = VERDICT_WITH_FINDINGS('abc', 1, 'REVISE', [
+    { id: 'F-1', severity: 'blocker', evidence: longEvidence, cites: 'ADR-1' },
+    { id: 'F-2', severity: 'correction', evidence: 'short' },
+  ]);
+  const r = reviewRows(5, [{ body, author: 'bot' }]);
+  assert.equal(r.verdicts[0].findingCount, 2);
+  assert.deepEqual(r.verdicts[0].findings, [
+    { id: 'F-1', severity: 'blocker', cites: 'ADR-1', evidenceExcerpt: longEvidence.slice(0, 240) },
+    { id: 'F-2', severity: 'correction', cites: null, evidenceExcerpt: 'short' },
+  ]);
+  assert.equal(r.verdicts[0].findings[0].evidenceExcerpt.length, 240);
+});
+
+test('#998 R998-5: a malformed findings block keeps findings: [] with the reason said in malformed, not silently "no findings"', () => {
+  const body = VERDICT_MALFORMED_FINDINGS('def', 2, 'REVISE');
+  const r = reviewRows(6, [{ body, author: 'bot' }]);
+  assert.deepEqual(r.verdicts[0].findings, []);
+  assert.deepEqual(r.verdicts[0].malformed, ['findings']);
+  assert.equal(r.verdicts[0].findingCount, null, 'uncomputable, distinct from a verdict that declared zero findings');
+});
+
+test('#998 R998-5: a verdict that declares findings: [] (genuinely empty) has findingCount 0, not null', () => {
+  const r = reviewRows(7, [{ body: VERDICT('ghi', 1, 'APPROVE'), author: 'bot' }]);
+  assert.deepEqual(r.verdicts[0].findings, []);
+  assert.equal(r.verdicts[0].findingCount, 0);
 });

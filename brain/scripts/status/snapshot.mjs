@@ -122,15 +122,37 @@ export function projectRecord(r) {
   return row;
 }
 
+const EVIDENCE_EXCERPT_LEN = 240;
+
+/**
+ * A `parseVerdict` finding entry, shaped for the UI (#998 R998-5). Only the
+ * fields `reviewer-protocol.md` SS6.1/6.2 actually declares (`id`, `severity`,
+ * `evidence`, `cites`) — no `file`/`line`: the protocol carries no such
+ * fields, so none are invented here.
+ */
+function shapeFinding(f) {
+  return {
+    id: f?.id ?? null,
+    severity: f?.severity ?? null,
+    cites: f?.cites ?? null,
+    evidenceExcerpt: typeof f?.evidence === 'string' ? f.evidence.slice(0, EVIDENCE_EXCERPT_LEN) : '',
+  };
+}
+
 /** The verdicts a PR thread carries, oldest first, plus the latest one. */
 export function reviewRows(prNumber, reviews) {
   const verdicts = [];
   for (const rv of reviews) {
     const v = parseVerdict({ body: rv?.body, author: rv?.author ?? null });
     if (!v) continue;
+    const findingsArray = Array.isArray(v.findings) ? v.findings : [];
     verdicts.push({
       pr: prNumber, head_sha: v.head_sha, rev: v.rev, verdict: v.verdict, author: v.author,
-      findings: Array.isArray(v.findings) ? v.findings.length : null,
+      // The array, not the count (#998 R998-5) — `findingCount` is `null` when
+      // uncomputable (absent from the block, or `malformed` names it), and the
+      // genuine count when the block declared a readable list, `[]` included.
+      findings: findingsArray.map(shapeFinding),
+      findingCount: Array.isArray(v.findings) ? v.findings.length : null,
       malformed: v.malformed ?? [],
     });
   }
