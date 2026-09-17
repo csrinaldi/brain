@@ -334,6 +334,10 @@ unaffected by this amendment.)
 - **WHEN** a memory-lane PR with no linked issue, or a PR whose linked issue has no epic, targets `main`
 - **THEN** the check passes, unchanged from today's behaviour
 
+#### Scenario: no linked issue at all, but the head looks like a tracker not targeting default — uncomputable, not a pass (amended 2026-09-17, PR #1006 review round 2)
+- **WHEN** a PR links no issue at all, its head branch is `feature/brain-ui`, and its base is `feature/other-tracker` (not the default branch)
+- **THEN** the check fails as `uncomputable`, naming the head, the base, and the default branch, and asking for the issue link — `fetchIssue` is never called, because the amendment above still requires the LINKED ISSUE's own declaration to decide tracker-vs-slice, and with no issue linked there is no declaration to read; a `feature/…` head with no issue that already targets the default branch still passes (R967-7's rule is satisfied either way), and every other no-issue head (e.g. `fix/…`) is unaffected
+
 #### Scenario: an unreadable epic is uncomputable, never a silent pass
 - **WHEN** the gate cannot read the linked issue's parent
 - **THEN** the result is `uncomputable` with the reason stated, and it is neither reported as a pass nor as a base violation

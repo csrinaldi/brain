@@ -758,3 +758,60 @@ no PR opened, no `--force`/`--no-verify` used.
 
 Commits: `4ba0891f` (finding 1), `d80a60da` (finding 2). This paragraph
 lands in a third, docs-only commit.
+
+## Review round 2 (PR #1006)
+
+One cold-review blocker fixed on `fix/issue-967-d-tracker-review` (same
+worktree, head `26fb7af6` before this round).
+
+**Finding (blocker)** — round 1 removed `run-check.mjs`'s step-3 shortcut
+that decided "tracker head" from `headBranch.startsWith('feature/')` alone
+(correct: only the LINKED ISSUE's own `tracker:` declaration can say a head
+IS a tracker — a slice based on its epic's tracker was being wrongly
+refused). But step 4 (`if (issueNumber == null) return { pass: true }`) still
+passed ANY PR with no linked issue BEFORE the tracker rule ever ran —
+including a `feature/…`-spelled head targeting something other than the
+default branch, which is exactly the shape R967-7 says MUST target default,
+unconditionally (measured: body `'no issue reference at all, oops'`, head
+`feature/brain-ui`, base `feature/other-tracker`, default `main` →
+`{ pass: true }`, `fetchIssue` never invoked — design D9: "a warning is what
+let #953 land on main").
+
+**The ruling**: the prefix is not a decision but IS a reason to demand
+evidence. With no issue linked there is no declaration left to read, so a
+`feature/…` head not targeting the default branch is now `uncomputable`
+rather than a pass — the reason names the head, the target, and the default
+branch, and asks for the issue link. A `feature/…` head with no issue that
+already targets the default branch still passes (the tracker rule is
+satisfied either way), and every other no-issue head (`fix/…`, `slice/…`,
+etc.) is unchanged — the standing memory-lane / no-issue case stays green.
+
+**TDD evidence**: RED seen first — `runCheck: base-branch — no linked issue +
+feature/... head not targeting default → fails closed, names
+head/target/default, fetchIssue never called (measured bug, PR #1006 review
+round 2)` failed on `result.pass` (`true !== false`) against the pre-fix
+code. Fixed in `run-check.mjs`'s step 4. GREEN after: 130/130 in
+`run-check.test.mjs`, 270/270 across the four targeted files. One mutation —
+dropping the new `feature/…`/no-issue branch back to the bare `if
+(issueNumber == null) return { pass: true };` — turned exactly that one test
+red (129/130) and no other; reverted.
+
+`spec.md` amended: R967-7 gained the "no linked issue at all, but the head
+looks like a tracker not targeting default" scenario.
+
+**Verification**: `GIT_CONFIG_GLOBAL=/dev/null node --test
+brain/scripts/governance/run-check.test.mjs
+brain/scripts/governance/checks/base-branch.test.mjs
+brain/scripts/status/epic-map.test.mjs brain/scripts/lib/ticket-base.test.mjs`
+— 270/270 green. `GIT_CONFIG_GLOBAL=/dev/null npm test` — 5680 pass / 1 fail
+(5681 total); the one failure is the same pre-existing/environmental
+`session-end-ship.test.mjs` "real entrypoint … writes no log file" case
+tracked as #1011 — unrelated to this diff, flagged not chased, per the given
+file scope. `npm run brain:repo:check` green before the code commit. Counted
+diff since `origin/feature/issue-967` (tests, `openspec/`, `.memory/`
+excluded): **245** (was 223 before this round; +22, all in `run-check.mjs`)
+— well under the 1000 budget. No AI attribution in the commit; nothing
+pushed, no PR opened, no `--force`/`--no-verify` used.
+
+Commit: `30172672` (code + test, one unit). This paragraph lands in a
+second, docs-only commit.
