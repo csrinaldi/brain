@@ -9,9 +9,11 @@ const view = (over = {}) => ({
     issue: 881,
     changeDir: 'openspec/changes/issue-881-ui',
     spec: { ok: true, value: [] },
+    sdd: { ok: true, value: [] },
     tasks: { ok: true, value: [] },
     workingMemory: { ok: true, value: {} },
     reviews: { ok: true, value: [], unreadable: [], sourceNote: 'forge comments until #880 lands' },
+    records: { ok: true, value: [] },
     ...over,
   },
 });
@@ -28,10 +30,10 @@ test('#881 R881-8: a change view that failed is a stated reason, not four empty 
   assert.match(buildDrawerModel(null).reason, /no change view/);
 });
 
-test('#881 R881-8: the drawer has exactly four tabs, in the spec\'s order', () => {
+test('#998 R998-6: the drawer has exactly six tabs, in the design\'s order', () => {
   const model = buildDrawerModel(view());
   assert.deepEqual(model.value.tabs.map((t) => t.id), TAB_IDS);
-  assert.deepEqual(model.value.tabs.map((t) => t.label), ['Spec', 'Tasks', 'Working memory', 'Reviews']);
+  assert.deepEqual(model.value.tabs.map((t) => t.label), ['Spec', 'SDD', 'Tasks', 'Working memory', 'Reviews', 'Records']);
   assert.equal(model.value.issue, 881);
 });
 
@@ -62,7 +64,8 @@ test('#881 R881-8: Spec cards carry their requirement, their scenarios and the f
 test('#881 R881-8 S2: no change dir states the expected path in the tab AND as its source', () => {
   const noDir = { ok: false, reason: 'no change dir at openspec/changes/issue-881-*', source: { path: 'openspec/changes/issue-881-*' } };
   const model = buildDrawerModel(view({ changeDir: null, spec: noDir, tasks: noDir }));
-  for (const tab of model.value.tabs.slice(0, 2)) {
+  const specAndTasks = [model.value.tabs.find((t) => t.id === 'spec'), model.value.tabs.find((t) => t.id === 'tasks')];
+  for (const tab of specAndTasks) {
     assert.equal(tab.ok, false);
     assert.equal(tab.reason, 'no change dir at openspec/changes/issue-881-*');
     assert.equal(tab.source, 'openspec/changes/issue-881-*');
@@ -80,7 +83,7 @@ test('#881 R881-8: Tasks show done/pending, the file line, and attribution — a
       ],
     },
   }));
-  const tasks = model.value.tabs[1];
+  const tasks = model.value.tabs[2];
   assert.equal(tasks.entries[0].title, 'T1. write the failing test');
   assert.equal(tasks.entries[0].done, true);
   assert.match(tasks.entries[0].detail, /alice/);
@@ -92,7 +95,7 @@ test('#881 R881-8: Tasks show done/pending, the file line, and attribution — a
 
 test('#881 R881-8 S3: an absent committed resume.md keeps the tab\'s own reason, which names slice 5', () => {
   const model = buildDrawerModel(view({ workingMemory: { ok: false, reason: 'no committed resume.md on feat/issue-881-x; the local overlay arrives in slice 5 (#883)' } }));
-  const wm = model.value.tabs[2];
+  const wm = model.value.tabs[3];
   assert.equal(wm.ok, false);
   assert.match(wm.reason, /slice 5 \(#883\)/);
 });
@@ -109,7 +112,7 @@ test('#881 R881-8: Working memory shows the three fields, each with its branch-q
       },
     },
   }));
-  const wm = model.value.tabs[2];
+  const wm = model.value.tabs[3];
   assert.deepEqual(wm.entries.map((e) => e.title), ['next_action', 'current_slice', 'blockers']);
   assert.equal(wm.entries[0].detail, 'ship PR 4');
   assert.equal(wm.entries[0].source, 'feat/issue-881-x:resume.md');
@@ -132,7 +135,7 @@ test('#881 R881-8 S4: Reviews list every round with its URL and state their sour
       ],
     },
   }));
-  const reviews = model.value.tabs[3];
+  const reviews = model.value.tabs[4];
   assert.equal(reviews.note, 'forge comments until #880 lands');
   assert.deepEqual(reviews.entries.map((e) => e.title), ['#971 rev 1 — REVISE', '#971 rev 2 — APPROVE']);
   assert.match(reviews.entries[0].detail, /bob/);
@@ -152,7 +155,7 @@ test('#998 R998-5: a round\'s findings become one child entry each, severity and
       ], findingCount: 2, head_sha: 'abc', malformed: [], source: { url: 'https://github.com/o/r/pull/971#c1' } }],
     },
   }));
-  const [round] = model.value.tabs[3].entries;
+  const [round] = model.value.tabs[4].entries;
   assert.equal(round.children.length, 2);
   assert.equal(round.children[0].title, 'blocker — F-1');
   assert.match(round.children[0].detail, /bad thing/);
@@ -172,7 +175,7 @@ test('#998 R998-5: a finding carrying file/line (a real per-finding anchor — D
       ], findingCount: 1, head_sha: 'abc', malformed: [], source: { url: 'https://github.com/o/r/pull/971#c1' } }],
     },
   }));
-  const [round] = model.value.tabs[3].entries;
+  const [round] = model.value.tabs[4].entries;
   assert.equal(round.children[0].source, 'brain/scripts/governance/run-check.mjs:556');
   assert.deepEqual(round.children[0].sourceStamp, { label: '[repo: brain/scripts/governance/run-check.mjs:556]', href: null, kind: 'repo' });
 });
@@ -186,7 +189,7 @@ test('#998 R998-5: the detail\'s finding count reads findingCount, not findings.
       value: [{ pr: 971, rev: 1, verdict: 'REVISE', author: 'bob', findings: [], findingCount: null, head_sha: 'abc', malformed: ['findings'], source: { url: 'https://github.com/o/r/pull/971#c1' } }],
     },
   }));
-  const [round] = model.value.tabs[3].entries;
+  const [round] = model.value.tabs[4].entries;
   assert.match(round.detail, /unknown finding count/, 'findingCount null (malformed/uncomputable) is said, never silently read as 0');
   assert.deepEqual(round.children, []);
 });
@@ -201,7 +204,7 @@ test('#881 R881-9: a review thread that could not be read is listed with its rea
       value: undefined,
     },
   }));
-  const reviews = model.value.tabs[3];
+  const reviews = model.value.tabs[4];
   assert.equal(reviews.ok, false);
   assert.match(reviews.reason, /every review thread of this issue is unreadable/);
   assert.equal(reviews.entries.length, 1, 'an unreadable thread is still an entry — skipping it reads as "no rounds were ever posted"');
@@ -219,9 +222,65 @@ test('#881 R881-9: a readable round and an unreadable thread coexist — both ar
       value: [{ pr: 971, rev: 1, verdict: 'APPROVE', author: 'bob', findings: [], findingCount: 0, head_sha: 'abc', malformed: [], source: { url: 'https://github.com/o/r/pull/971#c1' } }],
     },
   }));
-  const reviews = model.value.tabs[3];
+  const reviews = model.value.tabs[4];
   assert.equal(reviews.entries.length, 2);
   assert.equal(reviews.entries[1].pending, true, 'the unreadable thread comes after the rounds that were read');
+});
+
+// ── #998 R998-6: the door's two new tabs, sdd and records ───────────────────
+
+test('#998 R998-6: the sdd tab lists the seven stages as done/pending, each sourced to the change dir', () => {
+  const model = buildDrawerModel(view({
+    sdd: {
+      ok: true,
+      value: [
+        { stage: 'proposal', present: true, source: { path: 'openspec/changes/issue-881-ui' } },
+        { stage: 'spec', present: true, source: { path: 'openspec/changes/issue-881-ui' } },
+        { stage: 'archive', present: false, source: { path: 'openspec/changes/issue-881-ui' } },
+      ],
+    },
+  }));
+  const sdd = model.value.tabs.find((t) => t.id === 'sdd');
+  assert.equal(sdd.ok, true);
+  assert.deepEqual(sdd.entries.map((e) => e.title), ['proposal', 'spec', 'archive']);
+  assert.equal(sdd.entries[0].done, true);
+  assert.equal(sdd.entries[2].done, false);
+  assert.equal(sdd.entries[2].pending, true);
+  assert.equal(sdd.entries[0].source, 'openspec/changes/issue-881-ui');
+});
+
+test('#998 R998-6: the records tab lists this issue\'s own records, each sourced to its own file', () => {
+  const model = buildDrawerModel(view({
+    records: {
+      ok: true,
+      value: [
+        { id: 'rec-b', ts: '2026-09-16T10:00:00Z', actor: 'claude', actorKind: 'agent', type: 'bugfix', supersedes: 'rec-a', source: { path: '.memory/records/rec-b.jsonl' } },
+      ],
+    },
+  }));
+  const records = model.value.tabs.find((t) => t.id === 'records');
+  assert.equal(records.ok, true);
+  assert.equal(records.entries.length, 1);
+  assert.equal(records.entries[0].title, 'bugfix — rec-b');
+  assert.match(records.entries[0].detail, /claude/);
+  assert.match(records.entries[0].detail, /agent/);
+  assert.match(records.entries[0].detail, /supersedes rec-a/);
+  assert.equal(records.entries[0].source, '.memory/records/rec-b.jsonl');
+});
+
+test('#998 R998-6: a failing records tab carries only its own reason — the other five tabs are untouched', () => {
+  const model = buildDrawerModel(view({
+    records: { ok: false, reason: '.memory/index.jsonl is unreadable' },
+    spec: { ok: true, value: [{ id: 'R1', title: 't', line: 1, source: { path: 'spec.md', line: 1 }, scenarios: [] }] },
+  }));
+  assert.deepEqual(model.value.tabs.map((t) => t.id), TAB_IDS);
+  assert.equal(model.value.tabs.length, 6);
+  const records = model.value.tabs.find((t) => t.id === 'records');
+  assert.equal(records.ok, false);
+  assert.equal(records.reason, '.memory/index.jsonl is unreadable');
+  const spec = model.value.tabs.find((t) => t.id === 'spec');
+  assert.equal(spec.ok, true);
+  assert.equal(spec.entries.length, 1);
 });
 
 test('#881 A3: every leaf the drawer renders carries a non-empty source label', () => {
@@ -275,7 +334,7 @@ test('#998 R998-2: a review entry\'s stamp carries an href for a forge URL', () 
       value: [{ pr: 971, rev: 1, verdict: 'APPROVE', author: 'bob', findings: [], findingCount: 0, head_sha: 'abc', malformed: [], source: { url: 'https://github.com/o/r/pull/971#c1' } }],
     },
   }));
-  const [, , , reviews] = model.value.tabs;
+  const [, , , , reviews] = model.value.tabs;
   assert.equal(reviews.entries[0].sourceStamp.href, 'https://github.com/o/r/pull/971#c1');
   assert.equal(reviews.entries[0].sourceStamp.kind, 'forge');
   assert.equal(reviews.entries[0].sourceStamp.label, '[forge: #971]');
