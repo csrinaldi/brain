@@ -31,6 +31,8 @@ The manual step above belongs to this change.
 - `session:start`, `day:start` and `brain:memory:pull` no longer restore a manifest;
   `brain:memory:share` no longer creates the `.engram` symlink (`brain:env:init` /
   `cli.mjs setup` still does).
+- `brain:memory:migrate-v1 --rollback` is removed and refuses with a reason. Forward
+  `brain:memory:migrate-v1` and `--dry-run` are unchanged.
 
 ## v1.5.0 — the governance surface stops trusting what it cannot measure
 
