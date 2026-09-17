@@ -820,10 +820,10 @@ const NODES = [
            ["checks/", "brain/scripts/governance/checks/"]] },
 
   { id: "gsave", lane: "golden", actor: "either", label: "save",
-    verb: "npm run brain:save", since: "v0.6.0", status: "shipped",
-    summary: "Materialises session memory into .memory/ and commits it — or refuses and tells you to capture one.",
-    detail: ["If brain:memory:share produces no new changes, it exits non-zero: an empty memory commit would satisfy the gate's proxy while capturing nothing."],
-    docs: [["brain-save.mjs", "brain/scripts/brain-save.mjs"]] },
+    verb: "npm run brain:memory:save --issue <id>", since: "v0.6.0", status: "shipped",
+    summary: "Captures a durable issue-scoped memory record — or refuses and tells you to capture one.",
+    detail: ["The enabled memory lane ships the captured record independently of the feature PR; feature pushes no longer transport durable records."],
+    docs: [["memory/cli.mjs", "brain/scripts/memory/cli.mjs"]] },
 
   { id: "gship", lane: "golden", actor: "either", label: "ship",
     verb: "npm run brain:ship", since: "v0.6.0", status: "shipped",
@@ -1053,7 +1053,7 @@ const JOURNEY = [
     Upgrade consciously: npm run brain:upgrade -- v1.1.0
     (not auto-applied — review the tag changelog first)
 ── Team memory ─────────────────────────────
-  ✓ Pre-push hook active — materializes memory before push.
+  ✓ Pre-push hook active — checkpoints feature working memory before push.
 ── Ticket board ────────────────────────────
   #142  Export the invoice list to CSV   [status:approved] [type:feature]`,
     why: [
@@ -1142,11 +1142,11 @@ All checks passed. Ready to brain:ship.`,
     ],
     map: ["gcheck", "gnext", "l1", "localgates"] },
 
-  { phase: "11:45 · Save", actor: "either", title: "Commit the session memory",
-    cmd: "npm run brain:save",
-    out: `brain:save: .memory/ committed — "chore(memory): sync .memory [brain:save]"`,
+  { phase: "11:45 · Save", actor: "either", title: "Capture the durable issue memory record",
+    cmd: "npm run brain:memory:save --issue <id>",
+    out: `brain:memory:save: durable issue record captured; the enabled memory lane ships it`,
     why: [
-      "Memory is materialised from the live layer into .memory/ and committed. Tomorrow's brain:day:start on someone else's machine imports it.",
+      "The record is issue-scoped, not branch-scoped. The enabled memory lane delivers it to main independently of the feature PR — feature pushes no longer transport durable records. Tomorrow's brain:day:start on someone else's machine imports it from main.",
       "If nothing new was captured, this exits non-zero and tells you to capture a session summary instead of committing an empty change — an empty memory commit would satisfy the gate's proxy while recording nothing, which is worse than a red gate."
     ],
     map: ["gsave", "durable", "sharepull", "l3"] },

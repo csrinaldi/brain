@@ -194,7 +194,17 @@ The working directory is a DETACHED CHECKOUT at the head this review is about.
 It is not the operator's branch, and nothing you read here is affected by
 whatever they have checked out or left uncommitted. The one path below is
 absolute and deliberately points OUTSIDE this directory — that is where the
-reader looks for your findings.` : ''}
+reader looks for your findings.
+
+This working directory is snapshotted before you start and again after you
+finish, and ANY added, removed, or changed path inside it — not just the one
+you may have meant to touch — refuses publication of the whole review. So you
+create, edit, and delete nothing under the working directory: no scratch files,
+no notes, no installed modules, no test artefacts left behind. The only file
+you write is the artifact path above, and it is OUTSIDE this directory
+precisely so writing it cannot trip this rule. If you need scratch space for
+anything — a downloaded dependency, an intermediate file, a note to yourself —
+use the OS temp dir, never here.` : ''}
 
 ## What you must produce
 

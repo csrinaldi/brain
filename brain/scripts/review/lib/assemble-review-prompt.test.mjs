@@ -421,3 +421,25 @@ test('output mode switches only the delivery instruction, not the reviewer role 
   assert.ok(finalMessagePrompt.includes(`\`\`\`${ARTIFACT_TAG}`), 'the exact existing artifact schema remains in the returned-message mode');
   assert.ok(finalMessagePrompt.startsWith(ROLE.text), 'the first-party reviewer role remains verbatim');
 });
+
+// ── #1010 unit 6 — the engine must not touch the candidate tree itself ──────
+//
+// Measured on PR #1019's own cold review, with the #1010 fixes already in
+// place: the stage correctly refused — "the cold-review candidate changed
+// during execution; refusing publication — 1 path(s) changed: +scratch" —
+// because the engine created a `scratch` file inside the candidate on its
+// own initiative. The DETACHED CHECKOUT paragraph told it where it was, but
+// never told it the tree must not be touched.
+
+test('#1010: the DETACHED CHECKOUT paragraph forbids any write under the working directory, and only fires when there IS one to protect', () => {
+  const rooted = assembleReviewPrompt({ role: ROLE, prNumber: PR, artifactRoot: '/tmp/brain-review-op' });
+  assert.match(rooted, /DETACHED CHECKOUT/, 'sanity: the paragraph under test is present');
+  assert.match(rooted, /snapshotted/i, 'the prompt must say the tree is snapshotted before and after the run');
+  assert.match(rooted, /refuses publication/i, 'and that ANY changed path refuses the WHOLE review, not just the changed file');
+  assert.match(rooted, /no scratch files/i, 'the rule must be concrete about what "touch nothing" means, not merely abstract');
+  assert.match(rooted, /OS temp dir/i, 'the prompt must give the engine a legal place for scratch space instead of the candidate');
+
+  const plain = assembleReviewPrompt({ role: ROLE, prNumber: PR });
+  assert.doesNotMatch(plain, /DETACHED CHECKOUT/, 'no artifactRoot means no detached-checkout paragraph at all');
+  assert.doesNotMatch(plain, /snapshotted/i, 'and so no dangling reference to a snapshot rule with nothing above it to anchor it');
+});
