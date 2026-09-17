@@ -89,15 +89,33 @@ function ago(ms) {
 }
 
 /**
+ * The countdown text (#998 R998-6): "next poll in N s" while a tick is
+ * armed, "paused" while paused (checked first — a paused poller may still
+ * carry a stale `nextAttemptAt` from before it paused), "polling disabled"
+ * when nothing is scheduled at all. Reads only the `now` this caller already
+ * threads through every other clock read on this page — never `Date.now()`
+ * itself (D9: no clock in `lib/`).
+ */
+function pollCountdown({ poller, now }) {
+  if (poller.paused) return 'paused';
+  if (!poller.nextAttemptAt) return 'polling disabled';
+  const seconds = Math.max(0, Math.round((Date.parse(poller.nextAttemptAt) - now) / 1000));
+  return `next poll in ${seconds} s`;
+}
+
+/**
  * The maintainer's ruling, rendered: a visible "forge polled N s ago /
- * paused" indicator beside the two controls. `paused` is returned separately
- * so the page can mark the indicator itself, not only the button.
+ * paused" indicator beside the two controls, plus the countdown to the next
+ * attempt (#998 R998-6). `paused` is returned separately so the page can
+ * mark the indicator itself, not only the button; `countdown` is additive —
+ * `text` stays exactly what it already was, never a second projection of it.
  */
 export function pollIndicator({ poller, nowMs }) {
-  if (!poller) return { text: 'the poll state is unknown until the stream connects', paused: false };
+  if (!poller) return { text: 'the poll state is unknown until the stream connects', paused: false, countdown: 'polling disabled' };
   const when = poller.lastOkAt ? `forge polled ${ago(nowMs - Date.parse(poller.lastOkAt))}` : 'the forge has not been polled yet';
   return {
     text: poller.paused ? `polling is paused — ${when}` : when,
     paused: Boolean(poller.paused),
+    countdown: pollCountdown({ poller, now: nowMs }),
   };
 }
