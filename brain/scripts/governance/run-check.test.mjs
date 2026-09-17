@@ -1261,6 +1261,47 @@ test('runCheck: base-branch — no block, no prose parent → one fetch, pass (s
   assert.deepEqual(calls, [900], 'no declared parent (block or prose) means no second fetch');
 });
 
+// PR E (tracker PR #1004, round-3 cold review): a parent divergence
+// (parent-grammar or parent-ambiguous) short-circuits to the SAME
+// uncomputable result the wrapper's own step 5 gives an unreadable linked
+// issue — BEFORE `needsParentRead` would otherwise decide a parent fetch is
+// owed. `dp.parent === null` reads identically for "no parent declared" and
+// "a parent was declared and could not be read", so the wrapper's fetch
+// bookkeeping is the one place that proves the epic is never fetched for a
+// divergence, not just that the pure predicate says uncomputable.
+
+test('runCheck: base-branch — a parent-grammar divergence in the linked issue is uncomputable, the epic is never fetched', async () => {
+  const calls = [];
+  const result = await runCheck('base-branch', {
+    ctx: { body: 'Closes #337', sourceBranch: 'slice/x', targetBranch: 'main', defaultBranch: 'main' },
+    fetchIssue: async (n) => {
+      calls.push(n);
+      return { body: ['```brain-graph/1', 'parent: abc', '```'].join('\n') };
+    },
+  });
+  assert.equal(result.pass, false);
+  assert.equal(result.uncomputable, true);
+  assert.ok(result.reason.includes('parent-grammar'), `must name the divergence reason, got: ${result.reason}`);
+  assert.ok(result.reason.includes('abc'), `must name the offending value, got: ${result.reason}`);
+  assert.deepEqual(calls, [337], 'the epic must never be fetched — the parent could not be read, not resolved to none');
+});
+
+test('runCheck: base-branch — an ambiguous prose parent in the linked issue is uncomputable, the epic is never fetched', async () => {
+  const calls = [];
+  const result = await runCheck('base-branch', {
+    ctx: { body: 'Closes #337', sourceBranch: 'slice/x', targetBranch: 'main', defaultBranch: 'main' },
+    fetchIssue: async (n) => {
+      calls.push(n);
+      return { body: ['Parent: #878', 'Parent: #879'].join('\n') };
+    },
+  });
+  assert.equal(result.pass, false);
+  assert.equal(result.uncomputable, true);
+  assert.ok(result.reason.includes('parent-ambiguous'), `must name the divergence reason, got: ${result.reason}`);
+  assert.ok(result.reason.includes('878, 879'), `must name the offending value, got: ${result.reason}`);
+  assert.deepEqual(calls, [337], 'the epic must never be fetched — the parent could not be read, not resolved to none');
+});
+
 test('runCheck: base-branch — no forge fan-out: zero issueList calls, at most two issueView (fetchIssue) calls', async () => {
   const calls = [];
   await runCheck('base-branch', {
