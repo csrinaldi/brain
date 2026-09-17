@@ -1503,6 +1503,7 @@
 {"id":"rec-9d5a5bf1d8c58c62","ts":"2026-09-06T13:42:55Z","actor":"feat/issue-870-featmemory-the-epics-five-numbers-are-ha","type":"discovery","project":"brain","issue":870,"file":"2026-09-rec-9d5a5bf1d8c58c62.jsonl"}
 {"id":"rec-9d654541f2fee079","ts":"2026-07-07T17:08:41Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07-rec-9d654541f2fee079.jsonl"}
 {"id":"rec-9d7c56ebef781687","ts":"2026-07-25T21:51:52Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-9d7c56ebef781687.jsonl"}
+{"id":"rec-9dcb3ce0a56e1a18","ts":"2026-09-17T00:29:33Z","actor":"@csrinaldi","type":"decision","project":"brain","issue":998,"file":"2026-09-rec-9dcb3ce0a56e1a18.jsonl"}
 {"id":"rec-9dcc8dc3a086c04c","ts":"2026-07-21T00:54:04Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-07-rec-9dcc8dc3a086c04c.jsonl"}
 {"id":"rec-9dce38f14012e2f8","ts":"2026-07-29T14:26:50Z","actor":"@legacy","type":"config","project":"brain","file":"2026-07-rec-9dce38f14012e2f8.jsonl"}
 {"id":"rec-9e10c8956885d97c","ts":"2026-07-25T00:48:25Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-9e10c8956885d97c.jsonl"}
