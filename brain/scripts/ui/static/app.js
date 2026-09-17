@@ -5,7 +5,7 @@
 // `lib/*.mjs` module with its own `node:test`, because this file has no test
 // runner (no DOM harness exists in this repo, design D9). What CAN be
 // asserted about it is asserted by scan: `app-source-guard.test.mjs`,
-// `degradation-banner.test.mjs`, `no-management-views.test.mjs`.
+// `degradation-banner.test.mjs`, `views-owned.test.mjs`.
 //
 // Loaded as a plain ES module (`<script type="module" src="/app.js">`): the
 // imports below are resolved by the browser against `server.mjs`'s
@@ -16,7 +16,7 @@ import { initialPageState, applyFrame, parseFrame, streamFailed, controlFailed, 
 import { degradationBands, pollIndicator } from './lib/banners.mjs';
 import { buildCanvasModel } from './lib/canvas-model.mjs';
 import { buildDrawerModel } from './lib/drawer-model.mjs';
-import { MODES, PLACEHOLDERS, initialView, switchMode } from './lib/view-model.mjs';
+import { MODES, PLACEHOLDERS, initialView, switchMode, keyAction } from './lib/view-model.mjs';
 
 const mounts = {
   status: document.getElementById('status'),
@@ -298,6 +298,35 @@ async function loadChange(issue) {
   changeView = next;
   renderDrawer();
 }
+
+// ── keyboard (#998 R998-2) ───────────────────────────────────────────────
+
+/** The nodes `j`/`k` may traverse: only `map` mode ever has any on screen. */
+function drawnNodes() {
+  if (view !== 'map') return [];
+  const model = buildCanvasModel(sectionOf(state, 'graph'));
+  return model.ok ? model.value.nodes : [];
+}
+
+/**
+ * One listener for the whole page, routed entirely through
+ * `keyAction` — this function decides nothing, it only executes what that
+ * pure function returned. A Cmd/Ctrl/Alt combination or a keystroke while
+ * an input is focused is never this page's to take.
+ */
+function onKeyDown(event) {
+  if (event.metaKey || event.ctrlKey || event.altKey) return;
+  const target = event.target;
+  if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
+  const action = keyAction(view, event.key, { nodes: drawnNodes(), selected: selectedIssue });
+  if (action.type === 'none') return;
+  event.preventDefault();
+  if (action.type === 'mode') switchToMode(action.mode);
+  else if (action.type === 'select') selectNode(action.issue);
+  else if (action.type === 'close') closeDrawer();
+}
+
+document.addEventListener('keydown', onKeyDown);
 
 // ── the API: one REST read, then the stream ────────────────────────────────
 
