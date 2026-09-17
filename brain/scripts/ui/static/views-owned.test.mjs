@@ -91,6 +91,14 @@ test('#1009 cold review finding 1: renderReviewRound checks round.malformed befo
   assert.ok(malformedIdx < emptyIdx, 'the malformed check must come before the empty-findings case, so a malformed round is never read as "no findings"');
 });
 
+test('#1009 cold review round 2: renderReviewRound gives a STOP verdict its own mark and the "human escalation" word, distinct from the ✓/✕ marks', () => {
+  const fnMatch = APP_JS.match(/function renderReviewRound\([^)]*\) \{[\s\S]*?\n}\n/);
+  assert.ok(fnMatch, 'renderReviewRound function must exist in app.js');
+  const body = fnMatch[0];
+  assert.match(body, /'STOP'/, 'renderReviewRound must branch on the STOP verdict literal, not fold it into the REVISE/unknown ✕ mark');
+  assert.match(body, /human escalation/, 'a STOP round must say the escalation as text, not colour alone');
+});
+
 // ── #998 R998-6: the served branch and the poll countdown ───────────────────
 
 test('#998 R998-6 T3: the status bar names the served branch through the same sourceStamp helper the door uses', () => {

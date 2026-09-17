@@ -346,6 +346,12 @@ test('#879: reviewRows keeps verdicts oldest first and marks a review with no bl
   assert.equal(reviewRows(4, []).latest, null);
 });
 
+test('#1009 cold review round 2: reviewRows keeps a STOP verdict verbatim, same as REVISE/APPROVE — parseVerdict does not filter the word against the enum', () => {
+  const r = reviewRows(12, [{ body: VERDICT('stopsha0', 3, 'STOP'), author: 'bot' }]);
+  assert.equal(r.verdicts[0].verdict, 'STOP');
+  assert.equal(r.latest.verdict, 'STOP');
+});
+
 // ── #998 R998-5: findings per verdict — the array, not the count ───────────
 
 test('#998 R998-5: reviewRows carries a verdict\'s findings as the shaped array, plus findingCount — the excerpt truncated to 240 chars', () => {

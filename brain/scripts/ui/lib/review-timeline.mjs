@@ -27,11 +27,19 @@ function findingSource(f) {
   return f.file ? { path: f.file, line: f.line } : null;
 }
 
+/** The protocol's own verdict enum (reviewer-protocol.md:264) — anything else is kept, never dropped, only flagged (#1009 cold review round 2). */
+const KNOWN_VERDICTS = new Set(['APPROVE', 'REVISE', 'STOP']);
+
 function shapeRound(v) {
   const findings = v.findings.map((f) => ({ ...f, source: findingSource(f) }));
   return {
     rev: v.rev,
     verdict: v.verdict,
+    // A verdict word outside the protocol enum is kept verbatim above and
+    // said here, never dropped and never treated as an implicit APPROVE
+    // (#1009 cold review round 2 finding): the render layer reads this flag
+    // to call it out rather than silently rendering it like any other word.
+    unknownVerdict: !KNOWN_VERDICTS.has(v.verdict),
     headSha7: typeof v.head_sha === 'string' ? v.head_sha.slice(0, 7) : null,
     author: v.author,
     findings,
@@ -54,18 +62,41 @@ function threadState(reviewRow) {
 }
 
 /**
- * The two "waiting on a verdict right now" cases (R998-5) — never an
- * unreadable or an APPROVE-latest thread. Returns `{waiting, head}`, never a
- * bare string or null (#1009 cold review finding 2): `head` is `null` both
+ * The three "waiting on a verdict right now" cases (R998-5, plus STOP added
+ * on #1009 cold review round 2) — never an unreadable or an APPROVE-latest
+ * thread, and never an unknown-verdict-latest thread either (a word outside
+ * the protocol enum is said via `unknownVerdict` on the round, not silently
+ * treated as still-open). Returns `{waiting, head, group, escalate}`, never
+ * a bare string or null (#1009 cold review finding 2): `head` is `null` both
  * when nothing is waiting AND when a REVISE thread's head_sha could not be
  * parsed, so `waiting` — not a `!== null` check on the old string return —
  * is what the queue filter must read; collapsing those two `null`s into one
- * sentinel silently dropped an unparseable-head REVISE thread from the queue.
+ * sentinel silently dropped an unparseable-head REVISE thread from the
+ * queue. `group` orders the queue: STOP (a human must look now, protocol §7)
+ * comes before REVISE, which comes before "no round posted" — a STOP thread
+ * is more urgent than an open REVISE round, never mixed in by PR number
+ * alone.
  */
 function waitingOn(thread) {
-  if (thread.noRound) return { waiting: true, head: null };
-  if (thread.latest?.verdict === 'REVISE') return { waiting: true, head: thread.latest.headSha7 };
-  return { waiting: false, head: null };
+  if (thread.noRound) return { waiting: true, head: null, group: 'noRound', escalate: false };
+  if (thread.latest?.verdict === 'STOP') return { waiting: true, head: thread.latest.headSha7, group: 'stop', escalate: true };
+  if (thread.latest?.verdict === 'REVISE') return { waiting: true, head: thread.latest.headSha7, group: 'revise', escalate: false };
+  return { waiting: false, head: null, group: null, escalate: false };
+}
+
+// STOP jumps the queue ahead of everything else; REVISE and "no round
+// posted" keep their pre-existing relative order (plain PR-ascending,
+// un-split between the two — that ordering predates STOP and no finding
+// asked to change it), so both share one rank below STOP. The sort below is
+// stable, so within this shared rank the original PR-ascending order from
+// `threads` survives untouched.
+const QUEUE_GROUP_ORDER = { stop: 0, revise: 1, noRound: 1 };
+
+/** The wait reason string for one queue group — STOP's is `'human escalation'`, distinct from both the REVISE head and `'no round posted'` (#1009 cold review round 2). */
+function waitText(t, w) {
+  if (w.group === 'noRound') return 'no round posted';
+  if (w.group === 'stop') return 'human escalation';
+  return w.head ?? 'head not readable';
 }
 
 /**
@@ -88,20 +119,34 @@ export function buildReviewTimeline(reviewsSection, prsSection, { issue } = {}) 
     .map((p) => ({ pr: p.number, issue: p.issue, title: p.title, headBranch: p.headBranch, ...threadState(reviewsByPr.get(p.number)) }))
     .sort((a, b) => a.pr - b.pr);
 
-  const queue = threads
+  const waiting = threads
     .map((t) => ({ t, w: waitingOn(t) }))
     .filter(({ w }) => w.waiting)
-    .map(({ t, w }) => ({
-      pr: t.pr,
-      issue: t.issue,
-      title: t.title,
-      // `noRound` and `REVISE with an unreadable head` are both "head is
-      // null" but distinct reasons (#1009 cold review finding 2) — never the
-      // same wait string.
-      wait: t.noRound ? 'no round posted' : (w.head ?? 'head not readable'),
-    }));
+    // STOP first (a human must look now, protocol §7), then REVISE, then
+    // "no round posted" — each group oldest-PR first, since `threads` above
+    // is already sorted by PR ascending and this sort is stable.
+    .sort((a, b) => QUEUE_GROUP_ORDER[a.w.group] - QUEUE_GROUP_ORDER[b.w.group]);
 
-  const totals = { threads: threads.length, queue: queue.length, unreadable: threads.filter((t) => t.unreadable).length };
+  const queue = waiting.map(({ t, w }) => ({
+    pr: t.pr,
+    issue: t.issue,
+    title: t.title,
+    // `noRound`, `REVISE with an unreadable head` and `STOP` are all "head
+    // is null/irrelevant" but distinct reasons (#1009 cold review finding 2,
+    // round 2) — never the same wait string.
+    wait: waitText(t, w),
+    escalate: w.escalate,
+  }));
+
+  const totals = {
+    threads: threads.length,
+    queue: queue.length,
+    unreadable: threads.filter((t) => t.unreadable).length,
+    // Counted separately from the rest of the waiting queue (#1009 cold
+    // review round 2) — a STOP thread is a human-escalation state, not just
+    // another item waiting on a machine verdict.
+    stops: waiting.filter(({ w }) => w.group === 'stop').length,
+  };
 
   return { ok: true, value: { threads, queue, totals } };
 }

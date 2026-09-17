@@ -144,5 +144,63 @@ test('#998 R998-5: totals count threads, the queue, and unreadable threads', () 
     reviews([{ pr: 1, ok: true, verdicts: [verdict(1, 'REVISE', { pr: 1 })], latest: null }, { pr: 2, ok: false, reason: 'x' }]),
     prs([{ number: 1, title: 'a', headBranch: 'x', issue: 1 }, { number: 2, title: 'b', headBranch: 'y', issue: 2 }]),
   );
-  assert.deepEqual(t.value.totals, { threads: 2, queue: 1, unreadable: 1 });
+  assert.deepEqual(t.value.totals, { threads: 2, queue: 1, unreadable: 1, stops: 0 });
+});
+
+test('#1009 cold review round 2 finding: a STOP-latest thread is waiting, head of the queue (before REVISE and no-round entries), saying the human escalation', () => {
+  const t = buildReviewTimeline(
+    reviews([
+      { pr: 20, ok: true, verdicts: [verdict(1, 'REVISE', { pr: 20 })], latest: null },
+      { pr: 5, ok: true, verdicts: [verdict(3, 'STOP', { pr: 5, head_sha: 'stopsha0123' })], latest: null },
+    ]),
+    prs([
+      { number: 20, title: 'revise', headBranch: 'feat/r', issue: 1 },
+      { number: 5, title: 'stopped', headBranch: 'feat/s', issue: 2 },
+      { number: 1, title: 'no round', headBranch: 'feat/n', issue: 3 },
+    ]),
+  );
+  // STOP (pr 5) heads the queue ahead of everything else; REVISE (pr 20) and
+  // no-round (pr 1) keep their own pre-existing relative order beneath it —
+  // plain PR-ascending, un-split between the two.
+  assert.deepEqual(t.value.queue.map((q) => q.pr), [5, 1, 20], 'STOP first, then the REVISE/no-round entries in their existing oldest-PR-first order');
+  const stopEntry = t.value.queue.find((q) => q.pr === 5);
+  assert.equal(stopEntry.wait, 'human escalation');
+  assert.equal(stopEntry.escalate, true);
+  assert.notEqual(stopEntry.wait, 'no round posted');
+  const reviseEntry = t.value.queue.find((q) => q.pr === 20);
+  assert.equal(reviseEntry.escalate, false);
+  assert.notEqual(reviseEntry.wait, stopEntry.wait);
+});
+
+test('#1009 cold review round 2 finding: totals count STOP threads separately from the rest of the queue', () => {
+  const t = buildReviewTimeline(
+    reviews([
+      { pr: 1, ok: true, verdicts: [verdict(1, 'REVISE', { pr: 1 })], latest: null },
+      { pr: 2, ok: true, verdicts: [verdict(3, 'STOP', { pr: 2 })], latest: null },
+    ]),
+    prs([{ number: 1, title: 'a', headBranch: 'x', issue: 1 }, { number: 2, title: 'b', headBranch: 'y', issue: 2 }]),
+  );
+  assert.equal(t.value.totals.stops, 1);
+  assert.equal(t.value.totals.queue, 2, 'the STOP thread is still counted in the overall waiting queue too');
+});
+
+test('#1009 cold review round 2 finding: a verdict outside APPROVE|REVISE|STOP is kept on the round and said as unknownVerdict, never dropped or treated as approved', () => {
+  const t = buildReviewTimeline(
+    reviews([{ pr: 8, ok: true, verdicts: [verdict(1, 'WOBBLE', { pr: 8 })], latest: null }]),
+    prs([{ number: 8, title: 'odd verdict', headBranch: 'feat/odd', issue: 8 }]),
+  );
+  const round = t.value.threads[0].rounds[0];
+  assert.equal(round.verdict, 'WOBBLE', 'the verdict word itself is never dropped');
+  assert.equal(round.unknownVerdict, true);
+  assert.equal(t.value.queue.length, 0, 'an unknown verdict is not treated as a waiting state (neither REVISE nor STOP)');
+});
+
+test('#1009 cold review round 2 finding: APPROVE and STOP rounds are not marked unknownVerdict', () => {
+  const t = buildReviewTimeline(
+    reviews([{ pr: 9, ok: true, verdicts: [verdict(1, 'APPROVE', { pr: 9 }), verdict(2, 'STOP', { pr: 9 })], latest: null }]),
+    prs([{ number: 9, title: 'known verdicts', headBranch: 'feat/known', issue: 9 }]),
+  );
+  const [approveRound, stopRound] = t.value.threads[0].rounds;
+  assert.equal(approveRound.unknownVerdict, false);
+  assert.equal(stopRound.unknownVerdict, false);
 });
