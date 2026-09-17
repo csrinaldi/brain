@@ -33,3 +33,13 @@ test('#998 fix1: renderSdd says the archive dirs it skipped, by name, when total
   assert.match(body, /totals\.archiveSkipped\.count/, 'the band is gated on the count, not always shown');
   assert.match(body, /totals\.archiveSkipped\.names/, 'the names are rendered, not just the count');
 });
+
+// ── review of PR 4, fix 2: every path in the SDD row renders through sourceStamp ──
+
+test('#998 fix2: renderSddRow stamps every path it renders — the row header, each stage cell, the tasks line, and each slice line', () => {
+  const body = functionBody(read(APP_JS), 'function renderSddRow(');
+  assert.match(body, /sourceStamp\(\{\s*path:\s*change\.dir\s*\}\)/, 'the row header already stamps change.dir');
+  assert.match(body, /sourceStamp\(stage\.source\)/, 'each stage cell stamps its own source');
+  assert.match(body, /sourceStamp\(t\.source\)/, 'the tasks line stamps its own source');
+  assert.match(body, /sourceStamp\(s\.source\)/, 'each slice line stamps its own source');
+});

@@ -345,6 +345,13 @@ function renderSdd() {
   }
 }
 
+/**
+ * Every value this row draws carries its own source underneath it (A3,
+ * extended to the SDD view by review of PR 4, fix 2): the row header already
+ * stamped `change.dir`; each stage cell, the tasks line, and each slice line
+ * now stamp their own `source` the same way, rather than trusting the
+ * header's stamp to stand in for the whole row.
+ */
 function renderSddRow(change) {
   const row = el('div', 'sdd-row');
   const header = el('div', 'sdd-row-header');
@@ -354,15 +361,29 @@ function renderSddRow(change) {
 
   const matrix = el('div', 'sdd-matrix');
   for (const stage of change.stages) {
-    matrix.appendChild(el('span', `sdd-stage sdd-stage-${stage.state}`, `${STAGE_VOCAB[stage.state].mark} ${stage.id}`));
+    const cell = el('span', `sdd-stage sdd-stage-${stage.state}`, `${STAGE_VOCAB[stage.state].mark} ${stage.id} `);
+    cell.appendChild(el('span', 'source', sourceStamp(stage.source).label));
+    matrix.appendChild(cell);
   }
   row.appendChild(matrix);
 
   const t = change.tasks;
-  row.appendChild(el('p', 'sdd-tasks', `tasks: ${t.checked} checked, ${t.open} open${t.next ? ` — next: ${t.next}` : ''}`));
+  const tasksLine = el('p', 'sdd-tasks', `tasks: ${t.checked} checked, ${t.open} open${t.next ? ` — next: ${t.next}` : ''} `);
+  tasksLine.appendChild(el('span', 'source', sourceStamp(t.source).label));
+  row.appendChild(tasksLine);
 
   if (change.slices.length > 0) {
-    row.appendChild(saidList('slice plan (declared scope only — PR state is not read):', change.slices.map((s) => `slice ${s.n}: claims ${s.claims.join(', ')} → ${s.terminalPr}`)));
+    const wrap = document.createElement('div');
+    wrap.appendChild(said('slice plan (declared scope only — PR state is not read):'));
+    const list = el('ul', 'said-list');
+    for (const s of change.slices) {
+      const li = document.createElement('li');
+      li.appendChild(document.createTextNode(`slice ${s.n}: claims ${s.claims.join(', ')} → ${s.terminalPr} `));
+      li.appendChild(el('span', 'source', sourceStamp(s.source).label));
+      list.appendChild(li);
+    }
+    wrap.appendChild(list);
+    row.appendChild(wrap);
   }
   if (change.phaseOrder.violations.length > 0) {
     row.appendChild(saidList(`${change.phaseOrder.violations.length} phase-order violation(s):`, change.phaseOrder.violations.map((v) => `${v.stage}: ${v.reason}`)));
