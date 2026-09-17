@@ -75,3 +75,7 @@ test('#998 R998-2: the shell mounts exactly five regions — status, modes, bann
   const ids = [...INDEX_HTML.matchAll(/id="([^"]+)"/g)].map((m) => m[1]).sort();
   assert.deepEqual(ids, ['banners', 'canvas', 'drawer', 'modes', 'status']);
 });
+
+test('#998 R998-5: a finding\'s own source goes through the same sourceStamp helper the door uses, never a second copy of that logic', () => {
+  assert.match(APP_JS, /renderSourceStamp\(sourceStamp\(f\.source\)\)/, 'renderReviewRound must apply sourceStamp to each finding\'s own source (file:line when present)');
+});

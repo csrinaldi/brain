@@ -421,7 +421,7 @@ function renderReviewThread(thread) {
   return card;
 }
 
-/** One round: its verdict word + mark, its findings grouped by severity (#998 R998-5) — findings carry no `file`/`line` (reviewer-protocol.md §6.1/6.2 declares none), so a finding shows only its excerpt and cites. */
+/** One round: its verdict word + mark, its findings grouped by severity (#998 R998-5) — a finding's own `source` (its `file`/`line` anchor when the verdict carried one, per `verdict.mjs`'s `hasUsableAnchor`/REQ-405-2, measured on PR #1006) is rendered through the same `sourceStamp` helper as every other value on this page, beside its excerpt and cites. */
 function renderReviewRound(round) {
   const row = el('div', 'review-round');
   const mark = round.verdict === 'APPROVE' ? '✓' : '✕';
@@ -436,6 +436,7 @@ function renderReviewRound(round) {
   for (const f of round.findings) {
     const item = el('div', 'finding');
     item.appendChild(el('strong', null, `${f.severity ?? 'unknown'} — ${f.id ?? '?'}`));
+    item.appendChild(renderSourceStamp(sourceStamp(f.source))); // #998 R998-5: a finding's own file:line (or the said fallback), through the same stamp helper the door uses
     item.appendChild(el('p', null, `${f.evidenceExcerpt ?? ''}${f.cites ? ` (cites ${f.cites})` : ''}`));
     row.appendChild(item);
   }

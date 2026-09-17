@@ -140,15 +140,15 @@ test('#881 R881-8 S4: Reviews list every round with its URL and state their sour
   assert.equal(reviews.entries[0].source, 'https://github.com/o/r/pull/971#c1');
 });
 
-test('#998 R998-5: a round\'s findings become one child entry each, severity and id in the title, excerpt/cites in the detail, inheriting the round\'s own source (D14: no per-finding anchor exists)', () => {
+test('#998 R998-5: a round\'s findings become one child entry each, severity and id in the title, excerpt/cites in the detail; a finding with no file/line falls back to the round\'s own source', () => {
   const model = buildDrawerModel(view({
     reviews: {
       ok: true,
       sourceNote: 'forge comments until #880 lands',
       unreadable: [],
       value: [{ pr: 971, rev: 1, verdict: 'REVISE', author: 'bob', findings: [
-        { id: 'F-1', severity: 'blocker', evidenceExcerpt: 'bad thing', cites: 'ADR-1' },
-        { id: 'F-2', severity: 'minor', evidenceExcerpt: 'small thing', cites: null },
+        { id: 'F-1', severity: 'blocker', evidenceExcerpt: 'bad thing', cites: 'ADR-1', file: null, line: null },
+        { id: 'F-2', severity: 'minor', evidenceExcerpt: 'small thing', cites: null, file: null, line: null },
       ], findingCount: 2, head_sha: 'abc', malformed: [], source: { url: 'https://github.com/o/r/pull/971#c1' } }],
     },
   }));
@@ -157,8 +157,24 @@ test('#998 R998-5: a round\'s findings become one child entry each, severity and
   assert.equal(round.children[0].title, 'blocker — F-1');
   assert.match(round.children[0].detail, /bad thing/);
   assert.match(round.children[0].detail, /ADR-1/);
-  assert.equal(round.children[0].source, 'https://github.com/o/r/pull/971#c1', "a finding inherits the round's own source — no per-finding anchor exists (D14)");
+  assert.equal(round.children[0].source, 'https://github.com/o/r/pull/971#c1', "no file/line on this finding — it falls back to the round's own source");
   assert.equal(round.children[1].title, 'minor — F-2');
+});
+
+test('#998 R998-5: a finding carrying file/line (a real per-finding anchor — D14 amended, one DOES exist) renders its own [repo: path:line] stamp, not the round\'s URL', () => {
+  const model = buildDrawerModel(view({
+    reviews: {
+      ok: true,
+      sourceNote: 'forge comments until #880 lands',
+      unreadable: [],
+      value: [{ pr: 971, rev: 1, verdict: 'REVISE', author: 'bob', findings: [
+        { id: 'F-1', severity: 'blocker', evidenceExcerpt: 'bad thing', cites: 'ADR-1', file: 'brain/scripts/governance/run-check.mjs', line: 556 },
+      ], findingCount: 1, head_sha: 'abc', malformed: [], source: { url: 'https://github.com/o/r/pull/971#c1' } }],
+    },
+  }));
+  const [round] = model.value.tabs[3].entries;
+  assert.equal(round.children[0].source, 'brain/scripts/governance/run-check.mjs:556');
+  assert.deepEqual(round.children[0].sourceStamp, { label: '[repo: brain/scripts/governance/run-check.mjs:556]', href: null, kind: 'repo' });
 });
 
 test('#998 R998-5: the detail\'s finding count reads findingCount, not findings.length — a malformed verdict keeps it null, never 0', () => {

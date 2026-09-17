@@ -76,12 +76,21 @@ function workingMemoryEntries(fields) {
   }));
 }
 
-/** One child row per finding (#998 R998-5) — severity and id in the title, the excerpt and cites in the detail, inheriting the round's own source: no per-finding anchor exists in this provider (D14). */
+/**
+ * One child row per finding (#998 R998-5) — severity and id in the title,
+ * the excerpt and cites in the detail. D14 originally read "no per-finding
+ * anchor exists in this provider" — wrong, measured against PR #1006's
+ * posted verdict (verdict.mjs's `hasUsableAnchor`, REQ-405-2): a finding
+ * carrying `file`/`line` gets its OWN `{path, line}` source, rendered
+ * through the same `sourceStamp`/`sourceLabel` helper as every other value
+ * on this page; only a finding without one falls back to the round's own
+ * source (the PR comment URL).
+ */
 function findingEntries(round) {
   return (round.findings ?? []).map((f) => entry({
     title: `${f.severity ?? 'unknown'} — ${f.id ?? '?'}`,
     detail: `${f.evidenceExcerpt ?? ''}${f.cites ? ` (cites ${f.cites})` : ''}`,
-    source: round.source,
+    source: f.file ? { path: f.file, line: f.line } : round.source,
   }));
 }
 
