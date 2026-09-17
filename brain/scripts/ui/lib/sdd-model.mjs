@@ -32,9 +32,12 @@ const STAGE_FILE = Object.freeze({
 // `LIFECYCLE_STAGES` (brain/scripts/lib/sdd-layout.mjs), duplicated as a bare
 // literal rather than imported: that module reads `node:fs` at module scope
 // (its own default `exists()`/`listDir()` helpers), which this file must not
-// carry — `app.js` loads it directly as a browser ES module (D9). A test
-// pins the two arrays equal so a future reorder cannot drift silently.
-const LIFECYCLE_ORDER = ['proposal', 'spec', 'design', 'tasks'];
+// carry — `app.js` loads it directly as a browser ES module (D9), and an
+// unresolvable `node:fs` specifier would break the page's whole module graph
+// for every visitor, not just an SDD-tab one. Exported so `sdd-model.test.mjs`
+// can pin the two arrays equal, and allowlisted in `sdd-layout.test.mjs`'s
+// stage-array drift guard with this same reason.
+export const LIFECYCLE_ORDER = Object.freeze(['proposal', 'spec', 'design', 'tasks']);
 
 /**
  * evaluateStageOrder(present) -> {ok:true, violations}. Restates

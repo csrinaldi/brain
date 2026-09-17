@@ -5,8 +5,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildSddModel, STAGE_IDS, STAGE_VOCAB } from './sdd-model.mjs';
+import { buildSddModel, STAGE_IDS, STAGE_VOCAB, LIFECYCLE_ORDER } from './sdd-model.mjs';
 import { evaluatePhaseOrder } from '../../vcs/phase-order-check.mjs';
+import { LIFECYCLE_STAGES } from '../../lib/sdd-layout.mjs';
 
 const FULL = {
   id: 'issue-1-full', issue: 1, slug: 'full', dir: 'openspec/changes/issue-1-full', archived: false,
@@ -71,6 +72,10 @@ const ALL = [FULL, ONLY_PROPOSAL, HALF_TICKED, GRANDFATHERED, ARCHIVED, VIOLATIO
 function stageOf(model, id, stageId) {
   return model.value.changes.find((c) => c.id === id).stages.find((s) => s.id === stageId);
 }
+
+test('#998 R998-4: LIFECYCLE_ORDER (the browser-safe restatement) equals sdd-layout.mjs\'s LIFECYCLE_STAGES', () => {
+  assert.deepEqual(LIFECYCLE_ORDER, LIFECYCLE_STAGES);
+});
 
 test('#998 R998-4: STAGE_IDS is exactly the seven, in order', () => {
   assert.deepEqual(STAGE_IDS, ['proposal', 'spec', 'design', 'tasks', 'apply', 'verify', 'archive']);
