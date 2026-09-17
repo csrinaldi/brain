@@ -53,11 +53,15 @@ function makeRoot({ withSpec = true, withTasks = true } = {}) {
   return root;
 }
 
-function makeSnapshot({ changes = [{ id: 'issue-881-ui-server-canvas', issue: ISSUE, slug: 'ui-server-canvas', dir: CHANGE_DIR }], prs = [], reviews = [] } = {}) {
+function makeSnapshot({
+  changes = [{ id: 'issue-881-ui-server-canvas', issue: ISSUE, slug: 'ui-server-canvas', dir: CHANGE_DIR }],
+  prs = [], reviews = [], records = { ok: true, value: { records: [], duplicates: { ids: 0 } } },
+} = {}) {
   return {
     changes: { ok: true, value: changes },
     prs: { ok: true, value: prs },
     reviews: { ok: true, value: reviews },
+    records,
   };
 }
 
@@ -305,6 +309,85 @@ test('#881: one readable and one unreadable review thread — the rounds render 
   assert.equal(reviews.ok, true);
   assert.equal(reviews.value.length, 1, 'the readable round is still there');
   assert.deepEqual(reviews.unreadable, [{ pr: 958, ok: false, reason: 'thread unreadable: rate limited', source: { url: 'https://github.com/o/r/pull/958' } }]);
+});
+
+// ── #998 R998-6: the records tab — this issue's own memory records ──────────
+
+test('#998 R998-6: two records filed against this issue and one against another render newest first, sourced to their own file', () => {
+  const root = makeRoot();
+  const records = {
+    ok: true,
+    value: {
+      records: [
+        { id: 'rec-a', ts: '2026-09-15T10:00:00Z', actor: 'csrinaldi', actorKind: 'human', type: 'decision', issue: ISSUE, file: '.memory/records/rec-a.jsonl' },
+        { id: 'rec-b', ts: '2026-09-16T10:00:00Z', actor: 'claude', actorKind: 'agent', type: 'bugfix', issue: ISSUE, supersedes: 'rec-a', file: '.memory/records/rec-b.jsonl' },
+        { id: 'rec-c', ts: '2026-09-16T11:00:00Z', actor: 'csrinaldi', actorKind: 'human', type: 'decision', issue: 999, file: '.memory/records/rec-c.jsonl' },
+      ],
+      duplicates: { ids: 0 },
+    },
+  };
+  const snapshot = makeSnapshot({ records });
+  const run = recordingRun((args) => {
+    if (args[0] === 'blame') return BLAME_PORCELAIN;
+    if (args[0] === 'branch') return '';
+    throw new Error(`unexpected git call: ${args.join(' ')}`);
+  });
+  const result = buildChangeView({ root, issue: ISSUE, snapshot, _run: run });
+  assert.equal(result.value.records.ok, true);
+  assert.deepEqual(result.value.records.value.map((r) => r.id), ['rec-b', 'rec-a'], 'newest first, and the other issue\'s record is excluded');
+  assert.deepEqual(result.value.records.value[0], {
+    id: 'rec-b', ts: '2026-09-16T10:00:00Z', actor: 'claude', actorKind: 'agent', type: 'bugfix', supersedes: 'rec-a',
+    source: { path: '.memory/records/rec-b.jsonl' },
+  });
+});
+
+test('#998 R998-6: an unreadable records section is the tab\'s own reason, never an empty list read as "no records"', () => {
+  const root = makeRoot();
+  const snapshot = makeSnapshot({ records: { ok: false, reason: '.memory/index.jsonl is unreadable' } });
+  const run = recordingRun((args) => {
+    if (args[0] === 'blame') return BLAME_PORCELAIN;
+    if (args[0] === 'branch') return '';
+    throw new Error(`unexpected git call: ${args.join(' ')}`);
+  });
+  const result = buildChangeView({ root, issue: ISSUE, snapshot, _run: run });
+  assert.deepEqual(result.value.records, { ok: false, reason: '.memory/index.jsonl is unreadable' });
+});
+
+// ── #998 R998-6: the sdd tab — this issue's own seven-stage presence ────────
+
+test('#998 R998-6: the sdd tab lists the seven stages\' raw presence for this issue\'s own change row, sourced to the change dir', () => {
+  const root = makeRoot();
+  const changes = [{ id: 'issue-881-ui-server-canvas', issue: ISSUE, slug: 'ui-server-canvas', dir: CHANGE_DIR, artefacts: { proposal: true, spec: true, design: false, tasks: true, apply: false, verify: false, archive: false } }];
+  const snapshot = makeSnapshot({ changes });
+  const run = recordingRun((args) => {
+    if (args[0] === 'blame') return BLAME_PORCELAIN;
+    if (args[0] === 'branch') return '';
+    throw new Error(`unexpected git call: ${args.join(' ')}`);
+  });
+  const result = buildChangeView({ root, issue: ISSUE, snapshot, _run: run });
+  assert.equal(result.value.sdd.ok, true);
+  assert.deepEqual(result.value.sdd.value, [
+    { stage: 'proposal', present: true, source: { path: CHANGE_DIR } },
+    { stage: 'spec', present: true, source: { path: CHANGE_DIR } },
+    { stage: 'design', present: false, source: { path: CHANGE_DIR } },
+    { stage: 'tasks', present: true, source: { path: CHANGE_DIR } },
+    { stage: 'apply', present: false, source: { path: CHANGE_DIR } },
+    { stage: 'verify', present: false, source: { path: CHANGE_DIR } },
+    { stage: 'archive', present: false, source: { path: CHANGE_DIR } },
+  ]);
+});
+
+test('#998 R998-6: no matching row in the changes section is the sdd tab\'s own said reason', () => {
+  const root = makeRoot();
+  const snapshot = makeSnapshot({ changes: [] });
+  const run = recordingRun((args) => {
+    if (args[0] === 'blame') return BLAME_PORCELAIN;
+    if (args[0] === 'branch') return '';
+    throw new Error(`unexpected git call: ${args.join(' ')}`);
+  });
+  const result = buildChangeView({ root, issue: ISSUE, snapshot, _run: run });
+  assert.equal(result.value.sdd.ok, false);
+  assert.match(result.value.sdd.reason, new RegExp(`${ISSUE}`));
 });
 
 test('#881: when every review thread of the issue is unreadable the tab is ok:false and names them — never an empty list', () => {

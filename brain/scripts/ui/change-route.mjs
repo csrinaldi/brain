@@ -162,9 +162,46 @@ function buildReviewsTab({ snapshot, project, issue }) {
   return { ok: true, value: rounds, unreadable, sourceNote: REVIEWS_SOURCE_NOTE };
 }
 
+const SDD_STAGES = ['proposal', 'spec', 'design', 'tasks', 'apply', 'verify', 'archive'];
+
+/**
+ * The door's own sdd tab (#998 R998-6, design.md's "TAB_IDS grows sdd and
+ * records"): the seven stage artefacts' RAW presence for this issue's own
+ * row (`snapshot.changes`'s `artefacts{}` map, R998-4) — sourced to the
+ * change dir. This deliberately does not re-derive `lib/sdd-model.mjs`'s
+ * `STAGE_VOCAB` word/mark: that derivation is the SDD MODE's own concern
+ * (every change, at once); a single row's own tab draws the raw fact.
+ */
+function buildSddTab({ snapshot, issue, dir }) {
+  if (!dir) return noChangeDirTab(issue);
+  if (!snapshot?.changes?.ok) return { ok: false, reason: 'the changes section could not be read' };
+  const row = snapshot.changes.value.find((c) => c.issue === issue);
+  if (!row) return { ok: false, reason: `issue ${issue} has no row in the changes section` };
+  const artefacts = row.artefacts ?? {};
+  return { ok: true, value: SDD_STAGES.map((stage) => ({ stage, present: Boolean(artefacts[stage]), source: { path: dir } })) };
+}
+
+/**
+ * The door's records tab (#998 R998-6): this issue's own rows from
+ * `snapshot.records` (no new IO — the section is already in the snapshot
+ * the route holds, same as every other tab), newest first, each sourced to
+ * its own record file.
+ */
+function buildRecordsTab({ snapshot, issue }) {
+  if (!snapshot?.records?.ok) return { ok: false, reason: snapshot?.records?.reason ?? 'the records section could not be read' };
+  const rows = snapshot.records.value.records
+    .filter((r) => r.issue === issue)
+    .slice()
+    .sort((a, b) => (b.ts ?? '').localeCompare(a.ts ?? ''));
+  return {
+    ok: true,
+    value: rows.map((r) => ({ id: r.id, ts: r.ts, actor: r.actor, actorKind: r.actorKind, type: r.type, supersedes: r.supersedes ?? null, source: { path: r.file } })),
+  };
+}
+
 /**
  * buildChangeView() — the drawer's one composition. Server-side only (D11):
- * the four tabs' IO happens here, the pure shapers just attach `source`.
+ * the six tabs' IO happens here, the pure shapers just attach `source`.
  *
  * `project` is not in D8's module-map signature verbatim but is required to
  * build a PR URL (D14) the same way `server.mjs`'s `buildMeta()` already
@@ -196,9 +233,11 @@ export function buildChangeView({ root, issue, snapshot, project = null, _read, 
       issue,
       changeDir: dir,
       spec: buildSpecTab({ read, dir, issue }),
+      sdd: buildSddTab({ snapshot, issue, dir }),
       tasks: buildTasksTab({ read, run, dir, issue }),
       workingMemory: buildWorkingMemoryTab({ run, snapshot, issue }),
       reviews: buildReviewsTab({ snapshot, project, issue }),
+      records: buildRecordsTab({ snapshot, issue }),
     },
   };
 }
