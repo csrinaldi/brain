@@ -52,3 +52,40 @@ Full suite under `GIT_CONFIG_GLOBAL=/dev/null`: 5612/0 (PR 1 left it at 5611/0; 
 - `sdd`, `reviews`, `governance` render only the placeholder sentence this PR ships (naming PR 4, 5, 7); their real content is out of scope here.
 - The governance mode's content (the management views of #882) stays out of scope per `tasks.md`; only the tab and its placeholder exist.
 - `drawer-model.mjs`'s `TAB_IDS` growing a fifth tab (`sdd`) and `reviewEntries` gaining `findings[]`/`severity` are PR 5/6's work per the design's module map; untouched here.
+
+## PR 4 — the SDD view and the archive reader (R998-4) (2026-09-17)
+
+Branch `feat/issue-998-pr4-sdd` off `25b1d6b2` (PR 3 of #998, under review):
+
+| sha | unit | RED → GREEN | mutation |
+|---|---|---|---|
+| 0f51b9a1 | `status/snapshot.mjs`: `readChanges` also lists `openspec/changes/archive/<issue>` rows (`archived: true`, same shape as the active rows, plus a new per-row `artefacts{}` map) through a shared `readOneChange` helper | RED → 17/17 | dropping the archived rows from the returned array → red (13/14) |
+| 7e128e7f | `lib/sdd-model.mjs` + test: `buildSddModel(changesSection, {tier})` — seven stages each present/missing/in-progress/done/not-applicable, task count, slice plan (DECLARED SCOPE ONLY), named phase-order violations | RED → 11/11 | reverted |
+| 681a1037 | `lib/view-model.mjs`/`static/app.js`/`static/app.css`: the sdd view router branch renders `buildSddModel`'s output | RED 2 failures → GREEN 55/55 | reverted; `renderSdd()`/`renderSddRow()` themselves: N/A (D9) |
+| 46053526 | fix: stage-array drift guard allowlist entry for `sdd-model.mjs`'s local `LIFECYCLE_ORDER`, pinned equal to `sdd-layout.mjs`'s `LIFECYCLE_STAGES` | — | — |
+| a3cacf3f | docs: tasks.md T1-T4 ticked + R998-4's nine scenarios | — | — |
+| fe9a9878 / 072c0861 | memory record; tasks T5 ticked | — | — |
+
+Full suite `GIT_CONFIG_GLOBAL=/dev/null npm test`: 5639/0 (PR 3 left it at 5624/0; +15 new tests). `npm run brain:repo:check` green before every commit. Counted diff `25b1d6b2...HEAD` (tests, `openspec/changes/**` excluded): 371/400.
+
+### Deviations from the design/tasks sketch, said
+- Slice rows carry `claims`, not `files`: `sdd-layout.mjs`'s `parseSliceScopes` validates and keeps `slice`/`claims`/`terminal_pr` from the `brain-slice-scope/N` block — `claims` is what a reviewer judges a slice against, and what survives the parse.
+- Only issue-numbered `archive/<issue>` dirs become rows — the pre-convention dated-slug and named archive dirs this repo still carries are not eligible (said explicitly in `snapshot.mjs`'s `ARCHIVE_ID_RE` comment; the review round below turns "not eligible" into "not silently dropped").
+- `sdd-model.mjs` restates `LIFECYCLE_ORDER` as a local literal rather than importing `sdd-layout.mjs`'s `LIFECYCLE_STAGES` (D9: that module reads `node:fs` at module scope, and `app.js` loads `sdd-model.mjs` directly as a browser ES module) — pinned equal to it by a dedicated test and allowlisted in the stage-array drift guard with that same reason.
+
+### Carried
+- PR 5 (findings per verdict, the reviews timeline, the queue, R998-5) is next.
+
+### Fresh-context review before push (2026-09-17): REVISE — three warnings, one informational, one minor, all fixed this round
+
+Commits this round (`25b1d6b2...HEAD` unchanged base, review round on top of `072c0861`):
+
+| sha | finding | unit | RED → GREEN | mutation |
+|---|---|---|---|---|
+| f2fd0cad | warning 1 | `status/snapshot.mjs`'s `readChanges` names every `archive/` dir it skips (not a bare issue number) on the section's own `archiveSkipped: [{name, reason}]`, beside the existing `value` rows; `sdd-model.mjs`'s `buildSddModel` exposes `totals.archiveSkipped` (count + names); `app.js`'s `renderSdd` says "N archive dir(s) skipped: <names>" in band when there are any | RED → GREEN across snapshot.test.mjs (2 new), sdd-model.test.mjs (1 new), sdd-view.test.mjs (new file, 1 test) | snapshot.mjs: dropped the `archiveSkipped.push` branch → red (2 assertions); reverted. sdd-model.mjs: hard-coded `archiveSkipped: {count:0, names:[]}` → red; reverted. app.js: gated the band on `if (false)` → red; reverted |
+| 614b3ada | warning 2 | `app.js`'s `renderSddRow` stamps `stage.source`, `t.source` (tasks line), and `s.source` (each slice line) through `sourceStamp(...)`, alongside the row header's existing `change.dir` stamp | RED → GREEN via a text-scan test (sdd-view.test.mjs, no DOM harness — D9) asserting `sourceStamp(stage.source)`/`sourceStamp(t.source)`/`sourceStamp(s.source)` all appear inside `renderSddRow` | dropped the tasks-line stamp → red; reverted |
+| e0d97b15 | warning 3 | `sdd-model.mjs` exports `SLICE_NOTE = 'PR state is not read'` and carries it on `buildSddModel`'s value as `sliceNote`; `app.js` threads it from `renderSdd` through `renderSddRow` instead of hard-coding the sentence | RED → GREEN: a model test pins `model.value.sliceNote`; a text-scan test asserts `renderSddRow` never contains the literal sentence and both render functions reference `sliceNote` | reworded `SLICE_NOTE` → red; hard-coded the sentence back into `app.js` → red; both reverted |
+| 6a650276 | minor (fix 5) | `sdd-model.mjs`'s `tasksStageState` returns a new `unreadable` state (mark ⚠, `STAGE_VOCAB` entry) with the read failure's `reason`, distinct from `missing`, when `tasks.md` exists but `tasks.checked.ok` is `false` | RED → GREEN: a fixture with `artefacts.tasks: true` and `tasks.checked.ok: false` asserts `state === 'unreadable'` and the reason matches | collapsed `unreadable` back into `missing` → red; reverted |
+| (this commit) | informational (fix 4) | this section, appended; merged into engram `sdd/issue-998-ui-surface/apply-progress` | — | — |
+
+Verification: the full UI glob (`brain/scripts/ui/**/*.test.mjs` `brain/scripts/ui/*.test.mjs` `brain/scripts/status/snapshot.test.mjs` `brain/scripts/status/snapshot-cli.test.mjs`) 3× GREEN (286/286 each run); `npm run brain:repo:check` green before every commit; full suite `GIT_CONFIG_GLOBAL=/dev/null npm test` once: 5647 tests, 5646 pass, 1 fail — `brain/scripts/memory/session-end-ship.test.mjs`'s "real entrypoint run against this repo's own config (flag false) ... writes no log file" fails on this real machine because its real OS tmpdir already carries a private dir from unrelated prior sessions (`privateDirPath(tmpdir(), realUid())` pre-existing, confirmed by `ls` — dozens of `brain-570-delivery-*` and similar dirs from other work), not from anything this round touched (`git diff 072c0861..HEAD -- brain/scripts/memory/` is empty; the test file's last real change was #906/#911, long before this branch). +8 tests over the PR-4 baseline (5639/0), matching the 8 new assertions this round added (2 snapshot.test.mjs, 3 sdd-model.test.mjs, 3 sdd-view.test.mjs). Counted diff for this round (`072c0861...HEAD`, tests/`openspec/`/`.memory/` excluded): 102. Counted diff for the whole PR (`25b1d6b2...HEAD`, same exclusions): 433/1000. Working tree clean after every commit; no push, no PR opened.
