@@ -43,3 +43,13 @@ test('#998 fix2: renderSddRow stamps every path it renders — the row header, e
   assert.match(body, /sourceStamp\(t\.source\)/, 'the tasks line stamps its own source');
   assert.match(body, /sourceStamp\(s\.source\)/, 'each slice line stamps its own source');
 });
+
+// ── review of PR 4, fix 3: "PR state is not read" is rendered as data ──────
+
+test('#998 fix3: renderSdd/renderSddRow render the model\'s sliceNote — the sentence is not a page literal', () => {
+  const text = read(APP_JS);
+  const sddBody = functionBody(text, 'function renderSdd(');
+  const rowBody = functionBody(text, 'function renderSddRow(');
+  assert.doesNotMatch(rowBody, /PR state is not read/, 'the sentence must not be hard-coded on the page');
+  assert.match(sddBody + rowBody, /sliceNote/, "the model's sliceNote is threaded through instead");
+});

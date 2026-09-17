@@ -10,6 +10,13 @@
 export const STAGE_IDS = Object.freeze(['proposal', 'spec', 'design', 'tasks', 'apply', 'verify', 'archive']);
 
 /**
+ * The slice plan's ruling (proposal.md), pinned as data rather than a page
+ * literal (review of PR 4, fix 3): a slice's plan carries what it CLAIMS and
+ * its terminal PR, never whether that PR is open, merged, or exists.
+ */
+export const SLICE_NOTE = 'PR state is not read';
+
+/**
  * The small stage vocabulary — distinct from `state-vocab.mjs`'s nine NODE
  * states, which this is not: a stage cell says one of five words, never a
  * blank cell (never empty-on-failure).
@@ -182,5 +189,5 @@ export function buildSddModel(changesSection, { tier } = {}) {
     archiveSkipped: { count: skipped.length, names: skipped.map((s) => s.name) },
   };
 
-  return { ok: true, value: { changes, totals } };
+  return { ok: true, value: { changes, totals, sliceNote: SLICE_NOTE } };
 }

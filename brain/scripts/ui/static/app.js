@@ -329,7 +329,7 @@ function renderSdd() {
     mounts.canvas.appendChild(said(`the SDD view could not be computed: ${model.reason}`));
     return;
   }
-  const { changes, totals } = model.value;
+  const { changes, totals, sliceNote } = model.value;
   mounts.canvas.appendChild(el('p', 'canvas-summary', `${totals.active} active change(s), ${totals.archived} archived, ${totals.withViolations} with a phase-order violation`));
   // Review of PR 4, fix 1: a not-issue-numbered archive/ dir is skipped from
   // the rows above but never silently dropped — said here by name.
@@ -337,11 +337,11 @@ function renderSdd() {
     mounts.canvas.appendChild(said(`${totals.archiveSkipped.count} archive dir(s) skipped: ${totals.archiveSkipped.names.join(', ')}`));
   }
 
-  for (const change of changes.filter((c) => !c.archived)) mounts.canvas.appendChild(renderSddRow(change));
+  for (const change of changes.filter((c) => !c.archived)) mounts.canvas.appendChild(renderSddRow(change, sliceNote));
   const archived = changes.filter((c) => c.archived);
   if (archived.length > 0) {
     mounts.canvas.appendChild(el('h3', 'sdd-archived-heading', 'Archived'));
-    for (const change of archived) mounts.canvas.appendChild(renderSddRow(change));
+    for (const change of archived) mounts.canvas.appendChild(renderSddRow(change, sliceNote));
   }
 }
 
@@ -352,7 +352,7 @@ function renderSdd() {
  * now stamp their own `source` the same way, rather than trusting the
  * header's stamp to stand in for the whole row.
  */
-function renderSddRow(change) {
+function renderSddRow(change, sliceNote) {
   const row = el('div', 'sdd-row');
   const header = el('div', 'sdd-row-header');
   header.appendChild(el('strong', null, `#${change.issue}${change.slug ? ` ${change.slug}` : ''}`));
@@ -374,7 +374,7 @@ function renderSddRow(change) {
 
   if (change.slices.length > 0) {
     const wrap = document.createElement('div');
-    wrap.appendChild(said('slice plan (declared scope only — PR state is not read):'));
+    wrap.appendChild(said(`slice plan (declared scope only — ${sliceNote}):`));
     const list = el('ul', 'said-list');
     for (const s of change.slices) {
       const li = document.createElement('li');

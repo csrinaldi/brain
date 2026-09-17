@@ -176,6 +176,13 @@ test('#998 R998-4: totals count active, archived, and changes carrying a violati
 
 // ── review of PR 4, fix 1: archiveSkipped surfaces on totals ───────────────
 
+// ── review of PR 4, fix 3: "PR state is not read" is pinned as data ────────
+
+test('#998 fix3: the model carries sliceNote — the ruling sentence is data, not a page literal', () => {
+  const model = buildSddModel({ ok: true, value: [FULL] });
+  assert.equal(model.value.sliceNote, 'PR state is not read');
+});
+
 test('#998 fix1: totals.archiveSkipped counts and names the archive dirs snapshot.mjs said it skipped', () => {
   const model = buildSddModel({
     ok: true,
