@@ -71,7 +71,7 @@ import { LANE_BRANCH_RE, classifyLane } from './checks/lane.mjs';
 import { CLOSING_RE, CHAIN_RE } from './checks/issue-ref-patterns.mjs';
 import { resolveApprovedLabel } from './approved-label.mjs';
 import { readRecordObservations } from '../memory/lib/store.mjs';
-import { parseGraphBlock } from '../status/epic-graph.mjs';
+import { parseGraphBlock, declaredParent } from '../status/epic-graph.mjs';
 import { resultToExit } from './postmerge/exit-codes.mjs';
 import { loadContext, gitlabApiConfig } from '../vcs/ci-context.mjs';
 import { loadBrainConfig } from '../lib/brain-config.mjs';
@@ -550,10 +550,15 @@ async function runBaseBranchCheck(ctx, deps) {
 
   // Step 6 — the linked issue's own declaration decides whether a second
   // read is owed at all: no block, an unreadable block, the issue itself
-  // `kind: epic`, or no parent all resolve WITHOUT fetching a parent.
+  // `kind: epic`, or no parent all resolve WITHOUT fetching a parent. The
+  // parent itself is read through `declaredParent` (PR #1006 review round 1,
+  // finding 1), not `issueBlock.parent` alone — `parseGraphBlock` only ever
+  // resolves a `brain-graph/1` block, so a parent declared only via prose
+  // (no block at all, `issueBlock` is `null`) was never fetched, and the
+  // exact slice-on-main case this gate exists for passed silently.
   const issueBlock = parseGraphBlock(issue.body);
-  const needsParentRead =
-    issueBlock?.ok !== false && issueBlock?.kind !== 'epic' && (issueBlock?.parent ?? null) !== null;
+  const dp = declaredParent(issue.body);
+  const needsParentRead = issueBlock?.ok !== false && issueBlock?.kind !== 'epic' && dp.parent !== null;
   if (!needsParentRead) {
     return baseBranchRule({
       issueBody: issue.body,
@@ -564,7 +569,7 @@ async function runBaseBranchCheck(ctx, deps) {
   }
 
   // Step 7 — the parent, the one further read this gate ever makes.
-  const parentNumber = issueBlock.parent;
+  const parentNumber = dp.parent;
   let epic;
   try {
     epic = await fetchIssue(parentNumber);

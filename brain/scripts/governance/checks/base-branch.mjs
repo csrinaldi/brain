@@ -19,7 +19,7 @@
 // (no block, no parent, no tracker, a parent that never declared `kind: epic`
 // — R967-9) is the standing "pass untouched" case.
 
-import { parseGraphBlock } from '../../status/epic-graph.mjs';
+import { parseGraphBlock, declaredParent } from '../../status/epic-graph.mjs';
 
 const EPIC_KIND = 'epic';
 
@@ -74,7 +74,13 @@ export function baseBranchRule({ issueBody, epicBody, targetBranch, defaultBranc
     return { pass: true };
   }
 
-  const parent = issueBlock?.parent ?? null;
+  // The parent this PR must be checked against is read through `declaredParent`
+  // (PR #1006 review round 1, finding 1), not `issueBlock?.parent` alone: a
+  // block-less body can still declare its parent via prose (`Parent: #N`), and
+  // `issueBlock` is `null` for such a body — the caller (`run-check.mjs`) now
+  // fetches that parent, so this predicate must actually read it too, or the
+  // fetch happens for nothing and the slice-on-main case keeps passing anyway.
+  const parent = declaredParent(issueBody).parent;
   if (parent === null) return { pass: true };
 
   // D10 step 7 — the parent's own declaration. An unreadable parent body is

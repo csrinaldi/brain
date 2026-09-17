@@ -1181,6 +1181,38 @@ test('runCheck: base-branch — base ≠ the parent\'s declared tracker → fail
   assert.ok(result.reason.includes('main'), `must name the actual base, got: ${result.reason}`);
 });
 
+// PR #1006 cold review round 1, finding 1 (blocker): step 6 decided whether to
+// fetch the parent from `parseGraphBlock(issue.body)` alone, which is `null`
+// for a body carrying no `brain-graph/1` block at all — so a parent declared
+// only via prose (`Parent: #878 ...`, no block) was never read, and the exact
+// slice-on-main case this gate exists for passed silently, fetching only the
+// linked issue. `declaredParent` (PR D) already reads prose with or without a
+// block; the gate's own fetch decision now goes through it too.
+
+test('runCheck: base-branch — parent declared only via prose (no brain-graph block) still triggers the parent fetch and fails the slice-on-main case (PR #1006 review round 1, finding 1)', async () => {
+  const calls = [];
+  const result = await runCheck('base-branch', {
+    ctx: { body: 'Closes #881', sourceBranch: 'slice/x', targetBranch: 'main', defaultBranch: 'main' },
+    fetchIssue: async (n) => {
+      calls.push(n);
+      if (n === 881) return { body: 'Parent: #878 (Brain UI) — slice 3, Wave B.' };
+      return { body: EPIC_TRACKED_BODY };
+    },
+  });
+  assert.equal(result.pass, false, 'a slice-on-main whose parent is declared only via prose must fail, not pass silently');
+  assert.deepEqual(calls, [881, 878], 'the parent must be fetched too, not just the linked issue');
+});
+
+test('runCheck: base-branch — no block, no prose parent → one fetch, pass (standing case stays green)', async () => {
+  const calls = [];
+  const result = await runCheck('base-branch', {
+    ctx: { body: 'Closes #900', sourceBranch: 'slice/x', targetBranch: 'main', defaultBranch: 'main' },
+    fetchIssue: async (n) => { calls.push(n); return { body: 'just a plain body, no graph block, no parent line' }; },
+  });
+  assert.deepEqual(result, { pass: true });
+  assert.deepEqual(calls, [900], 'no declared parent (block or prose) means no second fetch');
+});
+
 test('runCheck: base-branch — no forge fan-out: zero issueList calls, at most two issueView (fetchIssue) calls', async () => {
   const calls = [];
   await runCheck('base-branch', {
