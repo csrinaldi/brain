@@ -152,6 +152,35 @@ test('#998 R998-4: an archive dir that exists but cannot be listed is a reason o
   assert.match(c.reason, /permission denied/);
 });
 
+// ── review of PR 4, fix 1: a not-issue-numbered archive dir is said, not dropped ────
+
+test('#998 fix1: an archive dir that is not a bare issue number is skipped from rows but named in archiveSkipped, never silently dropped', () => {
+  const files = {
+    'openspec/changes': [],
+    'openspec/changes/archive': ['5', '2026-07-26-issue-334-brain-ship-labels', 'governance'],
+    'openspec/changes/archive/5': ['spec.md'],
+  };
+  const c = readChanges({
+    root: '/fake',
+    tier: 'lite',
+    _list: (p) => { if (!(p in files)) throw new Error(`ENOENT: ${p}`); return files[p]; },
+    _exists: (p) => p === 'openspec/changes/archive' || p === 'openspec/changes/archive/5/spec.md',
+    _read: () => { throw new Error('n/a'); },
+  });
+  assert.equal(c.ok, true);
+  assert.deepEqual(c.value.filter((x) => x.archived).map((x) => x.id), ['5'], 'only the issue-numbered dir becomes a row');
+  assert.deepEqual(c.archiveSkipped, [
+    { name: '2026-07-26-issue-334-brain-ship-labels', reason: 'not an issue-numbered archive dir' },
+    { name: 'governance', reason: 'not an issue-numbered archive dir' },
+  ]);
+});
+
+test('#998 fix1: the fixture archive/ carries only its own .gitkeep as a non-issue-numbered entry — named, not dropped', () => {
+  const c = readChanges({ root: makeFixture(), tier: 'lite' });
+  assert.equal(c.ok, true);
+  assert.deepEqual(c.archiveSkipped, [{ name: '.gitkeep', reason: 'not an issue-numbered archive dir' }]);
+});
+
 // ── R879-5: roadmap ─────────────────────────────────────────────────────────
 
 test('#879: roadmap is done / in-flight / planned, and uncomputable when the PR list was not read', () => {

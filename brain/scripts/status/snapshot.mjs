@@ -242,7 +242,10 @@ function readOneChange({ id, missingId, dir, issue, slug, archived, artefacts, r
  * A missing `archive/` dir is "no archived changes" (a fact, checked via
  * `exists` before ever listing it); any OTHER failure to list an existing
  * `archive/` dir is this whole section's reason, same as a failure to list
- * `CHANGES_ROOT` itself.
+ * `CHANGES_ROOT` itself. A dir under `archive/` that is not a bare issue
+ * number (a pre-convention dated-slug dir, a named one) is never silently
+ * dropped: it is excluded from `value`'s rows AND named on the returned
+ * section's own `archiveSkipped` array (review of PR 4, fix 1).
  */
 export function readChanges({ root, tier, _read, _list, _exists } = {}) {
   const read = _read ?? ((p) => readFileSync(join(root, p), 'utf8'));
@@ -264,19 +267,26 @@ export function readChanges({ root, tier, _read, _list, _exists } = {}) {
 
   const archiveDirRel = `${CHANGES_ROOT}/archive`;
   let archivedRows = [];
+  const archiveSkipped = [];
   if (exists(archiveDirRel)) {
-    let archiveNames;
+    let allNames;
     try {
-      archiveNames = list(archiveDirRel).filter((n) => ARCHIVE_ID_RE.test(n)).sort((a, b) => Number(a) - Number(b));
+      allNames = list(archiveDirRel).sort();
     } catch (err) {
       return uncomputable(`${archiveDirRel} could not be listed: ${err?.message ?? err}`);
     }
+    const archiveNames = [];
+    for (const n of allNames) {
+      if (ARCHIVE_ID_RE.test(n)) archiveNames.push(n);
+      else archiveSkipped.push({ name: n, reason: 'not an issue-numbered archive dir' });
+    }
+    archiveNames.sort((a, b) => Number(a) - Number(b));
     archivedRows = archiveNames.map((name) =>
       readOneChange({ id: name, missingId: `archive/${name}`, dir: archivePath(name), issue: Number(name), slug: null, archived: true, artefacts, read, list, exists })
     );
   }
 
-  return field([...activeRows, ...archivedRows]);
+  return { ...field([...activeRows, ...archivedRows]), archiveSkipped };
 }
 
 /** Records, projected (D3), with the duplicate accounting the store reports. */

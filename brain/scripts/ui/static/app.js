@@ -195,8 +195,9 @@ function renderLanes() {
     mounts.canvas.appendChild(said(`the graph could not be computed: ${model.reason}`));
     return;
   }
-  const { lanes, crossEdges, holding, droppedEdges, issuesUnreadable } = model.value;
+  const { lanes, crossEdges, holding, droppedEdges, issuesUnreadable, edgeSummary } = model.value;
   mounts.canvas.appendChild(el('p', 'canvas-summary', `${lanes.length} track lane(s), ${holding.count} in the \`?\` holding lane`));
+  mounts.canvas.appendChild(el('p', 'edge-summary', `edges: ${edgeSummary.laneInternal} in lanes, ${edgeSummary.holdingInternal} in the \`?\` holding lane, ${edgeSummary.crossLane} crossing lanes, ${edgeSummary.unknownNode} to an unknown node (${edgeSummary.total} total)`));
 
   for (const lane of lanes) mounts.canvas.appendChild(renderLaneRow(lane));
   mounts.canvas.appendChild(renderHoldingLane(holding));
@@ -284,7 +285,9 @@ function renderHoldingLane(holding) {
   });
 
   const row = el('div', 'lane-row holding');
-  row.appendChild(renderLaneHeader('? — undeclared', holding.count, holding.nodes, toggle));
+  const header = renderLaneHeader('? — undeclared', holding.count, holding.nodes, toggle);
+  header.appendChild(el('span', 'lane-edge-count', `${holding.edgeCount} edge(s)`));
+  row.appendChild(header);
   if (holding.collapsed) return row;
 
   if (holding.note) {
@@ -300,6 +303,14 @@ function renderHoldingLane(holding) {
   const list = el('ul', 'holding-list');
   for (const node of holding.nodes) list.appendChild(el('li', null, `${node.state.mark} ${node.label}`));
   row.appendChild(list);
+
+  // Holding-holding edges are a board, drawn like a lane's own (#998 R998-3
+  // cold review): `lane-model.mjs` already laid it out over this same page's
+  // subgraph, this only turns that into elements, same as `renderLaneBoard`.
+  if (holding.edges.length > 0) {
+    row.appendChild(el('p', 'note', `${holding.edges.length} edge(s) on this page:`));
+    row.appendChild(renderLaneBoard({ nodes: holding.boardNodes, edges: holding.edges, width: holding.width, height: holding.height }));
+  }
 
   if (holding.totalPages > 1) row.appendChild(renderPager(holding));
   return row;
@@ -336,18 +347,30 @@ function renderSdd() {
     mounts.canvas.appendChild(said(`the SDD view could not be computed: ${model.reason}`));
     return;
   }
-  const { changes, totals } = model.value;
+  const { changes, totals, sliceNote } = model.value;
   mounts.canvas.appendChild(el('p', 'canvas-summary', `${totals.active} active change(s), ${totals.archived} archived, ${totals.withViolations} with a phase-order violation`));
+  // Review of PR 4, fix 1: a not-issue-numbered archive/ dir is skipped from
+  // the rows above but never silently dropped — said here by name.
+  if (totals.archiveSkipped.count > 0) {
+    mounts.canvas.appendChild(said(`${totals.archiveSkipped.count} archive dir(s) skipped: ${totals.archiveSkipped.names.join(', ')}`));
+  }
 
-  for (const change of changes.filter((c) => !c.archived)) mounts.canvas.appendChild(renderSddRow(change));
+  for (const change of changes.filter((c) => !c.archived)) mounts.canvas.appendChild(renderSddRow(change, sliceNote));
   const archived = changes.filter((c) => c.archived);
   if (archived.length > 0) {
     mounts.canvas.appendChild(el('h3', 'sdd-archived-heading', 'Archived'));
-    for (const change of archived) mounts.canvas.appendChild(renderSddRow(change));
+    for (const change of archived) mounts.canvas.appendChild(renderSddRow(change, sliceNote));
   }
 }
 
-function renderSddRow(change) {
+/**
+ * Every value this row draws carries its own source underneath it (A3,
+ * extended to the SDD view by review of PR 4, fix 2): the row header already
+ * stamped `change.dir`; each stage cell, the tasks line, and each slice line
+ * now stamp their own `source` the same way, rather than trusting the
+ * header's stamp to stand in for the whole row.
+ */
+function renderSddRow(change, sliceNote) {
   const row = el('div', 'sdd-row');
   const header = el('div', 'sdd-row-header');
   header.appendChild(el('strong', null, `#${change.issue}${change.slug ? ` ${change.slug}` : ''}`));
@@ -356,15 +379,29 @@ function renderSddRow(change) {
 
   const matrix = el('div', 'sdd-matrix');
   for (const stage of change.stages) {
-    matrix.appendChild(el('span', `sdd-stage sdd-stage-${stage.state}`, `${STAGE_VOCAB[stage.state].mark} ${stage.id}`));
+    const cell = el('span', `sdd-stage sdd-stage-${stage.state}`, `${STAGE_VOCAB[stage.state].mark} ${stage.id} `);
+    cell.appendChild(el('span', 'source', sourceStamp(stage.source).label));
+    matrix.appendChild(cell);
   }
   row.appendChild(matrix);
 
   const t = change.tasks;
-  row.appendChild(el('p', 'sdd-tasks', `tasks: ${t.checked} checked, ${t.open} open${t.next ? ` — next: ${t.next}` : ''}`));
+  const tasksLine = el('p', 'sdd-tasks', `tasks: ${t.checked} checked, ${t.open} open${t.next ? ` — next: ${t.next}` : ''} `);
+  tasksLine.appendChild(el('span', 'source', sourceStamp(t.source).label));
+  row.appendChild(tasksLine);
 
   if (change.slices.length > 0) {
-    row.appendChild(saidList('slice plan (declared scope only — PR state is not read):', change.slices.map((s) => `slice ${s.n}: claims ${s.claims.join(', ')} → ${s.terminalPr}`)));
+    const wrap = document.createElement('div');
+    wrap.appendChild(said(`slice plan (declared scope only — ${sliceNote}):`));
+    const list = el('ul', 'said-list');
+    for (const s of change.slices) {
+      const li = document.createElement('li');
+      li.appendChild(document.createTextNode(`slice ${s.n}: claims ${s.claims.join(', ')} → ${s.terminalPr} `));
+      li.appendChild(el('span', 'source', sourceStamp(s.source).label));
+      list.appendChild(li);
+    }
+    wrap.appendChild(list);
+    row.appendChild(wrap);
   }
   if (change.phaseOrder.violations.length > 0) {
     row.appendChild(saidList(`${change.phaseOrder.violations.length} phase-order violation(s):`, change.phaseOrder.violations.map((v) => `${v.stage}: ${v.reason}`)));

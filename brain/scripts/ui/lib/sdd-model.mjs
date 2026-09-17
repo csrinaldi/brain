@@ -10,9 +10,18 @@
 export const STAGE_IDS = Object.freeze(['proposal', 'spec', 'design', 'tasks', 'apply', 'verify', 'archive']);
 
 /**
+ * The slice plan's ruling (proposal.md), pinned as data rather than a page
+ * literal (review of PR 4, fix 3): a slice's plan carries what it CLAIMS and
+ * its terminal PR, never whether that PR is open, merged, or exists.
+ */
+export const SLICE_NOTE = 'PR state is not read';
+
+/**
  * The small stage vocabulary — distinct from `state-vocab.mjs`'s nine NODE
- * states, which this is not: a stage cell says one of five words, never a
- * blank cell (never empty-on-failure).
+ * states, which this is not: a stage cell says one of six words, never a
+ * blank cell (never empty-on-failure). `unreadable` (review of PR 4, fix 5)
+ * is distinct from `missing`: the artefact exists but could not be read or
+ * parsed, which is a different fact than it never having been written.
  */
 export const STAGE_VOCAB = Object.freeze({
   present: Object.freeze({ mark: '●', label: 'Present' }),
@@ -20,6 +29,7 @@ export const STAGE_VOCAB = Object.freeze({
   'in-progress': Object.freeze({ mark: '◐', label: 'In progress' }),
   done: Object.freeze({ mark: '✓', label: 'Done' }),
   'not-applicable': Object.freeze({ mark: '—', label: 'N/A' }),
+  unreadable: Object.freeze({ mark: '⚠', label: 'Unreadable' }),
 });
 
 /** The file each stage id names, for the stage cell's `source.path` (mirrors `sdd-layout.mjs`'s `ARTEFACT_FILE`, plus the two stages that module does not declare). */
@@ -66,14 +76,24 @@ function evaluateStageOrder(present) {
   return { ok: true, violations };
 }
 
-function stageRow(id, state, path) {
-  return { id, state, source: { path } };
+function stageRow(id, state, path, reason) {
+  const row = { id, state, source: { path } };
+  if (reason) row.reason = reason;
+  return row;
 }
 
-/** `tasks`'s own stage state: missing (no tasks.md), done (nothing open), or in-progress. */
+/**
+ * `tasks`'s own stage state: `missing` (no tasks.md), `unreadable` (tasks.md
+ * exists but could not be read or parsed — review of PR 4, fix 5, distinct
+ * from `missing` because the artefact IS there), `done` (nothing open), or
+ * `in-progress`.
+ */
 function tasksStageState(tasks, hasTasksArtefact) {
-  if (!hasTasksArtefact || tasks?.checked?.ok !== true) return 'missing';
-  return tasks.open?.value === 0 ? 'done' : 'in-progress';
+  if (!hasTasksArtefact) return { state: 'missing', reason: null };
+  if (tasks?.checked?.ok !== true) {
+    return { state: 'unreadable', reason: tasks?.checked?.reason ?? `${STAGE_FILE.tasks} could not be read` };
+  }
+  return { state: tasks.open?.value === 0 ? 'done' : 'in-progress', reason: null };
 }
 
 /** One change's seven-stage row. A grandfathered change claims none of them — "the past is recorded, not edited" (sdd-layout.mjs's own words for the same ruling). */
@@ -85,7 +105,8 @@ function buildStages(change) {
   for (const id of ['proposal', 'spec', 'design']) {
     stages.push(stageRow(id, present[id] ? 'present' : 'missing', `${change.dir}/${STAGE_FILE[id]}`));
   }
-  stages.push(stageRow('tasks', tasksStageState(change.tasks, present.tasks), `${change.dir}/${STAGE_FILE.tasks}`));
+  const tasksState = tasksStageState(change.tasks, present.tasks);
+  stages.push(stageRow('tasks', tasksState.state, `${change.dir}/${STAGE_FILE.tasks}`, tasksState.reason));
   stages.push(stageRow('apply', present.apply ? 'present' : 'missing', `${change.dir}/${STAGE_FILE.apply}`));
   stages.push(stageRow('verify', present.verify ? 'present' : 'missing', `${change.dir}/${STAGE_FILE.verify}`));
 
@@ -171,11 +192,16 @@ export function buildSddModel(changesSection, { tier } = {}) {
     .map(buildChangeRow)
     .sort((a, b) => a.issue - b.issue || Number(a.archived) - Number(b.archived));
 
+  // `archiveSkipped` rides in on the section snapshot.mjs's readChanges()
+  // returns (review of PR 4, fix 1) — an archive/ dir that is not a bare
+  // issue number, named rather than silently dropped from the rows above.
+  const skipped = Array.isArray(changesSection.archiveSkipped) ? changesSection.archiveSkipped : [];
   const totals = {
     active: changes.filter((c) => !c.archived).length,
     archived: changes.filter((c) => c.archived).length,
     withViolations: changes.filter((c) => c.phaseOrder.violations.length > 0).length,
+    archiveSkipped: { count: skipped.length, names: skipped.map((s) => s.name) },
   };
 
-  return { ok: true, value: { changes, totals } };
+  return { ok: true, value: { changes, totals, sliceNote: SLICE_NOTE } };
 }
