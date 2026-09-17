@@ -87,6 +87,20 @@ test('a parent declared in prose is honoured, and the message says it was prose'
   assert.equal(r.say.params.source, 'prose');
 });
 
+test('a parent declared in prose with NO block at all is still honoured (#967 PR D, review round 2)', async () => {
+  // Blocker 2 (cold review of the tracker PR, 2026-09-17): `parseGraphBlock`
+  // returned `null` before the prose scan ever ran when the body carried no
+  // `brain-graph/1` fence at all — invisible to `parentOf`, and so to this
+  // resolver. `declaredParent` is the shared fix; this pins it through the leaf.
+  const { fetchIssue } = reader({ [EPIC]: epicBody({ tracker: TRACKER }) });
+  const issue = { number: 881, body: `Parent: #${EPIC} (Brain UI) — slice 3, Wave B.` };
+
+  const r = await resolveBase({ issue, args: args(), fetchIssue });
+
+  assert.equal(r.base, TRACKER);
+  assert.equal(r.say.params.source, 'prose');
+});
+
 // ── Row 2: `main`, and never silently ────────────────────────────────────
 
 test('no parent, a parent that is not an epic, and an epic with no tracker each state their own reason', async () => {

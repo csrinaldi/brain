@@ -75,8 +75,22 @@ issue number and the offending text.
 
 ### R967-2: a parent read from prose, one hop, and said as such
 
-When the block declares no `parent:`, the reader MUST look for a
-**line-initial** `Parent: #<digits>` in the **prose**. A line DECLARES exactly
+The prose fallback applies **block or no block** — a body that never declared
+a `brain-graph/1` fence at all MUST still resolve a line-initial `Parent:`
+declaration exactly as one that declares a block with no `parent:` key does.
+(Amended 2026-09-17, PR D — cold review round 2: `parseGraphBlock` answers
+`null` before ever running the prose scan when the body carries no
+graph-tagged fence — measured, its `!body.includes(GRAPH_PROTOCOL)` guard
+short-circuits first — so the reader is `declaredParent`, not
+`parseGraphBlock` alone, for any caller that must see a prose-only parent:
+`buildGraph`'s node and `lib/ticket-base.mjs`'s `parentOf` both read through
+it. `parseGraphBlock`'s OWN return for a body with no block is unchanged —
+still `null` — because its shape has no field to carry a parent without also
+carrying the rest of a declaration that was never made.)
+
+When the block declares no `parent:` (or no block exists at all), the reader
+MUST look for a **line-initial** `Parent: #<digits>` in the **prose**. A line
+DECLARES exactly
 when it matches `/^Parent:[ \t]*#[1-9]\d*\b/m` — column zero, exact case, no
 leading-whitespace tolerance, arbitrary prose allowed after the number. The
 numbers a declaring line names are then read from the WHOLE line, not from the
@@ -154,6 +168,14 @@ to admit.
 #### Scenario: two numbers on ONE line is the same refusal
 - **WHEN** a body carries the single line-initial line `Parent: #878, #879`
 - **THEN** `node.parent` is `null`, `parentSource` is `null`, and a `declarationDivergences` entry names `878, 879` with reason `parent-ambiguous` — 878 does not win by being written first
+
+#### Scenario: the prose fallback runs with NO block at all (amended 2026-09-17, PR D)
+- **WHEN** a body carries a line-initial `Parent: #878` and no `brain-graph/1` fence anywhere
+- **THEN** `declaredParent(body)` resolves `parent: 878`, `parentSource: 'prose'` — the same answer as a body whose block exists but omits `parent:` — and this is what `buildGraph`'s node and `lib/ticket-base.mjs`'s `parentOf` both read; `parseGraphBlock(body)` alone still returns `null`, unchanged
+
+#### Scenario: an ambiguous prose parent with NO block is said too (amended 2026-09-17, PR #1006 review round 1, finding 2)
+- **WHEN** a body carries the single line-initial line `Parent: #878, #879` and no `brain-graph/1` fence anywhere
+- **THEN** `declaredParent(body)` resolves `parent: null`, `parentSource: null`, `ambiguousValue: '878, 879'`, and `buildGraph`'s own `declarationDivergences` output (not only `parseGraphBlock`'s, which never runs for a blockless body) carries a `{key: 'parent', value: '878, 879', reason: 'parent-ambiguous'}` entry for that node — the same fact the block-bearing path already says, not silently dropped because there was no block to carry it
 
 ### R967-3: the snapshot carries all four fields, and an unreadable node carries none
 
@@ -265,12 +287,28 @@ branch and no worktree. Every operator string this change adds MUST exist as an
 A governance check named `base-branch` MUST exist. Its rule: the PR's linked
 issue → that issue's `parent` → the parent's declared `tracker` (honoured only
 when the parent declares `kind: epic`) → the PR's base MUST equal that tracker.
-A PR whose **head** is itself a tracker (its branch name matching the declared
-grammar `feature/…`) MUST target the default branch. A PR whose linked issue
-has no epic, or whose epic declares no tracker, MUST pass untouched. The gate
-MUST be **required** at tier `lite`, not detection-only (ruling 1). A refusal
-MUST name the tracker. The gate MUST NOT enumerate the forge looking for open
-epics: it reads at most the linked issue and its parent.
+A PR whose linked issue has no epic, or whose epic declares no tracker, MUST
+pass untouched. The gate MUST be **required** at tier `lite`, not
+detection-only (ruling 1). A refusal MUST name the tracker. The gate MUST NOT
+enumerate the forge looking for open epics: it reads at most the linked issue
+and its parent.
+
+A PR whose **head** is itself a tracker's own integration branch MUST target
+the default branch. (Amended 2026-09-17, PR D — cold review round 2: the prior
+sentence read "its branch name matching the declared grammar `feature/…`" —
+a PREFIX test, decided with no read at all. Measured, that classified EVERY
+`feature/…`-named head as a tracker PR, rejecting an ordinary slice whose own
+branch happened to start with `feature/` too, even when its base was already
+correctly set to its epic's tracker. The one fact the rule holds is narrower:
+a head is that PR's tracker's own integration branch ONLY when it equals the
+LINKED ISSUE'S OWN declared tracker — the issue is itself `kind: epic` and its
+`tracker:` key names `headBranch` exactly. A `feature/…`-named head that is
+not the linked issue's own declared tracker is an ordinary slice head, decided
+by the normal parent → tracker → base comparison above, not by this rule.
+`status/stranded.mjs`'s OWN `feature/` prefix oracle is a different question —
+"which open branches look like trackers, to surface them before they have a
+PR at all", where no declaration is readable yet to check against — and is
+unaffected by this amendment.)
 
 #### Scenario: a slice PR against `main` fails at `lite`
 - **WHEN** at tier `lite` a PR links an issue whose epic declares `tracker: feature/brain-ui` and the PR's base is `main`
@@ -281,12 +319,24 @@ epics: it reads at most the linked issue and its parent.
 - **THEN** the check passes with no warning
 
 #### Scenario: a tracker PR must target the default branch
-- **WHEN** a PR's head branch is `feature/brain-ui` and its base is another `feature/…` branch
+- **WHEN** a PR's linked issue is itself `kind: epic` and declares `tracker: feature/brain-ui`, its head branch is `feature/brain-ui`, and its base is another `feature/…` branch
 - **THEN** the check fails and states a tracker PR targets the default branch
+
+#### Scenario: a slice head that merely starts with feature/ is not the tracker (amended 2026-09-17, PR D)
+- **WHEN** a PR's linked issue declares `parent: 878`, `#878` is `kind: epic` with `tracker: feature/brain-ui`, the PR's head branch is `feature/issue-42-my-feature`, and its base is `feature/brain-ui`
+- **THEN** the check passes — the head is not the linked issue's own declared tracker, so this is an ordinary slice correctly based on it, not a tracker PR targeting the wrong branch
+
+#### Scenario: a parent declared only via prose (no block) still gets fetched and fails a slice-on-main PR (amended 2026-09-17, PR #1006 review round 1, finding 1)
+- **WHEN** a PR's linked issue carries a line-initial `Parent: #878` and no `brain-graph/1` fence at all, `#878` is `kind: epic` with `tracker: feature/brain-ui`, and the PR's base is `main`
+- **THEN** the gate fetches the parent (two reads total: the linked issue and `#878`) and fails, naming `feature/brain-ui` — the fetch decision and the predicate's own parent read both go through `declaredParent`, not `parseGraphBlock` alone, so a prose-only declaration is no longer invisible to either
 
 #### Scenario: a lane PR passes untouched — the standing case
 - **WHEN** a memory-lane PR with no linked issue, or a PR whose linked issue has no epic, targets `main`
 - **THEN** the check passes, unchanged from today's behaviour
+
+#### Scenario: no linked issue at all, but the head looks like a tracker not targeting default — uncomputable, not a pass (amended 2026-09-17, PR #1006 review round 2)
+- **WHEN** a PR links no issue at all, its head branch is `feature/brain-ui`, and its base is `feature/other-tracker` (not the default branch)
+- **THEN** the check fails as `uncomputable`, naming the head, the base, and the default branch, and asking for the issue link — `fetchIssue` is never called, because the amendment above still requires the LINKED ISSUE's own declaration to decide tracker-vs-slice, and with no issue linked there is no declaration to read; a `feature/…` head with no issue that already targets the default branch still passes (R967-7's rule is satisfied either way), and every other no-issue head (e.g. `fix/…`) is unaffected
 
 #### Scenario: an unreadable epic is uncomputable, never a silent pass
 - **WHEN** the gate cannot read the linked issue's parent

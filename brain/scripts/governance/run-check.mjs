@@ -71,7 +71,7 @@ import { LANE_BRANCH_RE, classifyLane } from './checks/lane.mjs';
 import { CLOSING_RE, CHAIN_RE } from './checks/issue-ref-patterns.mjs';
 import { resolveApprovedLabel } from './approved-label.mjs';
 import { readRecordObservations } from '../memory/lib/store.mjs';
-import { parseGraphBlock } from '../status/epic-graph.mjs';
+import { parseGraphBlock, declaredParent } from '../status/epic-graph.mjs';
 import { resultToExit } from './postmerge/exit-codes.mjs';
 import { loadContext, gitlabApiConfig } from '../vcs/ci-context.mjs';
 import { loadBrainConfig } from '../lib/brain-config.mjs';
@@ -511,16 +511,42 @@ async function runBaseBranchCheck(ctx, deps) {
 
   const headBranch = ctx.sourceBranch ?? null;
 
-  // Step 3 — a tracker's own integration PR. No port call: the predicate
-  // decides on branch names alone.
-  if (typeof headBranch === 'string' && headBranch.startsWith('feature/')) {
-    return baseBranchRule({ targetBranch: ctx.targetBranch, defaultBranch: ctx.defaultBranch, headBranch });
-  }
+  // Step 3 — a tracker's own integration PR is now decided inside the
+  // predicate, from the LINKED ISSUE's own declaration (`kind: epic` +
+  // `tracker:` naming `headBranch`), not from `headBranch`'s spelling alone
+  // (PR D review round 2: the prior no-port-call shortcut here trusted any
+  // `feature/…`-named head as a tracker before a declaration was ever read,
+  // the same bug `checks/base-branch.mjs` closed in its own predicate — this
+  // wrapper duplicated it via a separate branch-name-only fast path). There
+  // is no cheaper read left to skip: whether `headBranch` really is the
+  // linked issue's declared tracker can only be known from that issue's
+  // body, so this case now falls straight through to the same fetch every
+  // other head takes below.
 
   // Step 4 — no linked issue is the standing case (memory-lane / no-issue PRs).
+  // A `feature/…`-spelled head is not itself a decision (step 3 above: only
+  // the linked issue's own `tracker:` declaration can say a head IS a
+  // tracker), but with no issue linked there is no declaration left to read,
+  // so a `feature/…` head that targets anything but the default branch is
+  // evidence the gate cannot resolve either way — R967-7 makes a tracker's
+  // own integration PR unconditional, so this must fail closed and demand
+  // the issue link rather than pass silently (PR #1006 review round 2).
   const closingRequired = requiresClosingKeyword(ctx);
   const issueNumber = extractIssueNumber(ctx.body, closingRequired);
-  if (issueNumber == null) return { pass: true };
+  if (issueNumber == null) {
+    if (headBranch?.startsWith('feature/') && ctx.targetBranch !== ctx.defaultBranch) {
+      return {
+        pass: false,
+        uncomputable: true,
+        reason:
+          `base-branch: head "${headBranch}" looks like a tracker branch and targets ` +
+          `"${ctx.targetBranch}", not "${ctx.defaultBranch}" — link the issue whose epic ` +
+          'declares (or does not declare) this head as its tracker; without it the gate ' +
+          'cannot tell a tracker from a slice and fails closed',
+      };
+    }
+    return { pass: true };
+  }
 
   // Step 5 — the linked issue, fail closed on a throw or an unreadable body.
   const fetchIssue = deps.fetchIssue ?? defaultFetchIssue(ctx, deps);
@@ -544,10 +570,15 @@ async function runBaseBranchCheck(ctx, deps) {
 
   // Step 6 — the linked issue's own declaration decides whether a second
   // read is owed at all: no block, an unreadable block, the issue itself
-  // `kind: epic`, or no parent all resolve WITHOUT fetching a parent.
+  // `kind: epic`, or no parent all resolve WITHOUT fetching a parent. The
+  // parent itself is read through `declaredParent` (PR #1006 review round 1,
+  // finding 1), not `issueBlock.parent` alone — `parseGraphBlock` only ever
+  // resolves a `brain-graph/1` block, so a parent declared only via prose
+  // (no block at all, `issueBlock` is `null`) was never fetched, and the
+  // exact slice-on-main case this gate exists for passed silently.
   const issueBlock = parseGraphBlock(issue.body);
-  const needsParentRead =
-    issueBlock?.ok !== false && issueBlock?.kind !== 'epic' && (issueBlock?.parent ?? null) !== null;
+  const dp = declaredParent(issue.body);
+  const needsParentRead = issueBlock?.ok !== false && issueBlock?.kind !== 'epic' && dp.parent !== null;
   if (!needsParentRead) {
     return baseBranchRule({
       issueBody: issue.body,
@@ -558,7 +589,7 @@ async function runBaseBranchCheck(ctx, deps) {
   }
 
   // Step 7 — the parent, the one further read this gate ever makes.
-  const parentNumber = issueBlock.parent;
+  const parentNumber = dp.parent;
   let epic;
   try {
     epic = await fetchIssue(parentNumber);

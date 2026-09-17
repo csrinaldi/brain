@@ -64,9 +64,27 @@ test('base-branch: a slice PR based on the declared tracker passes with no warni
 });
 
 // ── R967-7 S3: a tracker's own PR must target the default branch ────────────────
+//
+// PR D (cold review round 2, 2026-09-17): a head is "a tracker's own PR" ONLY
+// when `headBranch` equals the LINKED ISSUE'S OWN declared tracker (`kind: epic`
+// + `tracker:`) — never by `feature/` prefix alone. The two tests below replace
+// the old prefix-only pair, which asserted the exact bug this fix closes: they
+// never passed `issueBody`, so a bare `feature/…` name was trusted with no
+// declaration behind it at all.
 
-test('base-branch: a feature/... head targeting another feature/... branch fails', () => {
+test('base-branch: the REAL tracker head (== the linked epic\'s own declared tracker) targeting the default branch passes', () => {
   const r = baseBranchRule({
+    issueBody: EPIC_TRACKED, // the epic's OWN issue: kind: epic, tracker: feature/brain-ui
+    targetBranch: 'main',
+    defaultBranch: 'main',
+    headBranch: 'feature/brain-ui',
+  });
+  assert.deepEqual(r, { pass: true });
+});
+
+test('base-branch: the REAL tracker head targeting another feature/... branch fails, naming the default branch', () => {
+  const r = baseBranchRule({
+    issueBody: EPIC_TRACKED,
     targetBranch: 'feature/other-epic',
     defaultBranch: 'main',
     headBranch: 'feature/brain-ui',
@@ -75,11 +93,18 @@ test('base-branch: a feature/... head targeting another feature/... branch fails
   assert.ok(/default branch/.test(r.reason), `reason must state a tracker PR targets the default branch, got: ${r.reason}`);
 });
 
-test('base-branch: a feature/... head targeting the default branch passes', () => {
+// ── measured bug: a slice head that merely STARTS WITH feature/ is not the tracker ──
+
+test('base-branch (measured): a slice head naming an unrelated feature/... branch, correctly based on the real tracker, passes', () => {
+  // The reviewed bug: `headBranch: 'feature/issue-42-my-feature'` used to trip the
+  // blind `startsWith('feature/')` short-circuit before the epic/parent chain was
+  // ever read, rejecting a slice that was already based on its epic's tracker.
   const r = baseBranchRule({
-    targetBranch: 'main',
+    issueBody: SLICE_WITH_PARENT(878),
+    epicBody: EPIC_TRACKED,
+    targetBranch: 'feature/brain-ui',
     defaultBranch: 'main',
-    headBranch: 'feature/brain-ui',
+    headBranch: 'feature/issue-42-my-feature',
   });
   assert.deepEqual(r, { pass: true });
 });

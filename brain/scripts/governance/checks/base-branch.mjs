@@ -19,7 +19,7 @@
 // (no block, no parent, no tracker, a parent that never declared `kind: epic`
 // — R967-9) is the standing "pass untouched" case.
 
-import { parseGraphBlock } from '../../status/epic-graph.mjs';
+import { parseGraphBlock, declaredParent } from '../../status/epic-graph.mjs';
 
 const EPIC_KIND = 'epic';
 
@@ -29,24 +29,11 @@ const EPIC_KIND = 'epic';
  * @returns {{pass: boolean, reason?: string, uncomputable?: boolean}}
  */
 export function baseBranchRule({ issueBody, epicBody, targetBranch, defaultBranch, headBranch }) {
-  // D10 step 3 — a tracker's OWN integration PR must target the default
-  // branch. No issue lookup, no port call: this decides on branch names
-  // alone. Same oracle as `stranded.mjs:19-28` — "a branch that is a
-  // tracker" is a `feature/…` head, by construction of the grammar this
-  // repo declares it with (#967 D2) — unchanged, not duplicated.
-  if (typeof headBranch === 'string' && headBranch.startsWith('feature/')) {
-    if (targetBranch === defaultBranch) return { pass: true };
-    return {
-      pass: false,
-      reason:
-        `base-branch: a tracker PR ("${headBranch}") must target the default branch ` +
-        `("${defaultBranch}"), not "${targetBranch}" — a tracker integrates into the ` +
-        `default branch, it does not stack onto another tracker`,
-    };
-  }
-
   // D10 step 4/6 — no linked issue at all is the memory-lane / no-epic
-  // standing case (R967-7 S4): pass untouched.
+  // standing case (R967-7 S4): pass untouched. (PR D review round 2: this
+  // check now runs FIRST — the tracker-head decision below needs the linked
+  // issue's own declaration, so there is no data-free branch-name shortcut
+  // left to take before it.)
   if (typeof issueBody !== 'string') return { pass: true };
 
   const issueBlock = parseGraphBlock(issueBody);
@@ -58,10 +45,42 @@ export function baseBranchRule({ issueBody, epicBody, targetBranch, defaultBranc
     };
   }
 
-  // An epic's own work obeys no parent tracker (D10 step 6).
-  if (issueBlock?.kind === EPIC_KIND) return { pass: true };
+  // D10 step 3, corrected (PR D review round 2): a head is "a tracker's own
+  // integration PR" ONLY when it equals THE ONE FACT THE RULE HOLDS — the
+  // linked issue's OWN declared tracker (it is itself `kind: epic` and
+  // names `headBranch` in its `tracker:` field) — never by `feature/`
+  // PREFIX alone. The prior shape trusted any `feature/…`-named head as a
+  // tracker before ever reading a declaration, which rejected an ordinary
+  // slice whose branch happened to start with `feature/` too (measured:
+  // `feature/issue-42-my-feature`, correctly based on its epic's tracker).
+  // `stranded.mjs:19-28`'s `feature/` prefix oracle answers a DIFFERENT
+  // question — "which open branches look like trackers, to surface them
+  // before they have a PR at all" — where no declaration is available yet
+  // to check against; it is intentionally left as-is, not duplicated here.
+  if (issueBlock?.kind === EPIC_KIND) {
+    const ownTracker = issueBlock.tracker;
+    if (ownTracker && headBranch === ownTracker) {
+      if (targetBranch === defaultBranch) return { pass: true };
+      return {
+        pass: false,
+        reason:
+          `base-branch: a tracker PR ("${headBranch}") must target the default branch ` +
+          `("${defaultBranch}"), not "${targetBranch}" — a tracker integrates into the ` +
+          `default branch, it does not stack onto another tracker`,
+      };
+    }
+    // Any other work against the epic's own issue obeys no parent tracker
+    // (D10 step 6) — it is not the tracker's own integration PR.
+    return { pass: true };
+  }
 
-  const parent = issueBlock?.parent ?? null;
+  // The parent this PR must be checked against is read through `declaredParent`
+  // (PR #1006 review round 1, finding 1), not `issueBlock?.parent` alone: a
+  // block-less body can still declare its parent via prose (`Parent: #N`), and
+  // `issueBlock` is `null` for such a body — the caller (`run-check.mjs`) now
+  // fetches that parent, so this predicate must actually read it too, or the
+  // fetch happens for nothing and the slice-on-main case keeps passing anyway.
+  const parent = declaredParent(issueBody).parent;
   if (parent === null) return { pass: true };
 
   // D10 step 7 — the parent's own declaration. An unreadable parent body is

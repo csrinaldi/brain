@@ -212,6 +212,75 @@ function outsideFences(body, blocks, unterminated) {
   return lines.join('\n');
 }
 
+/**
+ * The parent declared in PROSE alone: the line-initial `Parent: #N` reader
+ * (R967-2), extracted so it can run WHETHER OR NOT a `brain-graph/1` block
+ * exists at all (#967 PR D, cold review round 2, 2026-09-17).
+ *
+ * MEASURED: `parseGraphBlock` returns `null` before this scan ever ran
+ * whenever the body carried no graph-tagged fence at all
+ * (`!body.includes(GRAPH_PROTOCOL)`) — so a body that never declared a block
+ * left its prose `Parent:` line invisible to `buildGraph`, to
+ * `lib/ticket-base.mjs`'s `parentOf`, and to the `base-branch` gate. R967-2's
+ * own rule says the fallback applies "block or no block"; the code only ran
+ * it inside the block-exists branch. `declaredParent` below is the one entry
+ * that answers correctly either way, reusing THIS reader from both sides.
+ *
+ * Same exclusions as always: every fenced region is blanked first
+ * (`outsideFences`, the `brain-graph/1` fence and an unterminated fence
+ * included) — an HTML comment is not masked, same standing follow-up.
+ *
+ * @param {string} body
+ * @returns {{ parent: number|null, parentSource: 'prose'|null, ambiguousValue: string|null }}
+ */
+export function parentFromProse(body) {
+  const { blocks, unterminated } = fencedBlocks(body);
+  const prose = [...new Set(
+    [...outsideFences(body, blocks, unterminated).matchAll(PARENT_PROSE_LINE)]
+      .flatMap(m => [...m[0].matchAll(ISSUE_REF)].map(r => Number(r[1]))),
+  )];
+  // Ambiguity (more than one DISTINCT number) is reported by the caller that
+  // has a `declarationDivergences` channel to say it in (`parseGraphBlock`);
+  // this reader hands back the raw value so that caller can still name it.
+  if (prose.length > 1) return { parent: null, parentSource: null, ambiguousValue: prose.join(', ') };
+  if (prose.length === 1) return { parent: prose[0], parentSource: 'prose', ambiguousValue: null };
+  return { parent: null, parentSource: null, ambiguousValue: null };
+}
+
+/**
+ * The parent DECLARED for a body, from whichever channel actually declares
+ * one: the block's `parent:` key when a `brain-graph/1` block reads cleanly
+ * and names it, else the line-initial `Parent:` prose — WITH or WITHOUT a
+ * block present at all (#967 PR D). `parseGraphBlock` alone only reaches the
+ * prose fallback when a block EXISTS and simply omits `parent:`; this is the
+ * one entry `buildGraph` and `lib/ticket-base.mjs`'s `parentOf` both need, so
+ * neither has to grow a second "read the block, else read the body" caller.
+ *
+ * A MALFORMED block (`{ok: false}`, an ambiguous or hidden declaration) never
+ * falls back to prose — malformed is not absent (#639), and salvaging a
+ * refused declaration through a second door would make the refusal optional.
+ *
+ * `ambiguousValue` carries the same thing `parseGraphBlock`'s own
+ * `declarationDivergences` carries for the block-bearing path: MORE THAN ONE
+ * distinct `Parent: #N` number, raw, for a caller that has no divergence
+ * channel of its own (#967 cold review round 1, finding 2) — `null` whenever
+ * a block resolved the parent (its own ambiguity, if any, is already said via
+ * `parseGraphBlock`'s `declarationDivergences`) or nothing was declared at all.
+ *
+ * @param {string} body
+ * @returns {{ parent: number|null, parentSource: 'block'|'prose'|null, ambiguousValue: string|null }}
+ */
+export function declaredParent(body) {
+  if (typeof body !== 'string') return { parent: null, parentSource: null, ambiguousValue: null };
+  const block = parseGraphBlock(body);
+  if (block && block.ok !== false) {
+    return { parent: block.parent, parentSource: block.parentSource, ambiguousValue: null };
+  }
+  if (block?.ok === false) return { parent: null, parentSource: null, ambiguousValue: null };
+  const prose = parentFromProse(body);
+  return { parent: prose.parent, parentSource: prose.parentSource, ambiguousValue: prose.ambiguousValue };
+}
+
 /** Node states, in the order a reader cares about them. */
 export const READY = 'ready';
 export const BLOCKED = 'blocked';
@@ -430,18 +499,18 @@ export function parseGraphBlock(body) {
       say('parent', parentRaw, 'parent-grammar');
     }
   } else {
-    const prose = [...new Set(
-      [...outsideFences(body, blocks, unterminated).matchAll(PARENT_PROSE_LINE)]
-        .flatMap(m => [...m[0].matchAll(ISSUE_REF)].map(r => Number(r[1]))),
-    )];
-    // DIFFERENT issues named for one key is ambiguity, and the answer is the one
-    // `parseGraphBlock` already gives for two graph blocks: stop picking. The count is
-    // over the numbers, not over the lines, so `Parent: #878, #879` on ONE line is the
-    // same refusal as the same pair on two — it was resolved to 878 by writing order
-    // until this rule was stated over the set. One number said twice, on one line or
-    // two, is a restatement rather than a disagreement: exactly one answer, so it reads.
-    if (prose.length > 1) say('parent', prose.join(', '), 'parent-ambiguous');
-    else if (prose.length === 1) { parent = prose[0]; parentSource = 'prose'; }
+    // #967 PR D: extracted into `parentFromProse`, reused unchanged here and
+    // by `declaredParent` for a body with no block at all. DIFFERENT issues
+    // named for one key is ambiguity, and the answer is the one
+    // `parseGraphBlock` already gives for two graph blocks: stop picking. The
+    // count is over the numbers, not over the lines, so `Parent: #878, #879`
+    // on ONE line is the same refusal as the same pair on two — it was
+    // resolved to 878 by writing order until this rule was stated over the
+    // set. One number said twice, on one line or two, is a restatement
+    // rather than a disagreement: exactly one answer, so it reads.
+    const prose = parentFromProse(body);
+    if (prose.ambiguousValue !== null) say('parent', prose.ambiguousValue, 'parent-ambiguous');
+    else if (prose.parent !== null) { parent = prose.parent; parentSource = prose.parentSource; }
   }
 
   return {
@@ -556,9 +625,25 @@ export function buildGraph(issues = []) {
     // salvaged. It places no node and draws no edge; `blocksUnreadable` is what
     // keeps that from reading as "this issue declared nothing".
     const g = parsed?.ok === false ? null : parsed;
+    // #967 PR D: `parent`/`parentSource` are resolved through `declaredParent`,
+    // NOT through `g` alone — a body with no `brain-graph/1` block at all still
+    // has its prose `Parent:` line read this way (measured: `g` is `null` for
+    // such a body, and `g?.parent` would silently discard it). `declared`
+    // below stays keyed on `g !== null` on purpose: a prose-only parent is a
+    // RELATION this issue stated, not a graph BLOCK it declared.
+    const dp = declaredParent(issue.body ?? '');
     // `needs` → an edge INTO this node. `blocks` → an edge OUT of it. Same relation,
     // two ends; declaring either is enough.
     for (const d of g?.declarationDivergences ?? []) declarationDivergences.push({ number: issue.number, ...d });
+    // #967 cold review round 1, finding 2: an ambiguous prose parent (`Parent: #878,
+    // #879`) for a body with NO block at all is said here too — `g` is `null` for
+    // such a body, so `g?.declarationDivergences` never carries it, the same gap
+    // `parseGraphBlock`'s own block-bearing fallback already closed for itself
+    // (~line 502-504). `dp.ambiguousValue` is `null` whenever a block resolved the
+    // parent, so this never double-reports a block's own ambiguity.
+    if (g === null && dp.ambiguousValue !== null) {
+      declarationDivergences.push({ number: issue.number, key: 'parent', value: dp.ambiguousValue, reason: 'parent-ambiguous' });
+    }
     for (const n of g?.needs ?? []) addEdge(`${n}->${issue.number}`, SRC_DECLARED);
     for (const b of g?.blocks ?? []) addEdge(`${issue.number}->${b}`, SRC_DECLARED);
 
@@ -590,8 +675,8 @@ export function buildGraph(issues = []) {
       // arrive in the next two slices, and the UI's node projection is #882's.
       kind: g?.kind ?? null,
       tracker: g?.tracker ?? null,
-      parent: g?.parent ?? null,
-      parentSource: g?.parentSource ?? null,
+      parent: dp.parent,
+      parentSource: dp.parentSource,
       files: g?.files ?? [],
       declared: g !== null,
       sources,
