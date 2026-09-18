@@ -8,6 +8,18 @@ automatically, but renames need manual action.
 
 ## Unreleased
 
+### `cli.mjs ship` refuses without a declared invoker (#1012)
+
+Nothing to do for this one. `cli.mjs ship` now refuses, before any credential read or
+VCS call, unless `--invoker` is `hook`, `sweep`, or `manual` — `session-end-ship.mjs`,
+`day-start-sweep.mjs`, and the `brain:memory:ship` script (and its bare alias) already
+pass the right one. It also refuses independently whenever `NODE_TEST_CONTEXT` is set,
+even with a valid `--invoker` — `--dry-run` and `BRAIN_VCS_TEST_MODULE` are the only
+bypasses. This closes #1007, where `npm test` reached the real port because nothing on
+the call path checked who was calling. A new meta-test (`test-spawn-hygiene.test.mjs`)
+enforces a closed allowlist over every test that spawns a `brain/scripts/**` runtime
+entrypoint, so the next unlisted spawn fails the scan instead of passing by default.
+
 **Manual step (consumers upgrading from an older brain).** The upgrade drops the
 `merge=engram-manifest` attribute (`.gitattributes` is managed), so git never runs the old
 driver again. Two inert leftovers stay in YOUR repo and nothing reads them. To remove them:

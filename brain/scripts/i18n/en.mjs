@@ -384,6 +384,9 @@ export default {
   'memory.ship.failed':           '✗ ship failed — {message}',
   'memory.ship.raced':            '✗ ship failed — the lane ref moved during this run (raced); nothing was lost, its blobs are re-collected on the next run: {message}',
   'memory.ship.badHost':          '✗ ship failed — the host name produced an empty or invalid ref slug: {message}',
+  'memory.ship.invokerMissing':   '✗ ship refused — pass --invoker hook, sweep, or manual; to run it by hand use `npm run brain:memory:ship`.',
+  'memory.ship.invokerUnderTest': '✗ ship refused — NODE_TEST_CONTEXT is set; a test must use BRAIN_VCS_TEST_MODULE or --dry-run, never a bare --invoker.',
+  'memory.ship.invokerInvalid':   '✗ ship refused — --invoker must be hook, sweep, or manual; got {value}.',
 
   // ── memory/cli.mjs — which backend actually ran (issue #641) ─────────────────
   // Each of these is a case where the backend that ran is not the one a reader

@@ -49,10 +49,12 @@ test('flag on: one _spawnSync call with --json and a timeout', () => {
   const [cmd, argv, opts] = calls[0];
   assert.equal(cmd, process.execPath);
   assert.ok(argv.some((a) => a.endsWith('cli.mjs')));
-  assert.ok(argv.includes('ship'));
-  assert.ok(argv.includes('--json'));
+  // #1012: the sweep caller declares itself — argv.slice(1) drops only the
+  // resolved cli.mjs path, so the exact remaining shape is pinned.
+  assert.deepEqual(argv.slice(1), ['ship', '--json', '--invoker', 'sweep']);
   assert.equal(typeof opts.timeout, 'number');
   assert.ok(opts.timeout > 0);
+  assert.equal('env' in opts, false, 'no env key — the child inherits the parent env by default');
 });
 
 test('flag on, exit 0, one JSON line: parsed into outcome, skipped:false', () => {
