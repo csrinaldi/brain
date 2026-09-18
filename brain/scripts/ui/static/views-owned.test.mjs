@@ -75,10 +75,19 @@ test('#882 R882-3: Decisions draws real content — the ADR table, drift warning
   assert.match(APP_JS, /row\.issuesLabel/, 'the issues list must render the model\'s own label text — the parser does not distinguish "referenced" from "driving"');
 });
 
-test('#882: this PR (PR 2) does not draw them yet — anti-patterns, history and by-actor identifiers still do not exist in the page', () => {
+test('#882 R882-4: Anti-patterns draws real content — the catalogue, core before project, an unlistable scope said beside the other scope\'s real rows', () => {
+  assert.match(APP_JS, /function renderAntiPatterns\(/, 'R882-4: Anti-patterns must render real content, not a placeholder');
+  assert.match(APP_JS, /buildAntiPatternsModel\(/, 'renderAntiPatterns must build its rows from lib/anti-patterns-model.mjs, not recompute them inline');
+  // The literal string is gone: the model builds each citation's stamp through
+  // `sourceStamp`/`issueUrl` now, so the page renders stamps, not text.
+  assert.match(APP_JS, /for \(const stamp of row\.issueStamps\) cited\.appendChild\(renderSourceStamp\(stamp\)\)/, 'each cited issue must be its own chip, so a known project makes it clickable');
+  assert.ok(!/\[forge: #\$\{n\}\]/.test(APP_JS), 'the page must not hand-build a forge label the model already stamps');
+});
+
+test('#882: this PR (PR 3) does not draw them yet — history and by-actor identifiers still do not exist in the page', () => {
   for (const [name, text] of [['app.js', APP_JS], ['index.html', INDEX_HTML]]) {
-    for (const forbidden of [/anti-?pattern/i, /\bby-?actor\b/i, /\bhistoryview\b/i]) {
-      assert.ok(!forbidden.test(text), `${name} matched ${forbidden} — those views are #882's later PRs, not PR 2's`);
+    for (const forbidden of [/\bby-?actor\b/i, /\bhistoryview\b/i]) {
+      assert.ok(!forbidden.test(text), `${name} matched ${forbidden} — those views are #882's later PRs, not PR 3's`);
     }
   }
 });
@@ -151,7 +160,7 @@ test('#998 R998-6 T4/T6: the status bar shows the poll countdown from pollIndica
 // moment a stamp carries an href — the defect the fresh review of PR 3 named
 // across both views.
 test('#882 R882-1: every governance row renders its stamp through renderSourceStamp, never a hand-built span', () => {
-  for (const fn of ['renderRoadmapRow', 'renderDecisionRow']) {
+  for (const fn of ['renderRoadmapRow', 'renderDecisionRow', 'renderAntiPatternRow']) {
     const m = APP_JS.match(new RegExp(`function ${fn}\\([^)]*\\) \\{[\\s\\S]*?\\n}\\n`));
     assert.ok(m, `${fn} must exist in app.js`);
     assert.match(m[0], /renderSourceStamp\(row\.sourceStamp\)/, `${fn} must render its stamp through the shared helper`);

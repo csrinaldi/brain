@@ -20,6 +20,7 @@ import { buildSddModel, STAGE_VOCAB } from './lib/sdd-model.mjs';
 import { buildReviewTimeline } from './lib/review-timeline.mjs';
 import { buildRoadmapModel } from './lib/roadmap-model.mjs';
 import { buildDecisionsModel } from './lib/decisions-model.mjs';
+import { buildAntiPatternsModel } from './lib/anti-patterns-model.mjs';
 import { sourceStamp } from './lib/provenance.mjs';
 import { MODES, PLACEHOLDERS, initialView, switchMode, keyAction } from './lib/view-model.mjs';
 import { GOVERNANCE_VIEWS, GOVERNANCE_PLACEHOLDERS } from './lib/governance-model.mjs';
@@ -544,7 +545,7 @@ function switchGovernanceView(subView) {
   render();
 }
 
-/** The router's own sub-router: Roadmap (R882-2) and Decisions (R882-3) draw real content; the other three still say the PR that brings them (`GOVERNANCE_PLACEHOLDERS`, never an empty area). */
+/** The router's own sub-router: Roadmap (R882-2), Decisions (R882-3) and Anti-patterns (R882-4) draw real content; the other two still say the PR that brings them (`GOVERNANCE_PLACEHOLDERS`, never an empty area). */
 function renderGovernance() {
   renderGovernanceNav();
   clear(mounts.canvas);
@@ -554,6 +555,10 @@ function renderGovernance() {
   }
   if (governanceView === 'decisions') {
     renderDecisions();
+    return;
+  }
+  if (governanceView === 'anti-patterns') {
+    renderAntiPatterns();
     return;
   }
   mounts.canvas.appendChild(said(GOVERNANCE_PLACEHOLDERS[governanceView]));
@@ -676,6 +681,56 @@ function renderDriftWarnings(driftWarnings) {
     ...unreadable.map((u) => `unreadable: ${u.path} — ${u.reason}`),
   ];
   wrap.appendChild(saidList(`adr drift — ${n} disagreement(s) between brain/HOME.md and the parser (reported, never a gate):`, lines));
+  return wrap;
+}
+
+/**
+ * Anti-patterns (#882 R882-4): the catalogue, core before project, sorted
+ * by id within each scope. `lib/anti-patterns-model.mjs` decided all of it
+ * — the grouping, the sort, the per-row `sourceStamp` (R882-1's shared
+ * `row()` helper, reused a third time); this renders one loop over rows
+ * this page never re-derives. A directory that could not be listed at all
+ * is its own said reason beside the other scope's real rows (never an
+ * empty section).
+ */
+function renderAntiPatterns() {
+  const model = buildAntiPatternsModel(sectionOf(state, 'antiPatterns'), { project: state.meta?.project });
+  if (!model.ok) {
+    mounts.canvas.appendChild(said(`the anti-patterns catalogue could not be computed: ${model.reason}`));
+    return;
+  }
+  const { rows, unlistable } = model.value;
+  mounts.canvas.appendChild(el('p', 'canvas-summary', `${rows.length} anti-pattern(s)`));
+  for (const row of rows) mounts.canvas.appendChild(renderAntiPatternRow(row));
+  if (unlistable.length > 0) mounts.canvas.appendChild(renderAntiPatternsUnlistable(unlistable));
+}
+
+/** One catalogue row: an unreadable entry is its own said reason, kept in place (never dropped); a readable one carries its title, scope and its own `sourceStamp`, plus the issues it cites — each stamped `[forge: #N]`, the same bracket form `sourceStamp` uses for a real forge ref, though no per-issue URL exists in this data (a bare `#N`/`ISSUE-N` mention, never a fabricated link). */
+function renderAntiPatternRow(row) {
+  const wrap = el('div', 'anti-pattern-row');
+  if (row.ok === false) {
+    wrap.appendChild(el('strong', null, row.path ?? 'an unreadable anti-pattern'));
+    wrap.appendChild(said(row.reason));
+    return wrap;
+  }
+  wrap.appendChild(el('span', 'anti-pattern-scope', row.scope));
+  wrap.appendChild(el('strong', 'anti-pattern-title', row.title));
+  wrap.appendChild(renderSourceStamp(row.sourceStamp));
+  if (row.issueStamps.length > 0) {
+    // One chip per citation, not one joined text node: a citation whose project
+    // is known carries its own href, and a joined string could never be clicked.
+    const cited = el('p', 'anti-pattern-issues');
+    for (const stamp of row.issueStamps) cited.appendChild(renderSourceStamp(stamp));
+    wrap.appendChild(cited);
+  }
+  return wrap;
+}
+
+/** An unlistable scope's directory is said beside the other scope's real rows, never read as "zero anti-patterns in that scope" (R882-4). Only called when there is something to say — an empty area would read as "nothing happened here," the same evidence-reader discipline every other degraded band in this page follows. */
+function renderAntiPatternsUnlistable(unlistable) {
+  const wrap = el('div', 'anti-pattern-unlistable');
+  const lines = unlistable.map((u) => `${u.scope}: ${u.reason}`);
+  wrap.appendChild(saidList('anti-patterns — a scope could not be listed:', lines));
   return wrap;
 }
 

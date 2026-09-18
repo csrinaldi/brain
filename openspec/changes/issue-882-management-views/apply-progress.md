@@ -1,7 +1,7 @@
 # Apply progress — issue-882: the management views
 
 Delivery: chained PRs on the tracker `feature/issue-882-management-views`
-(feature-branch-chain). This file tracks PR 1 and PR 2; PRs 3-5 are not
+(feature-branch-chain). This file tracks PR 1, PR 2 and PR 3; PRs 4-5 are not
 started.
 
 ## PR 1 — governance shell, shared row, Roadmap (R882-1, R882-2)
@@ -310,3 +310,116 @@ surface, any new gate, any score or ranking.
 PR 2 was cut from PR 1's pre-review head, so the tracker's version of `roadmap-model.mjs`, `app.js`, `app.css`, `views-owned.test.mjs` and the SDD documents won each conflict, with PR 2's own diff applied on top — the procedure this repository uses for a sibling cut before a squash, never a rebase.
 
 One debt from the fresh review of PR 3 was paid here rather than left to accumulate: `renderDecisionRow` rendered `row.sourceStamp` by hand (`el('span','source', label)`), which silently drops the "open ↗" chip the moment a stamp carries an href — and PR 1's head made hrefs real. Both governance renderers now go through `renderSourceStamp`, pinned by a scan test that also forbids the hand-built span. RED 17/18 → GREEN 344/344 across the UI glob; mutation: the hand-built span restored → that test red, reverted.
+
+## PR 3 — Anti-patterns (R882-4)
+
+Branch: `feat/issue-882-pr3-anti-patterns`, cut from PR 2's head `59c4f9eb`,
+worktree `/home/gandalf/IA/brain-issue-882-3`.
+
+### Commits
+
+```
+0ee52808 feat(ui): the Anti-patterns view's read model — catalogue grouped by scope (#882)
+2294cc94 feat(ui): draw the Anti-patterns view (#882)
+66961280 chore(memory): record PR 3 of #882 — the Anti-patterns view
+```
+
+### TDD Cycle Evidence
+
+| Unit | RED | GREEN | Mutation (turns red, then reverted) |
+|---|---|---|---|
+| T1a/T1b — `anti-patterns-model.mjs` | `ERR_MODULE_NOT_FOUND` on the new test file (8 tests) | 8/8 pass | Swapped `SCOPE_ORDER` from `['core', 'project']` to `['project', 'core']` → 1/8 red (the "core before project" grouping test only); reverted, 8/8 green |
+| T2 — `renderAntiPatterns` wiring (`app.js`, `app.css`, `views-owned.test.mjs`) | Added the Anti-patterns presence-proof test + narrowed the forbidden-identifier list to history/by-actor only → 1/16 red (`renderAntiPatterns`/`buildAntiPatternsModel`/`[forge: #${n}]` absent); confirmed by stashing `app.js`/`app.css` and re-running the updated test file alone | Wired `renderAntiPatterns`/`renderAntiPatternRow`/`renderAntiPatternsUnlistable` into `app.js`'s `renderGovernance` sub-router, added the `.anti-pattern-*` classes (existing `--line`/`--surface`/`--muted`/`--divergence-*` tokens only, no new token) → 16/16 green | Changed the per-issue stamp from `` `[forge: #${n}]` `` to a bare `` `#${n}` `` → 1/16 red (the same presence-proof test, now checking the exact bracket form); reverted, 16/16 green |
+
+`renderAntiPatterns`/`renderAntiPatternRow`/`renderAntiPatternsUnlistable`
+themselves carry no RED/GREEN cycle of their own (N/A, D9 — no DOM harness):
+wiring only, verified by the text-level scan above (`views-owned.test.mjs`)
+plus a trace against `anti-patterns-model.test.mjs`'s already-covered
+contract, the same precedent PR 1/PR 2's renderers used.
+
+### Focused test commands and results
+
+- `GIT_CONFIG_GLOBAL=/dev/null node --test brain/scripts/ui/lib/anti-patterns-model.test.mjs` — 8/8 pass
+- `GIT_CONFIG_GLOBAL=/dev/null node --test brain/scripts/ui/static/views-owned.test.mjs` — 16/16 pass
+- `GIT_CONFIG_GLOBAL=/dev/null node --test brain/scripts/ui/lib/source-guard.test.mjs brain/scripts/ui/static/app-source-guard.test.mjs brain/scripts/ui/static/tokens.test.mjs` — 14/14 pass
+- `GIT_CONFIG_GLOBAL=/dev/null node --test brain/scripts/ui/static/tokens.test.mjs` — run before every commit, 4/4 pass each time
+- `npm run brain:repo:check` — run before every commit, clean each time
+
+### Full suite (run once, at the end)
+
+`GIT_CONFIG_GLOBAL=/dev/null npm test` — **5879 pass / 0 fail** (baseline
+after PR 2: 5870 pass / 0 fail; +9 new tests — 8 in
+`anti-patterns-model.test.mjs`, +1 net in `views-owned.test.mjs`, whose
+forbidden-identifier test was narrowed and a new presence-proof test added).
+
+### Counted diff
+
+`git diff --numstat 59c4f9eb...HEAD | rg -v '\.test\.mjs|openspec/|\.memory/'
+| awk '{a+=$1; d+=$2} END {print a+d}'` → **134** (plan estimate ~200, budget
+1000).
+
+### Deviations from design
+
+1. **The per-issue "forge link" is text, never a clickable `href`.**
+   `spec.md`'s R882-4 scenario says a cited issue is "rendered as its own
+   forge link (`sourceStamp`'s `[forge: #N]` form)." `anti-patterns.mjs`'s
+   `ISSUE_REF_RE` only ever extracts a bare number from free text (`#94` or
+   `ISSUE-94`, both collapsed to `94`) — there is no per-issue URL anywhere
+   in this data, and no org/repo slug is available to any `ui/lib/**`
+   module (D9's purity gate forbids `process.*`/`fetch`, and no other pure
+   model in this codebase fabricates a forge URL from a bare number).
+   Building a real `https://.../issues/94` link would assert a confidence
+   the data does not carry — the same "never fabricate" discipline
+   `unlistable`/`{ok:false, reason}` already enforce everywhere else in this
+   view. Read the parenthetical as naming the VISUAL form to copy
+   (`provenance.mjs`'s own `[forge: #${n}]` bracket convention), not a
+   literal `sourceStamp()` call: `app.js`'s `renderAntiPatternRow` formats
+   each issue with that exact template, `href: null`, no second provenance
+   shaper invoked. `issues` itself stays the plain, deduplicated, sorted
+   number array `buildAntiPatternsModel` returns, matching the MUST clause's
+   literal row shape (`{id, title, scope, issues, source: {path}}`).
+2. **Row grouping is a flat, pre-sorted array (`core` rows then `project`
+   rows, `id`-sorted within each), not nested groups.** `design.md`'s module
+   map and `spec.md`'s MUST clause both say "one row per
+   `antiPatterns.value.entries`" (singular row list) and "Rows group by
+   scope... and sort by id within each scope" — read as an ORDERING
+   guarantee on one flat `rows` array, the same shape `decisions-model.mjs`
+   already returns, rather than a second nested shape like Roadmap's
+   `epics[].children`. `row.scope` carries the group each row belongs to,
+   so a future UI change to add visual scope headers would not need a model
+   change.
+3. **`row()` reuse continues — no Roadmap-style gap this time**, matching
+   PR 2's own note: anti-pattern files have a real per-row path
+   (`brain/core/anti-patterns/<id>.md` / `brain/project/anti-patterns/<id>.md`),
+   so `source: {path: entry.path}` goes through `governance-model.mjs`'s
+   `row()` helper unchanged, the same as ADR rows in PR 2.
+4. **`GOVERNANCE_PLACEHOLDERS['anti-patterns']` and
+   `governance-model.test.mjs`'s "every sub-view id not yet built has a
+   non-empty said sentence" test are both left untouched**, even though
+   Anti-patterns now draws real content. This mirrors PR 2's own choice for
+   `decisions` (still carries stale placeholder text in that same table,
+   never reachable once `renderGovernance`'s router special-cases it) —
+   consistent, not a fresh decision: the table is not cleaned up per PR,
+   unlike `view-model.mjs`'s top-level `PLACEHOLDERS`.
+
+### Out of scope (unchanged from tasks.md)
+
+Tier 2 (#883), telemetry (#884), remote deployment (#885), "PRs merged" per
+actor, a real dated roadmap, forge identity binding (#981), any write
+surface, any new gate, any score or ranking.
+
+### Working tree
+
+`git status --short` is empty after all commits — nothing left uncommitted.
+
+### Next
+
+PR 4 (History, R882-5) is not started. It depends only on PR 1
+(`governance-model.mjs`'s sub-nav) plus a new `status/history.mjs` reader and
+a `snapshot.mjs` section addition — not on PR 2 or PR 3's own view modules.
+
+### Merge onto the tracker (after PR 2, #1038)
+
+PR 3 was cut before PR 1's review fixes, so the tracker's version won each conflict with PR 3's own diff applied on top. The debt its own fresh review named was paid here: `forge-url.mjs` exists on the tracker now, so `buildAntiPatternsModel(section, {project})` stamps each cited ticket through `sourceStamp({url: issueUrl(project, n)})` — the same builder the roadmap rows use — and keeps today's bare `[forge: #N]` words when no project is known, rather than the roadmap's "no source was recorded" text, which would be wrong for a bare citation. The renderer draws one chip per citation instead of one joined text node, so a citation with a project behind it is individually clickable, and both governance renderers plus this one are pinned to `renderSourceStamp` by the shared scan test.
+
+RED 8/9 on the model (a project given must produce a real href) → GREEN 354/354 across the UI glob. Mutations: the model ignoring `project` → its test red; the renderer joining the stamps into one text node instead of chips → the scan test red (a first attempt that only disabled the branch left the scanned line in place and proved nothing — said here because a mutation that passes is not evidence). Both reverted.
