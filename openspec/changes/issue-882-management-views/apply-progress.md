@@ -22,10 +22,14 @@ bda16bea feat(ui): forge-url.mjs — the one place an issue/PR number becomes a 
 2db66977 refactor(ui): change-route.mjs's buildPrUrl delegates to forge-url.mjs (#882)
 fe56dc22 fix(ui): Roadmap rows go through row() and carry a real source (#882 cold review blocker)
 464de455 fix(ui): wire the Roadmap row's source stamp, restore the adrs guard (#882 cold review)
+288192a8 docs(sdd): append fresh-context review fixes to PR 1 apply progress (#882)
+5af54910 fix(ui): an unknown roadmap state is said, never thrown (#882 cold review #1037 correction 1)
+dca0271d docs(ui): spec.md R882-2 amendments for corrections 1/2, forge-url.mjs editorial note (#882 cold review #1037)
 ```
 
-The last four commits above are the fresh-context review's fixes — see
-"Fresh-context review before push" below.
+Commits bda16bea..288192a8 are the fresh-context review's fixes (see
+"Fresh-context review before push" below). Commits 5af54910..dca0271d are
+the cold review of PR #1037's fixes (see "Cold review of PR #1037" below).
 
 ### TDD Cycle Evidence
 
@@ -144,6 +148,73 @@ Full suite after these fixes: 5870 pass / 0 fail (was 5862 before this
 round). Counted diff after these fixes: 359 (was 308 before). Every gate
 (`brain:repo:check`, `tokens.test.mjs`) stayed green before each of the four
 fix commits, same as PR 1's original six.
+
+### Cold review of PR #1037 (head 288192a8): APPROVE with two corrections, both fixed
+
+The cold review of PR #1037 (the fresh-context-review-fixed head, `288192a8`)
+returned APPROVE with two corrections and one editorial. Both corrections
+fixed, in commits `5af54910` and `dca0271d`; the editorial addressed as a
+one-sentence comment, no behavior change.
+
+1. **Correction 1 — `roadmapRow` called `stateOf(node)` directly, which
+   THROWS on an unknown `node.status` or an unmapped roadmap state**
+   (`state-vocab.mjs`), and `buildRoadmapModel` had no guard: one such node
+   would throw out of `renderRoadmap()` inside `render()` and blank the
+   whole governance canvas — empty-on-failure in its worst form. Fixed per
+   the reviewer's own recommendation: a new `safeStateOf(node)` catches the
+   throw and falls back to the `unknown` vocabulary entry, carrying the
+   caught message as the row's own `stateReason` — the same guard
+   `lane-model.mjs`'s `stateAndMarks` already holds for this exact throw.
+   The rest of the rows draw unaffected. Wired all the way to the screen:
+   `app.js`'s `renderRoadmapRow` renders `row.stateReason` (a new
+   `.roadmap-state-reason` class, `var(--warn)`, no new token) so the said
+   reason is not left unused in the model. Tests: `roadmap-model.test.mjs`
+   gained 2 tests (unknown status, unmapped roadmap state — both prove
+   `model.ok === true` and the bad row's own `stateReason`, while a sibling
+   good row is unaffected); `views-owned.test.mjs` gained a scan asserting
+   `renderRoadmapRow` reads `row.stateReason`. `spec.md` R882-2 gained an
+   amendment paragraph and a new scenario. Mutation: reverted `roadmapRow`
+   to call `stateOf(node)` directly (no guard) → both new model tests failed
+   via the exact same thrown error the reviewer described; reverted, green.
+   A second mutation removed the `row.stateReason` rendering in `app.js` →
+   the new scan test red; reverted, green.
+2. **Correction 2 — an epic whose `parent` is another epic was listed flat
+   with the parent link silently dropped**, because `childrenByEpic` only
+   ever collects non-epic nodes. Decided (recommendation 1 of the two the
+   reviewer offered): keep `epics` FLAT — it stays a list, not a tree, since
+   a real nested-epic structure (arbitrary depth, cycles to guard against)
+   is a bigger change than this ticket's "per-epic status grouping, no
+   timeline" scope — and SAY the dropped relation as a
+   `{key: 'parent', value: <parent's number>, reason:
+   'nested-epic-not-supported'}` divergence on the child epic's own row,
+   reusing the exact shape and rendering `parent-not-epic` already has. Said
+   why in `roadmap-model.mjs`'s own module-header comment and in a new
+   `spec.md` R882-2 amendment + scenario. Test: `roadmap-model.test.mjs`
+   gained 1 test (an epic declaring another epic as `parent` still gets its
+   own top-level row, carrying the divergence; the parent epic's own row
+   carries none). Mutation: restored the silent drop (bypassed
+   `epicParentDivergence`) → the new test red (asserted `[]` where the
+   divergence should be); reverted, green.
+   - **Implementation note**: both corrections' `roadmap-model.mjs` code and
+     tests were authored together before being split into commits, so
+     `5af54910` (titled "correction 1") actually carries BOTH corrections'
+     implementation; correction 2's own mutation (above) was run and
+     verified independently regardless of that commit-boundary mislabel.
+     `spec.md`'s amendments for both corrections landed together in the
+     following commit, `dca0271d`.
+3. **Editorial (not fixed here, ticket already exists)** — `forge-url.mjs`'s
+   `https://github.com/` literal now stamps a github.com link for every
+   roadmap row too, widening the platform-agnostic debt from PRs to issues.
+   Added one sentence to `forge-url.mjs`'s header comment naming #1035 as
+   the owner of fixing both builders' forge-host literal at once; no
+   behavior change.
+
+Full suite after these fixes: 5874 pass / 0 fail (was 5870 before this
+round; baseline main: 5852). Counted diff after these fixes: 412 (was 359
+before; plan estimate ~360, budget 1000 for this tier). UI test-file glob
+count unchanged at 31 (no new test files this round, only existing ones
+extended). `brain:repo:check` and `tokens.test.mjs` stayed green before
+every commit in this round.
 
 ### Out of scope (unchanged from tasks.md)
 
