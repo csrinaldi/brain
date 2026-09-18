@@ -321,11 +321,12 @@ test('T3 mutation: the unknown subcommand is STILL flagged even with VCS_TOKEN d
 
 // ── T4 (Requirement 3/6, D8) ─────────────────────────────────────────────────
 
-test('T4: parseSubcommandManifest — empty source is null; the real run-check.mjs source yields exactly its 4 keys', () => {
+test('T4: parseSubcommandManifest — empty source is null; the real run-check.mjs source yields exactly its 5 keys', () => {
   assert.equal(parseSubcommandManifest(''), null);
   const src = readFileSync(resolve(REPO_ROOT, 'brain/scripts/governance/run-check.mjs'), 'utf8');
   const manifest = parseSubcommandManifest(src);
-  assert.deepEqual(Object.keys(manifest).sort(), ['decision-gate', 'diff-size', 'issue-link', 'memory-gate']);
+  // #967 PR C — base-branch joins the manifest, required at every tier (ruling 1).
+  assert.deepEqual(Object.keys(manifest).sort(), ['base-branch', 'decision-gate', 'diff-size', 'issue-link', 'memory-gate']);
 });
 
 test('T4 mutation: renaming the SUBCOMMAND_PORT_REACH const makes the manifest unreadable (null), not zero-requirement', () => {
