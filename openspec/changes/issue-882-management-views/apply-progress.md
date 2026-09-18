@@ -477,9 +477,16 @@ warnings, plus one open question. Fixed in order:
    falsely claimed `forge-url.mjs` "does not exist anywhere in this
    codebase."** True only of the stale branch point this slice was cut
    from — it shipped in PR 1 (#1037) and PR 3 already imports it on the
-   tracker. Corrected both texts (this section, and a new memory record
-   below) to say what was actually true: it did not exist on PR 4's own cut
-   point, and does exist on the tracker after the forward-merge.
+   tracker. This section's own rewrite (above, and the merge commit) says
+   what was actually true. For the memory record: a direct in-place edit
+   of `.memory/records/2026-09-rec-5b341c1225525cea.jsonl`'s content was
+   tried first and committed, then caught by the full suite —
+   `real-store-roundtrip.integration.test.mjs`'s REQ-C4-1 failed
+   ("recomputed id 'rec-e9d5efb8cac6efc2' does not match the stored id"):
+   a record's id is a content hash, so hand-editing content in place
+   breaks it. Reverted that edit in a following commit and instead saved a
+   NEW record (`rec-a85afb2bcfe4d641`) with `--supersedes
+   rec-5b341c1225525cea`, the store's own correction mechanism.
 3. **WARNING — `history-model.mjs` hand-built its own
    `` `https://github.com/${project}/pull/${n}` `` template.** Post-merge,
    imports `prUrl` from `lib/forge-url.mjs` instead — one definition, not
@@ -497,9 +504,28 @@ warnings, plus one open question. Fixed in order:
    than add an untested `git rev-list --count` call under strict TDD;
    `spec.md` amended to say this slice states the shown count only.
 
-Full suite after these fixes: see "Full suite (after the forward-merge and
-fixes)" below. `brain:repo:check` and `tokens.test.mjs` stayed green before
-every commit in this round.
+### Commits (the fresh-context-review round, after the forward-merge)
+
+```
+fca6d7b2 chore(merge): forward-merge the tracker (PR 1-3 squashed + cold-review fixes) into PR 4 (#882)
+4cacc75d fix(ui): History cites a reference, never asserts "PR" — cited link through forge-url.mjs, real source stamp (#882 cold review of PR 4)
+81945bf6 docs(memory): correct the PR 4 record's false forge-url.mjs claim (#882 cold review of PR 4) — REVERTED, see 285cb3bd
+285cb3bd fix(status): a citedRef fixture in snapshot.test.mjs still said prNumber, and revert a broken direct memory-record edit (#882)
+70bf426c docs(memory): record the corrected forge-url.mjs claim, superseding rec-5b341c1225525cea (#882 cold review of PR 4)
+```
+
+### Full suite (after the forward-merge and all fixes)
+
+`GIT_CONFIG_GLOBAL=/dev/null npm test` → **5915 pass / 0 fail** (up from
+5899 before the merge; the tracker's own PR 1-3 fixes plus this round's new
+scan tests account for the difference). `brain:repo:check` and
+`tokens.test.mjs` stayed green before every commit in this round.
+
+### Counted diff against the tracker (after the merge and all fixes)
+
+`git diff --numstat origin/feature/issue-882-management-views...HEAD | rg -v
+'\.test\.mjs|openspec/|\.memory/' | awk '{a+=$1; d+=$2} END {print a+d}'` →
+**241**.
 
 ### Working tree
 
