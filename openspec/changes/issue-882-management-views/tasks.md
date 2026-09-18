@@ -146,13 +146,13 @@ push, a posted cold-review APPROVE.
 {"slice": 5, "claims": ["R882-6"], "files": ["brain/scripts/ui/lib/actors-model.mjs", "brain/scripts/ui/static/app.js", "brain/scripts/ui/static/app.css", "brain/scripts/ui/static/views-owned.test.mjs"], "terminal_pr": "the tracker feature/issue-882-management-views -> main"}
 ```
 
-- [ ] T1a. `lib/actors-model.test.mjs`: a record-only actor and a
+- [x] T1a. `lib/actors-model.test.mjs`: a record-only actor and a
       forge-only actor both get a row, the second `actorKind: null` with the
       stated reason; `reviewsPosted`'s text carries the open-PRs-only
       caveat verbatim; every row's `prsMerged` is the stated-absence shape,
       never a bare `0`; `reviewsSection.ok === false` degrades per-row, not
       the whole view. RED.
-- [ ] T1b. `lib/actors-model.mjs`: `buildActorsModel(actorsSection,
+- [x] T1b. `lib/actors-model.mjs`: `buildActorsModel(actorsSection,
       reviewsSection)`. Mutation: `prsMerged` defaulted to `0` instead of
       the stated-absence object → red (the "never a bare 0" test).
 - [ ] T2. `static/app.js`: `renderActors`. `static/app.css`: actors classes.
