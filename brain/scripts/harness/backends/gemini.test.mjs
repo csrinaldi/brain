@@ -131,6 +131,25 @@ test('refuses before spawning when neither agy nor GEMINI_API_KEY/GOOGLE_APPLICA
   assert.equal(spawned, false);
 });
 
+test('refuses before spawning when gemini CLI binary does not exist even if key is present', async (t) => {
+  const paths = makePaths(t);
+  let spawned = false;
+  const result = await runStage({
+    stage: 'cold-review',
+    prompt: 'p',
+    model: 'gemini-2.5-pro',
+    cwd: paths.candidate,
+    output: output(paths),
+    _env: { ...BASE_ENV },
+    _commandExists: () => false,
+    _run: () => { spawned = true; return { status: 0 }; },
+  });
+
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /Gemini authentication is unavailable/i);
+  assert.equal(spawned, false);
+});
+
 test('refuses unsafe output paths inside the candidate before spawning', async (t) => {
   const paths = makePaths(t);
   let spawned = false;

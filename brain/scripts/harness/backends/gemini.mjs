@@ -14,7 +14,7 @@ import { withForgeConfigDir } from '../producer-forge-reach.mjs';
 import { DEFAULT_STAGE_TIMEOUT_MS, formatDuration } from '../../lib/duration.mjs';
 import { defaultRun } from './agent-runtime.mjs';
 
-export const GEMINI_MODEL = 'gemini-3.1-pro-high';
+export const GEMINI_MODEL = 'gemini-2.5-pro';
 
 export function deduplicateFindingsBlocks(text) {
   if (typeof text !== 'string') return text;
@@ -131,14 +131,12 @@ export async function runStage({
     runner = 'agy';
   } else if (hasGemini && (hasApiKey || hasGoogleCreds)) {
     runner = 'gemini';
-  } else if (hasApiKey || hasGoogleCreds) {
-    runner = 'gemini';
   }
 
   if (!runner) {
     return {
       ok: false,
-      reason: 'Gemini authentication is unavailable: neither agy (Antigravity CLI for Google AI Pro subscriptions) nor GEMINI_API_KEY / GOOGLE_APPLICATION_CREDENTIALS is set in environment.',
+      reason: 'Gemini authentication is unavailable: neither agy (Antigravity CLI for Google AI Pro subscriptions) nor GEMINI_API_KEY / GOOGLE_APPLICATION_CREDENTIALS for gemini CLI is set or available.',
     };
   }
 

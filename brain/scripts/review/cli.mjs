@@ -138,14 +138,6 @@ export function parseArgs(argv) {
     else given.push(argv[i]);
   }
 
-  if (engineVal === undefined) {
-    args.error = '"--engine" was given with no value after it';
-    return args;
-  }
-  if (modelVal === undefined) {
-    args.error = '"--model" was given with no value after it';
-    return args;
-  }
   if (engineVal !== null) args.engine = engineVal;
   if (modelVal !== null) args.model = modelVal;
 
