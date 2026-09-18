@@ -159,7 +159,7 @@ export async function runStage({
   const elapsed = () => _now() - startedAt;
 
   const args = runner === 'agy'
-    ? ['-p', prompt, '--model', effectiveModel, '--mode', 'plan', '--dangerously-skip-permissions']
+    ? ['-p', prompt, '--model', effectiveModel, '--dangerously-skip-permissions', '--disable-slash-commands']
     : ['-p', prompt, '-m', effectiveModel, '--approval-mode', 'plan', '--skip-trust', '--output', output.tempPath];
 
   let result;
@@ -210,7 +210,7 @@ export async function runStage({
   }
 
   if (!existsSync(output.tempPath)) {
-    return { ok: false, elapsedMs: elapsed(), reason: 'the Gemini engine exited cleanly but wrote no final message' };
+    return { ok: false, elapsedMs: elapsed(), reason: 'the Gemini engine exited cleanly but wrote no final message' + tail(result, secrets) };
   }
 
   try {

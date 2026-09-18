@@ -58,8 +58,8 @@ test('runs exact agy argv for Google AI Pro subscription with scrubbed environme
   assert.deepEqual(seen.args, [
     '-p', 'return the review artifact',
     '--model', 'gemini-3.1-pro-high',
-    '--mode', 'plan',
     '--dangerously-skip-permissions',
+    '--disable-slash-commands',
   ]);
   assert.equal(seen.opts.cwd, paths.candidate);
   assert.equal(seen.opts.env.SAFE_VALUE, 'kept');
