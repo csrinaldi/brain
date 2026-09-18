@@ -6,7 +6,7 @@
 // challenger, and publication.
 
 import { existsSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
-import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 import { assertRoutableStage } from '../../lib/stage-engine.mjs';
 import { credentialEnvNames, withoutCredentials } from '../../lib/credential-env.mjs';
@@ -61,9 +61,9 @@ export function canonicalPath(path) {
   return resolve(base, ...unresolved);
 }
 
-function isWithin(parent, child) {
+export function isWithin(parent, child) {
   const rel = relative(parent, child);
-  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
+  return rel === '' || (!rel.startsWith(`..${sep}`) && rel !== '..' && !isAbsolute(rel));
 }
 
 function validateOutput(output, cwd) {
@@ -195,9 +195,7 @@ export async function runStage({
     } catch (err) {
       return { ok: false, elapsedMs: elapsed(), reason: `the Gemini final message could not be written — ${err?.message ?? String(err)}` };
     }
-  }
-
-  if (existsSync(output.tempPath)) {
+  } else if (existsSync(output.tempPath)) {
     try {
       const raw = readFileSync(output.tempPath, 'utf8');
       const deduplicated = deduplicateFindingsBlocks(raw);
