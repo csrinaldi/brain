@@ -6,6 +6,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { buildRoadmapModel } from './roadmap-model.mjs';
+import { issueUrl } from './forge-url.mjs';
 
 const node = (number, over = {}) => ({
   number,
@@ -72,4 +73,27 @@ test('#882 R882-2: determinism under shuffled input — the same graph, nodes in
   const forward = buildRoadmapModel(graph({ nodes: [epic, c1, c2, unlinked1, unlinked2] }));
   const shuffled = buildRoadmapModel(graph({ nodes: [unlinked2, c2, epic, unlinked1, c1] }));
   assert.deepEqual(forward, shuffled);
+});
+
+// ── #882 cold review of PR 1 (blocker): every row goes through
+// governance-model.mjs's row() and carries a real source when a project is
+// known ───────────────────────────────────────────────────────────────────
+
+test('#882 cold review of PR 1 (blocker): a row sources to its issue URL through forge-url.mjs when a project is known', () => {
+  const model = buildRoadmapModel(graph({ nodes: [node(7)] }), { project: 'o/r' });
+  const row = model.value.unlinked[0];
+  assert.equal(row.source, issueUrl('o/r', 7));
+  assert.deepEqual(row.sourceStamp, { label: '[forge: #7]', href: issueUrl('o/r', 7), kind: 'forge' });
+});
+
+test('#882 cold review of PR 1 (blocker): without a known project, a row carries sourceStamp\'s own "no source was recorded" stamp — never a crash, never a guessed link', () => {
+  const model = buildRoadmapModel(graph({ nodes: [node(8)] }));
+  const row = model.value.unlinked[0];
+  assert.equal(row.source, 'no source was recorded for this value');
+  assert.deepEqual(row.sourceStamp, { label: '[no source was recorded for this value]', href: null, kind: 'none' });
+});
+
+test('#882 cold review of PR 1 (blocker): the epic row itself is sourced too, not only its children', () => {
+  const model = buildRoadmapModel(graph({ nodes: [node(20, { kind: 'epic' })] }), { project: 'o/r' });
+  assert.equal(model.value.epics[0].source, issueUrl('o/r', 20));
 });
