@@ -37,6 +37,7 @@ test('memoryPresence: no session_summary among observations → fail with reason
   const r = memoryPresence([{ type: 'decision' }, { type: 'bugfix' }]);
   assert.equal(r.pass, false);
   assert.ok(typeof r.reason === 'string' && r.reason.length > 0, 'reason must be present');
+  assert.doesNotMatch(r.reason, /brain:save|brain-save/);
 });
 
 // ── graceful non-array inputs ─────────────────────────────────────────────────

@@ -323,11 +323,12 @@ sep(await t('day.brain.section'));
 // ── 5. Team memory ───────────────────────────────────────────────────────────
 sep(await t('day.memory.section'));
 
-// 4a. Auto-install/repair the pre-push hook that materializes memory (ADR-0003).
+// 4a. Auto-install/repair the pre-push hook that checkpoints feature working memory
+//     and runs repository checks before push (day.memory.hookMissing / hookActive).
 //     Does not depend on re-running bootstrap: ensured on every startup, so devs
 //     who already have the system running receive it without manual action, and it
-//     re-installs itself if someone disables it. Real enforcement is client-side by design:
-//     the ~/.engram export can only happen on the dev's machine.
+//     re-installs itself if someone disables it. Durable team records travel through
+//     the memory lane, never on a feature push.
 const HOOKS_PATH = 'brain/scripts/hooks';
 const hookFile = join(ROOT, HOOKS_PATH, 'pre-push');
 if (!existsSync(hookFile)) {

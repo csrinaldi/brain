@@ -929,13 +929,16 @@ if (op === "search") {
 // "[object Object]".
 //
 // HONEST BOUND, because the first version of this comment claimed a guarantee
-// it does not have: the `{root}` is HONOURED by every plainfiles op and by
-// `engram.share`/`engram.importMemory`, but `engram.pull()` and
-// `engram.setup()` take NO parameters (see their definitions), so the object is
-// discarded and they act on the real repo root. Not reachable today — the env
-// var is set nowhere outside three test files, never in package.json, the hooks
-// or CI — so this is a bound on the seam, not a live defect. Any test that
-// needs a rooted `engram.pull`/`setup` must give those two a `{root}` first
+// it does not have — and #1010 measured that the gap WAS a live defect, not
+// merely an unreachable one: `cli.backend-fallback.test.mjs`'s own `setup`
+// test forwards `BRAIN_MEMORY_TEST_ROOT`, `engram.setup()` silently discarded
+// it, and every `npm test` run wrote `.engram` into whatever the real repo
+// root happened to be — including a cold-review candidate worktree, which is
+// how the symlink ended up inside a tree under review. `{root}` is now
+// HONOURED by every plainfiles op and by `engram.share`/`engram.importMemory`/
+// `engram.setup` (#1010). `engram.pull()` still takes NO parameters (see its
+// definition), so it still discards `{root}` and acts on the real repo root —
+// any test that needs a rooted `engram.pull` must give it a `{root}` first
 // rather than trusting this set.
 const ROOTED_OPS = new Set(["share", "pull", "import", "setup"]);
 

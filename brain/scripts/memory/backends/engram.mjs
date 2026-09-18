@@ -918,10 +918,18 @@ export async function index() {
  * driver for has had no writer since #874 split B, so there is nothing left
  * for a driver to merge.
  *
+ * `{root}` (#1010): honours `BRAIN_MEMORY_TEST_ROOT` the same way
+ * `share()`/`pull()`/`import()` already do (cli.mjs's `ROOTED_OPS`). Before
+ * #1010 this took no parameters at all, so a caller that forwarded `{root}`
+ * had it silently discarded and `ensureMemorySymlink()` fell through to the
+ * real repo root regardless — measured as `npm test` writing `.engram` into
+ * a cold-review candidate worktree via `cli.backend-fallback.test.mjs`'s own
+ * real-subprocess `setup` test.
+ *
  * Called by bootstrap.sh §7 via: node brain/scripts/memory/cli.mjs setup
  */
-export async function setup() {
-  ensureMemorySymlink();
+export async function setup({ root = repoRoot } = {}) {
+  ensureMemorySymlink(root);
 }
 
 // ---------------------------------------------------------------------------

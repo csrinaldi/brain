@@ -95,7 +95,6 @@
     "brain:metrics": "node ./brain/scripts/brain-metrics.mjs",
     "brain:start": "node ./brain/scripts/brain-start.mjs",
     "brain:check": "node ./brain/scripts/brain-check.mjs",
-    "brain:save": "node ./brain/scripts/brain-save.mjs",
     "brain:ship": "node ./brain/scripts/brain-ship.mjs",
     "brain:next": "node ./brain/scripts/brain-next.mjs",
     "brain:adopt": "node ./brain/scripts/adopt.mjs",
