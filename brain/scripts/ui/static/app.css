@@ -207,6 +207,18 @@ body {
 .decision-drift .said { margin: 0; color: var(--divergence-fg); }
 .decision-drift .said-list { margin: 6px 0 0 18px; padding: 0; color: var(--divergence-fg); }
 
+/* ── the Anti-patterns view (#882 R882-4): the catalogue, core before
+   project, an unreadable entry kept as its own row — sorted last — and an
+   unlistable scope said beside the other scope's real rows ── */
+
+.anti-pattern-row { margin-bottom: 14px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; }
+.anti-pattern-scope { display: inline-block; margin-right: 6px; font-size: 11px; padding: 1px 6px; border-radius: 4px; background: var(--surface); color: var(--muted); }
+.anti-pattern-title { display: inline-block; }
+.anti-pattern-issues { margin: 6px 0 0; font-size: 12px; color: var(--muted); }
+.anti-pattern-unlistable { margin-top: 10px; padding: 8px 10px; border: 1px dashed var(--divergence-fg); border-radius: 6px; background: var(--divergence-bg); }
+.anti-pattern-unlistable .said { margin: 0; color: var(--divergence-fg); }
+.anti-pattern-unlistable .said-list { margin: 6px 0 0 18px; padding: 0; color: var(--divergence-fg); }
+
 /* ── the degradation bands: never a blank area, always a said reason ───── */
 
 .banners:empty { display: none; }

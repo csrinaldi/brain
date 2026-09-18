@@ -63,10 +63,16 @@ test('#882 R882-3: Decisions draws real content — the ADR table, drift warning
   assert.match(APP_JS, /row\.issuesLabel/, 'the issues list must render the model\'s own label text — the parser does not distinguish "referenced" from "driving"');
 });
 
-test('#882: this PR (PR 2) does not draw them yet — anti-patterns, history and by-actor identifiers still do not exist in the page', () => {
+test('#882 R882-4: Anti-patterns draws real content — the catalogue, core before project, an unlistable scope said beside the other scope\'s real rows', () => {
+  assert.match(APP_JS, /function renderAntiPatterns\(/, 'R882-4: Anti-patterns must render real content, not a placeholder');
+  assert.match(APP_JS, /buildAntiPatternsModel\(/, 'renderAntiPatterns must build its rows from lib/anti-patterns-model.mjs, not recompute them inline');
+  assert.match(APP_JS, /\[forge: #\$\{n\}\]/, 'each cited issue must be stamped in the same [forge: #N] form sourceStamp uses for a real forge ref');
+});
+
+test('#882: this PR (PR 3) does not draw them yet — history and by-actor identifiers still do not exist in the page', () => {
   for (const [name, text] of [['app.js', APP_JS], ['index.html', INDEX_HTML]]) {
-    for (const forbidden of [/anti-?pattern/i, /\bby-?actor\b/i, /\bhistoryview\b/i]) {
-      assert.ok(!forbidden.test(text), `${name} matched ${forbidden} — those views are #882's later PRs, not PR 2's`);
+    for (const forbidden of [/\bby-?actor\b/i, /\bhistoryview\b/i]) {
+      assert.ok(!forbidden.test(text), `${name} matched ${forbidden} — those views are #882's later PRs, not PR 3's`);
     }
   }
 });
