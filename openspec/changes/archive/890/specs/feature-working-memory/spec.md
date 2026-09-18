@@ -5,7 +5,7 @@ feature checkpoint/resume behavior. `memory-gate` is unchanged.
 
 ## MODIFIED Requirements
 
-### Requirement REQ-S0-2: Pre-push Memory Guard
+### Requirement: REQ-S0-2: Pre-push Memory Guard
 
 The pre-push hook MUST NOT invoke `brain:memory:share`, inspect `.memory/` for
 feature-push transport, or require `.memory/` changes. It MUST preserve the
@@ -29,7 +29,7 @@ blocked when uncommitted memory changes remained.)
 - THEN it reports the repository-check failure and exits non-zero
 - AND the retired memory transport is not used as a substitute
 
-### Requirement REQ-S4-1: Pre-push Checkpoint Automation
+### Requirement: REQ-S4-1: Pre-push Checkpoint Automation
 
 The pre-push hook MUST call `feature-checkpoint <feature>` when a matching
 `openspec/changes/<feature>/` directory exists for the active branch. It MUST
