@@ -22,17 +22,39 @@ import { execFileSync } from 'node:child_process';
  * not this commit's own reference, so the anchor is load-bearing. */
 const CITED_REF = /\(#(\d+)\)\s*$/;
 
+/** git's `%ai` format (`YYYY-MM-DD HH:MM:SS +ZZZZ`) is NOT ISO 8601 — no
+ * spec requires a browser to parse it, and this module's output ships to
+ * the browser (D9). `%ai` is only ever produced here (`parseCommitLog`),
+ * so the normalization happens at the source, once, rather than asking
+ * every downstream reader (`lib/history-model.mjs`'s sort, included) to
+ * tolerate git's own shape. An input that doesn't match `%ai`'s exact
+ * shape passes through UNCHANGED — never mangled into something that
+ * merely looks fixed; a genuinely unparseable date is still that
+ * caller's own problem to state, not this function's to hide.
+ * (#1043 cold review correction 1) */
+const GIT_AI_DATE = /^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2}) ([+-]\d{2})(\d{2})$/;
+
+export function normalizeGitDate(date) {
+  if (typeof date !== 'string') return date;
+  const m = GIT_AI_DATE.exec(date);
+  if (!m) return date;
+  const [, ymd, hms, offHour, offMin] = m;
+  return `${ymd}T${hms}${offHour}:${offMin}`;
+}
+
 /** `git log --format='%H|%ai|%s'` output -> `{sha, date, subject, citedRef}`.
  * Splits on the first two `|` only — a subject itself may carry one.
- * `citedRef` is the bare number a trailing `(#N)` names — an issue XOR a
- * PR, whichever the number actually resolves to on the forge; never
- * asserted as one or the other here. */
+ * `date` is normalized from git's `%ai` shape to a real ISO instant
+ * (`normalizeGitDate`) before it ever leaves this module. `citedRef` is
+ * the bare number a trailing `(#N)` names — an issue XOR a PR, whichever
+ * the number actually resolves to on the forge; never asserted as one or
+ * the other here. */
 export function parseCommitLog(text) {
   return String(text ?? '').split('\n').filter(Boolean).map((line) => {
     const i1 = line.indexOf('|');
     const i2 = line.indexOf('|', i1 + 1);
     const sha = line.slice(0, i1);
-    const date = line.slice(i1 + 1, i2);
+    const date = normalizeGitDate(line.slice(i1 + 1, i2));
     const subject = line.slice(i2 + 1);
     const m = subject.match(CITED_REF);
     return { sha, date, subject, citedRef: m ? Number(m[1]) : null };

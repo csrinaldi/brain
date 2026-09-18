@@ -4,16 +4,16 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { gatherHistoryFacts, parseCommitLog, parseTagList } from './history.mjs';
+import { gatherHistoryFacts, parseCommitLog, parseTagList, normalizeGitDate } from './history.mjs';
 
 // ── the pure parsers ─────────────────────────────────────────────────────
 
-test('#882 R882-5: parseCommitLog reads sha|date|subject lines, citedRef parsed from a trailing (#N)', () => {
+test('#882 R882-5: parseCommitLog reads sha|date|subject lines, citedRef parsed from a trailing (#N), date normalized from git\'s %ai shape to ISO (#1043 correction 1)', () => {
   const text = 'aaa1111|2026-09-10 10:00:00 +0000|feat(ui): the History view (#123)\n'
     + 'bbb2222|2026-09-09 09:00:00 +0000|chore: tidy\n';
   assert.deepEqual(parseCommitLog(text), [
-    { sha: 'aaa1111', date: '2026-09-10 10:00:00 +0000', subject: 'feat(ui): the History view (#123)', citedRef: 123 },
-    { sha: 'bbb2222', date: '2026-09-09 09:00:00 +0000', subject: 'chore: tidy', citedRef: null },
+    { sha: 'aaa1111', date: '2026-09-10T10:00:00+00:00', subject: 'feat(ui): the History view (#123)', citedRef: 123 },
+    { sha: 'bbb2222', date: '2026-09-09T09:00:00+00:00', subject: 'chore: tidy', citedRef: null },
   ]);
 });
 
@@ -32,6 +32,26 @@ test('#882 fresh-context review of PR 4, blocker: a commit fact never carries a 
   assert.equal(commit.citedRef, 882);
   assert.ok(!('prNumber' in commit), 'no prNumber key — the field is citedRef');
   assert.ok(!JSON.stringify(commit).includes('PR'), 'no commit fact claims "PR" anywhere in its own text');
+});
+
+// ── #1043 cold review correction 1: git's %ai is not ISO 8601 ──────────────
+
+test('#1043 correction 1: normalizeGitDate turns the real %ai shape (YYYY-MM-DD HH:MM:SS +ZZZZ) into the ISO instant it names', () => {
+  assert.equal(normalizeGitDate('2026-09-10 10:00:00 +0200'), '2026-09-10T10:00:00+02:00');
+  assert.equal(Date.parse(normalizeGitDate('2026-09-10 10:00:00 +0200')), Date.parse('2026-09-10T08:00:00Z'), 'the normalized string parses to the correct UTC instant %ai named');
+});
+
+test('#1043 correction 1: normalizeGitDate passes through a string that does not match %ai\'s exact shape, unchanged — never mangling something that is not %ai', () => {
+  assert.equal(normalizeGitDate('x'), 'x');
+  assert.equal(normalizeGitDate('2026-09-10T00:00:00Z'), '2026-09-10T00:00:00Z');
+  assert.equal(normalizeGitDate(null), null);
+});
+
+test('#1043 correction 1: parseCommitLog normalizes each commit\'s %ai date to ISO, so the model never depends on a browser tolerating git\'s own non-ISO shape', () => {
+  const text = 'aaa1111|2026-09-10 10:00:00 +0200|feat(ui): x\n';
+  const [commit] = parseCommitLog(text);
+  assert.equal(commit.date, '2026-09-10T10:00:00+02:00');
+  assert.ok(!Number.isNaN(Date.parse(commit.date)), 'the normalized date must be parseable');
 });
 
 test('#882 R882-5: parseTagList reads name|date lines, newest-sorted order preserved as given', () => {
@@ -56,7 +76,7 @@ test('#882 R882-5: gatherHistoryFacts reads git log and git tag through its inje
   });
   assert.equal(facts.ok, true);
   assert.deepEqual(facts.value.commits, [
-    { sha: 'aaa1111', date: '2026-09-10 10:00:00 +0000', subject: 'feat(ui): the History view (#123)', citedRef: 123 },
+    { sha: 'aaa1111', date: '2026-09-10T10:00:00+00:00', subject: 'feat(ui): the History view (#123)', citedRef: 123 },
   ]);
   assert.deepEqual(facts.value.tags, [{ name: 'v1.4.0', date: '2026-09-01T00:00:00+00:00' }]);
   assert.ok(calls[0].startsWith('log '), 'git log runs first');
