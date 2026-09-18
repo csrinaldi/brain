@@ -14,11 +14,11 @@ test('#998 R998-2: the four modes, in a fixed order, each with a non-empty label
   }
 });
 
-test('#998 R998-2/R998-4/R998-5: map, sdd and reviews have content; governance names the PR that brings it', () => {
+test('#998 R998-2/R998-4/R998-5/#882 R882-1: map, sdd, reviews and governance have content — governance is a real mode with its own sub-router from #882 PR 1 on', () => {
   assert.equal(PLACEHOLDERS.map, null, 'map draws the canvas + drawer, not a placeholder');
   assert.equal(PLACEHOLDERS.sdd, null, 'sdd draws the seven-stage matrix (R998-4), not a placeholder');
   assert.equal(PLACEHOLDERS.reviews, null, 'reviews draws the timeline and verdict queue (R998-5), not a placeholder');
-  assert.match(PLACEHOLDERS.governance, /PR 7/);
+  assert.equal(PLACEHOLDERS.governance, null, '#882 R882-1: governance mounts its own sub-nav and sub-router from PR 1 on, even while some of its five sub-views still show their own said placeholder');
 });
 
 test('#998 R998-2: initialView starts on map', () => {
