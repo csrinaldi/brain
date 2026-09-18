@@ -6,7 +6,7 @@ unchanged.
 
 ## ADDED Requirements
 
-### Requirement REQ-S5-7: Automatic Memory Lane Shipping
+### Requirement: REQ-S5-7: Automatic Memory Lane Shipping
 
 The repository configuration MUST set `memory.lane.enabled` to `true`. Active
 operator guidance MUST direct durable capture to `brain:memory:save --issue N`
@@ -27,7 +27,7 @@ and delivery through the memory lane rather than through a feature PR.
 
 ## MODIFIED Requirements
 
-### Requirement REQ-S5-5: brain:next State-Machine Guidance
+### Requirement: REQ-S5-5: brain:next State-Machine Guidance
 
 `brain:next` MUST derive the current workflow state from the git branch, open PRs
 via the VCS adapter, and `brain.config.json`, then emit one next recommended
@@ -73,7 +73,7 @@ recommended `brain:save` when memory had not been materialized.)
 
 ## REMOVED Requirements
 
-### Requirement REQ-S5-3: brain:save Gates Session Summary + Memory
+### Requirement: REQ-S5-3: brain:save Gates Session Summary + Memory
 
 (Reason: `brain:save` is retired permanently after record-first capture and lane
 shipping; retaining the command would preserve a feature-PR transport path.)
