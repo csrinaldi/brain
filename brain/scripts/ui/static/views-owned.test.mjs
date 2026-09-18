@@ -175,11 +175,16 @@ test('#998 R998-6 T4/T6: the status bar shows the poll countdown from pollIndica
 // hand-rolled `el('span','source', …)` silently drops the "open ↗" chip the
 // moment a stamp carries an href — the defect the fresh review of PR 3 named
 // across both views.
-test('#882 R882-1: every governance row renders its stamp through renderSourceStamp, never a hand-built span', () => {
-  for (const fn of ['renderRoadmapRow', 'renderDecisionRow', 'renderAntiPatternRow']) {
+test('#882 R882-1/R882-5: every governance row renders its stamp through renderSourceStamp, never a hand-built span', () => {
+  // fresh-context review of PR 4, warning: renderHistoryEvent hand-built its
+  // own `el('span', 'source', ...)`, silently dropping the "open ↗" chip —
+  // the same defect the fresh review of PR 3 already named for Decisions
+  // and Anti-patterns. Pinned here alongside those three, not a fourth
+  // separate test, so the shared discipline stays in one place.
+  for (const [fn, param] of [['renderRoadmapRow', 'row'], ['renderDecisionRow', 'row'], ['renderAntiPatternRow', 'row'], ['renderHistoryEvent', 'event']]) {
     const m = APP_JS.match(new RegExp(`function ${fn}\\([^)]*\\) \\{[\\s\\S]*?\\n}\\n`));
     assert.ok(m, `${fn} must exist in app.js`);
-    assert.match(m[0], /renderSourceStamp\(row\.sourceStamp\)/, `${fn} must render its stamp through the shared helper`);
+    assert.match(m[0], new RegExp(`renderSourceStamp\\(${param}\\.sourceStamp\\)`), `${fn} must render its stamp through the shared helper`);
     assert.ok(!/el\('span', 'source'/.test(m[0]), `${fn} must not hand-build the stamp span — the helper owns the "open ↗" chip`);
   }
 });
