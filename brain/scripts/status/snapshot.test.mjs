@@ -88,7 +88,7 @@ test('#882 R882-5: history is wired from gatherHistoryFacts through buildSnapsho
   });
   assert.equal(s.history.ok, true);
   assert.deepEqual(s.history.value.commits, [
-    { sha: 'aaa1111', date: '2026-09-10 10:00:00 +0000', subject: 'feat(ui): the History view (#123)', prNumber: 123 },
+    { sha: 'aaa1111', date: '2026-09-10 10:00:00 +0000', subject: 'feat(ui): the History view (#123)', citedRef: 123 },
   ]);
   assert.deepEqual(s.history.value.tags, [{ name: 'v1.4.0', date: '2026-09-01T00:00:00+00:00' }]);
   assert.ok(calls.some((a) => a[0] === 'log'), 'buildSnapshot\'s own _run reaches gatherHistoryFacts, not a second git seam');
