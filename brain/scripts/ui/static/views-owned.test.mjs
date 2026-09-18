@@ -54,7 +54,7 @@ test('#998 R998-2/R998-4/R998-5/#882 R882-1: this PR owns exactly four modes; ma
 test('#882 R882-1/R882-2: the governance surface exists — the sub-nav is mounted, Roadmap draws real content', () => {
   assert.match(INDEX_HTML, /<nav id="governance-nav"/, 'R882-1: the governance sub-nav mount must exist');
   assert.match(APP_JS, /function renderRoadmap\(/, 'R882-2: Roadmap must render real content, not a placeholder');
-  assert.match(APP_JS, /GOVERNANCE_PLACEHOLDERS\[/, 'the four sub-views not yet built must still say their own placeholder, never an empty area');
+  assert.match(APP_JS, /GOVERNANCE_PLACEHOLDERS\[/, 'the sub-views not yet built must still say their own placeholder, never an empty area');
 });
 
 test('#882 cold review of PR 1 (blocker): a roadmap row applies the same sourceStamp helper the door uses — R882-1\'s row() is not a dead export', () => {
@@ -69,10 +69,16 @@ test('#882 cold review of PR #1037 (correction 1): a roadmap row says its own st
   assert.match(fnMatch[0], /row\.stateReason/, 'renderRoadmapRow must read row.stateReason, so roadmap-model.mjs\'s said reason for an unknown state actually reaches the screen');
 });
 
-test('#882: this PR does not draw them yet — decisions, anti-patterns, history and by-actor identifiers still do not exist in the page', () => {
+test('#882 R882-3: Decisions draws real content — the ADR table, drift warnings beside it, never a second drift computation', () => {
+  assert.match(APP_JS, /function renderDecisions\(/, 'R882-3: Decisions must render real content, not a placeholder');
+  assert.match(APP_JS, /buildDecisionsModel\(/, 'renderDecisions must build its rows from lib/decisions-model.mjs, not recompute them inline');
+  assert.match(APP_JS, /row\.issuesLabel/, 'the issues list must render the model\'s own label text — the parser does not distinguish "referenced" from "driving"');
+});
+
+test('#882: this PR (PR 2) does not draw them yet — anti-patterns, history and by-actor identifiers still do not exist in the page', () => {
   for (const [name, text] of [['app.js', APP_JS], ['index.html', INDEX_HTML]]) {
-    for (const forbidden of [/\bdecisionsview\b/i, /\badrs?\b/i, /anti-?pattern/i, /\bby-?actor\b/i, /\bhistoryview\b/i]) {
-      assert.ok(!forbidden.test(text), `${name} matched ${forbidden} — those views are #882's later PRs, not PR 1's`);
+    for (const forbidden of [/anti-?pattern/i, /\bby-?actor\b/i, /\bhistoryview\b/i]) {
+      assert.ok(!forbidden.test(text), `${name} matched ${forbidden} — those views are #882's later PRs, not PR 2's`);
     }
   }
 });
@@ -138,4 +144,17 @@ test('#998 R998-6 T4/T6: the status bar shows the poll countdown from pollIndica
   assert.match(APP_JS, /indicator\.countdown/, 'renderStatus must render pollIndicator\'s own countdown field');
   const dateNowCalls = [...APP_JS.matchAll(/Date\.now\(\)/g)].length;
   assert.equal(dateNowCalls, 1, 'app.js reads Date.now() exactly once (renderStatus\'s own nowMs) — every clock decision beyond that lives in lib/, driven by the injected now');
+});
+
+// #882 PR 2 merge onto PR 1's head: the shared stamp helper exists now, and a
+// hand-rolled `el('span','source', …)` silently drops the "open ↗" chip the
+// moment a stamp carries an href — the defect the fresh review of PR 3 named
+// across both views.
+test('#882 R882-1: every governance row renders its stamp through renderSourceStamp, never a hand-built span', () => {
+  for (const fn of ['renderRoadmapRow', 'renderDecisionRow']) {
+    const m = APP_JS.match(new RegExp(`function ${fn}\\([^)]*\\) \\{[\\s\\S]*?\\n}\\n`));
+    assert.ok(m, `${fn} must exist in app.js`);
+    assert.match(m[0], /renderSourceStamp\(row\.sourceStamp\)/, `${fn} must render its stamp through the shared helper`);
+    assert.ok(!/el\('span', 'source'/.test(m[0]), `${fn} must not hand-build the stamp span — the helper owns the "open ↗" chip`);
+  }
 });
