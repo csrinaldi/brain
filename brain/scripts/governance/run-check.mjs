@@ -1,14 +1,15 @@
 // run-check.mjs — thin git/IO runner wrapping governance's pure checks (design §4).
 //
-// Usage: node brain/scripts/governance/run-check.mjs <memory-gate|decision-gate|issue-link|diff-size>
+// Usage: node brain/scripts/governance/run-check.mjs <memory-gate|decision-gate|issue-link|diff-size|base-branch>
 //
 // All decision logic lives in the already-tested pure functions
-// (memoryPresence, adrPresence, issueLink, diffSize). This file is git/IO
-// glue only:
+// (memoryPresence, adrPresence, issueLink, diffSize, baseBranchRule). This
+// file is git/IO glue only:
 //   memory-gate    → memoryPresence(readRecordObservations(cwd))
 //   decision-gate  → adrPresence(git diff --name-only BASE_SHA...HEAD_SHA)
 //   issue-link     → issueLink(ctx.body) + referenced-issue approved-label check
 //   diff-size      → diffSize(git diff --numstat BASE_SHA...HEAD_SHA, ignoreList)
+//   base-branch    → baseBranchRule(linked issue + parent bodies, ctx branches) (#967)
 //
 // RECORDS-ONLY (C4/D4, REQ-C4-4): the #227 transitional chunks/records union
 // ("Retire the chunks-path once fully decommissioned — tracked for C4/D1") is
@@ -65,10 +66,12 @@ import { memoryRetrieval } from './checks/memory-retrieval.mjs';
 import { adrPresence } from './checks/adr-presence.mjs';
 import { issueLink } from './checks/issue-link.mjs';
 import { diffSize } from './checks/diff-size.mjs';
+import { baseBranchRule } from './checks/base-branch.mjs';
 import { LANE_BRANCH_RE, classifyLane } from './checks/lane.mjs';
 import { CLOSING_RE, CHAIN_RE } from './checks/issue-ref-patterns.mjs';
 import { resolveApprovedLabel } from './approved-label.mjs';
 import { readRecordObservations } from '../memory/lib/store.mjs';
+import { parseGraphBlock, declaredParent } from '../status/epic-graph.mjs';
 import { resultToExit } from './postmerge/exit-codes.mjs';
 import { loadContext, gitlabApiConfig } from '../vcs/ci-context.mjs';
 import { loadBrainConfig } from '../lib/brain-config.mjs';
@@ -468,6 +471,148 @@ async function runDiffSizeCheck(ctx, deps) {
 }
 
 /**
+ * base-branch case (REQUIRED at every tier including `lite` — ruling 1,
+ * design.md D9): a separate CI job, so it makes its own `fetchIssue` calls —
+ * one, or two when a parent exists (D10, R967-7 S6's bounded fan-out; never
+ * an `issueList`). The DECISION lives entirely in the pure `baseBranchRule`
+ * (checks/base-branch.mjs); this wrapper is IO glue — same split
+ * `runIssueLinkCheck` uses, same module-private `requiresClosingKeyword` and
+ * `extractIssueNumber` reused in place (D10: "the reuse is code, not calls").
+ *
+ * `requiresClosingKeyword(ctx) === null` doubles here as "is the base itself
+ * computable" — the base *is* the subject of this gate, so an uncomputable
+ * target/default branch can never be a pass (D10 step 2).
+ *
+ * @param {{body?: string|null, sourceBranch?: string|null, targetBranch?: string|null, defaultBranch?: string|null}} ctx
+ * @param {{fetchIssue?: Function}} deps
+ * @returns {Promise<{ pass: boolean, reason?: string, uncomputable?: boolean }>}
+ */
+async function runBaseBranchCheck(ctx, deps) {
+  // Step 1 — the wrapper's own self-diagnostic (mirrors runIssueLinkCheck).
+  if (typeof ctx.body !== 'string') {
+    return {
+      pass: false,
+      uncomputable: true,
+      reason: 'base-branch: PR body uncomputable (context API fetch failed) — failing closed',
+    };
+  }
+
+  // Step 2 — the base is the subject here; an unreadable target/default
+  // branch can never be a pass.
+  if (requiresClosingKeyword(ctx) === null) {
+    return {
+      pass: false,
+      uncomputable: true,
+      reason:
+        'base-branch: cannot determine target/default branch (ctx.targetBranch or ' +
+        'ctx.defaultBranch is null/uncomputable) — failing closed rather than assuming a base.',
+    };
+  }
+
+  const headBranch = ctx.sourceBranch ?? null;
+
+  // Step 3 — a tracker's own integration PR is now decided inside the
+  // predicate, from the LINKED ISSUE's own declaration (`kind: epic` +
+  // `tracker:` naming `headBranch`), not from `headBranch`'s spelling alone
+  // (PR D review round 2: the prior no-port-call shortcut here trusted any
+  // `feature/…`-named head as a tracker before a declaration was ever read,
+  // the same bug `checks/base-branch.mjs` closed in its own predicate — this
+  // wrapper duplicated it via a separate branch-name-only fast path). There
+  // is no cheaper read left to skip: whether `headBranch` really is the
+  // linked issue's declared tracker can only be known from that issue's
+  // body, so this case now falls straight through to the same fetch every
+  // other head takes below.
+
+  // Step 4 — no linked issue is the standing case (memory-lane / no-issue PRs).
+  // A `feature/…`-spelled head is not itself a decision (step 3 above: only
+  // the linked issue's own `tracker:` declaration can say a head IS a
+  // tracker), but with no issue linked there is no declaration left to read,
+  // so a `feature/…` head that targets anything but the default branch is
+  // evidence the gate cannot resolve either way — R967-7 makes a tracker's
+  // own integration PR unconditional, so this must fail closed and demand
+  // the issue link rather than pass silently (PR #1006 review round 2).
+  const closingRequired = requiresClosingKeyword(ctx);
+  const issueNumber = extractIssueNumber(ctx.body, closingRequired);
+  if (issueNumber == null) {
+    if (headBranch?.startsWith('feature/') && ctx.targetBranch !== ctx.defaultBranch) {
+      return {
+        pass: false,
+        uncomputable: true,
+        reason:
+          `base-branch: head "${headBranch}" looks like a tracker branch and targets ` +
+          `"${ctx.targetBranch}", not "${ctx.defaultBranch}" — link the issue whose epic ` +
+          'declares (or does not declare) this head as its tracker; without it the gate ' +
+          'cannot tell a tracker from a slice and fails closed',
+      };
+    }
+    return { pass: true };
+  }
+
+  // Step 5 — the linked issue, fail closed on a throw or an unreadable body.
+  const fetchIssue = deps.fetchIssue ?? defaultFetchIssue(ctx, deps);
+  let issue;
+  try {
+    issue = await fetchIssue(issueNumber);
+  } catch (err) {
+    return {
+      pass: false,
+      uncomputable: true,
+      reason: `base-branch: could not fetch issue #${issueNumber} — failing closed (uncomputable): ${err.message}`,
+    };
+  }
+  if (!issue || typeof issue.body !== 'string') {
+    return {
+      pass: false,
+      uncomputable: true,
+      reason: `base-branch: issue #${issueNumber} could not be read — failing closed (uncomputable)`,
+    };
+  }
+
+  // Step 6 — the linked issue's own declaration decides whether a second
+  // read is owed at all: no block, an unreadable block, the issue itself
+  // `kind: epic`, or no parent all resolve WITHOUT fetching a parent. The
+  // parent itself is read through `declaredParent` (PR #1006 review round 1,
+  // finding 1), not `issueBlock.parent` alone — `parseGraphBlock` only ever
+  // resolves a `brain-graph/1` block, so a parent declared only via prose
+  // (no block at all, `issueBlock` is `null`) was never fetched, and the
+  // exact slice-on-main case this gate exists for passed silently.
+  const issueBlock = parseGraphBlock(issue.body);
+  const dp = declaredParent(issue.body);
+  const needsParentRead = issueBlock?.ok !== false && issueBlock?.kind !== 'epic' && dp.parent !== null;
+  if (!needsParentRead) {
+    return baseBranchRule({
+      issueBody: issue.body,
+      targetBranch: ctx.targetBranch,
+      defaultBranch: ctx.defaultBranch,
+      headBranch,
+    });
+  }
+
+  // Step 7 — the parent, the one further read this gate ever makes.
+  const parentNumber = dp.parent;
+  let epic;
+  try {
+    epic = await fetchIssue(parentNumber);
+  } catch (err) {
+    return {
+      pass: false,
+      uncomputable: true,
+      reason: `base-branch: could not fetch parent #${parentNumber} — failing closed (uncomputable): ${err.message}`,
+    };
+  }
+  const epicBody = epic && typeof epic.body === 'string' ? epic.body : undefined;
+
+  // Step 8 — the final comparison lives in the predicate.
+  return baseBranchRule({
+    issueBody: issue.body,
+    epicBody,
+    targetBranch: ctx.targetBranch,
+    defaultBranch: ctx.defaultBranch,
+    headBranch,
+  });
+}
+
+/**
  * Declares, per subcommand, whether THIS FILE'S OWN HANDLER reaches the VCS
  * port (issue #535, Requirement 3/5). Read from source text — never imported
  * — by workflow-auth.mjs's `parseSubcommandManifest`, which recognizes this
@@ -485,6 +630,7 @@ export const SUBCOMMAND_PORT_REACH = {
   'decision-gate': false, // adrPresence — git diff only
   'issue-link': true,     // runIssueLinkCheck → defaultFetchIssue → getVcs
   'diff-size': false,     // runDiffSizeCheck — ctx.labels/diffNumstat only
+  'base-branch': true,    // runBaseBranchCheck → defaultFetchIssue → getVcs
 };
 
 /**
@@ -544,6 +690,9 @@ export async function runCheck(checkName, deps = {}) {
   }
   if (checkName === 'diff-size') {
     return runDiffSizeCheck(ctx, deps);
+  }
+  if (checkName === 'base-branch') {
+    return runBaseBranchCheck(ctx, deps);
   }
   throw new Error(`run-check.mjs: unknown check "${checkName}"`);
 }

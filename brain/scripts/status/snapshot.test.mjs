@@ -166,6 +166,65 @@ test('#879: with a port the graph carries roadmap per node, and one unreadable t
   assert.deepEqual(JSON.parse(JSON.stringify(s)), s);
 });
 
+test('#967 R967-3 S1/S2: the declared kind, tracker, parent and parentSource reach the snapshot, JSON-safe', async () => {
+  // A NEW case rather than an edit of the one above: changing #6's body in place
+  // would move that test's `tracks` deep-equal, an unrelated pin.
+  const issues = [
+    { number: 5, title: 'epic(ui): Brain UI', labels: ['status:approved'], assignees: [] },
+    { number: 6, title: 'six', labels: [], assignees: null },
+  ];
+  const epic = '```brain-graph/1\nkind: epic\ntrack: UI\ntracker: feature/brain-ui\nblocks: []\nneeds: []\nfiles: []\n```';
+  const slice = ['Parent: #5 (Brain UI) — slice 3, Wave B.', '',
+    '```brain-graph/1', 'track: UI', 'blocks: []', 'needs: []', 'files: []', '```'].join('\n');
+  const port = readOnlyPort({
+    issueList: async () => issues,
+    issueView: async ({ number }) => ({ body: number === 5 ? epic : slice, assignees: null }),
+    mrList: async () => [],
+    prReviews: async () => [],
+  });
+  const s = await buildSnapshot({ root: makeFixture(), now: NOW, vcs: port, project: 'o/r' });
+  const n5 = s.graph.value.nodes.find((n) => n.number === 5);
+  const n6 = s.graph.value.nodes.find((n) => n.number === 6);
+
+  assert.equal(n5.kind, 'epic');
+  assert.equal(n5.tracker, 'feature/brain-ui');
+  assert.equal(n5.parent, null);
+  assert.equal(n5.parentSource, null);
+  assert.equal(n6.kind, null, 'nothing is inferred from the epic(...) title on #5 either');
+  assert.equal(n6.tracker, null);
+  assert.equal(n6.parent, 5, 'read from the line-initial prose declaration');
+  assert.equal(n6.parentSource, 'prose', 'and the node says where it came from');
+  assert.deepEqual(s.graph.value.declarationDivergences, [], 'a clean pair says nothing');
+  // JSON-safe end to end, the four new fields included: a Map or an undefined among
+  // them would not survive this, and the verb's `--json` prints exactly this shape.
+  assert.deepEqual(JSON.parse(JSON.stringify(s)), s);
+});
+
+test('#967 R967-2 (PR D, review round 2): a slice body with Parent: prose and NO graph block at all still resolves its parent in the snapshot', async () => {
+  // A NEW case rather than an edit of the S1/S2 fixture above — #6 there already
+  // carries a `brain-graph/1` block (with no `parent:` key), so it exercises the
+  // block-exists prose fallback, not the no-block-at-all one this fix closes.
+  const issues = [
+    { number: 5, title: 'epic(ui): Brain UI', labels: ['status:approved'], assignees: [] },
+    { number: 7, title: 'seven', labels: [], assignees: null },
+  ];
+  const epic = '```brain-graph/1\nkind: epic\ntrack: UI\ntracker: feature/brain-ui\nblocks: []\nneeds: []\nfiles: []\n```';
+  const noBlockSlice = 'Parent: #5 (Brain UI) — slice 4, Wave B.';
+  const port = readOnlyPort({
+    issueList: async () => issues,
+    issueView: async ({ number }) => ({ body: number === 5 ? epic : noBlockSlice, assignees: null }),
+    mrList: async () => [],
+    prReviews: async () => [],
+  });
+  const s = await buildSnapshot({ root: makeFixture(), now: NOW, vcs: port, project: 'o/r' });
+  const n7 = s.graph.value.nodes.find((n) => n.number === 7);
+
+  assert.equal(n7.parent, 5, 'the prose parent resolves even with no brain-graph/1 block at all');
+  assert.equal(n7.parentSource, 'prose');
+  assert.equal(n7.declared, false, 'a prose-only parent is a relation, not a graph declaration');
+  assert.deepEqual(JSON.parse(JSON.stringify(s)), s);
+});
+
 test('#879: one issue body that cannot be read is a node that says so — never an issue that declared nothing', async () => {
   const issues = [
     { number: 5, title: 'five', labels: ['status:approved'], assignees: [] },
@@ -197,6 +256,21 @@ test('#879: one issue body that cannot be read is a node that says so — never 
   assert.match(n6.reason, /issue 6 timed out/);
   assert.equal(n6.status, UNREADABLE, 'not "unclassified" — nobody knows whether it declared a block');
   assert.equal(n6.declared, null);
+  // #967 R967-3 S3: an unreadable node carries none of the four declared fields —
+  // never a tracker or a parent it did not declare.
+  //
+  // PINNED, AND IT WAS ALREADY GREEN, labelled as what it is. `readForge` substitutes
+  // `body: ''` for a body it could not read, so the parse is `null` and all four
+  // arrive `null` before the reset ever runs. The reset names them anyway, for the
+  // same reason it already names `track`, `files` and `sources` — all three equally
+  // free today: it is the written guarantee, so that a later change to that
+  // substitution cannot silently turn a free property into a leaked declaration.
+  // No mutation of the reset alone can turn this assertion red, and saying so here
+  // is cheaper than a reviewer rediscovering it.
+  assert.equal(n6.kind, null);
+  assert.equal(n6.tracker, null);
+  assert.equal(n6.parent, null);
+  assert.equal(n6.parentSource, null);
   assert.deepEqual(failed.graph.value.issuesUnreadable, [{ number: 6, reason: 'issue 6 timed out' }]);
   assert.equal(n6.roadmap.value.state, PLANNED, 'state and PRs came from the list, so the roadmap is still a fact');
   // What the LIST said still counts: #5 declared it needs #6, and #6 is open.

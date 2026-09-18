@@ -232,6 +232,15 @@ export const GATE_MATRIX = Object.freeze({
     standard: Object.freeze({ policy: 'required', evidence: 'secret-scan' }),
     regulated: Object.freeze({ policy: 'required', evidence: 'secret-scan' }),
   }),
+  // #967 PR C (design.md D9, ruling 1) — REQUIRED at every tier INCLUDING
+  // `lite`, a deliberate exception to "lite only detects": `detection` would
+  // only have warned about the exact failure this gate exists to prevent
+  // (the #953 incident — a slice PR that reached `main` with the wrong base).
+  'base-branch': Object.freeze({
+    lite: Object.freeze({ policy: 'required', evidence: 'declared-tracker' }),
+    standard: Object.freeze({ policy: 'required', evidence: 'declared-tracker' }),
+    regulated: Object.freeze({ policy: 'required', evidence: 'declared-tracker' }),
+  }),
 });
 
 /**

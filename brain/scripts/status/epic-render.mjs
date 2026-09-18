@@ -84,7 +84,7 @@ export function renderMermaid({ nodes = [], edges = [] } = {}) {
  */
 export function renderSummary({
   nodes = [], tracks = new Map(),
-  divergences = [], relationsUnreadable = [], blocksUnreadable = [], foreignRelations = 0,
+  divergences = [], declarationDivergences = [], relationsUnreadable = [], blocksUnreadable = [], foreignRelations = 0,
 } = {}) {
   const by = (s) => nodes.filter(n => n.status === s).sort((a, b) => a.number - b.number);
   const ref = (ns) => (ns.length ? ns.map(n => `#${n.number}`).join(' ') : '—');
@@ -115,6 +115,13 @@ export function renderSummary({
   if (divergences.length) {
     const fmt = (d) => `#${d.from}→#${d.to} (sólo ${d.only === 'declared' ? 'declarado' : 'nativo'})`;
     lines.push(`**Las dos fuentes no coinciden** (${divergences.length}) — se toma la unión y se reporta la diferencia, ninguna pisa a la otra: ${divergences.map(fmt).join(' · ')}`);
+  }
+  // #967: lo que cada cuerpo declaró y no se pudo honrar. El valor ofensivo se cita
+  // tal como se escribió y la razón es el token del lector, no una glosa: un valor
+  // malformado se DICE, no se repara ni se descarta en silencio.
+  if (declarationDivergences.length) {
+    const fmt = (d) => `#${d.number} \`${d.key}\`=«${d.value}» (${d.reason})`;
+    lines.push(`**Declaraciones \`brain-graph/1\` no honradas** (${declarationDivergences.length}): ${declarationDivergences.map(fmt).join(' · ')} — se declararon y se dicen; ninguna se repara ni se descarta en silencio.`);
   }
   if (relationsUnreadable.length) {
     lines.push(`**Relaciones nativas ilegibles** en ${relationsUnreadable.length}: ${relationsUnreadable.map(n => `#${n}`).join(' ')} — no es «no tienen», es «no se pudieron leer».`);
