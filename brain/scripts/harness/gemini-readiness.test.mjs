@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { resolveGeminiRoute, checkGeminiReadiness } from './gemini-readiness.mjs';
+import { resolveGeminiRoute, checkGeminiReadiness, loadConfig } from './gemini-readiness.mjs';
 
 const FAKE_KEY = ['gemini', 'fixture', 'key'].join('-');
 
@@ -69,4 +69,9 @@ test('checkGeminiReadiness: gemini CLI and API key present returns ready: true',
   });
   assert.equal(result.ready, true);
   assert.match(result.diagnostic, /gemini \(API key\)/i);
+});
+
+test('loadConfig: returns empty object if brain.config.json is absent', () => {
+  const result = loadConfig('/tmp/nonexistent-dir-for-gemini-test-12345');
+  assert.deepEqual(result, {});
 });

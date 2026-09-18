@@ -4,7 +4,7 @@ import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
-import { runStage, deduplicateFindingsBlocks, GEMINI_MODEL } from './gemini.mjs';
+import { runStage, deduplicateFindingsBlocks, canonicalPath, GEMINI_MODEL } from './gemini.mjs';
 
 function makePaths(t) {
   const root = mkdtempSync(join(tmpdir(), 'gemini-backend-'));
@@ -243,4 +243,9 @@ test('runStage deduplicates identical findings in stdout when writing tempPath',
   assert.equal(result.ok, true);
   const written = readFileSync(paths.tempPath, 'utf8');
   assert.equal(written, block);
+});
+
+test('canonicalPath: correctly preserves first letter when resolving non-existent path directly under root', () => {
+  const resolved = canonicalPath('/nonexistent_test_dir_123');
+  assert.equal(resolved, '/nonexistent_test_dir_123');
 });

@@ -48,13 +48,13 @@ function tail(result, secrets, max = 300) {
   return ` — the engine last said: ${last.length > max ? `${last.slice(0, max)}…` : last}`;
 }
 
-function canonicalPath(path) {
+export function canonicalPath(path) {
   const unresolved = [];
   let current = resolve(path);
   while (!existsSync(current)) {
     const parent = dirname(current);
     if (parent === current) break;
-    unresolved.unshift(current.slice(parent.length + 1));
+    unresolved.unshift(relative(parent, current));
     current = parent;
   }
   const base = existsSync(current) ? realpathSync(current) : current;

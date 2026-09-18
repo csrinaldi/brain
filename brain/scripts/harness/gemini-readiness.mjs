@@ -76,8 +76,9 @@ export function checkGeminiReadiness(route, {
   };
 }
 
-function loadConfig(cwd) {
+export function loadConfig(cwd) {
   const file = join(cwd, 'brain.config.json');
+  if (!existsSync(file)) return {};
   try {
     return JSON.parse(readFileSync(file, 'utf8'));
   } catch (error) {
