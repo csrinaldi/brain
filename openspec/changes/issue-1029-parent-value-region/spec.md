@@ -22,3 +22,9 @@ said through `declarationDivergences`, never resolved by writing order.
 
 - **WHEN** a body's line reads `Parent: #878 — see #878 for the epic body.`
 - **THEN** the declared parent is 878: the second reference is prose, outside the value.
+
+- **WHEN** a body's line reads `Parent: #878, and #879`
+- **THEN** the two references are two values for one key and the same `parent-ambiguous` divergence is reported: a comma followed by `and` is a list join, not prose.
+
+- **WHEN** a body's line reads `Parent: #878` followed by a long run of spaces and then a word
+- **THEN** the declared parent is 878 and the scan is linear in the length of that run: each hop into a further reference MUST consume a separator of its own, never two optional whitespace runs around an optional token.

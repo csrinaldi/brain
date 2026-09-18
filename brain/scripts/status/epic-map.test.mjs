@@ -1284,3 +1284,24 @@ test('#1029: two references joined only by whitespace are still two values for o
   assert.equal(g.parent, null);
   assert.deepEqual(g.declarationDivergences, [{ key: 'parent', value: '878, 879', reason: 'parent-ambiguous' }]);
 });
+
+// #1030 cold review, correction: the value region's separator hops must not
+// backtrack quadratically. Measured on the first draft: a `Parent:` line with
+// a long run of spaces before a non-reference took 2.4s at 65k spaces and
+// 14.5s at 160k, against 0ms for the end-of-line pattern it replaced.
+test('#1029: a long run of spaces after the parent reference is scanned linearly, not quadratically', () => {
+  const body = ['Parent: #878' + ' '.repeat(120_000) + 'x', '', rawBlock('track: A')].join('\n');
+  const started = process.hrtime.bigint();
+  const g = parseGraphBlock(body);
+  const elapsedMs = Number(process.hrtime.bigint() - started) / 1e6;
+  assert.equal(g.parent, 878, 'the value is still the reference the key names');
+  assert.ok(elapsedMs < 1000, `the value region must not backtrack over the run (took ${Math.round(elapsedMs)}ms)`);
+});
+
+// #1030 cold review, editorial: a comma followed by "and" is how an English
+// list joins its last item; it was reading as one value plus prose.
+test('#1029: a list joined by ", and" is still two values for one key', () => {
+  const g = parseGraphBlock(['Parent: #878, and #879', '', rawBlock('track: A')].join('\n'));
+  assert.equal(g.parent, null);
+  assert.deepEqual(g.declarationDivergences, [{ key: 'parent', value: '878, 879', reason: 'parent-ambiguous' }]);
+});

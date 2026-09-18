@@ -150,11 +150,18 @@ const PARENT_KEY_GRAMMAR = new RegExp(String.raw`^${ISSUE_NUMBER}$`);
  * guess this requirement exists to refuse. A reference reached through anything else
  * — a bracket, a dash, a word — is prose about the work, not a second declaration.
  *
+ * Every hop into a further reference CONSUMES its own separator — punctuation, or
+ * whitespace, each optionally followed by `and` — and ends on a reference. Two
+ * adjacent optional whitespace runs around an optional token would let the engine
+ * split one run of spaces every way there is: measured on that first draft,
+ * `Parent: #1` followed by 65k spaces and a letter took 2.4s, and 160k took 14.5s,
+ * against 0ms for the end-of-line pattern this replaced (#1030 cold review).
+ *
  * `\b` is still what refuses `#878x`. `g` is for `matchAll`, which clones the regex
  * rather than advancing this one.
  */
 const PARENT_PROSE_VALUE = new RegExp(
-  String.raw`^Parent:[ \t]*(#${ISSUE_NUMBER}\b(?:[ \t]*(?:,|/|and)?[ \t]*#${ISSUE_NUMBER}\b)*)`,
+  String.raw`^Parent:[ \t]*(#${ISSUE_NUMBER}\b(?:(?:[ \t]*(?:,|/)[ \t]*(?:and[ \t]+)?|[ \t]+(?:and[ \t]+)?)#${ISSUE_NUMBER}\b)*)`,
   'gm',
 );
 

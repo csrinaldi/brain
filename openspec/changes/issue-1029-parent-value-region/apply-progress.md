@@ -13,3 +13,10 @@ A prose `Parent:` key declares the reference right after it, plus any further re
 RED: two new tests in `epic-map.test.mjs` (#998's real body shape → parent 878 with no divergence; `Parent: #878 #879` → still ambiguous) — 113/114 with the first red. GREEN: 115/115, and the targeted governance suites 279/279. Mutation: the value region restored to `.*$` (the old end-of-line rule) → the #998-shaped test red, reverted. Measured after the fix against the real body fetched from the forge: `{parent: 878, parentSource: 'prose', divergence: null}`.
 
 Full suite 5701/5701; `npm run brain:repo:check` green.
+
+## Cold review of PR #1030 (head 2f94c65f): APPROVE with two items, both fixed
+
+- correction: the first draft's hop, `[ \t]*(?:,|/|and)?[ \t]*#N`, put two optional whitespace runs around an optional token, so the engine could split one run of spaces every way there is. Measured by the reviewer: `Parent: #1` plus 65k spaces and a letter took 2430ms, 160k took 14488ms, against 0ms for the end-of-line pattern it replaced. Every hop now consumes a separator of its own — punctuation, or whitespace, each optionally followed by `and` — and ends on a reference. Measured after: 0ms at 1k and 20k spaces, 1ms at 120k. RED (a 120k-space body under a 1s bound) → GREEN; mutation: the ambiguous separator restored → that test red (it does not finish inside the bound), reverted.
+- editorial: `, and` is how an English list joins its last item and it read as one value plus prose. `Parent: #878, and #879` is now two values for one key, said as `parent-ambiguous`. RED → GREEN, covered by its own test.
+
+R1029-1 gains both scenarios. Targeted suites 283/283; full suite green.
