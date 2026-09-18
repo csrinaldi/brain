@@ -26,8 +26,10 @@
 //      the already-open fd is what still catches a pre-created file even if
 //      the directory check were somehow satisfied. Any failure routes
 //      through step 5's catch.
-//   3. `_spawn(execPath, [cli.mjs, 'ship', '--json'], { detached: true,
-//      stdio: ['ignore', fd, fd] })`, then `.unref()`, then `closeSync(fd)`.
+//   3. `_spawn(execPath, [cli.mjs, 'ship', '--json', '--invoker', 'hook'],
+//      { detached: true, stdio: ['ignore', fd, fd] })`, then `.unref()`,
+//      then `closeSync(fd)`. #1012: `--invoker hook` declares this caller
+//      to `cli.mjs ship`'s own invoker guard.
 //   4. Return / exit 0, ALWAYS — the child's own exit code is never read.
 //      `ship` exits 1 on a raced push; a session must not end red for that.
 //   5. Any throw along the way ⇒ exactly one stderr line, still exit 0.
@@ -175,7 +177,7 @@ export function shipOnSessionEnd({
       ensureTrustedFd(fd, uid, logPath);
       const child = _spawn(
         process.execPath,
-        [CLI_PATH, 'ship', '--json'],
+        [CLI_PATH, 'ship', '--json', '--invoker', 'hook'],
         {
           detached: true,
           stdio: ['ignore', fd, fd],

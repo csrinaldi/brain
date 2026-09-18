@@ -135,38 +135,44 @@ const ISSUE_NUMBER = String.raw`[1-9]\d*`;
 const PARENT_KEY_GRAMMAR = new RegExp(String.raw`^${ISSUE_NUMBER}$`);
 
 /**
- * A parent declared in PROSE: line-initial, exact case, trailing text free (#967 Q3).
- *
- * Measured against the corpus rather than sketched. #881's body reads
- * `Parent: #878 (Brain UI) — slice 3, Wave B.`, which a `$`-anchored pattern would
- * miss entirely — the one real body this reader exists for. And the mid-line shape
- * `Issue: #337 — M10 Phase 3. Parent: #335. Epic: #313.` must NOT match: there the
- * parent is not the epic, and reading it would mint an edge nobody declared.
- *
- * No leading-whitespace tolerance, for the same reason the fence tag is exact case:
- * a quoted or list-item `> Parent: #999` inside an example must declare nothing.
- * `Epic: #N` is NOT a synonym — #337 carries both, naming different issues.
+ * The VALUE a prose `Parent:` line declares — the run of issue references the key
+ * names, and nothing else on the line.
  *
  * IT IS MATCHED AGAINST PROSE, NOT AGAINST THE WHOLE BODY — see `outsideFences`.
  *
- * It matches to END OF LINE rather than stopping at the number, because the numbers
- * are counted afterwards by `ISSUE_REF` and THE REST OF THE LINE has to be counted
- * too: `Parent: #878, #879` is two values for one key, and a pattern that stopped at
- * the first one resolved it to 878 BY WRITING ORDER — the first-match-wins guess this
- * requirement already refuses when the two numbers are on two lines. `\b` is still
- * what refuses `#878x`, and it is checked before `.*` can swallow the `x`.
+ * The value ends where the prose begins (#1029). Until then this matched to END OF
+ * LINE and every `#N` on it was counted, so `Parent: #878 (Brain UI) — after slice 3
+ * (#881, merged as #970)` read as four competing declarations and the `base-branch`
+ * gate refused the PR that linked it (measured on #998, PR #1028). What the key
+ * declares is the reference right after it, plus any further reference joined to it
+ * as a LIST (`,`, `/`, `and`, or bare whitespace): `Parent: #878, #879` is still two
+ * values for one key, refused rather than resolved by writing order, which is the
+ * guess this requirement exists to refuse. A reference reached through anything else
+ * — a bracket, a dash, a word — is prose about the work, not a second declaration.
  *
- * `g` is for `matchAll`, which clones the regex rather than advancing this one.
+ * Every hop into a further reference CONSUMES its own separator — punctuation, or
+ * whitespace, each optionally followed by `and` — and ends on a reference. Two
+ * adjacent optional whitespace runs around an optional token would let the engine
+ * split one run of spaces every way there is: measured on that first draft,
+ * `Parent: #1` followed by 65k spaces and a letter took 2.4s, and 160k took 14.5s,
+ * against 0ms for the end-of-line pattern this replaced (#1030 cold review).
+ *
+ * `\b` is still what refuses `#878x`. `g` is for `matchAll`, which clones the regex
+ * rather than advancing this one.
  */
-const PARENT_PROSE_LINE = new RegExp(String.raw`^Parent:[ \t]*#${ISSUE_NUMBER}\b.*$`, 'gm');
+const PARENT_PROSE_VALUE = new RegExp(
+  String.raw`^Parent:[ \t]*(#${ISSUE_NUMBER}\b(?:(?:[ \t]*(?:,|/)[ \t]*(?:and[ \t]+)?|[ \t]+(?:and[ \t]+)?)#${ISSUE_NUMBER}\b)*)`,
+  'gm',
+);
 
 /**
- * Every issue reference on a line already known to declare one.
+ * Every issue reference inside a `Parent:` key's captured VALUE (never the whole
+ * line — #1029).
  *
  * The ambiguity rule is stated over the SET of numbers found, not over the count of
  * matches, so the one-line and two-line shapes cannot disagree about what counts as a
- * restatement: `Parent: #878 — see #878` reads 878, exactly as two `Parent: #878`
- * lines do.
+ * restatement: `Parent: #878 — see #878` reads 878 (the second reference is prose,
+ * outside the value), exactly as two `Parent: #878` lines do.
  */
 const ISSUE_REF = new RegExp(String.raw`#(${ISSUE_NUMBER})`, 'g');
 
@@ -236,8 +242,8 @@ function outsideFences(body, blocks, unterminated) {
 export function parentFromProse(body) {
   const { blocks, unterminated } = fencedBlocks(body);
   const prose = [...new Set(
-    [...outsideFences(body, blocks, unterminated).matchAll(PARENT_PROSE_LINE)]
-      .flatMap(m => [...m[0].matchAll(ISSUE_REF)].map(r => Number(r[1]))),
+    [...outsideFences(body, blocks, unterminated).matchAll(PARENT_PROSE_VALUE)]
+      .flatMap(m => [...m[1].matchAll(ISSUE_REF)].map(r => Number(r[1]))),
   )];
   // Ambiguity (more than one DISTINCT number) is reported by the caller that
   // has a `declarationDivergences` channel to say it in (`parseGraphBlock`);

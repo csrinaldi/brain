@@ -136,8 +136,27 @@ export function createUiServer({
     for (const client of clients) sendEvent(client, event, data);
   }
 
+  // #998 R998-6 T3: the served checkout's branch — `HEAD`'s symbolic ref on
+  // the SERVED ROOT's own git dir (never `-C` on a worktree, same posture as
+  // every other git call in this file). Read ONCE (memoized): every later
+  // `buildMeta()` call — one per status/sync frame — reuses the same value
+  // rather than shelling out to `git` on every broadcast. A detached HEAD
+  // (`git symbolic-ref` fails on purpose in that case) or any other read
+  // failure is a said reason, never a crash and never a blank header.
+  let servedBranch = null;
+  function resolveServedBranch() {
+    if (servedBranch !== null) return servedBranch;
+    try {
+      const branch = run('git', ['symbolic-ref', '--short', 'HEAD']).trim();
+      servedBranch = { ok: true, branch, source: { path: 'HEAD' } };
+    } catch (err) {
+      servedBranch = { ok: false, reason: err?.message ?? String(err), source: { path: 'HEAD' } };
+    }
+    return servedBranch;
+  }
+
   function buildMeta() {
-    return { project, watcher: watcher.state(), poller: poller.state() };
+    return { project, watcher: watcher.state(), poller: poller.state(), servedBranch: resolveServedBranch() };
   }
 
   // `_recomputeCurrent` is a test-only seam (default: the real recompute

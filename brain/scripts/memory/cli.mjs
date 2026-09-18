@@ -35,6 +35,7 @@ import {
   probeBinary,
   selectBackend,
 } from "./lib/backend-selection.mjs";
+import { decideShipInvoker } from "./lib/ship-invoker.mjs";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../../..");
 
@@ -465,14 +466,27 @@ function resolveVcsTestModulePath(vcsTestModule) {
 }
 
 if (op === "ship") {
+  const rest = process.argv.slice(3);
+
+  // #1012: the FIRST thing this op does. Refuse before any module load,
+  // credential read or VCS call unless the caller declares itself,
+  // independent of a test-runner process — see ship-invoker.mjs's own header
+  // comment for the full check order and why it exists (#1007). Stdout stays
+  // empty on refusal, even with --json — nothing below this block has run yet.
+  const invokerDecision = decideShipInvoker({ args: rest, env: process.env });
+  if (!invokerDecision.allowed) {
+    console.error(`memory/cli: ${await t(`memory.ship.${invokerDecision.key}`, invokerDecision.params)}`);
+    process.exit(1);
+  }
+
   const { shipLane } = await import("./lane/ship.mjs");
   const { MEMORY_TOKEN_ENV } = await import("../lib/credential-env.mjs");
   const { loadBrainConfig } = await import("../lib/brain-config.mjs");
   const memoryRoot = process.env.BRAIN_MEMORY_TEST_ROOT ?? repoRoot;
   const vcsTestModule = process.env.BRAIN_VCS_TEST_MODULE;
-  const rest = process.argv.slice(3);
   const dryRun = rest.includes("--dry-run");
   const asJson = rest.includes("--json");
+  const invoker = invokerDecision.invoker;
 
   try {
     // L1 (re-review): a set-but-blank BRAIN_VCS_TEST_MODULE is falsy, so the
@@ -513,7 +527,7 @@ if (op === "ship") {
     });
 
     if (asJson) {
-      console.log(JSON.stringify(result));
+      console.log(JSON.stringify({ ...result, invoker }));
     } else {
       console.log(`memory/cli: ${await t(`memory.ship.${shipOutcomeKey(result)}`, {
         ref: result.ref,

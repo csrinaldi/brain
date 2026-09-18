@@ -803,6 +803,14 @@ const STAGE_DRIFT_ALLOWLIST = [
     reason: 'REQ-L4-2′: the tier scopes what the GATE demands, never what the SCAFFOLD produces — ' +
       'TIER_PARAMS.artefacts is the tier-scoped GATE set, a DIFFERENT set from LIFECYCLE_STAGES on purpose.',
   },
+  {
+    path: 'brain/scripts/ui/lib/sdd-model.mjs',
+    reason: 'D9: this module is loaded directly by the browser (app.js -> ./lib/sdd-model.mjs), and ' +
+      'sdd-layout.mjs is not browser-safe (node:fs at module scope for its own exists()/listDir() ' +
+      'defaults) — importing it would break the page\'s whole module graph, not just the SDD tab\'s. ' +
+      'LIFECYCLE_ORDER is a genuine restatement of LIFECYCLE_STAGES, pinned equal to it by ' +
+      'sdd-model.test.mjs (a node:test file, never served to the browser).',
+  },
 ];
 
 function scanForRivalStageArray(root, { readdir = readdirSync, readFile = readFileSync, allowlist = STAGE_DRIFT_ALLOWLIST } = {}) {

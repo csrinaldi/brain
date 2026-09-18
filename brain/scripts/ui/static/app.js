@@ -5,7 +5,7 @@
 // `lib/*.mjs` module with its own `node:test`, because this file has no test
 // runner (no DOM harness exists in this repo, design D9). What CAN be
 // asserted about it is asserted by scan: `app-source-guard.test.mjs`,
-// `degradation-banner.test.mjs`, `no-management-views.test.mjs`.
+// `degradation-banner.test.mjs`, `views-owned.test.mjs`.
 //
 // Loaded as a plain ES module (`<script type="module" src="/app.js">`): the
 // imports below are resolved by the browser against `server.mjs`'s
@@ -14,22 +14,39 @@
 
 import { initialPageState, applyFrame, parseFrame, streamFailed, controlFailed, sectionOf, requestSequence } from './lib/frames.mjs';
 import { degradationBands, pollIndicator } from './lib/banners.mjs';
-import { buildCanvasModel } from './lib/canvas-model.mjs';
+import { buildLaneModel } from './lib/lane-model.mjs';
 import { buildDrawerModel } from './lib/drawer-model.mjs';
+import { buildSddModel, STAGE_VOCAB } from './lib/sdd-model.mjs';
+import { buildReviewTimeline } from './lib/review-timeline.mjs';
+import { sourceStamp } from './lib/provenance.mjs';
+import { MODES, PLACEHOLDERS, initialView, switchMode, keyAction } from './lib/view-model.mjs';
 
 const mounts = {
   status: document.getElementById('status'),
+  modes: document.getElementById('modes'),
   banners: document.getElementById('banners'),
   canvas: document.getElementById('canvas'),
   drawer: document.getElementById('drawer'),
 };
 
 let state = initialPageState();
-/** The issue whose node is activated; `null` until one is. The drawer follows it. */
+/** The current mode id (#998 R998-2). `map` is the only one with content this PR; the router says so for the rest. */
+let view = initialView();
+/** The issue whose node is activated; `null` until one is. The drawer follows it — `map` mode only. */
 let selectedIssue = null;
 /** The last `GET /api/change/<N>` body for the selected issue; `null` while it is still being read. */
 let changeView = null;
 let activeTab = 'spec';
+/**
+ * Which track lanes are collapsed (#998 R998-3): a local Set, the same kind
+ * of page-only interaction state `selectedIssue`/`activeTab` already are —
+ * not part of `frames.mjs`'s state, because it is never derived from a
+ * server frame. The `?` holding lane starts in it (lane-model.mjs's own
+ * default), so this page never has to decide that on its own.
+ */
+let collapsedTracks = new Set(['?']);
+/** The `?` holding lane's current page (#998 R998-3), 24 rows at a time. */
+let holdingPage = 0;
 
 // ── DOM helpers ────────────────────────────────────────────────────────────
 
@@ -79,9 +96,51 @@ function svgText(x, y, className, text) {
 
 function render() {
   renderStatus();
+  renderModes();
   renderBands();
-  renderCanvas();
-  renderDrawer();
+  renderContent();
+}
+
+/** The four mode buttons, drawn straight from `lib/view-model.mjs`'s table — no inline handler, no second copy of the labels. */
+function renderModes() {
+  clear(mounts.modes);
+  for (const mode of MODES) {
+    const button = el('button', null, mode.label);
+    button.type = 'button';
+    if (mode.id === view) button.setAttribute('aria-current', 'page');
+    button.addEventListener('click', () => switchToMode(mode.id));
+    mounts.modes.appendChild(button);
+  }
+}
+
+function switchToMode(mode) {
+  view = switchMode(view, mode);
+  render();
+}
+
+/** The router (#998 R998-2/R998-4/R998-5): `map` draws the canvas + drawer, `sdd` draws the seven-stage matrix, `reviews` draws the timeline + verdict queue; the rest say which PR brings their content. */
+function renderContent() {
+  if (view === 'map') {
+    renderLanes();
+    renderDrawer();
+    return;
+  }
+  if (view === 'sdd') {
+    renderSdd();
+    mounts.drawer.hidden = true;
+    clear(mounts.drawer);
+    return;
+  }
+  if (view === 'reviews') {
+    renderReviews();
+    mounts.drawer.hidden = true;
+    clear(mounts.drawer);
+    return;
+  }
+  clear(mounts.canvas);
+  mounts.canvas.appendChild(said(PLACEHOLDERS[view]));
+  mounts.drawer.hidden = true;
+  clear(mounts.drawer);
 }
 
 /** R881-9: one band per degraded thing, each one BESIDE the data, never instead of it. */
@@ -105,11 +164,26 @@ function renderBands() {
  * manual poll. Both controls POST — the only mutation verbs this server
  * accepts (R881-5).
  */
+/** The served branch, said with its own source stamp (#998 R998-6 T3) — a detached or unreadable HEAD is a said reason, never a blank header. */
+function renderServedBranch(servedBranch) {
+  const frag = document.createDocumentFragment();
+  if (servedBranch === null) {
+    frag.appendChild(el('span', 'served-branch', 'serving: unknown until the stream connects'));
+    return frag;
+  }
+  const text = servedBranch.ok ? `serving ${servedBranch.branch}` : `serving: unknown (${servedBranch.reason})`;
+  frag.appendChild(el('span', 'served-branch', text));
+  frag.appendChild(renderSourceStamp(sourceStamp(servedBranch.source)));
+  return frag;
+}
+
 function renderStatus() {
   const indicator = pollIndicator({ poller: state.meta?.poller ?? null, nowMs: Date.now() });
   clear(mounts.status);
   mounts.status.appendChild(el('strong', 'title', 'brain:ui'));
+  mounts.status.appendChild(renderServedBranch(state.meta?.servedBranch ?? null));
   mounts.status.appendChild(el('span', indicator.paused ? 'poll-indicator paused' : 'poll-indicator', indicator.text));
+  mounts.status.appendChild(el('span', 'poll-countdown', indicator.countdown));
   mounts.status.appendChild(el('span', 'spacer'));
 
   const toggle = el('button', 'poll-toggle', indicator.paused ? 'resume polling' : 'disable polling');
@@ -121,30 +195,79 @@ function renderStatus() {
 }
 
 /**
- * The DAG, drawn (R881-6/R881-7). Every decision — coordinates, colour, which
- * marks a node carries — was already made by `canvas-model.mjs`; this
- * function only turns that model into elements, which is why it has no
- * branches beyond "was the graph computable at all".
+ * The DAG, drawn as track lanes (#998 R998-3): one row per declared track —
+ * each with its OWN board, `layout()` run once per lane by `lane-model.mjs`
+ * — then the `?` holding lane last, as a paged list rather than a board
+ * (undeclared nodes carry no track to lay coordinates out against). Every
+ * decision — grouping, coordinates, colour, which marks a node carries —
+ * was already made by `lane-model.mjs`; this function only turns that model
+ * into elements.
  */
-function renderCanvas() {
-  const model = buildCanvasModel(sectionOf(state, 'graph'));
+function renderLanes() {
+  const model = buildLaneModel(sectionOf(state, 'graph'), { collapsedTracks, holdingPage });
   clear(mounts.canvas);
   if (!model.ok) {
     mounts.canvas.appendChild(said(`the graph could not be computed: ${model.reason}`));
     return;
   }
-  const { nodes, edges, droppedEdges, issuesUnreadable, unlinked, width, height } = model.value;
-  mounts.canvas.appendChild(el('p', 'canvas-summary', `${nodes.length} open issue(s), ${edges.length} edge(s), ${unlinked.length} in no edge`));
+  const { lanes, crossEdges, holding, droppedEdges, issuesUnreadable, edgeSummary } = model.value;
+  mounts.canvas.appendChild(el('p', 'canvas-summary', `${lanes.length} track lane(s), ${holding.count} in the \`?\` holding lane`));
+  mounts.canvas.appendChild(el('p', 'edge-summary', `edges: ${edgeSummary.laneInternal} in lanes, ${edgeSummary.holdingInternal} in the \`?\` holding lane, ${edgeSummary.crossLane} crossing lanes, ${edgeSummary.unknownNode} to an unknown node (${edgeSummary.total} total)`));
 
-  const board = svg('svg', { width: width + 4, height: height + 4, viewBox: `-2 -2 ${width + 4} ${height + 4}` });
-  for (const edge of edges) {
+  for (const lane of lanes) mounts.canvas.appendChild(renderLaneRow(lane));
+  mounts.canvas.appendChild(renderHoldingLane(holding));
+
+  // A cross-lane edge is never a line (R998-3: lanes have no shared
+  // coordinate space to draw one across) — it is said, like every other
+  // fact this page lists beside a drawing rather than folding into it.
+  if (crossEdges.length > 0) {
+    mounts.canvas.appendChild(saidList(`${crossEdges.length} edge(s) cross lanes:`, crossEdges.map((e) => `#${e.from} → #${e.to} crosses lanes ${e.fromTrack} → ${e.toTrack}`)));
+  }
+  if (droppedEdges.length > 0) {
+    mounts.canvas.appendChild(saidList(`${droppedEdges.length} edge(s) could not be drawn:`, droppedEdges.map((e) => `#${e.from} → #${e.to}: ${e.reason}`)));
+  }
+  if (issuesUnreadable.length > 0) {
+    mounts.canvas.appendChild(saidList(`${issuesUnreadable.length} issue body(ies) could not be read:`, issuesUnreadable.map((i) => `#${i.number}: ${i.reason}`)));
+  }
+}
+
+/** One state chip per code present in a lane's nodes, `mark word × n` — built from each node's own `state` (lane-model.mjs, state-vocab.mjs) so the header's summary cannot drift from the board below it. */
+function stateChips(nodes) {
+  const byCode = new Map();
+  for (const node of nodes) {
+    const entry = byCode.get(node.state.code) ?? { ...node.state, n: 0 };
+    entry.n += 1;
+    byCode.set(node.state.code, entry);
+  }
+  return [...byCode.values()];
+}
+
+function renderLaneHeader(label, count, nodes, toggle) {
+  const header = el('div', 'lane-header');
+  header.appendChild(el('strong', null, label));
+  header.appendChild(el('span', 'lane-count', String(count)));
+  const chips = el('span', 'lane-chips');
+  for (const chip of stateChips(nodes)) chips.appendChild(el('span', 'chip', `${chip.mark} ${chip.label} × ${chip.n}`));
+  header.appendChild(chips);
+  if (toggle) header.appendChild(toggle);
+  return header;
+}
+
+function renderLaneRow(lane) {
+  const row = el('div', 'lane-row');
+  row.appendChild(renderLaneHeader(lane.label, lane.count, lane.nodes, null));
+  row.appendChild(renderLaneBoard(lane));
+  return row;
+}
+
+/** One lane's own SVG board — the same drawing the single canvas used to be, now scoped to one lane's own coordinate space (R998-3). */
+function renderLaneBoard(lane) {
+  const board = svg('svg', { width: lane.width + 4, height: lane.height + 4, viewBox: `-2 -2 ${lane.width + 4} ${lane.height + 4}`, class: 'lane-board' });
+  for (const edge of lane.edges) {
     const [start, end] = edge.points;
-    // A reversed edge is a back edge the layout flipped to break a cycle: it
-    // is DRAWN dashed rather than hidden, because the cycle is a fact about
-    // the declarations, not a drawing problem (R881-7).
     board.appendChild(svg('line', { class: edge.reversed ? 'edge reversed' : 'edge', x1: start.x, y1: start.y, x2: end.x, y2: end.y }));
   }
-  for (const node of nodes) {
+  for (const node of lane.nodes) {
     const selected = node.number === selectedIssue ? ' selected' : '';
     const group = svg('g', { class: `node ${node.className}${selected}`, role: 'button', tabindex: 0, 'data-issue': node.number });
     group.appendChild(svg('rect', { x: node.x, y: node.y, width: node.w, height: node.h }));
@@ -157,14 +280,230 @@ function renderCanvas() {
     group.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') selectNode(node.number); });
     board.appendChild(group);
   }
-  mounts.canvas.appendChild(board);
+  return board;
+}
 
-  if (droppedEdges.length > 0) {
-    mounts.canvas.appendChild(saidList(`${droppedEdges.length} edge(s) could not be drawn:`, droppedEdges.map((e) => `#${e.from} → #${e.to}: ${e.reason}`)));
+/**
+ * The `?` holding lane (#998 R998-3): a header with a show/hide toggle
+ * (never a board), the fence an author pastes to leave it, and 24 rows at a
+ * time while expanded. A lane with zero nodes does not exist, but the
+ * holding lane always does — when empty, it says why instead of showing a
+ * blank expanded area.
+ */
+function renderHoldingLane(holding) {
+  const toggle = el('button', 'lane-toggle', holding.collapsed ? 'show' : 'hide');
+  toggle.type = 'button';
+  toggle.addEventListener('click', () => {
+    collapsedTracks = new Set(collapsedTracks);
+    if (collapsedTracks.has('?')) collapsedTracks.delete('?'); else collapsedTracks.add('?');
+    render();
+  });
+
+  const row = el('div', 'lane-row holding');
+  const header = renderLaneHeader('? — undeclared', holding.count, holding.nodes, toggle);
+  header.appendChild(el('span', 'lane-edge-count', `${holding.edgeCount} edge(s)`));
+  row.appendChild(header);
+  if (holding.collapsed) return row;
+
+  if (holding.note) {
+    row.appendChild(said(holding.note));
+    return row;
   }
-  if (issuesUnreadable.length > 0) {
-    mounts.canvas.appendChild(saidList(`${issuesUnreadable.length} issue body(ies) could not be read:`, issuesUnreadable.map((i) => `#${i.number}: ${i.reason}`)));
+
+  row.appendChild(el('p', 'note', "how to declare: paste this into the issue body, with your track's letter —"));
+  const pre = document.createElement('pre');
+  pre.textContent = holding.declareSnippet;
+  row.appendChild(pre);
+
+  const list = el('ul', 'holding-list');
+  for (const node of holding.nodes) list.appendChild(el('li', null, `${node.state.mark} ${node.label}`));
+  row.appendChild(list);
+
+  // Holding-holding edges are a board, drawn like a lane's own (#998 R998-3
+  // cold review): `lane-model.mjs` already laid it out over this same page's
+  // subgraph, this only turns that into elements, same as `renderLaneBoard`.
+  if (holding.edges.length > 0) {
+    row.appendChild(el('p', 'note', `${holding.edges.length} edge(s) on this page:`));
+    row.appendChild(renderLaneBoard({ nodes: holding.boardNodes, edges: holding.edges, width: holding.width, height: holding.height }));
   }
+
+  if (holding.totalPages > 1) row.appendChild(renderPager(holding));
+  return row;
+}
+
+function renderPager(holding) {
+  const pager = el('div', 'pager');
+  const prev = el('button', null, 'prev');
+  prev.type = 'button';
+  prev.disabled = holding.page === 0;
+  prev.addEventListener('click', () => { holdingPage = Math.max(0, holdingPage - 1); render(); });
+  const next = el('button', null, 'next');
+  next.type = 'button';
+  next.disabled = holding.page >= holding.totalPages - 1;
+  next.addEventListener('click', () => { holdingPage = Math.min(holding.totalPages - 1, holdingPage + 1); render(); });
+  pager.appendChild(prev);
+  pager.appendChild(el('span', null, `page ${holding.page + 1} / ${holding.totalPages}`));
+  pager.appendChild(next);
+  return pager;
+}
+
+/**
+ * The SDD view (#998 R998-4): one row per change — active first, archived
+ * under their own heading with their archive path — each with its seven
+ * stage cells, its task count, its slice plan (declared scope only, "PR
+ * state is not read" said in band per the ruling), and its named
+ * phase-order violations. `lib/sdd-model.mjs` decided all of it; this
+ * renders one loop over rows this page never re-derives.
+ */
+function renderSdd() {
+  const model = buildSddModel(sectionOf(state, 'changes'));
+  clear(mounts.canvas);
+  if (!model.ok) {
+    mounts.canvas.appendChild(said(`the SDD view could not be computed: ${model.reason}`));
+    return;
+  }
+  const { changes, totals, sliceNote } = model.value;
+  mounts.canvas.appendChild(el('p', 'canvas-summary', `${totals.active} active change(s), ${totals.archived} archived, ${totals.withViolations} with a phase-order violation`));
+  // Review of PR 4, fix 1: a not-issue-numbered archive/ dir is skipped from
+  // the rows above but never silently dropped — said here by name.
+  if (totals.archiveSkipped.count > 0) {
+    mounts.canvas.appendChild(said(`${totals.archiveSkipped.count} archive dir(s) skipped: ${totals.archiveSkipped.names.join(', ')}`));
+  }
+
+  for (const change of changes.filter((c) => !c.archived)) mounts.canvas.appendChild(renderSddRow(change, sliceNote));
+  const archived = changes.filter((c) => c.archived);
+  if (archived.length > 0) {
+    mounts.canvas.appendChild(el('h3', 'sdd-archived-heading', 'Archived'));
+    for (const change of archived) mounts.canvas.appendChild(renderSddRow(change, sliceNote));
+  }
+}
+
+/**
+ * Every value this row draws carries its own source underneath it (A3,
+ * extended to the SDD view by review of PR 4, fix 2): the row header already
+ * stamped `change.dir`; each stage cell, the tasks line, and each slice line
+ * now stamp their own `source` the same way, rather than trusting the
+ * header's stamp to stand in for the whole row.
+ */
+function renderSddRow(change, sliceNote) {
+  const row = el('div', 'sdd-row');
+  const header = el('div', 'sdd-row-header');
+  header.appendChild(el('strong', null, `#${change.issue}${change.slug ? ` ${change.slug}` : ''}`));
+  header.appendChild(el('span', 'source', sourceStamp({ path: change.dir }).label));
+  row.appendChild(header);
+
+  const matrix = el('div', 'sdd-matrix');
+  for (const stage of change.stages) {
+    const cell = el('span', `sdd-stage sdd-stage-${stage.state}`, `${STAGE_VOCAB[stage.state].mark} ${stage.id} `);
+    cell.appendChild(el('span', 'source', sourceStamp(stage.source).label));
+    matrix.appendChild(cell);
+  }
+  row.appendChild(matrix);
+
+  const t = change.tasks;
+  const tasksLine = el('p', 'sdd-tasks', `tasks: ${t.checked} checked, ${t.open} open${t.next ? ` — next: ${t.next}` : ''} `);
+  tasksLine.appendChild(el('span', 'source', sourceStamp(t.source).label));
+  row.appendChild(tasksLine);
+
+  if (change.slices.length > 0) {
+    const wrap = document.createElement('div');
+    wrap.appendChild(said(`slice plan (declared scope only — ${sliceNote}):`));
+    const list = el('ul', 'said-list');
+    for (const s of change.slices) {
+      const li = document.createElement('li');
+      li.appendChild(document.createTextNode(`slice ${s.n}: claims ${s.claims.join(', ')} → ${s.terminalPr} `));
+      li.appendChild(el('span', 'source', sourceStamp(s.source).label));
+      list.appendChild(li);
+    }
+    wrap.appendChild(list);
+    row.appendChild(wrap);
+  }
+  if (change.phaseOrder.violations.length > 0) {
+    row.appendChild(saidList(`${change.phaseOrder.violations.length} phase-order violation(s):`, change.phaseOrder.violations.map((v) => `${v.stage}: ${v.reason}`)));
+  }
+  return row;
+}
+
+/**
+ * The reviews view (#998 R998-5): the verdict queue first ("waiting on a
+ * verdict right now"), then one card per PR thread with its rounds oldest
+ * first — verdict word + ✓/✕ mark, findings grouped by severity. An
+ * unreadable thread is a row with its reason; a thread with no round says
+ * so. `lib/review-timeline.mjs` decided all of it; this renders one loop
+ * over rows this page never re-derives.
+ */
+function renderReviews() {
+  const model = buildReviewTimeline(sectionOf(state, 'reviews'), sectionOf(state, 'prs'));
+  clear(mounts.canvas);
+  if (!model.ok) {
+    mounts.canvas.appendChild(said(`the reviews timeline could not be computed: ${model.reason}`));
+    return;
+  }
+  const { threads, queue, totals } = model.value;
+  mounts.canvas.appendChild(el('p', 'canvas-summary', `${totals.threads} thread(s), ${totals.queue} waiting on a verdict, ${totals.unreadable} unreadable`));
+  mounts.canvas.appendChild(renderQueue(queue));
+  for (const thread of threads) mounts.canvas.appendChild(renderReviewThread(thread));
+}
+
+function renderQueue(queue) {
+  const wrap = el('div', 'review-queue');
+  wrap.appendChild(el('h3', null, 'waiting on a verdict right now'));
+  if (queue.length === 0) {
+    wrap.appendChild(said('nothing is waiting on a verdict'));
+    return wrap;
+  }
+  const list = el('ul', 'queue-list');
+  for (const item of queue) list.appendChild(el('li', null, `#${item.pr}${item.title ? ` ${item.title}` : ''} — ${item.wait}`));
+  wrap.appendChild(list);
+  return wrap;
+}
+
+function renderReviewThread(thread) {
+  const card = el('div', 'review-card');
+  card.appendChild(el('strong', null, `#${thread.pr}${thread.title ? ` ${thread.title}` : ''}`));
+  if (thread.unreadable) {
+    card.appendChild(said(`this thread could not be read: ${thread.unreadable.reason}`));
+    return card;
+  }
+  if (thread.noRound) {
+    card.appendChild(said('no round posted'));
+    return card;
+  }
+  for (const round of thread.rounds) card.appendChild(renderReviewRound(round));
+  return card;
+}
+
+/** One round: its verdict word + mark, its findings grouped by severity (#998 R998-5) — a finding's own `source` (its `file`/`line` anchor when the verdict carried one, per `verdict.mjs`'s `hasUsableAnchor`/REQ-405-2, measured on PR #1006) is rendered through the same `sourceStamp` helper as every other value on this page, beside its excerpt and cites. A malformed findings block (#1009 cold review finding 1) is checked BEFORE the empty case: `round.findings` is `[]` either way, so an unchecked order would render an unreadable block identically to a clean zero-findings round. STOP (#1009 cold review round 2) gets its own mark (⛔, distinct from ✓/✕) and says "human escalation" as text — reviewer-protocol.md §7's "a human must look now" state is never indistinguishable from an ordinary REVISE ✕. */
+function renderReviewRound(round) {
+  const row = el('div', 'review-round');
+  // `unknownVerdict` is review-timeline.mjs's own flag for a word outside the
+  // protocol enum (a typo, or a verdict a later protocol adds). Rendering it
+  // with the plain REVISE mark would make it byte-identical to a REVISE on
+  // screen, which is the silence R998-5 forbids (#1009 cold review round 3).
+  const mark = round.unknownVerdict ? '?' : round.verdict === 'APPROVE' ? '✓' : round.verdict === 'STOP' ? '⛔' : '✕';
+  const escalation = round.unknownVerdict
+    ? ' — unrecognised verdict word'
+    : round.verdict === 'STOP' ? ' — human escalation' : '';
+  row.appendChild(el('p', 'review-round-head', `${mark} ${round.verdict}${escalation} — rev ${round.rev}, ${round.author ?? 'unknown author'}${round.headSha7 ? `, head ${round.headSha7}` : ''}`));
+  if (round.malformed && round.malformed.length > 0) {
+    row.appendChild(said(`⚠ findings block unreadable: ${round.malformed.join(', ')}`));
+    return row;
+  }
+  if (round.findings.length === 0) {
+    row.appendChild(said('no findings'));
+    return row;
+  }
+  const chips = el('div', 'severity-chips');
+  for (const [severity, count] of Object.entries(round.bySeverity)) chips.appendChild(el('span', `severity-chip severity-${severity}`, `${severity} × ${count}`));
+  row.appendChild(chips);
+  for (const f of round.findings) {
+    const item = el('div', 'finding');
+    item.appendChild(el('strong', null, `${f.severity ?? 'unknown'} — ${f.id ?? '?'}`));
+    item.appendChild(renderSourceStamp(sourceStamp(f.source))); // #998 R998-5: a finding's own file:line (or the said fallback), through the same stamp helper the door uses
+    item.appendChild(el('p', null, `${f.evidenceExcerpt ?? ''}${f.cites ? ` (cites ${f.cites})` : ''}`));
+    row.appendChild(item);
+  }
+  return row;
 }
 
 /** Activating a node selects it and opens the drawer on its Spec tab (R881-8). */
@@ -183,8 +522,9 @@ function closeDrawer() {
 }
 
 /**
- * The inspector drawer: four tabs, one entry shape, and a source string under
- * every single value (A3). `drawer-model.mjs` decided all of it — including
+ * The inspector drawer: six tabs (#998 R998-6), one entry shape, and a
+ * source string under every single value (A3). `drawer-model.mjs` decided
+ * all of it — including
  * that a tab which failed keeps its reason and that an unreadable review
  * thread is still an entry — so this renders one loop, with no per-tab
  * branch to get wrong.
@@ -240,9 +580,27 @@ function renderEntry(item) {
   const done = item.done === undefined ? '' : item.done ? '[x] ' : '[ ] ';
   card.appendChild(el('strong', null, `${done}${item.title}`));
   if (item.detail) card.appendChild(el('p', null, item.detail));
-  card.appendChild(el('span', 'source', item.source)); // A3: the path or the URL, beside the value itself
+  card.appendChild(renderSourceStamp(item.sourceStamp)); // #998 R998-2: the design's stamp, beside the value itself (A3)
   for (const child of item.children ?? []) card.appendChild(renderEntry(child));
   return card;
+}
+
+/**
+ * The stamp's label, plus a chip when it carries an href (#998 R998-2). The
+ * href is the model's own guarantee (only an https forge/link URL ever gets
+ * one) — this function sets it as an attribute, never as markup.
+ */
+function renderSourceStamp(stamp) {
+  const wrap = document.createDocumentFragment();
+  wrap.appendChild(el('span', 'source', stamp.label));
+  if (stamp.href) {
+    const chip = el('a', 'source-chip', 'open ↗');
+    chip.setAttribute('href', stamp.href);
+    chip.setAttribute('rel', 'noopener noreferrer');
+    chip.setAttribute('target', '_blank');
+    wrap.appendChild(chip);
+  }
+  return wrap;
 }
 
 /** The drawer's own IO. A failed read is a reason IN the drawer, never a drawer that stays empty. */
@@ -264,6 +622,49 @@ async function loadChange(issue) {
   changeView = next;
   renderDrawer();
 }
+
+// ── keyboard (#998 R998-2) ───────────────────────────────────────────────
+
+/**
+ * The nodes `j`/`k` may traverse (#998 R998-3): every board node across
+ * every lane — never the `?` holding lane's paged rows, which carry no
+ * board coordinates to traverse in reading order. Each lane lays itself out
+ * in its OWN space starting at (0, 0) (lane-model.mjs), so two lanes' nodes
+ * cannot be compared by `y` directly; folding the lane's row position into
+ * a large offset keeps `keyAction`'s existing top-to-bottom sort correct
+ * across the stacked rows without teaching `view-model.mjs` anything about
+ * lanes.
+ */
+function drawnNodes() {
+  if (view !== 'map') return [];
+  const model = buildLaneModel(sectionOf(state, 'graph'), { collapsedTracks, holdingPage });
+  if (!model.ok) return [];
+  const nodes = [];
+  model.value.lanes.forEach((lane, laneIndex) => {
+    for (const node of lane.nodes) nodes.push({ ...node, y: laneIndex * 1e6 + node.y });
+  });
+  return nodes;
+}
+
+/**
+ * One listener for the whole page, routed entirely through
+ * `keyAction` — this function decides nothing, it only executes what that
+ * pure function returned. A Cmd/Ctrl/Alt combination or a keystroke while
+ * an input is focused is never this page's to take.
+ */
+function onKeyDown(event) {
+  if (event.metaKey || event.ctrlKey || event.altKey) return;
+  const target = event.target;
+  if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
+  const action = keyAction(view, event.key, { nodes: drawnNodes(), selected: selectedIssue });
+  if (action.type === 'none') return;
+  event.preventDefault();
+  if (action.type === 'mode') switchToMode(action.mode);
+  else if (action.type === 'select') selectNode(action.issue);
+  else if (action.type === 'close') closeDrawer();
+}
+
+document.addEventListener('keydown', onKeyDown);
 
 // ── the API: one REST read, then the stream ────────────────────────────────
 

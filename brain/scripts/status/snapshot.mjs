@@ -32,7 +32,7 @@ import { buildGraph } from './epic-graph.mjs';
 import { gatherReleaseFacts, releaseDebt } from './release-debt.mjs';
 import { readAdrIndex, homeAdrList, adrDrift } from './adr-index.mjs';
 import { readAntiPatterns } from './anti-patterns.mjs';
-import { CHANGES_ROOT, changeDir, parseChangeId, isGrandfathered, missingRequiredArtifacts, parseSliceScopes } from '../lib/sdd-layout.mjs';
+import { CHANGES_ROOT, changeDir, archivePath, ARTEFACT_FILE, parseChangeId, isGrandfathered, missingRequiredArtifacts, parseSliceScopes, hasSpec } from '../lib/sdd-layout.mjs';
 import { requiredArtifactsFor, resolveTier } from '../vcs/governance-tiers.mjs';
 import { parseVerdict } from '../review/lib/parse-verdict.mjs';
 import { readRecords, recordFilename } from '../memory/lib/store.mjs';
@@ -122,15 +122,65 @@ export function projectRecord(r) {
   return row;
 }
 
+const EVIDENCE_EXCERPT_LEN = 240;
+
+/**
+ * A finding's `line` scalar, as `parseVerdict` hands it back (always a
+ * string — `unyamlScalar` never coerces). Only a positive integer (>= 1)
+ * parses; anything else (absent, `'abc'`, `0`, a negative) is `null` — never
+ * a fabricated `0`, and never the raw string leaking through as a
+ * number-shaped surprise.
+ *
+ * `>= 1`, not `>= 0` (#1009 cold review finding 3): the emitter's own
+ * invariant is `hasUsableAnchor` (verdict.mjs), which never posts a finding
+ * with `line: 0` — only `line >= 1`. Accepting `0` here would let a line of
+ * `0` through as a real anchor, and `provenance.mjs`'s `sourceLabel`/
+ * `sourceStamp` use a falsy check (`source.line ? ... : ...`), so a `0`
+ * would silently render as `[repo: path]` with the line dropped rather than
+ * `[repo: path:0]` — a quiet loss, not a stated one.
+ */
+function parseFindingLine(raw) {
+  if (raw === undefined || raw === null) return null;
+  const n = Number(raw);
+  return Number.isInteger(n) && n >= 1 ? n : null;
+}
+
+/**
+ * A `parseVerdict` finding entry, shaped for the UI (#998 R998-5). `id`,
+ * `severity`, `evidence`, `cites` per the protocol prose; `file`/`line` ARE
+ * real emitted fields too — `verdict.mjs`'s `renderVerdict` posts them per
+ * finding when `hasUsableAnchor` holds (issue #405, REQ-405-2; measured on
+ * PR #1006's posted verdict, head e1c4aab3). An earlier revision of this
+ * function read the protocol prose as the schema and dropped them; the
+ * EMITTER is the schema, and `parseEntryList` (parse-verdict.mjs) is
+ * field-name-agnostic — it already captured whatever `renderVerdict` wrote,
+ * this function was just throwing the two fields away.
+ */
+function shapeFinding(f) {
+  return {
+    id: f?.id ?? null,
+    severity: f?.severity ?? null,
+    cites: f?.cites ?? null,
+    file: f?.file ?? null,
+    line: parseFindingLine(f?.line),
+    evidenceExcerpt: typeof f?.evidence === 'string' ? f.evidence.slice(0, EVIDENCE_EXCERPT_LEN) : '',
+  };
+}
+
 /** The verdicts a PR thread carries, oldest first, plus the latest one. */
 export function reviewRows(prNumber, reviews) {
   const verdicts = [];
   for (const rv of reviews) {
     const v = parseVerdict({ body: rv?.body, author: rv?.author ?? null });
     if (!v) continue;
+    const findingsArray = Array.isArray(v.findings) ? v.findings : [];
     verdicts.push({
       pr: prNumber, head_sha: v.head_sha, rev: v.rev, verdict: v.verdict, author: v.author,
-      findings: Array.isArray(v.findings) ? v.findings.length : null,
+      // The array, not the count (#998 R998-5) — `findingCount` is `null` when
+      // uncomputable (absent from the block, or `malformed` names it), and the
+      // genuine count when the block declared a readable list, `[]` included.
+      findings: findingsArray.map(shapeFinding),
+      findingCount: Array.isArray(v.findings) ? v.findings.length : null,
       malformed: v.malformed ?? [],
     });
   }
@@ -139,7 +189,71 @@ export function reviewRows(prNumber, reviews) {
 
 // ── readers: the edges, each degrading on its own ───────────────────────────
 
-/** Every non-archived change dir, read through the layout accessor (R879-8). */
+const APPLY_PROGRESS_FILE = 'apply-progress.md';
+const ARCHIVE_REPORT_FILE = 'archive-report.md';
+/** Canonical archive dir naming (archive-sweep.mjs, `archivePath(iid)`): the bare issue number, no `issue-` prefix and no slug — unlike the pre-convention dated-slug dirs this repo still carries, which are not eligible rows here (R998-4). */
+const ARCHIVE_ID_RE = /^\d+$/;
+
+/**
+ * The seven SDD stage artefacts' raw presence for one change dir (R998-4),
+ * independent of which subset the gate REQUIRES at this tier: the SDD view
+ * always draws all seven (spec.md's acceptance: "seven stages per change"),
+ * so presence is asked directly rather than filtered through
+ * `missingRequiredArtifacts`'s tier-scoped list.
+ *
+ * The spec slot delegates to `sdd-layout.mjs`'s own `hasSpec(changeId, ...)`
+ * rather than restating its flat/nested tolerance here a second time
+ * (editorial, cold review of #1008/PR6: an earlier revision of this comment
+ * claimed `hasSpec`'s own `changeDir(changeId)` path-building "does not go
+ * through" the `archive/<issue>` location — measured false, `changeDir(
+ * 'archive/<n>')` and `archivePath(<n>)` template the identical string from
+ * the same `CHANGES_ROOT` constant). `missingId` is exactly the identifier
+ * that relationship needs: `id` for an active row, the synthetic
+ * `archive/<name>` for an archived one — the same identifier
+ * `missingRequiredArtifacts` below already resolves a path from.
+ */
+function readArtefactPresence(dir, missingId, { exists, list }) {
+  return {
+    proposal: exists(`${dir}/proposal.md`),
+    spec: hasSpec(missingId, { exists, listDir: list }),
+    design: exists(`${dir}/design.md`),
+    tasks: exists(`${dir}/tasks.md`),
+    apply: exists(`${dir}/${APPLY_PROGRESS_FILE}`),
+    verify: exists(`${dir}/${ARTEFACT_FILE.verification}`),
+    archive: exists(`${dir}/${ARCHIVE_REPORT_FILE}`),
+  };
+}
+
+/** One change dir's row, active or archived (R998-4) — same shape either way. `missingId` is the identifier `missingRequiredArtifacts`/`isGrandfathered` resolve a path from; for an archived row it is a synthetic `archive/<name>`, which `changeDir()` templates into the exact `openspec/changes/archive/<name>` location (no second path-building rule needed). */
+function readOneChange({ id, missingId, dir, issue, slug, archived, artefacts, read, list, exists }) {
+  let tasksText = null;
+  try { tasksText = read(`${dir}/tasks.md`); } catch { tasksText = null; }
+  const tasks = deriveTasks({ tasksText, reason: `${dir}/tasks.md could not be read` });
+  const scopes = parseSliceScopes(tasksText ?? '');
+  return {
+    id, issue, slug, dir, archived,
+    grandfathered: archived ? false : isGrandfathered(id),
+    missing: Array.isArray(artefacts)
+      ? field(missingRequiredArtifacts(missingId, { artefacts, exists, listDir: list }))
+      : uncomputable(`the required artefact set could not be resolved: ${artefacts.reason}`),
+    artefacts: readArtefactPresence(dir, missingId, { exists, list }),
+    tasks: Object.fromEntries(tasks.fields),
+    sliceScopes: scopes.refusal ? uncomputable(scopes.refusal) : field(scopes.scopes),
+  };
+}
+
+/**
+ * Every change dir, active AND archived, read through the layout accessor
+ * (R879-8, extended R998-4): `openspec/changes/<issue-N-slug>` rows plus
+ * `openspec/changes/archive/<issue>` rows (`archived: true`), same shape.
+ * A missing `archive/` dir is "no archived changes" (a fact, checked via
+ * `exists` before ever listing it); any OTHER failure to list an existing
+ * `archive/` dir is this whole section's reason, same as a failure to list
+ * `CHANGES_ROOT` itself. A dir under `archive/` that is not a bare issue
+ * number (a pre-convention dated-slug dir, a named one) is never silently
+ * dropped: it is excluded from `value`'s rows AND named on the returned
+ * section's own `archiveSkipped` array (review of PR 4, fix 1).
+ */
 export function readChanges({ root, tier, _read, _list, _exists } = {}) {
   const read = _read ?? ((p) => readFileSync(join(root, p), 'utf8'));
   const list = _list ?? ((p) => readdirSync(join(root, p)));
@@ -153,24 +267,33 @@ export function readChanges({ root, tier, _read, _list, _exists } = {}) {
   let artefacts = null;
   try { artefacts = requiredArtifactsFor(tier); } catch (err) { artefacts = { reason: err.message }; }
 
-  const value = names.map((id) => {
+  const activeRows = names.map((id) => {
     const { iid, slug } = parseChangeId(id);
-    const dir = changeDir(id);
-    let tasksText = null;
-    try { tasksText = read(`${dir}/tasks.md`); } catch { tasksText = null; }
-    const tasks = deriveTasks({ tasksText, reason: `${dir}/tasks.md could not be read` });
-    const scopes = parseSliceScopes(tasksText ?? '');
-    return {
-      id, issue: Number(iid), slug, dir,
-      grandfathered: isGrandfathered(id),
-      missing: Array.isArray(artefacts)
-        ? field(missingRequiredArtifacts(id, { artefacts, exists, listDir: list }))
-        : uncomputable(`the required artefact set could not be resolved: ${artefacts.reason}`),
-      tasks: Object.fromEntries(tasks.fields),
-      sliceScopes: scopes.refusal ? uncomputable(scopes.refusal) : field(scopes.scopes),
-    };
+    return readOneChange({ id, missingId: id, dir: changeDir(id), issue: Number(iid), slug, archived: false, artefacts, read, list, exists });
   });
-  return field(value);
+
+  const archiveDirRel = `${CHANGES_ROOT}/archive`;
+  let archivedRows = [];
+  const archiveSkipped = [];
+  if (exists(archiveDirRel)) {
+    let allNames;
+    try {
+      allNames = list(archiveDirRel).sort();
+    } catch (err) {
+      return uncomputable(`${archiveDirRel} could not be listed: ${err?.message ?? err}`);
+    }
+    const archiveNames = [];
+    for (const n of allNames) {
+      if (ARCHIVE_ID_RE.test(n)) archiveNames.push(n);
+      else archiveSkipped.push({ name: n, reason: 'not an issue-numbered archive dir' });
+    }
+    archiveNames.sort((a, b) => Number(a) - Number(b));
+    archivedRows = archiveNames.map((name) =>
+      readOneChange({ id: name, missingId: `archive/${name}`, dir: archivePath(name), issue: Number(name), slug: null, archived: true, artefacts, read, list, exists })
+    );
+  }
+
+  return { ...field([...activeRows, ...archivedRows]), archiveSkipped };
 }
 
 /** Records, projected (D3), with the duplicate accounting the store reports. */
