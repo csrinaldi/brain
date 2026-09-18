@@ -143,7 +143,7 @@ push, a posted cold-review APPROVE.
 ## PR 5 — By actor (R882-6)
 
 ```brain-slice-scope/5
-{"slice": 5, "claims": ["R882-6"], "files": ["brain/scripts/ui/lib/actors-model.mjs", "brain/scripts/ui/static/app.js", "brain/scripts/ui/static/app.css", "brain/scripts/ui/static/views-owned.test.mjs"], "terminal_pr": "the tracker feature/issue-882-management-views -> main"}
+{"slice": 5, "claims": ["R882-6"], "files": ["brain/scripts/ui/lib/actors-model.mjs", "brain/scripts/ui/lib/governance-model.mjs", "brain/scripts/ui/lib/governance-model.test.mjs", "brain/scripts/ui/static/app.js", "brain/scripts/ui/static/app.css", "brain/scripts/ui/static/views-owned.test.mjs"], "note": "governance-model.mjs + its test added post-hoc: GOVERNANCE_PLACEHOLDERS lives only there, and T2 asks for nothing left unbuilt once all five sub-views are real.", "terminal_pr": "the tracker feature/issue-882-management-views -> main"}
 ```
 
 - [x] T1a. `lib/actors-model.test.mjs`: a record-only actor and a

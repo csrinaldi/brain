@@ -123,6 +123,20 @@ of `snapshot.mjs`'s existing sections plus one new `history` section.
   record's `actor` field are matched by string equality only; no identity
   resolution is attempted here.
 - Any write surface, any new gate, any score or ranking.
+- **A per-row source link for By actor's own row** — reconciled against
+  acceptance 2 ("every row links to its source: the ADR file, the issue, the
+  PR, the record id"). An actor is not a file, an issue or a PR: `actors` and
+  `reviews` are AGGREGATES, one row per actor over every record and review
+  round that actor touched, not a single sourced fact the way an ADR row or
+  an anti-pattern row is. The individual records and review rounds a By
+  actor row totals DO each carry their own source (every one of them is
+  already a real record file or a real forge review thread); the aggregate
+  row itself names none, because it is not itself one file, issue or PR to
+  point at. `lib/actors-model.mjs` states this honestly (`source: null`,
+  rendering through `sourceStamp` as "no source was recorded for this
+  value") rather than fabricating a source for the row — a per-actor drill-
+  down into its own contributing records/reviews, each keeping its real
+  source, is a follow-up this ticket does not build.
 
 ## Acceptance (issue #882's own words)
 

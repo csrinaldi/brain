@@ -1,8 +1,8 @@
 # Apply progress — issue-882: the management views
 
 Delivery: chained PRs on the tracker `feature/issue-882-management-views`
-(feature-branch-chain). This file tracks PR 1, PR 2, PR 3 and PR 4; PR 5 is
-not started.
+(feature-branch-chain). This file tracks PR 1 through PR 5 — the chain is
+complete.
 
 ## PR 1 — governance shell, shared row, Roadmap (R882-1, R882-2)
 
@@ -394,9 +394,137 @@ count beside the list is a plain count, never a rank.
 
 `git status --short` is empty after all commits — nothing left uncommitted.
 
-### Next
+## PR 5 — By actor (R882-6) — DONE (last slice of the chain)
 
-PR 5 (By actor, R882-6) is not started. It depends only on PR 1
-(`governance-model.mjs`'s sub-nav) — not on PR 2, PR 3 or PR 4's own view
-modules — and finalizes `views-owned.test.mjs`'s forbidden-identifier test
-into a full presence proof for the whole governance surface.
+Branch: `feat/issue-882-pr5-actors`, cut from PR 4's head `49765589`,
+worktree `/home/gandalf/IA/brain-issue-882-5`.
+
+### Commits
+
+```
+a4691e3e feat(ui): the By actor view's read model — records and reviews merged, no ranking (#882)
+b8f31a77 feat(ui): draw the By actor view, finalize the governance surface (#882)
+c0a88a27 chore(memory): record PR 5 of #882 — the By actor view
+```
+
+### TDD Cycle Evidence
+
+| Unit | RED | GREEN | Mutation (turns red, then reverted) |
+|---|---|---|---|
+| T1a/T1b — `lib/actors-model.mjs` | `ERR_MODULE_NOT_FOUND` on the new test file (9 tests) | 9/9 pass — `buildActorsModel(actorsSection, reviewsSection)` merges every `actorsSection.value` row with every distinct `reviewsSection.value[].verdicts` author `actorsSection` does not already list (a forge-only reviewer gets `actorKind: null` + the stated "kind unknown — no record carries it yet" reason); `reviewsPosted` is `{ok:true, count, caveat: REVIEWS_CAVEAT}` or `{ok:false, reason}` when `reviewsSection` itself is unreadable; `prsMerged` is always `PRS_MERGED_ABSENT`; rows sort by actor name only | `prsMerged` defaulted to `0` instead of `PRS_MERGED_ABSENT` → 1/9 red (exactly the "never a bare 0" test); reverted, 9/9 green |
+| T2 — `renderActors`/`renderActorRow` wiring + governance-surface finalization (`app.js`, `app.css`, `governance-model.mjs`, `views-owned.test.mjs`, `governance-model.test.mjs`) | Replaced `views-owned.test.mjs`'s "PR 4 does not draw by-actor yet" absence test with 4 new tests (Actors presence proof, "`renderActors` never re-sorts by volume," `GOVERNANCE_PLACEHOLDERS`-all-null finalization, a `sourceStamp`-chip scan across all 4 governance row renderers) → 4/21 red | Wired `renderActors`/`renderActorRow` into `app.js`'s `renderGovernance` sub-router; flipped `GOVERNANCE_PLACEHOLDERS` to all-`null`; rewrote `governance-model.test.mjs`'s placeholder test to assert that; added `.actor-*` CSS classes (existing `--line`/`--surface`/`--muted` tokens only, no new token) → 25/25 green across `views-owned.test.mjs` + `governance-model.test.mjs` | Reverted `renderActorRow` to the hand-built `el('span', 'source', row.sourceStamp.label)` instead of `renderSourceStamp` → 1/21 red (exactly the `sourceStamp`-chip scan test); reverted, 21/21 green (48/48 across the full relevant test set, including `source-guard.test.mjs`/`app-source-guard.test.mjs`/`tokens.test.mjs`/`actors-model.test.mjs`) |
+
+`renderActors`/`renderActorRow` themselves carry no RED/GREEN cycle of their
+own (N/A, D9 — no DOM harness): wiring only, verified by the text-level scan
+above (`views-owned.test.mjs`) plus a trace against `actors-model.test.mjs`'s
+already-covered contract, the same precedent PR 1-4's renderers used.
+
+### Focused test commands and results
+
+- `GIT_CONFIG_GLOBAL=/dev/null node --test brain/scripts/ui/lib/actors-model.test.mjs` — 9/9 pass
+- `GIT_CONFIG_GLOBAL=/dev/null node --test brain/scripts/ui/static/views-owned.test.mjs brain/scripts/ui/lib/governance-model.test.mjs` — 25/25 pass
+- `GIT_CONFIG_GLOBAL=/dev/null node --test brain/scripts/ui/static/views-owned.test.mjs brain/scripts/ui/lib/governance-model.test.mjs brain/scripts/ui/lib/actors-model.test.mjs brain/scripts/ui/static/app-source-guard.test.mjs brain/scripts/ui/lib/source-guard.test.mjs brain/scripts/ui/static/tokens.test.mjs` — 48/48 pass
+- `GIT_CONFIG_GLOBAL=/dev/null node --test brain/scripts/ui/static/tokens.test.mjs` — run before every commit, 4/4 pass each time
+- `npm run brain:repo:check` — run before every commit, clean each time
+
+### Full suite (run once, at the end)
+
+`GIT_CONFIG_GLOBAL=/dev/null npm test` — **5911 pass / 0 fail** (baseline
+after PR 4: 5899 pass / 0 fail; +12 new/net tests — 9 in
+`lib/actors-model.test.mjs`, +3 net in `views-owned.test.mjs` [+4 new, −1
+retired absence test], +0 net in `governance-model.test.mjs` [1 placeholder
+test rewritten, not added]).
+
+### Counted diff
+
+`git diff --numstat 49765589...HEAD | rg -v '\.test\.mjs|openspec/|\.memory/'
+| awk '{a+=$1; d+=$2} END {print a+d}'` → **194** (plan estimate ~260, budget
+1000).
+
+### Deviations from design
+
+1. **`lib/forge-url.mjs` and its `issueUrl`/`prUrl` exports do not exist on
+   this branch's lineage** (verified by a full-repo filename and symbol
+   search: `rg --files -g "forge-url*"` and `rg "issueUrl|prUrl|forge-url"`
+   across every `.mjs`, both empty). This is the same false reuse claim PR
+   4's apply prompt already carried and PR 4's own deviation note already
+   flagged; PR 5's apply prompt repeated it verbatim ("Reuse ...
+   `lib/forge-url.mjs`'s `issueUrl`/`prUrl`"). R882-6 does not require any
+   per-row forge URL for actors (a row names an actor, not a single PR or
+   issue) — `buildActorsModel` never needed one; `source: null` is the
+   honest shape for an aggregated row with no single file/URL of its own.
+   **The module exists on the tracker** (built by a later slice's own
+   forward-merge work); this branch's own lineage, cut from PR 4's head, does
+   not yet have it — the forward-merge from the tracker owes this branch the
+   switch to the real helper when it lands, not a fabricated one built here
+   ahead of it.
+2. **Fixed `renderDecisionRow`, `renderAntiPatternRow` and
+   `renderHistoryEvent` (PR 2/PR 3/PR 4's own renderers), not just this PR's
+   own `renderActorRow`.** All three hand-built their source span directly
+   (`el('span', 'source', row.sourceStamp.label)`) instead of calling the
+   existing `renderSourceStamp` helper. For Decisions/Anti-patterns this is
+   inert today (their `source` is always a repo path, and `provenance.mjs`'s
+   `sourceStamp` never sets `href` for a path) — but for History's merge
+   events, `sourceStamp` DOES carry an `href` (a real
+   `https://github.com/<project>/pull/<N>` URL) whenever the served project
+   is known, per PR 4's own `mergeSource`. The hand-built form has silently
+   dropped that link's "open ↗" chip since PR 4 landed. Fixed all three
+   alongside the new `renderActorRow` (defensible: `app.js` is a declared PR
+   5 file, and it is a live, verifiable bug against `renderSourceStamp`'s own
+   behaviour, not a stylistic preference), and added the scan test that
+   would have caught it in PR 4. Flagged explicitly here because it touches
+   code three OTHER slices' own tasks claimed finished.
+3. **Touched `governance-model.mjs` and `governance-model.test.mjs`, neither
+   of which is in PR 5's declared `brain-slice-scope/5` file list.**
+   `GOVERNANCE_PLACEHOLDERS` lives only in that file; T2 explicitly requires
+   it to have "nothing left unbuilt" once all five sub-views are real, which
+   cannot be satisfied without editing it. Flipped the four remaining
+   placeholder strings (`decisions`, `anti-patterns`, `history`, `actors`) to
+   `null`, and rewrote `governance-model.test.mjs`'s placeholder test
+   (previously asserting the four still had a non-empty said-sentence) to
+   assert all five are `null`. `tasks.md`'s own `brain-slice-scope/5` block
+   is amended in the same commit to name both files, with the reason inline.
+4. **`actorKindReason` is a field name neither `spec.md` nor `design.md`
+   names.** Spec only says `actorKind: null... stated as "kind unknown."`
+   Chose a sibling field (`actorKind: null, actorKindReason: '...'`) over
+   folding both into one `{ok:false, reason}` object, so `actorKind` itself
+   stays a bare value (matching spec's literal `actorKind: null` wording)
+   while the reason still rides beside it — a shape used nowhere else in
+   this ticket, but consistent with "every value carries its source."
+5. The `REVIEWS_CAVEAT` string omits the markdown backticks `spec.md`'s own
+   prose puts around `` `type: review` `` — rendered as plain prose, since
+   those are the spec DOCUMENT's own markdown formatting, not literal UI
+   text (no other stated string in this codebase, e.g. `ISSUES_LABEL`,
+   carries markdown syntax in its rendered form).
+6. `reviewsPosted`'s `ok:true` shape is `{ok:true, count, caveat}`, not a
+   bare number — the caveat rides on every row's own field (mirrors
+   `decisions-model.mjs`'s `issuesLabel`-on-every-row precedent) so the
+   renderer can never render a bare count with no scope said.
+
+### Out of scope (unchanged from tasks.md, now applies to the whole finished ticket)
+
+Tier 2 (#883), telemetry (#884), remote deployment (#885), "PRs merged" per
+actor as a real field (no VCS port verb backs it), a real dated roadmap (no
+start/due dates exist in the data), the forge identity binding (#981), any
+write surface, any new gate, any score or ranking, epic-grouping readiness
+beyond what `kind`/`parent` already declare, "per period" bucketing for By
+actor (`design.md` §8, item 3 — out of scope this pass).
+
+### Working tree
+
+`git status --short` is empty after the record-first memory commit and the
+`docs(sdd)` tick commit that follows it — nothing left uncommitted.
+
+### Chain status
+
+All five PRs (R882-1 through R882-6) are DONE. #882's own governance surface
+(roadmap, decisions, anti-patterns, history, by-actor) is fully built,
+five-for-five, on `feature/issue-882-management-views`. This branch
+(`feat/issue-882-pr5-actors`) is cut from PR 4's head and has NOT yet
+absorbed PR 4's own forward-merge onto the tracker (PR 4 is doing that merge
+now, per the coordinator) — when it lands, this branch does the same forward
+merge in turn. Next after that: the tracker's own PR into `main` (the
+"terminal_pr" every slice's `brain-slice-scope` block names), which — per
+this ticket's own `tasks.md` Review Workload Forecast — exceeds 400 lines by
+design and is expected to carry `size:exception`, the same posture
+`issue-998-ui-surface` used for its own tracker merge.
