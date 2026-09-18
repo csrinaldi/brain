@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-import { buildHistoryModel } from './history-model.mjs';
+import { buildHistoryModel, capNote } from './history-model.mjs';
 import { prUrl } from './forge-url.mjs';
 
 const SOURCE = readFileSync(fileURLToPath(new URL('./history-model.mjs', import.meta.url)), 'utf8');
@@ -202,6 +202,33 @@ test('#1043 correction 1: an event with a real, parseable date never carries a d
   });
   const [event] = model.value.events;
   assert.equal(event.dateUnparseable, null);
+});
+
+// ── #1043 cold review correction 2: the 200-commit cap must be SAID ────────
+
+test('#1043 correction 2: buildHistoryModel carries history.value.cap through onto model.value.cap, unmodified', () => {
+  const cap = { requested: 200, reached: true, total: 512 };
+  const model = buildHistoryModel({ history: { ok: true, value: { commits: [], tags: [], cap } }, adrs: { ok: true, value: [] } });
+  assert.deepEqual(model.value.cap, cap);
+});
+
+test('#1043 correction 2: with no cap info at all (an older fixture shape), model.value.cap is null and capNote says nothing — never a claim this code did not read', () => {
+  const model = buildHistoryModel({ history: { ok: true, value: { commits: [], tags: [] } }, adrs: { ok: true, value: [] } });
+  assert.equal(model.value.cap, null);
+  assert.equal(capNote(model.value.cap), null);
+});
+
+test('#1043 correction 2: capNote says "the newest N commits of TOTAL" when the total is known', () => {
+  assert.equal(capNote({ requested: 200, reached: true, total: 512 }), 'the newest 200 commits of 512');
+});
+
+test('#1043 correction 2: capNote says the weaker, still-honest phrasing when the total could not cheaply be read', () => {
+  assert.equal(capNote({ requested: 200, reached: true, total: null }), 'the newest 200 commits; older merges are not listed');
+});
+
+test('#1043 correction 2: capNote says nothing when the cap was not reached — never a partial-list claim under the cap', () => {
+  assert.equal(capNote({ requested: 200, reached: false, total: 3 }), null);
+  assert.equal(capNote(null), null);
 });
 
 // ── fresh-context review of PR 4, warning: one URL definition, not two ──────

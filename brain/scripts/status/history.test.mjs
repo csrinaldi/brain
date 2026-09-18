@@ -83,6 +83,50 @@ test('#882 R882-5: gatherHistoryFacts reads git log and git tag through its inje
   assert.ok(calls[1].startsWith('tag '), 'then git tag');
 });
 
+// ── #1043 cold review correction 2: the 200-commit cap must be SAID ────────
+
+test('#1043 correction 2: a fixture whose git log hits the 200-commit cap says so on facts.value.cap', () => {
+  const facts = gatherHistoryFacts({
+    root: '/nowhere',
+    _run: (file, args) => {
+      if (args[0] === 'log') {
+        const lines = Array.from({ length: 200 }, (_, i) => `sha${i}|2026-09-${String((i % 28) + 1).padStart(2, '0')} 00:00:00 +0000|commit ${i}`);
+        return `${lines.join('\n')}\n`;
+      }
+      if (args[0] === 'rev-list') return '512\n';
+      return '';
+    },
+  });
+  assert.equal(facts.ok, true);
+  assert.deepEqual(facts.value.cap, { requested: 200, reached: true, total: 512 });
+});
+
+test('#1043 correction 2: a fixture under the cap does NOT say the list is partial', () => {
+  const facts = gatherHistoryFacts({
+    root: '/nowhere',
+    _run: (file, args) => {
+      if (args[0] === 'log') return 'aaa1111|2026-09-10 10:00:00 +0000|feat(ui): x\n';
+      if (args[0] === 'rev-list') return '1\n';
+      return '';
+    },
+  });
+  assert.equal(facts.ok, true);
+  assert.equal(facts.value.cap.reached, false, 'a fixture with only 1 commit, well under the 200 cap, must not say the list is partial');
+});
+
+test('#1043 correction 2: a failing (or unreadable) total-count call degrades that ONE field only — the section still succeeds, total is honestly null rather than failing the whole read', () => {
+  const facts = gatherHistoryFacts({
+    root: '/nowhere',
+    _run: (file, args) => {
+      if (args[0] === 'log') return 'aaa1111|2026-09-10 10:00:00 +0000|feat(ui): x\n';
+      if (args[0] === 'rev-list') throw new Error('boom');
+      return '';
+    },
+  });
+  assert.equal(facts.ok, true, 'the total commit count is a best-effort extra, not load-bearing for the whole section');
+  assert.equal(facts.value.cap.total, null);
+});
+
 test('#882 R882-5: either git log or git tag throwing is this section\'s own {ok:false, reason} — never a partial list', () => {
   const logFails = gatherHistoryFacts({
     root: '/nowhere',

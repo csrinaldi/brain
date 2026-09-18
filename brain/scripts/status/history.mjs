@@ -70,18 +70,47 @@ export function parseTagList(text) {
   });
 }
 
+/** `git log -n 200` caps the merge history it reads — tags and ADR
+ * amendments are read uncapped, so a capped, unlabeled commit list can
+ * make an older release look like it landed with no merges around it,
+ * and nothing says why (#1043 cold review correction 2). `requested` is
+ * the cap this module asked git for; `reached` is whether the read
+ * actually came back at that cap (the only cheap signal available from
+ * the capped read alone — a repo with exactly `requested` commits reads
+ * as "reached" too, which is the honest over-approximation, never the
+ * under-approximation of silently claiming "not capped"); `total` is one
+ * more cheap git call through the SAME injected `_run` seam, best-effort
+ * only — a failing or unreadable count degrades to `null` (this section's
+ * own read still succeeds; the caller says "the newest 200 of N" when
+ * `total` is known, or the weaker-but-still-honest "the newest 200;
+ * older merges are not listed" when it is not, never a claimed total
+ * this code did not actually read). */
+const COMMIT_LOG_CAP = 200;
+
+function readTotalCommitCount(run) {
+  try {
+    const raw = run('git', ['rev-list', '--count', 'HEAD']);
+    const n = Number.parseInt(String(raw ?? '').trim(), 10);
+    return Number.isFinite(n) ? n : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
- * gatherHistoryFacts({root, _run}) -> {ok:true, value:{commits, tags}} |
+ * gatherHistoryFacts({root, _run}) -> {ok:true, value:{commits, tags, cap}} |
  * {ok:false, reason}. Never a thrown exception, and never a half-read
- * result folded into a "healthy" answer — either read failing fails the
- * whole section, said why.
+ * result folded into a "healthy" answer — either the `git log` or the
+ * `git tag` read failing fails the whole section, said why. The cap's own
+ * `total` sub-field is the one exception: a best-effort extra (see above),
+ * never load-bearing for the section's own {ok:true}.
  */
 export function gatherHistoryFacts({ root, _run } = {}) {
   const run = _run ?? ((file, args) => execFileSync(file, args, { cwd: root, encoding: 'utf8' }));
 
   let commits;
   try {
-    commits = parseCommitLog(run('git', ['log', '--format=%H|%ai|%s', '-n', '200']));
+    commits = parseCommitLog(run('git', ['log', '--format=%H|%ai|%s', '-n', String(COMMIT_LOG_CAP)]));
   } catch (err) {
     return { ok: false, reason: `git log could not be read: ${err?.message ?? err}` };
   }
@@ -93,5 +122,7 @@ export function gatherHistoryFacts({ root, _run } = {}) {
     return { ok: false, reason: `git tag could not be read: ${err?.message ?? err}` };
   }
 
-  return { ok: true, value: { commits, tags } };
+  const cap = { requested: COMMIT_LOG_CAP, reached: commits.length >= COMMIT_LOG_CAP, total: readTotalCommitCount(run) };
+
+  return { ok: true, value: { commits, tags, cap } };
 }

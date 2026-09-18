@@ -107,16 +107,37 @@ function sortEventsByDateDesc(events) {
  * @param {{history?: {ok:boolean, value?:{commits:Array, tags:Array}, reason?:string},
  *   adrs?: {ok:boolean, value?:Array, reason?:string}, project?: string|null}} opts
  */
+/**
+ * `capNote(cap)` -> the sentence a reader needs, or `null` when there is
+ * nothing to say.
+ *
+ * The commit list is capped (`gatherHistoryFacts` asks git for a fixed
+ * number) while tags and ADR amendments are not, so an older release can
+ * appear with no merges around it. Saying the cap is what keeps that from
+ * reading as "nothing happened" (#1043 cold review, correction 2).
+ *
+ * It never claims a total this code did not read: with `total` unknown the
+ * weaker sentence is the honest one, and under the cap there is nothing
+ * partial to warn about at all.
+ */
+export function capNote(cap) {
+  if (!cap || cap.reached !== true) return null;
+  const n = cap.requested;
+  return typeof cap.total === 'number'
+    ? `the newest ${n} commits of ${cap.total}`
+    : `the newest ${n} commits; older merges are not listed`;
+}
+
 export function buildHistoryModel({ history, adrs, project = null } = {}) {
   if (!history || typeof history !== 'object') return { ok: false, reason: 'no history section was given to History' };
   if (history.ok !== true) return { ok: false, reason: history.reason };
 
-  const { commits = [], tags = [] } = history.value ?? {};
+  const { commits = [], tags = [], cap = null } = history.value ?? {};
   const events = sortEventsByDateDesc([
     ...commits.map((c) => mergeEvent(c, project)),
     ...tags.map(releaseEvent),
     ...adrAmendedEvents(adrs),
   ]);
 
-  return { ok: true, value: { events } };
+  return { ok: true, value: { events, cap } };
 }

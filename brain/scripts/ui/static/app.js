@@ -21,7 +21,7 @@ import { buildReviewTimeline } from './lib/review-timeline.mjs';
 import { buildRoadmapModel } from './lib/roadmap-model.mjs';
 import { buildDecisionsModel } from './lib/decisions-model.mjs';
 import { buildAntiPatternsModel } from './lib/anti-patterns-model.mjs';
-import { buildHistoryModel } from './lib/history-model.mjs';
+import { buildHistoryModel, capNote } from './lib/history-model.mjs';
 import { buildActorsModel } from './lib/actors-model.mjs';
 import { sourceStamp } from './lib/provenance.mjs';
 import { MODES, PLACEHOLDERS, initialView, switchMode, keyAction } from './lib/view-model.mjs';
@@ -767,8 +767,11 @@ function renderHistory() {
     mounts.canvas.appendChild(said(`history could not be computed: ${model.reason}`));
     return;
   }
-  const { events } = model.value;
-  mounts.canvas.appendChild(el('p', 'canvas-summary', `${events.length} event(s)`));
+  const { events, cap } = model.value;
+  // The count alone would read as the whole history; the cap sentence is what
+  // keeps a capped commit list from looking like a quiet period (#1043).
+  const note = capNote(cap);
+  mounts.canvas.appendChild(el('p', 'canvas-summary', note ? `${events.length} event(s) — ${note}` : `${events.length} event(s)`));
   for (const event of events) mounts.canvas.appendChild(renderHistoryEvent(event));
   mounts.canvas.appendChild(renderHistoryReviewsLink());
 }
