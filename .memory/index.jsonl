@@ -84,6 +84,7 @@
 {"id":"rec-080d49f15acb84ec","ts":"2026-07-29T14:28:24Z","actor":"feat/issue-266-h0a-reviewer-protocol-doctrine","type":"decision","project":"brain","file":"2026-07-rec-080d49f15acb84ec.jsonl"}
 {"id":"rec-085ff36f97e13a7e","ts":"2026-08-02T14:38:09Z","actor":"claude/brain-architecture-review-qe5bo2","type":"session_summary","project":"brain","file":"2026-08-rec-085ff36f97e13a7e.jsonl"}
 {"id":"rec-0875784929f3223d","ts":"2026-06-26T15:48:10Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-06-rec-0875784929f3223d.jsonl"}
+{"id":"rec-08a4ddd1d6c86d3c","ts":"2026-09-18T15:15:26Z","actor":"@csrinaldi","type":"decision","project":"brain","issue":882,"file":"2026-09-rec-08a4ddd1d6c86d3c.jsonl"}
 {"id":"rec-08aaa1549be23af8","ts":"2026-08-18T10:45:24Z","actor":"@legacy","type":"discovery","project":"brain","file":"2026-08-rec-08aaa1549be23af8.jsonl"}
 {"id":"rec-08af988b8ee3fa33","ts":"2026-07-25T00:48:51Z","actor":"docs/p289-stack-merge-order-record","type":"pattern","project":"brain","file":"2026-07-rec-08af988b8ee3fa33.jsonl"}
 {"id":"rec-08e145d840db6c2f","ts":"2026-07-25T00:48:06Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-08e145d840db6c2f.jsonl"}
