@@ -161,9 +161,9 @@ push, a posted cold-review APPROVE.
       original forbidden-identifier test from `#998`'s
       `views-owned.test.mjs:55-61` is now fully inverted into a presence
       proof for the whole governance surface.
-- [ ] T3. `GIT_CONFIG_GLOBAL=/dev/null npm test` and
+- [x] T3. `GIT_CONFIG_GLOBAL=/dev/null npm test` and
       `npm run brain:repo:check` green; counted diff under 1000.
-- [ ] T4. `npm run memory:save -- "<title>" "<content>" --issue 882 --type decision`; stage only the record and `.memory/index.jsonl`.
+- [x] T4. `npm run memory:save -- "<title>" "<content>" --issue 882 --type decision`; stage only the record and `.memory/index.jsonl`.
 
 ## Review Workload Forecast
 
