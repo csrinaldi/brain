@@ -303,9 +303,10 @@ const TIER_PARAMS = Object.freeze({
     artefacts: Object.freeze(['proposal', 'spec', 'design', 'tasks']),
     honorSizeException: true,
     honorOverride: true,
-    // design §9 open risk: documented in AGENTS.md but read by no code path
-    // today (brain-metrics.mjs reports it raw, never subtracts it) — this
-    // flag is honest metadata, not yet load-bearing anywhere.
+    // #1024 (design item D7): load-bearing as of this change —
+    // `memory-gate-override.mjs#decideMemoryGateOverride` reads this flag to
+    // decide whether `skip:memory-gate` short-circuits REQ-L3-4's scoped
+    // check. `brain-metrics.mjs` reports the label raw/honored (design item 7).
     honorSkipMemoryGate: true,
     memoryAssertion: 'issue-linked-record',
   }),

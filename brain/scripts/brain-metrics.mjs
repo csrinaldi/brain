@@ -56,6 +56,7 @@ import {
   emptyRows, foldMerge, finalizeRows, PER_PERIOD_GATES, detectionJobNames,
 } from './lib/metrics-aggregate.mjs';
 import { leadTimeDays, selectApprovalEvent } from './lib/lead-time.mjs';
+import { decideMemoryGateOverride, toActorList } from './governance/memory-gate-override.mjs';
 import { computeMemoryCoverage } from './lib/memory-coverage.mjs';
 
 // ── Argument parsing (Phase 4.1) ─────────────────────────────────────────────
@@ -234,7 +235,7 @@ export function renderMarkdown({
     const header = [
       'Period', 'Changes Merged', 'Median Lead Time',
       'diff-size (raw/enf)', 'issue-link (raw/enf)', 'decision-gate (raw/enf)',
-      'size:exception', 'skip:memory-gate',
+      'size:exception', 'skip:memory-gate (raw/honored)',
       ...detectionJobs,
       'Uncomputable',
     ];
@@ -247,7 +248,7 @@ export function renderMarkdown({
         fmtLeadTime(row.medianLeadTimeDays),
         ...PER_PERIOD_GATES.map((g) => fmtGate(row.gates[g])),
         String(row.bypass.sizeException),
-        String(row.bypass.skipMemoryGate),
+        `${row.bypass.skipMemoryGate}/${row.bypass.skipMemoryGateHonored ?? 0}`,
         ...detectionJobs.map((j) => `${row.detection[j].pass}/${row.detection[j].fail}`),
         String(row.uncomputable),
       ];
@@ -277,6 +278,37 @@ export function renderMarkdown({
       lines.push('| Period | Author | size:exception |');
       lines.push('| --- | --- | --- |');
       for (const { period: p, author, count } of authorRows) {
+        lines.push(`| ${p} | ${author} | ${count} |`);
+      }
+    }
+  }
+
+  // #1024 (design item 7): skip:memory-gate's HONORED usage by author — the
+  // by-author table gains this label, mirroring size:exception's own
+  // breakdown above (never the RAW count, which is already the table's
+  // "skip:memory-gate (raw/honored)" column).
+  lines.push('');
+  lines.push('## skip:memory-gate usage by author (honored only)');
+  lines.push('');
+  if (rows.length === 0) {
+    lines.push('No `skip:memory-gate` usage honored in this window.');
+  } else {
+    const skipAuthorRows = [];
+    for (const row of rows) {
+      for (const [author, count] of Object.entries(row.skipMemoryGateByAuthor ?? {})) {
+        skipAuthorRows.push({ period: row.period, author, count });
+      }
+    }
+    if (skipAuthorRows.length === 0) {
+      lines.push('No `skip:memory-gate` usage honored in this window.');
+    } else {
+      skipAuthorRows.sort((a, b) => {
+        if (a.period !== b.period) return a.period < b.period ? -1 : 1;
+        return a.author.localeCompare(b.author);
+      });
+      lines.push('| Period | Author | skip:memory-gate (honored) |');
+      lines.push('| --- | --- | --- |');
+      for (const { period: p, author, count } of skipAuthorRows) {
         lines.push(`| ${p} | ${author} | ${count} |`);
       }
     }
@@ -317,9 +349,12 @@ export function renderMarkdown({
   }
   lines.push('');
   lines.push('Caveats: lead time is an ISSUE-APPROVAL proxy (last `status:approved` label-add '
-    + 'before merge), not PR-review-approval time. `skip:memory-gate` usage is documented '
-    + '(AGENTS.md, workflow-governance.md) but implemented nowhere — reported as label usage '
-    + 'only, never subtracted from an enforced count.');
+    + 'before merge), not PR-review-approval time. `skip:memory-gate` is honored at the '
+    + '"standard" tier only (refused at "regulated", not consulted at "lite" — #1024, '
+    + 'TIER_PARAMS.honorSkipMemoryGate) — the "raw/honored" column and the by-author table '
+    + 'above report `decideMemoryGateOverride`\'s resolved verdict at merge time, not a raw '
+    + 'label count subtracted from an enforced-failure total (`memory-gate` is not in '
+    + 'PER_PERIOD_GATES, design D3 — there is no enforced count to subtract from).');
 
   return lines.join('\n');
 }
@@ -358,6 +393,8 @@ export function renderJson({ rows, memGate, memCoverage }) {
       gates: row.gates,
       bypass: row.bypass,
       bypassByAuthor: row.bypassByAuthor ?? {},
+      // #1024 (design item 7): skip:memory-gate's HONORED usage by author.
+      skipMemoryGateByAuthor: row.skipMemoryGateByAuthor ?? {},
       detection: row.detection,
       uncomputable: row.uncomputable,
       memoryGatePassAtHead: memGate.pass,
@@ -432,7 +469,7 @@ async function evaluateOneMerge(sha, subject, ctx) {
   try {
     const parent1 = readMergeParent(sha, subject, cwd);
     const { numstat, changedFiles, addedFiles, body } = readMergeDiff(parent1, sha, cwd);
-    const { prLabels, prBody, prMetaError } = await fetchPrMeta(subject, vcs, config);
+    const { prLabels, prBody, prAuthor, prMetaError } = await fetchPrMeta(subject, vcs, config);
 
     // REQ-TS-1 (#474) — the PR fetch was attempted and FAILED. brain-audit
     // refuses to render a verdict for this merge and fails the window closed;
@@ -494,30 +531,51 @@ async function evaluateOneMerge(sha, subject, ctx) {
     // size:exception label-adding actor (spec's Bypass usage requirement —
     // "broken down by gate, by author, and by period"). The label lives on
     // the PR (prView, via fetchPrMeta above), not the linked issue, so this
-    // reads labelEvents for the PR NUMBER (GitHub PRs are issues under the
-    // hood — same events endpoint), never the issue number leadTimeCache
-    // keys on. `bypassAuthorCache` (keyed by PR number) mirrors
-    // leadTimeCache's "1 fetch per entity" de-dup discipline. Best-effort:
-    // an unresolvable actor is `null` here and folds into the "unknown"
-    // by-author bucket in lib/metrics-aggregate.mjs — never dropped.
+    // reads labelEvents for the PR/MR NUMBER (GitHub PRs are issues under the
+    // hood — same events endpoint; GitLab needs `kind: 'mr'`, #1024 —
+    // `prNumForRollup` is always the PR/MR's own number, never an issue's,
+    // so this call is unconditionally `kind: 'mr'`, unlike leadTimeCache's
+    // issue-number fetch below which stays the 'issue' default), never the
+    // issue number leadTimeCache keys on. `bypassAuthorCache` (keyed by PR
+    // number) mirrors leadTimeCache's "1 fetch per entity" de-dup discipline
+    // — and is now ALSO the source for skip:memory-gate's honored-applier
+    // read (#1024, design item 7), one fetch serving both labels. Best-
+    // effort: an unresolvable actor is `null` here and folds into the
+    // "unknown" by-author bucket in lib/metrics-aggregate.mjs — never dropped.
     let exceptionAuthor = null;
+    let skipMemoryGateHonoredAuthor = null;
+    const prLabelsArr = Array.isArray(prLabels) ? prLabels : [];
     if (
-      Array.isArray(prLabels) && prLabels.includes('size:exception')
+      (prLabelsArr.includes('size:exception') || prLabelsArr.includes('skip:memory-gate'))
       && prNumForRollup !== null && vcs && typeof vcs.labelEvents === 'function'
     ) {
       if (!bypassAuthorCache.has(prNumForRollup)) {
         bypassAuthorCache.set(
           prNumForRollup,
-          vcs.labelEvents({ project: config?.project?.slug, number: prNumForRollup }).catch(() => null),
+          vcs.labelEvents({ project: config?.project?.slug, number: prNumForRollup, kind: 'mr' }).catch(() => null),
         );
       }
       const events = await bypassAuthorCache.get(prNumForRollup);
-      const exceptionEvent = selectApprovalEvent(events, 'size:exception', mergedAt);
-      exceptionAuthor = exceptionEvent?.actor?.login ?? null;
+      if (prLabelsArr.includes('size:exception')) {
+        const exceptionEvent = selectApprovalEvent(events, 'size:exception', mergedAt);
+        exceptionAuthor = exceptionEvent?.actor?.login ?? null;
+      }
+      if (prLabelsArr.includes('skip:memory-gate')) {
+        const decision = decideMemoryGateOverride({
+          labels: prLabelsArr,
+          labelEvents: events,
+          prAuthor,
+          tier,
+          reviewActors: toActorList(config?.governance?.reviewActors),
+          agentActors: toActorList(config?.governance?.agentActors),
+        });
+        skipMemoryGateHonoredAuthor = decision.honored ? decision.applier ?? null : null;
+      }
     }
 
     return {
-      sha, mergedAt, prLabels, leadTimeDays: leadTime, kind: 'evaluated', evalRec, detection, exceptionAuthor, period,
+      sha, mergedAt, prLabels, leadTimeDays: leadTime, kind: 'evaluated', evalRec, detection,
+      exceptionAuthor, skipMemoryGateHonoredAuthor, period,
     };
   } catch {
     // Any git-plumbing throw (missing parent, diff read failure, reverter-

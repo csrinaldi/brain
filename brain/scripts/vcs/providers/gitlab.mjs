@@ -395,18 +395,27 @@ export async function prStatusRollup({ project, number, apiBase, token, proxyUrl
  * failure is caught and normalized to `null` (uncomputable) — never a
  * fabricated `[]`.
  *
- * @param {{ project: string, number: number, apiBase?: string, token?: string, proxyUrl?: string|null, fetchImpl?: Function }} params
+ * `kind` (issue #1024, design item 7): `'issue'` (default, UNCHANGED) reads
+ * `issues/:iid/resource_label_events`; `'mr'` reads
+ * `merge_requests/:iid/resource_label_events` instead — the memory-gate
+ * override's applier read (`decideMemoryGateOverride`) needs the MR's OWN
+ * label events, and `brain-metrics.mjs`'s `size:exception`/`skip:memory-gate`
+ * by-author reporting reads label events for a GitLab MR number today via the
+ * issues path, which is the same bug this fixes at the call site.
+ *
+ * @param {{ project: string, number: number, kind?: 'issue'|'mr', apiBase?: string, token?: string, proxyUrl?: string|null, fetchImpl?: Function }} params
  * @returns {Promise<Array<{ actor: { login: string }, action: 'add'|'remove', label: string, at: string }>|null>}
  */
-export async function labelEvents({ project, number, apiBase, token, proxyUrl, fetchImpl } = {}) {
+export async function labelEvents({ project, number, kind = 'issue', apiBase, token, proxyUrl, fetchImpl } = {}) {
   const encoded = encodeURIComponent(project);
+  const resource = kind === 'mr' ? 'merge_requests' : 'issues';
   let events;
   try {
     events = await gitlabApiFetch({
       apiBase: apiBase ?? 'https://gitlab.com/api/v4',
       token: glToken(token),
       proxyUrl: proxyUrl ?? null,
-      path: `projects/${encoded}/issues/${number}/resource_label_events`,
+      path: `projects/${encoded}/${resource}/${number}/resource_label_events`,
       fetchImpl,
     });
   } catch {

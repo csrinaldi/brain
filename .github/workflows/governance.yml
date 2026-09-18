@@ -152,11 +152,28 @@ jobs:
 
       - name: memory-gate (session summary captured)
         env:
+          # VCS_TOKEN, not GH_TOKEN (#1024, mirrors issue-link:61-71): reaches
+          # the server through the port (prView, labelEvents) via ci-context's
+          # PR_NUMBER-gated bootstrap, which resolves brain's one neutral
+          # credential.
+          VCS_TOKEN: ${{ github.token }}
+          # PR_NUMBER/PR_BODY let ci-context.mjs's loadContext() populate
+          # ctx.body (issue scoping, REQ-L3-4) and ctx.labels (the
+          # skip:memory-gate override, REQ-L3-5) from the SAME prView call.
+          # Without these the job's context was structurally uncomputable
+          # (both null), so memoryRetrieval() never ran in CI — #1024's gap.
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_BODY: ${{ github.event.pull_request.body }}
           # Repo metadata (never trigger identity — ADR-0016 ruling 1), mapped
-          # so ci-context.mjs's loadContext() can compute ctx.defaultBranch
-          # (issue #231 A2 phase 2 addendum). memory-gate itself does not
-          # consume this field today; every run-check.mjs-invoking job is wired
-          # uniformly so the seam degrades to null only when truly uncomputable.
+          # so ci-context.mjs's loadContext() can compute ctx.defaultBranch.
+          # NOT fetch-depth: 0 here (D1): the scoped check's own targeted
+          # `git fetch origin <default>` reads the default branch's
+          # `.memory/records/` without a checkout, so the union read works on
+          # GitHub's depth-1 checkout and covers GitLab's shallow clone too,
+          # with no YAML edit needed on either side. It also lets a manual
+          # re-run heal a PR after the record lands on its own lane — a
+          # frozen `fetch-depth: 0` checkout would not move until the next
+          # event.
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: node brain/scripts/governance/run-check.mjs memory-gate
 

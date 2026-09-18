@@ -97,13 +97,24 @@ function newRow(period, detectionJobs = DETECTION_JOB_NAMES) {
     uncomputable: 0,
     leadTimes: [],
     gates: Object.fromEntries(PER_PERIOD_GATES.map((g) => [g, { raw: 0, enforced: 0 }])),
-    bypass: { sizeException: 0, skipMemoryGate: 0 },
+    // skip:memory-gate is raw/honored as of #1024 (design item 7):
+    // `skipMemoryGate` is the RAW label count (unchanged); `skipMemoryGateHonored`
+    // counts only the merges where `decideMemoryGateOverride` (resolved by
+    // the caller, brain-metrics.mjs, and threaded in as
+    // `m.skipMemoryGateHonoredAuthor`) actually honored the override.
+    // `memory-gate` is not in PER_PERIOD_GATES, so there is no enforced-
+    // failure count to subtract an honored skip from.
+    bypass: { sizeException: 0, skipMemoryGate: 0, skipMemoryGateHonored: 0 },
     // size:exception usage broken down by author (spec's Bypass usage
     // reporting requirement — "by gate, by author, and by period"). Keyed by
     // the label-adding actor's login; an unresolvable actor (labelEvents
     // unavailable, or no matching add event) is bucketed under "unknown" —
     // NEVER dropped, mirroring D2's "count visibly, never hide" discipline.
     bypassByAuthor: {},
+    // skip:memory-gate's HONORED applier, by author (#1024) — mirrors
+    // bypassByAuthor's shape/discipline, but only for merges the override
+    // actually honored (never the raw label count).
+    skipMemoryGateByAuthor: {},
     detection: Object.fromEntries(detectionJobs.map((j) => [j, { pass: 0, fail: 0 }])),
   };
 }
@@ -123,6 +134,11 @@ function newRow(period, detectionJobs = DETECTION_JOB_NAMES) {
  * @param {string|null} [m.exceptionAuthor]  Login of the actor who added the
  *   `size:exception` label (resolved from PR labelEvents), or `null` when
  *   unresolvable — folded into "unknown" by-author bucket, never dropped.
+ * @param {string|null} [m.skipMemoryGateHonoredAuthor]  Login of the actor
+ *   `decideMemoryGateOverride` honored `skip:memory-gate` for at merge time
+ *   (#1024, design item 7), or `null`/absent when not honored (refused,
+ *   unresolvable, or the label was absent) — the RAW `skip:memory-gate`
+ *   count is unaffected either way.
  * @param {number|null} m.leadTimeDays
  * @param {'evaluated'|'baseline-skip'|'resolved-skip'|'uncomputable'} m.kind
  * @param {object|null} m.evalRec    lib/merge-walk.mjs `evaluateMerge()` output, iff kind==='evaluated'.
@@ -152,7 +168,14 @@ export function foldMerge(rows, m, detectionJobs = DETECTION_JOB_NAMES) {
     const author = m.exceptionAuthor ?? 'unknown';
     row.bypassByAuthor[author] = (row.bypassByAuthor[author] ?? 0) + 1;
   }
-  if (prLabels.includes('skip:memory-gate')) row.bypass.skipMemoryGate += 1;
+  if (prLabels.includes('skip:memory-gate')) {
+    row.bypass.skipMemoryGate += 1;
+    if (typeof m.skipMemoryGateHonoredAuthor === 'string') {
+      row.bypass.skipMemoryGateHonored += 1;
+      const skipAuthor = m.skipMemoryGateHonoredAuthor;
+      row.skipMemoryGateByAuthor[skipAuthor] = (row.skipMemoryGateByAuthor[skipAuthor] ?? 0) + 1;
+    }
+  }
 
   if (m.detection) {
     for (const job of detectionJobs) {
