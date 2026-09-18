@@ -211,3 +211,21 @@ test('#882 R882-1/R882-5: every governance row renders its stamp through renderS
     assert.ok(!/el\('span', 'source'/.test(m[0]), `${fn} must not hand-build the stamp span — the helper owns the "open ↗" chip`);
   }
 });
+
+// #1043 cold review, correction 2: the commit list is capped and the tags are
+// not, so an older release can appear with no merges around it. The page must
+// say the cap where the reader sees the count, never leave it implied.
+test('#1043 correction 2: renderHistory says the commit cap beside the event count', () => {
+  const m = APP_JS.match(/function renderHistory\(\) \{[\s\S]*?\n}\n/);
+  assert.ok(m, 'renderHistory must exist in app.js');
+  assert.match(m[0], /capNote\(/, 'renderHistory must ask the model for the cap sentence');
+  assert.match(m[0], /model\.value\.cap|cap\b/, 'the sentence must come from the model\'s own cap, not a literal in the page');
+});
+
+// #1043 correction 3: the model says a forge-only row is unreconciled evidence;
+// the page has to show it, or the sentence never reaches the reader.
+test('#1043 correction 3: renderActorRow renders the model\'s evidence note', () => {
+  const m = APP_JS.match(/function renderActorRow\([^)]*\) \{[\s\S]*?\n}\n/);
+  assert.ok(m, 'renderActorRow must exist in app.js');
+  assert.match(m[0], /row\.evidenceNote/, 'the unreconciled-namespace note must be rendered, not left in the model');
+});

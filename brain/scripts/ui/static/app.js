@@ -21,7 +21,7 @@ import { buildReviewTimeline } from './lib/review-timeline.mjs';
 import { buildRoadmapModel } from './lib/roadmap-model.mjs';
 import { buildDecisionsModel } from './lib/decisions-model.mjs';
 import { buildAntiPatternsModel } from './lib/anti-patterns-model.mjs';
-import { buildHistoryModel } from './lib/history-model.mjs';
+import { buildHistoryModel, capNote } from './lib/history-model.mjs';
 import { buildActorsModel } from './lib/actors-model.mjs';
 import { sourceStamp } from './lib/provenance.mjs';
 import { MODES, PLACEHOLDERS, initialView, switchMode, keyAction } from './lib/view-model.mjs';
@@ -767,8 +767,11 @@ function renderHistory() {
     mounts.canvas.appendChild(said(`history could not be computed: ${model.reason}`));
     return;
   }
-  const { events } = model.value;
-  mounts.canvas.appendChild(el('p', 'canvas-summary', `${events.length} event(s)`));
+  const { events, cap } = model.value;
+  // The count alone would read as the whole history; the cap sentence is what
+  // keeps a capped commit list from looking like a quiet period (#1043).
+  const note = capNote(cap);
+  mounts.canvas.appendChild(el('p', 'canvas-summary', note ? `${events.length} event(s) — ${note}` : `${events.length} event(s)`));
   for (const event of events) mounts.canvas.appendChild(renderHistoryEvent(event));
   mounts.canvas.appendChild(renderHistoryReviewsLink());
 }
@@ -818,6 +821,9 @@ function renderActorRow(row) {
   const wrap = el('div', 'actor-row');
   wrap.appendChild(el('strong', 'actor-name', row.actor));
   wrap.appendChild(el('span', 'actor-kind', row.actorKind ?? row.actorKindReason ?? 'kind unknown'));
+  // The two namespaces are not reconciled, so a forge-only row says what it
+  // is evidence of rather than reading as a second person (#1043).
+  if (row.evidenceNote) wrap.appendChild(said(row.evidenceNote));
   wrap.appendChild(renderSourceStamp(row.sourceStamp));
   wrap.appendChild(el('p', 'actor-records', `${row.records} record(s)${Object.keys(row.byType).length > 0 ? `: ${Object.entries(row.byType).map(([type, n]) => `${type} ${n}`).join(', ')}` : ''}`));
   wrap.appendChild(el('p', 'actor-reviews', row.reviewsPosted.ok

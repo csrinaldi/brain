@@ -78,6 +78,16 @@ function reviewsPostedOf(reviewsSection, actor, counts) {
  * @param {{ok:boolean, value?:Array<{actor:string, actorKind:string|null, records:number, byType:object, first:string|null, last:string|null}>, reason?:string}} actorsSection
  * @param {{ok:boolean, value?:Array<{pr:number, ok:boolean, verdicts?:Array<{author:string|null}>, reason?:string}>, reason?:string}} reviewsSection
  */
+/** A record names its actor in brain's own namespace (`@someone`); a review
+ * names its author in the forge's (`someone`). They are not the same string
+ * and nothing in this data maps one to the other, so a row backed only by a
+ * forge login may be a person who already has a row under their record id.
+ * The model does NOT guess a mapping — inventing one would merge two people
+ * as easily as it would join one. It says what the row is evidence of, so a
+ * reader never counts the same human twice without knowing it could be the
+ * same human (#1043 cold review, correction 3). */
+const FORGE_ONLY_EVIDENCE = 'evidence: a forge review login, not reconciled with the memory records\' actor names — this may be a person who also appears under their record id';
+
 export function buildActorsModel(actorsSection, reviewsSection) {
   if (!actorsSection || typeof actorsSection !== 'object') return { ok: false, reason: 'no actors section was given to By actor' };
   if (actorsSection.ok !== true) return { ok: false, reason: actorsSection.reason };
@@ -98,7 +108,7 @@ export function buildActorsModel(actorsSection, reviewsSection) {
   const counts = reviewCountsByAuthor(reviewsSection);
   for (const author of counts.keys()) {
     if (byActor.has(author)) continue;
-    byActor.set(author, { actor: author, actorKind: null, actorKindReason: NO_RECORD_REASON, records: 0, byType: {}, first: null, last: null });
+    byActor.set(author, { actor: author, actorKind: null, actorKindReason: NO_RECORD_REASON, evidenceNote: FORGE_ONLY_EVIDENCE, records: 0, byType: {}, first: null, last: null });
   }
 
   const rows = [...byActor.values()]
@@ -107,6 +117,7 @@ export function buildActorsModel(actorsSection, reviewsSection) {
       actor: a.actor,
       actorKind: a.actorKind,
       actorKindReason: a.actorKindReason,
+      evidenceNote: a.evidenceNote ?? null,
       records: a.records,
       byType: a.byType,
       first: a.first,

@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-import { buildHistoryModel } from './history-model.mjs';
+import { buildHistoryModel, capNote } from './history-model.mjs';
 import { prUrl } from './forge-url.mjs';
 
 const SOURCE = readFileSync(fileURLToPath(new URL('./history-model.mjs', import.meta.url)), 'utf8');
@@ -140,6 +140,95 @@ test('#882 R882-5: an unreadable ADR row (adr.ok === false) inside a readable ad
     adrs: { ok: true, value: [{ ok: false, path: 'brain/project/decisions/adr-0002-b.md', reason: 'no title line' }] },
   });
   assert.deepEqual(model.value.events, []);
+});
+
+// ── #1043 cold review correction 1: a total, stable order even when a date
+// cannot be parsed — never sorted first, never dropped ──────────────────────
+
+test('#1043 correction 1: an event whose date cannot be parsed sorts LAST and says so — never silently sorted first, never dropped', () => {
+  const model = buildHistoryModel({
+    history: { ok: true, value: { commits: [], tags: [] } },
+    adrs: { ok: true, value: [adr({ amendments: [{ n: 1, date: 'x', summary: 'x', issue: null }] })] },
+  });
+  assert.equal(model.ok, true);
+  assert.equal(model.value.events.length, 1, 'a truthy-but-unparseable date is never dropped');
+  const [event] = model.value.events;
+  assert.equal(typeof event.dateUnparseable, 'string', 'the event carries its own stated reason, not just a silent position');
+  assert.match(event.dateUnparseable, /x/, 'the reason names the actual unparseable value');
+});
+
+test('#1043 correction 1: mixed valid and unparseable dates sort deterministically — valid ones newest-first, unparseable ones kept at the end', () => {
+  const model = buildHistoryModel({
+    history: {
+      ok: true,
+      value: {
+        commits: [
+          commit({ date: '2026-09-05T00:00:00Z', subject: 'mid', sha: 'mid0000000' }),
+        ],
+        tags: [
+          tag({ date: '2026-09-10T00:00:00+00:00', name: 'newest' }),
+          tag({ date: '2026-08-01T00:00:00+00:00', name: 'oldest' }),
+        ],
+      },
+    },
+    adrs: { ok: true, value: [adr({ amendments: [{ n: 1, date: '2027-01-01T00:00:00Z', summary: 'x', issue: null }, { n: 2, date: 'x', summary: 'y', issue: null }] })] },
+  });
+  assert.equal(model.ok, true);
+  const titles = model.value.events.map((e) => e.title);
+  // 'A amended' fires twice (two amendments): the 2027 one sorts as the real
+  // newest event; the 'x'-dated one is unparseable and must land last.
+  assert.deepEqual(titles.slice(0, 4), ['A amended', 'newest', 'mid', 'oldest']);
+  assert.equal(titles.at(-1), 'A amended');
+  assert.equal(model.value.events.at(-1).dateUnparseable, 'date "x" could not be parsed — kept at the end of the timeline');
+
+  // run twice to prove determinism, not a lucky single ordering
+  const model2 = buildHistoryModel({
+    history: {
+      ok: true,
+      value: {
+        commits: [commit({ date: '2026-09-05T00:00:00Z', subject: 'mid', sha: 'mid0000000' })],
+        tags: [tag({ date: '2026-09-10T00:00:00+00:00', name: 'newest' }), tag({ date: '2026-08-01T00:00:00+00:00', name: 'oldest' })],
+      },
+    },
+    adrs: { ok: true, value: [adr({ amendments: [{ n: 1, date: '2027-01-01T00:00:00Z', summary: 'x', issue: null }, { n: 2, date: 'x', summary: 'y', issue: null }] })] },
+  });
+  assert.deepEqual(model2.value.events.map((e) => e.title), titles);
+});
+
+test('#1043 correction 1: an event with a real, parseable date never carries a dateUnparseable reason', () => {
+  const model = buildHistoryModel({
+    history: { ok: true, value: { commits: [commit()], tags: [] } },
+    adrs: { ok: true, value: [] },
+  });
+  const [event] = model.value.events;
+  assert.equal(event.dateUnparseable, null);
+});
+
+// ── #1043 cold review correction 2: the 200-commit cap must be SAID ────────
+
+test('#1043 correction 2: buildHistoryModel carries history.value.cap through onto model.value.cap, unmodified', () => {
+  const cap = { requested: 200, reached: true, total: 512 };
+  const model = buildHistoryModel({ history: { ok: true, value: { commits: [], tags: [], cap } }, adrs: { ok: true, value: [] } });
+  assert.deepEqual(model.value.cap, cap);
+});
+
+test('#1043 correction 2: with no cap info at all (an older fixture shape), model.value.cap is null and capNote says nothing — never a claim this code did not read', () => {
+  const model = buildHistoryModel({ history: { ok: true, value: { commits: [], tags: [] } }, adrs: { ok: true, value: [] } });
+  assert.equal(model.value.cap, null);
+  assert.equal(capNote(model.value.cap), null);
+});
+
+test('#1043 correction 2: capNote says "the newest N commits of TOTAL" when the total is known', () => {
+  assert.equal(capNote({ requested: 200, reached: true, total: 512 }), 'the newest 200 commits of 512');
+});
+
+test('#1043 correction 2: capNote says the weaker, still-honest phrasing when the total could not cheaply be read', () => {
+  assert.equal(capNote({ requested: 200, reached: true, total: null }), 'the newest 200 commits; older merges are not listed');
+});
+
+test('#1043 correction 2: capNote says nothing when the cap was not reached — never a partial-list claim under the cap', () => {
+  assert.equal(capNote({ requested: 200, reached: false, total: 3 }), null);
+  assert.equal(capNote(null), null);
 });
 
 // ── fresh-context review of PR 4, warning: one URL definition, not two ──────

@@ -65,7 +65,34 @@ function adrAmendedEvents(adrsSection) {
   return events;
 }
 
-const byDateDesc = (a, b) => Date.parse(b.date) - Date.parse(a.date);
+/** An event's own `Date.parse` epoch, or `null` when the date cannot be
+ * parsed at all — never `NaN` allowed to leak into a comparator, where an
+ * inconsistent (non-total) order silently misplaces the event (#1043 cold
+ * review correction 1: a reviewer measured an event dated `'x'` sorting
+ * ahead of one dated 2027, because `NaN - anything` is always `NaN`, and a
+ * comparator returning `NaN` tells `Array#sort` nothing about order). */
+function dateEpoch(date) {
+  const t = Date.parse(date);
+  return Number.isNaN(t) ? null : t;
+}
+
+/** A total, stable order: events with a parseable date sort newest-first;
+ * events whose date cannot be parsed keep their relative order (stable
+ * `.sort` + `.filter`, never re-shuffled) at the END of the list, each
+ * carrying its OWN stated reason on `dateUnparseable` — never silently
+ * sorted first (the `NaN` bug this replaces), never dropped (this repo
+ * already refuses that anti-pattern elsewhere). A parseable event's
+ * `dateUnparseable` is `null`, the same "state the absence" idiom every
+ * other field in this ticket's models uses. */
+function sortEventsByDateDesc(events) {
+  const stamped = events.map((event) => ({ event, epoch: dateEpoch(event.date) }));
+  const sortable = stamped.filter((s) => s.epoch !== null).sort((a, b) => b.epoch - a.epoch);
+  const unsortable = stamped.filter((s) => s.epoch === null);
+  return [
+    ...sortable.map((s) => ({ ...s.event, dateUnparseable: null })),
+    ...unsortable.map((s) => ({ ...s.event, dateUnparseable: `date ${JSON.stringify(s.event.date)} could not be parsed — kept at the end of the timeline` })),
+  ];
+}
 
 /**
  * buildHistoryModel({history, adrs, project}) -> {ok:true, value:{events}} |
@@ -80,16 +107,37 @@ const byDateDesc = (a, b) => Date.parse(b.date) - Date.parse(a.date);
  * @param {{history?: {ok:boolean, value?:{commits:Array, tags:Array}, reason?:string},
  *   adrs?: {ok:boolean, value?:Array, reason?:string}, project?: string|null}} opts
  */
+/**
+ * `capNote(cap)` -> the sentence a reader needs, or `null` when there is
+ * nothing to say.
+ *
+ * The commit list is capped (`gatherHistoryFacts` asks git for a fixed
+ * number) while tags and ADR amendments are not, so an older release can
+ * appear with no merges around it. Saying the cap is what keeps that from
+ * reading as "nothing happened" (#1043 cold review, correction 2).
+ *
+ * It never claims a total this code did not read: with `total` unknown the
+ * weaker sentence is the honest one, and under the cap there is nothing
+ * partial to warn about at all.
+ */
+export function capNote(cap) {
+  if (!cap || cap.reached !== true) return null;
+  const n = cap.requested;
+  return typeof cap.total === 'number'
+    ? `the newest ${n} commits of ${cap.total}`
+    : `the newest ${n} commits; older merges are not listed`;
+}
+
 export function buildHistoryModel({ history, adrs, project = null } = {}) {
   if (!history || typeof history !== 'object') return { ok: false, reason: 'no history section was given to History' };
   if (history.ok !== true) return { ok: false, reason: history.reason };
 
-  const { commits = [], tags = [] } = history.value ?? {};
-  const events = [
+  const { commits = [], tags = [], cap = null } = history.value ?? {};
+  const events = sortEventsByDateDesc([
     ...commits.map((c) => mergeEvent(c, project)),
     ...tags.map(releaseEvent),
     ...adrAmendedEvents(adrs),
-  ].sort(byDateDesc);
+  ]);
 
-  return { ok: true, value: { events } };
+  return { ok: true, value: { events, cap } };
 }
