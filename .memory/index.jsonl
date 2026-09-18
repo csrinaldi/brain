@@ -979,6 +979,7 @@
 {"id":"rec-678c3cebd5380a61","ts":"2026-07-25T21:52:04Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07-rec-678c3cebd5380a61.jsonl"}
 {"id":"rec-67af64220e5ad931","ts":"2026-07-13T00:21:38Z","actor":"@legacy","type":"session_summary","project":"brain","file":"2026-07-rec-67af64220e5ad931.jsonl"}
 {"id":"rec-67d1918ee4f5b0a2","ts":"2026-07-25T21:51:25Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07-rec-67d1918ee4f5b0a2.jsonl"}
+{"id":"rec-67e377a0b7dd16e6","ts":"2026-09-18T22:10:52Z","actor":"@csrinaldi","type":"discovery","project":"brain","issue":882,"file":"2026-09-rec-67e377a0b7dd16e6.jsonl"}
 {"id":"rec-68056b5b44f4ad75","ts":"2026-08-17T16:32:35Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-08-rec-68056b5b44f4ad75.jsonl"}
 {"id":"rec-680b6f5341a56864","ts":"2026-09-05T01:01:22Z","actor":"fix/issue-603-tier-blind-gitlab","type":"architecture","project":"brain","issue":603,"file":"2026-09-rec-680b6f5341a56864.jsonl"}
 {"id":"rec-682e54e6f050faae","ts":"2026-07-25T00:48:21Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07-rec-682e54e6f050faae.jsonl"}

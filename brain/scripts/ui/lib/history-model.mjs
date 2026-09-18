@@ -32,19 +32,23 @@ function commitSource(commit, project) {
 }
 
 function commitEvent(commit, project) {
-  return row({ kind: 'commit', date: commit.date, title: commit.subject, citedRef: commit.citedRef, source: commitSource(commit, project) });
+  // `malformed` travels to the event: the reader already said WHY a line could
+  // not be split, and an event that dropped it showed an empty title with the
+  // generic "date could not be parsed" instead — a reason stated in one layer
+  // and lost in the next, for the third time in this chain (#1043 round 5).
+  return row({ kind: 'commit', date: commit.date, title: commit.subject, citedRef: commit.citedRef, malformed: commit.malformed ?? null, source: commitSource(commit, project) });
 }
 
 /** A tag carries no per-event provenance beyond its own name (already the
  * event's title) — `source: null` renders through `sourceStamp` as the
  * one honest "no source was recorded" label, never a fabricated one. */
 function releaseEvent(tag) {
-  return row({ kind: 'release', date: tag.date, title: tag.name, source: null });
+  return row({ kind: 'release', date: tag.date, title: tag.name, malformed: tag.malformed ?? null, source: null });
 }
 
 function adrAmendedEvent(adr, amendment) {
   const title = adr.title ? `${adr.title} amended` : `${adr.path} amended`;
-  return row({ kind: 'adr-amended', date: amendment.date, title, source: { path: adr.path } });
+  return row({ kind: 'adr-amended', date: amendment.date, title, malformed: null, source: { path: adr.path } });
 }
 
 /** One event per ADR amendment that carries a date — an amendment with no
@@ -130,6 +134,10 @@ export function capNote(cap) {
   // A shallow clone's count is the fetched depth, not the history, so the
   // sentence says that instead of quoting a number that understates it.
   if (cap.shallow === true) return `the newest ${n} commits of a shallow checkout; how much history exists is not readable here`;
+  // A known total equal to the cap rules out anything older: claiming the
+  // opposite would be a small untruth the data itself disproves. An UNKNOWN
+  // total still warns, because it rules nothing out (#1043 round 5).
+  if (typeof cap.total === 'number' && cap.total <= n) return null;
   return typeof cap.total === 'number' && cap.total > n
     ? `the newest ${n} commits of ${cap.total} reachable from HEAD`
     : `the newest ${n} commits; older commits are not listed`;
