@@ -76,10 +76,16 @@ test('#882 R882-6: rows sort by actor name, never by record count or review coun
   assert.deepEqual(model.value.rows.map((r) => r.actor), ['amy', 'zack']);
 });
 
-test('#882 R882-6: a record-only actor with no review rounds still reads reviewsPosted count 0 with the caveat, never a bare unstated number', () => {
+// Superseded by #1043 round 3: this test used to pin `count: 0` for an actor
+// the forge never named, which the tracker's own review measured as a
+// fabricated zero — the count is keyed by forge login, and a record-namespace
+// name has no count in that data at all. The rule it pins now is the absence.
+test('#882 R882-6 (as amended by #1043 round 3): an actor the forge never named has no review count — the absence is stated, never a zero', () => {
   const model = buildActorsModel({ ok: true, value: [actorRow({ actor: 'alice' })] }, { ok: true, value: [] });
   const [alice] = model.value.rows;
-  assert.deepEqual(alice.reviewsPosted, { ok: true, count: 0, caveat: REVIEWS_CAVEAT });
+  assert.equal(alice.reviewsPosted.ok, false);
+  assert.match(alice.reviewsPosted.reason, /not attributable/i);
+  assert.ok(!('count' in alice.reviewsPosted), 'never a number this data cannot back');
 });
 
 test('#882 R882-6: every row goes through governance-model.mjs\'s own row() helper — carries a sourceStamp, never a second provenance shaper', () => {
@@ -106,4 +112,24 @@ test('#1043 correction 3: a row whose only evidence is a forge login says so, un
 
   const recorded = model.value.rows.find((r) => r.actor === '@someone');
   assert.equal(recorded.evidenceNote, null, 'a row backed by records has nothing unreconciled to warn about');
+});
+
+// ── #1043 round 3 ──────────────────────────────────────────────────────────
+// A record actor lives in brain's namespace (`@alice`); a review author lives
+// in the forge's (`alice`). Nothing maps one to the other, so "0 reviews" for
+// a record row is a claim this model cannot back — the same fabricated zero
+// its own header already refuses for `prsMerged`.
+test('#1043 round 3: a record-only actor gets no review COUNT — an unattributable field says so, never 0', () => {
+  const actors = { ok: true, value: [{ actor: '@alice', actorKind: 'human', records: 3, byType: {}, first: null, last: null }] };
+  const reviews = { ok: true, value: [{ pr: 1, ok: true, verdicts: [{ author: 'alice' }] }] };
+
+  const model = buildActorsModel(actors, reviews);
+  const record = model.value.rows.find((r) => r.actor === '@alice');
+  assert.equal(record.reviewsPosted.ok, false, 'a name the forge never used has no count to show');
+  assert.match(record.reviewsPosted.reason, /not attributable|namespace/i, 'and the reason names why: the two namespaces are not reconciled');
+  assert.ok(!('count' in record.reviewsPosted), 'never a number, and never a zero');
+
+  const forge = model.value.rows.find((r) => r.actor === 'alice');
+  assert.equal(forge.reviewsPosted.ok, true, 'the row the forge itself named does carry its count');
+  assert.equal(forge.reviewsPosted.count, 1);
 });

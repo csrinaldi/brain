@@ -706,3 +706,11 @@ The `budget` blocker is the standing one (#752). The other three were real, and 
 - **correction 3 — the total counted something else.** `git rev-list --count HEAD` counts what is REACHABLE FROM HEAD, which on a shallow or detached checkout is not the branch's history, so `capNote` could print "the newest 200 commits of 200" as if that were everything. The sentence now says what the number counts, and a total equal to the cap — which carries no information — falls back to the weaker honest phrasing. Mutation: a total equal to the cap printed anyway → red.
 
 Suites after the three: 407/407 across the UI and history globs.
+
+## Cold review of the tracker PR, round 3 (#1043, head 009781ab): two findings fixed
+
+- **correction — a fabricated zero, and a test that had pinned it.** `reviewsPostedOf` returned `counts.get(actor) ?? 0`, and `counts` is keyed by the FORGE's author logins. So a person recorded as `@alice` who reviews as `alice` read "reviews posted: 0" — a claim this data cannot back, the same fabricated zero the module's own header refuses for `prsMerged`, and the very gap the namespaces note was added for one round earlier. A name the forge never used now carries the stated absence and its reason, never a number.
+  Worth saying plainly: an existing test from PR 5 asserted `{ok: true, count: 0, caveat}` for exactly this case — the contract itself encoded the defect. It is superseded here with the reason in the test's own text, and R882-6 amended, rather than quietly edited.
+- **editorial — a shallow checkout's count is not the history.** `git rev-list --count HEAD` counts the fetched depth on a shallow clone, so the note could quote a number that understates the history while sounding precise. The shallow flag now travels WITH the count rather than correcting it, and the sentence says the checkout is shallow instead of quoting the number at all.
+
+Suites: 408/408 across the UI and history globs; full suite 5949/0.

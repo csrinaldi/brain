@@ -98,7 +98,7 @@ test('#1043 correction 2: a fixture whose git log hits the 200-commit cap says s
     },
   });
   assert.equal(facts.ok, true);
-  assert.deepEqual(facts.value.cap, { requested: 200, reached: true, total: 512 });
+  assert.deepEqual(facts.value.cap, { requested: 200, reached: true, total: 512, shallow: false }, 'the total travels with what it counts: a shallow checkout\'s count is the fetched depth, not the history (#1043 round 3)');
 });
 
 test('#1043 correction 2: a fixture under the cap does NOT say the list is partial', () => {
