@@ -724,3 +724,12 @@ Suites: 408/408 across the UI and history globs; full suite 5949/0.
 Suites: 440/440 across the UI, history and snapshot globs; full suite 5954/0.
 
 Four rounds, and it is worth naming the pattern rather than burying it: every round found something real, and in two of them the defect had been introduced by the previous round's own fix. The chain of reviews is doing the work it exists for.
+
+## Cold review of the tracker PR, round 5 (#1043, head 9cd5d3ac): two findings fixed, and the chain stops here
+
+- **correction — a reason stated in one layer and lost in the next, for the third time.** Round 4 made both readers SAY why a line could not be split; the event builders dropped `malformed`, so a malformed commit became an event with an empty title and the generic "date could not be parsed", and a malformed tag became a release titled with the raw line. The reason now travels to the event and the page says it. That this is the third instance of the same shape in one chain is the finding worth keeping: a value that is said somewhere is not said to the reader until the last layer renders it.
+- **editorial — the cap note claimed something the data disproves.** With a KNOWN total equal to the cap there is nothing older to omit, yet the note still read "older commits are not listed". It now says nothing in that case; an unknown total still warns, because it rules nothing out. This supersedes round 2's own assertion, which called a total equal to the cap "no information" — the weaker sentence was itself a claim. Said in the test's own text rather than edited away.
+
+Suites: 419/419 across the UI and history globs; full suite 5957/0.
+
+Five rounds. Every one found something real; three of them found a defect the previous round's fix had introduced, and all three were the same shape — a reason that exists in the data and does not reach the reader. Whatever a sixth round finds is filed as a ticket rather than fixed here: the view is usable, the remaining findings have moved from fabricated values to wording, and the tracker has waited long enough.

@@ -257,7 +257,11 @@ test('#1043 round 2, correction 2: a commit event is a commit — the kind never
 // say what was counted, and a total equal to the cap adds nothing.
 test('#1043 round 2, correction 3: capNote names what the total counts, and says nothing more when the total equals the cap', () => {
   assert.match(capNote({ requested: 200, reached: true, total: 512 }), /reachable from HEAD/, 'the sentence must say what the number counts');
-  assert.equal(capNote({ requested: 200, reached: true, total: 200 }), 'the newest 200 commits; older commits are not listed', 'a total equal to the cap is no information — say the weaker, honest sentence');
+  // Superseded by round 5: round 2 called a total equal to the cap "no
+  // information" and fell back to the weaker sentence — but that sentence
+  // claims older commits exist, and a known total equal to the cap rules that
+  // out. Saying nothing is the honest answer.
+  assert.equal(capNote({ requested: 200, reached: true, total: 200 }), null, 'a known total equal to the cap rules out anything older — claim nothing');
 });
 
 test('#1043 round 3: a shallow checkout says so instead of quoting a count that understates the history', () => {
@@ -277,4 +281,32 @@ test('#1043 round 4: same-day events of different kinds keep a stated, stable or
   const kinds = model.value.events.map((e) => e.kind);
   assert.deepEqual([...kinds].sort(), kinds.slice().sort(), 'sanity: both events are present');
   assert.equal(model.value.sameDayNote, 'events on the same day are ordered by kind, not by time: an ADR amendment carries a date only, a commit or tag carries a time');
+});
+
+// ── #1043 round 5 ──────────────────────────────────────────────────────────
+// Round 4 made the readers SAY why a line could not be split. The event
+// builders dropped that sentence, so the page showed an empty title and the
+// generic "date could not be parsed" instead of the specific reason — the
+// third time in this chain a reason has been stated in one layer and lost in
+// the next.
+test('#1043 round 5: a malformed commit or tag line carries its own reason onto the event', () => {
+  const model = buildHistoryModel({
+    history: { ok: true, value: {
+      commits: [{ sha: 'garbage', date: null, subject: '', citedRef: null, malformed: 'fewer than two "|" separators in the commit line' }],
+      tags: [{ name: 'v1', date: null, malformed: 'no "|" separator in the tag line' }],
+    } },
+    adrs: { ok: true, value: [] },
+  });
+  const commit = model.value.events.find((e) => e.kind === 'commit');
+  const release = model.value.events.find((e) => e.kind === 'release');
+  assert.match(commit.malformed, /two "\|" separators/, 'the commit line\'s own reason reaches the event');
+  assert.match(release.malformed, /no "\|" separator/, 'and so does the tag line\'s');
+  assert.equal(model.value.events.find((e) => e.kind === 'adr-amended'), undefined);
+});
+
+// A repo with exactly as many commits as the cap has nothing older to omit, so
+// claiming otherwise is a small untruth the known total can rule out.
+test('#1043 round 5: with a known total equal to the cap, nothing older is claimed', () => {
+  assert.equal(capNote({ requested: 200, reached: true, total: 200, shallow: false }), null);
+  assert.match(capNote({ requested: 200, reached: true, total: null, shallow: false }), /older commits are not listed/, 'an unknown total still warns — it cannot rule anything out');
 });

@@ -784,6 +784,7 @@ function renderHistoryEvent(event) {
   wrap.appendChild(el('span', 'history-date', event.date ?? 'no date recorded'));
   // The model keeps an event with an unreadable date at the END and states
   // why; printing only the date would drop that sentence (#1043 round 2).
+  if (event.malformed) wrap.appendChild(said(`this line could not be read: ${event.malformed}`));
   if (event.dateUnparseable) wrap.appendChild(said(event.dateUnparseable));
   wrap.appendChild(el('span', 'history-title', event.title));
   wrap.appendChild(renderSourceStamp(event.sourceStamp));

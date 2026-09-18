@@ -253,3 +253,9 @@ test('#1043 round 4: renderHistory says how same-day events are ordered', () => 
   assert.ok(m, 'renderHistory must exist in app.js');
   assert.match(m[0], /sameDayNote/, 'the ordering caveat must reach the page, not sit in the model');
 });
+
+test('#1043 round 5: renderHistoryEvent says a malformed line\'s own reason, not only the generic date one', () => {
+  const m = APP_JS.match(/function renderHistoryEvent\([^)]*\) \{[\s\S]*?\n}\n/);
+  assert.ok(m, 'renderHistoryEvent must exist in app.js');
+  assert.match(m[0], /event\.malformed/, 'the line-level reason must reach the page');
+});
