@@ -21,11 +21,11 @@ test('resolveGeminiRoute: unrouted or non-gemini returns required: false', () =>
 });
 
 test('resolveGeminiRoute: gemini engine returns required: true with model', () => {
-  const route = resolveGeminiRoute({ sdd: { map: { 'cold-review': { engine: 'gemini', model: 'gemini-2.5-pro' } } } });
+  const route = resolveGeminiRoute({ sdd: { map: { 'cold-review': { engine: 'gemini', model: 'gemini-3.1-pro-high' } } } });
   assert.equal(route.required, true);
   assert.equal(route.engine, 'gemini');
-  assert.equal(route.model, 'gemini-2.5-pro');
-  assert.equal(route.identity, 'cold-review:gemini/gemini-2.5-pro');
+  assert.equal(route.model, 'gemini-3.1-pro-high');
+  assert.equal(route.identity, 'cold-review:gemini/gemini-3.1-pro-high');
 });
 
 test('checkGeminiReadiness: not required returns ready: true', () => {
@@ -35,28 +35,38 @@ test('checkGeminiReadiness: not required returns ready: true', () => {
 });
 
 test('checkGeminiReadiness: missing binary returns ready: false with install hint', () => {
-  const route = { required: true, engine: 'gemini', identity: 'cold-review:gemini/gemini-2.5-pro' };
+  const route = { required: true, engine: 'gemini', identity: 'cold-review:gemini/gemini-3.1-pro-high' };
   const result = checkGeminiReadiness(route, { commandExists: () => false });
   assert.equal(result.ready, false);
-  assert.match(result.diagnostic, /run npm install -g @google\/gemini-cli/i);
+  assert.match(result.diagnostic, /neither agy.*nor gemini/i);
 });
 
-test('checkGeminiReadiness: missing auth returns ready: false with auth hint', () => {
-  const route = { required: true, engine: 'gemini', identity: 'cold-review:gemini/gemini-2.5-pro' };
+test('checkGeminiReadiness: missing auth when only gemini CLI is installed returns ready: false with hint', () => {
+  const route = { required: true, engine: 'gemini', identity: 'cold-review:gemini/gemini-3.1-pro-high' };
   const result = checkGeminiReadiness(route, {
-    commandExists: () => true,
+    commandExists: (bin) => bin === 'gemini',
     env: {},
   });
   assert.equal(result.ready, false);
   assert.match(result.diagnostic, /set GEMINI_API_KEY/i);
 });
 
-test('checkGeminiReadiness: binary and auth present returns ready: true', () => {
+test('checkGeminiReadiness: agy binary present returns ready: true for Google AI Pro subscription', () => {
+  const route = { required: true, engine: 'gemini', identity: 'cold-review:gemini/gemini-3.1-pro-high' };
+  const result = checkGeminiReadiness(route, {
+    commandExists: (bin) => bin === 'agy',
+    env: {},
+  });
+  assert.equal(result.ready, true);
+  assert.match(result.diagnostic, /agy \(Google AI Pro subscription\)/i);
+});
+
+test('checkGeminiReadiness: gemini CLI and API key present returns ready: true', () => {
   const route = { required: true, engine: 'gemini', identity: 'cold-review:gemini/gemini-2.5-pro' };
   const result = checkGeminiReadiness(route, {
-    commandExists: () => true,
+    commandExists: (bin) => bin === 'gemini',
     env: { GEMINI_API_KEY: FAKE_KEY },
   });
   assert.equal(result.ready, true);
-  assert.match(result.diagnostic, /Gemini CLI is installed and authenticated/i);
+  assert.match(result.diagnostic, /gemini \(API key\)/i);
 });

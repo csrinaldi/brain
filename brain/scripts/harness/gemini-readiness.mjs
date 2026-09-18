@@ -32,8 +32,8 @@ export function resolveGeminiRoute(config) {
   };
 }
 
-function defaultCommandExists(bin) {
-  return process.env.PATH?.split(':').some((dir) => existsSync(join(dir, bin))) ?? false;
+function defaultCommandExists(bin, env = process.env) {
+  return env?.PATH?.split(':').some((dir) => existsSync(join(dir, bin))) ?? false;
 }
 
 /**
@@ -47,26 +47,32 @@ export function checkGeminiReadiness(route, {
     const engine = route?.engine ?? 'no engine';
     return { ready: true, required: false, diagnostic: `cold-review is routed to ${engine}; Gemini is not required` };
   }
-  if (!commandExists('gemini')) {
-    return {
-      ready: false,
-      required: true,
-      diagnostic: 'Gemini is required by cold-review:gemini but is not installed; run npm install -g @google/gemini-cli.',
-    };
-  }
+  const hasAgy = commandExists('agy', env);
+  const hasGemini = commandExists('gemini', env);
   const hasApiKey = typeof env?.GEMINI_API_KEY === 'string' && env.GEMINI_API_KEY.trim() !== '';
   const hasGoogleCreds = typeof env?.GOOGLE_APPLICATION_CREDENTIALS === 'string' && env.GOOGLE_APPLICATION_CREDENTIALS.trim() !== '';
-  if (!hasApiKey && !hasGoogleCreds) {
+
+  if (!hasAgy && !hasGemini) {
     return {
       ready: false,
       required: true,
-      diagnostic: 'Gemini is installed but not authenticated; set GEMINI_API_KEY or GOOGLE_APPLICATION_CREDENTIALS before cold review.',
+      diagnostic: 'Gemini is required by cold-review:gemini but neither agy (Antigravity CLI for Google AI Pro subscriptions) nor gemini CLI is installed.',
     };
   }
+
+  if (!hasAgy && !hasApiKey && !hasGoogleCreds) {
+    return {
+      ready: false,
+      required: true,
+      diagnostic: 'Gemini CLI is installed but not authenticated; set GEMINI_API_KEY or GOOGLE_APPLICATION_CREDENTIALS before cold review.',
+    };
+  }
+
+  const runner = hasAgy ? 'agy (Google AI Pro subscription)' : 'gemini (API key)';
   return {
     ready: true,
     required: true,
-    diagnostic: `Gemini CLI is installed and authenticated for ${route.identity}; the review run verifies model access, network, and the read-only sandbox.`,
+    diagnostic: `Gemini runner ${runner} is available for ${route.identity}; the review run verifies model access, network, and the read-only sandbox.`,
   };
 }
 

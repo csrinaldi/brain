@@ -93,8 +93,22 @@ export function parseArgs(argv) {
     if (argv[i] === '--pr') given.push(argv[++i] ?? '(nothing)');
     else if (argv[i] === '--mode') args.mode = argv[++i];
     else if (argv[i] === '--dry-run') args.dryRun = true;
-    else if (argv[i] === '--engine') engineVal = argv[++i];
-    else if (argv[i] === '--model') modelVal = argv[++i];
+    else if (argv[i] === '--engine') {
+      const next = argv[++i];
+      if (next === undefined || next.startsWith('-')) {
+        args.error = '"--engine" was given with no value after it';
+        return args;
+      }
+      engineVal = next;
+    }
+    else if (argv[i] === '--model') {
+      const next = argv[++i];
+      if (next === undefined || next.startsWith('-')) {
+        args.error = '"--model" was given with no value after it';
+        return args;
+      }
+      modelVal = next;
+    }
     else if (argv[i].startsWith('-')) {
       // An unrecognised option is REFUSED, never ignored — the strict half of
       // `brain:approve`'s parser, which this verb had cited as its model while
@@ -304,7 +318,9 @@ export async function main(deps = {}) {
   // repo's real `brain.config.json` — which is how the cold review had to prove
   // the composition defects this file now guards against.
   let config = deps.config ?? loadBrainConfig();
-  if (args.engine || args.model) {
+  const hasEngineOverride = args.engine !== null && args.engine !== undefined;
+  const hasModelOverride = args.model !== null && args.model !== undefined;
+  if (hasEngineOverride || hasModelOverride) {
     const prevColdReview = config?.sdd?.map?.['cold-review'] ?? {};
     config = {
       ...config,
@@ -314,8 +330,10 @@ export async function main(deps = {}) {
           ...config?.sdd?.map,
           'cold-review': {
             ...prevColdReview,
-            ...(args.engine ? { engine: args.engine } : {}),
-            ...(args.model !== null && args.model !== undefined ? { model: args.model } : {}),
+            ...(hasEngineOverride ? { engine: args.engine } : {}),
+            ...(hasModelOverride
+              ? { model: args.model }
+              : (hasEngineOverride && args.engine !== prevColdReview.engine ? { model: undefined } : {})),
           },
         },
       },

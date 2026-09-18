@@ -1236,6 +1236,8 @@ test('parseArgs: --engine and --model are accepted and parsed', () => {
 test('parseArgs: --engine or --model with no value refuses', () => {
   assert.match(parseArgs(['665', '--engine']).error, /"--engine" was given with no value/);
   assert.match(parseArgs(['665', '--model']).error, /"--model" was given with no value/);
+  assert.match(parseArgs(['665', '--engine', '--model', 'gemini-2.5-pro']).error, /"--engine" was given with no value/);
+  assert.match(parseArgs(['665', '--model', '--dry-run']).error, /"--model" was given with no value/);
 });
 
 test('parseArgs: --engine=x and --model=y are refused with guidance', () => {

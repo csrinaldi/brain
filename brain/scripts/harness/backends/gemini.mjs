@@ -5,8 +5,8 @@
 // returns a bounded transport result. The review layer owns snapshots, parser,
 // challenger, and publication.
 
-import { existsSync, realpathSync, statSync } from 'node:fs';
-import { dirname, isAbsolute, relative, resolve } from 'node:path';
+import { existsSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 
 import { assertRoutableStage } from '../../lib/stage-engine.mjs';
 import { credentialEnvNames, withoutCredentials } from '../../lib/credential-env.mjs';
@@ -14,7 +14,28 @@ import { withForgeConfigDir } from '../producer-forge-reach.mjs';
 import { DEFAULT_STAGE_TIMEOUT_MS, formatDuration } from '../../lib/duration.mjs';
 import { defaultRun } from './agent-runtime.mjs';
 
-export const GEMINI_MODEL = 'gemini-2.5-pro';
+export const GEMINI_MODEL = 'gemini-3.1-pro-high';
+
+export function deduplicateFindingsBlocks(text) {
+  if (typeof text !== 'string') return text;
+  const regex = /```brain-findings\/1\s*([\s\S]*?)\s*```/g;
+  const matches = [...text.matchAll(regex)];
+  if (matches.length > 1) {
+    const firstContent = matches[0][1].trim();
+    const allIdentical = matches.every((m) => m[1].trim() === firstContent);
+    if (allIdentical) {
+      let seen = false;
+      return text.replace(regex, (match) => {
+        if (!seen) {
+          seen = true;
+          return match;
+        }
+        return '';
+      }).replace(/\n{3,}/g, '\n\n').trim();
+    }
+  }
+  return text;
+}
 
 function tail(result, secrets, max = 300) {
   const text = String(result?.stderr ?? '').trim() || String(result?.stdout ?? '').trim();
@@ -69,6 +90,10 @@ function validateOutput(output, cwd) {
   return null;
 }
 
+function defaultCommandExists(bin, env = process.env) {
+  return env?.PATH?.split(':').some((dir) => existsSync(join(dir, bin))) ?? false;
+}
+
 /**
  * Run Gemini as an untrusted producer against a read-only candidate.
  *
@@ -87,6 +112,7 @@ export async function runStage({
   _env = process.env,
   _run = defaultRun,
   _now = Date.now,
+  _commandExists = defaultCommandExists,
 } = {}) {
   assertRoutableStage(stage, { routed });
   if (typeof prompt !== 'string' || prompt.trim() === '') {
@@ -95,34 +121,52 @@ export async function runStage({
   const outputFailure = validateOutput(output, cwd);
   if (outputFailure) return { ok: false, reason: outputFailure };
 
+  const hasAgy = _commandExists('agy', _env);
+  const hasGemini = _commandExists('gemini', _env);
   const hasApiKey = typeof _env?.GEMINI_API_KEY === 'string' && _env.GEMINI_API_KEY.trim() !== '';
   const hasGoogleCreds = typeof _env?.GOOGLE_APPLICATION_CREDENTIALS === 'string' && _env.GOOGLE_APPLICATION_CREDENTIALS.trim() !== '';
-  if (!hasApiKey && !hasGoogleCreds) {
+
+  let runner = null;
+  if (hasAgy) {
+    runner = 'agy';
+  } else if (hasGemini && (hasApiKey || hasGoogleCreds)) {
+    runner = 'gemini';
+  } else if (hasApiKey || hasGoogleCreds) {
+    runner = 'gemini';
+  }
+
+  if (!runner) {
     return {
       ok: false,
-      reason: 'Gemini authentication is unavailable: neither GEMINI_API_KEY nor GOOGLE_APPLICATION_CREDENTIALS is set in environment.',
+      reason: 'Gemini authentication is unavailable: neither agy (Antigravity CLI for Google AI Pro subscriptions) nor GEMINI_API_KEY / GOOGLE_APPLICATION_CREDENTIALS is set in environment.',
     };
   }
+
+  const effectiveModel = (runner === 'agy' && (!model || model === 'gemini-2.5-pro' || model.startsWith('gpt-') || model.startsWith('claude-')))
+    ? 'gemini-3.1-pro-high'
+    : (model ?? GEMINI_MODEL);
 
   const scrubNames = Array.isArray(credentialEnv)
     ? credentialEnvNames({ extra: credentialEnv })
     : credentialEnvNames();
   const scrubbed = withoutCredentials(_env, scrubNames);
   const env = forgeConfigDir ? withForgeConfigDir(scrubbed, forgeConfigDir) : scrubbed;
-  const secrets = scrubNames.map((name) => _env?.[name]).filter(Boolean);
+  const secrets = [
+    ...scrubNames.map((name) => _env?.[name]),
+    _env?.GEMINI_API_KEY,
+    _env?.GOOGLE_APPLICATION_CREDENTIALS,
+  ].filter(Boolean);
 
   const startedAt = _now();
   const elapsed = () => _now() - startedAt;
 
-  const args = [
-    '--model', model,
-    '--output', output.tempPath,
-    prompt,
-  ];
+  const args = runner === 'agy'
+    ? ['-p', prompt, '--model', effectiveModel, '--mode', 'plan', '--dangerously-skip-permissions']
+    : ['-p', prompt, '-m', effectiveModel, '--approval-mode', 'plan', '--skip-trust', '--output', output.tempPath];
 
   let result;
   try {
-    result = _run('gemini', args, { cwd, timeoutMs, env });
+    result = _run(runner, args, { cwd, timeoutMs, env });
   } catch (err) {
     return { ok: false, elapsedMs: elapsed(), reason: `the Gemini engine could not be spawned — ${err?.message ?? String(err)}` };
   }
@@ -145,6 +189,28 @@ export async function runStage({
       reason: `the Gemini engine exited with status ${result?.status ?? 'unknown'}` + tail(result, secrets),
     };
   }
+
+  if (!existsSync(output.tempPath) && typeof result?.stdout === 'string' && result.stdout.trim() !== '') {
+    try {
+      const content = deduplicateFindingsBlocks(result.stdout.trim());
+      writeFileSync(output.tempPath, content, 'utf8');
+    } catch (err) {
+      return { ok: false, elapsedMs: elapsed(), reason: `the Gemini final message could not be written — ${err?.message ?? String(err)}` };
+    }
+  }
+
+  if (existsSync(output.tempPath)) {
+    try {
+      const raw = readFileSync(output.tempPath, 'utf8');
+      const deduplicated = deduplicateFindingsBlocks(raw);
+      if (deduplicated !== raw) {
+        writeFileSync(output.tempPath, deduplicated, 'utf8');
+      }
+    } catch {
+      // let subsequent checks handle stat/read errors
+    }
+  }
+
   if (!existsSync(output.tempPath)) {
     return { ok: false, elapsedMs: elapsed(), reason: 'the Gemini engine exited cleanly but wrote no final message' };
   }
