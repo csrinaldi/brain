@@ -31,6 +31,7 @@ import { parseBlame } from './lib/blame.mjs';
 import { shapeResumeView } from './lib/resume-view.mjs';
 import { parseFrontmatter } from '../memory/lib/resume-frontmatter.mjs';
 import { LIFECYCLE_STAGES } from '../lib/sdd-layout.mjs';
+import { prUrl } from './lib/forge-url.mjs';
 
 /** D14's caveat, verbatim in the UI, until #880 lands `type: review` records. */
 export const REVIEWS_SOURCE_NOTE = 'forge comments until #880 lands';
@@ -135,8 +136,12 @@ function buildWorkingMemoryTab({ run, snapshot, issue }) {
   return { ok: true, value: shapeResumeView({ frontmatter, branch }) };
 }
 
+// Delegates to `lib/forge-url.mjs`'s `prUrl` (#882 cold review of PR 1,
+// blocker fix): ONE definition of this shape, not a second copy that can
+// drift from the one `roadmap-model.mjs` (and every later governance view)
+// now shares.
 function buildPrUrl(project, pr) {
-  return project ? `https://github.com/${project}/pull/${pr}` : `pull/${pr}`;
+  return prUrl(project, pr);
 }
 
 /** D14: every round, oldest first (already the order `reviewRows` builds), sourced to the PR — no per-round anchor exists in this repo's provider today (github.mjs:564 drops it). */

@@ -571,7 +571,7 @@ function renderGovernance() {
  * divergences; this renders one loop over rows this page never re-derives.
  */
 function renderRoadmap() {
-  const model = buildRoadmapModel(sectionOf(state, 'graph'));
+  const model = buildRoadmapModel(sectionOf(state, 'graph'), { project: state.meta?.project ?? null });
   if (!model.ok) {
     mounts.canvas.appendChild(said(`the roadmap could not be computed: ${model.reason}`));
     return;
@@ -582,11 +582,13 @@ function renderRoadmap() {
   mounts.canvas.appendChild(renderRoadmapUnlinked(unlinked));
 }
 
-/** One roadmap row: its state chip, its title, its open blockers, and any `parent`-keyed divergence said inline rather than silently absorbed (R882-2). */
+/** One roadmap row: its state chip, its title, its own source stamp (`row()`'s — a link when a project is known, the honest "no source was recorded" stamp when not; #882 cold review of PR 1, blocker), its own `stateReason` when the state could not be read (`roadmap-model.mjs`'s `safeStateOf` guard — #882 cold review of PR #1037, correction 1: a said reason, never a silent `unknown` mark with no explanation), its open blockers, and any `parent`-keyed divergence said inline rather than silently absorbed (R882-2, and correction 2's `nested-epic-not-supported` case). */
 function renderRoadmapRow(row, className) {
   const node = el('div', className);
   node.appendChild(el('span', `roadmap-state ${row.state.className}`, `${row.state.mark} ${row.state.label}`));
   node.appendChild(el('span', 'roadmap-title', `#${row.number} ${row.title}`));
+  node.appendChild(renderSourceStamp(row.sourceStamp));
+  if (row.stateReason) node.appendChild(el('span', 'roadmap-state-reason', row.stateReason));
   if (row.blockedBy.length > 0) node.appendChild(el('span', 'roadmap-blocked', `blocked by ${row.blockedBy.map((n) => `#${n}`).join(', ')}`));
   for (const d of row.divergences) node.appendChild(el('span', 'roadmap-divergence', `${d.reason}${d.value !== null && d.value !== undefined ? `: #${d.value}` : ''}`));
   return node;
@@ -648,7 +650,7 @@ function renderDecisionRow(row) {
   }
   wrap.appendChild(el('strong', 'decision-title', `ADR-${String(row.number).padStart(4, '0')} ${row.title}`));
   wrap.appendChild(el('span', 'decision-status', row.status));
-  wrap.appendChild(el('span', 'source', row.sourceStamp.label));
+  wrap.appendChild(renderSourceStamp(row.sourceStamp));
   if (row.amendments.length > 0) {
     const list = el('ul', 'decision-amendments');
     for (const a of row.amendments) list.appendChild(el('li', null, `Amendment ${a.n}${a.date ? ` (${a.date})` : ''}: ${a.summary}${a.issue ? ` (#${a.issue})` : ''}`));
@@ -692,7 +694,7 @@ function renderDriftWarnings(driftWarnings) {
  * empty section).
  */
 function renderAntiPatterns() {
-  const model = buildAntiPatternsModel(sectionOf(state, 'antiPatterns'));
+  const model = buildAntiPatternsModel(sectionOf(state, 'antiPatterns'), { project: state.meta?.project });
   if (!model.ok) {
     mounts.canvas.appendChild(said(`the anti-patterns catalogue could not be computed: ${model.reason}`));
     return;
@@ -713,8 +715,14 @@ function renderAntiPatternRow(row) {
   }
   wrap.appendChild(el('span', 'anti-pattern-scope', row.scope));
   wrap.appendChild(el('strong', 'anti-pattern-title', row.title));
-  wrap.appendChild(el('span', 'source', row.sourceStamp.label));
-  if (row.issues.length > 0) wrap.appendChild(el('p', 'anti-pattern-issues', row.issues.map((n) => `[forge: #${n}]`).join(', ')));
+  wrap.appendChild(renderSourceStamp(row.sourceStamp));
+  if (row.issueStamps.length > 0) {
+    // One chip per citation, not one joined text node: a citation whose project
+    // is known carries its own href, and a joined string could never be clicked.
+    const cited = el('p', 'anti-pattern-issues');
+    for (const stamp of row.issueStamps) cited.appendChild(renderSourceStamp(stamp));
+    wrap.appendChild(cited);
+  }
   return wrap;
 }
 
