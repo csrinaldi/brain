@@ -154,27 +154,27 @@ push, a posted cold-review APPROVE.
 ## PR 5 — By actor (R882-6)
 
 ```brain-slice-scope/5
-{"slice": 5, "claims": ["R882-6"], "files": ["brain/scripts/ui/lib/actors-model.mjs", "brain/scripts/ui/static/app.js", "brain/scripts/ui/static/app.css", "brain/scripts/ui/static/views-owned.test.mjs"], "terminal_pr": "the tracker feature/issue-882-management-views -> main"}
+{"slice": 5, "claims": ["R882-6"], "files": ["brain/scripts/ui/lib/actors-model.mjs", "brain/scripts/ui/lib/governance-model.mjs", "brain/scripts/ui/lib/governance-model.test.mjs", "brain/scripts/ui/static/app.js", "brain/scripts/ui/static/app.css", "brain/scripts/ui/static/views-owned.test.mjs"], "note": "governance-model.mjs + its test added post-hoc: GOVERNANCE_PLACEHOLDERS lives only there, and T2 asks for nothing left unbuilt once all five sub-views are real.", "terminal_pr": "the tracker feature/issue-882-management-views -> main"}
 ```
 
-- [ ] T1a. `lib/actors-model.test.mjs`: a record-only actor and a
+- [x] T1a. `lib/actors-model.test.mjs`: a record-only actor and a
       forge-only actor both get a row, the second `actorKind: null` with the
       stated reason; `reviewsPosted`'s text carries the open-PRs-only
       caveat verbatim; every row's `prsMerged` is the stated-absence shape,
       never a bare `0`; `reviewsSection.ok === false` degrades per-row, not
       the whole view. RED.
-- [ ] T1b. `lib/actors-model.mjs`: `buildActorsModel(actorsSection,
+- [x] T1b. `lib/actors-model.mjs`: `buildActorsModel(actorsSection,
       reviewsSection)`. Mutation: `prsMerged` defaulted to `0` instead of
       the stated-absence object → red (the "never a bare 0" test).
-- [ ] T2. `static/app.js`: `renderActors`. `static/app.css`: actors classes.
+- [x] T2. `static/app.js`: `renderActors`. `static/app.css`: actors classes.
       `views-owned.test.mjs` **finalized**: all five sub-view identifiers
       present, `GOVERNANCE_PLACEHOLDERS` has nothing left unbuilt, the
       original forbidden-identifier test from `#998`'s
       `views-owned.test.mjs:55-61` is now fully inverted into a presence
       proof for the whole governance surface.
-- [ ] T3. `GIT_CONFIG_GLOBAL=/dev/null npm test` and
+- [x] T3. `GIT_CONFIG_GLOBAL=/dev/null npm test` and
       `npm run brain:repo:check` green; counted diff under 1000.
-- [ ] T4. `npm run memory:save -- "<title>" "<content>" --issue 882 --type decision`; stage only the record and `.memory/index.jsonl`.
+- [x] T4. `npm run memory:save -- "<title>" "<content>" --issue 882 --type decision`; stage only the record and `.memory/index.jsonl`.
 
 ## Review Workload Forecast
 
