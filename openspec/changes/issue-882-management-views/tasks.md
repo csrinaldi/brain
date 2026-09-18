@@ -155,7 +155,7 @@ push, a posted cold-review APPROVE.
 - [x] T1b. `lib/actors-model.mjs`: `buildActorsModel(actorsSection,
       reviewsSection)`. Mutation: `prsMerged` defaulted to `0` instead of
       the stated-absence object → red (the "never a bare 0" test).
-- [ ] T2. `static/app.js`: `renderActors`. `static/app.css`: actors classes.
+- [x] T2. `static/app.js`: `renderActors`. `static/app.css`: actors classes.
       `views-owned.test.mjs` **finalized**: all five sub-view identifiers
       present, `GOVERNANCE_PLACEHOLDERS` has nothing left unbuilt, the
       original forbidden-identifier test from `#998`'s

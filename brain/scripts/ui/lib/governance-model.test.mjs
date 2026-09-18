@@ -16,12 +16,8 @@ test('#882 R882-1: GOVERNANCE_VIEWS is the five sub-view ids, in the issue body\
   }
 });
 
-test('#882 R882-1: every sub-view id not yet built has a non-empty said sentence; roadmap (this PR) has none', () => {
-  assert.equal(GOVERNANCE_PLACEHOLDERS.roadmap, null, 'roadmap draws real content in this PR');
-  for (const id of ['decisions', 'anti-patterns', 'history', 'actors']) {
-    assert.equal(typeof GOVERNANCE_PLACEHOLDERS[id], 'string');
-    assert.ok(GOVERNANCE_PLACEHOLDERS[id].length > 0, `sub-view "${id}" has no placeholder sentence`);
-  }
+test('#882 R882-1/PR 5: every sub-view id draws real content — GOVERNANCE_PLACEHOLDERS has nothing left unbuilt as of #882\'s last slice (By actor)', () => {
+  for (const id of GOVERNANCE_VIEW_IDS) assert.equal(GOVERNANCE_PLACEHOLDERS[id], null, `sub-view "${id}" still names a placeholder`);
 });
 
 test('#882 R882-1: row() derives both source and sourceStamp from one source input, through provenance.mjs\'s own shapers — never a second provenance shaper', () => {

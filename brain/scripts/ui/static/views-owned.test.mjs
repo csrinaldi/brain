@@ -21,6 +21,7 @@ import { dirname, join } from 'node:path';
 
 import { TAB_IDS } from '../lib/drawer-model.mjs';
 import { MODE_IDS, PLACEHOLDERS } from '../lib/view-model.mjs';
+import { GOVERNANCE_VIEW_IDS, GOVERNANCE_PLACEHOLDERS } from '../lib/governance-model.mjs';
 
 const STATIC_DIR = dirname(fileURLToPath(import.meta.url));
 const APP_JS = readFileSync(join(STATIC_DIR, 'app.js'), 'utf8');
@@ -87,9 +88,31 @@ test('#882 R882-5: History\'s own event renderer never branches on a review kind
   assert.ok(!/'review'/.test(fnMatch[0]), 'no branch on a review kind inside History\'s own event renderer');
 });
 
-test('#882: this PR (PR 4) does not draw by-actor yet — that identifier still does not exist in the page', () => {
-  for (const [name, text] of [['app.js', APP_JS], ['index.html', INDEX_HTML]]) {
-    assert.ok(!/\bby-?actor\b/i.test(text), `${name} matched by-actor — that view is #882's PR 5, not PR 4's`);
+test('#882 R882-6: By actor draws real content — records and reviews merged into one row per actor, humans and agents in one table, no fabricated merge count', () => {
+  assert.match(APP_JS, /function renderActors\(/, 'R882-6: By actor must render real content, not a placeholder');
+  assert.match(APP_JS, /buildActorsModel\(/, 'renderActors must build its rows from lib/actors-model.mjs, not recompute them inline');
+  assert.match(APP_JS, /row\.reviewsPosted\.caveat/, 'reviewsPosted must render the model\'s own caveat text, never a bare count with no scope said');
+  assert.match(APP_JS, /row\.prsMerged\.reason/, 'prsMerged must render the model\'s own stated reason, never a bare 0');
+  assert.ok(!/prsMerged\s*:\s*0\b/.test(APP_JS), 'app.js must never hard-code prsMerged as a bare 0');
+});
+
+test('#882 R882-6: renderActors never re-sorts by volume — the model\'s own name order stands (issue #882\'s own "must NOT become a leaderboard")', () => {
+  const fnMatch = APP_JS.match(/function renderActors\([^)]*\) \{[\s\S]*?\n}\n/);
+  assert.ok(fnMatch, 'renderActors function must exist in app.js');
+  assert.ok(!/\.sort\(/.test(fnMatch[0]), 'renderActors must not re-sort the model\'s rows — buildActorsModel already sorts by name only');
+});
+
+test('#882: the governance surface is finalized (PR 5) — all five sub-views draw real content, GOVERNANCE_PLACEHOLDERS has nothing left unbuilt', () => {
+  assert.deepEqual(GOVERNANCE_VIEW_IDS, ['roadmap', 'decisions', 'anti-patterns', 'history', 'actors']);
+  for (const id of GOVERNANCE_VIEW_IDS) assert.equal(GOVERNANCE_PLACEHOLDERS[id], null, `sub-view "${id}" still names a placeholder — every #882 view is built as of PR 5`);
+});
+
+test('#882: every governance row\'s source stamp goes through renderSourceStamp — a hand-built el(\'span\', \'source\', …) drops the "open ↗" chip a real forge link would otherwise carry', () => {
+  for (const name of ['renderDecisionRow', 'renderAntiPatternRow', 'renderHistoryEvent', 'renderActorRow']) {
+    const fnMatch = APP_JS.match(new RegExp(`function ${name}\\([^)]*\\) \\{[\\s\\S]*?\\n}\\n`));
+    assert.ok(fnMatch, `${name} function must exist in app.js`);
+    assert.ok(!/el\('span',\s*'source',/.test(fnMatch[0]), `${name} must not hand-build the source span directly — read it through renderSourceStamp instead`);
+    assert.match(fnMatch[0], /renderSourceStamp\(/, `${name} must render its row's sourceStamp through renderSourceStamp, never a second copy of that logic`);
   }
 });
 

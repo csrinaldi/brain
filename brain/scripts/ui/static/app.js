@@ -22,6 +22,7 @@ import { buildRoadmapModel } from './lib/roadmap-model.mjs';
 import { buildDecisionsModel } from './lib/decisions-model.mjs';
 import { buildAntiPatternsModel } from './lib/anti-patterns-model.mjs';
 import { buildHistoryModel } from './lib/history-model.mjs';
+import { buildActorsModel } from './lib/actors-model.mjs';
 import { sourceStamp } from './lib/provenance.mjs';
 import { MODES, PLACEHOLDERS, initialView, switchMode, keyAction } from './lib/view-model.mjs';
 import { GOVERNANCE_VIEWS, GOVERNANCE_PLACEHOLDERS } from './lib/governance-model.mjs';
@@ -546,7 +547,7 @@ function switchGovernanceView(subView) {
   render();
 }
 
-/** The router's own sub-router: Roadmap (R882-2), Decisions (R882-3), Anti-patterns (R882-4) and History (R882-5) draw real content; the remaining view still says the PR that brings it (`GOVERNANCE_PLACEHOLDERS`, never an empty area). */
+/** The router's own sub-router: as of PR 5 (By actor, R882-6) all five sub-views draw real content — Roadmap (R882-2), Decisions (R882-3), Anti-patterns (R882-4), History (R882-5) and Actors (R882-6). The final line is a defensive fallback for a `governanceView` outside `GOVERNANCE_VIEW_IDS`, which cannot happen today (`GOVERNANCE_PLACEHOLDERS` is now all `null`, never reached). */
 function renderGovernance() {
   renderGovernanceNav();
   clear(mounts.canvas);
@@ -564,6 +565,10 @@ function renderGovernance() {
   }
   if (governanceView === 'history') {
     renderHistory();
+    return;
+  }
+  if (governanceView === 'actors') {
+    renderActors();
     return;
   }
   mounts.canvas.appendChild(said(GOVERNANCE_PLACEHOLDERS[governanceView]));
@@ -653,7 +658,7 @@ function renderDecisionRow(row) {
   }
   wrap.appendChild(el('strong', 'decision-title', `ADR-${String(row.number).padStart(4, '0')} ${row.title}`));
   wrap.appendChild(el('span', 'decision-status', row.status));
-  wrap.appendChild(el('span', 'source', row.sourceStamp.label));
+  wrap.appendChild(renderSourceStamp(row.sourceStamp));
   if (row.amendments.length > 0) {
     const list = el('ul', 'decision-amendments');
     for (const a of row.amendments) list.appendChild(el('li', null, `Amendment ${a.n}${a.date ? ` (${a.date})` : ''}: ${a.summary}${a.issue ? ` (#${a.issue})` : ''}`));
@@ -718,7 +723,7 @@ function renderAntiPatternRow(row) {
   }
   wrap.appendChild(el('span', 'anti-pattern-scope', row.scope));
   wrap.appendChild(el('strong', 'anti-pattern-title', row.title));
-  wrap.appendChild(el('span', 'source', row.sourceStamp.label));
+  wrap.appendChild(renderSourceStamp(row.sourceStamp));
   if (row.issues.length > 0) wrap.appendChild(el('p', 'anti-pattern-issues', row.issues.map((n) => `[forge: #${n}]`).join(', ')));
   return wrap;
 }
@@ -765,7 +770,7 @@ function renderHistoryEvent(event) {
   wrap.appendChild(el('span', `history-kind history-kind-${event.kind}`, event.kind));
   wrap.appendChild(el('span', 'history-date', event.date ?? 'no date recorded'));
   wrap.appendChild(el('span', 'history-title', event.title));
-  wrap.appendChild(el('span', 'source', event.sourceStamp.label));
+  wrap.appendChild(renderSourceStamp(event.sourceStamp));
   return wrap;
 }
 
@@ -777,6 +782,39 @@ function renderHistoryReviewsLink() {
   button.type = 'button';
   button.addEventListener('click', () => switchToMode('reviews'));
   wrap.appendChild(button);
+  return wrap;
+}
+
+/**
+ * By actor (#882 R882-6): one row per actor, humans and agents in the same
+ * table under the same schema — nothing here is scored or ranked
+ * (issue #882's own "must NOT become"). `lib/actors-model.mjs` decided all
+ * of it: the merge of `actors` and `reviews`, the name-only sort, the
+ * open-PRs-only caveat on `reviewsPosted`, the stated absence on
+ * `prsMerged`; this renders one loop over rows this page never re-derives.
+ */
+function renderActors() {
+  const model = buildActorsModel(sectionOf(state, 'actors'), sectionOf(state, 'reviews'));
+  if (!model.ok) {
+    mounts.canvas.appendChild(said(`the by-actor view could not be computed: ${model.reason}`));
+    return;
+  }
+  const { rows } = model.value;
+  mounts.canvas.appendChild(el('p', 'canvas-summary', `${rows.length} actor(s) — records and open-PR review threads, name order only`));
+  for (const row of rows) mounts.canvas.appendChild(renderActorRow(row));
+}
+
+/** One actor row: its kind (or the stated "kind unknown" reason for a forge-only reviewer), its record count by type, and its own `sourceStamp` — an aggregated row names no single file, so `source: null` states that honestly (R882-1's shared `row()` helper, reused a fifth time). `reviewsPosted` always carries the model's own open-PRs-only caveat; `prsMerged` always carries the model's own stated absence, never a bare `0`. */
+function renderActorRow(row) {
+  const wrap = el('div', 'actor-row');
+  wrap.appendChild(el('strong', 'actor-name', row.actor));
+  wrap.appendChild(el('span', 'actor-kind', row.actorKind ?? row.actorKindReason ?? 'kind unknown'));
+  wrap.appendChild(renderSourceStamp(row.sourceStamp));
+  wrap.appendChild(el('p', 'actor-records', `${row.records} record(s)${Object.keys(row.byType).length > 0 ? `: ${Object.entries(row.byType).map(([type, n]) => `${type} ${n}`).join(', ')}` : ''}`));
+  wrap.appendChild(el('p', 'actor-reviews', row.reviewsPosted.ok
+    ? `reviews posted: ${row.reviewsPosted.count} — ${row.reviewsPosted.caveat}`
+    : `reviews posted: not computed — ${row.reviewsPosted.reason}`));
+  wrap.appendChild(el('p', 'actor-prs-merged', `PRs merged: not shown — ${row.prsMerged.reason}`));
   return wrap;
 }
 

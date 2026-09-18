@@ -19,17 +19,20 @@ export const GOVERNANCE_VIEW_IDS = Object.freeze(GOVERNANCE_VIEWS.map((view) => 
 /**
  * The said sentence a sub-view not yet built renders instead of an empty
  * area (never empty-on-failure), mirroring view-model.mjs's own
- * PLACEHOLDERS table for the four top-level modes. `roadmap` is `null`
- * from this PR on: it draws real content starting here. The other four
- * name the PR of this ticket's own chain that brings them, updated by
- * each of that chain's PRs as they land.
+ * PLACEHOLDERS table for the four top-level modes. As of PR 5 (#882's
+ * last slice, By actor), all five sub-views draw real content — every
+ * entry is `null`. The table itself stays (`renderGovernance`'s router
+ * still reads it as its own defensive fallback for a `governanceView`
+ * outside `GOVERNANCE_VIEW_IDS`, which cannot happen today but costs
+ * nothing to leave named), so a sixth sub-view added later has an obvious
+ * place to say it is not built yet, the same way this one did.
  */
 export const GOVERNANCE_PLACEHOLDERS = Object.freeze({
   roadmap: null,
-  decisions: 'the decisions view is not built yet — it lands in PR 2 of #882',
-  'anti-patterns': 'the anti-patterns view is not built yet — it lands in PR 3 of #882',
-  history: 'the history view is not built yet — it lands in PR 4 of #882',
-  actors: 'the by-actor view is not built yet — it lands in PR 5 of #882',
+  decisions: null,
+  'anti-patterns': null,
+  history: null,
+  actors: null,
 });
 
 /**

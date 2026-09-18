@@ -230,6 +230,15 @@ body {
 .history-reviews-link { margin-top: 10px; padding: 8px 10px; border: 1px dashed var(--line); border-radius: 6px; }
 .history-reviews-link .said { margin: 0 0 6px; }
 
+/* ── the By actor view (#882 R882-6): one row per actor, humans and agents
+   in the same table under the same schema — no colour ever ranks a row,
+   this section carries no severity-like palette ── */
+
+.actor-row { margin-bottom: 14px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; }
+.actor-name { display: inline-block; }
+.actor-kind { display: inline-block; margin-left: 6px; font-size: 11px; padding: 1px 6px; border-radius: 4px; background: var(--surface); color: var(--muted); }
+.actor-records, .actor-reviews, .actor-prs-merged { margin: 6px 0 0; font-size: 12px; color: var(--muted); }
+
 /* ── the degradation bands: never a blank area, always a said reason ───── */
 
 .banners:empty { display: none; }
