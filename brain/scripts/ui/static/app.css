@@ -47,6 +47,11 @@
   --severity-correction-fg: #1b1b1f;  --severity-correction-bg: #ffe9b8;
   --severity-editorial-fg: #1b1b1f;   --severity-editorial-bg: #ececf2;
   --severity-unknown-fg: #8a4b00;     --severity-unknown-bg: #ffffff;
+  /* "the data disagrees with itself" (#882 D6): the Roadmap view's
+     parent-grammar/parent-ambiguous/parent-not-epic warnings and, from PR 2
+     on, the Decisions view's drift warnings — one shared visual language,
+     distinct from --severity-*, which is about review findings. */
+  --divergence-fg: #6b21a8;           --divergence-bg: #f3e8ff;
 }
 
 /* The design's dark palette (Claude Design "Brain UI implementation
@@ -77,6 +82,7 @@
     --severity-correction-fg: #f59e0b;  --severity-correction-bg: #451a03;
     --severity-editorial-fg: #94a3b8;   --severity-editorial-bg: #1e293b;
     --severity-unknown-fg: #fbbf24;     --severity-unknown-bg: #0f172a;
+    --divergence-fg: #d8b4fe;           --divergence-bg: #2e1065;
   }
 }
 
@@ -135,6 +141,104 @@ body {
   font-weight: 600;
   background: var(--surface-active);
 }
+
+/* ── the governance sub-nav: the five buttons of lib/governance-model.mjs
+   (#882 R882-1) — same idiom as .modes above, one level down ───────────── */
+
+.governance-nav[hidden] { display: none; }
+.governance-nav {
+  display: flex;
+  gap: 8px;
+  padding: 6px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+.governance-nav button {
+  font: inherit;
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--muted);
+  cursor: pointer;
+}
+.governance-nav button[aria-current='page'] {
+  color: var(--ink);
+  font-weight: 600;
+  background: var(--surface-active);
+}
+
+/* ── the Roadmap view (#882 R882-2): per-epic status grouping, no
+   timeline — each epic's row, its children nested under it, the unlinked
+   bucket last (rule zero: a node with no epic parent is never dropped) ── */
+
+.roadmap-epic { margin-bottom: 14px; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.roadmap-row { display: flex; align-items: center; gap: 8px; padding: 6px 10px; flex-wrap: wrap; }
+.roadmap-epic-row { background: var(--surface); border-bottom: 1px solid var(--line); font-weight: 600; }
+.roadmap-children { padding: 2px 0; }
+.roadmap-children .said { margin: 6px 10px; }
+.roadmap-child-row { padding-left: 24px; }
+.roadmap-unlinked { margin-bottom: 14px; padding: 8px 10px; border: 1px dashed var(--line); border-radius: 6px; }
+.roadmap-unlinked h3 { margin: 0 0 6px; font-size: 13px; }
+.roadmap-title { flex: 1; }
+.roadmap-blocked { font-size: 11px; color: var(--warn); }
+.roadmap-state-reason { font-size: 11px; color: var(--warn); }
+.roadmap-divergence { font-size: 11px; padding: 1px 6px; border-radius: 4px; color: var(--divergence-fg); background: var(--divergence-bg); }
+.roadmap-state { font-size: 11px; padding: 1px 6px; border-radius: 4px; }
+.roadmap-state.state-planned { color: var(--state-planned-fg); background: var(--state-planned-bg); }
+.roadmap-state.state-in-flight { color: var(--state-in-flight-fg); background: var(--state-in-flight-bg); }
+.roadmap-state.state-done { color: var(--state-done-fg); background: var(--state-done-bg); }
+.roadmap-state.status-blocked { color: var(--state-blocked-fg); background: var(--state-blocked-bg); }
+.roadmap-state.status-awaiting-review { color: var(--state-awaiting-review-fg); background: var(--state-awaiting-review-bg); }
+.roadmap-state.status-unclassified { color: var(--state-unclassified-fg); background: var(--state-unclassified-bg); }
+.roadmap-state.status-unreadable { color: var(--state-unreadable-fg); background: var(--state-unreadable-bg); }
+.roadmap-state.roadmap-not-computed { color: var(--state-not-computed-fg); background: var(--state-not-computed-bg); }
+.roadmap-state.node-unknown { color: var(--state-unknown-fg); background: var(--state-unknown-bg); }
+
+/* ── the Decisions view (#882 R882-3): the ADR table, sorted by number, an
+   unreadable ADR kept as its own row — sorted last — and drift warnings
+   riding beside the table, never instead of it ── */
+
+.decision-row { margin-bottom: 14px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; }
+.decision-title { display: block; }
+.decision-status { display: inline-block; margin-top: 4px; font-size: 11px; padding: 1px 6px; border-radius: 4px; background: var(--surface); color: var(--muted); }
+.decision-amendments { margin: 6px 0 0 18px; padding: 0; font-size: 12px; }
+.decision-issues, .decision-supersedes, .decision-superseded-by { margin: 6px 0 0; font-size: 12px; color: var(--muted); }
+.decision-drift { margin-top: 10px; padding: 8px 10px; border: 1px dashed var(--divergence-fg); border-radius: 6px; background: var(--divergence-bg); }
+.decision-drift .said { margin: 0; color: var(--divergence-fg); }
+.decision-drift .said-list { margin: 6px 0 0 18px; padding: 0; color: var(--divergence-fg); }
+
+/* ── the Anti-patterns view (#882 R882-4): the catalogue, core before
+   project, an unreadable entry kept as its own row — sorted last — and an
+   unlistable scope said beside the other scope's real rows ── */
+
+.anti-pattern-row { margin-bottom: 14px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; }
+.anti-pattern-scope { display: inline-block; margin-right: 6px; font-size: 11px; padding: 1px 6px; border-radius: 4px; background: var(--surface); color: var(--muted); }
+.anti-pattern-title { display: inline-block; }
+.anti-pattern-issues { margin: 6px 0 0; font-size: 12px; color: var(--muted); }
+.anti-pattern-unlistable { margin-top: 10px; padding: 8px 10px; border: 1px dashed var(--divergence-fg); border-radius: 6px; background: var(--divergence-bg); }
+.anti-pattern-unlistable .said { margin: 0; color: var(--divergence-fg); }
+.anti-pattern-unlistable .said-list { margin: 6px 0 0 18px; padding: 0; color: var(--divergence-fg); }
+
+/* ── the History view (#882 R882-5): merges, releases and ADR amendments,
+   newest first — review verdicts are deliberately excluded, linked to the
+   Reviews mode instead ── */
+
+.history-event { margin-bottom: 10px; padding: 6px 10px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; border: 1px solid var(--line); border-radius: 6px; }
+.history-kind { font-size: 11px; padding: 1px 6px; border-radius: 4px; background: var(--surface); color: var(--muted); text-transform: uppercase; }
+.history-date { font-size: 11px; color: var(--muted); }
+.history-title { flex: 1; }
+.history-reviews-link { margin-top: 10px; padding: 8px 10px; border: 1px dashed var(--line); border-radius: 6px; }
+.history-reviews-link .said { margin: 0 0 6px; }
+
+/* ── the By actor view (#882 R882-6): one row per actor, humans and agents
+   in the same table under the same schema — no colour ever ranks a row,
+   this section carries no severity-like palette ── */
+
+.actor-row { margin-bottom: 14px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; }
+.actor-name { display: inline-block; }
+.actor-kind { display: inline-block; margin-left: 6px; font-size: 11px; padding: 1px 6px; border-radius: 4px; background: var(--surface); color: var(--muted); }
+.actor-records, .actor-reviews, .actor-prs-merged { margin: 6px 0 0; font-size: 12px; color: var(--muted); }
 
 /* ── the degradation bands: never a blank area, always a said reason ───── */
 

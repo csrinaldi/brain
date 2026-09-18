@@ -18,20 +18,29 @@ import { buildLaneModel } from './lib/lane-model.mjs';
 import { buildDrawerModel } from './lib/drawer-model.mjs';
 import { buildSddModel, STAGE_VOCAB } from './lib/sdd-model.mjs';
 import { buildReviewTimeline } from './lib/review-timeline.mjs';
+import { buildRoadmapModel } from './lib/roadmap-model.mjs';
+import { buildDecisionsModel } from './lib/decisions-model.mjs';
+import { buildAntiPatternsModel } from './lib/anti-patterns-model.mjs';
+import { buildHistoryModel, capNote } from './lib/history-model.mjs';
+import { buildActorsModel } from './lib/actors-model.mjs';
 import { sourceStamp } from './lib/provenance.mjs';
 import { MODES, PLACEHOLDERS, initialView, switchMode, keyAction } from './lib/view-model.mjs';
+import { GOVERNANCE_VIEWS, GOVERNANCE_PLACEHOLDERS } from './lib/governance-model.mjs';
 
 const mounts = {
   status: document.getElementById('status'),
   modes: document.getElementById('modes'),
   banners: document.getElementById('banners'),
+  governanceNav: document.getElementById('governance-nav'),
   canvas: document.getElementById('canvas'),
   drawer: document.getElementById('drawer'),
 };
 
 let state = initialPageState();
-/** The current mode id (#998 R998-2). `map` is the only one with content this PR; the router says so for the rest. */
+/** The current mode id (#998 R998-2). `map`, `sdd`, `reviews` and `governance` all have real content (#882 R882-1). */
 let view = initialView();
+/** The active governance sub-view id (#882 R882-1) — mouse/Enter-activated only; the top-level Tab/Esc/J/K contract is untouched. */
+let governanceView = GOVERNANCE_VIEWS[0].id;
 /** The issue whose node is activated; `null` until one is. The drawer follows it — `map` mode only. */
 let selectedIssue = null;
 /** The last `GET /api/change/<N>` body for the selected issue; `null` while it is still being read. */
@@ -118,8 +127,11 @@ function switchToMode(mode) {
   render();
 }
 
-/** The router (#998 R998-2/R998-4/R998-5): `map` draws the canvas + drawer, `sdd` draws the seven-stage matrix, `reviews` draws the timeline + verdict queue; the rest say which PR brings their content. */
+/** The router (#998 R998-2/R998-4/R998-5, #882 R882-1): `map` draws the canvas + drawer, `sdd` draws the seven-stage matrix, `reviews` draws the timeline + verdict queue, `governance` draws its own sub-nav + sub-router. `#governance-nav` is shown only while `governance` is the active mode. */
 function renderContent() {
+  mounts.governanceNav.hidden = view !== 'governance';
+  if (view !== 'governance') clear(mounts.governanceNav);
+
   if (view === 'map') {
     renderLanes();
     renderDrawer();
@@ -133,6 +145,12 @@ function renderContent() {
   }
   if (view === 'reviews') {
     renderReviews();
+    mounts.drawer.hidden = true;
+    clear(mounts.drawer);
+    return;
+  }
+  if (view === 'governance') {
+    renderGovernance();
     mounts.drawer.hidden = true;
     clear(mounts.drawer);
     return;
@@ -504,6 +522,320 @@ function renderReviewRound(round) {
     row.appendChild(item);
   }
   return row;
+}
+
+/**
+ * The governance surface (#882 R882-1): the five sub-nav buttons, drawn
+ * straight from `lib/governance-model.mjs`'s own table — no inline handler,
+ * no second copy of the labels, the same idiom `renderModes` already uses
+ * for the four top-level modes. Switching sub-views is mouse/Enter-activated
+ * buttons only; the top-level Tab/Esc/J/K keyboard contract is untouched.
+ */
+function renderGovernanceNav() {
+  clear(mounts.governanceNav);
+  for (const sub of GOVERNANCE_VIEWS) {
+    const button = el('button', null, sub.label);
+    button.type = 'button';
+    if (sub.id === governanceView) button.setAttribute('aria-current', 'page');
+    button.addEventListener('click', () => switchGovernanceView(sub.id));
+    mounts.governanceNav.appendChild(button);
+  }
+}
+
+function switchGovernanceView(subView) {
+  governanceView = subView;
+  render();
+}
+
+/** The router's own sub-router: as of PR 5 (By actor, R882-6) all five sub-views draw real content — Roadmap (R882-2), Decisions (R882-3), Anti-patterns (R882-4), History (R882-5) and Actors (R882-6). The final line is a defensive fallback for a `governanceView` outside `GOVERNANCE_VIEW_IDS`, which cannot happen today (`GOVERNANCE_PLACEHOLDERS` is now all `null`, never reached). */
+function renderGovernance() {
+  renderGovernanceNav();
+  clear(mounts.canvas);
+  if (governanceView === 'roadmap') {
+    renderRoadmap();
+    return;
+  }
+  if (governanceView === 'decisions') {
+    renderDecisions();
+    return;
+  }
+  if (governanceView === 'anti-patterns') {
+    renderAntiPatterns();
+    return;
+  }
+  if (governanceView === 'history') {
+    renderHistory();
+    return;
+  }
+  if (governanceView === 'actors') {
+    renderActors();
+    return;
+  }
+  mounts.canvas.appendChild(said(GOVERNANCE_PLACEHOLDERS[governanceView]));
+}
+
+/**
+ * Roadmap (#882 R882-2): per-epic status grouping, no timeline (no
+ * start/due date exists anywhere in the data — the view's own copy says
+ * so). `lib/roadmap-model.mjs` decided all of it — grouping, state,
+ * divergences; this renders one loop over rows this page never re-derives.
+ */
+function renderRoadmap() {
+  const model = buildRoadmapModel(sectionOf(state, 'graph'), { project: state.meta?.project ?? null });
+  if (!model.ok) {
+    mounts.canvas.appendChild(said(`the roadmap could not be computed: ${model.reason}`));
+    return;
+  }
+  const { epics, unlinked } = model.value;
+  mounts.canvas.appendChild(el('p', 'canvas-summary', `${epics.length} epic(s), ${unlinked.length} unlinked node(s) — per-epic status only, no timeline is computed`));
+  for (const epic of epics) mounts.canvas.appendChild(renderRoadmapEpic(epic));
+  mounts.canvas.appendChild(renderRoadmapUnlinked(unlinked));
+}
+
+/** One roadmap row: its state chip, its title, its own source stamp (`row()`'s — a link when a project is known, the honest "no source was recorded" stamp when not; #882 cold review of PR 1, blocker), its own `stateReason` when the state could not be read (`roadmap-model.mjs`'s `safeStateOf` guard — #882 cold review of PR #1037, correction 1: a said reason, never a silent `unknown` mark with no explanation), its open blockers, and any `parent`-keyed divergence said inline rather than silently absorbed (R882-2, and correction 2's `nested-epic-not-supported` case). */
+function renderRoadmapRow(row, className) {
+  const node = el('div', className);
+  node.appendChild(el('span', `roadmap-state ${row.state.className}`, `${row.state.mark} ${row.state.label}`));
+  node.appendChild(el('span', 'roadmap-title', `#${row.number} ${row.title}`));
+  node.appendChild(renderSourceStamp(row.sourceStamp));
+  if (row.stateReason) node.appendChild(el('span', 'roadmap-state-reason', row.stateReason));
+  if (row.blockedBy.length > 0) node.appendChild(el('span', 'roadmap-blocked', `blocked by ${row.blockedBy.map((n) => `#${n}`).join(', ')}`));
+  for (const d of row.divergences) node.appendChild(el('span', 'roadmap-divergence', `${d.reason}${d.value !== null && d.value !== undefined ? `: #${d.value}` : ''}`));
+  return node;
+}
+
+function renderRoadmapEpic(epic) {
+  const wrap = el('div', 'roadmap-epic');
+  wrap.appendChild(renderRoadmapRow(epic, 'roadmap-row roadmap-epic-row'));
+  const children = el('div', 'roadmap-children');
+  if (epic.children.length === 0) {
+    children.appendChild(said('no children declared for this epic yet'));
+  } else {
+    for (const child of epic.children) children.appendChild(renderRoadmapRow(child, 'roadmap-row roadmap-child-row'));
+  }
+  wrap.appendChild(children);
+  return wrap;
+}
+
+/** Rule zero (lane-model.mjs's own "never filter a node away" discipline, applied here to epic grouping): a node with no epic parent is never dropped — it lands here, said, never silently absorbed. */
+function renderRoadmapUnlinked(unlinked) {
+  const wrap = el('div', 'roadmap-unlinked');
+  wrap.appendChild(el('h3', null, 'Unlinked'));
+  if (unlinked.length === 0) {
+    wrap.appendChild(said('every open node declares a real epic parent'));
+    return wrap;
+  }
+  for (const node of unlinked) wrap.appendChild(renderRoadmapRow(node, 'roadmap-row roadmap-child-row'));
+  return wrap;
+}
+
+/**
+ * Decisions (#882 R882-3): the ADR table, sorted by number, an unreadable
+ * ADR kept as its own row — sorted last — rather than dropped; drift
+ * warnings ride beside the table, never instead of it.
+ * `lib/decisions-model.mjs` decided all of it — the row shape (each row's
+ * own `sourceStamp`, through `governance-model.mjs`'s `row()` helper, R882-1),
+ * the sort, the drift passthrough — this renders one loop over rows this
+ * page never re-derives.
+ */
+function renderDecisions() {
+  const model = buildDecisionsModel(sectionOf(state, 'adrs'), sectionOf(state, 'drift'));
+  if (!model.ok) {
+    mounts.canvas.appendChild(said(`the decisions view could not be computed: ${model.reason}`));
+    return;
+  }
+  const { rows, driftWarnings } = model.value;
+  mounts.canvas.appendChild(el('p', 'canvas-summary', `${rows.length} ADR(s)`));
+  for (const row of rows) mounts.canvas.appendChild(renderDecisionRow(row));
+  mounts.canvas.appendChild(renderDriftWarnings(driftWarnings));
+}
+
+/** One ADR row: an unreadable entry is its own said reason, kept in place (never dropped); a readable one carries its title, status, amendments, cited issues (the model's own `issuesLabel` — "referenced," never "driving") and supersession, each beside its own `sourceStamp`. */
+function renderDecisionRow(row) {
+  const wrap = el('div', 'decision-row');
+  if (row.ok === false) {
+    wrap.appendChild(el('strong', null, row.path ?? 'an unreadable ADR'));
+    wrap.appendChild(said(row.reason));
+    return wrap;
+  }
+  wrap.appendChild(el('strong', 'decision-title', `ADR-${String(row.number).padStart(4, '0')} ${row.title}`));
+  wrap.appendChild(el('span', 'decision-status', row.status));
+  wrap.appendChild(renderSourceStamp(row.sourceStamp));
+  if (row.amendments.length > 0) {
+    const list = el('ul', 'decision-amendments');
+    for (const a of row.amendments) list.appendChild(el('li', null, `Amendment ${a.n}${a.date ? ` (${a.date})` : ''}: ${a.summary}${a.issue ? ` (#${a.issue})` : ''}`));
+    wrap.appendChild(list);
+  }
+  if (row.issues.length > 0) wrap.appendChild(el('p', 'decision-issues', `${row.issuesLabel}: ${row.issues.map((n) => `#${n}`).join(', ')}`));
+  if (row.supersedes.length > 0) wrap.appendChild(el('p', 'decision-supersedes', `supersedes: ${row.supersedes.map((n) => `ADR-${String(n).padStart(4, '0')}`).join(', ')}`));
+  if (row.supersededBy !== null) wrap.appendChild(el('p', 'decision-superseded-by', `superseded by ADR-${String(row.supersededBy).padStart(4, '0')}`));
+  return wrap;
+}
+
+/** The same drift text `renderSnapshotText` already renders in the terminal (`snapshot.mjs:457-469`) — never a second computation of what drifted, only a second place it is said. A `driftWarnings` read failure is its own said reason, beside the table above, never a reason to blank it (R882-3). */
+function renderDriftWarnings(driftWarnings) {
+  const wrap = el('div', 'decision-drift');
+  if (!driftWarnings.ok) {
+    wrap.appendChild(said(`adr drift not computed — ${driftWarnings.reason}`));
+    return wrap;
+  }
+  const { homeOnly, filesOnly, unreadable } = driftWarnings.value;
+  const n = homeOnly.length + filesOnly.length + unreadable.length;
+  if (n === 0) {
+    wrap.appendChild(said('adr drift: none — HOME.md and the parser agree'));
+    return wrap;
+  }
+  const lines = [
+    ...homeOnly.map((h) => `listed in HOME.md, not readable: ADR-${String(h.number).padStart(4, '0')} ${h.path ?? ''}`.trimEnd()),
+    ...filesOnly.map((f) => `on disk, not listed in HOME.md: ADR-${String(f.number).padStart(4, '0')} ${f.path}`),
+    ...unreadable.map((u) => `unreadable: ${u.path} — ${u.reason}`),
+  ];
+  wrap.appendChild(saidList(`adr drift — ${n} disagreement(s) between brain/HOME.md and the parser (reported, never a gate):`, lines));
+  return wrap;
+}
+
+/**
+ * Anti-patterns (#882 R882-4): the catalogue, core before project, sorted
+ * by id within each scope. `lib/anti-patterns-model.mjs` decided all of it
+ * — the grouping, the sort, the per-row `sourceStamp` (R882-1's shared
+ * `row()` helper, reused a third time); this renders one loop over rows
+ * this page never re-derives. A directory that could not be listed at all
+ * is its own said reason beside the other scope's real rows (never an
+ * empty section).
+ */
+function renderAntiPatterns() {
+  const model = buildAntiPatternsModel(sectionOf(state, 'antiPatterns'), { project: state.meta?.project });
+  if (!model.ok) {
+    mounts.canvas.appendChild(said(`the anti-patterns catalogue could not be computed: ${model.reason}`));
+    return;
+  }
+  const { rows, unlistable } = model.value;
+  mounts.canvas.appendChild(el('p', 'canvas-summary', `${rows.length} anti-pattern(s)`));
+  for (const row of rows) mounts.canvas.appendChild(renderAntiPatternRow(row));
+  if (unlistable.length > 0) mounts.canvas.appendChild(renderAntiPatternsUnlistable(unlistable));
+}
+
+/** One catalogue row: an unreadable entry is its own said reason, kept in place (never dropped); a readable one carries its title, scope and its own `sourceStamp`, plus the issues it cites — each stamped `[forge: #N]`, the same bracket form `sourceStamp` uses for a real forge ref, though no per-issue URL exists in this data (a bare `#N`/`ISSUE-N` mention, never a fabricated link). */
+function renderAntiPatternRow(row) {
+  const wrap = el('div', 'anti-pattern-row');
+  if (row.ok === false) {
+    wrap.appendChild(el('strong', null, row.path ?? 'an unreadable anti-pattern'));
+    wrap.appendChild(said(row.reason));
+    return wrap;
+  }
+  wrap.appendChild(el('span', 'anti-pattern-scope', row.scope));
+  wrap.appendChild(el('strong', 'anti-pattern-title', row.title));
+  wrap.appendChild(renderSourceStamp(row.sourceStamp));
+  if (row.issueStamps.length > 0) {
+    // One chip per citation, not one joined text node: a citation whose project
+    // is known carries its own href, and a joined string could never be clicked.
+    const cited = el('p', 'anti-pattern-issues');
+    for (const stamp of row.issueStamps) cited.appendChild(renderSourceStamp(stamp));
+    wrap.appendChild(cited);
+  }
+  return wrap;
+}
+
+/** An unlistable scope's directory is said beside the other scope's real rows, never read as "zero anti-patterns in that scope" (R882-4). Only called when there is something to say — an empty area would read as "nothing happened here," the same evidence-reader discipline every other degraded band in this page follows. */
+function renderAntiPatternsUnlistable(unlistable) {
+  const wrap = el('div', 'anti-pattern-unlistable');
+  const lines = unlistable.map((u) => `${u.scope}: ${u.reason}`);
+  wrap.appendChild(saidList('anti-patterns — a scope could not be listed:', lines));
+  return wrap;
+}
+
+/**
+ * History (#882 R882-5): merges, releases and ADR amendments, newest
+ * first. `lib/history-model.mjs` decided all of it — the merge (cited to
+ * the forge URL when the commit names a reference and the served project
+ * is known, a plain git source otherwise — never asserting "PR", only
+ * "cites"), the release and adr-amended events, the sort, each event's own
+ * `sourceStamp` (R882-1's shared `row()` helper, reused a fourth time);
+ * this renders one loop over events this page never re-derives. Review
+ * verdicts are deliberately excluded from this model — no field anywhere
+ * in the data carries a review round's timestamp, so this pane links to
+ * the Reviews mode instead of rendering a second, undated projection of
+ * the same rounds.
+ */
+function renderHistory() {
+  const model = buildHistoryModel({
+    history: sectionOf(state, 'history'),
+    adrs: sectionOf(state, 'adrs'),
+    project: state.meta?.project ?? null,
+  });
+  if (!model.ok) {
+    mounts.canvas.appendChild(said(`history could not be computed: ${model.reason}`));
+    return;
+  }
+  const { events, cap } = model.value;
+  // The count alone would read as the whole history; the cap sentence is what
+  // keeps a capped commit list from looking like a quiet period (#1043).
+  const note = capNote(cap);
+  mounts.canvas.appendChild(el('p', 'canvas-summary', note ? `${events.length} event(s) — ${note}` : `${events.length} event(s)`));
+  mounts.canvas.appendChild(said(model.value.sameDayNote));
+  for (const event of events) mounts.canvas.appendChild(renderHistoryEvent(event));
+  mounts.canvas.appendChild(renderHistoryReviewsLink());
+}
+
+/** One history event: its kind, its date, its title, and its own `sourceStamp` (the same chip every other governance row carries — a merge event's forge link when it cites a reference, a git sha or an ADR's own path otherwise). */
+function renderHistoryEvent(event) {
+  const wrap = el('div', 'history-event');
+  wrap.appendChild(el('span', `history-kind history-kind-${event.kind}`, event.kind));
+  wrap.appendChild(el('span', 'history-date', event.date ?? 'no date recorded'));
+  // The model keeps an event with an unreadable date at the END and states
+  // why; printing only the date would drop that sentence (#1043 round 2).
+  if (event.malformed) wrap.appendChild(said(`this line could not be read: ${event.malformed}`));
+  if (event.dateUnparseable) wrap.appendChild(said(event.dateUnparseable));
+  wrap.appendChild(el('span', 'history-title', event.title));
+  wrap.appendChild(renderSourceStamp(event.sourceStamp));
+  return wrap;
+}
+
+/** No review verdict is ever rendered inside this pane (R882-5: no round timestamp exists in this data yet) — a plain button hands off to the Reviews mode instead of a second, undated projection of the same rounds. */
+function renderHistoryReviewsLink() {
+  const wrap = el('div', 'history-reviews-link');
+  wrap.appendChild(said('review verdicts have no round timestamp yet — see the Reviews mode for those'));
+  const button = el('button', null, 'Go to Reviews');
+  button.type = 'button';
+  button.addEventListener('click', () => switchToMode('reviews'));
+  wrap.appendChild(button);
+  return wrap;
+}
+
+/**
+ * By actor (#882 R882-6): one row per actor, humans and agents in the same
+ * table under the same schema — nothing here is scored or ranked
+ * (issue #882's own "must NOT become"). `lib/actors-model.mjs` decided all
+ * of it: the merge of `actors` and `reviews`, the name-only sort, the
+ * open-PRs-only caveat on `reviewsPosted`, the stated absence on
+ * `prsMerged`; this renders one loop over rows this page never re-derives.
+ */
+function renderActors() {
+  const model = buildActorsModel(sectionOf(state, 'actors'), sectionOf(state, 'reviews'));
+  if (!model.ok) {
+    mounts.canvas.appendChild(said(`the by-actor view could not be computed: ${model.reason}`));
+    return;
+  }
+  const { rows } = model.value;
+  mounts.canvas.appendChild(el('p', 'canvas-summary', `${rows.length} actor(s) — memory-record names and forge review logins listed side by side, not joined; name order only`));
+  for (const row of rows) mounts.canvas.appendChild(renderActorRow(row));
+}
+
+/** One actor row: its kind (or the stated "kind unknown" reason for a forge-only reviewer), its record count by type, and its own `sourceStamp` — an aggregated row names no single file, so `source: null` states that honestly (R882-1's shared `row()` helper, reused a fifth time). `reviewsPosted` always carries the model's own open-PRs-only caveat; `prsMerged` always carries the model's own stated absence, never a bare `0`. */
+function renderActorRow(row) {
+  const wrap = el('div', 'actor-row');
+  wrap.appendChild(el('strong', 'actor-name', row.actor));
+  wrap.appendChild(el('span', 'actor-kind', row.actorKind ?? row.actorKindReason ?? 'kind unknown'));
+  // The two namespaces are not reconciled, so a forge-only row says what it
+  // is evidence of rather than reading as a second person (#1043).
+  if (row.evidenceNote) wrap.appendChild(said(row.evidenceNote));
+  wrap.appendChild(renderSourceStamp(row.sourceStamp));
+  wrap.appendChild(el('p', 'actor-records', `${row.records} record(s)${Object.keys(row.byType).length > 0 ? `: ${Object.entries(row.byType).map(([type, n]) => `${type} ${n}`).join(', ')}` : ''}`));
+  wrap.appendChild(el('p', 'actor-reviews', row.reviewsPosted.ok
+    ? `reviews posted: ${row.reviewsPosted.count} — ${row.reviewsPosted.caveat}`
+    : `reviews posted: not computed — ${row.reviewsPosted.reason}`));
+  wrap.appendChild(el('p', 'actor-prs-merged', `PRs merged: not shown — ${row.prsMerged.reason}`));
+  return wrap;
 }
 
 /** Activating a node selects it and opens the drawer on its Spec tab (R881-8). */
