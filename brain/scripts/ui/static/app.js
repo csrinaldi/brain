@@ -21,6 +21,7 @@ import { buildReviewTimeline } from './lib/review-timeline.mjs';
 import { buildRoadmapModel } from './lib/roadmap-model.mjs';
 import { buildDecisionsModel } from './lib/decisions-model.mjs';
 import { buildAntiPatternsModel } from './lib/anti-patterns-model.mjs';
+import { buildHistoryModel } from './lib/history-model.mjs';
 import { sourceStamp } from './lib/provenance.mjs';
 import { MODES, PLACEHOLDERS, initialView, switchMode, keyAction } from './lib/view-model.mjs';
 import { GOVERNANCE_VIEWS, GOVERNANCE_PLACEHOLDERS } from './lib/governance-model.mjs';
@@ -545,7 +546,7 @@ function switchGovernanceView(subView) {
   render();
 }
 
-/** The router's own sub-router: Roadmap (R882-2), Decisions (R882-3) and Anti-patterns (R882-4) draw real content; the other two still say the PR that brings them (`GOVERNANCE_PLACEHOLDERS`, never an empty area). */
+/** The router's own sub-router: Roadmap (R882-2), Decisions (R882-3), Anti-patterns (R882-4) and History (R882-5) draw real content; the remaining view still says the PR that brings it (`GOVERNANCE_PLACEHOLDERS`, never an empty area). */
 function renderGovernance() {
   renderGovernanceNav();
   clear(mounts.canvas);
@@ -559,6 +560,10 @@ function renderGovernance() {
   }
   if (governanceView === 'anti-patterns') {
     renderAntiPatterns();
+    return;
+  }
+  if (governanceView === 'history') {
+    renderHistory();
     return;
   }
   mounts.canvas.appendChild(said(GOVERNANCE_PLACEHOLDERS[governanceView]));
@@ -723,6 +728,55 @@ function renderAntiPatternsUnlistable(unlistable) {
   const wrap = el('div', 'anti-pattern-unlistable');
   const lines = unlistable.map((u) => `${u.scope}: ${u.reason}`);
   wrap.appendChild(saidList('anti-patterns — a scope could not be listed:', lines));
+  return wrap;
+}
+
+/**
+ * History (#882 R882-5): merges, releases and ADR amendments, newest
+ * first. `lib/history-model.mjs` decided all of it — the merge (the forge
+ * PR URL when a commit names one and the served project is known, a plain
+ * git source otherwise), the release and adr-amended events, the sort,
+ * each event's own `sourceStamp` (R882-1's shared `row()` helper, reused a
+ * fourth time); this renders one loop over events this page never
+ * re-derives. Review verdicts are deliberately excluded from this model —
+ * no field anywhere in the data carries a review round's timestamp, so
+ * this pane links to the Reviews mode instead of rendering a second,
+ * undated projection of the same rounds.
+ */
+function renderHistory() {
+  const model = buildHistoryModel({
+    history: sectionOf(state, 'history'),
+    adrs: sectionOf(state, 'adrs'),
+    project: state.meta?.project ?? null,
+  });
+  if (!model.ok) {
+    mounts.canvas.appendChild(said(`history could not be computed: ${model.reason}`));
+    return;
+  }
+  const { events } = model.value;
+  mounts.canvas.appendChild(el('p', 'canvas-summary', `${events.length} event(s)`));
+  for (const event of events) mounts.canvas.appendChild(renderHistoryEvent(event));
+  mounts.canvas.appendChild(renderHistoryReviewsLink());
+}
+
+/** One history event: its kind, its date, its title, and its own `sourceStamp` — a merge event's forge link when one exists, a git sha or an ADR's own path otherwise. */
+function renderHistoryEvent(event) {
+  const wrap = el('div', 'history-event');
+  wrap.appendChild(el('span', `history-kind history-kind-${event.kind}`, event.kind));
+  wrap.appendChild(el('span', 'history-date', event.date ?? 'no date recorded'));
+  wrap.appendChild(el('span', 'history-title', event.title));
+  wrap.appendChild(el('span', 'source', event.sourceStamp.label));
+  return wrap;
+}
+
+/** No review verdict is ever rendered inside this pane (R882-5: no round timestamp exists in this data yet) — a plain button hands off to the Reviews mode instead of a second, undated projection of the same rounds. */
+function renderHistoryReviewsLink() {
+  const wrap = el('div', 'history-reviews-link');
+  wrap.appendChild(said('review verdicts have no round timestamp yet — see the Reviews mode for those'));
+  const button = el('button', null, 'Go to Reviews');
+  button.type = 'button';
+  button.addEventListener('click', () => switchToMode('reviews'));
+  wrap.appendChild(button);
   return wrap;
 }
 

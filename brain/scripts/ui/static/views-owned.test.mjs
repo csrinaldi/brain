@@ -69,11 +69,27 @@ test('#882 R882-4: Anti-patterns draws real content — the catalogue, core befo
   assert.match(APP_JS, /\[forge: #\$\{n\}\]/, 'each cited issue must be stamped in the same [forge: #N] form sourceStamp uses for a real forge ref');
 });
 
-test('#882: this PR (PR 3) does not draw them yet — history and by-actor identifiers still do not exist in the page', () => {
+test('#882 R882-5: History draws real content — merges/releases/ADR amendments through lib/history-model.mjs, linked to the Reviews mode, never a duplicate review-round rendering', () => {
+  assert.match(APP_JS, /function renderHistory\(/, 'R882-5: History must render real content, not a placeholder');
+  assert.match(APP_JS, /buildHistoryModel\(/, 'renderHistory must build its events from lib/history-model.mjs, not recompute them inline');
+  const fnMatch = APP_JS.match(/function renderHistory\([^)]*\) \{[\s\S]*?\n}\n/);
+  assert.ok(fnMatch, 'renderHistory function must exist in app.js');
+  const linkMatch = APP_JS.match(/function renderHistoryReviewsLink\([^)]*\) \{[\s\S]*?\n}\n/);
+  assert.ok(linkMatch, 'renderHistoryReviewsLink function must exist in app.js');
+  const body = fnMatch[0] + linkMatch[0];
+  assert.match(body, /switchToMode\('reviews'\)/, "the history pane links to the Reviews mode instead of rendering a second, undated projection of the same rounds");
+  assert.ok(!/renderReviewRound\(/.test(body), 'no review round is ever rendered inside the history pane');
+});
+
+test('#882 R882-5: History\'s own event renderer never branches on a review kind — buildHistoryModel already guarantees none exists', () => {
+  const fnMatch = APP_JS.match(/function renderHistoryEvent\([^)]*\) \{[\s\S]*?\n}\n/);
+  assert.ok(fnMatch, 'renderHistoryEvent function must exist in app.js');
+  assert.ok(!/'review'/.test(fnMatch[0]), 'no branch on a review kind inside History\'s own event renderer');
+});
+
+test('#882: this PR (PR 4) does not draw by-actor yet — that identifier still does not exist in the page', () => {
   for (const [name, text] of [['app.js', APP_JS], ['index.html', INDEX_HTML]]) {
-    for (const forbidden of [/\bby-?actor\b/i, /\bhistoryview\b/i]) {
-      assert.ok(!forbidden.test(text), `${name} matched ${forbidden} — those views are #882's later PRs, not PR 3's`);
-    }
+    assert.ok(!/\bby-?actor\b/i.test(text), `${name} matched by-actor — that view is #882's PR 5, not PR 4's`);
   }
 });
 
