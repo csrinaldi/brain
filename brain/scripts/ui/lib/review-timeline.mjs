@@ -28,7 +28,10 @@ function findingSource(f) {
 }
 
 /** The protocol's own verdict enum (reviewer-protocol.md:264) — anything else is kept, never dropped, only flagged (#1009 cold review round 2). */
-const KNOWN_VERDICTS = new Set(['APPROVE', 'REVISE', 'STOP']);
+/** The protocol's own verdict enum (reviewer-protocol.md:264). Exported so the
+ * render layer says "unrecognised" with the SAME vocabulary this module flags
+ * it by — one definition, two readers (#1009 cold review round 3). */
+export const KNOWN_VERDICTS = new Set(['APPROVE', 'REVISE', 'STOP']);
 
 function shapeRound(v) {
   const findings = v.findings.map((f) => ({ ...f, source: findingSource(f) }));

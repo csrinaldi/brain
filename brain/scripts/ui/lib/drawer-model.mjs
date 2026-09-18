@@ -32,6 +32,7 @@ const TAB_LABELS = { spec: 'Spec', sdd: 'SDD', tasks: 'Tasks', workingMemory: 'W
 // already gets, `sourceStamp` is the design's bracketed form the door's
 // entries render from PR 2 on, with the href a forge/link chip may carry.
 import { sourceLabel, sourceStamp } from './provenance.mjs';
+import { KNOWN_VERDICTS } from './review-timeline.mjs';
 export { sourceLabel };
 
 function entry({ title, detail, source, pending = false, ...rest }) {
@@ -130,11 +131,18 @@ function reviewEntries(rounds, unreadable) {
     // round 2, reviewer-protocol.md §7's "a human must look now" state) —
     // the same word app.js's renderReviewRound puts beside the mark, so the
     // drawer never says less about a STOP round than the canvas does.
+    // A word outside the protocol enum keeps its spelling in the title and is
+    // NAMED here, from the same set review-timeline.mjs flags it by — a drawer
+    // that rendered it like an ordinary REVISE would say less than the canvas
+    // (#1009 cold review round 3).
+    const tail = `${round.author ?? 'unknown author'}, ${countPart}${round.head_sha ? `, head ${round.head_sha}` : ''}`;
     const detail = round.malformed?.length
       ? `findings block unreadable: ${round.malformed.join(', ')} (${countPart})`
-      : round.verdict === 'STOP'
-        ? `human escalation — ${round.author ?? 'unknown author'}, ${countPart}${round.head_sha ? `, head ${round.head_sha}` : ''}`
-        : `${round.author ?? 'unknown author'}, ${countPart}${round.head_sha ? `, head ${round.head_sha}` : ''}`;
+      : !KNOWN_VERDICTS.has(round.verdict)
+        ? `unrecognised verdict word — ${tail}`
+        : round.verdict === 'STOP'
+          ? `human escalation — ${tail}`
+          : tail;
     return entry({
       title: `#${round.pr} rev ${round.rev} — ${round.verdict}`,
       detail,

@@ -99,6 +99,17 @@ test('#1009 cold review round 2: renderReviewRound gives a STOP verdict its own 
   assert.match(body, /human escalation/, 'a STOP round must say the escalation as text, not colour alone');
 });
 
+test("#1009 cold review round 3: renderReviewRound reads round.unknownVerdict, so a verdict word outside the enum never renders byte-identical to a REVISE", () => {
+  const fnMatch = APP_JS.match(/function renderReviewRound\([^)]*\) \{[\s\S]*?\n}\n/);
+  assert.ok(fnMatch, 'renderReviewRound function must exist in app.js');
+  const body = fnMatch[0];
+  // The MARK itself must branch on the flag: a scan that merely finds the
+  // flag mentioned somewhere in the function passes even when the mark is
+  // decided without it, which is the defect this test exists to catch.
+  assert.match(body, /const mark = round\.unknownVerdict/, 'the mark must be decided by the flag review-timeline.mjs sets, not merely mention it');
+  assert.match(body, /unrecognised verdict/, 'an unknown verdict word must be called out as text, not only by a mark');
+});
+
 // ── #998 R998-6: the served branch and the poll countdown ───────────────────
 
 test('#998 R998-6 T3: the status bar names the served branch through the same sourceStamp helper the door uses', () => {

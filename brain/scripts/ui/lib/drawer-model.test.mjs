@@ -17,6 +17,20 @@ const view = (over = {}) => ({
     ...over,
   },
 });
+test("#1009 cold review round 3: a verdict word outside APPROVE|REVISE|STOP is called out as unrecognised, never rendered like an ordinary REVISE", () => {
+  const model = buildDrawerModel(view({
+    reviews: {
+      ok: true,
+      sourceNote: 'forge comments until #880 lands',
+      unreadable: [],
+      value: [{ pr: 971, rev: 2, verdict: 'MAYBE', author: 'bob', findings: [], findingCount: 0, head_sha: 'abc1234', source: { url: 'https://github.com/o/r/pull/971#c2' } }],
+    },
+  }));
+  const [round] = model.value.tabs[4].entries;
+  assert.equal(round.title, '#971 rev 2 — MAYBE', 'the verdict word is kept verbatim, never normalised away');
+  assert.match(round.detail, /unrecognised verdict/, 'the drawer must say the word is outside the protocol enum');
+});
+
 
 /** Every leaf the drawer will show, tab by tab — the A3 property walks this. */
 function leaves(model) {

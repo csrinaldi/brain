@@ -220,3 +220,7 @@ Full suite `GIT_CONFIG_GLOBAL=/dev/null npm test` after all four fixes: 5684/568
 
 ### Carried
 - PR 7 (the governance view — ADR table, drift, anti-patterns, actors, release debt, history) is next, blocked on #882/#880 per `tasks.md`'s delivery plan.
+
+### Carried from #1009's verdict (PR 5, head bf0450e6: APPROVE with one correction)
+
+`review-timeline.mjs`'s `shapeRound` set `unknownVerdict` and its comment claimed the render layer read it; measured, neither `app.js`'s `renderReviewRound` nor `drawer-model.mjs`'s `reviewEntries` ever mentioned the flag, so a verdict word outside `APPROVE | REVISE | STOP` rendered byte-identical to a REVISE. `KNOWN_VERDICTS` is now exported from `review-timeline.mjs` (one definition, two readers): the round's mark is decided by the flag (`?`) and says "unrecognised verdict word", and the drawer row names it from the same set while keeping the word verbatim in its title. RED 2 tests → GREEN 335/335 across the UI glob; mutations: `app.js` deciding the mark without the flag → the scan test red (the first draft of that test only looked for the flag's NAME anywhere in the function and passed the mutation — tightened to pin the mark's own expression); the drawer folding the unknown word into the ordinary tail → its test red. Both reverted.
