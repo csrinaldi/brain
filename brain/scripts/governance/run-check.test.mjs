@@ -38,7 +38,10 @@ test('runCheck: memory-gate — records has session_summary → pass', async () 
   const result = await runCheck('memory-gate', {
     readRecords: () => [{ type: 'session_summary', title: 'x' }],
   });
-  assert.deepEqual(result, { pass: true });
+  // #1024: a clean pass now also names its path (no ctx at all here → the
+  // pre-existing global presence fallback, unchanged in verdict).
+  assert.equal(result.pass, true);
+  assert.equal(result.path, 'presence');
 });
 
 test('runCheck: memory-gate — records have no session_summary → fail with reason', async () => {
@@ -76,6 +79,244 @@ test('runCheck: memory-gate — only chunks has session_summary (records empty) 
   });
   assert.equal(result.pass, false, 'a readChunks dep, even if passed, must never be consulted — records/ alone decides the verdict');
   assert.ok(typeof result.reason === 'string' && result.reason.length > 0);
+});
+
+// ── T2.1 (#1024): memory-gate reads the union of the PR tree and
+// origin/<default>, per REQ-L3-4/REQ-L3-5. `readDefaultBranchRecords` and
+// `fetchPrLabelEvents` are injected — no real git/VCS call in this file.
+
+test('runCheck: memory-gate — a record only on origin/<default> satisfies the scoped check (path=retrieval, no rebase)', async () => {
+  const result = await runCheck('memory-gate', {
+    ctx: { body: 'Closes #1024', targetBranch: 'main', defaultBranch: 'main' },
+    readRecords: () => [],
+    readDefaultBranchRecords: () => ({
+      records: [{ id: 'rec-1', issue: 1024, type: 'session_summary' }],
+      error: null,
+    }),
+  });
+  assert.equal(result.pass, true);
+  assert.match(result.path, /^retrieval #1024/);
+});
+
+// #1024 Batch 3 MINOR (visibility): a full clone reads the LOCAL
+// `refs/remotes/origin/<b>` without fetching — a stale ref must not read as
+// current evidence. `pathDetail` states the source explicitly.
+test('runCheck: memory-gate — pathDetail says "(fetched)" when the default-branch reader ran a live fetch (shallow checkout)', async () => {
+  const result = await runCheck('memory-gate', {
+    ctx: { body: 'Closes #1024', targetBranch: 'main', defaultBranch: 'main' },
+    readRecords: () => [],
+    readDefaultBranchRecords: () => ({
+      records: [{ id: 'rec-1', issue: 1024, type: 'session_summary' }],
+      error: null,
+      fetched: true,
+    }),
+  });
+  assert.equal(result.pass, true);
+  assert.match(result.pathDetail, /records: pr-tree\+origin\/<default> \(fetched\)/);
+});
+
+test('runCheck: memory-gate — pathDetail says "(local ref, not fetched)" when the default-branch reader read a full clone\'s existing ref without fetching', async () => {
+  const result = await runCheck('memory-gate', {
+    ctx: { body: 'Closes #1024', targetBranch: 'main', defaultBranch: 'main' },
+    readRecords: () => [],
+    readDefaultBranchRecords: () => ({
+      records: [{ id: 'rec-1', issue: 1024, type: 'session_summary' }],
+      error: null,
+      fetched: false,
+    }),
+  });
+  assert.equal(result.pass, true);
+  assert.match(result.pathDetail, /records: pr-tree\+origin\/<default> \(local ref, not fetched\)/);
+});
+
+test('runCheck: memory-gate — a record scoped in both trees with the same id yields a PARTIAL count of 1, not 2', async () => {
+  const result = await runCheck('memory-gate', {
+    ctx: { body: 'Closes #1024', targetBranch: 'main', defaultBranch: 'main' },
+    readRecords: () => [{ id: 'rec-1', issue: 1024, type: 'decision' }],
+    readDefaultBranchRecords: () => ({
+      records: [{ id: 'rec-1', issue: 1024, type: 'decision' }],
+      error: null,
+    }),
+  });
+  assert.equal(result.pass, true);
+  assert.match(result.reason, /1 memory record\(s\)/);
+});
+
+test('runCheck: memory-gate — a PR-tree HIT means the injected default-branch reader is never called (D3, lazy union)', async () => {
+  let called = false;
+  const result = await runCheck('memory-gate', {
+    ctx: { body: 'Closes #1024', targetBranch: 'main', defaultBranch: 'main' },
+    readRecords: () => [{ id: 'rec-1', issue: 1024, type: 'session_summary' }],
+    readDefaultBranchRecords: () => { called = true; return { records: [], error: null }; },
+  });
+  assert.equal(result.pass, true);
+  assert.equal(called, false, 'the default-branch reader must never run when the PR tree alone is already a clean HIT');
+});
+
+test('runCheck: memory-gate — default branch unreadable AND a PR-tree miss exits 2 at standard (D5, fail closed)', async () => {
+  const result = await runCheck('memory-gate', {
+    ctx: { body: 'Closes #1024', targetBranch: 'main', defaultBranch: 'main' },
+    readRecords: () => [],
+    readDefaultBranchRecords: () => ({ records: [], error: 'git fetch origin main failed: fatal: boom' }),
+    readConfig: () => ({ governance: { tier: 'standard' } }),
+  });
+  assert.equal(result.pass, false);
+  assert.equal(result.uncomputable, true);
+  assert.match(result.reason, /origin\/<default> is unreadable/i);
+});
+
+test('runCheck: memory-gate — default branch unreadable AND a PR-tree miss is STILL uncomputable at lite (mapDetectionToWarning never downgrades uncomputable — D5)', async () => {
+  const code = await main('memory-gate', {
+    ctx: { body: 'Closes #1024', targetBranch: 'main', defaultBranch: 'main' },
+    readRecords: () => [],
+    readDefaultBranchRecords: () => ({ records: [], error: 'git fetch origin main failed: fatal: boom' }),
+    readConfig: () => ({ governance: { tier: 'lite' } }),
+  });
+  assert.equal(code, 2, 'an uncomputable result must exit 2 at every tier, including lite — never softened to a warning');
+});
+
+test('runCheck: memory-gate — default branch unreadable but the PR tree already has the hit → still passes, citing the PR-tree hit', async () => {
+  const result = await runCheck('memory-gate', {
+    ctx: { body: 'Closes #1024', targetBranch: 'main', defaultBranch: 'main' },
+    readRecords: () => [{ id: 'rec-1', issue: 1024, type: 'session_summary' }],
+    readDefaultBranchRecords: () => ({ records: [], error: 'git fetch origin main failed: fatal: boom' }),
+  });
+  assert.equal(result.pass, true);
+});
+
+test('runCheck: memory-gate — ctx.body is null with PR_NUMBER set exits 2 at standard (D6, uncomputable body)', async () => {
+  const code = await main('memory-gate', {
+    ctx: { prNumber: 42, body: null },
+    readRecords: () => [],
+    readConfig: () => ({ governance: { tier: 'standard' } }),
+  });
+  assert.equal(code, 2);
+});
+
+test('runCheck: memory-gate — ctx.body is null with PR_NUMBER set degrades to path=presence at lite (D6)', async () => {
+  const result = await runCheck('memory-gate', {
+    ctx: { prNumber: 42, body: null },
+    readRecords: () => [{ type: 'session_summary' }],
+    readConfig: () => ({ governance: { tier: 'lite' } }),
+  });
+  assert.equal(result.pass, true);
+  assert.equal(result.path, 'presence');
+  assert.match(result.pathDetail, /PR description uncomputable/);
+});
+
+test('runCheck: memory-gate — regulated PARTIAL pass carries the evidence-gap suffix (D8)', async () => {
+  const result = await runCheck('memory-gate', {
+    ctx: { body: 'Closes #1024', targetBranch: 'main', defaultBranch: 'main' },
+    readRecords: () => [{ id: 'rec-1', issue: 1024, type: 'decision' }],
+    readDefaultBranchRecords: () => ({ records: [], error: null }),
+    readConfig: () => ({ governance: { tier: 'regulated' } }),
+  });
+  assert.equal(result.pass, true);
+  assert.match(result.reason, /evidence gap: the "regulated" tier declares issue-linked-session-summary/);
+});
+
+test('runCheck: memory-gate — the manifest reads true for memory-gate (D9)', () => {
+  assert.equal(SUBCOMMAND_PORT_REACH['memory-gate'], true);
+});
+
+// ── skip:memory-gate override (REQ-L3-5) ────────────────────────────────────
+
+test('runCheck: memory-gate — skip:memory-gate honored at standard, path=skipped, applier named', async () => {
+  const result = await runCheck('memory-gate', {
+    ctx: {
+      body: 'Closes #1024', targetBranch: 'main', defaultBranch: 'main',
+      labels: ['skip:memory-gate'], author: 'bob',
+    },
+    readRecords: () => [],
+    readConfig: () => ({ governance: { tier: 'standard' } }),
+    fetchPrLabelEvents: async () => [{ actor: { login: 'alice' }, action: 'add', label: 'skip:memory-gate' }],
+  });
+  assert.equal(result.pass, true);
+  assert.equal(result.path, 'skipped');
+  assert.match(result.pathDetail, /@alice/);
+});
+
+test('runCheck: memory-gate — skip:memory-gate refused at regulated, evaluation continues and fails on a scoped miss, refusal visible in the reason', async () => {
+  const result = await runCheck('memory-gate', {
+    ctx: {
+      body: 'Closes #1024', targetBranch: 'main', defaultBranch: 'main',
+      labels: ['skip:memory-gate'], author: 'bob',
+    },
+    readRecords: () => [],
+    readDefaultBranchRecords: () => ({ records: [], error: null }),
+    readConfig: () => ({ governance: { tier: 'regulated' } }),
+  });
+  assert.equal(result.pass, false);
+  assert.match(result.reason, /no.*scoped to issue #1024|no record scoped to #1024/);
+  // #1024 Batch 3 MAJOR: the override's refusal must be visible on the
+  // FAILING outcome too (REQ-L3-5/REQ-L3-4), not only inside the honored
+  // branch — mirroring runDiffSizeCheck's size:exception tier-refusal append.
+  assert.match(result.reason, /not honored at the "regulated" tier/);
+});
+
+test('runCheck: memory-gate — skip:memory-gate at lite is noted, not honored (the scoped miss stays a detection-only warning via main()), the note is visible in the printed reason', async () => {
+  const logs = [];
+  const orig = console.log;
+  console.log = (...args) => logs.push(args.join(' '));
+  let code;
+  try {
+    code = await main('memory-gate', {
+      ctx: {
+        body: 'Closes #1024', targetBranch: 'main', defaultBranch: 'main',
+        labels: ['skip:memory-gate'], author: 'bob',
+      },
+      readRecords: () => [],
+      readDefaultBranchRecords: () => ({ records: [], error: null }),
+      readConfig: () => ({ governance: { tier: 'lite' } }),
+    });
+  } finally {
+    console.log = orig;
+  }
+  assert.equal(code, 0, 'lite is detection-only — a scoped miss must still exit 0');
+  // #1024 Batch 3 MAJOR: at lite, the label-present-but-not-consulted note
+  // must be visible in the printed (warning) reason, not silently dropped.
+  assert.equal(logs.length, 2);
+  assert.match(logs[1], /not consulted at the "lite" tier/);
+});
+
+test('runCheck: memory-gate — the PR author applying skip:memory-gate is refused, evaluation continues, refusal visible even on a PASS', async () => {
+  const result = await runCheck('memory-gate', {
+    ctx: {
+      body: 'Closes #1024', targetBranch: 'main', defaultBranch: 'main',
+      labels: ['skip:memory-gate'], author: 'bob',
+    },
+    readRecords: () => [{ id: 'rec-1', issue: 1024, type: 'session_summary' }],
+    readConfig: () => ({ governance: { tier: 'standard' } }),
+    fetchPrLabelEvents: async () => [{ actor: { login: 'bob' }, action: 'add', label: 'skip:memory-gate' }],
+  });
+  // The author's own label is refused, but the PR tree already has a clean
+  // hit on its own merits — the refusal must never turn an existing PASS
+  // into a fail; it only means the SKIP path was not taken.
+  assert.equal(result.pass, true);
+  assert.notEqual(result.path, 'skipped');
+  // #1024 Batch 3 MAJOR: the refusal must be visible on this PASS outcome
+  // too — "append on every outcome (pass, warning, fail, uncomputable)".
+  assert.match(result.reason, /PR author \(@bob\) is refused/);
+});
+
+test('runCheck: memory-gate — an UNLABELED PR still fails a scoped miss at standard, and the reason names skip:memory-gate as available (REQ-L3-5)', async () => {
+  const result = await runCheck('memory-gate', {
+    ctx: { body: 'Closes #2048', targetBranch: 'main', defaultBranch: 'main' },
+    readRecords: () => [],
+    readDefaultBranchRecords: () => ({ records: [], error: null }),
+    readConfig: () => ({ governance: { tier: 'standard' } }),
+  });
+  assert.equal(result.pass, false);
+  assert.match(result.reason, /skip:memory-gate is available/);
+});
+
+test('runCheck: memory-gate — ctx.labels === null (uncomputable) is never read as a skip, evaluation proceeds normally', async () => {
+  const result = await runCheck('memory-gate', {
+    ctx: { body: 'Closes #1024', targetBranch: 'main', defaultBranch: 'main', labels: null },
+    readRecords: () => [{ id: 'rec-1', issue: 1024, type: 'session_summary' }],
+  });
+  assert.equal(result.pass, true);
+  assert.notEqual(result.path, 'skipped');
 });
 
 // ── decision-gate ────────────────────────────────────────────────────────────
@@ -172,13 +413,14 @@ test('runCheck: decision-gate — deps.ctx signaling null baseSha/headSha fails 
 
 // ── main() — exit-code + printed-reason smoke test ───────────────────────────
 
-test('main: memory-gate passing → returns 0, prints nothing', async () => {
+test('main: memory-gate passing → returns 0, prints the path line (#1024 — a clean pass now names its path, never nothing)', async () => {
   let code;
   const logs = await captureLog(async () => {
     code = await main('memory-gate', { readRecords: () => [{ type: 'session_summary' }] });
   });
   assert.equal(code, 0);
-  assert.deepEqual(logs, []);
+  assert.equal(logs.length, 1);
+  assert.match(logs[0], /^memory-gate: path=presence \(no PR context/);
 });
 
 test('main: memory-gate failing → returns 1, prints the reason', async () => {
@@ -197,7 +439,11 @@ test('main: memory-gate failing → returns 1, prints the reason', async () => {
     });
   });
   assert.equal(code, 1);
-  assert.ok(logs.length === 1 && logs[0].length > 0);
+  // #1024: a failing run now ALSO prints the path line (REQ-L3-4 — "every run
+  // MUST name the path it took") ahead of the evaluator's own reason.
+  assert.equal(logs.length, 2);
+  assert.match(logs[0], /^memory-gate: path=presence/);
+  assert.ok(logs[1].length > 0);
 });
 
 test('main: decision-gate failing → returns 1, prints the reason', async () => {
@@ -660,6 +906,24 @@ test('T7b: SUBCOMMAND_PORT_REACH values match each handler\'s own local getVcs r
   verifySubcommandPortReach(src, SUBCOMMAND_PORT_REACH);
 });
 
+// ── #1024 (D9) retarget: memory-gate NOW legitimately reaches getVcs (the
+// applier read for skip:memory-gate, via a named defaultFetchPrLabelEvents
+// function the handler calls), so SUBCOMMAND_PORT_REACH['memory-gate'] flips
+// to `true`. A mutation test whose PREMISE is "a false-declared handler
+// suddenly appears to reach getVcs" no longer says anything about
+// memory-gate — that premise now holds for real, by design. These five T7b
+// gate/mutation tests are retargeted to `decision-gate`, which STAYS `false`
+// (D9) and keeps the exact dispatch shape (`if (checkName === 'decision-gate')
+// { ... return adrPresence(changedFiles, addedFiles); }`) these gates guard.
+// decision-gate's handler is CROSS-FILE (adrPresence, checks/adr-presence.mjs)
+// rather than a local function declaration the way memory-gate's own
+// runMemoryGateCheck used to be — the "arrow-form"/"getVcs injected" mutations
+// below build a synthetic cross-file module (mirroring the existing
+// "T7b sentinel: crossFileClosure's tail call PROPAGATES null" fixture
+// pattern already in this file) rather than mutating run-check.mjs's own
+// text for those two, since there is no local handler declaration left to
+// mutate for a cross-file dispatch.
+
 test('T7b gate coverage: GATE 1 fires inside the ACTUAL loop when a dispatch branch has no extractable handler name', () => {
   // Same mutation as "T7b site 1" below (no `return fn(` left in the branch), but driven through
   // verifySubcommandPortReach itself — the shared loop GATE 1 guards — not through
@@ -667,8 +931,8 @@ test('T7b gate coverage: GATE 1 fires inside the ACTUAL loop when a dispatch bra
   // it makes this go red again (verified by mutation at apply time — see the PR description).
   const src = readFileSync(fileURLToPath(new URL('./run-check.mjs', import.meta.url)), 'utf8');
   const mutated = src.replace(
-    '    return runMemoryGateCheck(ctx, records);',
-    '    const result = runMemoryGateCheck(ctx, records);\n    return result;',
+    '    return adrPresence(changedFiles, addedFiles);',
+    '    const result = adrPresence(changedFiles, addedFiles);\n    return result;',
   );
   assert.notEqual(mutated, src, 'the mutation must land');
   // GATE 1's message specifically, not the generic /UNVERIFIED/ both gates' messages share —
@@ -679,47 +943,56 @@ test('T7b gate coverage: GATE 1 fires inside the ACTUAL loop when a dispatch bra
     'GATE 1 must refuse a dispatch branch with no extractable handler name from inside the actual loop');
 });
 
-test('T7b gate coverage: GATE 2 fires inside the ACTUAL loop when a handler is declared as an arrow function', () => {
+test('T7b gate coverage: GATE 2 fires inside the ACTUAL loop when the cross-file handler\'s import cannot be resolved (double-quoted, outside importMap\'s decidable domain)', () => {
   const src = readFileSync(fileURLToPath(new URL('./run-check.mjs', import.meta.url)), 'utf8');
   const mutated = src.replace(
-    'function runMemoryGateCheck(ctx, records) {',
-    'const runMemoryGateCheck = (ctx, records) => {',
+    "import { adrPresence } from './checks/adr-presence.mjs';",
+    'import { adrPresence } from "./checks/adr-presence.mjs";',
   );
   assert.notEqual(mutated, src, 'the mutation must land');
   assert.throws(() => verifySubcommandPortReach(mutated, SUBCOMMAND_PORT_REACH),
     /no call closure could be RESOLVED/,
-    'GATE 2 must refuse an arrow-form handler as unresolvable from inside the actual loop');
+    'GATE 2 must refuse a cross-file handler whose import this scanner cannot follow (single-quoted only, by design)');
 });
 
-test('T7b mutation: a getVcs( reference injected into the false-declared memory-gate handler is detected', () => {
-  const src = readFileSync(fileURLToPath(new URL('./run-check.mjs', import.meta.url)), 'utf8');
-  const mutated = src.replace('function runMemoryGateCheck(ctx, records) {',
-    'function runMemoryGateCheck(ctx, records) {\n  getVcs();');
-  assert.notEqual(mutated, src, 'the mutation must land');
-  const closure = bodyClosure(mutated, 'runMemoryGateCheck');
-  assert.ok(typeof closure === 'string', 'runMemoryGateCheck must still resolve under this mutation');
-  const reaches = /\bgetVcs(Fn)?\b/.test(closure);
-  assert.equal(reaches, true);
-  assert.notEqual(reaches, SUBCOMMAND_PORT_REACH['memory-gate'],
-    'the mutation must break the value correlation for a false-declared handler');
+test('T7b mutation: a getVcs( reference injected into decision-gate\'s (false-declared) cross-file handler is detected', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'run-check-t7b-decision-gate-'));
+  try {
+    writeFileSync(
+      join(dir, 'fake-adr-presence.mjs'),
+      'export function adrPresence(changedFiles, addedFiles) {\n  getVcs();\n  return { pass: true };\n}\n',
+      'utf8',
+    );
+    const fixtureSrc =
+      "import { adrPresence } from './fake-adr-presence.mjs';\n" +
+      "if (checkName === 'decision-gate') {\n    return adrPresence(changedFiles, addedFiles);\n}\n";
+    const closure = bodyClosure(fixtureSrc, 'adrPresence', new Set(), dir);
+    assert.ok(typeof closure === 'string', 'adrPresence must still resolve under this mutation');
+    const reaches = /\bgetVcs(Fn)?\b/.test(closure);
+    assert.equal(reaches, true);
+    assert.notEqual(reaches, SUBCOMMAND_PORT_REACH['decision-gate'],
+      'the mutation must break the value correlation for a false-declared handler');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('T7b mutation (#551, fifth vacuous-pass route): a dispatch branch inlined to call the sentinel directly is a REACH, not a resolved-empty closure', () => {
   // Reproduces the FIFTH vacuous-pass route: `return getVcs();` inlined straight into the
-  // memory-gate dispatch branch. Before bodyClosure's terminal base case, `fnName` resolved
+  // decision-gate dispatch branch. Before bodyClosure's terminal base case, `fnName` resolved
   // to 'getVcs', which has no LOCAL declaration in run-check.mjs, so bodyClosure fell through
   // to crossFileClosure, followed the import to vcs/cli.mjs, and successfully resolved
   // getVcs's OWN implementation body — which naturally does not call itself. That real,
   // non-null closure tested false against the getVcs regex and agreed with the manifest's
-  // `false` for memory-gate, having verified nothing.
+  // `false` for decision-gate, having verified nothing.
   const src = readFileSync(fileURLToPath(new URL('./run-check.mjs', import.meta.url)), 'utf8');
-  const mutated = src.replace('    return runMemoryGateCheck(ctx, records);', '    return getVcs();');
+  const mutated = src.replace('    return adrPresence(changedFiles, addedFiles);', '    return getVcs();');
   assert.notEqual(mutated, src, 'the mutation must land');
   const closure = bodyClosure(mutated, 'getVcs');
   assert.ok(typeof closure === 'string', 'the sentinel dispatched directly must still resolve — as a REACH, not as undecidable');
   const reaches = /\bgetVcs(Fn)?\b/.test(closure);
   assert.equal(reaches, true, 'dispatching the sentinel directly IS the reach; it must never read as "no getVcs found"');
-  assert.notEqual(reaches, SUBCOMMAND_PORT_REACH['memory-gate'],
+  assert.notEqual(reaches, SUBCOMMAND_PORT_REACH['decision-gate'],
     'the mutation must break the value correlation for a false-declared handler — this is the assertion ' +
     'that previously passed vacuously (issue #551, fifth vacuous-pass route)');
 });
@@ -803,12 +1076,12 @@ test('T7b sentinel: crossFileClosure\'s tail call PROPAGATES null', () => {
 test('T7b site 1: a dispatch branch with no extractable handler name yields null — and the key-completeness assert stays GREEN on that input', () => {
   const src = readFileSync(fileURLToPath(new URL('./run-check.mjs', import.meta.url)), 'utf8');
   const mutated = src.replace(
-    '    return runMemoryGateCheck(ctx, records);',
-    '    const result = runMemoryGateCheck(ctx, records);\n    return result;',
+    '    return adrPresence(changedFiles, addedFiles);',
+    '    const result = adrPresence(changedFiles, addedFiles);\n    return result;',
   );
   assert.notEqual(mutated, src, 'the mutation must land');
   const handlers = dispatchedHandlers(mutated);
-  const entry = handlers.find(([checkName]) => checkName === 'memory-gate');
+  const entry = handlers.find(([checkName]) => checkName === 'decision-gate');
   assert.equal(entry[1], null);
   assert.deepEqual(handlers.map(([checkName]) => checkName).sort(), dispatchedCheckNames(mutated),
     'the completeness assert stays green on this input — which is precisely why site 1 needs its ' +
@@ -816,16 +1089,39 @@ test('T7b site 1: a dispatch branch with no extractable handler name yields null
     'substitute for it, since GATE 1 never runs on this fixture at all');
 });
 
-test('T7b mutation (#551): an arrow-form handler is REFUSED as unresolvable, not read as "no getVcs"', () => {
+test('T7b mutation (#551): an arrow-form cross-file handler is REFUSED as unresolvable, not read as "no getVcs"', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'run-check-t7b-decision-gate-arrow-'));
+  try {
+    writeFileSync(
+      join(dir, 'fake-adr-presence.mjs'),
+      'export const adrPresence = (changedFiles, addedFiles) => {\n  if (process.env.NEVER === "1") getVcs();\n  return { pass: true };\n};\n',
+      'utf8',
+    );
+    const fixtureSrc =
+      "import { adrPresence } from './fake-adr-presence.mjs';\n" +
+      "if (checkName === 'decision-gate') {\n    return adrPresence(changedFiles, addedFiles);\n}\n";
+    assert.equal(bodyClosure(fixtureSrc, 'adrPresence', new Set(), dir), null,
+      "before #551 this returned '', which tested false and agreed with " +
+      "SUBCOMMAND_PORT_REACH['decision-gate'] === false — a green that had checked nothing");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// SUBCOMMAND_PORT_REACH['memory-gate'] is now `true` (D9): the applier read
+// for skip:memory-gate reaches getVcs through a NAMED function declaration
+// (defaultFetchPrLabelEvents) the handler calls — mirroring issue-link's own
+// defaultFetchIssue pattern, which T7b already resolves correctly.
+test('T7b: memory-gate is now a genuine getVcs reach (D9) — the manifest agrees with the resolved source scan', () => {
   const src = readFileSync(fileURLToPath(new URL('./run-check.mjs', import.meta.url)), 'utf8');
-  const mutated = src.replace(
-    'function runMemoryGateCheck(ctx, records) {',
-    'const runMemoryGateCheck = async (ctx, records) => {\n  if (process.env.NEVER === "1") getVcs();',
-  );
-  assert.notEqual(mutated, src, 'the mutation must land');
-  assert.equal(bodyClosure(mutated, 'runMemoryGateCheck'), null,
-    "before #551 this returned '', which tested false and agreed with " +
-    "SUBCOMMAND_PORT_REACH['memory-gate'] === false — a green that had checked nothing");
+  assert.equal(SUBCOMMAND_PORT_REACH['memory-gate'], true);
+  assert.equal(SUBCOMMAND_PORT_REACH['decision-gate'], false);
+  const handlers = dispatchedHandlers(src);
+  const [, fnName] = handlers.find(([checkName]) => checkName === 'memory-gate');
+  const closure = bodyClosure(src, fnName);
+  assert.ok(typeof closure === 'string');
+  assert.equal(/\bgetVcs(Fn)?\b/.test(closure), true,
+    'runMemoryGateCheck\'s own closure must mention getVcs/getVcsFn via defaultFetchPrLabelEvents');
 });
 
 test('runCheck: an unknown check name throws even when it superficially resembles a manifest key', () => {
@@ -1675,6 +1971,46 @@ test('wiring: defaultFetchIssue sources { apiBase, token, proxyUrl } from ci-con
     'defaultFetchIssue must pass apiBase/token/proxyUrl into vcs.issueView(...)');
 });
 
+// #1024 Batch 3 BLOCKER: defaultFetchPrLabelEvents (memory-gate's skip
+// override applier read) skipped BOTH of defaultFetchIssue's own disciplines
+// — it never threads gitlabApiConfig()'s { apiBase, token, proxyUrl } into
+// the call, and it never passes kind: 'mr', so on GitLab it silently read
+// ISSUE label events for the MR's own IID and the override could never be
+// honored there.
+test('wiring: defaultFetchPrLabelEvents sources { apiBase, token, proxyUrl } from ci-context.mjs\'s gitlabApiConfig() and passes kind: \'mr\' into vcs.labelEvents() — never reads process.env.CI_API_V4_URL itself', () => {
+  const src = readFileSync(fileURLToPath(new URL('./run-check.mjs', import.meta.url)), 'utf8');
+  const fnStart = src.indexOf('function defaultFetchPrLabelEvents(');
+  assert.ok(fnStart !== -1, 'defaultFetchPrLabelEvents not found');
+  const fnBody = src.slice(fnStart, src.indexOf('\n}', fnStart) + 2);
+  assert.match(fnBody, /gitlabApiConfig/, 'defaultFetchPrLabelEvents must obtain the GitLab API config via gitlabApiConfig(), not a local env read');
+  assert.match(fnBody, /vcs\.labelEvents\(\{[^}]*kind:\s*'mr'[^}]*apiBase[^}]*token[^}]*proxyUrl/s,
+    'defaultFetchPrLabelEvents must pass kind: \'mr\' and apiBase/token/proxyUrl into vcs.labelEvents(...)');
+});
+
+test('runCheck: memory-gate — defaultFetchPrLabelEvents requests kind: \'mr\' (GitLab MR label events, not issue events) via an injected getVcs', async () => {
+  let seenArgs;
+  const fakeVcs = {
+    labelEvents: async (args) => {
+      seenArgs = args;
+      return [{ actor: { login: 'alice' }, action: 'add', label: 'skip:memory-gate' }];
+    },
+  };
+  const result = await runCheck('memory-gate', {
+    ctx: {
+      body: 'Closes #1024', targetBranch: 'main', defaultBranch: 'main',
+      labels: ['skip:memory-gate'], author: 'bob', provider: 'gitlab', repo: 'g/r', prNumber: 7,
+    },
+    readRecords: () => [],
+    readConfig: () => ({ governance: { tier: 'standard' } }),
+    getVcs: async () => fakeVcs,
+  });
+  assert.ok(seenArgs, 'vcs.labelEvents must have been called');
+  assert.equal(seenArgs.kind, 'mr', 'must request MR label events, not issue events, on GitLab');
+  assert.equal(seenArgs.project, 'g/r');
+  assert.equal(seenArgs.number, 7);
+  assert.equal(result.path, 'skipped');
+});
+
 // ═══════════════════════════════════════════════════════════════════════════
 // PR5 (#310) Phase 5.2 — the 0/1/2 exit contract wired across evaluators. An
 // INFRA failure (git/IO/API) returns `uncomputable: true` → exit 2; a genuine
@@ -1772,7 +2108,12 @@ test('runCheck: memory-gate — no ctx at all (ctx.body undefined) → falls bac
   const result = await runCheck('memory-gate', {
     readRecords: () => [{ type: 'session_summary' }],
   });
-  assert.deepEqual(result, { pass: true }, 'ctx-less call must behave exactly like memoryPresence()');
+  // #1024: the verdict (pass:true, no reason) is byte-identical to
+  // memoryPresence()'s own contract — only the added path/pathDetail fields
+  // differ, so this checks the verdict fields directly rather than a full
+  // deepEqual against the pre-#1024 bare shape.
+  assert.equal(result.pass, true, 'ctx-less call must behave exactly like memoryPresence()');
+  assert.equal(result.reason, undefined);
 });
 
 test('runCheck: memory-gate — ctx.body has a closing reference + a scoped session_summary → pass clean', async () => {
@@ -1785,18 +2126,29 @@ test('runCheck: memory-gate — ctx.body has a closing reference + a scoped sess
 });
 
 test('runCheck: memory-gate — ctx.body has a reference but NO record scoped to that issue → fail', async () => {
+  // #1024 incident (batch 2): this is a MISS on the PR tree alone, so D3's
+  // lazy union falls through to the default-branch reader — MUST be
+  // injected here (a hermetic fake), never left to the production default,
+  // which would otherwise touch the REAL repo's git state from this test's
+  // real cwd (harmless post-fix, since a non-shallow repo never fetches, but
+  // still non-deterministic and not what a unit test should read).
   const result = await runCheck('memory-gate', {
     ctx: { body: 'feat: slice\n\nPart of #379', targetBranch: 'feature/tracker', defaultBranch: 'main' },
     readRecords: () => [{ type: 'session_summary', issue: 12 }],
+    readDefaultBranchRecords: () => ({ records: [], error: null }),
   });
   assert.equal(result.pass, false);
   assert.match(result.reason, /379/);
 });
 
 test('runCheck: memory-gate — ctx.body has scoped records but none is session_summary → pass:true with a warn/partial reason (non-blocking)', async () => {
+  // #1024 incident (batch 2): a PARTIAL PR-tree result is not a clean HIT
+  // (D3), so this also reaches the default-branch reader — injected fake,
+  // same reason as above.
   const result = await runCheck('memory-gate', {
     ctx: { body: 'Closes #379', targetBranch: 'main', defaultBranch: 'main' },
     readRecords: () => [{ type: 'decision', issue: 379 }],
+    readDefaultBranchRecords: () => ({ records: [], error: null }),
   });
   assert.equal(result.pass, true);
   assert.match(result.reason, /warn|partial/i);
@@ -1809,7 +2161,8 @@ test('runCheck: memory-gate — ctx.body present but no extractable issue number
   });
   // Falls back to global memoryPresence(): ANY session_summary anywhere passes,
   // regardless of its .issue — proves the fallback path, not the scoped path.
-  assert.deepEqual(result, { pass: true });
+  assert.equal(result.pass, true);
+  assert.equal(result.path, 'presence');
 });
 
 test('runCheck: memory-gate — ctx.body present but no extractable issue number, and no session_summary anywhere → fallback fails too', async () => {
@@ -1950,10 +2303,13 @@ test('#603: memory-gate failing at LITE → exits 0 and says which gate and whic
     });
   });
   assert.equal(code, 0, 'detection at this tier — REQ-TIER-3 says 0, not 1');
-  assert.equal(logs.length, 1);
-  assert.match(logs[0], /memory-gate/, 'the annotation names the gate');
-  assert.match(logs[0], /lite/, 'and states the tier as the reason');
-  assert.match(logs[0], /::warning::/, 'and is a warning, not silence');
+  // #1024: the path line (REQ-L3-4) now prints ahead of the tier-policied
+  // warning — two lines, not one.
+  assert.equal(logs.length, 2);
+  assert.match(logs[0], /^memory-gate: path=presence/);
+  assert.match(logs[1], /memory-gate/, 'the annotation names the gate');
+  assert.match(logs[1], /lite/, 'and states the tier as the reason');
+  assert.match(logs[1], /::warning::/, 'and is a warning, not silence');
 });
 
 test('#603: the SAME failure at STANDARD still exits 1 — the softening is policy-scoped', async () => {

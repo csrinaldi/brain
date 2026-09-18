@@ -27,11 +27,13 @@
 // in `memory-backend-contract.md`), so `.memory/records/` holds the file before the backend
 // copy exists. Delivery to `main` is bounded instead by the next lane ship plus a human
 // merge, because this repository has `allow_auto_merge` disabled, which ADR-0034 L2 did not
-// anticipate. Known gap, tracked at #1024: CI hands this gate no PR description
-// today (`.github/workflows/governance.yml`'s memory-gate job sets only `DEFAULT_BRANCH`), so
-// `runMemoryGateCheck` (`run-check.mjs`) falls back to this function and `memoryRetrieval()` is
-// never exercised in CI. What was already closed is the silence: `brain:session:start` reports
-// the newest record's age, so a memory layer that stops being written says so.
+// anticipate. #1024 closed the gap this header used to describe: CI now hands the memory-gate
+// job `PR_NUMBER`/`PR_BODY`/`VCS_TOKEN` (`.github/workflows/governance.yml`), so
+// `runMemoryGateCheck` (`run-check.mjs`) reaches `memoryRetrieval()` (issue-scoped, unioning the
+// PR tree with `origin/<default>`) whenever a PR/MR context is present; this function
+// (`memoryPresence`) remains the fallback for the repo-scoped case — no PR context, or a body
+// with no detectable issue reference. What was already closed is the silence: `brain:session:start`
+// reports the newest record's age, so a memory layer that stops being written says so.
 //
 // The path in this header used to read `.memory/chunks/*.jsonl.gz`. That directory no
 // longer exists — the C4 migration (#247) moved the durable layer to `.memory/records/`

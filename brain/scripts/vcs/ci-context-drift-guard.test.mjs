@@ -563,3 +563,23 @@ test('drift-guard (GitLab): gitlab-governance.yml pins a single global node:22+ 
     );
   }
 });
+
+// ── #1024: memory-gate's PR context wiring (REQ-L3-6, governance-v3) ────────
+//
+// Before this change, the `memory-gate` job mapped only DEFAULT_BRANCH, so
+// `loadGithubContext()` never called `prView` (it is gated on `PR_NUMBER !=
+// null`), and `ctx.body`/`ctx.labels` stayed structurally `null` for this
+// job — `runMemoryGateCheck` fell back to the repo-global `memoryPresence()`
+// and `memoryRetrieval()` never ran in CI (proposal.md's Intent section,
+// memory-presence.mjs:29-34). This mirrors the `issue-link` wiring test
+// above (`:117`), scoped to `memory-gate`'s own job block.
+test('#1024: the memory-gate job supplies every input the scoped check consumes', () => {
+  const gh = readFileSync(GITHUB_GOVERNANCE_YML, 'utf8');
+  const block = extractJobBlock(gh, 'memory-gate');
+  assert.ok(block, 'the memory-gate job must be locatable');
+  const code = block.replace(/^\s*#.*$/gm, '');
+  for (const key of ['VCS_TOKEN', 'PR_NUMBER', 'PR_BODY', 'DEFAULT_BRANCH']) {
+    assert.match(code, new RegExp(`^\\s*${key}:`, 'm'),
+      `${key} is consumed by run-check.mjs's memory-gate case (via ci-context) and must be declared`);
+  }
+});

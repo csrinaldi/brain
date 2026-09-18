@@ -78,6 +78,8 @@ import { loadBrainConfig } from '../lib/brain-config.mjs';
 import { getVcs } from '../vcs/cli.mjs';
 import { resolveTier, tierParams } from '../vcs/governance-tiers.mjs';
 import { mapDetectionToWarning } from './detection-policy.mjs';
+import { readDefaultBranchRecords, unionRecordsById } from './default-branch-records.mjs';
+import { decideMemoryGateOverride, SKIP_MEMORY_GATE_LABEL, toActorList } from './memory-gate-override.mjs';
 
 /**
  * Default `readRecords` dep for the memory-gate (issue #222 cutover fix):
@@ -271,31 +273,239 @@ function requiresClosingKeyword(ctx) {
 }
 
 /**
- * memory-gate case (T2.1, REQ-L3-4): degrades to the pre-existing GLOBAL
- * memoryPresence() check whenever an issue number cannot be resolved from
- * `ctx` (no ctx.body at all, e.g. every pre-T2.1 caller/fixture; or ctx.body
- * present but carrying no detectable issue reference) — this is a deliberate
- * choice NOT to fail-closed on "no issue detectable" (that would introduce a
- * new blocking surface beyond this issue's scope; see design.md). Reuses THIS
- * file's own extractIssueNumber/requiresClosingKeyword (never a third
- * extraction implementation — issue-link and actor-check.mjs already cover
- * that ground) with requiresClosingKeyword(ctx) coerced to a boolean via
- * `=== true` (null → false) to stay PERMISSIVE here — memory-gate does not
- * need issue-link's default-branch-conditional strictness, it only needs to
- * know the issue number if one is detectable.
+ * Default `fetchPrLabelEvents` dep for the memory-gate override (D9): the
+ * ONE place this file's memory-gate handler reaches the VCS port — a NAMED
+ * function declaration (never an inline arrow), so the T7b static-analysis
+ * mutation tests (run-check.test.mjs) can resolve it by name, mirroring
+ * `defaultFetchIssue`'s existing pattern for issue-link/base-branch.
  *
- * @param {{ body?: string|null, targetBranch?: string|null, defaultBranch?: string|null }} ctx
- * @param {Array<{type?: string, issue?: number|string, [key: string]: unknown}>} records
- * @returns {{ pass: boolean, reason?: string }}
+ * `kind: 'mr'` (Batch 3 BLOCKER fix, #1024): `ctx.prNumber` is always the
+ * PR/MR's OWN number, never an issue's — on GitLab, omitting `kind` reads
+ * ISSUE label events for that same numeric IID instead of the MR's own
+ * label events, so the applier could never be resolved and the override
+ * could never be honored there. `gitlabApiConfig()` threading mirrors
+ * `defaultFetchIssue` — this file is a GATE_FILE and must never read
+ * `CI_API_V4_URL` directly (ci-context-drift-guard.test.mjs forbids it).
+ * `github.mjs`'s `labelEvents` ignores the extra keys, so passing them
+ * unconditionally is harmless for GitHub.
+ *
+ * @param {{ provider?: string, repo?: string|null, prNumber?: number|null }} ctx
+ * @returns {() => Promise<Array<object>|null>}
  */
-function runMemoryGateCheck(ctx, records) {
-  if (typeof ctx?.body !== 'string') return memoryPresence(records);
+function defaultFetchPrLabelEvents(ctx, { getVcs: getVcsFn = getVcs } = {}) {
+  return async () => {
+    const vcs = await getVcsFn({ provider: ctx.provider });
+    const { apiBase, token, proxyUrl } = gitlabApiConfig();
+    return vcs.labelEvents({ project: ctx.repo, number: ctx.prNumber, kind: 'mr', apiBase, token, proxyUrl });
+  };
+}
 
+/**
+ * Steps 2-6 of the memory-gate case (T2.1/#1024, REQ-L3-4/REQ-CIC-3):
+ * resolves the scoped/fallback verdict AFTER the override (step 1) has
+ * already decided not to short-circuit. Extracted from `runMemoryGateCheck`
+ * (Batch 3) so the override's refusal note (`applyOverrideNote`) can wrap
+ * EVERY exit point uniformly, instead of duplicating the append at each
+ * early return.
+ *
+ *   2. D6 — a `PR_NUMBER`-bearing but uncomputable `ctx.body`: fails closed
+ *      at `standard`/`regulated`, degrades to `path=presence` at `lite`;
+ *   3. the pre-existing GLOBAL memoryPresence() fallback when no issue
+ *      number can be resolved at all (unchanged — see the ORIGINAL
+ *      docstring this replaces: this is a deliberate choice not to
+ *      fail-closed on "no issue detectable");
+ *   4. D3's LAZY union — the PR tree alone first; the default-branch reader
+ *      (`readDefaultBranchRecords`) runs ONLY when the PR tree alone is not
+ *      already a clean HIT;
+ *   5. D5 — a default-branch read failure fails closed on a miss, but never
+ *      overturns an existing PR-tree HIT;
+ *   6. D8 — a `regulated` PARTIAL pass carries a visible evidence-gap note.
+ *
+ * @param {object} ctx
+ * @param {Array<object>} records
+ * @param {{ readDefaultBranchRecords?: Function, cwd?: string }} deps
+ * @param {'lite'|'standard'|'regulated'} tier
+ * @returns {{ pass: boolean, reason?: string, path?: string, pathDetail?: string, uncomputable?: boolean }}
+ */
+function evaluateMemoryGateFallback(ctx, records, deps, tier) {
+  // ── 2. D6 — PR_NUMBER set but body uncomputable ───────────────────────
+  if (ctx?.prNumber != null && typeof ctx?.body !== 'string') {
+    if (tier === 'lite') {
+      return { ...memoryPresence(records), path: 'presence', pathDetail: 'PR description uncomputable' };
+    }
+    return {
+      pass: false,
+      uncomputable: true,
+      path: 'uncomputable',
+      pathDetail: 'PR description uncomputable',
+      reason:
+        'memory-gate: PR description uncomputable (context API fetch failed) — cannot scope to ' +
+        `an issue; failing closed at the "${tier}" tier`,
+    };
+  }
+
+  // ── 3. No PR context / no issue detectable — global fallback (unchanged) ─
+  if (typeof ctx?.body !== 'string') {
+    return { ...memoryPresence(records), path: 'presence', pathDetail: 'no PR context — PR_NUMBER not provided' };
+  }
   const closingRequired = requiresClosingKeyword(ctx) === true;
   const issueNumber = extractIssueNumber(ctx.body, closingRequired);
-  if (issueNumber == null) return memoryPresence(records);
+  if (issueNumber == null) {
+    return { ...memoryPresence(records), path: 'presence', pathDetail: 'no issue reference in the PR description' };
+  }
 
-  return memoryRetrieval(records, issueNumber);
+  // ── 4. D3 — lazy union: the PR tree alone first ───────────────────────
+  const prOnly = memoryRetrieval(records, issueNumber);
+  const prOnlyIsCleanHit = prOnly.pass && !/partial coverage/.test(prOnly.reason ?? '');
+  if (prOnlyIsCleanHit) {
+    return { ...prOnly, path: `retrieval #${issueNumber}`, pathDetail: 'records: pr-tree' };
+  }
+
+  const fetchDefaultBranchRecords = deps.readDefaultBranchRecords ?? readDefaultBranchRecords;
+  const defaultBranchResult = fetchDefaultBranchRecords({ defaultBranch: ctx.defaultBranch, cwd: deps.cwd });
+
+  // ── 5. D5 — default-branch read failure ───────────────────────────────
+  if (defaultBranchResult.error) {
+    const pathDetail = `records: pr-tree only — default branch unreadable: ${defaultBranchResult.error}`;
+    if (prOnly.pass) {
+      return { ...prOnly, path: `retrieval #${issueNumber}`, pathDetail };
+    }
+    return {
+      pass: false,
+      uncomputable: true,
+      path: `retrieval #${issueNumber}`,
+      pathDetail,
+      reason:
+        `memory-gate: no record scoped to #${issueNumber} on the PR tree and origin/<default> is ` +
+        `unreadable (${defaultBranchResult.error}) — failing closed`,
+    };
+  }
+
+  const union = unionRecordsById(records, defaultBranchResult.records);
+  const unionResult = memoryRetrieval(union, issueNumber);
+  // Batch 3 MINOR (visibility): a full clone reads the LOCAL
+  // refs/remotes/origin/<default> without ever fetching — that read can be
+  // stale (the ref was last updated whenever this clone/worktree last
+  // fetched, which may be long before this run). Name the source explicitly
+  // so a stale local ref is never mistaken for current evidence.
+  const sourceNote = defaultBranchResult.fetched ? 'fetched' : 'local ref, not fetched';
+  let result = { ...unionResult, path: `retrieval #${issueNumber}`, pathDetail: `records: pr-tree+origin/<default> (${sourceNote})` };
+
+  // ── 6. D8 — regulated PARTIAL visibility ──────────────────────────────
+  if (tier === 'regulated' && unionResult.pass && /partial coverage/.test(unionResult.reason ?? '')) {
+    result = {
+      ...result,
+      reason:
+        `${unionResult.reason} — evidence gap: the "regulated" tier declares ` +
+        'issue-linked-session-summary; partial coverage passes until that is enforced',
+    };
+  }
+
+  return result;
+}
+
+/**
+ * Surfaces the `skip:memory-gate` override's decision on the FINAL result,
+ * on every outcome — pass, warning (softened later by `mapDetectionToWarning`),
+ * fail, or uncomputable (Batch 3 MAJOR fix, REQ-L3-5/REQ-L3-4). Before this,
+ * `override.reason` was discarded whenever the override was NOT honored — a
+ * regulated refusal, an author/deny-listed applier, or a `lite` not-consulted
+ * note were computed but never appended anywhere, the same defect
+ * `runDiffSizeCheck`'s own tier-refusal append (D5, `size:exception`) already
+ * avoids.
+ *
+ * Two cases:
+ *   - `override.present` (the label WAS present, decided but not honored):
+ *     append `override.reason` unconditionally — this already covers the
+ *     `lite` not-consulted note, the `regulated` refusal, the author
+ *     refusal, the deny-listed refusal, and the unreadable-applier note.
+ *   - No label present at all: at the `standard` tier, a genuine SCOPED MISS
+ *     (`path` starts with `retrieval`, `pass: false`, not `uncomputable`)
+ *     must still name `skip:memory-gate` as available (REQ-L3-5 scenario
+ *     "Unlabeled PR still fails a scoped miss at standard"). If `labels`
+ *     itself was uncomputable (explicitly `null` — a real fetch failure, not
+ *     merely unset in a hand-built ctx), the D7 degradation-table note
+ *     ("labels uncomputable...") is appended instead, at any tier.
+ *
+ * @param {{ pass: boolean, reason?: string, path?: string, uncomputable?: boolean }} result
+ * @param {{ present: boolean, reason: string|null }} override
+ * @param {'lite'|'standard'|'regulated'} tier
+ * @param {string[]|null|undefined} labels
+ * @returns {object}
+ */
+function applyOverrideNote(result, override, tier, labels) {
+  if (override.present) {
+    return { ...result, reason: result.reason ? `${result.reason} — ${override.reason}` : override.reason };
+  }
+
+  const isScopedMiss = typeof result.path === 'string' && result.path.startsWith('retrieval')
+    && result.pass === false && !result.uncomputable;
+  if (isScopedMiss) {
+    if (labels === null) {
+      // A real fetch failure (D7 degradation table), not merely unset.
+      return { ...result, reason: `${result.reason} — ${override.reason}` };
+    }
+    if (tier === 'standard') {
+      return {
+        ...result,
+        reason:
+          `${result.reason} — skip:memory-gate is available (honored when applied by someone ` +
+          'other than the PR author, at the "standard" tier)',
+      };
+    }
+  }
+  return result;
+}
+
+/**
+ * memory-gate case (T2.1/#1024, REQ-L3-4/REQ-L3-5/REQ-CIC-3): resolves the
+ * `skip:memory-gate` override first (REQ-L3-5) — short-circuits BEFORE
+ * scoped evaluation when honored — then delegates to
+ * `evaluateMemoryGateFallback` for steps 2-6, and finally surfaces the
+ * override's decision on the result via `applyOverrideNote` (Batch 3),
+ * regardless of which step produced it.
+ *
+ * Every branch returns `path`/`pathDetail` alongside `pass`/`reason` (REQ-
+ * L3-4's "every run MUST name the path it took") — `main()` prints them.
+ *
+ * @param {{ body?: string|null, prNumber?: number|null, labels?: string[]|null, author?: string|null, provider?: string, repo?: string|null, targetBranch?: string|null, defaultBranch?: string|null }} ctx
+ * @param {Array<{type?: string, issue?: number|string, id?: string, [key: string]: unknown}>} records
+ * @param {{ readConfig?: () => object, readDefaultBranchRecords?: Function, fetchPrLabelEvents?: () => Promise<Array<object>|null>, cwd?: string }} [deps]
+ * @returns {Promise<{ pass: boolean, reason?: string, path?: string, pathDetail?: string, uncomputable?: boolean }>}
+ */
+async function runMemoryGateCheck(ctx, records, deps = {}) {
+  const readConfig = deps.readConfig ?? defaultReadConfig;
+  const config = readConfig();
+  const tier = resolveTier(config);
+  const reviewActors = toActorList(config?.governance?.reviewActors);
+  const agentActors = toActorList(config?.governance?.agentActors);
+
+  // ── 1. skip:memory-gate override (REQ-L3-5) ───────────────────────────
+  const labels = ctx?.labels;
+  const labelPresent = Array.isArray(labels) && labels.includes(SKIP_MEMORY_GATE_LABEL);
+  let labelEvents = null;
+  if (labelPresent && tier === 'standard') {
+    const fetchPrLabelEvents = deps.fetchPrLabelEvents ?? defaultFetchPrLabelEvents(ctx, deps);
+    try {
+      labelEvents = await fetchPrLabelEvents();
+    } catch {
+      labelEvents = null;
+    }
+  }
+  const override = decideMemoryGateOverride({
+    labels, labelEvents, prAuthor: ctx?.author, tier, reviewActors, agentActors,
+  });
+  if (override.honored) {
+    return {
+      pass: true,
+      path: 'skipped',
+      pathDetail: override.reason,
+      reason: `::notice::memory-gate: skipped by override (@${override.applier})`,
+    };
+  }
+
+  const result = evaluateMemoryGateFallback(ctx, records, deps, tier);
+  return applyOverrideNote(result, override, tier, labels);
 }
 
 /**
@@ -624,9 +834,16 @@ async function runBaseBranchCheck(ctx, deps) {
  * A test (run-check.test.mjs T7) asserts this key set sorted-equals the
  * checkNames actually dispatched below, in both directions — a manifest that
  * drifts from the dispatch is a violation the workflow-auth guard cannot see.
+ *
+ * `memory-gate` flips to `true` as of #1024 (D9): the skip:memory-gate
+ * override's applier can only be read through `labelEvents`, fetched by
+ * `defaultFetchPrLabelEvents` — a named function the handler calls, mirroring
+ * `defaultFetchIssue`'s existing pattern. The T7b mutation tests that used to
+ * pin memory-gate as a FALSE-declared handler are retargeted to
+ * `decision-gate`, which stays `false`.
  */
 export const SUBCOMMAND_PORT_REACH = {
-  'memory-gate': false,   // runMemoryGateCheck — records only
+  'memory-gate': true,    // runMemoryGateCheck → defaultFetchPrLabelEvents → getVcs (D9, #1024)
   'decision-gate': false, // adrPresence — git diff only
   'issue-link': true,     // runIssueLinkCheck → defaultFetchIssue → getVcs
   'diff-size': false,     // runDiffSizeCheck — ctx.labels/diffNumstat only
@@ -664,7 +881,7 @@ export async function runCheck(checkName, deps = {}) {
         reason: `memory-gate: cannot read records — failing closed (uncomputable): ${err.message}`,
       };
     }
-    return runMemoryGateCheck(ctx, records);
+    return runMemoryGateCheck(ctx, records, { ...deps, cwd });
   }
   if (checkName === 'decision-gate') {
     let changedFiles;
@@ -730,6 +947,15 @@ export async function main(checkName, deps = {}) {
   const readConfig = deps.readConfig ?? defaultReadConfig;
   const tier = resolveTier(readConfig());
   const policied = mapDetectionToWarning(result, tier, checkName);
+  // #1024, REQ-L3-4: "every run MUST name the path it took... including a
+  // clean pass, which named nothing before this change." Only the memory-gate
+  // result ever carries a `path` field today — printed generically here (not
+  // keyed on a literal checkName comparison) so the drift-guard's
+  // dispatch-count scan (T7/T7b, which counts textual `checkName === '...'`
+  // occurrences) is not doubled by this print site.
+  if (typeof policied.path === 'string') {
+    console.log(`memory-gate: path=${policied.path}${policied.pathDetail ? ` (${policied.pathDetail})` : ''}`);
+  }
   if (policied.reason) console.log(policied.reason);
   return resultToExit(policied);
 }

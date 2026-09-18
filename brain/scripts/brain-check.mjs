@@ -156,6 +156,12 @@ export async function runCheck({
   targetBranch = null,
   defaultBranch = null,
   fetchIssue,
+  // #1024: memory-gate's scoped check now also reads origin/<default> (D3
+  // lazy union). Left undefined here, `run-check.mjs` uses the REAL reader —
+  // desired for a local `brain:check` run, which should see the same union a
+  // CI run would. Tests inject a hermetic fake so this stays a pure unit
+  // test with no real git/network call.
+  readDefaultBranchRecords,
   npmTestFn,
   repoCheckFn,
 }) {
@@ -163,7 +169,11 @@ export async function runCheck({
   // `memory-gate` resolves the issue number from the same body `issue-link` does — two
   // contexts would be two chances to disagree about which issue this change is about.
   const govCtx = { body: prBody, targetBranch, defaultBranch };
-  const govDeps = { ctx: govCtx, ...(fetchIssue ? { fetchIssue } : {}) };
+  const govDeps = {
+    ctx: govCtx,
+    ...(fetchIssue ? { fetchIssue } : {}),
+    ...(readDefaultBranchRecords ? { readDefaultBranchRecords } : {}),
+  };
 
   const checks = [
     // diffSize and adrPresence stay on the pure functions, and that is a decision, not
