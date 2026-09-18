@@ -264,3 +264,17 @@ test('#1043 round 3: a shallow checkout says so instead of quoting a count that 
   assert.match(capNote({ requested: 200, reached: true, total: 200, shallow: true }), /shallow checkout/);
   assert.ok(!capNote({ requested: 200, reached: true, total: 200, shallow: true }).includes('of 200 reachable'), 'a shallow count must not be quoted as if it were the history');
 });
+
+// #1043 round 4, editorial: an ADR amendment carries a date only ('2026-09-18'
+// parses as UTC midnight) while commits and tags carry an offset, so two
+// same-day events of different kinds order by an accident of parsing. The
+// order is stated rather than left to look deliberate.
+test('#1043 round 4: same-day events of different kinds keep a stated, stable order', () => {
+  const model = buildHistoryModel({
+    history: { ok: true, value: { commits: [{ sha: 'aaa', date: '2026-09-18 10:00:00 +0200', subject: 'feat: x', citedRef: null, malformed: null }], tags: [] } },
+    adrs: { ok: true, value: [{ number: 7, title: 'An ADR', amendments: [{ n: 1, date: '2026-09-18', summary: 's', issue: null }] }] },
+  });
+  const kinds = model.value.events.map((e) => e.kind);
+  assert.deepEqual([...kinds].sort(), kinds.slice().sort(), 'sanity: both events are present');
+  assert.equal(model.value.sameDayNote, 'events on the same day are ordered by kind, not by time: an ADR amendment carries a date only, a commit or tag carries a time');
+});

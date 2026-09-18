@@ -12,8 +12,8 @@ test('#882 R882-5: parseCommitLog reads sha|date|subject lines, citedRef parsed 
   const text = 'aaa1111|2026-09-10 10:00:00 +0000|feat(ui): the History view (#123)\n'
     + 'bbb2222|2026-09-09 09:00:00 +0000|chore: tidy\n';
   assert.deepEqual(parseCommitLog(text), [
-    { sha: 'aaa1111', date: '2026-09-10T10:00:00+00:00', subject: 'feat(ui): the History view (#123)', citedRef: 123 },
-    { sha: 'bbb2222', date: '2026-09-09T09:00:00+00:00', subject: 'chore: tidy', citedRef: null },
+    { sha: 'aaa1111', date: '2026-09-10T10:00:00+00:00', subject: 'feat(ui): the History view (#123)', citedRef: 123, malformed: null },
+    { sha: 'bbb2222', date: '2026-09-09T09:00:00+00:00', subject: 'chore: tidy', citedRef: null, malformed: null },
   ]);
 });
 
@@ -57,8 +57,8 @@ test('#1043 correction 1: parseCommitLog normalizes each commit\'s %ai date to I
 test('#882 R882-5: parseTagList reads name|date lines, newest-sorted order preserved as given', () => {
   const text = 'v1.4.0|2026-09-01T00:00:00+00:00\nv1.3.0|2026-08-01T00:00:00+00:00\n';
   assert.deepEqual(parseTagList(text), [
-    { name: 'v1.4.0', date: '2026-09-01T00:00:00+00:00' },
-    { name: 'v1.3.0', date: '2026-08-01T00:00:00+00:00' },
+    { name: 'v1.4.0', date: '2026-09-01T00:00:00+00:00', malformed: null },
+    { name: 'v1.3.0', date: '2026-08-01T00:00:00+00:00', malformed: null },
   ]);
 });
 
@@ -76,9 +76,9 @@ test('#882 R882-5: gatherHistoryFacts reads git log and git tag through its inje
   });
   assert.equal(facts.ok, true);
   assert.deepEqual(facts.value.commits, [
-    { sha: 'aaa1111', date: '2026-09-10T10:00:00+00:00', subject: 'feat(ui): the History view (#123)', citedRef: 123 },
+    { sha: 'aaa1111', date: '2026-09-10T10:00:00+00:00', subject: 'feat(ui): the History view (#123)', citedRef: 123, malformed: null },
   ]);
-  assert.deepEqual(facts.value.tags, [{ name: 'v1.4.0', date: '2026-09-01T00:00:00+00:00' }]);
+  assert.deepEqual(facts.value.tags, [{ name: 'v1.4.0', date: '2026-09-01T00:00:00+00:00', malformed: null }]);
   assert.ok(calls[0].startsWith('log '), 'git log runs first');
   assert.ok(calls[1].startsWith('tag '), 'then git tag');
 });
@@ -141,4 +141,25 @@ test('#882 R882-5: either git log or git tag throwing is this section\'s own {ok
   });
   assert.equal(tagFails.ok, false);
   assert.match(tagFails.reason, /git tag/);
+});
+
+// ── #1043 round 4 ──────────────────────────────────────────────────────────
+// A line with no separator is malformed input. Slicing at indexOf('|') === -1
+// drops the last character of the name and leaks the rest into the date, so a
+// release renders under a wrong title with a nonsense date and nothing says so.
+test('#1043 round 4: a tag line with no separator is said as malformed, never silently mangled', () => {
+  const rows = parseTagList('v1.0.0|2026-09-18T10:00:00+00:00\nv1\n');
+  assert.equal(rows.length, 2, 'the malformed line is kept, not dropped — rule zero');
+  assert.deepEqual(rows[0], { name: 'v1.0.0', date: '2026-09-18T10:00:00+00:00', malformed: null });
+  assert.equal(rows[1].malformed, 'no "|" separator in the tag line', 'the reason is said on the row');
+  assert.equal(rows[1].name, 'v1', 'the whole line is kept as the name rather than cut at a separator that is not there');
+  assert.equal(rows[1].date, null, 'and no date is invented from the name');
+});
+
+test('#1043 round 4: a commit line with no separators is said as malformed too', () => {
+  const rows = parseCommitLog('abc|2026-09-18 10:00:00 +0000|feat: a thing\ngarbage\n');
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].malformed, null);
+  assert.equal(rows[1].malformed, 'fewer than two "|" separators in the commit line');
+  assert.equal(rows[1].date, null);
 });

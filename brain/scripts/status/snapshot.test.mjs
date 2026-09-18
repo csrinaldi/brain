@@ -88,9 +88,9 @@ test('#882 R882-5: history is wired from gatherHistoryFacts through buildSnapsho
   });
   assert.equal(s.history.ok, true);
   assert.deepEqual(s.history.value.commits, [
-    { sha: 'aaa1111', date: '2026-09-10T10:00:00+00:00', subject: 'feat(ui): the History view (#123)', citedRef: 123 },
+    { sha: 'aaa1111', date: '2026-09-10T10:00:00+00:00', subject: 'feat(ui): the History view (#123)', citedRef: 123, malformed: null },
   ]);
-  assert.deepEqual(s.history.value.tags, [{ name: 'v1.4.0', date: '2026-09-01T00:00:00+00:00' }]);
+  assert.deepEqual(s.history.value.tags, [{ name: 'v1.4.0', date: '2026-09-01T00:00:00+00:00', malformed: null }]);
   assert.ok(calls.some((a) => a[0] === 'log'), 'buildSnapshot\'s own _run reaches gatherHistoryFacts, not a second git seam');
   // Every other section computed from THIS same _run-injected buildSnapshot call still
   // stands exactly as the no-history baseline test above — additive, never displaced.

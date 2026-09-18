@@ -237,3 +237,19 @@ test('#1043 round 2: renderHistoryEvent renders the model\'s dateUnparseable rea
   assert.ok(m, 'renderHistoryEvent must exist in app.js');
   assert.match(m[0], /event\.dateUnparseable/, 'an event kept at the end for an unreadable date must say so on the page, not only in the model');
 });
+
+// #1043 round 4: with counts keyed by forge login, a record-backed row never
+// shows one — so a summary reading "records and open-PR review threads" says
+// the two are joined when the model's whole point is that they are not.
+test('#1043 round 4: the by-actor summary says the two namespaces are listed side by side, not joined', () => {
+  const m = APP_JS.match(/function renderActors\(\) \{[\s\S]*?\n}\n/);
+  assert.ok(m, 'renderActors must exist in app.js');
+  assert.ok(!/records and open-PR review threads/.test(m[0]), 'the old wording implied a join this data never performs');
+  assert.match(m[0], /not joined|side by side|never joined/i, 'the summary must say the two sources sit beside each other');
+});
+
+test('#1043 round 4: renderHistory says how same-day events are ordered', () => {
+  const m = APP_JS.match(/function renderHistory\(\) \{[\s\S]*?\n}\n/);
+  assert.ok(m, 'renderHistory must exist in app.js');
+  assert.match(m[0], /sameDayNote/, 'the ordering caveat must reach the page, not sit in the model');
+});
