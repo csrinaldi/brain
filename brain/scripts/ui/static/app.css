@@ -194,6 +194,19 @@ body {
 .roadmap-state.roadmap-not-computed { color: var(--state-not-computed-fg); background: var(--state-not-computed-bg); }
 .roadmap-state.node-unknown { color: var(--state-unknown-fg); background: var(--state-unknown-bg); }
 
+/* ── the Decisions view (#882 R882-3): the ADR table, sorted by number, an
+   unreadable ADR kept as its own row — sorted last — and drift warnings
+   riding beside the table, never instead of it ── */
+
+.decision-row { margin-bottom: 14px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; }
+.decision-title { display: block; }
+.decision-status { display: inline-block; margin-top: 4px; font-size: 11px; padding: 1px 6px; border-radius: 4px; background: var(--surface); color: var(--muted); }
+.decision-amendments { margin: 6px 0 0 18px; padding: 0; font-size: 12px; }
+.decision-issues, .decision-supersedes, .decision-superseded-by { margin: 6px 0 0; font-size: 12px; color: var(--muted); }
+.decision-drift { margin-top: 10px; padding: 8px 10px; border: 1px dashed var(--divergence-fg); border-radius: 6px; background: var(--divergence-bg); }
+.decision-drift .said { margin: 0; color: var(--divergence-fg); }
+.decision-drift .said-list { margin: 6px 0 0 18px; padding: 0; color: var(--divergence-fg); }
+
 /* ── the degradation bands: never a blank area, always a said reason ───── */
 
 .banners:empty { display: none; }

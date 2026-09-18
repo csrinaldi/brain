@@ -19,6 +19,7 @@ import { buildDrawerModel } from './lib/drawer-model.mjs';
 import { buildSddModel, STAGE_VOCAB } from './lib/sdd-model.mjs';
 import { buildReviewTimeline } from './lib/review-timeline.mjs';
 import { buildRoadmapModel } from './lib/roadmap-model.mjs';
+import { buildDecisionsModel } from './lib/decisions-model.mjs';
 import { sourceStamp } from './lib/provenance.mjs';
 import { MODES, PLACEHOLDERS, initialView, switchMode, keyAction } from './lib/view-model.mjs';
 import { GOVERNANCE_VIEWS, GOVERNANCE_PLACEHOLDERS } from './lib/governance-model.mjs';
@@ -543,12 +544,16 @@ function switchGovernanceView(subView) {
   render();
 }
 
-/** The router's own sub-router: Roadmap draws real content (R882-2); the other four still say the PR that brings them (`GOVERNANCE_PLACEHOLDERS`, never an empty area). */
+/** The router's own sub-router: Roadmap (R882-2) and Decisions (R882-3) draw real content; the other three still say the PR that brings them (`GOVERNANCE_PLACEHOLDERS`, never an empty area). */
 function renderGovernance() {
   renderGovernanceNav();
   clear(mounts.canvas);
   if (governanceView === 'roadmap') {
     renderRoadmap();
+    return;
+  }
+  if (governanceView === 'decisions') {
+    renderDecisions();
     return;
   }
   mounts.canvas.appendChild(said(GOVERNANCE_PLACEHOLDERS[governanceView]));
@@ -604,6 +609,71 @@ function renderRoadmapUnlinked(unlinked) {
     return wrap;
   }
   for (const node of unlinked) wrap.appendChild(renderRoadmapRow(node, 'roadmap-row roadmap-child-row'));
+  return wrap;
+}
+
+/**
+ * Decisions (#882 R882-3): the ADR table, sorted by number, an unreadable
+ * ADR kept as its own row — sorted last — rather than dropped; drift
+ * warnings ride beside the table, never instead of it.
+ * `lib/decisions-model.mjs` decided all of it — the row shape (each row's
+ * own `sourceStamp`, through `governance-model.mjs`'s `row()` helper, R882-1),
+ * the sort, the drift passthrough — this renders one loop over rows this
+ * page never re-derives.
+ */
+function renderDecisions() {
+  const model = buildDecisionsModel(sectionOf(state, 'adrs'), sectionOf(state, 'drift'));
+  if (!model.ok) {
+    mounts.canvas.appendChild(said(`the decisions view could not be computed: ${model.reason}`));
+    return;
+  }
+  const { rows, driftWarnings } = model.value;
+  mounts.canvas.appendChild(el('p', 'canvas-summary', `${rows.length} ADR(s)`));
+  for (const row of rows) mounts.canvas.appendChild(renderDecisionRow(row));
+  mounts.canvas.appendChild(renderDriftWarnings(driftWarnings));
+}
+
+/** One ADR row: an unreadable entry is its own said reason, kept in place (never dropped); a readable one carries its title, status, amendments, cited issues (the model's own `issuesLabel` — "referenced," never "driving") and supersession, each beside its own `sourceStamp`. */
+function renderDecisionRow(row) {
+  const wrap = el('div', 'decision-row');
+  if (row.ok === false) {
+    wrap.appendChild(el('strong', null, row.path ?? 'an unreadable ADR'));
+    wrap.appendChild(said(row.reason));
+    return wrap;
+  }
+  wrap.appendChild(el('strong', 'decision-title', `ADR-${String(row.number).padStart(4, '0')} ${row.title}`));
+  wrap.appendChild(el('span', 'decision-status', row.status));
+  wrap.appendChild(el('span', 'source', row.sourceStamp.label));
+  if (row.amendments.length > 0) {
+    const list = el('ul', 'decision-amendments');
+    for (const a of row.amendments) list.appendChild(el('li', null, `Amendment ${a.n}${a.date ? ` (${a.date})` : ''}: ${a.summary}${a.issue ? ` (#${a.issue})` : ''}`));
+    wrap.appendChild(list);
+  }
+  if (row.issues.length > 0) wrap.appendChild(el('p', 'decision-issues', `${row.issuesLabel}: ${row.issues.map((n) => `#${n}`).join(', ')}`));
+  if (row.supersedes.length > 0) wrap.appendChild(el('p', 'decision-supersedes', `supersedes: ${row.supersedes.map((n) => `ADR-${String(n).padStart(4, '0')}`).join(', ')}`));
+  if (row.supersededBy !== null) wrap.appendChild(el('p', 'decision-superseded-by', `superseded by ADR-${String(row.supersededBy).padStart(4, '0')}`));
+  return wrap;
+}
+
+/** The same drift text `renderSnapshotText` already renders in the terminal (`snapshot.mjs:457-469`) — never a second computation of what drifted, only a second place it is said. A `driftWarnings` read failure is its own said reason, beside the table above, never a reason to blank it (R882-3). */
+function renderDriftWarnings(driftWarnings) {
+  const wrap = el('div', 'decision-drift');
+  if (!driftWarnings.ok) {
+    wrap.appendChild(said(`adr drift not computed — ${driftWarnings.reason}`));
+    return wrap;
+  }
+  const { homeOnly, filesOnly, unreadable } = driftWarnings.value;
+  const n = homeOnly.length + filesOnly.length + unreadable.length;
+  if (n === 0) {
+    wrap.appendChild(said('adr drift: none — HOME.md and the parser agree'));
+    return wrap;
+  }
+  const lines = [
+    ...homeOnly.map((h) => `listed in HOME.md, not readable: ADR-${String(h.number).padStart(4, '0')} ${h.path ?? ''}`.trimEnd()),
+    ...filesOnly.map((f) => `on disk, not listed in HOME.md: ADR-${String(f.number).padStart(4, '0')} ${f.path}`),
+    ...unreadable.map((u) => `unreadable: ${u.path} — ${u.reason}`),
+  ];
+  wrap.appendChild(saidList(`adr drift — ${n} disagreement(s) between brain/HOME.md and the parser (reported, never a gate):`, lines));
   return wrap;
 }
 

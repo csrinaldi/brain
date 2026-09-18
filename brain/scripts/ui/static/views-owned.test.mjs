@@ -54,13 +54,19 @@ test('#998 R998-2/R998-4/R998-5/#882 R882-1: this PR owns exactly four modes; ma
 test('#882 R882-1/R882-2: the governance surface exists — the sub-nav is mounted, Roadmap draws real content', () => {
   assert.match(INDEX_HTML, /<nav id="governance-nav"/, 'R882-1: the governance sub-nav mount must exist');
   assert.match(APP_JS, /function renderRoadmap\(/, 'R882-2: Roadmap must render real content, not a placeholder');
-  assert.match(APP_JS, /GOVERNANCE_PLACEHOLDERS\[/, 'the four sub-views not yet built must still say their own placeholder, never an empty area');
+  assert.match(APP_JS, /GOVERNANCE_PLACEHOLDERS\[/, 'the sub-views not yet built must still say their own placeholder, never an empty area');
 });
 
-test('#882: this PR does not draw them yet — decisions, anti-patterns, history and by-actor identifiers still do not exist in the page', () => {
+test('#882 R882-3: Decisions draws real content — the ADR table, drift warnings beside it, never a second drift computation', () => {
+  assert.match(APP_JS, /function renderDecisions\(/, 'R882-3: Decisions must render real content, not a placeholder');
+  assert.match(APP_JS, /buildDecisionsModel\(/, 'renderDecisions must build its rows from lib/decisions-model.mjs, not recompute them inline');
+  assert.match(APP_JS, /row\.issuesLabel/, 'the issues list must render the model\'s own label text — the parser does not distinguish "referenced" from "driving"');
+});
+
+test('#882: this PR (PR 2) does not draw them yet — anti-patterns, history and by-actor identifiers still do not exist in the page', () => {
   for (const [name, text] of [['app.js', APP_JS], ['index.html', INDEX_HTML]]) {
-    for (const forbidden of [/\bdecisionsview\b/i, /anti-?pattern/i, /\bby-?actor\b/i, /\bhistoryview\b/i]) {
-      assert.ok(!forbidden.test(text), `${name} matched ${forbidden} — those views are #882's later PRs, not PR 1's`);
+    for (const forbidden of [/anti-?pattern/i, /\bby-?actor\b/i, /\bhistoryview\b/i]) {
+      assert.ok(!forbidden.test(text), `${name} matched ${forbidden} — those views are #882's later PRs, not PR 2's`);
     }
   }
 });
