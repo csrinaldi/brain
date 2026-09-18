@@ -48,23 +48,55 @@ no new global keybinding is claimed.
 
 ### R882-2: Roadmap — the epic graph grouped for real
 
-`lib/roadmap-model.mjs` MUST define `buildRoadmapModel(graphSection)`,
-grouping `graph.value.nodes` by epic: a node with `kind === 'epic'` becomes a
-roadmap row; every node whose `parent` equals that epic's number nests under
-it, carrying its roadmap state (`planned`/`in-flight`/`done`, from
-`node.roadmap`, `state-vocab.mjs`'s `stateOf`) and its `blockedBy` marks. A
-node with no epic parent — `parent === null`, or a declared `parent` that
-resolves to a node whose own `kind !== 'epic'` — lands in an `unlinked`
-bucket instead of being dropped or silently nested under a non-epic (rule
-zero; the same "never filter a node away" discipline `lane-model.mjs`'s `?`
-holding lane already holds for undeclared tracks). `graph.value
-.declarationDivergences` entries with `key === 'parent'` (`parent-grammar`,
-`parent-ambiguous`, `parent-not-epic`, per `epic-graph.mjs`) MUST be
-surfaced per node as an inline warning on that node's row, never silently
-absorbed into "unlinked" without saying why. The model MUST NOT compute a
-timeline (no start/due dates exist anywhere in the data): "roadmap" here is
-per-epic status grouping only, and the view's own copy says so. Determinism:
-the same graph, with `nodes` in any order, produces a byte-identical model.
+`lib/roadmap-model.mjs` MUST define `buildRoadmapModel(graphSection,
+{project} = {})`, grouping `graph.value.nodes` by epic: a node with
+`kind === 'epic'` becomes a roadmap row; every node whose `parent` equals
+that epic's number nests under it, carrying its roadmap state
+(`planned`/`in-flight`/`done`, from `node.roadmap`, `state-vocab.mjs`'s
+`stateOf`) and its `blockedBy` marks. A node with no epic parent —
+`parent === null`, or a declared `parent` that resolves to a node whose own
+`kind !== 'epic'` — lands in an `unlinked` bucket instead of being dropped
+or silently nested under a non-epic (rule zero; the same "never filter a
+node away" discipline `lane-model.mjs`'s `?` holding lane already holds for
+undeclared tracks). `graph.value.declarationDivergences` entries with
+`key === 'parent'` (`parent-grammar`, `parent-ambiguous`, `parent-not-epic`,
+per `epic-graph.mjs`) MUST be surfaced per node as an inline warning on that
+node's row, never silently absorbed into "unlinked" without saying why. The
+model MUST NOT compute a timeline (no start/due dates exist anywhere in the
+data): "roadmap" here is per-epic status grouping only, and the view's own
+copy says so. Determinism: the same graph, with `nodes` in any order,
+produces a byte-identical model.
+
+**Amendment (cold review of PR 1, blocker):** every row MUST go through
+`lib/governance-model.mjs`'s `row()` (R882-1's own shared entry shape,
+"reused by every one of the five view builders") and carry a real `source`
+when one is knowable — `{url: issueUrl(project, node.number)}`
+(`lib/forge-url.mjs`, the SAME builder `change-route.mjs`'s `buildPrUrl` now
+delegates to) when `project` is present, `source: null` —
+`sourceStamp`'s own honest "no source was recorded for this value" stamp —
+when it is not. `project` is `server.mjs`'s `buildMeta()` project string,
+threaded from `app.js`'s `state.meta?.project`, the same field
+`change-route.mjs` already reads to source a PR link (D14).
+
+**Amendment (cold review of PR #1037, correction 1):** `stateOf` throws by
+design on a `node.status` or a roadmap state `state-vocab.mjs`'s table does
+not know. `roadmapRow` MUST NOT let that throw escape `buildRoadmapModel` —
+one unreadable node must not blank the whole canvas (the empty-on-failure
+anti-pattern in its worst form). The row instead carries the `unknown`
+vocabulary entry as its `state` and the caught error's message as its own
+`stateReason`, the same guard `lib/lane-model.mjs`'s `stateAndMarks` already
+holds for this exact throw — every other row still draws.
+
+**Amendment (cold review of PR #1037, correction 2):** `epics` MUST stay
+FLAT — it is a list, not a tree. An epic whose own declared `parent`
+resolves to ANOTHER epic node is NOT nested under it (`childrenByEpic` only
+ever collects non-epic nodes; a real nested-epic tree, with arbitrary depth
+and cycles to guard against, is a bigger structural change than this
+ticket's "per-epic status grouping, no timeline" scope). The dropped
+parent-epic relation MUST NOT be silently absorbed either way: it is said on
+the child epic's own row as a `{key: 'parent', value: <parent's number>,
+reason: 'nested-epic-not-supported'}` divergence — the same shape and the
+same `roadmap-divergence` rendering `parent-not-epic` already uses.
 
 #### Scenario: an epic's declared children nest under it
 - **WHEN** a node declares `kind: epic` and three other nodes declare `parent: <that node>`
@@ -85,6 +117,14 @@ the same graph, with `nodes` in any order, produces a byte-identical model.
 #### Scenario: determinism under shuffled input
 - **WHEN** the same graph is given twice with `nodes` in different orders
 - **THEN** `buildRoadmapModel` returns a byte-identical model both times
+
+#### Scenario: an unknown node state is said, never thrown (cold review of PR #1037, correction 1)
+- **WHEN** one node's `status` or `roadmap.value.state` is a word `state-vocab.mjs`'s table does not know
+- **THEN** `buildRoadmapModel` still returns `{ok:true, ...}`; that node's own row carries the `unknown` state and a `stateReason` naming what could not be read; every other row draws unaffected
+
+#### Scenario: an epic declaring another epic as its parent is said, not silently dropped (cold review of PR #1037, correction 2)
+- **WHEN** a node declares `kind: epic` and its own `parent` resolves to another node that also declares `kind: epic`
+- **THEN** the child epic still gets its own top-level row in `epics` (never nested under the parent epic), carrying a `nested-epic-not-supported` divergence naming the parent it could not nest under
 
 ### R882-3: Decisions — the ADR table and its drift warnings
 
