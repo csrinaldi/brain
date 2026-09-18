@@ -97,3 +97,48 @@ test('#882 cold review of PR 1 (blocker): the epic row itself is sourced too, no
   const model = buildRoadmapModel(graph({ nodes: [node(20, { kind: 'epic' })] }), { project: 'o/r' });
   assert.equal(model.value.epics[0].source, issueUrl('o/r', 20));
 });
+
+// ── #882 cold review of PR #1037 (correction 1): stateOf's own throw on an
+// unknown node.status or an unmapped roadmap state must never blank the
+// whole canvas — one bad node says its own reason, the rest still draw ──
+
+test('#882 cold review of PR #1037 (correction 1): an unknown node status never throws the whole model — that row says the reason, every other row still draws', () => {
+  const bad = node(30, { status: 'a-status-this-table-does-not-know' });
+  const good = node(31);
+  const model = buildRoadmapModel(graph({ nodes: [bad, good] }));
+  assert.equal(model.ok, true, 'one bad node must not fail the whole model');
+  const badRow = model.value.unlinked.find((n) => n.number === 30);
+  const goodRow = model.value.unlinked.find((n) => n.number === 31);
+  assert.equal(badRow.state.code, 'unknown', 'the unknown vocabulary entry exists for exactly this case');
+  assert.match(badRow.stateReason, /unknown node status "a-status-this-table-does-not-know"/, 'the row says WHY, not just that it is unknown');
+  assert.equal(goodRow.state.code, 'planned', 'the other row is unaffected — one bad node does not cost the operator the rest');
+  assert.equal(goodRow.stateReason, null, 'a readable row carries no state reason');
+});
+
+test('#882 cold review of PR #1037 (correction 1): an unmapped roadmap state (not just an unknown status) is the same "said, never thrown" case', () => {
+  const bad = node(32, { roadmap: { ok: true, value: { state: 'a-roadmap-state-this-table-does-not-know' } } });
+  const model = buildRoadmapModel(graph({ nodes: [bad] }));
+  assert.equal(model.ok, true);
+  const badRow = model.value.unlinked[0];
+  assert.equal(badRow.state.code, 'unknown');
+  assert.match(badRow.stateReason, /no state for roadmap "a-roadmap-state-this-table-does-not-know"/);
+});
+
+// ── #882 cold review of PR #1037 (correction 2): an epic whose declared
+// parent is itself an epic is never silently flattened without saying so ──
+
+test('#882 cold review of PR #1037 (correction 2): an epic declaring another epic as its parent is said, not silently dropped — epics stay flat, the relation does not', () => {
+  const grandparent = node(40, { kind: 'epic', title: 'grandparent epic' });
+  const child = node(41, { kind: 'epic', parent: 40, title: 'child epic' });
+  const model = buildRoadmapModel(graph({ nodes: [grandparent, child] }));
+  assert.equal(model.ok, true);
+  assert.equal(model.value.epics.length, 2, 'both epics still get their own top-level row — epics are not nested');
+  const childRow = model.value.epics.find((e) => e.number === 41);
+  assert.deepEqual(
+    childRow.divergences,
+    [{ key: 'parent', value: 40, reason: 'nested-epic-not-supported' }],
+    'the dropped parent-epic relation is said on the child epic\'s own row, never silently absorbed',
+  );
+  const grandparentRow = model.value.epics.find((e) => e.number === 40);
+  assert.deepEqual(grandparentRow.divergences, [], 'the parent epic itself carries no divergence of its own');
+});

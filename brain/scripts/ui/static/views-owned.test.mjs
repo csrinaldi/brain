@@ -63,6 +63,12 @@ test('#882 cold review of PR 1 (blocker): a roadmap row applies the same sourceS
   assert.match(fnMatch[0], /renderSourceStamp\(row\.sourceStamp\)/, 'renderRoadmapRow must render row.sourceStamp through renderSourceStamp, never a bare #N with no stamp and no link');
 });
 
+test('#882 cold review of PR #1037 (correction 1): a roadmap row says its own stateReason when the state could not be read — the model\'s said value is not silently dropped on screen', () => {
+  const fnMatch = APP_JS.match(/function renderRoadmapRow\([^)]*\) \{[\s\S]*?\n}\n/);
+  assert.ok(fnMatch, 'renderRoadmapRow function must exist in app.js');
+  assert.match(fnMatch[0], /row\.stateReason/, 'renderRoadmapRow must read row.stateReason, so roadmap-model.mjs\'s said reason for an unknown state actually reaches the screen');
+});
+
 test('#882: this PR does not draw them yet — decisions, anti-patterns, history and by-actor identifiers still do not exist in the page', () => {
   for (const [name, text] of [['app.js', APP_JS], ['index.html', INDEX_HTML]]) {
     for (const forbidden of [/\bdecisionsview\b/i, /\badrs?\b/i, /anti-?pattern/i, /\bby-?actor\b/i, /\bhistoryview\b/i]) {

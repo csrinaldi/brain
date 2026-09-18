@@ -572,12 +572,13 @@ function renderRoadmap() {
   mounts.canvas.appendChild(renderRoadmapUnlinked(unlinked));
 }
 
-/** One roadmap row: its state chip, its title, its own source stamp (`row()`'s — a link when a project is known, the honest "no source was recorded" stamp when not; #882 cold review of PR 1, blocker), its open blockers, and any `parent`-keyed divergence said inline rather than silently absorbed (R882-2). */
+/** One roadmap row: its state chip, its title, its own source stamp (`row()`'s — a link when a project is known, the honest "no source was recorded" stamp when not; #882 cold review of PR 1, blocker), its own `stateReason` when the state could not be read (`roadmap-model.mjs`'s `safeStateOf` guard — #882 cold review of PR #1037, correction 1: a said reason, never a silent `unknown` mark with no explanation), its open blockers, and any `parent`-keyed divergence said inline rather than silently absorbed (R882-2, and correction 2's `nested-epic-not-supported` case). */
 function renderRoadmapRow(row, className) {
   const node = el('div', className);
   node.appendChild(el('span', `roadmap-state ${row.state.className}`, `${row.state.mark} ${row.state.label}`));
   node.appendChild(el('span', 'roadmap-title', `#${row.number} ${row.title}`));
   node.appendChild(renderSourceStamp(row.sourceStamp));
+  if (row.stateReason) node.appendChild(el('span', 'roadmap-state-reason', row.stateReason));
   if (row.blockedBy.length > 0) node.appendChild(el('span', 'roadmap-blocked', `blocked by ${row.blockedBy.map((n) => `#${n}`).join(', ')}`));
   for (const d of row.divergences) node.appendChild(el('span', 'roadmap-divergence', `${d.reason}${d.value !== null && d.value !== undefined ? `: #${d.value}` : ''}`));
   return node;
