@@ -19,14 +19,15 @@ export const MODE_IDS = Object.freeze(MODES.map((mode) => mode.id));
 
 /**
  * The said sentence a mode without content yet renders instead of an empty
- * area (never empty-on-failure). `map` and `sdd` are `null`: `map` draws
- * the existing canvas + drawer, `sdd` draws the seven-stage matrix (#998
- * R998-4) — neither is a placeholder.
+ * area (never empty-on-failure). `map`, `sdd` and `reviews` are `null`:
+ * `map` draws the existing canvas + drawer, `sdd` draws the seven-stage
+ * matrix (#998 R998-4), `reviews` draws the timeline and verdict queue
+ * (#998 R998-5) — none of the three is a placeholder.
  */
 export const PLACEHOLDERS = Object.freeze({
   map: null,
   sdd: null,
-  reviews: 'the reviews timeline is not built yet — it lands in PR 5',
+  reviews: null,
   governance: 'the governance view is not built yet — it lands in PR 7',
 });
 

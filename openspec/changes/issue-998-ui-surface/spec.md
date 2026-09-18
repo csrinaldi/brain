@@ -149,7 +149,85 @@ ids this PR owns.
 - **THEN** the model's `slices` entry carries the slice's claimed requirement ids and its terminal PR only — nothing about whether that PR is open, merged, or exists
 
 ### R998-5: the reviews timeline and the verdict queue
-Acceptance: a round shows its findings with severity and the text it cites; an unreadable thread is a row with its reason; a PR with no verdict says "no round posted".
+
+`status/snapshot.mjs`'s `reviewRows` MUST carry each verdict's `findings` as the shaped array `parseVerdict` already extracts (`{id, severity, evidenceExcerpt, cites, file, line}`, `evidence` truncated to its first 240 characters), never a count, plus a separate `findingCount`. `file`/`line` ARE real emitted fields — `verdict.mjs`'s `renderVerdict` posts them per finding when `hasUsableAnchor` holds (issue #405, REQ-405-2), measured directly on PR #1006's posted verdict (head e1c4aab3, a finding citing `brain/scripts/governance/run-check.mjs:556`); an earlier revision of this requirement read only the protocol prose and wrongly declared them absent. `line` is a positive integer (`>= 1`) parsed from its scalar — `0` parses to `null`, matching `hasUsableAnchor`'s own invariant (`verdict.mjs`) that a usable anchor never has `line: 0` (#1009 cold review finding 3); either field is `null` when the verdict carried no usable anchor for that finding. A verdict whose `findings:` block is malformed (`parseVerdict`'s `malformed` names it) keeps `findings: []` with the reason visible in `malformed`, never silently equal to "no findings were declared". `lib/review-timeline.mjs`'s `buildReviewTimeline(reviewsSection, prsSection, {issue?})` MUST turn the `{prs, reviews}` snapshot sections into `{threads, queue, totals}` — one thread per PR, its rounds oldest first, each round's findings grouped by severity (`bySeverity`, any severity string kept, never filtered against a closed vocabulary); a thread with zero rounds says so (`noRound: true`) rather than reading as approved; an unreadable thread is a row carrying its reason, never a skip. Each shaped round (`shapeRound`) MUST also carry `malformed` (the array `reviewRows` produced, possibly empty) and `findingCount` forward from the verdict — dropping either makes a malformed round indistinguishable from a clean verdict with zero findings (#1009 cold review finding 1). The queue holds threads whose latest verdict is STOP or REVISE, or which have no round at all — the three "waiting on a verdict right now" cases (`reviewer-protocol.md:264` declares the verdict enum `APPROVE | REVISE | STOP`; §7's bounded revision makes STOP the protocol's own "a human must look now" state, more urgent than REVISE) — ordered with every STOP-latest thread FIRST, ahead of the REVISE/no-round entries (which keep their own pre-existing oldest-PR-first order beneath it; #1009 cold review round 2). Each entry's `wait` names the head sha that has no verdict, the literal `'no round posted'` when there was never a round to name one from, the literal `'head not readable'` when the latest round is REVISE but its head sha could not be parsed, or the literal `'human escalation'` when the latest round is STOP — three distinct literals, never collapsed into one another — and each entry carries `escalate: true` for a STOP thread, `escalate: false` otherwise. `totals.stops` counts STOP-latest threads separately from the rest of `totals.queue`. `waitingOn`'s internal shape (`{waiting, head, group, escalate}`) MUST NOT collapse "not waiting" and "waiting but the head is unknown" into the same `null` value (#1009 cold review finding 2). A verdict word outside the protocol's `APPROVE | REVISE | STOP` enum is kept on the shaped round verbatim and flagged `unknownVerdict: true` — never dropped, never treated as an implicit APPROVE, and never treated as a waiting state either (#1009 cold review round 2). `app.js`'s `reviews` mode router draws the queue first, then one card per PR thread with its rounds and findings; a round whose `malformed` is non-empty renders as a said row ("findings block unreadable: <keys>", marked ⚠) instead of the "no findings" text a genuinely empty round gets; a STOP round gets its own mark (⛔, distinct from ✓/✕) and the word "human escalation" rendered as text beside the verdict. `lib/drawer-model.mjs`'s `reviewEntries` gains one child row per finding, each showing its severity, alongside the existing per-round entry; a malformed round's entry names the unreadable keys the same way, rather than folding into the generic "unknown finding count" phrase; a STOP round's detail is prefixed with the same "human escalation" word the canvas renders.
+
+#### Scenario: findings survive the round trip as an array, not a count
+- **WHEN** `reviewRows` parses a verdict whose block carries two findings
+- **THEN** the verdict's `findings` is a two-element array (`id`, `severity`, `evidenceExcerpt`, `cites`, `file`, `line` per entry) and `findingCount` is `2`
+
+#### Scenario: a finding's own file:line anchor survives, when the verdict carried one
+- **WHEN** a finding's block carries `file`/`line` (`hasUsableAnchor` held when the verdict was rendered)
+- **THEN** the shaped finding carries both, `line` as a number; a finding without a usable anchor has both `null` — never dropped, never fabricated
+
+#### Scenario: a finding's line of 0 is not a usable anchor (#1009 cold review finding 3)
+- **WHEN** a finding's block carries `line: 0`
+- **THEN** `parseFindingLine` returns `null`, the same as any non-numeric or negative value — `hasUsableAnchor` never emits `line: 0`, and rendering it as a real line would let `provenance.mjs`'s falsy check silently drop it from the stamp
+
+#### Scenario: a malformed findings block is named, not silently empty
+- **WHEN** a verdict's `findings:` block is unreadable (`parseVerdict` reports `malformed: ['findings']`)
+- **THEN** `reviewRows` keeps `findings: []` and `malformed` still names `'findings'` — indistinguishable from "no findings" only if a reader ignores `malformed`
+
+#### Scenario: a round's findings are grouped by severity, any value kept
+- **WHEN** a round carries findings whose severities include one value outside the declared protocol vocabulary
+- **THEN** `bySeverity` carries a count for that value too — an unknown severity is said, never dropped
+
+#### Scenario: a thread with no round is distinct from an unreadable one
+- **WHEN** a PR has posted zero verdicts (the reviews section is readable and simply has no rows for that PR)
+- **THEN** its thread has `noRound: true` and an empty `rounds` array — never the same shape as a thread whose reviews could not be read at all
+
+#### Scenario: an unreadable thread is a row with its reason
+- **WHEN** a PR's review thread could not be read (`reviews.value` carries `{pr, ok:false, reason}` for it)
+- **THEN** the thread appears with `unreadable: {reason}` and empty `rounds` — never skipped, never folded into "no round posted"
+
+#### Scenario: the queue holds exactly the two waiting cases, oldest first
+- **WHEN** the timeline has one thread with no round, one whose latest round is REVISE, one whose latest round is APPROVE, and one unreadable
+- **THEN** the queue contains only the first two, ordered by ascending PR number, each carrying a `wait` (the no-round thread's `wait` is `'no round posted'`; the REVISE thread's `wait` is its latest round's head sha)
+
+#### Scenario: a REVISE thread with an unreadable head still joins the queue (#1009 cold review finding 2)
+- **WHEN** a thread's latest round is REVISE but its `head_sha` is not a string (so `headSha7` is `null`)
+- **THEN** the queue still includes it, with `wait: 'head not readable'` — distinct from `'no round posted'`, and never silently dropped by collapsing "not waiting" and "waiting with an unknown head" into the same `null`
+
+#### Scenario: a malformed round renders as unreadable on screen, never as zero findings (#1009 cold review finding 1)
+- **WHEN** `app.js`'s `renderReviewRound` or `drawer-model.mjs`'s `reviewEntries` renders a round whose `malformed` array is non-empty
+- **THEN** the reviews-mode card says "findings block unreadable: <keys>" (marked ⚠), and the drawer's Reviews row names the same unreadable keys — neither reads as the "no findings"/generic-count text a genuinely empty round gets
+
+#### Scenario: a STOP-latest thread heads the queue, ahead of REVISE and no-round entries (#1009 cold review round 2)
+- **WHEN** the timeline has one thread whose latest round is STOP, one whose latest round is REVISE, and one with no round at all
+- **THEN** the queue lists the STOP thread first, followed by the REVISE and no-round threads in their own pre-existing oldest-PR-first order; the STOP entry's `wait` is the literal `'human escalation'` and its `escalate` is `true`; `totals.stops` is `1` and `totals.queue` counts all three
+
+#### Scenario: a STOP round renders with its own mark and says the human escalation, on the canvas and in the drawer (#1009 cold review round 2)
+- **WHEN** `app.js`'s `renderReviewRound` renders a round whose verdict is STOP, and `drawer-model.mjs`'s `reviewEntries` builds that round's entry
+- **THEN** the canvas mark is `⛔` (distinct from `✓` and `✕`) with the word "human escalation" rendered as text beside the verdict; the drawer entry's title still carries the verdict word verbatim and its detail is prefixed with the same "human escalation" word
+
+#### Scenario: a verdict outside APPROVE|REVISE|STOP is kept and said, never dropped or approved (#1009 cold review round 2)
+- **WHEN** `lib/review-timeline.mjs`'s `shapeRound` shapes a round whose verdict word is not one of `APPROVE`, `REVISE`, `STOP`
+- **THEN** the shaped round keeps that verdict word verbatim and carries `unknownVerdict: true`; the thread does not enter the queue on account of that round alone — an unknown word is said, never silently treated as an approval nor as a still-open REVISE/STOP state
+
+#### Scenario: the reviews tab shows a finding per row, with its severity and its own source when it has one
+- **WHEN** the drawer's Reviews tab renders a round with findings
+- **THEN** each finding is its own child entry naming its severity and id, its excerpt and `cites` in the detail, and its source — its own `{path: file, line}` anchor when the finding carried one, the round's own source otherwise (D14, `issue-881-ui-server-canvas/design.md:633`, is about a per-ROUND anchor to the underlying forge comment, which the provider does drop; it says nothing about a finding's own `file`/`line`, which the verdict body carries directly — R998-5's earlier text over-applied D14 to findings, corrected here)
 
 ### R998-6: the door's six tabs, the served branch, the countdown
-Acceptance: six tabs each keeping its own reason on failure; the header names the branch served; the bands show the next poll.
+
+Acceptance: six tabs each keeping its own reason on failure; the header names the branch served; the bands show the next poll. `change-route.mjs`'s `buildChangeView` grows two tab builders over sections it already holds (no new IO): `records` filters `snapshot.records` to this issue, newest first, each row `{id, ts, actor, actorKind, type, supersedes, source:{path: file}}`; `sdd` reads this issue's own row in `snapshot.changes` and states its seven stage artefacts' raw presence (`readChanges`'s R998-4 `artefacts{}` map), sourced to the change dir — deliberately not re-deriving `lib/sdd-model.mjs`'s `STAGE_VOCAB`, which stays the SDD mode's own concern over every change at once. `drawer-model.mjs`'s `TAB_IDS` grows to the design's six, in order: `spec, sdd, tasks, workingMemory, reviews, records` (the design's prose shorthand "memory" names the existing `workingMemory` tab, unchanged since #881). `server.mjs`'s `buildMeta()` gains `servedBranch` — `git symbolic-ref --short HEAD` on the served root's own git dir, read once and memoized, sourced to `HEAD`; a detached or unreadable `HEAD` is a said reason. `poller.mjs`'s `state()` gains `intervalMs` and `nextAttemptAt` (armed by `scheduleNext()` from the injected clock, cleared on pause); `lib/banners.mjs`'s `pollIndicator` gains an additive `countdown` field ("next poll in N s", "paused", or "polling disabled") beside its unchanged `text`/`paused`.
+
+#### Scenario: the door opens exactly six tabs, each with its own reason
+- **WHEN** the drawer receives a change view where every tab but `records` succeeded
+- **THEN** `TAB_IDS` is `spec, sdd, tasks, workingMemory, reviews, records`, in that order, and the failed `records` tab carries only its own reason — never hiding the other five
+
+#### Scenario: the sdd tab is the change's own seven-stage presence, no re-derivation
+- **WHEN** the drawer's `sdd` tab renders for a change with some artefacts present and some missing
+- **THEN** it lists each of `proposal, spec, design, tasks, apply, verify, archive` as present or missing, sourced to the change's own directory — the same raw fact `readChanges`'s `artefacts{}` map already carries, not a second computation of `lib/sdd-model.mjs`'s `STAGE_VOCAB`
+
+#### Scenario: the records tab lists this issue's own memory records, newest first
+- **WHEN** `.memory`'s records section carries two records for this issue and one for another
+- **THEN** the records tab shows exactly the two, newest first, each sourced to its own record file; an unreadable records section is the tab's own stated reason, never an empty list
+
+#### Scenario: the header names the served branch, sourced to HEAD
+- **WHEN** the server's checkout has a resolvable `HEAD` symbolic ref
+- **THEN** `buildMeta()`'s `servedBranch` carries the branch name and the page header renders "serving \<branch\>" beside its own source stamp; a detached or unreadable `HEAD` is a said reason instead, never a blank header
+
+#### Scenario: the status bar counts down to the next poll
+- **WHEN** the poller is scheduled, paused, or has no interval armed
+- **THEN** the indicator's countdown reads "next poll in N s", "paused", or "polling disabled" respectively, computed from the injected clock alone, never the wall clock inside `lib/`

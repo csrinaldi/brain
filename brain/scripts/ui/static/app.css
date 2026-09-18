@@ -39,6 +39,14 @@
   --state-unreadable-fg: #1b1b1f;     --state-unreadable-bg: #f3e3f6;
   --state-not-computed-fg: #1b1b1f;   --state-not-computed-bg: #ffffff;
   --state-unknown-fg: #8a4b00;        --state-unknown-bg: #ffffff;
+  /* one fg/bg pair per severity `reviewer-protocol.md` §6.1/6.2 declares
+     (blocker | correction | editorial), plus `unknown` for any other string
+     a finding may carry — R998-5: an unrecognized severity is still said in
+     full, in text, never dropped; only its colour falls back to this pair. */
+  --severity-blocker-fg: #8a1f11;     --severity-blocker-bg: #ffd9d4;
+  --severity-correction-fg: #1b1b1f;  --severity-correction-bg: #ffe9b8;
+  --severity-editorial-fg: #1b1b1f;   --severity-editorial-bg: #ececf2;
+  --severity-unknown-fg: #8a4b00;     --severity-unknown-bg: #ffffff;
 }
 
 /* The design's dark palette (Claude Design "Brain UI implementation
@@ -65,6 +73,10 @@
     --state-unreadable-fg: #d946ef;     --state-unreadable-bg: #3b0764;
     --state-not-computed-fg: #475569;   --state-not-computed-bg: #0f172a;
     --state-unknown-fg: #fbbf24;        --state-unknown-bg: #0f172a;
+    --severity-blocker-fg: #fb7185;     --severity-blocker-bg: #4c0519;
+    --severity-correction-fg: #f59e0b;  --severity-correction-bg: #451a03;
+    --severity-editorial-fg: #94a3b8;   --severity-editorial-bg: #1e293b;
+    --severity-unknown-fg: #fbbf24;     --severity-unknown-bg: #0f172a;
   }
 }
 
@@ -196,6 +208,24 @@ body {
 .sdd-stage-present, .sdd-stage-done { color: var(--ink); border-color: var(--ink); }
 .sdd-stage-in-progress { color: var(--warn); border-color: var(--warn); }
 .sdd-tasks { margin: 0; color: var(--muted); font-size: 12px; }
+
+/* ── the reviews view (#998 R998-5): the verdict queue, then one card per
+   PR thread — rounds oldest first, findings grouped by severity ───────── */
+
+.review-queue { margin-bottom: 14px; padding: 8px 10px; border: 1px dashed var(--line); border-radius: 6px; }
+.review-queue h3 { margin: 0 0 6px; font-size: 13px; }
+.queue-list { list-style: none; margin: 0; padding: 0; font-size: 12px; }
+.queue-list li { padding: 2px 0; }
+.review-card { margin-bottom: 14px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; }
+.review-round { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+.review-round-head { margin: 0 0 6px; font-size: 12px; }
+.severity-chips { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; }
+.severity-chip { font-size: 11px; padding: 2px 6px; border-radius: 4px; color: var(--severity-unknown-fg); background: var(--severity-unknown-bg); }
+.severity-chip.severity-blocker { color: var(--severity-blocker-fg); background: var(--severity-blocker-bg); }
+.severity-chip.severity-correction { color: var(--severity-correction-fg); background: var(--severity-correction-bg); }
+.severity-chip.severity-editorial { color: var(--severity-editorial-fg); background: var(--severity-editorial-bg); }
+.finding { margin: 4px 0; font-size: 12px; }
+.finding p { margin: 2px 0 0; color: var(--muted); }
 
 /* ── the inspector drawer: four tabs, every value with its source ───────── */
 

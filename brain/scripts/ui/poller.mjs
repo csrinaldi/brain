@@ -89,9 +89,18 @@ export function createPoller({
   let lastOkAt = null;
   let lastError = initialError;
   let forgeAsOf = { issues: null, bodies: null, reviews: null };
+  // #998 R998-6: the status bar's countdown. Armed by `scheduleNext()` from
+  // the SAME injected `_now()` this whole module already uses, never the
+  // wall clock (D9: no clock in `lib/`, the caller passes it). A manual
+  // `once()` clears any pending timer first, then re-arms the countdown
+  // anyway: `runTick()`'s own `.finally()` calls `scheduleNext()` on every
+  // completed tick, scheduled or manual alike — cold review of #1008/PR6
+  // measured this after an earlier revision of this comment claimed the
+  // opposite.
+  let nextAttemptAt = null;
 
   function state() {
-    return { paused, lastPolledAt, lastOkAt, lastError, forgeAsOf: { ...forgeAsOf } };
+    return { paused, lastPolledAt, lastOkAt, lastError, forgeAsOf: { ...forgeAsOf }, intervalMs: interval, nextAttemptAt };
   }
 
   function pickReviewTargets(prNumbers) {
@@ -213,7 +222,8 @@ export function createPoller({
     // would arm a brand-new real timer AFTER the server believes it has shut
     // down, leaking a handle that keeps the process alive (measured: a
     // `node --test` run that passes every assertion but never exits).
-    if (closed || paused || interval <= 0) return;
+    if (closed || paused || interval <= 0) { nextAttemptAt = null; return; }
+    nextAttemptAt = new Date(_now().getTime() + interval).toISOString();
     timer = _setTimeout(runTick, interval);
   }
 
@@ -229,10 +239,14 @@ export function createPoller({
 
   return {
     start() { return paused ? undefined : runTick(); },
-    close() { closed = true; if (timer) { _clearTimeout(timer); timer = null; } },
+    // The countdown goes with the timer, as it does in `pause()`: after
+    // `close()` no tick will ever fire, so a surviving `nextAttemptAt` would
+    // report a poll that is never coming (#1015 cold review).
+    close() { closed = true; if (timer) { _clearTimeout(timer); timer = null; } nextAttemptAt = null; },
     pause() {
       paused = true;
       if (timer) { _clearTimeout(timer); timer = null; }
+      nextAttemptAt = null;
       return state();
     },
     resume() {

@@ -251,6 +251,67 @@ test('#881: poller.close() during an in-flight tick leaves no timer scheduled on
   assert.equal(scheduler.pending(), 0, 'no timer remains scheduled once the in-flight tick settles after close()');
 });
 
+// ── #998 R998-6: state() carries intervalMs and nextAttemptAt ──────────────
+
+test('#998 R998-6: state() carries intervalMs and a nextAttemptAt armed to now + interval right after a successful tick; paused clears it', async () => {
+  const scheduler = fakeScheduler();
+  const now = { t: 1726272000000 };
+  const vcs = makeVcs({ callLog: [] });
+  const poller = createPoller({
+    vcs, cache: createForgeCache(), project: 'o/r', interval: 60000,
+    _setTimeout: scheduler.setTimeout, _clearTimeout: scheduler.clearTimeout, _now: () => new Date(now.t),
+  });
+
+  await poller.start();
+  let s = poller.state();
+  assert.equal(s.intervalMs, 60000);
+  assert.equal(s.nextAttemptAt, new Date(now.t + 60000).toISOString(), 'armed from the injected clock, never Date.now()');
+
+  poller.pause();
+  s = poller.state();
+  assert.equal(s.nextAttemptAt, null, 'a paused poller has nothing scheduled');
+  assert.equal(s.intervalMs, 60000, 'intervalMs itself is a static fact, unaffected by pause');
+
+  poller.resume();
+  s = poller.state();
+  assert.equal(s.nextAttemptAt, new Date(now.t + 60000).toISOString(), 'resuming re-arms the countdown from the same clock');
+
+  poller.close();
+});
+
+test('#998 R998-6: createPoller({initialError}) starts with nextAttemptAt null — nothing is scheduled before the first resume', () => {
+  const scheduler = fakeScheduler();
+  const now = { t: 0 };
+  const vcs = makeVcs({ callLog: [] });
+  const poller = createPoller({
+    vcs, cache: createForgeCache(), project: 'o/r', interval: 60000, initialError: 'no VCS token',
+    _setTimeout: scheduler.setTimeout, _clearTimeout: scheduler.clearTimeout, _now: () => new Date(now.t),
+  });
+  assert.equal(poller.state().nextAttemptAt, null);
+  poller.close();
+});
+
+// ── cold review of #1008/PR6: once() DOES re-arm the countdown ─────────────
+//
+// The comment above `nextAttemptAt`'s declaration used to claim a manual
+// once() "does not itself re-arm the interval" — false, measured here:
+// once()'s own runTick() calls scheduleNext() in its .finally() on every
+// completed tick, the same path a regular scheduled tick already takes.
+
+test('#998 R998-6: a manual once() re-arms nextAttemptAt from the moment the tick settles, not the moment it was called', async () => {
+  const scheduler = fakeScheduler();
+  const now = { t: 5000 };
+  const vcs = makeVcs({ callLog: [] });
+  const poller = createPoller({
+    vcs, cache: createForgeCache(), project: 'o/r', interval: 60000,
+    _setTimeout: scheduler.setTimeout, _clearTimeout: scheduler.clearTimeout, _now: () => new Date(now.t),
+  });
+
+  await poller.once();
+  assert.equal(poller.state().nextAttemptAt, new Date(65000).toISOString(), 'once() at t=5000 with a 60000ms interval re-arms to 65000');
+  poller.close();
+});
+
 // ── judgment:cold-1: the review lane is capped on the cold-start tick too ──
 //
 // The header comment (poller.mjs:6-8) promises "every tick, capped at 10
@@ -574,4 +635,20 @@ test('#881: a queued import overflow drains ahead of later churn, even while the
   assert.deepEqual(starved, [], 'the queued overflow is drained FIFO ahead of the churn that arrived after it');
 
   poller.close();
+});
+
+test("#1015 cold review: close() clears the countdown — a poll that will never fire must not be reported as pending", async () => {
+  const scheduler = fakeScheduler();
+  const now = { t: 1726272000000 };
+  const vcs = makeVcs({ callLog: [] });
+  const poller = createPoller({
+    vcs, cache: createForgeCache(), project: 'o/r', interval: 60000,
+    _setTimeout: scheduler.setTimeout, _clearTimeout: scheduler.clearTimeout, _now: () => new Date(now.t),
+  });
+
+  await poller.start();
+  assert.equal(poller.state().nextAttemptAt, new Date(now.t + 60000).toISOString(), 'a settled tick arms the next attempt from the injected clock');
+  poller.close();
+  assert.equal(poller.state().nextAttemptAt, null, 'after close() no tick will ever fire, so the countdown says nothing rather than a stale future time');
+  assert.equal(scheduler.pending(), 0, 'and the timer it was counting down to is gone');
 });

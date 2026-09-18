@@ -1,6 +1,7 @@
-// drawer-model.mjs — `GET /api/change/{issue}` turned into the four tabs the
-// inspector renders (#881 PR 4 / B2, R881-8, A3). Pure, imported by the
-// browser AND by node:test (D9).
+// drawer-model.mjs — `GET /api/change/{issue}` turned into the six tabs the
+// inspector renders (#881 PR 4 / B2, R881-8, A3; grown to six by #998
+// R998-6's `sdd` and `records`). Pure, imported by the browser AND by
+// node:test (D9).
 //
 // `change-route.mjs` already did the IO and the parsing; what is left is the
 // last mile the DOM needs, and it is exactly the part that is easy to get
@@ -15,12 +16,15 @@
 //     skipping it reads as "no rounds were ever posted"
 //     (`evidence-reader-empty-on-failure.md`, R881-9).
 //
-// One entry shape for all four tabs — `{title, detail, source, pending,
+// One entry shape for all six tabs — `{title, detail, source, pending,
 // done?, children?}` — so `app.js` renders every tab with one loop and has
 // no per-tab branch to get wrong.
 
-export const TAB_IDS = ['spec', 'tasks', 'workingMemory', 'reviews'];
-const TAB_LABELS = { spec: 'Spec', tasks: 'Tasks', workingMemory: 'Working memory', reviews: 'Reviews' };
+// #998 R998-6, design.md's "ship six (spec, sdd, tasks, memory, reviews,
+// records)" ruling: the id stays `workingMemory` (unchanged since #881), the
+// design's prose shorthand "memory" refers to that same tab.
+export const TAB_IDS = ['spec', 'sdd', 'tasks', 'workingMemory', 'reviews', 'records'];
+const TAB_LABELS = { spec: 'Spec', sdd: 'SDD', tasks: 'Tasks', workingMemory: 'Working memory', reviews: 'Reviews', records: 'Records' };
 
 // A3: `sourceLabel` lives in provenance.mjs since #998; re-exported so every
 // importer of this module keeps working. `sourceStamp` is additive (#998
@@ -28,6 +32,7 @@ const TAB_LABELS = { spec: 'Spec', tasks: 'Tasks', workingMemory: 'Working memor
 // already gets, `sourceStamp` is the design's bracketed form the door's
 // entries render from PR 2 on, with the href a forge/link chip may carry.
 import { sourceLabel, sourceStamp } from './provenance.mjs';
+import { KNOWN_VERDICTS } from './review-timeline.mjs';
 export { sourceLabel };
 
 function entry({ title, detail, source, pending = false, ...rest }) {
@@ -76,12 +81,75 @@ function workingMemoryEntries(fields) {
   }));
 }
 
-function reviewEntries(rounds, unreadable) {
-  const read = rounds.map((round) => entry({
-    title: `#${round.pr} rev ${round.rev} — ${round.verdict}`,
-    detail: `${round.author ?? 'unknown author'}, ${round.findings ?? 0} finding(s)${round.head_sha ? `, head ${round.head_sha}` : ''}`,
-    source: round.source,
+/**
+ * One child row per finding (#998 R998-5) — severity and id in the title,
+ * the excerpt and cites in the detail. D14 originally read "no per-finding
+ * anchor exists in this provider" — wrong, measured against PR #1006's
+ * posted verdict (verdict.mjs's `hasUsableAnchor`, REQ-405-2): a finding
+ * carrying `file`/`line` gets its OWN `{path, line}` source, rendered
+ * through the same `sourceStamp`/`sourceLabel` helper as every other value
+ * on this page; only a finding without one falls back to the round's own
+ * source (the PR comment URL).
+ */
+function findingEntries(round) {
+  return (round.findings ?? []).map((f) => entry({
+    title: `${f.severity ?? 'unknown'} — ${f.id ?? '?'}`,
+    detail: `${f.evidenceExcerpt ?? ''}${f.cites ? ` (cites ${f.cites})` : ''}`,
+    source: f.file ? { path: f.file, line: f.line } : round.source,
   }));
+}
+
+/** The sdd tab's entries (#998 R998-6): the change's own seven-stage raw presence, `change-route.mjs`'s `buildSddTab`. */
+function sddEntries(items) {
+  return items.map((item) => entry({
+    title: item.stage,
+    detail: item.present ? 'present' : 'missing',
+    source: item.source,
+    done: item.present,
+    pending: !item.present,
+  }));
+}
+
+/** The records tab's entries (#998 R998-6): this issue's own memory records, newest first (`change-route.mjs`'s `buildRecordsTab`). */
+function recordsEntries(items) {
+  return items.map((item) => entry({
+    title: `${item.type ?? 'record'} — ${item.id ?? '?'}`,
+    detail: `${item.actor ?? 'unknown'} (${item.actorKind ?? 'unknown'})${item.supersedes ? `, supersedes ${item.supersedes}` : ''}${item.ts ? `, ${item.ts}` : ''}`,
+    source: item.source,
+  }));
+}
+
+function reviewEntries(rounds, unreadable) {
+  const read = rounds.map((round) => {
+    const countPart = round.findingCount === null ? 'unknown finding count' : `${round.findingCount} finding(s)`;
+    // A malformed findings block is named explicitly, not folded into the
+    // generic "unknown finding count" phrase (#1009 cold review finding 1):
+    // `round.malformed` names WHICH keys were unreadable, and dropping that
+    // name here would leave this row indistinguishable from a round whose
+    // finding count was merely uncomputable for some other reason.
+    // A STOP round names the human escalation explicitly (#1009 cold review
+    // round 2, reviewer-protocol.md §7's "a human must look now" state) —
+    // the same word app.js's renderReviewRound puts beside the mark, so the
+    // drawer never says less about a STOP round than the canvas does.
+    // A word outside the protocol enum keeps its spelling in the title and is
+    // NAMED here, from the same set review-timeline.mjs flags it by — a drawer
+    // that rendered it like an ordinary REVISE would say less than the canvas
+    // (#1009 cold review round 3).
+    const tail = `${round.author ?? 'unknown author'}, ${countPart}${round.head_sha ? `, head ${round.head_sha}` : ''}`;
+    const detail = round.malformed?.length
+      ? `findings block unreadable: ${round.malformed.join(', ')} (${countPart})`
+      : !KNOWN_VERDICTS.has(round.verdict)
+        ? `unrecognised verdict word — ${tail}`
+        : round.verdict === 'STOP'
+          ? `human escalation — ${tail}`
+          : tail;
+    return entry({
+      title: `#${round.pr} rev ${round.rev} — ${round.verdict}`,
+      detail,
+      source: round.source,
+      children: findingEntries(round),
+    });
+  });
   // After the rounds that WERE read, never instead of them.
   const missed = unreadable.map((thread) => entry({
     title: `#${thread.pr} — unreadable`,
@@ -101,10 +169,11 @@ function reviewEntries(rounds, unreadable) {
 export function buildDrawerModel(changeView) {
   if (!changeView || typeof changeView !== 'object') return { ok: false, reason: 'no change view was given to the drawer' };
   if (changeView.ok !== true) return { ok: false, reason: changeView.reason };
-  const { issue, changeDir, spec, tasks, workingMemory, reviews } = changeView.value;
+  const { issue, changeDir, spec, sdd, tasks, workingMemory, reviews, records } = changeView.value;
 
   const tabs = [
     spec.ok ? { id: 'spec', label: TAB_LABELS.spec, ok: true, reason: null, source: null, note: null, entries: specEntries(spec.value) } : failedTab('spec', spec),
+    sdd.ok ? { id: 'sdd', label: TAB_LABELS.sdd, ok: true, reason: null, source: null, note: null, entries: sddEntries(sdd.value) } : failedTab('sdd', sdd),
     tasks.ok ? { id: 'tasks', label: TAB_LABELS.tasks, ok: true, reason: null, source: null, note: null, entries: taskEntries(tasks.value) } : failedTab('tasks', tasks),
     workingMemory.ok
       ? { id: 'workingMemory', label: TAB_LABELS.workingMemory, ok: true, reason: null, source: null, note: null, entries: workingMemoryEntries(workingMemory.value) }
@@ -112,6 +181,7 @@ export function buildDrawerModel(changeView) {
     reviews.ok
       ? { id: 'reviews', label: TAB_LABELS.reviews, ok: true, reason: null, source: null, note: reviews.sourceNote ?? null, entries: reviewEntries(reviews.value ?? [], reviews.unreadable ?? []) }
       : failedTab('reviews', reviews, reviewEntries([], reviews.unreadable ?? [])),
+    records.ok ? { id: 'records', label: TAB_LABELS.records, ok: true, reason: null, source: null, note: null, entries: recordsEntries(records.value) } : failedTab('records', records),
   ];
 
   return { ok: true, value: { issue, changeDir, tabs } };

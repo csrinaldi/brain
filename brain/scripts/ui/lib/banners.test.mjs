@@ -9,7 +9,7 @@ const at = (secondsAgo) => new Date(NOW - secondsAgo * 1000).toISOString();
 const meta = (over = {}) => ({
   project: 'o/r',
   watcher: { ok: true, watched: 110, failed: [] },
-  poller: { paused: false, lastPolledAt: at(5), lastOkAt: at(5), lastError: null, forgeAsOf: {} },
+  poller: { paused: false, lastPolledAt: at(5), lastOkAt: at(5), lastError: null, forgeAsOf: {}, intervalMs: 60000, nextAttemptAt: at(-55) },
   ...over,
 });
 
@@ -109,7 +109,7 @@ test('#881 R881-9 S1: every {ok:false} section of the snapshot is named with its
 });
 
 test('#881 R881-4: the poll indicator says how long ago the forge was polled', () => {
-  assert.deepEqual(pollIndicator({ poller: meta().poller, nowMs: NOW }), { text: 'forge polled 5 s ago', paused: false });
+  assert.deepEqual(pollIndicator({ poller: meta().poller, nowMs: NOW }), { text: 'forge polled 5 s ago', paused: false, countdown: 'next poll in 55 s' });
   assert.equal(pollIndicator({ poller: { ...meta().poller, lastOkAt: at(180) }, nowMs: NOW }).text, 'forge polled 3 min ago');
   assert.equal(pollIndicator({ poller: { ...meta().poller, lastOkAt: at(7200) }, nowMs: NOW }).text, 'forge polled 2 h ago');
 });
@@ -118,11 +118,26 @@ test('#881 R881-4 S2: paused is visible in the indicator itself, not only in the
   const paused = pollIndicator({ poller: { ...meta().poller, paused: true }, nowMs: NOW });
   assert.equal(paused.paused, true);
   assert.equal(paused.text, 'polling is paused — forge polled 5 s ago');
+  assert.equal(paused.countdown, 'paused', 'the countdown says paused even though a nextAttemptAt is still in the fixture — paused always wins');
 
-  const never = pollIndicator({ poller: { paused: true, lastPolledAt: null, lastOkAt: null, lastError: null, forgeAsOf: {} }, nowMs: NOW });
+  const never = pollIndicator({ poller: { paused: true, lastPolledAt: null, lastOkAt: null, lastError: null, forgeAsOf: {}, intervalMs: 60000, nextAttemptAt: null }, nowMs: NOW });
   assert.equal(never.text, 'polling is paused — the forge has not been polled yet');
+  assert.equal(never.countdown, 'paused');
 });
 
 test('#881: with no meta yet the indicator states that, rather than claiming a fresh poll', () => {
-  assert.deepEqual(pollIndicator({ poller: null, nowMs: NOW }), { text: 'the poll state is unknown until the stream connects', paused: false });
+  assert.deepEqual(pollIndicator({ poller: null, nowMs: NOW }), { text: 'the poll state is unknown until the stream connects', paused: false, countdown: 'polling disabled' });
+});
+
+// ── #998 R998-6: the countdown text ─────────────────────────────────────────
+
+test('#998 R998-6: the countdown reads "next poll in N s" while scheduled, "paused" while paused, "polling disabled" with no schedule armed', () => {
+  const scheduled = pollIndicator({ poller: { ...meta().poller, nextAttemptAt: at(-55) }, nowMs: NOW });
+  assert.equal(scheduled.countdown, 'next poll in 55 s');
+
+  const paused = pollIndicator({ poller: { ...meta().poller, paused: true, nextAttemptAt: null }, nowMs: NOW });
+  assert.equal(paused.countdown, 'paused');
+
+  const disabled = pollIndicator({ poller: { ...meta().poller, nextAttemptAt: null, intervalMs: 0 }, nowMs: NOW });
+  assert.equal(disabled.countdown, 'polling disabled');
 });

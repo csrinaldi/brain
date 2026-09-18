@@ -53,3 +53,10 @@ test('#998 fix3: renderSdd/renderSddRow render the model\'s sliceNote — the se
   assert.doesNotMatch(rowBody, /PR state is not read/, 'the sentence must not be hard-coded on the page');
   assert.match(sddBody + rowBody, /sliceNote/, "the model's sliceNote is threaded through instead");
 });
+
+// ── cold review of #1008/PR6: a null "next" renders no "— next:" fragment ──
+
+test('#998 cold-1008: the tasks line omits the "next" fragment when t.next is falsy — sdd-model.mjs\'s own job is normalising the "—" sentinel to null, this only pins the row already guards on it', () => {
+  const rowBody = functionBody(read(APP_JS), 'function renderSddRow(');
+  assert.match(rowBody, /\$\{t\.next \? `[^`]*next:[^`]*`\s*:\s*''\}/, 'the tasks line must guard the "— next: …" fragment on t.next being truthy');
+});

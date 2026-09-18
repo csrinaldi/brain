@@ -404,6 +404,70 @@ test('#881: R881-2 S1 — the first SSE frame is `sync`, carrying the whole curr
   }
 });
 
+// ── #998 R998-6 T3: buildMeta's servedBranch ────────────────────────────────
+
+test('#998 R998-6 T3: buildMeta\'s servedBranch names the served checkout\'s HEAD via git symbolic-ref, sourced to HEAD, read once and memoized across a second broadcast', async () => {
+  const root = makeFixture();
+  const cache = createForgeCache();
+  cache.setIssueList([]);
+  cache.setMrList([]);
+  const gitCalls = [];
+  const _run = (file, args) => {
+    gitCalls.push(args);
+    if (args[0] === 'symbolic-ref') return 'feat/issue-998-pr6-door\n';
+    throw new Error(`unexpected git call: ${args.join(' ')}`);
+  };
+  const server = createUiServer({ root, vcs: cache.port, project: 'o/r', _now: now, poll: false, _run });
+  await server.listen(0);
+  const ac = new AbortController();
+  try {
+    const res = await fetch(`http://127.0.0.1:${server.port}/api/stream`, { signal: ac.signal });
+    const readFrame = frameReader(res);
+    const frame = await readFrame();
+    const payload = JSON.parse(frame.slice('event: sync\ndata: '.length));
+    assert.deepEqual(payload.meta.servedBranch, { ok: true, branch: 'feat/issue-998-pr6-door', source: { path: 'HEAD' } });
+
+    // A manual poll forces a SECOND `buildMeta()` (the `status` frame
+    // `recomputeAndBroadcast` sends once the tick settles, win or lose) —
+    // `resolveServedBranch()` must not shell out to `git` a second time.
+    await fetch(`http://127.0.0.1:${server.port}/api/poll/once`, { method: 'POST' });
+    const statusFrame = await readFrame();
+    assert.match(statusFrame, /^event: status\ndata: \{/);
+    const statusPayload = JSON.parse(statusFrame.slice('event: status\ndata: '.length));
+    assert.deepEqual(statusPayload.servedBranch, { ok: true, branch: 'feat/issue-998-pr6-door', source: { path: 'HEAD' } });
+    ac.abort();
+  } finally {
+    await server.close();
+  }
+  assert.equal(gitCalls.filter((a) => a[0] === 'symbolic-ref').length, 1, 'resolveServedBranch memoizes — one git call across two buildMeta() calls');
+});
+
+test('#998 R998-6 T3: a detached or unreadable HEAD is a said reason on servedBranch, never a crash', async () => {
+  const root = makeFixture();
+  const cache = createForgeCache();
+  cache.setIssueList([]);
+  cache.setMrList([]);
+  const _run = (file, args) => {
+    if (args[0] === 'symbolic-ref') throw new Error('fatal: ref HEAD is not a symbolic ref');
+    throw new Error(`unexpected git call: ${args.join(' ')}`);
+  };
+  const server = createUiServer({ root, vcs: cache.port, project: 'o/r', _now: now, poll: false, _run });
+  await server.listen(0);
+  const ac = new AbortController();
+  try {
+    const res = await fetch(`http://127.0.0.1:${server.port}/api/stream`, { signal: ac.signal });
+    const readFrame = frameReader(res);
+    const frame = await readFrame();
+    const payload = JSON.parse(frame.slice('event: sync\ndata: '.length));
+    assert.equal(payload.meta.servedBranch.ok, false);
+    assert.match(payload.meta.servedBranch.reason, /not a symbolic ref/);
+    assert.deepEqual(payload.meta.servedBranch.source, { path: 'HEAD' });
+    ac.abort();
+  } finally {
+    await server.close();
+  }
+});
+
 // ── R881-2 S2/A2: a committed-tier change reaches the client ────────────────
 
 test('#881: R881-2 S2/A2 — a committed-tier change (via the watcher) yields a `section` frame within the debounce, no reconnect', async () => {

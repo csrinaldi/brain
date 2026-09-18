@@ -17,6 +17,7 @@ import { degradationBands, pollIndicator } from './lib/banners.mjs';
 import { buildLaneModel } from './lib/lane-model.mjs';
 import { buildDrawerModel } from './lib/drawer-model.mjs';
 import { buildSddModel, STAGE_VOCAB } from './lib/sdd-model.mjs';
+import { buildReviewTimeline } from './lib/review-timeline.mjs';
 import { sourceStamp } from './lib/provenance.mjs';
 import { MODES, PLACEHOLDERS, initialView, switchMode, keyAction } from './lib/view-model.mjs';
 
@@ -117,7 +118,7 @@ function switchToMode(mode) {
   render();
 }
 
-/** The router (#998 R998-2/R998-4): `map` draws the canvas + drawer, `sdd` draws the seven-stage matrix; the rest say which PR brings their content. */
+/** The router (#998 R998-2/R998-4/R998-5): `map` draws the canvas + drawer, `sdd` draws the seven-stage matrix, `reviews` draws the timeline + verdict queue; the rest say which PR brings their content. */
 function renderContent() {
   if (view === 'map') {
     renderLanes();
@@ -126,6 +127,12 @@ function renderContent() {
   }
   if (view === 'sdd') {
     renderSdd();
+    mounts.drawer.hidden = true;
+    clear(mounts.drawer);
+    return;
+  }
+  if (view === 'reviews') {
+    renderReviews();
     mounts.drawer.hidden = true;
     clear(mounts.drawer);
     return;
@@ -157,11 +164,26 @@ function renderBands() {
  * manual poll. Both controls POST — the only mutation verbs this server
  * accepts (R881-5).
  */
+/** The served branch, said with its own source stamp (#998 R998-6 T3) — a detached or unreadable HEAD is a said reason, never a blank header. */
+function renderServedBranch(servedBranch) {
+  const frag = document.createDocumentFragment();
+  if (servedBranch === null) {
+    frag.appendChild(el('span', 'served-branch', 'serving: unknown until the stream connects'));
+    return frag;
+  }
+  const text = servedBranch.ok ? `serving ${servedBranch.branch}` : `serving: unknown (${servedBranch.reason})`;
+  frag.appendChild(el('span', 'served-branch', text));
+  frag.appendChild(renderSourceStamp(sourceStamp(servedBranch.source)));
+  return frag;
+}
+
 function renderStatus() {
   const indicator = pollIndicator({ poller: state.meta?.poller ?? null, nowMs: Date.now() });
   clear(mounts.status);
   mounts.status.appendChild(el('strong', 'title', 'brain:ui'));
+  mounts.status.appendChild(renderServedBranch(state.meta?.servedBranch ?? null));
   mounts.status.appendChild(el('span', indicator.paused ? 'poll-indicator paused' : 'poll-indicator', indicator.text));
+  mounts.status.appendChild(el('span', 'poll-countdown', indicator.countdown));
   mounts.status.appendChild(el('span', 'spacer'));
 
   const toggle = el('button', 'poll-toggle', indicator.paused ? 'resume polling' : 'disable polling');
@@ -402,6 +424,88 @@ function renderSddRow(change, sliceNote) {
   return row;
 }
 
+/**
+ * The reviews view (#998 R998-5): the verdict queue first ("waiting on a
+ * verdict right now"), then one card per PR thread with its rounds oldest
+ * first — verdict word + ✓/✕ mark, findings grouped by severity. An
+ * unreadable thread is a row with its reason; a thread with no round says
+ * so. `lib/review-timeline.mjs` decided all of it; this renders one loop
+ * over rows this page never re-derives.
+ */
+function renderReviews() {
+  const model = buildReviewTimeline(sectionOf(state, 'reviews'), sectionOf(state, 'prs'));
+  clear(mounts.canvas);
+  if (!model.ok) {
+    mounts.canvas.appendChild(said(`the reviews timeline could not be computed: ${model.reason}`));
+    return;
+  }
+  const { threads, queue, totals } = model.value;
+  mounts.canvas.appendChild(el('p', 'canvas-summary', `${totals.threads} thread(s), ${totals.queue} waiting on a verdict, ${totals.unreadable} unreadable`));
+  mounts.canvas.appendChild(renderQueue(queue));
+  for (const thread of threads) mounts.canvas.appendChild(renderReviewThread(thread));
+}
+
+function renderQueue(queue) {
+  const wrap = el('div', 'review-queue');
+  wrap.appendChild(el('h3', null, 'waiting on a verdict right now'));
+  if (queue.length === 0) {
+    wrap.appendChild(said('nothing is waiting on a verdict'));
+    return wrap;
+  }
+  const list = el('ul', 'queue-list');
+  for (const item of queue) list.appendChild(el('li', null, `#${item.pr}${item.title ? ` ${item.title}` : ''} — ${item.wait}`));
+  wrap.appendChild(list);
+  return wrap;
+}
+
+function renderReviewThread(thread) {
+  const card = el('div', 'review-card');
+  card.appendChild(el('strong', null, `#${thread.pr}${thread.title ? ` ${thread.title}` : ''}`));
+  if (thread.unreadable) {
+    card.appendChild(said(`this thread could not be read: ${thread.unreadable.reason}`));
+    return card;
+  }
+  if (thread.noRound) {
+    card.appendChild(said('no round posted'));
+    return card;
+  }
+  for (const round of thread.rounds) card.appendChild(renderReviewRound(round));
+  return card;
+}
+
+/** One round: its verdict word + mark, its findings grouped by severity (#998 R998-5) — a finding's own `source` (its `file`/`line` anchor when the verdict carried one, per `verdict.mjs`'s `hasUsableAnchor`/REQ-405-2, measured on PR #1006) is rendered through the same `sourceStamp` helper as every other value on this page, beside its excerpt and cites. A malformed findings block (#1009 cold review finding 1) is checked BEFORE the empty case: `round.findings` is `[]` either way, so an unchecked order would render an unreadable block identically to a clean zero-findings round. STOP (#1009 cold review round 2) gets its own mark (⛔, distinct from ✓/✕) and says "human escalation" as text — reviewer-protocol.md §7's "a human must look now" state is never indistinguishable from an ordinary REVISE ✕. */
+function renderReviewRound(round) {
+  const row = el('div', 'review-round');
+  // `unknownVerdict` is review-timeline.mjs's own flag for a word outside the
+  // protocol enum (a typo, or a verdict a later protocol adds). Rendering it
+  // with the plain REVISE mark would make it byte-identical to a REVISE on
+  // screen, which is the silence R998-5 forbids (#1009 cold review round 3).
+  const mark = round.unknownVerdict ? '?' : round.verdict === 'APPROVE' ? '✓' : round.verdict === 'STOP' ? '⛔' : '✕';
+  const escalation = round.unknownVerdict
+    ? ' — unrecognised verdict word'
+    : round.verdict === 'STOP' ? ' — human escalation' : '';
+  row.appendChild(el('p', 'review-round-head', `${mark} ${round.verdict}${escalation} — rev ${round.rev}, ${round.author ?? 'unknown author'}${round.headSha7 ? `, head ${round.headSha7}` : ''}`));
+  if (round.malformed && round.malformed.length > 0) {
+    row.appendChild(said(`⚠ findings block unreadable: ${round.malformed.join(', ')}`));
+    return row;
+  }
+  if (round.findings.length === 0) {
+    row.appendChild(said('no findings'));
+    return row;
+  }
+  const chips = el('div', 'severity-chips');
+  for (const [severity, count] of Object.entries(round.bySeverity)) chips.appendChild(el('span', `severity-chip severity-${severity}`, `${severity} × ${count}`));
+  row.appendChild(chips);
+  for (const f of round.findings) {
+    const item = el('div', 'finding');
+    item.appendChild(el('strong', null, `${f.severity ?? 'unknown'} — ${f.id ?? '?'}`));
+    item.appendChild(renderSourceStamp(sourceStamp(f.source))); // #998 R998-5: a finding's own file:line (or the said fallback), through the same stamp helper the door uses
+    item.appendChild(el('p', null, `${f.evidenceExcerpt ?? ''}${f.cites ? ` (cites ${f.cites})` : ''}`));
+    row.appendChild(item);
+  }
+  return row;
+}
+
 /** Activating a node selects it and opens the drawer on its Spec tab (R881-8). */
 function selectNode(issue) {
   selectedIssue = issue;
@@ -418,8 +522,9 @@ function closeDrawer() {
 }
 
 /**
- * The inspector drawer: four tabs, one entry shape, and a source string under
- * every single value (A3). `drawer-model.mjs` decided all of it — including
+ * The inspector drawer: six tabs (#998 R998-6), one entry shape, and a
+ * source string under every single value (A3). `drawer-model.mjs` decided
+ * all of it — including
  * that a tab which failed keeps its reason and that an unreadable review
  * thread is still an entry — so this renders one loop, with no per-tab
  * branch to get wrong.
