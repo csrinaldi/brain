@@ -58,18 +58,33 @@ import { execFileSync } from 'node:child_process';
 
 const RECORDS_PATH = '.memory/records/';
 
+// Batch 4 (#1024 live-CI bug, PR #1048): `execFileSync`'s default `maxBuffer`
+// is 1 MiB. `git ls-tree`'s listing and `git cat-file --batch`'s blob stream
+// (D2's ONE-call design) both need to hold the WHOLE default branch's
+// `.memory/records/` in memory at once — this repo's own real `origin/main`
+// already measures 8,967,273 bytes, well past 1 MiB, and a production
+// consumer's history only grows. 512 MiB is a generous, cheap FIXED cap —
+// comfortably ahead of years of this project's own growth — chosen over a
+// computed size (a second `git ls-tree -r -l` round trip to sum blob sizes
+// plus per-object header overhead) because the cost difference is
+// negligible at this scale and a fixed cap needs no extra git call to fail
+// closed if it is ever wrong.
+const MAX_BUFFER = 512 * 1024 * 1024;
+
 /**
  * Default git runner: real `execFileSync('git', args, opts)`, returning a
  * raw `Buffer` (no `encoding` option) so byte-size-based batch parsing stays
  * correct regardless of multi-byte content. Injectable in tests — no
- * production caller passes its own `git` dep.
+ * production caller passes its own `git` dep. `maxBuffer` defaults to
+ * `MAX_BUFFER` (Batch 4) — a caller-supplied `opts.maxBuffer` still wins,
+ * since it is spread after the default.
  *
  * @param {string[]} args
- * @param {{cwd?: string, input?: string}} [opts]
+ * @param {{cwd?: string, input?: string, maxBuffer?: number}} [opts]
  * @returns {Buffer}
  */
 function defaultGit(args, opts = {}) {
-  return execFileSync('git', args, opts);
+  return execFileSync('git', args, { maxBuffer: MAX_BUFFER, ...opts });
 }
 
 /**
@@ -78,20 +93,28 @@ function defaultGit(args, opts = {}) {
  * contract table names verbatim ("git fetch origin <b> failed: <first
  * stderr line>").
  *
+ * Batch 4 (#1024 live-CI bug): `stderr` can be a REAL, present Buffer that is
+ * simply EMPTY — measured on `execFileSync`'s own ENOBUFS (the child is
+ * killed before any stderr is captured) — which used to fall through to a
+ * bare, silent "failed: " with nothing after the colon. When no non-empty
+ * stderr line exists, this now falls back to the thrown error's own
+ * `code`/`message` (e.g. `code: 'ENOBUFS'`, `message: 'spawnSync git
+ * ENOBUFS'`), so the cause is never silently empty.
+ *
  * @param {unknown} err
  * @returns {string}
  */
 function firstStderrLine(err) {
   const stderr = err && typeof err === 'object' ? /** @type {any} */ (err).stderr : undefined;
-  const text = Buffer.isBuffer(stderr)
-    ? stderr.toString('utf8')
-    : typeof stderr === 'string' && stderr
-      ? stderr
-      : err instanceof Error
-        ? err.message
-        : String(err);
-  const line = text.split('\n').find((l) => l.trim() !== '');
-  return line ?? text.trim();
+  const stderrText = Buffer.isBuffer(stderr) ? stderr.toString('utf8') : typeof stderr === 'string' ? stderr : '';
+  const line = stderrText.split('\n').find((l) => l.trim() !== '');
+  if (line) return line;
+
+  const code = err && typeof err === 'object' ? /** @type {any} */ (err).code : undefined;
+  const message = err instanceof Error ? err.message : typeof err === 'string' ? err : undefined;
+  if (message) return code && !message.includes(String(code)) ? `${code}: ${message}` : message;
+  if (code) return String(code);
+  return 'unknown error (no stderr, no code, no message)';
 }
 
 /**

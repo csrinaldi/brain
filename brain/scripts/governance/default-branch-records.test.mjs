@@ -140,6 +140,49 @@ test('readDefaultBranchRecords: batch parsing handles embedded newlines and a mi
   assert.deepEqual(result.records, [{ id: 'rec-bbbbbbbbbbbbbbbb', issue: 7, note: 'line one\nline two' }]);
 });
 
+// #1024 Batch 4 (live-CI bug, PR #1048): execFileSync's default `maxBuffer`
+// is 1 MiB. `git cat-file --batch` for a large `.memory/records/` volume
+// (measured 8,967,273 bytes on this repo's real origin/main) exceeds it and
+// throws ENOBUFS — with an EMPTY `stderr` (the child is killed before any
+// stderr is captured), so the old `firstStderrLine` produced a bare, silent
+// "git cat-file failed: " with nothing after the colon. Every test before
+// this batch stayed under 1 MiB, so the defect never showed up here.
+test('readDefaultBranchRecords: a cat-file failure with EMPTY stderr (e.g. ENOBUFS) still names the cause — never a bare "failed: " with nothing after the colon', () => {
+  const result = readDefaultBranchRecords({
+    defaultBranch: 'main',
+    git: (args) => {
+      if (args[0] === 'rev-parse') return SHALLOW_TRUE;
+      if (args[0] === 'fetch') return Buffer.alloc(0);
+      if (args[0] === 'ls-tree') return Buffer.from('.memory/records/2026-09-rec-ffffffffffffffff.jsonl\0', 'utf8');
+      if (args[0] === 'cat-file') {
+        const e = new Error('spawnSync git ENOBUFS');
+        e.code = 'ENOBUFS';
+        e.stderr = Buffer.alloc(0);
+        throw e;
+      }
+      throw new Error('unexpected');
+    },
+  });
+  assert.equal(result.records.length, 0);
+  assert.notEqual(result.error, 'git cat-file failed: ', 'must never end in a bare, silent colon with no cause');
+  assert.match(result.error, /ENOBUFS/, 'must name the actual cause (the thrown error\'s code/message) when stderr is empty');
+});
+
+test('readDefaultBranchRecords: a fetch failure with EMPTY stderr also falls back to the error\'s code/message (same fix, D1 path)', () => {
+  const result = readDefaultBranchRecords({
+    defaultBranch: 'main',
+    git: (args) => {
+      if (args[0] === 'rev-parse') return SHALLOW_TRUE;
+      const e = new Error('spawnSync git ETIMEDOUT');
+      e.code = 'ETIMEDOUT';
+      e.stderr = Buffer.alloc(0);
+      throw e;
+    },
+  });
+  assert.notEqual(result.error, 'git fetch origin main failed: ');
+  assert.match(result.error, /ETIMEDOUT/);
+});
+
 test('readDefaultBranchRecords: cause strings are verbatim', () => {
   const fetchFail = readDefaultBranchRecords({
     defaultBranch: 'main',

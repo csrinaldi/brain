@@ -204,3 +204,88 @@ test('readDefaultBranchRecords: main absent on origin returns the fetch-failure 
     removeTempTree(dir);
   }
 });
+
+// ── Batch 4 (#1024 live-CI bug, PR #1048): real production volume ─────────
+//
+// Live CI on PR #1048 printed `memory-gate: path=retrieval #1024 (records:
+// pr-tree only — default branch unreadable: git cat-file failed: )` and
+// exited 2. Reproduced locally: this repo's real `origin/main` holds
+// 8,967,273 bytes of `.memory/records/`, and `execFileSync`'s DEFAULT
+// `maxBuffer` is 1 MiB — `git cat-file --batch`'s single-call design (D2)
+// needs to hold the WHOLE listing's blob stream in memory at once, so it
+// died with ENOBUFS well before this repo's own real volume. No test before
+// this batch ever built a fixture anywhere near 1 MiB, so the defect never
+// showed up here despite the parsing CONTRACT itself being correct.
+
+/** Builds a bare "origin" whose `main` branch carries `count` records of
+ *  ~1 KB each (comfortably over the 1 MiB `execFileSync` default), then
+ *  clones it either FULL or SHALLOW per `depth`. Returns the clone dir. */
+function buildLargeRecordsOriginAndClone(dir, { count = 1500, depth = null } = {}) {
+  const originDir = join(dir, 'origin.git');
+  const seedDir = join(dir, 'seed');
+  const cloneDir = join(dir, 'clone');
+
+  mkdirSync(originDir, { recursive: true });
+  git(['init', '--bare', '-b', 'main', originDir]);
+
+  mkdirSync(seedDir, { recursive: true });
+  git(['init', '-b', 'main', seedDir]);
+  git(['config', 'user.email', 'test@example.com'], { cwd: seedDir });
+  git(['config', 'user.name', 'Test'], { cwd: seedDir });
+  writeFileSync(join(seedDir, 'README.md'), '# seed\n', 'utf8');
+
+  const recordsDir = join(seedDir, '.memory', 'records');
+  mkdirSync(recordsDir, { recursive: true });
+  for (let i = 0; i < count; i++) {
+    const id = `rec-${i.toString(16).padStart(16, '0')}`;
+    const record = JSON.stringify({
+      id, ts: '2026-09-18T00:00:00Z', issue: 1000 + (i % 50), type: 'decision',
+      content: 'x'.repeat(900), // pads each record to roughly 1 KB
+    });
+    writeFileSync(join(recordsDir, `2026-09-${id}.jsonl`), record + '\n', 'utf8');
+  }
+  git(['add', '.'], { cwd: seedDir });
+  git(['commit', '-m', `seed ${count} large records`], { cwd: seedDir });
+  git(['push', `file://${originDir}`, 'main'], { cwd: seedDir });
+  git(['branch', 'feature'], { cwd: seedDir });
+  git(['push', `file://${originDir}`, 'feature'], { cwd: seedDir });
+
+  const cloneArgs = depth
+    ? ['clone', '--depth', String(depth), '--branch', 'feature', `file://${originDir}`, cloneDir]
+    : ['clone', '--branch', 'feature', `file://${originDir}`, cloneDir];
+  git(cloneArgs);
+  git(['config', 'user.email', 'test@example.com'], { cwd: cloneDir });
+  git(['config', 'user.name', 'Test'], { cwd: cloneDir });
+
+  return { originDir, cloneDir };
+}
+
+test('readDefaultBranchRecords: a FULL (non-shallow) clone reads MORE THAN 1 MiB of records without ENOBUFS (#1024 live-CI bug, Batch 4)', () => {
+  const dir = testTmp('default-branch-records-integration-largevol-full-');
+  try {
+    const { cloneDir } = buildLargeRecordsOriginAndClone(dir, { count: 1500 });
+
+    const result = readDefaultBranchRecords({ defaultBranch: 'main', cwd: cloneDir });
+
+    assert.equal(result.error, null, `must not fail with ENOBUFS on a large volume: ${result.error}`);
+    assert.equal(result.records.length, 1500);
+    assert.equal(result.fetched, false, 'a full clone reads the local ref, never fetches');
+  } finally {
+    removeTempTree(dir);
+  }
+});
+
+test('readDefaultBranchRecords: a SHALLOW clone reads MORE THAN 1 MiB of records without ENOBUFS (#1024 live-CI bug, Batch 4)', () => {
+  const dir = testTmp('default-branch-records-integration-largevol-shallow-');
+  try {
+    const { cloneDir } = buildLargeRecordsOriginAndClone(dir, { count: 1500, depth: 1 });
+
+    const result = readDefaultBranchRecords({ defaultBranch: 'main', cwd: cloneDir });
+
+    assert.equal(result.error, null, `must not fail with ENOBUFS on a large volume: ${result.error}`);
+    assert.equal(result.records.length, 1500);
+    assert.equal(result.fetched, true, 'a shallow clone runs the live fetch');
+  } finally {
+    removeTempTree(dir);
+  }
+});

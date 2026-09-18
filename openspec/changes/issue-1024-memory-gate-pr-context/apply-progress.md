@@ -1,7 +1,131 @@
 # Apply progress: issue-1024-memory-gate-pr-context
 
 **Mode**: Strict TDD (native test runner: `node --test`)
-**Status**: 25/25 tasks complete + Batch 2 incident fix + Batch 3 cold-review fixes. Ready for verify.
+**Status**: 25/25 tasks complete + Batch 2 incident fix + Batch 3 cold-review fixes + Batch 4 live-CI bug fix. Ready for verify.
+
+**Commit note**: Batches 1-3 (plus this change's SDD artifacts) were committed by the
+maintainer as 7 commits and pushed as PR #1048 on `fix/issue-1024-fixgovernance-memory-
+gate-never-receives`. Batch 4 below is a NEW, currently UNCOMMITTED fix on top of that
+branch, per the maintainer's explicit instruction to leave it uncommitted for now and not
+rewrite history.
+
+## Batch 4 — live-CI bug: `git cat-file --batch` ENOBUFS on real record volume
+
+**Evidence.** Live CI on PR #1048 printed `memory-gate: path=retrieval #1024 (records:
+pr-tree only — default branch unreadable: git cat-file failed: )` and exited 2. The
+orchestrator reproduced it locally against the real volume: `origin/main` holds
+8,967,273 bytes of `.memory/records/`; `readDefaultBranchRecords` returned `{ n: 0, error:
+"git cat-file failed: " }` — a bare, silent cause with nothing after the colon.
+
+**Root cause (two compounding bugs).**
+1. `execFileSync`'s default `maxBuffer` is 1 MiB. `git cat-file --batch`'s single-call
+   design (D2) must hold the WHOLE default branch's `.memory/records/` blob stream in
+   memory at once, so it throws `ENOBUFS` once the real volume exceeds 1 MiB — which no
+   test before this batch ever did (every fixture stayed well under 1 MiB).
+2. On `ENOBUFS`, `execFileSync`'s thrown error has an EMPTY `stderr` (the child is killed
+   before any stderr is captured) — `firstStderrLine` only ever read `stderr`, so it fell
+   through to a bare, silent `''`, producing `"git cat-file failed: "` with the actual
+   cause (`ENOBUFS`) nowhere in the message. `brain-check.mjs`'s own documented `npmTest`
+   ENOBUFS (Batch 1's Risks section) is the same class of defect, encountered independently.
+
+**Fix — `default-branch-records.mjs`** (diff below):
+1. `defaultGit` now passes `maxBuffer: MAX_BUFFER` (512 MiB, a fixed cap — see the
+   in-source comment for the one-line justification: cheap, generous, no second
+   `git ls-tree -r -l` round trip needed to compute an exact size) to every real git call,
+   overridable by a caller-supplied `opts.maxBuffer`.
+2. `firstStderrLine` now falls back to the thrown error's own `code`/`message` (e.g.
+   `ENOBUFS` / `"spawnSync git ENOBUFS"`) when no non-empty stderr line exists, so the
+   cause is never silently empty.
+
+```diff
+--- a/brain/scripts/governance/default-branch-records.mjs
++++ b/brain/scripts/governance/default-branch-records.mjs
+@@ const RECORDS_PATH = '.memory/records/';
++// Batch 4 (#1024 live-CI bug, PR #1048): execFileSync's default maxBuffer
++// is 1 MiB. git ls-tree's listing and git cat-file --batch's blob stream
++// (D2's ONE-call design) both need to hold the WHOLE default branch's
++// .memory/records/ in memory at once — this repo's own real origin/main
++// already measures 8,967,273 bytes, well past 1 MiB, and a production
++// consumer's history only grows. 512 MiB is a generous, cheap FIXED cap,
++// chosen over a computed size (a second git ls-tree -r -l round trip).
++const MAX_BUFFER = 512 * 1024 * 1024;
+
+ function defaultGit(args, opts = {}) {
+-  return execFileSync('git', args, opts);
++  return execFileSync('git', args, { maxBuffer: MAX_BUFFER, ...opts });
+ }
+
+ function firstStderrLine(err) {
+   const stderr = ...;
+-  const text = Buffer.isBuffer(stderr) ? stderr.toString('utf8') : ... err.message ... ;
+-  const line = text.split('\n').find((l) => l.trim() !== '');
+-  return line ?? text.trim();
++  const stderrText = Buffer.isBuffer(stderr) ? stderr.toString('utf8') : typeof stderr === 'string' ? stderr : '';
++  const line = stderrText.split('\n').find((l) => l.trim() !== '');
++  if (line) return line;
++  const code = err?.code;
++  const message = err instanceof Error ? err.message : ...;
++  if (message) return code && !message.includes(String(code)) ? `${code}: ${message}` : message;
++  if (code) return String(code);
++  return 'unknown error (no stderr, no code, no message)';
+ }
+```
+(Full literal diff captured via `git diff` and included verbatim in the return summary.)
+
+**RED-first evidence.**
+1. Two new unit tests in `default-branch-records.test.mjs`: a `cat-file` failure with an
+   EMPTY-but-present `stderr` Buffer and `code: 'ENOBUFS'`, and a `fetch` failure with the
+   same shape and `code: 'ETIMEDOUT'` — both run and confirmed to fail against the pre-fix
+   source (`result.error` was the bare `'git cat-file failed: '` / `'git fetch origin main
+   failed: '`), then passed after the fix.
+2. Two new integration tests in `default-branch-records.integration.test.mjs`: a helper
+   (`buildLargeRecordsOriginAndClone`) seeds a bare origin with 1,500 real ~1 KB records
+   (>1.4 MB total, comfortably over the 1 MiB default), then clones it FULL and SHALLOW.
+   Both were run and confirmed to fail against the pre-fix source — the EXACT live-CI
+   reproduction: `must not fail with ENOBUFS on a large volume: git cat-file failed: `
+   (`actual: 'git cat-file failed: '`, `expected: null`) — then passed after the fix
+   (1500/1500 records, `error: null`, `fetched: false` on the full clone / `true` on the
+   shallow clone).
+
+### Verification (verbatim summary lines)
+
+- Unit + integration suites for the touched files: `default-branch-records.test.mjs`
+  **14/14 pass**; `default-branch-records.integration.test.mjs` **6/6 pass**.
+- Focused suite (11 files spanning all four batches): **493/493 pass**.
+- Git spy (a `git` shim on `PATH` logging every `fetch` call's cwd+args before exec'ing the
+  real binary) wrapped around the full `npm test`: **227 total fetch calls, ALL under
+  `/tmp/...`, ZERO outside it**.
+- `git rev-parse --is-shallow-repository`: `false` before, `false` after (`.git/shallow`
+  absent both times).
+- Lane safety: `git ls-remote origin 'refs/heads/memory/*'` (0 refs) and `gh pr list`
+  identical before/after this `npm test` run.
+- Full `npm test`: **5914/5914 pass** (4 more than Batch 3's 5910 — the 2 new unit + 2 new
+  integration cases from this batch).
+- Real-volume probe (read-only — a full clone never fetches, so this is a pure local
+  `ls-tree`+`cat-file` read, no network, no write), run exactly as specified:
+
+  ```
+  node --input-type=module -e 'import { readDefaultBranchRecords } from "./brain/scripts/governance/default-branch-records.mjs"; const r = await readDefaultBranchRecords({ cwd: process.cwd(), defaultBranch: "main" }); console.log(JSON.stringify({ n: r.records?.length, error: r.error, fetched: r.fetched }));'
+  ```
+
+  Output: **`{"n":2409,"error":null,"fetched":false}`** — 2,409 records (roughly the
+  expected ~2,400), `error: null`, `fetched: false` (this worktree is a full clone, so the
+  read came from the local ref with no fetch — matching the expectation exactly).
+
+- `brain:repo:check` and `brain:nav` were NOT re-run in this batch (no change to
+  navigable/referenced files) — Batch 3's runs already confirmed both pass and nothing in
+  Batch 4 touches doc/reference structure. `run-check.mjs`/`brain:check` were NOT run as
+  standalone commands against the real worktree in this batch, per the explicit constraint.
+
+### Files touched in Batch 4 (all already-touched files; no new files)
+
+`brain/scripts/governance/default-branch-records.mjs` (the fix), `brain/scripts/governance/
+default-branch-records.test.mjs` (2 new unit cases), `brain/scripts/governance/
+default-branch-records.integration.test.mjs` (2 new integration cases + a
+`buildLargeRecordsOriginAndClone` helper).
+
+**Left uncommitted**, per the maintainer's explicit instruction — no commit was made in
+this batch.
 
 ## Batch 3 — cold review fixes (REQUEST_CHANGES, orchestrator-verified findings)
 
