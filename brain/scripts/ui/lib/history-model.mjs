@@ -26,13 +26,13 @@ import { prUrl } from './forge-url.mjs';
  * here claims "PR" — the link is kept regardless, since issues and pull
  * requests share one forge numbering and the reference resolves to
  * whichever the number actually is. */
-function mergeSource(commit, project) {
+function commitSource(commit, project) {
   if (project && commit.citedRef) return { url: prUrl(project, commit.citedRef) };
   return { sha: commit.sha };
 }
 
-function mergeEvent(commit, project) {
-  return row({ kind: 'merge', date: commit.date, title: commit.subject, citedRef: commit.citedRef, source: mergeSource(commit, project) });
+function commitEvent(commit, project) {
+  return row({ kind: 'commit', date: commit.date, title: commit.subject, citedRef: commit.citedRef, source: commitSource(commit, project) });
 }
 
 /** A tag carries no per-event provenance beyond its own name (already the
@@ -123,9 +123,13 @@ function sortEventsByDateDesc(events) {
 export function capNote(cap) {
   if (!cap || cap.reached !== true) return null;
   const n = cap.requested;
-  return typeof cap.total === 'number'
-    ? `the newest ${n} commits of ${cap.total}`
-    : `the newest ${n} commits; older merges are not listed`;
+  // `git rev-list --count HEAD` counts what is REACHABLE FROM HEAD, which on a
+  // shallow or detached checkout is not the branch's history — so the sentence
+  // says what the number counts rather than implying a project total. And a
+  // total equal to the cap carries no information at all (#1043 round 2).
+  return typeof cap.total === 'number' && cap.total > n
+    ? `the newest ${n} commits of ${cap.total} reachable from HEAD`
+    : `the newest ${n} commits; older commits are not listed`;
 }
 
 export function buildHistoryModel({ history, adrs, project = null } = {}) {
@@ -134,7 +138,7 @@ export function buildHistoryModel({ history, adrs, project = null } = {}) {
 
   const { commits = [], tags = [], cap = null } = history.value ?? {};
   const events = sortEventsByDateDesc([
-    ...commits.map((c) => mergeEvent(c, project)),
+    ...commits.map((c) => commitEvent(c, project)),
     ...tags.map(releaseEvent),
     ...adrAmendedEvents(adrs),
   ]);

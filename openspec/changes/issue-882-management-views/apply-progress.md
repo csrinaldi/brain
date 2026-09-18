@@ -696,3 +696,13 @@ The tracker's own review returned REVISE: the known `budget` blocker (#752, the 
 - **correction 3 — two namespaces, one table.** Rows are keyed by the memory record's actor (`@someone`) and by the forge review's author login (`someone`), which are different strings for what may be the same human, and nothing warned. Fixed: a row whose only evidence is a forge login carries `evidenceNote` saying exactly that and that the two namespaces are not reconciled; the page renders it. No mapping is invented — inventing one would merge two people as easily as it would join one. Mutations: the note dropped from the model → red; the page not rendering it → red.
 
 Suites after the three: 404/404 across the UI and history globs, `npm run brain:repo:check` green.
+
+## Cold review of the tracker PR, round 2 (#1043, head 4261e4fe): three findings fixed
+
+The `budget` blocker is the standing one (#752). The other three were real, and two of them were introduced by the round-1 fixes themselves — worth saying, because a fix that adds its own silence is exactly what a second round is for.
+
+- **correction 1 — the model stated a reason the view dropped.** Round 1 gave every event with an unreadable date a `dateUnparseable` sentence explaining why it sits at the end; `renderHistoryEvent` printed only the date, so the reader saw an undated event at the bottom with no explanation. The page now renders it. Mutation: the page drops the reason again → red.
+- **correction 2 — "merge" was an overclaim.** `gatherHistoryFacts` runs `git log` with no `--merges` and no `--first-parent`, so EVERY commit on the branch becomes an event, and every one of them was labelled `merge`. That is the same overclaim the `citedRef` work already refused for "PR": the log selects commits, so the event is a `commit`. Renamed through the model, its tests and the spec; a test asserts nothing on the event calls it a merge. Mutation: the kind restored to `merge` → 3 red.
+- **correction 3 — the total counted something else.** `git rev-list --count HEAD` counts what is REACHABLE FROM HEAD, which on a shallow or detached checkout is not the branch's history, so `capNote` could print "the newest 200 commits of 200" as if that were everything. The sentence now says what the number counts, and a total equal to the cap — which carries no information — falls back to the weaker honest phrasing. Mutation: a total equal to the cap printed anyway → red.
+
+Suites after the three: 407/407 across the UI and history globs.

@@ -199,7 +199,7 @@ only, never a claimed "N of TOTAL" the code does not compute. Either `git`
 call failing is this section's own `{ok:false, reason}` — never a partial
 commit list rendered as if it were the whole history. `lib/history-model.mjs`'s
 `buildHistoryModel({history, adrs, project})` merges three event kinds into
-one list, newest first: a `merge` event per commit (dated, its `citedRef`
+one list, newest first: a `commit` event per commit (dated, its `citedRef`
 sourced to the forge when present, a plain git source otherwise), a
 `release` event per tag, and an `adr-amended` event per ADR amendment
 carrying a date (`adrs.value[].amendments[].date`). **Review verdicts are
@@ -222,18 +222,18 @@ this ticket's own unsquashed commits cite the driving issue that way. There
 is no textual signal that tells a squash suffix apart from a hand-written
 citation, so the model MUST NOT claim "PR" anywhere in its data or its
 rendered text. The parsed field is named `citedRef` (never `prNumber`), and
-a merge event's title says what the commit actually says — it CITES `#N` —
+a commit event's title says what the commit actually says — it CITES `#N` —
 never "PR #N". The link is still built and kept: issues and pull requests
 share one forge numbering, and the reference resolves to whichever the
 number actually is, whether or not it happens to be a pull request.
 
-#### Scenario: a commit citing a number becomes a sourced merge event, never claiming "PR"
+#### Scenario: a commit citing a number becomes a sourced commit event, never claiming "PR"
 - **WHEN** `history.value.commits` carries a commit whose subject ends `(#123)`
-- **THEN** the corresponding `merge` event carries `citedRef: 123`, is sourced to the forge reference (rendered through `sourceStamp` as `[forge: #123]`), and no word "PR" or field named `prNumber` appears anywhere in the event
+- **THEN** the corresponding `commit` event carries `citedRef: 123`, is sourced to the forge reference (rendered through `sourceStamp` as `[forge: #123]`), and no word "PR" or field named `prNumber` appears anywhere in the event
 
 #### Scenario: a commit with no citation is still an event, sourced to git
 - **WHEN** a commit's subject carries no trailing `(#N)`
-- **THEN** the `merge` event still appears, sourced to `{sha}` (`[git: <sha7>]`), `citedRef: null` — never dropped, never guessed
+- **THEN** the `commit` event still appears, sourced to `{sha}` (`[git: <sha7>]`), `citedRef: null` — never dropped, never guessed
 
 #### Scenario: git history unreadable is the section's own reason
 - **WHEN** either the `git log` or the `git tag` read throws
