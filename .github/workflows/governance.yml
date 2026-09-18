@@ -310,3 +310,35 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: node brain/scripts/governance/lane-scrub.mjs
+
+  # ── Invariant 11 (issue #967 PR C) — a slice PR's base is its epic's tracker ─
+  #
+  # A slice belongs on its epic's tracker while that epic is in flight
+  # (`brain:ticket:start` already enforces this at creation time — PR B,
+  # lib/ticket-base.mjs). This job is the backstop: a PR that reached the
+  # forge with the wrong base anyway is refused, not merely warned about — a
+  # warning is what let #953 land on `main` (design.md D9). REQUIRED at every
+  # tier, `lite` included (governance-tiers.mjs GATE_MATRIX['base-branch'],
+  # ruling 1) — a deliberate exception to "lite only detects".
+  #
+  # The check runs no git: no BASE_SHA/HEAD_SHA, no fetch-depth: 0. Its own
+  # reads are at most two `issueView` calls (the linked issue, then its
+  # parent) via the VCS port — the same shape `issue-link` above uses.
+  base-branch:
+    name: base-branch
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify the PR's base against its epic's declared tracker
+        env:
+          # VCS_TOKEN, not GH_TOKEN (#479): this step reaches the server
+          # through the port, which resolves brain's one neutral credential.
+          VCS_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          BASE_BRANCH: ${{ github.event.pull_request.base.ref }}
+          # The repo's REAL default branch — repo metadata, never trigger
+          # identity (ADR-0016 ruling 1).
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: node brain/scripts/governance/run-check.mjs base-branch

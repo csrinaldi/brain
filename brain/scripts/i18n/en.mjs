@@ -259,7 +259,7 @@ export default {
 
   // ── ticket-start.mjs (PR2) ────────────────────────────────────────────────────
   'ticket.error.baseRequiresArg': '✗ --base requires a branch name. Example: --base feature/issue-99-my-story',
-  'ticket.error.usage':           'Usage: brain:ticket:start -- <issue-id> [--worktree] [--base <branch>]',
+  'ticket.error.usage':           'Usage: brain:ticket:start -- <issue-id> [--worktree] [--base <branch>] [--off-tracker]',
   'ticket.error.usageExample1':   'Example: brain:ticket:start -- 42',
   'ticket.error.usageExample2':   '         brain:ticket:start -- 42 --worktree --base feature/issue-99-my-story',
   'ticket.error.noRemote':        '✗ Could not detect origin remote.',
@@ -287,6 +287,16 @@ export default {
   'ticket.mode.worktree':         'Isolated worktree (the default — harness-contract.md requires it for parallel work).',
   'ticket.mode.inPlace':          'IN-PLACE branch in the main checkout — allowed only for strictly solo, serial work. No other agent can work in parallel while this branch is checked out here.',
   'ticket.error.contradictoryModes': 'both --worktree and --in-place were given. Refusing rather than picking one: ask for one mode.',
+
+  // ── ticket-start.mjs — the base comes from the epic (#967) ──────────────────
+  // Every one of these SAYS the reason. A base the operator did not choose and
+  // cannot account for is how a slice ends up on the wrong branch quietly.
+  'ticket.base.fromEpic':         '→ Base: {tracker} — declared by epic #{epic} (parent read from the {source}).',
+  'ticket.base.noEpic':           '→ Base: {base} — no epic tracker applies (reason: {reason}).',
+  'ticket.base.epicUnreadable':   '→ Base: {base} — epic #{epic} could not be read, continuing anyway: {message}',
+  'ticket.base.offTracker':       '→ Base: {base} — OFF TRACKER: epic #{epic} declares {tracker}, and --off-tracker was given.',
+  'ticket.error.baseIsTracked':   '✗ --base {base} was given, but epic #{epic} declares tracker {tracker} — while that epic is in flight a slice starts there. Use --base {tracker}, or pass {flag} to state that this branch deliberately does not.',
+
   'ticket.nextSteps.header':      'Next steps:',
   'ticket.nextSteps.cd':          '    0. cd {path}   (open your work session here)',
   'ticket.nextSteps.step1':       '    1. Implement — use /sdd-new {id} if the change is complex',
