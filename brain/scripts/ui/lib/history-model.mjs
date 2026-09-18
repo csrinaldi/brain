@@ -135,6 +135,13 @@ export function capNote(cap) {
     : `the newest ${n} commits; older commits are not listed`;
 }
 
+/** An ADR amendment carries a DATE ('2026-09-18', which parses as UTC
+ * midnight); a commit or a tag carries a time with an offset. So two events on
+ * the same day of different kinds order by an accident of parsing rather than
+ * by when they happened, and an order that looks deliberate and is not is the
+ * quiet kind of wrong. The reader is told (#1043 round 4). */
+export const SAME_DAY_NOTE = 'events on the same day are ordered by kind, not by time: an ADR amendment carries a date only, a commit or tag carries a time';
+
 export function buildHistoryModel({ history, adrs, project = null } = {}) {
   if (!history || typeof history !== 'object') return { ok: false, reason: 'no history section was given to History' };
   if (history.ok !== true) return { ok: false, reason: history.reason };
@@ -146,5 +153,5 @@ export function buildHistoryModel({ history, adrs, project = null } = {}) {
     ...adrAmendedEvents(adrs),
   ]);
 
-  return { ok: true, value: { events, cap } };
+  return { ok: true, value: { events, cap, sameDayNote: SAME_DAY_NOTE } };
 }

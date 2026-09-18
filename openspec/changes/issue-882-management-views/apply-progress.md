@@ -714,3 +714,13 @@ Suites after the three: 407/407 across the UI and history globs.
 - **editorial — a shallow checkout's count is not the history.** `git rev-list --count HEAD` counts the fetched depth on a shallow clone, so the note could quote a number that understates the history while sounding precise. The shallow flag now travels WITH the count rather than correcting it, and the sentence says the checkout is shallow instead of quoting the number at all.
 
 Suites: 408/408 across the UI and history globs; full suite 5949/0.
+
+## Cold review of the tracker PR, round 4 (#1043, head 150f5691): three findings fixed
+
+- **correction — a parser mangled a malformed line instead of saying so.** `parseTagList('v1')` returned `{name: 'v', date: 'v1'}`: `indexOf` answers -1, and slicing on that drops the name's last character and leaks the rest into the date, so a release would render under a wrong title with a nonsense date and nothing would report it. Both parsers now KEEP a malformed line (rule zero) and name its own problem on the row. The existing row literals gained the new key rather than the key being smuggled in.
+- **correction — the summary implied a join the data never performs.** Round 3 made the review count attributable only to names the forge itself used, which is right; the summary still read "records and open-PR review threads", as if the two were one list. It now says they are listed side by side and not joined.
+- **editorial — same-day order was an accident of parsing.** An ADR amendment carries a date only (UTC midnight); a commit or tag carries a time with an offset. Two same-day events of different kinds therefore ordered by how the string parsed, which looked deliberate and was not. The model states the rule and the page says it.
+
+Suites: 440/440 across the UI, history and snapshot globs; full suite 5954/0.
+
+Four rounds, and it is worth naming the pattern rather than burying it: every round found something real, and in two of them the defect had been introduced by the previous round's own fix. The chain of reviews is doing the work it exists for.

@@ -772,6 +772,7 @@ function renderHistory() {
   // keeps a capped commit list from looking like a quiet period (#1043).
   const note = capNote(cap);
   mounts.canvas.appendChild(el('p', 'canvas-summary', note ? `${events.length} event(s) — ${note}` : `${events.length} event(s)`));
+  mounts.canvas.appendChild(said(model.value.sameDayNote));
   for (const event of events) mounts.canvas.appendChild(renderHistoryEvent(event));
   mounts.canvas.appendChild(renderHistoryReviewsLink());
 }
@@ -815,7 +816,7 @@ function renderActors() {
     return;
   }
   const { rows } = model.value;
-  mounts.canvas.appendChild(el('p', 'canvas-summary', `${rows.length} actor(s) — records and open-PR review threads, name order only`));
+  mounts.canvas.appendChild(el('p', 'canvas-summary', `${rows.length} actor(s) — memory-record names and forge review logins listed side by side, not joined; name order only`));
   for (const row of rows) mounts.canvas.appendChild(renderActorRow(row));
 }
 

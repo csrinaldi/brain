@@ -53,11 +53,16 @@ export function parseCommitLog(text) {
   return String(text ?? '').split('\n').filter(Boolean).map((line) => {
     const i1 = line.indexOf('|');
     const i2 = line.indexOf('|', i1 + 1);
+    // Same rule as the tag parser above: a line this format did not produce is
+    // kept and said, never sliced on a separator that is not there.
+    if (i1 === -1 || i2 === -1) {
+      return { sha: line, date: null, subject: '', citedRef: null, malformed: 'fewer than two "|" separators in the commit line' };
+    }
     const sha = line.slice(0, i1);
     const date = normalizeGitDate(line.slice(i1 + 1, i2));
     const subject = line.slice(i2 + 1);
     const m = subject.match(CITED_REF);
-    return { sha, date, subject, citedRef: m ? Number(m[1]) : null };
+    return { sha, date, subject, citedRef: m ? Number(m[1]) : null, malformed: null };
   });
 }
 
@@ -65,8 +70,14 @@ export function parseCommitLog(text) {
  * `{name, date}`, in the order git already sorted them (`--sort=-creatordate`). */
 export function parseTagList(text) {
   return String(text ?? '').split('\n').filter(Boolean).map((line) => {
+    // `indexOf` answers -1 for a line with no separator, and slicing on that
+    // silently drops the name's last character and leaks the rest into the
+    // date — a release under a wrong title with a nonsense date, said by
+    // nothing. A malformed line is KEPT (rule zero) and names its own
+    // problem instead (#1043 round 4).
     const i = line.indexOf('|');
-    return { name: line.slice(0, i), date: line.slice(i + 1) };
+    if (i === -1) return { name: line, date: null, malformed: 'no "|" separator in the tag line' };
+    return { name: line.slice(0, i), date: line.slice(i + 1), malformed: null };
   });
 }
 
