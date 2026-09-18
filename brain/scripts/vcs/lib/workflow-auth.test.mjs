@@ -270,7 +270,15 @@ test('#480 A3 at the splitter: a step whose first key is run: is its own step', 
 
 // ── T2 (Requirement 3/5) ────────────────────────────────────────────────────
 
-const fixtureT2 = (memoryGateHasPrNumber) => [
+// #1024 (D9): memory-gate's manifest entry flips to `true` (SUBCOMMAND_PORT_
+// REACH['memory-gate']) — its skip:memory-gate applier read genuinely
+// reaches getVcs, same as issue-link/base-branch, so it is now flagged for a
+// missing VCS_TOKEN UNCONDITIONALLY (directPort, Requirement 3), same as
+// diff-size's OWN probe below is flagged via the asymmetric contextPort+
+// PR_NUMBER rule. `decision-gate` is the remaining `false`-manifest
+// subcommand and replaces memory-gate as this fixture's "contextPort-only,
+// PR_NUMBER governs whether it is flagged" probe (Requirement 5).
+const fixtureT2 = (decisionGateHasPrNumber) => [
   'permissions: { contents: write, pull-requests: read }',
   'jobs:',
   '  g:',
@@ -279,22 +287,36 @@ const fixtureT2 = (memoryGateHasPrNumber) => [
   '        env:',
   '          PR_NUMBER: ${{ github.event.pull_request.number }}',
   '        run: node brain/scripts/governance/run-check.mjs diff-size',
-  '      - name: memory-gate',
-  ...(memoryGateHasPrNumber
+  '      - name: decision-gate',
+  ...(decisionGateHasPrNumber
     ? ['        env:', '          PR_NUMBER: ${{ github.event.pull_request.number }}']
     : []),
-  '        run: node brain/scripts/governance/run-check.mjs memory-gate',
+  '        run: node brain/scripts/governance/run-check.mjs decision-gate',
 ].join('\n');
 
-test('T2: diff-size (+PR_NUMBER, no credential) is flagged; memory-gate (no PR_NUMBER) yields zero violations', () => {
+test('T2: diff-size (+PR_NUMBER, no credential) is flagged; decision-gate (no PR_NUMBER) yields zero violations', () => {
   const v = audit(fixtureT2(false));
   assert.ok(v.some(m => /diff-size/.test(m) && /VCS_TOKEN/.test(m)), `diff-size must be flagged:\n${v.join('\n')}`);
-  assert.ok(!v.some(m => /memory-gate/.test(m)), `memory-gate must NOT be flagged:\n${v.join('\n')}`);
+  assert.ok(!v.some(m => /decision-gate/.test(m)), `decision-gate must NOT be flagged:\n${v.join('\n')}`);
 });
 
-test('T2 mutation: adding PR_NUMBER to the memory-gate step now flags it too — the rule is live, not vacuous, in both directions', () => {
+test('T2 mutation: adding PR_NUMBER to the decision-gate step now flags it too — the rule is live, not vacuous, in both directions', () => {
   const v = audit(fixtureT2(true));
-  assert.ok(v.some(m => /memory-gate/.test(m) && /VCS_TOKEN/.test(m)), `memory-gate with PR_NUMBER must now be flagged:\n${v.join('\n')}`);
+  assert.ok(v.some(m => /decision-gate/.test(m) && /VCS_TOKEN/.test(m)), `decision-gate with PR_NUMBER must now be flagged:\n${v.join('\n')}`);
+});
+
+test('#1024 (D9): memory-gate (no PR_NUMBER, no VCS_TOKEN) IS now flagged — directPort, unconditional (mirrors issue-link/base-branch)', () => {
+  const fixture = [
+    'permissions: { contents: write, pull-requests: read }',
+    'jobs:',
+    '  g:',
+    '    steps:',
+    '      - name: memory-gate',
+    '        run: node brain/scripts/governance/run-check.mjs memory-gate',
+  ].join('\n');
+  const v = audit(fixture);
+  assert.ok(v.some(m => /memory-gate/.test(m) && /VCS_TOKEN/.test(m)),
+    `memory-gate must be flagged even without PR_NUMBER — its manifest entry is now true:\n${v.join('\n')}`);
 });
 
 // ── T3 (Requirement 4) ──────────────────────────────────────────────────────

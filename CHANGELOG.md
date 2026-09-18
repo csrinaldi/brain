@@ -8,6 +8,44 @@ automatically, but renames need manual action.
 
 ## Unreleased
 
+### `memory-gate` receives the PR context and reads the default branch (#1024)
+
+**Manual step for `standard`/`regulated` consumers with a diverged `governance.yml`.**
+`memory-gate`'s job in `.github/workflows/governance.yml` now needs the same three env
+keys `issue-link` already declares, so `ci-context.mjs`'s `loadContext()` can populate
+`ctx.body`/`ctx.labels` for this job instead of leaving both structurally `null`. If your
+copy of `governance.yml` diverged from the vendored one, add this block to the
+`memory-gate` step's `env:` (see `governance.yml`'s own job for the exact form and
+comments):
+
+    VCS_TOKEN: ${{ github.token }}
+    PR_NUMBER: ${{ github.event.pull_request.number }}
+    PR_BODY: ${{ github.event.pull_request.body }}
+
+Nothing else to do at `lite` (this repo's own tier) — a scoped miss stays a
+non-blocking `::warning::`, unchanged.
+
+Scoped evidence now unions the PR's checked-out tree with `origin/<default>`, deduped by
+record `id` (PR tree wins on a collision). Since ADR-0034, a memory record lands on `main`
+via its own lane PR, usually after the feature PR opens — before this change, a record
+that already reached the default branch but never rode the feature branch counted as
+MISSING, forcing a rebase. It no longer does: a record on `origin/<default>` now satisfies
+a feature PR closing the same issue, with no rebase. If the default branch is unreadable
+(fetch/ref failure) and the PR tree already has a scoped hit, the gate still passes on
+that hit; if the PR tree has no hit either, the gate fails closed with an explicit
+"default branch unreadable" reason — a read failure never produces a silent pass. Every
+run now also prints the path it took (`memory-gate: path=presence|retrieval|skipped
+(<detail>)`), including a clean pass, which printed nothing before this change.
+
+`skip:memory-gate` is now honored, per tier (`TIER_PARAMS.honorSkipMemoryGate`): at
+`standard`, the label — applied by an actor other than the PR author and not listed in
+`governance.reviewActors`/`governance.agentActors` — short-circuits the check and passes
+with `path=skipped`, naming the applier; at `regulated` the label is refused, consistent
+with `regulated` already refusing `size:exception`; at `lite` it is noted in the output and
+not consulted, because the gate is detection-only there. `brain:metrics`'s `skip:memory-gate`
+column is now `raw/honored` (previously raw-only), with an honored-usage-by-author table
+mirroring `size:exception`'s own.
+
 ### `cli.mjs ship` refuses without a declared invoker (#1012)
 
 Nothing to do for this one. `cli.mjs ship` now refuses, before any credential read or

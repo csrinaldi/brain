@@ -33,6 +33,11 @@ function makeCtx(overrides = {}) {
     targetBranch: 'feature/x',
     defaultBranch: 'main',
     fetchIssue: async () => ({ labels: ['status:approved'] }),
+    // #1024: hermetic fake — memory-gate's D3 lazy union would otherwise
+    // reach the REAL git remote (readDefaultBranchRecords' production
+    // default) whenever the PR-tree observations alone are not a clean hit,
+    // which is exactly the case `memoryPresence fails` below exercises.
+    readDefaultBranchRecords: () => ({ records: [], error: null }),
     npmTestFn: async () => ({ ok: true }),
     repoCheckFn: async () => ({ ok: true }),
     ...overrides,

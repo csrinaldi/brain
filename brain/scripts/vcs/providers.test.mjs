@@ -1197,6 +1197,53 @@ test('gitlab.labelEvents normalizes resource_label_events to the shared shape, a
   ]);
 });
 
+// #1024 (design item 7): the memory-gate override's applier read needs
+// GitLab MR label events, not issue label events — `brain-metrics.mjs:511`
+// already reads issue events for an MR number on GitLab, which is the SAME
+// bug this optional `kind` param fixes at the call site. Default (no `kind`,
+// or `kind: 'issue'`) is UNCHANGED (`issues/:iid/resource_label_events`).
+test('gitlab.labelEvents({ kind: "mr" }) requests merge_requests/:iid/resource_label_events, not the issue-events path', async () => {
+  let seenUrl;
+  await gitlab.labelEvents({
+    project: 'g/r',
+    number: 7,
+    kind: 'mr',
+    apiBase: 'https://gitlab.example.com/api/v4',
+    token: 'tok-abc',
+    fetchImpl: async (url) => { seenUrl = url; return { ok: true, json: async () => [] }; },
+  });
+  assert.equal(seenUrl, 'https://gitlab.example.com/api/v4/projects/g%2Fr/merge_requests/7/resource_label_events');
+});
+
+test('gitlab.labelEvents default (no kind, or kind: "issue") is unchanged — issues/:iid/resource_label_events', async () => {
+  let seenUrlDefault;
+  await gitlab.labelEvents({
+    project: 'g/r',
+    number: 7,
+    apiBase: 'https://gitlab.example.com/api/v4',
+    token: 'tok-abc',
+    fetchImpl: async (url) => { seenUrlDefault = url; return { ok: true, json: async () => [] }; },
+  });
+  assert.equal(seenUrlDefault, 'https://gitlab.example.com/api/v4/projects/g%2Fr/issues/7/resource_label_events');
+
+  let seenUrlExplicitIssue;
+  await gitlab.labelEvents({
+    project: 'g/r',
+    number: 7,
+    kind: 'issue',
+    apiBase: 'https://gitlab.example.com/api/v4',
+    token: 'tok-abc',
+    fetchImpl: async (url) => { seenUrlExplicitIssue = url; return { ok: true, json: async () => [] }; },
+  });
+  assert.equal(seenUrlExplicitIssue, 'https://gitlab.example.com/api/v4/projects/g%2Fr/issues/7/resource_label_events');
+});
+
+test('github.labelEvents accepts and ignores a kind parameter (documentation-only — GitHub\'s events endpoint is already PR/issue-unified)', async () => {
+  setSpawn(fakeSpawn([]));
+  const result = await github.labelEvents({ project: 'o/r', number: 42, kind: 'mr' });
+  assert.deepEqual(result, []);
+});
+
 // FIX1 fail-open guard, MOVED with the extraction (issue #239 A3, m3 close):
 // `gh api` does NOT auto-paginate. GitHub's Events API is oldest-first, so on
 // an issue with more than ~30 events the most recent approved-label event
