@@ -1264,3 +1264,23 @@ test('#723: a well-formed declaration is untouched by any of this', () => {
   assert.deepEqual(parseGraphBlock(block({ track: 'B', blocks: [2] })),
     graphShape({ track: 'B', blocks: [2], needs: [], files: [] }));
 });
+
+// ── #1029: the key's VALUE ends where the prose begins ─────────────────────
+// Measured on issue #998's own body, which refused the Brain UI tracker PR
+// (#1028): naming the parent and then saying anything else about the work on
+// the same line was read as five competing declarations.
+test('#1029: a Parent: line that also mentions other issues in prose declares ONE parent, not an ambiguity', () => {
+  const body = [
+    'Parent: #878 (Brain UI) — the surface, after slice 3. Slice 3 (#881, merged as #970) proved the data path. PR 7 is #882 content; PR 8 lands after #967.',
+    '', rawBlock('track: A'),
+  ].join('\n');
+  const g = parseGraphBlock(body);
+  assert.equal(g.parent, 878, 'the value is the reference the key names; the rest of the line is prose');
+  assert.deepEqual(g.declarationDivergences, []);
+});
+
+test('#1029: two references joined only by whitespace are still two values for one key', () => {
+  const g = parseGraphBlock(['Parent: #878 #879', '', rawBlock('track: A')].join('\n'));
+  assert.equal(g.parent, null);
+  assert.deepEqual(g.declarationDivergences, [{ key: 'parent', value: '878, 879', reason: 'parent-ambiguous' }]);
+});
