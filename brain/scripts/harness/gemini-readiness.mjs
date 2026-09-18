@@ -66,7 +66,9 @@ export function checkGeminiReadiness(route, {
     };
   }
 
-  const runner = hasAgy ? 'agy (Google AI Pro subscription)' : 'gemini (API key)';
+  const runner = hasAgy
+    ? 'agy (Google AI Pro subscription)'
+    : (hasApiKey ? 'gemini (API key)' : 'gemini (ADC)');
   return {
     ready: true,
     required: true,

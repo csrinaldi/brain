@@ -100,7 +100,6 @@ test('runs exact gemini argv with scrubbed environment and final-message output'
     '-p', 'return the review artifact',
     '-m', 'gemini-2.5-pro',
     '--approval-mode', 'plan',
-    '--skip-trust',
   ]);
   assert.equal(seen.opts.cwd, paths.candidate);
   assert.equal(seen.opts.env.SAFE_VALUE, 'kept');

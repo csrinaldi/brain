@@ -176,7 +176,7 @@ export async function runStage({
 
   const args = runner === 'agy'
     ? ['-p', prompt, '--model', effectiveModel, '--sandbox', '--dangerously-skip-permissions', '--disable-slash-commands']
-    : ['-p', prompt, '-m', effectiveModel, '--approval-mode', 'plan', '--skip-trust'];
+    : ['-p', prompt, '-m', effectiveModel, '--approval-mode', 'plan'];
 
   let result;
   try {

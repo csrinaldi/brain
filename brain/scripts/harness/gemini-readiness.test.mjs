@@ -72,6 +72,16 @@ test('checkGeminiReadiness: gemini CLI and API key present returns ready: true',
   assert.match(result.diagnostic, /gemini \(API key\)/i);
 });
 
+test('checkGeminiReadiness: gemini CLI and GOOGLE_APPLICATION_CREDENTIALS present returns ready: true with ADC diagnostic', () => {
+  const route = { required: true, engine: 'gemini', identity: 'cold-review:gemini/gemini-2.5-pro' };
+  const result = checkGeminiReadiness(route, {
+    commandExists: (bin) => bin === 'gemini',
+    env: { GOOGLE_APPLICATION_CREDENTIALS: '/path/to/creds.json' },
+  });
+  assert.equal(result.ready, true);
+  assert.match(result.diagnostic, /gemini \(ADC\)/i);
+});
+
 test('loadConfig: returns empty object if brain.config.json is absent', () => {
   const result = loadConfig('/tmp/nonexistent-dir-for-gemini-test-12345');
   assert.deepEqual(result, {});
