@@ -23,7 +23,7 @@ test('#882 R882-5: history.ok === false passes its reason straight through', () 
   assert.deepEqual(model, { ok: false, reason: 'git log could not be read: boom' });
 });
 
-test('#882 R882-5: a commit citing a number becomes a merge event sourced to the forge URL (through lib/forge-url.mjs\'s prUrl, not a hand-built template), [forge: #N] — never claiming "PR"', () => {
+test('#882 R882-5: a commit citing a number becomes a commit event sourced to the forge URL (through lib/forge-url.mjs\'s prUrl, not a hand-built template), [forge: #N] — never claiming "PR"', () => {
   const model = buildHistoryModel({
     history: { ok: true, value: { commits: [commit({ citedRef: 123, subject: 'feat(ui): the History view (#123)' })], tags: [] } },
     adrs: { ok: true, value: [] },
@@ -31,7 +31,7 @@ test('#882 R882-5: a commit citing a number becomes a merge event sourced to the
   });
   assert.equal(model.ok, true);
   const [event] = model.value.events;
-  assert.equal(event.kind, 'merge');
+  assert.equal(event.kind, 'commit');
   assert.equal(event.source, prUrl('o/r', 123), 'the URL is forge-url.mjs\'s own prUrl output, not a second hand-built copy');
   assert.equal(event.sourceStamp.label, '[forge: #123]');
   assert.equal(event.sourceStamp.href, 'https://github.com/o/r/pull/123');
@@ -121,7 +121,7 @@ test('#882 R882-5: no review-verdict event is ever produced — a plain scan for
     project: 'o/r',
   });
   assert.ok(model.value.events.every((e) => e.kind !== 'review'), 'no event kind is ever "review"');
-  assert.deepEqual(new Set(model.value.events.map((e) => e.kind)), new Set(['merge', 'release', 'adr-amended']));
+  assert.deepEqual(new Set(model.value.events.map((e) => e.kind)), new Set(['commit', 'release', 'adr-amended']));
 });
 
 test('#882 R882-5: an unreadable adrs section degrades independently — merge/release events still render, adr-amended events are simply absent', () => {
@@ -219,11 +219,11 @@ test('#1043 correction 2: with no cap info at all (an older fixture shape), mode
 });
 
 test('#1043 correction 2: capNote says "the newest N commits of TOTAL" when the total is known', () => {
-  assert.equal(capNote({ requested: 200, reached: true, total: 512 }), 'the newest 200 commits of 512');
+  assert.equal(capNote({ requested: 200, reached: true, total: 512 }), 'the newest 200 commits of 512 reachable from HEAD');
 });
 
 test('#1043 correction 2: capNote says the weaker, still-honest phrasing when the total could not cheaply be read', () => {
-  assert.equal(capNote({ requested: 200, reached: true, total: null }), 'the newest 200 commits; older merges are not listed');
+  assert.equal(capNote({ requested: 200, reached: true, total: null }), 'the newest 200 commits; older commits are not listed');
 });
 
 test('#1043 correction 2: capNote says nothing when the cap was not reached — never a partial-list claim under the cap', () => {
@@ -236,4 +236,26 @@ test('#1043 correction 2: capNote says nothing when the cap was not reached — 
 test('#882 fresh-context review of PR 4, warning: history-model.mjs never hand-builds a github.com URL — lib/forge-url.mjs is the one place that literal lives', () => {
   assert.ok(!SOURCE.includes('https://github.com/'), 'no literal https://github.com/ inside history-model.mjs — prUrl (lib/forge-url.mjs) is the only builder');
   assert.match(SOURCE, /import\s*\{[^}]*prUrl[^}]*\}\s*from\s*['"]\.\/forge-url\.mjs['"]/, 'history-model.mjs must import prUrl from lib/forge-url.mjs');
+});
+
+// ── #1043 review round 2 ───────────────────────────────────────────────────
+// The reader runs `git log` with no `--merges` and no `--first-parent`, so
+// every commit on the branch becomes an event. Calling them all "merge" is
+// the same overclaim the citedRef comment already refuses for "PR".
+test('#1043 round 2, correction 2: a commit event is a commit — the kind never claims a merge the log did not select', () => {
+  const model = buildHistoryModel({
+    history: { ok: true, value: { commits: [{ sha: 'abc1234', date: '2026-09-18 10:00:00 +0000', subject: 'feat(x): a thing (#12)', citedRef: 12 }], tags: [] } },
+    adrs: { ok: true, value: [] },
+  });
+  const [event] = model.value.events;
+  assert.equal(event.kind, 'commit', 'the log selects commits, so the event is a commit');
+  assert.ok(!JSON.stringify(event).includes('merge'), 'nothing on the event may call it a merge');
+});
+
+// `git rev-list --count HEAD` counts what is REACHABLE from HEAD, which on a
+// shallow or detached checkout is not the branch's history. The sentence must
+// say what was counted, and a total equal to the cap adds nothing.
+test('#1043 round 2, correction 3: capNote names what the total counts, and says nothing more when the total equals the cap', () => {
+  assert.match(capNote({ requested: 200, reached: true, total: 512 }), /reachable from HEAD/, 'the sentence must say what the number counts');
+  assert.equal(capNote({ requested: 200, reached: true, total: 200 }), 'the newest 200 commits; older commits are not listed', 'a total equal to the cap is no information — say the weaker, honest sentence');
 });

@@ -229,3 +229,11 @@ test('#1043 correction 3: renderActorRow renders the model\'s evidence note', ()
   assert.ok(m, 'renderActorRow must exist in app.js');
   assert.match(m[0], /row\.evidenceNote/, 'the unreconciled-namespace note must be rendered, not left in the model');
 });
+
+// #1043 round 2, correction 1: the model states why an event sits at the end
+// of the timeline; a view that prints only the date drops that sentence.
+test('#1043 round 2: renderHistoryEvent renders the model\'s dateUnparseable reason', () => {
+  const m = APP_JS.match(/function renderHistoryEvent\([^)]*\) \{[\s\S]*?\n}\n/);
+  assert.ok(m, 'renderHistoryEvent must exist in app.js');
+  assert.match(m[0], /event\.dateUnparseable/, 'an event kept at the end for an unreadable date must say so on the page, not only in the model');
+});
