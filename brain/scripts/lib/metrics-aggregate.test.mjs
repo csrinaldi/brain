@@ -196,6 +196,31 @@ test('bypass usage counts size:exception and skip:memory-gate as RAW label usage
   assert.equal(out[0].bypass.skipMemoryGate, 1);
 });
 
+// #1024 (design item 7): the skip:memory-gate column becomes raw/honored.
+// "Honored" is a SEPARATE field the caller (brain-metrics.mjs) resolves via
+// decideMemoryGateOverride and threads in as `m.skipMemoryGateHonoredAuthor`
+// — foldMerge itself does not re-derive the override decision, mirroring how
+// `exceptionAuthor` already works for size:exception.
+
+test('bypass usage: skip:memory-gate honored count and by-author are separate from the raw label count', () => {
+  let rows = emptyRows();
+  rows = foldMerge(rows, {
+    sha: 'h1', mergedAt: '2026-07-05T00:00:00Z', prLabels: ['skip:memory-gate'], leadTimeDays: null,
+    kind: 'evaluated', evalRec: evalPass(), detection: null, period: 'month',
+    skipMemoryGateHonoredAuthor: 'alice',
+  });
+  rows = foldMerge(rows, {
+    sha: 'h2', mergedAt: '2026-07-06T00:00:00Z', prLabels: ['skip:memory-gate'], leadTimeDays: null,
+    kind: 'evaluated', evalRec: evalPass(), detection: null, period: 'month',
+    // not honored (refused, or unresolvable) — raw counts it, honored does not.
+    skipMemoryGateHonoredAuthor: null,
+  });
+  const out = finalizeRows(rows);
+  assert.equal(out[0].bypass.skipMemoryGate, 2, 'raw counts every skip:memory-gate label, honored or not');
+  assert.equal(out[0].bypass.skipMemoryGateHonored, 1, 'honored counts only the resolved-honored merges');
+  assert.deepEqual(out[0].skipMemoryGateByAuthor, { alice: 1 });
+});
+
 test('bypass usage is visible across weekly buckets (H3 — a rising trend must be observable)', () => {
   let rows = emptyRows();
   const weeks = ['2026-07-06T00:00:00Z', '2026-07-06T00:00:00Z', '2026-07-13T00:00:00Z'];

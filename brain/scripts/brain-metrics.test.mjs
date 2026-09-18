@@ -169,7 +169,7 @@ function sampleRow(period) {
       'issue-link': { raw: 0, enforced: 0 },
       'decision-gate': { raw: 1, enforced: 1 },
     },
-    bypass: { sizeException: 1, skipMemoryGate: 0 },
+    bypass: { sizeException: 1, skipMemoryGate: 0, skipMemoryGateHonored: 0 },
     detection: {
       'phase-order': { pass: 3, fail: 0 },
       'actor-check': { pass: 2, fail: 1 },
@@ -200,6 +200,19 @@ test('renderMarkdown: renders period rows, repo-level memory-gate, and coverage 
   assert.match(md, /2\/10 tagged/);
   assert.match(md, /adoption pending/);
   assert.match(md, /issue-approval proxy|ISSUE-APPROVAL proxy/i);
+});
+
+// #1024 (design item 7): skip:memory-gate becomes raw/honored, and gains its
+// own by-author section (honored-only, mirroring size:exception's).
+test('renderMarkdown: skip:memory-gate renders as raw/honored, and honored usage gets its own by-author section', () => {
+  const row = { ...sampleRow('2026-07'), bypass: { sizeException: 0, skipMemoryGate: 3, skipMemoryGateHonored: 1 }, skipMemoryGateByAuthor: { alice: 1 } };
+  const md = renderMarkdown({
+    rows: [row], memGate: { pass: true }, memCoverage: { available: true, total: 0, tagged: 0, coveragePct: 0 }, range: 'HEAD', period: 'month',
+  });
+  assert.match(md, /skip:memory-gate \(raw\/honored\)/);
+  assert.match(md, /\| 3\/1 \|/);
+  assert.match(md, /skip:memory-gate usage by author/);
+  assert.match(md, /\| 2026-07 \| alice \| 1 \|/);
 });
 
 test('renderMarkdown: memory records "Unavailable" caveat when coverage is unavailable (E2)', () => {
@@ -459,6 +472,63 @@ test('by-author (C1): an injected vcs.labelEvents resolves the size:exception la
   const parsed = JSON.parse(output);
   assert.equal(parsed.length, 1);
   assert.deepEqual(parsed[0].bypassByAuthor, { alice: 1 });
+});
+
+// #1024 (design item 7): skip:memory-gate's "honored" count/by-author is
+// resolved via decideMemoryGateOverride at merge time, using the PR's own
+// label events, prAuthor and the tier — not a raw label count.
+test('by-author (#1024): an injected vcs.labelEvents resolves skip:memory-gate\'s HONORED applier (standard tier, distinct from the PR author)', async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'metrics-vcs-skipmemorygate-'));
+  t.after(() => removeTempTree(dir));
+  const git = makeRepo(dir);
+  commit(git, dir, { 'README.md': 'init' }, 'chore: initial (#0)');
+  const base = headShaOf(git);
+  mergeAddingPayload(
+    git, dir, { 'src/b.mjs': 'export const b = 1;\n' }, 'A',
+    'Merge pull request #11 from x/y\n\nCloses #4',
+  );
+
+  let seenKind;
+  const mockVcs = {
+    prView: async () => ({ labels: ['skip:memory-gate'], body: 'Closes #4', author: 'bob' }),
+    labelEvents: async ({ kind }) => {
+      seenKind = kind;
+      return [{ action: 'add', label: 'skip:memory-gate', at: '2026-07-01T00:00:00Z', actor: { login: 'alice' } }];
+    },
+  };
+
+  const { output, exitCode } = await runMetrics({ argv: [`${base}..HEAD`, '--json'], cwd: dir, vcs: mockVcs });
+  assert.equal(exitCode, 0);
+  const parsed = JSON.parse(output);
+  assert.equal(parsed.length, 1);
+  assert.equal(seenKind, 'mr', 'the PR/MR\'s own label events must be fetched with kind: "mr", not the issue-events default');
+  assert.equal(parsed[0].bypass.skipMemoryGate, 1, 'raw count');
+  assert.equal(parsed[0].bypass.skipMemoryGateHonored, 1, 'honored at the default "standard" tier, applier distinct from the author');
+  assert.deepEqual(parsed[0].skipMemoryGateByAuthor, { alice: 1 });
+});
+
+test('by-author (#1024): skip:memory-gate applied by the PR author is counted RAW but never HONORED', async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'metrics-vcs-skipmemorygate-author-'));
+  t.after(() => removeTempTree(dir));
+  const git = makeRepo(dir);
+  commit(git, dir, { 'README.md': 'init' }, 'chore: initial (#0)');
+  const base = headShaOf(git);
+  mergeAddingPayload(
+    git, dir, { 'src/c.mjs': 'export const c = 1;\n' }, 'A',
+    'Merge pull request #12 from x/y\n\nCloses #5',
+  );
+
+  const mockVcs = {
+    prView: async () => ({ labels: ['skip:memory-gate'], body: 'Closes #5', author: 'bob' }),
+    labelEvents: async () => ([{ action: 'add', label: 'skip:memory-gate', at: '2026-07-01T00:00:00Z', actor: { login: 'bob' } }]),
+  };
+
+  const { output, exitCode } = await runMetrics({ argv: [`${base}..HEAD`, '--json'], cwd: dir, vcs: mockVcs });
+  assert.equal(exitCode, 0);
+  const parsed = JSON.parse(output);
+  assert.equal(parsed[0].bypass.skipMemoryGate, 1);
+  assert.equal(parsed[0].bypass.skipMemoryGateHonored, 0);
+  assert.deepEqual(parsed[0].skipMemoryGateByAuthor, {});
 });
 
 // ── auditBaseline parity (issue #324 B2 fix round) ───────────────────────────
