@@ -531,9 +531,15 @@ scan tests account for the difference). `brain:repo:check` and
 
 `git status --short` is empty after all commits — nothing left uncommitted.
 
-### Next
+### Next / coordination note
 
-PR 5 (By actor, R882-6) is not started. It depends only on PR 1
-(`governance-model.mjs`'s sub-nav) — not on PR 2, PR 3 or PR 4's own view
-modules — and finalizes `views-owned.test.mjs`'s forbidden-identifier test
-into a full presence proof for the whole governance surface.
+A concurrent apply pass built PR 5 (By actor, R882-6) from PR 4's
+PRE-merge, pre-fix head (`49765589`) — before this branch's forward-merge
+and fresh-context-review fixes landed. PR 5's own record independently
+found and fixed the same `renderHistoryEvent`→`renderSourceStamp` defect
+(warning 4 here) and repeated this branch's now-corrected
+`forge-url.mjs`-does-not-exist claim (true only at that same stale cut
+point). Whoever integrates PR 5 onto this branch (or onto the tracker)
+needs to reconcile: PR 5's `history-model.mjs` still carries `prNumber`,
+not `citedRef`, and still hand-builds the forge URL rather than importing
+`prUrl` — this branch's fixes are not yet in PR 5's lineage.
