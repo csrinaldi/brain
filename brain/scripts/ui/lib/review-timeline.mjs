@@ -27,10 +27,10 @@ function findingSource(f) {
   return f.file ? { path: f.file, line: f.line } : null;
 }
 
-/** The protocol's own verdict enum (reviewer-protocol.md:264) — anything else is kept, never dropped, only flagged (#1009 cold review round 2). */
-/** The protocol's own verdict enum (reviewer-protocol.md:264). Exported so the
- * render layer says "unrecognised" with the SAME vocabulary this module flags
- * it by — one definition, two readers (#1009 cold review round 3). */
+/** The protocol's own verdict enum (reviewer-protocol.md:264). Anything else is
+ * kept, never dropped, only flagged (#1009 round 2). Exported so the render
+ * layer says "unrecognised" with the SAME vocabulary this module flags it by —
+ * one definition, two readers (#1009 round 3). */
 export const KNOWN_VERDICTS = new Set(['APPROVE', 'REVISE', 'STOP']);
 
 function shapeRound(v) {

@@ -636,3 +636,18 @@ test('#881: a queued import overflow drains ahead of later churn, even while the
 
   poller.close();
 });
+
+test("#1015 cold review: close() clears the countdown — a poll that will never fire must not be reported as pending", async () => {
+  const now = { t: 0 };
+  const poller = createPoller({
+    intervalMs: 60_000,
+    run: async () => ({ ok: true }),
+    _now: () => new Date(now.t),
+    _setTimeout: () => 1,
+    _clearTimeout: () => {},
+  });
+  await poller.start();
+  assert.equal(poller.state().nextAttemptAt, new Date(60_000).toISOString(), 'a settled tick arms the next attempt');
+  poller.close();
+  assert.equal(poller.state().nextAttemptAt, null, 'after close() no tick will ever fire, so the countdown says nothing rather than a stale future time');
+});

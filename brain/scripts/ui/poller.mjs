@@ -239,7 +239,10 @@ export function createPoller({
 
   return {
     start() { return paused ? undefined : runTick(); },
-    close() { closed = true; if (timer) { _clearTimeout(timer); timer = null; } },
+    // The countdown goes with the timer, as it does in `pause()`: after
+    // `close()` no tick will ever fire, so a surviving `nextAttemptAt` would
+    // report a poll that is never coming (#1015 cold review).
+    close() { closed = true; if (timer) { _clearTimeout(timer); timer = null; } nextAttemptAt = null; },
     pause() {
       paused = true;
       if (timer) { _clearTimeout(timer); timer = null; }
