@@ -821,6 +821,9 @@ function renderActorRow(row) {
   const wrap = el('div', 'actor-row');
   wrap.appendChild(el('strong', 'actor-name', row.actor));
   wrap.appendChild(el('span', 'actor-kind', row.actorKind ?? row.actorKindReason ?? 'kind unknown'));
+  // The two namespaces are not reconciled, so a forge-only row says what it
+  // is evidence of rather than reading as a second person (#1043).
+  if (row.evidenceNote) wrap.appendChild(said(row.evidenceNote));
   wrap.appendChild(renderSourceStamp(row.sourceStamp));
   wrap.appendChild(el('p', 'actor-records', `${row.records} record(s)${Object.keys(row.byType).length > 0 ? `: ${Object.entries(row.byType).map(([type, n]) => `${type} ${n}`).join(', ')}` : ''}`));
   wrap.appendChild(el('p', 'actor-reviews', row.reviewsPosted.ok

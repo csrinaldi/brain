@@ -87,3 +87,23 @@ test('#882 R882-6: every row goes through governance-model.mjs\'s own row() help
   const [alice] = model.value.rows;
   assert.deepEqual(alice.sourceStamp, { label: '[no source was recorded for this value]', href: null, kind: 'none' }, 'an actor row has no single per-row file/URL — row(null) states that honestly, rather than fabricating one');
 });
+
+// #1043 cold review, correction 3: record actors and forge logins are two
+// namespaces. `@someone` in the records and `someone` as a review author are
+// the same human, and this model cannot know it — so it must not let the
+// second row read as a second person.
+test('#1043 correction 3: a row whose only evidence is a forge login says so, unreconciled with the record namespace', () => {
+  const actors = { ok: true, value: [{ actor: '@someone', actorKind: 'human', records: 4, byType: { decision: 4 }, first: '2026-01-01', last: '2026-02-01' }] };
+  const reviews = { ok: true, value: [{ pr: 1, ok: true, verdicts: [{ author: 'someone' }] }] };
+
+  const model = buildActorsModel(actors, reviews);
+  const names = model.value.rows.map((r) => r.actor);
+  assert.deepEqual(names, ['@someone', 'someone'], 'both rows stand: the model must not invent a mapping between the two namespaces');
+
+  const forgeOnly = model.value.rows.find((r) => r.actor === 'someone');
+  assert.match(forgeOnly.evidenceNote, /forge (review )?login/i, "the forge-only row must name what it is evidence of");
+  assert.match(forgeOnly.evidenceNote, /not reconciled|unreconciled/i, 'and must say the two namespaces are not reconciled, so it never reads as a second person');
+
+  const recorded = model.value.rows.find((r) => r.actor === '@someone');
+  assert.equal(recorded.evidenceNote, null, 'a row backed by records has nothing unreconciled to warn about');
+});

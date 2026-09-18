@@ -221,3 +221,11 @@ test('#1043 correction 2: renderHistory says the commit cap beside the event cou
   assert.match(m[0], /capNote\(/, 'renderHistory must ask the model for the cap sentence');
   assert.match(m[0], /model\.value\.cap|cap\b/, 'the sentence must come from the model\'s own cap, not a literal in the page');
 });
+
+// #1043 correction 3: the model says a forge-only row is unreconciled evidence;
+// the page has to show it, or the sentence never reaches the reader.
+test('#1043 correction 3: renderActorRow renders the model\'s evidence note', () => {
+  const m = APP_JS.match(/function renderActorRow\([^)]*\) \{[\s\S]*?\n}\n/);
+  assert.ok(m, 'renderActorRow must exist in app.js');
+  assert.match(m[0], /row\.evidenceNote/, 'the unreconciled-namespace note must be rendered, not left in the model');
+});
