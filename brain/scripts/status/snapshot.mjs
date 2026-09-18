@@ -30,6 +30,7 @@ import { field, uncomputable } from './report.mjs';
 import { deriveTasks } from './derive.mjs';
 import { buildGraph } from './epic-graph.mjs';
 import { gatherReleaseFacts, releaseDebt } from './release-debt.mjs';
+import { gatherHistoryFacts } from './history.mjs';
 import { readAdrIndex, homeAdrList, adrDrift } from './adr-index.mjs';
 import { readAntiPatterns } from './anti-patterns.mjs';
 import { CHANGES_ROOT, changeDir, archivePath, ARTEFACT_FILE, parseChangeId, isGrandfathered, missingRequiredArtifacts, parseSliceScopes, hasSpec } from '../lib/sdd-layout.mjs';
@@ -434,6 +435,7 @@ export async function buildSnapshot({ root = process.cwd(), now, vcs = null, pro
     actors,
     releaseDebt: field(releaseDebt(gatherReleaseFacts({ root, _run: run, _read: read }))),
     drift,
+    history: gatherHistoryFacts({ root, _run: run }),
   };
 }
 
@@ -453,6 +455,7 @@ export function renderSnapshotText(s) {
     line('anti-patterns', s.antiPatterns, (a) => `${a.entries.length} entr${a.entries.length === 1 ? 'y' : 'ies'}${a.unlistable.length ? `, ${a.unlistable.length} dir(s) unlistable` : ''}`),
     line('actors', s.actors, (a) => `${a.length} actor(s)`),
     line('release debt', s.releaseDebt, (d) => d.severity),
+    line('history', s.history, (h) => `${h.commits.length} commit(s), ${h.tags.length} tag(s)`),
   ];
   if (s.drift.ok) {
     const d = s.drift.value;
