@@ -261,7 +261,12 @@ test('the memory-gate row describes BOTH pipeline wirings, because the gate has 
   // false on the other provider — which is what shipped, on the GitLab file this
   // very change invented.
   const records = [{ type: 'session_summary', issue: 12 }];
-  const deps = { readRecords: () => records, readConfig: () => ({}) };
+  // #1024 incident (batch 2): `records` scores a MISS against issue #570
+  // (D3's lazy union), so `withBody` below reaches the default-branch
+  // reader — injected as a hermetic fake here, never left to the production
+  // default (which would otherwise touch the REAL repo's git state from
+  // this test's real cwd).
+  const deps = { readRecords: () => records, readConfig: () => ({}), readDefaultBranchRecords: () => ({ records: [], error: null }) };
   const filled = renderScaffold('gitlab').replace(/^([A-Za-z]+) #$/m, '$1 #570');
 
   const withBody = await runCheck('memory-gate', {
@@ -770,12 +775,19 @@ test('the scaffold states what the `decision` label actually is, and never that 
   }
 });
 
-test('the scaffold does not promise that `skip:memory-gate` exempts anything (#529, #570)', () => {
+// #1024 changed the underlying reality: skip:memory-gate now IS honored at
+// the "standard" tier (refused at "regulated", not consulted at "lite") —
+// the OLD guard (asserting the scaffold must claim the label is inert)
+// would now demand a FALSE claim. The scaffold must instead state the
+// tier-scoped truth, never a blanket "exempts nothing" now that it does.
+test('the scaffold states skip:memory-gate\'s tier-scoped reality, never a blanket "exempts nothing" claim (#1024, #529, #570)', () => {
   for (const provider of SCAFFOLD_PROVIDERS) {
     const rendered = renderScaffold(provider);
     if (rendered.includes('skip:memory-gate')) {
-      assert.match(rendered, /skip:memory-gate[^.]{0,120}(no code|no gate|nothing reads|not implemented|changes nothing|exempts nothing)/i,
-        `${provider}: naming the label without saying it is inert re-states an exemption that does not exist`);
+      assert.match(rendered, /skip:memory-gate[^.]{0,160}(honored|refus|not consulted)/i,
+        `${provider}: the scaffold must name the tier-scoped rule (honored at standard, refused at regulated, not consulted at lite), not a blanket inert claim`);
+      assert.doesNotMatch(rendered, /skip:memory-gate[^.]{0,160}exempts nothing/i,
+        `${provider}: skip:memory-gate now DOES exempt something at the "standard" tier — this claim is stale`);
     }
   }
 });
@@ -801,10 +813,18 @@ test('the memory checklist item describes the lane, verbatim, on every provider 
       /Session memory captured with `npm run memory:share`/,
       `${provider}: the pre-lane wording must be fully replaced, not left alongside the new sentence`
     );
-    // memory-gate/skip:memory-gate discipline sentence, unchanged in substance.
+    // memory-gate/skip:memory-gate discipline sentence — updated for #1024:
+    // skip:memory-gate now genuinely honors at the "standard" tier.
+    const { abbr } = scaffoldDelivery(provider);
     assert.match(
       rendered,
-      /on the lane\. Where the pipeline hands `memory-gate` this description, an unscoped\n\s+record does NOT satisfy it\. `skip:memory-gate` is named in the docs but no gate\n\s+reads it — applying it exempts nothing\./,
+      new RegExp(
+        `on the lane\\. Where the pipeline hands \`memory-gate\` this description, an unscoped\\n\\s+`
+        + `record does NOT satisfy it — though a record already on \`main\` from its own lane ${abbr}\\n\\s+`
+        + `does, with no rebase needed\\. \`skip:memory-gate\` is honored at the "standard" tier\\n\\s+`
+        + `when applied by someone other than the ${abbr} author; "regulated" refuses it; "lite"\\n\\s+`
+        + `does not consult it\\.`,
+      ),
     );
   }
 });
