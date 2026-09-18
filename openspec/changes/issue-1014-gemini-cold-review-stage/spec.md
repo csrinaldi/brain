@@ -10,14 +10,15 @@ issue: 1014
 - **REQ-GEMINI-1 (CLI Overrides)**: `brain/scripts/review/cli.mjs` debe aceptar los flags `--engine <name>` y `--model <model>`. Si se especifican, deben sobreescribir en memoria el objeto `config.sdd.map['cold-review']` para la ejecución actual sin persistir cambios en `brain.config.json`. Un flag sin valor debe ser rechazado.
 - **REQ-GEMINI-2 (Backend Gemini Transport)**: `brain/scripts/harness/backends/gemini.mjs` debe exportar `runStage` satisfaciendo el contrato de harness:
   - Validar que el stage sea enrutable y que el prompt no esté vacío.
-  - Soportar el modelo especificado o default (`gemini-2.5-pro`).
+  - Soportar el modelo especificado o default (`gemini-2.5-pro` para CLI `gemini` con API key; mapeado a `gemini-3.1-pro-high` cuando el runner activo es `agy` para suscripciones Google One AI Premium / Google AI Pro).
+  - Soportar runners duales: runner `agy` (Antigravity CLI para suscripciones Google AI Pro) con preferencia sobre `gemini` CLI (API key) cuando está autenticado.
   - Requerir y validar el descriptor `output` (`mode: 'final-message'`, paths absolutos, resolviendo fuera del candidato).
-  - Depurar variables de entorno sensibles con `withoutCredentials`.
+  - Depurar variables de entorno sensibles con `withoutCredentials` (y excluir credenciales de API key en ejecuciones bajo `agy`).
   - Aplicar el shadow de forges con `withForgeConfigDir`.
-  - Ejecutar el runner de Gemini de forma no interactiva contra el candidato en modo solo lectura.
-  - Escribir la respuesta en `output.tempPath` y retornar `{ ok: true, elapsedMs }` o fallo estructurado con diagnóstico acotado.
+  - Ejecutar el runner de Gemini de forma no interactiva contra el candidato en modo solo lectura (`--approval-mode plan` en `gemini` CLI; `--sandbox --dangerously-skip-permissions --disable-slash-commands` en `agy`).
+  - Capturar y escribir la respuesta en `output.tempPath` (deduplicando bloques idénticos consecutivos en stdout si el runner emite múltiples bloques) y retornar `{ ok: true, elapsedMs }` o fallo estructurado con diagnóstico acotado.
 - **REQ-GEMINI-3 (Integración de Stage en Host)**: `brain/scripts/review/lib/run-cold-review-stage.mjs` debe activar el descriptor de salida `output` de tipo `final-message` cuando `routing.engine === 'gemini'`, y promover atómicamente el archivo temporal a `output.artifactPath` tras una ejecución exitosa.
-- **REQ-GEMINI-4 (Readiness y Entorno)**: Proveer verificación de readiness para Gemini (`brain/scripts/harness/gemini-readiness.mjs`), comprobando presencia del ejecutable y disponibilidad de autenticación (`GEMINI_API_KEY` o ADC) sin fallar cuando el stage no esté enrutado a Gemini.
+- **REQ-GEMINI-4 (Readiness y Entorno)**: Proveer verificación de readiness para Gemini (`brain/scripts/harness/gemini-readiness.mjs`), comprobando presencia del ejecutable y disponibilidad de autenticación (`agy` autenticado para Google AI Pro o `gemini` CLI con `GEMINI_API_KEY` o ADC) sin fallar cuando el stage no esté enrutado a Gemini o `brain.config.json` esté ausente.
 
 ## Escenarios
 

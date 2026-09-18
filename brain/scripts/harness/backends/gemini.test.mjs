@@ -58,11 +58,14 @@ test('runs exact agy argv for Google AI Pro subscription with scrubbed environme
   assert.deepEqual(seen.args, [
     '-p', 'return the review artifact',
     '--model', 'gemini-3.1-pro-high',
+    '--sandbox',
     '--dangerously-skip-permissions',
     '--disable-slash-commands',
   ]);
   assert.equal(seen.opts.cwd, paths.candidate);
   assert.equal(seen.opts.env.SAFE_VALUE, 'kept');
+  assert.equal(seen.opts.env.GEMINI_API_KEY, undefined);
+  assert.equal(seen.opts.env.GOOGLE_APPLICATION_CREDENTIALS, undefined);
   assert.equal(seen.opts.env.BRAIN_REVIEWER_TOKEN, undefined);
   assert.equal(seen.opts.env.GH_TOKEN, undefined);
   assert.equal(seen.opts.env.GH_CONFIG_DIR, join(paths.root, 'forge-shadow'));

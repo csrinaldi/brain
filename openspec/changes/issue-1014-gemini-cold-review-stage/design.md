@@ -16,7 +16,8 @@ El revisor frío con Gemini se diseña estrictamente como un **transport produce
 | **Patrón `final-message` (salida host-owned fuera del candidato)** | Tool-use directo dentro del worktree (patrón Claude) | Garantiza por construcción la inmutabilidad del código bajo revisión. Evita que el agente modifique accidentalmente archivos durante el análisis. |
 | **CLI overrides en memoria en `cli.mjs`** | Modificar temporalmente `brain.config.json` en disco; variables de entorno ad-hoc | Mantiene el archivo de configuración inalterado (idempotencia y limpieza en git), permitiendo al operador elegir el evaluador al vuelo. |
 | **Depuración estricta de credenciales de Forge** | Compartir entorno padre completo | ADR-0033 exige que el subagente productor jamás posea credenciales de escritura en forges (`gh`/`glab`/tokens). |
-| **Modelo por defecto opaco (`gemini-2.5-pro`)** | Validar contra catálogo cerrado de modelos | Según ADR-0019 / #323, el nombre del modelo es un pass-through opaco que brain no interpreta. |
+| **Soporte de runners duales (`agy` / `gemini`)** | Soportar únicamente API key vía `gemini` CLI | Permite utilizar suscripciones activas de Google One AI Premium / Google AI Pro mediante Antigravity CLI (`agy`), manteniendo compatibilidad con `gemini` CLI con API key. |
+| **Resolución de modelo por runner (`gemini-2.5-pro` / `gemini-3.1-pro-high`)** | Forzar `gemini-2.5-pro` independientemente del runner | El CLI `gemini` opera con el catálogo 2.5 (`gemini-2.5-pro`), mientras que `agy` opera sobre modelos 3.x (`gemini-3.1-pro-high`). Mapear transparentemente asegura ejecución sin fallas en ambos ecosistemas. |
 
 ## Flujo de Datos
 

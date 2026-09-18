@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import { COLD_REVIEW_STAGE, resolveStageEngine } from '../lib/stage-engine.mjs';
-import { GEMINI_MODEL } from './backends/gemini.mjs';
+import { GEMINI_MODEL, hasAgyAuth } from './backends/gemini.mjs';
 
 /**
  * Resolve whether the effective cold-review route makes Gemini a dependency.
@@ -16,11 +16,8 @@ import { GEMINI_MODEL } from './backends/gemini.mjs';
  */
 export function resolveGeminiRoute(config) {
   const routing = resolveStageEngine(config, COLD_REVIEW_STAGE);
-  if (routing === null) {
-    return { required: false, stage: COLD_REVIEW_STAGE, engine: null, model: null };
-  }
-  if (routing.engine !== 'gemini') {
-    return { required: false, stage: COLD_REVIEW_STAGE, engine: routing.engine, model: routing.model };
+  if (routing === null || routing.engine !== 'gemini') {
+    return { required: false, stage: COLD_REVIEW_STAGE, engine: routing?.engine ?? null, model: routing?.model ?? null };
   }
   const model = routing.model ?? GEMINI_MODEL;
   return {
@@ -42,12 +39,13 @@ function defaultCommandExists(bin, env = process.env) {
 export function checkGeminiReadiness(route, {
   commandExists = defaultCommandExists,
   env = process.env,
+  agyAuthCheck = hasAgyAuth,
 } = {}) {
   if (!route?.required) {
     const engine = route?.engine ?? 'no engine';
     return { ready: true, required: false, diagnostic: `cold-review is routed to ${engine}; Gemini is not required` };
   }
-  const hasAgy = commandExists('agy', env);
+  const hasAgy = commandExists('agy', env) && agyAuthCheck(env);
   const hasGemini = commandExists('gemini', env);
   const hasApiKey = typeof env?.GEMINI_API_KEY === 'string' && env.GEMINI_API_KEY.trim() !== '';
   const hasGoogleCreds = typeof env?.GOOGLE_APPLICATION_CREDENTIALS === 'string' && env.GOOGLE_APPLICATION_CREDENTIALS.trim() !== '';
@@ -56,7 +54,7 @@ export function checkGeminiReadiness(route, {
     return {
       ready: false,
       required: true,
-      diagnostic: 'Gemini is required by cold-review:gemini but neither agy (Antigravity CLI for Google AI Pro subscriptions) nor gemini CLI is installed.',
+      diagnostic: 'Gemini is required by cold-review:gemini but neither agy (authenticated via Antigravity CLI for Google AI Pro subscriptions) nor gemini CLI is installed.',
     };
   }
 

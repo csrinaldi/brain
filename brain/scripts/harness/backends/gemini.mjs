@@ -7,6 +7,7 @@
 
 import { existsSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { homedir } from 'node:os';
 
 import { assertRoutableStage } from '../../lib/stage-engine.mjs';
 import { credentialEnvNames, withoutCredentials } from '../../lib/credential-env.mjs';
@@ -15,6 +16,11 @@ import { DEFAULT_STAGE_TIMEOUT_MS, formatDuration } from '../../lib/duration.mjs
 import { defaultRun } from './agent-runtime.mjs';
 
 export const GEMINI_MODEL = 'gemini-2.5-pro';
+
+export function hasAgyAuth(_env = process.env, _existsSync = existsSync) {
+  const home = _env?.HOME ?? homedir();
+  return _existsSync(join(home, '.gemini', 'antigravity-cli'));
+}
 
 export function deduplicateFindingsBlocks(text) {
   if (typeof text !== 'string') return text;
@@ -121,7 +127,7 @@ export async function runStage({
   const outputFailure = validateOutput(output, cwd);
   if (outputFailure) return { ok: false, reason: outputFailure };
 
-  const hasAgy = _commandExists('agy', _env);
+  const hasAgy = _commandExists('agy', _env) && hasAgyAuth(_env);
   const hasGemini = _commandExists('gemini', _env);
   const hasApiKey = typeof _env?.GEMINI_API_KEY === 'string' && _env.GEMINI_API_KEY.trim() !== '';
   const hasGoogleCreds = typeof _env?.GOOGLE_APPLICATION_CREDENTIALS === 'string' && _env.GOOGLE_APPLICATION_CREDENTIALS.trim() !== '';
@@ -144,13 +150,16 @@ export async function runStage({
     ? 'gemini-3.1-pro-high'
     : (model ?? GEMINI_MODEL);
 
-  const scrubNames = Array.isArray(credentialEnv)
+  const baseScrub = Array.isArray(credentialEnv)
     ? credentialEnvNames({ extra: credentialEnv })
     : credentialEnvNames();
+  const scrubNames = runner === 'agy'
+    ? [...baseScrub, 'GEMINI_API_KEY', 'GOOGLE_APPLICATION_CREDENTIALS']
+    : baseScrub;
   const scrubbed = withoutCredentials(_env, scrubNames);
   const env = forgeConfigDir ? withForgeConfigDir(scrubbed, forgeConfigDir) : scrubbed;
   const secrets = [
-    ...scrubNames.map((name) => _env?.[name]),
+    ...baseScrub.map((name) => _env?.[name]),
     _env?.GEMINI_API_KEY,
     _env?.GOOGLE_APPLICATION_CREDENTIALS,
   ].filter(Boolean);
@@ -159,7 +168,7 @@ export async function runStage({
   const elapsed = () => _now() - startedAt;
 
   const args = runner === 'agy'
-    ? ['-p', prompt, '--model', effectiveModel, '--dangerously-skip-permissions', '--disable-slash-commands']
+    ? ['-p', prompt, '--model', effectiveModel, '--sandbox', '--dangerously-skip-permissions', '--disable-slash-commands']
     : ['-p', prompt, '-m', effectiveModel, '--approval-mode', 'plan', '--skip-trust', '--output', output.tempPath];
 
   let result;
