@@ -50,7 +50,11 @@ const skip = existsSync(join(ROOT, '.brain-source'))
 
 for (const v of VERBS) {
   test(`brain:memory:${v} and its alias run cli.mjs ${v} (#961 R4)`, { skip }, () => {
-    const want = `node ./brain/scripts/memory/cli.mjs ${v}`;
+    // #1012: `ship` alone declares its invoker at the script level — every
+    // caller of `cli.mjs ship` must pass a marker, including this one.
+    const want = v === 'ship'
+      ? `node ./brain/scripts/memory/cli.mjs ${v} --invoker manual`
+      : `node ./brain/scripts/memory/cli.mjs ${v}`;
     assert.equal(pkg.scripts?.[`brain:memory:${v}`], want);
     assert.equal(pkg.scripts?.[`memory:${v}`], want);
     assert.ok(!MANAGED_SCRIPT_KEYS.includes(`memory:${v}`), 'a bare alias is never managed');

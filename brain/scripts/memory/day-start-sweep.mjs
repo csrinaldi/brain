@@ -20,8 +20,10 @@ export function laneSweepEnabled(config) {
 }
 
 /**
- * Runs `memory/cli.mjs ship --json` synchronously, with a 60s timeout this
- * module owns outright, and parses its single stdout line.
+ * Runs `memory/cli.mjs ship --json --invoker sweep` synchronously, with a
+ * 60s timeout this module owns outright, and parses its single stdout
+ * line. `--invoker sweep` declares this caller to the ship op's own
+ * invoker guard (#1012).
  *
  * `enabled` lets a caller that already computed `laneSweepEnabled(config)`
  * (day-start.mjs step 5, to decide whether to print the progress line
@@ -39,7 +41,7 @@ export function runLaneSweep({ config, enabled = laneSweepEnabled(config), _spaw
 
   const result = _spawnSync(
     process.execPath,
-    [CLI_PATH, 'ship', '--json'],
+    [CLI_PATH, 'ship', '--json', '--invoker', 'sweep'],
     { cwd: REPO_ROOT, encoding: 'utf8', timeout: 60_000 },
   );
 

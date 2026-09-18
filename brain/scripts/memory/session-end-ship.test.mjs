@@ -145,12 +145,17 @@ test('flag true: one _spawn call, detached+unref, stdio[1]===stdio[2] (tmp-log f
   const [cmd, argv, opts] = args;
   assert.equal(cmd, process.execPath);
   assert.ok(argv.some((a) => a.endsWith('cli.mjs')), `argv must resolve cli.mjs, got ${JSON.stringify(argv)}`);
-  assert.ok(argv.includes('ship'));
-  assert.ok(argv.includes('--json'));
+  // #1012: the hook caller declares itself — argv.slice(1) drops only the
+  // resolved cli.mjs path, so the exact remaining shape is pinned.
+  assert.deepEqual(argv.slice(1), ['ship', '--json', '--invoker', 'hook']);
   assert.equal(opts.detached, true);
   assert.equal(opts.stdio[0], 'ignore');
   assert.equal(opts.stdio[1], opts.stdio[2], 'stdout and stderr share the same tmp-log fd');
   assert.equal(typeof opts.stdio[1], 'number', 'stdio[1] is an open fd number');
+  // A2: the child must inherit the EXACT process.env reference captured at
+  // spawn time — not a copy, not a scrubbed subset (see this file's header
+  // comment on why "hardening" this would be the exact trap).
+  assert.equal(opts.env, parentEnv, 'env must be the exact process.env reference at spawn time (A2)');
   assert.equal(opts.env.GH_TOKEN, ghFixture, 'GH_TOKEN carried unchanged');
   assert.equal(opts.env.BRAIN_MEMORY_TOKEN, memFixture, 'BRAIN_MEMORY_TOKEN carried unchanged');
   assert.ok(child.unrefCalled, '.unref() must be invoked');
