@@ -42,8 +42,8 @@ test('#998 R998-2: the page reaches exactly the endpoints this slice owns — no
   ]);
 });
 
-test('#998 R998-2: the drawer still has four tabs and no fifth view hides among them', () => {
-  assert.deepEqual(TAB_IDS, ['spec', 'tasks', 'workingMemory', 'reviews']);
+test('#998 R998-6: the drawer now has six tabs, in the design\'s order', () => {
+  assert.deepEqual(TAB_IDS, ['spec', 'sdd', 'tasks', 'workingMemory', 'reviews', 'records']);
 });
 
 test('#998 R998-2/R998-4/R998-5: this PR owns exactly four modes; map, sdd and reviews have real content, governance names the PR that brings it', () => {
@@ -97,4 +97,28 @@ test('#1009 cold review round 2: renderReviewRound gives a STOP verdict its own 
   const body = fnMatch[0];
   assert.match(body, /'STOP'/, 'renderReviewRound must branch on the STOP verdict literal, not fold it into the REVISE/unknown ✕ mark');
   assert.match(body, /human escalation/, 'a STOP round must say the escalation as text, not colour alone');
+});
+
+test("#1009 cold review round 3: renderReviewRound reads round.unknownVerdict, so a verdict word outside the enum never renders byte-identical to a REVISE", () => {
+  const fnMatch = APP_JS.match(/function renderReviewRound\([^)]*\) \{[\s\S]*?\n}\n/);
+  assert.ok(fnMatch, 'renderReviewRound function must exist in app.js');
+  const body = fnMatch[0];
+  // The MARK itself must branch on the flag: a scan that merely finds the
+  // flag mentioned somewhere in the function passes even when the mark is
+  // decided without it, which is the defect this test exists to catch.
+  assert.match(body, /const mark = round\.unknownVerdict/, 'the mark must be decided by the flag review-timeline.mjs sets, not merely mention it');
+  assert.match(body, /unrecognised verdict/, 'an unknown verdict word must be called out as text, not only by a mark');
+});
+
+// ── #998 R998-6: the served branch and the poll countdown ───────────────────
+
+test('#998 R998-6 T3: the status bar names the served branch through the same sourceStamp helper the door uses', () => {
+  assert.match(APP_JS, /renderServedBranch\(state\.meta\?\.servedBranch/, 'renderStatus must read servedBranch off meta, the same way it already reads poller/watcher');
+  assert.match(APP_JS, /renderSourceStamp\(sourceStamp\(servedBranch\.source\)\)/, 'the served branch must carry its own source stamp, never a bare string');
+});
+
+test('#998 R998-6 T4/T6: the status bar shows the poll countdown from pollIndicator, never a second Date.now() clock read', () => {
+  assert.match(APP_JS, /indicator\.countdown/, 'renderStatus must render pollIndicator\'s own countdown field');
+  const dateNowCalls = [...APP_JS.matchAll(/Date\.now\(\)/g)].length;
+  assert.equal(dateNowCalls, 1, 'app.js reads Date.now() exactly once (renderStatus\'s own nowMs) — every clock decision beyond that lives in lib/, driven by the injected now');
 });

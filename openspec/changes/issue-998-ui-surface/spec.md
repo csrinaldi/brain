@@ -209,4 +209,25 @@ ids this PR owns.
 - **THEN** each finding is its own child entry naming its severity and id, its excerpt and `cites` in the detail, and its source — its own `{path: file, line}` anchor when the finding carried one, the round's own source otherwise (D14, `issue-881-ui-server-canvas/design.md:633`, is about a per-ROUND anchor to the underlying forge comment, which the provider does drop; it says nothing about a finding's own `file`/`line`, which the verdict body carries directly — R998-5's earlier text over-applied D14 to findings, corrected here)
 
 ### R998-6: the door's six tabs, the served branch, the countdown
-Acceptance: six tabs each keeping its own reason on failure; the header names the branch served; the bands show the next poll.
+
+Acceptance: six tabs each keeping its own reason on failure; the header names the branch served; the bands show the next poll. `change-route.mjs`'s `buildChangeView` grows two tab builders over sections it already holds (no new IO): `records` filters `snapshot.records` to this issue, newest first, each row `{id, ts, actor, actorKind, type, supersedes, source:{path: file}}`; `sdd` reads this issue's own row in `snapshot.changes` and states its seven stage artefacts' raw presence (`readChanges`'s R998-4 `artefacts{}` map), sourced to the change dir — deliberately not re-deriving `lib/sdd-model.mjs`'s `STAGE_VOCAB`, which stays the SDD mode's own concern over every change at once. `drawer-model.mjs`'s `TAB_IDS` grows to the design's six, in order: `spec, sdd, tasks, workingMemory, reviews, records` (the design's prose shorthand "memory" names the existing `workingMemory` tab, unchanged since #881). `server.mjs`'s `buildMeta()` gains `servedBranch` — `git symbolic-ref --short HEAD` on the served root's own git dir, read once and memoized, sourced to `HEAD`; a detached or unreadable `HEAD` is a said reason. `poller.mjs`'s `state()` gains `intervalMs` and `nextAttemptAt` (armed by `scheduleNext()` from the injected clock, cleared on pause); `lib/banners.mjs`'s `pollIndicator` gains an additive `countdown` field ("next poll in N s", "paused", or "polling disabled") beside its unchanged `text`/`paused`.
+
+#### Scenario: the door opens exactly six tabs, each with its own reason
+- **WHEN** the drawer receives a change view where every tab but `records` succeeded
+- **THEN** `TAB_IDS` is `spec, sdd, tasks, workingMemory, reviews, records`, in that order, and the failed `records` tab carries only its own reason — never hiding the other five
+
+#### Scenario: the sdd tab is the change's own seven-stage presence, no re-derivation
+- **WHEN** the drawer's `sdd` tab renders for a change with some artefacts present and some missing
+- **THEN** it lists each of `proposal, spec, design, tasks, apply, verify, archive` as present or missing, sourced to the change's own directory — the same raw fact `readChanges`'s `artefacts{}` map already carries, not a second computation of `lib/sdd-model.mjs`'s `STAGE_VOCAB`
+
+#### Scenario: the records tab lists this issue's own memory records, newest first
+- **WHEN** `.memory`'s records section carries two records for this issue and one for another
+- **THEN** the records tab shows exactly the two, newest first, each sourced to its own record file; an unreadable records section is the tab's own stated reason, never an empty list
+
+#### Scenario: the header names the served branch, sourced to HEAD
+- **WHEN** the server's checkout has a resolvable `HEAD` symbolic ref
+- **THEN** `buildMeta()`'s `servedBranch` carries the branch name and the page header renders "serving \<branch\>" beside its own source stamp; a detached or unreadable `HEAD` is a said reason instead, never a blank header
+
+#### Scenario: the status bar counts down to the next poll
+- **WHEN** the poller is scheduled, paused, or has no interval armed
+- **THEN** the indicator's countdown reads "next poll in N s", "paused", or "polling disabled" respectively, computed from the injected clock alone, never the wall clock inside `lib/`

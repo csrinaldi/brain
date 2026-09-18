@@ -164,11 +164,26 @@ function renderBands() {
  * manual poll. Both controls POST — the only mutation verbs this server
  * accepts (R881-5).
  */
+/** The served branch, said with its own source stamp (#998 R998-6 T3) — a detached or unreadable HEAD is a said reason, never a blank header. */
+function renderServedBranch(servedBranch) {
+  const frag = document.createDocumentFragment();
+  if (servedBranch === null) {
+    frag.appendChild(el('span', 'served-branch', 'serving: unknown until the stream connects'));
+    return frag;
+  }
+  const text = servedBranch.ok ? `serving ${servedBranch.branch}` : `serving: unknown (${servedBranch.reason})`;
+  frag.appendChild(el('span', 'served-branch', text));
+  frag.appendChild(renderSourceStamp(sourceStamp(servedBranch.source)));
+  return frag;
+}
+
 function renderStatus() {
   const indicator = pollIndicator({ poller: state.meta?.poller ?? null, nowMs: Date.now() });
   clear(mounts.status);
   mounts.status.appendChild(el('strong', 'title', 'brain:ui'));
+  mounts.status.appendChild(renderServedBranch(state.meta?.servedBranch ?? null));
   mounts.status.appendChild(el('span', indicator.paused ? 'poll-indicator paused' : 'poll-indicator', indicator.text));
+  mounts.status.appendChild(el('span', 'poll-countdown', indicator.countdown));
   mounts.status.appendChild(el('span', 'spacer'));
 
   const toggle = el('button', 'poll-toggle', indicator.paused ? 'resume polling' : 'disable polling');
@@ -461,8 +476,14 @@ function renderReviewThread(thread) {
 /** One round: its verdict word + mark, its findings grouped by severity (#998 R998-5) — a finding's own `source` (its `file`/`line` anchor when the verdict carried one, per `verdict.mjs`'s `hasUsableAnchor`/REQ-405-2, measured on PR #1006) is rendered through the same `sourceStamp` helper as every other value on this page, beside its excerpt and cites. A malformed findings block (#1009 cold review finding 1) is checked BEFORE the empty case: `round.findings` is `[]` either way, so an unchecked order would render an unreadable block identically to a clean zero-findings round. STOP (#1009 cold review round 2) gets its own mark (⛔, distinct from ✓/✕) and says "human escalation" as text — reviewer-protocol.md §7's "a human must look now" state is never indistinguishable from an ordinary REVISE ✕. */
 function renderReviewRound(round) {
   const row = el('div', 'review-round');
-  const mark = round.verdict === 'APPROVE' ? '✓' : round.verdict === 'STOP' ? '⛔' : '✕';
-  const escalation = round.verdict === 'STOP' ? ' — human escalation' : '';
+  // `unknownVerdict` is review-timeline.mjs's own flag for a word outside the
+  // protocol enum (a typo, or a verdict a later protocol adds). Rendering it
+  // with the plain REVISE mark would make it byte-identical to a REVISE on
+  // screen, which is the silence R998-5 forbids (#1009 cold review round 3).
+  const mark = round.unknownVerdict ? '?' : round.verdict === 'APPROVE' ? '✓' : round.verdict === 'STOP' ? '⛔' : '✕';
+  const escalation = round.unknownVerdict
+    ? ' — unrecognised verdict word'
+    : round.verdict === 'STOP' ? ' — human escalation' : '';
   row.appendChild(el('p', 'review-round-head', `${mark} ${round.verdict}${escalation} — rev ${round.rev}, ${round.author ?? 'unknown author'}${round.headSha7 ? `, head ${round.headSha7}` : ''}`));
   if (round.malformed && round.malformed.length > 0) {
     row.appendChild(said(`⚠ findings block unreadable: ${round.malformed.join(', ')}`));
@@ -501,8 +522,9 @@ function closeDrawer() {
 }
 
 /**
- * The inspector drawer: four tabs, one entry shape, and a source string under
- * every single value (A3). `drawer-model.mjs` decided all of it — including
+ * The inspector drawer: six tabs (#998 R998-6), one entry shape, and a
+ * source string under every single value (A3). `drawer-model.mjs` decided
+ * all of it — including
  * that a tab which failed keeps its reason and that an unreadable review
  * thread is still an entry — so this renders one loop, with no per-tab
  * branch to get wrong.

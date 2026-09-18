@@ -119,12 +119,21 @@ function buildStages(change) {
   return stages;
 }
 
+// `status/derive.mjs`'s `deriveTasks()` renders "zero open items" as the
+// literal em dash, its own DISPLAY sentinel (other readers of that field
+// print it verbatim, so `derive.mjs` itself is unchanged) — never a real
+// "next" value. Cold review of #1008/PR6: `buildTasksSummary` used to
+// forward it unchanged, so the SDD row rendered "next: —" for every done
+// or task-less change.
+const NO_NEXT_TASK_SENTINEL = '—';
+
 function buildTasksSummary(change) {
   const t = change.tasks ?? {};
+  const next = t.next?.ok === true ? t.next.value : null;
   return {
     checked: t.checked?.ok === true ? t.checked.value : 0,
     open: t.open?.ok === true ? t.open.value : 0,
-    next: t.next?.ok === true ? t.next.value : null,
+    next: next === NO_NEXT_TASK_SENTINEL ? null : next,
     source: { path: `${change.dir}/${STAGE_FILE.tasks}` },
   };
 }
