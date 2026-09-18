@@ -189,6 +189,7 @@
 {"id":"rec-1362132390d4053e","ts":"2026-07-29T13:59:21Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-1362132390d4053e.jsonl"}
 {"id":"rec-136c14874586ff8a","ts":"2026-07-29T14:25:53Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-136c14874586ff8a.jsonl"}
 {"id":"rec-136dc71bbe99c995","ts":"2026-07-11T21:43:52Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-07-rec-136dc71bbe99c995.jsonl"}
+{"id":"rec-137be3cdde722ae9","ts":"2026-09-18T21:33:10Z","actor":"@csrinaldi","type":"bugfix","project":"brain","issue":882,"file":"2026-09-rec-137be3cdde722ae9.jsonl"}
 {"id":"rec-13adfb65f8c2a335","ts":"2026-07-13T00:21:47Z","actor":"@legacy","type":"decision","project":"brain","file":"2026-07-rec-13adfb65f8c2a335.jsonl"}
 {"id":"rec-1430930c7b759264","ts":"2026-08-16T13:53:19Z","actor":"@legacy","type":"architecture","project":"brain","file":"2026-08-rec-1430930c7b759264.jsonl"}
 {"id":"rec-144e78a600586841","ts":"2026-07-25T21:51:30Z","actor":"feat/issue-266-h0a-reviewer-protocol-doctrine","type":"discovery","project":"brain","file":"2026-07-rec-144e78a600586841.jsonl"}
