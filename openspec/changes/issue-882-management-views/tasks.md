@@ -84,20 +84,20 @@ push, a posted cold-review APPROVE.
 {"slice": 3, "claims": ["R882-4"], "files": ["brain/scripts/ui/lib/anti-patterns-model.mjs", "brain/scripts/ui/static/app.js", "brain/scripts/ui/static/app.css", "brain/scripts/ui/static/views-owned.test.mjs"], "terminal_pr": "the tracker feature/issue-882-management-views -> main"}
 ```
 
-- [ ] T1a. `lib/anti-patterns-model.test.mjs`: a row citing both `#N` and
+- [x] T1a. `lib/anti-patterns-model.test.mjs`: a row citing both `#N` and
       `ISSUE-N` forms, deduplicated; an unlistable scope said beside the
       other scope's real rows; the whole section unreadable passes its
       reason through. RED.
-- [ ] T1b. `lib/anti-patterns-model.mjs`:
+- [x] T1b. `lib/anti-patterns-model.mjs`:
       `buildAntiPatternsModel(antiPatternsSection)` — grouped `core` before
       `project`, sorted by `id` within each. Mutation: the group order
       swapped → red.
-- [ ] T2. `static/app.js`: `renderAntiPatterns`. `static/app.css`:
+- [x] T2. `static/app.js`: `renderAntiPatterns`. `static/app.css`:
       anti-patterns classes. `views-owned.test.mjs` updated the same way PR
       2 updated it.
-- [ ] T3. `GIT_CONFIG_GLOBAL=/dev/null npm test` and
+- [x] T3. `GIT_CONFIG_GLOBAL=/dev/null npm test` and
       `npm run brain:repo:check` green; counted diff under 1000.
-- [ ] T4. `npm run memory:save -- "<title>" "<content>" --issue 882 --type decision`; stage only the record and `.memory/index.jsonl`.
+- [x] T4. `npm run memory:save -- "<title>" "<content>" --issue 882 --type decision`; stage only the record and `.memory/index.jsonl`.
 
 ## PR 4 — History (R882-5)
 
