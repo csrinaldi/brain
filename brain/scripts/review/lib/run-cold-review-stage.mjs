@@ -165,17 +165,17 @@ export async function runColdReviewStage({
     const rel = relative(resolve(parent), resolve(child));
     return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
   };
-  // Codex returns its artifact as a final message. The host creates its only
+  // Codex and Gemini return their artifact as a final message. The host creates its only
   // writable destination beside the normal artifact, never in the candidate.
-  const output = routing.engine === 'codex'
+  const output = (routing.engine === 'codex' || routing.engine === 'gemini')
     ? {
         mode: 'final-message',
-        tempPath: join(dirname(artifactAbsolutePath), `.codex-final-${prNumber}-${crypto.randomUUID()}.tmp`),
+        tempPath: join(dirname(artifactAbsolutePath), `.${routing.engine}-final-${prNumber}-${crypto.randomUUID()}.tmp`),
         artifactPath: artifactAbsolutePath,
       }
     : undefined;
   if (output && isWithin(worktreePath, output.artifactPath)) {
-    return { routed: true, ok: false, reason: 'the Codex final-message output resolves inside the cold-review candidate; refusing before clearing any artifact' };
+    return { routed: true, ok: false, reason: `the ${routing.engine} final-message output resolves inside the cold-review candidate; refusing before clearing any artifact` };
   }
 
   // THE ENGINE READS THE COLD WORKTREE, AND REFUSING IS THE POINT (judgment:cold-3).
