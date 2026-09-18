@@ -4,7 +4,7 @@ import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
-import { runStage, deduplicateFindingsBlocks, canonicalPath, isWithin, GEMINI_MODEL } from './gemini.mjs';
+import { runStage, deduplicateFindingsBlocks, canonicalPath, isWithin, hasAgyAuth, GEMINI_MODEL } from './gemini.mjs';
 
 function makePaths(t) {
   const root = mkdtempSync(join(tmpdir(), 'gemini-backend-'));
@@ -47,6 +47,7 @@ test('runs exact agy argv for Google AI Pro subscription with scrubbed environme
     output: output(paths),
     _env: { ...BASE_ENV },
     _commandExists: (bin) => bin === 'agy',
+    _hasAgyAuth: () => true,
     _run: (bin, args, opts) => {
       seen = { bin, args, opts };
       return { status: 0, stdout: '```brain-findings/1\n[]\n```\n' };
@@ -100,7 +101,6 @@ test('runs exact gemini argv with scrubbed environment and final-message output'
     '-m', 'gemini-2.5-pro',
     '--approval-mode', 'plan',
     '--skip-trust',
-    '--output', paths.tempPath,
   ]);
   assert.equal(seen.opts.cwd, paths.candidate);
   assert.equal(seen.opts.env.SAFE_VALUE, 'kept');
@@ -240,12 +240,26 @@ test('runStage deduplicates identical findings in stdout when writing tempPath',
     output: output(paths),
     _env: { ...BASE_ENV },
     _commandExists: (bin) => bin === 'agy',
+    _hasAgyAuth: () => true,
     _run: () => ({ status: 0, stdout: duplicated }),
   });
 
   assert.equal(result.ok, true);
   const written = readFileSync(paths.tempPath, 'utf8');
   assert.equal(written, block);
+});
+
+test('hasAgyAuth: returns true when cli dir and indicator file exists', () => {
+  const existsMap = new Set([
+    '/fake/home/.gemini/antigravity-cli',
+    '/fake/home/.gemini/antigravity-cli/settings.json',
+  ]);
+  assert.equal(hasAgyAuth({ HOME: '/fake/home' }, (p) => existsMap.has(p)), true);
+});
+
+test('hasAgyAuth: returns false when indicator file is missing or dir does not exist', () => {
+  assert.equal(hasAgyAuth({ HOME: '/fake/home' }, (p) => p === '/fake/home/.gemini/antigravity-cli'), false);
+  assert.equal(hasAgyAuth({ HOME: '/fake/home' }, () => false), false);
 });
 
 test('canonicalPath: correctly preserves first letter when resolving non-existent path directly under root', () => {

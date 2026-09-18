@@ -56,6 +56,7 @@ test('checkGeminiReadiness: agy binary present returns ready: true for Google AI
   const result = checkGeminiReadiness(route, {
     commandExists: (bin) => bin === 'agy',
     env: {},
+    agyAuthCheck: () => true,
   });
   assert.equal(result.ready, true);
   assert.match(result.diagnostic, /agy \(Google AI Pro subscription\)/i);

@@ -19,7 +19,13 @@ export const GEMINI_MODEL = 'gemini-2.5-pro';
 
 export function hasAgyAuth(_env = process.env, _existsSync = existsSync) {
   const home = _env?.HOME ?? homedir();
-  return _existsSync(join(home, '.gemini', 'antigravity-cli'));
+  const cliDir = join(home, '.gemini', 'antigravity-cli');
+  if (!_existsSync(cliDir)) return false;
+  return (
+    _existsSync(join(cliDir, 'settings.json')) ||
+    _existsSync(join(cliDir, 'jetski_state.pbtxt')) ||
+    _existsSync(join(cliDir, 'installation_id'))
+  );
 }
 
 export function deduplicateFindingsBlocks(text) {
@@ -119,6 +125,7 @@ export async function runStage({
   _run = defaultRun,
   _now = Date.now,
   _commandExists = defaultCommandExists,
+  _hasAgyAuth = hasAgyAuth,
 } = {}) {
   assertRoutableStage(stage, { routed });
   if (typeof prompt !== 'string' || prompt.trim() === '') {
@@ -127,7 +134,7 @@ export async function runStage({
   const outputFailure = validateOutput(output, cwd);
   if (outputFailure) return { ok: false, reason: outputFailure };
 
-  const hasAgy = _commandExists('agy', _env) && hasAgyAuth(_env);
+  const hasAgy = _commandExists('agy', _env) && _hasAgyAuth(_env);
   const hasGemini = _commandExists('gemini', _env);
   const hasApiKey = typeof _env?.GEMINI_API_KEY === 'string' && _env.GEMINI_API_KEY.trim() !== '';
   const hasGoogleCreds = typeof _env?.GOOGLE_APPLICATION_CREDENTIALS === 'string' && _env.GOOGLE_APPLICATION_CREDENTIALS.trim() !== '';
@@ -169,7 +176,7 @@ export async function runStage({
 
   const args = runner === 'agy'
     ? ['-p', prompt, '--model', effectiveModel, '--sandbox', '--dangerously-skip-permissions', '--disable-slash-commands']
-    : ['-p', prompt, '-m', effectiveModel, '--approval-mode', 'plan', '--skip-trust', '--output', output.tempPath];
+    : ['-p', prompt, '-m', effectiveModel, '--approval-mode', 'plan', '--skip-trust'];
 
   let result;
   try {
