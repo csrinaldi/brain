@@ -663,10 +663,15 @@ export async function mrAutoMerge({ project, number, requiredReviews = 1 } = {})
  * `[]`, so callers (the actor-check DETECTION gate) can distinguish "no
  * events" from "couldn't fetch".
  *
- * @param {{ project: string, number: number }} params
+ * `kind` (issue #1024, design item 7) is accepted and IGNORED here,
+ * documentation-only: GitHub's Events API is already PR/issue-unified (a PR
+ * IS an issue under the hood, same events endpoint either way) — only
+ * GitLab's provider distinguishes `issues/…` from `merge_requests/…`.
+ *
+ * @param {{ project: string, number: number, kind?: 'issue'|'mr' }} params
  * @returns {Promise<Array<{ actor: { login: string|undefined }, action: 'add'|'remove', label: string|undefined, at: string|undefined }>|null>}
  */
-export async function labelEvents({ project, number } = {}) {
+export async function labelEvents({ project, number, kind: _kind } = {}) {
   let events;
   try {
     events = ghJson(['api', '--paginate', `repos/${project}/issues/${number}/events`]);
