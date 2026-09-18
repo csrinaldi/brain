@@ -22,13 +22,16 @@ export const MODE_IDS = Object.freeze(MODES.map((mode) => mode.id));
  * area (never empty-on-failure). `map`, `sdd` and `reviews` are `null`:
  * `map` draws the existing canvas + drawer, `sdd` draws the seven-stage
  * matrix (#998 R998-4), `reviews` draws the timeline and verdict queue
- * (#998 R998-5) — none of the three is a placeholder.
+ * (#998 R998-5). `governance` is `null` too, from #882 PR 1 on (R882-1):
+ * it is a real mode with its own sub-router from that PR, even while some
+ * of its five sub-views still show their own said placeholder —
+ * `lib/governance-model.mjs`'s own `GOVERNANCE_PLACEHOLDERS` table.
  */
 export const PLACEHOLDERS = Object.freeze({
   map: null,
   sdd: null,
   reviews: null,
-  governance: 'the governance view is not built yet — it lands in PR 7',
+  governance: null,
 });
 
 /** The page before anything has been chosen: the first mode. */

@@ -18,20 +18,25 @@ import { buildLaneModel } from './lib/lane-model.mjs';
 import { buildDrawerModel } from './lib/drawer-model.mjs';
 import { buildSddModel, STAGE_VOCAB } from './lib/sdd-model.mjs';
 import { buildReviewTimeline } from './lib/review-timeline.mjs';
+import { buildRoadmapModel } from './lib/roadmap-model.mjs';
 import { sourceStamp } from './lib/provenance.mjs';
 import { MODES, PLACEHOLDERS, initialView, switchMode, keyAction } from './lib/view-model.mjs';
+import { GOVERNANCE_VIEWS, GOVERNANCE_PLACEHOLDERS } from './lib/governance-model.mjs';
 
 const mounts = {
   status: document.getElementById('status'),
   modes: document.getElementById('modes'),
   banners: document.getElementById('banners'),
+  governanceNav: document.getElementById('governance-nav'),
   canvas: document.getElementById('canvas'),
   drawer: document.getElementById('drawer'),
 };
 
 let state = initialPageState();
-/** The current mode id (#998 R998-2). `map` is the only one with content this PR; the router says so for the rest. */
+/** The current mode id (#998 R998-2). `map`, `sdd`, `reviews` and `governance` all have real content (#882 R882-1). */
 let view = initialView();
+/** The active governance sub-view id (#882 R882-1) — mouse/Enter-activated only; the top-level Tab/Esc/J/K contract is untouched. */
+let governanceView = GOVERNANCE_VIEWS[0].id;
 /** The issue whose node is activated; `null` until one is. The drawer follows it — `map` mode only. */
 let selectedIssue = null;
 /** The last `GET /api/change/<N>` body for the selected issue; `null` while it is still being read. */
@@ -118,8 +123,11 @@ function switchToMode(mode) {
   render();
 }
 
-/** The router (#998 R998-2/R998-4/R998-5): `map` draws the canvas + drawer, `sdd` draws the seven-stage matrix, `reviews` draws the timeline + verdict queue; the rest say which PR brings their content. */
+/** The router (#998 R998-2/R998-4/R998-5, #882 R882-1): `map` draws the canvas + drawer, `sdd` draws the seven-stage matrix, `reviews` draws the timeline + verdict queue, `governance` draws its own sub-nav + sub-router. `#governance-nav` is shown only while `governance` is the active mode. */
 function renderContent() {
+  mounts.governanceNav.hidden = view !== 'governance';
+  if (view !== 'governance') clear(mounts.governanceNav);
+
   if (view === 'map') {
     renderLanes();
     renderDrawer();
@@ -133,6 +141,12 @@ function renderContent() {
   }
   if (view === 'reviews') {
     renderReviews();
+    mounts.drawer.hidden = true;
+    clear(mounts.drawer);
+    return;
+  }
+  if (view === 'governance') {
+    renderGovernance();
     mounts.drawer.hidden = true;
     clear(mounts.drawer);
     return;
@@ -504,6 +518,95 @@ function renderReviewRound(round) {
     row.appendChild(item);
   }
   return row;
+}
+
+/**
+ * The governance surface (#882 R882-1): the five sub-nav buttons, drawn
+ * straight from `lib/governance-model.mjs`'s own table — no inline handler,
+ * no second copy of the labels, the same idiom `renderModes` already uses
+ * for the four top-level modes. Switching sub-views is mouse/Enter-activated
+ * buttons only; the top-level Tab/Esc/J/K keyboard contract is untouched.
+ */
+function renderGovernanceNav() {
+  clear(mounts.governanceNav);
+  for (const sub of GOVERNANCE_VIEWS) {
+    const button = el('button', null, sub.label);
+    button.type = 'button';
+    if (sub.id === governanceView) button.setAttribute('aria-current', 'page');
+    button.addEventListener('click', () => switchGovernanceView(sub.id));
+    mounts.governanceNav.appendChild(button);
+  }
+}
+
+function switchGovernanceView(subView) {
+  governanceView = subView;
+  render();
+}
+
+/** The router's own sub-router: Roadmap draws real content (R882-2); the other four still say the PR that brings them (`GOVERNANCE_PLACEHOLDERS`, never an empty area). */
+function renderGovernance() {
+  renderGovernanceNav();
+  clear(mounts.canvas);
+  if (governanceView === 'roadmap') {
+    renderRoadmap();
+    return;
+  }
+  mounts.canvas.appendChild(said(GOVERNANCE_PLACEHOLDERS[governanceView]));
+}
+
+/**
+ * Roadmap (#882 R882-2): per-epic status grouping, no timeline (no
+ * start/due date exists anywhere in the data — the view's own copy says
+ * so). `lib/roadmap-model.mjs` decided all of it — grouping, state,
+ * divergences; this renders one loop over rows this page never re-derives.
+ */
+function renderRoadmap() {
+  const model = buildRoadmapModel(sectionOf(state, 'graph'), { project: state.meta?.project ?? null });
+  if (!model.ok) {
+    mounts.canvas.appendChild(said(`the roadmap could not be computed: ${model.reason}`));
+    return;
+  }
+  const { epics, unlinked } = model.value;
+  mounts.canvas.appendChild(el('p', 'canvas-summary', `${epics.length} epic(s), ${unlinked.length} unlinked node(s) — per-epic status only, no timeline is computed`));
+  for (const epic of epics) mounts.canvas.appendChild(renderRoadmapEpic(epic));
+  mounts.canvas.appendChild(renderRoadmapUnlinked(unlinked));
+}
+
+/** One roadmap row: its state chip, its title, its own source stamp (`row()`'s — a link when a project is known, the honest "no source was recorded" stamp when not; #882 cold review of PR 1, blocker), its own `stateReason` when the state could not be read (`roadmap-model.mjs`'s `safeStateOf` guard — #882 cold review of PR #1037, correction 1: a said reason, never a silent `unknown` mark with no explanation), its open blockers, and any `parent`-keyed divergence said inline rather than silently absorbed (R882-2, and correction 2's `nested-epic-not-supported` case). */
+function renderRoadmapRow(row, className) {
+  const node = el('div', className);
+  node.appendChild(el('span', `roadmap-state ${row.state.className}`, `${row.state.mark} ${row.state.label}`));
+  node.appendChild(el('span', 'roadmap-title', `#${row.number} ${row.title}`));
+  node.appendChild(renderSourceStamp(row.sourceStamp));
+  if (row.stateReason) node.appendChild(el('span', 'roadmap-state-reason', row.stateReason));
+  if (row.blockedBy.length > 0) node.appendChild(el('span', 'roadmap-blocked', `blocked by ${row.blockedBy.map((n) => `#${n}`).join(', ')}`));
+  for (const d of row.divergences) node.appendChild(el('span', 'roadmap-divergence', `${d.reason}${d.value !== null && d.value !== undefined ? `: #${d.value}` : ''}`));
+  return node;
+}
+
+function renderRoadmapEpic(epic) {
+  const wrap = el('div', 'roadmap-epic');
+  wrap.appendChild(renderRoadmapRow(epic, 'roadmap-row roadmap-epic-row'));
+  const children = el('div', 'roadmap-children');
+  if (epic.children.length === 0) {
+    children.appendChild(said('no children declared for this epic yet'));
+  } else {
+    for (const child of epic.children) children.appendChild(renderRoadmapRow(child, 'roadmap-row roadmap-child-row'));
+  }
+  wrap.appendChild(children);
+  return wrap;
+}
+
+/** Rule zero (lane-model.mjs's own "never filter a node away" discipline, applied here to epic grouping): a node with no epic parent is never dropped — it lands here, said, never silently absorbed. */
+function renderRoadmapUnlinked(unlinked) {
+  const wrap = el('div', 'roadmap-unlinked');
+  wrap.appendChild(el('h3', null, 'Unlinked'));
+  if (unlinked.length === 0) {
+    wrap.appendChild(said('every open node declares a real epic parent'));
+    return wrap;
+  }
+  for (const node of unlinked) wrap.appendChild(renderRoadmapRow(node, 'roadmap-row roadmap-child-row'));
+  return wrap;
 }
 
 /** Activating a node selects it and opens the drawer on its Spec tab (R881-8). */

@@ -8,13 +8,16 @@
   </head>
   <body>
     <!--
-      The shell, and only the shell: five mounts `app.js` renders into. No
+      The shell, and only the shell: six mounts `app.js` renders into. No
       markup here describes data, because every value on this page comes from
       the read model at runtime (R881-9 — a hard-coded row would be a second
       source of truth, and an empty one would read as "there is nothing here").
-      `#modes` is the one exception that is not data: the four mode ids and
-      labels are `lib/view-model.mjs`'s own table, so the buttons ARE the
-      code, not a second copy of it (#998 R998-2).
+      `#modes` and `#governance-nav` are the two exceptions that are not data:
+      the four mode ids/labels and the five governance sub-view ids/labels are
+      `lib/view-model.mjs`'s and `lib/governance-model.mjs`'s own tables, so
+      the buttons ARE the code, not a second copy of it (#998 R998-2, #882
+      R882-1). `#governance-nav` starts `hidden`: `app.js` shows it only while
+      the `governance` mode is active.
 
       No script from the network, no stylesheet from the network, no inline
       handler: `app.js` is loaded directly as an ES module and wires every
@@ -25,6 +28,7 @@
     <header id="status" class="status-bar"></header>
     <nav id="modes" class="modes" aria-label="Modes"></nav>
     <div id="banners" class="banners" role="status" aria-live="polite"></div>
+    <nav id="governance-nav" class="governance-nav" aria-label="Governance views" hidden></nav>
     <main id="canvas" class="canvas"></main>
     <aside id="drawer" class="drawer" hidden></aside>
     <script type="module" src="/app.js"></script>
