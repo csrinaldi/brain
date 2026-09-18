@@ -561,7 +561,7 @@ function renderGovernance() {
  * divergences; this renders one loop over rows this page never re-derives.
  */
 function renderRoadmap() {
-  const model = buildRoadmapModel(sectionOf(state, 'graph'));
+  const model = buildRoadmapModel(sectionOf(state, 'graph'), { project: state.meta?.project ?? null });
   if (!model.ok) {
     mounts.canvas.appendChild(said(`the roadmap could not be computed: ${model.reason}`));
     return;
@@ -572,11 +572,12 @@ function renderRoadmap() {
   mounts.canvas.appendChild(renderRoadmapUnlinked(unlinked));
 }
 
-/** One roadmap row: its state chip, its title, its open blockers, and any `parent`-keyed divergence said inline rather than silently absorbed (R882-2). */
+/** One roadmap row: its state chip, its title, its own source stamp (`row()`'s — a link when a project is known, the honest "no source was recorded" stamp when not; #882 cold review of PR 1, blocker), its open blockers, and any `parent`-keyed divergence said inline rather than silently absorbed (R882-2). */
 function renderRoadmapRow(row, className) {
   const node = el('div', className);
   node.appendChild(el('span', `roadmap-state ${row.state.className}`, `${row.state.mark} ${row.state.label}`));
   node.appendChild(el('span', 'roadmap-title', `#${row.number} ${row.title}`));
+  node.appendChild(renderSourceStamp(row.sourceStamp));
   if (row.blockedBy.length > 0) node.appendChild(el('span', 'roadmap-blocked', `blocked by ${row.blockedBy.map((n) => `#${n}`).join(', ')}`));
   for (const d of row.divergences) node.appendChild(el('span', 'roadmap-divergence', `${d.reason}${d.value !== null && d.value !== undefined ? `: #${d.value}` : ''}`));
   return node;

@@ -57,9 +57,15 @@ test('#882 R882-1/R882-2: the governance surface exists — the sub-nav is mount
   assert.match(APP_JS, /GOVERNANCE_PLACEHOLDERS\[/, 'the four sub-views not yet built must still say their own placeholder, never an empty area');
 });
 
+test('#882 cold review of PR 1 (blocker): a roadmap row applies the same sourceStamp helper the door uses — R882-1\'s row() is not a dead export', () => {
+  const fnMatch = APP_JS.match(/function renderRoadmapRow\([^)]*\) \{[\s\S]*?\n}\n/);
+  assert.ok(fnMatch, 'renderRoadmapRow function must exist in app.js');
+  assert.match(fnMatch[0], /renderSourceStamp\(row\.sourceStamp\)/, 'renderRoadmapRow must render row.sourceStamp through renderSourceStamp, never a bare #N with no stamp and no link');
+});
+
 test('#882: this PR does not draw them yet — decisions, anti-patterns, history and by-actor identifiers still do not exist in the page', () => {
   for (const [name, text] of [['app.js', APP_JS], ['index.html', INDEX_HTML]]) {
-    for (const forbidden of [/\bdecisionsview\b/i, /anti-?pattern/i, /\bby-?actor\b/i, /\bhistoryview\b/i]) {
+    for (const forbidden of [/\bdecisionsview\b/i, /\badrs?\b/i, /anti-?pattern/i, /\bby-?actor\b/i, /\bhistoryview\b/i]) {
       assert.ok(!forbidden.test(text), `${name} matched ${forbidden} — those views are #882's later PRs, not PR 1's`);
     }
   }
