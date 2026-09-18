@@ -267,18 +267,40 @@ export function parentFromProse(body) {
  * a block resolved the parent (its own ambiguity, if any, is already said via
  * `parseGraphBlock`'s `declarationDivergences`) or nothing was declared at all.
  *
+ * `divergence` (#967 PR E, tracker PR #1004 round-3 cold review) is the ONE
+ * fact `parent === null` alone erases: a `parent:` key that fails
+ * `PARENT_KEY_GRAMMAR` and two disagreeing prose `Parent:` lines both land on
+ * `parent: null` — the SAME value a body that never mentions a parent at all
+ * produces. A caller that only reads `.parent` cannot tell "nothing was
+ * declared" from "something was declared and could not be read" — exactly
+ * the distinction `base-branch.mjs`'s own header comment (line 18) already
+ * demands ("uncomputable, never a silent pass") but its `baseBranchRule`
+ * failed to make, because this reader gave it nothing to branch on. `null`
+ * when the parent resolved cleanly OR nothing was declared at all; otherwise
+ * `{key: 'parent', value, reason: 'parent-grammar'|'parent-ambiguous'}` —
+ * the SAME entry shape `declarationDivergences` already uses, for the block
+ * case lifted straight from it (filtered to `key === 'parent'`) rather than
+ * re-derived, and for the prose-only case built from `parentFromProse`'s own
+ * `ambiguousValue` (its ONLY divergence — a non-matching line says nothing,
+ * by design).
+ *
  * @param {string} body
- * @returns {{ parent: number|null, parentSource: 'block'|'prose'|null, ambiguousValue: string|null }}
+ * @returns {{ parent: number|null, parentSource: 'block'|'prose'|null, ambiguousValue: string|null,
+ *            divergence: {key:'parent', value:string, reason:'parent-grammar'|'parent-ambiguous'}|null }}
  */
 export function declaredParent(body) {
-  if (typeof body !== 'string') return { parent: null, parentSource: null, ambiguousValue: null };
+  if (typeof body !== 'string') return { parent: null, parentSource: null, ambiguousValue: null, divergence: null };
   const block = parseGraphBlock(body);
   if (block && block.ok !== false) {
-    return { parent: block.parent, parentSource: block.parentSource, ambiguousValue: null };
+    const divergence = (block.declarationDivergences ?? []).find((d) => d.key === 'parent') ?? null;
+    return { parent: block.parent, parentSource: block.parentSource, ambiguousValue: null, divergence };
   }
-  if (block?.ok === false) return { parent: null, parentSource: null, ambiguousValue: null };
+  if (block?.ok === false) return { parent: null, parentSource: null, ambiguousValue: null, divergence: null };
   const prose = parentFromProse(body);
-  return { parent: prose.parent, parentSource: prose.parentSource, ambiguousValue: prose.ambiguousValue };
+  const divergence = prose.ambiguousValue !== null
+    ? { key: 'parent', value: prose.ambiguousValue, reason: 'parent-ambiguous' }
+    : null;
+  return { parent: prose.parent, parentSource: prose.parentSource, ambiguousValue: prose.ambiguousValue, divergence };
 }
 
 /** Node states, in the order a reader cares about them. */

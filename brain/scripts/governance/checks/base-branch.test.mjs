@@ -204,6 +204,53 @@ test('base-branch: the parent issue body could not be read — uncomputable, nev
   assert.equal(r.uncomputable, true);
 });
 
+// ── a parent divergence is uncomputable, never a silent pass (PR E, round-3 ──
+// cold-review finding, tracker PR #1004): `declaredParent(issueBody).parent`
+// collapses a `parent-grammar` (malformed block key) and a `parent-ambiguous`
+// (two disagreeing prose `Parent:` lines) divergence into the SAME `null` a
+// body that never mentions a parent at all produces — line 84's old
+// `if (parent === null) return { pass: true }` could not tell them apart, so
+// an unreadable parent declaration passed untouched instead of failing closed.
+
+const SLICE_PARENT_GRAMMAR = ['```brain-graph/1', 'parent: abc', '```'].join('\n');
+const SLICE_PARENT_AMBIGUOUS = ['Parent: #878', 'Parent: #879'].join('\n');
+
+test('base-branch: a parent-grammar divergence (parent: abc) is uncomputable, never a silent pass', () => {
+  const r = baseBranchRule({
+    issueBody: SLICE_PARENT_GRAMMAR,
+    targetBranch: 'main',
+    defaultBranch: 'main',
+    headBranch: 'slice/whatever',
+  });
+  assert.equal(r.pass, false);
+  assert.equal(r.uncomputable, true);
+  assert.ok(r.reason.includes('parent-grammar'), `reason must name the divergence reason, got: ${r.reason}`);
+  assert.ok(r.reason.includes('abc'), `reason must name the offending value, got: ${r.reason}`);
+});
+
+test('base-branch: a parent-ambiguous divergence (two disagreeing Parent: lines) is uncomputable, never a silent pass', () => {
+  const r = baseBranchRule({
+    issueBody: SLICE_PARENT_AMBIGUOUS,
+    targetBranch: 'main',
+    defaultBranch: 'main',
+    headBranch: 'slice/whatever',
+  });
+  assert.equal(r.pass, false);
+  assert.equal(r.uncomputable, true);
+  assert.ok(r.reason.includes('parent-ambiguous'), `reason must name the divergence reason, got: ${r.reason}`);
+  assert.ok(r.reason.includes('878, 879'), `reason must name the offending value, got: ${r.reason}`);
+});
+
+test('base-branch: a clean body with no parent mentioned at all still passes untouched (the standing case)', () => {
+  const r = baseBranchRule({
+    issueBody: SLICE_NO_PARENT,
+    targetBranch: 'main',
+    defaultBranch: 'main',
+    headBranch: 'slice/whatever',
+  });
+  assert.deepEqual(r, { pass: true });
+});
+
 // ── mutation (R967-7 S9, the revert-proof): reverting this file alone turns ─────
 // exactly this file red. Proven by a static-import scan: no module other than
 // run-check.mjs (the one sanctioned wrapper, #340's rule against a second
