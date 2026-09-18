@@ -190,36 +190,50 @@ declared order) and sort by `id` within each scope.
 | {ok:false, reason}`, read through a new `status/history.mjs` (`gatherHistory
 Facts({root, _run})`, the same injected `_run` seam `release-debt.mjs`
 already uses — one more `git` call, not a new IO primitive): `commits` is the
-served branch's `git log --format='%H|%ai|%s' -n 200` (`prNumber` parsed from
-a trailing `(#N)` on the subject, matching this repo's own commit-message
-convention, `null` when absent — never fabricated) plus the branch's total
-commit count (`git rev-list --count HEAD`), so the page can say "N of TOTAL
-shown"; `tags` is `git tag --sort=-creatordate
---format='%(refname:short)|%(creatordate:iso-strict)'`. Either `git` call
-failing is this section's own `{ok:false, reason}` — never a partial commit
-list rendered as if it were the whole history. `lib/history-model.mjs`'s
-`buildHistoryModel({history, adrs})` merges three event kinds into one
-list, newest first: a `merge` event per commit (dated, its `prNumber` as a
-forge source when present, a plain git source otherwise), a `release` event
-per tag, and an `adr-amended` event per ADR amendment carrying a date
-(`adrs.value[].amendments[].date`). **Review verdicts are deliberately
-excluded from this model** (D-numbered decision in `design.md`): no field
-anywhere in the data carries a review round's timestamp (`prReviews`
-returns `{state, author, body}` only — `archive/881/design.md`'s D14 already
-established this for the Reviews tab), so a verdict cannot be placed on a
-real timeline without fabricating an order; the History view instead links to
-the existing Reviews mode rather than rendering a second, undated projection
-of the same rounds (the same "no second projection of the same values" ruling
+served branch's `git log --format='%H|%ai|%s' -n 200` (a trailing `(#N)` on
+the subject parsed into `citedRef: N`, `null` when absent — never
+fabricated); `tags` is `git tag --sort=-creatordate
+--format='%(refname:short)|%(creatordate:iso-strict)'`. This slice does not
+read the branch's total commit count — the page states the shown count
+only, never a claimed "N of TOTAL" the code does not compute. Either `git`
+call failing is this section's own `{ok:false, reason}` — never a partial
+commit list rendered as if it were the whole history. `lib/history-model.mjs`'s
+`buildHistoryModel({history, adrs, project})` merges three event kinds into
+one list, newest first: a `merge` event per commit (dated, its `citedRef`
+sourced to the forge when present, a plain git source otherwise), a
+`release` event per tag, and an `adr-amended` event per ADR amendment
+carrying a date (`adrs.value[].amendments[].date`). **Review verdicts are
+deliberately excluded from this model** (D-numbered decision in
+`design.md`): no field anywhere in the data carries a review round's
+timestamp (`prReviews` returns `{state, author, body}` only —
+`archive/881/design.md`'s D14 already established this for the Reviews
+tab), so a verdict cannot be placed on a real timeline without fabricating
+an order; the History view instead links to the existing Reviews mode
+rather than rendering a second, undated projection of the same rounds (the
+same "no second projection of the same values" ruling
 `archive/881/design.md`'s item 6 already made for the design's rejected
 `sources` tab).
 
-#### Scenario: a commit naming its PR becomes a sourced merge event
-- **WHEN** `history.value.commits` carries a commit whose subject ends `(#123)`
-- **THEN** the corresponding `merge` event's source is `{url: '<forge PR URL>'}`, rendered through `sourceStamp` as `[forge: #123]`
+**Amendment (fresh-context review of PR 4, blocker):** a trailing `(#N)` on
+a commit subject is this repository's own CITATION convention, not proof of
+a squash-merged PR — measured against the real log: of 200 commits, 147
+carry a trailing `(#N)`, and 17 of those resolve to `#882` itself, because
+this ticket's own unsquashed commits cite the driving issue that way. There
+is no textual signal that tells a squash suffix apart from a hand-written
+citation, so the model MUST NOT claim "PR" anywhere in its data or its
+rendered text. The parsed field is named `citedRef` (never `prNumber`), and
+a merge event's title says what the commit actually says — it CITES `#N` —
+never "PR #N". The link is still built and kept: issues and pull requests
+share one forge numbering, and the reference resolves to whichever the
+number actually is, whether or not it happens to be a pull request.
 
-#### Scenario: a commit with no PR suffix is still an event, sourced to git
+#### Scenario: a commit citing a number becomes a sourced merge event, never claiming "PR"
+- **WHEN** `history.value.commits` carries a commit whose subject ends `(#123)`
+- **THEN** the corresponding `merge` event carries `citedRef: 123`, is sourced to the forge reference (rendered through `sourceStamp` as `[forge: #123]`), and no word "PR" or field named `prNumber` appears anywhere in the event
+
+#### Scenario: a commit with no citation is still an event, sourced to git
 - **WHEN** a commit's subject carries no trailing `(#N)`
-- **THEN** the `merge` event still appears, sourced to `{sha}` (`[git: <sha7>]`), `prNumber: null` — never dropped, never guessed
+- **THEN** the `merge` event still appears, sourced to `{sha}` (`[git: <sha7>]`), `citedRef: null` — never dropped, never guessed
 
 #### Scenario: git history unreadable is the section's own reason
 - **WHEN** either the `git log` or the `git tag` read throws

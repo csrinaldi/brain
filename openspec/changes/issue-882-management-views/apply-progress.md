@@ -1,8 +1,8 @@
 # Apply progress — issue-882: the management views
 
 Delivery: chained PRs on the tracker `feature/issue-882-management-views`
-(feature-branch-chain). This file tracks PR 1, PR 2 and PR 3; PRs 4-5 are not
-started.
+(feature-branch-chain). This file tracks PR 1, PR 2, PR 3 and PR 4; PR 5 is
+not started.
 
 ## PR 1 — governance shell, shared row, Roadmap (R882-1, R882-2)
 
@@ -412,14 +412,134 @@ surface, any new gate, any score or ranking.
 
 `git status --short` is empty after all commits — nothing left uncommitted.
 
-### Next
-
-PR 4 (History, R882-5) is not started. It depends only on PR 1
-(`governance-model.mjs`'s sub-nav) plus a new `status/history.mjs` reader and
-a `snapshot.mjs` section addition — not on PR 2 or PR 3's own view modules.
-
 ### Merge onto the tracker (after PR 2, #1038)
 
 PR 3 was cut before PR 1's review fixes, so the tracker's version won each conflict with PR 3's own diff applied on top. The debt its own fresh review named was paid here: `forge-url.mjs` exists on the tracker now, so `buildAntiPatternsModel(section, {project})` stamps each cited ticket through `sourceStamp({url: issueUrl(project, n)})` — the same builder the roadmap rows use — and keeps today's bare `[forge: #N]` words when no project is known, rather than the roadmap's "no source was recorded" text, which would be wrong for a bare citation. The renderer draws one chip per citation instead of one joined text node, so a citation with a project behind it is individually clickable, and both governance renderers plus this one are pinned to `renderSourceStamp` by the shared scan test.
 
 RED 8/9 on the model (a project given must produce a real href) → GREEN 354/354 across the UI glob. Mutations: the model ignoring `project` → its test red; the renderer joining the stamps into one text node instead of chips → the scan test red (a first attempt that only disabled the branch left the scanned line in place and proved nothing — said here because a mutation that passes is not evidence). Both reverted.
+
+## PR 4 — History (R882-5) — DONE
+
+Branch: `feat/issue-882-pr4-history`, cut from PR 3's own local (pre-squash)
+head `2a27ab00`, worktree `/home/gandalf/IA/brain-issue-882-4`.
+
+### Commits (before the forward-merge)
+
+```
+110abd9c feat(status): the History view's read model — git log and tags, injected _run (#882)
+3ac5e8fc feat(status): wire the history section into buildSnapshot, additive (#882)
+fa4f0584 feat(ui): the History view's read model — merges/releases/ADR amendments, newest first (#882)
+75fa9500 feat(ui): draw the History view (#882)
+76af9158 chore(memory): record PR 4 of #882 — the History view
+49765589 docs(sdd): tick PR 4 tasks and record apply progress (#882)
+```
+
+### TDD Cycle Evidence
+
+| Unit | RED | GREEN | Mutation (turns red, then reverted) |
+|---|---|---|---|
+| T1a/T1b — `status/history.mjs` | `ERR_MODULE_NOT_FOUND` on the new test file (6 tests) | 6/6 pass | Loosened the `(#N)` trailing-anchor regex from `/\(#(\d+)\)\s*$/` to `/\(#(\d+)\)/` → 1/6 red (the mid-subject test); reverted, 6/6 green |
+| T2a/T2b — `snapshot.mjs` wiring | Added `s.history.ok`/`reason` assertions to the R879-2 baseline test plus a new dedicated `_run`-injected wiring test → 2/26 red (`s.history` undefined) | Wired `history: gatherHistoryFacts({root, _run: run})` into `buildSnapshot`'s return, plus a matching `renderSnapshotText` line → 26/26 green | Removed the `history:` key from `buildSnapshot`'s return object → 4/26 red; reverted, 26/26 green |
+| T3a/T3b — `lib/history-model.mjs` | `ERR_MODULE_NOT_FOUND` on the new test file (11 tests) | 11/11 pass | Pushed one extra `row({kind: 'review', ...})` event into the merged list → 5/11 red (the "no review kind" scan plus four assertions the extra event disturbed); reverted, 11/11 green |
+| T4 — `renderHistory` wiring | Removed `historyview` from the forbidden-identifier test, added a presence-proof test → 2/18 red | Wired `renderHistory`/`renderHistoryEvent`/`renderHistoryReviewsLink` into `renderGovernance`'s sub-router, `.history-*` CSS classes → 18/18 green | N/A this unit — wiring-only, D9 |
+
+### Full suite (once, before the forward-merge)
+
+`GIT_CONFIG_GLOBAL=/dev/null npm test` → **5899 pass / 0 fail** (baseline
+after PR 3's local pre-squash head: 5879 pass / 0 fail).
+
+### Counted diff (before the forward-merge)
+
+`git diff --numstat 2a27ab00...HEAD | rg -v '\.test\.mjs|openspec/|\.memory/'
+| awk '{a+=$1; d+=$2} END {print a+d}'` → **222** (plan estimate ~380, budget
+1000).
+
+### Fresh-context review before push: REVISE → fixed
+
+A fresh-context review of PR 4 returned REVISE with two blockers and two
+warnings, plus one open question. Fixed in order:
+
+1. **BLOCKER — a trailing `(#N)` is a citation, not a PR number.** Measured
+   against this repository's real log: of 200 commits, 147 carry a trailing
+   `(#N)`, and 17 of those resolve to `#882` — the issue, because this
+   chain's own unsquashed commits cite the driving issue that way. There is
+   no textual signal separating a squash suffix from a hand-written
+   citation. Renamed the field `prNumber` → `citedRef` throughout
+   `status/history.mjs`, `status/history.test.mjs`, `lib/history-model.mjs`
+   and `lib/history-model.test.mjs`; the rendered text and every doc/comment
+   now say "cites #N", never "PR #N". `spec.md`'s R882-5 gained an Amendment
+   naming this explicitly, the same way R882-6 already states the "PRs
+   merged" gap instead of approximating it, plus a scenario asserting no
+   event's text contains the word "PR". Mutation: restored the word "PR" (in
+   a comment reachable by the new scan) and a `prNumber` field on the merge
+   event → both scan tests red; reverted.
+2. **BLOCKER — `apply-progress.md`'s Deviation 1 and the memory record
+   falsely claimed `forge-url.mjs` "does not exist anywhere in this
+   codebase."** True only of the stale branch point this slice was cut
+   from — it shipped in PR 1 (#1037) and PR 3 already imports it on the
+   tracker. This section's own rewrite (above, and the merge commit) says
+   what was actually true. For the memory record: a direct in-place edit
+   of `.memory/records/2026-09-rec-5b341c1225525cea.jsonl`'s content was
+   tried first and committed, then caught by the full suite —
+   `real-store-roundtrip.integration.test.mjs`'s REQ-C4-1 failed
+   ("recomputed id 'rec-e9d5efb8cac6efc2' does not match the stored id"):
+   a record's id is a content hash, so hand-editing content in place
+   breaks it. Reverted that edit in a following commit and instead saved a
+   NEW record (`rec-a85afb2bcfe4d641`) with `--supersedes
+   rec-5b341c1225525cea`, the store's own correction mechanism.
+3. **WARNING — `history-model.mjs` hand-built its own
+   `` `https://github.com/${project}/pull/${n}` `` template.** Post-merge,
+   imports `prUrl` from `lib/forge-url.mjs` instead — one definition, not
+   two that can drift. Kept the `{sha}` fallback for a commit with no
+   citation. Pinned with a source-level test asserting `history-model.mjs`
+   contains no literal `https://github.com/`.
+4. **WARNING — `renderHistoryEvent` hand-built `el('span', 'source', ...)`,
+   dropping the "open ↗" chip every other governance row carries.** Now
+   calls `renderSourceStamp(event.sourceStamp)`, the same helper
+   `renderRoadmapRow`/`renderDecisionRow`/`renderAntiPatternRow` use.
+   `renderHistoryEvent` added to `views-owned.test.mjs`'s shared
+   `renderSourceStamp` scan alongside those three.
+5. **Open question — R882-5's prose asked for "N of TOTAL shown," which
+   `gatherHistoryFacts` never read.** Decision: dropped the phrase rather
+   than add an untested `git rev-list --count` call under strict TDD;
+   `spec.md` amended to say this slice states the shown count only.
+
+### Commits (the fresh-context-review round, after the forward-merge)
+
+```
+fca6d7b2 chore(merge): forward-merge the tracker (PR 1-3 squashed + cold-review fixes) into PR 4 (#882)
+4cacc75d fix(ui): History cites a reference, never asserts "PR" — cited link through forge-url.mjs, real source stamp (#882 cold review of PR 4)
+81945bf6 docs(memory): correct the PR 4 record's false forge-url.mjs claim (#882 cold review of PR 4) — REVERTED, see 285cb3bd
+285cb3bd fix(status): a citedRef fixture in snapshot.test.mjs still said prNumber, and revert a broken direct memory-record edit (#882)
+70bf426c docs(memory): record the corrected forge-url.mjs claim, superseding rec-5b341c1225525cea (#882 cold review of PR 4)
+```
+
+### Full suite (after the forward-merge and all fixes)
+
+`GIT_CONFIG_GLOBAL=/dev/null npm test` → **5915 pass / 0 fail** (up from
+5899 before the merge; the tracker's own PR 1-3 fixes plus this round's new
+scan tests account for the difference). `brain:repo:check` and
+`tokens.test.mjs` stayed green before every commit in this round.
+
+### Counted diff against the tracker (after the merge and all fixes)
+
+`git diff --numstat origin/feature/issue-882-management-views...HEAD | rg -v
+'\.test\.mjs|openspec/|\.memory/' | awk '{a+=$1; d+=$2} END {print a+d}'` →
+**241**.
+
+### Working tree
+
+`git status --short` is empty after all commits — nothing left uncommitted.
+
+### Next / coordination note
+
+A concurrent apply pass built PR 5 (By actor, R882-6) from PR 4's
+PRE-merge, pre-fix head (`49765589`) — before this branch's forward-merge
+and fresh-context-review fixes landed. PR 5's own record independently
+found and fixed the same `renderHistoryEvent`→`renderSourceStamp` defect
+(warning 4 here) and repeated this branch's now-corrected
+`forge-url.mjs`-does-not-exist claim (true only at that same stale cut
+point). Whoever integrates PR 5 onto this branch (or onto the tracker)
+needs to reconcile: PR 5's `history-model.mjs` still carries `prNumber`,
+not `citedRef`, and still hand-builds the forge URL rather than importing
+`prUrl` — this branch's fixes are not yet in PR 5's lineage.
