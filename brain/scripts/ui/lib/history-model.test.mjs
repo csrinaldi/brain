@@ -259,3 +259,8 @@ test('#1043 round 2, correction 3: capNote names what the total counts, and says
   assert.match(capNote({ requested: 200, reached: true, total: 512 }), /reachable from HEAD/, 'the sentence must say what the number counts');
   assert.equal(capNote({ requested: 200, reached: true, total: 200 }), 'the newest 200 commits; older commits are not listed', 'a total equal to the cap is no information — say the weaker, honest sentence');
 });
+
+test('#1043 round 3: a shallow checkout says so instead of quoting a count that understates the history', () => {
+  assert.match(capNote({ requested: 200, reached: true, total: 200, shallow: true }), /shallow checkout/);
+  assert.ok(!capNote({ requested: 200, reached: true, total: 200, shallow: true }).includes('of 200 reachable'), 'a shallow count must not be quoted as if it were the history');
+});

@@ -52,11 +52,18 @@ function reviewCountsByAuthor(reviewsSection) {
  * other degraded field this ticket's models produce (`driftWarnings`,
  * R882-3; the finding pattern R882-6 itself names). `reviewsSection` being
  * unreadable is THIS field's own reason, never the whole view's. */
+const NOT_ATTRIBUTABLE = 'not attributable: this name comes from the memory records and the forge never used it — the two namespaces are not reconciled, so a count here would be a guess';
+
 function reviewsPostedOf(reviewsSection, actor, counts) {
   if (!reviewsSection || typeof reviewsSection !== 'object' || reviewsSection.ok !== true) {
     return { ok: false, reason: reviewsSection?.reason ?? 'no reviews section was given to By actor' };
   }
-  return { ok: true, count: counts.get(actor) ?? 0, caveat: REVIEWS_CAVEAT };
+  // `counts` is keyed by the forge's own author logins. A name the forge never
+  // used has no count in this data, and `?? 0` would turn that absence into a
+  // claim — the same fabricated zero this file refuses for `prsMerged`, and
+  // the reason the namespaces note exists at all (#1043 round 3).
+  if (!counts.has(actor)) return { ok: false, reason: NOT_ATTRIBUTABLE };
+  return { ok: true, count: counts.get(actor), caveat: REVIEWS_CAVEAT };
 }
 
 /**

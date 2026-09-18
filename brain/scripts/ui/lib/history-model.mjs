@@ -127,6 +127,9 @@ export function capNote(cap) {
   // shallow or detached checkout is not the branch's history — so the sentence
   // says what the number counts rather than implying a project total. And a
   // total equal to the cap carries no information at all (#1043 round 2).
+  // A shallow clone's count is the fetched depth, not the history, so the
+  // sentence says that instead of quoting a number that understates it.
+  if (cap.shallow === true) return `the newest ${n} commits of a shallow checkout; how much history exists is not readable here`;
   return typeof cap.total === 'number' && cap.total > n
     ? `the newest ${n} commits of ${cap.total} reachable from HEAD`
     : `the newest ${n} commits; older commits are not listed`;

@@ -89,11 +89,22 @@ const COMMIT_LOG_CAP = 200;
 
 function readTotalCommitCount(run) {
   try {
+    // On a shallow clone this counts the fetched depth, not the branch's
+    // history, so the count alone would understate it with no sign. The
+    // shallow flag travels WITH the number rather than correcting it: what
+    // the number counts is the honest thing to say (#1043 round 3).
     const raw = run('git', ['rev-list', '--count', 'HEAD']);
     const n = Number.parseInt(String(raw ?? '').trim(), 10);
-    return Number.isFinite(n) ? n : null;
+    if (!Number.isFinite(n)) return { total: null, shallow: false };
+    let shallow = false;
+    try {
+      shallow = String(run('git', ['rev-parse', '--is-shallow-repository']) ?? '').trim() === 'true';
+    } catch {
+      shallow = false;
+    }
+    return { total: n, shallow };
   } catch {
-    return null;
+    return { total: null, shallow: false };
   }
 }
 
@@ -122,7 +133,7 @@ export function gatherHistoryFacts({ root, _run } = {}) {
     return { ok: false, reason: `git tag could not be read: ${err?.message ?? err}` };
   }
 
-  const cap = { requested: COMMIT_LOG_CAP, reached: commits.length >= COMMIT_LOG_CAP, total: readTotalCommitCount(run) };
+  const cap = { requested: COMMIT_LOG_CAP, reached: commits.length >= COMMIT_LOG_CAP, ...readTotalCommitCount(run) };
 
   return { ok: true, value: { commits, tags, cap } };
 }
