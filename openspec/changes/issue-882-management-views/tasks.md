@@ -60,23 +60,23 @@ push, a posted cold-review APPROVE.
 {"slice": 2, "claims": ["R882-3"], "files": ["brain/scripts/ui/lib/decisions-model.mjs", "brain/scripts/ui/static/app.js", "brain/scripts/ui/static/app.css", "brain/scripts/ui/static/views-owned.test.mjs"], "terminal_pr": "the tracker feature/issue-882-management-views -> main"}
 ```
 
-- [ ] T1a. `lib/decisions-model.test.mjs`: a readable ADR's full row; an
+- [x] T1a. `lib/decisions-model.test.mjs`: a readable ADR's full row; an
       unreadable ADR kept as its own row, sorted last; `driftWarnings`
       carries `homeOnly`/`filesOnly`/`unreadable` verbatim; `adrsSection.ok
       === false` passes its reason through regardless of `driftSection`.
       RED.
-- [ ] T1b. `lib/decisions-model.mjs`: `buildDecisionsModel(adrsSection,
+- [x] T1b. `lib/decisions-model.mjs`: `buildDecisionsModel(adrsSection,
       driftSection)`. Mutation: `issues` mislabeled as "driving issues" in a
       test string → the label-text assertion red; reverted (keeps the model
       honest about what the parser actually distinguishes).
-- [ ] T2. `static/app.js`: `renderDecisions` — the ADR table, drift warnings
+- [x] T2. `static/app.js`: `renderDecisions` — the ADR table, drift warnings
       inline beside it. `static/app.css`: decisions classes, existing token
       block only. `views-owned.test.mjs`: `decisionsview`-style identifier
       check flips from "forbidden" to "present, and roadmap/anti-pattern/
       by-actor/history still absent."
-- [ ] T3. `GIT_CONFIG_GLOBAL=/dev/null npm test` and
+- [x] T3. `GIT_CONFIG_GLOBAL=/dev/null npm test` and
       `npm run brain:repo:check` green; counted diff under 1000.
-- [ ] T4. `npm run memory:save -- "<title>" "<content>" --issue 882 --type decision`; stage only the record and `.memory/index.jsonl`.
+- [x] T4. `npm run memory:save -- "<title>" "<content>" --issue 882 --type decision`; stage only the record and `.memory/index.jsonl`.
 
 ## PR 3 — Anti-patterns (R882-4)
 
