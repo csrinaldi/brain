@@ -10,6 +10,11 @@
 // own domain instead of a github.com URL) is a follow-up ticket's job.
 // `change-route.mjs`'s `buildPrUrl` now delegates to `prUrl` below so there
 // is ONE definition, not two copies that can drift.
+//
+// Editorial (cold review of PR #1037): `issueUrl` widens this same debt from
+// PRs to issues — every roadmap row now stamps a github.com link too. Not
+// fixed here (out of this ticket's scope); #1035 owns making the forge host
+// come from the port for both builders at once.
 
 /** {project, number} -> the issue's URL, or a relative reference when no project is known — never a bare number, never a crash. */
 export function issueUrl(project, number) {
