@@ -107,8 +107,11 @@ push, a posted cold-review APPROVE.
 
 - [x] T1a. `status/history.test.mjs`: `gatherHistoryFacts` parses a fixture
       `git log`/`git tag` output into `{commits, tags}`; a commit whose
-      subject ends `(#123)` carries `prNumber: 123`; one without carries
-      `null`; either `_run` throwing is `{ok:false, reason}`. RED.
+      subject ends `(#123)` carries `citedRef: 123` — a CITATION, never
+      asserted as a PR number (fresh-context review of PR 4, blocker: this
+      repo's own log mixes squash suffixes and hand-written issue
+      citations with no textual signal telling them apart); one without
+      carries `null`; either `_run` throwing is `{ok:false, reason}`. RED.
 - [x] T1b. `status/history.mjs`: `gatherHistoryFacts({root, _run})`, same
       injected-`_run` seam `release-debt.mjs` uses. Mutation: the `(#N)`
       regex loosened to match mid-subject → the trailing-anchor test red.
@@ -120,22 +123,30 @@ push, a posted cold-review APPROVE.
 - [x] T2b. `status/snapshot.mjs`: wire `history` into `buildSnapshot`'s
       return. Mutation: `history` left out of the return object → the
       snapshot-shape test red.
-- [x] T3a. `lib/history-model.test.mjs`: a commit with a PR suffix becomes a
-      `merge` event sourced to `{url}`; one without, sourced to `{sha}`; a
-      tag becomes a `release` event; an ADR amendment with a date becomes an
-      `adr-amended` event; all three kinds merge newest-first; `history.ok
-      === false` passes its reason through; no verdict entry is ever
-      produced (scan the returned events for a `kind === 'review'` — none
-      exists). RED.
-- [x] T3b. `lib/history-model.mjs`: `buildHistoryModel({history, adrs})`.
-      Mutation: a verdict-shaped event accidentally included → the "no
-      review kind" scan test red; reverted.
-- [x] T4. `static/app.js`: `renderHistory` — the merged list, plus a plain
-      link to the `reviews` mode with the stated reason (no timestamp
-      exists for a round yet). `static/app.css`: history classes.
-      `views-owned.test.mjs` updated: `historyview`-style identifier now
-      present; the link to `reviews` mode is asserted by scan (no duplicate
-      review-round rendering inside the history pane).
+- [x] T3a. `lib/history-model.test.mjs`: a commit citing a number becomes a
+      `merge` event sourced to `{url}` (through `lib/forge-url.mjs`'s
+      `prUrl`, not a hand-built template — one definition, reused), and no
+      word "PR" or `prNumber` field appears anywhere in its text; one
+      without a citation, sourced to `{sha}`; a tag becomes a `release`
+      event; an ADR amendment with a date becomes an `adr-amended` event;
+      all three kinds merge newest-first; `history.ok === false` passes
+      its reason through; no verdict entry is ever produced (scan the
+      returned events for a `kind === 'review'` — none exists). RED.
+- [x] T3b. `lib/history-model.mjs`: `buildHistoryModel({history, adrs,
+      project})`, importing `prUrl` from `lib/forge-url.mjs` (ships on the
+      tracker since PR 1, #1037). Mutation: a verdict-shaped event
+      accidentally included → the "no review kind" scan test red;
+      reverted.
+- [x] T4. `static/app.js`: `renderHistory` — the merged list, each event's
+      `sourceStamp` rendered through the shared `renderSourceStamp` (the
+      "open ↗" chip every other governance row carries, not a bare
+      `el('span', 'source', ...)` — fresh-context review warning), plus a
+      plain link to the `reviews` mode with the stated reason (no
+      timestamp exists for a round yet). `static/app.css`: history
+      classes. `views-owned.test.mjs` updated: `historyview`-style
+      identifier now present, `renderHistoryEvent` added to the shared
+      `renderSourceStamp` scan; the link to `reviews` mode is asserted by
+      scan (no duplicate review-round rendering inside the history pane).
 - [x] T5. `GIT_CONFIG_GLOBAL=/dev/null npm test` and
       `npm run brain:repo:check` green; counted diff under 1000.
 - [x] T6. `npm run memory:save -- "<title>" "<content>" --issue 882 --type decision`; stage only the record and `.memory/index.jsonl`.

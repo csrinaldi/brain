@@ -11,14 +11,22 @@
 
 import { execFileSync } from 'node:child_process';
 
-/** A commit subject names its own PR only as a TRAILING `(#N)` — this repo's
- * own commit-message convention (matches this ticket's own merged commits).
- * A `(#N)` mid-subject is a citation, not the PR this commit landed through,
- * so the anchor is load-bearing, not decorative. */
-const PR_SUFFIX = /\(#(\d+)\)\s*$/;
+/** A trailing `(#N)` on a commit subject is a CITATION, not proof of a
+ * squash-merged PR (fresh-context review of PR 4, blocker): measured
+ * against this repository's own log, of 200 commits 147 carry a trailing
+ * `(#N)`, and 17 of those resolve to `#882` — the issue itself, because
+ * this ticket's own unsquashed commits cite the driving issue that way.
+ * There is no textual signal separating a squash suffix from a
+ * hand-written citation, so nothing downstream may assert "PR" from this
+ * alone. A `(#N)` mid-subject is a citation to something else entirely,
+ * not this commit's own reference, so the anchor is load-bearing. */
+const CITED_REF = /\(#(\d+)\)\s*$/;
 
-/** `git log --format='%H|%ai|%s'` output -> `{sha, date, subject, prNumber}`.
- * Splits on the first two `|` only — a subject itself may carry one. */
+/** `git log --format='%H|%ai|%s'` output -> `{sha, date, subject, citedRef}`.
+ * Splits on the first two `|` only — a subject itself may carry one.
+ * `citedRef` is the bare number a trailing `(#N)` names — an issue XOR a
+ * PR, whichever the number actually resolves to on the forge; never
+ * asserted as one or the other here. */
 export function parseCommitLog(text) {
   return String(text ?? '').split('\n').filter(Boolean).map((line) => {
     const i1 = line.indexOf('|');
@@ -26,8 +34,8 @@ export function parseCommitLog(text) {
     const sha = line.slice(0, i1);
     const date = line.slice(i1 + 1, i2);
     const subject = line.slice(i2 + 1);
-    const m = subject.match(PR_SUFFIX);
-    return { sha, date, subject, prNumber: m ? Number(m[1]) : null };
+    const m = subject.match(CITED_REF);
+    return { sha, date, subject, citedRef: m ? Number(m[1]) : null };
   });
 }
 

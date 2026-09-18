@@ -6,10 +6,15 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 import { buildHistoryModel } from './history-model.mjs';
+import { prUrl } from './forge-url.mjs';
 
-const commit = (over = {}) => ({ sha: 'aaa1111bbb', date: '2026-09-10 10:00:00 +0000', subject: 'feat(ui): x', prNumber: null, ...over });
+const SOURCE = readFileSync(fileURLToPath(new URL('./history-model.mjs', import.meta.url)), 'utf8');
+
+const commit = (over = {}) => ({ sha: 'aaa1111bbb', date: '2026-09-10 10:00:00 +0000', subject: 'feat(ui): x', citedRef: null, ...over });
 const tag = (over = {}) => ({ name: 'v1.4.0', date: '2026-09-01T00:00:00+00:00', ...over });
 const adr = (over = {}) => ({ ok: true, path: 'brain/project/decisions/adr-0001-a.md', title: 'A', amendments: [], ...over });
 
@@ -18,24 +23,26 @@ test('#882 R882-5: history.ok === false passes its reason straight through', () 
   assert.deepEqual(model, { ok: false, reason: 'git log could not be read: boom' });
 });
 
-test('#882 R882-5: a commit naming its PR becomes a merge event sourced to the forge PR URL, [forge: #N]', () => {
+test('#882 R882-5: a commit citing a number becomes a merge event sourced to the forge URL (through lib/forge-url.mjs\'s prUrl, not a hand-built template), [forge: #N] — never claiming "PR"', () => {
   const model = buildHistoryModel({
-    history: { ok: true, value: { commits: [commit({ prNumber: 123, subject: 'feat(ui): the History view (#123)' })], tags: [] } },
+    history: { ok: true, value: { commits: [commit({ citedRef: 123, subject: 'feat(ui): the History view (#123)' })], tags: [] } },
     adrs: { ok: true, value: [] },
     project: 'o/r',
   });
   assert.equal(model.ok, true);
   const [event] = model.value.events;
   assert.equal(event.kind, 'merge');
-  assert.equal(event.source, 'https://github.com/o/r/pull/123');
+  assert.equal(event.source, prUrl('o/r', 123), 'the URL is forge-url.mjs\'s own prUrl output, not a second hand-built copy');
   assert.equal(event.sourceStamp.label, '[forge: #123]');
   assert.equal(event.sourceStamp.href, 'https://github.com/o/r/pull/123');
   assert.equal(event.sourceStamp.kind, 'forge');
+  assert.ok(!JSON.stringify(event).includes('PR'), 'the event never claims "PR" anywhere in its own text');
+  assert.ok(!('prNumber' in event), 'no prNumber field — the field is citedRef');
 });
 
-test('#882 R882-5: a commit with no PR suffix is still an event, sourced to git — never dropped, never guessed', () => {
+test('#882 R882-5: a commit with no citation is still an event, sourced to git — never dropped, never guessed', () => {
   const model = buildHistoryModel({
-    history: { ok: true, value: { commits: [commit({ prNumber: null, sha: 'deadbeef00' })], tags: [] } },
+    history: { ok: true, value: { commits: [commit({ citedRef: null, sha: 'deadbeef00' })], tags: [] } },
     adrs: { ok: true, value: [] },
     project: 'o/r',
   });
@@ -45,9 +52,9 @@ test('#882 R882-5: a commit with no PR suffix is still an event, sourced to git 
   assert.equal(event.sourceStamp.href, null, 'a git sha never carries an href');
 });
 
-test('#882 R882-5: a commit naming its PR with no project known falls back to its git source — never a fabricated URL', () => {
+test('#882 R882-5: a commit citing a number with no project known falls back to its git source — never a fabricated URL', () => {
   const model = buildHistoryModel({
-    history: { ok: true, value: { commits: [commit({ prNumber: 123, sha: 'cafe000001' })], tags: [] } },
+    history: { ok: true, value: { commits: [commit({ citedRef: 123, sha: 'cafe000001' })], tags: [] } },
     adrs: { ok: true, value: [] },
     project: null,
   });
@@ -106,7 +113,7 @@ test('#882 R882-5: no review-verdict event is ever produced — a plain scan for
     history: {
       ok: true,
       value: {
-        commits: [commit({ prNumber: 1 }), commit({ prNumber: null })],
+        commits: [commit({ citedRef: 1 }), commit({ citedRef: null })],
         tags: [tag()],
       },
     },
@@ -119,7 +126,7 @@ test('#882 R882-5: no review-verdict event is ever produced — a plain scan for
 
 test('#882 R882-5: an unreadable adrs section degrades independently — merge/release events still render, adr-amended events are simply absent', () => {
   const model = buildHistoryModel({
-    history: { ok: true, value: { commits: [commit({ prNumber: null })], tags: [tag()] } },
+    history: { ok: true, value: { commits: [commit({ citedRef: null })], tags: [tag()] } },
     adrs: { ok: false, reason: 'brain/project/decisions could not be listed' },
   });
   assert.equal(model.ok, true, 'one degraded section never blanks the whole view');
@@ -133,4 +140,11 @@ test('#882 R882-5: an unreadable ADR row (adr.ok === false) inside a readable ad
     adrs: { ok: true, value: [{ ok: false, path: 'brain/project/decisions/adr-0002-b.md', reason: 'no title line' }] },
   });
   assert.deepEqual(model.value.events, []);
+});
+
+// ── fresh-context review of PR 4, warning: one URL definition, not two ──────
+
+test('#882 fresh-context review of PR 4, warning: history-model.mjs never hand-builds a github.com URL — lib/forge-url.mjs is the one place that literal lives', () => {
+  assert.ok(!SOURCE.includes('https://github.com/'), 'no literal https://github.com/ inside history-model.mjs — prUrl (lib/forge-url.mjs) is the only builder');
+  assert.match(SOURCE, /import\s*\{[^}]*prUrl[^}]*\}\s*from\s*['"]\.\/forge-url\.mjs['"]/, 'history-model.mjs must import prUrl from lib/forge-url.mjs');
 });

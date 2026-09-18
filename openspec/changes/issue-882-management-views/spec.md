@@ -48,23 +48,55 @@ no new global keybinding is claimed.
 
 ### R882-2: Roadmap — the epic graph grouped for real
 
-`lib/roadmap-model.mjs` MUST define `buildRoadmapModel(graphSection)`,
-grouping `graph.value.nodes` by epic: a node with `kind === 'epic'` becomes a
-roadmap row; every node whose `parent` equals that epic's number nests under
-it, carrying its roadmap state (`planned`/`in-flight`/`done`, from
-`node.roadmap`, `state-vocab.mjs`'s `stateOf`) and its `blockedBy` marks. A
-node with no epic parent — `parent === null`, or a declared `parent` that
-resolves to a node whose own `kind !== 'epic'` — lands in an `unlinked`
-bucket instead of being dropped or silently nested under a non-epic (rule
-zero; the same "never filter a node away" discipline `lane-model.mjs`'s `?`
-holding lane already holds for undeclared tracks). `graph.value
-.declarationDivergences` entries with `key === 'parent'` (`parent-grammar`,
-`parent-ambiguous`, `parent-not-epic`, per `epic-graph.mjs`) MUST be
-surfaced per node as an inline warning on that node's row, never silently
-absorbed into "unlinked" without saying why. The model MUST NOT compute a
-timeline (no start/due dates exist anywhere in the data): "roadmap" here is
-per-epic status grouping only, and the view's own copy says so. Determinism:
-the same graph, with `nodes` in any order, produces a byte-identical model.
+`lib/roadmap-model.mjs` MUST define `buildRoadmapModel(graphSection,
+{project} = {})`, grouping `graph.value.nodes` by epic: a node with
+`kind === 'epic'` becomes a roadmap row; every node whose `parent` equals
+that epic's number nests under it, carrying its roadmap state
+(`planned`/`in-flight`/`done`, from `node.roadmap`, `state-vocab.mjs`'s
+`stateOf`) and its `blockedBy` marks. A node with no epic parent —
+`parent === null`, or a declared `parent` that resolves to a node whose own
+`kind !== 'epic'` — lands in an `unlinked` bucket instead of being dropped
+or silently nested under a non-epic (rule zero; the same "never filter a
+node away" discipline `lane-model.mjs`'s `?` holding lane already holds for
+undeclared tracks). `graph.value.declarationDivergences` entries with
+`key === 'parent'` (`parent-grammar`, `parent-ambiguous`, `parent-not-epic`,
+per `epic-graph.mjs`) MUST be surfaced per node as an inline warning on that
+node's row, never silently absorbed into "unlinked" without saying why. The
+model MUST NOT compute a timeline (no start/due dates exist anywhere in the
+data): "roadmap" here is per-epic status grouping only, and the view's own
+copy says so. Determinism: the same graph, with `nodes` in any order,
+produces a byte-identical model.
+
+**Amendment (cold review of PR 1, blocker):** every row MUST go through
+`lib/governance-model.mjs`'s `row()` (R882-1's own shared entry shape,
+"reused by every one of the five view builders") and carry a real `source`
+when one is knowable — `{url: issueUrl(project, node.number)}`
+(`lib/forge-url.mjs`, the SAME builder `change-route.mjs`'s `buildPrUrl` now
+delegates to) when `project` is present, `source: null` —
+`sourceStamp`'s own honest "no source was recorded for this value" stamp —
+when it is not. `project` is `server.mjs`'s `buildMeta()` project string,
+threaded from `app.js`'s `state.meta?.project`, the same field
+`change-route.mjs` already reads to source a PR link (D14).
+
+**Amendment (cold review of PR #1037, correction 1):** `stateOf` throws by
+design on a `node.status` or a roadmap state `state-vocab.mjs`'s table does
+not know. `roadmapRow` MUST NOT let that throw escape `buildRoadmapModel` —
+one unreadable node must not blank the whole canvas (the empty-on-failure
+anti-pattern in its worst form). The row instead carries the `unknown`
+vocabulary entry as its `state` and the caught error's message as its own
+`stateReason`, the same guard `lib/lane-model.mjs`'s `stateAndMarks` already
+holds for this exact throw — every other row still draws.
+
+**Amendment (cold review of PR #1037, correction 2):** `epics` MUST stay
+FLAT — it is a list, not a tree. An epic whose own declared `parent`
+resolves to ANOTHER epic node is NOT nested under it (`childrenByEpic` only
+ever collects non-epic nodes; a real nested-epic tree, with arbitrary depth
+and cycles to guard against, is a bigger structural change than this
+ticket's "per-epic status grouping, no timeline" scope). The dropped
+parent-epic relation MUST NOT be silently absorbed either way: it is said on
+the child epic's own row as a `{key: 'parent', value: <parent's number>,
+reason: 'nested-epic-not-supported'}` divergence — the same shape and the
+same `roadmap-divergence` rendering `parent-not-epic` already uses.
 
 #### Scenario: an epic's declared children nest under it
 - **WHEN** a node declares `kind: epic` and three other nodes declare `parent: <that node>`
@@ -85,6 +117,14 @@ the same graph, with `nodes` in any order, produces a byte-identical model.
 #### Scenario: determinism under shuffled input
 - **WHEN** the same graph is given twice with `nodes` in different orders
 - **THEN** `buildRoadmapModel` returns a byte-identical model both times
+
+#### Scenario: an unknown node state is said, never thrown (cold review of PR #1037, correction 1)
+- **WHEN** one node's `status` or `roadmap.value.state` is a word `state-vocab.mjs`'s table does not know
+- **THEN** `buildRoadmapModel` still returns `{ok:true, ...}`; that node's own row carries the `unknown` state and a `stateReason` naming what could not be read; every other row draws unaffected
+
+#### Scenario: an epic declaring another epic as its parent is said, not silently dropped (cold review of PR #1037, correction 2)
+- **WHEN** a node declares `kind: epic` and its own `parent` resolves to another node that also declares `kind: epic`
+- **THEN** the child epic still gets its own top-level row in `epics` (never nested under the parent epic), carrying a `nested-epic-not-supported` divergence naming the parent it could not nest under
 
 ### R882-3: Decisions — the ADR table and its drift warnings
 
@@ -150,36 +190,50 @@ declared order) and sort by `id` within each scope.
 | {ok:false, reason}`, read through a new `status/history.mjs` (`gatherHistory
 Facts({root, _run})`, the same injected `_run` seam `release-debt.mjs`
 already uses — one more `git` call, not a new IO primitive): `commits` is the
-served branch's `git log --format='%H|%ai|%s' -n 200` (`prNumber` parsed from
-a trailing `(#N)` on the subject, matching this repo's own commit-message
-convention, `null` when absent — never fabricated) plus the branch's total
-commit count (`git rev-list --count HEAD`), so the page can say "N of TOTAL
-shown"; `tags` is `git tag --sort=-creatordate
---format='%(refname:short)|%(creatordate:iso-strict)'`. Either `git` call
-failing is this section's own `{ok:false, reason}` — never a partial commit
-list rendered as if it were the whole history. `lib/history-model.mjs`'s
-`buildHistoryModel({history, adrs})` merges three event kinds into one
-list, newest first: a `merge` event per commit (dated, its `prNumber` as a
-forge source when present, a plain git source otherwise), a `release` event
-per tag, and an `adr-amended` event per ADR amendment carrying a date
-(`adrs.value[].amendments[].date`). **Review verdicts are deliberately
-excluded from this model** (D-numbered decision in `design.md`): no field
-anywhere in the data carries a review round's timestamp (`prReviews`
-returns `{state, author, body}` only — `archive/881/design.md`'s D14 already
-established this for the Reviews tab), so a verdict cannot be placed on a
-real timeline without fabricating an order; the History view instead links to
-the existing Reviews mode rather than rendering a second, undated projection
-of the same rounds (the same "no second projection of the same values" ruling
+served branch's `git log --format='%H|%ai|%s' -n 200` (a trailing `(#N)` on
+the subject parsed into `citedRef: N`, `null` when absent — never
+fabricated); `tags` is `git tag --sort=-creatordate
+--format='%(refname:short)|%(creatordate:iso-strict)'`. This slice does not
+read the branch's total commit count — the page states the shown count
+only, never a claimed "N of TOTAL" the code does not compute. Either `git`
+call failing is this section's own `{ok:false, reason}` — never a partial
+commit list rendered as if it were the whole history. `lib/history-model.mjs`'s
+`buildHistoryModel({history, adrs, project})` merges three event kinds into
+one list, newest first: a `merge` event per commit (dated, its `citedRef`
+sourced to the forge when present, a plain git source otherwise), a
+`release` event per tag, and an `adr-amended` event per ADR amendment
+carrying a date (`adrs.value[].amendments[].date`). **Review verdicts are
+deliberately excluded from this model** (D-numbered decision in
+`design.md`): no field anywhere in the data carries a review round's
+timestamp (`prReviews` returns `{state, author, body}` only —
+`archive/881/design.md`'s D14 already established this for the Reviews
+tab), so a verdict cannot be placed on a real timeline without fabricating
+an order; the History view instead links to the existing Reviews mode
+rather than rendering a second, undated projection of the same rounds (the
+same "no second projection of the same values" ruling
 `archive/881/design.md`'s item 6 already made for the design's rejected
 `sources` tab).
 
-#### Scenario: a commit naming its PR becomes a sourced merge event
-- **WHEN** `history.value.commits` carries a commit whose subject ends `(#123)`
-- **THEN** the corresponding `merge` event's source is `{url: '<forge PR URL>'}`, rendered through `sourceStamp` as `[forge: #123]`
+**Amendment (fresh-context review of PR 4, blocker):** a trailing `(#N)` on
+a commit subject is this repository's own CITATION convention, not proof of
+a squash-merged PR — measured against the real log: of 200 commits, 147
+carry a trailing `(#N)`, and 17 of those resolve to `#882` itself, because
+this ticket's own unsquashed commits cite the driving issue that way. There
+is no textual signal that tells a squash suffix apart from a hand-written
+citation, so the model MUST NOT claim "PR" anywhere in its data or its
+rendered text. The parsed field is named `citedRef` (never `prNumber`), and
+a merge event's title says what the commit actually says — it CITES `#N` —
+never "PR #N". The link is still built and kept: issues and pull requests
+share one forge numbering, and the reference resolves to whichever the
+number actually is, whether or not it happens to be a pull request.
 
-#### Scenario: a commit with no PR suffix is still an event, sourced to git
+#### Scenario: a commit citing a number becomes a sourced merge event, never claiming "PR"
+- **WHEN** `history.value.commits` carries a commit whose subject ends `(#123)`
+- **THEN** the corresponding `merge` event carries `citedRef: 123`, is sourced to the forge reference (rendered through `sourceStamp` as `[forge: #123]`), and no word "PR" or field named `prNumber` appears anywhere in the event
+
+#### Scenario: a commit with no citation is still an event, sourced to git
 - **WHEN** a commit's subject carries no trailing `(#N)`
-- **THEN** the `merge` event still appears, sourced to `{sha}` (`[git: <sha7>]`), `prNumber: null` — never dropped, never guessed
+- **THEN** the `merge` event still appears, sourced to `{sha}` (`[git: <sha7>]`), `citedRef: null` — never dropped, never guessed
 
 #### Scenario: git history unreadable is the section's own reason
 - **WHEN** either the `git log` or the `git tag` read throws

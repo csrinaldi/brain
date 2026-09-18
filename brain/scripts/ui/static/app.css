@@ -182,6 +182,7 @@ body {
 .roadmap-unlinked h3 { margin: 0 0 6px; font-size: 13px; }
 .roadmap-title { flex: 1; }
 .roadmap-blocked { font-size: 11px; color: var(--warn); }
+.roadmap-state-reason { font-size: 11px; color: var(--warn); }
 .roadmap-divergence { font-size: 11px; padding: 1px 6px; border-radius: 4px; color: var(--divergence-fg); background: var(--divergence-bg); }
 .roadmap-state { font-size: 11px; padding: 1px 6px; border-radius: 4px; }
 .roadmap-state.state-planned { color: var(--state-planned-fg); background: var(--state-planned-bg); }

@@ -13,16 +13,26 @@
 // made for the design's rejected `sources` tab).
 
 import { row } from './governance-model.mjs';
+import { prUrl } from './forge-url.mjs';
 
-/** A commit's PR URL, built only when BOTH a project and a PR number are
- * known — never a fabricated link built from one alone. */
+/**
+ * A commit's cited-reference URL, built only when BOTH a project and a
+ * citation are known — never a fabricated link built from one alone.
+ * Built through `lib/forge-url.mjs`'s own `prUrl` (fresh-context review of
+ * PR 4, warning: one URL definition, not a second hand-built copy that can
+ * drift). A trailing `(#N)` is a CITATION, not proof of a PR (blocker, same
+ * review): this repo's own log mixes squash suffixes and hand-written
+ * issue citations with no textual signal telling them apart, so nothing
+ * here claims "PR" — the link is kept regardless, since issues and pull
+ * requests share one forge numbering and the reference resolves to
+ * whichever the number actually is. */
 function mergeSource(commit, project) {
-  if (project && commit.prNumber) return { url: `https://github.com/${project}/pull/${commit.prNumber}` };
+  if (project && commit.citedRef) return { url: prUrl(project, commit.citedRef) };
   return { sha: commit.sha };
 }
 
 function mergeEvent(commit, project) {
-  return row({ kind: 'merge', date: commit.date, title: commit.subject, prNumber: commit.prNumber, source: mergeSource(commit, project) });
+  return row({ kind: 'merge', date: commit.date, title: commit.subject, citedRef: commit.citedRef, source: mergeSource(commit, project) });
 }
 
 /** A tag carries no per-event provenance beyond its own name (already the
@@ -63,9 +73,9 @@ const byDateDesc = (a, b) => Date.parse(b.date) - Date.parse(a.date);
  * through — the merge/release events derive from it, so an unreadable
  * `history` fails the whole view. `adrs` degrades independently (see
  * `adrAmendedEvents`). `project` (an `owner/repo` string) is the only
- * source of the merge event's PR URL; with no project known, a
- * PR-numbered commit still becomes an event, sourced to git instead
- * (never a fabricated forge link).
+ * source of the merge event's forge URL; with no project known, a commit
+ * citing a number still becomes an event, sourced to git instead (never a
+ * fabricated forge link).
  *
  * @param {{history?: {ok:boolean, value?:{commits:Array, tags:Array}, reason?:string},
  *   adrs?: {ok:boolean, value?:Array, reason?:string}, project?: string|null}} opts

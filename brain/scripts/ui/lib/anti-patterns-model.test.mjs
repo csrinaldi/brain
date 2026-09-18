@@ -88,3 +88,20 @@ test('#882 R882-4: an unlistable scope is said beside the other scope\'s real ro
   assert.deepEqual(model.value.unlistable, unlistable);
   assert.equal(model.value.rows.length, 1, 'the core scope\'s real row is still present, not blanked by the project scope\'s unlistable state');
 });
+
+// #882 PR 3 merge onto the tracker: `forge-url.mjs` exists now (PR 1), so a
+// cited ticket becomes a real link instead of a hand-built `[forge: #N]`
+// string — the same builder the roadmap rows use, never a second copy.
+test('a cited ticket carries a real forge stamp when the served project is known, and today\'s bare text when it is not', () => {
+  const section = { ok: true, value: { entries: [{ ok: true, scope: 'core', id: 'evidence-reader', title: 'Evidence reader empty on failure', path: 'brain/core/anti-patterns/evidence-reader.md', issues: [94, 12] }], unlistable: [] } };
+
+  const withProject = buildAntiPatternsModel(section, { project: 'csrinaldi/brain' });
+  const [row] = withProject.value.rows;
+  assert.deepEqual(row.issueStamps.map((s) => s.label), ['[forge: #12]', '[forge: #94]']);
+  assert.equal(row.issueStamps[0].href, 'https://github.com/csrinaldi/brain/issues/12', 'a known project makes the citation clickable');
+
+  const without = buildAntiPatternsModel(section);
+  const [bare] = without.value.rows;
+  assert.deepEqual(bare.issueStamps.map((s) => s.label), ['[forge: #12]', '[forge: #94]'], 'the bare form keeps the same words');
+  assert.equal(bare.issueStamps[0].href, null, 'with no project there is no link to claim');
+});

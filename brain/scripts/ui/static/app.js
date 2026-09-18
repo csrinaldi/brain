@@ -581,7 +581,7 @@ function renderGovernance() {
  * divergences; this renders one loop over rows this page never re-derives.
  */
 function renderRoadmap() {
-  const model = buildRoadmapModel(sectionOf(state, 'graph'));
+  const model = buildRoadmapModel(sectionOf(state, 'graph'), { project: state.meta?.project ?? null });
   if (!model.ok) {
     mounts.canvas.appendChild(said(`the roadmap could not be computed: ${model.reason}`));
     return;
@@ -592,11 +592,13 @@ function renderRoadmap() {
   mounts.canvas.appendChild(renderRoadmapUnlinked(unlinked));
 }
 
-/** One roadmap row: its state chip, its title, its open blockers, and any `parent`-keyed divergence said inline rather than silently absorbed (R882-2). */
+/** One roadmap row: its state chip, its title, its own source stamp (`row()`'s — a link when a project is known, the honest "no source was recorded" stamp when not; #882 cold review of PR 1, blocker), its own `stateReason` when the state could not be read (`roadmap-model.mjs`'s `safeStateOf` guard — #882 cold review of PR #1037, correction 1: a said reason, never a silent `unknown` mark with no explanation), its open blockers, and any `parent`-keyed divergence said inline rather than silently absorbed (R882-2, and correction 2's `nested-epic-not-supported` case). */
 function renderRoadmapRow(row, className) {
   const node = el('div', className);
   node.appendChild(el('span', `roadmap-state ${row.state.className}`, `${row.state.mark} ${row.state.label}`));
   node.appendChild(el('span', 'roadmap-title', `#${row.number} ${row.title}`));
+  node.appendChild(renderSourceStamp(row.sourceStamp));
+  if (row.stateReason) node.appendChild(el('span', 'roadmap-state-reason', row.stateReason));
   if (row.blockedBy.length > 0) node.appendChild(el('span', 'roadmap-blocked', `blocked by ${row.blockedBy.map((n) => `#${n}`).join(', ')}`));
   for (const d of row.divergences) node.appendChild(el('span', 'roadmap-divergence', `${d.reason}${d.value !== null && d.value !== undefined ? `: #${d.value}` : ''}`));
   return node;
@@ -702,7 +704,7 @@ function renderDriftWarnings(driftWarnings) {
  * empty section).
  */
 function renderAntiPatterns() {
-  const model = buildAntiPatternsModel(sectionOf(state, 'antiPatterns'));
+  const model = buildAntiPatternsModel(sectionOf(state, 'antiPatterns'), { project: state.meta?.project });
   if (!model.ok) {
     mounts.canvas.appendChild(said(`the anti-patterns catalogue could not be computed: ${model.reason}`));
     return;
@@ -724,7 +726,13 @@ function renderAntiPatternRow(row) {
   wrap.appendChild(el('span', 'anti-pattern-scope', row.scope));
   wrap.appendChild(el('strong', 'anti-pattern-title', row.title));
   wrap.appendChild(renderSourceStamp(row.sourceStamp));
-  if (row.issues.length > 0) wrap.appendChild(el('p', 'anti-pattern-issues', row.issues.map((n) => `[forge: #${n}]`).join(', ')));
+  if (row.issueStamps.length > 0) {
+    // One chip per citation, not one joined text node: a citation whose project
+    // is known carries its own href, and a joined string could never be clicked.
+    const cited = el('p', 'anti-pattern-issues');
+    for (const stamp of row.issueStamps) cited.appendChild(renderSourceStamp(stamp));
+    wrap.appendChild(cited);
+  }
   return wrap;
 }
 
@@ -738,15 +746,16 @@ function renderAntiPatternsUnlistable(unlistable) {
 
 /**
  * History (#882 R882-5): merges, releases and ADR amendments, newest
- * first. `lib/history-model.mjs` decided all of it — the merge (the forge
- * PR URL when a commit names one and the served project is known, a plain
- * git source otherwise), the release and adr-amended events, the sort,
- * each event's own `sourceStamp` (R882-1's shared `row()` helper, reused a
- * fourth time); this renders one loop over events this page never
- * re-derives. Review verdicts are deliberately excluded from this model —
- * no field anywhere in the data carries a review round's timestamp, so
- * this pane links to the Reviews mode instead of rendering a second,
- * undated projection of the same rounds.
+ * first. `lib/history-model.mjs` decided all of it — the merge (cited to
+ * the forge URL when the commit names a reference and the served project
+ * is known, a plain git source otherwise — never asserting "PR", only
+ * "cites"), the release and adr-amended events, the sort, each event's own
+ * `sourceStamp` (R882-1's shared `row()` helper, reused a fourth time);
+ * this renders one loop over events this page never re-derives. Review
+ * verdicts are deliberately excluded from this model — no field anywhere
+ * in the data carries a review round's timestamp, so this pane links to
+ * the Reviews mode instead of rendering a second, undated projection of
+ * the same rounds.
  */
 function renderHistory() {
   const model = buildHistoryModel({
@@ -764,7 +773,7 @@ function renderHistory() {
   mounts.canvas.appendChild(renderHistoryReviewsLink());
 }
 
-/** One history event: its kind, its date, its title, and its own `sourceStamp` — a merge event's forge link when one exists, a git sha or an ADR's own path otherwise. */
+/** One history event: its kind, its date, its title, and its own `sourceStamp` (the same chip every other governance row carries — a merge event's forge link when it cites a reference, a git sha or an ADR's own path otherwise). */
 function renderHistoryEvent(event) {
   const wrap = el('div', 'history-event');
   wrap.appendChild(el('span', `history-kind history-kind-${event.kind}`, event.kind));
