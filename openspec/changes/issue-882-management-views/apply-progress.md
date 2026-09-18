@@ -1,8 +1,8 @@
 # Apply progress — issue-882: the management views
 
 Delivery: chained PRs on the tracker `feature/issue-882-management-views`
-(feature-branch-chain). This file tracks PR 1, PR 2 and PR 3; PRs 4-5 are not
-started.
+(feature-branch-chain). This file tracks PR 1, PR 2, PR 3 and PR 4; PR 5 is
+not started.
 
 ## PR 1 — governance shell, shared row, Roadmap (R882-1, R882-2)
 
@@ -279,8 +279,124 @@ surface, any new gate, any score or ranking.
 
 `git status --short` is empty after all commits — nothing left uncommitted.
 
+## PR 4 — History (R882-5) — DONE
+
+Branch: `feat/issue-882-pr4-history`, cut from PR 3's head `2a27ab00`,
+worktree `/home/gandalf/IA/brain-issue-882-4`.
+
+### Commits
+
+```
+110abd9c feat(status): the History view's read model — git log and tags, injected _run (#882)
+3ac5e8fc feat(status): wire the history section into buildSnapshot, additive (#882)
+fa4f0584 feat(ui): the History view's read model — merges/releases/ADR amendments, newest first (#882)
+75fa9500 feat(ui): draw the History view (#882)
+76af9158 chore(memory): record PR 4 of #882 — the History view
+```
+
+### TDD Cycle Evidence
+
+| Unit | RED | GREEN | Mutation (turns red, then reverted) |
+|---|---|---|---|
+| T1a/T1b — `status/history.mjs` | `ERR_MODULE_NOT_FOUND` on the new test file (6 tests) | 6/6 pass | Loosened the `(#N)` trailing-anchor regex from `/\(#(\d+)\)\s*$/` to `/\(#(\d+)\)/` → 1/6 red (the mid-subject test); reverted, 6/6 green |
+| T2a/T2b — `snapshot.mjs` wiring | Added `s.history.ok`/`reason` assertions to the R879-2 baseline test plus a new dedicated `_run`-injected wiring test → 2/26 red (`s.history` undefined) | Wired `history: gatherHistoryFacts({root, _run: run})` into `buildSnapshot`'s return, plus a matching `renderSnapshotText` line → 26/26 green | Removed the `history:` key from `buildSnapshot`'s return object → 4/26 red (the two history-specific tests plus `renderSnapshotText`'s own coverage of the new line); reverted, 26/26 green |
+| T3a/T3b — `lib/history-model.mjs` | `ERR_MODULE_NOT_FOUND` on the new test file (11 tests) | 11/11 pass (two rounds of test-fixture fixes along the way — see Deviations) | Pushed one extra `row({kind: 'review', ...})` event into the merged list → 5/11 red (the "no review kind" scan plus four other assertions the extra event's presence disturbed); reverted, 11/11 green |
+| T4 — `renderHistory` wiring (`app.js`, `app.css`, `views-owned.test.mjs`) | Removed `historyview` from the forbidden-identifier test, added a presence-proof test (`renderHistory`/`buildHistoryModel`/`switchToMode('reviews')`) and a "no review-kind branch" scan for `renderHistoryEvent` → 2/18 red | Wired `renderHistory`/`renderHistoryEvent`/`renderHistoryReviewsLink` into `app.js`'s `renderGovernance` sub-router, added the `.history-*` classes (existing `--line`/`--surface`/`--muted` tokens only, no new token) → 18/18 green | N/A this unit — the presence-proof test IS the RED/GREEN pair; a second destructive mutation over wiring-only code would just re-prove D9, already proven by T1-T3's own mutations |
+
+`renderHistory`/`renderHistoryEvent`/`renderHistoryReviewsLink` themselves
+carry no RED/GREEN cycle of their own (N/A, D9 — no DOM harness): wiring
+only, verified by the text-level scan above (`views-owned.test.mjs`) plus a
+trace against `history-model.test.mjs`'s already-covered contract, the same
+precedent PR 1-3's renderers used.
+
+### Focused test commands and results
+
+- `GIT_CONFIG_GLOBAL=/dev/null node --test brain/scripts/status/history.test.mjs` — 6/6 pass
+- `GIT_CONFIG_GLOBAL=/dev/null node --test brain/scripts/status/snapshot.test.mjs` — 26/26 pass
+- `GIT_CONFIG_GLOBAL=/dev/null node --test brain/scripts/ui/lib/history-model.test.mjs` — 11/11 pass
+- `GIT_CONFIG_GLOBAL=/dev/null node --test brain/scripts/ui/static/views-owned.test.mjs brain/scripts/ui/static/tokens.test.mjs brain/scripts/ui/static/app-source-guard.test.mjs` — 29/29 pass
+- `GIT_CONFIG_GLOBAL=/dev/null node --test brain/scripts/ui/static/tokens.test.mjs` — run before every commit, 4/4 pass each time
+- `npm run brain:repo:check` — run before every commit, clean each time
+
+### Full suite (run once, at the end)
+
+`GIT_CONFIG_GLOBAL=/dev/null npm test` — **5899 pass / 0 fail** (baseline
+after PR 3: 5879 pass / 0 fail; +20 new/net tests — 6 in
+`status/history.test.mjs`, 1 new dedicated wiring test in
+`status/snapshot.test.mjs`, 11 in `lib/history-model.test.mjs`, +2 net in
+`views-owned.test.mjs`, whose one forbidden-identifier test was replaced by
+two presence-proof tests and a by-actor-only forbidden test).
+
+### Counted diff
+
+`git diff --numstat 2a27ab00...HEAD | rg -v '\.test\.mjs|openspec/|\.memory/'
+| awk '{a+=$1; d+=$2} END {print a+d}'` → **222** (plan estimate ~380, budget
+1000).
+
+### Deviations from design
+
+1. **No `lib/forge-url.mjs` or exported `prUrl(project, number)` helper
+   exists anywhere in this codebase (verified by a full-repo search)** — the
+   apply prompt's stated reuse target for the merge event's forge URL was
+   factually wrong. The nearest precedent is `change-route.mjs`'s own
+   private, unexported `buildPrUrl(project, pr)`, a SERVER-side Node module
+   (`import { readFileSync } from 'node:fs'` at module scope) that cannot be
+   imported into browser-side `app.js` or a pure `ui/lib/**` module without
+   breaking D9's purity gate. The prompt's OTHER claim — that "the page
+   passes `state.meta?.project`" — checked out true:
+   `server.mjs`'s `buildMeta()` returns `{project, ...}`, sent on the `sync`
+   SSE frame, merged into `state.meta` by `frames.mjs`'s `applyFrame` (same
+   precedent `renderServedBranch(state.meta?.servedBranch...)` already uses).
+2. **`buildHistoryModel`'s signature is `{history, adrs, project}`, not the
+   literal `{history, adrs}` design.md's module map states.** `provenance.mjs`'s
+   `sourceStamp` requires a full `https://<host>/<owner>/<repo>/pull/<N>` URL
+   to render the `[forge: #N]` label `spec.md`'s own scenario demands — a
+   bare `prNumber` cannot produce that label, and neither `gatherHistoryFacts`
+   (per T1a/T1b) nor `buildHistoryModel` (per design.md) was given a project
+   input to build one. Extended `buildHistoryModel` with an optional third
+   `project` key (defaults to `null`) rather than adding a new module or
+   touching `change-route.mjs`: the URL-building is pure string templating
+   (no IO, no `node:` builtin), stays inside `history-model.mjs` — already an
+   allowed PR 4 file per the `brain-slice-scope` block — and a commit naming
+   a PR with no `project` known still becomes an event, sourced to git
+   instead (never a fabricated link built from one alone).
+3. **`gatherHistoryFacts` does not read `git rev-list --count HEAD`**, though
+   `spec.md`'s prose mentions "the branch's total commit count... so the page
+   can say 'N of TOTAL shown'." Neither T1a's RED test nor T3a/T4's own
+   descriptions call for a total-count field or its display; under strict
+   TDD (test-first), no untested git call was added. `renderHistory`'s own
+   summary line states the shown count (`${events.length} event(s)`) without
+   a claimed total — never a fabricated "out of N" figure the code does not
+   compute.
+4. **`GOVERNANCE_PLACEHOLDERS['history']` and `governance-model.test.mjs` are
+   both left untouched**, even though History now draws real content. This
+   continues PR 2's and PR 3's own established precedent for `decisions` and
+   `anti-patterns`: the table is not cleaned up per PR, never reachable once
+   `renderGovernance`'s router special-cases the view — `governance-model.mjs`
+   is not in PR 4's declared file list either.
+5. **A release event's `source` is `null`** (renders through `sourceStamp` as
+   `[no source was recorded for this value]`). Neither `spec.md` nor
+   `design.md` states a source for a release or adr-amended event beyond the
+   merge scenario's explicit `{url}`/`{sha}` pair; a tag carries no
+   per-event provenance beyond its own name (already the event's title), so
+   `source: null` was chosen over fabricating one (e.g. treating the tag name
+   itself as a git sha, which it is not).
+
+### Out of scope (unchanged from tasks.md)
+
+Tier 2 (#883), telemetry (#884), remote deployment (#885), "PRs merged" per
+actor, a real dated roadmap, forge identity binding (#981), any write
+surface, any new gate, any score or ranking — no event in this view is ever
+scored or sorted by anything but its own date (issue #882's own guard); the
+count beside the list is a plain count, never a rank.
+
+### Working tree
+
+`git status --short` is empty after all commits — nothing left uncommitted.
+
 ### Next
 
-PR 4 (History, R882-5) is not started. It depends only on PR 1
-(`governance-model.mjs`'s sub-nav) plus a new `status/history.mjs` reader and
-a `snapshot.mjs` section addition — not on PR 2 or PR 3's own view modules.
+PR 5 (By actor, R882-6) is not started. It depends only on PR 1
+(`governance-model.mjs`'s sub-nav) — not on PR 2, PR 3 or PR 4's own view
+modules — and finalizes `views-owned.test.mjs`'s forbidden-identifier test
+into a full presence proof for the whole governance surface.
