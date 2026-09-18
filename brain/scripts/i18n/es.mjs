@@ -352,6 +352,9 @@ export default {
   'memory.ship.failed':           '✗ el envío falló — {message}',
   'memory.ship.raced':            '✗ el envío falló — la ref del lane se movió durante esta corrida (raced); no se perdió nada, sus blobs se vuelven a juntar en la próxima corrida: {message}',
   'memory.ship.badHost':          '✗ el envío falló — el nombre de host produjo un slug de ref vacío o inválido: {message}',
+  'memory.ship.invokerMissing':   '✗ envío rechazado — pasá --invoker hook, sweep o manual; para correrlo a mano usá `npm run brain:memory:ship`.',
+  'memory.ship.invokerUnderTest': '✗ envío rechazado — NODE_TEST_CONTEXT está configurado; un test debe usar BRAIN_VCS_TEST_MODULE o --dry-run, nunca un --invoker a secas.',
+  'memory.ship.invokerInvalid':   '✗ envío rechazado — --invoker debe ser hook, sweep o manual; se recibió {value}.',
 
   // ── memory/cli.mjs — qué backend corrió realmente (issue #641) ───────────────
   'memory.backend.substituted': 'el binario `{from}` no está instalado acá, así que `{op}` corrió sobre el backend `{fallback}` (solo registros) — mismos registros, misma validación, sin backend requerido (ADR-0017). MEMORY_BACKEND no estaba seteado, así que no se pisó ninguna elección explícita; seteálo para fijar cualquiera de los dos backends.',

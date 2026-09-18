@@ -159,6 +159,25 @@ test('--json carries the outcome shape on stdout only', () => {
   assert.equal(parsed.dryRun, false);
 });
 
+// #1012: the guard's own decision is echoed on --json, so an e2e run that
+// only ever exercises the bypass path (BRAIN_VCS_TEST_MODULE) can still
+// prove a caller's --invoker marker survived the whole chain.
+test('#1012 --json carries invoker:null when no --invoker was declared (bypass excuses it here)', () => {
+  const { mainDir } = fixtureRepo({ withCandidate: false });
+  const run = runCli(mainDir, '--json');
+  assert.equal(run.status, 0, run.stderr);
+  const parsed = JSON.parse(run.stdout);
+  assert.equal(parsed.invoker, null);
+});
+
+test('#1012 --json carries invoker:\'manual\' when --invoker manual was declared', () => {
+  const { mainDir } = fixtureRepo({ withCandidate: false });
+  const run = runCli(mainDir, '--json', '--invoker', 'manual');
+  assert.equal(run.status, 0, run.stderr);
+  const parsed = JSON.parse(run.stdout);
+  assert.equal(parsed.invoker, 'manual');
+});
+
 test('--dry-run prints the plan and makes zero of ship\'s own network calls (push/fetch never happen)', () => {
   const { mainDir, originDir } = fixtureRepo({ withCandidate: true });
   const beforeOriginRefs = git(originDir, 'for-each-ref', 'refs/heads/memory/');
@@ -238,6 +257,33 @@ test('the op reads BRAIN_MEMORY_TOKEN exactly once (source guard) and threads on
   const reads = source.match(/process\.env\[MEMORY_TOKEN_ENV\]/g) ?? [];
   assert.equal(reads.length, 1, `BRAIN_MEMORY_TOKEN must be read exactly once via MEMORY_TOKEN_ENV, found ${reads.length} occurrence(s)`);
   assert.doesNotMatch(source, /shipLane\([^)]*identity\b(?!Bound)/, 'shipLane must never receive the raw token — only identityBound');
+});
+
+// #1012: the guard call must run before either credential-touching or
+// VCS-touching line in the ship block — a source-order check, since the
+// guard's own effect (an early exit) is otherwise indistinguishable from
+// "the guard runs last but nothing before it happened to fail".
+test('#1012 source-order guard: decideShipInvoker is called before both the token read and getVcs in the ship block', () => {
+  const source = readFileSync(CLI, 'utf8');
+  const shipBlockStart = source.indexOf('if (op === "ship")');
+  const shipBlockEnd = source.indexOf('if (op === "migrate-v1")');
+  const shipBlock = source.slice(shipBlockStart, shipBlockEnd);
+
+  const guardIdx = shipBlock.indexOf('decideShipInvoker(');
+  const tokenReadIdx = shipBlock.indexOf('process.env[MEMORY_TOKEN_ENV]');
+  const getVcsIdx = shipBlock.indexOf('.getVcs(');
+  // Cold review on #1012: the ship block's dynamic imports ran before the
+  // guard. Those modules have no top-level side effects today, but a refactor
+  // that moves work into one would slip past the two checks above.
+  const firstImportIdx = shipBlock.indexOf('await import(');
+
+  assert.notEqual(guardIdx, -1, 'the ship block must call decideShipInvoker');
+  assert.notEqual(tokenReadIdx, -1, 'the ship block must still read the token exactly once');
+  assert.notEqual(getVcsIdx, -1, 'the ship block must still reference getVcs exactly once');
+  assert.notEqual(firstImportIdx, -1, 'the ship block must still load its modules dynamically');
+  assert.ok(guardIdx < firstImportIdx, 'the guard must run before the ship block loads any module');
+  assert.ok(guardIdx < tokenReadIdx, 'the guard must run before the token is ever read');
+  assert.ok(guardIdx < getVcsIdx, 'the guard must run before getVcs is ever reached');
 });
 
 test('C1 (cold review) guard: runCli() always sets BRAIN_VCS_TEST_MODULE — combined with the source guard below (getVcs gated behind the ternary\'s false branch), no test in this file that goes through runCli() can ever reach the real getVcs()', () => {
@@ -600,5 +646,7 @@ test('#921 — brain:memory:ship prints memory.collect.worktreeSkipped on stderr
 
 test('brain:memory:ship resolves from package.json, beside the other memory:* scripts', () => {
   const pkg = JSON.parse(readFileSync(join(HERE, '../../../package.json'), 'utf8'));
-  assert.equal(pkg.scripts['memory:ship'], 'node ./brain/scripts/memory/cli.mjs ship');
+  // #1012: the manual invoker declares itself at the script level — every
+  // caller of cli.mjs ship must pass a marker, including this one.
+  assert.equal(pkg.scripts['memory:ship'], 'node ./brain/scripts/memory/cli.mjs ship --invoker manual');
 });
