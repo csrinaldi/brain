@@ -9,6 +9,8 @@
 // all is its own said reason beside the OTHER scope's real rows, never
 // rendered as "zero anti-patterns in that scope."
 
+import { issueUrl } from './forge-url.mjs';
+import { sourceStamp } from './provenance.mjs';
 import { row } from './governance-model.mjs';
 
 /** `core` before `project` — ANTI_PATTERN_DIRS' own declared order
@@ -36,9 +38,18 @@ const byScopeThenId = (a, b) => {
  * independent of whatever the reader already guaranteed. An unreadable
  * entry is kept in place, `{ok:false, path, scope, reason}` — no `id` to
  * sort by (rule zero: never dropped, sorted last within its own scope). */
-function antiPatternRow(entry) {
+function antiPatternRow(entry, project) {
   if (!entry.ok) return { ok: false, path: entry.path, scope: entry.scope, reason: entry.reason };
+  // A cited ticket is a bare number in the catalogue's prose, so the stamp it
+  // deserves depends on whether the page knows which project is served:
+  // `issueUrl` (the SAME builder the roadmap rows use — #882 PR 1) makes it a
+  // real link, and with no project the words stay exactly as they were rather
+  // than claiming a link this view cannot back.
+  const issueStamps = [...entry.issues].sort((a, b) => a - b).map((n) => (project
+    ? sourceStamp({ url: issueUrl(project, n) })
+    : { label: `[forge: #${n}]`, href: null, kind: 'forge' }));
   return row({
+    issueStamps,
     source: { path: entry.path },
     id: entry.id,
     title: entry.title,
@@ -61,11 +72,11 @@ function antiPatternRow(entry) {
  *
  * @param {{ok:boolean, value?:{entries:Array, unlistable:Array}, reason?:string}} antiPatternsSection
  */
-export function buildAntiPatternsModel(antiPatternsSection) {
+export function buildAntiPatternsModel(antiPatternsSection, { project } = {}) {
   if (!antiPatternsSection || typeof antiPatternsSection !== 'object') return { ok: false, reason: 'no anti-patterns section was given' };
   if (antiPatternsSection.ok !== true) return { ok: false, reason: antiPatternsSection.reason };
 
   const { entries = [], unlistable = [] } = antiPatternsSection.value ?? {};
-  const rows = [...entries].map(antiPatternRow).sort(byScopeThenId);
+  const rows = [...entries].map((entry) => antiPatternRow(entry, project)).sort(byScopeThenId);
   return { ok: true, value: { rows, unlistable } };
 }

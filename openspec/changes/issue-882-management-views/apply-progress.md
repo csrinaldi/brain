@@ -18,7 +18,19 @@ dc183daf feat(ui): the Roadmap view's read model — epics grouped, unlinked rul
 0d02e0e8 feat(ui): governance becomes a real mode with its own sub-router (#882)
 ff052ba5 feat(ui): draw the governance sub-nav and the Roadmap view (#882)
 7b9876c9 chore(memory): record PR 1 of #882 — governance shell, shared row, Roadmap
+3827a3e0 docs(sdd): tick PR 1 tasks and record apply progress (#882)
+bda16bea feat(ui): forge-url.mjs — the one place an issue/PR number becomes a URL (#882)
+2db66977 refactor(ui): change-route.mjs's buildPrUrl delegates to forge-url.mjs (#882)
+fe56dc22 fix(ui): Roadmap rows go through row() and carry a real source (#882 cold review blocker)
+464de455 fix(ui): wire the Roadmap row's source stamp, restore the adrs guard (#882 cold review)
+288192a8 docs(sdd): append fresh-context review fixes to PR 1 apply progress (#882)
+5af54910 fix(ui): an unknown roadmap state is said, never thrown (#882 cold review #1037 correction 1)
+dca0271d docs(ui): spec.md R882-2 amendments for corrections 1/2, forge-url.mjs editorial note (#882 cold review #1037)
 ```
+
+Commits bda16bea..288192a8 are the fresh-context review's fixes (see
+"Fresh-context review before push" below). Commits 5af54910..dca0271d are
+the cold review of PR #1037's fixes (see "Cold review of PR #1037" below).
 
 ### TDD Cycle Evidence
 
@@ -39,40 +51,38 @@ precedent #998's PR 2-6 renderers used.
 
 - `GIT_CONFIG_GLOBAL=/dev/null node --test brain/scripts/ui/lib/governance-model.test.mjs` — 4/4 pass
 - `GIT_CONFIG_GLOBAL=/dev/null node --test brain/scripts/ui/lib/roadmap-model.test.mjs` — 5/5 pass
-- `GIT_CONFIG_GLOBAL=/dev/null node --test brain/scripts/ui/lib/view-model.test.mjs brain/scripts/ui/static/views-owned.test.mjs` — 23/23 pass
+- `GIT_CONFIG_GLOBAL=/dev/null node --test brain/scripts/ui/lib/view-model.test.mjs brain/scripts/ui/static/views-owned.test.mjs` — 24/24 pass (corrected from an earlier miscount of 23/23 — see "Fresh-context review before push" below)
 - `GIT_CONFIG_GLOBAL=/dev/null node --test brain/scripts/ui/static/*.test.mjs brain/scripts/ui/lib/*.test.mjs` — 214/214 pass (includes `source-guard.test.mjs`, `app-source-guard.test.mjs`, `tokens.test.mjs`)
 - `GIT_CONFIG_GLOBAL=/dev/null node --test brain/scripts/ui/static/tokens.test.mjs` — run before every commit, 4/4 pass each time
 - `npm run brain:repo:check` — run before every commit, clean each time
 
 ### Full suite (run once, at the end)
 
-`GIT_CONFIG_GLOBAL=/dev/null npm test` — **5862 pass / 0 fail** (baseline on
-`main` today: 5852 pass / 0 fail; +10 new tests — 4 in
-`governance-model.test.mjs`, 5 in `roadmap-model.test.mjs`, +1 net in
-`views-owned.test.mjs`, whose one forbidden-identifier test was replaced by
-two presence-proof tests).
+`GIT_CONFIG_GLOBAL=/dev/null npm test` — **5870 pass / 0 fail** (baseline on
+`main` today: 5852 pass / 0 fail; +18 new tests over the two apply passes —
+4 in `governance-model.test.mjs`, 8 in `roadmap-model.test.mjs` (5 original
++ 3 from the cold-review fix), +2 net in `views-owned.test.mjs` (one
+forbidden-identifier test replaced by two presence-proof tests, plus one
+more added by the cold-review fix), 4 in the new `forge-url.test.mjs`).
 
 ### Counted diff
 
 `git diff --numstat origin/feature/issue-882-management-views...HEAD | rg -v
 '\.test\.mjs|openspec/|\.memory/' | awk '{a+=$1; d+=$2} END {print a+d}'` →
-**308** (plan estimate ~360, budget 1000).
+**359** (plan estimate ~360, budget 1000; was 308 before the cold-review
+fixes).
 
 ### Deviations from design
 
-1. **Roadmap rows carry no `sourceStamp`, unlike `governance-model.mjs`'s
-   `row()` helper.** R882-1 says `row()` is "reused by every one of the five
-   view builders." Graph nodes (`epic-graph.mjs`) carry no per-node file
-   path or forge URL — unlike ADR rows (R882-3) or anti-pattern rows
-   (R882-4), which do read a real file. Rather than fabricate a source
-   (e.g. a made-up `{path: 'the graph'}`), Roadmap follows `lane-model.mjs`'s
-   own precedent: the existing `map` mode's node boxes carry no per-node
-   `sourceStamp` chip either — the whole `graph` section IS the source, said
-   once via the degradation band when the section fails
-   (`renderRoadmap`'s own `said(...)` branch), the same posture `renderLanes`
-   already holds. `row()` remains available and will be used by PR 2
-   (Decisions) and PR 3 (Anti-patterns), which do have a real per-row file
-   path.
+1. ~~**Roadmap rows carry no `sourceStamp`, unlike `governance-model.mjs`'s
+   `row()` helper.**~~ **RESOLVED — see "Fresh-context review before push"
+   below.** This deviation was the review's blocker: it followed
+   `lane-model.mjs`'s map-view precedent (no per-node stamp) instead of
+   R882-1's own "`row()` is reused by every one of the five view builders."
+   A fresh-context reviewer correctly rejected that precedent — the map mode
+   is not one of R882-1's five view builders, and issue #882's acceptance 2
+   requires every row to link to its source. Fixed: every roadmap row now
+   goes through `row()` and carries a real issue URL when a project is known.
 2. **A test-fixture bug, not an implementation bug, found and fixed during
    T2's GREEN step.** The `parent-not-epic` scenario's first draft asserted
    `unlinked` contained only the child node (`[2]`); the parent node (`#1`,
@@ -89,6 +99,123 @@ two presence-proof tests).
    content already reflects the fully-finished PR 1 state (commits,
    diff count, test counts) regardless of commit order. A separate
    `docs(sdd)` commit follows with the tick and this file.
+
+### Fresh-context review before push: REVISE → fixed
+
+A fresh-context review of PR 1 before push returned REVISE — one blocker,
+one warning, one minor. All three fixed, in the four commits listed above.
+
+1. **BLOCKER — Roadmap rows shipped with no provenance.** `roadmap-model.mjs`
+   defined its own row shape and never called `governance-model.mjs`'s
+   `row()`; `app.js` rendered `#N title` as plain text, no stamp, no link.
+   R882-1 says `row()` is "reused by every one of the five view builders"
+   and issue #882's acceptance 2 requires every row to link to its source.
+   The reviewer's own premise check found neither `Reviews` nor `SDD` mode
+   stamps a forge URL today either — no existing precedent either way — so
+   this needed building correctly here, not deferred. Fixed:
+   - New pure `brain/scripts/ui/lib/forge-url.mjs` (`issueUrl`, `prUrl`) —
+     the one place an issue/PR number becomes a forge URL. `change-route.mjs`'s
+     pre-existing `buildPrUrl` now delegates to `prUrl` so there is one
+     definition, not two.
+   - `buildRoadmapModel(graphSection, {project} = {})` — a new optional
+     `project` argument, documented as an amendment in `spec.md` R882-2. Every
+     row now goes through `row()` and sources to `{url: issueUrl(project,
+     node.number)}` when `project` is known, `source: null` (`sourceStamp`'s
+     own honest "no source was recorded" stamp) when it is not.
+   - `app.js` passes `state.meta?.project` (the same field `server.mjs`'s
+     `buildMeta()` already exposes and `change-route.mjs` already reads for
+     the drawer's PR links) and `renderRoadmapRow` now renders
+     `row.sourceStamp` through the existing `renderSourceStamp` helper.
+   - Tests: `forge-url.test.mjs` (4 tests, both branches of both builders);
+     `roadmap-model.test.mjs` gained 3 tests (sourced-with-project,
+     unsourced-without-project, epic row sourced too); `views-owned.test.mjs`
+     gained a scan asserting `renderRoadmapRow` applies
+     `renderSourceStamp(row.sourceStamp)`. Each unit's own mutation is in the
+     TDD Cycle Evidence above (T1/T2/T3/T4 numbering continues: this is work
+     beyond T1-T6, done as its own RED→GREEN→mutation cycle per unit, not
+     reusing PR 1's original task numbers).
+2. **WARNING — the rewritten `views-owned.test.mjs` dropped the
+   `/\badrs?\b/i` forbidden-identifier pattern with no replacement**, so
+   nothing would have caught Decisions-view text leaking in ahead of PR 2.
+   Fixed: restored `/\badrs?\b/i` alongside the other four forbidden patterns
+   in the "this PR does not draw them yet" test.
+3. **MINOR — `apply-progress.md` claimed 23/23 for the `view-model.test.mjs`
+   + `views-owned.test.mjs` pair; the real count at that point was 24/24**
+   (T4 added a second presence test — the original count was written before
+   that addition was accounted for). Corrected above to 24/24, with a note
+   that it is now 25/25 after this review round's own added test.
+
+Full suite after these fixes: 5870 pass / 0 fail (was 5862 before this
+round). Counted diff after these fixes: 359 (was 308 before). Every gate
+(`brain:repo:check`, `tokens.test.mjs`) stayed green before each of the four
+fix commits, same as PR 1's original six.
+
+### Cold review of PR #1037 (head 288192a8): APPROVE with two corrections, both fixed
+
+The cold review of PR #1037 (the fresh-context-review-fixed head, `288192a8`)
+returned APPROVE with two corrections and one editorial. Both corrections
+fixed, in commits `5af54910` and `dca0271d`; the editorial addressed as a
+one-sentence comment, no behavior change.
+
+1. **Correction 1 — `roadmapRow` called `stateOf(node)` directly, which
+   THROWS on an unknown `node.status` or an unmapped roadmap state**
+   (`state-vocab.mjs`), and `buildRoadmapModel` had no guard: one such node
+   would throw out of `renderRoadmap()` inside `render()` and blank the
+   whole governance canvas — empty-on-failure in its worst form. Fixed per
+   the reviewer's own recommendation: a new `safeStateOf(node)` catches the
+   throw and falls back to the `unknown` vocabulary entry, carrying the
+   caught message as the row's own `stateReason` — the same guard
+   `lane-model.mjs`'s `stateAndMarks` already holds for this exact throw.
+   The rest of the rows draw unaffected. Wired all the way to the screen:
+   `app.js`'s `renderRoadmapRow` renders `row.stateReason` (a new
+   `.roadmap-state-reason` class, `var(--warn)`, no new token) so the said
+   reason is not left unused in the model. Tests: `roadmap-model.test.mjs`
+   gained 2 tests (unknown status, unmapped roadmap state — both prove
+   `model.ok === true` and the bad row's own `stateReason`, while a sibling
+   good row is unaffected); `views-owned.test.mjs` gained a scan asserting
+   `renderRoadmapRow` reads `row.stateReason`. `spec.md` R882-2 gained an
+   amendment paragraph and a new scenario. Mutation: reverted `roadmapRow`
+   to call `stateOf(node)` directly (no guard) → both new model tests failed
+   via the exact same thrown error the reviewer described; reverted, green.
+   A second mutation removed the `row.stateReason` rendering in `app.js` →
+   the new scan test red; reverted, green.
+2. **Correction 2 — an epic whose `parent` is another epic was listed flat
+   with the parent link silently dropped**, because `childrenByEpic` only
+   ever collects non-epic nodes. Decided (recommendation 1 of the two the
+   reviewer offered): keep `epics` FLAT — it stays a list, not a tree, since
+   a real nested-epic structure (arbitrary depth, cycles to guard against)
+   is a bigger change than this ticket's "per-epic status grouping, no
+   timeline" scope — and SAY the dropped relation as a
+   `{key: 'parent', value: <parent's number>, reason:
+   'nested-epic-not-supported'}` divergence on the child epic's own row,
+   reusing the exact shape and rendering `parent-not-epic` already has. Said
+   why in `roadmap-model.mjs`'s own module-header comment and in a new
+   `spec.md` R882-2 amendment + scenario. Test: `roadmap-model.test.mjs`
+   gained 1 test (an epic declaring another epic as `parent` still gets its
+   own top-level row, carrying the divergence; the parent epic's own row
+   carries none). Mutation: restored the silent drop (bypassed
+   `epicParentDivergence`) → the new test red (asserted `[]` where the
+   divergence should be); reverted, green.
+   - **Implementation note**: both corrections' `roadmap-model.mjs` code and
+     tests were authored together before being split into commits, so
+     `5af54910` (titled "correction 1") actually carries BOTH corrections'
+     implementation; correction 2's own mutation (above) was run and
+     verified independently regardless of that commit-boundary mislabel.
+     `spec.md`'s amendments for both corrections landed together in the
+     following commit, `dca0271d`.
+3. **Editorial (not fixed here, ticket already exists)** — `forge-url.mjs`'s
+   `https://github.com/` literal now stamps a github.com link for every
+   roadmap row too, widening the platform-agnostic debt from PRs to issues.
+   Added one sentence to `forge-url.mjs`'s header comment naming #1035 as
+   the owner of fixing both builders' forge-host literal at once; no
+   behavior change.
+
+Full suite after these fixes: 5874 pass / 0 fail (was 5870 before this
+round; baseline main: 5852). Counted diff after these fixes: 412 (was 359
+before; plan estimate ~360, budget 1000 for this tier). UI test-file glob
+count unchanged at 31 (no new test files this round, only existing ones
+extended). `brain:repo:check` and `tokens.test.mjs` stayed green before
+every commit in this round.
 
 ## PR 2 — Decisions (R882-3)
 
@@ -177,6 +304,12 @@ after PR 1: 5862 pass / 0 fail; +8 new tests — 7 in
 Tier 2 (#883), telemetry (#884), remote deployment (#885), "PRs merged" per
 actor, a real dated roadmap, forge identity binding (#981), any write
 surface, any new gate, any score or ranking.
+
+### Merge onto PR 1's head (the tracker, after #1037)
+
+PR 2 was cut from PR 1's pre-review head, so the tracker's version of `roadmap-model.mjs`, `app.js`, `app.css`, `views-owned.test.mjs` and the SDD documents won each conflict, with PR 2's own diff applied on top — the procedure this repository uses for a sibling cut before a squash, never a rebase.
+
+One debt from the fresh review of PR 3 was paid here rather than left to accumulate: `renderDecisionRow` rendered `row.sourceStamp` by hand (`el('span','source', label)`), which silently drops the "open ↗" chip the moment a stamp carries an href — and PR 1's head made hrefs real. Both governance renderers now go through `renderSourceStamp`, pinned by a scan test that also forbids the hand-built span. RED 17/18 → GREEN 344/344 across the UI glob; mutation: the hand-built span restored → that test red, reverted.
 
 ## PR 3 — Anti-patterns (R882-4)
 
@@ -279,12 +412,18 @@ surface, any new gate, any score or ranking.
 
 `git status --short` is empty after all commits — nothing left uncommitted.
 
+### Merge onto the tracker (after PR 2, #1038)
+
+PR 3 was cut before PR 1's review fixes, so the tracker's version won each conflict with PR 3's own diff applied on top. The debt its own fresh review named was paid here: `forge-url.mjs` exists on the tracker now, so `buildAntiPatternsModel(section, {project})` stamps each cited ticket through `sourceStamp({url: issueUrl(project, n)})` — the same builder the roadmap rows use — and keeps today's bare `[forge: #N]` words when no project is known, rather than the roadmap's "no source was recorded" text, which would be wrong for a bare citation. The renderer draws one chip per citation instead of one joined text node, so a citation with a project behind it is individually clickable, and both governance renderers plus this one are pinned to `renderSourceStamp` by the shared scan test.
+
+RED 8/9 on the model (a project given must produce a real href) → GREEN 354/354 across the UI glob. Mutations: the model ignoring `project` → its test red; the renderer joining the stamps into one text node instead of chips → the scan test red (a first attempt that only disabled the branch left the scanned line in place and proved nothing — said here because a mutation that passes is not evidence). Both reverted.
+
 ## PR 4 — History (R882-5) — DONE
 
-Branch: `feat/issue-882-pr4-history`, cut from PR 3's head `2a27ab00`,
-worktree `/home/gandalf/IA/brain-issue-882-4`.
+Branch: `feat/issue-882-pr4-history`, cut from PR 3's own local (pre-squash)
+head `2a27ab00`, worktree `/home/gandalf/IA/brain-issue-882-4`.
 
-### Commits
+### Commits (before the forward-merge)
 
 ```
 110abd9c feat(status): the History view's read model — git log and tags, injected _run (#882)
@@ -292,6 +431,7 @@ worktree `/home/gandalf/IA/brain-issue-882-4`.
 fa4f0584 feat(ui): the History view's read model — merges/releases/ADR amendments, newest first (#882)
 75fa9500 feat(ui): draw the History view (#882)
 76af9158 chore(memory): record PR 4 of #882 — the History view
+49765589 docs(sdd): tick PR 4 tasks and record apply progress (#882)
 ```
 
 ### TDD Cycle Evidence
@@ -299,96 +439,67 @@ fa4f0584 feat(ui): the History view's read model — merges/releases/ADR amendme
 | Unit | RED | GREEN | Mutation (turns red, then reverted) |
 |---|---|---|---|
 | T1a/T1b — `status/history.mjs` | `ERR_MODULE_NOT_FOUND` on the new test file (6 tests) | 6/6 pass | Loosened the `(#N)` trailing-anchor regex from `/\(#(\d+)\)\s*$/` to `/\(#(\d+)\)/` → 1/6 red (the mid-subject test); reverted, 6/6 green |
-| T2a/T2b — `snapshot.mjs` wiring | Added `s.history.ok`/`reason` assertions to the R879-2 baseline test plus a new dedicated `_run`-injected wiring test → 2/26 red (`s.history` undefined) | Wired `history: gatherHistoryFacts({root, _run: run})` into `buildSnapshot`'s return, plus a matching `renderSnapshotText` line → 26/26 green | Removed the `history:` key from `buildSnapshot`'s return object → 4/26 red (the two history-specific tests plus `renderSnapshotText`'s own coverage of the new line); reverted, 26/26 green |
-| T3a/T3b — `lib/history-model.mjs` | `ERR_MODULE_NOT_FOUND` on the new test file (11 tests) | 11/11 pass (two rounds of test-fixture fixes along the way — see Deviations) | Pushed one extra `row({kind: 'review', ...})` event into the merged list → 5/11 red (the "no review kind" scan plus four other assertions the extra event's presence disturbed); reverted, 11/11 green |
-| T4 — `renderHistory` wiring (`app.js`, `app.css`, `views-owned.test.mjs`) | Removed `historyview` from the forbidden-identifier test, added a presence-proof test (`renderHistory`/`buildHistoryModel`/`switchToMode('reviews')`) and a "no review-kind branch" scan for `renderHistoryEvent` → 2/18 red | Wired `renderHistory`/`renderHistoryEvent`/`renderHistoryReviewsLink` into `app.js`'s `renderGovernance` sub-router, added the `.history-*` classes (existing `--line`/`--surface`/`--muted` tokens only, no new token) → 18/18 green | N/A this unit — the presence-proof test IS the RED/GREEN pair; a second destructive mutation over wiring-only code would just re-prove D9, already proven by T1-T3's own mutations |
+| T2a/T2b — `snapshot.mjs` wiring | Added `s.history.ok`/`reason` assertions to the R879-2 baseline test plus a new dedicated `_run`-injected wiring test → 2/26 red (`s.history` undefined) | Wired `history: gatherHistoryFacts({root, _run: run})` into `buildSnapshot`'s return, plus a matching `renderSnapshotText` line → 26/26 green | Removed the `history:` key from `buildSnapshot`'s return object → 4/26 red; reverted, 26/26 green |
+| T3a/T3b — `lib/history-model.mjs` | `ERR_MODULE_NOT_FOUND` on the new test file (11 tests) | 11/11 pass | Pushed one extra `row({kind: 'review', ...})` event into the merged list → 5/11 red (the "no review kind" scan plus four assertions the extra event disturbed); reverted, 11/11 green |
+| T4 — `renderHistory` wiring | Removed `historyview` from the forbidden-identifier test, added a presence-proof test → 2/18 red | Wired `renderHistory`/`renderHistoryEvent`/`renderHistoryReviewsLink` into `renderGovernance`'s sub-router, `.history-*` CSS classes → 18/18 green | N/A this unit — wiring-only, D9 |
 
-`renderHistory`/`renderHistoryEvent`/`renderHistoryReviewsLink` themselves
-carry no RED/GREEN cycle of their own (N/A, D9 — no DOM harness): wiring
-only, verified by the text-level scan above (`views-owned.test.mjs`) plus a
-trace against `history-model.test.mjs`'s already-covered contract, the same
-precedent PR 1-3's renderers used.
+### Full suite (once, before the forward-merge)
 
-### Focused test commands and results
+`GIT_CONFIG_GLOBAL=/dev/null npm test` → **5899 pass / 0 fail** (baseline
+after PR 3's local pre-squash head: 5879 pass / 0 fail).
 
-- `GIT_CONFIG_GLOBAL=/dev/null node --test brain/scripts/status/history.test.mjs` — 6/6 pass
-- `GIT_CONFIG_GLOBAL=/dev/null node --test brain/scripts/status/snapshot.test.mjs` — 26/26 pass
-- `GIT_CONFIG_GLOBAL=/dev/null node --test brain/scripts/ui/lib/history-model.test.mjs` — 11/11 pass
-- `GIT_CONFIG_GLOBAL=/dev/null node --test brain/scripts/ui/static/views-owned.test.mjs brain/scripts/ui/static/tokens.test.mjs brain/scripts/ui/static/app-source-guard.test.mjs` — 29/29 pass
-- `GIT_CONFIG_GLOBAL=/dev/null node --test brain/scripts/ui/static/tokens.test.mjs` — run before every commit, 4/4 pass each time
-- `npm run brain:repo:check` — run before every commit, clean each time
-
-### Full suite (run once, at the end)
-
-`GIT_CONFIG_GLOBAL=/dev/null npm test` — **5899 pass / 0 fail** (baseline
-after PR 3: 5879 pass / 0 fail; +20 new/net tests — 6 in
-`status/history.test.mjs`, 1 new dedicated wiring test in
-`status/snapshot.test.mjs`, 11 in `lib/history-model.test.mjs`, +2 net in
-`views-owned.test.mjs`, whose one forbidden-identifier test was replaced by
-two presence-proof tests and a by-actor-only forbidden test).
-
-### Counted diff
+### Counted diff (before the forward-merge)
 
 `git diff --numstat 2a27ab00...HEAD | rg -v '\.test\.mjs|openspec/|\.memory/'
 | awk '{a+=$1; d+=$2} END {print a+d}'` → **222** (plan estimate ~380, budget
 1000).
 
-### Deviations from design
+### Fresh-context review before push: REVISE → fixed
 
-1. **No `lib/forge-url.mjs` or exported `prUrl(project, number)` helper
-   exists anywhere in this codebase (verified by a full-repo search)** — the
-   apply prompt's stated reuse target for the merge event's forge URL was
-   factually wrong. The nearest precedent is `change-route.mjs`'s own
-   private, unexported `buildPrUrl(project, pr)`, a SERVER-side Node module
-   (`import { readFileSync } from 'node:fs'` at module scope) that cannot be
-   imported into browser-side `app.js` or a pure `ui/lib/**` module without
-   breaking D9's purity gate. The prompt's OTHER claim — that "the page
-   passes `state.meta?.project`" — checked out true:
-   `server.mjs`'s `buildMeta()` returns `{project, ...}`, sent on the `sync`
-   SSE frame, merged into `state.meta` by `frames.mjs`'s `applyFrame` (same
-   precedent `renderServedBranch(state.meta?.servedBranch...)` already uses).
-2. **`buildHistoryModel`'s signature is `{history, adrs, project}`, not the
-   literal `{history, adrs}` design.md's module map states.** `provenance.mjs`'s
-   `sourceStamp` requires a full `https://<host>/<owner>/<repo>/pull/<N>` URL
-   to render the `[forge: #N]` label `spec.md`'s own scenario demands — a
-   bare `prNumber` cannot produce that label, and neither `gatherHistoryFacts`
-   (per T1a/T1b) nor `buildHistoryModel` (per design.md) was given a project
-   input to build one. Extended `buildHistoryModel` with an optional third
-   `project` key (defaults to `null`) rather than adding a new module or
-   touching `change-route.mjs`: the URL-building is pure string templating
-   (no IO, no `node:` builtin), stays inside `history-model.mjs` — already an
-   allowed PR 4 file per the `brain-slice-scope` block — and a commit naming
-   a PR with no `project` known still becomes an event, sourced to git
-   instead (never a fabricated link built from one alone).
-3. **`gatherHistoryFacts` does not read `git rev-list --count HEAD`**, though
-   `spec.md`'s prose mentions "the branch's total commit count... so the page
-   can say 'N of TOTAL shown'." Neither T1a's RED test nor T3a/T4's own
-   descriptions call for a total-count field or its display; under strict
-   TDD (test-first), no untested git call was added. `renderHistory`'s own
-   summary line states the shown count (`${events.length} event(s)`) without
-   a claimed total — never a fabricated "out of N" figure the code does not
-   compute.
-4. **`GOVERNANCE_PLACEHOLDERS['history']` and `governance-model.test.mjs` are
-   both left untouched**, even though History now draws real content. This
-   continues PR 2's and PR 3's own established precedent for `decisions` and
-   `anti-patterns`: the table is not cleaned up per PR, never reachable once
-   `renderGovernance`'s router special-cases the view — `governance-model.mjs`
-   is not in PR 4's declared file list either.
-5. **A release event's `source` is `null`** (renders through `sourceStamp` as
-   `[no source was recorded for this value]`). Neither `spec.md` nor
-   `design.md` states a source for a release or adr-amended event beyond the
-   merge scenario's explicit `{url}`/`{sha}` pair; a tag carries no
-   per-event provenance beyond its own name (already the event's title), so
-   `source: null` was chosen over fabricating one (e.g. treating the tag name
-   itself as a git sha, which it is not).
+A fresh-context review of PR 4 returned REVISE with two blockers and two
+warnings, plus one open question. Fixed in order:
 
-### Out of scope (unchanged from tasks.md)
+1. **BLOCKER — a trailing `(#N)` is a citation, not a PR number.** Measured
+   against this repository's real log: of 200 commits, 147 carry a trailing
+   `(#N)`, and 17 of those resolve to `#882` — the issue, because this
+   chain's own unsquashed commits cite the driving issue that way. There is
+   no textual signal separating a squash suffix from a hand-written
+   citation. Renamed the field `prNumber` → `citedRef` throughout
+   `status/history.mjs`, `status/history.test.mjs`, `lib/history-model.mjs`
+   and `lib/history-model.test.mjs`; the rendered text and every doc/comment
+   now say "cites #N", never "PR #N". `spec.md`'s R882-5 gained an Amendment
+   naming this explicitly, the same way R882-6 already states the "PRs
+   merged" gap instead of approximating it, plus a scenario asserting no
+   event's text contains the word "PR". Mutation: restored the word "PR" (in
+   a comment reachable by the new scan) and a `prNumber` field on the merge
+   event → both scan tests red; reverted.
+2. **BLOCKER — `apply-progress.md`'s Deviation 1 and the memory record
+   falsely claimed `forge-url.mjs` "does not exist anywhere in this
+   codebase."** True only of the stale branch point this slice was cut
+   from — it shipped in PR 1 (#1037) and PR 3 already imports it on the
+   tracker. Corrected both texts (this section, and a new memory record
+   below) to say what was actually true: it did not exist on PR 4's own cut
+   point, and does exist on the tracker after the forward-merge.
+3. **WARNING — `history-model.mjs` hand-built its own
+   `` `https://github.com/${project}/pull/${n}` `` template.** Post-merge,
+   imports `prUrl` from `lib/forge-url.mjs` instead — one definition, not
+   two that can drift. Kept the `{sha}` fallback for a commit with no
+   citation. Pinned with a source-level test asserting `history-model.mjs`
+   contains no literal `https://github.com/`.
+4. **WARNING — `renderHistoryEvent` hand-built `el('span', 'source', ...)`,
+   dropping the "open ↗" chip every other governance row carries.** Now
+   calls `renderSourceStamp(event.sourceStamp)`, the same helper
+   `renderRoadmapRow`/`renderDecisionRow`/`renderAntiPatternRow` use.
+   `renderHistoryEvent` added to `views-owned.test.mjs`'s shared
+   `renderSourceStamp` scan alongside those three.
+5. **Open question — R882-5's prose asked for "N of TOTAL shown," which
+   `gatherHistoryFacts` never read.** Decision: dropped the phrase rather
+   than add an untested `git rev-list --count` call under strict TDD;
+   `spec.md` amended to say this slice states the shown count only.
 
-Tier 2 (#883), telemetry (#884), remote deployment (#885), "PRs merged" per
-actor, a real dated roadmap, forge identity binding (#981), any write
-surface, any new gate, any score or ranking — no event in this view is ever
-scored or sorted by anything but its own date (issue #882's own guard); the
-count beside the list is a plain count, never a rank.
+Full suite after these fixes: see "Full suite (after the forward-merge and
+fixes)" below. `brain:repo:check` and `tokens.test.mjs` stayed green before
+every commit in this round.
 
 ### Working tree
 

@@ -57,6 +57,18 @@ test('#882 R882-1/R882-2: the governance surface exists — the sub-nav is mount
   assert.match(APP_JS, /GOVERNANCE_PLACEHOLDERS\[/, 'the sub-views not yet built must still say their own placeholder, never an empty area');
 });
 
+test('#882 cold review of PR 1 (blocker): a roadmap row applies the same sourceStamp helper the door uses — R882-1\'s row() is not a dead export', () => {
+  const fnMatch = APP_JS.match(/function renderRoadmapRow\([^)]*\) \{[\s\S]*?\n}\n/);
+  assert.ok(fnMatch, 'renderRoadmapRow function must exist in app.js');
+  assert.match(fnMatch[0], /renderSourceStamp\(row\.sourceStamp\)/, 'renderRoadmapRow must render row.sourceStamp through renderSourceStamp, never a bare #N with no stamp and no link');
+});
+
+test('#882 cold review of PR #1037 (correction 1): a roadmap row says its own stateReason when the state could not be read — the model\'s said value is not silently dropped on screen', () => {
+  const fnMatch = APP_JS.match(/function renderRoadmapRow\([^)]*\) \{[\s\S]*?\n}\n/);
+  assert.ok(fnMatch, 'renderRoadmapRow function must exist in app.js');
+  assert.match(fnMatch[0], /row\.stateReason/, 'renderRoadmapRow must read row.stateReason, so roadmap-model.mjs\'s said reason for an unknown state actually reaches the screen');
+});
+
 test('#882 R882-3: Decisions draws real content — the ADR table, drift warnings beside it, never a second drift computation', () => {
   assert.match(APP_JS, /function renderDecisions\(/, 'R882-3: Decisions must render real content, not a placeholder');
   assert.match(APP_JS, /buildDecisionsModel\(/, 'renderDecisions must build its rows from lib/decisions-model.mjs, not recompute them inline');
@@ -66,7 +78,10 @@ test('#882 R882-3: Decisions draws real content — the ADR table, drift warning
 test('#882 R882-4: Anti-patterns draws real content — the catalogue, core before project, an unlistable scope said beside the other scope\'s real rows', () => {
   assert.match(APP_JS, /function renderAntiPatterns\(/, 'R882-4: Anti-patterns must render real content, not a placeholder');
   assert.match(APP_JS, /buildAntiPatternsModel\(/, 'renderAntiPatterns must build its rows from lib/anti-patterns-model.mjs, not recompute them inline');
-  assert.match(APP_JS, /\[forge: #\$\{n\}\]/, 'each cited issue must be stamped in the same [forge: #N] form sourceStamp uses for a real forge ref');
+  // The literal string is gone: the model builds each citation's stamp through
+  // `sourceStamp`/`issueUrl` now, so the page renders stamps, not text.
+  assert.match(APP_JS, /for \(const stamp of row\.issueStamps\) cited\.appendChild\(renderSourceStamp\(stamp\)\)/, 'each cited issue must be its own chip, so a known project makes it clickable');
+  assert.ok(!/\[forge: #\$\{n\}\]/.test(APP_JS), 'the page must not hand-build a forge label the model already stamps');
 });
 
 test('#882 R882-5: History draws real content — merges/releases/ADR amendments through lib/history-model.mjs, linked to the Reviews mode, never a duplicate review-round rendering', () => {
@@ -154,4 +169,17 @@ test('#998 R998-6 T4/T6: the status bar shows the poll countdown from pollIndica
   assert.match(APP_JS, /indicator\.countdown/, 'renderStatus must render pollIndicator\'s own countdown field');
   const dateNowCalls = [...APP_JS.matchAll(/Date\.now\(\)/g)].length;
   assert.equal(dateNowCalls, 1, 'app.js reads Date.now() exactly once (renderStatus\'s own nowMs) — every clock decision beyond that lives in lib/, driven by the injected now');
+});
+
+// #882 PR 2 merge onto PR 1's head: the shared stamp helper exists now, and a
+// hand-rolled `el('span','source', …)` silently drops the "open ↗" chip the
+// moment a stamp carries an href — the defect the fresh review of PR 3 named
+// across both views.
+test('#882 R882-1: every governance row renders its stamp through renderSourceStamp, never a hand-built span', () => {
+  for (const fn of ['renderRoadmapRow', 'renderDecisionRow', 'renderAntiPatternRow']) {
+    const m = APP_JS.match(new RegExp(`function ${fn}\\([^)]*\\) \\{[\\s\\S]*?\\n}\\n`));
+    assert.ok(m, `${fn} must exist in app.js`);
+    assert.match(m[0], /renderSourceStamp\(row\.sourceStamp\)/, `${fn} must render its stamp through the shared helper`);
+    assert.ok(!/el\('span', 'source'/.test(m[0]), `${fn} must not hand-build the stamp span — the helper owns the "open ↗" chip`);
+  }
 });
