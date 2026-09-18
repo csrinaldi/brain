@@ -51,6 +51,7 @@ export const GOVERNANCE_JOBS = [
   // order-guard asserts governance.yml's job order equals this array exactly.
   'lane-paths',
   'lane-scrub',
+  'base-branch',
 ];
 
 /**

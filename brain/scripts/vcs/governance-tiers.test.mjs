@@ -174,7 +174,7 @@ test('REQ-TIER-8 (regression): GOVERNANCE_JOBS and GATE_MATRIX keys are the SAME
 // ratified departure from that guarantee (design §4.1), so `standard` now
 // also requires the three promoted gates.
 
-test("REQ-TIER-9: requiredJobs('standard') includes the Q5 Phase 5 promotions (phase-order, actor-check, brain-writes-reviewed) and #905's lane-paths/lane-scrub, preserving GATE_MATRIX order", () => {
+test("REQ-TIER-9: requiredJobs('standard') includes the Q5 Phase 5 promotions (phase-order, actor-check, brain-writes-reviewed), #905's lane-paths/lane-scrub and #967's base-branch, preserving GATE_MATRIX order", () => {
   assert.deepEqual(requiredJobs('standard'), [
     'issue-link',
     'diff-size',
@@ -186,10 +186,11 @@ test("REQ-TIER-9: requiredJobs('standard') includes the Q5 Phase 5 promotions (p
     'brain-writes-reviewed',
     'lane-paths',
     'lane-scrub',
+    'base-branch',
   ]);
 });
 
-test("requiredJobs('lite') demotes memory-gate and phase-order by position (proportionality, design §2.B); promotes actor-check/brain-writes-reviewed by evidence tiering (REQ-TIER-2, Phase 5); lane-paths/lane-scrub required at every tier (#905)", () => {
+test("requiredJobs('lite') demotes memory-gate and phase-order by position (proportionality, design §2.B); promotes actor-check/brain-writes-reviewed by evidence tiering (REQ-TIER-2, Phase 5); lane-paths/lane-scrub required at every tier (#905); base-branch required at every tier, including lite (#967 ruling 1)", () => {
   assert.deepEqual(requiredJobs('lite'), [
     'issue-link',
     'diff-size',
@@ -199,6 +200,7 @@ test("requiredJobs('lite') demotes memory-gate and phase-order by position (prop
     'brain-writes-reviewed',
     'lane-paths',
     'lane-scrub',
+    'base-branch',
   ]);
 });
 

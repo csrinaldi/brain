@@ -6,7 +6,9 @@ import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { parseTicketArgs, WORKTREE_FLAG, IN_PLACE_FLAG } from './ticket-args.mjs';
+import {
+  parseTicketArgs, WORKTREE_FLAG, IN_PLACE_FLAG, OFF_TRACKER_FLAG,
+} from './ticket-args.mjs';
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '../../..');
 
@@ -81,6 +83,47 @@ test('the id may appear after the flags', () => {
   assert.equal(r.ok, true);
   assert.equal(r.id, '316');
   assert.equal(r.useWorktree, false);
+});
+
+// ── "nobody asked" and "the caller asked for main" are different facts (#967) ──
+
+test('--base absent and --base main differ in a field, and both still resolve to main', () => {
+  // R967-6 S1. `baseBranch` defaults to 'main' (`:60-61`), so the value alone
+  // cannot tell the two apart — and the verb has to, because an explicit `main`
+  // against an epic that declares a tracker is refused while an absent `--base`
+  // is resolved. The distinction is a NEW field: every assertion above still
+  // reads `baseBranch` and still reads 'main', which is the whole point of
+  // adding one rather than making the default null (design Q1).
+  const absent = parseTicketArgs(['881']);
+  const explicit = parseTicketArgs(['881', '--base', 'main']);
+
+  assert.equal(absent.baseExplicit, false);
+  assert.equal(explicit.baseExplicit, true);
+  assert.equal(absent.baseBranch, 'main', 'the default survives — it is the tested default of #782');
+  assert.equal(explicit.baseBranch, 'main');
+});
+
+test(`${OFF_TRACKER_FLAG}: the named opt-out off an epic's tracker`, () => {
+  // R967-6 S3. The flag an operator is pointed at by the refusal: it is not a
+  // mode, it is a statement that this branch deliberately does not start from
+  // the tracker its epic declares.
+  assert.equal(parseTicketArgs(['881']).offTracker, false);
+  const off = parseTicketArgs(['881', OFF_TRACKER_FLAG]);
+  assert.equal(off.ok, true);
+  assert.equal(off.offTracker, true);
+  assert.equal(off.baseBranch, 'main');
+});
+
+test(`the id rule is unaffected by ${OFF_TRACKER_FLAG} — it takes no value`, () => {
+  // The rule at `:66` skips `--base`'s value only. A flag that consumes nothing
+  // cannot swallow the id, and this is the test that says so rather than the
+  // reader having to re-derive it.
+  const r = parseTicketArgs([OFF_TRACKER_FLAG, '--base', '2024', '881']);
+  assert.equal(r.ok, true);
+  assert.equal(r.id, '881');
+  assert.equal(r.baseBranch, '2024');
+  assert.equal(r.offTracker, true);
+  assert.equal(r.baseExplicit, true);
 });
 
 // ── The contract row is the oracle, and drift from it fails here ──────────

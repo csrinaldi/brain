@@ -192,3 +192,12 @@ lane-scrub:
   stage: test
   script:
     - node brain/scripts/governance/lane-scrub.mjs
+
+# ── Invariant 11 (issue #967 PR C) — a slice MR's base is its epic's tracker ─
+# REQUIRED at every tier, `lite` included (GATE_MATRIX['base-branch'],
+# ruling 1) — the backstop for `brain:ticket:start`'s creation-time refusal.
+base-branch:
+  extends: .governance_mr_rules
+  stage: test
+  script:
+    - node brain/scripts/governance/run-check.mjs base-branch
