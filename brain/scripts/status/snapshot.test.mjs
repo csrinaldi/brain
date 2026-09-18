@@ -13,6 +13,24 @@ const NOW = '2026-09-13T00:00:00Z';
 
 const VERDICT = (sha, rev, verdict) => `Round ${rev}\n\n\`\`\`yaml\nprotocol: brain-review/2\nhead_sha: ${sha}\nrev: ${rev}\nverdict: ${verdict}\nfindings: []\n\`\`\`\n`;
 
+/** A verdict whose `findings:` block carries the given entries, in the ONE list encoding `renderVerdict` emits (#998 R998-5). `file`/`line` are real emitted fields (verdict.mjs's `hasUsableAnchor`, REQ-405-2, measured on PR #1006's posted verdict) — included here only when the fixture asks for them. */
+const VERDICT_WITH_FINDINGS = (sha, rev, verdict, findings) => {
+  const lines = ['protocol: brain-review/2', `head_sha: ${sha}`, `rev: ${rev}`, `verdict: ${verdict}`, 'findings:'];
+  for (const f of findings) {
+    lines.push(`  - id: ${f.id}`);
+    lines.push(`    severity: ${f.severity}`);
+    if (f.evidence !== undefined) lines.push(`    evidence: "${f.evidence}"`);
+    if (f.cites !== undefined) lines.push(`    cites: ${f.cites}`);
+    if (f.file !== undefined) lines.push(`    file: ${f.file}`);
+    if (f.line !== undefined) lines.push(`    line: ${f.line}`);
+  }
+  return `Round ${rev}\n\n\`\`\`yaml\n${lines.join('\n')}\n\`\`\`\n`;
+};
+
+/** A findings block in the FOREIGN 0-indent encoding (#452/#478): unreadable at any entry count, never a truncated prefix. */
+const VERDICT_MALFORMED_FINDINGS = (sha, rev, verdict) =>
+  `Round ${rev}\n\n\`\`\`yaml\nprotocol: brain-review/2\nhead_sha: ${sha}\nrev: ${rev}\nverdict: ${verdict}\nfindings:\n- id: F-1\n  severity: blocker\n\`\`\`\n`;
+
 /** A port whose every write verb throws — "read-only" proved, not promised. */
 function readOnlyPort(reads) {
   const port = {};
@@ -76,18 +94,115 @@ test('#879: changes read tasks, slice scopes and missing artefacts; an absent ta
   const root = makeFixture();
   const c = readChanges({ root, tier: 'lite' });
   assert.equal(c.ok, true);
-  assert.deepEqual(c.value.map((x) => x.id), ['issue-1-a', 'issue-2-no-tasks'], 'archive/ is not a change');
-  const [a, b] = c.value;
+  const active = c.value.filter((x) => !x.archived);
+  assert.deepEqual(active.map((x) => x.id), ['issue-1-a', 'issue-2-no-tasks'], 'archive/ is not a change dir of its own');
+  const [a, b] = active;
   assert.deepEqual(a.tasks, { checked: { ok: true, value: 1 }, open: { ok: true, value: 1 }, next: { ok: true, value: 'next one' } });
   assert.deepEqual(a.sliceScopes, { ok: true, value: [{ slice: 1, claims: ['R1-1'], terminal_pr: 'this PR -> main' }] });
   assert.deepEqual(a.missing, { ok: true, value: [] });
   assert.equal(b.tasks.checked.ok, false);
   assert.match(b.tasks.checked.reason, /issue-2-no-tasks\/tasks\.md could not be read/);
   assert.deepEqual(b.missing.value, [], 'at lite only spec.md is required, and it is there');
-  assert.deepEqual(readChanges({ root, tier: 'standard' }).value[1].missing.value, ['proposal.md', 'design.md', 'tasks.md'], 'the tier decides the required set');
+  assert.deepEqual(readChanges({ root, tier: 'standard' }).value.filter((x) => !x.archived)[1].missing.value, ['proposal.md', 'design.md', 'tasks.md'], 'the tier decides the required set');
   assert.equal(readChanges({ root: '/nowhere', tier: 'lite' }).ok, false);
   const unresolved = readChanges({ root, tier: null });
-  assert.equal(unresolved.value[0].missing.ok, false, 'no tier → the required set cannot be resolved, and that is said');
+  assert.equal(unresolved.value.filter((x) => !x.archived)[0].missing.ok, false, 'no tier → the required set cannot be resolved, and that is said');
+});
+
+// ── R998-4: the archive reader ──────────────────────────────────────────────
+
+test('#998 R998-4: readChanges also lists openspec/changes/archive/<issue> rows, archived: true, same shape', () => {
+  const root = makeFixture();
+  const c = readChanges({ root, tier: 'lite' });
+  assert.equal(c.ok, true);
+  const archived = c.value.filter((x) => x.archived);
+  assert.deepEqual(archived.map((x) => x.id), ['9']);
+  const [nine] = archived;
+  assert.equal(nine.dir, 'openspec/changes/archive/9');
+  assert.equal(nine.issue, 9);
+  assert.equal(nine.slug, null);
+  assert.equal(nine.grandfathered, false);
+  assert.deepEqual(nine.artefacts, { proposal: true, spec: true, design: true, tasks: true, apply: false, verify: false, archive: true });
+  assert.deepEqual(nine.tasks, { checked: { ok: true, value: 2 }, open: { ok: true, value: 0 }, next: { ok: true, value: '—' } });
+  assert.deepEqual(nine.missing.value, [], 'at lite only spec.md is required, and it is there too');
+});
+
+// ── cold review of #1008/PR6: hasSpec's nested-specs/ tolerance through the archive path ──
+
+test('#998 cold-1008: an archived row with the nested specs/*/spec.md convention still resolves spec:true', () => {
+  const files = {
+    'openspec/changes': [],
+    'openspec/changes/archive': ['12'],
+    'openspec/changes/archive/12': ['tasks.md', 'specs'],
+    'openspec/changes/archive/12/specs': ['a'],
+  };
+  const c = readChanges({
+    root: '/fake',
+    tier: 'lite',
+    _list: (p) => { if (!(p in files)) throw new Error(`ENOENT: ${p}`); return files[p]; },
+    _exists: (p) => p === 'openspec/changes/archive'
+      || p === 'openspec/changes/archive/12/tasks.md'
+      || p === 'openspec/changes/archive/12/specs'
+      || p === 'openspec/changes/archive/12/specs/a/spec.md',
+    _read: (p) => { if (p === 'openspec/changes/archive/12/tasks.md') return '- [ ] x'; throw new Error('missing'); },
+  });
+  assert.equal(c.ok, true);
+  const [twelve] = c.value.filter((x) => x.archived);
+  assert.equal(twelve.artefacts.spec, true, 'the nested specs/*/spec.md convention must resolve through the archive path too, the same as an active change dir');
+});
+
+test('#998 R998-4: a missing archive dir is "no archived changes", never an error', () => {
+  const files = { 'openspec/changes': ['issue-1-a'], 'openspec/changes/issue-1-a': ['tasks.md'] };
+  const c = readChanges({
+    root: '/fake',
+    tier: 'lite',
+    _list: (p) => { if (!(p in files)) throw new Error(`ENOENT: ${p}`); return files[p]; },
+    _exists: (p) => p === 'openspec/changes/issue-1-a/tasks.md',
+    _read: (p) => { if (p === 'openspec/changes/issue-1-a/tasks.md') return '- [ ] x'; throw new Error('missing'); },
+  });
+  assert.equal(c.ok, true);
+  assert.deepEqual(c.value.filter((x) => x.archived), []);
+});
+
+test('#998 R998-4: an archive dir that exists but cannot be listed is a reason on the whole section', () => {
+  const c = readChanges({
+    root: '/fake',
+    tier: 'lite',
+    _list: (p) => { if (p === 'openspec/changes') return []; throw new Error('permission denied'); },
+    _exists: () => true,
+    _read: () => { throw new Error('n/a'); },
+  });
+  assert.equal(c.ok, false);
+  assert.match(c.reason, /permission denied/);
+});
+
+// ── review of PR 4, fix 1: a not-issue-numbered archive dir is said, not dropped ────
+
+test('#998 fix1: an archive dir that is not a bare issue number is skipped from rows but named in archiveSkipped, never silently dropped', () => {
+  const files = {
+    'openspec/changes': [],
+    'openspec/changes/archive': ['5', '2026-07-26-issue-334-brain-ship-labels', 'governance'],
+    'openspec/changes/archive/5': ['spec.md'],
+  };
+  const c = readChanges({
+    root: '/fake',
+    tier: 'lite',
+    _list: (p) => { if (!(p in files)) throw new Error(`ENOENT: ${p}`); return files[p]; },
+    _exists: (p) => p === 'openspec/changes/archive' || p === 'openspec/changes/archive/5/spec.md',
+    _read: () => { throw new Error('n/a'); },
+  });
+  assert.equal(c.ok, true);
+  assert.deepEqual(c.value.filter((x) => x.archived).map((x) => x.id), ['5'], 'only the issue-numbered dir becomes a row');
+  assert.deepEqual(c.archiveSkipped, [
+    { name: '2026-07-26-issue-334-brain-ship-labels', reason: 'not an issue-numbered archive dir' },
+    { name: 'governance', reason: 'not an issue-numbered archive dir' },
+  ]);
+});
+
+test('#998 fix1: the fixture archive/ carries only its own .gitkeep as a non-issue-numbered entry — named, not dropped', () => {
+  const c = readChanges({ root: makeFixture(), tier: 'lite' });
+  assert.equal(c.ok, true);
+  assert.deepEqual(c.archiveSkipped, [{ name: '.gitkeep', reason: 'not an issue-numbered archive dir' }]);
 });
 
 // ── R879-5: roadmap ─────────────────────────────────────────────────────────
@@ -303,4 +418,61 @@ test('#879: reviewRows keeps verdicts oldest first and marks a review with no bl
   assert.equal(r.verdicts.length, 1);
   assert.equal(r.latest.rev, 1);
   assert.equal(reviewRows(4, []).latest, null);
+});
+
+test('#1009 cold review round 2: reviewRows keeps a STOP verdict verbatim, same as REVISE/APPROVE — parseVerdict does not filter the word against the enum', () => {
+  const r = reviewRows(12, [{ body: VERDICT('stopsha0', 3, 'STOP'), author: 'bot' }]);
+  assert.equal(r.verdicts[0].verdict, 'STOP');
+  assert.equal(r.latest.verdict, 'STOP');
+});
+
+// ── #998 R998-5: findings per verdict — the array, not the count ───────────
+
+test('#998 R998-5: reviewRows carries a verdict\'s findings as the shaped array, plus findingCount — the excerpt truncated to 240 chars', () => {
+  const longEvidence = 'e'.repeat(300);
+  const body = VERDICT_WITH_FINDINGS('abc', 1, 'REVISE', [
+    { id: 'F-1', severity: 'blocker', evidence: longEvidence, cites: 'ADR-1' },
+    { id: 'F-2', severity: 'correction', evidence: 'short' },
+  ]);
+  const r = reviewRows(5, [{ body, author: 'bot' }]);
+  assert.equal(r.verdicts[0].findingCount, 2);
+  assert.deepEqual(r.verdicts[0].findings, [
+    { id: 'F-1', severity: 'blocker', cites: 'ADR-1', file: null, line: null, evidenceExcerpt: longEvidence.slice(0, 240) },
+    { id: 'F-2', severity: 'correction', cites: null, file: null, line: null, evidenceExcerpt: 'short' },
+  ]);
+  assert.equal(r.verdicts[0].findings[0].evidenceExcerpt.length, 240);
+});
+
+test('#998 R998-5: a finding carrying file/line (the real emitted anchor, verdict.mjs\'s hasUsableAnchor / REQ-405-2, measured on PR #1006) survives with both present; one without has both null', () => {
+  const body = VERDICT_WITH_FINDINGS('abc', 1, 'REVISE', [
+    { id: 'F-1', severity: 'blocker', evidence: 'e', cites: 'ADR-1', file: 'brain/scripts/governance/run-check.mjs', line: 556 },
+    { id: 'F-2', severity: 'correction', evidence: 'e' },
+  ]);
+  const r = reviewRows(8, [{ body, author: 'bot' }]);
+  assert.equal(r.verdicts[0].findings[0].file, 'brain/scripts/governance/run-check.mjs');
+  assert.equal(r.verdicts[0].findings[0].line, 556);
+  assert.equal(r.verdicts[0].findings[1].file, null);
+  assert.equal(r.verdicts[0].findings[1].line, null);
+});
+
+test("#1009 cold review finding 3: a finding's line of 0 parses to null — hasUsableAnchor (verdict.mjs) never emits line 0, and provenance.mjs's falsy check would silently drop it", () => {
+  const body = VERDICT_WITH_FINDINGS('abc', 1, 'REVISE', [
+    { id: 'F-1', severity: 'blocker', evidence: 'e', file: 'brain/scripts/governance/run-check.mjs', line: 0 },
+  ]);
+  const r = reviewRows(11, [{ body, author: 'bot' }]);
+  assert.equal(r.verdicts[0].findings[0].line, null, 'line 0 is not a usable anchor — parseFindingLine must reject it, same as non-numeric input');
+});
+
+test('#998 R998-5: a malformed findings block keeps findings: [] with the reason said in malformed, not silently "no findings"', () => {
+  const body = VERDICT_MALFORMED_FINDINGS('def', 2, 'REVISE');
+  const r = reviewRows(6, [{ body, author: 'bot' }]);
+  assert.deepEqual(r.verdicts[0].findings, []);
+  assert.deepEqual(r.verdicts[0].malformed, ['findings']);
+  assert.equal(r.verdicts[0].findingCount, null, 'uncomputable, distinct from a verdict that declared zero findings');
+});
+
+test('#998 R998-5: a verdict that declares findings: [] (genuinely empty) has findingCount 0, not null', () => {
+  const r = reviewRows(7, [{ body: VERDICT('ghi', 1, 'APPROVE'), author: 'bot' }]);
+  assert.deepEqual(r.verdicts[0].findings, []);
+  assert.equal(r.verdicts[0].findingCount, 0);
 });
