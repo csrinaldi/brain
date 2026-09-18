@@ -51,10 +51,16 @@ test('#998 R998-2/R998-4/R998-5/#882 R882-1: this PR owns exactly four modes; ma
   for (const mode of ['map', 'sdd', 'reviews', 'governance']) assert.equal(PLACEHOLDERS[mode], null, `mode "${mode}" has real content, not a placeholder`);
 });
 
-test('#998 R998-2: no roadmap, decisions, anti-pattern or by-actor/history view identifier exists in the page', () => {
+test('#882 R882-1/R882-2: the governance surface exists — the sub-nav is mounted, Roadmap draws real content', () => {
+  assert.match(INDEX_HTML, /<nav id="governance-nav"/, 'R882-1: the governance sub-nav mount must exist');
+  assert.match(APP_JS, /function renderRoadmap\(/, 'R882-2: Roadmap must render real content, not a placeholder');
+  assert.match(APP_JS, /GOVERNANCE_PLACEHOLDERS\[/, 'the four sub-views not yet built must still say their own placeholder, never an empty area');
+});
+
+test('#882: this PR does not draw them yet — decisions, anti-patterns, history and by-actor identifiers still do not exist in the page', () => {
   for (const [name, text] of [['app.js', APP_JS], ['index.html', INDEX_HTML]]) {
-    for (const forbidden of [/\broadmapview\b/i, /\bdecisionsview\b/i, /\badrs?\b/i, /anti-?pattern/i, /\bby-?actor\b/i, /\bhistoryview\b/i]) {
-      assert.ok(!forbidden.test(text), `${name} matched ${forbidden} — those views are #882's, not this slice's`);
+    for (const forbidden of [/\bdecisionsview\b/i, /anti-?pattern/i, /\bby-?actor\b/i, /\bhistoryview\b/i]) {
+      assert.ok(!forbidden.test(text), `${name} matched ${forbidden} — those views are #882's later PRs, not PR 1's`);
     }
   }
 });
@@ -70,9 +76,9 @@ test('#881 R881-10 S1: nothing on the page reads a worktree path — the committ
   assert.ok(!/file:\/\//.test(APP_JS), 'the page reads nothing from the filesystem directly');
 });
 
-test('#998 R998-2: the shell mounts exactly five regions — status, modes, banners, canvas, drawer', () => {
+test('#998 R998-2/#882 R882-1: the shell mounts exactly six regions — status, modes, banners, governance-nav, canvas, drawer', () => {
   const ids = [...INDEX_HTML.matchAll(/id="([^"]+)"/g)].map((m) => m[1]).sort();
-  assert.deepEqual(ids, ['banners', 'canvas', 'drawer', 'modes', 'status']);
+  assert.deepEqual(ids, ['banners', 'canvas', 'drawer', 'governance-nav', 'modes', 'status']);
 });
 
 test('#998 R998-5: a finding\'s own source goes through the same sourceStamp helper the door uses, never a second copy of that logic', () => {
