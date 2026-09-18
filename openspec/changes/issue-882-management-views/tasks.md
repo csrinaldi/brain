@@ -14,26 +14,26 @@ push, a posted cold-review APPROVE.
 {"slice": 1, "claims": ["R882-1", "R882-2"], "files": ["brain/scripts/ui/lib/governance-model.mjs", "brain/scripts/ui/lib/roadmap-model.mjs", "brain/scripts/ui/lib/view-model.mjs", "brain/scripts/ui/static/app.js", "brain/scripts/ui/static/index.html", "brain/scripts/ui/static/app.css", "brain/scripts/ui/static/views-owned.test.mjs"], "terminal_pr": "the tracker feature/issue-882-management-views -> main"}
 ```
 
-- [ ] T1a. `lib/governance-model.test.mjs`: `GOVERNANCE_VIEWS` is the five ids
+- [x] T1a. `lib/governance-model.test.mjs`: `GOVERNANCE_VIEWS` is the five ids
       in order; `GOVERNANCE_PLACEHOLDERS` has a non-empty sentence for every
       id not yet real; `row(...)` derives both `source` and `sourceStamp`
       from one `source` input, matching `provenance.mjs`'s own shapers. RED.
-- [ ] T1b. `lib/governance-model.mjs`: the table + `row()` helper. Mutation:
+- [x] T1b. `lib/governance-model.mjs`: the table + `row()` helper. Mutation:
       drop one placeholder entry → red.
-- [ ] T2a. `lib/roadmap-model.test.mjs`: an epic's declared children nest
+- [x] T2a. `lib/roadmap-model.test.mjs`: an epic's declared children nest
       under it; an undeclared node lands in `unlinked`; a `parent-not-epic`
       divergence is surfaced on the child's row, never silently nested; a
       graph section `{ok:false}` passes its reason through unchanged;
       determinism under shuffled `nodes`. RED (`ERR_MODULE_NOT_FOUND`).
-- [ ] T2b. `lib/roadmap-model.mjs`: `buildRoadmapModel(graphSection)` —
+- [x] T2b. `lib/roadmap-model.mjs`: `buildRoadmapModel(graphSection)` —
       groups by `kind === 'epic'` / `parent`, reads
       `declarationDivergences` for `key === 'parent'` per node, no timeline
       computed. Mutation: the `parent-not-epic` check removed → red.
-- [ ] T3. `lib/view-model.mjs`: `PLACEHOLDERS.governance` → `null`.
+- [x] T3. `lib/view-model.mjs`: `PLACEHOLDERS.governance` → `null`.
       `view-model.test.mjs` updated: `governance` now has real content, the
       same assertion shape PR 3/4/5 of #998 used when `sdd`/`reviews` went
       real. Mutation: the placeholder left non-null → red.
-- [ ] T4. `static/index.html`: `<nav id="governance-nav">` mounted inside the
+- [x] T4. `static/index.html`: `<nav id="governance-nav">` mounted inside the
       `governance` mode's content area. `static/app.js`: `renderGovernance`
       draws the five sub-nav buttons from `GOVERNANCE_VIEWS`
       (`aria-current="page"` on the active one, no inline handler — mirrors
@@ -50,9 +50,9 @@ push, a posted cold-review APPROVE.
       `renderRoadmap` themselves: RED/GREEN N/A — no DOM harness (D9), same
       precedent as #998's PR 2-6 renderers; verified by trace against
       `roadmap-model.test.mjs`'s covered contract.
-- [ ] T5. `GIT_CONFIG_GLOBAL=/dev/null npm test` and
+- [x] T5. `GIT_CONFIG_GLOBAL=/dev/null npm test` and
       `npm run brain:repo:check` green; counted diff under 1000.
-- [ ] T6. `npm run memory:save -- "<title>" "<content>" --issue 882 --type decision`; stage only the record and `.memory/index.jsonl`.
+- [x] T6. `npm run memory:save -- "<title>" "<content>" --issue 882 --type decision`; stage only the record and `.memory/index.jsonl`.
 
 ## PR 2 — Decisions (R882-3)
 
