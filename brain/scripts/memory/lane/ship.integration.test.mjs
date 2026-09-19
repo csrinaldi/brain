@@ -247,6 +247,108 @@ test('R3 under a real squash: squash-merging the lane into main makes a same-day
   assert.equal(remoteLaneSha, first.commit, 'the lane ref itself is untouched by the squash-merge no-op');
 });
 
+test('#1050 repro: a same-day append after a squash-merge reparents onto origin/main — X is not re-listed', async () => {
+  const { mainDir, originDir } = buildFixtureRepo();
+  addCandidate(mainDir, '2026-09-rec-1111111111111111.jsonl', recordJson('rec-1111111111111111', 'x'));
+  const { vcs } = recordingVcs();
+
+  const first = await shipLane({ root: mainDir, project: 'x/y', tier: 'lite', host: 'test-host', date: '2026-09-09', vcs });
+  assert.equal(first.pushed, true);
+
+  // Squash-merge X into main — same plumbing as the "R3 under a real squash"
+  // test above (auto-merge is hardcoded --squash on both providers, R3): no
+  // commit-ancestry relationship between the lane ref and main survives.
+  // Also delete the remote lane branch, matching the provider's own
+  // delete-branch-on-merge convention this same auto-merge relies on
+  // (design.md's Reparent note: a SURVIVING stale remote branch is a
+  // different, already-documented case — `surveyRef` computes `behind>0`
+  // and ship throws `diverged` rather than force-pushing over it).
+  const mainHead = git(mainDir, 'rev-parse', 'main').trim();
+  const laneTree = git(mainDir, 'rev-parse', `${first.commit}^{tree}`).trim();
+  const squashCommit = git(mainDir, 'commit-tree', laneTree, '-p', mainHead, '-m', 'squash merge lane').trim();
+  git(mainDir, 'update-ref', 'refs/heads/main', squashCommit);
+  git(mainDir, 'push', 'origin', 'main');
+  git(mainDir, 'push', 'origin', '--delete', first.branch);
+
+  // NOW collect a genuinely new record Y on top of the (pre-squash) local
+  // lane ref, and ship again — this is the bug's exact trigger: before
+  // #936, the second commit still parented on X's pre-merge commit, so its
+  // three-dot diff against origin/main re-derived X as "added by this lane"
+  // forever.
+  addCandidate(mainDir, '2026-09-rec-2222222222222222.jsonl', recordJson('rec-2222222222222222', 'y'));
+  const second = await shipLane({ root: mainDir, project: 'x/y', tier: 'lite', host: 'test-host', date: '2026-09-09', vcs });
+
+  assert.equal(second.pushed, true, 'Y is new content — this run must push');
+  const secondParent = git(mainDir, 'rev-parse', `${second.commit}^`).trim();
+  const originMainTip = git(originDir, 'rev-parse', 'main').trim();
+  assert.equal(secondParent, originMainTip, "the new commit's parent must be origin/main's own tip, not X's pre-squash commit");
+
+  const diffPaths = git(mainDir, 'diff', '--name-only', `origin/main...${second.commit}`)
+    .trim().split('\n').filter(Boolean);
+  assert.deepEqual(
+    diffPaths,
+    ['.memory/records/2026-09-rec-2222222222222222.jsonl'],
+    'the three-dot diff (PR title/body/lane-paths) must list only Y — X must never be re-listed',
+  );
+});
+
+test('a partially-delivered tip still appends on the existing tip — reparent only fires when EVERY lane path is delivered', async () => {
+  const { mainDir } = buildFixtureRepo();
+  addCandidate(mainDir, '2026-09-rec-1111111111111111.jsonl', recordJson('rec-1111111111111111', 'x'));
+  addCandidate(mainDir, '2026-09-rec-3333333333333333.jsonl', recordJson('rec-3333333333333333', 'z'));
+  const { vcs } = recordingVcs();
+
+  const first = await shipLane({ root: mainDir, project: 'x/y', tier: 'lite', host: 'test-host', date: '2026-09-09', vcs });
+  assert.equal(first.pushed, true);
+
+  // Land ONLY one of the lane's two paths directly on main (e.g. a human
+  // cherry-picked a single record out of the lane's PR) — a partial
+  // delivery: main gains rec-1111111111111111 but not rec-3333333333333333.
+  // The file is already untracked-but-present on disk from `addCandidate`
+  // above (collectLane never touches the working tree), so `git add` alone
+  // stages it, byte-identical to what the lane shipped.
+  git(mainDir, 'add', '.memory/records/2026-09-rec-1111111111111111.jsonl');
+  git(mainDir, 'commit', '-q', '-m', 'cherry-pick one record onto main');
+  git(mainDir, 'push', '-q', 'origin', 'main');
+
+  addCandidate(mainDir, '2026-09-rec-2222222222222222.jsonl', recordJson('rec-2222222222222222', 'y'));
+  const second = await shipLane({ root: mainDir, project: 'x/y', tier: 'lite', host: 'test-host', date: '2026-09-09', vcs });
+
+  assert.equal(second.pushed, true);
+  const secondParent = git(mainDir, 'rev-parse', `${second.commit}^`).trim();
+  assert.equal(secondParent, first.commit, 'a partially-delivered tip must keep appending on the existing tip, unchanged from today');
+});
+
+test('a stale/unfetchable base keeps appending on the existing tip — an unknown delivery state must never reparent', () => {
+  const { mainDir, originDir } = buildFixtureRepo();
+  addCandidate(mainDir, '2026-09-rec-1111111111111111.jsonl', recordJson('rec-1111111111111111', 'x'));
+
+  const first = collectLane({ root: mainDir, host: 'test-host', date: '2026-09-09' });
+  git(mainDir, 'push', '-q', 'origin', `${first.ref}:${first.ref}`);
+
+  // Squash-merge X into main so it WOULD be delivered if this run's fetch
+  // could see it — this test proves a fetch failure ALONE (baseStale) must
+  // never reparent, delivered-on-the-remote or not.
+  const mainHead = git(mainDir, 'rev-parse', 'main').trim();
+  const laneTree = git(mainDir, 'rev-parse', `${first.commit}^{tree}`).trim();
+  const squashCommit = git(mainDir, 'commit-tree', laneTree, '-p', mainHead, '-m', 'squash merge lane').trim();
+  git(mainDir, 'update-ref', 'refs/heads/main', squashCommit);
+  git(mainDir, 'push', 'origin', 'main');
+
+  // Break the remote so THIS run's `git fetch origin main` fails. The stale
+  // `refs/remotes/origin/main` from the prior successful fetch is still on
+  // disk — a naive read would see the squash-merge and call it delivered;
+  // `baseFetched` must gate that off.
+  git(mainDir, 'remote', 'set-url', 'origin', join(mainDir, 'no-such-origin.git'));
+
+  addCandidate(mainDir, '2026-09-rec-2222222222222222.jsonl', recordJson('rec-2222222222222222', 'y'));
+  const second = collectLane({ root: mainDir, host: 'test-host', date: '2026-09-09' });
+
+  assert.equal(second.baseFetched, false, "the broken remote must make this run's fetch fail");
+  const secondParent = git(mainDir, 'rev-parse', `${second.commit}^`).trim();
+  assert.equal(secondParent, first.commit, 'an unreadable delivery state must keep appending on the existing tip, never reparenting');
+});
+
 test('the main checkout is untouched: git status and HEAD are byte-identical before and after', async () => {
   const { mainDir } = buildFixtureRepo();
   addCandidate(mainDir, '2026-09-rec-1111111111111111.jsonl', recordJson('rec-1111111111111111', 'x'));
