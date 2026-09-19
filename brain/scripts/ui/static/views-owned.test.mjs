@@ -21,6 +21,7 @@ import { dirname, join } from 'node:path';
 
 import { TAB_IDS } from '../lib/drawer-model.mjs';
 import { MODE_IDS, PLACEHOLDERS } from '../lib/view-model.mjs';
+import { GOVERNANCE_VIEW_IDS, GOVERNANCE_PLACEHOLDERS } from '../lib/governance-model.mjs';
 
 const STATIC_DIR = dirname(fileURLToPath(import.meta.url));
 const APP_JS = readFileSync(join(STATIC_DIR, 'app.js'), 'utf8');
@@ -46,17 +47,87 @@ test('#998 R998-6: the drawer now has six tabs, in the design\'s order', () => {
   assert.deepEqual(TAB_IDS, ['spec', 'sdd', 'tasks', 'workingMemory', 'reviews', 'records']);
 });
 
-test('#998 R998-2/R998-4/R998-5: this PR owns exactly four modes; map, sdd and reviews have real content, governance names the PR that brings it', () => {
+test('#998 R998-2/R998-4/R998-5/#882 R882-1: this PR owns exactly four modes; map, sdd, reviews and governance all have real content — governance mounts its own sub-nav and sub-router from #882 PR 1 on', () => {
   assert.deepEqual(MODE_IDS, ['map', 'sdd', 'reviews', 'governance']);
-  for (const mode of ['map', 'sdd', 'reviews']) assert.equal(PLACEHOLDERS[mode], null, `mode "${mode}" has real content, not a placeholder`);
-  assert.match(PLACEHOLDERS.governance, /\bPR \d\b/, 'mode "governance" must name the PR that brings it, not render blank');
+  for (const mode of ['map', 'sdd', 'reviews', 'governance']) assert.equal(PLACEHOLDERS[mode], null, `mode "${mode}" has real content, not a placeholder`);
 });
 
-test('#998 R998-2: no roadmap, decisions, anti-pattern or by-actor/history view identifier exists in the page', () => {
-  for (const [name, text] of [['app.js', APP_JS], ['index.html', INDEX_HTML]]) {
-    for (const forbidden of [/\broadmapview\b/i, /\bdecisionsview\b/i, /\badrs?\b/i, /anti-?pattern/i, /\bby-?actor\b/i, /\bhistoryview\b/i]) {
-      assert.ok(!forbidden.test(text), `${name} matched ${forbidden} — those views are #882's, not this slice's`);
-    }
+test('#882 R882-1/R882-2: the governance surface exists — the sub-nav is mounted, Roadmap draws real content', () => {
+  assert.match(INDEX_HTML, /<nav id="governance-nav"/, 'R882-1: the governance sub-nav mount must exist');
+  assert.match(APP_JS, /function renderRoadmap\(/, 'R882-2: Roadmap must render real content, not a placeholder');
+  assert.match(APP_JS, /GOVERNANCE_PLACEHOLDERS\[/, 'the sub-views not yet built must still say their own placeholder, never an empty area');
+});
+
+test('#882 cold review of PR 1 (blocker): a roadmap row applies the same sourceStamp helper the door uses — R882-1\'s row() is not a dead export', () => {
+  const fnMatch = APP_JS.match(/function renderRoadmapRow\([^)]*\) \{[\s\S]*?\n}\n/);
+  assert.ok(fnMatch, 'renderRoadmapRow function must exist in app.js');
+  assert.match(fnMatch[0], /renderSourceStamp\(row\.sourceStamp\)/, 'renderRoadmapRow must render row.sourceStamp through renderSourceStamp, never a bare #N with no stamp and no link');
+});
+
+test('#882 cold review of PR #1037 (correction 1): a roadmap row says its own stateReason when the state could not be read — the model\'s said value is not silently dropped on screen', () => {
+  const fnMatch = APP_JS.match(/function renderRoadmapRow\([^)]*\) \{[\s\S]*?\n}\n/);
+  assert.ok(fnMatch, 'renderRoadmapRow function must exist in app.js');
+  assert.match(fnMatch[0], /row\.stateReason/, 'renderRoadmapRow must read row.stateReason, so roadmap-model.mjs\'s said reason for an unknown state actually reaches the screen');
+});
+
+test('#882 R882-3: Decisions draws real content — the ADR table, drift warnings beside it, never a second drift computation', () => {
+  assert.match(APP_JS, /function renderDecisions\(/, 'R882-3: Decisions must render real content, not a placeholder');
+  assert.match(APP_JS, /buildDecisionsModel\(/, 'renderDecisions must build its rows from lib/decisions-model.mjs, not recompute them inline');
+  assert.match(APP_JS, /row\.issuesLabel/, 'the issues list must render the model\'s own label text — the parser does not distinguish "referenced" from "driving"');
+});
+
+test('#882 R882-4: Anti-patterns draws real content — the catalogue, core before project, an unlistable scope said beside the other scope\'s real rows', () => {
+  assert.match(APP_JS, /function renderAntiPatterns\(/, 'R882-4: Anti-patterns must render real content, not a placeholder');
+  assert.match(APP_JS, /buildAntiPatternsModel\(/, 'renderAntiPatterns must build its rows from lib/anti-patterns-model.mjs, not recompute them inline');
+  // The literal string is gone: the model builds each citation's stamp through
+  // `sourceStamp`/`issueUrl` now, so the page renders stamps, not text.
+  assert.match(APP_JS, /for \(const stamp of row\.issueStamps\) cited\.appendChild\(renderSourceStamp\(stamp\)\)/, 'each cited issue must be its own chip, so a known project makes it clickable');
+  assert.ok(!/\[forge: #\$\{n\}\]/.test(APP_JS), 'the page must not hand-build a forge label the model already stamps');
+});
+
+test('#882 R882-5: History draws real content — merges/releases/ADR amendments through lib/history-model.mjs, linked to the Reviews mode, never a duplicate review-round rendering', () => {
+  assert.match(APP_JS, /function renderHistory\(/, 'R882-5: History must render real content, not a placeholder');
+  assert.match(APP_JS, /buildHistoryModel\(/, 'renderHistory must build its events from lib/history-model.mjs, not recompute them inline');
+  const fnMatch = APP_JS.match(/function renderHistory\([^)]*\) \{[\s\S]*?\n}\n/);
+  assert.ok(fnMatch, 'renderHistory function must exist in app.js');
+  const linkMatch = APP_JS.match(/function renderHistoryReviewsLink\([^)]*\) \{[\s\S]*?\n}\n/);
+  assert.ok(linkMatch, 'renderHistoryReviewsLink function must exist in app.js');
+  const body = fnMatch[0] + linkMatch[0];
+  assert.match(body, /switchToMode\('reviews'\)/, "the history pane links to the Reviews mode instead of rendering a second, undated projection of the same rounds");
+  assert.ok(!/renderReviewRound\(/.test(body), 'no review round is ever rendered inside the history pane');
+});
+
+test('#882 R882-5: History\'s own event renderer never branches on a review kind — buildHistoryModel already guarantees none exists', () => {
+  const fnMatch = APP_JS.match(/function renderHistoryEvent\([^)]*\) \{[\s\S]*?\n}\n/);
+  assert.ok(fnMatch, 'renderHistoryEvent function must exist in app.js');
+  assert.ok(!/'review'/.test(fnMatch[0]), 'no branch on a review kind inside History\'s own event renderer');
+});
+
+test('#882 R882-6: By actor draws real content — records and reviews merged into one row per actor, humans and agents in one table, no fabricated merge count', () => {
+  assert.match(APP_JS, /function renderActors\(/, 'R882-6: By actor must render real content, not a placeholder');
+  assert.match(APP_JS, /buildActorsModel\(/, 'renderActors must build its rows from lib/actors-model.mjs, not recompute them inline');
+  assert.match(APP_JS, /row\.reviewsPosted\.caveat/, 'reviewsPosted must render the model\'s own caveat text, never a bare count with no scope said');
+  assert.match(APP_JS, /row\.prsMerged\.reason/, 'prsMerged must render the model\'s own stated reason, never a bare 0');
+  assert.ok(!/prsMerged\s*:\s*0\b/.test(APP_JS), 'app.js must never hard-code prsMerged as a bare 0');
+});
+
+test('#882 R882-6: renderActors never re-sorts by volume — the model\'s own name order stands (issue #882\'s own "must NOT become a leaderboard")', () => {
+  const fnMatch = APP_JS.match(/function renderActors\([^)]*\) \{[\s\S]*?\n}\n/);
+  assert.ok(fnMatch, 'renderActors function must exist in app.js');
+  assert.ok(!/\.sort\(/.test(fnMatch[0]), 'renderActors must not re-sort the model\'s rows — buildActorsModel already sorts by name only');
+});
+
+test('#882: the governance surface is finalized (PR 5) — all five sub-views draw real content, GOVERNANCE_PLACEHOLDERS has nothing left unbuilt', () => {
+  assert.deepEqual(GOVERNANCE_VIEW_IDS, ['roadmap', 'decisions', 'anti-patterns', 'history', 'actors']);
+  for (const id of GOVERNANCE_VIEW_IDS) assert.equal(GOVERNANCE_PLACEHOLDERS[id], null, `sub-view "${id}" still names a placeholder — every #882 view is built as of PR 5`);
+});
+
+test('#882: every governance row\'s source stamp goes through renderSourceStamp — a hand-built el(\'span\', \'source\', …) drops the "open ↗" chip a real forge link would otherwise carry', () => {
+  for (const name of ['renderDecisionRow', 'renderAntiPatternRow', 'renderHistoryEvent', 'renderActorRow']) {
+    const fnMatch = APP_JS.match(new RegExp(`function ${name}\\([^)]*\\) \\{[\\s\\S]*?\\n}\\n`));
+    assert.ok(fnMatch, `${name} function must exist in app.js`);
+    assert.ok(!/el\('span',\s*'source',/.test(fnMatch[0]), `${name} must not hand-build the source span directly — read it through renderSourceStamp instead`);
+    assert.match(fnMatch[0], /renderSourceStamp\(/, `${name} must render its row's sourceStamp through renderSourceStamp, never a second copy of that logic`);
   }
 });
 
@@ -71,9 +142,9 @@ test('#881 R881-10 S1: nothing on the page reads a worktree path — the committ
   assert.ok(!/file:\/\//.test(APP_JS), 'the page reads nothing from the filesystem directly');
 });
 
-test('#998 R998-2: the shell mounts exactly five regions — status, modes, banners, canvas, drawer', () => {
+test('#998 R998-2/#882 R882-1: the shell mounts exactly six regions — status, modes, banners, governance-nav, canvas, drawer', () => {
   const ids = [...INDEX_HTML.matchAll(/id="([^"]+)"/g)].map((m) => m[1]).sort();
-  assert.deepEqual(ids, ['banners', 'canvas', 'drawer', 'modes', 'status']);
+  assert.deepEqual(ids, ['banners', 'canvas', 'drawer', 'governance-nav', 'modes', 'status']);
 });
 
 test('#998 R998-5: a finding\'s own source goes through the same sourceStamp helper the door uses, never a second copy of that logic', () => {
@@ -121,4 +192,70 @@ test('#998 R998-6 T4/T6: the status bar shows the poll countdown from pollIndica
   assert.match(APP_JS, /indicator\.countdown/, 'renderStatus must render pollIndicator\'s own countdown field');
   const dateNowCalls = [...APP_JS.matchAll(/Date\.now\(\)/g)].length;
   assert.equal(dateNowCalls, 1, 'app.js reads Date.now() exactly once (renderStatus\'s own nowMs) — every clock decision beyond that lives in lib/, driven by the injected now');
+});
+
+// #882 PR 2 merge onto PR 1's head: the shared stamp helper exists now, and a
+// hand-rolled `el('span','source', …)` silently drops the "open ↗" chip the
+// moment a stamp carries an href — the defect the fresh review of PR 3 named
+// across both views.
+test('#882 R882-1/R882-5: every governance row renders its stamp through renderSourceStamp, never a hand-built span', () => {
+  // fresh-context review of PR 4, warning: renderHistoryEvent hand-built its
+  // own `el('span', 'source', ...)`, silently dropping the "open ↗" chip —
+  // the same defect the fresh review of PR 3 already named for Decisions
+  // and Anti-patterns. Pinned here alongside those three, not a fourth
+  // separate test, so the shared discipline stays in one place.
+  for (const [fn, param] of [['renderRoadmapRow', 'row'], ['renderDecisionRow', 'row'], ['renderAntiPatternRow', 'row'], ['renderHistoryEvent', 'event']]) {
+    const m = APP_JS.match(new RegExp(`function ${fn}\\([^)]*\\) \\{[\\s\\S]*?\\n}\\n`));
+    assert.ok(m, `${fn} must exist in app.js`);
+    assert.match(m[0], new RegExp(`renderSourceStamp\\(${param}\\.sourceStamp\\)`), `${fn} must render its stamp through the shared helper`);
+    assert.ok(!/el\('span', 'source'/.test(m[0]), `${fn} must not hand-build the stamp span — the helper owns the "open ↗" chip`);
+  }
+});
+
+// #1043 cold review, correction 2: the commit list is capped and the tags are
+// not, so an older release can appear with no merges around it. The page must
+// say the cap where the reader sees the count, never leave it implied.
+test('#1043 correction 2: renderHistory says the commit cap beside the event count', () => {
+  const m = APP_JS.match(/function renderHistory\(\) \{[\s\S]*?\n}\n/);
+  assert.ok(m, 'renderHistory must exist in app.js');
+  assert.match(m[0], /capNote\(/, 'renderHistory must ask the model for the cap sentence');
+  assert.match(m[0], /model\.value\.cap|cap\b/, 'the sentence must come from the model\'s own cap, not a literal in the page');
+});
+
+// #1043 correction 3: the model says a forge-only row is unreconciled evidence;
+// the page has to show it, or the sentence never reaches the reader.
+test('#1043 correction 3: renderActorRow renders the model\'s evidence note', () => {
+  const m = APP_JS.match(/function renderActorRow\([^)]*\) \{[\s\S]*?\n}\n/);
+  assert.ok(m, 'renderActorRow must exist in app.js');
+  assert.match(m[0], /row\.evidenceNote/, 'the unreconciled-namespace note must be rendered, not left in the model');
+});
+
+// #1043 round 2, correction 1: the model states why an event sits at the end
+// of the timeline; a view that prints only the date drops that sentence.
+test('#1043 round 2: renderHistoryEvent renders the model\'s dateUnparseable reason', () => {
+  const m = APP_JS.match(/function renderHistoryEvent\([^)]*\) \{[\s\S]*?\n}\n/);
+  assert.ok(m, 'renderHistoryEvent must exist in app.js');
+  assert.match(m[0], /event\.dateUnparseable/, 'an event kept at the end for an unreadable date must say so on the page, not only in the model');
+});
+
+// #1043 round 4: with counts keyed by forge login, a record-backed row never
+// shows one — so a summary reading "records and open-PR review threads" says
+// the two are joined when the model's whole point is that they are not.
+test('#1043 round 4: the by-actor summary says the two namespaces are listed side by side, not joined', () => {
+  const m = APP_JS.match(/function renderActors\(\) \{[\s\S]*?\n}\n/);
+  assert.ok(m, 'renderActors must exist in app.js');
+  assert.ok(!/records and open-PR review threads/.test(m[0]), 'the old wording implied a join this data never performs');
+  assert.match(m[0], /not joined|side by side|never joined/i, 'the summary must say the two sources sit beside each other');
+});
+
+test('#1043 round 4: renderHistory says how same-day events are ordered', () => {
+  const m = APP_JS.match(/function renderHistory\(\) \{[\s\S]*?\n}\n/);
+  assert.ok(m, 'renderHistory must exist in app.js');
+  assert.match(m[0], /sameDayNote/, 'the ordering caveat must reach the page, not sit in the model');
+});
+
+test('#1043 round 5: renderHistoryEvent says a malformed line\'s own reason, not only the generic date one', () => {
+  const m = APP_JS.match(/function renderHistoryEvent\([^)]*\) \{[\s\S]*?\n}\n/);
+  assert.ok(m, 'renderHistoryEvent must exist in app.js');
+  assert.match(m[0], /event\.malformed/, 'the line-level reason must reach the page');
 });
