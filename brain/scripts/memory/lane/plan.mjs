@@ -54,10 +54,16 @@ function byteCompare(a, b) {
  * slugifyHost() — A5: lowercase, every run of `[^a-z0-9]` becomes `-`,
  * collapse repeats, strip leading/trailing `-`, truncate to 40, strip again.
  *
+ * Exported (#936, D-sweep step 3): the cross-day sweep (`lane/sweep.mjs`)
+ * needs the exact same slug this module already uses to build a ref, so it
+ * can filter `memory/<host>-*` refs by an EXACT match on this host's own
+ * slug — never a prefix match, which would let a `gandalf` host claim
+ * `gandalf-rog-...`'s refs too.
+ *
  * @param {string} host
  * @returns {string}
  */
-function slugifyHost(host) {
+export function slugifyHost(host) {
   let slug = String(host ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '-');
   slug = slug.replace(/^-+|-+$/g, '');
   slug = slug.slice(0, 40);

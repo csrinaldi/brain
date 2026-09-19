@@ -18,7 +18,7 @@ import { t } from './i18n/t.mjs';
 import { currentBranch } from './lib/git-branch.mjs';
 import { agentRuntimeReport, platformEnvVars, platformConfig } from './harness/backends/agent-runtime.mjs';
 import { readEnv } from './lib/env-read.mjs';
-import { laneSweepEnabled, runLaneSweep, laneSweepLine } from './memory/day-start-sweep.mjs';
+import { laneSweepEnabled, runLaneSweep, laneSweepLine, laneSweepBranchLines } from './memory/day-start-sweep.mjs';
 
 const ROOT = process.cwd();
 const NODE = process.execPath;
@@ -383,12 +383,22 @@ if (engram.status === 0) {
   if (laneEnabled) {
     console.log(`  ${C.dim}${await t('day.memory.laneSweep.running')}${C.reset}`);
   }
-  const line = laneSweepLine(runLaneSweep({ config, enabled: laneEnabled }));
+  const laneResult = runLaneSweep({ config, enabled: laneEnabled });
+  const line = laneSweepLine(laneResult);
   if (line.level === 'warn') {
     const detail = await t(line.params.detailKey, line.params.detailParams);
     warn(await t(line.key, { detail }));
   } else if (line.level === 'ok') {
     ok(await t(line.key, line.params));
+  }
+  // #936 (D-sweep step 5.7): one line per cross-day sweep row, in ADDITION
+  // to the single-line summary above — `laneResult.outcome?.sweep` is `null`
+  // whenever today's own run never reached the sweep (flag off, a non-zero
+  // exit, unparseable output, or --dry-run), so `laneSweepBranchLines()`
+  // returns `[]` and this loop is a no-op.
+  for (const branchLine of laneSweepBranchLines(laneResult.outcome?.sweep ?? null)) {
+    if (branchLine.level === 'warn') warn(await t(branchLine.key, branchLine.params));
+    else ok(await t(branchLine.key, branchLine.params));
   }
 }
 

@@ -527,8 +527,30 @@ if (op === "ship") {
       vcs,
     });
 
+    // D6 (#936): the cross-day sweep runs ONLY after today's shipLane call
+    // above SUCCEEDED (this line is unreached if it threw — the `catch`
+    // below owns that path) and ONLY when this is not `--dry-run` (a plan
+    // must never mutate any ref, today's or a prior day's). `sweepLanes()`
+    // never throws by construction — every per-branch failure it can hit is
+    // caught internally and mapped to that branch's own row — so today's
+    // already-successful result is never put at risk by a sweep-side bug.
+    let sweep = null;
+    if (!dryRun) {
+      const { sweepLanes } = await import("./lane/sweep.mjs");
+      const { defaultGit } = await import("./lane/collect.mjs");
+      sweep = await sweepLanes({
+        root: memoryRoot,
+        project: config.project.slug,
+        tier: config.governance.tier,
+        host: hostname(),
+        today: result.date,
+        git: defaultGit,
+        vcs,
+      });
+    }
+
     if (asJson) {
-      console.log(JSON.stringify({ ...result, invoker }));
+      console.log(JSON.stringify({ ...result, invoker, sweep }));
     } else {
       console.log(`memory/cli: ${await t(`memory.ship.${shipOutcomeKey(result)}`, {
         ref: result.ref,
@@ -563,6 +585,14 @@ if (op === "ship") {
       }
       if (!result.identityBound) {
         console.error(`memory/cli: ${await t("memory.ship.identityAmbient")}`);
+      }
+      // D-sweep step 5.8: one stderr line per cross-day sweep row, same
+      // "always on stderr, never gated by --json" evidence discipline as
+      // skippedWorktrees/pushed/prExisting/armed above.
+      for (const row of sweep?.branches ?? []) {
+        console.error(`memory/cli: ${await t(`memory.ship.sweep.${row.action}`, {
+          branch: row.branch, date: row.date, number: row.pr?.number ?? null, reason: row.reason ?? "",
+        })}`);
       }
     }
     process.exit(0);

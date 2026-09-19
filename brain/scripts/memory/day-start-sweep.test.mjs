@@ -10,7 +10,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { laneSweepEnabled, runLaneSweep, laneSweepLine } from './day-start-sweep.mjs';
+import { laneSweepEnabled, runLaneSweep, laneSweepLine, laneSweepBranchLines } from './day-start-sweep.mjs';
+import en from '../i18n/en.mjs';
+import es from '../i18n/es.mjs';
 
 // ── laneSweepEnabled — pure ─────────────────────────────────────────────────
 
@@ -276,4 +278,53 @@ test('laneSweepLine never returns a level outside {skip, ok, warn} — the only 
   for (const c of cases) {
     assert.ok(['skip', 'ok', 'warn'].includes(laneSweepLine(c).level));
   }
+});
+
+// ── laneSweepBranchLines — pure, one line per sweep-table row (#936) ────────
+
+test('laneSweepBranchLines: null sweep (--dry-run, or no sweep ran) yields zero lines, never a crash', () => {
+  assert.deepEqual(laneSweepBranchLines(null), []);
+  assert.deepEqual(laneSweepBranchLines(undefined), []);
+  assert.deepEqual(laneSweepBranchLines({ remoteListed: true, branches: undefined }), []);
+});
+
+test('laneSweepBranchLines: empty branches yields zero lines', () => {
+  assert.deepEqual(laneSweepBranchLines({ remoteListed: true, branches: [] }), []);
+});
+
+const BRANCH_ACTIONS = ['deleted', 'shipped', 'reconciled', 'closedUnmerged', 'unknown', 'diverged', 'failed', 'remoteOnly'];
+const WARN_ACTIONS = new Set(['closedUnmerged', 'unknown', 'diverged', 'failed', 'remoteOnly']);
+
+for (const action of BRANCH_ACTIONS) {
+  test(`laneSweepBranchLines: action "${action}" renders day.memory.laneSweep.branch.${action}, level ${WARN_ACTIONS.has(action) ? 'warn' : 'ok'}`, () => {
+    const row = { branch: 'memory/test-host-2026-09-01', date: '2026-09-01', where: 'local', action, delivered: null, pr: { number: 7, url: null }, reason: action === 'failed' ? 'boom' : null };
+    const [line] = laneSweepBranchLines({ remoteListed: true, branches: [row] });
+    assert.equal(line.key, `day.memory.laneSweep.branch.${action}`);
+    assert.equal(line.level, WARN_ACTIONS.has(action) ? 'warn' : 'ok');
+    assert.equal(line.params.branch, row.branch);
+    assert.equal(line.params.date, row.date);
+    assert.equal(line.params.number, 7);
+    // Both catalogs must carry this key — a missing key would otherwise
+    // silently render as the literal key string to the operator.
+    assert.equal(typeof en[line.key], 'string', `en.mjs must carry ${line.key}`);
+    assert.equal(typeof es[line.key], 'string', `es.mjs must carry ${line.key}`);
+    assert.equal(typeof en[`memory.ship.sweep.${action}`], 'string', `en.mjs must carry memory.ship.sweep.${action}`);
+    assert.equal(typeof es[`memory.ship.sweep.${action}`], 'string', `es.mjs must carry memory.ship.sweep.${action}`);
+  });
+}
+
+test('laneSweepBranchLines: a row with no PR (pr:null) reports number:null, never throws', () => {
+  const [line] = laneSweepBranchLines({ remoteListed: true, branches: [{ branch: 'memory/test-host-2026-09-01', date: '2026-09-01', action: 'deleted', delivered: true, pr: null, reason: null }] });
+  assert.equal(line.params.number, null);
+});
+
+test('laneSweepBranchLines: multiple rows produce one line each, in order', () => {
+  const branches = [
+    { branch: 'memory/test-host-2026-09-01', date: '2026-09-01', action: 'deleted', delivered: true, pr: null, reason: null },
+    { branch: 'memory/test-host-2026-09-02', date: '2026-09-02', action: 'unknown', delivered: null, pr: null, reason: 'baseStale' },
+  ];
+  const lines = laneSweepBranchLines({ remoteListed: true, branches });
+  assert.equal(lines.length, 2);
+  assert.equal(lines[0].key, 'day.memory.laneSweep.branch.deleted');
+  assert.equal(lines[1].key, 'day.memory.laneSweep.branch.unknown');
 });
