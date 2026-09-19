@@ -89,11 +89,20 @@ function fixtureRepo() {
   return root;
 }
 
-async function boot() {
+async function boot({ issues = ISSUES } = {}) {
+  const vcs = {
+    async issueList() { return issues.map(({ number, title, labels }) => ({ number, title, labels, assignees: [] })); },
+    async issueView({ number }) {
+      const issue = issues.find((i) => i.number === number);
+      if (!issue) throw new Error(`no such issue #${number}`);
+      if (issue.body === null) throw new Error('the forge refused this body');
+      return { body: issue.body, assignees: [] };
+    },
+  };
   const snapshot = await buildSnapshot({
     root: fixtureRepo(),
     project: 'csrinaldi/brain',
-    vcs: VCS,
+    vcs,
     now: '2026-09-19T12:00:00.000Z',
     // No git in a temp directory, and a harness must not depend on one.
     _run: () => { throw new Error('git is not available in this harness'); },
@@ -282,4 +291,27 @@ test('#1059 smoke: the finder survives a re-render, and says epics are not data 
   fire(input, 'input');
   const ticket = findAll(dom.mounts.search, byClass('search-hit'))[0];
   assert.ok(!/tracker /.test(ticket.textContent), 'a ticket claims no tracker it never declared');
+});
+
+test('#1059 smoke: asked for an epic in a graph that declares none, the finder says why — and stays quiet otherwise', async (t) => {
+  // The live snapshot is exactly this graph: 95 nodes, `kind` and `tracker`
+  // null on every one of them, because no issue body has declared either yet.
+  const undeclared = ISSUES.map((i) => (i.body === null ? i : { ...i, body: i.body.replace(/^kind:.*\n/m, '').replace(/^tracker:.*\n/m, '') }));
+  const dom = await boot({ issues: undeclared });
+  t.after(() => dom.restore());
+
+  const input = find(dom.mounts.search, (n) => n.tagName === 'INPUT');
+
+  input.value = 'epic';
+  fire(input, 'input');
+  const asked = dom.mounts.search.textContent;
+  assert.match(asked, /no issue body has declared one yet/, 'asked for an epic, the page states the absence instead of answering an empty list');
+  assert.match(asked, /#1032 is the ticket/, 'and names the ticket that makes kind, parent and tracker real data');
+
+  // A sentence about `kind` under every search for a title is noise, and
+  // noise is how a real statement stops being read.
+  input.value = 'memory';
+  fire(input, 'input');
+  assert.ok(!/no issue body has declared one yet/.test(dom.mounts.search.textContent),
+    'a query that never mentioned epics or trackers gets no lecture about them');
 });

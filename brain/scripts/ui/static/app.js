@@ -255,10 +255,12 @@ function renderSearchResults() {
 
   const { results, shown, total, note, epicTrackerFacet } = found.value;
 
-  // Asked for epics and trackers by name, the page must not answer with an
-  // empty list as though none existed: `kind` and `tracker` are declared
-  // fields that no issue body carries yet, and the model says so.
-  if (!epicTrackerFacet.ok && searchQuery.trim() !== '') {
+  // Asked for epics or trackers BY NAME, the page must not answer with an
+  // empty list as though none existed: those are declared fields that no
+  // issue body carries yet, and the model says so. The notice is gated on the
+  // query actually asking, because a sentence about `kind` under every search
+  // for a title is noise, and noise is how a real statement stops being read.
+  if (!epicTrackerFacet.ok && /epic|tracker/i.test(searchQuery)) {
     searchResultsMount.appendChild(said(epicTrackerFacet.reason));
   }
 

@@ -106,3 +106,55 @@ are stripped first, strings last.
 
 A DOM smoke harness would have caught all three defects on the first render
 and is the real fix for this class. It is not in this change's scope.
+
+## The page is run now, not only scanned
+
+D9's premise was that asserting anything about `app.js` required a DOM, and a
+DOM required a dependency. That premise cost three shipped defects. It was
+wrong: `ui/test-support/dom.mjs` is about two hundred lines, imports nothing,
+and runs the real module.
+
+`load-app.mjs` imports the actual `static/app.js` with its `./lib/` specifiers
+rewritten to the real modules, into `testTmp` and never into the repository.
+The page's `setInterval` is stubbed across the import only — a real one holds
+the event loop open and `node --test` hangs instead of failing, and replacing
+a global timer for the whole run would reach the test runner itself.
+
+The fixture is issue BODIES fed to the real `buildSnapshot`. Nothing in the
+test describes the shape of a node or a change; the production readers decide
+that. This is the direct answer to how the `stages` defect shipped.
+
+Each of the three defects was reintroduced:
+
+| mutation | smoke suite |
+| --- | --- |
+| `sddForIssue` returns the raw entry | 3 of 3 red |
+| `saidList` deleted | 3 of 3 red |
+| the panel drawn only in the map view | 1 red |
+
+The second needed the fixture widened before it bit: with four tidy issues no
+branch ever called `saidList`, and a mutation that leaves the suite green is
+not evidence. A cross-lane edge and a body the forge refuses now ride in the
+fixture, which is also the only honest way to draw those two regions.
+
+## The finder (R1059-11)
+
+The maintainer asked for a way to find epics, trackers and tickets.
+`lib/search-model.mjs` matches by issue number, title, track and label, ranks
+an exact number above everything, and caps the list while stating the total.
+
+Two decisions worth the ink:
+
+- **A result says it is an epic or a tracker from the DECLARATION**, never
+  from the word in its title. Six issues on the live graph have "epic" in the
+  title; none declares `kind`. The finder lists all six and decorates none.
+- **The field is its own mount, built once.** The status bar re-renders on a
+  five-second clock and `render()` runs on every stream frame, so a control
+  rebuilt by either would drop the caret and erase a half-typed query under
+  the reader's hands. The smoke suite pins this by asserting the input is the
+  SAME element across a full render.
+
+The notice about `kind` and `tracker` being undeclared is gated on the query
+actually asking for one. A sentence about `kind` under every search for a
+title is noise, and noise is how a real statement stops being read. Both
+directions of that gate were mutated and each turns exactly one test red.
