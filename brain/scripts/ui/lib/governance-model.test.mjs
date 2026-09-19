@@ -8,7 +8,7 @@ import { GOVERNANCE_VIEWS, GOVERNANCE_VIEW_IDS, GOVERNANCE_PLACEHOLDERS, row } f
 import { sourceLabel, sourceStamp } from './provenance.mjs';
 
 test('#882 R882-1: GOVERNANCE_VIEWS is the five sub-view ids, in the issue body\'s order', () => {
-  assert.deepEqual(GOVERNANCE_VIEW_IDS, ['roadmap', 'decisions', 'anti-patterns', 'history', 'actors']);
+  assert.deepEqual(GOVERNANCE_VIEW_IDS, ['roadmap', 'decisions', 'anti-patterns', 'history', 'actors', 'queue', 'slices']);
   for (const view of GOVERNANCE_VIEWS) {
     assert.equal(typeof view.id, 'string');
     assert.equal(typeof view.label, 'string');

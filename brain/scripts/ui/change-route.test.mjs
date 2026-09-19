@@ -355,7 +355,7 @@ test('#998 R998-6: an unreadable records section is the tab\'s own reason, never
 
 // ── #998 R998-6: the sdd tab — this issue's own seven-stage presence ────────
 
-test('#998 R998-6: the sdd tab lists the seven stages\' raw presence for this issue\'s own change row, sourced to the change dir', () => {
+test('#998 R998-6/#1059: the sdd tab names each stage\'s FILE and sources the row to that file, not to the directory all seven share', () => {
   const root = makeRoot();
   const changes = [{ id: 'issue-881-ui-server-canvas', issue: ISSUE, slug: 'ui-server-canvas', dir: CHANGE_DIR, artefacts: { proposal: true, spec: true, design: false, tasks: true, apply: false, verify: false, archive: false } }];
   const snapshot = makeSnapshot({ changes });
@@ -366,15 +366,26 @@ test('#998 R998-6: the sdd tab lists the seven stages\' raw presence for this is
   });
   const result = buildChangeView({ root, issue: ISSUE, snapshot, _run: run });
   assert.equal(result.value.sdd.ok, true);
+  // The maintainer, clicking a ticket: "SDD no está listando los files".
+  // Seven rows carried the same `{path: CHANGE_DIR}` stamp, so the tab said a
+  // stage was present without ever naming the file that made it present, and
+  // the provenance — the thing every value on this page is supposed to carry
+  // — pointed all seven readers at one directory.
   assert.deepEqual(result.value.sdd.value, [
-    { stage: 'proposal', present: true, source: { path: CHANGE_DIR } },
-    { stage: 'spec', present: true, source: { path: CHANGE_DIR } },
-    { stage: 'design', present: false, source: { path: CHANGE_DIR } },
-    { stage: 'tasks', present: true, source: { path: CHANGE_DIR } },
-    { stage: 'apply', present: false, source: { path: CHANGE_DIR } },
-    { stage: 'verify', present: false, source: { path: CHANGE_DIR } },
-    { stage: 'archive', present: false, source: { path: CHANGE_DIR } },
+    { stage: 'proposal', file: 'proposal.md', present: true, source: { path: `${CHANGE_DIR}/proposal.md` } },
+    { stage: 'spec', file: 'spec.md', present: true, source: { path: `${CHANGE_DIR}/spec.md` } },
+    { stage: 'design', file: 'design.md', present: false, source: { path: `${CHANGE_DIR}/design.md` } },
+    { stage: 'tasks', file: 'tasks.md', present: true, source: { path: `${CHANGE_DIR}/tasks.md` } },
+    { stage: 'apply', file: 'apply-progress.md', present: false, source: { path: `${CHANGE_DIR}/apply-progress.md` } },
+    { stage: 'verify', file: 'verify-report.md', present: false, source: { path: `${CHANGE_DIR}/verify-report.md` } },
+    { stage: 'archive', file: 'archive-report.md', present: false, source: { path: `${CHANGE_DIR}/archive-report.md` } },
   ]);
+
+  // A stage that is MISSING still names the file it would be, because "design
+  // is missing" is only actionable if the reader knows what to create.
+  const design = result.value.sdd.value.find((row) => row.stage === 'design');
+  assert.equal(design.present, false);
+  assert.equal(design.file, 'design.md', 'an absent stage names the file it would be written to');
 });
 
 test('#998 R998-6: no change dir for this issue is the sdd tab\'s own said reason — the exact noChangeDirTab reason, the same fact the spec/tasks tabs already share for this cause, never a second wording for it', () => {
@@ -409,4 +420,39 @@ test('#881: when every review thread of the issue is unreadable the tab is ok:fa
   assert.match(reviews.reason, /957.*rate limited/);
   assert.equal(reviews.unreadable.length, 1);
   assert.equal(reviews.sourceNote, REVIEWS_SOURCE_NOTE);
+});
+
+// ── #1059 region 08: the panel's SDD tab carries the slice plan ───────────
+// The design puts the slice plan under the stage strip, in the same tab. The
+// plan is DECLARED in tasks.md and read into `sliceScopes`; what a PR actually
+// did with it is not read, and the tab says so rather than implying it.
+test('#1059 region 08: the sdd tab carries the declared slice plan beside the stages', () => {
+  const snapshot = {
+    changes: { ok: true, value: [{
+      issue: 881, dir: 'openspec/changes/issue-881-ui', artefacts: { proposal: true, spec: true },
+      sliceScopes: { ok: true, value: [
+        { slice: 1, claims: ['R881-1', 'R881-2'], terminal_pr: 'this PR -> main' },
+        { slice: 2, claims: ['R881-3'], terminal_pr: null },
+      ] },
+    }] },
+  };
+
+  const view = buildChangeView({ snapshot, issue: 881, project: 'o/r' });
+  const sdd = view.value.sdd;
+
+  assert.equal(sdd.ok, true);
+  assert.ok(Array.isArray(sdd.value), 'the stages stay an array, so every existing reader keeps working');
+  assert.equal(sdd.slices.ok, true);
+  assert.equal(sdd.slices.value.length, 2);
+  assert.deepEqual(sdd.slices.value[0].claims, ['R881-1', 'R881-2'], 'a slice is judged against what it claims');
+  assert.match(sdd.slices.note, /not read/i, 'what a PR did with the plan is not read, and the tab says so');
+});
+
+test('#1059 region 08: a change with no declared plan says so, and an unreadable one passes its reason through', () => {
+  const none = buildChangeView({ snapshot: { changes: { ok: true, value: [{ issue: 5, dir: 'd', artefacts: {} }] } }, issue: 5 });
+  assert.equal(none.value.sdd.slices.ok, false);
+  assert.match(none.value.sdd.slices.reason, /no slice plan/i);
+
+  const broken = buildChangeView({ snapshot: { changes: { ok: true, value: [{ issue: 5, dir: 'd', artefacts: {}, sliceScopes: { ok: false, reason: 'the block would not parse' } }] } }, issue: 5 });
+  assert.equal(broken.value.sdd.slices.reason, 'the block would not parse');
 });
