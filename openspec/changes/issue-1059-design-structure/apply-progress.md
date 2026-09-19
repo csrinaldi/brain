@@ -1,0 +1,51 @@
+# Apply progress — issue-1059-design-structure
+
+Nine phases, each shown to the maintainer in the running page before the next
+began. Every phase is one commit.
+
+| phase | commit | what landed |
+|---|---|---|
+| 1 | `422c334b` | the status bar as region 01; the light palette becomes the design's; the accent tokens |
+| 2 | `97c28644` | the app shell and the chrome: mono pills with their glyphs, the queue count, the keyboard chips |
+| 3 | `d12c2dc5` | a lane is a grid of cards, with the clustering bar and the legend above |
+| 4 | `4fcf97f6` | the cards breathe, and each carries the stage its change reached |
+| 5 | `fe812686` | the undeclared issues are the design's batch; no lane draws SVG any more |
+| 6 | `210bc1c4` | the verdict queue and governance are the design's tables |
+| 7 | `71c34ce8` | the drawer is the design's right panel, with the node's header and the numbered stage strip |
+| 8 | `c9a9e877` | the viewer picks the theme — system, light or dark, remembered |
+| 9 | `60c0925a` | the slice plan rides the panel's SDD tab, declared and said as declared |
+
+Full suite at the end: 6075 pass / 0 fail. `npm run brain:repo:check` green
+before every commit. Counted diff against the tracker: ~1 480.
+
+## Said, because it is the kind of thing that is easier not to write down
+
+- **The SDD artifacts were written LAST.** Phases 1 to 9 landed before this
+  change had a proposal, a spec or a task list — the maintainer asked for
+  phase-by-phase work in the running page, and the artifacts followed the
+  code instead of leading it. It was the maintainer who noticed: the UI shows
+  every change's stages, and this change had no directory to show. The spec
+  was written from the region table that already existed, so it describes what
+  the design asked for rather than what the code happened to do, but the order
+  was wrong and the record says so.
+- **Phase 1's model was written before its test.** Proven afterwards by removal
+  (the suite fails without the module) and two mutations, both red. Said here
+  rather than presented as a red-first cycle.
+- Two guards were loosened and one tightened, each with its reason in the test
+  itself: `app-source-guard`'s allowance for the SVG namespace URL is GONE
+  (nothing draws SVG now — the strictest that assertion has ever been);
+  `tokens.test.mjs`'s `\bwhite\b` no longer matches `white-space`, proven still
+  to catch a real `color: white`; and a new token test pins that the bare
+  `:root`, the guarded media query and the `[data-theme]` stamp define exactly
+  the same names.
+- **A ruling was reversed.** #998's ruling 4 refused a persisted theme toggle
+  because it would be the page's first state outside the read model. The
+  maintainer reversed it; R1059-8 records both the reversal and the
+  distinction that reconciles it.
+
+## What the page still cannot say
+
+Three regions of the design need data that does not exist, and each says so
+where the design draws it rather than guessing: the epic a served branch
+belongs to, the waiting duration on a queue row, and whether a PR merged. The
+first and third need tickets; the second is #880.
