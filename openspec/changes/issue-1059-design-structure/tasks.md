@@ -49,9 +49,9 @@ phases are the design's own regions, not a code-shaped breakdown.
 - [x] T29. `buildSlicePlan` + the fourth mode becomes the design's "implementation slices": only changes that declare a plan are rows, an unparseable plan is said beside them, and the archive dirs the section skipped keep being said — the fact survives the view that used to carry it.
 
 ## Still open (R1059-9)
-- [ ] T23. The served branch resolves to its epic — needs a reader; ticket to open.
+- [ ] T23. The served branch resolves to its epic — #1068, open and approved.
 - [ ] T24. The waiting duration — #880.
-- [ ] T25. `merged, not archived` — the port carries no merged-PR data; ticket to open.
+- [ ] T25. `merged, not archived` — #1069, open and approved (the port reads only OPEN PRs, which costs merged review history too).
 - [ ] T26. Epic clustering — #1032, open and approved.
 
 ## Review Workload Forecast

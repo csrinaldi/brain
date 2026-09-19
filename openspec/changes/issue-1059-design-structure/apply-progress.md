@@ -294,3 +294,24 @@ fixture already followed.
 
 Mutations: stamping the directory again, and dropping `file` from the row,
 each turn two suites red.
+
+## What this change hands on
+
+Four tickets were opened for the facts this page states it cannot compute, so
+each stated absence now names a ticket rather than ending the sentence:
+
+- **#1068** — the served branch resolves to its epic. #967 made an epic
+  declare its tracker; nothing reads the declaration in the other direction.
+  It must never parse an epic out of a branch name.
+- **#1069** — the port reads only OPEN pull requests. That costs `merged, not
+  archived` AND a merged PR's whole review history, which disappears at the
+  moment the decision it records becomes permanent.
+- **#1070** — a PR whose branch is outside `^[a-z]+\/issue-(\d+)` joins to no
+  ticket, silently. Measured here: PR #1050's `memory/<host>-<date>` branch
+  joins to `null`, so its review rounds are reachable from no panel. The
+  absence of a JOIN reads as the absence of REVIEWS.
+- **#1071** — the panel never shows the file scope a ticket declares, though
+  governance judges every diff against it.
+
+T23 and T25 point at #1068 and #1069. T24 is #880 and T26 is #1032, both
+already open.
