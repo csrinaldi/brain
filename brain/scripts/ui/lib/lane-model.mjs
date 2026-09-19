@@ -198,6 +198,10 @@ export function buildLaneModel(graphSection, { collapsedTracks = new Set(['?']),
   const holding = {
     track: '?',
     count: holdingTotal,
+    // #1059 region 04: the design states the batch as a proportion of the
+    // whole graph ("67 of 91"), so the whole travels with the part rather
+    // than the page adding two numbers from two places.
+    total: nodes.length,
     collapsed: collapsedTracks.has('?'),
     page,
     totalPages,

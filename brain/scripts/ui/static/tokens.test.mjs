@@ -56,7 +56,10 @@ test('#998: system font stacks, no downloadable face, no external resource in th
 
 test('#998: no surface is hard-coded white outside the token block — the drawer follows the dark palette too (cold review of PR 1, correction)', () => {
   // Comments are not colours (an issue reference like #998 is not a hex), and the token blocks are where literals belong.
+  // `white` as a COLOUR is forbidden; `white-space` is a property name and was
+  // a false positive the moment a rule outside the token block needed it
+  // (#1059 region 04, the batch's tiles), so the match stops at a hyphen.
   const withoutTokens = css.replace(/\/\*[\s\S]*?\*\//g, '').replace(/:root\s*\{[^}]*\}/g, '').replace(/@media \(prefers-color-scheme: dark\)\s*\{\s*:root\s*\{[^}]*\}\s*\}/g, '');
-  const literals = [...withoutTokens.matchAll(/#[0-9a-fA-F]{3,8}\b|\bwhite\b/g)].map((m) => m[0]);
+  const literals = [...withoutTokens.matchAll(/#[0-9a-fA-F]{3,8}\b|\bwhite\b(?!-)/g)].map((m) => m[0]);
   assert.deepEqual(literals, [], 'a colour outside the token block must read a token, never a literal (cold review of PR 2: a hard-coded light hex on the active mode button was illegible in dark)');
 });

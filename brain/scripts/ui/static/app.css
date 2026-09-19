@@ -626,3 +626,85 @@ body {
 .node-sdd-tasks { color: var(--muted); font-variant-numeric: tabular-nums; }
 .node-sdd-dir { color: var(--stamp); word-break: break-all; }
 .node-sdd-none { color: var(--stamp); }
+
+
+/* ── #1059 region 04: the undeclared batch ────────────────────────────────
+   Not a lane — a panel that states the proportion, shows what to paste, and
+   lists the issues as tiles with the rest counted. */
+.batch {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border-radius: 8px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  margin-bottom: 26px;
+}
+.batch-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.batch-title {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.batch-mark { color: var(--warn); font-weight: 700; }
+.batch-word { color: var(--warn); font-weight: 700; }
+.batch-count { color: var(--muted); }
+.batch-declare {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.batch-declare-label { color: var(--stamp); }
+.batch-declare code {
+  color: var(--accent);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.batch-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 8px;
+}
+.batch-tile {
+  padding: 9px 10px;
+  border-radius: 6px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  cursor: pointer;
+}
+.batch-tile:hover { border-color: var(--edge); }
+.batch-tile:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.batch-tile-number { font-family: var(--font-mono); font-size: 11px; color: var(--ink); font-weight: 600; }
+.batch-tile-title {
+  margin: 3px 0 0;
+  font-size: 11px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.batch-foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--stamp);
+}
+.batch-rest { color: var(--muted); }

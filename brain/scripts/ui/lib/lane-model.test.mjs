@@ -159,3 +159,21 @@ test('#1059 region 03: a lane node carries its title and what blocks it, apart f
   assert.deepEqual(second.blockedBy, [881], 'what a node waits on is a fact of the card, not only a drawn line');
   assert.deepEqual(first.blockedBy, []);
 });
+
+// #1059 phase 5: the design states the batch as a proportion — "67 of 91 open
+// issues declared no block" — so the holding lane carries the total it is a
+// part of, rather than the page computing it from two places.
+test('#1059 region 04: the holding lane knows the whole it is a part of', () => {
+  const model = buildLaneModel({ ok: true, value: {
+    nodes: [
+      { number: 1, title: 'a', track: 'UI', status: 'ready', blockedBy: [] },
+      { number: 2, title: 'b', track: null, status: 'unclassified', blockedBy: [] },
+      { number: 3, title: 'c', track: null, status: 'unclassified', blockedBy: [] },
+    ],
+    edges: [],
+    tracks: new Map([['UI', [1]]]),
+  } });
+
+  assert.equal(model.value.holding.count, 2);
+  assert.equal(model.value.holding.total, 3, 'the batch says "2 of 3", and both numbers come from one place');
+});

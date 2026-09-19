@@ -82,11 +82,13 @@ test('#881 T2a: app.js fetches /api/* and nothing else, and never evaluates a st
   for (const [re, label] of [[/\beval\s*\(/, 'eval()'], [/new\s+Function\s*\(/, 'new Function()']]) {
     assert.ok(!re.test(text), `app.js matched ${label} — forbidden in the page (no remote code, no third-party endpoint)`);
   }
-  // The ONE absolute URL the page may contain is the SVG namespace constant,
-  // which `createElementNS` requires literally: it is an identifier the
-  // browser compares by string, never a resource anything fetches.
+  // The page used to carry ONE absolute URL — the SVG namespace constant that
+  // `createElementNS` requires literally. #1059 region 03 replaced the lane
+  // boards with the design's card grid, so nothing in the page draws SVG any
+  // more and the allowance is gone with it: the list is now empty, which is
+  // the strictest this assertion has ever been.
   const absolute = [...text.matchAll(/https?:\/\/\S*/g)].map((m) => m[0].replace(/['";,)]+$/, ''));
-  assert.deepEqual([...new Set(absolute)], ['http://www.w3.org/2000/svg'], 'the page must reach no host but this server');
+  assert.deepEqual([...new Set(absolute)], [], 'the page must reach no host but this server');
 });
 
 test('#881 T2a: index.html loads no external resource, no inline handler, and no build artefact', () => {

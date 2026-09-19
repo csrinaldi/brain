@@ -77,31 +77,6 @@ function said(text) {
   return el('p', 'said', text);
 }
 
-/** A stated list — the same rule as `said`, for facts that come by the handful. */
-function saidList(heading, lines) {
-  const wrap = document.createElement('div');
-  wrap.appendChild(said(heading));
-  const list = el('ul', 'said-list');
-  for (const line of lines) list.appendChild(el('li', null, line));
-  wrap.appendChild(list);
-  return wrap;
-}
-
-// The SVG namespace: an identifier `createElementNS` compares by string, not
-// a resource anything fetches (the source guard allows this one constant).
-const SVG_NS = 'http://www.w3.org/2000/svg';
-
-function svg(tag, attrs = {}) {
-  const node = document.createElementNS(SVG_NS, tag);
-  for (const [name, value] of Object.entries(attrs)) node.setAttribute(name, String(value));
-  return node;
-}
-
-function svgText(x, y, className, text) {
-  const node = svg('text', { x, y, class: className });
-  node.textContent = text;
-  return node;
-}
 
 // ── render ─────────────────────────────────────────────────────────────────
 
@@ -435,28 +410,6 @@ function renderNodeCard(node) {
   return card;
 }
 
-/** One lane's own SVG board — the same drawing the single canvas used to be, now scoped to one lane's own coordinate space (R998-3). */
-function renderLaneBoard(lane) {
-  const board = svg('svg', { width: lane.width + 4, height: lane.height + 4, viewBox: `-2 -2 ${lane.width + 4} ${lane.height + 4}`, class: 'lane-board' });
-  for (const edge of lane.edges) {
-    const [start, end] = edge.points;
-    board.appendChild(svg('line', { class: edge.reversed ? 'edge reversed' : 'edge', x1: start.x, y1: start.y, x2: end.x, y2: end.y }));
-  }
-  for (const node of lane.nodes) {
-    const selected = node.number === selectedIssue ? ' selected' : '';
-    const group = svg('g', { class: `node ${node.className}${selected}`, role: 'button', tabindex: 0, 'data-issue': node.number });
-    group.appendChild(svg('rect', { x: node.x, y: node.y, width: node.w, height: node.h }));
-    const title = svg('title');
-    title.textContent = [node.label, ...node.marks].join(' — ');
-    group.appendChild(title);
-    group.appendChild(svgText(node.x + 8, node.y + 22, 'label', node.label.slice(0, 24)));
-    if (node.marks.length > 0) group.appendChild(svgText(node.x + 8, node.y + 42, 'mark', node.marks.join(', ').slice(0, 28)));
-    group.addEventListener('click', () => selectNode(node.number));
-    group.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') selectNode(node.number); });
-    board.appendChild(group);
-  }
-  return board;
-}
 
 /**
  * The `?` holding lane (#998 R998-3): a header with a show/hide toggle
@@ -466,6 +419,12 @@ function renderLaneBoard(lane) {
  * blank expanded area.
  */
 function renderHoldingLane(holding) {
+  // Region 04 of the design: the undeclared issues are a BATCH, not a lane —
+  // a panel that states the proportion, shows what to paste to declare, and
+  // lists the issues as small tiles with the rest counted. The board that used
+  // to draw this page's holding-holding edges is gone with it; those edges are
+  // still classified by the model and are now SAID here, which is what the
+  // rest of this page does with an edge it does not draw (#1059 phase 5).
   const toggle = el('button', 'lane-toggle', holding.collapsed ? 'show' : 'hide');
   toggle.type = 'button';
   toggle.addEventListener('click', () => {
@@ -474,36 +433,53 @@ function renderHoldingLane(holding) {
     render();
   });
 
-  const row = el('div', 'lane-row holding');
-  const header = renderLaneHeader('? — undeclared', holding.count, holding.nodes, toggle);
-  header.appendChild(el('span', 'lane-edge-count', `${holding.edgeCount} edge(s)`));
-  row.appendChild(header);
-  if (holding.collapsed) return row;
+  const panel = el('div', 'batch');
+
+  const head = el('div', 'batch-head');
+  const left = el('div', 'batch-title');
+  left.appendChild(el('span', 'batch-mark', '?'));
+  left.appendChild(el('span', 'batch-word', 'undeclared'));
+  left.appendChild(el('span', 'batch-count', `${holding.count} of ${holding.total} open issues declared no block`));
+  head.appendChild(left);
+  head.appendChild(toggle);
+  panel.appendChild(head);
+
+  if (holding.collapsed) return panel;
 
   if (holding.note) {
-    row.appendChild(said(holding.note));
-    return row;
+    panel.appendChild(said(holding.note));
+    return panel;
   }
 
-  row.appendChild(el('p', 'note', "how to declare: paste this into the issue body, with your track's letter —"));
-  const pre = document.createElement('pre');
-  pre.textContent = holding.declareSnippet;
-  row.appendChild(pre);
+  const how = el('div', 'batch-declare');
+  how.appendChild(el('span', 'batch-declare-label', 'to declare, paste in the issue body'));
+  how.appendChild(el('code', null, holding.declareSnippet));
+  panel.appendChild(how);
 
-  const list = el('ul', 'holding-list');
-  for (const node of holding.nodes) list.appendChild(el('li', null, `${node.state.mark} ${node.label}`));
-  row.appendChild(list);
-
-  // Holding-holding edges are a board, drawn like a lane's own (#998 R998-3
-  // cold review): `lane-model.mjs` already laid it out over this same page's
-  // subgraph, this only turns that into elements, same as `renderLaneBoard`.
-  if (holding.edges.length > 0) {
-    row.appendChild(el('p', 'note', `${holding.edges.length} edge(s) on this page:`));
-    row.appendChild(renderLaneBoard({ nodes: holding.boardNodes, edges: holding.edges, width: holding.width, height: holding.height }));
+  const tiles = el('div', 'batch-tiles');
+  for (const node of holding.nodes) {
+    const tile = el('div', 'batch-tile');
+    tile.setAttribute('role', 'button');
+    tile.setAttribute('tabindex', '0');
+    tile.appendChild(el('span', 'batch-tile-number', `#${node.number}`));
+    tile.appendChild(el('p', 'batch-tile-title', node.title || '(no title)'));
+    tile.addEventListener('click', () => selectNode(node.number));
+    tile.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') selectNode(node.number); });
+    tiles.appendChild(tile);
   }
+  panel.appendChild(tiles);
 
-  if (holding.totalPages > 1) row.appendChild(renderPager(holding));
-  return row;
+  const foot = el('div', 'batch-foot');
+  const shown = holding.nodes.length;
+  const rest = holding.count - shown;
+  foot.appendChild(el('span', 'batch-rest', rest > 0 ? `+ ${rest} more` : 'all of them are listed'));
+  if (holding.edgeCount > 0) {
+    foot.appendChild(el('span', 'batch-edges', `${holding.edgeCount} edge(s) run between undeclared issues — said, not drawn: this batch has no coordinate space`));
+  }
+  panel.appendChild(foot);
+
+  if (holding.totalPages > 1) panel.appendChild(renderPager(holding));
+  return panel;
 }
 
 function renderPager(holding) {
