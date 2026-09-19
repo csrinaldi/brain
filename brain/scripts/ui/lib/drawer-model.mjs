@@ -44,6 +44,23 @@ function failedTab(id, tabView, entries = []) {
   return { id, label: TAB_LABELS[id], ok: false, reason: tabView.reason, source: tabView.source ? sourceLabel(tabView.source) : null, entries, note: tabView.sourceNote ?? null };
 }
 
+/**
+ * The lines `spec-cards.mjs` could not attach to a scenario (#1067 cold
+ * review, finding cold-1). The parser collected them so a `WHEN` would stop
+ * being dropped silently; collecting a fact and never showing it is not a fix,
+ * it is the same silence one module further along. Each one carries the line
+ * as written and the heading it was missing, sourced to its own line number so
+ * the author can go straight to it.
+ */
+function orphanEntries(orphans) {
+  return (orphans ?? []).map((orphan) => entry({
+    title: orphan.text,
+    detail: orphan.reason,
+    source: orphan.source,
+    pending: true,
+  }));
+}
+
 function specEntries(cards) {
   return cards.map((card) => entry({
     title: `${card.id} — ${card.title}`,
@@ -203,7 +220,7 @@ export function buildDrawerModel(changeView) {
   const { issue, changeDir, spec, sdd, tasks, workingMemory, reviews, records } = changeView.value;
 
   const tabs = [
-    spec.ok ? { id: 'spec', label: TAB_LABELS.spec, ok: true, reason: null, source: null, note: null, entries: specEntries(spec.value) } : failedTab('spec', spec),
+    spec.ok ? { id: 'spec', label: TAB_LABELS.spec, ok: true, reason: null, source: null, note: null, entries: specEntries(spec.value), orphans: orphanEntries(spec.orphans) } : failedTab('spec', spec),
     sdd.ok ? { id: 'sdd', label: TAB_LABELS.sdd, ok: true, reason: null, source: null, note: null, entries: sddEntries(sdd.value), slices: sliceEntries(sdd.slices) } : failedTab('sdd', sdd),
     tasks.ok ? { id: 'tasks', label: TAB_LABELS.tasks, ok: true, reason: null, source: null, note: null, entries: taskEntries(tasks.value) } : failedTab('tasks', tasks),
     workingMemory.ok

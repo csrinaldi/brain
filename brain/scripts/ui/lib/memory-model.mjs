@@ -39,6 +39,16 @@ import { row } from './governance-model.mjs';
  * deterministically against each other. */
 const TYPE_ORDER = Object.freeze(['architecture', 'session_summary', 'discovery', 'decision', 'pattern', 'bugfix', 'config']);
 
+/**
+ * The row a record with no usable `type` lands in (#1067 cold review, finding
+ * cold-2). It is NAMED rather than absorbed into an existing type or dropped,
+ * which is the rule this module already held for `actorKind` — and it is a
+ * string, which is the part that was missing: `countsBy` sorted the keys the
+ * canonical order does not name with `localeCompare`, so a null or numeric
+ * type threw and took the whole Memory view down over one malformed record.
+ */
+const NO_TYPE = '(no type declared)';
+
 /** `actorKind` is `human` or `agent` today; a record with neither (or a
  * value neither test fixture nor live data has shown yet) counts as
  * `unknown` rather than being dropped from the summary — the same "state
@@ -146,7 +156,10 @@ function countsBy(records, keyOf, order) {
   const known = order.filter((k) => counts.has(k)).map((k) => ({ key: k, count: counts.get(k) }));
   const extra = [...counts.keys()]
     .filter((k) => !order.includes(k))
-    .sort((a, b) => a.localeCompare(b))
+    // `String(...)` on both sides, always: a key extractor that lets a
+    // non-string through must not be able to throw here, because the throw
+    // is not local — it destroys the whole view (#1067).
+    .sort((a, b) => String(a).localeCompare(String(b)))
     .map((k) => ({ key: k, count: counts.get(k) }));
   return [...known, ...extra];
 }
@@ -231,7 +244,8 @@ export function buildMemoryModel(recordsSection, options = {}) {
   const shown = Math.min(total, cap);
   const recentRecords = sorted.slice(0, cap).map((r) => recentRow(r, now));
 
-  const countsByType = countsBy(records, (r) => r.type, TYPE_ORDER).map(({ key, count }) => ({ type: key, count }));
+  const countsByType = countsBy(records, (r) => (typeof r.type === 'string' && r.type !== '' ? r.type : NO_TYPE), TYPE_ORDER)
+    .map(({ key, count }) => ({ type: key, count }));
   const countsByActorKind = countsBy(records, (r) => r.actorKind ?? 'unknown', ACTOR_KIND_ORDER).map(({ key, count }) => ({ actorKind: key, count }));
 
   const empty = total === 0;

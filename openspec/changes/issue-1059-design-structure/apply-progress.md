@@ -315,3 +315,44 @@ each stated absence now names a ticket rather than ending the sentence:
 
 T23 and T25 point at #1068 and #1069. T24 is #880 and T26 is #1032, both
 already open.
+
+## Cold review round 1 of PR #1067 — REVISE, and it was right twice
+
+**cold-1, correction — the fix was only a fix where tests could see it.** The
+reviewer measured that `orphans`, which `spec-cards.mjs` had just learned to
+collect so a `WHEN` would stop being dropped silently, was read NOWHERE outside
+the parser. `change-route.mjs` passed it through, `drawer-model.mjs` took only
+the cards, and `app.js` never mentioned it. The line was still invisible on the
+page.
+
+That is the same defect one module further along, and the finding is exact: a
+reader that collects a fact and never shows it has not fixed
+empty-on-failure, it has moved it. The orphans now reach the spec tab and the
+panel draws them under a heading that counts them, each with the line as
+WRITTEN and the heading it was missing, sourced to its own line number.
+
+**cold-2, correction — one malformed record could take the whole view down.**
+`countsBy` sorted the keys outside the canonical order with
+`a.localeCompare(b)`. `actorKind` is normalised before it gets there; `type` is
+not. A record with a null or numeric type puts a non-string key in that list,
+and two of them throw — destroying the Memory mode over one bad row.
+
+A record with no usable type now lands in a NAMED row rather than being
+absorbed or dropped, and both comparands are stringified.
+
+That second guard did not bite at first: coercing the type key already made it
+unreachable, and a guard no test can reach is a guard nobody can trust. The
+mutation was kept and the hole it guards was closed instead — `actorKind`
+normalises only null and undefined, so a NUMBER passes straight through. With
+that test the stringified comparator is load-bearing and its mutation is red.
+
+**budget, blocker — the repository contradicts itself.** 3101 lines against a
+`lite` budget of 1000. But `tierParams('lite')` carries `honorSizeException:
+true`, CI's `diff-size` gate read the label and passed, and the reviewer's
+`tranche.mjs` never reads the label set at all. One number, two authorities,
+opposite answers, eight seconds apart.
+
+This is NOT patched here. Changing what the reviewer accepts is a governance
+decision that affects every PR in the repository, and doing it inside the PR
+the change would unblock is marking one's own homework. #1072 carries it, with
+the measurement.

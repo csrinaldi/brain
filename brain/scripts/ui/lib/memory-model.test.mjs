@@ -237,3 +237,73 @@ test('totalRecords reflects the full set regardless of cap', () => {
   const model = buildMemoryModel(section(records));
   assert.equal(model.value.totalRecords, MEMORY_RECENT_CAP + 5);
 });
+
+// ── #1067 cold review, finding cold-2 ──────────────────────────────────────
+// `countsBy` sorted the keys `order` does not name with `a.localeCompare(b)`.
+// `actorKind` is normalised to 'unknown' before it gets there, but `type` is
+// not: a record whose `type` is null, or a number, puts a non-string key in
+// that list, and with two or more of them the comparator throws — taking the
+// WHOLE Memory view down over one malformed record. The module's own stated
+// rule is that an unexpected value is never absorbed and never dropped, so the
+// fix names it rather than deleting it.
+test('#1067: a record with no declared type is named, never dropped and never fatal', () => {
+  const section = {
+    ok: true,
+    value: {
+      records: [
+        { id: 'a', ts: '2026-09-01T00:00:00Z', actor: 'x', actorKind: 'agent', type: 'bugfix', file: '.memory/records/a.jsonl' },
+        { id: 'b', ts: '2026-09-02T00:00:00Z', actor: 'x', actorKind: 'agent', type: null, file: '.memory/records/b.jsonl' },
+        { id: 'c', ts: '2026-09-03T00:00:00Z', actor: 'x', actorKind: 'agent', file: '.memory/records/c.jsonl' },
+      ],
+      duplicates: { ids: 0, lines: 0, divergent: 0, groups: [] },
+    },
+  };
+
+  const model = buildMemoryModel(section);
+  assert.equal(model.ok, true, 'one malformed record must not take the whole ledger down');
+
+  const types = model.value.countsByType;
+  const total = types.reduce((sum, row) => sum + row.count, 0);
+  assert.equal(total, 3, 'every record is counted exactly once — nothing absorbed, nothing dropped');
+  assert.deepEqual(types.find((row) => row.type === 'bugfix'), { type: 'bugfix', count: 1 });
+
+  const undeclared = types.find((row) => row.type !== 'bugfix');
+  assert.ok(undeclared, 'the records with no type are their own row');
+  assert.equal(undeclared.count, 2, 'a null type and an absent one are the same fact: nobody declared it');
+  assert.match(String(undeclared.type), /declared/, 'and the row says so in words, rather than rendering "null"');
+});
+
+test('#1067: two or more records with non-string types do not throw the comparator', () => {
+  const records = [
+    { id: 'a', ts: '2026-09-01T00:00:00Z', actor: 'x', actorKind: 'agent', type: 42, file: 'a.jsonl' },
+    { id: 'b', ts: '2026-09-02T00:00:00Z', actor: 'x', actorKind: 'agent', type: { weird: true }, file: 'b.jsonl' },
+    { id: 'c', ts: '2026-09-03T00:00:00Z', actor: 'x', actorKind: 'agent', type: null, file: 'c.jsonl' },
+  ];
+  const section = { ok: true, value: { records, duplicates: { ids: 0, lines: 0, divergent: 0, groups: [] } } };
+
+  // Before the fix this threw `a.localeCompare is not a function`, which the
+  // page has no way to recover from: the mode renders nothing at all.
+  const model = buildMemoryModel(section);
+  assert.equal(model.ok, true);
+  assert.equal(model.value.countsByType.reduce((sum, row) => sum + row.count, 0), 3);
+});
+
+// The `type` fix above coerces its own key, so on its own it makes the
+// stringified comparator unreachable — and a guard no test can reach is a
+// guard nobody can trust. `actorKind` is the second key extractor, and it
+// normalises only null and undefined (`?? 'unknown'`): a NUMBER or an object
+// passes straight through. Two of those and the comparator throws, with the
+// same consequence — the whole Memory view renders nothing.
+test('#1067: a non-string actorKind cannot throw the comparator either', () => {
+  const records = [
+    { id: 'a', ts: '2026-09-01T00:00:00Z', actor: 'x', actorKind: 7, type: 'bugfix', file: 'a.jsonl' },
+    { id: 'b', ts: '2026-09-02T00:00:00Z', actor: 'x', actorKind: { rogue: true }, type: 'bugfix', file: 'b.jsonl' },
+    { id: 'c', ts: '2026-09-03T00:00:00Z', actor: 'x', actorKind: 'human', type: 'bugfix', file: 'c.jsonl' },
+  ];
+  const section = { ok: true, value: { records, duplicates: { ids: 0, lines: 0, divergent: 0, groups: [] } } };
+
+  const model = buildMemoryModel(section);
+  assert.equal(model.ok, true, 'a rogue actorKind must not take the ledger down');
+  assert.equal(model.value.countsByActorKind.reduce((sum, row) => sum + row.count, 0), 3,
+    'and every record is still counted — the value is unexpected, not absent');
+});

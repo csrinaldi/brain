@@ -1539,9 +1539,20 @@ function renderTab(tab) {
       for (const slice of tab.slices.entries) wrap.appendChild(renderEntry(slice));
     }
   }
+  // The lines the spec grammar could not attach to a scenario (#1067 cold
+  // review, finding cold-1). `spec-cards.mjs` stopped dropping them; a fact
+  // collected and never drawn is the same silence one module further along,
+  // so they are drawn HERE, where the author of the file will see them.
+  if (tab.orphans && tab.orphans.length > 0) {
+    wrap.appendChild(el('h3', 'orphan-title', `${tab.orphans.length} line(s) the grammar could not attach`));
+    for (const orphan of tab.orphans) wrap.appendChild(renderEntry(orphan));
+  }
+
   // "read, and empty" and "never read" are different facts, so they are
-  // different sentences — an empty area would say neither.
-  if (tab.ok && tab.entries.length === 0) wrap.appendChild(said('this tab\'s source was read and has nothing in it'));
+  // different sentences — an empty area would say neither. An orphan is
+  // content, so a tab that has only orphans is not empty.
+  const nothingDrawn = tab.entries.length === 0 && (tab.orphans ?? []).length === 0;
+  if (tab.ok && nothingDrawn) wrap.appendChild(said('this tab\'s source was read and has nothing in it'));
   return wrap;
 }
 

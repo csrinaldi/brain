@@ -1239,3 +1239,12 @@ body {
   font-size: 11px;
   color: var(--muted);
 }
+
+/* Lines the spec grammar could not attach to a scenario (#1067). They are a
+   warning about the file, so they read as one. */
+.orphan-title {
+  margin: 14px 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--warn);
+}

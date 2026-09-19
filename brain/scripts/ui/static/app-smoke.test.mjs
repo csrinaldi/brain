@@ -85,7 +85,23 @@ function fixtureRepo() {
   const change = join(root, 'openspec', 'changes', 'issue-1059-design-structure');
   mkdirSync(change, { recursive: true });
   writeFileSync(join(change, 'proposal.md'), '# Proposal\n');
-  writeFileSync(join(change, 'spec.md'), '# Spec\n');
+  // A requirement the grammar reads, and beneath it a WHEN/THEN pair whose
+  // author forgot the scenario heading. The page must show the orphan rather
+  // than drop it (#1067 cold review, finding cold-1).
+  writeFileSync(join(change, 'spec.md'), [
+    '# Spec',
+    '',
+    '### R1059-1: a requirement the grammar reads',
+    '#### Scenario: it is attached',
+    '- **WHEN** a scenario heading is present',
+    '- **THEN** the pair attaches to it.',
+    '',
+    '### R1059-2: a requirement whose author forgot the heading',
+    '',
+    '- **WHEN** nobody wrote a scenario heading',
+    '- **THEN** the line belongs to no scenario.',
+    '',
+  ].join('\n'));
   writeFileSync(join(change, 'design.md'), '# Design\n');
   writeFileSync(join(change, 'tasks.md'), '# Tasks\n\n- [x] one\n- [ ] two\n');
 
@@ -417,4 +433,18 @@ test('#1059: the panel\'s SDD tab names the file of every stage, present or miss
   const drawn = dom.mounts.drawer.textContent;
   assert.match(drawn, /openspec\/changes\/issue-1059-design-structure\/proposal\.md/);
   assert.match(drawn, /openspec\/changes\/issue-1059-design-structure\/design\.md/);
+});
+
+test('#1067: a WHEN with no scenario heading is DRAWN in the panel, not merely collected', async (t) => {
+  const dom = await boot();
+  t.after(() => dom.restore());
+
+  fire(cardFor(dom, 1059), 'click');
+  await settle();
+
+  const drawn = dom.mounts.drawer.textContent;
+  assert.match(drawn, /R1059-1/, 'the requirements the grammar read are there');
+  assert.match(drawn, /2 line\(s\) the grammar could not attach/, 'and the two it could not are counted');
+  assert.match(drawn, /nobody wrote a scenario heading/, 'the orphan line is shown AS WRITTEN — the reviewer\'s point was that collecting it is not showing it');
+  assert.match(drawn, /belongs to no scenario/, 'with what it was missing');
 });
