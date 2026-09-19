@@ -24,7 +24,7 @@ import { getVcs } from '../../vcs/cli.mjs';
 import { loadBrainConfig } from '../../lib/brain-config.mjs';
 import { parseDiffNumstat } from '../../vcs/diff-size-count.mjs';
 import { REQUIRED_JOBS, DETECTION_JOBS, resolveJobSets } from '../../vcs/governance-checks.mjs';
-import { resolveTier, tierParams } from '../../vcs/governance-tiers.mjs';
+import { resolveTier, tierParams, sizeExceptionRuling } from '../../vcs/governance-tiers.mjs';
 import { isUncomputable } from '../../vcs/lib/uncomputable-cause.mjs';
 
 // The diff budget is TIERED (ADR-0026 §2.C: lite 1000 · standard 400 ·
@@ -150,6 +150,12 @@ export function evaluateTranche({
   detectionJobs = DETECTION_JOBS,
   diffBudget = tierParams(DEFAULT_TIER).diffBudget,
   tier = null,
+  // #1072: the PR's own labels. The evaluator used to read the tier's budget
+  // and ignore its sibling `honorSizeException`, so it blocked on a number the
+  // `diff-size` gate had waived eight seconds earlier. `null` is what
+  // `gatherTrancheInputs` hands over when the forge refused the read, and it
+  // is deliberately NOT a waiver.
+  labels = null,
 } = {}) {
   if (!Array.isArray(requiredGates)) {
     // Uncomputable evidence — never APPROVE on it (protocol §10, REQ-H1-8
@@ -210,18 +216,44 @@ export function evaluateTranche({
   }
 
   if (budget && typeof budget.lines === 'number' && budget.lines > diffBudget) {
-    findings.push({
-      id: 'budget',
-      severity: 'blocker',
-      // The comparison and the tier travel WITH the evidence (protocol §10:
-      // findings are self-evidencing). `cites` names the resolving function, not
-      // a number — the old `(400-line budget)` parenthetical was a citation to
-      // doctrine the evaluator had not actually applied at two of three tiers.
-      evidence:
-        `git diff --numstat ${budget.baseSha}...${budget.headSha} | diff-size-count.mjs = ` +
-        `${budget.lines} > ${diffBudget}${tier ? ` (tier: ${tier})` : ''}`,
-      cites: 'governance-tiers.mjs tierParams(tier).diffBudget',
-    });
+    // ONE reading of the label, shared with `governance/run-check.mjs`
+    // (#1072). The tier is resolved for the ruling exactly as it is for the
+    // budget above it; with no tier in hand the default is used, which is what
+    // `diffBudget` already defaults to.
+    const ruling = sizeExceptionRuling({ labels, tier: tier ?? DEFAULT_TIER });
+    const comparison =
+      `git diff --numstat ${budget.baseSha}...${budget.headSha} | diff-size-count.mjs = ` +
+      `${budget.lines} > ${diffBudget}${tier ? ` (tier: ${tier})` : ''}`;
+
+    if (ruling.honored) {
+      // Waiving is not forgetting. The gate returns `pass` WITH a reason, and
+      // so does this: an area where a waived 3,101-line diff used to be
+      // reported must not become blank, or the verdict stops carrying the
+      // fact the maintainer granted an exception about.
+      findings.push({
+        id: 'budget',
+        severity: 'editorial',
+        evidence: `${comparison} — size:exception present and honored at the "${tier ?? DEFAULT_TIER}" tier, so the budget is waived, not met`,
+        cites: 'governance-tiers.mjs sizeExceptionRuling',
+      });
+    } else {
+      findings.push({
+        id: 'budget',
+        severity: 'blocker',
+        // The comparison and the tier travel WITH the evidence (protocol §10:
+        // findings are self-evidencing). `cites` names the resolving function, not
+        // a number — the old `(400-line budget)` parenthetical was a citation to
+        // doctrine the evaluator had not actually applied at two of three tiers.
+        //
+        // REQ-TIER-6: when a tier REFUSES the waiver, the verdict says the
+        // label was present and the tier refused it — the same sentence
+        // `run-check.mjs` produces. Silence would read as "nobody asked".
+        evidence: ruling.refusedByTier
+          ? `${comparison} — size:exception is not honored at the "${tier}" tier; the change must be sliced`
+          : comparison,
+        cites: 'governance-tiers.mjs tierParams(tier).diffBudget',
+      });
+    }
   }
 
   const tier2Touched = changedFiles.filter(f => TIER2_PREFIXES.some(prefix => f.startsWith(prefix)));
@@ -303,6 +335,13 @@ export async function gatherTrancheInputs({
   baseSha,
   changedFiles = [],
   prBody = '',
+  // #1072: the caller usually already holds these. `review/cli.mjs` boots with
+  // a `prView` and reads `boot.prView.labels` twice before it gets here, so
+  // taking them as an input costs the forge nothing and keeps the labels
+  // consistent with the `prBody` beside them — one read of the PR, not two
+  // that can disagree. The fetch below is the fallback for a caller that has
+  // none.
+  labels: givenLabels,
   deps = {},
 } = {}) {
   const fetchRollup =
@@ -328,5 +367,24 @@ export async function gatherTrancheInputs({
   // budget comparison, which used a file-local constant instead.
   const { diffBudget } = tierParams(tier);
 
-  return { requiredGates, changedFiles, budget, prBody, requiredJobs, detectionJobs, diffBudget, tier };
+  // #1072: the PR's own labels, through the SAME `prView` the CI context uses
+  // (`vcs/ci-context.mjs`), through `getVcs` — never from the environment,
+  // which is the ambient-auth hole #479 closed.
+  //
+  // A refusal is `null`, never `[]`. An empty array would say "this PR carries
+  // no exception", which is a claim the reviewer cannot make when it never
+  // read the labels; `sizeExceptionRuling` treats a non-array as no waiver, so
+  // a failed read fails CLOSED.
+  let labels = Array.isArray(givenLabels) ? givenLabels : null;
+  if (givenLabels === undefined) {
+    const prView = deps.prView ?? (async (args) => (await (deps.getVcs ?? getVcs)({ provider })).prView(args));
+    try {
+      const pr = await prView({ project, number });
+      labels = Array.isArray(pr?.labels) ? pr.labels : null;
+    } catch {
+      labels = null;
+    }
+  }
+
+  return { requiredGates, changedFiles, budget, prBody, requiredJobs, detectionJobs, diffBudget, tier, labels };
 }

@@ -76,7 +76,7 @@ import { resultToExit } from './postmerge/exit-codes.mjs';
 import { loadContext, gitlabApiConfig } from '../vcs/ci-context.mjs';
 import { loadBrainConfig } from '../lib/brain-config.mjs';
 import { getVcs } from '../vcs/cli.mjs';
-import { resolveTier, tierParams } from '../vcs/governance-tiers.mjs';
+import { resolveTier, tierParams, sizeExceptionRuling } from '../vcs/governance-tiers.mjs';
 import { mapDetectionToWarning } from './detection-policy.mjs';
 import { readDefaultBranchRecords, unionRecordsById } from './default-branch-records.mjs';
 import { decideMemoryGateOverride, SKIP_MEMORY_GATE_LABEL, toActorList } from './memory-gate-override.mjs';
@@ -644,9 +644,13 @@ async function runDiffSizeCheck(ctx, deps) {
   const tier = resolveTier(config);
   const params = tierParams(tier);
 
-  const labels = ctx.labels ?? [];
-  const exceptionLabelPresent = labels.includes('size:exception');
-  if (exceptionLabelPresent && params.honorSizeException) {
+  // #1072: the reading of `size:exception` is `governance-tiers.mjs`'s, not
+  // this file's. It used to be decided here, and `review/evaluators/tranche
+  // .mjs` decided the same question by not asking it — so the gate and the
+  // reviewer gave opposite answers about the same PR. One function now, read
+  // by both.
+  const ruling = sizeExceptionRuling({ labels: ctx.labels, tier });
+  if (ruling.honored) {
     return {
       pass: true,
       reason: `size:exception label present — skipping diff-size gate (honored at the "${tier}" tier).`,
@@ -668,7 +672,7 @@ async function runDiffSizeCheck(ctx, deps) {
   const ignoreList = Array.isArray(config?.governance?.ignoreList) ? config.governance.ignoreList : [];
   const result = diffSize(numstat, ignoreList, params.diffBudget);
 
-  if (!result.pass && exceptionLabelPresent && !params.honorSizeException) {
+  if (!result.pass && ruling.refusedByTier) {
     // REQ-TIER-6: a tier-refused waiver must be reported, never treated as
     // absent — the label WAS present; the tier is what refused it.
     return {

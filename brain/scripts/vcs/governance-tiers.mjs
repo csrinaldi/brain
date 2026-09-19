@@ -493,6 +493,49 @@ export function tierParams(tier) {
 }
 
 /**
+ * The one label that waives the diff-size budget. Exported so no call site
+ * retypes the string: a typo in a second literal would read as "no exception
+ * asked for", which is the silent half of the defect #1072 names.
+ */
+export const SIZE_EXCEPTION_LABEL = 'size:exception';
+
+/**
+ * sizeExceptionRuling({labels, tier}) -> {present, honored, refusedByTier}
+ *
+ * THE single reading of `size:exception`, for every authority that has an
+ * opinion about the diff budget.
+ *
+ * #1072, measured on PR #1067: the `diff-size` CI gate passed (`run-check.mjs`
+ * read the label, and `lite` carries `honorSizeException: true`) while the
+ * cold reviewer emitted a `blocker` on the same 3,101 lines eight seconds
+ * later, because `review/evaluators/tranche.mjs` read `tierParams(tier)
+ * .diffBudget` and never read the label at all. It took one field of this
+ * module's frozen params and ignored its sibling. A budget decision readable
+ * two ways from two files is not a policy — it is a contradiction a
+ * maintainer cannot act on, because removing the label to satisfy the
+ * reviewer fails the gate and keeping it fails the review.
+ *
+ * The three states are kept APART on purpose, and `refusedByTier` is why:
+ * REQ-TIER-6 requires a tier that refuses the waiver to report that the label
+ * WAS present and the tier is what refused it, never to behave as though
+ * nobody asked. A caller that only checked `honored` would collapse "no
+ * exception requested" into "exception refused" and lose the sentence the
+ * requirement exists to produce.
+ *
+ * A label set the caller could not read is not a waiver. Waiving a budget on
+ * the strength of a fetch that failed would grant the exception by accident,
+ * which is the one direction this must never fail.
+ *
+ * @param {{labels?: string[]|null, tier: string}} input
+ */
+export function sizeExceptionRuling({ labels, tier } = {}) {
+  const present = Array.isArray(labels) && labels.includes(SIZE_EXCEPTION_LABEL);
+  const honored = present && tierParams(tier).honorSizeException === true;
+  return { present, honored, refusedByTier: present && !honored };
+}
+
+
+/**
  * Derives the ACTUALLY-ENFORCED required-job set for a tier — replaces the
  * old `REQUIRED_JOBS` constant (design §8, REQ-TIER-9). This is
  * `resolveGatePolicy`'s raw matrix value MINUS `PENDING_PROMOTION` (see the

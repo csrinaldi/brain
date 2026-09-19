@@ -481,3 +481,135 @@ test('evaluateTranche: normal exit with no blocker finding → conclusionCauses 
   });
   assert.deepEqual(result.conclusionCauses, []);
 });
+
+// ── #1072: the reviewer honors size:exception exactly as the gate does ──────
+// Measured on PR #1067: `diff-size` passed at 13:0x and the cold reviewer
+// emitted `budget / blocker` on the same 3,101 lines eight seconds later. The
+// gate read the label; this evaluator read `tierParams(tier).diffBudget` and
+// never read the label at all — one field of the tier's frozen params, with
+// its sibling `honorSizeException` ignored. The maintainer's ruling: honor it
+// as the gate does.
+
+test('#1072: over budget with size:exception at a tier that honors it → no blocker, and the waiver is SAID', () => {
+  const result = evaluateTranche({
+    requiredGates: greenRollup(),
+    changedFiles: ['brain/scripts/ui/static/app.js'],
+    budget: { lines: 3101, uncomputable: false, baseSha: 'BASE', headSha: 'HEAD' },
+    diffBudget: 1000,
+    tier: 'lite',
+    labels: ['size:exception', 'type:feature'],
+  });
+
+  assert.ok(!result.findings.some((f) => f.id === 'budget' && f.severity === 'blocker'),
+    'the gate waived this exact number; the reviewer may not block on it');
+
+  // Waiving is not forgetting. The repository refuses an empty area where a
+  // fact belongs, and 3,101 lines waived is a fact.
+  const waived = result.findings.find((f) => f.id === 'budget');
+  assert.ok(waived, 'the budget is still reported');
+  assert.equal(waived.severity, 'editorial', 'stated, not blocking');
+  assert.match(waived.evidence, /3101 > 1000/, 'with the number it waived');
+  assert.match(waived.evidence, /size:exception/, 'and the label that waived it');
+  assert.match(waived.evidence, /lite/, 'and the tier that honored it');
+});
+
+test('#1072: over budget with size:exception at a tier that REFUSES it → still a blocker, and it says the tier refused', () => {
+  const result = evaluateTranche({
+    requiredGates: greenRollup(),
+    changedFiles: [],
+    budget: { lines: 300, uncomputable: false, baseSha: 'BASE', headSha: 'HEAD' },
+    diffBudget: 200,
+    tier: 'regulated',
+    labels: ['size:exception'],
+  });
+
+  const finding = result.findings.find((f) => f.id === 'budget');
+  assert.ok(finding);
+  assert.equal(finding.severity, 'blocker');
+  // REQ-TIER-6, the same sentence `run-check.mjs` produces: the label WAS
+  // present and the tier is what refused it. Silence here would read as "no
+  // exception was asked for", which is a different fact.
+  assert.match(finding.evidence, /not honored at the "regulated" tier/);
+  assert.ok(finding.cites, 'a blocker finding MUST carry cites (protocol §6)');
+});
+
+test('#1072: over budget with no label is the blocker it always was', () => {
+  const result = evaluateTranche({
+    requiredGates: greenRollup(),
+    changedFiles: [],
+    budget: { lines: 1500, uncomputable: false, baseSha: 'BASE', headSha: 'HEAD' },
+    diffBudget: 1000,
+    tier: 'lite',
+    labels: ['type:feature'],
+  });
+
+  const finding = result.findings.find((f) => f.id === 'budget');
+  assert.equal(finding.severity, 'blocker');
+  assert.match(finding.evidence, /1500 > 1000/);
+  assert.ok(!/size:exception/.test(finding.evidence), 'no waiver was asked for, so none is mentioned');
+});
+
+test('#1072: labels the reviewer could not read never waive the budget', () => {
+  // Granting an exception because a fetch failed is the one direction this
+  // must never fail. `gatherTrancheInputs` hands `null` when prView throws.
+  for (const labels of [null, undefined, 'size:exception']) {
+    const result = evaluateTranche({
+      requiredGates: greenRollup(),
+      changedFiles: [],
+      budget: { lines: 3101, uncomputable: false, baseSha: 'BASE', headSha: 'HEAD' },
+      diffBudget: 1000,
+      tier: 'lite',
+      labels,
+    });
+    const finding = result.findings.find((f) => f.id === 'budget');
+    assert.equal(finding.severity, 'blocker',
+      `an unreadable label set is not a waiver (${JSON.stringify(labels)})`);
+  }
+});
+
+test('#1072: gatherTrancheInputs reads the PR labels through the port, and survives a refusal', () => {
+  // The labels come from the same `prView` the CI context uses (ci-context
+  // .mjs:63), through `getVcs` — never from the environment, which is the
+  // ambient-auth hole #479 closed.
+  const calls = [];
+  const deps = {
+    fetchRollup: async () => greenRollup(),
+    diffNumstat: () => '1\t0\tfile.mjs\n',
+    readIgnoreList: () => [],
+    readConfig: () => ({}),
+    tier: 'lite',
+    prView: async (args) => { calls.push(args); return { labels: ['size:exception'], body: '' }; },
+  };
+
+  return gatherTrancheInputs({ project: 'o/r', number: 1067, headSha: 'H', baseSha: 'B', deps })
+    .then(async (gathered) => {
+      assert.deepEqual(gathered.labels, ['size:exception']);
+      assert.deepEqual(calls, [{ project: 'o/r', number: 1067 }], 'asked for this PR, once');
+
+      const refused = await gatherTrancheInputs({
+        project: 'o/r', number: 1067, headSha: 'H', baseSha: 'B',
+        deps: { ...deps, prView: async () => { throw new Error('the forge refused'); } },
+      });
+      assert.equal(refused.labels, null,
+        'a refusal is null, never [] — an empty list would read as "this PR carries no exception", which is a claim the reviewer cannot make');
+    });
+});
+
+test('#1072: labels handed in are used as given, and no second forge call is made for them', async () => {
+  let prViewCalls = 0;
+  const gathered = await gatherTrancheInputs({
+    project: 'o/r', number: 1067, headSha: 'H', baseSha: 'B',
+    labels: ['size:exception'],
+    deps: {
+      fetchRollup: async () => greenRollup(),
+      diffNumstat: () => '1\t0\tfile.mjs\n',
+      readIgnoreList: () => [],
+      readConfig: () => ({}),
+      tier: 'lite',
+      prView: async () => { prViewCalls += 1; return { labels: [] }; },
+    },
+  });
+
+  assert.deepEqual(gathered.labels, ['size:exception']);
+  assert.equal(prViewCalls, 0, 'the caller already read the PR; reading it again could disagree with the body beside it');
+});

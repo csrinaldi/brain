@@ -510,6 +510,10 @@ export async function main(deps = {}) {
       baseSha,
       changedFiles,
       prBody: boot.prView.body,
+      // #1072: the labels from the SAME prView that gave the body above, so
+      // the reviewer honors `size:exception` on the same reading of the PR the
+      // `diff-size` gate honors it on — and with no second forge call.
+      labels: boot.prView.labels ?? [],
       // #631: the bound port, FIRST, so a caller's override wins on the seams it
       // names and cannot silently drop the credential binding by omission.
       //
