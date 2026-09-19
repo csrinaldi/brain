@@ -1555,3 +1555,43 @@ test('main: --engine and --model override config.sdd.map["cold-review"] in memor
   assert.equal(deps.config.sdd.map['cold-review'].engine, 'claude');
 });
 
+
+// ── #1073 cold review, finding cold-1 ──────────────────────────────────────
+// `gatherTrancheInputs` states the rule in its own comment: "A refusal is
+// null, never []. An empty array would say 'this PR carries no exception',
+// which is a claim the reviewer cannot make when it never read the labels."
+// The main call path then wrote `boot.prView.labels ?? []` and coerced exactly
+// that null into exactly that empty array. The verdict was still fail-closed,
+// so nothing was waived wrongly — but the doctrine was honored everywhere
+// except where it is used.
+test('#1073: a PR read that carried no labels hands over null, and never a second forge call', async () => {
+  const vcs = spyVcs();
+  const deps = readyDeps({ vcs });
+  // The forge refused the labels — `gitlab.mjs` and `ci-context.mjs` both
+  // model this as `labels: null` on an otherwise usable prView.
+  deps.coldBootDeps.fetchPr = async () => ({ number: 42, author: 'alice', labels: null, body: '', headRefOid: HEAD });
+
+  let prViewCalls = 0;
+  deps.trancheDeps.prView = async () => { prViewCalls += 1; return { labels: ['size:exception'] }; };
+
+  const lines = [];
+  const code = await main({ argv: ['--pr', '42'], log: (s) => lines.push(s), ...deps });
+
+  assert.equal(code, 0);
+  // `?? null` rather than the raw value: an ABSENT labels field would
+  // otherwise read as "the caller supplied none" and trigger the fallback
+  // fetch, turning a refused read into a second request that could succeed
+  // and waive a budget the first read never authorised.
+  assert.equal(prViewCalls, 0,
+    'the PR was already read and the labels were refused; asking again would let a retry grant an exception the first read never carried');
+
+  // The distinction has to be OBSERVABLE or it is not worth keeping: `[]` and
+  // `null` both fail closed, so a test that only checked the verdict could not
+  // tell them apart, and the first attempt at this test could not. Over
+  // budget, the verdict now says which of the two happened.
+  deps.trancheDeps.diffNumstat = () => '900\t900\tbig.mjs\n';
+  const overBudget = [];
+  await main({ argv: ['--pr', '42'], log: (s) => overBudget.push(s), ...deps });
+  assert.ok(overBudget.some((l) => /labels could not be read/.test(l)),
+    'a block on a refused read must not be presented as a block on an absent exception — coercing the refusal to [] is exactly that claim');
+});

@@ -50,3 +50,19 @@ test('deriveMode: defaults labels/changedFiles to [] when omitted — never thro
   assert.equal(deriveMode({}), 'tranche');
   assert.equal(deriveMode(), 'tranche');
 });
+
+// #1073, sweeping the class: `labels = []` is a DEFAULT, and a default only
+// applies to `undefined`. The same shape crashed `evaluators/checkpoint.mjs`
+// when `review/cli.mjs` began handing an unread label set through as `null`.
+// This call site passes `?? []` today, so it is not reachable — which is
+// exactly why it is worth pinning before someone threads the honest `null`
+// through here too and derives a mode from a TypeError.
+test('#1073: a label set that was never read derives the default mode, it does not throw', () => {
+  for (const labels of [null, undefined, 'needs-ruling', {}]) {
+    assert.equal(deriveMode({ labels, changedFiles: [] }), 'tranche',
+      `an unread label set cannot claim a ruling was asked for (${JSON.stringify(labels)})`);
+  }
+  // A checkpoint report still wins over an unreadable label set: that fact
+  // comes from the changed files, which WERE read.
+  assert.equal(deriveMode({ labels: null, changedFiles: ['openspec/changes/x/checkpoint-report.md'] }), 'checkpoint');
+});

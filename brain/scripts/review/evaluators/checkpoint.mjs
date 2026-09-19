@@ -349,7 +349,13 @@ export async function gatherCheckpointInputs({
   headSha,
   changedFiles = [],
   prBody = '',
-  labels = [],
+  // #1073 rev 4: `null`, NOT `[]`. A default of `[]` MINTS a claim — "the PR
+  // was read and carries no exception" — for a caller that simply did not
+  // pass any, and this evaluator forwards that value into the tranche gather,
+  // where it decides whether a budget block says the labels were unread.
+  // Hardening the consumers was not enough while the default was still
+  // manufacturing the false reading upstream of them (R1072-5).
+  labels = null,
   worktreePath,
   doctrineRecords = [],
   tier = 'standard',
@@ -358,7 +364,10 @@ export async function gatherCheckpointInputs({
   const baseSha = deps.baseSha ?? null; // fed by cli.mjs (ci-context → prView.baseRefOid, ADR-0022); tests inject directly
 
   const trancheInputs = await gatherTrancheInputs({
-    project, number, provider, headSha, baseSha, changedFiles, prBody, deps: deps.trancheDeps ?? {},
+    // #1072: this evaluator already takes the PR's labels for
+    // `hasDecisionLabel`; the budget needs the same set, and reading them here
+    // rather than fetching keeps one reading of the PR per run.
+    project, number, provider, headSha, baseSha, changedFiles, prBody, labels, deps: deps.trancheDeps ?? {},
   });
 
   const root = worktreePath ?? process.cwd();
@@ -462,7 +471,14 @@ export async function gatherCheckpointInputs({
     auditOutput: runAudit(),
     governanceStatusOutput: runGovernanceStatus(),
     changedFiles,
-    hasDecisionLabel: labels.includes('decision'),
+    // #1073: `labels = []` is a DEFAULT, and a default only applies to
+    // `undefined`. `review/cli.mjs` hands this evaluator
+    // `boot.prView.labels ?? null`, so a refused forge read arrives as `null`
+    // and `null.includes` threw — a checkpoint review crashing on a failure it
+    // was supposed to survive. Nobody read the labels, so nobody can claim a
+    // decision label is there: false, which is also the closed direction.
+    hasDecisionLabel: Array.isArray(labels) && labels.includes('decision'),
+    labels,
     exists,
   };
 }
