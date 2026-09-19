@@ -12,6 +12,12 @@ export const GOVERNANCE_VIEWS = Object.freeze([
   Object.freeze({ id: 'anti-patterns', label: 'Anti-patterns' }),
   Object.freeze({ id: 'history', label: 'History' }),
   Object.freeze({ id: 'actors', label: 'By actor' }),
+  // #1059: both arrived from the top level, where they had been modes. A
+  // project-wide verdict queue and a project-wide slice plan are facts about
+  // the whole repository, not about the ticket in front of the reader, and
+  // this is where facts about the whole repository live.
+  Object.freeze({ id: 'queue', label: 'Verdict queue' }),
+  Object.freeze({ id: 'slices', label: 'Implementation slices' }),
 ]);
 
 export const GOVERNANCE_VIEW_IDS = Object.freeze(GOVERNANCE_VIEWS.map((view) => view.id));
@@ -33,6 +39,8 @@ export const GOVERNANCE_PLACEHOLDERS = Object.freeze({
   'anti-patterns': null,
   history: null,
   actors: null,
+  queue: null,
+  slices: null,
 });
 
 /**

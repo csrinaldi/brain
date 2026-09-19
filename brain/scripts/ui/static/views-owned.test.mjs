@@ -48,8 +48,8 @@ test('#998 R998-6: the drawer now has six tabs, in the design\'s order', () => {
 });
 
 test('#998 R998-2/R998-4/R998-5/#882 R882-1: this PR owns exactly four modes; map, sdd, reviews and governance all have real content — governance mounts its own sub-nav and sub-router from #882 PR 1 on', () => {
-  assert.deepEqual(MODE_IDS, ['map', 'sdd', 'reviews', 'governance']);
-  for (const mode of ['map', 'sdd', 'reviews', 'governance']) assert.equal(PLACEHOLDERS[mode], null, `mode "${mode}" has real content, not a placeholder`);
+  assert.deepEqual(MODE_IDS, ['map', 'governance', 'memory']);
+  for (const mode of MODE_IDS) assert.equal(PLACEHOLDERS[mode], null, `mode "${mode}" has real content, not a placeholder`);
 });
 
 test('#882 R882-1/R882-2: the governance surface exists — the sub-nav is mounted, Roadmap draws real content', () => {
@@ -93,7 +93,7 @@ test('#882 R882-5: History draws real content — merges/releases/ADR amendments
   const linkMatch = APP_JS.match(/function renderHistoryReviewsLink\([^)]*\) \{[\s\S]*?\n}\n/);
   assert.ok(linkMatch, 'renderHistoryReviewsLink function must exist in app.js');
   const body = fnMatch[0] + linkMatch[0];
-  assert.match(body, /switchToMode\('reviews'\)/, "the history pane links to the Reviews mode instead of rendering a second, undated projection of the same rounds");
+  assert.match(body, /switchGovernanceView\('queue'\)/, 'the history pane links to the verdict queue, which moved under Governance in #1059, instead of rendering a second undated projection of the same rounds');
   assert.ok(!/renderReviewRound\(/.test(body), 'no review round is ever rendered inside the history pane');
 });
 
@@ -117,9 +117,21 @@ test('#882 R882-6: renderActors never re-sorts by volume — the model\'s own na
   assert.ok(!/\.sort\(/.test(fnMatch[0]), 'renderActors must not re-sort the model\'s rows — buildActorsModel already sorts by name only');
 });
 
-test('#882: the governance surface is finalized (PR 5) — all five sub-views draw real content, GOVERNANCE_PLACEHOLDERS has nothing left unbuilt', () => {
-  assert.deepEqual(GOVERNANCE_VIEW_IDS, ['roadmap', 'decisions', 'anti-patterns', 'history', 'actors']);
-  for (const id of GOVERNANCE_VIEW_IDS) assert.equal(GOVERNANCE_PLACEHOLDERS[id], null, `sub-view "${id}" still names a placeholder — every #882 view is built as of PR 5`);
+test('#882/#1059: every governance sub-view draws real content, and the two that came down from the top level are among them', () => {
+  // #882's five, plus the two #1059 moved here when they stopped being modes.
+  // A project-wide verdict queue and a project-wide slice plan are facts about
+  // the repository, not about the ticket in front of the reader.
+  assert.deepEqual(GOVERNANCE_VIEW_IDS, ['roadmap', 'decisions', 'anti-patterns', 'history', 'actors', 'queue', 'slices']);
+  for (const id of GOVERNANCE_VIEW_IDS) assert.equal(GOVERNANCE_PLACEHOLDERS[id], null, `sub-view "${id}" still names a placeholder — every one of them is built`);
+
+  // Routed, not merely tabled: a sub-view in the table with no branch in the
+  // router draws the placeholder fallback, which is an empty pane wearing a
+  // sentence.
+  const router = APP_JS.match(/function renderGovernance\(\) \{[\s\S]*?\n}\n/);
+  assert.ok(router, 'renderGovernance must exist in app.js');
+  for (const id of GOVERNANCE_VIEW_IDS) {
+    assert.ok(router[0].includes(`governanceView === '${id}'`), `the router has no branch for the "${id}" sub-view, so its button would draw the fallback`);
+  }
 });
 
 test('#882: every governance row\'s source stamp goes through renderSourceStamp — a hand-built el(\'span\', \'source\', …) drops the "open ↗" chip a real forge link would otherwise carry', () => {
@@ -142,9 +154,12 @@ test('#881 R881-10 S1: nothing on the page reads a worktree path — the committ
   assert.ok(!/file:\/\//.test(APP_JS), 'the page reads nothing from the filesystem directly');
 });
 
-test('#998 R998-2/#882 R882-1: the shell mounts exactly six regions — status, modes, banners, governance-nav, canvas, drawer', () => {
+test('#998 R998-2/#882 R882-1: the shell mounts exactly seven regions — status, modes, search, banners, governance-nav, canvas, drawer', () => {
   const ids = [...INDEX_HTML.matchAll(/id="([^"]+)"/g)].map((m) => m[1]).sort();
-  assert.deepEqual(ids, ['banners', 'canvas', 'drawer', 'governance-nav', 'modes', 'status']);
+  // `search` joined in #1059: the finder is its own mount rather than a
+  // control inside the status bar, which re-renders on a five-second clock
+  // and would erase a half-typed query.
+  assert.deepEqual(ids, ['banners', 'canvas', 'drawer', 'governance-nav', 'modes', 'search', 'status']);
 });
 
 test('#998 R998-5: a finding\'s own source goes through the same sourceStamp helper the door uses, never a second copy of that logic', () => {
@@ -191,7 +206,12 @@ test('#998 R998-6 T3: the status bar names the served branch through the same so
 test('#998 R998-6 T4/T6: the status bar shows the poll countdown from pollIndicator, never a second Date.now() clock read', () => {
   assert.match(APP_JS, /indicator\.countdown/, 'renderStatus must render pollIndicator\'s own countdown field');
   const dateNowCalls = [...APP_JS.matchAll(/Date\.now\(\)/g)].length;
-  assert.equal(dateNowCalls, 1, 'app.js reads Date.now() exactly once (renderStatus\'s own nowMs) — every clock decision beyond that lives in lib/, driven by the injected now');
+  assert.equal(dateNowCalls, 1, 'app.js reads Date.now() in exactly ONE place — every clock decision beyond that lives in lib/, driven by the injected now');
+  // #1059: Memory needs "now" to say how old a record is, and a second
+  // `Date.now()` beside the poll indicator's would be a second clock that can
+  // disagree with the first. Both take it from one function instead.
+  assert.match(APP_JS, /function nowMs\(\) \{\s*\n\s*return Date\.now\(\);/, 'the one read is wrapped, so every caller shares it');
+  assert.ok([...APP_JS.matchAll(/nowMs\(\)/g)].length >= 3, 'and the wrapper is what the renderers call');
 });
 
 // #882 PR 2 merge onto PR 1's head: the shared stamp helper exists now, and a
@@ -258,4 +278,117 @@ test('#1043 round 5: renderHistoryEvent says a malformed line\'s own reason, not
   const m = APP_JS.match(/function renderHistoryEvent\([^)]*\) \{[\s\S]*?\n}\n/);
   assert.ok(m, 'renderHistoryEvent must exist in app.js');
   assert.match(m[0], /event\.malformed/, 'the line-level reason must reach the page');
+});
+
+// ── #1059 phase 1: the header is built from the design's region 01 ─────────
+test('#1059 region 01: the status bar is built from buildHeaderModel, not assembled ad hoc in the page', () => {
+  const m = APP_JS.match(/function renderStatus\(\) \{[\s\S]*?\n}\n/);
+  assert.ok(m, 'renderStatus must exist in app.js');
+  assert.match(m[0], /buildHeaderModel\(/, 'the counts and the branch come from a model, like every other region');
+  assert.match(m[0], /counts\.ok/, 'an unreadable graph must cost the header its counts and nothing else');
+  assert.match(m[0], /epic\.reason/, 'the epic this branch serves is stated as unresolved, never guessed');
+});
+
+test('#1059 region 01: the design\'s six header facts each have a place in the bar', () => {
+  const m = APP_JS.match(/function renderStatus\(\) \{[\s\S]*?\n}\n/);
+  for (const [what, re] of [
+    ['the wordmark', /brain:ui/i],
+    ['the branch served', /servedBranch/],
+    ['the live indicator', /status-live/],
+    ['the poll indicator', /indicator\.text/],
+    ['the node counts', /status-counts/],
+    ['the poller controls', /poll-toggle/],
+  ]) {
+    assert.match(m[0], re, `${what} must be in the status bar (design region 01)`);
+  }
+});
+
+test('#1059 region 02: the mode nav carries each mode\'s glyph and the keyboard chips', () => {
+  const m = APP_JS.match(/function renderModes\(\) \{[\s\S]*?\n}\n/);
+  assert.ok(m, 'renderModes must exist in app.js');
+  assert.match(m[0], /mode\.glyph/, 'the glyph comes from the mode table, never a literal in the page');
+  assert.match(m[0], /'kbd'/, 'the keyboard hints are chips, as the design draws them');
+  assert.ok(!/mode-count/.test(m[0]),
+    'the waiting count does NOT ride a mode any more: `(3)` beside "Reviews" read as three reviews, but the Reviews mode is gone and beside "Governance" the same number reads as three governance things (#1059)');
+});
+
+test('#1059: the waiting count sits on the Verdict queue sub-nav button, where the word beside it says what it counts', () => {
+  const m = APP_JS.match(/function renderGovernanceNav\(\) \{[\s\S]*?\n}\n/);
+  assert.ok(m, 'renderGovernanceNav must exist in app.js');
+  assert.match(m[0], /sub\.id === 'queue'/, 'the count is attached to one named sub-view, not to whichever button happens to be there');
+  assert.match(m[0], /mode-count/);
+  assert.match(m[0], /buildReviewTimeline\(/, 'and it comes from the model, never recounted in the page');
+});
+
+test('#1059 region 03: a node card carries the design\'s SDD strip, sourced from the change the issue owns', () => {
+  const m = APP_JS.match(/function renderNodeSdd\([^)]*\) \{[\s\S]*?\n}\n/);
+  assert.ok(m, 'renderNodeSdd must exist in app.js');
+  assert.match(m[0], /sddForIssue\(/, 'the change comes from the model, never a scan written into the page');
+  assert.match(m[0], /found\.reason/, 'an issue with no change directory says so rather than showing an empty strip');
+  assert.match(m[0], /change\.dir/, 'the strip names where the change lives, as the design does');
+});
+
+test('#1059 region 05: the verdict queue is the design\'s table, with every column from the model', () => {
+  const m = APP_JS.match(/function renderQueue\([^)]*\) \{[\s\S]*?\n}\n/);
+  assert.ok(m, 'renderQueue must exist in app.js');
+  for (const column of ['PR', 'issue', 'rounds', 'latest verdict', 'head judged', 'waiting']) {
+    assert.ok(m[0].includes(`'${column}'`), `the table must have the "${column}" column the design draws`);
+  }
+  assert.match(m[0], /item\.rounds/, 'the counts come from the queue entry, not a second walk of the threads');
+  assert.match(m[0], /no round posted/, 'a thread with no round says so in the verdict cell, never an empty cell');
+});
+
+test('#1059 region 06: decisions and anti-patterns are tables, and an unreadable row still spans one', () => {
+  for (const [fn, columns] of [
+    ['renderDecisions', ['ADR', 'title', 'status', 'amendments', 'file']],
+    ['renderAntiPatterns', ['scope', 'pattern', 'cited by', 'file']],
+  ]) {
+    const m = APP_JS.match(new RegExp(`function ${fn}\\(\\) \\{[\\s\\S]*?\\n}\\n`));
+    assert.ok(m, `${fn} must exist in app.js`);
+    for (const column of columns) {
+      assert.ok(m[0].includes(`'${column}'`), `${fn} must draw the "${column}" column the design has`);
+    }
+  }
+  for (const fn of ['renderDecisionRow', 'renderAntiPatternRow']) {
+    const m = APP_JS.match(new RegExp(`function ${fn}\\([^)]*\\) \\{[\\s\\S]*?\\n}\\n`));
+    assert.match(m[0], /colspan/, `${fn} must keep an unreadable entry as a row across the table, never drop it`);
+  }
+});
+
+test('#1059 phase 8: the bar offers the three theme choices, and the stored one is read before the first paint', () => {
+  assert.match(APP_JS, /THEMES, normalizeTheme, attributeFor/, 'the choices come from lib/theme.mjs, never a list written into the page');
+  const m = APP_JS.match(/function renderStatus\(\) \{[\s\S]*?\n}\n/);
+  assert.match(m[0], /createElement\('select'\)/, 'the control is a select, as the maintainer asked');
+  assert.match(m[0], /readTheme\(\)/, 'it opens on the choice the viewer already made');
+  // The rule is ORDER, not adjacency: the stamp must land before anything
+  // paints. Asserting the two calls were neighbours broke the moment the
+  // finder was mounted between them (#1059), which was a true statement of
+  // the wrong thing.
+  const boot = APP_JS.slice(APP_JS.indexOf('applyTheme(readTheme());'));
+  const firstPaint = boot.indexOf('\nrender();');
+  assert.ok(firstPaint > 0, 'the page paints at boot');
+  assert.ok(!/(^|[^a-zA-Z])render\(\)/.test(boot.slice('applyTheme(readTheme());'.length, firstPaint)),
+    'the stamp lands before the first render, so the page never flashes the other theme');
+  assert.match(APP_JS, /catch \{\s*\n\s*return 'system';/, 'storage that cannot be read falls back to the viewer\'s own setting rather than throwing');
+});
+
+test('#1059 region 08: the panel draws the slice plan under the stages, with its note', () => {
+  const m = APP_JS.match(/function renderTab\([^)]*\) \{[\s\S]*?\n}\n/);
+  assert.ok(m, 'renderTab must exist in app.js');
+  assert.match(m[0], /tab\.slices/, 'the slice plan rides the tab the design puts it in');
+  assert.match(m[0], /tab\.slices\.reason/, 'a change with no plan says why, never an empty heading');
+  assert.match(m[0], /tab\.slices\.note/, 'the "PR state is not read" note must reach the reader');
+});
+
+// #1059 phase 10, found by the maintainer clicking: `renderDrawer` was called
+// only in the map view, and the other three force-hid it. Phases 6 and 10 made
+// queue rows and plan issues clickable, so selecting a ticket from either
+// could never show its panel. A panel is about a TICKET and a mode is about
+// the project, so the panel belongs in every mode.
+test('#1059: the node panel is drawn in every mode, never only on the map', () => {
+  const m = APP_JS.match(/function renderContent\(\) \{[\s\S]*?\n}\n/);
+  assert.ok(m, 'renderContent must exist in app.js');
+  const drawn = (m[0].match(/renderDrawer\(\)/g) ?? []).length;
+  assert.equal(drawn, 1, 'one call, made for every mode — not one per branch, which is how three of them came to lack it');
+  assert.ok(!/mounts\.drawer\.hidden = true/.test(m[0]), 'no mode may force the panel shut: closing it is the reader\'s own control');
 });

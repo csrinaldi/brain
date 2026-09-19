@@ -62,12 +62,74 @@ function stateAndMarks(node) {
   return { marks, state };
 }
 
+/**
+ * nodeSummaryFor(graphSection, issue) -> {ok:true, value:{number, title, track,
+ * state, marks, blockedBy}} | {ok:false, reason}
+ *
+ * The one node the drawer's own header names (#1059 region 08). It is the same
+ * shape a lane card shows, built by the same `stateAndMarks` — a header that
+ * derived the state a second way could disagree with the card the reader just
+ * clicked, which is the kind of quiet contradiction this page exists to avoid.
+ */
+export function nodeSummaryFor(graphSection, issue) {
+  if (!graphSection || typeof graphSection !== 'object') return { ok: false, reason: 'no graph section was given' };
+  if (graphSection.ok !== true) return { ok: false, reason: graphSection.reason };
+  const node = (graphSection.value?.nodes ?? []).find((n) => n.number === issue);
+  if (!node) return { ok: false, reason: `the graph holds no issue #${issue}` };
+  const { marks, state } = stateAndMarks(node);
+  return {
+    ok: true,
+    value: {
+      number: node.number,
+      title: node.title ?? '',
+      track: node.track ?? null,
+      state: { code: state.code, label: state.label, mark: state.mark },
+      marks,
+      blockedBy: [...(node.blockedBy ?? [])].sort((a, b) => a - b),
+    },
+  };
+}
+
+/**
+ * childrenOf(graphSection, issue) -> {ok:true, value:[{number, title, state,
+ * track}]} | {ok:false, reason}
+ *
+ * The tickets that belong to this one (#1059 phase 10). The relation is
+ * DECLARED BY THE CHILD — `parent` is a node field since #967 — so a parent's
+ * list is whoever points at it, never a list the parent carries about itself.
+ * That asymmetry is why nobody had read it yet, and why a node nobody declares
+ * has an empty list rather than a missing one: "no ticket names this as its
+ * parent" is a fact, not a failure.
+ */
+export function childrenOf(graphSection, issue) {
+  if (!graphSection || typeof graphSection !== 'object') return { ok: false, reason: 'no graph section was given' };
+  if (graphSection.ok !== true) return { ok: false, reason: graphSection.reason };
+  const value = (graphSection.value?.nodes ?? [])
+    .filter((n) => n.parent === issue)
+    .sort((a, b) => a.number - b.number)
+    .map((node) => {
+      const { state } = stateAndMarks(node);
+      return {
+        number: node.number,
+        title: node.title ?? '',
+        track: node.track ?? null,
+        state: { code: state.code, label: state.label, mark: state.mark },
+      };
+    });
+  return { ok: true, value };
+}
+
 /** A drawable node — canvas-model.mjs's shape, plus the state word/mark (#998 R998-3) — for one lane's own board. */
 function drawnNode(node, box) {
   const { marks, state } = stateAndMarks(node);
   return {
     number: node.number,
     label: `#${node.number} ${node.title ?? ''}`.trim(),
+    // #1059 region 03: the design draws a card, not a labelled rectangle, so
+    // the title stands on its own line and what a node waits on is a fact of
+    // the card rather than only a line between two boxes.
+    title: node.title ?? '',
+    blockedBy: [...(node.blockedBy ?? [])].sort((a, b) => a - b),
     className: state.className,
     marks,
     track: node.track ?? null,
@@ -85,6 +147,8 @@ function holdingRow(node) {
   return {
     number: node.number,
     label: `#${node.number} ${node.title ?? ''}`.trim(),
+    title: node.title ?? '',
+    blockedBy: [...(node.blockedBy ?? [])].sort((a, b) => a - b),
     marks,
     state: { code: state.code, label: state.label, mark: state.mark },
   };
@@ -191,6 +255,10 @@ export function buildLaneModel(graphSection, { collapsedTracks = new Set(['?']),
   const holding = {
     track: '?',
     count: holdingTotal,
+    // #1059 region 04: the design states the batch as a proportion of the
+    // whole graph ("67 of 91"), so the whole travels with the part rather
+    // than the page adding two numbers from two places.
+    total: nodes.length,
     collapsed: collapsedTracks.has('?'),
     page,
     totalPages,

@@ -44,6 +44,23 @@ function failedTab(id, tabView, entries = []) {
   return { id, label: TAB_LABELS[id], ok: false, reason: tabView.reason, source: tabView.source ? sourceLabel(tabView.source) : null, entries, note: tabView.sourceNote ?? null };
 }
 
+/**
+ * The lines `spec-cards.mjs` could not attach to a scenario (#1067 cold
+ * review, finding cold-1). The parser collected them so a `WHEN` would stop
+ * being dropped silently; collecting a fact and never showing it is not a fix,
+ * it is the same silence one module further along. Each one carries the line
+ * as written and the heading it was missing, sourced to its own line number so
+ * the author can go straight to it.
+ */
+function orphanEntries(orphans) {
+  return (orphans ?? []).map((orphan) => entry({
+    title: orphan.text,
+    detail: orphan.reason,
+    source: orphan.source,
+    pending: true,
+  }));
+}
+
 function specEntries(cards) {
   return cards.map((card) => entry({
     title: `${card.id} — ${card.title}`,
@@ -101,13 +118,44 @@ function findingEntries(round) {
 
 /** The sdd tab's entries (#998 R998-6): the change's own seven-stage raw presence, `change-route.mjs`'s `buildSddTab`. */
 function sddEntries(items) {
-  return items.map((item) => entry({
+  // #1059 region 08: the design numbers the stages and marks each one, so a
+  // gap in the middle of the lifecycle is visible at a glance rather than
+  // inferred by counting names. The position is the stage's place in the
+  // order the reader was given, not an index into whatever was returned.
+  return items.map((item, i) => entry({
+    position: i + 1,
+    mark: item.present ? '\u2713' : '\u2014',
     title: item.stage,
+    // #1059: the file the stage IS, beside its name. The tab used to say
+    // "design — missing" and leave the reader to know that design means
+    // `design.md`; a missing stage is only actionable when the file it would
+    // be is on screen.
+    file: item.file ?? null,
     detail: item.present ? 'present' : 'missing',
     source: item.source,
     done: item.present,
     pending: !item.present,
   }));
+}
+
+/**
+ * The declared slice plan that rides the sdd tab (#1059 region 08). A change
+ * with no plan carries the reason rather than an empty list, and the note the
+ * route wrote — "what each PR did with its slice is not read" — travels with
+ * it, because a drawn slice must never read as a merged one.
+ */
+function sliceEntries(slices) {
+  if (!slices || typeof slices !== 'object') return { ok: false, reason: 'this change carries no slice plan' };
+  if (slices.ok !== true) return { ok: false, reason: slices.reason };
+  return {
+    ok: true,
+    note: slices.note ?? null,
+    entries: (slices.value ?? []).map((slice) => entry({
+      title: `slice ${slice.slice}`,
+      detail: [slice.claims.join(', '), slice.terminalPr].filter(Boolean).join(' · '),
+      source: slice.source,
+    })),
+  };
 }
 
 /** The records tab's entries (#998 R998-6): this issue's own memory records, newest first (`change-route.mjs`'s `buildRecordsTab`). */
@@ -172,8 +220,8 @@ export function buildDrawerModel(changeView) {
   const { issue, changeDir, spec, sdd, tasks, workingMemory, reviews, records } = changeView.value;
 
   const tabs = [
-    spec.ok ? { id: 'spec', label: TAB_LABELS.spec, ok: true, reason: null, source: null, note: null, entries: specEntries(spec.value) } : failedTab('spec', spec),
-    sdd.ok ? { id: 'sdd', label: TAB_LABELS.sdd, ok: true, reason: null, source: null, note: null, entries: sddEntries(sdd.value) } : failedTab('sdd', sdd),
+    spec.ok ? { id: 'spec', label: TAB_LABELS.spec, ok: true, reason: null, source: null, note: null, entries: specEntries(spec.value), orphans: orphanEntries(spec.orphans) } : failedTab('spec', spec),
+    sdd.ok ? { id: 'sdd', label: TAB_LABELS.sdd, ok: true, reason: null, source: null, note: null, entries: sddEntries(sdd.value), slices: sliceEntries(sdd.slices) } : failedTab('sdd', sdd),
     tasks.ok ? { id: 'tasks', label: TAB_LABELS.tasks, ok: true, reason: null, source: null, note: null, entries: taskEntries(tasks.value) } : failedTab('tasks', tasks),
     workingMemory.ok
       ? { id: 'workingMemory', label: TAB_LABELS.workingMemory, ok: true, reason: null, source: null, note: null, entries: workingMemoryEntries(workingMemory.value) }
