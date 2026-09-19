@@ -325,3 +325,12 @@ test('#1059 region 06: decisions and anti-patterns are tables, and an unreadable
     assert.match(m[0], /colspan/, `${fn} must keep an unreadable entry as a row across the table, never drop it`);
   }
 });
+
+test('#1059 phase 8: the bar offers the three theme choices, and the stored one is read before the first paint', () => {
+  assert.match(APP_JS, /THEMES, normalizeTheme, attributeFor/, 'the choices come from lib/theme.mjs, never a list written into the page');
+  const m = APP_JS.match(/function renderStatus\(\) \{[\s\S]*?\n}\n/);
+  assert.match(m[0], /createElement\('select'\)/, 'the control is a select, as the maintainer asked');
+  assert.match(m[0], /readTheme\(\)/, 'it opens on the choice the viewer already made');
+  assert.match(APP_JS, /applyTheme\(readTheme\(\)\);\s*\nrender\(\);/, 'the stamp lands before the first render, so the page never flashes the other theme');
+  assert.match(APP_JS, /catch \{\s*\n\s*return 'system';/, 'storage that cannot be read falls back to the viewer\'s own setting rather than throwing');
+});

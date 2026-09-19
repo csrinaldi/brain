@@ -14,6 +14,39 @@
 
 import { initialPageState, applyFrame, parseFrame, streamFailed, controlFailed, sectionOf, requestSequence } from './lib/frames.mjs';
 import { degradationBands, pollIndicator } from './lib/banners.mjs';
+import { THEMES, normalizeTheme, attributeFor } from './lib/theme.mjs';
+
+/**
+ * The viewer's own theme choice (#1059 phase 8). It lives in `localStorage`
+ * and nowhere else: it is about the reader, not about the project, so it
+ * never reaches the repository and no other viewer sees it. Reading it can
+ * throw (a private window, blocked site data), and a page that fails to load
+ * because it could not read a preference would be absurd — so it falls back
+ * to `system`, which is the viewer's own setting.
+ */
+const THEME_KEY = 'brain:ui:theme';
+
+function readTheme() {
+  try {
+    return normalizeTheme(window.localStorage.getItem(THEME_KEY));
+  } catch {
+    return 'system';
+  }
+}
+
+function applyTheme(choice) {
+  const attribute = attributeFor(choice);
+  if (attribute === null) document.documentElement.removeAttribute('data-theme');
+  else document.documentElement.setAttribute('data-theme', attribute);
+  try {
+    window.localStorage.setItem(THEME_KEY, normalizeTheme(choice));
+  } catch {
+    // The page still honours the choice for this visit; only remembering it
+    // failed, and saying so in a band would be noise about the reader's own
+    // browser rather than about the project.
+  }
+}
+
 import { buildLaneModel, nodeSummaryFor } from './lib/lane-model.mjs';
 import { issueUrl } from './lib/forge-url.mjs';
 import { buildDrawerModel } from './lib/drawer-model.mjs';
@@ -234,6 +267,25 @@ function renderStatus() {
   mounts.status.appendChild(countsEl);
 
   mounts.status.appendChild(el('span', 'spacer'));
+
+  // The theme control: three choices, the current one selected. `system` is
+  // the default and stamps nothing, so the page follows the viewer's own
+  // setting unless they say otherwise.
+  const themeWrap = el('label', 'theme-choice');
+  themeWrap.appendChild(el('span', 'theme-label', 'theme'));
+  const select = document.createElement('select');
+  select.id = 'theme-select';
+  const current = readTheme();
+  for (const theme of THEMES) {
+    const option = document.createElement('option');
+    option.value = theme.id;
+    option.textContent = theme.label;
+    if (theme.id === current) option.selected = true;
+    select.appendChild(option);
+  }
+  select.addEventListener('change', () => { applyTheme(select.value); });
+  themeWrap.appendChild(select);
+  mounts.status.appendChild(themeWrap);
 
   const toggle = el('button', 'poll-toggle', indicator.paused ? 'resume polling' : 'disable polling');
   toggle.addEventListener('click', () => postPoll(indicator.paused ? 'resume' : 'pause'));
@@ -1331,6 +1383,7 @@ function subscribe() {
   return stream;
 }
 
+applyTheme(readTheme());
 render();
 readSnapshot().then(subscribe);
 // "polled 5 s ago" is a claim that goes stale by itself, so the indicator

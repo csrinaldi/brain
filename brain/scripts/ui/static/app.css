@@ -66,8 +66,14 @@
 
 /* The design's dark palette (Claude Design "Brain UI implementation
    proposal"): followed when the system prefers dark, never persisted. */
+/* #1059 phase 8: the viewer has THREE states, not two. An explicit choice
+   stamps `data-theme` on the document; the default, "system", stamps nothing
+   and the media query decides. So the media query is guarded — an explicit
+   light must beat a dark operating system — and each stamp redefines the same
+   token names again, so the choice wins in both directions. No token is ever
+   defined for the first time inside one of these blocks. */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme='light']) {
     --ink: #f1f5f9;
     --muted: #94a3b8;
     --line: rgba(255, 255, 255, 0.08);
@@ -98,6 +104,37 @@
     --divergence-fg: #d8b4fe;           --divergence-bg: #2e1065;
   }
 }
+
+:root[data-theme='dark'] {
+    --ink: #f1f5f9;
+    --muted: #94a3b8;
+    --line: rgba(255, 255, 255, 0.08);
+    --paper: #0b0f17;
+    --surface: #141b2d;
+    --accent: #22d3ee;
+    --accent-quiet: #083344;
+    --live: #34d399;
+    --warn: #fbbf24;
+    --warn-bg: #2d1f03;
+    --stamp: #64748b;
+    --surface-active: #1e293b;
+    --edge: #475569;
+    --node-stroke: #64748b;
+    --state-planned-fg: #64748b;        --state-planned-bg: #1e293b;
+    --state-in-flight-fg: #06b6d4;      --state-in-flight-bg: #083344;
+    --state-done-fg: #6366f1;           --state-done-bg: #1e1b4b;
+    --state-blocked-fg: #fb7185;        --state-blocked-bg: #4c0519;
+    --state-awaiting-review-fg: #f59e0b; --state-awaiting-review-bg: #451a03;
+    --state-unclassified-fg: #d97706;     --state-unclassified-bg: #2d1f03;
+    --state-unreadable-fg: #d946ef;     --state-unreadable-bg: #3b0764;
+    --state-not-computed-fg: #475569;   --state-not-computed-bg: #0f172a;
+    --state-unknown-fg: #fbbf24;        --state-unknown-bg: #0f172a;
+    --severity-blocker-fg: #fb7185;     --severity-blocker-bg: #4c0519;
+    --severity-correction-fg: #f59e0b;  --severity-correction-bg: #451a03;
+    --severity-editorial-fg: #94a3b8;   --severity-editorial-bg: #1e293b;
+    --severity-unknown-fg: #fbbf24;     --severity-unknown-bg: #0f172a;
+    --divergence-fg: #d8b4fe;           --divergence-bg: #2e1065;
+  }
 
 * { box-sizing: border-box; }
 
@@ -889,3 +926,24 @@ body {
 .stage-name { color: var(--ink); flex: 1; }
 .stage-mark.done { color: var(--state-done-fg); }
 .stage-mark.missing { color: var(--stamp); }
+
+
+/* #1059 phase 8: the theme control sits with the other chrome in the bar. */
+.theme-choice {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--stamp);
+}
+.theme-choice select {
+  font: inherit;
+  padding: 3px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--muted);
+  cursor: pointer;
+}
+.theme-choice select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
