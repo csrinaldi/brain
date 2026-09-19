@@ -80,3 +80,56 @@ test('#881: no text given is a said failure, never an empty array read as "no re
   assert.equal(typeof result.reason, 'string');
   assert.ok(result.reason.length > 0);
 });
+
+// ── #1059: a spec it cannot parse is not a spec with nothing in it ─────────
+// Found by the maintainer: "cuando hago click en SDD u otro menú en el lateral
+// no veo la info relacionada". The Spec tab of #1059 said "this tab's source
+// was read and has nothing in it" while the SDD tab said spec.md was present.
+// Both were reading the same 5,731-byte file. The file used `##` for its
+// requirement headings and the grammar declares `###`, so the parser found no
+// cards and returned an EMPTY LIST — `evidence-reader-empty-on-failure` in its
+// purest form, and the one anti-pattern this page exists to refuse.
+test('#1059: text with no requirement heading is a stated failure, never an empty card list', () => {
+  const text = [
+    '# Spec — issue-1059-design-structure',
+    '',
+    '## R1059-1: the status bar is the design\'s region 01',
+    '',
+    'The bar MUST carry the branch served and the node counts.',
+    '',
+    '- **WHEN** the graph holds four nodes',
+    '- **THEN** the bar says so.',
+  ].join('\n');
+
+  const parsed = parseSpecCards({ text, path: 'openspec/changes/issue-1059/spec.md' });
+
+  assert.equal(parsed.ok, false, 'a file with 8 lines of content has something in it — saying otherwise is a lie the reader acts on');
+  assert.match(parsed.reason, /### R/, 'the reason names the heading the grammar wants, so the author can fix it without reading the parser');
+  assert.match(parsed.reason, /openspec\/changes\/issue-1059\/spec\.md/, 'and names the file it read');
+});
+
+test('#1059: a spec.md that really is empty still reads as empty, not as a failure', () => {
+  for (const text of ['', '   \n\n  \t\n']) {
+    const parsed = parseSpecCards({ text, path: 'x/spec.md' });
+    assert.equal(parsed.ok, true, 'nothing in the file IS nothing to say — this is the one case where an empty list is the truth');
+    assert.deepEqual(parsed.value, []);
+  }
+});
+
+test('#1059: a WHEN or THEN that belongs to no scenario is carried as a stated divergence, never dropped', () => {
+  const text = [
+    '### R1-1: a requirement whose author forgot the scenario heading',
+    '',
+    '- **WHEN** something happens',
+    '- **THEN** something follows.',
+  ].join('\n');
+
+  const parsed = parseSpecCards({ text, path: 'y/spec.md' });
+  assert.equal(parsed.ok, true, 'the requirement itself parsed, so the file is readable');
+  assert.equal(parsed.value.length, 1);
+  assert.equal(parsed.value[0].scenarios.length, 0);
+  assert.ok(Array.isArray(parsed.orphans), 'the lines that attached to nothing are carried');
+  assert.equal(parsed.orphans.length, 2, 'both of them — a dropped WHEN is a requirement the page silently stops testing');
+  assert.deepEqual(parsed.orphans.map((o) => o.line), [3, 4]);
+  assert.match(parsed.orphans[0].reason, /Scenario/, 'and each says what heading it was missing');
+});

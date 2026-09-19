@@ -56,7 +56,35 @@ test('#998: system font stacks, no downloadable face, no external resource in th
 
 test('#998: no surface is hard-coded white outside the token block — the drawer follows the dark palette too (cold review of PR 1, correction)', () => {
   // Comments are not colours (an issue reference like #998 is not a hex), and the token blocks are where literals belong.
-  const withoutTokens = css.replace(/\/\*[\s\S]*?\*\//g, '').replace(/:root\s*\{[^}]*\}/g, '').replace(/@media \(prefers-color-scheme: dark\)\s*\{\s*:root\s*\{[^}]*\}\s*\}/g, '');
-  const literals = [...withoutTokens.matchAll(/#[0-9a-fA-F]{3,8}\b|\bwhite\b/g)].map((m) => m[0]);
+  // `white` as a COLOUR is forbidden; `white-space` is a property name and was
+  // a false positive the moment a rule outside the token block needed it
+  // (#1059 region 04, the batch's tiles), so the match stops at a hyphen.
+  // The token blocks are where literals belong, and since #1059 there are
+  // three of them: the bare `:root` light base, the guarded media query, and
+  // the explicit `[data-theme]` stamp. All three are stripped before the scan.
+  const withoutTokens = css
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/@media \(prefers-color-scheme: dark\)\s*\{[\s\S]*?\n\}/g, '')
+    .replace(/:root(?:\[[^\]]*\])?\s*\{[^}]*\}/g, '');
+  const literals = [...withoutTokens.matchAll(/#[0-9a-fA-F]{3,8}\b|\bwhite\b(?!-)/g)].map((m) => m[0]);
   assert.deepEqual(literals, [], 'a colour outside the token block must read a token, never a literal (cold review of PR 2: a hard-coded light hex on the active mode button was illegible in dark)');
+});
+
+// ── #1059 phase 8: three theme states, one set of names ───────────────────
+// A token defined in only one block is the classic unreadable-page bug: the
+// viewer gets one theme's text on the other theme's ground. The light block on
+// bare `:root` is the base and must define every name the others redefine.
+test('#1059: every token the dark blocks redefine is defined on bare :root first', () => {
+  const names = (block) => [...block.matchAll(/--[a-z0-9-]+(?=\s*:)/g)].map((m) => m[0]).sort();
+
+  const light = names((css.match(/^:root \{([\s\S]*?)\n\}/m) ?? [, ''])[1]);
+  const media = names((css.match(/:root:not\(\[data-theme='light'\]\) \{([\s\S]*?)\n  \}/) ?? [, ''])[1]);
+  const stamped = names((css.match(/:root\[data-theme='dark'\] \{([\s\S]*?)\n\}/) ?? [, ''])[1]);
+
+  assert.ok(light.length > 0, 'the bare :root block must carry the light palette');
+  assert.ok(media.length > 0, 'the media query must redefine the dark palette');
+  assert.deepEqual(media, stamped, 'the stamped dark theme and the system dark theme must define the SAME names, or the toggle changes a different set of colours than the OS does');
+  for (const name of media) {
+    assert.ok(light.includes(name), `${name} is redefined for dark but never defined on bare :root — a viewer on light would inherit nothing`);
+  }
 });

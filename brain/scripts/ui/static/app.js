@@ -14,13 +14,51 @@
 
 import { initialPageState, applyFrame, parseFrame, streamFailed, controlFailed, sectionOf, requestSequence } from './lib/frames.mjs';
 import { degradationBands, pollIndicator } from './lib/banners.mjs';
-import { buildLaneModel } from './lib/lane-model.mjs';
+import { THEMES, normalizeTheme, attributeFor } from './lib/theme.mjs';
+
+/**
+ * The viewer's own theme choice (#1059 phase 8). It lives in `localStorage`
+ * and nowhere else: it is about the reader, not about the project, so it
+ * never reaches the repository and no other viewer sees it. Reading it can
+ * throw (a private window, blocked site data), and a page that fails to load
+ * because it could not read a preference would be absurd — so it falls back
+ * to `system`, which is the viewer's own setting.
+ */
+const THEME_KEY = 'brain:ui:theme';
+
+function readTheme() {
+  try {
+    return normalizeTheme(window.localStorage.getItem(THEME_KEY));
+  } catch {
+    return 'system';
+  }
+}
+
+function applyTheme(choice) {
+  const attribute = attributeFor(choice);
+  if (attribute === null) document.documentElement.removeAttribute('data-theme');
+  else document.documentElement.setAttribute('data-theme', attribute);
+  try {
+    window.localStorage.setItem(THEME_KEY, normalizeTheme(choice));
+  } catch {
+    // The page still honours the choice for this visit; only remembering it
+    // failed, and saying so in a band would be noise about the reader's own
+    // browser rather than about the project.
+  }
+}
+
+import { buildLaneModel, nodeSummaryFor, childrenOf } from './lib/lane-model.mjs';
+import { issueUrl } from './lib/forge-url.mjs';
 import { buildDrawerModel } from './lib/drawer-model.mjs';
-import { buildSddModel, STAGE_VOCAB } from './lib/sdd-model.mjs';
+import { buildSddModel, sddForIssue, buildSlicePlan, STAGE_VOCAB } from './lib/sdd-model.mjs';
+import { searchNodes } from './lib/search-model.mjs';
+import { buildMemoryModel } from './lib/memory-model.mjs';
 import { buildReviewTimeline } from './lib/review-timeline.mjs';
 import { buildRoadmapModel } from './lib/roadmap-model.mjs';
 import { buildDecisionsModel } from './lib/decisions-model.mjs';
 import { buildAntiPatternsModel } from './lib/anti-patterns-model.mjs';
+import { buildHeaderModel } from './lib/header-model.mjs';
+import { STATES } from './lib/state-vocab.mjs';
 import { buildHistoryModel, capNote } from './lib/history-model.mjs';
 import { buildActorsModel } from './lib/actors-model.mjs';
 import { sourceStamp } from './lib/provenance.mjs';
@@ -32,6 +70,7 @@ const mounts = {
   modes: document.getElementById('modes'),
   banners: document.getElementById('banners'),
   governanceNav: document.getElementById('governance-nav'),
+  search: document.getElementById('search'),
   canvas: document.getElementById('canvas'),
   drawer: document.getElementById('drawer'),
 };
@@ -43,6 +82,16 @@ let view = initialView();
 let governanceView = GOVERNANCE_VIEWS[0].id;
 /** The issue whose node is activated; `null` until one is. The drawer follows it — `map` mode only. */
 let selectedIssue = null;
+/**
+ * The finder's query, and the two nodes it owns (#1059). The INPUT is built
+ * once at boot and never re-created, because `render()` runs on every stream
+ * frame and `renderStatus` on a five-second clock: rebuilding the control
+ * would drop the caret and erase a half-typed query under the reader's hands.
+ * Only the result list is redrawn.
+ */
+let searchQuery = '';
+let searchInput = null;
+let searchResultsMount = null;
 /** The last `GET /api/change/<N>` body for the selected issue; `null` while it is still being read. */
 let changeView = null;
 let activeTab = 'spec';
@@ -66,6 +115,16 @@ function el(tag, className, text) {
   return node;
 }
 
+/**
+ * THE page's only clock read (#998 R998-6 T4/T6, kept in #1059). Two reads can
+ * disagree with each other, so every part of the page that needs "now" takes
+ * it from here and passes it into a pure model — no `lib/*.mjs` touches a
+ * clock, and no renderer invents an age of its own.
+ */
+function nowMs() {
+  return Date.now();
+}
+
 function clear(node) {
   while (node.firstChild) node.removeChild(node.firstChild);
 }
@@ -75,9 +134,11 @@ function said(text) {
   return el('p', 'said', text);
 }
 
-/** A stated list — the same rule as `said`, for facts that come by the handful. */
+/** A stated list — the same rule as `said`, for facts that come by the handful.
+ *  Restored in #1059: phase 5 removed the SVG helpers this sat above and took
+ *  it along, leaving seven call sites pointing at nothing. */
 function saidList(heading, lines) {
-  const wrap = document.createElement('div');
+  const wrap = el('div', 'said-group');
   wrap.appendChild(said(heading));
   const list = el('ul', 'said-list');
   for (const line of lines) list.appendChild(el('li', null, line));
@@ -85,27 +146,13 @@ function saidList(heading, lines) {
   return wrap;
 }
 
-// The SVG namespace: an identifier `createElementNS` compares by string, not
-// a resource anything fetches (the source guard allows this one constant).
-const SVG_NS = 'http://www.w3.org/2000/svg';
-
-function svg(tag, attrs = {}) {
-  const node = document.createElementNS(SVG_NS, tag);
-  for (const [name, value] of Object.entries(attrs)) node.setAttribute(name, String(value));
-  return node;
-}
-
-function svgText(x, y, className, text) {
-  const node = svg('text', { x, y, class: className });
-  node.textContent = text;
-  return node;
-}
 
 // ── render ─────────────────────────────────────────────────────────────────
 
 function render() {
   renderStatus();
   renderModes();
+  renderSearchResults();
   renderBands();
   renderContent();
 }
@@ -113,13 +160,35 @@ function render() {
 /** The four mode buttons, drawn straight from `lib/view-model.mjs`'s table — no inline handler, no second copy of the labels. */
 function renderModes() {
   clear(mounts.modes);
+  // Region 02 of the design: the modes as pills carrying their glyph, then the
+  // keyboard chips. The glyph and the label both come from `view-model.mjs`'s
+  // table — the buttons are that table, never a second copy of it (#1059
+  // phase 2, retabled to three modes in #1059's last slice).
+  const group = el('div', 'mode-group');
   for (const mode of MODES) {
-    const button = el('button', null, mode.label);
+    const button = el('button', null);
     button.type = 'button';
+    button.appendChild(el('span', 'mode-glyph', mode.glyph));
+    button.appendChild(el('span', 'mode-label', mode.label));
+    // The count that used to ride the Reviews mode does NOT move here. `(3)`
+    // beside "Reviews" reads as three reviews; beside "Governance" it reads as
+    // three governance things, which is not what it counts. It moved to the
+    // Verdict queue sub-nav button, where the word beside it says what it is
+    // (#1059).
     if (mode.id === view) button.setAttribute('aria-current', 'page');
     button.addEventListener('click', () => switchToMode(mode.id));
-    mounts.modes.appendChild(button);
+    group.appendChild(button);
   }
+  mounts.modes.appendChild(group);
+
+  const keys = el('div', 'mode-keys');
+  for (const [key, what] of [['J/K', 'node'], ['Tab', 'view'], ['Esc', 'close']]) {
+    const hint = el('span', 'mode-key');
+    hint.appendChild(el('kbd', null, key));
+    hint.appendChild(el('span', null, what));
+    keys.appendChild(hint);
+  }
+  mounts.modes.appendChild(keys);
 }
 
 function switchToMode(mode) {
@@ -128,37 +197,229 @@ function switchToMode(mode) {
 }
 
 /** The router (#998 R998-2/R998-4/R998-5, #882 R882-1): `map` draws the canvas + drawer, `sdd` draws the seven-stage matrix, `reviews` draws the timeline + verdict queue, `governance` draws its own sub-nav + sub-router. `#governance-nav` is shown only while `governance` is the active mode. */
+/**
+ * The finder (#1059, the maintainer's ask: "un buscador para poder encontrar
+ * las epicas, trackers y tickets"). Built ONCE, at boot.
+ *
+ * The control cannot be rebuilt on render. `render()` runs on every stream
+ * frame and `renderStatus` on a five-second clock, and re-creating an input
+ * element drops the caret and the value with it — the reader would lose the
+ * word they were half way through typing, on someone else's push. So the
+ * shell is mounted once and only `renderSearchResults` ever redraws, which is
+ * also why the query lives in module state rather than in the DOM.
+ */
+function mountSearch() {
+  clear(mounts.search);
+
+  const field = el('label', 'search-field');
+  field.appendChild(el('span', 'search-label', 'Find'));
+
+  const input = document.createElement('input');
+  input.type = 'search';
+  input.className = 'search-input';
+  input.setAttribute('placeholder', 'issue number, title, track or label');
+  input.setAttribute('autocomplete', 'off');
+  input.addEventListener('input', () => {
+    searchQuery = input.value;
+    renderSearchResults();
+  });
+  input.addEventListener('keydown', (event) => {
+    // The page owns J/K/Tab/Esc as chords over the board. They must not fire
+    // while someone is typing a title into this box, and the input is where
+    // that is decided — `onKeyDown` listens on the document, so without this
+    // every letter would also be a shortcut.
+    if (typeof event.stopPropagation === 'function') event.stopPropagation();
+    if (event.key === 'Escape') {
+      input.value = '';
+      searchQuery = '';
+      renderSearchResults();
+      return;
+    }
+    if (event.key === 'Enter') {
+      const first = searchNodes(sectionOf(state, 'graph'), searchQuery);
+      if (first.ok && first.value.results.length > 0) selectNode(first.value.results[0].number);
+    }
+  });
+  field.appendChild(input);
+  searchInput = input;
+
+  mounts.search.appendChild(field);
+  searchResultsMount = el('div', 'search-results');
+  mounts.search.appendChild(searchResultsMount);
+  renderSearchResults();
+}
+
+/**
+ * The result list, and only it. Every row states what it matched on, so a hit
+ * a reader did not expect explains itself instead of looking like noise; a
+ * node whose body could not be read is still listed, with its reason, because
+ * an unreadable issue is exactly the one a reader is most likely hunting.
+ */
+function renderSearchResults() {
+  if (searchResultsMount === null) return;
+  clear(searchResultsMount);
+
+  const found = searchNodes(sectionOf(state, 'graph'), searchQuery);
+  if (!found.ok) {
+    searchResultsMount.appendChild(said(found.reason));
+    return;
+  }
+
+  const { results, shown, total, note, epicTrackerFacet } = found.value;
+
+  // Asked for epics or trackers BY NAME, the page must not answer with an
+  // empty list as though none existed: those are declared fields that no
+  // issue body carries yet, and the model says so. The notice is gated on the
+  // query actually asking, because a sentence about `kind` under every search
+  // for a title is noise, and noise is how a real statement stops being read.
+  if (!epicTrackerFacet.ok && /epic|tracker/i.test(searchQuery)) {
+    searchResultsMount.appendChild(said(epicTrackerFacet.reason));
+  }
+
+  if (note && results.length === 0) {
+    searchResultsMount.appendChild(said(note));
+    return;
+  }
+
+  const count = el('p', 'search-count', shown === total
+    ? `${total} match${total === 1 ? '' : 'es'}`
+    : `${shown} of ${total} matches — narrow the query to see the rest`);
+  searchResultsMount.appendChild(count);
+
+  const list = el('div', 'search-list');
+  for (const row of results) {
+    const hit = el('div', `search-hit${row.ok ? '' : ' search-hit-unreadable'}`);
+    hit.setAttribute('role', 'button');
+    hit.setAttribute('tabindex', '0');
+    hit.setAttribute('data-issue', String(row.number));
+
+    const head = el('div', 'search-hit-head');
+    head.appendChild(el('span', 'search-hit-number', `#${row.number}`));
+    // The maintainer asked to find EPICS, TRACKERS and tickets, so a result
+    // that is one says which — from the node's own declaration, never from
+    // its title text. A ticket declares nothing here and stays a ticket.
+    if (row.kind) head.appendChild(el('span', `search-hit-kind kind-${row.kind}`, row.kind));
+    if (row.tracker) head.appendChild(el('span', 'search-hit-tracker', `tracker ${row.tracker}`));
+    if (row.track) head.appendChild(el('span', 'search-hit-track', row.track));
+    head.appendChild(el('span', 'search-hit-matched', `matched ${row.matchedBy.join(', ')}`));
+    hit.appendChild(head);
+
+    hit.appendChild(el('p', 'search-hit-title', row.title || '(no title)'));
+    if (!row.ok) hit.appendChild(said(row.reason));
+
+    hit.addEventListener('click', () => selectNode(row.number));
+    hit.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') selectNode(row.number); });
+    list.appendChild(hit);
+  }
+  searchResultsMount.appendChild(list);
+}
+
+/**
+ * Memory (#1059, the maintainer's ask): the `.memory/records` ledger, at the
+ * top level rather than buried inside two governance sub-views that each read
+ * a slice of it. The summary leads: how many records there are and how they
+ * split by type and by who wrote them, then the integrity signal, then the
+ * most recent rows.
+ *
+ * `now` is read HERE and passed in, because `lib/memory-model.mjs` is pure and
+ * forbidden from touching a clock — an age it invented would be a fact with no
+ * source, which is the one thing this page never shows.
+ */
+function renderMemory() {
+  clear(mounts.canvas);
+
+  const model = buildMemoryModel(sectionOf(state, 'records'), { now: nowMs() });
+  if (!model.ok) {
+    mounts.canvas.appendChild(said(`the memory ledger could not be read: ${model.reason}`));
+    return;
+  }
+  const { totalRecords, recent, countsByType, countsByActorKind, duplicates, note } = model.value;
+
+  mounts.canvas.appendChild(el('p', 'canvas-summary', `${totalRecords} memory record(s) · .memory/records/`));
+  if (note) {
+    // An empty ledger is a different fact from an unreadable one, and the
+    // model keeps them apart; so does the page.
+    mounts.canvas.appendChild(said(note));
+    return;
+  }
+
+  const chips = el('div', 'memory-counts');
+  for (const { type, count } of countsByType) {
+    const chip = el('span', 'memory-chip');
+    chip.appendChild(el('span', 'memory-chip-word', type));
+    chip.appendChild(el('span', 'memory-chip-count', String(count)));
+    chips.appendChild(chip);
+  }
+  for (const { actorKind, count } of countsByActorKind) {
+    const chip = el('span', 'memory-chip memory-chip-actor');
+    chip.appendChild(el('span', 'memory-chip-word', actorKind));
+    chip.appendChild(el('span', 'memory-chip-count', String(count)));
+    chips.appendChild(chip);
+  }
+  mounts.canvas.appendChild(chips);
+
+  // The integrity signal is never a number on its own: the same record id
+  // disagreeing with itself is a problem someone has to go and look at, so
+  // the ids and the lines they sit on are named.
+  if (!duplicates.ok) {
+    mounts.canvas.appendChild(said(duplicates.reason));
+  } else if (duplicates.integrityNote) {
+    const divergent = duplicates.groups.filter((g) => g.divergent);
+    if (divergent.length > 0) {
+      mounts.canvas.appendChild(saidList(duplicates.integrityNote,
+        divergent.map((g) => `${g.id}: ${g.occurrences.join(', ')}`)));
+    } else {
+      mounts.canvas.appendChild(said(duplicates.integrityNote));
+    }
+  }
+
+  mounts.canvas.appendChild(el('p', 'canvas-summary', recent.shown === recent.total
+    ? `every record, most recent first`
+    : `the ${recent.shown} most recent of ${recent.total}`));
+
+  const scroller = el('div', 'table-scroller');
+  const table = el('table', 'memory-table');
+  const thead = el('thead', null);
+  const head = el('tr', null);
+  for (const column of ['when', 'type', 'actor', 'record', 'source']) head.appendChild(el('th', null, column));
+  thead.appendChild(head);
+  table.appendChild(thead);
+
+  const body = el('tbody', null);
+  for (const record of recent.records) {
+    const tr = el('tr', null);
+    // A record whose own timestamp could not be parsed says so where its age
+    // would have gone — never a blank cell, and never a guessed age.
+    tr.appendChild(el('td', 'memory-when', record.relativeTime ?? (record.tsUnparseable ? `unparseable: ${record.ts}` : record.ts)));
+    tr.appendChild(el('td', 'memory-type', record.type));
+    const actor = el('td', 'memory-actor');
+    actor.appendChild(el('span', 'memory-actor-name', record.actor));
+    actor.appendChild(el('span', 'memory-actor-kind', record.actorKind ?? 'unknown'));
+    tr.appendChild(actor);
+    tr.appendChild(el('td', 'memory-id', record.id));
+    const source = el('td', 'memory-source');
+    source.appendChild(renderSourceStamp(record.sourceStamp));
+    tr.appendChild(source);
+    body.appendChild(tr);
+  }
+  table.appendChild(body);
+  scroller.appendChild(table);
+  mounts.canvas.appendChild(scroller);
+}
+
 function renderContent() {
   mounts.governanceNav.hidden = view !== 'governance';
   if (view !== 'governance') clear(mounts.governanceNav);
 
-  if (view === 'map') {
-    renderLanes();
-    renderDrawer();
-    return;
-  }
-  if (view === 'sdd') {
-    renderSdd();
-    mounts.drawer.hidden = true;
-    clear(mounts.drawer);
-    return;
-  }
-  if (view === 'reviews') {
-    renderReviews();
-    mounts.drawer.hidden = true;
-    clear(mounts.drawer);
-    return;
-  }
-  if (view === 'governance') {
-    renderGovernance();
-    mounts.drawer.hidden = true;
-    clear(mounts.drawer);
-    return;
-  }
-  clear(mounts.canvas);
-  mounts.canvas.appendChild(said(PLACEHOLDERS[view]));
-  mounts.drawer.hidden = true;
-  clear(mounts.drawer);
+  if (view === 'map') renderLanes();
+  else if (view === 'governance') renderGovernance();
+  else if (view === 'memory') renderMemory();
+
+  // The panel is about a TICKET; a mode is about the project. So it is drawn
+  // once, for every mode — a queue row or a plan issue opens it without
+  // throwing the reader out of what they were reading (#1059 phase 10, found
+  // by the maintainer clicking a row and getting nothing).
+  renderDrawer();
 }
 
 /** R881-9: one band per degraded thing, each one BESIDE the data, never instead of it. */
@@ -196,13 +457,64 @@ function renderServedBranch(servedBranch) {
 }
 
 function renderStatus() {
-  const indicator = pollIndicator({ poller: state.meta?.poller ?? null, nowMs: Date.now() });
+  const indicator = pollIndicator({ poller: state.meta?.poller ?? null, nowMs: nowMs() });
+  // Region 01 of the maintainer's design: the wordmark and the branch, then
+  // what is live, then the counts, then the controls. `header-model.mjs` owns
+  // every value; this function places them (#1059 phase 1).
+  const header = buildHeaderModel(sectionOf(state, 'graph'), state.meta ?? {});
+  const { counts, epic } = header.value;
   clear(mounts.status);
+
   mounts.status.appendChild(el('strong', 'title', 'brain:ui'));
   mounts.status.appendChild(renderServedBranch(state.meta?.servedBranch ?? null));
+
+  const live = el('span', 'status-live', indicator.paused ? 'paused' : 'live');
+  live.setAttribute('title', indicator.paused ? 'polling is paused' : 'the page is connected to the stream');
+  mounts.status.appendChild(live);
+
   mounts.status.appendChild(el('span', indicator.paused ? 'poll-indicator paused' : 'poll-indicator', indicator.text));
   mounts.status.appendChild(el('span', 'poll-countdown', indicator.countdown));
+
+  // The epic this checkout serves: an epic declares its tracker branch, and
+  // nothing joins the two yet, so the bar says that rather than parsing an
+  // epic out of a branch name.
+  mounts.status.appendChild(el('span', 'status-epic', epic.ok ? `epic #${epic.issue}` : 'epic: not resolved'));
+  mounts.status.appendChild(el('span', 'status-epic-reason', epic.ok ? '' : epic.reason));
+
+  const countsEl = el('span', 'status-counts');
+  if (counts.ok) {
+    countsEl.appendChild(el('span', 'count-label', 'nodes'));
+    countsEl.appendChild(el('span', 'count-total', String(counts.nodes)));
+    countsEl.appendChild(el('span', 'count-sep', '\u00b7'));
+    countsEl.appendChild(el('span', 'count-label', 'tracked'));
+    countsEl.appendChild(el('span', 'count-tracked', String(counts.tracked)));
+    countsEl.appendChild(el('span', 'count-sep', '\u00b7'));
+    countsEl.appendChild(el('span', 'count-undeclared', `${counts.undeclared} undeclared`));
+  } else {
+    countsEl.appendChild(el('span', 'count-label', `nodes: not counted — ${counts.reason}`));
+  }
+  mounts.status.appendChild(countsEl);
+
   mounts.status.appendChild(el('span', 'spacer'));
+
+  // The theme control: three choices, the current one selected. `system` is
+  // the default and stamps nothing, so the page follows the viewer's own
+  // setting unless they say otherwise.
+  const themeWrap = el('label', 'theme-choice');
+  themeWrap.appendChild(el('span', 'theme-label', 'theme'));
+  const select = document.createElement('select');
+  select.id = 'theme-select';
+  const current = readTheme();
+  for (const theme of THEMES) {
+    const option = document.createElement('option');
+    option.value = theme.id;
+    option.textContent = theme.label;
+    if (theme.id === current) option.selected = true;
+    select.appendChild(option);
+  }
+  select.addEventListener('change', () => { applyTheme(select.value); });
+  themeWrap.appendChild(select);
+  mounts.status.appendChild(themeWrap);
 
   const toggle = el('button', 'poll-toggle', indicator.paused ? 'resume polling' : 'disable polling');
   toggle.addEventListener('click', () => postPoll(indicator.paused ? 'resume' : 'pause'));
@@ -229,6 +541,10 @@ function renderLanes() {
     return;
   }
   const { lanes, crossEdges, holding, droppedEdges, issuesUnreadable, edgeSummary } = model.value;
+  // The design's clustering row and legend sit above the lanes (#1059 region
+  // 03). The legend is built from `state-vocab.mjs` itself — a hand-written
+  // list here would be a second definition of what a state is called.
+  mounts.canvas.appendChild(renderClusteringBar());
   mounts.canvas.appendChild(el('p', 'canvas-summary', `${lanes.length} track lane(s), ${holding.count} in the \`?\` holding lane`));
   mounts.canvas.appendChild(el('p', 'edge-summary', `edges: ${edgeSummary.laneInternal} in lanes, ${edgeSummary.holdingInternal} in the \`?\` holding lane, ${edgeSummary.crossLane} crossing lanes, ${edgeSummary.unknownNode} to an unknown node (${edgeSummary.total} total)`));
 
@@ -274,32 +590,108 @@ function renderLaneHeader(label, count, nodes, toggle) {
 function renderLaneRow(lane) {
   const row = el('div', 'lane-row');
   row.appendChild(renderLaneHeader(lane.label, lane.count, lane.nodes, null));
-  row.appendChild(renderLaneBoard(lane));
+  row.appendChild(renderLaneCards(lane));
   return row;
 }
 
-/** One lane's own SVG board — the same drawing the single canvas used to be, now scoped to one lane's own coordinate space (R998-3). */
-function renderLaneBoard(lane) {
-  const board = svg('svg', { width: lane.width + 4, height: lane.height + 4, viewBox: `-2 -2 ${lane.width + 4} ${lane.height + 4}`, class: 'lane-board' });
-  for (const edge of lane.edges) {
-    const [start, end] = edge.points;
-    board.appendChild(svg('line', { class: edge.reversed ? 'edge reversed' : 'edge', x1: start.x, y1: start.y, x2: end.x, y2: end.y }));
+/**
+ * A lane as the maintainer's design draws it: a grid of cards, one per node
+ * (#1059 region 03). The DAG's edges are NOT lines here — a card says what it
+ * waits on in words, and the cross-lane and undrawable edges keep the said
+ * lists below, which is where they already were. Every value still comes from
+ * `lane-model.mjs`; this function places them.
+ */
+/** The design's clustering control and legend (#1059 region 03). Epic clustering is
+ * not offered as a working control: `kind` and `parent` are node fields since #967
+ * but the lane model does not group by them yet (#1032), so the button says what it
+ * is waiting on rather than switching to nothing. */
+function renderClusteringBar() {
+  const bar = el('div', 'clustering-bar');
+
+  const left = el('div', 'clustering-controls');
+  left.appendChild(el('span', 'clustering-label', 'clustering'));
+  const byTrack = el('button', 'clustering-choice', 'track swimlanes');
+  byTrack.type = 'button';
+  byTrack.setAttribute('aria-current', 'true');
+  const byEpic = el('button', 'clustering-choice', 'epic clusters');
+  byEpic.type = 'button';
+  byEpic.disabled = true;
+  byEpic.setAttribute('title', 'epic grouping is not built yet — kind and parent are node data, and the lane model does not read them (#1032)');
+  left.appendChild(byTrack);
+  left.appendChild(byEpic);
+  left.appendChild(el('span', 'clustering-note', 'grouped by the track each issue declares'));
+  bar.appendChild(left);
+
+  const legend = el('div', 'legend');
+  legend.appendChild(el('span', 'legend-label', 'legend'));
+  for (const state of Object.values(STATES)) {
+    const item = el('span', `legend-item state-${state.code}`);
+    item.appendChild(el('span', 'legend-mark', state.mark));
+    item.appendChild(el('span', 'legend-word', state.label));
+    legend.appendChild(item);
   }
-  for (const node of lane.nodes) {
-    const selected = node.number === selectedIssue ? ' selected' : '';
-    const group = svg('g', { class: `node ${node.className}${selected}`, role: 'button', tabindex: 0, 'data-issue': node.number });
-    group.appendChild(svg('rect', { x: node.x, y: node.y, width: node.w, height: node.h }));
-    const title = svg('title');
-    title.textContent = [node.label, ...node.marks].join(' — ');
-    group.appendChild(title);
-    group.appendChild(svgText(node.x + 8, node.y + 22, 'label', node.label.slice(0, 24)));
-    if (node.marks.length > 0) group.appendChild(svgText(node.x + 8, node.y + 42, 'mark', node.marks.join(', ').slice(0, 28)));
-    group.addEventListener('click', () => selectNode(node.number));
-    group.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') selectNode(node.number); });
-    board.appendChild(group);
-  }
-  return board;
+  bar.appendChild(legend);
+  return bar;
 }
+
+/**
+ * The strip the design puts at the foot of a card (#1059 region 03): the stage
+ * the change reached, how many of its tasks are ticked, and the directory it
+ * lives in — each with its own source, like every other value here. An issue
+ * with no change directory says that instead of showing an empty strip.
+ */
+function renderNodeSdd(issue) {
+  const strip = el('div', 'node-sdd');
+  const found = sddForIssue(sectionOf(state, 'changes'), issue);
+  if (!found.ok) {
+    strip.appendChild(el('span', 'node-sdd-none', found.reason));
+    return strip;
+  }
+  const change = found.value;
+  const reached = [...change.stages].reverse().find((stage) => stage.state === 'present' || stage.state === 'done');
+  strip.appendChild(el('span', 'node-sdd-label', change.archived ? 'archived' : 'SDD'));
+  strip.appendChild(el('span', 'node-sdd-stage', reached ? reached.id : 'no stage present'));
+  if (change.tasks && typeof change.tasks.checked === 'number') {
+    const total = change.tasks.checked + (change.tasks.open ?? 0);
+    strip.appendChild(el('span', 'node-sdd-tasks', `tasks ${change.tasks.checked}/${total}`));
+  }
+  strip.appendChild(el('span', 'node-sdd-dir', change.dir));
+  return strip;
+}
+
+function renderLaneCards(lane) {
+  const grid = el('div', 'lane-grid');
+  for (const node of lane.nodes) grid.appendChild(renderNodeCard(node));
+  return grid;
+}
+
+function renderNodeCard(node) {
+  const card = el('div', `node-card ${node.className}${node.number === selectedIssue ? ' selected' : ''}`);
+  card.setAttribute('role', 'button');
+  card.setAttribute('tabindex', '0');
+  card.setAttribute('data-issue', String(node.number));
+
+  const head = el('div', 'node-card-head');
+  head.appendChild(el('span', 'node-number', `#${node.number}`));
+  const chip = el('span', `node-state state-${node.state.code}`);
+  chip.appendChild(el('span', 'node-state-mark', node.state.mark));
+  chip.appendChild(el('span', 'node-state-word', node.state.label));
+  head.appendChild(chip);
+  card.appendChild(head);
+
+  card.appendChild(el('h4', 'node-title', node.title || '(no title)'));
+
+  if (node.blockedBy.length > 0) {
+    card.appendChild(el('p', 'node-blocked', `blocked by ${node.blockedBy.map((n) => `#${n}`).join(', ')}`));
+  }
+  for (const mark of node.marks) card.appendChild(said(mark));
+  card.appendChild(renderNodeSdd(node.number));
+
+  card.addEventListener('click', () => selectNode(node.number));
+  card.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') selectNode(node.number); });
+  return card;
+}
+
 
 /**
  * The `?` holding lane (#998 R998-3): a header with a show/hide toggle
@@ -309,6 +701,12 @@ function renderLaneBoard(lane) {
  * blank expanded area.
  */
 function renderHoldingLane(holding) {
+  // Region 04 of the design: the undeclared issues are a BATCH, not a lane —
+  // a panel that states the proportion, shows what to paste to declare, and
+  // lists the issues as small tiles with the rest counted. The board that used
+  // to draw this page's holding-holding edges is gone with it; those edges are
+  // still classified by the model and are now SAID here, which is what the
+  // rest of this page does with an edge it does not draw (#1059 phase 5).
   const toggle = el('button', 'lane-toggle', holding.collapsed ? 'show' : 'hide');
   toggle.type = 'button';
   toggle.addEventListener('click', () => {
@@ -317,36 +715,53 @@ function renderHoldingLane(holding) {
     render();
   });
 
-  const row = el('div', 'lane-row holding');
-  const header = renderLaneHeader('? — undeclared', holding.count, holding.nodes, toggle);
-  header.appendChild(el('span', 'lane-edge-count', `${holding.edgeCount} edge(s)`));
-  row.appendChild(header);
-  if (holding.collapsed) return row;
+  const panel = el('div', 'batch');
+
+  const head = el('div', 'batch-head');
+  const left = el('div', 'batch-title');
+  left.appendChild(el('span', 'batch-mark', '?'));
+  left.appendChild(el('span', 'batch-word', 'undeclared'));
+  left.appendChild(el('span', 'batch-count', `${holding.count} of ${holding.total} open issues declared no block`));
+  head.appendChild(left);
+  head.appendChild(toggle);
+  panel.appendChild(head);
+
+  if (holding.collapsed) return panel;
 
   if (holding.note) {
-    row.appendChild(said(holding.note));
-    return row;
+    panel.appendChild(said(holding.note));
+    return panel;
   }
 
-  row.appendChild(el('p', 'note', "how to declare: paste this into the issue body, with your track's letter —"));
-  const pre = document.createElement('pre');
-  pre.textContent = holding.declareSnippet;
-  row.appendChild(pre);
+  const how = el('div', 'batch-declare');
+  how.appendChild(el('span', 'batch-declare-label', 'to declare, paste in the issue body'));
+  how.appendChild(el('code', null, holding.declareSnippet));
+  panel.appendChild(how);
 
-  const list = el('ul', 'holding-list');
-  for (const node of holding.nodes) list.appendChild(el('li', null, `${node.state.mark} ${node.label}`));
-  row.appendChild(list);
-
-  // Holding-holding edges are a board, drawn like a lane's own (#998 R998-3
-  // cold review): `lane-model.mjs` already laid it out over this same page's
-  // subgraph, this only turns that into elements, same as `renderLaneBoard`.
-  if (holding.edges.length > 0) {
-    row.appendChild(el('p', 'note', `${holding.edges.length} edge(s) on this page:`));
-    row.appendChild(renderLaneBoard({ nodes: holding.boardNodes, edges: holding.edges, width: holding.width, height: holding.height }));
+  const tiles = el('div', 'batch-tiles');
+  for (const node of holding.nodes) {
+    const tile = el('div', 'batch-tile');
+    tile.setAttribute('role', 'button');
+    tile.setAttribute('tabindex', '0');
+    tile.appendChild(el('span', 'batch-tile-number', `#${node.number}`));
+    tile.appendChild(el('p', 'batch-tile-title', node.title || '(no title)'));
+    tile.addEventListener('click', () => selectNode(node.number));
+    tile.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') selectNode(node.number); });
+    tiles.appendChild(tile);
   }
+  panel.appendChild(tiles);
 
-  if (holding.totalPages > 1) row.appendChild(renderPager(holding));
-  return row;
+  const foot = el('div', 'batch-foot');
+  const shown = holding.nodes.length;
+  const rest = holding.count - shown;
+  foot.appendChild(el('span', 'batch-rest', rest > 0 ? `+ ${rest} more` : 'all of them are listed'));
+  if (holding.edgeCount > 0) {
+    foot.appendChild(el('span', 'batch-edges', `${holding.edgeCount} edge(s) run between undeclared issues — said, not drawn: this batch has no coordinate space`));
+  }
+  panel.appendChild(foot);
+
+  if (holding.totalPages > 1) panel.appendChild(renderPager(holding));
+  return panel;
 }
 
 function renderPager(holding) {
@@ -374,35 +789,56 @@ function renderPager(holding) {
  * renders one loop over rows this page never re-derives.
  */
 function renderSdd() {
-  const model = buildSddModel(sectionOf(state, 'changes'));
+  // The PROJECT's chained-PR plan, not a matrix of every change's seven
+  // stages: per-change detail belongs in the panel a reader opens by clicking
+  // a ticket, which is where it lives (#1059 phase 10). This was the design's
+  // fourth MODE until the last slice, when it moved under Governance — a plan
+  // across every change is a fact about the repository, and that is where
+  // facts about the repository live.
+  const model = buildSlicePlan(sectionOf(state, 'changes'));
   clear(mounts.canvas);
   if (!model.ok) {
-    mounts.canvas.appendChild(said(`the SDD view could not be computed: ${model.reason}`));
+    mounts.canvas.appendChild(said(`the slice plan could not be computed: ${model.reason}`));
     return;
   }
-  const { changes, totals, sliceNote } = model.value;
-  mounts.canvas.appendChild(el('p', 'canvas-summary', `${totals.active} active change(s), ${totals.archived} archived, ${totals.withViolations} with a phase-order violation`));
-  // Review of PR 4, fix 1: a not-issue-numbered archive/ dir is skipped from
-  // the rows above but never silently dropped — said here by name.
-  if (totals.archiveSkipped.count > 0) {
-    mounts.canvas.appendChild(said(`${totals.archiveSkipped.count} archive dir(s) skipped: ${totals.archiveSkipped.names.join(', ')}`));
+  const { changes, unreadable, note, archiveSkipped } = model.value;
+  mounts.canvas.appendChild(el('p', 'canvas-summary', `${changes.length} change(s) declare a chained plan`));
+  mounts.canvas.appendChild(said(note));
+  if (archiveSkipped.count > 0) {
+    mounts.canvas.appendChild(said(`${archiveSkipped.count} archive dir(s) skipped: ${archiveSkipped.names.join(', ')}`));
   }
 
-  for (const change of changes.filter((c) => !c.archived)) mounts.canvas.appendChild(renderSddRow(change, sliceNote));
-  const archived = changes.filter((c) => c.archived);
-  if (archived.length > 0) {
-    mounts.canvas.appendChild(el('h3', 'sdd-archived-heading', 'Archived'));
-    for (const change of archived) mounts.canvas.appendChild(renderSddRow(change, sliceNote));
+  if (changes.length === 0) {
+    mounts.canvas.appendChild(said('no change in this tree declares a slice plan in its tasks.md'));
+  }
+
+  for (const change of changes) {
+    const block = el('div', 'plan-change');
+    const head = el('div', 'plan-change-head');
+    const open = el('button', 'plan-issue', `#${change.issue}`);
+    open.type = 'button';
+    open.addEventListener('click', () => selectNode(change.issue));
+    head.appendChild(open);
+    if (change.archived) head.appendChild(el('span', 'plan-archived', 'archived'));
+    head.appendChild(renderSourceStamp(sourceStamp(change.source)));
+    block.appendChild(head);
+
+    const list = el('ol', 'plan-slices');
+    for (const slice of change.slices) {
+      const item = el('li', 'plan-slice');
+      item.appendChild(el('span', 'plan-slice-n', `slice ${slice.slice}`));
+      item.appendChild(el('span', 'plan-claims', slice.claims.length > 0 ? slice.claims.join(', ') : 'claims nothing'));
+      if (slice.terminalPr) item.appendChild(el('span', 'plan-terminal', slice.terminalPr));
+      list.appendChild(item);
+    }
+    block.appendChild(list);
+    mounts.canvas.appendChild(block);
+  }
+
+  if (unreadable.length > 0) {
+    mounts.canvas.appendChild(saidList(`${unreadable.length} declared plan(s) could not be read:`, unreadable.map((u) => `#${u.issue}: ${u.reason}`)));
   }
 }
-
-/**
- * Every value this row draws carries its own source underneath it (A3,
- * extended to the SDD view by review of PR 4, fix 2): the row header already
- * stamped `change.dir`; each stage cell, the tasks line, and each slice line
- * now stamp their own `source` the same way, rather than trusting the
- * header's stamp to stand in for the whole row.
- */
 function renderSddRow(change, sliceNote) {
   const row = el('div', 'sdd-row');
   const header = el('div', 'sdd-row-header');
@@ -464,15 +900,59 @@ function renderReviews() {
 }
 
 function renderQueue(queue) {
+  // Region 05 of the design: the queue is a TABLE — PR, issue, rounds, latest
+  // verdict, the head it judged, and what it waits on. Every column comes from
+  // the entry itself (#1059 phase 6); a row opens the PR's own issue so the
+  // rounds are one click away, which is what the design's rows do.
   const wrap = el('div', 'review-queue');
   wrap.appendChild(el('h3', null, 'waiting on a verdict right now'));
+  wrap.appendChild(el('p', 'queue-note', 'the one review question that is about the project and not about a single PR'));
   if (queue.length === 0) {
     wrap.appendChild(said('nothing is waiting on a verdict'));
     return wrap;
   }
-  const list = el('ul', 'queue-list');
-  for (const item of queue) list.appendChild(el('li', null, `#${item.pr}${item.title ? ` ${item.title}` : ''} — ${item.wait}`));
-  wrap.appendChild(list);
+
+  const scroller = el('div', 'table-scroller');
+  const table = el('table', 'queue-table');
+  const head = el('tr', null);
+  for (const column of ['PR', 'issue', 'rounds', 'latest verdict', 'head judged', 'waiting']) {
+    head.appendChild(el('th', null, column));
+  }
+  const thead = el('thead', null);
+  thead.appendChild(head);
+  table.appendChild(thead);
+
+  const body = el('tbody', null);
+  for (const item of queue) {
+    const row = el('tr', item.escalate ? 'queue-row escalate' : 'queue-row');
+    row.appendChild(el('td', 'queue-pr', `#${item.pr}`));
+    row.appendChild(el('td', 'queue-issue', item.issue === null ? 'no issue linked' : `#${item.issue}`));
+    row.appendChild(el('td', 'queue-rounds', String(item.rounds)));
+
+    const verdictCell = el('td', null);
+    if (item.verdict === null) {
+      verdictCell.appendChild(el('span', 'queue-none', 'no round posted'));
+    } else {
+      const chip = el('span', `queue-verdict verdict-${item.verdict.toLowerCase()}`, item.verdict);
+      verdictCell.appendChild(chip);
+    }
+    row.appendChild(verdictCell);
+
+    row.appendChild(el('td', 'queue-head', item.headSha7 ?? 'no head judged'));
+    row.appendChild(el('td', 'queue-wait', item.wait));
+
+    if (item.issue !== null) {
+      row.classList.add('openable');
+      row.setAttribute('role', 'button');
+      row.setAttribute('tabindex', '0');
+      row.addEventListener('click', () => selectNode(item.issue));
+      row.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') selectNode(item.issue); });
+    }
+    body.appendChild(row);
+  }
+  table.appendChild(body);
+  scroller.appendChild(table);
+  wrap.appendChild(scroller);
   return wrap;
 }
 
@@ -533,9 +1013,13 @@ function renderReviewRound(round) {
  */
 function renderGovernanceNav() {
   clear(mounts.governanceNav);
+  const queue = buildReviewTimeline(sectionOf(state, 'reviews'), sectionOf(state, 'prs'));
   for (const sub of GOVERNANCE_VIEWS) {
     const button = el('button', null, sub.label);
     button.type = 'button';
+    // How many verdicts are waiting, beside the words "Verdict queue" — the
+    // one place the number cannot be read as counting something else.
+    if (sub.id === 'queue' && queue.ok) button.appendChild(el('span', 'mode-count', ` (${queue.value.queue.length})`));
     if (sub.id === governanceView) button.setAttribute('aria-current', 'page');
     button.addEventListener('click', () => switchGovernanceView(sub.id));
     mounts.governanceNav.appendChild(button);
@@ -569,6 +1053,17 @@ function renderGovernance() {
   }
   if (governanceView === 'actors') {
     renderActors();
+    return;
+  }
+  // Both arrived from the top level in #1059. They render exactly as they did
+  // as modes — a project-wide fact did not change shape by moving to where
+  // the project-wide facts live.
+  if (governanceView === 'queue') {
+    renderReviews();
+    return;
+  }
+  if (governanceView === 'slices') {
+    renderSdd();
     return;
   }
   mounts.canvas.appendChild(said(GOVERNANCE_PLACEHOLDERS[governanceView]));
@@ -645,31 +1140,62 @@ function renderDecisions() {
     return;
   }
   const { rows, driftWarnings } = model.value;
-  mounts.canvas.appendChild(el('p', 'canvas-summary', `${rows.length} ADR(s)`));
-  for (const row of rows) mounts.canvas.appendChild(renderDecisionRow(row));
+  // Region 06 of the design: the decisions are a TABLE — number, title,
+  // status, amendments, file — with the drift warning beside it, not a stack
+  // of paragraphs (#1059 phase 6).
   mounts.canvas.appendChild(renderDriftWarnings(driftWarnings));
+  mounts.canvas.appendChild(el('p', 'canvas-summary', `${rows.length} ADR(s) · brain/project/decisions/`));
+
+  const scroller = el('div', 'table-scroller');
+  const table = el('table', 'decisions-table');
+  const thead = el('thead', null);
+  const head = el('tr', null);
+  for (const column of ['ADR', 'title', 'status', 'amendments', 'file']) head.appendChild(el('th', null, column));
+  thead.appendChild(head);
+  table.appendChild(thead);
+
+  const body = el('tbody', null);
+  for (const row of rows) body.appendChild(renderDecisionRow(row));
+  table.appendChild(body);
+  scroller.appendChild(table);
+  mounts.canvas.appendChild(scroller);
 }
 
 /** One ADR row: an unreadable entry is its own said reason, kept in place (never dropped); a readable one carries its title, status, amendments, cited issues (the model's own `issuesLabel` — "referenced," never "driving") and supersession, each beside its own `sourceStamp`. */
 function renderDecisionRow(row) {
-  const wrap = el('div', 'decision-row');
+  const tr = el('tr', 'decision-row');
   if (row.ok === false) {
-    wrap.appendChild(el('strong', null, row.path ?? 'an unreadable ADR'));
-    wrap.appendChild(said(row.reason));
-    return wrap;
+    // An ADR the parser could not read keeps its place, sorted last, with its
+    // reason across the row rather than a blank line pretending it parsed.
+    const cell = el('td', 'decision-unreadable');
+    cell.setAttribute('colspan', '5');
+    cell.appendChild(el('strong', null, row.path ?? 'an unreadable ADR'));
+    cell.appendChild(said(row.reason));
+    tr.appendChild(cell);
+    return tr;
   }
-  wrap.appendChild(el('strong', 'decision-title', `ADR-${String(row.number).padStart(4, '0')} ${row.title}`));
-  wrap.appendChild(el('span', 'decision-status', row.status));
-  wrap.appendChild(renderSourceStamp(row.sourceStamp));
-  if (row.amendments.length > 0) {
-    const list = el('ul', 'decision-amendments');
-    for (const a of row.amendments) list.appendChild(el('li', null, `Amendment ${a.n}${a.date ? ` (${a.date})` : ''}: ${a.summary}${a.issue ? ` (#${a.issue})` : ''}`));
-    wrap.appendChild(list);
+
+  tr.appendChild(el('td', 'decision-number', String(row.number).padStart(4, '0')));
+  tr.appendChild(el('td', 'decision-title', row.title));
+  tr.appendChild(el('td', `decision-status status-${String(row.status).replace(/\s+/g, '-').toLowerCase()}`, row.status));
+
+  const amendments = el('td', 'decision-amendments');
+  if (row.amendments.length === 0) {
+    amendments.appendChild(el('span', 'decision-none', '—'));
+  } else {
+    for (const a of row.amendments) {
+      amendments.appendChild(el('p', 'decision-amendment', `${a.n}${a.date ? ` (${a.date})` : ''}: ${a.summary}${a.issue ? ` (#${a.issue})` : ''}`));
+    }
   }
-  if (row.issues.length > 0) wrap.appendChild(el('p', 'decision-issues', `${row.issuesLabel}: ${row.issues.map((n) => `#${n}`).join(', ')}`));
-  if (row.supersedes.length > 0) wrap.appendChild(el('p', 'decision-supersedes', `supersedes: ${row.supersedes.map((n) => `ADR-${String(n).padStart(4, '0')}`).join(', ')}`));
-  if (row.supersededBy !== null) wrap.appendChild(el('p', 'decision-superseded-by', `superseded by ADR-${String(row.supersededBy).padStart(4, '0')}`));
-  return wrap;
+  tr.appendChild(amendments);
+
+  const file = el('td', 'decision-file');
+  file.appendChild(renderSourceStamp(row.sourceStamp));
+  if (row.supersedes.length > 0) file.appendChild(el('p', 'decision-supersedes', `supersedes ${row.supersedes.map((n) => `ADR-${String(n).padStart(4, '0')}`).join(', ')}`));
+  if (row.supersededBy !== null) file.appendChild(el('p', 'decision-superseded-by', `superseded by ADR-${String(row.supersededBy).padStart(4, '0')}`));
+  if (row.issues.length > 0) file.appendChild(el('p', 'decision-issues', `${row.issuesLabel}: ${row.issues.map((n) => `#${n}`).join(', ')}`));
+  tr.appendChild(file);
+  return tr;
 }
 
 /** The same drift text `renderSnapshotText` already renders in the terminal (`snapshot.mjs:457-469`) — never a second computation of what drifted, only a second place it is said. A `driftWarnings` read failure is its own said reason, beside the table above, never a reason to blank it (R882-3). */
@@ -710,30 +1236,56 @@ function renderAntiPatterns() {
     return;
   }
   const { rows, unlistable } = model.value;
-  mounts.canvas.appendChild(el('p', 'canvas-summary', `${rows.length} anti-pattern(s)`));
-  for (const row of rows) mounts.canvas.appendChild(renderAntiPatternRow(row));
+  // Region 06: the catalogue is a table too — scope, name, the tickets that
+  // cite it, and the file (#1059 phase 6).
+  mounts.canvas.appendChild(el('p', 'canvas-summary', `${rows.length} anti-pattern(s) · brain/core/anti-patterns/`));
+
+  const scroller = el('div', 'table-scroller');
+  const table = el('table', 'anti-patterns-table');
+  const thead = el('thead', null);
+  const head = el('tr', null);
+  for (const column of ['scope', 'pattern', 'cited by', 'file']) head.appendChild(el('th', null, column));
+  thead.appendChild(head);
+  table.appendChild(thead);
+
+  const body = el('tbody', null);
+  for (const row of rows) body.appendChild(renderAntiPatternRow(row));
+  table.appendChild(body);
+  scroller.appendChild(table);
+  mounts.canvas.appendChild(scroller);
+
   if (unlistable.length > 0) mounts.canvas.appendChild(renderAntiPatternsUnlistable(unlistable));
 }
 
 /** One catalogue row: an unreadable entry is its own said reason, kept in place (never dropped); a readable one carries its title, scope and its own `sourceStamp`, plus the issues it cites — each stamped `[forge: #N]`, the same bracket form `sourceStamp` uses for a real forge ref, though no per-issue URL exists in this data (a bare `#N`/`ISSUE-N` mention, never a fabricated link). */
 function renderAntiPatternRow(row) {
-  const wrap = el('div', 'anti-pattern-row');
+  const tr = el('tr', 'anti-pattern-row');
   if (row.ok === false) {
-    wrap.appendChild(el('strong', null, row.path ?? 'an unreadable anti-pattern'));
-    wrap.appendChild(said(row.reason));
-    return wrap;
+    const cell = el('td', 'anti-pattern-unreadable');
+    cell.setAttribute('colspan', '4');
+    cell.appendChild(el('strong', null, row.path ?? 'an unreadable anti-pattern'));
+    cell.appendChild(said(row.reason));
+    tr.appendChild(cell);
+    return tr;
   }
-  wrap.appendChild(el('span', 'anti-pattern-scope', row.scope));
-  wrap.appendChild(el('strong', 'anti-pattern-title', row.title));
-  wrap.appendChild(renderSourceStamp(row.sourceStamp));
-  if (row.issueStamps.length > 0) {
-    // One chip per citation, not one joined text node: a citation whose project
-    // is known carries its own href, and a joined string could never be clicked.
-    const cited = el('p', 'anti-pattern-issues');
+
+  tr.appendChild(el('td', 'anti-pattern-scope', row.scope));
+  tr.appendChild(el('td', 'anti-pattern-title', row.title));
+
+  const cited = el('td', 'anti-pattern-issues');
+  if (row.issueStamps.length === 0) {
+    cited.appendChild(el('span', 'decision-none', 'no ticket cites it'));
+  } else {
+    // One chip per citation, so a citation with a project behind it is
+    // individually clickable (#882 PR 3's own cold review).
     for (const stamp of row.issueStamps) cited.appendChild(renderSourceStamp(stamp));
-    wrap.appendChild(cited);
   }
-  return wrap;
+  tr.appendChild(cited);
+
+  const file = el('td', 'anti-pattern-file');
+  file.appendChild(renderSourceStamp(row.sourceStamp));
+  tr.appendChild(file);
+  return tr;
 }
 
 /** An unlistable scope's directory is said beside the other scope's real rows, never read as "zero anti-patterns in that scope" (R882-4). Only called when there is something to say — an empty area would read as "nothing happened here," the same evidence-reader discipline every other degraded band in this page follows. */
@@ -797,7 +1349,7 @@ function renderHistoryReviewsLink() {
   wrap.appendChild(said('review verdicts have no round timestamp yet — see the Reviews mode for those'));
   const button = el('button', null, 'Go to Reviews');
   button.type = 'button';
-  button.addEventListener('click', () => switchToMode('reviews'));
+  button.addEventListener('click', () => { switchToMode('governance'); switchGovernanceView('queue'); });
   wrap.appendChild(button);
   return wrap;
 }
@@ -866,10 +1418,47 @@ function renderDrawer() {
   mounts.drawer.hidden = selectedIssue === null;
   if (selectedIssue === null) return;
 
-  const close = el('button', 'close', 'close');
+  // Region 08's header: the number, the state the card showed, the track, a
+  // link to the issue on the forge, and the close control — all from the same
+  // model the card used, so the panel never contradicts what was clicked.
+  const head = el('div', 'drawer-head');
+  const summary = nodeSummaryFor(sectionOf(state, 'graph'), selectedIssue);
+
+  const idLine = el('div', 'drawer-id');
+  idLine.appendChild(el('span', 'drawer-number', `#${selectedIssue}`));
+  if (summary.ok) {
+    const chip = el('span', `node-state state-${summary.value.state.code}`);
+    chip.appendChild(el('span', 'node-state-mark', summary.value.state.mark));
+    chip.appendChild(el('span', 'node-state-word', summary.value.state.label));
+    idLine.appendChild(chip);
+    if (summary.value.track) idLine.appendChild(el('span', 'drawer-track', `track ${summary.value.track}`));
+  }
+  const project = state.meta?.project ?? null;
+  if (project) {
+    const link = el('a', 'drawer-forge', `forge #${selectedIssue} \u2197`);
+    link.setAttribute('href', issueUrl(project, selectedIssue));
+    link.setAttribute('rel', 'noopener noreferrer');
+    link.setAttribute('target', '_blank');
+    idLine.appendChild(link);
+  }
+  head.appendChild(idLine);
+
+  const close = el('button', 'close', '\u2715');
+  close.setAttribute('aria-label', 'close this panel');
   close.addEventListener('click', closeDrawer);
-  mounts.drawer.appendChild(close);
-  mounts.drawer.appendChild(el('h2', null, `#${selectedIssue}`));
+  head.appendChild(close);
+  mounts.drawer.appendChild(head);
+
+  if (summary.ok) {
+    if (summary.value.title) mounts.drawer.appendChild(el('h2', 'drawer-title', summary.value.title));
+    for (const mark of summary.value.marks) mounts.drawer.appendChild(said(mark));
+    if (summary.value.blockedBy.length > 0) {
+      mounts.drawer.appendChild(el('p', 'drawer-blocked', `blocked by ${summary.value.blockedBy.map((n) => `#${n}`).join(', ')}`));
+    }
+    mounts.drawer.appendChild(renderChildren(selectedIssue));
+  } else {
+    mounts.drawer.appendChild(said(summary.reason));
+  }
 
   if (changeView === null) {
     mounts.drawer.appendChild(el('p', 'note', 'reading this change…'));
@@ -893,6 +1482,43 @@ function renderDrawer() {
   mounts.drawer.appendChild(renderTab(model.value.tabs.find((t) => t.id === activeTab) ?? model.value.tabs[0]));
 }
 
+/**
+ * The tickets that belong to the selected one (#1059 phase 10): the issues
+ * that DECLARE it as their parent, each with the state vocabulary a card
+ * shows. A node nobody declares says so — "no ticket names this as its
+ * parent" is a fact about the declarations, not a failure to read them.
+ */
+function renderChildren(issue) {
+  const wrap = el('div', 'drawer-children');
+  const found = childrenOf(sectionOf(state, 'graph'), issue);
+  if (!found.ok) {
+    wrap.appendChild(said(found.reason));
+    return wrap;
+  }
+  wrap.appendChild(el('h3', 'drawer-section-title', `tickets that declare #${issue} as their parent`));
+  if (found.value.length === 0) {
+    wrap.appendChild(said('no open ticket declares this one as its parent'));
+    return wrap;
+  }
+  const list = el('ul', 'child-list');
+  for (const child of found.value) {
+    const item = el('li', 'child-row');
+    item.setAttribute('role', 'button');
+    item.setAttribute('tabindex', '0');
+    item.appendChild(el('span', 'child-number', `#${child.number}`));
+    const chip = el('span', `node-state state-${child.state.code}`);
+    chip.appendChild(el('span', 'node-state-mark', child.state.mark));
+    chip.appendChild(el('span', 'node-state-word', child.state.label));
+    item.appendChild(chip);
+    item.appendChild(el('span', 'child-title', child.title || '(no title)'));
+    item.addEventListener('click', () => selectNode(child.number));
+    item.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') selectNode(child.number); });
+    list.appendChild(item);
+  }
+  wrap.appendChild(list);
+  return wrap;
+}
+
 function renderTab(tab) {
   const wrap = document.createElement('div');
   if (tab.note) wrap.appendChild(el('p', 'note', `source: ${tab.note}`));
@@ -901,14 +1527,53 @@ function renderTab(tab) {
     if (tab.source) wrap.appendChild(el('span', 'source', tab.source));
   }
   for (const item of tab.entries) wrap.appendChild(renderEntry(item));
+
+  // The slice plan sits under the stage strip, in the same tab, as the design
+  // draws it (#1059 region 08).
+  if (tab.slices) {
+    wrap.appendChild(el('h3', 'slice-plan-title', 'slice plan'));
+    if (!tab.slices.ok) {
+      wrap.appendChild(said(tab.slices.reason));
+    } else {
+      if (tab.slices.note) wrap.appendChild(el('p', 'note', tab.slices.note));
+      for (const slice of tab.slices.entries) wrap.appendChild(renderEntry(slice));
+    }
+  }
+  // The lines the spec grammar could not attach to a scenario (#1067 cold
+  // review, finding cold-1). `spec-cards.mjs` stopped dropping them; a fact
+  // collected and never drawn is the same silence one module further along,
+  // so they are drawn HERE, where the author of the file will see them.
+  if (tab.orphans && tab.orphans.length > 0) {
+    wrap.appendChild(el('h3', 'orphan-title', `${tab.orphans.length} line(s) the grammar could not attach`));
+    for (const orphan of tab.orphans) wrap.appendChild(renderEntry(orphan));
+  }
+
   // "read, and empty" and "never read" are different facts, so they are
-  // different sentences — an empty area would say neither.
-  if (tab.ok && tab.entries.length === 0) wrap.appendChild(said('this tab\'s source was read and has nothing in it'));
+  // different sentences — an empty area would say neither. An orphan is
+  // content, so a tab that has only orphans is not empty.
+  const nothingDrawn = tab.entries.length === 0 && (tab.orphans ?? []).length === 0;
+  if (tab.ok && nothingDrawn) wrap.appendChild(said('this tab\'s source was read and has nothing in it'));
   return wrap;
 }
 
 function renderEntry(item) {
   const card = el('div', item.pending ? 'card pending' : 'card');
+  // A numbered, marked entry is the design's stage strip (#1059 region 08);
+  // everything else keeps the checkbox form the tasks tab needs.
+  if (typeof item.position === 'number') {
+    const line = el('div', 'stage-line');
+    line.appendChild(el('span', 'stage-number', String(item.position)));
+    line.appendChild(el('span', 'stage-name', item.title));
+    // The file the stage is. Present or missing, the reader sees what to open
+    // or what to create (#1059).
+    if (item.file) line.appendChild(el('span', 'stage-file', item.file));
+    line.appendChild(el('span', item.done ? 'stage-mark done' : 'stage-mark missing', item.mark));
+    card.appendChild(line);
+    if (item.detail) card.appendChild(el('p', null, item.detail));
+    card.appendChild(renderSourceStamp(item.sourceStamp));
+    for (const child of item.children ?? []) card.appendChild(renderEntry(child));
+    return card;
+  }
   const done = item.done === undefined ? '' : item.done ? '[x] ' : '[ ] ';
   card.appendChild(el('strong', null, `${done}${item.title}`));
   if (item.detail) card.appendChild(el('p', null, item.detail));
@@ -1050,6 +1715,8 @@ function subscribe() {
   return stream;
 }
 
+applyTheme(readTheme());
+mountSearch();
 render();
 readSnapshot().then(subscribe);
 // "polled 5 s ago" is a claim that goes stale by itself, so the indicator
