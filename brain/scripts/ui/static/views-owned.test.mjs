@@ -282,3 +282,11 @@ test('#1059 region 01: the design\'s six header facts each have a place in the b
     assert.match(m[0], re, `${what} must be in the status bar (design region 01)`);
   }
 });
+
+test('#1059 region 02: the mode nav carries each mode\'s glyph, the queue count and the keyboard chips', () => {
+  const m = APP_JS.match(/function renderModes\(\) \{[\s\S]*?\n}\n/);
+  assert.ok(m, 'renderModes must exist in app.js');
+  assert.match(m[0], /mode\.glyph/, 'the glyph comes from the mode table, never a literal in the page');
+  assert.match(m[0], /mode-count/, 'the design puts the queue\'s own count on the verdicts mode');
+  assert.match(m[0], /'kbd'/, 'the keyboard hints are chips, as the design draws them');
+});

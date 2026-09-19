@@ -101,11 +101,19 @@
 
 * { box-sizing: border-box; }
 
+/* #1059 phase 2 — the app shell the design draws: a full-height column on the
+   ground colour, so the page IS the application rather than a document that
+   happens to be dark. The chrome (bar, nav, labels, counts) is mono; the
+   content keeps the sans. */
 body {
   margin: 0;
   font: 14px/1.45 var(--font-sans);
   color: var(--ink);
   background: var(--paper);
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  -webkit-font-smoothing: antialiased;
 }
 
 /* ── the status bar: the poll indicator and its two controls (R881-4) ───── */
@@ -113,15 +121,38 @@ body {
 .status-bar {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 8px 14px;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  padding: 10px 20px;
   border-bottom: 1px solid var(--line);
-  background: var(--surface);
+  background: var(--paper);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.status-bar .title {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  font-size: 12px;
+  text-transform: uppercase;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.status-bar .title::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--accent);
 }
 
 .status-bar .poll-indicator { font-variant-numeric: tabular-nums; }
 .status-bar .poll-indicator.paused { color: var(--warn); }
 .status-bar button {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  border-radius: 5px;
   font: inherit;
   padding: 3px 10px;
   border: 1px solid var(--line);
@@ -172,19 +203,53 @@ body {
 
 .modes {
   display: flex;
-  gap: 8px;
-  padding: 6px 14px;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px 16px;
+  padding: 8px 20px;
   border-bottom: 1px solid var(--line);
+  background: var(--paper);
+}
+.modes .mode-group { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.modes .mode-glyph { color: var(--stamp); }
+.modes button[aria-current='page'] .mode-glyph { color: var(--accent); }
+.modes .mode-count { color: var(--stamp); }
+.modes .mode-keys {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--stamp);
+}
+.modes .mode-key { display: inline-flex; align-items: baseline; gap: 5px; }
+.modes kbd {
+  font-family: inherit;
+  padding: 1px 5px;
+  border-radius: 3px;
+  border: 1px solid var(--line);
   background: var(--surface);
+  color: var(--muted);
 }
 .modes button {
-  font: inherit;
-  padding: 4px 10px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 12px;
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: 5px;
   background: var(--surface);
   color: var(--muted);
   cursor: pointer;
+}
+.modes button:hover { color: var(--ink); border-color: var(--edge); }
+.modes button[aria-current='page'] {
+  color: var(--ink);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  background: var(--accent-quiet);
 }
 .modes button[aria-current='page'] {
   color: var(--ink);
@@ -197,6 +262,8 @@ body {
 
 .governance-nav[hidden] { display: none; }
 .governance-nav {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
   display: flex;
   gap: 8px;
   padding: 6px 14px;
@@ -302,7 +369,7 @@ body {
 
 /* ── the canvas ────────────────────────────────────────────────────────── */
 
-.canvas { padding: 14px; overflow: auto; }
+.canvas { padding: 18px 20px; overflow: auto; flex: 1; }
 .canvas .said { margin: 0 0 10px; color: var(--warn); }
 .canvas .said-list { margin: 0 0 10px 18px; color: var(--warn); padding: 0; }
 

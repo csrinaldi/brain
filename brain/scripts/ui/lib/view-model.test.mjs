@@ -82,3 +82,15 @@ test('#998 R998-2: Escape closes the door only when something is selected', () =
 test('#998 R998-2: an unknown key is a no-op', () => {
   assert.deepEqual(keyAction('map', 'z', { nodes: [], selected: null }), { type: 'none' });
 });
+
+// ── #1059 phase 2: the design gives each mode a glyph ──────────────────────
+// The buttons ARE this table (R998-2), so the glyph belongs here beside the
+// label — not in the page, where it would be a second copy of the mode list.
+test('#1059 region 02: every mode carries the glyph the design draws beside its name', () => {
+  const glyphs = MODES.map((m) => m.glyph);
+  assert.deepEqual(glyphs, ['●', '▤', '⚖', '▦'], 'map, slices, verdicts, governance — the design\'s own marks, in the table\'s order');
+  for (const mode of MODES) {
+    assert.equal(typeof mode.label, 'string');
+    assert.ok(mode.label.length > 0, 'the glyph is beside the word, never instead of it');
+  }
+});

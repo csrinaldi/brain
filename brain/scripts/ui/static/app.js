@@ -114,13 +114,34 @@ function render() {
 /** The four mode buttons, drawn straight from `lib/view-model.mjs`'s table — no inline handler, no second copy of the labels. */
 function renderModes() {
   clear(mounts.modes);
+  // Region 02 of the design: the modes as pills carrying their glyph, then the
+  // queue's own count on the verdicts mode, then the keyboard chips. The glyph
+  // and the label both come from `view-model.mjs`'s table — the buttons are
+  // that table, never a second copy of it (#1059 phase 2).
+  const group = el('div', 'mode-group');
+  const queue = buildReviewTimeline(sectionOf(state, 'reviews'), sectionOf(state, 'prs'));
   for (const mode of MODES) {
-    const button = el('button', null, mode.label);
+    const button = el('button', null);
     button.type = 'button';
+    button.appendChild(el('span', 'mode-glyph', mode.glyph));
+    button.appendChild(el('span', 'mode-label', mode.label));
+    if (mode.id === 'reviews' && queue.ok) {
+      button.appendChild(el('span', 'mode-count', `(${queue.value.queue.length})`));
+    }
     if (mode.id === view) button.setAttribute('aria-current', 'page');
     button.addEventListener('click', () => switchToMode(mode.id));
-    mounts.modes.appendChild(button);
+    group.appendChild(button);
   }
+  mounts.modes.appendChild(group);
+
+  const keys = el('div', 'mode-keys');
+  for (const [key, what] of [['J/K', 'node'], ['Tab', 'view'], ['Esc', 'close']]) {
+    const hint = el('span', 'mode-key');
+    hint.appendChild(el('kbd', null, key));
+    hint.appendChild(el('span', null, what));
+    keys.appendChild(hint);
+  }
+  mounts.modes.appendChild(keys);
 }
 
 function switchToMode(mode) {

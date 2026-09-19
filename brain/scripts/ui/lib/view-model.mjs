@@ -8,11 +8,15 @@
 // (PR 6 may add per-mode state; until then the id is the whole state).
 
 /** The four modes, in the order they switch and the order Tab cycles. */
+// #1059 region 02: the glyph is the maintainer's design's own mark for each
+// mode. It sits BESIDE the word, never instead of it — a mark alone would make
+// the nav unreadable to anyone the glyph does not reach, which is the same
+// rule `state-vocab.mjs` holds for a state.
 export const MODES = Object.freeze([
-  Object.freeze({ id: 'map', label: 'Map & tracks' }),
-  Object.freeze({ id: 'sdd', label: 'SDD & slices' }),
-  Object.freeze({ id: 'reviews', label: 'Reviews' }),
-  Object.freeze({ id: 'governance', label: 'Governance' }),
+  Object.freeze({ id: 'map', glyph: '\u25cf', label: 'Map & tracks' }),
+  Object.freeze({ id: 'sdd', glyph: '\u25a4', label: 'SDD & slices' }),
+  Object.freeze({ id: 'reviews', glyph: '\u2696', label: 'Reviews' }),
+  Object.freeze({ id: 'governance', glyph: '\u25a6', label: 'Governance' }),
 ]);
 
 export const MODE_IDS = Object.freeze(MODES.map((mode) => mode.id));
