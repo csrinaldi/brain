@@ -84,7 +84,14 @@ function toResult(node, matchedBy) {
     title: typeof node.title === 'string' ? node.title : '',
     track: node.track ?? null,
     labels: Array.isArray(node.labels) ? [...node.labels] : [],
-    state: node.state ?? null,
+    // `forgeState`, NOT `state`. On a raw graph node from `epic-graph.mjs`
+    // this field is the forge's own word — the string "open" or "closed" —
+    // while every node `lane-model.mjs` builds carries a `state` OBJECT of
+    // `{code, mark, label}` from `state-vocab.mjs`. Two different things under
+    // one name in the same page is how `row.state.code` gets written and
+    // throws at render; the name is the guard, because a comment warning
+    // against the mistake still lets someone make it (#1059).
+    forgeState: node.state ?? null,
     status: node.status ?? null,
     kind: node.kind ?? null,
     tracker: node.tracker ?? null,
@@ -128,6 +135,9 @@ function buildEpicTrackerFacet(nodes) {
 /**
  * searchNodes(graphSection, query, {limit}) -> {ok:true, value:{query,
  * results, shown, total, cap, note, epicTrackerFacet}} | {ok:false, reason}
+ *
+ * A result row is `{number, title, track, labels, forgeState, status, kind,
+ * tracker, parent, ok, matchedBy}` plus `reason` when `ok` is false.
  *
  * One query box over the graph's own nodes (#1059): matches by issue number
  * (exact and prefix), title substring, exact track, and exact-or-substring

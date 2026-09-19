@@ -194,3 +194,17 @@ test('#1059: a node matching by several dimensions reports every dimension it ma
   const result = searchNodes(g, '9');
   assert.deepEqual(result.value.results[0].matchedBy, ['number', 'title']);
 });
+
+// The name is the guard. A raw graph node's `state` is the forge's own word
+// ("open"), while every node `lane-model.mjs` builds carries a `{code, mark,
+// label}` object under that same name. Carrying the string through as `state`
+// would invite `row.state.code`, which throws at render — the exact class of
+// defect that shipped three times in #1059.
+test('#1059: a result carries the forge word as forgeState, never as a `state` that reads like the vocabulary object', () => {
+  const node = { number: 1, title: 'a ticket', labels: [], track: 'UI', kind: null, tracker: null, parent: null, state: 'open', ok: true };
+  const found = searchNodes({ ok: true, value: { nodes: [node] } }, '1');
+
+  assert.equal(found.value.results[0].forgeState, 'open', 'the forge word travels under its own name');
+  assert.ok(!('state' in found.value.results[0]),
+    'and nothing on a result row is called `state`, so no renderer can reach for `.code` on a string');
+});

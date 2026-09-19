@@ -158,3 +158,20 @@ The notice about `kind` and `tracker` being undeclared is gated on the query
 actually asking for one. A sentence about `kind` under every search for a
 title is noise, and noise is how a real statement stops being read. Both
 directions of that gate were mutated and each turns exactly one test red.
+
+## One name, two things — caught before it shipped
+
+A raw graph node from `epic-graph.mjs` carries `state` as the forge's own
+word, the string `"open"`. Every node `lane-model.mjs` builds carries `state`
+as a `{code, mark, label}` object from `state-vocab.mjs`. Two different things
+under one name in the same page is how `row.state.code` gets written, and how
+it throws at render — three times over in this very change.
+
+A search result now calls the forge word `forgeState`, and nothing on a result
+row is called `state` at all. The NAME is the guard: a comment warning against
+the mistake still lets someone make it. Mutation: carrying it back as `state`
+turns exactly that test red.
+
+This was found because the delegated writer checked the live data instead of
+believing the brief it was given, which had the field wrong. That is the same
+discipline the `stages` defect was missing.
