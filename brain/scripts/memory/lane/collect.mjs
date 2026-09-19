@@ -16,6 +16,7 @@ import { hostname, tmpdir } from 'node:os';
 import { join, basename } from 'node:path';
 
 import { planLaneCommit } from './plan.mjs';
+import { contentDelivery } from './delivery.mjs';
 import { scanTextForSecrets, resolveSecretConfig, compilePatterns } from '../lib/secret-scrub.mjs';
 import { loadBrainConfigOrThrow } from '../../lib/brain-config.mjs';
 // removeTempTree, not a bare rmSync: this module spawns git AND recursively
@@ -196,7 +197,8 @@ function buildCandidate(worktreePath, entry, patterns, allowPatterns) {
  *   loadConfig?: (root: string) => object,
  * }} opts
  * @returns {{ref: string, commit: string|null, collected: number, skipped: object[],
- *   duplicates: object, baseFetched: boolean, skippedWorktrees: Array<{path: string, reason: string}>}}
+ *   duplicates: object, baseFetched: boolean, skippedWorktrees: Array<{path: string, reason: string}>,
+ *   reparented: boolean}}
  */
 export function collectLane({
   root,
@@ -276,10 +278,32 @@ export function collectLane({
   // 8. A9: observe the ref's current tip AT PLAN TIME — this is the `<old>`
   //     value the CAS below is compared against. If it moved between here and
   //     the `update-ref` call, the CAS fails and the run reports `raced`.
+  //
+  //  #936 (D3, the #1050 fix): a same-day append used to ALWAYS parent on
+  //  the existing tip, even when that tip's own content had already reached
+  //  `origin/main` (e.g. a same-day squash-merge) — the three-dot diff
+  //  against `origin/main` then re-derived every one of the tip's own paths
+  //  as "added by this lane" forever, since a squash-merged lane shares no
+  //  commit ancestry with `main` (`surveyDelivery`'s own doc comment). The
+  //  shared `contentDelivery()` helper answers the same question this
+  //  module's own step-9 delivery survey (`ship.mjs`'s `surveyDelivery`)
+  //  asks: when the existing tip is fully `delivered`, this run reparents
+  //  onto `origin/main`'s own tip instead — `pending`/`unknown` keep
+  //  appending on the existing tip exactly as before this change, since a
+  //  partial or unreadable delivery state must never reparent.
   const refCheck = git(['rev-parse', '--verify', '--quiet', plan.ref], { cwd: root });
   const existingTip = refCheck.status === 0 ? refCheck.stdout.trim() : null;
   const oldTipArg = existingTip ?? '';
-  if (existingTip) plan.parent = existingTip; // D2: same-day append parents off the ref's tip, not origin/main
+  let reparented = false;
+  if (existingTip) {
+    const delivery = contentDelivery({ git, root, rev: existingTip, baseFetched });
+    if (delivery.status === 'delivered') {
+      plan.parent = originMainTip;
+      reparented = true;
+    } else {
+      plan.parent = existingTip; // D2: same-day append parents off the ref's tip, not origin/main
+    }
+  }
 
   // 9. blobs for the winners ONLY (A1: a marked candidate never reaches
   //    `plan.files`, so `hash-object -w` is structurally unreachable for it).
@@ -304,10 +328,15 @@ export function collectLane({
 
     if (newTreeSha === parentTreeSha) {
       // Nothing new: the ref is left exactly as it was, `update-ref` is never
-      // called — the "nothing new is a no-op" scenario, verbatim.
+      // called — the "nothing new is a no-op" scenario, verbatim. `reparented`
+      // is `false` here even when the delivery read above decided to reparent
+      // (`plan.parent = originMainTip`): no commit was minted and the ref's
+      // own tip never moved, so nothing was actually reparented. A fully
+      // delivered tip stranded this way is harmless (D5) — the next run with
+      // genuinely new content reparents it, or the cross-day sweep deletes it.
       return {
         ref: plan.ref, commit: null, collected: 0, skipped: plan.skipped,
-        duplicates: plan.duplicates, baseFetched, skippedWorktrees,
+        duplicates: plan.duplicates, baseFetched, skippedWorktrees, reparented: false,
       };
     }
 
@@ -363,6 +392,7 @@ export function collectLane({
       duplicates: plan.duplicates,
       baseFetched,
       skippedWorktrees,
+      reparented,
     };
   } finally {
     removeTempTree(tmpDir);

@@ -15,6 +15,7 @@
 
 import { collectLane, defaultGit } from './collect.mjs';
 import { tierParams } from '../../vcs/governance-tiers.mjs';
+import { contentDelivery } from './delivery.mjs';
 
 /** Run `git(argv, opts)`; parse its stdout as a non-negative integer count,
  * defaulting to 0 on anything unparseable (never throws — a survey read is
@@ -76,46 +77,23 @@ function surveyRef({ git, root, ref, branch }) {
  * surveyDelivery() — R3/R4 (#920): "did these records reach `origin/main`'s
  * CONTENT?", via content containment, never commit ancestry (`merge-base
  * --is-ancestor` would report every squash-merged lane as pending forever —
- * see proposal R3). Runs on the existing injected `git` seam, no new seam,
- * no network:
+ * see proposal R3).
  *
- *   lanePaths   = git diff --name-only origin/main...<ref>   # what this lane adds
- *   undelivered = git diff --name-only <ref> origin/main -- <lanePaths>
- *   delivered   ⟺ lanePaths is empty, or undelivered is empty
- *
- * R5: an unreadable precondition is NAMED, never resolved to `delivered:
- * true` — `baseFetched === false` (stale `origin/main`) short-circuits with
- * NO git call at all; a non-zero diff exit (unresolvable revision) is the
- * other `unknown` case. Both report `delivered: null` with a reason; the
- * caller still acts (push if pending, always attempt reconciliation) rather
- * than silently assume delivery — a false "delivered" strands memory
- * forever, while a spurious extra `mrList` scan costs one API call.
- *
- * The first call is byte-identical to `buildTitleAndBody`'s own three-dot
- * diff (R4's deliberate argv collision — same question, same answer); the
- * second is distinguished by its `--` pathspec (see `surveyOkRules` in
- * ship.test.mjs for the ordered fake-git pair this requires).
+ * #936 (D3): the classification itself now lives in the shared, leaf
+ * `contentDelivery()` helper (`lane/delivery.mjs`) — reused by the same-day
+ * reparent (`collect.mjs` step 8) and the cross-day sweep (`lane/sweep.mjs`).
+ * This function is a THIN WRAPPER translating that helper's
+ * `{status, reason}` shape back to this module's own pre-#936
+ * `{delivered, reason}` shape — `delivered`→`true`, `pending`→`false`,
+ * `unknown`→`null`, same `reason`. No behavior change: the wrapper's argv
+ * and every observable outcome are byte-identical to the pre-#936 body (see
+ * `surveyOkRules` in ship.test.mjs for the ordered fake-git pair this
+ * requires, and `delivery.test.mjs` for the helper's own direct coverage).
  */
 function surveyDelivery({ git, root, ref, baseFetched }) {
-  if (baseFetched === false) {
-    return { delivered: null, reason: 'baseStale' };
-  }
-
-  const laneDiff = git(['diff', '--name-only', `origin/main...${ref}`], { cwd: root });
-  if (laneDiff.status !== 0) {
-    return { delivered: null, reason: 'diffFailed' };
-  }
-  const lanePaths = String(laneDiff.stdout ?? '').split('\n').filter(Boolean);
-  if (lanePaths.length === 0) {
-    return { delivered: true, reason: null };
-  }
-
-  const undeliveredDiff = git(['diff', '--name-only', ref, 'origin/main', '--', ...lanePaths], { cwd: root });
-  if (undeliveredDiff.status !== 0) {
-    return { delivered: null, reason: 'diffFailed' };
-  }
-  const undeliveredPaths = String(undeliveredDiff.stdout ?? '').split('\n').filter(Boolean);
-  return { delivered: undeliveredPaths.length === 0, reason: null };
+  const { status, reason } = contentDelivery({ git, root, rev: ref, baseFetched });
+  const delivered = status === 'delivered' ? true : status === 'pending' ? false : null;
+  return { delivered, reason };
 }
 
 // A4: the branch's own grammar (ADR-0034 L1, adr-0034:49) — tolerating the
@@ -180,29 +158,72 @@ function parsePrNumber(url) {
   return fallback ? Number(fallback[1]) : null;
 }
 
-/** findOrCreatePr() — A1 steps 4-5. `mrList` is the ONE port verb that
- * THROWS (design A6, measured: github.mjs:458/gitlab.mjs:614 call a JSON
- * runner that throws on non-zero exit, unlike mrCreate/mrAutoMerge which
- * each catch their own). Wrapped here so a lookup failure is tagged
- * `prLookupFailed` and fails the run closed — the precondition for a
- * mutating write (mrCreate) is unreadable, and creating blindly risks a
- * duplicate PR. */
-async function findOrCreatePr({ vcs, project, branch, title, body }) {
+/**
+ * decidePr() — D4 (#936), REVERSES #920's R8. `mrList` is the ONE port verb
+ * that THROWS (design A6, measured: github.mjs:458/gitlab.mjs:614 call a
+ * JSON runner that throws on non-zero exit, unlike mrCreate/mrAutoMerge
+ * which each catch their own). Wrapped here so a lookup failure is tagged
+ * `prLookupFailed` and fails the run closed.
+ *
+ * R8 REVERSAL (#920 -> #936): #920's R8 ruling was "PR closed unmerged ⇒
+ * pending ⇒ push if needed, then a fresh PR" — implemented, pre-#936, by
+ * querying `mrList({state:'open'})` ALONE: a closed PR could never be found
+ * by that query, so the branch always fell through to `mrCreate`, i.e. a
+ * fresh PR every run. This is now REVERSED: the query below spans ALL
+ * states (bound to this one branch via the D2 `headBranch` filter, never a
+ * repo-wide scan) so a closed-unmerged history is actually visible, and a
+ * closed-unmerged branch's only decision is `closedUnmerged` — reported on
+ * every run, never re-pushed, never given a fresh PR.
+ *
+ * D4's rule, once the list is filtered to `headBranch === branch` (a
+ * foreign branch's PR must never affect this decision):
+ * - any item with `state === 'open'` -> reuse it (`action: 'reuse'`)
+ * - no matches at all -> `action: 'create'`
+ * - otherwise the HIGHEST-numbered match ("newest") decides:
+ *   - `state === null || merged === null` (uncomputable) -> `prLookupFailed`
+ *   - `state === 'closed' && merged === false` -> `action: 'closedUnmerged'`
+ *   - anything else (`merged === true`, i.e. a pre-#936 [closed, merged]
+ *     history) -> `action: 'create'`
+ *
+ * Called BEFORE the push (moved from `ship.mjs`'s old post-push position) —
+ * a push onto a branch whose only PR was closed unmerged would itself be a
+ * re-ship, which spec.md forbids regardless of whether a fresh PR follows.
+ */
+async function decidePr({ vcs, project, branch }) {
   let list;
   try {
-    list = await vcs.mrList({ project, state: 'open' });
+    list = await vcs.mrList({ project, state: 'all', headBranch: branch });
   } catch (err) {
     const e = new Error(`memory.ship.prLookupFailed: mrList failed — ${err.message}`);
     e.prLookupFailed = true;
     throw e;
   }
-  const found = list.find((m) => m.headBranch === branch);
-  if (found) {
-    // mrList's own shape (`{number, title, headBranch}`) carries no url —
-    // this is the honest value for a re-run's idempotent find, not a gap.
-    return { number: found.number, url: null };
-  }
+  const matches = list.filter((m) => m.headBranch === branch);
+  const open = matches.find((m) => m.state === 'open');
+  if (open) return { action: 'reuse', number: open.number };
+  if (matches.length === 0) return { action: 'create' };
 
+  const newest = matches.reduce((a, b) => (b.number > a.number ? b : a));
+  if (newest.state == null || newest.merged == null) {
+    const e = new Error(`memory.ship.prLookupFailed: mrList's item #${newest.number} for ${branch} is missing state/merged`);
+    e.prLookupFailed = true;
+    throw e;
+  }
+  if (newest.state === 'closed' && newest.merged === false) {
+    return { action: 'closedUnmerged', number: newest.number };
+  }
+  // `merged === true` (or, in principle, any other computable combination
+  // D1's enum does not actually produce) — a merged PR's branch is being
+  // re-shipped with fresh content, so a NEW PR is the correct outcome, same
+  // as an empty list.
+  return { action: 'create' };
+}
+
+/** createPr() — A1 step 5, the `action: 'create'` half of `decidePr()`'s
+ * decision. Unchanged from the pre-#936 `mrCreate` + one-shot re-scan
+ * sequence — only the caller now decides WHETHER to reach this, before the
+ * push, rather than always falling through to it after. */
+async function createPr({ vcs, project, branch, title, body }) {
   const created = await vcs.mrCreate({ project, title, body, head: branch, base: 'main', labels: [] });
   if (!created.url) {
     const e = new Error(`memory.ship.prCreateFailed: mrCreate failed — ${created.error ?? 'unknown error'}`);
@@ -283,6 +304,8 @@ export async function shipLane({
       // "would reconcile" claim could never consult `mrList`, so this never
       // surveys delivery and never attempts reconciliation (A7).
       delivered: null, deliveredReason: 'dryRun', reconciled: false,
+      // D4 (#936): --dry-run never reaches the PR lookup either (vcs:null).
+      closedUnmerged: false,
     };
   }
 
@@ -316,6 +339,8 @@ export async function shipLane({
       ...base, title: null, body: null, ahead, behind, remoteRefPresent,
       pushed: false, diverged: false, pr: null, autoMerge: null,
       delivered: null, deliveredReason: 'noRef', reconciled: false,
+      // D4 (#936): a ref that never existed never reaches the PR lookup.
+      closedUnmerged: false,
     };
   }
 
@@ -347,6 +372,8 @@ export async function shipLane({
       ...base, title: null, body: null, ahead, behind, remoteRefPresent,
       pushed: false, diverged: false, pr: null, autoMerge: null,
       delivered: true, deliveredReason: null, reconciled: false,
+      // D4 (#936): a delivered no-op never reaches the PR lookup.
+      closedUnmerged: false,
     };
   }
 
@@ -358,6 +385,26 @@ export async function shipLane({
     const err = new Error(`memory.ship.diverged: ${ref} is behind origin's matching ref — refusing to force-push.`);
     err.diverged = true;
     throw err;
+  }
+
+  // R8 REVERSAL (#920 -> #936, D4): the PR lookup now runs BEFORE the push
+  // (moved from its old position after the push, below `findOrCreatePr`'s
+  // former call site). #920's R8 pushed first and only THEN looked up the
+  // PR — since that lookup only ever queried `state:'open'`, a closed PR was
+  // invisible to it and the branch always got a fresh one. That ordering
+  // and that query both changed: `decidePr()` below sees every state for
+  // this branch, and a `closedUnmerged` decision must forbid the push
+  // itself (a push onto a human-closed PR's branch is a re-ship, which
+  // spec.md forbids), not merely skip creating a new PR after already
+  // pushing.
+  const decision = await decidePr({ vcs, project, branch });
+
+  if (decision.action === 'closedUnmerged') {
+    return {
+      ...base, title: null, body: null, ahead, behind, remoteRefPresent,
+      pushed: false, diverged: false, pr: { number: decision.number, url: null }, autoMerge: null,
+      delivered, deliveredReason, reconciled: false, closedUnmerged: true,
+    };
   }
 
   let pushed = false;
@@ -381,7 +428,9 @@ export async function shipLane({
   // once we know a push already happened or a reconcile is about to run.
   const { title, body } = buildTitleAndBody({ git, root, ref, branch });
 
-  const pr = await findOrCreatePr({ vcs, project, branch, title, body });
+  const pr = decision.action === 'reuse'
+    ? { number: decision.number, url: null }
+    : await createPr({ vcs, project, branch, title, body });
 
   // Both derivations (URL parse + the one-shot mrList re-scan) failing
   // leaves the PR open and unarmed — NOT fatal, per spec.md's own scenario
@@ -393,7 +442,7 @@ export async function shipLane({
   if (pr.number === null) {
     return {
       ...base, title, body, ahead, behind, remoteRefPresent, pushed, diverged: false, pr, autoMerge: null,
-      delivered, deliveredReason, reconciled: true,
+      delivered, deliveredReason, reconciled: true, closedUnmerged: false,
     };
   }
 
@@ -414,6 +463,6 @@ export async function shipLane({
 
   return {
     ...base, title, body, ahead, behind, remoteRefPresent, pushed, diverged: false, pr, autoMerge,
-    delivered, deliveredReason, reconciled: true,
+    delivered, deliveredReason, reconciled: true, closedUnmerged: false,
   };
 }

@@ -437,7 +437,7 @@ const ALLOWLIST = [
   { file: 'test/review-regulated/regulated-review.e2e.test.mjs', entrypoint: '<unresolved>', line: 47, reason: 'fixture-root-local-git' },
 
   // ── npm pack: no VCS surface at all ──────────────────────────────────────
-  { file: 'test/publish-allowlist.e2e.test.mjs', entrypoint: '<unresolved>', line: 84, reason: 'no-vcs-capability' },
+  { file: 'test/publish-allowlist.e2e.test.mjs', entrypoint: '<unresolved>', line: 90, reason: 'no-vcs-capability' },
 ];
 
 function validateAllowlist(entries) {

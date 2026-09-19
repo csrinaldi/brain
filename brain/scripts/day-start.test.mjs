@@ -56,3 +56,16 @@ test('day-start.mjs step-5 lane-sweep block prints a progress line before the (u
     'a progress line must print (when armed) before runLaneSweep() is invoked, not only after it returns',
   );
 });
+
+// #936 (D-sweep step 5.7): the cross-day sweep's own per-branch lines are
+// rendered the same way as the single-line summary above — through the
+// pure laneSweepBranchLines() decision, never a literal "sweep.outcome"
+// re-derivation (the same discipline the test above pins for laneSweepLine).
+test('day-start.mjs step-5 lane-sweep block also renders laneSweepBranchLines(), routed the same pure way', () => {
+  const block = laneSweepBlock();
+  assert.match(block, /laneSweepBranchLines\(/, 'the block must call laneSweepBranchLines() to render the per-branch sweep rows');
+  assert.ok(
+    !/sweep\.outcome/.test(block),
+    'day-start.mjs must not re-derive sweep.outcome directly — laneSweepBranchLines() owns that read',
+  );
+});

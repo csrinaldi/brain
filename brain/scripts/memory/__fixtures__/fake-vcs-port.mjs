@@ -22,7 +22,8 @@
 //
 // Script shape (see cli.ship.test.mjs for worked examples):
 //   {
-//     "mrList":      [ { "number": 1, "headBranch": "memory/host-2026-01-01", "title": "..." }, ... ],
+//     "mrList":      [ { "number": 1, "headBranch": "memory/host-2026-01-01", "title": "...", "state": "open", "merged": false }, ... ],
+//                    // `state`/`merged` (#930) default to `null` when a script omits them.
 //     "mrCreate":     { "url": "https://…/pull/999" } | { "url": null, "error": "..." },
 //     "mrAutoMerge":  { "enabled": true, "url": null } | { "enabled": false, "reason": "..." }
 //   }
@@ -48,9 +49,26 @@ function loadScript() {
   }
 }
 
-export const mrList = async () => {
+// #930/#936 — the real port's `mrList` gained an additive `state`/`merged`
+// pair on every item, plus an optional `headBranch` filter (D1/D2). This
+// fake honors both: a script entry that already carries `state`/`merged`
+// passes them through unchanged; one written before #930 (no such fields)
+// defaults to `null` — an honest "the fixture never said" rather than a
+// fabricated `false`. `headBranch`, when passed, filters the script's list
+// the same way the real provider's server-side filter would — the fake
+// never needs to fabricate a full-page-throws case, since the script
+// controls its own list length.
+export const mrList = async ({ headBranch } = {}) => {
   const script = loadScript();
-  return script.mrList ?? [];
+  const items = script.mrList ?? [];
+  const filtered = headBranch !== undefined ? items.filter((i) => i.headBranch === headBranch) : items;
+  return filtered.map((i) => ({
+    number: i.number,
+    title: i.title,
+    headBranch: i.headBranch,
+    state: i.state ?? null,
+    merged: i.merged ?? null,
+  }));
 };
 
 export const mrCreate = async () => {

@@ -8,6 +8,30 @@ automatically, but renames need manual action.
 
 ## Unreleased
 
+### The memory lane reconciles its own branches: same-day reparent, cross-day sweep, closed PRs respected (#936, #930)
+
+- **Same-day append no longer re-shows merged records.** When today's local lane ref
+  (`memory/<host>-<date>`) was already squash-merged, the next ship parented new records on
+  the stale tip, so the PR diff listed records already on `main` (#1023, #1050). The ship
+  now checks, by content, whether the ref's own records are all on `origin/main`; if they
+  are, the new commit parents on `origin/main`. Partial or unreadable delivery keeps
+  appending as before (fail closed).
+- **Cross-day sweep.** After today's ship succeeds (never under `--dry-run`),
+  `brain:memory:ship` visits every other `memory/<host>-*` ref of this host, with no age
+  cutoff: a ref whose records are all on `main` has its local ref deleted; a pending ref is
+  re-shipped without collecting today's records into it; a ref that exists only on the
+  remote is reported and never changed. Results appear in `memory:ship --json` as `sweep`
+  and as lines in `day:start`. A sweep failure never turns today's successful ship into a
+  failure; it is reported as `sweep.failed`.
+- **Behavior change — a closed lane PR is no longer reopened (#920 R8 reversed).** The PR
+  lookup now runs before the push. If a branch has no open PR and its newest PR was closed
+  without merge, the ship reports it and does nothing else, on every run, until an operator
+  deletes the local ref. Previously a fresh PR was opened.
+- **`mrList` reports merge state (#930).** Every item from both providers now carries
+  `state` (`open`/`closed`/`null`) and `merged` (`true`/`false`/`null`). An optional
+  `headBranch` filter queries all states for one branch and fails closed on a full page.
+  Unfiltered calls send exactly the same request as before.
+
 ### `brain:memory:heal-duplicates` reconciles the engram store's pre-guard duplicate rows (#1061)
 
 New verb, `engram`-only: `npm run brain:memory:heal-duplicates` groups a live `engram
