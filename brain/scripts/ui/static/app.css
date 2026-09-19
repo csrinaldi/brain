@@ -1232,3 +1232,10 @@ body {
   white-space: nowrap;
 }
 .memory-source { color: var(--muted); }
+
+/* The file a stage IS, beside its name in the panel's stage strip (#1059). */
+.stage-file {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+}

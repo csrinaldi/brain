@@ -30,7 +30,7 @@ import { parseTasksList } from './lib/tasks-list.mjs';
 import { parseBlame } from './lib/blame.mjs';
 import { shapeResumeView } from './lib/resume-view.mjs';
 import { parseFrontmatter } from '../memory/lib/resume-frontmatter.mjs';
-import { LIFECYCLE_STAGES } from '../lib/sdd-layout.mjs';
+import { LIFECYCLE_STAGES, ARTEFACT_FILE } from '../lib/sdd-layout.mjs';
 import { prUrl } from './lib/forge-url.mjs';
 
 /** D14's caveat, verbatim in the UI, until #880 lands `type: review` records. */
@@ -176,6 +176,24 @@ function buildReviewsTab({ snapshot, project, issue }) {
 const SDD_STAGES = [...LIFECYCLE_STAGES, 'apply', 'verify', 'archive'];
 
 /**
+ * The file each stage IS. The four canonical names come from `sdd-layout.mjs`
+ * rather than being retyped — that module refuses a change that declares a
+ * different file for a lifecycle stage, so a second literal here could
+ * silently disagree with the rule the repository actually enforces. The three
+ * the door adds are named here because `sdd-layout.mjs` does not own them.
+ *
+ * #1059: the tab used to stamp all seven rows with the change DIRECTORY, so it
+ * reported a stage present without ever naming the file that made it present
+ * and every row's provenance pointed at the same place. A stage is a file.
+ */
+const STAGE_FILE = Object.freeze({
+  ...Object.fromEntries(LIFECYCLE_STAGES.map((stage) => [stage, ARTEFACT_FILE[stage]])),
+  apply: 'apply-progress.md',
+  verify: 'verify-report.md',
+  archive: 'archive-report.md',
+});
+
+/**
  * The door's own sdd tab (#998 R998-6, design.md's "TAB_IDS grows sdd and
  * records"): the seven stage artefacts' RAW presence for this issue's own
  * row (`snapshot.changes`'s `artefacts{}` map, R998-4) — sourced to the
@@ -217,7 +235,14 @@ function buildSddTab({ snapshot, issue, dir }) {
   const artefacts = row.artefacts ?? {};
   return {
     ok: true,
-    value: SDD_STAGES.map((stage) => ({ stage, present: Boolean(artefacts[stage]), source: { path: dir } })),
+    // A MISSING stage still names its file: "design is missing" is only
+    // actionable when the reader knows what to create.
+    value: SDD_STAGES.map((stage) => ({
+      stage,
+      file: STAGE_FILE[stage],
+      present: Boolean(artefacts[stage]),
+      source: { path: `${dir}/${STAGE_FILE[stage]}` },
+    })),
     // #1059 region 08: the design puts the slice plan under the stage strip,
     // in this same tab. The plan is DECLARED in `tasks.md` and read into
     // `sliceScopes`; what a pull request actually did with it is not read

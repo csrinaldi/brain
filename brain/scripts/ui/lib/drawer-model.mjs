@@ -109,6 +109,11 @@ function sddEntries(items) {
     position: i + 1,
     mark: item.present ? '\u2713' : '\u2014',
     title: item.stage,
+    // #1059: the file the stage IS, beside its name. The tab used to say
+    // "design — missing" and leave the reader to know that design means
+    // `design.md`; a missing stage is only actionable when the file it would
+    // be is on screen.
+    file: item.file ?? null,
     detail: item.present ? 'present' : 'missing',
     source: item.source,
     done: item.present,

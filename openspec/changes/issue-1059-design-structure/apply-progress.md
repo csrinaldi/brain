@@ -266,3 +266,31 @@ than asserting nothing, and `installDom` restores every global it replaced.
 
 A harness is a claim about the browser. An untested one is a claim with no
 evidence, and it will be believed anyway.
+
+## A stage is a file, and the tab never said which
+
+The maintainer, clicking a ticket: the SDD tab was not listing the files.
+
+`buildSddTab` stamped all seven stage rows with the change DIRECTORY. So the
+tab reported "design — missing" without ever naming `design.md`, and the
+provenance every value on this page is supposed to carry pointed seven
+different facts at one identical place. Provenance in form, useless in
+substance.
+
+Each row now carries `file` and is sourced to `${dir}/${file}`, and the panel
+draws the file beside the stage name. A MISSING stage names its file too: "design
+is missing" is only actionable when the reader knows what to create.
+
+The four canonical names come from `sdd-layout.mjs`'s `ARTEFACT_FILE` rather
+than being retyped — that module REFUSES a change declaring a different file
+for a lifecycle stage, so a second literal here could disagree with the rule
+the repository actually enforces. The three the door adds are named locally,
+because that module does not own them.
+
+The smoke harness now answers `GET /api/change/<n>` with `buildChangeView`
+itself, over the same fixture repo. The panel's tabs under test are the shapes
+the production reader really emits, which is the same rule the snapshot
+fixture already followed.
+
+Mutations: stamping the directory again, and dropping `file` from the row,
+each turn two suites red.

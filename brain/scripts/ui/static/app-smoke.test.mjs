@@ -20,6 +20,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { buildSnapshot } from '../../status/snapshot.mjs';
+import { buildChangeView } from '../change-route.mjs';
 import { testTmp } from '../../lib/test-tmp.mjs';
 import { MODES } from '../lib/view-model.mjs';
 import { GOVERNANCE_VIEWS } from '../lib/governance-model.mjs';
@@ -101,6 +102,7 @@ function fixtureRepo() {
 }
 
 async function boot({ issues = ISSUES } = {}) {
+  const root = fixtureRepo();
   const vcs = {
     async issueList() { return issues.map(({ number, title, labels }) => ({ number, title, labels, assignees: [] })); },
     async issueView({ number }) {
@@ -111,14 +113,28 @@ async function boot({ issues = ISSUES } = {}) {
     },
   };
   const snapshot = await buildSnapshot({
-    root: fixtureRepo(),
+    root,
     project: 'csrinaldi/brain',
     vcs,
     now: '2026-09-19T12:00:00.000Z',
     // No git in a temp directory, and a harness must not depend on one.
     _run: () => { throw new Error('git is not available in this harness'); },
   });
-  const dom = installDom({ mountIds: MOUNT_IDS, snapshot });
+  // The panel's body comes from `GET /api/change/<n>`, which the server
+  // answers with `buildChangeView`. The harness answers it with the SAME
+  // builder over the same fixture repo, so the panel's tabs are the shapes
+  // the production reader really emits — not a hand-written stand-in.
+  const changes = {};
+  for (const issue of [1059]) {
+    changes[issue] = buildChangeView({
+      root,
+      issue,
+      snapshot,
+      _run: () => { throw new Error('git is not available in this harness'); },
+    });
+  }
+
+  const dom = installDom({ mountIds: MOUNT_IDS, snapshot, changes });
   await loadApp();
   await settle();
   return dom;
@@ -372,4 +388,33 @@ test('#1059: the Memory mode leads with the ledger summary and lists the records
   assert.equal(rows.length, 3, 'a header row and one row per record');
   const first = rows[1].textContent;
   assert.match(first, /rec-aaaa/, 'most recent first');
+});
+
+test('#1059: the panel\'s SDD tab names the file of every stage, present or missing', async (t) => {
+  const dom = await boot();
+  t.after(() => dom.restore());
+
+  fire(cardFor(dom, 1059), 'click');
+  await settle();
+
+  const tabs = find(dom.mounts.drawer, byClass('tabs'));
+  assert.ok(tabs, 'the panel has its tab bar');
+  const sddTab = tabs.childNodes.find((b) => b.textContent.includes('SDD'));
+  assert.ok(sddTab, 'and an SDD tab');
+  fire(sddTab, 'click');
+  await settle();
+
+  // The maintainer's report: "SDD no está listando los files cuando click en
+  // un ticket". Every stage is a file, and the tab named none of them.
+  const files = findAll(dom.mounts.drawer, byClass('stage-file')).map((n) => n.textContent);
+  assert.deepEqual(files, [
+    'proposal.md', 'spec.md', 'design.md', 'tasks.md',
+    'apply-progress.md', 'verify-report.md', 'archive-report.md',
+  ], 'all seven, in lifecycle order — a missing stage names the file it would be written to');
+
+  // And each row's provenance points at ITS file, not at the one directory
+  // all seven used to share.
+  const drawn = dom.mounts.drawer.textContent;
+  assert.match(drawn, /openspec\/changes\/issue-1059-design-structure\/proposal\.md/);
+  assert.match(drawn, /openspec\/changes\/issue-1059-design-structure\/design\.md/);
 });

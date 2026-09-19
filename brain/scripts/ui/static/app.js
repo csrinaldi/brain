@@ -1553,6 +1553,9 @@ function renderEntry(item) {
     const line = el('div', 'stage-line');
     line.appendChild(el('span', 'stage-number', String(item.position)));
     line.appendChild(el('span', 'stage-name', item.title));
+    // The file the stage is. Present or missing, the reader sees what to open
+    // or what to create (#1059).
+    if (item.file) line.appendChild(el('span', 'stage-file', item.file));
     line.appendChild(el('span', item.done ? 'stage-mark done' : 'stage-mark missing', item.mark));
     card.appendChild(line);
     if (item.detail) card.appendChild(el('p', null, item.detail));

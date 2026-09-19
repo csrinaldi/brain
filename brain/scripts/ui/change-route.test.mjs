@@ -355,7 +355,7 @@ test('#998 R998-6: an unreadable records section is the tab\'s own reason, never
 
 // ── #998 R998-6: the sdd tab — this issue's own seven-stage presence ────────
 
-test('#998 R998-6: the sdd tab lists the seven stages\' raw presence for this issue\'s own change row, sourced to the change dir', () => {
+test('#998 R998-6/#1059: the sdd tab names each stage\'s FILE and sources the row to that file, not to the directory all seven share', () => {
   const root = makeRoot();
   const changes = [{ id: 'issue-881-ui-server-canvas', issue: ISSUE, slug: 'ui-server-canvas', dir: CHANGE_DIR, artefacts: { proposal: true, spec: true, design: false, tasks: true, apply: false, verify: false, archive: false } }];
   const snapshot = makeSnapshot({ changes });
@@ -366,15 +366,26 @@ test('#998 R998-6: the sdd tab lists the seven stages\' raw presence for this is
   });
   const result = buildChangeView({ root, issue: ISSUE, snapshot, _run: run });
   assert.equal(result.value.sdd.ok, true);
+  // The maintainer, clicking a ticket: "SDD no está listando los files".
+  // Seven rows carried the same `{path: CHANGE_DIR}` stamp, so the tab said a
+  // stage was present without ever naming the file that made it present, and
+  // the provenance — the thing every value on this page is supposed to carry
+  // — pointed all seven readers at one directory.
   assert.deepEqual(result.value.sdd.value, [
-    { stage: 'proposal', present: true, source: { path: CHANGE_DIR } },
-    { stage: 'spec', present: true, source: { path: CHANGE_DIR } },
-    { stage: 'design', present: false, source: { path: CHANGE_DIR } },
-    { stage: 'tasks', present: true, source: { path: CHANGE_DIR } },
-    { stage: 'apply', present: false, source: { path: CHANGE_DIR } },
-    { stage: 'verify', present: false, source: { path: CHANGE_DIR } },
-    { stage: 'archive', present: false, source: { path: CHANGE_DIR } },
+    { stage: 'proposal', file: 'proposal.md', present: true, source: { path: `${CHANGE_DIR}/proposal.md` } },
+    { stage: 'spec', file: 'spec.md', present: true, source: { path: `${CHANGE_DIR}/spec.md` } },
+    { stage: 'design', file: 'design.md', present: false, source: { path: `${CHANGE_DIR}/design.md` } },
+    { stage: 'tasks', file: 'tasks.md', present: true, source: { path: `${CHANGE_DIR}/tasks.md` } },
+    { stage: 'apply', file: 'apply-progress.md', present: false, source: { path: `${CHANGE_DIR}/apply-progress.md` } },
+    { stage: 'verify', file: 'verify-report.md', present: false, source: { path: `${CHANGE_DIR}/verify-report.md` } },
+    { stage: 'archive', file: 'archive-report.md', present: false, source: { path: `${CHANGE_DIR}/archive-report.md` } },
   ]);
+
+  // A stage that is MISSING still names the file it would be, because "design
+  // is missing" is only actionable if the reader knows what to create.
+  const design = result.value.sdd.value.find((row) => row.stage === 'design');
+  assert.equal(design.present, false);
+  assert.equal(design.file, 'design.md', 'an absent stage names the file it would be written to');
 });
 
 test('#998 R998-6: no change dir for this issue is the sdd tab\'s own said reason — the exact noChangeDirTab reason, the same fact the spec/tasks tabs already share for this cause, never a second wording for it', () => {
