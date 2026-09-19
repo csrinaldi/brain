@@ -30,6 +30,11 @@ export function parseSpecCards({ text, path } = {}) {
 
   const lines = text.split(/\r\n|\n/);
   const cards = [];
+  // A WHEN or THEN the grammar could not attach to a scenario. Dropping one
+  // silently is how a requirement stops being tested without anybody noticing
+  // (#1059): the line is in the file, the page never shows it, and the author
+  // believes it is covered.
+  const orphans = [];
   let currentCard = null;
   let currentScenario = null;
 
@@ -52,11 +57,32 @@ export function parseSpecCards({ text, path } = {}) {
     }
 
     const when = WHEN_RE.exec(line);
-    if (when && currentScenario) { currentScenario.when = when[1]; currentScenario.complete = currentScenario.then !== null; return; }
+    if (when) {
+      if (currentScenario) { currentScenario.when = when[1]; currentScenario.complete = currentScenario.then !== null; return; }
+      orphans.push({ line: lineNo, text: line.trim(), source: { path, line: lineNo }, reason: 'this WHEN belongs to no scenario — a scenario opens with a `#### Scenario: <name>` heading' });
+      return;
+    }
 
     const then = THEN_RE.exec(line);
-    if (then && currentScenario) { currentScenario.then = then[1]; currentScenario.complete = currentScenario.when !== null; }
+    if (then) {
+      if (currentScenario) { currentScenario.then = then[1]; currentScenario.complete = currentScenario.when !== null; return; }
+      orphans.push({ line: lineNo, text: line.trim(), source: { path, line: lineNo }, reason: 'this THEN belongs to no scenario — a scenario opens with a `#### Scenario: <name>` heading' });
+    }
   });
 
-  return { ok: true, value: cards };
+  // A FILE WITH CONTENT AND NO CARDS IS NOT A FILE WITH NOTHING IN IT. The
+  // page renders an empty card list as "this tab's source was read and has
+  // nothing in it", which is the `evidence-reader-empty-on-failure`
+  // anti-pattern: the reader could not understand the file and reported the
+  // absence of requirements instead of the absence of understanding. #1059's
+  // own spec.md used `##` where the grammar declares `###`, and its Spec tab
+  // read as empty for a day while the SDD tab said the file was present.
+  if (cards.length === 0 && text.trim() !== '') {
+    return {
+      ok: false,
+      reason: `${path} has content but declares no requirement: a requirement heading is \`### R<issue>-<n>: <title>\`, and a scenario under it is \`#### Scenario: <name>\` with \`- **WHEN**\` and \`- **THEN**\` lines`,
+    };
+  }
+
+  return { ok: true, value: cards, orphans };
 }

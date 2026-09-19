@@ -175,3 +175,36 @@ turns exactly that test red.
 This was found because the delegated writer checked the live data instead of
 believing the brief it was given, which had the field wrong. That is the same
 discipline the `stages` defect was missing.
+
+## The Spec tab read as empty for a day
+
+The maintainer reported seeing no related information when clicking the
+panel's tabs. The tabs were wired correctly; the Spec tab was lying.
+
+`spec.md` for this very change used `##` for its requirement headings where
+the grammar in `lib/spec-cards.mjs` declares `###`, and used bare `WHEN`/
+`THEN` pairs with no `#### Scenario:` heading. The parser found no cards and
+returned `{ok: true, value: []}`, which the page renders as "this tab's source
+was read and has nothing in it" — about a file of 5,731 bytes, while the SDD
+tab beside it reported `spec.md` present. Two tabs, one file, opposite claims.
+
+That is `evidence-reader-empty-on-failure` exactly: the reader could not
+understand the file and reported the absence of REQUIREMENTS instead of the
+absence of UNDERSTANDING.
+
+Two fixes, and the reader's is the one that matters:
+
+- A `spec.md` with content and no requirement heading is now `{ok:false,
+  reason}`, and the reason quotes the grammar so an author can fix the file
+  without reading the parser. A file that really is empty still reads as
+  empty, because there the empty list is the truth.
+- A `WHEN` or `THEN` that attaches to no scenario is carried in `orphans`
+  rather than dropped. A dropped `WHEN` is a requirement the page silently
+  stops showing while its author believes it is covered.
+- This change's own `spec.md` was rewritten to the declared grammar. It now
+  parses to ten requirement cards.
+
+A sweep found two more specs in the same shape, both archived: `archive/1029`
+and `archive/1020`. They are not edited here — with the reader fixed they now
+say what is wrong with them instead of reporting themselves as empty, which is
+the outcome the anti-pattern asks for.
