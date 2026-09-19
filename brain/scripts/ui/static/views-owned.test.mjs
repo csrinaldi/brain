@@ -298,3 +298,30 @@ test('#1059 region 03: a node card carries the design\'s SDD strip, sourced from
   assert.match(m[0], /found\.reason/, 'an issue with no change directory says so rather than showing an empty strip');
   assert.match(m[0], /change\.dir/, 'the strip names where the change lives, as the design does');
 });
+
+test('#1059 region 05: the verdict queue is the design\'s table, with every column from the model', () => {
+  const m = APP_JS.match(/function renderQueue\([^)]*\) \{[\s\S]*?\n}\n/);
+  assert.ok(m, 'renderQueue must exist in app.js');
+  for (const column of ['PR', 'issue', 'rounds', 'latest verdict', 'head judged', 'waiting']) {
+    assert.ok(m[0].includes(`'${column}'`), `the table must have the "${column}" column the design draws`);
+  }
+  assert.match(m[0], /item\.rounds/, 'the counts come from the queue entry, not a second walk of the threads');
+  assert.match(m[0], /no round posted/, 'a thread with no round says so in the verdict cell, never an empty cell');
+});
+
+test('#1059 region 06: decisions and anti-patterns are tables, and an unreadable row still spans one', () => {
+  for (const [fn, columns] of [
+    ['renderDecisions', ['ADR', 'title', 'status', 'amendments', 'file']],
+    ['renderAntiPatterns', ['scope', 'pattern', 'cited by', 'file']],
+  ]) {
+    const m = APP_JS.match(new RegExp(`function ${fn}\\(\\) \\{[\\s\\S]*?\\n}\\n`));
+    assert.ok(m, `${fn} must exist in app.js`);
+    for (const column of columns) {
+      assert.ok(m[0].includes(`'${column}'`), `${fn} must draw the "${column}" column the design has`);
+    }
+  }
+  for (const fn of ['renderDecisionRow', 'renderAntiPatternRow']) {
+    const m = APP_JS.match(new RegExp(`function ${fn}\\([^)]*\\) \\{[\\s\\S]*?\\n}\\n`));
+    assert.match(m[0], /colspan/, `${fn} must keep an unreadable entry as a row across the table, never drop it`);
+  }
+});

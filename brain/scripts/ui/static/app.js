@@ -597,15 +597,59 @@ function renderReviews() {
 }
 
 function renderQueue(queue) {
+  // Region 05 of the design: the queue is a TABLE — PR, issue, rounds, latest
+  // verdict, the head it judged, and what it waits on. Every column comes from
+  // the entry itself (#1059 phase 6); a row opens the PR's own issue so the
+  // rounds are one click away, which is what the design's rows do.
   const wrap = el('div', 'review-queue');
   wrap.appendChild(el('h3', null, 'waiting on a verdict right now'));
+  wrap.appendChild(el('p', 'queue-note', 'the one review question that is about the project and not about a single PR'));
   if (queue.length === 0) {
     wrap.appendChild(said('nothing is waiting on a verdict'));
     return wrap;
   }
-  const list = el('ul', 'queue-list');
-  for (const item of queue) list.appendChild(el('li', null, `#${item.pr}${item.title ? ` ${item.title}` : ''} — ${item.wait}`));
-  wrap.appendChild(list);
+
+  const scroller = el('div', 'table-scroller');
+  const table = el('table', 'queue-table');
+  const head = el('tr', null);
+  for (const column of ['PR', 'issue', 'rounds', 'latest verdict', 'head judged', 'waiting']) {
+    head.appendChild(el('th', null, column));
+  }
+  const thead = el('thead', null);
+  thead.appendChild(head);
+  table.appendChild(thead);
+
+  const body = el('tbody', null);
+  for (const item of queue) {
+    const row = el('tr', item.escalate ? 'queue-row escalate' : 'queue-row');
+    row.appendChild(el('td', 'queue-pr', `#${item.pr}`));
+    row.appendChild(el('td', 'queue-issue', item.issue === null ? 'no issue linked' : `#${item.issue}`));
+    row.appendChild(el('td', 'queue-rounds', String(item.rounds)));
+
+    const verdictCell = el('td', null);
+    if (item.verdict === null) {
+      verdictCell.appendChild(el('span', 'queue-none', 'no round posted'));
+    } else {
+      const chip = el('span', `queue-verdict verdict-${item.verdict.toLowerCase()}`, item.verdict);
+      verdictCell.appendChild(chip);
+    }
+    row.appendChild(verdictCell);
+
+    row.appendChild(el('td', 'queue-head', item.headSha7 ?? 'no head judged'));
+    row.appendChild(el('td', 'queue-wait', item.wait));
+
+    if (item.issue !== null) {
+      row.classList.add('openable');
+      row.setAttribute('role', 'button');
+      row.setAttribute('tabindex', '0');
+      row.addEventListener('click', () => selectNode(item.issue));
+      row.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') selectNode(item.issue); });
+    }
+    body.appendChild(row);
+  }
+  table.appendChild(body);
+  scroller.appendChild(table);
+  wrap.appendChild(scroller);
   return wrap;
 }
 
@@ -778,31 +822,62 @@ function renderDecisions() {
     return;
   }
   const { rows, driftWarnings } = model.value;
-  mounts.canvas.appendChild(el('p', 'canvas-summary', `${rows.length} ADR(s)`));
-  for (const row of rows) mounts.canvas.appendChild(renderDecisionRow(row));
+  // Region 06 of the design: the decisions are a TABLE — number, title,
+  // status, amendments, file — with the drift warning beside it, not a stack
+  // of paragraphs (#1059 phase 6).
   mounts.canvas.appendChild(renderDriftWarnings(driftWarnings));
+  mounts.canvas.appendChild(el('p', 'canvas-summary', `${rows.length} ADR(s) · brain/project/decisions/`));
+
+  const scroller = el('div', 'table-scroller');
+  const table = el('table', 'decisions-table');
+  const thead = el('thead', null);
+  const head = el('tr', null);
+  for (const column of ['ADR', 'title', 'status', 'amendments', 'file']) head.appendChild(el('th', null, column));
+  thead.appendChild(head);
+  table.appendChild(thead);
+
+  const body = el('tbody', null);
+  for (const row of rows) body.appendChild(renderDecisionRow(row));
+  table.appendChild(body);
+  scroller.appendChild(table);
+  mounts.canvas.appendChild(scroller);
 }
 
 /** One ADR row: an unreadable entry is its own said reason, kept in place (never dropped); a readable one carries its title, status, amendments, cited issues (the model's own `issuesLabel` — "referenced," never "driving") and supersession, each beside its own `sourceStamp`. */
 function renderDecisionRow(row) {
-  const wrap = el('div', 'decision-row');
+  const tr = el('tr', 'decision-row');
   if (row.ok === false) {
-    wrap.appendChild(el('strong', null, row.path ?? 'an unreadable ADR'));
-    wrap.appendChild(said(row.reason));
-    return wrap;
+    // An ADR the parser could not read keeps its place, sorted last, with its
+    // reason across the row rather than a blank line pretending it parsed.
+    const cell = el('td', 'decision-unreadable');
+    cell.setAttribute('colspan', '5');
+    cell.appendChild(el('strong', null, row.path ?? 'an unreadable ADR'));
+    cell.appendChild(said(row.reason));
+    tr.appendChild(cell);
+    return tr;
   }
-  wrap.appendChild(el('strong', 'decision-title', `ADR-${String(row.number).padStart(4, '0')} ${row.title}`));
-  wrap.appendChild(el('span', 'decision-status', row.status));
-  wrap.appendChild(renderSourceStamp(row.sourceStamp));
-  if (row.amendments.length > 0) {
-    const list = el('ul', 'decision-amendments');
-    for (const a of row.amendments) list.appendChild(el('li', null, `Amendment ${a.n}${a.date ? ` (${a.date})` : ''}: ${a.summary}${a.issue ? ` (#${a.issue})` : ''}`));
-    wrap.appendChild(list);
+
+  tr.appendChild(el('td', 'decision-number', String(row.number).padStart(4, '0')));
+  tr.appendChild(el('td', 'decision-title', row.title));
+  tr.appendChild(el('td', `decision-status status-${String(row.status).replace(/\s+/g, '-').toLowerCase()}`, row.status));
+
+  const amendments = el('td', 'decision-amendments');
+  if (row.amendments.length === 0) {
+    amendments.appendChild(el('span', 'decision-none', '—'));
+  } else {
+    for (const a of row.amendments) {
+      amendments.appendChild(el('p', 'decision-amendment', `${a.n}${a.date ? ` (${a.date})` : ''}: ${a.summary}${a.issue ? ` (#${a.issue})` : ''}`));
+    }
   }
-  if (row.issues.length > 0) wrap.appendChild(el('p', 'decision-issues', `${row.issuesLabel}: ${row.issues.map((n) => `#${n}`).join(', ')}`));
-  if (row.supersedes.length > 0) wrap.appendChild(el('p', 'decision-supersedes', `supersedes: ${row.supersedes.map((n) => `ADR-${String(n).padStart(4, '0')}`).join(', ')}`));
-  if (row.supersededBy !== null) wrap.appendChild(el('p', 'decision-superseded-by', `superseded by ADR-${String(row.supersededBy).padStart(4, '0')}`));
-  return wrap;
+  tr.appendChild(amendments);
+
+  const file = el('td', 'decision-file');
+  file.appendChild(renderSourceStamp(row.sourceStamp));
+  if (row.supersedes.length > 0) file.appendChild(el('p', 'decision-supersedes', `supersedes ${row.supersedes.map((n) => `ADR-${String(n).padStart(4, '0')}`).join(', ')}`));
+  if (row.supersededBy !== null) file.appendChild(el('p', 'decision-superseded-by', `superseded by ADR-${String(row.supersededBy).padStart(4, '0')}`));
+  if (row.issues.length > 0) file.appendChild(el('p', 'decision-issues', `${row.issuesLabel}: ${row.issues.map((n) => `#${n}`).join(', ')}`));
+  tr.appendChild(file);
+  return tr;
 }
 
 /** The same drift text `renderSnapshotText` already renders in the terminal (`snapshot.mjs:457-469`) — never a second computation of what drifted, only a second place it is said. A `driftWarnings` read failure is its own said reason, beside the table above, never a reason to blank it (R882-3). */
@@ -843,30 +918,56 @@ function renderAntiPatterns() {
     return;
   }
   const { rows, unlistable } = model.value;
-  mounts.canvas.appendChild(el('p', 'canvas-summary', `${rows.length} anti-pattern(s)`));
-  for (const row of rows) mounts.canvas.appendChild(renderAntiPatternRow(row));
+  // Region 06: the catalogue is a table too — scope, name, the tickets that
+  // cite it, and the file (#1059 phase 6).
+  mounts.canvas.appendChild(el('p', 'canvas-summary', `${rows.length} anti-pattern(s) · brain/core/anti-patterns/`));
+
+  const scroller = el('div', 'table-scroller');
+  const table = el('table', 'anti-patterns-table');
+  const thead = el('thead', null);
+  const head = el('tr', null);
+  for (const column of ['scope', 'pattern', 'cited by', 'file']) head.appendChild(el('th', null, column));
+  thead.appendChild(head);
+  table.appendChild(thead);
+
+  const body = el('tbody', null);
+  for (const row of rows) body.appendChild(renderAntiPatternRow(row));
+  table.appendChild(body);
+  scroller.appendChild(table);
+  mounts.canvas.appendChild(scroller);
+
   if (unlistable.length > 0) mounts.canvas.appendChild(renderAntiPatternsUnlistable(unlistable));
 }
 
 /** One catalogue row: an unreadable entry is its own said reason, kept in place (never dropped); a readable one carries its title, scope and its own `sourceStamp`, plus the issues it cites — each stamped `[forge: #N]`, the same bracket form `sourceStamp` uses for a real forge ref, though no per-issue URL exists in this data (a bare `#N`/`ISSUE-N` mention, never a fabricated link). */
 function renderAntiPatternRow(row) {
-  const wrap = el('div', 'anti-pattern-row');
+  const tr = el('tr', 'anti-pattern-row');
   if (row.ok === false) {
-    wrap.appendChild(el('strong', null, row.path ?? 'an unreadable anti-pattern'));
-    wrap.appendChild(said(row.reason));
-    return wrap;
+    const cell = el('td', 'anti-pattern-unreadable');
+    cell.setAttribute('colspan', '4');
+    cell.appendChild(el('strong', null, row.path ?? 'an unreadable anti-pattern'));
+    cell.appendChild(said(row.reason));
+    tr.appendChild(cell);
+    return tr;
   }
-  wrap.appendChild(el('span', 'anti-pattern-scope', row.scope));
-  wrap.appendChild(el('strong', 'anti-pattern-title', row.title));
-  wrap.appendChild(renderSourceStamp(row.sourceStamp));
-  if (row.issueStamps.length > 0) {
-    // One chip per citation, not one joined text node: a citation whose project
-    // is known carries its own href, and a joined string could never be clicked.
-    const cited = el('p', 'anti-pattern-issues');
+
+  tr.appendChild(el('td', 'anti-pattern-scope', row.scope));
+  tr.appendChild(el('td', 'anti-pattern-title', row.title));
+
+  const cited = el('td', 'anti-pattern-issues');
+  if (row.issueStamps.length === 0) {
+    cited.appendChild(el('span', 'decision-none', 'no ticket cites it'));
+  } else {
+    // One chip per citation, so a citation with a project behind it is
+    // individually clickable (#882 PR 3's own cold review).
     for (const stamp of row.issueStamps) cited.appendChild(renderSourceStamp(stamp));
-    wrap.appendChild(cited);
   }
-  return wrap;
+  tr.appendChild(cited);
+
+  const file = el('td', 'anti-pattern-file');
+  file.appendChild(renderSourceStamp(row.sourceStamp));
+  tr.appendChild(file);
+  return tr;
 }
 
 /** An unlistable scope's directory is said beside the other scope's real rows, never read as "zero anti-patterns in that scope" (R882-4). Only called when there is something to say — an empty area would read as "nothing happened here," the same evidence-reader discipline every other degraded band in this page follows. */
