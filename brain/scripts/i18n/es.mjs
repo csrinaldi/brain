@@ -95,6 +95,10 @@ export default {
   'day.memory.laneSweep.branch.diverged':       '⚠ Lane sweep: {branch} ({date}) divergió de su remoto — no se forzó nada.',
   'day.memory.laneSweep.branch.failed':         '⚠ Lane sweep: {branch} ({date}) no se pudo reconciliar — {reason}',
   'day.memory.laneSweep.branch.remoteOnly':     '⚠ Lane sweep: {branch} ({date}) sólo existe en el remoto — se reporta, no se modifica.',
+  // #936 remediation: el sweep completo puede fallar de forma cerrada
+  // (cli.mjs aísla un throw del código previo al loop de sweepLanes()) —
+  // distinto de una fila por rama y de `day.memory.laneSweep.warn`.
+  'day.memory.laneSweep.sweepFailed': '⚠ El lane sweep falló — {reason}; no se cambió ni reconcilió nada esta vez.',
 
   'day.done.withTicket':      'Con ticket:',
   'day.done.ticketStart':     'brain:ticket:start -- <iid>   (terminal)',
@@ -400,6 +404,9 @@ export default {
   'memory.ship.sweep.diverged':       'lane sweep: {branch} ({date}) divergió de su remoto — no se forzó nada.',
   'memory.ship.sweep.failed':         'lane sweep: {branch} ({date}) no se pudo reconciliar — {reason}',
   'memory.ship.sweep.remoteOnly':     'lane sweep: {branch} ({date}) sólo existe en el remoto — se reporta, no se modifica.',
+  // #936 remediation: refleja memory.ship.sweepFailed en inglés — el sweep
+  // completo falló, no hay filas de `branches` para recorrer.
+  'memory.ship.sweepFailed':          'el lane sweep falló: {reason}, no se cambió ni reconcilió nada esta vez.',
 
   // ── memory/cli.mjs — qué backend corrió realmente (issue #641) ───────────────
   'memory.backend.substituted': 'el binario `{from}` no está instalado acá, así que `{op}` corrió sobre el backend `{fallback}` (solo registros) — mismos registros, misma validación, sin backend requerido (ADR-0017). MEMORY_BACKEND no estaba seteado, así que no se pisó ninguna elección explícita; seteálo para fijar cualquiera de los dos backends.',

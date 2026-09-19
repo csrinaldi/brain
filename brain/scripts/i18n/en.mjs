@@ -104,6 +104,13 @@ export default {
   'day.memory.laneSweep.branch.diverged':       '⚠ Lane sweep: {branch} ({date}) diverged from its remote — nothing was forced.',
   'day.memory.laneSweep.branch.failed':         '⚠ Lane sweep: {branch} ({date}) failed to reconcile — {reason}',
   'day.memory.laneSweep.branch.remoteOnly':     '⚠ Lane sweep: {branch} ({date}) exists only on the remote — reported, not mutated.',
+  // #936 remediation (cold review WARNING): the sweep as a WHOLE can fail
+  // closed (cli.mjs isolates a throw from sweepLanes()'s own pre-loop code —
+  // the shared fetch/listLocalBranches/listRemoteBranches/slugifyHost — into
+  // this fail-closed marker) — distinct from a per-branch row above, and
+  // from `day.memory.laneSweep.warn` (which is about the WHOLE `ship` child
+  // process failing to run at all).
+  'day.memory.laneSweep.sweepFailed': '⚠ Lane sweep failed — {reason}; nothing changed or reconciled this run.',
 
   // Done footer
   'day.done.withTicket':      'With a ticket:',
@@ -431,6 +438,9 @@ export default {
   'memory.ship.sweep.diverged':       'lane sweep: {branch} ({date}) diverged from its remote — nothing was forced.',
   'memory.ship.sweep.failed':         'lane sweep: {branch} ({date}) failed to reconcile — {reason}',
   'memory.ship.sweep.remoteOnly':     'lane sweep: {branch} ({date}) exists only on the remote — reported, not mutated.',
+  // #936 remediation: mirrors day.memory.laneSweep.sweepFailed above — the
+  // sweep as a WHOLE failed closed, no `branches` rows exist to iterate.
+  'memory.ship.sweepFailed':          'sweep failed: {reason}, nothing changed or reconciled this run.',
 
   // ── memory/cli.mjs — which backend actually ran (issue #641) ─────────────────
   // Each of these is a case where the backend that ran is not the one a reader

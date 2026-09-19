@@ -717,6 +717,48 @@ test('#921 — brain:memory:ship prints memory.collect.worktreeSkipped on stderr
   assert.match(run.stderr, /not a git repository/i);
 });
 
+// #936 remediation (cold review WARNING): sweepLanes() is documented "never
+// throws", but that promise only holds INSIDE its own per-branch loop —
+// nothing in cli.mjs's `ship` op enforced it at the call site, so a throw
+// from sweepLanes()'s pre-loop code (the shared `fetch`, `listLocalBranches`,
+// `listRemoteBranches`, or `slugifyHost`) would land in the SAME `catch` that
+// reports today's shipLane() outcome, turning an already-successful ship
+// into a reported `memory.ship.failed` / exit 1.
+//
+// `BRAIN_MEMORY_SWEEP_FORCE_THROW` is a test-only injection seam (mirrors
+// `BRAIN_MEMORY_HEAL_FORCE_THROW`, cli.heal-duplicates.test.mjs): it throws
+// immediately before cli.mjs's own call to `sweepLanes()`, so this test
+// exercises cli.mjs's OWN isolation of that call, independent of whether
+// sweepLanes()'s internals ever hit this in practice. NEVER set outside
+// tests.
+test('#936 remediation: a throwing sweepLanes() never turns today\'s successful ship into a failure — exit 0, fail-closed sweep marker', () => {
+  const { mainDir } = fixtureRepo({ withCandidate: false });
+  const run = spawnSync(process.execPath, [CLI, 'ship', '--json'], {
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      BRAIN_MEMORY_TEST_ROOT: mainDir,
+      MEMORY_BACKEND: 'no-such-backend',
+      BRAIN_VCS_TEST_MODULE: FAKE_VCS_MODULE,
+      BRAIN_MEMORY_SWEEP_FORCE_THROW: '1',
+    },
+  });
+
+  assert.equal(run.status, 0, run.stdout + run.stderr);
+  const parsed = JSON.parse(run.stdout);
+  // Today's own ship outcome is untouched — still the "nothing to ship"
+  // shape this fixture always produces.
+  assert.equal(parsed.pushed, false);
+  assert.equal(parsed.pr, null);
+  // The sweep outcome is a fail-closed marker, not `null` and not a thrown
+  // process exit — `{ branches: [...] }`'s absence here is itself the proof
+  // that the throw was caught before ever reaching the per-branch shape.
+  assert.equal(parsed.sweep.failed, true);
+  assert.match(parsed.sweep.reason, /BRAIN_MEMORY_SWEEP_FORCE_THROW/);
+  // Reported on stderr too — evidence discipline mirrors pushed/prExisting/armed.
+  assert.match(run.stderr, /memory\/cli:.*sweep failed/i);
+});
+
 test('brain:memory:ship resolves from package.json, beside the other memory:* scripts', () => {
   const pkg = JSON.parse(readFileSync(join(HERE, '../../../package.json'), 'utf8'));
   // #1012: the manual invoker declares itself at the script level — every

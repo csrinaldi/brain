@@ -158,11 +158,23 @@ const WARN_BRANCH_ACTIONS = new Set(['closedUnmerged', 'unknown', 'diverged', 'f
  * render `ok`; `closedUnmerged`/`unknown`/`diverged`/`failed`/`remoteOnly`
  * render `warn` (design.md's own table).
  *
- * @param {{ remoteListed: boolean, branches: Array<object> } | null} sweep
+ * #936 remediation (cold review WARNING): `sweep` can also be the fail-closed
+ * marker `{ failed: true, reason }` — cli.mjs's own isolation of a throw from
+ * `sweepLanes()`'s pre-loop code (the shared fetch/listLocalBranches/
+ * listRemoteBranches/slugifyHost, none of which run inside the per-branch
+ * try/catch). That shape has no `branches` array by construction, so it is
+ * checked FIRST and rendered as exactly one `warn` line, distinct from the
+ * "nothing ran" `[]` case above.
+ *
+ * @param {{ remoteListed: boolean, branches: Array<object> } | { failed: true, reason: string } | null} sweep
  * @returns {Array<{ level: 'ok'|'warn', key: string, params: object }>}
  */
 export function laneSweepBranchLines(sweep) {
-  if (!sweep || !Array.isArray(sweep.branches)) return [];
+  if (!sweep) return [];
+  if (sweep.failed) {
+    return [{ level: 'warn', key: 'day.memory.laneSweep.sweepFailed', params: { reason: sweep.reason ?? '' } }];
+  }
+  if (!Array.isArray(sweep.branches)) return [];
   return sweep.branches.map((row) => ({
     level: WARN_BRANCH_ACTIONS.has(row.action) ? 'warn' : 'ok',
     key: `day.memory.laneSweep.branch.${row.action}`,

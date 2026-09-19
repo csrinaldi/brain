@@ -318,6 +318,23 @@ test('laneSweepBranchLines: a row with no PR (pr:null) reports number:null, neve
   assert.equal(line.params.number, null);
 });
 
+// #936 remediation (cold review WARNING): `sweepLanes()` can now fail closed
+// as a whole (cli.mjs isolates a throw from its pre-loop code into
+// `{ failed: true, reason }`) — `laneSweepBranchLines()` must render that as
+// ONE line, not silently fall through to the empty-array branch (`branches`
+// is absent on this shape, which is exactly what the pre-existing "null/
+// shapeless sweep" test above already covers for the OTHER reason: no sweep
+// ran at all. This is a THIRD, distinct shape: a sweep that ran and failed).
+test('laneSweepBranchLines: a whole-sweep failure ({failed:true, reason}) renders exactly one warn line naming the reason', () => {
+  const lines = laneSweepBranchLines({ failed: true, reason: 'boom: BRAIN_MEMORY_SWEEP_FORCE_THROW=1' });
+  assert.equal(lines.length, 1);
+  assert.equal(lines[0].level, 'warn');
+  assert.equal(lines[0].key, 'day.memory.laneSweep.sweepFailed');
+  assert.equal(lines[0].params.reason, 'boom: BRAIN_MEMORY_SWEEP_FORCE_THROW=1');
+  assert.equal(typeof en[lines[0].key], 'string', `en.mjs must carry ${lines[0].key}`);
+  assert.equal(typeof es[lines[0].key], 'string', `es.mjs must carry ${lines[0].key}`);
+});
+
 test('laneSweepBranchLines: multiple rows produce one line each, in order', () => {
   const branches = [
     { branch: 'memory/test-host-2026-09-01', date: '2026-09-01', action: 'deleted', delivered: true, pr: null, reason: null },

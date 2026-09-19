@@ -173,7 +173,7 @@ const EXPORT_KW = 'ex' + 'port';
 // `migrate-v1` still calls it. `retiredBy` below names that ruling, not a
 // pending deletion.
 const ALLOWLIST = [
-  { file: 'brain/scripts/memory/cli.mjs', line: 703, retiredBy: 'kept — R3 (#955)' }, // #936 (D-sweep steps 5.6/5.8) shifted this line again by wiring sweepLanes() and its per-branch stderr lines into the ship op, earlier in the same block
+  { file: 'brain/scripts/memory/cli.mjs', line: 732, retiredBy: 'kept — R3 (#955)' }, // #936 remediation shifted this line again by isolating the sweepLanes() call into its own try/catch (fail-closed marker + BRAIN_MEMORY_SWEEP_FORCE_THROW seam), earlier in the same block
   { file: 'brain/scripts/memory/lib/migrate-v1.test.mjs', line: 13, retiredBy: 'kept — R3 (#955)' },
 ];
 

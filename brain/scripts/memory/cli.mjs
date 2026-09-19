@@ -530,23 +530,44 @@ if (op === "ship") {
     // D6 (#936): the cross-day sweep runs ONLY after today's shipLane call
     // above SUCCEEDED (this line is unreached if it threw — the `catch`
     // below owns that path) and ONLY when this is not `--dry-run` (a plan
-    // must never mutate any ref, today's or a prior day's). `sweepLanes()`
-    // never throws by construction — every per-branch failure it can hit is
-    // caught internally and mapped to that branch's own row — so today's
-    // already-successful result is never put at risk by a sweep-side bug.
+    // must never mutate any ref, today's or a prior day's).
+    //
+    // #936 remediation (cold review WARNING): `sweepLanes()`'s per-branch
+    // loop DOES catch every failure it can hit internally and maps it to
+    // that branch's own row — but that guarantee starts only INSIDE the
+    // loop. Its own pre-loop code (the shared `fetch`, `listLocalBranches`,
+    // `listRemoteBranches`, `slugifyHost`) is NOT inside any try/catch of
+    // its own. This call therefore has its OWN try/catch, isolated from
+    // shipLane's outer try above: a sweep-side throw here can never turn
+    // today's already-successful `result` into a reported ship failure —
+    // it becomes this fail-closed marker instead, still surfaced (in
+    // --json, and per-run on stderr below) rather than silently swallowed.
     let sweep = null;
     if (!dryRun) {
-      const { sweepLanes } = await import("./lane/sweep.mjs");
-      const { defaultGit } = await import("./lane/collect.mjs");
-      sweep = await sweepLanes({
-        root: memoryRoot,
-        project: config.project.slug,
-        tier: config.governance.tier,
-        host: hostname(),
-        today: result.date,
-        git: defaultGit,
-        vcs,
-      });
+      try {
+        // BRAIN_MEMORY_SWEEP_FORCE_THROW (test-only seam, mirrors
+        // BRAIN_MEMORY_HEAL_FORCE_THROW): throws before sweepLanes() is
+        // ever called, so a test can exercise this try/catch's isolation
+        // directly — sweepLanes()'s own internals have no reachable throw
+        // in its pre-loop code today, this seam proves the isolation still
+        // holds if that ever changes. NEVER set this outside tests.
+        if (process.env.BRAIN_MEMORY_SWEEP_FORCE_THROW) {
+          throw new Error(`forced failure for test coverage (BRAIN_MEMORY_SWEEP_FORCE_THROW=${process.env.BRAIN_MEMORY_SWEEP_FORCE_THROW})`);
+        }
+        const { sweepLanes } = await import("./lane/sweep.mjs");
+        const { defaultGit } = await import("./lane/collect.mjs");
+        sweep = await sweepLanes({
+          root: memoryRoot,
+          project: config.project.slug,
+          tier: config.governance.tier,
+          host: hostname(),
+          today: result.date,
+          git: defaultGit,
+          vcs,
+        });
+      } catch (err) {
+        sweep = { failed: true, reason: err?.message ?? String(err) };
+      }
     }
 
     if (asJson) {
@@ -589,10 +610,18 @@ if (op === "ship") {
       // D-sweep step 5.8: one stderr line per cross-day sweep row, same
       // "always on stderr, never gated by --json" evidence discipline as
       // skippedWorktrees/pushed/prExisting/armed above.
-      for (const row of sweep?.branches ?? []) {
-        console.error(`memory/cli: ${await t(`memory.ship.sweep.${row.action}`, {
-          branch: row.branch, date: row.date, number: row.pr?.number ?? null, reason: row.reason ?? "",
-        })}`);
+      //
+      // #936 remediation: `sweep?.failed` (the fail-closed marker from the
+      // isolated try/catch above) has no `branches` to iterate — reported as
+      // its own single line instead, same discipline.
+      if (sweep?.failed) {
+        console.error(`memory/cli: ${await t("memory.ship.sweepFailed", { reason: sweep.reason ?? "" })}`);
+      } else {
+        for (const row of sweep?.branches ?? []) {
+          console.error(`memory/cli: ${await t(`memory.ship.sweep.${row.action}`, {
+            branch: row.branch, date: row.date, number: row.pr?.number ?? null, reason: row.reason ?? "",
+          })}`);
+        }
       }
     }
     process.exit(0);
