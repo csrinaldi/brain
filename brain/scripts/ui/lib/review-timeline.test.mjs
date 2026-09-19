@@ -204,3 +204,37 @@ test('#1009 cold review round 2 finding: APPROVE and STOP rounds are not marked 
   assert.equal(approveRound.unknownVerdict, false);
   assert.equal(stopRound.unknownVerdict, false);
 });
+
+// ── #1059 region 05: the design's queue is a table ────────────────────────
+// Its columns are PR, issue, rounds, latest verdict, head judged and waiting.
+// The entry carried only the first two and the wait, so the page would have
+// had to reach back into the threads to fill a row — the join belongs here.
+test('#1059 region 05: a queue entry carries every column the design\'s table shows', () => {
+  const reviews = { ok: true, value: [
+    { pr: 889, ok: true, verdicts: [
+      { rev: 1, verdict: 'REVISE', head_sha: 'aaaaaaa1', author: 'bot', findings: [] },
+      { rev: 2, verdict: 'REVISE', head_sha: 'e6412ab0', author: 'bot', findings: [] },
+    ] },
+  ] };
+  const prs = { ok: true, value: [{ number: 889, title: 'the door', issue: 881, headBranch: 'feat/x' }] };
+
+  const model = buildReviewTimeline(reviews, prs);
+  const [entry] = model.value.queue;
+
+  assert.equal(entry.pr, 889);
+  assert.equal(entry.issue, 881);
+  assert.equal(entry.rounds, 2, 'the table counts the rounds posted so far');
+  assert.equal(entry.verdict, 'REVISE', 'and names the latest verdict word');
+  assert.equal(entry.headSha7, 'e6412ab', 'and the head that verdict judged');
+});
+
+test('#1059 region 05: a thread with no round fills the same columns without inventing any', () => {
+  const reviews = { ok: true, value: [{ pr: 1050, ok: true, verdicts: [] }] };
+  const prs = { ok: true, value: [{ number: 1050, title: 'a memory lane', issue: null, headBranch: 'memory/x' }] };
+
+  const [entry] = buildReviewTimeline(reviews, prs).value.queue;
+  assert.equal(entry.rounds, 0);
+  assert.equal(entry.verdict, null, 'no round means no verdict word — never an empty string passed off as one');
+  assert.equal(entry.headSha7, null);
+  assert.equal(entry.wait, 'no round posted');
+});

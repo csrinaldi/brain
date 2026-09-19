@@ -1,4 +1,5 @@
-// view-model.mjs — the four-mode view and its router (#998 R998-2). Pure,
+// view-model.mjs — the mode view and its router (#998 R998-2, retabled in
+// #1059). Pure,
 // imported by the browser and by node:test (D9): no DOM, no clock, no
 // fetch. `app.js` owns turning what this module returns into elements and
 // listeners; every decision — which mode is next, which node a keystroke
@@ -7,12 +8,30 @@
 // A "view" IS the current mode's id: there is nothing else to carry yet
 // (PR 6 may add per-mode state; until then the id is the whole state).
 
-/** The four modes, in the order they switch and the order Tab cycles. */
+/**
+ * The modes, in the order they switch and the order Tab cycles.
+ *
+ * #1059 retabled these from four to three, on the maintainer's rule: a mode
+ * is a question about the WHOLE PROJECT, and a question about one ticket
+ * belongs in the panel that ticket opens. `Implementation slices` and
+ * `Reviews` were per-ticket questions wearing a project-wide hat — the panel
+ * already answers both for the ticket in front of you.
+ *
+ * Neither projection was thrown away. The project-wide verdict queue and the
+ * project-wide slice plan are global facts, and global facts live under
+ * Governance, so both moved there as sub-views rather than being deleted.
+ * `memory` takes the freed place: the `.memory/records` ledger is as global
+ * as governance is, and it had no home outside two governance sub-views that
+ * each read a slice of it.
+ */
+// #1059 region 02: the glyph is the maintainer's design's own mark for each
+// mode. It sits BESIDE the word, never instead of it — a mark alone would make
+// the nav unreadable to anyone the glyph does not reach, which is the same
+// rule `state-vocab.mjs` holds for a state.
 export const MODES = Object.freeze([
-  Object.freeze({ id: 'map', label: 'Map & tracks' }),
-  Object.freeze({ id: 'sdd', label: 'SDD & slices' }),
-  Object.freeze({ id: 'reviews', label: 'Reviews' }),
-  Object.freeze({ id: 'governance', label: 'Governance' }),
+  Object.freeze({ id: 'map', glyph: '\u25cf', label: 'Map & tracks' }),
+  Object.freeze({ id: 'governance', glyph: '\u25a6', label: 'Governance' }),
+  Object.freeze({ id: 'memory', glyph: '\u25c8', label: 'Memory' }),
 ]);
 
 export const MODE_IDS = Object.freeze(MODES.map((mode) => mode.id));
@@ -29,9 +48,8 @@ export const MODE_IDS = Object.freeze(MODES.map((mode) => mode.id));
  */
 export const PLACEHOLDERS = Object.freeze({
   map: null,
-  sdd: null,
-  reviews: null,
   governance: null,
+  memory: null,
 });
 
 /** The page before anything has been chosen: the first mode. */

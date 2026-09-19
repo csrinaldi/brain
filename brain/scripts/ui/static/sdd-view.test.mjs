@@ -28,10 +28,13 @@ function functionBody(text, signaturePrefix) {
 
 // ── review of PR 4, fix 1: skipped archive dirs are said in band ───────────
 
-test('#998 fix1: renderSdd says the archive dirs it skipped, by name, when totals.archiveSkipped is non-empty', () => {
+// #1059 phase 10 moved this view from a stage matrix to the project's slice
+// plan. The fact survived the move: it reads the same section, so it still
+// says what that section skipped — the assertion follows the new field name.
+test('#998 fix1 (as moved by #1059): renderSdd says the archive dirs it skipped, by name', () => {
   const body = functionBody(read(APP_JS), 'function renderSdd(');
-  assert.match(body, /totals\.archiveSkipped\.count/, 'the band is gated on the count, not always shown');
-  assert.match(body, /totals\.archiveSkipped\.names/, 'the names are rendered, not just the count');
+  assert.match(body, /archiveSkipped\.count/, 'the band is gated on the count, not always shown');
+  assert.match(body, /archiveSkipped\.names/, 'the names are rendered, not just the count');
 });
 
 // ── review of PR 4, fix 2: every path in the SDD row renders through sourceStamp ──

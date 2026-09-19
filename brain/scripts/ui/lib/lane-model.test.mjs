@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildLaneModel } from './lane-model.mjs';
+import { buildLaneModel, nodeSummaryFor, childrenOf } from './lane-model.mjs';
 import { parseGraphBlock } from '../../status/epic-graph.mjs';
 
 const node = (number, over = {}) => ({
@@ -135,4 +135,98 @@ test('#998 R998-3: the same graph, nodes and edges shuffled, gives a byte-identi
   const a = buildLaneModel(graph({ nodes, edges }));
   const b = buildLaneModel(graph({ nodes: [...nodes].reverse(), edges: [...edges].reverse() }));
   assert.deepEqual(a, b);
+});
+
+// ── #1059 phase 3: the design draws a lane as a grid of cards ─────────────
+// A card names the issue, its title on its own line, its state, and what it
+// waits on. `label` glued the number and the title into one string for an SVG
+// text node; a card needs them apart, and the edges it used to draw as lines
+// become the words "blocked by #N" on the card that is blocked.
+test('#1059 region 03: a lane node carries its title and what blocks it, apart from its label', () => {
+  const model = buildLaneModel({ ok: true, value: {
+    nodes: [
+      { number: 881, title: 'ui server, SVG canvas, SSE live stream', track: 'UI', status: 'ready', blockedBy: [], roadmap: { ok: true, value: { state: 'in-flight' } } },
+      { number: 882, title: 'management views', track: 'UI', status: 'blocked', blockedBy: [881], roadmap: { ok: true, value: { state: 'planned' } } },
+    ],
+    edges: [{ from: 881, to: 882 }],
+    tracks: new Map([['UI', [881, 882]]]),
+  } });
+
+  assert.equal(model.ok, true);
+  const [lane] = model.value.lanes;
+  const [first, second] = lane.nodes;
+  assert.equal(first.title, 'ui server, SVG canvas, SSE live stream', 'the title stands on its own, not glued into the label');
+  assert.deepEqual(second.blockedBy, [881], 'what a node waits on is a fact of the card, not only a drawn line');
+  assert.deepEqual(first.blockedBy, []);
+});
+
+// #1059 phase 5: the design states the batch as a proportion — "67 of 91 open
+// issues declared no block" — so the holding lane carries the total it is a
+// part of, rather than the page computing it from two places.
+test('#1059 region 04: the holding lane knows the whole it is a part of', () => {
+  const model = buildLaneModel({ ok: true, value: {
+    nodes: [
+      { number: 1, title: 'a', track: 'UI', status: 'ready', blockedBy: [] },
+      { number: 2, title: 'b', track: null, status: 'unclassified', blockedBy: [] },
+      { number: 3, title: 'c', track: null, status: 'unclassified', blockedBy: [] },
+    ],
+    edges: [],
+    tracks: new Map([['UI', [1]]]),
+  } });
+
+  assert.equal(model.value.holding.count, 2);
+  assert.equal(model.value.holding.total, 3, 'the batch says "2 of 3", and both numbers come from one place');
+});
+
+// ── #1059 region 08: the drawer's own header names the node ───────────────
+// The design's panel opens with the issue's number, its state, its track and a
+// link to the forge. That is the same shape a card carries, so it comes from
+// the same place rather than being derived a second time in the page.
+test('#1059 region 08: nodeSummaryFor gives the drawer the node a card would show', () => {
+  const graph = { ok: true, value: {
+    nodes: [{ number: 881, title: 'ui server', track: 'UI', status: 'ready', blockedBy: [879], roadmap: { ok: true, value: { state: 'in-flight' } } }],
+    edges: [], tracks: new Map([['UI', [881]]]),
+  } };
+
+  const found = nodeSummaryFor(graph, 881);
+  assert.equal(found.ok, true);
+  assert.equal(found.value.number, 881);
+  assert.equal(found.value.title, 'ui server');
+  assert.equal(found.value.track, 'UI');
+  assert.deepEqual(found.value.blockedBy, [879]);
+  assert.equal(typeof found.value.state.label, 'string');
+  assert.equal(typeof found.value.state.mark, 'string');
+
+  const missing = nodeSummaryFor(graph, 4242);
+  assert.equal(missing.ok, false);
+  assert.match(missing.reason, /#4242/, 'an issue the graph does not hold says which one');
+
+  const unreadable = nodeSummaryFor({ ok: false, reason: 'the forge would not answer' }, 881);
+  assert.equal(unreadable.reason, 'the forge would not answer', 'the section\'s own reason passes through');
+});
+
+// ── #1059 phase 10: a node's own children ─────────────────────────────────
+// Selecting an epic should show the tickets that belong to it. `parent` is a
+// node field since #967, so the relation is already data — it just had no
+// reader. The relation is DECLARED by the child, so the parent's list is
+// whoever points at it, never a list the parent itself carries.
+test('#1059: childrenOf lists the issues that declare this one as their parent', () => {
+  const graph = { ok: true, value: {
+    nodes: [
+      { number: 878, title: 'the epic', track: 'UI', status: 'ready', blockedBy: [], parent: null },
+      { number: 1059, title: 'the design', track: 'UI', status: 'ready', blockedBy: [], parent: 878 },
+      { number: 1032, title: 'epic lanes', track: 'UI', status: 'ready', blockedBy: [], parent: 878 },
+      { number: 1026, title: 'a memory fix', track: 'MEMORY', status: 'ready', blockedBy: [], parent: null },
+    ],
+    edges: [], tracks: new Map(),
+  } };
+
+  const children = childrenOf(graph, 878);
+  assert.equal(children.ok, true);
+  assert.deepEqual(children.value.map((c) => c.number), [1032, 1059], 'ascending, so the list does not depend on the forge\'s order');
+  assert.equal(children.value[0].title, 'epic lanes');
+  assert.equal(typeof children.value[0].state.mark, 'string', 'a child is shown with the same state vocabulary a card uses');
+
+  assert.deepEqual(childrenOf(graph, 1026).value, [], 'a node nobody declares as parent has no children — that is a fact, not a failure');
+  assert.equal(childrenOf({ ok: false, reason: 'the forge would not answer' }, 878).reason, 'the forge would not answer');
 });

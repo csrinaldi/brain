@@ -139,6 +139,15 @@ export function buildReviewTimeline(reviewsSection, prsSection, { issue } = {}) 
     // round 2) — never the same wait string.
     wait: waitText(t, w),
     escalate: w.escalate,
+    // #1059 region 05: the design's queue is a table, and its remaining
+    // columns are facts of the thread — the rounds posted, the latest verdict
+    // word and the head that verdict judged. They travel with the entry so a
+    // row never has to reach back into `threads` to be filled, and a thread
+    // with no round fills them with nothing rather than with a blank passed
+    // off as a value.
+    rounds: t.rounds.length,
+    verdict: t.latest ? t.latest.verdict : null,
+    headSha7: t.latest ? t.latest.headSha7 : null,
   }));
 
   const totals = {

@@ -6,7 +6,12 @@ import assert from 'node:assert/strict';
 import { MODES, MODE_IDS, PLACEHOLDERS, initialView, switchMode, nextMode, keyAction } from './view-model.mjs';
 
 test('#998 R998-2: the four modes, in a fixed order, each with a non-empty label', () => {
-  assert.deepEqual(MODE_IDS, ['map', 'sdd', 'reviews', 'governance']);
+  // #1059: three modes, not four. The maintainer's rule — per-ticket detail
+  // belongs in the panel a ticket opens, the top level is for what is true of
+  // the whole project. Implementation slices and Reviews were per-ticket
+  // questions wearing a project-wide hat; the panel already answers both, and
+  // their project-wide projections moved under Governance, where global lives.
+  assert.deepEqual(MODE_IDS, ['map', 'governance', 'memory']);
   for (const mode of MODES) {
     assert.equal(typeof mode.id, 'string');
     assert.equal(typeof mode.label, 'string');
@@ -14,29 +19,30 @@ test('#998 R998-2: the four modes, in a fixed order, each with a non-empty label
   }
 });
 
-test('#998 R998-2/R998-4/R998-5/#882 R882-1: map, sdd, reviews and governance have content — governance is a real mode with its own sub-router from #882 PR 1 on', () => {
+test('#998 R998-2/#882 R882-1/#1059: every mode has real content, and the table carries no mode that does not', () => {
   assert.equal(PLACEHOLDERS.map, null, 'map draws the canvas + drawer, not a placeholder');
-  assert.equal(PLACEHOLDERS.sdd, null, 'sdd draws the seven-stage matrix (R998-4), not a placeholder');
-  assert.equal(PLACEHOLDERS.reviews, null, 'reviews draws the timeline and verdict queue (R998-5), not a placeholder');
-  assert.equal(PLACEHOLDERS.governance, null, '#882 R882-1: governance mounts its own sub-nav and sub-router from PR 1 on, even while some of its five sub-views still show their own said placeholder');
+  assert.equal(PLACEHOLDERS.governance, null, '#882 R882-1: governance mounts its own sub-nav and sub-router');
+  assert.equal(PLACEHOLDERS.memory, null, '#1059: memory draws the .memory/records ledger');
+  assert.deepEqual(Object.keys(PLACEHOLDERS).sort(), [...MODE_IDS].sort(),
+    'the placeholder table and the mode table name the same modes — a retable that updates one and not the other leaves a mode that routes nowhere');
 });
 
 test('#998 R998-2: initialView starts on map', () => {
   assert.equal(initialView(), 'map');
 });
 
-test('#998 R998-2: Tab cycles the four modes in order and wraps back to map', () => {
+test('#998 R998-2: Tab cycles every mode in order and wraps back to map', () => {
   let view = initialView();
   const seen = [view];
-  for (let i = 0; i < 4; i += 1) {
+  for (let i = 0; i < MODE_IDS.length; i += 1) {
     view = keyAction(view, 'Tab', { nodes: [], selected: null }).mode;
     seen.push(view);
   }
-  assert.deepEqual(seen, ['map', 'sdd', 'reviews', 'governance', 'map']);
+  assert.deepEqual(seen, ['map', 'governance', 'memory', 'map']);
 });
 
 test('#998 R998-2: switchMode validates the target mode; nextMode validates the current view', () => {
-  assert.equal(switchMode('map', 'reviews'), 'reviews');
+  assert.equal(switchMode('map', 'memory'), 'memory');
   assert.throws(() => switchMode('map', 'bogus'), /unknown mode/);
   assert.throws(() => nextMode('bogus'), /unknown mode/);
 });
@@ -81,4 +87,17 @@ test('#998 R998-2: Escape closes the door only when something is selected', () =
 
 test('#998 R998-2: an unknown key is a no-op', () => {
   assert.deepEqual(keyAction('map', 'z', { nodes: [], selected: null }), { type: 'none' });
+});
+
+// ── #1059 phase 2: the design gives each mode a glyph ──────────────────────
+// The buttons ARE this table (R998-2), so the glyph belongs here beside the
+// label — not in the page, where it would be a second copy of the mode list.
+test('#1059 region 02: every mode carries the glyph the design draws beside its name', () => {
+  const glyphs = MODES.map((m) => m.glyph);
+  assert.deepEqual(glyphs, ['●', '▦', '◈'], 'map, governance, memory — one mark per mode, in the table\'s order (#1059 retabled these from four)');
+  assert.equal(new Set(glyphs).size, glyphs.length, 'no two modes share a mark, or the nav says two things with one symbol');
+  for (const mode of MODES) {
+    assert.equal(typeof mode.label, 'string');
+    assert.ok(mode.label.length > 0, 'the glyph is beside the word, never instead of it');
+  }
 });
