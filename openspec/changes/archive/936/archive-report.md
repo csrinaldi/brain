@@ -53,10 +53,11 @@ memory-lane capability exists under `openspec/specs/`, so nothing was merged the
 
 ## Open follow-ups
 
-- Two Tier 2 drafts wait for the maintainer under `brain-drafts/`:
-  - `adr-0034-l2-auto-merge-note.md`: with `allow_auto_merge` off, `lite` behaves like
+- Two Tier 2 drafts wait for the maintainer under `brain-drafts/`. Each has a
+  `brain:promote`-ready `.draft.md`, dry-run through `planAmendment` against `main`:
+  - `adr-0034-amendment-4.draft.md` (source note `adr-0034-l2-auto-merge-note.md`): with `allow_auto_merge` off, `lite` behaves like
     `standard`. The policy question is deferred to epic #864 task 6.1.
-  - `vcs-contract-mrlist-row.md`: the `mrList` row in `brain/core/methodology/vcs-contract.md`.
+  - `vcs-contract-mrlist-row.draft.md` (rationale `vcs-contract-mrlist-row.md`): the `mrList` row in `brain/core/methodology/vcs-contract.md`.
 - #1076: whether every vendored `brain/scripts/**` suite must ship in the npm tarball.
 - A branch name with a numeric suffix (`memory/<host>-<date>-<n>`) is ignored by the sweep
   without a report line. Nothing produces that shape today (`LANE_BRANCH_RE`).
