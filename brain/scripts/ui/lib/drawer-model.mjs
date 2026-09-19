@@ -116,6 +116,26 @@ function sddEntries(items) {
   }));
 }
 
+/**
+ * The declared slice plan that rides the sdd tab (#1059 region 08). A change
+ * with no plan carries the reason rather than an empty list, and the note the
+ * route wrote — "what each PR did with its slice is not read" — travels with
+ * it, because a drawn slice must never read as a merged one.
+ */
+function sliceEntries(slices) {
+  if (!slices || typeof slices !== 'object') return { ok: false, reason: 'this change carries no slice plan' };
+  if (slices.ok !== true) return { ok: false, reason: slices.reason };
+  return {
+    ok: true,
+    note: slices.note ?? null,
+    entries: (slices.value ?? []).map((slice) => entry({
+      title: `slice ${slice.slice}`,
+      detail: [slice.claims.join(', '), slice.terminalPr].filter(Boolean).join(' · '),
+      source: slice.source,
+    })),
+  };
+}
+
 /** The records tab's entries (#998 R998-6): this issue's own memory records, newest first (`change-route.mjs`'s `buildRecordsTab`). */
 function recordsEntries(items) {
   return items.map((item) => entry({
@@ -179,7 +199,7 @@ export function buildDrawerModel(changeView) {
 
   const tabs = [
     spec.ok ? { id: 'spec', label: TAB_LABELS.spec, ok: true, reason: null, source: null, note: null, entries: specEntries(spec.value) } : failedTab('spec', spec),
-    sdd.ok ? { id: 'sdd', label: TAB_LABELS.sdd, ok: true, reason: null, source: null, note: null, entries: sddEntries(sdd.value) } : failedTab('sdd', sdd),
+    sdd.ok ? { id: 'sdd', label: TAB_LABELS.sdd, ok: true, reason: null, source: null, note: null, entries: sddEntries(sdd.value), slices: sliceEntries(sdd.slices) } : failedTab('sdd', sdd),
     tasks.ok ? { id: 'tasks', label: TAB_LABELS.tasks, ok: true, reason: null, source: null, note: null, entries: taskEntries(tasks.value) } : failedTab('tasks', tasks),
     workingMemory.ok
       ? { id: 'workingMemory', label: TAB_LABELS.workingMemory, ok: true, reason: null, source: null, note: null, entries: workingMemoryEntries(workingMemory.value) }

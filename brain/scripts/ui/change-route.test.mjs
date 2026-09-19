@@ -410,3 +410,38 @@ test('#881: when every review thread of the issue is unreadable the tab is ok:fa
   assert.equal(reviews.unreadable.length, 1);
   assert.equal(reviews.sourceNote, REVIEWS_SOURCE_NOTE);
 });
+
+// ── #1059 region 08: the panel's SDD tab carries the slice plan ───────────
+// The design puts the slice plan under the stage strip, in the same tab. The
+// plan is DECLARED in tasks.md and read into `sliceScopes`; what a PR actually
+// did with it is not read, and the tab says so rather than implying it.
+test('#1059 region 08: the sdd tab carries the declared slice plan beside the stages', () => {
+  const snapshot = {
+    changes: { ok: true, value: [{
+      issue: 881, dir: 'openspec/changes/issue-881-ui', artefacts: { proposal: true, spec: true },
+      sliceScopes: { ok: true, value: [
+        { slice: 1, claims: ['R881-1', 'R881-2'], terminal_pr: 'this PR -> main' },
+        { slice: 2, claims: ['R881-3'], terminal_pr: null },
+      ] },
+    }] },
+  };
+
+  const view = buildChangeView({ snapshot, issue: 881, project: 'o/r' });
+  const sdd = view.value.sdd;
+
+  assert.equal(sdd.ok, true);
+  assert.ok(Array.isArray(sdd.value), 'the stages stay an array, so every existing reader keeps working');
+  assert.equal(sdd.slices.ok, true);
+  assert.equal(sdd.slices.value.length, 2);
+  assert.deepEqual(sdd.slices.value[0].claims, ['R881-1', 'R881-2'], 'a slice is judged against what it claims');
+  assert.match(sdd.slices.note, /not read/i, 'what a PR did with the plan is not read, and the tab says so');
+});
+
+test('#1059 region 08: a change with no declared plan says so, and an unreadable one passes its reason through', () => {
+  const none = buildChangeView({ snapshot: { changes: { ok: true, value: [{ issue: 5, dir: 'd', artefacts: {} }] } }, issue: 5 });
+  assert.equal(none.value.sdd.slices.ok, false);
+  assert.match(none.value.sdd.slices.reason, /no slice plan/i);
+
+  const broken = buildChangeView({ snapshot: { changes: { ok: true, value: [{ issue: 5, dir: 'd', artefacts: {}, sliceScopes: { ok: false, reason: 'the block would not parse' } }] } }, issue: 5 });
+  assert.equal(broken.value.sdd.slices.reason, 'the block would not parse');
+});

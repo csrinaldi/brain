@@ -403,3 +403,31 @@ test('#1059 region 08: each SDD entry carries its position in the lifecycle and 
   assert.equal(sdd.entries[1].position, 2);
   assert.equal(sdd.entries[1].mark, '—', 'a stage that is not there is a dash, never a blank');
 });
+
+test('#1059 region 08: the slice plan rides the sdd tab, each slice saying what it claims', () => {
+  const model = buildDrawerModel(view({
+    sdd: {
+      ok: true,
+      value: [{ stage: 'proposal', present: true, source: { path: 'd' } }],
+      slices: { ok: true, note: 'declared in tasks.md — what each PR did with its slice is not read', value: [
+        { slice: 1, claims: ['R1-1', 'R1-2'], terminalPr: 'this PR -> main', source: { path: 'd' } },
+      ] },
+    },
+  }));
+
+  const sdd = model.value.tabs.find((t) => t.id === 'sdd');
+  assert.equal(sdd.slices.ok, true);
+  assert.equal(sdd.slices.entries.length, 1);
+  assert.match(sdd.slices.entries[0].title, /slice 1/i);
+  assert.match(sdd.slices.entries[0].detail, /R1-1, R1-2/, 'a slice is named by what it claims');
+  assert.deepEqual(sdd.slices.entries[0].sourceStamp, { label: '[repo: d]', href: null, kind: 'repo' });
+});
+
+test('#1059 region 08: a change with no declared plan carries the reason, not an empty list', () => {
+  const model = buildDrawerModel(view({
+    sdd: { ok: true, value: [], slices: { ok: false, reason: 'no slice plan is declared in this change\'s tasks.md' } },
+  }));
+  const sdd = model.value.tabs.find((t) => t.id === 'sdd');
+  assert.equal(sdd.slices.ok, false);
+  assert.match(sdd.slices.reason, /no slice plan/i);
+});

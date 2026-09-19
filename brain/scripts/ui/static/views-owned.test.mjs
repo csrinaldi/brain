@@ -334,3 +334,11 @@ test('#1059 phase 8: the bar offers the three theme choices, and the stored one 
   assert.match(APP_JS, /applyTheme\(readTheme\(\)\);\s*\nrender\(\);/, 'the stamp lands before the first render, so the page never flashes the other theme');
   assert.match(APP_JS, /catch \{\s*\n\s*return 'system';/, 'storage that cannot be read falls back to the viewer\'s own setting rather than throwing');
 });
+
+test('#1059 region 08: the panel draws the slice plan under the stages, with its note', () => {
+  const m = APP_JS.match(/function renderTab\([^)]*\) \{[\s\S]*?\n}\n/);
+  assert.ok(m, 'renderTab must exist in app.js');
+  assert.match(m[0], /tab\.slices/, 'the slice plan rides the tab the design puts it in');
+  assert.match(m[0], /tab\.slices\.reason/, 'a change with no plan says why, never an empty heading');
+  assert.match(m[0], /tab\.slices\.note/, 'the "PR state is not read" note must reach the reader');
+});

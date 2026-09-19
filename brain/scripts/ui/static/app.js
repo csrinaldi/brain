@@ -1221,6 +1221,18 @@ function renderTab(tab) {
     if (tab.source) wrap.appendChild(el('span', 'source', tab.source));
   }
   for (const item of tab.entries) wrap.appendChild(renderEntry(item));
+
+  // The slice plan sits under the stage strip, in the same tab, as the design
+  // draws it (#1059 region 08).
+  if (tab.slices) {
+    wrap.appendChild(el('h3', 'slice-plan-title', 'slice plan'));
+    if (!tab.slices.ok) {
+      wrap.appendChild(said(tab.slices.reason));
+    } else {
+      if (tab.slices.note) wrap.appendChild(el('p', 'note', tab.slices.note));
+      for (const slice of tab.slices.entries) wrap.appendChild(renderEntry(slice));
+    }
+  }
   // "read, and empty" and "never read" are different facts, so they are
   // different sentences — an empty area would say neither.
   if (tab.ok && tab.entries.length === 0) wrap.appendChild(said('this tab\'s source was read and has nothing in it'));

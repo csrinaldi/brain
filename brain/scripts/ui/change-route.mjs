@@ -183,6 +183,25 @@ const SDD_STAGES = [...LIFECYCLE_STAGES, 'apply', 'verify', 'archive'];
  * `STAGE_VOCAB` word/mark: that derivation is the SDD MODE's own concern
  * (every change, at once); a single row's own tab draws the raw fact.
  */
+/** The declared slice plan of one change, or its own said reason. */
+function sliceTab(row, dir) {
+  const scopes = row.sliceScopes;
+  if (!scopes || typeof scopes !== 'object') return { ok: false, reason: 'no slice plan is declared in this change\'s tasks.md' };
+  if (scopes.ok !== true) return { ok: false, reason: scopes.reason };
+  const value = scopes.value ?? [];
+  if (value.length === 0) return { ok: false, reason: 'no slice plan is declared in this change\'s tasks.md' };
+  return {
+    ok: true,
+    note: 'declared in tasks.md — what each PR did with its slice is not read',
+    value: value.map((slice) => ({
+      slice: slice.slice,
+      claims: [...(slice.claims ?? [])],
+      terminalPr: slice.terminal_pr ?? null,
+      source: { path: dir },
+    })),
+  };
+}
+
 function buildSddTab({ snapshot, issue, dir }) {
   // `dir` is `findChangeDir(snapshot, issue)` — the SAME `snapshot.changes
   // .value.find(c => c.issue === issue)` predicate this function would
@@ -196,7 +215,16 @@ function buildSddTab({ snapshot, issue, dir }) {
   if (!dir) return noChangeDirTab(issue);
   const row = snapshot.changes.value.find((c) => c.issue === issue);
   const artefacts = row.artefacts ?? {};
-  return { ok: true, value: SDD_STAGES.map((stage) => ({ stage, present: Boolean(artefacts[stage]), source: { path: dir } })) };
+  return {
+    ok: true,
+    value: SDD_STAGES.map((stage) => ({ stage, present: Boolean(artefacts[stage]), source: { path: dir } })),
+    // #1059 region 08: the design puts the slice plan under the stage strip,
+    // in this same tab. The plan is DECLARED in `tasks.md` and read into
+    // `sliceScopes`; what a pull request actually did with it is not read
+    // anywhere on this page, so the note says that rather than letting a
+    // reader assume a drawn slice is a merged one.
+    slices: sliceTab(row, dir),
+  };
 }
 
 /**
