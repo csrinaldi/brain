@@ -62,6 +62,12 @@ const ISSUES = [
     number: 1024, title: 'fix(governance): the memory gate reads the PR context', labels: [],
     body: fence(['track:    GOVERNANCE', 'blocks:   []', 'needs:    [1059]']),
   },
+  // Declares a PARENT but no track: the `?` batch holds it in track mode, and
+  // its epic claims it in epic mode. It must never be on screen twice (#1079).
+  {
+    number: 921, title: 'feat(ui): a slice that declared no track', labels: [],
+    body: fence(['parent:   878', 'blocks:   []', 'needs:    []']),
+  },
   // A body the forge will not hand over. The node still enters the graph with
   // what the LIST said, and the page must say the body is unknown rather than
   // draw it as an issue that declared nothing.
@@ -184,14 +190,14 @@ test('#1059 smoke: the page boots against a real snapshot and draws the board', 
   assert.equal(cards(dom).length, 4, `every issue that declared a track became a card, drawn: ${cards(dom).length}`);
   const count = find(dom.mounts.canvas, byClass('batch-count'));
   assert.ok(count, 'the holding lane states its own proportion');
-  assert.match(count.textContent, /2 of 6 open issues/, 'and the proportion is of the whole graph, not of the lane');
+  assert.match(count.textContent, /3 of 7 open issues/, 'and the proportion is of the whole graph, not of the lane');
 
   // It opens collapsed, so the tiles are behind the toggle — which makes this
   // the cheapest place to prove the toggle is wired at all.
   assert.equal(findAll(dom.mounts.canvas, byClass('batch-tile')).length, 0, 'collapsed, so no tiles yet');
   fire(find(dom.mounts.canvas, byClass('lane-toggle')), 'click');
   const batch = findAll(dom.mounts.canvas, byClass('batch-tile'));
-  assert.equal(batch.length, 2, 'expanded, the issues with no declared track are tiles — never silently missing');
+  assert.equal(batch.length, 3, 'expanded, the issues with no declared track are tiles — never silently missing');
   assert.match(batch.map((t) => t.textContent).join(' '), /#907/);
 
   // `saidList` was called in seven places and defined in none, and nothing
@@ -447,4 +453,106 @@ test('#1067: a WHEN with no scenario heading is DRAWN in the panel, not merely c
   assert.match(drawn, /2 line\(s\) the grammar could not attach/, 'and the two it could not are counted');
   assert.match(drawn, /nobody wrote a scenario heading/, 'the orphan line is shown AS WRITTEN — the reviewer\'s point was that collecting it is not showing it');
   assert.match(drawn, /belongs to no scenario/, 'with what it was missing');
+});
+
+test('#1032: epic clustering groups the slices under their epic, and draws no node twice', async (t) => {
+  const dom = await boot();
+  t.after(() => dom.restore());
+
+  const button = (label) => find(dom.mounts.canvas, (n) => n.tagName === 'BUTTON' && n.textContent.includes(label));
+  const issuesDrawn = () => findAll(dom.mounts.canvas, byClass('node-card')).map((c) => c.getAttribute('data-issue'));
+
+  assert.equal(findAll(dom.mounts.canvas, byClass('epic-cluster')).length, 0, 'the board opens on track swimlanes');
+  const epicButton = button('epic clusters');
+  assert.ok(epicButton, 'the design draws both clustering choices');
+  assert.ok(!epicButton.disabled, 'and the second one works now that kind and parent are data (#1032)');
+
+  fire(epicButton, 'click');
+  await settle();
+
+  const clusters = findAll(dom.mounts.canvas, byClass('epic-cluster'));
+  assert.equal(clusters.length, 1, 'one cluster, for the one issue declaring kind: epic');
+  const cluster = clusters[0].textContent;
+  assert.match(cluster, /#878/, 'led by the epic itself');
+  assert.match(cluster, /#1059/, 'with the slices that named it as their parent');
+  assert.match(cluster, /#1032/);
+
+  // This fixture's epic DOES declare a tracker, so the branch is named.
+  assert.match(cluster, /feature\/brain-ui/, 'the tracker branch the epic declared is on screen');
+
+  // THE RULE THIS MODE LIVES OR DIES BY. A slice is on screen once: under its
+  // epic, not also down in its track lane. The page filters by the model's own
+  // `unclaimed` set rather than deciding again from kind and parent.
+  const drawn = issuesDrawn();
+  assert.equal(new Set(drawn).size, drawn.length, `a node was drawn twice: ${drawn.join(', ')}`);
+  assert.ok(drawn.includes('1059'), 'the slice is drawn, under its epic');
+
+  // And nothing vanished: the issue with no parent is still on the board.
+  assert.ok(drawn.includes('1024'), 'a node no epic claimed keeps its place in its own track lane');
+
+  // Back, and the board is what it was.
+  fire(button('track swimlanes'), 'click');
+  await settle();
+  assert.equal(findAll(dom.mounts.canvas, byClass('epic-cluster')).length, 0);
+});
+
+test('#1032: an epic that declares no tracker says so where the branch would be', async (t) => {
+  // True of every epic in this repository today, so it is the case a reader
+  // actually meets. `ticket-base.mjs` calls this state
+  // `epic-declares-no-tracker`, and a blank line there would read as "this
+  // epic has a tracker and we did not show it".
+  const noTracker = ISSUES.map((i) => (i.body === null ? i : { ...i, body: i.body.replace(/^tracker:.*\n/m, '') }));
+  const dom = await boot({ issues: noTracker });
+  t.after(() => dom.restore());
+
+  fire(find(dom.mounts.canvas, (n) => n.tagName === 'BUTTON' && n.textContent.includes('epic clusters')), 'click');
+  await settle();
+
+  const cluster = find(dom.mounts.canvas, byClass('epic-cluster'));
+  assert.ok(cluster, 'the epic still leads a cluster — a missing tracker is not a missing epic');
+  assert.match(cluster.textContent, /epic-declares-no-tracker|declares no tracker/,
+    'the absence is named, in the words the resolver itself uses');
+  assert.ok(!/feature\/brain-ui/.test(cluster.textContent), 'and no branch is claimed that was never declared');
+});
+
+test('#1079: the declare snippet\'s caveat is ON SCREEN, not only in the model', async (t) => {
+  // The snippet gained `kind: epic` and `parent: 878`. The note saying both
+  // lines are conditional was carried by the model and drawn nowhere, so the
+  // page showed a block that, pasted as printed, declares a repository full
+  // of epics parented to one ticket. This is the same class as the spec
+  // orphans earlier in this change: collected is not shown.
+  const dom = await boot();
+  t.after(() => dom.restore());
+
+  fire(find(dom.mounts.canvas, byClass('lane-toggle')), 'click');
+  await settle();
+
+  const batch = find(dom.mounts.canvas, byClass('batch')).textContent;
+  assert.match(batch, /kind: epic/, 'the snippet offers the key');
+  assert.match(batch, /parent: 878/);
+  assert.match(batch, /only if this issue IS an epic/, 'and the page says when to keep it');
+  assert.match(batch, /only if it is a slice of one/);
+});
+
+test('#1079: a node with no track that an epic claims is drawn once, and the batch says so', async (t) => {
+  const dom = await boot();
+  t.after(() => dom.restore());
+
+  const button = (label) => find(dom.mounts.canvas, (n) => n.tagName === 'BUTTON' && n.textContent.includes(label));
+  fire(button('epic clusters'), 'click');
+  await settle();
+  fire(find(dom.mounts.canvas, byClass('lane-toggle')), 'click');
+  await settle();
+
+  const drawn = [
+    ...findAll(dom.mounts.canvas, byClass('node-card')).map((c) => c.getAttribute('data-issue')),
+    ...findAll(dom.mounts.canvas, byClass('batch-tile')).map((t2) => t2.textContent.replace(/[^0-9]/g, '')),
+  ];
+  const twice = drawn.filter((n, i) => drawn.indexOf(n) !== i);
+  assert.deepEqual(twice, [], `drawn twice: ${twice.join(', ')} — the batch must not repeat what a cluster already shows`);
+  assert.ok(drawn.includes('921'), 'and it IS on screen, under the epic that claimed it');
+
+  // Not hidden, shown elsewhere. A batch that silently shrank would read as
+  // the graph changing when only the view did.
+  assert.match(find(dom.mounts.canvas, byClass('batch')).textContent, /1 more shown under their epic/);
 });
