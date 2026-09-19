@@ -1,6 +1,6 @@
 # ADR-0034 — Memory travels on its own lane: records reach `main` on their own pull request, never the feature's
 
-**Status**: Accepted · **amended 17/09/2026** (Amendments 1-3 — see below)
+**Status**: Accepted · **amended 19/09/2026** (Amendments 1-4 — see below)
 **Date**: 2026-09-09 — Cristian Rinaldi
 
 ## Context
@@ -67,7 +67,7 @@ branch named `memory/*` bypasses `issue-link` by name alone.
 
 | tier | `requiredReviews` | lane merge |
 |---|---|---|
-| `lite` | 0 | `mrAutoMerge` (2.5) enables auto-merge on green |
+| `lite` | 0 | `mrAutoMerge` (2.5) enables auto-merge on green — **not in this repository while `allow_auto_merge` is off; see Amendment 4** |
 | `standard` / `regulated` | 1 | `mrAutoMerge` refuses — `{enabled:false, reason:'requires-human-approval'}`, never throws; the PR waits for a human approval instead of pretending one happened |
 
 `mrAutoMerge` is new VCS-port surface (`vcs-contract.md`, after `mrCreate`):
@@ -320,3 +320,25 @@ amendment retires the feature-PR transport surfaces, not the gate that reads the
 `brain:memory:share` is unaffected as a verb: it remains the backend's own materialization
 command (`brain:day:start`'s cycle, or run by hand); it is simply no longer invoked from
 `pre-push`. L1-L5, L8, L9, the targets and the dependency order are untouched.
+
+## Amendment 4 — `lite` does not auto-merge in this repository (issue #936)
+
+**Signed**: 19/09/2026 — Cristian Rinaldi
+
+### What was observed
+
+On 2026-09-19 `gh api repos/csrinaldi/brain` reported `allow_auto_merge: false`. GitHub
+therefore refuses `mrAutoMerge` at every tier. `shipLane`
+(`brain/scripts/memory/lane/ship.mjs`) records the refusal as `autoMerge.enabled: false` and
+does not fail. Lane PR #1075 shows it: `"autoMerge":{"enabled":false,"reason":"unsupported"}`.
+In practice, tier `lite` in this repository behaves like `standard` and `regulated`: every
+lane PR waits for a human merge.
+
+### What this does NOT change
+
+L2's table still describes the intended behavior in a repository that allows auto-merge. C1,
+the `lane-scrub` requirement, and the tier contract are unchanged. No code changes.
+
+### Open decision
+
+Whether to enable `allow_auto_merge` or amend L2's table is deferred to epic #864 task 6.1.
