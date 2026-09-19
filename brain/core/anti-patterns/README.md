@@ -56,6 +56,7 @@ Navigable index — add an entry here when promoting a new anti-pattern
 - [Pre-v0.8.0 upgrader clobbers consumer identity and locks out future upgrades](pre-v0-8-0-upgrade-clobber-lockout.md)
 - [Evidence reader returns empty on failure (fail-open in REQUIRED gates)](evidence-reader-empty-on-failure.md)
 - [The red-proof is blind along an axis the mutation never varies](red-proof-blind-along-an-unvaried-axis.md)
+- [A test spawns a live entrypoint and trusts configuration to keep it harmless](test-spawns-a-live-entrypoint.md)
 
 > Only generic harness anti-patterns. Project-specific ones (stack, infra,
 > domain) are indexed by the consuming project separately — `core/` does not reference `project/`,

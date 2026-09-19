@@ -91,6 +91,23 @@ test('PR2 ticket-start: key sample exists in en', () => {
   assert.equal(en['ticket.error.tokenNotFound'],'✗ VCS token not found in .env — run brain:env:init');
 });
 
+// ── memory/cli.mjs heal-duplicates (#1061): 13 keys exist in en, match es parity ──
+
+test('memory.heal.*: all 13 keys exist in en and es, and es is actually translated', () => {
+  const suffixes = [
+    'none', 'plan', 'deleted', 'done', 'partial', 'unverified',
+    'notEngram', 'badFlag', 'failed',
+    'refused.divergent', 'refused.tooMany', 'refused.shape', 'refused.version',
+  ];
+  assert.equal(suffixes.length, 13);
+  for (const suffix of suffixes) {
+    const key = `memory.heal.${suffix}`;
+    assert.ok(en[key], `${key} must exist in en`);
+    assert.ok(es[key], `${key} must exist in es`);
+    assert.notEqual(es[key], en[key], `${key} must actually be translated, not copied`);
+  }
+});
+
 // ── Parity: es has every key that en has ───────────────────────────────────────
 
 test('es catalog has an entry for every key in en (complete Spanish parity)', () => {

@@ -323,6 +323,21 @@ export default {
   'memory.splitRecords.repeats': '{count} línea(s) repetida(s) colapsadas gana-la-primera ({divergent} divergentes — mismo id, bytes distintos). La ganadora es la línea que los lectores ya resolvían.',
   'memory.splitRecords.failed':  '✗ split-records falló — {message}',
 
+  // ── memory/cli.mjs — heal-duplicates (#1061, #864 tarea 1.2a) ────────────────
+  'memory.heal.none':               'nada que sanar — {rows} fila(s) rec- viva(s), {distinct} clave(s) distinta(s).',
+  'memory.heal.plan':               'plan — se encontraron {count} clave(s) duplicada(s). NO se borró nada. Volvé a correrlo con --apply para ejecutarlo.',
+  'memory.heal.deleted':            '✓ se borraron {count} fila(s): {ids}.',
+  'memory.heal.done':               '✓ sanación verificada — {rows} fila(s) rec- viva(s), {distinct} clave(s) distinta(s).',
+  'memory.heal.partial':            '✗ la sanación se detuvo tras un borrado fallido — borradas {deleted}, sin borrar {notDeleted} ({detail}). No se tocó nada más; volvé a correrlo una vez resuelta la causa.',
+  'memory.heal.unverified':         '✗ no se pudo verificar la sanación — se borraron {deleted} fila(s) pero un export nuevo todavía muestra un duplicado. No se borró nada más.',
+  'memory.heal.notEngram':          "heal-duplicates solo aplica al backend 'engram', no a '{backend}'. No se borró nada.",
+  'memory.heal.badFlag':            "flag desconocida '{flag}'. Solo se acepta --apply. No se borró nada.",
+  'memory.heal.failed':             '✗ heal-duplicates falló — {message}',
+  'memory.heal.refused.divergent':  "rechazado — '{key}' tiene copias que difieren en {fields}. No se borró nada.",
+  'memory.heal.refused.tooMany':    "rechazado — '{key}' tiene {count} fila(s) viva(s), más de las dos que esta sanación entiende. No se borró nada.",
+  'memory.heal.refused.shape':      'rechazado — el export no tiene una forma que esta sanación entienda ({detail}). No se borró nada.',
+  'memory.heal.refused.version':    'rechazado — {detail}. No se borró nada.',
+
   // ── memory/cli.mjs — collect (issue #887, ADR-0034 L4/C2) ────────────────────
   'memory.collect.done':    '✓ se juntaron {collected} registro(s) en {ref} ({commit}).',
   'memory.collect.nothing': 'nada nuevo para juntar — {ref} sin cambios.',
