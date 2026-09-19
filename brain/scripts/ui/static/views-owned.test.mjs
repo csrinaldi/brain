@@ -290,3 +290,11 @@ test('#1059 region 02: the mode nav carries each mode\'s glyph, the queue count 
   assert.match(m[0], /mode-count/, 'the design puts the queue\'s own count on the verdicts mode');
   assert.match(m[0], /'kbd'/, 'the keyboard hints are chips, as the design draws them');
 });
+
+test('#1059 region 03: a node card carries the design\'s SDD strip, sourced from the change the issue owns', () => {
+  const m = APP_JS.match(/function renderNodeSdd\([^)]*\) \{[\s\S]*?\n}\n/);
+  assert.ok(m, 'renderNodeSdd must exist in app.js');
+  assert.match(m[0], /sddForIssue\(/, 'the change comes from the model, never a scan written into the page');
+  assert.match(m[0], /found\.reason/, 'an issue with no change directory says so rather than showing an empty strip');
+  assert.match(m[0], /change\.dir/, 'the strip names where the change lives, as the design does');
+});

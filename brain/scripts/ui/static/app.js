@@ -16,7 +16,7 @@ import { initialPageState, applyFrame, parseFrame, streamFailed, controlFailed, 
 import { degradationBands, pollIndicator } from './lib/banners.mjs';
 import { buildLaneModel } from './lib/lane-model.mjs';
 import { buildDrawerModel } from './lib/drawer-model.mjs';
-import { buildSddModel, STAGE_VOCAB } from './lib/sdd-model.mjs';
+import { buildSddModel, sddForIssue, STAGE_VOCAB } from './lib/sdd-model.mjs';
 import { buildReviewTimeline } from './lib/review-timeline.mjs';
 import { buildRoadmapModel } from './lib/roadmap-model.mjs';
 import { buildDecisionsModel } from './lib/decisions-model.mjs';
@@ -377,6 +377,31 @@ function renderClusteringBar() {
   return bar;
 }
 
+/**
+ * The strip the design puts at the foot of a card (#1059 region 03): the stage
+ * the change reached, how many of its tasks are ticked, and the directory it
+ * lives in — each with its own source, like every other value here. An issue
+ * with no change directory says that instead of showing an empty strip.
+ */
+function renderNodeSdd(issue) {
+  const strip = el('div', 'node-sdd');
+  const found = sddForIssue(sectionOf(state, 'changes'), issue);
+  if (!found.ok) {
+    strip.appendChild(el('span', 'node-sdd-none', found.reason));
+    return strip;
+  }
+  const change = found.value;
+  const reached = [...change.stages].reverse().find((stage) => stage.state === 'present' || stage.state === 'done');
+  strip.appendChild(el('span', 'node-sdd-label', change.archived ? 'archived' : 'SDD'));
+  strip.appendChild(el('span', 'node-sdd-stage', reached ? reached.id : 'no stage present'));
+  if (change.tasks && typeof change.tasks.checked === 'number') {
+    const total = change.tasks.checked + (change.tasks.open ?? 0);
+    strip.appendChild(el('span', 'node-sdd-tasks', `tasks ${change.tasks.checked}/${total}`));
+  }
+  strip.appendChild(el('span', 'node-sdd-dir', change.dir));
+  return strip;
+}
+
 function renderLaneCards(lane) {
   const grid = el('div', 'lane-grid');
   for (const node of lane.nodes) grid.appendChild(renderNodeCard(node));
@@ -403,6 +428,7 @@ function renderNodeCard(node) {
     card.appendChild(el('p', 'node-blocked', `blocked by ${node.blockedBy.map((n) => `#${n}`).join(', ')}`));
   }
   for (const mark of node.marks) card.appendChild(said(mark));
+  card.appendChild(renderNodeSdd(node.number));
 
   card.addEventListener('click', () => selectNode(node.number));
   card.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') selectNode(node.number); });

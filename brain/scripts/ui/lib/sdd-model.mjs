@@ -190,6 +190,24 @@ function buildChangeRow(change) {
  * Determinism: the same changes, in any order, produce a byte-identical
  * model — rows sort by issue number before anything else runs over them.
  */
+/**
+ * sddForIssue(changesSection, issue) -> {ok:true, value:<the change row>} |
+ * {ok:false, reason}
+ *
+ * One change, found by the issue that owns it (#1059 region 03). A node card
+ * carries the stage its change reached; the SDD view builds every row, and a
+ * card needs exactly one, so the search belongs here rather than in the page.
+ * An issue with no change directory is not an error and not an empty strip —
+ * it is a stated absence, like every other missing thing on this page.
+ */
+export function sddForIssue(changesSection, issue) {
+  if (!changesSection || typeof changesSection !== 'object') return { ok: false, reason: 'no changes section was given' };
+  if (changesSection.ok !== true) return { ok: false, reason: changesSection.reason };
+  const found = (changesSection.value ?? []).find((c) => c.issue === issue);
+  if (!found) return { ok: false, reason: `no change directory names issue #${issue}` };
+  return { ok: true, value: found };
+}
+
 export function buildSddModel(changesSection, { tier } = {}) {
   void tier;
   if (!changesSection || typeof changesSection !== 'object') {

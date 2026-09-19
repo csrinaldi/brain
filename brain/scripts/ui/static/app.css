@@ -398,15 +398,28 @@ body {
    drawn ACROSS rows (that would need a shared coordinate space the lanes
    deliberately do not have; a cross-lane edge is said instead, app.js). */
 
-.lane-row { margin-bottom: 14px; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.lane-row {
+  /* #1059 phase 4: the design gives a lane air — the header is a line above
+     its grid, not a box drawn around it, and the lanes breathe between each
+     other rather than stacking flush. */
+  margin: 0 0 26px;
+  border: 0;
+  border-radius: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
 .lane-row.holding { border-style: dashed; }
 .lane-header {
   display: flex;
-  align-items: center;
+  align-items: baseline;
+  flex-wrap: wrap;
   gap: 10px;
-  padding: 6px 10px;
-  background: var(--surface);
+  padding: 0 0 8px;
+  background: transparent;
   border-bottom: 1px solid var(--line);
+  font-family: var(--font-mono);
+  font-size: 12px;
 }
 .lane-count { color: var(--muted); font-variant-numeric: tabular-nums; }
 .lane-chips { display: flex; gap: 6px; flex-wrap: wrap; margin-left: auto; }
@@ -593,3 +606,23 @@ body {
 .node-state.state-not-computed { background: var(--state-not-computed-bg); }
 .node-state.state-unknown, .legend-item.state-unknown { color: var(--state-unknown-fg); }
 .node-state.state-unknown { background: var(--state-unknown-bg); }
+
+
+/* The strip at the foot of a card: what stage the change reached, its tasks,
+   and where it lives (#1059 phase 4). */
+.node-sdd {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--stamp);
+}
+.node-sdd-label { color: var(--accent); font-weight: 600; }
+.node-sdd-stage { color: var(--muted); }
+.node-sdd-tasks { color: var(--muted); font-variant-numeric: tabular-nums; }
+.node-sdd-dir { color: var(--stamp); word-break: break-all; }
+.node-sdd-none { color: var(--stamp); }

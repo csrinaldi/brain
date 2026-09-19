@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildSddModel, STAGE_IDS, STAGE_VOCAB, LIFECYCLE_ORDER } from './sdd-model.mjs';
+import { buildSddModel, sddForIssue, STAGE_IDS, STAGE_VOCAB, LIFECYCLE_ORDER } from './sdd-model.mjs';
 import { evaluatePhaseOrder } from '../../vcs/phase-order-check.mjs';
 import { LIFECYCLE_STAGES } from '../../lib/sdd-layout.mjs';
 
@@ -249,4 +249,32 @@ test('#998 R998-4: determinism — the same changes, shuffled, produce a byte-id
   const a = buildSddModel({ ok: true, value: ALL });
   const b = buildSddModel({ ok: true, value: shuffled });
   assert.deepEqual(JSON.parse(JSON.stringify(a)), JSON.parse(JSON.stringify(b)));
+});
+
+// ── #1059 phase 4: a node card needs one change, found by its issue ────────
+// The design puts a strip on each card — the stage the change reached, its
+// task count and the directory it lives in. The SDD view builds every change;
+// a card needs exactly one, and looking it up by scanning the whole list in
+// the renderer would put that search in the page instead of the model.
+test('#1059 region 03: sddForIssue finds the change an issue owns, and says so when there is none', () => {
+  const section = { ok: true, value: [
+    { id: 'issue-881-ui', issue: 881, slug: 'ui', dir: 'openspec/changes/issue-881-ui', archived: false, missing: [], tasks: { checked: 14, open: 4, next: 'T5' } },
+    { id: '882', issue: 882, slug: 'views', dir: 'openspec/changes/archive/882', archived: true, missing: [], tasks: { checked: 12, open: 0, next: null } },
+  ] };
+
+  const found = sddForIssue(section, 881);
+  assert.equal(found.ok, true);
+  assert.equal(found.value.issue, 881);
+  assert.equal(found.value.archived, false);
+
+  const archived = sddForIssue(section, 882);
+  assert.equal(archived.value.archived, true, 'an archived change is still the issue\'s change');
+
+  const none = sddForIssue(section, 99999);
+  assert.equal(none.ok, false);
+  assert.match(none.reason, /no change/i, 'an issue with no change dir says so — it is not an error and not an empty strip');
+
+  const unreadable = sddForIssue({ ok: false, reason: 'the changes dir could not be read' }, 881);
+  assert.equal(unreadable.ok, false);
+  assert.equal(unreadable.reason, 'the changes dir could not be read', 'the section\'s own reason passes through');
 });
