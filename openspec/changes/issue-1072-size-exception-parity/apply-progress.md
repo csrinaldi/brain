@@ -178,3 +178,54 @@ trading one defect for another.
 | the label is retyped in the evidence | 1 red |
 
 Whole repository: 6213 tests, 6213 pass, 0 fail.
+
+## Cold review rev 5 — a second engine, and two latent defects
+
+This round ran on Gemini through the CLI flag (`--engine gemini`), not through
+the config, which stays `codex`/`gpt-5.5`. It is the first round in this change
+whose findings came from a different family than the four before it.
+
+Both findings are REAL and neither is reachable today. That combination is
+worth recording, because it changes what "pinned" can mean.
+
+**`deriveMode` still carried `labels = []`.** R1072-5 says that shape does not
+satisfy the unread case, and I had added the `Array.isArray` guard beside it
+while leaving the default that the rule names. The default is gone entirely
+now rather than changed to `null`: the guard covers every shape at once, and a
+parameter default here could only ever be a second, weaker statement of it.
+Behaviourally identical, which is the point — the rule is about what the code
+SAYS as much as what it does.
+
+**The budget block interpolated the tier three times with two spellings.**
+`tier ?? DEFAULT_TIER` in the waived sentence, a bare `tier` in the refused
+one. A refused waiver on an unresolved tier would name the `"null"` tier.
+
+No mutation reaches it. `refusedByTier` is only true at `regulated`, which is
+never null, so both spellings produce identical output and a behavioural test
+passes either way. The defect becomes real the day `DEFAULT_TIER` names a tier
+that refuses the waiver.
+
+That is exactly when a source assertion is the honest instrument, and it is
+what this repository already does for invariants no behaviour can reach. The
+tier is resolved ONCE at the top of the block, and a scan pins that: it
+requires the single resolution, forbids a sentence naming the raw tier, and
+requires the resolution to appear exactly once.
+
+Two things the scan had to learn, both of which are the same lesson in
+miniature:
+
+- **Comments are stripped first.** This file's own prose quotes the forbidden
+  spelling while explaining why it is forbidden, and a scan reading comments
+  as code would forbid the explanation.
+- **The forbidden shape is `"${tier}"`, in quotes** — a SENTENCE naming a
+  tier. The comparison line's `(tier: ${tier})` is deliberately untouched: it
+  reports the tier as GIVEN and omits the clause when none was, which the
+  tier-text assertions pin. A scan forbidding every `${tier}` would forbid a
+  correct line to catch an incorrect one.
+
+| mutation | pinned by |
+| --- | --- |
+| the refused sentence takes a bare tier again | the scan — 1 red |
+| (no behavioural mutation exists) | the branch is unreachable at every tier |
+
+Whole repository: 6215 tests, 6215 pass, 0 fail.

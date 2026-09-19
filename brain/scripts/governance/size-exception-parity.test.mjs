@@ -139,3 +139,43 @@ test('#1073: no authority retypes the label — the spelling comes from one expo
       `${file} must name the label through the shared export`);
   }
 });
+
+// #1073 rev 5, Gemini finding cold-2. The budget block interpolated the tier
+// three times with TWO spellings: `tier ?? DEFAULT_TIER` in the waived
+// sentence, a bare `tier` in the refused one. A refused waiver on an
+// unresolved tier would have named the "null" tier.
+//
+// No mutation reaches it. `refusedByTier` is only true at `regulated`, which is
+// never null, so both spellings produce identical output today and a
+// behavioural test passes either way. The defect is LATENT: it becomes real
+// the day `DEFAULT_TIER` names a tier that refuses the waiver.
+//
+// That is precisely when a source assertion is the honest instrument. It pins
+// the single resolution rather than an outcome nothing can currently observe,
+// and it fails the moment someone reintroduces the second spelling.
+test('#1073: the budget finding resolves the tier ONCE, and every sentence uses that one value', () => {
+  const source = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'review', 'evaluators', 'tranche.mjs'), 'utf8');
+  const whole = source.match(/if \(budget && typeof budget\.lines === 'number'[\s\S]*?\n  }\n/);
+  assert.ok(whole, 'the budget block must exist in tranche.mjs');
+
+  // Comments first, as always: this file's own prose quotes the forbidden
+  // spelling while explaining why it is forbidden, and a scan that read
+  // comments as code would forbid the explanation.
+  const block = whole[0]
+    .split('\n')
+    .map((line) => line.replace(/(^|[^:])\/\/.*$/, '$1 '))
+    .join('\n');
+
+  assert.match(block, /const resolvedTier = tier \?\? DEFAULT_TIER;/,
+    'the tier is resolved once, at the top of the block');
+  // The forbidden shape is a SENTENCE naming a tier: `"${tier}"`, in quotes.
+  // The comparison line's `(tier: ${tier})` is a different statement and is
+  // deliberately left alone — it reports the tier as GIVEN, omitting the
+  // clause entirely when none was, which is pinned by the tier-text
+  // assertions in `evaluators/tranche.test.mjs`. A scan that forbade every
+  // `${tier}` would be forbidding a correct line to catch an incorrect one.
+  assert.ok(!/"\$\{tier\}"/.test(block),
+    'a sentence named the RAW tier — an unresolved one reads as the "null" tier while the ruling was made against the default');
+  assert.equal((block.match(/tier \?\? DEFAULT_TIER/g) ?? []).length, 1,
+    'the resolution appears exactly once, because two copies are what drifted in the first place');
+});

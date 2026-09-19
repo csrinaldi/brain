@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 
 import { evaluateTranche, gatherTrancheInputs } from './tranche.mjs';
 import { REQUIRED_JOBS, DETECTION_JOBS } from '../../vcs/governance-checks.mjs';
+import { TIERS } from '../../vcs/governance-tiers.mjs';
 import { uncomputable } from '../../vcs/lib/uncomputable-cause.mjs';
 
 function greenRollup() {
@@ -622,4 +623,29 @@ test('#1073: a budget blocker says whether the labels were UNREAD or genuinely a
   assert.equal(absent.severity, 'blocker');
   assert.ok(!/could not be read/.test(absent.evidence),
     'the labels WERE read and carry no exception — that is a fact, not a gap');
+});
+
+test('#1073 rev 5: the tier a budget sentence names is the tier the ruling was made against', () => {
+  // Gemini's finding cold-2. The refused-waiver sentence interpolated a bare
+  // `tier` while the ruling and the waived sentence resolved the default, so
+  // the two could name different tiers. It is not reachable while
+  // `DEFAULT_TIER` honors the waiver — which is exactly why it is pinned
+  // structurally rather than guarded: this asserts the OUTCOME for every tier,
+  // and the code now resolves once so there is no second spelling to drift.
+  for (const tier of [...TIERS, null, undefined]) {
+    for (const labels of [[], ['size:exception'], null]) {
+      const finding = evaluateTranche({
+        requiredGates: greenRollup(),
+        changedFiles: [],
+        budget: { lines: 5000, uncomputable: false, baseSha: 'BASE', headSha: 'HEAD' },
+        diffBudget: 1000,
+        tier,
+        labels,
+      }).findings.find((f) => f.id === 'budget');
+
+      assert.ok(finding, `a 5000-line diff is over every tier's budget (${tier})`);
+      assert.ok(!/"(null|undefined)"/.test(finding.evidence),
+        `the evidence named an unresolved tier: ${finding.evidence}`);
+    }
+  }
 });

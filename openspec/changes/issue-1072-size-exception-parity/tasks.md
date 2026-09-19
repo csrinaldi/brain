@@ -9,3 +9,5 @@
 - [x] T7. Every consumer of a label set survives an unread one (R1072-5): `evaluators/checkpoint.mjs` and `review/mode.mjs`, each pinned by a mutation.
 - [x] T8. `gatherCheckpointInputs` defaults `labels` to `null`, not `[]` (R1072-5).
 - [x] T9. Both authorities interpolate `SIZE_EXCEPTION_LABEL` in their reasons and evidence; a scan refuses an executable literal (R1072-6).
+- [x] T10. `deriveMode` carries no `labels` default at all; the `Array.isArray` guard is the single statement (R1072-5).
+- [x] T11. The budget block resolves the tier once and every sentence uses that value; pinned by scan, because no behavioural mutation can reach the divergence (R1072-2).

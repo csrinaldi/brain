@@ -220,7 +220,16 @@ export function evaluateTranche({
     // (#1072). The tier is resolved for the ruling exactly as it is for the
     // budget above it; with no tier in hand the default is used, which is what
     // `diffBudget` already defaults to.
-    const ruling = sizeExceptionRuling({ labels, tier: tier ?? DEFAULT_TIER });
+    // ONE resolution, used by the ruling and by every sentence that names the
+    // tier (#1073 rev 5, Gemini finding cold-2). Three interpolations carried
+    // two spellings — `tier ?? DEFAULT_TIER` in the waived sentence and a bare
+    // `tier` in the refused one — so a refused waiver on an unresolved tier
+    // would have named the "null" tier. It is not reachable today, because
+    // `DEFAULT_TIER` honors the waiver and so `refusedByTier` cannot be true
+    // while `tier` is null; it becomes reachable the day that default changes.
+    // Resolving once removes the possibility rather than guarding it.
+    const resolvedTier = tier ?? DEFAULT_TIER;
+    const ruling = sizeExceptionRuling({ labels, tier: resolvedTier });
     const comparison =
       `git diff --numstat ${budget.baseSha}...${budget.headSha} | diff-size-count.mjs = ` +
       `${budget.lines} > ${diffBudget}${tier ? ` (tier: ${tier})` : ''}`;
@@ -233,7 +242,7 @@ export function evaluateTranche({
       findings.push({
         id: 'budget',
         severity: 'editorial',
-        evidence: `${comparison} — ${SIZE_EXCEPTION_LABEL} present and honored at the "${tier ?? DEFAULT_TIER}" tier, so the budget is waived, not met`,
+        evidence: `${comparison} — ${SIZE_EXCEPTION_LABEL} present and honored at the "${resolvedTier}" tier, so the budget is waived, not met`,
         cites: 'governance-tiers.mjs sizeExceptionRuling',
       });
     } else {
@@ -257,7 +266,7 @@ export function evaluateTranche({
         // label was present and the tier refused it — the same sentence
         // `run-check.mjs` produces. Silence would read as "nobody asked".
         evidence: ruling.refusedByTier
-          ? `${comparison} — ${SIZE_EXCEPTION_LABEL} is not honored at the "${tier}" tier; the change must be sliced`
+          ? `${comparison} — ${SIZE_EXCEPTION_LABEL} is not honored at the "${resolvedTier}" tier; the change must be sliced`
           : unread
             ? `${comparison} — the PR's labels could not be read, so no waiver could be honored; this block may be a refused read rather than an absent exception`
             : comparison,
