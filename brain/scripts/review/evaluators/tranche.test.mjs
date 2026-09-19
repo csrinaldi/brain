@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 
 import { evaluateTranche, gatherTrancheInputs } from './tranche.mjs';
 import { REQUIRED_JOBS, DETECTION_JOBS } from '../../vcs/governance-checks.mjs';
+import { TIERS } from '../../vcs/governance-tiers.mjs';
 import { uncomputable } from '../../vcs/lib/uncomputable-cause.mjs';
 
 function greenRollup() {
@@ -340,13 +341,24 @@ test('evaluateTranche: fed lite-tier job sets, a red memory-gate is editorial (d
 // drops it before the budget. Injecting `diffBudget` by hand into `evaluateTranche`
 // would test a wiring that production never performs.
 
-/** Gathers + evaluates at a tier with a synthetic numstat of `lines` changed lines. */
+/**
+ * Gathers + evaluates at a tier with a synthetic numstat of `lines` changed
+ * lines.
+ *
+ * `labels: []` is deliberate and load-bearing (#1072): these tests are about
+ * the TIER's contribution to the evidence text, so the PR they describe is one
+ * that WAS read and carries no exception. Leaving it out would make them
+ * describe a PR whose labels could not be read, which is a different fact and
+ * carries a different sentence — and would quietly turn every tier assertion
+ * into an assertion about the unread case instead.
+ */
 async function trancheAtTier(tier, lines) {
   const inputs = await gatherTrancheInputs({
     project: 'owner/repo',
     number: 1,
     headSha: 'HEAD',
     baseSha: 'BASE',
+    labels: [],
     deps: {
       tier,
       fetchRollup: async () => greenRollup(),
@@ -480,4 +492,160 @@ test('evaluateTranche: normal exit with no blocker finding → conclusionCauses 
     budget: { lines: 120, uncomputable: false, baseSha: 'BASE', headSha: 'HEAD' },
   });
   assert.deepEqual(result.conclusionCauses, []);
+});
+
+// ── #1072: the reviewer honors size:exception exactly as the gate does ──────
+// Measured on PR #1067: `diff-size` passed at 13:0x and the cold reviewer
+// emitted `budget / blocker` on the same 3,101 lines eight seconds later. The
+// gate read the label; this evaluator read `tierParams(tier).diffBudget` and
+// never read the label at all — one field of the tier's frozen params, with
+// its sibling `honorSizeException` ignored. The maintainer's ruling: honor it
+// as the gate does.
+
+test('#1072: over budget with size:exception at a tier that honors it → no blocker, and the waiver is SAID', () => {
+  const result = evaluateTranche({
+    requiredGates: greenRollup(),
+    changedFiles: ['brain/scripts/ui/static/app.js'],
+    budget: { lines: 3101, uncomputable: false, baseSha: 'BASE', headSha: 'HEAD' },
+    diffBudget: 1000,
+    tier: 'lite',
+    labels: ['size:exception', 'type:feature'],
+  });
+
+  assert.ok(!result.findings.some((f) => f.id === 'budget' && f.severity === 'blocker'),
+    'the gate waived this exact number; the reviewer may not block on it');
+
+  // Waiving is not forgetting. The repository refuses an empty area where a
+  // fact belongs, and 3,101 lines waived is a fact.
+  const waived = result.findings.find((f) => f.id === 'budget');
+  assert.ok(waived, 'the budget is still reported');
+  assert.equal(waived.severity, 'editorial', 'stated, not blocking');
+  assert.match(waived.evidence, /3101 > 1000/, 'with the number it waived');
+  assert.match(waived.evidence, /size:exception/, 'and the label that waived it');
+  assert.match(waived.evidence, /lite/, 'and the tier that honored it');
+});
+
+test('#1072: over budget with size:exception at a tier that REFUSES it → still a blocker, and it says the tier refused', () => {
+  const result = evaluateTranche({
+    requiredGates: greenRollup(),
+    changedFiles: [],
+    budget: { lines: 300, uncomputable: false, baseSha: 'BASE', headSha: 'HEAD' },
+    diffBudget: 200,
+    tier: 'regulated',
+    labels: ['size:exception'],
+  });
+
+  const finding = result.findings.find((f) => f.id === 'budget');
+  assert.ok(finding);
+  assert.equal(finding.severity, 'blocker');
+  // REQ-TIER-6, the same sentence `run-check.mjs` produces: the label WAS
+  // present and the tier is what refused it. Silence here would read as "no
+  // exception was asked for", which is a different fact.
+  assert.match(finding.evidence, /not honored at the "regulated" tier/);
+  assert.ok(finding.cites, 'a blocker finding MUST carry cites (protocol §6)');
+});
+
+test('#1072: over budget with no label is the blocker it always was', () => {
+  const result = evaluateTranche({
+    requiredGates: greenRollup(),
+    changedFiles: [],
+    budget: { lines: 1500, uncomputable: false, baseSha: 'BASE', headSha: 'HEAD' },
+    diffBudget: 1000,
+    tier: 'lite',
+    labels: ['type:feature'],
+  });
+
+  const finding = result.findings.find((f) => f.id === 'budget');
+  assert.equal(finding.severity, 'blocker');
+  assert.match(finding.evidence, /1500 > 1000/);
+  assert.ok(!/size:exception/.test(finding.evidence), 'no waiver was asked for, so none is mentioned');
+});
+
+test('#1072: labels the reviewer could not read never waive the budget', () => {
+  // Granting an exception because a fetch failed is the one direction this
+  // must never fail. `gatherTrancheInputs` hands `null` when prView throws.
+  for (const labels of [null, undefined, 'size:exception']) {
+    const result = evaluateTranche({
+      requiredGates: greenRollup(),
+      changedFiles: [],
+      budget: { lines: 3101, uncomputable: false, baseSha: 'BASE', headSha: 'HEAD' },
+      diffBudget: 1000,
+      tier: 'lite',
+      labels,
+    });
+    const finding = result.findings.find((f) => f.id === 'budget');
+    assert.equal(finding.severity, 'blocker',
+      `an unreadable label set is not a waiver (${JSON.stringify(labels)})`);
+  }
+});
+
+test('#1072: labels are an INPUT — the gather never reaches the forge for them', async () => {
+  // A fallback fetch was tried here and reverted. It made every existing test
+  // that did not pass labels call out to a forge: green on a machine with an
+  // authenticated `gh`, red in CI where the call threw and changed a budget
+  // finding's evidence string. A unit suite whose result depends on the
+  // network is not a unit suite, so the seam is gone and this pins it.
+  const forge = () => { throw new Error('the gather must not reach the forge'); };
+
+  const given = await gatherTrancheInputs({
+    project: 'o/r', number: 1067, headSha: 'H', baseSha: 'B',
+    labels: ['size:exception'],
+    deps: { fetchRollup: async () => greenRollup(), diffNumstat: () => '1\t0\tf.mjs\n', readIgnoreList: () => [], readConfig: () => ({}), tier: 'lite', getVcs: forge, prView: forge },
+  });
+  assert.deepEqual(given.labels, ['size:exception']);
+
+  // None supplied is "not read", which waives nothing — never a lookup.
+  const none = await gatherTrancheInputs({
+    project: 'o/r', number: 1067, headSha: 'H', baseSha: 'B',
+    deps: { fetchRollup: async () => greenRollup(), diffNumstat: () => '1\t0\tf.mjs\n', readIgnoreList: () => [], readConfig: () => ({}), tier: 'lite', getVcs: forge, prView: forge },
+  });
+  assert.equal(none.labels, null, 'not read, and not an empty list that would claim the PR carries no exception');
+});
+
+test('#1073: a budget blocker says whether the labels were UNREAD or genuinely absent', () => {
+  const base = {
+    requiredGates: greenRollup(),
+    changedFiles: [],
+    budget: { lines: 1500, uncomputable: false, baseSha: 'BASE', headSha: 'HEAD' },
+    diffBudget: 1000,
+    tier: 'lite',
+  };
+
+  // Not read: the forge refused, so nobody knows whether an exception exists.
+  const unread = evaluateTranche({ ...base, labels: null }).findings.find((f) => f.id === 'budget');
+  assert.equal(unread.severity, 'blocker');
+  assert.match(unread.evidence, /labels could not be read/,
+    'a block on an unread label set must not be presented as a block on an absent exception');
+
+  // Read, and empty: a real answer. Saying "could not be read" here would be
+  // the opposite lie.
+  const absent = evaluateTranche({ ...base, labels: [] }).findings.find((f) => f.id === 'budget');
+  assert.equal(absent.severity, 'blocker');
+  assert.ok(!/could not be read/.test(absent.evidence),
+    'the labels WERE read and carry no exception — that is a fact, not a gap');
+});
+
+test('#1073 rev 5: the tier a budget sentence names is the tier the ruling was made against', () => {
+  // Gemini's finding cold-2. The refused-waiver sentence interpolated a bare
+  // `tier` while the ruling and the waived sentence resolved the default, so
+  // the two could name different tiers. It is not reachable while
+  // `DEFAULT_TIER` honors the waiver — which is exactly why it is pinned
+  // structurally rather than guarded: this asserts the OUTCOME for every tier,
+  // and the code now resolves once so there is no second spelling to drift.
+  for (const tier of [...TIERS, null, undefined]) {
+    for (const labels of [[], ['size:exception'], null]) {
+      const finding = evaluateTranche({
+        requiredGates: greenRollup(),
+        changedFiles: [],
+        budget: { lines: 5000, uncomputable: false, baseSha: 'BASE', headSha: 'HEAD' },
+        diffBudget: 1000,
+        tier,
+        labels,
+      }).findings.find((f) => f.id === 'budget');
+
+      assert.ok(finding, `a 5000-line diff is over every tier's budget (${tier})`);
+      assert.ok(!/"(null|undefined)"/.test(finding.evidence),
+        `the evidence named an unresolved tier: ${finding.evidence}`);
+    }
+  }
 });

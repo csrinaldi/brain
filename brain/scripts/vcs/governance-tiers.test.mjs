@@ -20,6 +20,8 @@ import {
   tierParams,
   requiredJobs,
   printDiffBudget,
+  SIZE_EXCEPTION_LABEL,
+  sizeExceptionRuling
 } from './governance-tiers.mjs';
 import { GOVERNANCE_JOBS } from './governance-checks.mjs';
 
@@ -399,4 +401,44 @@ test('brain\'s OWN config resolves to /2 — and no longer needs to ask', () => 
   const withoutTheLine = { ...config, reviewer: { ...config.reviewer, protocol: undefined } };
   assert.equal(resolveReviewProtocol(withoutTheLine), 'brain-review/2',
     'dropping reviewer.protocol must leave brain producing /2, not fall back to /1');
+});
+
+// ── #1072: ONE ruling on size:exception, read by both authorities ──────────
+// Measured on PR #1067: the `diff-size` CI gate passed (the label is present
+// and `lite` carries `honorSizeException: true`) while the cold reviewer
+// emitted a `blocker` on the same number eight seconds later, because
+// `evaluators/tranche.mjs` read `tierParams(tier).diffBudget` and never read
+// the label at all. A budget decision readable two ways from two files is not
+// a policy, it is a contradiction. This function is the one reading.
+test('#1072: the label is honored where the tier honors it, refused where it does not, and absent is absent', () => {
+  assert.equal(SIZE_EXCEPTION_LABEL, 'size:exception', 'one spelling, imported — never retyped at a call site');
+
+  const honored = sizeExceptionRuling({ labels: ['size:exception', 'type:feature'], tier: 'lite' });
+  assert.deepEqual(honored, { present: true, honored: true, refusedByTier: false });
+
+  // REQ-TIER-6: a tier that refuses the waiver must SAY the label was present
+  // and refused, never behave as though nobody asked.
+  const refused = sizeExceptionRuling({ labels: ['size:exception'], tier: 'regulated' });
+  assert.deepEqual(refused, { present: true, honored: false, refusedByTier: true });
+
+  const absent = sizeExceptionRuling({ labels: ['type:feature'], tier: 'lite' });
+  assert.deepEqual(absent, { present: false, honored: false, refusedByTier: false });
+});
+
+test('#1072: no labels at all is the same as no exception, and never throws', () => {
+  for (const labels of [undefined, null, [], 'not-an-array', {}]) {
+    const ruling = sizeExceptionRuling({ labels, tier: 'lite' });
+    assert.deepEqual(ruling, { present: false, honored: false, refusedByTier: false },
+      `a label set the reviewer could not read is not a waiver (${JSON.stringify(labels)})`);
+  }
+});
+
+test('#1072: every tier answers, and the answer agrees with its own honorSizeException flag', () => {
+  for (const tier of TIERS) {
+    const ruling = sizeExceptionRuling({ labels: ['size:exception'], tier });
+    assert.equal(ruling.honored, tierParams(tier).honorSizeException === true,
+      `the ruling for "${tier}" must be the tier's own flag, not a second opinion about it`);
+    assert.equal(ruling.present, true);
+    assert.equal(ruling.refusedByTier, !ruling.honored);
+  }
 });
