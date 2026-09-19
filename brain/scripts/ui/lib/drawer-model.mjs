@@ -101,7 +101,13 @@ function findingEntries(round) {
 
 /** The sdd tab's entries (#998 R998-6): the change's own seven-stage raw presence, `change-route.mjs`'s `buildSddTab`. */
 function sddEntries(items) {
-  return items.map((item) => entry({
+  // #1059 region 08: the design numbers the stages and marks each one, so a
+  // gap in the middle of the lifecycle is visible at a glance rather than
+  // inferred by counting names. The position is the stage's place in the
+  // order the reader was given, not an index into whatever was returned.
+  return items.map((item, i) => entry({
+    position: i + 1,
+    mark: item.present ? '\u2713' : '\u2014',
     title: item.stage,
     detail: item.present ? 'present' : 'missing',
     source: item.source,

@@ -62,6 +62,34 @@ function stateAndMarks(node) {
   return { marks, state };
 }
 
+/**
+ * nodeSummaryFor(graphSection, issue) -> {ok:true, value:{number, title, track,
+ * state, marks, blockedBy}} | {ok:false, reason}
+ *
+ * The one node the drawer's own header names (#1059 region 08). It is the same
+ * shape a lane card shows, built by the same `stateAndMarks` — a header that
+ * derived the state a second way could disagree with the card the reader just
+ * clicked, which is the kind of quiet contradiction this page exists to avoid.
+ */
+export function nodeSummaryFor(graphSection, issue) {
+  if (!graphSection || typeof graphSection !== 'object') return { ok: false, reason: 'no graph section was given' };
+  if (graphSection.ok !== true) return { ok: false, reason: graphSection.reason };
+  const node = (graphSection.value?.nodes ?? []).find((n) => n.number === issue);
+  if (!node) return { ok: false, reason: `the graph holds no issue #${issue}` };
+  const { marks, state } = stateAndMarks(node);
+  return {
+    ok: true,
+    value: {
+      number: node.number,
+      title: node.title ?? '',
+      track: node.track ?? null,
+      state: { code: state.code, label: state.label, mark: state.mark },
+      marks,
+      blockedBy: [...(node.blockedBy ?? [])].sort((a, b) => a - b),
+    },
+  };
+}
+
 /** A drawable node — canvas-model.mjs's shape, plus the state word/mark (#998 R998-3) — for one lane's own board. */
 function drawnNode(node, box) {
   const { marks, state } = stateAndMarks(node);

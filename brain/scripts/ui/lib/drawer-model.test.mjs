@@ -382,3 +382,24 @@ test('#998 R998-2: a review entry\'s stamp carries an href for a forge URL', () 
   assert.equal(reviews.entries[0].sourceStamp.kind, 'forge');
   assert.equal(reviews.entries[0].sourceStamp.label, '[forge: #971]');
 });
+
+// ── #1059 region 08: the SDD tab is the design's numbered strip ───────────
+// The design draws seven numbered stages in order — "1 proposal ✓ … 5 apply
+// 14/18 … 7 archive —" — not an unordered list of names. The number is the
+// stage's position in the lifecycle, which is information: it is what makes a
+// gap in the middle visible.
+test('#1059 region 08: each SDD entry carries its position in the lifecycle and its mark', () => {
+  const model = buildDrawerModel(view({
+    sdd: { ok: true, value: [
+      { stage: 'proposal', present: true, source: { path: 'openspec/changes/x' } },
+      { stage: 'spec', present: false, source: { path: 'openspec/changes/x' } },
+    ] },
+  }));
+
+  const sdd = model.value.tabs.find((t) => t.id === 'sdd');
+  assert.equal(sdd.entries.length, 2);
+  assert.equal(sdd.entries[0].position, 1, 'the first stage is 1, as the design numbers it');
+  assert.equal(sdd.entries[0].mark, '✓', 'a present stage is ticked');
+  assert.equal(sdd.entries[1].position, 2);
+  assert.equal(sdd.entries[1].mark, '—', 'a stage that is not there is a dash, never a blank');
+});

@@ -14,7 +14,8 @@
 
 import { initialPageState, applyFrame, parseFrame, streamFailed, controlFailed, sectionOf, requestSequence } from './lib/frames.mjs';
 import { degradationBands, pollIndicator } from './lib/banners.mjs';
-import { buildLaneModel } from './lib/lane-model.mjs';
+import { buildLaneModel, nodeSummaryFor } from './lib/lane-model.mjs';
+import { issueUrl } from './lib/forge-url.mjs';
 import { buildDrawerModel } from './lib/drawer-model.mjs';
 import { buildSddModel, sddForIssue, STAGE_VOCAB } from './lib/sdd-model.mjs';
 import { buildReviewTimeline } from './lib/review-timeline.mjs';
@@ -1100,10 +1101,43 @@ function renderDrawer() {
   mounts.drawer.hidden = selectedIssue === null;
   if (selectedIssue === null) return;
 
-  const close = el('button', 'close', 'close');
+  // Region 08's header: the number, the state the card showed, the track, a
+  // link to the issue on the forge, and the close control — all from the same
+  // model the card used, so the panel never contradicts what was clicked.
+  const head = el('div', 'drawer-head');
+  const summary = nodeSummaryFor(sectionOf(state, 'graph'), selectedIssue);
+
+  const idLine = el('div', 'drawer-id');
+  idLine.appendChild(el('span', 'drawer-number', `#${selectedIssue}`));
+  if (summary.ok) {
+    const chip = el('span', `node-state state-${summary.value.state.code}`);
+    chip.appendChild(el('span', 'node-state-mark', summary.value.state.mark));
+    chip.appendChild(el('span', 'node-state-word', summary.value.state.label));
+    idLine.appendChild(chip);
+    if (summary.value.track) idLine.appendChild(el('span', 'drawer-track', `track ${summary.value.track}`));
+  }
+  const project = state.meta?.project ?? null;
+  if (project) {
+    const link = el('a', 'drawer-forge', `forge #${selectedIssue} \u2197`);
+    link.setAttribute('href', issueUrl(project, selectedIssue));
+    link.setAttribute('rel', 'noopener noreferrer');
+    link.setAttribute('target', '_blank');
+    idLine.appendChild(link);
+  }
+  head.appendChild(idLine);
+
+  const close = el('button', 'close', '\u2715');
+  close.setAttribute('aria-label', 'close this panel');
   close.addEventListener('click', closeDrawer);
-  mounts.drawer.appendChild(close);
-  mounts.drawer.appendChild(el('h2', null, `#${selectedIssue}`));
+  head.appendChild(close);
+  mounts.drawer.appendChild(head);
+
+  if (summary.ok) {
+    if (summary.value.title) mounts.drawer.appendChild(el('h2', 'drawer-title', summary.value.title));
+    for (const mark of summary.value.marks) mounts.drawer.appendChild(said(mark));
+  } else {
+    mounts.drawer.appendChild(said(summary.reason));
+  }
 
   if (changeView === null) {
     mounts.drawer.appendChild(el('p', 'note', 'reading this change…'));
@@ -1143,6 +1177,19 @@ function renderTab(tab) {
 
 function renderEntry(item) {
   const card = el('div', item.pending ? 'card pending' : 'card');
+  // A numbered, marked entry is the design's stage strip (#1059 region 08);
+  // everything else keeps the checkbox form the tasks tab needs.
+  if (typeof item.position === 'number') {
+    const line = el('div', 'stage-line');
+    line.appendChild(el('span', 'stage-number', String(item.position)));
+    line.appendChild(el('span', 'stage-name', item.title));
+    line.appendChild(el('span', item.done ? 'stage-mark done' : 'stage-mark missing', item.mark));
+    card.appendChild(line);
+    if (item.detail) card.appendChild(el('p', null, item.detail));
+    card.appendChild(renderSourceStamp(item.sourceStamp));
+    for (const child of item.children ?? []) card.appendChild(renderEntry(child));
+    return card;
+  }
   const done = item.done === undefined ? '' : item.done ? '[x] ' : '[ ] ';
   card.appendChild(el('strong', null, `${done}${item.title}`));
   if (item.detail) card.appendChild(el('p', null, item.detail));

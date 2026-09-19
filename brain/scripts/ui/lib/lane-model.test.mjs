@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildLaneModel } from './lane-model.mjs';
+import { buildLaneModel, nodeSummaryFor } from './lane-model.mjs';
 import { parseGraphBlock } from '../../status/epic-graph.mjs';
 
 const node = (number, over = {}) => ({
@@ -176,4 +176,31 @@ test('#1059 region 04: the holding lane knows the whole it is a part of', () => 
 
   assert.equal(model.value.holding.count, 2);
   assert.equal(model.value.holding.total, 3, 'the batch says "2 of 3", and both numbers come from one place');
+});
+
+// ── #1059 region 08: the drawer's own header names the node ───────────────
+// The design's panel opens with the issue's number, its state, its track and a
+// link to the forge. That is the same shape a card carries, so it comes from
+// the same place rather than being derived a second time in the page.
+test('#1059 region 08: nodeSummaryFor gives the drawer the node a card would show', () => {
+  const graph = { ok: true, value: {
+    nodes: [{ number: 881, title: 'ui server', track: 'UI', status: 'ready', blockedBy: [879], roadmap: { ok: true, value: { state: 'in-flight' } } }],
+    edges: [], tracks: new Map([['UI', [881]]]),
+  } };
+
+  const found = nodeSummaryFor(graph, 881);
+  assert.equal(found.ok, true);
+  assert.equal(found.value.number, 881);
+  assert.equal(found.value.title, 'ui server');
+  assert.equal(found.value.track, 'UI');
+  assert.deepEqual(found.value.blockedBy, [879]);
+  assert.equal(typeof found.value.state.label, 'string');
+  assert.equal(typeof found.value.state.mark, 'string');
+
+  const missing = nodeSummaryFor(graph, 4242);
+  assert.equal(missing.ok, false);
+  assert.match(missing.reason, /#4242/, 'an issue the graph does not hold says which one');
+
+  const unreadable = nodeSummaryFor({ ok: false, reason: 'the forge would not answer' }, 881);
+  assert.equal(unreadable.reason, 'the forge would not answer', 'the section\'s own reason passes through');
 });

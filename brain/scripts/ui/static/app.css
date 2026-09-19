@@ -463,17 +463,23 @@ body {
 
 /* ── the inspector drawer: four tabs, every value with its source ───────── */
 
+/* #1059 region 08: the design's panel — a sibling of the content, not an
+   overlay on top of it. On a phone it takes the whole width and the content
+   scrolls behind it, which is the only way 470px and 390px can both be true. */
+.workspace { display: flex; flex: 1; min-height: 0; align-items: stretch; }
 .drawer {
-  position: fixed;
-  top: 0;
-  right: 0;
-  width: min(520px, 100%);
-  height: 100%;
+  width: min(470px, 100%);
+  flex: none;
   overflow: auto;
-  padding: 14px 16px;
+  padding: 0;
   border-left: 1px solid var(--line);
   background: var(--surface);
-  box-shadow: -2px 0 8px rgba(0, 0, 0, 0.08);
+  display: flex;
+  flex-direction: column;
+}
+@media (max-width: 760px) {
+  .workspace { flex-direction: column; }
+  .drawer { width: 100%; border-left: 0; border-top: 1px solid var(--line); }
 }
 .drawer[hidden] { display: none; }
 .drawer h2 { margin: 0 0 8px; font-size: 16px; }
@@ -813,3 +819,73 @@ body {
 }
 .anti-pattern-issues .source { margin-right: 6px; }
 .anti-pattern-file, .decision-file { font-size: 11px; }
+
+
+/* ── #1059 region 08: the drawer as the design's panel ────────────────────*/
+.drawer-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+  background: var(--paper);
+  position: sticky;
+  top: 0;
+}
+.drawer-id { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-family: var(--font-mono); font-size: 11px; }
+.drawer-number { color: var(--accent); font-weight: 700; font-size: 12px; }
+.drawer-track { color: var(--stamp); }
+.drawer-forge { color: var(--accent); text-decoration: none; }
+.drawer-forge:hover { text-decoration: underline; }
+.drawer .close {
+  font: inherit;
+  font-size: 13px;
+  line-height: 1;
+  padding: 4px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--muted);
+  cursor: pointer;
+}
+.drawer-title {
+  margin: 0;
+  padding: 12px 16px 0;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--ink);
+}
+.drawer .tabs, .drawer > .note, .drawer > .said, .drawer > div { padding-left: 16px; padding-right: 16px; }
+.drawer .tabs { padding-top: 12px; flex-wrap: wrap; }
+.drawer .tabs button {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 4px 9px;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--muted);
+  cursor: pointer;
+}
+.drawer .tabs button[aria-selected='true'] {
+  color: var(--ink);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  background: var(--accent-quiet);
+}
+.stage-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
+.stage-number {
+  color: var(--stamp);
+  font-variant-numeric: tabular-nums;
+  min-width: 1.4ch;
+}
+.stage-name { color: var(--ink); flex: 1; }
+.stage-mark.done { color: var(--state-done-fg); }
+.stage-mark.missing { color: var(--stamp); }

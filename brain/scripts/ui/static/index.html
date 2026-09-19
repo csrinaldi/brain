@@ -29,8 +29,13 @@
     <nav id="modes" class="modes" aria-label="Modes"></nav>
     <div id="banners" class="banners" role="status" aria-live="polite"></div>
     <nav id="governance-nav" class="governance-nav" aria-label="Governance views" hidden></nav>
-    <main id="canvas" class="canvas"></main>
-    <aside id="drawer" class="drawer" hidden></aside>
+    <!-- #1059 region 08: the canvas and the drawer are a ROW, the way the
+         design lays its `main` out — the panel sits beside the content and
+         pushes it, rather than floating over it. -->
+    <div class="workspace">
+      <main id="canvas" class="canvas"></main>
+      <aside id="drawer" class="drawer" hidden></aside>
+    </div>
     <script type="module" src="/app.js"></script>
   </body>
 </html>
