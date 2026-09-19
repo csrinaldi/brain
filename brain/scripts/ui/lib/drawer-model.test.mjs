@@ -382,3 +382,85 @@ test('#998 R998-2: a review entry\'s stamp carries an href for a forge URL', () 
   assert.equal(reviews.entries[0].sourceStamp.kind, 'forge');
   assert.equal(reviews.entries[0].sourceStamp.label, '[forge: #971]');
 });
+
+// ── #1059 region 08: the SDD tab is the design's numbered strip ───────────
+// The design draws seven numbered stages in order — "1 proposal ✓ … 5 apply
+// 14/18 … 7 archive —" — not an unordered list of names. The number is the
+// stage's position in the lifecycle, which is information: it is what makes a
+// gap in the middle visible.
+test('#1059 region 08: each SDD entry carries its position in the lifecycle and its mark', () => {
+  const model = buildDrawerModel(view({
+    sdd: { ok: true, value: [
+      { stage: 'proposal', present: true, source: { path: 'openspec/changes/x' } },
+      { stage: 'spec', present: false, source: { path: 'openspec/changes/x' } },
+    ] },
+  }));
+
+  const sdd = model.value.tabs.find((t) => t.id === 'sdd');
+  assert.equal(sdd.entries.length, 2);
+  assert.equal(sdd.entries[0].position, 1, 'the first stage is 1, as the design numbers it');
+  assert.equal(sdd.entries[0].mark, '✓', 'a present stage is ticked');
+  assert.equal(sdd.entries[1].position, 2);
+  assert.equal(sdd.entries[1].mark, '—', 'a stage that is not there is a dash, never a blank');
+});
+
+test('#1059 region 08: the slice plan rides the sdd tab, each slice saying what it claims', () => {
+  const model = buildDrawerModel(view({
+    sdd: {
+      ok: true,
+      value: [{ stage: 'proposal', present: true, source: { path: 'd' } }],
+      slices: { ok: true, note: 'declared in tasks.md — what each PR did with its slice is not read', value: [
+        { slice: 1, claims: ['R1-1', 'R1-2'], terminalPr: 'this PR -> main', source: { path: 'd' } },
+      ] },
+    },
+  }));
+
+  const sdd = model.value.tabs.find((t) => t.id === 'sdd');
+  assert.equal(sdd.slices.ok, true);
+  assert.equal(sdd.slices.entries.length, 1);
+  assert.match(sdd.slices.entries[0].title, /slice 1/i);
+  assert.match(sdd.slices.entries[0].detail, /R1-1, R1-2/, 'a slice is named by what it claims');
+  assert.deepEqual(sdd.slices.entries[0].sourceStamp, { label: '[repo: d]', href: null, kind: 'repo' });
+});
+
+test('#1059 region 08: a change with no declared plan carries the reason, not an empty list', () => {
+  const model = buildDrawerModel(view({
+    sdd: { ok: true, value: [], slices: { ok: false, reason: 'no slice plan is declared in this change\'s tasks.md' } },
+  }));
+  const sdd = model.value.tabs.find((t) => t.id === 'sdd');
+  assert.equal(sdd.slices.ok, false);
+  assert.match(sdd.slices.reason, /no slice plan/i);
+});
+
+// ── #1067 cold review, finding cold-1 ──────────────────────────────────────
+// `parseSpecCards` learned to collect a WHEN or THEN that attaches to no
+// scenario, so it would stop being dropped silently. The reviewer measured
+// that `orphans` was read NOWHERE outside the parser: the line was still
+// invisible on the page, and the defect was fixed only where tests could see
+// it. A reader that collects a fact and never shows it has not fixed
+// empty-on-failure, it has moved it one module along.
+test('#1067: an orphan WHEN or THEN reaches the spec tab, so the page can say the line exists', () => {
+  const model = buildDrawerModel(view({
+    spec: {
+      ok: true,
+      value: [{ id: 'R1-1', title: 'a requirement', source: { path: 'spec.md', line: 1 }, scenarios: [] }],
+      orphans: [
+        { line: 3, text: '- **WHEN** something happens', source: { path: 'spec.md', line: 3 }, reason: 'this WHEN belongs to no scenario — a scenario opens with a `#### Scenario: <name>` heading' },
+      ],
+    },
+  }));
+
+  assert.equal(model.ok, true);
+  const spec = model.value.tabs.find((t) => t.id === 'spec');
+  assert.ok(Array.isArray(spec.orphans), 'the spec tab carries the lines the grammar could not attach');
+  assert.equal(spec.orphans.length, 1);
+  assert.match(spec.orphans[0].title, /WHEN/, 'the line itself is shown, not only a count');
+  assert.match(spec.orphans[0].detail, /Scenario/, 'with what it was missing');
+  assert.equal(spec.orphans[0].sourceStamp.label, '[repo: spec.md:3]', 'sourced to the line, so the author can go straight to it');
+});
+
+test('#1067: a spec with nothing orphaned carries an empty list, never an absent field a renderer has to guard', () => {
+  const model = buildDrawerModel(view());
+  const spec = model.value.tabs.find((t) => t.id === 'spec');
+  assert.deepEqual(spec.orphans, []);
+});
