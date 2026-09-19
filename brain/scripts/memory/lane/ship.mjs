@@ -15,6 +15,7 @@
 
 import { collectLane, defaultGit } from './collect.mjs';
 import { tierParams } from '../../vcs/governance-tiers.mjs';
+import { contentDelivery } from './delivery.mjs';
 
 /** Run `git(argv, opts)`; parse its stdout as a non-negative integer count,
  * defaulting to 0 on anything unparseable (never throws — a survey read is
@@ -76,46 +77,23 @@ function surveyRef({ git, root, ref, branch }) {
  * surveyDelivery() — R3/R4 (#920): "did these records reach `origin/main`'s
  * CONTENT?", via content containment, never commit ancestry (`merge-base
  * --is-ancestor` would report every squash-merged lane as pending forever —
- * see proposal R3). Runs on the existing injected `git` seam, no new seam,
- * no network:
+ * see proposal R3).
  *
- *   lanePaths   = git diff --name-only origin/main...<ref>   # what this lane adds
- *   undelivered = git diff --name-only <ref> origin/main -- <lanePaths>
- *   delivered   ⟺ lanePaths is empty, or undelivered is empty
- *
- * R5: an unreadable precondition is NAMED, never resolved to `delivered:
- * true` — `baseFetched === false` (stale `origin/main`) short-circuits with
- * NO git call at all; a non-zero diff exit (unresolvable revision) is the
- * other `unknown` case. Both report `delivered: null` with a reason; the
- * caller still acts (push if pending, always attempt reconciliation) rather
- * than silently assume delivery — a false "delivered" strands memory
- * forever, while a spurious extra `mrList` scan costs one API call.
- *
- * The first call is byte-identical to `buildTitleAndBody`'s own three-dot
- * diff (R4's deliberate argv collision — same question, same answer); the
- * second is distinguished by its `--` pathspec (see `surveyOkRules` in
- * ship.test.mjs for the ordered fake-git pair this requires).
+ * #936 (D3): the classification itself now lives in the shared, leaf
+ * `contentDelivery()` helper (`lane/delivery.mjs`) — reused by the same-day
+ * reparent (`collect.mjs` step 8) and the cross-day sweep (`lane/sweep.mjs`).
+ * This function is a THIN WRAPPER translating that helper's
+ * `{status, reason}` shape back to this module's own pre-#936
+ * `{delivered, reason}` shape — `delivered`→`true`, `pending`→`false`,
+ * `unknown`→`null`, same `reason`. No behavior change: the wrapper's argv
+ * and every observable outcome are byte-identical to the pre-#936 body (see
+ * `surveyOkRules` in ship.test.mjs for the ordered fake-git pair this
+ * requires, and `delivery.test.mjs` for the helper's own direct coverage).
  */
 function surveyDelivery({ git, root, ref, baseFetched }) {
-  if (baseFetched === false) {
-    return { delivered: null, reason: 'baseStale' };
-  }
-
-  const laneDiff = git(['diff', '--name-only', `origin/main...${ref}`], { cwd: root });
-  if (laneDiff.status !== 0) {
-    return { delivered: null, reason: 'diffFailed' };
-  }
-  const lanePaths = String(laneDiff.stdout ?? '').split('\n').filter(Boolean);
-  if (lanePaths.length === 0) {
-    return { delivered: true, reason: null };
-  }
-
-  const undeliveredDiff = git(['diff', '--name-only', ref, 'origin/main', '--', ...lanePaths], { cwd: root });
-  if (undeliveredDiff.status !== 0) {
-    return { delivered: null, reason: 'diffFailed' };
-  }
-  const undeliveredPaths = String(undeliveredDiff.stdout ?? '').split('\n').filter(Boolean);
-  return { delivered: undeliveredPaths.length === 0, reason: null };
+  const { status, reason } = contentDelivery({ git, root, rev: ref, baseFetched });
+  const delivered = status === 'delivered' ? true : status === 'pending' ? false : null;
+  return { delivered, reason };
 }
 
 // A4: the branch's own grammar (ADR-0034 L1, adr-0034:49) — tolerating the
