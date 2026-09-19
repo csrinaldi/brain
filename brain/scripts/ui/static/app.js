@@ -22,6 +22,7 @@ import { buildRoadmapModel } from './lib/roadmap-model.mjs';
 import { buildDecisionsModel } from './lib/decisions-model.mjs';
 import { buildAntiPatternsModel } from './lib/anti-patterns-model.mjs';
 import { buildHeaderModel } from './lib/header-model.mjs';
+import { STATES } from './lib/state-vocab.mjs';
 import { buildHistoryModel, capNote } from './lib/history-model.mjs';
 import { buildActorsModel } from './lib/actors-model.mjs';
 import { sourceStamp } from './lib/provenance.mjs';
@@ -283,6 +284,10 @@ function renderLanes() {
     return;
   }
   const { lanes, crossEdges, holding, droppedEdges, issuesUnreadable, edgeSummary } = model.value;
+  // The design's clustering row and legend sit above the lanes (#1059 region
+  // 03). The legend is built from `state-vocab.mjs` itself — a hand-written
+  // list here would be a second definition of what a state is called.
+  mounts.canvas.appendChild(renderClusteringBar());
   mounts.canvas.appendChild(el('p', 'canvas-summary', `${lanes.length} track lane(s), ${holding.count} in the \`?\` holding lane`));
   mounts.canvas.appendChild(el('p', 'edge-summary', `edges: ${edgeSummary.laneInternal} in lanes, ${edgeSummary.holdingInternal} in the \`?\` holding lane, ${edgeSummary.crossLane} crossing lanes, ${edgeSummary.unknownNode} to an unknown node (${edgeSummary.total} total)`));
 
@@ -328,8 +333,80 @@ function renderLaneHeader(label, count, nodes, toggle) {
 function renderLaneRow(lane) {
   const row = el('div', 'lane-row');
   row.appendChild(renderLaneHeader(lane.label, lane.count, lane.nodes, null));
-  row.appendChild(renderLaneBoard(lane));
+  row.appendChild(renderLaneCards(lane));
   return row;
+}
+
+/**
+ * A lane as the maintainer's design draws it: a grid of cards, one per node
+ * (#1059 region 03). The DAG's edges are NOT lines here — a card says what it
+ * waits on in words, and the cross-lane and undrawable edges keep the said
+ * lists below, which is where they already were. Every value still comes from
+ * `lane-model.mjs`; this function places them.
+ */
+/** The design's clustering control and legend (#1059 region 03). Epic clustering is
+ * not offered as a working control: `kind` and `parent` are node fields since #967
+ * but the lane model does not group by them yet (#1032), so the button says what it
+ * is waiting on rather than switching to nothing. */
+function renderClusteringBar() {
+  const bar = el('div', 'clustering-bar');
+
+  const left = el('div', 'clustering-controls');
+  left.appendChild(el('span', 'clustering-label', 'clustering'));
+  const byTrack = el('button', 'clustering-choice', 'track swimlanes');
+  byTrack.type = 'button';
+  byTrack.setAttribute('aria-current', 'true');
+  const byEpic = el('button', 'clustering-choice', 'epic clusters');
+  byEpic.type = 'button';
+  byEpic.disabled = true;
+  byEpic.setAttribute('title', 'epic grouping is not built yet — kind and parent are node data, and the lane model does not read them (#1032)');
+  left.appendChild(byTrack);
+  left.appendChild(byEpic);
+  left.appendChild(el('span', 'clustering-note', 'grouped by the track each issue declares'));
+  bar.appendChild(left);
+
+  const legend = el('div', 'legend');
+  legend.appendChild(el('span', 'legend-label', 'legend'));
+  for (const state of Object.values(STATES)) {
+    const item = el('span', `legend-item state-${state.code}`);
+    item.appendChild(el('span', 'legend-mark', state.mark));
+    item.appendChild(el('span', 'legend-word', state.label));
+    legend.appendChild(item);
+  }
+  bar.appendChild(legend);
+  return bar;
+}
+
+function renderLaneCards(lane) {
+  const grid = el('div', 'lane-grid');
+  for (const node of lane.nodes) grid.appendChild(renderNodeCard(node));
+  return grid;
+}
+
+function renderNodeCard(node) {
+  const card = el('div', `node-card ${node.className}${node.number === selectedIssue ? ' selected' : ''}`);
+  card.setAttribute('role', 'button');
+  card.setAttribute('tabindex', '0');
+  card.setAttribute('data-issue', String(node.number));
+
+  const head = el('div', 'node-card-head');
+  head.appendChild(el('span', 'node-number', `#${node.number}`));
+  const chip = el('span', `node-state state-${node.state.code}`);
+  chip.appendChild(el('span', 'node-state-mark', node.state.mark));
+  chip.appendChild(el('span', 'node-state-word', node.state.label));
+  head.appendChild(chip);
+  card.appendChild(head);
+
+  card.appendChild(el('h4', 'node-title', node.title || '(no title)'));
+
+  if (node.blockedBy.length > 0) {
+    card.appendChild(el('p', 'node-blocked', `blocked by ${node.blockedBy.map((n) => `#${n}`).join(', ')}`));
+  }
+  for (const mark of node.marks) card.appendChild(said(mark));
+
+  card.addEventListener('click', () => selectNode(node.number));
+  card.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') selectNode(node.number); });
+  return card;
 }
 
 /** One lane's own SVG board — the same drawing the single canvas used to be, now scoped to one lane's own coordinate space (R998-3). */

@@ -68,6 +68,11 @@ function drawnNode(node, box) {
   return {
     number: node.number,
     label: `#${node.number} ${node.title ?? ''}`.trim(),
+    // #1059 region 03: the design draws a card, not a labelled rectangle, so
+    // the title stands on its own line and what a node waits on is a fact of
+    // the card rather than only a line between two boxes.
+    title: node.title ?? '',
+    blockedBy: [...(node.blockedBy ?? [])].sort((a, b) => a - b),
     className: state.className,
     marks,
     track: node.track ?? null,
@@ -85,6 +90,8 @@ function holdingRow(node) {
   return {
     number: node.number,
     label: `#${node.number} ${node.title ?? ''}`.trim(),
+    title: node.title ?? '',
+    blockedBy: [...(node.blockedBy ?? [])].sort((a, b) => a - b),
     marks,
     state: { code: state.code, label: state.label, mark: state.mark },
   };

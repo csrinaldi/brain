@@ -136,3 +136,26 @@ test('#998 R998-3: the same graph, nodes and edges shuffled, gives a byte-identi
   const b = buildLaneModel(graph({ nodes: [...nodes].reverse(), edges: [...edges].reverse() }));
   assert.deepEqual(a, b);
 });
+
+// ── #1059 phase 3: the design draws a lane as a grid of cards ─────────────
+// A card names the issue, its title on its own line, its state, and what it
+// waits on. `label` glued the number and the title into one string for an SVG
+// text node; a card needs them apart, and the edges it used to draw as lines
+// become the words "blocked by #N" on the card that is blocked.
+test('#1059 region 03: a lane node carries its title and what blocks it, apart from its label', () => {
+  const model = buildLaneModel({ ok: true, value: {
+    nodes: [
+      { number: 881, title: 'ui server, SVG canvas, SSE live stream', track: 'UI', status: 'ready', blockedBy: [], roadmap: { ok: true, value: { state: 'in-flight' } } },
+      { number: 882, title: 'management views', track: 'UI', status: 'blocked', blockedBy: [881], roadmap: { ok: true, value: { state: 'planned' } } },
+    ],
+    edges: [{ from: 881, to: 882 }],
+    tracks: new Map([['UI', [881, 882]]]),
+  } });
+
+  assert.equal(model.ok, true);
+  const [lane] = model.value.lanes;
+  const [first, second] = lane.nodes;
+  assert.equal(first.title, 'ui server, SVG canvas, SSE live stream', 'the title stands on its own, not glued into the label');
+  assert.deepEqual(second.blockedBy, [881], 'what a node waits on is a fact of the card, not only a drawn line');
+  assert.deepEqual(first.blockedBy, []);
+});
