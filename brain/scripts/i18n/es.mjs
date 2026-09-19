@@ -83,6 +83,23 @@ export default {
   'day.memory.laneSweep.detailUnparsed':  'salida de ship no parseable',
   'day.memory.laneSweep.detailExitCode':  'ship terminó con código {status}',
 
+  // Lane sweep entre días, por rama (#936, tabla de sweep de design.md) —
+  // una línea por fila de `outcome.sweep.branches[]`, renderizada por
+  // `laneSweepBranchLines()`. `deleted`/`shipped`/`reconciled` son de
+  // rutina (`ok`); el resto necesita la atención de una persona (`warn`).
+  'day.memory.laneSweep.branch.deleted':        'Lane sweep: {branch} ({date}) ya se había entregado por completo — se borró la rama local.',
+  'day.memory.laneSweep.branch.shipped':        'Lane sweep: {branch} ({date}) se volvió a enviar — pull request #{number}.',
+  'day.memory.laneSweep.branch.reconciled':     'Lane sweep: {branch} ({date}) se reconcilió — pull request #{number}, nada nuevo para enviar.',
+  'day.memory.laneSweep.branch.closedUnmerged': '⚠ Lane sweep: {branch} ({date}) no se volvió a enviar — el pull request #{number} se cerró sin fusionarse; borrá la rama local para dejar de ver este aviso.',
+  'day.memory.laneSweep.branch.unknown':        '⚠ Lane sweep: {branch} ({date}) tiene un estado ilegible — se mantiene, no se adivina.',
+  'day.memory.laneSweep.branch.diverged':       '⚠ Lane sweep: {branch} ({date}) divergió de su remoto — no se forzó nada.',
+  'day.memory.laneSweep.branch.failed':         '⚠ Lane sweep: {branch} ({date}) no se pudo reconciliar — {reason}',
+  'day.memory.laneSweep.branch.remoteOnly':     '⚠ Lane sweep: {branch} ({date}) sólo existe en el remoto — se reporta, no se modifica.',
+  // #936 remediation: el sweep completo puede fallar de forma cerrada
+  // (cli.mjs aísla un throw del código previo al loop de sweepLanes()) —
+  // distinto de una fila por rama y de `day.memory.laneSweep.warn`.
+  'day.memory.laneSweep.sweepFailed': '⚠ El lane sweep falló — {reason}; no se cambió ni reconcilió nada esta vez.',
+
   'day.done.withTicket':      'Con ticket:',
   'day.done.ticketStart':     'brain:ticket:start -- <iid>   (terminal)',
   'day.done.ticketStartAgent':'/ticket-start <iid>             (Claude / agente IA)',
@@ -364,12 +381,32 @@ export default {
   'memory.ship.prLookupFailed':   '✗ el envío falló — no se pudo consultar el pull request, así que su existencia es incomputable; el push ya se concretó y es durable. {message}',
   'memory.ship.prCreateFailed':   '✗ el envío falló — no se pudo crear el pull request. {message}',
   'memory.ship.prNumberUnknown':  'el pull request está abierto pero no se pudo derivar su número — se salteó el auto-merge; la próxima corrida lo recupera.',
+  // REVERSIÓN DE R8 (#920 -> #936, D4): una rama cuyo único pull request se
+  // cerró sin fusionarse nunca se vuelve a enviar ni recibe un PR nuevo — se
+  // reporta en cada corrida hasta que un operador borre la rama local.
+  'memory.ship.closedUnmerged':   '⚠ no se envió {branch} — el pull request #{number} se cerró sin fusionarse; se seguirá reportando en cada corrida hasta que se borre la rama local.',
   'memory.ship.failed':           '✗ el envío falló — {message}',
   'memory.ship.raced':            '✗ el envío falló — la ref del lane se movió durante esta corrida (raced); no se perdió nada, sus blobs se vuelven a juntar en la próxima corrida: {message}',
   'memory.ship.badHost':          '✗ el envío falló — el nombre de host produjo un slug de ref vacío o inválido: {message}',
   'memory.ship.invokerMissing':   '✗ envío rechazado — pasá --invoker hook, sweep o manual; para correrlo a mano usá `npm run brain:memory:ship`.',
   'memory.ship.invokerUnderTest': '✗ envío rechazado — NODE_TEST_CONTEXT está configurado; un test debe usar BRAIN_VCS_TEST_MODULE o --dry-run, nunca un --invoker a secas.',
   'memory.ship.invokerInvalid':   '✗ envío rechazado — --invoker debe ser hook, sweep o manual; se recibió {value}.',
+
+  // Lane sweep entre días, por rama, en stderr (#936, D-sweep paso 5.8) —
+  // nunca condicionado por --json, misma disciplina que memory.ship.pushed/
+  // prExisting/armed/identityAmbient de arriba. Mismas 8 acciones que
+  // day.memory.laneSweep.branch.*.
+  'memory.ship.sweep.deleted':        'lane sweep: {branch} ({date}) ya se había entregado por completo — se borró la rama local.',
+  'memory.ship.sweep.shipped':        'lane sweep: {branch} ({date}) se volvió a enviar — pull request #{number}.',
+  'memory.ship.sweep.reconciled':     'lane sweep: {branch} ({date}) se reconcilió — pull request #{number}, nada nuevo para enviar.',
+  'memory.ship.sweep.closedUnmerged': 'lane sweep: {branch} ({date}) no se volvió a enviar — el pull request #{number} se cerró sin fusionarse.',
+  'memory.ship.sweep.unknown':        'lane sweep: {branch} ({date}) tiene un estado ilegible — se mantiene, no se adivina.',
+  'memory.ship.sweep.diverged':       'lane sweep: {branch} ({date}) divergió de su remoto — no se forzó nada.',
+  'memory.ship.sweep.failed':         'lane sweep: {branch} ({date}) no se pudo reconciliar — {reason}',
+  'memory.ship.sweep.remoteOnly':     'lane sweep: {branch} ({date}) sólo existe en el remoto — se reporta, no se modifica.',
+  // #936 remediation: refleja memory.ship.sweepFailed en inglés — el sweep
+  // completo falló, no hay filas de `branches` para recorrer.
+  'memory.ship.sweepFailed':          'el lane sweep falló: {reason}, no se cambió ni reconcilió nada esta vez.',
 
   // ── memory/cli.mjs — qué backend corrió realmente (issue #641) ───────────────
   'memory.backend.substituted': 'el binario `{from}` no está instalado acá, así que `{op}` corrió sobre el backend `{fallback}` (solo registros) — mismos registros, misma validación, sin backend requerido (ADR-0017). MEMORY_BACKEND no estaba seteado, así que no se pisó ninguna elección explícita; seteálo para fijar cualquiera de los dos backends.',

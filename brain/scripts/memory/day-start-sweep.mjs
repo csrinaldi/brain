@@ -139,3 +139,50 @@ export function laneSweepLine(sweep) {
   }
   return { level: 'ok', key: 'day.memory.laneSweep.nothing', params: {} };
 }
+
+// R8 REVERSAL (#920 -> #936, D4) also reaches here through `closedUnmerged`:
+// a row this action never re-pushes or reopens, so it MUST print as `warn`,
+// not `ok` — the operator has to see it to ever act on it.
+const WARN_BRANCH_ACTIONS = new Set(['closedUnmerged', 'unknown', 'diverged', 'failed', 'remoteOnly']);
+
+/**
+ * laneSweepBranchLines() — pure, mirrors `laneSweepLine()`'s own contract
+ * (#936, design.md's module map: `day-start-sweep: laneSweepLine (unchanged)
+ * + laneSweepBranchLines(outcome.sweep)`). One row in, one line out — never
+ * calls `t()`, never touches I/O, never throws.
+ *
+ * `sweep` is `outcome.sweep` from a `ship --json` outcome: `null` (a
+ * `--dry-run` run, or a run whose sweep never executed) yields `[]` — never
+ * a crash on a missing key. Each branch's `action` maps to
+ * `day.memory.laneSweep.branch.<action>` — `deleted`/`shipped`/`reconciled`
+ * render `ok`; `closedUnmerged`/`unknown`/`diverged`/`failed`/`remoteOnly`
+ * render `warn` (design.md's own table).
+ *
+ * #936 remediation (cold review WARNING): `sweep` can also be the fail-closed
+ * marker `{ failed: true, reason }` — cli.mjs's own isolation of a throw from
+ * `sweepLanes()`'s pre-loop code (the shared fetch/listLocalBranches/
+ * listRemoteBranches/slugifyHost, none of which run inside the per-branch
+ * try/catch). That shape has no `branches` array by construction, so it is
+ * checked FIRST and rendered as exactly one `warn` line, distinct from the
+ * "nothing ran" `[]` case above.
+ *
+ * @param {{ remoteListed: boolean, branches: Array<object> } | { failed: true, reason: string } | null} sweep
+ * @returns {Array<{ level: 'ok'|'warn', key: string, params: object }>}
+ */
+export function laneSweepBranchLines(sweep) {
+  if (!sweep) return [];
+  if (sweep.failed) {
+    return [{ level: 'warn', key: 'day.memory.laneSweep.sweepFailed', params: { reason: sweep.reason ?? '' } }];
+  }
+  if (!Array.isArray(sweep.branches)) return [];
+  return sweep.branches.map((row) => ({
+    level: WARN_BRANCH_ACTIONS.has(row.action) ? 'warn' : 'ok',
+    key: `day.memory.laneSweep.branch.${row.action}`,
+    params: {
+      branch: row.branch,
+      date: row.date,
+      number: row.pr?.number ?? null,
+      reason: row.reason ?? '',
+    },
+  }));
+}

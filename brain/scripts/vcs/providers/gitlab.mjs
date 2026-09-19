@@ -618,10 +618,43 @@ export async function issueList({ project, state = 'open', assignee } = {}) {
   }));
 }
 
-export async function mrList({ project, state = 'open' } = {}) {
+/** D1 — GitLab's native merge_requests `state` has no distinct GitHub-shaped
+ * `merged` boolean of its own; it folds `merged` into `state` as a third
+ * value. Mapped to the shared { state, merged } pair GitHub also reports:
+ * `opened`→`open`/`false`, `closed`→`closed`/`false`, `merged`→`closed`/
+ * `true`. Anything else (e.g. `locked`) is unrepresentable in the shared
+ * enum and reports `null`/`null` rather than guessing. */
+function mapGitlabMrState(raw) {
+  if (raw === 'opened') return { state: 'open', merged: false };
+  if (raw === 'closed') return { state: 'closed', merged: false };
+  if (raw === 'merged') return { state: 'closed', merged: true };
+  return { state: null, merged: null };
+}
+
+/**
+ * mrList — widened additively by #930 (D1/D2). See github.mjs#mrList's
+ * docstring for the shared rationale; this is the GitLab half.
+ *
+ * D2: an optional `headBranch` filter narrows the query to
+ * `source_branch=<branch>` (URL-encoded) and switches the page size to 100
+ * (matching GitHub's). Unfiltered calls stay byte-identical to the pre-#930
+ * query (`per_page=50`, no `source_branch` param). When `headBranch` is set
+ * and the page comes back full (100), this THROWS rather than risk a
+ * silently truncated result.
+ */
+export async function mrList({ project, state = 'open', headBranch } = {}) {
   const encoded = encodeURIComponent(project);
-  const arr = runJson('glab', ['api', `projects/${encoded}/merge_requests?state=${providerState('gitlab', state)}&per_page=50`]);
-  return arr.map(r => ({ number: r.iid, title: r.title, headBranch: r.source_branch }));
+  const endpoint = headBranch !== undefined
+    ? `projects/${encoded}/merge_requests?state=${providerState('gitlab', state)}&source_branch=${encodeURIComponent(headBranch)}&per_page=100`
+    : `projects/${encoded}/merge_requests?state=${providerState('gitlab', state)}&per_page=50`;
+  const arr = runJson('glab', ['api', endpoint]);
+  if (headBranch !== undefined && arr.length === 100) {
+    throw new Error(`mrList: a full page (100) came back for headBranch ${headBranch} — cannot rule out truncation, failing closed`);
+  }
+  return arr.map(r => {
+    const { state: mrState, merged } = mapGitlabMrState(r.state);
+    return { number: r.iid, title: r.title, headBranch: r.source_branch, state: mrState, merged };
+  });
 }
 
 export async function commitStatus({ project, sha }) {

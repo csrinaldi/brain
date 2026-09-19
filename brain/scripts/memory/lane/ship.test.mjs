@@ -102,6 +102,7 @@ test('a full run produces the outcome shape, pushed:true, pr.number set', async 
   assert.equal(result.autoMerge.enabled, true);
   assert.equal(result.identityBound, false);
   assert.equal(result.dryRun, false);
+  assert.equal(result.closedUnmerged, false, 'closedUnmerged defaults to false on the ordinary success path');
 });
 
 // ── #921 — shipLane() must forward collectLane()'s skippedWorktrees, never drop it ──
@@ -165,6 +166,7 @@ test('(a) ref exists, remote matches, lane delivered ⇒ no-op: zero push/list/c
   assert.equal(result.delivered, true);
   assert.equal(result.deliveredReason, null);
   assert.equal(result.reconciled, false);
+  assert.equal(result.closedUnmerged, false, 'a delivered no-op never reaches the D4 lookup, so this stays the default');
 });
 
 test('(b) M1 regression pin: ref exists, ahead:0, records absent from origin/main ⇒ no push, but find/create + arm run', async () => {
@@ -375,6 +377,7 @@ test('cold-1 (PR #902 review): a ref that never existed locally is nothing-to-sh
   assert.equal(result.delivered, null);
   assert.equal(result.deliveredReason, 'noRef');
   assert.equal(result.reconciled, false);
+  assert.equal(result.closedUnmerged, false, 'a ref that never existed never reaches the D4 lookup either');
 });
 
 test("A1 recovery case: commit:null but ahead:1 (a prior push failed) still pushes and opens/arms", async () => {
@@ -458,7 +461,10 @@ test('a non-fast-forward push refusal (undetected by the pre-check) is classifie
     }),
     (err) => { assert.equal(err.diverged, true); return true; },
   );
-  assert.deepEqual(vcsCalls, { mrList: 0, mrCreate: 0, mrAutoMerge: 0 });
+  // D4 (#936): the PR lookup now runs BEFORE the push (it must, to decide
+  // whether a push is even allowed), so mrList is 1 here — only mrCreate and
+  // mrAutoMerge, which come strictly after a successful push, stay at 0.
+  assert.deepEqual(vcsCalls, { mrList: 1, mrCreate: 0, mrAutoMerge: 0 });
 });
 
 test('a genuine push failure (not a divergence shape) is classified pushFailed', async () => {
@@ -479,14 +485,24 @@ test('a genuine push failure (not a divergence shape) is classified pushFailed',
 
 // ── Requirement: PR lookup and creation are idempotent ───────────────────────
 
-test('PR already open by headBranch: mrCreate never called, mrAutoMerge still called', async () => {
+test('PR already open by headBranch wins over a newer closed PR: mrCreate never called, mrAutoMerge still called', async () => {
   const { git } = fakeGit([
     ...surveyOkRules(),
     { match: (a) => a[0] === 'push', result: ok() },
   ]);
   let mrListArgs;
   const { vcs, calls: vcsCalls } = fakeVcs({
-    mrList: async (args) => { vcsCalls.mrList++; mrListArgs = args; return [{ number: 7, title: 't', headBranch: BRANCH }]; },
+    mrList: async (args) => {
+      vcsCalls.mrList++;
+      mrListArgs = args;
+      // D4: an open item must win even though a higher-numbered closed item
+      // for the same branch also exists — "open wins" is checked BEFORE
+      // "highest-numbered decides".
+      return [
+        { number: 7, title: 't', headBranch: BRANCH, state: 'open', merged: false },
+        { number: 9, title: 't', headBranch: BRANCH, state: 'closed', merged: false },
+      ];
+    },
   });
 
   const result = await shipLane({
@@ -497,10 +513,106 @@ test('PR already open by headBranch: mrCreate never called, mrAutoMerge still ca
   assert.equal(vcsCalls.mrCreate, 0);
   assert.equal(vcsCalls.mrAutoMerge, 1);
   assert.equal(result.pr.number, 7);
-  // spec.md:51 — mrList MUST be called with { project, state: 'open' }, not an
-  // all-states list (which would match a CLOSED lane PR by head and skip
-  // mrCreate forever).
-  assert.deepEqual(mrListArgs, { project: 'x/y', state: 'open' });
+  assert.equal(result.closedUnmerged, false);
+  // D4 (#936): the lookup now queries ALL states (open wins, else the
+  // highest-numbered item decides) and is bound to this exact branch via the
+  // D2 `headBranch` filter — never a repo-wide `state: 'open'` list, which
+  // could never see a closed-unmerged PR to begin with.
+  assert.deepEqual(mrListArgs, { project: 'x/y', state: 'all', headBranch: BRANCH });
+});
+
+// ── Requirement: #920's R8 is reversed (D4) — closed-unmerged is reported, never reopened ──
+
+test('D4: a foreign branch\'s PR is filtered out before "newest" is picked, so an unrelated closed-unmerged PR never blocks a fresh create', async () => {
+  const { git } = fakeGit([...surveyOkRules(), { match: (a) => a[0] === 'push', result: ok() }]);
+  const { vcs, calls: vcsCalls } = fakeVcs({
+    mrList: async () => [{ number: 99, title: 't', headBranch: 'memory/some-other-host-2026-09-08', state: 'closed', merged: false }],
+  });
+
+  const result = await shipLane({
+    root: '/repo', project: 'x/y', tier: 'lite', host: 'test-host', date: '2026-09-09',
+    collect: fakeCollect(), git, vcs,
+  });
+
+  assert.equal(vcsCalls.mrCreate, 1, 'an unrelated branch\'s closed-unmerged PR must never suppress this branch\'s own create');
+  assert.equal(result.closedUnmerged, false);
+  assert.equal(result.pr.number, 42);
+});
+
+test('D4: no open PR, highest-numbered match is closed-unmerged ⇒ closedUnmerged:true, zero push/create/arm calls, PR reported', async () => {
+  const { git, calls } = fakeGit([
+    { match: (a) => a[0] === 'rev-parse', result: ok('deadbeef') },
+    { match: (a) => a[0] === 'fetch', result: ok() },
+    { match: (a) => a[0] === 'rev-list' && a[2] === `${REF}..refs/remotes/origin/${BRANCH}`, result: ok('0') },
+    { match: (a) => a[0] === 'rev-list' && a[2] === `refs/remotes/origin/${BRANCH}..${REF}`, result: ok('1') },
+    { match: (a) => a[0] === 'diff' && a.includes('--'), result: ok('.memory/records/2026-09-rec-1.jsonl') },
+    { match: (a) => a[0] === 'diff', result: ok('.memory/records/2026-09-rec-1.jsonl') },
+  ]);
+  const { vcs, calls: vcsCalls } = fakeVcs({
+    // Lower-numbered closed+merged, higher-numbered closed-unmerged — the
+    // HIGHEST number must decide, per D4's "newest wins" rule, and it is
+    // closed-unmerged here.
+    mrList: async () => {
+      vcsCalls.mrList++;
+      return [
+        { number: 3, title: 't', headBranch: BRANCH, state: 'closed', merged: true },
+        { number: 11, title: 't', headBranch: BRANCH, state: 'closed', merged: false },
+      ];
+    },
+  });
+
+  const result = await shipLane({
+    root: '/repo', project: 'x/y', tier: 'lite', host: 'test-host', date: '2026-09-09',
+    collect: fakeCollect(), git, vcs,
+  });
+
+  assert.equal(result.closedUnmerged, true);
+  assert.equal(result.pr.number, 11);
+  assert.equal(result.pushed, false, 'a branch whose only current PR is closed-unmerged must never be re-shipped (a push here would be indistinguishable from re-opening it)');
+  assert.equal(result.reconciled, false);
+  assert.equal(result.autoMerge, null);
+  assert.deepEqual(vcsCalls, { mrList: 1, mrCreate: 0, mrAutoMerge: 0 });
+  assert.ok(!calls.some((a) => a[0] === 'push'), 'D4 forbids the push entirely once the newest PR is closed-unmerged, regardless of pending content');
+});
+
+test('D4: no open PR, highest-numbered match is closed+merged ⇒ creates a fresh PR (pre-#936 [closed, merged] histories heal)', async () => {
+  const { git } = fakeGit([...surveyOkRules(), { match: (a) => a[0] === 'push', result: ok() }]);
+  const { vcs, calls: vcsCalls } = fakeVcs({
+    mrList: async () => [{ number: 5, title: 't', headBranch: BRANCH, state: 'closed', merged: true }],
+  });
+
+  const result = await shipLane({
+    root: '/repo', project: 'x/y', tier: 'lite', host: 'test-host', date: '2026-09-09',
+    collect: fakeCollect(), git, vcs,
+  });
+
+  assert.equal(result.closedUnmerged, false);
+  assert.equal(vcsCalls.mrCreate, 1);
+  assert.equal(result.pr.number, 42);
+});
+
+test('D4: the highest-numbered match\'s state/merged is null (uncomputable) ⇒ prLookupFailed, zero push/create calls', async () => {
+  const { git, calls } = fakeGit([
+    { match: (a) => a[0] === 'rev-parse', result: ok('deadbeef') },
+    { match: (a) => a[0] === 'fetch', result: ok() },
+    { match: (a) => a[0] === 'rev-list' && a[2] === `${REF}..refs/remotes/origin/${BRANCH}`, result: ok('0') },
+    { match: (a) => a[0] === 'rev-list' && a[2] === `refs/remotes/origin/${BRANCH}..${REF}`, result: ok('1') },
+    { match: (a) => a[0] === 'diff' && a.includes('--'), result: ok('.memory/records/2026-09-rec-1.jsonl') },
+    { match: (a) => a[0] === 'diff', result: ok('.memory/records/2026-09-rec-1.jsonl') },
+  ]);
+  const { vcs, calls: vcsCalls } = fakeVcs({
+    mrList: async () => [{ number: 4, title: 't', headBranch: BRANCH, state: null, merged: null }],
+  });
+
+  await assert.rejects(
+    () => shipLane({
+      root: '/repo', project: 'x/y', tier: 'lite', host: 'test-host', date: '2026-09-09',
+      collect: fakeCollect(), git, vcs,
+    }),
+    (err) => { assert.equal(err.prLookupFailed, true); return true; },
+  );
+  assert.equal(vcsCalls.mrCreate, 0);
+  assert.ok(!calls.some((a) => a[0] === 'push'), 'an uncomputable PR state must fail closed before any push');
 });
 
 test('mrCreate returning {url:null, error} is fatal: prCreateFailed, mrAutoMerge never called', async () => {
@@ -629,7 +741,7 @@ test('an unparseable URL triggers exactly one mrList re-scan and recovers the nu
   const { vcs } = fakeVcs({
     mrList: async () => {
       mrListCalls++;
-      return mrListCalls === 1 ? [] : [{ number: 9, title: 't', headBranch: BRANCH }];
+      return mrListCalls === 1 ? [] : [{ number: 9, title: 't', headBranch: BRANCH, state: 'open', merged: false }];
     },
     mrCreate: async () => ({ url: 'https://example.invalid/unparseable' }),
     mrAutoMerge: async (args) => { armArgs = args; return { enabled: true, url: null }; },
@@ -732,8 +844,8 @@ test('E2 (cold review): a throwing mrAutoMerge is mapped to a non-fatal refusal,
 
 // ── Requirement: mrList throwing is the one fatal port failure ──────────────
 
-test('mrList throwing is fatal: exit non-zero, mrCreate never called', async () => {
-  const { git } = fakeGit([...surveyOkRules(), { match: (a) => a[0] === 'push', result: ok() }]);
+test('mrList throwing is fatal: exit non-zero, mrCreate never called, and — D4 — the lookup now runs before push, so push never happens either', async () => {
+  const { git, calls } = fakeGit([...surveyOkRules(), { match: (a) => a[0] === 'push', result: ok() }]);
   const { vcs, calls: vcsCalls } = fakeVcs({
     mrList: async () => { throw new Error('gh api pulls failed: rate limited'); },
   });
@@ -743,6 +855,7 @@ test('mrList throwing is fatal: exit non-zero, mrCreate never called', async () 
     (err) => { assert.equal(err.prLookupFailed, true); return true; },
   );
   assert.equal(vcsCalls.mrCreate, 0);
+  assert.ok(!calls.some((a) => a[0] === 'push'), 'D4 moves the PR lookup before the push — a lookup failure must never let a push through first');
 });
 
 // ── Requirement: credential threading ────────────────────────────────────────
@@ -795,6 +908,7 @@ test('--dry-run: vcs is null and a git fake that throws on push/fetch still lets
   assert.equal(result.delivered, null);
   assert.equal(result.deliveredReason, 'dryRun');
   assert.equal(result.reconciled, false);
+  assert.equal(result.closedUnmerged, false, '--dry-run never reaches the D4 lookup (vcs:null)');
 });
 
 // ── Requirement: no credential value ever appears in the returned shape ─────

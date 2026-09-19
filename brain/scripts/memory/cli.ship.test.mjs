@@ -445,7 +445,10 @@ test('R11 (#920): pushed:false && reconciled:true renders as "reconciled", never
   // `slugifyHost()` can rewrite a raw `hostname()` that this fixture must
   // not have to re-derive.
   const secondScript = writeVcsTestScript(testTmp('cli-ship-fake-vcs-'), {
-    mrList: [{ number: 999, title: 't', headBranch: firstParsed.branch }],
+    // D4 (#936): the lookup now spans every state, so an item that omits
+    // `state` reads as uncomputable (`prLookupFailed`, fail closed) — this
+    // fixture's PR is genuinely still open, so it must say so explicitly.
+    mrList: [{ number: 999, title: 't', headBranch: firstParsed.branch, state: 'open', merged: false }],
     mrAutoMerge: { enabled: true, url: null },
   });
   const jsonRun = spawnSync(process.execPath, [CLI, 'ship', '--json'], {
@@ -474,6 +477,76 @@ test('R11 (#920): pushed:false && reconciled:true renders as "reconciled", never
 
   const afterOriginMainRefs = git(originDir, 'for-each-ref', '--format=%(refname)', 'refs/heads/memory/');
   assert.notEqual(afterOriginMainRefs, '', 'the lane ref itself must still be present on origin');
+});
+
+test('D4/R8 reversal (#936): a branch whose only PR is closed unmerged is reported, never re-pushed, never given a fresh PR', () => {
+  const { mainDir, originDir } = fixtureRepo({ withCandidate: true });
+
+  // Run 1: a full success — the lane's PR lands on origin but is never
+  // merged into main.
+  const firstScript = writeVcsTestScript(testTmp('cli-ship-fake-vcs-'), {
+    mrList: [],
+    mrCreate: { url: 'https://fake-vcs.invalid/pull/999' },
+    mrAutoMerge: { enabled: true, url: null },
+  });
+  const first = spawnSync(process.execPath, [CLI, 'ship', '--json'], {
+    encoding: 'utf8',
+    env: {
+      ...process.env, BRAIN_MEMORY_TEST_ROOT: mainDir, MEMORY_BACKEND: 'no-such-backend',
+      BRAIN_VCS_TEST_MODULE: FAKE_VCS_MODULE, BRAIN_VCS_TEST_SCRIPT: firstScript,
+    },
+  });
+  assert.equal(first.status, 0, first.stderr);
+  const firstParsed = JSON.parse(first.stdout);
+  assert.equal(firstParsed.pushed, true);
+  const beforeSha = git(originDir, 'for-each-ref', '--format=%(objectname)', 'refs/heads/memory/').trim();
+
+  // A human closes PR #999 without merging it. Run 2: the same lane still
+  // has pending content (records never reached origin/main), so the pre-#936
+  // path would have pushed and opened a fresh PR (#920 R8). #936 reverses
+  // that: no push, no mrCreate, and the run reports closedUnmerged.
+  const secondScript = writeVcsTestScript(testTmp('cli-ship-fake-vcs-'), {
+    mrList: [{ number: 999, title: 't', headBranch: firstParsed.branch, state: 'closed', merged: false }],
+  });
+  const jsonRun = spawnSync(process.execPath, [CLI, 'ship', '--json'], {
+    encoding: 'utf8',
+    env: {
+      ...process.env, BRAIN_MEMORY_TEST_ROOT: mainDir, MEMORY_BACKEND: 'no-such-backend',
+      BRAIN_VCS_TEST_MODULE: FAKE_VCS_MODULE, BRAIN_VCS_TEST_SCRIPT: secondScript,
+    },
+  });
+  assert.equal(jsonRun.status, 0, jsonRun.stderr);
+  const parsed = JSON.parse(jsonRun.stdout);
+  assert.equal(parsed.closedUnmerged, true);
+  assert.equal(parsed.pushed, false);
+  assert.equal(parsed.pr.number, 999);
+  assert.equal(parsed.autoMerge, null);
+
+  const afterSha = git(originDir, 'for-each-ref', '--format=%(objectname)', 'refs/heads/memory/').trim();
+  assert.equal(afterSha, beforeSha, 'a closed-unmerged branch must never be re-pushed to origin');
+
+  const textRun = spawnSync(process.execPath, [CLI, 'ship'], {
+    encoding: 'utf8',
+    env: {
+      ...process.env, BRAIN_MEMORY_TEST_ROOT: mainDir, MEMORY_BACKEND: 'no-such-backend',
+      BRAIN_VCS_TEST_MODULE: FAKE_VCS_MODULE, BRAIN_VCS_TEST_SCRIPT: secondScript,
+    },
+  });
+  assert.equal(textRun.status, 0, textRun.stderr);
+  assert.match(textRun.stdout, /memory\/cli:.*999/, 'the closed PR number must be reported in the text output');
+  assert.doesNotMatch(textRun.stdout, /nothing new to ship/i);
+
+  // Run again on the SAME (still closed-unmerged) state to prove this is
+  // reported on EVERY run, never just once (spec.md's own scenario).
+  const thirdRun = spawnSync(process.execPath, [CLI, 'ship', '--json'], {
+    encoding: 'utf8',
+    env: {
+      ...process.env, BRAIN_MEMORY_TEST_ROOT: mainDir, MEMORY_BACKEND: 'no-such-backend',
+      BRAIN_VCS_TEST_MODULE: FAKE_VCS_MODULE, BRAIN_VCS_TEST_SCRIPT: secondScript,
+    },
+  });
+  assert.equal(thirdRun.status, 0, thirdRun.stderr);
+  assert.equal(JSON.parse(thirdRun.stdout).closedUnmerged, true);
 });
 
 test('E1 (cold review): mrCreate returns a URL with no derivable PR number and the rescan finds nothing: exit 0, prNumberUnknown', () => {
@@ -642,6 +715,48 @@ test('#921 — brain:memory:ship prints memory.collect.worktreeSkipped on stderr
   assert.match(run.stderr, new RegExp(wtDir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   // F4 (cold review): reason, not just count + path.
   assert.match(run.stderr, /not a git repository/i);
+});
+
+// #936 remediation (cold review WARNING): sweepLanes() is documented "never
+// throws", but that promise only holds INSIDE its own per-branch loop —
+// nothing in cli.mjs's `ship` op enforced it at the call site, so a throw
+// from sweepLanes()'s pre-loop code (the shared `fetch`, `listLocalBranches`,
+// `listRemoteBranches`, or `slugifyHost`) would land in the SAME `catch` that
+// reports today's shipLane() outcome, turning an already-successful ship
+// into a reported `memory.ship.failed` / exit 1.
+//
+// `BRAIN_MEMORY_SWEEP_FORCE_THROW` is a test-only injection seam (mirrors
+// `BRAIN_MEMORY_HEAL_FORCE_THROW`, cli.heal-duplicates.test.mjs): it throws
+// immediately before cli.mjs's own call to `sweepLanes()`, so this test
+// exercises cli.mjs's OWN isolation of that call, independent of whether
+// sweepLanes()'s internals ever hit this in practice. NEVER set outside
+// tests.
+test('#936 remediation: a throwing sweepLanes() never turns today\'s successful ship into a failure — exit 0, fail-closed sweep marker', () => {
+  const { mainDir } = fixtureRepo({ withCandidate: false });
+  const run = spawnSync(process.execPath, [CLI, 'ship', '--json'], {
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      BRAIN_MEMORY_TEST_ROOT: mainDir,
+      MEMORY_BACKEND: 'no-such-backend',
+      BRAIN_VCS_TEST_MODULE: FAKE_VCS_MODULE,
+      BRAIN_MEMORY_SWEEP_FORCE_THROW: '1',
+    },
+  });
+
+  assert.equal(run.status, 0, run.stdout + run.stderr);
+  const parsed = JSON.parse(run.stdout);
+  // Today's own ship outcome is untouched — still the "nothing to ship"
+  // shape this fixture always produces.
+  assert.equal(parsed.pushed, false);
+  assert.equal(parsed.pr, null);
+  // The sweep outcome is a fail-closed marker, not `null` and not a thrown
+  // process exit — `{ branches: [...] }`'s absence here is itself the proof
+  // that the throw was caught before ever reaching the per-branch shape.
+  assert.equal(parsed.sweep.failed, true);
+  assert.match(parsed.sweep.reason, /BRAIN_MEMORY_SWEEP_FORCE_THROW/);
+  // Reported on stderr too — evidence discipline mirrors pushed/prExisting/armed.
+  assert.match(run.stderr, /memory\/cli:.*sweep failed/i);
 });
 
 test('brain:memory:ship resolves from package.json, beside the other memory:* scripts', () => {

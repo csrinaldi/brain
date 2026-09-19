@@ -527,11 +527,55 @@ if (op === "ship") {
       vcs,
     });
 
+    // D6 (#936): the cross-day sweep runs ONLY after today's shipLane call
+    // above SUCCEEDED (this line is unreached if it threw — the `catch`
+    // below owns that path) and ONLY when this is not `--dry-run` (a plan
+    // must never mutate any ref, today's or a prior day's).
+    //
+    // #936 remediation (cold review WARNING): `sweepLanes()`'s per-branch
+    // loop DOES catch every failure it can hit internally and maps it to
+    // that branch's own row — but that guarantee starts only INSIDE the
+    // loop. Its own pre-loop code (the shared `fetch`, `listLocalBranches`,
+    // `listRemoteBranches`, `slugifyHost`) is NOT inside any try/catch of
+    // its own. This call therefore has its OWN try/catch, isolated from
+    // shipLane's outer try above: a sweep-side throw here can never turn
+    // today's already-successful `result` into a reported ship failure —
+    // it becomes this fail-closed marker instead, still surfaced (in
+    // --json, and per-run on stderr below) rather than silently swallowed.
+    let sweep = null;
+    if (!dryRun) {
+      try {
+        // BRAIN_MEMORY_SWEEP_FORCE_THROW (test-only seam, mirrors
+        // BRAIN_MEMORY_HEAL_FORCE_THROW): throws before sweepLanes() is
+        // ever called, so a test can exercise this try/catch's isolation
+        // directly — sweepLanes()'s own internals have no reachable throw
+        // in its pre-loop code today, this seam proves the isolation still
+        // holds if that ever changes. NEVER set this outside tests.
+        if (process.env.BRAIN_MEMORY_SWEEP_FORCE_THROW) {
+          throw new Error(`forced failure for test coverage (BRAIN_MEMORY_SWEEP_FORCE_THROW=${process.env.BRAIN_MEMORY_SWEEP_FORCE_THROW})`);
+        }
+        const { sweepLanes } = await import("./lane/sweep.mjs");
+        const { defaultGit } = await import("./lane/collect.mjs");
+        sweep = await sweepLanes({
+          root: memoryRoot,
+          project: config.project.slug,
+          tier: config.governance.tier,
+          host: hostname(),
+          today: result.date,
+          git: defaultGit,
+          vcs,
+        });
+      } catch (err) {
+        sweep = { failed: true, reason: err?.message ?? String(err) };
+      }
+    }
+
     if (asJson) {
-      console.log(JSON.stringify({ ...result, invoker }));
+      console.log(JSON.stringify({ ...result, invoker, sweep }));
     } else {
       console.log(`memory/cli: ${await t(`memory.ship.${shipOutcomeKey(result)}`, {
         ref: result.ref,
+        branch: result.branch,
         number: result.pr?.number ?? null,
         reason: result.autoMerge?.reason ?? "",
       })}`);
@@ -563,6 +607,22 @@ if (op === "ship") {
       if (!result.identityBound) {
         console.error(`memory/cli: ${await t("memory.ship.identityAmbient")}`);
       }
+      // D-sweep step 5.8: one stderr line per cross-day sweep row, same
+      // "always on stderr, never gated by --json" evidence discipline as
+      // skippedWorktrees/pushed/prExisting/armed above.
+      //
+      // #936 remediation: `sweep?.failed` (the fail-closed marker from the
+      // isolated try/catch above) has no `branches` to iterate — reported as
+      // its own single line instead, same discipline.
+      if (sweep?.failed) {
+        console.error(`memory/cli: ${await t("memory.ship.sweepFailed", { reason: sweep.reason ?? "" })}`);
+      } else {
+        for (const row of sweep?.branches ?? []) {
+          console.error(`memory/cli: ${await t(`memory.ship.sweep.${row.action}`, {
+            branch: row.branch, date: row.date, number: row.pr?.number ?? null, reason: row.reason ?? "",
+          })}`);
+        }
+      }
     }
     process.exit(0);
   } catch (err) {
@@ -588,6 +648,11 @@ if (op === "ship") {
  * block above's job, off the THROWN, fatal branches only). */
 function shipOutcomeKey(result) {
   if (result.dryRun) return "dryRun";
+  // R8 REVERSAL (#920 -> #936, D4): checked before `prNumberUnknown`/
+  // `nothing` — a closedUnmerged row's `pr.number` is set (the human-closed
+  // PR's own number), so without this check it would fall through and be
+  // misreported as "done".
+  if (result.closedUnmerged) return "closedUnmerged";
   if (result.pr && result.pr.number === null) return "prNumberUnknown";
   if (result.pushed === false && result.pr === null) return "nothing";
   if (result.autoMerge?.enabled === false) return "autoMergeRefused";

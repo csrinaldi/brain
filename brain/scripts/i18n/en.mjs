@@ -92,6 +92,26 @@ export default {
   'day.memory.laneSweep.detailUnparsed':  'unparseable ship output',
   'day.memory.laneSweep.detailExitCode':  'ship exited {status}',
 
+  // Cross-day lane sweep, per branch (#936, design.md's sweep table) — one
+  // line per `outcome.sweep.branches[]` row, rendered by
+  // `laneSweepBranchLines()`. `deleted`/`shipped`/`reconciled` are routine
+  // (`ok`); the rest need a human's attention (`warn`).
+  'day.memory.laneSweep.branch.deleted':        'Lane sweep: {branch} ({date}) was fully delivered — the local branch was deleted.',
+  'day.memory.laneSweep.branch.shipped':        'Lane sweep: {branch} ({date}) was re-shipped — pull request #{number}.',
+  'day.memory.laneSweep.branch.reconciled':     'Lane sweep: {branch} ({date}) was reconciled — pull request #{number}, nothing new to push.',
+  'day.memory.laneSweep.branch.closedUnmerged': '⚠ Lane sweep: {branch} ({date}) was not re-shipped — pull request #{number} was closed without merging; delete the local branch to stop this report.',
+  'day.memory.laneSweep.branch.unknown':        '⚠ Lane sweep: {branch} ({date}) has an unreadable state — kept, not guessed.',
+  'day.memory.laneSweep.branch.diverged':       '⚠ Lane sweep: {branch} ({date}) diverged from its remote — nothing was forced.',
+  'day.memory.laneSweep.branch.failed':         '⚠ Lane sweep: {branch} ({date}) failed to reconcile — {reason}',
+  'day.memory.laneSweep.branch.remoteOnly':     '⚠ Lane sweep: {branch} ({date}) exists only on the remote — reported, not mutated.',
+  // #936 remediation (cold review WARNING): the sweep as a WHOLE can fail
+  // closed (cli.mjs isolates a throw from sweepLanes()'s own pre-loop code —
+  // the shared fetch/listLocalBranches/listRemoteBranches/slugifyHost — into
+  // this fail-closed marker) — distinct from a per-branch row above, and
+  // from `day.memory.laneSweep.warn` (which is about the WHOLE `ship` child
+  // process failing to run at all).
+  'day.memory.laneSweep.sweepFailed': '⚠ Lane sweep failed — {reason}; nothing changed or reconciled this run.',
+
   // Done footer
   'day.done.withTicket':      'With a ticket:',
   'day.done.ticketStart':     'brain:ticket:start -- <iid>   (terminal)',
@@ -396,12 +416,31 @@ export default {
   'memory.ship.prLookupFailed':   '✗ ship failed — the pull request lookup could not run, so its existence is uncomputable; the push already landed and is durable. {message}',
   'memory.ship.prCreateFailed':   '✗ ship failed — the pull request could not be created. {message}',
   'memory.ship.prNumberUnknown':  'the pull request is open but its number could not be derived — auto-merge was skipped; the next run recovers it.',
+  // R8 REVERSAL (#920 -> #936, D4): a branch whose only pull request was
+  // closed unmerged is never re-pushed and never given a fresh PR — it is
+  // reported instead, on every run, until an operator deletes the local ref.
+  'memory.ship.closedUnmerged':   '⚠ {branch} was not shipped — pull request #{number} was closed without merging; it will keep being reported on every run until the local branch is deleted.',
   'memory.ship.failed':           '✗ ship failed — {message}',
   'memory.ship.raced':            '✗ ship failed — the lane ref moved during this run (raced); nothing was lost, its blobs are re-collected on the next run: {message}',
   'memory.ship.badHost':          '✗ ship failed — the host name produced an empty or invalid ref slug: {message}',
   'memory.ship.invokerMissing':   '✗ ship refused — pass --invoker hook, sweep, or manual; to run it by hand use `npm run brain:memory:ship`.',
   'memory.ship.invokerUnderTest': '✗ ship refused — NODE_TEST_CONTEXT is set; a test must use BRAIN_VCS_TEST_MODULE or --dry-run, never a bare --invoker.',
   'memory.ship.invokerInvalid':   '✗ ship refused — --invoker must be hook, sweep, or manual; got {value}.',
+
+  // Cross-day lane sweep, per branch, on stderr (#936, D-sweep step 5.8) —
+  // never gated by --json, same discipline as memory.ship.pushed/prExisting/
+  // armed/identityAmbient above. Same 8 actions as day.memory.laneSweep.branch.*.
+  'memory.ship.sweep.deleted':        'lane sweep: {branch} ({date}) was fully delivered — the local branch was deleted.',
+  'memory.ship.sweep.shipped':        'lane sweep: {branch} ({date}) was re-shipped — pull request #{number}.',
+  'memory.ship.sweep.reconciled':     'lane sweep: {branch} ({date}) was reconciled — pull request #{number}, nothing new to push.',
+  'memory.ship.sweep.closedUnmerged': 'lane sweep: {branch} ({date}) was not re-shipped — pull request #{number} was closed without merging.',
+  'memory.ship.sweep.unknown':        'lane sweep: {branch} ({date}) has an unreadable state — kept, not guessed.',
+  'memory.ship.sweep.diverged':       'lane sweep: {branch} ({date}) diverged from its remote — nothing was forced.',
+  'memory.ship.sweep.failed':         'lane sweep: {branch} ({date}) failed to reconcile — {reason}',
+  'memory.ship.sweep.remoteOnly':     'lane sweep: {branch} ({date}) exists only on the remote — reported, not mutated.',
+  // #936 remediation: mirrors day.memory.laneSweep.sweepFailed above — the
+  // sweep as a WHOLE failed closed, no `branches` rows exist to iterate.
+  'memory.ship.sweepFailed':          'sweep failed: {reason}, nothing changed or reconciled this run.',
 
   // ── memory/cli.mjs — which backend actually ran (issue #641) ─────────────────
   // Each of these is a case where the backend that ran is not the one a reader
