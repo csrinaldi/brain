@@ -164,33 +164,16 @@ function renderContent() {
   mounts.governanceNav.hidden = view !== 'governance';
   if (view !== 'governance') clear(mounts.governanceNav);
 
-  if (view === 'map') {
-    renderLanes();
-    renderDrawer();
-    return;
-  }
-  if (view === 'sdd') {
-    renderSdd();
-    mounts.drawer.hidden = true;
-    clear(mounts.drawer);
-    return;
-  }
-  if (view === 'reviews') {
-    renderReviews();
-    mounts.drawer.hidden = true;
-    clear(mounts.drawer);
-    return;
-  }
-  if (view === 'governance') {
-    renderGovernance();
-    mounts.drawer.hidden = true;
-    clear(mounts.drawer);
-    return;
-  }
-  clear(mounts.canvas);
-  mounts.canvas.appendChild(said(PLACEHOLDERS[view]));
-  mounts.drawer.hidden = true;
-  clear(mounts.drawer);
+  if (view === 'map') renderLanes();
+  else if (view === 'sdd') renderSdd();
+  else if (view === 'reviews') renderReviews();
+  else if (view === 'governance') renderGovernance();
+
+  // The panel is about a TICKET; a mode is about the project. So it is drawn
+  // once, for every mode — a queue row or a plan issue opens it without
+  // throwing the reader out of what they were reading (#1059 phase 10, found
+  // by the maintainer clicking a row and getting nothing).
+  renderDrawer();
 }
 
 /** R881-9: one band per degraded thing, each one BESIDE the data, never instead of it. */

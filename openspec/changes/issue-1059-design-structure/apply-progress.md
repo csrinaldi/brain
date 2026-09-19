@@ -49,3 +49,20 @@ Three regions of the design need data that does not exist, and each says so
 where the design draws it rather than guessing: the epic a served branch
 belongs to, the waiting duration on a queue row, and whether a PR merged. The
 first and third need tickets; the second is #880.
+
+## A defect this change introduced, found by the maintainer clicking
+
+Phase 6 made every verdict-queue row clickable and phase 10 made every issue in
+the slice plan clickable, both calling `selectNode`. But `renderContent` drew
+the panel only in the map view and force-hid it in the other three. So three of
+the five ways to select a ticket could never show one: the click registered,
+the state changed, and the page drew nothing.
+
+The fix states the rule the code had violated: a panel is about a TICKET and a
+mode is about the project, so the panel is drawn once, for every mode, and no
+mode may force it shut — closing it is the reader's own control. A queue row
+now opens its ticket without throwing the reader out of the queue.
+
+Covered by a new assertion in `views-owned.test.mjs` that counts the calls in
+`renderContent` and refuses any `mounts.drawer.hidden = true` inside it.
+Mutation: removing the single call turns exactly that test red.

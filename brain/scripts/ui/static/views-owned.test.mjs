@@ -342,3 +342,16 @@ test('#1059 region 08: the panel draws the slice plan under the stages, with its
   assert.match(m[0], /tab\.slices\.reason/, 'a change with no plan says why, never an empty heading');
   assert.match(m[0], /tab\.slices\.note/, 'the "PR state is not read" note must reach the reader');
 });
+
+// #1059 phase 10, found by the maintainer clicking: `renderDrawer` was called
+// only in the map view, and the other three force-hid it. Phases 6 and 10 made
+// queue rows and plan issues clickable, so selecting a ticket from either
+// could never show its panel. A panel is about a TICKET and a mode is about
+// the project, so the panel belongs in every mode.
+test('#1059: the node panel is drawn in every mode, never only on the map', () => {
+  const m = APP_JS.match(/function renderContent\(\) \{[\s\S]*?\n}\n/);
+  assert.ok(m, 'renderContent must exist in app.js');
+  const drawn = (m[0].match(/renderDrawer\(\)/g) ?? []).length;
+  assert.equal(drawn, 1, 'one call, made for every mode — not one per branch, which is how three of them came to lack it');
+  assert.ok(!/mounts\.drawer\.hidden = true/.test(m[0]), 'no mode may force the panel shut: closing it is the reader\'s own control');
+});
