@@ -8,7 +8,7 @@
   </head>
   <body>
     <!--
-      The shell, and only the shell: six mounts `app.js` renders into. No
+      The shell, and only the shell: seven mounts `app.js` renders into. No
       markup here describes data, because every value on this page comes from
       the read model at runtime (R881-9 — a hard-coded row would be a second
       source of truth, and an empty one would read as "there is nothing here").
@@ -23,10 +23,16 @@
       handler: `app.js` is loaded directly as an ES module and wires every
       listener itself (maintainer ruling, 2026-09-14 — no dependency, no CDN,
       no vendored library, no build step). `app-source-guard.test.mjs` asserts
-      all of that by scan, since no DOM test runner exists in this repo.
+      all of that by scan; `app-smoke.test.mjs` runs the page itself against
+      the harness in `ui/test-support/`, which is what D9 used to say was
+      impossible without a dependency.
     -->
     <header id="status" class="status-bar"></header>
     <nav id="modes" class="modes" aria-label="Modes"></nav>
+    <!-- The finder (#1059). It is its OWN mount rather than a control inside
+         `#status`, because the status bar re-renders on a five-second clock
+         and would wipe what the reader is typing mid-word. -->
+    <div id="search" class="search" role="search"></div>
     <div id="banners" class="banners" role="status" aria-live="polite"></div>
     <nav id="governance-nav" class="governance-nav" aria-label="Governance views" hidden></nav>
     <!-- #1059 region 08: the canvas and the drawer are a ROW, the way the

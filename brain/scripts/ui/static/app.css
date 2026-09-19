@@ -1034,3 +1034,108 @@ body {
 .plan-slice-n { font-family: var(--font-mono); font-size: 11px; color: var(--muted); min-width: 7ch; }
 .plan-claims { color: var(--ink); }
 .plan-terminal { font-family: var(--font-mono); font-size: 10.5px; color: var(--stamp); }
+
+/* ── the finder (#1059) ──────────────────────────────────────────────────── */
+/* A band of its own between the modes and the bands, because it is neither: a
+   mode is where you are, a band is what went wrong, and this is how you get
+   somewhere. Every colour comes from the token block — there is no literal
+   here, which `tokens.test.mjs` enforces. */
+.search {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+.search-field {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.search-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.search-input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 13px;
+}
+.search-input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-color: var(--accent);
+}
+.search-count {
+  margin: 0;
+  font-size: 11px;
+  color: var(--muted);
+}
+.search-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 8px;
+}
+.search-hit {
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--paper);
+  cursor: pointer;
+}
+.search-hit:hover,
+.search-hit:focus {
+  border-color: var(--accent);
+  background: var(--surface-active);
+}
+.search-hit-unreadable { border-style: dashed; }
+.search-hit-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.search-hit-number {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--ink);
+}
+/* An epic and a tracker are DECLARED, so they are marked — the accent is
+   emphasis here, never the only carrier: the word is printed too. */
+.search-hit-kind {
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--accent-quiet);
+  color: var(--accent);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.search-hit-tracker {
+  font-family: var(--font-mono);
+  color: var(--live);
+}
+.search-hit-track { font-family: var(--font-mono); }
+.search-hit-matched { margin-left: auto; }
+.search-hit-title {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--ink);
+  line-height: 1.35;
+}
+@media (max-width: 720px) {
+  .search { padding: 8px 14px; }
+  .search-hit-matched { margin-left: 0; }
+}

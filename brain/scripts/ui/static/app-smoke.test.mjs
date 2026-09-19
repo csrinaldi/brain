@@ -26,7 +26,10 @@ import { installDom, fire, find, findAll, byClass } from '../test-support/dom.mj
 import { loadApp, settle } from '../test-support/load-app.mjs';
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..');
-const MOUNT_IDS = ['status', 'modes', 'banners', 'governance-nav', 'canvas', 'drawer'];
+// The ids `index.html` carries. A mount the page reads and this list omits
+// comes back null and the page throws, which is the correct failure: the two
+// files are one contract.
+const MOUNT_IDS = ['status', 'modes', 'search', 'banners', 'governance-nav', 'canvas', 'drawer'];
 
 /** The declaration block exactly as it is written in an issue body. */
 function fence(lines) {
@@ -197,4 +200,86 @@ test('#1059 smoke: every mode renders without throwing, and the theme control ta
   fire(select, 'change');
   assert.equal(dom.documentElement.getAttribute('data-theme'), 'dark', 'an explicit choice stamps the document');
   assert.equal(dom.storage.get('brain:ui:theme'), 'dark', 'and it is remembered for the next visit');
+});
+
+test('#1059 smoke: the finder finds a ticket by number and by title, and opens it', async (t) => {
+  const dom = await boot();
+  t.after(() => dom.restore());
+
+  const input = find(dom.mounts.search, (n) => n.tagName === 'INPUT');
+  assert.ok(input, 'the finder has a field');
+
+  const hits = () => findAll(dom.mounts.search, byClass('search-hit'));
+  assert.equal(hits().length, 0, 'nothing is asked yet, so nothing is listed');
+  assert.match(dom.mounts.search.textContent, /type an issue number/, 'and the page says what to type instead of showing a blank area');
+
+  // By number.
+  input.value = '1059';
+  fire(input, 'input');
+  assert.equal(hits().length, 1, 'an exact issue number is one hit');
+  assert.match(hits()[0].textContent, /#1059/);
+
+  // By a word in the title, across issues.
+  input.value = 'lanes';
+  fire(input, 'input');
+  assert.ok(hits().length >= 1, 'a word from a title finds it');
+  assert.match(hits().map((h) => h.textContent).join(' '), /#1032/);
+
+  // The unreadable node is findable, and says why it is unreadable rather
+  // than being dropped from the list.
+  input.value = '953';
+  fire(input, 'input');
+  assert.equal(hits().length, 1);
+  assert.match(hits()[0].textContent, /could not be read/, 'an issue whose body the forge refused is still findable, with its reason');
+
+  // A query that matches nothing says so.
+  input.value = 'zzzzz-nothing-matches-this';
+  fire(input, 'input');
+  assert.equal(hits().length, 0);
+  assert.match(dom.mounts.search.textContent, /no epic, tracker, or ticket matches/);
+
+  // Clicking a hit opens that ticket's panel — the same panel a card opens.
+  input.value = '878';
+  fire(input, 'input');
+  fire(hits()[0], 'click');
+  await settle();
+  assert.equal(dom.mounts.drawer.hidden, false, 'the finder opens the panel');
+  assert.match(dom.mounts.drawer.textContent, /#878/);
+});
+
+test('#1059 smoke: the finder survives a re-render, and says epics are not data yet', async (t) => {
+  const dom = await boot();
+  t.after(() => dom.restore());
+
+  const input = find(dom.mounts.search, (n) => n.tagName === 'INPUT');
+  input.value = '10';
+  fire(input, 'input');
+  const before = findAll(dom.mounts.search, byClass('search-hit')).length;
+  assert.ok(before > 0, 'a number prefix matches');
+
+  // THE TRAP THIS GUARDS. The status bar re-renders on a five-second clock
+  // and `render()` runs on every stream frame. If the finder were rebuilt by
+  // either, the caret and the half-typed query would vanish under the
+  // reader's hands. The input must be the SAME element afterwards.
+  fire(modeButton(dom, 'reviews'), 'click');
+  await settle();
+  const after = find(dom.mounts.search, (n) => n.tagName === 'INPUT');
+  assert.equal(after, input, 'the field is the same element across a full render — never rebuilt');
+  assert.equal(after.value, '10', 'so the query survives');
+
+  // The maintainer's ask, literally: find the epic. #878 declares
+  // `kind: epic` and a tracker branch in its body, so the result must say
+  // both — from the declaration, never guessed from the word in the title.
+  input.value = '878';
+  fire(input, 'input');
+  const epic = findAll(dom.mounts.search, byClass('search-hit'))[0];
+  assert.ok(epic, 'the epic is findable by its number');
+  assert.match(epic.textContent, /epic/, 'and the row says it is an epic');
+  assert.match(epic.textContent, /tracker feature\/brain-ui/, 'and names the branch the epic declared');
+
+  // A ticket that declares neither is not decorated as one.
+  input.value = '1032';
+  fire(input, 'input');
+  const ticket = findAll(dom.mounts.search, byClass('search-hit'))[0];
+  assert.ok(!/tracker /.test(ticket.textContent), 'a ticket claims no tracker it never declared');
 });

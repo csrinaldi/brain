@@ -51,6 +51,7 @@ import { buildLaneModel, nodeSummaryFor, childrenOf } from './lib/lane-model.mjs
 import { issueUrl } from './lib/forge-url.mjs';
 import { buildDrawerModel } from './lib/drawer-model.mjs';
 import { buildSddModel, sddForIssue, buildSlicePlan, STAGE_VOCAB } from './lib/sdd-model.mjs';
+import { searchNodes } from './lib/search-model.mjs';
 import { buildReviewTimeline } from './lib/review-timeline.mjs';
 import { buildRoadmapModel } from './lib/roadmap-model.mjs';
 import { buildDecisionsModel } from './lib/decisions-model.mjs';
@@ -68,6 +69,7 @@ const mounts = {
   modes: document.getElementById('modes'),
   banners: document.getElementById('banners'),
   governanceNav: document.getElementById('governance-nav'),
+  search: document.getElementById('search'),
   canvas: document.getElementById('canvas'),
   drawer: document.getElementById('drawer'),
 };
@@ -79,6 +81,16 @@ let view = initialView();
 let governanceView = GOVERNANCE_VIEWS[0].id;
 /** The issue whose node is activated; `null` until one is. The drawer follows it — `map` mode only. */
 let selectedIssue = null;
+/**
+ * The finder's query, and the two nodes it owns (#1059). The INPUT is built
+ * once at boot and never re-created, because `render()` runs on every stream
+ * frame and `renderStatus` on a five-second clock: rebuilding the control
+ * would drop the caret and erase a half-typed query under the reader's hands.
+ * Only the result list is redrawn.
+ */
+let searchQuery = '';
+let searchInput = null;
+let searchResultsMount = null;
 /** The last `GET /api/change/<N>` body for the selected issue; `null` while it is still being read. */
 let changeView = null;
 let activeTab = 'spec';
@@ -129,6 +141,7 @@ function saidList(heading, lines) {
 function render() {
   renderStatus();
   renderModes();
+  renderSearchResults();
   renderBands();
   renderContent();
 }
@@ -172,6 +185,121 @@ function switchToMode(mode) {
 }
 
 /** The router (#998 R998-2/R998-4/R998-5, #882 R882-1): `map` draws the canvas + drawer, `sdd` draws the seven-stage matrix, `reviews` draws the timeline + verdict queue, `governance` draws its own sub-nav + sub-router. `#governance-nav` is shown only while `governance` is the active mode. */
+/**
+ * The finder (#1059, the maintainer's ask: "un buscador para poder encontrar
+ * las epicas, trackers y tickets"). Built ONCE, at boot.
+ *
+ * The control cannot be rebuilt on render. `render()` runs on every stream
+ * frame and `renderStatus` on a five-second clock, and re-creating an input
+ * element drops the caret and the value with it — the reader would lose the
+ * word they were half way through typing, on someone else's push. So the
+ * shell is mounted once and only `renderSearchResults` ever redraws, which is
+ * also why the query lives in module state rather than in the DOM.
+ */
+function mountSearch() {
+  clear(mounts.search);
+
+  const field = el('label', 'search-field');
+  field.appendChild(el('span', 'search-label', 'Find'));
+
+  const input = document.createElement('input');
+  input.type = 'search';
+  input.className = 'search-input';
+  input.setAttribute('placeholder', 'issue number, title, track or label');
+  input.setAttribute('autocomplete', 'off');
+  input.addEventListener('input', () => {
+    searchQuery = input.value;
+    renderSearchResults();
+  });
+  input.addEventListener('keydown', (event) => {
+    // The page owns J/K/Tab/Esc as chords over the board. They must not fire
+    // while someone is typing a title into this box, and the input is where
+    // that is decided — `onKeyDown` listens on the document, so without this
+    // every letter would also be a shortcut.
+    if (typeof event.stopPropagation === 'function') event.stopPropagation();
+    if (event.key === 'Escape') {
+      input.value = '';
+      searchQuery = '';
+      renderSearchResults();
+      return;
+    }
+    if (event.key === 'Enter') {
+      const first = searchNodes(sectionOf(state, 'graph'), searchQuery);
+      if (first.ok && first.value.results.length > 0) selectNode(first.value.results[0].number);
+    }
+  });
+  field.appendChild(input);
+  searchInput = input;
+
+  mounts.search.appendChild(field);
+  searchResultsMount = el('div', 'search-results');
+  mounts.search.appendChild(searchResultsMount);
+  renderSearchResults();
+}
+
+/**
+ * The result list, and only it. Every row states what it matched on, so a hit
+ * a reader did not expect explains itself instead of looking like noise; a
+ * node whose body could not be read is still listed, with its reason, because
+ * an unreadable issue is exactly the one a reader is most likely hunting.
+ */
+function renderSearchResults() {
+  if (searchResultsMount === null) return;
+  clear(searchResultsMount);
+
+  const found = searchNodes(sectionOf(state, 'graph'), searchQuery);
+  if (!found.ok) {
+    searchResultsMount.appendChild(said(found.reason));
+    return;
+  }
+
+  const { results, shown, total, note, epicTrackerFacet } = found.value;
+
+  // Asked for epics and trackers by name, the page must not answer with an
+  // empty list as though none existed: `kind` and `tracker` are declared
+  // fields that no issue body carries yet, and the model says so.
+  if (!epicTrackerFacet.ok && searchQuery.trim() !== '') {
+    searchResultsMount.appendChild(said(epicTrackerFacet.reason));
+  }
+
+  if (note && results.length === 0) {
+    searchResultsMount.appendChild(said(note));
+    return;
+  }
+
+  const count = el('p', 'search-count', shown === total
+    ? `${total} match${total === 1 ? '' : 'es'}`
+    : `${shown} of ${total} matches — narrow the query to see the rest`);
+  searchResultsMount.appendChild(count);
+
+  const list = el('div', 'search-list');
+  for (const row of results) {
+    const hit = el('div', `search-hit${row.ok ? '' : ' search-hit-unreadable'}`);
+    hit.setAttribute('role', 'button');
+    hit.setAttribute('tabindex', '0');
+    hit.setAttribute('data-issue', String(row.number));
+
+    const head = el('div', 'search-hit-head');
+    head.appendChild(el('span', 'search-hit-number', `#${row.number}`));
+    // The maintainer asked to find EPICS, TRACKERS and tickets, so a result
+    // that is one says which — from the node's own declaration, never from
+    // its title text. A ticket declares nothing here and stays a ticket.
+    if (row.kind) head.appendChild(el('span', `search-hit-kind kind-${row.kind}`, row.kind));
+    if (row.tracker) head.appendChild(el('span', 'search-hit-tracker', `tracker ${row.tracker}`));
+    if (row.track) head.appendChild(el('span', 'search-hit-track', row.track));
+    head.appendChild(el('span', 'search-hit-matched', `matched ${row.matchedBy.join(', ')}`));
+    hit.appendChild(head);
+
+    hit.appendChild(el('p', 'search-hit-title', row.title || '(no title)'));
+    if (!row.ok) hit.appendChild(said(row.reason));
+
+    hit.addEventListener('click', () => selectNode(row.number));
+    hit.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') selectNode(row.number); });
+    list.appendChild(hit);
+  }
+  searchResultsMount.appendChild(list);
+}
+
 function renderContent() {
   mounts.governanceNav.hidden = view !== 'governance';
   if (view !== 'governance') clear(mounts.governanceNav);
@@ -1451,6 +1579,7 @@ function subscribe() {
 }
 
 applyTheme(readTheme());
+mountSearch();
 render();
 readSnapshot().then(subscribe);
 // "polled 5 s ago" is a claim that goes stale by itself, so the indicator

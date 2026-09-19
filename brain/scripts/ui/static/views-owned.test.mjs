@@ -142,9 +142,12 @@ test('#881 R881-10 S1: nothing on the page reads a worktree path — the committ
   assert.ok(!/file:\/\//.test(APP_JS), 'the page reads nothing from the filesystem directly');
 });
 
-test('#998 R998-2/#882 R882-1: the shell mounts exactly six regions — status, modes, banners, governance-nav, canvas, drawer', () => {
+test('#998 R998-2/#882 R882-1: the shell mounts exactly seven regions — status, modes, search, banners, governance-nav, canvas, drawer', () => {
   const ids = [...INDEX_HTML.matchAll(/id="([^"]+)"/g)].map((m) => m[1]).sort();
-  assert.deepEqual(ids, ['banners', 'canvas', 'drawer', 'governance-nav', 'modes', 'status']);
+  // `search` joined in #1059: the finder is its own mount rather than a
+  // control inside the status bar, which re-renders on a five-second clock
+  // and would erase a half-typed query.
+  assert.deepEqual(ids, ['banners', 'canvas', 'drawer', 'governance-nav', 'modes', 'search', 'status']);
 });
 
 test('#998 R998-5: a finding\'s own source goes through the same sourceStamp helper the door uses, never a second copy of that logic', () => {
@@ -331,7 +334,15 @@ test('#1059 phase 8: the bar offers the three theme choices, and the stored one 
   const m = APP_JS.match(/function renderStatus\(\) \{[\s\S]*?\n}\n/);
   assert.match(m[0], /createElement\('select'\)/, 'the control is a select, as the maintainer asked');
   assert.match(m[0], /readTheme\(\)/, 'it opens on the choice the viewer already made');
-  assert.match(APP_JS, /applyTheme\(readTheme\(\)\);\s*\nrender\(\);/, 'the stamp lands before the first render, so the page never flashes the other theme');
+  // The rule is ORDER, not adjacency: the stamp must land before anything
+  // paints. Asserting the two calls were neighbours broke the moment the
+  // finder was mounted between them (#1059), which was a true statement of
+  // the wrong thing.
+  const boot = APP_JS.slice(APP_JS.indexOf('applyTheme(readTheme());'));
+  const firstPaint = boot.indexOf('\nrender();');
+  assert.ok(firstPaint > 0, 'the page paints at boot');
+  assert.ok(!/(^|[^a-zA-Z])render\(\)/.test(boot.slice('applyTheme(readTheme());'.length, firstPaint)),
+    'the stamp lands before the first render, so the page never flashes the other theme');
   assert.match(APP_JS, /catch \{\s*\n\s*return 'system';/, 'storage that cannot be read falls back to the viewer\'s own setting rather than throwing');
 });
 
