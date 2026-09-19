@@ -1139,3 +1139,96 @@ body {
   .search { padding: 8px 14px; }
   .search-hit-matched { margin-left: 0; }
 }
+
+/* ── Memory: the .memory/records ledger (#1059) ──────────────────────────── */
+/* A summary band of counts, then the integrity signal, then the rows. Tokens
+   only — no colour literal lives outside the token block. */
+.memory-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 12px;
+}
+.memory-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 3px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  font-size: 11px;
+}
+.memory-chip-word {
+  color: var(--muted);
+  letter-spacing: 0.03em;
+}
+.memory-chip-count {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+/* Who wrote a record is a different axis from what it says, so the two chip
+   families are told apart by a fill rather than by their position alone. */
+.memory-chip-actor {
+  background: var(--accent-quiet);
+  border-color: var(--accent-quiet);
+}
+.memory-chip-actor .memory-chip-word { color: var(--accent); }
+
+.memory-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.memory-table th {
+  text-align: left;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.memory-table td {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+.memory-when {
+  white-space: nowrap;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.memory-type {
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+/* An actor here is almost always a BRANCH, not a person, and a branch name is
+   long. It wraps rather than pushing the table sideways. */
+.memory-actor {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.memory-actor-name {
+  font-family: var(--font-mono);
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.memory-actor-kind {
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.memory-id {
+  font-family: var(--font-mono);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.memory-source { color: var(--muted); }

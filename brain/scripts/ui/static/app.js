@@ -52,6 +52,7 @@ import { issueUrl } from './lib/forge-url.mjs';
 import { buildDrawerModel } from './lib/drawer-model.mjs';
 import { buildSddModel, sddForIssue, buildSlicePlan, STAGE_VOCAB } from './lib/sdd-model.mjs';
 import { searchNodes } from './lib/search-model.mjs';
+import { buildMemoryModel } from './lib/memory-model.mjs';
 import { buildReviewTimeline } from './lib/review-timeline.mjs';
 import { buildRoadmapModel } from './lib/roadmap-model.mjs';
 import { buildDecisionsModel } from './lib/decisions-model.mjs';
@@ -114,6 +115,16 @@ function el(tag, className, text) {
   return node;
 }
 
+/**
+ * THE page's only clock read (#998 R998-6 T4/T6, kept in #1059). Two reads can
+ * disagree with each other, so every part of the page that needs "now" takes
+ * it from here and passes it into a pure model — no `lib/*.mjs` touches a
+ * clock, and no renderer invents an age of its own.
+ */
+function nowMs() {
+  return Date.now();
+}
+
 function clear(node) {
   while (node.firstChild) node.removeChild(node.firstChild);
 }
@@ -150,19 +161,20 @@ function render() {
 function renderModes() {
   clear(mounts.modes);
   // Region 02 of the design: the modes as pills carrying their glyph, then the
-  // queue's own count on the verdicts mode, then the keyboard chips. The glyph
-  // and the label both come from `view-model.mjs`'s table — the buttons are
-  // that table, never a second copy of it (#1059 phase 2).
+  // keyboard chips. The glyph and the label both come from `view-model.mjs`'s
+  // table — the buttons are that table, never a second copy of it (#1059
+  // phase 2, retabled to three modes in #1059's last slice).
   const group = el('div', 'mode-group');
-  const queue = buildReviewTimeline(sectionOf(state, 'reviews'), sectionOf(state, 'prs'));
   for (const mode of MODES) {
     const button = el('button', null);
     button.type = 'button';
     button.appendChild(el('span', 'mode-glyph', mode.glyph));
     button.appendChild(el('span', 'mode-label', mode.label));
-    if (mode.id === 'reviews' && queue.ok) {
-      button.appendChild(el('span', 'mode-count', `(${queue.value.queue.length})`));
-    }
+    // The count that used to ride the Reviews mode does NOT move here. `(3)`
+    // beside "Reviews" reads as three reviews; beside "Governance" it reads as
+    // three governance things, which is not what it counts. It moved to the
+    // Verdict queue sub-nav button, where the word beside it says what it is
+    // (#1059).
     if (mode.id === view) button.setAttribute('aria-current', 'page');
     button.addEventListener('click', () => switchToMode(mode.id));
     group.appendChild(button);
@@ -302,14 +314,106 @@ function renderSearchResults() {
   searchResultsMount.appendChild(list);
 }
 
+/**
+ * Memory (#1059, the maintainer's ask): the `.memory/records` ledger, at the
+ * top level rather than buried inside two governance sub-views that each read
+ * a slice of it. The summary leads: how many records there are and how they
+ * split by type and by who wrote them, then the integrity signal, then the
+ * most recent rows.
+ *
+ * `now` is read HERE and passed in, because `lib/memory-model.mjs` is pure and
+ * forbidden from touching a clock — an age it invented would be a fact with no
+ * source, which is the one thing this page never shows.
+ */
+function renderMemory() {
+  clear(mounts.canvas);
+
+  const model = buildMemoryModel(sectionOf(state, 'records'), { now: nowMs() });
+  if (!model.ok) {
+    mounts.canvas.appendChild(said(`the memory ledger could not be read: ${model.reason}`));
+    return;
+  }
+  const { totalRecords, recent, countsByType, countsByActorKind, duplicates, note } = model.value;
+
+  mounts.canvas.appendChild(el('p', 'canvas-summary', `${totalRecords} memory record(s) · .memory/records/`));
+  if (note) {
+    // An empty ledger is a different fact from an unreadable one, and the
+    // model keeps them apart; so does the page.
+    mounts.canvas.appendChild(said(note));
+    return;
+  }
+
+  const chips = el('div', 'memory-counts');
+  for (const { type, count } of countsByType) {
+    const chip = el('span', 'memory-chip');
+    chip.appendChild(el('span', 'memory-chip-word', type));
+    chip.appendChild(el('span', 'memory-chip-count', String(count)));
+    chips.appendChild(chip);
+  }
+  for (const { actorKind, count } of countsByActorKind) {
+    const chip = el('span', 'memory-chip memory-chip-actor');
+    chip.appendChild(el('span', 'memory-chip-word', actorKind));
+    chip.appendChild(el('span', 'memory-chip-count', String(count)));
+    chips.appendChild(chip);
+  }
+  mounts.canvas.appendChild(chips);
+
+  // The integrity signal is never a number on its own: the same record id
+  // disagreeing with itself is a problem someone has to go and look at, so
+  // the ids and the lines they sit on are named.
+  if (!duplicates.ok) {
+    mounts.canvas.appendChild(said(duplicates.reason));
+  } else if (duplicates.integrityNote) {
+    const divergent = duplicates.groups.filter((g) => g.divergent);
+    if (divergent.length > 0) {
+      mounts.canvas.appendChild(saidList(duplicates.integrityNote,
+        divergent.map((g) => `${g.id}: ${g.occurrences.join(', ')}`)));
+    } else {
+      mounts.canvas.appendChild(said(duplicates.integrityNote));
+    }
+  }
+
+  mounts.canvas.appendChild(el('p', 'canvas-summary', recent.shown === recent.total
+    ? `every record, most recent first`
+    : `the ${recent.shown} most recent of ${recent.total}`));
+
+  const scroller = el('div', 'table-scroller');
+  const table = el('table', 'memory-table');
+  const thead = el('thead', null);
+  const head = el('tr', null);
+  for (const column of ['when', 'type', 'actor', 'record', 'source']) head.appendChild(el('th', null, column));
+  thead.appendChild(head);
+  table.appendChild(thead);
+
+  const body = el('tbody', null);
+  for (const record of recent.records) {
+    const tr = el('tr', null);
+    // A record whose own timestamp could not be parsed says so where its age
+    // would have gone — never a blank cell, and never a guessed age.
+    tr.appendChild(el('td', 'memory-when', record.relativeTime ?? (record.tsUnparseable ? `unparseable: ${record.ts}` : record.ts)));
+    tr.appendChild(el('td', 'memory-type', record.type));
+    const actor = el('td', 'memory-actor');
+    actor.appendChild(el('span', 'memory-actor-name', record.actor));
+    actor.appendChild(el('span', 'memory-actor-kind', record.actorKind ?? 'unknown'));
+    tr.appendChild(actor);
+    tr.appendChild(el('td', 'memory-id', record.id));
+    const source = el('td', 'memory-source');
+    source.appendChild(renderSourceStamp(record.sourceStamp));
+    tr.appendChild(source);
+    body.appendChild(tr);
+  }
+  table.appendChild(body);
+  scroller.appendChild(table);
+  mounts.canvas.appendChild(scroller);
+}
+
 function renderContent() {
   mounts.governanceNav.hidden = view !== 'governance';
   if (view !== 'governance') clear(mounts.governanceNav);
 
   if (view === 'map') renderLanes();
-  else if (view === 'sdd') renderSdd();
-  else if (view === 'reviews') renderReviews();
   else if (view === 'governance') renderGovernance();
+  else if (view === 'memory') renderMemory();
 
   // The panel is about a TICKET; a mode is about the project. So it is drawn
   // once, for every mode — a queue row or a plan issue opens it without
@@ -353,7 +457,7 @@ function renderServedBranch(servedBranch) {
 }
 
 function renderStatus() {
-  const indicator = pollIndicator({ poller: state.meta?.poller ?? null, nowMs: Date.now() });
+  const indicator = pollIndicator({ poller: state.meta?.poller ?? null, nowMs: nowMs() });
   // Region 01 of the maintainer's design: the wordmark and the branch, then
   // what is live, then the counts, then the controls. `header-model.mjs` owns
   // every value; this function places them (#1059 phase 1).
@@ -685,10 +789,12 @@ function renderPager(holding) {
  * renders one loop over rows this page never re-derives.
  */
 function renderSdd() {
-  // The design's fourth mode is the PROJECT's chained-PR plan, not a matrix of
-  // every change's seven stages: per-change detail belongs in the panel a
-  // reader opens by clicking a ticket, which is where it now lives (#1059
-  // phase 10, the maintainer's own reading of the design).
+  // The PROJECT's chained-PR plan, not a matrix of every change's seven
+  // stages: per-change detail belongs in the panel a reader opens by clicking
+  // a ticket, which is where it lives (#1059 phase 10). This was the design's
+  // fourth MODE until the last slice, when it moved under Governance — a plan
+  // across every change is a fact about the repository, and that is where
+  // facts about the repository live.
   const model = buildSlicePlan(sectionOf(state, 'changes'));
   clear(mounts.canvas);
   if (!model.ok) {
@@ -907,9 +1013,13 @@ function renderReviewRound(round) {
  */
 function renderGovernanceNav() {
   clear(mounts.governanceNav);
+  const queue = buildReviewTimeline(sectionOf(state, 'reviews'), sectionOf(state, 'prs'));
   for (const sub of GOVERNANCE_VIEWS) {
     const button = el('button', null, sub.label);
     button.type = 'button';
+    // How many verdicts are waiting, beside the words "Verdict queue" — the
+    // one place the number cannot be read as counting something else.
+    if (sub.id === 'queue' && queue.ok) button.appendChild(el('span', 'mode-count', ` (${queue.value.queue.length})`));
     if (sub.id === governanceView) button.setAttribute('aria-current', 'page');
     button.addEventListener('click', () => switchGovernanceView(sub.id));
     mounts.governanceNav.appendChild(button);
@@ -943,6 +1053,17 @@ function renderGovernance() {
   }
   if (governanceView === 'actors') {
     renderActors();
+    return;
+  }
+  // Both arrived from the top level in #1059. They render exactly as they did
+  // as modes — a project-wide fact did not change shape by moving to where
+  // the project-wide facts live.
+  if (governanceView === 'queue') {
+    renderReviews();
+    return;
+  }
+  if (governanceView === 'slices') {
+    renderSdd();
     return;
   }
   mounts.canvas.appendChild(said(GOVERNANCE_PLACEHOLDERS[governanceView]));
@@ -1228,7 +1349,7 @@ function renderHistoryReviewsLink() {
   wrap.appendChild(said('review verdicts have no round timestamp yet — see the Reviews mode for those'));
   const button = el('button', null, 'Go to Reviews');
   button.type = 'button';
-  button.addEventListener('click', () => switchToMode('reviews'));
+  button.addEventListener('click', () => { switchToMode('governance'); switchGovernanceView('queue'); });
   wrap.appendChild(button);
   return wrap;
 }

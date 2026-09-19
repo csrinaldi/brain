@@ -208,3 +208,61 @@ A sweep found two more specs in the same shape, both archived: `archive/1029`
 and `archive/1020`. They are not edited here — with the reader fixed they now
 say what is wrong with them instead of reporting themselves as empty, which is
 the outcome the anti-pattern asks for.
+
+## Three modes, not four — and Memory (R1059-12)
+
+The maintainer's rule, in their own words: Implementation Slices and Reviews
+belong in the side panel with the ticket's information; Governance is global
+access; Memory should exist at the global level.
+
+So the mode table is `map`, `governance`, `memory`.
+
+Nothing was deleted to get there. A project-wide verdict queue and a
+project-wide slice plan are facts about the REPOSITORY, not about the ticket
+in front of the reader, and the same rule that sends per-ticket detail to the
+panel sends repository-wide facts to Governance. Both moved there as
+sub-views, which took Governance from five to seven. The per-ticket halves
+were already in the panel from phase 10, so nothing is shown twice.
+
+The waiting count came off the mode nav. `(3)` beside "Reviews" read as three
+reviews; beside "Governance" the same number reads as three governance things,
+which is not what it counts. It sits on the Verdict queue sub-nav button now,
+where the word beside it says what it is.
+
+`lib/memory-model.mjs` reads the `.memory/records` ledger: 2,421 records in the
+live snapshot, counted by type and by who wrote them over the FULL set rather
+than the capped list, with the recent rows newest-first. Two decisions worth
+recording:
+
+- **No by-actor grouping.** An `actor` here is almost always a BRANCH, not a
+  person, and `actors-model.mjs` already owns the by-actor view with its own
+  reconciliation caveats. A second grouping would be a second answer.
+- **Duplicates are an integrity signal, never a number.** Two record ids in
+  this repository appear twice with DIVERGENT content — the same record
+  disagreeing with itself. The page names the ids and the lines they sit on.
+
+`Date.now()` is still read in exactly one place. Memory needs "now" to state a
+record's age, and a second clock beside the poll indicator's could disagree
+with it, so both take it from one `nowMs()` wrapper — and the guard now pins
+the wrapper as well as the count.
+
+## The harness disagreed with the browser, and every suite still passed
+
+Driving the live page by hand — the work the harness exists to remove — showed
+the Governance sub-nav rendering a button as " (1)" with its label gone.
+
+`el('button', null, 'Verdict queue')` assigns `textContent`, then the count
+span is appended. In a browser the assignment leaves a TEXT NODE, so the
+button reads "Verdict queue (1)". The shim kept the assigned string in a field
+beside the children and returned it only when there were none, so appending
+anything erased the label. Every suite passed throughout, because the shim
+agreed with itself.
+
+`textContent` now leaves a real text node, and `test-support/dom.test.mjs`
+pins that and eight other behaviours: assignment replaces, nesting
+concatenates depth-first, a fragment is spent when appended, `classList`
+writes through `className`, `fire` throws at a node with no listener rather
+than asserting nothing, and `installDom` restores every global it replaced.
+
+A harness is a claim about the browser. An untested one is a claim with no
+evidence, and it will be believed anyway.

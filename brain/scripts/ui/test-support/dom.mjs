@@ -26,6 +26,36 @@
 /** Every listener a node was given, so a test can activate one the way a user would. */
 const LISTENERS = Symbol('listeners');
 
+/**
+ * A text node built WITHOUT going through the `textContent` setter, which
+ * would call this function again and recurse forever. It is the leaf every
+ * string on the page becomes, exactly as `document.createTextNode` is in a
+ * browser.
+ */
+function rawTextNode(text) {
+  return {
+    tagName: '#text',
+    className: '',
+    childNodes: [],
+    parentNode: null,
+    attributes: Object.create(null),
+    [LISTENERS]: Object.create(null),
+    _ownText: text,
+    get textContent() { return this._ownText; },
+    set textContent(value) { this._ownText = value === null || value === undefined ? '' : String(value); },
+    get firstChild() { return null; },
+    appendChild(child) { return child; },
+    removeChild(child) { return child; },
+    setAttribute() {},
+    getAttribute() { return null; },
+    removeAttribute() {},
+    hasAttribute() { return false; },
+    addEventListener() {},
+    removeEventListener() {},
+    classList: { add() {}, remove() {}, contains() { return false; }, toggle() { return false; } },
+  };
+}
+
 function makeClassList(node) {
   const parts = () => (node.className ? String(node.className).split(/\s+/).filter(Boolean) : []);
   const write = (list) => { node.className = list.join(' '); };
@@ -56,12 +86,24 @@ export function createElement(tag) {
     get firstChild() { return this.childNodes[0] ?? null; },
     get children() { return this.childNodes; },
 
-    // `textContent` is the one property with real semantics here: assigning it
-    // REPLACES the children, and reading it concatenates them. The page builds
-    // every string through `el(tag, class, text)`, so a naive version that only
-    // stored the last assignment would make every assertion about rendered text
-    // silently wrong — worse than not having the harness at all.
-    set textContent(value) { this._ownText = value === null || value === undefined ? '' : String(value); this.childNodes = []; },
+    // `textContent` is the one property with real semantics here, and getting
+    // it wrong is worse than not having the harness at all.
+    //
+    // In a browser, assigning it REPLACES the children with a single text
+    // node — so a later `appendChild` leaves BOTH, and reading it back returns
+    // both concatenated. This shim first kept the string in a field beside the
+    // children and returned it only when there were none, which meant the
+    // `el(tag, class, text)` + `appendChild` pattern the page uses everywhere
+    // silently LOST the text: a Governance button built as
+    // `el('button', null, 'Verdict queue')` plus a count span read back as
+    // " (1)", with its own label gone. Found by driving the live page, not by
+    // a test — the harness agreed with itself and disagreed with the browser.
+    set textContent(value) {
+      const text = value === null || value === undefined ? '' : String(value);
+      this.childNodes = [];
+      this._ownText = '';
+      if (text !== '') this.appendChild(rawTextNode(text));
+    },
     get textContent() {
       if (this.childNodes.length === 0) return this._ownText;
       return this.childNodes.map((child) => child.textContent).join('');
@@ -155,7 +197,7 @@ export function installDom({ mountIds, snapshot = null, changes = {}, storage = 
     getElementById: (id) => mounts[id] ?? null,
     createElement,
     createDocumentFragment: () => createElement('#fragment'),
-    createTextNode: (text) => { const n = createElement('#text'); n.textContent = text; return n; },
+    createTextNode: (text) => rawTextNode(String(text)),
     addEventListener() {},
     removeEventListener() {},
   };

@@ -22,6 +22,7 @@ import { fileURLToPath } from 'node:url';
 import { buildSnapshot } from '../../status/snapshot.mjs';
 import { testTmp } from '../../lib/test-tmp.mjs';
 import { MODES } from '../lib/view-model.mjs';
+import { GOVERNANCE_VIEWS } from '../lib/governance-model.mjs';
 import { installDom, fire, find, findAll, byClass } from '../test-support/dom.mjs';
 import { loadApp, settle } from '../test-support/load-app.mjs';
 
@@ -86,6 +87,16 @@ function fixtureRepo() {
   writeFileSync(join(change, 'spec.md'), '# Spec\n');
   writeFileSync(join(change, 'design.md'), '# Design\n');
   writeFileSync(join(change, 'tasks.md'), '# Tasks\n\n- [x] one\n- [ ] two\n');
+
+  // The memory ledger, in the shape `.memory/records` really holds: one JSON
+  // object per line. `snapshot.mjs`'s own reader turns these into the records
+  // section, so nothing here describes what a record looks like to the page.
+  const records = join(root, '.memory', 'records');
+  mkdirSync(records, { recursive: true });
+  writeFileSync(join(records, '2026-09-rec-aaaa.jsonl'),
+    `${JSON.stringify({ id: 'rec-aaaa', ts: '2026-09-18T22:10:52Z', actor: 'feat/issue-1059-design', actorKind: 'agent', type: 'architecture', project: 'brain', content: 'a decision' })}\n`);
+  writeFileSync(join(records, '2026-09-rec-bbbb.jsonl'),
+    `${JSON.stringify({ id: 'rec-bbbb', ts: '2026-09-17T09:00:00Z', actor: '@legacy', actorKind: 'human', type: 'bugfix', project: 'brain', content: 'a fix' })}\n`);
   return root;
 }
 
@@ -186,7 +197,7 @@ test('#1059 smoke: clicking a ticket opens its panel, from every mode', async (t
 
   // The defect the maintainer hit: a mode is about the PROJECT, a panel is
   // about a TICKET, so switching mode may not shut the panel.
-  for (const mode of ['sdd', 'reviews', 'governance', 'map']) {
+  for (const mode of ['governance', 'memory', 'map']) {
     fire(modeButton(dom, mode), 'click');
     await settle();
     assert.equal(dom.mounts.drawer.hidden, false, `the panel survives the ${mode} mode — closing it is the reader's own control`);
@@ -197,7 +208,7 @@ test('#1059 smoke: every mode renders without throwing, and the theme control ta
   const dom = await boot();
   t.after(() => dom.restore());
 
-  for (const mode of ['sdd', 'reviews', 'governance', 'map']) {
+  for (const mode of ['governance', 'memory', 'map']) {
     fire(modeButton(dom, mode), 'click');
     await settle();
     assert.ok(dom.mounts.canvas.childNodes.length > 0, `the ${mode} mode drew something — an empty area is the one thing this page never shows`);
@@ -270,7 +281,7 @@ test('#1059 smoke: the finder survives a re-render, and says epics are not data 
   // and `render()` runs on every stream frame. If the finder were rebuilt by
   // either, the caret and the half-typed query would vanish under the
   // reader's hands. The input must be the SAME element afterwards.
-  fire(modeButton(dom, 'reviews'), 'click');
+  fire(modeButton(dom, 'governance'), 'click');
   await settle();
   const after = find(dom.mounts.search, (n) => n.tagName === 'INPUT');
   assert.equal(after, input, 'the field is the same element across a full render — never rebuilt');
@@ -314,4 +325,51 @@ test('#1059 smoke: asked for an epic in a graph that declares none, the finder s
   fire(input, 'input');
   assert.ok(!/no issue body has declared one yet/.test(dom.mounts.search.textContent),
     'a query that never mentioned epics or trackers gets no lecture about them');
+});
+
+test('#1059: every governance sub-view draws, including the two that came down from the top level', async (t) => {
+  const dom = await boot();
+  t.after(() => dom.restore());
+
+  fire(modeButton(dom, 'governance'), 'click');
+  await settle();
+
+  const buttons = findAll(dom.mounts['governance-nav'], (n) => n.tagName === 'BUTTON');
+  assert.equal(buttons.length, GOVERNANCE_VIEWS.length, 'the sub-nav IS the table, never a second copy of it');
+
+  for (const sub of GOVERNANCE_VIEWS) {
+    const button = buttons.find((b) => b.textContent.includes(sub.label));
+    assert.ok(button, `the ${sub.id} sub-view has a control reading "${sub.label}"`);
+    fire(button, 'click');
+    await settle();
+    assert.ok(dom.mounts.canvas.childNodes.length > 0,
+      `the ${sub.id} sub-view drew something — an empty pane is the one thing this page never shows`);
+  }
+});
+
+test('#1059: the Memory mode leads with the ledger summary and lists the records', async (t) => {
+  const dom = await boot();
+  t.after(() => dom.restore());
+
+  fire(modeButton(dom, 'memory'), 'click');
+  await settle();
+
+  const drawn = dom.mounts.canvas.textContent;
+  assert.match(drawn, /2 memory record\(s\)/, 'the count leads, before any row');
+  assert.match(drawn, /\.memory\/records\//, 'and names where they live');
+
+  // The summary is over every record, not over the capped list beneath it.
+  assert.match(drawn, /architecture/);
+  assert.match(drawn, /bugfix/);
+  assert.match(drawn, /agent/);
+  assert.match(drawn, /human/);
+
+  // An actor here is a BRANCH, not a person, and the page must not dress it
+  // up as one.
+  assert.match(drawn, /feat\/issue-1059-design/);
+
+  const rows = findAll(dom.mounts.canvas, (n) => n.tagName === 'TR');
+  assert.equal(rows.length, 3, 'a header row and one row per record');
+  const first = rows[1].textContent;
+  assert.match(first, /rec-aaaa/, 'most recent first');
 });
