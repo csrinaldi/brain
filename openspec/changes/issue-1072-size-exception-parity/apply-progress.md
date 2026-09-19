@@ -19,8 +19,13 @@ carries no exception when nothing was read.
 The reviewer takes the labels from the CALLER. `review/cli.mjs` already boots
 with a `prView` and reads `boot.prView.labels` twice before the gather; taking
 them as an input costs the forge nothing and keeps the labels consistent with
-the `prBody` gathered beside them. The port fetch remains as the fallback for
-a caller that has none.
+the `prBody` gathered beside them. `evaluators/checkpoint.mjs` already took
+`labels` as a parameter of its own and now forwards them too, so both
+production callers read the PR once and share that reading.
+
+A port fetch was written here as a fallback for a caller that has none, and
+REVERTED — see "The fallback fetch was a defect" below. The gather does not
+reach the forge for labels at all.
 
 **Waiving is not forgetting.** The gate returns pass WITH a reason, so the
 reviewer states the waiver as an `editorial` finding carrying the count, the

@@ -34,17 +34,37 @@ string.
 - **WHEN** the count exceeds the budget and no waiver was asked for
 - **THEN** the blocker is exactly what it was, and mentions no waiver.
 
-### R1072-3: the labels come from the caller's own read of the PR
-`gatherTrancheInputs` MUST accept `labels` as an input and MUST only fetch
-them through the port when the caller supplied none.
+### R1072-3: the labels are an INPUT, and the gather never fetches them
+`gatherTrancheInputs` MUST take `labels` from its caller and MUST NOT reach
+the forge for them. Any value that is not an array is "not read", which waives
+nothing.
 
-#### Scenario: the caller already read the PR
-- **WHEN** `review/cli.mjs` passes `boot.prView.labels`
-- **THEN** no second `prView` call is made, so the labels cannot disagree with the `prBody` gathered beside them.
+A first draft of this requirement said the gather MUST fall back to a `prView`
+fetch when a caller supplied none. That was implemented and REVERTED, and the
+requirement is rewritten rather than left standing beside code that contradicts
+it: the fallback made this function reach the network, so every existing test
+that omits labels called out to a forge. With an authenticated `gh` on the
+developer's machine the call returned an array and the suite was green; in CI
+there is no such credential, the call threw, and a budget finding's evidence
+gained a sentence the tier-text assertions did not expect. The green run was
+the lie.
 
-#### Scenario: the forge refuses the fallback read
-- **WHEN** no labels were supplied and `prView` throws
-- **THEN** `labels` is `null`, never `[]`, because an empty list would claim the PR carries no exception when nothing was read.
+The fallback was also unnecessary. Both production callers already hold the
+labels: `review/cli.mjs` reads `boot.prView.labels` before the gather, and
+`evaluators/checkpoint.mjs` already took `labels` as a parameter of its own and
+merely was not forwarding them.
+
+#### Scenario: the caller supplies the labels
+- **WHEN** `review/cli.mjs` or `evaluators/checkpoint.mjs` passes the labels it already read
+- **THEN** they are used as given, and no forge call is made for them, so they cannot disagree with the `prBody` gathered beside them.
+
+#### Scenario: the caller supplies none
+- **WHEN** no `labels` are passed
+- **THEN** the gather yields `null` without contacting the forge, because a unit suite whose result depends on reaching a network is not a unit suite.
+
+#### Scenario: the read was refused upstream
+- **WHEN** the caller's own PR read returned no labels, and it passes `null`
+- **THEN** nothing is waived, and the budget finding says the labels could not be read — a different fact from a PR that carries no exception.
 
 ### R1072-4: the agreement is pinned, not assumed
 A test MUST drive both authorities with the same inputs and fail when their
