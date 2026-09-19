@@ -52,7 +52,7 @@ test('#881 R881-6: a node.status this map does not know THROWS, naming it — it
   assert.throws(
     () => colourClass(node({ status: 'weird', roadmap: { ok: true, value: { state: PLANNED } } })),
     /weird/,
-    'the unknown status must be named in the reason canvas-model.mjs marks the node with',
+    'the unknown status must be named in the reason a lane card marks the node with',
   );
 });
 

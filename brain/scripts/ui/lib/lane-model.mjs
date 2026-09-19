@@ -17,12 +17,31 @@
 // have. It is reported instead, in `crossEdges`, and `app.js` says it as
 // text under the lanes.
 //
-// Epic grouping (`node.kind`/`node.parent`) is not data yet (#967;
-// proposal.md ruling 5, 2026-09-16) — `epicGrouping` says so rather than
-// faking a `kind:'epic'` grouping the data cannot back.
+// Epic grouping (#1032; `node.kind`/`node.parent` have been real data since
+// #967) is `epicGrouping`: nodes whose `parent` resolves to a node whose own
+// `kind` is `'epic'` group under that epic's row, the same declaration an
+// issue body already carries — never a second grouping vocabulary layered
+// on top of `kind`/`parent`. A node whose declared parent does NOT read as
+// an epic keeps the divergence the graph already said (`parent-not-epic`,
+// `epic-graph.mjs`'s own D5) rather than being silently reparented; a node
+// with no parent at all is untouched here — it stays in its track lane as
+// every node already does, epicGrouping says nothing extra about it. Nested
+// epics are REAL (#884 is both `kind:'epic'` AND a declared child of #878):
+// `epics` stays FLAT, the same correction `roadmap-model.mjs`'s own cold
+// review already made for the identical shape (#882 cold review of PR
+// #1037, correction 2) — reused here rather than re-derived so the two
+// "group by epic" views cannot drift into two different nested-epic
+// answers. What this does NOT do: decide whether a node's own open PR
+// targets a base other than its epic's tracker — that needs the PR list,
+// which this pure module is never given (only `server.mjs`'s PR-aware
+// routes receive it), so each grouped child carries a `baseCheck: {ok:
+// false, reason}` slot a future model can fill rather than a claim this one
+// cannot back (#1032 scope note).
 
 import { layout } from './layout.mjs';
 import { stateOf, STATES } from './state-vocab.mjs';
+import { sourceStamp } from './provenance.mjs';
+import { issueUrl } from './forge-url.mjs';
 
 const PAGE_SIZE = 24;
 
@@ -31,17 +50,39 @@ const PAGE_SIZE = 24;
  * (#998 R998-3): the `brain-graph/1` fence `parseGraphBlock`
  * (`status/epic-graph.mjs`) reads. `track: A` is a worked example, not a
  * placeholder syntax — an author replaces the letter, not the shape.
+ *
+ * #1032 adds `kind` and `parent`. #967 made both real — a node declares
+ * whether it is an epic and which epic owns it — and the lanes now group by
+ * them, so a snippet that still showed only `track` told an author how to
+ * leave the `?` lane while staying silent about the two declarations the
+ * board is organised around.
+ *
+ * Every key here is one the parser actually READS. A key nobody reads would
+ * be an instruction to write something with no effect, which is worse than
+ * no instruction at all.
  */
 const DECLARE_SNIPPET = [
   '```brain-graph/1',
   'track: A',
+  'kind: epic',
+  'parent: 878',
   'blocks: []',
   'needs: []',
   'files: []',
   '```',
 ].join('\n');
 
-/** The marks a node carries (canvas-model.mjs's own rule, repeated here for a per-lane node) plus its state-vocab word — the label's whole content. */
+/**
+ * A snippet is a worked EXAMPLE, not a form to submit whole. Pasted verbatim
+ * by every undeclared issue, the two lines above would declare a repository
+ * full of epics, each one the child of the same ticket. This sentence is what
+ * keeps the example from reading as an instruction, and it is carried as data
+ * rather than written into the page so the snippet and its caveat cannot
+ * drift apart.
+ */
+const DECLARE_NOTE = 'keep the lines that are true: `kind: epic` only if this issue IS an epic, and `parent:` only if it is a slice of one — an issue that is neither declares just its track';
+
+/** The marks a node carries, plus its state-vocab word — the label's whole content. (The rule was `canvas-model.mjs`'s; that module had no importer left and was removed in #1032.) */
 function stateAndMarks(node) {
   const marks = [];
   if (node.status === 'unreadable') marks.push('unreadable');
@@ -54,8 +95,9 @@ function stateAndMarks(node) {
   try {
     state = stateOf(node);
   } catch (err) {
-    // One unknown state cannot blank a lane, the same rule canvas-model.mjs
-    // holds for the single board: mark it, keep the rest drawing.
+    // One unknown state cannot blank a lane: mark that node, keep every
+    // other one drawing. An unreadable row is a row with a reason on it,
+    // never a reason to stop drawing the rest.
     state = STATES.unknown;
     marks.push(`unknown state: ${err?.message ?? err}`);
   }
@@ -119,7 +161,7 @@ export function childrenOf(graphSection, issue) {
   return { ok: true, value };
 }
 
-/** A drawable node — canvas-model.mjs's shape, plus the state word/mark (#998 R998-3) — for one lane's own board. */
+/** A drawable node — the shape the retired `canvas-model.mjs` established, plus the state word/mark (#998 R998-3) — for one lane's own board. */
 function drawnNode(node, box) {
   const { marks, state } = stateAndMarks(node);
   return {
@@ -157,22 +199,198 @@ function holdingRow(node) {
 const byNumber = (a, b) => a.number - b.number;
 const byFromTo = (a, b) => a.from - b.from || a.to - b.to;
 
+/** The shared fields every `epicGrouping` row carries — the same words
+ * `stateAndMarks` already derives for a track-lane card, so a node grouped
+ * by epic cannot read differently from the same node's own card just
+ * because it now has a second grouped location (#1032). */
+function groupedRow(node) {
+  const { marks, state } = stateAndMarks(node);
+  // EVERY field `drawnNode` gives a lane card, minus the coordinates. The
+  // page draws a cluster's slices with the SAME `renderNodeCard` the lanes
+  // use, so a row missing one of these produces a card with an `undefined`
+  // class and throws reading `blockedBy.length` — the shape mismatch that
+  // shipped in `sddForIssue` and took the whole board down (#1059).
+  //
+  // The coordinates are deliberately absent: a cluster is a grid, and a row
+  // carrying an `x` would be inviting a second layout engine into a module
+  // that has exactly one.
+  return {
+    number: node.number,
+    title: node.title ?? '',
+    track: node.track ?? null,
+    blockedBy: [...(node.blockedBy ?? [])].sort((a, b) => a - b),
+    className: state.className,
+    state: { code: state.code, label: state.label, mark: state.mark },
+    marks,
+  };
+}
+
 /**
- * buildLaneModel(graphSection, {collapsedTracks, holdingPage}) ->
+ * A node grouped under its epic. `parentSource` — 'block' or 'prose' —
+ * survives to the reader unchanged (house rule: the distinction between a
+ * declared block and a prose "Parent:" line must not be lost in the
+ * grouping). `baseCheck` is a reserved, honestly-failed slot: this pure
+ * module never receives the PR list, so it cannot say whether the node's
+ * own open PR targets a base other than its epic's tracker — that gap is
+ * SAID, never a silently empty field (rule 4, evidence-reader-empty-on-
+ * failure).
+ */
+function epicChildRow(node) {
+  return {
+    ...groupedRow(node),
+    parentSource: node.parentSource ?? null,
+    baseCheck: {
+      ok: false,
+      reason: 'the PR list is not available to lane-model.mjs (#1032 scope) — computing whether this node\'s open PR targets a base other than its epic\'s tracker needs a model that receives PRs',
+    },
+  };
+}
+
+/** A node whose declared parent did not resolve to a real epic — carried
+ * with the graph's own reason, never re-derived (D5, `epic-graph.mjs`). */
+function divergentChildRow(node, reason) {
+  return {
+    ...groupedRow(node),
+    parent: node.parent,
+    parentSource: node.parentSource ?? null,
+    reason,
+  };
+}
+
+/**
+ * The epic's own tracker, named with a stamp (#1032). `branch` is
+ * `node.tracker` verbatim; when it is falsy the epic SAYS why
+ * (`epic-declares-no-tracker`, `ticket-base.mjs`'s own token — #967's data
+ * shows every epic in the live graph is in exactly this state today) rather
+ * than rendering an empty tracker as if none had been asked for. When a
+ * tracker IS declared, its stamp names the epic issue that declared it —
+ * a real forge link when `project` is known, the same bracket-only forge
+ * label `anti-patterns-model.mjs` already falls back to when it is not.
+ */
+function trackerInfo(epicNode, project) {
+  if (!epicNode.tracker) return { branch: null, stamp: null, reason: 'epic-declares-no-tracker' };
+  return {
+    branch: epicNode.tracker,
+    stamp: project
+      ? sourceStamp({ url: issueUrl(project, epicNode.number) })
+      : { label: `[forge: #${epicNode.number}]`, href: null, kind: 'forge' },
+    reason: null,
+  };
+}
+
+/**
+ * buildEpicGrouping(nodes, declarationDivergences, project) -> {ok:true,
+ * value:{epics, divergentChildren}} (#1032).
+ *
+ * `epics` is one row per `kind === 'epic'` node — FLAT, never nested under
+ * each other even when one epic declares another as its own `parent`
+ * (#884-shaped data is real): that dropped relation is said on the child
+ * epic's own `parentDivergence` as `nested-epic-not-supported`, the exact
+ * shape and reason `roadmap-model.mjs` already established for the
+ * identical decision (#882 cold review of PR #1037, correction 2) — reused
+ * rather than re-derived so the two "group by epic" views cannot disagree.
+ *
+ * `divergentChildren` is every non-epic node whose `parent` is declared but
+ * does not resolve to a real epic: when the parent number resolves to a
+ * real, non-epic node, the reason is the graph's own `declarationDivergences`
+ * entry (`parent-not-epic`, D5 in `epic-graph.mjs`) carried through
+ * unchanged; when the parent number is simply absent from this graph
+ * (closed issue, another repository — `epic-graph.mjs`'s own comment: "not
+ * in this list is not 'not an epic'"), the graph reports no divergence for
+ * it, so this model states its own honest, locally-observed fact instead of
+ * borrowing a reason nobody upstream reported: `parent-not-in-graph`.
+ *
+ * A node with NO declared parent appears in neither bucket — it stays in
+ * its track lane exactly as before #1032, which is the "must not become a
+ * second grouping vocabulary" rule read literally: nothing is said about a
+ * node that itself said nothing.
+ *
+ * Determinism: `epics` and every `children` array sort by issue number
+ * before returning, independent of input order.
+ */
+function buildEpicGrouping(nodes, declarationDivergences, project) {
+  const nodeList = Array.isArray(nodes) ? nodes : [];
+  const divergences = Array.isArray(declarationDivergences) ? declarationDivergences : [];
+  const byNode = new Map(nodeList.map((n) => [n.number, n]));
+  const reportedReasonFor = (number) => {
+    const d = divergences.find((x) => x.number === number && x.key === 'parent');
+    return d ? d.reason : null;
+  };
+  // A parent declaration resolved against the graph: null (no parent
+  // declared), the resolved node (parent found), or undefined (a parent
+  // number this graph holds no node for — an outage-shaped absence, never
+  // read as "not an epic").
+  const resolveParent = (n) => (n.parent == null ? null : byNode.get(n.parent));
+  const parentReason = (n, parentNode) => (parentNode ? (reportedReasonFor(n.number) ?? 'parent-not-epic') : 'parent-not-in-graph');
+
+  const epicNodes = nodeList.filter((n) => n.kind === 'epic').sort(byNumber);
+  const childrenByEpic = new Map(epicNodes.map((e) => [e.number, []]));
+  const divergentChildren = [];
+
+  for (const n of [...nodeList].sort(byNumber)) {
+    if (n.kind === 'epic') continue; // epics get their own flat top-level row below, never nested as a slice
+    if (n.parent == null) continue; // #1032: no declaration to group by — stays in its track lane, untouched here
+    const parentNode = resolveParent(n);
+    if (parentNode && parentNode.kind === 'epic') {
+      childrenByEpic.get(parentNode.number).push(epicChildRow(n));
+      continue;
+    }
+    divergentChildren.push(divergentChildRow(n, parentReason(n, parentNode)));
+  }
+
+  const epics = epicNodes.map((e) => {
+    // `e.parent == null` alone decides "nothing declared" — `resolveParent`
+    // deliberately returns `undefined` (not `null`) for a declared parent
+    // this graph holds no node for, and collapsing that into the same
+    // "no divergence" branch would silently swallow the exact
+    // `parent-not-in-graph` fact rule 4 requires this model to say.
+    const parentNode = resolveParent(e);
+    const parentDivergence = e.parent == null ? null : {
+      parent: e.parent,
+      parentSource: e.parentSource ?? null,
+      reason: parentNode && parentNode.kind === 'epic' ? 'nested-epic-not-supported' : parentReason(e, parentNode),
+    };
+    return {
+      ...groupedRow(e),
+      tracker: trackerInfo(e, project),
+      parentDivergence,
+      children: childrenByEpic.get(e.number),
+    };
+  });
+
+  // WHO THIS GROUPING DID NOT CLAIM (#1032). The page draws epic clusters
+  // beside the track lanes, and a node an epic already claimed must not be
+  // drawn a second time down in its lane. Deciding who is claimed is THIS
+  // module's job: a renderer that worked it out from `parent` and `kind`
+  // would be a second answer to a question already answered here, and the two
+  // can disagree.
+  //
+  // The three sets partition the graph: a node leads a cluster, sits under
+  // one, or is unclaimed. A `divergentChildren` row is UNCLAIMED — its
+  // declaration did not resolve to an epic, so nothing claimed it, and it
+  // stays on the board in its own track lane with its reason beside it.
+  const claimed = new Set(epics.flatMap((e) => [e.number, ...e.children.map((c) => c.number)]));
+  const unclaimed = nodeList.map((n) => n.number).filter((number) => !claimed.has(number)).sort((a, b) => a - b);
+
+  return { ok: true, value: { epics, divergentChildren, unclaimed } };
+}
+
+/**
+ * buildLaneModel(graphSection, {collapsedTracks, holdingPage, project}) ->
  * {ok:true, value:{lanes, crossEdges, holding, droppedEdges,
  * issuesUnreadable, epicGrouping}} | {ok:false, reason}
  *
  * Determinism: the same graph, with `nodes`/`edges` in any order, produces a
  * byte-identical model — every grouping sorts before it lays out or pages.
  *
- * @param {{ok:boolean, value?:{nodes:Array, edges:Array, issuesUnreadable?:Array}, reason?:string}} graphSection
- * @param {{collapsedTracks?: Set<string>, holdingPage?: number}} [options] `collapsedTracks` holds the track ids currently collapsed — the `?` lane starts in it, so it is collapsed by default without `app.js` deciding that on its own.
+ * @param {{ok:boolean, value?:{nodes:Array, edges:Array, issuesUnreadable?:Array, declarationDivergences?:Array}, reason?:string}} graphSection
+ * @param {{collapsedTracks?: Set<string>, holdingPage?: number, project?: string|null}} [options] `collapsedTracks` holds the track ids currently collapsed — the `?` lane starts in it, so it is collapsed by default without `app.js` deciding that on its own. `project` (optional, defaulting to `null` the way `roadmap-model.mjs`'s own `buildRoadmapModel` already does) sources the epic tracker's stamp to a real forge link when known.
  */
-export function buildLaneModel(graphSection, { collapsedTracks = new Set(['?']), holdingPage = 0 } = {}) {
+export function buildLaneModel(graphSection, { collapsedTracks = new Set(['?']), holdingPage = 0, project = null, clustering = 'track' } = {}) {
   if (!graphSection || typeof graphSection !== 'object') return { ok: false, reason: 'no graph section was given to the lanes' };
   if (graphSection.ok !== true) return { ok: false, reason: graphSection.reason };
 
-  const { nodes = [], edges = [], issuesUnreadable = [] } = graphSection.value ?? {};
+  const { nodes = [], edges = [], issuesUnreadable = [], declarationDivergences = [] } = graphSection.value ?? {};
 
   const trackOf = new Map(nodes.map((n) => [n.number, n.track ?? null]));
   const byTrack = new Map();
@@ -234,7 +452,25 @@ export function buildLaneModel(graphSection, { collapsedTracks = new Set(['?']),
     };
   });
 
-  const holdingSorted = [...holdingNodes].sort(byNumber);
+  // The grouping is built BEFORE the batch, because the batch has to know
+  // what it already claimed (#1079 cold review, finding cold-1). A node can
+  // declare no track and still declare a parent: in epic clustering the epic
+  // shows it, and the `?` batch showing it again drew the same node twice.
+  //
+  // The arithmetic stays here rather than in the page. This batch states a
+  // count, a total and a page span, and a renderer dropping rows from a page
+  // it did not compute would make all three lie.
+  const epicGrouping = buildEpicGrouping(nodes, declarationDivergences, project);
+  const shownElsewhere = clustering === 'epic' && epicGrouping.ok
+    ? new Set(nodes.map((n) => n.number).filter((number) => !epicGrouping.value.unclaimed.includes(number)))
+    : new Set();
+
+  const holdingAll = [...holdingNodes].sort(byNumber);
+  const holdingSorted = holdingAll.filter((n) => !shownElsewhere.has(n.number));
+  // NOT hidden — shown somewhere else. The two are different facts, and a
+  // batch that silently shrank would misreport how much of the graph declared
+  // no track at all.
+  const claimedElsewhere = holdingAll.length - holdingSorted.length;
   const holdingTotal = holdingSorted.length;
   const totalPages = Math.max(1, Math.ceil(holdingTotal / PAGE_SIZE));
   const page = Math.min(Math.max(0, holdingPage), totalPages - 1);
@@ -268,7 +504,9 @@ export function buildLaneModel(graphSection, { collapsedTracks = new Set(['?']),
     edgeCount: holdingEdges.length,
     width: placedHolding.width,
     height: placedHolding.height,
+    claimedElsewhere,
     declareSnippet: DECLARE_SNIPPET,
+    declareNote: DECLARE_NOTE,
     // Never empty-on-failure: a page with nothing currently visible and a
     // track with nothing left to declare are different facts.
     note: holdingTotal === 0 ? 'every open issue declares a track' : null,
@@ -295,7 +533,7 @@ export function buildLaneModel(graphSection, { collapsedTracks = new Set(['?']),
       droppedEdges,
       issuesUnreadable,
       edgeSummary,
-      epicGrouping: { ok: false, reason: 'kind and parent are not data yet (#967)' },
+      epicGrouping,
     },
   };
 }
