@@ -259,3 +259,26 @@ test('#1043 round 5: renderHistoryEvent says a malformed line\'s own reason, not
   assert.ok(m, 'renderHistoryEvent must exist in app.js');
   assert.match(m[0], /event\.malformed/, 'the line-level reason must reach the page');
 });
+
+// ── #1059 phase 1: the header is built from the design's region 01 ─────────
+test('#1059 region 01: the status bar is built from buildHeaderModel, not assembled ad hoc in the page', () => {
+  const m = APP_JS.match(/function renderStatus\(\) \{[\s\S]*?\n}\n/);
+  assert.ok(m, 'renderStatus must exist in app.js');
+  assert.match(m[0], /buildHeaderModel\(/, 'the counts and the branch come from a model, like every other region');
+  assert.match(m[0], /counts\.ok/, 'an unreadable graph must cost the header its counts and nothing else');
+  assert.match(m[0], /epic\.reason/, 'the epic this branch serves is stated as unresolved, never guessed');
+});
+
+test('#1059 region 01: the design\'s six header facts each have a place in the bar', () => {
+  const m = APP_JS.match(/function renderStatus\(\) \{[\s\S]*?\n}\n/);
+  for (const [what, re] of [
+    ['the wordmark', /brain:ui/i],
+    ['the branch served', /servedBranch/],
+    ['the live indicator', /status-live/],
+    ['the poll indicator', /indicator\.text/],
+    ['the node counts', /status-counts/],
+    ['the poller controls', /poll-toggle/],
+  ]) {
+    assert.match(m[0], re, `${what} must be in the status bar (design region 01)`);
+  }
+});

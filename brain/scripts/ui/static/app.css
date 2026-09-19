@@ -17,17 +17,27 @@
      query. The values here are the page's colours before #998, unchanged. */
   --font-sans: ui-sans-serif, system-ui, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
-  --ink: #1b1b1f;
-  --muted: #5d5d6b;
-  --line: #c9c9d1;
-  --paper: #fbfbfd;
+  /* #1059 phase 1: the light palette is the design's own slate ramp read for a
+     light ground (#0f172a → #64748b), not the page's pre-#998 greys. The dark
+     block below already carried the design's values; light never did, so a
+     viewer whose system is light saw a different page from the one designed. */
+  --ink: #0f172a;
+  --muted: #52617a;
+  --line: #d3dae6;
+  --paper: #f7f8fb;
   --surface: #ffffff;
-  --warn: #8a4b00;
-  --warn-bg: #fff4e0;
-  --stamp: #5d5d6b;
-  --surface-active: #eef1f8;
-  --edge: #8d8d99;
-  --node-stroke: #6a6a78;
+  --warn: #92600e;
+  --warn-bg: #fdf3dc;
+  --stamp: #64748b;
+  --surface-active: #e8edf6;
+  --edge: #94a3b8;
+  --node-stroke: #64748b;
+  /* The accent the design spends on what is live and what is tracked. It is
+     never the only carrier of a state — every state keeps its word and its
+     mark (R998-1) — so this is emphasis, not meaning. */
+  --accent: #0e7490;
+  --accent-quiet: #cffafe;
+  --live: #047857;
   /* one fg/bg pair per state of lib/state-vocab.mjs; the class each state
      paints is the state's className, and the rule for it reads the pair */
   --state-planned-fg: #1b1b1f;        --state-planned-bg: #eef1f8;
@@ -63,6 +73,9 @@
     --line: rgba(255, 255, 255, 0.08);
     --paper: #0b0f17;
     --surface: #141b2d;
+    --accent: #22d3ee;
+    --accent-quiet: #083344;
+    --live: #34d399;
     --warn: #fbbf24;
     --warn-bg: #2d1f03;
     --stamp: #64748b;
@@ -117,6 +130,43 @@ body {
   cursor: pointer;
 }
 .status-bar .spacer { flex: 1; }
+
+/* #1059 phase 1, design region 01: the bar reads left to right as the design
+   lays it out — what this is, what it serves, whether it is live, when it last
+   polled, what it is working on, how big the graph is — then the controls. The
+   counts use the accent for what IS tracked and the warn token for what
+   declared nothing, which is the design's own emphasis; both keep their words,
+   so the colour is never the carrier. */
+.status-bar .status-live {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--live);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.status-bar .status-live::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--live);
+}
+.status-bar .status-epic { font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
+.status-bar .status-epic-reason { font-size: 11px; color: var(--stamp); max-width: 46ch; }
+.status-bar .status-counts {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.status-bar .count-total { color: var(--ink); font-weight: 600; }
+.status-bar .count-tracked { color: var(--accent); font-weight: 600; }
+.status-bar .count-undeclared { color: var(--warn); font-weight: 600; }
+.status-bar .count-sep { color: var(--stamp); }
 
 /* ── the modes nav: the four buttons of lib/view-model.mjs (#998 R998-2) ── */
 

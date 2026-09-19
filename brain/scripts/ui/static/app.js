@@ -21,6 +21,7 @@ import { buildReviewTimeline } from './lib/review-timeline.mjs';
 import { buildRoadmapModel } from './lib/roadmap-model.mjs';
 import { buildDecisionsModel } from './lib/decisions-model.mjs';
 import { buildAntiPatternsModel } from './lib/anti-patterns-model.mjs';
+import { buildHeaderModel } from './lib/header-model.mjs';
 import { buildHistoryModel, capNote } from './lib/history-model.mjs';
 import { buildActorsModel } from './lib/actors-model.mjs';
 import { sourceStamp } from './lib/provenance.mjs';
@@ -197,11 +198,43 @@ function renderServedBranch(servedBranch) {
 
 function renderStatus() {
   const indicator = pollIndicator({ poller: state.meta?.poller ?? null, nowMs: Date.now() });
+  // Region 01 of the maintainer's design: the wordmark and the branch, then
+  // what is live, then the counts, then the controls. `header-model.mjs` owns
+  // every value; this function places them (#1059 phase 1).
+  const header = buildHeaderModel(sectionOf(state, 'graph'), state.meta ?? {});
+  const { counts, epic } = header.value;
   clear(mounts.status);
+
   mounts.status.appendChild(el('strong', 'title', 'brain:ui'));
   mounts.status.appendChild(renderServedBranch(state.meta?.servedBranch ?? null));
+
+  const live = el('span', 'status-live', indicator.paused ? 'paused' : 'live');
+  live.setAttribute('title', indicator.paused ? 'polling is paused' : 'the page is connected to the stream');
+  mounts.status.appendChild(live);
+
   mounts.status.appendChild(el('span', indicator.paused ? 'poll-indicator paused' : 'poll-indicator', indicator.text));
   mounts.status.appendChild(el('span', 'poll-countdown', indicator.countdown));
+
+  // The epic this checkout serves: an epic declares its tracker branch, and
+  // nothing joins the two yet, so the bar says that rather than parsing an
+  // epic out of a branch name.
+  mounts.status.appendChild(el('span', 'status-epic', epic.ok ? `epic #${epic.issue}` : 'epic: not resolved'));
+  mounts.status.appendChild(el('span', 'status-epic-reason', epic.ok ? '' : epic.reason));
+
+  const countsEl = el('span', 'status-counts');
+  if (counts.ok) {
+    countsEl.appendChild(el('span', 'count-label', 'nodes'));
+    countsEl.appendChild(el('span', 'count-total', String(counts.nodes)));
+    countsEl.appendChild(el('span', 'count-sep', '\u00b7'));
+    countsEl.appendChild(el('span', 'count-label', 'tracked'));
+    countsEl.appendChild(el('span', 'count-tracked', String(counts.tracked)));
+    countsEl.appendChild(el('span', 'count-sep', '\u00b7'));
+    countsEl.appendChild(el('span', 'count-undeclared', `${counts.undeclared} undeclared`));
+  } else {
+    countsEl.appendChild(el('span', 'count-label', `nodes: not counted — ${counts.reason}`));
+  }
+  mounts.status.appendChild(countsEl);
+
   mounts.status.appendChild(el('span', 'spacer'));
 
   const toggle = el('button', 'poll-toggle', indicator.paused ? 'resume polling' : 'disable polling');
