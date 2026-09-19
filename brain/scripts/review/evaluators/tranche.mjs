@@ -24,7 +24,7 @@ import { getVcs } from '../../vcs/cli.mjs';
 import { loadBrainConfig } from '../../lib/brain-config.mjs';
 import { parseDiffNumstat } from '../../vcs/diff-size-count.mjs';
 import { REQUIRED_JOBS, DETECTION_JOBS, resolveJobSets } from '../../vcs/governance-checks.mjs';
-import { resolveTier, tierParams, sizeExceptionRuling } from '../../vcs/governance-tiers.mjs';
+import { resolveTier, tierParams, sizeExceptionRuling, SIZE_EXCEPTION_LABEL } from '../../vcs/governance-tiers.mjs';
 import { isUncomputable } from '../../vcs/lib/uncomputable-cause.mjs';
 
 // The diff budget is TIERED (ADR-0026 §2.C: lite 1000 · standard 400 ·
@@ -233,7 +233,7 @@ export function evaluateTranche({
       findings.push({
         id: 'budget',
         severity: 'editorial',
-        evidence: `${comparison} — size:exception present and honored at the "${tier ?? DEFAULT_TIER}" tier, so the budget is waived, not met`,
+        evidence: `${comparison} — ${SIZE_EXCEPTION_LABEL} present and honored at the "${tier ?? DEFAULT_TIER}" tier, so the budget is waived, not met`,
         cites: 'governance-tiers.mjs sizeExceptionRuling',
       });
     } else {
@@ -257,7 +257,7 @@ export function evaluateTranche({
         // label was present and the tier refused it — the same sentence
         // `run-check.mjs` produces. Silence would read as "nobody asked".
         evidence: ruling.refusedByTier
-          ? `${comparison} — size:exception is not honored at the "${tier}" tier; the change must be sliced`
+          ? `${comparison} — ${SIZE_EXCEPTION_LABEL} is not honored at the "${tier}" tier; the change must be sliced`
           : unread
             ? `${comparison} — the PR's labels could not be read, so no waiver could be honored; this block may be a refused read rather than an absent exception`
             : comparison,

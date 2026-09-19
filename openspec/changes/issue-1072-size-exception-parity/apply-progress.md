@@ -149,3 +149,32 @@ left at the second call site is rewritten to say what that site actually does.
 | the mode guard is dropped | 1 red |
 
 Whole repository: 6211 tests, 6211 pass, 0 fail.
+
+## Cold review rev 4 — the rule I wrote, applied to me
+
+**A default that MINTS a claim.** R1072-5 says a `labels = []` default does
+not satisfy the unread case. `gatherCheckpointInputs` still carried one — and
+forwarded that manufactured `[]` into the tranche gather, where it decides
+whether a budget block says the labels were unread. So a caller that simply
+passed no labels produced a verdict asserting the PR was read and carries no
+exception.
+
+Hardening the consumers was not enough while the default upstream was still
+minting the false reading. The default is `null` now.
+
+**One export owns the spelling.** R1072-1 says an authority reads the label
+through the shared ruling and does not retype it. Both still spelled
+`size:exception` into their evidence and reason SENTENCES by hand, where a
+typo is tied to nothing and would name a label the code does not read. Both
+interpolate `SIZE_EXCEPTION_LABEL` now, and R1072-6 states the rule.
+
+The scan that enforces it strips comments first: prose may name the label,
+because a guard that pushed authors into writing worse comments would be
+trading one defect for another.
+
+| mutation | suites |
+| --- | --- |
+| the checkpoint default mints a read again | 1 red |
+| the label is retyped in the evidence | 1 red |
+
+Whole repository: 6213 tests, 6213 pass, 0 fail.

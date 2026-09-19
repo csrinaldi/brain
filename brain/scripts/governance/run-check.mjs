@@ -76,7 +76,7 @@ import { resultToExit } from './postmerge/exit-codes.mjs';
 import { loadContext, gitlabApiConfig } from '../vcs/ci-context.mjs';
 import { loadBrainConfig } from '../lib/brain-config.mjs';
 import { getVcs } from '../vcs/cli.mjs';
-import { resolveTier, tierParams, sizeExceptionRuling } from '../vcs/governance-tiers.mjs';
+import { resolveTier, tierParams, sizeExceptionRuling, SIZE_EXCEPTION_LABEL } from '../vcs/governance-tiers.mjs';
 import { mapDetectionToWarning } from './detection-policy.mjs';
 import { readDefaultBranchRecords, unionRecordsById } from './default-branch-records.mjs';
 import { decideMemoryGateOverride, SKIP_MEMORY_GATE_LABEL, toActorList } from './memory-gate-override.mjs';
@@ -653,7 +653,7 @@ async function runDiffSizeCheck(ctx, deps) {
   if (ruling.honored) {
     return {
       pass: true,
-      reason: `size:exception label present — skipping diff-size gate (honored at the "${tier}" tier).`,
+      reason: `${SIZE_EXCEPTION_LABEL} label present — skipping diff-size gate (honored at the "${tier}" tier).`,
     };
   }
 
@@ -677,7 +677,7 @@ async function runDiffSizeCheck(ctx, deps) {
     // absent — the label WAS present; the tier is what refused it.
     return {
       ...result,
-      reason: `${result.reason} — size:exception is not honored at the "${tier}" tier; the change must be sliced.`,
+      reason: `${result.reason} — ${SIZE_EXCEPTION_LABEL} is not honored at the "${tier}" tier; the change must be sliced.`,
     };
   }
 

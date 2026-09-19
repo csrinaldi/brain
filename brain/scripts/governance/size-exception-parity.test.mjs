@@ -19,6 +19,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import { runCheck } from './run-check.mjs';
 import { evaluateTranche } from '../review/evaluators/tranche.mjs';
 import { TIERS, tierParams } from '../vcs/governance-tiers.mjs';
@@ -104,4 +108,34 @@ test('#1072: a tier that refuses the waiver refuses it on BOTH sides, and both s
   assert.match(gate.reason, /not honored at the "regulated" tier/);
   assert.match(reviewer.evidence, /not honored at the "regulated" tier/,
     'the same sentence, so a reader is not left guessing why one authority said more than the other');
+});
+
+// #1073 rev 4, finding cold-2: R1072-1 says every authority reads the label
+// through `sizeExceptionRuling` and does not retype the string. Both were
+// still spelling `size:exception` into their EVIDENCE sentences by hand. A
+// typo there is not tied to `SIZE_EXCEPTION_LABEL` and nothing would catch
+// it — the verdict would name a label the code does not read.
+test('#1073: no authority retypes the label — the spelling comes from one export', () => {
+  const HERE = dirname(fileURLToPath(import.meta.url));
+  const files = [
+    join(HERE, 'run-check.mjs'),
+    join(HERE, '..', 'review', 'evaluators', 'tranche.mjs'),
+  ];
+
+  for (const file of files) {
+    const source = readFileSync(file, 'utf8');
+    // Comments and prose may name the label — that is documentation, and the
+    // scan must not push authors into writing worse comments. What may not
+    // appear is the literal in EXECUTABLE text.
+    const code = source
+      .split('\n')
+      .map((line) => line.replace(/(^|[^:])\/\/.*$/, '$1 '))
+      .join('\n')
+      .replace(/\/\*[\s\S]*?\*\//g, ' ');
+
+    assert.ok(!code.includes('size:exception'),
+      `${file} spells "size:exception" in executable text — interpolate SIZE_EXCEPTION_LABEL so one export owns the spelling (R1072-1)`);
+    assert.match(code, /SIZE_EXCEPTION_LABEL/,
+      `${file} must name the label through the shared export`);
+  }
 });

@@ -79,6 +79,18 @@ to `undefined`, and the honest value for an unread set is `null`.
 - **WHEN** `deriveMode` receives a non-array `labels`
 - **THEN** it derives the default mode, because a set nobody read cannot claim a ruling was asked for.
 
+#### Scenario: a caller passes no labels at all
+- **WHEN** `gatherCheckpointInputs` is called without `labels`
+- **THEN** the value is `null`, never `[]` — a default of `[]` MINTS the claim "read, and carries no exception" for a caller who simply did not pass any, and that manufactured reading is then forwarded into the budget decision.
+
+### R1072-6: one export owns the label's spelling
+No authority may write the label string into executable text. Prose and
+comments may name it; code MUST interpolate `SIZE_EXCEPTION_LABEL`.
+
+#### Scenario: a verdict or a gate reason names the label
+- **WHEN** `run-check.mjs` or `evaluators/tranche.mjs` builds a reason or an evidence sentence mentioning the label
+- **THEN** the spelling comes from the shared export, so a typo cannot name a label the code does not read.
+
 ### R1072-4: the agreement is pinned, not assumed
 A test MUST drive both authorities with the same inputs and fail when their
 answers diverge.

@@ -7,6 +7,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, mkdirSync, copyFileSync, readFileSync } from 'node:fs';
 import { removeTempTree } from '../../__fixtures__/tmp-tree.mjs';
+import { evaluateTranche } from './tranche.mjs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -1024,4 +1025,46 @@ test('#1073: an unread label set fails closed, it does not crash the checkpoint 
   // Read, and not carrying it: a fact, distinct from the unread case above.
   const without = await gatherCheckpointInputs({ ...base, labels: [] });
   assert.equal(without.hasDecisionLabel, false);
+});
+
+// #1073 rev 4: R1072-5 says a `labels = []` default does not satisfy the
+// unread case — and this evaluator still carried one, then FORWARDED that
+// manufactured `[]` into the tranche gather. So a caller that omitted labels
+// produced a budget finding claiming the PR was read and carries no
+// exception. Hardening the consumers was not enough while the default was
+// still minting the false claim.
+test('#1073: omitting the labels yields "not read", never an empty set that claims the PR carries no exception', async () => {
+  const base = {
+    // Both SHAs, or the tranche gather reports the budget uncomputable and
+    // there is no finding to inspect.
+    headSha: 'HEAD',
+    changedFiles: ['openspec/changes/issue-1-x/checkpoint-report.md'],
+    deps: {
+      baseSha: 'BASE',
+      exists: () => true,
+      listDir: () => [],
+      readFile: () => '- [x] done\n',
+      runReversion: async () => ({ uncomputable: false, command: 'cmd', vacuousTests: [] }),
+      runAudit: () => '', runGovernanceStatus: () => '',
+      trancheDeps: { fetchRollup: async () => greenRollup(), diffNumstat: () => '1500\t0\tbig.txt\n', readIgnoreList: () => [], tier: 'lite' },
+    },
+  };
+
+  const omitted = await gatherCheckpointInputs(base);
+  assert.equal(omitted.labels, null, 'omitted is UNREAD, and the default must not invent a read');
+  assert.equal(omitted.trancheInputs.labels, null, 'and the unread set is what gets forwarded, not a manufactured []');
+  assert.equal(omitted.hasDecisionLabel, false, 'and still fails closed');
+
+  // The budget lives on the tranche inputs this evaluator gathers, which is
+  // exactly the value the forwarded labels travel on.
+  const budget = evaluateTranche(omitted.trancheInputs).findings.find((f) => f.id === 'budget');
+  assert.match(budget.evidence, /labels could not be read/,
+    'the over-budget block must say the labels were never read, not present it as a PR with no exception');
+
+  // Read, and empty: the opposite fact, and it must not borrow that sentence.
+  const read = await gatherCheckpointInputs({ ...base, labels: [] });
+  assert.deepEqual(read.labels, []);
+  assert.deepEqual(read.trancheInputs.labels, []);
+  const readBudget = evaluateTranche(read.trancheInputs).findings.find((f) => f.id === 'budget');
+  assert.ok(!/could not be read/.test(readBudget.evidence));
 });

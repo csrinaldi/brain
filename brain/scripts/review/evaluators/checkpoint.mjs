@@ -349,7 +349,13 @@ export async function gatherCheckpointInputs({
   headSha,
   changedFiles = [],
   prBody = '',
-  labels = [],
+  // #1073 rev 4: `null`, NOT `[]`. A default of `[]` MINTS a claim — "the PR
+  // was read and carries no exception" — for a caller that simply did not
+  // pass any, and this evaluator forwards that value into the tranche gather,
+  // where it decides whether a budget block says the labels were unread.
+  // Hardening the consumers was not enough while the default was still
+  // manufacturing the false reading upstream of them (R1072-5).
+  labels = null,
   worktreePath,
   doctrineRecords = [],
   tier = 'standard',

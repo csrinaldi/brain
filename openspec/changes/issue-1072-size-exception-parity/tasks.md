@@ -7,3 +7,5 @@
 - [x] T6. The `prView` fallback, written for T4 and reverted: it made the gather reach the network, so CI went red on a test that passed locally. Pinned by a seam that throws if the forge is called.
 - [x] T5. `governance/size-exception-parity.test.mjs` drives both authorities across every tier (R1072-4).
 - [x] T7. Every consumer of a label set survives an unread one (R1072-5): `evaluators/checkpoint.mjs` and `review/mode.mjs`, each pinned by a mutation.
+- [x] T8. `gatherCheckpointInputs` defaults `labels` to `null`, not `[]` (R1072-5).
+- [x] T9. Both authorities interpolate `SIZE_EXCEPTION_LABEL` in their reasons and evidence; a scan refuses an executable literal (R1072-6).
