@@ -990,3 +990,38 @@ test('#555: at REGULATED, verify-report.md present completes the set', async () 
   assert.deepEqual(inputs.artifacts.missing, [],
     'a regulated change carrying the five REAL artefacts is complete — the blocker B1 fixed');
 });
+
+// ── #1073 cold review rev 3 ────────────────────────────────────────────────
+// `review/cli.mjs` hands this evaluator `boot.prView.labels ?? null`, so an
+// unread label set arrives as `null` — and `labels = []` is a default, which
+// only applies to `undefined`. `labels.includes('decision')` then throws, and
+// a checkpoint review CRASHES on a refused forge read instead of failing
+// closed and saying the labels could not be read. Measured by the reviewer as
+// a TypeError at checkpoint.mjs:468.
+test('#1073: an unread label set fails closed, it does not crash the checkpoint review', async () => {
+  const base = {
+    changedFiles: ['openspec/changes/issue-1-x/checkpoint-report.md'],
+    deps: {
+      baseSha: 'BASE',
+      exists: () => true,
+      listDir: () => [],
+      readFile: () => '- [x] done\n',
+      runReversion: async () => ({ uncomputable: false, command: 'cmd', vacuousTests: [] }),
+      runAudit: () => '', runGovernanceStatus: () => '',
+      trancheDeps: { fetchRollup: async () => greenRollup(), diffNumstat: () => '', readIgnoreList: () => [], tier: 'lite' },
+    },
+  };
+
+  const unread = await gatherCheckpointInputs({ ...base, labels: null });
+  assert.equal(unread.hasDecisionLabel, false,
+    'nobody read the labels, so nobody can claim a decision label is there — false, never a throw');
+  assert.equal(unread.labels ?? null, null, 'and the unread set travels on as unread');
+
+  // Read, and carrying the label: the ordinary case must be untouched.
+  const withLabel = await gatherCheckpointInputs({ ...base, labels: ['decision'] });
+  assert.equal(withLabel.hasDecisionLabel, true);
+
+  // Read, and not carrying it: a fact, distinct from the unread case above.
+  const without = await gatherCheckpointInputs({ ...base, labels: [] });
+  assert.equal(without.hasDecisionLabel, false);
+});

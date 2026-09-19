@@ -66,6 +66,19 @@ merely was not forwarding them.
 - **WHEN** the caller's own PR read returned no labels, and it passes `null`
 - **THEN** nothing is waived, and the budget finding says the labels could not be read — a different fact from a PR that carries no exception.
 
+### R1072-5: every consumer of a label set survives one that was never read
+A value threaded as "not read" MUST fail closed at each consumer, never throw.
+A `labels = []` parameter default does NOT satisfy this: a default applies only
+to `undefined`, and the honest value for an unread set is `null`.
+
+#### Scenario: the checkpoint evaluator is handed an unread set
+- **WHEN** `review/cli.mjs` passes `null` and `hasDecisionLabel` is computed
+- **THEN** it is `false` — nobody read the labels, so nobody can claim a decision label is there — and the review continues instead of crashing.
+
+#### Scenario: the mode is derived from an unread set
+- **WHEN** `deriveMode` receives a non-array `labels`
+- **THEN** it derives the default mode, because a set nobody read cannot claim a ruling was asked for.
+
 ### R1072-4: the agreement is pinned, not assumed
 A test MUST drive both authorities with the same inputs and fail when their
 answers diverge.

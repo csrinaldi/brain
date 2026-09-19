@@ -115,3 +115,37 @@ and both the supplied and the omitted case pass without touching it.
 evidence; without it they described a PR whose labels could not be read, which
 is a different fact with a different sentence, and every tier assertion would
 have quietly become an assertion about the unread case.
+
+## Cold review rev 3 — a crash I threaded in, and the class behind it
+
+The reviewer measured a `TypeError: Cannot read properties of null (reading
+'includes')` at `evaluators/checkpoint.mjs`, reproduced here before touching
+anything. A checkpoint review CRASHED on a refused forge read — the one kind
+of failure it exists to survive.
+
+The cause is mine and it is worth naming exactly. When the previous round
+asked for `?? null` instead of `?? []`, I applied it with a plain string
+replace, and `review/cli.mjs` carries that expression at TWO call sites: the
+tranche gather and the checkpoint gather. Both changed. The tranche path was
+written for `null`; the checkpoint path was not.
+
+Underneath it is a trap worth stating on its own: **`labels = []` is a
+DEFAULT, and a default only applies to `undefined`.** Every parameter written
+that way looks guarded and is not, the moment an honest `null` starts flowing
+through it.
+
+So the sweep ran, not just the fix. `review/mode.mjs` holds the same shape —
+`deriveMode({labels = []})` then `labels.includes('needs-ruling')`. It is not
+reachable today, because that call site still passes `?? []`. It is pinned
+anyway, before someone threads the honest `null` through and derives a mode
+from a TypeError.
+
+R1072-5 states the rule for both, and the duplicated comment the bad replace
+left at the second call site is rewritten to say what that site actually does.
+
+| mutation | suites |
+| --- | --- |
+| the checkpoint guard is dropped | 1 red |
+| the mode guard is dropped | 1 red |
+
+Whole repository: 6211 tests, 6211 pass, 0 fail.

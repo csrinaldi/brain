@@ -465,7 +465,14 @@ export async function gatherCheckpointInputs({
     auditOutput: runAudit(),
     governanceStatusOutput: runGovernanceStatus(),
     changedFiles,
-    hasDecisionLabel: labels.includes('decision'),
+    // #1073: `labels = []` is a DEFAULT, and a default only applies to
+    // `undefined`. `review/cli.mjs` hands this evaluator
+    // `boot.prView.labels ?? null`, so a refused forge read arrives as `null`
+    // and `null.includes` threw — a checkpoint review crashing on a failure it
+    // was supposed to survive. Nobody read the labels, so nobody can claim a
+    // decision label is there: false, which is also the closed direction.
+    hasDecisionLabel: Array.isArray(labels) && labels.includes('decision'),
+    labels,
     exists,
   };
 }
