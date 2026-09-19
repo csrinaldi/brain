@@ -513,7 +513,15 @@ export async function main(deps = {}) {
       // #1072: the labels from the SAME prView that gave the body above, so
       // the reviewer honors `size:exception` on the same reading of the PR the
       // `diff-size` gate honors it on — and with no second forge call.
-      labels: boot.prView.labels ?? [],
+      // `?? null`, NOT `?? []` (#1073 cold review, finding cold-1). The
+      // gather's own rule is that a refusal is null and never an empty array,
+      // because `[]` claims the PR carries no exception when nothing was
+      // read. Writing `[]` here honored the doctrine everywhere except on the
+      // path that uses it. `null` is also what keeps an ABSENT labels field
+      // from falling through to the fallback fetch, which would turn a refused
+      // read into a retry that could waive a budget the first read never
+      // authorised.
+      labels: boot.prView.labels ?? null,
       // #631: the bound port, FIRST, so a caller's override wins on the seams it
       // names and cannot silently drop the credential binding by omission.
       //
@@ -536,7 +544,15 @@ export async function main(deps = {}) {
       headSha: boot.headSha,
       changedFiles,
       prBody: boot.prView.body,
-      labels: boot.prView.labels ?? [],
+      // `?? null`, NOT `?? []` (#1073 cold review, finding cold-1). The
+      // gather's own rule is that a refusal is null and never an empty array,
+      // because `[]` claims the PR carries no exception when nothing was
+      // read. Writing `[]` here honored the doctrine everywhere except on the
+      // path that uses it. `null` is also what keeps an ABSENT labels field
+      // from falling through to the fallback fetch, which would turn a refused
+      // read into a retry that could waive a budget the first read never
+      // authorised.
+      labels: boot.prView.labels ?? null,
       tier,   // #555: the artifact set is tier-resolved; cli.mjs already has it
       worktreePath: boot.worktreePath,
       doctrineRecords: boot.doctrine.records,

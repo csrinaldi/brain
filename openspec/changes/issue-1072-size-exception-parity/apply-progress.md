@@ -46,3 +46,33 @@ the test that would have caught it.
 
 Whole repository: 6097 tests, 6097 pass, 0 fail. `governance/**` alone: 439
 pass, unchanged by the refactor.
+
+## Cold review round 1 of PR #1073 — APPROVE, with one editorial that was right
+
+The finding: `gatherTrancheInputs` states in its own comment that "a refusal
+is null, never []", and `review/cli.mjs` then wrote `boot.prView.labels ?? []`
+— coercing exactly that null into exactly that empty array. The verdict was
+still fail-closed, so nothing was waived wrongly, but the doctrine was honored
+everywhere except on the path that uses it.
+
+`?? null` now, rather than the raw value the reviewer suggested: an ABSENT
+labels field would otherwise read as "the caller supplied none" and fall
+through to the fallback fetch, turning a refused read into a second request
+that could succeed and waive a budget the first read never authorised.
+
+**The first test for it did not bite.** `[]` and `null` both fail closed, so a
+test that only watched the verdict could not tell them apart — the mutation
+ran green and the fix was unprovable. That is not a testing problem, it is a
+design one: a distinction nothing can observe is not worth keeping.
+
+So the distinction was made observable, which is also the honest behaviour. A
+budget blocker on labels that could NOT BE READ now says so, because that is a
+different fact from a PR that genuinely carries no exception: the first may be
+a refused forge read, the second is a real answer. With that sentence in the
+verdict the mutation turns red.
+
+| mutation | cli suite |
+| --- | --- |
+| the refusal is coerced back to `[]` | 1 red |
+
+Whole repository after the round: 6099 tests, 6099 pass, 0 fail.

@@ -613,3 +613,26 @@ test('#1072: labels handed in are used as given, and no second forge call is mad
   assert.deepEqual(gathered.labels, ['size:exception']);
   assert.equal(prViewCalls, 0, 'the caller already read the PR; reading it again could disagree with the body beside it');
 });
+
+test('#1073: a budget blocker says whether the labels were UNREAD or genuinely absent', () => {
+  const base = {
+    requiredGates: greenRollup(),
+    changedFiles: [],
+    budget: { lines: 1500, uncomputable: false, baseSha: 'BASE', headSha: 'HEAD' },
+    diffBudget: 1000,
+    tier: 'lite',
+  };
+
+  // Not read: the forge refused, so nobody knows whether an exception exists.
+  const unread = evaluateTranche({ ...base, labels: null }).findings.find((f) => f.id === 'budget');
+  assert.equal(unread.severity, 'blocker');
+  assert.match(unread.evidence, /labels could not be read/,
+    'a block on an unread label set must not be presented as a block on an absent exception');
+
+  // Read, and empty: a real answer. Saying "could not be read" here would be
+  // the opposite lie.
+  const absent = evaluateTranche({ ...base, labels: [] }).findings.find((f) => f.id === 'budget');
+  assert.equal(absent.severity, 'blocker');
+  assert.ok(!/could not be read/.test(absent.evidence),
+    'the labels WERE read and carry no exception — that is a fact, not a gap');
+});

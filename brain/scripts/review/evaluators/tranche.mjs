@@ -237,6 +237,14 @@ export function evaluateTranche({
         cites: 'governance-tiers.mjs sizeExceptionRuling',
       });
     } else {
+      // A budget blocker where the LABELS could not be read is a different
+      // fact from one where the PR genuinely carries no exception, and a
+      // reader has to be able to tell them apart: the first may be a refused
+      // forge read, the second is a real answer. `null` is what
+      // `gatherTrancheInputs` and `review/cli.mjs` hand over for "not read",
+      // and this is the sentence that makes that distinction worth keeping
+      // (#1073 cold review, finding cold-1).
+      const unread = !Array.isArray(labels);
       findings.push({
         id: 'budget',
         severity: 'blocker',
@@ -250,7 +258,9 @@ export function evaluateTranche({
         // `run-check.mjs` produces. Silence would read as "nobody asked".
         evidence: ruling.refusedByTier
           ? `${comparison} — size:exception is not honored at the "${tier}" tier; the change must be sliced`
-          : comparison,
+          : unread
+            ? `${comparison} — the PR's labels could not be read, so no waiver could be honored; this block may be a refused read rather than an absent exception`
+            : comparison,
         cites: 'governance-tiers.mjs tierParams(tier).diffBudget',
       });
     }
