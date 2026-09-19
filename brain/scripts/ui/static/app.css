@@ -1248,3 +1248,69 @@ body {
   font-weight: 600;
   color: var(--warn);
 }
+
+/* ── epic clusters (#1032) ───────────────────────────────────────────────── */
+/* A cluster is a heading and a grid, not a board: the slices of an epic have
+   no coordinates, so nothing here draws a line between them. Tokens only. */
+.epic-cluster {
+  margin: 0 0 26px;
+}
+.epic-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+}
+.epic-head:hover,
+.epic-head:focus {
+  border-bottom-color: var(--accent);
+}
+.epic-number {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--ink);
+}
+.epic-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+  flex: 1;
+  min-width: 0;
+}
+.epic-track,
+.epic-count {
+  font-size: 11px;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+.epic-tracker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  margin: 6px 0 10px;
+  font-size: 11px;
+}
+.epic-tracker-label {
+  color: var(--muted);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.epic-tracker-branch {
+  font-family: var(--font-mono);
+  color: var(--live);
+}
+/* An epic that declared no tracker is a stated absence, so it reads as one:
+   the warning colour, not a blank space where a branch would be. */
+.epic-tracker-none {
+  color: var(--warn);
+  font-style: italic;
+}
+@media (max-width: 720px) {
+  .epic-title { flex-basis: 100%; }
+}

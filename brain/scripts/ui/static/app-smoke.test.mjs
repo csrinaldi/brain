@@ -448,3 +448,63 @@ test('#1067: a WHEN with no scenario heading is DRAWN in the panel, not merely c
   assert.match(drawn, /nobody wrote a scenario heading/, 'the orphan line is shown AS WRITTEN — the reviewer\'s point was that collecting it is not showing it');
   assert.match(drawn, /belongs to no scenario/, 'with what it was missing');
 });
+
+test('#1032: epic clustering groups the slices under their epic, and draws no node twice', async (t) => {
+  const dom = await boot();
+  t.after(() => dom.restore());
+
+  const button = (label) => find(dom.mounts.canvas, (n) => n.tagName === 'BUTTON' && n.textContent.includes(label));
+  const issuesDrawn = () => findAll(dom.mounts.canvas, byClass('node-card')).map((c) => c.getAttribute('data-issue'));
+
+  assert.equal(findAll(dom.mounts.canvas, byClass('epic-cluster')).length, 0, 'the board opens on track swimlanes');
+  const epicButton = button('epic clusters');
+  assert.ok(epicButton, 'the design draws both clustering choices');
+  assert.ok(!epicButton.disabled, 'and the second one works now that kind and parent are data (#1032)');
+
+  fire(epicButton, 'click');
+  await settle();
+
+  const clusters = findAll(dom.mounts.canvas, byClass('epic-cluster'));
+  assert.equal(clusters.length, 1, 'one cluster, for the one issue declaring kind: epic');
+  const cluster = clusters[0].textContent;
+  assert.match(cluster, /#878/, 'led by the epic itself');
+  assert.match(cluster, /#1059/, 'with the slices that named it as their parent');
+  assert.match(cluster, /#1032/);
+
+  // This fixture's epic DOES declare a tracker, so the branch is named.
+  assert.match(cluster, /feature\/brain-ui/, 'the tracker branch the epic declared is on screen');
+
+  // THE RULE THIS MODE LIVES OR DIES BY. A slice is on screen once: under its
+  // epic, not also down in its track lane. The page filters by the model's own
+  // `unclaimed` set rather than deciding again from kind and parent.
+  const drawn = issuesDrawn();
+  assert.equal(new Set(drawn).size, drawn.length, `a node was drawn twice: ${drawn.join(', ')}`);
+  assert.ok(drawn.includes('1059'), 'the slice is drawn, under its epic');
+
+  // And nothing vanished: the issue with no parent is still on the board.
+  assert.ok(drawn.includes('1024'), 'a node no epic claimed keeps its place in its own track lane');
+
+  // Back, and the board is what it was.
+  fire(button('track swimlanes'), 'click');
+  await settle();
+  assert.equal(findAll(dom.mounts.canvas, byClass('epic-cluster')).length, 0);
+});
+
+test('#1032: an epic that declares no tracker says so where the branch would be', async (t) => {
+  // True of every epic in this repository today, so it is the case a reader
+  // actually meets. `ticket-base.mjs` calls this state
+  // `epic-declares-no-tracker`, and a blank line there would read as "this
+  // epic has a tracker and we did not show it".
+  const noTracker = ISSUES.map((i) => (i.body === null ? i : { ...i, body: i.body.replace(/^tracker:.*\n/m, '') }));
+  const dom = await boot({ issues: noTracker });
+  t.after(() => dom.restore());
+
+  fire(find(dom.mounts.canvas, (n) => n.tagName === 'BUTTON' && n.textContent.includes('epic clusters')), 'click');
+  await settle();
+
+  const cluster = find(dom.mounts.canvas, byClass('epic-cluster'));
+  assert.ok(cluster, 'the epic still leads a cluster — a missing tracker is not a missing epic');
+  assert.match(cluster.textContent, /epic-declares-no-tracker|declares no tracker/,
+    'the absence is named, in the words the resolver itself uses');
+  assert.ok(!/feature\/brain-ui/.test(cluster.textContent), 'and no branch is claimed that was never declared');
+});

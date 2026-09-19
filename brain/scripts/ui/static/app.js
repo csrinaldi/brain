@@ -89,6 +89,15 @@ let selectedIssue = null;
  * would drop the caret and erase a half-typed query under the reader's hands.
  * Only the result list is redrawn.
  */
+/**
+ * How the board groups (#1032). The design draws both choices; only track
+ * swimlanes could be honoured until `kind` and `parent` became data. `epic`
+ * draws one cluster per declared epic and keeps every node the grouping did
+ * not claim in its own track lane below, so no node is ever drawn twice and
+ * none disappears.
+ */
+let clustering = 'track';
+
 let searchQuery = '';
 let searchInput = null;
 let searchResultsMount = null;
@@ -534,7 +543,7 @@ function renderStatus() {
  * into elements.
  */
 function renderLanes() {
-  const model = buildLaneModel(sectionOf(state, 'graph'), { collapsedTracks, holdingPage });
+  const model = buildLaneModel(sectionOf(state, 'graph'), { collapsedTracks, holdingPage, project: state.meta?.project ?? null });
   clear(mounts.canvas);
   if (!model.ok) {
     mounts.canvas.appendChild(said(`the graph could not be computed: ${model.reason}`));
@@ -548,7 +557,26 @@ function renderLanes() {
   mounts.canvas.appendChild(el('p', 'canvas-summary', `${lanes.length} track lane(s), ${holding.count} in the \`?\` holding lane`));
   mounts.canvas.appendChild(el('p', 'edge-summary', `edges: ${edgeSummary.laneInternal} in lanes, ${edgeSummary.holdingInternal} in the \`?\` holding lane, ${edgeSummary.crossLane} crossing lanes, ${edgeSummary.unknownNode} to an unknown node (${edgeSummary.total} total)`));
 
-  for (const lane of lanes) mounts.canvas.appendChild(renderLaneRow(lane));
+  // #1032: in epic clustering the declared epics lead, and the lanes below
+  // carry only what no epic claimed. The filter reads the model's OWN
+  // `unclaimed` set rather than re-deciding from `kind`/`parent` here — a
+  // second answer to a question the model already answered can disagree with
+  // the first, and the board would draw a node twice or lose one.
+  const grouping = model.value.epicGrouping;
+  const epicMode = clustering === 'epic' && grouping.ok;
+  if (clustering === 'epic' && !grouping.ok) {
+    mounts.canvas.appendChild(said(`the epics could not be grouped: ${grouping.reason}`));
+  }
+  if (epicMode) mounts.canvas.appendChild(renderEpicClusters(grouping.value));
+
+  const unclaimed = epicMode ? new Set(grouping.value.unclaimed) : null;
+  for (const lane of lanes) {
+    const shown = epicMode ? { ...lane, nodes: lane.nodes.filter((n) => unclaimed.has(n.number)) } : lane;
+    // A lane emptied by clustering is not drawn: every one of its nodes is on
+    // screen above, under the epic that claimed it. A lane with zero nodes
+    // does not exist here either (R998-3).
+    if (shown.nodes.length > 0) mounts.canvas.appendChild(renderLaneRow({ ...shown, count: shown.nodes.length }));
+  }
   mounts.canvas.appendChild(renderHoldingLane(holding));
 
   // A cross-lane edge is never a line (R998-3: lanes have no shared
@@ -587,6 +615,92 @@ function renderLaneHeader(label, count, nodes, toggle) {
   return header;
 }
 
+/**
+ * The declared epics and their slices (#1032). Each epic leads its own
+ * cluster: the epic's card, the tracker branch it declared, and the slices
+ * that named it as their parent.
+ *
+ * Every absence here is a sentence, never a gap. An epic that declared no
+ * tracker says so — that is `ticket-base.mjs`'s own `epic-declares-no-tracker`
+ * state and it is true of every epic in this repository today. A node whose
+ * declared parent did not resolve to an epic is listed apart with the reason
+ * the graph reported, rather than being quietly reparented or dropped.
+ */
+function renderEpicClusters(grouping) {
+  const wrap = document.createElement('div');
+  const { epics, divergentChildren } = grouping;
+
+  if (epics.length === 0) {
+    wrap.appendChild(said('no issue declares `kind: epic`, so there is nothing to cluster by — the track lanes below are the whole board'));
+    return wrap;
+  }
+
+  wrap.appendChild(el('p', 'canvas-summary', `${epics.length} declared epic(s)`));
+
+  for (const epic of epics) {
+    const cluster = el('div', 'epic-cluster');
+
+    // The epic leads its own cluster as a HEADING, not as another card —
+    // a card plus a header would say its number and title twice. But its
+    // STATE must still be on screen: an epic is a node like any other, and
+    // hiding whether it is planned or in flight would make the one mode
+    // organised around epics the only place you cannot see how they are
+    // going. The chip is built from the same `state` words every card uses.
+    const head = el('div', 'epic-head');
+    head.appendChild(el('span', 'epic-number', `#${epic.number}`));
+    const chip = el('span', `node-state state-${epic.state.code}`);
+    chip.appendChild(el('span', 'node-state-mark', epic.state.mark));
+    chip.appendChild(el('span', 'node-state-word', epic.state.label));
+    head.appendChild(chip);
+    head.appendChild(el('h3', 'epic-title', epic.title || '(no title)'));
+    if (epic.track) head.appendChild(el('span', 'epic-track', epic.track));
+    head.appendChild(el('span', 'epic-count', `${epic.children.length} slice(s)`));
+    cluster.appendChild(head);
+    for (const mark of epic.marks) cluster.appendChild(said(mark));
+
+    // Clicking the epic opens its panel, the same panel its slices open.
+    head.setAttribute('role', 'button');
+    head.setAttribute('tabindex', '0');
+    head.setAttribute('data-issue', String(epic.number));
+    head.addEventListener('click', () => selectNode(epic.number));
+    head.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') selectNode(epic.number); });
+
+    // The tracker is the branch an epic's slices are supposed to target, and
+    // an epic that declared none cannot have that checked at all — so the
+    // absence is named rather than left as a blank line.
+    const tracker = el('p', 'epic-tracker');
+    if (epic.tracker.branch) {
+      tracker.appendChild(el('span', 'epic-tracker-label', 'tracker'));
+      tracker.appendChild(el('span', 'epic-tracker-branch', epic.tracker.branch));
+      if (epic.tracker.stamp) tracker.appendChild(renderSourceStamp(epic.tracker.stamp));
+    } else {
+      tracker.appendChild(el('span', 'epic-tracker-none', epic.tracker.reason ?? 'this epic declares no tracker branch'));
+    }
+    cluster.appendChild(tracker);
+
+    if (epic.parentDivergence) {
+      cluster.appendChild(said(`declared parent #${epic.parentDivergence.parent} (from the ${epic.parentDivergence.parentSource ?? 'unknown'}): ${epic.parentDivergence.reason}`));
+    }
+
+    if (epic.children.length === 0) {
+      cluster.appendChild(said('no open issue declares this epic as its parent'));
+    } else {
+      const grid = el('div', 'lane-grid');
+      for (const child of epic.children) grid.appendChild(renderNodeCard(child));
+      cluster.appendChild(grid);
+    }
+
+    wrap.appendChild(cluster);
+  }
+
+  if (divergentChildren.length > 0) {
+    wrap.appendChild(saidList(`${divergentChildren.length} issue(s) declare a parent that is not an epic:`,
+      divergentChildren.map((c) => `#${c.number} declares #${c.parent} (from the ${c.parentSource ?? 'unknown'}): ${c.reason}`)));
+  }
+
+  return wrap;
+}
+
 function renderLaneRow(lane) {
   const row = el('div', 'lane-row');
   row.appendChild(renderLaneHeader(lane.label, lane.count, lane.nodes, null));
@@ -612,14 +726,21 @@ function renderClusteringBar() {
   left.appendChild(el('span', 'clustering-label', 'clustering'));
   const byTrack = el('button', 'clustering-choice', 'track swimlanes');
   byTrack.type = 'button';
-  byTrack.setAttribute('aria-current', 'true');
+  if (clustering === 'track') byTrack.setAttribute('aria-current', 'true');
+  byTrack.addEventListener('click', () => { clustering = 'track'; render(); });
+
+  // #1032: no longer disabled. `kind` and `parent` are declarations the issue
+  // bodies carry and `lane-model.mjs` now groups by them.
   const byEpic = el('button', 'clustering-choice', 'epic clusters');
   byEpic.type = 'button';
-  byEpic.disabled = true;
-  byEpic.setAttribute('title', 'epic grouping is not built yet — kind and parent are node data, and the lane model does not read them (#1032)');
+  if (clustering === 'epic') byEpic.setAttribute('aria-current', 'true');
+  byEpic.addEventListener('click', () => { clustering = 'epic'; render(); });
+
   left.appendChild(byTrack);
   left.appendChild(byEpic);
-  left.appendChild(el('span', 'clustering-note', 'grouped by the track each issue declares'));
+  left.appendChild(el('span', 'clustering-note', clustering === 'epic'
+    ? 'grouped by the epic each issue declares as its parent'
+    : 'grouped by the track each issue declares'));
   bar.appendChild(left);
 
   const legend = el('div', 'legend');
@@ -1634,7 +1755,7 @@ async function loadChange(issue) {
  */
 function drawnNodes() {
   if (view !== 'map') return [];
-  const model = buildLaneModel(sectionOf(state, 'graph'), { collapsedTracks, holdingPage });
+  const model = buildLaneModel(sectionOf(state, 'graph'), { collapsedTracks, holdingPage, project: state.meta?.project ?? null });
   if (!model.ok) return [];
   const nodes = [];
   model.value.lanes.forEach((lane, laneIndex) => {
