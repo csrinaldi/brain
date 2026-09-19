@@ -45,6 +45,10 @@ page can draw clusters and lanes together without deciding again.
 - **WHEN** the page draws clusters above and track lanes below
 - **THEN** it filters the lanes by `unclaimed` alone, no node is drawn twice, and no node disappears.
 
+#### Scenario: a claimed node declared no track
+- **WHEN** a node declares a `parent` an epic answers and no `track`
+- **THEN** in epic clustering the `?` batch excludes it and states how many it is not showing, because it is on screen under its epic — not hidden, shown elsewhere. A batch that silently shrank would misreport how much of the graph declared no track.
+
 #### Scenario: every node is accounted for
 - **WHEN** the grouping is built
 - **THEN** leading a cluster, sitting under one, and being unclaimed partition the graph — a node in none of the three would vanish from a board that trusted this answer.
@@ -61,3 +65,7 @@ page draws it with that same function.
 #### Scenario: an author reads the `?` lane's snippet
 - **WHEN** the holding lane shows what to paste
 - **THEN** the snippet carries `track`, `kind`, `parent`, `blocks`, `needs` and `files` — every key the parser reads and no key it does not — with a note saying `kind` is only for an epic and `parent` only for a slice of one, so the example is not read as an instruction.
+
+#### Scenario: the caveat reaches the reader
+- **WHEN** the page draws the batch's declaration block
+- **THEN** the note is ON SCREEN beside the snippet. A caveat carried by the model and drawn nowhere is not a caveat; the page would show a block that, pasted as printed, declares a repository full of epics parented to one ticket.

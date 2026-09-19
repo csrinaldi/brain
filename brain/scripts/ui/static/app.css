@@ -1314,3 +1314,16 @@ body {
 @media (max-width: 720px) {
   .epic-title { flex-basis: 100%; }
 }
+
+/* The snippet's caveat, and what the batch is not showing because a cluster
+   already does (#1079). Both are stated facts, so both are visible. */
+.batch-declare-note {
+  margin: 6px 0 0;
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+.batch-elsewhere {
+  font-size: 11px;
+  color: var(--accent);
+}

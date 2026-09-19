@@ -543,7 +543,7 @@ function renderStatus() {
  * into elements.
  */
 function renderLanes() {
-  const model = buildLaneModel(sectionOf(state, 'graph'), { collapsedTracks, holdingPage, project: state.meta?.project ?? null });
+  const model = buildLaneModel(sectionOf(state, 'graph'), { collapsedTracks, holdingPage, project: state.meta?.project ?? null, clustering });
   clear(mounts.canvas);
   if (!model.ok) {
     mounts.canvas.appendChild(said(`the graph could not be computed: ${model.reason}`));
@@ -843,6 +843,12 @@ function renderHoldingLane(holding) {
   left.appendChild(el('span', 'batch-mark', '?'));
   left.appendChild(el('span', 'batch-word', 'undeclared'));
   left.appendChild(el('span', 'batch-count', `${holding.count} of ${holding.total} open issues declared no block`));
+  // Not hidden — shown somewhere else. Without this the batch would appear to
+  // shrink when the reader switched clustering, which reads as the graph
+  // changing rather than the view (#1079).
+  if (holding.claimedElsewhere > 0) {
+    left.appendChild(el('span', 'batch-elsewhere', `${holding.claimedElsewhere} more shown under their epic`));
+  }
   head.appendChild(left);
   head.appendChild(toggle);
   panel.appendChild(head);
@@ -857,6 +863,13 @@ function renderHoldingLane(holding) {
   const how = el('div', 'batch-declare');
   how.appendChild(el('span', 'batch-declare-label', 'to declare, paste in the issue body'));
   how.appendChild(el('code', null, holding.declareSnippet));
+  // #1079 cold review, finding cold-2. The snippet gained `kind: epic` and
+  // `parent: 878` and the note explaining that both lines are CONDITIONAL was
+  // carried by the model and drawn nowhere — so the page showed a pasteable
+  // block that, taken at its word, declares a repository full of epics all
+  // parented to one ticket. A caveat that exists only in the model is not a
+  // caveat; it is the same silence one module along.
+  if (holding.declareNote) how.appendChild(el('p', 'batch-declare-note', holding.declareNote));
   panel.appendChild(how);
 
   const tiles = el('div', 'batch-tiles');
@@ -1755,7 +1768,7 @@ async function loadChange(issue) {
  */
 function drawnNodes() {
   if (view !== 'map') return [];
-  const model = buildLaneModel(sectionOf(state, 'graph'), { collapsedTracks, holdingPage, project: state.meta?.project ?? null });
+  const model = buildLaneModel(sectionOf(state, 'graph'), { collapsedTracks, holdingPage, project: state.meta?.project ?? null, clustering });
   if (!model.ok) return [];
   const nodes = [];
   model.value.lanes.forEach((lane, laneIndex) => {

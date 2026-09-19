@@ -386,7 +386,7 @@ function buildEpicGrouping(nodes, declarationDivergences, project) {
  * @param {{ok:boolean, value?:{nodes:Array, edges:Array, issuesUnreadable?:Array, declarationDivergences?:Array}, reason?:string}} graphSection
  * @param {{collapsedTracks?: Set<string>, holdingPage?: number, project?: string|null}} [options] `collapsedTracks` holds the track ids currently collapsed — the `?` lane starts in it, so it is collapsed by default without `app.js` deciding that on its own. `project` (optional, defaulting to `null` the way `roadmap-model.mjs`'s own `buildRoadmapModel` already does) sources the epic tracker's stamp to a real forge link when known.
  */
-export function buildLaneModel(graphSection, { collapsedTracks = new Set(['?']), holdingPage = 0, project = null } = {}) {
+export function buildLaneModel(graphSection, { collapsedTracks = new Set(['?']), holdingPage = 0, project = null, clustering = 'track' } = {}) {
   if (!graphSection || typeof graphSection !== 'object') return { ok: false, reason: 'no graph section was given to the lanes' };
   if (graphSection.ok !== true) return { ok: false, reason: graphSection.reason };
 
@@ -452,7 +452,25 @@ export function buildLaneModel(graphSection, { collapsedTracks = new Set(['?']),
     };
   });
 
-  const holdingSorted = [...holdingNodes].sort(byNumber);
+  // The grouping is built BEFORE the batch, because the batch has to know
+  // what it already claimed (#1079 cold review, finding cold-1). A node can
+  // declare no track and still declare a parent: in epic clustering the epic
+  // shows it, and the `?` batch showing it again drew the same node twice.
+  //
+  // The arithmetic stays here rather than in the page. This batch states a
+  // count, a total and a page span, and a renderer dropping rows from a page
+  // it did not compute would make all three lie.
+  const epicGrouping = buildEpicGrouping(nodes, declarationDivergences, project);
+  const shownElsewhere = clustering === 'epic' && epicGrouping.ok
+    ? new Set(nodes.map((n) => n.number).filter((number) => !epicGrouping.value.unclaimed.includes(number)))
+    : new Set();
+
+  const holdingAll = [...holdingNodes].sort(byNumber);
+  const holdingSorted = holdingAll.filter((n) => !shownElsewhere.has(n.number));
+  // NOT hidden — shown somewhere else. The two are different facts, and a
+  // batch that silently shrank would misreport how much of the graph declared
+  // no track at all.
+  const claimedElsewhere = holdingAll.length - holdingSorted.length;
   const holdingTotal = holdingSorted.length;
   const totalPages = Math.max(1, Math.ceil(holdingTotal / PAGE_SIZE));
   const page = Math.min(Math.max(0, holdingPage), totalPages - 1);
@@ -486,6 +504,7 @@ export function buildLaneModel(graphSection, { collapsedTracks = new Set(['?']),
     edgeCount: holdingEdges.length,
     width: placedHolding.width,
     height: placedHolding.height,
+    claimedElsewhere,
     declareSnippet: DECLARE_SNIPPET,
     declareNote: DECLARE_NOTE,
     // Never empty-on-failure: a page with nothing currently visible and a
@@ -514,7 +533,7 @@ export function buildLaneModel(graphSection, { collapsedTracks = new Set(['?']),
       droppedEdges,
       issuesUnreadable,
       edgeSummary,
-      epicGrouping: buildEpicGrouping(nodes, declarationDivergences, project),
+      epicGrouping,
     },
   };
 }

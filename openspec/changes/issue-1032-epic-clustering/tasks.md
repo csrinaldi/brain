@@ -9,4 +9,6 @@
 - [x] T7. The declare snippet gains `kind` and `parent`, with a note; every key in it is one the parser reads (R1032-6).
 - [x] T8. `app.js`: the clustering control is enabled, clusters render above the lanes, and the lanes filter by `unclaimed`.
 - [x] T9. `canvas-model.mjs` and its test removed; the three comments citing it rewritten.
+- [x] T11. The `?` batch excludes what a cluster already shows and states the count; the page passes the clustering mode to the model (R1032-4).
+- [x] T12. The declare note is rendered beside the snippet (R1032-6).
 - [ ] T10. A slice whose open PR targets a base other than its epic's tracker — needs the PR list, which this model is not given. Each grouped child carries an explicitly failed `baseCheck` naming the reason. Ticket to open.

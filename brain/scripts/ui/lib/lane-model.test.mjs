@@ -491,3 +491,37 @@ test('#1032: an epic-grouped row carries every field a lane card carries, so one
   // layout engine into a module that deliberately has none.
   assert.equal(grouped.x, undefined, 'a cluster lays out as a grid; coordinates belong to a lane board');
 });
+
+// ── #1079 cold review, finding cold-1 ──────────────────────────────────────
+// A node can declare NO TRACK and still declare a parent. In epic clustering
+// the epic claims it, and the `?` holding lane held it too — so expanding the
+// batch drew the same node a second time. The lanes were filtered by
+// `unclaimed`; the holding lane was appended whole.
+//
+// The arithmetic lives here, not in the page: the batch states a count, a
+// total and a page span, and a renderer dropping rows from a page it did not
+// compute would make all three lie.
+test('#1079: in epic clustering the `?` batch excludes what an epic already claimed, and says how many', () => {
+  const nodes = [
+    { number: 1, title: 'epic', track: 'UI', kind: 'epic', parent: null, state: 'open', ok: true },
+    { number: 2, title: 'claimed, no track', track: null, kind: null, parent: 1, parentSource: 'block', state: 'open', ok: true },
+    { number: 3, title: 'undeclared, no parent', track: null, kind: null, parent: null, state: 'open', ok: true },
+  ];
+  const section = { ok: true, value: { nodes, edges: [], tracks: {} } };
+
+  // Track swimlanes: the batch is what it always was. Declaring a parent does
+  // not declare a track, and this lane is about the track.
+  const byTrack = buildLaneModel(section, { collapsedTracks: new Set() });
+  assert.deepEqual(byTrack.value.holding.nodes.map((n) => n.number), [2, 3]);
+  assert.equal(byTrack.value.holding.count, 2);
+  assert.equal(byTrack.value.holding.claimedElsewhere, 0, 'nothing is shown elsewhere in this mode');
+
+  // Epic clusters: #2 is on screen under its epic, so the batch must not show
+  // it again — and must not pretend it was never undeclared either.
+  const byEpic = buildLaneModel(section, { collapsedTracks: new Set(), clustering: 'epic' });
+  assert.deepEqual(byEpic.value.holding.nodes.map((n) => n.number), [3], 'only what no epic claimed');
+  assert.equal(byEpic.value.holding.count, 1, 'and the count is of what this batch actually shows');
+  assert.equal(byEpic.value.holding.claimedElsewhere, 1,
+    'the one it is not showing is stated — a batch that silently shrank would misreport how much of the graph declared no track');
+  assert.equal(byEpic.value.holding.total, 3, 'the proportion is still of every open issue');
+});

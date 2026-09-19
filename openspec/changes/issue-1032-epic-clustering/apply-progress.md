@@ -81,3 +81,39 @@ other, and the one mode organised around epics must not be the only place you
 cannot see how they are going.
 
 Whole repository: 6290 tests, 6290 pass, 0 fail.
+
+## Cold review round 1 of PR #1079 — two blockers, and one of them is a repeat
+
+**cold-1: a node can declare no track AND a parent.** In epic clustering the
+epic claimed it and the `?` batch held it too, so expanding the batch drew the
+same node a second time. I had filtered the track lanes by `unclaimed` and
+appended the holding lane whole. Reproduced exactly as measured before
+changing anything: claimed `[2]`, unclaimed `[]`, `holding.nodes` `[2]`.
+
+The fix moves the grouping ahead of the batch inside the model, because the
+arithmetic belongs there: the batch states a count, a total and a page span,
+and a renderer dropping rows from a page it did not compute would make all
+three lie. The batch now says `N more shown under their epic` — not hidden,
+shown elsewhere. Those are different facts, and a batch that silently shrank
+would read as the graph changing when only the view did.
+
+**cold-2: I added `declareNote` to the model and drew it nowhere.**
+
+That is the same defect as the spec `orphans` earlier in this change, and the
+same defect as `saidList`, and the same class as `sddForIssue`. Collected is
+not shown. Worse here than usual: the snippet had just gained `kind: epic` and
+`parent: 878`, so the page was displaying a pasteable block that, taken at its
+word, declares a repository full of epics all parented to one ticket. The
+caveat existed, in a field nobody rendered.
+
+The smoke suite now asserts the caveat's words are ON SCREEN, which is the
+only kind of test that catches this class — a model test would have passed
+throughout, exactly as it did.
+
+| mutation | suites |
+| --- | --- |
+| the note stops being drawn | 1 red |
+| the batch stops excluding what a cluster shows | 2 red |
+| the clustering mode stops reaching the model | 1 red |
+
+Whole repository: 6293 tests, 6293 pass, 0 fail.
