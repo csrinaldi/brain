@@ -380,9 +380,13 @@ for (const providerName of Object.keys(PROVIDERS)) {
     assert.equal(result.stateReason, null, 'an open issue carries no closure reason on either provider');
   });
 
-  // ── mrList (issue #355, M10 Phase 2 rank-3) ─────────────────────────────
-  // `({ project, state }) -> [{ number, title, headBranch }]`. Unlike its
-  // sibling read verbs (prView/prReviews/labelEvents/prStatusRollup), `mrList`
+  // ── mrList (issue #355, M10 Phase 2 rank-3; issue #930 D1/D2 widening) ──
+  // `({ project, state, headBranch }) -> [{ number, title, headBranch, state, merged }]`.
+  // `state`/`merged` are additive (#930) — every pre-#930 caller reading only
+  // `number`/`title`/`headBranch` keeps working unchanged. `headBranch` is an
+  // optional filter (D2); an unfiltered call stays byte-identical to the
+  // pre-#930 query. Unlike its sibling read verbs (prView/prReviews/labelEvents/
+  // prStatusRollup), `mrList`
   // does NOT wrap its transport call — `runJson` throws on a non-zero exit or
   // malformed JSON (exec.mjs:31-32), and neither provider catches it. This is
   // PINNED here (design D3) because changing it is out of scope for this
@@ -399,8 +403,8 @@ for (const providerName of Object.keys(PROVIDERS)) {
     for (const entry of result) {
       assert.deepEqual(
         Object.keys(entry).sort(),
-        ['headBranch', 'number', 'title'],
-        'each mrList entry must normalize to EXACTLY { number, title, headBranch } — no narrowed or widened shape',
+        ['headBranch', 'merged', 'number', 'state', 'title'],
+        'each mrList entry must normalize to EXACTLY { number, title, headBranch, state, merged } — the additive #930 shape, no narrowed or extra fields',
       );
     }
     // Full-array lock: pins values AND order (neither provider sorts —
@@ -409,18 +413,39 @@ for (const providerName of Object.keys(PROVIDERS)) {
     // content rather than re-derived from fixture.data via the same
     // number/head.ref/source_branch mapping the normalizer performs — doing
     // so would let a normalizer bug that mirrors this test's mapping pass
-    // undetected.
+    // undetected. Both fixtures were queried with an open-state filter, so
+    // every entry is `state: 'open', merged: false` (a PR that is still open
+    // has never merged) — #930's D1 mapping.
     const expected =
       providerName === 'github'
         ? [
-            { number: 342, title: 'M10: seam-contract-coverage epic tracker', headBranch: 'feature/m10-seam-contract-coverage' },
-            { number: 331, title: 'fix(governance): re-order release audit gate to audit-then-tag and add audit baseline', headBranch: 'fix/issue-210-fixgovernance-releaseyml-audit-gate-cann' },
+            { number: 342, title: 'M10: seam-contract-coverage epic tracker', headBranch: 'feature/m10-seam-contract-coverage', state: 'open', merged: false },
+            { number: 331, title: 'fix(governance): re-order release audit gate to audit-then-tag and add audit baseline', headBranch: 'fix/issue-210-fixgovernance-releaseyml-audit-gate-cann', state: 'open', merged: false },
           ]
         : [
-            { number: 42, title: 'Add pagination guard to labelList', headBranch: 'feat/label-pagination' },
-            { number: 41, title: 'Fix issueView author normalization', headBranch: 'fix/issue-author-null' },
+            { number: 42, title: 'Add pagination guard to labelList', headBranch: 'feat/label-pagination', state: 'open', merged: false },
+            { number: 41, title: 'Fix issueView author normalization', headBranch: 'fix/issue-author-null', state: 'open', merged: false },
           ];
     assert.deepEqual(result, expected);
+  });
+
+  // #930 — spec.md's "Both providers report merged state" scenario: a closed,
+  // merged PR and a closed, unmerged PR on two different branches, both
+  // normalized through the shared {state, merged} pair.
+  test(`${providerName}.mrList (contract): both providers report merged state — closed+merged vs closed+unmerged on different branches`, async () => {
+    const fixtureName = `${providerName}-mrList-all.json`;
+    const fixture = loadFixture(fixtureName);
+    assertProvenance(fixture, fixtureName);
+
+    const result = await vcs.mrList({ project: 'x/y', state: 'all', ...mrListArgs(fixture) });
+
+    const merged = result.find((r) => r.state === 'closed' && r.merged === true);
+    const unmerged = result.find((r) => r.state === 'closed' && r.merged === false);
+    assert.ok(merged, 'the `-all` fixture must include a closed, merged PR');
+    assert.ok(unmerged, 'the `-all` fixture must include a closed, unmerged PR');
+    assert.notEqual(merged.headBranch, unmerged.headBranch, 'the merged and unmerged PRs must be on different branches');
+    assert.equal(typeof merged.number, 'number');
+    assert.equal(typeof unmerged.number, 'number');
   });
 
   test(`${providerName}.mrList (contract): an empty open-list yields [], never a fabricated null/undefined`, async () => {

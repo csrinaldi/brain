@@ -246,15 +246,104 @@ test('#459: gitlab.issueList stops after a single short page — no wasted round
 // ── mrList ───────────────────────────────────────────────────────────────────────
 
 test('github.mrList returns headBranch from head.ref', async () => {
-  setSpawn(fakeSpawn([{ number: 1, title: 'Fix', head: { ref: 'feat/foo' } }]));
+  setSpawn(fakeSpawn([{ number: 1, title: 'Fix', head: { ref: 'feat/foo' }, state: 'open', merged_at: null }]));
   const result = await github.mrList({ project: 'o/r', state: 'open' });
-  assert.deepEqual(result, [{ number: 1, title: 'Fix', headBranch: 'feat/foo' }]);
+  assert.deepEqual(result, [{ number: 1, title: 'Fix', headBranch: 'feat/foo', state: 'open', merged: false }]);
 });
 
 test('gitlab.mrList returns headBranch from source_branch', async () => {
-  setSpawn(fakeSpawn([{ iid: 1, title: 'Fix', source_branch: 'feat/bar' }]));
+  setSpawn(fakeSpawn([{ iid: 1, title: 'Fix', source_branch: 'feat/bar', state: 'opened' }]));
   const result = await gitlab.mrList({ project: 'g/r', state: 'open' });
-  assert.deepEqual(result, [{ number: 1, title: 'Fix', headBranch: 'feat/bar' }]);
+  assert.deepEqual(result, [{ number: 1, title: 'Fix', headBranch: 'feat/bar', state: 'open', merged: false }]);
+});
+
+// #930 D1 — the additive `merged`/`state` mapping.
+
+test('github.mrList maps a closed, merged PR to state:closed, merged:true', async () => {
+  setSpawn(fakeSpawn([{ number: 2, title: 'Merged', head: { ref: 'feat/m' }, state: 'closed', merged_at: '2026-09-10T12:00:00Z' }]));
+  const result = await github.mrList({ project: 'o/r', state: 'all' });
+  assert.deepEqual(result[0], { number: 2, title: 'Merged', headBranch: 'feat/m', state: 'closed', merged: true });
+});
+
+test('github.mrList maps a closed, unmerged PR to state:closed, merged:false', async () => {
+  setSpawn(fakeSpawn([{ number: 3, title: 'Abandoned', head: { ref: 'feat/a' }, state: 'closed', merged_at: null }]));
+  const result = await github.mrList({ project: 'o/r', state: 'all' });
+  assert.deepEqual(result[0], { number: 3, title: 'Abandoned', headBranch: 'feat/a', state: 'closed', merged: false });
+});
+
+test('github.mrList maps a missing merged_at field to merged:null — never guessed', async () => {
+  setSpawn(fakeSpawn([{ number: 4, title: 'Unknown', head: { ref: 'feat/u' }, state: 'closed' }]));
+  const result = await github.mrList({ project: 'o/r', state: 'all' });
+  assert.deepEqual(result[0], { number: 4, title: 'Unknown', headBranch: 'feat/u', state: 'closed', merged: null });
+});
+
+test('gitlab.mrList maps native state:merged to state:closed, merged:true', async () => {
+  setSpawn(fakeSpawn([{ iid: 2, title: 'Merged', source_branch: 'feat/m', state: 'merged' }]));
+  const result = await gitlab.mrList({ project: 'g/r', state: 'all' });
+  assert.deepEqual(result[0], { number: 2, title: 'Merged', headBranch: 'feat/m', state: 'closed', merged: true });
+});
+
+test('gitlab.mrList maps native state:closed (never merged) to state:closed, merged:false', async () => {
+  setSpawn(fakeSpawn([{ iid: 3, title: 'Abandoned', source_branch: 'feat/a', state: 'closed' }]));
+  const result = await gitlab.mrList({ project: 'g/r', state: 'all' });
+  assert.deepEqual(result[0], { number: 3, title: 'Abandoned', headBranch: 'feat/a', state: 'closed', merged: false });
+});
+
+test('gitlab.mrList maps an unrepresentable native state (e.g. locked) to state:null, merged:null', async () => {
+  setSpawn(fakeSpawn([{ iid: 4, title: 'Locked', source_branch: 'feat/l', state: 'locked' }]));
+  const result = await gitlab.mrList({ project: 'g/r', state: 'all' });
+  assert.deepEqual(result[0], { number: 4, title: 'Locked', headBranch: 'feat/l', state: null, merged: null });
+});
+
+// #930 D2 — the optional `headBranch` filter and its full-page fail-closed guard.
+
+test('github.mrList unfiltered call stays byte-identical to the pre-#930 query — no head param added', async () => {
+  let argv = null;
+  setSpawn((cmd, args) => { argv = args; return { status: 0, stdout: '[]', stderr: '' }; });
+  await github.mrList({ project: 'o/r', state: 'open' });
+  assert.equal(argv[argv.length - 1], 'repos/o/r/pulls?state=open&per_page=100');
+});
+
+test('github.mrList({ headBranch }) filters by head=<owner>:<branch>, URL-encoded', async () => {
+  let argv = null;
+  setSpawn((cmd, args) => { argv = args; return { status: 0, stdout: '[]', stderr: '' }; });
+  await github.mrList({ project: 'o/r', state: 'all', headBranch: 'memory/host-2026-01-01' });
+  const endpoint = argv[argv.length - 1];
+  assert.equal(endpoint, 'repos/o/r/pulls?state=all&head=o%3Amemory%2Fhost-2026-01-01&per_page=100');
+});
+
+test('github.mrList({ headBranch }) throws when the page comes back full (100) — fails closed on possible truncation', async () => {
+  const full = Array.from({ length: 100 }, (_, i) => ({ number: i + 1, title: `t${i}`, head: { ref: 'memory/host-2026-01-01' }, state: 'open', merged_at: null }));
+  setSpawn(fakeSpawn(full));
+  await assert.rejects(
+    () => github.mrList({ project: 'o/r', state: 'all', headBranch: 'memory/host-2026-01-01' }),
+    /full page|truncation/i,
+  );
+});
+
+test('gitlab.mrList unfiltered call stays byte-identical to the pre-#930 query — no source_branch param, per_page=50', async () => {
+  let argv = null;
+  setSpawn((cmd, args) => { argv = args; return { status: 0, stdout: '[]', stderr: '' }; });
+  await gitlab.mrList({ project: 'g/r', state: 'open' });
+  const endpoint = argv[argv.length - 1];
+  assert.equal(endpoint, `projects/${encodeURIComponent('g/r')}/merge_requests?state=opened&per_page=50`);
+});
+
+test('gitlab.mrList({ headBranch }) filters by source_branch, URL-encoded, per_page=100', async () => {
+  let argv = null;
+  setSpawn((cmd, args) => { argv = args; return { status: 0, stdout: '[]', stderr: '' }; });
+  await gitlab.mrList({ project: 'g/r', state: 'all', headBranch: 'memory/host-2026-01-01' });
+  const endpoint = argv[argv.length - 1];
+  assert.equal(endpoint, `projects/${encodeURIComponent('g/r')}/merge_requests?state=all&source_branch=${encodeURIComponent('memory/host-2026-01-01')}&per_page=100`);
+});
+
+test('gitlab.mrList({ headBranch }) throws when the page comes back full (100) — fails closed on possible truncation', async () => {
+  const full = Array.from({ length: 100 }, (_, i) => ({ iid: i + 1, title: `t${i}`, source_branch: 'memory/host-2026-01-01', state: 'opened' }));
+  setSpawn(fakeSpawn(full));
+  await assert.rejects(
+    () => gitlab.mrList({ project: 'g/r', state: 'all', headBranch: 'memory/host-2026-01-01' }),
+    /full page|truncation/i,
+  );
 });
 
 // ── commitStatus ─────────────────────────────────────────────────────────────────

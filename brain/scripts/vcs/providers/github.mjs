@@ -454,9 +454,39 @@ export async function issueList({ project, state = 'open', assignee } = {}) {
     }));
 }
 
-export async function mrList({ project, state = 'open' } = {}) {
-  const arr = ghJson(['api', `repos/${project}/pulls?state=${providerState('github', state)}&per_page=100`]);
-  return arr.map(r => ({ number: r.number, title: r.title, headBranch: r.head.ref }));
+/**
+ * mrList — widened additively by #930 (D1/D2).
+ *
+ * D1: every entry now also carries `state` ('open'|'closed', GitHub's own
+ * literal, passed through unchanged) and `merged` (boolean|null): `true`/
+ * `false` when `merged_at` is present (non-null vs null), `null` only when
+ * the payload carries no `merged_at` field at all — an uncomputable read,
+ * never guessed. Pre-#930 callers reading only `number`/`title`/`headBranch`
+ * are unaffected (additive, never narrowed).
+ *
+ * D2: an optional `headBranch` filter narrows the query to
+ * `head=<owner>:<branch>` (`owner` derived from `project`, URL-encoded).
+ * Unfiltered calls stay byte-identical to the pre-#930 query — no `head=`
+ * param is ever added unless `headBranch` is explicitly passed. When
+ * `headBranch` is set and the page comes back full (100), this THROWS
+ * rather than risk returning a silently truncated result — the caller
+ * (the lane sweep, #936) must not decide a closed-PR outcome from a partial
+ * page.
+ */
+export async function mrList({ project, state = 'open', headBranch } = {}) {
+  const owner = project.split('/')[0];
+  const headParam = headBranch !== undefined ? `&head=${encodeURIComponent(`${owner}:${headBranch}`)}` : '';
+  const arr = ghJson(['api', `repos/${project}/pulls?state=${providerState('github', state)}${headParam}&per_page=100`]);
+  if (headBranch !== undefined && arr.length === 100) {
+    throw new Error(`mrList: a full page (100) came back for headBranch ${headBranch} — cannot rule out truncation, failing closed`);
+  }
+  return arr.map(r => ({
+    number: r.number,
+    title: r.title,
+    headBranch: r.head.ref,
+    state: r.state,
+    merged: r.merged_at !== undefined ? r.merged_at !== null : null,
+  }));
 }
 
 export async function commitStatus({ project, sha }) {

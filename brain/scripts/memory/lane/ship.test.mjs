@@ -486,7 +486,7 @@ test('PR already open by headBranch: mrCreate never called, mrAutoMerge still ca
   ]);
   let mrListArgs;
   const { vcs, calls: vcsCalls } = fakeVcs({
-    mrList: async (args) => { vcsCalls.mrList++; mrListArgs = args; return [{ number: 7, title: 't', headBranch: BRANCH }]; },
+    mrList: async (args) => { vcsCalls.mrList++; mrListArgs = args; return [{ number: 7, title: 't', headBranch: BRANCH, state: 'open', merged: false }]; },
   });
 
   const result = await shipLane({
@@ -629,7 +629,7 @@ test('an unparseable URL triggers exactly one mrList re-scan and recovers the nu
   const { vcs } = fakeVcs({
     mrList: async () => {
       mrListCalls++;
-      return mrListCalls === 1 ? [] : [{ number: 9, title: 't', headBranch: BRANCH }];
+      return mrListCalls === 1 ? [] : [{ number: 9, title: 't', headBranch: BRANCH, state: 'open', merged: false }];
     },
     mrCreate: async () => ({ url: 'https://example.invalid/unparseable' }),
     mrAutoMerge: async (args) => { armArgs = args; return { enabled: true, url: null }; },
