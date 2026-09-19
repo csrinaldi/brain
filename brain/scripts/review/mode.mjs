@@ -14,7 +14,12 @@ const CHECKPOINT_REPORT_RE = /(^|\/)checkpoint-report\.md$/;
  * @returns {'ruling'|'checkpoint'|'tranche'}
  */
 export function deriveMode({ labels = [], changedFiles = [] } = {}) {
-  if (labels.includes('needs-ruling')) return 'ruling';
+  // #1073: `labels = []` is a default, and a default only applies to
+  // `undefined`. The identical shape crashed `evaluators/checkpoint.mjs` the
+  // moment `review/cli.mjs` began threading an unread label set through as
+  // `null`. A set nobody read cannot claim a ruling was asked for, so a
+  // non-array derives the default mode rather than a TypeError.
+  if (Array.isArray(labels) && labels.includes('needs-ruling')) return 'ruling';
   if (changedFiles.some(f => CHECKPOINT_REPORT_RE.test(f))) return 'checkpoint';
   return 'tranche';
 }

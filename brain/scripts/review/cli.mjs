@@ -510,6 +510,14 @@ export async function main(deps = {}) {
       baseSha,
       changedFiles,
       prBody: boot.prView.body,
+      // #1072: the labels from the SAME prView that gave the body above, so
+      // the reviewer honors `size:exception` on the same reading of the PR the
+      // `diff-size` gate honors it on — and with no second forge call.
+      // `?? null`, NOT `?? []` (#1073 cold review): a refusal is null and never
+      // an empty array, because `[]` claims the PR carries no exception when
+      // nothing was read. Every consumer of this value treats a non-array as
+      // "not read" and fails closed on it.
+      labels: boot.prView.labels ?? null,
       // #631: the bound port, FIRST, so a caller's override wins on the seams it
       // names and cannot silently drop the credential binding by omission.
       //
@@ -532,7 +540,11 @@ export async function main(deps = {}) {
       headSha: boot.headSha,
       changedFiles,
       prBody: boot.prView.body,
-      labels: boot.prView.labels ?? [],
+      // `?? null`, NOT `?? []` (#1073 cold review): a refusal is null and never
+      // an empty array, because `[]` claims the PR carries no exception when
+      // nothing was read. Every consumer of this value treats a non-array as
+      // "not read" and fails closed on it.
+      labels: boot.prView.labels ?? null,
       tier,   // #555: the artifact set is tier-resolved; cli.mjs already has it
       worktreePath: boot.worktreePath,
       doctrineRecords: boot.doctrine.records,
