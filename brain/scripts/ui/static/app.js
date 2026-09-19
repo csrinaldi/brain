@@ -47,10 +47,10 @@ function applyTheme(choice) {
   }
 }
 
-import { buildLaneModel, nodeSummaryFor } from './lib/lane-model.mjs';
+import { buildLaneModel, nodeSummaryFor, childrenOf } from './lib/lane-model.mjs';
 import { issueUrl } from './lib/forge-url.mjs';
 import { buildDrawerModel } from './lib/drawer-model.mjs';
-import { buildSddModel, sddForIssue, STAGE_VOCAB } from './lib/sdd-model.mjs';
+import { buildSddModel, sddForIssue, buildSlicePlan, STAGE_VOCAB } from './lib/sdd-model.mjs';
 import { buildReviewTimeline } from './lib/review-timeline.mjs';
 import { buildRoadmapModel } from './lib/roadmap-model.mjs';
 import { buildDecisionsModel } from './lib/decisions-model.mjs';
@@ -560,35 +560,54 @@ function renderPager(holding) {
  * renders one loop over rows this page never re-derives.
  */
 function renderSdd() {
-  const model = buildSddModel(sectionOf(state, 'changes'));
+  // The design's fourth mode is the PROJECT's chained-PR plan, not a matrix of
+  // every change's seven stages: per-change detail belongs in the panel a
+  // reader opens by clicking a ticket, which is where it now lives (#1059
+  // phase 10, the maintainer's own reading of the design).
+  const model = buildSlicePlan(sectionOf(state, 'changes'));
   clear(mounts.canvas);
   if (!model.ok) {
-    mounts.canvas.appendChild(said(`the SDD view could not be computed: ${model.reason}`));
+    mounts.canvas.appendChild(said(`the slice plan could not be computed: ${model.reason}`));
     return;
   }
-  const { changes, totals, sliceNote } = model.value;
-  mounts.canvas.appendChild(el('p', 'canvas-summary', `${totals.active} active change(s), ${totals.archived} archived, ${totals.withViolations} with a phase-order violation`));
-  // Review of PR 4, fix 1: a not-issue-numbered archive/ dir is skipped from
-  // the rows above but never silently dropped — said here by name.
-  if (totals.archiveSkipped.count > 0) {
-    mounts.canvas.appendChild(said(`${totals.archiveSkipped.count} archive dir(s) skipped: ${totals.archiveSkipped.names.join(', ')}`));
+  const { changes, unreadable, note, archiveSkipped } = model.value;
+  mounts.canvas.appendChild(el('p', 'canvas-summary', `${changes.length} change(s) declare a chained plan`));
+  mounts.canvas.appendChild(said(note));
+  if (archiveSkipped.count > 0) {
+    mounts.canvas.appendChild(said(`${archiveSkipped.count} archive dir(s) skipped: ${archiveSkipped.names.join(', ')}`));
   }
 
-  for (const change of changes.filter((c) => !c.archived)) mounts.canvas.appendChild(renderSddRow(change, sliceNote));
-  const archived = changes.filter((c) => c.archived);
-  if (archived.length > 0) {
-    mounts.canvas.appendChild(el('h3', 'sdd-archived-heading', 'Archived'));
-    for (const change of archived) mounts.canvas.appendChild(renderSddRow(change, sliceNote));
+  if (changes.length === 0) {
+    mounts.canvas.appendChild(said('no change in this tree declares a slice plan in its tasks.md'));
+  }
+
+  for (const change of changes) {
+    const block = el('div', 'plan-change');
+    const head = el('div', 'plan-change-head');
+    const open = el('button', 'plan-issue', `#${change.issue}`);
+    open.type = 'button';
+    open.addEventListener('click', () => selectNode(change.issue));
+    head.appendChild(open);
+    if (change.archived) head.appendChild(el('span', 'plan-archived', 'archived'));
+    head.appendChild(renderSourceStamp(sourceStamp(change.source)));
+    block.appendChild(head);
+
+    const list = el('ol', 'plan-slices');
+    for (const slice of change.slices) {
+      const item = el('li', 'plan-slice');
+      item.appendChild(el('span', 'plan-slice-n', `slice ${slice.slice}`));
+      item.appendChild(el('span', 'plan-claims', slice.claims.length > 0 ? slice.claims.join(', ') : 'claims nothing'));
+      if (slice.terminalPr) item.appendChild(el('span', 'plan-terminal', slice.terminalPr));
+      list.appendChild(item);
+    }
+    block.appendChild(list);
+    mounts.canvas.appendChild(block);
+  }
+
+  if (unreadable.length > 0) {
+    mounts.canvas.appendChild(saidList(`${unreadable.length} declared plan(s) could not be read:`, unreadable.map((u) => `#${u.issue}: ${u.reason}`)));
   }
 }
-
-/**
- * Every value this row draws carries its own source underneath it (A3,
- * extended to the SDD view by review of PR 4, fix 2): the row header already
- * stamped `change.dir`; each stage cell, the tasks line, and each slice line
- * now stamp their own `source` the same way, rather than trusting the
- * header's stamp to stand in for the whole row.
- */
 function renderSddRow(change, sliceNote) {
   const row = el('div', 'sdd-row');
   const header = el('div', 'sdd-row-header');
@@ -1187,6 +1206,10 @@ function renderDrawer() {
   if (summary.ok) {
     if (summary.value.title) mounts.drawer.appendChild(el('h2', 'drawer-title', summary.value.title));
     for (const mark of summary.value.marks) mounts.drawer.appendChild(said(mark));
+    if (summary.value.blockedBy.length > 0) {
+      mounts.drawer.appendChild(el('p', 'drawer-blocked', `blocked by ${summary.value.blockedBy.map((n) => `#${n}`).join(', ')}`));
+    }
+    mounts.drawer.appendChild(renderChildren(selectedIssue));
   } else {
     mounts.drawer.appendChild(said(summary.reason));
   }
@@ -1211,6 +1234,43 @@ function renderDrawer() {
   }
   mounts.drawer.appendChild(tabs);
   mounts.drawer.appendChild(renderTab(model.value.tabs.find((t) => t.id === activeTab) ?? model.value.tabs[0]));
+}
+
+/**
+ * The tickets that belong to the selected one (#1059 phase 10): the issues
+ * that DECLARE it as their parent, each with the state vocabulary a card
+ * shows. A node nobody declares says so — "no ticket names this as its
+ * parent" is a fact about the declarations, not a failure to read them.
+ */
+function renderChildren(issue) {
+  const wrap = el('div', 'drawer-children');
+  const found = childrenOf(sectionOf(state, 'graph'), issue);
+  if (!found.ok) {
+    wrap.appendChild(said(found.reason));
+    return wrap;
+  }
+  wrap.appendChild(el('h3', 'drawer-section-title', `tickets that declare #${issue} as their parent`));
+  if (found.value.length === 0) {
+    wrap.appendChild(said('no open ticket declares this one as its parent'));
+    return wrap;
+  }
+  const list = el('ul', 'child-list');
+  for (const child of found.value) {
+    const item = el('li', 'child-row');
+    item.setAttribute('role', 'button');
+    item.setAttribute('tabindex', '0');
+    item.appendChild(el('span', 'child-number', `#${child.number}`));
+    const chip = el('span', `node-state state-${child.state.code}`);
+    chip.appendChild(el('span', 'node-state-mark', child.state.mark));
+    chip.appendChild(el('span', 'node-state-word', child.state.label));
+    item.appendChild(chip);
+    item.appendChild(el('span', 'child-title', child.title || '(no title)'));
+    item.addEventListener('click', () => selectNode(child.number));
+    item.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') selectNode(child.number); });
+    list.appendChild(item);
+  }
+  wrap.appendChild(list);
+  return wrap;
 }
 
 function renderTab(tab) {

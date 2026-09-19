@@ -14,7 +14,7 @@
 // rule `state-vocab.mjs` holds for a state.
 export const MODES = Object.freeze([
   Object.freeze({ id: 'map', glyph: '\u25cf', label: 'Map & tracks' }),
-  Object.freeze({ id: 'sdd', glyph: '\u25a4', label: 'SDD & slices' }),
+  Object.freeze({ id: 'sdd', glyph: '\u25a4', label: 'Implementation slices' }),
   Object.freeze({ id: 'reviews', glyph: '\u2696', label: 'Reviews' }),
   Object.freeze({ id: 'governance', glyph: '\u25a6', label: 'Governance' }),
 ]);

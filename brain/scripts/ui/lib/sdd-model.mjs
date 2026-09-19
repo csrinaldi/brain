@@ -200,6 +200,58 @@ function buildChangeRow(change) {
  * An issue with no change directory is not an error and not an empty strip —
  * it is a stated absence, like every other missing thing on this page.
  */
+/**
+ * buildSlicePlan(changesSection) -> {ok:true, value:{changes, unreadable, note}}
+ * | {ok:false, reason}
+ *
+ * The project's declared chained-PR plan (#1059 phase 10) — the design's fourth
+ * mode. Only changes that DECLARE a plan are rows: a plan view listing changes
+ * with no plan would be a list of absences pretending to be a schedule. A plan
+ * that could not be parsed is said BESIDE the ones that could, never dropped,
+ * and the note repeats what the rest of the page already says — the plan is
+ * declared, and what each PR did with its slice is not read.
+ */
+export function buildSlicePlan(changesSection) {
+  if (!changesSection || typeof changesSection !== 'object') return { ok: false, reason: 'no changes section was given' };
+  if (changesSection.ok !== true) return { ok: false, reason: changesSection.reason };
+
+  const changes = [];
+  const unreadable = [];
+  for (const row of changesSection.value ?? []) {
+    const scopes = row.sliceScopes;
+    if (!scopes || typeof scopes !== 'object') continue;
+    if (scopes.ok !== true) { unreadable.push({ issue: row.issue, reason: scopes.reason }); continue; }
+    const slices = scopes.value ?? [];
+    if (slices.length === 0) continue;
+    changes.push({
+      issue: row.issue,
+      dir: row.dir,
+      archived: Boolean(row.archived),
+      source: { path: row.dir },
+      slices: slices.map((slice) => ({
+        slice: slice.slice,
+        claims: [...(slice.claims ?? [])],
+        terminalPr: slice.terminal_pr ?? null,
+      })),
+    });
+  }
+  // The changes section also carries the archive directories it SKIPPED (#1008
+  // fix 1). The stage matrix used to say them; this view reads the same
+  // section, so it keeps saying them rather than letting the fact fall out of
+  // the page with the view that used to carry it — the exact shape of defect
+  // three rounds of #882's own review kept finding.
+  const skipped = changesSection.archiveSkipped ?? [];
+  return {
+    ok: true,
+    value: {
+      changes,
+      unreadable,
+      note: SLICE_NOTE,
+      archiveSkipped: { count: skipped.length, names: skipped.map((s) => s.name) },
+    },
+  };
+}
+
 export function sddForIssue(changesSection, issue) {
   if (!changesSection || typeof changesSection !== 'object') return { ok: false, reason: 'no changes section was given' };
   if (changesSection.ok !== true) return { ok: false, reason: changesSection.reason };

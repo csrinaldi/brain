@@ -43,6 +43,11 @@ phases are the design's own regions, not a code-shaped breakdown.
 - [x] T21. `change-route.mjs` carries the declared slice plan on the sdd tab, with the note that PR state is not read. RED first.
 - [x] T22. The drawer model and the panel draw it beneath the stages.
 
+## Phase 10 — per-ticket detail belongs in the panel (R1059-7, R1059-10)
+- [x] T27. `childrenOf` lists the issues that DECLARE a node as their parent — the relation is declared by the child, so a parent's list is whoever points at it. RED first.
+- [x] T28. The panel shows those tickets, each clickable, each with the state vocabulary a card uses; a node nobody declares says so.
+- [x] T29. `buildSlicePlan` + the fourth mode becomes the design's "implementation slices": only changes that declare a plan are rows, an unparseable plan is said beside them, and the archive dirs the section skipped keep being said — the fact survives the view that used to carry it.
+
 ## Still open (R1059-9)
 - [ ] T23. The served branch resolves to its epic — needs a reader; ticket to open.
 - [ ] T24. The waiting duration — #880.

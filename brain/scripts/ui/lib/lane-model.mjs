@@ -90,6 +90,35 @@ export function nodeSummaryFor(graphSection, issue) {
   };
 }
 
+/**
+ * childrenOf(graphSection, issue) -> {ok:true, value:[{number, title, state,
+ * track}]} | {ok:false, reason}
+ *
+ * The tickets that belong to this one (#1059 phase 10). The relation is
+ * DECLARED BY THE CHILD — `parent` is a node field since #967 — so a parent's
+ * list is whoever points at it, never a list the parent carries about itself.
+ * That asymmetry is why nobody had read it yet, and why a node nobody declares
+ * has an empty list rather than a missing one: "no ticket names this as its
+ * parent" is a fact, not a failure.
+ */
+export function childrenOf(graphSection, issue) {
+  if (!graphSection || typeof graphSection !== 'object') return { ok: false, reason: 'no graph section was given' };
+  if (graphSection.ok !== true) return { ok: false, reason: graphSection.reason };
+  const value = (graphSection.value?.nodes ?? [])
+    .filter((n) => n.parent === issue)
+    .sort((a, b) => a.number - b.number)
+    .map((node) => {
+      const { state } = stateAndMarks(node);
+      return {
+        number: node.number,
+        title: node.title ?? '',
+        track: node.track ?? null,
+        state: { code: state.code, label: state.label, mark: state.mark },
+      };
+    });
+  return { ok: true, value };
+}
+
 /** A drawable node — canvas-model.mjs's shape, plus the state word/mark (#998 R998-3) — for one lane's own board. */
 function drawnNode(node, box) {
   const { marks, state } = stateAndMarks(node);

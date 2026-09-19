@@ -96,3 +96,20 @@ the stamped dark theme MUST define the same names as the system one.
 - `merged, not archived` — the port carries no merged-PR data.
 
 Each MUST be stated where the design draws it, naming what is missing.
+
+## R1059-10: per-ticket detail lives in the panel, the fourth mode is the project's plan
+
+The maintainer's reading of the design, 2026-09-19: the SDD stages of a ticket
+are not a sibling of the map. Selecting a ticket MUST show, in the panel, its
+stages, the tickets that declare it as their parent, and what it waits on. The
+fourth mode MUST be the project's declared chained-PR plan, which is what the
+design's own fourth mode draws.
+
+- **WHEN** an epic is selected and three open issues declare it as their parent
+- **THEN** the panel lists those three, ascending, each with its state as mark and word, and each opens its own panel.
+
+- **WHEN** no open issue declares the selected one as its parent
+- **THEN** the panel says so: that is a fact about the declarations, not a failure to read them.
+
+- **WHEN** a change declares no slice plan
+- **THEN** it is not a row in the plan view, because a plan view listing absences would be a list of absences pretending to be a schedule.

@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildSddModel, sddForIssue, STAGE_IDS, STAGE_VOCAB, LIFECYCLE_ORDER } from './sdd-model.mjs';
+import { buildSddModel, sddForIssue, buildSlicePlan, STAGE_IDS, STAGE_VOCAB, LIFECYCLE_ORDER, SLICE_NOTE } from './sdd-model.mjs';
 import { evaluatePhaseOrder } from '../../vcs/phase-order-check.mjs';
 import { LIFECYCLE_STAGES } from '../../lib/sdd-layout.mjs';
 
@@ -277,4 +277,37 @@ test('#1059 region 03: sddForIssue finds the change an issue owns, and says so w
   const unreadable = sddForIssue({ ok: false, reason: 'the changes dir could not be read' }, 881);
   assert.equal(unreadable.ok, false);
   assert.equal(unreadable.reason, 'the changes dir could not be read', 'the section\'s own reason passes through');
+});
+
+// ── #1059 phase 10: the fourth mode is the project's slice plan ───────────
+// The design's fourth mode is "implementation slices": the chained PRs a
+// change declares, across the project. The seven-stage matrix that used to
+// live there is per-change detail, and per-change detail belongs in the panel
+// the reader opens by clicking a ticket.
+test('#1059: buildSlicePlan lists only the changes that declare a plan, with what each slice claims', () => {
+  const section = { ok: true, value: [
+    { issue: 881, dir: 'openspec/changes/issue-881-ui', archived: false, sliceScopes: { ok: true, value: [
+      { slice: 1, claims: ['R881-1'], terminal_pr: null },
+      { slice: 2, claims: ['R881-2', 'R881-3'], terminal_pr: 'this PR -> main' },
+    ] } },
+    { issue: 900, dir: 'openspec/changes/issue-900-x', archived: false, sliceScopes: { ok: true, value: [] } },
+    { issue: 901, dir: 'openspec/changes/issue-901-y', archived: false },
+    { issue: 902, dir: 'openspec/changes/issue-902-z', archived: false, sliceScopes: { ok: false, reason: 'the block would not parse' } },
+  ] };
+
+  const plan = buildSlicePlan(section);
+  assert.equal(plan.ok, true);
+  assert.deepEqual(plan.value.changes.map((c) => c.issue), [881], 'a change with no declared plan is not a row in a plan view');
+  assert.equal(plan.value.changes[0].slices.length, 2);
+  assert.deepEqual(plan.value.changes[0].slices[1].claims, ['R881-2', 'R881-3']);
+
+  assert.deepEqual(plan.value.unreadable, [{ issue: 902, reason: 'the block would not parse' }],
+    'a plan that could not be parsed is SAID beside the ones that could, never dropped');
+  assert.equal(plan.value.note, SLICE_NOTE, 'the view repeats what the page already says: PR state is not read');
+});
+
+test('#1059: the slice plan carries the archive dirs the section skipped, so the fact survives the view that used to say it', () => {
+  const section = { ok: true, value: [], archiveSkipped: [{ name: 'governance', reason: 'not an issue-numbered archive dir' }] };
+  const plan = buildSlicePlan(section);
+  assert.deepEqual(plan.value.archiveSkipped, { count: 1, names: ['governance'] });
 });

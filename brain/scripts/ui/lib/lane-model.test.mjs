@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildLaneModel, nodeSummaryFor } from './lane-model.mjs';
+import { buildLaneModel, nodeSummaryFor, childrenOf } from './lane-model.mjs';
 import { parseGraphBlock } from '../../status/epic-graph.mjs';
 
 const node = (number, over = {}) => ({
@@ -203,4 +203,30 @@ test('#1059 region 08: nodeSummaryFor gives the drawer the node a card would sho
 
   const unreadable = nodeSummaryFor({ ok: false, reason: 'the forge would not answer' }, 881);
   assert.equal(unreadable.reason, 'the forge would not answer', 'the section\'s own reason passes through');
+});
+
+// ── #1059 phase 10: a node's own children ─────────────────────────────────
+// Selecting an epic should show the tickets that belong to it. `parent` is a
+// node field since #967, so the relation is already data — it just had no
+// reader. The relation is DECLARED by the child, so the parent's list is
+// whoever points at it, never a list the parent itself carries.
+test('#1059: childrenOf lists the issues that declare this one as their parent', () => {
+  const graph = { ok: true, value: {
+    nodes: [
+      { number: 878, title: 'the epic', track: 'UI', status: 'ready', blockedBy: [], parent: null },
+      { number: 1059, title: 'the design', track: 'UI', status: 'ready', blockedBy: [], parent: 878 },
+      { number: 1032, title: 'epic lanes', track: 'UI', status: 'ready', blockedBy: [], parent: 878 },
+      { number: 1026, title: 'a memory fix', track: 'MEMORY', status: 'ready', blockedBy: [], parent: null },
+    ],
+    edges: [], tracks: new Map(),
+  } };
+
+  const children = childrenOf(graph, 878);
+  assert.equal(children.ok, true);
+  assert.deepEqual(children.value.map((c) => c.number), [1032, 1059], 'ascending, so the list does not depend on the forge\'s order');
+  assert.equal(children.value[0].title, 'epic lanes');
+  assert.equal(typeof children.value[0].state.mark, 'string', 'a child is shown with the same state vocabulary a card uses');
+
+  assert.deepEqual(childrenOf(graph, 1026).value, [], 'a node nobody declares as parent has no children — that is a fact, not a failure');
+  assert.equal(childrenOf({ ok: false, reason: 'the forge would not answer' }, 878).reason, 'the forge would not answer');
 });
