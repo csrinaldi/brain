@@ -48,6 +48,7 @@ import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { resolveFeature } from "../lib/feature-resolution.mjs";
+import { planDuplicateHeal, parseEngramVersion, isTestedVersion } from "../lib/engram-heal.mjs";
 import { changeDir, OPERATIONAL_ARTIFACTS } from "../../lib/sdd-layout.mjs";
 import { parseFrontmatter, serializeFrontmatter } from "../lib/resume-frontmatter.mjs";
 import { validateResume } from "../lib/resume-schema.mjs";
@@ -1483,3 +1484,160 @@ function _defaultEngramSave(title, content, { type, project, scope, topic }) {
     { stdio: ["ignore", "ignore", "pipe"] },
   );
 }
+
+/**
+ * Runs `engram version` and returns its STDOUT, or `null` if the probe could
+ * not get an answer (absent binary, non-zero exit, spawn error). `null` is
+ * "I do not know" the same way `probeBinary`'s three-valued result is —
+ * `healDuplicates` treats it identically to an untested version: refuse,
+ * never guess.
+ *
+ * @returns {string | null}
+ */
+function _defaultHealVersionProbe() {
+  try {
+    return execFileSync("engram", ["version"], { stdio: ["ignore", "pipe", "pipe"], encoding: "utf8" });
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * HEAL_DELETE_ARGS(id) — the exact argv `healDuplicates` hard-deletes with.
+ *
+ * Measured (design.md "Measured by the orchestrator", engram 1.20.0): a soft
+ * `engram delete <id>` leaves the row in `engram export` with `deleted_at`
+ * set — `readBackendKeys`/`topicKeysFromExport` do not filter it, so the
+ * audit would still count it as live. Only `--hard` actually removes the
+ * row. `--hard` must come AFTER the id: `delete <id> --hard` is the only
+ * argument order engram accepts (`delete --hard <id>` is rejected).
+ *
+ * @param {number} id  The numeric observation id — `engram delete obs-…`
+ *   fails with `invalid observation id`; only the numeric id works.
+ * @returns {string[]}
+ */
+export function HEAL_DELETE_ARGS(id) {
+  return ["delete", String(id), "--hard"];
+}
+
+/**
+ * healDuplicates() — reconciles the store's pre-guard duplicate rows (#1061,
+ * #864 task 1.2a; memory-backend-contract.md's Deletion clause). Report-only
+ * by default (REQ-MB-2); `apply: true` is required to delete anything
+ * (REQ-MB-4), and a second apply run is a no-op (REQ-MB-4, REQ-MB-5).
+ *
+ * Never touches `.memory/records/` or `.memory/index.jsonl` — every read
+ * this function performs is `_read` on a throwaway `engram export` file this
+ * function itself creates and removes; `.memory/` is never in that path.
+ *
+ * Order of operations (design.md's Data Flow):
+ *   1. `_probe()` → `engram version`. Out of the tested 1.20.x range, or
+ *      absent, refuses `version` — in dry-run too. No export, no delete.
+ *   2. `engram export` → `topicKeysFromExport` cross-check (#445, reused) →
+ *      `planDuplicateHeal`. A refusal here (`divergent`/`tooMany`/`shape`)
+ *      refuses the WHOLE run; nothing is deleted.
+ *   3. No duplicate groups → `outcome: 'none'`.
+ *   4. Dry-run → `outcome: 'planned'`, the groups, zero delete calls.
+ *   5. Apply → delete every non-keeper id, ascending, ONE AT A TIME (see the
+ *      loop's own comment for why). The first throw stops the run
+ *      immediately (`outcome: 'partial'`; `notDeleted` includes the id that
+ *      failed).
+ *   6. Every delete succeeded → re-export, re-plan. Any duplicate still
+ *      standing (or a shape refusal on the re-export) is `outcome:
+ *      'unverified'` — REQ-MB-5's check that a soft delete the export
+ *      ignores does not get reported as healed.
+ *
+ * @param {object} [opts]
+ * @param {boolean} [opts.apply]  Delete for real. Defaults to report-only.
+ * @param {() => string | null} [opts._probe]  Returns `engram version`'s
+ *   stdout, or `null` if the probe could not answer.
+ * @param {(bin: string, args: string[], opts?: object) => string} [opts._exec]
+ *   Runs `engram <args>`, returning stdout.
+ * @param {(path: string, encoding?: string) => string} [opts._read]
+ *   Reads the export file `_exec('export', …)` wrote.
+ * @returns {{outcome: 'none'|'planned'|'healed'|'refused'|'partial'|'unverified',
+ *            deleted?: number[], notDeleted?: number[], groups?: object[],
+ *            rows?: number, distinct?: number, refusal?: string, key?: string,
+ *            fields?: string[], count?: number, detail?: string}}
+ */
+export function healDuplicates({
+  apply = false,
+  _probe = _defaultHealVersionProbe,
+  _exec = execFileSync,
+  _read = readFileSync,
+} = {}) {
+  const versionStdout = _probe();
+  const version = versionStdout == null ? null : parseEngramVersion(versionStdout);
+  if (!isTestedVersion(version)) {
+    return {
+      outcome: "refused",
+      refusal: "version",
+      detail:
+        versionStdout == null
+          ? "engram version probe returned no answer"
+          : `engram reports '${String(versionStdout).trim()}', outside the tested ${TESTED_ENGRAM_LABEL}`,
+    };
+  }
+
+  const exportAndPlan = () => {
+    const dir = mkdtempSync(join(tmpdir(), "brain-engram-heal-"));
+    const file = join(dir, "export.json");
+    try {
+      const stdout = _exec("engram", ["export", file], { stdio: ["ignore", "pipe", "pipe"], encoding: "utf8" });
+      const fileContents = _read(file, "utf8");
+      topicKeysFromExport(stdout, fileContents); // throws on shape/count mismatch (#445)
+      return planDuplicateHeal(JSON.parse(fileContents));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
+
+  let plan;
+  try {
+    plan = exportAndPlan();
+  } catch (err) {
+    return { outcome: "refused", refusal: "shape", detail: explainEngramFailure(err) };
+  }
+
+  if (!plan.ok) {
+    return { outcome: "refused", refusal: plan.refusal, key: plan.key, fields: plan.fields, count: plan.count, detail: plan.reason };
+  }
+
+  if (plan.groups.length === 0) {
+    return { outcome: "none", rows: plan.rows, distinct: plan.distinct };
+  }
+
+  if (!apply) {
+    return { outcome: "planned", groups: plan.groups, rows: plan.rows, distinct: plan.distinct };
+  }
+
+  // One id at a time, ascending, stopping at the FIRST failure — never a
+  // batch and never continue-past-a-throw. You cannot reason about a
+  // half-healed store unless the report is exact: `deleted` and
+  // `notDeleted` must name precisely which ids landed before the maintainer
+  // decides what to do next (design.md's own ruling on this loop).
+  const ids = plan.groups.flatMap((g) => g.delete).sort((a, b) => a - b);
+  const deleted = [];
+  for (let i = 0; i < ids.length; i++) {
+    try {
+      _exec("engram", HEAL_DELETE_ARGS(ids[i]), { stdio: ["ignore", "ignore", "pipe"] });
+      deleted.push(ids[i]);
+    } catch (err) {
+      return { outcome: "partial", deleted, notDeleted: ids.slice(i), detail: explainEngramFailure(err) };
+    }
+  }
+
+  let verify;
+  try {
+    verify = exportAndPlan();
+  } catch (err) {
+    return { outcome: "unverified", deleted, notDeleted: [], detail: explainEngramFailure(err) };
+  }
+  if (!verify.ok || verify.groups.length > 0) {
+    return { outcome: "unverified", deleted, notDeleted: [] };
+  }
+
+  return { outcome: "healed", deleted, notDeleted: [], rows: verify.rows, distinct: verify.distinct };
+}
+
+const TESTED_ENGRAM_LABEL = "1.20.x";

@@ -85,6 +85,7 @@
     "brain:memory:resolve-index": "node ./brain/scripts/memory/cli.mjs resolve-index",
     "brain:memory:audit": "node ./brain/scripts/memory/cli.mjs audit",
     "brain:memory:split-records": "node ./brain/scripts/memory/cli.mjs split-records",
+    "brain:memory:heal-duplicates": "node ./brain/scripts/memory/cli.mjs heal-duplicates",
     "brain:memory:collect": "node ./brain/scripts/memory/cli.mjs collect",
     "brain:memory:ship": "node ./brain/scripts/memory/cli.mjs ship --invoker manual",
     "brain:memory:migrate-v1": "node ./brain/scripts/memory/cli.mjs migrate-v1",

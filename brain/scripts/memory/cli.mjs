@@ -2,7 +2,7 @@
 // brain/scripts/memory/cli.mjs — MEMORY_BACKEND dispatcher.
 //
 // Usage: node brain/scripts/memory/cli.mjs <op>
-//   op: share | pull | import | index | reindex | setup | feature-checkpoint | feature-resume
+//   op: share | pull | import | index | reindex | setup | feature-checkpoint | feature-resume | heal-duplicates
 //
 //   pull    — churn-resilient full pull: manifest restore + git pull + engram import.
 //             Use for cross-machine sync (npm run brain:memory:pull).
@@ -126,6 +126,7 @@ const VALID_OPS = [
   "audit",
   "resolve-index",
   "split-records",
+  "heal-duplicates",
   "collect",
   "ship",
   "migrate-v1",
@@ -706,6 +707,105 @@ if (op === "migrate-v1") {
     console.log(`  ${report.unparseableNote}`);
   }
   process.exit(0);
+}
+
+// ---------------------------------------------------------------------------
+// "heal-duplicates" — reconciles the engram store's pre-guard duplicate rows
+// (#1061, #864 task 1.2a; memory-backend-contract.md's Deletion clause).
+// Engram-only, so it is dispatched HERE — before backend selection — the
+// same way "split-records" is: MEMORY_BACKEND !== "engram" is a designed
+// refusal (`memory.heal.notEngram`), never a FALLBACK_OPS substitution,
+// because `plainfiles` has no observation-id space to reconcile at all.
+//
+// REPORT-ONLY BY DEFAULT (REQ-MB-2). `--apply` is required to delete
+// anything; any other argument refuses `memory.heal.badFlag` and deletes
+// nothing — an unknown flag fails closed rather than being silently ignored
+// (the `split-records`/`ship` precedent for this dispatcher). The call and
+// its outcome handling are wrapped in try/catch, mirroring "split-records"
+// (`:250-304`): an unexpected throw must exit 1 with `memory.heal.failed`,
+// never an uncaught stack trace.
+// ---------------------------------------------------------------------------
+if (op === "heal-duplicates") {
+  if (MEMORY_BACKEND !== "engram") {
+    console.error(`memory/cli: ${await t("memory.heal.notEngram", { backend: MEMORY_BACKEND })}`);
+    process.exit(1);
+  }
+  const rest = process.argv.slice(3);
+  const badFlag = rest.find((a) => a !== "--apply");
+  if (badFlag !== undefined) {
+    console.error(`memory/cli: ${await t("memory.heal.badFlag", { flag: badFlag })}`);
+    process.exit(1);
+  }
+  const apply = rest.includes("--apply");
+  const { healDuplicates } = await import("./backends/engram.mjs");
+  // Cold-review MAJOR #1: unlike every other branch in this file (see
+  // "split-records", `:250-305`), this call used to run with no try/catch —
+  // an unexpected throw crashed with a raw Node stack trace instead of the
+  // `memory.heal.failed` message, and that message was otherwise reachable
+  // only from the impossible "unknown outcome" branch below. Wrapping the
+  // call AND its outcome handling, exactly like "split-records", makes
+  // `memory.heal.failed` a REAL failure path instead of dead code.
+  try {
+    // BRAIN_MEMORY_HEAL_FORCE_THROW (test-only seam): throws before calling
+    // healDuplicates(), so a test can exercise this try/catch directly —
+    // healDuplicates() itself is already fully defensive (every exec/read it
+    // performs is wrapped internally), so no misbehaving `engram` binary can
+    // make the call below throw. NEVER set this outside tests.
+    if (process.env.BRAIN_MEMORY_HEAL_FORCE_THROW) {
+      throw new Error(`forced failure for test coverage (BRAIN_MEMORY_HEAL_FORCE_THROW=${process.env.BRAIN_MEMORY_HEAL_FORCE_THROW})`);
+    }
+    const result = healDuplicates({ apply });
+
+    if (result.outcome === "refused") {
+      const key = `memory.heal.refused.${result.refusal}`;
+      console.error(
+        `memory/cli: ${await t(key, {
+          key: result.key ?? "",
+          fields: (result.fields ?? []).join(", "),
+          count: result.count ?? 0,
+          detail: result.detail ?? "",
+        })}`,
+      );
+      process.exit(1);
+    }
+    if (result.outcome === "none") {
+      console.log(`memory/cli: ${await t("memory.heal.none", { rows: result.rows ?? 0, distinct: result.distinct ?? 0 })}`);
+      process.exit(0);
+    }
+    if (result.outcome === "planned") {
+      console.log(`memory/cli: ${await t("memory.heal.plan", { count: result.groups.length })}`);
+      for (const g of result.groups) {
+        console.log(`  ${g.key} — keep #${g.keep}, delete #${g.delete.join(", ")}`);
+      }
+      process.exit(0);
+    }
+    if (result.outcome === "healed") {
+      console.log(
+        `memory/cli: ${await t("memory.heal.deleted", { count: result.deleted.length, ids: result.deleted.join(", ") })}`,
+      );
+      console.log(`memory/cli: ${await t("memory.heal.done", { rows: result.rows ?? 0, distinct: result.distinct ?? 0 })}`);
+      process.exit(0);
+    }
+    if (result.outcome === "partial") {
+      console.error(
+        `memory/cli: ${await t("memory.heal.partial", {
+          deleted: result.deleted.join(", "),
+          notDeleted: result.notDeleted.join(", "),
+          detail: result.detail ?? "",
+        })}`,
+      );
+      process.exit(1);
+    }
+    if (result.outcome === "unverified") {
+      console.error(`memory/cli: ${await t("memory.heal.unverified", { deleted: result.deleted.join(", ") })}`);
+      process.exit(1);
+    }
+    console.error(`memory/cli: ${await t("memory.heal.failed", { message: `unknown outcome '${result.outcome}'` })}`);
+    process.exit(1);
+  } catch (err) {
+    console.error(`memory/cli: ${await t("memory.heal.failed", { message: err.message })}`);
+    process.exit(1);
+  }
 }
 
 // Map verb strings that cannot be valid JS export names to their actual export name.
