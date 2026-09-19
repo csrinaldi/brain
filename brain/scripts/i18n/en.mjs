@@ -354,6 +354,21 @@ export default {
   'memory.splitRecords.repeats': '{count} repeated line(s) collapsed first-wins ({divergent} divergent — same id, different bytes). The winner is the line the readers already resolved to.',
   'memory.splitRecords.failed':  '✗ split-records failed — {message}',
 
+  // ── memory/cli.mjs — heal-duplicates (#1061, #864 task 1.2a) ─────────────────
+  'memory.heal.none':               'nothing to heal — {rows} live rec- row(s), {distinct} distinct key(s).',
+  'memory.heal.plan':               'plan — {count} duplicate key(s) found. NOTHING was deleted. Re-run with --apply to perform it.',
+  'memory.heal.deleted':            '✓ deleted {count} row(s): {ids}.',
+  'memory.heal.done':               '✓ heal verified — {rows} live rec- row(s), {distinct} distinct key(s).',
+  'memory.heal.partial':            '✗ heal stopped after a failed delete — deleted {deleted}, not deleted {notDeleted} ({detail}). Nothing else was touched; re-run once the cause is fixed.',
+  'memory.heal.unverified':         '✗ heal could not be verified — {deleted} row(s) were deleted but a fresh export still shows a duplicate. Nothing further was deleted.',
+  'memory.heal.notEngram':          "heal-duplicates only applies to the 'engram' backend, not '{backend}'. Nothing was deleted.",
+  'memory.heal.badFlag':            "unknown flag '{flag}'. Only --apply is accepted. Nothing was deleted.",
+  'memory.heal.failed':             '✗ heal-duplicates failed — {message}',
+  'memory.heal.refused.divergent':  "refused — '{key}' has copies that differ in {fields}. Nothing was deleted.",
+  'memory.heal.refused.tooMany':    "refused — '{key}' has {count} live rows, more than the two this heal understands. Nothing was deleted.",
+  'memory.heal.refused.shape':      'refused — the export is not in a shape this heal understands ({detail}). Nothing was deleted.',
+  'memory.heal.refused.version':    'refused — {detail}. Nothing was deleted.',
+
   // ── memory/cli.mjs — collect (issue #887, ADR-0034 L4/C2) ────────────────────
   'memory.collect.done':    '✓ collected {collected} record(s) into {ref} ({commit}).',
   'memory.collect.nothing': 'nothing new to collect — {ref} unchanged.',

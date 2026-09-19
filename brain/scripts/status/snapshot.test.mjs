@@ -67,7 +67,40 @@ test('#879: with no port the forge sections say why, the tree sections are compu
   assert.equal(s.actors.ok, true);
   assert.equal(s.releaseDebt.ok, true);
   assert.equal(s.drift.ok, true);
+  assert.equal(s.history.ok, false, 'no real git repo backs this tmpdir fixture');
+  assert.match(s.history.reason, /git (log|tag)/);
   assert.deepEqual(snapshotTree(root), before, 'the snapshot wrote nothing');
+});
+
+// ── #882 R882-5: history, additive beside the nine existing sections ────────
+
+test('#882 R882-5: history is wired from gatherHistoryFacts through buildSnapshot\'s own injected _run, additive beside every other section', async () => {
+  const root = makeFixture();
+  const calls = [];
+  const s = await buildSnapshot({
+    root, now: NOW,
+    _run: (file, args) => {
+      calls.push(args);
+      if (args[0] === 'log') return 'aaa1111|2026-09-10 10:00:00 +0000|feat(ui): the History view (#123)\n';
+      if (args[0] === 'tag') return 'v1.4.0|2026-09-01T00:00:00+00:00\n';
+      throw new Error(`unexpected git ${args[0]}`);
+    },
+  });
+  assert.equal(s.history.ok, true);
+  assert.deepEqual(s.history.value.commits, [
+    { sha: 'aaa1111', date: '2026-09-10T10:00:00+00:00', subject: 'feat(ui): the History view (#123)', citedRef: 123, malformed: null },
+  ]);
+  assert.deepEqual(s.history.value.tags, [{ name: 'v1.4.0', date: '2026-09-01T00:00:00+00:00', malformed: null }]);
+  assert.ok(calls.some((a) => a[0] === 'log'), 'buildSnapshot\'s own _run reaches gatherHistoryFacts, not a second git seam');
+  // Every other section computed from THIS same _run-injected buildSnapshot call still
+  // stands exactly as the no-history baseline test above — additive, never displaced.
+  assert.equal(s.changes.ok, true);
+  assert.equal(s.records.ok, true);
+  assert.equal(s.adrs.ok, true);
+  assert.equal(s.antiPatterns.ok, true);
+  assert.equal(s.actors.ok, true);
+  assert.equal(s.releaseDebt.ok, true);
+  assert.equal(s.drift.ok, true);
 });
 
 test('#879: a missing records dir is a reason on records AND actors, never []', async () => {
