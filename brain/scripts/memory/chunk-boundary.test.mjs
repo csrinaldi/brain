@@ -173,7 +173,7 @@ const EXPORT_KW = 'ex' + 'port';
 // `migrate-v1` still calls it. `retiredBy` below names that ruling, not a
 // pending deletion.
 const ALLOWLIST = [
-  { file: 'brain/scripts/memory/cli.mjs', line: 666, retiredBy: 'kept — R3 (#955)' }, // #1012 shifted this line by inserting the invoker guard earlier in the ship op
+  { file: 'brain/scripts/memory/cli.mjs', line: 667, retiredBy: 'kept — R3 (#955)' }, // #1061 shifted this line by inserting "heal-duplicates" into VALID_OPS earlier in the file
   { file: 'brain/scripts/memory/lib/migrate-v1.test.mjs', line: 13, retiredBy: 'kept — R3 (#955)' },
 ];
 

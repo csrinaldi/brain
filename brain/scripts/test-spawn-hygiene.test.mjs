@@ -367,6 +367,7 @@ const ALLOWLIST = [
   { file: 'brain/scripts/memory/cli.audit.test.mjs', entrypoint: 'brain/scripts/memory/cli.mjs', reason: 'no-vcs-capability' },
   { file: 'brain/scripts/memory/cli.backend-fallback.test.mjs', entrypoint: 'brain/scripts/memory/cli.mjs', reason: 'no-vcs-capability' },
   { file: 'brain/scripts/memory/cli.collect.test.mjs', entrypoint: 'brain/scripts/memory/cli.mjs', reason: 'no-vcs-capability' },
+  { file: 'brain/scripts/memory/cli.heal-duplicates.test.mjs', entrypoint: 'brain/scripts/memory/cli.mjs', reason: 'no-vcs-capability' },
   { file: 'brain/scripts/memory/cli.migrate-v1.test.mjs', entrypoint: 'brain/scripts/memory/cli.mjs', reason: 'no-vcs-capability' },
   { file: 'brain/scripts/memory/cli.reindex-duplicates.test.mjs', entrypoint: 'brain/scripts/memory/cli.mjs', reason: 'no-vcs-capability' },
   { file: 'brain/scripts/memory/cli.save-search.test.mjs', entrypoint: 'brain/scripts/memory/cli.mjs', reason: 'no-vcs-capability' },
@@ -417,7 +418,10 @@ const ALLOWLIST = [
   { file: 'brain/scripts/bootstrap.worktree.test.mjs', entrypoint: '<unresolved>', line: 145, reason: 'no-vcs-capability' },
 
   // ── i18n shell-catalog eval: bash -c, zero VCS surface ──────────────────
-  { file: 'brain/scripts/i18n/coverage.test.mjs', entrypoint: '<unresolved>', line: 136, reason: 'no-vcs-capability' },
+  { file: 'brain/scripts/i18n/coverage.test.mjs', entrypoint: '<unresolved>', line: 153, reason: 'no-vcs-capability' }, // #1061 shifted this line by inserting the memory.heal.* parity test earlier in the file
+
+  // ── #1061 heal-duplicates cli spawn test's own `which` resolution ───────
+  { file: 'brain/scripts/memory/cli.heal-duplicates.test.mjs', entrypoint: '<unresolved>', line: 24, reason: 'no-vcs-capability' },
 
   // ── cli-entry / bin shape: prints help, never touches VCS ───────────────
   { file: 'brain/scripts/lib/init.test.mjs', entrypoint: 'brain/scripts/cli-entry.mjs', reason: 'no-vcs-capability' },

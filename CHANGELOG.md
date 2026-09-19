@@ -8,6 +8,22 @@ automatically, but renames need manual action.
 
 ## Unreleased
 
+### `brain:memory:heal-duplicates` reconciles the engram store's pre-guard duplicate rows (#1061)
+
+New verb, `engram`-only: `npm run brain:memory:heal-duplicates` groups a live `engram
+export` by `rec-`-prefixed `topic_key`, and for any key with exactly two live rows whose
+`content`/`title`/`type` agree, keeps the lower observation id and deletes the other. It is
+**report-only by default** — nothing is deleted unless you pass `--apply` — and it refuses
+(deleting nothing, exiting non-zero) when copies of one key diverge, a key has more than two
+live rows, the engram version is outside the tested `1.20.x` range, or the export shape is
+unrecognized. Deletion is **hard** (`engram delete <id> --hard`): measured against engram
+1.20.0, a soft delete leaves the row in `engram export` with `deleted_at` set, which the
+audit would still count as live, so only `--hard` actually reconciles the store. Never reads
+or writes `.memory/records/` or `.memory/index.jsonl` — this is a backend-side reconciliation
+of engram's own rows, not a change to brain's durable record format. The maintainer runbook
+for the one-time run against the real store lives in
+`openspec/changes/issue-1061-engram-duplicate-heal/tasks.md`.
+
 ### `memory-gate` receives the PR context and reads the default branch (#1024)
 
 **Manual step for `standard`/`regulated` consumers with a diverged `governance.yml`.**
