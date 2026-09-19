@@ -358,7 +358,10 @@ export async function gatherCheckpointInputs({
   const baseSha = deps.baseSha ?? null; // fed by cli.mjs (ci-context → prView.baseRefOid, ADR-0022); tests inject directly
 
   const trancheInputs = await gatherTrancheInputs({
-    project, number, provider, headSha, baseSha, changedFiles, prBody, deps: deps.trancheDeps ?? {},
+    // #1072: this evaluator already takes the PR's labels for
+    // `hasDecisionLabel`; the budget needs the same set, and reading them here
+    // rather than fetching keeps one reading of the PR per run.
+    project, number, provider, headSha, baseSha, changedFiles, prBody, labels, deps: deps.trancheDeps ?? {},
   });
 
   const root = worktreePath ?? process.cwd();

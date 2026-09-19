@@ -345,12 +345,20 @@ export async function gatherTrancheInputs({
   baseSha,
   changedFiles = [],
   prBody = '',
-  // #1072: the caller usually already holds these. `review/cli.mjs` boots with
-  // a `prView` and reads `boot.prView.labels` twice before it gets here, so
-  // taking them as an input costs the forge nothing and keeps the labels
-  // consistent with the `prBody` beside them — one read of the PR, not two
-  // that can disagree. The fetch below is the fallback for a caller that has
-  // none.
+  // #1072: an INPUT, never a fetch. Both production callers already hold the
+  // PR's labels — `review/cli.mjs` reads `boot.prView.labels` twice before it
+  // gets here, and `evaluators/checkpoint.mjs` takes them as a parameter of
+  // its own — so taking them costs the forge nothing and keeps them consistent
+  // with the `prBody` gathered beside them.
+  //
+  // A fallback that fetched them when a caller passed none was tried and
+  // REVERTED: it made this function reach the network, and every existing test
+  // that did not pass labels started doing so. On this machine `gh` is
+  // authenticated and the call returned an array, so the suite was green; in
+  // CI there is no such credential, the call threw, and
+  // `gatherTrancheInputs: standard's evidence TEXT does change` failed on the
+  // evidence string. A unit suite whose result depends on whether the machine
+  // can reach a forge is not a unit suite.
   labels: givenLabels,
   deps = {},
 } = {}) {
@@ -377,24 +385,12 @@ export async function gatherTrancheInputs({
   // budget comparison, which used a file-local constant instead.
   const { diffBudget } = tierParams(tier);
 
-  // #1072: the PR's own labels, through the SAME `prView` the CI context uses
-  // (`vcs/ci-context.mjs`), through `getVcs` — never from the environment,
-  // which is the ambient-auth hole #479 closed.
-  //
-  // A refusal is `null`, never `[]`. An empty array would say "this PR carries
-  // no exception", which is a claim the reviewer cannot make when it never
-  // read the labels; `sizeExceptionRuling` treats a non-array as no waiver, so
-  // a failed read fails CLOSED.
-  let labels = Array.isArray(givenLabels) ? givenLabels : null;
-  if (givenLabels === undefined) {
-    const prView = deps.prView ?? (async (args) => (await (deps.getVcs ?? getVcs)({ provider })).prView(args));
-    try {
-      const pr = await prView({ project, number });
-      labels = Array.isArray(pr?.labels) ? pr.labels : null;
-    } catch {
-      labels = null;
-    }
-  }
+  // #1072: a refusal is `null`, never `[]`. An empty array would say "this PR
+  // carries no exception", which is a claim nobody can make when the labels
+  // were never read. `sizeExceptionRuling` treats a non-array as no waiver, so
+  // an unread set fails CLOSED, and `evaluateTranche` says which of the two
+  // happened rather than letting a reader guess.
+  const labels = Array.isArray(givenLabels) ? givenLabels : null;
 
   return { requiredGates, changedFiles, budget, prBody, requiredJobs, detectionJobs, diffBudget, tier, labels };
 }

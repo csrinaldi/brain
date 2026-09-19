@@ -76,3 +76,37 @@ verdict the mutation turns red.
 | the refusal is coerced back to `[]` | 1 red |
 
 Whole repository after the round: 6099 tests, 6099 pass, 0 fail.
+
+## The fallback fetch was a defect, and CI caught it
+
+`local-checks` went red on the second commit, on one test:
+`gatherTrancheInputs: standard's evidence TEXT does change`. It passed locally
+and failed in CI, which is the signature worth recognising.
+
+The cause was mine. To let a caller omit the labels, `gatherTrancheInputs`
+fell back to fetching them through `prView` — so every existing test that did
+not pass labels started REACHING THE NETWORK. On this machine `gh` is
+authenticated, the call returned an array, and the suite was green. In CI there
+is no such credential, the call threw, `labels` became `null`, and the budget
+finding's evidence gained the "labels could not be read" sentence that the
+test's exact-equality assertion did not expect.
+
+A unit suite whose result depends on whether the machine can reach a forge is
+not a unit suite. The green run was the lie; the red one was the measurement.
+
+The fallback is gone. Labels are an INPUT and nothing else:
+
+- `review/cli.mjs` already passes `boot.prView.labels ?? null`.
+- `evaluators/checkpoint.mjs` already TOOK `labels` as a parameter for
+  `hasDecisionLabel` and simply was not forwarding them; it does now, so both
+  production callers read the PR once and share that reading.
+- Anything that is not an array is "not read", which waives nothing.
+
+A test pins it: the gather is handed a `getVcs`/`prView` that throws if called,
+and both the supplied and the omitted case pass without touching it.
+
+`trancheAtTier`, the fixture behind the tier-text assertions, now passes
+`labels: []` on purpose. Those tests are about the TIER's contribution to the
+evidence; without it they described a PR whose labels could not be read, which
+is a different fact with a different sentence, and every tier assertion would
+have quietly become an assertion about the unread case.

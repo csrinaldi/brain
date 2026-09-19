@@ -340,13 +340,24 @@ test('evaluateTranche: fed lite-tier job sets, a red memory-gate is editorial (d
 // drops it before the budget. Injecting `diffBudget` by hand into `evaluateTranche`
 // would test a wiring that production never performs.
 
-/** Gathers + evaluates at a tier with a synthetic numstat of `lines` changed lines. */
+/**
+ * Gathers + evaluates at a tier with a synthetic numstat of `lines` changed
+ * lines.
+ *
+ * `labels: []` is deliberate and load-bearing (#1072): these tests are about
+ * the TIER's contribution to the evidence text, so the PR they describe is one
+ * that WAS read and carries no exception. Leaving it out would make them
+ * describe a PR whose labels could not be read, which is a different fact and
+ * carries a different sentence — and would quietly turn every tier assertion
+ * into an assertion about the unread case instead.
+ */
 async function trancheAtTier(tier, lines) {
   const inputs = await gatherTrancheInputs({
     project: 'owner/repo',
     number: 1,
     headSha: 'HEAD',
     baseSha: 'BASE',
+    labels: [],
     deps: {
       tier,
       fetchRollup: async () => greenRollup(),
@@ -567,51 +578,27 @@ test('#1072: labels the reviewer could not read never waive the budget', () => {
   }
 });
 
-test('#1072: gatherTrancheInputs reads the PR labels through the port, and survives a refusal', () => {
-  // The labels come from the same `prView` the CI context uses (ci-context
-  // .mjs:63), through `getVcs` — never from the environment, which is the
-  // ambient-auth hole #479 closed.
-  const calls = [];
-  const deps = {
-    fetchRollup: async () => greenRollup(),
-    diffNumstat: () => '1\t0\tfile.mjs\n',
-    readIgnoreList: () => [],
-    readConfig: () => ({}),
-    tier: 'lite',
-    prView: async (args) => { calls.push(args); return { labels: ['size:exception'], body: '' }; },
-  };
+test('#1072: labels are an INPUT — the gather never reaches the forge for them', async () => {
+  // A fallback fetch was tried here and reverted. It made every existing test
+  // that did not pass labels call out to a forge: green on a machine with an
+  // authenticated `gh`, red in CI where the call threw and changed a budget
+  // finding's evidence string. A unit suite whose result depends on the
+  // network is not a unit suite, so the seam is gone and this pins it.
+  const forge = () => { throw new Error('the gather must not reach the forge'); };
 
-  return gatherTrancheInputs({ project: 'o/r', number: 1067, headSha: 'H', baseSha: 'B', deps })
-    .then(async (gathered) => {
-      assert.deepEqual(gathered.labels, ['size:exception']);
-      assert.deepEqual(calls, [{ project: 'o/r', number: 1067 }], 'asked for this PR, once');
-
-      const refused = await gatherTrancheInputs({
-        project: 'o/r', number: 1067, headSha: 'H', baseSha: 'B',
-        deps: { ...deps, prView: async () => { throw new Error('the forge refused'); } },
-      });
-      assert.equal(refused.labels, null,
-        'a refusal is null, never [] — an empty list would read as "this PR carries no exception", which is a claim the reviewer cannot make');
-    });
-});
-
-test('#1072: labels handed in are used as given, and no second forge call is made for them', async () => {
-  let prViewCalls = 0;
-  const gathered = await gatherTrancheInputs({
+  const given = await gatherTrancheInputs({
     project: 'o/r', number: 1067, headSha: 'H', baseSha: 'B',
     labels: ['size:exception'],
-    deps: {
-      fetchRollup: async () => greenRollup(),
-      diffNumstat: () => '1\t0\tfile.mjs\n',
-      readIgnoreList: () => [],
-      readConfig: () => ({}),
-      tier: 'lite',
-      prView: async () => { prViewCalls += 1; return { labels: [] }; },
-    },
+    deps: { fetchRollup: async () => greenRollup(), diffNumstat: () => '1\t0\tf.mjs\n', readIgnoreList: () => [], readConfig: () => ({}), tier: 'lite', getVcs: forge, prView: forge },
   });
+  assert.deepEqual(given.labels, ['size:exception']);
 
-  assert.deepEqual(gathered.labels, ['size:exception']);
-  assert.equal(prViewCalls, 0, 'the caller already read the PR; reading it again could disagree with the body beside it');
+  // None supplied is "not read", which waives nothing — never a lookup.
+  const none = await gatherTrancheInputs({
+    project: 'o/r', number: 1067, headSha: 'H', baseSha: 'B',
+    deps: { fetchRollup: async () => greenRollup(), diffNumstat: () => '1\t0\tf.mjs\n', readIgnoreList: () => [], readConfig: () => ({}), tier: 'lite', getVcs: forge, prView: forge },
+  });
+  assert.equal(none.labels, null, 'not read, and not an empty list that would claim the PR carries no exception');
 });
 
 test('#1073: a budget blocker says whether the labels were UNREAD or genuinely absent', () => {
