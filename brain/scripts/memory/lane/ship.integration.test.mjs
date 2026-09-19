@@ -62,7 +62,10 @@ function buildFixtureRepo() {
 /** A recording, in-memory, NO-NETWORK vcs port fake — never the real
  * providers. `mrList`/`mrCreate`/`mrAutoMerge` behave like a real forge only
  * in shape: idempotent find-by-headBranch, a monotonic PR number, an
- * unconditional arm. */
+ * unconditional arm. `mrList` reports `state`/`merged` (#930/#936, D4) — every
+ * PR this fake ever creates opens `state:'open'/merged:false`, matching a
+ * real forge; nothing in this file ever closes one, so `state`/`merged`
+ * never change past creation here. */
 function recordingVcs() {
   const calls = { mrList: 0, mrCreate: 0, mrAutoMerge: 0 };
   const prs = [];
@@ -70,12 +73,12 @@ function recordingVcs() {
   const vcs = {
     mrList: async () => {
       calls.mrList++;
-      return prs.map((p) => ({ number: p.number, title: p.title, headBranch: p.headBranch }));
+      return prs.map((p) => ({ number: p.number, title: p.title, headBranch: p.headBranch, state: p.state, merged: p.merged }));
     },
     mrCreate: async ({ head, title }) => {
       calls.mrCreate++;
       const number = nextNumber++;
-      prs.push({ number, headBranch: head, title });
+      prs.push({ number, headBranch: head, title, state: 'open', merged: false });
       return { url: `https://example.invalid/pull/${number}` };
     },
     mrAutoMerge: async () => {
@@ -178,12 +181,12 @@ function recordingVcsThrowOnce() {
       calls.mrList++;
       mrListCallCount++;
       if (mrListCallCount === 1) throw new Error('gh api pulls failed: rate limited');
-      return prs.map((p) => ({ number: p.number, title: p.title, headBranch: p.headBranch }));
+      return prs.map((p) => ({ number: p.number, title: p.title, headBranch: p.headBranch, state: p.state, merged: p.merged }));
     },
     mrCreate: async ({ head, title }) => {
       calls.mrCreate++;
       const number = nextNumber++;
-      prs.push({ number, headBranch: head, title });
+      prs.push({ number, headBranch: head, title, state: 'open', merged: false });
       return { url: `https://example.invalid/pull/${number}` };
     },
     mrAutoMerge: async () => {
@@ -194,7 +197,13 @@ function recordingVcsThrowOnce() {
   return { vcs, calls };
 }
 
-test('M1 repro: push OK, mrList throws once; the retry with zero new records finds/creates the PR and arms it', async () => {
+// D4 (#936) supersedes the pre-#936 M1 finding below: M1's audit finding was
+// that a push could land durably even though a LATER mrList lookup then
+// failed — a partial effect. D4 moves that same lookup BEFORE the push
+// (needed so a closedUnmerged decision can forbid the push itself), which
+// closes that exact gap for a first-time create: an mrList outage now means
+// NOTHING pushes at all, not a push that landed anyway.
+test('D4 (#936) supersedes M1: mrList now runs before the push, so an outage on the first run pushes nothing at all; the retry pushes, creates the PR, and arms it cleanly', async () => {
   const { mainDir, originDir } = buildFixtureRepo();
   addCandidate(mainDir, '2026-09-rec-1111111111111111.jsonl', recordJson('rec-1111111111111111', 'x'));
   const { vcs, calls } = recordingVcsThrowOnce();
@@ -203,17 +212,21 @@ test('M1 repro: push OK, mrList throws once; the retry with zero new records fin
     () => shipLane({ root: mainDir, project: 'x/y', tier: 'lite', host: 'test-host', date: '2026-09-09', vcs }),
     (err) => { assert.equal(err.prLookupFailed, true); return true; },
   );
-  const remoteShaAfterRun1 = git(originDir, 'rev-parse', 'refs/heads/memory/test-host-2026-09-09').trim();
-  assert.ok(remoteShaAfterRun1, 'the push already landed even though mrList failed');
+  assert.throws(
+    () => git(originDir, 'rev-parse', 'refs/heads/memory/test-host-2026-09-09'),
+    /unknown revision/,
+    'a prLookupFailed run must land nothing on origin now that the lookup runs before the push',
+  );
+  assert.equal(calls.mrCreate, 0);
 
   const second = await shipLane({ root: mainDir, project: 'x/y', tier: 'lite', host: 'test-host', date: '2026-09-09', vcs });
 
-  assert.equal(second.pushed, false, 'zero new records means nothing new to push');
+  assert.equal(second.pushed, true, 'nothing landed on the failed run, so the retry is a genuine push, not a reconcile-only one');
   assert.equal(second.reconciled, true);
-  assert.ok(second.pr && second.pr.number, 'the M1 retry must find/create the PR');
-  assert.equal(calls.mrCreate, 1, 'exactly one PR is created across both runs');
-  const remoteShaAfterRun2 = git(originDir, 'rev-parse', 'refs/heads/memory/test-host-2026-09-09').trim();
-  assert.equal(remoteShaAfterRun2, remoteShaAfterRun1, 'the remote sha must not move on the reconcile-only retry');
+  assert.ok(second.pr && second.pr.number, 'the retry must find/create the PR');
+  assert.equal(calls.mrCreate, 1, 'exactly one PR is created, on the retry');
+  const remoteSha = git(originDir, 'rev-parse', 'refs/heads/memory/test-host-2026-09-09').trim();
+  assert.ok(remoteSha, 'the retry\'s push must land on origin');
 });
 
 test('R3 under a real squash: squash-merging the lane into main makes a same-day retry a true no-op (delivered:true)', async () => {

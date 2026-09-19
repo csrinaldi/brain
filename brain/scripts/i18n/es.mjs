@@ -364,6 +364,10 @@ export default {
   'memory.ship.prLookupFailed':   '✗ el envío falló — no se pudo consultar el pull request, así que su existencia es incomputable; el push ya se concretó y es durable. {message}',
   'memory.ship.prCreateFailed':   '✗ el envío falló — no se pudo crear el pull request. {message}',
   'memory.ship.prNumberUnknown':  'el pull request está abierto pero no se pudo derivar su número — se salteó el auto-merge; la próxima corrida lo recupera.',
+  // REVERSIÓN DE R8 (#920 -> #936, D4): una rama cuyo único pull request se
+  // cerró sin fusionarse nunca se vuelve a enviar ni recibe un PR nuevo — se
+  // reporta en cada corrida hasta que un operador borre la rama local.
+  'memory.ship.closedUnmerged':   '⚠ no se envió {branch} — el pull request #{number} se cerró sin fusionarse; se seguirá reportando en cada corrida hasta que se borre la rama local.',
   'memory.ship.failed':           '✗ el envío falló — {message}',
   'memory.ship.raced':            '✗ el envío falló — la ref del lane se movió durante esta corrida (raced); no se perdió nada, sus blobs se vuelven a juntar en la próxima corrida: {message}',
   'memory.ship.badHost':          '✗ el envío falló — el nombre de host produjo un slug de ref vacío o inválido: {message}',

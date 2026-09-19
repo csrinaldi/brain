@@ -396,6 +396,10 @@ export default {
   'memory.ship.prLookupFailed':   '✗ ship failed — the pull request lookup could not run, so its existence is uncomputable; the push already landed and is durable. {message}',
   'memory.ship.prCreateFailed':   '✗ ship failed — the pull request could not be created. {message}',
   'memory.ship.prNumberUnknown':  'the pull request is open but its number could not be derived — auto-merge was skipped; the next run recovers it.',
+  // R8 REVERSAL (#920 -> #936, D4): a branch whose only pull request was
+  // closed unmerged is never re-pushed and never given a fresh PR — it is
+  // reported instead, on every run, until an operator deletes the local ref.
+  'memory.ship.closedUnmerged':   '⚠ {branch} was not shipped — pull request #{number} was closed without merging; it will keep being reported on every run until the local branch is deleted.',
   'memory.ship.failed':           '✗ ship failed — {message}',
   'memory.ship.raced':            '✗ ship failed — the lane ref moved during this run (raced); nothing was lost, its blobs are re-collected on the next run: {message}',
   'memory.ship.badHost':          '✗ ship failed — the host name produced an empty or invalid ref slug: {message}',

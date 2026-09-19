@@ -445,7 +445,10 @@ test('R11 (#920): pushed:false && reconciled:true renders as "reconciled", never
   // `slugifyHost()` can rewrite a raw `hostname()` that this fixture must
   // not have to re-derive.
   const secondScript = writeVcsTestScript(testTmp('cli-ship-fake-vcs-'), {
-    mrList: [{ number: 999, title: 't', headBranch: firstParsed.branch }],
+    // D4 (#936): the lookup now spans every state, so an item that omits
+    // `state` reads as uncomputable (`prLookupFailed`, fail closed) — this
+    // fixture's PR is genuinely still open, so it must say so explicitly.
+    mrList: [{ number: 999, title: 't', headBranch: firstParsed.branch, state: 'open', merged: false }],
     mrAutoMerge: { enabled: true, url: null },
   });
   const jsonRun = spawnSync(process.execPath, [CLI, 'ship', '--json'], {
@@ -474,6 +477,76 @@ test('R11 (#920): pushed:false && reconciled:true renders as "reconciled", never
 
   const afterOriginMainRefs = git(originDir, 'for-each-ref', '--format=%(refname)', 'refs/heads/memory/');
   assert.notEqual(afterOriginMainRefs, '', 'the lane ref itself must still be present on origin');
+});
+
+test('D4/R8 reversal (#936): a branch whose only PR is closed unmerged is reported, never re-pushed, never given a fresh PR', () => {
+  const { mainDir, originDir } = fixtureRepo({ withCandidate: true });
+
+  // Run 1: a full success — the lane's PR lands on origin but is never
+  // merged into main.
+  const firstScript = writeVcsTestScript(testTmp('cli-ship-fake-vcs-'), {
+    mrList: [],
+    mrCreate: { url: 'https://fake-vcs.invalid/pull/999' },
+    mrAutoMerge: { enabled: true, url: null },
+  });
+  const first = spawnSync(process.execPath, [CLI, 'ship', '--json'], {
+    encoding: 'utf8',
+    env: {
+      ...process.env, BRAIN_MEMORY_TEST_ROOT: mainDir, MEMORY_BACKEND: 'no-such-backend',
+      BRAIN_VCS_TEST_MODULE: FAKE_VCS_MODULE, BRAIN_VCS_TEST_SCRIPT: firstScript,
+    },
+  });
+  assert.equal(first.status, 0, first.stderr);
+  const firstParsed = JSON.parse(first.stdout);
+  assert.equal(firstParsed.pushed, true);
+  const beforeSha = git(originDir, 'for-each-ref', '--format=%(objectname)', 'refs/heads/memory/').trim();
+
+  // A human closes PR #999 without merging it. Run 2: the same lane still
+  // has pending content (records never reached origin/main), so the pre-#936
+  // path would have pushed and opened a fresh PR (#920 R8). #936 reverses
+  // that: no push, no mrCreate, and the run reports closedUnmerged.
+  const secondScript = writeVcsTestScript(testTmp('cli-ship-fake-vcs-'), {
+    mrList: [{ number: 999, title: 't', headBranch: firstParsed.branch, state: 'closed', merged: false }],
+  });
+  const jsonRun = spawnSync(process.execPath, [CLI, 'ship', '--json'], {
+    encoding: 'utf8',
+    env: {
+      ...process.env, BRAIN_MEMORY_TEST_ROOT: mainDir, MEMORY_BACKEND: 'no-such-backend',
+      BRAIN_VCS_TEST_MODULE: FAKE_VCS_MODULE, BRAIN_VCS_TEST_SCRIPT: secondScript,
+    },
+  });
+  assert.equal(jsonRun.status, 0, jsonRun.stderr);
+  const parsed = JSON.parse(jsonRun.stdout);
+  assert.equal(parsed.closedUnmerged, true);
+  assert.equal(parsed.pushed, false);
+  assert.equal(parsed.pr.number, 999);
+  assert.equal(parsed.autoMerge, null);
+
+  const afterSha = git(originDir, 'for-each-ref', '--format=%(objectname)', 'refs/heads/memory/').trim();
+  assert.equal(afterSha, beforeSha, 'a closed-unmerged branch must never be re-pushed to origin');
+
+  const textRun = spawnSync(process.execPath, [CLI, 'ship'], {
+    encoding: 'utf8',
+    env: {
+      ...process.env, BRAIN_MEMORY_TEST_ROOT: mainDir, MEMORY_BACKEND: 'no-such-backend',
+      BRAIN_VCS_TEST_MODULE: FAKE_VCS_MODULE, BRAIN_VCS_TEST_SCRIPT: secondScript,
+    },
+  });
+  assert.equal(textRun.status, 0, textRun.stderr);
+  assert.match(textRun.stdout, /memory\/cli:.*999/, 'the closed PR number must be reported in the text output');
+  assert.doesNotMatch(textRun.stdout, /nothing new to ship/i);
+
+  // Run again on the SAME (still closed-unmerged) state to prove this is
+  // reported on EVERY run, never just once (spec.md's own scenario).
+  const thirdRun = spawnSync(process.execPath, [CLI, 'ship', '--json'], {
+    encoding: 'utf8',
+    env: {
+      ...process.env, BRAIN_MEMORY_TEST_ROOT: mainDir, MEMORY_BACKEND: 'no-such-backend',
+      BRAIN_VCS_TEST_MODULE: FAKE_VCS_MODULE, BRAIN_VCS_TEST_SCRIPT: secondScript,
+    },
+  });
+  assert.equal(thirdRun.status, 0, thirdRun.stderr);
+  assert.equal(JSON.parse(thirdRun.stdout).closedUnmerged, true);
 });
 
 test('E1 (cold review): mrCreate returns a URL with no derivable PR number and the rescan finds nothing: exit 0, prNumberUnknown', () => {

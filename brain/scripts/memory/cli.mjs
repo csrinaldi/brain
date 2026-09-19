@@ -532,6 +532,7 @@ if (op === "ship") {
     } else {
       console.log(`memory/cli: ${await t(`memory.ship.${shipOutcomeKey(result)}`, {
         ref: result.ref,
+        branch: result.branch,
         number: result.pr?.number ?? null,
         reason: result.autoMerge?.reason ?? "",
       })}`);
@@ -588,6 +589,11 @@ if (op === "ship") {
  * block above's job, off the THROWN, fatal branches only). */
 function shipOutcomeKey(result) {
   if (result.dryRun) return "dryRun";
+  // R8 REVERSAL (#920 -> #936, D4): checked before `prNumberUnknown`/
+  // `nothing` — a closedUnmerged row's `pr.number` is set (the human-closed
+  // PR's own number), so without this check it would fall through and be
+  // misreported as "done".
+  if (result.closedUnmerged) return "closedUnmerged";
   if (result.pr && result.pr.number === null) return "prNumberUnknown";
   if (result.pushed === false && result.pr === null) return "nothing";
   if (result.autoMerge?.enabled === false) return "autoMergeRefused";
