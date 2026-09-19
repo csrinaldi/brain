@@ -73,7 +73,7 @@ function _defaultLoadBrainConfig(root) {
  *   - `ts`        ← getTimestamp seam (C2a canonical, never `new Date()`
  *                   directly).
  *
- * Order mirrors dualWriteRecords: scan for secrets BEFORE any write. `type`
+ * Order mirrors the retired dualWriteRecords (#977): scan for secrets BEFORE any write. `type`
  * and `--issue` shape refusals stay FIRST — both are caller mistakes fixable
  * in the same second; the actor refusal is a machine-setup question.
  *
@@ -231,7 +231,7 @@ export async function save(
   // THE APPEND IS ALREADY DONE (issue #637), and it cannot be ordered otherwise:
   // `rebuildIndex` reads the WHOLE store, so it can only run after the line it
   // has to see. Every other write in this codebase scans before it writes —
-  // `dualWriteRecords` aborts "before the append-only log is ever touched",
+  // the retired `dualWriteRecords` (#977) aborted "before the append-only log is ever touched",
   // `share()` runs the chunk backstop first for the same reason — and `save` is
   // the one verb that cannot follow the rule.
   //

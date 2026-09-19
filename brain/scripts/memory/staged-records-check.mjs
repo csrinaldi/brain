@@ -2,7 +2,7 @@
 // staged-records-check.mjs — the `pre-commit` half of issue #701 (design.md
 // Decision 6, proposal.md Decision 4). Refuses a staged `.memory/records/`
 // path whose blob is BYTE-IDENTICAL to that path's blob at the upstream base
-// — the SAME predicate `dualWriteRecords()` uses (`upstream-records.mjs`), at
+// — the SAME predicate `dualWriteRecords()` used (`upstream-records.mjs`) until #977 retired it, at
 // a second call site, never a separate authorship rule.
 //
 // Shape follows `vcs/actor-check.mjs`: a PURE evaluator (`evaluateStagedRecords`)
