@@ -256,27 +256,46 @@ test('#998 R998-4: determinism — the same changes, shuffled, produce a byte-id
 // task count and the directory it lives in. The SDD view builds every change;
 // a card needs exactly one, and looking it up by scanning the whole list in
 // the renderer would put that search in the page instead of the model.
-test('#1059 region 03: sddForIssue finds the change an issue owns, and says so when there is none', () => {
-  const section = { ok: true, value: [
-    { id: 'issue-881-ui', issue: 881, slug: 'ui', dir: 'openspec/changes/issue-881-ui', archived: false, missing: [], tasks: { checked: 14, open: 4, next: 'T5' } },
-    { id: '882', issue: 882, slug: 'views', dir: 'openspec/changes/archive/882', archived: true, missing: [], tasks: { checked: 12, open: 0, next: null } },
-  ] };
+test('#1059 region 03: sddForIssue returns a BUILT ROW, on the shape the snapshot actually carries', () => {
+  // THE FIXTURES ARE THE POINT. This test used to invent its own change
+  // shape — `tasks: {checked: 14}` as a bare number, no `artefacts`, no
+  // `sliceScopes` — and then assert only `issue` and `archived`, the two
+  // fields every shape happens to share. So it passed while the function
+  // returned the RAW snapshot entry, which carries no `stages` at all, and
+  // the card renderer threw on every single card. FULL and ONLY_PROPOSAL are
+  // the same fixtures `buildSddModel` is tested against, and they are the
+  // shape `readChanges()` really emits.
+  const section = { ok: true, value: [FULL, ONLY_PROPOSAL] };
 
-  const found = sddForIssue(section, 881);
+  const found = sddForIssue(section, 1);
   assert.equal(found.ok, true);
-  assert.equal(found.value.issue, 881);
+  assert.equal(found.value.issue, 1);
   assert.equal(found.value.archived, false);
 
-  const archived = sddForIssue(section, 882);
-  assert.equal(archived.value.archived, true, 'an archived change is still the issue\'s change');
+  // The three things the card's strip reads. Each one is absent from the raw
+  // entry, so asserting them is what pins the row.
+  assert.ok(Array.isArray(found.value.stages), 'a row carries its stages — the strip names the last one reached');
+  assert.deepEqual(found.value.stages.map((s) => s.id), STAGE_IDS,
+    'all seven stages, in lifecycle order, exactly as buildSddModel builds them');
+  assert.equal(typeof found.value.tasks.checked, 'number',
+    'the row summarises tasks into numbers; the raw entry carries {ok,value} envelopes the strip cannot add up');
+  assert.equal(typeof found.value.tasks.open, 'number');
+  assert.equal(found.value.dir, 'openspec/changes/issue-1-full');
+
+  // A change whose tasks.md could not be read still produces a row, because a
+  // card that throws is the one thing worse than a card that says nothing.
+  const degraded = sddForIssue(section, 2);
+  assert.equal(degraded.ok, true);
+  assert.deepEqual(degraded.value.stages.map((s) => s.id), STAGE_IDS);
+  assert.equal(degraded.value.tasks.checked, 0, 'unreadable counts read as zero, never as an envelope');
 
   const none = sddForIssue(section, 99999);
   assert.equal(none.ok, false);
   assert.match(none.reason, /no change/i, 'an issue with no change dir says so — it is not an error and not an empty strip');
 
-  const unreadable = sddForIssue({ ok: false, reason: 'the changes dir could not be read' }, 881);
+  const unreadable = sddForIssue({ ok: false, reason: 'the changes dir could not be read' }, 1);
   assert.equal(unreadable.ok, false);
-  assert.equal(unreadable.reason, 'the changes dir could not be read', 'the section\'s own reason passes through');
+  assert.equal(unreadable.reason, 'the changes dir could not be read', "the section's own reason passes through");
 });
 
 // ── #1059 phase 10: the fourth mode is the project's slice plan ───────────

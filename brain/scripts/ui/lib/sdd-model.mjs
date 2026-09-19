@@ -257,7 +257,12 @@ export function sddForIssue(changesSection, issue) {
   if (changesSection.ok !== true) return { ok: false, reason: changesSection.reason };
   const found = (changesSection.value ?? []).find((c) => c.issue === issue);
   if (!found) return { ok: false, reason: `no change directory names issue #${issue}` };
-  return { ok: true, value: found };
+  // A ROW, not the raw snapshot entry. `readChanges()` emits `artefacts`
+  // booleans and `{ok,value}` task envelopes; a caller wants the seven stages
+  // and two numbers, which is exactly what every row in `buildSddModel` gets.
+  // Returning the raw entry here made the card strip read a `stages` that has
+  // never existed on it, and one card throwing takes the whole render with it.
+  return { ok: true, value: buildChangeRow(found) };
 }
 
 export function buildSddModel(changesSection, { tier } = {}) {

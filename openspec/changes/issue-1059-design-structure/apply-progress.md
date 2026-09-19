@@ -66,3 +66,43 @@ now opens its ticket without throwing the reader out of the queue.
 Covered by a new assertion in `views-owned.test.mjs` that counts the calls in
 `renderContent` and refuses any `mounts.drawer.hidden = true` inside it.
 Mutation: removing the single call turns exactly that test red.
+
+## Two more defects, and the reason none of them could fail a test
+
+The mode gate above was not why the maintainer saw no panel. Two real crashes
+were, and both were found by running the page instead of reading it: a
+throwaway DOM shim in the scratchpad imported the real `app.js`, pointed its
+`fetch` at the running server, and dispatched a card's own click listener.
+The stack traces named both faults in one run.
+
+**1. `sddForIssue` returned the raw snapshot entry, not a row.** `readChanges()`
+emits `artefacts` booleans and `{ok,value}` task envelopes; a row carries seven
+`stages` and two numbers. The card strip read `change.stages`, which is on NO
+entry the server sends — all 179 of them. So `renderNodeSdd` threw on every
+card that had a change directory, `renderLanes` died mid-board, and
+`renderDrawer` never ran. The function's own docstring already said "value:
+`<the change row>`"; the code disagreed with it.
+
+The test is the story. It invented a THIRD shape — `tasks: {checked: 14}` as a
+bare number, no `artefacts`, no `sliceScopes` — and asserted only `issue` and
+`archived`, the two fields every shape happens to share. It now uses the same
+`FULL`/`ONLY_PROPOSAL` fixtures the rest of the file uses, which are the shape
+the reader really emits, and asserts the three things the strip reads.
+
+**2. `saidList` was called seven times and defined nowhere.** Phase 5 removed
+the SVG helpers, and this one sat directly above them in the same block, so it
+went with them. Every branch that reports a cross-lane edge, a dropped edge or
+an unreadable issue body threw a `ReferenceError`. Restored from `fe812686^`.
+
+**The class, not just the two bugs.** D9 says `app.js` has no runner, so a
+`ReferenceError` in it is not a red test — it is a blank page. A new scan in
+`app-source-guard.test.mjs` now requires every identifier in call position to
+be declared, imported, bound as a parameter, or a named platform global. It
+caught `saidList` and nothing else. Writing it also exposed a trap worth
+recording: stripping block comments before line comments lets the `/*` inside
+this file's own `lib/*.mjs` prose open a comment that swallows the imports
+below it, so the scan reports a dozen phantom undefined names. Line comments
+are stripped first, strings last.
+
+A DOM smoke harness would have caught all three defects on the first render
+and is the real fix for this class. It is not in this change's scope.

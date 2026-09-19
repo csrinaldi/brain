@@ -123,3 +123,79 @@ test('#998: the page never assigns markup — no innerHTML, outerHTML, insertAdj
   const text = readFileSync(APP_JS, 'utf8');
   assert.doesNotMatch(text, /\b(innerHTML|outerHTML|insertAdjacentHTML|document\.write)\b/, 'text from the forge and from files is rendered as text, never as markup');
 });
+
+// ── #1059: a call to a function that does not exist ────────────────────────
+// `saidList` was called in seven places and defined in none. It had been
+// deleted as collateral when phase 5 removed the SVG helpers it happened to
+// sit above, and NOTHING caught it: app.js has no DOM runner (D9), so a
+// ReferenceError is not a failing test, it is a blank page in the browser —
+// `renderLanes` threw before `renderDrawer` ran, so no ticket panel could
+// ever open. The maintainer found it by clicking.
+//
+// This scan is the cheapest guard that would have caught it: every identifier
+// in call position must be declared in the file, imported, a parameter, or a
+// known platform global. It is deliberately conservative — a name it cannot
+// account for is a failure, so the fix is to declare the function or add the
+// global here, never to loosen the rule.
+const PLATFORM_GLOBALS = new Set([
+  'fetch', 'setInterval', 'clearInterval', 'setTimeout', 'clearTimeout',
+  'EventSource', 'Error', 'Object', 'Array', 'Number', 'String', 'Boolean',
+  'Math', 'JSON', 'Date', 'Map', 'Set', 'Promise', 'RegExp', 'Symbol',
+  'parseInt', 'parseFloat', 'isNaN', 'isFinite',
+  'encodeURIComponent', 'decodeURIComponent', 'structuredClone',
+]);
+const JS_KEYWORDS = new Set([
+  'if', 'for', 'while', 'switch', 'catch', 'return', 'typeof', 'function',
+  'new', 'of', 'in', 'await', 'else', 'do', 'try', 'throw', 'case', 'delete',
+  'void', 'instanceof', 'yield', 'super', 'this', 'constructor', 'get', 'set',
+]);
+
+/** The source with comments and string/template bodies blanked, so a name
+ *  that only appears in prose or in a quoted string is never read as code.
+ *
+ *  THE ORDER IS LOAD-BEARING, and getting it wrong is how this scan first
+ *  lied to me. Stripping block comments first lets a `/*` that occurs inside
+ *  a LINE comment — app.js's own header says "a pure `lib/<star>.mjs` module"
+ *  — open a comment that runs to the next real closer and swallows the
+ *  imports below it, which then read as undefined. Line comments go first for
+ *  that reason; strings go last, because comment prose is full of
+ *  apostrophes that would otherwise open a string that never closes. */
+function codeOnly(text) {
+  return text
+    .split('\n')
+    .map((line) => line.replace(/(^|[^:])\/\/.*$/, '$1 '))
+    .join('\n')
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/'(?:\\.|[^'\\])*'/g, "''")
+    .replace(/"(?:\\.|[^"\\])*"/g, '""')
+    .replace(/`(?:\\.|[^`\\])*`/g, '``');
+}
+
+test('#1059: every function app.js calls is really defined — a ReferenceError is a blank page, not a failing test', () => {
+  const code = codeOnly(read(APP_JS));
+
+  const declared = new Set();
+  for (const m of code.matchAll(/\bfunction\s+([A-Za-z_$][\w$]*)/g)) declared.add(m[1]);
+  for (const m of code.matchAll(/\bclass\s+([A-Za-z_$][\w$]*)/g)) declared.add(m[1]);
+  for (const m of code.matchAll(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)/g)) declared.add(m[1]);
+  // Destructured bindings and every parameter list: `({a, b})`, `(x, y) =>`,
+  // `function f(a, b)`. Collected loosely on purpose — a name bound anywhere
+  // is not the defect this looks for.
+  for (const m of code.matchAll(/[({,[]\s*([A-Za-z_$][\w$]*)\s*(?=[,)}\]=:])/g)) declared.add(m[1]);
+  for (const m of code.matchAll(/import\s*\{([^}]*)\}/g)) {
+    for (const part of m[1].split(',')) {
+      const name = part.trim().split(/\s+as\s+/).pop()?.trim();
+      if (name) declared.add(name);
+    }
+  }
+
+  const unknown = new Set();
+  for (const m of code.matchAll(/(^|[^.\w$])([A-Za-z_$][\w$]*)\s*\(/g)) {
+    const name = m[2];
+    if (JS_KEYWORDS.has(name) || PLATFORM_GLOBALS.has(name) || declared.has(name)) continue;
+    unknown.add(name);
+  }
+
+  assert.deepEqual([...unknown].sort(), [],
+    'these names are called in app.js but never defined, imported or bound — each one throws a ReferenceError the moment its branch runs');
+});

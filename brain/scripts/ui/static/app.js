@@ -111,6 +111,18 @@ function said(text) {
   return el('p', 'said', text);
 }
 
+/** A stated list — the same rule as `said`, for facts that come by the handful.
+ *  Restored in #1059: phase 5 removed the SVG helpers this sat above and took
+ *  it along, leaving seven call sites pointing at nothing. */
+function saidList(heading, lines) {
+  const wrap = el('div', 'said-group');
+  wrap.appendChild(said(heading));
+  const list = el('ul', 'said-list');
+  for (const line of lines) list.appendChild(el('li', null, line));
+  wrap.appendChild(list);
+  return wrap;
+}
+
 
 // ── render ─────────────────────────────────────────────────────────────────
 
