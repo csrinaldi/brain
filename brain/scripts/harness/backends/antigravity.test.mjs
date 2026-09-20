@@ -255,7 +255,7 @@ test('2.3: init() never throws when _readDoc throws on one path — warns and st
   const _writeAgents = () => { wrote = true; };
 
   const { warnings } = await captureWarn(() =>
-    init({ _readDoc, _writeAgents, _repoRoot: '/fake/repo' }),
+    init({ _readDoc, _writeAgents, _writeGeminiSettings: () => {}, _repoRoot: '/fake/repo' }),
   );
 
   assert.ok(warnings.some((w) => w.includes('sdd-layout.md')), 'must warn naming the failing path');
@@ -267,7 +267,7 @@ test('2.3: init() never throws when _writeAgents throws — warns, resolves', as
   const _writeAgents = () => { throw new Error('boom-write'); };
 
   const { warnings } = await captureWarn(() =>
-    init({ _readDoc, _writeAgents, _repoRoot: '/fake/repo' }),
+    init({ _readDoc, _writeAgents, _writeGeminiSettings: () => {}, _repoRoot: '/fake/repo' }),
   );
 
   assert.ok(warnings.some((w) => w.includes('boom-write')));
