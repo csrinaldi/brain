@@ -13,7 +13,7 @@ import { vcsToken } from '../lib/token.mjs';
 import { currentIdentity } from '../lib/identity-context.mjs';
 import { gitlabApiFetch } from '../gitlab-api.mjs';
 import { assertNoApprovalLabel } from '../lib/approval-deny.mjs';
-import { uncomputable, UNCOMPUTABLE_REASONS } from '../lib/uncomputable-cause.mjs';
+import { uncomputable, UNCOMPUTABLE_REASONS, isNotFound } from '../lib/uncomputable-cause.mjs';
 import { armed, refused, AUTO_MERGE_REASONS } from '../lib/auto-merge-outcome.mjs';
 
 export const PROVIDER = 'gitlab';
@@ -286,8 +286,16 @@ export async function issueRelations({ project, number, apiBase, token, proxyUrl
  * `r.description` (`null`/`undefined` when GitLab omits it), indistinguishable
  * from the failure case above.
  *
+ * `absent` (issue #1086, D1) is an ADDITIVE third field on the same failure
+ * shape, computed from `isNotFound(err.message)` in the `catch` below —
+ * `gitlabApiFetch` throws `GitLab API failed: ${status} (${path})`, so a 404
+ * on this MR-by-iid lookup classifies `not-found` via the shared classifier's
+ * numeric-code rule, same discipline as `github.mjs#prView`. `false` on a
+ * successful fetch, `true` on a definitive negative, `null` on any other
+ * failure. `labels`/`body` stay `null` in both failure branches.
+ *
  * @param {{ project: string, number: number, apiBase?: string, token?: string, proxyUrl?: string|null, fetchImpl?: Function }} params
- * @returns {Promise<{ number: number, labels: string[]|null, body: string|null, author: string|null, headRefOid: string|null, baseRefOid: string|null }>}
+ * @returns {Promise<{ number: number, labels: string[]|null, body: string|null, author: string|null, headRefOid: string|null, baseRefOid: string|null, absent: boolean|null }>}
  */
 export async function prView({ project, number, apiBase, token, proxyUrl, fetchImpl } = {}) {
   const encoded = encodeURIComponent(project);
@@ -306,9 +314,18 @@ export async function prView({ project, number, apiBase, token, proxyUrl, fetchI
       author: r.author?.username ?? null,
       headRefOid: r.sha ?? r.diff_refs?.head_sha ?? null,
       baseRefOid: r.diff_refs?.base_sha ?? null,
+      absent: false,
     };
-  } catch {
-    return { number, labels: null, body: null, author: null, headRefOid: null, baseRefOid: null };
+  } catch (err) {
+    return {
+      number,
+      labels: null,
+      body: null,
+      author: null,
+      headRefOid: null,
+      baseRefOid: null,
+      absent: isNotFound(err?.message ?? '') ? true : null,
+    };
   }
 }
 

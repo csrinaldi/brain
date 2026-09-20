@@ -254,6 +254,9 @@ for (const providerName of Object.keys(PROVIDERS)) {
     // successfully-empty — a SUCCESSFUL fetch must never surface `null`.
     assert.notEqual(result.body, null, 'a successful prView fetch must never surface body:null (that means uncomputable)');
     assert.notEqual(result.author, undefined, 'author key must be present (null is valid — absent-on-provider — undefined is not)');
+    // issue #1086, D1: a successful fetch MUST additively report `absent: false`
+    // — existing consumers that do not read `absent` are unaffected by this key.
+    assert.equal(result.absent, false, 'a successful prView fetch must report absent:false');
   });
 
   test(`${providerName}.prView (contract): a fetch failure yields the null-shape, never throws`, async () => {
@@ -262,7 +265,40 @@ for (const providerName of Object.keys(PROVIDERS)) {
     assertProvenance(fixture, fixtureName);
 
     const result = await vcs.prView({ project: 'x/y', number: 42, ...prViewArgs(fixture) });
-    assert.deepEqual(result, { number: 42, labels: null, body: null, author: null, headRefOid: null, baseRefOid: null });
+    // issue #1086, D1: this fixture is the GENERIC/unreadable failure — the
+    // read could not be completed for a reason OTHER than a definitive
+    // negative, so `absent` must be `null` (unknown), never `true`.
+    assert.deepEqual(result, {
+      number: 42,
+      labels: null,
+      body: null,
+      author: null,
+      headRefOid: null,
+      baseRefOid: null,
+      absent: null,
+    });
+  });
+
+  // issue #1086, D1/D2: the definitive-negative case — the requested number
+  // identifies an issue, not a pull/merge request. `labels`/`body` MUST stay
+  // `null` (REQ-CIC-2's sentinel is untouched — a consumer that does not read
+  // `absent` sees exactly the legacy unreadable shape), and `absent` MUST be
+  // `true`, never `null`.
+  test(`${providerName}.prView (contract): reports absent:true on the not-found fixture — a number that is an issue, not a PR (#1086)`, async () => {
+    const fixtureName = `${providerName}-prView-notfound.json`;
+    const fixture = loadFixture(fixtureName);
+    assertProvenance(fixture, fixtureName);
+
+    const result = await vcs.prView({ project: 'x/y', number: 978, ...prViewArgs(fixture) });
+    assert.deepEqual(result, {
+      number: 978,
+      labels: null,
+      body: null,
+      author: null,
+      headRefOid: null,
+      baseRefOid: null,
+      absent: true,
+    });
   });
 
   // headRefOid (ADR-0021 Decision 1): the recorded/derived happy fixtures

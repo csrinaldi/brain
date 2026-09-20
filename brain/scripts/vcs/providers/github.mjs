@@ -11,7 +11,7 @@ import { normalizeCommitStatus, providerState, assigneeParams, normalizeAssignee
 import { vcsToken } from '../lib/token.mjs';
 import { currentIdentity } from '../lib/identity-context.mjs';
 import { assertNoApprovalLabel } from '../lib/approval-deny.mjs';
-import { uncomputable, UNCOMPUTABLE_REASONS } from '../lib/uncomputable-cause.mjs';
+import { uncomputable, UNCOMPUTABLE_REASONS, isNotFound } from '../lib/uncomputable-cause.mjs';
 import { armed, refused, AUTO_MERGE_REASONS } from '../lib/auto-merge-outcome.mjs';
 
 export const PROVIDER = 'github';
@@ -401,12 +401,32 @@ export async function capabilities({ project = '', branch = 'main' } = {}) {
  * REQUIRED gate) MUST treat `null` as uncomputable, never collapse it to a
  * fabricated empty default.
  *
+ * `absent` (issue #1086, D1) is an ADDITIVE third field on the same failure
+ * shape, computed from `isNotFound(r.stderr)`: `false` on a successful
+ * fetch, `true` when `gh pr view`'s own stderr is a definitive "that number
+ * is not a pull request" (`isNotFound` — the module's shared not-found
+ * predicate, never a provider-local regex), `null` on any other failure
+ * (including the JSON-parse catch below — a malformed response is not a
+ * negative). `labels`/`body` stay `null` in BOTH failure branches,
+ * byte-identical to today, so a consumer that does not read `absent`
+ * behaves exactly as before this change.
+ *
  * @param {{ project?: string, number: number }} opts
- * @returns {Promise<{ number: number, labels: string[]|null, body: string|null, author: string|null, headRefOid: string|null, baseRefOid: string|null }>}
+ * @returns {Promise<{ number: number, labels: string[]|null, body: string|null, author: string|null, headRefOid: string|null, baseRefOid: string|null, absent: boolean|null }>}
  */
 export async function prView({ project, number } = {}) {
   const r = gh(['pr', 'view', String(number), '--json', 'number,labels,body,author,headRefOid']);
-  if (!r.ok) return { number, labels: null, body: null, author: null, headRefOid: null, baseRefOid: null };
+  if (!r.ok) {
+    return {
+      number,
+      labels: null,
+      body: null,
+      author: null,
+      headRefOid: null,
+      baseRefOid: null,
+      absent: isNotFound(r.stderr) ? true : null,
+    };
+  }
   try {
     const data = JSON.parse(r.stdout);
     const br = gh(['api', `repos/{owner}/{repo}/pulls/${number}`, '--jq', '.base.sha']);
@@ -421,9 +441,12 @@ export async function prView({ project, number } = {}) {
       author: data.author?.login ?? null,
       headRefOid: data.headRefOid ?? null,
       baseRefOid,
+      absent: false,
     };
   } catch {
-    return { number, labels: null, body: null, author: null, headRefOid: null, baseRefOid: null };
+    // A malformed response is not a negative — `absent: null`, same as any
+    // other unreadable state.
+    return { number, labels: null, body: null, author: null, headRefOid: null, baseRefOid: null, absent: null };
   }
 }
 
