@@ -192,9 +192,14 @@ test('1.2: init() resolves with missingDocs naming the one path _readDoc threw f
     return FAKE_DOCS[relPath];
   };
   const _writeAgents = () => {};
+  // Hermetic by construction (matches 2.1's fix, remediation batch): without
+  // this, init()'s real default writer runs against '/fake/repo/.gemini' and
+  // its outcome depends on ambient filesystem permissions, not on anything
+  // this test asserts.
+  const _writeGeminiSettings = () => {};
 
   const { result } = await captureWarn(() =>
-    init({ _readDoc, _writeAgents, _repoRoot: '/fake/repo' }),
+    init({ _readDoc, _writeAgents, _writeGeminiSettings, _repoRoot: '/fake/repo' }),
   );
 
   assert.deepEqual(result.missingDocs, ['brain/core/methodology/sdd-layout.md']);
@@ -203,9 +208,11 @@ test('1.2: init() resolves with missingDocs naming the one path _readDoc threw f
 test('1.3: init() resolves with agentsWritten: false when _writeAgents throws, and still resolves (never throws)', async () => {
   const _readDoc = (relPath) => FAKE_DOCS[relPath];
   const _writeAgents = () => { throw new Error('boom-write'); };
+  // Hermetic by construction (matches 2.1's fix, remediation batch) — see 1.2.
+  const _writeGeminiSettings = () => {};
 
   const { result } = await captureWarn(() =>
-    init({ _readDoc, _writeAgents, _repoRoot: '/fake/repo' }),
+    init({ _readDoc, _writeAgents, _writeGeminiSettings, _repoRoot: '/fake/repo' }),
   );
 
   assert.equal(result.agentsWritten, false);

@@ -66,6 +66,21 @@
       possible output (already verified during design — none do), so no
       pre-existing test needs deletion.
 
+## Phase 4: Remediation (verify FAIL — closes coverage gap)
+
+- [x] 4.1 RED/GREEN: extend `makeUpgradableConsumer` with an optional
+      `missingMethodologyDocs` param (list of methodology doc slugs to leave
+      unwritten), add a `brain-upgrade.test.mjs` case where `brain/HOME.md`
+      IS present but a methodology doc is not, and assert the generic
+      "compiled without N missing source doc(s)" wording appears, names the
+      missing doc, the byte-identical success line is absent, and the
+      `brain/HOME.md`-specific message is absent. Covers spec.md's "A
+      different source doc is missing" scenario, which `tasks.md` Phase 2
+      under-planned.
+- [x] 4.2 Harden `antigravity.test.mjs` tests `1.2` and `1.3` (new, non-
+      hermetic per the verify SUGGESTION) with an injected
+      `_writeGeminiSettings: () => {}`, matching test `2.1`'s existing fix.
+
 ## Review Workload Forecast
 
 | Field | Value |

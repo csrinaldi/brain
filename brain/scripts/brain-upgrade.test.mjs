@@ -167,7 +167,12 @@ test('brain:upgrade: --no-install states that modification detection degraded (R
 // `homeMd` is optional (task 2.1): omitting it simulates a consumer whose
 // brain/HOME.md does not exist, so init()'s _readDoc throws for that one
 // SOURCE_DOCS path and the upgrade's regen message must name it.
-function makeUpgradableConsumer(prefix, { geminiSettings, homeMd }) {
+// `missingMethodologyDocs` (added for the "a different source doc is
+// missing" spec scenario): a list of methodology doc slugs (e.g.
+// 'sdd-layout') to leave unwritten, so init()'s _readDoc throws for that ONE
+// non-brain/HOME.md SOURCE_DOCS path — a distinct code path from omitting
+// homeMd, which only ever exercises the brain/HOME.md-specific branch.
+function makeUpgradableConsumer(prefix, { geminiSettings, homeMd, missingMethodologyDocs = [] }) {
   const dir = makeTmpDir(prefix);
   const pkg = join(dir, 'node_modules', 'brain');
   mkdirSync(join(pkg, 'brain', 'core'), { recursive: true });
@@ -192,6 +197,7 @@ function makeUpgradableConsumer(prefix, { geminiSettings, homeMd }) {
   // Omitted entirely when `homeMd` is undefined/null (task 2.1 fixture).
   if (homeMd != null) writeFileSync(join(dir, 'brain', 'HOME.md'), homeMd);
   for (const d of ['agent-authorities', 'harness-contract', 'sdd-layout', 'workflow-governance']) {
+    if (missingMethodologyDocs.includes(d)) continue;
     writeFileSync(join(dir, 'brain', 'core', 'methodology', `${d}.md`), `# ${d}\n`);
   }
   return dir;
@@ -262,6 +268,31 @@ test('brain:upgrade: brain/HOME.md missing — the regen message names it and po
     `the message must name the command that creates brain/HOME.md and regenerates AGENTS.md:\n${out}`);
   assert.ok(!out.includes('Regenerated AGENTS.md from YOUR brain/HOME.md (it is compiled, not shipped — see #397).'),
     `the byte-identical success line must NOT print when brain/HOME.md is missing:\n${out}`);
+});
+
+// Remediation (verify FAIL, spec scenario "A different source doc is
+// missing"): brain/HOME.md IS present, but a methodology doc is not. This is
+// a distinct code path from the brain/HOME.md-missing test above — it must
+// hit the generic "compiled without N missing source doc(s)" branch, not the
+// brain/HOME.md-specific one, and must still suppress the byte-identical
+// success line.
+test('brain:upgrade: a different source doc is missing — names it as compiled-without, not the HOME.md message, not the byte-identical success line', (t) => {
+  const dir = makeUpgradableConsumer('brain-397-otherdoc-', {
+    geminiSettings: { hooks: {} },
+    homeMd: '# consumer home\n',
+    missingMethodologyDocs: ['sdd-layout'],
+  });
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+
+  const r = runBrainUpgrade(dir, ['--no-install']);
+  const out = `${r.stdout}${r.stderr}`;
+
+  assert.match(out, /AGENTS\.md was compiled without 1 missing source doc\(s\): brain\/core\/methodology\/sdd-layout\.md/,
+    `the message must name the missing methodology doc and say it was compiled without it:\n${out}`);
+  assert.ok(!out.includes('Regenerated AGENTS.md from YOUR brain/HOME.md (it is compiled, not shipped — see #397).'),
+    `the byte-identical success line must NOT print when a source doc is missing:\n${out}`);
+  assert.ok(!out.includes('brain/HOME.md is missing'),
+    `must not print the brain/HOME.md-specific message when brain/HOME.md itself is present:\n${out}`);
 });
 
 // The trap, proven by behaviour rather than by reading the source: init() writes
