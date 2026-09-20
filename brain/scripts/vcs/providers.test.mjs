@@ -372,6 +372,53 @@ test('github.commitStatus returns null when there are no checks', async () => {
   assert.equal(result, null);
 });
 
+// ── commitPrs (issue #1086 cold-review remediation) ───────────────────────────────
+//
+// GitLab's merge_requests-for-a-commit endpoint defaults to a small page size
+// when no `per_page` is given (unlike GitHub's `commitPrs`, which spawns
+// `gh api --paginate` and walks every page automatically — see github.mjs).
+// Without an explicit `per_page`, a commit associated with more merge
+// requests than the default page could return a SILENTLY TRUNCATED list —
+// collapsing a true "two or more containing MRs" (uncomputable, per the
+// dispatch table, design D4) into a false "exactly one" (audited as if it
+// were unambiguous). Mirrors the `mrList` full-page precedent (#930/#936,
+// see the headBranch tests above) — but `commitPrs` NEVER throws (its
+// contract, unlike `mrList`'s): a full page means refuse-by-returning-null,
+// the same uncomputable value a transport failure already yields.
+
+test('gitlab.commitPrs requests per_page=100 explicitly (never relies on the GitLab default page size)', async () => {
+  let seenUrl;
+  await gitlab.commitPrs({
+    project: 'g/r',
+    sha: 'deadbeef',
+    fetchImpl: async (url) => {
+      seenUrl = url;
+      return { ok: true, json: async () => [] };
+    },
+  });
+  assert.match(seenUrl, /[?&]per_page=100(&|$)/, "commitPrs must request per_page=100, matching mrList's headBranch-filtered discipline");
+});
+
+test('gitlab.commitPrs returns null when the page comes back FULL (100) — refuses rather than decide on a possibly-truncated page', async () => {
+  const full = Array.from({ length: 100 }, (_, i) => ({ iid: i + 1 }));
+  const result = await gitlab.commitPrs({
+    project: 'g/r',
+    sha: 'deadbeef',
+    fetchImpl: async () => ({ ok: true, json: async () => full }),
+  });
+  assert.equal(result, null, 'a full page must be refused (null), never decided on — the same uncomputable value a transport failure yields');
+});
+
+test('gitlab.commitPrs returns the list intact, ascending, when the page is short (< 100)', async () => {
+  const short = Array.from({ length: 3 }, (_, i) => ({ iid: 3 - i }));
+  const result = await gitlab.commitPrs({
+    project: 'g/r',
+    sha: 'deadbeef',
+    fetchImpl: async () => ({ ok: true, json: async () => short }),
+  });
+  assert.deepEqual(result, [1, 2, 3], 'a short page is returned intact and ascending — only a FULL page is refused');
+});
+
 // ── checkRuns (issue #203 review fix F3 — direct provider-level coverage) ────────
 
 test('github.checkRuns maps check_runs[].name entries to an array of bare names', async () => {

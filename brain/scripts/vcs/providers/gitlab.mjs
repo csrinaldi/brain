@@ -689,6 +689,20 @@ export async function commitStatus({ project, sha }) {
  * `GET projects/:enc/repository/commits/:sha/merge_requests`, mapped to
  * `r.iid`, ascending.
  *
+ * Cold-review remediation (#1086): explicitly requests `per_page=100`
+ * rather than relying on GitLab's (smaller) default page size. UNLIKE
+ * GitHub's sibling above (`gh api --paginate`, which walks every page for
+ * free), this endpoint is read as a single page — deliberately asymmetric,
+ * because `gitlabApiFetch` has no pagination loop of its own. A commit
+ * associated with more containing MRs than one page could otherwise return a
+ * SILENTLY TRUNCATED list, collapsing a true "two or more" (uncomputable,
+ * per the dispatch table) into a false "exactly one" (audited as
+ * unambiguous) — the same truncation hazard `mrList`'s `headBranch` filter
+ * guards against (#930/#936). `mrList` fails closed by THROWING; this verb's
+ * contract never throws, so it fails closed by returning `null` instead —
+ * the same uncomputable value a transport failure already yields, and
+ * `fetchPrMeta` already treats a `null` `commitPrs` result as uncomputable.
+ *
  * @param {{ project: string, sha: string, apiBase?: string, token?: string, proxyUrl?: string|null, fetchImpl?: Function }} params
  * @returns {Promise<number[]|null>}
  */
@@ -699,10 +713,11 @@ export async function commitPrs({ project, sha, apiBase, token, proxyUrl, fetchI
       apiBase: apiBase ?? 'https://gitlab.com/api/v4',
       token: glToken(token),
       proxyUrl: proxyUrl ?? null,
-      path: `projects/${encoded}/repository/commits/${sha}/merge_requests`,
+      path: `projects/${encoded}/repository/commits/${sha}/merge_requests?per_page=100`,
       fetchImpl,
     });
     if (!Array.isArray(r)) return null;
+    if (r.length === 100) return null; // full page — cannot rule out truncation, refuse rather than decide
     return r.map(mr => mr.iid).sort((a, b) => a - b);
   } catch {
     return null;

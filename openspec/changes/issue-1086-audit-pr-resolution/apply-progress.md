@@ -84,7 +84,7 @@ No other deviations in Phases 1-3 — that production code matches design.md's D
 ### Phase 4-5 deviations (batch 2)
 
 4. **The Tier 2 draft is a `.draft.md`, not the bare `.md` tasks.md 5.1 names.** `openspec/changes/issue-1086-audit-pr-resolution/brain-drafts/vcs-contract-commitprs-row.draft.md` — the real `brain-amendment/1` promotable shape (`amendment-draft.mjs`'s `AMENDMENT_DRAFT_SUFFIX` contract), matching what the `issue-936` precedent actually ships (`vcs-contract-mrlist-row.draft.md`, not `vcs-contract-mrlist-row.md` — that sibling file is the human-readable rationale, which this batch did not duplicate given the scope). Verified against the real target file with `planAmendment` — see below.
-5. **The Tier 2 draft is NOT committed by this batch.** The launch instructions explicitly say "Never commit … the openspec change files", and the whole `openspec/changes/issue-1086-audit-pr-resolution/` directory has been untracked since batch 1 (confirmed: `git status` shows it as `??` before and after this batch's commit). The draft file exists on disk in the worktree but is not staged or committed. **This creates a real tension with design D7** ("the maintainer lands it in `brain/core/methodology/vcs-contract.md` **inside this PR**") and with tasks.md's own Phase 5 commit plan (`docs(sdd): issue-1086 Tier 2 draft, #996 correction, closing verification (#1086)`): `brain:promote` needs the draft file to exist in the PR's pushed branch to be run against it. Flagged as a risk for the orchestrator to resolve explicitly (e.g. a follow-up commit adding just the `brain-drafts/` file, or an explicit call that this file is handed to the maintainer out-of-band) rather than silently worked around.
+5. **[CORRECTED — see Remediation (cold review) below] The Tier 2 draft was NOT committed by batch 2.** At the time batch 2 wrote this deviation, the launch instructions read as "Never commit … the openspec change files", and the whole `openspec/changes/issue-1086-audit-pr-resolution/` directory was untracked (confirmed: `git status` showed it as `??` before and after batch 2's commit). The draft file existed on disk in the worktree but was not staged or committed, which created a real tension with design D7 ("the maintainer lands it in `brain/core/methodology/vcs-contract.md` **inside this PR**") and with tasks.md's own Phase 5 commit plan, since `brain:promote` needs the draft file to exist in the PR's pushed branch to be run against it. **This was resolved, not left open**: commit `c7eadb7a` (`docs(sdd): issue-1086 change artifacts and the Tier 2 vcs-contract draft (#1086)`) committed the entire `openspec/changes/issue-1086-audit-pr-resolution/` directory, including `brain-drafts/vcs-contract-commitprs-row.draft.md` and this `apply-progress.md` file itself — the orchestrator's call, made after this batch's report. As of `c7eadb7a`, `brain:promote` CAN find the draft on the pushed branch; do not read the paragraph above as a live blocker.
 6. **No Phase 5 git commit was made.** Every Phase 5 deliverable (the Tier 2 draft, the #996 comment text) is either excluded by the no-openspec-commit rule or explicitly held back from posting. There is no production/test code change in Phase 5, so there is nothing else to commit under that phase's plan.
 7. **5.5's Success Criteria were confirmed by construction/regression-pin, not by a live `brain:audit "v1.5.0..HEAD"` run** — the launch instructions say "no further live calls" beyond what batch 1 already did (2.1's single `gh pr view 978`). See task 5.5 above for exactly what was and was not independently verified.
 
@@ -167,7 +167,7 @@ Both `amend-find`/`amend-replace` pairs are `pending` (state `blocked` would mea
 ## Remaining Tasks
 
 - [ ] None from `tasks.md` — all 5 phases (29/29 tasks) are marked `[x]`.
-- Outstanding, but outside this apply batch's authority: the maintainer promoting `brain-drafts/vcs-contract-commitprs-row.draft.md` via `brain:promote` (D7's blocking hand-off — the ONE reason `verb-contract-drift-guard.test.mjs` stays red), the orchestrator posting the #996 comment, and deciding how the uncommitted `brain-drafts/` file reaches the PR (Deviation #5).
+- Outstanding, but outside this apply batch's authority: the maintainer promoting `brain-drafts/vcs-contract-commitprs-row.draft.md` via `brain:promote` (D7's blocking hand-off — the ONE reason `verb-contract-drift-guard.test.mjs` stays red) and the orchestrator posting the #996 comment. Deviation #5's "how does the draft reach the PR" question is resolved — commit `c7eadb7a` committed the whole `openspec/changes/issue-1086-audit-pr-resolution/` directory, so the draft is on the pushed branch.
 
 ## Workload / PR Boundary
 
@@ -179,3 +179,48 @@ Both `amend-find`/`amend-replace` pairs are `pending` (state `blocked` would mea
 ## Status
 
 **5/5 phases (29/29 tasks) complete.** `npm test`: 6333/6334 — the one failure is the anticipated, documented D7 hand-off (`verb-contract-drift-guard.test.mjs`), not a defect. Ready for `sdd-verify`. Two items remain outside an apply agent's authority before this can merge: the maintainer's `brain:promote` of the Tier 2 draft, and the orchestrator's posting of the #996 comment (text prepared above, not sent).
+
+## Remediation (cold review)
+
+A fresh-context cold review raised two findings against the batch-2 state above; both are fixed in this remediation batch.
+
+### Finding 1 (WARNING, fixed) — `gitlab.mjs#commitPrs` did not paginate
+
+`commitPrs` on GitLab (`brain/scripts/vcs/providers/gitlab.mjs:695-710` before this fix) requested `projects/:enc/repository/commits/:sha/merge_requests` with no `per_page`, unlike GitHub's sibling (`github.mjs:545-555`), which spawns `gh api --paginate` and walks every page automatically. A commit associated with more containing MRs than GitLab's default page size would have returned a silently truncated list, which could collapse a true "two or more containing MRs → uncomputable" (per the `fetchPrMeta` dispatch table, design D4) into a false "exactly one → audit it" — a fail-open in the very dispatch #1086 exists to make honest. This is the same class of hazard `evidence-reader-empty-on-failure.md` documents (a reader's failure must never look like a legitimate, decidable answer) and the same truncation hazard `mrList`'s `headBranch` filter already guards against (#930/#936).
+
+**Fix**: `gitlab.mjs#commitPrs` now requests `per_page=100` explicitly, and when the page comes back FULL (`r.length === 100`) it returns `null` — the same uncomputable value a transport failure already yields — rather than deciding on a possibly-truncated page. Unlike `mrList` (which fails closed by THROWING), `commitPrs`'s contract never throws, so the refusal is expressed as `null`, which `fetchPrMeta` already treats as uncomputable (Phase 4's fail-closed dispatch, 4.1's test). GitHub's `commitPrs` is unchanged — `--paginate` already walks every page — and the asymmetry is now spelled out in both the `gitlab.mjs#commitPrs` docstring and design.md's D3 row.
+
+- RED: `brain/scripts/vcs/providers.test.mjs` — three new tests: (a) `commitPrs` must request `per_page=100` explicitly (failed pre-fix: no such param was sent), (b) a full (100-item) page must return `null` (failed pre-fix: returned the 100 items intact), (c) a short (3-item) page is returned intact and ascending (passed both before and after — the boundary this fix must not break).
+- GREEN: all three pass after the fix; full `vcs.contract.test.mjs` (215 cases, including the existing `commitPrs` happy/empty/failure contract cases, whose happy fixture carries exactly 1 item and stays well under the 100-item threshold) still 100% green.
+- Design.md's D3 row updated to state the `per_page=100` + full-page-refusal behavior and the deliberate GitHub/GitLab pagination asymmetry (GitHub auto-paginates; GitLab reads one page and refuses on a full one), and its Rejected column now also names "a GitLab pagination loop matching GitHub's `--paginate`" as considered and deferred in favor of matching the existing `mrList` fail-closed shape.
+
+### Finding 2 (WARNING, fixed) — stale Deviation #5 in this file
+
+Deviation #5 (Phase 4-5, above) said the Tier 2 draft was NOT committed and that `brain:promote` could not find it on the pushed branch. That was accurate when batch 2 wrote it, but commit `c7eadb7a` (`docs(sdd): issue-1086 change artifacts and the Tier 2 vcs-contract draft (#1086)`) subsequently committed the entire `openspec/changes/issue-1086-audit-pr-resolution/` directory — including `brain-drafts/vcs-contract-commitprs-row.draft.md` and this `apply-progress.md` file itself — so the tension Deviation #5 flagged is resolved, not outstanding. Deviation #5's text and the "Remaining Tasks" line referencing it are corrected in place above (marked `[CORRECTED — see Remediation (cold review) below]`) rather than deleted, so the original batch-2 reasoning stays visible for anyone auditing why the deviation was written in the first place.
+
+### Files changed (this remediation batch)
+
+| File | Action | What Was Done |
+|------|--------|----------------|
+| `brain/scripts/vcs/providers/gitlab.mjs` | Modified | `commitPrs` requests `per_page=100` and refuses (`null`) a full page instead of deciding on it; docstring expanded |
+| `brain/scripts/vcs/providers.test.mjs` | Modified | 3 new `commitPrs` tests: explicit `per_page=100`, full-page refusal, short-page pass-through |
+| `openspec/changes/issue-1086-audit-pr-resolution/design.md` | Modified | D3 row corrected to describe the pagination behavior and the GitHub/GitLab asymmetry |
+| `openspec/changes/issue-1086-audit-pr-resolution/apply-progress.md` | Modified | Deviation #5 and the "Remaining Tasks" line corrected in place; this section added |
+
+### TDD Cycle Evidence (this remediation batch)
+
+| Task | Test File | Layer | Safety Net | RED | GREEN | TRIANGULATE | REFACTOR |
+|------|-----------|-------|------------|-----|-------|-------------|----------|
+| Finding 1 | `providers.test.mjs` | Unit (fetchImpl-injected) | ✅ 360/360 pre-fix `providers.test.mjs` + `vcs.contract.test.mjs` combined suite (minus the 2 new RED cases) | ✅ Written — 2 of 3 new tests failed pre-fix (`per_page` absent; full page returned intact instead of `null`) | ✅ 360/360 after the fix (both suites) | ✅ full page (100) / short page (3) / explicit-param-presence, distinguishing "refuse" from "decide" | ➖ None needed |
+
+### Full suite (this remediation batch)
+
+`npm test` → **6336/6337 pass**. The ONLY failure is `verb-contract-drift-guard.test.mjs`'s `"every verb in cli.mjs VERBS is either documented in the Required Verbs table or a listed deliberate exception"` — the same anticipated, documented D7 hand-off as batch 2 (6333/6334), unchanged in nature, one higher in absolute count because this batch added 3 tests, all green.
+
+### Governed diff (this remediation batch, vs `origin/main`)
+
+`git diff --stat origin/main HEAD -- . ':(exclude)**/*.test.mjs' ':(exclude).memory/**' ':(exclude)openspec/**' ':(exclude)AGENTS.md'` — see the return envelope for the exact numbers; the only governed (non-test, non-doc-artifact) file this batch touches is `brain/scripts/vcs/providers/gitlab.mjs`.
+
+### Commits (this remediation batch)
+
+6. `fix(vcs): commitPrs refuses a truncated GitLab page instead of deciding on it (#1086)` — Finding 1's code fix + Finding 2's documentation correction, one commit.
