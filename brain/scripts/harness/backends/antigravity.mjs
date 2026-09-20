@@ -60,7 +60,7 @@ export const GEMINI_SETTINGS_EMIT_PATH = '.gemini/settings.json';
  */
 export const AGENT_RUNTIME = null;
 
-const REGENERATE_HINT = 'AGENT_PLATFORM=antigravity npm run brain:env:init';
+export const REGENERATE_HINT = 'AGENT_PLATFORM=antigravity npm run brain:env:init';
 
 // The settings-hooks payload itself is NOT antigravity-specific and no longer
 // lives here (issue #315): it was byte-identical to claude's copy, down to the
@@ -212,7 +212,11 @@ function _defaultWriteFile(relPath, content, root) {
  * @param {(relPath: string, content: string) => void} [opts._writeGeminiSettings]
  *   Writes the compiled .gemini/settings.json content.
  * @param {string} [opts._repoRoot] Repo root used by the default seams.
- * @returns {Promise<void>}
+ * @returns {Promise<{ missingDocs: string[], agentsWritten: boolean, geminiWritten: boolean }>}
+ *   Additive report of what init() could not read or write. No `ok` field —
+ *   `init()` keeps its "never throws" contract; only its return value grows
+ *   (design.md "Additive report object, not `{ ok: false }`"). A caller that
+ *   discards or never inspects the resolved value observes no behavior change.
  */
 export async function init({
   _readDoc,
@@ -224,6 +228,7 @@ export async function init({
   const writeAgents = _writeAgents ?? ((relPath, content) => _defaultWriteFile(relPath, content, _repoRoot));
   const writeGeminiSettings = _writeGeminiSettings ?? ((relPath, content) => _defaultWriteFile(relPath, content, _repoRoot));
 
+  const missingDocs = [];
   const docs = {};
   for (const relPath of SOURCE_DOCS) {
     try {
@@ -231,21 +236,28 @@ export async function init({
     } catch (err) {
       console.warn(`  harness: antigravity could not read ${relPath} — ${err.message}`);
       docs[relPath] = '';
+      missingDocs.push(relPath);
     }
   }
 
   const content = compileAgentsMd(docs);
 
+  let agentsWritten = true;
   try {
     writeAgents(AGENTS_EMIT_PATH, content);
   } catch (err) {
     console.warn(`  harness: antigravity could not write ${AGENTS_EMIT_PATH} — ${err.message}`);
+    agentsWritten = false;
   }
 
+  let geminiWritten = true;
   const settingsContent = compileSettingsHooksJson();
   try {
     writeGeminiSettings(GEMINI_SETTINGS_EMIT_PATH, settingsContent);
   } catch (err) {
     console.warn(`  harness: antigravity could not write ${GEMINI_SETTINGS_EMIT_PATH} — ${err.message}`);
+    geminiWritten = false;
   }
+
+  return { missingDocs, agentsWritten, geminiWritten };
 }

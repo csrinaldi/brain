@@ -35,13 +35,14 @@ import { dispatch } from '../cli.mjs';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..');
 
-/** Capture console.warn lines while calling fn(). */
+/** Capture console.warn lines while calling fn(). Returns fn()'s resolved value. */
 async function captureWarn(fn) {
   const warnings = [];
   const orig = console.warn;
   console.warn = (...args) => warnings.push(args.join(' '));
-  try { await fn(); } finally { console.warn = orig; }
-  return warnings;
+  let result;
+  try { result = await fn(); } finally { console.warn = orig; }
+  return { warnings, result };
 }
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
@@ -171,13 +172,71 @@ test('2.1: init() calls _readDoc once per SOURCE_DOCS path (in order) and _write
   const writeCalls = [];
   const _readDoc = (relPath) => { readCalls.push(relPath); return FAKE_DOCS[relPath]; };
   const _writeAgents = (relPath, content) => writeCalls.push({ relPath, content });
+  const _writeGeminiSettings = () => {};
 
-  await init({ _readDoc, _writeAgents, _repoRoot: '/fake/repo' });
+  const result = await init({ _readDoc, _writeAgents, _writeGeminiSettings, _repoRoot: '/fake/repo' });
 
   assert.deepEqual(readCalls, SOURCE_DOCS);
   assert.equal(writeCalls.length, 1);
   assert.equal(writeCalls[0].relPath, AGENTS_EMIT_PATH);
   assert.equal(writeCalls[0].content, compileAgentsMd(FAKE_DOCS));
+
+  // REQ: on the all-readable, all-writable happy path, init()'s resolved
+  // value reports nothing missing and both writes as successful.
+  assert.deepEqual(result, { missingDocs: [], agentsWritten: true, geminiWritten: true });
+});
+
+test('1.2: init() resolves with missingDocs naming the one path _readDoc threw for', async () => {
+  const _readDoc = (relPath) => {
+    if (relPath === 'brain/core/methodology/sdd-layout.md') throw new Error('boom-read');
+    return FAKE_DOCS[relPath];
+  };
+  const _writeAgents = () => {};
+
+  const { result } = await captureWarn(() =>
+    init({ _readDoc, _writeAgents, _repoRoot: '/fake/repo' }),
+  );
+
+  assert.deepEqual(result.missingDocs, ['brain/core/methodology/sdd-layout.md']);
+});
+
+test('1.3: init() resolves with agentsWritten: false when _writeAgents throws, and still resolves (never throws)', async () => {
+  const _readDoc = (relPath) => FAKE_DOCS[relPath];
+  const _writeAgents = () => { throw new Error('boom-write'); };
+
+  const { result } = await captureWarn(() =>
+    init({ _readDoc, _writeAgents, _repoRoot: '/fake/repo' }),
+  );
+
+  assert.equal(result.agentsWritten, false);
+});
+
+test('1.4: init() resolves with geminiWritten: false when _writeGeminiSettings throws', async () => {
+  const _readDoc = (relPath) => FAKE_DOCS[relPath];
+  const _writeAgents = () => {};
+  const _writeGeminiSettings = () => { throw new Error('boom-gemini-write'); };
+
+  const { result } = await captureWarn(() =>
+    init({ _readDoc, _writeAgents, _writeGeminiSettings, _repoRoot: '/fake/repo' }),
+  );
+
+  assert.equal(result.geminiWritten, false);
+});
+
+test('1.5: init()\'s resolved object has no "ok" property under any read/write failure combination, so harness/cli.mjs\'s r.ok === false check never matches', async () => {
+  const throwingReadDoc = () => { throw new Error('boom-read-all'); };
+  const throwingWrite = () => { throw new Error('boom-write-all'); };
+
+  const { result: allFailed } = await captureWarn(() =>
+    init({ _readDoc: throwingReadDoc, _writeAgents: throwingWrite, _writeGeminiSettings: throwingWrite, _repoRoot: '/fake/repo' }),
+  );
+  const { result: allPassed } = await captureWarn(() =>
+    init({ _readDoc: (relPath) => FAKE_DOCS[relPath], _writeAgents: () => {}, _writeGeminiSettings: () => {}, _repoRoot: '/fake/repo' }),
+  );
+
+  for (const r of [allFailed, allPassed]) {
+    assert.ok(!Object.prototype.hasOwnProperty.call(r, 'ok'), 'resolved value must not have an "ok" property');
+  }
 });
 
 test('2.3: init() never throws when _readDoc throws on one path — warns and still writes', async () => {
@@ -188,7 +247,7 @@ test('2.3: init() never throws when _readDoc throws on one path — warns and st
   let wrote = false;
   const _writeAgents = () => { wrote = true; };
 
-  const warnings = await captureWarn(() =>
+  const { warnings } = await captureWarn(() =>
     init({ _readDoc, _writeAgents, _repoRoot: '/fake/repo' }),
   );
 
@@ -200,7 +259,7 @@ test('2.3: init() never throws when _writeAgents throws — warns, resolves', as
   const _readDoc = (relPath) => FAKE_DOCS[relPath];
   const _writeAgents = () => { throw new Error('boom-write'); };
 
-  const warnings = await captureWarn(() =>
+  const { warnings } = await captureWarn(() =>
     init({ _readDoc, _writeAgents, _repoRoot: '/fake/repo' }),
   );
 
@@ -221,7 +280,7 @@ test('2.4: dispatch("antigravity", "init", [opts]) resolves through the REAL cli
   const settingsWrites = [];
   const _writeGeminiSettings = (relPath, content) => settingsWrites.push({ relPath, content });
 
-  await assert.doesNotReject(dispatch('antigravity', 'init', [{ _writeAgents, _writeGeminiSettings }]));
+  const result = await dispatch('antigravity', 'init', [{ _writeAgents, _writeGeminiSettings }]);
 
   // Injected too: without it the default writer lands on the REAL tracked
   // .gemini/settings.json (#616), which is what let a mutated compiler repair
@@ -233,6 +292,10 @@ test('2.4: dispatch("antigravity", "init", [opts]) resolves through the REAL cli
   assert.equal(scratchWrites[0].relPath, AGENTS_EMIT_PATH);
   assert.match(scratchWrites[0].content, /generated from/);
   assert.match(scratchWrites[0].content, /— do not edit/);
+
+  // The real 5 SOURCE_DOCS are all readable and both writes succeed against
+  // this fixture, so the resolved report is the happy-path shape too.
+  assert.deepEqual(result, { missingDocs: [], agentsWritten: true, geminiWritten: true });
 });
 
 test('2.5: n=3 — antigravity, plain, and gentle-ai all resolve through dispatch() to a real init() export', async () => {
