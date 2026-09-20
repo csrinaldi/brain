@@ -164,6 +164,9 @@ test('brain:upgrade: --no-install states that modification detection degraded (R
 
 // Extends the minimal consumer with a real managed manifest and a package that
 // actually ships the files under test.
+// `homeMd` is optional (task 2.1): omitting it simulates a consumer whose
+// brain/HOME.md does not exist, so init()'s _readDoc throws for that one
+// SOURCE_DOCS path and the upgrade's regen message must name it.
 function makeUpgradableConsumer(prefix, { geminiSettings, homeMd }) {
   const dir = makeTmpDir(prefix);
   const pkg = join(dir, 'node_modules', 'brain');
@@ -186,7 +189,8 @@ function makeUpgradableConsumer(prefix, { geminiSettings, homeMd }) {
   writeFileSync(join(dir, '.gemini', 'settings.json'), JSON.stringify(geminiSettings, null, 2) + '\n');
 
   // The consumer's OWN HOME.md — the input that makes AGENTS.md theirs.
-  writeFileSync(join(dir, 'brain', 'HOME.md'), homeMd);
+  // Omitted entirely when `homeMd` is undefined/null (task 2.1 fixture).
+  if (homeMd != null) writeFileSync(join(dir, 'brain', 'HOME.md'), homeMd);
   for (const d of ['agent-authorities', 'harness-contract', 'sdd-layout', 'workflow-governance']) {
     writeFileSync(join(dir, 'brain', 'core', 'methodology', `${d}.md`), `# ${d}\n`);
   }
@@ -223,12 +227,41 @@ test('brain:upgrade: AGENTS.md after the upgrade reflects the CONSUMER\'s brain/
 
   const r = runBrainUpgrade(dir, ['--no-install']);
   const agents = readFileSync(join(dir, 'AGENTS.md'), 'utf8');
+  const out = `${r.stdout}${r.stderr}`;
 
   assert.match(agents, /MY OWN HOME/,
-    `AGENTS.md must be compiled from the CONSUMER's HOME.md:\n${r.stdout}${r.stderr}`);
-  assert.match(`${r.stdout}${r.stderr}`, /AGENTS\.md/,
+    `AGENTS.md must be compiled from the CONSUMER's HOME.md:\n${out}`);
+  assert.match(out, /AGENTS\.md/,
     'the run must SAY it regenerated the file — REQ-397-4 requires reporting it, ' +
     'because a silent regeneration is indistinguishable from the copy it replaced');
+
+  // Byte-identical happy-path wording (task 2.2): all 5 SOURCE_DOCS readable
+  // and the write succeeded, so the exact, unchanged success line must print —
+  // a regression in the new branching must be caught even when the file exists.
+  assert.ok(out.includes('Regenerated AGENTS.md from YOUR brain/HOME.md (it is compiled, not shipped — see #397).'),
+    `expected the byte-identical success line:\n${out}`);
+});
+
+// Task 2.1 — a consumer with NO brain/HOME.md at all (the exact scenario
+// #1089 was filed about): init()'s _readDoc throws for that one SOURCE_DOCS
+// path, and the upgrade's message must name it instead of falsely claiming
+// success.
+test('brain:upgrade: brain/HOME.md missing — the regen message names it and points at the recovery command, not the byte-identical success line', (t) => {
+  const dir = makeUpgradableConsumer('brain-397-nohome-', {
+    geminiSettings: { hooks: {} },
+    // homeMd deliberately omitted — brain/HOME.md does not exist on disk.
+  });
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+
+  const r = runBrainUpgrade(dir, ['--no-install']);
+  const out = `${r.stdout}${r.stderr}`;
+
+  assert.match(out, /brain\/HOME\.md/,
+    `the message must name brain/HOME.md as the absent source doc:\n${out}`);
+  assert.match(out, /AGENT_PLATFORM=antigravity npm run brain:env:init/,
+    `the message must name the command that creates brain/HOME.md and regenerates AGENTS.md:\n${out}`);
+  assert.ok(!out.includes('Regenerated AGENTS.md from YOUR brain/HOME.md (it is compiled, not shipped — see #397).'),
+    `the byte-identical success line must NOT print when brain/HOME.md is missing:\n${out}`);
 });
 
 // The trap, proven by behaviour rather than by reading the source: init() writes

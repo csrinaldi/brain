@@ -670,14 +670,31 @@ if (!dryRun) {
   }
 
   try {
-    const { init: antigravityInit } = await import(new URL('./harness/backends/antigravity.mjs', import.meta.url));
+    const { init: antigravityInit, REGENERATE_HINT } = await import(new URL('./harness/backends/antigravity.mjs', import.meta.url));
     // `init()` emits .gemini/settings.json TOO. Left alive, it would overwrite the
     // merge performed moments ago in this same run — a wired, correct, quietly
     // destructive path, which is the exact defect class this issue exists to
     // remove. The seam is neutralised rather than the call avoided, so AGENTS.md
     // still goes through the one generator brain's drift-guard checks against.
-    await antigravityInit({ _repoRoot: ROOT, _writeGeminiSettings: () => {} });
-    ok('Regenerated AGENTS.md from YOUR brain/HOME.md (it is compiled, not shipped — see #397).');
+    const report = await antigravityInit({ _repoRoot: ROOT, _writeGeminiSettings: () => {} });
+
+    // init() never throws (issue #256) — it reports what it could not read or
+    // write instead. Word the claim from that report rather than printing an
+    // unconditional success line (issue #1089): a write failure is reported
+    // FIRST, regardless of missingDocs, because a claim of "regenerated" is
+    // false the moment the file was not written at all.
+    if (!report.agentsWritten) {
+      warn('Could not write AGENTS.md — the regeneration did not complete.');
+      info(`Run \`${REGENERATE_HINT}\` to rebuild it.`);
+    } else if (report.missingDocs.length === 0) {
+      ok('Regenerated AGENTS.md from YOUR brain/HOME.md (it is compiled, not shipped — see #397).');
+    } else if (report.missingDocs.includes('brain/HOME.md')) {
+      warn('brain/HOME.md is missing — AGENTS.md was compiled from the methodology docs only, not from anything of yours.');
+      info(`Run \`${REGENERATE_HINT}\` to create brain/HOME.md and regenerate AGENTS.md from it.`);
+    } else {
+      warn(`AGENTS.md was compiled without ${report.missingDocs.length} missing source doc(s): ${report.missingDocs.join(', ')}`);
+      info(`Run \`${REGENERATE_HINT}\` to rebuild it once they exist.`);
+    }
   } catch (err) {
     // Never fatal. The upgrade itself succeeded; a stale AGENTS.md is a
     // regenerable inconvenience, and failing the run here would turn it into a
