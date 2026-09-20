@@ -6,123 +6,207 @@ registry (ADR-0030, superseding ADR-0006's git tags); consumers upgrade with
 changes** before upgrading — additive `brain.config.json` migrations apply
 automatically, but renames need manual action.
 
-## Unreleased
+## v1.6.0 — memory travels on its own lane, and three gates become required at every tier
 
-### The memory lane reconciles its own branches: same-day reparent, cross-day sweep, closed PRs respected (#936, #930)
+**Manual steps — read all four before upgrading.** Unlike v1.5.0, this release asks
+something of you.
 
-- **Same-day append no longer re-shows merged records.** When today's local lane ref
-  (`memory/<host>-<date>`) was already squash-merged, the next ship parented new records on
-  the stale tip, so the PR diff listed records already on `main` (#1023, #1050). The ship
-  now checks, by content, whether the ref's own records are all on `origin/main`; if they
-  are, the new commit parents on `origin/main`. Partial or unreadable delivery keeps
-  appending as before (fail closed).
-- **Cross-day sweep.** After today's ship succeeds (never under `--dry-run`),
-  `brain:memory:ship` visits every other `memory/<host>-*` ref of this host, with no age
-  cutoff: a ref whose records are all on `main` has its local ref deleted; a pending ref is
-  re-shipped without collecting today's records into it; a ref that exists only on the
-  remote is reported and never changed. Results appear in `memory:ship --json` as `sweep`
-  and as lines in `day:start`. A sweep failure never turns today's successful ship into a
-  failure; it is reported as `sweep.failed`.
-- **Behavior change — a closed lane PR is no longer reopened (#920 R8 reversed).** The PR
-  lookup now runs before the push. If a branch has no open PR and its newest PR was closed
-  without merge, the ship reports it and does nothing else, on every run, until an operator
-  deletes the local ref. Previously a fresh PR was opened.
-- **`mrList` reports merge state (#930).** Every item from both providers now carries
-  `state` (`open`/`closed`/`null`) and `merged` (`true`/`false`/`null`). An optional
-  `headBranch` filter queries all states for one branch and fails closed on a full page.
-  Unfiltered calls send exactly the same request as before.
+1. **Re-run `npm run brain:protect`** if you have branch protection armed. Three new
+   status contexts ship — `lane-paths`, `lane-scrub` and `base-branch` — and
+   `brain:protect` derives the required set from your tier. Without the re-run, the
+   three run unenforced on GitHub and block on GitLab, which has no protection layer
+   to hide them.
+2. **`standard`/`regulated` with a diverged `governance.yml`:** add `VCS_TOKEN`,
+   `PR_NUMBER` and `PR_BODY` to the `memory-gate` step's `env:` (see the vendored job
+   for the exact form). Nothing to do at `lite`.
+3. **Remove two inert leftovers:** `git rm .memory/manifest.json` and
+   `git config --unset merge.engram-manifest.driver`. The upgrade already drops the
+   `merge=engram-manifest` attribute, so git never runs the old driver again.
+4. **`brain:memory:migrate-v1 --rollback` is removed** and refuses with a reason.
+   Forward `migrate-v1` and `--dry-run` are unchanged.
 
-### `brain:memory:heal-duplicates` reconciles the engram store's pre-guard duplicate rows (#1061)
+### Why a minor and not a patch
 
-New verb, `engram`-only: `npm run brain:memory:heal-duplicates` groups a live `engram
-export` by `rec-`-prefixed `topic_key`, and for any key with exactly two live rows whose
-`content`/`title`/`type` agree, keeps the lower observation id and deletes the other. It is
-**report-only by default** — nothing is deleted unless you pass `--apply` — and it refuses
-(deleting nothing, exiting non-zero) when copies of one key diverge, a key has more than two
-live rows, the engram version is outside the tested `1.20.x` range, or the export shape is
-unrecognized. Deletion is **hard** (`engram delete <id> --hard`): measured against engram
-1.20.0, a soft delete leaves the row in `engram export` with `deleted_at` set, which the
-audit would still count as live, so only `--hard` actually reconciles the store. Never reads
-or writes `.memory/records/` or `.memory/index.jsonl` — this is a backend-side reconciliation
-of engram's own rows, not a change to brain's durable record format. The maintainer runbook
-for the one-time run against the real store lives in
-`openspec/changes/issue-1061-engram-duplicate-heal/tasks.md`.
+Eleven of the 55 shipping changes add capability a consumer can rely on, and one
+dormant migration becomes reachable — `1.6.0`, `memory.lane.enabled` (#906, ADR-0034
+L5). `migrateConfig` applies only entries at or below the installed package version,
+so at 1.5.0 that entry was code no consumer could reach. It runs now, and **its
+default is `false` on every tier, always**. Flipping it is a maintainer act, never a
+migration default, so no consumer's behaviour changes silently when the migration
+lands: the lane's triggers read the flag before they spawn anything, and an absent
+flag already meant `false`.
 
-### `memory-gate` receives the PR context and reads the default branch (#1024)
+Not a major: nothing a consumer had is renamed or removed. The eleven `memory:*` →
+`brain:memory:*` names (#961) are not a rename a consumer sees — consumers never had
+those scripts, and they arrive here for the first time under their `brain:` names.
 
-**Manual step for `standard`/`regulated` consumers with a diverged `governance.yml`.**
-`memory-gate`'s job in `.github/workflows/governance.yml` now needs the same three env
-keys `issue-link` already declares, so `ci-context.mjs`'s `loadContext()` can populate
-`ctx.body`/`ctx.labels` for this job instead of leaving both structurally `null`. If your
-copy of `governance.yml` diverged from the vendored one, add this block to the
-`memory-gate` step's `env:` (see `governance.yml`'s own job for the exact form and
-comments):
+(Measured 24 feat / 31 fix / 44 internal by commit prefix, which is not the same split
+as the prose below: #961 carries a `refactor` prefix and #922 a `chore` one, and both
+are listed as capability because what they changed for a consumer is which verbs exist
+in their `package.json`.)
 
-    VCS_TOKEN: ${{ github.token }}
-    PR_NUMBER: ${{ github.event.pull_request.number }}
-    PR_BODY: ${{ github.event.pull_request.body }}
+### What you can do that you could not before
 
-Nothing else to do at `lite` (this repo's own tier) — a scoped miss stays a
-non-blocking `::warning::`, unchanged.
+- **Run the verbs the doctrine has been telling you to run.** `MANAGED_SCRIPT_KEYS`
+  went from 9 to 33 (#922). `brain:upgrade` now injects 24 more keys into your
+  `package.json` — `brain:audit`, `brain:check`, `brain:config`, `brain:metrics`,
+  `brain:next`, `brain:promote`, `brain:protect`, `brain:review`, `brain:review:board`,
+  `brain:ship`, `brain:start`, `brain:upgrade`, `brain:governance-status`, `brain:nav`,
+  `brain:adopt`, `brain:change:archive`, and the seven `brain:memory:*` verbs plus
+  `brain:memory:session-end`. The catalog is reconciled against every `npm run …`
+  mention in governed doctrine by a drift-guard test, so doctrine can no longer
+  recommend a script the installer never delivers. `brain:memory:session-end` matters
+  most: the compiled SessionEnd hook runs that script, and without the key every
+  adopter's hook printed an npm "missing script" error to a surface the agent shows the
+  user.
+- **Let a memory record travel on its own branch.** ADR-0034's lane ships whole, across
+  nine slices: a pure planner that groups records, breaks C2 ties and names the ref
+  (#897); a collector that writes one local ref with a secret scan before the write and
+  a CAS on `update-ref` (#887); `shipLane`, which pushes `--no-verify` behind a diverged
+  pre-check, finds or creates the lane PR and arms by tier (#901); the `memory:ship` op
+  itself, reading `BRAIN_MEMORY_TOKEN` once into the port identity, with `--dry-run` and
+  `--json` (#888); and the triggers — a SessionEnd hook on both platforms and a
+  `day:start` sweep, inert until `memory.lane.enabled` (#906). `mrAutoMerge` (#886) arms
+  auto-merge only at exactly zero required reviews, never throws, and hardcodes squash.
+  **All of it is off by default.**
+- **Stop rebasing to satisfy `memory-gate`.** Scoped evidence now unions the PR's
+  checked-out tree with `origin/<default>`, deduped by record `id`, PR tree winning a
+  collision (#1024). Since ADR-0034 a record reaches `main` on its own lane PR, usually
+  after the feature PR opens — such a record used to count as MISSING. It no longer
+  does. If the default branch is unreadable and the PR tree has a scoped hit, the gate
+  still passes on that hit; if neither has one it fails closed with an explicit "default
+  branch unreadable" reason. A read failure never produces a silent pass. Every run now
+  prints the path it took (`path=presence|retrieval|skipped`), including a clean pass,
+  which printed nothing before. `skip:memory-gate` is honored per tier — accepted at
+  `standard` from an actor who is neither the PR author nor a listed review/agent actor,
+  refused at `regulated`, noted but not consulted at `lite`. `brain:metrics`'s column
+  for it is now `raw/honored`, with an honored-usage-by-author table mirroring
+  `size:exception`'s.
+- **Ask what the memory actually contains.** `brain:memory:audit` (#870) answers epic
+  #864's five numbers as one command, from records and git alone. `brain:snapshot`
+  (#879) serves the whole read model as one JSON shape.
+- **Correct a record instead of contradicting it.** `brain:memory:save --supersedes
+  <id>` (#805) carries the correction chain, local-first and fail-closed, refused before
+  any write rather than half-written.
+- **Trust a record's provenance.** Actor is the configured handle, never the branch;
+  `actorKind` is measured rather than guessed; `issue` is derived, never fabricated
+  (#738). A known agent marker means agent, never human, and W4 now refuses a
+  fabricating `source` (#939, #461).
+- **Review with Codex or Gemini.** The `cold-review` stage routes to `claude`, `codex`
+  or `gemini` (#978, #1017) — transport backend, output wiring, conditional readiness
+  and routing. There is deliberately no default engine: a silent fallback to `claude`
+  would be a degradation nobody could see.
+- **Declare an epic's tracker as data.** The `brain-issue-graph` block declares it, the
+  verb resolves it, and a gate refuses a slice aimed at `main` while its epic is in
+  flight (#967). `brain:ticket:start` already enforced this at creation; `base-branch`
+  is the backstop for a PR that reached the forge anyway.
+- **See the work.** A local Brain UI ships behind `node brain/scripts/ui/server.mjs` —
+  an SSE stream and a DAG canvas with an inspector drawer (#881), the six-tab surface
+  with lanes, the SDD view and the reviews timeline (#998), the management views for
+  roadmap, decisions, anti-patterns, history and by-actor (#882), the maintainer's
+  design built region by region with a harness that runs it (#1059), and lanes that
+  group by epic now that kind, parent and tracker are data (#1032). Note: `brain:ui` and
+  `brain:snapshot` are **not** managed script keys — the files travel with
+  `brain/scripts/**`, the npm scripts do not.
 
-Scoped evidence now unions the PR's checked-out tree with `origin/<default>`, deduped by
-record `id` (PR tree wins on a collision). Since ADR-0034, a memory record lands on `main`
-via its own lane PR, usually after the feature PR opens — before this change, a record
-that already reached the default branch but never rode the feature branch counted as
-MISSING, forcing a rebase. It no longer does: a record on `origin/<default>` now satisfies
-a feature PR closing the same issue, with no rebase. If the default branch is unreadable
-(fetch/ref failure) and the PR tree already has a scoped hit, the gate still passes on
-that hit; if the PR tree has no hit either, the gate fails closed with an explicit
-"default branch unreadable" reason — a read failure never produces a silent pass. Every
-run now also prints the path it took (`memory-gate: path=presence|retrieval|skipped
-(<detail>)`), including a clean pass, which printed nothing before this change.
+### Three gates that are required at every tier
 
-`skip:memory-gate` is now honored, per tier (`TIER_PARAMS.honorSkipMemoryGate`): at
-`standard`, the label — applied by an actor other than the PR author and not listed in
-`governance.reviewActors`/`governance.agentActors` — short-circuits the check and passes
-with `path=skipped`, naming the applier; at `regulated` the label is refused, consistent
-with `regulated` already refusing `size:exception`; at `lite` it is noted in the output and
-not consulted, because the gate is detection-only there. `brain:metrics`'s `skip:memory-gate`
-column is now `raw/honored` (previously raw-only), with an honored-usage-by-author table
-mirroring `size:exception`'s own.
+This is the loudest change in the release, and `lite` is not exempt.
 
-### `cli.mjs ship` refuses without a declared invoker (#1012)
+- **`lane-paths`** (#905) — a lane branch may touch only lane paths.
+- **`lane-scrub`** (#905) — a non-waivable secret scan over every added
+  `.memory/records/*.jsonl` path, on **every** PR, lane or not. It never imports the
+  tier module at all: non-waivability is a property of the code, not of a matrix a
+  future tier edit could soften. It fails closed on an unreadable secret config, an
+  unreadable record, an invalid pattern, or an uncomputable diff.
+- **`base-branch`** (#967) — a slice PR's base must be its epic's declared tracker. A
+  consumer who declares no `brain-issue-graph` block passes untouched; a block that
+  cannot be parsed is uncomputable and refuses, never a silent pass.
 
-Nothing to do for this one. `cli.mjs ship` now refuses, before any credential read or
-VCS call, unless `--invoker` is `hook`, `sweep`, or `manual` — `session-end-ship.mjs`,
-`day-start-sweep.mjs`, and the `brain:memory:ship` script (and its bare alias) already
-pass the right one. It also refuses independently whenever `NODE_TEST_CONTEXT` is set,
-even with a valid `--invoker` — `--dry-run` and `BRAIN_VCS_TEST_MODULE` are the only
-bypasses. This closes #1007, where `npm test` reached the real port because nothing on
-the call path checked who was calling. A new meta-test (`test-spawn-hygiene.test.mjs`)
-enforces a closed allowlist over every test that spawns a `brain/scripts/**` runtime
-entrypoint, so the next unlisted spawn fails the scan instead of passing by default.
+`GOVERNANCE_JOBS` is 3 entries longer than it was — 11 total — and `brain:audit` now
+prints `[LANE]` for a lane merge while `local-checks` warns on index lag without
+mutating anything (#889).
 
-**Manual step (consumers upgrading from an older brain).** The upgrade drops the
-`merge=engram-manifest` attribute (`.gitattributes` is managed), so git never runs the old
-driver again. Two inert leftovers stay in YOUR repo and nothing reads them. To remove them:
+### What was repaired
 
-    git rm .memory/manifest.json
-    git config --unset merge.engram-manifest.driver
+- **An unreadable `brain.config.json` refuses instead of assuming defaults** — across
+  four surfaces that each got it wrong independently: the memory scan (#712), the
+  deny-list readers (#942), the release gate (#962), and the strict loader, which now
+  also rejects a config that parses to something that is not a JSON object (#975).
+- **`ship` refuses unless its caller declares itself** (#1012). `cli.mjs ship` refuses,
+  before any credential read or VCS call, unless `--invoker` is `hook`, `sweep` or
+  `manual`, and refuses independently whenever `NODE_TEST_CONTEXT` is set even with a
+  valid invoker. `--dry-run` and `BRAIN_VCS_TEST_MODULE` are the only bypasses. This
+  closes #1007, where `npm test` reached the real port because nothing on the call path
+  checked who was calling. A meta-test now enforces a closed allowlist over every test
+  that spawns a `brain/scripts/**` runtime entrypoint.
+- **The lane reconciles its own branches** (#936, #930, #920). A half-finished delivery
+  from a previous run is reconciled rather than repeated (#920). When today's local ref
+  was already squash-merged, the next ship checks by content whether its records are all
+  on `origin/main` and, if so, parents the new commit on `origin/main` — the PR diff
+  stops listing records already merged; partial or unreadable delivery keeps appending,
+  fail closed. After a successful ship (never under `--dry-run`) a cross-day sweep
+  visits every other `memory/<host>-*` ref of this host with no age cutoff: fully
+  merged refs are deleted locally, pending refs are re-shipped without collecting
+  today's records into them, remote-only refs are reported and never touched. A sweep
+  failure never turns a successful ship into a failure — it reports `sweep.failed`.
+  **Behaviour change (#920 R8 reversed):** a lane PR closed without merge is no longer
+  reopened. The lookup runs before the push; the ship reports and stops, every run,
+  until an operator deletes the local ref. `mrList` now carries `state` and `merged` on
+  both providers, with an optional `headBranch` filter that queries all states and fails
+  closed on a full page; unfiltered calls send exactly the request they always did.
+- **The engram adapter heals its own duplicate rows.** `brain:memory:heal-duplicates`
+  (#1061, `engram`-only) groups a live export by `rec-`-prefixed `topic_key` and, for a
+  key with exactly two live rows whose content, title and type agree, keeps the lower
+  observation id. Report-only unless you pass `--apply`; it refuses, deleting nothing,
+  when copies diverge, when a key has more than two live rows, when the engram version
+  is outside the tested `1.20.x` range, or when the export shape is unrecognized.
+  Deletion is hard — measured against engram 1.20.0, a soft delete leaves the row in the
+  export with `deleted_at` set, which the audit would still count as live. It never
+  reads or writes `.memory/records/` or the index.
+- **The chunk read-back became an enforced boundary** (#247) — an allowlist guard, two
+  pins and #874's deletion ledger — and `memory:save` under engram now writes the record
+  first and hydrates one record afterwards (#924), with `share()` committing what is
+  already true rather than exporting (#874).
+- **Two importers through one snapshot yield one write** (#820): a non-blocking
+  hydration guard makes the second importer skip and say so.
+- **A worktree that could not be inspected is reported, not dropped** (#921, #923).
+- **Reindex parity between the two backends is pinned** rather than assumed (#361).
+- **The cold reviewer honors `size:exception` exactly as the diff-size gate does**
+  (#1072) — the two had diverged.
+- **The review run stopped writing into its own candidate**, and a symlink is now hashed
+  by its target (#1019).
+- **A prose `Parent:` declares the reference it names**, not every issue on the line
+  (#1030).
+- **The suite stopped touching the real repository.** `archive.test.mjs` sandboxes in
+  tmp with a guard that keeps the class closed (#1022), the suite no longer reindexes
+  the real memory index and the guard learned to see a defaulted root (#1058),
+  `session-end-ship`'s real-config test holds for both lane flag states and never spawns
+  for real (#1013), and the suite's verdict no longer depends on the shell (#714, #638).
 
-### Memory scripts join the `brain:` namespace (#961)
+### Retirements
 
-Nothing to do for this one. The eleven `memory:*` scripts are now `brain:memory:*` (`save`,
-`index`, `share`, `pull`, `resolve-index`, `audit`, `ship`, `reindex`, `split-records`,
-`collect`, `migrate-v1`), like `brain:memory:session-end`. brain's own `package.json`
-keeps the bare names as identical aliases, so commands in history and records still
-run. Consumers never had these scripts. The managed seven arrive with #922 under their
-`brain:memory:*` names only.
+- **The feature-PR memory surfaces are gone** (#890). The five surfaces `pre-push` and
+  `ticket.nextSteps.step3` used are retired; the lane is where a record travels.
+- **Engram's transport artifacts are gone** (#955). `session:start`, `day:start` and
+  `brain:memory:pull` no longer restore a manifest; `brain:memory:share` no longer
+  creates the `.engram` symlink (`brain:env:init` / `cli.mjs setup` still does).
+  `brain:memory:migrate-v1 --rollback` is removed.
+- **The manifest, its merge driver and share's symlink self-heal are gone** (#958).
+- **`dualWriteRecords` is gone**, and five comments stopped citing it (#1060).
 
-### Engram's transport artifacts retire (#955)
+### Doctrine
 
-The manual step above belongs to this change.
-
-- `session:start`, `day:start` and `brain:memory:pull` no longer restore a manifest;
-  `brain:memory:share` no longer creates the `.engram` symlink (`brain:env:init` /
-  `cli.mjs setup` still does).
-- `brain:memory:migrate-v1 --rollback` is removed and refuses with a reason. Forward
-  `brain:memory:migrate-v1` and `--dry-run` are unchanged.
+ADR-0034 (*memory travels on its own lane*) was ruled and promoted with three
+amendments, plus consolidation-protocol §5 and openspec README rule 3 (#862, #892), and
+gained Amendment 4 with a `vcs-contract` `mrList` row for #936 (#1080). The backend
+contract was ruled — records are the concept, engram is an adapter — across six promoted
+drafts (#863, #876). The evidence-reader doctrine gained direction (deny readers fail
+closed, #959) and names `brain:audit` as fixed and `approved-label` as an exemption
+(#976). Five ADR errata corrected #961's amendments, which had annotated a body they
+claimed was untouched (#973). The memory scripts are `brain:memory:*` throughout
+doctrine and the ADRs (#961), and `memory-presence`'s header now cites ADR-0034, names
+the export trigger and bounds the backend-to-file lag (#795).
 
 ## v1.5.0 — the governance surface stops trusting what it cannot measure
 
