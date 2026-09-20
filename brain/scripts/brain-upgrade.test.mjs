@@ -295,6 +295,28 @@ test('brain:upgrade: a different source doc is missing — names it as compiled-
     `must not print the brain/HOME.md-specific message when brain/HOME.md itself is present:\n${out}`);
 });
 
+// REQ: the write itself failed. A directory where AGENTS.md belongs makes the
+// write fail for real (EISDIR) instead of faking the report, so the claim is
+// tested against the filesystem that produces it.
+test('brain:upgrade: the AGENTS.md write fails — says so, never claims a regeneration', (t) => {
+  const dir = makeUpgradableConsumer('brain-397-writefail-', {
+    geminiSettings: { hooks: {} },
+    homeMd: '# consumer home\n',
+  });
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  mkdirSync(join(dir, 'AGENTS.md'), { recursive: true });
+
+  const r = runBrainUpgrade(dir, ['--no-install']);
+  const out = `${r.stdout}${r.stderr}`;
+
+  assert.match(out, /Could not write AGENTS\.md — the regeneration did not complete\./,
+    `an unwritable AGENTS.md must be reported, not claimed as regenerated:\n${out}`);
+  assert.ok(!out.includes('Regenerated AGENTS.md from YOUR brain/HOME.md (it is compiled, not shipped — see #397).'),
+    `the success line must NOT print when the write failed:\n${out}`);
+  assert.ok(!out.includes('AGENTS.md was compiled without'),
+    `a write failure outranks the missing-docs wording:\n${out}`);
+});
+
 // The trap, proven by behaviour rather than by reading the source: init() writes
 // .gemini/settings.json too, so a plain call would undo the merge in the SAME run.
 test('brain:upgrade: regenerating AGENTS.md does not undo the .gemini merge (REQ-397-3 + REQ-397-4)', (t) => {

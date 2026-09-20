@@ -96,3 +96,4 @@ Decision needed before apply: No
 Chained PRs recommended: No
 Chain strategy: pending
 400-line budget risk: Low
+- [x] 4.3 Cover the write-failure wording at the brain-upgrade level: a directory where `AGENTS.md` belongs makes the write fail for real (EISDIR). Red proven against `origin/main`'s unconditional line.
