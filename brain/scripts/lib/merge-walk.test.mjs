@@ -257,3 +257,147 @@ test('REQ-TS-1: fetchPrMeta still never throws, whatever prView does', async () 
   assert.equal(typeof r.prMetaError, 'string');
   assert.ok(r.prMetaError.includes('bare string'), `expected the thrown value stringified, got ${r.prMetaError}`);
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Issue #1086 (D3/D4) — fetchPrMeta's commit-sha dispatch. The gate is
+// structural: the containing-pull-request lookup is reachable ONLY from a
+// definitive `absent: true`, so a transport failure (absent: null/false, or a
+// throw) can never arrive at it by any path.
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('#1086 fail-closed proof: a transport failure NEVER reaches the commitPrs lookup', async () => {
+  let commitPrsCalls = 0;
+  const vcs = {
+    prView: async () => ({
+      number: 978, labels: null, body: null, author: null, headRefOid: null, baseRefOid: null, absent: null,
+    }),
+    commitPrs: async () => { commitPrsCalls += 1; return [991]; },
+  };
+  const r = await fetchPrMeta(
+    'feat(setup): add conditional Codex readiness and routing (#978)', vcs, {}, 'deadbeef',
+  );
+
+  assert.equal(commitPrsCalls, 0,
+    'a transport failure (absent: null) must never reach the commit-sha lookup — a fallback that ' +
+    'fires on an outage turns an uncomputable into a verdict, which is the fail-open this change ' +
+    'exists to prevent');
+  assert.ok(r.prMetaError !== null, 'the merge must stay uncomputable, not silently resolved');
+});
+
+test('#1086 regression pin: the real (#978) shape resolves through commitPrs to a real verdict', async () => {
+  const sha = 'd4cb7f829c3ea968d8bc17f5f2c47d6f0e3b3bee';
+  const vcs = {
+    prView: async ({ number }) => {
+      if (number === 978) {
+        return {
+          number: 978, labels: null, body: null, author: null, headRefOid: null, baseRefOid: null, absent: true,
+        };
+      }
+      if (number === 991) {
+        return {
+          number: 991, labels: ['type:feat'], body: 'Closes #978', author: 'csrinaldi',
+          headRefOid: 'abc', baseRefOid: 'def', absent: false,
+        };
+      }
+      throw new Error(`unexpected prView number: ${number}`);
+    },
+    commitPrs: async (opts) => {
+      assert.equal(opts.sha, sha);
+      return [991];
+    },
+  };
+  const r = await fetchPrMeta(
+    'feat(setup): add conditional Codex readiness and routing (#978)', vcs, {}, sha,
+  );
+
+  assert.equal(r.prMetaError, null, `expected a real verdict, not uncomputable: ${JSON.stringify(r)}`);
+  assert.equal(r.prNum, 991);
+  assert.equal(r.subjectRef, 978);
+  assert.equal(r.prSource, 'commit-sha');
+  assert.equal(r.prBody, 'Closes #978');
+});
+
+test('#1086: absent + exactly one containing pull request resolves and audits that pull request', async () => {
+  const vcs = {
+    prView: async ({ number }) => (number === 42
+      ? { number: 42, labels: null, body: null, author: null, absent: true }
+      : { number, labels: ['x'], body: 'body', author: 'a', absent: false }),
+    commitPrs: async () => [55],
+  };
+  const r = await fetchPrMeta('fix: something (#42)', vcs, {}, 'sha1');
+
+  assert.equal(r.prNum, 55);
+  assert.equal(r.prSource, 'commit-sha');
+  assert.equal(r.prMetaError, null);
+});
+
+test('#1086: absent + no containing pull request falls back to the commit body (prSource null)', async () => {
+  const vcs = {
+    prView: async () => ({ number: 42, labels: null, body: null, author: null, absent: true }),
+    commitPrs: async () => [],
+  };
+  const r = await fetchPrMeta('fix: something (#42)', vcs, {}, 'sha1');
+
+  assert.equal(r.prNum, null);
+  assert.equal(r.prSource, null);
+  assert.equal(r.prMetaError, null, 'the absence of a containing pull request is real evidence, not missing evidence');
+  assert.equal(r.subjectRef, 42);
+});
+
+test('#1086: absent + two containing pull requests is uncomputable — neither is evaluated', async () => {
+  let prViewCallsForCandidates = 0;
+  const vcs = {
+    prView: async ({ number }) => {
+      if (number === 42) return { number: 42, labels: null, body: null, author: null, absent: true };
+      prViewCallsForCandidates += 1;
+      return { number, labels: ['x'], body: 'body', author: 'a', absent: false };
+    },
+    commitPrs: async () => [10, 20],
+  };
+  const r = await fetchPrMeta('fix: something (#42)', vcs, {}, 'sha1');
+
+  assert.equal(r.prNum, null);
+  assert.ok(r.prMetaError !== null);
+  assert.match(r.prMetaError, /10/);
+  assert.match(r.prMetaError, /20/);
+  assert.equal(prViewCallsForCandidates, 0, 'neither containing pull request is evaluated — never a guess');
+});
+
+test('#1086: absent + commitPrs verb missing on the provider is uncomputable', async () => {
+  const vcs = { prView: async () => ({ number: 42, labels: null, body: null, author: null, absent: true }) };
+  const r = await fetchPrMeta('fix: something (#42)', vcs, {}, 'sha1');
+
+  assert.equal(r.prNum, null);
+  assert.ok(r.prMetaError !== null);
+});
+
+test('#1086: absent + commitPrs transport failure (null) is uncomputable', async () => {
+  const vcs = {
+    prView: async () => ({ number: 42, labels: null, body: null, author: null, absent: true }),
+    commitPrs: async () => null,
+  };
+  const r = await fetchPrMeta('fix: something (#42)', vcs, {}, 'sha1');
+
+  assert.equal(r.prNum, null);
+  assert.ok(r.prMetaError !== null);
+});
+
+test('#1086: each uncomputable cause under the dispatch is distinguishable', async () => {
+  const missingVerb = await fetchPrMeta('fix: a (#1)', {
+    prView: async () => ({ number: 1, labels: null, body: null, author: null, absent: true }),
+  }, {}, 'sha1');
+  const ambiguous = await fetchPrMeta('fix: b (#2)', {
+    prView: async () => ({ number: 2, labels: null, body: null, author: null, absent: true }),
+    commitPrs: async () => [1, 2],
+  }, {}, 'sha2');
+  const legacy = await fetchPrMeta('fix: c (#3)', {
+    prView: async () => ({ number: 3, labels: null, body: null, author: null, absent: null }),
+  }, {}, 'sha3');
+
+  assert.notEqual(missingVerb.prMetaError, ambiguous.prMetaError);
+  assert.notEqual(missingVerb.prMetaError, legacy.prMetaError);
+  assert.notEqual(ambiguous.prMetaError, legacy.prMetaError);
+  assert.equal(legacy.prNum, 3, 'the legacy unreadable path keeps prNum === subjectRef, byte-identical to today');
+  assert.equal(missingVerb.prNum, null);
+  assert.equal(ambiguous.prNum, null);
+});

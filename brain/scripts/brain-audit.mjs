@@ -112,6 +112,57 @@ import { resolveTier, tierParams } from './vcs/governance-tiers.mjs';
  * @param {number} failShaCount            [FAIL-SHA] lines emitted (deduped carriers).
  * @returns {0|1|2}
  */
+/**
+ * Formats the `[UNCOMPUTABLE]` line (issue #1086, D6). Pure — no I/O, no git,
+ * takes exactly what `fetchPrMeta` returned.
+ *
+ * Two shapes, both byte-identical to their pre-#1086 wording where they
+ * already existed: the LEGACY case (`prNum !== null` — the subject's own
+ * `prView` read could not be completed, unchanged from today) keeps the
+ * `— PR #N metadata unreachable: …` suffix exactly. Every dispatch-table
+ * ambiguous/unresolvable outcome (`prNum === null`) prints `prMetaError`
+ * directly — that message already names the subject's number and the cause
+ * (`resolveByCommitSha`'s `uncomputable()` helper), so each cause stays
+ * distinguishable from the others and from the legacy line.
+ *
+ * @param {string} sha
+ * @param {string} subject
+ * @param {{ prNum: number|null, prMetaError: string }} ctx
+ * @returns {string}
+ */
+export function formatUncomputableLine(sha, subject, { prNum, prMetaError }) {
+  const head = `[UNCOMPUTABLE] ${sha.slice(0, 7)} ${subject}`;
+  return prNum !== null
+    ? `${head} — PR #${prNum} metadata unreachable: ${prMetaError}`
+    : `${head} — ${prMetaError}`;
+}
+
+/**
+ * Formats the `[PASS]`/`[FAIL]` bracketed pull-request-resolution suffix
+ * (issue #1086, D6) — in the style of the existing ` [size:exception]` note,
+ * never a new line tag. Pure — no I/O, no git.
+ *
+ * Two cases render a suffix, everything else renders '':
+ *   - `prSource === 'commit-sha'`: the merge was audited through a pull
+ *     request resolved BY commit sha, because the subject's own number is not
+ *     one.
+ *   - `subjectRef !== null && prNum === null && prMetaError === null`: the
+ *     subject's number is absent AND no pull request contains the merge —
+ *     audited from the commit body, exactly the existing no-PR path.
+ *
+ * @param {{ subjectRef: number|null, prNum: number|null, prSource: 'subject'|'commit-sha'|null, prMetaError: string|null }} ctx
+ * @returns {string}
+ */
+export function formatPrSourceSuffix({ subjectRef, prNum, prSource, prMetaError }) {
+  if (prSource === 'commit-sha') {
+    return ` [pr #${prNum} by commit-sha; (#${subjectRef}) is not a pull request]`;
+  }
+  if (subjectRef !== null && prNum === null && prMetaError === null) {
+    return ` [(#${subjectRef}) is not a pull request; no pull request contains this merge — commit body audited]`;
+  }
+  return '';
+}
+
 export function crossCheckExit(failCount, nominableTreeKeyedCount, failShaCount) {
   // Bidirectional NOMINABLE ⟺ [FAIL-SHA] coherence. Newest-carrier dedup keeps
   // ≥1 emission per payload, so nominableTreeKeyedCount>0 ⟹ failShaCount>0 always
@@ -318,7 +369,9 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       // evidence" correctly; re-fabricating an empty default here would
       // re-introduce the exact fail-open the seam removes, just on a
       // parallel path (prView fix-at-source disposition).
-      const { prNum, prLabels, prBody, prAuthor, prReviews, prMetaError } = await fetchPrMeta(subject, vcs, config);
+      const {
+        prNum, subjectRef, prLabels, prBody, prAuthor, prReviews, prMetaError, prSource,
+      } = await fetchPrMeta(subject, vcs, config, sha);
 
       // ── Uncomputable merge (REQ-TS-1/-2, issue #474) ─────────────────────
       // The PR fetch was ATTEMPTED and FAILED. Do NOT evaluate this merge:
@@ -335,7 +388,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       // fails closed rather than the merge being silently dropped.
       if (prMetaError !== null) {
         uncomputableCount += 1;
-        console.log(`[UNCOMPUTABLE] ${sha.slice(0, 7)} ${subject} — PR #${prNum} metadata unreachable: ${prMetaError}`);
+        console.log(formatUncomputableLine(sha, subject, { prNum, prMetaError }));
         continue;
       }
 
@@ -372,9 +425,11 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
         diffBudget, honorSizeException, tier,
       });
 
+      const prNote = formatPrSourceSuffix({ subjectRef, prNum, prSource, prMetaError });
+
       if (rec.kind === 'pass') {
         const sizeNote = rec.sizeSkipped ? ' [size:exception]' : '';
-        console.log(`[PASS] ${sha.slice(0, 7)} ${subject}${sizeNote}`);
+        console.log(`[PASS] ${sha.slice(0, 7)} ${subject}${sizeNote}${prNote}`);
         continue;
       }
 
@@ -414,7 +469,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
             + '--reason "<why the ungoverned ADR is accepted>"  (run `cursor.mjs window` for the shas)';
         reasons += ` — resolve by reverting ${sha.slice(0, 7)}, or ACCEPT THE WHOLE AUDITED WINDOW: ${acceptCmd}`;
       }
-      console.log(`[FAIL] ${sha.slice(0, 7)} ${subject} — ${reasons}`);
+      console.log(`[FAIL] ${sha.slice(0, 7)} ${subject} — ${reasons}${prNote}`);
 
       // ── [FAIL-SHA] (auto-revert signal) — class-filtered + newest-carrier
       // dedup (design §15.5, REQ-D2-3). Emitted ONLY for a surviving un-exempted

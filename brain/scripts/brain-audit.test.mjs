@@ -17,7 +17,7 @@ import { removeTempTree } from './__fixtures__/tmp-tree.mjs';
 
 const AUDIT_SCRIPT = new URL('./brain-audit.mjs', import.meta.url).pathname;
 
-import { crossCheckExit } from './brain-audit.mjs';
+import { crossCheckExit, formatUncomputableLine, formatPrSourceSuffix } from './brain-audit.mjs';
 import { readMergeParent } from './lib/merge-walk.mjs';
 
 // ── Fixture helpers ───────────────────────────────────────────────────────────
@@ -2150,4 +2150,63 @@ test('#962: no brain.config.json at all — behaviour unchanged (ENOENT still re
   assert.equal(r.status, 0,
     `an absent brain.config.json must audit exactly as before (R11):\n${r.stdout}\n${r.stderr}`);
   assert.match(r.stdout, /No commits found/);
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Issue #1086 (D6) — emission suffixes. Pure unit tests on the exported
+// formatters: no entrypoint spawn, no real `.git`, no fixture repo at all —
+// exactly the "pure emission path" the design's Testing Strategy calls for.
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('#1086: the legacy [UNCOMPUTABLE] line stays byte-identical (prView read could not be completed)', () => {
+  const line = formatUncomputableLine('deadbeefcafe', 'Merge pull request #471 from x/y', {
+    prNum: 471,
+    prMetaError: 'PR metadata unreadable (prView returned the REQ-CIC-2 uncomputable sentinel for #471) '
+      + '— the API call failed; the evaluator has no evidence, not empty evidence',
+  });
+
+  assert.equal(
+    line,
+    '[UNCOMPUTABLE] deadbee Merge pull request #471 from x/y — PR #471 metadata unreachable: '
+      + 'PR metadata unreadable (prView returned the REQ-CIC-2 uncomputable sentinel for #471) '
+      + '— the API call failed; the evaluator has no evidence, not empty evidence',
+    'this is the exact pre-#1086 wording — a consumer parsing this line must see no change',
+  );
+});
+
+test('#1086: an ambiguous [UNCOMPUTABLE] line (two containing PRs) names its own cause, distinct from the legacy line', () => {
+  const legacy = formatUncomputableLine('cafebabe0001', 'feat: x (#5)', {
+    prNum: 5,
+    prMetaError: 'PR metadata unreadable (prView returned the REQ-CIC-2 uncomputable sentinel for #5) '
+      + '— the API call failed; the evaluator has no evidence, not empty evidence',
+  });
+  const ambiguous = formatUncomputableLine('cafebabe0002', 'feat: y (#6)', {
+    prNum: null,
+    prMetaError: "subject's #6 is not a pull request; 2 pull requests contain the merge commit (10, 20) "
+      + 'and none can be chosen — the evaluator has no evidence, not empty evidence',
+  });
+
+  assert.notEqual(legacy, ambiguous);
+  assert.match(legacy, /PR #5 metadata unreachable/);
+  assert.match(ambiguous, /10, 20/);
+  assert.doesNotMatch(ambiguous, /metadata unreachable/,
+    'the ambiguous cause must never be phrased as the legacy "read could not be completed" cause');
+});
+
+test('#1086: the commit-sha-resolved suffix renders on [PASS]/[FAIL]', () => {
+  const suffix = formatPrSourceSuffix({ subjectRef: 978, prNum: 991, prSource: 'commit-sha', prMetaError: null });
+  assert.equal(suffix, ' [pr #991 by commit-sha; (#978) is not a pull request]');
+});
+
+test('#1086: the no-containing-PR suffix renders when the commit body was audited', () => {
+  const suffix = formatPrSourceSuffix({ subjectRef: 978, prNum: null, prSource: null, prMetaError: null });
+  assert.equal(suffix, ' [(#978) is not a pull request; no pull request contains this merge — commit body audited]');
+});
+
+test('#1086: no suffix for an ordinary subject-resolved merge (unchanged today)', () => {
+  assert.equal(formatPrSourceSuffix({ subjectRef: 471, prNum: 471, prSource: 'subject', prMetaError: null }), '');
+});
+
+test('#1086: no suffix when the subject references no PR at all (unchanged today)', () => {
+  assert.equal(formatPrSourceSuffix({ subjectRef: null, prNum: null, prSource: null, prMetaError: null }), '');
 });

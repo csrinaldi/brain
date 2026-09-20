@@ -290,72 +290,92 @@ export function readMergeDiff(parent1, sha, cwd) {
  *     [WARN] rather than failing the window closed, so a consumer repo with no
  *     VCS adapter keeps auditing.
  *
+ * `sha` (issue #1086, D4) is the fourth positional argument, NOT an options
+ * object — #474's REQ-TS pins destructure the first three positionally and
+ * must stay byte-identical. It is consulted ONLY when `prView` reports a
+ * definitive `absent: true` on the subject's own number: the shared
+ * `commitPrs({ project, sha })` verb then answers which pull requests contain
+ * the merge commit, and the dispatch table in spec.md decides the rest. The
+ * gate is structural — `absent` is `null`/`false` on every OTHER failure or
+ * success, so a transport failure can reach `commitPrs` by no path at all
+ * (the fail-closed proof in `merge-walk.test.mjs`).
+ *
+ * Two additive return fields (design D5): `subjectRef` is what `parsePrNumber`
+ * saw in the subject, unconditionally; `prSource` is `'subject'` (the
+ * unchanged today-path), `'commit-sha'` (resolved via `commitPrs`), or `null`
+ * (no PR audited — either the subject named none, or the commit-sha lookup
+ * definitively found none, both "commit body" outcomes). `prNum` stays
+ * `subjectRef` on the LEGACY unreadable path (today's behavior, byte-
+ * identical); it is `null` on every ambiguous/unresolvable dispatch outcome,
+ * so `prMetaError !== null && prNum !== null` IS the legacy case and needs no
+ * third field to distinguish it.
+ *
  * @param {string} subject
  * @param {object|null} vcs
  * @param {object} config
- * @returns {Promise<{ prNum: number|null, prLabels: string[]|null, prBody: string|null, prAuthor: string|null, prReviews: Array|null, prMetaError: string|null }>}
+ * @param {string} [sha] Required only for the commit-sha dispatch branch.
+ * @returns {Promise<{ prNum: number|null, subjectRef: number|null, prLabels: string[]|null, prBody: string|null, prAuthor: string|null, prReviews: Array|null, prMetaError: string|null, prSource: 'subject'|'commit-sha'|null }>}
  */
-export async function fetchPrMeta(subject, vcs, config) {
+export async function fetchPrMeta(subject, vcs, config, sha) {
   let prLabels = null;
   let prBody = null;
   let prAuthor = null;
   let prReviews = null;
   let prMetaError = null;
-  const prNum = parsePrNumber(subject);
-  if (prNum !== null && vcs) {
+  let prSource = null;
+  const subjectRef = parsePrNumber(subject);
+  let prNum = subjectRef;
+  if (subjectRef !== null && vcs) {
     try {
       const pr = await vcs.prView({
         project: config?.project?.slug,
-        number: prNum,
+        number: subjectRef,
       });
-      prLabels = pr.labels;
-      prBody = pr.body;
-      prAuthor = pr.author;
-      // ── REQ-CIC-2's uncomputable sentinel — the path #467 ACTUALLY took ──
-      // `prView` NEVER THROWS (ci-context.mjs: "an internal failure yields
-      // `null` on the affected fields only, never an exception"). On a failed
-      // `gh` call it RETURNS `{ labels: null, body: null }`
-      // (providers/github.mjs:186 and :203; gitlab.mjs mirrors it). On SUCCESS
-      // it always returns an array and a string (`data.labels ?? []`,
-      // `data.body ?? ''`), so null/null is unambiguous and can only mean the
-      // fetch failed.
-      //
-      // This — not the `catch` below — is the seam the #467 outage came
-      // through, and reading #474's issue text alone would have missed it: the
-      // bare `catch {}` it names is real, but it only fires if `prView` itself
-      // throws (a module/adapter error), which the unauthenticated case does
-      // not do. REQ-CIC-2 says consumers MUST fail closed on `null`; until now
-      // the audit passed the nulls to the pure helpers and then let
-      // `selectIssueLinkBody(null, commitBody)` render a confident verdict from
-      // the merge commit body. Failing closed is what that requirement asks for.
-      if (prLabels === null && prBody === null) {
-        prMetaError = `PR metadata unreadable (prView returned the REQ-CIC-2 uncomputable sentinel for #${prNum}) `
-          + '— the API call failed; the evaluator has no evidence, not empty evidence';
+      if (pr.absent === true) {
+        // ── The definitive negative (issue #1086, D1/D4) ────────────────────
+        // The subject's number is NOT a pull request — the provider said so
+        // affirmatively, not "could not tell". This is the ONLY branch that
+        // opens the commit-sha lookup; every other outcome of this call
+        // (`absent: false` success, `absent: null` any other failure) never
+        // reaches `resolveByCommitSha` at all.
+        const dispatch = await resolveByCommitSha({ vcs, config, sha, subjectRef });
+        prNum = dispatch.prNum;
+        prSource = dispatch.prSource;
+        prLabels = dispatch.prLabels;
+        prBody = dispatch.prBody;
+        prAuthor = dispatch.prAuthor;
+        prReviews = dispatch.prReviews;
+        prMetaError = dispatch.prMetaError;
       } else {
-        // Reviews, for the human-gate invariant on merged history (#511). Only
-        // when prView SUCCEEDED: asking for reviews on a PR whose metadata is
-        // already uncomputable would produce a second, weaker sentinel for the
-        // same failure. `prReviews` returns null on a failed call and an array
-        // on success — null is preserved as "no evidence", never flattened to
-        // [], which would read as "reviewed by nobody" and is a verdict.
-        // Three outcomes, and they are NOT the same thing:
-        //   verb absent   → the adapter cannot answer this question at all. A capability
-        //                   gap, not a failed read: the check abstains and the window
-        //                   stays clean. (Every real provider implements it — VERBS —
-        //                   so this is the injected/partial-adapter case.)
-        //   returns null  → the verb exists and the call FAILED. That rides the SAME
-        //                   uncomputable channel prView's sentinel does; inventing a
-        //                   second one inside the check is what turned 16 tests red.
-        //   returns array → evidence.
-        if (typeof vcs.prReviews === 'function') {
-          prReviews = await vcs.prReviews({
-            project: config?.project?.slug,
-            number: prNum,
-          });
-          if (prReviews === null) {
-            prMetaError = `PR reviews unreadable for #${prNum} — the API call failed; `
-              + 'the evaluator has no evidence, not empty evidence';
-          }
+        prLabels = pr.labels;
+        prBody = pr.body;
+        prAuthor = pr.author;
+        // ── REQ-CIC-2's uncomputable sentinel — the path #467 ACTUALLY took ──
+        // `prView` NEVER THROWS (ci-context.mjs: "an internal failure yields
+        // `null` on the affected fields only, never an exception"). On a failed
+        // `gh` call it RETURNS `{ labels: null, body: null }`
+        // (providers/github.mjs:186 and :203; gitlab.mjs mirrors it). On SUCCESS
+        // it always returns an array and a string (`data.labels ?? []`,
+        // `data.body ?? ''`), so null/null is unambiguous and can only mean the
+        // fetch failed.
+        //
+        // This — not the `catch` below — is the seam the #467 outage came
+        // through, and reading #474's issue text alone would have missed it: the
+        // bare `catch {}` it names is real, but it only fires if `prView` itself
+        // throws (a module/adapter error), which the unauthenticated case does
+        // not do. REQ-CIC-2 says consumers MUST fail closed on `null`; until now
+        // the audit passed the nulls to the pure helpers and then let
+        // `selectIssueLinkBody(null, commitBody)` render a confident verdict from
+        // the merge commit body. Failing closed is what that requirement asks for.
+        //
+        // Byte-identical to pre-#1086: `absent` is `false`/`null` here, never
+        // `true`, so this message and `prNum === subjectRef` are unchanged.
+        if (prLabels === null && prBody === null) {
+          prMetaError = `PR metadata unreadable (prView returned the REQ-CIC-2 uncomputable sentinel for #${subjectRef}) `
+            + '— the API call failed; the evaluator has no evidence, not empty evidence';
+        } else {
+          prSource = 'subject';
+          prReviews = await fetchReviews(vcs, config, subjectRef, (msg) => { prMetaError = msg; });
         }
       }
     } catch (err) {
@@ -366,7 +386,123 @@ export async function fetchPrMeta(subject, vcs, config) {
       prMetaError = err?.message ? String(err.message) : String(err);
     }
   }
-  return { prNum, prLabels, prBody, prAuthor, prReviews, prMetaError };
+  return { prNum, subjectRef, prLabels, prBody, prAuthor, prReviews, prMetaError, prSource };
+}
+
+/**
+ * Reviews, for the human-gate invariant on merged history (#511). Only called
+ * once evidence has been read successfully (from either the subject PR or a
+ * commit-sha-resolved PR) — asking for reviews on a PR whose metadata is
+ * already uncomputable would produce a second, weaker sentinel for the same
+ * failure. `prReviews` returns null on a failed call and an array on success —
+ * null is preserved as "no evidence", never flattened to `[]`, which would
+ * read as "reviewed by nobody" and is a verdict. Three outcomes, and they are
+ * NOT the same thing:
+ *   verb absent   → the adapter cannot answer this question at all. A capability
+ *                   gap, not a failed read: the check abstains and the window
+ *                   stays clean. (Every real provider implements it — VERBS —
+ *                   so this is the injected/partial-adapter case.)
+ *   returns null  → the verb exists and the call FAILED. That rides the SAME
+ *                   uncomputable channel prView's sentinel does; inventing a
+ *                   second one inside the check is what turned 16 tests red.
+ *   returns array → evidence.
+ *
+ * @param {object} vcs
+ * @param {object} config
+ * @param {number} number
+ * @param {(msg: string) => void} onError
+ * @returns {Promise<Array|null>}
+ */
+async function fetchReviews(vcs, config, number, onError) {
+  if (typeof vcs.prReviews !== 'function') return null;
+  const prReviews = await vcs.prReviews({ project: config?.project?.slug, number });
+  if (prReviews === null) {
+    onError(`PR reviews unreadable for #${number} — the API call failed; `
+      + 'the evaluator has no evidence, not empty evidence');
+  }
+  return prReviews;
+}
+
+/**
+ * A one-level re-read of `prView`/`prReviews` for a pull request resolved by
+ * commit sha (issue #1086, D4's Data Flow: "a one-level re-read through a
+ * local `readPr(number)` helper, never recursion"). Fetches EXACTLY what the
+ * subject path fetches, through the SAME calls, so a merge resolved by commit
+ * sha is evaluated identically to one resolved by subject — no second
+ * evidence shape exists. Never dispatches on the re-read PR's own `absent`
+ * field: that would be a second attempt, which the design explicitly refuses.
+ *
+ * @param {object} vcs
+ * @param {object} config
+ * @param {number} number
+ * @returns {Promise<{ prLabels, prBody, prAuthor, prReviews, error: string|null }>}
+ */
+async function readPr(vcs, config, number) {
+  const pr = await vcs.prView({ project: config?.project?.slug, number });
+  const prLabels = pr.labels;
+  const prBody = pr.body;
+  const prAuthor = pr.author;
+  if (prLabels === null && prBody === null) {
+    return {
+      prLabels: null, prBody: null, prAuthor: null, prReviews: null,
+      error: `PR metadata unreadable (prView returned the REQ-CIC-2 uncomputable sentinel for #${number}) `
+        + '— the API call failed; the evaluator has no evidence, not empty evidence',
+    };
+  }
+  let error = null;
+  const prReviews = await fetchReviews(vcs, config, number, (msg) => { error = msg; });
+  return { prLabels, prBody, prAuthor, prReviews, error };
+}
+
+/**
+ * The commit-sha dispatch (issue #1086, D3/D4): reachable ONLY from a
+ * definitive `absent: true` on the subject's own number (the caller's
+ * structural gate). Resolves `commitPrs({ project, sha })` and dispatches per
+ * spec.md's table — never a guess between multiple candidates, never a
+ * fabricated empty on a lookup failure.
+ *
+ * @param {{ vcs: object, config: object, sha: string|undefined, subjectRef: number }} args
+ * @returns {Promise<{ prNum: number|null, prSource: 'commit-sha'|null, prLabels, prBody, prAuthor, prReviews, prMetaError: string|null }>}
+ */
+async function resolveByCommitSha({ vcs, config, sha, subjectRef }) {
+  const uncomputable = (reason) => ({
+    prNum: null, prSource: null, prLabels: null, prBody: null, prAuthor: null, prReviews: null,
+    prMetaError: `subject's #${subjectRef} is not a pull request; ${reason} `
+      + '— the evaluator has no evidence, not empty evidence',
+  });
+
+  if (typeof vcs.commitPrs !== 'function' || !sha) {
+    return uncomputable('the commit-sha pull request lookup is unavailable on this provider');
+  }
+
+  const prs = await vcs.commitPrs({ project: config?.project?.slug, sha });
+  if (prs === null) {
+    return uncomputable('the commit-sha pull request lookup failed');
+  }
+  if (prs.length === 0) {
+    // Real evidence: no pull request contains this commit — audit the commit
+    // body, exactly the existing no-PR path (spec: "Absent; no pull request
+    // contains the merge"). Not an error: `prMetaError` stays null.
+    return {
+      prNum: null, prSource: null, prLabels: null, prBody: null, prAuthor: null, prReviews: null, prMetaError: null,
+    };
+  }
+  if (prs.length > 1) {
+    return uncomputable(
+      `${prs.length} pull requests contain the merge commit (${prs.join(', ')}) and none can be chosen`,
+    );
+  }
+
+  const [number] = prs;
+  const read = await readPr(vcs, config, number);
+  if (read.error) {
+    return uncomputable(`the commit-sha-resolved pull request #${number} could not be read — ${read.error}`);
+  }
+  return {
+    prNum: number, prSource: 'commit-sha',
+    prLabels: read.prLabels, prBody: read.prBody, prAuthor: read.prAuthor, prReviews: read.prReviews,
+    prMetaError: null,
+  };
 }
 
 /**
