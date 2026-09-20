@@ -11,7 +11,7 @@ import { normalizeCommitStatus, providerState, assigneeParams, normalizeAssignee
 import { vcsToken } from '../lib/token.mjs';
 import { currentIdentity } from '../lib/identity-context.mjs';
 import { assertNoApprovalLabel } from '../lib/approval-deny.mjs';
-import { uncomputable, UNCOMPUTABLE_REASONS } from '../lib/uncomputable-cause.mjs';
+import { uncomputable, UNCOMPUTABLE_REASONS, isNotFound } from '../lib/uncomputable-cause.mjs';
 import { armed, refused, AUTO_MERGE_REASONS } from '../lib/auto-merge-outcome.mjs';
 
 export const PROVIDER = 'github';
@@ -401,12 +401,32 @@ export async function capabilities({ project = '', branch = 'main' } = {}) {
  * REQUIRED gate) MUST treat `null` as uncomputable, never collapse it to a
  * fabricated empty default.
  *
+ * `absent` (issue #1086, D1) is an ADDITIVE third field on the same failure
+ * shape, computed from `isNotFound(r.stderr)`: `false` on a successful
+ * fetch, `true` when `gh pr view`'s own stderr is a definitive "that number
+ * is not a pull request" (`isNotFound` — the module's shared not-found
+ * predicate, never a provider-local regex), `null` on any other failure
+ * (including the JSON-parse catch below — a malformed response is not a
+ * negative). `labels`/`body` stay `null` in BOTH failure branches,
+ * byte-identical to today, so a consumer that does not read `absent`
+ * behaves exactly as before this change.
+ *
  * @param {{ project?: string, number: number }} opts
- * @returns {Promise<{ number: number, labels: string[]|null, body: string|null, author: string|null, headRefOid: string|null, baseRefOid: string|null }>}
+ * @returns {Promise<{ number: number, labels: string[]|null, body: string|null, author: string|null, headRefOid: string|null, baseRefOid: string|null, absent: boolean|null }>}
  */
 export async function prView({ project, number } = {}) {
   const r = gh(['pr', 'view', String(number), '--json', 'number,labels,body,author,headRefOid']);
-  if (!r.ok) return { number, labels: null, body: null, author: null, headRefOid: null, baseRefOid: null };
+  if (!r.ok) {
+    return {
+      number,
+      labels: null,
+      body: null,
+      author: null,
+      headRefOid: null,
+      baseRefOid: null,
+      absent: isNotFound(r.stderr) ? true : null,
+    };
+  }
   try {
     const data = JSON.parse(r.stdout);
     const br = gh(['api', `repos/{owner}/{repo}/pulls/${number}`, '--jq', '.base.sha']);
@@ -421,9 +441,12 @@ export async function prView({ project, number } = {}) {
       author: data.author?.login ?? null,
       headRefOid: data.headRefOid ?? null,
       baseRefOid,
+      absent: false,
     };
   } catch {
-    return { number, labels: null, body: null, author: null, headRefOid: null, baseRefOid: null };
+    // A malformed response is not a negative — `absent: null`, same as any
+    // other unreadable state.
+    return { number, labels: null, body: null, author: null, headRefOid: null, baseRefOid: null, absent: null };
   }
 }
 
@@ -497,6 +520,38 @@ export async function commitStatus({ project, sha }) {
   // (queued/in_progress). Use status until completed, then the conclusion.
   const raw = cr.status === 'completed' ? cr.conclusion : cr.status;
   return normalizeCommitStatus('github', raw);
+}
+
+/**
+ * commitPrs — the pull requests that contain a commit (issue #1086, D3). The
+ * shared merge-evidence layer (`fetchPrMeta`, `merge-walk.mjs`) opens this
+ * lookup ONLY when `prView` reports a definitive `absent`, so its answer must
+ * distinguish "definitively none" from "could not read" as sharply as
+ * `issueRelations` does (`:194-197`): `[]` on a successful read with no
+ * containing pull request, `null` on ANY transport failure or malformed
+ * response — NEVER a fabricated `[]` for a failure, and never a throw.
+ * Ascending on a real list; numbers only (the caller re-enters `prView` for
+ * every other field, so no second evidence shape is introduced — design D3).
+ *
+ * Mirrors `commitStatus({ project, sha })`'s commit-keyed shape, but UNLIKE
+ * `commitStatus` (pinned to reject on a transport failure, out of scope)
+ * this verb never throws — the fail-closed dispatch in `fetchPrMeta` depends
+ * on `null` being distinguishable from `[]` without a try/catch at the call
+ * site.
+ *
+ * @param {{ project: string, sha: string }} opts
+ * @returns {Promise<number[]|null>}
+ */
+export async function commitPrs({ project, sha } = {}) {
+  const r = gh(['api', '--paginate', `repos/${project}/commits/${sha}/pulls`]);
+  if (!r.ok) return null;
+  try {
+    const data = JSON.parse(r.stdout);
+    if (!Array.isArray(data)) return null;
+    return data.map(pr => pr.number).sort((a, b) => a - b);
+  } catch {
+    return null;
+  }
 }
 
 /**

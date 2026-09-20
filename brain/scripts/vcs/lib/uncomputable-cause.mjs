@@ -18,6 +18,11 @@
 // module both providers IMPORT and neither RE-EXPORTS — this module follows
 // that precedent verbatim (`verb-contract-drift-guard.test.mjs` would
 // otherwise treat a re-exported helper as an undeclared contract verb).
+//
+// issue #1086 adds `isNotFound` alongside `uncomputable()`/`isUncomputable()`
+// as the module's third approved export: both providers import ONLY these
+// three from here to decide `prView`'s additive `absent` field (D2) — never
+// a provider-local regex or stderr literal.
 
 /** The closed vocabulary `reason` draws from. Declared once, frozen, so a
  * rename is one edit and a test can assert the classifier's codomain is a
@@ -152,4 +157,19 @@ export function uncomputable({ detail, reason = null } = {}) {
  */
 export function isUncomputable(value) {
   return Boolean(value) && typeof value === 'object' && value.uncomputable === true;
+}
+
+/**
+ * The shared not-found predicate (issue #1086, D2). `true` only when
+ * `classifyUncomputableCause` would answer `NOT_FOUND` for the same text —
+ * never a second regex, so the auth-beats-404 ordering above (rule 3 before
+ * rule 4) protects this predicate for free: a masked-private-repo 404 that
+ * also carries auth words classifies `UNAUTHENTICATED`, so `isNotFound`
+ * answers `false` for it, not a false "absent".
+ *
+ * @param {string} text
+ * @returns {boolean}
+ */
+export function isNotFound(text) {
+  return classifyUncomputableCause(text) === UNCOMPUTABLE_REASONS.NOT_FOUND;
 }

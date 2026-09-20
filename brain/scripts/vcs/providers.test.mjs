@@ -372,6 +372,53 @@ test('github.commitStatus returns null when there are no checks', async () => {
   assert.equal(result, null);
 });
 
+// ── commitPrs (issue #1086 cold-review remediation) ───────────────────────────────
+//
+// GitLab's merge_requests-for-a-commit endpoint defaults to a small page size
+// when no `per_page` is given (unlike GitHub's `commitPrs`, which spawns
+// `gh api --paginate` and walks every page automatically — see github.mjs).
+// Without an explicit `per_page`, a commit associated with more merge
+// requests than the default page could return a SILENTLY TRUNCATED list —
+// collapsing a true "two or more containing MRs" (uncomputable, per the
+// dispatch table, design D4) into a false "exactly one" (audited as if it
+// were unambiguous). Mirrors the `mrList` full-page precedent (#930/#936,
+// see the headBranch tests above) — but `commitPrs` NEVER throws (its
+// contract, unlike `mrList`'s): a full page means refuse-by-returning-null,
+// the same uncomputable value a transport failure already yields.
+
+test('gitlab.commitPrs requests per_page=100 explicitly (never relies on the GitLab default page size)', async () => {
+  let seenUrl;
+  await gitlab.commitPrs({
+    project: 'g/r',
+    sha: 'deadbeef',
+    fetchImpl: async (url) => {
+      seenUrl = url;
+      return { ok: true, json: async () => [] };
+    },
+  });
+  assert.match(seenUrl, /[?&]per_page=100(&|$)/, "commitPrs must request per_page=100, matching mrList's headBranch-filtered discipline");
+});
+
+test('gitlab.commitPrs returns null when the page comes back FULL (100) — refuses rather than decide on a possibly-truncated page', async () => {
+  const full = Array.from({ length: 100 }, (_, i) => ({ iid: i + 1 }));
+  const result = await gitlab.commitPrs({
+    project: 'g/r',
+    sha: 'deadbeef',
+    fetchImpl: async () => ({ ok: true, json: async () => full }),
+  });
+  assert.equal(result, null, 'a full page must be refused (null), never decided on — the same uncomputable value a transport failure yields');
+});
+
+test('gitlab.commitPrs returns the list intact, ascending, when the page is short (< 100)', async () => {
+  const short = Array.from({ length: 3 }, (_, i) => ({ iid: 3 - i }));
+  const result = await gitlab.commitPrs({
+    project: 'g/r',
+    sha: 'deadbeef',
+    fetchImpl: async () => ({ ok: true, json: async () => short }),
+  });
+  assert.deepEqual(result, [1, 2, 3], 'a short page is returned intact and ascending — only a FULL page is refused');
+});
+
 // ── checkRuns (issue #203 review fix F3 — direct provider-level coverage) ────────
 
 test('github.checkRuns maps check_runs[].name entries to an array of bare names', async () => {
@@ -1020,19 +1067,35 @@ test('github.prView returns { number, labels, body, author, headRefOid, baseRefO
     author: 'alice',
     headRefOid: 'cafef00dcafef00dcafef00dcafef00dcafef00d',
     baseRefOid: 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
+    // issue #1086, D1: a successful fetch additively reports absent:false.
+    absent: false,
   });
 });
 
-test('github.prView returns { number, labels: null, body: null, author: null, headRefOid: null, baseRefOid: null } on gh failure (never throws) — REQ-CIC-2 uncomputable, not genuinely-empty', async () => {
-  setSpawn(() => ({ status: 1, stdout: '', stderr: 'not found' }));
+// issue #1086: this is the GENERIC/unreadable failure case (must classify
+// `absent: null`, an unresolved read, not a definitive negative) — stderr is
+// deliberately a message `isNotFound` does not match, so it stays distinct
+// from `github.prView reports absent:true …` below.
+test('github.prView returns { number, labels: null, body: null, author: null, headRefOid: null, baseRefOid: null, absent: null } on gh failure (never throws) — REQ-CIC-2 uncomputable, not genuinely-empty', async () => {
+  setSpawn(() => ({ status: 1, stdout: '', stderr: 'gh: fixture simulated failure' }));
   const result = await github.prView({ project: 'o/r', number: 99 });
-  assert.deepEqual(result, { number: 99, labels: null, body: null, author: null, headRefOid: null, baseRefOid: null });
+  assert.deepEqual(result, { number: 99, labels: null, body: null, author: null, headRefOid: null, baseRefOid: null, absent: null });
 });
 
-test('github.prView returns { number, labels: null, body: null, author: null, headRefOid: null, baseRefOid: null } on malformed JSON (never throws)', async () => {
+test('github.prView returns { number, labels: null, body: null, author: null, headRefOid: null, baseRefOid: null, absent: null } on malformed JSON (never throws)', async () => {
   setSpawn(() => ({ status: 0, stdout: 'not-json', stderr: '' }));
   const result = await github.prView({ project: 'o/r', number: 5 });
-  assert.deepEqual(result, { number: 5, labels: null, body: null, author: null, headRefOid: null, baseRefOid: null });
+  assert.deepEqual(result, { number: 5, labels: null, body: null, author: null, headRefOid: null, baseRefOid: null, absent: null });
+});
+
+test('github.prView reports absent:true when gh pr view stderr is a definitive not-found (#1086)', async () => {
+  setSpawn(() => ({
+    status: 1,
+    stdout: '',
+    stderr: 'GraphQL: Could not resolve to a PullRequest with the number of 99. (repository.pullRequest)\n',
+  }));
+  const result = await github.prView({ project: 'o/r', number: 99 });
+  assert.deepEqual(result, { number: 99, labels: null, body: null, author: null, headRefOid: null, baseRefOid: null, absent: true });
 });
 
 test('github.prView headRefOid defaults to null when absent from an otherwise-successful response', async () => {
@@ -1133,6 +1196,8 @@ test('gitlab.prView returns { number, labels, body, author, headRefOid, baseRefO
     author: 'alice',
     headRefOid: 'cafef00dcafef00dcafef00dcafef00dcafef00d',
     baseRefOid: 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
+    // issue #1086, D1: a successful fetch additively reports absent:false.
+    absent: false,
   });
 });
 
@@ -1187,13 +1252,26 @@ test('gitlab.prView baseRefOid defaults to null when diff_refs.base_sha is absen
   assert.equal(result.baseRefOid, null);
 });
 
-test('gitlab.prView returns { number, labels: null, body: null, author: null, headRefOid: null, baseRefOid: null } on fetch failure (never throws) — uncomputable, not genuinely-empty', async () => {
+// issue #1086: GENERIC/unreadable failure — status corrected from 404 to
+// 500 (a 404 collides with classifyUncomputableCause's numeric not-found
+// rule and would misclassify this as absent:true; see the dedicated
+// absent:true test below for that case).
+test('gitlab.prView returns { number, labels: null, body: null, author: null, headRefOid: null, baseRefOid: null, absent: null } on fetch failure (never throws) — uncomputable, not genuinely-empty', async () => {
+  const result = await gitlab.prView({
+    project: 'g/r',
+    number: 99,
+    fetchImpl: async () => ({ ok: false, status: 500 }),
+  });
+  assert.deepEqual(result, { number: 99, labels: null, body: null, author: null, headRefOid: null, baseRefOid: null, absent: null });
+});
+
+test('gitlab.prView reports absent:true when gitlabApiFetch fails with a 404 (definitive not-found, #1086)', async () => {
   const result = await gitlab.prView({
     project: 'g/r',
     number: 99,
     fetchImpl: async () => ({ ok: false, status: 404 }),
   });
-  assert.deepEqual(result, { number: 99, labels: null, body: null, author: null, headRefOid: null, baseRefOid: null });
+  assert.deepEqual(result, { number: 99, labels: null, body: null, author: null, headRefOid: null, baseRefOid: null, absent: true });
 });
 
 test('gitlab.prView author defaults to null when absent from an otherwise-successful response', async () => {

@@ -13,7 +13,7 @@ import { vcsToken } from '../lib/token.mjs';
 import { currentIdentity } from '../lib/identity-context.mjs';
 import { gitlabApiFetch } from '../gitlab-api.mjs';
 import { assertNoApprovalLabel } from '../lib/approval-deny.mjs';
-import { uncomputable, UNCOMPUTABLE_REASONS } from '../lib/uncomputable-cause.mjs';
+import { uncomputable, UNCOMPUTABLE_REASONS, isNotFound } from '../lib/uncomputable-cause.mjs';
 import { armed, refused, AUTO_MERGE_REASONS } from '../lib/auto-merge-outcome.mjs';
 
 export const PROVIDER = 'gitlab';
@@ -286,8 +286,16 @@ export async function issueRelations({ project, number, apiBase, token, proxyUrl
  * `r.description` (`null`/`undefined` when GitLab omits it), indistinguishable
  * from the failure case above.
  *
+ * `absent` (issue #1086, D1) is an ADDITIVE third field on the same failure
+ * shape, computed from `isNotFound(err.message)` in the `catch` below —
+ * `gitlabApiFetch` throws `GitLab API failed: ${status} (${path})`, so a 404
+ * on this MR-by-iid lookup classifies `not-found` via the shared classifier's
+ * numeric-code rule, same discipline as `github.mjs#prView`. `false` on a
+ * successful fetch, `true` on a definitive negative, `null` on any other
+ * failure. `labels`/`body` stay `null` in both failure branches.
+ *
  * @param {{ project: string, number: number, apiBase?: string, token?: string, proxyUrl?: string|null, fetchImpl?: Function }} params
- * @returns {Promise<{ number: number, labels: string[]|null, body: string|null, author: string|null, headRefOid: string|null, baseRefOid: string|null }>}
+ * @returns {Promise<{ number: number, labels: string[]|null, body: string|null, author: string|null, headRefOid: string|null, baseRefOid: string|null, absent: boolean|null }>}
  */
 export async function prView({ project, number, apiBase, token, proxyUrl, fetchImpl } = {}) {
   const encoded = encodeURIComponent(project);
@@ -306,9 +314,18 @@ export async function prView({ project, number, apiBase, token, proxyUrl, fetchI
       author: r.author?.username ?? null,
       headRefOid: r.sha ?? r.diff_refs?.head_sha ?? null,
       baseRefOid: r.diff_refs?.base_sha ?? null,
+      absent: false,
     };
-  } catch {
-    return { number, labels: null, body: null, author: null, headRefOid: null, baseRefOid: null };
+  } catch (err) {
+    return {
+      number,
+      labels: null,
+      body: null,
+      author: null,
+      headRefOid: null,
+      baseRefOid: null,
+      absent: isNotFound(err?.message ?? '') ? true : null,
+    };
   }
 }
 
@@ -661,6 +678,50 @@ export async function commitStatus({ project, sha }) {
   const encoded = encodeURIComponent(project);
   const arr = runJson('glab', ['api', `projects/${encoded}/commits/${sha}/statuses?per_page=1`]);
   return normalizeCommitStatus('gitlab', arr[0]?.status);
+}
+
+/**
+ * commitPrs — the merge requests that contain a commit (issue #1086, D3).
+ * Same contract as `github.mjs#commitPrs`: `[]` on a successful read with no
+ * containing merge request, `null` on ANY transport failure — never a
+ * fabricated `[]`, never a throw. Transport is `gitlabApiFetch`, the same
+ * seam `prView` uses (unlike `commitStatus` above, which spawns `glab`) —
+ * `GET projects/:enc/repository/commits/:sha/merge_requests`, mapped to
+ * `r.iid`, ascending.
+ *
+ * Cold-review remediation (#1086): explicitly requests `per_page=100`
+ * rather than relying on GitLab's (smaller) default page size. UNLIKE
+ * GitHub's sibling above (`gh api --paginate`, which walks every page for
+ * free), this endpoint is read as a single page — deliberately asymmetric,
+ * because `gitlabApiFetch` has no pagination loop of its own. A commit
+ * associated with more containing MRs than one page could otherwise return a
+ * SILENTLY TRUNCATED list, collapsing a true "two or more" (uncomputable,
+ * per the dispatch table) into a false "exactly one" (audited as
+ * unambiguous) — the same truncation hazard `mrList`'s `headBranch` filter
+ * guards against (#930/#936). `mrList` fails closed by THROWING; this verb's
+ * contract never throws, so it fails closed by returning `null` instead —
+ * the same uncomputable value a transport failure already yields, and
+ * `fetchPrMeta` already treats a `null` `commitPrs` result as uncomputable.
+ *
+ * @param {{ project: string, sha: string, apiBase?: string, token?: string, proxyUrl?: string|null, fetchImpl?: Function }} params
+ * @returns {Promise<number[]|null>}
+ */
+export async function commitPrs({ project, sha, apiBase, token, proxyUrl, fetchImpl } = {}) {
+  const encoded = encodeURIComponent(project);
+  try {
+    const r = await gitlabApiFetch({
+      apiBase: apiBase ?? 'https://gitlab.com/api/v4',
+      token: glToken(token),
+      proxyUrl: proxyUrl ?? null,
+      path: `projects/${encoded}/repository/commits/${sha}/merge_requests?per_page=100`,
+      fetchImpl,
+    });
+    if (!Array.isArray(r)) return null;
+    if (r.length === 100) return null; // full page — cannot rule out truncation, refuse rather than decide
+    return r.map(mr => mr.iid).sort((a, b) => a - b);
+  } catch {
+    return null;
+  }
 }
 
 /**

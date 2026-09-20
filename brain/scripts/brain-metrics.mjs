@@ -132,7 +132,8 @@ function loadConfig(cwd) {
  * Extract the issue number a merge references (shared CLOSING_RE/CHAIN_RE
  * vocabulary, issue-ref-patterns.mjs) — the issue whose `status:approved`
  * label-add timestamp anchors lead time (design D4). Distinct from the PR
- * number `fetchPrMeta` parses from the subject.
+ * number `fetchPrMeta` resolves — `subjectRef` when parsed from the subject,
+ * or `prNum` when resolved via the commit-sha fallback (issue #1086, D4).
  *
  * @param {string} body
  * @returns {number|null}
@@ -469,7 +470,7 @@ async function evaluateOneMerge(sha, subject, ctx) {
   try {
     const parent1 = readMergeParent(sha, subject, cwd);
     const { numstat, changedFiles, addedFiles, body } = readMergeDiff(parent1, sha, cwd);
-    const { prLabels, prBody, prAuthor, prMetaError } = await fetchPrMeta(subject, vcs, config);
+    const { prLabels, prBody, prAuthor, prMetaError } = await fetchPrMeta(subject, vcs, config, sha);
 
     // REQ-TS-1 (#474) — the PR fetch was attempted and FAILED. brain-audit
     // refuses to render a verdict for this merge and fails the window closed;

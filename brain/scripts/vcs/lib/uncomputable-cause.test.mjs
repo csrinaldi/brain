@@ -13,6 +13,7 @@ import {
   classifyUncomputableCause,
   uncomputable,
   isUncomputable,
+  isNotFound,
 } from './uncomputable-cause.mjs';
 
 const UNCOMPUTABLE_REASON_VALUES = Object.values(UNCOMPUTABLE_REASONS);
@@ -104,6 +105,33 @@ for (const [message, expectedReason] of CORPUS) {
     assert.equal(u.detail, message, "the provider's own words must survive to the operator");
   });
 }
+
+// ── 1b. `isNotFound` — D2's shared not-found predicate (#1086) ─────────────
+//
+// `isNotFound(text)` MUST be `true` exactly when `classifyUncomputableCause`
+// would answer `NOT_FOUND`, and `false` for every other reason in the
+// CORPUS above — it is a thin, total function of the same classifier, never
+// a second regex.
+
+for (const [message, expectedReason] of CORPUS) {
+  test(`isNotFound: ${JSON.stringify(message)} -> ${expectedReason === UNCOMPUTABLE_REASONS.NOT_FOUND} (#1086)`, () => {
+    assert.equal(isNotFound(message), expectedReason === UNCOMPUTABLE_REASONS.NOT_FOUND);
+  });
+}
+
+test('isNotFound: auth-worded 404 text (masked private repo) stays false — auth beats 404 per the existing ordering (#1086)', () => {
+  // Constructed precedence probe (same discipline as the ordering block
+  // below): a 404 status marker AND an auth word in the same message. The
+  // classifier's rule 3 (auth beats 404) must win, so this must NOT read as
+  // not-found.
+  const message = 'gh pr view 1 --json statusCheckRollup failed (status 404): Bad credentials (masked private repo)';
+  assert.equal(classifyUncomputableCause(message), UNCOMPUTABLE_REASONS.UNAUTHENTICATED);
+  assert.equal(isNotFound(message), false);
+});
+
+test('isNotFound: a fully unclassified message is false, not a fallback true', () => {
+  assert.equal(isNotFound('gh: the flurb subsystem declined to enumerate the rollup (HTTP 418)'), false);
+});
 
 // ── 2. Ordering (identity.test.mjs:316-321's pattern) ──────────────────────
 //

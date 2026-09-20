@@ -157,6 +157,9 @@ const PROVIDERS = {
     // use.
     whoami: jsonSpawnCallArgs,
     commitStatus: jsonSpawnCallArgs,
+    // commitPrs (issue #1086, D3) spawns `gh api --paginate` — the same
+    // JSON-over-spawn seam labelEvents/issueList/commitStatus use.
+    commitPrs: jsonSpawnCallArgs,
   },
   gitlab: {
     module: gitlab,
@@ -185,6 +188,8 @@ const PROVIDERS = {
     // gitlab.mrList/issueList do (design D1) — SAME shared function object.
     whoami: jsonSpawnCallArgs,
     commitStatus: jsonSpawnCallArgs,
+    // gitlab.commitPrs fetches over gitlabApiFetch, same seam as prView.
+    commitPrs: gitlabCallArgs,
   },
 };
 
@@ -202,6 +207,7 @@ for (const providerName of Object.keys(PROVIDERS)) {
     prReviews: prReviewsArgs,
     whoami: whoamiArgs,
     commitStatus: commitStatusArgs,
+    commitPrs: commitPrsArgs,
   } = PROVIDERS[providerName];
 
   // ── labelEvents ────────────────────────────────────────────────────────
@@ -254,6 +260,9 @@ for (const providerName of Object.keys(PROVIDERS)) {
     // successfully-empty — a SUCCESSFUL fetch must never surface `null`.
     assert.notEqual(result.body, null, 'a successful prView fetch must never surface body:null (that means uncomputable)');
     assert.notEqual(result.author, undefined, 'author key must be present (null is valid — absent-on-provider — undefined is not)');
+    // issue #1086, D1: a successful fetch MUST additively report `absent: false`
+    // — existing consumers that do not read `absent` are unaffected by this key.
+    assert.equal(result.absent, false, 'a successful prView fetch must report absent:false');
   });
 
   test(`${providerName}.prView (contract): a fetch failure yields the null-shape, never throws`, async () => {
@@ -262,7 +271,40 @@ for (const providerName of Object.keys(PROVIDERS)) {
     assertProvenance(fixture, fixtureName);
 
     const result = await vcs.prView({ project: 'x/y', number: 42, ...prViewArgs(fixture) });
-    assert.deepEqual(result, { number: 42, labels: null, body: null, author: null, headRefOid: null, baseRefOid: null });
+    // issue #1086, D1: this fixture is the GENERIC/unreadable failure — the
+    // read could not be completed for a reason OTHER than a definitive
+    // negative, so `absent` must be `null` (unknown), never `true`.
+    assert.deepEqual(result, {
+      number: 42,
+      labels: null,
+      body: null,
+      author: null,
+      headRefOid: null,
+      baseRefOid: null,
+      absent: null,
+    });
+  });
+
+  // issue #1086, D1/D2: the definitive-negative case — the requested number
+  // identifies an issue, not a pull/merge request. `labels`/`body` MUST stay
+  // `null` (REQ-CIC-2's sentinel is untouched — a consumer that does not read
+  // `absent` sees exactly the legacy unreadable shape), and `absent` MUST be
+  // `true`, never `null`.
+  test(`${providerName}.prView (contract): reports absent:true on the not-found fixture — a number that is an issue, not a PR (#1086)`, async () => {
+    const fixtureName = `${providerName}-prView-notfound.json`;
+    const fixture = loadFixture(fixtureName);
+    assertProvenance(fixture, fixtureName);
+
+    const result = await vcs.prView({ project: 'x/y', number: 978, ...prViewArgs(fixture) });
+    assert.deepEqual(result, {
+      number: 978,
+      labels: null,
+      body: null,
+      author: null,
+      headRefOid: null,
+      baseRefOid: null,
+      absent: true,
+    });
   });
 
   // headRefOid (ADR-0021 Decision 1): the recorded/derived happy fixtures
@@ -821,6 +863,42 @@ for (const providerName of Object.keys(PROVIDERS)) {
       () => vcs.commitStatus({ project: 'x/y', sha: 'cafef00d', ...commitStatusArgs(fixture) }),
       'commitStatus must REJECT on a transport failure — runJson throws (exec.mjs:31-32) and neither provider wraps it; PINNED as out-of-scope (the mrList rationale, design D2 there), NOT because a caller depends on the throw',
     );
+  });
+
+  // ── commitPrs (issue #1086, D3) ──────────────────────────────────────────
+  // `({ project, sha }) -> number[]|null` — the pull requests that contain a
+  // commit. Mirrors `commitStatus({project, sha})`'s commit-keyed shape, but
+  // NEVER throws (unlike `commitStatus`, pinned above): `[]` on a definitive
+  // empty list, `null` on any transport failure, ascending on a real list —
+  // `fetchPrMeta`'s fail-closed gate (Phase 4) depends on `null` never being
+  // conflated with `[]`.
+  test(`${providerName}.commitPrs (contract): happy fixture normalizes to an ascending number[]`, async () => {
+    const fixtureName = `${providerName}-commitPrs-happy.json`;
+    const fixture = loadFixture(fixtureName);
+    assertProvenance(fixture, fixtureName);
+
+    const result = await vcs.commitPrs({ project: 'x/y', sha: 'd4cb7f8', ...commitPrsArgs(fixture) });
+    assert.deepEqual(result, [991], 'the happy fixture carries exactly one containing pull request, number 991');
+    const sorted = [...result].sort((a, b) => a - b);
+    assert.deepEqual(result, sorted, 'commitPrs must be ordered ascending');
+  });
+
+  test(`${providerName}.commitPrs (contract): a definitive empty list normalizes to [], never null`, async () => {
+    const fixtureName = `${providerName}-commitPrs-empty.json`;
+    const fixture = loadFixture(fixtureName);
+    assertProvenance(fixture, fixtureName);
+
+    const result = await vcs.commitPrs({ project: 'x/y', sha: 'deadbeef', ...commitPrsArgs(fixture) });
+    assert.deepEqual(result, [], 'no containing pull request is a SUCCESSFUL read with an empty answer — [], not null');
+  });
+
+  test(`${providerName}.commitPrs (contract): a transport failure yields null, never throws and never a fabricated []`, async () => {
+    const fixtureName = `${providerName}-commitPrs-failure.json`;
+    const fixture = loadFixture(fixtureName);
+    assertProvenance(fixture, fixtureName);
+
+    const result = await vcs.commitPrs({ project: 'x/y', sha: 'deadbeef', ...commitPrsArgs(fixture) });
+    assert.equal(result, null, 'an unreadable commitPrs lookup must return null, never []  and never throw');
   });
 
   // ── projectResolve (issue #385, M10 Phase 2 final Gap-A batch) ──────────
