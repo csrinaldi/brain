@@ -13,6 +13,7 @@
 //   node brain/scripts/vcs/fixtures/record-fixtures.mjs github mrList <project>
 //   node brain/scripts/vcs/fixtures/record-fixtures.mjs github issueList <project>
 //   node brain/scripts/vcs/fixtures/record-fixtures.mjs github prReviews <project> <prNumber>
+//   node brain/scripts/vcs/fixtures/record-fixtures.mjs github commitPrs <project> <sha>
 //
 // Endpoints hit (documented per REQ-A3-6 — "documents which real endpoints it
 // hits"):
@@ -22,6 +23,7 @@
 //   - github mrList      → `gh api repos/<project>/pulls?state=open&per_page=100` (issue #355, M10 Phase 2 rank-3)
 //   - github issueList   → `gh api repos/<project>/issues?state=open&per_page=100` (issue #362, M10 Phase 2 rank-4)
 //   - github prReviews   → `gh api --paginate repos/<project>/pulls/<n>/reviews` (issue #317)
+//   - github commitPrs   → `gh api --paginate repos/<project>/commits/<sha>/pulls` (issue #1086, D3)
 //
 // Deliberately NOT auto-recorded by this script, ever:
 //   - github mrCreate  → `gh pr create` is a MUTATING write (creates a real PR
@@ -241,6 +243,34 @@ async function recordGithubPrReviews(project, number) {
   );
 }
 
+/**
+ * Records `github-commitPrs-happy.json` from the exact call
+ * `github.mjs#commitPrs` makes — `gh api --paginate repos/<project>/commits/<sha>/pulls`
+ * (issue #1086, D3). Unlike every other recorder above, the third CLI
+ * argument is a commit SHA, not a numeric id — kept as a raw string, never
+ * `Number(sha)` (a short sha like `d4cb7f8` is not numeric and `Number()`
+ * would silently produce `NaN`). Trimmed to the one field `commitPrs`
+ * actually consumes (`number`), same jq-equivalent discipline as every
+ * other recorder here.
+ */
+async function recordGithubCommitPrs(project, sha) {
+  const endpoint = `GET repos/${project}/commits/${sha}/pulls`;
+  const arr = runJson('gh', ['api', '--paginate', `repos/${project}/commits/${sha}/pulls`]);
+  writeFixture(
+    'github-commitPrs-happy.json',
+    {
+      endpoint,
+      date: today(),
+      recorded: true,
+      note:
+        'Trimmed to the one field github.mjs#commitPrs actually consumes (number) via a ' +
+        'jq-equivalent projection of the real response — values are unmodified from the ' +
+        'live API.',
+    },
+    arr.map(r => ({ number: r.number })),
+  );
+}
+
 const CASES = {
   labelEvents: recordGithubLabelEvents,
   prView: recordGithubPrView,
@@ -248,19 +278,28 @@ const CASES = {
   mrList: recordGithubMrList,
   issueList: recordGithubIssueList,
   prReviews: recordGithubPrReviews,
+  commitPrs: recordGithubCommitPrs,
 };
 
+// `commitPrs` takes a commit SHA as its trailing argument — a short sha
+// like `d4cb7f8` is not numeric, so it MUST be passed through as a raw
+// string, never `Number(arg)` (which would silently coerce it to `NaN`).
+// Every other verb here takes a numeric id, unaffected by this branch.
+const RAW_TRAILING_ARG_VERBS = new Set(['commitPrs']);
+
 async function main() {
-  const [provider, verb, project, number] = process.argv.slice(2);
+  const [provider, verb, project, trailingArg] = process.argv.slice(2);
   if (provider !== 'github' || !CASES[verb]) {
     console.error(
       'usage: node record-fixtures.mjs github <labelEvents|prView|issueView|prReviews> <project> <number>\n' +
       '       node record-fixtures.mjs github <mrList|issueList> <project>\n' +
+      '       node record-fixtures.mjs github commitPrs <project> <sha>\n' +
       '  (mrCreate and every gitlab-* fixture are deliberately NOT recordable by this script — see header comment)',
     );
     process.exit(1);
   }
-  await CASES[verb](project, Number(number));
+  const arg = RAW_TRAILING_ARG_VERBS.has(verb) ? trailingArg : Number(trailingArg);
+  await CASES[verb](project, arg);
 }
 
 const isMain = import.meta.url === `file://${process.argv[1]}`;

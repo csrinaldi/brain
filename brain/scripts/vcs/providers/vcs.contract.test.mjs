@@ -157,6 +157,9 @@ const PROVIDERS = {
     // use.
     whoami: jsonSpawnCallArgs,
     commitStatus: jsonSpawnCallArgs,
+    // commitPrs (issue #1086, D3) spawns `gh api --paginate` — the same
+    // JSON-over-spawn seam labelEvents/issueList/commitStatus use.
+    commitPrs: jsonSpawnCallArgs,
   },
   gitlab: {
     module: gitlab,
@@ -185,6 +188,8 @@ const PROVIDERS = {
     // gitlab.mrList/issueList do (design D1) — SAME shared function object.
     whoami: jsonSpawnCallArgs,
     commitStatus: jsonSpawnCallArgs,
+    // gitlab.commitPrs fetches over gitlabApiFetch, same seam as prView.
+    commitPrs: gitlabCallArgs,
   },
 };
 
@@ -202,6 +207,7 @@ for (const providerName of Object.keys(PROVIDERS)) {
     prReviews: prReviewsArgs,
     whoami: whoamiArgs,
     commitStatus: commitStatusArgs,
+    commitPrs: commitPrsArgs,
   } = PROVIDERS[providerName];
 
   // ── labelEvents ────────────────────────────────────────────────────────
@@ -857,6 +863,42 @@ for (const providerName of Object.keys(PROVIDERS)) {
       () => vcs.commitStatus({ project: 'x/y', sha: 'cafef00d', ...commitStatusArgs(fixture) }),
       'commitStatus must REJECT on a transport failure — runJson throws (exec.mjs:31-32) and neither provider wraps it; PINNED as out-of-scope (the mrList rationale, design D2 there), NOT because a caller depends on the throw',
     );
+  });
+
+  // ── commitPrs (issue #1086, D3) ──────────────────────────────────────────
+  // `({ project, sha }) -> number[]|null` — the pull requests that contain a
+  // commit. Mirrors `commitStatus({project, sha})`'s commit-keyed shape, but
+  // NEVER throws (unlike `commitStatus`, pinned above): `[]` on a definitive
+  // empty list, `null` on any transport failure, ascending on a real list —
+  // `fetchPrMeta`'s fail-closed gate (Phase 4) depends on `null` never being
+  // conflated with `[]`.
+  test(`${providerName}.commitPrs (contract): happy fixture normalizes to an ascending number[]`, async () => {
+    const fixtureName = `${providerName}-commitPrs-happy.json`;
+    const fixture = loadFixture(fixtureName);
+    assertProvenance(fixture, fixtureName);
+
+    const result = await vcs.commitPrs({ project: 'x/y', sha: 'd4cb7f8', ...commitPrsArgs(fixture) });
+    assert.deepEqual(result, [991], 'the happy fixture carries exactly one containing pull request, number 991');
+    const sorted = [...result].sort((a, b) => a - b);
+    assert.deepEqual(result, sorted, 'commitPrs must be ordered ascending');
+  });
+
+  test(`${providerName}.commitPrs (contract): a definitive empty list normalizes to [], never null`, async () => {
+    const fixtureName = `${providerName}-commitPrs-empty.json`;
+    const fixture = loadFixture(fixtureName);
+    assertProvenance(fixture, fixtureName);
+
+    const result = await vcs.commitPrs({ project: 'x/y', sha: 'deadbeef', ...commitPrsArgs(fixture) });
+    assert.deepEqual(result, [], 'no containing pull request is a SUCCESSFUL read with an empty answer — [], not null');
+  });
+
+  test(`${providerName}.commitPrs (contract): a transport failure yields null, never throws and never a fabricated []`, async () => {
+    const fixtureName = `${providerName}-commitPrs-failure.json`;
+    const fixture = loadFixture(fixtureName);
+    assertProvenance(fixture, fixtureName);
+
+    const result = await vcs.commitPrs({ project: 'x/y', sha: 'deadbeef', ...commitPrsArgs(fixture) });
+    assert.equal(result, null, 'an unreadable commitPrs lookup must return null, never []  and never throw');
   });
 
   // ── projectResolve (issue #385, M10 Phase 2 final Gap-A batch) ──────────

@@ -681,6 +681,35 @@ export async function commitStatus({ project, sha }) {
 }
 
 /**
+ * commitPrs — the merge requests that contain a commit (issue #1086, D3).
+ * Same contract as `github.mjs#commitPrs`: `[]` on a successful read with no
+ * containing merge request, `null` on ANY transport failure — never a
+ * fabricated `[]`, never a throw. Transport is `gitlabApiFetch`, the same
+ * seam `prView` uses (unlike `commitStatus` above, which spawns `glab`) —
+ * `GET projects/:enc/repository/commits/:sha/merge_requests`, mapped to
+ * `r.iid`, ascending.
+ *
+ * @param {{ project: string, sha: string, apiBase?: string, token?: string, proxyUrl?: string|null, fetchImpl?: Function }} params
+ * @returns {Promise<number[]|null>}
+ */
+export async function commitPrs({ project, sha, apiBase, token, proxyUrl, fetchImpl } = {}) {
+  const encoded = encodeURIComponent(project);
+  try {
+    const r = await gitlabApiFetch({
+      apiBase: apiBase ?? 'https://gitlab.com/api/v4',
+      token: glToken(token),
+      proxyUrl: proxyUrl ?? null,
+      path: `projects/${encoded}/repository/commits/${sha}/merge_requests`,
+      fetchImpl,
+    });
+    if (!Array.isArray(r)) return null;
+    return r.map(mr => mr.iid).sort((a, b) => a - b);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Posts a COMMENT-state merge request review (issue #266, REQ-266-2).
  * GitLab's notes API has no review-event concept (APPROVE/COMMENT/REQUEST
  * CHANGES) — a plain note is posted, which structurally cannot become an

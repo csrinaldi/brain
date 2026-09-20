@@ -50,6 +50,12 @@ export const VERBS = [
   'branchProtect', 'capabilities',
   'prReviewComment', 'issueComment', 'labelAdd', 'labelRemove',
   'prStatusRollup', 'labelList', 'prCommits',
+  // issue #1086, D3/D7: fires verb-contract-drift-guard.test.mjs's :82-91
+  // check by design until the maintainer's `brain:promote` lands the
+  // vcs-contract.md Required Verbs row drafted at
+  // openspec/changes/issue-1086-audit-pr-resolution/brain-drafts/vcs-contract-commitprs-row.md
+  // on this same branch.
+  'commitPrs',
 ];
 
 /**

@@ -523,6 +523,38 @@ export async function commitStatus({ project, sha }) {
 }
 
 /**
+ * commitPrs — the pull requests that contain a commit (issue #1086, D3). The
+ * shared merge-evidence layer (`fetchPrMeta`, `merge-walk.mjs`) opens this
+ * lookup ONLY when `prView` reports a definitive `absent`, so its answer must
+ * distinguish "definitively none" from "could not read" as sharply as
+ * `issueRelations` does (`:194-197`): `[]` on a successful read with no
+ * containing pull request, `null` on ANY transport failure or malformed
+ * response — NEVER a fabricated `[]` for a failure, and never a throw.
+ * Ascending on a real list; numbers only (the caller re-enters `prView` for
+ * every other field, so no second evidence shape is introduced — design D3).
+ *
+ * Mirrors `commitStatus({ project, sha })`'s commit-keyed shape, but UNLIKE
+ * `commitStatus` (pinned to reject on a transport failure, out of scope)
+ * this verb never throws — the fail-closed dispatch in `fetchPrMeta` depends
+ * on `null` being distinguishable from `[]` without a try/catch at the call
+ * site.
+ *
+ * @param {{ project: string, sha: string }} opts
+ * @returns {Promise<number[]|null>}
+ */
+export async function commitPrs({ project, sha } = {}) {
+  const r = gh(['api', '--paginate', `repos/${project}/commits/${sha}/pulls`]);
+  if (!r.ok) return null;
+  try {
+    const data = JSON.parse(r.stdout);
+    if (!Array.isArray(data)) return null;
+    return data.map(pr => pr.number).sort((a, b) => a - b);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * prStatusRollup — the provider-agnostic READ verb `prStatusRollup`
  * (ADR-0021 Decision 2). Returns the full status-check rollup for a PR's
  * head commit, normalized to `[{ name, status, conclusion }]` — one entry
