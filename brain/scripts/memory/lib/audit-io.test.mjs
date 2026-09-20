@@ -1,4 +1,4 @@
-// audit-io.test.mjs — the reading half of `memory:audit` (#870), exercised
+// audit-io.test.mjs — the reading half of `brain:memory:audit` (#870), exercised
 // through its seams: no real git, no real engram, no real fs beyond a tmp dir.
 // Written after the rev-1 cold review of PR #871: the engram branch trusted
 // `observations.length` without the `Observations: N` cross-check that

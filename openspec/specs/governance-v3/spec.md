@@ -771,3 +771,664 @@ backstop (`brain:audit`, L2) is harness-agnostic.
 | G6 | **Bot/admin allow-list mechanism for REQ-L5-2.** The proposal names "bot accounts, admin overrides, and re-labeling" as edge cases needing explicit handling but does not specify the allow-list's storage location or format. Left to design. |
 | G7 | **CODEOWNERS reviewer identity.** REQ-L6-1 requires a human reviewer assignment but the proposal does not name who. Left to the operator/design as a per-consumer configuration concern, analogous to `brain.config.json`'s `project.slug`. |
 | G8 | **Rung 3 vs. rung 2 precedence when both are available.** The ladder table implies rungs stack (a project may have both a fail-closed release path and post-merge auto-correction). `brain:governance-status`'s "active rung" report (REQ-HONESTY-1) is defined as the **highest** rung reached; the spec does not require rung 3 to imply rung 2 is also wired — a project could have rung 3 (post-merge CI) without rung 2 (no controlled release path), an edge case left to design to classify correctly. |
+
+### [issue-942] deny-fail-closed — 2026-09-12
+
+# Delta for governance-v3 (issue #942)
+
+Ratified rulings R1–R12 (maintainer, 2026-09-12, issue #942 comment; engram
+`sdd/issue-942-deny-fail-closed/ruling`) are the source of truth below and are not
+reopened here.
+
+## Note — accepted operational cost
+
+An unparseable `brain.config.json` now turns every PR in a consumer repo red at once
+(`actor-check` and `brain-writes-reviewed` both fail at `required` tiers). The maintainer
+ratified this cost explicitly (R1, R12): it is the intended direction, not a defect.
+
+## Out of scope (non-goals, carried from the proposal)
+
+- The secret-scan loaders (`plainfiles.mjs`, `engram.mjs`, `lane/collect.mjs`, `lane-scrub.mjs`) — #712.
+- A `config-parses` governance job / new `GATE_MATRIX` row / `governance.yml` job — R9, follow-up ticket.
+- A localized (Spanish) refusal string — R10, blocked on #715 (`activeLang()` reads the same config the refusal describes).
+- `loadBrainConfig()`'s own error shape — R8; it keeps throwing on absence AND malformation, unchanged.
+- The tier resolver's ratified degrade to `standard` (`readConfigSafe`, REQ-TIER-10) — unchanged, not this issue.
+
+## MODIFIED Requirements
+
+### Requirement REQ-L5-1: `status:approved` Actor Must Differ From the Author
+
+A new job MUST call `gh api repos/{repo}/issues/{n}/events` (the same permission
+already granted — `permissions: issues: read`, `governance.yml:19`) for the issue
+referenced by the PR (resolved the same way `issue-link` resolves it), find the actor
+who applied the `status:approved` label, and compare that actor's login against the
+PR author and the issue author. The job MUST fail when the `status:approved` actor
+equals the PR author or the issue author. The deny-direction readers this job consumes
+(`denyActors` via `approvalDenySet`) MUST propagate a `brain.config.json` read or parse
+failure rather than returning an empty set; the failure routes through the existing
+tiered fail-closed catch (`resolveTierForFailure` + `resolveGatePolicy`).
+(Previously: the deny readers silently returned `[]` on any read/parse error, which
+denied nobody.)
+
+#### Scenario: Self-applied approval fails the gate
+
+- GIVEN the issue referenced by the PR was labeled `status:approved` by the same actor who authored the PR
+- WHEN the L5 job runs
+- THEN it exits non-zero citing self-approval
+
+#### Scenario: Human-applied approval passes the gate
+
+- GIVEN the issue referenced by the PR was labeled `status:approved` by an actor different from the PR author and the issue author
+- WHEN the L5 job runs
+- THEN it exits zero
+
+#### Scenario: A deny reader refuses rather than denying nobody
+
+- GIVEN `brain.config.json` is present but unparseable (malformed JSON, a permission error, a directory in its place)
+- WHEN `actor-check` reads `denyActors`
+- THEN it fails closed at `required` tiers, naming the unreadable file and the parse error
+- AND the verdict is NOT computed from an empty deny set
+
+---
+
+### Requirement REQ-L6-2: Evidence-Based Human Review on Brain-Writes (Primary L6 Mechanism)
+
+A PR whose changed files include at least one path under `brain/core/**` or
+`brain/project/**` MUST have at least one `APPROVED` review from a human reviewer who
+is neither the PR author nor a bot-allow-listed identity, before that PR's brain-writes
+are considered reviewed. Missing REVIEW EVIDENCE (no reviews, API unavailable) MUST
+degrade to a warning, never a false failure. A `brain.config.json` read or parse
+failure feeding the exclusion readers (`reviewActors`, `approvalActors`) is a distinct,
+uncomputable case — NOT missing evidence — and MUST fail closed per tier via the same
+`resolveTierForFailure` + `resolveGatePolicy` shape `actor-check.mjs` already uses. The
+docstring claiming this job is "detection-only (DETECTION_JOBS)" is corrected: the gate
+is `required` at every tier.
+(Previously: the catch was an unconditional `warn` for both missing review evidence
+and config-read failure, and the docstring falsely stated the gate was detection-only.)
+
+#### Scenario: Non-brain PR is exempt
+
+- GIVEN a PR's changed files contain no path under `brain/core/**` or `brain/project/**`
+- WHEN the `brain-writes-reviewed` check runs
+- THEN it reports `pass`
+
+#### Scenario: Self-approval only fails the check
+
+- GIVEN a PR touches `brain/core/**` and the only `APPROVED` reviewer is the PR author
+- WHEN the check runs
+- THEN it reports `fail`
+
+#### Scenario: Bot-only approval fails the check
+
+- GIVEN the only `APPROVED` reviewer is a bot-allow-listed identity
+- WHEN the check runs
+- THEN it reports `fail`
+
+#### Scenario: Human review present passes the check
+
+- GIVEN at least one `APPROVED` reviewer is neither the PR author nor bot-allow-listed
+- WHEN the check runs
+- THEN it reports `pass`
+
+#### Scenario: Admin override passes, logged
+
+- GIVEN an allow-listed `override:*` label is present
+- WHEN the check runs
+- THEN it reports `pass`, logged
+
+#### Scenario: A warning is not a refusal
+
+- GIVEN a PR touches `brain/core/**` and `brain.config.json` is present but unparseable
+- WHEN `brain-writes-reviewed` runs
+- THEN it returns `fail` at `required` tiers, not `warn`, naming the file and the parse error
+- AND this is distinct from the "missing review evidence" case, which still returns `warn`
+
+## ADDED Requirements
+
+### Requirement REQ-DENY-1: Shared Primitive Distinguishes Absence From Unreadability
+
+`brain/scripts/lib/brain-config.mjs` MUST export `loadBrainConfigOrThrow(root)`: it
+MUST return `{}` when `brain.config.json` is absent (`ENOENT`), and MUST throw a named
+error identifying the file and the underlying read or parse failure for any other
+failure. This is the one shared primitive; it is NOT a shared deny/allow list and NOT a
+shared policy function — each caller still handles the throw per its own direction.
+
+#### Scenario: The primitive distinguishes the two failures
+
+- GIVEN `brain.config.json` does not exist at `root`
+- WHEN `loadBrainConfigOrThrow(root)` is called
+- THEN it returns `{}` and does not throw
+- GIVEN `brain.config.json` exists but is not valid JSON
+- WHEN `loadBrainConfigOrThrow(root)` is called
+- THEN it throws a named error identifying the file
+
+#### Scenario: An absent config is not an unreadable one
+
+- GIVEN a fresh consumer install with no `brain.config.json` at all
+- WHEN any hardened deny reader (`actor-check`, `brain-writes-reviewed`, `brain:approve`) runs
+- THEN it behaves exactly as it does today — returns `[]`, no gate refuses
+
+### Requirement REQ-DENY-2: Write-Side Deny Readers Refuse, Not Crash
+
+`brain:approve`'s deny readers (`defaultReadDenyActors`, `defaultReadAgentActors`) MUST
+propagate a `brain.config.json` read/parse failure into `runApprove`'s existing
+`say('✗ …'); return done(1)` refusal shape. A refusal MUST NEVER surface as a raw
+stack trace in an interactive session.
+
+#### Scenario: The write side refuses too
+
+- GIVEN `brain.config.json` is present but unparseable
+- WHEN a user runs `brain:approve`
+- THEN the command exits 1 with a `✗ …` message naming the unreadable config
+- AND no stack trace reaches the terminal
+
+### Requirement REQ-DENY-3: Read Side and Write Side Agree Under Every Config State
+
+For one actor identity, `actor-check`'s deny verdict and `brain:approve`'s deny verdict
+MUST agree under every `brain.config.json` state: readable-and-listed, readable-and-not-
+listed, absent, and unreadable.
+
+#### Scenario: The read side and the write side agree
+
+- GIVEN one actor identity and one `brain.config.json` state (readable, absent, or unreadable)
+- WHEN both `actor-check` and `brain:approve` evaluate that identity
+- THEN both reach the same deny/allow answer for that state
+
+### Requirement REQ-DENY-4: Direction Asymmetry Holds, and the Judge Cannot Be Disarmed
+
+Allow/exemption-direction readers (`actor-check.mjs`'s `approvalActors` reader,
+`governance.ignoreList` consumers, `approved-label.mjs`) are UNCHANGED by this issue and
+MAY keep degrading to empty on a config-read failure, because empty is the restrictive
+answer in that direction. Because every hardened reader resolves `cwd` to the PR's own
+checked-out tree, a change that leaves its own `brain.config.json` unparseable MUST make
+the gates it feeds refuse, not silently pass.
+
+#### Scenario: An allow list may still degrade
+
+- GIVEN `brain.config.json` is unparseable
+- WHEN `actor-check`'s `approvalActors` reader, an `ignoreList` consumer, or `approved-label.mjs` runs
+- THEN each returns its empty/default fallback, unchanged from today
+
+#### Scenario: The gate that judges a change cannot be disarmed by it
+
+- GIVEN a PR's own diff leaves `brain.config.json` unparseable
+- WHEN `actor-check` or `brain-writes-reviewed` runs against that PR's checked-out tree
+- THEN the gate refuses (fails closed), it does not pass
+
+### [issue-712] config-scan-fail-closed — 2026-09-12
+
+# Delta for governance-v3 (issue #712)
+
+Ratified rulings R1–R13 (maintainer, 2026-09-12) are the source of truth below and are
+not reopened here. No published spec covers the secret-scan policy today, so this delta
+is entirely ADDED text under `governance-v3`, not a modification of existing
+requirements.
+
+## NOT in this change
+
+- #942's deny readers and its direction rule — reused via `loadBrainConfigOrThrow`, not reopened.
+- `deriveProject`'s directory-basename fallback on ENOENT — named (R5), not fixed.
+- A `config-parses` governance job / new `GATE_MATRIX` row / `governance.yml` edit.
+- New i18n keys (R10) — `activeLang()` reads the same unreadable config, so a Spanish string here is dead until #715.
+- The tier resolver's ratified degrade to `standard` (`readConfigSafe`, REQ-TIER-10).
+
+## ADDED Requirements
+
+### Requirement: REQ-SCAN-1 — An Unreadable Policy Refuses, Never Defaults
+
+When `brain.config.json` exists at the scanned root but cannot be read or parsed, every
+call site consuming `governance.memorySecretPatterns` or `memorySecretAllowPatterns`
+MUST refuse instead of scanning under `DEFAULT_SECRET_PATTERNS`. Call sites:
+`memory/lane/collect.mjs`, `memory/backends/engram.mjs`,
+`memory/backends/plainfiles.mjs`, `governance/lane-scrub.mjs`.
+
+#### Scenario: A policy that cannot be read is not an empty policy
+
+- GIVEN `brain.config.json` is present at the scanned root but is not valid JSON
+- WHEN `brain:memory:save` (either backend), `brain:memory:collect`, or `lane-scrub` reads the
+  secret-scan config
+- THEN that call site refuses instead of scanning under `DEFAULT_SECRET_PATTERNS`
+
+### Requirement: REQ-SCAN-2 — Direction Is a Property of the Key, Not the File
+
+A read carrying both a DENY-direction key (`memorySecretPatterns`) and an
+ALLOW-direction key (`memorySecretAllowPatterns`) MUST propagate on failure — one read
+cannot be half-propagated; the deny-direction key decides for the read that carries it.
+
+#### Scenario: Direction follows the key, not the file
+
+- GIVEN one read resolves both `governance.memorySecretPatterns` (deny-direction) and
+  `governance.memorySecretAllowPatterns` (allow-direction) from one `brain.config.json`
+- WHEN that file is present but unreadable
+- THEN the read propagates, even though `memorySecretAllowPatterns` alone would be
+  allow-direction
+
+### Requirement: REQ-SCAN-3 — An Absent Config Stays Green
+
+When `brain.config.json` does not exist (`ENOENT`), all four call sites MUST behave as
+today: `DEFAULT_SECRET_PATTERNS` apply, the allowlist is empty, nothing refuses.
+
+#### Scenario: An absent config is not an unreadable one
+
+- GIVEN no `brain.config.json` exists at the scanned root
+- WHEN `brain:memory:save`, `brain:memory:collect`, `brain:memory:ship`, or `lane-scrub` runs
+- THEN all four proceed on the default pattern set and none refuses
+- AND this is `lane-scrub`'s first assertion of this case — it has zero coverage today
+
+### Requirement: REQ-SCAN-4 — The Write Operations Refuse and Say So
+
+`brain:memory:save` (both backends), `brain:memory:collect`, and `brain:memory:ship` MUST exit non-zero
+when their secret-scan config read fails per REQ-SCAN-1, through their existing error
+handling, naming the unreadable file.
+
+#### Scenario: The write ops refuse and say so
+
+- GIVEN `brain.config.json` is present but unparseable
+- WHEN `brain:memory:save`, `brain:memory:collect`, or `brain:memory:ship` runs
+- THEN each exits 1 through its existing catch, naming the file, and no record or lane
+  commit is written
+
+### Requirement: REQ-SCAN-5 — lane-scrub Refuses as Uncomputable, After the Early Return
+
+`lane-scrub` MUST treat a secret-scan config read failure as `{pass:false,
+uncomputable:true}`, exiting 2. This read MUST occur after the existing
+`recordPaths.length === 0` early return.
+
+#### Scenario: The gate refuses as uncomputable
+
+- GIVEN `brain.config.json` is present but unparseable, and the PR adds at least one
+  `.memory/records/*.jsonl` path
+- WHEN `lane-scrub` runs
+- THEN it exits 2, reporting `uncomputable`, distinct from an invalid-pattern verdict
+- AND a PR carrying no records is unaffected, since the config is read only after the
+  no-record-paths early return
+
+### Requirement: REQ-SCAN-6 — No Report-and-Continue
+
+A secret-scan config read failure MUST NOT produce a warning riding alongside a scan run
+under the wrong policy — by the time such a warning is read, the scan already ran and
+the record was already written.
+
+#### Scenario: A warning arrives too late
+
+- GIVEN a secret-scan config read fails
+- WHEN the call site would otherwise report-and-continue (as `resolveUpstreamRef` does
+  for ref selection)
+- THEN the operation refuses instead — no record is written under an unverified policy
+
+### Requirement: REQ-SCAN-7 — Read Paths Are Untouched
+
+`memory:search` and every other read path MUST NOT be affected: none consumes
+`memorySecretPatterns` or `memorySecretAllowPatterns`.
+
+#### Scenario: Read paths are untouched
+
+- GIVEN `brain.config.json` is present but unparseable
+- WHEN `memory:search` runs
+- THEN it never reaches `resolveSecretConfig` and does not refuse
+
+### [issue-1012] lane-ship-invoker-guard — 2026-09-18
+
+# Delta for governance-v3
+
+New family `REQ-SHIP-*`: governs which process may reach `cli.mjs ship`'s VCS calls —
+distinct from `REQ-SCAN-*` (secret-scan config read failures). No existing requirement's
+text conflicts, so all entries below are ADDED.
+
+## ADDED Requirements
+
+### Requirement: REQ-SHIP-1: Ship-Op Invoker Refusal
+
+`cli.mjs ship` MUST refuse, before any credential read or VCS call, unless `--invoker`
+is one of `hook`, `sweep`, or `manual`. The refusal MUST exit non-zero and name the
+accepted values and `npm run brain:memory:ship`. This refusal MUST be bypassed only by
+`BRAIN_VCS_TEST_MODULE` or `--dry-run`.
+
+#### Scenario: Missing or unknown invoker refuses before any VCS work
+
+- GIVEN `cli.mjs ship` runs with no `--invoker` (or an unrecognized value), no `BRAIN_VCS_TEST_MODULE`, and no `--dry-run`
+- WHEN the op executes
+- THEN it exits non-zero, naming `hook`/`sweep`/`manual` and `npm run brain:memory:ship`
+- AND no credential is read and no VCS call is attempted
+
+#### Scenario: Each declared invoker value proceeds
+
+- GIVEN `cli.mjs ship` runs with `--invoker hook`, `--invoker sweep`, or `--invoker manual` and a fake VCS port
+- WHEN the op executes
+- THEN none of the three is refused for its invoker value
+
+#### Scenario: Either bypass excuses a missing invoker
+
+- GIVEN `cli.mjs ship` runs with no `--invoker`, and either `--dry-run` or `BRAIN_VCS_TEST_MODULE` is set
+- WHEN the op executes
+- THEN it is not refused for a missing invoker
+
+### Requirement: REQ-SHIP-2: Test-Context Refusal
+
+`cli.mjs ship` MUST refuse when `NODE_TEST_CONTEXT` is set, independent of REQ-SHIP-1,
+even with a valid `--invoker`. This refusal MUST be bypassed only by the same two
+bypasses as REQ-SHIP-1.
+
+#### Scenario: A valid invoker under a test context is refused, unless bypassed
+
+- GIVEN `NODE_TEST_CONTEXT` is set and `cli.mjs ship` runs with `--invoker manual`
+- WHEN neither bypass is present, it exits non-zero before any VCS call
+- AND WHEN `BRAIN_VCS_TEST_MODULE` is set instead, it is not refused for the test context
+
+### Requirement: REQ-SHIP-3: Callers Declare Their Invoker
+
+`session-end-ship.mjs` MUST spawn `cli.mjs ship` with `--invoker hook`;
+`day-start-sweep.mjs` MUST spawn it with `--invoker sweep`; the `brain:memory:ship` npm
+script MUST pass `--invoker manual`. The SessionEnd hook command and the child's
+inherited `process.env` are unchanged.
+
+#### Scenario: SessionEnd hook path reaches the fake VCS port
+
+- GIVEN `memory.lane.enabled` is `true` and a fake VCS port is configured
+- WHEN `npm run brain:memory:session-end` runs end to end
+- THEN `session-end-ship.mjs` spawns `cli.mjs ship --invoker hook` and the fake port receives the call
+
+#### Scenario: Day-start sweep path reaches the fake VCS port
+
+- GIVEN `memory.lane.enabled` is `true` and a fake VCS port is configured
+- WHEN the day-start sweep runs end to end
+- THEN it spawns `cli.mjs ship --invoker sweep` and the fake port receives the call
+
+#### Scenario: Manual ship keeps today's behavior
+
+- GIVEN a fake VCS port is configured
+- WHEN `npm run brain:memory:ship -- --dry-run` runs
+- THEN `cli.mjs ship` receives `--invoker manual` and `--dry-run`, unchanged from today
+
+### Requirement: REQ-SHIP-4: Spawn-Hygiene Meta-Test Enforces a Closed Allowlist
+
+A meta-test sibling to `test-hygiene.test.mjs` MUST scan tests that spawn
+`brain/scripts/**` entrypoints through `process.execPath`. A spawn MUST fail the scan
+unless it is allowlisted with a reason from the closed set `no-vcs-capability`,
+`fixture-root-local-git`, `vcs-port-substituted`, `refusal-asserted`, or carries a
+recognized test seam. An allowlist reason outside that set MUST fail. The meta-test MUST prove its own
+detection through self-proving fixtures.
+
+#### Scenario: An unallowlisted, seamless spawn fails the scan
+
+- GIVEN a fixture test spawns a `brain/scripts/**` entrypoint via `process.execPath`, unlisted, with no recognized seam
+- WHEN the meta-test runs
+- THEN it fails, forcing a reviewer decision
+
+#### Scenario: A closed-set reason passes; an out-of-set reason fails
+
+- GIVEN two fixture spawns, one allowlisted with a closed-set reason and one with a reason outside the set
+- WHEN the meta-test runs
+- THEN the first passes and the second fails
+
+### Requirement: REQ-SHIP-5: Anti-Pattern Draft Exists for Maintainer Promotion
+
+This change MUST add a draft anti-pattern file under its own `brain-drafts/` directory,
+shaped like `brain/core/anti-patterns/*.md` (Problem / Why / Rule / Detection), and a
+separate promotion note carrying the one-line entry for the `## Registered` list in
+`brain/core/anti-patterns/README.md`. The draft itself MUST carry no draft-only
+scaffolding, so it can be copied verbatim. The agent MUST NOT place the draft under
+`brain/core/**` directly.
+
+#### Scenario: Draft exists in the change's drafts folder, not under the governed path
+
+- GIVEN this change's `brain-drafts/` directory and its diff
+- WHEN both are inspected
+- THEN `brain-drafts/` contains a draft with Problem/Why/Rule/Detection sections and no `Status` or `Registered` section, a promotion note naming the README `## Registered` entry, and no new file was added under `brain/core/anti-patterns/`
+
+### [issue-1024] memory-gate-pr-context — 2026-09-18
+
+REQ-L3-4 is restated in full (its scoped-evidence set, fail-closed rule, and path
+naming all change; its no-issue-detectable fallback does not). Two new members join
+the existing L3 family (`REQ-L3-1`..`REQ-L3-4` already cover job registration and
+issue-scoping): `REQ-L3-5` is the `memory-gate`-specific skip override (distinct from
+any other gate's override), and `REQ-L3-6` is the CI-wiring precondition without which
+`REQ-L3-4`'s scoped path never runs on GitHub. Both extend the L3 numbering rather than
+opening a new family, since both are `memory-gate` job behavior, the same requirement
+this family already governs.
+
+## MODIFIED Requirements
+
+### Requirement: REQ-L3-4: `memory-gate` Is Issue-Scoped (T2.1)
+
+REQ-L3-1's `memory-gate` job MUST NOT stop at a global existence check once the
+current change's issue number is detectable. `run-check.mjs` MUST resolve the issue
+number the current PR/MR targets from `ctx.body` (reusing this file's own existing
+`extractIssueNumber`/`requiresClosingKeyword` — no new extraction implementation),
+then filter the SCOPED EVIDENCE to `record.issue === issueNumber` before verifying
+coverage.
+
+The scoped evidence set MUST be the union of the records readable from the PR's
+checked-out tree and the records readable from `origin/<default>`, de-duplicated by
+`record.id` (on a same-id collision, the PR-tree copy wins). A record that reaches the
+default branch on its own lane PR (ADR-0034) satisfies a feature PR that closes the
+same issue, with no rebase required — the feature branch never needs to carry the
+record.
+
+The gate MUST:
+
+- FAIL when no record in either source is scoped to the issue (MISSING).
+- PASS with a WARN-flavored reason (non-blocking) when scoped records exist but none
+  is a `session_summary` (PARTIAL).
+- PASS cleanly when a scoped `session_summary` exists in either source (HIT).
+- FALL BACK to the pre-existing global `memoryPresence()` check when no issue number
+  can be resolved from `ctx` — unchanged by this change.
+
+If the default-branch read fails (fetch/ref error) and the PR tree alone already
+contains a scoped HIT, the gate MUST still pass on that hit. If the default-branch
+read fails AND the PR tree has no scoped hit, the gate MUST fail closed with an
+explicit "default branch unreadable" reason — a read failure MUST NEVER produce a
+silent pass.
+
+Every run MUST name the path it took — `presence` (global fallback), `retrieval`
+(issue-scoped, either source), or `skipped` (REQ-L3-5) — including a clean pass, which
+named nothing before this change.
+
+Tier behavior is unchanged: at `lite`, a scoped MISS is a non-blocking `::warning::`
+(`mapDetectionToWarning`); at `standard`/`regulated`, a scoped MISS blocks
+(`GATE_MATRIX['memory-gate']`).
+
+(Previously: scoped evidence was the PR tree ONLY, so a record that had reached the
+default branch but not the feature branch counted as MISSING, forcing a rebase; the
+gate never named the path it took, not even on a clean pass.)
+
+#### Scenario: PR-tree record satisfies the scoped check
+
+- GIVEN `ctx.body` resolves to issue N
+- AND the PR tree contains a `session_summary` record with `issue === N`
+- WHEN `memory-gate` runs
+- THEN it passes cleanly with `path=retrieval`
+
+#### Scenario: Default-branch-only record satisfies the scoped check, no rebase
+
+- GIVEN `ctx.body` resolves to issue N
+- AND no record scoped to N exists in the PR tree, but one exists on `origin/<default>`
+- WHEN `memory-gate` runs
+- THEN it passes with `path=retrieval`, with no rebase of the feature branch
+
+#### Scenario: The same record on both trees counts once
+
+- GIVEN a `session_summary` scoped to issue N exists in both the PR tree and
+  `origin/<default>` with the same `id`
+- WHEN `memory-gate` runs
+- THEN it passes citing one scoped hit, not a duplicate
+
+#### Scenario: No scoped record in either source fails, citing the issue
+
+- GIVEN `ctx.body` resolves to issue N
+- AND neither the PR tree nor `origin/<default>` has a record with `issue === N`
+- WHEN `memory-gate` runs
+- THEN it fails, citing issue N by number, with `path=retrieval`
+
+#### Scenario: Scoped records exist but none is a session_summary
+
+- GIVEN `ctx.body` resolves to issue N
+- AND at least one record scoped to N exists in the union set, but none is a
+  `session_summary`
+- WHEN `memory-gate` runs
+- THEN it passes (`pass: true`) with a partial/warn reason and `path=retrieval`
+
+#### Scenario: Default-branch read fails but the PR tree already has the hit
+
+- GIVEN the default-branch read errors (fetch/ref failure)
+- AND the PR tree alone contains a scoped `session_summary` for issue N
+- WHEN `memory-gate` runs
+- THEN it still passes, citing the PR-tree hit
+
+#### Scenario: Default-branch read fails and the PR tree has no hit — fail closed
+
+- GIVEN the default-branch read errors
+- AND the PR tree has no record scoped to issue N
+- WHEN `memory-gate` runs
+- THEN it fails, with an explicit "default branch unreadable" reason
+- AND it never passes silently
+
+#### Scenario: No issue number detectable — fallback unchanged, path named
+
+- GIVEN `ctx.body` is absent, or present but contains no closing keyword or "Part of
+  #N" reference
+- WHEN `memory-gate` runs
+- THEN it degrades to the pre-T2.1 global `memoryPresence()` check
+- AND a clean pass names `path=presence`
+
+#### Scenario: `lite` tier turns a scoped miss into a warning
+
+- GIVEN this repository's `governance.tier` is `lite`
+- AND `memory-gate` would otherwise fail on a scoped MISS
+- WHEN the result is mapped through `mapDetectionToWarning`
+- THEN it exits 0 with an `::warning::` annotation, not a red check
+
+## ADDED Requirements
+
+#### Scenario: An uncomputable PR description is handled per tier
+
+- GIVEN `PR_NUMBER` is set but the PR description could not be fetched
+- WHEN `memory-gate` runs
+- THEN at `standard`/`regulated` the result is uncomputable and fails closed, as
+  `issue-link` does for an uncomputable body
+- AND at `lite` it falls back to the repository-wide check and prints
+  `path=presence (PR description uncomputable)`
+
+#### Scenario: A partial pass at regulated shows the evidence gap
+
+- GIVEN a PR at `regulated` whose issue has scoped records but no `session_summary`
+- WHEN `memory-gate` runs
+- THEN it passes as today, and the output carries a visible evidence-gap note that
+  `regulated` expects an issue-linked session summary
+
+### Requirement: REQ-L3-5: `memory-gate` Skip Override Is Real
+
+Whether the label is honored is a tier parameter, `TIER_PARAMS.honorSkipMemoryGate`
+(`brain/scripts/vcs/governance-tiers.mjs`): `false` at `lite`, `true` at `standard`,
+`false` at `regulated`. When the tier honors it and the PR carries `skip:memory-gate`
+from an authorized applier, `memory-gate` MUST short-circuit BEFORE evaluating
+REQ-L3-4's scoped check and PASS with `path=skipped`, naming who applied the label. At
+`regulated` the label MUST be refused with a reason that names the tier, consistent with
+`regulated` refusing `size:exception`; evaluation continues per REQ-L3-4. At `lite` the
+label is noted in the output and not consulted, because the gate is detection-only
+there. Without an honored label, a scoped MISS at `standard`/`regulated` fails per
+REQ-L3-4.
+
+The PR's labels MUST reach the gate through the same normalized context as the body
+(`ci-context` `loadContext()`). An uncomputable label set (the fetch failed —
+`labels: null`, distinct from `[]`) MUST NEVER be read as the label being applied: the
+gate MUST proceed as if no override were present, never silently PASS with
+`path=skipped`.
+
+An authorized applier is the actor of the latest label-add event for
+`skip:memory-gate`, who MUST differ from the PR author and MUST NOT be listed in
+`governance.reviewActors` or `governance.agentActors`. When the label events cannot be
+read, the applier is unknown and the label MUST NOT be honored; the reason says so.
+
+#### Scenario: Labeled PR passes at standard, applier named
+
+- GIVEN a PR at `standard` carries `skip:memory-gate`, applied by an actor other than
+  the PR author and outside `reviewActors`/`agentActors`
+- WHEN `memory-gate` runs
+- THEN it passes with `path=skipped`, naming the actor who applied the label
+
+#### Scenario: Labeled PR at regulated is refused, tier named
+
+- GIVEN a PR at `regulated` carries `skip:memory-gate` from an otherwise authorized
+  applier, and has no scoped record for its issue
+- WHEN `memory-gate` runs
+- THEN the override is refused with a reason naming the `regulated` tier
+- AND the gate fails per REQ-L3-4
+
+#### Scenario: Labeled PR at lite notes the label and stays detection-only
+
+- GIVEN a PR at `lite` carries `skip:memory-gate` and has no scoped record for its issue
+- WHEN `memory-gate` runs
+- THEN the output notes the label as not consulted at `lite`
+- AND the scoped miss is a non-blocking warning per REQ-L3-4
+
+#### Scenario: The PR author cannot wave their own PR through
+
+- GIVEN a PR at `standard` carries `skip:memory-gate` applied by the PR author
+- WHEN `memory-gate` runs
+- THEN the override is refused with a reason naming the author as the applier
+- AND evaluation continues per REQ-L3-4
+
+#### Scenario: Unreadable label events are never an honored skip
+
+- GIVEN a PR at `standard` carries `skip:memory-gate` but its label events cannot be read
+- WHEN `memory-gate` runs
+- THEN the override is not honored and the reason says the applier is unknown
+
+#### Scenario: Unlabeled PR still fails a scoped miss at standard
+
+- GIVEN a PR does not carry `skip:memory-gate` and has no scoped record for its issue,
+  at `standard` tier
+- WHEN `memory-gate` runs
+- THEN it fails per REQ-L3-4, and the reason names `skip:memory-gate` as available
+
+#### Scenario: Uncomputable labels are never read as a skip
+
+- GIVEN the label fetch fails (`labels: null`, not `[]`)
+- WHEN `memory-gate` runs
+- THEN it does not pass with `path=skipped`
+- AND it falls through to REQ-L3-4's scoped evaluation, never treating the
+  uncomputable state as "label applied"
+
+#### Scenario: An agent or review actor cannot apply the override
+
+- GIVEN a PR at `standard` carries `skip:memory-gate` applied by an actor listed in
+  `governance.agentActors` or `governance.reviewActors`
+- WHEN `memory-gate` evaluates the override
+- THEN it refuses the override with a reason naming the rejected applier, and falls
+  back to REQ-L3-4's scoped evaluation
+
+### Requirement: REQ-L3-6: `memory-gate` Job Declares PR Context Env
+
+The GitHub `memory-gate` job in `governance.yml` MUST declare `VCS_TOKEN`,
+`PR_NUMBER`, and `PR_BODY` in its step `env:`, mirroring the `issue-link` job
+(`:61-71`), so `ci-context.mjs`'s `loadContext()` can populate `ctx.body` and
+`ctx.labels` for this job instead of leaving both structurally `null`. A drift-guard
+test, modelled on `ci-context-drift-guard.test.mjs`'s `#130` case, MUST assert all
+three keys are present in the job block and MUST fail against the job definition as it
+stood at `02896d69`.
+
+#### Scenario: `memory-gate` job declares the three keys
+
+- GIVEN `governance.yml`'s `memory-gate` job block
+- WHEN the drift-guard test inspects it
+- THEN `VCS_TOKEN`, `PR_NUMBER`, and `PR_BODY` are each declared
+
+#### Scenario: The drift-guard test fails on the pre-change base
+
+- GIVEN the `memory-gate` job block as it stood at commit `02896d69` (`DEFAULT_BRANCH`
+  only)
+- WHEN the drift-guard test runs against that block
+- THEN it fails, naming the missing key(s)
+
+## Open Questions
+
+- Uncomputable PR body: resolved by design (fail closed at `standard`/`regulated`,
+  named `presence` fallback at `lite`); now a REQ-L3-4 scenario.
+- `regulated` treating PARTIAL coverage as a MISS: deferred; this change only makes
+  the gap visible (REQ-L3-4 scenario). A follow-up decides enforcement.
+- Override tier scope: resolved by the maintainer on 2026-09-18 — follow
+  `TIER_PARAMS.honorSkipMemoryGate` (REQ-L3-5).
+- The automatic re-trigger on a default-branch push and GitLab verification are
+  explicitly out of scope for this change (see proposal); tracked as follow-ups, not
+  requirements here.

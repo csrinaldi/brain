@@ -8,12 +8,27 @@
 //   share()              — export live memory to .memory/ (engram sync)
 //   pull()               — import .memory/records/ into engram (records-only, D2/C4)
 //   index()              — project brain/ docs into engram (delegates to brain-to-engram.mjs)
-//   setup()              — ensure .engram → .memory symlink + register merge driver
+//   setup()              — ensure .engram → .memory symlink
 //   featureCheckpoint()  — dehydrate: stamp + validate + write resume.md (REQ-S2-1, REQ-E-1)
 //   featureResume()      — hydrate: project openspec/changes/<feature>/*.md into LOCAL engram
-//                          under a DISTINCT project namespace so memory:share never exports
+//                          under a DISTINCT project namespace so brain:memory:share never exports
 //                          these observations (CONFIRMED: engram sync --export is project-
 //                          scoped; feature obs under brain-feature-<X> stay out of .memory/)
+
+// #247/#863 D3 — the chunk read-back is a boundary now (guard:
+// brain/scripts/memory/chunk-boundary.test.mjs). The seven-row ledger of what
+// 3.2 (#874) deletes is restated in
+// openspec/changes/archive/2026-09-10-issue-247-chunk-boundary/{tasks,design}.md.
+// Rows 1, 2, 4 and 5 are gone — `share()` (#874 split B) no longer calls
+// `engram sync --export`, has no observation reader and no chunk-scrub
+// subsystem left, and `engram.share.test.mjs`'s old shape retired with
+// them. Row 3 (the records dual-write exporter's own `_readObservations`
+// seam) is retired too now — #955 (epic task 2.4) deleted the function
+// that owned it instead of giving it the future caller the O1 disposition
+// held it open for. Row 6 (symlink confinement) closed with #955 (Slice A,
+// PR #965). Row 7 (legacy gz path): #955 Slice B deleted `scrubChunkFile`
+// and `.memory/legacy/`; `collectChunkObservations` is KEPT (R3) — forward
+// `migrate-v1` still calls it. All seven rows are closed.
 
 import { execFileSync, spawnSync } from "node:child_process";
 import {
@@ -25,7 +40,6 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
-  statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -34,21 +48,24 @@ import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { resolveFeature } from "../lib/feature-resolution.mjs";
+import { planDuplicateHeal, parseEngramVersion, isTestedVersion } from "../lib/engram-heal.mjs";
 import { changeDir, OPERATIONAL_ARTIFACTS } from "../../lib/sdd-layout.mjs";
 import { parseFrontmatter, serializeFrontmatter } from "../lib/resume-frontmatter.mjs";
 import { validateResume } from "../lib/resume-schema.mjs";
 import { currentBranch } from "../../lib/git-branch.mjs";
-import { resolveSecretConfig, compilePatterns, scrubChunkFile, scanTextForSecrets } from "../lib/secret-scrub.mjs";
-import { exportObservation } from "../lib/engram-export.mjs";
+import { resolveSecretConfig, compilePatterns, scanTextForSecrets } from "../lib/secret-scrub.mjs";
 import { importRecord } from "../lib/engram-import.mjs";
 import { appendRecord, rebuildIndex, readRecordIds, readRecords } from "../lib/store.mjs";
 import { upstreamRecordEntries } from "../lib/upstream-records.mjs";
-import { emptyDuplicates, normalizeDuplicates } from "../lib/duplicates.mjs";
-import { serializeRecord } from "../lib/format.mjs";
-import { collectChunkObservations } from "../lib/migrate-v1.mjs";
+import { normalizeDuplicates } from "../lib/duplicates.mjs";
+import { buildRecord, serializeRecord, nowUtcSeconds, RECORD_TYPES } from "../lib/format.mjs";
 import { unsupportedOp } from "../lib/unsupported-op.mjs";
 import { acquireHydrationGuard } from "../lib/hydration-guard.mjs";
 import { ENGRAM_BIN, probeBinary } from "../lib/backend-selection.mjs";
+import { gitConfigGet } from "../../lib/git-config.mjs";
+import { resolveActor, resolveActorKind, deriveIssue, composeSource } from "../lib/capture-provenance.mjs";
+import { classifySupersedes } from "../lib/supersedes.mjs";
+import { loadBrainConfigOrThrow } from "../../lib/brain-config.mjs";
 import { t } from "../../i18n/t.mjs";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../../../..");
@@ -134,471 +151,66 @@ function requireEngram() {
 }
 
 /**
- * share() — export live engram memory to .memory/ (idempotent, content-addressed),
- * fail-closed secret-scrub whatever chunks were materialized this run as the
- * transitional backstop (issue #214, C1b), THEN dual-write the exported
- * observations into `.memory/records/` under scan-then-write (issue #221,
- * C2b-1, design.md Decision 1).
+ * share() — the `plainfiles.share()` mirror (R11, D6, #874 split B row —
+ * ledger row list below). The exporter is retired: `share` is no longer a
+ * producer (spec: "share commits what is already true"). It runs a bare
+ * `rebuildIndex()` self-check exactly like `plainfiles.share()` — records
+ * already ARE the store, so there is no data movement left to orchestrate.
  *
- * Order (issue #221 fix pass, MINOR): the chunk backstop runs BEFORE the
- * records dual-write. Rationale — `dualWriteRecords()` APPENDS to the
- * append-only `records/` log; if it ran first and a LATER gate (the chunk
- * backstop) then failed, `records/` would already be mutated on an aborted
- * share. Scanning chunks first means a chunk-only secret (e.g. a
- * `scope:personal` observation the records candidate filter already
- * excluded) aborts the share before `records/` is ever touched.
+ * Symlink confinement (#955, R7): `share()` no longer touches `.engram` —
+ * ensuring it is `setup()`'s job alone. `share`/`pull` MUST NOT create or
+ * repair the symlink on the way.
  *
- * Scrub scope: TWO independent fail-closed scans run, never one gating
- * the other's write:
- *   1. scrubMaterializedChunks() — the chunks engram's export just wrote are
- *      scanned AFTER materialization (C1b's original design, unchanged): a
- *      hit blocks the push but the chunk itself was already written locally.
- *   2. dualWriteRecords() — candidate records (transformed from observations
- *      via exportObservation) are scanned BEFORE any `records/` append; a hit
- *      aborts before the append-only log is ever touched (Decision 1). It
- *      also dedups by content-addressed `id` against what `records/` already
- *      has (issue #221 fix pass, BLOCKER) — a retry after ANY abort is safe.
- * There is NO `--no-scrub` flag for either path; the only bypass is the
- * config allowlist (`governance.memorySecretAllowPatterns`).
+ * Completes with the engram binary ABSENT (rule 3, R11): there is no
+ * `_requireEngram()` call here any more — nothing downstream of this
+ * function touches the binary.
  *
- * @param {object} [opts]  Injectable seams for testing — production defaults
- *   call the real engram binary, git, and filesystem.
+ * @param {object} [opts]  Injectable seams for testing.
  * @param {string} [opts.root]  Repo root.
- * @param {() => string} [opts._requireEngram]  Resolves the engram binary; throws if absent.
- * @param {(engram: string) => void} [opts._export]  Runs `engram sync --export`.
- * @param {(root: string) => {observations: object[], unparseable: string[], emptyObservations: string[]}} [opts._readObservations]
- *   Observations materialized this run, plus the chunk-level accounting buckets.
- * @param {typeof exportObservation} [opts._exportObservation]
- * @param {typeof appendRecord} [opts._appendRecord]
  * @param {typeof rebuildIndex} [opts._rebuildIndex]
- * @param {(root: string) => string[]} [opts._changedChunkFiles]  Every chunk present (issue #469).
- * @param {(root: string) => object} [opts._loadConfig]  Reads brain.config.json.
- * @param {(path: string, patterns: RegExp[], allowPatterns: RegExp[]) => object|null} [opts._scrubChunk]
- * @param {(p: string) => string|null} [opts._resolveDir]  Resolves .engram/.memory (issue #469, REQ-469-3).
- * @param {typeof upstreamRecordEntries} [opts._upstreamRecordIds]  The issue #701 predicate,
- *   threaded into `dualWriteRecords()`'s own call — see that function's docs.
+ * @returns {Promise<{indexCount: number, duplicates: object}>}
  */
 export async function share({
   root = repoRoot,
-  _requireEngram = requireEngram,
-  _ensureSymlink = ensureMemorySymlink,
-  _export = _defaultShareExport,
-  _readObservations = _defaultReadObservations,
-  _exportObservation = exportObservation,
-  _appendRecord = appendRecord,
   _rebuildIndex = rebuildIndex,
-  _changedChunkFiles = _defaultChangedChunkFiles,
-  _loadConfig = _defaultLoadBrainConfig,
-  _scrubChunk = scrubChunkFile,
-  _resolveDir = _defaultResolveDir,
-  _upstreamRecordIds = upstreamRecordEntries,
 } = {}) {
-  const engram = _requireEngram();
-  // BEFORE the export (issue #657): the `.engram → .memory` binding is LOCAL and
-  // gitignored (.gitignore:68), so it exists only in the tree where `setup()` ran.
-  // Every worktree created afterwards has `.memory/` checked out and NO binding —
-  // and `AGENTS.md:212` makes worktree-per-task mandatory, so that is the common
-  // case, not the exotic one. Without the binding `engram sync --export` (no --dir
-  // flag, ADR-0002 §21) creates a REAL `.engram/` beside the worktree's `.memory/`
-  // and every chunk it writes is invisible to the readers below.
-  //
-  // Ensuring it HERE makes the binding a precondition of the export instead of a
-  // side effect of setup. Idempotent and non-clobbering by construction (see
-  // ensureMemorySymlink cases 1-4), so this is a no-op wherever setup already ran.
-  _ensureSymlink(root);
-  _export(engram, root);
-  // BEFORE the scrub, not after (issue #469, REQ-469-3): if the export wrote
-  // somewhere this process does not read, the scrub would scan an unrelated
-  // directory and pass, which is the failure being caught. Ordering the check
-  // ahead of it means the run cannot report a clean scrub it never performed.
-  assertExportDestinationIsRead(root, { _resolveDir });
-  await scrubMaterializedChunks(root, { _changedChunkFiles, _loadConfig, _scrubChunk });
-  // Record-write is UNCONDITIONAL (design.md Decision 1, D3/C4, issue #229 — the
-  // `memory.dualWrite` gate is retired BY DELETION). Records-only is the only
-  // path; there is no flag left to condition on. The transitional cutover state
-  // marker (C2b-1/C2b-2) served its purpose: the key is also removed from
-  // brain.config.json (move 2) and the 0.6.0 migration entry that introduced it
-  // is removed too (move 3) — it was never shipped to any released consumer.
-  // RETURNED, not discarded (#574). Every number dualWriteRecords measures used
-  // to die here: cli.mjs printed `unprovenanced` only because the generic
-  // dispatch tail happened to see the value, and it never saw one from `share`
-  // because `share` returned undefined. The duplicate accounting would have
-  // died the same way.
-  const accounting = await dualWriteRecords(
-    root, { _readObservations, _exportObservation, _appendRecord, _rebuildIndex, _loadConfig, _upstreamRecordIds },
-  );
-
-  // The self-check, for the one path dualWriteRecords returns from before it
-  // ever reads `records/`: engram exported nothing project-scoped, so there
-  // were no candidates. That run still SHARES a store, and the store may have
-  // been union-merged since — leaving `share` silent there would reproduce this
-  // ticket's bug on the quietest path there is. Mirrors plainfiles.share(),
-  // which has always been a bare rebuildIndex() self-check.
-  if (accounting.indexCount === undefined) {
-    const { count, duplicates } = _rebuildIndex({
-      recordsDir: join(root, ".memory", "records"),
-      indexPath: join(root, ".memory", "index.jsonl"),
-    });
-    accounting.indexCount = count;
-    accounting.duplicates = normalizeDuplicates(duplicates);
-  }
-  return accounting;
-}
-
-/**
- * Default seam: the observations materialized by this run's `engram sync
- * --export` — read back from the gzip chunks it just wrote under
- * `.memory/chunks` (reuses migrate-v1.mjs's collectChunkObservations, never a
- * second reader). Returns the FULL bucket shape — `observations` plus the
- * `unparseable`/`emptyObservations` chunk-level buckets — so dualWriteRecords()
- * can account for every chunk, not just the ones that parsed into observations
- * (issue #221 fix pass, MAJOR).
- *
- * @param {string} root
- * @returns {{observations: object[], unparseable: string[], emptyObservations: string[]}}
- */
-export function _defaultReadObservations(root) {
-  return collectChunkObservations(join(root, ".memory", "chunks"));
-}
-
-/**
- * dualWriteRecords() — scan-then-write over the RECORDS log (issue #221,
- * C2b-1; design.md Decision 1, REQ-C2B1-3). Independent of requireEngram()/
- * the real export so it is unit-testable with zero engram/git dependency,
- * mirroring scrubMaterializedChunks()'s testable-core pattern.
- *
- * Order: read observations → transform each into a CANDIDATE record via
- * exportObservation() → scan the candidate record LINES for secrets → only
- * if clean, dedup by content-addressed `id` against what `records/` already
- * has (issue #221 fix pass, BLOCKER) → append every NEW candidate to
- * `records/` + rebuild the index. A secret hit aborts BEFORE any
- * `appendRecord` call — the append-only `records/` log is never written with
- * a secret.
- *
- * Accounting (issue #221 fix pass, MAJOR — mirrors migrate-v1.mjs's
- * buildMigrationReport() honesty contract): every observation is accounted
- * for exactly once, never silently dropped. `errored` (a throwing
- * exportObservation), `rejected` (non-enum type), and `skippedPersonal`
- * (scope:personal) each get their own counter — none of them abort the run
- * for the others (per-observation isolation) — and the chunk-level
- * `unparseableChunks`/`emptyObservationsChunks` buckets from
- * `_readObservations()` are surfaced too. `deduped` counts candidates whose
- * `id` was already present in `records/` (a prior run) OR earlier in THIS
- * batch (two observations exporting to the same content-addressed record).
- *
- * @param {string} root
- * @param {object} [opts]
- * @param {(root: string) => {observations: object[], unparseable?: string[], emptyObservations?: string[]}} [opts._readObservations]
- * @param {typeof exportObservation} [opts._exportObservation]
- * @param {typeof appendRecord} [opts._appendRecord]
- * @param {typeof rebuildIndex} [opts._rebuildIndex]
- * @param {typeof readRecordIds} [opts._readRecordIds]
- * @param {(root: string) => object} [opts._loadConfig]
- * @param {typeof upstreamRecordEntries} [opts._upstreamRecordIds]  issue #701 — the id set
- *   already durable at the upstream base. Defaulted, called AFTER the secret scan and
- *   BEFORE the dedup loop (design.md Decision 4): the zero-candidate early return above
- *   still short-circuits before it (no git spawn on a steady-state share), and the scan
- *   above it still covers every candidate, including the ones this widens the decline to.
- * @returns {Promise<{written: number, deduped: number, dedupedUpstream: number, errored: number,
- *   rejected: number, skippedPersonal: number, unprovenanced: number, unparseableChunks: number,
- *   emptyObservationsChunks: number, indexCount?: number,
- *   duplicates: {ids: number, lines: number, divergent: number, groups: object[]},
- *   upstreamScope?: {applied: boolean, ref: string|null, stated: boolean, reason: string|null,
- *   configError: string|null, entries: number, unnamed: number}}>}
- *   `upstreamScope.ref` is `null` when NO ref answered — `upstream-records.mjs`
- *   returns no name for a run in which no name was used, so nothing downstream
- *   can print one (issue #701, cold review round 4).
- *   `duplicates` (#574) is the union-merge residual already sitting in
- *   `records/`, distinct from `deduped` (candidates THIS run declined to
- *   append). Zero on the early return, which measured nothing. `dedupedUpstream`
- *   is `deduped`'s own-reason sub-bucket (issue #701) — `deduped` stays the
- *   TOTAL of every decline (own-records ∪ in-batch ∪ upstream), never folded
- *   silently. `upstreamScope` is absent (not `{applied:false,...}`) on the
- *   zero-candidate early return, mirroring `indexCount`'s own "undefined means
- *   never measured" contract just below.
- */
-export async function dualWriteRecords(
-  root,
-  {
-    _readObservations = _defaultReadObservations,
-    _exportObservation = exportObservation,
-    _appendRecord = appendRecord,
-    _rebuildIndex = rebuildIndex,
-    _readRecordIds = readRecordIds,
-    _loadConfig = _defaultLoadBrainConfig,
-    _upstreamRecordIds = upstreamRecordEntries,
-  } = {},
-) {
-  const { observations, unparseable = [], emptyObservations = [] } = _readObservations(root);
-
-  const candidates = [];
-  let errored = 0;
-  let rejected = 0;
-  let skippedPersonal = 0;
-  // #541: observations that arrived with NO §4 provenance block. `exportObservation`
-  // has always returned this flag and the loop has always discarded it, so the
-  // fallback — actor `@legacy`, no `issue` — was applied silently and the resulting
-  // record looked like any other. Counting it is what turns "the emitter does not
-  // exist" from a thing you discover by reading 2000 records into a number printed on
-  // every share.
-  //
-  // Counted, NOT rejected. Failing here would refuse the 2070 historical observations
-  // this repository already holds and make `share` unusable — the same trap #529's
-  // ruling refused for `memory-gate`. Visibility first; the gate only once the emitter
-  // exists to satisfy it.
-  let unprovenanced = 0;
-  for (const obs of observations) {
-    let result;
-    try {
-      result = _exportObservation(obs);
-    } catch {
-      errored += 1; // one bad observation must never abort the whole share
-      continue;
-    }
-    if (result.skipped) {
-      skippedPersonal += 1;
-      continue;
-    }
-    if (result.rejected) {
-      rejected += 1;
-      continue;
-    }
-    if (!result.recovered) unprovenanced += 1;
-    candidates.push(result.record);
-  }
-
-  const accounting = {
-    written: 0,
-    deduped: 0,
-    // issue #701 — `deduped`'s own-reason sub-bucket: candidates declined
-    // because their id is already durable at the upstream base, distinct from
-    // an own-worktree or in-batch repeat. `deduped` itself is unchanged in
-    // meaning: the TOTAL of every decline reason.
-    dedupedUpstream: 0,
-    errored,
-    rejected,
-    skippedPersonal,
-    unprovenanced,
-    unparseableChunks: unparseable.length,
-    emptyObservationsChunks: emptyObservations.length,
-    // #574. `deduped` above counts candidates this RUN declined to append; this
-    // counts physical lines already sitting in `records/` under a repeated id —
-    // the union-merge residual. Zero here means "measured, none", and on the
-    // early returns below it means "no reindex ran, so nothing was measured":
-    // never a number this function did not observe.
-    duplicates: emptyDuplicates(),
-  };
-
-  if (candidates.length === 0) return accounting;
-
-  const { patternSources, allowPatternSources } = resolveSecretConfig(_loadConfig(root));
-  const patterns = compilePatterns(patternSources);
-  const allowPatterns = compilePatterns(allowPatternSources);
-
-  const candidateText = candidates.map(serializeRecord).join("\n");
-  const hit = scanTextForSecrets(candidateText, patterns, allowPatterns);
-  if (hit) {
-    throw new Error(
-      await t("memory.share.secretFoundRecords", {
-        line: hit.lineNumber,
-        pattern: hit.pattern,
-      }),
-    );
-  }
-
-  const recordsDir = join(root, ".memory", "records");
-  const indexPath = join(root, ".memory", "index.jsonl");
-
-  const existingIds = _readRecordIds({ recordsDir });
-  // issue #701 — the id set already durable at the upstream base, beside
-  // `_readRecordIds` (design.md Decision 4). `ok: false` degrades to an EMPTY
-  // scope below — never treated as "found nothing" for the write decision
-  // (Decision 3): the accounting still records `applied: false` so the report
-  // can tell "checked, empty" from "could not check" apart.
-  //
-  // `config` is DELIBERATELY not passed: `upstream-records.mjs` owns the
-  // `memory.upstreamRef` key and reads it from `root` when `config` is omitted.
-  // Passing `{}` here (or defaulting it anywhere in that chain) is not nullish
-  // and would silently kill the config level — the defect cold review of #708
-  // found, where every layer defaulted `config = {}` and the read never fired.
-  const upstream = _upstreamRecordIds({ root });
-  accounting.upstreamScope = {
-    applied: upstream.ok === true,
-    ref: upstream.ref,
-    stated: upstream.stated,
-    reason: upstream.ok ? null : upstream.reason,
-    // Independent of `applied`: an unreadable `brain.config.json` no longer
-    // stops the lookup, so the scope can be APPLIED against a derived ref while
-    // a ref stated in that config went unread. Reported either way.
-    configError: upstream.configError ?? null,
-    entries: upstream.ok ? upstream.byId.size : 0,
-    unnamed: upstream.ok ? upstream.unnamed.length : 0,
-  };
-
-  const seenInBatch = new Set();
-  const toAppend = [];
-  for (const record of candidates) {
-    const dedupedOwn = existingIds.has(record.id) || seenInBatch.has(record.id);
-    const dedupedUp = !dedupedOwn && upstream.ok === true && upstream.byId.has(record.id);
-    if (dedupedOwn || dedupedUp) {
-      accounting.deduped += 1;
-      if (dedupedUp) accounting.dedupedUpstream += 1;
-      continue;
-    }
-    seenInBatch.add(record.id);
-    toAppend.push(record);
-  }
-
-  for (const record of toAppend) {
-    _appendRecord(record, { recordsDir });
-  }
-  accounting.written = toAppend.length;
-  // Reindex UNCONDITIONALLY from here on (#574) — the former `toAppend.length > 0`
-  // guard was the churn discipline reading of ADR-0017, but it also meant that
-  // the steady-state share (engram exported, everything already in `records/`,
-  // nothing to append) never read the log and so could never notice the
-  // duplicates a `git pull` had merged in since. The guard bought nothing it
-  // was meant to: `rebuildIndex` is deterministic, so re-running it over an
-  // unchanged store rewrites byte-identical content and `git diff` stays empty
-  // — the churn rule is about the DIFF, not the write (measured: rebuilding
-  // over this repo's 2038-record store reproduces the committed index
-  // byte-for-byte). The zero-candidate early return above still short-circuits
-  // before this; `share()` covers that path with its own self-check.
-  const { count, duplicates } = _rebuildIndex({ recordsDir, indexPath });
-  accounting.indexCount = count;
-  accounting.duplicates = normalizeDuplicates(duplicates);
-  return accounting;
-}
-
-export function _defaultShareExport(engram, root, { _exec = execFileSync } = {}) {
-  // `cwd` is EXPLICIT (issue #657). engram resolves `.engram/` relative to the
-  // process cwd, and git runs its hooks with cwd set to the worktree that invoked
-  // them — so inheriting it is precisely what let a push from one worktree
-  // materialize memory into that worktree instead of the root `share()` reads.
-  // Anchoring the export to `root` keeps the writer and the readers on one tree.
-  _exec(engram, ["sync", "--export"], { stdio: "inherit", cwd: root });
+  const { count, duplicates } = _rebuildIndex({
+    recordsDir: join(root, ".memory", "records"),
+    indexPath: join(root, ".memory", "index.jsonl"),
+  });
+  return { indexCount: count, duplicates: normalizeDuplicates(duplicates) };
 }
 
 /**
  * Default seam: reads `brain.config.json` for the `governance.memorySecret*`
- * keys. Never throws — an absent/unparseable config falls back to `{}`, which
- * resolveSecretConfig() turns into the default pattern set.
+ * keys, via `loadBrainConfigOrThrow` (#942). ENOENT still returns `{}`
+ * (absence stays green, R12/REQ-SCAN-3); every OTHER read/parse failure
+ * PROPAGATES (#712, REQ-SCAN-1) — a read carrying both a DENY-direction key
+ * (`memorySecretPatterns`) and an ALLOW-direction key
+ * (`memorySecretAllowPatterns`) cannot be half-propagated (R1/REQ-SCAN-2).
+ *
+ * D4 (design.md): `save()` is this function's only wiring point.
+ * The records dual-write exporter this doc once ALSO named as a wiring
+ * point (kept callerless since #874 split B "for a future caller per O1")
+ * is gone now — #955 R5 (epic task 2.4) deleted it outright rather than
+ * giving it that caller, so there is only ever one implementation of this
+ * rule to keep hardened.
  *
  * @param {string} root
  * @returns {object}
  */
 function _defaultLoadBrainConfig(root) {
-  try {
-    return JSON.parse(readFileSync(join(root, "brain.config.json"), "utf8"));
-  } catch {
-    return {};
-  }
-}
-
-/**
- * Default seam: every `.memory/chunks/*.jsonl.gz` present, read from the
- * FILESYSTEM (issue #469, design D1). Same directory `_defaultReadObservations`
- * already enumerates via `collectChunkObservations` — one source of truth for
- * what a share run touches, not two.
- *
- * This used to ask `git status --porcelain -- .memory/chunks` and describe the
- * result as the "materialized THIS run" boundary. `.memory/chunks/` is
- * GITIGNORED (`.gitignore:84`), and `git status --porcelain` never reports
- * ignored paths, so the set was **always empty**: the scrub had never scanned a
- * chunk. An empty set is not an error, so the fail-closed guard below never
- * tripped — it fails closed on a git ERROR and passed on a git result that was
- * empty for a structural reason. `evidence-reader-empty-on-failure` with a
- * third case neither branch modelled: the query cannot ever return anything.
- *
- * `--ignored` is NOT the fix, measured rather than argued (design D1): three of
- * the four git spellings report `!! .memory/chunks/` — the DIRECTORY — which the
- * `.jsonl.gz` suffix filter then dropped, leaving the scan at zero. Only plain
- * `--ignored -uall` lists files, while `--ignored=matching -uall`, which reads as
- * the tighter request, does not. A gate one plausible flag edit silently disarms
- * is the defect being fixed, re-armed and harder to see.
- *
- * The "materialized THIS run" boundary is gone, and was never real for
- * gitignored chunks: it did not narrow the scan, it emptied it. This scans the
- * WHOLE store, deliberately — the premise that an untouched chunk was cleared by
- * an earlier run is false, because no earlier run scanned anything. Restoring a
- * real boundary (pre/post-export snapshot) trades completeness for speed in a
- * gate whose whole job is completeness; deferred to a ticket with a measurement.
- *
- * Directories are dropped on their TYPE, not their name — the git spellings that
- * returned a directory path are exactly what a suffix-only filter cannot see.
- *
- * Fail CLOSED on any read error, including ENOENT. `share()` reaches here only
- * AFTER `engram sync --export` ran, so a missing chunk directory means the export
- * wrote where this process does not read — the REQ-469-3 failure, caught twice.
- * An EMPTY directory is not an error: a fresh clone with no memory yet is
- * legitimate, and that is the distinction the git version could not draw.
- *
- * ## The scanned set must CONTAIN the read set (round-1 cold review, BLOCKER)
- *
- * The invariant is not that this function and `_defaultReadObservations` agree;
- * it is that **nothing reaches `records/` unscanned**. The first draft of this
- * fix used `Dirent.isFile()` to drop directories (E5) and thereby dropped
- * SYMLINKS too — `isFile()` is false for a symlink entry — while the reader's
- * `readFileSync` follows them. Measured on a chunks directory holding one
- * symlink to a chunk carrying `ghp_…`:
- *
- * ```
- * SCANNER sees : [ 'plain.jsonl.gz' ]
- * READER  sees : [{"text":"ghp_0123…"},{"text":"fine"}]
- * ```
- *
- * The secret bypassed the scrub and landed in the append-only log, in a public
- * repository — the one outcome this gate exists to prevent, opened by the guard
- * added to close a different one. So the type test is `statSync`, which FOLLOWS
- * symlinks: a symlink to a chunk is scanned, a directory (or a symlink to one)
- * is not, and the reader can read nothing this does not see.
- *
- * An entry that cannot be stat'd fails CLOSED for the same reason the directory
- * read does: "cannot look" must never be reported as "nothing to scan".
- *
- * @param {string} root
- * @param {object} [opts]
- * @param {(dir: string, opts: object) => import("node:fs").Dirent[]} [opts._listDir]
- * @param {(p: string) => import("node:fs").Stats} [opts._stat]
- * @returns {string[]}  Absolute paths.
- */
-export function _defaultChangedChunkFiles(root, { _listDir = readdirSync, _stat = statSync } = {}) {
-  const dir = join(root, ".memory", "chunks");
-  let entries;
-  try {
-    entries = _listDir(dir, { withFileTypes: true });
-  } catch (err) {
-    throw new Error(
-      `secret-scrub: cannot read ${dir} — cannot determine which chunks this run materialized; refusing to share (fail closed): ${err?.code ?? ""} ${err?.message ?? err}`.replace(
-        /\s+/g,
-        " ",
-      ),
-    );
-  }
-  const out = [];
-  for (const e of entries) {
-    if (!e.name.endsWith(".jsonl.gz")) continue;
-    const full = join(dir, e.name);
-    let st;
-    try {
-      st = _stat(full);
-    } catch (err) {
-      throw new Error(
-        `secret-scrub: cannot stat ${full} — a chunk the reader may still follow cannot be classified; refusing to share (fail closed): ${err?.code ?? ""} ${err?.message ?? err}`.replace(
-          /\s+/g,
-          " ",
-        ),
-      );
-    }
-    if (st.isFile()) out.push(full);
-  }
-  return out;
+  return loadBrainConfigOrThrow(root);
 }
 
 /**
  * Default seam: resolve a path through symlinks, or `null` when it does not
- * exist (issue #469, REQ-469-3). Separated so `share()`'s export-destination
- * check is testable without building a real symlink.
+ * exist (issue #469, REQ-469-3). Was separated so `share()`'s former
+ * export-destination check (`assertExportDestinationIsRead`, retired #874
+ * split B row 4) was testable without building a real symlink. No current
+ * caller — left for the maintainer/2.4 to retire alongside the rest of the
+ * chunk estate rather than expanding this PR's ledger past what tasks.md
+ * names.
  *
  * @param {string} p
  * @returns {string|null}
@@ -611,130 +223,9 @@ export function _defaultResolveDir(p) {
   }
 }
 
-/**
- * Throws when `engram sync --export` writes to a directory `share()` does not
- * read from (issue #469, REQ-469-3).
- *
- * engram writes under `.engram/`; every reader here — `_defaultReadObservations`,
- * `_defaultChangedChunkFiles` — reads under `.memory/`. `ensureMemorySymlink`
- * keeps those the same directory, but its case 3 (`.engram` is a REAL directory)
- * only `console.warn`s and does not clobber, which is right. Nothing downstream
- * checked, so the export succeeded, printed `Created chunk …`, zero records were
- * appended, and the run reported success. Reproduced in the maintainer's own
- * checkout.
- *
- * Compares RESOLVED paths rather than symlink type: what matters is that the two
- * land on the same directory, and `realpathSync` answers that for a symlink, a
- * bind mount, or anything else that makes them agree.
- *
- * An ABSENT `.engram` passes — engram then writes to `.memory` directly, the
- * normal post-migration state on a fresh clone.
- *
- * Throws rather than warns: a warning is what `ensureMemorySymlink` already does,
- * and the defect reached production with that warning in place.
- *
- * @param {string} root
- * @param {object} [opts]
- * @param {(p: string) => string|null} [opts._resolveDir]
- */
-export function assertExportDestinationIsRead(root, { _resolveDir = _defaultResolveDir } = {}) {
-  const engramPath = join(root, ".engram");
-  const engramResolved = _resolveDir(engramPath);
-  if (engramResolved === null) return;
-
-  const memoryPath = join(root, ".memory");
-  const memoryResolved = _resolveDir(memoryPath);
-  if (engramResolved === memoryResolved) return;
-
-  throw new Error(
-    `memory:share: 'engram sync --export' writes under ${engramPath} (${engramResolved}), ` +
-      `but this run reads chunks and records from ${memoryPath} (${memoryResolved ?? "missing"}). ` +
-      `Every chunk the export just wrote would be invisible: the secret scrub would scan nothing and ` +
-      `zero records would be appended, while the run reported success. ` +
-      `Fix: make .engram a symlink to .memory (npm run memory:setup, after pulling the migration), ` +
-      `or remove the real .engram directory once its contents are merged.`,
-  );
-}
-
-/**
- * scrubMaterializedChunks() — the fail-closed core, independent of requireEngram()
- * so it is unit-testable with zero real engram/git/gzip dependency. Resolves
- * the effective pattern set (defaults + `governance.memorySecretPatterns`,
- * additive) and the allowlist (`governance.memorySecretAllowPatterns`, the sole
- * bypass — no CLI flag), then scans every changed chunk. Throws on the FIRST
- * hit, naming the matched pattern and the file:line location.
- *
- * @param {string} root
- * @param {object} [opts]
- * @param {(root: string) => string[]} [opts._changedChunkFiles]
- * @param {(root: string) => object} [opts._loadConfig]
- * @param {(path: string, patterns: RegExp[], allowPatterns: RegExp[]) => object|null} [opts._scrubChunk]
- */
-export async function scrubMaterializedChunks(
-  root,
-  {
-    _changedChunkFiles = _defaultChangedChunkFiles,
-    _loadConfig = _defaultLoadBrainConfig,
-    _scrubChunk = scrubChunkFile,
-  } = {},
-) {
-  const { patternSources, allowPatternSources } = resolveSecretConfig(_loadConfig(root));
-  const patterns = compilePatterns(patternSources);
-  const allowPatterns = compilePatterns(allowPatternSources);
-
-  for (const chunkPath of _changedChunkFiles(root)) {
-    const hit = _scrubChunk(chunkPath, patterns, allowPatterns);
-    if (hit) {
-      throw new Error(
-        await t("memory.share.secretFound", {
-          file: chunkPath,
-          line: hit.lineNumber,
-          pattern: hit.pattern,
-        }),
-      );
-    }
-  }
-}
-
 // ---------------------------------------------------------------------------
 // pullMemory — churn-resilient memory pull (issue #59)
 // ---------------------------------------------------------------------------
-
-/**
- * Default seam: check whether .memory/manifest.json has uncommitted local changes.
- *
- * @param {string} root  Repo root.
- * @returns {boolean}
- */
-function _defaultIsManifestDirty(root) {
-  const r = spawnSync(
-    "git",
-    ["status", "--porcelain", "--", ".memory/manifest.json"],
-    { encoding: "utf8", cwd: root },
-  );
-  return !!r.stdout?.trim();
-}
-
-/**
- * Default seam: discard uncommitted local changes to .memory/manifest.json.
- * Non-fatal: logs a warning on failure instead of throwing.
- *
- * @param {string} root  Repo root.
- */
-function _defaultRestoreManifest(root) {
-  const r = spawnSync("git", ["checkout", "--", ".memory/manifest.json"], {
-    stdio: "pipe",
-    cwd: root,
-  });
-  if (r.status !== 0) {
-    console.warn(
-      "  ⚠ could not restore .memory/manifest.json —",
-      r.stderr?.toString().trim() || "unknown error",
-    );
-  } else {
-    console.log("  ✓ .memory/manifest.json restored (discarded local churn)");
-  }
-}
 
 /**
  * Default seam: run `git pull` in the repo root.
@@ -1012,42 +503,33 @@ export async function importMemory({
 /**
  * pullMemory() — churn-resilient memory pull (issue #59).
  *
- * Problem: `engram sync --export` (run by memory:share / pre-push) rewrites
- * .memory/manifest.json, leaving it dirty in the working tree. A subsequent
- * `git pull` aborts with "your local changes would be overwritten by merge"
- * because manifest.json is a tracked file with uncommitted local changes.
- * The union-merge driver only helps with COMMITTED conflicts, not dirty-tree blocks.
+ * The manifest-churn-discard step this function once ran first is retired
+ * (#955, R6): the tracked derived-index file it discarded churn from has had
+ * no writer since #874 split B, so there is nothing left to discard before a
+ * pull. This function now:
+ *   1. Runs `git pull` (the `merge=union` driver handles any record conflicts).
+ *   2. Rebuilds `.memory/index.jsonl` from the merged `records/` (#574).
+ *   3. Calls importMemory() to hydrate local engram from the merged .memory/.
  *
- * Solution: the manifest is a DERIVED index that engram regenerates on every
- * export. Discarding local churn is therefore always safe. This function:
- *   1. Detects and discards uncommitted manifest churn before pulling.
- *   2. Runs `git pull` (the union-merge driver handles any committed-manifest merges).
- *   3. Rebuilds `.memory/index.jsonl` from the merged `records/` (#574).
- *   4. Calls importMemory() to hydrate local engram from the merged .memory/.
- *
- * Step 3 is new, and it is where #574's rule reaches the engram side of
- * `pull()`. The `git pull` in step 2 is the exact event that MINTS a duplicate
- * physical line (`merge=union`, ADR-0017 REQ-MF-3), and this path used to walk
- * straight from there into hydrating the live layer — never rebuilding the
- * derived index, never reading the log, reporting nothing. `plainfiles.pull()`
- * has always been `git pull` + reindex; both backends now say the same thing
+ * Step 2 is where #574's rule reaches the engram side of `pull()`. The `git
+ * pull` in step 1 is the exact event that MINTS a duplicate physical line
+ * (`merge=union`, ADR-0017 REQ-MF-3), and this path used to walk straight
+ * from there into hydrating the live layer — never rebuilding the derived
+ * index, never reading the log, reporting nothing. `plainfiles.pull()` has
+ * always been `git pull` + reindex; both backends now say the same thing
  * about the same store. Ordering matters as much as presence: the reindex is
  * the fail-closed gate, so a store that cannot be indexed — a TAMPERED line,
  * which is the only refusal left — refuses BEFORE engram is hydrated from it,
  * rather than after. (Two lines claiming one id with different bytes is NOT
  * that case: it is reported as divergent and resolved first-wins.)
  *
- * Use pullMemory() for cross-machine syncs (npm run memory:pull).
+ * Use pullMemory() for cross-machine syncs (npm run brain:memory:pull).
  * Use importMemory() when git pull already ran (post-merge hook, day-start step 5).
  *
  * Injectable seams make the function fully unit-testable without real git/engram:
  *
  * @param {object} [opts]
  * @param {string}  [opts.root]              Repo root (defaults to this package's root).
- * @param {(root: string) => boolean}  [opts._isManifestDirty]
- *   Returns true when manifest.json has uncommitted local changes.
- * @param {(root: string) => void}     [opts._restoreManifest]
- *   Discards uncommitted manifest changes (non-fatal, best-effort).
  * @param {(root: string) => void}     [opts._gitPull]
  *   Runs `git pull`; MUST throw on non-zero exit so import is not called on failure.
  * @param {() => void | Promise<void>} [opts._import]
@@ -1055,24 +537,14 @@ export async function importMemory({
  */
 export async function pullMemory({
   root = repoRoot,
-  _isManifestDirty = _defaultIsManifestDirty,
-  _restoreManifest = _defaultRestoreManifest,
   _gitPull = _defaultGitPull,
   _rebuildIndex = rebuildIndex,
   _import = importMemory,
 } = {}) {
-  // Step 1: discard regenerable manifest churn so git pull can proceed.
-  if (_isManifestDirty(root)) {
-    console.log(
-      "  ℹ .memory/manifest.json has uncommitted local changes — restoring before pull",
-    );
-    _restoreManifest(root);
-  }
-
-  // Step 2: pull latest commits (throws on failure — import must not run).
+  // Step 1: pull latest commits (throws on failure — import must not run).
   _gitPull(root);
 
-  // Step 3: rebuild the derived index from the just-merged records/ (#574).
+  // Step 2: rebuild the derived index from the just-merged records/ (#574).
   // Throws on a store the merge left unindexable — hydration must not run on
   // one, so this deliberately sits BEFORE the import.
   const { count, duplicates } = _rebuildIndex({
@@ -1080,7 +552,7 @@ export async function pullMemory({
     indexPath: join(root, ".memory", "index.jsonl"),
   });
 
-  // Step 4: hydrate local engram from the newly merged .memory/.
+  // Step 3: hydrate local engram from the newly merged .memory/.
   await _import();
 
   return { indexCount: count, duplicates: normalizeDuplicates(duplicates) };
@@ -1097,21 +569,328 @@ export async function pull() {
 }
 
 // ---------------------------------------------------------------------------
-// save / search — the Q1 asymmetry's engram side (design Decision 5, obs
-// #578's "engram.search stub: YES" ruling). engram already has a native
-// `mem_save`/`mem_search`; a second CLI-mediated door would create a second
-// surface to keep in parity forever. Both refuse loudly via the shared
-// unsupportedOp helper — never cryptic, never a silent no-op, on either verb.
+// save — the record-first producer path (#874, split A). `search` keeps the
+// Q1 asymmetry's engram-side refusal below; `save` no longer shares it
+// (D7) — engram already has a native `mem_search`, but `save`'s route is now
+// THIS one, mirrored from `plainfiles.save()` (R1) rather than deferred to
+// `mem_save`, which writes past `.memory/records/` entirely.
 // ---------------------------------------------------------------------------
 
-/** @returns {Promise<never>} */
-export async function save() {
-  await unsupportedOp("save", "engram", { key: "memory.save.engramUnsupported" });
+/** The repository this record belongs to, from config, falling back to the checkout
+ *  directory name. Duplicated from plainfiles.mjs verbatim (R1) — no shared-core
+ *  extraction; the correctness-critical logic already lives in the shared libs
+ *  this function calls into. */
+function deriveProject(config, root) {
+  const slug = config?.project?.slug;
+  if (typeof slug === "string" && slug.trim() !== "") return slug.split("/").pop();
+  const name = config?.project?.name;
+  if (typeof name === "string" && name.trim() !== "") return name;
+  return String(root).replace(/\/+$/, "").split("/").pop();
+}
+
+/**
+ * save() — the engram-side mirror of `plainfiles.save()` (R1): scan-then-write
+ * to `.memory/records/<yyyy-mm>-<id>.jsonl`, rebuild the index, THEN hydrate
+ * the active backend from that one record via `hydrate()` as the terminal
+ * step. The record is durable BEFORE hydrate ever runs (spec: "a capture is
+ * durable before the backend runs") — a hydrate failure never makes the
+ * capture appear lost (R5), it is reported as `deferred`/`contended`.
+ *
+ * Gate order is IDENTICAL to `plainfiles.save()`, pinned by the cross-backend
+ * parity test (save-parity.test.mjs, R2): caller-mistake refusals (`type`,
+ * `--issue` shape) → actor/provenance (#738) → `classifySupersedes` (#805) →
+ * `buildRecord` → `scanTextForSecrets` over the serialized candidate →
+ * `appendRecord` → `rebuildIndex` → `hydrate`.
+ *
+ * @param {string} title
+ * @param {string} content
+ * @param {{type: string, project: string, issue?: number, supersedes?: string, scope?: string, topic?: string}} [opts]
+ * @param {object} [seams]  root, getBranch, getTimestamp, getHostname, getGitConfig, getEnv,
+ *   _appendRecord, _rebuildIndex, _loadConfig, _readRecordIds, _upstreamRecordEntries, _hydrate
+ * @returns {Promise<{id: string, file: string, written: boolean, hydrated: boolean,
+ *   deferred?: true, contended?: true, reason?: string, indexCount?: number, duplicates: object}>}
+ */
+export async function save(
+  title,
+  content,
+  // scope/topic are accepted for _defaultEngramSave arg-shape parity — the record
+  // format has no home for them (out of scope, same as plainfiles), so they are
+  // ignored LOUDLY (a console.warn naming them) rather than erroring. `hydrate()`
+  // NEVER reads the caller's `topic`: the topic_key it hydrates under is always
+  // the record's own id (R6), never this field.
+  { type, project, issue, supersedes, scope, topic } = {},
+  {
+    root = repoRoot,
+    getBranch = _getGitBranch,
+    getTimestamp = nowUtcSeconds,
+    getHostname = () => osHostname(),
+    getGitConfig = (key) => gitConfigGet(key, root),
+    getEnv = () => process.env,
+    _appendRecord = appendRecord,
+    _rebuildIndex = rebuildIndex,
+    _loadConfig = _defaultLoadBrainConfig,
+    _readRecordIds = readRecordIds,
+    _upstreamRecordEntries = upstreamRecordEntries,
+    _hydrate = hydrate,
+  } = {},
+) {
+  const ignoredOpts = [scope && "scope", topic && "topic"].filter(Boolean);
+  if (ignoredOpts.length > 0) {
+    console.warn(await t("memory.save.engramIgnoredOpts", { opts: ignoredOpts.join(", ") }));
+  }
+
+  const ts = getTimestamp();
+  const branch = getBranch(root);
+  const config = _loadConfig(root);
+
+  const resolvedProject = project ?? deriveProject(config, root);
+  if (!type) {
+    throw new Error(await t("memory.plainfiles.save.typeRequired", { types: RECORD_TYPES.join(", ") }));
+  }
+  if (issue !== undefined && issue !== null && !Number.isInteger(issue)) {
+    throw new Error(await t("memory.plainfiles.save.issueInvalid", { value: String(issue) }));
+  }
+
+  // #738 — the actor refusal, AFTER the two caller-mistake refusals above,
+  // BEFORE the supersedes gate (which may read the store).
+  const actorResult = resolveActor({ configured: getGitConfig("brain.actor") });
+  if (!actorResult.ok) {
+    const key = actorResult.reason === "reserved"
+      ? "memory.plainfiles.save.actorReserved"
+      : actorResult.reason === "malformed"
+        ? "memory.plainfiles.save.actorMalformed"
+        : "memory.plainfiles.save.actorUnset";
+    throw new Error(await t(key, { value: String(actorResult.value ?? "") }));
+  }
+  const actor = actorResult.actor;
+
+  const kindResult = resolveActorKind({ env: getEnv(), agentEnvConfig: getGitConfig("brain.agentEnv") });
+  const actorKind = kindResult.actorKind;
+
+  const issueResult = deriveIssue({ declared: issue, branch });
+  if (issueResult.derived) {
+    console.log(await t("memory.plainfiles.save.issueDerived", { issue: String(issueResult.issue), branch }));
+  }
+
+  const source = composeSource({ host: getHostname(), backend: "engram", actor: actorResult, kind: kindResult, issue: issueResult });
+
+  const recordsDir = join(root, ".memory", "records");
+
+  if (supersedes !== undefined) {
+    const verdict = classifySupersedes({
+      id: supersedes,
+      localIds: () => _readRecordIds({ recordsDir }),
+      upstream: () => _upstreamRecordEntries({ root }),
+    });
+    if (verdict.configError !== undefined) {
+      console.warn(await t("memory.plainfiles.save.supersedesConfigError", { error: verdict.configError }));
+    }
+    if (!verdict.ok) {
+      const key = {
+        malformed: "memory.plainfiles.save.supersedesMalformed",
+        "not-in-store": "memory.plainfiles.save.supersedesNotInStore",
+        "could-not-verify": "memory.plainfiles.save.supersedesUnverifiable",
+      }[verdict.reason];
+      throw new Error(await t(key, verdict.detail));
+    }
+  }
+
+  const candidate = buildRecord({
+    ts, actor, actorKind, type, project: resolvedProject,
+    issue: issueResult.issue, supersedes, content, title, source,
+  });
+
+  const { patternSources, allowPatternSources } = resolveSecretConfig(config);
+  const patterns = compilePatterns(patternSources);
+  const allowPatterns = compilePatterns(allowPatternSources);
+  const hit = scanTextForSecrets(serializeRecord(candidate), patterns, allowPatterns);
+  if (hit) {
+    throw new Error(
+      await t("memory.plainfiles.save.secretFound", { line: hit.lineNumber, pattern: hit.pattern }),
+    );
+  }
+
+  const indexPath = join(root, ".memory", "index.jsonl");
+
+  const { file } = _appendRecord(candidate, { recordsDir });
+
+  // THE APPEND IS ALREADY DONE (#637, mirrored from plainfiles.save() verbatim):
+  // `rebuildIndex` reads the WHOLE store, so it can only run after the line it
+  // has to see. The original error is ANNOTATED AND RETHROWN rather than
+  // wrapped — every caller keeps the fail-closed throw it already had.
+  let reindex;
+  try {
+    reindex = _rebuildIndex({ recordsDir, indexPath });
+  } catch (err) {
+    const annotated = (err !== null && (typeof err === "object" || typeof err === "function"))
+      ? err
+      : new Error(String(err));
+    annotated.indexFailed = true;
+    annotated.recordId = candidate.id;
+    annotated.recordFile = file;
+    throw annotated;
+  }
+
+  // THE ONE STEP plainfiles.save() has no equivalent of: the record is durable
+  // (appended + indexed) BEFORE this runs, so a backend failure here can never
+  // make the capture appear lost (spec: "a capture is durable before the
+  // backend runs"; R5).
+  const hydrateResult = await _hydrate({ root, recordId: candidate.id, record: candidate });
+
+  return {
+    id: candidate.id,
+    file,
+    written: true,
+    hydrated: hydrateResult?.written === 1,
+    ...(hydrateResult?.deferred ? { deferred: true, reason: hydrateResult.reason } : {}),
+    ...(hydrateResult?.contended ? { contended: true } : {}),
+    indexCount: reindex?.count,
+    duplicates: normalizeDuplicates(reindex?.duplicates),
+  };
 }
 
 /** @returns {Promise<never>} */
 export async function search() {
   await unsupportedOp("search", "engram", { key: "memory.search.engramUnsupported" });
+}
+
+/**
+ * isEngramArgvUnsafe() — fresh-review F2 (#924): `engram save --help` offers
+ * no `--` escape (measured), so a value beginning with `-` would be parsed
+ * as an option, not a positional. `hydrate()` checks its `title`/`content`
+ * against this BEFORE spawning; never used to sanitize, only to refuse.
+ *
+ * @param {unknown} value
+ * @returns {boolean}
+ */
+function isEngramArgvUnsafe(value) {
+  return typeof value === "string" && value.startsWith("-");
+}
+
+/**
+ * hydrate() — project ONE durable record into the active engram store, keyed
+ * by the record's own id as `topic_key` (#874, split A, R3/R4/D1/D2/D9).
+ *
+ * ONE `_engramSave` call, never the bulk `importMemory()` path (R3): the
+ * primitive already exists and is already in production (`featureResume`),
+ * and the bulk path pays a whole-store read back for a single record.
+ *
+ * Order: resolve the record (D2 — an already-materialized `record` is used as
+ * given, at zero extra IO; absent, `_readRecords` finds it by id, and an
+ * unknown id THROWS — D4, a caller mistake, never `deferred`) → probe the
+ * binary (D3 — `probeBinary`, never `requireEngram()`, which throws) →
+ * acquire the #820 guard, non-blocking (R4) → one `_engramSave` call built
+ * via `importRecord()` (D1 — the SAME pure record→observation transform
+ * `importMemory` uses) with `topic: recordId` (R6 — always the record's own
+ * id, never the caller's `topic`).
+ *
+ * Never throws past this function except D4's unknown-id case: an absent
+ * binary, a contended guard, or a throwing `_engramSave` all DEFER (R5) —
+ * the record is already durable before this runs, so a backend failure here
+ * must never read as a lost capture.
+ *
+ * @param {{root?: string, recordId: string, record?: object}} args
+ * @param {object} [seams]
+ * @param {(title: string, content: string, opts: object) => void} [seams._engramSave]
+ * @param {() => {held: boolean, release?: () => void, owner?: object}} [seams._guard]  #820 guard, non-blocking.
+ * @param {() => {available: boolean|null, reason?: string}} [seams._probe]
+ * @param {(opts: {recordsDir: string}) => {records: object[], duplicates: object}} [seams._readRecords]
+ * @param {(record: object) => object} [seams._importRecord]
+ * @param {(msg: string) => void} [seams._warn]
+ * @returns {Promise<{written: 0|1, skipped: number, deferred?: true, contended?: true, reason?: string}>}
+ */
+export async function hydrate(
+  { root = repoRoot, recordId, record } = {},
+  {
+    _engramSave = _defaultEngramSave,
+    _guard = acquireHydrationGuard,
+    _probe = () => probeBinary(ENGRAM_BIN),
+    _readRecords = readRecords,
+    _importRecord = importRecord,
+    _warn = console.error,
+  } = {},
+) {
+  let resolved = record;
+  if (resolved === undefined) {
+    const { records } = _readRecords({ recordsDir: join(root, ".memory", "records") });
+    resolved = records.find((r) => r?.id === recordId);
+    if (resolved === undefined) {
+      throw new Error(await t("memory.hydrate.recordNotFound", { recordId }));
+    }
+  }
+
+  const probe = _probe();
+  if (probe.available !== true) {
+    const reason = probe.available === false
+      ? "engram binary not found"
+      : (probe.reason ?? "engram binary could not be resolved");
+    _warn(await t("memory.save.hydrateDeferred", { recordId, reason }));
+    return { written: 0, skipped: 0, deferred: true, reason };
+  }
+
+  // B1 (cold review #924): `acquireHydrationGuard()` is not exception-free —
+  // its `mkdirSync(staging)` is unguarded (ENOSPC, EACCES, …), and a rename
+  // error other than ENOTEMPTY/EEXIST/EPERM is rethrown. Acquiring the guard
+  // is folded into the SAME failure envelope as `_engramSave` below: a throw
+  // here is a backend failure like any other and must defer (R5), never
+  // escape `save()` and make an already-durable record look like it failed.
+  // The guard is never actually taken on this path, so there is nothing to
+  // release.
+  let guard;
+  try {
+    guard = _guard();
+  } catch (err) {
+    const reason = `guard-failed: ${err?.code ?? err?.message ?? String(err)}`;
+    _warn(await t("memory.save.hydrateDeferred", { recordId, reason }));
+    return { written: 0, skipped: 0, deferred: true, reason };
+  }
+  if (!guard.held) {
+    const age = Math.round((guard.owner?.ageMs ?? 0) / 1000);
+    _warn(await t("memory.save.hydrateContended", { recordId, pid: guard.owner?.pid ?? "?", age }));
+    return { written: 0, skipped: 0, deferred: true, contended: true };
+  }
+
+  try {
+    const observation = _importRecord(resolved);
+    // fresh-review F2 (#924), widened by cold-review E1 (#924): `engram save
+    // --help` offers no `--` escape (measured) — any positional/option VALUE
+    // starting with `-` would be parsed as an option, not the value, and
+    // either misbehave or fail in a way that looks like an unrelated engram
+    // error. Checked here: `title`/`content` (agent-controlled, F2) and
+    // `project` (E1 — `save()`'s `deriveProject()` falls back to the checkout
+    // directory's basename, `String(root).split('/').pop()`, which may itself
+    // start with `-`). NOT checked: `type` is one of format.mjs's fixed
+    // `RECORD_TYPES` enum, `scope` is always the constant `'project'` set by
+    // `importRecord()`, and `topic` is always the record's own id — always
+    // `rec-`-prefixed per format.mjs#computeRecordId — so none of those three
+    // can start with `-`. Refused BEFORE the spawn, never thrown (R5 shape):
+    // this is a data shape the caller cannot fix by retrying, so it is
+    // reported the same way a deferred hydration is. The proper fix — an
+    // escape in the engram CLI itself — is upstream; nothing to change here
+    // beyond refusing to hand it an unsafe argv.
+    if (
+      isEngramArgvUnsafe(observation.title)
+      || isEngramArgvUnsafe(observation.content)
+      || isEngramArgvUnsafe(observation.project)
+    ) {
+      const reason = "engram-argv-unsafe";
+      _warn(await t("memory.save.hydrateDeferred", { recordId, reason }));
+      return { written: 0, skipped: 0, deferred: true, reason };
+    }
+    _engramSave(observation.title, observation.content, {
+      type: observation.type,
+      project: observation.project,
+      scope: observation.scope,
+      topic: recordId,
+    });
+    return { written: 1, skipped: 0 };
+  } catch (err) {
+    const reason = explainEngramFailure(err);
+    _warn(await t("memory.save.hydrateDeferred", { recordId, reason }));
+    return { written: 0, skipped: 0, deferred: true, reason };
+  } finally {
+    guard.release();
+  }
 }
 
 /**
@@ -1130,30 +909,28 @@ export async function index() {
 }
 
 /**
- * setup() — idempotent setup for the engram backend:
- *   1. Ensure .engram → .memory symlink (delegates to ensureMemorySymlink).
- *   2. Register the merge driver for .memory/manifest.json (ADR-0002).
+ * setup() — idempotent setup for the engram backend: ensure the `.engram →
+ * .memory` symlink (delegates to ensureMemorySymlink). This is the ONLY
+ * place the symlink is created or repaired (#955, R7 — symlink confinement);
+ * `share()`/`pull()` never touch it.
+ *
+ * The merge-driver registration this function used to also perform is
+ * retired (#955, R7): the tracked derived-index file it registered a merge
+ * driver for has had no writer since #874 split B, so there is nothing left
+ * for a driver to merge.
+ *
+ * `{root}` (#1010): honours `BRAIN_MEMORY_TEST_ROOT` the same way
+ * `share()`/`pull()`/`import()` already do (cli.mjs's `ROOTED_OPS`). Before
+ * #1010 this took no parameters at all, so a caller that forwarded `{root}`
+ * had it silently discarded and `ensureMemorySymlink()` fell through to the
+ * real repo root regardless — measured as `npm test` writing `.engram` into
+ * a cold-review candidate worktree via `cli.backend-fallback.test.mjs`'s own
+ * real-subprocess `setup` test.
  *
  * Called by bootstrap.sh §7 via: node brain/scripts/memory/cli.mjs setup
  */
-export async function setup() {
-  // 1. Ensure symlink .engram → .memory using the hardened helper.
-  ensureMemorySymlink();
-
-  // 2. Register merge driver for .memory/manifest.json.
-  const result = spawnSync(
-    "git",
-    [
-      "config",
-      "merge.engram-manifest.driver",
-      "node brain/scripts/merge-engram-manifest.mjs %O %A %B",
-    ],
-    { stdio: "inherit", cwd: repoRoot },
-  );
-  if (result.status !== 0) {
-    throw new Error("Failed to register engram-manifest merge driver");
-  }
-  console.log("  ✓ merge driver engram-manifest registered");
+export async function setup({ root = repoRoot } = {}) {
+  ensureMemorySymlink(root);
 }
 
 // ---------------------------------------------------------------------------
@@ -1374,7 +1151,7 @@ export async function featureCheckpoint(
  * Project all .md files in openspec/changes/<feature>/ into the LOCAL engram
  * under the distinct project namespace 'brain-feature-<feature>'.
  *
- * This namespace separation ensures that a subsequent `memory:share`
+ * This namespace separation ensures that a subsequent `brain:memory:share`
  * (= engram sync --export, which defaults to the 'brain' project) does NOT
  * pick up these observations and write them to .memory/ — keeping feature
  * obs out of the durable committed store.
@@ -1440,7 +1217,7 @@ export async function featureResume(
 
   // 5. Project each .md file into engram under 'brain-feature-<feature>'.
   //    Modeled on brain-to-engram.mjs — one save per file, topic as upsert key.
-  //    The distinct project namespace keeps these obs out of memory:share exports.
+  //    The distinct project namespace keeps these obs out of brain:memory:share exports.
   const featureProject = `brain-feature-${resolvedFeature}`;
   let files;
   try {
@@ -1707,3 +1484,160 @@ function _defaultEngramSave(title, content, { type, project, scope, topic }) {
     { stdio: ["ignore", "ignore", "pipe"] },
   );
 }
+
+/**
+ * Runs `engram version` and returns its STDOUT, or `null` if the probe could
+ * not get an answer (absent binary, non-zero exit, spawn error). `null` is
+ * "I do not know" the same way `probeBinary`'s three-valued result is —
+ * `healDuplicates` treats it identically to an untested version: refuse,
+ * never guess.
+ *
+ * @returns {string | null}
+ */
+function _defaultHealVersionProbe() {
+  try {
+    return execFileSync("engram", ["version"], { stdio: ["ignore", "pipe", "pipe"], encoding: "utf8" });
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * HEAL_DELETE_ARGS(id) — the exact argv `healDuplicates` hard-deletes with.
+ *
+ * Measured (design.md "Measured by the orchestrator", engram 1.20.0): a soft
+ * `engram delete <id>` leaves the row in `engram export` with `deleted_at`
+ * set — `readBackendKeys`/`topicKeysFromExport` do not filter it, so the
+ * audit would still count it as live. Only `--hard` actually removes the
+ * row. `--hard` must come AFTER the id: `delete <id> --hard` is the only
+ * argument order engram accepts (`delete --hard <id>` is rejected).
+ *
+ * @param {number} id  The numeric observation id — `engram delete obs-…`
+ *   fails with `invalid observation id`; only the numeric id works.
+ * @returns {string[]}
+ */
+export function HEAL_DELETE_ARGS(id) {
+  return ["delete", String(id), "--hard"];
+}
+
+/**
+ * healDuplicates() — reconciles the store's pre-guard duplicate rows (#1061,
+ * #864 task 1.2a; memory-backend-contract.md's Deletion clause). Report-only
+ * by default (REQ-MB-2); `apply: true` is required to delete anything
+ * (REQ-MB-4), and a second apply run is a no-op (REQ-MB-4, REQ-MB-5).
+ *
+ * Never touches `.memory/records/` or `.memory/index.jsonl` — every read
+ * this function performs is `_read` on a throwaway `engram export` file this
+ * function itself creates and removes; `.memory/` is never in that path.
+ *
+ * Order of operations (design.md's Data Flow):
+ *   1. `_probe()` → `engram version`. Out of the tested 1.20.x range, or
+ *      absent, refuses `version` — in dry-run too. No export, no delete.
+ *   2. `engram export` → `topicKeysFromExport` cross-check (#445, reused) →
+ *      `planDuplicateHeal`. A refusal here (`divergent`/`tooMany`/`shape`)
+ *      refuses the WHOLE run; nothing is deleted.
+ *   3. No duplicate groups → `outcome: 'none'`.
+ *   4. Dry-run → `outcome: 'planned'`, the groups, zero delete calls.
+ *   5. Apply → delete every non-keeper id, ascending, ONE AT A TIME (see the
+ *      loop's own comment for why). The first throw stops the run
+ *      immediately (`outcome: 'partial'`; `notDeleted` includes the id that
+ *      failed).
+ *   6. Every delete succeeded → re-export, re-plan. Any duplicate still
+ *      standing (or a shape refusal on the re-export) is `outcome:
+ *      'unverified'` — REQ-MB-5's check that a soft delete the export
+ *      ignores does not get reported as healed.
+ *
+ * @param {object} [opts]
+ * @param {boolean} [opts.apply]  Delete for real. Defaults to report-only.
+ * @param {() => string | null} [opts._probe]  Returns `engram version`'s
+ *   stdout, or `null` if the probe could not answer.
+ * @param {(bin: string, args: string[], opts?: object) => string} [opts._exec]
+ *   Runs `engram <args>`, returning stdout.
+ * @param {(path: string, encoding?: string) => string} [opts._read]
+ *   Reads the export file `_exec('export', …)` wrote.
+ * @returns {{outcome: 'none'|'planned'|'healed'|'refused'|'partial'|'unverified',
+ *            deleted?: number[], notDeleted?: number[], groups?: object[],
+ *            rows?: number, distinct?: number, refusal?: string, key?: string,
+ *            fields?: string[], count?: number, detail?: string}}
+ */
+export function healDuplicates({
+  apply = false,
+  _probe = _defaultHealVersionProbe,
+  _exec = execFileSync,
+  _read = readFileSync,
+} = {}) {
+  const versionStdout = _probe();
+  const version = versionStdout == null ? null : parseEngramVersion(versionStdout);
+  if (!isTestedVersion(version)) {
+    return {
+      outcome: "refused",
+      refusal: "version",
+      detail:
+        versionStdout == null
+          ? "engram version probe returned no answer"
+          : `engram reports '${String(versionStdout).trim()}', outside the tested ${TESTED_ENGRAM_LABEL}`,
+    };
+  }
+
+  const exportAndPlan = () => {
+    const dir = mkdtempSync(join(tmpdir(), "brain-engram-heal-"));
+    const file = join(dir, "export.json");
+    try {
+      const stdout = _exec("engram", ["export", file], { stdio: ["ignore", "pipe", "pipe"], encoding: "utf8" });
+      const fileContents = _read(file, "utf8");
+      topicKeysFromExport(stdout, fileContents); // throws on shape/count mismatch (#445)
+      return planDuplicateHeal(JSON.parse(fileContents));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
+
+  let plan;
+  try {
+    plan = exportAndPlan();
+  } catch (err) {
+    return { outcome: "refused", refusal: "shape", detail: explainEngramFailure(err) };
+  }
+
+  if (!plan.ok) {
+    return { outcome: "refused", refusal: plan.refusal, key: plan.key, fields: plan.fields, count: plan.count, detail: plan.reason };
+  }
+
+  if (plan.groups.length === 0) {
+    return { outcome: "none", rows: plan.rows, distinct: plan.distinct };
+  }
+
+  if (!apply) {
+    return { outcome: "planned", groups: plan.groups, rows: plan.rows, distinct: plan.distinct };
+  }
+
+  // One id at a time, ascending, stopping at the FIRST failure — never a
+  // batch and never continue-past-a-throw. You cannot reason about a
+  // half-healed store unless the report is exact: `deleted` and
+  // `notDeleted` must name precisely which ids landed before the maintainer
+  // decides what to do next (design.md's own ruling on this loop).
+  const ids = plan.groups.flatMap((g) => g.delete).sort((a, b) => a - b);
+  const deleted = [];
+  for (let i = 0; i < ids.length; i++) {
+    try {
+      _exec("engram", HEAL_DELETE_ARGS(ids[i]), { stdio: ["ignore", "ignore", "pipe"] });
+      deleted.push(ids[i]);
+    } catch (err) {
+      return { outcome: "partial", deleted, notDeleted: ids.slice(i), detail: explainEngramFailure(err) };
+    }
+  }
+
+  let verify;
+  try {
+    verify = exportAndPlan();
+  } catch (err) {
+    return { outcome: "unverified", deleted, notDeleted: [], detail: explainEngramFailure(err) };
+  }
+  if (!verify.ok || verify.groups.length > 0) {
+    return { outcome: "unverified", deleted, notDeleted: [] };
+  }
+
+  return { outcome: "healed", deleted, notDeleted: [], rows: verify.rows, distinct: verify.distinct };
+}
+
+const TESTED_ENGRAM_LABEL = "1.20.x";

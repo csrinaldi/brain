@@ -5,10 +5,12 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 
-import { CONFIRMATION_WORD, parseArgs, runApprove } from './cli.mjs';
+import { CONFIRMATION_WORD, parseArgs, runApprove, defaultReadDenyActors, defaultReadAgentActors } from './cli.mjs';
 import { parseDecision } from '../review/lib/decision-block.mjs';
+import { testTmp } from '../lib/test-tmp.mjs';
 
 const HEAD_SHA = 'a'.repeat(40);
 const OTHER_SHA = 'b'.repeat(40);
@@ -301,4 +303,106 @@ test('#124: both twins answer the deny question with the SAME function', async (
   const src = readFileSync(new URL('./cli.mjs', import.meta.url), 'utf8');
   assert.match(src, /isDeniedActor\(actor, denyActors\)/, 'the write side ASKS the shared predicate');
   assert.doesNotMatch(src, /denyActors\.includes\(/, 'and does not restate the rule — that is how it diverged three times');
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// issue #942 (R1, R5, R11): a deny list that cannot be read denies nobody —
+// refuse instead. defaultReadDenyActors/defaultReadAgentActors now call
+// loadBrainConfigOrThrow(root) and propagate; the call site at runApprove's
+// deny check wraps that throw into the existing say('✗ …'); done(1) shape.
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('T9: defaultReadDenyActors(tmpDir) — unparseable brain.config.json → throws, message names the file', () => {
+  const dir = testTmp('approve-cli-cfg-');
+  writeFileSync(join(dir, 'brain.config.json'), '{oops');
+  assert.throws(
+    () => defaultReadDenyActors(dir),
+    (err) => {
+      assert.match(err.message, /brain\.config\.json/);
+      return true;
+    },
+  );
+});
+
+test('T10: defaultReadDenyActors(tmpDir) — no config at all → returns [] (R11)', () => {
+  const dir = testTmp('approve-cli-cfg-');
+  assert.deepEqual(defaultReadDenyActors(dir), []);
+});
+
+test('T9b: defaultReadAgentActors(tmpDir) — unparseable brain.config.json → throws, message names the file', () => {
+  const dir = testTmp('approve-cli-cfg-');
+  writeFileSync(join(dir, 'brain.config.json'), '{oops');
+  assert.throws(
+    () => defaultReadAgentActors(dir),
+    (err) => {
+      assert.match(err.message, /brain\.config\.json/);
+      return true;
+    },
+  );
+});
+
+test('T10b: defaultReadAgentActors(tmpDir) — no config at all → returns [] (R11)', () => {
+  const dir = testTmp('approve-cli-cfg-');
+  assert.deepEqual(defaultReadAgentActors(dir), []);
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// issue #975: loadBrainConfigOrThrow's shape check — JSON that parses but is
+// not a plain object (`null`, `[]`, `42`, `"x"`) used to degrade exactly like
+// `{}` because every reader here uses optional chaining. `defaultReadDenyActors`
+// and `defaultReadAgentActors` call `loadBrainConfigOrThrow` unchanged, so
+// they propagate the new shape-check throw exactly like T9/T9b's parse-failure
+// throw.
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('#975: defaultReadDenyActors(tmpDir) — non-object brain.config.json ([]) → throws, names the type', () => {
+  const dir = testTmp('approve-cli-cfg-');
+  writeFileSync(join(dir, 'brain.config.json'), '[]');
+  assert.throws(
+    () => defaultReadDenyActors(dir),
+    (err) => {
+      assert.match(err.message, /brain\.config\.json/);
+      assert.match(err.message, /must contain a JSON object/);
+      assert.match(err.message, /got array/);
+      return true;
+    },
+  );
+});
+
+test('#975: defaultReadAgentActors(tmpDir) — non-object brain.config.json (null) → throws, names the type', () => {
+  const dir = testTmp('approve-cli-cfg-');
+  writeFileSync(join(dir, 'brain.config.json'), 'null');
+  assert.throws(
+    () => defaultReadAgentActors(dir),
+    (err) => {
+      assert.match(err.message, /brain\.config\.json/);
+      assert.match(err.message, /got null/);
+      return true;
+    },
+  );
+});
+
+test('#975: runApprove refuses closed when the REAL defaultReadDenyActors hits a non-object config — the real entry point, not the loader alone', async () => {
+  const dir = testTmp('approve-cli-cfg-');
+  writeFileSync(join(dir, 'brain.config.json'), '42');
+  const vcs = makeVcs();
+  const res = await runApprove(baseCtx(vcs, {
+    // Wires the REAL production reader (not a stub) against a fixture dir
+    // whose config is a non-object — proves the caller, not just the loader.
+    readDenyActorsFn: () => defaultReadDenyActors(dir),
+  })).catch((e) => ({ threw: e }));
+  assert.ok(!res.threw, `the refusal must not throw past runApprove: ${res.threw?.message}`);
+  assert.notEqual(res.exitCode, 0, 'a non-object config must refuse the approval, not let it through');
+  assert.equal(vcs.calls.prReviewComment, 0, 'without posting anything');
+});
+
+test('T11: runApprove — readDenyActorsFn throws → exitCode 1, stdout starts with ✗, promise does not reject, prReviewComment never called', async () => {
+  const vcs = makeVcs();
+  const res = await runApprove(baseCtx(vcs, {
+    readDenyActorsFn: () => { throw new Error('brain.config.json at /tmp/x could not be parsed: Unexpected token'); },
+  })).catch((e) => ({ threw: e }));
+  assert.ok(!res.threw, `runApprove must never reject: ${res.threw?.message}`);
+  assert.equal(res.exitCode, 1);
+  assert.match(res.output, /^✗/m);
+  assert.equal(vcs.calls.prReviewComment, 0);
 });

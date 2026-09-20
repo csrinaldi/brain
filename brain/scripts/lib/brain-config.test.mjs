@@ -3,11 +3,12 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
-import { ensureProjectIdentity, providerFromHost, ensureBrainConfig } from './brain-config.mjs';
+import { ensureProjectIdentity, providerFromHost, ensureBrainConfig, loadBrainConfigOrThrow } from './brain-config.mjs';
+import { testTmp } from './test-tmp.mjs';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -159,12 +160,12 @@ test('ensureBrainConfig: creates config when missing with github identity', () =
     assert.equal(cfg.vcs.provider, 'github');
     assert.equal(cfg.project.gitHost, 'github.com');
     assert.equal(cfg.project.slug, 'owner/repo');
-    assert.equal(cfg.schemaVersion, '1.4.0', 'sdd.engines (1.4.0, issue #824) is now the latest — the 0.6.0 memory.dualWrite gap (D3/C4, issue #229) stays a deliberate, never-reused retirement mark');
+    assert.equal(cfg.schemaVersion, '1.6.0', 'memory.lane.enabled (1.6.0, issue #906 A6) is now the latest — the 0.6.0 memory.dualWrite gap (D3/C4, issue #229) stays a deliberate, never-reused retirement mark');
     assert.deepEqual(cfg.sdd.map, {}, 'sdd.map ships EMPTY: a routed cold-review would spawn an engine no consumer asked for');
     assert.deepEqual(cfg.sdd.stages, {}, 'sdd.stages ships EMPTY: the four lifecycle stages live in sdd-layout.mjs LIFECYCLE_STAGES, never duplicated into JSON (#456)');
     assert.deepEqual(cfg.sdd.configs, {}, "sdd.configs ships EMPTY: a stage absent from it takes the inhabitant's declared defaults, never an invented override (#312)");
     assert.deepEqual(cfg.sdd.engines, {}, 'sdd.engines ships EMPTY: an engine nobody recorded is honestly absent (#824)');
-    assert.ok(!('memory' in cfg), 'memory.dualWrite migration entry removed — no memory key is defaulted anymore');
+    assert.equal(cfg.memory.lane.enabled, false, 'memory.lane.enabled (#906 A6) must default false — never true on any tier, ever');
     assert.equal(cfg.governance.approvedLabel, 'status:approved', 'governance.approvedLabel must default to the plain base form');
     assert.equal(cfg.governance.tier, 'standard', 'governance.tier (issue #358 Q5, REQ-TIER-10) must default to "standard", never "lite"');
     assert.equal(cfg.reviewer.tokenEnv, 'BRAIN_REVIEWER_TOKEN', 'reviewer.tokenEnv must default to the documented env var name');
@@ -243,6 +244,117 @@ test('ensureBrainConfig: idempotent — second call does not recreate', () => {
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// ── loadBrainConfigOrThrow (issue #942, R3 — REQ-DENY-1) ────────────────────
+//
+// Distinguishes ABSENT (`{}`, no throw) from UNREADABLE/UNPARSEABLE (throw,
+// naming the path and the failure kind) — the one shared primitive every
+// hardened deny reader calls. Mirrors `memory/lib/upstream-records.mjs`'s
+// `loadBrainConfigAt` byte-for-byte in behaviour (the house model).
+
+test('T1: loadBrainConfigOrThrow — no file at all → returns {} (absence is not unreadability)', () => {
+  const dir = testTmp('brain-config-throw-');
+  assert.deepEqual(loadBrainConfigOrThrow(dir), {});
+});
+
+test('T2: loadBrainConfigOrThrow — malformed JSON → throws, message names the path and "could not be parsed"', () => {
+  const dir = testTmp('brain-config-throw-');
+  writeFileSync(join(dir, 'brain.config.json'), '{oops');
+  assert.throws(
+    () => loadBrainConfigOrThrow(dir),
+    (err) => {
+      assert.match(err.message, /brain\.config\.json/, 'names the file');
+      assert.match(err.message, new RegExp(dir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), 'names the path');
+      assert.match(err.message, /could not be parsed/, 'names the failure kind');
+      return true;
+    },
+  );
+});
+
+test('T3: loadBrainConfigOrThrow — config path is a directory → throws "could not be read" (ENOENT is the ONLY exemption)', () => {
+  const dir = testTmp('brain-config-throw-');
+  mkdirSync(join(dir, 'brain.config.json'));
+  assert.throws(
+    () => loadBrainConfigOrThrow(dir),
+    (err) => {
+      assert.match(err.message, /could not be read/, 'a directory in the file\'s place is "could not look", not absence');
+      return true;
+    },
+  );
+});
+
+// ── loadBrainConfigOrThrow shape check (issue #975) ──────────────────────────
+//
+// The parse can succeed on JSON that is not a plain object; every caller
+// reads through optional chaining, so a non-object value used to degrade
+// exactly like `{}` — the #942 class reached through a shape gap instead of
+// a parse error. `null`, `[]`, `42`, `"x"` must all throw, naming the path
+// and the JSON type found; absence and a valid object are unchanged.
+
+test('T4: loadBrainConfigOrThrow — brain.config.json is `null` → throws, names the path and "got null"', () => {
+  const dir = testTmp('brain-config-shape-');
+  writeFileSync(join(dir, 'brain.config.json'), 'null');
+  assert.throws(
+    () => loadBrainConfigOrThrow(dir),
+    (err) => {
+      assert.match(err.message, /brain\.config\.json/, 'names the file');
+      assert.match(err.message, new RegExp(dir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), 'names the path');
+      assert.match(err.message, /must contain a JSON object/, 'names the failure kind');
+      assert.match(err.message, /got null/, 'names the type found');
+      return true;
+    },
+  );
+});
+
+test('T5: loadBrainConfigOrThrow — brain.config.json is `[]` → throws "got array"', () => {
+  const dir = testTmp('brain-config-shape-');
+  writeFileSync(join(dir, 'brain.config.json'), '[]');
+  assert.throws(
+    () => loadBrainConfigOrThrow(dir),
+    (err) => {
+      assert.match(err.message, /must contain a JSON object/);
+      assert.match(err.message, /got array/);
+      return true;
+    },
+  );
+});
+
+test('T6: loadBrainConfigOrThrow — brain.config.json is `42` → throws "got number"', () => {
+  const dir = testTmp('brain-config-shape-');
+  writeFileSync(join(dir, 'brain.config.json'), '42');
+  assert.throws(
+    () => loadBrainConfigOrThrow(dir),
+    (err) => {
+      assert.match(err.message, /must contain a JSON object/);
+      assert.match(err.message, /got number/);
+      return true;
+    },
+  );
+});
+
+test('T7: loadBrainConfigOrThrow — brain.config.json is `"x"` → throws "got string"', () => {
+  const dir = testTmp('brain-config-shape-');
+  writeFileSync(join(dir, 'brain.config.json'), '"x"');
+  assert.throws(
+    () => loadBrainConfigOrThrow(dir),
+    (err) => {
+      assert.match(err.message, /must contain a JSON object/);
+      assert.match(err.message, /got string/);
+      return true;
+    },
+  );
+});
+
+test('T8: loadBrainConfigOrThrow — no file at all → still returns {} (unchanged by the shape check, R11)', () => {
+  const dir = testTmp('brain-config-shape-');
+  assert.deepEqual(loadBrainConfigOrThrow(dir), {});
+});
+
+test('T9: loadBrainConfigOrThrow — a valid object → still returns the parsed object unchanged', () => {
+  const dir = testTmp('brain-config-shape-');
+  writeFileSync(join(dir, 'brain.config.json'), JSON.stringify({ governance: { reviewActors: ['bot'] } }));
+  assert.deepEqual(loadBrainConfigOrThrow(dir), { governance: { reviewActors: ['bot'] } });
 });
 
 test('ensureBrainConfig: no origin (null host) → creates file but empty provider/host/slug', () => {

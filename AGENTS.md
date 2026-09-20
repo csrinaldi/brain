@@ -58,7 +58,7 @@ See [`brain/project/README.md`](brain/project/README.md) for directory conventio
 ### Architecture decisions
 
 - [ADR-0001](brain/project/decisions/adr-0001-arquitectura-3-capas-harness-reemplazable.md) — 3-layer architecture with replaceable harness
-- [ADR-0002](brain/project/decisions/adr-0002-memoria-git-based-dos-capas.md) — Git-based team memory in two layers (**Amendment 1, 08/09/2026** — the manifest note is withdrawn — records are the truth (ADR-0017), the manifest was the chunk transport's index and that transport is retired; manifest, symlink and merge driver are the engram adapter's private artifacts, governed by memory-backend-contract.md rule 3, #863; **Amendment 2, 09/09/2026** — the canonical flow's `memory:share`/`pre-push` bullets and the "verbs keep their names until #862" note now point at the lane (ADR-0034); the two-layer decision itself is unchanged)
+- [ADR-0002](brain/project/decisions/adr-0002-memoria-git-based-dos-capas.md) — Git-based team memory in two layers (**Amendment 1, 08/09/2026** — the manifest note is withdrawn — records are the truth (ADR-0017), the manifest was the chunk transport's index and that transport is retired; manifest, symlink and merge driver are the engram adapter's private artifacts, governed by memory-backend-contract.md rule 3, #863; **Amendment 2, 09/09/2026** — the canonical flow's `memory:share`/`pre-push` bullets and the "verbs keep their names until #862" note now point at the lane (ADR-0034); the two-layer decision itself is unchanged; **Amendment 3, 15/09/2026** — the canonical flow's scripts are now `brain:memory:pull`, `brain:memory:index` and `brain:memory:share`; the bare names stay as repo-only aliases and the two-layer decision is unchanged, #961; **Amendment 4, 15/09/2026** — erratum — Amendment 3 said the body was not rewritten, but its own promotion had annotated the body and Amendment 2 in place under ruling R6 on #961 as amended (option A); that sentence is rewritten, #973)
 - [ADR-0003](brain/project/decisions/adr-0003-split-core-project-self-hosting.md) — core/project split and self-hosting
 - [ADR-0004](brain/project/decisions/adr-0004-adapter-memoria-memory-backend.md) — Memory adapter: MEMORY_BACKEND selector (**Amendment 1, 08/09/2026** — the interface exists — memory-backend-contract.md names the required verbs, the three rules and the agnosticism test; "manifest required for all backends" is withdrawn (plainfiles is the proof) and the manifest, symlink and driver are the engram adapter's, #863)
 - [ADR-0005](brain/project/decisions/adr-0005-adapter-harness-sdd-harness.md) — Harness adapter: SDD_HARNESS selector
@@ -67,13 +67,13 @@ See [`brain/project/README.md`](brain/project/README.md) for directory conventio
 - [ADR-0008](brain/project/decisions/adr-0008-adapter-vcs-provider.md) — VCS adapter: explicit provider + verb contract
 - [ADR-0009](brain/project/decisions/adr-0009-documentation-language-policy.md) — Documentation language policy: core English, project docs configurable
 - [ADR-0010](brain/project/decisions/adr-0010-cli-output-i18n.md) — CLI output i18n: message catalogs with English fallback
-- [ADR-0011](brain/project/decisions/adr-0011-feature-scoped-working-memory.md) — Feature-scoped working memory: branch-local resume.md
+- [ADR-0011](brain/project/decisions/adr-0011-feature-scoped-working-memory.md) — Feature-scoped working memory: branch-local resume.md (**Amendment 1, 15/09/2026** — the export this ADR cites is now `brain:memory:share`; the bare name stays as a repo-only alias and the decision is unchanged, #961; **Amendment 2, 15/09/2026** — erratum — Amendment 1 said the body was not rewritten, but its own promotion had annotated it in place under ruling R6 on #961 as amended (option A); that sentence is rewritten, #973)
 - [ADR-0012](brain/project/decisions/adr-0012-harness-init-adapter.md) — Harness-init adapter: each harness defines its init
 - [ADR-0013](brain/project/decisions/adr-0013-auto-adr-onboarding.md) — Auto-ADR onboarding: bootstrap notices, agent drafts, human signs
-- [ADR-0014](brain/project/decisions/adr-0014-workflow-governance.md) — Workflow governance: enforce load-bearing invariants server-side
+- [ADR-0014](brain/project/decisions/adr-0014-workflow-governance.md) — Workflow governance: enforce load-bearing invariants server-side (**Amendment 1, 15/09/2026** — the memory-dump proxy's script is now `brain:memory:share`; the bare name stays as a repo-only alias and the invariants are unchanged, #961; **Amendment 2, 15/09/2026** — erratum — Amendment 1 said the body was not rewritten, but its own promotion had annotated it in place under ruling R6 on #961 as amended (option A); that sentence is rewritten, #973)
 - [ADR-0015](brain/project/decisions/adr-0015-governance-v3-substrate-ladder.md) — Governance v3: six-level fail-closed gate ladder over observable evidence (L1–L6 + substrate rung ladder)
 - [ADR-0016](brain/project/decisions/adr-0016-ci-context-normalization.md) — CI Context Normalization: One Seam Over Provider-Specific Pipeline Evidence
-- [ADR-0017](brain/project/decisions/adr-0017-memory-format-owned-by-brain.md) — The Durable Memory Record Format Is Owned By Brain, Not By Engram (**Amendment 1, 15/08/2026** — duplicate lines are not necessarily byte-identical — brain's own round-trip widens the unhashed `source`, so a divergent pair is reported and resolved first-wins, never refused; and the churn rule governs the diff, not the write, with the cross-file caveat named, #635; **Amendment 2, 16/08/2026** — the durable log holds ONE RECORD PER FILE (`records/<yyyy-mm>-<id>.jsonl`) — `merge=union` was a local git mechanism the forge that performs the merge does not apply, so the log was conflict-free only where the driver ran; two different records are now two different paths and there is nothing to union, #677)
+- [ADR-0017](brain/project/decisions/adr-0017-memory-format-owned-by-brain.md) — The Durable Memory Record Format Is Owned By Brain, Not By Engram (**Amendment 1, 15/08/2026** — duplicate lines are not necessarily byte-identical — brain's own round-trip widens the unhashed `source`, so a divergent pair is reported and resolved first-wins, never refused; and the churn rule governs the diff, not the write, with the cross-file caveat named, #635; **Amendment 2, 16/08/2026** — the durable log holds ONE RECORD PER FILE (`records/<yyyy-mm>-<id>.jsonl`) — `merge=union` was a local git mechanism the forge that performs the merge does not apply, so the log was conflict-free only where the driver ran; two different records are now two different paths and there is nothing to union, #677; **Amendment 3, 15/09/2026** — the scripts this ADR cites are now `brain:memory:*` (`save`, `share`, `reindex`, `resolve-index`, `split-records`); the bare names stay as repo-only aliases and the format decision is unchanged, #961; **Amendment 4, 15/09/2026** — erratum — Amendment 3 said the body and Amendments 1-2 were not rewritten, but its own promotion had annotated them in place under ruling R6 on #961 as amended (option A); that sentence is rewritten, #973)
 - [ADR-0019](brain/project/decisions/adr-0019-harness-port.md) — The SDD_HARNESS port: four environment surfaces, artifacts neutral by design (**Amendment 1, 28/08/2026** — routing WHO PRODUCES a stage's artefact does not fork the evidence contract — what forks it is a second layout, #323; **Amendment 2, 31/08/2026** — Amendment 1's evidence-contract citations named line numbers and two counts that were already wrong when written — corrected to symbols, #456; **Amendment 3, 31/08/2026** — Amendment 2's own replacement count was wrong — eleven production importers and five test files, not ten and eighteen, #456; **Amendment 4, 31/08/2026** — Amendment 2's narrative still stated ten/eighteen — annotated in place with the measured eleven/sixteen so no reader takes the superseded count as current, #456; **Amendment 5, 03/09/2026** — a DECLARED custom stage's artefact joins the evidence contract under Amendment 1's four conditions — scaffolded, walked by phase-order in declared position, archived whole; the tier still scopes only the four, #810)
 - [ADR-0020](brain/project/decisions/adr-0020-reviewer-port-verbs-and-two-key-split.md) — External-reviewer VCS port verbs + the reviewActors/approvalActors two-key split (**Amendment 1, 06/08/2026; Amendment 2, 07/08/2026** — `prReviewComment` carries optional inline `comments[]`; at most ONE payload the provider accepts carries the verdict, but GitLab needs N+1 calls — verb count and lock 2 unchanged, #405)
 - [ADR-0021](brain/project/decisions/adr-0021-reviewer-port-head-and-rollup.md) — Widen the VCS port for the cold reviewer: headRefOid on prView + a prStatusRollup read verb; retire the H1-1 cold-boot seam
@@ -90,7 +90,7 @@ See [`brain/project/README.md`](brain/project/README.md) for directory conventio
 - [ADR-0032](brain/project/decisions/adr-0032-graph-block-declared-by-its-tag.md) — A graph block is declared by its fence tag: unspoofability outranks the rendered-artifact rule, and the tag is only half the fix (**Amendment 1, 18/08/2026** — the rendering assumption is closed by observation on both providers — an unknown info-string keeps its code-block shape and loses only highlighting, so the cost stays at "no colours"; and the tag's other half, D6's hidden-declaration refusal, was never wired until #723, #723)
 - [ADR-0033](brain/project/decisions/adr-0033-cold-review-transport.md) — The cold review runs as a spawned subagent: the transport is a stage engine, and the producer never holds a credential (**Amendment 1, 28/08/2026** — the poster credential stays on the environment axis by ruling, not by omission — the engine session is the boundary, #773; **Amendment 2, 28/08/2026** — the forge-CLI row gains a per-run config-dir shadow — the CLI can no longer find the keyring, which is not the same as the secret being gone, #775)
 - [ADR-0023](brain/project/decisions/adr-0023-sdd-role-port.md) — The role port: engines declare, platforms receive, brain's own roles live on a shelf
-- [ADR-0034](brain/project/decisions/adr-0034-memory-travels-on-its-own-lane.md) — Memory travels on its own lane: records reach `main` on their own pull request, never the feature's
+- [ADR-0034](brain/project/decisions/adr-0034-memory-travels-on-its-own-lane.md) — Memory travels on its own lane: records reach `main` on their own pull request, never the feature's (**Amendment 1, 15/09/2026** — `brain:memory:ship` is now the real script name, and the scripts the ADR cites as `memory:save`/`memory:share`/`memory:audit` are `brain:memory:*`; the bare names stay as repo-only aliases and the lane decision is unchanged, #961; **Amendment 2, 15/09/2026** — erratum — Amendment 1 said the body was not rewritten, but its own promotion had annotated it in place under ruling R6 on #961 as amended (option A); that sentence is rewritten, #973; **Amendment 3, 17/09/2026** — the five feature-PR memory surfaces L6/L7 named (`pre-push` share, `brain:save`, `brain:next`'s materialization state, `ticket.nextSteps`/PR-template wording) are retired; `memory-gate` is unchanged; this repository sets `memory.lane.enabled: true`, #890; **Amendment 4, 19/09/2026** — observed, not a policy change — this repository has `allow_auto_merge: false`, so `mrAutoMerge` is refused at every tier and a `lite` lane PR waits for a human merge like `standard`; whether to enable the setting or amend L2 is deferred to epic #864 task 6.1, #936)
 
 ### Project-specific rules
 
@@ -128,7 +128,7 @@ The agent may execute without asking for permission:
 
 - Read any file in the repo (`brain/`, `openspec/`, code, scripts)
 - Create/modify files in `openspec/changes/**` (in-flight SDD artifacts)
-- Capture memory as records: `npm run memory:save` writes a record under `.memory/records/` first (`memory-backend-contract.md` rule 2); the active backend picks it up on the next hydration (`session:start`, `cli.mjs import`) until #874 adds direct hydration. The backend's own MCP write (`mem_save`) is working memory for the change in flight, non-durable by definition: nothing exports it.
+- Capture memory as records: `npm run brain:memory:save` writes a record under `.memory/records/` first (`memory-backend-contract.md` rule 2); the active backend picks it up on the next hydration (`session:start`, `cli.mjs import`) until #874 adds direct hydration. The backend's own MCP write (`mem_save`) is working memory for the change in flight, non-durable by definition: nothing exports it.
 - Write to `scratch/{agent-id}.md` within an active change
 - Run `npm run brain:repo:check`, `npm run backend:build`, `npm run brain:change:verify`
 - Create issues in GitLab (`/gitlab-issue`)
@@ -224,11 +224,11 @@ this contract — without changes to `project-workflow.md` or `developer-environ
 | `npm run brain:project:feature -- --issue <id>` | `project:feature -- --issue <id>` | `/sdd-new <id>` | Starts an SDD change: creates `openspec/changes/issue-<id>-<slug>/` with `proposal.md`, `design.md`, `tasks.md`, `spec.md`. |
 | `npm run brain:repo:check` | `repo:check` | — | Validates prohibited references across the entire tree. Minimum gate before any commit. |
 | `npm run brain:change:verify` | `change:verify` | `/sdd-verify` | Validates the scope of the active change: classifies the diff, runs only the necessary verifications. |
-| `npm run memory:share` | — | — | Materializes what `.memory/records/` does not yet hold and rebuilds `index.jsonl`; reports the duplicate accounting. Under record-first (#864 task 3.2) it exports nothing from the backend. |
-| `npm run memory:pull` | — | — | `git pull`, then hydrates the active backend from `.memory/records/` (idempotent by record id — `memory-backend-contract.md` rule 1). Brings the team's memory. |
-| `npm run memory:index` | — | — | Re-projects `brain/` doctrine into the active backend, where the backend supports it (`plainfiles` does not, by design). Needed when ADRs or glossary change. |
-| `npm run memory:save` | — | — | The producer path: writes a record to `.memory/records/` first (provenance, `--issue`; `--supersedes` lands with #805). Today it is pinned to `plainfiles` and the active backend picks the record up on its next hydration (`session:start`, `cli.mjs import`); direct hydration lands with #874. `memory-backend-contract.md` rule 2. |
-| `npm run memory:audit` | — | — | The five numbers of memory 2.0 (#870) from records and `git log` alone; the backend row degrades to a stated reason. |
+| `npm run brain:memory:share` | — | — | Materializes what `.memory/records/` does not yet hold and rebuilds `index.jsonl`; reports the duplicate accounting. Under record-first (#864 task 3.2) it exports nothing from the backend. |
+| `npm run brain:memory:pull` | — | — | `git pull`, then hydrates the active backend from `.memory/records/` (idempotent by record id — `memory-backend-contract.md` rule 1). Brings the team's memory. |
+| `npm run brain:memory:index` | — | — | Re-projects `brain/` doctrine into the active backend, where the backend supports it (`plainfiles` does not, by design). Needed when ADRs or glossary change. |
+| `npm run brain:memory:save` | — | — | The producer path: writes a record to `.memory/records/` first (provenance, `--issue`; `--supersedes` lands with #805). Today it is pinned to `plainfiles` and the active backend picks the record up on its next hydration (`session:start`, `cli.mjs import`); direct hydration lands with #874. `memory-backend-contract.md` rule 2. |
+| `npm run brain:memory:audit` | — | — | The five numbers of memory 2.0 (#870) from records and `git log` alone; the backend row degrades to a stated reason. |
 
 > **Worktree convention (load-bearing):** task start is
 > `npm run brain:ticket:start -- <id> [--base <tracker>]`, and **the isolated worktree is what
@@ -445,7 +445,7 @@ Job names are **load-bearing**: they form the check context strings
 |---|-----------|-----------------|------------|-----------|
 | 1 | Every PR links an approved ticket | `issue-link` | _(none — not skippable)_ | Hard |
 | 2 | PR diff ≤ the declared tier's budget — **1000** `lite` · **400** `standard` · **200** `regulated` | `diff-size` | `size:exception` — **refused at `regulated`** | Hard with override — **none at `regulated`** |
-| 3 | `.memory/` has EVER held a session summary (repo-scoped) | `memory-gate` _(S4)_ | _(none — `skip:memory-gate` is named but unimplemented)_ | Soft — see below |
+| 3 | Repo-scoped when no issue is detectable; otherwise issue-scoped over the PR tree plus `origin/<default>` (#1024) | `memory-gate` _(S4)_ | `skip:memory-gate` — honored at `standard` by a non-author, refused at `regulated`, not consulted at `lite` (#1024) | Soft — see below |
 | 4 | An ADDED ADR co-occurs with a `brain/HOME.md` entry | `decision-gate` _(S4)_ | _(none — the gate reads no labels)_ | Hard, in one direction — see below |
 
 > **Invariant 2 is tier-resolved, and this text restates the numbers by hand** (#496). The
@@ -464,27 +464,38 @@ Job names are **load-bearing**: they form the check context strings
 
 ### Invariant 3 scope — what `memory-gate` does and does not check
 
-**It is repo-scoped and it is permanently satisfied.** `memoryPresence` asks whether ANY
-`session_summary` observation exists in `.memory/records/`. There are 205. The gate therefore
-passes on every PR regardless of whether that PR captured anything, and it will keep passing if
-nothing is ever captured again.
+**It is repo-scoped only when no issue is detectable from the PR/MR description; otherwise it
+is issue-scoped over the union of the PR tree and `origin/<default>` (#1024).** When
+`ci-context.mjs`'s `loadContext()` can resolve an issue number, `memoryRetrieval()` requires a
+record scoped to that issue in either tree — a record that reached the default branch on its
+own lane PR (ADR-0034) satisfies a feature PR closing the same issue, with no rebase. Only when
+no issue number can be resolved does the gate fall back to `memoryPresence`'s repo-wide
+question — whether ANY `session_summary` observation exists anywhere in `.memory/records/`.
 
-**Nothing enforces per-change capture.** The PR template's "Memory materialized before closing"
-is a promise the checklist makes and no gate keeps. Read invariant 3 as *"this repository has a
-memory layer"*, never as *"this change was remembered"*.
+**Per-change capture is enforced when an issue is detectable.** The PR template's "Memory
+materialized before closing" is now backed by the scoped check above whenever the pipeline can
+resolve the issue; it remains an unenforced promise only in the repo-scoped fallback case (no
+issue detectable).
 
 Measured 2026-08-11 (issue #529): `.memory/records/` went **seven days** without a new record
 while **34 merges** landed. `memory-gate` was green on all of them — correctly, by the definition
 above. That is the gap this scope note exists to stop hiding.
 
-**`skip:memory-gate` does not exist in code.** No path checks for it. It is listed here and in
-`AGENTS.md` as documentation of an intent, and `brain:metrics` counts its usage raw without ever
-subtracting it. Applying the label changes nothing.
+**`skip:memory-gate` is real, per tier (#1024).** `memory-gate-override.mjs#decideMemoryGateOverride`
+honors it ONLY at the `standard` tier (`TIER_PARAMS.honorSkipMemoryGate`), and only when the
+applier — the latest `add` event's actor — differs from the PR author and is not listed in
+`governance.reviewActors`/`governance.agentActors` (mirrors `actor-check`'s own distinct-actor
+rule). At `regulated` the label is refused, consistent with `regulated` refusing
+`size:exception`. At `lite` it is noted in the output and not consulted, because the gate is
+detection-only there. `brain:metrics` reports it as `raw/honored`, not a raw count alone.
 
 **This is a ruling, not a resting place** (issue #529). The sequence is: #530 makes capture a
 mechanism rather than a habit → `skip:memory-gate` becomes real → invariant 3 tightens to
 recency. Tightening it before the writer is reliable would block every PR with no override,
-which is how a gate teaches people that gates are obstacles.
+which is how a gate teaches people that gates are obstacles. **Step 2 done (#1024)**: the
+tier-scoped override above and the union read that makes a strict scoped check safe without
+forcing a rebase. Recency (the rest of step 3) remains — this change activates `GATE_MATRIX`'s
+`required` evidence at `standard`/`regulated` but does not tighten the evidence form itself.
 
 Check context format: `governance / <job-name>` (GitHub prefixes the workflow `name:` field).
 
@@ -658,7 +669,7 @@ a `--range=` flag) — `git log` already accepts range syntax like `HEAD~30..HEA
 | Changes merged | Count of first-parent merges landing in the bucket |
 | Median lead time | Median of: issue's **last** `status:approved` label-add at-or-before merge → merge date |
 | `diff-size` / `issue-link` / `decision-gate` (raw / enforced) | `raw` = the check's real result, ignoring any exemption; `enforced` = `raw` minus `size:exception`-labeled and net-parity-exempted merges (the same exemption decisions `brain-audit` itself makes) |
-| `size:exception` / `skip:memory-gate` usage | Raw count of merges whose PR carries the label, by period |
+| `size:exception` usage / `skip:memory-gate` usage (raw / honored) | `size:exception`: raw count of merges whose PR carries the label, by period. `skip:memory-gate`: raw count of merges whose PR carries the label, AND how many of those `decideMemoryGateOverride` actually honored (#1024) |
 | `size:exception` usage by author | A separate "Exception usage by author" table: `size:exception` count per (period, label-adding actor) pair. The actor is read from the PR's own label-add events, not the linked issue's; unresolvable actors (VCS not configured, `labelEvents` fetch failure) are bucketed as `unknown` — never dropped |
 | `phase-order` / `actor-check` / `brain-writes-reviewed` | Single pass/fail count column (DETECTION_JOBS never block merge, so there is no raw/enforced split). Supported on both providers — see the GitLab caveat below |
 | Uncomputable | Merges where a per-merge git-plumbing read failed — counted visibly, never silently dropped or silently passed |
@@ -684,12 +695,12 @@ a `--range=` flag) — `git log` already accepts range syntax like `HEAD~30..HEA
   reflect a long-considered issue approved well before the PR existed.
 - **`memoryPresence`/`memory-gate` is repo-global, not per-merge.** See above — do
   not read it as "did this specific merge have memory captured".
-- **`skip:memory-gate` is documented, not enforced.** The label is named in
-  `AGENTS.md` and this file, but no code path anywhere checks for it or exempts
-  anything on its presence — unlike `size:exception`, which `diff-size` genuinely
-  honors. `brain:metrics` reports `skip:memory-gate` usage as a RAW label count only
-  and **never subtracts it** from an enforced count — subtracting it would invent an
-  exemption that does not exist in code.
+- **`skip:memory-gate` is enforced at `standard` only (#1024).** `memory-gate` is not in
+  `PER_PERIOD_GATES` (design D3 — it is a repo-level signal, not a per-period series), so there
+  is no enforced-failure count to subtract an honored skip from. `brain:metrics` reports it as
+  `raw/honored`: raw is every merge whose PR carried the label; honored is the subset
+  `decideMemoryGateOverride` actually honored (a non-author applier, at the `standard` tier),
+  with a by-author breakdown mirroring `size:exception`'s own table.
 - **`decision-gate` counts are label-conditional.** Only PRs carrying the `decision`
   label contribute to its raw/enforced counts, matching its mixed (Step 1 hard /
   Step 2 heuristic) enforcement described above.

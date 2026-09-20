@@ -19,6 +19,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { loadBrainConfigOrThrow } from '../lib/brain-config.mjs';
 import { loadContext, resolveDetectionBody, gitlabApiConfig } from './ci-context.mjs';
 import { getVcs } from './cli.mjs';
 import { resolveApprovedLabel } from '../governance/approved-label.mjs';
@@ -1095,16 +1096,17 @@ export function approvalDenySet(config) {
  * restrictive and co-directional ("not a human authority"), which is why ruling
  * R2 is excepted here; see the ADR. Kept as a separate reader from
  * `defaultReadBotAllowlist` so the two keys never merge at the source.
+ *
+ * DENY-DIRECTION (issue #942, R1): calls `loadBrainConfigOrThrow(cwd)` and does
+ * NOT catch. An absent config still resolves to `{}` → `[]` (R11, unchanged) —
+ * only a PRESENT-but-unreadable/unparseable config throws, and that throw
+ * propagates out of `gatherActorCheckInputs` into `runActorCheck`'s existing
+ * tiered catch (`resolveTierForFailure` + `resolveGatePolicy` → `fail` at
+ * `required` tiers). A deny reader that swallows a config-read failure denies
+ * nobody, which is the exact fail-open this hardening closes.
  */
 function defaultReadDenyActors(cwd) {
-  return () => {
-    try {
-      const config = JSON.parse(readFileSync(join(cwd, 'brain.config.json'), 'utf8'));
-      return approvalDenySet(config);
-    } catch {
-      return [];
-    }
-  };
+  return () => approvalDenySet(loadBrainConfigOrThrow(cwd));
 }
 
 /**
@@ -1328,15 +1330,16 @@ export async function runActorCheck(deps = {}) {
       return {
         level: 'fail',
         reason:
-          `actor-check: could not gather inputs (gh api failure?) — ${err.message} — failing closed: ` +
-          `actor-check is required at the "${tier}" tier (REQ-TIER-2's never-tiered core) and an ` +
-          'unverifiable API failure cannot be treated as a pass (matches evaluateDistinctAct\'s existing ' +
-          'fail-closed handling of an unreadable prCommits — issue #358 Q5 Phase 5 review finding 1).',
+          `actor-check: could not gather inputs (gh/api or brain.config.json failure) — ${err.message} — ` +
+          `failing closed: actor-check is required at the "${tier}" tier (REQ-TIER-2's never-tiered core) ` +
+          'and an unverifiable failure cannot be treated as a pass (matches evaluateDistinctAct\'s existing ' +
+          'fail-closed handling of an unreadable prCommits — issue #358 Q5 Phase 5 review finding 1; widened ' +
+          'to a config-read/parse failure by issue #942, R1).',
       };
     }
     return {
       level: 'warn',
-      reason: `actor-check: could not gather inputs (gh api failure?) — ${err.message} (detection-tier at "${tier}").`,
+      reason: `actor-check: could not gather inputs (gh/api or brain.config.json failure) — ${err.message} (detection-tier at "${tier}").`,
     };
   }
 

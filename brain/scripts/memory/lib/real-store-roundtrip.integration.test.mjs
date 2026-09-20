@@ -53,10 +53,21 @@ test('REQ-C4-1: round-trip id-equality holds for every record in the REAL .memor
     return;
   }
 
+  // #738: a real record whose OWN stored `actor` is branch-shaped now gets a
+  // documented A5 soft-reject on re-export (W3, #738) — this is the exact
+  // historical population (~183 records, design.md's measured audit) #738
+  // exists to stop GROWING, not to backfill (Non-Goals: no `HANDLE_RE`
+  // grammar change, no backfill of legacy shapes). Counted and reported
+  // separately from a genuine round-trip failure, never silently dropped.
   const failures = [];
+  const branchShapeRejections = [];
   for (const record of records) {
     const observation = importRecord(record);
     const { record: exported, rejected, skipped } = exportObservation(observation);
+    if (rejected?.reason?.includes('branch-shaped')) {
+      branchShapeRejections.push(record.id);
+      continue;
+    }
     if (rejected || skipped) {
       failures.push(
         `${record.id ?? '(missing id)'}: round-trip was ${rejected ? 'REJECTED' : 'SKIPPED'} — ${JSON.stringify(rejected ?? skipped)}`,
@@ -71,7 +82,19 @@ test('REQ-C4-1: round-trip id-equality holds for every record in the REAL .memor
     }
   }
 
-  console.log(`REQ-C4-1: round-trip id-equality exercised over ${records.length} real records from .memory/records/`);
+  console.log(
+    `REQ-C4-1: round-trip id-equality exercised over ${records.length} real records from .memory/records/ ` +
+      `(${branchShapeRejections.length} pre-existing branch-shaped-actor records excluded, #738 A5)`,
+  );
+  // Bound the exclusion bucket (fresh-context review NIT): a regression that
+  // widens the "branch-shaped" classification to swallow every record would
+  // silently EMPTY `failures` above instead of failing loudly — this pin
+  // makes that regression visible instead of quietly turning the test vacuous.
+  assert.ok(
+    branchShapeRejections.length < records.length,
+    `every one of ${records.length} records was classified as branch-shaped-actor and excluded — ` +
+      'this empties the failure set silently; the exclusion classifier is almost certainly over-matching',
+  );
   assert.deepEqual(
     failures,
     [],
@@ -148,7 +171,12 @@ test('REQ-C4-1 / #404: real records re-stamped with an `issue` still round-trip 
   const samples = [...withSource, ...withoutSource];
   assert.ok(samples.length > 0, 'the real store must yield at least one sample record');
 
+  // #738 (A5): a sampled record whose OWN stored `actor` is already
+  // branch-shaped gets a documented soft-reject on re-export — excluded from
+  // `failures` the same way the sibling test above excludes it, not silently
+  // dropped from the count.
   const failures = [];
+  const branchShapeRejections = [];
   for (const sample of samples) {
     // Rebuild through buildRecord() so the id is the one this record WOULD
     // have carried had its author populated `issue` — never a hand-computed
@@ -172,6 +200,10 @@ test('REQ-C4-1 / #404: real records re-stamped with an `issue` still round-trip 
     }
 
     const { record: exported, rejected, skipped } = exportObservation(importRecord(issued));
+    if (rejected?.reason?.includes('branch-shaped')) {
+      branchShapeRejections.push(sample.id);
+      continue;
+    }
     if (rejected || skipped) {
       failures.push(`${sample.id}: round-trip was ${rejected ? 'REJECTED' : 'SKIPPED'}`);
       continue;
@@ -187,7 +219,14 @@ test('REQ-C4-1 / #404: real records re-stamped with an `issue` still round-trip 
   }
 
   console.log(
-    `REQ-C4-1/#404: issue-carrying round-trip exercised over ${samples.length} records derived from the real store`,
+    `REQ-C4-1/#404: issue-carrying round-trip exercised over ${samples.length} records derived from the real store ` +
+      `(${branchShapeRejections.length} pre-existing branch-shaped-actor records excluded, #738 A5)`,
+  );
+  // Same exclusion-bucket bound as the sibling test above (fresh-context review NIT).
+  assert.ok(
+    branchShapeRejections.length < samples.length,
+    `every one of ${samples.length} sampled records was classified as branch-shaped-actor and excluded — ` +
+      'this empties the failure set silently; the exclusion classifier is almost certainly over-matching',
   );
   assert.deepEqual(failures, [], `${failures.length}/${samples.length} issue-carrying records failed:\n${failures.join('\n')}`);
 });
@@ -201,6 +240,12 @@ test('W1 (#404): every record in the REAL store already satisfies the write-path
   // Honest about its reach: this is THIS repo. A consumer's `.memory/**` is
   // consumer-owned (managed-paths.mjs's `local` array) and is not covered by
   // any test here — which is the reason the rule is not on the read path.
+  //
+  // W3 (#738) is EXCLUDED from this measurement, on purpose: it is a NEW,
+  // forward-only rule — the whole reason #738 exists is that ~183 of this
+  // repo's own historical records carry a branch-shaped `actor` (design.md's
+  // measured audit). Backfilling them is explicitly a Non-Goal (#864 task
+  // 1.2a / #368); W1/W2 (measured here) are the rules this pin still owns.
   const records = readRecordObservations({ recordsDir });
   if (records.length === 0) {
     t.skip(
@@ -209,9 +254,22 @@ test('W1 (#404): every record in the REAL store already satisfies the write-path
     );
     return;
   }
+  const nonW3Errors = (r) => validateWritableRecord(r).errors.filter((e) => !e.includes('W3'));
   const offenders = records
-    .filter((r) => !validateWritableRecord(r).valid)
-    .map((r) => `${r.id}: ${validateWritableRecord(r).errors.join('; ')}`);
+    .filter((r) => nonW3Errors(r).length > 0)
+    .map((r) => `${r.id}: ${nonW3Errors(r).join('; ')}`);
   console.log(`W1/#404: write-path rules measured over ${records.length} real records`);
+  // Bound the W3 exclusion bucket (fresh-context review NIT): the known
+  // ~183-record branch-shaped-actor population (design.md's measured audit)
+  // must actually PRODUCE a W3 error for this filter to be doing anything. A
+  // regression that stops `classifyActor` from ever returning 'branch' would
+  // make `nonW3Errors` a no-op filter over an already-empty set, and
+  // `offenders` would stay silently empty for the wrong reason.
+  const w3Count = records.filter((r) => validateWritableRecord(r).errors.some((e) => e.includes('W3'))).length;
+  assert.ok(
+    w3Count > 0,
+    'expected at least one real record to trip the W3 branch-shaped-actor rule (the known historical population) — ' +
+      'zero means the W3 exclusion below is filtering nothing, not that the store is clean',
+  );
   assert.deepEqual(offenders, [], `${offenders.length}/${records.length} real records violate a write-path rule:\n${offenders.join('\n')}`);
 });

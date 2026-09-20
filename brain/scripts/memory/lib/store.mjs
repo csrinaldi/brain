@@ -98,13 +98,13 @@ export function recordFilename(record) {
  * Reading is unchanged and needs no migration: every reader here globs
  * `*.jsonl` under `records/` and parses line by line, so a month-file store, a
  * per-record store, and a half-migrated store all read identically. Splitting
- * an existing store is `memory:split-records`, which a repository runs when it
+ * an existing store is `brain:memory:split-records`, which a repository runs when it
  * wants the conflict-free property — brain never rewrites a consumer's
  * `.memory/**` on upgrade.
  *
  * Validates with `validateWritableRecord()`, not `validateRecord()`: this is
  * the ONE chokepoint through which every in-tree producer creates a record
- * (`plainfiles.mjs#save`, `engram.mjs#dualWriteRecords`, `migrate-v1.mjs`), so
+ * (`plainfiles.mjs#save`, `engram.mjs#save`, `migrate-v1.mjs`; `engram.mjs#dualWriteRecords` until #977), so
  * it is where shape rules can be enforced WITHOUT a read-path rejection
  * bricking an already-populated consumer store (see format.mjs's read/write
  * note, issue #404).
@@ -244,7 +244,7 @@ export function rebuildIndex({ recordsDir, indexPath }) {
  * readRecordIds() — read the set of record `id`s currently present in
  * `records/` (issue #221 fix pass, BLOCKER). `records/` is the AUTHORITATIVE
  * dedup source — not the derived `index.jsonl` — since it is the append-only
- * log dualWriteRecords() must never write a duplicate physical line into.
+ * log no producer may write a duplicate physical line into.
  *
  * Same degenerate-state contract as rebuildIndex(): an absent/empty
  * `records/` returns an empty Set, never throws. A corrupt physical line is

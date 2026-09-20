@@ -1,6 +1,6 @@
-// secret-scrub.mjs — fail-closed secret scanner for `memory:share` (issue #214, C1b).
+// secret-scrub.mjs — fail-closed secret scanner for `brain:memory:share` (issue #214, C1b).
 //
-// Scans ONLY the content materialized in the CURRENT `memory:share` run — never
+// Scans ONLY the content materialized in the CURRENT `brain:memory:share` run — never
 // the whole store (C1a design.md Decision 5). Today "materialized this run"
 // means the engram gzip chunks `share()` writes to `.memory/chunks/*.jsonl.gz`
 // (see backends/engram.mjs#scrubMaterializedChunks) — a deliberate pre-C2 scrub
@@ -10,8 +10,7 @@
 // only bypass is `governance.memorySecretAllowPatterns`, a committed, reviewable
 // allowlist (never an ephemeral local CLI flag).
 
-import { gunzipSync } from 'node:zlib';
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 
 /**
  * Default secret patterns (regex source strings). Additive only: a consumer's
@@ -92,42 +91,13 @@ export function scanTextForSecrets(text, patterns, allowPatterns = []) {
 }
 
 /**
- * scrubChunkFile() — decompress an engram chunk (`.jsonl.gz`, a gzip of ONE
- * JSON object per ADR-0017's empirical inspection), pretty-print it so a
- * match has a meaningful line number, and scan for secrets.
- *
- * Defense-in-depth (cutover finding 7, id:388): guards existence before the
- * read. The primary fix excludes porcelain deletions in
- * `_defaultChangedChunkFiles` (engram.mjs), but a caller could still hand this
- * function a path that no longer exists (e.g. a race between `git status` and
- * the read) — treat "already gone" as "nothing to scan" rather than an ENOENT
- * throw.
- *
- * @param {string} chunkPath
- * @param {RegExp[]} patterns
- * @param {RegExp[]} [allowPatterns]
- * @returns {{pattern: string, lineNumber: number, line: string} | null}
- */
-export function scrubChunkFile(chunkPath, patterns, allowPatterns = []) {
-  if (!existsSync(chunkPath)) return null;
-  const gz = readFileSync(chunkPath);
-  const raw = gunzipSync(gz).toString('utf8');
-  let pretty;
-  try {
-    pretty = JSON.stringify(JSON.parse(raw), null, 2);
-  } catch {
-    // Not parseable JSON — scan the raw decompressed bytes rather than silently skipping.
-    pretty = raw;
-  }
-  return scanTextForSecrets(pretty, patterns, allowPatterns);
-}
-
-/**
  * scrubRecordsFile() — read a plaintext `.memory/records/*.jsonl` file (one
  * physical JSON line per record, R1 — see format.mjs) and scan it for
- * secrets. Unlike scrubChunkFile(), there is NO gzip step: REQ-C2B1-2's
- * re-point target (issue #221, C2b-1) is already plaintext. Mirrors
- * scrubChunkFile()'s signature/return exactly.
+ * secrets. Plaintext only — no gzip step: REQ-C2B1-2's re-point target
+ * (issue #221, C2b-1) is already plaintext. The gzip-chunk scrubber this
+ * once mirrored (`scrubChunkFile`) had no production caller after #874
+ * split B removed `share()`'s chunk scan; #955 (R4, epic task 2.4) deleted
+ * it — nothing in this file reads a `.jsonl.gz` any more.
  *
  * @param {string} recordsPath
  * @param {RegExp[]} patterns

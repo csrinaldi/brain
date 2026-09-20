@@ -13,8 +13,15 @@ const CHECKPOINT_REPORT_RE = /(^|\/)checkpoint-report\.md$/;
  * @param {{ labels?: string[], changedFiles?: string[] }} [input]
  * @returns {'ruling'|'checkpoint'|'tranche'}
  */
-export function deriveMode({ labels = [], changedFiles = [] } = {}) {
-  if (labels.includes('needs-ruling')) return 'ruling';
+export function deriveMode({ labels, changedFiles = [] } = {}) {
+  // #1073: there is NO `labels = []` default here any more. A default only
+  // applies to `undefined`, so it looks like a guard and is not — the
+  // identical shape crashed `evaluators/checkpoint.mjs` the moment
+  // `review/cli.mjs` began threading an unread label set through as `null`,
+  // and a default of `[]` also MINTS a reading nobody performed. The guard is
+  // the `Array.isArray` below, which covers every shape at once: a set nobody
+  // read cannot claim a ruling was asked for.
+  if (Array.isArray(labels) && labels.includes('needs-ruling')) return 'ruling';
   if (changedFiles.some(f => CHECKPOINT_REPORT_RE.test(f))) return 'checkpoint';
   return 'tranche';
 }

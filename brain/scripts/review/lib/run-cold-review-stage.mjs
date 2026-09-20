@@ -40,8 +40,8 @@
 // exists to forbid. Rather than ship that for one commit and forbid it in the
 // next, the seam is required and the resolution lands in B.6 with its refusal.
 
-import { join, dirname } from 'node:path';
-import { mkdirSync, existsSync, rmSync, mkdtempSync } from 'node:fs';
+import { join, dirname, isAbsolute, relative, resolve } from 'node:path';
+import { mkdirSync, existsSync, rmSync, mkdtempSync, renameSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 
 import { COLD_REVIEW_STAGE, resolveStageEngine } from '../../lib/stage-engine.mjs';
@@ -49,7 +49,33 @@ import { credentialEnvNames, withoutCredentials } from '../../lib/credential-env
 import { assertProducerCannotReachForge, withForgeConfigDir } from '../../harness/producer-forge-reach.mjs';
 import { assembleReviewPrompt } from './assemble-review-prompt.mjs';
 import { firstPartyRole } from '../../roles/first-party/index.mjs';
-import { artifactPathFor } from './findings-artifact.mjs';
+import { artifactPathFor, readFindingsArtifact } from './findings-artifact.mjs';
+import { compareCandidateSnapshots, snapshotCandidate } from './candidate-snapshot.mjs';
+
+/**
+ * describeCandidateChange(changes) — names WHAT changed for the "candidate
+ * changed during execution" refusal (#1010). Before this, the refusal said
+ * only that the candidate changed, leaving an operator to re-run under a
+ * watcher (the exact measurement #1010's issue comments performed by hand)
+ * to find out what. `changes` is `compareCandidateSnapshots(...).changes` —
+ * `{added, removed, changed}` path arrays. Bounded to the first 10 (sorted,
+ * `+`/`-`/`~` prefixed) plus a count of the rest: a mutated `npm test` run
+ * can touch hundreds of paths, and an unbounded list is as unreadable as no
+ * list at all.
+ *
+ * @param {{added: string[], removed: string[], changed: string[]}} changes
+ * @returns {string}
+ */
+function describeCandidateChange(changes) {
+  const all = [
+    ...changes.added.map((path) => `+${path}`),
+    ...changes.removed.map((path) => `-${path}`),
+    ...changes.changed.map((path) => `~${path}`),
+  ].sort();
+  const shown = all.slice(0, 10);
+  const suffix = all.length > shown.length ? ` (+${all.length - shown.length} more)` : '';
+  return `${all.length} path(s) changed: ${shown.join(', ')}${suffix}`;
+}
 
 /**
  * runColdReviewStage() — runs the cold review for one PR.
@@ -134,6 +160,23 @@ export async function runColdReviewStage({
   // Before the prompt, because `artifactPathFor` is the boundary that refuses a
   // PR number that is not one, and the prompt is built from its answer.
   const artifactPath = artifactPathFor(prNumber);
+  const artifactAbsolutePath = join(root, artifactPath);
+  const isWithin = (parent, child) => {
+    const rel = relative(resolve(parent), resolve(child));
+    return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
+  };
+  // Codex and Gemini return their artifact as a final message. The host creates its only
+  // writable destination beside the normal artifact, never in the candidate.
+  const output = (routing.engine === 'codex' || routing.engine === 'gemini')
+    ? {
+        mode: 'final-message',
+        tempPath: join(dirname(artifactAbsolutePath), `.${routing.engine}-final-${prNumber}-${crypto.randomUUID()}.tmp`),
+        artifactPath: artifactAbsolutePath,
+      }
+    : undefined;
+  if (output && isWithin(worktreePath, output.artifactPath)) {
+    return { routed: true, ok: false, reason: `the ${routing.engine} final-message output resolves inside the cold-review candidate; refusing before clearing any artifact` };
+  }
 
   // THE ENGINE READS THE COLD WORKTREE, AND REFUSING IS THE POINT (judgment:cold-3).
   //
@@ -170,6 +213,12 @@ export async function runColdReviewStage({
         'instead would review an arbitrary branch while the verdict binds itself to the head — ' +
         'silently, because the diff range still resolves. Refusing rather than reviewing the wrong tree.',
     };
+  }
+  let candidateBefore;
+  try {
+    candidateBefore = snapshotCandidate(worktreePath);
+  } catch (err) {
+    return { routed: true, ok: false, reason: `the cold-review candidate cannot be snapshotted — ${err?.message ?? String(err)}` };
   }
 
   // A PRECONDITION, SO IT RUNS BEFORE ANY MUTATION (judgment:cold-4, fourth cold
@@ -313,7 +362,7 @@ export async function runColdReviewStage({
       // #814 D5: the role is SERVED (brain's first-party Adversary instance),
       // the protocol is assembled beside the reader. Direction of imports:
       // review → roles/first-party, never back.
-      prompt: assembleReviewPrompt({ role: firstPartyRole(COLD_REVIEW_STAGE), prNumber, baseRef, headRef, artifactRoot: root }),
+      prompt: assembleReviewPrompt({ role: firstPartyRole(COLD_REVIEW_STAGE), prNumber, baseRef, headRef, artifactRoot: root, outputMode: output ? 'final-message' : 'file' }),
       model: routing.model,
       engine: routing.engine,
       cwd: worktreePath,
@@ -335,6 +384,7 @@ export async function runColdReviewStage({
       // after `mkdir` and after `remove` had deleted the previous artifact, and
       // below the routing check, so an unrouted repo never validated the key.
       timeoutMs,
+      output,
     });
 
     if (!result?.ok) {
@@ -344,6 +394,33 @@ export async function runColdReviewStage({
         elapsedMs: result?.elapsedMs ?? null,
         reason: result?.reason ?? 'the engine returned no result',
       };
+    }
+
+    let candidateAfter;
+    try {
+      candidateAfter = snapshotCandidate(worktreePath);
+    } catch (err) {
+      return { routed: true, ok: false, reason: `the cold-review candidate cannot be re-snapshotted — ${err?.message ?? String(err)}` };
+    }
+    const candidateComparison = compareCandidateSnapshots(candidateBefore, candidateAfter);
+    if (!candidateComparison.equal) {
+      return {
+        routed: true,
+        ok: false,
+        reason: `the cold-review candidate changed during execution; refusing publication — ${describeCandidateChange(candidateComparison.changes)}`,
+      };
+    }
+
+    if (output) {
+      try {
+        renameSync(output.tempPath, output.artifactPath);
+      } catch (err) {
+        return { routed: true, ok: false, reason: `the Codex final message could not be atomically materialized — ${err?.message ?? String(err)}` };
+      }
+      const parsed = readFindingsArtifact(readFileSync(output.artifactPath, 'utf8'));
+      if (!parsed.ok) {
+        return { routed: true, ok: false, reason: `the Codex final message could not be read by the existing findings reader — ${parsed.reason}` };
+      }
     }
 
     // See the header: a clean exit with no artifact is the state that would

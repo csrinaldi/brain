@@ -14,6 +14,7 @@ import assert from 'node:assert/strict';
 import {
   REVIEWER_TOKEN_ENV,
   FORGE_TOKEN_ENV,
+  MEMORY_TOKEN_ENV,
   credentialEnvNames,
   withoutCredentials,
 } from './credential-env.mjs';
@@ -35,6 +36,23 @@ test('#682 cold-2: the VCS credential name comes from token.mjs, not from a copy
     'the var `vcsToken()` reads is not in the scrub set — the producer inherits the credential ' +
     'brain posts with'
   );
+});
+
+// ── issue #888 — MEMORY_TOKEN_ENV denylisted by default (D3/A5) ─────────────
+
+test('#888: MEMORY_TOKEN_ENV is BRAIN_MEMORY_TOKEN, and is in the DEFAULT set with no `extra`', () => {
+  assert.equal(MEMORY_TOKEN_ENV, 'BRAIN_MEMORY_TOKEN');
+  assert.ok(
+    credentialEnvNames().includes(MEMORY_TOKEN_ENV),
+    'the ship op\'s credential name must be denylisted by default, with no `extra` argument required',
+  );
+});
+
+test('#888: leak regression — withoutCredentials strips BRAIN_MEMORY_TOKEN by default, no `extra`', () => {
+  const env = { PATH: '/usr/bin', BRAIN_MEMORY_TOKEN: 'secret' };
+  const out = withoutCredentials(env, credentialEnvNames());
+  assert.equal(out.BRAIN_MEMORY_TOKEN, undefined);
+  assert.equal(out.PATH, '/usr/bin');
 });
 
 test('#682 cold-2: every forge credential is in the set', () => {
@@ -90,6 +108,7 @@ test('cold-5: the scrubbed set is pinned, so no prose can state a stale count', 
   // Pinned as the NAMES rather than the length: a test asserting `=== 8` goes
   // green on a rename and tells nobody which name moved.
   assert.deepEqual(credentialEnvNames().sort(), [
+    'BRAIN_MEMORY_TOKEN',
     'BRAIN_REVIEWER_TOKEN',
     'CI_JOB_TOKEN',
     'GH_ENTERPRISE_TOKEN',

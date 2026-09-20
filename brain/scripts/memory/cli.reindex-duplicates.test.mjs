@@ -15,12 +15,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { buildRecord, serializeRecord } from './lib/format.mjs';
+import { removeTempTree } from '../lib/tmp-tree.mjs';
 
 const CLI = join(dirname(fileURLToPath(import.meta.url)), 'cli.mjs');
 
@@ -32,9 +33,19 @@ const base = {
   project: 'brain',
 };
 
+// #738 (design A6, #897 precedent): `brain:memory:save` now reads `brain.actor`
+// from the real `git config --get` (cwd = root). Isolated from ambient
+// global/system config so this suite's verdict does not depend on the
+// machine it runs on.
+const ISOLATED_GIT_ENV = { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' };
+
 function fixtureRoot(t, lines) {
   const root = mkdtempSync(join(tmpdir(), 'brain-cli-dup-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  // #802: this fixture now `git init`s root (#738's isolation fixture) — a
+  // bare recursive rmSync here would trip the drift guard; removeTempTree instead.
+  t.after(() => removeTempTree(root));
+  spawnSync('git', ['init', '-q'], { cwd: root, encoding: 'utf8', env: { ...process.env, ...ISOLATED_GIT_ENV } });
+  spawnSync('git', ['config', '--local', 'brain.actor', '@test'], { cwd: root, encoding: 'utf8', env: { ...process.env, ...ISOLATED_GIT_ENV } });
   const recordsDir = join(root, '.memory', 'records');
   mkdirSync(recordsDir, { recursive: true });
   writeFileSync(join(recordsDir, '2026-07.jsonl'), lines.map((l) => l + '\n').join(''), 'utf8');
@@ -44,11 +55,11 @@ function fixtureRoot(t, lines) {
 function runCli(root, ...args) {
   return spawnSync(process.execPath, [CLI, ...args], {
     encoding: 'utf8',
-    env: { ...process.env, BRAIN_MEMORY_TEST_ROOT: root, MEMORY_BACKEND: 'plainfiles' },
+    env: { ...process.env, BRAIN_MEMORY_TEST_ROOT: root, MEMORY_BACKEND: 'plainfiles', ...ISOLATED_GIT_ENV },
   });
 }
 
-test('memory:reindex REPORTS the duplicate accounting — the silence #574 opened on', (t) => {
+test('brain:memory:reindex REPORTS the duplicate accounting — the silence #574 opened on', (t) => {
   const a = buildRecord({ ...base, content: 'A' });
   const b = buildRecord({ ...base, content: 'B' });
   const root = fixtureRoot(t, [serializeRecord(a), serializeRecord(b), serializeRecord(a)]);
@@ -65,7 +76,7 @@ test('memory:reindex REPORTS the duplicate accounting — the silence #574 opene
   assert.equal(/duplicate record id/.test(run.stdout), false, 'on stderr, which the hooks preserve — never stdout');
 });
 
-test('memory:reindex on a clean store reports NOTHING at all', (t) => {
+test('brain:memory:reindex on a clean store reports NOTHING at all', (t) => {
   const a = buildRecord({ ...base, content: 'A' });
   const root = fixtureRoot(t, [serializeRecord(a)]);
 
@@ -79,7 +90,7 @@ test('memory:reindex on a clean store reports NOTHING at all', (t) => {
   );
 });
 
-test('memory:reindex REPORTS a divergent duplicate as divergent, exits 0, and still writes the index', (t) => {
+test('brain:memory:reindex REPORTS a divergent duplicate as divergent, exits 0, and still writes the index', (t) => {
   // Not a refusal: `source` is hash-excluded, and brain's own round-trip
   // widens it, so this pair is a record brain itself writes.
   const a = buildRecord({ ...base, content: 'A', source: 'issue #574' });
@@ -97,7 +108,7 @@ test('memory:reindex REPORTS a divergent duplicate as divergent, exits 0, and st
 
 // ── the verbs the ticket actually names ──────────────────────────────────────
 
-test('memory:share REPORTS it too — the verb #574 measured as printing nothing', (t) => {
+test('brain:memory:share REPORTS it too — the verb #574 measured as printing nothing', (t) => {
   const a = buildRecord({ ...base, content: 'A' });
   const root = fixtureRoot(t, [serializeRecord(a), serializeRecord(a)]);
 
@@ -108,7 +119,7 @@ test('memory:share REPORTS it too — the verb #574 measured as printing nothing
   assert.match(run.stderr, /1 excess physical line\(s\)/);
 });
 
-test('memory:save REPORTS it, with the store/index gap — the first verb run after a pull', (t) => {
+test('brain:memory:save REPORTS it, with the store/index gap — the first verb run after a pull', (t) => {
   const a = buildRecord({ ...base, content: 'A' });
   const root = fixtureRoot(t, [serializeRecord(a), serializeRecord(a)]);
 

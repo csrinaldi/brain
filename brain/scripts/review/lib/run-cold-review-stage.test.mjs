@@ -384,6 +384,57 @@ test('#682 cold-3: the engine writes into the operator tree and leaves the workt
   );
 });
 
+test('a candidate mutation after the engine starts refuses publication and NAMES the path that changed', async (t) => {
+  const root = makeRepo(t);
+  const candidate = makeWorktree(t);
+  writeFileSync(join(candidate, 'candidate.txt'), 'before\n');
+
+  const result = await runColdReviewStage({
+    config: ROUTED, prNumber: PR, root, worktreePath: candidate,
+    deps: { forgeProbe: LOGGED_OUT, runStage: async () => {
+      writeFileSync(join(candidate, 'candidate.txt'), 'after\n');
+      writeFileSync(join(root, artifactPathFor(PR)), `\`\`\`${ARTIFACT_TAG}\n[]\n\`\`\`\n`);
+      return { ok: true };
+    } },
+  });
+
+  assert.equal(result.routed, true);
+  assert.equal(result.ok, false);
+  // #1010 — the refusal used to say only "the candidate changed", which is
+  // correct but leaves an operator re-running under a watcher to find out
+  // WHAT. `compareCandidateSnapshots` already carries added/removed/changed
+  // path lists; the reason now names them.
+  assert.equal(
+    result.reason,
+    'the cold-review candidate changed during execution; refusing publication — 1 path(s) changed: ~candidate.txt',
+  );
+});
+
+test('a candidate mutation with many changed paths bounds the refusal to the first 10 and a count (#1010)', async (t) => {
+  const root = makeRepo(t);
+  const candidate = makeWorktree(t);
+
+  const result = await runColdReviewStage({
+    config: ROUTED, prNumber: PR, root, worktreePath: candidate,
+    deps: { forgeProbe: LOGGED_OUT, runStage: async () => {
+      // 12 new files — one more than the 10-path bound — so the refusal must
+      // show exactly 10 and say "(+2 more)" rather than spam an unreadable
+      // wall of paths (the shape a mutated `npm test` run — #1010 — would
+      // otherwise produce, since it can touch hundreds of paths).
+      for (let i = 0; i < 12; i += 1) {
+        writeFileSync(join(candidate, `new-${String(i).padStart(2, '0')}.txt`), 'x\n');
+      }
+      writeFileSync(join(root, artifactPathFor(PR)), `\`\`\`${ARTIFACT_TAG}\n[]\n\`\`\`\n`);
+      return { ok: true };
+    } },
+  });
+
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /^the cold-review candidate changed during execution; refusing publication — 12 path\(s\) changed: /);
+  assert.match(result.reason, /\(\+2 more\)$/, 'only the first 10 paths are named, with a count of what was elided');
+  assert.equal((result.reason.match(/\+new-/g) ?? []).length, 10, 'exactly 10 paths are named');
+});
+
 // ── #682 C.5's verdict, judgment:cold-1 ──────────────────────────────────────
 
 test('#682 cold-1: a STALE artifact does not pass for one this run wrote', async (t) => {
@@ -838,3 +889,104 @@ test('a second run does not inherit the first run\'s directory', async (t) => {
   assert.equal(seen.length, 2);
   assert.notEqual(seen[0], seen[1], 'a reused directory is a place a session could accumulate');
 });
+
+// ── #978 PR2: Codex final-message transport ─────────────────────────────────
+
+const CODEX_ROUTED = { sdd: { map: { [COLD_REVIEW_STAGE]: { engine: 'codex', model: 'gpt-5.5' } } } };
+
+test('Codex receives a host-owned final-message descriptor and only a valid atomically materialized artifact succeeds', async (t) => {
+  const root = makeRepo(t);
+  const worktree = makeWorktree(t);
+  let seen;
+
+  const result = await runColdReviewStage({
+    config: CODEX_ROUTED, prNumber: PR, root, worktreePath: worktree,
+    deps: {
+      forgeProbe: LOGGED_OUT,
+      runStage: async (args) => {
+        seen = args;
+        writeFileSync(args.output.tempPath, `\`\`\`${ARTIFACT_TAG}\n[]\n\`\`\`\n`);
+        return { ok: true };
+      },
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(seen.output.mode, 'final-message');
+  assert.equal(seen.output.artifactPath, join(root, artifactPathFor(PR)));
+  assert.notEqual(seen.output.tempPath, seen.output.artifactPath);
+  assert.ok(seen.prompt.includes('Return exactly the artifact bytes as your final message'));
+  assert.equal(existsSync(seen.output.tempPath), false, 'the temporary Codex message is consumed by the host rename');
+  assert.equal(existsSync(seen.output.artifactPath), true, 'the host-owned final artifact is available to the unchanged reader');
+});
+
+test('a Codex candidate mutation refuses before its temporary message is published', async (t) => {
+  const root = makeRepo(t);
+  const worktree = makeWorktree(t);
+  let output;
+
+  const result = await runColdReviewStage({
+    config: CODEX_ROUTED, prNumber: PR, root, worktreePath: worktree,
+    deps: {
+      forgeProbe: LOGGED_OUT,
+      runStage: async (args) => {
+        output = args.output;
+        writeFileSync(output.tempPath, `\`\`\`${ARTIFACT_TAG}\n[]\n\`\`\`\n`);
+        writeFileSync(join(worktree, 'mutation.txt'), 'forbidden\n');
+        return { ok: true };
+      },
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /candidate changed/i);
+  assert.equal(existsSync(output.artifactPath), false, 'a candidate mutation cannot reach the artifact reader');
+});
+
+test('a malformed Codex final message is refused by the existing findings reader', async (t) => {
+  const root = makeRepo(t);
+  const result = await runColdReviewStage({
+    config: CODEX_ROUTED, prNumber: PR, root, worktreePath: makeWorktree(t),
+    deps: {
+      forgeProbe: LOGGED_OUT,
+      runStage: async ({ output }) => {
+        writeFileSync(output.tempPath, 'not a brain findings artifact\n');
+        return { ok: true };
+      },
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /could not be read/i);
+});
+
+// ── Gemini final-message transport ──────────────────────────────────────────
+
+const GEMINI_ROUTED = { sdd: { map: { [COLD_REVIEW_STAGE]: { engine: 'gemini', model: 'gemini-2.5-pro' } } } };
+
+test('Gemini receives a host-owned final-message descriptor and materializes the artifact atomically', async (t) => {
+  const root = makeRepo(t);
+  const worktree = makeWorktree(t);
+  let seen;
+
+  const result = await runColdReviewStage({
+    config: GEMINI_ROUTED, prNumber: PR, root, worktreePath: worktree,
+    deps: {
+      forgeProbe: LOGGED_OUT,
+      runStage: async (args) => {
+        seen = args;
+        writeFileSync(args.output.tempPath, `\`\`\`${ARTIFACT_TAG}\n[]\n\`\`\`\n`);
+        return { ok: true };
+      },
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(seen.output.mode, 'final-message');
+  assert.equal(seen.output.artifactPath, join(root, artifactPathFor(PR)));
+  assert.notEqual(seen.output.tempPath, seen.output.artifactPath);
+  assert.ok(seen.prompt.includes('Return exactly the artifact bytes as your final message'));
+  assert.equal(existsSync(seen.output.tempPath), false, 'the temporary Gemini message is consumed by the host rename');
+  assert.equal(existsSync(seen.output.artifactPath), true, 'the host-owned final artifact is available to the reader');
+});
+

@@ -157,6 +157,15 @@ test('#323 S7 (round 6 + maintainer): the forge wiring is CHECKED AGAINST the de
     'a forge config invokes a script outside VERIFICATION_SURFACE — declare it in governance-tiers.mjs (the authority), never here');
 });
 
+test('B2.2 (#889, design A9): brain/scripts/memory/index-lag.mjs is declared in VERIFICATION_SURFACE.scripts', () => {
+  // index-lag.mjs lives under brain/scripts/memory/, which is NOT one of
+  // VERIFICATION_SURFACE.dirs — it must be declared by name, beside
+  // check-refs.mjs, or the local-checks warning wired into governance.yml
+  // becomes a gate the drift guard above cannot see.
+  assert.ok(VERIFICATION_SURFACE.scripts.includes('brain/scripts/memory/index-lag.mjs'),
+    'the local-checks index-lag warning script must join the verification surface declaration');
+});
+
 test('#323 S7 (round 6): a commented path in a forge config is documentation, not an invocation', () => {
   const yaml = 'on: push\n# bootstrap.sh runs brain/scripts/lib/brain-config.mjs ensure, which imports things\njobs:\n  x:\n    steps:\n      - run: node brain/scripts/brain-audit.mjs   # the audit gate\n';
   assert.deepEqual(forgeScriptRefs(yaml), ['brain/scripts/brain-audit.mjs'],

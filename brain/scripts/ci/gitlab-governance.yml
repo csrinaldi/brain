@@ -137,7 +137,7 @@ local-checks:
   extends: .governance_mr_rules
   stage: test
   script:
-    - npm run repo:check && npm run brain:nav && npm test
+    - npm run repo:check && npm run brain:nav && node brain/scripts/memory/index-lag.mjs && npm test
 
 # ── Invariant 4 (L3) — session memory was captured (REQUIRED) ──────────────
 memory-gate:
@@ -173,3 +173,31 @@ brain-writes-reviewed:
   stage: test
   script:
     - node brain/scripts/vcs/brain-writes-reviewed.mjs
+
+# ── Invariant 9 (L1, ADR-0034, #905) — the memory lane's path predicate ─────
+# REQUIRED at every tier (GATE_MATRIX['lane-paths']) — self-reporting: runs
+# and passes explicitly on a non-lane MR too ("not a lane — nothing to
+# check"), never skipped.
+lane-paths:
+  extends: .governance_mr_rules
+  stage: test
+  script:
+    - node brain/scripts/governance/lane-paths.mjs
+
+# ── Invariant 10 (C1, ADR-0034, #905) — non-waivable secret scan ───────────
+# REQUIRED at every tier (GATE_MATRIX['lane-scrub']) — scans every ADDED
+# `.memory/records/*.jsonl` path on every MR, lane or not (design A6).
+lane-scrub:
+  extends: .governance_mr_rules
+  stage: test
+  script:
+    - node brain/scripts/governance/lane-scrub.mjs
+
+# ── Invariant 11 (issue #967 PR C) — a slice MR's base is its epic's tracker ─
+# REQUIRED at every tier, `lite` included (GATE_MATRIX['base-branch'],
+# ruling 1) — the backstop for `brain:ticket:start`'s creation-time refusal.
+base-branch:
+  extends: .governance_mr_rules
+  stage: test
+  script:
+    - node brain/scripts/governance/run-check.mjs base-branch

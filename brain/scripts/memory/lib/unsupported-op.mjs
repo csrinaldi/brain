@@ -3,9 +3,11 @@
 // (sdd/issue-246-c3/constraints, obs #578) route through this ONE helper:
 //   - `plainfiles.mjs`'s `index`/`featureCheckpoint`/`featureResume` defer
 //     with the generic `memory.op.unsupported` key.
-//   - `engram.mjs`'s `save`/`search` refuse with the friendlier
-//     `memory.save.engramUnsupported` / `memory.search.engramUnsupported`
-//     keys, pointing the caller at the native engram tool.
+//   - `engram.mjs`'s `search` refuses with the friendlier
+//     `memory.search.engramUnsupported` key, pointing the caller at the
+//     native engram tool. `save`'s matching key retired at #874, split A
+//     (D7): `engram.save()` is now the record-first producer path, and no
+//     longer routes through this helper at all.
 //
 // Never a silent no-op: the caller's op stays async so `await unsupportedOp(...)`
 // rejects, and cli.mjs's existing catch-and-exit-1 dispatch path (cli.mjs:237-243)

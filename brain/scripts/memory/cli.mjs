@@ -2,10 +2,10 @@
 // brain/scripts/memory/cli.mjs — MEMORY_BACKEND dispatcher.
 //
 // Usage: node brain/scripts/memory/cli.mjs <op>
-//   op: share | pull | import | index | reindex | setup | feature-checkpoint | feature-resume
+//   op: share | pull | import | index | reindex | setup | feature-checkpoint | feature-resume | heal-duplicates
 //
 //   pull    — churn-resilient full pull: manifest restore + git pull + engram import.
-//             Use for cross-machine sync (npm run memory:pull).
+//             Use for cross-machine sync (npm run brain:memory:pull).
 //   import  — import-only: records-only engram hydrate (D2/C4), no git pull.
 //             Use after git already pulled (post-merge hook, day-start step 5).
 //   reindex — regenerate .memory/index.jsonl from .memory/records/ alone
@@ -19,9 +19,10 @@
 //
 // Pattern mirrors SDD_HARNESS dispatch in brain/scripts/bootstrap.sh §6.
 
-import { readFileSync, existsSync } from "node:fs";
-import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { readFileSync, existsSync, realpathSync } from "node:fs";
+import { join, dirname, relative, isAbsolute, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { hostname } from "node:os";
 
 import { t } from "../i18n/t.mjs";
 import { formatDuplicateReport } from "./lib/duplicates.mjs";
@@ -34,8 +35,24 @@ import {
   probeBinary,
   selectBackend,
 } from "./lib/backend-selection.mjs";
+import { decideShipInvoker } from "./lib/ship-invoker.mjs";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../../..");
+
+// B1 (#888 cold review, PR 2): the ONLY directory `BRAIN_VCS_TEST_MODULE`
+// (the ship op's test-only vcs-port seam, below) is ever allowed to import
+// from. A test-only seam that imports an ARBITRARY absolute path is CODE
+// executed inside the same process that reads `BRAIN_MEMORY_TOKEN` — unlike
+// `BRAIN_MEMORY_TEST_ROOT`/`BRAIN_MEMORY_ENV_FILE`, which only ever point at
+// DATA (a directory to read records from, an env file to parse), never at a
+// module this process then `import()`s and executes. Constraining the path
+// to a COMMITTED fixture directory means the only code that can ever run
+// through this seam is code that was reviewed and merged — never an
+// arbitrary path a misconfigured or malicious env could point at. See
+// `vcs/cli.mjs`'s own `getVcs()` for the same discipline applied to its
+// provider-name seam (a regex allowlist there; a path-containment check
+// here, because this seam takes a path rather than a bare identifier).
+const FIXTURE_ROOT = join(repoRoot, "brain/scripts/memory/__fixtures__");
 
 // ---------------------------------------------------------------------------
 // Read MEMORY_BACKEND: env var > .env file > default "engram"
@@ -93,8 +110,8 @@ const MEMORY_BACKEND = STATED_BACKEND ?? DEFAULT_BACKEND;
 // files are outside this ticket's file claim — flagged, not silently worked
 // around.)
 // ---------------------------------------------------------------------------
-function reportDuplicates(duplicates, { indexCount, surface, brief } = {}) {
-  for (const line of formatDuplicateReport(duplicates, { indexCount, surface, brief })) console.error(line);
+async function reportDuplicates(duplicates, { indexCount, surface, brief } = {}) {
+  for (const line of await formatDuplicateReport(duplicates, { indexCount, surface, brief })) console.error(line);
 }
 
 // ---------------------------------------------------------------------------
@@ -109,6 +126,9 @@ const VALID_OPS = [
   "audit",
   "resolve-index",
   "split-records",
+  "heal-duplicates",
+  "collect",
+  "ship",
   "migrate-v1",
   "setup",
   "feature-checkpoint",
@@ -148,7 +168,7 @@ if (op === "reindex") {
       indexPath: join(memoryRoot, ".memory", "index.jsonl"),
     });
     console.log(`memory/cli: ${await t("memory.reindex.done", { count })}`);
-    reportDuplicates(duplicates, { indexCount: count });
+    await reportDuplicates(duplicates, { indexCount: count });
     process.exit(0);
   } catch (err) {
     console.error(`memory/cli: ${await t("memory.reindex.failed", { message: err.message })}`);
@@ -203,7 +223,7 @@ if (op === "resolve-index") {
     console.log(`memory/cli: ${await t(key, { count })}`);
     // The op that exists BECAUSE two branches merged is the last one that
     // should stay quiet about what the merge duplicated (#574).
-    reportDuplicates(duplicates, { indexCount: count });
+    await reportDuplicates(duplicates, { indexCount: count });
     process.exit(0);
   } catch (err) {
     console.error(`memory/cli: ${await t("memory.resolveIndex.failed", { message: err.message })}`);
@@ -276,12 +296,372 @@ if (op === "split-records") {
       indexPath: join(memoryRoot, ".memory", "index.jsonl"),
     });
     console.log(`memory/cli: ${await t("memory.reindex.done", { count })}`);
-    reportDuplicates(duplicates, { indexCount: count });
+    await reportDuplicates(duplicates, { indexCount: count });
     process.exit(0);
   } catch (err) {
     console.error(`memory/cli: ${await t("memory.splitRecords.failed", { message: err.message })}`);
     process.exit(1);
   }
+}
+
+// ---------------------------------------------------------------------------
+// "collect" — the lane collector (issue #887, ADR-0034 L4/C2). Backend-
+// agnostic like "reindex": it materializes ONE local commit from every
+// worktree's uncommitted `.memory/records/` candidates onto
+// `refs/heads/memory/<host>-<date>`. No backend is ever consulted — this
+// block always exits before backend selection runs — and neither this op
+// nor `lane/collect.mjs` ever pushes a ref, opens a PR, or is called from a
+// hook (D7; the scope boundary is asserted behaviourally in
+// `lane/collect.integration.test.mjs`).
+//
+// BRAIN_MEMORY_TEST_ROOT — honoured, like "reindex"/"audit"/"split-records"
+// above (design.md A9): without it, `cli.collect.test.mjs` would enumerate
+// every worktree of the maintainer's real clone.
+//
+// `--json` prints the result object on stdout ONLY; the duplicate/skip
+// evidence always goes to stderr via `reportDuplicates`, so `--json` stdout
+// stays parseable regardless of what the run found.
+// ---------------------------------------------------------------------------
+if (op === "collect") {
+  const { collectLane } = await import("./lane/collect.mjs");
+  const memoryRoot = process.env.BRAIN_MEMORY_TEST_ROOT ?? repoRoot;
+  // E4: scoped to argv AFTER `node cli.mjs collect`, like `audit` above —
+  // `process.argv.includes("--json")` would also match a `--json` that
+  // happened to appear earlier in argv (the node binary path, the script
+  // path), which is never the intent for this op's own flag.
+  const rest = process.argv.slice(3);
+  const asJson = rest.includes("--json");
+  try {
+    const result = collectLane({ root: memoryRoot });
+    if (asJson) {
+      console.log(JSON.stringify(result));
+    } else if (result.commit === null) {
+      console.log(`memory/cli: ${await t("memory.collect.nothing", { ref: result.ref })}`);
+    } else {
+      console.log(
+        `memory/cli: ${await t("memory.collect.done", {
+          collected: result.collected,
+          ref: result.ref,
+          commit: result.commit,
+        })}`,
+      );
+    }
+    if (!result.baseFetched) {
+      console.error(`memory/cli: ${await t("memory.collect.offline")}`);
+    }
+    // D4's audibility half: a secret hit is surfaced by COUNT — never the
+    // matched line, never even the file — because the run itself already
+    // refused to let the line text travel any further than `pattern` +
+    // `lineNumber` (A1 in design.md).
+    const secretCount = result.skipped.filter((s) => s.reason === "secret").length;
+    if (secretCount > 0) {
+      console.error(`memory/cli: ${await t("memory.collect.secretSkipped", { count: secretCount })}`);
+    }
+    const modifiedCount = result.skipped.filter((s) => s.reason === "modified-tracked").length;
+    if (modifiedCount > 0) {
+      console.error(`memory/cli: ${await t("memory.collect.modifiedTrackedSkipped", { count: modifiedCount })}`);
+    }
+    // #921: an unreadable worktree is a distinct fact from "nothing pending
+    // here" — always reported on stderr (never gated by --json) whenever the
+    // list is non-empty, mirroring the secret/modified-tracked lines above.
+    // F3 (cold review): `?? []` guards this consumer the same way ship.mjs's
+    // own destructuring already defaults the field — collectLane() always
+    // populates it today (no live bug), but this consumer had no defence of
+    // its own if that producer contract ever changed.
+    // F4 (cold review): the text surface now names WHY, not just which —
+    // the operator reading stderr sees the same reason `--json` already
+    // carries, instead of having to cross-reference the two.
+    const skippedWorktreesHere = result.skippedWorktrees ?? [];
+    if (skippedWorktreesHere.length > 0) {
+      console.error(`memory/cli: ${await t("memory.collect.worktreeSkipped", {
+        count: skippedWorktreesHere.length,
+        paths: skippedWorktreesHere.map((w) => `${w.path} (${w.reason})`).join(", "),
+      })}`);
+    }
+    await reportDuplicates(result.duplicates, { surface: "the lane commit" });
+    process.exit(0);
+  } catch (err) {
+    // `raced` and `badHost` are named failures `lane/collect.mjs` tags on the
+    // thrown error (A9, A5) — everything else falls through to
+    // `memory.collect.failed` below, which is no longer only "a genuine git
+    // failure": since #712, an unreadable `brain.config.json` propagates
+    // from the same reader and lands here too (REQ-SCAN-4). The string
+    // itself (`en.mjs`) is already neutral and needs no change (R10).
+    if (err?.raced) {
+      console.error(`memory/cli: ${await t("memory.collect.raced", { message: err.message })}`);
+    } else if (err?.badHost) {
+      console.error(`memory/cli: ${await t("memory.collect.badHost", { message: err.message })}`);
+    } else {
+      console.error(`memory/cli: ${await t("memory.collect.failed", { message: err.message })}`);
+    }
+    process.exit(1);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// "ship" — the lane ship: one push, one PR, one credential this op reads and
+// this op alone (issue #888, ADR-0034 L1/L2/L5, design.md A1-A7). Dispatched
+// BEFORE backend selection, like "collect" above — no backend is ever
+// consulted, and this is the only user-invocable surface this slice adds
+// (the trigger wiring — a SessionEnd hook, a day:start sweep — is deferred to
+// #889; D4).
+//
+// BRAIN_MEMORY_TEST_ROOT — honoured, like "collect" above.
+//
+// The credential: `MEMORY_TOKEN_ENV` (`BRAIN_MEMORY_TOKEN`) is read from
+// `process.env` in EXACTLY ONE place, right here. It is handed to
+// `getVcs({identity})`, which binds it and returns the PORT — `shipLane`
+// receives that bound port plus `identityBound: boolean`, never the token
+// itself (A5's structural leak-regression guarantee: the string is never in
+// `shipLane`'s scope at all).
+//
+// `--json` prints the result object on stdout ONLY; every other line this op
+// prints goes to stderr, so `--json` stdout stays parseable regardless of
+// what the run found (mirrors "collect"'s own contract).
+//
+// BRAIN_VCS_TEST_MODULE (test-only seam, mirrors BRAIN_MEMORY_TEST_ROOT):
+// when set, its value is a path to a fake port module (the same shape
+// `getVcs()` itself returns — `mrList`/`mrCreate`/`mrAutoMerge`), and that
+// module is imported DIRECTLY instead of ever calling `getVcs()`. This
+// exists because `getVcs()` has no seam of its own reachable through a CLI
+// subprocess (unlike `_import`, its in-process-only test hook): without it,
+// EVERY non-dry-run CLI-level test of this op resolves the REAL provider
+// from this repo's own `brain.config.json`, and any test fixture that fails
+// to short-circuit before `shipLane`'s find/create step reaches the real,
+// unfakeable GitHub port (see `cli.ship.test.mjs`'s own account of the near
+// -miss this seam closes). NEVER set this outside tests.
+//
+// B1 (cold review, PR 2): the resolved path MUST fall inside `FIXTURE_ROOT`
+// (`resolveVcsTestModulePath` below) — see that constant's own comment for
+// why. The fixture module itself carries no test-case-specific behavior;
+// its ANSWERS are read at call time from the JSON file named by the second,
+// DATA-only env var `BRAIN_VCS_TEST_SCRIPT` (see
+// `__fixtures__/fake-vcs-port.mjs`).
+//
+// M1 (re-review, PR 2): containment is checked on the REAL path, not the
+// lexical one — a symlink placed inside `FIXTURE_ROOT` pointing outside it
+// would resolve lexically inside the fixture dir while `import()` still
+// follows the link to wherever it points. `realpathSync` is best-effort
+// (wrapped in try/catch) because the target may legitimately not exist yet
+// (the escape test below points at `/tmp/x.mjs`, which is never created) —
+// in that case the lexical path is the closest honest answer and the
+// containment check still runs against it.
+// ---------------------------------------------------------------------------
+
+/** Resolves `BRAIN_VCS_TEST_MODULE` against `FIXTURE_ROOT`, refusing (before
+ * any `import()` is attempted) anything that would resolve outside it — a
+ * path traversal (`../..`), an absolute path elsewhere on disk, or a
+ * symlink planted inside `FIXTURE_ROOT` whose real target lands outside it
+ * (M1, re-review). See B1's comment on `FIXTURE_ROOT` for the rationale. */
+function resolveVcsTestModulePath(vcsTestModule) {
+  const lexical = resolve(vcsTestModule);
+  let abs;
+  try { abs = realpathSync(lexical); } catch { abs = lexical; }
+  let root;
+  try { root = realpathSync(FIXTURE_ROOT); } catch { root = FIXTURE_ROOT; }
+  const rel = relative(root, abs);
+  if (rel === "" || rel.startsWith("..") || isAbsolute(rel)) {
+    throw new Error(`memory/cli: BRAIN_VCS_TEST_MODULE must resolve inside ${FIXTURE_ROOT}`);
+  }
+  return lexical;
+}
+
+if (op === "ship") {
+  const rest = process.argv.slice(3);
+
+  // #1012: the FIRST thing this op does. Refuse before any module load,
+  // credential read or VCS call unless the caller declares itself,
+  // independent of a test-runner process — see ship-invoker.mjs's own header
+  // comment for the full check order and why it exists (#1007). Stdout stays
+  // empty on refusal, even with --json — nothing below this block has run yet.
+  const invokerDecision = decideShipInvoker({ args: rest, env: process.env });
+  if (!invokerDecision.allowed) {
+    console.error(`memory/cli: ${await t(`memory.ship.${invokerDecision.key}`, invokerDecision.params)}`);
+    process.exit(1);
+  }
+
+  const { shipLane } = await import("./lane/ship.mjs");
+  const { MEMORY_TOKEN_ENV } = await import("../lib/credential-env.mjs");
+  const { loadBrainConfig } = await import("../lib/brain-config.mjs");
+  const memoryRoot = process.env.BRAIN_MEMORY_TEST_ROOT ?? repoRoot;
+  const vcsTestModule = process.env.BRAIN_VCS_TEST_MODULE;
+  const dryRun = rest.includes("--dry-run");
+  const asJson = rest.includes("--json");
+  const invoker = invokerDecision.invoker;
+
+  try {
+    // L1 (re-review): a set-but-blank BRAIN_VCS_TEST_MODULE is falsy, so the
+    // ternary below would silently treat it as unset and bind the REAL vcs
+    // port — refused here, before that ternary is ever reached.
+    if (vcsTestModule !== undefined && vcsTestModule.trim() === "") {
+      throw new Error("memory/cli: BRAIN_VCS_TEST_MODULE is set but empty — unset it to use the real port");
+    }
+    const config = loadBrainConfig();
+    const rawToken = process.env[MEMORY_TOKEN_ENV]; // ONE read, in ONE place (A5)
+    // (cold review, PR 2): a set-but-blank BRAIN_MEMORY_TOKEN reads as '' —
+    // not null/undefined, so `identity` below would have stayed truthy and
+    // `identityBound` (below) would have reported `true`, while
+    // `vcs/cli.mjs`'s own `bound = identity ?? _token(name)` treats '' as
+    // falsy and silently falls through to the AMBIENT credential: the run
+    // would authenticate ambiently while reporting a bound identity.
+    // Refused here, loudly, before either consumer sees it — an unattended
+    // host that exports an empty token is misconfigured, not merely
+    // "unset" (ADR-0033's own failure mode).
+    if (rawToken !== undefined && rawToken.trim() === "") {
+      throw new Error(`memory/cli: ${MEMORY_TOKEN_ENV} is set but empty — unset it to use the ambient identity`);
+    }
+    const identity = rawToken ?? null;
+    const vcs = dryRun
+      ? null
+      : vcsTestModule
+        ? await import(pathToFileURL(resolveVcsTestModulePath(vcsTestModule)).href)
+        : await (await import("../vcs/cli.mjs")).getVcs({ config, identity });
+    const result = await shipLane({
+      root: memoryRoot,
+      project: config.project.slug,
+      tier: config.governance.tier,
+      host: hostname(),
+      date: new Date().toISOString().slice(0, 10),
+      dryRun,
+      identityBound: identity !== null,
+      vcs,
+    });
+
+    // D6 (#936): the cross-day sweep runs ONLY after today's shipLane call
+    // above SUCCEEDED (this line is unreached if it threw — the `catch`
+    // below owns that path) and ONLY when this is not `--dry-run` (a plan
+    // must never mutate any ref, today's or a prior day's).
+    //
+    // #936 remediation (cold review WARNING): `sweepLanes()`'s per-branch
+    // loop DOES catch every failure it can hit internally and maps it to
+    // that branch's own row — but that guarantee starts only INSIDE the
+    // loop. Its own pre-loop code (the shared `fetch`, `listLocalBranches`,
+    // `listRemoteBranches`, `slugifyHost`) is NOT inside any try/catch of
+    // its own. This call therefore has its OWN try/catch, isolated from
+    // shipLane's outer try above: a sweep-side throw here can never turn
+    // today's already-successful `result` into a reported ship failure —
+    // it becomes this fail-closed marker instead, still surfaced (in
+    // --json, and per-run on stderr below) rather than silently swallowed.
+    let sweep = null;
+    if (!dryRun) {
+      try {
+        // BRAIN_MEMORY_SWEEP_FORCE_THROW (test-only seam, mirrors
+        // BRAIN_MEMORY_HEAL_FORCE_THROW): throws before sweepLanes() is
+        // ever called, so a test can exercise this try/catch's isolation
+        // directly — sweepLanes()'s own internals have no reachable throw
+        // in its pre-loop code today, this seam proves the isolation still
+        // holds if that ever changes. NEVER set this outside tests.
+        if (process.env.BRAIN_MEMORY_SWEEP_FORCE_THROW) {
+          throw new Error(`forced failure for test coverage (BRAIN_MEMORY_SWEEP_FORCE_THROW=${process.env.BRAIN_MEMORY_SWEEP_FORCE_THROW})`);
+        }
+        const { sweepLanes } = await import("./lane/sweep.mjs");
+        const { defaultGit } = await import("./lane/collect.mjs");
+        sweep = await sweepLanes({
+          root: memoryRoot,
+          project: config.project.slug,
+          tier: config.governance.tier,
+          host: hostname(),
+          today: result.date,
+          git: defaultGit,
+          vcs,
+        });
+      } catch (err) {
+        sweep = { failed: true, reason: err?.message ?? String(err) };
+      }
+    }
+
+    if (asJson) {
+      console.log(JSON.stringify({ ...result, invoker, sweep }));
+    } else {
+      console.log(`memory/cli: ${await t(`memory.ship.${shipOutcomeKey(result)}`, {
+        ref: result.ref,
+        branch: result.branch,
+        number: result.pr?.number ?? null,
+        reason: result.autoMerge?.reason ?? "",
+      })}`);
+    }
+
+    // Evidence, always on stderr — never gated by --json (mirrors "collect").
+    // #921: skippedWorktrees is evidence from the `collect()` step shipLane()
+    // runs internally, unconditionally — reported here regardless of
+    // --dry-run, so the SessionEnd trigger's log (which redirects this op's
+    // stdout+stderr verbatim, see session-end-ship.mjs) surfaces it instead
+    // of a silent "nothing to ship".
+    // F3/F4 (cold review): same `?? []` guard and reason-bearing text as the
+    // "collect" op above — see that block's comment.
+    const skippedWorktreesHere = result.skippedWorktrees ?? [];
+    if (skippedWorktreesHere.length > 0) {
+      console.error(`memory/cli: ${await t("memory.collect.worktreeSkipped", {
+        count: skippedWorktreesHere.length,
+        paths: skippedWorktreesHere.map((w) => `${w.path} (${w.reason})`).join(", "),
+      })}`);
+    }
+    if (!result.dryRun) {
+      if (result.pushed) console.error(`memory/cli: ${await t("memory.ship.pushed", { ref: result.ref })}`);
+      if (result.pr && result.pr.url === null && result.pr.number !== null) {
+        console.error(`memory/cli: ${await t("memory.ship.prExisting", { number: result.pr.number })}`);
+      }
+      if (result.autoMerge?.enabled === true) {
+        console.error(`memory/cli: ${await t("memory.ship.armed", { number: result.pr?.number ?? null })}`);
+      }
+      if (!result.identityBound) {
+        console.error(`memory/cli: ${await t("memory.ship.identityAmbient")}`);
+      }
+      // D-sweep step 5.8: one stderr line per cross-day sweep row, same
+      // "always on stderr, never gated by --json" evidence discipline as
+      // skippedWorktrees/pushed/prExisting/armed above.
+      //
+      // #936 remediation: `sweep?.failed` (the fail-closed marker from the
+      // isolated try/catch above) has no `branches` to iterate — reported as
+      // its own single line instead, same discipline.
+      if (sweep?.failed) {
+        console.error(`memory/cli: ${await t("memory.ship.sweepFailed", { reason: sweep.reason ?? "" })}`);
+      } else {
+        for (const row of sweep?.branches ?? []) {
+          console.error(`memory/cli: ${await t(`memory.ship.sweep.${row.action}`, {
+            branch: row.branch, date: row.date, number: row.pr?.number ?? null, reason: row.reason ?? "",
+          })}`);
+        }
+      }
+    }
+    process.exit(0);
+  } catch (err) {
+    // E3 (cold review): `raced`/`badHost` are named failures `collect()`
+    // (called internally by `shipLane`) tags on the thrown error (A9, A5 —
+    // same two tags the "collect" op's own catch above passes through)
+    // — everything else here is a genuine ship-specific failure.
+    const key = err?.raced ? "raced"
+      : err?.badHost ? "badHost"
+      : err?.diverged ? "diverged"
+      : err?.pushFailed ? "pushFailed"
+      : err?.prLookupFailed ? "prLookupFailed"
+      : err?.prCreateFailed ? "prCreateFailed"
+      : "failed";
+    console.error(`memory/cli: ${await t(`memory.ship.${key}`, { message: err.message })}`);
+    process.exit(1);
+  }
+}
+
+/** shipOutcomeKey() — maps `shipLane`'s outcome shape to one of the
+ * `memory.ship.*` primary message keys (design.md A6's exit table). Kept a
+ * pure function of the result, never of the error path (that is the `catch`
+ * block above's job, off the THROWN, fatal branches only). */
+function shipOutcomeKey(result) {
+  if (result.dryRun) return "dryRun";
+  // R8 REVERSAL (#920 -> #936, D4): checked before `prNumberUnknown`/
+  // `nothing` — a closedUnmerged row's `pr.number` is set (the human-closed
+  // PR's own number), so without this check it would fall through and be
+  // misreported as "done".
+  if (result.closedUnmerged) return "closedUnmerged";
+  if (result.pr && result.pr.number === null) return "prNumberUnknown";
+  if (result.pushed === false && result.pr === null) return "nothing";
+  if (result.autoMerge?.enabled === false) return "autoMergeRefused";
+  // R11 (#920): a reconciliation without a push (find/create + arm ran, zero
+  // new commits) is still work — checked after `autoMergeRefused` (a refused
+  // arm keeps its own precedence) and before the final `done`, so a run that
+  // also pushed still reports "done".
+  if (result.pushed === false && result.reconciled === true) return "reconciled";
+  return "done";
 }
 
 // ---------------------------------------------------------------------------
@@ -296,9 +676,14 @@ if (op === "split-records") {
 //   itself is retired (D3/C4, issue #229) — records-only write is now
 //   unconditional. The abort-if-populated guard in `runMigration()` still
 //   protects re-runs.
-// `--rollback` → the inverse (REQ-C2B2-2): restores chunks from `legacy/`,
-//   drops `records/`, reindexes. Rehearsed only in fixtures per the runbook;
-//   the real rollback runs only via the cutover runbook.
+// `--rollback` → RETIRED (#955 R1/R2/D1): it refuses and exits 1. The old
+//   behaviour restored chunks from `legacy/` and then deleted `records/`
+//   unconditionally — on this repo (and any consumer past cutover) that
+//   destroys every record written since migration to restore a transport
+//   nothing reads. The refusal branch below runs BEFORE the `--dry-run`
+//   check. Without it, `--rollback` falls through into the real forward
+//   `runMigration()` in the next branch (and `--rollback --dry-run` prints
+//   a migration report and exits 0).
 //
 // BRAIN_MIGRATE_V1_TEST_ROOT (test-only seam): when set, this op resolves
 // `.memory/` under `<value>/.memory` instead of the real repo root. NEVER
@@ -314,21 +699,13 @@ if (op === "migrate-v1") {
   const legacyDir = join(memoryRoot, "legacy");
   const indexPath = join(memoryRoot, "index.jsonl");
 
+  // D1 refusal branch — do NOT delete this `if`. Without it, `--rollback`
+  // falls through into the real forward `runMigration()` in the next
+  // branch below (and `--rollback --dry-run` prints a migration report
+  // and exits 0 instead of refusing).
   if (process.argv.includes("--rollback")) {
-    const { rollbackMigration } = await import("./lib/migrate-v1.mjs");
-    try {
-      const summary = rollbackMigration({ chunksDir, recordsDir, legacyDir, indexPath });
-      console.log(
-        await t("memory.migrateV1.rollbackSummary", {
-          restored: summary.restored,
-          indexCount: summary.indexCount,
-        }),
-      );
-      process.exit(0);
-    } catch (err) {
-      console.error(`memory/cli: ${err.message}`);
-      process.exit(1);
-    }
+    console.error(`memory/cli: ${await t("memory.migrateV1.rollbackRetired")}`);
+    process.exit(1);
   }
 
   if (!process.argv.includes("--dry-run")) {
@@ -395,6 +772,105 @@ if (op === "migrate-v1") {
     console.log(`  ${report.unparseableNote}`);
   }
   process.exit(0);
+}
+
+// ---------------------------------------------------------------------------
+// "heal-duplicates" — reconciles the engram store's pre-guard duplicate rows
+// (#1061, #864 task 1.2a; memory-backend-contract.md's Deletion clause).
+// Engram-only, so it is dispatched HERE — before backend selection — the
+// same way "split-records" is: MEMORY_BACKEND !== "engram" is a designed
+// refusal (`memory.heal.notEngram`), never a FALLBACK_OPS substitution,
+// because `plainfiles` has no observation-id space to reconcile at all.
+//
+// REPORT-ONLY BY DEFAULT (REQ-MB-2). `--apply` is required to delete
+// anything; any other argument refuses `memory.heal.badFlag` and deletes
+// nothing — an unknown flag fails closed rather than being silently ignored
+// (the `split-records`/`ship` precedent for this dispatcher). The call and
+// its outcome handling are wrapped in try/catch, mirroring "split-records"
+// (`:250-304`): an unexpected throw must exit 1 with `memory.heal.failed`,
+// never an uncaught stack trace.
+// ---------------------------------------------------------------------------
+if (op === "heal-duplicates") {
+  if (MEMORY_BACKEND !== "engram") {
+    console.error(`memory/cli: ${await t("memory.heal.notEngram", { backend: MEMORY_BACKEND })}`);
+    process.exit(1);
+  }
+  const rest = process.argv.slice(3);
+  const badFlag = rest.find((a) => a !== "--apply");
+  if (badFlag !== undefined) {
+    console.error(`memory/cli: ${await t("memory.heal.badFlag", { flag: badFlag })}`);
+    process.exit(1);
+  }
+  const apply = rest.includes("--apply");
+  const { healDuplicates } = await import("./backends/engram.mjs");
+  // Cold-review MAJOR #1: unlike every other branch in this file (see
+  // "split-records", `:250-305`), this call used to run with no try/catch —
+  // an unexpected throw crashed with a raw Node stack trace instead of the
+  // `memory.heal.failed` message, and that message was otherwise reachable
+  // only from the impossible "unknown outcome" branch below. Wrapping the
+  // call AND its outcome handling, exactly like "split-records", makes
+  // `memory.heal.failed` a REAL failure path instead of dead code.
+  try {
+    // BRAIN_MEMORY_HEAL_FORCE_THROW (test-only seam): throws before calling
+    // healDuplicates(), so a test can exercise this try/catch directly —
+    // healDuplicates() itself is already fully defensive (every exec/read it
+    // performs is wrapped internally), so no misbehaving `engram` binary can
+    // make the call below throw. NEVER set this outside tests.
+    if (process.env.BRAIN_MEMORY_HEAL_FORCE_THROW) {
+      throw new Error(`forced failure for test coverage (BRAIN_MEMORY_HEAL_FORCE_THROW=${process.env.BRAIN_MEMORY_HEAL_FORCE_THROW})`);
+    }
+    const result = healDuplicates({ apply });
+
+    if (result.outcome === "refused") {
+      const key = `memory.heal.refused.${result.refusal}`;
+      console.error(
+        `memory/cli: ${await t(key, {
+          key: result.key ?? "",
+          fields: (result.fields ?? []).join(", "),
+          count: result.count ?? 0,
+          detail: result.detail ?? "",
+        })}`,
+      );
+      process.exit(1);
+    }
+    if (result.outcome === "none") {
+      console.log(`memory/cli: ${await t("memory.heal.none", { rows: result.rows ?? 0, distinct: result.distinct ?? 0 })}`);
+      process.exit(0);
+    }
+    if (result.outcome === "planned") {
+      console.log(`memory/cli: ${await t("memory.heal.plan", { count: result.groups.length })}`);
+      for (const g of result.groups) {
+        console.log(`  ${g.key} — keep #${g.keep}, delete #${g.delete.join(", ")}`);
+      }
+      process.exit(0);
+    }
+    if (result.outcome === "healed") {
+      console.log(
+        `memory/cli: ${await t("memory.heal.deleted", { count: result.deleted.length, ids: result.deleted.join(", ") })}`,
+      );
+      console.log(`memory/cli: ${await t("memory.heal.done", { rows: result.rows ?? 0, distinct: result.distinct ?? 0 })}`);
+      process.exit(0);
+    }
+    if (result.outcome === "partial") {
+      console.error(
+        `memory/cli: ${await t("memory.heal.partial", {
+          deleted: result.deleted.join(", "),
+          notDeleted: result.notDeleted.join(", "),
+          detail: result.detail ?? "",
+        })}`,
+      );
+      process.exit(1);
+    }
+    if (result.outcome === "unverified") {
+      console.error(`memory/cli: ${await t("memory.heal.unverified", { deleted: result.deleted.join(", ") })}`);
+      process.exit(1);
+    }
+    console.error(`memory/cli: ${await t("memory.heal.failed", { message: `unknown outcome '${result.outcome}'` })}`);
+    process.exit(1);
+  } catch (err) {
+    console.error(`memory/cli: ${await t("memory.heal.failed", { message: err.message })}`);
+    process.exit(1);
+  }
 }
 
 // Map verb strings that cannot be valid JS export names to their actual export name.
@@ -512,13 +988,40 @@ if (op === "save") {
   const rest = process.argv.slice(3);
   const positionals = [];
   const flags = {};
+  // `--supersedes` (#805): the generic `flags[key] = rest[++i]` parser below is
+  // uniformly last-wins and cannot tell "absent" from "present with no value" —
+  // measured, design.md A5. Neither hole is safe for a field the backend cannot
+  // see twice, so the count and the final value are tracked here, at the parser,
+  // and refused before any backend is ever reached.
+  let supersedesCount = 0;
   for (let i = 0; i < rest.length; i++) {
     const arg = rest[i];
     if (arg.startsWith("--")) {
-      flags[arg.slice(2)] = rest[++i];
+      const key = arg.slice(2);
+      // fresh-context review MINOR-1: `--supersedes=<id>` is NOT the
+      // space-separated form this parser recognizes for ANY flag — left
+      // unhandled, `key` becomes the bogus flag name `"supersedes=<id>"`,
+      // `flags.supersedes` stays undefined, and the NEXT argv token is
+      // consumed as that bogus key's value. That silently wrote a record
+      // missing the field the caller asked for (exit 0). Counted and
+      // refused the same way a value-less `--supersedes` is refused below,
+      // instead of accepted by splitting on `=` — every other flag in this
+      // parser only understands the space-separated form, so accepting `=`
+      // here alone would be an inconsistent one-off carve-out.
+      if (key === "supersedes" || key.startsWith("supersedes=")) supersedesCount += 1;
+      if (key.startsWith("supersedes=")) continue;
+      flags[key] = rest[++i];
     } else {
       positionals.push(arg);
     }
+  }
+  if (supersedesCount > 1) {
+    console.error(`memory/cli: ${await t("memory.save.supersedesRepeated")}`);
+    process.exit(1);
+  }
+  if (supersedesCount === 1 && flags.supersedes === undefined) {
+    console.error(`memory/cli: ${await t("memory.save.supersedesMissingValue")}`);
+    process.exit(1);
   }
   const [title, content] = positionals;
   // `--issue` (#530): the record format has carried an `issue` field all along and
@@ -528,12 +1031,21 @@ if (op === "save") {
   // refuses a non-integer, so a typo fails closed at the chokepoint rather than
   // landing a string in a durable field.
   const issue = flags.issue === undefined ? undefined : Number(flags.issue);
-  const opts = { type: flags.type, project: flags.project, issue, scope: flags.scope, topic: flags.topic };
+  // `--supersedes` is forwarded UNPARSED to every backend (design.md — the CLI
+  // enforces arity, plainfiles.mjs owns the store check, engram.mjs's catalog
+  // message just names the flag).
+  const opts = { type: flags.type, project: flags.project, issue, supersedes: flags.supersedes, scope: flags.scope, topic: flags.topic };
   const seams = memoryTestRoot ? { root: memoryTestRoot } : {};
   try {
+    // #874 — a deferred/contended hydration is already reported on stderr by
+    // engram.mjs#hydrate() itself (mirrors importMemory()'s own `_warn`
+    // convention); the record is ALREADY durable by the time save() returns
+    // (appended + indexed before hydrate ever runs), so `save` still exits 0
+    // exactly as it does when the engram backend was never selected at all —
+    // a backend failure here must never read as a lost capture (R5).
     const result = await backend.save(title, content, opts, seams);
     console.log(`memory/cli: ${await t("memory.plainfiles.save.done", { id: result?.id, file: result?.file })}`);
-    reportDuplicates(result?.duplicates, { indexCount: result?.indexCount });
+    await reportDuplicates(result?.duplicates, { indexCount: result?.indexCount });
     process.exit(0);
   } catch (err) {
     // #637 — the index rebuild is the ONE gate that cannot run before the
@@ -579,7 +1091,7 @@ if (op === "search") {
     // query that matched nothing "collapsed into the result set" would name a
     // collapse that did not happen there. And `brief`, because a search is a
     // question about records, not a maintenance run on the store.
-    reportDuplicates(result?.duplicates, { surface: 'the records read', brief: true });
+    await reportDuplicates(result?.duplicates, { surface: 'the records read', brief: true });
     process.exit(0);
   } catch (err) {
     console.error(`memory/cli: ${BACKEND}.search() failed — ${err.message}`);
@@ -596,13 +1108,16 @@ if (op === "search") {
 // "[object Object]".
 //
 // HONEST BOUND, because the first version of this comment claimed a guarantee
-// it does not have: the `{root}` is HONOURED by every plainfiles op and by
-// `engram.share`/`engram.importMemory`, but `engram.pull()` and
-// `engram.setup()` take NO parameters (see their definitions), so the object is
-// discarded and they act on the real repo root. Not reachable today — the env
-// var is set nowhere outside three test files, never in package.json, the hooks
-// or CI — so this is a bound on the seam, not a live defect. Any test that
-// needs a rooted `engram.pull`/`setup` must give those two a `{root}` first
+// it does not have — and #1010 measured that the gap WAS a live defect, not
+// merely an unreachable one: `cli.backend-fallback.test.mjs`'s own `setup`
+// test forwards `BRAIN_MEMORY_TEST_ROOT`, `engram.setup()` silently discarded
+// it, and every `npm test` run wrote `.engram` into whatever the real repo
+// root happened to be — including a cold-review candidate worktree, which is
+// how the symlink ended up inside a tree under review. `{root}` is now
+// HONOURED by every plainfiles op and by `engram.share`/`engram.importMemory`/
+// `engram.setup` (#1010). `engram.pull()` still takes NO parameters (see its
+// definition), so it still discards `{root}` and acts on the real repo root —
+// any test that needs a rooted `engram.pull` must give it a `{root}` first
 // rather than trusting this set.
 const ROOTED_OPS = new Set(["share", "pull", "import", "setup"]);
 
@@ -613,64 +1128,14 @@ try {
     : process.argv.slice(3);
   const result = await backend[fn](...forwarded);
 
-  // `share` returns an accounting and nothing ever printed it, so every number it
-  // measured — including the one added for #541 — died in the return value. The
-  // observations that arrived WITHOUT a §4 provenance block are surfaced here, because
-  // an outage nobody sees is the same outage: their records land as `@legacy` with no
-  // `issue` and read exactly like a healthy one.
-  if (op === "share" && result && typeof result.unprovenanced === "number" && result.unprovenanced > 0) {
-    console.log(`memory/cli: ${await t("memory.share.unprovenanced", { count: result.unprovenanced })}`);
-  }
-
-  // issue #701 — the upstream-base export scope. `upstreamScope` is absent on
-  // the zero-candidate early return (nothing was measured — see
-  // dualWriteRecords()'s own docs), so every branch below is keyed on its
-  // PRESENCE, mirroring `indexCount`'s "undefined means never measured" reading
-  // just above.
-  //
-  // `applied: false` is printed to STDERR for the same reason #641's backend
-  // substitution notice is: the automated callers (`pre-push`) discard stdout,
-  // and "this run wrote every candidate — the pre-#701 behaviour" is exactly
-  // the kind of silent-degradation notice that must survive that discard.
-  if (op === "share" && result?.upstreamScope) {
-    const scope = result.upstreamScope;
-    // Independent of `applied`: an unreadable `brain.config.json` falls THROUGH
-    // to the derived candidates rather than stopping resolution, so the scope
-    // can be applied while a stated ref went unread. Both facts get a line.
-    //
-    // TWO keys, chosen on whether there IS a ref. Naming the ref the base "was
-    // derived as" is only true when one actually resolved, and `scope.ref` is
-    // `null` when none did. It used to be the string `'origin/main'` even then,
-    // so this line told the operator a ref had answered while the
-    // `applied: false` line directly below it said nothing had (cold review
-    // round 2 of #701).
-    if (scope.configError) {
-      const key = scope.ref
-        ? "memory.share.upstreamConfigUnreadable"
-        : "memory.share.upstreamConfigUnreadableNoRef";
-      console.error(`memory/cli: ${await t(key, { error: scope.configError, ref: scope.ref })}`);
-    }
-    // No `{ref}`: this line fires on every `ok:false`, and on the one where
-    // nothing resolved there is no ref to name. `reason` names the ref itself
-    // wherever one was involved (`upstream-records.mjs#upstreamRecordEntries`),
-    // which is what stopped this line from interpolating the invented
-    // `origin/main` one line under a line saying nothing had resolved.
-    if (scope.applied === false) {
-      console.error(
-        `memory/cli: ${await t("memory.share.upstreamUnavailable", { reason: scope.reason })}`,
-      );
-    } else if (scope.unnamed > 0) {
-      console.error(`memory/cli: ${await t("memory.share.upstreamUnnamed", { count: scope.unnamed })}`);
-    }
-  }
-  // `dedupedUpstream` is the success number (records already durable on the
-  // trunk, correctly not re-exported) — printed to stdout like progress, never
-  // to stderr like a warning.
-  if (op === "share" && typeof result?.dedupedUpstream === "number" && result.dedupedUpstream > 0) {
-    console.log(
-      `memory/cli: ${await t("memory.share.dedupedUpstream", { count: result.dedupedUpstream, ref: result.upstreamScope?.ref })}`,
-    );
-  }
+  // #874 split B (row 1, R11): `share()` no longer calls the records
+  // dual-write exporter, so its return value is now the bare
+  // `{indexCount, duplicates}` mirror of `plainfiles.share()` —
+  // `unprovenanced`, `upstreamScope` (issue #701), and `dedupedUpstream`
+  // never reach `result` for `op === "share"` any more. The three print
+  // blocks that used to surface them here retired with the exporter; the
+  // exporter itself is gone too now (#955 R5, epic task 2.4) — it had no
+  // production caller left after #874 split B, only its own tests.
 
   // #574 — the duplicate accounting, for every op that produced one (`share`,
   // `pull`, `setup`, `import`, and anything added later that reads the store).
@@ -680,7 +1145,7 @@ try {
   // `import` gets its own surface: it hydrates engram from `records/` and never
   // writes the index (only `pullMemory` reindexes), so the default wording
   // would have it claim a collapse into an index it did not touch.
-  reportDuplicates(result?.duplicates, {
+  await reportDuplicates(result?.duplicates, {
     indexCount: result?.indexCount,
     surface: op === "import" ? "the records read" : undefined,
   });

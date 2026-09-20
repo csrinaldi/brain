@@ -1,4 +1,4 @@
-// migrate-v1.test.mjs — unit tests for the memory:migrate-v1 dry-run report
+// migrate-v1.test.mjs — unit tests for the brain:memory:migrate-v1 dry-run report
 // (issue #217, C2a scope: dry-run + histograms only; the persisting real run
 // is C2b — see design.md).
 //
@@ -10,7 +10,7 @@ import { gzipSync } from 'node:zlib';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { collectChunkObservations, buildMigrationReport, runMigration, rollbackMigration } from './migrate-v1.mjs';
+import { collectChunkObservations, buildMigrationReport, runMigration } from './migrate-v1.mjs';
 import { testTmp } from '../../lib/test-tmp.mjs';
 
 const baseObs = (overrides = {}) => ({
@@ -316,56 +316,4 @@ test('runMigration: re-run over a just-migrated fixture aborts (idempotency)', (
     () => runMigration({ chunksDir, recordsDir, legacyDir, indexPath }),
     /run the cutover runbook/,
   );
-});
-
-// ── rollbackMigration (the inverse of runMigration, REQ-C2B2-2, fixtures only) ──
-
-test('rollbackMigration: restores a migrated fixture to byte-identical pre-cutover state', () => {
-  const { chunksDir, recordsDir, legacyDir, indexPath } = tmpMigrationFixture();
-  const payload = {
-    sessions: [],
-    observations: [baseObs(), baseObs({ id: 2, sync_id: 'obs-2', type: 'manual' })],
-    prompts: [],
-  };
-  writeFileSync(join(chunksDir, 'chunk1.jsonl.gz'), gzipSync(Buffer.from(JSON.stringify(payload))));
-
-  // Snapshot the pre-migration state: exactly one chunk file, its exact bytes.
-  const preSnapshotFiles = readdirSync(chunksDir).sort();
-  const preSnapshotBytes = readFileSync(join(chunksDir, 'chunk1.jsonl.gz'));
-
-  runMigration({ chunksDir, recordsDir, legacyDir, indexPath });
-  // Sanity: the migration actually moved things before we roll it back.
-  assert.ok(existsSync(recordsDir), 'sanity: migration must have populated records/');
-  assert.ok(existsSync(join(legacyDir, 'chunk1.jsonl.gz')), 'sanity: migration must have moved the chunk to legacy/');
-
-  const summary = rollbackMigration({ chunksDir, recordsDir, legacyDir, indexPath });
-
-  assert.equal(summary.restored, 1);
-  assert.deepEqual(
-    readdirSync(chunksDir).sort(),
-    preSnapshotFiles,
-    'chunks/ file list must match the pre-migration snapshot exactly',
-  );
-  assert.deepEqual(
-    readFileSync(join(chunksDir, 'chunk1.jsonl.gz')),
-    preSnapshotBytes,
-    'restored chunk bytes must be byte-identical to the pre-migration original',
-  );
-  assert.ok(!existsSync(recordsDir), 'records/ must be gone after rollback');
-  assert.ok(
-    !existsSync(legacyDir),
-    'legacy/ must be cleaned up after a full rollback — the pre-cutover snapshot never had it',
-  );
-  assert.ok(existsSync(indexPath), 'the index must be rebuilt (empty, since records/ is gone)');
-  assert.equal(summary.indexCount, 0);
-});
-
-test('rollbackMigration: is a no-op-safe restore even when legacy/ or records/ are absent', () => {
-  const { chunksDir, recordsDir, legacyDir, indexPath } = tmpMigrationFixture();
-  // Nothing was ever migrated: no legacy/, no records/.
-  const summary = rollbackMigration({ chunksDir, recordsDir, legacyDir, indexPath });
-  assert.equal(summary.restored, 0);
-  assert.ok(!existsSync(recordsDir));
-  assert.ok(existsSync(indexPath), 'the index must still be (re)built, deterministically empty');
-  assert.equal(summary.indexCount, 0);
 });

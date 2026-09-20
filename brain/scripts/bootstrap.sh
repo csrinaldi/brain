@@ -184,6 +184,17 @@ for tool in "$VCS_CLI" engram gentle-ai gga claude; do
   fi
 done
 
+# Codex is not a general bootstrap dependency. Consult the effective route
+# before probing it so consumers that keep the Claude route never need a Codex
+# executable, state directory, authentication, or Linux sandbox support.
+say "Codex cold-review"
+if CODEX_READINESS="$(node brain/scripts/harness/codex-readiness.mjs --check 2>&1)"; then
+  ok "$CODEX_READINESS"
+else
+  warn "$CODEX_READINESS"
+  MISSING_OPTIONAL+=("Codex cold-review readiness")
+fi
+
 # --- 3. Personal PAT in .env --------------------------------------------------
 say "$I18N_BOOTSTRAP_PAT_SECTION"
 VCS_TOKEN="$(env_get "$VCS_TOKEN_VAR")"
@@ -309,8 +320,8 @@ case "$MEMORY_BACKEND" in
     else
       warn "$I18N_BOOTSTRAP_MEMORY_NODEABSENT"
     fi
-    $PM run --silent memory:pull  && ok "$I18N_BOOTSTRAP_MEMORY_PULL_OK"  || warn "$I18N_BOOTSTRAP_MEMORY_PULL_FAILED"
-    $PM run --silent memory:index && ok "$I18N_BOOTSTRAP_MEMORY_INDEX_OK" || warn "$I18N_BOOTSTRAP_MEMORY_INDEX_FAILED"
+    $PM run --silent brain:memory:pull  && ok "$I18N_BOOTSTRAP_MEMORY_PULL_OK"  || warn "$I18N_BOOTSTRAP_MEMORY_PULL_FAILED"
+    $PM run --silent brain:memory:index && ok "$I18N_BOOTSTRAP_MEMORY_INDEX_OK" || warn "$I18N_BOOTSTRAP_MEMORY_INDEX_FAILED"
     ;;
   *)
     warn "$(printf "$I18N_BOOTSTRAP_MEMORY_UNKNOWNBACKEND" "$MEMORY_BACKEND")"
@@ -331,7 +342,7 @@ cat <<'EOT'
        (pulls memory, shows open tickets, checks for brain updates)
     3. Pick a ticket and create your branch: {type}/issue-{iid}-{slug}.
     4. Plan a feature with SDD: brain:project:feature -- --issue [ID]
-    5. Before pushing: brain:repo:check && npm run memory:share
+    5. Before pushing: brain:repo:check; capture durable memory with brain:memory:save --issue <id> (the enabled memory lane ships it)
 EOT
 if [ "${#MISSING_OPTIONAL[@]}" -gt 0 ]; then
   printf "  $I18N_BOOTSTRAP_DONE_PENDING\n" "${MISSING_OPTIONAL[*]}"

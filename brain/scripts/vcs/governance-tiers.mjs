@@ -126,6 +126,7 @@ export const VERIFICATION_SURFACE = Object.freeze({
   ]),
   scripts: Object.freeze([
     'brain/scripts/check-refs.mjs',    // local-checks, reached via npm-script indirection (reader 3)
+    'brain/scripts/memory/index-lag.mjs', // local-checks — warns on index/records drift, never fails (#889)
     'brain/scripts/brain-audit.mjs',   // the postmerge/release audit — a gate that runs after merge
     'brain/scripts/archive.mjs',       // change:archive (reader 4)
     'brain/scripts/lib/archive-logic.mjs',
@@ -216,6 +217,30 @@ export const GATE_MATRIX = Object.freeze({
     standard: Object.freeze({ policy: 'required', evidence: 'human-approved-review' }),
     regulated: Object.freeze({ policy: 'required', evidence: 'human-approved-review+codeowners-rung1' }),
   }),
+  // #905 (ADR-0034 L1/C1) — APPENDED AT THE END, mirroring GOVERNANCE_JOBS'
+  // append order (design.md A7). Required at every tier by POSITION (not
+  // added to NEVER_TIERED — REQ-TIER-2's six-gate core stays untouched; these
+  // two are simply matrix rows whose policy happens to be 'required'
+  // everywhere, same shape 'diff-size' already has).
+  'lane-paths': Object.freeze({
+    lite: Object.freeze({ policy: 'required', evidence: 'lane-path-restriction' }),
+    standard: Object.freeze({ policy: 'required', evidence: 'lane-path-restriction' }),
+    regulated: Object.freeze({ policy: 'required', evidence: 'lane-path-restriction' }),
+  }),
+  'lane-scrub': Object.freeze({
+    lite: Object.freeze({ policy: 'required', evidence: 'secret-scan' }),
+    standard: Object.freeze({ policy: 'required', evidence: 'secret-scan' }),
+    regulated: Object.freeze({ policy: 'required', evidence: 'secret-scan' }),
+  }),
+  // #967 PR C (design.md D9, ruling 1) — REQUIRED at every tier INCLUDING
+  // `lite`, a deliberate exception to "lite only detects": `detection` would
+  // only have warned about the exact failure this gate exists to prevent
+  // (the #953 incident — a slice PR that reached `main` with the wrong base).
+  'base-branch': Object.freeze({
+    lite: Object.freeze({ policy: 'required', evidence: 'declared-tracker' }),
+    standard: Object.freeze({ policy: 'required', evidence: 'declared-tracker' }),
+    regulated: Object.freeze({ policy: 'required', evidence: 'declared-tracker' }),
+  }),
 });
 
 /**
@@ -278,9 +303,10 @@ const TIER_PARAMS = Object.freeze({
     artefacts: Object.freeze(['proposal', 'spec', 'design', 'tasks']),
     honorSizeException: true,
     honorOverride: true,
-    // design §9 open risk: documented in AGENTS.md but read by no code path
-    // today (brain-metrics.mjs reports it raw, never subtracts it) — this
-    // flag is honest metadata, not yet load-bearing anywhere.
+    // #1024 (design item D7): load-bearing as of this change —
+    // `memory-gate-override.mjs#decideMemoryGateOverride` reads this flag to
+    // decide whether `skip:memory-gate` short-circuits REQ-L3-4's scoped
+    // check. `brain-metrics.mjs` reports the label raw/honored (design item 7).
     honorSkipMemoryGate: true,
     memoryAssertion: 'issue-linked-record',
   }),
@@ -465,6 +491,49 @@ export function tierParams(tier) {
   }
   return params;
 }
+
+/**
+ * The one label that waives the diff-size budget. Exported so no call site
+ * retypes the string: a typo in a second literal would read as "no exception
+ * asked for", which is the silent half of the defect #1072 names.
+ */
+export const SIZE_EXCEPTION_LABEL = 'size:exception';
+
+/**
+ * sizeExceptionRuling({labels, tier}) -> {present, honored, refusedByTier}
+ *
+ * THE single reading of `size:exception`, for every authority that has an
+ * opinion about the diff budget.
+ *
+ * #1072, measured on PR #1067: the `diff-size` CI gate passed (`run-check.mjs`
+ * read the label, and `lite` carries `honorSizeException: true`) while the
+ * cold reviewer emitted a `blocker` on the same 3,101 lines eight seconds
+ * later, because `review/evaluators/tranche.mjs` read `tierParams(tier)
+ * .diffBudget` and never read the label at all. It took one field of this
+ * module's frozen params and ignored its sibling. A budget decision readable
+ * two ways from two files is not a policy — it is a contradiction a
+ * maintainer cannot act on, because removing the label to satisfy the
+ * reviewer fails the gate and keeping it fails the review.
+ *
+ * The three states are kept APART on purpose, and `refusedByTier` is why:
+ * REQ-TIER-6 requires a tier that refuses the waiver to report that the label
+ * WAS present and the tier is what refused it, never to behave as though
+ * nobody asked. A caller that only checked `honored` would collapse "no
+ * exception requested" into "exception refused" and lose the sentence the
+ * requirement exists to produce.
+ *
+ * A label set the caller could not read is not a waiver. Waiving a budget on
+ * the strength of a fetch that failed would grant the exception by accident,
+ * which is the one direction this must never fail.
+ *
+ * @param {{labels?: string[]|null, tier: string}} input
+ */
+export function sizeExceptionRuling({ labels, tier } = {}) {
+  const present = Array.isArray(labels) && labels.includes(SIZE_EXCEPTION_LABEL);
+  const honored = present && tierParams(tier).honorSizeException === true;
+  return { present, honored, refusedByTier: present && !honored };
+}
+
 
 /**
  * Derives the ACTUALLY-ENFORCED required-job set for a tier — replaces the

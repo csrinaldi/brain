@@ -91,13 +91,18 @@ test('#682 B.3: the model rides as given, and an absent one adds no flag at all'
   let args = null;
   const spy = (_cmd, a) => { args = a; return okRun(); };
 
+  // #1010 — every run also carries --settings {disableAllHooks: true}
+  // (claude.test.mjs pins that flag on its own); this test's job is only the
+  // MODEL flag, so it is asserted independently of the fixed --settings tail
+  // rather than re-pinning the whole array here.
   await runStage({ stage: COLD_REVIEW_STAGE, prompt: 'revisá esto', model: 'vendor/whatever:2026', _run: spy });
-  assert.deepEqual(args, ['-p', 'revisá esto', '--model', 'vendor/whatever:2026'],
+  assert.deepEqual(args.slice(0, 4), ['-p', 'revisá esto', '--model', 'vendor/whatever:2026'],
     'the id passes through untouched — brain never validates it against a catalogue (#323)');
 
   await runStage({ stage: COLD_REVIEW_STAGE, prompt: 'revisá esto', _run: spy });
-  assert.deepEqual(args, ['-p', 'revisá esto'],
+  assert.deepEqual(args.slice(0, 2), ['-p', 'revisá esto'],
     'no model means no flag — brain does not invent a default the operator did not choose');
+  assert.equal(args.includes('--model'), false, 'no model means no --model flag anywhere in argv');
 });
 
 test('#682 B.3: the engine gets a wall clock, and it is passed to the runner', async () => {

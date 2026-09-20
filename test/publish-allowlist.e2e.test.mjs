@@ -56,8 +56,14 @@ const MUST_NOT_SHIP = Object.freeze([
  * rule above anticipated. Raise it deliberately when the product genuinely
  * grows; if raising it is ever the quick fix for a red run, read what got added
  * first.
+ *
+ * Raised 8 → 9 (#936, 2026-09-19) after reading what was added: `main` sat at
+ * 7.96 MB after the UI design pages (#1067), and #936's lane sweep added
+ * ~0.1 MB of source and vendored tests under `brain/scripts/**` (sweep.mjs,
+ * delivery.mjs and their suites). Organic growth, no bulk. Whether every
+ * vendored suite must ship is tracked in #1076.
  */
-const SIZE_CANARY_MB = 8;
+const SIZE_CANARY_MB = 9;
 
 /**
  * The real packed contents — read from the ACTUAL tarball, not from npm's

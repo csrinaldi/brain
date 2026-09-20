@@ -33,11 +33,17 @@ const TEST_DIR = join(REPO_ROOT, 'test');
 // — a real-fs scan that hit this file would flag itself. Excluded the same way
 // sdd-layout.test.mjs excludes its own module from A1 (issue #250 B0).
 const SELF_ABS = fileURLToPath(import.meta.url);
-// tmp-tree.mjs itself legitimately calls a recursive rmSync (that IS the
-// removeTempTree implementation) — it does not spawn git, so the AND
-// condition already excludes it, but it is named here too so the exclusion
-// is not an accident of tmp-tree.mjs happening to be git-silent today.
-const TMP_TREE_ABS = join(SCRIPTS_DIR, '__fixtures__', 'tmp-tree.mjs');
+// lib/tmp-tree.mjs itself legitimately calls a recursive rmSync (that IS the
+// removeTempTree implementation, moved here from __fixtures__/ by #887's
+// correction C2) — it does not spawn git, so the AND condition already
+// excludes it, but it is named here too so the exclusion is not an accident
+// of tmp-tree.mjs happening to be git-silent today.
+const TMP_TREE_ABS = join(SCRIPTS_DIR, 'lib', 'tmp-tree.mjs');
+// __fixtures__/tmp-tree.mjs is now a thin re-export of the above — it
+// carries neither a git spawn nor an rmSync literal, so it would not trip
+// the scan even without this exclusion; named for the same "not an
+// accident" reason.
+const TMP_TREE_REEXPORT_ABS = join(SCRIPTS_DIR, '__fixtures__', 'tmp-tree.mjs');
 
 /**
  * Files that spawn git AND recursively `rmSync` a directory they own, and are
@@ -122,7 +128,7 @@ function scanForDrift(roots, { readdir = readdirSync, readFile = readFileSync, a
       if (!entry.isFile() || !entry.name.endsWith('.mjs')) continue;
       const dir = entry.parentPath ?? entry.path;
       const full = join(dir, entry.name);
-      if (full === TMP_TREE_ABS || full === SELF_ABS) continue;
+      if (full === TMP_TREE_ABS || full === TMP_TREE_REEXPORT_ABS || full === SELF_ABS) continue;
       if (allowSet.has(full)) continue;
       const content = readFile(full, 'utf8');
       if (spawnsGit(content) && callsRecursiveRmSync(content)) offenders.push(full);

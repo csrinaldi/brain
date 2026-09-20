@@ -406,7 +406,7 @@ npm run brain:session:start  # restore session context — read-only, local, no 
 npm run brain:start 142      # verify the issue is approved, create the branch
 npm run brain:project:feature -- --issue 142 --title export-invoices-csv
 npm run brain:check          # the governance checks + tests + reference check
-npm run brain:save           # materialise and commit session memory
+npm run brain:memory:save --issue <id> # capture durable issue memory; the lane ships it
 npm run brain:ship           # re-check, then open the PR
 npm run brain:next           # what is my next step?
 npm run brain:review -- --pr 318
@@ -433,7 +433,7 @@ All checks passed. Ready to brain:ship.
 ```
 
 ```
-brain:save: .memory/ committed — "chore(memory): sync .memory [brain:save]"
+brain:memory:save: durable issue record captured; the enabled memory lane ships it
 brain:ship: PR opened → https://github.com/acme/ledger/pull/318
 ```
 

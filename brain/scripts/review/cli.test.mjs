@@ -1226,6 +1226,25 @@ test('parseArgs: every REVIEW_MODES entry is accepted', () => {
   }
 });
 
+test('parseArgs: --engine and --model are accepted and parsed', () => {
+  const args = parseArgs(['665', '--engine', 'gemini', '--model', 'gemini-2.5-pro']);
+  assert.equal(args.error, null);
+  assert.equal(args.engine, 'gemini');
+  assert.equal(args.model, 'gemini-2.5-pro');
+});
+
+test('parseArgs: --engine or --model with no value refuses', () => {
+  assert.match(parseArgs(['665', '--engine']).error, /"--engine" was given with no value/);
+  assert.match(parseArgs(['665', '--model']).error, /"--model" was given with no value/);
+  assert.match(parseArgs(['665', '--engine', '--model', 'gemini-2.5-pro']).error, /"--engine" was given with no value/);
+  assert.match(parseArgs(['665', '--model', '--dry-run']).error, /"--model" was given with no value/);
+});
+
+test('parseArgs: --engine=x and --model=y are refused with guidance', () => {
+  assert.match(parseArgs(['665', '--engine=gemini']).error, /write "--engine gemini"/);
+  assert.match(parseArgs(['665', '--model=gemini-2.5-pro']).error, /write "--model gemini-2.5-pro"/);
+});
+
 test('main: an unusable --mode refuses before any git or network call (G3)', async () => {
   const errors = [];
   const vcs = spyVcs();
@@ -1505,4 +1524,74 @@ test('#631: every gather*Inputs call in the bound region receives the reviewer-b
       'evaluator never calls getVcs loses nothing by receiving one, and exempting it would rebuild the hand-kept ' +
       'list this test exists to replace.',
   );
+});
+
+test('main: --engine and --model override config.sdd.map["cold-review"] in memory', async () => {
+  let capturedConfig = null;
+  const vcs = spyVcs();
+  const deps = readyDeps({ vcs });
+  delete deps.inferentialDeps;
+  deps.config = {
+    project: { slug: 'org/repo' },
+    sdd: { map: { 'cold-review': { engine: 'claude', model: 'sonnet' } } },
+  };
+  deps.runColdReviewStage = async ({ config }) => {
+    capturedConfig = config;
+    return { routed: true, ok: true };
+  };
+
+  const code = await main({
+    argv: ['42', '--engine', 'gemini', '--model', 'gemini-2.5-pro', '--dry-run'],
+    log: () => {},
+    error: () => {},
+    ...deps,
+  });
+
+  assert.equal(code, 0);
+  assert.deepEqual(capturedConfig?.sdd?.map?.['cold-review'], {
+    engine: 'gemini',
+    model: 'gemini-2.5-pro',
+  });
+  assert.equal(deps.config.sdd.map['cold-review'].engine, 'claude');
+});
+
+
+// ── #1073 cold review, finding cold-1 ──────────────────────────────────────
+// `gatherTrancheInputs` states the rule in its own comment: "A refusal is
+// null, never []. An empty array would say 'this PR carries no exception',
+// which is a claim the reviewer cannot make when it never read the labels."
+// The main call path then wrote `boot.prView.labels ?? []` and coerced exactly
+// that null into exactly that empty array. The verdict was still fail-closed,
+// so nothing was waived wrongly — but the doctrine was honored everywhere
+// except where it is used.
+test('#1073: a PR read that carried no labels hands over null, and never a second forge call', async () => {
+  const vcs = spyVcs();
+  const deps = readyDeps({ vcs });
+  // The forge refused the labels — `gitlab.mjs` and `ci-context.mjs` both
+  // model this as `labels: null` on an otherwise usable prView.
+  deps.coldBootDeps.fetchPr = async () => ({ number: 42, author: 'alice', labels: null, body: '', headRefOid: HEAD });
+
+  let prViewCalls = 0;
+  deps.trancheDeps.prView = async () => { prViewCalls += 1; return { labels: ['size:exception'] }; };
+
+  const lines = [];
+  const code = await main({ argv: ['--pr', '42'], log: (s) => lines.push(s), ...deps });
+
+  assert.equal(code, 0);
+  // `?? null` rather than the raw value: an ABSENT labels field would
+  // otherwise read as "the caller supplied none" and trigger the fallback
+  // fetch, turning a refused read into a second request that could succeed
+  // and waive a budget the first read never authorised.
+  assert.equal(prViewCalls, 0,
+    'the PR was already read and the labels were refused; asking again would let a retry grant an exception the first read never carried');
+
+  // The distinction has to be OBSERVABLE or it is not worth keeping: `[]` and
+  // `null` both fail closed, so a test that only checked the verdict could not
+  // tell them apart, and the first attempt at this test could not. Over
+  // budget, the verdict now says which of the two happened.
+  deps.trancheDeps.diffNumstat = () => '900\t900\tbig.mjs\n';
+  const overBudget = [];
+  await main({ argv: ['--pr', '42'], log: (s) => overBudget.push(s), ...deps });
+  assert.ok(overBudget.some((l) => /labels could not be read/.test(l)),
+    'a block on a refused read must not be presented as a block on an absent exception — coercing the refusal to [] is exactly that claim');
 });

@@ -5,14 +5,19 @@
 // format.mjs's contract). Reuses buildRecord()/computeRecordId() — never a
 // second id hasher — and validateRecord() as a defensive final gate.
 
-import { buildRecord, validateRecord, RECORD_TYPES } from './format.mjs';
+import { buildRecord, validateRecord, RECORD_TYPES, classifyActor } from './format.mjs';
 import { parseProvenance } from './provenance.mjs';
 
 /** The declared convention for a legacy record with no recoverable §4 prose
  * (REQ-MF-6): the store owner stands in as the ULTIMATE author of record — a
  * DECLARED convention, NOT a factual authorship claim. Never added to the
  * `actorKind` enum ("unknown" is deliberately absent from format.mjs's
- * human|agent set) — legacy records are declared `human` by this convention. */
+ * human|agent set) — legacy records are declared `human` by this convention.
+ *
+ * #874: this no-recovery fallback (and the door it sits behind) is LEGACY —
+ * it retires when engram's own `mem_save`/`save()` stub is addressed. Until
+ * then it stays exactly as it is; only a RECOVERED branch-shaped actor gets
+ * the new #738 guard below, never this path. */
 export const LEGACY_ACTOR = '@legacy';
 export const LEGACY_ACTOR_KIND = 'human';
 
@@ -83,6 +88,23 @@ export function exportObservation(observation) {
   };
 
   if (recovered) {
+    // #738 (design A5): a §4 block CAN recover a branch-shaped `actor`
+    // (`ACTOR_LINE_RE` accepts any non-whitespace token) — W3 (format.mjs)
+    // would refuse it at appendRecord, turning a genuine recovery into a
+    // THROW inside `share`/`migrate-v1`. Soft-reject it here instead, the
+    // same shape as the non-enum-type rejection above. Measured vacuous
+    // today (0/278 real observations recover at all), which is exactly why
+    // it is cheap to make honest before it is ever load-bearing.
+    if (classifyActor(parsed.actor) === 'branch') {
+      return {
+        rejected: {
+          id: obsRef,
+          title: observation.title ?? '',
+          type: observation.type,
+          reason: `recovered actor is branch-shaped: '${parsed.actor}' (W3, #738) — a branch answers WHERE, not WHO`,
+        },
+      };
+    }
     fields.actor = parsed.actor;
     fields.actorKind = parsed.actorKind;
     if (parsed.issue !== undefined) fields.issue = parsed.issue;

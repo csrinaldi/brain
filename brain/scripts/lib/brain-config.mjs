@@ -24,6 +24,26 @@ const CONFIG_PATH = join(REPO_ROOT, 'brain.config.json');
  * Loads and returns the parsed brain.config.json from the repository root.
  * Throws a descriptive error if the file is missing or malformed.
  *
+ * Classified for the SAME shape gap #975 fixed on `loadBrainConfigOrThrow`
+ * (issue #975, Expected item 3) and left UNCHANGED, deliberately: this
+ * function has no DENY/exclusion-list caller. Its callers read
+ * `governance.ignoreList` (ALLOW/exemption, e.g.
+ * `review/evaluators/tranche.mjs:313`), `governance.tier` via
+ * `resolveTier()` (a doctrine-ratified fixed fallback, e.g.
+ * `vcs/governance-tiers.mjs:520`), or plain status/identity fields with no
+ * governance-gate semantics at all (`review/identity.mjs:143,153`,
+ * `status/epic-map.mjs:74`, `ticket-new.mjs:76`, `ticket-start.mjs:68`,
+ * `day-start.mjs:28`, `archive.mjs:228`, `vcs/cli.mjs:129`). Two call sites
+ * (`governance/run-check.mjs:174`, `vcs/phase-order-check.mjs:489`) already
+ * wrap the call in `try { … } catch { return {}; }`, so even a raw non-object
+ * return degrades to the same `{}` a shape-check throw would produce there.
+ * Adding the same shape check here would only change ONE observable case —
+ * a top-level `null` no longer crashes on the caller's first unguarded
+ * `.` access — for zero DENY-direction benefit, so R8's "keeps throwing on
+ * absence and malformation, unchanged" is extended to cover shape too. See
+ * `openspec/changes/issue-975-config-shape/proposal.md` for the full
+ * caller-by-caller table.
+ *
  * @returns {object} The parsed brain.config.json object.
  */
 export function loadBrainConfig() {
@@ -42,6 +62,96 @@ export function loadBrainConfig() {
   } catch (err) {
     throw new Error(`brain.config.json is not valid JSON: ${err.message}`);
   }
+}
+
+/**
+ * True when `value` is a plain JSON object — the only shape every
+ * `loadBrainConfigOrThrow` caller can safely optional-chain into
+ * (issue #975). `typeof value === 'object'` alone is not enough: it is also
+ * true for `null` and for arrays, which is exactly how the shape gap fails
+ * open — `null?.governance` and `[].governance` both resolve to
+ * `undefined` without throwing, same as `{}.governance`, so a DENY reader
+ * downstream cannot tell "the config is a non-object" from "the config has
+ * no governance key" and degrades as if it were empty.
+ */
+function isPlainObject(value) {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Names a parsed JSON value's shape for the error message (issue #975).
+ * `null` and arrays are both `typeof 'object'`, so they are named
+ * explicitly before falling back to `typeof` for every other JSON value
+ * (`'string'`, `'number'`, `'boolean'`).
+ */
+function describeJsonType(value) {
+  if (value === null) return 'null';
+  if (Array.isArray(value)) return 'array';
+  return typeof value;
+}
+
+/**
+ * Loads brain.config.json from `root`, distinguishing ABSENCE from
+ * UNREADABILITY (issue #942, R3 — REQ-DENY-1). Mirrors
+ * `memory/lib/upstream-records.mjs`'s `loadBrainConfigAt` byte-for-byte in
+ * behaviour — the house model, and the only reader in the tree that already
+ * made this distinction before this issue.
+ *
+ * ENOENT is the ONE "there is nothing to read" case, and returns `{}` — a
+ * fresh consumer install has no config file, and that must stay green
+ * (R11). Every OTHER read failure (a directory in the file's place, a
+ * permission error) or any JSON.parse failure is "could not look", and
+ * THROWS a named error identifying the file and the failure kind — the
+ * parse wrapper says "could not be parsed", never "is not valid JSON",
+ * because the wrapped `JSON.parse` message already ends that way (#701 cold
+ * review round 2).
+ *
+ * A THIRD failure kind, added by issue #975: the parse can succeed on JSON
+ * that is not a plain object (`null`, an array, a number, a string) — the
+ * JSDoc always promised `@returns {object}`, but nothing enforced it. Every
+ * caller of this function reads through optional chaining
+ * (`config?.governance?.reviewActors`), so a non-object value degrades
+ * exactly like `{}` — the #942 class (a DENY/exclusion reader failing open)
+ * reached through a shape gap instead of a read/parse failure. The shape
+ * check throws a named error identifying the path and the JSON type found,
+ * so a DENY-direction caller that does not catch (per its own #942
+ * direction) propagates this exactly as it propagates a parse failure.
+ *
+ * This is NOT a shared deny/allow list and NOT a shared policy function
+ * (explicitly rejected — R3's "why"): it shares the READ only. Each caller
+ * still handles the throw per its own direction — a deny/exclusion reader
+ * propagates it, an allow/exemption reader may still degrade it to `[]`.
+ *
+ * `loadBrainConfig()` (below) is UNCHANGED (R8, and unchanged again by
+ * #975 — see that function's own doc comment for why): it keeps throwing on
+ * BOTH absence and malformation for its own callers, which correctly read
+ * any throw as "absent". This is a second, additive export for callers
+ * that need absence and unreadability to mean different things.
+ *
+ * @param {string} [root] - Repository root (defaults to this module's repo root).
+ * @returns {object} `{}` when brain.config.json is absent; the parsed object otherwise.
+ * @throws {Error} when brain.config.json exists but cannot be read, cannot be
+ *   parsed, or parses to a JSON value that is not a plain object.
+ */
+export function loadBrainConfigOrThrow(root = REPO_ROOT) {
+  const path = join(root, 'brain.config.json');
+  let raw;
+  try {
+    raw = readFileSync(path, 'utf8');
+  } catch (err) {
+    if (err?.code === 'ENOENT') return {};
+    throw new Error(`brain.config.json at ${path} could not be read: ${err.message}`);
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    throw new Error(`brain.config.json at ${path} could not be parsed: ${err.message}`);
+  }
+  if (!isPlainObject(parsed)) {
+    throw new Error(`brain.config.json at ${path} must contain a JSON object, got ${describeJsonType(parsed)}`);
+  }
+  return parsed;
 }
 
 /**

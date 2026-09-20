@@ -160,12 +160,12 @@ export const REFUSED_FIELDS = Object.freeze(['causal_disposition']);
  * spellings of it.
  *
  * @param {{prNumber: number|string, baseRef?: string|null, headRef?: string|null,
- *          artifactRoot?: string|null}} args
+ *          artifactRoot?: string|null, outputMode?: 'file'|'final-message'}} args
  * @returns {string}
  * @throws {Error} via `artifactPathFor` when the PR number is not one
  */
 export function assembleReviewPrompt({
-  role, prNumber, baseRef = null, headRef = null, artifactRoot = null,
+  role, prNumber, baseRef = null, headRef = null, artifactRoot = null, outputMode = 'file',
 } = {}) {
   // Refused, not defaulted, for the same reason the path below is thrown on:
   // a prompt with no role half sends an engine to work as nobody in
@@ -178,6 +178,9 @@ export function assembleReviewPrompt({
   // reader reports "missing", which is indistinguishable from "never ran".
   const relPath = artifactPathFor(prNumber);
   const artifactPath = artifactRoot ? join(artifactRoot, relPath) : relPath;
+  if (!['file', 'final-message'].includes(outputMode)) {
+    throw new Error(`assemble-review-prompt: unsupported output mode ${JSON.stringify(outputMode)}`);
+  }
 
   const diffCommand = baseRef && headRef
     ? `git diff ${baseRef}...${headRef}`
@@ -191,11 +194,23 @@ The working directory is a DETACHED CHECKOUT at the head this review is about.
 It is not the operator's branch, and nothing you read here is affected by
 whatever they have checked out or left uncommitted. The one path below is
 absolute and deliberately points OUTSIDE this directory — that is where the
-reader looks for your findings.` : ''}
+reader looks for your findings.
+
+This working directory is snapshotted before you start and again after you
+finish, and ANY added, removed, or changed path inside it — not just the one
+you may have meant to touch — refuses publication of the whole review. So you
+create, edit, and delete nothing under the working directory: no scratch files,
+no notes, no installed modules, no test artefacts left behind. The only file
+you write is the artifact path above, and it is OUTSIDE this directory
+precisely so writing it cannot trip this rule. If you need scratch space for
+anything — a downloaded dependency, an intermediate file, a note to yourself —
+use the OS temp dir, never here.` : ''}
 
 ## What you must produce
 
-Write exactly one file: \`${artifactPath}\`
+${outputMode === 'file'
+  ? `Write exactly one file: \`${artifactPath}\``
+  : 'Return exactly the artifact bytes as your final message. Say nothing else.'}
 
 It contains EXACTLY ONE fenced block, tagged \`${ARTIFACT_TAG}\`, whose content is
 a JSON array of findings. **Two blocks with that tag are refused outright** and
@@ -231,7 +246,7 @@ ${CARRIED_FIELDS.map((f) => `  - ${f}`).join('\n')}
 
 ## The empty case is a real answer
 
-If you find nothing, write the file with an empty array. "The reviewer ran and
+If you find nothing, ${outputMode === 'file' ? 'write the file' : 'return the artifact'} with an empty array. "The reviewer ran and
 found nothing" and "the reviewer never ran" are different states, and only the
 first one is yours to report. Do not omit the file to signal that you found
 nothing — an absent file reads as a failure and the verdict will say so.
@@ -261,6 +276,6 @@ nothing — an absent file reads as a failure and the verdict will say so.
 The first finding anchors and becomes an inline comment. The second does not and
 stays in the summary. Both are legitimate.
 
-Write the file. Say nothing else — brain does not read your stdout.
+${outputMode === 'file' ? 'Write the file. Say nothing else — brain does not read your stdout.' : 'Return the artifact bytes. Say nothing else.'}
 `;
 }

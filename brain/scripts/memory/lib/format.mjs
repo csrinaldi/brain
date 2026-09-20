@@ -28,6 +28,16 @@
 //        displacing the issue citation and prepending bytes to the hashed `content`.
 //   W2 — `issue`, when present, MUST be a finite integer `number` — the type the schema
 //        declares. `issue: "404"` re-imports as the number `404`, a different `id`.
+//   W3 — `actor` MUST NOT be branch-shaped (#738): no `/`, and not a bare default branch
+//        (`main`/`master`/`develop`/`trunk`). A branch answers WHERE a record was captured
+//        from, not WHO captured it — that question belongs in `issue`, not `actor`.
+//   W4 — `source`, when it cites `issue #N` (issue #461 "Case 4"), MUST agree with the
+//        record's own `issue`: `issue` MUST be present and equal to N. `issue` and `source`
+//        share ONE `**Fuente:**` line (provenance.mjs's renderFuente), so a record with no
+//        `issue` whose `source` cites one is byte-identical on the wire to a record that DOES
+//        declare it — no renderer/parser change can tell them apart, only refusing the write
+//        can. #460 ruled the READ-path version of this rule OUT (same reasoning as W1-W3
+//        above); this is the WRITE-time variant #460 itself said was "available and safe".
 
 import { createHash } from 'node:crypto';
 
@@ -44,6 +54,41 @@ const UTC_TS_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
 // Partial PII heuristic (REQ-MF-5): flags an email-shaped actor. Does not catch
 // a bare legal name — full enforcement is the C1b secret-scrubbing hook, not this validator.
 const EMAIL_ACTOR_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// The actor-shape predicate (#738, design A4) — rehomed here from `audit.mjs`
+// so the schema owner holds the rule; `audit.mjs` imports these instead of
+// redefining them. `HANDLE_RE` is also the positive requirement
+// `capture-provenance.mjs#resolveActor` enforces at the point a handle is
+// minted (imported from here, so the two can never drift).
+export const HANDLE_RE = /^@[A-Za-z0-9][A-Za-z0-9-]*$/;
+// A bare default-branch name is a branch too: records captured from the main
+// checkout carry `actor: "main"` (measured: 2 of them) — no `/` to catch.
+// Not exported (MINOR-1, fresh-context review): no consumer outside this
+// module reads the set itself, only `classifyActor`'s verdict.
+const DEFAULT_BRANCHES = new Set(['main', 'master', 'develop', 'trunk']);
+
+// The same "does this text cite an issue" grammar provenance.mjs's
+// `ISSUE_IN_FUENTE_RE`/`issueFromFuente` use for the composed `**Fuente:**`
+// line — kept as a local, deliberately NOT imported: format.mjs stays a
+// zero-dependency pure schema module (this file's header), and W4 below
+// checks the raw `source` field a caller is about to write, not composed §4
+// prose. Same pattern, independent module boundary.
+const ISSUE_CITED_IN_SOURCE_RE = /issue #(\d+)/;
+
+/**
+ * The four actor shapes (#738). `@legacy` is the export fallback; a `/` or a
+ * bare default-branch name is a git branch; `@name` is a handle; anything
+ * else is "other" and worth a look.
+ * @param {unknown} actor
+ * @returns {'legacy'|'branch'|'handle'|'other'}
+ */
+export function classifyActor(actor) {
+  if (typeof actor !== 'string' || actor === '') return 'other';
+  if (actor === '@legacy') return 'legacy';
+  if (actor.includes('/') || DEFAULT_BRANCHES.has(actor)) return 'branch';
+  if (HANDLE_RE.test(actor)) return 'handle';
+  return 'other';
+}
 
 /**
  * canonicalJson() — RFC 8785 (JCS) canonical serialization for this schema's
@@ -171,10 +216,15 @@ export function validateRecord(record) {
  *   W2 — `issue`, when present, MUST be a finite integer `number`. The schema
  *        declares `number`; `issue: "404"` is admitted by validateRecord() but
  *        re-imports as the number `404`, which is a different `id`.
+ *   W4 — `source`, when it cites `issue #N` (issue #461), MUST agree with the
+ *        record's own `issue` (present AND equal to N). Otherwise the two
+ *        fields disagree about a fact that shares one rendered line, and the
+ *        record fabricates `issue: N` for any reader that recovers it from
+ *        `source` alone.
  *
  * These are NOT in validateRecord() on purpose: that runs on the read path via
  * parseRecordLine(), where a rejection turns one bad line into a store-wide
- * failure of `memory:share`, `memory:pull`, `plainfiles.save` and `setup` —
+ * failure of `brain:memory:share`, `brain:memory:pull`, `plainfiles.save` and `setup` —
  * in a directory brain does not manage and therefore cannot migrate.
  *
  * Measured vacuous over this repo's store at the time of writing (0/2157
@@ -196,6 +246,32 @@ export function validateWritableRecord(record) {
     }
     if (record.issue !== undefined && record.issue !== null && !Number.isInteger(record.issue)) {
       writeErrors.push(`issue must be an integer number, not ${typeof record.issue} ${JSON.stringify(record.issue)} (W2)`);
+    }
+    // W3 — `actor` must not be branch-shaped: no `/`, and not a bare default
+    // branch (`main`/`master`/`develop`/`trunk`). Refuses the SHAPE only,
+    // never "not a handle" — a recovered non-handle actor (`other`, e.g.
+    // §4-recovered bare names) must still pass this gate; only `resolveActor`
+    // (capture-provenance.mjs) enforces the positive handle requirement,
+    // at the point a value is minted rather than recovered (#738 [rev #870]).
+    if (classifyActor(record.actor) === 'branch') {
+      writeErrors.push(
+        `actor is branch-shaped: '${record.actor}' — a branch answers WHERE, not WHO (W3, #738); ` +
+          `the branch belongs in 'issue'`,
+      );
+    }
+    if (typeof record.source === 'string') {
+      const cited = ISSUE_CITED_IN_SOURCE_RE.exec(record.source);
+      if (cited) {
+        const citedIssue = Number(cited[1]);
+        if (record.issue !== citedIssue) {
+          const declared = record.issue === undefined || record.issue === null ? 'absent' : JSON.stringify(record.issue);
+          writeErrors.push(
+            `source cites 'issue #${citedIssue}' but the record's own issue is ${declared} — issue and source ` +
+              `share one '**Fuente:**' line, so this fabricates 'issue: ${citedIssue}' for any reader that ` +
+              `recovers it from source alone (W4, #461): ${JSON.stringify(record.source)}`,
+          );
+        }
+      }
     }
   }
   return { valid: writeErrors.length === 0, errors: writeErrors };

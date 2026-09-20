@@ -16,9 +16,9 @@ import { vcsToken } from './vcs/lib/token.mjs';
 import { detectPM } from './lib/pm.mjs';
 import { t } from './i18n/t.mjs';
 import { currentBranch } from './lib/git-branch.mjs';
-import { restoreManifestChurn } from './lib/memory-manifest.mjs';
 import { agentRuntimeReport, platformEnvVars, platformConfig } from './harness/backends/agent-runtime.mjs';
 import { readEnv } from './lib/env-read.mjs';
+import { laneSweepEnabled, runLaneSweep, laneSweepLine, laneSweepBranchLines } from './memory/day-start-sweep.mjs';
 
 const ROOT = process.cwd();
 const NODE = process.execPath;
@@ -110,18 +110,6 @@ if (!vcs) {
         warn(await t('day.vcs.authFailed'));
       }
     }
-  }
-}
-
-// ── Pre-sync: restore manifest churn so git merge can proceed ────────────────
-// .memory/manifest.json is rewritten by `engram sync --export` (a derived index,
-// not user content). Discarding uncommitted local churn before the git merge is
-// safe and prevents the "your local changes would be overwritten" abort.
-// This is the "pull EARLY" step described in issue #59 / ADR-0002.
-{
-  const { restored } = restoreManifestChurn(ROOT);
-  if (restored) {
-    info(await t('day.memory.manifestRestored') || `manifest.json churn discarded (safe)`);
   }
 }
 
@@ -335,11 +323,12 @@ sep(await t('day.brain.section'));
 // ── 5. Team memory ───────────────────────────────────────────────────────────
 sep(await t('day.memory.section'));
 
-// 4a. Auto-install/repair the pre-push hook that materializes memory (ADR-0003).
+// 4a. Auto-install/repair the pre-push hook that checkpoints feature working memory
+//     and runs repository checks before push (day.memory.hookMissing / hookActive).
 //     Does not depend on re-running bootstrap: ensured on every startup, so devs
 //     who already have the system running receive it without manual action, and it
-//     re-installs itself if someone disables it. Real enforcement is client-side by design:
-//     the ~/.engram export can only happen on the dev's machine.
+//     re-installs itself if someone disables it. Durable team records travel through
+//     the memory lane, never on a feature push.
 const HOOKS_PATH = 'brain/scripts/hooks';
 const hookFile = join(ROOT, HOOKS_PATH, 'pre-push');
 if (!existsSync(hookFile)) {
@@ -358,9 +347,9 @@ if (!existsSync(hookFile)) {
 const engram = capture('engram', ['--version']);
 if (engram.status === 0) {
   // 4a. Import team memory from .memory/ → local engram (import-only, no git pull).
-  //     Step 2 already ran git fetch + merge (guarded by the early manifest restore),
-  //     so the working tree is up-to-date. Using "import" avoids a redundant network
-  //     call and eliminates any risk of post-merge hook recursion.
+  //     Step 2 already ran git fetch + merge, so the working tree is up-to-date.
+  //     Using "import" avoids a redundant network call and eliminates any risk
+  //     of post-merge hook recursion.
   console.log(`  ${C.dim}${await t('day.memory.importing')}${C.reset}`);
   await run(NODE, ['brain/scripts/memory/cli.mjs', 'import']);
 
@@ -379,6 +368,38 @@ if (engram.status === 0) {
 } else {
   info(await t('day.memory.notAvailable'));
   console.log(`       ${await t('day.memory.install')}`);
+}
+
+// 5a. Lane sweep — a synchronous sub-step, own timeout (#906, design.md A7).
+// NOT its own sep(): TOTAL stays 6 (test/bootstrap-smoke/smoke.mjs pins the
+// literal 6/6), the same reasoning as the AI-runtime block above (4b).
+// Silent skip when memory.lane.enabled is false or absent; exactly one line
+// when it ran; a non-zero or unparseable outcome WARNS, never fails
+// day:start — this block only ever renders what the PURE laneSweepLine()
+// decides (day-start.test.mjs pins that it never calls die; day-start-
+// sweep.test.mjs pins laneSweepLine's own four branches, #906 cold review C5).
+{
+  const laneEnabled = laneSweepEnabled(config);
+  if (laneEnabled) {
+    console.log(`  ${C.dim}${await t('day.memory.laneSweep.running')}${C.reset}`);
+  }
+  const laneResult = runLaneSweep({ config, enabled: laneEnabled });
+  const line = laneSweepLine(laneResult);
+  if (line.level === 'warn') {
+    const detail = await t(line.params.detailKey, line.params.detailParams);
+    warn(await t(line.key, { detail }));
+  } else if (line.level === 'ok') {
+    ok(await t(line.key, line.params));
+  }
+  // #936 (D-sweep step 5.7): one line per cross-day sweep row, in ADDITION
+  // to the single-line summary above — `laneResult.outcome?.sweep` is `null`
+  // whenever today's own run never reached the sweep (flag off, a non-zero
+  // exit, unparseable output, or --dry-run), so `laneSweepBranchLines()`
+  // returns `[]` and this loop is a no-op.
+  for (const branchLine of laneSweepBranchLines(laneResult.outcome?.sweep ?? null)) {
+    if (branchLine.level === 'warn') warn(await t(branchLine.key, branchLine.params));
+    else ok(await t(branchLine.key, branchLine.params));
+  }
 }
 
 // ── 6. Ticket board ──────────────────────────────────────────────────────────

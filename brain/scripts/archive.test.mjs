@@ -5,6 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 // Task 1.1 (RED): Imports from a non-existent logic module
 import {
@@ -235,13 +236,20 @@ test('3.2: archiveChange fails when target archive directory already exists — 
 
 // ── Test 4: Integration E2E ──────────────────────────────────────────────
 import { execFileSync } from 'node:child_process';
-import { rmSync, mkdirSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync, existsSync, readFileSync, readdirSync } from 'node:fs';
+import { testTmp } from './lib/test-tmp.mjs';
 
 test('4.1: Integration: E2E CLI run over sandbox layout', () => {
-  const sandbox = join(process.cwd(), 'scratch/test-archive-sandbox');
+  // Snapshot the real repo root's entry list BEFORE running — an absence
+  // claim on a single name would miss any other stray write, so this is a
+  // before/after comparison of the whole root (#1020), never a claim that
+  // one specific path does not exist.
+  const rootEntriesBefore = readdirSync(process.cwd()).sort();
 
-  if (existsSync(sandbox)) rmSync(sandbox, { recursive: true, force: true });
-  mkdirSync(sandbox, { recursive: true });
+  // Sandbox lives under the shared test-tmp root (#842 hygiene), never under
+  // the real repo's cwd: a per-run root outside the tree, cleaned up by the
+  // process-exit hook even on a killed run.
+  const sandbox = testTmp('archive-e2e-');
 
   const changeId = 'issue-999-integration-test';
   const changeDirRel = `openspec/changes/${changeId}`;
@@ -259,7 +267,10 @@ issue: 999
 - REQ-CAP-1: Integrate
 `);
 
-  const scriptPath = join(process.cwd(), 'brain/scripts/archive.mjs');
+  // Resolved from this module's own URL, not the test's cwd: the sandbox now
+  // runs with `cwd: sandbox`, and archive.mjs lives beside this test file
+  // regardless of where the suite is invoked from.
+  const scriptPath = fileURLToPath(new URL('./archive.mjs', import.meta.url));
   execFileSync('node', [scriptPath, changeId], {
     cwd: sandbox,
     env: { ...process.env, MEMORY_BACKEND: 'plainfiles' },
@@ -275,12 +286,19 @@ issue: 999
   assert.match(content, /### \[issue-999\] integration-test/);
   assert.match(content, /- REQ-CAP-1: Integrate/);
 
-  rmSync(sandbox, { recursive: true, force: true });
+  // No manual rmSync: the sandbox lives under the shared test-tmp root and
+  // is swept by its process-exit hook, so this run's own cleanup is never
+  // the thing standing between "green" and a leftover directory.
+  const rootEntriesAfter = readdirSync(process.cwd()).sort();
+  assert.deepEqual(
+    rootEntriesAfter,
+    rootEntriesBefore,
+    'this test must never change the real repo root\'s entry list (#1020)',
+  );
 });
 
 // ── Test 5: --backfill routed through the closed-issue selector (issue #557) ──
 
-import { fileURLToPath } from 'node:url';
 import { runBackfill, runSingle, BLOCKED_OUTCOMES } from './archive.mjs';
 import { OUTCOME } from './lib/archive-sweep.mjs';
 

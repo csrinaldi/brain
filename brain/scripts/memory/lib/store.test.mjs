@@ -68,7 +68,9 @@ test('appendRecord: re-appending the SAME record is idempotent and SAYS so — w
 
 test('appendRecord: an existing file with DIVERGENT bytes is never overwritten — first-wins, as the readers resolve it', () => {
   const { recordsDir } = tmpMemoryDir();
-  const rec = buildRecord({ ...base, content: 'round-tripped', source: 'PR #405' });
+  // `issue: 405` declared so the widened `source` below (citing 'issue #405')
+  // satisfies format.mjs's W4 (#461) — `source` itself stays hash-excluded.
+  const rec = buildRecord({ ...base, content: 'round-tripped', issue: 405, source: 'PR #405' });
   const widened = { ...rec, source: 'issue #405 / PR #405' }; // `source` is not hashed — same id
   appendRecord(widened, { recordsDir });
 

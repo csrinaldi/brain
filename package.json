@@ -10,6 +10,9 @@
     "access": "public"
   },
   "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
   "_files_note": "Derived from `managed` in brain/core/managed-paths.mjs — every path whose strategy needs BRAIN'S BYTES at install time. Verified against a real `npm pack` by test/publish-allowlist.e2e.test.mjs, never against this array alone. AGENTS.md is deliberately absent: it is `regenerate`, compiled in the consumer from SOURCE_DOCS, and shipping brain's own would be a file describing the wrong repository (#397).",
   "files": [
     "brain/core",
@@ -62,7 +65,7 @@
     "test": "node --test \"brain/scripts/**/*.test.mjs\" \"test/**/*.e2e.test.mjs\"",
     "test:fresh-install": "bash test/fresh-install/run.sh",
     "test:upgrade": "bash test/upgrade/run.sh",
-    "memory:save": "MEMORY_BACKEND=plainfiles node ./brain/scripts/memory/cli.mjs save",
+    "memory:save": "node ./brain/scripts/memory/cli.mjs save",
     "memory:index": "node ./brain/scripts/memory/cli.mjs index",
     "memory:share": "node ./brain/scripts/memory/cli.mjs share",
     "memory:pull": "node ./brain/scripts/memory/cli.mjs pull",
@@ -70,7 +73,22 @@
     "memory:resolve-index": "node ./brain/scripts/memory/cli.mjs resolve-index",
     "memory:audit": "node ./brain/scripts/memory/cli.mjs audit",
     "memory:split-records": "node ./brain/scripts/memory/cli.mjs split-records",
+    "memory:collect": "node ./brain/scripts/memory/cli.mjs collect",
+    "memory:ship": "node ./brain/scripts/memory/cli.mjs ship --invoker manual",
     "memory:migrate-v1": "node ./brain/scripts/memory/cli.mjs migrate-v1",
+    "brain:memory:session-end": "node ./brain/scripts/memory/session-end-ship.mjs",
+    "brain:memory:save": "node ./brain/scripts/memory/cli.mjs save",
+    "brain:memory:index": "node ./brain/scripts/memory/cli.mjs index",
+    "brain:memory:share": "node ./brain/scripts/memory/cli.mjs share",
+    "brain:memory:pull": "node ./brain/scripts/memory/cli.mjs pull",
+    "brain:memory:reindex": "node ./brain/scripts/memory/cli.mjs reindex",
+    "brain:memory:resolve-index": "node ./brain/scripts/memory/cli.mjs resolve-index",
+    "brain:memory:audit": "node ./brain/scripts/memory/cli.mjs audit",
+    "brain:memory:split-records": "node ./brain/scripts/memory/cli.mjs split-records",
+    "brain:memory:heal-duplicates": "node ./brain/scripts/memory/cli.mjs heal-duplicates",
+    "brain:memory:collect": "node ./brain/scripts/memory/cli.mjs collect",
+    "brain:memory:ship": "node ./brain/scripts/memory/cli.mjs ship --invoker manual",
+    "brain:memory:migrate-v1": "node ./brain/scripts/memory/cli.mjs migrate-v1",
     "feature:checkpoint": "node ./brain/scripts/memory/cli.mjs feature-checkpoint",
     "feature:resume": "node ./brain/scripts/memory/cli.mjs feature-resume",
     "tools:install": "bash ./brain/scripts/install-tools.sh",
@@ -78,7 +96,6 @@
     "brain:metrics": "node ./brain/scripts/brain-metrics.mjs",
     "brain:start": "node ./brain/scripts/brain-start.mjs",
     "brain:check": "node ./brain/scripts/brain-check.mjs",
-    "brain:save": "node ./brain/scripts/brain-save.mjs",
     "brain:ship": "node ./brain/scripts/brain-ship.mjs",
     "brain:next": "node ./brain/scripts/brain-next.mjs",
     "brain:adopt": "node ./brain/scripts/adopt.mjs",
@@ -92,6 +109,8 @@
     "brain:context:compile": "node ./brain/scripts/context/cli.mjs",
     "context:compile": "node ./brain/scripts/context/cli.mjs",
     "test:danger-paths": "bash test/upgrade/danger-paths.sh",
-    "brain:status": "node ./brain/scripts/status/cli.mjs"
+    "brain:status": "node ./brain/scripts/status/cli.mjs",
+    "brain:snapshot": "node ./brain/scripts/status/snapshot-cli.mjs",
+    "brain:ui": "node ./brain/scripts/ui/server.mjs"
   }
 }

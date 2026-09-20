@@ -1,130 +1,56 @@
 #!/usr/bin/env sh
-# pre-push — materializa la memoria viva en .memory/ antes del push (ADR-0002).
+# pre-push — checkpoint feature working memory, then run repository checks.
+# Durable team records travel through the memory lane, never on a feature PR.
 #
-# La capa Viva de memoria (sesión, errores, contexto) viaja en .memory/ commiteado
-# y entra a main al mergear el MR. Este hook garantiza que esa materialización
-# ocurra ANTES del push, en lugar de depender de que el dev recuerde memory:share.
-#
-# Comportamiento:
-#   - Sin node instalado (CI, clone fresco) → no bloquea (exit 0).
-#   - Dispatcha `memory:share` vía brain/scripts/memory/cli.mjs (backend-agnóstico, MEMORY_BACKEND).
-#   - Si .memory/ queda con cambios sin commitear (staged, unstaged o untracked)
-#     → aborta el push con instrucciones.
-#   - Bypass de emergencia: git push --no-verify.
-#
-# Instalado vía `core.hooksPath = brain/scripts/hooks` en bootstrap.sh §7 / npm run env:init.
+# Without node (CI or a minimal clone) this hook remains non-blocking.
+# A tooling/checkpoint failure is isolated; canonical-root and repo-check
+# failures remain actionable and block because they identify the push target.
 #
 # ── STREAM DISCIPLINE FOR HOOKS (issue #633) ────────────────────────────────
 #
 #   stdout is PROGRESS. stderr is SOMETHING A HUMAN NEEDS.
 #   A hook discards the first and NEVER the second.
 #
-# So `>/dev/null` is right and `2>&1` / `2>/dev/null` are wrong, on every
-# invocation, without exception. The reason is not tidiness: hooks are the
-# automated callers, and `memory/cli.mjs` puts its reports on stderr precisely
-# so those callers keep them (#598, and post-merge's `import` line says so in
-# its own comment). A hook that adds `2>&1` silently opts out of every warning
-# the tool was designed to give it.
-#
-# `|| true` / `|| exit 0` are a SEPARATE decision and they stay: a tooling
-# problem must not block a push or a merge. But once the exit code is thrown
-# away, stderr is the only channel left — discarding both leaves nothing at all.
-#
-# Enforced, not merely written down: hooks.stream-discipline.test.mjs scans
-# every hook for `cli.mjs` invocations and fails on any that discards stderr,
-# so a line added later follows the rule by failing a test rather than by
-# whoever wrote it having read this comment.
-#
-# Nota de arquitectura: engram escribe a .engram/ (su convención interna); ese path
-# es un symlink → .memory/ (el dir canónico versionado en git). ADR-0002 describe
-# el modelo; este hook inspecciona .memory/ directamente para evitar ambigüedad.
+# So `>/dev/null` is right on dispatcher progress and `2>&1` / `2>/dev/null`
+# are wrong on any `cli.mjs` invocation, without exception.
 
-# ── S4.8 note — reliability-first deviation from literal spec ──────────────
-# Hard-blocking the PR-level invariants (issue-link, adr-presence,
-# memory-presence) here would cause false-positives → developers use
-# --no-verify, defeating governance.  Pre-push hard-blocks ONLY:
-#   (a) uncommitted memory (existing)
-#   (b) repo:check — reference/prohibition violations (new)
-# Diff-size is a WARNING only (dev may be about to split PRs).
-# brain:audit is where ALL 4 invariants are enforced hard (on merged history).
-# ────────────────────────────────────────────────────────────────────────────
-
-# Sin node no hay dispatcher — no bloquear (entorno mínimo).
 command -v node >/dev/null 2>&1 || exit 0
 
-# Locate repo root so the dispatcher path is absolute regardless of cwd.
-repo_root=$(git rev-parse --show-toplevel)
+# Resolve the canonical root before invoking any node script.  An empty or
+# failed root is unsafe: refusing is preferable to running against the caller's
+# cwd (issue #890 threat matrix).
+repo_root=$(git rev-parse --show-toplevel 2>/dev/null) || {
+  echo "pre-push: could not resolve repository root; refusing push" >&2
+  exit 1
+}
+if [ -z "$repo_root" ]; then
+  echo "pre-push: repository root is empty; refusing push" >&2
+  exit 1
+fi
 
-# Materializar la memoria local en .memory/ vía dispatcher (backend-agnóstico).
-# Si el export falla, no bloquear el push por un problema de tooling.
-#
-# STREAM DISCIPLINE (issue #633) — see the header rule. `>/dev/null` and NOT
-# `2>&1`: this is the last command before the store leaves the machine, and the
-# duplicate report (#574/#598) is deliberately on stderr so automated callers
-# keep it. `2>&1` discarded it on every single `git push`.
-#
-# `|| exit 0` stays: a tooling problem must never block a push. But the exit
-# code was the ONLY signal left, and it is thrown away one character later — so
-# a tampered record, the one refusal `rebuildIndex` still has, was reported to
-# nobody and blocked nothing. Not blocking is the decision; being silent was not.
-node "$repo_root/brain/scripts/memory/cli.mjs" share >/dev/null || exit 0
+# Only checkpoint when an active change directory exists.  The backend resolves
+# the active feature (including resume.md disambiguation); no durable-record
+# share or dirty-.memory guard runs here.
+changes_dir="$repo_root/openspec/changes"
+if [ -d "$changes_dir" ] && find "$changes_dir" -mindepth 1 -maxdepth 1 -type d ! -name archive -print -quit 2>/dev/null | grep -q .; then
+  node "$repo_root/brain/scripts/memory/cli.mjs" feature-checkpoint >/dev/null || true
+fi
 
-# Checkpoint the active feature's resume.md so the latest context travels
-# with the branch on every push (REQ-S4-1).
-# Non-blocking: || true ensures a failed or ambiguous-resolution checkpoint
-# never aborts the push.
-# Known limitation (A2): when multiple openspec/changes/ dirs exist the cli
-# exits non-zero ("ambiguous"); || true swallows it and the push continues
-# unaffected.  The committed resume.md remains the primary context-travel
-# mechanism in that case.
-#
-# STREAM DISCIPLINE (issue #633) — this line was `2>/dev/null`, exactly backwards,
-# and it mattered more here than anywhere else. MEASURED on this repo:
-# `feature-checkpoint` writes 0 lines to stdout and 2 to stderr, so `2>/dev/null`
-# discarded the ONLY stream it uses. The message it silenced is the A2 limitation
-# above announcing itself —
-#   ℹ memory: feature-resolution: ambiguous active feature … — skipping checkpoint
-# — i.e. the documented failure mode was invisible in practice, and the `|| true`
-# meant the exit code said nothing either. A skip nobody can see is the same
-# outage as a skip that never reports.
-node "$repo_root/brain/scripts/memory/cli.mjs" feature-checkpoint >/dev/null || true
-
-# ── repo:check (hard — no false positives) ──────────────────────────────────
+# Repository reference/prohibition checks remain a hard pre-push boundary.
 node "$repo_root/brain/scripts/check-refs.mjs" || exit 1
 
-# ── diff-size WARNING (informational only — never blocks) ────────────────────
-# Budget is tiered (issue #358 Q5, REQ-TIER-9) — resolved by
-# governance-tiers.mjs from the repo's declared governance.tier, never a
-# second hardcoded literal here. If the budget can't be resolved (config
-# unreadable, unknown tier), the warning is skipped rather than falling back
-# to a stale literal.
+# Diff-size is informational; the authoritative governance audit remains the
+# merge-time check.  Unknown config/base state skips the warning.
 base=$(git merge-base HEAD origin/main 2>/dev/null) || base=""
 if [ -n "$base" ]; then
   budget=$(node "$repo_root/brain/scripts/vcs/governance-tiers.mjs" diff-budget 2>/dev/null) || budget=""
-  diff_lines=$(git diff --numstat "$base" HEAD \
-    | node "$repo_root/brain/scripts/vcs/diff-size-count.mjs" 2>/dev/null) || diff_lines=""
+  diff_lines=$(git diff --numstat "$base" HEAD | node "$repo_root/brain/scripts/vcs/diff-size-count.mjs" 2>/dev/null) || diff_lines=""
   if [ -n "$diff_lines" ] && [ -n "$budget" ] && [ "$diff_lines" -gt "$budget" ] 2>/dev/null; then
     echo ""
     echo "⚠ pre-push: ~${diff_lines} changed lines (budget: ${budget})."
     echo "  Consider splitting before opening a review (this push continues)."
     echo ""
   fi
-fi
-
-# ── uncommitted .memory/ check (WARNING — reliability-first, never blocks) ────
-# Rationale (ADR-0014 §9): `memory:share` above re-materializes the manifest,
-# which is non-deterministic (it churns), so a hard block here would self-block
-# the very push it runs on → developers reach for --no-verify, silencing the
-# whole hook. `brain:save` is the proper materialize-and-commit point, and
-# `brain:audit` enforces memory-presence on the merge to main. So: WARN here.
-pending=$(git -C "$repo_root" status --porcelain -- .memory)
-
-if [ -n "$pending" ]; then
-  echo ""
-  echo "⚠ pre-push: memoria viva sin commitear en .memory/ (este push continúa)."
-  echo "  Materializá con 'brain:save' (o: git add .memory && git commit -m 'chore(memory): sync .memory')."
-  echo "  El audit verifica memory-presence en el merge a main."
-  echo ""
 fi
 
 exit 0

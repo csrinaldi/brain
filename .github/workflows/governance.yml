@@ -1,6 +1,8 @@
 # governance.yml — Workflow Governance Layer (ADR-0014)
 #
-# Enforces four process invariants as PR checks. Each job name becomes the
+# Enforces process invariants as PR checks — ten jobs as of #905 (memory-gate,
+# decision-gate, phase-order, actor-check, brain-writes-reviewed, issue-link,
+# diff-size, local-checks, lane-paths, lane-scrub). Each job name becomes the
 # GitHub check context reported as "governance / <job-name>". These names are
 # load-bearing: brain/scripts/vcs/governance-checks.mjs (S3) derives the required
 # status-check list from them, and branch protection references them by context.
@@ -45,7 +47,14 @@ jobs:
     name: issue-link
     runs-on: ubuntu-latest
     steps:
+      # fetch-depth: 0 (#905, ADR-0034 L1/D1a) — issue-link now recomputes the
+      # lane predicate itself over the three-dot diff (BASE_SHA...HEAD_SHA)
+      # before exempting a memory/* head from the closing-keyword requirement.
+      # It already declares PR_NUMBER + VCS_TOKEN for fetchIssue below, so its
+      # auth verdict is unchanged — this only widens the checkout.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Verify approved issue link
         env:
@@ -60,6 +69,9 @@ jobs:
           # The repo's REAL default branch — repo metadata, never trigger identity
           # (ADR-0016 ruling 1). This is the input the literal 'main' used to be.
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          # #905 — feeds the lane predicate's three-dot diff (classifyLane).
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: node brain/scripts/governance/run-check.mjs issue-link
 
   # ── Invariant 2 — PR diff fits within the tiered review budget ──────────────
@@ -118,6 +130,9 @@ jobs:
       - name: brain:nav (navigation/link integrity)
         run: npm run brain:nav
 
+      - name: memory:index-lag (warn on index/records drift, never fails)
+        run: node brain/scripts/memory/index-lag.mjs
+
       - name: test (brain internal unit suite — brain source only)
         if: ${{ hashFiles('.brain-source') != '' }}
         run: npm test
@@ -137,11 +152,28 @@ jobs:
 
       - name: memory-gate (session summary captured)
         env:
+          # VCS_TOKEN, not GH_TOKEN (#1024, mirrors issue-link:61-71): reaches
+          # the server through the port (prView, labelEvents) via ci-context's
+          # PR_NUMBER-gated bootstrap, which resolves brain's one neutral
+          # credential.
+          VCS_TOKEN: ${{ github.token }}
+          # PR_NUMBER/PR_BODY let ci-context.mjs's loadContext() populate
+          # ctx.body (issue scoping, REQ-L3-4) and ctx.labels (the
+          # skip:memory-gate override, REQ-L3-5) from the SAME prView call.
+          # Without these the job's context was structurally uncomputable
+          # (both null), so memoryRetrieval() never ran in CI — #1024's gap.
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_BODY: ${{ github.event.pull_request.body }}
           # Repo metadata (never trigger identity — ADR-0016 ruling 1), mapped
-          # so ci-context.mjs's loadContext() can compute ctx.defaultBranch
-          # (issue #231 A2 phase 2 addendum). memory-gate itself does not
-          # consume this field today; every run-check.mjs-invoking job is wired
-          # uniformly so the seam degrades to null only when truly uncomputable.
+          # so ci-context.mjs's loadContext() can compute ctx.defaultBranch.
+          # NOT fetch-depth: 0 here (D1): the scoped check's own targeted
+          # `git fetch origin <default>` reads the default branch's
+          # `.memory/records/` without a checkout, so the union read works on
+          # GitHub's depth-1 checkout and covers GitLab's shallow clone too,
+          # with no YAML edit needed on either side. It also lets a manual
+          # re-run heal a PR after the record lands on its own lane — a
+          # frozen `fetch-depth: 0` checkout would not move until the next
+          # event.
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: node brain/scripts/governance/run-check.mjs memory-gate
 
@@ -249,3 +281,81 @@ jobs:
           # See memory-gate above (issue #231 A2 phase 2 addendum).
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: node brain/scripts/vcs/brain-writes-reviewed.mjs
+
+  # ── Invariant 9 (L1, ADR-0034) — the memory lane's path predicate ───────────
+  #
+  # Wraps evaluateLanePaths() over the three-dot diff (classifyLane,
+  # governance/checks/lane.mjs). A required, SELF-REPORTING context (design.md
+  # A5, D3): runs and passes explicitly on every non-lane PR ("not a lane —
+  # nothing to check", exit 0), never skipped, so a required context always
+  # reports. NO PR_NUMBER in this step's env (lib/workflow-auth.mjs:57-64 — a
+  # step declaring PR_NUMBER requires VCS_TOKEN); this job needs only
+  # BASE_SHA/HEAD_SHA + the ambient GITHUB_HEAD_REF (pull_request-only), so it
+  # stays offline by construction.
+  lane-paths:
+    name: lane-paths
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: lane-paths (the memory lane's path predicate)
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: node brain/scripts/governance/lane-paths.mjs
+
+  # ── Invariant 10 (C1, ADR-0034) — non-waivable secret scan on added records ─
+  #
+  # Wraps evaluateLaneScrub() over every ADDED `.memory/records/*.jsonl` path —
+  # on EVERY PR, lane or not (design.md A6: the five #890 feature-PR surfaces
+  # are still live). Never imports governance-tiers.mjs (source-guarded by
+  # lane-scrub.test.mjs): non-waivability is a property of the code, not a
+  # GATE_MATRIX cell a tier edit could soften. Same PR_NUMBER-free, offline
+  # construction as lane-paths above.
+  lane-scrub:
+    name: lane-scrub
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: lane-scrub (non-waivable secret scan on added records)
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: node brain/scripts/governance/lane-scrub.mjs
+
+  # ── Invariant 11 (issue #967 PR C) — a slice PR's base is its epic's tracker ─
+  #
+  # A slice belongs on its epic's tracker while that epic is in flight
+  # (`brain:ticket:start` already enforces this at creation time — PR B,
+  # lib/ticket-base.mjs). This job is the backstop: a PR that reached the
+  # forge with the wrong base anyway is refused, not merely warned about — a
+  # warning is what let #953 land on `main` (design.md D9). REQUIRED at every
+  # tier, `lite` included (governance-tiers.mjs GATE_MATRIX['base-branch'],
+  # ruling 1) — a deliberate exception to "lite only detects".
+  #
+  # The check runs no git: no BASE_SHA/HEAD_SHA, no fetch-depth: 0. Its own
+  # reads are at most two `issueView` calls (the linked issue, then its
+  # parent) via the VCS port — the same shape `issue-link` above uses.
+  base-branch:
+    name: base-branch
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify the PR's base against its epic's declared tracker
+        env:
+          # VCS_TOKEN, not GH_TOKEN (#479): this step reaches the server
+          # through the port, which resolves brain's one neutral credential.
+          VCS_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          BASE_BRANCH: ${{ github.event.pull_request.base.ref }}
+          # The repo's REAL default branch — repo metadata, never trigger
+          # identity (ADR-0016 ruling 1).
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: node brain/scripts/governance/run-check.mjs base-branch

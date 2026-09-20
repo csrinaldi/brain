@@ -108,11 +108,14 @@ they agree.
 | `issue-link` | The merge request description references an issue carrying the approved label. Fails closed. |
 | `diff-size` | Changed lines are within the declared tier's budget, excluding the configured ignore list. |
 | `local-checks` | The structural repo checks — reference check, navigation check — run in CI too, not only in your local hook. |
-| `memory-gate` | Session memory was captured. WHEN the pipeline hands this gate the merge request description (some do, some do not), it requires a memory record scoped to the linked issue; otherwise it degrades to "this repository has ever recorded a session summary". |
+| `memory-gate` | Session memory was captured. The gate reads the merge request description (#1024 — both GitHub and GitLab now hand it, unioning the merge request tree with the default branch) and requires a memory record scoped to the linked issue; when no issue is detectable it degrades to "this repository has ever recorded a session summary". |
 | `decision-gate` | An ADDED ADR is indexed in `brain/HOME.md`, and `brain/HOME.md` is not touched without an ADR. Reads no labels. |
 | `phase-order` | The change's SDD artifacts progressed in order. A real violation fails at every tier; only an UNCOMPUTABLE diff is downgraded to a warning at the lightest one. |
 | `actor-check` | The approval is not self-approval. At the lightest tier that means a distinct ACT (approving after your own last commit is enough); above it, a distinct ACTOR — approving your own merge request or your own issue fails — and at the strictest tier the approver must also have authored no commit on the branch. |
 | `brain-writes-reviewed` | Writes to the knowledge half are not agent-authored — that half never tiers. Above the lightest tier an approving review from someone other than the author is also required, though a merge request with NO reviews yet warns and passes rather than failing on absent evidence. |
+| `lane-paths` | Runs on every merge request, not only a memory lane one. On the lane branch it verifies every changed path under `.memory/records/` is an ADDED file and nothing else changed; on any other merge request it passes with nothing to check. Never tiers. |
+| `lane-scrub` | Runs on every merge request, lane or not. Every record file added under `.memory/records/` is scanned for a committed secret and fails closed on a match, naming only the pattern and line number — never the matched text. Not softened at any tier. |
+| `base-branch` | A merge request whose linked issue names a parent that declares a tracker must base on that tracker while the epic is in flight; a merge request with no linked issue, no parent, or an epic with no tracker passes untouched. Required at every tier, including the lightest. |
 
 ## Test plan
 
@@ -130,10 +133,12 @@ they agree.
 - [ ] Exactly one `type:*` label added, from the list above
 - [ ] Diff size within the tier's budget (or `size:exception` labelled and justified)
 - [ ] Conventional commit format (`type(scope): description`, no AI-attribution trailers)
-- [ ] Session memory captured with `npm run memory:share`, and the record carries the
-      linked issue number. Where the pipeline hands `memory-gate` this description,
-      an unscoped record does NOT satisfy it. `skip:memory-gate` is named in the docs
-      but no gate reads it — applying it exempts nothing.
+- [ ] Session memory captured as a record (`brain:memory:save --issue N`); it reaches `main`
+      on the lane. Where the pipeline hands `memory-gate` this description, an unscoped
+      record does NOT satisfy it — though a record already on `main` from its own lane MR
+      does, with no rebase needed. `skip:memory-gate` is honored at the "standard" tier
+      when applied by someone other than the MR author; "regulated" refuses it; "lite"
+      does not consult it.
 
 <!-- Emitted from brain/scripts/vcs/contributor-scaffold.mjs — edit the source, not
      .gitlab/merge_request_templates/Default.md. A hand-edit here is refused by contributor-scaffold.test.mjs. -->

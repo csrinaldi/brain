@@ -395,18 +395,27 @@ export async function prStatusRollup({ project, number, apiBase, token, proxyUrl
  * failure is caught and normalized to `null` (uncomputable) — never a
  * fabricated `[]`.
  *
- * @param {{ project: string, number: number, apiBase?: string, token?: string, proxyUrl?: string|null, fetchImpl?: Function }} params
+ * `kind` (issue #1024, design item 7): `'issue'` (default, UNCHANGED) reads
+ * `issues/:iid/resource_label_events`; `'mr'` reads
+ * `merge_requests/:iid/resource_label_events` instead — the memory-gate
+ * override's applier read (`decideMemoryGateOverride`) needs the MR's OWN
+ * label events, and `brain-metrics.mjs`'s `size:exception`/`skip:memory-gate`
+ * by-author reporting reads label events for a GitLab MR number today via the
+ * issues path, which is the same bug this fixes at the call site.
+ *
+ * @param {{ project: string, number: number, kind?: 'issue'|'mr', apiBase?: string, token?: string, proxyUrl?: string|null, fetchImpl?: Function }} params
  * @returns {Promise<Array<{ actor: { login: string }, action: 'add'|'remove', label: string, at: string }>|null>}
  */
-export async function labelEvents({ project, number, apiBase, token, proxyUrl, fetchImpl } = {}) {
+export async function labelEvents({ project, number, kind = 'issue', apiBase, token, proxyUrl, fetchImpl } = {}) {
   const encoded = encodeURIComponent(project);
+  const resource = kind === 'mr' ? 'merge_requests' : 'issues';
   let events;
   try {
     events = await gitlabApiFetch({
       apiBase: apiBase ?? 'https://gitlab.com/api/v4',
       token: glToken(token),
       proxyUrl: proxyUrl ?? null,
-      path: `projects/${encoded}/issues/${number}/resource_label_events`,
+      path: `projects/${encoded}/${resource}/${number}/resource_label_events`,
       fetchImpl,
     });
   } catch {
@@ -609,10 +618,43 @@ export async function issueList({ project, state = 'open', assignee } = {}) {
   }));
 }
 
-export async function mrList({ project, state = 'open' } = {}) {
+/** D1 — GitLab's native merge_requests `state` has no distinct GitHub-shaped
+ * `merged` boolean of its own; it folds `merged` into `state` as a third
+ * value. Mapped to the shared { state, merged } pair GitHub also reports:
+ * `opened`→`open`/`false`, `closed`→`closed`/`false`, `merged`→`closed`/
+ * `true`. Anything else (e.g. `locked`) is unrepresentable in the shared
+ * enum and reports `null`/`null` rather than guessing. */
+function mapGitlabMrState(raw) {
+  if (raw === 'opened') return { state: 'open', merged: false };
+  if (raw === 'closed') return { state: 'closed', merged: false };
+  if (raw === 'merged') return { state: 'closed', merged: true };
+  return { state: null, merged: null };
+}
+
+/**
+ * mrList — widened additively by #930 (D1/D2). See github.mjs#mrList's
+ * docstring for the shared rationale; this is the GitLab half.
+ *
+ * D2: an optional `headBranch` filter narrows the query to
+ * `source_branch=<branch>` (URL-encoded) and switches the page size to 100
+ * (matching GitHub's). Unfiltered calls stay byte-identical to the pre-#930
+ * query (`per_page=50`, no `source_branch` param). When `headBranch` is set
+ * and the page comes back full (100), this THROWS rather than risk a
+ * silently truncated result.
+ */
+export async function mrList({ project, state = 'open', headBranch } = {}) {
   const encoded = encodeURIComponent(project);
-  const arr = runJson('glab', ['api', `projects/${encoded}/merge_requests?state=${providerState('gitlab', state)}&per_page=50`]);
-  return arr.map(r => ({ number: r.iid, title: r.title, headBranch: r.source_branch }));
+  const endpoint = headBranch !== undefined
+    ? `projects/${encoded}/merge_requests?state=${providerState('gitlab', state)}&source_branch=${encodeURIComponent(headBranch)}&per_page=100`
+    : `projects/${encoded}/merge_requests?state=${providerState('gitlab', state)}&per_page=50`;
+  const arr = runJson('glab', ['api', endpoint]);
+  if (headBranch !== undefined && arr.length === 100) {
+    throw new Error(`mrList: a full page (100) came back for headBranch ${headBranch} — cannot rule out truncation, failing closed`);
+  }
+  return arr.map(r => {
+    const { state: mrState, merged } = mapGitlabMrState(r.state);
+    return { number: r.iid, title: r.title, headBranch: r.source_branch, state: mrState, merged };
+  });
 }
 
 export async function commitStatus({ project, sha }) {

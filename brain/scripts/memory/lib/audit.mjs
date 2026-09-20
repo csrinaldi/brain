@@ -1,4 +1,4 @@
-// audit.mjs — the pure half of `memory:audit` (#870; memory 2.0 task 0.2).
+// audit.mjs — the pure half of `brain:memory:audit` (#870; memory 2.0 task 0.2).
 //
 // The five numbers that opened memory 2.0 (#864) were hand queries nobody could
 // re-run. This module computes them from plain data — no fs, no git, no backend —
@@ -11,11 +11,15 @@
 // never 0 — "cannot determine" and "none" are different answers, and collapsing
 // them is the evidence-reader-empty-on-failure class this repo keeps paying for.
 
+import { classifyActor } from './format.mjs';
+
 const H = 3600000;
-const HANDLE_RE = /^@[A-Za-z0-9][A-Za-z0-9-]*$/;
-// A bare default-branch name is a branch too: records captured from the main
-// checkout carry `actor: "main"` (measured: 2 of them) — no `/` to catch.
-const DEFAULT_BRANCHES = new Set(['main', 'master', 'develop', 'trunk']);
+
+// `HANDLE_RE`/`DEFAULT_BRANCHES`/`classifyActor` moved to `format.mjs` (#738,
+// design A4) — the schema owner holds the actor-shape predicate. Re-exported
+// here so this module's own callers (and this file's test suite) keep
+// importing `classifyActor` from `audit.mjs`, unchanged.
+export { classifyActor };
 
 /**
  * Nearest-rank percentile over an ASCENDING list. `null` on an empty list.
@@ -51,20 +55,6 @@ export function latencyStats(pairs) {
     over24h: hours.filter((h) => h > 24).length,
     over72h: hours.filter((h) => h > 72).length,
   };
-}
-
-/**
- * The four actor shapes (design.md D3; #738's raised bar — a handle, never a
- * branch name). `@legacy` is the export fallback; a `/` is a git branch;
- * `@name` is a handle; anything else is "other" and worth a look.
- * @returns {'legacy'|'branch'|'handle'|'other'}
- */
-export function classifyActor(actor) {
-  if (typeof actor !== 'string' || actor === '') return 'other';
-  if (actor === '@legacy') return 'legacy';
-  if (actor.includes('/') || DEFAULT_BRANCHES.has(actor)) return 'branch';
-  if (HANDLE_RE.test(actor)) return 'handle';
-  return 'other';
 }
 
 export function actorShape(records) {
@@ -151,7 +141,7 @@ const h = (x) => (x === null ? 'n/a' : `${x.toFixed(1)} h`);
 export function renderReport(r) {
   const L = r.latency;
   const lines = [
-    `memory:audit — ${r.generatedAt} — window since ${r.window.sinceIso} (${r.window.records} records)`,
+    `brain:memory:audit — ${r.generatedAt} — window since ${r.window.sinceIso} (${r.window.records} records)`,
     L.measured === false
       ? `learn→main: not measured — ${L.reason}`
       : `learn→main   n ${L.n} · p50 ${h(L.p50h)} · p75 ${h(L.p75h)} · p90 ${h(L.p90h)} · max ${h(L.maxH)} · ≤1h ${L.within1h} · >24h ${L.over24h} · >72h ${L.over72h} · not landed ${L.notLanded}`,

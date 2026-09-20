@@ -7,7 +7,11 @@
 // Usage: npm run brain:ticket:start -- <id>                 (in-place checkout from main)
 //        npm run brain:ticket:start -- <id> --worktree      (isolated worktree from main)
 //        npm run brain:ticket:start -- <id> --base <branch> (different base, e.g. a story tracker)
-//        node brain/scripts/ticket-start.mjs <id> [--worktree] [--base <branch>]
+//        npm run brain:ticket:start -- <id> --off-tracker   (start from main although the epic declares a tracker)
+//        node brain/scripts/ticket-start.mjs <id> [--worktree] [--base <branch>] [--off-tracker]
+//
+// With no --base the base is READ FROM THE EPIC (#967): the issue's `parent`,
+// that node's declared `tracker`. The run always says which base it took and why.
 // Deprecated alias: npm run ticket:start (same target)
 
 import { spawnSync } from 'node:child_process';
@@ -22,6 +26,7 @@ import { detectPM } from './lib/pm.mjs';
 import { t } from './i18n/t.mjs';
 import { tryFeatureResume } from './memory/lib/auto-resume.mjs';
 import { parseTicketArgs } from './lib/ticket-args.mjs';
+import { resolveBase } from './lib/ticket-base.mjs';
 import { worktreeAddArgs, inPlaceCheckoutArgs } from './lib/ticket-branch.mjs';
 import { evaluateFreshness } from './lib/checkout-freshness.mjs';
 
@@ -48,7 +53,7 @@ if (!parsed.ok) {
   console.error(await t('ticket.error.usageExample2'));
   process.exit(1);
 }
-const { id, baseBranch, useWorktree } = parsed;
+const { id, useWorktree } = parsed;
 
 const sh = (cmd, args, opts = {}) => {
   const r = spawnSync(cmd, args, { encoding: 'utf8', cwd: ROOT, stdio: 'pipe', ...opts });
@@ -99,6 +104,26 @@ if (!issue?.number) {
   console.error(`  ${await t('ticket.error.notFound', { id, project })}`);
   process.exit(1);
 }
+
+// ── Which branch does this slice start from? (#967) ───────────────────────────
+// THE DECISION IS NOT HERE. `resolveBase` is a pure leaf with the reader
+// injected, so every row of it — the tracker, the three reasons there is none,
+// the fail-open on an unreadable epic, the one refusal — is tested without a
+// repository or a forge (`lib/ticket-base.test.mjs`). What is left here is a
+// print and an exit, before any git work: a refusal creates nothing.
+const resolved = await resolveBase({
+  issue,
+  args: parsed,
+  fetchIssue: (number) => vcs.issueView({ project, number: String(number) }),
+});
+if (!resolved.ok) {
+  console.error(`  ${await t(resolved.refusal.key, resolved.refusal.params)}`);
+  process.exit(1);
+}
+const baseBranch = resolved.base;
+// `say` is null only on an explicit `--base <other>` — the path that predates
+// this change and stays byte-identical, message included.
+if (resolved.say) console.log(`\n  ${await t(resolved.say.key, resolved.say.params)}`);
 
 // ── Determine the branch type from labels ─────────────────────────────────────
 // deriveBranchType strips the `type:` namespace before mapping (#101).

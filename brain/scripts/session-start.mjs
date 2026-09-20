@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // session-start.mjs — universal, read-only, LOCAL-ONLY session context loader
-// (issue #138, design.md). Restores brain's operational context (manifest,
-// engram, active change, ticket memory) for any agent or human, without the
+// (issue #138, design.md). Restores brain's operational context (engram,
+// active change, ticket memory) for any agent or human, without the
 // cost or network surface of day:start.
 //
 // The module performs NO action on import — all side effects are guarded by
@@ -12,9 +12,9 @@
 //
 // Dependency boundary (design §1.5a — statically asserted by
 // session-start.test.mjs's import-graph test): this module imports ONLY
-// node:* builtins, lib/git-branch.mjs, lib/memory-manifest.mjs, and
-// memory/lib/auto-resume.mjs. It MUST NOT import day-start.mjs, vcs/*,
-// lib/installer.mjs, or memory/cli.mjs's `pull` path.
+// node:* builtins, lib/git-branch.mjs, and memory/lib/auto-resume.mjs. It
+// MUST NOT import day-start.mjs, vcs/*, lib/installer.mjs, or
+// memory/cli.mjs's `pull` path.
 //
 // No-network gate (design §1.5b): every subprocess this module's steps issue
 // is routed through `gatedSpawn` (assertLocalArgv before the real spawn) —
@@ -31,7 +31,6 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 import { currentBranch } from './lib/git-branch.mjs';
-import { restoreManifestChurn } from './lib/memory-manifest.mjs';
 import { tryFeatureResume } from './memory/lib/auto-resume.mjs';
 import { synthesizeContext } from './context/synthesizer.mjs';
 import { t } from './i18n/t.mjs';
@@ -86,7 +85,7 @@ export function deriveChangeFromBranch(branchName, changesDir, { _readdir = read
 
 // ── assertLocalArgv — runtime local-op allowlist gate (design §1.5b) ─────────
 
-const GIT_ALLOWED_SUBCOMMANDS = new Set(['status', 'restore', 'rev-parse']);
+const GIT_ALLOWED_SUBCOMMANDS = new Set(['rev-parse']);
 const MEMORY_CLI_ALLOWED_OPS = new Set(['import', 'feature-resume']);
 
 // Defense in depth: reject these anywhere in argv, even on an otherwise-
@@ -99,8 +98,11 @@ const FORBIDDEN_ARGV_TOKEN = /^(pull|fetch|merge|clone|ls-remote|push)$|--export
 
 /**
  * Throws synchronously if `(cmd, args)` is not on the local-only allowlist:
- *   - `git status|restore|rev-parse` (read/local index only; trailing path
- *     args are permitted — these ops legitimately take them).
+ *   - `git rev-parse` (read-only, no working-tree mutation; trailing path
+ *     args are permitted — this op legitimately takes them). `status` and
+ *     `restore` were dropped (#955, D3): their only user was the manifest
+ *     restore step, now retired — a dead `restore` entry would let a
+ *     read-only loader run a tree-mutating git verb.
  *   - `<node> brain/scripts/memory/cli.mjs import|feature-resume`, called
  *     with EXACTLY those 2 args — no trailing flags (local-only ops per
  *     memory/cli.mjs:7-10 — never `pull`).
@@ -108,9 +110,9 @@ const FORBIDDEN_ARGV_TOKEN = /^(pull|fetch|merge|clone|ls-remote|push)$|--export
  * Any other argv (notably `git fetch|pull|merge|clone|ls-remote|push`,
  * `memory/cli.mjs pull`, `memory/cli.mjs import --export`, `engram sync
  * --export`) is rejected. This is the runtime gate ALL subprocess calls
- * session-start.mjs controls are routed through — directly (step 2) and via
- * the injected `_spawn` seam threaded into the PR1 libs and the
- * feature-resume runner (steps 1, 3, 4) — before they reach the real spawn.
+ * session-start.mjs controls are routed through — directly (step2) and via
+ * the injected `_spawn` seam threaded into `currentBranch` (step3) and the
+ * feature-resume runner (step4) — before they reach the real spawn.
  *
  * @param {string} cmd
  * @param {string[]} args
@@ -189,19 +191,19 @@ function formatChangeLine(change, strings) {
  * and passes the resolved map in as `strings` — design §1.8). Fixed section
  * order; lines are present/absent based only on the inputs.
  *
- * @param {{ manifest: {restored: boolean}, engram: {ok: boolean},
+ * @param {{ engram: {ok: boolean},
  *           change: {branch: string|null, token: string|null, matches: string[]},
  *           ticket: string|null }} model
  * @param {{ header: string, branch: string, branchUnknown: string, changeOne: string,
  *           changeNone: string, changeAmbiguous: string, memoryOk: string,
- *           memorySkip: string, manifestRestored: string, ticketLabel: string,
+ *           memorySkip: string, ticketLabel: string,
  *           ticketNone: string }} strings
  *           Resolved `session.*` templates (placeholders intact), e.g. from
  *           `resolveSessionStrings()`.
  * @returns {string}
  */
 export function renderContextBlock(model, strings) {
-  const { manifest, engram, change, ticket, recency = null } = model;
+  const { engram, change, ticket, recency = null } = model;
   const s = strings;
 
   const lines = [
@@ -209,7 +211,12 @@ export function renderContextBlock(model, strings) {
     RULE_DOUBLE,
     fill(s.branch, { branch: change.branch ?? s.branchUnknown }),
     formatChangeLine(change, s),
-    engram.ok ? s.memoryOk : s.memorySkip,
+    // #923 (acceptance A): when a failure reason is available, surface it —
+    // additive over the bare skip line so a caller/test that never supplies
+    // `engram.reason` still renders exactly the old generic line.
+    engram.ok
+      ? s.memoryOk
+      : (engram.reason ? fill(s.memorySkipReason, { reason: engram.reason }) : s.memorySkip),
   ];
 
   // Only when it is worth saying. A store captured today needs no line; an unknown or
@@ -221,10 +228,6 @@ export function renderContextBlock(model, strings) {
     } else if (recency.ageDays >= STALE_MEMORY_DAYS) {
       lines.push(fill(s.memoryRecencyStale, { days: String(recency.ageDays) }));
     }
-  }
-
-  if (manifest.restored) {
-    lines.push(s.manifestRestored);
   }
 
   lines.push(
@@ -246,12 +249,12 @@ export function renderContextBlock(model, strings) {
 // degrade to a printed note, never an exception.
 //
 // Gate coverage (fresh review MAJOR 2): every subprocess call a step issues —
-// directly (step 2) or via an injected `{_spawn}` seam into a PR1 lib (steps
-// 1, 3) or via tryFeatureResume's own `_runner` injection point (step 4) —
+// directly (step2) or via an injected `{_spawn}` seam into `currentBranch`
+// (step3) or via tryFeatureResume's own `_runner` injection point (step4) —
 // is routed through `boundGatedSpawn(deps)`, so `assertLocalArgv` runs
 // before the call reaches the real `spawnSync` (production) or a test spy.
-// `currentBranch` and `restoreManifestChurn` already accept `{_spawn}`;
-// `tryFeatureResume` is not modified (out of scope — owned by the
+// `currentBranch` already accepts `{_spawn}`; `tryFeatureResume` is not
+// modified (out of scope — owned by the
 // already-merged feature-working-memory change) — instead we supply a
 // `_runner` that itself calls through the same gated spawn.
 
@@ -268,24 +271,17 @@ function boundGatedSpawn(deps) {
 }
 
 /**
- * Step 1 — restore `.memory/manifest.json` churn before any git or engram
- * operation (REQ-3). Thin wrapper over `restoreManifestChurn`, gated.
- *
- * @returns {{ restored: boolean }}
- */
-export function step1RestoreManifest(cwd, deps = {}) {
-  try {
-    return restoreManifestChurn(cwd, { _spawn: boundGatedSpawn(deps) });
-  } catch {
-    return { restored: false };
-  }
-}
-
-/**
  * Step 2 — hydrate local engram from `.memory/` via the allowlisted
  * `memory/cli.mjs import` (REQ-4). Local-only: gated by `assertLocalArgv`.
  *
- * @returns {{ ok: boolean }}
+ * #923 (acceptance A): a non-zero exit or a thrown exception used to
+ * collapse to a bare `{ok:false}` — the failure CAUSE (stderr, exit code, or
+ * the caught exception's own message) is now preserved on the return shape,
+ * so the printed context block can say WHY hydration failed, not just THAT
+ * it did. This is additive to the contract, never fatal: `runSessionStart()`
+ * still always resolves `exitCode: 0` regardless of what this step reports.
+ *
+ * @returns {{ ok: true } | { ok: false, reason: string }}
  */
 export function step2HydrateEngram(cwd, deps = {}) {
   try {
@@ -293,9 +289,12 @@ export function step2HydrateEngram(cwd, deps = {}) {
     const cmd = process.execPath;
     const args = ['brain/scripts/memory/cli.mjs', 'import'];
     const r = spawn(cmd, args, { cwd, encoding: 'utf8' });
-    return { ok: Boolean(r) && r.status === 0 };
-  } catch {
-    return { ok: false };
+    if (Boolean(r) && r.status === 0) return { ok: true };
+    const stderr = typeof r?.stderr === 'string' ? r.stderr.trim() : '';
+    const reason = stderr || `exited ${r?.status ?? 'unknown'}`;
+    return { ok: false, reason };
+  } catch (err) {
+    return { ok: false, reason: err?.message ?? String(err) };
   }
 }
 
@@ -422,13 +421,25 @@ export async function step5SynthesizeContext(cwd, deps = {}) {
 // ── runSessionStart — top-level orchestrator (design §1.1) ──────────────────
 
 /**
- * Runs the full brain:session:start loop in order: restore manifest churn →
- * hydrate engram → resolve branch/change → load ticket memory → render.
+ * Runs the full brain:session:start loop in order: hydrate engram → resolve
+ * branch/change → load ticket memory → render.
  *
  * ALWAYS resolves with `exitCode: 0`. brain:session:start is a best-effort
  * context loader — a missing engram, a non-git dir, or an ambiguous branch must
  * degrade to a printed note, never a non-zero exit (an agent's session must
  * not be blocked by a context-load failure).
+ *
+ * #923 (acceptance B, triage finding, deliberate — NOT a bug fix): this
+ * orchestrator calls steps 2-4b only. `step5SynthesizeContext` is defined,
+ * exported, and independently tested (see its own test above), but nothing
+ * wires it in here. Whether it is dead code or an intended-but-unwired stage
+ * is a product decision, not something this fix resolves — wiring it in
+ * changes runSessionStart()'s output shape and (being `async`, unlike every
+ * step before it) its performance profile, both consumer-facing decisions
+ * that belong with #267 (the consumption/diagnostics ticket this triage
+ * question is linked to), not silently bundled into an observability fix.
+ * Recorded here so the open question has one canonical home instead of
+ * being rediscovered from scratch.
  *
  * @param {string} cwd
  * @param {{ _spawn?: Function, _branch?: Function, _changes?: Function, _resume?: Function }} [deps]
@@ -437,12 +448,11 @@ export async function step5SynthesizeContext(cwd, deps = {}) {
  * @returns {Promise<{ exitCode: 0, output: string }>}
  */
 export async function runSessionStart(cwd, deps = {}, strings) {
-  const manifest = step1RestoreManifest(cwd, deps);
   const engram = step2HydrateEngram(cwd, deps);
   const change = step3ResolveChange(cwd, deps);
   const ticket = step4LoadTicketMemory(cwd, deps);
   const recency = step4bMemoryRecency(cwd, deps);
-  const output = renderContextBlock({ manifest, engram, change, ticket, recency }, strings);
+  const output = renderContextBlock({ engram, change, ticket, recency }, strings);
   return { exitCode: 0, output };
 }
 
@@ -465,9 +475,9 @@ const SESSION_I18N_KEYS = {
   changeAmbiguous:  'session.change.ambiguous',
   memoryOk:         'session.memory.ok',
   memorySkip:       'session.memory.skip',
+  memorySkipReason: 'session.memory.skip.reason',
   memoryRecencyStale:   'session.memory.recency.stale',
   memoryRecencyUnknown: 'session.memory.recency.unknown',
-  manifestRestored: 'session.manifest.restored',
   ticketLabel:      'session.ticket.label',
   ticketNone:       'session.ticket.none',
 };

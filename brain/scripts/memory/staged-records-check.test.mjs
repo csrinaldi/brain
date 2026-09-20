@@ -311,7 +311,7 @@ test('evaluateStagedRecords: a healthy upstream carries no configError — the f
 // The gate's predicate is byte-identity against upstream, and a record arriving
 // through a merge from the trunk is byte-identical to upstream BY DEFINITION —
 // it IS upstream's blob. So the rule that makes the gate right for a
-// `memory:share` restage fired on every merge, and the remedy it printed
+// `brain:memory:share` restage fired on every merge, and the remedy it printed
 // (`git restore --staged` + `rm`) made the merge result OMIT the record, which
 // propagates as a deletion when the branch merges back. Measured in a throwaway
 // repo before this fix: the record was gone from the trunk afterwards.

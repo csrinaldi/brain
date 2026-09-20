@@ -820,10 +820,10 @@ const NODES = [
            ["checks/", "brain/scripts/governance/checks/"]] },
 
   { id: "gsave", lane: "golden", actor: "either", label: "save",
-    verb: "npm run brain:save", since: "v0.6.0", status: "shipped",
-    summary: "Materialises session memory into .memory/ and commits it — or refuses and tells you to capture one.",
-    detail: ["If memory:share produces no new changes, it exits non-zero: an empty memory commit would satisfy the gate's proxy while capturing nothing."],
-    docs: [["brain-save.mjs", "brain/scripts/brain-save.mjs"]] },
+    verb: "npm run brain:memory:save --issue <id>", since: "v0.6.0", status: "shipped",
+    summary: "Captures a durable issue-scoped memory record — or refuses and tells you to capture one.",
+    detail: ["The enabled memory lane ships the captured record independently of the feature PR; feature pushes no longer transport durable records."],
+    docs: [["memory/cli.mjs", "brain/scripts/memory/cli.mjs"]] },
 
   { id: "gship", lane: "golden", actor: "either", label: "ship",
     verb: "npm run brain:ship", since: "v0.6.0", status: "shipped",
@@ -860,11 +860,11 @@ const NODES = [
            ["ADR-0002", "brain/project/decisions/adr-0002-memoria-git-based-dos-capas.md"]] },
 
   { id: "sharepull", lane: "memory", actor: "either", label: "Share / pull",
-    verb: "memory:share · memory:pull", since: "v0.5.0", status: "shipped",
+    verb: "brain:memory:share · brain:memory:pull", since: "v0.5.0", status: "shipped",
     summary: "Export before pushing; churn-resilient pull when syncing across machines.",
     detail: [
       "A pre-push hook runs the export and warns when .memory/ was left uncommitted. It is a warning, not a block — the hook itself churns the manifest, so a hard block self-blocked the push.",
-      "memory:pull restores the regenerable manifest, pulls, then imports — raw git pull aborts with \"local changes would be overwritten\" once share has run."
+      "brain:memory:pull restores the regenerable manifest, pulls, then imports — raw git pull aborts with \"local changes would be overwritten\" once share has run."
     ],
     docs: [["memory/cli.mjs", "brain/scripts/memory/cli.mjs"],
            ["pre-push hook", "brain/scripts/hooks/pre-push"]] },
@@ -1023,7 +1023,7 @@ const MILESTONES = [
   { v: "v0.4.0", t: "Adapters harden, memory gets a second layer", future: false,
     body: "Generic VCS_TOKEN replaces provider-specific tokens (breaking). Feature-scoped working memory arrives (ADR-0011): resume.md travels with the branch and never reaches main. Harness-init becomes an adapter (ADR-0012), and env:init learns to bootstrap brain.config.json from the git origin." },
   { v: "v0.5.0", t: "Onboarding stops being manual", future: false,
-    body: "Auto-ADR onboarding (ADR-0013): the agent drafts starter ADRs into brain-drafts/ and the human signs each one — the human gate is designed in from the first ADR a repo ever gets. memory:pull becomes churn-resilient across machines." },
+    body: "Auto-ADR onboarding (ADR-0013): the agent drafts starter ADRs into brain-drafts/ and the human signs each one — the human gate is designed in from the first ADR a repo ever gets. brain:memory:pull becomes churn-resilient across machines." },
   { v: "v0.6.0", t: "Governance v1 — the invariants get teeth", future: false,
     body: "ADR-0014 lands four load-bearing invariants with a floor that works everywhere (client hooks + brain:audit over merged history) and a hard gate where the platform allows it (brain:protect). The golden path (start/check/save/ship/next) unifies the human and agent surfaces, and the --no-verify policy is enforced as a prohibited reference." },
   { v: "v0.7.0 – v0.8.1", t: "Naming becomes a contract", future: false,
@@ -1053,7 +1053,7 @@ const JOURNEY = [
     Upgrade consciously: npm run brain:upgrade -- v1.1.0
     (not auto-applied — review the tag changelog first)
 ── Team memory ─────────────────────────────
-  ✓ Pre-push hook active — materializes memory before push.
+  ✓ Pre-push hook active — checkpoints feature working memory before push.
 ── Ticket board ────────────────────────────
   #142  Export the invoice list to CSV   [status:approved] [type:feature]`,
     why: [
@@ -1142,11 +1142,11 @@ All checks passed. Ready to brain:ship.`,
     ],
     map: ["gcheck", "gnext", "l1", "localgates"] },
 
-  { phase: "11:45 · Save", actor: "either", title: "Commit the session memory",
-    cmd: "npm run brain:save",
-    out: `brain:save: .memory/ committed — "chore(memory): sync .memory [brain:save]"`,
+  { phase: "11:45 · Save", actor: "either", title: "Capture the durable issue memory record",
+    cmd: "npm run brain:memory:save --issue <id>",
+    out: `brain:memory:save: durable issue record captured; the enabled memory lane ships it`,
     why: [
-      "Memory is materialised from the live layer into .memory/ and committed. Tomorrow's brain:day:start on someone else's machine imports it.",
+      "The record is issue-scoped, not branch-scoped. The enabled memory lane delivers it to main independently of the feature PR — feature pushes no longer transport durable records. Tomorrow's brain:day:start on someone else's machine imports it from main.",
       "If nothing new was captured, this exits non-zero and tells you to capture a session summary instead of committing an empty change — an empty memory commit would satisfy the gate's proxy while recording nothing, which is worse than a red gate."
     ],
     map: ["gsave", "durable", "sharepull", "l3"] },

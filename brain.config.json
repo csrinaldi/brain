@@ -12,6 +12,11 @@
   "vcs": {
     "provider": "github"
   },
+  "memory": {
+    "lane": {
+      "enabled": true
+    }
+  },
   "governance": {
     "auditBaseline": "v1.0.0",
     "tier": "lite",
@@ -43,8 +48,8 @@
   "sdd": {
     "map": {
       "cold-review": {
-        "engine": "claude",
-        "model": "sonnet"
+        "engine": "codex",
+        "model": "gpt-5.5"
       }
     }
   }

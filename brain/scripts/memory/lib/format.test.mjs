@@ -19,6 +19,7 @@ import {
   buildIndexEntry,
   serializeIndex,
   nowUtcSeconds,
+  classifyActor,
 } from './format.mjs';
 
 // ── canonicalJson (RFC 8785 JCS) ──────────────────────────────────────────────
@@ -94,6 +95,21 @@ test('buildRecord: present optionals are carried through', () => {
   assert.equal(rec.source, 'issue #205');
 });
 
+// ── supersedes (#805) — pin only, no format.mjs edit; the field already
+// round-trips through hashInput (R2/R3) and the writable-record gates. ────
+
+test('buildRecord: a supersedes value changes the id versus the same content without it (#805)', () => {
+  const withoutSupersedes = buildRecord({ ...base });
+  const withSupersedes = buildRecord({ ...base, supersedes: 'rec-0123456789abcdef' });
+  assert.notEqual(withSupersedes.id, withoutSupersedes.id);
+  assert.equal(withSupersedes.supersedes, 'rec-0123456789abcdef');
+});
+
+test('buildRecord: an absent supersedes stays omitted, never null (R3, #805)', () => {
+  const rec = buildRecord({ ...base });
+  assert.equal('supersedes' in rec, false);
+});
+
 // ── validateRecord (REQ-MF-1, REQ-MF-5 partial) ───────────────────────────────
 
 test('validateRecord: accepts a well-formed record', () => {
@@ -137,6 +153,12 @@ test('validateRecord: rejects a null optional field (R3)', () => {
   const { valid, errors } = validateRecord(rec);
   assert.equal(valid, false);
   assert.ok(errors.some((e) => e.includes('issue')));
+});
+
+test('validateRecord: accepts a record carrying supersedes (#805)', () => {
+  const rec = buildRecord({ ...base, supersedes: 'rec-0123456789abcdef' });
+  const { valid, errors } = validateRecord(rec);
+  assert.equal(valid, true, errors.join('; '));
 });
 
 // ── W1/W2 (issue #404): the WRITE-path rules ────────────────────────────────
@@ -200,12 +222,96 @@ test('validateWritableRecord: accepts the shapes brain actually writes', () => {
   }
 });
 
+// ── W3 (#738): the write gate refuses a branch-shaped actor ─────────────────
+// `HANDLE_RE`/`DEFAULT_BRANCHES`/`classifyActor` move here from `audit.mjs`
+// (design A4) so the schema owner holds the predicate; `audit.mjs` imports
+// them instead of redefining them, and `audit.test.mjs` stays green
+// UNMODIFIED — the proof the move is behaviour-preserving.
+
+test('classifyActor: exported from format.mjs, identical behaviour to the prior audit.mjs definition', () => {
+  assert.equal(classifyActor('@csrinaldi'), 'handle');
+  assert.equal(classifyActor('@legacy'), 'legacy');
+  assert.equal(classifyActor('feat/issue-738-x'), 'branch');
+  assert.equal(classifyActor('main'), 'branch');
+  assert.equal(classifyActor('crinaldi'), 'other');
+});
+
+for (const actor of ['feat/x', 'main', 'master', 'develop', 'trunk']) {
+  test(`validateWritableRecord: W3 refuses a branch-shaped actor ('${actor}')`, () => {
+    const rec = { ...buildRecord({ ...base, actor }) };
+    const { valid, errors } = validateWritableRecord(rec);
+    assert.equal(valid, false);
+    assert.ok(errors.some((e) => e.includes('W3')), `errors were: ${errors.join('; ')}`);
+  });
+
+  test(`validateRecord: the READ gate still ADMITS a branch-shaped actor ('${actor}'), unchanged`, () => {
+    const rec = { ...buildRecord({ ...base, actor }) };
+    assert.equal(validateRecord(rec).valid, true, 'a read-path rejection would brick a consumer store');
+  });
+}
+
+for (const actor of ['@legacy', '@csrinaldi', 'crinaldi']) {
+  test(`validateWritableRecord: W3 admits a non-branch-shaped actor ('${actor}')`, () => {
+    const rec = { ...buildRecord({ ...base, actor }) };
+    const { valid, errors } = validateWritableRecord(rec);
+    assert.equal(valid, true, `${actor} must be writable — ${errors.join('; ')}`);
+  });
+}
+
 test('validateWritableRecord: still reports every read-gate error (it is a superset, not a replacement)', () => {
   const { valid, errors } = validateWritableRecord({ ...buildRecord({ ...base }), issue: null, type: 'nope' });
   assert.equal(valid, false);
   assert.ok(errors.some((e) => e.includes('R3')), `errors were: ${errors.join('; ')}`);
   assert.ok(errors.some((e) => e.includes('invalid type')), `errors were: ${errors.join('; ')}`);
 });
+
+// ── W4 (#461 "Case 4"): a source citing an issue the record does not declare
+// fabricates that issue on round-trip. `issue` and `source` share ONE
+// '**Fuente:**' line (provenance.mjs's renderFuente), so `{source: 'issue
+// #201 / PR #204'}` (no `issue`) renders byte-identical to `{issue: 201,
+// source: 'PR #204'}` — the two are indistinguishable on the wire. WRITE-time
+// only, same asymmetry as W1-W3: #460's ruling against a READ-path rule for
+// this exact shape stands, so a record already carrying it must still parse.
+
+test('validateWritableRecord: W4 rejects a source citing an issue the record does not declare', () => {
+  const rec = { ...buildRecord({ ...base }), source: 'issue #201 / PR #204' };
+  const { valid, errors } = validateWritableRecord(rec);
+  assert.equal(valid, false);
+  assert.ok(errors.some((e) => e.includes('W4')), `errors were: ${errors.join('; ')}`);
+});
+
+test('validateWritableRecord: W4 rejects a source citing a DIFFERENT issue than the one declared', () => {
+  const rec = { ...buildRecord({ ...base, issue: 405 }), source: 'issue #201 / PR #204' };
+  const { valid, errors } = validateWritableRecord(rec);
+  assert.equal(valid, false);
+  assert.ok(errors.some((e) => e.includes('W4')), `errors were: ${errors.join('; ')}`);
+});
+
+test('validateWritableRecord: W4 admits a source citing the SAME issue the record declares', () => {
+  const rec = buildRecord({ ...base, issue: 201, source: 'issue #201 / PR #204' });
+  const { valid, errors } = validateWritableRecord(rec);
+  assert.equal(valid, true, errors.join('; '));
+});
+
+test('validateWritableRecord: W4 does not fire on a source with no issue citation at all', () => {
+  const rec = buildRecord({ ...base, source: 'PR #405' });
+  const { valid, errors } = validateWritableRecord(rec);
+  assert.equal(valid, true, errors.join('; '));
+});
+
+test(
+  "validateRecord/parseRecordLine: the READ gate does NOT reject the W4 shape — a pre-existing record " +
+    "carrying it must still parse (#461, #460's ruling against a read-path rule stands)",
+  () => {
+    const rec = { ...buildRecord({ ...base }), source: 'issue #201 / PR #204' };
+    assert.equal(
+      validateRecord(rec).valid,
+      true,
+      'a read-path rejection would brick a consumer store — #460 ruled this OUT',
+    );
+    assert.deepEqual(parseRecordLine(serializeRecord(rec)), rec);
+  },
+);
 
 test('validateRecord: flags an email-shaped actor (REQ-MF-5 partial heuristic)', () => {
   const rec = { ...buildRecord({ ...base }), actor: 'someone@example.com' };

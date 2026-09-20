@@ -78,6 +78,8 @@ export const REVIEW_MODES = Object.freeze(['auto', 'tranche', 'checkpoint', 'rul
 
 export function parseArgs(argv) {
   const args = { pr: null, mode: 'auto', dryRun: false, error: null };
+  let engineVal = null;
+  let modelVal = null;
 
   // Every PR number the argv names, from EITHER syntax, collected in one list.
   //
@@ -91,6 +93,22 @@ export function parseArgs(argv) {
     if (argv[i] === '--pr') given.push(argv[++i] ?? '(nothing)');
     else if (argv[i] === '--mode') args.mode = argv[++i];
     else if (argv[i] === '--dry-run') args.dryRun = true;
+    else if (argv[i] === '--engine') {
+      const next = argv[++i];
+      if (next === undefined || next.startsWith('-')) {
+        args.error = '"--engine" was given with no value after it';
+        return args;
+      }
+      engineVal = next;
+    }
+    else if (argv[i] === '--model') {
+      const next = argv[++i];
+      if (next === undefined || next.startsWith('-')) {
+        args.error = '"--model" was given with no value after it';
+        return args;
+      }
+      modelVal = next;
+    }
     else if (argv[i].startsWith('-')) {
       // An unrecognised option is REFUSED, never ignored — the strict half of
       // `brain:approve`'s parser, which this verb had cited as its model while
@@ -108,7 +126,7 @@ export function parseArgs(argv) {
       // `--dry-run` is a boolean and `true` would parse as a PR number.
       const eq = argv[i].indexOf('=');
       const stem = eq > 0 ? argv[i].slice(0, eq) : null;
-      if (stem === '--pr' || stem === '--mode') {
+      if (stem === '--pr' || stem === '--mode' || stem === '--engine' || stem === '--model') {
         args.error = `unknown option "${argv[i]}" — a value is a separate argument, so write "${stem} ${argv[i].slice(eq + 1)}"`;
       } else if (stem === '--dry-run') {
         args.error = `unknown option "${argv[i]}" — "--dry-run" is a flag and takes no value`;
@@ -119,6 +137,9 @@ export function parseArgs(argv) {
     }
     else given.push(argv[i]);
   }
+
+  if (engineVal !== null) args.engine = engineVal;
+  if (modelVal !== null) args.model = modelVal;
 
   // `--mode`, validated HERE rather than at the dispatch chain (self-review G3).
   //
@@ -288,7 +309,28 @@ export async function main(deps = {}) {
   // without a seam the only way to exercise it end to end was to mutate the
   // repo's real `brain.config.json` — which is how the cold review had to prove
   // the composition defects this file now guards against.
-  const config = deps.config ?? loadBrainConfig();
+  let config = deps.config ?? loadBrainConfig();
+  const hasEngineOverride = args.engine !== null && args.engine !== undefined;
+  const hasModelOverride = args.model !== null && args.model !== undefined;
+  if (hasEngineOverride || hasModelOverride) {
+    const prevColdReview = config?.sdd?.map?.['cold-review'] ?? {};
+    config = {
+      ...config,
+      sdd: {
+        ...config?.sdd,
+        map: {
+          ...config?.sdd?.map,
+          'cold-review': {
+            ...prevColdReview,
+            ...(hasEngineOverride ? { engine: args.engine } : {}),
+            ...(hasModelOverride
+              ? { model: args.model }
+              : (hasEngineOverride && args.engine !== prevColdReview.engine ? { model: undefined } : {})),
+          },
+        },
+      },
+    };
+  }
   const project = deps.project ?? config.project?.slug;
   // Reviewer protocol version (issue #391 T2.3 §3, issue #394 M3): the TIER sets
   // the default, and since #442 `reviewer.protocol` in brain.config.json may
@@ -468,6 +510,14 @@ export async function main(deps = {}) {
       baseSha,
       changedFiles,
       prBody: boot.prView.body,
+      // #1072: the labels from the SAME prView that gave the body above, so
+      // the reviewer honors `size:exception` on the same reading of the PR the
+      // `diff-size` gate honors it on — and with no second forge call.
+      // `?? null`, NOT `?? []` (#1073 cold review): a refusal is null and never
+      // an empty array, because `[]` claims the PR carries no exception when
+      // nothing was read. Every consumer of this value treats a non-array as
+      // "not read" and fails closed on it.
+      labels: boot.prView.labels ?? null,
       // #631: the bound port, FIRST, so a caller's override wins on the seams it
       // names and cannot silently drop the credential binding by omission.
       //
@@ -490,7 +540,11 @@ export async function main(deps = {}) {
       headSha: boot.headSha,
       changedFiles,
       prBody: boot.prView.body,
-      labels: boot.prView.labels ?? [],
+      // `?? null`, NOT `?? []` (#1073 cold review): a refusal is null and never
+      // an empty array, because `[]` claims the PR carries no exception when
+      // nothing was read. Every consumer of this value treats a non-array as
+      // "not read" and fails closed on it.
+      labels: boot.prView.labels ?? null,
       tier,   // #555: the artifact set is tier-resolved; cli.mjs already has it
       worktreePath: boot.worktreePath,
       doctrineRecords: boot.doctrine.records,
@@ -734,7 +788,7 @@ export async function main(deps = {}) {
     try {
       stageResult = (deps.inferentialDeps || antiLoop)
         ? { routed: false }
-        : await runColdReviewStage({
+        : await (deps.runColdReviewStage ?? runColdReviewStage)({
           config,
           prNumber: args.pr,
           baseRef: baseSha,
