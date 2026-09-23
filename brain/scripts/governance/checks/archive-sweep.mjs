@@ -35,6 +35,34 @@
 // edit" test — this is the hole a hand-made `auto-archive/*` branch could
 // otherwise walk through).
 //
+// AN ADDED FILE UNDER `openspec/changes/archive/**` (issue #557 S5, ADR-0035
+// residual risk 2 — CLOSED, not narrowed): checked `archiveChange` end to
+// end — it writes under `archive/<iid>/**` ONLY via `fs.rename(srcDir,
+// destDir)`, a whole-folder move with content untouched, plus
+// `fs.mkdir('openspec/changes/archive')` (a directory, not a file write
+// inside `<dest>`). Content untouched means git's `-M100%` detector always
+// reports every file that lands under `archive/<iid>/**` as an R100 rename,
+// never an `A`. `sweep.mjs`'s markdown report goes to
+// `$RUNNER_TEMP/sweep-body.md` (outside the repo, used only as the PR
+// body) — it is never `git add`-ed. Measured against the real 2026-09-23
+// phase-6 backfill (`fdca7970...a3bb5b02`, 612 diff lines): every `A` line
+// is `openspec/specs/<capability>/spec.md`; zero `A` lines exist anywhere
+// under `archive/**`. So there is NO legitimate case an exemption here
+// would protect — not a narrow one, none — and the rule is tightened all
+// the way: an `A` (or an `M`, already refused by the `SPEC_FILE_RE`-only
+// check below) under `openspec/changes/archive/**` is ALWAYS offending,
+// full stop, with no folder-pairing carve-out and no cross-check needed.
+//
+// An earlier version of this predicate exempted an added file under
+// `archive/<dest>/**` when `<dest>` also matched a rename destination
+// folder elsewhere in the diff ("pairs with a rename"). That was itself
+// gameable: one genuine rename into `archive/9/` plus an unrelated
+// `A openspec/changes/archive/9/payload.sh` still returned `exempt: true`,
+// because the pairing checked only the FOLDER, never the specific file.
+// Closed by removing the carve-out entirely rather than tightening the
+// pairing further — the evidence above shows there was never a legitimate
+// case to preserve, so the zero-tolerance rule costs nothing.
+//
 // RESIDUAL RISK (stated per the maintainer's request, not silently
 // accepted): this predicate does NOT verify the archived folder's `<iid>`
 // destination actually corresponds to the source folder's own issue number
@@ -108,6 +136,9 @@ export function classifySweepDiff({ nameStatusLines, numstatLines } = {}) {
   const offending = [];
   let renameCount = 0;
 
+  // Single pass — no rename/added-file pairing is needed (issue #557 S5):
+  // zero added files under archive/** are ever exempt, full stop, so an
+  // `A` line's classification no longer depends on what any `R` line says.
   for (const line of nameStatusLines) {
     const parts = line.split('\t');
     const status = parts[0];
@@ -129,7 +160,12 @@ export function classifySweepDiff({ nameStatusLines, numstatLines } = {}) {
 
     const path = parts[1];
     if (status === 'A') {
-      if (ARCHIVE_DEST_RE.test(path) || SPEC_FILE_RE.test(path)) continue;
+      // A new capability spec file is the ONLY legitimate `A` this predicate
+      // allows (issue #557 S5 — see the header comment). No added file under
+      // `openspec/changes/archive/**` is ever exempt, regardless of what
+      // renames exist elsewhere in the diff: no real `archiveChange` run
+      // ever adds one there.
+      if (SPEC_FILE_RE.test(path)) continue;
       offending.push(path);
       continue;
     }

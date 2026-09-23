@@ -1,6 +1,6 @@
 # ADR-0035 — The archive sweep's `issue-link` exemption is content-earned, never granted by branch name
 
-**Status**: Accepted
+**Status**: Accepted · **amended 23/09/2026** (Amendment 1 — see below)
 **Date**: 2026-09-23 — Cristian Rinaldi
 
 ## Context
@@ -59,8 +59,12 @@ Recomputed on every run from `git diff -M100% --name-status` and `--numstat` ove
    `openspec/changes/archive/<dest>/…`, where the path below the two-segment prefix is
    identical. A file whose content drifted during the move is reported by git as a delete plus
    an add, and the delete is refused.
-2. **An added file** that is either `openspec/specs/<capability>/spec.md` or any path under
-   `openspec/changes/archive/<dest>/`.
+2. **An added file** that is `openspec/specs/<capability>/spec.md` — the ONLY added file this
+   predicate ever accepts. **As of Amendment 1 (#557): no added file under
+   `openspec/changes/archive/<dest>/` is ever accepted, at any `<dest>`, under any condition.**
+   Before Amendment 1, this category also admitted any path under `archive/<dest>/` (later,
+   briefly, gated by a same-folder rename check); both were holes. See Amendment 1 for what
+   they allowed and why closing the category entirely costs nothing.
 3. **A modified `openspec/specs/<capability>/spec.md` with zero deleted lines**, checked on
    `--numstat` rather than inferred from the path. Consolidation both creates and appends to
    spec files (`archive-logic.mjs#mergeSpecs`): the 2026-09-23 backfill produced 18 creates and
@@ -99,6 +103,11 @@ understands. This is the memory-lane block's own property, kept identical on pur
    land unlinked text on `main`. Refusing `A` under `archive/` unless it pairs with a rename is
    the follow-up that closes it. This ADR records the predicate as it runs, not as it was
    described.
+   **[Amended by Amendment 1 (#557) — CLOSED, not narrowed. `classifySweepDiff` refuses every
+   added file under `archive/**` unconditionally: no real `archiveChange` run ever adds one
+   there, so there was never a legitimate case an exemption would protect. An interim
+   "pairs with a rename" rule was tried first and found still gameable by a same-folder
+   smuggle; it was removed rather than tightened further. See Amendment 1.]**
 
 ## The sibling gap: `auto-revert/*`
 
@@ -140,3 +149,100 @@ falsely.
 **A closing keyword in the sweep body (`Closes #557`).** It would pass the gate by saying
 something false: the sweep does not resolve #557, and GitHub would close the issue on the first
 merge. That is the #867 class ADR-0034 L1 rejected for the memory lane.
+
+## Amendment 1 — residual risk 2 is closed: zero added files under `archive/**` are ever exempt (issue #557)
+
+**Signed**: 23/09/2026 — Cristian Rinaldi
+
+Residual risk 2, as this ADR named it, was real and demonstrable: `classifySweepDiff`
+exempted **any** added file under `openspec/changes/archive/<dest>/`, provided the same
+diff carried at least one valid archive rename **anywhere** — not necessarily into
+`<dest>`. A minimal proof:
+
+```
+classifySweepDiff({
+  nameStatusLines: ['R100\topenspec/changes/issue-9-x/spec.md\topenspec/changes/archive/9/spec.md',
+                    'A\topenspec/changes/archive/anything/payload.sh'],
+  numstatLines: ['0\t0\topenspec/changes/{issue-9-x => archive/9}/spec.md',
+                 '40\t0\topenspec/changes/archive/anything/payload.sh'] })
+→ exempt: true, offending: []
+```
+
+A hand-made `auto-archive/<date>` branch carrying one genuine rename could land arbitrary
+content under `archive/anything/` on `main` with no linked issue and no closing keyword.
+
+### What was checked before choosing the fix
+
+Two questions the maintainer asked before any code changed, answered from
+`archive-logic.mjs#archiveChange` and `sdd-layout.mjs`:
+
+1. **Does a real archive run ever ADD a file under `archive/<iid>/`?** No. `archiveChange`
+   writes under `destDir` in exactly one way: `fs.rename(srcDir, destDir)` — a whole-folder
+   move with content untouched, so git's `-M100%` detector reports every file that lands
+   there as an R100 rename, never an `A`. The only other write the function performs is
+   `fs.mkdir('openspec/changes/archive')`, a directory, not a file. `sweep.mjs`'s markdown
+   report — the one place an "archive report" might have been added under `archive/**` — is
+   written to `$RUNNER_TEMP/sweep-body.md` and used only as the PR body; the workflow's
+   `git add -A` step never touches it. Measured directly against the real 2026-09-23 phase-6
+   backfill (`fdca7970...a3bb5b02`, 612 diff lines): every `A` line is
+   `openspec/specs/<capability>/spec.md`; zero `A` lines appear anywhere under
+   `openspec/changes/archive/`.
+2. **Is `archivePath(iid)` always numeric?** No. `archiveChange` uses the raw `changeId` as
+   the destination segment for a grandfathered change (`isGrandfathered`), and
+   `openspec/changes/archive/` carries real, current, non-numeric folders today —
+   `auto-adrs`, `cli-i18n`, `feature-working-memory`, `governance`, `installer-versionado`,
+   `install-home-scaffold`, `managed-paths-namespace`, `vcs-adapter` — plus several
+   date-prefixed legacy folders predating this convention. A fix that required `<dest>` to
+   match `^\d+$` would refuse those.
+
+Together, (1) and (2) point past a shape rule: there is no filename, extension, or numeric
+pattern that separates a legitimate archived file from an illegitimate one, because there
+is no legitimate ADDED file at all. Anything present under `archive/**` that is not a
+rename is, by (1), evidence of something other than a real sweep.
+
+### The interim fix, and why it still had a hole
+
+The first fix tried was narrower: require the added file's destination FOLDER to be, in the
+same diff, the destination of at least one already-valid archive rename. That refused the
+proof case above, but not this one — one genuine rename into `archive/9/`, plus an unrelated
+file added into that SAME folder:
+
+```
+classifySweepDiff({
+  nameStatusLines: ['R100\topenspec/changes/issue-9-foo/proposal.md\topenspec/changes/archive/9/proposal.md',
+                    'A\topenspec/changes/archive/9/payload.sh'],
+  numstatLines: ['0\t0\topenspec/changes/{issue-9-foo => archive/9}/proposal.md',
+                 '3\t0\topenspec/changes/archive/9/payload.sh'] })
+→ exempt: true (under the interim, folder-pairing rule)
+```
+
+The pairing checked the FOLDER a rename landed in, never the specific file being added — so
+a forged branch needed only one genuine rename to unlock arbitrary content anywhere inside
+that rename's own destination folder. Confirmed by the maintainer directly against
+`archive-sweep.mjs` before this amendment was rewritten.
+
+### The fix
+
+Given §"What was checked": no real `archiveChange` run ever adds a file under `archive/**`
+at all, so there was never a legitimate case the interim pairing rule — or any narrower
+carve-out — needed to protect. The tightest correct rule is therefore the simplest one:
+`classifySweepDiff` refuses **every** added file under `openspec/changes/archive/**`,
+unconditionally, regardless of what renames exist anywhere in the diff. The only added file
+this predicate accepts anywhere is `openspec/specs/<capability>/spec.md` — the genuinely
+legitimate case `archiveChange#mergeSpecs` produces via `fs.mkdir` + `writeFile`, unrelated
+to `archive/**`.
+
+Both proof cases above (the original cross-folder smuggle and the same-folder smuggle) are
+now refused, naming the offending file. The real phase-6 backfill diff, re-run against the
+tightened predicate, is still `exempt: true` — the fix changes nothing about a genuine
+sweep, because a genuine sweep never had an `A` under `archive/**` to lose.
+
+`brain/scripts/governance/checks/archive-sweep.mjs` (this branch,
+`feat/issue-557-s5-sweep-added-files`) carries the implementation and its test suite
+(`archive-sweep.test.mjs`), including both proof cases above and the real backfill check.
+
+### What this does not change
+
+Residual risk 1 (the `<iid>` destination not being cross-checked against the source
+folder's own issue number) is untouched by this amendment and remains open, exactly as
+this ADR already named it.
