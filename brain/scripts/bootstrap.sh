@@ -7,6 +7,40 @@
 # Idempotent: running again only completes what is missing.
 set -euo pipefail
 
+# The WORKTREE (or plain checkout) that invoked this script — where ITS OWN
+# CODE lives: brain/scripts/**, package.json, node_modules (issue #1093).
+# Captured HERE, before the REPO_ROOT `cd` below, while `pwd` is still the
+# caller's tree: `npm run brain:env:init` always runs bootstrap.sh with the
+# invoking tree as cwd, so this is exactly "the brain the caller invoked" —
+# the worktree's checkout when adopting or upgrading on a branch, which is
+# ordinarily a DIFFERENT tree than REPO_ROOT below.
+#
+# Everything that runs BRAIN'S OWN CODE (a `node brain/scripts/...` call, or a
+# `$PM run brain:*` verb) resolves against THIS tree from here on — never
+# against REPO_ROOT. Running old code from a stale main checkout is the bug:
+# a real adoption in `csrinaldi/synergy` got `Cannot find module` from two
+# scripts the main tree's old brain never had, and re-registered a merge
+# driver the worktree's (current) brain had already retired.
+WORKTREE_ROOT="$(pwd)"
+BRAIN_SCRIPTS="$WORKTREE_ROOT/brain/scripts"
+
+# Steps below that are non-fatal by design still report failure here instead
+# of vanishing — see the two `|| { ...; MISSING_OPTIONAL+=(...); }` sites near
+# the top of this file and §2's tool checks. Declared early (moved up from
+# its old spot just above §2) so those two sites can add to it too.
+MISSING_OPTIONAL=()
+
+# Hard requirement, checked first: without the invoking tree's own
+# brain/scripts/, nothing below can run ITS code at all — only ever a
+# cascade of `Cannot find module` errors that per-step warnings would hide
+# behind `== Environment ready ==` (issue #1093, the exact defect reported).
+# This is the one failure mode individual step warnings cannot meaningfully
+# degrade past, so it exits non-zero instead of continuing.
+if [ ! -d "$BRAIN_SCRIPTS" ]; then
+  printf '  \xe2\x9c\x97 brain/scripts/ not found at %s — this checkout is incomplete (re-run the install/upgrade). env:init cannot continue.\n' "$WORKTREE_ROOT" >&2
+  exit 1
+fi
+
 # The MAIN worktree, not whichever worktree invoked this (issue #657).
 # `--show-toplevel` answers "the current worktree", which for env:init is the
 # wrong tree: `.env` is gitignored (.gitignore:79), so it exists ONLY in the main
@@ -19,6 +53,10 @@ set -euo pipefail
 # tree. `--path-format=absolute` is REQUIRED, not decoration: the bare form returns
 # a relative `.git` from the main tree and an absolute path from a worktree, so
 # `dirname` on it would yield `.` in the very case that already worked.
+#
+# NOTE (issue #1093): this governs WHERE DATA lives — .env, git config,
+# brain.config.json — not which CODE runs. Code resolves via WORKTREE_ROOT /
+# BRAIN_SCRIPTS above regardless of REPO_ROOT.
 REPO_ROOT="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
 cd "$REPO_ROOT"
 
@@ -27,14 +65,17 @@ cd "$REPO_ROOT"
 # full schema and derives vcs.provider / gitHost / slug from the git origin so
 # the mapfile below reads the correct provider (not the *)‐default gitlab).
 # Non-fatal: degrades gracefully if git is absent or node is not yet available.
+# The failure is still REPORTED (not silently walked past, issue #1093): a
+# bare `|| true` here gave zero signal, not even a warning line.
 _config_existed=true
 [ -f brain.config.json ] || _config_existed=false
-node brain/scripts/lib/brain-config.mjs ensure || true
+node "$BRAIN_SCRIPTS/lib/brain-config.mjs" ensure || { printf '  \xe2\x9a\xa0 brain.config.json: ensure step failed (see error above)\n' >&2; MISSING_OPTIONAL+=("brain.config.json ensure"); }
 
 # Scaffold brain/HOME.md if absent (never overwrites an existing one — the file
 # is consumer-owned once it exists). Non-fatal, idempotent: re-running env:init
-# on a repo that already has HOME.md is a no-op.
-node brain/scripts/lib/home-scaffold.mjs ensure || true
+# on a repo that already has HOME.md is a no-op. Reported on failure, same
+# reasoning as brain.config.json above (issue #1093).
+node "$BRAIN_SCRIPTS/lib/home-scaffold.mjs" ensure || { printf '  \xe2\x9a\xa0 brain/HOME.md: scaffold step failed (see error above)\n' >&2; MISSING_OPTIONAL+=("brain/HOME.md scaffold"); }
 
 # Resolve project identity from brain.config.json, falling back to git origin.
 # VCS_PROVIDER: env var wins, then brain.config.json vcs.provider.
@@ -139,7 +180,7 @@ env_set() {
 # If node is absent or sh.mjs fails, the script falls through to inline English
 # defaults (${I18N_VAR:-"…"}) used only in the pre-node section (§1 below).
 if command -v node >/dev/null 2>&1; then
-  _i18n_vars="$(node brain/scripts/i18n/sh.mjs 2>/dev/null)"
+  _i18n_vars="$(node "$BRAIN_SCRIPTS/i18n/sh.mjs" 2>/dev/null)"
   [ -n "$_i18n_vars" ] && eval "$_i18n_vars"
   unset _i18n_vars
 fi
@@ -160,7 +201,10 @@ if [ "$_PM_FOUND" = false ]; then
 fi
 unset _PM_FOUND _pm_bin
 # Detect the consumer's package manager for use in §7 memory steps.
-PM="$(node brain/scripts/lib/pm.mjs name 2>/dev/null || echo npm)"
+# Detected against WORKTREE_ROOT, not cwd (REPO_ROOT): $PM later runs
+# `brain:memory:pull`/`brain:memory:index` IN the worktree (issue #1093), so
+# it must be the package manager that tree actually uses.
+PM="$(cd "$WORKTREE_ROOT" && node "$BRAIN_SCRIPTS/lib/pm.mjs" name 2>/dev/null || echo npm)"
 ok "$(printf "${I18N_BOOTSTRAP_DEPS_OK:-git, python3 present; package manager: %s}" "$PM")"
 
 # --- 2. Ecosystem tools (degrade gracefully) ----------------------------------
@@ -174,7 +218,9 @@ INSTALL_HINT[engram]="gentle-ai install  (requires gentle-ai)"
 INSTALL_HINT[gga]="gentle-ai install  (requires gentle-ai)"
 INSTALL_HINT[claude]="npm install -g @anthropic-ai/claude-code"
 
-MISSING_OPTIONAL=()
+# MISSING_OPTIONAL is declared near the top of this file now (issue #1093),
+# so the two `brain-config.mjs`/`home-scaffold.mjs` failure reports above can
+# add to it too — redeclaring it here would silently drop those entries.
 for tool in "$VCS_CLI" engram gentle-ai gga claude; do
   if command -v "$tool" >/dev/null 2>&1; then
     ok "$tool"
@@ -188,7 +234,7 @@ done
 # before probing it so consumers that keep the Claude route never need a Codex
 # executable, state directory, authentication, or Linux sandbox support.
 say "Codex cold-review"
-if CODEX_READINESS="$(node brain/scripts/harness/codex-readiness.mjs --check 2>&1)"; then
+if CODEX_READINESS="$(node "$BRAIN_SCRIPTS/harness/codex-readiness.mjs" --check 2>&1)"; then
   ok "$CODEX_READINESS"
 else
   warn "$CODEX_READINESS"
@@ -208,7 +254,7 @@ else
   It must be PERSONAL — not a project bot token — so your pushes, issues and
   MRs/PRs appear under your name.
 EOT
-  PAT_URL="$(node brain/scripts/vcs/cli.mjs pat-setup-url "{\"host\":\"$VCS_HOST\",\"name\":\"brain-dev\",\"scopes\":[\"$PAT_SCOPES\"]}" 2>/dev/null || true)"
+  PAT_URL="$(node "$BRAIN_SCRIPTS/vcs/cli.mjs" pat-setup-url "{\"host\":\"$VCS_HOST\",\"name\":\"brain-dev\",\"scopes\":[\"$PAT_SCOPES\"]}" 2>/dev/null || true)"
   read -r -p "  $I18N_BOOTSTRAP_PAT_OPENPROMPT" OPEN_BROWSER
   case "${OPEN_BROWSER:-S}" in
     n|N)
@@ -260,10 +306,10 @@ ok "$I18N_BOOTSTRAP_CRED_OK"
 # Token is read from .env by the provider (Part A of the VCS adapter) —
 # NOT passed in argv to avoid leaking it via /proc/*/cmdline.
 say "$I18N_BOOTSTRAP_AUTH_SECTION"
-if node brain/scripts/vcs/cli.mjs auth-check "{\"host\":\"$VCS_HOST\"}" >/dev/null 2>&1; then
+if node "$BRAIN_SCRIPTS/vcs/cli.mjs" auth-check "{\"host\":\"$VCS_HOST\"}" >/dev/null 2>&1; then
   ok "$(printf "$I18N_BOOTSTRAP_AUTH_ALREADYOK" "$VCS_HOST")"
 elif [ -n "$VCS_TOKEN" ]; then
-  node brain/scripts/vcs/cli.mjs auth-login "{\"host\":\"$VCS_HOST\"}" \
+  node "$BRAIN_SCRIPTS/vcs/cli.mjs" auth-login "{\"host\":\"$VCS_HOST\"}" \
     && ok "$(printf "$I18N_BOOTSTRAP_AUTH_OK" "$VCS_HOST")" \
     || warn "$I18N_BOOTSTRAP_AUTH_FAILED"
 else
@@ -289,7 +335,13 @@ if [ -z "$SDD_ENGINE" ]; then
   env_set SDD_ENGINE "$SDD_ENGINE"
 fi
 ok "$(printf "$I18N_BOOTSTRAP_SDD_OK" "$SDD_ENGINE ($AGENT_PLATFORM)")"
-node brain/scripts/harness/cli.mjs init \
+# Exported, not just written to .env (issue #1093): harness/cli.mjs resolves
+# its own repoRoot from ITS OWN module location, which is now WORKTREE_ROOT —
+# a tree that never gets this .env write. Its precedence is already
+# `process.env.X ?? envVars.X ?? config.X`, so exporting here is enough
+# regardless of which .env (if any) that resolution finds.
+export AGENT_PLATFORM SDD_ENGINE
+node "$BRAIN_SCRIPTS/harness/cli.mjs" init \
   || warn "$I18N_BOOTSTRAP_SDD_INITFAILED"
 
 # --- 7. Team memory (replaceable backend, ADR-0003) --------------------------
@@ -305,6 +357,9 @@ if [ -z "$MEMORY_BACKEND" ]; then
   env_set MEMORY_BACKEND "$MEMORY_BACKEND"
 fi
 ok "$(printf "$I18N_BOOTSTRAP_MEMORY_BACKEND" "$MEMORY_BACKEND")"
+# Same reasoning as AGENT_PLATFORM/SDD_ENGINE above (issue #1093):
+# memory/cli.mjs also resolves .env from its OWN module location.
+export MEMORY_BACKEND
 
 git config core.hooksPath brain/scripts/hooks \
   && ok "$I18N_BOOTSTRAP_MEMORY_HOOKOK" \
@@ -314,14 +369,18 @@ case "$MEMORY_BACKEND" in
   engram)
     # Delegate setup (symlink + merge driver) to the backend module — no duplication.
     if command -v node >/dev/null 2>&1; then
-      node brain/scripts/memory/cli.mjs setup \
+      node "$BRAIN_SCRIPTS/memory/cli.mjs" setup \
         && ok "$I18N_BOOTSTRAP_MEMORY_ENGRAM_OK" \
         || warn "$I18N_BOOTSTRAP_MEMORY_ENGRAM_FAILED"
     else
       warn "$I18N_BOOTSTRAP_MEMORY_NODEABSENT"
     fi
-    $PM run --silent brain:memory:pull  && ok "$I18N_BOOTSTRAP_MEMORY_PULL_OK"  || warn "$I18N_BOOTSTRAP_MEMORY_PULL_FAILED"
-    $PM run --silent brain:memory:index && ok "$I18N_BOOTSTRAP_MEMORY_INDEX_OK" || warn "$I18N_BOOTSTRAP_MEMORY_INDEX_FAILED"
+    # Run IN the worktree (issue #1093): `$PM run` resolves the script body
+    # from cwd's package.json, and REPO_ROOT's (main tree's) can be a
+    # different, older version entirely — the "pull failed" / "index failed"
+    # shape from the synergy repro (both verbs reported non-blocking).
+    (cd "$WORKTREE_ROOT" && $PM run --silent brain:memory:pull)  && ok "$I18N_BOOTSTRAP_MEMORY_PULL_OK"  || warn "$I18N_BOOTSTRAP_MEMORY_PULL_FAILED"
+    (cd "$WORKTREE_ROOT" && $PM run --silent brain:memory:index) && ok "$I18N_BOOTSTRAP_MEMORY_INDEX_OK" || warn "$I18N_BOOTSTRAP_MEMORY_INDEX_FAILED"
     ;;
   *)
     warn "$(printf "$I18N_BOOTSTRAP_MEMORY_UNKNOWNBACKEND" "$MEMORY_BACKEND")"
@@ -330,7 +389,7 @@ esac
 
 # --- 8. Open tickets: starting point -----------------------------------------
 say "$(printf "$I18N_BOOTSTRAP_BOARD_SECTION" "$PROJECT_PATH")"
-node brain/scripts/tracker-board.mjs \
+node "$BRAIN_SCRIPTS/tracker-board.mjs" \
   || warn "$(printf "$I18N_BOOTSTRAP_BOARD_FAILED" "$VCS_HOST" "$PROJECT_PATH")"
 
 # --- 9. Next steps ------------------------------------------------------------
