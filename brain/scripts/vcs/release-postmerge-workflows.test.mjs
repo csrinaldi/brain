@@ -988,3 +988,167 @@ test('REQ-TS-5 PROPERTY: for every terminal audit code, red ⟹ an alarm exists'
   assert.deepEqual(unreported, [],
     `these terminal states were RED AND SILENT — the #466 signature:\n${unreported.join('\n')}`);
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Phase 7 (issue #557) — the governance archive sweep step. Positioned as the
+// LAST functional step, after `advance`/`uncomputable`, before the `always()`
+// terminal assertion (design D5). Gated on a clean audit and a successful
+// cursor advance; never gates `advance`/`revert`; failure files the shared
+// `governance:archive-sweep-failed` alarm and exits 0 (design D5's
+// failure-semantics table) — the sweep must never redden this job.
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ── Source guards ────────────────────────────────────────────────────────
+
+test('#557: governance-postmerge.yml declares a `- id: sweep` step positioned after `- id: advance`', () => {
+  const text = readFileSync(POSTMERGE_YML, 'utf8');
+  const advanceIdx = text.indexOf('- id: advance');
+  const sweepIdx = text.indexOf('- id: sweep');
+  assert.ok(advanceIdx !== -1, 'advance step must exist');
+  assert.ok(sweepIdx !== -1, 'sweep step must exist (issue #557)');
+  assert.ok(sweepIdx > advanceIdx, 'the sweep step must be positioned after advance');
+});
+
+test("#557: the sweep step's if: gates on a clean audit and advance success, and references neither revert nor uncomputable", () => {
+  const text = readFileSync(POSTMERGE_YML, 'utf8');
+  const stepBlock = text.slice(text.indexOf('- id: sweep'), text.indexOf('- id: terminal'));
+  const ifLine = stepBlock.split('\n').find((l) => l.trim().startsWith('if:')) || '';
+  assert.match(ifLine, /steps\.audit\.outputs\.code == '0'/, "the sweep step's if: must gate on a clean audit");
+  assert.match(ifLine, /steps\.advance\.outcome == 'success'/, "the sweep step's if: must gate on advance success (C1, readable in YAML)");
+  assert.doesNotMatch(ifLine, /steps\.revert|steps\.uncomputable/, 'the sweep step must not condition on revert/uncomputable — it is orthogonal to those branches');
+});
+
+test('#557: the sweep step never writes the governance cursor (no cursor.mjs reference)', () => {
+  const text = readFileSync(POSTMERGE_YML, 'utf8');
+  const script = extractRunScript(text, 'sweep');
+  assert.doesNotMatch(script, /cursor\.mjs/, 'the sweep step must never touch the governance cursor — it never gates advance/revert');
+});
+
+test('#557: the sweep step declares VCS_TOKEN (mirrors the audit step\'s credential, #479 shape)', () => {
+  const text = readFileSync(POSTMERGE_YML, 'utf8');
+  const stepBlock = text.slice(text.indexOf('- id: sweep'), text.indexOf('- id: terminal'));
+  assert.match(stepBlock, /VCS_TOKEN:\s*\$\{\{\s*github\.token\s*\}\}/, 'the sweep step must declare VCS_TOKEN so readIssueState can authenticate');
+});
+
+test('#557: the sweep step dedups the same-day PR via `gh pr list --head <br> --state all` (REQ-D2-13 mirrored, design D6)', () => {
+  const text = readFileSync(POSTMERGE_YML, 'utf8');
+  const script = extractRunScript(text, 'sweep');
+  assert.match(script, /gh pr list --head[^\n]*--state all/, 'same-day idempotency must dedup on the PR head in any state, mirroring the revert step');
+});
+
+test('#557: the sweep step enforces the one-open-PR backlog cap before doing anything else (design D6)', () => {
+  const text = readFileSync(POSTMERGE_YML, 'utf8');
+  const script = extractRunScript(text, 'sweep');
+  assert.match(script, /startswith\("auto-archive\/"\)/, 'the backlog cap must scan for any open auto-archive/* PR');
+});
+
+test('#557: the sweep step invokes sweep.mjs with --report, never inlines the report body', () => {
+  const text = readFileSync(POSTMERGE_YML, 'utf8');
+  const script = extractRunScript(text, 'sweep');
+  assert.match(script, /sweep\.mjs --apply --report/, 'the sweep step must call sweep.mjs --apply --report <file>, matching design\'s mermaid');
+});
+
+test('#557: the terminal step declares ALARM_SWEEP and concatenates it into filed=', () => {
+  const text = readFileSync(POSTMERGE_YML, 'utf8');
+  assert.match(text, /ALARM_SWEEP:\s*\$\{\{\s*steps\.sweep\.outputs\.alarm\s*\}\}/, 'the terminal step must read steps.sweep.outputs.alarm');
+  const terminalScript = extractRunScript(text, 'terminal');
+  assert.match(terminalScript, /\$\{ALARM_SWEEP:-\}/, 'ALARM_SWEEP must be concatenated into the filed= accounting');
+});
+
+test('#557 teeth: removing ALARM_SWEEP from the terminal filed= concatenation is a detectable mutation', () => {
+  const text = readFileSync(POSTMERGE_YML, 'utf8');
+  const terminalScript = extractRunScript(text, 'terminal');
+  const stripped = terminalScript.replace('${ALARM_SWEEP:-}', '');
+  assert.notEqual(stripped, terminalScript, 'the mutation must land — proves the assertion above has teeth');
+  assert.doesNotMatch(stripped, /\$\{ALARM_SWEEP:-\}/);
+});
+
+// ── Executable guards — a fake `node` intercepts sweep.mjs only; every other
+// node invocation (alarm.mjs) falls through to the REAL node binary so the
+// REAL alarm.mjs runs against the stubbed `gh` on PATH. ────────────────────
+
+function writeSweepNodeStub(binDir, { sweepOutput = 'SWEEP archived=0 blocked=0 unconsolidated=0', sweepExit = 0, touchDummyFile = false } = {}) {
+  mkdirSync(binDir, { recursive: true });
+  const realNode = process.execPath;
+  const node = join(binDir, 'node');
+  writeFileSync(node, [
+    '#!/usr/bin/env bash',
+    'for a in "$@"; do case "$a" in',
+    '  *sweep.mjs)',
+    '    report=""',
+    '    next=0',
+    '    for b in "$@"; do',
+    '      if [ "$next" = "1" ]; then report="$b"; next=0; fi',
+    '      if [ "$b" = "--report" ]; then next=1; fi',
+    '    done',
+    `    [ -n "$report" ] && printf '%s\\n' ${JSON.stringify('# sweep report (stub)\n\nPart of #557.\n')} > "$report"`,
+    touchDummyFile
+      ? '    mkdir -p openspec/changes/archive/999 && echo x > openspec/changes/archive/999/dummy'
+      : '    :',
+    `    printf '%s\\n' ${JSON.stringify(sweepOutput)}`,
+    `    exit ${sweepExit}`,
+    '    ;;',
+    'esac; done',
+    `exec "${realNode}" "$@"`,
+    '',
+  ].join('\n'));
+  chmodSync(node, 0o755);
+}
+
+test('#557 executable: zero archivable → no `pr create`, exit 0, no alarm', () => {
+  const r = runStepIsolated('sweep', {
+    ghOpts: { prListPrints: '' },
+    repoSetup: (g, repo, homeDir) => {
+      writeFileSync(join(repo, 'f'), 'x\n'); g('add', '.'); g('commit', '-m', 'c0');
+      writeSweepNodeStub(join(homeDir, 'bin'), { sweepOutput: 'SWEEP archived=0 blocked=0 unconsolidated=0', sweepExit: 0 });
+    },
+  });
+  assert.equal(r.status, 0, `zero-archivable run must exit 0:\n${r.stdout}\n${r.stderr}`);
+  assert.doesNotMatch(r.ghLog(), /pr create/, `no PR should be created when nothing is archivable:\n${r.ghLog()}`);
+  assert.doesNotMatch(r.output(), /alarm=/, 'a clean zero-archivable run must not file an alarm');
+});
+
+test('#557 executable: selector exits non-zero (3) → governance:archive-sweep-failed alarm filed, alarm= recorded, exit 0', () => {
+  const r = runStepIsolated('sweep', {
+    ghOpts: { prListPrints: '' },
+    repoSetup: (g, repo, homeDir) => {
+      writeFileSync(join(repo, 'f'), 'x\n'); g('add', '.'); g('commit', '-m', 'c0');
+      writeSweepNodeStub(join(homeDir, 'bin'), { sweepOutput: 'SWEEP: 1 issue(s) could not be read — fail-closed, nothing archived.', sweepExit: 3 });
+    },
+  });
+  assert.equal(r.status, 0, `a selector failure must not redden the job:\n${r.stdout}\n${r.stderr}`);
+  assert.match(r.ghLog(), /issue (create|comment)/, `an alarm must be filed on a selector failure:\n${r.ghLog()}`);
+  assert.match(r.ghLog(), /governance:archive-sweep-failed/, `the alarm must carry the shared sweep-failure label:\n${r.ghLog()}`);
+  assert.match(r.output(), /alarm=governance:archive-sweep-failed/, `alarm= must be recorded for terminal accounting:\n${r.output()}`);
+});
+
+test('#557 executable: an auto-archive/* PR is already open (backlog cap) → no `pr create`, exit 0', () => {
+  const r = runStepIsolated('sweep', {
+    ghOpts: { prListPrints: '1' },
+    repoSetup: (g, repo, homeDir) => {
+      writeFileSync(join(repo, 'f'), 'x\n'); g('add', '.'); g('commit', '-m', 'c0');
+      // The sweep.mjs stub must never even run — the backlog cap short-circuits first.
+      writeSweepNodeStub(join(homeDir, 'bin'), { sweepOutput: 'SWEEP archived=1 blocked=0 unconsolidated=0', sweepExit: 0 });
+    },
+  });
+  assert.equal(r.status, 0, `the backlog cap must not fail the job:\n${r.stdout}\n${r.stderr}`);
+  assert.doesNotMatch(r.ghLog(), /pr create/, `no PR should be created while one is already open:\n${r.ghLog()}`);
+});
+
+test('#557 executable: push failure (no origin remote) → orphan branch delete attempted, alarm filed, exit 0', () => {
+  const r = runStepIsolated('sweep', {
+    ghOpts: { prListPrints: '' },
+    repoSetup: (g, repo, homeDir) => {
+      // Deliberately NO `git remote add origin` — `git push origin <br>` fails.
+      writeFileSync(join(repo, 'f'), 'x\n'); g('add', '.'); g('commit', '-m', 'c0');
+      writeSweepNodeStub(join(homeDir, 'bin'), { sweepOutput: 'SWEEP archived=1 blocked=0 unconsolidated=0', sweepExit: 0, touchDummyFile: true });
+    },
+  });
+  assert.equal(r.status, 0, `a push failure must not redden the job:\n${r.stdout}\n${r.stderr}`);
+  // The orphan-branch delete is a plain `git push origin --delete`, not a `gh`
+  // call, so it never reaches ghLog() — the observable contract is that the
+  // job stays green and the shared alarm fires (design D6/D5), asserted below.
+  assert.match(r.ghLog(), /issue (create|comment)/, `an alarm must be filed on a push failure:\n${r.ghLog()}`);
+  assert.match(r.ghLog(), /governance:archive-sweep-failed/, `the alarm must carry the shared sweep-failure label:\n${r.ghLog()}`);
+  assert.match(r.output(), /alarm=governance:archive-sweep-failed/);
+});
