@@ -71,8 +71,8 @@ Chain strategy: pending
 
 ## Phase 8: PR3 — Verification
 
-- [ ] 8.1 Run `npm test` incl. workflow drift guards.
-- [ ] 8.2 Dry-run walkthrough: 0 eligible→no PR; 1 eligible→exactly one `auto-archive/<date>` PR; same-day re-run→none.
+- [x] 8.1 Run `npm test` incl. workflow drift guards.
+- [x] 8.2 Dry-run walkthrough: 0 eligible→no PR; 1 eligible→exactly one `auto-archive/<date>` PR; same-day re-run→none.
 
 ## Phase 9: PR4 — Doctrine Fixes (human-authored)
 

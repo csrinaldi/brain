@@ -1152,3 +1152,78 @@ test('#557 executable: push failure (no origin remote) → orphan branch delete 
   assert.match(r.ghLog(), /governance:archive-sweep-failed/, `the alarm must carry the shared sweep-failure label:\n${r.ghLog()}`);
   assert.match(r.output(), /alarm=governance:archive-sweep-failed/);
 });
+
+// ── 8.2: the dry-run walkthrough (fakes/injected seams only — no real PRs,
+// no real pushes, no real GitHub API). A `gh` stub precise enough to answer
+// the backlog-cap query and the same-day `--head` query DIFFERENTLY, since
+// the workflow issues two distinct `gh pr list` calls in one run. ─────────
+
+function writeGhStubPrecise(binDir, { openBacklogCount = 0, sameDayExists = false } = {}) {
+  mkdirSync(binDir, { recursive: true });
+  const gh = join(binDir, 'gh');
+  writeFileSync(gh, [
+    '#!/usr/bin/env bash',
+    'echo "gh $*" >> "${GH_LOG:-/dev/null}"',
+    'args="$*"',
+    'case "$1 $2" in',
+    '  "pr list")',
+    '    case "$args" in',
+    `      *--head*) printf '%s' ${JSON.stringify(sameDayExists ? '1' : '')} ;;`,
+    `      *) printf '%s' ${JSON.stringify(String(openBacklogCount))} ;;`,
+    '    esac',
+    '    ;;',
+    '  *) : ;;',
+    'esac',
+    'exit 0',
+    '',
+  ].join('\n'));
+  chmodSync(gh, 0o755);
+}
+
+test('8.2 dry-run: 1 eligible folder → exactly one auto-archive/<date> PR is opened, targeting main', () => {
+  const r = runStepIsolated('sweep', {
+    ghOpts: {}, // overridden by the precise stub written in repoSetup below
+    repoSetup: (g, repo, homeDir) => {
+      const origin = join(homeDir, 'origin.git');
+      spawnSync('git', ['init', '--bare', origin], { encoding: 'utf8', env: isolatedEnv(homeDir) });
+      g('remote', 'add', 'origin', origin);
+      writeFileSync(join(repo, 'f'), 'x\n'); g('add', '.'); g('commit', '-m', 'c0');
+      g('push', 'origin', 'main');
+      writeGhStubPrecise(join(homeDir, 'bin'), { openBacklogCount: 0, sameDayExists: false });
+      writeSweepNodeStub(join(homeDir, 'bin'), { sweepOutput: 'SWEEP archived=1 blocked=0 unconsolidated=0', sweepExit: 0, touchDummyFile: true });
+    },
+  });
+  const today = new Date().toISOString().slice(0, 10);
+  assert.equal(r.status, 0, `a clean 1-eligible run must exit 0:\n${r.stdout}\n${r.stderr}`);
+  const prCreateCalls = (r.ghLog().match(/^gh pr create/gm) || []).length;
+  assert.equal(prCreateCalls, 1, `exactly one PR must be opened:\n${r.ghLog()}`);
+  assert.match(r.ghLog(), new RegExp(`gh pr create --base main --head auto-archive/${today}`), `the PR must target main from today's auto-archive branch:\n${r.ghLog()}`);
+  assert.doesNotMatch(r.output(), /alarm=/, 'a successful sweep must not file an alarm');
+});
+
+test('8.2 dry-run: 0 eligible folders → no PR is created', () => {
+  const r = runStepIsolated('sweep', {
+    repoSetup: (g, repo, homeDir) => {
+      writeFileSync(join(repo, 'f'), 'x\n'); g('add', '.'); g('commit', '-m', 'c0');
+      writeGhStubPrecise(join(homeDir, 'bin'), { openBacklogCount: 0, sameDayExists: false });
+      writeSweepNodeStub(join(homeDir, 'bin'), { sweepOutput: 'SWEEP archived=0 blocked=3 unconsolidated=0', sweepExit: 0 });
+    },
+  });
+  assert.equal(r.status, 0, `a zero-eligible run must exit 0:\n${r.stdout}\n${r.stderr}`);
+  assert.doesNotMatch(r.ghLog(), /pr create/, `no PR may be opened when nothing is archivable:\n${r.ghLog()}`);
+});
+
+test('8.2 dry-run: same-day re-run (a PR for today already exists in ANY state) → no new PR is created', () => {
+  const r = runStepIsolated('sweep', {
+    repoSetup: (g, repo, homeDir) => {
+      writeFileSync(join(repo, 'f'), 'x\n'); g('add', '.'); g('commit', '-m', 'c0');
+      // No OPEN auto-archive/* PR (backlog cap clear), but today's branch
+      // already has a PR in some state (open, merged, or closed-without-merge) —
+      // design's "Re-run same day after PR exists" scenario (REQ-D2-13 mirrored).
+      writeGhStubPrecise(join(homeDir, 'bin'), { openBacklogCount: 0, sameDayExists: true });
+      writeSweepNodeStub(join(homeDir, 'bin'), { sweepOutput: 'SWEEP archived=1 blocked=0 unconsolidated=0', sweepExit: 0, touchDummyFile: true });
+    },
+  });
+  assert.equal(r.status, 0, `a same-day re-run must exit 0, never fail:\n${r.stdout}\n${r.stderr}`);
+  assert.doesNotMatch(r.ghLog(), /pr create/, `no new PR may be opened the same UTC day once one already exists:\n${r.ghLog()}`);
+});
