@@ -73,6 +73,7 @@ Chain strategy: pending
 
 - [x] 8.1 Run `npm test` incl. workflow drift guards.
 - [x] 8.2 Dry-run walkthrough: 0 eligible→no PR; 1 eligible→exactly one `auto-archive/<date>` PR; same-day re-run→none.
+- [x] 8.3 [GAP CLOSE, phase 9 pre-work] The sweep PR's `Part of #557.`-only body fails `issue-link` on the default branch (PR #1097, 2026-09-23) — the 8.2 dry-run never exercised the gate itself. New `brain/scripts/governance/checks/archive-sweep.mjs#classifySweepDiff`: a content-earned exemption for `auto-archive/<date>` heads, modeled on `lane.mjs#classifyLane` (evidence recomputed from `git diff -M100%`, never trusted by branch name). Wired into `runIssueLinkCheck` (`run-check.mjs`). See design.md D6 amendment for the predicate and its stated residual risk.
 
 ## Phase 9: PR4 — Doctrine Fixes (human-authored)
 
