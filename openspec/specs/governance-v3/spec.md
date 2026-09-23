@@ -1432,3 +1432,293 @@ stood at `02896d69`.
 - The automatic re-trigger on a default-branch push and GitLab verification are
   explicitly out of scope for this change (see proposal); tracked as follow-ups, not
   requirements here.
+
+### [issue-337] efficacy-probes — 2026-09-23
+
+# Delta for governance-v3
+
+Issue #337 — M10 Phase 3. Rung 2 must report structural efficacy, not file presence.
+
+## MODIFIED Requirements
+
+### Requirement REQ-L2-1: `brain:audit` Fails Closed at the Release/Tag Path (Rung 2)
+
+The project's release/publish/tag script MUST invoke `brain-audit.mjs` (or an
+equivalent invocation over the range being released) and MUST fail closed — abort the
+release — when `brain-audit.mjs` exits non-zero. This MUST hold regardless of whether
+branch protection (rung 1) is available, since rung 2 requires only that the project
+controls its own release path.
+
+The rung 2 **verdict** reported by `evalRung2` (`brain/scripts/vcs/substrate.mjs`) and
+`realReleaseGateProbe` (`brain/scripts/brain-governance-status.mjs`) MUST derive from a
+structural efficacy check of the wired release path — whether the workflow can
+plausibly block a release/tag before it exists — never from mere presence of a
+release/publish workflow file. A workflow that triggers post-tag (e.g. `on: push:
+tags`) or lacks write-level permissions to prevent the tag (e.g. `permissions:
+contents: read`) MUST yield `active: false` with a remedy. The verdict MUST also carry
+a `verifiable` flag (mirroring rung 1's `evalPreReceiveGate` precedent, `substrate.mjs:210-227`)
+so wiring that is declared but structurally unproven is never rendered as enforced.
+
+(Previously: described only the release script's own fail-closed obligation; the
+verdict-reporting probe had no efficacy check and treated file presence as sufficient.)
+
+#### Scenario: Release aborts on audit failure
+
+- GIVEN the range being released contains a merge commit that fails a `brain-audit.mjs` check
+- WHEN the release/tag script runs
+- THEN `brain-audit.mjs` exits non-zero and the release script aborts before publishing or tagging
+
+#### Scenario: Rung 2 holds on a substrate with no branch protection
+
+- GIVEN branch protection on `main` is unavailable
+- WHEN a release is attempted with a violation in the audited range
+- THEN the release still fails closed via the release-path `brain:audit` gate
+
+#### Scenario: Enforcing workflow reports active and verifiable
+
+- GIVEN `release.yml` triggers pre-tag and holds write permissions sufficient to block the tag
+- WHEN `evalRung2` runs
+- THEN it reports `active: true`, `verifiable: true`
+
+#### Scenario: Post-tag anti-pattern reports inert
+
+- GIVEN `release.yml` exists, triggers on `push: tags`, and holds only `contents: read`
+- WHEN `evalRung2` runs
+- THEN it reports `active: false` with remedy "workflow cannot block tags (fires post-tag)"
+
+#### Scenario: No wired workflow reports inert
+
+- GIVEN no release/publish workflow file exists
+- WHEN `evalRung2` runs
+- THEN it reports `active: false` with remedy "no workflow wired"
+
+#### Scenario: Gated-but-unproven workflow reports unverifiable (deferred to Phase 4 #210)
+
+- GIVEN a workflow exists and the audit-gating job is present but conditionally skipped (or lacks a `needs:` DAG link to the tag-creation step) so enforcement cannot be confirmed structurally
+- WHEN `evalRung2` runs
+- THEN it reports `verifiable: false` with remedy "workflow rebuild needed (Phase 4 #210)"
+- **NOTE (Phase 3 #337)**: This scenario is documented but deferred to Phase 4. Phase 3 detects presence of the audit job and write permissions; full DAG validation (`needs:` link confirmation) is out of scope and will be implemented in #210's workflow rebuild.
+
+## MODIFIED Requirements
+
+### Requirement REQ-HONESTY-1: `brain:governance-status` Reports Active Rung and Remedy
+
+`brain-governance-status.mjs` MUST be extended to report, in addition to the existing
+per-layer state, the active substrate rung (1-4, per the ladder table) for the
+consumer repo and the remedy to reach the next rung up. The reported rung MUST be
+derived from actual capability probes (as `capabilities()` already does for branch
+protection), never hardcoded.
+
+Every rung verdict, not only the top-level summary, MUST carry reasoning explaining
+why the rung is or is not active, plus remedy guidance. Confident over-reporting (a
+false-positive claim of enforcement) is a worse failure than honest under-reporting;
+when structural evidence is ambiguous or unverifiable, the probe MUST report the
+lower/unverified state, never the higher one.
+
+(Previously: required the active rung + remedy at summary level only; behavior under
+ambiguous evidence was unspecified.)
+
+#### Scenario: Rung 2 repo reports rung 2 with a remedy to reach rung 1
+
+- GIVEN a repo has no branch protection but has a release/tag script wired to `brain:audit` fail-closed
+- WHEN `brain:governance-status` runs
+- THEN it reports the active rung as 2 with reasoning and a remedy to reach rung 1
+
+#### Scenario: Ambiguous efficacy never over-reports
+
+- GIVEN a release workflow's ability to block a tag cannot be structurally confirmed
+- WHEN `brain:governance-status` runs
+- THEN it reports the lower/unverified state, never claims enforcement it cannot prove
+
+### [issue-379] t21-memory-retrieval — 2026-09-23
+
+### [issue-379] governance-v3 delta — T2.1 issue-scoped memory-gate
+
+This is a delta over `openspec/specs/governance-v3/spec.md` — it adds one requirement
+(REQ-L3-4) to the existing Level 3 section. See that file (post-merge) for the full,
+merged spec; this delta documents only what T2.1 adds.
+
+## Added Requirement: REQ-L3-4 — `memory-gate` Is Issue-Scoped
+
+REQ-L3-1's `memory-gate` job MUST NOT stop at a global existence check once the current
+change's issue number is detectable. `brain/scripts/governance/run-check.mjs` MUST
+resolve the issue number the current PR/MR targets from `ctx.body` (reusing this file's
+own existing `extractIssueNumber`/`requiresClosingKeyword` — no new extraction
+implementation), then filter `.memory/records/` observations to `record.issue ===
+issueNumber` (via `checks/memory-retrieval.mjs`'s `memoryRetrieval(observations,
+issueNumber)`) before verifying coverage. The gate MUST:
+
+- FAIL when no record at all is scoped to the issue (memory cache MISSING).
+- PASS with a WARN-flavored reason (`pass: true`, non-blocking — this contract has no
+  distinct warn exit code) when scoped records exist but none is a `session_summary`
+  (PARTIAL coverage).
+- PASS cleanly when a scoped `session_summary` exists (HIT).
+- FALL BACK to the pre-existing global `memoryPresence()` check (REQ-L3-1's original
+  behavior) when no issue number can be resolved from `ctx` — either `ctx.body` is
+  absent (non-string) or `ctx.body` is present but carries no detectable issue
+  reference.
+
+[**unit-testable**: `memoryRetrieval` is a pure evaluator (fixture-testable, no I/O);
+the wrapper (`runMemoryGateCheck`) and its fallback are covered by `run-check.test.mjs`]
+
+#### Scenario: PR references an issue and a scoped session_summary exists
+
+- GIVEN `ctx.body` contains a detectable issue reference (e.g. `Closes #379`) resolving to issue N
+- AND `.memory/records/` contains a `session_summary` record with `issue === N`
+- WHEN the `memory-gate` job runs
+- THEN it passes cleanly
+
+#### Scenario: PR references an issue but no record is scoped to it
+
+- GIVEN `ctx.body` resolves to issue N
+- AND no record in `.memory/records/` has `issue === N` (even if other issues' records exist)
+- WHEN the `memory-gate` job runs
+- THEN it fails, citing issue N by number
+
+#### Scenario: PR references an issue with scoped records but no session_summary
+
+- GIVEN `ctx.body` resolves to issue N
+- AND `.memory/records/` has at least one record with `issue === N`, but none has `type === 'session_summary'`
+- WHEN the `memory-gate` job runs
+- THEN it passes (`pass: true`) but the reason flags partial/warn coverage — non-blocking
+
+#### Scenario: No issue number is detectable — fallback to the global check
+
+- GIVEN `ctx.body` is absent, or present but contains no closing keyword or "Part of #N" reference
+- WHEN the `memory-gate` job runs
+- THEN it degrades to the pre-T2.1 global `memoryPresence()` check (passes if ANY `session_summary` exists anywhere in `.memory/records/`)
+
+### [issue-468] rung3-efficacy-probe — 2026-09-23
+
+# Delta for Governance v3
+
+Refines REQ-L2-2/REQ-HONESTY-1: rung 3 MUST earn "armed" from run-ledger evidence, not
+file presence — closing the gap that let a 12-day post-merge CI outage report armed.
+
+## ADDED Requirements
+
+### Requirement: REQ-R3-1 — Recent Success Arms Rung 3
+
+Rung 3 MUST report `active: true, verifiable: true` only when the last terminal run of
+the post-merge workflow succeeded within the 48h staleness window. `mechanism` MUST
+name the run ledger as the evidence source — never a generic/file-presence label.
+
+#### Scenario: Recent successful run arms rung 3
+
+- GIVEN the last terminal run of `governance-postmerge.yml` completed within 48h, conclusion success
+- WHEN rung 3 is evaluated
+- THEN it reports `active: true, verifiable: true`, `mechanism` naming the run ledger
+
+### Requirement: REQ-R3-2 — Terminal Failure Reports Inert With the Run URL
+
+Rung 3 MUST report `active: false, mechanism: 'postmerge-failing'` when the last terminal
+run failed, and `reason` MUST carry that run's URL.
+
+#### Scenario: Failed last run reports inert with the run URL
+
+- GIVEN the last terminal run of `governance-postmerge.yml` completed, conclusion failure
+- WHEN rung 3 is evaluated
+- THEN it reports `active: false, mechanism: 'postmerge-failing'`, `reason` includes the run URL
+
+### Requirement: REQ-R3-3 — Staleness Reports Inert; Drift-Guard Required
+
+Rung 3 MUST report inactive when no terminal run occurred within 48h (2 daily cron
+periods), regardless of an older run's outcome. A test MUST fail if
+`governance-postmerge.yml`'s `schedule:` cron changes without updating the constant.
+
+#### Scenario: Stale last-known-success reports inert
+
+- GIVEN the last terminal run succeeded but was >48h ago, no run since
+- WHEN rung 3 is evaluated
+- THEN it reports `active: false`
+
+#### Scenario: Drift guard fails on unmatched cron change
+
+- GIVEN `governance-postmerge.yml`'s `schedule:` cron changes without the constant being updated
+- WHEN the drift-guard test runs
+- THEN it fails
+
+### Requirement: REQ-R3-4 — Read Failure Is Uncomputable, Never Armed
+
+Rung 3 MUST report `available: false`, never `active: true`, on any read failure (auth,
+token, network, rate-limit, malformed response) — per the
+`evidence-reader-empty-on-failure` contract: a reader MUST NOT turn a failed read into
+a confident verdict.
+
+#### Scenario: No API access is uncomputable
+
+- GIVEN the run-ledger read fails (no token/API access)
+- WHEN rung 3 is evaluated
+- THEN it reports `available: false, active: false` — never `active: true`
+
+#### Scenario: Malformed response is uncomputable
+
+- GIVEN the run-ledger read returns an unparseable response
+- WHEN rung 3 is evaluated
+- THEN it reports `available: false, active: false`
+
+### Requirement: REQ-R3-5 — No Terminal Run In The Read Window Reports Unproven
+
+Rung 3 MUST report `active: false, mechanism: 'postmerge-unproven'` when the workflow
+file is present, the ledger read succeeded, and no terminal run appears in the page
+the reader retrieved. The requirement is deliberately scoped to the read window and
+NOT to the workflow's whole history: the probe reads a bounded page, so a backlog in
+which every recent entry is still queued or in progress produces this state on a
+workflow with years of successful runs. Claiming "never" from a windowed read is the
+`evidence-reader-empty-on-failure` contract violated one level up — "genuinely zero"
+conflated with "none in the window I looked at".
+
+#### Scenario: A ledger page with no terminal run reports unproven
+
+- GIVEN `governance-postmerge.yml` exists and the ledger read succeeded
+- AND no terminal run appears in the retrieved page
+- WHEN rung 3 is evaluated
+- THEN it reports `active: false, mechanism: 'postmerge-unproven'`
+- AND the `reason` scopes the claim to the read window, never to the workflow's history
+
+### Requirement: REQ-R3-6 — Shape Parity With Rung 2
+
+Every rung-3 outcome MUST return the same fields rung 2 (#337) returns: `available,
+active, verifiable, mechanism, reason, remedy`.
+
+#### Scenario: Every rung-3 branch carries the full field set
+
+- GIVEN any rung-3 outcome (armed, inert, stale, unproven, uncomputable)
+- WHEN the result is inspected
+- THEN it contains `available, active, verifiable, mechanism, reason, remedy`
+
+### Requirement: REQ-R3-7 — Legacy Bare-Boolean Probes Keep Working
+
+A probe returning a bare boolean (the existing ~36-fixture contract) MUST keep working,
+normalized to a declared-but-legacy signal (`verifiable: false`) — mirroring rung 2's
+`normalizeReleaseGateEvidence` pattern — with no existing fixture requiring changes.
+
+#### Scenario: Bare `true`/`false` normalize to declared-legacy
+
+- GIVEN a probe returns bare boolean `true` or `false`
+- WHEN rung 3 is evaluated
+- THEN `verifiable: false`, `active` matches the boolean, and `mechanism` differs from REQ-R3-1's run-ledger mechanism
+
+### Requirement: REQ-R3-8 — Governance-Status Renders a Rung-3 Breakdown
+
+`brain:governance-status` output MUST include a rung-3 breakdown block reporting
+`verifiable` and `mechanism` whenever rung-3 evidence exists, mirroring the existing
+rung-1/rung-2 blocks — no computed rung-3 signal may go unrendered.
+
+#### Scenario: Rung-3 evidence is visible in the status report
+
+- GIVEN rung 3 has been evaluated (any outcome)
+- WHEN `brain:governance-status` runs
+- THEN its output includes a rung-3 line naming `verifiable` and `mechanism`
+
+### Requirement: REQ-R3-9 — Historical Outage Window Replays as Inactive
+
+A fixture built from the real run-ledger data for `governance-postmerge.yml` covering
+2026-07-24 to 2026-08-05, replayed through the real probe and rung-3 evaluation, MUST
+report rung 3 inactive.
+
+#### Scenario: The 12-day outage window reports inactive
+
+- GIVEN the 2026-07-24→2026-08-05 fixture, in which the workflow failed continuously
+- WHEN it is replayed through the real probe and rung-3 evaluation
+- THEN rung 3 reports `active: false`
