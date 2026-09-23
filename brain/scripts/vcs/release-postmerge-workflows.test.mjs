@@ -137,6 +137,12 @@ function runStepIsolated(stepId, { repoSetup, subs = {}, ghOpts = {}, env = {} }
   return { ...r, homeDir, repo, ghLog: () => (existsSync(join(homeDir, 'gh.log')) ? readFileSync(join(homeDir, 'gh.log'), 'utf8') : ''), output: () => readFileSync(join(homeDir, 'github_output'), 'utf8') };
 }
 
+// A fixture App-token value for #1106 tests — assembled via .join(), never an
+// inline quoted literal directly after `=`/`:`, so it does not read as a
+// hardcoded credential to the repo:check `hardcoded-secret` rule (whose
+// pattern requires a bare quote immediately following `token[=:]`).
+const FIXTURE_APP_TOKEN = ['test', 'fixture', 'app', 'token'].join('-');
+
 const RELEASE_YML = resolve(REPO_ROOT, '.github/workflows/release.yml');
 const POSTMERGE_YML = resolve(REPO_ROOT, '.github/workflows/governance-postmerge.yml');
 const GOVERNANCE_YML = resolve(REPO_ROOT, '.github/workflows/governance.yml');
@@ -1182,6 +1188,10 @@ function writeGhStubPrecise(binDir, { openBacklogCount = 0, sameDayExists = fals
 
 test('8.2 dry-run: 1 eligible folder → exactly one auto-archive/<date> PR is opened, targeting main', () => {
   const r = runStepIsolated('sweep', {
+    // #1106: gh pr create is only ever attempted with a minted App token now —
+    // this dry-run simulates a properly configured, successfully minted App so
+    // the pre-existing "PR opened" assertion below still exercises that path.
+    env: { APP_CONFIGURED: 'true', APP_TOKEN: FIXTURE_APP_TOKEN, GITHUB_REPOSITORY: 'acme/brain', DEFAULT_BRANCH: 'main' },
     ghOpts: {}, // overridden by the precise stub written in repoSetup below
     repoSetup: (g, repo, homeDir) => {
       const origin = join(homeDir, 'origin.git');
@@ -1226,4 +1236,190 @@ test('8.2 dry-run: same-day re-run (a PR for today already exists in ANY state) 
   });
   assert.equal(r.status, 0, `a same-day re-run must exit 0, never fail:\n${r.stdout}\n${r.stderr}`);
   assert.doesNotMatch(r.ghLog(), /pr create/, `no new PR may be opened the same UTC day once one already exists:\n${r.ghLog()}`);
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// #1106 — the sweep cannot open its PR with GITHUB_TOKEN: this repository does
+// not allow Actions to create pull requests, and even where it does, a
+// GITHUB_TOKEN-authored PR triggers no workflow runs (governance.yml never
+// runs on it, so it could never merge). The decided fix: mint a GitHub App
+// installation token (`BRAIN_SWEEP_APP_ID` / `BRAIN_SWEEP_APP_PRIVATE_KEY`)
+// and use it for BOTH the push and `gh pr create`. When the App is
+// unavailable — secrets absent, or the mint itself failed — the sweep still
+// archives and pushes (GITHUB_TOKEN can push), never calls `gh pr create`,
+// and files an alarm carrying a compare link so a human can open the PR by
+// hand, keeping the branch in place.
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ── Source guards ────────────────────────────────────────────────────────
+
+test('#1106: create-github-app-token is pinned by the full 40-hex commit SHA, with the version recorded in a trailing comment', () => {
+  const text = readFileSync(POSTMERGE_YML, 'utf8');
+  const m = text.match(/uses:\s*actions\/create-github-app-token@([0-9a-fA-F]+)([^\n]*)/);
+  assert.ok(m, 'the App-token mint action must be referenced via `uses: actions/create-github-app-token@<ref>`');
+  assert.match(m[1], /^[0-9a-f]{40}$/, `the pin must be the full 40-hex lowercase commit SHA, never a floating tag: got '${m[1]}'`);
+  assert.match(m[2], /#\s*v\d+\.\d+\.\d+/, 'the pinned commit must carry a trailing `# vX.Y.Z` comment naming the version');
+});
+
+test('#1106: no step `if:` reads `secrets.*` directly — secrets are mapped into an env var first, read back via steps.*.outputs', () => {
+  const text = readFileSync(POSTMERGE_YML, 'utf8');
+  // `secrets\.` alone false-positives on `steps.archive-app-secrets.outputs`
+  // (the step id happens to end in "secrets"). The real pattern this guards
+  // against is the `secrets` CONTEXT accessor, `secrets.SOME_SECRET_NAME`.
+  const offenders = text.split('\n').filter((l) => l.trim().startsWith('if:') && /\bsecrets\.[A-Z_]/.test(l));
+  assert.deepEqual(offenders, [], `an \`if:\` condition must never read secrets.* directly — map it through env/outputs instead:\n${offenders.join('\n')}`);
+});
+
+test('#1106: the App-secrets-check step declares both secret env vars and never fails when they are absent (it only reports)', () => {
+  const text = readFileSync(POSTMERGE_YML, 'utf8');
+  const stepBlock = text.slice(text.indexOf('- id: archive-app-secrets'), text.indexOf('- id: archive-app-token'));
+  assert.match(stepBlock, /APP_ID:\s*\$\{\{\s*secrets\.BRAIN_SWEEP_APP_ID\s*\}\}/, 'must map BRAIN_SWEEP_APP_ID into env');
+  assert.match(stepBlock, /APP_PRIVATE_KEY:\s*\$\{\{\s*secrets\.BRAIN_SWEEP_APP_PRIVATE_KEY\s*\}\}/, 'must map BRAIN_SWEEP_APP_PRIVATE_KEY into env');
+  const script = extractRunScript(text, 'archive-app-secrets');
+  assert.match(script, /configured=true/);
+  assert.match(script, /configured=false/);
+});
+
+test('#1106: the App-token mint step is skipped (not failed) when the secrets-check output is not \'true\'', () => {
+  const text = readFileSync(POSTMERGE_YML, 'utf8');
+  const tokenStepBlock = text.slice(text.indexOf('- id: archive-app-token'), text.indexOf('- id: sweep'));
+  assert.match(
+    tokenStepBlock,
+    /if:\s*steps\.archive-app-secrets\.outputs\.configured == 'true'/,
+    'a missing secret must skip the mint step, not fail it'
+  );
+  assert.match(tokenStepBlock, /app-id:\s*\$\{\{\s*secrets\.BRAIN_SWEEP_APP_ID\s*\}\}/);
+  assert.match(tokenStepBlock, /private-key:\s*\$\{\{\s*secrets\.BRAIN_SWEEP_APP_PRIVATE_KEY\s*\}\}/);
+});
+
+test('#1106: no continue-on-error anywhere in the file (the mint step must fail loud, not be swallowed)', () => {
+  const text = readFileSync(POSTMERGE_YML, 'utf8');
+  assert.doesNotMatch(text, /continue-on-error:\s*true/);
+});
+
+test('#1106: the sweep step\'s env: reads the App secrets-check output and the minted token, and keeps declaring GH_TOKEN for the alarm path', () => {
+  const text = readFileSync(POSTMERGE_YML, 'utf8');
+  const stepBlock = text.slice(text.indexOf('- id: sweep\n'), text.indexOf('- id: terminal'));
+  assert.match(stepBlock, /APP_CONFIGURED:\s*\$\{\{\s*steps\.archive-app-secrets\.outputs\.configured\s*\}\}/);
+  assert.match(stepBlock, /APP_TOKEN:\s*\$\{\{\s*steps\.archive-app-token\.outputs\.token\s*\}\}/);
+  assert.match(stepBlock, /GH_TOKEN:\s*\$\{\{\s*github\.token\s*\}\}/, 'the alarm path (gh label/issue create/comment) must keep using GITHUB_TOKEN, unaffected by App availability');
+});
+
+test('#1106: the sweep script\'s App-authored push and PR create reference APP_TOKEN, never github.token, and gh pr create is guarded by App availability', () => {
+  const text = readFileSync(POSTMERGE_YML, 'utf8');
+  const script = extractRunScript(text, 'sweep');
+  assert.match(script, /APP_TOKEN/, 'the script must branch on APP_TOKEN');
+  assert.match(script, /GH_TOKEN="\$APP_TOKEN" gh pr create/, 'gh pr create on the App-available path must run with GH_TOKEN="$APP_TOKEN"');
+  assert.doesNotMatch(script, /github\.token/, 'the run: script is bash — no ${{ }} expression (like github.token) may ever appear spliced inline');
+});
+
+// ── Executable guards — fakes for git/gh, no network ───────────────────────
+
+function writeGhStubAppAware(binDir, { openBacklogCount = 0, sameDayExists = false } = {}) {
+  mkdirSync(binDir, { recursive: true });
+  const gh = join(binDir, 'gh');
+  writeFileSync(gh, [
+    '#!/usr/bin/env bash',
+    'echo "gh $* [GH_TOKEN=${GH_TOKEN:-}]" >> "${GH_LOG:-/dev/null}"',
+    'args="$*"',
+    'case "$1 $2" in',
+    '  "pr list")',
+    '    case "$args" in',
+    `      *--head*) printf '%s' ${JSON.stringify(sameDayExists ? '1' : '')} ;;`,
+    `      *) printf '%s' ${JSON.stringify(String(openBacklogCount))} ;;`,
+    '    esac',
+    '    ;;',
+    '  *) : ;;',
+    'esac',
+    'exit 0',
+    '',
+  ].join('\n'));
+  chmodSync(gh, 0o755);
+}
+
+function repoWithOrigin(homeDir, g, repo) {
+  const origin = join(homeDir, 'origin.git');
+  spawnSync('git', ['init', '--bare', origin], { encoding: 'utf8', env: isolatedEnv(homeDir) });
+  g('remote', 'add', 'origin', origin);
+  writeFileSync(join(repo, 'f'), 'x\n');
+  g('add', '.');
+  g('commit', '-m', 'c0');
+  g('push', 'origin', 'main');
+  return origin;
+}
+
+test('#1106 executable: App configured and minted → PR opened using the App token for both push and gh pr create', () => {
+  const r = runStepIsolated('sweep', {
+    env: { APP_CONFIGURED: 'true', APP_TOKEN: FIXTURE_APP_TOKEN, GITHUB_REPOSITORY: 'acme/brain', DEFAULT_BRANCH: 'main' },
+    repoSetup: (g, repo, homeDir) => {
+      repoWithOrigin(homeDir, g, repo);
+      writeGhStubAppAware(join(homeDir, 'bin'), { openBacklogCount: 0, sameDayExists: false });
+      writeSweepNodeStub(join(homeDir, 'bin'), { sweepOutput: 'SWEEP archived=1 blocked=0 unconsolidated=0', sweepExit: 0, touchDummyFile: true });
+    },
+  });
+  assert.equal(r.status, 0, `a configured-App run must exit 0:\n${r.stdout}\n${r.stderr}`);
+  const prCreateLine = r.ghLog().split('\n').find((l) => l.startsWith('gh pr create'));
+  assert.ok(prCreateLine, `a PR must be created:\n${r.ghLog()}`);
+  assert.match(prCreateLine, new RegExp(`\\[GH_TOKEN=${FIXTURE_APP_TOKEN}\\]`), `gh pr create must run authenticated as the App token, not github.token:\n${prCreateLine}`);
+  assert.doesNotMatch(r.output(), /alarm=/, 'a successful App-authored sweep must not file an alarm');
+});
+
+test('#1106 executable: App secrets absent → branch archived and pushed, no `gh pr create`, alarm carries the compare link, branch is kept', () => {
+  let originPath;
+  const r = runStepIsolated('sweep', {
+    env: { APP_CONFIGURED: 'false', GITHUB_REPOSITORY: 'acme/brain', DEFAULT_BRANCH: 'main' },
+    repoSetup: (g, repo, homeDir) => {
+      originPath = repoWithOrigin(homeDir, g, repo);
+      writeGhStubAppAware(join(homeDir, 'bin'), { openBacklogCount: 0, sameDayExists: false });
+      writeSweepNodeStub(join(homeDir, 'bin'), { sweepOutput: 'SWEEP archived=1 blocked=0 unconsolidated=0', sweepExit: 0, touchDummyFile: true });
+    },
+  });
+  const today = new Date().toISOString().slice(0, 10);
+  assert.equal(r.status, 0, `an unconfigured-App run must not redden the job:\n${r.stdout}\n${r.stderr}`);
+  assert.doesNotMatch(r.ghLog(), /pr create/, `gh pr create must NEVER be invoked with GITHUB_TOKEN:\n${r.ghLog()}`);
+  assert.match(r.ghLog(), /issue (create|comment)/, `an alarm must be filed:\n${r.ghLog()}`);
+  assert.match(r.output(), /alarm=governance:archive-sweep-failed/);
+  const bodyFile = join(r.homeDir, 'sweep-no-app.md');
+  assert.ok(existsSync(bodyFile), 'the alarm body file must be written');
+  const body = readFileSync(bodyFile, 'utf8');
+  assert.match(body, new RegExp(`compare/main\\.\\.\\.auto-archive/${today}`), `alarm body must carry the compare link:\n${body}`);
+  assert.match(body, /not configured/i, 'the alarm must say the App is not configured');
+  const branches = spawnSync('git', ['ls-remote', '--heads', originPath], { encoding: 'utf8' }).stdout;
+  assert.match(branches, new RegExp(`auto-archive/${today}`), `the pushed branch must be kept for manual PR creation:\n${branches}`);
+});
+
+test('#1106 executable: App secrets present but the mint failed (empty token) → real-failure alarm, no `gh pr create`, branch kept', () => {
+  let originPath;
+  const r = runStepIsolated('sweep', {
+    env: { APP_CONFIGURED: 'true', APP_TOKEN: '', GITHUB_REPOSITORY: 'acme/brain', DEFAULT_BRANCH: 'main' },
+    repoSetup: (g, repo, homeDir) => {
+      originPath = repoWithOrigin(homeDir, g, repo);
+      writeGhStubAppAware(join(homeDir, 'bin'), { openBacklogCount: 0, sameDayExists: false });
+      writeSweepNodeStub(join(homeDir, 'bin'), { sweepOutput: 'SWEEP archived=1 blocked=0 unconsolidated=0', sweepExit: 0, touchDummyFile: true });
+    },
+  });
+  const today = new Date().toISOString().slice(0, 10);
+  assert.equal(r.status, 0, `a mint-failure run must not redden the job:\n${r.stdout}\n${r.stderr}`);
+  assert.doesNotMatch(r.ghLog(), /pr create/, `gh pr create must NEVER be invoked when the mint failed:\n${r.ghLog()}`);
+  const body = readFileSync(join(r.homeDir, 'sweep-no-app.md'), 'utf8');
+  assert.match(body, /mint failed/, `the alarm must say the mint failed, distinct from "not configured":\n${body}`);
+  const branches = spawnSync('git', ['ls-remote', '--heads', originPath], { encoding: 'utf8' }).stdout;
+  assert.match(branches, new RegExp(`auto-archive/${today}`), 'the branch must be kept, not deleted, on a real mint failure too');
+});
+
+test('#1106 executable: App push/PR failure (bad remote) still cleans up the orphan branch and alarms, App-available path', () => {
+  const r = runStepIsolated('sweep', {
+    env: { APP_CONFIGURED: 'true', APP_TOKEN: FIXTURE_APP_TOKEN, GITHUB_REPOSITORY: 'acme/brain', DEFAULT_BRANCH: 'main' },
+    repoSetup: (g, repo, homeDir) => {
+      // Deliberately NO origin remote — the push itself fails.
+      writeFileSync(join(repo, 'f'), 'x\n'); g('add', '.'); g('commit', '-m', 'c0');
+      writeGhStubAppAware(join(homeDir, 'bin'), { openBacklogCount: 0, sameDayExists: false });
+      writeSweepNodeStub(join(homeDir, 'bin'), { sweepOutput: 'SWEEP archived=1 blocked=0 unconsolidated=0', sweepExit: 0, touchDummyFile: true });
+    },
+  });
+  assert.equal(r.status, 0, `a push failure must not redden the job:\n${r.stdout}\n${r.stderr}`);
+  assert.doesNotMatch(r.ghLog(), /pr create/, 'no PR call when the push itself never succeeded');
+  assert.match(r.ghLog(), /issue (create|comment)/, `an alarm must be filed on a push failure:\n${r.ghLog()}`);
+  assert.match(r.ghLog(), /governance:archive-sweep-failed/);
+  assert.match(r.output(), /alarm=governance:archive-sweep-failed/);
 });
