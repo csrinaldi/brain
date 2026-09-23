@@ -152,6 +152,54 @@ test('a rename whose destination is NOT under openspec/changes/archive/ ⇒ not 
   assert.equal(result.exempt, false);
 });
 
+// ── residual risk 2 (ADR-0035): an added file under archive/<dest>/ must
+// under archive/** at all — no real archiveChange run ever ADDS a file
+// there (see the module header comment), so there is no legitimate case
+// to protect and the rule costs nothing tightened all the way to zero.
+
+test('a real rename plus an unrelated added file under a DIFFERENT archive/<dest>/ ⇒ not exempt, offending names it (ADR-0035 residual risk 2)', () => {
+  // The exact proof from the gap report: a genuine issue-9 rename earns
+  // nothing for a hand-added payload dropped under archive/anything/.
+  const result = classifySweepDiff({
+    nameStatusLines: [
+      'R100\topenspec/changes/issue-9-x/spec.md\topenspec/changes/archive/9/spec.md',
+      'A\topenspec/changes/archive/anything/payload.sh',
+    ],
+    numstatLines: [
+      '0\t0\topenspec/changes/{issue-9-x => archive/9}/spec.md',
+      '40\t0\topenspec/changes/archive/anything/payload.sh',
+    ],
+  });
+  assert.equal(result.exempt, false);
+  assert.ok(result.offending.some((o) => o.includes('payload.sh')));
+});
+
+test('an added file under archive/<dest>/ where <dest> IS a real rename destination in the same diff ⇒ STILL not exempt (zero added files under archive/** are ever exempt)', () => {
+  // Same-folder pairing used to let this through — closed. No real
+  // archiveChange run ever adds a file under archive/<iid>/ (it only
+  // renames), so there is nothing legitimate this would have protected.
+  const result = classifySweepDiff({
+    nameStatusLines: [
+      'R100\topenspec/changes/issue-9-foo/proposal.md\topenspec/changes/archive/9/proposal.md',
+      'A\topenspec/changes/archive/9/extra-file.md',
+    ],
+    numstatLines: [
+      '0\t0\topenspec/changes/{issue-9-foo => archive/9}/proposal.md',
+      '3\t0\topenspec/changes/archive/9/extra-file.md',
+    ],
+  });
+  assert.equal(result.exempt, false);
+  assert.ok(result.offending.some((o) => o.includes('extra-file.md')));
+});
+
+test('an added file under archive/<dest>/ with NO rename anywhere in the diff ⇒ not exempt (no rename at all, refused before pairing is even considered)', () => {
+  const result = classifySweepDiff({
+    nameStatusLines: ['A\topenspec/changes/archive/9/payload.sh'],
+    numstatLines: ['40\t0\topenspec/changes/archive/9/payload.sh'],
+  });
+  assert.equal(result.exempt, false);
+});
+
 // ── fail-closed evidence handling ───────────────────────────────────────
 
 test('nameStatusLines/numstatLines absent (uncomputable diff) ⇒ not exempt, never throws', () => {
