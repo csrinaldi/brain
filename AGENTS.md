@@ -91,6 +91,7 @@ See [`brain/project/README.md`](brain/project/README.md) for directory conventio
 - [ADR-0033](brain/project/decisions/adr-0033-cold-review-transport.md) — The cold review runs as a spawned subagent: the transport is a stage engine, and the producer never holds a credential (**Amendment 1, 28/08/2026** — the poster credential stays on the environment axis by ruling, not by omission — the engine session is the boundary, #773; **Amendment 2, 28/08/2026** — the forge-CLI row gains a per-run config-dir shadow — the CLI can no longer find the keyring, which is not the same as the secret being gone, #775)
 - [ADR-0023](brain/project/decisions/adr-0023-sdd-role-port.md) — The role port: engines declare, platforms receive, brain's own roles live on a shelf
 - [ADR-0034](brain/project/decisions/adr-0034-memory-travels-on-its-own-lane.md) — Memory travels on its own lane: records reach `main` on their own pull request, never the feature's (**Amendment 1, 15/09/2026** — `brain:memory:ship` is now the real script name, and the scripts the ADR cites as `memory:save`/`memory:share`/`memory:audit` are `brain:memory:*`; the bare names stay as repo-only aliases and the lane decision is unchanged, #961; **Amendment 2, 15/09/2026** — erratum — Amendment 1 said the body was not rewritten, but its own promotion had annotated it in place under ruling R6 on #961 as amended (option A); that sentence is rewritten, #973; **Amendment 3, 17/09/2026** — the five feature-PR memory surfaces L6/L7 named (`pre-push` share, `brain:save`, `brain:next`'s materialization state, `ticket.nextSteps`/PR-template wording) are retired; `memory-gate` is unchanged; this repository sets `memory.lane.enabled: true`, #890; **Amendment 4, 19/09/2026** — observed, not a policy change — this repository has `allow_auto_merge: false`, so `mrAutoMerge` is refused at every tier and a `lite` lane PR waits for a human merge like `standard`; whether to enable the setting or amend L2 is deferred to epic #864 task 6.1, #936)
+- [ADR-0035](brain/project/decisions/adr-0035-archive-sweep-issue-link-exemption-is-content-earned.md) — The archive sweep's `issue-link` exemption is content-earned, never granted by branch name
 
 ### Project-specific rules
 
@@ -198,7 +199,10 @@ Changes to this document require an MR reviewed by `@crinaldi`.
 > **status:** current | **last-reviewed:** 2026-06-24 | **owner:** @crinaldi
 
 > **Purpose:** defines the abstract verbs that any SDD harness must implement
-> to be compatible with this project. Referenced by ADR-0002.
+> to be compatible with this project. Referenced in the brain project by ADR-0005 (harness
+> adapter: `SDD_HARNESS` selector + verb contract, which names this file as its contract) and
+> ADR-0001 (3-layer architecture with replaceable harness). Core docs reference project ADRs by
+> name, not by path, because `brain/project/**` is consumer-owned.
 
 The current harness is `gentle-ai`. Another harness may replace it as long as it implements
 this contract — without changes to `project-workflow.md` or `developer-environment.md`.
@@ -260,6 +264,14 @@ this contract — without changes to `project-workflow.md` or `developer-environ
 | `/retomar` | Recovers the context from the previous session from engram + the VCS board. |
 | `/issue-create` | Creates an issue from a description or changeset. Provider-specific skill (e.g. `gitlab-issue`). |
 | `/mr-create` | Opens a PR/MR linked to an issue. Provider-specific skill. |
+
+> **`/sdd-archive` is human-optional, machine-guaranteed.** No human is required to run it, and no
+> gate fails because a change is unarchived: staleness is never an audit failure class. On GitHub,
+> the machine does the archiving. After every clean post-merge audit,
+> `.github/workflows/governance-postmerge.yml` sweeps changes whose issue is CLOSED into
+> `openspec/changes/archive/` through one `auto-archive/<date>` PR. "Optional" here means "not your
+> job", not "nobody's job"; running it by hand only makes the next sweep a no-op. The GitLab
+> governance fragment has no sweep step yet, so on GitLab archiving is still a manual act.
 
 ## Artifact contract
 
@@ -443,7 +455,7 @@ Job names are **load-bearing**: they form the check context strings
 
 | # | Invariant | CI job (`name:`) | Skip label | Character |
 |---|-----------|-----------------|------------|-----------|
-| 1 | Every PR links an approved ticket | `issue-link` | _(none — not skippable)_ | Hard |
+| 1 | Every PR links an approved ticket — except a lane PR whose diff earns the exemption (ADR-0034, ADR-0035) | `issue-link` | _(none — no label bypasses it)_ | Hard, with two content-earned exemptions — see below |
 | 2 | PR diff ≤ the declared tier's budget — **1000** `lite` · **400** `standard` · **200** `regulated` | `diff-size` | `size:exception` — **refused at `regulated`** | Hard with override — **none at `regulated`** |
 | 3 | Repo-scoped when no issue is detectable; otherwise issue-scoped over the PR tree plus `origin/<default>` (#1024) | `memory-gate` _(S4)_ | `skip:memory-gate` — honored at `standard` by a non-author, refused at `regulated`, not consulted at `lite` (#1024) | Soft — see below |
 | 4 | An ADDED ADR co-occurs with a `brain/HOME.md` entry | `decision-gate` _(S4)_ | _(none — the gate reads no labels)_ | Hard, in one direction — see below |
@@ -461,6 +473,35 @@ Job names are **load-bearing**: they form the check context strings
 > `brain.config.json` is not managed at all. A sentence naming *this* repo's tier would travel
 > and be false on arrival — the defect that got `AGENTS.md` removed from the managed set in
 > #397, "a file describing the wrong repository".
+
+### Invariant 1 scope — two content-earned exemptions, never a branch-name exemption
+
+**"Not skippable" means no label bypasses `issue-link`.** Invariant 3 has `skip:memory-gate`;
+invariant 1 has no `skip:issue-link`. That does not mean the check never yields. Two narrow lanes
+are exempt from the closing-keyword requirement, and both follow one rule: **the branch name is a
+claim, never the proof. The diff is recomputed and checked before the exemption is granted.**
+
+| Lane | Branch claim | Content proof, recomputed from `BASE...HEAD` | Decision · predicate |
+|---|---|---|---|
+| Memory | `memory/<host>-<date>` | every changed path is an ADDED `.memory/records/*.jsonl` file | ADR-0034 L1 · `checks/lane.mjs#classifyLane` |
+| Archive sweep | `auto-archive/<date>` | at least one exact-content (`-M100%`, `R100`) rename `openspec/changes/<name>/…` → `openspec/changes/archive/<iid>/…` with the same relative path. Otherwise only added files under `openspec/changes/archive/**`, and new or pure-addition (zero deleted lines) `openspec/specs/<capability>/spec.md` | ADR-0035 · `checks/archive-sweep.mjs#classifySweepDiff` |
+
+Both are wired into `run-check.mjs#runIssueLinkCheck` in the same shape. The branch regex is
+tested first, so a non-lane head never touches git. The diff predicate runs next, inside a
+`try`. A pass is returned only when the predicate proves the lane. A head that claims a lane
+but whose diff fails the proof falls through to the ordinary rule: a closing keyword on the
+default branch. It is never exempted silently. An uncomputable diff also falls through, and is
+never reported as `uncomputable`.
+
+**Why not a label.** Both lanes are opened by unattended automation, a memory collector and a
+post-merge sweep, with no human in the loop to apply one. A label that automation applies to
+its own pull request is the spoofable shortcut this rule exists to prevent. Recomputing the
+proof costs less than trusting the claim.
+
+**Not exempt: `auto-revert/*`.** The post-merge auto-revert opens `auto-revert/<sha>` against
+the default branch with `Part of #259.` and no closing keyword, so `issue-link` refuses it. A
+revert has no fixed diff shape for a path predicate to check. ADR-0035 names this gap and leaves
+it open.
 
 ### Invariant 3 scope — what `memory-gate` does and does not check
 
@@ -541,7 +582,7 @@ L1 enforces **observable outputs** of each invariant. It does NOT enforce judgme
 
 | What L1 enforces | What L1 does NOT enforce |
 |-----------------|--------------------------|
-| A ticket link exists and has `status:approved` | Whether the ticket describes the right work |
+| A ticket link exists and has `status:approved`, unless the diff earns a lane exemption (invariant 1 scope) | Whether the ticket describes the right work |
 | PR diff ≤ the tier's budget (excluding ignore-list) | Whether the PR is sliced coherently |
 | `.memory/` changed (memory-gate proxy) | Capture quality or session completeness |
 | An added ADR is indexed in `brain/HOME.md` | Whether the PR actually made a new decision |
