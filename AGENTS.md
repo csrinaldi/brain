@@ -199,7 +199,10 @@ Changes to this document require an MR reviewed by `@crinaldi`.
 > **status:** current | **last-reviewed:** 2026-06-24 | **owner:** @crinaldi
 
 > **Purpose:** defines the abstract verbs that any SDD harness must implement
-> to be compatible with this project. Referenced by ADR-0002.
+> to be compatible with this project. Referenced in the brain project by ADR-0005 (harness
+> adapter: `SDD_HARNESS` selector + verb contract, which names this file as its contract) and
+> ADR-0001 (3-layer architecture with replaceable harness). Core docs reference project ADRs by
+> name, not by path, because `brain/project/**` is consumer-owned.
 
 The current harness is `gentle-ai`. Another harness may replace it as long as it implements
 this contract — without changes to `project-workflow.md` or `developer-environment.md`.
@@ -261,6 +264,14 @@ this contract — without changes to `project-workflow.md` or `developer-environ
 | `/retomar` | Recovers the context from the previous session from engram + the VCS board. |
 | `/issue-create` | Creates an issue from a description or changeset. Provider-specific skill (e.g. `gitlab-issue`). |
 | `/mr-create` | Opens a PR/MR linked to an issue. Provider-specific skill. |
+
+> **`/sdd-archive` is human-optional, machine-guaranteed.** No human is required to run it, and no
+> gate fails because a change is unarchived: staleness is never an audit failure class. On GitHub,
+> the machine does the archiving. After every clean post-merge audit,
+> `.github/workflows/governance-postmerge.yml` sweeps changes whose issue is CLOSED into
+> `openspec/changes/archive/` through one `auto-archive/<date>` PR. "Optional" here means "not your
+> job", not "nobody's job"; running it by hand only makes the next sweep a no-op. The GitLab
+> governance fragment has no sweep step yet, so on GitLab archiving is still a manual act.
 
 ## Artifact contract
 
