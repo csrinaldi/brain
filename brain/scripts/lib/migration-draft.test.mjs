@@ -91,20 +91,55 @@ test('#809 D3: a file without the anchor refuses — never a guess', () => {
   assert.match(refusal, /migrations/);
 });
 
-// ── D4: the backlog rides the contract — the three REAL drafts parse ────────
+// ── D4: the backlog rides the contract — every draft in the repo parses ────
+//
+// The claim is "every pending draft IN THE REPO", so the oracle is a walk of
+// `openspec/changes/*/brain-drafts/` and `openspec/changes/archive/*/brain-drafts/`
+// for `MIGRATION_DRAFT_BASENAME_RE` basenames — never a hand-written list of
+// change dirs, which goes stale the moment a change moves (#557 archived all
+// three the previous list named). An empty walk fails the test rather than
+// passing with nothing checked.
 
 test('#809 D4: every pending draft in the repo parses under the contract', async () => {
-  const { readFileSync } = await import('node:fs');
-  const drafts = [
-    'openspec/changes/issue-456-stage-set/brain-drafts/config-migrations-1.2.0.md',
-    'openspec/changes/issue-312-role-port/brain-drafts/config-migrations-1.3.0.md',
-    'openspec/changes/issue-814-engine-adapter/brain-drafts/config-migrations-1.4.0.md',
-  ];
-  for (const rel of drafts) {
-    const { entry, refusal } = parseMigrationDraft(readFileSync(new URL(`../../../${rel}`, import.meta.url), 'utf8'));
-    assert.equal(refusal, null, `${rel}: ${refusal}`);
-    assert.ok(entry.description.length > 0, rel);
-    assert.equal(typeof entry.defaults.sdd, 'object', `${rel}: every pending draft declares under sdd.*`);
+  const { readFileSync, readdirSync } = await import('node:fs');
+  const changesRoot = new URL('../../../openspec/changes/', import.meta.url);
+
+  const listDirs = (rootUrl) => {
+    let entries;
+    try {
+      entries = readdirSync(rootUrl, { withFileTypes: true });
+    } catch {
+      return [];
+    }
+    return entries.filter((e) => e.isDirectory()).map((e) => new URL(`${e.name}/`, rootUrl));
+  };
+
+  const changeDirs = [...listDirs(changesRoot), ...listDirs(new URL('archive/', changesRoot))];
+
+  const drafts = [];
+  for (const dirUrl of changeDirs) {
+    const draftsDirUrl = new URL('brain-drafts/', dirUrl);
+    let names;
+    try {
+      names = readdirSync(draftsDirUrl);
+    } catch {
+      continue;
+    }
+    for (const name of names) {
+      if (MIGRATION_DRAFT_BASENAME_RE.test(name)) drafts.push(new URL(name, draftsDirUrl));
+    }
+  }
+
+  assert.ok(
+    drafts.length > 0,
+    'expected at least one config-migrations-*.md draft under openspec/changes/*/brain-drafts/ or openspec/changes/archive/*/brain-drafts/ — an empty walk means the test checked nothing',
+  );
+
+  for (const fileUrl of drafts) {
+    const { entry, refusal } = parseMigrationDraft(readFileSync(fileUrl, 'utf8'));
+    assert.equal(refusal, null, `${fileUrl.pathname}: ${refusal}`);
+    assert.ok(entry.description.length > 0, fileUrl.pathname);
+    assert.equal(typeof entry.defaults.sdd, 'object', `${fileUrl.pathname}: every pending draft declares under sdd.*`);
   }
 });
 

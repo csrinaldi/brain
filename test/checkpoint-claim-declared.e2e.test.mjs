@@ -79,12 +79,34 @@ test('#495: every checkpoint report in the tree gets a DECIDED answer — never 
     undecided.map((u) => `  ${u}`).join('\n'));
 });
 
-test('#495: every ARCHIVED report reads `absent` — the past is recorded, not edited', () => {
+test('#495: every ARCHIVED report older than #495 reads `absent` — the past is recorded, not edited', () => {
   const archived = reports(join(CHANGES, 'archive'));
   assert.ok(archived.length > 0, 'no archived reports found — the walker is broken, not the tree');
 
+  // The rule is "predates #495", not "lives under archive/" — those were the
+  // same set only until #557's sweep archived #495's own folder alongside
+  // everything older. #495 is the issue that INTRODUCED the `brain-checkpoint/1`
+  // declared form: commit 93f3853e added `checkpoint-block.mjs` and
+  // `openspec/changes/archive/495/checkpoint-report.md` (now archived, but
+  // `openspec/changes/issue-495-*/` at the time) in the same commit, and that
+  // report carries the first ever declared block on purpose — dogfooded, per
+  // its own prose ("This is the first checkpoint report in this repository
+  // that the reviewer can read"). So `archive/495/` parsing is not the past
+  // being edited; it is the boundary itself. The walk keys the boundary off
+  // the archive folder's own numeric id (`archive/<id>/checkpoint-report.md`),
+  // not off which reports happen to live in the folder today.
+  const DECLARED_FORM_ISSUE = 495;
+  const archiveRoot = join(CHANGES, 'archive');
+
   const surprises = archived
-    .map((path) => ({ rel: relative(repoRoot, path), r: parseCheckpointClaim(readFileSync(path, 'utf8')) }))
+    .map((path) => {
+      const idSegment = relative(archiveRoot, path).split(/[\\/]/)[0];
+      const issueId = /^\d+$/.test(idSegment) ? Number(idSegment) : null;
+      return { rel: relative(repoRoot, path), issueId, r: parseCheckpointClaim(readFileSync(path, 'utf8')) };
+    })
+    // Unresolvable/non-numeric archive folder ids stay under the old,
+    // conservative rule (must read absent) rather than silently exempted.
+    .filter(({ issueId }) => issueId === null || issueId < DECLARED_FORM_ISSUE)
     .filter(({ r }) => r.absent !== true)
     .map(({ rel, r }) => `${rel} — ${r.ok ? 'parsed a claim' : `refused as MALFORMED: ${r.error}`}`);
 
