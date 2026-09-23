@@ -1,0 +1,20 @@
+diff --git a/openspec/README.md b/openspec/README.md
+index ecfc7fb2..aeed2c73 100644
+--- a/openspec/README.md
++++ b/openspec/README.md
+@@ -2,7 +2,7 @@
+ 
+ > **Source of truth** for spec-driven design, in tool-agnostic Markdown.
+ > The harness (gentle-ai today) is replaceable; engram is a disposable index.
+-> See [`../brain/decisions/adr-0002-harness-reemplazable-openspec.md`](../brain/decisions/adr-0002-harness-reemplazable-openspec.md).
++> See [`../brain/project/decisions/adr-0001-arquitectura-3-capas-harness-reemplazable.md`](../brain/project/decisions/adr-0001-arquitectura-3-capas-harness-reemplazable.md).
+ 
+ ## Structure
+ 
+@@ -27,3 +27,6 @@ openspec/
+    artifact under `openspec/` and `brain/` still travels with the code in the
+    same MR.
+ 4. **Replaces** the previous `docs/sdd/tasks/` convention (deprecated).
++5. **Archived automatically.** A change whose issue is CLOSED is swept out of `changes/` into
++   `changes/archive/<iid>/` by the post-merge governance workflow, which opens one
++   `auto-archive/<date>` PR after a clean audit. `changes/` therefore lists in-flight work only.
