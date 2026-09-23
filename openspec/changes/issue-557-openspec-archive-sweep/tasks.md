@@ -56,28 +56,29 @@ Chain strategy: pending
 
 ## Phase 6: PR2 — Backfill Execution (no code)
 
-- [ ] 6.1 Run `node brain/scripts/archive.mjs --backfill` locally against current tree (PR1 merged).
-- [ ] 6.2 Review report: `archived`/`consolidated`/`unconsolidated`/`blocked` counts match expectations; no unexpected collisions.
-- [ ] 6.3 Commit renames (`changes/<name>/` → `changes/archive/<iid>/`) + `openspec/specs/**` appends only.
-- [ ] 6.4 Verify `phase-order-check` passes on the resulting diff.
+- [x] 6.1 Run `node brain/scripts/archive.mjs --backfill` locally against current tree (PR1 merged). — done 2026-09-22: 120 archived, 15 left (report on PR #1097).
+- [x] 6.2 Review report: `archived`/`consolidated`/`unconsolidated`/`blocked` counts match expectations; no unexpected collisions. — done: 22 consolidated, 98 unconsolidated; 10 blocked (collisions #266/#323/#518, `archive/682` exists) deferred to a later round, 2 unparseable, 4 open.
+- [x] 6.3 Commit renames (`changes/<name>/` → `changes/archive/<iid>/`) + `openspec/specs/**` appends only. — done: `a3bb5b02`, 591 renames, 0 deletions, 18 new spec files; merged as `d6bd5eab` (#1097).
+- [x] 6.4 Verify `phase-order-check` passes on the resulting diff. — done: `phase-order` green on #1097; two tests with hardcoded or over-broad paths fixed in `3a218555`.
 
 ## Phase 7: PR3 — Governance Sweep Step
 
-- [ ] 7.1 New `brain/scripts/governance/postmerge/sweep.mjs`: real `readIssueState` via `getVcs().issueView`, applies `archiveChange`, renders markdown report (by capability, blocked table, unconsolidated list, `Part of #557.`), prints `SWEEP archived=N blocked=M unconsolidated=K`; exit 0 clean / 3 incomplete-or-failed.
-- [ ] 7.2 New `brain/scripts/governance/postmerge/sweep.test.mjs`: deterministic rendering, summary matches classification, exit 3 on `complete===false`.
-- [ ] 7.3 `.github/workflows/governance-postmerge.yml`: add `- id: sweep` after `advance`/`uncomputable`, before terminal `always()`; `if: steps.audit.outputs.code == '0' && steps.advance.outcome == 'success'`; branch `auto-archive/$(date -u +%F)`; backlog-cap + same-day (`--state all`) idempotency checks; orphan-branch cleanup; `VCS_TOKEN: ${{ github.token }}`; on failure file `governance:archive-sweep-failed` alarm, exit 0.
-- [ ] 7.4 Terminal step: add `ALARM_SWEEP: ${{ steps.sweep.outputs.alarm }}`; concatenate into `filed=`.
-- [ ] 7.5 Extend `brain/scripts/vcs/release-postmerge-workflows.test.mjs`: source guards (ordering, `if:` shape, no `cursor.mjs` write, `VCS_TOKEN` declared, `--state all` dedup, `ALARM_SWEEP` declared+concatenated, no `continue-on-error`); executable guards (zero-archivable→no `pr create`; selector failure→alarm+exit 0; open `auto-archive/*`→skip; push failure→orphan delete+alarm).
+- [x] 7.1 New `brain/scripts/governance/postmerge/sweep.mjs`: real `readIssueState` via `getVcs().issueView`, applies `archiveChange`, renders markdown report (by capability, blocked table, unconsolidated list, `Part of #557.`), prints `SWEEP archived=N blocked=M unconsolidated=K`; exit 0 clean / 3 incomplete-or-failed.
+- [x] 7.2 New `brain/scripts/governance/postmerge/sweep.test.mjs`: deterministic rendering, summary matches classification, exit 3 on `complete===false`.
+- [x] 7.3 `.github/workflows/governance-postmerge.yml`: add `- id: sweep` after `advance`/`uncomputable`, before terminal `always()`; `if: steps.audit.outputs.code == '0' && steps.advance.outcome == 'success'`; branch `auto-archive/$(date -u +%F)`; backlog-cap + same-day (`--state all`) idempotency checks; orphan-branch cleanup; `VCS_TOKEN: ${{ github.token }}`; on failure file `governance:archive-sweep-failed` alarm, exit 0.
+- [x] 7.4 Terminal step: add `ALARM_SWEEP: ${{ steps.sweep.outputs.alarm }}`; concatenate into `filed=`.
+- [x] 7.5 Extend `brain/scripts/vcs/release-postmerge-workflows.test.mjs`: source guards (ordering, `if:` shape, no `cursor.mjs` write, `VCS_TOKEN` declared, `--state all` dedup, `ALARM_SWEEP` declared+concatenated, no `continue-on-error`); executable guards (zero-archivable→no `pr create`; selector failure→alarm+exit 0; open `auto-archive/*`→skip; push failure→orphan delete+alarm).
 
 ## Phase 8: PR3 — Verification
 
-- [ ] 8.1 Run `npm test` incl. workflow drift guards.
-- [ ] 8.2 Dry-run walkthrough: 0 eligible→no PR; 1 eligible→exactly one `auto-archive/<date>` PR; same-day re-run→none.
+- [x] 8.1 Run `npm test` incl. workflow drift guards.
+- [x] 8.2 Dry-run walkthrough: 0 eligible→no PR; 1 eligible→exactly one `auto-archive/<date>` PR; same-day re-run→none.
+- [x] 8.3 [GAP CLOSE, phase 9 pre-work] The sweep PR's `Part of #557.`-only body fails `issue-link` on the default branch (PR #1097, 2026-09-23) — the 8.2 dry-run never exercised the gate itself. New `brain/scripts/governance/checks/archive-sweep.mjs#classifySweepDiff`: a content-earned exemption for `auto-archive/<date>` heads, modeled on `lane.mjs#classifyLane` (evidence recomputed from `git diff -M100%`, never trusted by branch name). Wired into `runIssueLinkCheck` (`run-check.mjs`). See design.md D6 amendment for the predicate and its stated residual risk.
 
 ## Phase 9: PR4 — Doctrine Fixes (human-authored)
 
-- [ ] 9.1 [HUMAN] `openspec/README.md:5` dead ADR ref → `../brain/project/decisions/adr-0001-arquitectura-3-capas-harness-reemplazable.md`.
-- [ ] 9.2 [HUMAN] `openspec/README.md` new rule 5: archived-automatically statement (design D9).
-- [ ] 9.3 [HUMAN] `harness-contract.md:6` dead ref → link ADR-0005 + ADR-0001.
-- [ ] 9.4 [HUMAN] `harness-contract.md` callout after §43-50: "human-optional, machine-guaranteed" (design D9 text, table category unchanged).
-- [ ] 9.5 [HUMAN] Human opens and merges PR4 — `brain-writes-reviewed.mjs` blocks agent-authored `brain/core/**` changes at every tier.
+- [x] 9.1 [HUMAN] `openspec/README.md:5` dead ADR ref → `../brain/project/decisions/adr-0001-arquitectura-3-capas-harness-reemplazable.md`. — done in `bc186a05` (#1100), via `openspec-readme.patch`.
+- [x] 9.2 [HUMAN] `openspec/README.md` new rule 5: archived-automatically statement (design D9). — done in `bc186a05` (#1100).
+- [x] 9.3 [HUMAN] `harness-contract.md:6` dead ref → link ADR-0005 + ADR-0001. — done in `280eb7f1` (#1100). Deviation: ADRs cited by name, not link — `brain/core/**` ships to consumers and a link into `brain/project/` would be dead there.
+- [x] 9.4 [HUMAN] `harness-contract.md` callout after §43-50: "human-optional, machine-guaranteed" (design D9 text, table category unchanged). — done in `280eb7f1` (#1100), anchored on the `/mr-create` row (the table moved since August); states the guarantee is GitHub-only.
+- [x] 9.5 [HUMAN] Human opens and merges PR4 — `brain-writes-reviewed.mjs` blocks agent-authored `brain/core/**` changes at every tier. — done: #1100 opened and merged by the maintainer; ADR-0035 promoted (`99eac39e`), Amendment 1 closing residual risk 2 promoted with #1101.

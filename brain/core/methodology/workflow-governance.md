@@ -18,7 +18,7 @@ Job names are **load-bearing**: they form the check context strings
 
 | # | Invariant | CI job (`name:`) | Skip label | Character |
 |---|-----------|-----------------|------------|-----------|
-| 1 | Every PR links an approved ticket | `issue-link` | _(none — not skippable)_ | Hard |
+| 1 | Every PR links an approved ticket — except a lane PR whose diff earns the exemption (ADR-0034, ADR-0035) | `issue-link` | _(none — no label bypasses it)_ | Hard, with two content-earned exemptions — see below |
 | 2 | PR diff ≤ the declared tier's budget — **1000** `lite` · **400** `standard` · **200** `regulated` | `diff-size` | `size:exception` — **refused at `regulated`** | Hard with override — **none at `regulated`** |
 | 3 | Repo-scoped when no issue is detectable; otherwise issue-scoped over the PR tree plus `origin/<default>` (#1024) | `memory-gate` _(S4)_ | `skip:memory-gate` — honored at `standard` by a non-author, refused at `regulated`, not consulted at `lite` (#1024) | Soft — see below |
 | 4 | An ADDED ADR co-occurs with a `brain/HOME.md` entry | `decision-gate` _(S4)_ | _(none — the gate reads no labels)_ | Hard, in one direction — see below |
@@ -36,6 +36,35 @@ Job names are **load-bearing**: they form the check context strings
 > `brain.config.json` is not managed at all. A sentence naming *this* repo's tier would travel
 > and be false on arrival — the defect that got `AGENTS.md` removed from the managed set in
 > #397, "a file describing the wrong repository".
+
+### Invariant 1 scope — two content-earned exemptions, never a branch-name exemption
+
+**"Not skippable" means no label bypasses `issue-link`.** Invariant 3 has `skip:memory-gate`;
+invariant 1 has no `skip:issue-link`. That does not mean the check never yields. Two narrow lanes
+are exempt from the closing-keyword requirement, and both follow one rule: **the branch name is a
+claim, never the proof. The diff is recomputed and checked before the exemption is granted.**
+
+| Lane | Branch claim | Content proof, recomputed from `BASE...HEAD` | Decision · predicate |
+|---|---|---|---|
+| Memory | `memory/<host>-<date>` | every changed path is an ADDED `.memory/records/*.jsonl` file | ADR-0034 L1 · `checks/lane.mjs#classifyLane` |
+| Archive sweep | `auto-archive/<date>` | at least one exact-content (`-M100%`, `R100`) rename `openspec/changes/<name>/…` → `openspec/changes/archive/<iid>/…` with the same relative path. Otherwise only added files under `openspec/changes/archive/**`, and new or pure-addition (zero deleted lines) `openspec/specs/<capability>/spec.md` | ADR-0035 · `checks/archive-sweep.mjs#classifySweepDiff` |
+
+Both are wired into `run-check.mjs#runIssueLinkCheck` in the same shape. The branch regex is
+tested first, so a non-lane head never touches git. The diff predicate runs next, inside a
+`try`. A pass is returned only when the predicate proves the lane. A head that claims a lane
+but whose diff fails the proof falls through to the ordinary rule: a closing keyword on the
+default branch. It is never exempted silently. An uncomputable diff also falls through, and is
+never reported as `uncomputable`.
+
+**Why not a label.** Both lanes are opened by unattended automation, a memory collector and a
+post-merge sweep, with no human in the loop to apply one. A label that automation applies to
+its own pull request is the spoofable shortcut this rule exists to prevent. Recomputing the
+proof costs less than trusting the claim.
+
+**Not exempt: `auto-revert/*`.** The post-merge auto-revert opens `auto-revert/<sha>` against
+the default branch with `Part of #259.` and no closing keyword, so `issue-link` refuses it. A
+revert has no fixed diff shape for a path predicate to check. ADR-0035 names this gap and leaves
+it open.
 
 ### Invariant 3 scope — what `memory-gate` does and does not check
 
@@ -116,7 +145,7 @@ L1 enforces **observable outputs** of each invariant. It does NOT enforce judgme
 
 | What L1 enforces | What L1 does NOT enforce |
 |-----------------|--------------------------|
-| A ticket link exists and has `status:approved` | Whether the ticket describes the right work |
+| A ticket link exists and has `status:approved`, unless the diff earns a lane exemption (invariant 1 scope) | Whether the ticket describes the right work |
 | PR diff ≤ the tier's budget (excluding ignore-list) | Whether the PR is sliced coherently |
 | `.memory/` changed (memory-gate proxy) | Capture quality or session completeness |
 | An added ADR is indexed in `brain/HOME.md` | Whether the PR actually made a new decision |

@@ -375,6 +375,125 @@ jobs:
           echo "alarm=${label}" >> "$GITHUB_OUTPUT"   # REQ-TS-5
           exit 2
 
+      - id: sweep
+        name: Sweep closed changes into the archive (clean audit only)
+        # Positioned as the LAST functional step, after `advance`/`uncomputable`
+        # and immediately before the `always()` terminal assertion (design D5).
+        # That places it after `advance`, which is what C1 requires, and after
+        # every handler, so even its one exit-1 path can never skip a step that
+        # would otherwise have run. `steps.advance.outcome == 'success'` is
+        # belt-and-braces — a failing `advance` already aborts the job before
+        # this step runs — but it makes C1 readable in the YAML instead of
+        # inferable from step ordering.
+        if: steps.audit.outputs.code == '0' && steps.advance.outcome == 'success'
+        env:
+          VCS_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          today="$(date -u +%F)"
+          br="auto-archive/${today}"
+
+          # Unmerged backlog (design D6): ONE open auto-archive/* PR at a time.
+          # Two open sweep PRs would both append to the same
+          # openspec/specs/<capability>/spec.md, and whichever merges second
+          # conflicts or double-appends — serialising to one open PR keeps the
+          # append monotone.
+          open_count="$(gh pr list --state open --json headRefName --jq '[.[] | select(.headRefName | startswith("auto-archive/"))] | length')"
+          if [ "${open_count:-0}" -gt 0 ]; then
+            echo "an auto-archive/* PR is already open — skipping this run (backlog cap)."
+            exit 0
+          fi
+
+          # Same-day idempotency, mirroring REQ-D2-13 verbatim: a PR for today's
+          # branch in ANY state (open, merged, or closed-without-merge) is never
+          # duplicated or reopened.
+          if [ -n "$(gh pr list --head "$br" --state all --json number --jq '.[0].number // empty')" ]; then
+            echo "auto-archive PR for ${today} already exists — skipping."
+            exit 0
+          fi
+
+          git switch -c "$br"
+
+          # The orchestrator computes and renders; this bash does git/gh —
+          # exactly the node/bash boundary the revert step already draws.
+          # Never gates advance/revert: it writes no cursor, and its script is
+          # total (exits 0 on every path but a killed runner — design D5).
+          set +e
+          sweep_out="$(node brain/scripts/governance/postmerge/sweep.mjs --apply --report "$RUNNER_TEMP/sweep-body.md")"
+          sweep_code=$?
+          set -e
+
+          printf '%s\n' "$sweep_out"
+
+          # Fail-closed (design D3): an incomplete selection or an archive
+          # write failure means NOTHING was archived. File the shared alarm
+          # and stay green — a housekeeping bug must never redden this job
+          # (design D5's "why the sweep must not redden the job").
+          if [ "$sweep_code" -ne 0 ]; then
+            label="governance:archive-sweep-failed"
+            {
+              echo "The post-merge archive sweep could not complete — the selector could not read every issue state, or an archive write itself failed. NOTHING was archived this run (design D3, fail-closed)."
+              echo ""
+              echo "Sweep output:"
+              echo '```'
+              printf '%s\n' "$sweep_out"
+              echo '```'
+              echo ""
+              echo "The prior cursor advance is unaffected — the sweep never gates it. Part of #557."
+            } > "$RUNNER_TEMP/sweep-failed.md"
+            node brain/scripts/governance/postmerge/alarm.mjs "$label" \
+              "governance: archive sweep failed" \
+              "$RUNNER_TEMP/sweep-failed.md"
+            echo "alarm=${label}" >> "$GITHUB_OUTPUT"
+            echo "archive sweep failed; alarm filed, no PR opened."
+            exit 0
+          fi
+
+          archived="$(printf '%s\n' "$sweep_out" | grep '^SWEEP ' | sed -E 's/^SWEEP archived=([0-9]+).*/\1/')"
+
+          if [ "${archived:-0}" -eq 0 ]; then
+            echo "nothing eligible to sweep this run."
+            exit 0
+          fi
+
+          # Commit, push, and open the PR as ONE failure boundary, chained via
+          # && so a MID-sequence failure (e.g. the push) short-circuits the
+          # rest rather than relying on `set -e` inside a subshell tested by
+          # `||` — bash disables errexit for every command in a list whose
+          # exit status feeds a conditional, even a subshell that re-sets `-e`
+          # internally, so a `(...) || { ... }` block here would silently run
+          # `gh pr create` after a failed `git push`. ANY failure below
+          # deletes the (possibly orphaned) remote branch and files the
+          # shared alarm (design D6: "Same cleanup the revert step performs"),
+          # rather than leaving a half-pushed branch that could permanently
+          # suppress the next day's retry.
+          if git add -A \
+            && git commit -m "chore(openspec): archive ${archived} closed changes" \
+            && git push origin "$br" \
+            && gh pr create --base main --head "$br" \
+                 --title "chore(openspec): archive ${archived} closed changes" \
+                 --body-file "$RUNNER_TEMP/sweep-body.md"
+          then
+            echo "opened auto-archive PR for ${archived} folder(s)."
+          else
+            git push origin --delete "$br" 2>/dev/null || true
+            label="governance:archive-sweep-failed"
+            {
+              echo "The post-merge archive sweep archived ${archived} folder(s) locally, but committing, pushing, or opening the PR for ${br} failed."
+              echo ""
+              echo "Any orphaned remote branch has been deleted where possible. Nothing was left half-pushed."
+              echo ""
+              echo "Part of #557."
+            } > "$RUNNER_TEMP/sweep-push-failed.md"
+            node brain/scripts/governance/postmerge/alarm.mjs "$label" \
+              "governance: archive sweep commit/push/PR failed" \
+              "$RUNNER_TEMP/sweep-push-failed.md"
+            echo "alarm=${label}" >> "$GITHUB_OUTPUT"
+            echo "commit/push/PR failed; orphan branch cleanup attempted, alarm filed."
+          fi
+
       - id: terminal
         name: Terminal-state assertion — no terminal state may be both red and silent
         if: always()
@@ -398,6 +517,7 @@ jobs:
           ALARM_WINDOW: ${{ steps.window.outputs.alarm }}
           ALARM_REVERT: ${{ steps.revert.outputs.alarm }}
           ALARM_UNCOMPUTABLE: ${{ steps.uncomputable.outputs.alarm }}
+          ALARM_SWEEP: ${{ steps.sweep.outputs.alarm }}
         run: |
           set -euo pipefail
           code="${AUDIT_CODE:-}"
@@ -411,7 +531,7 @@ jobs:
             *) echo "audit produced no mapped terminal code ('${code}') — uncomputable."; mapped=0 ;;
           esac
 
-          filed="${ALARM_WINDOW:-}${ALARM_REVERT:-}${ALARM_UNCOMPUTABLE:-}"
+          filed="${ALARM_WINDOW:-}${ALARM_REVERT:-}${ALARM_UNCOMPUTABLE:-}${ALARM_SWEEP:-}"
           if [ "$JOB_STATUS" = "success" ] && [ "$mapped" -eq 1 ]; then
             echo "job is green and the audit code is mapped — nothing to report."
             exit 0

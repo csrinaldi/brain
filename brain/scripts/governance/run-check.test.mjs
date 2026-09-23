@@ -2510,3 +2510,157 @@ test('runCheck: issue-link — ctx.sourceBranch absent/null → standard rules a
   assert.equal(diffCalls, 0, 'an absent sourceBranch must never touch git for the lane predicate');
   assert.deepEqual(result, { pass: true });
 });
+
+// ── issue-link — recomputes the archive-sweep predicate before exempting
+// (#557 phase 9 gap-close, design.md D6 amendment) ──────────────────────
+//
+// Same discipline as the memory-lane block above: `runIssueLinkCheck`
+// short-circuits on `ctx.sourceBranch` against `SWEEP_BRANCH_RE` BEFORE
+// touching git; only a matching branch calls `classifySweepDiff` (needing
+// the -M100% three-dot diff). A sweep-classified PR skips `issueLink()`
+// (and its default-branch closing-keyword requirement) entirely.
+
+test('runCheck: issue-link — a real-shaped sweep diff on auto-archive/<date> passes with "Part of #557." alone, issueLink() never consulted', async () => {
+  let issueLinkCalls = 0;
+  const spyIssueLink = () => {
+    issueLinkCalls += 1;
+    return { pass: false, reason: 'no issue reference found' };
+  };
+  const result = await runCheck('issue-link', {
+    ctx: {
+      body: 'Part of #557.',
+      provider: 'github',
+      sourceBranch: 'auto-archive/2026-09-23',
+      targetBranch: 'main',
+      defaultBranch: 'main',
+    },
+    diffNameStatus: () => [
+      'R100\topenspec/changes/issue-9-foo/proposal.md\topenspec/changes/archive/9/proposal.md',
+      'M\topenspec/specs/existing-cap/spec.md',
+      'A\topenspec/specs/new-cap/spec.md',
+    ],
+    diffNumstatRenames: () => [
+      '0\t0\topenspec/changes/{issue-9-foo => archive/9}/proposal.md',
+      '4\t0\topenspec/specs/existing-cap/spec.md',
+      '1\t0\topenspec/specs/new-cap/spec.md',
+    ],
+    issueLink: spyIssueLink,
+    fetchIssue: async () => { throw new Error('must not be called — a sweep-classified PR never fetches the issue'); },
+    readConfig: () => ({}),
+  });
+  assert.deepEqual(result, { pass: true });
+  assert.equal(issueLinkCalls, 0, 'a sweep-classified PR must skip issueLink() entirely');
+});
+
+test('runCheck: issue-link — an auto-archive/<date> diff carrying one extra code file falls to the ordinary rule and fails (no closing keyword)', async () => {
+  const result = await runCheck('issue-link', {
+    ctx: {
+      body: 'Part of #557.',
+      provider: 'github',
+      sourceBranch: 'auto-archive/2026-09-23',
+      targetBranch: 'main',
+      defaultBranch: 'main',
+    },
+    diffNameStatus: () => [
+      'R100\topenspec/changes/issue-9-foo/proposal.md\topenspec/changes/archive/9/proposal.md',
+      'M\tbrain/scripts/governance/run-check.mjs',
+    ],
+    diffNumstatRenames: () => [
+      '0\t0\topenspec/changes/{issue-9-foo => archive/9}/proposal.md',
+      '10\t2\tbrain/scripts/governance/run-check.mjs',
+    ],
+    fetchIssue: async () => { throw new Error('must not be called — "Part of" alone never resolves on the default branch'); },
+    readConfig: () => ({}),
+  });
+  assert.equal(result.pass, false);
+  assert.match(result.reason, /must use a closing keyword/);
+});
+
+test('runCheck: issue-link — a spec-only edit with no archive rename on auto-archive/<date> falls to the ordinary rule and fails (the hole this predicate closes)', async () => {
+  const result = await runCheck('issue-link', {
+    ctx: {
+      body: 'Part of #557.',
+      provider: 'github',
+      sourceBranch: 'auto-archive/2026-09-23',
+      targetBranch: 'main',
+      defaultBranch: 'main',
+    },
+    diffNameStatus: () => ['M\topenspec/specs/existing-cap/spec.md'],
+    diffNumstatRenames: () => ['4\t0\topenspec/specs/existing-cap/spec.md'],
+    fetchIssue: async () => { throw new Error('must not be called — "Part of" alone never resolves on the default branch'); },
+    readConfig: () => ({}),
+  });
+  assert.equal(result.pass, false);
+  assert.match(result.reason, /must use a closing keyword/);
+});
+
+test('runCheck: issue-link — a non-auto-archive/* head with a pure archive-diff shape still needs a closing keyword, diff closures never called', async () => {
+  let diffCalls = 0;
+  const result = await runCheck('issue-link', {
+    ctx: {
+      body: 'Part of #557.',
+      provider: 'github',
+      sourceBranch: 'feat/some-feature',
+      targetBranch: 'main',
+      defaultBranch: 'main',
+    },
+    diffNameStatus: () => { diffCalls += 1; return []; },
+    diffNumstatRenames: () => { diffCalls += 1; return []; },
+    fetchIssue: async () => { throw new Error('must not be called — "Part of" alone never resolves on the default branch'); },
+    readConfig: () => ({}),
+  });
+  assert.equal(diffCalls, 0, 'a non-auto-archive/* head must never touch git for the sweep predicate');
+  assert.equal(result.pass, false);
+  assert.match(result.reason, /must use a closing keyword/);
+});
+
+test('runCheck: issue-link — a THROWING diff on an auto-archive/<date>-shaped branch demotes to standard rules, NEVER reported as uncomputable', async () => {
+  const result = await runCheck('issue-link', {
+    ctx: {
+      body: 'Closes #557',
+      provider: 'github',
+      sourceBranch: 'auto-archive/2026-09-23',
+      targetBranch: 'main',
+      defaultBranch: 'main',
+    },
+    diffNameStatus: () => { throw new Error('git exited with status 128'); },
+    diffNumstatRenames: () => { throw new Error('git exited with status 128'); },
+    fetchIssue: async () => ({ labels: ['status:approved'] }),
+    readConfig: () => ({}),
+  });
+  assert.equal(result.pass, true);
+  assert.notEqual(result.uncomputable, true);
+});
+
+test('runCheck: issue-link — the ACTUAL body sweep.mjs renders (renderReport) passes on auto-archive/<date> with a real sweep diff', async () => {
+  const { renderReport } = await import('./postmerge/sweep.mjs');
+  const body = renderReport({
+    dateStr: '2026-09-23',
+    archived: [{ name: 'issue-9-foo', iid: '9', consolidated: ['existing-cap'], unconsolidated: false }],
+    blocked: [],
+  });
+  assert.match(body, /Part of #557\.\n$/);
+  let issueLinkCalls = 0;
+  const result = await runCheck('issue-link', {
+    ctx: {
+      body,
+      provider: 'github',
+      sourceBranch: 'auto-archive/2026-09-23',
+      targetBranch: 'main',
+      defaultBranch: 'main',
+    },
+    diffNameStatus: () => [
+      'R100\topenspec/changes/issue-9-foo/proposal.md\topenspec/changes/archive/9/proposal.md',
+      'M\topenspec/specs/existing-cap/spec.md',
+    ],
+    diffNumstatRenames: () => [
+      '0\t0\topenspec/changes/{issue-9-foo => archive/9}/proposal.md',
+      '4\t0\topenspec/specs/existing-cap/spec.md',
+    ],
+    issueLink: () => { issueLinkCalls += 1; return { pass: false, reason: 'no issue reference found' }; },
+    fetchIssue: async () => { throw new Error('must not be called — a sweep-classified PR never fetches the issue'); },
+    readConfig: () => ({}),
+  });
+  assert.deepEqual(result, { pass: true });
+  assert.equal(issueLinkCalls, 0);
+});
