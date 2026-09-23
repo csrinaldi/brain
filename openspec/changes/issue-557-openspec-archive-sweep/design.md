@@ -340,6 +340,81 @@ misreported as red-and-silent. A drift test removes the term and asserts the gua
 
 ## D6 — Auto-archive PR mechanics
 
+> **Amendment (phase 9 pre-work, 2026-09-23) — the `Part of #557.`-only body fails
+> `issue-link` on `main`.** The table below renders a PR body ending `Part of #557.`
+> and opens it `--base main`. `issue-link`'s default-branch-conditional policy
+> (`run-check.mjs#requiresClosingKeyword`) requires a CLOSING keyword
+> (Closes/Fixes/Resolves) on the default branch — "Part of #N" alone is accepted
+> only on non-default (slice) targets. PR #1097 (2026-09-23) failed with exactly
+> that reason. Nothing in §8.2's dry-run walkthrough exercised the gate itself, so
+> every automated sweep PR would have stayed red forever.
+>
+> **Decision — a content-earned exemption, not a branch-name exemption.** A
+> branch-name-only exemption (`if head starts with auto-archive/, skip issue-link`)
+> would be spoofable: anyone could push `auto-archive/anything` and bypass the gate
+> entirely — the same reason the memory-lane exemption (ADR-0034 D1a, `lane.mjs`)
+> is never trusted by branch name alone, only by recomputing a predicate over the
+> diff itself. This amendment applies the identical discipline to a second lane.
+>
+> `brain/scripts/governance/checks/archive-sweep.mjs#classifySweepDiff` is the new
+> pure predicate, wired into `runIssueLinkCheck` the same way `classifyLane` is:
+> short-circuit on `SWEEP_BRANCH_RE.test(ctx.sourceBranch)` (`^auto-archive/\d{4}-\d{2}-\d{2}$`)
+> BEFORE touching git; only a matching branch recomputes the diff
+> (`git diff -M100% --name-status/--numstat BASE...HEAD`) and classifies it. An
+> uncomputable diff demotes to "not exempt" (falls through to the standard rule),
+> never `uncomputable: true` — mirroring the lane block's own fail-closed property.
+>
+> **What earns the exemption**, read directly off what `archiveChange`
+> (`archive-logic.mjs`) actually writes:
+> - an EXACT-content move of a whole change folder,
+>   `openspec/changes/<name>/**` → `openspec/changes/archive/<iid>/**` — proved by
+>   git's own 100%-similarity rename detection (`-M100%`; a rename reported as
+>   anything less than `R100`, i.e. any content drift during the "move", is
+>   rejected), with the relative path below the two-segment prefix required to
+>   match (the "same basename below the folder" rule).
+> - a brand-new `openspec/specs/<capability>/spec.md` (`fs.mkdir` + `writeFile`,
+>   when the destination did not exist).
+> - an APPEND to an EXISTING `openspec/specs/<capability>/spec.md`. **Consolidation
+>   can both CREATE and APPEND to spec files** (`mergeSpecs` trims trailing
+>   whitespace off the existing content, then appends a provenance header + the
+>   delta body — confirmed against the actual 2026-09-23 backfill, which produced
+>   18 creates and multiple appends). An append is asserted PURE — zero
+>   deletions — via a `--numstat` check on that path; any deletion in a modified
+>   spec file refuses the exemption.
+> - At least one valid archive rename MUST be present. A diff carrying ONLY spec
+>   changes (a create or a pure-addition append) with zero renames is refused —
+>   proven by test ("a spec-only edit with no archive renames fails"): a real
+>   sweep never produces a spec change without also moving at least one folder,
+>   so a rename-less diff cannot be a real sweep output.
+> - Anything else — code, workflows, `brain/**`, `.memory/**`, a deletion with no
+>   matching rename, a spec modification that deletes a line — is NOT exempt and
+>   falls through to the ordinary `issue-link` rule.
+>
+> **Stated residual risk (not silently accepted).** The predicate does NOT verify
+> that a renamed folder's destination `<iid>` corresponds to its own source
+> folder's issue number — only that the rename is git-proven byte-identical and
+> the relative path matches. A content-identical file could in principle be
+> "moved" into a different `<iid>` than its own source folder without the
+> predicate objecting. Judged acceptable because forging it still requires
+> git-proven byte-identical content (not an arbitrary payload) and because a real
+> sweep's own selector (`selectSweep`) is what actually decides `<iid>`
+> correspondence — this predicate only proves "this diff has the SHAPE of a
+> sweep," not "this diff's semantics are correct." A tighter cross-check against
+> `sdd-layout.mjs#parseChangeId` is a possible follow-up, not required to close
+> this gap.
+>
+> **Not fixed here.** The pre-existing `auto-revert/*` postmerge step has the
+> identical `Part of #259.`-to-`main` problem and is explicitly out of scope for
+> this amendment — a separate gap for a separate step.
+>
+> **Doctrine impact.** `workflow-governance.md` states `issue-link` is "not
+> skippable" and this amendment adds a second (content-gated, non-label) carve-out
+> alongside the existing memory-lane one. Per `agent-authorities.md`, doctrine and
+> ADR text are human-authored; the proposed wording is drafted under
+> `brain-drafts/` for maintainer review in phase 9, not applied to `brain/core/**`
+> directly.
+
+
 | Concern | Decision |
 |---------|----------|
 | Branch | `auto-archive/$(date -u +%F)` — UTC, one branch per calendar day |

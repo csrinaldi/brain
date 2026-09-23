@@ -63,16 +63,17 @@ Chain strategy: pending
 
 ## Phase 7: PR3 — Governance Sweep Step
 
-- [ ] 7.1 New `brain/scripts/governance/postmerge/sweep.mjs`: real `readIssueState` via `getVcs().issueView`, applies `archiveChange`, renders markdown report (by capability, blocked table, unconsolidated list, `Part of #557.`), prints `SWEEP archived=N blocked=M unconsolidated=K`; exit 0 clean / 3 incomplete-or-failed.
-- [ ] 7.2 New `brain/scripts/governance/postmerge/sweep.test.mjs`: deterministic rendering, summary matches classification, exit 3 on `complete===false`.
-- [ ] 7.3 `.github/workflows/governance-postmerge.yml`: add `- id: sweep` after `advance`/`uncomputable`, before terminal `always()`; `if: steps.audit.outputs.code == '0' && steps.advance.outcome == 'success'`; branch `auto-archive/$(date -u +%F)`; backlog-cap + same-day (`--state all`) idempotency checks; orphan-branch cleanup; `VCS_TOKEN: ${{ github.token }}`; on failure file `governance:archive-sweep-failed` alarm, exit 0.
-- [ ] 7.4 Terminal step: add `ALARM_SWEEP: ${{ steps.sweep.outputs.alarm }}`; concatenate into `filed=`.
-- [ ] 7.5 Extend `brain/scripts/vcs/release-postmerge-workflows.test.mjs`: source guards (ordering, `if:` shape, no `cursor.mjs` write, `VCS_TOKEN` declared, `--state all` dedup, `ALARM_SWEEP` declared+concatenated, no `continue-on-error`); executable guards (zero-archivable→no `pr create`; selector failure→alarm+exit 0; open `auto-archive/*`→skip; push failure→orphan delete+alarm).
+- [x] 7.1 New `brain/scripts/governance/postmerge/sweep.mjs`: real `readIssueState` via `getVcs().issueView`, applies `archiveChange`, renders markdown report (by capability, blocked table, unconsolidated list, `Part of #557.`), prints `SWEEP archived=N blocked=M unconsolidated=K`; exit 0 clean / 3 incomplete-or-failed.
+- [x] 7.2 New `brain/scripts/governance/postmerge/sweep.test.mjs`: deterministic rendering, summary matches classification, exit 3 on `complete===false`.
+- [x] 7.3 `.github/workflows/governance-postmerge.yml`: add `- id: sweep` after `advance`/`uncomputable`, before terminal `always()`; `if: steps.audit.outputs.code == '0' && steps.advance.outcome == 'success'`; branch `auto-archive/$(date -u +%F)`; backlog-cap + same-day (`--state all`) idempotency checks; orphan-branch cleanup; `VCS_TOKEN: ${{ github.token }}`; on failure file `governance:archive-sweep-failed` alarm, exit 0.
+- [x] 7.4 Terminal step: add `ALARM_SWEEP: ${{ steps.sweep.outputs.alarm }}`; concatenate into `filed=`.
+- [x] 7.5 Extend `brain/scripts/vcs/release-postmerge-workflows.test.mjs`: source guards (ordering, `if:` shape, no `cursor.mjs` write, `VCS_TOKEN` declared, `--state all` dedup, `ALARM_SWEEP` declared+concatenated, no `continue-on-error`); executable guards (zero-archivable→no `pr create`; selector failure→alarm+exit 0; open `auto-archive/*`→skip; push failure→orphan delete+alarm).
 
 ## Phase 8: PR3 — Verification
 
-- [ ] 8.1 Run `npm test` incl. workflow drift guards.
-- [ ] 8.2 Dry-run walkthrough: 0 eligible→no PR; 1 eligible→exactly one `auto-archive/<date>` PR; same-day re-run→none.
+- [x] 8.1 Run `npm test` incl. workflow drift guards.
+- [x] 8.2 Dry-run walkthrough: 0 eligible→no PR; 1 eligible→exactly one `auto-archive/<date>` PR; same-day re-run→none.
+- [x] 8.3 [GAP CLOSE, phase 9 pre-work] The sweep PR's `Part of #557.`-only body fails `issue-link` on the default branch (PR #1097, 2026-09-23) — the 8.2 dry-run never exercised the gate itself. New `brain/scripts/governance/checks/archive-sweep.mjs#classifySweepDiff`: a content-earned exemption for `auto-archive/<date>` heads, modeled on `lane.mjs#classifyLane` (evidence recomputed from `git diff -M100%`, never trusted by branch name). Wired into `runIssueLinkCheck` (`run-check.mjs`). See design.md D6 amendment for the predicate and its stated residual risk.
 
 ## Phase 9: PR4 — Doctrine Fixes (human-authored)
 

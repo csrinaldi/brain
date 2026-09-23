@@ -68,6 +68,7 @@ import { issueLink } from './checks/issue-link.mjs';
 import { diffSize } from './checks/diff-size.mjs';
 import { baseBranchRule } from './checks/base-branch.mjs';
 import { LANE_BRANCH_RE, classifyLane } from './checks/lane.mjs';
+import { SWEEP_BRANCH_RE, classifySweepDiff } from './checks/archive-sweep.mjs';
 import { CLOSING_RE, CHAIN_RE } from './checks/issue-ref-patterns.mjs';
 import { resolveApprovedLabel } from './approved-label.mjs';
 import { readRecordObservations } from '../memory/lib/store.mjs';
@@ -135,6 +136,64 @@ function defaultDiffNameOnly(ctx = {}) {
   }
   try {
     const out = execFileSync('git', ['diff', '--name-only', `${base}...${head}`], {
+      encoding: 'utf8',
+    });
+    return out.split('\n').filter(Boolean);
+  } catch (err) {
+    throw new Error(`git diff failed: ${err.message}`);
+  }
+}
+
+/**
+ * Computes `git diff -M100% --name-status $baseSha...$headSha` — the
+ * archive-sweep exemption's evidence (checks/archive-sweep.mjs's
+ * `classifySweepDiff`, #557 phase 9 gap-close). `-M100%` requests git's OWN
+ * exact-similarity rename detection: a folder move whose content changed
+ * even by one byte is reported as a separate delete+add pair, never as
+ * `R100` — the predicate relies on this to prove "moved, not modified"
+ * without reading file content itself. Throws when base/head are
+ * null/absent or the git command fails — mirrors defaultDiffNameOnly's
+ * fail-closed contract; `runIssueLinkCheck` demotes a throw here to "not a
+ * sweep" rather than `uncomputable: true` (mirrors the lane block's
+ * Property 2 — an unverifiable sweep diff falls through to standard rules).
+ *
+ * @param {{ baseSha?: string|null, headSha?: string|null }} ctx
+ * @returns {string[]}
+ */
+function defaultDiffNameStatus(ctx = {}) {
+  const base = ctx.baseSha;
+  const head = ctx.headSha;
+  if (!base || !head) {
+    throw new Error('BASE_SHA/HEAD_SHA not set — cannot compute diff');
+  }
+  try {
+    const out = execFileSync('git', ['diff', '-M100%', '--name-status', `${base}...${head}`], {
+      encoding: 'utf8',
+    });
+    return out.split('\n').filter(Boolean);
+  } catch (err) {
+    throw new Error(`git diff failed: ${err.message}`);
+  }
+}
+
+/**
+ * Computes `git diff -M100% --numstat $baseSha...$headSha` — paired with
+ * `defaultDiffNameStatus` for the archive-sweep exemption: `classifySweepDiff`
+ * reads this to assert an `M`-status `openspec/specs/<cap>/spec.md` is a
+ * PURE addition (zero deletions), never by path shape alone. Same `-M100%` flag,
+ * same fail-closed contract.
+ *
+ * @param {{ baseSha?: string|null, headSha?: string|null }} ctx
+ * @returns {string[]}
+ */
+function defaultDiffNumstatRenames(ctx = {}) {
+  const base = ctx.baseSha;
+  const head = ctx.headSha;
+  if (!base || !head) {
+    throw new Error('BASE_SHA/HEAD_SHA not set — cannot compute diff');
+  }
+  try {
+    const out = execFileSync('git', ['diff', '-M100%', '--numstat', `${base}...${head}`], {
       encoding: 'utf8',
     });
     return out.split('\n').filter(Boolean);
@@ -561,6 +620,30 @@ async function runIssueLinkCheck(ctx, deps) {
       // into exit 2.
     }
     if (laneResult.lane) {
+      return { pass: true };
+    }
+  }
+
+  // Archive-sweep recomputation (#557 phase 9 gap-close, design.md D6
+  // amendment): an `auto-archive/*` head is NEVER trusted by branch name
+  // alone either — same discipline as the memory lane above. Property 1:
+  // short-circuit on the branch regex BEFORE touching git — a non-
+  // `auto-archive/*` head never calls the diff closures. Property 2: an
+  // uncomputable diff demotes to "not a sweep", never `uncomputable: true`
+  // — falls through to the standard rules below.
+  if (SWEEP_BRANCH_RE.test(ctx.sourceBranch ?? '')) {
+    const diffNameStatus = deps.diffNameStatus ?? (() => defaultDiffNameStatus(ctx));
+    const diffNumstatRenames = deps.diffNumstatRenames ?? (() => defaultDiffNumstatRenames(ctx));
+    let sweepResult = { exempt: false };
+    try {
+      const nameStatusLines = diffNameStatus();
+      const numstatLines = diffNumstatRenames();
+      sweepResult = classifySweepDiff({ nameStatusLines, numstatLines });
+    } catch {
+      // Uncomputable diff — demoted to "not exempt", never surfaced as
+      // uncomputable:true (mirrors the lane block immediately above).
+    }
+    if (sweepResult.exempt) {
       return { pass: true };
     }
   }
