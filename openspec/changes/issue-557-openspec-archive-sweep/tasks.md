@@ -56,10 +56,10 @@ Chain strategy: pending
 
 ## Phase 6: PR2 — Backfill Execution (no code)
 
-- [ ] 6.1 Run `node brain/scripts/archive.mjs --backfill` locally against current tree (PR1 merged).
-- [ ] 6.2 Review report: `archived`/`consolidated`/`unconsolidated`/`blocked` counts match expectations; no unexpected collisions.
-- [ ] 6.3 Commit renames (`changes/<name>/` → `changes/archive/<iid>/`) + `openspec/specs/**` appends only.
-- [ ] 6.4 Verify `phase-order-check` passes on the resulting diff.
+- [x] 6.1 Run `node brain/scripts/archive.mjs --backfill` locally against current tree (PR1 merged). — done 2026-09-22: 120 archived, 15 left (report on PR #1097).
+- [x] 6.2 Review report: `archived`/`consolidated`/`unconsolidated`/`blocked` counts match expectations; no unexpected collisions. — done: 22 consolidated, 98 unconsolidated; 10 blocked (collisions #266/#323/#518, `archive/682` exists) deferred to a later round, 2 unparseable, 4 open.
+- [x] 6.3 Commit renames (`changes/<name>/` → `changes/archive/<iid>/`) + `openspec/specs/**` appends only. — done: `a3bb5b02`, 591 renames, 0 deletions, 18 new spec files; merged as `d6bd5eab` (#1097).
+- [x] 6.4 Verify `phase-order-check` passes on the resulting diff. — done: `phase-order` green on #1097; two tests with hardcoded or over-broad paths fixed in `3a218555`.
 
 ## Phase 7: PR3 — Governance Sweep Step
 
@@ -77,8 +77,8 @@ Chain strategy: pending
 
 ## Phase 9: PR4 — Doctrine Fixes (human-authored)
 
-- [ ] 9.1 [HUMAN] `openspec/README.md:5` dead ADR ref → `../brain/project/decisions/adr-0001-arquitectura-3-capas-harness-reemplazable.md`.
-- [ ] 9.2 [HUMAN] `openspec/README.md` new rule 5: archived-automatically statement (design D9).
-- [ ] 9.3 [HUMAN] `harness-contract.md:6` dead ref → link ADR-0005 + ADR-0001.
-- [ ] 9.4 [HUMAN] `harness-contract.md` callout after §43-50: "human-optional, machine-guaranteed" (design D9 text, table category unchanged).
-- [ ] 9.5 [HUMAN] Human opens and merges PR4 — `brain-writes-reviewed.mjs` blocks agent-authored `brain/core/**` changes at every tier.
+- [x] 9.1 [HUMAN] `openspec/README.md:5` dead ADR ref → `../brain/project/decisions/adr-0001-arquitectura-3-capas-harness-reemplazable.md`. — done in `bc186a05` (#1100), via `openspec-readme.patch`.
+- [x] 9.2 [HUMAN] `openspec/README.md` new rule 5: archived-automatically statement (design D9). — done in `bc186a05` (#1100).
+- [x] 9.3 [HUMAN] `harness-contract.md:6` dead ref → link ADR-0005 + ADR-0001. — done in `280eb7f1` (#1100). Deviation: ADRs cited by name, not link — `brain/core/**` ships to consumers and a link into `brain/project/` would be dead there.
+- [x] 9.4 [HUMAN] `harness-contract.md` callout after §43-50: "human-optional, machine-guaranteed" (design D9 text, table category unchanged). — done in `280eb7f1` (#1100), anchored on the `/mr-create` row (the table moved since August); states the guarantee is GitHub-only.
+- [x] 9.5 [HUMAN] Human opens and merges PR4 — `brain-writes-reviewed.mjs` blocks agent-authored `brain/core/**` changes at every tier. — done: #1100 opened and merged by the maintainer; ADR-0035 promoted (`99eac39e`), Amendment 1 closing residual risk 2 promoted with #1101.
