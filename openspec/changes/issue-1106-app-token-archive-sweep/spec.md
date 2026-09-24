@@ -5,31 +5,62 @@ issue: 1106
 
 # Archive Sweep PR Authentication — Delta Spec
 
+> **Revised** after the coordinator's rework instruction: opening the PR moves off
+> `gh pr create` in workflow bash and onto the VCS port (`getVcs().mrCreate`), called
+> from `sweep.mjs --open-pr`. The workflow keeps only what is unavoidably
+> GitHub-Actions-specific (the secrets check, minting the App token, pushing the
+> branch). Every requirement below is revised to the ported shape; nothing about the
+> credential decision (mint a GitHub App token, degrade explicitly when unavailable)
+> changed — only WHERE the PR-open call lives.
+
 ## Requirements
 
-### Requirement: the sweep never calls `gh pr create` with GITHUB_TOKEN
+### Requirement: the sweep opens its PR through the VCS port, never `gh pr create` in workflow bash
 
-`gh pr create` in the `sweep` step of `governance-postmerge.yml` MUST only ever be
-invoked with a minted GitHub App installation token, never with `GITHUB_TOKEN` /
-`github.token`.
+Opening the `auto-archive/<date>` PR/MR MUST go through `getVcs().mrCreate` (called
+from `sweep.mjs --open-pr`), never a `gh pr create` invocation in the workflow's bash.
+This keeps `sweep.mjs` provider-agnostic (vcs-contract.md, issue #239) — the identical
+code path works on a GitLab consumer's fork of this workflow, which a GitHub-CLI-shaped
+bash call could never be.
 
 #### Scenario: App configured and minted
 - **WHEN** `BRAIN_SWEEP_APP_ID` and `BRAIN_SWEEP_APP_PRIVATE_KEY` are set and the mint
   succeeds
-- **THEN** the sweep pushes the `auto-archive/<date>` branch and calls `gh pr create`
-  authenticated with the minted App token
+- **THEN** the workflow pushes the `auto-archive/<date>` branch authenticated as the
+  App, then invokes `sweep.mjs --open-pr`, which calls `getVcs({ identity: token
+  }).mrCreate(...)` and the PR is opened authenticated as the App
 
 #### Scenario: App secrets absent
 - **WHEN** `BRAIN_SWEEP_APP_ID` or `BRAIN_SWEEP_APP_PRIVATE_KEY` is unset
-- **THEN** the sweep archives and pushes the branch with `GITHUB_TOKEN`, never calls
-  `gh pr create`, and the job does not fail because of the missing secret
+- **THEN** the workflow archives and pushes the branch with `GITHUB_TOKEN`; `sweep.mjs
+  --open-pr` receives no token, calls `mrCreate` zero times, exits 2 (skipped); and the
+  job does not fail because of the missing secret
 
 #### Scenario: App secrets present but the mint fails
 - **WHEN** both secrets are set but `actions/create-github-app-token` does not produce a
   token
-- **THEN** the sweep still archives and pushes the branch, never calls `gh pr create`
-  with `GITHUB_TOKEN`, and files an alarm distinguishing this as a real failure (not a
-  missing-secret degrade)
+- **THEN** the workflow still archives and pushes the branch; `sweep.mjs --open-pr`
+  again receives no token and exits 2 (skipped); the alarm distinguishes this as a real
+  failure (not a missing-secret degrade)
+
+#### Scenario: mrCreate itself fails
+- **WHEN** a token is available but `mrCreate` returns `{ url: null, error }` (a bad
+  token, a rejected request)
+- **THEN** `sweep.mjs --open-pr` exits 1 (failed); the workflow treats this as a real
+  push/PR failure — alarm filed, the orphan branch deleted — the same as before this
+  change, never a silent success
+
+### Requirement: the PR targets the repository's actual default branch, never a hardcoded `main`
+
+`sweep.mjs --open-pr`'s `--base` argument MUST be the repository's actual default
+branch (read from `github.event.repository.default_branch` in the workflow, falling
+back to `main` only when that is unset), never a literal `main` baked into the bash or
+the node call.
+
+#### Scenario: base is threaded through, not hardcoded
+- **WHEN** the workflow invokes `sweep.mjs --open-pr`
+- **THEN** the `--base` value passed is `$default_branch` (resolved from
+  `DEFAULT_BRANCH`), matching the same value the alarm's compare link already uses
 
 ### Requirement: a missing App secret never fails the job
 

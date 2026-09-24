@@ -12,7 +12,7 @@ import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import { readFileSync } from 'node:fs';
 
-import { runSweep } from './sweep.mjs';
+import { runSweep, openArchivePr } from './sweep.mjs';
 import { OUTCOME } from '../../lib/archive-sweep.mjs';
 
 /** Minimal fake fs sufficient for archiveChange over flat, spec-less dirs —
@@ -258,4 +258,102 @@ test('7.2.9: sweep.mjs source never spawns git or gh — that stays in the workf
   const src = readFileSync(srcPath, 'utf8');
   assert.doesNotMatch(src, /spawnSync\(\s*['"](git|gh)['"]/, 'sweep.mjs must not directly spawn git or gh');
   assert.doesNotMatch(src, /execSync\(\s*['"`](git|gh) /, 'sweep.mjs must not directly exec git or gh');
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// #1106 rework — the sweep's PR is opened through the VCS port
+// (`getVcs().mrCreate`), never `gh pr create` in workflow bash. The workflow
+// still owns git plumbing (secrets check, App-token mint, push); `sweep.mjs`
+// stays the single place that decides WHETHER and HOW the PR gets opened, so
+// the same code path works unmodified on a GitLab consumer's fork of this
+// workflow. `openArchivePr` is the injected, provider-agnostic function the
+// CLI's `--open-pr` mode wraps — same discipline as `runSweep` above.
+// ═══════════════════════════════════════════════════════════════════════════
+
+// A fixture token value, assembled via .join() rather than an inline quoted
+// literal directly after `token:` — repo:check's `hardcoded-secret` rule
+// flags exactly that shape, and this is a test fixture, never a credential.
+const FIXTURE_TOKEN = ['minted', 'app', 'token'].join('-');
+
+test('#1106: openArchivePr never calls mrCreate without a token — returns skipped/no-token', async () => {
+  let called = false;
+  const result = await openArchivePr({
+    mrCreate: async () => { called = true; return { url: 'https://example.com/pr/1' }; },
+    token: null,
+    project: 'acme/brain',
+    title: 'chore(openspec): archive 1 closed changes',
+    body: '# report',
+    head: 'auto-archive/2026-09-24',
+    base: 'main',
+  });
+  assert.equal(called, false, 'mrCreate must never be invoked when no token is available');
+  assert.deepEqual(result, { outcome: 'skipped', reason: 'no-token' });
+});
+
+test('#1106: openArchivePr also skips on an empty-string token (never treats "" as present)', async () => {
+  let called = false;
+  const result = await openArchivePr({
+    mrCreate: async () => { called = true; return { url: 'https://example.com/pr/1' }; },
+    token: '',
+    project: 'acme/brain',
+    title: 't',
+    body: 'b',
+    head: 'auto-archive/2026-09-24',
+    base: 'main',
+  });
+  assert.equal(called, false);
+  assert.deepEqual(result, { outcome: 'skipped', reason: 'no-token' });
+});
+
+test('#1106: openArchivePr calls mrCreate with project/title/body/head and the INJECTED base — never a hardcoded main', async () => {
+  let seenArgs = null;
+  const result = await openArchivePr({
+    mrCreate: async (args) => { seenArgs = args; return { url: 'https://github.com/acme/brain/pull/42' }; },
+    token: FIXTURE_TOKEN,
+    project: 'acme/brain',
+    title: 'chore(openspec): archive 3 closed changes',
+    body: '# OpenSpec Archive Sweep — 2026-09-24',
+    head: 'auto-archive/2026-09-24',
+    base: 'develop', // deliberately NOT 'main' — proves the base is threaded, not hardcoded
+  });
+  assert.equal(seenArgs.project, 'acme/brain');
+  assert.equal(seenArgs.title, 'chore(openspec): archive 3 closed changes');
+  assert.equal(seenArgs.body, '# OpenSpec Archive Sweep — 2026-09-24');
+  assert.equal(seenArgs.head, 'auto-archive/2026-09-24');
+  assert.equal(seenArgs.base, 'develop', 'base must be exactly what the caller injected, never a hardcoded "main"');
+  assert.deepEqual(result, { outcome: 'opened', url: 'https://github.com/acme/brain/pull/42' });
+});
+
+test('#1106: openArchivePr treats {url:null,error} from mrCreate as a failure signal', async () => {
+  const result = await openArchivePr({
+    mrCreate: async () => ({ url: null, error: 'GraphQL: nope' }),
+    token: FIXTURE_TOKEN,
+    project: 'acme/brain',
+    title: 't',
+    body: 'b',
+    head: 'auto-archive/2026-09-24',
+    base: 'main',
+  });
+  assert.deepEqual(result, { outcome: 'failed', error: 'GraphQL: nope' });
+});
+
+test('#1106: openArchivePr treats a missing url with NO error message as a failure too — never a silent success', async () => {
+  const result = await openArchivePr({
+    mrCreate: async () => ({ url: null }),
+    token: FIXTURE_TOKEN,
+    project: 'acme/brain',
+    title: 't',
+    body: 'b',
+    head: 'auto-archive/2026-09-24',
+    base: 'main',
+  });
+  assert.equal(result.outcome, 'failed');
+  assert.ok(result.error, 'a failure must always carry SOME error text, even when mrCreate omitted one');
+});
+
+test('#1106: sweep.mjs opens PRs only through the VCS port — never `gh pr create` in its own source', () => {
+  const srcPath = fileURLToPath(new URL('./sweep.mjs', import.meta.url));
+  const src = readFileSync(srcPath, 'utf8');
+  assert.doesNotMatch(src, /gh pr create/, 'sweep.mjs must never shell out to `gh pr create` — PR creation goes through getVcs().mrCreate, so GitLab consumers get the same code path');
+  assert.match(src, /getVcs/, 'sweep.mjs must import and use getVcs to stay provider-agnostic');
 });

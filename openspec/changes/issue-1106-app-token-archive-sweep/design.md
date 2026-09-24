@@ -32,33 +32,95 @@ Both are gated identically to `sweep` itself
 (`steps.audit.outputs.code == '0' && steps.advance.outcome == 'success'`) — no reason to
 mint a token on a run that never reaches the sweep.
 
-`sweep`'s `env:` gains `APP_CONFIGURED` (from step 1's output) and `APP_TOKEN` (from step
-2's output), alongside the untouched `VCS_TOKEN`/`GH_TOKEN` (still `github.token`, still
-what the alarm path uses).
+`sweep`'s `env:` gains `APP_CONFIGURED` (from step 1's output) and `BRAIN_SWEEP_TOKEN`
+(from step 2's output), alongside the untouched `VCS_TOKEN`/`GH_TOKEN` (still
+`github.token`, still what the alarm path uses).
 
 Inside the `sweep` script, after the existing archive/backlog/same-day logic
-(unchanged), a new resolution decides which identity opens the PR:
+(unchanged), a resolution decides which identity PUSHES:
 
 ```
-app_available = (APP_CONFIGURED == 'true') AND (APP_TOKEN is non-empty)
+app_available = (APP_CONFIGURED == 'true') AND (BRAIN_SWEEP_TOKEN is non-empty)
 ```
 
 - **`app_available`**: push authenticates with the App token (a per-invocation
   `-c http.extraheader=` Basic-auth header built from `x-access-token:<token>`, after
   stripping the checkout-persisted `GITHUB_TOKEN` extraheader so the two credentials
-  never collide on the same request) and `gh pr create` runs with
-  `GH_TOKEN="$APP_TOKEN"`. Any failure in this chain triggers the pre-existing orphan-branch
-  cleanup + `governance:archive-sweep-failed` alarm (unchanged shape from #557).
-- **not `app_available`**: archive + push with the default (`GITHUB_TOKEN`) credentials —
-  this already works, `contents: write` covers a push — but `gh pr create` is never
-  attempted. On a successful push, file the shared alarm with a compare link
-  (`https://github.com/<repo>/compare/<default_branch>...<branch>`) and leave the branch
-  in place. On a push failure, fall back to the existing cleanup+alarm path.
+  never collide on the same request).
+- **not `app_available`**: push with the default (`GITHUB_TOKEN`) credentials — this
+  already works, `contents: write` covers a push.
 
-The two "unavailable" causes (secrets absent vs. mint failed) are distinguished only in
-the alarm body text — the execution shape is identical, because both mean "no working App
-identity to open a PR with," and the fix for a human reading either alarm is the same
-(open the compare link, or configure the App).
+Any push failure (either branch) triggers the pre-existing orphan-branch cleanup +
+`governance:archive-sweep-failed` alarm (unchanged shape from #557), and the step exits
+before ever attempting to open a PR.
+
+## Rework: PR creation moves to the VCS port (issue #1106, revised)
+
+The first version of this design put `gh pr create` directly in the workflow's bash,
+authenticated with `GH_TOKEN="$APP_TOKEN"`. That is the exact coupling
+`vcs-contract.md` exists to forbid: brain declares itself VCS-agnostic, and the port
+already implements `mrCreate` for both GitHub (`gh pr create` under the hood) and
+GitLab (`POST .../merge_requests`, issue #239). A `gh`-shaped bash call in a MANAGED
+workflow has no GitLab equivalent — it ships broken-by-construction to every non-GitHub
+consumer's fork.
+
+**The split, after rework:**
+
+- **Workflow (GitHub-Actions-specific, unavoidably so):** the secrets check, minting
+  the App token, and pushing the branch with it. This is runner credential plumbing —
+  it stays.
+- **`sweep.mjs` (provider-agnostic):** after a successful push, the workflow invokes
+  `node sweep.mjs --open-pr --head <branch> --base <default_branch> --archived <n>
+  --report <file>`, reading `BRAIN_SWEEP_TOKEN` from its own environment. `sweep.mjs`
+  is the ONE place that decides whether and how the PR gets opened — the same code runs
+  unmodified whether the underlying provider is GitHub or GitLab.
+
+**`openArchivePr` (sweep.mjs, injectable, unit-tested in sweep.test.mjs):**
+
+```
+openArchivePr({ mrCreate, token, project, title, body, head, base })
+  → no token:              { outcome: 'skipped', reason: 'no-token' }     (never calls mrCreate)
+  → mrCreate → { url }:    { outcome: 'opened', url }
+  → mrCreate → { url:null,
+                 error? }: { outcome: 'failed', error }
+```
+
+The CLI wiring binds the token at the PORT, not as a bare per-call parameter — that is
+the existing convention (`cli.mjs`'s `getVcs({ identity })`, `bindIdentity`), and it is
+load-bearing here: GitHub's own `mrCreate` implementation has NO `token` parameter at
+all — it authenticates via the bound identity (`currentIdentity()`, read inside every
+`gh` call `ghOpts` makes). A caller that only set `mrCreate({ ..., token })` and never
+bound the port would silently authenticate as nothing (ambient `gh` auth) on GitHub.
+`sweep.mjs` therefore does BOTH: `getVcs({ config, identity: token })` binds the App
+token for every GitHub call the returned object makes, AND `token` is passed again as
+`mrCreate`'s own field — a no-op on GitHub, and the live credential GitLab's
+implementation actually reads (`glToken(token) = token ?? currentIdentity() ?? ...`,
+thirteen call sites, vcs-contract.md). Neither provider is left silently unauthenticated.
+
+**Exit contract (`--open-pr`, distinct from `--apply`'s 0/3):**
+
+| Exit | Meaning | stdout |
+|---|---|---|
+| 0 | PR opened | `SWEEP-PR url=<url>` |
+| 1 | `mrCreate` failed (bad token, rejected request) — a REAL failure | `SWEEP-PR failed=<error>` |
+| 2 | Skipped — no token available (unconfigured, or the mint failed) | `SWEEP-PR skipped=no-token` |
+
+The workflow branches on this code exactly as it branched on the old `app_available`
+boolean, with one behavioral difference clarified by the rework: exit 2 (skip) keeps
+the branch and alarms with the compare link (same as before); exit 1 (a real `mrCreate`
+failure) is now its own case — cleaned up and alarmed "as today" (the same
+commit/push/PR-failed shape #557 always used), distinct from the no-token degrade. The
+two "unavailable" causes (secrets absent vs. mint failed) are still distinguished only
+in the alarm body TEXT — computed bash-side from `APP_CONFIGURED`/`BRAIN_SWEEP_TOKEN`,
+since `sweep.mjs` itself only needs to know "token or no token."
+
+**`--base` is no longer hardcoded.** The original shape passed `--base main` literally
+to `gh pr create`. The rework threads `$default_branch` (resolved from
+`DEFAULT_BRANCH`, i.e. `github.event.repository.default_branch`, falling back to `main`
+only when unset — the same variable the compare-link alarm text already used) into
+`sweep.mjs --open-pr --base "$default_branch"`, so a consumer whose default branch
+isn't `main` gets a correctly-targeted PR instead of one aimed at a branch that may not
+exist.
 
 ## Why not swap the whole remote URL
 
@@ -88,8 +150,19 @@ degraded-but-correct path forever: their sweep archives and pushes, never crashe
 tells them exactly what to configure via the alarm body. Setting up the App is optional,
 not required for the sweep to behave safely.
 
-## Rejected: continuing to call `gh pr create` with `GITHUB_TOKEN` as a last resort
+## Rejected: falling back to `GITHUB_TOKEN` as a last resort
 
-Rejected outright — that is the exact defect #1106 reports. It is refused unconditionally
-in both the "not configured" and "mint failed" branches; there is no code path in this
-design where `gh pr create` runs without a verified non-empty `APP_TOKEN`.
+Rejected outright — that is the exact defect #1106 reports. Refused unconditionally in
+both the "not configured" and "mint failed" branches; there is no code path in this
+design where a PR is opened without a verified non-empty `BRAIN_SWEEP_TOKEN` reaching
+`sweep.mjs --open-pr`.
+
+## Rejected: a bare `mrCreate({ ..., token })` call with no bound identity
+
+Passing `token` as an inline `mrCreate` argument and nothing else would work on
+GitLab (whose `mrCreate` reads its own `token` parameter) and silently NOT authenticate
+on GitHub (whose `mrCreate` has no `token` parameter — it reads the bound identity).
+That asymmetry is exactly the shape `cli.mjs`'s own header comment warns against ("a
+parameter a caller may omit is a rule the caller must remember"). `sweep.mjs` binds the
+identity at the port (`getVcs({ identity: token })`) and ALSO passes `token` through, so
+neither provider's authentication path is a silent no-op.

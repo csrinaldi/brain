@@ -6,12 +6,22 @@
 // folder, and renders the markdown report the workflow's bash turns into the
 // `auto-archive/<date>` PR body.
 //
-// NO git, NO gh here: the workflow's bash does the commit/push/PR — the same
-// node/bash boundary the revert step already draws (design, "Module contracts").
-// `readIssueState` still reaches the network through the VCS port (`gh` under
-// the hood, via `getVcs()`), which is the existing, already-tested boundary
-// `archive.mjs`'s own `makeReadIssueState` draws — reused here rather than
-// re-implemented.
+// NO git here: the workflow's bash still does the commit/push — the same
+// node/bash boundary the revert step already draws (design, "Module
+// contracts"). `readIssueState` reaches the network through the VCS port
+// (via `getVcs()`), the existing, already-tested boundary `archive.mjs`'s
+// own `makeReadIssueState` draws — reused here rather than re-implemented.
+//
+// #1106 rework: opening the sweep's own PR/MR ALSO goes through the VCS port
+// (`getVcs().mrCreate`, see `openArchivePr` below) — never the `gh` CLI's own
+// PR-creation subcommand, in workflow bash. The earlier shape shelled that
+// subcommand directly from the workflow, which (a) tied PR creation to GitHub
+// specifically, when the port
+// already implements `mrCreate` for both providers (#239), and (b) left the
+// App-token identity nowhere provider-neutral to be threaded. The workflow
+// still owns the git plumbing that is unavoidably GitHub-Actions-specific
+// (secrets check, minting the App token, pushing the branch); this module
+// owns the decision of whether and how the PR gets opened.
 //
 // Fail-closed (design D3): if the selector could not read every issue state,
 // NOTHING is archived — not even folders already classified `archivable`
@@ -22,16 +32,26 @@
 //
 // Usage:
 //   node sweep.mjs --apply --report <file>
+//   node sweep.mjs --open-pr --head <branch> --base <branch> --archived <n> --report <file>
 //
-// Exit codes:
+// Exit codes (--apply):
 //   0 — the selector answered completely; the report (if any) was written
 //   3 — incomplete (an issue read failed) or an archive write itself failed —
 //       nothing was archived; the workflow files its own alarm and exits 0
 //
-// Prints, on stdout, the one summary line the workflow's bash parses:
-//   SWEEP archived=<N> blocked=<M> unconsolidated=<K>
+// Exit codes (--open-pr):
+//   0 — the PR/MR was opened; stdout carries `SWEEP-PR url=<url>`
+//   1 — mrCreate failed (a real failure — a bad token, a rejected request);
+//       stdout carries `SWEEP-PR failed=<error>`
+//   2 — skipped: no token was available (BRAIN_SWEEP_TOKEN unset/empty — a
+//       legitimate, reportable state, see design.md); stdout carries
+//       `SWEEP-PR skipped=no-token`
+//
+// Prints, on stdout, the one summary line the workflow's bash parses per mode:
+//   SWEEP archived=<N> blocked=<M> unconsolidated=<K>          (--apply)
+//   SWEEP-PR url=<url> | skipped=<reason> | failed=<error>     (--open-pr)
 
-import { readdirSync, writeFileSync } from 'node:fs';
+import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { archiveChange } from '../../lib/archive-logic.mjs';
@@ -39,6 +59,7 @@ import { OUTCOME, selectSweep } from '../../lib/archive-sweep.mjs';
 import { makeFs, makeReadIssueState } from '../../archive.mjs';
 import { originIdentity } from '../../vcs/lib/repo.mjs';
 import { loadBrainConfig } from '../../lib/brain-config.mjs';
+import { getVcs } from '../../vcs/cli.mjs';
 
 /** Outcomes rendered in the "blocked" table — every non-archivable outcome
  * EXCEPT `open` (expected steady-state, left out of the daily report
@@ -211,12 +232,97 @@ export async function runSweep({
   };
 }
 
+/**
+ * openArchivePr — opens the sweep's PR/MR through the VCS port, or reports why
+ * it did not (issue #1106). The ONLY policy here is "no token → no call": a
+ * missing/empty `token` is a legitimate, reportable state (the App is not
+ * configured, or its mint failed), never an error this function itself
+ * raises. `mrCreate` is injected — same discipline as `runSweep`'s `fs` /
+ * `readIssueState` — so this is testable with a fake port and no network.
+ *
+ * `token` is threaded BOTH ways on purpose: bound at the port via
+ * `getVcs({ identity: token })` (the CLI wiring below) so a GitHub call
+ * authenticates correctly — `github.mrCreate` has no `token` parameter of its
+ * own, it reads the bound identity — AND passed again as `mrCreate`'s own
+ * `token` field, which is what GitLab's implementation actually reads
+ * (`glToken(token) = token ?? currentIdentity() ?? vcsToken(...)`, thirteen
+ * call sites, vcs-contract.md). Passing it here is a no-op on GitHub and the
+ * live credential on GitLab — never a silent auth gap on either provider.
+ *
+ * Never throws: an `mrCreate` failure is a `{ outcome: 'failed' }` result,
+ * matching `mrCreate`'s own never-throws contract (`{ url: null, error }`).
+ *
+ * @param {{
+ *   mrCreate: (args: { project: string, title: string, body: string, head: string, base: string, token?: string }) => Promise<{ url: string } | { url: null, error?: string }>,
+ *   token: string|null|undefined,
+ *   project: string,
+ *   title: string,
+ *   body: string,
+ *   head: string,
+ *   base: string,
+ * }} args
+ * @returns {Promise<{ outcome: 'opened', url: string } | { outcome: 'skipped', reason: 'no-token' } | { outcome: 'failed', error: string }>}
+ */
+export async function openArchivePr({ mrCreate, token, project, title, body, head, base }) {
+  if (!token) {
+    return { outcome: 'skipped', reason: 'no-token' };
+  }
+  const result = await mrCreate({ project, title, body, head, base, token });
+  if (result && result.url) {
+    return { outcome: 'opened', url: result.url };
+  }
+  return { outcome: 'failed', error: (result && result.error) || 'mrCreate returned no url' };
+}
+
 // ── CLI entrypoint ───────────────────────────────────────────────────────────
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const args = process.argv.slice(2);
-  const reportIdx = args.indexOf('--report');
-  const reportPath = reportIdx !== -1 ? args[reportIdx + 1] : null;
+  const flag = (name) => {
+    const i = args.indexOf(name);
+    return i !== -1 ? args[i + 1] : null;
+  };
+
+  if (args.includes('--open-pr')) {
+    const head = flag('--head');
+    const base = flag('--base');
+    const archived = flag('--archived');
+    const reportPath = flag('--report');
+    if (!head || !base || !archived || !reportPath) {
+      console.error('Usage: node sweep.mjs --open-pr --head <branch> --base <branch> --archived <n> --report <file>');
+      process.exit(2);
+    }
+
+    const body = readFileSync(reportPath, 'utf8');
+    const title = `chore(openspec): archive ${archived} closed changes`;
+    const token = process.env.BRAIN_SWEEP_TOKEN || null;
+    const { project } = originIdentity();
+    const config = loadBrainConfig();
+    const vcs = token ? await getVcs({ config, identity: token }) : null;
+
+    const result = await openArchivePr({
+      mrCreate: vcs ? vcs.mrCreate : async () => ({ url: null, error: 'no VCS port bound (no token)' }),
+      token,
+      project,
+      title,
+      body,
+      head,
+      base,
+    });
+
+    if (result.outcome === 'opened') {
+      console.log(`SWEEP-PR url=${result.url}`);
+      process.exit(0);
+    }
+    if (result.outcome === 'skipped') {
+      console.log(`SWEEP-PR skipped=${result.reason}`);
+      process.exit(2);
+    }
+    console.log(`SWEEP-PR failed=${result.error}`);
+    process.exit(1);
+  }
+
+  const reportPath = flag('--report');
 
   if (!reportPath) {
     console.error('Usage: node sweep.mjs --apply --report <file>');

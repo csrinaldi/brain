@@ -39,8 +39,8 @@ issue: 1106
 > repository) and uses it for both the push and the PR.
 >
 > **Without those two secrets, the guarantee degrades, it does not break.** The sweep still
-> archives and pushes the branch every run; it never calls `gh pr create` with a token that
-> cannot open a mergeable PR; it files an issue carrying a compare link
+> archives and pushes the branch every run; it never attempts to open a PR with a token that
+> cannot open a mergeable one; it files an issue carrying a compare link
 > (`.../compare/<default>...auto-archive/<date>`) so a human opens the PR by hand. "Optional"
 > here means "not your job", not "nobody's job" — configuring the App turns the last mile back
 > into nobody's job too; running the compare link by hand only makes the next sweep's PR a
