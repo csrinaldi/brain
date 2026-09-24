@@ -375,6 +375,40 @@ jobs:
           echo "alarm=${label}" >> "$GITHUB_OUTPUT"   # REQ-TS-5
           exit 2
 
+      - id: archive-app-secrets
+        name: Check whether the sweep's GitHub App credentials are configured (#1106)
+        # Same gate as `sweep` itself — no reason to mint a token on a run
+        # that will not reach the sweep at all.
+        if: steps.audit.outputs.code == '0' && steps.advance.outcome == 'success'
+        # `secrets.*` is not read directly in a step `if:` anywhere in this
+        # file — it is mapped into THIS step's env first, and every later
+        # step reads this step's OUTPUT instead. A repo with neither secret
+        # set must never FAIL this step; it only reports what it found.
+        env:
+          APP_ID: ${{ secrets.BRAIN_SWEEP_APP_ID }}
+          APP_PRIVATE_KEY: ${{ secrets.BRAIN_SWEEP_APP_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -n "${APP_ID:-}" ] && [ -n "${APP_PRIVATE_KEY:-}" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - id: archive-app-token
+        name: Mint a GitHub App installation token for the sweep PR (#1106)
+        # Skipped — never FAILED — when the two secrets are absent: a missing
+        # secret must not fail this step, because it never runs at all.
+        # `sweep` reads `steps.archive-app-token.outputs.token`, which is
+        # empty either way this step did not produce one (unconfigured, or a
+        # real mint failure while configured — the sweep step distinguishes
+        # the two via `archive-app-secrets`'s output).
+        if: steps.archive-app-secrets.outputs.configured == 'true'
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.BRAIN_SWEEP_APP_ID }}
+          private-key: ${{ secrets.BRAIN_SWEEP_APP_PRIVATE_KEY }}
+
       - id: sweep
         name: Sweep closed changes into the archive (clean audit only)
         # Positioned as the LAST functional step, after `advance`/`uncomputable`
@@ -388,7 +422,23 @@ jobs:
         if: steps.audit.outputs.code == '0' && steps.advance.outcome == 'success'
         env:
           VCS_TOKEN: ${{ github.token }}
+          # The alarm path (gh label/issue create/comment, via alarm.mjs)
+          # ALWAYS uses GITHUB_TOKEN — that works today and must still fire if
+          # the App token is what broke (#1106). Only the PR-opening path
+          # below is ever authenticated with the minted App token instead.
           GH_TOKEN: ${{ github.token }}
+          # #1106: the App identity for BOTH the push and opening the PR — a
+          # PR authored/opened by GITHUB_TOKEN either cannot be created (this
+          # repo refuses it) or triggers no workflow run (governance.yml would
+          # never run on it, so it could never merge) even where creation is
+          # allowed. BRAIN_SWEEP_TOKEN is the name sweep.mjs's `--open-pr`
+          # mode itself reads (#1106 rework) — opening the PR goes through the
+          # VCS port (getVcs().mrCreate), never the `gh` CLI's PR-creation
+          # subcommand in this bash.
+          APP_CONFIGURED: ${{ steps.archive-app-secrets.outputs.configured }}
+          BRAIN_SWEEP_TOKEN: ${{ steps.archive-app-token.outputs.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           set -euo pipefail
 
@@ -458,30 +508,128 @@ jobs:
             exit 0
           fi
 
-          # Commit, push, and open the PR as ONE failure boundary, chained via
-          # && so a MID-sequence failure (e.g. the push) short-circuits the
-          # rest rather than relying on `set -e` inside a subshell tested by
-          # `||` — bash disables errexit for every command in a list whose
-          # exit status feeds a conditional, even a subshell that re-sets `-e`
-          # internally, so a `(...) || { ... }` block here would silently run
-          # `gh pr create` after a failed `git push`. ANY failure below
-          # deletes the (possibly orphaned) remote branch and files the
-          # shared alarm (design D6: "Same cleanup the revert step performs"),
-          # rather than leaving a half-pushed branch that could permanently
-          # suppress the next day's retry.
-          if git add -A \
-            && git commit -m "chore(openspec): archive ${archived} closed changes" \
-            && git push origin "$br" \
-            && gh pr create --base main --head "$br" \
-                 --title "chore(openspec): archive ${archived} closed changes" \
-                 --body-file "$RUNNER_TEMP/sweep-body.md"
-          then
-            echo "opened auto-archive PR for ${archived} folder(s)."
+          # ── #1106: resolve which identity pushes (and, downstream, opens
+          # the PR) ───────────────────────────────────────────────────────
+          # GITHUB_TOKEN CAN push (contents: write) but this repository does
+          # not allow it to create pull requests — and even where that setting
+          # is on, a GITHUB_TOKEN-authored PR triggers no workflow run, so
+          # governance.yml would never run on it and it could never merge.
+          # Opening the PR is therefore NEVER done with GITHUB_TOKEN, below or
+          # anywhere else in this step — it goes through the VCS port instead
+          # (`sweep.mjs --open-pr`, #1106 rework), never the `gh` CLI's own
+          # PR-creation subcommand. When the App is unavailable — the two
+          # secrets are absent, or the mint itself failed — the branch is
+          # still archived and pushed, and a human opens the PR by hand from
+          # the alarm's compare link.
+          app_available=0
+          unavailable_reason=""
+          if [ "${APP_CONFIGURED:-false}" = "true" ]; then
+            if [ -n "${BRAIN_SWEEP_TOKEN:-}" ]; then
+              app_available=1
+            else
+              unavailable_reason="the GitHub App token mint failed — this is a real failure, not a missing-secret degrade"
+            fi
           else
+            unavailable_reason="BRAIN_SWEEP_APP_ID / BRAIN_SWEEP_APP_PRIVATE_KEY are not configured on this repository"
+          fi
+
+          default_branch="${DEFAULT_BRANCH:-main}"
+          compare_url="https://github.com/${GITHUB_REPOSITORY:-}/compare/${default_branch}...${br}"
+
+          # ── Commit + push, as its own failure boundary ─────────────────────
+          # The push authenticates as the App when available (not just the PR
+          # open below), per the decided fix — the PR's author and events
+          # belong to the App identity throughout. The checkout-persisted
+          # GITHUB_TOKEN credential header is stripped first: a push carrying
+          # BOTH headers is rejected by GitHub (duplicate Authorization).
+          push_ok=0
+          if [ "$app_available" -eq 1 ]; then
+            git config --local --unset-all http.https://github.com/.extraheader 2>/dev/null || true
+            auth_header="AUTHORIZATION: basic $(printf '%s' "x-access-token:${BRAIN_SWEEP_TOKEN}" | base64 -w0)"
+            if git add -A \
+              && git commit -m "chore(openspec): archive ${archived} closed changes" \
+              && git -c http.extraheader="$auth_header" push origin "$br"
+            then
+              push_ok=1
+            fi
+          else
+            if git add -A \
+              && git commit -m "chore(openspec): archive ${archived} closed changes" \
+              && git push origin "$br"
+            then
+              push_ok=1
+            fi
+          fi
+
+          if [ "$push_ok" -ne 1 ]; then
             git push origin --delete "$br" 2>/dev/null || true
             label="governance:archive-sweep-failed"
             {
-              echo "The post-merge archive sweep archived ${archived} folder(s) locally, but committing, pushing, or opening the PR for ${br} failed."
+              echo "The post-merge archive sweep archived ${archived} folder(s) locally, but committing or pushing ${br} failed."
+              echo ""
+              echo "Any orphaned remote branch has been deleted where possible. Nothing was left half-pushed."
+              echo ""
+              echo "Part of #557."
+            } > "$RUNNER_TEMP/sweep-push-failed.md"
+            node brain/scripts/governance/postmerge/alarm.mjs "$label" \
+              "governance: archive sweep commit/push failed" \
+              "$RUNNER_TEMP/sweep-push-failed.md"
+            echo "alarm=${label}" >> "$GITHUB_OUTPUT"
+            echo "commit/push failed; orphan branch cleanup attempted, alarm filed."
+            exit 0
+          fi
+
+          # ── Open the PR, through the VCS port (#1106 rework) ───────────────
+          # `sweep.mjs --open-pr` is the ONLY place this workflow opens a PR —
+          # never the `gh` CLI's own PR-creation subcommand here. It decides
+          # skip-vs-open from
+          # BRAIN_SWEEP_TOKEN's presence alone (empty either way the App was
+          # unavailable); the WHY (unconfigured vs mint-failed) stays in this
+          # bash, for the alarm text only. `--base` is the repository's actual
+          # default branch, never a hardcoded `main` (also #1106).
+          set +e
+          pr_out="$(node brain/scripts/governance/postmerge/sweep.mjs --open-pr \
+            --head "$br" --base "$default_branch" --archived "$archived" \
+            --report "$RUNNER_TEMP/sweep-body.md")"
+          pr_code=$?
+          set -e
+          printf '%s\n' "$pr_out"
+
+          if [ "$pr_code" -eq 0 ]; then
+            echo "opened auto-archive PR for ${archived} folder(s)."
+          elif [ "$pr_code" -eq 2 ]; then
+            # Skipped: no usable App token (unconfigured, or the mint
+            # failed). The branch is left in place (NOT deleted) — a human
+            # needs it to open the PR by hand from the compare link.
+            label="governance:archive-sweep-failed"
+            {
+              echo "The post-merge archive sweep archived ${archived} folder(s) and pushed ${br}, but could not open its pull request: ${unavailable_reason}."
+              echo ""
+              echo "The branch was left in place — open the PR by hand:"
+              echo ""
+              echo "${compare_url}"
+              echo ""
+              echo "To let the sweep open this PR itself, configure a GitHub App (Contents: read/write, Pull requests: read/write, this repository only) and set the \`BRAIN_SWEEP_APP_ID\` and \`BRAIN_SWEEP_APP_PRIVATE_KEY\` repository secrets."
+              echo ""
+              echo "Part of #557 / #1106."
+            } > "$RUNNER_TEMP/sweep-no-app.md"
+            node brain/scripts/governance/postmerge/alarm.mjs "$label" \
+              "governance: archive sweep could not open its PR" \
+              "$RUNNER_TEMP/sweep-no-app.md"
+            echo "alarm=${label}" >> "$GITHUB_OUTPUT"
+            echo "archived and pushed ${br}; no App token available (${unavailable_reason}); alarm filed, branch kept for manual PR."
+          else
+            # A real mrCreate failure (a bad token, a rejected request) — "as
+            # today": cleaned up like any other push/PR failure, never left
+            # for a human who was never told to expect it.
+            git push origin --delete "$br" 2>/dev/null || true
+            label="governance:archive-sweep-failed"
+            {
+              echo "The post-merge archive sweep archived ${archived} folder(s) and pushed ${br}, but opening its pull request failed:"
+              echo ""
+              echo '```'
+              printf '%s\n' "$pr_out"
+              echo '```'
               echo ""
               echo "Any orphaned remote branch has been deleted where possible. Nothing was left half-pushed."
               echo ""
@@ -491,7 +639,7 @@ jobs:
               "governance: archive sweep commit/push/PR failed" \
               "$RUNNER_TEMP/sweep-push-failed.md"
             echo "alarm=${label}" >> "$GITHUB_OUTPUT"
-            echo "commit/push/PR failed; orphan branch cleanup attempted, alarm filed."
+            echo "PR creation failed; orphan branch cleanup attempted, alarm filed."
           fi
 
       - id: terminal
