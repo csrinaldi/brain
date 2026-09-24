@@ -6,6 +6,111 @@ registry (ADR-0030, superseding ADR-0006's git tags); consumers upgrade with
 changes** before upgrading — additive `brain.config.json` migrations apply
 automatically, but renames need manual action.
 
+## v1.7.0 — closed changes archive themselves, and adoption stops running the wrong code
+
+**Manual step: read before upgrading.** On GitHub this release starts running a new
+post-merge step in your repository.
+
+1. **Decide how the archive sweep opens its pull requests.** After your next clean
+   post-merge audit, `governance-postmerge.yml` archives every change folder whose issue
+   is closed and pushes an `auto-archive/<date>` branch. To have it open the PR too,
+   create a GitHub App with *Contents: read and write* and *Pull requests: read and
+   write* on the repository, install it, and set the secrets `BRAIN_SWEEP_APP_ID` and
+   `BRAIN_SWEEP_APP_PRIVATE_KEY`. Without them, the sweep keeps the pushed branch and
+   files a `governance:archive-sweep-failed` issue with a compare link for you to open
+   the PR by hand. Nothing breaks either way. Provisioning the App through brain itself
+   is #1107.
+
+Optional: if you hand-added a bare `repo:check` script to work around #1094, you can
+drop it.
+
+No branch-protection change. No new status context ships, so `brain:protect` does not
+need a re-run.
+
+### Why a minor and not a patch
+
+It was planned as 1.6.1, two adoption fixes. Then #557 landed in full, and it adds
+behaviour that runs in your repository: `governance-postmerge.yml` is a managed
+workflow, so the sweep reaches every consumer on upgrade and acts on the first clean
+merge after it. `issue-link` also gains an exemption. By the rule 1.6.0 applied,
+capability a consumer can rely on is a minor. Shipping it as a patch would change your
+repository under a version number that says it will not.
+
+Not a major: nothing is renamed or removed.
+
+### What you can do that you could not before
+
+- **Closed changes leave `openspec/changes/` on their own** (#557). After a clean
+  post-merge audit, the sweep asks the VCS whether each change folder's issue is closed
+  and moves the closed ones to `openspec/changes/archive/<iid>/` as byte-identical
+  renames, consolidating any declared capability spec into `openspec/specs/`. It opens
+  at most one `auto-archive/*` PR at a time and never a second one on the same day.
+  **It is fail-closed:** if a single issue state cannot be read, it archives nothing and
+  files the alarm, because archiving the readable subset would report a sweep it could
+  not complete. Folders it cannot place (several folders sharing one issue number, an
+  existing destination, a name that does not parse as `issue-<N>-<slug>`) are listed in
+  the PR and left alone. They never raise the alarm, which would otherwise fire on every
+  merge. If you have never archived, expect the first sweep to be large. GitHub only:
+  the GitLab fragment has no sweep yet.
+- **The sweep's PR can pass `issue-link` without a closing keyword** (ADR-0035). An
+  `auto-archive/<YYYY-MM-DD>` head targeting the default branch is exempt only when the
+  diff earns it: byte-identical renames from `openspec/changes/<name>/` into
+  `openspec/changes/archive/<X>/` with the same relative path, plus new or purely
+  additive `openspec/specs/**/spec.md` files, and nothing else. **No file may be added or
+  modified anywhere under `archive/`** (Amendment 1). An uncomputable diff is not exempt.
+  The exemption is never granted by branch name, the same discipline ADR-0034 applies
+  to `memory/*` lane heads.
+- **The sweep acts as an App, through the VCS port** (#1106). It mints an installation
+  token with `actions/create-github-app-token`, pinned by commit SHA, pushes with it,
+  and opens the PR through the port's `mrCreate` against your repository's actual
+  default branch. The workflow's `GITHUB_TOKEN` could not do this: GitHub refuses
+  Actions-created PRs by default, and a PR created with that token triggers no checks,
+  so it could never merge.
+
+### What was repaired
+
+- **`env:init` runs the code of the tree that invoked it** (#1093). It moves into the
+  main checkout because `.env` and git config live there (#657), but it also ran every
+  script from there. From a worktree holding a newer brain (every adoption or upgrade on
+  a branch), it ran the old code and still printed `== Environment ready ==`. Measured
+  in a real adoption: two `Cannot find module` errors, a merge driver 1.6.0 had retired,
+  and a success line. It now records the invoking tree first and runs its scripts,
+  including `brain:memory:pull` and `brain:memory:index`, from there. `.env` and git
+  config stay where they were. A missing `brain/scripts/` stops the run, and two steps
+  that failed in silence (`brain-config`, `home-scaffold`) now warn. They stay
+  non-blocking.
+- **The shipped workflows call a script you actually have** (#1094). `governance.yml`
+  and the GitLab fragment ran `npm run repo:check`, which only exists in brain's own
+  `package.json`. The installer delivers `brain:repo:check`, so every new consumer's
+  `local-checks` failed on its first pull request. Both now call `brain:repo:check`,
+  and a drift guard walks every managed workflow (discovered from the managed-paths
+  list, not a hand-written one) and fails if any `npm run <script>` names a key the
+  installer does not ship.
+- **The upgrade reports what it regenerated, not what it meant to** (#1089). When it
+  could not read `brain/HOME.md`, it still claimed to have regenerated `AGENTS.md` from
+  it.
+
+### Doctrine
+
+ADR-0035 (*the archive sweep's `issue-link` exemption is content-earned, never granted
+by branch name*) was promoted with Amendment 1, which closes its added-file residual
+risk (#557). `workflow-governance.md` invariant 1 now names `issue-link`'s two
+content-earned exemptions, `memory/*` (ADR-0034) and `auto-archive/<date>` (ADR-0035).
+`harness-contract.md` lost a dead reference, cites project ADRs by name because
+`brain/core/` ships to you and `brain/project/` is yours, and states that archiving is
+machine-guaranteed on GitHub only. `openspec/README.md` gained the rule that closed
+changes archive automatically.
+
+### Known limits
+
+- The pre-existing `auto-revert/*` post-merge step still opens its PR with
+  `GITHUB_TOKEN` and a `Part of` reference to the default branch, so it can neither open
+  nor pass `issue-link` on GitHub.
+- GitHub's `mrCreate` ignores the `token` argument the VCS contract says it accepts
+  (#1109). The sweep binds the identity to the port, so it is not affected.
+- The doctrine does not yet say that automatic archiving needs the App. That note is
+  drafted in #1106's change folder, awaiting promotion.
+
 ## v1.6.0 — memory travels on its own lane, and three gates become required at every tier
 
 **Manual steps — read all four before upgrading.** Unlike v1.5.0, this release asks
