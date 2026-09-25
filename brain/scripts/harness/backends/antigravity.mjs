@@ -18,11 +18,12 @@
 //   init() — reads the 5 SOURCE_DOCS, compiles AGENTS.md via compileAgentsMd(),
 //            writes it to AGENTS_EMIT_PATH. Never throws.
 
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { join, dirname, posix as posixPath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { compileSettingsHooksJson } from './settings-hooks.mjs';
+import { mergeSettings } from '../../lib/installer.mjs';
 import { rolesSection } from '../../roles/first-party/project-role.mjs';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '../../../..');
@@ -196,6 +197,17 @@ function _defaultWriteFile(relPath, content, root) {
   writeFileSync(fullPath, content, 'utf8');
 }
 
+/**
+ * Reads relPath's raw content, or `null` if it does not exist. Mirrors
+ * claude.mjs's read seam (issue #1139) — a malformed-but-present file's
+ * JSON.parse failure is the caller's business (it knows the path).
+ */
+function _defaultReadFile(relPath, root) {
+  const fullPath = join(root, relPath);
+  if (!existsSync(fullPath)) return null;
+  return readFileSync(fullPath, 'utf8');
+}
+
 // ---------------------------------------------------------------------------
 // Verb: init
 // ---------------------------------------------------------------------------
@@ -209,23 +221,32 @@ function _defaultWriteFile(relPath, content, root) {
  *   Reads one source doc's content. Defaults to real readFileSync from _repoRoot.
  * @param {(relPath: string, content: string) => void} [opts._writeAgents]
  *   Writes the compiled content to relPath.
+ * @param {() => (string|null)} [opts._readGeminiSettings]
+ *   Reads the existing .gemini/settings.json raw content, or `null` if absent
+ *   (issue #1139). Defaults to real readFileSync from _repoRoot.
  * @param {(relPath: string, content: string) => void} [opts._writeGeminiSettings]
  *   Writes the compiled .gemini/settings.json content.
  * @param {string} [opts._repoRoot] Repo root used by the default seams.
- * @returns {Promise<{ missingDocs: string[], agentsWritten: boolean, geminiWritten: boolean }>}
+ * @returns {Promise<{ missingDocs: string[], agentsWritten: boolean, geminiWritten: boolean, geminiSettingsError?: string }>}
  *   Additive report of what init() could not read or write. No `ok` field —
  *   `init()` keeps its "never throws" contract; only its return value grows
  *   (design.md "Additive report object, not `{ ok: false }`"). A caller that
  *   discards or never inspects the resolved value observes no behavior change.
+ *   `geminiSettingsError` is present ONLY when the existing
+ *   `.gemini/settings.json` could not be parsed as JSON — the one case where
+ *   `init()` refuses to write it rather than silently overwrite (#1127: no
+ *   report-success-over-a-failure). `geminiWritten` is `false` in that case too.
  */
 export async function init({
   _readDoc,
   _writeAgents,
+  _readGeminiSettings,
   _writeGeminiSettings,
   _repoRoot = repoRoot,
 } = {}) {
   const readDoc = _readDoc ?? ((relPath) => _defaultReadDoc(relPath, _repoRoot));
   const writeAgents = _writeAgents ?? ((relPath, content) => _defaultWriteFile(relPath, content, _repoRoot));
+  const readGeminiSettings = _readGeminiSettings ?? (() => _defaultReadFile(GEMINI_SETTINGS_EMIT_PATH, _repoRoot));
   const writeGeminiSettings = _writeGeminiSettings ?? ((relPath, content) => _defaultWriteFile(relPath, content, _repoRoot));
 
   const missingDocs = [];
@@ -250,14 +271,43 @@ export async function init({
     agentsWritten = false;
   }
 
+  // .gemini/settings.json is MERGED into any existing file (issue #1139),
+  // through the same mergeSettings core claude.mjs and brain:upgrade use —
+  // never overwritten unconditionally.
+  const brainSettings = JSON.parse(compileSettingsHooksJson());
+
   let geminiWritten = true;
-  const settingsContent = compileSettingsHooksJson();
-  try {
-    writeGeminiSettings(GEMINI_SETTINGS_EMIT_PATH, settingsContent);
-  } catch (err) {
-    console.warn(`  harness: antigravity could not write ${GEMINI_SETTINGS_EMIT_PATH} — ${err.message}`);
-    geminiWritten = false;
+  let geminiSettingsError;
+  const existingRaw = readGeminiSettings();
+  let existingGeminiSettings = null;
+  if (existingRaw != null) {
+    try {
+      existingGeminiSettings = JSON.parse(existingRaw);
+    } catch (err) {
+      geminiSettingsError =
+        `antigravity: ${GEMINI_SETTINGS_EMIT_PATH} is not valid JSON — ${err.message}. ` +
+        `Fix or remove the file, then re-run brain:env:init.`;
+      console.warn(`  harness: ${geminiSettingsError}`);
+    }
   }
 
-  return { missingDocs, agentsWritten, geminiWritten };
+  if (geminiSettingsError) {
+    geminiWritten = false;
+  } else {
+    const merged = mergeSettings(existingGeminiSettings, brainSettings);
+    const settingsContent = JSON.stringify(merged, null, 2) + '\n';
+    try {
+      writeGeminiSettings(GEMINI_SETTINGS_EMIT_PATH, settingsContent);
+    } catch (err) {
+      console.warn(`  harness: antigravity could not write ${GEMINI_SETTINGS_EMIT_PATH} — ${err.message}`);
+      geminiWritten = false;
+    }
+  }
+
+  return {
+    missingDocs,
+    agentsWritten,
+    geminiWritten,
+    ...(geminiSettingsError ? { geminiSettingsError } : {}),
+  };
 }

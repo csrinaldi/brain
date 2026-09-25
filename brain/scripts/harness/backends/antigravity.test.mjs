@@ -335,6 +335,91 @@ test('compileSettingsHooksJson() emits valid JSON with SessionStart and PreToolU
   assert.match(preToolUseHook, /--no-verify/);
 });
 
+// ── issue #1139: init() must merge .gemini/settings.json, not overwrite it ──
+
+test('init(): an existing .gemini/settings.json with permissions.allow and a custom hook survives, brain hooks are current (REQ-1139-5)', async () => {
+  const customEntry = { matcher: 'Read', hooks: [{ type: 'command', command: 'my-custom-hook' }] };
+  const existing = {
+    permissions: { allow: ['Bash(a:*)', 'Bash(b:*)'] },
+    hooks: { PreToolUse: [customEntry] },
+  };
+  const _readDoc = (relPath) => FAKE_DOCS[relPath];
+  const _writeAgents = () => {};
+  const _readGeminiSettings = () => JSON.stringify(existing);
+  const settingsWrites = [];
+  const _writeGeminiSettings = (relPath, content) => settingsWrites.push({ relPath, content });
+
+  await init({ _readDoc, _writeAgents, _readGeminiSettings, _writeGeminiSettings, _repoRoot: '/fake/repo' });
+
+  assert.equal(settingsWrites.length, 1);
+  const written = JSON.parse(settingsWrites[0].content);
+  assert.deepEqual(written.permissions.allow, ['Bash(a:*)', 'Bash(b:*)']);
+  const preToolUse = written.hooks.PreToolUse;
+  assert.ok(preToolUse.some((e) => JSON.stringify(e) === JSON.stringify(customEntry)),
+    'consumer custom hook must survive');
+  const brainPreToolUse = JSON.parse(compileSettingsHooksJson()).hooks.PreToolUse;
+  for (const brainEntry of brainPreToolUse) {
+    assert.ok(preToolUse.some((e) => JSON.stringify(e) === JSON.stringify(brainEntry)),
+      'brain hook entry must be present and current');
+  }
+});
+
+test('init(): running twice against the same existing .gemini/settings.json content is idempotent (REQ-1139-5)', async () => {
+  const existing = { permissions: { allow: ['x'] }, hooks: { PreToolUse: [] } };
+  const _readDoc = (relPath) => FAKE_DOCS[relPath];
+  const _writeAgents = () => {};
+
+  const firstWrites = [];
+  await init({
+    _readDoc, _writeAgents,
+    _readGeminiSettings: () => JSON.stringify(existing),
+    _writeGeminiSettings: (relPath, content) => firstWrites.push({ relPath, content }),
+    _repoRoot: '/fake/repo',
+  });
+  const firstContent = firstWrites[0].content;
+
+  const secondWrites = [];
+  await init({
+    _readDoc, _writeAgents,
+    _readGeminiSettings: () => firstContent,
+    _writeGeminiSettings: (relPath, content) => secondWrites.push({ relPath, content }),
+    _repoRoot: '/fake/repo',
+  });
+
+  assert.equal(secondWrites[0].content, firstContent, 'second init() must produce byte-identical output');
+});
+
+test('init(): no existing .gemini/settings.json writes brain settings exactly as before (REQ-1139-5)', async () => {
+  const _readDoc = (relPath) => FAKE_DOCS[relPath];
+  const _writeAgents = () => {};
+  const _readGeminiSettings = () => null;
+  const settingsWrites = [];
+  const _writeGeminiSettings = (relPath, content) => settingsWrites.push({ relPath, content });
+
+  await init({ _readDoc, _writeAgents, _readGeminiSettings, _writeGeminiSettings, _repoRoot: '/fake/repo' });
+
+  assert.equal(settingsWrites.length, 1);
+  assert.equal(settingsWrites[0].content, compileSettingsHooksJson());
+});
+
+test('init(): a malformed existing .gemini/settings.json is never overwritten and the failure is reported without an "ok" property (REQ-1139-5)', async () => {
+  const _readDoc = (relPath) => FAKE_DOCS[relPath];
+  const _writeAgents = () => {};
+  const _readGeminiSettings = () => '{ not valid json';
+  const settingsWrites = [];
+  const _writeGeminiSettings = (relPath, content) => settingsWrites.push({ relPath, content });
+
+  const { result } = await captureWarn(() =>
+    init({ _readDoc, _writeAgents, _readGeminiSettings, _writeGeminiSettings, _repoRoot: '/fake/repo' }),
+  );
+
+  assert.equal(settingsWrites.length, 0, 'the write seam must never be invoked on a malformed file');
+  assert.equal(result.geminiWritten, false);
+  assert.match(result.geminiSettingsError, /\.gemini\/settings\.json/, 'must name the offending file');
+  assert.ok(!Object.prototype.hasOwnProperty.call(result, 'ok'),
+    'antigravity init() must never gain an "ok" property (pinned by test 1.5)');
+});
+
 // ═══════════════════════════════════════════════════════════════════════════
 // REQ-509-6 — the AGENTS.md compiler no longer fails open for a new caller
 // ═══════════════════════════════════════════════════════════════════════════

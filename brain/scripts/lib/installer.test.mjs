@@ -20,6 +20,7 @@ import {
   RESTORE_POINT_DIR,
   mergeDefaults,
   mergeClaudeSettings,
+  mergeSettings,
   mergePackageJsonScripts,
   mergePackageJson,
   migrateConfig,
@@ -563,6 +564,48 @@ test('mergeClaudeSettings: brain hooks under non-PreToolUse events are merged (R
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
+});
+
+// ── issue #1139: mergeSettings — the shared pure core ────────────────────────
+//
+// mergeClaudeSettings (above) is a thin file-IO wrapper. These tests pin the
+// pure, fs-free core directly — the same function claude.mjs/antigravity.mjs
+// import and call (REQ-1139-6).
+
+test('mergeSettings(null, brainSettings): no existing settings — returns brain settings as-is (REQ-1139-3)', () => {
+  const result = mergeSettings(null, BRAIN_SETTINGS);
+  assert.deepEqual(result, BRAIN_SETTINGS);
+});
+
+test('mergeSettings: consumer permissions.allow and custom hook survive, brain hook present (REQ-1139-1)', () => {
+  const customEntry = { matcher: 'Read', hooks: [{ type: 'command', command: 'my-custom-hook' }] };
+  const existing = {
+    permissions: { allow: ['Bash(a:*)', 'Bash(b:*)'] },
+    hooks: { PreToolUse: [customEntry] },
+  };
+  const result = mergeSettings(existing, BRAIN_SETTINGS);
+
+  assert.deepEqual(result.permissions.allow, ['Bash(a:*)', 'Bash(b:*)']);
+  const preToolUse = result.hooks.PreToolUse;
+  assert.ok(preToolUse.some((e) => JSON.stringify(e) === JSON.stringify(customEntry)));
+  assert.ok(preToolUse.some((e) => JSON.stringify(e) === JSON.stringify(BRAIN_HOOK_ENTRY)));
+});
+
+test('mergeSettings: applying twice in sequence does not duplicate brain hooks (REQ-1139-2)', () => {
+  const existing = { hooks: { PreToolUse: [] } };
+  const once = mergeSettings(existing, BRAIN_SETTINGS);
+  const twice = mergeSettings(once, BRAIN_SETTINGS);
+  assert.deepEqual(twice, once);
+  assert.equal(twice.hooks.PreToolUse.length, 1);
+});
+
+test('mergeSettings is pure — mutates neither argument', () => {
+  const existing = { permissions: { allow: ['x'] }, hooks: { PreToolUse: [] } };
+  const existingSnapshot = JSON.parse(JSON.stringify(existing));
+  const brainSnapshot = JSON.parse(JSON.stringify(BRAIN_SETTINGS));
+  mergeSettings(existing, BRAIN_SETTINGS);
+  assert.deepEqual(existing, existingSnapshot);
+  assert.deepEqual(BRAIN_SETTINGS, brainSnapshot);
 });
 
 // REQ-S1-4: settings.local.json is absent from the managed-paths export.

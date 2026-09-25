@@ -9,11 +9,12 @@ import { credentialEnvNames, withoutCredentials } from '../../lib/credential-env
 import { withForgeConfigDir } from '../producer-forge-reach.mjs';
 import { DEFAULT_STAGE_TIMEOUT_MS, formatDuration } from '../../lib/duration.mjs';
 import { defaultRun } from './agent-runtime.mjs';
-import { writeFileSync, mkdirSync } from 'node:fs';
+import { writeFileSync, mkdirSync, readFileSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { compileSettingsHooksJson } from './settings-hooks.mjs';
+import { mergeSettings } from '../../lib/installer.mjs';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '../../../..');
 
@@ -47,21 +48,61 @@ function _defaultWriteFile(relPath, content, root) {
 }
 
 /**
- * Compiles and writes .claude/settings.json hooks. Never throws.
+ * Reads relPath's raw content, or `null` if it does not exist. Never throws
+ * on a missing file — a malformed-but-present file's JSON.parse failure is
+ * the caller's business (it knows the path for the error message).
+ */
+function _defaultReadFile(relPath, root) {
+  const fullPath = join(root, relPath);
+  if (!existsSync(fullPath)) return null;
+  return readFileSync(fullPath, 'utf8');
+}
+
+/**
+ * Compiles and merges .claude/settings.json hooks into any existing file
+ * (issue #1139) using the same `mergeSettings` core `brain:upgrade` uses
+ * (`mergeClaudeSettings` in lib/installer.mjs) — never overwrites consumer
+ * content. Never throws.
  *
  * @param {object} [opts] Injectable seams.
+ * @param {() => (string|null)} [opts._readClaudeSettings]
+ *   Reads the existing .claude/settings.json raw content, or `null` if absent.
  * @param {(relPath: string, content: string) => void} [opts._writeClaudeSettings]
  *   Writes the compiled .claude/settings.json content.
  * @param {string} [opts._repoRoot] Repo root used by the default seams.
- * @returns {Promise<void>}
+ * @returns {Promise<undefined|{ok: false, reason: string}>}
+ *   `undefined` on success (unchanged contract). `{ok: false, reason}` ONLY
+ *   when the existing file could not be parsed as JSON — the one case where
+ *   `init()` refuses to write rather than silently overwrite (#1127: no
+ *   report-success-over-a-failure).
  */
 export async function init({
+  _readClaudeSettings,
   _writeClaudeSettings,
   _repoRoot = repoRoot,
 } = {}) {
+  const readClaudeSettings = _readClaudeSettings ?? (() => _defaultReadFile(CLAUDE_SETTINGS_EMIT_PATH, _repoRoot));
   const writeClaudeSettings = _writeClaudeSettings ?? ((relPath, content) => _defaultWriteFile(relPath, content, _repoRoot));
 
-  const settingsContent = compileSettingsHooksJson();
+  const brainSettings = JSON.parse(compileSettingsHooksJson());
+
+  const existingRaw = readClaudeSettings();
+  let existingSettings = null;
+  if (existingRaw != null) {
+    try {
+      existingSettings = JSON.parse(existingRaw);
+    } catch (err) {
+      const reason =
+        `claude: ${CLAUDE_SETTINGS_EMIT_PATH} is not valid JSON — ${err.message}. ` +
+        `Fix or remove the file, then re-run brain:env:init.`;
+      console.warn(`  harness: ${reason}`);
+      return { ok: false, reason };
+    }
+  }
+
+  const merged = mergeSettings(existingSettings, brainSettings);
+  const settingsContent = JSON.stringify(merged, null, 2) + '\n';
+
   try {
     writeClaudeSettings(CLAUDE_SETTINGS_EMIT_PATH, settingsContent);
   } catch (err) {

@@ -1256,20 +1256,61 @@ function copyManagedImpl({ srcRoot, destRoot, managed, local, dryRun = false, sp
 // ── Claude settings merge ─────────────────────────────────────────────────────
 
 /**
- * Merges brain's `.claude/settings.json` into the consumer's copy without
- * overwriting consumer-owned content.
+ * Merges brain's settings object into an existing consumer settings object
+ * without overwriting consumer-owned content. Pure, fs-free — the shared core
+ * behind `mergeClaudeSettings` below AND `claude.mjs`/`antigravity.mjs`'s
+ * `init()`, which compile brain's content in memory and have no brain-side
+ * file to point a path-shaped API at (issue #1139).
  *
  * Behaviour:
- * - No existing file at `existingPath` → write brain's block as-is.
- * - Existing file → spread consumer object (all consumer keys preserved),
- *   then for EVERY hook event brain defines (PreToolUse, PostToolUse, …),
- *   additively append brain's entries that are not already present.
- *   `permissions.allow` and every other consumer key are left untouched.
+ * - `existingSettings` is `null`/`undefined` (no existing file) → brain's
+ *   object, as-is (shallow copy).
+ * - Otherwise → spread the existing object (all its top-level keys
+ *   preserved), then for EVERY hook event brain defines (PreToolUse,
+ *   PostToolUse, …), additively append brain's entries that are not already
+ *   present. `permissions.allow` and every other existing key are left
+ *   untouched.
  *
  * Entry dedup is by `JSON.stringify`, so it is sensitive to key ordering: a
  * brain hook entry a consumer hand-added with a different key order would not
  * dedup and could duplicate. In practice brain owns these entries and writes
  * them with a stable key order, so this is a non-issue.
+ *
+ * @param {object|null} existingSettings  Parsed existing settings, or `null` if none.
+ * @param {object} brainSettings          Parsed brain settings object.
+ * @returns {object} The merged settings object.
+ */
+export function mergeSettings(existingSettings, brainSettings) {
+  if (existingSettings == null) {
+    return { ...brainSettings };
+  }
+
+  // Shallow-spread preserves all top-level existing keys (permissions.allow, etc.).
+  const merged = { ...existingSettings };
+
+  // Merge every hook event brain defines: keep existing entries first, then
+  // append any brain entries not already present (compared by serialised value).
+  // Existing-only hook events are preserved untouched by the spread above.
+  const brainHooks = brainSettings.hooks ?? {};
+  if (Object.keys(brainHooks).length > 0) {
+    const mergedHooks = { ...existingSettings.hooks };
+    for (const [event, brainEntries] of Object.entries(brainHooks)) {
+      const existingEntries = mergedHooks[event] ?? [];
+      const seen = new Set(existingEntries.map((e) => JSON.stringify(e)));
+      const additions = brainEntries.filter((e) => !seen.has(JSON.stringify(e)));
+      mergedHooks[event] = [...existingEntries, ...additions];
+    }
+    merged.hooks = mergedHooks;
+  }
+
+  return merged;
+}
+
+/**
+ * Merges brain's `.claude/settings.json` into the consumer's copy without
+ * overwriting consumer-owned content. Thin file-IO wrapper around
+ * `mergeSettings` above — reads both files, delegates the merge, writes the
+ * result.
  *
  * @param {string} existingPath       Absolute path to consumer's settings.json (may not exist).
  * @param {string} brainSettingsPath  Absolute path to brain's settings.json.
@@ -1279,7 +1320,7 @@ export function mergeClaudeSettings(existingPath, brainSettingsPath) {
 
   if (!existsSync(existingPath)) {
     mkdirSync(dirname(existingPath), { recursive: true });
-    writeFileSync(existingPath, JSON.stringify(brainSettings, null, 2) + '\n');
+    writeFileSync(existingPath, JSON.stringify(mergeSettings(null, brainSettings), null, 2) + '\n');
     return;
   }
 
@@ -1295,24 +1336,7 @@ export function mergeClaudeSettings(existingPath, brainSettingsPath) {
     );
   }
 
-  // Shallow-spread preserves all top-level consumer keys (permissions.allow, etc.).
-  const merged = { ...consumerSettings };
-
-  // Merge every hook event brain defines: keep consumer entries first, then
-  // append any brain entries not already present (compared by serialised value).
-  // Consumer-only hook events are preserved untouched by the spread below.
-  const brainHooks = brainSettings.hooks ?? {};
-  if (Object.keys(brainHooks).length > 0) {
-    const mergedHooks = { ...consumerSettings.hooks };
-    for (const [event, brainEntries] of Object.entries(brainHooks)) {
-      const consumerEntries = mergedHooks[event] ?? [];
-      const seen = new Set(consumerEntries.map((e) => JSON.stringify(e)));
-      const additions = brainEntries.filter((e) => !seen.has(JSON.stringify(e)));
-      mergedHooks[event] = [...consumerEntries, ...additions];
-    }
-    merged.hooks = mergedHooks;
-  }
-
+  const merged = mergeSettings(consumerSettings, brainSettings);
   writeFileSync(existingPath, JSON.stringify(merged, null, 2) + '\n');
 }
 

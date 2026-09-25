@@ -2,9 +2,13 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 
 import { CLAUDE_SETTINGS_EMIT_PATH, init, runStage } from './claude.mjs';
 import { compileSettingsHooksJson } from './settings-hooks.mjs';
+import { mergeClaudeSettings } from '../../lib/installer.mjs';
 
 test('CLAUDE_SETTINGS_EMIT_PATH === ".claude/settings.json"', () => {
   assert.equal(CLAUDE_SETTINGS_EMIT_PATH, '.claude/settings.json');
@@ -34,6 +38,111 @@ test('init() calls _writeClaudeSettings with CLAUDE_SETTINGS_EMIT_PATH and valid
   assert.equal(writeCalls.length, 1);
   assert.equal(writeCalls[0].relPath, CLAUDE_SETTINGS_EMIT_PATH);
   assert.equal(writeCalls[0].content, compileSettingsHooksJson());
+});
+
+// ── issue #1139: init() must merge, not overwrite ────────────────────────────
+
+test('init(): an existing settings.json with permissions.allow and a custom hook survives, brain hooks are current (REQ-1139-1)', async () => {
+  const customEntry = { matcher: 'Read', hooks: [{ type: 'command', command: 'my-custom-hook' }] };
+  const existing = {
+    permissions: { allow: ['Bash(a:*)', 'Bash(b:*)'] },
+    hooks: { PreToolUse: [customEntry] },
+  };
+  const _readClaudeSettings = () => JSON.stringify(existing);
+  const writeCalls = [];
+  const _writeClaudeSettings = (relPath, content) => writeCalls.push({ relPath, content });
+
+  await init({ _readClaudeSettings, _writeClaudeSettings, _repoRoot: '/fake/repo' });
+
+  assert.equal(writeCalls.length, 1);
+  const written = JSON.parse(writeCalls[0].content);
+  assert.deepEqual(written.permissions.allow, ['Bash(a:*)', 'Bash(b:*)']);
+  const preToolUse = written.hooks.PreToolUse;
+  assert.ok(preToolUse.some((e) => JSON.stringify(e) === JSON.stringify(customEntry)),
+    'consumer custom hook must survive');
+  const brainPreToolUse = JSON.parse(compileSettingsHooksJson()).hooks.PreToolUse;
+  for (const brainEntry of brainPreToolUse) {
+    assert.ok(preToolUse.some((e) => JSON.stringify(e) === JSON.stringify(brainEntry)),
+      'brain hook entry must be present and current');
+  }
+});
+
+test('init(): running twice against the same existing content is idempotent — byte-identical output, no duplicate hooks (REQ-1139-2)', async () => {
+  const existing = { permissions: { allow: ['x'] }, hooks: { PreToolUse: [] } };
+
+  const firstWrites = [];
+  await init({
+    _readClaudeSettings: () => JSON.stringify(existing),
+    _writeClaudeSettings: (relPath, content) => firstWrites.push({ relPath, content }),
+    _repoRoot: '/fake/repo',
+  });
+  const firstContent = firstWrites[0].content;
+
+  const secondWrites = [];
+  await init({
+    _readClaudeSettings: () => firstContent,
+    _writeClaudeSettings: (relPath, content) => secondWrites.push({ relPath, content }),
+    _repoRoot: '/fake/repo',
+  });
+
+  assert.equal(secondWrites[0].content, firstContent, 'second init() must produce byte-identical output');
+});
+
+test('init(): no existing settings.json writes brain settings exactly as before (REQ-1139-3)', async () => {
+  const writeCalls = [];
+  const _readClaudeSettings = () => null;
+  const _writeClaudeSettings = (relPath, content) => writeCalls.push({ relPath, content });
+
+  await init({ _readClaudeSettings, _writeClaudeSettings, _repoRoot: '/fake/repo' });
+
+  assert.equal(writeCalls.length, 1);
+  assert.equal(writeCalls[0].content, compileSettingsHooksJson());
+});
+
+test('init(): a malformed existing settings.json is never overwritten and the failure is reported (REQ-1139-4)', async () => {
+  const _readClaudeSettings = () => '{ not valid json';
+  const writeCalls = [];
+  const _writeClaudeSettings = (relPath, content) => writeCalls.push({ relPath, content });
+
+  const result = await init({ _readClaudeSettings, _writeClaudeSettings, _repoRoot: '/fake/repo' });
+
+  assert.equal(writeCalls.length, 0, 'the write seam must never be invoked on a malformed file');
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /\.claude\/settings\.json/, 'must name the offending file');
+});
+
+test('upgrade -> init -> upgrade: the file is stable and the consumer key survives throughout (REQ-1139-8)', async () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'brain-1139-compose-'));
+  try {
+    const brainPath = join(tmp, 'brain-settings.json');
+    writeFileSync(brainPath, compileSettingsHooksJson());
+
+    const consumerPath = join(tmp, 'settings.json');
+    writeFileSync(consumerPath, JSON.stringify({ permissions: { allow: ['MyCustomTool(*)'] } }, null, 2) + '\n');
+
+    // Step 1: brain:upgrade's own merge.
+    mergeClaudeSettings(consumerPath, brainPath);
+    const afterUpgrade1 = JSON.parse(readFileSync(consumerPath, 'utf8'));
+    assert.deepEqual(afterUpgrade1.permissions.allow, ['MyCustomTool(*)']);
+
+    // Step 2: brain:env:init's merge, through the injected seams pointed at
+    // the same file.
+    await init({
+      _readClaudeSettings: () => readFileSync(consumerPath, 'utf8'),
+      _writeClaudeSettings: (relPath, content) => writeFileSync(consumerPath, content),
+      _repoRoot: tmp,
+    });
+    const afterInit = JSON.parse(readFileSync(consumerPath, 'utf8'));
+    assert.deepEqual(afterInit.permissions.allow, ['MyCustomTool(*)'], 'consumer key must survive init()');
+
+    // Step 3: brain:upgrade again — must be a stable no-op on the hook set.
+    mergeClaudeSettings(consumerPath, brainPath);
+    const afterUpgrade2 = JSON.parse(readFileSync(consumerPath, 'utf8'));
+    assert.deepEqual(afterUpgrade2.permissions.allow, ['MyCustomTool(*)'], 'consumer key must survive the second upgrade');
+    assert.deepEqual(afterUpgrade2.hooks, afterInit.hooks, 'the hook set must be stable after the second upgrade');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
 });
 
 // ── agent runtime descriptor (issue #123) ────────────────────────────────────
