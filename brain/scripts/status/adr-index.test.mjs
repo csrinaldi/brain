@@ -120,9 +120,10 @@ test('#879: on this repository every ADR parses and HOME.md lists exactly the pa
   const home = homeAdrList(readFileSync(join(ROOT, 'brain/HOME.md'), 'utf8'));
   const d = adrDrift(r.value, home);
   assert.deepEqual({ homeOnly: d.homeOnly, filesOnly: d.filesOnly }, { homeOnly: [], filesOnly: [] });
-  // The amendment trail exists as data now: ADR-0026 carries seven.
+  // The amendment trail exists as data now: ADR-0026 carries eight (Amendment 8 is #1124).
   const adr26 = r.value.find((a) => a.number === 26);
-  assert.equal(adr26.amendments.length, 7);
+  assert.equal(adr26.amendments.length, 8);
   assert.equal(adr26.amendments[6].issue, 743);
+  assert.equal(adr26.amendments[7].issue, 1124);
   assert.equal(r.value.find((a) => a.number === 6).supersededBy, 30);
 });
