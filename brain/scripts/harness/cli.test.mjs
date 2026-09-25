@@ -15,7 +15,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { resolveHarness, resolvePlatform, resolveEngine, resolveMemory, dispatch, VALID_OPS } from './cli.mjs';
-import { SDD_ENGINES } from './platform.mjs';
+import { SDD_ENGINES, DEFAULT_PLATFORM, AGENT_PLATFORMS } from './platform.mjs';
 
 // ── 3-axis resolution tests (issue #305) ───────────────────────────────────
 
@@ -27,17 +27,58 @@ test('resolvePlatform: env AGENT_PLATFORM wins over envVars and config', () => {
   assert.equal(result, 'claude');
 });
 
+// The legacy value is `antigravity`, NOT `claude` (#1125): with `claude` the
+// default, a legacy `SDD_HARNESS=claude` resolves to `claude` whether or not the
+// fallback is read at all — the test would pass against a resolver that dropped
+// SDD_HARNESS. The value under test must differ from the default to detect it.
 test('resolvePlatform: falls back to legacy SDD_HARNESS when platform absent', () => {
   const result = resolvePlatform({
     env: {},
-    envVars: { SDD_HARNESS: 'claude' },
+    envVars: { SDD_HARNESS: 'antigravity' },
   });
-  assert.equal(result, 'claude');
+  assert.equal(result, 'antigravity');
 });
 
-test('resolvePlatform: defaults to antigravity when absent', () => {
-  const result = resolvePlatform({ env: {}, envVars: {} });
-  assert.equal(result, 'antigravity');
+// #1125 — the default is `claude` (ADR-0024 Amendment 2). Until #1125 this test
+// pinned `antigravity`, ADR-0024's "deliberate default"; the maintainer's ruling
+// of 2026-09-24 moved it. Updated, not deleted: the default is still pinned, it is
+// just a different value.
+test('resolvePlatform: defaults to claude when nothing is stated (#1125)', () => {
+  assert.equal(resolvePlatform({ env: {}, envVars: {} }), 'claude');
+  assert.equal(resolvePlatform({ env: {}, envVars: {}, config: {} }), 'claude');
+  assert.equal(resolvePlatform({ env: {} }), 'claude');
+});
+
+test('resolvePlatform: DEFAULT_PLATFORM is the one declaration of the default, and it is claude (#1125)', () => {
+  assert.equal(DEFAULT_PLATFORM, 'claude');
+  assert.equal(resolvePlatform({ env: {}, envVars: {} }), DEFAULT_PLATFORM);
+});
+
+test('resolvePlatform: a legacy SDD_HARNESS outside the platform set falls to the claude default, not to itself (#1125)', () => {
+  // `gentle-ai` is an ENGINE (ADR-0024); as a legacy SDD_HARNESS it must not
+  // leak into the platform axis.
+  assert.equal(resolvePlatform({ env: {}, envVars: { SDD_HARNESS: 'gentle-ai' } }), 'claude');
+});
+
+test('resolvePlatform: a stated antigravity still resolves to antigravity on EVERY path (#1125)', () => {
+  const paths = {
+    'process env AGENT_PLATFORM': { env: { AGENT_PLATFORM: 'antigravity' }, envVars: {}, config: {} },
+    '.env AGENT_PLATFORM': { env: {}, envVars: { AGENT_PLATFORM: 'antigravity' }, config: {} },
+    'config platform': { env: {}, envVars: {}, config: { platform: 'antigravity' } },
+    'process env SDD_HARNESS (legacy)': { env: { SDD_HARNESS: 'antigravity' }, envVars: {}, config: {} },
+    '.env SDD_HARNESS (legacy)': { env: {}, envVars: { SDD_HARNESS: 'antigravity' }, config: {} },
+    'config harness (legacy)': { env: {}, envVars: {}, config: { harness: 'antigravity' } },
+  };
+  for (const [label, opts] of Object.entries(paths)) {
+    assert.equal(resolvePlatform(opts), 'antigravity', `stated via ${label}`);
+  }
+});
+
+test('resolvePlatform: AGENT_PLATFORMS names the supported platforms, claude first (#1125)', () => {
+  assert.deepEqual([...AGENT_PLATFORMS], ['claude', 'antigravity', 'plain']);
+  for (const p of AGENT_PLATFORMS) {
+    assert.equal(resolvePlatform({ env: {}, envVars: { SDD_HARNESS: p } }), p, `legacy SDD_HARNESS=${p}`);
+  }
 });
 
 test('resolveEngine: env SDD_ENGINE wins over envVars', () => {
