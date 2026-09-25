@@ -216,7 +216,12 @@ execFileSync('git', ['-C', consumer, 'commit', '-qm', 'consumer baseline']);
 // proved nothing: removing the `home-scaffold.mjs ensure` call from
 // bootstrap.sh entirely left this suite fully GREEN. A check that survives
 // the deletion of what it checks is not a check.
-for (const f of ['brain.config.json', 'AGENTS.md', '.env', 'brain/HOME.md']) {
+//
+// `.claude/settings.json` joined it with #1125. The default platform became
+// `claude`, whose harness init emits that file and not `AGENTS.md`; the source
+// tree tracks a copy, so leaving it would satisfy the post-condition below
+// without the harness init ever running — the F2 shape again.
+for (const f of ['brain.config.json', 'AGENTS.md', '.env', 'brain/HOME.md', '.claude/settings.json']) {
   rmSync(join(consumer, f), { force: true });
 }
 
@@ -272,8 +277,16 @@ if (init.status !== 0) console.log(init.out.split('\n').slice(-25).map((l) => ` 
 const POST_CONDITIONS = [
   ['brain.config.json', () => existsSync(join(consumer, 'brain.config.json'))],
   ['brain/HOME.md', () => existsSync(join(consumer, 'brain', 'HOME.md'))],
-  ['AGENTS.md (harness init ran)', () => existsSync(join(consumer, 'AGENTS.md'))],
+  // #1125: the fixture states no platform, so the harness init runs the DEFAULT
+  // platform, `claude`, and its emit is `.claude/settings.json`. This read
+  // `AGENTS.md` while `antigravity` was the default (ADR-0024, amended by
+  // Amendment 2); `AGENTS.md` is antigravity's emit and a claude consumer does
+  // not get one from env:init.
+  ['.claude/settings.json (harness init ran for the default platform)', () => existsSync(join(consumer, '.claude', 'settings.json'))],
   ['.env (PAT scaffold ran)', () => existsSync(join(consumer, '.env'))],
+  ['.env states AGENT_PLATFORM=claude (the default, stated explicitly — #1125)', () =>
+    existsSync(join(consumer, '.env'))
+    && /^AGENT_PLATFORM=claude$/m.test(readFileSync(join(consumer, '.env'), 'utf8'))],
   ['core.hooksPath (pre-push hook installed)', () => {
     const r = spawnSync('git', ['-C', consumer, 'config', '--get', 'core.hooksPath'], { encoding: 'utf8' });
     return (r.stdout ?? '').trim() === 'brain/scripts/hooks';
