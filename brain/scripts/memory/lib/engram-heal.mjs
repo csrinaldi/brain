@@ -26,7 +26,7 @@ const IDENTITY_FIELDS = Object.freeze(['content', 'title', 'type']);
  *
  * engram's update banner ("Update available: 1.20.0 -> 2.0.0") lives on
  * STDERR and carries TWO version numbers; this function is never handed that
- * text by its caller (backends/engram.mjs reads `engram version`'s stdout
+ * text by its caller (axes/memory/adapters/engram.mjs reads `engram version`'s stdout
  * alone) but stays defensive about the shape regardless — a caller error
  * here must surface as `null`, never as a wrong guess.
  *

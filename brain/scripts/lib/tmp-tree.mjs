@@ -33,14 +33,14 @@
 // swallowed twice.
 //
 // `_rm` and `onLeak` are injectable purely as test seams (this repo's convention —
-// see e.g. `harness/backends/claude.mjs`'s `_run`/`_env`): they let the test suite
+// see e.g. `axes/platform/adapters/claude.mjs`'s `_run`/`_env`): they let the test suite
 // drive the ENOTEMPTY/other-errno/give-up paths deterministically, without waiting
 // on a real race to reproduce.
 //
 // LOCATION (issue #887, correction C2): this module lived at
 // `__fixtures__/tmp-tree.mjs` from #801 through #802's 31-file adoption sweep. #802's
 // own scope note flagged, but deliberately did not resolve, that two PRODUCTION
-// modules (`review/cold-boot.mjs`, `memory/backends/engram.mjs`) were importing a
+// modules (`review/cold-boot.mjs`, `axes/memory/adapters/engram.mjs`) were importing a
 // helper from a directory named `__fixtures__` — a name that reads test-only. #887
 // Slice B (`memory/lane/collect.mjs`) became a THIRD production importer, at which
 // point deferring the layering question further stopped being reasonable: this file

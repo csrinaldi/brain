@@ -979,8 +979,8 @@ requirements.
 When `brain.config.json` exists at the scanned root but cannot be read or parsed, every
 call site consuming `governance.memorySecretPatterns` or `memorySecretAllowPatterns`
 MUST refuse instead of scanning under `DEFAULT_SECRET_PATTERNS`. Call sites:
-`memory/lane/collect.mjs`, `memory/backends/engram.mjs`,
-`memory/backends/plainfiles.mjs`, `governance/lane-scrub.mjs`.
+`memory/lane/collect.mjs`, `axes/memory/adapters/engram.mjs`,
+`axes/memory/adapters/plainfiles.mjs`, `governance/lane-scrub.mjs`.
 
 #### Scenario: A policy that cannot be read is not an empty policy
 

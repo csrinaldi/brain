@@ -12,8 +12,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { assertNoApprovalLabel } from './approval-deny.mjs';
-import * as github from '../providers/github.mjs';
-import * as gitlab from '../providers/gitlab.mjs';
+import * as github from '../../axes/vcs/adapters/github.mjs';
+import * as gitlab from '../../axes/vcs/adapters/gitlab.mjs';
 
 test('#528: the default approval label is refused', () => {
   assert.throws(

@@ -8,8 +8,8 @@ import { removeTempTree } from '../__fixtures__/tmp-tree.mjs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import * as plain from './backends/plain.mjs';
-import * as gentleAi from './backends/gentle-ai.mjs';
+import * as plain from '../axes/sdd-engine/adapters/plain.mjs';
+import * as gentleAi from '../axes/sdd-engine/adapters/gentle-ai.mjs';
 import { assertRoutedStage } from '../lib/stage-engine.mjs';
 import { artifactPaths } from '../lib/sdd-layout.mjs';
 

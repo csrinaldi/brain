@@ -300,9 +300,9 @@ a non-empty `priorVerdicts`, with the latest entry carrying a defined `author`.]
 - PR #383 (`fix(vcs): prReviews carries the verdict body — revives anti-loop, rev-bound,
   doctrine load and board`), commit `f88b3f3a20a55dafd8290af8f190f1bfeb8ef1a2`, merged to
   `main` 2026-07-31.
-- `brain/scripts/vcs/providers/github.mjs` — `prReviews` (`main` lines ~266-307).
-- `brain/scripts/vcs/providers/gitlab.mjs` — `prReviews` (`main` lines ~242-350).
-- `brain/scripts/vcs/providers/vcs.contract.test.mjs` — the `prReviews` contract block
+- `brain/scripts/axes/vcs/adapters/github.mjs` — `prReviews` (`main` lines ~266-307).
+- `brain/scripts/axes/vcs/adapters/gitlab.mjs` — `prReviews` (`main` lines ~242-350).
+- `brain/scripts/axes/vcs/contract.test.mjs` — the `prReviews` contract block
   (lines ~562-651) and the GitLab-specific security/all-or-nothing/source-scan tests
   (lines ~1483-1642).
 - `brain/scripts/vcs/fixtures/{github,gitlab}-prReviews-{happy,failure}.json`,
@@ -621,9 +621,9 @@ a non-empty `priorVerdicts`, with the latest entry carrying a defined `author`.]
 - PR #383 (`fix(vcs): prReviews carries the verdict body — revives anti-loop, rev-bound,
   doctrine load and board`), commit `f88b3f3a20a55dafd8290af8f190f1bfeb8ef1a2`, merged to
   `main` 2026-07-31.
-- `brain/scripts/vcs/providers/github.mjs` — `prReviews` (`main` lines ~266-307).
-- `brain/scripts/vcs/providers/gitlab.mjs` — `prReviews` (`main` lines ~242-350).
-- `brain/scripts/vcs/providers/vcs.contract.test.mjs` — the `prReviews` contract block
+- `brain/scripts/axes/vcs/adapters/github.mjs` — `prReviews` (`main` lines ~266-307).
+- `brain/scripts/axes/vcs/adapters/gitlab.mjs` — `prReviews` (`main` lines ~242-350).
+- `brain/scripts/axes/vcs/contract.test.mjs` — the `prReviews` contract block
   (lines ~562-651) and the GitLab-specific security/all-or-nothing/source-scan tests
   (lines ~1483-1642).
 - `brain/scripts/vcs/fixtures/{github,gitlab}-prReviews-{happy,failure}.json`,

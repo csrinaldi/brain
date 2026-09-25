@@ -9,7 +9,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { VALID_OPS, CLI_OPS, dispatch } from './cli.mjs';
-import { runStage, STAGE_TIMEOUT_MS } from './backends/claude.mjs';
+import { runStage, STAGE_TIMEOUT_MS } from '../axes/platform/adapters/claude.mjs';
 import { SDD_LIFECYCLE_STAGES, COLD_REVIEW_STAGE } from '../lib/stage-engine.mjs';
 
 const okRun = () => ({ status: 0, stdout: '', stderr: '' });

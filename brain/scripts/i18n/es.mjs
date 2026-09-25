@@ -423,12 +423,12 @@ export default {
   'memory.backend.statedButAbsent': 'MEMORY_BACKEND={backend} está seteado explícitamente, pero el binario `{backend}` no está en PATH acá — un selector explícito nunca se pisa (ADR-0004), así que esta corrida va a fallar. La captura solo-registros no necesita backend: `MEMORY_BACKEND={fallback} npm run brain:memory:{op}`.',
   'memory.backend.probeFailed': 'no se pudo determinar si el binario `{backend}` está presente — {reason}. Eso es la VERIFICACIÓN fallando, no el binario faltando, así que no se sustituyó nada y `{op}` sigue sobre `{backend}`. Si falla, la ruta solo-registros es `MEMORY_BACKEND={fallback} npm run brain:memory:{op}`.',
 
-  // ── memory/backends/engram.mjs — share() secret scrub (issue #214, C1b) ──────
+  // ── axes/memory/adapters/engram.mjs — share() secret scrub (issue #214, C1b) ──────
   'memory.share.unprovenanced': '{count} observación(es) llegaron sin bloque de provenance, así que se materializaron como `@legacy` y sin `issue` — todavía nada emite el bloque en el camino de captura (#541). Contadas, no rechazadas: rechazarlas voltearía el store que ya existe.',
   'memory.share.skippedHydrated': 'Se omitieron {count} observación(es) — su topic ya nombraba un registro (escrito por hydrate(), #874), así que reexportarlas habría generado un id duplicado.',
   'memory.share.secretFound': 'Se detectó un secreto en {file}:{line} — coincide con el patrón "{pattern}". Eliminá el secreto o agregá una entrada en governance.memorySecretAllowPatterns si es un falso positivo. Ejecutá `gunzip -c {file} | jq .` para inspeccionar (el número de línea corresponde a esa vista formateada).',
 
-  // ── memory/backends/engram.mjs — alcance del export contra la base upstream del
+  // ── axes/memory/adapters/engram.mjs — alcance del export contra la base upstream del
   // exportador de records en dual-write (issue #701). Huérfana desde #874 split B
   // junto al resto de `memory.share.*` (D6) — el exportador también se retiró
   // ahora (#955 R5, epic task 2.4), así que estas claves ya no tienen lector.
@@ -448,7 +448,7 @@ export default {
   'memory.stagedRecordsCheck.configUnreadable': '{error}. Cualquier memory.upstreamRef declarado ahí NO fue respetado — la base upstream se derivó como {ref} en su lugar. Arreglá brain.config.json (un marcador de conflicto a medio merge es la causa habitual) si querías apuntar a otro ref.',
   'memory.stagedRecordsCheck.configUnreadableNoRef': '{error}. Cualquier memory.upstreamRef declarado ahí NO fue respetado, y tampoco resolvió ninguna base upstream — la línea siguiente dice qué se intentó. Arreglá brain.config.json (un marcador de conflicto a medio merge es la causa habitual) si querías apuntar a otro ref.',
 
-  // ── memory/backends/engram.mjs — importMemory() pull solo-records (D2/C4, issue #229) ──
+  // ── axes/memory/adapters/engram.mjs — importMemory() pull solo-records (D2/C4, issue #229) ──
   'memory.import.empty':    'ℹ no se encontraron registros en .memory/records/ — nada para importar.',
   'memory.import.progress': '  ✓ {written}/{total} registros importados',
   'memory.import.done':     '✓ importación completa — {written}/{total} registros importados a engram (solo records, D2/C4).',
@@ -472,7 +472,7 @@ export default {
   // call site (engram.mjs#save) ahora es el camino productor record-first.
   'memory.search.engramUnsupported':  "'{op}' no es un verbo de cli para el backend '{backend}' — usá el mem_search nativo de engram / 'engram search' en su lugar.",
 
-  // ── memory/backends/plainfiles.mjs — verbos cli save/search (C3, issue #246) ──
+  // ── axes/memory/adapters/plainfiles.mjs — verbos cli save/search (C3, issue #246) ──
   'memory.plainfiles.save.issueInvalid': '--issue tiene que ser un NÚMERO de issue; llegó {value}. Se guarda como entero para que el registro quede atado a su ticket.',
   'memory.plainfiles.save.typeRequired': '--type es obligatorio y no tiene default seguro — es una elección, no un dato que la herramienta pueda derivar. Uno de: {types}.',
   'memory.plainfiles.save.done':    '✓ guardado {id} → {file}',

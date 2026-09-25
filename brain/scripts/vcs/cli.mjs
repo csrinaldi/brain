@@ -2,7 +2,7 @@
 // brain/scripts/vcs/cli.mjs — vcs.provider dispatcher.
 //
 // Reads vcs.provider from brain.config.json (or VCS_PROVIDER env override) and
-// delegates to ./providers/<provider>.mjs. Mirrors brain/scripts/memory/cli.mjs, but
+// delegates to axes/vcs/adapters/<provider>.mjs. Mirrors brain/scripts/memory/cli.mjs, but
 // the selector is REPO-LEVEL (brain.config.json), not per-dev (.env) — see ADR-0008.
 //
 // Two usages:
@@ -34,7 +34,7 @@ import { loadBrainConfig } from '../lib/brain-config.mjs';
 // prCommits (issue #358 Q5 Phase 4): READ-only PR/MR commit list, added to
 // resolve REQ-L5-1's tiered evidence (lite's distinct-act head-commit
 // timestamp; regulated's approver-authored-no-commit check) — see
-// providers/github.mjs#prCommits / providers/gitlab.mjs#prCommits.
+// axes/vcs/adapters/github.mjs#prCommits / axes/vcs/adapters/gitlab.mjs#prCommits.
 // mrAutoMerge (issue #886, ADR-0034 L2): arms auto-merge by tier
 // (requiredReviews), never merges, never throws. No flag parsing needed —
 // the CLI takes one JSON blob (see below), so requiredReviews arrives as a
@@ -142,11 +142,11 @@ export async function getVcs({ config, env, provider, identity = null, _import, 
   }
   let mod;
   try {
-    const url = new URL(`./providers/${name}.mjs`, import.meta.url);
+    const url = new URL(`../axes/vcs/adapters/${name}.mjs`, import.meta.url);
     mod = _import ? await _import(url) : await import(url);
   } catch (err) {
     throw new Error(
-      `vcs: provider '${name}' not found at providers/${name}.mjs — ${err.message}`,
+      `vcs: provider '${name}' not found at axes/vcs/adapters/${name}.mjs — ${err.message}`,
     );
   }
   // An explicit `identity` always wins — the reviewer verifies and writes as a

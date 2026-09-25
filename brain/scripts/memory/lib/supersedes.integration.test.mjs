@@ -26,7 +26,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
-import { save } from '../backends/plainfiles.mjs';
+import { save } from '../../axes/memory/adapters/plainfiles.mjs';
 import { readRecords } from './store.mjs';
 import { withoutEnv } from '../__fixtures__/env.mjs';
 

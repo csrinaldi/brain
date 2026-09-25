@@ -670,7 +670,7 @@ if (!dryRun) {
   }
 
   try {
-    const { init: antigravityInit, REGENERATE_HINT } = await import(new URL('./harness/backends/antigravity.mjs', import.meta.url));
+    const { init: antigravityInit, REGENERATE_HINT } = await import(new URL('./axes/platform/adapters/antigravity.mjs', import.meta.url));
     // `init()` emits .gemini/settings.json TOO. Left alive, it would overwrite the
     // merge performed moments ago in this same run — a wired, correct, quietly
     // destructive path, which is the exact defect class this issue exists to

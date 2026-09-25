@@ -234,7 +234,7 @@ export async function assertRoutedStage({ config, stage, _load } = {}) {
     );
   }
 
-  const { loadInhabitant, resolveRoles } = await import('../roles/role-port.mjs');
+  const { loadInhabitant, resolveRoles } = await import('../axes/sdd-engine/role-port.mjs');
   const inhabitant = await loadInhabitant(routing.engine, _load ? { _load } : {});
   // The port's own refusals travel untouched: no declareRoles, an unanswered
   // stage, a malformed declaration — each is the port's sentence, not ours.

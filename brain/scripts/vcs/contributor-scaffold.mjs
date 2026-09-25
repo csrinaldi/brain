@@ -37,8 +37,8 @@
 // reproduces the claim in order to disown it is indistinguishable, to a reader
 // grepping the tree, from one that means it.
 
-import { CONTRIBUTOR_SCAFFOLD as GITHUB_DELIVERY } from './providers/github.mjs';
-import { CONTRIBUTOR_SCAFFOLD as GITLAB_DELIVERY } from './providers/gitlab.mjs';
+import { CONTRIBUTOR_SCAFFOLD as GITHUB_DELIVERY } from '../axes/vcs/adapters/github.mjs';
+import { CONTRIBUTOR_SCAFFOLD as GITLAB_DELIVERY } from '../axes/vcs/adapters/gitlab.mjs';
 import { GOVERNANCE_JOBS } from './governance-checks.mjs';
 import { resolveApprovedLabel } from '../governance/approved-label.mjs';
 

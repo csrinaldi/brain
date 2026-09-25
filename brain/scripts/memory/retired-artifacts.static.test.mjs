@@ -62,7 +62,7 @@ const { hits, scanned } = scanForRetiredArtifactStrings();
 
 test('S1: the scan read a real tree (a vacuous pass is a failure) — more than 100 production files scanned, including engram.mjs', () => {
   assert.ok(scanned > 100, `only ${scanned} file(s) scanned under brain/scripts/ — the walker, not the tree, is what to look at`);
-  const engramMjsPath = join(SCAN_ROOT, 'memory', 'backends', 'engram.mjs');
+  const engramMjsPath = join(SCAN_ROOT, 'axes', 'memory', 'adapters', 'engram.mjs');
   assert.doesNotThrow(() => statSync(engramMjsPath), 'engram.mjs must exist and be reachable by the walk');
 });
 

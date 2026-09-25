@@ -4,7 +4,7 @@
 // (#887 Slice B) became a third PRODUCTION module importing a helper from a
 // directory named `__fixtures__` — a name that reads test-only — and #802's
 // own scope note had already flagged that layering question for the first
-// two (`review/cold-boot.mjs`, `memory/backends/engram.mjs`) without
+// two (`review/cold-boot.mjs`, `axes/memory/adapters/engram.mjs`) without
 // resolving it. Every existing `import { removeTempTree } from
 // '.../__fixtures__/tmp-tree.mjs'` across this repo's test suite keeps
 // working unchanged through this re-export — only NEW imports should reach

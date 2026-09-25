@@ -354,7 +354,7 @@ export async function fetchPrMeta(subject, vcs, config, sha) {
         // `prView` NEVER THROWS (ci-context.mjs: "an internal failure yields
         // `null` on the affected fields only, never an exception"). On a failed
         // `gh` call it RETURNS `{ labels: null, body: null }`
-        // (providers/github.mjs:186 and :203; gitlab.mjs mirrors it). On SUCCESS
+        // (axes/vcs/adapters/github.mjs:186 and :203; gitlab.mjs mirrors it). On SUCCESS
         // it always returns an array and a string (`data.labels ?? []`,
         // `data.body ?? ''`), so null/null is unambiguous and can only mean the
         // fetch failed.

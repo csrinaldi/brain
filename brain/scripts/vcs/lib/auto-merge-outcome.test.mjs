@@ -72,7 +72,7 @@ test('refused({reason,error}): error is present iff explicitly passed — never 
 
 test('source guard: neither provider source hand-constructs `enabled:` — both import armed/refused from this module', () => {
   for (const providerFile of ['github.mjs', 'gitlab.mjs']) {
-    const src = readFileSync(fileURLToPath(new URL(`../providers/${providerFile}`, import.meta.url)), 'utf8');
+    const src = readFileSync(fileURLToPath(new URL(`../../axes/vcs/adapters/${providerFile}`, import.meta.url)), 'utf8');
     // Editorial 7: `\s+` (at least one space) missed a hand-written COMPACT
     // literal like `enabled:true` (no space) — the exact style Prettier
     // would never emit but a hand-edit could. Widened to `\s*` so both

@@ -48,7 +48,7 @@ const SOURCE = readFileSync(MODULE_PATH, 'utf8');
 //
 // The fix is not "add the other file" — it is to derive the list from the
 // import statements, and to pin it, so a THIRD module cannot slip in silently
-// either. `harness/backends/antigravity.mjs` and `lib/home-index.mjs` are
+// either. `axes/platform/adapters/antigravity.mjs` and `lib/home-index.mjs` are
 // shared library code with their own suites and are deliberately out of scope;
 // they are named here so adding a new import fails this test until someone
 // decides which side of that line it is on.
@@ -69,7 +69,7 @@ const SOURCE = readFileSync(MODULE_PATH, 'utf8');
 const OWN_IMPORTS = ['brain/scripts/lib/amendment-draft.mjs', 'brain/scripts/lib/migration-draft.mjs', 'brain/scripts/lib/promote-guards.mjs'];
 const SHARED_IMPORTS = [
   'brain/scripts/lib/home-index.mjs',
-  'brain/scripts/harness/backends/antigravity.mjs',
+  'brain/scripts/axes/platform/adapters/antigravity.mjs',
   'brain/scripts/lib/shipped-hostnames.mjs',
   'brain/scripts/lib/fenced-blocks.mjs',
   'brain/scripts/lib/installer.mjs',

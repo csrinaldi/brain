@@ -23,7 +23,7 @@ import {
   runPromote,
 } from './brain-promote.mjs';
 import { GUARDS } from './lib/promote-guards.mjs';
-import { compileAgentsMd, SOURCE_DOCS } from './harness/backends/antigravity.mjs';
+import { compileAgentsMd, SOURCE_DOCS } from './axes/platform/adapters/antigravity.mjs';
 import { makeFixtureRepo, statusOf, SAMPLE_DRAFT } from './__fixtures__/promote-repo.mjs';
 
 // Independent transcription of governance/checks/adr-presence.mjs's ADR_RE.

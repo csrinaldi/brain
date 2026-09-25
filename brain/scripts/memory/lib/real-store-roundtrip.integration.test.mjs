@@ -34,7 +34,7 @@ import { importRecord } from './engram-import.mjs';
 import { exportObservation } from './engram-export.mjs';
 import { buildRecord, computeRecordId, validateRecord, validateWritableRecord } from './format.mjs';
 
-// Same depth as engram.mjs's repoRoot (brain/scripts/memory/backends/engram.mjs):
+// Same depth as engram.mjs's repoRoot (brain/scripts/axes/memory/adapters/engram.mjs):
 // this file lives at brain/scripts/memory/lib/, a sibling directory at the
 // same depth — four levels up reaches the repo root.
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '../../../..');

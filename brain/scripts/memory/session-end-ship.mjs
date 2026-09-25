@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // brain/scripts/memory/session-end-ship.mjs — the SessionEnd hook launcher
 // (#906, design.md A1-A3, ruling D1). The compiled SessionEnd hook
-// (harness/backends/settings-hooks.mjs) runs `npm run brain:memory:session-end`
+// (axes/platform/lib/settings-hooks.mjs) runs `npm run brain:memory:session-end`
 // UNCONDITIONALLY on every platform (D2: emit-always, guard at runtime) — this
 // file is that runtime guard.
 //

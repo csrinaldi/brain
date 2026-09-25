@@ -16,7 +16,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { SOURCE_DOCS, AGENTS_EMIT_PATH, compileAgentsMd } from '../harness/backends/antigravity.mjs';
+import { SOURCE_DOCS, AGENTS_EMIT_PATH, compileAgentsMd } from '../axes/platform/adapters/antigravity.mjs';
 
 export const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 

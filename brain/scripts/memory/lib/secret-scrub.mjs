@@ -3,7 +3,7 @@
 // Scans ONLY the content materialized in the CURRENT `brain:memory:share` run — never
 // the whole store (C1a design.md Decision 5). Today "materialized this run"
 // means the engram gzip chunks `share()` writes to `.memory/chunks/*.jsonl.gz`
-// (see backends/engram.mjs#scrubMaterializedChunks) — a deliberate pre-C2 scrub
+// (see axes/memory/adapters/engram.mjs#scrubMaterializedChunks) — a deliberate pre-C2 scrub
 // target: C2 re-points brain-owned durable I/O at `records/`, and the scanner
 // moves with it then. Fails closed: a match blocks the run (non-zero exit) and
 // names the matched pattern + file:line. There is NO `--no-scrub` flag — the

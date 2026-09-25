@@ -9,7 +9,7 @@ import { readFileSync } from 'node:fs';
 import { projectRole, PROJECTION_PLATFORMS } from './project-role.mjs';
 import { VERIFIER_REVIEW } from './verifier-review.mjs';
 import { ADVERSARY_COLD_REVIEW } from './adversary-cold-review.mjs';
-import { compileAgentsMd, SOURCE_DOCS } from '../../harness/backends/antigravity.mjs';
+import { compileAgentsMd, SOURCE_DOCS } from '../../axes/platform/adapters/antigravity.mjs';
 
 test('#576 T3: same input, same bytes — twice, on both platforms', () => {
   for (const platform of PROJECTION_PLATFORMS) {

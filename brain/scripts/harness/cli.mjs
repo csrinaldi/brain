@@ -5,7 +5,8 @@
 //   op: init
 //
 // Reads SDD_HARNESS from the environment or .env (default: gentle-ai).
-// Imports the corresponding backend from ./backends/<harness>.mjs and
+// Imports the corresponding backend from axes/<axis>/adapters/<harness>.mjs
+// (harnessAdapterUrl, issue #1141) and
 // dispatches the requested operation.
 //
 // Mirrors brain/scripts/memory/cli.mjs exactly (ADR-0012).
@@ -42,6 +43,7 @@ function readEnvFile(root = repoRoot) {
 // ADR-0024, and moving it out from under its callers would be a second defect
 // to fix the first.
 import { resolvePlatform, SDD_ENGINES } from './platform.mjs';
+import { harnessAdapterUrl } from '../axes/lib/harness-adapter-url.mjs';
 export { resolvePlatform, SDD_ENGINES };
 
 /**
@@ -156,7 +158,7 @@ const kebabToCamel = (s) => s.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
 // Backend loader (injectable seam for testing)
 // ---------------------------------------------------------------------------
 async function defaultBackendLoader(harness) {
-  const url = new URL(`./backends/${harness}.mjs`, import.meta.url);
+  const url = harnessAdapterUrl(harness);
   try {
     return await import(url);
   } catch (err) {

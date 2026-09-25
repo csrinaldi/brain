@@ -76,7 +76,7 @@ const ALLOWLIST = [
     // worse than the bare rmSync it would replace.
   },
   {
-    path: 'brain/scripts/memory/backends/engram.mjs',
+    path: 'brain/scripts/axes/memory/adapters/engram.mjs',
     // Scratch dirs for export/import payloads, removed in a `finally`. Here
     // never-throwing is arguably RIGHT (a throwing cleanup in `finally` masks
     // the original exception) — but adopting it would make a production module

@@ -175,7 +175,7 @@ test('#641 FALLBACK_OPS: every covered op is really implemented by the fallback,
   // `index`/`featureCheckpoint`/`featureResume` ARE exported functions on
   // plainfiles, so `typeof === function` cannot tell them apart from real ones;
   // they defer via unsupportedOp, so the distinction is BEHAVIOURAL.
-  const plainfiles = await import('../backends/plainfiles.mjs');
+  const plainfiles = await import('../../axes/memory/adapters/plainfiles.mjs');
   const verbExport = (op) => ({ import: 'importMemory' })[op] ?? op.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
 
   for (const op of FALLBACK_OPS) {

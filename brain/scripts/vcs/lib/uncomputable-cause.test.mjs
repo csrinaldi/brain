@@ -256,7 +256,7 @@ test('uncomputable({detail, reason}): an explicitly-passed reason is never overr
 
 test('source guard: neither provider source contains the literal `uncomputable: true` (#606) — one constructor, uncomputable() in this module', () => {
   for (const providerFile of ['github.mjs', 'gitlab.mjs']) {
-    const src = readFileSync(fileURLToPath(new URL(`../providers/${providerFile}`, import.meta.url)), 'utf8');
+    const src = readFileSync(fileURLToPath(new URL(`../../axes/vcs/adapters/${providerFile}`, import.meta.url)), 'utf8');
     assert.equal(
       src.includes('uncomputable: true'),
       false,

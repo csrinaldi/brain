@@ -12,7 +12,7 @@
 // `brain:memory:share` or the #701 gate.
 //
 // `withoutEnv` was originally local to
-// `backends/engram.upstream-scope.test.mjs` (the one test file that first
+// `axes/memory/adapters/engram.upstream-scope.test.mjs` (the one test file that first
 // needed it) and is promoted here so every file with the same real-predicate
 // shape can share one implementation instead of re-deriving it.
 export function withoutEnv(t, name) {

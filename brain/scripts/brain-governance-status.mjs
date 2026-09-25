@@ -467,7 +467,7 @@ export async function reportGovernanceStatus({
     platformKnown = false;
   } else if (!providerModule) {
     try {
-      providerModule = await import(`./vcs/providers/${provider}.mjs`);
+      providerModule = await import(`./axes/vcs/adapters/${provider}.mjs`);
     } catch (e) {
       console.log(`  platform    UNKNOWN (cannot load provider "${provider}": ${e.message})`);
       platformKnown = false;

@@ -17,7 +17,7 @@
 // invoked by .github/workflows/governance-relabel.yml on `issues: labeled`,
 // finds every OPEN PR whose body references the just-approved issue and
 // forces a FULL rerun of governance.yml for each (via the GitHub-only
-// `rerunWorkflowRun` verb, providers/github.mjs) — never `gh run rerun
+// `rerunWorkflowRun` verb, axes/vcs/adapters/github.mjs) — never `gh run rerun
 // --failed`, which only reruns already-failed jobs and would leave the
 // stale-green actor-check untouched, the literal bug being fixed here.
 //

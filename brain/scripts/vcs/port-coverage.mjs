@@ -25,8 +25,8 @@ const REPO = join(HERE, '..', '..', '..');
 
 /** The adapters whose exports define the port surface. */
 export const PROVIDER_FILES = Object.freeze({
-  github: 'brain/scripts/vcs/providers/github.mjs',
-  gitlab: 'brain/scripts/vcs/providers/gitlab.mjs',
+  github: 'brain/scripts/axes/vcs/adapters/github.mjs',
+  gitlab: 'brain/scripts/axes/vcs/adapters/gitlab.mjs',
 });
 
 /**
@@ -299,7 +299,7 @@ export function gather({ repo = REPO, _read = readFileSync, _readdir = readdirSy
     fixtures.push({ provider: m ? m[1] : null, verb: m ? m[2] : null, name, provenance });
   }
 
-  const contractText = read('brain/scripts/vcs/providers/vcs.contract.test.mjs');
+  const contractText = read('brain/scripts/axes/vcs/contract.test.mjs');
 
   const consumers = [];
   let otherTestText = '';
@@ -322,7 +322,7 @@ export function gather({ repo = REPO, _read = readFileSync, _readdir = readdirSy
         if (!p.includes('vcs.contract.test.mjs')) otherTestText += `\n${text}`;
         continue;
       }
-      if (p.includes('/vcs/providers/')) continue;   // a provider calling itself is not a consumer
+      if (p.includes('/axes/vcs/adapters/')) continue;   // a provider calling itself is not a consumer
       // And the audit is not a consumer of the port either. This file discusses
       // verbs by name in its own prose and carries a regex whose SOURCE matches
       // its own dispatcher pattern — measured: it counted itself for

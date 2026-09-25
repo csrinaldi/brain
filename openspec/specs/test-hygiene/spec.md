@@ -55,7 +55,7 @@
 
 ## R1026-1: the test suite leaves the real `.memory/index.jsonl` unchanged after running
 
-- Every test in `brain/scripts/memory/backends/engram.pull.test.mjs` that
+- Every test in `brain/scripts/axes/memory/adapters/engram.pull.test.mjs` that
   calls `pullMemory()` MUST inject both `root` and `_rebuildIndex`, matching
   the pattern the file's own (f)/(g) tests already use
   (`engram.pull.test.mjs:102-141`).
@@ -72,7 +72,7 @@
   MUST assert *unchanged*, never *absent* — the file legitimately exists
   and must stay as it was.
 - A full run of `GIT_CONFIG_GLOBAL=/dev/null node --test
-  brain/scripts/memory/backends/engram.pull.test.mjs` MUST leave
+  brain/scripts/axes/memory/adapters/engram.pull.test.mjs` MUST leave
   `git status --short .memory/index.jsonl` empty afterward.
 
 ## R1026-2: the hygiene guard covers production functions whose root parameter defaults to the repo

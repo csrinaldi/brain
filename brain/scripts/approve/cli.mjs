@@ -205,7 +205,7 @@ export async function runApprove({
   // credential source) — PROVIDER-CONDITIONAL (cold-review round 2 finding):
   // on GitLab every site honors `{ apiBase, token, proxyUrl }`, so threading
   // it keeps whoami and the post on the SAME source. On GitHub, `whoami`
-  // DOES honor a `token` key (providers/github.mjs's `GH_TOKEN` override) but
+  // DOES honor a `token` key (axes/vcs/adapters/github.mjs's `GH_TOKEN` override) but
   // `prView`/`mrList`/`prReviews`/`prReviewComment` do not — they always use
   // the ambient `gh` session. Threading a GitLab-derived token into whoami
   // there would let it resolve a DIFFERENT identity than the one that posts.

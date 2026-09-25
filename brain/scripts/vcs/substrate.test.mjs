@@ -19,7 +19,7 @@ import { spawnSync } from 'node:child_process';
 import { detectSubstrate } from './substrate.mjs';
 import { checkContexts } from './governance-checks.mjs';
 import { setSpawn } from './lib/exec.mjs';
-import * as gitlab from './providers/gitlab.mjs';
+import * as gitlab from '../axes/vcs/adapters/gitlab.mjs';
 
 afterEach(() => setSpawn(spawnSync));
 

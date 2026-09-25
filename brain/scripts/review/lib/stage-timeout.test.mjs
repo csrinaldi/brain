@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { STAGE_TIMEOUT_MS } from '../../harness/backends/claude.mjs';
+import { STAGE_TIMEOUT_MS } from '../../axes/platform/adapters/claude.mjs';
 import {
   TIMEOUT_IN_FORCE_TODAY,
   MIN_STAGE_TIMEOUT_MS,

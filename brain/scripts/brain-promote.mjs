@@ -46,7 +46,7 @@ import { join, basename, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { insertAdrLink } from './lib/home-index.mjs';
-import { SOURCE_DOCS, AGENTS_EMIT_PATH, compileAgentsMd } from './harness/backends/antigravity.mjs';
+import { SOURCE_DOCS, AGENTS_EMIT_PATH, compileAgentsMd } from './axes/platform/adapters/antigravity.mjs';
 import {
   AMENDMENT_DRAFT_SUFFIX,
   CONTRACT_TAG,

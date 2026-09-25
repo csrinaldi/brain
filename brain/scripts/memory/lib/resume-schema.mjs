@@ -2,7 +2,7 @@
 //
 // Pure functions: no filesystem access, no engram dependency, no child processes.
 // Used by:
-//   - brain/scripts/memory/backends/engram.mjs (featureCheckpoint validation step)
+//   - brain/scripts/axes/memory/adapters/engram.mjs (featureCheckpoint validation step)
 //   - Slice 1 contract tests (resume-schema.test.mjs)
 //
 // Contract (REQ-S1-1):

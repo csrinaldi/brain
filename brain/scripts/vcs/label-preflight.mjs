@@ -11,11 +11,11 @@
 // taxonomy. labelPreflight converts both into ONE uniform, local, actionable
 // refusal before any write ever happens.
 //
-// Deliberately UNCACHED (unlike providers/*.mjs's `capabilities()` memo) —
+// Deliberately UNCACHED (unlike axes/vcs/adapters/*.mjs's `capabilities()` memo) —
 // every call re-checks the remote, per spec.
 
-import { labelList as githubLabelList } from './providers/github.mjs';
-import { labelList as gitlabLabelList } from './providers/gitlab.mjs';
+import { labelList as githubLabelList } from '../axes/vcs/adapters/github.mjs';
+import { labelList as gitlabLabelList } from '../axes/vcs/adapters/gitlab.mjs';
 
 const PROVIDER_LABEL_LIST = {
   github: githubLabelList,

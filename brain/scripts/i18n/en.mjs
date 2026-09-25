@@ -463,12 +463,12 @@ export default {
   'memory.backend.statedButAbsent': 'MEMORY_BACKEND={backend} is set explicitly, but the `{backend}` binary is not on PATH here — a stated selector is never overridden (ADR-0004), so this run will fail. Records-only capture needs no backend: `MEMORY_BACKEND={fallback} npm run brain:memory:{op}`.',
   'memory.backend.probeFailed': 'could not determine whether the `{backend}` binary is present — {reason}. That is the CHECK failing, not the binary being absent, so nothing was substituted and `{op}` continues on `{backend}`. If it fails, the records-only route is `MEMORY_BACKEND={fallback} npm run brain:memory:{op}`.',
 
-  // ── memory/backends/engram.mjs — share() secret scrub (issue #214, C1b) ──────
+  // ── axes/memory/adapters/engram.mjs — share() secret scrub (issue #214, C1b) ──────
   'memory.share.unprovenanced': '{count} observation(s) arrived with no provenance block, so they materialised as `@legacy` with no `issue` — nothing emits the block on the capture path yet (#541). Counted, not refused: refusing would reject the store that already exists.',
   'memory.share.skippedHydrated': '{count} observation(s) were skipped — their topic already named a record (written by hydrate(), #874), so re-exporting them would have minted a duplicate id.',
   'memory.share.secretFound': 'Secret detected in {file}:{line} — pattern "{pattern}" matched. Redact the secret, or add an allowlist entry in governance.memorySecretAllowPatterns if this is a false positive. Run `gunzip -c {file} | jq .` to inspect (the line number is against that pretty-printed view).',
 
-  // ── memory/backends/engram.mjs — the records dual-write exporter's upstream-base
+  // ── axes/memory/adapters/engram.mjs — the records dual-write exporter's upstream-base
   // export scope (issue #701). Orphaned since #874 split B along with the rest of
   // `memory.share.*` (D6) — the exporter itself is gone too now (#955 R5, epic
   // task 2.4), so these keys have no reader left. Left in place: no ruling covers
@@ -497,7 +497,7 @@ export default {
   // See memory.share.upstreamConfigUnreadableNoRef — the same split, at the gate.
   'memory.stagedRecordsCheck.configUnreadableNoRef': '{error}. Any memory.upstreamRef stated there was NOT honored, and no upstream base resolved either — see the next line for what was tried. Fix brain.config.json (a mid-merge conflict marker is the usual cause) if you meant to scope against a different ref.',
 
-  // ── memory/backends/engram.mjs — importMemory() records-only pull (D2/C4, issue #229) ──
+  // ── axes/memory/adapters/engram.mjs — importMemory() records-only pull (D2/C4, issue #229) ──
   'memory.import.empty':    'ℹ no records found in .memory/records/ — nothing to import.',
   'memory.import.progress': '  ✓ {written}/{total} records imported',
   'memory.import.done':     '✓ import complete — {written}/{total} records imported into engram (records-only, D2/C4).',
@@ -521,7 +521,7 @@ export default {
   // site (engram.mjs#save) is now the record-first producer path.
   'memory.search.engramUnsupported':  "'{op}' is not a cli verb for the '{backend}' backend — use engram's native mem_search / 'engram search' instead.",
 
-  // ── memory/backends/plainfiles.mjs — save/search CLI verbs (C3, issue #246) ──
+  // ── axes/memory/adapters/plainfiles.mjs — save/search CLI verbs (C3, issue #246) ──
   'memory.plainfiles.save.issueInvalid': '--issue must be an issue NUMBER; got {value}. It is stored as an integer so a record can be tied to its ticket.',
   'memory.plainfiles.save.typeRequired': '--type is required and has no safe default — it is a choice, not a fact the tool can derive. One of: {types}.',
   'memory.plainfiles.save.done':    "✓ saved {id} → {file}",

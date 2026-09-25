@@ -106,7 +106,7 @@ test('resolveEngine: defaults to gentle-ai when absent', () => {
 //
 // `resolveEngine` used to hold the engine-axis membership as an inline
 // literal `['gentle-ai', 'plain']`. Extracted to `harness/platform.mjs` as
-// `SDD_ENGINES` so `roles/role-port.mjs`'s registry assertion (and any future
+// `SDD_ENGINES` so `axes/sdd-engine/role-port.mjs`'s registry assertion (and any future
 // second reader) shares the same one declaration — `CLI_OPS`-from-`OPS`
 // (`:136-145` above) and `IMPLEMENTED_AXES`-from-`RUNNERS`
 // (`resolve-challenger.mjs:64-74`) are the house pattern this mirrors.
@@ -241,8 +241,11 @@ test('#682 cold-1: no backend reaches the dispatcher — the cycle that deadlock
   const { join, dirname } = await import('node:path');
   const { fileURLToPath } = await import('node:url');
 
+  const { HARNESS_ADAPTER_AXES, harnessAdapterDir } = await import('../axes/lib/harness-adapter-url.mjs');
+
   const here = dirname(fileURLToPath(import.meta.url));
-  const backendsDir = join(here, 'backends');
+  // The old `backends/` directory, split by axis in #1141.
+  const backendsDirs = HARNESS_ADAPTER_AXES.map((axis) => fileURLToPath(harnessAdapterDir(axis)));
 
   // Walk the STATIC import graph of every backend, following relative edges.
   const seen = new Set();
@@ -263,11 +266,12 @@ test('#682 cold-1: no backend reaches the dispatcher — the cycle that deadlock
     }
   };
 
-  const backends = readdirSync(backendsDir)
-    .filter((f) => f.endsWith('.mjs') && !f.includes('.test.'));
+  const backends = backendsDirs.flatMap((dir) => readdirSync(dir)
+    .filter((f) => f.endsWith('.mjs') && !f.includes('.test.'))
+    .map((f) => join(dir, f)));
   assert.ok(backends.length >= 3, 'the backends directory must still hold backends — otherwise this test is vacuous');
 
-  for (const b of backends) visit(join(backendsDir, b), []);
+  for (const b of backends) visit(b, []);
 
   assert.deepEqual(
     offenders, [],

@@ -372,8 +372,8 @@ const ALLOWLIST = [
   { file: 'brain/scripts/memory/cli.reindex-duplicates.test.mjs', entrypoint: 'brain/scripts/memory/cli.mjs', reason: 'no-vcs-capability' },
   { file: 'brain/scripts/memory/cli.save-search.test.mjs', entrypoint: 'brain/scripts/memory/cli.mjs', reason: 'no-vcs-capability' },
   { file: 'brain/scripts/memory/cli.split-records-duplicates.test.mjs', entrypoint: 'brain/scripts/memory/cli.mjs', reason: 'no-vcs-capability' },
-  { file: 'brain/scripts/memory/backends/no-artifact.parity.test.mjs', entrypoint: 'brain/scripts/memory/backends/cli.mjs', reason: 'no-vcs-capability' },
-  { file: 'brain/scripts/memory/backends/plainfiles.save-index-failure.test.mjs', entrypoint: 'brain/scripts/memory/backends/cli.mjs', reason: 'no-vcs-capability' },
+  { file: 'brain/scripts/axes/memory/no-artifact.parity.test.mjs', entrypoint: 'brain/scripts/axes/memory/cli.mjs', reason: 'no-vcs-capability' },
+  { file: 'brain/scripts/axes/memory/adapters/plainfiles.save-index-failure.test.mjs', entrypoint: 'brain/scripts/axes/memory/adapters/cli.mjs', reason: 'no-vcs-capability' },
   { file: 'brain/scripts/memory/lib/supersedes.integration.test.mjs', entrypoint: 'brain/scripts/memory/lib/cli.mjs', reason: 'no-vcs-capability' },
 
   // ── `which`/`git`-probe helpers: local, read-only, no push ──────────────
@@ -413,7 +413,7 @@ const ALLOWLIST = [
   { file: 'brain/scripts/hooks/pre-commit.test.mjs', entrypoint: 'brain/scripts/hooks/pre-commit', reason: 'no-vcs-capability' },
   { file: 'brain/scripts/hooks/pre-push.test.mjs', entrypoint: 'brain/scripts/hooks/pre-push', reason: 'no-vcs-capability' },
   { file: 'brain/scripts/hooks/hooks.stream-discipline.test.mjs', entrypoint: '<unresolved>', line: 98, reason: 'no-vcs-capability' },
-  { file: 'brain/scripts/harness/backends/settings-hooks.test.mjs', entrypoint: '<unresolved>', line: 92, reason: 'no-vcs-capability' },
+  { file: 'brain/scripts/axes/platform/lib/settings-hooks.test.mjs', entrypoint: '<unresolved>', line: 93, reason: 'no-vcs-capability' },
   { file: 'brain/scripts/bootstrap.worktree.test.mjs', entrypoint: '<unresolved>', line: 64, reason: 'no-vcs-capability' },
   { file: 'brain/scripts/bootstrap.worktree.test.mjs', entrypoint: '<unresolved>', line: 145, reason: 'no-vcs-capability' },
   { file: 'brain/scripts/bootstrap.cross-tree-code.test.mjs', entrypoint: '<unresolved>', line: 64, reason: 'no-vcs-capability' },
