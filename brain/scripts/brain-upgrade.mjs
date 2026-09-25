@@ -457,6 +457,13 @@ if (!existsSync(pkgRoot)) {
 
 const { managed, local } = await import(join(pkgRoot, 'brain', 'core', 'managed-paths.mjs'));
 
+// Files the INCOMING package no longer ships (#1141). Read from the package, not
+// from this script's sibling: only the release that stopped shipping a file knows
+// it did, and this script may be the consumer's older copy. A package from before
+// the list existed has no module to read, and retires nothing.
+const retiredModule = join(pkgRoot, 'brain', 'scripts', 'lib', 'retired-paths.mjs');
+const { RETIRED_PATHS: retired = [] } = existsSync(retiredModule) ? await import(retiredModule) : {};
+
 // A signal raised during the install above is delivered here, at the first await
 // after it — before any managed path has been written.
 if (interrupted) {
@@ -468,9 +475,9 @@ if (interrupted) {
   process.exit(interrupted === 'SIGTERM' ? 143 : 130);
 }
 
-let copied, skipped, merged, collisions, consumerModified, brainChanged, modificationDetection, refused, forced;
+let copied, skipped, merged, collisions, consumerModified, brainChanged, modificationDetection, refused, forced, removed;
 try {
-  ({ copied, skipped, merged, collisions, consumerModified, brainChanged, modificationDetection, refused, forced } = copyManaged({
+  ({ copied, skipped, merged, collisions, consumerModified, brainChanged, modificationDetection, refused, forced, removed } = copyManaged({
     srcRoot: pkgRoot,
     destRoot: ROOT,
     managed,
@@ -486,6 +493,7 @@ try {
     outgoing,
     refusePaths: REFUSE_PATHS,
     forceManaged,
+    retired,
   }));
 } catch (err) {
   // copyManaged snapshots every path it may write BEFORE its first write and
@@ -592,11 +600,19 @@ if (dryRun) {
     info(`would merge ${merged.length} settings file(s) (consumer content preserved):`);
     for (const f of merged) console.log(`      ${C.dim}${f}${C.reset}`);
   }
+  if (removed.length) {
+    info(`would remove ${removed.length} file(s) brain no longer ships:`);
+    for (const f of removed) console.log(`      ${C.dim}${f}${C.reset}`);
+  }
 } else {
   ok(`Copied ${copied.length} managed file(s) (brain/core, scripts, .gitattributes).`);
   if (merged.length) {
     ok(`Merged ${merged.length} settings file(s) additively (consumer content preserved):`);
     for (const f of merged) console.log(`      ${C.dim}${f}${C.reset}`);
+  }
+  if (removed.length) {
+    ok(`Removed ${removed.length} file(s) brain no longer ships:`);
+    for (const f of removed) console.log(`      ${C.dim}${f}${C.reset}`);
   }
 }
 if (skipMerge.length) {

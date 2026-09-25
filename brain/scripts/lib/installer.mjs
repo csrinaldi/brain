@@ -22,6 +22,7 @@ import {
   realpathSync,
   renameSync,
   rmSync,
+  rmdirSync,
   statSync,
   writeFileSync,
 } from 'node:fs';
@@ -983,10 +984,15 @@ export function createRestorePoint({ destRoot, relPaths }) {
  *   the consumer also modified aborts the run before any write.
  * @param {string[]} [opts.forceManaged]  Paths the operator named explicitly to
  *   overwrite anyway. Per path, never a wildcard (signed decision 3).
+ * @param {string[]} [opts.retired]  Exact paths the INCOMING package declares it
+ *   no longer ships (`lib/retired-paths.mjs`, #1141). Each one present in the
+ *   consumer's tree is removed, unless it is `local`, outside `managed`, or the
+ *   incoming package ships it again. Removed under the same restore point as the
+ *   writes, so a failed run puts them back.
  * @returns {{ copied: string[], skipped: string[], merged: string[], collisions: string[],
  *   consumerModified: string[], brainChanged: string[],
  *   modificationDetection: 'three-way'|'degraded',
- *   refused: string[], forced: string[] }}
+ *   refused: string[], forced: string[], removed: string[] }}
  */
 export function copyManaged(opts) {
   // ── The `beforeAnyWrite` invariant, owned in ONE place (#447) ───────────────
@@ -1021,7 +1027,7 @@ export function copyManaged(opts) {
   }
 }
 
-function copyManagedImpl({ srcRoot, destRoot, managed, local, dryRun = false, specialMerge = {}, abortOnCollision = false, outgoing = null, refusePaths = [], forceManaged = [] }, phase) {
+function copyManagedImpl({ srcRoot, destRoot, managed, local, dryRun = false, specialMerge = {}, abortOnCollision = false, outgoing = null, refusePaths = [], forceManaged = [], retired = [] }, phase) {
   const skipped = [];
   const collisions = [];
   const toCopy = [];  // rel paths for plain copyFileSync
@@ -1139,6 +1145,17 @@ function copyManagedImpl({ srcRoot, destRoot, managed, local, dryRun = false, sp
   toMerge.sort();
   toCopy.sort();
 
+  // ── Retired paths (#1141) ───────────────────────────────────────────────────
+  // The pre-flight above walks the INCOMING package, so it can never see a file
+  // the package stopped shipping. The package names those itself; only the ones
+  // still in the consumer's tree, still brain's to manage, and not shipped again
+  // are removed. A consumer file beside them is not on the list and is untouched.
+  const toRemove = [...new Set(retired)]
+    .filter((rel) => matchesAny(rel, managed) && !matchesAny(rel, local))
+    .filter((rel) => !existsSync(join(srcRoot, rel)))
+    .filter((rel) => { try { return lstatSync(join(destRoot, rel)).isFile(); } catch { return false; } })
+    .sort();
+
   // ── Abort gate ──────────────────────────────────────────────────────────────
   // When the caller requests abort-on-collision and collisions were found, return
   // before the write loop so the caller observes zero writes. Skipped under
@@ -1164,6 +1181,7 @@ function copyManagedImpl({ srcRoot, destRoot, managed, local, dryRun = false, sp
       modificationDetection,
       refused: refused.sort(),
       forced: forced.sort(),
+      removed: [],
     };
   }
 
@@ -1176,7 +1194,7 @@ function copyManagedImpl({ srcRoot, destRoot, managed, local, dryRun = false, sp
   if (!dryRun) {
     let restorePoint;
     try {
-      restorePoint = createRestorePoint({ destRoot, relPaths: [...toMerge, ...toCopy] });
+      restorePoint = createRestorePoint({ destRoot, relPaths: [...toMerge, ...toCopy, ...toRemove] });
     } catch (err) {
       // An interrupted-run refusal is NOT a failed snapshot. It fires because a
       // journal is already on disk, and that journal plus its snapshot are the only
@@ -1219,6 +1237,10 @@ function copyManagedImpl({ srcRoot, destRoot, managed, local, dryRun = false, sp
         mkdirSync(dirname(dest), { recursive: true });
         copyFileSync(join(srcRoot, rel), dest);
       }
+      for (const rel of toRemove) {
+        rmSync(join(destRoot, rel));
+        pruneEmptyParents(destRoot, rel);
+      }
     } catch (err) {
       const { failed } = restorePoint.restore();
       if (failed.length === 0) {
@@ -1250,7 +1272,25 @@ function copyManagedImpl({ srcRoot, destRoot, managed, local, dryRun = false, sp
     modificationDetection,
     refused: refused.sort(),
     forced: forced.sort(),
+    removed: toRemove,
   };
+}
+
+/**
+ * Removes the directories a retired path leaves empty, from its parent upward,
+ * stopping at the first one that still holds anything and never reaching
+ * `destRoot` itself. A consumer file in the same directory keeps it alive.
+ */
+function pruneEmptyParents(destRoot, rel) {
+  let dir = dirname(rel);
+  while (dir && dir !== '.' && dir !== '/') {
+    const abs = join(destRoot, dir);
+    try {
+      if (readdirSync(abs).length > 0) return;
+      rmdirSync(abs);
+    } catch { return; }
+    dir = dirname(dir);
+  }
 }
 
 // ── Claude settings merge ─────────────────────────────────────────────────────
