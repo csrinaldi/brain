@@ -108,11 +108,13 @@ resolver retires (see below).
   shadowed by the `.env` value `brain:env:init` writes. That was true before this amendment for
   `claude` and is true after it for `antigravity`. #1114 owns declaring the selectors in the
   schema.
-- **The `claude` harness init overwrites `.claude/settings.json`.** `brain:upgrade` merges that
-  file, but `brain:env:init` on `claude` then writes brain's hooks over the result. A consumer's
-  own entries are lost. The same holds for `antigravity` and `.gemini/settings.json`. It
-  predates this amendment, but the new default puts every fresh consumer on this path. It was
-  measured on a packed-tarball consumer during #1125, and is tracked separately (see #1125's PR).
+- **The `claude` harness init overwrote `.claude/settings.json`, and this default waited for
+  the fix.** `brain:upgrade` merged that file, but `brain:env:init` on `claude` then wrote brain's
+  hooks over the result, so a consumer's own entries were lost. `antigravity` did the same to
+  `.gemini/settings.json`. It predates this amendment, but the new default would have put every
+  fresh consumer on that path. It was measured on a packed-tarball consumer during #1125 and
+  fixed by #1139 before this default shipped: `init` now merges through the same `mergeSettings`
+  core the upgrade uses.
 
 ### Notes for the promoter
 
@@ -124,5 +126,5 @@ resolver retires (see below).
   this ADR was accepted.
 - The `brain/HOME.md` marker is §1c's fourth act, and no gate checks it (#516). Confirm it
   landed before committing.
-- The third "Known state" bullet names a follow-up ticket as "see #1125's PR". If that ticket
-  exists by the time you promote, replace the phrase with its number before promoting.
+- The third "Known state" bullet cites #1139, which fixed the settings overwrite. Promote this
+  amendment only after #1139 has merged.
