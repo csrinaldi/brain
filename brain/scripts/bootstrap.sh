@@ -324,9 +324,29 @@ fi
 # Runs BEFORE the memory sync so the ecosystem (skills, engram, gga) is
 # ready when memory is imported.
 say "$I18N_BOOTSTRAP_SDD_SECTION"
-AGENT_PLATFORM="$(env_get AGENT_PLATFORM)"
-[ -n "$AGENT_PLATFORM" ] || AGENT_PLATFORM="antigravity"
-env_set AGENT_PLATFORM "$AGENT_PLATFORM"
+# AGENT_PLATFORM — the same precedence and default as harness/platform.mjs's
+# resolvePlatform (issue #1125): process env > .env > legacy SDD_HARNESS (only
+# when it names a platform) > `claude`. This is a SECOND resolver, held to the
+# first by bootstrap.default-platform.test.mjs's parity table until #1114
+# leaves exactly one.
+#
+# Two answers, on purpose. `.env` records what the REPO states: an existing
+# value is never rewritten, and a repo that states nothing gets the default
+# written explicitly. A process-env AGENT_PLATFORM is per-invocation, as it is
+# for resolvePlatform: `AGENT_PLATFORM=antigravity npm run brain:env:init` (the
+# hint brain:upgrade prints) runs antigravity for that run and does not move
+# the repo off the platform it states, or off the default.
+_DOTENV_PLATFORM="$(env_get AGENT_PLATFORM)"
+_REPO_PLATFORM="$_DOTENV_PLATFORM"
+if [ -z "$_REPO_PLATFORM" ]; then
+  _LEGACY_PLATFORM="${SDD_HARNESS:-$(env_get SDD_HARNESS)}"
+  case "$_LEGACY_PLATFORM" in
+    claude|antigravity|plain) _REPO_PLATFORM="$_LEGACY_PLATFORM" ;;
+    *) _REPO_PLATFORM="claude" ;;
+  esac
+fi
+[ -n "$_DOTENV_PLATFORM" ] || env_set AGENT_PLATFORM "$_REPO_PLATFORM"
+AGENT_PLATFORM="${AGENT_PLATFORM:-$_REPO_PLATFORM}"
 
 SDD_ENGINE="$(env_get SDD_ENGINE)"
 if [ -z "$SDD_ENGINE" ]; then

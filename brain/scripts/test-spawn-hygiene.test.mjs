@@ -420,6 +420,9 @@ const ALLOWLIST = [
   { file: 'brain/scripts/bootstrap.cross-tree-code.test.mjs', entrypoint: '<unresolved>', line: 179, reason: 'no-vcs-capability' },
   // #1124: bootstrap.sh's own brain-config.mjs ensure line — reads `git remote get-url origin` only, never the network
   { file: 'brain/scripts/bootstrap.tier-notice.test.mjs', entrypoint: '<unresolved>', line: 62, reason: 'no-vcs-capability' },
+  // #1125: bash runs bootstrap.sh's env helpers and §6 platform block, lifted verbatim, in a scratch dir — no git, no network, no push.
+  { file: 'brain/scripts/bootstrap.default-platform.test.mjs', entrypoint: '<unresolved>', line: 85, reason: 'no-vcs-capability' },
+  { file: 'brain/scripts/bootstrap.default-platform.test.mjs', entrypoint: '<unresolved>', line: 179, reason: 'no-vcs-capability' },
 
   // ── i18n shell-catalog eval: bash -c, zero VCS surface ──────────────────
   { file: 'brain/scripts/i18n/coverage.test.mjs', entrypoint: '<unresolved>', line: 153, reason: 'no-vcs-capability' }, // #1061 shifted this line by inserting the memory.heal.* parity test earlier in the file

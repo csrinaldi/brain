@@ -19,7 +19,7 @@ Measured. The right fix is one entry point it can classify, not a wider list.
 
 | # | assertion |
 |---|---|
-| 1 | `brain:env:init` exits 0 **and** the tree it leaves is complete — `brain.config.json` with the full schema and the identity derived from the fixture's origin, `brain/HOME.md`, `AGENTS.md`, `.env`, `core.hooksPath` |
+| 1 | `brain:env:init` exits 0 **and** the tree it leaves is complete — `brain.config.json` with the full schema and the identity derived from the fixture's origin, `brain/HOME.md`, the default platform's harness emit (`.claude/settings.json` since #1125; `AGENTS.md` while `antigravity` was the default), `.env` stating `AGENT_PLATFORM=claude`, `core.hooksPath` |
 | 2 | `brain:session:start` exits 0 |
 | 3 | `brain:day:start` exits 0 **and reaches its last step**, not just an early exit |
 | 4 | a second `brain:env:init` exits 0 and changes nothing |
@@ -28,7 +28,8 @@ Assertion 1 is two assertions on purpose. #446 exited 127 **after** writing
 `brain.config.json` and `HOME.md` and before doing anything else, so a partial
 bootstrap is the shape to catch — and a variant that skips a step while still
 exiting 0 would pass an exit-code check alone. Proven: skipping the harness init
-and returning 0 turns assertion 1 red on `AGENTS.md` (mutation C, below).
+and returning 0 turns assertion 1 red on the harness emit (mutation C, below —
+measured on `AGENTS.md` before #1125 moved the default to `claude`).
 
 ## Why a fixture, and why no container
 

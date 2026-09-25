@@ -416,14 +416,17 @@ test('#682 cold-4: defaultRun runs the child in the cwd it was given', async () 
 
 test('platformEnvVars: BOTH axis keys reach resolvePlatform, not just AGENT_PLATFORM', () => {
   // ADR-0024 keeps SDD_HARNESS as the legacy fallback; a repo declaring only
-  // SDD_HARNESS=claude must not silently resolve to the antigravity default.
+  // SDD_HARNESS=antigravity must not silently resolve to the claude default.
+  // (#1125: this read `claude` while `antigravity` was the default; with the
+  // default flipped, `claude` would pass even if SDD_HARNESS were never read, so
+  // the stated value moved to the one that differs from the default.)
   const seen = [];
-  const read = (key) => { seen.push(key); return key === 'SDD_HARNESS' ? 'claude' : null; };
+  const read = (key) => { seen.push(key); return key === 'SDD_HARNESS' ? 'antigravity' : null; };
   const envVars = platformEnvVars(read);
 
   assert.ok(seen.includes('AGENT_PLATFORM'), 'AGENT_PLATFORM must be read');
   assert.ok(seen.includes('SDD_HARNESS'), 'SDD_HARNESS must be read');
-  assert.equal(resolvePlatform({ env: {}, envVars }), 'claude');
+  assert.equal(resolvePlatform({ env: {}, envVars }), 'antigravity');
 });
 
 test('platformConfig: a harness section of the WRONG shape degrades to {}, never to a crash', () => {
@@ -433,7 +436,8 @@ test('platformConfig: a harness section of the WRONG shape degrades to {}, never
   assert.deepEqual(platformConfig({ harness: { platform: 'claude' } }), { platform: 'claude' });
   assert.deepEqual(platformConfig({}), {});
   assert.deepEqual(platformConfig(null), {});
-  assert.equal(resolvePlatform({ env: {}, envVars: {}, config: platformConfig({ harness: 'claude' }) }), 'claude');
+  // #1125: `antigravity`, not `claude` — the default must not satisfy this.
+  assert.equal(resolvePlatform({ env: {}, envVars: {}, config: platformConfig({ harness: 'antigravity' }) }), 'antigravity');
 });
 
 // ── env: #682's SECOND cold review, judgment:cold-2 ──────────────────────────

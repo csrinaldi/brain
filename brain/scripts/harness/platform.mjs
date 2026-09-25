@@ -19,8 +19,10 @@
 //   node harness/cli.mjs init                        → exit 0
 //   AGENT_PLATFORM=claude node harness/cli.mjs init  → exit 13, nothing written
 //
-// The first resolves to `antigravity`, whose backend closes no cycle, so the
-// defect is invisible unless the platform is the one that does. `bootstrap.sh`
+// The first resolved to `antigravity` (the default until #1125), whose backend
+// closes no cycle, so the defect is invisible unless the platform is the one
+// that does. Since #1125 the unset path resolves `claude`, so the plain
+// `node harness/cli.mjs init` now walks exactly the edge this file cut. `bootstrap.sh`
 // runs exactly this command, so a consumer configuring `claude` — which is every
 // repo that would route this slice's stage — got no `.claude/settings.json`.
 //
@@ -50,6 +52,20 @@
 export const SDD_ENGINES = Object.freeze(['gentle-ai', 'plain']);
 
 /**
+ * The AGENT_PLATFORM axis membership (ADR-0024), and the value a repo gets when
+ * it states none (issue #1125, ADR-0024 Amendment 2). `claude` is the default;
+ * `antigravity` is the second supported platform; `plain` emits nothing.
+ *
+ * ONE DECLARATION IN JS, BUT NOT YET ONE RESOLVER. `bootstrap.sh` §6 still
+ * resolves the platform in shell before `harness/cli.mjs` runs, and
+ * `bootstrap.default-platform.test.mjs` holds it to `resolvePlatform` by a
+ * parity table. #1114 retires the second resolver; until then, a change here
+ * is a change there too, and the parity test says so.
+ */
+export const AGENT_PLATFORMS = Object.freeze(['claude', 'antigravity', 'plain']);
+export const DEFAULT_PLATFORM = 'claude';
+
+/**
  * Resolves the active agent platform.
  * Pure — takes env + envVars + config explicitly for testing.
  *
@@ -61,9 +77,9 @@ export function resolvePlatform({ env = process.env, envVars = {}, config = {} }
   if (platformVal) return platformVal;
 
   const harnessVal = env.SDD_HARNESS ?? envVars.SDD_HARNESS ?? config.harness;
-  if (harnessVal && ['antigravity', 'claude', 'plain'].includes(harnessVal)) {
+  if (harnessVal && AGENT_PLATFORMS.includes(harnessVal)) {
     return harnessVal;
   }
 
-  return 'antigravity';
+  return DEFAULT_PLATFORM;
 }
