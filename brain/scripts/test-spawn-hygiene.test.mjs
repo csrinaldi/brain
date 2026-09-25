@@ -418,6 +418,8 @@ const ALLOWLIST = [
   { file: 'brain/scripts/bootstrap.worktree.test.mjs', entrypoint: '<unresolved>', line: 145, reason: 'no-vcs-capability' },
   { file: 'brain/scripts/bootstrap.cross-tree-code.test.mjs', entrypoint: '<unresolved>', line: 64, reason: 'no-vcs-capability' },
   { file: 'brain/scripts/bootstrap.cross-tree-code.test.mjs', entrypoint: '<unresolved>', line: 179, reason: 'no-vcs-capability' },
+  // #1124: bootstrap.sh's own brain-config.mjs ensure line — reads `git remote get-url origin` only, never the network
+  { file: 'brain/scripts/bootstrap.tier-notice.test.mjs', entrypoint: '<unresolved>', line: 62, reason: 'no-vcs-capability' },
 
   // ── i18n shell-catalog eval: bash -c, zero VCS surface ──────────────────
   { file: 'brain/scripts/i18n/coverage.test.mjs', entrypoint: '<unresolved>', line: 153, reason: 'no-vcs-capability' }, // #1061 shifted this line by inserting the memory.heal.* parity test earlier in the file

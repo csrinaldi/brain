@@ -14,7 +14,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { originIdentity } from '../vcs/lib/repo.mjs';
 import { mergeDefaults } from './installer.mjs';
-import { migrations } from '../../core/config-migrations.mjs';
+import { migrations, NEW_CONSUMER_DEFAULTS } from '../../core/config-migrations.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const REPO_ROOT = join(dirname(__filename), '..', '..', '..');
@@ -222,7 +222,12 @@ export function providerFromHost(host) {
 
 /**
  * Builds the full default brain.config.json by applying all migrations in order
- * onto an empty object. Sets schemaVersion to the latest migration version.
+ * onto NEW_CONSUMER_DEFAULTS. Sets schemaVersion to the latest migration version.
+ *
+ * NEW_CONSUMER_DEFAULTS goes in FIRST (issue #1124): mergeDefaults never
+ * overwrites a present value, so the 0.9.0 entry's `standard` — the protection
+ * for EXISTING consumers — cannot replace a new consumer's `lite`. Only this
+ * function reads it; migrateConfig (brain:upgrade, brain:config) never does.
  *
  * @returns {object}
  */
@@ -236,7 +241,7 @@ function buildDefaultConfig() {
     }
     return 0;
   });
-  let cfg = {};
+  let cfg = mergeDefaults({}, NEW_CONSUMER_DEFAULTS);
   for (const m of ordered) {
     if (m.defaults) {
       cfg = mergeDefaults(cfg, m.defaults);
@@ -365,4 +370,14 @@ if (process.argv[1] === __filename && process.argv[2] === 'ensure') {
       }
     } catch {}
   }
+  // #1124: the tier line runs on EVERY env:init, created or not — a new consumer
+  // is told the tier it was given, an existing one the tier it already has.
+  // A dynamic import chained with .then(), NEVER a top-level await: tier-notice.mjs
+  // reaches i18n/t.mjs and governance-tiers.mjs, both of which import THIS module.
+  // Awaited here, that cycle deadlocks against this module's own unfinished
+  // evaluation (measured: "unsettled top-level await", the step exits 13). Chained,
+  // it runs after this module has finished evaluating, so the cycle is inert.
+  import('./tier-notice.mjs')
+    .then(({ printTierNotice }) => printTierNotice({ created: result.created, configPath: CONFIG_PATH }))
+    .catch((e) => { console.error(`  ⚠ governance tier: could not report it (${e.message})`); process.exitCode = 1; });
 }

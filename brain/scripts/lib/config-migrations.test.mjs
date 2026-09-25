@@ -82,3 +82,52 @@ test('#906 C1: a migration walk with nothing left to filter DOES plant 1.6.0 —
   assert.equal(cfg.memory.lane.enabled, false, 'a config built from every migration, unfiltered, DOES carry the 1.6.0 default');
   assert.equal(cfg.schemaVersion, '1.6.0', 'and its schemaVersion is stamped to the latest entry — ahead of package.json until the 1.6.0 cut');
 });
+
+// ── #1124: new consumers default to lite; existing consumers keep their tier ──
+//
+// The ruling (maintainer, 2026-09-24) splits one question in two. A NEW
+// consumer — no brain.config.json yet — is built with `lite`. An EXISTING
+// consumer's tier is never changed by a migration: a declared value survives,
+// and a config that lacks the key gets what `resolveTier()` already reads for
+// an absent key (`standard`), so the write changes nothing a gate can see.
+// That is why the 0.9.0 entry keeps `standard`, and why the `lite` default
+// lives OUTSIDE the migration list, where `migrateConfig` cannot reach it.
+
+import { NEW_CONSUMER_DEFAULTS } from '../../core/config-migrations.mjs';
+import { resolveTier } from '../vcs/governance-tiers.mjs';
+
+test('#1124: NEW_CONSUMER_DEFAULTS declares lite — the overlay a fresh config is built from', () => {
+  assert.deepEqual(NEW_CONSUMER_DEFAULTS, { governance: { tier: 'lite' } });
+  assert.ok(Object.isFrozen(NEW_CONSUMER_DEFAULTS), 'a shared default must not be mutable by a caller');
+});
+
+test('#1124: no migration entry defaults governance.tier to lite — an upgrade can never weaken a consumer', () => {
+  for (const m of migrations) {
+    assert.notEqual(m.defaults?.governance?.tier, 'lite', `migration ${m.version} must not default the tier to lite`);
+  }
+  const entry = migrations.find((m) => m.version === '0.9.0');
+  assert.equal(entry.defaults.governance.tier, 'standard', 'the 0.9.0 entry keeps the protection it was written for');
+});
+
+test('#1124: an existing config that lacks the tier key migrates to standard — the same tier resolveTier() already read for it', () => {
+  const before = { schemaVersion: '0.8.0', governance: { approvedLabel: 'status:approved' } };
+  const readBefore = resolveTier(before);
+  const { config, applied } = migrateConfig(before, migrations, '1.7.0');
+  assert.ok(applied.includes('0.9.0'), 'the tier migration is pending for a pre-0.9.0 config');
+  assert.equal(config.governance.tier, 'standard');
+  assert.equal(resolveTier(config), readBefore, 'the effective tier is identical before and after the migration');
+});
+
+test('#1124: an existing config that declares standard or regulated keeps it through every migration', () => {
+  for (const tier of ['standard', 'regulated', 'lite']) {
+    for (const schemaVersion of ['0.1.0', '0.8.0', '1.5.0']) {
+      const { config } = migrateConfig({ schemaVersion, governance: { tier } }, migrations, '99.0.0');
+      assert.equal(config.governance.tier, tier, `a declared ${tier} (schemaVersion ${schemaVersion}) must survive the upgrade`);
+    }
+  }
+});
+
+test('#1124: migrateConfig never reads NEW_CONSUMER_DEFAULTS — an empty config walked through every migration is standard, not lite', () => {
+  const { config } = migrateConfig({}, migrations, '99.0.0');
+  assert.equal(config.governance.tier, 'standard');
+});

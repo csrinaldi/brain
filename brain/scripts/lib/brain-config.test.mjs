@@ -167,7 +167,7 @@ test('ensureBrainConfig: creates config when missing with github identity', () =
     assert.deepEqual(cfg.sdd.engines, {}, 'sdd.engines ships EMPTY: an engine nobody recorded is honestly absent (#824)');
     assert.equal(cfg.memory.lane.enabled, false, 'memory.lane.enabled (#906 A6) must default false — never true on any tier, ever');
     assert.equal(cfg.governance.approvedLabel, 'status:approved', 'governance.approvedLabel must default to the plain base form');
-    assert.equal(cfg.governance.tier, 'standard', 'governance.tier (issue #358 Q5, REQ-TIER-10) must default to "standard", never "lite"');
+    assert.equal(cfg.governance.tier, 'lite', 'governance.tier: a NEW consumer defaults to "lite" (issue #1124, ADR-0026 Amendment 8) — existing consumers keep theirs through the migrations');
     assert.equal(cfg.reviewer.tokenEnv, 'BRAIN_REVIEWER_TOKEN', 'reviewer.tokenEnv must default to the documented env var name');
     // Full schema must exist
     assert.ok('project' in cfg, 'project key must exist');
@@ -243,6 +243,22 @@ test('ensureBrainConfig: idempotent — second call does not recreate', () => {
     assert.deepEqual(second.filled, []);
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// #1124: the lite default is for a config env:init CREATES. An existing file is
+// never re-tiered by ensureBrainConfig — neither a declared tier nor a missing key.
+test('#1124 ensureBrainConfig: an existing config keeps its declared tier, and a missing key stays missing', () => {
+  for (const governance of [{ tier: 'standard' }, { tier: 'regulated' }, {}]) {
+    const dir = mkdtempSync(join(tmpdir(), 'brain-ensure-tier-'));
+    try {
+      writeFileSync(join(dir, 'brain.config.json'), JSON.stringify({ project: { gitHost: '', slug: '' }, vcs: { provider: 'github' }, governance }, null, 2) + '\n');
+      const result = ensureBrainConfig(dir, { identity: { host: 'github.com', project: 'owner/repo' } });
+      assert.equal(result.created, false);
+      assert.deepEqual(readCfg(dir).governance, governance, 'ensureBrainConfig must not touch governance on an existing config');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   }
 });
 
