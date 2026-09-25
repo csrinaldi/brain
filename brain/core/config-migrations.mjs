@@ -105,6 +105,9 @@ export const migrations = [
       reviewer: { handle: '', tokenEnv: 'BRAIN_REVIEWER_TOKEN' },
     },
   },
+  // #1124: this entry's `standard` protects EXISTING consumers and stays. A NEW
+  // consumer's `lite` is not a migration default: it is NEW_CONSUMER_DEFAULTS
+  // below, which migrateConfig never reads.
   {
     version: '0.9.0',
     description:
@@ -220,3 +223,20 @@ export const migrations = [
 // of any tag. Doctrine: never-shipped keys retire BY DELETION pre-release, since
 // there is no consumer to honor. Post-release retirement (the first real one) will
 // use tolerate-and-ignore + deprecation warning instead — see design.md for C4.
+
+// NEW_CONSUMER_DEFAULTS (issue #1124, ADR-0026 Amendment 8) — what a config env:init
+// CREATES declares, beyond the migrations. Kept OUT of the `migrations` list on
+// purpose: `migrateConfig` walks that list for EXISTING consumers, and a `lite`
+// there would silently weaken every one of them on upgrade — the reason the
+// 0.9.0 entry above defaults to `standard`. A new consumer has nothing to weaken:
+// the default tier is chosen for the one-maintainer repository that runs
+// env:init first, and env:init says so, why, and how to change it
+// (lib/tier-notice.mjs).
+//
+// buildDefaultConfig() (lib/brain-config.mjs) merges this FIRST and the
+// migrations after it. mergeDefaults never overwrites a value already present, so
+// a fresh config is exactly "a consumer that declared lite before any migration
+// ran" — the same path a declared tier already takes through every upgrade.
+export const NEW_CONSUMER_DEFAULTS = Object.freeze({
+  governance: Object.freeze({ tier: 'lite' }),
+});

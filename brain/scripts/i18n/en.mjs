@@ -234,6 +234,18 @@ export default {
   'bootstrap.done.pending': 'Pending: {tools}',
   'bootstrap.done.install': 'Run: npm run tools:install  (installs all at once)',
 
+  // ── lib/tier-notice.mjs — env:init states the governance tier (#1124) ─────────
+  // {tier} = lite | standard | regulated
+  'config.tier.new':       'governance tier: {tier} — set for this new repository (governance.tier in brain.config.json).',
+  'config.tier.declared':  'governance tier: {tier} — already declared in brain.config.json; left unchanged.',
+  'config.tier.absent':    'governance tier: standard — brain.config.json declares none, and an absent tier resolves to standard; left unchanged.',
+  // {tier} = the unrecognised value, {tiers} = the valid tiers, comma-separated
+  'config.tier.invalid':   'governance.tier "{tier}" in brain.config.json is not a tier ({tiers}) — every gate that reads it fails closed until it is fixed.',
+  'config.tier.why.lite':  'lite is for one maintainer: no second approval is required to merge, and every gate still runs.',
+  'config.tier.why.standard':  'standard is for a team: a merge needs a second, non-author approval.',
+  'config.tier.why.regulated': 'regulated is for audited work: the strictest evidence, and no waivers.',
+  'config.tier.change':    'To change it, set governance.tier in brain.config.json to lite, standard (a team: a second, non-author approval) or regulated (audited: the strictest evidence, no waivers) — e.g. npm run brain:config -- set governance.tier standard — then re-run npm run brain:protect.',
+
   // ── install-tools.sh (PR3) ────────────────────────────────────────────────────
   // Pre-check (before eval — inline English default used in the script)
   'tools.require.noApt': 'This script requires apt-get (Ubuntu/Debian). Install the tools manually following brain/project/methodology/developer-environment.md.',
