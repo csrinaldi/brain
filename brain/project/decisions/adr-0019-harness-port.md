@@ -1,6 +1,6 @@
 # ADR-0019 — The `SDD_HARNESS` port: four environment surfaces, artifacts neutral by design
 
-**Status**: Accepted · **amended 03/09/2026** (Amendments 1-5 — see below)
+**Status**: Accepted · **amended 28/09/2026** (Amendments 1-6 — see below)
 **Date**: 2026-07-12 — Cristian Rinaldi (proposed + accepted via #250 / B0; promoted with #253 / B1)
 
 ## Context
@@ -77,7 +77,7 @@ inhabitant (`plain.mjs`) with zero changes to `cli.mjs`, `new-change.mjs`,
 - #584 (contract inventory measurement), #585 (owner ruling: thinness is design
   truth), #587 (B0 design ruling: frontier approved, ADR number verified).
 - `brain/scripts/harness/cli.mjs:52` (`VALID_OPS = ['init']`).
-- `brain/scripts/harness/backends/gentle-ai.mjs:74,221` (`_toEngramProject()`,
+- `brain/scripts/axes/sdd-engine/adapters/gentle-ai.mjs:74,221` (under `brain/scripts/harness/backends/` until #1141; see Amendment 6) (`_toEngramProject()`,
   `init()`'s injectable-opts shape).
 
 ## Amendment 1 — the invariant is the artefact contract, not the op count (issue #323)
@@ -247,7 +247,7 @@ rg -l "from ['\"][^'\"]*sdd-layout\.mjs['\"]" --glob '*.mjs'
 ```
 
 **Eleven production importers**: `check-refs.mjs`, `lib/archive-logic.mjs`,
-`lib/archive-sweep.mjs`, `lib/stage-engine.mjs`, `memory/backends/engram.mjs`,
+`lib/archive-sweep.mjs`, `lib/stage-engine.mjs`, `memory/backends/engram.mjs` (now `axes/memory/adapters/engram.mjs`; moved by #1141, see Amendment 6),
 `memory/lib/feature-resolution.mjs`, `new-change.mjs`,
 `review/evaluators/checkpoint.mjs`, `session-start.mjs`, `vcs/governance-tiers.mjs`,
 `vcs/phase-order-check.mjs`. **Five test files.** Sixteen total.
@@ -255,7 +255,7 @@ rg -l "from ['\"][^'\"]*sdd-layout\.mjs['\"]" --glob '*.mjs'
 ### How both numbers were wrong at once
 
 The measurement behind Amendment 2 matched only single-quoted import specifiers.
-`memory/backends/engram.mjs` and `new-change.mjs` import with double quotes, so they
+`memory/backends/engram.mjs` (now `axes/memory/adapters/engram.mjs`; moved by #1141, see Amendment 6) and `new-change.mjs` import with double quotes, so they
 fell out of the production count — ten instead of eleven.
 
 The "eighteen counting tests" half came from a second, looser pass that counted every
@@ -376,3 +376,22 @@ full declared set; GATE walks tier-scoped four ∪ customs; the presence DEMAND
 of `check-refs` and the reviewer checkpoint stays the tier-scoped four.
 Zero-config identity is the regression bar: without `sdd.stages`, every
 surface above is byte-identical to its pre-#810 behaviour.
+
+## Amendment 6 — the harness and memory backends moved under `axes/` (issue #1141)
+
+**Signed**: 28/09/2026 — Cristian Rinaldi
+
+#1141 moved every backend adapter into one directory per axis, with `git mv`, so `git log
+--follow` still reaches its history:
+
+| as written above | the path today |
+|---|---|
+| `brain/scripts/harness/backends/gentle-ai.mjs` | `brain/scripts/axes/sdd-engine/adapters/gentle-ai.mjs` |
+| `memory/backends/engram.mjs` (relative to `brain/scripts/`) | `axes/memory/adapters/engram.mjs` |
+
+These citations sit inside the Evidence section and inside Amendments 3-4's own measured
+importer lists — moving a file the lists already named does not change what was measured, so
+the counts (eleven production importers, five test files) are untouched. Every citation above
+is annotated in place under ruling R6 on #961 as amended (option A) — the maintainer applied
+the same ruling to #1141's path moves on 2026-09-28. The four-surfaces decision and the
+`sdd-layout.mjs` evidence contract are unchanged.
