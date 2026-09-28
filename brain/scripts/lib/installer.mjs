@@ -1150,8 +1150,11 @@ function copyManagedImpl({ srcRoot, destRoot, managed, local, dryRun = false, sp
   // the package stopped shipping. The package names those itself; only the ones
   // still in the consumer's tree, still brain's to manage, and not shipped again
   // are removed. A consumer file beside them is not on the list and is untouched.
+  // A REFUSE or MERGE path is never removed: those strategies exist because the
+  // consumer's bytes there matter, and deleting them is the clobber REFUSE refuses.
   const toRemove = [...new Set(retired)]
     .filter((rel) => matchesAny(rel, managed) && !matchesAny(rel, local))
+    .filter((rel) => !matchesAny(rel, refusePaths) && !Object.hasOwn(specialMerge, rel))
     .filter((rel) => !existsSync(join(srcRoot, rel)))
     .filter((rel) => { try { return lstatSync(join(destRoot, rel)).isFile(); } catch { return false; } })
     .sort();

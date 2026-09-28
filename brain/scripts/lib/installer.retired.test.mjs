@@ -56,6 +56,17 @@ test('#1141: a retired path the consumer still holds is removed, and reported', 
   assert.equal(readFileSync(join(dest, NEW), 'utf8'), 'export const where = "axes";\n', 'the new path is still copied');
 });
 
+test('#1141: a retired path under a REFUSE or MERGE strategy is NOT removed, whatever the list says', (t) => {
+  const { src, dest } = fixture(t);
+  const refused = copyManaged({ srcRoot: src, destRoot: dest, managed: ['brain/scripts/**'], local: [], retired: [OLD], refusePaths: [OLD] });
+  assert.equal(existsSync(join(dest, OLD)), true, 'a REFUSE path keeps the consumer\'s bytes; the list alone cannot delete it');
+  assert.deepEqual(refused.removed, []);
+
+  const merged = copyManaged({ srcRoot: src, destRoot: dest, managed: ['brain/scripts/**'], local: [], retired: [OLD], specialMerge: { [OLD]: () => {} } });
+  assert.equal(existsSync(join(dest, OLD)), true, 'a MERGE path is the consumer\'s to keep too');
+  assert.deepEqual(merged.removed, []);
+});
+
 test('#1141: a consumer-owned file in the same directory is NOT removed', (t) => {
   const { src, dest } = fixture(t);
   copyManaged({ srcRoot: src, destRoot: dest, managed: ['brain/scripts/**'], local: [], retired: [OLD] });
