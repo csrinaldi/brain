@@ -8,7 +8,7 @@
 
 The active provider is chosen via `vcs.provider` in `brain.config.json` (explicit,
 repo-level — see ADR-0008). The dispatcher `scripts/vcs/cli.mjs` reads that key and
-delegates to `scripts/vcs/providers/<provider>.mjs`. Credentials live in `.env`
+delegates to `scripts/axes/vcs/adapters/<provider>.mjs`. Credentials live in `.env`
 (`VCS_TOKEN`, a single generic var across providers), never in the config.
 
 ---
@@ -84,7 +84,7 @@ lookup fails CLOSED (`{ exists: false, error }`), never treated as "label exists
 
 ## How to add a provider
 
-Create `scripts/vcs/providers/<name>.mjs` exporting the 21 verbs and add `<name>` as a
+Create `scripts/axes/vcs/adapters/<name>.mjs` exporting the 21 verbs and add `<name>` as a
 valid value of `vcs.provider`. The callers are not touched.
 
 ## Current implementation
