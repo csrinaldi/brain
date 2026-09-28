@@ -1,6 +1,6 @@
 # ADR-0020 — External-reviewer VCS port verbs + the reviewActors/approvalActors two-key split
 
-**Status**: Accepted · **amended 28/09/2026** (Amendments 1-3 — see below)
+**Status**: Accepted · **amended 28/09/2026** (Amendments 1-4 — see below)
 **Date**: 2026-07-16 — Cristian Rinaldi
 
 ## Context
@@ -153,7 +153,7 @@ that guarantee depend on ordering rather than on structure.
 to two endpoints (notes without `comments`, discussions with) and must first read the
 MR's `diff_refs` to build `position`. This asymmetry is the shape this port already
 absorbs — `prCommits` returns `login: null` for every GitLab entry — and
-`vcs.contract.test.mjs` is what keeps it deliberate rather than accidental.
+`vcs.contract.test.mjs` (renamed `contract.test.mjs` and moved to `brain/scripts/axes/vcs/`; moved by #1141, see Amendment 4) is what keeps it deliberate rather than accidental.
 
 `prView` is **not** widened to carry `diff_refs`: its normalized shape is consumed by
 cold-boot, tranche, checkpoint and the poster's anti-stale check, and a provider-shaped
@@ -281,3 +281,16 @@ still reaches their history:
 
 Each citation above is annotated in place with its new path. The four COMMENT-only verbs, the
 three locks and the reviewActors/approvalActors split are unchanged.
+
+## Amendment 4 — the contract suite's bare filename citation, also stale (issue #1141)
+
+**Signed**: 28/09/2026 — Cristian Rinaldi
+
+Amendment 3 annotated every backticked `brain/scripts/vcs/providers/...` citation this ADR
+made. One more citation names the same contract suite without a directory —
+`vcs.contract.test.mjs` — and #1141 renamed the file itself, not only its directory: it is
+`brain/scripts/axes/vcs/contract.test.mjs` today, so a reader who greps the old bare name finds
+nothing at all, not merely a stale path. Annotated in place under ruling R6 on #961 as amended
+(option A) — the maintainer applied the same ruling to #1141's path moves on 2026-09-28. The
+four COMMENT-only verbs, the three locks and the reviewActors/approvalActors split are
+unchanged.
