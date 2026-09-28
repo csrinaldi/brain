@@ -24,7 +24,7 @@ The reviewer becomes a merge authorizer only if it can produce the one thing L6 
 as *the* human review of a `brain/**` write: a non-author, non-allow-listed review with
 `state === 'APPROVED'` (`evaluateBrainWritesReviewed`). That same
 review also satisfies `main`'s `required_approving_review_count: 1`
-(set by the `branchProtect` verb in `providers/github.mjs`). A reviewer running `gh pr review --approve`
+(set by the `branchProtect` verb in `axes/vcs/adapters/github.mjs`). A reviewer running `gh pr review --approve`
 would satisfy branch protection **and** the brain-writes gate in one call.
 
 That asymmetry cannot be a rule the agent remembers. If it depends on the model choosing
@@ -58,8 +58,8 @@ because describing it as one mechanism gets it wrong for one of them:
 
 | provider | mechanism |
 |---|---|
-| GitHub | `event: 'COMMENT'` is hardcoded at every call site in `providers/github.mjs` — the initial post (inline and plain) and the retry alike. No call constructs any other event. |
-| GitLab | **stronger** — GitLab's notes API has no review-event concept at all (`providers/gitlab.mjs`). A plain note is posted, and there is no APPROVE state for it to reach (REQ-266-3). |
+| GitHub | `event: 'COMMENT'` is hardcoded at every call site in `axes/vcs/adapters/github.mjs` — the initial post (inline and plain) and the retry alike. No call constructs any other event. |
+| GitLab | **stronger** — GitLab's notes API has no review-event concept at all (`axes/vcs/adapters/gitlab.mjs`). A plain note is posted, and there is no APPROVE state for it to reach (REQ-266-3). |
 
 **Lock 3 — one key, one meaning, enforced at two gates.** The reviewer handle registers in
 `governance.reviewActors`, whose sole meaning is **"this identity is not a human approver."**
@@ -187,7 +187,7 @@ Two mandatory tests make this executable and ship with the implementation slice 
 `brain`'s VCS port is `VERBS` in `brain/scripts/vcs/cli.mjs`. It had 16 verbs when this section
 was written, **none of which wrote to the review/comment/label surface**; H0 added the four
 below and `VERBS` now carries 26. They are shipped, on both providers
-(`brain/scripts/vcs/providers/{github,gitlab}.mjs`), each incapable of approving. Normalized
+(`brain/scripts/axes/vcs/adapters/{github,gitlab}.mjs`), each incapable of approving. Normalized
 returns match the port's existing `{ url } | { url: null, error }` / never-throws discipline
 (`brain/core/methodology/vcs-contract.md`).
 
@@ -199,7 +199,7 @@ returns match the port's existing `{ url } | { url: null, error }` / never-throw
 | `labelRemove` | `({ project, number, labels })` | monotonic-tightening removals only |
 
 The four names are added to `VERBS` (`cli.mjs`) and to the `vcs-contract.md` required-verbs
-table. The parameterized contract suite (`providers/vcs.contract.test.mjs`) runs one assertion
+table. The parameterized contract suite (`axes/vcs/contract.test.mjs`) runs one assertion
 set over `['github', 'gitlab']` and turns red until both providers implement all four with the
 normalized shapes.
 
