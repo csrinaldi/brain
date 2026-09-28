@@ -77,7 +77,7 @@ inhabitant (`plain.mjs`) with zero changes to `cli.mjs`, `new-change.mjs`,
 - #584 (contract inventory measurement), #585 (owner ruling: thinness is design
   truth), #587 (B0 design ruling: frontier approved, ADR number verified).
 - `brain/scripts/harness/cli.mjs:52` (`VALID_OPS = ['init']`).
-- `brain/scripts/axes/sdd-engine/adapters/gentle-ai.mjs:74,221` (under `brain/scripts/harness/backends/` until #1141; see Amendment 6) (`_toEngramProject()`,
+- `brain/scripts/axes/sdd-engine/adapters/gentle-ai.mjs:74,221` (under brain/scripts/harness/backends/ until #1141; see Amendment 6) (`_toEngramProject()`,
   `init()`'s injectable-opts shape).
 
 ## Amendment 1 — the invariant is the artefact contract, not the op count (issue #323)
@@ -386,7 +386,7 @@ surface above is byte-identical to its pre-#810 behaviour.
 
 | as written above | the path today |
 |---|---|
-| `brain/scripts/harness/backends/gentle-ai.mjs` | `brain/scripts/axes/sdd-engine/adapters/gentle-ai.mjs` |
+| brain/scripts/harness/backends/gentle-ai.mjs | `brain/scripts/axes/sdd-engine/adapters/gentle-ai.mjs` |
 | `memory/backends/engram.mjs` (relative to `brain/scripts/`) | `axes/memory/adapters/engram.mjs` |
 
 These citations sit inside the Evidence section and inside Amendments 3-4's own measured

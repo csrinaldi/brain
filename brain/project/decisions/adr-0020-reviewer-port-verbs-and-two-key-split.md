@@ -286,7 +286,7 @@ three locks and the reviewActors/approvalActors split are unchanged.
 
 **Signed**: 28/09/2026 — Cristian Rinaldi
 
-Amendment 3 annotated every backticked `brain/scripts/vcs/providers/...` citation this ADR
+Amendment 3 annotated every backticked brain/scripts/vcs/providers/... citation this ADR
 made. One more citation names the same contract suite without a directory —
 `vcs.contract.test.mjs` — and #1141 renamed the file itself, not only its directory: it is
 `brain/scripts/axes/vcs/contract.test.mjs` today, so a reader who greps the old bare name finds

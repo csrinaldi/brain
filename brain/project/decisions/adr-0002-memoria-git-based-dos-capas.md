@@ -157,7 +157,7 @@ amended — this rewrites no other line of the body or of an earlier amendment.
 **Signed**: 28/09/2026 — Cristian Rinaldi
 
 #1141 moved every backend adapter into one directory per axis. The engram memory backend left
-`brain/scripts/memory/backends/` for `brain/scripts/axes/memory/adapters/`, with `git mv`, so
+brain/scripts/memory/backends/ for `brain/scripts/axes/memory/adapters/`, with `git mv`, so
 `git log --follow` still reaches its history:
 
 | as written above | the path today |

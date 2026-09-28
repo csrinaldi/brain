@@ -85,7 +85,7 @@ milestone late, and says so. As of `main @ 4cde50e` plus #576's change:
 **Signed**: 28/09/2026 — Cristian Rinaldi
 
 #1141 moved every adapter into one directory per axis, and the role port with it: it left
-`brain/scripts/roles/role-port.mjs` for `brain/scripts/axes/sdd-engine/role-port.mjs`, with
+brain/scripts/roles/role-port.mjs for `brain/scripts/axes/sdd-engine/role-port.mjs`, with
 `git mv`, so `git log --follow` still reaches its history.
 
 The citation above is annotated in place under ruling R6 on #961 as amended (option A) — the
