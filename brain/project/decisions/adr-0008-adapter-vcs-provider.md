@@ -1,6 +1,6 @@
 # ADR-0008 — VCS Adapter: explicit provider + verb contract
 
-**Status**: Accepted
+**Status**: Accepted · **amended 28/09/2026** (Amendment 1 — see below)
 **Date**: 2026-06-26
 
 ## Context
@@ -27,7 +27,7 @@ VCS follows the adapter pattern, with two differences from harness/memory:
 
 - **Verb contract**: `brain/core/methodology/vcs-contract.md` defines the abstract verbs that any provider must implement (`auth-check`, `auth-login`, `whoami`, `issue-view`, `issue-list`, `mr-list`, `commit-status`, `repo-clone-url`, `pat-setup-url`, and `project-resolve` as a no-op on hosts that use slug directly). The contract normalizes naming differences (GitLab `iid`/`description`/`source_branch` ↔ GitHub `number`/`body`/`headBranch`).
 
-- **Dispatcher**: `scripts/vcs/cli.mjs` reads `vcs.provider` and delegates to `scripts/vcs/providers/<provider>.mjs`. Same pattern as `scripts/memory/cli.mjs` (ADR-0004).
+- **Dispatcher**: `scripts/vcs/cli.mjs` reads `vcs.provider` and delegates to `brain/scripts/axes/vcs/adapters/<provider>.mjs` (under `scripts/vcs/providers/<provider>.mjs` until #1141; see Amendment 1). Same pattern as `scripts/memory/cli.mjs` (ADR-0004).
 
 - **Code and contract → core; this ADR → project.** The adapter is a generic product (shipped to consumers). This decision record is evolution of brain-as-project and is not shipped (`brain/project/**` is `local` in the installer manifest).
 
@@ -35,6 +35,22 @@ VCS follows the adapter pattern, with two differences from harness/memory:
 
 - **Positive**: the same repo operates on GitHub, GitLab, or another host by changing one key in `brain.config.json`.
 - **Positive**: scripts no longer hardcode glab; the flow is testable against the contract without touching a real host.
-- **Positive**: adding a new provider = `scripts/vcs/providers/<x>.mjs` + one `case`, without touching callers.
+- **Positive**: adding a new provider = `brain/scripts/axes/vcs/adapters/<x>.mjs` (under `scripts/vcs/providers/<x>.mjs` until #1141; see Amendment 1) + one `case`, without touching callers.
 - **Negative**: GitLab-only verbs (`project-resolve`, `commit-status` enum) require explicit normalization; gh↔glab parity is not 1:1 and must be documented in the contract.
 - **Negative**: the refactor touches 5 scripts that currently drive the GitLab flow — high blast-radius, delivered in chained PRs.
+
+## Amendment 1 — the VCS providers moved to `axes/vcs/adapters/` (issue #1141)
+
+**Signed**: 28/09/2026 — Cristian Rinaldi
+
+#1141 moved every provider adapter into one directory per axis, with `git mv`, so `git log
+--follow` still reaches its history:
+
+| as written above | the path today |
+|---|---|
+| `scripts/vcs/providers/<provider>.mjs` | `brain/scripts/axes/vcs/adapters/<provider>.mjs` |
+| `scripts/vcs/providers/<x>.mjs` (how-to) | `brain/scripts/axes/vcs/adapters/<x>.mjs` |
+
+Both citations above are annotated in place under ruling R6 on #961 as amended (option A) — the
+maintainer applied the same ruling to #1141's path moves on 2026-09-28. The explicit-provider +
+verb-contract decision is unchanged.
