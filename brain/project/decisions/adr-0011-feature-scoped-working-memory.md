@@ -1,6 +1,6 @@
 # ADR-0011 — Feature-Scoped Working Memory
 
-**Status**: Accepted · **amended 15/09/2026** (Amendments 1-2 — see below)  
+**Status**: Accepted · **amended 28/09/2026** (Amendments 1-3 — see below)  
 **Date**: 2026-06-26
 
 ## Context
@@ -19,7 +19,7 @@ Introduce a **second memory layer**, structurally separated from durable memory,
 
 1. **Generic contract — `resume.md`.** Feature working memory's source of truth is a committed `openspec/changes/<feature>/resume.md`: backend-agnostic, human-readable, reconstructible with `git clone` and zero tooling. YAML frontmatter (`feature`, `checkpointed_at`, `checkpointed_from`, `current_slice`, `next_action`, `blockers[]`, `in_flight_decisions[]`) plus a prose body. It is a *pointer into* the work, not a mirror of it — per-task progress is read from `tasks.md` checkboxes and never duplicated here.
 
-2. **Per-backend adapter — symmetric verbs.** Two ops on `scripts/memory/cli.mjs`, dispatched to `scripts/memory/backends/<backend>.mjs` exactly like `index` / `share` / `pull` / `setup`:
+2. **Per-backend adapter — symmetric verbs.** Two ops on `scripts/memory/cli.mjs`, dispatched to `brain/scripts/axes/memory/adapters/<backend>.mjs` (under `scripts/memory/backends/<backend>.mjs` until #1141; see Amendment 3) exactly like `index` / `share` / `pull` / `setup`:
    - `feature-checkpoint [feature]` (dehydrate): stamp + validate the live `resume.md` and ensure it is committed before push.
    - `feature-resume [feature]` (hydrate): project `openspec/changes/<feature>/*` into the **local** engram so each machine re-hydrates its own store (`~/.engram` is not in git).
 
@@ -32,7 +32,7 @@ This decision builds on the foundation restored in the same change: ADR-0002's `
 ## Consequences
 
 - **Positive**: feature work survives a machine switch or hand-off — `next_action`, blockers, and in-flight decisions travel with the branch in a plain committed file.
-- **Positive**: the same adapter discipline as ADR-0004 — switching memory backend or adding one means implementing the two verbs in `scripts/memory/backends/<name>.mjs`; the `resume.md` contract is untouched.
+- **Positive**: the same adapter discipline as ADR-0004 — switching memory backend or adding one means implementing the two verbs in `brain/scripts/axes/memory/adapters/<name>.mjs` (under `scripts/memory/backends/<name>.mjs` until #1141; see Amendment 3); the `resume.md` contract is untouched.
 - **Positive**: zero-tooling recovery — the resume point is readable with any text editor after `git clone`.
 - **Negative**: the engram-projection convenience (`mem_search` over feature context) requires saving feature observations under a distinct project namespace — local `engram sync --export` is project-scoped (confirmed: "exports project-scoped chunks to `.engram/` by default"), so feature obs in their own namespace are not materialized by `memory:share` (renamed `brain:memory:share`; see Amendment 1). The cost is that recall must target that namespace rather than the default `brain` project. File-only hydration remains the backstop for backends without project isolation.
 - **Negative**: the automatic pre-push checkpoint guarantees *delivery* of `resume.md`, not its *richness* — keeping the body current remains the working agent's responsibility.
@@ -97,3 +97,19 @@ rewrites it to state what the act did.
 
 The rename table and the one in-place annotation Amendment 1 made were already correct under R6 as
 amended — this rewrites no other line of the body or of an earlier amendment.
+
+## Amendment 3 — the memory backends moved to `axes/memory/adapters/` (issue #1141)
+
+**Signed**: 28/09/2026 — Cristian Rinaldi
+
+#1141 moved every backend adapter into one directory per axis, with `git mv`, so `git log
+--follow` still reaches its history:
+
+| as written above | the path today |
+|---|---|
+| `scripts/memory/backends/<backend>.mjs` | `brain/scripts/axes/memory/adapters/<backend>.mjs` |
+| `scripts/memory/backends/<name>.mjs` (how-to) | `brain/scripts/axes/memory/adapters/<name>.mjs` |
+
+Both citations above are annotated in place under ruling R6 on #961 as amended (option A) — the
+maintainer applied the same ruling to #1141's path moves on 2026-09-28. The `resume.md`
+contract and the feature-checkpoint/feature-resume verbs are unchanged.
