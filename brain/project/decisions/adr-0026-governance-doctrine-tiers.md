@@ -1,6 +1,6 @@
 # ADR-0026 — Governance Doctrine Tiers: A Declared Axis Orthogonal to the Detected Substrate Ladder
 
-**Status**: Accepted · **amended 25/09/2026** (Amendments 1-8 — see below)  
+**Status**: Accepted · **amended 28/09/2026** (Amendments 1-9 — see below)  
 **Date**: 31/07/2026 — Cristian Rinaldi
 
 ## Context
@@ -772,7 +772,7 @@ recorded because the report line is half of what this amendment delivers.
 
 - #94 (this amendment) · `brain/scripts/brain-protect.mjs` `protectionFor` ·
   `brain/scripts/vcs/governance-tiers.mjs` `TIER_PARAMS` ·
-  `brain/scripts/vcs/providers/github.mjs` `branchProtect`
+  `brain/scripts/axes/vcs/adapters/github.mjs` `branchProtect` (under brain/scripts/vcs/providers/ until #1141; see Amendment 9)
 - REQ-L6-1' (`brain-writes-reviewed.mjs`) — why `lite` is 0
 - `reviewer-protocol.md` §2 Lock 1 — why the reviewer handle cannot be the second approver
 - #442 / D5 — `regulated` unsatisfiable at n=1, the same finding one gate over
@@ -958,3 +958,12 @@ failure #1081 measured: a one-person repository that cannot merge.
 - `brain/core/config-migrations.mjs` `NEW_CONSUMER_DEFAULTS` and the 0.9.0 entry
 - `brain/scripts/lib/brain-config.mjs` `buildDefaultConfig`, `ensureBrainConfig`
 - `brain/scripts/lib/tier-notice.mjs`, `brain/scripts/vcs/governance-tiers.mjs` `resolveTier`
+
+## Amendment 9 — the GitHub adapter moved to `axes/vcs/adapters/` (issue #1141)
+
+**Signed**: 28/09/2026 — Cristian Rinaldi
+
+#1141 moved every adapter into one directory per axis. The GitHub adapter that implements
+`branchProtect` left brain/scripts/vcs/providers/ for `brain/scripts/axes/vcs/adapters/`, with
+`git mv`, so `git log --follow` still reaches its history. The one citation Amendment 6 made is
+annotated in place. No tier parameter changed.
