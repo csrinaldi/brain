@@ -9,7 +9,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 import { testTmp } from '../../lib/test-tmp.mjs';
@@ -18,7 +18,7 @@ import {
   buildDivergedPullFixture, buildPullFixture, git, withIsolatedGitEnv,
   FIXTURE_RECORD, RECORD_PATH, RECORD_CONTENT,
 } from '../../__fixtures__/pull-fixture.mjs';
-import { defaultGitPull } from './reconcile-pull.mjs';
+import { defaultGitPull, reconcileUntrackedRecords } from './reconcile-pull.mjs';
 
 const quiet = () => {};
 const tracked = (dir) => git(dir, 'ls-files', '--', RECORD_PATH).trim();
@@ -158,29 +158,126 @@ test('(g) nothing is stored outside the working tree and the object store — gi
 
 // A capturing clone whose origin/main already carries the record (commit A),
 // plus the base dir so a test can land a second upstream change (commit B).
-function buildRace(t) {
+//   files: {path: Buffer|string} shipped upstream AND written locally;
+//   local: overrides the local bytes per path; ship(dir): overrides how commit
+//   A writes upstream; seed: extra tracked files in the root commit.
+function buildRace(t, { files = { [RECORD_PATH]: RECORD_CONTENT }, local = {}, ship, seed = {} } = {}) {
   const base = testTmp('brain-pull-race-1118-');
   t.after(() => removeTempTree(base));
   const originDir = join(base, 'origin.git');
-  const seed = join(base, 'seed');
+  const seedDir = join(base, 'seed');
   const capturingDir = join(base, 'capturing');
+  const put = (dir, map) => {
+    for (const [p, c] of Object.entries(map)) {
+      mkdirSync(dirname(join(dir, p)), { recursive: true });
+      writeFileSync(join(dir, p), c);
+    }
+  };
   git(base, 'init', '--bare', '-q', '-b', 'main', originDir);
-  git(base, 'init', '-q', '-b', 'main', seed);
-  git(seed, 'remote', 'add', 'origin', originDir);
-  mkdirSync(join(seed, '.memory', 'records'), { recursive: true });
-  writeFileSync(join(seed, '.memory', '.gitkeep'), '', 'utf8');
-  git(seed, 'add', '.memory');
-  git(seed, 'commit', '-q', '-m', 'root');
-  git(seed, 'push', '-q', '-u', 'origin', 'main');
+  git(base, 'init', '-q', '-b', 'main', seedDir);
+  git(seedDir, 'remote', 'add', 'origin', originDir);
+  put(seedDir, { '.memory/.gitkeep': '', ...seed });
+  git(seedDir, 'add', '-A', '.');
+  git(seedDir, 'commit', '-q', '-m', 'root');
+  git(seedDir, 'push', '-q', '-u', 'origin', 'main');
   git(base, 'clone', '-q', originDir, capturingDir);
-  mkdirSync(join(capturingDir, '.memory', 'records'), { recursive: true });
-  writeFileSync(join(capturingDir, RECORD_PATH), RECORD_CONTENT, 'utf8');
+  put(capturingDir, { ...files, ...local });
   const a = join(base, 'shipper-a');
   git(base, 'clone', '-q', originDir, a);
-  mkdirSync(join(a, '.memory', 'records'), { recursive: true });
-  writeFileSync(join(a, RECORD_PATH), RECORD_CONTENT, 'utf8');
-  git(a, 'add', RECORD_PATH);
+  if (ship) ship(a); else put(a, files);
+  git(a, 'add', '-A', '.');
   git(a, 'commit', '-q', '-m', 'lane: add the fixture record');
   git(a, 'push', '-q', 'origin', 'main');
   return { base, originDir, capturingDir };
 }
+
+// Makes the pull fail after reconciliation: pull.ff=only plus a diverging
+// local commit and a diverging upstream commit.
+function divergeAfterReconcile(capturingDir, base, originDir) {
+  git(capturingDir, 'config', 'pull.ff', 'only');
+  return () => {
+    writeFileSync(join(capturingDir, 'local-only.txt'), 'local\n');
+    git(capturingDir, 'add', 'local-only.txt');
+    git(capturingDir, 'commit', '-q', '-m', 'local work');
+    const b = join(base, 'shipper-b');
+    git(base, 'clone', '-q', originDir, b);
+    writeFileSync(join(b, 'upstream-only.txt'), 'up\n');
+    git(b, 'add', 'upstream-only.txt');
+    git(b, 'commit', '-q', '-m', 'upstream work');
+    git(b, 'push', '-q', 'origin', 'main');
+  };
+}
+
+test('(h) core.autocrlf=true + CRLF local copy of an LF blob: refused as divergent, bytes unchanged', (t) => {
+  const crlf = RECORD_CONTENT.replace(/\n/g, '\r\n');
+  const { capturingDir } = buildRace(t, { local: { [RECORD_PATH]: crlf } });
+  git(capturingDir, 'config', 'core.autocrlf', 'true');
+  assert.throws(() => defaultGitPull(capturingDir, { _log: quiet }), (err) => { assert.ok(err.message.includes(RECORD_PATH)); return true; });
+  assert.equal(readFileSync(join(capturingDir, RECORD_PATH), 'utf8'), crlf, 'CRLF bytes untouched');
+});
+
+test('(i) invalid UTF-8 bytes survive a failed pull byte-identical', (t) => {
+  const bytes = Buffer.from([0x7b, 0x22, 0xff, 0xfe, 0xc3, 0x28, 0x22, 0x7d, 0x0a]);
+  const { base, originDir, capturingDir } = buildRace(t, { files: { [RECORD_PATH]: bytes } });
+  assert.throws(() => defaultGitPull(capturingDir, {
+    _log: quiet, _afterReconcile: divergeAfterReconcile(capturingDir, base, originDir),
+  }), /git pull|Command failed/i);
+  assert.ok(readFileSync(join(capturingDir, RECORD_PATH)).equals(bytes), 'bytes identical');
+});
+
+test('(j) a merge that conflicts elsewhere: the record staged in the index is fine, not "could not be put back"', (t) => {
+  const { capturingDir } = buildRace(t, {
+    seed: { 'conflict.txt': 'base\n' },
+    ship: (dir) => {
+      mkdirSync(join(dir, '.memory', 'records'), { recursive: true });
+      writeFileSync(join(dir, RECORD_PATH), RECORD_CONTENT);
+      writeFileSync(join(dir, 'conflict.txt'), 'upstream side\n');
+    },
+  });
+  git(capturingDir, 'config', 'pull.rebase', 'false');
+  writeFileSync(join(capturingDir, 'conflict.txt'), 'local side\n');
+  git(capturingDir, 'add', 'conflict.txt');
+  git(capturingDir, 'commit', '-q', '-m', 'local edit');
+  const logs = [];
+  assert.throws(() => defaultGitPull(capturingDir, { _log: (l) => logs.push(l) }), (err) => {
+    assert.doesNotMatch(err.message, /could not be put back/);
+    return true;
+  });
+  assert.equal(onDisk(capturingDir), RECORD_CONTENT);
+  assert.match(git(capturingDir, 'ls-files', '-s', '--', RECORD_PATH), /^\d+ [0-9a-f]+ 0\t/);
+  assert.ok(logs.some((l) => l.includes(RECORD_PATH) && /index/i.test(l)), JSON.stringify(logs));
+});
+
+test('(k) a symlink entry in @{u} is never a candidate, even when its target equals the local bytes', (t) => {
+  const target = 'some-target';
+  const { capturingDir } = buildRace(t, {
+    files: { [RECORD_PATH]: target },
+    ship: (dir) => {
+      mkdirSync(join(dir, '.memory', 'records'), { recursive: true });
+      symlinkSync(target, join(dir, RECORD_PATH));
+    },
+  });
+  assert.throws(() => defaultGitPull(capturingDir, { _log: quiet }));
+  assert.equal(readFileSync(join(capturingDir, RECORD_PATH), 'utf8'), target);
+  assert.ok(lstatSync(join(capturingDir, RECORD_PATH)).isFile(), 'still the local regular file');
+});
+
+test('(l) an unlink failing mid-loop names the already-deleted paths and their oids', (t) => {
+  const p2 = '.memory/records/2026-09-rec-00000000000000bb.jsonl';
+  const { capturingDir } = buildRace(t, { files: { [RECORD_PATH]: RECORD_CONTENT, [p2]: 'second\n' } });
+  git(capturingDir, 'fetch', '-q');
+  const deleted = [];
+  let calls = 0;
+  const _unlink = (p) => {
+    calls += 1;
+    if (calls === 2) throw new Error('EPERM simulated');
+    deleted.push(p); unlinkSync(p);
+  };
+  assert.throws(() => reconcileUntrackedRecords({ root: capturingDir, _unlink }), (err) => {
+    assert.match(err.message, /EPERM simulated/);
+    assert.ok(deleted.length === 1 && err.message.includes(deleted[0].replace(capturingDir + '/', '')), err.message);
+    assert.match(err.message, /[0-9a-f]{40}/);
+    assert.match(err.message, /@\{u\}|origin\/main/);
+    return true;
+  });
+});

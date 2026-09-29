@@ -36,6 +36,22 @@ remembered path is then checked (exists, tracked at HEAD, same oid). Failure to
 pass is repaired from the blob and reported; exit code 0 is never trusted alone.
 A file that exists with different bytes is never overwritten.
 
+## Decision 3b: byte-strict identity, regular files only (review of the simplified design)
+
+- Identity is `git hash-object --no-filters`: raw bytes. A CRLF working copy
+  under `core.autocrlf=true` hashes differently from the LF blob and is treated
+  as divergent (refused, untouched), never deleted and restored as LF.
+- The blob is read as a Buffer (`cat-file blob`, no encoding) and written as a
+  Buffer, so invalid UTF-8 survives byte-identical.
+- Verification accepts a path that is present and whose tracked blob (HEAD's,
+  else the index's stage-0 entry) equals the oid: a merge that conflicts
+  elsewhere leaves the record staged, which is fine. Tracked-blob comparison
+  (not a working-tree hash) also keeps a legitimate autocrlf checkout valid.
+- Only `100644`/`100755` `@{u}` entries are candidates; symlink and submodule
+  entries are never reconciled.
+- If an unlink fails mid-loop, the error names the already-deleted paths and
+  the blob oids that are in `@{u}`.
+
 ## Decision 4: one shared `defaultGitPull`
 
 `reconcile-pull.mjs` exports the one default `_gitPull` used by both adapters

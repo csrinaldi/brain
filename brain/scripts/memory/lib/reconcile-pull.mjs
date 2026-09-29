@@ -16,19 +16,37 @@ import { dirname, join } from 'node:path';
 
 import { upstreamRecordEntries } from './upstream-records.mjs';
 
-function run(root, args, { input } = {}) {
-  return spawnSync('git', args, { cwd: root, encoding: 'utf8', input, maxBuffer: 1e9 });
+function run(root, args, { encoding = 'utf8' } = {}) {
+  return spawnSync('git', args, { cwd: root, encoding, maxBuffer: 1e9 });
 }
 
 const ok = (r) => !r.error && r.status === 0;
 
-/** `git hash-object` of the file on disk, or null when it cannot be read. */
+/**
+ * `git hash-object --no-filters` of the file on disk (its raw bytes, so a CRLF
+ * copy under core.autocrlf never hashes equal to an LF blob), or null.
+ */
 function hashOnDisk(root, path) {
-  const r = run(root, ['hash-object', '--', path]);
+  const r = run(root, ['hash-object', '--no-filters', '--', path]);
   return ok(r) ? r.stdout.trim() : null;
 }
 
 const isTrackedAtHead = (root, path) => ok(run(root, ['cat-file', '-e', `HEAD:${path}`]));
+
+/** The blob oid git tracks at `path`: HEAD's, else the index's (a merge in progress), else null. */
+function trackedOid(root, path) {
+  const head = run(root, ['rev-parse', '--verify', '--quiet', `HEAD:${path}`]);
+  if (ok(head)) return { oid: head.stdout.trim(), where: 'HEAD' };
+  const idx = run(root, ['ls-files', '--stage', '--', path]);
+  const m = ok(idx) ? /^\d+ ([0-9a-f]+) 0\t/m.exec(idx.stdout) : null;
+  return m ? { oid: m[1], where: 'the index' } : null;
+}
+
+/** Only regular-file entries are reconcilable: never a symlink or a submodule. */
+function isRegularFileEntry(root, target, path) {
+  const r = run(root, ['ls-tree', target, '--', path]);
+  return ok(r) && /^100(644|755) blob /.test(r.stdout);
+}
 
 /** `@{u}` as a short ref, or null when the branch has no upstream. */
 function resolveUpstream(root) {
@@ -41,7 +59,7 @@ function resolveUpstream(root) {
  * returns `[{path, oid}]` to verify after the pull. A record whose bytes differ
  * from the incoming copy is never touched: the whole call refuses instead.
  */
-export function reconcileUntrackedRecords({ root }) {
+export function reconcileUntrackedRecords({ root, _unlink = unlinkSync }) {
   const target = resolveUpstream(root);
   if (!target) return [];
   const upstream = upstreamRecordEntries({ root, ref: target });
@@ -51,6 +69,7 @@ export function reconcileUntrackedRecords({ root }) {
   const divergent = [];
   for (const [path, upstreamOid] of upstream.byPath) {
     if (!existsSync(join(root, path)) || isTrackedAtHead(root, path)) continue;
+    if (!isRegularFileEntry(root, target, path)) continue;
     const localOid = hashOnDisk(root, path);
     if (localOid === upstreamOid) candidates.push({ path, oid: upstreamOid });
     else divergent.push(`  ${path} (local ${localOid ?? 'unreadable'} vs incoming ${upstreamOid})`);
@@ -63,7 +82,19 @@ export function reconcileUntrackedRecords({ root }) {
     );
   }
 
-  for (const c of candidates) unlinkSync(join(root, c.path));
+  const deleted = [];
+  for (const c of candidates) {
+    try {
+      _unlink(join(root, c.path));
+    } catch (err) {
+      const done = deleted.map((d) => `  ${d.path} (blob ${d.oid} in ${target})`).join('\n');
+      throw new Error(
+        `brain:memory:pull: could not delete ${c.path}: ${err.message}` +
+        (deleted.length ? `\nalready deleted, their bytes are in ${target} (@{u}) as these blobs:\n${done}` : ''),
+      );
+    }
+    deleted.push(c);
+  }
   return candidates;
 }
 
@@ -80,28 +111,29 @@ export function verifyOrRestore({ root, reconciled, _log = console.log }) {
   for (const { path, oid } of reconciled) {
     const abs = join(root, path);
     if (existsSync(abs)) {
+      const entry = trackedOid(root, path);
+      if (entry?.oid === oid) {
+        _log(`brain:memory:pull: verified ${path} — present, tracked in ${entry.where} as blob ${oid}`);
+        continue;
+      }
+      if (entry) {
+        problems.push(`${path} — tracked in ${entry.where} as a different blob (${entry.oid}, expected ${oid}); not overwritten`);
+        continue;
+      }
       const now = hashOnDisk(root, path);
-      if (now === oid && isTrackedAtHead(root, path)) {
-        _log(`brain:memory:pull: verified ${path} — present, tracked at HEAD, blob ${oid}`);
-        continue;
-      }
-      if (now === oid) {
-        // Present with the same bytes but never committed: nothing to rewrite.
-        _log(`brain:memory:pull: ${path} is present with blob ${oid} but is not tracked at HEAD (the pull did not recreate it)`);
-        problems.push(`${path} — present with the original bytes but not tracked at HEAD`);
-        continue;
-      }
-      problems.push(`${path} — exists with different content (blob ${now ?? 'unreadable'}, expected ${oid}); not overwritten`);
+      problems.push(now === oid
+        ? `${path} — present with the original bytes but tracked neither in HEAD nor in the index`
+        : `${path} — exists with different content (blob ${now ?? 'unreadable'}, expected ${oid}); not overwritten`);
       continue;
     }
-    const blob = run(root, ['cat-file', 'blob', oid]);
+    const blob = run(root, ['cat-file', 'blob', oid], { encoding: 'buffer' });
     if (!ok(blob)) {
       problems.push(`${path} — could not be restored: blob ${oid} is no longer readable (${String(blob.stderr ?? '').trim()})`);
       continue;
     }
     try {
       mkdirSync(dirname(abs), { recursive: true });
-      writeFileSync(abs, blob.stdout, 'utf8');
+      writeFileSync(abs, blob.stdout);
     } catch (err) {
       problems.push(`${path} — could not be restored from blob ${oid}: ${err.message}`);
       continue;

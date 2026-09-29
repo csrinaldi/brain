@@ -10,3 +10,7 @@
 - [x] 3. Wire the shared `defaultGitPull` into `plainfiles.mjs#pull` and
       `engram.mjs#pullMemory`; adapter end-to-end tests.
 - [x] 4. `npm test`, `brain:repo:check`, `brain:nav`.
+- [x] 5. Review remediation, each RED then GREEN: (h) autocrlf/CRLF refused,
+      (i) invalid UTF-8 byte-identical, (j) conflict elsewhere with the record
+      staged, (k) symlink entry never a candidate, (l) mid-loop unlink names
+      the deleted paths.

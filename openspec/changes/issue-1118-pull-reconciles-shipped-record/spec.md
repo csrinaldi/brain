@@ -19,6 +19,11 @@ content (reported instead). The pull error is then rethrown; if the pull exited
 path states what was verified or restored; nothing is claimed that was not
 checked.
 
+Identity MUST be byte-strict (`git hash-object --no-filters`); only regular-file
+(`100644`/`100755`) `@{u}` entries are candidates; the blob is restored as raw
+bytes; verification accepts a path tracked in HEAD or in the index with the
+same oid; a failed unlink names the already-deleted paths and their oids.
+
 #### Scenario: the capturing checkout's shipped record no longer blocks its pull
 - **GIVEN** an untracked record byte-identical to `origin/main`'s copy
 - **WHEN** `pull` runs
@@ -43,3 +48,18 @@ checked.
 
 #### Scenario: nothing outside the working tree and the object store
 - **THEN** no file under the git dir holds a copy, and `git worktree remove` is irrelevant
+
+#### Scenario: CRLF working copy under `core.autocrlf=true`
+- **THEN** it is divergent: refused, bytes unchanged
+
+#### Scenario: invalid UTF-8 bytes and a failed pull
+- **THEN** the file is back byte-identical
+
+#### Scenario: the merge conflicts elsewhere and the record is staged
+- **THEN** the record is verified as present in the index, not reported as lost
+
+#### Scenario: `@{u}` carries a symlink at the path whose target equals the local bytes
+- **THEN** the local file is not deleted
+
+#### Scenario: an unlink fails mid-loop
+- **THEN** the error names the already-deleted paths and their blob oids
