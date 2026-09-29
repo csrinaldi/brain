@@ -88,7 +88,7 @@ jobs:
           #   ABSENT                  (exit 2) — the cursor ref does not exist
           #   UNKNOWN <reason>        (exit 2) — the cursor could not be computed
           # Capture BOTH output and code; never let a non-zero code abort silently.
-          set +e
+          set +e  # surfaced: the exit code is captured on the next line and branched on; any non-PRESENT state files an alarm and halts
           win_out="$(node brain/scripts/governance/postmerge/cursor.mjs window)"
           win_code=$?
           set -e
@@ -168,7 +168,7 @@ jobs:
           # The audit's NUMERIC exit code is authoritative — capture it, never a
           # boolean outcome (continue-on-error flattens 1 and 2). A [FAIL-SHA]-like
           # string in stdout is NEVER pattern-matched to decide a revert.
-          set +e
+          set +e  # surfaced: the numeric audit exit code is captured, normalised, and decides revert versus alarm
           audit_out="$(node brain/scripts/brain-audit.mjs "$range")"
           code=$?
           set -e
@@ -312,9 +312,9 @@ jobs:
               # Per-offender failure boundary: abort any half-applied revert, reset
               # to a clean detached HEAD, clean up an orphan branch so it can never
               # permanently suppress a retry, record the offender, and CONTINUE.
-              git revert --abort 2>/dev/null || true
-              git checkout --detach "$head_sha" 2>/dev/null || true
-              git push origin --delete "auto-revert/${sha}" 2>/dev/null || true
+              git revert --abort 2>/dev/null || true  # swallow-ok: cleanup after a failed per-offender revert; the offender is recorded in `failed` and alarmed below
+              git checkout --detach "$head_sha" 2>/dev/null || true  # swallow-ok: cleanup after a failed per-offender revert; the offender is recorded in `failed` and alarmed below
+              git push origin --delete "auto-revert/${sha}" 2>/dev/null || true  # swallow-ok: cleanup after a failed per-offender revert; the offender is recorded in `failed` and alarmed below
               failed+=("$sha")
             }
           done
@@ -474,7 +474,7 @@ jobs:
           # D3) the real cause is logged via console.error, not console.log —
           # capturing stdout alone left the alarm's "Sweep output" block empty
           # on every genuine failure, not just the #1113 crash case (#1113).
-          set +e
+          set +e  # surfaced: the sweep exit code is captured on the next line; non-zero files the shared alarm
           sweep_out="$(node brain/scripts/governance/postmerge/sweep.mjs --apply --report "$RUNNER_TEMP/sweep-body.md" 2>&1)"
           sweep_code=$?
           set -e
@@ -548,7 +548,7 @@ jobs:
           # BOTH headers is rejected by GitHub (duplicate Authorization).
           push_ok=0
           if [ "$app_available" -eq 1 ]; then
-            git config --local --unset-all http.https://github.com/.extraheader 2>/dev/null || true
+            git config --local --unset-all http.https://github.com/.extraheader 2>/dev/null || true  # swallow-ok: strips a credential header the push must not carry; if it was never set there is nothing to strip, and a bad push is alarmed below
             auth_header="AUTHORIZATION: basic $(printf '%s' "x-access-token:${BRAIN_SWEEP_TOKEN}" | base64 -w0)"
             if git add -A \
               && git commit -m "chore(openspec): archive ${archived} closed changes" \
@@ -566,7 +566,7 @@ jobs:
           fi
 
           if [ "$push_ok" -ne 1 ]; then
-            git push origin --delete "$br" 2>/dev/null || true
+            git push origin --delete "$br" 2>/dev/null || true  # swallow-ok: best-effort orphan-branch cleanup on a path that already files an alarm ("where possible")
             label="governance:archive-sweep-failed"
             {
               echo "The post-merge archive sweep archived ${archived} folder(s) locally, but committing or pushing ${br} failed."
@@ -591,7 +591,7 @@ jobs:
           # unavailable); the WHY (unconfigured vs mint-failed) stays in this
           # bash, for the alarm text only. `--base` is the repository's actual
           # default branch, never a hardcoded `main` (also #1106).
-          set +e
+          set +e  # surfaced: the PR exit code is captured on the next line; 0, 2 and any other each branch to an outcome or an alarm
           pr_out="$(node brain/scripts/governance/postmerge/sweep.mjs --open-pr \
             --head "$br" --base "$default_branch" --archived "$archived" \
             --report "$RUNNER_TEMP/sweep-body.md")"
@@ -626,7 +626,7 @@ jobs:
             # A real mrCreate failure (a bad token, a rejected request) — "as
             # today": cleaned up like any other push/PR failure, never left
             # for a human who was never told to expect it.
-            git push origin --delete "$br" 2>/dev/null || true
+            git push origin --delete "$br" 2>/dev/null || true  # swallow-ok: best-effort orphan-branch cleanup on a path that already files an alarm ("where possible")
             label="governance:archive-sweep-failed"
             {
               echo "The post-merge archive sweep archived ${archived} folder(s) and pushed ${br}, but opening its pull request failed:"

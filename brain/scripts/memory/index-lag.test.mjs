@@ -49,6 +49,18 @@ function snapshotDir(dir) {
 
 // ── compareIndexToRecords (pure) ───────────────────────────────────────────
 
+// #1127: the corrupt-line `continue` inside compareIndexToRecords is marked
+// `surfaced:` in the source. This pins the claim: a line that cannot be parsed
+// is not silently dropped from the picture — its id reads as missing.
+test('compareIndexToRecords (#1127): a corrupt index line is not indexed, so its record reads as missing from the index', () => {
+  const result = compareIndexToRecords({
+    indexLines: ['{ not json'],
+    records: [{ id: 'rec-aaaaaaaaaaaaaaaa' }],
+  });
+  assert.equal(result.lagged, true);
+  assert.deepEqual(result.missingFromIndex, ['rec-aaaaaaaaaaaaaaaa']);
+});
+
 test('compareIndexToRecords: a committed index whose id set differs from the rebuilt set reports lagged:true with both counts', () => {
   const indexLines = [JSON.stringify({ id: 'rec-aaaaaaaaaaaaaaaa', ts: base.ts, actor: base.actor, type: base.type, project: base.project })];
   const records = [

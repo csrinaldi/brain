@@ -152,7 +152,7 @@ async function sweepLocal({ branch, date, where, root, project, tier, host, git,
       root, project, tier, host, date, git, vcs,
       collect: () => noCollect(ref, baseFetched),
     });
-  } catch (err) {
+  } catch (err) { /* surfaced: a per-branch failure is returned as a row (`action`, `reason`) that the ship op reports */
     if (err?.diverged) {
       return { branch, date, where, action: 'diverged', delivered: false, pr: null, reason: err.message };
     }
@@ -242,7 +242,7 @@ export async function sweepLanes({ root, project, tier, host, today, git, vcs, s
           root, project, tier, host, git, vcs, ship, baseFetched,
         }));
       }
-    } catch (err) {
+    } catch (err) { /* surfaced: an unexpected throw is contained per branch and returned as a row with its reason */
       // Belt-and-braces: an unexpected throw from a git call this module
       // does not otherwise wrap (e.g. `for-each-ref` returning meanwhile
       // is fine as a status object, never a throw — but a future git()

@@ -120,7 +120,7 @@ function isDirectInvocation() {
   if (!entry) return false;
   try {
     return import.meta.url === pathToFileURL(realpathSync(entry)).href;
-  } catch {
+  } catch { /* swallow-ok: an argv[1] that cannot be resolved is not a direct invocation of this file (REPL, -e, stdin) */
     return false;
   }
 }

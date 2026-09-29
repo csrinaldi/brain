@@ -93,7 +93,7 @@ export function ensureMemorySymlink(root = repoRoot) {
   try {
     lstatSync(targetPath);
     targetExists = true;
-  } catch {
+  } catch { /* swallow-ok: an lstat probe; absence is answered by the warning and skip that follow (the symlink is the engram adapter's private artifact) */
     /* not found */
   }
 
@@ -106,7 +106,7 @@ export function ensureMemorySymlink(root = repoRoot) {
   let engramStat = null;
   try {
     engramStat = lstatSync(symlinkPath);
-  } catch {
+  } catch { /* swallow-ok: an lstat probe: an absent .engram is the normal fresh-clone state and the branch below creates it */
     /* .engram does not exist — normal post-migration state on a fresh clone */
   }
 
@@ -219,7 +219,7 @@ function _defaultLoadBrainConfig(root) {
 export function _defaultResolveDir(p) {
   try {
     return realpathSync(p);
-  } catch {
+  } catch { /* swallow-ok: an unresolvable directory reads as null, this seam's documented "not resolvable" answer */
     return null;
   }
 }
@@ -475,7 +475,7 @@ export async function importMemory({
   try {
     try {
       existingTopicKeys = _engramExistingTopicKeys();
-    } catch (err) {
+    } catch (err) { /* surfaced: engram's stderr is surfaced in the thrown error — that is the point of this block (#433) */
       // execFileSync captures engram's stderr on `pipe`; surfacing it is the whole
       // point — #433 survived as long as it did because this path runs quiet.
       unreadable = explainEngramFailure(err);
@@ -856,7 +856,7 @@ export async function hydrate(
   let guard;
   try {
     guard = _guard();
-  } catch (err) {
+  } catch (err) { /* surfaced: warned as hydrateDeferred and returned as `{ deferred: true, reason }`; the record is already durable */
     const reason = `guard-failed: ${err?.code ?? err?.message ?? String(err)}`;
     _warn(await t("memory.save.hydrateDeferred", { recordId, reason }));
     return { written: 0, skipped: 0, deferred: true, reason };
@@ -901,7 +901,7 @@ export async function hydrate(
       topic: recordId,
     });
     return { written: 1, skipped: 0 };
-  } catch (err) {
+  } catch (err) { /* surfaced: warned as hydrateDeferred and returned as `{ deferred: true, reason }`; the record is already durable */
     const reason = explainEngramFailure(err);
     _warn(await t("memory.save.hydrateDeferred", { recordId, reason }));
     return { written: 0, skipped: 0, deferred: true, reason };
@@ -1024,7 +1024,7 @@ function _engramEnrich(feature, frontmatter) {
       // Leave as skeleton; the obs text is structured but too complex to parse
       // here without risking corruption. The agent should update manually.
     }
-  } catch {
+  } catch { /* swallow-ok: enrichment is best-effort by contract: never fatal, never required (feature-working-memory-contract.md) */
     // Enrichment is best-effort — never fatal.
   }
 }
@@ -1068,7 +1068,7 @@ export async function featureCheckpoint(
   let resolvedFeature;
   try {
     resolvedFeature = resolveFeature(root, feature);
-  } catch (err) {
+  } catch (err) { /* swallow-ok: contract guarantee: an unresolvable feature is informational and exits 0 (feature-working-memory-contract.md) */
     console.warn(`  ℹ memory: ${err.message} — skipping checkpoint`);
     return; // exit 0: must never break the pre-push hook
   }
@@ -1093,7 +1093,9 @@ export async function featureCheckpoint(
       // File exists but has no parseable frontmatter — treat content as body only.
       body = existing;
     }
-  } catch {
+  } catch (err) {
+    // swallow-ok: ONLY ENOENT (no resume.md yet) is the skeleton-creation case; any other read error is re-thrown below
+    if (err?.code !== "ENOENT") throw err;
     // File absent — create skeleton with required fields.
     frontmatter = {
       feature: resolvedFeature,
@@ -1142,14 +1144,14 @@ export async function featureCheckpoint(
   //    Wrapped in its own try/catch in addition to being injectable.
   try {
     _doEngramEnrich(resolvedFeature, frontmatter);
-  } catch {
+  } catch { /* swallow-ok: enrichment is best-effort by contract: never fatal, never required (feature-working-memory-contract.md) */
     // Enrichment failed — proceed to core write regardless.
   }
 
   // 6. Validate (NEVER fatal — warn only).
   try {
     validateResume(frontmatter);
-  } catch (err) {
+  } catch (err) { /* surfaced: a warning line names the offending field; the write proceeds by contract so the file can be fixed by hand */
     console.warn(`  ⚠ resume.md validation warning: ${err.message}`);
   }
 
@@ -1239,18 +1241,22 @@ export async function featureResume(
   let files;
   try {
     files = readdirSync(targetDir).filter((f) => f.endsWith(".md"));
-  } catch {
-    console.warn(`  ⚠ could not read change dir: ${targetDir}`);
-    return;
+  } catch (err) {
+    // Nothing was projected: that is a failure, not a quiet return (#1127).
+    throw new Error(`featureResume: could not read change dir ${targetDir} — ${err.message}`);
   }
 
+  // Every file is still attempted; the verb rejects at the end naming each one
+  // that did not land, so a partial hydration never reads as a complete one.
+  const failures = [];
   for (const filename of files) {
     const filePath = join(targetDir, filename);
     let content;
     try {
       content = readFileSync(filePath, "utf8");
-    } catch {
+    } catch (err) { /* surfaced: collected into `failures` and thrown after the loop (#1127) */
       console.warn(`  ⚠ could not read ${filename} — skipping`);
+      failures.push(`${filename}: ${String(err.message).trim()}`);
       continue;
     }
 
@@ -1268,9 +1274,15 @@ export async function featureResume(
       console.log(
         `  ✓ ${filename} → engram [reference] topic=${topic} project=${featureProject}`,
       );
-    } catch (err) {
+    } catch (err) { /* surfaced: collected into `failures` and thrown after the loop (#1127) */
       console.warn(`  ⚠ ${filename}: ${String(err.message).trim()}`);
+      failures.push(`${filename}: ${String(err.message).trim()}`);
     }
+  }
+  if (failures.length > 0) {
+    throw new Error(
+      `featureResume: ${failures.length} of ${files.length} file(s) were not projected into engram — ${failures.join("; ")}`,
+    );
   }
 }
 
@@ -1514,7 +1526,7 @@ function _defaultEngramSave(title, content, { type, project, scope, topic }) {
 function _defaultHealVersionProbe() {
   try {
     return execFileSync("engram", ["version"], { stdio: ["ignore", "pipe", "pipe"], encoding: "utf8" });
-  } catch {
+  } catch { /* swallow-ok: a failed version probe returns null, this seam's documented "version unknown" answer */
     return null;
   }
 }
@@ -1612,7 +1624,7 @@ export function healDuplicates({
   let plan;
   try {
     plan = exportAndPlan();
-  } catch (err) {
+  } catch (err) { /* surfaced: returned as an outcome object with `detail`, which the caller reports */
     return { outcome: "refused", refusal: "shape", detail: explainEngramFailure(err) };
   }
 
@@ -1639,7 +1651,7 @@ export function healDuplicates({
     try {
       _exec("engram", HEAL_DELETE_ARGS(ids[i]), { stdio: ["ignore", "ignore", "pipe"] });
       deleted.push(ids[i]);
-    } catch (err) {
+    } catch (err) { /* surfaced: returned as an outcome object with `detail`, which the caller reports */
       return { outcome: "partial", deleted, notDeleted: ids.slice(i), detail: explainEngramFailure(err) };
     }
   }
@@ -1647,7 +1659,7 @@ export function healDuplicates({
   let verify;
   try {
     verify = exportAndPlan();
-  } catch (err) {
+  } catch (err) { /* surfaced: returned as an outcome object with `detail`, which the caller reports */
     return { outcome: "unverified", deleted, notDeleted: [], detail: explainEngramFailure(err) };
   }
   if (!verify.ok || verify.groups.length > 0) {

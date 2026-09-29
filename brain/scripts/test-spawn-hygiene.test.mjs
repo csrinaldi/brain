@@ -54,6 +54,7 @@ import { readFileSync, globSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join, dirname, sep, relative, resolve as pathResolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { testTmp } from './lib/test-tmp.mjs';
+import { maskNonCode } from './lib/mask-non-code.mjs';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
@@ -93,52 +94,6 @@ function callArgsText(src, openParenIdx) {
     }
   }
   return src.slice(openParenIdx + 1);
-}
-
-/** Replaces every //, /* *‍/ and string/template body with blanks (same
- * length, newlines preserved) so the call-site search never matches
- * callee-shaped text living inside a comment or a string. */
-function maskNonCode(src) {
-  let out = '';
-  let i = 0;
-  const n = src.length;
-  while (i < n) {
-    const c = src[i];
-    const c2 = src[i + 1];
-    if (c === '/' && c2 === '/') {
-      let j = i;
-      while (j < n && src[j] !== '\n') { out += ' '; j += 1; }
-      i = j;
-      continue;
-    }
-    if (c === '/' && c2 === '*') {
-      out += '  ';
-      let j = i + 2;
-      while (j < n && !(src[j] === '*' && src[j + 1] === '/')) {
-        out += src[j] === '\n' ? '\n' : ' ';
-        j += 1;
-      }
-      out += '  ';
-      i = j + 2;
-      continue;
-    }
-    if (c === '\'' || c === '"' || c === '`') {
-      const quote = c;
-      out += ' ';
-      let j = i + 1;
-      while (j < n && src[j] !== quote) {
-        if (src[j] === '\\') { out += '  '; j += 2; continue; }
-        out += src[j] === '\n' ? '\n' : ' ';
-        j += 1;
-      }
-      out += ' ';
-      i = j + 1;
-      continue;
-    }
-    out += c;
-    i += 1;
-  }
-  return out;
 }
 
 /** Splits `text` on top-level commas — the same paren/bracket/brace/string
@@ -410,16 +365,28 @@ const ALLOWLIST = [
   // ── git hooks: run directly, never through a real `git push`/network ───
   { file: 'brain/scripts/hooks/commit-msg.test.mjs', entrypoint: 'brain/scripts/hooks/commit-msg', reason: 'no-vcs-capability' },
   { file: 'brain/scripts/hooks/hooks.attribution-parity.test.mjs', entrypoint: 'brain/scripts/hooks/commit-msg', reason: 'no-vcs-capability' },
+  // #1127: bash runs install-tools.sh's provider-resolution and summary snippets, lifted verbatim, in a scratch dir with a gentle-ai shim — no apt, no network.
+  // #1127 slice A: bash runs bootstrap.sh's step snippets, lifted verbatim, against failing stand-in scripts in a scratch dir — no git remote, no network.
+  { file: 'brain/scripts/bootstrap.required-steps.test.mjs', entrypoint: '<unresolved>', line: 58, reason: 'no-vcs-capability' },
+  // #1127 round 3: the REAL bootstrap.sh in a hermetic box — HOME/XDG under the temp root, a PATH of only shimmed host tools (no gh, glab, engram, gentle-ai, codex; a python3 grep), stdin closed, a COPY of the brain tree; the unhealthy case pulls from a local bare repo, never a network.
+  { file: 'brain/scripts/bootstrap.e2e.test.mjs', entrypoint: '<unresolved>', line: 66, reason: 'no-vcs-capability' },
+  { file: 'brain/scripts/bootstrap.e2e.test.mjs', entrypoint: 'brain/scripts/bootstrap.sh', line: 108, reason: 'no-vcs-capability' },
+  // #1127: `brain-config.mjs ensure` run from a COPY of the tree in a temp repo, to pin its exit code.
+  { file: 'brain/scripts/lib/brain-config.ensure-cli.test.mjs', entrypoint: 'brain/scripts/lib/brain-config.mjs', line: 28, reason: 'no-vcs-capability' },
+  { file: 'brain/scripts/install-tools.test.mjs', entrypoint: '<unresolved>', line: 34, reason: 'no-vcs-capability' },
+  { file: 'brain/scripts/install-tools.test.mjs', entrypoint: '<unresolved>', line: 93, reason: 'no-vcs-capability' }, // `command -v` lookups for the no-node PATH
+  { file: 'brain/scripts/install-tools.test.mjs', entrypoint: '<unresolved>', line: 97, reason: 'no-vcs-capability' }, // the same snippet with node off PATH
+  { file: 'brain/scripts/brain-promote.golden.test.mjs', entrypoint: 'brain/scripts/hooks/commit-msg', reason: 'no-vcs-capability' }, // #1127: masked away by the old masker (a regex literal holding a quote); runs the hook on a message file, no VCS
   { file: 'brain/scripts/hooks/pre-commit.test.mjs', entrypoint: 'brain/scripts/hooks/pre-commit', reason: 'no-vcs-capability' },
   { file: 'brain/scripts/hooks/pre-push.test.mjs', entrypoint: 'brain/scripts/hooks/pre-push', reason: 'no-vcs-capability' },
   { file: 'brain/scripts/hooks/hooks.stream-discipline.test.mjs', entrypoint: '<unresolved>', line: 98, reason: 'no-vcs-capability' },
   { file: 'brain/scripts/axes/platform/lib/settings-hooks.test.mjs', entrypoint: '<unresolved>', line: 93, reason: 'no-vcs-capability' },
   { file: 'brain/scripts/bootstrap.worktree.test.mjs', entrypoint: '<unresolved>', line: 64, reason: 'no-vcs-capability' },
   { file: 'brain/scripts/bootstrap.worktree.test.mjs', entrypoint: '<unresolved>', line: 145, reason: 'no-vcs-capability' },
-  { file: 'brain/scripts/bootstrap.cross-tree-code.test.mjs', entrypoint: '<unresolved>', line: 64, reason: 'no-vcs-capability' },
-  { file: 'brain/scripts/bootstrap.cross-tree-code.test.mjs', entrypoint: '<unresolved>', line: 179, reason: 'no-vcs-capability' },
+  { file: 'brain/scripts/bootstrap.cross-tree-code.test.mjs', entrypoint: '<unresolved>', line: 72, reason: 'no-vcs-capability' },
+  { file: 'brain/scripts/bootstrap.cross-tree-code.test.mjs', entrypoint: '<unresolved>', line: 187, reason: 'no-vcs-capability' },
   // #1124: bootstrap.sh's own brain-config.mjs ensure line — reads `git remote get-url origin` only, never the network
-  { file: 'brain/scripts/bootstrap.tier-notice.test.mjs', entrypoint: '<unresolved>', line: 62, reason: 'no-vcs-capability' },
+  { file: 'brain/scripts/bootstrap.tier-notice.test.mjs', entrypoint: '<unresolved>', line: 71, reason: 'no-vcs-capability' },
   // #1125: bash runs bootstrap.sh's env helpers and §6 platform block, lifted verbatim, in a scratch dir — no git, no network, no push.
   { file: 'brain/scripts/bootstrap.default-platform.test.mjs', entrypoint: '<unresolved>', line: 85, reason: 'no-vcs-capability' },
   { file: 'brain/scripts/bootstrap.default-platform.test.mjs', entrypoint: '<unresolved>', line: 179, reason: 'no-vcs-capability' },
@@ -450,7 +417,7 @@ const ALLOWLIST = [
   //    dir, and brain-to-engram.mjs run against a fake `engram` stub — none
   //    of the four ever import or call a VCS/gh port.
   { file: 'brain/scripts/bootstrap.env-gitignore.test.mjs', entrypoint: '<unresolved>', line: 60, reason: 'no-vcs-capability' },
-  { file: 'brain/scripts/bootstrap.memory-backend-case.test.mjs', entrypoint: '<unresolved>', line: 89, reason: 'no-vcs-capability' },
+  { file: 'brain/scripts/bootstrap.memory-backend-case.test.mjs', entrypoint: '<unresolved>', line: 109, reason: 'no-vcs-capability' },
   { file: 'brain/scripts/bootstrap.vcs-provider-validate.test.mjs', entrypoint: '<unresolved>', line: 66, reason: 'no-vcs-capability' },
   { file: 'brain/scripts/brain-to-engram.test.mjs', entrypoint: '<unresolved>', line: 141, reason: 'no-vcs-capability' },
 

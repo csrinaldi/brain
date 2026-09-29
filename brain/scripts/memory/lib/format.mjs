@@ -376,7 +376,7 @@ export function serializeIndex(entriesById) {
 export function canonicalOrNull(record) {
   try {
     return canonicalJson(record);
-  } catch {
+  } catch { /* swallow-ok: canonicalOrNull's contract: a non-canonicalisable record reads as null and the caller routes it to invalid */
     return null;
   }
 }

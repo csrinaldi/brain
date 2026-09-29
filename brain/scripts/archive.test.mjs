@@ -556,3 +556,21 @@ test('#810: a declared custom stage artefact lands in the archive with the dir �
   assert.deepEqual(renames, [{ src: 'openspec/changes/issue-810-x', dest: 'openspec/changes/archive/810' }],
     'the DIR moves whole — research.md rides it; no per-file copy that could drop a custom artefact');
 });
+
+// ── #1127: --backfill in a repo with no openspec/changes/ is zero entries ────
+// The same crash #1113 fixed in the sweep: an unguarded readdirSync threw an
+// uncaught ENOENT stack for a consumer that has no changes folder yet.
+import { spawnSync } from 'node:child_process';
+
+test('#1127: --backfill in a repo with no openspec/changes/ exits 0 without an uncaught ENOENT', () => {
+  const sandbox = testTmp('archive-backfill-nochanges-');
+  mkdirSync(join(sandbox, '.git'), { recursive: true });
+  const scriptPath = fileURLToPath(new URL('./archive.mjs', import.meta.url));
+  const res = spawnSync('node', [scriptPath, '--backfill'], {
+    cwd: sandbox,
+    encoding: 'utf8',
+    env: { ...process.env, HOME: sandbox, DBUS_SESSION_BUS_ADDRESS: '', XDG_RUNTIME_DIR: sandbox },
+  });
+  assert.doesNotMatch(res.stderr, /ENOENT|scandir/, 'no uncaught readdir failure');
+  assert.equal(res.status, 0, res.stderr);
+});

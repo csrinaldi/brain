@@ -320,8 +320,9 @@ export function ensureBrainConfig(root = REPO_ROOT, { identity, write = true } =
   try {
     const raw = readFileSync(configPath, 'utf8');
     cfg = JSON.parse(raw);
-  } catch {
-    return { created: false, filled: [], provider: '' };
+  } catch (err) {
+    // Reported, never skipped in silence (#1127): the caller (`ensure`) prints it and exits 1.
+    return { created: false, filled: [], provider: '', error: `cannot be read or parsed — ${err.message}` };
   }
 
   if (!hasIdentity) {
@@ -354,6 +355,10 @@ export function ensureBrainConfig(root = REPO_ROOT, { identity, write = true } =
 // Main-module guard: run as `node brain/scripts/lib/brain-config.mjs ensure`
 if (process.argv[1] === __filename && process.argv[2] === 'ensure') {
   const result = ensureBrainConfig();
+  if (result.error) {
+    console.error(`  ✗ brain.config.json: ${result.error}`);
+    process.exitCode = 1;
+  }
   if (result.created) {
     console.log(`  ✓ brain.config.json: created (provider=${result.provider || '?'})`);
     try {

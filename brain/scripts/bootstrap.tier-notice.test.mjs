@@ -32,6 +32,14 @@ function line(prefix) {
   return l.trim();
 }
 
+/** The whole `ensure` statement: its line plus the `|| { … }` failure classification that follows (#1127). */
+function ensureStatement() {
+  const start = LINES.findIndex((s) => s.startsWith('node "$BRAIN_SCRIPTS/lib/brain-config.mjs" ensure'));
+  assert.ok(start >= 0, 'bootstrap.sh must run brain-config.mjs ensure');
+  const end = LINES.findIndex((s, i) => i > start && s === '}');
+  return LINES.slice(start, end + 1).join('\n');
+}
+
 /** Copies what a consumer carries after `brain init`: brain/scripts + brain/core, no tests. */
 function copyBrain(dest) {
   const keep = (src) => !src.endsWith('.test.mjs') && basename(src) !== '__fixtures__' && basename(src) !== 'node_modules';
@@ -57,7 +65,8 @@ function runEnsure(repo) {
   const script = [
     'MISSING_OPTIONAL=()',
     `BRAIN_SCRIPTS=${JSON.stringify(join(repo, 'brain', 'scripts'))}`,
-    line('node "$BRAIN_SCRIPTS/lib/brain-config.mjs" ensure'),
+    'REQUIRED_FAILURES=()',
+    ensureStatement(),
   ].join('\n');
   return execFileSync('bash', ['-c', `{\n${script}\n} 2>&1`], { cwd: repo, encoding: 'utf8' });
 }

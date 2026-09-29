@@ -70,7 +70,7 @@ export function resolveInstalledTag({ root, readFile = (p) => readFileSync(p, 'u
   try {
     const version = JSON.parse(readFile(pkgPath))?.version;
     return typeof version === 'string' && version.length > 0 ? `v${version}` : null;
-  } catch {
+  } catch { /* swallow-ok: an unreadable or unparseable package.json reads as "no installed tag" — the resolver's documented null */
     return null;
   }
 }
@@ -155,7 +155,7 @@ export function writeBootstrapAlias({ pkgPath, readFile = (p) => readFileSync(p,
   const current = (() => {
     try {
       return JSON.parse(before)?.scripts?.[BOOTSTRAP_SCRIPT_KEY];
-    } catch {
+    } catch { /* surfaced: an unparseable package.json is re-raised, with the real parse error, by the merge that follows */
       return undefined; // unparseable — let the merge raise the real error below
     }
   })();

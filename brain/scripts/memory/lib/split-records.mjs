@@ -170,7 +170,7 @@ export function runSplit({ recordsDir, apply = false, _writeFile = writeFileSync
       try {
         const record = JSON.parse(line);
         if (record && typeof record.id === 'string') present.add(record.id);
-      } catch {
+      } catch { /* swallow-ok: only collects ids already present; a corrupt line is refused by the rebuildIndex gate (store.mjs) */
         continue;
       }
     }

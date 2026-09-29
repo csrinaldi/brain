@@ -31,6 +31,7 @@ import {
   existsSync,
   readdirSync,
   rmSync,
+  chmodSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -394,4 +395,59 @@ test('featureResume: throws ambiguous error when multiple dirs and no arg', asyn
       return true;
     },
   );
+});
+
+// ---------------------------------------------------------------------------
+// #1127 (class C): a projection that lost files must not report success.
+// Before: each failed save was a `⚠` line and featureResume returned normally,
+// so `feature-resume` exited 0 over a partial hydration.
+// ---------------------------------------------------------------------------
+
+function resumeFixture(t) {
+  const root = makeTempRoot();
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const featureDir = makeFeatureDir(root, 'my-feature');
+  writeFileSync(join(featureDir, 'resume.md'), [
+    '---', 'feature: my-feature', 'current_slice: S2', 'next_action: go', 'blockers:', '---', '',
+  ].join('\n'));
+  writeFileSync(join(featureDir, 'proposal.md'), '# Proposal\nbody\n');
+  return root;
+}
+
+test('featureResume (#1127): rejects, naming the files, when an engram save fails', async (t) => {
+  const root = resumeFixture(t);
+  await assert.rejects(
+    () => featureResume('my-feature', {
+      root,
+      _checkEngram: () => true,
+      _engramSave: (title) => { if (title === 'Proposal') throw new Error('engram exploded'); },
+    }),
+    (err) => /proposal\.md/.test(err.message) && /engram exploded/.test(err.message),
+  );
+});
+
+test('featureResume (#1127): still attempts every file before rejecting (one failure does not hide the others)', async (t) => {
+  const root = resumeFixture(t);
+  const attempted = [];
+  await assert.rejects(() => featureResume('my-feature', {
+    root,
+    _checkEngram: () => true,
+    _engramSave: (title) => { attempted.push(title); throw new Error('down'); },
+  }));
+  assert.equal(attempted.length, 2, 'both files were attempted');
+});
+
+test('featureCheckpoint (#1127): an existing resume.md that cannot be READ is never overwritten by a skeleton', async (t) => {
+  if (process.getuid?.() === 0) return t.skip('root ignores file modes');
+  const root = makeTempRoot();
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  makeFeatureDir(root, 'my-feature');
+  const rp = resumePath(root, 'my-feature');
+  const original = '---\nfeature: my-feature\ncurrent_slice: S9\nnext_action: keep me\nblockers:\n---\n';
+  writeFileSync(rp, original);
+  chmodSync(rp, 0o200); // writable, not readable: read fails EACCES, a skeleton write would succeed
+
+  await assert.rejects(() => featureCheckpoint('my-feature', { root, ...defaultDeps() }), /EACCES/);
+  chmodSync(rp, 0o644);
+  assert.equal(readFileSync(rp, 'utf8'), original, 'the hand-written state must survive');
 });

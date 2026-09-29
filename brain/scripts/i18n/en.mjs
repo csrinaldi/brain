@@ -212,7 +212,7 @@ export default {
   // {harness} = unknown harness name
   'bootstrap.sdd.unknownHarness':     "harness '{harness}' has no known init routine — configure its skills manually",
   // no {placeholder} — generic failure from brain/scripts/harness/cli.mjs init
-  'bootstrap.sdd.initFailed':         'harness init failed (non-blocking)',
+  'bootstrap.sdd.initFailed':         'harness init failed — REQUIRED, env:init will exit 1',
   // ADR gap detection (Step 4 of gentle-ai init)
   'bootstrap.sdd.noProjectAdrs':      'No project ADRs found (brain/project/decisions/ is empty or absent).',
   'bootstrap.sdd.noProjectAdrsHint':  'Run /project:bootstrap-adrs in your AI agent to draft the starter ADR set (Stack, Testing, Build).',
@@ -226,13 +226,18 @@ export default {
   'bootstrap.memory.hookFailed':     'could not activate core.hooksPath (pre-push hook)',
   'bootstrap.memory.nodeAbsent':     'node absent — engram backend setup skipped',
   'bootstrap.memory.engram.ok':      'engram backend configured (symlink + merge driver)',
-  'bootstrap.memory.engram.failed':  'memory setup failed (non-blocking)',
+  'bootstrap.memory.engram.failed':  'memory setup failed — REQUIRED, env:init will exit 1',
   'bootstrap.memory.pull.ok':        'memory imported (.memory/ → engram)',
-  'bootstrap.memory.pull.failed':    'brain:memory:pull failed (non-blocking)',
+  'bootstrap.memory.pull.failed':    'brain:memory:pull failed — REQUIRED, env:init will exit 1',
+  'bootstrap.memory.pull.skipped':   'memory pull skipped — {reason}. Next: npm run brain:memory:pull once that is in place.',
+  'bootstrap.memory.pull.noCommits': 'this repository has no commits yet',
+  'bootstrap.memory.pull.noUpstream': 'this branch has no upstream to pull from',
+  'bootstrap.memory.pull.offline':   'the remote could not be reached',
+  'bootstrap.memory.engramAbsent':   'engram is not installed — hydration and indexing skipped (records-only capture still works). Next: install engram, then npm run brain:memory:pull && npm run brain:memory:index.',
   'bootstrap.memory.index.ok':       'durable index reprojected (brain/ → engram)',
-  'bootstrap.memory.index.failed':   'brain:memory:index failed (non-blocking)',
+  'bootstrap.memory.index.failed':   'brain:memory:index failed — REQUIRED, env:init will exit 1',
   'bootstrap.memory.plainfiles.ok':      'plainfiles backend ready (.memory/records/ + index)',
-  'bootstrap.memory.plainfiles.failed':  'plainfiles memory setup failed (non-blocking)',
+  'bootstrap.memory.plainfiles.failed':  'plainfiles memory setup failed — REQUIRED, env:init will exit 1',
   'bootstrap.memory.plainfiles.noIndex': 'brain/ → memory indexing is engram-only; plainfiles has no doc projection by design',
   // {backend} = unknown backend name
   'bootstrap.memory.unknownBackend': "backend '{backend}' has no known init routine — configure it manually",
@@ -299,6 +304,7 @@ export default {
   'tools.gentleai.configFailed':     'gentle-ai install failed — retry manually',
 
   // §5 Summary — {tool} = binary name
+  'tools.summary.incomplete':    'Setup INCOMPLETE — failed steps: {steps}. Fix the errors above and re-run.',
   'tools.summary.section':       'Installation complete',
   'tools.summary.nextStep':      'Next step:',
   'tools.summary.checkVersions': 'Check versions:',

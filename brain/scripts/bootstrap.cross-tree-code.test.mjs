@@ -45,6 +45,14 @@ function line(prefix) {
   return l.trim();
 }
 
+/** The verbatim memory-step helper functions (#1127). */
+function helpers() {
+  const start = LINES.findIndex((s) => s.includes('BEGIN memory-step-helpers'));
+  const end = LINES.findIndex((s, i) => i > start && s.includes('END memory-step-helpers'));
+  assert.ok(start >= 0 && end > start, 'bootstrap.sh must carry the memory-step-helpers block');
+  return LINES.slice(start, end).join('\n');
+}
+
 /** The verbatim `if [ ! -d "$BRAIN_SCRIPTS" ]; then ... fi` guard, whole. */
 function brainScriptsGuard() {
   const start = LINES.findIndex((s) => s.startsWith('if [ ! -d "$BRAIN_SCRIPTS" ]'));
@@ -218,7 +226,12 @@ test("#1093 bootstrap.sh memory pull: runs against the WORKTREE's package.json, 
       'cd "$REPO_ROOT"',
       'PM=npm',
       'ok() { :; }; warn() { :; }', // stubs — bootstrap.sh defines these earlier; irrelevant here
-      line('(cd "$WORKTREE_ROOT" && $PM run --silent brain:memory:pull)'),
+      // Slice A (#1127): the pull runs through run_memory_pull. The preflight is stubbed so the
+      // question under test stays WHICH package.json ran, in WHICH directory.
+      'MISSING_OPTIONAL=(); REQUIRED_FAILURES=()',
+      helpers(),
+      'memory_pull_unavailable() { return 1; }',
+      'run_memory_pull',
     ].join('\n');
 
     sh(script, wt);

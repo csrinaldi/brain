@@ -130,7 +130,7 @@ export function readOutgoing({ pkgRoot, relPaths }) {
   for (const rel of relPaths) {
     try {
       out.set(rel, readFileSync(join(pkgRoot, rel)));
-    } catch {
+    } catch { /* swallow-ok: an absent or unreadable outgoing copy is "unknown", never evidence of a consumer edit; callers treat unknown as unknown */
       // Absent or unreadable. Absence is NOT evidence of a consumer edit — a
       // path brain ships for the first time has no outgoing copy either — so it
       // is simply left out of the map and callers treat "unknown" as "unknown".
@@ -154,7 +154,7 @@ export function listFiles(root) {
     let entries;
     try {
       entries = readdirSync(dir, { withFileTypes: true });
-    } catch {
+    } catch { /* follow-up: slice-D an unreadable directory lists as empty, so a file could be skipped from a copy without a report */
       return;
     }
     for (const entry of entries) {
@@ -210,7 +210,7 @@ function restoreHandle({ destRoot, dir, saved, created, createdDirs }) {
           // this — the write loop had just created the parent.
           mkdirSync(dirname(target), { recursive: true });
           copyFileSync(join(dir, rel), target);
-        } catch { failed.push(rel); }
+        } catch { /* surfaced: the path is pushed to `failed`, which the restore result returns and the caller prints */ failed.push(rel); }
       }
 
       // Judged by outcome, not by whether the call threw: a path that is gone was
@@ -218,7 +218,7 @@ function restoreHandle({ destRoot, dir, saved, created, createdDirs }) {
       // Only a path still on disk afterwards is a real failure.
       for (const rel of created) {
         const path = join(destRoot, rel);
-        try { rmSync(path, { force: true }); } catch { /* verified on the next line */ }
+        try { rmSync(path, { force: true }); } catch { /* surfaced: judged by outcome: pathPresent() on the next line pushes the path to `failed` when it is still on disk */ /* verified on the next line */ }
         if (pathPresent(path)) failed.push(rel);
       }
 
@@ -230,7 +230,7 @@ function restoreHandle({ destRoot, dir, saved, created, createdDirs }) {
           if (pathPresent(d) && readdirSync(d).length === 0) rmSync(d, { recursive: true, force: true });
         // Reported repo-relative like every other entry: the caller prints them as
         // one list, and mixing absolute with relative paths reads as two bugs.
-        } catch { failed.push(relative(destRoot, d)); }
+        } catch { /* surfaced: a directory that could not be removed is pushed to `failed` and reported by the caller */ failed.push(relative(destRoot, d)); }
       }
 
       return { failed };
@@ -245,7 +245,7 @@ function restoreHandle({ destRoot, dir, saved, created, createdDirs }) {
      * survives is an unreferenced directory, which the next run treats as debris.
      */
     discard() {
-      try { rmSync(join(dir, JOURNAL_FILE), { force: true }); } catch { /* fall through */ }
+      try { rmSync(join(dir, JOURNAL_FILE), { force: true }); } catch { /* swallow-ok: removing the journal first is a safety ordering; the recursive removal on the next line still runs */ /* fall through */ }
       rmSync(dir, { recursive: true, force: true });
     },
   };
@@ -284,7 +284,7 @@ export function preflightMergeTargets({ destRoot, mergePaths }) {
       if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
         unparseable.push({ rel, reason: `expected a JSON object, got ${Array.isArray(parsed) ? 'an array' : String(parsed)}` });
       }
-    } catch (err) {
+    } catch (err) { /* surfaced: a read or parse failure is pushed to `unparseable` with its cause and refuses the upgrade before any write */
       // "cannot be read" and "cannot be parsed" are different; say which.
       const why = err?.code && err.code !== 'ENOENT' ? `cannot be read — ${err.message}` : err?.message ?? String(err);
       unparseable.push({ rel, reason: why });
@@ -389,8 +389,8 @@ function fsyncPath(p) {
   try {
     fd = openSync(p, 'r');
     fsyncSync(fd);
-  } catch { /* best effort */ } finally {
-    if (fd !== undefined) { try { closeSync(fd); } catch { /* ignore */ } }
+  } catch { /* swallow-ok: fsync is a durability hint; a failure leaves the write valid, only less durable across power loss */ /* best effort */ } finally {
+    if (fd !== undefined) { try { closeSync(fd); } catch { /* swallow-ok: closing the probe descriptor cannot change the outcome; the fsync attempt above already ran */ /* ignore */ } }
   }
 }
 
@@ -403,7 +403,7 @@ function fsyncPath(p) {
  */
 function pidAlive(pid) {
   if (!Number.isInteger(pid) || pid <= 0) return false;
-  try { process.kill(pid, 0); return true; } catch (err) { return err?.code === 'EPERM'; }
+  try { process.kill(pid, 0); return true; } catch (err) { /* swallow-ok: kill(pid, 0) throws by design to say "not alive"; EPERM (alive, not ours) maps to true */ return err?.code === 'EPERM'; }
 }
 
 /**
@@ -438,7 +438,7 @@ function readLock(destRoot) {
   let unknown = false;
   try {
     raw = readFileSync(path, 'utf8');
-  } catch (err) {
+  } catch (err) { /* surfaced: a code outside STRUCTURALLY_UNOWNED marks the lock `unknown`, which fails closed and refuses */
     if (!STRUCTURALLY_UNOWNED.has(err?.code)) unknown = true;
   }
   const pid = Number.parseInt(String(raw).trim(), 10);
@@ -539,7 +539,7 @@ export function acquireLock(destRoot) {
         throw new Error(`another brain:upgrade took the lock at ${path} at the same moment.`);
       }
       break;
-    } catch (err) {
+    } catch (err) { /* swallow-ok: ONLY EEXIST continues (a live owner refuses, a dead one is reclaimed, a contended retry throws); every other error is re-thrown */
       if (err?.code !== 'EEXIST') throw err;
       const cur = readLock(destRoot);
       if (cur.alive) {
@@ -572,7 +572,7 @@ export function acquireLock(destRoot) {
       try {
         const cur = readLock(destRoot);
         if (cur.present && cur.pid === process.pid) rmSync(path, { force: true });
-      } catch { /* cosmetic */ }
+      } catch { /* swallow-ok: releasing our own lock is cosmetic; a stale lock is caught by the pid-liveness check on the next run */ /* cosmetic */ }
     },
   };
 }
@@ -623,7 +623,7 @@ export function readJournal(destRoot) {
     if (j?.version !== JOURNAL_VERSION) return null;
     if (!Array.isArray(j.saved) || !Array.isArray(j.created) || !Array.isArray(j.createdDirs)) return null;
     return j;
-  } catch {
+  } catch { /* surfaced: any read, parse or version failure returns null; inspectRestorePoint then reports state `corrupt` and refuses whenever a journal file is on disk */
     return null;
   }
 }
@@ -696,7 +696,7 @@ export function recoverFromJournal({ destRoot }) {
  * @returns {import('node:fs').Stats|null}
  */
 function lstatOrNull(p) {
-  try { return lstatSync(p); } catch { return null; }
+  try { return lstatSync(p); } catch { /* swallow-ok: absent-or-unreadable is the null callers branch on: "nothing there" */ return null; }
 }
 
 /** True when something occupies `p` — including a symlink with no target. */
@@ -725,7 +725,7 @@ function pathPresent(p) {
  */
 function escapesRoot(destRoot, p) {
   let rootReal;
-  try { rootReal = realpathSync(destRoot); } catch { return false; }
+  try { rootReal = realpathSync(destRoot); } catch { /* follow-up: slice-D an unresolvable destination root reads as "does not escape", which fails open in a safety check */ return false; }
 
   // Resolve the deepest ancestor that exists, then re-attach the tail that does
   // not — so a path scheduled to be CREATED under a symlinked parent is judged on
@@ -736,7 +736,7 @@ function escapesRoot(destRoot, p) {
       const base = realpathSync(cur);
       const resolved = tail.length ? join(base, ...tail) : base;
       return resolved !== rootReal && !resolved.startsWith(rootReal + sep);
-    } catch {
+    } catch { /* swallow-ok: an unresolvable segment moves the probe to its parent; that walk is how a path still to be created is judged */
       const parent = dirname(cur);
       if (parent === cur) return false; // nothing on the path resolves at all
       tail.unshift(basename(cur));
@@ -755,7 +755,7 @@ function escapesRoot(destRoot, p) {
  * leftover snapshot directory is cosmetic; a false failure report is not.
  */
 function safeDiscard(restorePoint) {
-  try { restorePoint.discard(); } catch { /* cosmetic — never surface as failure */ }
+  try { restorePoint.discard(); } catch { /* swallow-ok: cosmetic — a leftover snapshot directory is harmless, a false failure after a fully applied upgrade is not */ /* cosmetic — never surface as failure */ }
 }
 
 /**
@@ -781,7 +781,7 @@ function annotateRollback(err, failed, snapshotDir) {
       err.rollbackIncomplete = failed;
       err.rollbackSnapshotDir = snapshotDir;
       return err;
-    } catch { /* frozen or sealed — fall through to the wrapper */ }
+    } catch { /* swallow-ok: a frozen error cannot be annotated; the next lines wrap it in a new Error that carries it as cause */ /* frozen or sealed — fall through to the wrapper */ }
   }
   const wrapped = new Error(
     `upgrade failed and the rollback was incomplete — ${failed.length} path(s) still modified`,
@@ -1021,7 +1021,7 @@ export function copyManaged(opts) {
     return copyManagedImpl(opts, phase);
   } catch (err) {
     if (!phase.restorePointReached && err !== null && typeof err === 'object') {
-      try { err.beforeAnyWrite = true; } catch { /* frozen — wording stays generic */ }
+      try { err.beforeAnyWrite = true; } catch { /* swallow-ok: annotating a frozen error only changes wording; the original error is re-thrown unchanged */ /* frozen — wording stays generic */ }
     }
     throw err;
   }
@@ -1068,12 +1068,12 @@ function copyManagedImpl({ srcRoot, destRoot, managed, local, dryRun = false, sp
       const destFile = join(destRoot, rel);
       if (existsSync(destFile)) {
         let destBytes = null;
-        try { destBytes = readFileSync(destFile); } catch { /* unreadable — cannot claim it was edited */ }
+        try { destBytes = readFileSync(destFile); } catch { /* swallow-ok: any read error on an existing destination file (EACCES, EISDIR; ENOENT is excluded by existsSync) means "cannot claim it was edited"; the copy that follows reports a real write failure */ /* unreadable — cannot claim it was edited */ }
         if (destBytes && !destBytes.equals(outBytes)) consumerModified.push(rel);
       }
       try {
         if (!readFileSync(join(srcRoot, rel)).equals(outBytes)) brainChanged.push(rel);
-      } catch { /* unreadable incoming — the copy below will report the real failure */ }
+      } catch { /* swallow-ok: unreadable incoming file: the copy below reports the real failure */ /* unreadable incoming — the copy below will report the real failure */ }
     } else if (outgoing !== null && matchesAny(rel, refusePaths) && existsSync(join(destRoot, rel))) {
       // FIRST SHIP OF A REFUSE PATH (#601). brain never shipped this path, and a
       // file is sitting at it in the consumer's tree. Those bytes cannot be
@@ -1156,7 +1156,7 @@ function copyManagedImpl({ srcRoot, destRoot, managed, local, dryRun = false, sp
     .filter((rel) => matchesAny(rel, managed) && !matchesAny(rel, local))
     .filter((rel) => !matchesAny(rel, refusePaths) && !Object.hasOwn(specialMerge, rel))
     .filter((rel) => !existsSync(join(srcRoot, rel)))
-    .filter((rel) => { try { return lstatSync(join(destRoot, rel)).isFile(); } catch { return false; } })
+    .filter((rel) => { try { return lstatSync(join(destRoot, rel)).isFile(); } catch { /* swallow-ok: a retired path that cannot be stat'd is neither removed nor claimed removed; it is left out of the removal list */ return false; } })
     .sort();
 
   // ── Abort gate ──────────────────────────────────────────────────────────────
@@ -1291,7 +1291,7 @@ function pruneEmptyParents(destRoot, rel) {
     try {
       if (readdirSync(abs).length > 0) return;
       rmdirSync(abs);
-    } catch { return; }
+    } catch { /* swallow-ok: pruning empty parents is tidying after a removal that already succeeded */ return; }
     dir = dirname(dir);
   }
 }
@@ -1790,7 +1790,7 @@ export function installSpecDetail(root, tag, { readProvenance } = {}) {
     if (typeof pkg?.name === 'string') name = pkg.name;
     const declared = pkg?.repository?.url ?? (typeof pkg?.repository === 'string' ? pkg.repository : undefined);
     if (typeof declared === 'string') repoUrl = declared;
-  } catch {
+  } catch { /* surfaced: reported as `source: 'fallback'`, never silently */
     // Absent or unparseable — reported as `source: 'fallback'`, never silently.
   }
   // Injectable so the resolution can be exercised without a real `node_modules`
@@ -1822,7 +1822,7 @@ export function installSpecDetail(root, tag, { readProvenance } = {}) {
       const base = p.resolved.split('#')[0].trim();
       if (base) repoUrl = base;
     }
-  } catch {
+  } catch { /* swallow-ok: a provenance read must never be what stops an upgrade; `unknown` keeps the prior behaviour and the git fallback */
     // A provenance read must never be what stops an upgrade: `unknown` keeps the
     // pre-existing behaviour and the git fallback stays attached.
   }
@@ -2027,7 +2027,7 @@ export function readInstalledVersion(repoRoot) {
     try {
       const pkg = JSON.parse(readFileSync(path, 'utf8'));
       if (names.has(pkg.name) && pkg.version) return pkg.version;
-    } catch {
+    } catch { /* swallow-ok: tries the next candidate path; falling off the end returns null, the "version unknown" answer */
       // try next candidate
     }
   }

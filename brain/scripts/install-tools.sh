@@ -7,6 +7,9 @@
 #        npm run tools:install
 set -euo pipefail
 
+# Steps that FAILED (#1127): a failed step ends the run incomplete, never as a clean summary.
+FAILED_STEPS=()
+
 say()    { printf '\n\033[1m== %s ==\033[0m\n' "$1"; }
 ok()     { printf '  ✓ %s\n' "$1"; }
 warn()   { printf '  ⚠ %s\n' "$1"; }
@@ -21,9 +24,25 @@ if ! command -v apt-get >/dev/null 2>&1; then
   die "${I18N_TOOLS_REQUIRE_NOAPT:-This script requires apt-get (Ubuntu/Debian). Install the tools manually following brain/project/methodology/developer-environment.md.}"
 fi
 
-# ── Resolve VCS provider from brain.config.json (defaults to gitlab) ──────────
-# node may not be installed yet — the || echo 'gitlab' fallback handles that case.
-VCS_PROVIDER="$(node -p "(require('./brain.config.json').vcs||{}).provider||'gitlab'" 2>/dev/null || echo 'gitlab')"
+# ── Resolve VCS provider from brain.config.json (gitlab only when there is NO config) ──
+# An ABSENT config keeps the documented default. An UNREADABLE one is refused: guessing
+# gitlab would hand a GitHub repo `glab` (#1127). node may not be installed yet, so the
+# one field is read without it in that case.
+if [ -f brain.config.json ]; then
+  if command -v node >/dev/null 2>&1; then
+    VCS_PROVIDER="$(node -p "(require('./brain.config.json').vcs||{}).provider||'gitlab'")" \
+      || die "brain.config.json exists but cannot be read or parsed — fix it, then re-run. Refusing to guess the VCS provider."
+  else
+    # Without node only a plain `"vcs": { ... "provider": "<name>" ... }` object is understood;
+    # anything else (including no provider, or an empty one) takes the same gitlab default the
+    # node path uses. Corruption cannot be detected here — install node and re-run to validate.
+    printf '  note: node is not installed yet — reading vcs.provider with a simple text match\n' >&2
+    VCS_PROVIDER="$(tr -d '\n' < brain.config.json | sed -n 's/.*"vcs"[[:space:]]*:[[:space:]]*{[^}]*"provider"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
+    VCS_PROVIDER="${VCS_PROVIDER:-gitlab}"
+  fi
+else
+  VCS_PROVIDER="gitlab"
+fi
 case "$VCS_PROVIDER" in
   github) VCS_CLI="gh" ;;
   *)      VCS_CLI="glab" ;;
@@ -143,11 +162,15 @@ if command -v gentle-ai >/dev/null 2>&1; then
     skip "$I18N_TOOLS_GENTLEAI_ALREADYCONFIGURED"
   else
     printf '  %s\n' "$I18N_TOOLS_GENTLEAI_CONFIGURING"
-    gentle-ai install && ok "$I18N_TOOLS_GENTLEAI_CONFIGURED" || warn "$I18N_TOOLS_GENTLEAI_CONFIGFAILED"
+    gentle-ai install && ok "$I18N_TOOLS_GENTLEAI_CONFIGURED" || { warn "$I18N_TOOLS_GENTLEAI_CONFIGFAILED"; FAILED_STEPS+=("gentle-ai configuration"); }
   fi
 fi
 
 # ── 5. Summary ────────────────────────────────────────────────────────────────
+if [ "${#FAILED_STEPS[@]}" -gt 0 ]; then
+  printf "  $I18N_TOOLS_SUMMARY_INCOMPLETE\n" "${FAILED_STEPS[*]}" >&2
+  exit 1
+fi
 say "$I18N_TOOLS_SUMMARY_SECTION"
 printf '  %s\n' "$I18N_TOOLS_SUMMARY_NEXTSTEP"
 printf '    npm install && npm run env:init\n\n'
@@ -155,7 +178,7 @@ printf '  %s\n' "$I18N_TOOLS_SUMMARY_CHECKVERSIONS"
 for tool in git java maven node npm claude gentle-ai engram gga "$VCS_CLI"; do
   if command -v "$tool" >/dev/null 2>&1; then
     printf '    ✓ %-14s' "$tool"
-    "$tool" --version 2>/dev/null | head -1 | sed 's/^//' || true
+    "$tool" --version 2>/dev/null | head -1 | sed 's/^//' || true  # swallow-ok: a version banner is cosmetic; the tool's presence was already established above
     echo
   else
     printf "    ✗ $I18N_TOOLS_SUMMARY_NOTFOUND\n" "$tool"

@@ -78,7 +78,16 @@ cd "$REPO_ROOT"
 # bare `|| true` here gave zero signal, not even a warning line.
 _config_existed=true
 [ -f brain.config.json ] || _config_existed=false
-node "$BRAIN_SCRIPTS/lib/brain-config.mjs" ensure || { printf '  \xe2\x9a\xa0 brain.config.json: ensure step failed (see error above)\n' >&2; MISSING_OPTIONAL+=("brain.config.json ensure"); }
+node "$BRAIN_SCRIPTS/lib/brain-config.mjs" ensure || {
+  printf '  \xe2\x9a\xa0 brain.config.json: ensure step failed (see error above)\n' >&2
+  # By CAUSE: a config that cannot be parsed makes every later config read meaningless, so it is
+  # REQUIRED; any other ensure failure (e.g. the tier notice) stays optional (#1127).
+  if [ -f brain.config.json ] && ! node -e "JSON.parse(require('fs').readFileSync('brain.config.json','utf8'))" >/dev/null 2>&1; then
+    REQUIRED_FAILURES+=("brain.config.json cannot be parsed (fix or remove it, then re-run)")
+  else
+    MISSING_OPTIONAL+=("brain.config.json ensure")
+  fi
+}
 
 # Scaffold brain/HOME.md if absent (never overwrites an existing one — the file
 # is consumer-owned once it exists). Non-fatal, idempotent: re-running env:init
@@ -97,14 +106,14 @@ import { readFileSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 
 let c = {};
-try { c = JSON.parse(readFileSync('brain.config.json', 'utf8')); } catch {}
+try { c = JSON.parse(readFileSync('brain.config.json', 'utf8')); } catch { /* swallow-ok: an unparseable config reads as empty here and identity falls back to the git origin; `brain-config.mjs ensure` above now reports it and exits 1 (#1127) */ }
 
 let originHost = '', originProject = '';
 try {
   const url = execSync('git remote get-url origin', { encoding: 'utf8' }).trim();
   const m = url.match(/(?:https?:\/\/(?:[^@\/]+@)?|git@)([^\/:]+)(?::\d+)?[\/:](.+?)(?:\.git)?$/);
   if (m) { originHost = m[1]; originProject = m[2]; }
-} catch {}
+} catch { /* swallow-ok: no git origin means no derived host or project; the prompts and the final summary name what is still unset */ }
 
 console.log(process.env.VCS_PROVIDER || c.vcs?.provider || '');
 console.log(c.project?.gitHost || originHost  || '');
@@ -146,14 +155,14 @@ if [ -t 0 ] && [ "$_config_existed" = false ] && [ -n "$VCS_PROVIDER$VCS_HOST$PR
   if [ -n "$_override" ] && [ "$_override" != "$VCS_PROVIDER" ]; then
     VCS_PROVIDER="$_override"
     # Persist the override to brain.config.json — use env var to avoid injection.
-    VCS_PROVIDER_OVERRIDE="$_override" node --input-type=module <<'NODE' || true
+    # A failed write is a REQUIRED failure (issue #1127): the operator typed this value,
+    # and losing it silently means the next run derives the wrong provider.
+    VCS_PROVIDER_OVERRIDE="$_override" node --input-type=module <<'NODE' || { printf '  \xe2\x9a\xa0 brain.config.json: could not persist the VCS provider override\n' >&2; REQUIRED_FAILURES+=("VCS provider override not persisted to brain.config.json"); }
 import { readFileSync, writeFileSync } from 'node:fs';
-try {
-  const cfg = JSON.parse(readFileSync('brain.config.json', 'utf8'));
-  if (!cfg.vcs) cfg.vcs = {};
-  cfg.vcs.provider = process.env.VCS_PROVIDER_OVERRIDE;
-  writeFileSync('brain.config.json', JSON.stringify(cfg, null, 2) + '\n');
-} catch {}
+const cfg = JSON.parse(readFileSync('brain.config.json', 'utf8'));
+if (!cfg.vcs) cfg.vcs = {};
+cfg.vcs.provider = process.env.VCS_PROVIDER_OVERRIDE;
+writeFileSync('brain.config.json', JSON.stringify(cfg, null, 2) + '\n');
 NODE
   fi
   # --- END vcs-provider-validate ---
@@ -183,13 +192,13 @@ say()  { printf '\n\033[1m== %s ==\033[0m\n' "$1"; }
 ok()   { printf '  ✓ %s\n' "$1"; }
 warn() { printf '  ⚠ %s\n' "$1"; }
 
-env_get() { grep -E "^$1=" .env 2>/dev/null | head -1 | cut -d= -f2- || true; }
+env_get() { grep -E "^$1=" .env 2>/dev/null | head -1 | cut -d= -f2- || true; }  # swallow-ok: grep exits 1 when the key is absent, which is the answer env_get exists to give
 env_set() {
   touch .env
   if grep -qE "^$1=" .env; then
     # key exists (maybe empty): replace the line instead of appending a duplicate
     local tmp; tmp="$(mktemp)"
-    grep -vE "^$1=" .env > "$tmp" || true
+    grep -vE "^$1=" .env > "$tmp" || true  # swallow-ok: grep -v exits 1 when .env held only that key; the empty remainder is the correct result
     printf '%s=%s\n' "$1" "$2" >> "$tmp"
     mv "$tmp" .env
   else
@@ -230,7 +239,7 @@ unset _PM_FOUND _pm_bin
 # Detected against WORKTREE_ROOT, not cwd (REPO_ROOT): $PM later runs
 # `brain:memory:pull`/`brain:memory:index` IN the worktree (issue #1093), so
 # it must be the package manager that tree actually uses.
-PM="$(cd "$WORKTREE_ROOT" && node "$BRAIN_SCRIPTS/lib/pm.mjs" name 2>/dev/null || echo npm)"
+PM="$(cd "$WORKTREE_ROOT" && node "$BRAIN_SCRIPTS/lib/pm.mjs" name 2>/dev/null || echo npm)"  # swallow-ok: npm is the documented default package manager when detection is unavailable
 ok "$(printf "${I18N_BOOTSTRAP_DEPS_OK:-git, python3 present; package manager: %s}" "$PM")"
 
 # --- 2. Ecosystem tools (degrade gracefully) ----------------------------------
@@ -279,7 +288,7 @@ say "$I18N_BOOTSTRAP_PAT_SECTION"
 # .gitignore, core.excludesFile, …) is honored instead of duplicated.
 ensure_env_gitignored() {
   git check-ignore -q .env 2>/dev/null && return 0
-  [ -f .gitignore ] || : > .gitignore
+  [ -f .gitignore ] || : > .gitignore  # swallow-ok: create-if-absent: `: > file` IS the creation, not a swallowed failure (the guard reads `|| :` as a swallow); a failed write surfaces through the final `git check-ignore` and GITIGNORE_FAILED
   if [ -s .gitignore ] && [ "$(tail -c1 .gitignore | wc -l)" -eq 0 ]; then printf '\n' >> .gitignore; fi
   printf '.env\n' >> .gitignore
   git check-ignore -q .env 2>/dev/null
@@ -335,11 +344,11 @@ ENV_SYMLINK_TARGET=""
 if [ -L .env ]; then
   ENV_SECRET_SAFE=false
   ENV_SECRET_UNSAFE_REASON=symlink
-  ENV_SYMLINK_TARGET="$(readlink .env 2>/dev/null || true)"
+  ENV_SYMLINK_TARGET="$(readlink .env 2>/dev/null || true)"  # swallow-ok: the target is only quoted in the refusal message; the refusal (ENV_SECRET_SAFE=false) is already decided
 elif [ -e .env ] && [ ! -f .env ]; then
   ENV_SECRET_SAFE=false
   ENV_SECRET_UNSAFE_REASON=notRegularFile
-elif [ -f .env ] && _env_links="$(stat -c %h .env 2>/dev/null || stat -f %l .env 2>/dev/null || echo 1)" && [ "$_env_links" -gt 1 ] 2>/dev/null; then
+elif [ -f .env ] && _env_links="$(stat -c %h .env 2>/dev/null || stat -f %l .env 2>/dev/null || echo 1)" && [ "$_env_links" -gt 1 ] 2>/dev/null; then  # swallow-ok: GNU-then-BSD portability fallback; if BOTH stat forms fail the count reads as 1, so the hardlink check is SKIPPED; the symlink, file-type, tracked and ignore checks around it still gate the write
   # A HARDLINK to a file outside the repo passes `-L` (false) and `-f` (true),
   # and `>> .env` would append the PAT through it. Link count > 1 is the only
   # signal; `stat -c %h` is GNU, `stat -f %l` is BSD/macOS.
@@ -365,7 +374,7 @@ else
   It must be PERSONAL — not a project bot token — so your pushes, issues and
   MRs/PRs appear under your name.
 EOT
-  PAT_URL="$(node "$BRAIN_SCRIPTS/vcs/cli.mjs" pat-setup-url "{\"host\":\"$VCS_HOST\",\"name\":\"brain-dev\",\"scopes\":[\"$PAT_SCOPES\"]}" 2>/dev/null || true)"
+  PAT_URL="$(node "$BRAIN_SCRIPTS/vcs/cli.mjs" pat-setup-url "{\"host\":\"$VCS_HOST\",\"name\":\"brain-dev\",\"scopes\":[\"$PAT_SCOPES\"]}" 2>/dev/null || true)"  # swallow-ok: the URL only pre-fills a browser tab; the token prompt that follows works without it
   read -r -p "  $I18N_BOOTSTRAP_PAT_OPENPROMPT" OPEN_BROWSER
   case "${OPEN_BROWSER:-S}" in
     n|N)
@@ -373,9 +382,9 @@ EOT
       ;;
     *)
       if command -v xdg-open >/dev/null 2>&1; then
-        xdg-open "$PAT_URL" >/dev/null 2>&1 || true
+        xdg-open "$PAT_URL" >/dev/null 2>&1 || true  # swallow-ok: opening a browser is a convenience; the URL is printed right after
       elif command -v open >/dev/null 2>&1; then
-        open "$PAT_URL" >/dev/null 2>&1 || true
+        open "$PAT_URL" >/dev/null 2>&1 || true  # swallow-ok: opening a browser is a convenience; the URL is printed right after
       fi
       printf "  $I18N_BOOTSTRAP_PAT_BROWSERFALLBACK\n" "$PAT_URL"
       ;;
@@ -451,7 +460,7 @@ if node "$BRAIN_SCRIPTS/vcs/cli.mjs" auth-check "{\"host\":\"$VCS_HOST\"}" >/dev
 elif [ -n "$VCS_TOKEN" ]; then
   node "$BRAIN_SCRIPTS/vcs/cli.mjs" auth-login "{\"host\":\"$VCS_HOST\"}" \
     && ok "$(printf "$I18N_BOOTSTRAP_AUTH_OK" "$VCS_HOST")" \
-    || warn "$I18N_BOOTSTRAP_AUTH_FAILED"
+    || { warn "$I18N_BOOTSTRAP_AUTH_FAILED"; REQUIRED_FAILURES+=("VCS CLI login failed for $VCS_HOST"); }
 else
   warn "$I18N_BOOTSTRAP_AUTH_NOTOKEN"
 fi
@@ -502,7 +511,7 @@ ok "$(printf "$I18N_BOOTSTRAP_SDD_OK" "$SDD_ENGINE ($AGENT_PLATFORM)")"
 # regardless of which .env (if any) that resolution finds.
 export AGENT_PLATFORM SDD_ENGINE
 node "$BRAIN_SCRIPTS/harness/cli.mjs" init \
-  || warn "$I18N_BOOTSTRAP_SDD_INITFAILED"
+  || { warn "$I18N_BOOTSTRAP_SDD_INITFAILED"; REQUIRED_FAILURES+=("SDD harness init failed"); }
 
 # --- 7. Team memory (replaceable backend, ADR-0003) --------------------------
 # MEMORY_BACKEND mirrors the SDD_HARNESS pattern from §6: read from .env,
@@ -544,7 +553,70 @@ export MEMORY_BACKEND
 
 git config core.hooksPath brain/scripts/hooks \
   && ok "$I18N_BOOTSTRAP_MEMORY_HOOKOK" \
-  || warn "$I18N_BOOTSTRAP_MEMORY_HOOKFAILED"
+  || { warn "$I18N_BOOTSTRAP_MEMORY_HOOKFAILED"; REQUIRED_FAILURES+=("git hooks path (core.hooksPath) not configured"); }
+
+# --- BEGIN memory-step-helpers (issue #1127) ---
+# A memory step fails by CAUSE, not by step. A fresh repo with no commits, a branch with no
+# upstream, no remote, an unreachable network and a missing engram binary are all USABLE
+# environments: the step is skipped, the next command is printed, and the run still exits 0
+# (records-only capture needs no backend — memory-backend-contract.md). A step that was
+# attempted and failed for a real reason (a merge refusal, a reconcile refusal, a corrupt
+# store) is REQUIRED: it joins REQUIRED_FAILURES and the run exits 1.
+
+# Preflight, never git's wording: prints why a pull cannot even be attempted and returns 0;
+# returns 1 when it can be.
+memory_pull_unavailable() {
+  local tree="$1"
+  if ! git -C "$tree" rev-parse --verify --quiet HEAD >/dev/null 2>&1; then
+    printf '%s' "$I18N_BOOTSTRAP_MEMORY_PULL_NOCOMMITS"; return 0
+  fi
+  if ! git -C "$tree" rev-parse --abbrev-ref --symbolic-full-name '@{u}' >/dev/null 2>&1; then
+    printf '%s' "$I18N_BOOTSTRAP_MEMORY_PULL_NOUPSTREAM"; return 0
+  fi
+  return 1
+}
+
+# The ONE place that reads git's words: was a failed pull a connectivity problem (the network
+# or the remote host is unreachable) rather than a real refusal? Takes the captured stderr.
+memory_pull_offline() {
+  printf '%s' "$1" | grep -qiE 'could not resolve host|unable to access|network is unreachable|connection (timed out|refused)|failed to connect|temporary failure in name resolution|could not read from remote repository'
+}
+
+# Runs `brain:memory:pull` in the invoking tree and classifies the outcome.
+run_memory_pull() {
+  local reason errf
+  if reason="$(memory_pull_unavailable "$WORKTREE_ROOT")"; then
+    warn "$(printf "$I18N_BOOTSTRAP_MEMORY_PULL_SKIPPED" "$reason")"
+    MISSING_OPTIONAL+=("memory pull (next: npm run brain:memory:pull)")
+    return 0
+  fi
+  errf="$(mktemp)"
+  if (cd "$WORKTREE_ROOT" && $PM run --silent brain:memory:pull) 2>"$errf"; then
+    cat "$errf" >&2; rm -f "$errf"
+    ok "$I18N_BOOTSTRAP_MEMORY_PULL_OK"
+  else
+    cat "$errf" >&2
+    if memory_pull_offline "$(cat "$errf")"; then
+      warn "$(printf "$I18N_BOOTSTRAP_MEMORY_PULL_SKIPPED" "$I18N_BOOTSTRAP_MEMORY_PULL_OFFLINE")"
+      MISSING_OPTIONAL+=("memory pull (next: npm run brain:memory:pull, once the remote is reachable)")
+    else
+      warn "$I18N_BOOTSTRAP_MEMORY_PULL_FAILED"
+      REQUIRED_FAILURES+=("memory pull failed")
+    fi
+    rm -f "$errf"
+  fi
+}
+
+# Runs `brain:memory:index` (engram only). Attempted only when the engram binary exists.
+run_memory_index() {
+  if (cd "$WORKTREE_ROOT" && $PM run --silent brain:memory:index); then
+    ok "$I18N_BOOTSTRAP_MEMORY_INDEX_OK"
+  else
+    warn "$I18N_BOOTSTRAP_MEMORY_INDEX_FAILED"
+    REQUIRED_FAILURES+=("memory index failed")
+  fi
+}
+# --- END memory-step-helpers ---
 
 case "$MEMORY_BACKEND" in
   engram)
@@ -552,16 +624,21 @@ case "$MEMORY_BACKEND" in
     if command -v node >/dev/null 2>&1; then
       node "$BRAIN_SCRIPTS/memory/cli.mjs" setup \
         && ok "$I18N_BOOTSTRAP_MEMORY_ENGRAM_OK" \
-        || warn "$I18N_BOOTSTRAP_MEMORY_ENGRAM_FAILED"
+        || { warn "$I18N_BOOTSTRAP_MEMORY_ENGRAM_FAILED"; REQUIRED_FAILURES+=("engram memory setup failed"); }
     else
       warn "$I18N_BOOTSTRAP_MEMORY_NODEABSENT"
     fi
-    # Run IN the worktree (issue #1093): `$PM run` resolves the script body
-    # from cwd's package.json, and REPO_ROOT's (main tree's) can be a
-    # different, older version entirely — the "pull failed" / "index failed"
-    # shape from the synergy repro (both verbs reported non-blocking).
-    (cd "$WORKTREE_ROOT" && $PM run --silent brain:memory:pull)  && ok "$I18N_BOOTSTRAP_MEMORY_PULL_OK"  || warn "$I18N_BOOTSTRAP_MEMORY_PULL_FAILED"
-    (cd "$WORKTREE_ROOT" && $PM run --silent brain:memory:index) && ok "$I18N_BOOTSTRAP_MEMORY_INDEX_OK" || warn "$I18N_BOOTSTRAP_MEMORY_INDEX_FAILED"
+    # Hydration and indexing need the engram BINARY. Without it they are not attempted:
+    # not a failure, and records-only capture still works (#1127).
+    if command -v engram >/dev/null 2>&1; then
+      # Run IN the worktree (issue #1093): `$PM run` resolves the script body from cwd's
+      # package.json, and REPO_ROOT's (main tree's) can be a different, older version.
+      run_memory_pull
+      run_memory_index
+    else
+      warn "$I18N_BOOTSTRAP_MEMORY_ENGRAMABSENT"
+      MISSING_OPTIONAL+=("engram hydration and index (next: install engram, then npm run brain:memory:pull && npm run brain:memory:index)")
+    fi
     ;;
   plainfiles)
     # plainfiles is a real, supported backend (axes/memory/adapters/plainfiles.mjs),
@@ -575,11 +652,11 @@ case "$MEMORY_BACKEND" in
     if command -v node >/dev/null 2>&1; then
       node "$BRAIN_SCRIPTS/memory/cli.mjs" setup \
         && ok "$I18N_BOOTSTRAP_MEMORY_PLAINFILES_OK" \
-        || warn "$I18N_BOOTSTRAP_MEMORY_PLAINFILES_FAILED"
+        || { warn "$I18N_BOOTSTRAP_MEMORY_PLAINFILES_FAILED"; REQUIRED_FAILURES+=("plainfiles memory setup failed"); }
     else
       warn "$I18N_BOOTSTRAP_MEMORY_NODEABSENT"
     fi
-    (cd "$WORKTREE_ROOT" && $PM run --silent brain:memory:pull) && ok "$I18N_BOOTSTRAP_MEMORY_PULL_OK" || warn "$I18N_BOOTSTRAP_MEMORY_PULL_FAILED"
+    run_memory_pull
     ok "$I18N_BOOTSTRAP_MEMORY_PLAINFILES_NOINDEX"
     ;;
   *)
@@ -590,7 +667,7 @@ esac
 # --- 8. Open tickets: starting point -----------------------------------------
 say "$(printf "$I18N_BOOTSTRAP_BOARD_SECTION" "$PROJECT_PATH")"
 node "$BRAIN_SCRIPTS/tracker-board.mjs" \
-  || warn "$(printf "$I18N_BOOTSTRAP_BOARD_FAILED" "$VCS_HOST" "$PROJECT_PATH")"
+  || warn "$(printf "$I18N_BOOTSTRAP_BOARD_FAILED" "$VCS_HOST" "$PROJECT_PATH")"  # swallow-ok: the open-ticket board is a read-only listing; a failure loses no state and the message names where to look
 
 # --- 9. Next steps ------------------------------------------------------------
 say "$I18N_BOOTSTRAP_DONE_SECTION"

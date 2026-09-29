@@ -195,7 +195,7 @@ export async function runSweep({
       if (result.unconsolidated) unconsolidatedCount += 1;
       else consolidatedCount += 1;
       archived.push({ name, iid: folder.iid, consolidated: result.consolidated, unconsolidated: result.unconsolidated });
-    } catch (err) {
+    } catch (err) { /* surfaced: pushed to archiveErrors: the sweep exits 3 and the workflow files the archive-sweep-failed alarm */
       archiveErrors.push({ name, message: err.message });
       logError(`SWEEP: failed to archive ${name}: ${err.message}`);
     }

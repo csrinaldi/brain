@@ -207,7 +207,7 @@ if (existsSync(ownPkgPath) && !existsSync(sourceMarkerPath)) {
         'package.json name is "brain" — a pre-v0.8.0 brain:upgrade may have clobbered your project name; consider restoring it.',
       );
     }
-  } catch { /* unreadable package.json — let the install step report it */ }
+  } catch { /* swallow-ok: the check only warns about a pre-v0.8.0 name clobber; an unreadable package.json is reported by the install step */ /* unreadable package.json — let the install step report it */ }
 }
 
 console.log(`\n${C.bold}brain:upgrade${C.reset} ${tag ? `→ ${C.cyan}${tag}${C.reset}` : ''}${dryRun ? `  ${C.dim}(dry run)${C.reset}` : ''}\n`);
@@ -248,10 +248,17 @@ for (const sig of ['SIGINT', 'SIGTERM']) {
 // Imported the way step 3 imports it rather than scraped: a regex over someone else's
 // source is a guess, and this has to be right to name the keys correctly.
 async function migrationsForGuard() {
+  const file = installedPackageRoot(ROOT, 'brain', 'core', 'config-migrations.mjs');
   try {
-    const mod = await import(installedPackageRoot(ROOT, 'brain', 'core', 'config-migrations.mjs'));
+    const mod = await import(file);
     return Array.isArray(mod?.migrations) ? mod.migrations : [];
-  } catch { return []; }  // not installed yet, or unreadable — the guard still compares versions
+  } catch (err) {
+    // swallow-ok: ONLY the module itself being absent (not installed yet) reads as no migrations; a load failure or a missing import inside it dies below
+    // Only the module ITSELF being absent is "not installed"; a missing import inside it is a broken module.
+    if ((err?.code === 'ERR_MODULE_NOT_FOUND' || err?.code === 'ENOENT') && String(err.message).includes(file)) return [];
+    // Loading it again at the migration step would crash AFTER the managed copy (#1127).
+    die(`${file} cannot be loaded (${err?.message ?? err}). Nothing was written.`);
+  }
 }
 
 // `.gemini/settings.json` reuses mergeClaudeSettings deliberately (#397, REQ-397-3).
@@ -311,12 +318,25 @@ if (badForce.length > 0) {
 //
 // So compare against the highest thing that is actually true about this repo.
 const currentSchema = (() => {
-  try { return semverOrNull(JSON.parse(readFileSync(join(ROOT, 'brain.config.json'), 'utf8')).schemaVersion); }
-  catch { return null; }  // no config yet, or unreadable — nothing recorded to compare
+  const configFile = join(ROOT, 'brain.config.json');
+  try { return semverOrNull(JSON.parse(readFileSync(configFile, 'utf8')).schemaVersion); }
+  catch (err) {
+    // swallow-ok: ONLY ENOENT (no config yet, the first run) reads as no recorded schema version; every other error dies below
+    if (err?.code === 'ENOENT') return null;
+    // A corrupt config read as "absent" would disarm the downgrade guard and then
+    // throw at the migration step, AFTER the managed copy (#1127).
+    die(`${configFile} cannot be read or parsed (${err?.message ?? err}). Nothing was written. Fix or remove it and re-run.`);
+  }
 })();
 const installedSemver = (() => {
   try { return semverOrNull(JSON.parse(readFileSync(installedPackageRoot(ROOT, 'package.json'), 'utf8')).version); }
-  catch { return null; }
+  catch (err) {
+    // surfaced: ENOENT (not installed yet) is silent; any other error warns that the installed version is not a floor
+    if (err?.code !== 'ENOENT') {
+      warn(`Could not read the installed package's version (${err?.message ?? err}) — the downgrade guard has no installed-version floor for this run.`);
+    }
+    return null;
+  }
 })();
 const taggedSemver = semverOrNull(tag);
 // With no tag (`--no-install`), the installed package IS what gets applied.
@@ -463,6 +483,15 @@ const { managed, local } = await import(join(pkgRoot, 'brain', 'core', 'managed-
 // the list existed has no module to read, and retires nothing.
 const retiredModule = join(pkgRoot, 'brain', 'scripts', 'lib', 'retired-paths.mjs');
 const { RETIRED_PATHS: retired = [] } = existsSync(retiredModule) ? await import(retiredModule) : {};
+
+// The module step 3 will import is the INCOMING package's. Load it now, on every path,
+// so a broken one refuses before `copyManaged` instead of crashing after it (#1127).
+const incomingMigrations = join(pkgRoot, 'brain', 'core', 'config-migrations.mjs');
+try {
+  await import(incomingMigrations);
+} catch (err) {
+  die(`${incomingMigrations} cannot be loaded (${err?.message ?? err}). No managed path was written.`);
+}
 
 // A signal raised during the install above is delivered here, at the first await
 // after it — before any managed path has been written.
@@ -670,7 +699,7 @@ if (!existsSync(configPath)) {
 if (!dryRun) {
   // REQ-397-6 — read BEFORE the regeneration overwrites the evidence. The file
   // about to be rebuilt is the only record that an earlier upgrade replaced it.
-  const readOrNull = (p) => { try { return readFileSync(p, 'utf8'); } catch { return null; } };
+  const readOrNull = (p) => { try { return readFileSync(p, 'utf8'); } catch { /* swallow-ok: detectAgentsClobber treats null as "evidence absent" and warns only when evidence is present */ return null; } };
   const clobber = detectAgentsClobber({
     onDisk: readOrNull(join(ROOT, 'AGENTS.md')),
     consumerHome: readOrNull(join(ROOT, 'brain', 'HOME.md')),
@@ -711,7 +740,7 @@ if (!dryRun) {
       warn(`AGENTS.md was compiled without ${report.missingDocs.length} missing source doc(s): ${report.missingDocs.join(', ')}`);
       info(`Run \`${REGENERATE_HINT}\` to rebuild it once they exist.`);
     }
-  } catch (err) {
+  } catch (err) { /* follow-up: slice-B a failed AGENTS.md regeneration is a warning plus a hint, then the run still prints "Done." */
     // Never fatal. The upgrade itself succeeded; a stale AGENTS.md is a
     // regenerable inconvenience, and failing the run here would turn it into a
     // reason to distrust the upgrade.

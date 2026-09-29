@@ -129,7 +129,7 @@ export function probeBinary(bin, { _spawn = spawnSync } = {}) {
   let result;
   try {
     result = _spawn("which", [bin], { encoding: "utf8" });
-  } catch (err) {
+  } catch (err) { /* surfaced: returned as `available: null` with the reason, which the caller reports */
     return { available: null, reason: `\`which ${bin}\` threw — ${err.message}` };
   }
   // spawnSync reports its OWN failure (ENOENT on `which` itself, EACCES, …) in

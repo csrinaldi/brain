@@ -79,7 +79,7 @@ export function slugifyHost(host) {
 function parseCandidateJson(content) {
   try {
     return JSON.parse(content);
-  } catch {
+  } catch { /* surfaced: an unparsable candidate reads as undefined and the caller routes it to `invalid` */
     return undefined;
   }
 }

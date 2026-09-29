@@ -54,7 +54,7 @@ export function runLaneSweep({ config, enabled = laneSweepEnabled(config), _spaw
 
   try {
     return { skipped: false, status, outcome: JSON.parse(line), unparsed: false };
-  } catch {
+  } catch { /* surfaced: returned as `unparsed: true`, which the day-start renderer reports */
     return { skipped: false, status, outcome: null, unparsed: true };
   }
 }
