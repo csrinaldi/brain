@@ -191,7 +191,7 @@ export function shipOnSessionEnd({
     }
 
     return { spawned: true, logPath };
-  } catch (err) {
+  } catch (err) { /* surfaced: the SessionEnd hook must exit 0 so it never blocks closing a session; the error is written to stderr and returned as spawned: false */
     process.stderr.write(`brain:memory:session-end: ${err?.message ?? String(err)}\n`);
     return { spawned: false, logPath: null };
   }

@@ -456,9 +456,9 @@ if (op === "collect") {
 function resolveVcsTestModulePath(vcsTestModule) {
   const lexical = resolve(vcsTestModule);
   let abs;
-  try { abs = realpathSync(lexical); } catch { abs = lexical; }
+  try { abs = realpathSync(lexical); } catch { /* swallow-ok: realpath only normalises the test-root guard's comparison; the lexical path is still compared */ abs = lexical; }
   let root;
-  try { root = realpathSync(FIXTURE_ROOT); } catch { root = FIXTURE_ROOT; }
+  try { root = realpathSync(FIXTURE_ROOT); } catch { /* swallow-ok: realpath only normalises the test-root guard's comparison; the lexical path is still compared */ root = FIXTURE_ROOT; }
   const rel = relative(root, abs);
   if (rel === "" || rel.startsWith("..") || isAbsolute(rel)) {
     throw new Error(`memory/cli: BRAIN_VCS_TEST_MODULE must resolve inside ${FIXTURE_ROOT}`);
@@ -565,7 +565,7 @@ if (op === "ship") {
           git: defaultGit,
           vcs,
         });
-      } catch (err) {
+      } catch (err) { /* surfaced: carried as `sweep.failed` in the JSON and one stderr line; today's ship is deliberately not failed by it (#936) */
         sweep = { failed: true, reason: err?.message ?? String(err) };
       }
     }

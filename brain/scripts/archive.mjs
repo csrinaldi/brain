@@ -65,7 +65,7 @@ export function makeReadIssueState({ project, config }) {
       const vcs = await vcsPromise;
       const issue = await vcs.issueView({ project, number: Number(iid) });
       return { state: issue.state, stateReason: issue.stateReason ?? null };
-    } catch {
+    } catch { /* surfaced: a null issue state is read by selectSweep as "could not read" and the run exits 1 (archive.test 5.4) */
       return null;
     }
   };
@@ -153,7 +153,7 @@ export async function runBackfill({
           consolidatedCount += 1;
           log(`  ✓ Archived: ${name} (consolidated: ${result.consolidated.join(', ')})`);
         }
-      } catch (err) {
+      } catch (err) { /* surfaced: pushed to archiveErrors, printed, and the backfill exits 1 when any exist */
         archiveErrors.push({ name, message: err.message });
         logError(`  ✗ Failed to archive ${name}: ${err.message}`);
       }
@@ -201,7 +201,7 @@ export async function runSingle({ changeId, fs, dateStr = new Date().toISOString
     log(`\n  ✓ Cambio "${changeId}" archivado con éxito.`);
     log('    Cuerpo de specs delta fusionado en openspec/specs/ y directorio movido a archive/.\n');
     return 0;
-  } catch (err) {
+  } catch (err) { /* surfaced: the error is printed and the function returns exit code 1 */
     logError(`\n  ✗ Error al archivar cambio: ${err.message}\n`);
     return 1;
   }

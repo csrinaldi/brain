@@ -207,7 +207,7 @@ if (existsSync(ownPkgPath) && !existsSync(sourceMarkerPath)) {
         'package.json name is "brain" — a pre-v0.8.0 brain:upgrade may have clobbered your project name; consider restoring it.',
       );
     }
-  } catch { /* unreadable package.json — let the install step report it */ }
+  } catch { /* swallow-ok: the check only warns about a pre-v0.8.0 name clobber; an unreadable package.json is reported by the install step */ /* unreadable package.json — let the install step report it */ }
 }
 
 console.log(`\n${C.bold}brain:upgrade${C.reset} ${tag ? `→ ${C.cyan}${tag}${C.reset}` : ''}${dryRun ? `  ${C.dim}(dry run)${C.reset}` : ''}\n`);
@@ -251,7 +251,7 @@ async function migrationsForGuard() {
   try {
     const mod = await import(installedPackageRoot(ROOT, 'brain', 'core', 'config-migrations.mjs'));
     return Array.isArray(mod?.migrations) ? mod.migrations : [];
-  } catch { return []; }  // not installed yet, or unreadable — the guard still compares versions
+  } catch { /* swallow-ok: not installed yet or unreadable reads as no migrations; the guard still compares versions */ return []; }  // not installed yet, or unreadable — the guard still compares versions
 }
 
 // `.gemini/settings.json` reuses mergeClaudeSettings deliberately (#397, REQ-397-3).
@@ -312,11 +312,11 @@ if (badForce.length > 0) {
 // So compare against the highest thing that is actually true about this repo.
 const currentSchema = (() => {
   try { return semverOrNull(JSON.parse(readFileSync(join(ROOT, 'brain.config.json'), 'utf8')).schemaVersion); }
-  catch { return null; }  // no config yet, or unreadable — nothing recorded to compare
+  catch { /* swallow-ok: no config yet reads as no recorded schema version — nothing to compare, the first-run case */ return null; }  // no config yet, or unreadable — nothing recorded to compare
 })();
 const installedSemver = (() => {
   try { return semverOrNull(JSON.parse(readFileSync(installedPackageRoot(ROOT, 'package.json'), 'utf8')).version); }
-  catch { return null; }
+  catch { /* swallow-ok: an unreadable installed package.json reads as no installed version; the install step names the real problem */ return null; }
 })();
 const taggedSemver = semverOrNull(tag);
 // With no tag (`--no-install`), the installed package IS what gets applied.
@@ -670,7 +670,7 @@ if (!existsSync(configPath)) {
 if (!dryRun) {
   // REQ-397-6 — read BEFORE the regeneration overwrites the evidence. The file
   // about to be rebuilt is the only record that an earlier upgrade replaced it.
-  const readOrNull = (p) => { try { return readFileSync(p, 'utf8'); } catch { return null; } };
+  const readOrNull = (p) => { try { return readFileSync(p, 'utf8'); } catch { /* swallow-ok: detectAgentsClobber treats null as "evidence absent" and warns only when evidence is present */ return null; } };
   const clobber = detectAgentsClobber({
     onDisk: readOrNull(join(ROOT, 'AGENTS.md')),
     consumerHome: readOrNull(join(ROOT, 'brain', 'HOME.md')),
@@ -711,7 +711,7 @@ if (!dryRun) {
       warn(`AGENTS.md was compiled without ${report.missingDocs.length} missing source doc(s): ${report.missingDocs.join(', ')}`);
       info(`Run \`${REGENERATE_HINT}\` to rebuild it once they exist.`);
     }
-  } catch (err) {
+  } catch (err) { /* follow-up: slice-B a failed AGENTS.md regeneration is a warning plus a hint, then the run still prints "Done." */
     // Never fatal. The upgrade itself succeeded; a stale AGENTS.md is a
     // regenerable inconvenience, and failing the run here would turn it into a
     // reason to distrust the upgrade.

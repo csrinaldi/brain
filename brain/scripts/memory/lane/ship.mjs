@@ -472,7 +472,7 @@ export async function shipLane({
   let autoMerge;
   try {
     autoMerge = await vcs.mrAutoMerge({ project, number: pr.number, requiredReviews: tierParams(tier).requiredReviews });
-  } catch (err) {
+  } catch (err) { /* surfaced: folded into `autoMerge: { enabled: false, reason }`, reported on stderr; a refusal is non-fatal by design (A6) */
     autoMerge = { enabled: false, reason: err?.message ?? String(err) };
   }
 

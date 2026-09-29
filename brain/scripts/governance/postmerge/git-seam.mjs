@@ -30,7 +30,7 @@ export function gitTry(argv, { cwd = process.cwd(), maxBuffer = DEFAULT_MAX_BUFF
       cwd, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], maxBuffer,
     });
     return { status: 0, stdout, stderr: '' };
-  } catch (err) {
+  } catch (err) { /* surfaced: mapped to status -1 with the reason kept; an unmapped status is uncomputable, never a verdict */
     // ENOBUFS is OUR limit, not git's. It still collapses to -1 (an unmapped
     // status is uncomputable, never a verdict — see the module header), but the
     // reason must survive: err.stderr is empty here, so the plain fallback below

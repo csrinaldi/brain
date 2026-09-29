@@ -51,7 +51,7 @@ export function collectChunkObservations(chunksDir) {
     try {
       const raw = gunzipSync(readFileSync(join(chunksDir, file))).toString('utf8');
       parsed = JSON.parse(raw);
-    } catch {
+    } catch { /* surfaced: pushed to `unparseable`, which the migration report lists */
       unparseable.push(file);
       continue;
     }
@@ -105,7 +105,7 @@ export function buildMigrationReport(observations, chunkStats = {}) {
     let result;
     try {
       result = exportObservation(obs);
-    } catch (err) {
+    } catch (err) { /* surfaced: pushed to `rejected` with its reason; one corrupt observation must not abort the report */
       // A throwing export (e.g. toUtcSeconds() on a malformed created_at)
       // must reject THAT one observation only — one corrupt observation
       // must never abort the whole migration report (MINOR-4).
@@ -227,7 +227,7 @@ export function runMigration({
     let result;
     try {
       result = _exportObservation(obs);
-    } catch (err) {
+    } catch (err) { /* surfaced: pushed to `rejected` with its reason; the migration report lists it */
       rejected.push({ id: obsRef, title: obs.title ?? '', type: obs.type, reason: err.message });
       continue;
     }

@@ -58,7 +58,7 @@ export function tryFeatureResume(root, { _runner } = {}) {
       return result.stdout ?? '';
     }
     return null;
-  } catch {
+  } catch { /* swallow-ok: the resume hint is advisory; a runner that cannot start yields null, the same as no resume point */
     // Runner threw (binary not found, permission error, etc.) — isolate.
     return null;
   }

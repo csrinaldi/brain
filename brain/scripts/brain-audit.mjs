@@ -238,7 +238,7 @@ function resolveRange(cwd) {
   try {
     execSync('git rev-parse origin/main', { encoding: 'utf8', cwd, stdio: 'pipe' });
     return 'origin/main..HEAD';
-  } catch {
+  } catch { /* swallow-ok: an unresolvable origin/main widens the audited range to HEAD — a superset, never a narrower one */
     return 'HEAD';
   }
 }

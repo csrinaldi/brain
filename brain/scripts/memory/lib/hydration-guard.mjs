@@ -34,7 +34,7 @@ function defaultPidAlive(pid) {
   try {
     process.kill(pid, 0);
     return true;
-  } catch (err) {
+  } catch (err) { /* swallow-ok: kill(pid, 0) throws by design to say "not alive"; EPERM (alive, not ours) maps to true */
     // EPERM is an ALIVE pid this user may not signal; only ESRCH means dead.
     return err?.code === 'EPERM';
   }
@@ -44,7 +44,7 @@ function readOwner(lockPath) {
   try {
     const o = JSON.parse(readFileSync(join(lockPath, OWNER_FILE), 'utf8'));
     if (typeof o?.pid === 'number' && typeof o?.startedAt === 'number') return o;
-  } catch {
+  } catch { /* swallow-ok: an absent or unreadable owner file falls to the directory-age rule the caller applies */
     /* absent or unreadable → the caller decides by the directory's age */
   }
   return null;
@@ -69,7 +69,7 @@ function sweepOrphans(lockPath, staleMs, now) {
   const dir = dirname(lockPath);
   const prefix = `${basename(lockPath)}.`;
   let names;
-  try { names = readdirSync(dir); } catch { return; }
+  try { names = readdirSync(dir); } catch { /* swallow-ok: reclaiming orphans is opportunistic; the lock take itself still runs and reports contention */ return; }
   for (const name of names) {
     if (!name.startsWith(prefix)) continue;
     const tag = name.slice(prefix.length).split('-')[0];
@@ -77,7 +77,7 @@ function sweepOrphans(lockPath, staleMs, now) {
     const full = join(dir, name);
     try {
       if (now - statSync(full).mtimeMs > staleMs) rmSync(full, { recursive: true, force: true });
-    } catch {
+    } catch { /* swallow-ok: gone already or unreadable — not ours to insist on */
       /* gone already, or unreadable — not ours to insist on */
     }
   }
@@ -128,7 +128,7 @@ export function acquireHydrationGuard({
     const tomb = privateDir('released');
     try {
       renameSync(lockPath, tomb);
-    } catch {
+    } catch { /* swallow-ok: the lock is already gone (reclaimed by someone else); nothing of ours to remove */
       return; // already gone — reclaimed by someone else; nothing of ours to remove
     }
     const moved = readOwner(tomb);
@@ -136,7 +136,7 @@ export function acquireHydrationGuard({
       rmSync(tomb, { recursive: true, force: true });
       return;
     }
-    try { renameSync(tomb, lockPath); } catch { rmSync(tomb, { recursive: true, force: true }); }
+    try { renameSync(tomb, lockPath); } catch { /* swallow-ok: putting the lock back lost a race; removing the tombstone is the safe end, the lock was not ours */ rmSync(tomb, { recursive: true, force: true }); }
   };
 
   const take = () => {
@@ -174,7 +174,7 @@ export function acquireHydrationGuard({
       // Not a lock this module ever creates (ours always carry their owner).
       // Unknown is not stale: reclaim only once the directory itself is old.
       let ageMs = 0;
-      try { ageMs = _now() - statSync(lockPath).mtimeMs; } catch { return { held: false, owner: NO_OWNER }; }
+      try { ageMs = _now() - statSync(lockPath).mtimeMs; } catch { /* surfaced: an unreadable lock path returns `held: false`, which the caller reports as contention */ return { held: false, owner: NO_OWNER }; }
       stale = ageMs > staleMs;
     }
     if (!stale) return { held: false, owner: describe(owner) };
@@ -184,7 +184,7 @@ export function acquireHydrationGuard({
     const tomb = privateDir('stale');
     try {
       renameSync(lockPath, tomb);
-    } catch {
+    } catch { /* swallow-ok: someone else moved the stale lock first; the loop retries the take */
       continue; // someone else moved it first — retry the take
     }
     const moved = readOwner(tomb);
@@ -193,7 +193,7 @@ export function acquireHydrationGuard({
       continue;
     }
     // A fresh lock was installed between the decision and the reclaim: put it back.
-    try { renameSync(tomb, lockPath); } catch { rmSync(tomb, { recursive: true, force: true }); }
+    try { renameSync(tomb, lockPath); } catch { /* swallow-ok: putting the lock back lost a race; removing the tombstone is the safe end, the lock was not ours */ rmSync(tomb, { recursive: true, force: true }); }
     return { held: false, owner: describe(moved) };
   }
   return { held: false, owner: describe(readOwner(lockPath)) };

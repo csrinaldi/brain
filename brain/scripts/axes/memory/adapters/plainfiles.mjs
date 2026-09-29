@@ -294,7 +294,7 @@ function _defaultRg(query, { root, mode }) {
     const recordsDir = join(root, ".memory", "records");
     const args = mode === "regex" ? ["-i", query, recordsDir] : ["-i", "-F", query, recordsDir];
     spawnSync("rg", args, { encoding: "utf8" });
-  } catch {
+  } catch { /* swallow-ok: rg is an accelerant whose output never determines the search result (see search()) */
     /* best-effort accelerant — never fatal */
   }
 }
@@ -341,7 +341,7 @@ export async function search(
   if (_which("rg")) {
     try {
       _rg(query, { root, mode });
-    } catch {
+    } catch { /* swallow-ok: rg is an accelerant whose output never determines the search result (see search()) */
       /* best-effort accelerant — never fatal, never changes the result below */
     }
   }

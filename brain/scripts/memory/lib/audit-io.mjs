@@ -25,7 +25,7 @@ export function readRecordLines(recordsDir, { _readdir = readdirSync, _read = re
     for (const line of _read(join(recordsDir, file), 'utf8').split('\n')) {
       if (!line.trim()) continue;
       let o;
-      try { o = JSON.parse(line); } catch { continue; }
+      try { o = JSON.parse(line); } catch { /* swallow-ok: audit measures well-formed records; a corrupt line is the fail-closed rebuildIndex gate's to refuse (store.mjs) */ continue; }
       if (typeof o?.id === 'string' && typeof o?.ts === 'string') out.push({ ...o, file });
     }
   }
@@ -69,7 +69,7 @@ export function readBackendKeys(backend, root, { _probe = probeBinary, _exec = e
     if (backend === 'plainfiles') {
       const indexPath = join(root, '.memory', 'index.jsonl');
       if (!existsSync(indexPath)) return { measured: false, reason: 'plainfiles: index.jsonl not found' };
-      const keys = _read(indexPath, 'utf8').split('\n').filter((l) => l.trim()).map((l) => { try { return JSON.parse(l).id; } catch { return null; } }).filter(Boolean);
+      const keys = _read(indexPath, 'utf8').split('\n').filter((l) => l.trim()).map((l) => { try { return JSON.parse(l).id; } catch { /* swallow-ok: an unparseable index line yields a null key that never matches a record id, so the drift shows in the measured row */ return null; } }).filter(Boolean);
       return { measured: true, mode: 'plainfiles index (vacuity row)', keys };
     }
     if (backend !== 'engram') return { measured: false, reason: `${backend}: no export reader for this backend` };
@@ -93,7 +93,7 @@ export function readBackendKeys(backend, root, { _probe = probeBinary, _exec = e
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
-  } catch (err) {
+  } catch (err) { /* surfaced: returned as `{ measured: false, reason }`: the audit row says why it degraded */
     return { measured: false, reason: `${backend}: ${String(err?.message ?? err).split('\n')[0]}` };
   }
 }
@@ -108,7 +108,7 @@ export function runAudit({ root, backend, sinceMs, nowMs = Date.now(), _readReco
   let landedMsById;
   try {
     landedMsById = _readLandingTimes(root);
-  } catch (err) {
+  } catch (err) { /* surfaced: returned as `{ measured: false, reason }`: the audit row says why it degraded */
     landedMsById = { measured: false, reason: String(err?.message ?? err).split('\n')[0] };
   }
   const backendKeys = _readBackendKeys(backend, root);

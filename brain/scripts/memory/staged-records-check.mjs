@@ -244,7 +244,7 @@ export function stagedRecordDiff({ root, _spawn = spawnSync }) {
       encoding: 'utf8',
       maxBuffer: 1e9,
     });
-  } catch (err) {
+  } catch (err) { /* surfaced: returned as `{ ok: false, reason }`, which the pre-commit check refuses on */
     return { ok: false, reason: `git diff threw — ${err.message}` };
   }
   if (result?.error) return { ok: false, reason: `git diff could not run — ${result.error.message}` };
@@ -297,7 +297,7 @@ export function mergeIntroducedRecords({ root, _spawn = spawnSync, _readFile = r
   let pathResult;
   try {
     pathResult = _spawn('git', ['rev-parse', '--git-path', 'MERGE_HEAD'], { cwd: root, encoding: 'utf8' });
-  } catch (err) {
+  } catch (err) { /* surfaced: returned as `{ ok: false, reason }`, which the pre-commit check refuses on */
     return { ok: false, reason: `git rev-parse --git-path MERGE_HEAD threw — ${err.message}` };
   }
   if (pathResult?.error) return { ok: false, reason: `git rev-parse --git-path could not run — ${pathResult.error.message}` };
@@ -311,7 +311,7 @@ export function mergeIntroducedRecords({ root, _spawn = spawnSync, _readFile = r
   let text;
   try {
     text = _readFile(isAbsolute(mergeHeadPath) ? mergeHeadPath : join(root, mergeHeadPath), 'utf8');
-  } catch (err) {
+  } catch (err) { /* surfaced: only ENOENT means "no merge"; every other read failure returns `{ ok: false, reason }` */
     // ENOENT is the ordinary answer and the only one that means "no merge".
     // Everything else — EACCES, EIO, a directory where the file should be — is
     // a broken checkout, and saying "no merge in progress" there tells the
@@ -336,7 +336,7 @@ export function mergeIntroducedRecords({ root, _spawn = spawnSync, _readFile = r
         encoding: 'utf8',
         maxBuffer: 1e9,
       });
-    } catch (err) {
+    } catch (err) { /* surfaced: returned as `{ ok: false, inMerge: true, reason }`, which the check refuses on */
       return { ok: false, inMerge: true, reason: `git ls-tree against ${parent} threw — ${err.message}` };
     }
     if (tree?.error) return { ok: false, inMerge: true, reason: `git ls-tree against ${parent} could not run — ${tree.error.message}` };

@@ -267,7 +267,7 @@ export function readRecordIds({ recordsDir }) {
       try {
         const record = JSON.parse(line);
         if (record && typeof record.id === 'string') ids.add(record.id);
-      } catch {
+      } catch { /* swallow-ok: corrupt line — the fail-closed integrity gate is rebuildIndex above, which throws; this reader is tolerant by design */
         continue; // corrupt line — not this function's fail-closed gate
       }
     }
@@ -354,14 +354,14 @@ export function readRecords({ recordsDir }) {
   let filenames;
   try {
     filenames = readdirSync(recordsDir).filter((f) => f.endsWith('.jsonl')).sort();
-  } catch {
+  } catch { /* follow-up: slice-C a records/ directory that exists but cannot be read reads as an empty store */
     return { records, duplicates: summarizeDuplicates(occurrences) }; // records/ absent or unreadable
   }
   for (const filename of filenames) {
     let raw;
     try {
       raw = readFileSync(join(recordsDir, filename), 'utf8');
-    } catch {
+    } catch { /* follow-up: slice-C a record file that cannot be read is skipped without being counted or reported */
       continue; // file vanished/unreadable between readdir and read — best-effort, never throw
     }
     const physicalLines = raw.split('\n');
@@ -371,7 +371,7 @@ export function readRecords({ recordsDir }) {
       let record;
       try {
         record = JSON.parse(line);
-      } catch {
+      } catch { /* swallow-ok: corrupt line — the fail-closed integrity gate is rebuildIndex above, which throws; this reader is tolerant by design */
         continue; // corrupt line — not this function's fail-closed gate
       }
       const id = record && typeof record.id === 'string' ? record.id : undefined;

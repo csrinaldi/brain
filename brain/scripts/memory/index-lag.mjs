@@ -32,7 +32,7 @@ function readIndexLines(indexPath, readFile) {
   let raw;
   try {
     raw = readFile(indexPath, 'utf8');
-  } catch {
+  } catch { /* surfaced: an unreadable index reads as empty, which then reports as lag (0 indexed) in the same WARNING */
     return []; // absent/unreadable index.jsonl — never throw, read as empty
   }
   return raw.split('\n').filter((line) => line.trim() !== '');
@@ -57,7 +57,7 @@ export function compareIndexToRecords({ indexLines = [], records = [] } = {}) {
     let entry;
     try {
       entry = JSON.parse(line);
-    } catch {
+    } catch { /* surfaced: a corrupt index line is simply not indexed, so its ids show up as missing from the index in the WARNING */
       continue; // a corrupt index line is not this warning's gate to fail on
     }
     if (entry && typeof entry.id === 'string') indexedIds.add(entry.id);

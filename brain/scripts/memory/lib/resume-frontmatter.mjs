@@ -97,7 +97,7 @@ export function parseFrontmatter(source) {
     }
 
     return { frontmatter, body };
-  } catch {
+  } catch { /* swallow-ok: the documented graceful fallback for a hand-edited resume.md: no frontmatter, the body is kept */
     // Never throw — return graceful fallback.
     return { frontmatter: null, body: source ?? '' };
   }

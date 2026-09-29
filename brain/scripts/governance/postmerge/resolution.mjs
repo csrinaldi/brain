@@ -508,7 +508,7 @@ export function revertResurrectsAt(candidate, tip, { git }) {
     let blobLines;
     try {
       blobLines = new Set(git.orThrow(['show', `${tip}:${path}`]).split('\n'));
-    } catch {
+    } catch { /* swallow-ok: an unreadable blob reads as "every removed line resurrects" — the fail-closed direction */
       return true; // path absent at tip → every removed line resurrects
     }
     if (removed.some((L) => !blobLines.has(L))) return true;

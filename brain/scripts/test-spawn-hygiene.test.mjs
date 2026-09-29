@@ -54,6 +54,7 @@ import { readFileSync, globSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join, dirname, sep, relative, resolve as pathResolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { testTmp } from './lib/test-tmp.mjs';
+import { maskNonCode } from './lib/mask-non-code.mjs';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
@@ -93,52 +94,6 @@ function callArgsText(src, openParenIdx) {
     }
   }
   return src.slice(openParenIdx + 1);
-}
-
-/** Replaces every //, /* *‍/ and string/template body with blanks (same
- * length, newlines preserved) so the call-site search never matches
- * callee-shaped text living inside a comment or a string. */
-function maskNonCode(src) {
-  let out = '';
-  let i = 0;
-  const n = src.length;
-  while (i < n) {
-    const c = src[i];
-    const c2 = src[i + 1];
-    if (c === '/' && c2 === '/') {
-      let j = i;
-      while (j < n && src[j] !== '\n') { out += ' '; j += 1; }
-      i = j;
-      continue;
-    }
-    if (c === '/' && c2 === '*') {
-      out += '  ';
-      let j = i + 2;
-      while (j < n && !(src[j] === '*' && src[j + 1] === '/')) {
-        out += src[j] === '\n' ? '\n' : ' ';
-        j += 1;
-      }
-      out += '  ';
-      i = j + 2;
-      continue;
-    }
-    if (c === '\'' || c === '"' || c === '`') {
-      const quote = c;
-      out += ' ';
-      let j = i + 1;
-      while (j < n && src[j] !== quote) {
-        if (src[j] === '\\') { out += '  '; j += 2; continue; }
-        out += src[j] === '\n' ? '\n' : ' ';
-        j += 1;
-      }
-      out += ' ';
-      i = j + 1;
-      continue;
-    }
-    out += c;
-    i += 1;
-  }
-  return out;
 }
 
 /** Splits `text` on top-level commas — the same paren/bracket/brace/string
@@ -410,6 +365,7 @@ const ALLOWLIST = [
   // ── git hooks: run directly, never through a real `git push`/network ───
   { file: 'brain/scripts/hooks/commit-msg.test.mjs', entrypoint: 'brain/scripts/hooks/commit-msg', reason: 'no-vcs-capability' },
   { file: 'brain/scripts/hooks/hooks.attribution-parity.test.mjs', entrypoint: 'brain/scripts/hooks/commit-msg', reason: 'no-vcs-capability' },
+  { file: 'brain/scripts/brain-promote.golden.test.mjs', entrypoint: 'brain/scripts/hooks/commit-msg', reason: 'no-vcs-capability' }, // #1127: masked away by the old masker (a regex literal holding a quote); runs the hook on a message file, no VCS
   { file: 'brain/scripts/hooks/pre-commit.test.mjs', entrypoint: 'brain/scripts/hooks/pre-commit', reason: 'no-vcs-capability' },
   { file: 'brain/scripts/hooks/pre-push.test.mjs', entrypoint: 'brain/scripts/hooks/pre-push', reason: 'no-vcs-capability' },
   { file: 'brain/scripts/hooks/hooks.stream-discipline.test.mjs', entrypoint: '<unresolved>', line: 98, reason: 'no-vcs-capability' },

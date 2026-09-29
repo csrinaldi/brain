@@ -81,7 +81,7 @@ function refResolves(ref, root, _spawn) {
     const r = _spawn('git', ['rev-parse', '--verify', '--quiet', `${ref}^{tree}`], { cwd: root, encoding: 'utf8' });
     if (r?.error) return false;
     return r?.status === 0;
-  } catch {
+  } catch { /* swallow-ok: a failed ref probe reads as "ref not present", the answer the probe exists to give */
     return false;
   }
 }
@@ -182,7 +182,7 @@ export function resolveUpstreamRef({
   let configError;
   try {
     cfg = config ?? _loadConfig(root);
-  } catch (err) {
+  } catch (err) { /* surfaced: carried as `configError` into the result */
     // `cfg` stays undefined, so `statedRef` below is undefined and the derived
     // candidates take over — carrying the named failure with them.
     configError = err.message;

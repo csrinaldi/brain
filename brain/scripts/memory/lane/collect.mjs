@@ -54,7 +54,7 @@ export function defaultGit(argv, { cwd = process.cwd(), input, env } = {}) {
       env: env ? { ...process.env, ...env } : process.env,
     });
     return { status: 0, stdout, stderr: '' };
-  } catch (err) {
+  } catch (err) { /* surfaced: ENOBUFS is returned as status -1, an uncomputable git result the callers never read as a pass */
     if (err.code === 'ENOBUFS') {
       return {
         status: -1,
@@ -174,7 +174,7 @@ function buildCandidate(worktreePath, entry, patterns, allowPatterns) {
   let readError;
   try {
     content = readFileSync(absPath, 'utf8');
-  } catch (err) {
+  } catch (err) { /* surfaced: recorded as `readError` on the candidate and routed to skipped with its reason */
     readError = err.message;
   }
   let secret;

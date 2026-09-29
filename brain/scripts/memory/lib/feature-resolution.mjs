@@ -53,7 +53,7 @@ export function resolveFeature(root, explicitArg) {
   let entries;
   try {
     entries = readdirSync(changesDir);
-  } catch {
+  } catch { /* swallow-ok: no openspec/changes/ means no candidate feature — the nothing-to-resume case */
     // openspec/changes/ does not exist (fresh repo, no changes yet).
     return null;
   }
@@ -63,7 +63,7 @@ export function resolveFeature(root, explicitArg) {
     if (entry === 'archive') return false;
     try {
       return statSync(join(changesDir, entry)).isDirectory();
-    } catch {
+    } catch { /* swallow-ok: an entry that cannot be stat'd is not a candidate change directory */
       return false;
     }
   });
