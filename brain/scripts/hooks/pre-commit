@@ -20,7 +20,7 @@
 
 command -v node >/dev/null 2>&1 || exit 0
 
-# ── 0. Unborn-HEAD exemption from checks 1 and 2 (issue #1112, finding 4) ───
+# ── 0. No-commit-at-all exemption from checks 1 and 2 (issue #1112, finding 4) ─
 #
 # `env:init` sets core.hooksPath (bootstrap.sh §7) before the operator makes
 # the adoption commit, so checks 1 and 2 below are both live against the only
@@ -32,13 +32,25 @@ command -v node >/dev/null 2>&1 || exit 0
 # is structurally impossible for a repository's very first commit. Maintainer
 # ruling, 2026-09-29: exempt that one commit.
 #
-# Detected via `git rev-parse --verify -q HEAD` failing — NOT by branch name,
-# which a fresh repo may set to anything. Silent, closed set: `-q` suppresses
-# git's own error text, and the command's only observable effect here is its
-# exit status. Self-closing: the moment this commit lands, HEAD is born and
-# every later commit is judged by checks 1 and 2 exactly as before.
-if ! git rev-parse --verify -q HEAD >/dev/null 2>&1; then
-  echo "✓ pre-commit: HEAD is unborn (no commit exists yet) — worktree isolation is impossible for this commit; allowing it (issue #1112)."
+# THE CONDITION IS "THE REPOSITORY HAS NO COMMIT AT ALL" — checked via
+# `git rev-list -n 1 --all` being empty (no commit reachable from ANY ref) —
+# never "the CURRENT HEAD is unborn" (`git rev-parse --verify HEAD` failing).
+# Those are NOT the same fact: `git checkout --orphan x` also makes the
+# current HEAD unborn, in a repository that already has real history on other
+# refs (e.g. `main`) — a HEAD-only check would re-open #782 on demand, letting
+# any commit in the main checkout dodge check 2 just by switching to a fresh
+# orphan branch first (cold-review finding, reproduced). `--all` still reaches
+# `main`'s commit in that case, so the condition below stays false and checks
+# 1/2 judge the orphan-branch commit exactly as they would any other.
+#
+# Silent, closed set: `-n 1` stops at the first hit (cheap even on a large
+# history) and no output is the only signal read. NOT self-closing on "this
+# commit lands" alone in the sense the first cut of this comment claimed —
+# it is false again FOREVER once any commit exists anywhere in the
+# repository, by construction: no operation can make a repo's total commit
+# count go from 1 back to 0.
+if [ -z "$(git rev-list -n 1 --all 2>/dev/null)" ]; then
+  echo "✓ pre-commit: the repository has no commit yet — worktree isolation is impossible for this commit; allowing it (issue #1112)."
 else
 
 # ── 1. Block direct commits to main/master ──────────────────────────────────

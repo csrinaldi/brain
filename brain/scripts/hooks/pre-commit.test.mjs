@@ -22,6 +22,13 @@ function makeTempDir(prefix) {
  * @param {string} [opts.branch='feature/x']
  * @param {number} [opts.stagedRecordsCode=0]
  * @param {number} [opts.checkRefsCode=0]
+ * @param {boolean} [opts.hasCommit=true] issue #1112 gate 0 — whether the
+ *   fake repo has any commit at all (`git rev-list -n 1 --all` non-empty).
+ *   `true` for every pre-existing test here: they all model a repo that
+ *   already has history, which is the universe checks 1/2 governed before
+ *   gate 0 existed. `pre-commit.unborn-head.test.mjs` covers the `false`
+ *   (no-commit-at-all) path against REAL git; the one test below that sets
+ *   `hasCommit: false` here is a fast unit-level mirror of that same gate.
  */
 function createMockBin({
   callLog, branch = 'feature/x', stagedRecordsCode = 0, checkRefsCode = 0,
@@ -31,6 +38,7 @@ function createMockBin({
   // commit belongs in a worktree. Opt into the main checkout to exercise the
   // refusal.
   inMainCheckout = false,
+  hasCommit = true,
 }) {
   const binDir = makeTempDir('pc-bin-');
   writeFileSync(
@@ -57,7 +65,9 @@ function createMockBin({
     join(binDir, 'git'),
     [
       '#!/usr/bin/env sh',
-      'if [ "$1" = "rev-parse" ] && [ "$2" = "--abbrev-ref" ]; then',
+      'if [ "$1" = "rev-list" ]; then',
+      `  ${hasCommit ? "printf 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\\n'" : ':'}`,
+      'elif [ "$1" = "rev-parse" ] && [ "$2" = "--abbrev-ref" ]; then',
       `  printf '%s\\n' "${branch}"`,
       'elif [ "$1" = "rev-parse" ] && [ "$2" = "--show-toplevel" ]; then',
       '  printf "/fake/repo\\n"',
@@ -205,4 +215,21 @@ test('pre-commit: main is still refused by check 1, before the worktree check', 
   const result = runHook(binDir);
   assert.equal(result.status, 1);
   assert.match(`${result.stdout}${result.stderr}`, /direct commits to 'main'/);
+});
+
+// ── #1112 gate 0 — no commit at all (fast unit-level mirror; the real-git
+//    proof, including the orphan-branch regression, lives in
+//    pre-commit.unborn-head.test.mjs) ───────────────────────────────────────
+
+test('#1112 gate 0: a repo with NO commit at all is exempt from checks 1 and 2, even on "main" in the main checkout', (t) => {
+  const tmpRoot = makeTempDir('pc-root-');
+  const callLog = join(tmpRoot, 'calls.log');
+  t.after(() => rmSync(tmpRoot, { recursive: true, force: true }));
+
+  const binDir = createMockBin({ callLog, branch: 'main', inMainCheckout: true, hasCommit: false });
+  t.after(() => rmSync(binDir, { recursive: true, force: true }));
+
+  const result = runHook(binDir);
+  assert.equal(result.status, 0, `expected the no-commit-at-all exemption to pass through; stderr:\n${result.stderr}`);
+  assert.deepEqual(readCallLog(callLog), ['staged-records-check', 'check-refs']);
 });
