@@ -16,7 +16,7 @@ import { evaluateSelfReview, gatherColdBoot, defaultCloneDetached } from './cold
 // exercise the REAL provider normalizer and the REAL downstream locks rather
 // than an injected review shape — see the block comment there.
 import { setSpawn } from '../vcs/lib/exec.mjs';
-import * as github from '../vcs/providers/github.mjs';
+import * as github from '../axes/vcs/adapters/github.mjs';
 import { postVerdict } from './poster.mjs';
 import { buildVerdict } from './verdict.mjs';
 import { verdictsAtHead } from './lib/parse-verdict.mjs';

@@ -157,7 +157,7 @@ const REJECTION_REPORT_FILE = 'migration-rejected.json';
  * runMigration() — the real-run CODE (C2-migrate, #219). Fixture-tested only
  * (design.md Decision 1): proven against a synthetic temp-dir store, never
  * executed here against the live `.memory/`. Deps are injected (`_`-prefixed,
- * mirroring backends/engram.mjs's seam pattern) so tests drive a real
+ * mirroring axes/memory/adapters/engram.mjs's seam pattern) so tests drive a real
  * filesystem in a temp dir.
  *
  * Order (design.md Decision 2 + 3):

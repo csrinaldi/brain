@@ -169,4 +169,4 @@ A YAML parse error upstream should also degrade to prose-only treatment, never a
 - The two-layer durable memory ADR — the durable layer this is separated from.
 - The memory adapter ADR — the backend-agnostic dispatch discipline this mirrors.
 - `scripts/memory/lib/resume-schema.mjs` — validator implementation (Slice 1).
-- `scripts/memory/backends/engram.mjs` — engram implementation of the verbs (Slice 2).
+- `scripts/axes/memory/adapters/engram.mjs` — engram implementation of the verbs (Slice 2).

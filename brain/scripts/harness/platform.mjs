@@ -6,8 +6,8 @@
 // The cycle was one edge long, and every hop in it was reasonable on its own:
 //
 //   harness/cli.mjs            top-level `await dispatch(platform, op, …)`
-//     → dynamic import         backends/claude.mjs        (chosen by the platform)
-//       → static import        backends/agent-runtime.mjs (for `defaultRun`)
+//     → dynamic import         axes/platform/adapters/claude.mjs        (chosen by the platform)
+//       → static import        axes/lib/agent-runtime.mjs (for `defaultRun`)
 //         → static import      harness/cli.mjs            (for `resolvePlatform`)
 //
 // The last hop re-enters a module that is STILL EVALUATING — it is suspended at
@@ -42,7 +42,7 @@
 /**
  * The SDD_ENGINE axis membership (issue #312, design D2 supporting change).
  * Lives here, not `cli.mjs`, for the same reason this whole file does: a
- * backend may not import the dispatcher, and `roles/role-port.mjs`'s registry
+ * backend may not import the dispatcher, and `axes/sdd-engine/role-port.mjs`'s registry
  * assertion needs this list without reaching into `cli.mjs`'s top-level-await
  * module. `cli.mjs`'s `resolveEngine` reads it below instead of holding its
  * own inline literal — one declaration, two readers, the `CLI_OPS`-from-`OPS`

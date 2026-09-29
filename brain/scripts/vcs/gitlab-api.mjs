@@ -5,13 +5,13 @@
 // as plain arguments and reads NO environment itself. This is deliberate —
 // callers that ARE sanctioned to read pipeline env (ci-context.mjs, the sole
 // reader per the drift-guard) resolve apiBase/token/proxyUrl and thread them
-// in here; a GATE_FILE consumer (providers/gitlab.mjs) receives them as
+// in here; a GATE_FILE consumer (axes/vcs/adapters/gitlab.mjs) receives them as
 // parameters from ITS caller and never reads the GitLab API base URL
 // pipeline var directly either (ci-context-drift-guard.test.mjs forbids it
 // explicitly).
 //
 // ONE fetcher, N consumers: ci-context.mjs's defaultFetchMr (the MR body/
-// labels/author call, REQ-CIC-5) and providers/gitlab.mjs's issueView (the
+// labels/author call, REQ-CIC-5) and axes/vcs/adapters/gitlab.mjs's issueView (the
 // CI-consumed verb migrated off the glab CLI, finding #12) both call this
 // same helper — never a second hand-rolled GitLab API fetch elsewhere.
 

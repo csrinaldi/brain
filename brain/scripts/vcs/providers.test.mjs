@@ -9,8 +9,8 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { setSpawn } from './lib/exec.mjs';
 
-import * as github from './providers/github.mjs';
-import * as gitlab from './providers/gitlab.mjs';
+import * as github from '../axes/vcs/adapters/github.mjs';
+import * as gitlab from '../axes/vcs/adapters/gitlab.mjs';
 
 afterEach(() => setSpawn(spawnSync));
 
@@ -1419,7 +1419,7 @@ test('github.labelEvents accepts and ignores a kind parameter (documentation-onl
 // (mirrors the neutrality source-scan style in phase-order-check.test.mjs and
 // actor-check.test.mjs's pre-A3 FIX1 guard, now here alongside the code).
 test('github.labelEvents source includes --paginate on the gh api events call (FIX1 fail-open guard)', async () => {
-  const srcPath = fileURLToPath(new URL('./providers/github.mjs', import.meta.url));
+  const srcPath = fileURLToPath(new URL('../axes/vcs/adapters/github.mjs', import.meta.url));
   const src = readFileSync(srcPath, 'utf8');
   const fnStart = src.indexOf('export async function labelEvents');
   assert.notEqual(fnStart, -1, 'labelEvents not found in github.mjs');
@@ -1462,7 +1462,7 @@ test('gitlab.labelEvents returns null (never []) when the underlying fetch throw
 // cross-provider shape parity, the parseVerdict round-trip, the
 // notes-are-never-APPROVED security boundary, the ordering/pagination locks
 // and the all-or-nothing failure rule live in the shared contract suite
-// (providers/vcs.contract.test.mjs); these are the provider-local unit tests.
+// (axes/vcs/contract.test.mjs); these are the provider-local unit tests.
 
 test('github.prReviews normalizes gh reviews to { state, author, body }', async () => {
   setSpawn(fakeSpawn([
@@ -1483,7 +1483,7 @@ test('github.prReviews returns null (never []) when the underlying gh api call t
 });
 
 test('github.prReviews source includes --paginate on the gh api reviews call (fail-open guard, moved with the extraction)', () => {
-  const srcPath = fileURLToPath(new URL('./providers/github.mjs', import.meta.url));
+  const srcPath = fileURLToPath(new URL('../axes/vcs/adapters/github.mjs', import.meta.url));
   const src = readFileSync(srcPath, 'utf8');
   const fnStart = src.indexOf('export async function prReviews');
   assert.notEqual(fnStart, -1, 'prReviews not found in github.mjs');
@@ -1588,7 +1588,7 @@ test('github.prCommits returns null (never []) when the underlying gh api call t
 });
 
 test('github.prCommits source includes --paginate on the gh api commits call', () => {
-  const srcPath = fileURLToPath(new URL('./providers/github.mjs', import.meta.url));
+  const srcPath = fileURLToPath(new URL('../axes/vcs/adapters/github.mjs', import.meta.url));
   const src = readFileSync(srcPath, 'utf8');
   const fnStart = src.indexOf('export async function prCommits');
   assert.notEqual(fnStart, -1, 'prCommits not found in github.mjs');

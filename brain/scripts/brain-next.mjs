@@ -83,7 +83,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     const provider = config?.vcs?.provider;
     const project = config?.project?.slug;
     if (provider && project) {
-      providerModule = await import(`./vcs/providers/${provider}.mjs`);
+      providerModule = await import(`./axes/vcs/adapters/${provider}.mjs`);
       providerModule._project = project;
     }
   } catch { /* best-effort */ }

@@ -275,11 +275,11 @@ test('collectChunkObservations: a non-destructured dynamic import + member acces
 });
 
 test('collectChunkObservations: the scan actually read something — evidence floor (A3, settings-hooks.test.mjs pattern)', () => {
-  // A scan that reads nothing proves nothing (harness/backends/settings-hooks.test.mjs:145-150's rule).
+  // A scan that reads nothing proves nothing (axes/platform/lib/settings-hooks.test.mjs:145-150's rule).
   const { files } = chunkImporters(repoRoot);
   assert.ok(files.length > 100, `the scan read ${files.length} files — it is not looking where it thinks`);
   for (const known of [
-    'brain/scripts/memory/backends/engram.mjs',
+    'brain/scripts/axes/memory/adapters/engram.mjs',
     'brain/scripts/memory/cli.mjs',
     'brain/scripts/memory/lib/migrate-v1.mjs',
   ]) {

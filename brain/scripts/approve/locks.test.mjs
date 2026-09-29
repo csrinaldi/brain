@@ -150,7 +150,7 @@ test('REQ-473-7 lock 2: no BRAIN_HUMAN_TOKEN or new token env var (design.md §F
 // GitLab (every site honors it — one credential source). WRONG on GitHub
 // (this repo's ACTIVE provider, brain.config.json's `vcs.provider`):
 // `whoami({token})` overrides identity to the TOKEN's account
-// (providers/github.mjs:35-39) while `prView`/`mrList`/`prReviews`/
+// (axes/vcs/adapters/github.mjs:35-39) while `prView`/`mrList`/`prReviews`/
 // `prReviewComment` ignore `token`/`apiBase`/`proxyUrl` entirely and use the
 // ambient `gh` session — with `VCS_TOKEN` divergent from the `gh` login,
 // whoami claims one identity and the post lands under another. Fix: thread
@@ -238,7 +238,7 @@ test('REQ-473-CONFIG (gitlab, SITE completeness): mrList on the branch-resolutio
 
 test('REQ-473-CONFIG (github): whoami receives NO token key — ambient `gh` session decides identity, exactly like every other site', async () => {
   // github.mjs's whoami({token}) OVERRIDES identity to the token's account
-  // when `token` is present (providers/github.mjs:35-39: `GH_TOKEN` env
+  // when `token` is present (axes/vcs/adapters/github.mjs:35-39: `GH_TOKEN` env
   // override). Passing gitlabApiConfig()'s VCS_TOKEN here would silently
   // diverge whoami's identity from what the ambient `gh` session posts under.
   const vcs = makeVcs({}, 'github');

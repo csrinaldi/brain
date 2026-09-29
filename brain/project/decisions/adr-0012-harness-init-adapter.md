@@ -1,6 +1,6 @@
 # ADR-0012 — Harness Init Adapter: scripts/harness/ Dispatcher + Backend Contract
 
-**Status**: Accepted  
+**Status**: Accepted · **amended 28/09/2026** (Amendment 1 — see below)  
 **Date**: 2026-06-27
 
 ## Context
@@ -19,11 +19,11 @@ The harness init binding moves out of `bootstrap.sh` and into a dedicated adapte
 
 - **Dispatcher**: `scripts/harness/cli.mjs`.
   - Reads `SDD_HARNESS` from `process.env` → `.env` file → default `'gentle-ai'` (same precedence as `MEMORY_BACKEND`).
-  - Validates the op (`init`) and dispatches to `scripts/harness/backends/<SDD_HARNESS>.mjs`.
+  - Validates the op (`init`) and dispatches to `brain/scripts/axes/sdd-engine/adapters/<SDD_HARNESS>.mjs` (under `scripts/harness/backends/<SDD_HARNESS>.mjs` until #1141; see Amendment 1).
   - Guards the dynamic import path (only `[a-z][a-z0-9-]*` names allowed) to prevent path traversal.
   - Exports `resolveHarness()` and `dispatch()` as pure / injectable functions for unit tests.
 
-- **Backend contract** (verb: `init`): each module in `scripts/harness/backends/` MUST export `async function init()`. For gentle-ai, `init()` performs the ecosystem step (doctor / install / skill-registry refresh) **and** the SDD project-context check (engram search for `sdd-init/<project>`).
+- **Backend contract** (verb: `init`): each module in `brain/scripts/axes/sdd-engine/adapters/` (under `scripts/harness/backends/` until #1141; see Amendment 1) MUST export `async function init()`. For gentle-ai, `init()` performs the ecosystem step (doctor / install / skill-registry refresh) **and** the SDD project-context check (engram search for `sdd-init/<project>`).
 
 - **Binding point** (replaces ADR-0005 §6 `case`): `bootstrap.sh §6` becomes:
   ```sh
@@ -31,7 +31,7 @@ The harness init binding moves out of `bootstrap.sh` and into a dedicated adapte
   ```
   The harness-selector prompt and `env_set SDD_HARNESS` remain in the shell (they are shell-level UX, not harness logic).
 
-- **Adding a new harness**: create `scripts/harness/backends/<name>.mjs` that exports `init()`. No edit to `bootstrap.sh` or `cli.mjs` required.
+- **Adding a new harness**: create `brain/scripts/axes/sdd-engine/adapters/<name>.mjs` (under `scripts/harness/backends/<name>.mjs` until #1141; see Amendment 1) that exports `init()`. No edit to `bootstrap.sh` or `cli.mjs` required.
 
 - **SDD context check (gentle-ai backend)**: `init()` resolves the project slug via `brain.config.json project.slug` (or git origin fallback), then searches engram for `sdd-init/<project>`. If absent, it prints a clear notice: the agent Init Guard will create the context on the first `/sdd-*` command (or the user can run `/sdd-init` explicitly). The check is best-effort and never fatal.
 
@@ -53,3 +53,20 @@ This ADR supersedes the **"Binding point"** detail in ADR-0005 (the §6 `case` b
 - **Positive**: the SDD project-context check (previously absent) is now emitted on every `env:init`, making the missing-context situation visible early.
 - **Negative**: adding a new harness requires implementing the `init()` verb — there is no formal interface today, only convention (same limitation as the memory adapter).
 - **Negative**: bootstrap.sh now requires Node.js at §6 (previously only needed at §7). Node is already a required dependency (§1).
+
+## Amendment 1 — the harness backends moved to `axes/sdd-engine/adapters/` (issue #1141)
+
+**Signed**: 28/09/2026 — Cristian Rinaldi
+
+#1141 moved every backend adapter into one directory per axis, with `git mv`, so `git log
+--follow` still reaches its history:
+
+| as written above | the path today |
+|---|---|
+| `scripts/harness/backends/<SDD_HARNESS>.mjs` | `brain/scripts/axes/sdd-engine/adapters/<SDD_HARNESS>.mjs` |
+| `scripts/harness/backends/` (directory) | `brain/scripts/axes/sdd-engine/adapters/` |
+| `scripts/harness/backends/<name>.mjs` (how-to) | `brain/scripts/axes/sdd-engine/adapters/<name>.mjs` |
+
+All three citations above are annotated in place under ruling R6 on #961 as amended (option A)
+— the maintainer applied the same ruling to #1141's path moves on 2026-09-28. The `SDD_HARNESS`
+dispatcher, the `init()` backend contract and the binding point are unchanged.

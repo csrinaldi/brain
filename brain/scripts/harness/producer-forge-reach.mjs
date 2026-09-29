@@ -65,7 +65,7 @@
 // ADR-0005 forbids is brain knowing which AGENT it spawns. This module never
 // mentions one.
 
-import { defaultRun } from './backends/agent-runtime.mjs';
+import { defaultRun } from '../axes/lib/agent-runtime.mjs';
 
 /**
  * How long one probe may take. The forge CLIs answer locally — `auth status`

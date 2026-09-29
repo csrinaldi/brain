@@ -91,15 +91,28 @@ export function importSpecifiers(text) {
   return out;
 }
 
+// The engines' home. Until #1141 it was one directory, brain/scripts/harness/,
+// which also held every engine and platform adapter. #1141 moved those
+// adapters to the axis directories below WITHOUT changing what this guard
+// forbids: a gate reaching an engine's module, wherever the module now lives.
+// The VCS and memory axes are deliberately absent — a gate importing a VCS
+// adapter is the port working, not a fork per engine.
+const ENGINE_HOMES = [
+  join('brain', 'scripts', 'harness'),
+  join('brain', 'scripts', 'axes', 'platform'),
+  join('brain', 'scripts', 'axes', 'sdd-engine'),
+  join('brain', 'scripts', 'axes', 'review-engine'),
+  join('brain', 'scripts', 'axes', 'lib'),
+];
+
 /** Pure: specifiers that resolve into the engines' home, from a file at relDir. */
 export function harnessImports(text, relDir) {
-  const home = join('brain', 'scripts', 'harness');
   return importSpecifiers(text).filter((spec) => {
     if (!spec.startsWith('.')) return false;
     const resolved = join(relDir, spec);
     // Path-boundary, not prefix (round 5): a sibling named harness-legacy
     // must not read as inside the engines' home.
-    return resolved === home || resolved.startsWith(home + sep);
+    return ENGINE_HOMES.some((home) => resolved === home || resolved.startsWith(home + sep));
   });
 }
 

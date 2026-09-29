@@ -9,7 +9,7 @@
 
 The active backend is chosen via `MEMORY_BACKEND` in `.env` (default `engram`; `plainfiles`
 is the second inhabitant, #246). The dispatcher `brain/scripts/memory/cli.mjs` reads that key
-and delegates to `brain/scripts/memory/backends/<backend>.mjs`. Verbs that are
+and delegates to `brain/scripts/axes/memory/adapters/<backend>.mjs`. Verbs that are
 backend-agnostic by nature — `reindex`, `resolve-index`, `audit`, `split-records` — are
 dispatched directly and never reach a backend.
 
@@ -113,7 +113,7 @@ this table is updated by the slice that turns a "not yet" into a "yes".
 
 ## How to add a backend
 
-1. Create `brain/scripts/memory/backends/<name>.mjs` exporting the four required verbs and
+1. Create `brain/scripts/axes/memory/adapters/<name>.mjs` exporting the four required verbs and
    `unsupportedOp` for the optional ones you do not implement.
 2. Add the `case` in `brain/scripts/memory/cli.mjs`.
 3. Add its row to *Conformance* and prove rules 1–3 with the memory 2.0 spec's scenarios
@@ -139,7 +139,7 @@ backend without `save` has no record-first capture") is now satisfied on
 
 ### What landed (split A)
 
-- `engram.save()` (`brain/scripts/memory/backends/engram.mjs`) is no longer
+- `engram.save()` (`brain/scripts/axes/memory/adapters/engram.mjs`) is no longer
   `unsupportedOp` — it mirrors `plainfiles.save()`'s gate order (caller-mistake
   refusals → actor/provenance #738 → `--supersedes` #805 → `buildRecord` →
   secret scan → `appendRecord` → `rebuildIndex`) and adds ONE new terminal
@@ -179,7 +179,7 @@ change. The `save` column (Amendment 1) is untouched here too.
 
 ### What landed (split B)
 
-- `engram.share()` (`brain/scripts/memory/backends/engram.mjs`) is now the
+- `engram.share()` (`brain/scripts/axes/memory/adapters/engram.mjs`) is now the
   `plainfiles.share()` mirror: `_ensureSymlink(root)` → `rebuildIndex()` →
   `{indexCount, duplicates}`. It no longer calls `requireEngram()`, runs
   `engram sync --export`, reads observations from chunks, scans chunks for

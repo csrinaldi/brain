@@ -16,7 +16,7 @@ import { vcsToken } from './vcs/lib/token.mjs';
 import { detectPM } from './lib/pm.mjs';
 import { t } from './i18n/t.mjs';
 import { currentBranch } from './lib/git-branch.mjs';
-import { agentRuntimeReport, platformEnvVars, platformConfig } from './harness/backends/agent-runtime.mjs';
+import { agentRuntimeReport, platformEnvVars, platformConfig } from './axes/lib/agent-runtime.mjs';
 import { readEnv } from './lib/env-read.mjs';
 import { laneSweepEnabled, runLaneSweep, laneSweepLine, laneSweepBranchLines } from './memory/day-start-sweep.mjs';
 

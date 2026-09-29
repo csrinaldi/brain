@@ -23,8 +23,8 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
 import { VERBS } from './cli.mjs';
-import * as github from './providers/github.mjs';
-import * as gitlab from './providers/gitlab.mjs';
+import * as github from '../axes/vcs/adapters/github.mjs';
+import * as gitlab from '../axes/vcs/adapters/gitlab.mjs';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const CONTRACT_DOC = join(REPO_ROOT, 'brain', 'core', 'methodology', 'vcs-contract.md');
@@ -124,7 +124,7 @@ test('every function exported by BOTH REAL providers is present in cli.mjs VERBS
   assert.deepEqual(
     undeclared,
     [],
-    `providers/github.mjs and providers/gitlab.mjs both export ${JSON.stringify(undeclared)} but ` +
+    `axes/vcs/adapters/github.mjs and axes/vcs/adapters/gitlab.mjs both export ${JSON.stringify(undeclared)} but ` +
       'cli.mjs VERBS (and SHARED_NON_VERB_EXPORTS) omit them — add the verb to VERBS + vcs-contract.md, ' +
       'or document it in SHARED_NON_VERB_EXPORTS if it is a legitimately-shared non-verb export',
   );

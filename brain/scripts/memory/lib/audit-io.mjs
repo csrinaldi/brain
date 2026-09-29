@@ -11,7 +11,7 @@ import { join } from 'node:path';
 
 import { buildReport } from './audit.mjs';
 import { ENGRAM_BIN, probeBinary } from './backend-selection.mjs';
-import { topicKeysFromExport } from '../backends/engram.mjs';
+import { topicKeysFromExport } from '../../axes/memory/adapters/engram.mjs';
 
 /**
  * Every PHYSICAL line under records/ as `{...record, file}` — repeats included,

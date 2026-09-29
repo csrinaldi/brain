@@ -277,7 +277,7 @@ The S2 PR MUST itself comply with Gates I and II. Branch protection MUST remain 
 
 ### Requirement REQ-S3-1: protectBranch Returns `{enforced, reason, remedy}`
 
-`scripts/vcs/providers/github.mjs` MUST implement `protectBranch()`. On success it MUST
+`scripts/axes/vcs/adapters/github.mjs` MUST implement `protectBranch()`. On success it MUST
 return `{ enforced: true }`. On any failure (403, unsupported, etc.) it MUST return
 `{ enforced: false, reason: 'tier'|'unsupported', remedy: '<string>' }`. It MUST NOT throw or crash.
 The protection payload MUST require: the governance check contexts from `governance.yml`,
@@ -316,14 +316,14 @@ The protection payload MUST require: the governance check contexts from `governa
 
 ### Requirement REQ-S3-2: GitLab protectBranch Throws "Not Yet Implemented"
 
-`scripts/vcs/providers/gitlab.mjs` MUST implement `protectBranch()`. The implementation
+`scripts/axes/vcs/adapters/gitlab.mjs` MUST implement `protectBranch()`. The implementation
 MUST throw a clearly worded "not yet implemented" error.
 
 [**unit-testable**: call `gitlab.protectBranch()` in a `node --test` test; assert the thrown error message contains "not yet implemented"]
 
 #### Scenario: GitLab impl throws with clear message
 
-- GIVEN `scripts/vcs/providers/gitlab.mjs` is imported
+- GIVEN `scripts/axes/vcs/adapters/gitlab.mjs` is imported
 - WHEN `protectBranch()` is called
 - THEN an error is thrown containing the phrase "not yet implemented"
 
@@ -397,7 +397,7 @@ non-admin direct push to `main` MUST be rejected by GitHub.
 
 ### Requirement REQ-S3-7: capabilities() Probed, Not Hardcoded
 
-`scripts/vcs/providers/github.mjs` MUST export `capabilities()`. It MUST return
+`scripts/axes/vcs/adapters/github.mjs` MUST export `capabilities()`. It MUST return
 `{ hardEnforcement: 'available'|'unavailable'|'unknown', detail: string }`. It MUST
 derive the result by probing the API (attempt + cache result), NOT by hardcoding a
 platform/tier matrix.

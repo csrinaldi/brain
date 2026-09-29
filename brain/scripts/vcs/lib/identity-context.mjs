@@ -17,7 +17,7 @@
 // A verb cannot opt out because no verb is asked to opt in: there is no argument
 // to forget. A verb added tomorrow inherits the binding for free — provided it
 // reaches the network through the chokepoint, which is what the drift guard in
-// `providers/*.drift.test.mjs` exists to keep true.
+// `axes/vcs/adapters/*.drift.test.mjs` exists to keep true.
 //
 // AsyncLocalStorage rather than a module-level variable: the value must not leak
 // between concurrent ports or survive past the call that set it, and a mutable

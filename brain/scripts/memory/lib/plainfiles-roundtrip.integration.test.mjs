@@ -14,8 +14,8 @@ import { mkdtempSync, rmSync, readFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { importMemory } from '../backends/engram.mjs';
-import { save } from '../backends/plainfiles.mjs';
+import { importMemory } from '../../axes/memory/adapters/engram.mjs';
+import { save } from '../../axes/memory/adapters/plainfiles.mjs';
 import { RECORD_TYPES } from './format.mjs';
 
 // #820: a faked backend has no store to protect — never take the real machine guard from a test.

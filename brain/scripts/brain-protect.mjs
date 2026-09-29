@@ -136,7 +136,7 @@ export async function activateProtection({ _config = null, _providerModule = nul
 
   let providerModule = _providerModule;
   try {
-    if (!providerModule) providerModule = await import(`./vcs/providers/${provider}.mjs`);
+    if (!providerModule) providerModule = await import(`./axes/vcs/adapters/${provider}.mjs`);
   } catch (e) {
     console.error(`brain:protect: cannot load provider "${provider}" — ${e.message}`);
     process.exit(1);

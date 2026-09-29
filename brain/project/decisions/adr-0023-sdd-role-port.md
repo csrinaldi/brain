@@ -1,6 +1,6 @@
 # ADR-0023 — The role port: engines declare, platforms receive, brain's own roles live on a shelf
 
-**Status**: Accepted
+**Status**: Accepted · **amended 28/09/2026** (Amendment 1 — see below)
 **Date**: 2026-09-02 — Cristian Rinaldi
 
 ## Context
@@ -9,7 +9,7 @@ Written FROM what exists — the #312 plan promised this ADR "rewritten from
 what exists" and #312 closed without it; #576 executes that promise one
 milestone late, and says so. As of `main @ 4cde50e` plus #576's change:
 
-- `roles/role-port.mjs` — the contract: an inhabitant is
+- `brain/scripts/axes/sdd-engine/role-port.mjs` (relative path was `roles/role-port.mjs` under `brain/scripts/` until #1141; see Amendment 1) — the contract: an inhabitant is
   `declareRoles(stages) → { agent, model_tier, chooses_model, instructions }`
   per resolved stage; `model_tier ∈ {cheap, balanced, deep} | null` (null is
   CHECKED: "a human executes"); `instructions` is a non-empty string or a
@@ -79,3 +79,15 @@ milestone late, and says so. As of `main @ 4cde50e` plus #576's change:
   is NAMED here and ruled elsewhere: this ADR does not adjudicate it.
 - #754 closes: the cold-reviewer role exists — as the Adversary instance for
   the stage, with the Verifier holding the review's own role.
+
+## Amendment 1 — the role port moved to `axes/sdd-engine/role-port.mjs` (issue #1141)
+
+**Signed**: 28/09/2026 — Cristian Rinaldi
+
+#1141 moved every adapter into one directory per axis, and the role port with it: it left
+brain/scripts/roles/role-port.mjs for `brain/scripts/axes/sdd-engine/role-port.mjs`, with
+`git mv`, so `git log --follow` still reaches its history.
+
+The citation above is annotated in place under ruling R6 on #961 as amended (option A) — the
+maintainer applied the same ruling to #1141's path moves on 2026-09-28. The `declareRoles`
+contract and the engines-declare/platforms-receive split are unchanged.

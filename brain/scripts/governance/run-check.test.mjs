@@ -2276,7 +2276,7 @@ test('runCheck: decision-gate — an architectural change with NO ADR passes; th
   const result = await runCheck('decision-gate', {
     diffNameOnly: () => [
       'brain/core/methodology/workflow-governance.md',
-      'brain/scripts/vcs/providers/github.mjs',
+      'brain/scripts/axes/vcs/adapters/github.mjs',
       'package.json',
     ],
     diffNameOnlyAdded: () => [],

@@ -1,6 +1,6 @@
 # ADR-0004 — Memory Adapter: MEMORY_BACKEND Selector + Dispatch
 
-**Status**: Accepted · **amended 08/09/2026** (Amendment 1 — see below)  
+**Status**: Accepted · **amended 28/09/2026** (Amendments 1-2 — see below)  
 **Date**: 2026-06-26
 
 ## Context
@@ -15,10 +15,10 @@ Memory follows the same adapter pattern as the harness:
 
 - **Selector**: `MEMORY_BACKEND` in `.env`. Default: `engram`.
 - **Dispatcher**: `scripts/memory/cli.mjs`. Single entry point. Reads `MEMORY_BACKEND` and delegates to the corresponding implementation. The verbs, which are required, their normalized returns and the failure discipline are defined by `brain/core/methodology/memory-backend-contract.md` (Amendment 1, #863): required `setup`, `share`, `hydrate` (today `pull` / `cli.mjs import`), `save`; optional `index`, `search`, `featureCheckpoint`, `featureResume`. Backend-agnostic verbs (`reindex`, `resolve-index`, `audit`) are dispatched directly and never reach a backend.
-- **Backend**: `scripts/memory/backends/engram.mjs`. Encapsulates everything specific to engram: the binary CLI invocation, the creation of the symlink `.engram → .memory` (required because engram has no `--dir` flag), and the merge driver registration.
+- **Backend**: `brain/scripts/axes/memory/adapters/engram.mjs` (under `scripts/memory/backends/engram.mjs` until #1141; see Amendment 2). Encapsulates everything specific to engram: the binary CLI invocation, the creation of the symlink `.engram → .memory` (required because engram has no `--dir` flag), and the merge driver registration.
 - **Canonical**: `.memory/` is the real git directory. The symlink `.engram → .memory` is an implementation detail of the engram backend, not of the system.
 
-To add a new backend: create `scripts/memory/backends/<name>.mjs` and add a `case` in `scripts/memory/cli.mjs`.
+To add a new backend: create `brain/scripts/axes/memory/adapters/<name>.mjs` (under `scripts/memory/backends/<name>.mjs` until #1141; see Amendment 2) and add a `case` in `scripts/memory/cli.mjs`.
 
 ## Consequences
 
@@ -49,3 +49,19 @@ symlink and driver to the engram adapter.
 The selector, the dispatcher and the backend directory are as decided. Adding a backend is
 still a file plus a `case`; what is new is that the contract says what the file must export
 and how it is proved.
+
+## Amendment 2 — the memory backends moved to `axes/memory/adapters/` (issue #1141)
+
+**Signed**: 28/09/2026 — Cristian Rinaldi
+
+#1141 moved every backend adapter into one directory per axis, with `git mv`, so `git log
+--follow` still reaches its history:
+
+| as written above | the path today |
+|---|---|
+| `scripts/memory/backends/engram.mjs` | `brain/scripts/axes/memory/adapters/engram.mjs` |
+| `scripts/memory/backends/<name>.mjs` (how-to) | `brain/scripts/axes/memory/adapters/<name>.mjs` |
+
+Both citations above are annotated in place under ruling R6 on #961 as amended (option A) — the
+maintainer applied the same ruling to #1141's path moves on 2026-09-28. The `MEMORY_BACKEND`
+selector, the dispatcher and the canonical `.memory/` directory are unchanged.

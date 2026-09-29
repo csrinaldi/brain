@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // record-fixtures.mjs — committed, re-runnable script that hits the real VCS
 // APIs to refresh the fixture JSON files consumed by
-// `../providers/vcs.contract.test.mjs` (issue #239 A3 Phase 3, REQ-A3-6).
+// `axes/vcs/contract.test.mjs` (issue #239 A3 Phase 3, REQ-A3-6).
 //
 // NOT run by `npm test` — the contract suite reads the already-written JSON
 // files, never the network (A2/A3's no-live-network discipline). Run this

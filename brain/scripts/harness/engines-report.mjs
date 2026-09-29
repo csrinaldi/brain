@@ -15,7 +15,7 @@
 // and this module forwards the refusal untouched: a path becomes settable in
 // the migration that declares it. That is the gate working, not a bug.
 
-import { resolveRoles, loadInhabitant } from '../roles/role-port.mjs';
+import { resolveRoles, loadInhabitant } from '../axes/sdd-engine/role-port.mjs';
 import { resolveStageSet } from '../lib/sdd-layout.mjs';
 import { planConfigWrite } from '../config/config-verb.mjs';
 

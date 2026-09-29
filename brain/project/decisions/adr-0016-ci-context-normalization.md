@@ -1,6 +1,6 @@
 # ADR-0016 — CI Context Normalization: One Seam Over Provider-Specific Pipeline Evidence
 
-**Status**: Accepted
+**Status**: Accepted · **amended 28/09/2026** (Amendment 1 — see below)
 **Date**: 07/02/2026 — Cristian Rinaldi
 
 ## Context
@@ -11,7 +11,7 @@ its CI context **ad hoc**: directly from `process.env.*` and via its own `gh` ca
 reading of "which PR is this, its base/head SHA, labels, body, author" is **duplicated
 across five files**:
 
-- `brain/scripts/vcs/providers/github.mjs` — `prView()` (L126–139), the only `gh pr view` reader.
+- `brain/scripts/axes/vcs/adapters/github.mjs` (under brain/scripts/vcs/providers/ when this ADR was written; moved by #1141, see Amendment 1) — `prView()` (L126–139), the only `gh pr view` reader.
 - `brain/scripts/vcs/actor-check.mjs` (L219–223) — `PR_AUTHOR`, `PR_BODY`, `BASE_BRANCH`, `GITHUB_REPOSITORY`.
 - `brain/scripts/vcs/brain-writes-reviewed.mjs` (L213–216) — `BASE_SHA`, `HEAD_SHA`, `PR_NUMBER`, `GITHUB_REPOSITORY`, `PR_AUTHOR`.
 - `brain/scripts/vcs/phase-order-check.mjs` (L372–373) — `BASE_SHA`, `HEAD_SHA`.
@@ -149,3 +149,15 @@ wiring and provider verbs follow in A2/A3.
   draft → human-review → promotion flow this draft itself follows.
 - [ADR-0009](adr-0009-documentation-language-policy.md) —
   documentation-language policy (this ADR is English).
+
+## Amendment 1 — the VCS adapters moved to `axes/vcs/adapters/` (issue #1141)
+
+**Signed**: 28/09/2026 — Cristian Rinaldi
+
+#1141 moved every adapter into one directory per axis. The VCS adapters left
+brain/scripts/vcs/providers/ for `brain/scripts/axes/vcs/adapters/`, with `git mv`, so
+`git log --follow` still reaches their history. The citation above is annotated in place: the
+line numbers are the ones this ADR measured on its own date, not today's.
+
+Nothing in this decision changed. `ci-context.mjs` is still the one reader of pipeline context,
+and its drift guard now refuses a direct import from the adapters' new path.

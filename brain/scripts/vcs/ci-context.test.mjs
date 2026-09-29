@@ -284,7 +284,7 @@ test('REQ-CIC-5: proxy is read from standard env (HTTPS_PROXY), never a hard-cod
 
 // ── gitlabApiConfig (issue #231 CP-A2b live-validation finding #12): the
 // SOLE sanctioned resolver of { apiBase, token, proxyUrl } from env, so a
-// GATE_FILE consumer (providers/gitlab.mjs, run-check.mjs) can obtain the
+// GATE_FILE consumer (axes/vcs/adapters/gitlab.mjs, run-check.mjs) can obtain the
 // same GitLab API config defaultFetchMr already uses (REQ-CIC-5) WITHOUT
 // reading process.env.CI_API_V4_URL itself (forbidden by the drift-guard).
 // Exposed as its own function (not folded into ctx) so ctx's field set for

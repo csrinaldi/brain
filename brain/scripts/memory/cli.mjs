@@ -10,11 +10,11 @@
 //             Use after git already pulled (post-merge hook, day-start step 5).
 //   reindex — regenerate .memory/index.jsonl from .memory/records/ alone
 //             (REQ-MF-4, issue #205). Backend-agnostic: dispatched directly
-//             here, not through backends/<backend>.mjs — the record format is
+//             here, not through axes/memory/adapters/<backend>.mjs — the record format is
 //             brain-owned and independent of the live memory backend.
 //
 // Reads MEMORY_BACKEND from the environment or .env (default: engram).
-// Imports the corresponding backend from ./backends/<backend>.mjs and
+// Imports the corresponding backend from axes/memory/adapters/<backend>.mjs and
 // dispatches the requested operation.
 //
 // Pattern mirrors SDD_HARNESS dispatch in brain/scripts/bootstrap.sh §6.
@@ -151,7 +151,7 @@ if (!VALID_OPS.includes(op)) {
 // ---------------------------------------------------------------------------
 // "reindex" is backend-agnostic: the durable record format (.memory/records/,
 // .memory/index.jsonl) is brain-owned (ADR-0017), not a MEMORY_BACKEND concern.
-// Dispatched directly here instead of through backends/<backend>.mjs.
+// Dispatched directly here instead of through axes/memory/adapters/<backend>.mjs.
 // ---------------------------------------------------------------------------
 //
 // BRAIN_MEMORY_TEST_ROOT (test-only seam, see the note further down where
@@ -802,7 +802,7 @@ if (op === "heal-duplicates") {
     process.exit(1);
   }
   const apply = rest.includes("--apply");
-  const { healDuplicates } = await import("./backends/engram.mjs");
+  const { healDuplicates } = await import("../axes/memory/adapters/engram.mjs");
   // Cold-review MAJOR #1: unlike every other branch in this file (see
   // "split-records", `:250-305`), this call used to run with no try/catch —
   // an unexpected throw crashed with a raw Node stack trace instead of the
@@ -949,7 +949,7 @@ if (selection.reason === REASON.SUBSTITUTED) {
 // Load backend and dispatch
 // ---------------------------------------------------------------------------
 const BACKEND = selection.backend;
-const backendPath = new URL(`./backends/${BACKEND}.mjs`, import.meta.url);
+const backendPath = new URL(`../axes/memory/adapters/${BACKEND}.mjs`, import.meta.url);
 
 let backend;
 try {

@@ -14,7 +14,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -553,4 +553,35 @@ test('brain:upgrade: registers package.json under specialMerge → mergePackageJ
   // escape hatch reintroduces exactly the clobber this guard exists to prevent.
   assert.match(source, /local:\s*\[\.\.\.local,\s*\.\.\.skipMerge\]/,
     'a --skip-merge path must join `local` so it is left alone, never plain-copied (issue #180 + #399)');
+});
+
+// ── Retired paths, driven through the REAL CLI (issue #1141) ─────────────────
+// The unit tests in lib/installer.retired.test.mjs prove copyManaged removes a
+// retired path. This proves the script hands it the list — read from the
+// INCOMING package, because only the release that stopped shipping a file knows
+// it did — and that it works under --no-install, where the outgoing package is
+// already gone.
+test('brain:upgrade: a file the incoming package retired leaves the consumer, a consumer file beside it stays (#1141)', (t) => {
+  const dir = makeConsumerRepo('brain-1141-retired-');
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const pkg = join(dir, 'node_modules', 'brain');
+  const old = 'brain/scripts/harness/backends/claude.mjs';
+  const mine = 'brain/scripts/harness/backends/my-own-backend.mjs';
+
+  writeFileSync(join(pkg, 'brain', 'core', 'managed-paths.mjs'),
+    "export const managed = ['brain/scripts/**'];\nexport const local = [];\n");
+  mkdirSync(join(pkg, 'brain', 'scripts', 'lib'), { recursive: true });
+  writeFileSync(join(pkg, 'brain', 'scripts', 'lib', 'retired-paths.mjs'),
+    `export const RETIRED_PATHS = Object.freeze([${JSON.stringify(old)}]);\n`);
+  mkdirSync(join(dir, 'brain', 'scripts', 'harness', 'backends'), { recursive: true });
+  writeFileSync(join(dir, old), 'export const stale = true;\n');
+  writeFileSync(join(dir, mine), 'export const mine = true;\n');
+
+  const r = runBrainUpgrade(dir, ['--no-install']);
+  const out = `${r.stdout}${r.stderr}`;
+
+  assert.equal(r.status, 0, `the upgrade must succeed:\n${out}`);
+  assert.equal(existsSync(join(dir, old)), false, `the retired file must be gone:\n${out}`);
+  assert.equal(readFileSync(join(dir, mine), 'utf8'), 'export const mine = true;\n', 'the consumer\'s own file must survive');
+  assert.match(out, /harness\/backends\/claude\.mjs/, 'and the run must name what it removed');
 });

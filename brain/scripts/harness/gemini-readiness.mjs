@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import { COLD_REVIEW_STAGE, resolveStageEngine } from '../lib/stage-engine.mjs';
-import { GEMINI_MODEL, hasAgyAuth } from './backends/gemini.mjs';
+import { GEMINI_MODEL, hasAgyAuth } from '../axes/review-engine/adapters/gemini.mjs';
 
 /**
  * Resolve whether the effective cold-review route makes Gemini a dependency.

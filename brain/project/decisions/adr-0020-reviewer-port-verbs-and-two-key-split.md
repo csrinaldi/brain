@@ -1,6 +1,6 @@
 # ADR-0020 — External-reviewer VCS port verbs + the reviewActors/approvalActors two-key split
 
-**Status**: Accepted · **amended 07/08/2026** (Amendment 2 — see below)
+**Status**: Accepted · **amended 28/09/2026** (Amendments 1-4 — see below)
 **Date**: 2026-07-16 — Cristian Rinaldi
 
 ## Context
@@ -42,7 +42,7 @@ one config line.
 | `labelAdd({ project, number, labels })`      | caller enforces the deny-set (monotonic tightening only)       |
 | `labelRemove({ project, number, labels })`   | caller enforces the deny-set                                   |
 
-Both providers (`brain/scripts/vcs/providers/github.mjs`, `.../gitlab.mjs`) implement them or the
+Both providers (`brain/scripts/axes/vcs/adapters/github.mjs`, `.../gitlab.mjs`; under brain/scripts/vcs/providers/ until #1141, see Amendment 3) implement them or the
 verb-contract drift-guard turns red. Adding verbs to the port is itself a decision (this ADR +
 `decision` label), by the protocol's own rule (`brain/core/methodology/vcs-contract.md`,
 `brain/scripts/vcs/cli.mjs` `VERBS`).
@@ -87,7 +87,7 @@ becomes true again for the reviewer identity precisely because of the split.
 the caller, not left to the model; L5 `actor-check` is the independent backstop.
 
 **Files touched at implementation (H0-b):** `brain/scripts/vcs/cli.mjs` (`VERBS`),
-`brain/scripts/vcs/providers/{github,gitlab}.mjs`, `brain/scripts/vcs/actor-check.mjs`,
+`brain/scripts/axes/vcs/adapters/{github,gitlab}.mjs` (then under brain/scripts/vcs/providers/; see Amendment 3), `brain/scripts/vcs/actor-check.mjs`,
 `brain/scripts/vcs/brain-writes-reviewed.mjs`, `brain.config.json` (the two governance keys),
 `brain/core/methodology/vcs-contract.md`.
 
@@ -153,7 +153,7 @@ that guarantee depend on ordering rather than on structure.
 to two endpoints (notes without `comments`, discussions with) and must first read the
 MR's `diff_refs` to build `position`. This asymmetry is the shape this port already
 absorbs — `prCommits` returns `login: null` for every GitLab entry — and
-`vcs.contract.test.mjs` is what keeps it deliberate rather than accidental.
+`vcs.contract.test.mjs` (renamed `contract.test.mjs` and moved to `brain/scripts/axes/vcs/`; moved by #1141, see Amendment 4) is what keeps it deliberate rather than accidental.
 
 `prView` is **not** widened to carry `diff_refs`: its normalized shape is consumed by
 cold-boot, tranche, checkpoint and the poster's anti-stale check, and a provider-shaped
@@ -186,9 +186,9 @@ only when it starts emitting anchors.
 
 - `brain/core/methodology/vcs-contract.md` — the `prReviewComment` row records the widened
   signature, the two-endpoint GitLab mapping, and the extra `diff_refs` read.
-- `brain/scripts/vcs/providers/{github,gitlab}.mjs`, `brain/scripts/review/poster.mjs`,
+- `brain/scripts/axes/vcs/adapters/{github,gitlab}.mjs` (then under brain/scripts/vcs/providers/; see Amendment 3), `brain/scripts/review/poster.mjs`,
   `brain/scripts/review/verdict.mjs`, `brain/scripts/review/lib/parse-verdict.mjs`.
-- `brain/scripts/vcs/providers/vcs.contract.test.mjs` forces parity **including the
+- `brain/scripts/axes/vcs/contract.test.mjs` (then brain/scripts/vcs/providers/vcs.contract.test.mjs; see Amendment 3) forces parity **including the
   un-anchorable fallback** — a provider that silently no-ops on `comments` fails.
 
 ### What this amendment deliberately does NOT decide
@@ -265,3 +265,32 @@ carries `COMMENT`.
 - rev-2 APPROVE + binding conditions: issue #266 comment 4986616224.
 - Durable records: `rec-1efa1893e1427623` (decision), `rec-ed1c325e24addf22` (design-off meta-finding),
   `rec-04902454cc5ffa88`.
+
+## Amendment 3 — the VCS adapters and their contract suite moved to `axes/vcs/` (issue #1141)
+
+**Signed**: 28/09/2026 — Cristian Rinaldi
+
+#1141 moved every adapter into one directory per axis, with `git mv`, so `git log --follow`
+still reaches their history:
+
+| as written above | the path today |
+|---|---|
+| brain/scripts/vcs/providers/github.mjs | `brain/scripts/axes/vcs/adapters/github.mjs` |
+| brain/scripts/vcs/providers/gitlab.mjs | `brain/scripts/axes/vcs/adapters/gitlab.mjs` |
+| brain/scripts/vcs/providers/vcs.contract.test.mjs | `brain/scripts/axes/vcs/contract.test.mjs` |
+
+Each citation above is annotated in place with its new path. The four COMMENT-only verbs, the
+three locks and the reviewActors/approvalActors split are unchanged.
+
+## Amendment 4 — the contract suite's bare filename citation, also stale (issue #1141)
+
+**Signed**: 28/09/2026 — Cristian Rinaldi
+
+Amendment 3 annotated every backticked brain/scripts/vcs/providers/... citation this ADR
+made. One more citation names the same contract suite without a directory —
+`vcs.contract.test.mjs` — and #1141 renamed the file itself, not only its directory: it is
+`brain/scripts/axes/vcs/contract.test.mjs` today, so a reader who greps the old bare name finds
+nothing at all, not merely a stale path. Annotated in place under ruling R6 on #961 as amended
+(option A) — the maintainer applied the same ruling to #1141's path moves on 2026-09-28. The
+four COMMENT-only verbs, the three locks and the reviewActors/approvalActors split are
+unchanged.

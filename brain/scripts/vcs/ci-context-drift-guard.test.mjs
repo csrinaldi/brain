@@ -42,8 +42,8 @@ const GATE_FILES = [
   join(VCS_DIR, 'brain-writes-reviewed.mjs'),
   join(VCS_DIR, 'phase-order-check.mjs'),
   join(VCS_DIR, '..', 'governance', 'run-check.mjs'),
-  join(VCS_DIR, 'providers', 'github.mjs'),
-  join(VCS_DIR, 'providers', 'gitlab.mjs'),
+  join(VCS_DIR, '..', 'axes', 'vcs', 'adapters', 'github.mjs'),
+  join(VCS_DIR, '..', 'axes', 'vcs', 'adapters', 'gitlab.mjs'),
   join(VCS_DIR, '..', 'brain-audit.mjs'),
 ];
 
@@ -411,7 +411,7 @@ function githubJobCommands(yml, job) {
 
 test('#130/#479: ci-context reaches a provider THROUGH the port, never by direct import', () => {
   // The seam's last hole, and it was invisible until the accident covering it was
-  // removed. `ci-context.mjs` imported `prView` straight from `providers/github.mjs`,
+  // removed. `ci-context.mjs` imported `prView` straight from `axes/vcs/adapters/github.mjs`,
   // which bypasses `getVcs()` — and `getVcs()` is where #479 put the credential
   // resolution. Every job that needed the PR body also happened to set `GH_TOKEN`, so
   // `gh` authenticated ambiently and nothing looked wrong.
@@ -424,7 +424,7 @@ test('#130/#479: ci-context reaches a provider THROUGH the port, never by direct
   // wire — the same reason `github.identity.drift.test.mjs` exists one layer down.
   const src = readFileSync(join(VCS_DIR, 'ci-context.mjs'), 'utf8');
   assert.doesNotMatch(
-    src, /from\s+['"]\.\/providers\/[a-z-]+\.mjs['"]/,
+    src, /from\s+['"]\.\.\/axes\/vcs\/adapters\/[a-z-]+\.mjs['"]/,
     'ci-context.mjs must obtain a provider via getVcs(), never by importing the module — ' +
     'a direct import silently opts out of the credential binding',
   );

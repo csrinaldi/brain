@@ -109,7 +109,7 @@ async function loadGithubContext(env, deps) {
  * proxyUrl }) from the sanctioned env source. This is the SAME resolution
  * defaultFetchMr uses for the MR fetch (REQ-CIC-5), exposed as its own
  * function (issue #231 CP-A2b live-validation finding #12) so OTHER
- * CI-consumed GitLab verbs — providers/gitlab.mjs's issueView, threaded via
+ * CI-consumed GitLab verbs — axes/vcs/adapters/gitlab.mjs's issueView, threaded via
  * run-check.mjs's defaultFetchIssue — can obtain the identical config
  * WITHOUT reading `process.env.CI_API_V4_URL` themselves. gitlab.mjs and
  * run-check.mjs are both GATE_FILEs (ci-context-drift-guard.test.mjs); this

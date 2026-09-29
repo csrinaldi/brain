@@ -123,7 +123,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
 
   let providerModule;
   try {
-    providerModule = await import(`./vcs/providers/${provider}.mjs`);
+    providerModule = await import(`./axes/vcs/adapters/${provider}.mjs`);
   } catch (e) {
     console.error(`brain:start: cannot load provider "${provider}" — ${e.message}`);
     process.exit(1);

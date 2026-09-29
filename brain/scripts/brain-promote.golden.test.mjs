@@ -39,7 +39,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { CONFIRMATION_WORD, runPromote } from './brain-promote.mjs';
-import { SOURCE_DOCS, compileAgentsMd } from './harness/backends/antigravity.mjs';
+import { SOURCE_DOCS, compileAgentsMd } from './axes/platform/adapters/antigravity.mjs';
 import { makeRepoFromFiles, statusOf, commitCount, stagedPaths, REPO_ROOT } from './__fixtures__/promote-repo.mjs';
 
 /**

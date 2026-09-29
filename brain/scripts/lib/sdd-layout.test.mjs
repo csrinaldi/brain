@@ -490,7 +490,7 @@ const CONSUMING_SITE_RELPATHS = [
   'session-start.mjs',
   'new-change.mjs',
   'vcs/phase-order-check.mjs',
-  'memory/backends/engram.mjs',
+  'axes/memory/adapters/engram.mjs',
   'memory/lib/feature-resolution.mjs',
 ];
 

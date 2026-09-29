@@ -34,8 +34,8 @@ const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '../../..');
  *
  * The first version of this guard scanned all of `brain/core/**` and
  * `brain/scripts/**` and reported 18 files. Reading them refuted it: nearly all are
- * ADAPTERS or their manifests — `harness/backends/claude.mjs` implements the harness
- * verb contract for one platform exactly as `vcs/providers/github.mjs` implements the
+ * ADAPTERS or their manifests — `axes/platform/adapters/claude.mjs` implements the harness
+ * verb contract for one platform exactly as `axes/vcs/adapters/github.mjs` implements the
  * VCS contract for one forge, `managed-paths.mjs` lists that backend's emitted file,
  * `tranche.mjs` matches AI-attribution trailers by their literal text. **Naming a
  * platform is what an adapter is FOR**; a guard that forbade it would condemn the

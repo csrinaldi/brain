@@ -1,6 +1,7 @@
 // stage-seam.test.mjs — #682 slice 3, B.6.
 //
-// The central oracle reads the REAL `backends/` directory and drives the REAL
+// The central oracle reads the REAL adapter directories (the old `backends/`,
+// split by axis in #1141) and drives the REAL
 // seam against every backend in it. It is not a fixture list, on purpose:
 //
 //   A fixture naming `plain`, `gentle-ai`, `antigravity` would pass forever
@@ -25,6 +26,7 @@ import { fileURLToPath } from 'node:url';
 import { makeRunStageSeam, RUN_STAGE_OP } from './stage-seam.mjs';
 import { dispatch, VALID_OPS } from './cli.mjs';
 import { COLD_REVIEW_STAGE } from '../lib/stage-engine.mjs';
+import { HARNESS_ADAPTER_AXES, harnessAdapterDir, harnessAdapterUrl } from '../axes/lib/harness-adapter-url.mjs';
 
 /**
  * A forge CLI reporting NO session. Injected into every call, because
@@ -36,13 +38,13 @@ import { COLD_REVIEW_STAGE } from '../lib/stage-engine.mjs';
  */
 const LOGGED_OUT = () => ({ status: 1, stderr: 'not logged into any hosts' });
 
-const BACKENDS_DIR = fileURLToPath(new URL('./backends/', import.meta.url));
+const BACKENDS_DIRS = HARNESS_ADAPTER_AXES.map((axis) => fileURLToPath(harnessAdapterDir(axis)));
 
 /** Every real backend name, read from disk rather than listed here. */
 function realBackends() {
-  return readdirSync(BACKENDS_DIR)
+  return [...new Set(BACKENDS_DIRS.flatMap((dir) => readdirSync(dir)
     .filter((f) => f.endsWith('.mjs') && !f.endsWith('.test.mjs'))
-    .map((f) => f.replace(/\.mjs$/, ''));
+    .map((f) => f.replace(/\.mjs$/, ''))))];
 }
 
 const CALL = { stage: COLD_REVIEW_STAGE, prompt: 'review the diff', model: 'zz-9', cwd: '/tmp' };
@@ -63,7 +65,7 @@ test('every real backend either answers or is REFUSED — measured against the d
   const refused = [];
 
   for (const name of names) {
-    const mod = await import(new URL(`./backends/${name}.mjs`, import.meta.url));
+    const mod = await import(harnessAdapterUrl(name));
     const implementsIt = typeof mod.runStage === 'function';
 
     if (implementsIt) {

@@ -1,6 +1,6 @@
 # ADR-0002 — Two-Layer Git-Based Team Memory
 
-**Status**: Accepted · **amended 15/09/2026** (Amendments 1-4 — see below)  
+**Status**: Accepted · **amended 28/09/2026** (Amendments 1-5 — see below)  
 **Date**: 2026-06-26
 
 ## Context
@@ -22,7 +22,7 @@ Memory operates in two layers:
    recoverable source of truth. The chunk directory and the manifest that Amendment 1
    withdraws were the engram transport's private artifacts, never the durable layer's.
 
-2. **Memory backend (live)**: implementation chosen by `MEMORY_BACKEND`. Engram indexes `.memory/` into its local store for semantic search. The symlink `.engram → .memory` (created by `scripts/memory/backends/engram.mjs setup`) is required because the engram CLI has no configurable directory flag.
+2. **Memory backend (live)**: implementation chosen by `MEMORY_BACKEND`. Engram indexes `.memory/` into its local store for semantic search. The symlink `.engram → .memory` (created by `brain/scripts/axes/memory/adapters/engram.mjs setup` (under `scripts/memory/backends/engram.mjs setup` until #1141; see Amendment 5)) is required because the engram CLI has no configurable directory flag.
 
 The canonical flow:
 - `memory:pull` (renamed `brain:memory:pull`; see Amendment 3) → churn-resilient sync: runs `git pull`, then hydrates the active backend from `.memory/records/`. *(Its manifest-restore step is the engram adapter's, not the layer's — the note below is superseded by Amendment 1, and the step retires with #864 task 2.4.)* Use this instead of a raw `git pull`.
@@ -151,3 +151,20 @@ amendment rewrites it to state what the act did.
 
 The rename table and the in-place annotations Amendment 3 made were already correct under R6 as
 amended — this rewrites no other line of the body or of an earlier amendment.
+
+## Amendment 5 — the engram backend moved to `axes/memory/adapters/` (issue #1141)
+
+**Signed**: 28/09/2026 — Cristian Rinaldi
+
+#1141 moved every backend adapter into one directory per axis. The engram memory backend left
+brain/scripts/memory/backends/ for `brain/scripts/axes/memory/adapters/`, with `git mv`, so
+`git log --follow` still reaches its history:
+
+| as written above | the path today |
+|---|---|
+| `scripts/memory/backends/engram.mjs` | `brain/scripts/axes/memory/adapters/engram.mjs` |
+
+The citation above is annotated in place under ruling R6 on #961 as amended (option A) — the
+maintainer applied the same ruling to #1141's path moves on 2026-09-28: the historical path
+stays visible next to its `axes/memory/adapters/` rename. Nothing in the two-layer memory
+decision changed.

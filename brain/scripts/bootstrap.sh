@@ -318,7 +318,7 @@ fi
 
 # --- 6. SDD implementation (replaceable harness, ADR-0012) --------------------
 # Harness-specific init is now delegated to brain/scripts/harness/cli.mjs, which
-# dispatches to brain/scripts/harness/backends/<SDD_HARNESS>.mjs. Adding a new
+# dispatches to brain/scripts/axes/<axis>/adapters/<SDD_HARNESS>.mjs. Adding a new
 # harness requires only a new backend module — no edits to this file.
 # Mirrors the memory (ADR-0004) and VCS (ADR-0008) adapter patterns.
 # Runs BEFORE the memory sync so the ecosystem (skills, engram, gga) is

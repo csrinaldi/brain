@@ -1,6 +1,6 @@
 # ADR-0022 — Widen the VCS port for the cold reviewer: `baseRefOid` on `prView`
 
-**Status**: Accepted
+**Status**: Accepted · **amended 28/09/2026** (Amendment 1 — see below)
 **Date**: 2026-07-17 - Cristian Rinaldi
 
 ## Context
@@ -10,7 +10,7 @@ The cold reviewer (`brain:review`, Track H phase H1) needs the PR's **base sha**
 1. **Budget** (H1-2c tranche): `git diff --numstat base...head | diff-size-count.mjs` (`brain/scripts/review/evaluators/tranche.mjs:10`). Without `base`, the changed-line budget is uncomputable.
 2. **TDD-RED by reversion** (H1-3 checkpoint, the evaluator's headline defense): `git checkout <base> -- <impl-files>`, run the PR's new tests, require them to **fail** (issue #266 acceptance; tasks §10.4). Without `base`, the check cannot run.
 
-ADR-0021 widened `prView` to expose `headRefOid` but **not** `baseRefOid` — the port returns `{ number, labels, body, author, headRefOid }` (`brain/scripts/vcs/providers/github.mjs:161`, `gitlab.mjs:116`). Today the base sha is reachable **only** through `ci-context.mjs`'s `BASE_SHA` env var, which is set in CI but **unset when a human runs `brain:review` locally**. So both re-derivations fold to protocol §10 fail-closed (REVISE + `evidence uncomputable`) outside CI — documented in `tranche.mjs:10-22`. This is the open finding **H1-2C-BASE** (issue #266; #279 body).
+ADR-0021 widened `prView` to expose `headRefOid` but **not** `baseRefOid` — the port returns `{ number, labels, body, author, headRefOid }` (`brain/scripts/axes/vcs/adapters/github.mjs:161` (under brain/scripts/vcs/providers/ until #1141; see Amendment 1), `gitlab.mjs:116`). Today the base sha is reachable **only** through `ci-context.mjs`'s `BASE_SHA` env var, which is set in CI but **unset when a human runs `brain:review` locally**. So both re-derivations fold to protocol §10 fail-closed (REVISE + `evidence uncomputable`) outside CI — documented in `tranche.mjs:10-22`. This is the open finding **H1-2C-BASE** (issue #266; #279 body).
 
 For H1-2c the fallback only cost the budget dimension — tolerable. For H1-3 it would gut the checkpoint's **most valuable** check. Adding to the port is itself a decision (protocol §4, ADR-0020's own rule) — hence this ADR. Human ruling (issue #266 comment 5008243569, "Lectura i"): widen the port for `baseRefOid` **first**; the H1-3 evaluator develops in parallel against an injected `deps.baseSha` seam and opens its PR only once this widening lands. H1-2C-BASE **closes** with this widening.
 
@@ -40,3 +40,16 @@ For H1-2c the fallback only cost the budget dimension — tolerable. For H1-3 it
 - ADR-0021 (headRefOid on prView + prStatusRollup + seam retirement) — this ADR extends `prView` for the reviewer's remaining READ need, the base sha.
 - ADR-0020 (the four COMMENT-only reviewer write verbs + two-key split).
 - Port + verb contract: `brain/core/methodology/vcs-contract.md`, `brain/scripts/vcs/cli.mjs` (`VERBS`); the fail-closed base handling this closes: `brain/scripts/review/evaluators/tranche.mjs:10-22`.
+
+## Amendment 1 — the GitHub adapter moved to `axes/vcs/adapters/` (issue #1141)
+
+**Signed**: 28/09/2026 — Cristian Rinaldi
+
+#1141 moved every provider adapter into one directory per axis, with `git mv`, so `git log
+--follow` still reaches its history. The GitHub adapter left brain/scripts/vcs/providers/
+for `brain/scripts/axes/vcs/adapters/`; the line numbers are the ones this ADR measured on its
+own date, not today's.
+
+The citation above is annotated in place under ruling R6 on #961 as amended (option A) — the
+maintainer applied the same ruling to #1141's path moves on 2026-09-28. The `baseRefOid`
+widening and the closure of H1-2C-BASE are unchanged.

@@ -34,7 +34,7 @@ import { resolveConvergence } from './lib/convergence.mjs';
 import { runColdReviewStage } from './lib/run-cold-review-stage.mjs';
 import { formatDuration, resolveStageTimeout } from './lib/stage-timeout.mjs';
 import { makeRunStageSeam } from '../harness/stage-seam.mjs';
-import { defaultRun } from '../harness/backends/agent-runtime.mjs';
+import { defaultRun } from '../axes/lib/agent-runtime.mjs';
 import {
   evaluateInferential, gatherInferentialInputs, shouldRun as judgmentHalfRuns,
   PRODUCES as INFERENTIAL_PRODUCES,
