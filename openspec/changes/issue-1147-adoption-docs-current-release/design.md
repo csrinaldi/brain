@@ -7,15 +7,23 @@ issue: 1147
 
 ## Technical decisions
 
-- **Verification method (ADR-0036 discipline applied to docs).** Every command
-  named in `docs/adoption.md` was checked against `npm pack --dry-run --json` run
-  in this worktree (package `@logikas/brain@1.7.0`, 761 files), cross-referenced
-  against `MANAGED_SCRIPT_KEYS` in `brain/core/managed-paths.mjs` (the single
-  source `mergePackageJson` in `brain/scripts/lib/installer.mjs` filters brain's
-  own `package.json` scripts to before merging them into a consumer's), and against
-  `package.json`'s own `scripts` block. A command that exists only as a `brain:*`
+- **Verification method (ADR-0036 discipline applied to docs).** Every command,
+  script name, flag, config key, env var, file path and default named in
+  `docs/adoption.md` was checked against **the registry tarball of the published
+  version** — `npm pack` of `@logikas/brain` as pulled from the npm registry
+  (never `npm pack` of this working tree, and never the worktree's own source
+  files), cross-referenced against `MANAGED_SCRIPT_KEYS` in
+  `brain/core/managed-paths.mjs` (the single source `mergePackageJson` in
+  `brain/scripts/lib/installer.mjs` filters brain's own `package.json` scripts to
+  before merging them into a consumer's), and against the tarball's own
+  `package.json` `scripts` block. A command that exists only as a `brain:*`
   script not in `MANAGED_SCRIPT_KEYS`, or that needs `brain:doctor` (unshipped,
-  #1130), is not used.
+  #1130), is not used. **The working tree is never authoritative for "what a
+  consumer gets"** — only the registry tarball is; a prior pass on this issue
+  verified against `npm pack` of the working tree instead and asserted stale
+  defaults (`lite`/`claude`) against what was then the published `1.7.0`
+  (`standard`/`antigravity`) as a result. This pass re-verified every claim
+  against the extracted tarball of the published `1.8.0` release.
 - **Source of the "choices env:init makes" table.** Read directly from
   `brain/scripts/bootstrap.sh` (tier notice via `brain/scripts/lib/tier-notice.mjs`,
   platform resolution §6, memory backend prompt §7, VCS provider resolution) rather

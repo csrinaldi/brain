@@ -44,7 +44,7 @@ allowlisted bytes into the same directory
 ([ADR-0030 Amendment 1](../brain/project/decisions/adr-0030-distribution-scoped-registry-package.md)):
 
 ```bash
-npm i -D "git+https://github.com/csrinaldi/brain.git#v1.7.0"
+npm i -D "git+https://github.com/csrinaldi/brain.git#v1.8.0"
 ```
 
 ---
@@ -67,6 +67,14 @@ hooks (`core.hooksPath`, wired by `env:init`) start refusing commits that don't 
       orphaned links.
 - [ ] **CI / PR template.** brain adds `.github/workflows/governance.yml` (or the
       GitLab fragment) and a PR/MR template. Reconcile with anything you already have.
+
+**Your agent platform default does not change on upgrade.** `env:init` has always
+written whatever it resolved back into `.env`. If you have ever run `env:init` before
+(even on an older brain version), your `.env` already has `AGENT_PLATFORM=antigravity`
+recorded explicitly, and an existing, non-empty `.env` value is never rewritten — you
+keep `antigravity`, not the new-consumer `claude` default. Only a repository with no
+`AGENT_PLATFORM` in `.env` yet (a brand-new install) resolves and persists `claude` the
+first time `env:init` runs.
 
 Then run the same five steps as the quick path above, and once `env:init` finishes:
 
@@ -178,8 +186,8 @@ each tier requires and how to recover if protection locks you out.
 ## Upgrading
 
 ```bash
-npm run brain:upgrade -- v1.7.0             # install a newer tag, copy managed paths
-npm run brain:upgrade -- v1.7.0 --dry-run   # preview what would change
+npm run brain:upgrade -- v1.8.0             # install a newer tag, copy managed paths
+npm run brain:upgrade -- v1.8.0 --dry-run   # preview what would change
 ```
 
 Read the [CHANGELOG](../CHANGELOG.md) first — renames and breaking changes need

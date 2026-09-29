@@ -9,8 +9,10 @@ issue: 1147
 
 - **R1.** `docs/adoption.md` MUST distinguish the new-repository path from the
   existing-repository path, and every command, script name, flag, config key and
-  file path it names MUST exist in the published package (`npm pack`), not only in
-  this repository's source tree (ADR-0036).
+  file path it names MUST exist in **the registry tarball of the published
+  version** (`npm pack` of the package as published to the npm registry, not a
+  `npm pack` of this repository's working tree, and never this repository's own
+  source tree directly) (ADR-0036).
 - **R2.** `docs/adoption.md` MUST state the `lite` tier as the explicit default for
   new consumers (ADR-0026 Amendment 8) and `claude` as the default agent platform,
   with `antigravity` named as the second supported platform (ADR-0024 Amendment 2).
