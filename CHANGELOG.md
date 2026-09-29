@@ -6,6 +6,142 @@ registry (ADR-0030, superseding ADR-0006's git tags); consumers upgrade with
 changes** before upgrading — additive `brain.config.json` migrations apply
 automatically, but renames need manual action.
 
+## v1.8.0 — new consumers get lite and claude, and adapters live one directory per axis
+
+**Manual step: read before upgrading.** `brain/scripts/harness/backends/`,
+`brain/scripts/memory/backends/`, `brain/scripts/vcs/providers/` and
+`brain/scripts/roles/role-port.mjs` are gone. Every adapter now lives under
+`brain/scripts/axes/<axis>/` (#1141). `brain:upgrade` removes the old files from your
+tree for you — it reads the list from the **incoming** (1.8.0) package, not your
+current one, so running `npm run brain:upgrade -- v1.8.0` is enough for brain's own
+files. What it cannot fix is **your own code**: if anything in your repository imports
+one of these paths directly, that import breaks the moment the old file is removed. Fix
+those imports yourself, using the complete mapping below (generated from
+`brain/scripts/lib/retired-paths.mjs` and the move's own renames — every entry is a
+real `git mv`, not a guess).
+
+| Old path | New path |
+|---|---|
+| `brain/scripts/harness/backends/agent-runtime.mjs` | `brain/scripts/axes/lib/agent-runtime.mjs` |
+| `brain/scripts/harness/backends/agent-runtime.test.mjs` | `brain/scripts/axes/lib/agent-runtime.test.mjs` |
+| `brain/scripts/harness/backends/antigravity.mjs` | `brain/scripts/axes/platform/adapters/antigravity.mjs` |
+| `brain/scripts/harness/backends/antigravity.test.mjs` | `brain/scripts/axes/platform/adapters/antigravity.test.mjs` |
+| `brain/scripts/harness/backends/antigravity.drift.test.mjs` | `brain/scripts/axes/platform/adapters/antigravity.drift.test.mjs` |
+| `brain/scripts/harness/backends/claude.mjs` | `brain/scripts/axes/platform/adapters/claude.mjs` |
+| `brain/scripts/harness/backends/claude.test.mjs` | `brain/scripts/axes/platform/adapters/claude.test.mjs` |
+| `brain/scripts/harness/backends/settings-hooks.mjs` | `brain/scripts/axes/platform/lib/settings-hooks.mjs` |
+| `brain/scripts/harness/backends/settings-hooks.test.mjs` | `brain/scripts/axes/platform/lib/settings-hooks.test.mjs` |
+| `brain/scripts/harness/backends/codex.mjs` | `brain/scripts/axes/review-engine/adapters/codex.mjs` |
+| `brain/scripts/harness/backends/codex.test.mjs` | `brain/scripts/axes/review-engine/adapters/codex.test.mjs` |
+| `brain/scripts/harness/backends/gemini.mjs` | `brain/scripts/axes/review-engine/adapters/gemini.mjs` |
+| `brain/scripts/harness/backends/gemini.test.mjs` | `brain/scripts/axes/review-engine/adapters/gemini.test.mjs` |
+| `brain/scripts/harness/backends/gentle-ai.mjs` | `brain/scripts/axes/sdd-engine/adapters/gentle-ai.mjs` |
+| `brain/scripts/harness/backends/gentle-ai.test.mjs` | `brain/scripts/axes/sdd-engine/adapters/gentle-ai.test.mjs` |
+| `brain/scripts/harness/backends/gentle-ai.roles.mjs` | `brain/scripts/axes/sdd-engine/adapters/gentle-ai.roles.mjs` |
+| `brain/scripts/harness/backends/gentle-ai.roles.test.mjs` | `brain/scripts/axes/sdd-engine/adapters/gentle-ai.roles.test.mjs` |
+| `brain/scripts/harness/backends/plain.mjs` | `brain/scripts/axes/sdd-engine/adapters/plain.mjs` |
+| `brain/scripts/harness/backends/plain.test.mjs` | `brain/scripts/axes/sdd-engine/adapters/plain.test.mjs` |
+| `brain/scripts/memory/backends/engram.mjs` | `brain/scripts/axes/memory/adapters/engram.mjs` |
+| `brain/scripts/memory/backends/engram.batch-import.test.mjs` | `brain/scripts/axes/memory/adapters/engram.batch-import.test.mjs` |
+| `brain/scripts/memory/backends/engram.branch.test.mjs` | `brain/scripts/axes/memory/adapters/engram.branch.test.mjs` |
+| `brain/scripts/memory/backends/engram.duplicates.test.mjs` | `brain/scripts/axes/memory/adapters/engram.duplicates.test.mjs` |
+| `brain/scripts/memory/backends/engram.feature.test.mjs` | `brain/scripts/axes/memory/adapters/engram.feature.test.mjs` |
+| `brain/scripts/memory/backends/engram.heal.test.mjs` | `brain/scripts/axes/memory/adapters/engram.heal.test.mjs` |
+| `brain/scripts/memory/backends/engram.heal.integration.test.mjs` | `brain/scripts/axes/memory/adapters/engram.heal.integration.test.mjs` |
+| `brain/scripts/memory/backends/engram.hydrate.test.mjs` | `brain/scripts/axes/memory/adapters/engram.hydrate.test.mjs` |
+| `brain/scripts/memory/backends/engram.import.test.mjs` | `brain/scripts/axes/memory/adapters/engram.import.test.mjs` |
+| `brain/scripts/memory/backends/engram.pull.test.mjs` | `brain/scripts/axes/memory/adapters/engram.pull.test.mjs` |
+| `brain/scripts/memory/backends/engram.save.test.mjs` | `brain/scripts/axes/memory/adapters/engram.save.test.mjs` |
+| `brain/scripts/memory/backends/engram.search-unsupported.test.mjs` | `brain/scripts/axes/memory/adapters/engram.search-unsupported.test.mjs` |
+| `brain/scripts/memory/backends/engram.setup.test.mjs` | `brain/scripts/axes/memory/adapters/engram.setup.test.mjs` |
+| `brain/scripts/memory/backends/engram.share.test.mjs` | `brain/scripts/axes/memory/adapters/engram.share.test.mjs` |
+| `brain/scripts/memory/backends/plainfiles.mjs` | `brain/scripts/axes/memory/adapters/plainfiles.mjs` |
+| `brain/scripts/memory/backends/plainfiles.actorkind-consistency.test.mjs` | `brain/scripts/axes/memory/adapters/plainfiles.actorkind-consistency.test.mjs` |
+| `brain/scripts/memory/backends/plainfiles.pull.test.mjs` | `brain/scripts/axes/memory/adapters/plainfiles.pull.test.mjs` |
+| `brain/scripts/memory/backends/plainfiles.save.test.mjs` | `brain/scripts/axes/memory/adapters/plainfiles.save.test.mjs` |
+| `brain/scripts/memory/backends/plainfiles.save-index-failure.test.mjs` | `brain/scripts/axes/memory/adapters/plainfiles.save-index-failure.test.mjs` |
+| `brain/scripts/memory/backends/plainfiles.search.test.mjs` | `brain/scripts/axes/memory/adapters/plainfiles.search.test.mjs` |
+| `brain/scripts/memory/backends/plainfiles.setup.test.mjs` | `brain/scripts/axes/memory/adapters/plainfiles.setup.test.mjs` |
+| `brain/scripts/memory/backends/plainfiles.share.test.mjs` | `brain/scripts/axes/memory/adapters/plainfiles.share.test.mjs` |
+| `brain/scripts/memory/backends/plainfiles.unsupported.test.mjs` | `brain/scripts/axes/memory/adapters/plainfiles.unsupported.test.mjs` |
+| `brain/scripts/memory/backends/no-artifact.parity.test.mjs` | `brain/scripts/axes/memory/no-artifact.parity.test.mjs` |
+| `brain/scripts/memory/backends/reindex-parity.test.mjs` | `brain/scripts/axes/memory/reindex-parity.test.mjs` |
+| `brain/scripts/memory/backends/save-parity.test.mjs` | `brain/scripts/axes/memory/save-parity.test.mjs` |
+| `brain/scripts/roles/role-port.mjs` | `brain/scripts/axes/sdd-engine/role-port.mjs` |
+| `brain/scripts/roles/role-port.test.mjs` | `brain/scripts/axes/sdd-engine/role-port.test.mjs` |
+| `brain/scripts/roles/roles.contract.test.mjs` | `brain/scripts/axes/sdd-engine/contract.test.mjs` |
+| `brain/scripts/roles/fixtures/stage-set-custom.json` | `brain/scripts/axes/sdd-engine/fixtures/stage-set-custom.json` |
+| `brain/scripts/vcs/providers/github.mjs` | `brain/scripts/axes/vcs/adapters/github.mjs` |
+| `brain/scripts/vcs/providers/gitlab.mjs` | `brain/scripts/axes/vcs/adapters/gitlab.mjs` |
+| `brain/scripts/vcs/providers/identity.drift.test.mjs` | `brain/scripts/axes/vcs/adapters/identity.drift.test.mjs` |
+| `brain/scripts/vcs/providers/vcs.contract.test.mjs` | `brain/scripts/axes/vcs/contract.test.mjs` |
+
+53 paths in total — the exact list `brain:upgrade` acts on is
+`brain/scripts/lib/retired-paths.mjs` in the package you are upgrading to. What is
+**kept**, never removed by this step: a file you added yourself in one of these
+directories (it is not on the list); a path your `brain.config.json` declares `local`;
+a symlink (the removal only ever touches a real file, checked with `lstat`); and a path
+the installer treats as `REFUSE` or `MERGE` (your bytes there matter enough that the
+strategy exists precisely so an upgrade never clobbers them).
+
+### Why a minor and not a patch
+
+The release reporter measured 6 commits since v1.7.0 — 2 `feat`, 1 `fix`, 3 internal —
+and no config migration is pending above 1.7.0. Two of those `feat` changes alter what a
+**new** consumer gets on its first `env:init` (the default governance tier, the default
+agent platform), and the axes refactor's upgrade step removes files from every
+consumer's tree. Capability and behavior a consumer relies on changing is a minor, by
+the same rule v1.6.0 and v1.7.0 applied. Not a patch: existing consumers are not
+silently reconfigured. Not a major: nothing existing consumers rely on breaks on its
+own — only a consumer's own out-of-tree imports of the moved adapter paths do, and
+that is the one manual step above.
+
+### New consumers default to `lite`; existing consumers keep their tier (#1124)
+
+A `brain.config.json` that `env:init` **creates** now declares `governance.tier:
+"lite"` — `NEW_CONSUMER_DEFAULTS`, not a migration. `lite` fits the one-maintainer
+repository that runs `env:init` first: it needs no second approver. An **existing**
+consumer's declared tier is never touched by an upgrade; `migrateConfig` never reads
+`NEW_CONSUMER_DEFAULTS`, and the pre-existing 0.9.0 migration entry (which still
+defaults an absent-key config to `standard`) is unchanged. `env:init` now prints the
+tier on every run — the tier, why (for a new config), and how to change it — for both
+cases, so it is never a silent decision either way.
+
+### The default agent platform is `claude`; `antigravity` is the second supported platform (#1125)
+
+`resolvePlatform()` (and `bootstrap.sh`'s shell mirror of it) now answers `claude` when
+no platform is stated anywhere. What this means in practice turns on one fact: since
+`env:init` has always written whatever it resolved back into your `.env`, an **existing**
+consumer that has ever run `env:init` already has `AGENT_PLATFORM=antigravity` recorded
+there explicitly — an existing, non-empty `.env` value is never rewritten, so nothing
+changes for that consumer on upgrade. A **brand-new install**, with no `AGENT_PLATFORM`
+in `.env` yet, resolves and persists `claude` the first time `env:init` runs. `antigravity`
+remains fully supported — set `AGENT_PLATFORM=antigravity` (in `.env`, or as a stated
+config/process value) to keep or choose it.
+
+### `env:init` merges your `.claude/settings.json` and `.gemini/settings.json` instead of overwriting them (#1139)
+
+Both platform backends' `init()` used to write their settings file unconditionally,
+discarding any consumer-owned `permissions.allow` entries and custom hooks on every run
+— `brain:upgrade` already merged the same file more carefully, so the file had two
+writers with opposite rules. `init()` now reads the existing file first (when present)
+and merges it through the same `mergeSettings` core `brain:upgrade` uses: your existing
+top-level keys are kept, and brain's hook entries are appended only where you do not
+already have them. A malformed existing file is never overwritten — `init()` reports
+which file and why, and leaves it alone.
+
+### Doctrine: ADR-0036 and ADR-0037
+
+- **ADR-0036** — a change is done when it works on a fresh consumer install, at a cost
+  one person can pay. Names the preconditions brain's own repository has that no
+  consumer does, and the checkable procedure a change now has to satisfy before it
+  counts as finished.
+- **ADR-0037** — autonomy is configurable: modes A, B and C, B by default, and the
+  producing identity never approves or merges, in any mode. **Doctrine only — there is
+  no runtime for it yet.** The merge verb (`mrMerge`) and the identity gate it depends on
+  are #1133 and #1134; until both land, mode B cannot actually be claimed and the
+  effective mode stays A.
+
 ## v1.7.0 — closed changes archive themselves, and adoption stops running the wrong code
 
 **Manual step: read before upgrading.** On GitHub this release starts running a new
