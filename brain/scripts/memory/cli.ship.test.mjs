@@ -229,6 +229,38 @@ test('the CLI never re-throws: a diverged run exits cleanly with no stack trace 
   assert.doesNotMatch(run.stderr, /at .*\(.*\.m?js:\d+:\d+\)/, 'an uncaught exception would print a stack trace — this must be a caught, mapped failure');
 });
 
+// #1119: real reproduction of the audit's evidence (#1081 F7,
+// evidence/51-seam2a.txt + 52-after-2a.txt) — decidePr's mrList lookup
+// throws BEFORE the push (D4), so the CLI must report that nothing was
+// pushed, and origin must genuinely carry no `memory/*` ref, ever.
+test('#1119: a decidePr mrList lookup failure never claims the push landed — and it never did', () => {
+  const { mainDir, originDir } = fixtureRepo({ withCandidate: true });
+  // Deliberately never written: fake-vcs-port.mjs's mrList reads this path
+  // and throws "is not valid JSON" on ENOENT, exactly like evidence 51's
+  // injected outage (BRAIN_VCS_TEST_SCRIPT pointing at a missing file).
+  const missingScriptPath = join(testTmp('cli-ship-1119-'), 'seam2-missing.json');
+
+  const run = spawnSync(process.execPath, [CLI, 'ship'], {
+    encoding: 'utf8',
+    env: {
+      ...process.env, BRAIN_MEMORY_TEST_ROOT: mainDir, MEMORY_BACKEND: 'no-such-backend',
+      BRAIN_VCS_TEST_MODULE: FAKE_VCS_MODULE, BRAIN_VCS_TEST_SCRIPT: missingScriptPath,
+    },
+  });
+
+  assert.equal(run.status, 1);
+  assert.match(run.stderr, /memory\/cli:.*prLookupFailed/i, run.stderr);
+  assert.doesNotMatch(
+    run.stderr, /already landed/i,
+    'the pre-push decidePr lookup failed — nothing was ever pushed, so the message must never claim it landed',
+  );
+  assert.match(run.stderr, /nothing was pushed/i, run.stderr);
+
+  // Evidence 52's own check, reproduced: no memory/* ref exists on origin.
+  const originRefs = git(originDir, 'for-each-ref', '--format=%(refname)', 'refs/heads/memory/');
+  assert.equal(originRefs.trim(), '', 'a decidePr failure must land nothing on origin, matching what the message now says');
+});
+
 test('BRAIN_MEMORY_TOKEN never appears in stdout or stderr, on any path', () => {
   const sentinel = 'sekrit-token-value-do-not-print';
   const { mainDir: nothingRoot } = fixtureRepo({ withCandidate: false });
@@ -595,6 +627,56 @@ test('E3 (cold review): raced/badHost are mapped the same way "collect" maps the
   assert.equal(typeof en['memory.ship.badHost'], 'string', 'en.mjs must carry memory.ship.badHost');
   assert.equal(typeof es['memory.ship.raced'], 'string', 'es.mjs must carry memory.ship.raced');
   assert.equal(typeof es['memory.ship.badHost'], 'string', 'es.mjs must carry memory.ship.badHost');
+});
+
+// #1119: `prLookupFailed` is thrown from two call sites in ship.mjs with
+// opposite push states (decidePr's own lookup, always pre-push per D4; and
+// createPr's one-shot re-scan, always post-push) — a single static message
+// claiming one outcome for both would be false on one of them. See
+// evidence at openspec/changes/issue-1081-memory-2-0-exit-audit/evidence/
+// 51-seam2a.txt + 52-after-2a.txt on the #1081 branch: a decidePr failure
+// left nothing on origin, while the pre-#1119 message claimed the push
+// "already landed and is durable".
+test('#1119: prLookupFailed forks on err.pushed into two honest keys — neither catalog claims the wrong outcome (source guard + content)', () => {
+  const source = readFileSync(CLI, 'utf8');
+  const shipBlockStart = source.indexOf('if (op === "ship")');
+  const shipBlockEnd = source.indexOf('function shipOutcomeKey');
+  const shipBlock = source.slice(shipBlockStart, shipBlockEnd);
+  assert.match(
+    shipBlock,
+    /err\?\.prLookupFailed \? \(err\.pushed \? "prLookupFailedAfterPush" : "prLookupFailed"\)/,
+    'a prLookupFailed error must be routed by err.pushed to one of two distinct keys',
+  );
+
+  for (const [label, cat] of [['en', en], ['es', es]]) {
+    const preText = cat['memory.ship.prLookupFailed'];
+    const postText = cat['memory.ship.prLookupFailedAfterPush'];
+    assert.equal(typeof preText, 'string', `${label}.mjs must carry memory.ship.prLookupFailed`);
+    assert.equal(typeof postText, 'string', `${label}.mjs must carry memory.ship.prLookupFailedAfterPush`);
+
+    // The pre-push key (decidePr) must never claim a push landed.
+    assert.doesNotMatch(
+      preText, /already landed|ya se concretó/i,
+      `${label}.mjs memory.ship.prLookupFailed must not claim a push happened — decidePr's lookup always runs before the push (D4)`,
+    );
+    // ...and must say what actually happened (nothing was pushed) and that
+    // retrying is fine.
+    assert.match(
+      preText, /nothing was pushed|no se envió nada/i,
+      `${label}.mjs memory.ship.prLookupFailed must state that nothing was pushed`,
+    );
+    assert.match(
+      preText, /retry|reintent/i,
+      `${label}.mjs memory.ship.prLookupFailed must say how/whether to retry`,
+    );
+
+    // The post-push key (createPr's re-scan) is the one case where a push
+    // genuinely did land — its own claim must stay true, not be erased.
+    assert.match(
+      postText, /already landed|ya se concretó/i,
+      `${label}.mjs memory.ship.prLookupFailedAfterPush must state the push already landed — it runs strictly after the push step`,
+    );
+  }
 });
 
 test('the real getVcs()/gh port is only ever imported when BRAIN_VCS_TEST_MODULE is unset (source guard)', () => {
