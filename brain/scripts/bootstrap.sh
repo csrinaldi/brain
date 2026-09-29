@@ -441,7 +441,28 @@ say "$I18N_BOOTSTRAP_MEMORY_SECTION"
 MEMORY_BACKEND="$(env_get MEMORY_BACKEND)"
 if [ -z "$MEMORY_BACKEND" ]; then
   if [ -t 0 ]; then
-    read -r -p "  $I18N_BOOTSTRAP_MEMORY_PROMPT" MEMORY_BACKEND
+    # --- BEGIN memory-backend-validate (issue #1112, cold-review should-fix 3) ---
+    # Same validation shape as vcs-provider-validate (finding 2) — reused
+    # rather than a second style for the same class of prompt: read into a
+    # scratch variable, `case` it against the closed set, re-prompt on
+    # anything else. Only the two real backends
+    # (axes/memory/adapters/engram.mjs, axes/memory/adapters/plainfiles.mjs)
+    # are accepted; anything else would land in .env and fail later,
+    # silently, deep inside memory/cli.mjs's backend dispatch. Reads into
+    # `_membackend_answer`, not `$MEMORY_BACKEND` directly, so this loop's
+    # own `case` is textually distinct from the real backend-dispatch `case
+    # "$MEMORY_BACKEND" in` a few lines below — two different literal lines
+    # for two different jobs, never one string a test's own extraction could
+    # match by accident.
+    while :; do
+      read -r -p "  $I18N_BOOTSTRAP_MEMORY_PROMPT" _membackend_answer
+      case "$_membackend_answer" in
+        engram|plainfiles|'') break ;;
+        *) printf '  ✗ Unknown backend "%s" — only "engram" or "plainfiles" are supported.\n' "$_membackend_answer" >&2 ;;
+      esac
+    done
+    MEMORY_BACKEND="$_membackend_answer"
+    # --- END memory-backend-validate ---
   fi
   MEMORY_BACKEND="${MEMORY_BACKEND:-engram}"
   env_set MEMORY_BACKEND "$MEMORY_BACKEND"
