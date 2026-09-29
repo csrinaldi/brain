@@ -27,7 +27,8 @@ import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { removeTempTree } from './__fixtures__/tmp-tree.mjs';
-import { run, resolveProject } from './brain-to-engram.mjs';
+import { run } from './brain-to-engram.mjs';
+import { deriveProject } from './axes/memory/adapters/engram.mjs';
 
 const SCRIPT = fileURLToPath(new URL('./brain-to-engram.mjs', import.meta.url));
 
@@ -44,14 +45,14 @@ function withDocsTree(fn) {
   }
 }
 
-test('#1112 resolveProject: falls back to slug when project.name is empty (env:init never sets .name)', () => {
-  const project = resolveProject({ project: { slug: 'csrinaldi/brain', name: '' } }, '/some/checkout');
+test('#1112 deriveProject: falls back to slug when project.name is empty (env:init never sets .name)', () => {
+  const project = deriveProject({ project: { slug: 'csrinaldi/brain', name: '' } }, '/some/checkout');
   assert.equal(project, 'brain', 'must use slug\'s last segment, like the rest of the engram adapter');
 });
 
-test('#1112 resolveProject: never returns empty string for a config shaped like env:init leaves it', () => {
+test('#1112 deriveProject: never returns empty string for a config shaped like env:init leaves it', () => {
   // The exact shape bootstrap.sh's ensureBrainConfig leaves: slug set, name never written.
-  const project = resolveProject({ project: { slug: 'org/repo' } }, '/some/checkout');
+  const project = deriveProject({ project: { slug: 'org/repo' } }, '/some/checkout');
   assert.notEqual(project, '', 'an empty --project is the exact defect this issue reports');
 });
 

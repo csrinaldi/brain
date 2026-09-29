@@ -22,22 +22,6 @@ const SOURCES = [
   { dir: "brain/core/methodology", type: "reference" },
 ];
 
-/**
- * Resolves the engram `--project` value the same way the rest of the engram
- * adapter does (issue #1112, finding 3): re-exports `deriveProject` from
- * `axes/memory/adapters/engram.mjs` so this is the SAME function, not a
- * fourth divergent copy — `config.project.name` alone is wrong here because
- * `env:init`/`ensureBrainConfig` only ever set `project.slug`, leaving
- * `name` empty and every `engram save … --project ""` call failing.
- *
- * @param {object} config brain.config.json (or a subset)
- * @param {string} root repo root, for the checkout-basename fallback
- * @returns {string}
- */
-export function resolveProject(config, root) {
-  return deriveProject(config, root);
-}
-
 function mdFiles(dir) {
   let out = [];
   let entries;
@@ -94,7 +78,15 @@ export function run({
   log = console.log,
   logErr = console.error,
 } = {}) {
-  const project = resolveProject(config, repoRoot);
+  // Resolves the engram `--project` value the same way the rest of the
+  // engram adapter does (issue #1112, finding 3): `deriveProject`, imported
+  // straight from `axes/memory/adapters/engram.mjs` (the SAME function, not
+  // a fourth divergent copy) — `config.project.name` alone is wrong here
+  // because `env:init`/`ensureBrainConfig` only ever set `project.slug`,
+  // leaving `name` empty and every `engram save … --project ""` call
+  // failing (cold-review nit: this used to be a one-line pass-through
+  // wrapper with no logic of its own; called directly instead).
+  const project = deriveProject(config, repoRoot);
   let indexed = 0;
   let failed = 0;
   for (const { dir, type } of sources) {
