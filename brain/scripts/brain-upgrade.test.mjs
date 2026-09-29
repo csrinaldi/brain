@@ -585,3 +585,49 @@ test('brain:upgrade: a file the incoming package retired leaves the consumer, a 
   assert.equal(readFileSync(join(dir, mine), 'utf8'), 'export const mine = true;\n', 'the consumer\'s own file must survive');
   assert.match(out, /harness\/backends\/claude\.mjs/, 'and the run must name what it removed');
 });
+
+// ── #1127 (class C): the downgrade guard must not read a corrupt input as "absent" ──
+
+test('brain:upgrade (#1127): a corrupt brain.config.json refuses BEFORE any write, naming the file', (t) => {
+  const dir = makeConsumerRepo('brain-1127-corrupt-config-');
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  writeFileSync(join(dir, 'brain.config.json'), '{ this is not json');
+
+  const r = runBrainUpgrade(dir, ['--no-install']);
+  const out = `${r.stdout}${r.stderr}`;
+
+  assert.notEqual(r.status, 0, out);
+  assert.match(out, /brain\.config\.json/, `the refusal must name the file:\n${out}`);
+  assert.match(out, /Nothing was written/, `the refusal must say nothing was written:\n${out}`);
+  assert.doesNotMatch(out, /Copying|Copied|managed path/i, 'no copy step may have run');
+});
+
+test('brain:upgrade (#1127): an absent brain.config.json is still the first-run case, not a refusal', (t) => {
+  const dir = makeConsumerRepo('brain-1127-absent-config-');
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const r = runBrainUpgrade(dir, ['--no-install']);
+  assert.doesNotMatch(`${r.stdout}${r.stderr}`, /Nothing was written/);
+});
+
+test('brain:upgrade (#1127): an unreadable installed package.json is reported as a degraded downgrade guard', (t) => {
+  const dir = makeConsumerRepo('brain-1127-corrupt-installed-');
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  writeFileSync(join(dir, 'node_modules', 'brain', 'package.json'), '{ nope');
+
+  const r = runBrainUpgrade(dir, ['--no-install']);
+  const out = `${r.stdout}${r.stderr}`;
+  assert.match(out, /downgrade guard/i, `the degraded guard must be stated:\n${out}`);
+});
+
+test('brain:upgrade (#1127): a BROKEN installed migrations module refuses before any write; only "not installed" reads as none', (t) => {
+  const dir = makeConsumerRepo('brain-1127-broken-migrations-');
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  writeFileSync(join(dir, 'brain.config.json'), JSON.stringify({ schemaVersion: '9.0.0' }));
+  writeFileSync(join(dir, 'node_modules', 'brain', 'brain', 'core', 'config-migrations.mjs'), 'export const = ;\n');
+
+  const r = runBrainUpgrade(dir, ['--no-install', '--allow-downgrade']);
+  const out = `${r.stdout}${r.stderr}`;
+  assert.notEqual(r.status, 0, out);
+  assert.match(out, /config-migrations/, out);
+  assert.match(out, /Nothing was written/, `must refuse before the copy, not crash at the migration step:\n${out}`);
+});
