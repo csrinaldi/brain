@@ -282,6 +282,29 @@ else
 fi
 # --- END ensure-env-gitignored ---
 
+# --- BEGIN env-secret-safe-gate (issue #1112, cold-review finding) ---
+# `ensure_env_gitignored` above only WARNS when it cannot confirm `.env` is
+# ignored — a warning does not stop the write that follows. FAIL CLOSED
+# instead: compute ONE gate, read by the one place below that writes a new
+# secret into `.env`.
+#
+# `git check-ignore` NEVER reports a path as ignored once it is TRACKED, no
+# matter which pattern in `.gitignore` matches it — a previous run (this same
+# bug, before this fix, or a manual `git add -A`) may already have committed
+# `.env`. A `.gitignore` fix cannot protect a secret about to be written into
+# a file git's index already has, so tracked status is checked FIRST and
+# separately from the ignore check — it changes which remedy is correct.
+ENV_SECRET_SAFE=true
+ENV_SECRET_UNSAFE_REASON=""
+if git ls-files --error-unmatch .env >/dev/null 2>&1; then
+  ENV_SECRET_SAFE=false
+  ENV_SECRET_UNSAFE_REASON=tracked
+elif ! git check-ignore -q .env 2>/dev/null; then
+  ENV_SECRET_SAFE=false
+  ENV_SECRET_UNSAFE_REASON=ignoreFailed
+fi
+# --- END env-secret-safe-gate ---
+
 VCS_TOKEN="$(env_get "$VCS_TOKEN_VAR")"
 if [ -n "$VCS_TOKEN" ]; then
   ok "$(printf "$I18N_BOOTSTRAP_PAT_ALREADYSET" "$VCS_TOKEN_VAR")"
@@ -310,12 +333,20 @@ EOT
   esac
   read -r -s -p "  $I18N_BOOTSTRAP_PAT_ENTERPROMPT" VCS_TOKEN
   echo
+  # --- BEGIN pat-write-gate (issue #1112, cold-review finding) ---
   if [ -z "$VCS_TOKEN" ]; then
     warn "$I18N_BOOTSTRAP_PAT_SKIPPED"
+  elif [ "$ENV_SECRET_SAFE" != true ]; then
+    if [ "$ENV_SECRET_UNSAFE_REASON" = tracked ]; then
+      warn "$(printf "$I18N_BOOTSTRAP_PAT_TRACKEDREFUSED" "$VCS_TOKEN_VAR")"
+    else
+      warn "$(printf "$I18N_BOOTSTRAP_PAT_GITIGNOREREFUSED" "$VCS_TOKEN_VAR")"
+    fi
   else
     env_set "$VCS_TOKEN_VAR" "$VCS_TOKEN"
     ok "$(printf "$I18N_BOOTSTRAP_PAT_SAVED" "$VCS_TOKEN_VAR")"
   fi
+  # --- END pat-write-gate ---
 fi
 if [ -n "$VCS_TOKEN" ]; then export "$VCS_TOKEN_VAR=$VCS_TOKEN"; fi
 

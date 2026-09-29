@@ -163,6 +163,8 @@ export default {
   'bootstrap.pat.enterPrompt':     'Pegá tu PAT (no se muestra): ',
   'bootstrap.pat.skipped':         'Sin token: se salta la autenticación del VCS. Volvé a correr brain:env:init cuando lo tengas.',
   'bootstrap.pat.saved':           '{var} guardado en .env (gitignored)',
+  'bootstrap.pat.trackedRefused':     '{var} NO se escribió — .env ya está trackeado por git, así que ningún patrón de .gitignore puede protegerlo. Destrackealo primero: git rm --cached .env — y volvé a correr brain:env:init.',
+  'bootstrap.pat.gitignoreRefused':   '{var} NO se escribió — no se pudo confirmar que .env esté en gitignore. Arreglá .gitignore a mano y volvé a correr brain:env:init.',
 
   // §4 Git credential helper
   'bootstrap.cred.section': 'Credential helper de git (HTTPS)',
