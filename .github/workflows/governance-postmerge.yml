@@ -488,7 +488,7 @@ jobs:
           if [ "$sweep_code" -ne 0 ]; then
             label="governance:archive-sweep-failed"
             {
-              echo "The post-merge archive sweep could not complete — the selector could not read every issue state, or an archive write itself failed. NOTHING was archived this run (design D3, fail-closed)."
+              echo "The post-merge archive sweep could not complete — the selector could not read every issue state, an archive write itself failed, or the sweep exited on an unexpected error (the output below names which). NOTHING was archived this run (design D3, fail-closed)."
               echo ""
               echo "Sweep output:"
               echo '```'
