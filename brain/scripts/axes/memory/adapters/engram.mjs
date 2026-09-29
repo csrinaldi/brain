@@ -1239,18 +1239,22 @@ export async function featureResume(
   let files;
   try {
     files = readdirSync(targetDir).filter((f) => f.endsWith(".md"));
-  } catch {
-    console.warn(`  ⚠ could not read change dir: ${targetDir}`);
-    return;
+  } catch (err) {
+    // Nothing was projected: that is a failure, not a quiet return (#1127).
+    throw new Error(`featureResume: could not read change dir ${targetDir} — ${err.message}`);
   }
 
+  // Every file is still attempted; the verb rejects at the end naming each one
+  // that did not land, so a partial hydration never reads as a complete one.
+  const failures = [];
   for (const filename of files) {
     const filePath = join(targetDir, filename);
     let content;
     try {
       content = readFileSync(filePath, "utf8");
-    } catch {
+    } catch (err) {
       console.warn(`  ⚠ could not read ${filename} — skipping`);
+      failures.push(`${filename}: ${String(err.message).trim()}`);
       continue;
     }
 
@@ -1270,7 +1274,13 @@ export async function featureResume(
       );
     } catch (err) {
       console.warn(`  ⚠ ${filename}: ${String(err.message).trim()}`);
+      failures.push(`${filename}: ${String(err.message).trim()}`);
     }
+  }
+  if (failures.length > 0) {
+    throw new Error(
+      `featureResume: ${failures.length} of ${files.length} file(s) were not projected into engram — ${failures.join("; ")}`,
+    );
   }
 }
 
