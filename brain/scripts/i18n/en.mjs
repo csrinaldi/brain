@@ -428,7 +428,7 @@ export default {
   // #1119: this lookup runs before the push (D4) — a failure here means
   // nothing was pushed, not that the push landed. Retrying is safe: the
   // next run starts over from the same unpushed state.
-  'memory.ship.prLookupFailed':   '✗ ship failed — the pull request lookup could not run, so its existence is uncomputable; the lookup runs before the push, so nothing was pushed. Retry once the lookup succeeds. {message}',
+  'memory.ship.prLookupFailed':   '✗ ship failed — the pull request lookup could not run, so its existence is uncomputable; nothing was pushed this run. Retry once the lookup succeeds. {message}',
   // #1119: distinct from `prLookupFailed` above — this is the one-shot
   // re-scan that only runs AFTER the push already landed, so unlike the
   // pre-push lookup failure, the push here is real and durable.

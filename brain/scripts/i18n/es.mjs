@@ -391,7 +391,7 @@ export default {
   // #1119: esta consulta corre antes del push (D4) — un fallo acá significa
   // que no se envió nada, no que el push se concretó. Reintentar es seguro:
   // la próxima corrida arranca de nuevo desde el mismo estado sin enviar.
-  'memory.ship.prLookupFailed':   '✗ el envío falló — no se pudo consultar el pull request, así que su existencia es incomputable; la consulta corre antes del push, así que no se envió nada. Reintentá una vez que la consulta funcione. {message}',
+  'memory.ship.prLookupFailed':   '✗ el envío falló — no se pudo consultar el pull request, así que su existencia es incomputable; en esta corrida no se envió nada. Reintentá una vez que la consulta funcione. {message}',
   // #1119: distinto de `prLookupFailed` — esta es la re-consulta de único
   // intento que corre DESPUÉS de que el push ya se concretó, así que a
   // diferencia del fallo de consulta previo al push, acá el push es real y
