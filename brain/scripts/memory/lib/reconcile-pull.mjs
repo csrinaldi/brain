@@ -134,7 +134,7 @@ export function verifyOrRestore({ root, reconciled, _log = console.log }) {
     try {
       mkdirSync(dirname(abs), { recursive: true });
       writeFileSync(abs, blob.stdout);
-    } catch (err) {
+    } catch (err) { /* surfaced: pushed to `problems`, which defaultGitPull throws with the pull result */
       problems.push(`${path} — could not be restored from blob ${oid}: ${err.message}`);
       continue;
     }
@@ -161,7 +161,7 @@ export function defaultGitPull(root, { _log = console.log, _afterReconcile } = {
   let pullError = null;
   try {
     execFileSync('git', ['pull'], { stdio: 'inherit', cwd: root });
-  } catch (err) {
+  } catch (err) { /* surfaced: kept as `pullError` and re-thrown below after verifyOrRestore, with any unrestored records appended */
     pullError = err;
   }
 

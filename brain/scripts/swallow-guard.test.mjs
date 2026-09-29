@@ -97,34 +97,9 @@ function scopedFiles() {
 // guaranteed merge conflict. Each entry names the owner and matches by the site's
 // own text, so it survives line drift. When the owner lands, the entry goes stale,
 // this test fails, and it is replaced by a real marker (or the site is gone).
-const BOOT = 'brain/scripts/bootstrap.sh';
-const OWNED_ELSEWHERE = [
-  // #1155 rewrites bootstrap.sh (credential gate, provider and backend validation,
-  // the memory case, and a REQUIRED_FAILURES summary with exit 1). The verdicts below
-  // are stated now; the fixes land as slice-A on top of that summary, not as a second
-  // mechanism beside it.
-  { file: BOOT, contains: 'VCS_PROVIDER_OVERRIDE="$_override" node', owner: '#1155', reason: 'slice-A the provider override write swallows its own failure (empty catch and `|| true`); it must join REQUIRED_FAILURES' },
-  // Embedded node snippets (heredocs): the scan reads JS inside shell since the cold review (S2).
-  { file: BOOT, contains: "c = JSON.parse(readFileSync('brain.config.json'", owner: '#1155', reason: 'slice-A a corrupt brain.config.json reads as an empty config here, so the derived provider, host and slug silently come out empty' },
-  { file: BOOT, contains: "originHost = m[1]", owner: '#1155', reason: 'swallow-ok: no git origin means no derived host or project; the prompts and the final summary name what is still unset' },
-  { file: BOOT, contains: 'cfg.vcs.provider = process.env.VCS_PROVIDER_OVERRIDE', owner: '#1155', reason: 'slice-A the provider override write swallows its own failure (empty catch); it must join REQUIRED_FAILURES' },
-  { file: BOOT, contains: 'env_get() {', owner: '#1155', reason: 'swallow-ok: grep exits 1 when the key is absent, which is the answer env_get exists to give' },
-  { file: BOOT, contains: 'grep -vE "^$1=" .env > "$tmp"', owner: '#1155', reason: 'swallow-ok: grep -v exits 1 when .env held only that key; the empty remainder is the correct result' },
-  { file: BOOT, contains: 'PM="$(cd "$WORKTREE_ROOT"', owner: '#1155', reason: 'swallow-ok: falls back to npm, the default package manager, when detection is unavailable' },
-  { file: BOOT, contains: 'PAT_URL="$(node', owner: '#1155', reason: 'swallow-ok: the URL only pre-fills a browser tab; without it the operator is told to create the token by hand' },
-  { file: BOOT, contains: 'xdg-open "$PAT_URL"', owner: '#1155', reason: 'swallow-ok: opening a browser is a convenience; the URL is printed on the next line' },
-  { file: BOOT, contains: 'open "$PAT_URL"', owner: '#1155', reason: 'swallow-ok: opening a browser is a convenience; the URL is printed on the next line' },
-  { file: BOOT, contains: 'I18N_BOOTSTRAP_AUTH_FAILED', owner: '#1155', reason: 'slice-A `auth-login || warn`: a failed VCS login is a warning line, then "Environment ready"' },
-  { file: BOOT, contains: 'I18N_BOOTSTRAP_SDD_INITFAILED', owner: '#1155', reason: 'slice-A a failed SDD init is a warning line, then "Environment ready"' },
-  { file: BOOT, contains: 'I18N_BOOTSTRAP_MEMORY_HOOKFAILED', owner: '#1155', reason: 'slice-A a failed core.hooksPath config is a warning line, then "Environment ready"' },
-  { file: BOOT, contains: 'I18N_BOOTSTRAP_MEMORY_ENGRAM_FAILED', owner: '#1155', reason: 'slice-A a failed engram setup is a warning line, then "Environment ready"' },
-  { file: BOOT, contains: 'brain:memory:pull)', owner: '#1155', reason: 'slice-A a failed memory pull is a warning line, then "Environment ready"' },
-  { file: BOOT, contains: 'brain:memory:index)', owner: '#1155', reason: 'slice-A a failed memory index is a warning line, then "Environment ready"' },
-  { file: BOOT, contains: 'I18N_BOOTSTRAP_BOARD_FAILED', owner: '#1155', reason: 'swallow-ok: the open-ticket board is a read-only listing; a failure loses no state and the message names where to look' },
-  // #1154 rewrites these two regions.
-  { file: 'brain/scripts/axes/memory/adapters/engram.mjs', contains: '_defaultResolveDir', owner: '#1154', reason: 'swallow-ok: an unresolvable directory reads as null, the seam\'s "not resolvable" answer' },
-  { file: 'brain/scripts/memory/lib/upstream-records.mjs', contains: "git ls-tree against '${ref}' threw", owner: '#1154', reason: 'surfaced: returned as `{ ok: false, reason }` with the ref and the cause' },
-];
+// Sites owned by an open PR would go here, matched by their own text. Empty since #1154 and
+// #1155 merged and every site they brought has its own marker.
+const OWNED_ELSEWHERE = [];
 
 // ── Scanner ─────────────────────────────────────────────────────────────────
 

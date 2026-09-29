@@ -339,7 +339,7 @@ export function upstreamRecordEntries({
       encoding: 'utf8',
       maxBuffer: 1e9,
     });
-  } catch (err) {
+  } catch (err) { /* surfaced: returned as `{ ok: false, reason }` with the ref and the cause */
     return { ok: false, ref, stated, reason: `git ls-tree against '${ref}' threw — ${err.message}`, ...carry };
   }
   if (result?.error) {

@@ -219,7 +219,7 @@ function _defaultLoadBrainConfig(root) {
 export function _defaultResolveDir(p) {
   try {
     return realpathSync(p);
-  } catch {
+  } catch { /* swallow-ok: an unresolvable directory reads as null, this seam's documented "not resolvable" answer */
     return null;
   }
 }
