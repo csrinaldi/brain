@@ -4,7 +4,8 @@ These are the defects known today on the **consumer path** — install, bootstra
 the first days of using brain in a repository you did not build brain in. Each one was
 found live, most of them by the `#1081` consumer demonstration (a fresh, empty
 repository installing the published `@logikas/brain` package). Every item links its
-tracking issue and states the practical workaround, if one exists.
+tracking issue, where one exists, and states the practical workaround, if one exists.
+This list describes brain **1.9.0**.
 
 This is not a scorecard of brain's own test suite — brain's suite is green on all of
 these, which is the point: none of them shows up in brain's own repository (see
@@ -16,29 +17,6 @@ For the plan to close this class of gap, see the
 ---
 
 ## Install and first adoption
-
-- **A fresh consumer's `env:init` can publish a credential, and reports success over
-  failures it saw.** ([#1112](https://github.com/csrinaldi/brain/issues/1112))
-  - `.env` is not gitignored by `brain init` or `env:init` — the next `git add -A`
-    commits your token. **Workaround:** add `.env` and `node_modules/` to
-    `.gitignore` before running `env:init` (see `docs/adoption.md`).
-  - `vcs.provider` is not validated — a typo at the provider prompt is written
-    verbatim into the tracked `brain.config.json`. **Workaround:** type exactly
-    `github` or `gitlab`.
-  - `project.name` stays empty, which makes every `engram` doctrine-index write fail
-    silently while the run reports success. **Workaround:** set `project.name` by
-    hand in `brain.config.json` before your first `brain:memory:index`.
-  - The adoption commit is refused by brain's own pre-commit hook, and no documented
-    path exists yet for a new repository's first commit. **Workaround:**
-    `git commit --no-verify`, after confirming `brain:repo:check` is green yourself.
-    See `docs/adoption.md` — "The first commit".
-
-- **The post-merge archive sweep crashes when `openspec/changes/` doesn't exist, and
-  files a false alarm on every clean merge.**
-  ([#1113](https://github.com/csrinaldi/brain/issues/1113)) Affects any consumer that
-  hasn't started its first SDD change yet. **No workaround** besides creating an
-  `openspec/changes/` directory (even empty) before your first post-merge run, or
-  ignoring the filed alarm issue until this ships.
 
 - **The archive sweep's automation identity has no provisioning verb.**
   ([#1107](https://github.com/csrinaldi/brain/issues/1107)) Setting up the GitHub App
@@ -57,34 +35,38 @@ For the plan to close this class of gap, see the
   context reaches the agent** at session start. **Workaround:** none that restores the
   context; `brain:memory:pull` still works to sync records to disk.
 
-- **A fresh `engram` 2.0 store rejects brain's import sessions.**
-  ([#1116](https://github.com/csrinaldi/brain/issues/1116)) A record whose hydrate into
-  engram was deferred (engram unavailable at save time) is durable in
-  `.memory/records/` but can never reach a **new** engram store — both recovery paths
-  (`memory/cli.mjs import`, `brain:memory:pull`) fail on a fresh store. Invisible in
-  brain's own repository because its store already holds the import session row.
-  **Workaround:** none yet; the record is safe on disk and reachable by reading
-  `.memory/records/` directly.
-
 - **`search` serves a superseded record next to its correction, both unmarked.**
   ([#1117](https://github.com/csrinaldi/brain/issues/1117)) The supersession link
   exists in the data (`supersedes`) but isn't surfaced to the reader, so a stale claim
   can be read as current. **Workaround:** when in doubt, check a record's
   `supersedes` field directly rather than trusting the newest-looking result.
 
-- **The checkout that captured a memory record can't `pull` after its own lane merge.**
-  ([#1118](https://github.com/csrinaldi/brain/issues/1118)) `git pull` refuses because
-  the local, already-committed record files are untracked-but-identical to what just
-  landed on `main`. **Workaround:** `git add .memory/records/ && git pull` (or
-  `git stash -u && git pull && git stash pop`) once you hit the
-  "untracked working tree files would be overwritten" error.
+- **The engram duplicate-heal probe is tested on 1.20.x only.** On engram 2.x, import and
+  hydration work, but the probe refuses the duplicate-heal verb with "outside the tested
+  1.20.x" (even in dry-run). **Workaround:** none needed for normal use; duplicates
+  are not healed automatically on 2.x.
 
-- **The `prLookupFailed` memory message claims a push that didn't happen.**
-  ([#1119](https://github.com/csrinaldi/brain/issues/1119)) If the PR lookup during
-  `brain:memory:ship` fails, the reported message says the records are durable on the
-  remote; since `#936` the push runs *after* the lookup, so nothing was pushed.
-  **Workaround:** if you see this message, verify with
-  `git ls-remote --heads origin 'memory/*'` before assuming the records shipped.
+## Failures that are still reported softly
+
+These are the follow-up slices left by the failure-reporting sweep
+([#1127](https://github.com/csrinaldi/brain/issues/1127)). Each is a place where a
+failure is still not the exit code it should be. None shows up in a healthy tree.
+
+- **A failed `AGENTS.md` regeneration during `brain:upgrade` is a warning, then `Done.`.**
+  The upgrade itself succeeded. **Workaround:** read the warning and run the printed hint.
+- **An unreadable `.memory/records/` directory or record file reads as an empty store.**
+  `brain:memory:audit` does not count it. **Workaround:** if memory looks empty, check
+  the directory's permissions.
+- **`brain:upgrade`'s installer does not fail closed on two unreadable-path cases.** An
+  unreadable source directory lists as empty (a file could be skipped from the copy), and
+  an unresolvable destination root reads as "does not escape". **Workaround:** none needed
+  on a healthy tree.
+- **`brain-config ensure` still degrades silently on an unwritable directory.**
+  **Workaround:** make the repository root writable.
+- **Failure reporting is not yet swept in `day:start`, `session:start`, `adopt`, the
+  `vcs/**` adapters and the `hooks/*` scripts.** A swallowed failure there can read as a
+  healthy session. **Workaround:** none; treat a session start that prints nothing about
+  memory as unverified.
 
 ## Platform axis
 
