@@ -473,3 +473,28 @@ test('resolveUpstreamRef: an explicit `{}` config still means "no stated ref" â€
   });
   assert.deepEqual(r, { ref: 'origin/HEAD', stated: false, resolved: true });
 });
+
+// #1118: an explicit `ref` bypasses env/config/origin resolution entirely.
+test('upstreamRecordEntries: an explicit ref is read as given and never resolved via env/config', () => {
+  const calls = [];
+  const r = upstreamRecordEntries({
+    root: '/x',
+    ref: 'origin/topic',
+    env: { BRAIN_MEMORY_UPSTREAM_REF: 'ignored/ref' },
+    _spawn: (cmd, args) => {
+      calls.push(args.join(' '));
+      if (args[0] === 'rev-parse') return { status: 0, stdout: '' };
+      return { status: 0, stdout: '100644 blob abc\t.memory/records/2026-09-rec-0123456789abcdef.jsonl\0' };
+    },
+  });
+  assert.equal(r.ok, true);
+  assert.equal(r.ref, 'origin/topic');
+  assert.ok(r.byPath.has('.memory/records/2026-09-rec-0123456789abcdef.jsonl'));
+  assert.ok(calls.every((c) => !c.includes('ignored/ref')));
+});
+
+test('upstreamRecordEntries: an explicit ref that does not resolve names it plainly', () => {
+  const r = upstreamRecordEntries({ root: '/x', ref: 'origin/gone', _spawn: () => ({ status: 1, stdout: '' }) });
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /given ref 'origin\/gone' does not resolve/);
+});

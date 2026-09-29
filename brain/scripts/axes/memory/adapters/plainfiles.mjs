@@ -11,7 +11,7 @@ import { mkdirSync } from "node:fs";
 import { hostname as osHostname } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { execFileSync, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 
 import { _getGitBranch } from "./engram.mjs";
 import { buildRecord, serializeRecord, nowUtcSeconds, RECORD_TYPES } from "../../../memory/lib/format.mjs";
@@ -20,6 +20,7 @@ import { normalizeDuplicates } from "../../../memory/lib/duplicates.mjs";
 import { gitConfigGet } from "../../../lib/git-config.mjs";
 import { resolveActor, resolveActorKind, deriveIssue, composeSource } from "../../../memory/lib/capture-provenance.mjs";
 import { upstreamRecordEntries } from "../../../memory/lib/upstream-records.mjs";
+import { defaultGitPull } from "../../../memory/lib/reconcile-pull.mjs";
 import { classifySupersedes } from "../../../memory/lib/supersedes.mjs";
 import { loadBrainConfigOrThrow } from "../../../lib/brain-config.mjs";
 
@@ -386,11 +387,6 @@ export async function share({ root = repoRoot } = {}, { _rebuildIndex = rebuildI
   return { indexCount: count, duplicates: normalizeDuplicates(duplicates) };
 }
 
-/** Default seam: `git pull` — throws on non-zero exit (mirrors engram.mjs's `_defaultGitPull`). */
-function _defaultGitPull(root) {
-  execFileSync("git", ["pull"], { stdio: "inherit", cwd: root });
-}
-
 /**
  * pull() — `git pull` then `rebuildIndex()`, records-only (REQ-C3-4). NO
  * manifest-dirty-discard, NO importMemory step: plainfiles never
@@ -404,7 +400,7 @@ function _defaultGitPull(root) {
  * absorbing it — including a disagreeing pair, which is counted as divergent
  * and resolved first-wins, never refused.
  */
-export async function pull({ root = repoRoot } = {}, { _gitPull = _defaultGitPull, _rebuildIndex = rebuildIndex } = {}) {
+export async function pull({ root = repoRoot } = {}, { _gitPull = defaultGitPull, _rebuildIndex = rebuildIndex } = {}) {
   _gitPull(root); // throws unmodified on a dirty/conflicting tree — never auto-discarded
   const recordsDir = join(root, ".memory", "records");
   const indexPath = join(root, ".memory", "index.jsonl");
