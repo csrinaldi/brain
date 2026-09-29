@@ -21,7 +21,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { readFileSync, existsSync, mkdtempSync, mkdirSync, writeFileSync, symlinkSync } from 'node:fs';
+import { readFileSync, existsSync, mkdtempSync, mkdirSync, writeFileSync, symlinkSync, linkSync } from 'node:fs';
 import { removeTempTree } from './__fixtures__/tmp-tree.mjs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -131,6 +131,24 @@ test('#1112 safe-gate: .env exists but is not a regular file (a directory) — u
   });
 });
 
+test('#1112 safe-gate: .env is a HARDLINK to a file outside the repo — unsafe, reason=hardlinked, even with a covering .gitignore', () => {
+  withRepo((dir) => {
+    const outside = mkdtempSync(join(tmpdir(), 'brain-1112-patguard-outside-'));
+    try {
+      const target = join(outside, 'secrets.env');
+      writeFileSync(target, 'EXISTING=1\n');
+      linkSync(target, join(dir, '.env')); // same inode: `-L` is false and `-f` is true
+      writeFileSync(join(dir, '.gitignore'), '.env\n');
+      const result = runSafeGate(dir);
+      assert.equal(result.status, 0, `stderr:\n${result.stderr}`);
+      assert.equal(result.stdout, 'false|hardlinked');
+      assert.equal(readFileSync(target, 'utf8'), 'EXISTING=1\n', 'the safe-gate itself must never write through the hardlink');
+    } finally {
+      removeTempTree(outside);
+    }
+  });
+});
+
 // ── pat-write-gate: the actual write decision ───────────────────────────────
 
 function runWriteGate(dir, { envSecretSafe, envSecretUnsafeReason = '', envSymlinkTarget = '', patValue }) {
@@ -151,6 +169,8 @@ function runWriteGate(dir, { envSecretSafe, envSecretUnsafeReason = '', envSymli
     'I18N_BOOTSTRAP_PAT_GITIGNOREREFUSED="%s NOT written — could not confirm .env is git-ignored. Fix .gitignore, then re-run env:init."',
     'I18N_BOOTSTRAP_PAT_SYMLINKREFUSED="%s NOT written — .env is a symlink to %s; it must be a regular file. Replace it, then re-run env:init."',
     'I18N_BOOTSTRAP_PAT_NOTREGULARFILEREFUSED="%s NOT written — .env exists but is not a regular file. Replace it, then re-run env:init."',
+    'I18N_BOOTSTRAP_PAT_HARDLINKEDREFUSED="%s NOT written — .env is hardlinked to another file. Replace it with an independent regular file, then re-run env:init."',
+    'I18N_BOOTSTRAP_PAT_SETTINGSNOTE="The non-secret settings (MEMORY_BACKEND, AGENT_PLATFORM, SDD_ENGINE) are still written to .env."',
     WRITE_GATE,
   ].join('\n');
   return spawnSync('bash', ['-c', script], { cwd: dir, encoding: 'utf8' });
@@ -208,6 +228,26 @@ test('#1112 write-gate: .env exists but is not a regular file — the token is N
     assert.doesNotMatch(result.stdout, /CANDIDATE_PAT_VALUE_NOT_REAL_00000000/);
     assert.match(result.stdout, /regular file/i);
   });
+});
+
+test('#1112 write-gate: .env is HARDLINKED — the token is NOT written, and the message names it', () => {
+  withRepo((dir) => {
+    const result = runWriteGate(dir, { envSecretSafe: 'false', envSecretUnsafeReason: 'hardlinked', patValue: 'CANDIDATE_PAT_VALUE_NOT_REAL_00000000' });
+    assert.equal(result.status, 0, `stderr:\n${result.stderr}`);
+    assert.ok(!existsSync(join(dir, '.env')), '.env must never be created by the write gate when unsafe');
+    assert.doesNotMatch(result.stdout, /CANDIDATE_PAT_VALUE_NOT_REAL_00000000/);
+    assert.match(result.stdout, /hardlinked/i);
+  });
+});
+
+test('#1112 write-gate: every refusal also says the non-secret settings are still written to .env', () => {
+  for (const reason of ['tracked', 'ignoreFailed', 'symlink', 'notRegularFile', 'hardlinked']) {
+    withRepo((dir) => {
+      const result = runWriteGate(dir, { envSecretSafe: 'false', envSecretUnsafeReason: reason, patValue: 'CANDIDATE_PAT_VALUE_NOT_REAL_00000000' });
+      assert.equal(result.status, 0, `stderr:\n${result.stderr}`);
+      assert.match(result.stdout, /non-secret settings .* still written/, `refusal '${reason}' must state the settings note`);
+    });
+  }
 });
 
 test('#1112 write-gate: safe — the token IS written (no regression)', () => {

@@ -167,6 +167,8 @@ export default {
   'bootstrap.pat.gitignoreRefused':   '{var} NO se escribió — no se pudo confirmar que .env esté en gitignore. Arreglá .gitignore a mano y volvé a correr brain:env:init.',
   'bootstrap.pat.symlinkRefused':          '{var} NO se escribió — .env es un symlink a {target}; tiene que ser un archivo regular, o el token se escribiría fuera de este repo. Reemplazalo por un archivo regular y volvé a correr brain:env:init.',
   'bootstrap.pat.notRegularFileRefused':   '{var} NO se escribió — .env existe pero no es un archivo regular. Tiene que ser un archivo regular; volvé a correr brain:env:init.',
+  'bootstrap.pat.hardlinkedRefused':        '{var} NO se escribió — .env es un hardlink a otro archivo, así que el token también quedaría ahí. Reemplazalo por un archivo regular independiente y volvé a correr brain:env:init.',
+  'bootstrap.pat.settingsNote':             'Los ajustes no secretos (MEMORY_BACKEND, AGENT_PLATFORM, SDD_ENGINE) igual se escriben en .env.',
 
   // §4 Git credential helper
   'bootstrap.cred.section': 'Credential helper de git (HTTPS)',

@@ -60,6 +60,8 @@ function runWriteGate({ envSecretSafe, envSecretUnsafeReason = '', patValue }) {
     'I18N_BOOTSTRAP_PAT_GITIGNOREREFUSED="%s gitignore-refused"',
     'I18N_BOOTSTRAP_PAT_SYMLINKREFUSED="%s symlink-refused: %s"',
     'I18N_BOOTSTRAP_PAT_NOTREGULARFILEREFUSED="%s notregular-refused"',
+    'I18N_BOOTSTRAP_PAT_HARDLINKEDREFUSED="%s hardlinked-refused"',
+    'I18N_BOOTSTRAP_PAT_SETTINGSNOTE=settings-note',
     WRITE_GATE,
     'printf \'%s\' "${#REQUIRED_FAILURES[@]}"',
   ].join('\n');

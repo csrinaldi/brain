@@ -339,6 +339,12 @@ if [ -L .env ]; then
 elif [ -e .env ] && [ ! -f .env ]; then
   ENV_SECRET_SAFE=false
   ENV_SECRET_UNSAFE_REASON=notRegularFile
+elif [ -f .env ] && _env_links="$(stat -c %h .env 2>/dev/null || stat -f %l .env 2>/dev/null || echo 1)" && [ "$_env_links" -gt 1 ] 2>/dev/null; then
+  # A HARDLINK to a file outside the repo passes `-L` (false) and `-f` (true),
+  # and `>> .env` would append the PAT through it. Link count > 1 is the only
+  # signal; `stat -c %h` is GNU, `stat -f %l` is BSD/macOS.
+  ENV_SECRET_SAFE=false
+  ENV_SECRET_UNSAFE_REASON=hardlinked
 elif git ls-files --error-unmatch .env >/dev/null 2>&1; then
   ENV_SECRET_SAFE=false
   ENV_SECRET_UNSAFE_REASON=tracked
@@ -393,6 +399,9 @@ EOT
       notRegularFile)
         warn "$(printf "$I18N_BOOTSTRAP_PAT_NOTREGULARFILEREFUSED" "$VCS_TOKEN_VAR")"
         ;;
+      hardlinked)
+        warn "$(printf "$I18N_BOOTSTRAP_PAT_HARDLINKEDREFUSED" "$VCS_TOKEN_VAR")"
+        ;;
       tracked)
         warn "$(printf "$I18N_BOOTSTRAP_PAT_TRACKEDREFUSED" "$VCS_TOKEN_VAR")"
         ;;
@@ -400,6 +409,9 @@ EOT
         warn "$(printf "$I18N_BOOTSTRAP_PAT_GITIGNOREREFUSED" "$VCS_TOKEN_VAR")"
         ;;
     esac
+    # The gate protects the SECRET only: the non-secret settings are still
+    # written to .env, and the operator is told so rather than left to guess.
+    warn "$I18N_BOOTSTRAP_PAT_SETTINGSNOTE"
   else
     env_set "$VCS_TOKEN_VAR" "$VCS_TOKEN"
     ok "$(printf "$I18N_BOOTSTRAP_PAT_SAVED" "$VCS_TOKEN_VAR")"

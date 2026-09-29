@@ -182,6 +182,8 @@ export default {
   // {var} = token env var name, {target} = the symlink's target path
   'bootstrap.pat.symlinkRefused':          '{var} NOT written — .env is a symlink to {target}; it must be a regular file, or the token would be written outside this repo. Replace it with a regular file, then re-run brain:env:init.',
   'bootstrap.pat.notRegularFileRefused':   '{var} NOT written — .env exists but is not a regular file. It must be a regular file, then re-run brain:env:init.',
+  'bootstrap.pat.hardlinkedRefused':       '{var} NOT written — .env is hardlinked to another file, so the token would also land there. Replace it with an independent regular file, then re-run brain:env:init.',
+  'bootstrap.pat.settingsNote':            'The non-secret settings (MEMORY_BACKEND, AGENT_PLATFORM, SDD_ENGINE) are still written to .env.',
 
   // §4 Git credential helper
   'bootstrap.cred.section': 'Git credential helper (HTTPS)',
