@@ -383,10 +383,10 @@ const ALLOWLIST = [
   { file: 'brain/scripts/axes/platform/lib/settings-hooks.test.mjs', entrypoint: '<unresolved>', line: 93, reason: 'no-vcs-capability' },
   { file: 'brain/scripts/bootstrap.worktree.test.mjs', entrypoint: '<unresolved>', line: 64, reason: 'no-vcs-capability' },
   { file: 'brain/scripts/bootstrap.worktree.test.mjs', entrypoint: '<unresolved>', line: 145, reason: 'no-vcs-capability' },
-  { file: 'brain/scripts/bootstrap.cross-tree-code.test.mjs', entrypoint: '<unresolved>', line: 64, reason: 'no-vcs-capability' },
-  { file: 'brain/scripts/bootstrap.cross-tree-code.test.mjs', entrypoint: '<unresolved>', line: 179, reason: 'no-vcs-capability' },
+  { file: 'brain/scripts/bootstrap.cross-tree-code.test.mjs', entrypoint: '<unresolved>', line: 72, reason: 'no-vcs-capability' },
+  { file: 'brain/scripts/bootstrap.cross-tree-code.test.mjs', entrypoint: '<unresolved>', line: 187, reason: 'no-vcs-capability' },
   // #1124: bootstrap.sh's own brain-config.mjs ensure line — reads `git remote get-url origin` only, never the network
-  { file: 'brain/scripts/bootstrap.tier-notice.test.mjs', entrypoint: '<unresolved>', line: 62, reason: 'no-vcs-capability' },
+  { file: 'brain/scripts/bootstrap.tier-notice.test.mjs', entrypoint: '<unresolved>', line: 71, reason: 'no-vcs-capability' },
   // #1125: bash runs bootstrap.sh's env helpers and §6 platform block, lifted verbatim, in a scratch dir — no git, no network, no push.
   { file: 'brain/scripts/bootstrap.default-platform.test.mjs', entrypoint: '<unresolved>', line: 85, reason: 'no-vcs-capability' },
   { file: 'brain/scripts/bootstrap.default-platform.test.mjs', entrypoint: '<unresolved>', line: 179, reason: 'no-vcs-capability' },
@@ -417,7 +417,7 @@ const ALLOWLIST = [
   //    dir, and brain-to-engram.mjs run against a fake `engram` stub — none
   //    of the four ever import or call a VCS/gh port.
   { file: 'brain/scripts/bootstrap.env-gitignore.test.mjs', entrypoint: '<unresolved>', line: 60, reason: 'no-vcs-capability' },
-  { file: 'brain/scripts/bootstrap.memory-backend-case.test.mjs', entrypoint: '<unresolved>', line: 89, reason: 'no-vcs-capability' },
+  { file: 'brain/scripts/bootstrap.memory-backend-case.test.mjs', entrypoint: '<unresolved>', line: 109, reason: 'no-vcs-capability' },
   { file: 'brain/scripts/bootstrap.vcs-provider-validate.test.mjs', entrypoint: '<unresolved>', line: 66, reason: 'no-vcs-capability' },
   { file: 'brain/scripts/brain-to-engram.test.mjs', entrypoint: '<unresolved>', line: 141, reason: 'no-vcs-capability' },
 
