@@ -300,11 +300,11 @@ test('PR3 bootstrap: team memory section keys exist in en', () => {
   assert.equal(en['bootstrap.memory.hookFailed'],      'could not activate core.hooksPath (pre-push hook)');
   assert.equal(en['bootstrap.memory.nodeAbsent'],      'node absent — engram backend setup skipped');
   assert.equal(en['bootstrap.memory.engram.ok'],       'engram backend configured (symlink + merge driver)');
-  assert.equal(en['bootstrap.memory.engram.failed'],   'memory setup failed (non-blocking)');
+  assert.equal(en['bootstrap.memory.engram.failed'],   'memory setup failed — REQUIRED, env:init will exit 1');
   assert.equal(en['bootstrap.memory.pull.ok'],         'memory imported (.memory/ → engram)');
-  assert.equal(en['bootstrap.memory.pull.failed'],     'brain:memory:pull failed (non-blocking)');
+  assert.equal(en['bootstrap.memory.pull.failed'],     'brain:memory:pull failed — REQUIRED, env:init will exit 1');
   assert.equal(en['bootstrap.memory.index.ok'],        'durable index reprojected (brain/ → engram)');
-  assert.equal(en['bootstrap.memory.index.failed'],    'brain:memory:index failed (non-blocking)');
+  assert.equal(en['bootstrap.memory.index.failed'],    'brain:memory:index failed — REQUIRED, env:init will exit 1');
   assert.equal(en['bootstrap.memory.unknownBackend'],  "backend '{backend}' has no known init routine — configure it manually");
 });
 

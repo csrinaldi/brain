@@ -24,6 +24,14 @@ import { fileURLToPath } from 'node:url';
 const BOOTSTRAP = join(dirname(fileURLToPath(import.meta.url)), 'bootstrap.sh');
 const LINES = readFileSync(BOOTSTRAP, 'utf8').split('\n');
 
+/** The verbatim memory-step helper functions (#1127). */
+function helpersBlock() {
+  const start = LINES.findIndex((l) => l.includes('BEGIN memory-step-helpers'));
+  const end = LINES.findIndex((l, i) => i > start && l.includes('END memory-step-helpers'));
+  assert.ok(start >= 0 && end > start, 'bootstrap.sh must carry the memory-step-helpers block');
+  return LINES.slice(start, end).join('\n');
+}
+
 /** The verbatim `case "$MEMORY_BACKEND" in ... esac` block, as bootstrap.sh writes it. */
 function memoryBackendCaseBlock() {
   const start = LINES.findIndex((l) => l.trim() === 'case "$MEMORY_BACKEND" in');
@@ -54,6 +62,10 @@ function runCase(memoryBackend) {
     );
     chmodSync(join(bin, 'node'), 0o755);
 
+    // A stand-in engram binary: hydration/index are only attempted when it exists (#1127).
+    writeFileSync(join(bin, 'engram'), '#!/usr/bin/env bash\nexit 0\n');
+    chmodSync(join(bin, 'engram'), 0o755);
+
     const outFile = join(dir, 'out.log');
     writeFileSync(outFile, '');
     const script = [
@@ -77,6 +89,14 @@ function runCase(memoryBackend) {
       'I18N_BOOTSTRAP_MEMORY_PLAINFILES_FAILED=plainfiles-failed',
       'I18N_BOOTSTRAP_MEMORY_PLAINFILES_NOINDEX=plainfiles-noindex',
       "I18N_BOOTSTRAP_MEMORY_UNKNOWNBACKEND=unknown-backend-%s",
+      // Slice A (#1127): pull/index run through the helpers, and engram hydration needs the engram
+      // binary. The preflight is stubbed; the dispatch under test is the case arm.
+      'I18N_BOOTSTRAP_MEMORY_PULL_SKIPPED=pull-skipped-%s',
+      'I18N_BOOTSTRAP_MEMORY_PULL_OFFLINE=offline',
+      'I18N_BOOTSTRAP_MEMORY_ENGRAMABSENT=engram-absent',
+      'MISSING_OPTIONAL=(); REQUIRED_FAILURES=()',
+      helpersBlock(),
+      'memory_pull_unavailable() { return 1; }',
       memoryBackendCaseBlock(),
     ].join('\n');
 

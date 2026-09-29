@@ -78,7 +78,16 @@ cd "$REPO_ROOT"
 # bare `|| true` here gave zero signal, not even a warning line.
 _config_existed=true
 [ -f brain.config.json ] || _config_existed=false
-node "$BRAIN_SCRIPTS/lib/brain-config.mjs" ensure || { printf '  \xe2\x9a\xa0 brain.config.json: ensure step failed (see error above)\n' >&2; MISSING_OPTIONAL+=("brain.config.json ensure"); }
+node "$BRAIN_SCRIPTS/lib/brain-config.mjs" ensure || {
+  printf '  \xe2\x9a\xa0 brain.config.json: ensure step failed (see error above)\n' >&2
+  # By CAUSE: a config that cannot be parsed makes every later config read meaningless, so it is
+  # REQUIRED; any other ensure failure (e.g. the tier notice) stays optional (#1127).
+  if [ -f brain.config.json ] && ! node -e "JSON.parse(require('fs').readFileSync('brain.config.json','utf8'))" >/dev/null 2>&1; then
+    REQUIRED_FAILURES+=("brain.config.json cannot be parsed (fix or remove it, then re-run)")
+  else
+    MISSING_OPTIONAL+=("brain.config.json ensure")
+  fi
+}
 
 # Scaffold brain/HOME.md if absent (never overwrites an existing one — the file
 # is consumer-owned once it exists). Non-fatal, idempotent: re-running env:init
@@ -339,7 +348,7 @@ if [ -L .env ]; then
 elif [ -e .env ] && [ ! -f .env ]; then
   ENV_SECRET_SAFE=false
   ENV_SECRET_UNSAFE_REASON=notRegularFile
-elif [ -f .env ] && _env_links="$(stat -c %h .env 2>/dev/null || stat -f %l .env 2>/dev/null || echo 1)" && [ "$_env_links" -gt 1 ] 2>/dev/null; then  # swallow-ok: GNU-then-BSD portability fallback; if neither stat works the count reads as 1, and the symlink, file-type, tracked and ignore checks around it still gate the write
+elif [ -f .env ] && _env_links="$(stat -c %h .env 2>/dev/null || stat -f %l .env 2>/dev/null || echo 1)" && [ "$_env_links" -gt 1 ] 2>/dev/null; then  # swallow-ok: GNU-then-BSD portability fallback; if BOTH stat forms fail the count reads as 1, so the hardlink check is SKIPPED; the symlink, file-type, tracked and ignore checks around it still gate the write
   # A HARDLINK to a file outside the repo passes `-L` (false) and `-f` (true),
   # and `>> .env` would append the PAT through it. Link count > 1 is the only
   # signal; `stat -c %h` is GNU, `stat -f %l` is BSD/macOS.
@@ -546,6 +555,69 @@ git config core.hooksPath brain/scripts/hooks \
   && ok "$I18N_BOOTSTRAP_MEMORY_HOOKOK" \
   || { warn "$I18N_BOOTSTRAP_MEMORY_HOOKFAILED"; REQUIRED_FAILURES+=("git hooks path (core.hooksPath) not configured"); }
 
+# --- BEGIN memory-step-helpers (issue #1127) ---
+# A memory step fails by CAUSE, not by step. A fresh repo with no commits, a branch with no
+# upstream, no remote, an unreachable network and a missing engram binary are all USABLE
+# environments: the step is skipped, the next command is printed, and the run still exits 0
+# (records-only capture needs no backend — memory-backend-contract.md). A step that was
+# attempted and failed for a real reason (a merge refusal, a reconcile refusal, a corrupt
+# store) is REQUIRED: it joins REQUIRED_FAILURES and the run exits 1.
+
+# Preflight, never git's wording: prints why a pull cannot even be attempted and returns 0;
+# returns 1 when it can be.
+memory_pull_unavailable() {
+  local tree="$1"
+  if ! git -C "$tree" rev-parse --verify --quiet HEAD >/dev/null 2>&1; then
+    printf '%s' "$I18N_BOOTSTRAP_MEMORY_PULL_NOCOMMITS"; return 0
+  fi
+  if ! git -C "$tree" rev-parse --abbrev-ref --symbolic-full-name '@{u}' >/dev/null 2>&1; then
+    printf '%s' "$I18N_BOOTSTRAP_MEMORY_PULL_NOUPSTREAM"; return 0
+  fi
+  return 1
+}
+
+# The ONE place that reads git's words: was a failed pull a connectivity problem (the network
+# or the remote host is unreachable) rather than a real refusal? Takes the captured stderr.
+memory_pull_offline() {
+  printf '%s' "$1" | grep -qiE 'could not resolve host|unable to access|network is unreachable|connection (timed out|refused)|failed to connect|temporary failure in name resolution|could not read from remote repository'
+}
+
+# Runs `brain:memory:pull` in the invoking tree and classifies the outcome.
+run_memory_pull() {
+  local reason errf
+  if reason="$(memory_pull_unavailable "$WORKTREE_ROOT")"; then
+    warn "$(printf "$I18N_BOOTSTRAP_MEMORY_PULL_SKIPPED" "$reason")"
+    MISSING_OPTIONAL+=("memory pull (next: npm run brain:memory:pull)")
+    return 0
+  fi
+  errf="$(mktemp)"
+  if (cd "$WORKTREE_ROOT" && $PM run --silent brain:memory:pull) 2>"$errf"; then
+    cat "$errf" >&2; rm -f "$errf"
+    ok "$I18N_BOOTSTRAP_MEMORY_PULL_OK"
+  else
+    cat "$errf" >&2
+    if memory_pull_offline "$(cat "$errf")"; then
+      warn "$(printf "$I18N_BOOTSTRAP_MEMORY_PULL_SKIPPED" "$I18N_BOOTSTRAP_MEMORY_PULL_OFFLINE")"
+      MISSING_OPTIONAL+=("memory pull (next: npm run brain:memory:pull, once the remote is reachable)")
+    else
+      warn "$I18N_BOOTSTRAP_MEMORY_PULL_FAILED"
+      REQUIRED_FAILURES+=("memory pull failed")
+    fi
+    rm -f "$errf"
+  fi
+}
+
+# Runs `brain:memory:index` (engram only). Attempted only when the engram binary exists.
+run_memory_index() {
+  if (cd "$WORKTREE_ROOT" && $PM run --silent brain:memory:index); then
+    ok "$I18N_BOOTSTRAP_MEMORY_INDEX_OK"
+  else
+    warn "$I18N_BOOTSTRAP_MEMORY_INDEX_FAILED"
+    REQUIRED_FAILURES+=("memory index failed")
+  fi
+}
+# --- END memory-step-helpers ---
+
 case "$MEMORY_BACKEND" in
   engram)
     # Delegate setup (symlink + merge driver) to the backend module — no duplication.
@@ -556,12 +628,17 @@ case "$MEMORY_BACKEND" in
     else
       warn "$I18N_BOOTSTRAP_MEMORY_NODEABSENT"
     fi
-    # Run IN the worktree (issue #1093): `$PM run` resolves the script body
-    # from cwd's package.json, and REPO_ROOT's (main tree's) can be a
-    # different, older version entirely — the "pull failed" / "index failed"
-    # shape from the synergy repro (both verbs reported non-blocking).
-    (cd "$WORKTREE_ROOT" && $PM run --silent brain:memory:pull)  && ok "$I18N_BOOTSTRAP_MEMORY_PULL_OK"  || { warn "$I18N_BOOTSTRAP_MEMORY_PULL_FAILED"; REQUIRED_FAILURES+=("memory pull failed"); }
-    (cd "$WORKTREE_ROOT" && $PM run --silent brain:memory:index) && ok "$I18N_BOOTSTRAP_MEMORY_INDEX_OK" || { warn "$I18N_BOOTSTRAP_MEMORY_INDEX_FAILED"; REQUIRED_FAILURES+=("memory index failed"); }
+    # Hydration and indexing need the engram BINARY. Without it they are not attempted:
+    # not a failure, and records-only capture still works (#1127).
+    if command -v engram >/dev/null 2>&1; then
+      # Run IN the worktree (issue #1093): `$PM run` resolves the script body from cwd's
+      # package.json, and REPO_ROOT's (main tree's) can be a different, older version.
+      run_memory_pull
+      run_memory_index
+    else
+      warn "$I18N_BOOTSTRAP_MEMORY_ENGRAMABSENT"
+      MISSING_OPTIONAL+=("engram hydration and index (next: install engram, then npm run brain:memory:pull && npm run brain:memory:index)")
+    fi
     ;;
   plainfiles)
     # plainfiles is a real, supported backend (axes/memory/adapters/plainfiles.mjs),
@@ -579,7 +656,7 @@ case "$MEMORY_BACKEND" in
     else
       warn "$I18N_BOOTSTRAP_MEMORY_NODEABSENT"
     fi
-    (cd "$WORKTREE_ROOT" && $PM run --silent brain:memory:pull) && ok "$I18N_BOOTSTRAP_MEMORY_PULL_OK" || { warn "$I18N_BOOTSTRAP_MEMORY_PULL_FAILED"; REQUIRED_FAILURES+=("memory pull failed"); }
+    run_memory_pull
     ok "$I18N_BOOTSTRAP_MEMORY_PLAINFILES_NOINDEX"
     ;;
   *)
