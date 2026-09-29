@@ -8,11 +8,26 @@
 // the #1081 repro's ordering. Once that is set, check 1 (direct commit to
 // main/master) blocks whenever the default branch is literally named
 // "main"/"master", and check 2 (#788/#782 slice 2 — no commit from the MAIN
-// CHECKOUT) blocks EVERY commit from the main checkout regardless of branch.
-// `git worktree add` itself requires at least one commit to exist (it cannot
-// create a worktree off an unborn branch), so worktree isolation is
-// structurally impossible for a repository's very first commit — the
-// adoption commit can never satisfy check 2 as written.
+// CHECKOUT) blocks EVERY commit from the main checkout regardless of branch —
+// the adoption commit can never satisfy check 2 as written.
+//
+// WHY THE EXEMPTION IS RIGHT (maintainer ruling, 2026-09-29, re-confirmed the
+// same day with a corrected rationale — see `pre-commit`'s own comment for
+// the full version): check 2 exists so parallel work cannot collide in one
+// checkout. A repository with NO commit at all has no branch anyone else is
+// using and no history to share, so there is no parallel work to isolate —
+// the exemption applies to exactly one commit in a repository's life,
+// announces itself, and closes itself. An EARLIER version of this reasoning
+// claimed `git worktree add` itself "requires a commit to exist", making
+// worktree isolation "structurally impossible" here — that claim was FALSE:
+// `git worktree add --orphan` works against a repository with zero commits
+// (git >= 2.42, verified on 2.53), so an orphan worktree could isolate this
+// commit too. The exemption does not rest on that claim; it rests on there
+// being no parallel work to protect against yet, plus the cost (ADR-0036) of
+// making an operator move `npx brain init`/`env:init`'s already-written
+// files, `.env` and git config into a separate worktree — or re-run the
+// install there — on the single most fragile step, for someone brand new to
+// brain.
 //
 // CORRECTED CONDITION (cold-review finding, same day): the first cut of this
 // fix detected "HEAD is unborn" via `git rev-parse --verify -q HEAD` failing.

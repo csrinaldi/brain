@@ -58,30 +58,53 @@ bootstrap, forever. The `plainfiles)` case arm runs `setup` and `pull`
 (both genuinely supported) and prints an informational `ok` naming why
 `index` is skipped.
 
-**D5 — item 4 was a stop, then ruled: Option A (maintainer, 2026-09-29).**
-The worktree brief explicitly named "how the first commit of a new repo
-should be made under the hooks" as an example of a product decision this
-agent must not invent, so item 4 was first stopped and reported as a
-fork (three options, `proposal.md`). The maintainer then ruled Option A:
-`pre-commit`'s check 2 (#788/#782 slice 2) refuses every commit from the
-main checkout regardless of branch, and `git worktree add` itself cannot
-run without at least one commit already existing — it cannot create a
-worktree off an unborn branch — so the isolation check 2 exists to force
-is structurally impossible to satisfy for a repository's very first
-commit. The maintainer's own words: "the pre-commit hook exempts a
-commit when HEAD is unborn ... because `git worktree add` cannot run
-without a commit, so worktree isolation is impossible for exactly that
-commit."
+**D5 — item 4 was a stop, then ruled: Option A (maintainer, 2026-09-29;
+rationale RE-CONFIRMED AND CORRECTED, same day).** The worktree brief
+explicitly named "how the first commit of a new repo should be made
+under the hooks" as an example of a product decision this agent must not
+invent, so item 4 was first stopped and reported as a fork (three
+options, `proposal.md`). The maintainer ruled Option A — keep the
+no-commit-at-all exemption exactly as implemented — with the rationale,
+in this order:
 
-**D5.1 — implementation, CORRECTED after cold review.** The first cut
-detected via `git rev-parse --verify -q HEAD` failing — "the CURRENT HEAD
-is unborn". Cold review reproduced a bypass: `git checkout --orphan x` in
-the main checkout of a repo that already has real history ALSO makes the
-current HEAD unborn, so that detector exempted a crafted orphan-branch
-commit from checks 1/2 repeatably — reopening #782 on demand, exactly the
-guard check 2 exists to close. "HEAD is unborn" and "the repository has
-no commit" are not the same fact, and the maintainer's own ruling names
-the second one: `git worktree add` needs "a commit", not "a born HEAD".
+1. **Primary.** `pre-commit`'s check 2 (#788/#782 slice 2) exists so
+   parallel work cannot collide in one checkout. A repository with NO
+   commit at all has no branch anyone else is using and no history to
+   share, so there is no parallel work to isolate — the exemption
+   recognises that the rule has nothing to protect there. It applies to
+   exactly one commit in a repository's life, announces itself, and
+   closes itself (see D5.1's self-closing note).
+2. **Cost (ADR-0036).** `npx brain init` and `env:init` leave the
+   adoption's files, `.env` and git config sitting in the main checkout.
+   Committing them from a separate (orphan) worktree instead would mean
+   moving all of that there, or re-running the install itself there — on
+   the single most fragile step, for someone brand new to brain.
+3. **Compatibility.** An orphan worktree (`git worktree add --orphan`)
+   is the one construction that could otherwise isolate this commit even
+   with zero commits so far, and it requires git >= 2.42.
+
+**The original rationale was wrong, and is recorded here so it is not
+re-introduced.** The first ruling's stated reason was "`git worktree add`
+cannot run without a commit, so worktree isolation is impossible for
+exactly that commit" — i.e., that `git worktree add` itself requires a
+commit to exist. That premise is FALSE: `git worktree add --orphan` works
+against a repository with zero commits (git >= 2.42, verified on 2.53),
+so worktree isolation of the adoption commit is NOT structurally
+impossible — an orphan worktree could do it. The maintainer re-confirmed
+Option A on 2026-09-29 with the corrected rationale above (points 1-3),
+which does not depend on that false premise at all: the exemption rests
+on there being no parallel work to protect against yet (point 1), not on
+worktree creation being impossible.
+
+**D5.1 — implementation.** The first cut detected via `git rev-parse
+--verify -q HEAD` failing — "the CURRENT HEAD is unborn". Cold review
+reproduced a bypass: `git checkout --orphan x` in the main checkout of a
+repo that already has real history ALSO makes the current HEAD unborn,
+so that detector exempted a crafted orphan-branch commit from checks 1/2
+repeatably — reopening #782 on demand, exactly the guard check 2 exists
+to close. "HEAD is unborn" and "the repository has no commit" are not
+the same fact — the corrected condition (point 1 above) needs the second
+one, not the first.
 
 The condition is now **the repository has no commit reachable from ANY
 ref** — `git rev-list -n 1 --all` empty — checked once, ahead of checks 1

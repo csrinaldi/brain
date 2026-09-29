@@ -49,28 +49,43 @@ This needed a product decision this agent was not authorized to make (the
 worktree brief names this exact scenario as an example of one), so it was
 first stopped and reported as a fork with three options (below).
 
-**Ruling (maintainer, 2026-09-29): Option A.** `git worktree add` itself
-requires at least one commit to exist — it cannot create a worktree off
-an unborn branch — so worktree isolation (what check 2 exists to force)
-is structurally impossible for a repository's first commit. `pre-commit`
-exempts a commit when **the repository has no commit at all**
+**Ruling (maintainer, 2026-09-29): Option A.** `pre-commit` exempts a
+commit when **the repository has no commit at all**
 (`git rev-list -n 1 --all` empty), printing one line naming why the
 commit was allowed. The exemption is false again FOREVER once any commit
-exists anywhere in the repository.
+exists anywhere in the repository. The rationale, in order: (1) check
+2 (#782) exists so parallel work cannot collide in one checkout, and a
+repository with no commit at all has no parallel work to isolate; (2)
+the cost (ADR-0036) of moving `npx brain init`/`env:init`'s files, `.env`
+and git config into a separate worktree, or re-running the install
+there, on the most fragile step for someone new to brain; (3) an orphan
+worktree (`git worktree add --orphan`) is the one construction that
+could otherwise isolate this commit even with zero commits so far, and
+it requires git >= 2.42. See `design.md` D5 for the full rationale.
 
-**Corrected after cold review, same day.** The first cut detected "HEAD
-is unborn" (`git rev-parse --verify -q HEAD` failing) instead. That is a
-different, narrower-looking-but-actually-wider fact: `git checkout
---orphan x` in the main checkout of a repo that already has real history
-ALSO makes the current HEAD unborn, so the first cut's exemption fired
-repeatably for a crafted orphan-branch commit — reopening #782 on demand
-(reproduced in cold review). "HEAD is unborn" and "the repository has no
-commit" are not equivalent; only the second is what the maintainer's own
-ruling and `git worktree add`'s real requirement describe. See
-`design.md` D5.1 for the corrected condition and the real-git-fixture
-tests that pin both the "still refused" side (a second commit from the
-main checkout; a direct commit to `main` once HEAD is born) and the
-orphan-branch regression (refused, even though HEAD is unborn again).
+**Corrected condition after cold review, same day.** The first cut
+detected "HEAD is unborn" (`git rev-parse --verify -q HEAD` failing)
+instead of "the repository has no commit at all". That is a different,
+narrower-looking-but-actually-wider fact: `git checkout --orphan x` in
+the main checkout of a repo that already has real history ALSO makes the
+current HEAD unborn, so the first cut's exemption fired repeatably for a
+crafted orphan-branch commit — reopening #782 on demand (reproduced in
+cold review). See `design.md` D5.1 for the corrected condition and the
+real-git-fixture tests that pin both the "still refused" side (a second
+commit from the main checkout; a direct commit to `main` once HEAD is
+born) and the orphan-branch regression (refused, even though HEAD is
+unborn again).
+
+**Corrected RATIONALE after a second cold review, same day (2026-09-29).**
+The ruling above originally read "`git worktree add` cannot run without
+a commit, so worktree isolation is impossible for exactly that commit" —
+i.e., that `git worktree add` itself requires a commit to exist. That
+premise is FALSE: `git worktree add --orphan` works against a repository
+with zero commits (git >= 2.42, verified on 2.53). The maintainer
+re-confirmed Option A the same day with the corrected rationale given
+above, which does not depend on that false premise: the exemption rests
+on there being no parallel work to protect against yet, not on worktree
+creation being impossible. See `design.md` D5 for the full record.
 
 Options B (document `--no-verify`) and C (reorder the guide) were not
 taken. `docs/adoption.md`/`docs/KNOWN-LIMITATIONS.md` remain untouched by
