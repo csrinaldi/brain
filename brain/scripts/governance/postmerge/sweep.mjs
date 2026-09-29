@@ -274,6 +274,32 @@ export async function openArchivePr({ mrCreate, token, project, title, body, hea
   return { outcome: 'failed', error: (result && result.error) || 'mrCreate returned no url' };
 }
 
+/**
+ * Lists change-folder names directly under `changesRootAbsPath`. A missing
+ * root (`ENOENT`) means a fresh consumer with no `openspec/changes/` yet —
+ * that is zero eligible changes, not a failure, and is reported as an empty
+ * list rather than thrown (#1113: the bare `readdirSync` this replaces threw
+ * an uncaught exception on every clean merge in a consumer with no changes
+ * folder, crashing the sweep and filing a false `governance:archive-sweep-failed`
+ * alarm whose "Sweep output" block was empty because the process never
+ * reached its own error handling). Any OTHER read failure (permissions, the
+ * path exists but is a file, etc.) still throws — only "the root itself does
+ * not exist" is the harmless, expected case.
+ *
+ * @param {string} changesRootAbsPath
+ * @returns {string[]}
+ */
+export function listChangeFolders(changesRootAbsPath) {
+  let dirEntries;
+  try {
+    dirEntries = readdirSync(changesRootAbsPath, { withFileTypes: true });
+  } catch (err) {
+    if (err.code === 'ENOENT') return [];
+    throw err;
+  }
+  return dirEntries.filter((e) => e.isDirectory()).map((e) => e.name);
+}
+
 // ── CLI entrypoint ───────────────────────────────────────────────────────────
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
@@ -330,8 +356,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   }
 
   const changesRoot = 'openspec/changes';
-  const dirEntries = readdirSync(join(process.cwd(), changesRoot), { withFileTypes: true });
-  const entries = dirEntries.filter((e) => e.isDirectory()).map((e) => e.name);
+  const entries = listChangeFolders(join(process.cwd(), changesRoot));
   const fs = makeFs();
   const { project } = originIdentity();
   const readIssueState = makeReadIssueState({ project, config: loadBrainConfig() });

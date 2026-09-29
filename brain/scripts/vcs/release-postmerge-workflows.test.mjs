@@ -1025,6 +1025,12 @@ test('#557: governance-postmerge.yml declares a `- id: sweep` step positioned af
   assert.ok(sweepIdx > advanceIdx, 'the sweep step must be positioned after advance');
 });
 
+test('#1113: the --apply capture merges stderr, so the alarm carries the real cause', () => {
+  const text = readFileSync(POSTMERGE_YML, 'utf8');
+  const applyLine = text.split('\n').find((l) => l.includes('sweep.mjs --apply')) || '';
+  assert.match(applyLine, /2>&1\)"\s*$/, 'the fail-closed path logs via console.error: without 2>&1 the alarm\'s "Sweep output" block is empty');
+});
+
 test("#557: the sweep step's if: gates on a clean audit and advance success, and references neither revert nor uncomputable", () => {
   const text = readFileSync(POSTMERGE_YML, 'utf8');
   const stepBlock = text.slice(text.indexOf('- id: sweep'), text.indexOf('- id: terminal'));
