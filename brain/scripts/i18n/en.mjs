@@ -165,6 +165,9 @@ export default {
   'bootstrap.ecosystem.notFound': '{tool} not found — {hint}',
 
   // §3 Personal access token
+  'bootstrap.gitignore.ok':     '.env is git-ignored',
+  'bootstrap.gitignore.failed': 'could not confirm .env is git-ignored — check .gitignore by hand before committing',
+
   'bootstrap.pat.section':         'Personal access token (.env)',
   'bootstrap.pat.alreadySet':      '{var} already set in .env',
   'bootstrap.pat.noTty':           'no TTY: add {var} to .env and re-run brain:env:init',

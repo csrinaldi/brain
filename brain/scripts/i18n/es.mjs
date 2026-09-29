@@ -150,6 +150,9 @@ export default {
   'bootstrap.ecosystem.section':  'Herramientas del ecosistema',
   'bootstrap.ecosystem.notFound': '{tool} no encontrado — {hint}',
 
+  'bootstrap.gitignore.ok':     '.env está en gitignore',
+  'bootstrap.gitignore.failed': 'no se pudo confirmar que .env esté en gitignore — revisá .gitignore a mano antes de commitear',
+
   // §3 Personal access token
   'bootstrap.pat.section':         'Token personal de acceso (.env)',
   'bootstrap.pat.alreadySet':      '{var} ya configurado en .env',

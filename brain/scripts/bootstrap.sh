@@ -260,6 +260,28 @@ fi
 
 # --- 3. Personal PAT in .env --------------------------------------------------
 say "$I18N_BOOTSTRAP_PAT_SECTION"
+
+# --- BEGIN ensure-env-gitignored (issue #1112, finding 1) ---
+# `.env` (and node_modules/) are untracked but NOT ignored in a fresh
+# consumer repo — `brain init` never created or amended a `.gitignore`.
+# The next `git add -A` after this section writes the operator's PAT below
+# would commit it. `git check-ignore` (not a plain grep) is used so an
+# existing broader pattern (`.env*`, one written in a parent directory's
+# .gitignore, core.excludesFile, …) is honored instead of duplicated.
+ensure_env_gitignored() {
+  git check-ignore -q .env 2>/dev/null && return 0
+  [ -f .gitignore ] || : > .gitignore
+  if [ -s .gitignore ] && [ "$(tail -c1 .gitignore | wc -l)" -eq 0 ]; then printf '\n' >> .gitignore; fi
+  printf '.env\n' >> .gitignore
+  git check-ignore -q .env 2>/dev/null
+}
+if ensure_env_gitignored; then
+  ok "$I18N_BOOTSTRAP_GITIGNORE_OK"
+else
+  warn "$I18N_BOOTSTRAP_GITIGNORE_FAILED"
+fi
+# --- END ensure-env-gitignored ---
+
 VCS_TOKEN="$(env_get "$VCS_TOKEN_VAR")"
 if [ -n "$VCS_TOKEN" ]; then
   ok "$(printf "$I18N_BOOTSTRAP_PAT_ALREADYSET" "$VCS_TOKEN_VAR")"
