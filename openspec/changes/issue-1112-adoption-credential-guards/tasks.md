@@ -5,12 +5,15 @@
 - Chained PRs recommended: No
 - Decision needed before apply: item 4 was stopped and reported as a fork
   (see `proposal.md`); the maintainer ruled Option A on 2026-09-29 and
-  phase 6 below implements it.
+  phase 6 below implements it; a same-day cold review then found the
+  first cut's exemption condition wrong (blocker 1, phase 7) and a
+  fail-open credential path (blocker 2, phase 7).
 - Estimated changed lines (gated: tests, openspec, `.memory` excluded from budget):
-  `bootstrap.sh` ~60, `brain-to-engram.mjs` ~60 (rewrite), `engram.mjs` ~10,
-  `i18n/en.mjs`+`i18n/es.mjs` ~12, `test-spawn-hygiene.test.mjs` allowlist ~8,
-  `hooks/pre-commit` ~30 (unborn-HEAD gate). Well under the `standard`
-  tier's 400-line budget.
+  `bootstrap.sh` ~110 (across all phases), `brain-to-engram.mjs` ~55,
+  `engram.mjs` ~10, `i18n/en.mjs`+`i18n/es.mjs` ~16,
+  `test-spawn-hygiene.test.mjs` allowlist ~14, `hooks/pre-commit` ~35
+  (no-commit-at-all gate, corrected). Well under the `standard` tier's
+  400-line budget.
 
 ## Phase 1 — finding 3: `brain-to-engram.mjs` project resolution + exit code
 
@@ -25,6 +28,8 @@
       rewrite `brain-to-engram.mjs` with `resolveProject`, `run()`, and a
       `process.argv[1] === fileURLToPath(import.meta.url)` main-module
       guard that exits non-zero when `failed > 0`. GREEN.
+      **Cold-review nit (7.4 below): `resolveProject` removed — it was a
+      pure pass-through; `run()` now calls `deriveProject` directly.**
 - [x] 1.3 `npm test` on `axes/memory/adapters/engram*.test.mjs` +
       `memory/cli.backend-fallback.test.mjs`: still green (export-only
       change to a shared function).
@@ -104,3 +109,73 @@
       brain:nav`: all green/exit 0. Did not touch the real engram store
       or any real remote this run — the fixture in 6.1 has no `origin`
       remote at all.
+
+## Phase 7 — cold review, 2026-09-29 (2 blockers, 1 should-fix, 1 nit)
+
+- [x] 7.1 BLOCKER — corrected the gate-0 condition. Added an orphan-branch
+      test to `pre-commit.unborn-head.test.mjs`: a repo WITH history,
+      `git checkout --orphan`, commit attempted — must be REFUSED by
+      check 2. RED against the `git rev-parse --verify -q HEAD` detector
+      (the orphan commit landed: exit 0, `unborn` message printed) with
+      the 5 pre-existing cases still green. Fixed: gate 0 now tests
+      `[ -z "$(git rev-list -n 1 --all 2>/dev/null)" ]` (no commit
+      reachable from ANY ref) instead of HEAD-only. GREEN (6/6). Updated
+      the comment's "self-closing"/detection claims to match (D5.1).
+      Also fixed the pre-existing MOCKED `pre-commit.test.mjs` suite,
+      which broke as a side effect (the mock `git` answered every
+      unmatched subcommand, including the new `rev-list`, with empty/exit
+      0 — read by the corrected gate as "no commit anywhere", exempting
+      every mocked scenario): added a `hasCommit` fixture flag (default
+      `true`, matching what all 7 pre-existing tests already modeled) and
+      one new mocked test for the `hasCommit: false` path. 55/55 hook
+      tests green.
+- [x] 7.2 BLOCKER — fail-closed credential write.
+      `bootstrap.pat-secret-guard.test.mjs`: `.env` tracked → token not
+      written, message names `git rm --cached`; ignore check failing for
+      another reason → token not written; safe → written (regression).
+      RED (missing `BEGIN/END env-secret-safe-gate` / `pat-write-gate`
+      markers). Fixed: `ENV_SECRET_SAFE`/`ENV_SECRET_UNSAFE_REASON`
+      computed once (`git ls-files --error-unmatch .env` for tracked,
+      else `git check-ignore -q .env`), read by the one place `.env`
+      gets a new token — `bootstrap.pat.trackedRefused`/`.gitignoreRefused`
+      added to both i18n catalogs. GREEN (7/7). One of the test's fake PAT
+      literals (`ghp_…`, in a `vcsToken:` JS object property) tripped
+      `check-refs.mjs`'s `hardcoded-secret` rule (matches
+      `token\s*[=:]\s*["']…{8,}["']` — not the PAT shape itself, the KEY
+      NAME "token" next to a quoted literal); renamed the test's own
+      parameter to `patValue` and the fake string to a non-PAT-shaped
+      placeholder. `brain:repo:check` clean.
+- [x] 7.3 SHOULD-FIX — `MEMORY_BACKEND` prompt validation.
+      `bootstrap.memory-backend-validate.test.mjs`, reusing
+      `vcs-provider-validate`'s exact loop shape. RED (missing markers).
+      Fixed: `while :; do read … case … esac; done`, restricted to
+      `engram|plainfiles|''`. Discovered and fixed a marker collision:
+      the loop's own `case "$MEMORY_BACKEND" in` was textually identical
+      to the real backend-dispatch `case` a few lines below, so
+      `bootstrap.memory-backend-case.test.mjs`'s fragment extraction
+      (exact-text match) grabbed the wrong block — 3 of its tests broke.
+      Fixed by reading into a scratch variable (`_membackend_answer`)
+      instead of `$MEMORY_BACKEND` directly, so the two `case` statements
+      are textually distinct. GREEN (6/6 new + 4/4 restored).
+- [x] 7.4 NIT — `brain-to-engram.mjs`'s `resolveProject(config, root)` was
+      a one-line pass-through (`return deriveProject(config, root)`);
+      removed, `run()` calls `deriveProject` (imported from
+      `axes/memory/adapters/engram.mjs`) directly. Test file updated to
+      import and exercise `deriveProject` directly. 6/6 green.
+- [x] 7.5 `test-spawn-hygiene.test.mjs`: 6 new/shifted spawns flagged by
+      REQ-SHIP-4 (one line-number shift in `brain-to-engram.test.mjs`
+      from the new import; 3 new fragments in
+      `bootstrap.memory-backend-validate.test.mjs`/
+      `bootstrap.pat-secret-guard.test.mjs`). All `no-vcs-capability`.
+- [x] 7.6 `proposal.md`/`spec.md`/`design.md` updated: the corrected
+      no-commit-at-all condition (D5.1), the fail-closed credential gate
+      (D6), the `MEMORY_BACKEND` validation reuse (D7), and the
+      `resolveProject` removal (D3.1) are all recorded.
+- [x] 7.7 Safety for this phase: no mutating git command
+      (remote/config/stash/reset/checkout/worktree/fetch/push) run
+      against `/home/gandalf/IA/*` or any `cp` copy of a worktree; every
+      fixture is a fresh `git init` repo under the OS temp dir
+      (`mkdtempSync`), never a copy of this worktree. No real engram
+      store or real remote touched.
+- [x] 7.8 `npm test` (full suite), `npm run brain:repo:check`, `npm run
+      brain:nav`: all green/exit 0.

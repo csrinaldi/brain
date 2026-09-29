@@ -53,14 +53,24 @@ first stopped and reported as a fork with three options (below).
 requires at least one commit to exist — it cannot create a worktree off
 an unborn branch — so worktree isolation (what check 2 exists to force)
 is structurally impossible for a repository's first commit. `pre-commit`
-now exempts a commit when `git rev-parse --verify -q HEAD` fails (HEAD is
-unborn), detected structurally rather than by branch name, printing one
-line naming why the commit was allowed. The exemption is self-closing:
-the moment that commit lands, HEAD is born and every later commit is
-judged by checks 1 and 2 exactly as before. See `design.md` for the
-implementation and the real-git-fixture tests that pin the "still
-refused" side (a second commit from the main checkout; a direct commit
-to `main` once HEAD is born).
+exempts a commit when **the repository has no commit at all**
+(`git rev-list -n 1 --all` empty), printing one line naming why the
+commit was allowed. The exemption is false again FOREVER once any commit
+exists anywhere in the repository.
+
+**Corrected after cold review, same day.** The first cut detected "HEAD
+is unborn" (`git rev-parse --verify -q HEAD` failing) instead. That is a
+different, narrower-looking-but-actually-wider fact: `git checkout
+--orphan x` in the main checkout of a repo that already has real history
+ALSO makes the current HEAD unborn, so the first cut's exemption fired
+repeatably for a crafted orphan-branch commit — reopening #782 on demand
+(reproduced in cold review). "HEAD is unborn" and "the repository has no
+commit" are not equivalent; only the second is what the maintainer's own
+ruling and `git worktree add`'s real requirement describe. See
+`design.md` D5.1 for the corrected condition and the real-git-fixture
+tests that pin both the "still refused" side (a second commit from the
+main checkout; a direct commit to `main` once HEAD is born) and the
+orphan-branch regression (refused, even though HEAD is unborn again).
 
 Options B (document `--no-verify`) and C (reorder the guide) were not
 taken. `docs/adoption.md`/`docs/KNOWN-LIMITATIONS.md` remain untouched by
@@ -72,19 +82,29 @@ The three original options, for the record:
 
 | Option | What it does | Tradeoff |
 |---|---|---|
-| A — unborn-HEAD exemption (taken) | Hook checks 1 and 2 add a guard: exempt when `git rev-parse HEAD` fails (repo has zero commits yet). Self-closing: the exemption stops applying the moment the first commit lands. | Purely mechanical, derivable from the hooks' own stated purpose (protect history / enable parallel work — neither applies before any commit exists). No doc change needed. Does not cover a SECOND pre-adoption commit (e.g. `npm init -y` before `brain init`), which is a real step in the guide. |
+| A — no-commit-at-all exemption (taken, corrected) | Hook checks 1 and 2 add a guard: exempt when the repository has no commit at all (`git rev-list -n 1 --all` empty — NOT merely "HEAD is unborn", which `git checkout --orphan` can also produce in a repo with history). False again forever once any commit exists. | Purely mechanical, derivable from the hooks' own stated purpose (protect history / enable parallel work — neither applies before any commit exists). No doc change needed. Does not cover a SECOND pre-adoption commit (e.g. `npm init -y` before `brain init`), which is a real step in the guide. |
 | B — document `--no-verify` explicitly | `docs/adoption.md` states, in Path A, that the adoption commit uses `git commit --no-verify`, with the reasoning (hooks aren't load-bearing yet on a repo with no history/branches). | Zero code change. Leaves the bypass as the sanctioned path forever, which is what issue #1112 calls "undocumented" today — documenting it doesn't make it not a bypass. |
 | C — reorder the guide | `docs/adoption.md` has the operator commit `npx brain init`'s output BEFORE running `env:init` (which is what sets `core.hooksPath`). | No code change, no bypass. Breaks down as soon as `env:init` itself writes files worth committing (`brain.config.json` `ensure`, `brain/HOME.md` scaffold) — a second commit would still hit the hook once it's installed. |
 
 ## Acceptance
 
 - A fresh consumer's `env:init` never leaves `.env` untracked-but-unignored.
+- `env:init` FAILS CLOSED: if `.env` is already tracked by git, or the
+  ignore check fails for any other reason, the PAT is never written — the
+  step stops with a message naming the real fix (`git rm --cached .env`
+  for the tracked case), never a warning the write proceeds past anyway.
 - `vcs.provider` can only ever become `github` or `gitlab` through the
   interactive prompt.
+- `MEMORY_BACKEND` can only ever become `engram` or `plainfiles` through
+  the interactive prompt, validated with the same loop shape as
+  `vcs.provider` — not a second style for the same class of prompt.
 - `brain-to-engram.mjs` resolves the project the same way the rest of the
-  engram adapter does, and a real indexing failure makes `env:init` report
-  failure, not silent success.
+  engram adapter does (`deriveProject`, called directly — no pass-through
+  wrapper), and a real indexing failure makes `env:init` report failure,
+  not silent success.
 - `MEMORY_BACKEND=plainfiles` is never reported as an unknown backend.
 - The adoption commit (repo's first commit) is accepted by `pre-commit`
   even from the main checkout, with the reason printed; a second commit
-  from the same main checkout is still refused, unchanged.
+  from the same main checkout is still refused, unchanged; an orphan
+  branch created in a repo that already has history is judged by checks
+  1/2 exactly as any other commit — never exempted.

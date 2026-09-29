@@ -40,6 +40,14 @@ fileURLToPath(import.meta.url)` main-module guard (the same pattern
 resolution and failure-counting logic are unit-testable without spawning
 a real `engram` binary or touching the real `brain/` tree.
 
+**D3.1 — cold-review nit fixed: `deriveProject` called directly, no
+`resolveProject` wrapper.** The first cut added a `resolveProject(config,
+root)` function whose entire body was `return deriveProject(config,
+root)` — a pure pass-through with no logic of its own. `run()` now calls
+`deriveProject` directly (imported straight from
+`axes/memory/adapters/engram.mjs`); the tests that exercised the old
+wrapper now exercise `deriveProject` via that same import.
+
 **D4 — `plainfiles` never calls `brain:memory:index`.**
 `plainfiles.mjs#index()` always throws (`unsupportedOp`, C3 Decision 5) —
 it is not a bug, it is a deliberate scope boundary (no doc→memory
@@ -65,20 +73,35 @@ commit when HEAD is unborn ... because `git worktree add` cannot run
 without a commit, so worktree isolation is impossible for exactly that
 commit."
 
-**D5.1 — implementation.** A new gate 0, ahead of checks 1 and 2, tests
-`git rev-parse --verify -q HEAD` (silent: `-q` suppresses git's own error
-text, the command's only observable effect here is its exit status).
-Detection is structural (does a commit object exist for HEAD), not by
-branch name — a fresh repo may set its default branch to anything, and
-detecting by name (e.g. exempting only `main`/`master`) would miss check
-2 entirely, which fires regardless of branch. On the unborn-HEAD path,
-the hook prints one line to stdout naming the reason and falls through
-directly to checks 3/4 (`staged-records-check.mjs`, `check-refs.mjs`),
-skipping only checks 1 and 2 — those two are the only ones this issue is
-about, and nothing else changes for the adoption commit. The gate is
-self-closing by construction: once the commit is made, `HEAD` resolves
-and every later commit is evaluated by checks 1 and 2 unchanged — no
-separate "first N commits" counter or flag to go stale.
+**D5.1 — implementation, CORRECTED after cold review.** The first cut
+detected via `git rev-parse --verify -q HEAD` failing — "the CURRENT HEAD
+is unborn". Cold review reproduced a bypass: `git checkout --orphan x` in
+the main checkout of a repo that already has real history ALSO makes the
+current HEAD unborn, so that detector exempted a crafted orphan-branch
+commit from checks 1/2 repeatably — reopening #782 on demand, exactly the
+guard check 2 exists to close. "HEAD is unborn" and "the repository has
+no commit" are not the same fact, and the maintainer's own ruling names
+the second one: `git worktree add` needs "a commit", not "a born HEAD".
+
+The condition is now **the repository has no commit reachable from ANY
+ref** — `git rev-list -n 1 --all` empty — checked once, ahead of checks 1
+and 2. `--all` still reaches `main`'s commit even while `HEAD` itself is
+freshly orphaned, so the corrected gate stays false (checks 1/2 apply
+normally) for the orphan-branch case, and is only ever true before the
+very first commit anywhere in the repository. On that no-commit path, the
+hook prints one line to stdout naming the reason ("the repository has no
+commit yet") and falls through directly to checks 3/4
+(`staged-records-check.mjs`, `check-refs.mjs`), skipping only checks 1
+and 2 — those two are the only ones this issue is about, and nothing else
+changes for the adoption commit.
+
+The gate is self-closing, restated precisely: false again FOREVER once
+any commit exists anywhere in the repository — not merely "once this
+commit lands" (the first cut's claim, which was true but insufficient: it
+did not rule out a LATER unborn state via `--orphan`). No operation makes
+a repository's total commit count go from 1 back to 0, so there is no
+separate "first N commits" counter or flag to go stale, and no way to
+re-enter the exempted state once any commit exists.
 
 **D5.2 — other hooks checked, none changed.** `pre-push`, `commit-msg`
 and `pre-receive` were read end-to-end: none contains a branch-name or
@@ -97,15 +120,53 @@ made this commit" is not observable from a server, so nothing server-side
 (a GitLab CI job, a push rule) could implement or need the same
 exemption.
 
+**D6 — fail-closed credential gate (cold-review blocker 2).**
+`ensure_env_gitignored` (finding 1) only WARNS when it cannot confirm
+`.env` is ignored; that warning never stopped the PAT write that follows.
+Measured: `git check-ignore` NEVER reports a path as ignored once it is
+TRACKED, no matter which pattern in `.gitignore` matches it — a previous
+run (this same bug, before this fix, or a manual `git add -A`) may
+already have committed `.env`. A `.gitignore` fix cannot protect a secret
+about to be written into a file git's index already has, so tracked
+status must be checked SEPARATELY from (and before) the ignore check — it
+changes which remedy is correct.
+
+`ENV_SECRET_SAFE`/`ENV_SECRET_UNSAFE_REASON` are computed once
+(`git ls-files --error-unmatch .env` for tracked, else
+`git check-ignore -q .env` for ignored) and read by the single place that
+writes a new secret into `.env`. Unsafe for either reason: the write is
+skipped and a message names the real remedy — `git rm --cached .env` for
+the tracked case (nothing else fixes it), a generic "fix .gitignore by
+hand" for any other ignore-check failure. `VCS_TOKEN` itself is NOT
+cleared after a refused write — the in-memory value still authenticates
+THIS session's git operations (§4/§5 below); only the durable write to
+`.env` is refused, so the same unsafe state is caught again next run.
+
+**D7 — `MEMORY_BACKEND` validation reuses the `vcs.provider` loop shape
+(cold-review should-fix 3).** Same defect class as finding 2: the
+interactive prompt accepted any typed string and wrote it into `.env`,
+with the consequence only surfacing later, deep inside
+`memory/cli.mjs`'s backend dispatch. Rather than invent a second
+validation style for the same class of prompt, the fix is the identical
+shape — read into a scratch variable, `case` it against the closed set
+(`engram`, `plainfiles`, or empty), re-prompt on anything else. The
+scratch variable (`_membackend_answer`, not `$MEMORY_BACKEND` directly)
+is deliberate: the real backend-dispatch `case "$MEMORY_BACKEND" in` a
+few lines below is a DIFFERENT case statement for a different job, and
+reading into the same variable name would make this loop's own `case
+"$MEMORY_BACKEND" in` textually identical to it — exactly the kind of
+accidental collision a test's own marker-based fragment extraction (#340)
+cannot tell apart.
+
 ## Testing approach
 
 Every fix is a bash fragment or pure JS function LIFTED OUT OF the real
 source file and executed/imported directly in its test — the same idiom
 `bootstrap.worktree.test.mjs`/`bootstrap.tier-notice.test.mjs` already
 use (#340: no second copy of the logic to drift from the real one).
-`brain-to-engram.mjs`'s `run()`/`resolveProject()` are genuinely
-importable (guarded by the main-module check), so those get ordinary unit
-tests plus one true end-to-end run against THIS repo's own
+`brain-to-engram.mjs`'s `run()` is genuinely importable (guarded by the
+main-module check), so it gets ordinary unit tests (calling `deriveProject`
+directly, D3.1) plus one true end-to-end run against THIS repo's own
 `brain.config.json` (which has `project.name === ""` today — the live,
 unmodified shape of the defect).
 
@@ -116,5 +177,17 @@ into the fixture the same way `bootstrap.tier-notice.test.mjs`'s own
 `copyBrain` does — checks 3/4 downstream of the new gate need those files
 to exist under the fixture's own `--show-toplevel`. A mocked-git fixture
 (like `pre-commit.test.mjs`'s existing suite) would only prove the gate
-reads the mock correctly, not that `git rev-parse --verify -q HEAD`
-behaves as expected against real git.
+reads the mock correctly, not that `git rev-list -n 1 --all` behaves as
+expected against real git — which is exactly what the corrected D5.1
+needed proven, including the orphan-branch regression case (`git checkout
+--orphan` in a repo WITH history, still refused by check 2). The mocked
+`pre-commit.test.mjs` suite was updated in the same pass (a `hasCommit`
+fixture flag, default `true`) so its seven pre-existing scenarios — which
+all implicitly modeled a repo with history — keep meaning what they always
+meant now that gate 0 exists.
+
+D6's two fragments (`env-secret-safe-gate`, `pat-write-gate`) and D7's
+(`memory-backend-validate`) follow the same lifted-fragment idiom, each
+proven against a real temp git repo where real tracked/ignored state
+matters (D6) or against piped stdin driving the same loop shape as
+`vcs-provider-validate` (D7).
