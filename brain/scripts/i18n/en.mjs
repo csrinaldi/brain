@@ -179,6 +179,9 @@ export default {
   'bootstrap.pat.saved':           '{var} saved in .env (gitignored)',
   'bootstrap.pat.trackedRefused':     '{var} NOT written — .env is already tracked by git, so no .gitignore pattern can protect it. Untrack it first: git rm --cached .env — then re-run brain:env:init.',
   'bootstrap.pat.gitignoreRefused':   '{var} NOT written — could not confirm .env is git-ignored. Fix .gitignore by hand, then re-run brain:env:init.',
+  // {var} = token env var name, {target} = the symlink's target path
+  'bootstrap.pat.symlinkRefused':          '{var} NOT written — .env is a symlink to {target}; it must be a regular file, or the token would be written outside this repo. Replace it with a regular file, then re-run brain:env:init.',
+  'bootstrap.pat.notRegularFileRefused':   '{var} NOT written — .env exists but is not a regular file. It must be a regular file, then re-run brain:env:init.',
 
   // §4 Git credential helper
   'bootstrap.cred.section': 'Git credential helper (HTTPS)',

@@ -288,15 +288,49 @@ fi
 # instead: compute ONE gate, read by the one place below that writes a new
 # secret into `.env`.
 #
-# `git check-ignore` NEVER reports a path as ignored once it is TRACKED, no
-# matter which pattern in `.gitignore` matches it — a previous run (this same
-# bug, before this fix, or a manual `git add -A`) may already have committed
-# `.env`. A `.gitignore` fix cannot protect a secret about to be written into
-# a file git's index already has, so tracked status is checked FIRST and
-# separately from the ignore check — it changes which remedy is correct.
+# Checked ONCE here, before any of the prompts below ever run — never
+# re-checked per-write, so the whole PAT section reads one consistent answer.
+#
+# FILE TYPE is checked FIRST, independently of tracking/ignore status
+# (cold-review round 3): a `.env` that is a SYMLINK to a file outside the
+# repo (`.env -> /outside/secrets.env`) passes both the tracked check (the
+# symlink itself is untracked) and the ignore check (`git check-ignore`
+# matches the symlink's OWN path, same as for a regular file) — so the gate
+# used to say "safe", and `env_set`'s `>> .env` then followed the symlink and
+# appended the PAT to a file OUTSIDE the repo entirely (reproduced). `[ -L
+# .env ]` is true for a symlink regardless of what it points at, or whether
+# the target even exists, so it must be checked BEFORE `-f` (which follows
+# symlinks and would call a symlink-to-a-regular-file "safe"). Anything else
+# that exists but is not a regular file (a directory, a FIFO, …) is refused
+# for the same reason: `>> .env` on any of those is not "write a token into a
+# file this repo owns".
+#
+# TRACKED STATUS is checked next. `git check-ignore` NEVER reports a path as
+# ignored once it is TRACKED, no matter which pattern in `.gitignore`
+# matches it — a previous run (this same bug, before this fix, or a manual
+# `git add -A`) may already have committed `.env`. A `.gitignore` fix cannot
+# protect a secret about to be written into a file git's index already has,
+# so tracked status is checked separately from, and before, the ignore
+# check — it changes which remedy is correct.
+#
+# The IGNORE CHECK itself (`git check-ignore -q .env`) honors every
+# applicable source — a pattern in THIS repo's `.gitignore` at any level, a
+# rule in `.git/info/exclude`, or a global `core.excludesFile` — any of which
+# make `.env` ignored for THIS CLONE ONLY; none of them travels with the repo
+# to a fresh clone, which is exactly why `ensure_env_gitignored` above writes
+# a repo-tracked `.gitignore` pattern rather than relying on a clone-local
+# exclude file to do the whole job.
 ENV_SECRET_SAFE=true
 ENV_SECRET_UNSAFE_REASON=""
-if git ls-files --error-unmatch .env >/dev/null 2>&1; then
+ENV_SYMLINK_TARGET=""
+if [ -L .env ]; then
+  ENV_SECRET_SAFE=false
+  ENV_SECRET_UNSAFE_REASON=symlink
+  ENV_SYMLINK_TARGET="$(readlink .env 2>/dev/null || true)"
+elif [ -e .env ] && [ ! -f .env ]; then
+  ENV_SECRET_SAFE=false
+  ENV_SECRET_UNSAFE_REASON=notRegularFile
+elif git ls-files --error-unmatch .env >/dev/null 2>&1; then
   ENV_SECRET_SAFE=false
   ENV_SECRET_UNSAFE_REASON=tracked
 elif ! git check-ignore -q .env 2>/dev/null; then
@@ -337,11 +371,20 @@ EOT
   if [ -z "$VCS_TOKEN" ]; then
     warn "$I18N_BOOTSTRAP_PAT_SKIPPED"
   elif [ "$ENV_SECRET_SAFE" != true ]; then
-    if [ "$ENV_SECRET_UNSAFE_REASON" = tracked ]; then
-      warn "$(printf "$I18N_BOOTSTRAP_PAT_TRACKEDREFUSED" "$VCS_TOKEN_VAR")"
-    else
-      warn "$(printf "$I18N_BOOTSTRAP_PAT_GITIGNOREREFUSED" "$VCS_TOKEN_VAR")"
-    fi
+    case "$ENV_SECRET_UNSAFE_REASON" in
+      symlink)
+        warn "$(printf "$I18N_BOOTSTRAP_PAT_SYMLINKREFUSED" "$VCS_TOKEN_VAR" "$ENV_SYMLINK_TARGET")"
+        ;;
+      notRegularFile)
+        warn "$(printf "$I18N_BOOTSTRAP_PAT_NOTREGULARFILEREFUSED" "$VCS_TOKEN_VAR")"
+        ;;
+      tracked)
+        warn "$(printf "$I18N_BOOTSTRAP_PAT_TRACKEDREFUSED" "$VCS_TOKEN_VAR")"
+        ;;
+      *)
+        warn "$(printf "$I18N_BOOTSTRAP_PAT_GITIGNOREREFUSED" "$VCS_TOKEN_VAR")"
+        ;;
+    esac
   else
     env_set "$VCS_TOKEN_VAR" "$VCS_TOKEN"
     ok "$(printf "$I18N_BOOTSTRAP_PAT_SAVED" "$VCS_TOKEN_VAR")"

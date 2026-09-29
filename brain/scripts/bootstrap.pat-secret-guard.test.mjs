@@ -21,7 +21,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { readFileSync, existsSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { readFileSync, existsSync, mkdtempSync, mkdirSync, writeFileSync, symlinkSync } from 'node:fs';
 import { removeTempTree } from './__fixtures__/tmp-tree.mjs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -91,9 +91,49 @@ test('#1112 safe-gate: .env untracked but NOT covered by any .gitignore pattern 
   });
 });
 
+// ── symlinked / non-regular .env (cold-review round 3, blocker) ────────────
+//
+// The gate above checked tracking/ignore status BY PATH ONLY. A `.env` that
+// is a SYMLINK to a file outside the repo (e.g. `.env -> /outside/secrets.env`)
+// passes both checks — `git check-ignore -q .env` matches the symlink's own
+// path, same as for a regular file, and the symlink itself is untracked — so
+// the gate said "safe", and `env_set`'s `>> .env` followed the symlink and
+// appended the PAT to the file OUTSIDE the repo (reproduced). File TYPE must
+// be checked independently of tracking/ignore status, and first: `[ -L .env ]`
+// is true for a symlink regardless of what it points at or whether that
+// target exists.
+
+test('#1112 safe-gate: .env is a SYMLINK to a file outside the repo — unsafe, reason=symlink, even with a covering .gitignore', () => {
+  withRepo((dir) => {
+    const outside = mkdtempSync(join(tmpdir(), 'brain-1112-patguard-outside-'));
+    try {
+      const target = join(outside, 'secrets.env');
+      writeFileSync(target, 'EXISTING=1\n');
+      symlinkSync(target, join(dir, '.env'));
+      writeFileSync(join(dir, '.gitignore'), '.env\n'); // matches the symlink's path — irrelevant to the file-type check
+      const result = runSafeGate(dir);
+      assert.equal(result.status, 0, `stderr:\n${result.stderr}`);
+      assert.equal(result.stdout, 'false|symlink');
+      assert.equal(readFileSync(target, 'utf8'), 'EXISTING=1\n', 'the safe-gate itself must never write to the symlink target');
+    } finally {
+      removeTempTree(outside);
+    }
+  });
+});
+
+test('#1112 safe-gate: .env exists but is not a regular file (a directory) — unsafe, reason=notRegularFile', () => {
+  withRepo((dir) => {
+    mkdirSync(join(dir, '.env'));
+    writeFileSync(join(dir, '.gitignore'), '.env\n');
+    const result = runSafeGate(dir);
+    assert.equal(result.status, 0, `stderr:\n${result.stderr}`);
+    assert.equal(result.stdout, 'false|notRegularFile');
+  });
+});
+
 // ── pat-write-gate: the actual write decision ───────────────────────────────
 
-function runWriteGate(dir, { envSecretSafe, envSecretUnsafeReason = '', patValue }) {
+function runWriteGate(dir, { envSecretSafe, envSecretUnsafeReason = '', envSymlinkTarget = '', patValue }) {
   const script = [
     'set -euo pipefail',
     `cd "${dir}"`,
@@ -104,10 +144,13 @@ function runWriteGate(dir, { envSecretSafe, envSecretUnsafeReason = '', patValue
     `VCS_TOKEN="${patValue}"`,
     `ENV_SECRET_SAFE=${envSecretSafe}`,
     `ENV_SECRET_UNSAFE_REASON=${envSecretUnsafeReason}`,
+    `ENV_SYMLINK_TARGET="${envSymlinkTarget}"`,
     'I18N_BOOTSTRAP_PAT_SKIPPED=skipped',
     'I18N_BOOTSTRAP_PAT_SAVED="%s saved"',
     'I18N_BOOTSTRAP_PAT_TRACKEDREFUSED="%s NOT written — .env is already tracked by git. Untrack it first: git rm --cached .env, then re-run env:init."',
     'I18N_BOOTSTRAP_PAT_GITIGNOREREFUSED="%s NOT written — could not confirm .env is git-ignored. Fix .gitignore, then re-run env:init."',
+    'I18N_BOOTSTRAP_PAT_SYMLINKREFUSED="%s NOT written — .env is a symlink to %s; it must be a regular file. Replace it, then re-run env:init."',
+    'I18N_BOOTSTRAP_PAT_NOTREGULARFILEREFUSED="%s NOT written — .env exists but is not a regular file. Replace it, then re-run env:init."',
     WRITE_GATE,
   ].join('\n');
   return spawnSync('bash', ['-c', script], { cwd: dir, encoding: 'utf8' });
@@ -135,6 +178,35 @@ test('#1112 write-gate: the ignore check failing for another reason — the toke
     assert.ok(!existsSync(join(dir, '.env')), '.env must never be created by the write gate when unsafe');
     assert.doesNotMatch(result.stdout, /CANDIDATE_PAT_VALUE_NOT_REAL_00000000/);
     assert.match(result.stdout, /WARN:/);
+  });
+});
+
+test('#1112 write-gate: .env is a SYMLINK — the token is NOT written to the target, and the message names it', () => {
+  withRepo((dir) => {
+    const result = runWriteGate(dir, {
+      envSecretSafe: 'false',
+      envSecretUnsafeReason: 'symlink',
+      envSymlinkTarget: '/outside/secrets.env',
+      patValue: 'CANDIDATE_PAT_VALUE_NOT_REAL_00000000',
+    });
+    assert.equal(result.status, 0, `stderr:\n${result.stderr}`);
+    assert.doesNotMatch(result.stdout, /CANDIDATE_PAT_VALUE_NOT_REAL_00000000/, 'the pasted token must never appear written anywhere');
+    assert.match(result.stdout, /symlink/i);
+    assert.match(result.stdout, /\/outside\/secrets\.env/, 'the message must name the symlink target');
+    assert.match(result.stdout, /regular file/i);
+  });
+});
+
+test('#1112 write-gate: .env exists but is not a regular file — the token is NOT written', () => {
+  withRepo((dir) => {
+    const result = runWriteGate(dir, {
+      envSecretSafe: 'false',
+      envSecretUnsafeReason: 'notRegularFile',
+      patValue: 'CANDIDATE_PAT_VALUE_NOT_REAL_00000000',
+    });
+    assert.equal(result.status, 0, `stderr:\n${result.stderr}`);
+    assert.doesNotMatch(result.stdout, /CANDIDATE_PAT_VALUE_NOT_REAL_00000000/);
+    assert.match(result.stdout, /regular file/i);
   });
 });
 
