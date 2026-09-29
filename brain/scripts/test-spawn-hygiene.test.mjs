@@ -452,7 +452,14 @@ const ALLOWLIST = [
   { file: 'brain/scripts/bootstrap.env-gitignore.test.mjs', entrypoint: '<unresolved>', line: 60, reason: 'no-vcs-capability' },
   { file: 'brain/scripts/bootstrap.memory-backend-case.test.mjs', entrypoint: '<unresolved>', line: 89, reason: 'no-vcs-capability' },
   { file: 'brain/scripts/bootstrap.vcs-provider-validate.test.mjs', entrypoint: '<unresolved>', line: 66, reason: 'no-vcs-capability' },
-  { file: 'brain/scripts/brain-to-engram.test.mjs', entrypoint: '<unresolved>', line: 140, reason: 'no-vcs-capability' },
+  { file: 'brain/scripts/brain-to-engram.test.mjs', entrypoint: '<unresolved>', line: 141, reason: 'no-vcs-capability' },
+
+  // ── #1112 cold-review follow-up (blockers 2/3): more bootstrap.sh
+  //    fragments, lifted verbatim into scratch/fixture dirs — none imports
+  //    or calls a VCS/gh port.
+  { file: 'brain/scripts/bootstrap.memory-backend-validate.test.mjs', entrypoint: '<unresolved>', line: 56, reason: 'no-vcs-capability' },
+  { file: 'brain/scripts/bootstrap.pat-secret-guard.test.mjs', entrypoint: '<unresolved>', line: 58, reason: 'no-vcs-capability' },
+  { file: 'brain/scripts/bootstrap.pat-secret-guard.test.mjs', entrypoint: '<unresolved>', line: 113, reason: 'no-vcs-capability' },
 ];
 
 function validateAllowlist(entries) {
