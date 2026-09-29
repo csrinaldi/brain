@@ -630,11 +630,17 @@ if (op === "ship") {
     // (called internally by `shipLane`) tags on the thrown error (A9, A5 —
     // same two tags the "collect" op's own catch above passes through)
     // — everything else here is a genuine ship-specific failure.
+    // #1119: `prLookupFailed` is thrown from two call sites with opposite
+    // push states — `decidePr()`'s own lookup always runs BEFORE the push
+    // (D4), so nothing was ever pushed; `createPr()`'s one-shot re-scan only
+    // ever runs AFTER the push step, so a real push may already have landed.
+    // `err.pushed` (set at both throw sites, ship.mjs) picks the honest key
+    // for each — never a single message claiming one outcome for both.
     const key = err?.raced ? "raced"
       : err?.badHost ? "badHost"
       : err?.diverged ? "diverged"
       : err?.pushFailed ? "pushFailed"
-      : err?.prLookupFailed ? "prLookupFailed"
+      : err?.prLookupFailed ? (err.pushed ? "prLookupFailedAfterPush" : "prLookupFailed")
       : err?.prCreateFailed ? "prCreateFailed"
       : "failed";
     console.error(`memory/cli: ${await t(`memory.ship.${key}`, { message: err.message })}`);

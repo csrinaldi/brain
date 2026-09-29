@@ -425,7 +425,14 @@ export default {
   'memory.ship.identityAmbient':  'BRAIN_MEMORY_TOKEN is not set — this run authenticated with the ambient session credential.',
   'memory.ship.diverged':         '✗ ship failed — {ref} diverged from origin; nothing was forced. {message}',
   'memory.ship.pushFailed':       '✗ ship failed — the push did not land. {message}',
-  'memory.ship.prLookupFailed':   '✗ ship failed — the pull request lookup could not run, so its existence is uncomputable; the push already landed and is durable. {message}',
+  // #1119: this lookup runs before the push (D4) — a failure here means
+  // nothing was pushed, not that the push landed. Retrying is safe: the
+  // next run starts over from the same unpushed state.
+  'memory.ship.prLookupFailed':   '✗ ship failed — the pull request lookup could not run, so its existence is uncomputable; nothing was pushed this run. Retry once the lookup succeeds. {message}',
+  // #1119: distinct from `prLookupFailed` above — this is the one-shot
+  // re-scan that only runs AFTER the push already landed, so unlike the
+  // pre-push lookup failure, the push here is real and durable.
+  'memory.ship.prLookupFailedAfterPush': '✗ ship failed — the push already landed, but the pull request could not be found afterward to confirm its number. Retry is safe — the next run reconciles it. {message}',
   'memory.ship.prCreateFailed':   '✗ ship failed — the pull request could not be created. {message}',
   'memory.ship.prNumberUnknown':  'the pull request is open but its number could not be derived — auto-merge was skipped; the next run recovers it.',
   // R8 REVERSAL (#920 -> #936, D4): a branch whose only pull request was

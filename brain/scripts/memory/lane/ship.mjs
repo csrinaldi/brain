@@ -196,6 +196,12 @@ async function decidePr({ vcs, project, branch }) {
   } catch (err) {
     const e = new Error(`memory.ship.prLookupFailed: mrList failed — ${err.message}`);
     e.prLookupFailed = true;
+    // #1119: this call always runs before the push (D4's own ordering,
+    // enforced by this function's call site below, line ~400 vs the push at
+    // ~412) — so a throw here can never mean anything landed. Tagged
+    // explicitly rather than left to be guessed downstream, so the i18n
+    // message key chosen in cli.mjs never has to re-derive it.
+    e.pushed = false;
     throw e;
   }
   const matches = list.filter((m) => m.headBranch === branch);
@@ -207,6 +213,7 @@ async function decidePr({ vcs, project, branch }) {
   if (newest.state == null || newest.merged == null) {
     const e = new Error(`memory.ship.prLookupFailed: mrList's item #${newest.number} for ${branch} is missing state/merged`);
     e.prLookupFailed = true;
+    e.pushed = false; // #1119: same reasoning as the throw above — pre-push.
     throw e;
   }
   if (newest.state === 'closed' && newest.merged === false) {
@@ -222,8 +229,15 @@ async function decidePr({ vcs, project, branch }) {
 /** createPr() — A1 step 5, the `action: 'create'` half of `decidePr()`'s
  * decision. Unchanged from the pre-#936 `mrCreate` + one-shot re-scan
  * sequence — only the caller now decides WHETHER to reach this, before the
- * push, rather than always falling through to it after. */
-async function createPr({ vcs, project, branch, title, body }) {
+ * push, rather than always falling through to it after.
+ *
+ * `pushed` (#1119) is threaded through purely for error reporting: unlike
+ * `decidePr()`'s own lookup (always pre-push), THIS function is only ever
+ * reached after shipLane's push step has already run — so a rescan failure
+ * here can genuinely mean the push already landed. `pushed` carries the
+ * real, caller-observed outcome of that push step (`false` when nothing was
+ * pending) rather than assuming it always ran. */
+async function createPr({ vcs, project, branch, title, body, pushed }) {
   const created = await vcs.mrCreate({ project, title, body, head: branch, base: 'main', labels: [] });
   if (!created.url) {
     const e = new Error(`memory.ship.prCreateFailed: mrCreate failed — ${created.error ?? 'unknown error'}`);
@@ -239,6 +253,7 @@ async function createPr({ vcs, project, branch, title, body }) {
     } catch (err) {
       const e = new Error(`memory.ship.prLookupFailed: the one-shot mrList re-scan failed — ${err.message}`);
       e.prLookupFailed = true;
+      e.pushed = pushed;
       throw e;
     }
     const rescanFound = rescan.find((m) => m.headBranch === branch);
@@ -430,7 +445,7 @@ export async function shipLane({
 
   const pr = decision.action === 'reuse'
     ? { number: decision.number, url: null }
-    : await createPr({ vcs, project, branch, title, body });
+    : await createPr({ vcs, project, branch, title, body, pushed });
 
   // Both derivations (URL parse + the one-shot mrList re-scan) failing
   // leaves the PR open and unarmed — NOT fatal, per spec.md's own scenario

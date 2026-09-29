@@ -232,7 +232,7 @@ test('reconcile-only path (M1 shape): mrList throwing is still fatal prLookupFai
       root: '/repo', project: 'x/y', tier: 'lite', host: 'test-host', date: '2026-09-09',
       collect: fakeCollect({ commit: null }), git, vcs,
     }),
-    (err) => { assert.equal(err.prLookupFailed, true); return true; },
+    (err) => { assert.equal(err.prLookupFailed, true); assert.equal(err.pushed, false, '#1119: decidePr\'s own lookup always runs before the push'); return true; },
   );
   assert.equal(vcsCalls.mrCreate, 0);
 });
@@ -609,7 +609,7 @@ test('D4: the highest-numbered match\'s state/merged is null (uncomputable) ⇒ 
       root: '/repo', project: 'x/y', tier: 'lite', host: 'test-host', date: '2026-09-09',
       collect: fakeCollect(), git, vcs,
     }),
-    (err) => { assert.equal(err.prLookupFailed, true); return true; },
+    (err) => { assert.equal(err.prLookupFailed, true); assert.equal(err.pushed, false, '#1119: decidePr\'s own lookup always runs before the push'); return true; },
   );
   assert.equal(vcsCalls.mrCreate, 0);
   assert.ok(!calls.some((a) => a[0] === 'push'), 'an uncomputable PR state must fail closed before any push');
@@ -852,10 +852,40 @@ test('mrList throwing is fatal: exit non-zero, mrCreate never called, and — D4
 
   await assert.rejects(
     () => shipLane({ root: '/repo', project: 'x/y', tier: 'lite', host: 'test-host', date: '2026-09-09', collect: fakeCollect(), git, vcs }),
-    (err) => { assert.equal(err.prLookupFailed, true); return true; },
+    (err) => { assert.equal(err.prLookupFailed, true); assert.equal(err.pushed, false, '#1119: decidePr\'s own lookup always runs before the push'); return true; },
   );
   assert.equal(vcsCalls.mrCreate, 0);
   assert.ok(!calls.some((a) => a[0] === 'push'), 'D4 moves the PR lookup before the push — a lookup failure must never let a push through first');
+});
+
+test('#1119: unlike decidePr\'s own lookup, createPr\'s one-shot re-scan only ever runs AFTER the push — a failure there is tagged pushed:true', async () => {
+  const { git, calls } = fakeGit([...surveyOkRules(), { match: (a) => a[0] === 'push', result: ok() }]);
+  let mrListCalls = 0;
+  const { vcs, calls: vcsCalls } = fakeVcs({
+    mrList: async () => {
+      mrListCalls++;
+      // Call 1 is decidePr()'s own lookup (state:'all', pre-push) — an empty
+      // list picks action:'create', which reaches the push step and then
+      // createPr(). Call 2 is createPr()'s one-shot re-scan (state:'open',
+      // triggered below by an unparseable mrCreate URL) — THIS is the one
+      // that fails, strictly after the push above already ran.
+      if (mrListCalls === 1) return [];
+      throw new Error('gh api pulls failed: rate limited');
+    },
+    mrCreate: async () => { vcsCalls.mrCreate++; return { url: 'https://example.invalid/unparseable' }; },
+  });
+
+  await assert.rejects(
+    () => shipLane({ root: '/repo', project: 'x/y', tier: 'lite', host: 'test-host', date: '2026-09-09', collect: fakeCollect(), git, vcs }),
+    (err) => {
+      assert.equal(err.prLookupFailed, true);
+      assert.equal(err.pushed, true, '#1119: the push rule above already ran by the time createPr\'s re-scan is reached');
+      return true;
+    },
+  );
+  assert.equal(mrListCalls, 2, 'the failure must be the re-scan (call 2), not the initial decidePr lookup (call 1)');
+  assert.equal(vcsCalls.mrCreate, 1, 'mrCreate must have run before the re-scan — proving the push already happened too');
+  assert.ok(calls.some((a) => a[0] === 'push'), 'the push must have actually run before this failure, unlike the decidePr case above');
 });
 
 // ── Requirement: credential threading ────────────────────────────────────────
