@@ -100,6 +100,33 @@ test('buildImportPayload: a synthetic session row exists for each project presen
   }
 });
 
+// #1116 (parent #864, found by #1081 F6): engram 2.x's `import` REJECTS a
+// session row with no `directory` — "pulled session directory is invalid:
+// directory is required" — so a deferred record can never reach a FRESH
+// engram 2.x store. Measured directly against the real binary (issue #1081
+// evidence 45, reproduced again in this change's own verification) and
+// against engram 1.20.0, which accepts the same field as harmless extra
+// metadata. `root` is the repo root already threaded through every other
+// `root`-accepting export in this file (see `repoRoot` at the top of
+// engram.mjs) — reusing it as the session's `directory` costs nothing new.
+test('buildImportPayload: every session row carries directory = root — engram 2.x rejects an import session with none (#1116)', () => {
+  const { payload } = buildImportPayload({
+    records: [rec('rec-aaa', { project: 'brain' }), rec('rec-bbb', { project: 'other' })],
+    existingTopicKeys: new Set(),
+    startedAt: '2026-08-04 12:00:00',
+    root: '/fake/repo/root',
+  });
+
+  assert.ok(payload.sessions.length > 0, 'fixture must produce at least one session to check');
+  for (const s of payload.sessions) {
+    assert.equal(
+      s.directory,
+      '/fake/repo/root',
+      'a session with no directory is what makes engram 2.x refuse the whole import (#1116)',
+    );
+  }
+});
+
 test('buildImportPayload: the payload is in the shape engram import accepts', () => {
   const { payload } = buildImportPayload({
     records: [rec('rec-aaa')],

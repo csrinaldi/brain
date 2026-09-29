@@ -10,9 +10,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
-import { readFileSync } from 'node:fs';
+import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
-import { runSweep, openArchivePr } from './sweep.mjs';
+import { runSweep, openArchivePr, listChangeFolders } from './sweep.mjs';
 import { OUTCOME } from '../../lib/archive-sweep.mjs';
 
 /** Minimal fake fs sufficient for archiveChange over flat, spec-less dirs —
@@ -249,6 +251,41 @@ test('7.2.8: the rendered report always ends with "Part of #557."', async () => 
     logError: () => {},
   });
   assert.match(result.report, /Part of #557\.\s*$/);
+});
+
+// ── #1113: listChangeFolders — a missing openspec/changes/ is zero entries,
+// not a crash. A fresh consumer with no change folders yet must not make the
+// CLI throw an uncaught ENOENT (that crash is what filed the false alarm on
+// every clean merge, per #1113's brain-test reproduction). Any OTHER read
+// failure (e.g. the path exists but is a file, not a directory) still
+// surfaces — only "the root itself does not exist" is the harmless case. ──
+
+test('#1113: listChangeFolders returns [] when openspec/changes/ does not exist (fresh consumer, no crash)', () => {
+  const missingRoot = fileURLToPath(new URL(`./__fixture-missing-${process.pid}/`, import.meta.url));
+  assert.deepEqual(listChangeFolders(missingRoot), []);
+});
+
+test('#1113: listChangeFolders lists only directories, ignoring files, under an existing root', () => {
+  const root = mkdtempSync(join(tmpdir(), 'sweep-list-'));
+  try {
+    mkdirSync(join(root, 'issue-1-a'));
+    mkdirSync(join(root, 'issue-2-b'));
+    writeFileSync(join(root, 'README.md'), 'not a change');
+    assert.deepEqual(listChangeFolders(root).sort(), ['issue-1-a', 'issue-2-b']);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('#1113: listChangeFolders rethrows a non-ENOENT error (e.g. the root is a file, not a directory)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'sweep-list-file-'));
+  const filePath = join(dir, 'not-a-dir');
+  writeFileSync(filePath, 'x');
+  try {
+    assert.throws(() => listChangeFolders(filePath));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 // ── 7.2.9: no git, no gh — sweep.mjs's module source never shells out ──────

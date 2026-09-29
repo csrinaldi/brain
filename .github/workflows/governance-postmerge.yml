@@ -470,8 +470,12 @@ jobs:
           # exactly the node/bash boundary the revert step already draws.
           # Never gates advance/revert: it writes no cursor, and its script is
           # total (exits 0 on every path but a killed runner — design D5).
+          # stderr is merged in (2>&1): on the fail-closed exit-3 path (design
+          # D3) the real cause is logged via console.error, not console.log —
+          # capturing stdout alone left the alarm's "Sweep output" block empty
+          # on every genuine failure, not just the #1113 crash case (#1113).
           set +e
-          sweep_out="$(node brain/scripts/governance/postmerge/sweep.mjs --apply --report "$RUNNER_TEMP/sweep-body.md")"
+          sweep_out="$(node brain/scripts/governance/postmerge/sweep.mjs --apply --report "$RUNNER_TEMP/sweep-body.md" 2>&1)"
           sweep_code=$?
           set -e
 
@@ -484,7 +488,7 @@ jobs:
           if [ "$sweep_code" -ne 0 ]; then
             label="governance:archive-sweep-failed"
             {
-              echo "The post-merge archive sweep could not complete — the selector could not read every issue state, or an archive write itself failed. NOTHING was archived this run (design D3, fail-closed)."
+              echo "The post-merge archive sweep could not complete — the selector could not read every issue state, an archive write itself failed, or the sweep exited on an unexpected error (the output below names which). NOTHING was archived this run (design D3, fail-closed)."
               echo ""
               echo "Sweep output:"
               echo '```'

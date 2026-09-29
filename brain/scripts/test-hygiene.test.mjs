@@ -393,13 +393,13 @@ const ROOT_ALLOWLIST = [
   // (`() => fixtureRecords(...)`), so the real repoRoot value is
   // constructed but never dereferenced against the filesystem. Verified by
   // reading engram.mjs's importMemory body, not assumed.
-  { file: 'brain/scripts/axes/memory/adapters/engram.import.test.mjs', line: 220, fn: 'importMemory' },
-  { file: 'brain/scripts/axes/memory/adapters/engram.import.test.mjs', line: 225, fn: 'importMemory' },
-  { file: 'brain/scripts/axes/memory/adapters/engram.import.test.mjs', line: 257, fn: 'importMemory' },
-  { file: 'brain/scripts/axes/memory/adapters/engram.import.test.mjs', line: 282, fn: 'importMemory' },
-  { file: 'brain/scripts/axes/memory/adapters/engram.import.test.mjs', line: 283, fn: 'importMemory' },
-  { file: 'brain/scripts/axes/memory/adapters/engram.import.test.mjs', line: 290, fn: 'importMemory' },
-  { file: 'brain/scripts/axes/memory/adapters/engram.import.test.mjs', line: 299, fn: 'importMemory' },
+  { file: 'brain/scripts/axes/memory/adapters/engram.import.test.mjs', line: 248, fn: 'importMemory' },
+  { file: 'brain/scripts/axes/memory/adapters/engram.import.test.mjs', line: 253, fn: 'importMemory' },
+  { file: 'brain/scripts/axes/memory/adapters/engram.import.test.mjs', line: 285, fn: 'importMemory' },
+  { file: 'brain/scripts/axes/memory/adapters/engram.import.test.mjs', line: 310, fn: 'importMemory' },
+  { file: 'brain/scripts/axes/memory/adapters/engram.import.test.mjs', line: 311, fn: 'importMemory' },
+  { file: 'brain/scripts/axes/memory/adapters/engram.import.test.mjs', line: 318, fn: 'importMemory' },
+  { file: 'brain/scripts/axes/memory/adapters/engram.import.test.mjs', line: 327, fn: 'importMemory' },
   // save-parity.test.mjs: every `save()`/`engramSave()` call passes root
   // through a local `pinnedSeams(root)`/`noActorSeams(root)` helper that
   // DOES set `root` on the returned seams object — the same "same-file
