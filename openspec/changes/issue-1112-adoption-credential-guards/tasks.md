@@ -179,3 +179,77 @@
       store or real remote touched.
 - [x] 7.8 `npm test` (full suite), `npm run brain:repo:check`, `npm run
       brain:nav`: all green/exit 0.
+
+## Phase 8 — cold review round 3, 2026-09-29 (1 blocker, 1 should-fix, 1 nit)
+
+`pre-commit` and its docs explicitly OUT OF SCOPE this round — a third
+finding (the first-commit exemption's rationale) is back with the
+maintainer.
+
+- [x] 8.1 BLOCKER — symlinked `.env`. Extended
+      `bootstrap.pat-secret-guard.test.mjs`: safe-gate symlink case
+      (unsafe, reason=symlink, even with a covering `.gitignore`) and
+      non-regular-file case (a directory in `.env`'s place); write-gate
+      symlink case (token never written to the target, message names the
+      target) and non-regular-file case. RED (4/4 new cases). Fixed:
+      `[ -L .env ]` checked first (before `-f`, which follows symlinks),
+      then `-e && ! -f` for any other non-regular file;
+      `ENV_SYMLINK_TARGET` captured via `readlink`. Write-gate `case`
+      extended with `symlink`/`notRegularFile` arms;
+      `bootstrap.pat.symlinkRefused`/`.notRegularFileRefused` added to
+      both i18n catalogs. GREEN (11/11). NIT also folded into this same
+      edit: the gate's rationale comment now notes `.git/info/exclude`/
+      global `core.excludesFile` count as ignored for THIS CLONE ONLY,
+      and that the gate runs once, before the prompts.
+- [x] 8.2 SHOULD-FIX (class C) — a refused write was a clean exit.
+      `bootstrap.required-failure.test.mjs`: the write-gate records
+      exactly one `REQUIRED_FAILURES` entry per refusal reason (4 cases),
+      none for a safe write or a skipped/empty prompt (2 cases); the
+      summary fragment exits non-zero and names the failure when
+      non-empty, falls through untouched when empty (2 cases). RED
+      (missing `BEGIN/END required-failure-summary` marker). Fixed:
+      `REQUIRED_FAILURES=()` declared beside `MISSING_OPTIONAL` (a
+      distinct list, on purpose — see design D9); write-gate appends to
+      it on every refusal where `VCS_TOKEN` was non-empty; §9's
+      `required-failure-summary` prints the list and `exit 1`s when
+      non-empty. `bootstrap.done.requiredFailed` added to both catalogs.
+      GREEN (8/8).
+- [x] 8.3 End-to-end proof (should-fix 2's own ask): a real interactive
+      run, not just fragments. Added `brain/scripts/__fixtures__/pty-drive.py`
+      (python3 — already a required base dependency; Node has no built-in
+      pty) and `bootstrap.pat-refusal-e2e.test.mjs`: seeds a consumer
+      fixture with a TRACKED `.env`, drives the REAL `bootstrap.sh` under
+      a real pty, answers its two PAT prompts (open-browser: no;
+      paste-PAT: a fake token), asserts exit non-zero, the token nowhere
+      on disk in the fixture, and the summary naming the refusal. HOME/
+      ENGRAM_DATA_DIR redirected into the fixture's own temp tree;
+      GH_CONFIG_DIR pointed at a nonexistent path, GH_TOKEN/GITHUB_TOKEN
+      cleared. Stable across 3 repeated runs (~3.5-4.3s each). One
+      residual documented in the test's own header, not chased further:
+      under the real pty specifically, `gh auth status` still reports
+      this sandbox's ambient real login despite the same isolation env
+      vars working correctly for a plain (non-pty) child process —
+      read-only, no push, no token use; the test asserts nothing about
+      that line.
+- [x] 8.4 `test-spawn-hygiene.test.mjs`: one shifted spawn
+      (`bootstrap.pat-secret-guard.test.mjs`, 113→156, from the new
+      symlink tests) plus two new (`bootstrap.required-failure.test.mjs`,
+      lines 66/102). All `no-vcs-capability`. The e2e test's own `python3`
+      spawn is NOT a hit at all — `python3` isn't in the scanner's tracked
+      runtime list (`process.execPath`/`node`/`npm`/`bash`/`sh`), so no
+      allowlist entry was needed for it.
+- [x] 8.5 `proposal.md`/`spec.md`/`design.md` updated: D8 (symlink/
+      non-regular-file gate) and D9 (REQUIRED_FAILURES + e2e proof)
+      recorded; new spec requirements and scenarios (including the two
+      new symlink scenarios and the required-failure ones).
+- [x] 8.6 Safety: no mutating git command
+      (remote/config/stash/reset/checkout/worktree/fetch/push) or file
+      write against `/home/gandalf/IA/*` outside this worktree's own
+      commits; every fixture is a fresh `git init` under the OS temp dir.
+      No real engram store touched (`ENGRAM_DATA_DIR` redirected; the
+      fixture uses `MEMORY_BACKEND=plainfiles`, so no real `engram`
+      binary is even invoked). No real remote — the fixture has no
+      `origin`.
+- [x] 8.7 `npm test` (full suite: 6532 tests, 6529 pass, 0 fail, 3
+      skipped), `npm run brain:repo:check`, `npm run brain:nav`: all
+      green/exit 0.

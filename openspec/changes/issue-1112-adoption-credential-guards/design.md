@@ -158,6 +158,37 @@ reading into the same variable name would make this loop's own `case
 accidental collision a test's own marker-based fragment extraction (#340)
 cannot tell apart.
 
+**D8 — the fail-closed gate checks FILE TYPE, independently of and before
+tracking/ignore status (cold-review round 3, blocker).** D6's gate
+checked whether `.env` was tracked or ignored, both BY PATH — it never
+asked what `.env` actually WAS. A symlink (`.env -> /outside/secrets.env`)
+passes both of those checks exactly as a regular file would (the symlink
+itself is untracked, and `git check-ignore` matches the symlink's own
+path same as any other path), so the gate said "safe" and `env_set`'s
+`>> .env` followed the symlink, appending the PAT to a file OUTSIDE the
+repo entirely (reproduced). `[ -L .env ]` is checked FIRST, before `[ -f
+.env ]` (which follows symlinks and would misclassify a
+symlink-to-a-regular-file as safe); anything else that exists but is not
+a regular file (a directory, a FIFO, …) is refused the same way, under a
+distinct `notRegularFile` reason. The refusal message for a symlink names
+the target (`readlink .env`), because "must be a regular file" alone
+does not tell the operator what to go check.
+
+**D9 — a refused write is a REQUIRED failure, recorded separately from
+MISSING_OPTIONAL, and turns into a non-zero exit (cold-review round 3,
+should-fix, class C).** Before this, the gate's refusal was only ever a
+`warn` — the same soft signal already used for genuinely optional
+degradations (a missing `gh` binary, a failed `brain:memory:pull`).
+`MISSING_OPTIONAL`'s own name says what class it is for, and a VCS token
+the operator actually typed in, that `env:init` could not persist, is not
+in that class. `REQUIRED_FAILURES` is declared as its own array (next to
+`MISSING_OPTIONAL`, same top-of-file spot), appended to only inside the
+write-gate's refusal branch — never for the "operator skipped the prompt"
+case, which attempted nothing. §9's `required-failure-summary` prints the
+list in the same final summary a human reads AND exits 1 when it is
+non-empty, so a script whose last visible line still reads "Environment
+ready" cannot also be read as success by anything checking `$?`.
+
 ## Testing approach
 
 Every fix is a bash fragment or pure JS function LIFTED OUT OF the real
@@ -190,4 +221,26 @@ D6's two fragments (`env-secret-safe-gate`, `pat-write-gate`) and D7's
 (`memory-backend-validate`) follow the same lifted-fragment idiom, each
 proven against a real temp git repo where real tracked/ignored state
 matters (D6) or against piped stdin driving the same loop shape as
-`vcs-provider-validate` (D7).
+`vcs-provider-validate` (D7). D8's symlink/non-regular-file cases extend
+the same two D6 fragments with `symlinkSync`/`mkdirSync` fixtures (a real
+symlink pointing outside the repo, and a directory in `.env`'s place).
+
+D9's mechanism (`REQUIRED_FAILURES`, `required-failure-summary`) gets the
+same fragment-level proof — but the requirement itself ("the operator
+actually tried, bootstrap.sh actually refuses, actually exits non-zero")
+needed one thing the fragment tests cannot give: a genuine run of the
+WHOLE script reaching the write gate through real interactive input.
+§3's PAT prompt only fires when `[ -t 0 ]` is true, and piped stdin is
+never a TTY — so `bootstrap.pat-refusal-e2e.test.mjs` drives the real
+`bootstrap.sh` under an actual pseudo-tty
+(`__fixtures__/pty-drive.py`, using python3 — already a required base
+dependency, since Node has no built-in pty) against a fixture with a
+TRACKED `.env`, answering the two PAT-section prompts (open-browser: no;
+paste-PAT: a fake token) as a human would, and asserts the real exit
+code, the real summary text, and that the fake token lands nowhere on
+disk. One residual, documented in that test file's own header rather
+than worked around: under a real pty specifically (not a plain piped
+subprocess, where the same isolation env vars work as expected), `gh
+auth status` in this sandbox still reports the ambient session's real
+login. It is read-only (no push, no token use) and the test asserts
+nothing about that line.

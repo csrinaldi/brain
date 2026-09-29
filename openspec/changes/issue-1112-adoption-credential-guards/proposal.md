@@ -108,3 +108,39 @@ The three original options, for the record:
   from the same main checkout is still refused, unchanged; an orphan
   branch created in a repo that already has history is judged by checks
   1/2 exactly as any other commit — never exempted.
+- `env:init` also refuses a symlinked or otherwise non-regular `.env` —
+  the same fail-closed gate, checking file TYPE first, independently of
+  tracking/ignore status.
+- A refused PAT write is recorded as a REQUIRED failure (not folded into
+  the optional-degradation list), named in the final summary, and turns
+  the exit code non-zero — proven end to end under a real interactive
+  run, not merely at the fragment level.
+
+## Cold review, round 3 (2026-09-29)
+
+Two more findings, on top of the item-4 ruling above (which is unchanged
+and not touched by this round — pre-commit and its docs were explicitly
+out of scope for round 3, pending a separate maintainer answer on the
+first-commit exemption's rationale):
+
+1. **BLOCKER — symlinked `.env`.** The blocker-2 gate (D6) checked
+   tracking/ignore status by PATH only, never asking what `.env` actually
+   WAS. A `.env -> /outside/secrets.env` symlink, with `.env` matched by
+   `.gitignore`, passed both checks — `git check-ignore` matches the
+   symlink's own path same as any regular file — so the gate said "safe"
+   and `env_set`'s `>> .env` followed the symlink, writing the PAT outside
+   the repo entirely (reproduced). Fixed: `[ -L .env ]` checked first
+   (before `-f`, which follows symlinks), and anything that exists but is
+   not a regular file is refused the same way. See `design.md` D8.
+2. **SHOULD-FIX (class C) — a refused write was still a clean exit.** The
+   gate only ever `warn`ed on refusal, the same signal used for genuinely
+   optional degradations, so `env:init` still finished reading as a
+   successful setup. Fixed: `REQUIRED_FAILURES`, a list distinct from
+   `MISSING_OPTIONAL`, recorded only when an actual attempt was refused;
+   the final summary names it and the process exits non-zero. Proven end
+   to end under a real pty, not just at the fragment level — see
+   `design.md` D9.
+3. **NIT** — the gate's rationale comment now notes that `.git/info/exclude`
+   and a global `core.excludesFile` count as ignored for THIS CLONE ONLY
+   (never travel to a fresh clone), and that the whole gate runs once,
+   before any of the PAT-section prompts.

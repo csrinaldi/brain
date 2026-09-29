@@ -41,6 +41,38 @@ Cold-review finding (blocker 2), 2026-09-29: `git check-ignore` never reports a 
 - **WHEN** `.env` is untracked and ignored, and the operator provides a candidate token
 - **THEN** the token is written to `.env`, unchanged from before this fix
 
+### Requirement: `env:init` refuses a symlinked or non-regular `.env`
+
+Cold-review round 3 blocker, 2026-09-29: the gate above checked tracking/ignore status by PATH only. A `.env` that is a symlink to a file outside the repo passed both checks (the symlink itself is untracked, and `git check-ignore` matches the symlink's own path) — `env_set`'s `>> .env` then followed the symlink and wrote the PAT outside the repo entirely (reproduced).
+
+#### Scenario: `.env` is a symlink to a file outside the repo
+- **WHEN** `.env` is a symlink (`.env -> /outside/secrets.env`), even with a `.gitignore` pattern matching `.env`, and the operator provides a candidate token
+- **THEN** the token is never written to the symlink's target, and a message names the target and says `.env` must be a regular file
+
+#### Scenario: `.env` exists but is not a regular file
+- **WHEN** `.env` exists as something other than a regular file or a symlink (e.g. a directory) and the operator provides a candidate token
+- **THEN** the token is never written
+
+### Requirement: a refused PAT write is a required failure, not a clean exit
+
+Cold-review round 3, class C, 2026-09-25: a refused write only ever `warn`ed — the same soft signal already used for optional degradations — so `env:init` still finished reading as a successful setup.
+
+#### Scenario: the refusal is recorded separately from optional degradations
+- **WHEN** the write-gate refuses a token the operator actually provided (tracked, symlink, not-a-regular-file, or any other ignore-check failure)
+- **THEN** the refusal is recorded in a list distinct from the one used for optional/degraded steps
+
+#### Scenario: an unattempted write records nothing
+- **WHEN** the operator leaves the PAT prompt empty (skips it)
+- **THEN** no required failure is recorded — nothing was attempted
+
+#### Scenario: the final summary names the failure and the process exits non-zero
+- **WHEN** any required failure was recorded during the run
+- **THEN** the final summary prints it, and `env:init` exits with a non-zero status
+
+#### Scenario: end to end, under a real interactive run
+- **WHEN** the real `bootstrap.sh` is driven under a real TTY against a fixture whose `.env` is already tracked, and the operator types a candidate token at the real prompt
+- **THEN** the token never appears anywhere on disk in the fixture, the summary names the refusal, and the process exits non-zero
+
 ### Requirement: `vcs.provider` accepts only `github` or `gitlab`
 
 #### Scenario: an invalid answer is rejected and never persisted
