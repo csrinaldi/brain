@@ -299,6 +299,7 @@ export default {
   'tools.gentleai.configFailed':     'gentle-ai install failed — retry manually',
 
   // §5 Summary — {tool} = binary name
+  'tools.summary.incomplete':    'Setup INCOMPLETE — failed steps: {steps}. Fix the errors above and re-run.',
   'tools.summary.section':       'Installation complete',
   'tools.summary.nextStep':      'Next step:',
   'tools.summary.checkVersions': 'Check versions:',

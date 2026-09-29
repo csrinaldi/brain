@@ -265,6 +265,7 @@ export default {
   'tools.gentleai.configured':       'ecosistema configurado',
   'tools.gentleai.configFailed':     'gentle-ai install falló — reintentá a mano',
 
+  'tools.summary.incomplete':    'Instalación INCOMPLETA — pasos fallidos: {steps}. Corregí los errores de arriba y volvé a correr.',
   'tools.summary.section':       'Instalación completa',
   'tools.summary.nextStep':      'Siguiente paso:',
   'tools.summary.checkVersions': 'Verifica versiones:',
