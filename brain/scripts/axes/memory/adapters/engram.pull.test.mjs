@@ -111,6 +111,17 @@ test('pullMemory: pull → import in order', async () => {
   );
 });
 
+test('#1116: pullMemory hands its own root to the import, so the session directory is the pulled tree', async () => {
+  let seen;
+  await pullMemory({
+    root: '/fake/root',
+    _gitPull: () => {},
+    _rebuildIndex: () => ({ count: 0 }),
+    _import: (opts) => { seen = opts?.root; },
+  });
+  assert.equal(seen, '/fake/root', 'a root override that stops at the pull hydrates engram with the wrong directory');
+});
+
 // ---------------------------------------------------------------------------
 // pullMemory (c) failing git pull → error propagated, import NOT called
 // ---------------------------------------------------------------------------

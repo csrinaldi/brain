@@ -304,7 +304,7 @@ export function buildImportPayload({
   records,
   existingTopicKeys,
   startedAt,
-  root,
+  root = repoRoot,
   _importRecord = importRecord,
 }) {
   // The delta. A record already in engram is SKIPPED rather than re-sent,
@@ -567,7 +567,7 @@ export async function pullMemory({
   });
 
   // Step 3: hydrate local engram from the newly merged .memory/.
-  await _import();
+  await _import({ root });
 
   return { indexCount: count, duplicates: normalizeDuplicates(duplicates) };
 }
