@@ -388,3 +388,16 @@ test('ensureBrainConfig: no origin (null host) → creates file but empty provid
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// #1127 (class C): `env:init` ran `ensure` over a brain.config.json that could not be
+// parsed and exited 0 in silence; every later step then read an empty config.
+test('ensureBrainConfig (#1127): an existing brain.config.json that cannot be parsed is reported, not silently skipped', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'brain-ensure-corrupt-'));
+  try {
+    writeFileSync(join(dir, 'brain.config.json'), '{ not json');
+    const result = ensureBrainConfig(dir, { identity: { host: 'github.com', project: 'owner/repo' } });
+    assert.equal(result.created, false);
+    assert.match(result.error ?? '', /parse|JSON/i);
+    assert.equal(readFileSync(join(dir, 'brain.config.json'), 'utf8'), '{ not json', 'the file is left untouched');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
