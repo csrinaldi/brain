@@ -3,6 +3,8 @@
 # main checkout + refuse a byte-identical .memory/records/ restage + repo:check.
 #
 # Hard checks (locally unambiguous — no false positives):
+#   0. Unborn-HEAD exemption from checks 1 and 2 (issue #1112 finding 4,
+#      maintainer ruling 2026-09-29).
 #   1. Block direct commit to main or master (PRs only).
 #   2. Refuse a task branch in the MAIN CHECKOUT (issue #788, #782 slice 2).
 #   3. staged-records-check.mjs (issue #701) — refuses a staged
@@ -17,6 +19,27 @@
 # Installed via core.hooksPath = brain/scripts/hooks.
 
 command -v node >/dev/null 2>&1 || exit 0
+
+# ── 0. Unborn-HEAD exemption from checks 1 and 2 (issue #1112, finding 4) ───
+#
+# `env:init` sets core.hooksPath (bootstrap.sh §7) before the operator makes
+# the adoption commit, so checks 1 and 2 below are both live against the only
+# checkout that exists. Check 1 blocks whenever the default branch happens to
+# be literally named "main"/"master"; check 2 blocks EVERY commit from the
+# main checkout, unconditionally, regardless of branch. `git worktree add`
+# itself requires at least one commit to exist — it cannot create a worktree
+# off an unborn branch — so worktree isolation (what check 2 exists to force)
+# is structurally impossible for a repository's very first commit. Maintainer
+# ruling, 2026-09-29: exempt that one commit.
+#
+# Detected via `git rev-parse --verify -q HEAD` failing — NOT by branch name,
+# which a fresh repo may set to anything. Silent, closed set: `-q` suppresses
+# git's own error text, and the command's only observable effect here is its
+# exit status. Self-closing: the moment this commit lands, HEAD is born and
+# every later commit is judged by checks 1 and 2 exactly as before.
+if ! git rev-parse --verify -q HEAD >/dev/null 2>&1; then
+  echo "✓ pre-commit: HEAD is unborn (no commit exists yet) — worktree isolation is impossible for this commit; allowing it (issue #1112)."
+else
 
 # ── 1. Block direct commits to main/master ──────────────────────────────────
 branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
@@ -69,6 +92,8 @@ if [ -n "$git_dir" ] && [ "$git_dir" = "$git_common_dir" ]; then
   echo "  (bypass: git commit --no-verify)"
   echo ""
   exit 1
+fi
+
 fi
 
 repo_root=$(git rev-parse --show-toplevel)
