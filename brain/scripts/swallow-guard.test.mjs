@@ -450,6 +450,8 @@ test('#1127 scanner: shell evasions round 2 — quote after true, || { true; }, 
 test('#1127 scanner: two catches on ONE line each need their own marker', () => {
   const src = 'try { a(); } catch { /* swallow-ok: the first probe is advisory only */ } try { b(); } catch { }\n';
   assert.deepEqual(verdictsOf('x.mjs', src), ['optional', 'unexplained']);
+  const laterMarker = 'try { a(); } catch { } try { b(); } catch { /* swallow-ok: only the second probe is advisory */ }\n';
+  assert.deepEqual(verdictsOf('x.mjs', laterMarker), ['unexplained', 'optional'], 'the second catch\'s marker is not the first\'s');
   const both = 'try { a(); } catch { /* swallow-ok: the first probe is advisory only */ } try { b(); } catch { /* swallow-ok: the second probe is advisory too */ }\n';
   assert.deepEqual(verdictsOf('x.mjs', both), ['optional', 'optional']);
 });

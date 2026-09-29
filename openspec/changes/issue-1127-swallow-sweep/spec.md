@@ -82,3 +82,20 @@ that copies before failing.
 
 `|| true` / `|| :` followed by a quote, brace or paren, `|| { true; }`, `|| (true)`,
 `if ! cmd; then :; fi` (one line or spread) are sites; two catches on one line each need their own marker.
+
+## REQ-1127-12 — a bootstrap step that leaves the environment unusable is a REQUIRED failure
+
+SDD init, `core.hooksPath`, engram setup, plainfiles setup, memory pull, memory index, the
+provider-override write and a failing VCS login (with a token present) MUST append to #1155's
+`REQUIRED_FAILURES` (summary line, exit 1). The board listing, an absent token and a browser that
+does not open remain optional, each with a stated reason.
+**Falsifiable by**: a failing `brain:memory:pull` with `env:init` still exiting 0.
+
+## REQ-1127-13 — `ensure` reports an unparseable `brain.config.json`
+
+`brain-config.mjs ensure` MUST print the cause and exit 1 when an existing config cannot be parsed,
+and MUST leave the file untouched.
+
+## REQ-1127-14 — no owned-elsewhere allowlist entry outlives its owner
+
+`OWNED_ELSEWHERE` is empty; a stale entry fails the guard.

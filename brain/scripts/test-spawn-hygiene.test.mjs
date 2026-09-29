@@ -366,6 +366,8 @@ const ALLOWLIST = [
   { file: 'brain/scripts/hooks/commit-msg.test.mjs', entrypoint: 'brain/scripts/hooks/commit-msg', reason: 'no-vcs-capability' },
   { file: 'brain/scripts/hooks/hooks.attribution-parity.test.mjs', entrypoint: 'brain/scripts/hooks/commit-msg', reason: 'no-vcs-capability' },
   // #1127: bash runs install-tools.sh's provider-resolution and summary snippets, lifted verbatim, in a scratch dir with a gentle-ai shim — no apt, no network.
+  // #1127 slice A: bash runs bootstrap.sh's step snippets, lifted verbatim, against failing stand-in scripts in a scratch dir — no git remote, no network.
+  { file: 'brain/scripts/bootstrap.required-steps.test.mjs', entrypoint: '<unresolved>', line: 55, reason: 'no-vcs-capability' },
   { file: 'brain/scripts/install-tools.test.mjs', entrypoint: '<unresolved>', line: 34, reason: 'no-vcs-capability' },
   { file: 'brain/scripts/install-tools.test.mjs', entrypoint: '<unresolved>', line: 93, reason: 'no-vcs-capability' }, // `command -v` lookups for the no-node PATH
   { file: 'brain/scripts/install-tools.test.mjs', entrypoint: '<unresolved>', line: 97, reason: 'no-vcs-capability' }, // the same snippet with node off PATH

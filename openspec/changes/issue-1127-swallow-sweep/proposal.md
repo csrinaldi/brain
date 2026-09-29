@@ -25,10 +25,9 @@ enforces.
 
 ## Scope boundary
 
-- `bootstrap.sh`, `hooks/pre-commit`, `memory/lib/reconcile-pull.mjs` are being rewritten in open
-  PRs #1155 and #1154. Their sites are inventoried (guard `OWNED_ELSEWHERE`, each with its owner)
-  and NOT edited here; the bootstrap fixes are slice-A, to land on top of #1155's
-  `REQUIRED_FAILURES` summary instead of a second mechanism beside it.
+- `bootstrap.sh` and `memory/lib/reconcile-pull.mjs` were being rewritten in #1155 / #1154 while this change
+  was built; both have merged, their sites are marked or fixed here, and the bootstrap steps append to
+  #1155's `REQUIRED_FAILURES` (slice A) rather than a second list.
 - `brain/core/**` and `brain/project/**` are untouched.
 
 ## Non-goals

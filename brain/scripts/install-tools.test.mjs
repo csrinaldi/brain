@@ -95,7 +95,7 @@ function noNodeRun(dir, config) {
   }
   writeFileSync(join(dir, 'brain.config.json'), config);
   const bash = spawnSync('sh', ['-c', 'command -v bash'], { encoding: 'utf8' }).stdout.trim();
-  const r = spawnSync(bash, ['-c', `${PRELUDE}${resolveVcs()}\necho "CLI=$VCS_CLI"`], {
+  const r = spawnSync(bash, ['-c', `${PRELUDE}${resolveVcs()}\necho "CLI=$VCS_CLI PROVIDER=$VCS_PROVIDER"`], {
     cwd: dir, encoding: 'utf8', env: { PATH: bin, HOME: dir, DBUS_SESSION_BUS_ADDRESS: '' },
   });
   return `${r.stdout}${r.stderr}`;
@@ -107,6 +107,10 @@ test('#1127 install-tools (no node): reads vcs.provider scoped to the vcs object
   assert.match(out, /text match/);
 }));
 
+test('#1127 install-tools (no node): the vcs object wins whichever order the file lists it in', () => inTmp((dir) => {
+  assert.match(noNodeRun(dir, '{"vcs": {"provider": "github"}, "other": {"provider": "gitlab"}}'), /CLI=gh/);
+}));
+
 test('#1127 install-tools (no node): an empty or missing provider takes the same gitlab default as the node path', () => inTmp((dir) => {
-  assert.match(noNodeRun(dir, '{"vcs": {"provider": ""}}'), /CLI=glab/);
+  assert.match(noNodeRun(dir, '{"vcs": {"provider": ""}}'), /PROVIDER=gitlab/, 'the same default value the node path uses, not an empty string');
 }));

@@ -21,14 +21,7 @@ cannot change what the step reports (an fsync hint, a cleanup on a path that alr
 probe whose null IS its answer). Where it could, the site is `surfaced` with the mechanism named,
 `follow-up`, or was fixed (below).
 
-**D3. Owned-elsewhere sites are inventoried, not edited.** #1155 rewrites `bootstrap.sh` (it adds
-`REQUIRED_FAILURES` and a summary that exits 1) and #1154 rewrites two regions of `engram.mjs` /
-`upstream-records.mjs`. A marker there would be a guaranteed conflict, and fixing bootstrap here
-would create a SECOND failure list beside `REQUIRED_FAILURES`. Those sites sit in the guard's
-`OWNED_ELSEWHERE`, matched by their own text (so line drift does not matter); when the owner lands
-the entry goes stale, the test fails, and it is replaced by a real marker. A first implementation
-of the bootstrap fix (`FAILED_STEPS`, `NOT ready` banner, exit 1) was written test-first and
-withdrawn for exactly this reason; slice-A re-applies it on `REQUIRED_FAILURES`.
+**D3. Owned-elsewhere sites were inventoried, not edited, while #1154/#1155 were open; both have merged.** A marker on lines an open PR rewrites is a guaranteed conflict, and fixing bootstrap then would have created a SECOND failure list beside #1155's `REQUIRED_FAILURES`. The guard therefore carried an `OWNED_ELSEWHERE` list matched by site text. It is now retired: every site those PRs brought has its own marker or a fix, and the mechanism stays (empty) with its stale-entry check for the next time a PR owns a region.
 
 **D4. `index-lag.mjs` returns 0 on purpose.** Its contract (spec "local-checks warns on index lag,
 never fails", L3) is a report, not a gate: the swallowed reads (`index.jsonl` unreadable, one
@@ -66,11 +59,11 @@ silently missing a `catch`.
 
 | Slice | Sites | Fix | Note |
 |---|---|---|---|
-| A | `bootstrap.sh`: SDD init, `core.hooksPath`, engram setup, memory pull, memory index, the provider override (empty `catch` + `\|\| true`), **`auth-login \|\| warn` (line ~314, then "Environment ready")**, and the three embedded `node` snippets (`catch {}` on the config read at :91, the git-origin read at :98, the override write at :131) | append to #1155's `REQUIRED_FAILURES` so the run ends `NOT ready` with exit 1 | after #1155 merges; the guard's `OWNED_ELSEWHERE` entries carry the `slice-A` tag and go stale when it lands. A tested draft exists (`FAILED_STEPS`, `NOT ready` banner). Board listing stays optional: read-only, loses no state |
+| A (done) | `bootstrap.sh` steps that warned and then read "Environment ready" | REQUIRED (appended to #1155's `REQUIRED_FAILURES`): SDD init, `core.hooksPath`, engram setup, plainfiles setup, memory pull (both backends), memory index, the provider-override write (its `catch {}` and `\|\| true` removed), `auth-login` failing with a token present. OPTIONAL with a stated reason: the open-ticket board (read-only listing), no token provided (an explicit operator choice), a browser that will not open, the PAT-URL prefill | `bootstrap.required-steps.test.mjs` (7 tests, snippets lifted from the script). Also fixed: `brain-config.mjs ensure` silently exited 0 over an unparseable `brain.config.json` (the embedded `catch {}` at bootstrap :91 read it as empty); it now reports and exits 1 (`brain-config.test.mjs`) |
 | B | `brain-upgrade.mjs` AGENTS.md regeneration | decide whether a failed regeneration belongs in the exit code, and stop printing `Done.` over it | product call: the upgrade proper succeeded, AGENTS.md is a compiled derivative |
 | C | `store.mjs` `readRecords`: unreadable `records/` dir and unreadable record file | surface as a counted, reported read failure instead of an empty store | needs an audit-visible number, so it touches `brain:memory:audit` |
 | D | `installer.mjs` `listFiles`, `escapesRoot` | fail closed: an unreadable source directory or an unresolvable destination root must stop the upgrade | unreachable in a healthy tree, so low urgency |
-| E | paths outside the five areas, not swept here (counts of unmarked swallow sites the scanner finds today): `day-start.mjs` 6, `session-start.mjs` 8, `adopt.mjs` 3, `vcs/**` adapters 29 in 12 files, `hooks/*` 7 in 4 files | run the same inventory, then add the files to the guard's scope | 53 sites; `day-start`/`session-start` first (a swallow there reads as a healthy session) |
+| E | `lib/brain-config.mjs` (`ensure` still degrades silently on an unwritable directory) and the paths outside the five areas, not swept here (counts of unmarked swallow sites the scanner finds today): `day-start.mjs` 6, `session-start.mjs` 8, `adopt.mjs` 3, `vcs/**` adapters 29 in 12 files, `hooks/*` 7 in 4 files | run the same inventory, then add the files to the guard's scope | 53 sites; `day-start`/`session-start` first (a swallow there reads as a healthy session) |
 
 ## What the guard cannot see
 
@@ -86,7 +79,7 @@ and `.catch(` sites; window = the catch's own lines plus a standalone comment li
 scanned with the JS classifier); `scanShell` (swallow-shaped lines and their continuation, window = the
 line plus the contiguous comment block above); `classify` (`fails` / `owned` / `optional` /
 `surfaced` / `follow-up` / `weak` / `unexplained`); `scanAll` (adds orphan markers). Four guard
-tests and fourteen scanner tests on synthetic sources. `SWALLOW_INVENTORY=1 node
+tests and fifteen scanner tests on synthetic sources. `SWALLOW_INVENTORY=1 node
 brain/scripts/swallow-guard.test.mjs` prints the table below straight from the markers.
 
 ## Inventory (every site, generated from the markers)
@@ -94,15 +87,15 @@ brain/scripts/swallow-guard.test.mjs` prints the table below straight from the m
 Sites per area and verdict, then the table. Line numbers are as of this change's tip and drift; the
 guard matches by content, not line.
 
-| Area | fails (throws/exits) | optional | surfaced | follow-up | owned by #1155/#1154 | total |
+| Area | fails (throws/exits) | optional | surfaced | follow-up | owned | total |
 |---|---|---|---|---|---|---|
 | install | 5 | 21 | 8 | 2 | 0 | 36 |
-| bootstrap | 2 | 0 | 0 | 0 | 17 | 19 |
+| bootstrap | 2 | 12 | 0 | 0 | 0 | 14 |
 | upgrade | 5 | 2 | 1 | 1 | 0 | 9 |
-| memory | 24 | 31 | 32 | 2 | 2 | 91 |
+| memory | 25 | 32 | 35 | 2 | 0 | 94 |
 | postmerge | 5 | 8 | 9 | 0 | 0 | 22 |
 
-Total: 177 sites.
+Total: 175 sites.
 
 | Area | Site | Verdict | Reason | Pinned by |
 |---|---|---|---|---|
@@ -142,23 +135,18 @@ Total: 177 sites.
 | install | `brain/scripts/lib/installer.mjs:2030` | optional | tries the next candidate path; falling off the end returns null, the "version unknown" answer | swallow-guard.test.mjs |
 | install | `brain/scripts/cli-entry.mjs:123` | optional | an argv[1] that cannot be resolved is not a direct invocation of this file (REPL, -e, stdin) | swallow-guard.test.mjs |
 | install | `brain/scripts/install-tools.sh:181` | optional | a version banner is cosmetic; the tool's presence was already established above | swallow-guard.test.mjs |
-| bootstrap | `brain/scripts/bootstrap.sh:124` | owned | #1155: slice-A the provider override write swallows its own failure (empty catch and `\|\| true`); it must join REQUIRED_FAILURES | swallow-guard.test.mjs |
-| bootstrap | `brain/scripts/bootstrap.sh:160` | owned | #1155: swallow-ok: grep exits 1 when the key is absent, which is the answer env_get exists to give | swallow-guard.test.mjs |
-| bootstrap | `brain/scripts/bootstrap.sh:166` | owned | #1155: swallow-ok: grep -v exits 1 when .env held only that key; the empty remainder is the correct result | swallow-guard.test.mjs |
-| bootstrap | `brain/scripts/bootstrap.sh:207` | owned | #1155: swallow-ok: falls back to npm, the default package manager, when detection is unavailable | swallow-guard.test.mjs |
-| bootstrap | `brain/scripts/bootstrap.sh:257` | owned | #1155: swallow-ok: the URL only pre-fills a browser tab; without it the operator is told to create the token by hand | swallow-guard.test.mjs |
-| bootstrap | `brain/scripts/bootstrap.sh:265` | owned | #1155: swallow-ok: opening a browser is a convenience; the URL is printed on the next line | swallow-guard.test.mjs |
-| bootstrap | `brain/scripts/bootstrap.sh:267` | owned | #1155: swallow-ok: opening a browser is a convenience; the URL is printed on the next line | swallow-guard.test.mjs |
-| bootstrap | `brain/scripts/bootstrap.sh:314` | owned | #1155: slice-A `auth-login \|\| warn`: a failed VCS login is a warning line, then "Environment ready" | swallow-guard.test.mjs |
-| bootstrap | `brain/scripts/bootstrap.sh:365` | owned | #1155: slice-A a failed SDD init is a warning line, then "Environment ready" | swallow-guard.test.mjs |
-| bootstrap | `brain/scripts/bootstrap.sh:386` | owned | #1155: slice-A a failed core.hooksPath config is a warning line, then "Environment ready" | swallow-guard.test.mjs |
-| bootstrap | `brain/scripts/bootstrap.sh:394` | owned | #1155: slice-A a failed engram setup is a warning line, then "Environment ready" | swallow-guard.test.mjs |
-| bootstrap | `brain/scripts/bootstrap.sh:402` | owned | #1155: slice-A a failed memory pull is a warning line, then "Environment ready" | swallow-guard.test.mjs |
-| bootstrap | `brain/scripts/bootstrap.sh:403` | owned | #1155: slice-A a failed memory index is a warning line, then "Environment ready" | swallow-guard.test.mjs |
-| bootstrap | `brain/scripts/bootstrap.sh:413` | owned | #1155: swallow-ok: the open-ticket board is a read-only listing; a failure loses no state and the message names where to look | swallow-guard.test.mjs |
-| bootstrap | `brain/scripts/bootstrap.sh:91` | owned | #1155: slice-A a corrupt brain.config.json reads as an empty config here, so the derived provider, host and slug silently come out empty | swallow-guard.test.mjs |
-| bootstrap | `brain/scripts/bootstrap.sh:98` | owned | #1155: swallow-ok: no git origin means no derived host or project; the prompts and the final summary name what is still unset | swallow-guard.test.mjs |
-| bootstrap | `brain/scripts/bootstrap.sh:131` | owned | #1155: slice-A the provider override write swallows its own failure (empty catch); it must join REQUIRED_FAILURES | swallow-guard.test.mjs |
+| bootstrap | `brain/scripts/bootstrap.sh:186` | optional | grep exits 1 when the key is absent, which is the answer env_get exists to give | swallow-guard.test.mjs |
+| bootstrap | `brain/scripts/bootstrap.sh:192` | optional | grep -v exits 1 when .env held only that key; the empty remainder is the correct result | swallow-guard.test.mjs |
+| bootstrap | `brain/scripts/bootstrap.sh:233` | optional | npm is the documented default package manager when detection is unavailable | swallow-guard.test.mjs |
+| bootstrap | `brain/scripts/bootstrap.sh:282` | optional | create-if-absent: `: > file` IS the creation, not a swallowed failure (the guard reads `\|\| :` as a swallow); a failed write surfaces through the final `git check-ignore` and GITIGNORE_FAILED | swallow-guard.test.mjs |
+| bootstrap | `brain/scripts/bootstrap.sh:338` | optional | the target is only quoted in the refusal message; the refusal (ENV_SECRET_SAFE=false) is already decided | swallow-guard.test.mjs |
+| bootstrap | `brain/scripts/bootstrap.sh:342` | optional | GNU-then-BSD portability fallback; if neither stat works the count reads as 1, and the symlink, file-type, tracked and ignore checks around it still gate the write | swallow-guard.test.mjs |
+| bootstrap | `brain/scripts/bootstrap.sh:368` | optional | the URL only pre-fills a browser tab; the token prompt that follows works without it | swallow-guard.test.mjs |
+| bootstrap | `brain/scripts/bootstrap.sh:376` | optional | opening a browser is a convenience; the URL is printed right after | swallow-guard.test.mjs |
+| bootstrap | `brain/scripts/bootstrap.sh:378` | optional | opening a browser is a convenience; the URL is printed right after | swallow-guard.test.mjs |
+| bootstrap | `brain/scripts/bootstrap.sh:593` | optional | the open-ticket board is a read-only listing; a failure loses no state and the message names where to look | swallow-guard.test.mjs |
+| bootstrap | `brain/scripts/bootstrap.sh:100` | optional | an unparseable config reads as empty here and identity falls back to the git origin; `brain-config.mjs ensure` above now reports it and exits 1 (#1127) | swallow-guard.test.mjs |
+| bootstrap | `brain/scripts/bootstrap.sh:107` | optional | no git origin means no derived host or project; the prompts and the final summary name what is still unset | swallow-guard.test.mjs |
 | bootstrap | `brain/scripts/harness/cli.mjs:164` | fails | the block throws or exits | the block throws or exits |
 | bootstrap | `brain/scripts/harness/cli.mjs:273` | fails | the block throws or exits | the block throws or exits |
 | upgrade | `brain/scripts/brain-upgrade.mjs:160` | fails | the block throws or exits | the block throws or exits |
@@ -236,6 +224,9 @@ Total: 177 sites.
 | memory | `brain/scripts/memory/lib/migrate-v1.mjs:54` | surfaced | pushed to `unparseable`, which the migration report lists | swallow-guard.test.mjs |
 | memory | `brain/scripts/memory/lib/migrate-v1.mjs:108` | surfaced | pushed to `rejected` with its reason; one corrupt observation must not abort the report | swallow-guard.test.mjs |
 | memory | `brain/scripts/memory/lib/migrate-v1.mjs:230` | surfaced | pushed to `rejected` with its reason; the migration report lists it | swallow-guard.test.mjs |
+| memory | `brain/scripts/memory/lib/reconcile-pull.mjs:89` | fails | the block throws or exits | the block throws or exits |
+| memory | `brain/scripts/memory/lib/reconcile-pull.mjs:137` | surfaced | pushed to `problems`, which defaultGitPull throws with the pull result | swallow-guard.test.mjs |
+| memory | `brain/scripts/memory/lib/reconcile-pull.mjs:164` | surfaced | kept as `pullError` and re-thrown below after verifyOrRestore, with any unrestored records appended | swallow-guard.test.mjs |
 | memory | `brain/scripts/memory/lib/resume-frontmatter.mjs:100` | optional | the documented graceful fallback for a hand-edited resume.md: no frontmatter, the body is kept | swallow-guard.test.mjs |
 | memory | `brain/scripts/memory/lib/split-records.mjs:78` | fails | the block throws or exits | the block throws or exits |
 | memory | `brain/scripts/memory/lib/split-records.mjs:173` | optional | only collects ids already present; a corrupt line is refused by the rebuildIndex gate (store.mjs) | swallow-guard.test.mjs |
@@ -248,35 +239,35 @@ Total: 177 sites.
 | memory | `brain/scripts/memory/lib/upstream-records.mjs:74` | fails | the block throws or exits | the block throws or exits |
 | memory | `brain/scripts/memory/lib/upstream-records.mjs:84` | optional | a failed ref probe reads as "ref not present", the answer the probe exists to give | swallow-guard.test.mjs |
 | memory | `brain/scripts/memory/lib/upstream-records.mjs:185` | surfaced | carried as `configError` into the result | swallow-guard.test.mjs |
-| memory | `brain/scripts/memory/lib/upstream-records.mjs:320` | owned | #1154: surfaced: returned as `{ ok: false, reason }` with the ref and the cause | swallow-guard.test.mjs |
+| memory | `brain/scripts/memory/lib/upstream-records.mjs:342` | surfaced | returned as `{ ok: false, reason }` with the ref and the cause | swallow-guard.test.mjs |
 | memory | `brain/scripts/memory/session-end-ship.mjs:80` | optional | ONLY EEXIST continues (the directory exists, and the lstat checks below refuse a symlink, a foreign owner or loose permissions); every other error is re-thrown | swallow-guard.test.mjs |
 | memory | `brain/scripts/memory/session-end-ship.mjs:194` | surfaced | the SessionEnd hook must exit 0 so it never blocks closing a session; the error is written to stderr and returned as spawned: false | swallow-guard.test.mjs |
 | memory | `brain/scripts/memory/staged-records-check.mjs:247` | surfaced | returned as `{ ok: false, reason }`, which the pre-commit check refuses on | swallow-guard.test.mjs |
 | memory | `brain/scripts/memory/staged-records-check.mjs:300` | surfaced | returned as `{ ok: false, reason }`, which the pre-commit check refuses on | swallow-guard.test.mjs |
 | memory | `brain/scripts/memory/staged-records-check.mjs:314` | surfaced | only ENOENT means "no merge"; every other read failure returns `{ ok: false, reason }` | swallow-guard.test.mjs |
 | memory | `brain/scripts/memory/staged-records-check.mjs:339` | surfaced | returned as `{ ok: false, inMerge: true, reason }`, which the check refuses on | swallow-guard.test.mjs |
-| memory | `brain/scripts/axes/memory/adapters/engram.mjs:95` | optional | an lstat probe; absence is answered by the warning and skip that follow (the symlink is the engram adapter's private artifact) | swallow-guard.test.mjs |
-| memory | `brain/scripts/axes/memory/adapters/engram.mjs:108` | optional | an lstat probe: an absent .engram is the normal fresh-clone state and the branch below creates it | swallow-guard.test.mjs |
-| memory | `brain/scripts/axes/memory/adapters/engram.mjs:221` | owned | #1154: swallow-ok: an unresolvable directory reads as null, the seam's "not resolvable" answer | swallow-guard.test.mjs |
-| memory | `brain/scripts/axes/memory/adapters/engram.mjs:483` | surfaced | engram's stderr is surfaced in the thrown error — that is the point of this block (#433) | swallow-guard.test.mjs |
-| memory | `brain/scripts/axes/memory/adapters/engram.mjs:738` | fails | the block throws or exits | the block throws or exits |
-| memory | `brain/scripts/axes/memory/adapters/engram.mjs:856` | surfaced | warned as hydrateDeferred and returned as `{ deferred: true, reason }`; the record is already durable | swallow-guard.test.mjs |
-| memory | `brain/scripts/axes/memory/adapters/engram.mjs:901` | surfaced | warned as hydrateDeferred and returned as `{ deferred: true, reason }`; the record is already durable | swallow-guard.test.mjs |
-| memory | `brain/scripts/axes/memory/adapters/engram.mjs:1024` | optional | enrichment is best-effort by contract: never fatal, never required (feature-working-memory-contract.md) | swallow-guard.test.mjs |
-| memory | `brain/scripts/axes/memory/adapters/engram.mjs:1068` | optional | contract guarantee: an unresolvable feature is informational and exits 0 (feature-working-memory-contract.md) | swallow-guard.test.mjs |
-| memory | `brain/scripts/axes/memory/adapters/engram.mjs:1093` | optional | ONLY ENOENT (no resume.md yet) is the skeleton-creation case; any other read error is re-thrown below | swallow-guard.test.mjs |
-| memory | `brain/scripts/axes/memory/adapters/engram.mjs:1144` | optional | enrichment is best-effort by contract: never fatal, never required (feature-working-memory-contract.md) | swallow-guard.test.mjs |
-| memory | `brain/scripts/axes/memory/adapters/engram.mjs:1151` | surfaced | a warning line names the offending field; the write proceeds by contract so the file can be fixed by hand | swallow-guard.test.mjs |
-| memory | `brain/scripts/axes/memory/adapters/engram.mjs:1241` | fails | the block throws or exits | the block throws or exits |
-| memory | `brain/scripts/axes/memory/adapters/engram.mjs:1254` | surfaced | collected into `failures` and thrown after the loop (#1127) | swallow-guard.test.mjs |
-| memory | `brain/scripts/axes/memory/adapters/engram.mjs:1274` | surfaced | collected into `failures` and thrown after the loop (#1127) | swallow-guard.test.mjs |
-| memory | `brain/scripts/axes/memory/adapters/engram.mjs:1526` | optional | a failed version probe returns null, this seam's documented "version unknown" answer | swallow-guard.test.mjs |
-| memory | `brain/scripts/axes/memory/adapters/engram.mjs:1624` | surfaced | returned as an outcome object with `detail`, which the caller reports | swallow-guard.test.mjs |
-| memory | `brain/scripts/axes/memory/adapters/engram.mjs:1651` | surfaced | returned as an outcome object with `detail`, which the caller reports | swallow-guard.test.mjs |
-| memory | `brain/scripts/axes/memory/adapters/engram.mjs:1659` | surfaced | returned as an outcome object with `detail`, which the caller reports | swallow-guard.test.mjs |
-| memory | `brain/scripts/axes/memory/adapters/plainfiles.mjs:252` | fails | the block throws or exits | the block throws or exits |
-| memory | `brain/scripts/axes/memory/adapters/plainfiles.mjs:296` | optional | rg is an accelerant whose output never determines the search result (see search()) | swallow-guard.test.mjs |
-| memory | `brain/scripts/axes/memory/adapters/plainfiles.mjs:343` | optional | rg is an accelerant whose output never determines the search result (see search()) | swallow-guard.test.mjs |
+| memory | `brain/scripts/axes/memory/adapters/engram.mjs:96` | optional | an lstat probe; absence is answered by the warning and skip that follow (the symlink is the engram adapter's private artifact) | swallow-guard.test.mjs |
+| memory | `brain/scripts/axes/memory/adapters/engram.mjs:109` | optional | an lstat probe: an absent .engram is the normal fresh-clone state and the branch below creates it | swallow-guard.test.mjs |
+| memory | `brain/scripts/axes/memory/adapters/engram.mjs:222` | optional | an unresolvable directory reads as null, this seam's documented "not resolvable" answer | swallow-guard.test.mjs |
+| memory | `brain/scripts/axes/memory/adapters/engram.mjs:478` | surfaced | engram's stderr is surfaced in the thrown error — that is the point of this block (#433) | swallow-guard.test.mjs |
+| memory | `brain/scripts/axes/memory/adapters/engram.mjs:741` | fails | the block throws or exits | the block throws or exits |
+| memory | `brain/scripts/axes/memory/adapters/engram.mjs:859` | surfaced | warned as hydrateDeferred and returned as `{ deferred: true, reason }`; the record is already durable | swallow-guard.test.mjs |
+| memory | `brain/scripts/axes/memory/adapters/engram.mjs:904` | surfaced | warned as hydrateDeferred and returned as `{ deferred: true, reason }`; the record is already durable | swallow-guard.test.mjs |
+| memory | `brain/scripts/axes/memory/adapters/engram.mjs:1027` | optional | enrichment is best-effort by contract: never fatal, never required (feature-working-memory-contract.md) | swallow-guard.test.mjs |
+| memory | `brain/scripts/axes/memory/adapters/engram.mjs:1071` | optional | contract guarantee: an unresolvable feature is informational and exits 0 (feature-working-memory-contract.md) | swallow-guard.test.mjs |
+| memory | `brain/scripts/axes/memory/adapters/engram.mjs:1096` | optional | ONLY ENOENT (no resume.md yet) is the skeleton-creation case; any other read error is re-thrown below | swallow-guard.test.mjs |
+| memory | `brain/scripts/axes/memory/adapters/engram.mjs:1147` | optional | enrichment is best-effort by contract: never fatal, never required (feature-working-memory-contract.md) | swallow-guard.test.mjs |
+| memory | `brain/scripts/axes/memory/adapters/engram.mjs:1154` | surfaced | a warning line names the offending field; the write proceeds by contract so the file can be fixed by hand | swallow-guard.test.mjs |
+| memory | `brain/scripts/axes/memory/adapters/engram.mjs:1244` | fails | the block throws or exits | the block throws or exits |
+| memory | `brain/scripts/axes/memory/adapters/engram.mjs:1257` | surfaced | collected into `failures` and thrown after the loop (#1127) | swallow-guard.test.mjs |
+| memory | `brain/scripts/axes/memory/adapters/engram.mjs:1277` | surfaced | collected into `failures` and thrown after the loop (#1127) | swallow-guard.test.mjs |
+| memory | `brain/scripts/axes/memory/adapters/engram.mjs:1529` | optional | a failed version probe returns null, this seam's documented "version unknown" answer | swallow-guard.test.mjs |
+| memory | `brain/scripts/axes/memory/adapters/engram.mjs:1627` | surfaced | returned as an outcome object with `detail`, which the caller reports | swallow-guard.test.mjs |
+| memory | `brain/scripts/axes/memory/adapters/engram.mjs:1654` | surfaced | returned as an outcome object with `detail`, which the caller reports | swallow-guard.test.mjs |
+| memory | `brain/scripts/axes/memory/adapters/engram.mjs:1662` | surfaced | returned as an outcome object with `detail`, which the caller reports | swallow-guard.test.mjs |
+| memory | `brain/scripts/axes/memory/adapters/plainfiles.mjs:253` | fails | the block throws or exits | the block throws or exits |
+| memory | `brain/scripts/axes/memory/adapters/plainfiles.mjs:297` | optional | rg is an accelerant whose output never determines the search result (see search()) | swallow-guard.test.mjs |
+| memory | `brain/scripts/axes/memory/adapters/plainfiles.mjs:344` | optional | rg is an accelerant whose output never determines the search result (see search()) | swallow-guard.test.mjs |
 | postmerge | `brain/scripts/governance/postmerge/alarm.mjs:78` | fails | the block throws or exits | the block throws or exits |
 | postmerge | `brain/scripts/governance/postmerge/cursor.mjs:151` | fails | the block throws or exits | the block throws or exits |
 | postmerge | `brain/scripts/governance/postmerge/git-seam.mjs:33` | surfaced | mapped to status -1 with the reason kept; an unmapped status is uncomputable, never a verdict | swallow-guard.test.mjs |

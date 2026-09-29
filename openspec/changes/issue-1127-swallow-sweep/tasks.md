@@ -25,8 +25,11 @@ issue: 1127
 - [x] **T10** Round-2 review: incoming migrations module import-checked before the copy on every path;
       ERR_MODULE_NOT_FOUND for the module vs its imports; guard shell forms and per-catch windows;
       install-tools no-node provider scope; `tryFeatureResume` label only when the projection message is present.
-- [ ] **slice-A** (after #1155 lands) bootstrap steps, `auth-login || warn` and the three embedded
-      snippets join `REQUIRED_FAILURES`.
+- [x] **slice-A** bootstrap steps join `REQUIRED_FAILURES` (7 tests); `ensure` reports a corrupt config.
+- [x] **T11** #1154/#1155 merged: `OWNED_ELSEWHERE` retired, every merged site marked with a reason
+      that says exactly what it is (create-if-absent, portable stat fallback, ...).
+- [x] **T12** Mutation-checked every guard rule and N1/N3 in a scratch clone; three survivors
+      (per-catch trailing text, unscoped sed, empty-provider default) got tests that kill them.
 - [ ] **slice-B** `brain-upgrade` AGENTS.md regeneration failure vs the closing `Done.`.
 - [ ] **slice-C** record readers: an unreadable records dir/file must not read as an empty store.
 - [ ] **slice-D** installer walkers that fail open (`listFiles`, `escapesRoot`).
