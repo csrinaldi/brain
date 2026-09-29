@@ -402,6 +402,25 @@ case "$MEMORY_BACKEND" in
     (cd "$WORKTREE_ROOT" && $PM run --silent brain:memory:pull)  && ok "$I18N_BOOTSTRAP_MEMORY_PULL_OK"  || warn "$I18N_BOOTSTRAP_MEMORY_PULL_FAILED"
     (cd "$WORKTREE_ROOT" && $PM run --silent brain:memory:index) && ok "$I18N_BOOTSTRAP_MEMORY_INDEX_OK" || warn "$I18N_BOOTSTRAP_MEMORY_INDEX_FAILED"
     ;;
+  plainfiles)
+    # plainfiles is a real, supported backend (axes/memory/adapters/plainfiles.mjs),
+    # not a fall-through — issue #1112 (folded finding). It supports `setup`
+    # (.memory/records/ + index self-check, no symlink, no merge driver —
+    # ADR-0002 is engram-only) and `pull` (git pull + rebuild index).
+    # `index` (brain/ doc → memory projection) is deliberately unsupported for
+    # plainfiles (design C3 Decision 5, unsupported-op.mjs): it always throws,
+    # so it is never called here — calling it would report a real design
+    # decision as a spurious "failed (non-blocking)".
+    if command -v node >/dev/null 2>&1; then
+      node "$BRAIN_SCRIPTS/memory/cli.mjs" setup \
+        && ok "$I18N_BOOTSTRAP_MEMORY_PLAINFILES_OK" \
+        || warn "$I18N_BOOTSTRAP_MEMORY_PLAINFILES_FAILED"
+    else
+      warn "$I18N_BOOTSTRAP_MEMORY_NODEABSENT"
+    fi
+    (cd "$WORKTREE_ROOT" && $PM run --silent brain:memory:pull) && ok "$I18N_BOOTSTRAP_MEMORY_PULL_OK" || warn "$I18N_BOOTSTRAP_MEMORY_PULL_FAILED"
+    ok "$I18N_BOOTSTRAP_MEMORY_PLAINFILES_NOINDEX"
+    ;;
   *)
     warn "$(printf "$I18N_BOOTSTRAP_MEMORY_UNKNOWNBACKEND" "$MEMORY_BACKEND")"
     ;;

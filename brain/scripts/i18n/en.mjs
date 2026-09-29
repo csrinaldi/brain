@@ -221,6 +221,9 @@ export default {
   'bootstrap.memory.pull.failed':    'brain:memory:pull failed (non-blocking)',
   'bootstrap.memory.index.ok':       'durable index reprojected (brain/ → engram)',
   'bootstrap.memory.index.failed':   'brain:memory:index failed (non-blocking)',
+  'bootstrap.memory.plainfiles.ok':      'plainfiles backend ready (.memory/records/ + index)',
+  'bootstrap.memory.plainfiles.failed':  'plainfiles memory setup failed (non-blocking)',
+  'bootstrap.memory.plainfiles.noIndex': 'brain/ → memory indexing is engram-only; plainfiles has no doc projection by design',
   // {backend} = unknown backend name
   'bootstrap.memory.unknownBackend': "backend '{backend}' has no known init routine — configure it manually",
 

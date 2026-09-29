@@ -202,6 +202,9 @@ export default {
   'bootstrap.memory.pull.failed':    'brain:memory:pull falló (no bloqueante)',
   'bootstrap.memory.index.ok':       'índice durable reproyectado (brain/ → engram)',
   'bootstrap.memory.index.failed':   'brain:memory:index falló (no bloqueante)',
+  'bootstrap.memory.plainfiles.ok':      'backend plainfiles listo (.memory/records/ + index)',
+  'bootstrap.memory.plainfiles.failed':  'setup de memoria plainfiles falló (no bloqueante)',
+  'bootstrap.memory.plainfiles.noIndex': 'la indexación brain/ → memoria es exclusiva de engram; plainfiles no proyecta docs por diseño',
   'bootstrap.memory.unknownBackend': "backend '{backend}' sin rutina de init conocida — configuralo a mano",
 
   // §8 Ticket board
