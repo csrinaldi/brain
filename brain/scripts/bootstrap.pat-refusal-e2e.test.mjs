@@ -15,30 +15,34 @@
 // prompts (open-browser: no; paste-PAT: a fake token) exactly as a human
 // would.
 //
-// SAFETY: everything lives under the OS temp dir (mkdtemp), never under this
-// worktree. HOME and ENGRAM_DATA_DIR are redirected into the fixture's own
-// temp tree so `gentle-ai install`/engram calls never touch the real
-// account's config. GH_CONFIG_DIR is pointed at a nonexistent path and
-// GH_TOKEN/GITHUB_TOKEN are cleared, as best-effort isolation for the VCS
-// CLI's own `gh auth status` call. The fixture has no `origin` remote at all.
+// SAFETY / HERMETICITY: everything lives under the OS temp dir (mkdtemp),
+// never under this worktree, and the run must never reach a real `gh`, a
+// real `gentle-ai`, the network or the operator's keyring.
+//   - A temp dir is placed FIRST on PATH holding fake `gh` and `gentle-ai`
+//     executables. They append their argv to a log file and exit
+//     deterministically (gh: 1, gentle-ai: 0). The logs are the only record of
+//     what bootstrap asked those tools to do.
+//   - DBUS_SESSION_BUS_ADDRESS is emptied and XDG_RUNTIME_DIR points at a temp
+//     dir, so nothing can reach the desktop secret service (keyring).
+//   - HOME and ENGRAM_DATA_DIR are redirected into the fixture's temp tree,
+//     GH_CONFIG_DIR points at a nonexistent path, GH_TOKEN/GITHUB_TOKEN are
+//     cleared. The fixture has no `origin` remote at all.
+//   - python3 stays real: it is only the pty driver.
 //
-// KNOWN RESIDUAL (documented, not a test bug): under a REAL pty specifically
-// — not a plain piped subprocess, where the same env vars work as expected —
-// `gh auth status` in this sandbox still reports the ambient session's real
-// login, despite GH_CONFIG_DIR/GH_TOKEN/GITHUB_TOKEN all being overridden.
-// Measured directly: `node vcs/cli.mjs auth-check` returns `false` when
-// invoked as a plain child process with these env vars, and `true` when the
-// exact same env vars reach it via this pty path. The cause was not fully
-// isolated (something in the auth backend behaves differently once attached
-// to a real tty — a session bus / keyring lookup outside GH_CONFIG_DIR's
-// reach is the leading guess) and is read-only either way (no push, no
-// repo write, no token used) — this test asserts nothing about that one
-// line and does not depend on its outcome.
+// WHY THIS IS NECESSARY (corrected diagnosis): an earlier version of this
+// header blamed the pty for `gh auth status` "seeing the ambient login". That
+// was wrong. gh 2.46 exits 0 on an INVALID `GH_TOKEN` (it prints "The token in
+// GH_TOKEN is invalid"), so `authCheck` reported true whatever the session.
+// The real leaks were different: bootstrap's harness step runs
+// `gentle-ai install`, and `gentle-ai doctor` calls `gh auth token`, which
+// reached the operator's REAL token through the desktop keyring (dbus secret
+// service at /run/user/UID/bus) despite the HOME/GH_CONFIG_DIR overrides. The
+// shims plus the dbus/XDG overrides close both.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { cpSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { removeTempTree } from './lib/tmp-tree.mjs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
@@ -126,10 +130,28 @@ function allFiles(root) {
   return out;
 }
 
-function runBootstrapE2e(repo, base) {
+/** Fake `gh` / `gentle-ai`: record argv, exit deterministically. Returns { shimDir, ghLog, gentleLog }. */
+function makeShims(base) {
+  const shimDir = join(base, 'shims');
+  mkdirSync(shimDir, { recursive: true });
+  const ghLog = join(base, 'gh.log');
+  const gentleLog = join(base, 'gentle-ai.log');
+  const shim = (name, log, code) => {
+    const path = join(shimDir, name);
+    writeFileSync(path, `#!/bin/sh\nprintf '%s\\n' "$*" >> '${log}'\nexit ${code}\n`);
+    chmodSync(path, 0o755);
+  };
+  shim('gh', ghLog, 1);
+  shim('gentle-ai', gentleLog, 0);
+  return { shimDir, ghLog, gentleLog };
+}
+
+function runBootstrapE2e(repo, base, shims) {
   const homeDir = join(base, 'home');
   const engramDataDir = join(base, 'engram-data');
   const ghConfigDir = join(base, 'gh-config-nonexistent');
+  const xdgRuntimeDir = join(base, 'xdg-runtime');
+  mkdirSync(xdgRuntimeDir, { recursive: true });
   const steps = JSON.stringify([
     ['Open the browser', Buffer.from('n\n').toString('base64')],
     ['Paste your PAT', Buffer.from(`${PASTED_PAT_VALUE}\n`).toString('base64')],
@@ -139,12 +161,14 @@ function runBootstrapE2e(repo, base) {
     encoding: 'utf8',
     timeout: 100_000,
     env: {
-      PATH: process.env.PATH,
+      PATH: `${shims.shimDir}:${process.env.PATH}`,
       HOME: homeDir,
       ENGRAM_DATA_DIR: engramDataDir,
       GH_CONFIG_DIR: ghConfigDir,
       GH_TOKEN: '',
       GITHUB_TOKEN: '',
+      DBUS_SESSION_BUS_ADDRESS: '',
+      XDG_RUNTIME_DIR: xdgRuntimeDir,
       PTY_STEPS: steps,
       PTY_TIMEOUT: '90',
     },
@@ -153,7 +177,30 @@ function runBootstrapE2e(repo, base) {
 
 test('#1112 e2e: env:init refuses a tracked .env, never writes the token, names the refusal, and exits non-zero', () => {
   withTrackedEnvConsumer((repo, base) => {
-    const result = runBootstrapE2e(repo, base);
+    const shims = makeShims(base);
+    const result = runBootstrapE2e(repo, base, shims);
+
+    // Hermeticity: the shims are what the run resolved, and they are the only
+    // record of what bootstrap asked gh / gentle-ai for. Nothing real ran.
+    for (const name of ['gh', 'gentle-ai']) {
+      const resolved = execFileSync('sh', ['-c', `command -v ${name}`], {
+        encoding: 'utf8',
+        env: { PATH: `${shims.shimDir}:${process.env.PATH}` },
+      }).trim();
+      assert.equal(resolved, join(shims.shimDir, name), `${name} must resolve to the shim`);
+    }
+    const ghCalls = existsSync(shims.ghLog) ? readFileSync(shims.ghLog, 'utf8') : '';
+    const gentleCalls = existsSync(shims.gentleLog) ? readFileSync(shims.gentleLog, 'utf8') : '';
+    assert.doesNotMatch(ghCalls, /auth token/, `no gh shim call may be \`auth token\`; gh calls:\n${ghCalls}`);
+    assert.doesNotMatch(gentleCalls, /auth token/, 'gentle-ai shim must never see `auth token`');
+    assert.equal(
+      ghCalls.includes(PASTED_PAT_VALUE) || gentleCalls.includes(PASTED_PAT_VALUE),
+      false,
+      'the pasted token must never reach a shim argv',
+    );
+    if (process.env.BRAIN_E2E_SHOW_SHIM_LOG) {
+      process.stderr.write(`--- gh shim log ---\n${ghCalls}--- gentle-ai shim log ---\n${gentleCalls}`);
+    }
 
     assert.notEqual(
       result.status,
