@@ -261,6 +261,17 @@ export function parseLsTree(text) {
  * @param {object} [args.config]  Parsed `brain.config.json`. **Deliberately undefaulted**:
  *   omitted → `resolveUpstreamRef` reads it from `root`, and a `= {}` here would be
  *   non-nullish, defeating that read and leaving `memory.upstreamRef` dead in production.
+ * @param {string} [args.ref]  #1118: an EXPLICIT ref to read instead of
+ *   resolving one via `resolveUpstreamRef()` (env → `memory.upstreamRef` →
+ *   `origin/HEAD` → `origin/main`). A caller that already knows the exact
+ *   ref it needs — `pull`'s reconciliation needs the SAME ref `git pull`
+ *   itself will merge from (`@{u}`), which has nothing to do with
+ *   `memory.upstreamRef`'s "what counts as durable" question — passes it
+ *   here rather than going through the save()/supersedes resolution this
+ *   module otherwise performs. `stated`/`configError` do not apply to an
+ *   explicit ref (there is no config read to report on); `reason`, on the
+ *   `ok:false` arm, names the ref plainly instead of citing the env/config
+ *   escape hatches that had no part in choosing it.
  * @param {typeof spawnSync} [args._spawn]
  * @param {(root: string) => object} [args._loadConfig]  Forwarded to `resolveUpstreamRef`
  *   so the config read is injectable at the layer production actually calls.
@@ -289,10 +300,19 @@ export function upstreamRecordEntries({
   root,
   env = process.env,
   config,
+  ref: explicitRef,
   _spawn = spawnSync,
   _loadConfig = loadBrainConfigAt,
 } = {}) {
-  const { ref, stated, resolved, configError } = resolveUpstreamRef({ root, env, config, _spawn, _loadConfig });
+  let ref, stated, resolved, configError;
+  const explicit = explicitRef !== undefined && explicitRef !== null;
+  if (explicit) {
+    ref = explicitRef;
+    stated = true;
+    resolved = refResolves(ref, root, _spawn);
+  } else {
+    ({ ref, stated, resolved, configError } = resolveUpstreamRef({ root, env, config, _spawn, _loadConfig }));
+  }
   const carry = configError === undefined ? {} : { configError };
   if (!resolved) {
     // No "— writing every candidate this run (pre-#701 behaviour)" tail. That
@@ -304,9 +324,11 @@ export function upstreamRecordEntries({
     // clause was outright false there and its wrapper contradicted it one clause
     // later: "Nothing was refused; this run could not ask the question."
     // Each consumer states its own degradation; `reason` states the fact.
-    const reason = stated
-      ? `the stated upstream ref '${ref}' does not resolve (BRAIN_MEMORY_UPSTREAM_REF / memory.upstreamRef)`
-      : `no upstream ref resolved (tried origin/HEAD, origin/main)`;
+    const reason = explicit
+      ? `the given ref '${ref}' does not resolve`
+      : stated
+        ? `the stated upstream ref '${ref}' does not resolve (BRAIN_MEMORY_UPSTREAM_REF / memory.upstreamRef)`
+        : `no upstream ref resolved (tried origin/HEAD, origin/main)`;
     return { ok: false, ref, stated, reason, ...carry };
   }
 
