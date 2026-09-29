@@ -445,6 +445,14 @@ const ALLOWLIST = [
 
   // ── npm pack: no VCS surface at all ──────────────────────────────────────
   { file: 'test/publish-allowlist.e2e.test.mjs', entrypoint: '<unresolved>', line: 90, reason: 'no-vcs-capability' },
+
+  // ── #1112: bootstrap.sh fragments lifted verbatim into a scratch/fixture
+  //    dir, and brain-to-engram.mjs run against a fake `engram` stub — none
+  //    of the four ever import or call a VCS/gh port.
+  { file: 'brain/scripts/bootstrap.env-gitignore.test.mjs', entrypoint: '<unresolved>', line: 60, reason: 'no-vcs-capability' },
+  { file: 'brain/scripts/bootstrap.memory-backend-case.test.mjs', entrypoint: '<unresolved>', line: 89, reason: 'no-vcs-capability' },
+  { file: 'brain/scripts/bootstrap.vcs-provider-validate.test.mjs', entrypoint: '<unresolved>', line: 66, reason: 'no-vcs-capability' },
+  { file: 'brain/scripts/brain-to-engram.test.mjs', entrypoint: '<unresolved>', line: 140, reason: 'no-vcs-capability' },
 ];
 
 function validateAllowlist(entries) {
