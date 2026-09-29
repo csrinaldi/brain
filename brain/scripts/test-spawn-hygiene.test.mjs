@@ -459,7 +459,17 @@ const ALLOWLIST = [
   //    or calls a VCS/gh port.
   { file: 'brain/scripts/bootstrap.memory-backend-validate.test.mjs', entrypoint: '<unresolved>', line: 56, reason: 'no-vcs-capability' },
   { file: 'brain/scripts/bootstrap.pat-secret-guard.test.mjs', entrypoint: '<unresolved>', line: 58, reason: 'no-vcs-capability' },
-  { file: 'brain/scripts/bootstrap.pat-secret-guard.test.mjs', entrypoint: '<unresolved>', line: 113, reason: 'no-vcs-capability' },
+  // #1112 cold-review round 3 (blocker 1, symlink handling): shifted from
+  // line 113 by the new symlink/non-regular-file tests added above it.
+  { file: 'brain/scripts/bootstrap.pat-secret-guard.test.mjs', entrypoint: '<unresolved>', line: 156, reason: 'no-vcs-capability' },
+
+  // ── #1112 cold-review round 3 (should-fix 2): REQUIRED_FAILURES / exit
+  //    code fragments, lifted verbatim — no VCS/gh port anywhere in them.
+  //    (The e2e test in bootstrap.pat-refusal-e2e.test.mjs spawns `python3`,
+  //    not a tracked runtime, so it is not a hit here at all — see that
+  //    file's own header for why a real pty was needed.)
+  { file: 'brain/scripts/bootstrap.required-failure.test.mjs', entrypoint: '<unresolved>', line: 66, reason: 'no-vcs-capability' },
+  { file: 'brain/scripts/bootstrap.required-failure.test.mjs', entrypoint: '<unresolved>', line: 102, reason: 'no-vcs-capability' },
 ];
 
 function validateAllowlist(entries) {
