@@ -118,13 +118,15 @@ commit yet") and falls through directly to checks 3/4
 and 2 — those two are the only ones this issue is about, and nothing else
 changes for the adoption commit.
 
-The gate is self-closing, restated precisely: false again FOREVER once
-any commit exists anywhere in the repository — not merely "once this
-commit lands" (the first cut's claim, which was true but insufficient: it
-did not rule out a LATER unborn state via `--orphan`). No operation makes
-a repository's total commit count go from 1 back to 0, so there is no
-separate "first N commits" counter or flag to go stale, and no way to
-re-enter the exempted state once any commit exists.
+The exemption's scope, restated precisely: it applies while NO ref
+reaches any commit, and stops applying once one does. It is NOT permanent.
+`git checkout --orphan x; git branch -D main` leaves
+`git rev-list -n 1 --all` empty and the exemption fires again (covered by
+a test so doc and behaviour agree). Reaching that state in a repository
+with history requires deliberately deleting every ref, which also leaves no
+shared history for parallel work to collide on — which is why the rule
+still has nothing to protect there. There is no "first N commits" counter
+or flag to go stale.
 
 **D5.2 — other hooks checked, none changed.** `pre-push`, `commit-msg`
 and `pre-receive` were read end-to-end: none contains a branch-name or

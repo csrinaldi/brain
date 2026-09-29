@@ -52,8 +52,9 @@ first stopped and reported as a fork with three options (below).
 **Ruling (maintainer, 2026-09-29): Option A.** `pre-commit` exempts a
 commit when **the repository has no commit at all**
 (`git rev-list -n 1 --all` empty), printing one line naming why the
-commit was allowed. The exemption is false again FOREVER once any commit
-exists anywhere in the repository. The rationale, in order: (1) check
+commit was allowed. The exemption applies while NO ref reaches any commit;
+it stops applying once one does. (It is not permanent: deleting every ref
+brings it back, in a state with no shared history left to protect.) The rationale, in order: (1) check
 2 (#782) exists so parallel work cannot collide in one checkout, and a
 repository with no commit at all has no parallel work to isolate; (2)
 the cost (ADR-0036) of moving `npx brain init`/`env:init`'s files, `.env`

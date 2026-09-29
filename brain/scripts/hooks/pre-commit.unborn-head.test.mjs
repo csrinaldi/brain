@@ -37,9 +37,11 @@
 // checkout. The condition is now "the repository has no commit reachable
 // from ANY ref" (`git rev-list -n 1 --all` empty) — true only before the very
 // first commit anywhere in the repo, never reopenable by switching branches.
-// The exemption is still self-closing (false again forever once one commit
-// exists ANYWHERE), but it does not fire "always" on every unborn-HEAD state
-// — see the orphan-branch test below, which must still be refused.
+// The exemption applies while NO ref reaches any commit. It stops applying as
+// soon as one does, but it is not permanent: deleting every ref (see the
+// last test) brings it back, at a state with no shared history to protect.
+// It does not fire on every unborn-HEAD state — see the orphan-branch test
+// below, which must still be refused.
 //
 // Unlike pre-commit.test.mjs (mocked node/git shell scripts), THIS suite runs
 // against a REAL git repository with `core.hooksPath` pointed at the real
@@ -180,6 +182,29 @@ test('#1112 orphan branch in a repo WITH history is judged by checks 1/2, never 
       /no commit yet/i,
       'the no-commit-at-all exemption message must never appear for an orphan branch in a repo with history',
     );
+  } finally {
+    removeTempTree(dir);
+  }
+});
+
+test('#1112 the exemption applies again once EVERY ref is deleted (documented behaviour: no ref reaches any commit)', () => {
+  const { dir, git } = makeRepo({ defaultBranch: 'main' });
+  try {
+    const first = attemptCommit(dir, 'README.md', 'chore: adopt brain (#1112)');
+    assert.equal(first.status, 0, 'setup: the first commit must succeed');
+
+    // Deliberately delete every ref: `git rev-list -n 1 --all` is empty again.
+    git('checkout', '-q', '--orphan', 'x');
+    git('branch', '-q', '-D', 'main');
+    assert.equal(git('rev-list', '-n', '1', '--all').trim(), '', 'setup: no ref may reach a commit');
+
+    const again = attemptCommit(dir, 'again.md', 'chore: adopt brain again (#1112)');
+    assert.equal(
+      again.status,
+      0,
+      `with no ref reaching any commit the exemption applies; stdout:\n${again.stdout}\nstderr:\n${again.stderr}`,
+    );
+    assert.match(`${again.stdout}${again.stderr}`, /no commit yet/i);
   } finally {
     removeTempTree(dir);
   }

@@ -36,8 +36,8 @@ command -v node >/dev/null 2>&1 || exit 0
 #     is using and no history to share, so there is no parallel work to
 #     isolate — the exemption recognises that the rule has nothing to
 #     protect there yet. It applies to exactly one commit in a repository's
-#     life, announces itself (the line printed below), and closes itself:
-#     see the "false again FOREVER" note further down.
+#     life, announces itself (the line printed below), and stops applying as
+#     soon as any ref reaches a commit: see the closing note below.
 #  2. COST (ADR-0036) — `npx brain init` and `env:init` leave the adoption's
 #     files, `.env` and git config sitting in the MAIN checkout. Making that
 #     first commit from a separate (orphan) worktree instead would mean
@@ -66,9 +66,13 @@ command -v node >/dev/null 2>&1 || exit 0
 # 1/2 judge the orphan-branch commit exactly as they would any other.
 #
 # Silent, closed set: `-n 1` stops at the first hit (cheap even on a large
-# history) and no output is the only signal read. Self-closing: false again
-# FOREVER once any commit exists anywhere in the repository, by construction
-# — no operation can make a repo's total commit count go from 1 back to 0.
+# history) and no output is the only signal read. The exemption applies while
+# NO ref reaches any commit. It is NOT permanent: `git checkout --orphan x;
+# git branch -D main` leaves `git rev-list -n 1 --all` empty again, and the
+# exemption fires once more. Reaching that state in a repository with history
+# takes deliberately deleting every ref, which also leaves no shared history
+# for parallel work to collide on — which is why the rule still has nothing
+# to protect there.
 if [ -z "$(git rev-list -n 1 --all 2>/dev/null)" ]; then
   echo "✓ pre-commit: the repository has no commit yet — no parallel work exists to isolate; allowing it (issue #1112)."
 else
