@@ -41,7 +41,7 @@ Cold-review finding (blocker 2), 2026-09-29: `git check-ignore` never reports a 
 - **WHEN** `.env` is untracked and ignored, and the operator provides a candidate token
 - **THEN** the token is written to `.env`, unchanged from before this fix
 
-### Requirement: `env:init` refuses a symlinked or non-regular `.env`
+### Requirement: `env:init` refuses a symlinked, hardlinked or non-regular `.env`
 
 Cold-review round 3 blocker, 2026-09-29: the gate above checked tracking/ignore status by PATH only. A `.env` that is a symlink to a file outside the repo passed both checks (the symlink itself is untracked, and `git check-ignore` matches the symlink's own path) — `env_set`'s `>> .env` then followed the symlink and wrote the PAT outside the repo entirely (reproduced).
 
@@ -52,6 +52,14 @@ Cold-review round 3 blocker, 2026-09-29: the gate above checked tracking/ignore 
 #### Scenario: `.env` exists but is not a regular file
 - **WHEN** `.env` exists as something other than a regular file or a symlink (e.g. a directory) and the operator provides a candidate token
 - **THEN** the token is never written
+
+#### Scenario: `.env` is a hardlink to another file
+- **WHEN** `.env` is a regular file whose link count is greater than 1 (a hardlink to a file outside the repo passes both `-L` and `-f`), and the operator provides a candidate token
+- **THEN** the token is never written (reason `hardlinked`), and the message says `.env` must be an independent regular file. The link count is read portably: `stat -c %h` (GNU), falling back to `stat -f %l` (BSD/macOS)
+
+#### Scenario: every refusal states what was still written
+- **WHEN** the write gate refuses the token for any reason
+- **THEN** the output also says the non-secret settings (`MEMORY_BACKEND`, `AGENT_PLATFORM`, `SDD_ENGINE`) are still written to `.env`
 
 ### Requirement: a refused PAT write is a required failure, not a clean exit
 
@@ -72,6 +80,7 @@ Cold-review round 3, class C, 2026-09-25: a refused write only ever `warn`ed —
 #### Scenario: end to end, under a real interactive run
 - **WHEN** the real `bootstrap.sh` is driven under a real TTY against a fixture whose `.env` is already tracked, and the operator types a candidate token at the real prompt
 - **THEN** the token never appears anywhere on disk in the fixture, the summary names the refusal, and the process exits non-zero
+- **AND** the run is hermetic: `gh` and `gentle-ai` resolve to PATH shims that only record their argv, the dbus session bus and XDG runtime dir are neutralised, and the shims never receive `auth token`
 
 ### Requirement: `vcs.provider` accepts only `github` or `gitlab`
 
@@ -158,6 +167,10 @@ Ruled by the maintainer 2026-09-29 (Option A) after this change first stopped an
 #### Scenario: an orphan branch in a repo WITH history is never exempted
 - **WHEN** `git checkout --orphan` is run in the main checkout of a repository that already has a commit (e.g. on `main`), making the current HEAD unborn again, and a commit is then attempted on that orphan branch
 - **THEN** the commit is refused by check 2 exactly as any other main-checkout commit — the no-commit-at-all exemption never fires, because `main`'s commit is still reachable from `git rev-list --all`
+
+#### Scenario: the exemption applies again once every ref is deleted
+- **WHEN** every ref of a repository with history is deleted (`git checkout --orphan x; git branch -D main`) so `git rev-list -n 1 --all` is empty, and a commit is attempted
+- **THEN** the exemption applies. It holds while no ref reaches any commit; it is not permanent, and a repository with no ref has no shared history for parallel work to collide on
 
 #### Scenario: no other installed hook needed the same exemption
 - **WHEN** `pre-push`, `commit-msg` and `pre-receive` are reviewed for a branch-name or main-checkout/worktree refusal

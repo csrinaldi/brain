@@ -98,7 +98,7 @@ The three original options, for the record:
 
 | Option | What it does | Tradeoff |
 |---|---|---|
-| A — no-commit-at-all exemption (taken, corrected) | Hook checks 1 and 2 add a guard: exempt when the repository has no commit at all (`git rev-list -n 1 --all` empty — NOT merely "HEAD is unborn", which `git checkout --orphan` can also produce in a repo with history). False again forever once any commit exists. | Purely mechanical, derivable from the hooks' own stated purpose (protect history / enable parallel work — neither applies before any commit exists). No doc change needed. Does not cover a SECOND pre-adoption commit (e.g. `npm init -y` before `brain init`), which is a real step in the guide. |
+| A — no-commit-at-all exemption (taken, corrected) | Hook checks 1 and 2 add a guard: exempt when the repository has no commit at all (`git rev-list -n 1 --all` empty — NOT merely "HEAD is unborn", which `git checkout --orphan` can also produce in a repo with history). Stops applying once any ref reaches a commit (deleting every ref brings it back). | Purely mechanical, derivable from the hooks' own stated purpose (protect history / enable parallel work — neither applies before any commit exists). No doc change needed. Does not cover a SECOND pre-adoption commit (e.g. `npm init -y` before `brain init`), which is a real step in the guide. |
 | B — document `--no-verify` explicitly | `docs/adoption.md` states, in Path A, that the adoption commit uses `git commit --no-verify`, with the reasoning (hooks aren't load-bearing yet on a repo with no history/branches). | Zero code change. Leaves the bypass as the sanctioned path forever, which is what issue #1112 calls "undocumented" today — documenting it doesn't make it not a bypass. |
 | C — reorder the guide | `docs/adoption.md` has the operator commit `npx brain init`'s output BEFORE running `env:init` (which is what sets `core.hooksPath`). | No code change, no bypass. Breaks down as soon as `env:init` itself writes files worth committing (`brain.config.json` `ensure`, `brain/HOME.md` scaffold) — a second commit would still hit the hook once it's installed. |
 
@@ -127,6 +127,8 @@ The three original options, for the record:
 - `env:init` also refuses a symlinked or otherwise non-regular `.env` —
   the same fail-closed gate, checking file TYPE first, independently of
   tracking/ignore status.
+- The same gate refuses a HARDLINKED `.env` (link count > 1), and every
+  refusal states that the non-secret settings were still written.
 - A refused PAT write is recorded as a REQUIRED failure (not folded into
   the optional-degradation list), named in the final summary, and turns
   the exit code non-zero — proven end to end under a real interactive

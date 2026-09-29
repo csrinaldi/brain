@@ -224,13 +224,8 @@ maintainer.
       on disk in the fixture, and the summary naming the refusal. HOME/
       ENGRAM_DATA_DIR redirected into the fixture's own temp tree;
       GH_CONFIG_DIR pointed at a nonexistent path, GH_TOKEN/GITHUB_TOKEN
-      cleared. Stable across 3 repeated runs (~3.5-4.3s each). One
-      residual documented in the test's own header, not chased further:
-      under the real pty specifically, `gh auth status` still reports
-      this sandbox's ambient real login despite the same isolation env
-      vars working correctly for a plain (non-pty) child process —
-      read-only, no push, no token use; the test asserts nothing about
-      that line.
+      cleared. (The original "pty leaks the ambient gh login" residual
+      was a misdiagnosis; see 9.1.)
 - [x] 8.4 `test-spawn-hygiene.test.mjs`: one shifted spawn
       (`bootstrap.pat-secret-guard.test.mjs`, 113→156, from the new
       symlink tests) plus two new (`bootstrap.required-failure.test.mjs`,
@@ -253,3 +248,22 @@ maintainer.
 - [x] 8.7 `npm test` (full suite: 6532 tests, 6529 pass, 0 fail, 3
       skipped), `npm run brain:repo:check`, `npm run brain:nav`: all
       green/exit 0.
+
+## 9. Final cold review fixes
+
+- [x] 9.1 SHOULD-FIX — `bootstrap.pat-refusal-e2e.test.mjs` made
+      hermetic: fake `gh`/`gentle-ai` first on PATH (argv logged),
+      `DBUS_SESSION_BUS_ADDRESS=` empty, `XDG_RUNTIME_DIR=<tmp>`, python3
+      kept for the pty. Header diagnosis corrected (gh exits 0 on an
+      invalid `GH_TOKEN`; the leak was `gentle-ai doctor` -> `gh auth
+      token` -> keyring). Asserts shims resolve first and never received
+      `auth token`. All other `bootstrap.*.test.mjs` checked: fragment-only,
+      none can reach gh/gentle-ai.
+- [x] 9.2 SHOULD-FIX — false "cannot return to zero commits / false
+      FOREVER" claim reworded (hook comment, design D5.1, proposal,
+      unborn-head test header, spec) to "applies while no ref reaches any
+      commit"; new test deletes every ref and proves the exemption fires.
+- [x] 9.3 NIT — hardlinked `.env` refused (`hardlinked`, red then green;
+      `stat -c %h` / `stat -f %l`), en/es message.
+- [x] 9.4 NIT — chose to keep writing non-secret settings and say so in
+      every refusal (design D8.2); `bootstrap.pat.settingsNote` en/es.

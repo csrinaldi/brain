@@ -73,7 +73,7 @@ in this order:
    share, so there is no parallel work to isolate — the exemption
    recognises that the rule has nothing to protect there. It applies to
    exactly one commit in a repository's life, announces itself, and
-   closes itself (see D5.1's self-closing note).
+   stops applying once any ref reaches a commit (see D5.1).
 2. **Cost (ADR-0036).** `npx brain init` and `env:init` leave the
    adoption's files, `.env` and git config sitting in the main checkout.
    Committing them from a separate (orphan) worktree instead would mean
@@ -198,6 +198,36 @@ a regular file (a directory, a FIFO, …) is refused the same way, under a
 distinct `notRegularFile` reason. The refusal message for a symlink names
 the target (`readlink .env`), because "must be a regular file" alone
 does not tell the operator what to go check.
+
+**D8.1 — hardlinks (final cold review, nit).** `[ -L ]` is false and
+`[ -f ]` true for a hardlink to a file outside the repo, and `>> .env`
+would append the PAT through it. The gate now refuses a regular `.env`
+with link count > 1 (reason `hardlinked`, en/es message). The count comes
+from `stat -c %h` (GNU) with `stat -f %l` (BSD/macOS) as fallback; if
+neither works the count defaults to 1 (no refusal), the same posture as
+the other checks when a tool is missing.
+
+**D8.2 — non-secret settings stay written (final cold review, nit).** The
+gate protects the SECRET only. Options: (a) also stop `env_set` writing
+`MEMORY_BACKEND`/`AGENT_PLATFORM`/`SDD_ENGINE` when `.env` is unsafe, or
+(b) keep writing them and say so. Chosen (b): (a) would re-prompt for the
+backend on every run in the `ignoreFailed` case and change unrelated
+sections' persistence for no secret-protection gain. Every refusal now
+also prints `bootstrap.pat.settingsNote` ("the non-secret settings ...
+are still written to .env").
+
+**D9.1 — the e2e test is hermetic (final cold review, should-fix).** The
+test's header blamed the pty for `gh auth status` seeing the ambient
+login. Wrong: gh 2.46 exits 0 on an INVALID `GH_TOKEN`, so `authCheck`
+returned true. The real leaks were bootstrap's harness step running
+`gentle-ai install`, and `gentle-ai doctor` calling `gh auth token`, which
+reached the real token through the desktop keyring (dbus secret service)
+despite HOME/GH_CONFIG_DIR. Fix: fake `gh`/`gentle-ai` first on PATH
+recording argv to logs, `DBUS_SESSION_BUS_ADDRESS=` empty,
+`XDG_RUNTIME_DIR=<tmp>`; python3 stays real (pty only). The test asserts
+the names resolve to the shims and that `auth token` was never requested.
+The other `bootstrap.*.test.mjs` files only run LIFTED fragments (no
+`gh`/`gentle-ai` call reachable), so none needed shims.
 
 **D9 — a refused write is a REQUIRED failure, recorded separately from
 MISSING_OPTIONAL, and turns into a non-zero exit (cold-review round 3,
