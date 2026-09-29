@@ -106,6 +106,34 @@ test('importMemory: no chunk path is read — never spawns `engram sync --import
   assert.equal(chunkPathTouched, false, 'no chunk-path seam was ever invoked');
 });
 
+// #1116 (parent #864, found by #1081 F6): a FRESH engram 2.x store rejects
+// brain's import session with "pulled session directory is invalid:
+// directory is required" because the session row `buildImportPayload` builds
+// carries no `directory`. `importMemory` already threads `root` through as
+// the repo root (see the `root: '/fake/root'` seam above) — this pins that
+// the same value reaches the session payload engram actually sees.
+test('importMemory: the session payload carries directory = root — engram 2.x refuses an import session with none (#1116)', async () => {
+  const records = fixtureRecords(1);
+  const imports = [];
+
+  await importMemory({
+    _guard: noGuard,
+    root: '/fake/root',
+    _requireEngram: () => 'engram',
+    _readRecords: () => ({ records }),
+    _engramExistingTopicKeys: () => new Set(),
+    _engramImport: (payload) => imports.push(payload),
+    _log: () => {},
+  });
+
+  assert.equal(imports.length, 1);
+  assert.equal(
+    imports[0].sessions[0].directory,
+    '/fake/root',
+    'engram 2.x: "pulled session directory is invalid: directory is required" — see #1116',
+  );
+});
+
 test('importMemory: empty records/ → zero writes, no throw', async () => {
   const progressLines = [];
   const result = await importMemory({
