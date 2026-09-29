@@ -244,6 +244,8 @@ export default {
   // {tools} = space-separated list of missing optional tools
   'bootstrap.done.pending': 'Pending: {tools}',
   'bootstrap.done.install': 'Run: npm run tools:install  (installs all at once)',
+  // {items} = space-separated list of required-but-failed steps
+  'bootstrap.done.requiredFailed': '✗ Required step(s) failed: {items} — env:init did NOT complete successfully.',
 
   // ── lib/tier-notice.mjs — env:init states the governance tier (#1124) ─────────
   // {tier} = lite | standard | regulated

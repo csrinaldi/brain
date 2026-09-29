@@ -30,6 +30,15 @@ BRAIN_SCRIPTS="$WORKTREE_ROOT/brain/scripts"
 # its old spot just above §2) so those two sites can add to it too.
 MISSING_OPTIONAL=()
 
+# A DIFFERENT class from MISSING_OPTIONAL (issue #1112, cold-review round 3,
+# should-fix): a VCS token the operator actually typed in, that the
+# fail-closed pat-write-gate below refused to persist, is not optional —
+# it is the one thing this section exists to do. Appended only there; a
+# non-empty REQUIRED_FAILURES turns the final summary into a non-zero exit
+# (§9's required-failure-summary), so env:init cannot finish reading as a
+# successful setup when it demonstrably was not one.
+REQUIRED_FAILURES=()
+
 # Hard requirement, checked first: without the invoking tree's own
 # brain/scripts/, nothing below can run ITS code at all — only ever a
 # cascade of `Cannot find module` errors that per-step warnings would hide
@@ -371,6 +380,12 @@ EOT
   if [ -z "$VCS_TOKEN" ]; then
     warn "$I18N_BOOTSTRAP_PAT_SKIPPED"
   elif [ "$ENV_SECRET_SAFE" != true ]; then
+    # A REQUIRED failure (cold-review round 3, should-fix), not an optional
+    # one: the operator typed a token in and it could not be saved. Recorded
+    # once here, regardless of which reason refused it — §9's
+    # required-failure-summary is what turns this into the final summary
+    # line and the non-zero exit.
+    REQUIRED_FAILURES+=("$VCS_TOKEN_VAR not saved to .env ($ENV_SECRET_UNSAFE_REASON)")
     case "$ENV_SECRET_UNSAFE_REASON" in
       symlink)
         warn "$(printf "$I18N_BOOTSTRAP_PAT_SYMLINKREFUSED" "$VCS_TOKEN_VAR" "$ENV_SYMLINK_TARGET")"
@@ -580,6 +595,19 @@ if [ "${#MISSING_OPTIONAL[@]}" -gt 0 ]; then
   printf "  $I18N_BOOTSTRAP_DONE_PENDING\n" "${MISSING_OPTIONAL[*]}"
   printf '  %s\n' "$I18N_BOOTSTRAP_DONE_INSTALL"
 fi
+
+# --- BEGIN required-failure-summary (issue #1112, cold-review round 3, should-fix) ---
+# A refused credential write is not optional (see REQUIRED_FAILURES' own
+# declaration near the top of this file) — it must not read as success.
+# Named here, in the same final summary a human reads, AND turned into a
+# non-zero exit, so anything checking `$?` (a script, a CI step, an agent)
+# gets the same answer a human reading "Environment ready" plus this line
+# would: env:init did not finish clean.
+if [ "${#REQUIRED_FAILURES[@]}" -gt 0 ]; then
+  printf "  $I18N_BOOTSTRAP_DONE_REQUIREDFAILED\n" "${REQUIRED_FAILURES[*]}"
+  exit 1
+fi
+# --- END required-failure-summary ---
 
 # --- ADMIN ONLY (one-time) -------------------------------------------------------
 # Branch protection is a repo setting, not a per-developer concern.

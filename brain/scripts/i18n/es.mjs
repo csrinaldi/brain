@@ -222,6 +222,7 @@ export default {
   'bootstrap.done.section': 'Entorno listo',
   'bootstrap.done.pending': 'Pendiente: {tools}',
   'bootstrap.done.install': 'Corré: npm run tools:install  (instala todo de una)',
+  'bootstrap.done.requiredFailed': '✗ Paso(s) requerido(s) fallaron: {items} — env:init NO se completó con éxito.',
 
   // ── lib/tier-notice.mjs (#1124) ───────────────────────────────────────────────
   'config.tier.new':       'nivel de gobernanza: {tier} — establecido para este repositorio nuevo (governance.tier en brain.config.json).',
