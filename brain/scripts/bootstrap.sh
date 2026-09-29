@@ -116,8 +116,24 @@ if [ -t 0 ] && [ "$_config_existed" = false ] && [ -n "$VCS_PROVIDER$VCS_HOST$PR
   printf '    provider : %s\n' "${VCS_PROVIDER:-?}"
   printf '    gitHost  : %s\n' "${VCS_HOST:-?}"
   printf '    slug     : %s\n' "${PROJECT_PATH:-?}"
-  read -r -p "  VCS provider [${VCS_PROVIDER:-}]: " _override
-  _override="${_override:-$VCS_PROVIDER}"
+  # --- BEGIN vcs-provider-validate (issue #1112, finding 2) ---
+  # Only "github"/"gitlab" are valid vcs.provider values (ADR-0008). Before
+  # this fix, whatever was typed here was written verbatim into the TRACKED
+  # brain.config.json — an operator who answered with a pasted PAT (instead
+  # of a provider name) got the token committed to a tracked file. That same
+  # file's governance.memorySecretPatterns already lists the PAT shape
+  # (ghp_[A-Za-z0-9]{20,}), a few lines below, unchecked against. Restricting
+  # to this fixed two-value enum is strictly stronger than scanning against
+  # memorySecretPatterns for this one write path: no PAT-shaped string can
+  # ever equal "github" or "gitlab".
+  while :; do
+    read -r -p "  VCS provider [${VCS_PROVIDER:-}]: " _override
+    _override="${_override:-$VCS_PROVIDER}"
+    case "$_override" in
+      github|gitlab|'') break ;;
+      *) printf '  ✗ Unknown provider "%s" — only "github" or "gitlab" are supported.\n' "$_override" >&2 ;;
+    esac
+  done
   if [ -n "$_override" ] && [ "$_override" != "$VCS_PROVIDER" ]; then
     VCS_PROVIDER="$_override"
     # Persist the override to brain.config.json — use env var to avoid injection.
@@ -131,6 +147,7 @@ try {
 } catch {}
 NODE
   fi
+  # --- END vcs-provider-validate ---
 fi
 
 # Generic credential env var (ADR-0007 / issue #33): a single VCS_TOKEN is used
