@@ -57,6 +57,7 @@ import { resolveSecretConfig, compilePatterns, scanTextForSecrets } from "../../
 import { importRecord } from "../../../memory/lib/engram-import.mjs";
 import { appendRecord, rebuildIndex, readRecordIds, readRecords } from "../../../memory/lib/store.mjs";
 import { upstreamRecordEntries } from "../../../memory/lib/upstream-records.mjs";
+import { defaultGitPull } from "../../../memory/lib/reconcile-pull.mjs";
 import { normalizeDuplicates } from "../../../memory/lib/duplicates.mjs";
 import { buildRecord, serializeRecord, nowUtcSeconds, RECORD_TYPES } from "../../../memory/lib/format.mjs";
 import { unsupportedOp } from "../../../memory/lib/unsupported-op.mjs";
@@ -227,15 +228,9 @@ export function _defaultResolveDir(p) {
 // pullMemory — churn-resilient memory pull (issue #59)
 // ---------------------------------------------------------------------------
 
-/**
- * Default seam: run `git pull` in the repo root.
- * Throws (via execFileSync) on non-zero exit so callers can detect failure.
- *
- * @param {string} root  Repo root.
- */
-function _defaultGitPull(root) {
-  execFileSync("git", ["pull"], { stdio: "inherit", cwd: root });
-}
+// The default `_gitPull` seam is `defaultGitPull()`
+// (`../../../memory/lib/reconcile-pull.mjs`), shared with plainfiles.mjs#pull:
+// fetch, reconcile byte-identical untracked records (#1118), literal `git pull`.
 
 /**
  * Default seam: read every record currently in `.memory/records/`, ONE per
@@ -551,7 +546,7 @@ export async function importMemory({
  */
 export async function pullMemory({
   root = repoRoot,
-  _gitPull = _defaultGitPull,
+  _gitPull = defaultGitPull,
   _rebuildIndex = rebuildIndex,
   _import = importMemory,
 } = {}) {
