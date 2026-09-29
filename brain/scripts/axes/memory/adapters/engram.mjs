@@ -588,8 +588,16 @@ export async function pull() {
 /** The repository this record belongs to, from config, falling back to the checkout
  *  directory name. Duplicated from plainfiles.mjs verbatim (R1) — no shared-core
  *  extraction; the correctness-critical logic already lives in the shared libs
- *  this function calls into. */
-function deriveProject(config, root) {
+ *  this function calls into.
+ *
+ *  Exported (issue #1112, finding 3) so `brain-to-engram.mjs` — a THIRD
+ *  reader, not a backend adapter — resolves the project the same way this
+ *  adapter's own `save()` does, instead of reading `config.project.name`
+ *  directly (empty after `env:init`, which only ever sets `project.slug`).
+ *  This does not reopen R1: R1 is about the two BACKEND adapters
+ *  (plainfiles/engram) staying independent, not about every other caller
+ *  reinventing project resolution. */
+export function deriveProject(config, root) {
   const slug = config?.project?.slug;
   if (typeof slug === "string" && slug.trim() !== "") return slug.split("/").pop();
   const name = config?.project?.name;

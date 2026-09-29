@@ -30,6 +30,15 @@ BRAIN_SCRIPTS="$WORKTREE_ROOT/brain/scripts"
 # its old spot just above §2) so those two sites can add to it too.
 MISSING_OPTIONAL=()
 
+# A DIFFERENT class from MISSING_OPTIONAL (issue #1112, cold-review round 3,
+# should-fix): a VCS token the operator actually typed in, that the
+# fail-closed pat-write-gate below refused to persist, is not optional —
+# it is the one thing this section exists to do. Appended only there; a
+# non-empty REQUIRED_FAILURES turns the final summary into a non-zero exit
+# (§9's required-failure-summary), so env:init cannot finish reading as a
+# successful setup when it demonstrably was not one.
+REQUIRED_FAILURES=()
+
 # Hard requirement, checked first: without the invoking tree's own
 # brain/scripts/, nothing below can run ITS code at all — only ever a
 # cascade of `Cannot find module` errors that per-step warnings would hide
@@ -116,8 +125,24 @@ if [ -t 0 ] && [ "$_config_existed" = false ] && [ -n "$VCS_PROVIDER$VCS_HOST$PR
   printf '    provider : %s\n' "${VCS_PROVIDER:-?}"
   printf '    gitHost  : %s\n' "${VCS_HOST:-?}"
   printf '    slug     : %s\n' "${PROJECT_PATH:-?}"
-  read -r -p "  VCS provider [${VCS_PROVIDER:-}]: " _override
-  _override="${_override:-$VCS_PROVIDER}"
+  # --- BEGIN vcs-provider-validate (issue #1112, finding 2) ---
+  # Only "github"/"gitlab" are valid vcs.provider values (ADR-0008). Before
+  # this fix, whatever was typed here was written verbatim into the TRACKED
+  # brain.config.json — an operator who answered with a pasted PAT (instead
+  # of a provider name) got the token committed to a tracked file. That same
+  # file's governance.memorySecretPatterns already lists the PAT shape
+  # (ghp_[A-Za-z0-9]{20,}), a few lines below, unchecked against. Restricting
+  # to this fixed two-value enum is strictly stronger than scanning against
+  # memorySecretPatterns for this one write path: no PAT-shaped string can
+  # ever equal "github" or "gitlab".
+  while :; do
+    read -r -p "  VCS provider [${VCS_PROVIDER:-}]: " _override
+    _override="${_override:-$VCS_PROVIDER}"
+    case "$_override" in
+      github|gitlab|'') break ;;
+      *) printf '  ✗ Unknown provider "%s" — only "github" or "gitlab" are supported.\n' "$_override" >&2 ;;
+    esac
+  done
   if [ -n "$_override" ] && [ "$_override" != "$VCS_PROVIDER" ]; then
     VCS_PROVIDER="$_override"
     # Persist the override to brain.config.json — use env var to avoid injection.
@@ -131,6 +156,7 @@ try {
 } catch {}
 NODE
   fi
+  # --- END vcs-provider-validate ---
 fi
 
 # Generic credential env var (ADR-0007 / issue #33): a single VCS_TOKEN is used
@@ -243,6 +269,91 @@ fi
 
 # --- 3. Personal PAT in .env --------------------------------------------------
 say "$I18N_BOOTSTRAP_PAT_SECTION"
+
+# --- BEGIN ensure-env-gitignored (issue #1112, finding 1) ---
+# `.env` (and node_modules/) are untracked but NOT ignored in a fresh
+# consumer repo — `brain init` never created or amended a `.gitignore`.
+# The next `git add -A` after this section writes the operator's PAT below
+# would commit it. `git check-ignore` (not a plain grep) is used so an
+# existing broader pattern (`.env*`, one written in a parent directory's
+# .gitignore, core.excludesFile, …) is honored instead of duplicated.
+ensure_env_gitignored() {
+  git check-ignore -q .env 2>/dev/null && return 0
+  [ -f .gitignore ] || : > .gitignore
+  if [ -s .gitignore ] && [ "$(tail -c1 .gitignore | wc -l)" -eq 0 ]; then printf '\n' >> .gitignore; fi
+  printf '.env\n' >> .gitignore
+  git check-ignore -q .env 2>/dev/null
+}
+if ensure_env_gitignored; then
+  ok "$I18N_BOOTSTRAP_GITIGNORE_OK"
+else
+  warn "$I18N_BOOTSTRAP_GITIGNORE_FAILED"
+fi
+# --- END ensure-env-gitignored ---
+
+# --- BEGIN env-secret-safe-gate (issue #1112, cold-review finding) ---
+# `ensure_env_gitignored` above only WARNS when it cannot confirm `.env` is
+# ignored — a warning does not stop the write that follows. FAIL CLOSED
+# instead: compute ONE gate, read by the one place below that writes a new
+# secret into `.env`.
+#
+# Checked ONCE here, before any of the prompts below ever run — never
+# re-checked per-write, so the whole PAT section reads one consistent answer.
+#
+# FILE TYPE is checked FIRST, independently of tracking/ignore status
+# (cold-review round 3): a `.env` that is a SYMLINK to a file outside the
+# repo (`.env -> /outside/secrets.env`) passes both the tracked check (the
+# symlink itself is untracked) and the ignore check (`git check-ignore`
+# matches the symlink's OWN path, same as for a regular file) — so the gate
+# used to say "safe", and `env_set`'s `>> .env` then followed the symlink and
+# appended the PAT to a file OUTSIDE the repo entirely (reproduced). `[ -L
+# .env ]` is true for a symlink regardless of what it points at, or whether
+# the target even exists, so it must be checked BEFORE `-f` (which follows
+# symlinks and would call a symlink-to-a-regular-file "safe"). Anything else
+# that exists but is not a regular file (a directory, a FIFO, …) is refused
+# for the same reason: `>> .env` on any of those is not "write a token into a
+# file this repo owns".
+#
+# TRACKED STATUS is checked next. `git check-ignore` NEVER reports a path as
+# ignored once it is TRACKED, no matter which pattern in `.gitignore`
+# matches it — a previous run (this same bug, before this fix, or a manual
+# `git add -A`) may already have committed `.env`. A `.gitignore` fix cannot
+# protect a secret about to be written into a file git's index already has,
+# so tracked status is checked separately from, and before, the ignore
+# check — it changes which remedy is correct.
+#
+# The IGNORE CHECK itself (`git check-ignore -q .env`) honors every
+# applicable source — a pattern in THIS repo's `.gitignore` at any level, a
+# rule in `.git/info/exclude`, or a global `core.excludesFile` — any of which
+# make `.env` ignored for THIS CLONE ONLY; none of them travels with the repo
+# to a fresh clone, which is exactly why `ensure_env_gitignored` above writes
+# a repo-tracked `.gitignore` pattern rather than relying on a clone-local
+# exclude file to do the whole job.
+ENV_SECRET_SAFE=true
+ENV_SECRET_UNSAFE_REASON=""
+ENV_SYMLINK_TARGET=""
+if [ -L .env ]; then
+  ENV_SECRET_SAFE=false
+  ENV_SECRET_UNSAFE_REASON=symlink
+  ENV_SYMLINK_TARGET="$(readlink .env 2>/dev/null || true)"
+elif [ -e .env ] && [ ! -f .env ]; then
+  ENV_SECRET_SAFE=false
+  ENV_SECRET_UNSAFE_REASON=notRegularFile
+elif [ -f .env ] && _env_links="$(stat -c %h .env 2>/dev/null || stat -f %l .env 2>/dev/null || echo 1)" && [ "$_env_links" -gt 1 ] 2>/dev/null; then
+  # A HARDLINK to a file outside the repo passes `-L` (false) and `-f` (true),
+  # and `>> .env` would append the PAT through it. Link count > 1 is the only
+  # signal; `stat -c %h` is GNU, `stat -f %l` is BSD/macOS.
+  ENV_SECRET_SAFE=false
+  ENV_SECRET_UNSAFE_REASON=hardlinked
+elif git ls-files --error-unmatch .env >/dev/null 2>&1; then
+  ENV_SECRET_SAFE=false
+  ENV_SECRET_UNSAFE_REASON=tracked
+elif ! git check-ignore -q .env 2>/dev/null; then
+  ENV_SECRET_SAFE=false
+  ENV_SECRET_UNSAFE_REASON=ignoreFailed
+fi
+# --- END env-secret-safe-gate ---
+
 VCS_TOKEN="$(env_get "$VCS_TOKEN_VAR")"
 if [ -n "$VCS_TOKEN" ]; then
   ok "$(printf "$I18N_BOOTSTRAP_PAT_ALREADYSET" "$VCS_TOKEN_VAR")"
@@ -271,12 +382,41 @@ EOT
   esac
   read -r -s -p "  $I18N_BOOTSTRAP_PAT_ENTERPROMPT" VCS_TOKEN
   echo
+  # --- BEGIN pat-write-gate (issue #1112, cold-review finding) ---
   if [ -z "$VCS_TOKEN" ]; then
     warn "$I18N_BOOTSTRAP_PAT_SKIPPED"
+  elif [ "$ENV_SECRET_SAFE" != true ]; then
+    # A REQUIRED failure (cold-review round 3, should-fix), not an optional
+    # one: the operator typed a token in and it could not be saved. Recorded
+    # once here, regardless of which reason refused it — §9's
+    # required-failure-summary is what turns this into the final summary
+    # line and the non-zero exit.
+    REQUIRED_FAILURES+=("$VCS_TOKEN_VAR not saved to .env ($ENV_SECRET_UNSAFE_REASON)")
+    case "$ENV_SECRET_UNSAFE_REASON" in
+      symlink)
+        warn "$(printf "$I18N_BOOTSTRAP_PAT_SYMLINKREFUSED" "$VCS_TOKEN_VAR" "$ENV_SYMLINK_TARGET")"
+        ;;
+      notRegularFile)
+        warn "$(printf "$I18N_BOOTSTRAP_PAT_NOTREGULARFILEREFUSED" "$VCS_TOKEN_VAR")"
+        ;;
+      hardlinked)
+        warn "$(printf "$I18N_BOOTSTRAP_PAT_HARDLINKEDREFUSED" "$VCS_TOKEN_VAR")"
+        ;;
+      tracked)
+        warn "$(printf "$I18N_BOOTSTRAP_PAT_TRACKEDREFUSED" "$VCS_TOKEN_VAR")"
+        ;;
+      *)
+        warn "$(printf "$I18N_BOOTSTRAP_PAT_GITIGNOREREFUSED" "$VCS_TOKEN_VAR")"
+        ;;
+    esac
+    # The gate protects the SECRET only: the non-secret settings are still
+    # written to .env, and the operator is told so rather than left to guess.
+    warn "$I18N_BOOTSTRAP_PAT_SETTINGSNOTE"
   else
     env_set "$VCS_TOKEN_VAR" "$VCS_TOKEN"
     ok "$(printf "$I18N_BOOTSTRAP_PAT_SAVED" "$VCS_TOKEN_VAR")"
   fi
+  # --- END pat-write-gate ---
 fi
 if [ -n "$VCS_TOKEN" ]; then export "$VCS_TOKEN_VAR=$VCS_TOKEN"; fi
 
@@ -371,7 +511,28 @@ say "$I18N_BOOTSTRAP_MEMORY_SECTION"
 MEMORY_BACKEND="$(env_get MEMORY_BACKEND)"
 if [ -z "$MEMORY_BACKEND" ]; then
   if [ -t 0 ]; then
-    read -r -p "  $I18N_BOOTSTRAP_MEMORY_PROMPT" MEMORY_BACKEND
+    # --- BEGIN memory-backend-validate (issue #1112, cold-review should-fix 3) ---
+    # Same validation shape as vcs-provider-validate (finding 2) — reused
+    # rather than a second style for the same class of prompt: read into a
+    # scratch variable, `case` it against the closed set, re-prompt on
+    # anything else. Only the two real backends
+    # (axes/memory/adapters/engram.mjs, axes/memory/adapters/plainfiles.mjs)
+    # are accepted; anything else would land in .env and fail later,
+    # silently, deep inside memory/cli.mjs's backend dispatch. Reads into
+    # `_membackend_answer`, not `$MEMORY_BACKEND` directly, so this loop's
+    # own `case` is textually distinct from the real backend-dispatch `case
+    # "$MEMORY_BACKEND" in` a few lines below — two different literal lines
+    # for two different jobs, never one string a test's own extraction could
+    # match by accident.
+    while :; do
+      read -r -p "  $I18N_BOOTSTRAP_MEMORY_PROMPT" _membackend_answer
+      case "$_membackend_answer" in
+        engram|plainfiles|'') break ;;
+        *) printf '  ✗ Unknown backend "%s" — only "engram" or "plainfiles" are supported.\n' "$_membackend_answer" >&2 ;;
+      esac
+    done
+    MEMORY_BACKEND="$_membackend_answer"
+    # --- END memory-backend-validate ---
   fi
   MEMORY_BACKEND="${MEMORY_BACKEND:-engram}"
   env_set MEMORY_BACKEND "$MEMORY_BACKEND"
@@ -402,6 +563,25 @@ case "$MEMORY_BACKEND" in
     (cd "$WORKTREE_ROOT" && $PM run --silent brain:memory:pull)  && ok "$I18N_BOOTSTRAP_MEMORY_PULL_OK"  || warn "$I18N_BOOTSTRAP_MEMORY_PULL_FAILED"
     (cd "$WORKTREE_ROOT" && $PM run --silent brain:memory:index) && ok "$I18N_BOOTSTRAP_MEMORY_INDEX_OK" || warn "$I18N_BOOTSTRAP_MEMORY_INDEX_FAILED"
     ;;
+  plainfiles)
+    # plainfiles is a real, supported backend (axes/memory/adapters/plainfiles.mjs),
+    # not a fall-through — issue #1112 (folded finding). It supports `setup`
+    # (.memory/records/ + index self-check, no symlink, no merge driver —
+    # ADR-0002 is engram-only) and `pull` (git pull + rebuild index).
+    # `index` (brain/ doc → memory projection) is deliberately unsupported for
+    # plainfiles (design C3 Decision 5, unsupported-op.mjs): it always throws,
+    # so it is never called here — calling it would report a real design
+    # decision as a spurious "failed (non-blocking)".
+    if command -v node >/dev/null 2>&1; then
+      node "$BRAIN_SCRIPTS/memory/cli.mjs" setup \
+        && ok "$I18N_BOOTSTRAP_MEMORY_PLAINFILES_OK" \
+        || warn "$I18N_BOOTSTRAP_MEMORY_PLAINFILES_FAILED"
+    else
+      warn "$I18N_BOOTSTRAP_MEMORY_NODEABSENT"
+    fi
+    (cd "$WORKTREE_ROOT" && $PM run --silent brain:memory:pull) && ok "$I18N_BOOTSTRAP_MEMORY_PULL_OK" || warn "$I18N_BOOTSTRAP_MEMORY_PULL_FAILED"
+    ok "$I18N_BOOTSTRAP_MEMORY_PLAINFILES_NOINDEX"
+    ;;
   *)
     warn "$(printf "$I18N_BOOTSTRAP_MEMORY_UNKNOWNBACKEND" "$MEMORY_BACKEND")"
     ;;
@@ -427,6 +607,19 @@ if [ "${#MISSING_OPTIONAL[@]}" -gt 0 ]; then
   printf "  $I18N_BOOTSTRAP_DONE_PENDING\n" "${MISSING_OPTIONAL[*]}"
   printf '  %s\n' "$I18N_BOOTSTRAP_DONE_INSTALL"
 fi
+
+# --- BEGIN required-failure-summary (issue #1112, cold-review round 3, should-fix) ---
+# A refused credential write is not optional (see REQUIRED_FAILURES' own
+# declaration near the top of this file) — it must not read as success.
+# Named here, in the same final summary a human reads, AND turned into a
+# non-zero exit, so anything checking `$?` (a script, a CI step, an agent)
+# gets the same answer a human reading "Environment ready" plus this line
+# would: env:init did not finish clean.
+if [ "${#REQUIRED_FAILURES[@]}" -gt 0 ]; then
+  printf "  $I18N_BOOTSTRAP_DONE_REQUIREDFAILED\n" "${REQUIRED_FAILURES[*]}"
+  exit 1
+fi
+# --- END required-failure-summary ---
 
 # --- ADMIN ONLY (one-time) -------------------------------------------------------
 # Branch protection is a repo setting, not a per-developer concern.

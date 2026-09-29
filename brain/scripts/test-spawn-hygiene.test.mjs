@@ -445,6 +445,33 @@ const ALLOWLIST = [
 
   // ── npm pack: no VCS surface at all ──────────────────────────────────────
   { file: 'test/publish-allowlist.e2e.test.mjs', entrypoint: '<unresolved>', line: 90, reason: 'no-vcs-capability' },
+
+  // ── #1112: bootstrap.sh fragments lifted verbatim into a scratch/fixture
+  //    dir, and brain-to-engram.mjs run against a fake `engram` stub — none
+  //    of the four ever import or call a VCS/gh port.
+  { file: 'brain/scripts/bootstrap.env-gitignore.test.mjs', entrypoint: '<unresolved>', line: 60, reason: 'no-vcs-capability' },
+  { file: 'brain/scripts/bootstrap.memory-backend-case.test.mjs', entrypoint: '<unresolved>', line: 89, reason: 'no-vcs-capability' },
+  { file: 'brain/scripts/bootstrap.vcs-provider-validate.test.mjs', entrypoint: '<unresolved>', line: 66, reason: 'no-vcs-capability' },
+  { file: 'brain/scripts/brain-to-engram.test.mjs', entrypoint: '<unresolved>', line: 141, reason: 'no-vcs-capability' },
+
+  // ── #1112 cold-review follow-up (blockers 2/3): more bootstrap.sh
+  //    fragments, lifted verbatim into scratch/fixture dirs — none imports
+  //    or calls a VCS/gh port.
+  { file: 'brain/scripts/bootstrap.memory-backend-validate.test.mjs', entrypoint: '<unresolved>', line: 56, reason: 'no-vcs-capability' },
+  { file: 'brain/scripts/bootstrap.pat-secret-guard.test.mjs', entrypoint: '<unresolved>', line: 58, reason: 'no-vcs-capability' },
+  // #1112 cold-review round 3 (blocker 1, symlink handling): shifted from
+  // line 113 by the new symlink/non-regular-file tests added above it.
+  { file: 'brain/scripts/bootstrap.pat-secret-guard.test.mjs', entrypoint: '<unresolved>', line: 176, reason: 'no-vcs-capability' },
+
+  // ── #1112 cold-review round 3 (should-fix 2): REQUIRED_FAILURES / exit
+  //    code fragments, lifted verbatim — no VCS/gh port anywhere in them.
+  //    (The e2e test in bootstrap.pat-refusal-e2e.test.mjs spawns `python3`,
+  //    not a tracked runtime, so it is not a hit here at all — see that
+  //    file's own header for why a real pty was needed.)
+  { file: 'brain/scripts/bootstrap.required-failure.test.mjs', entrypoint: '<unresolved>', line: 68, reason: 'no-vcs-capability' },
+  { file: 'brain/scripts/bootstrap.required-failure.test.mjs', entrypoint: '<unresolved>', line: 104, reason: 'no-vcs-capability' },
+  // #1112 final cold review: the e2e's `sh -c 'command -v gh'` proves the shims resolve first; no VCS port involved.
+  { file: 'brain/scripts/bootstrap.pat-refusal-e2e.test.mjs', entrypoint: '<unresolved>', line: 186, reason: 'no-vcs-capability' },
 ];
 
 function validateAllowlist(entries) {

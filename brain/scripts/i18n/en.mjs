@@ -165,6 +165,9 @@ export default {
   'bootstrap.ecosystem.notFound': '{tool} not found — {hint}',
 
   // §3 Personal access token
+  'bootstrap.gitignore.ok':     '.env is git-ignored',
+  'bootstrap.gitignore.failed': 'could not confirm .env is git-ignored — check .gitignore by hand before committing',
+
   'bootstrap.pat.section':         'Personal access token (.env)',
   'bootstrap.pat.alreadySet':      '{var} already set in .env',
   'bootstrap.pat.noTty':           'no TTY: add {var} to .env and re-run brain:env:init',
@@ -174,6 +177,13 @@ export default {
   'bootstrap.pat.enterPrompt':     'Paste your PAT (not shown): ',
   'bootstrap.pat.skipped':         'No token: skipping VCS authentication. Re-run brain:env:init when you have it.',
   'bootstrap.pat.saved':           '{var} saved in .env (gitignored)',
+  'bootstrap.pat.trackedRefused':     '{var} NOT written — .env is already tracked by git, so no .gitignore pattern can protect it. Untrack it first: git rm --cached .env — then re-run brain:env:init.',
+  'bootstrap.pat.gitignoreRefused':   '{var} NOT written — could not confirm .env is git-ignored. Fix .gitignore by hand, then re-run brain:env:init.',
+  // {var} = token env var name, {target} = the symlink's target path
+  'bootstrap.pat.symlinkRefused':          '{var} NOT written — .env is a symlink to {target}; it must be a regular file, or the token would be written outside this repo. Replace it with a regular file, then re-run brain:env:init.',
+  'bootstrap.pat.notRegularFileRefused':   '{var} NOT written — .env exists but is not a regular file. It must be a regular file, then re-run brain:env:init.',
+  'bootstrap.pat.hardlinkedRefused':       '{var} NOT written — .env is hardlinked to another file, so the token would also land there. Replace it with an independent regular file, then re-run brain:env:init.',
+  'bootstrap.pat.settingsNote':            'The non-secret settings (MEMORY_BACKEND, AGENT_PLATFORM, SDD_ENGINE) are still written to .env.',
 
   // §4 Git credential helper
   'bootstrap.cred.section': 'Git credential helper (HTTPS)',
@@ -221,6 +231,9 @@ export default {
   'bootstrap.memory.pull.failed':    'brain:memory:pull failed (non-blocking)',
   'bootstrap.memory.index.ok':       'durable index reprojected (brain/ → engram)',
   'bootstrap.memory.index.failed':   'brain:memory:index failed (non-blocking)',
+  'bootstrap.memory.plainfiles.ok':      'plainfiles backend ready (.memory/records/ + index)',
+  'bootstrap.memory.plainfiles.failed':  'plainfiles memory setup failed (non-blocking)',
+  'bootstrap.memory.plainfiles.noIndex': 'brain/ → memory indexing is engram-only; plainfiles has no doc projection by design',
   // {backend} = unknown backend name
   'bootstrap.memory.unknownBackend': "backend '{backend}' has no known init routine — configure it manually",
 
@@ -233,6 +246,8 @@ export default {
   // {tools} = space-separated list of missing optional tools
   'bootstrap.done.pending': 'Pending: {tools}',
   'bootstrap.done.install': 'Run: npm run tools:install  (installs all at once)',
+  // {items} = space-separated list of required-but-failed steps
+  'bootstrap.done.requiredFailed': '✗ Required step(s) failed: {items} — env:init did NOT complete successfully.',
 
   // ── lib/tier-notice.mjs — env:init states the governance tier (#1124) ─────────
   // {tier} = lite | standard | regulated

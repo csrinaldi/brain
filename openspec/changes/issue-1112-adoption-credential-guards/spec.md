@@ -1,0 +1,181 @@
+---
+status: applied
+issue: 1112
+---
+
+# Adoption never publishes a credential, and reports failures it saw (#1112)
+
+## Requirements
+
+### Requirement: `.env` is git-ignored before any secret is ever written into it
+
+#### Scenario: fresh repo, no `.gitignore`
+- **WHEN** `env:init` reaches §3 (Personal PAT) in a repo with no `.gitignore`
+- **THEN** a `.gitignore` is created containing `.env`, and `git check-ignore -q .env` succeeds, before the PAT is ever written
+
+#### Scenario: existing `.gitignore` without a trailing newline
+- **WHEN** `.gitignore` already exists and does not end in a newline
+- **THEN** the pre-existing content survives intact on its own line, and `.env` is appended as its own line
+
+#### Scenario: idempotent
+- **WHEN** `env:init` runs twice
+- **THEN** `.gitignore` contains exactly one `.env` line
+
+#### Scenario: an existing broader pattern already covers `.env`
+- **WHEN** `.gitignore` already contains a pattern like `.env*`
+- **THEN** no redundant literal `.env` line is added, and `git check-ignore -q .env` still succeeds
+
+### Requirement: `env:init` fails closed — a credential is never written unless `.env` is confirmed safe
+
+Cold-review finding (blocker 2), 2026-09-29: `git check-ignore` never reports a TRACKED path as ignored, no matter which pattern matches it, so a warning-only response to a failed ignore check left the PAT write unblocked.
+
+#### Scenario: `.env` is already tracked by git
+- **WHEN** `.env` is tracked (even if a `.gitignore` pattern matches it) and the operator provides a candidate token
+- **THEN** the token is never written to `.env`, and a message names the real fix (`git rm --cached .env`, then re-run `env:init`)
+
+#### Scenario: the ignore check fails for another reason
+- **WHEN** `.env` is untracked but `git check-ignore -q .env` still fails after the repair attempt, and the operator provides a candidate token
+- **THEN** the token is never written to `.env`
+
+#### Scenario: safe — no regression
+- **WHEN** `.env` is untracked and ignored, and the operator provides a candidate token
+- **THEN** the token is written to `.env`, unchanged from before this fix
+
+### Requirement: `env:init` refuses a symlinked, hardlinked or non-regular `.env`
+
+Cold-review round 3 blocker, 2026-09-29: the gate above checked tracking/ignore status by PATH only. A `.env` that is a symlink to a file outside the repo passed both checks (the symlink itself is untracked, and `git check-ignore` matches the symlink's own path) — `env_set`'s `>> .env` then followed the symlink and wrote the PAT outside the repo entirely (reproduced).
+
+#### Scenario: `.env` is a symlink to a file outside the repo
+- **WHEN** `.env` is a symlink (`.env -> /outside/secrets.env`), even with a `.gitignore` pattern matching `.env`, and the operator provides a candidate token
+- **THEN** the token is never written to the symlink's target, and a message names the target and says `.env` must be a regular file
+
+#### Scenario: `.env` exists but is not a regular file
+- **WHEN** `.env` exists as something other than a regular file or a symlink (e.g. a directory) and the operator provides a candidate token
+- **THEN** the token is never written
+
+#### Scenario: `.env` is a hardlink to another file
+- **WHEN** `.env` is a regular file whose link count is greater than 1 (a hardlink to a file outside the repo passes both `-L` and `-f`), and the operator provides a candidate token
+- **THEN** the token is never written (reason `hardlinked`), and the message says `.env` must be an independent regular file. The link count is read portably: `stat -c %h` (GNU), falling back to `stat -f %l` (BSD/macOS)
+
+#### Scenario: every refusal states what was still written
+- **WHEN** the write gate refuses the token for any reason
+- **THEN** the output also says the non-secret settings (`MEMORY_BACKEND`, `AGENT_PLATFORM`, `SDD_ENGINE`) are still written to `.env`
+
+### Requirement: a refused PAT write is a required failure, not a clean exit
+
+Cold-review round 3, class C, 2026-09-25: a refused write only ever `warn`ed — the same soft signal already used for optional degradations — so `env:init` still finished reading as a successful setup.
+
+#### Scenario: the refusal is recorded separately from optional degradations
+- **WHEN** the write-gate refuses a token the operator actually provided (tracked, symlink, not-a-regular-file, or any other ignore-check failure)
+- **THEN** the refusal is recorded in a list distinct from the one used for optional/degraded steps
+
+#### Scenario: an unattempted write records nothing
+- **WHEN** the operator leaves the PAT prompt empty (skips it)
+- **THEN** no required failure is recorded — nothing was attempted
+
+#### Scenario: the final summary names the failure and the process exits non-zero
+- **WHEN** any required failure was recorded during the run
+- **THEN** the final summary prints it, and `env:init` exits with a non-zero status
+
+#### Scenario: end to end, under a real interactive run
+- **WHEN** the real `bootstrap.sh` is driven under a real TTY against a fixture whose `.env` is already tracked, and the operator types a candidate token at the real prompt
+- **THEN** the token never appears anywhere on disk in the fixture, the summary names the refusal, and the process exits non-zero
+- **AND** the run is hermetic: `gh` and `gentle-ai` resolve to PATH shims that only record their argv, the dbus session bus and XDG runtime dir are neutralised, and the shims never receive `auth token`
+
+### Requirement: `vcs.provider` accepts only `github` or `gitlab`
+
+#### Scenario: an invalid answer is rejected and never persisted
+- **WHEN** the interactive VCS-provider prompt receives an answer that is not `github`, `gitlab`, or empty
+- **THEN** the answer is rejected with a reported message, re-prompted, and never written to `brain.config.json`
+
+#### Scenario: a valid answer is accepted
+- **WHEN** the prompt receives `github` or `gitlab`
+- **THEN** it is accepted and, if different from the derived value, persisted to `brain.config.json`
+
+#### Scenario: an empty answer keeps the derived default
+- **WHEN** the prompt receives an empty answer
+- **THEN** the derived `VCS_PROVIDER` is kept and `brain.config.json` is not rewritten
+
+### Requirement: `MEMORY_BACKEND` accepts only `engram` or `plainfiles`
+
+Cold-review should-fix 3, 2026-09-29: reuses the exact validation loop shape used for `vcs.provider`, rather than a second style for the same class of prompt.
+
+#### Scenario: an invalid backend is rejected and re-prompted
+- **WHEN** the interactive memory-backend prompt receives an answer that is not `engram`, `plainfiles`, or empty
+- **THEN** the answer is rejected with a reported message and re-prompted
+
+#### Scenario: a valid backend is accepted
+- **WHEN** the prompt receives `engram` or `plainfiles`
+- **THEN** it is accepted
+
+#### Scenario: an empty answer is accepted (the caller applies the `engram` default)
+- **WHEN** the prompt receives an empty answer
+- **THEN** the loop accepts it as-is; defaulting to `engram` remains the caller's job, unchanged
+
+### Requirement: `brain-to-engram.mjs` resolves the project like the rest of the engram adapter, and reports a failed index
+
+#### Scenario: `project.name` is empty (the shape `env:init` leaves)
+- **WHEN** `brain.config.json` has `project.slug` set and `project.name` empty
+- **THEN** every `engram save` call receives `--project` resolved via `deriveProject` (slug's last segment, called directly — no pass-through wrapper), never an empty string
+
+#### Scenario: a per-file indexing failure is counted and reported
+- **WHEN** one or more files fail to index
+- **THEN** each failure is reported (never silently swallowed), and the process exits non-zero
+
+#### Scenario: a clean run exits zero
+- **WHEN** every file indexes successfully
+- **THEN** the process exits zero
+
+### Requirement: `MEMORY_BACKEND=plainfiles` is a recognized backend
+
+#### Scenario: plainfiles setup and pull run
+- **WHEN** `MEMORY_BACKEND=plainfiles`
+- **THEN** `memory/cli.mjs setup` and `brain:memory:pull` both run, and neither is reported as an unknown backend
+
+#### Scenario: `index` is never called for plainfiles
+- **WHEN** `MEMORY_BACKEND=plainfiles`
+- **THEN** `brain:memory:index` is never invoked (it is unsupported by design for plainfiles — C3 Decision 5 — and would always fail)
+
+#### Scenario: a genuinely unknown backend is still reported as unknown
+- **WHEN** `MEMORY_BACKEND` is neither `engram` nor `plainfiles`
+- **THEN** the existing unknown-backend warning still fires
+
+### Requirement: `pre-commit` accepts a repository's first commit even from the main checkout
+
+Ruled by the maintainer 2026-09-29 (Option A) after this change first stopped and reported the fork. **Corrected the same day**: the condition is "the repository has no commit at all" (`git rev-list -n 1 --all` empty), never "the current HEAD is unborn" (`git rev-parse --verify HEAD` failing) — the two are not equivalent, and the cold review reproduced the gap between them (see the orphan-branch scenario below).
+
+#### Scenario: the first commit is accepted, even on a branch named "main"
+- **WHEN** a commit is attempted in a fresh repository with no prior commits, `core.hooksPath` set to the installed hooks, on a branch named `main`
+- **THEN** the commit succeeds
+
+#### Scenario: detection is structural, not by branch name
+- **WHEN** the same first-commit scenario runs on a default branch named something other than `main`/`master` (e.g. `trunk`)
+- **THEN** the commit still succeeds
+
+#### Scenario: the exemption is reported
+- **WHEN** the first commit is accepted via the no-commit-at-all exemption
+- **THEN** one line naming the reason is printed
+
+#### Scenario: a second commit from the main checkout is still refused
+- **WHEN** a second commit is attempted from the same main checkout, on a non-`main` branch, after the first commit has landed
+- **THEN** it is refused by check 2 (never a branch in the main checkout), unchanged
+
+#### Scenario: check 1 is unchanged once HEAD is born
+- **WHEN** a direct commit to `main` is attempted after the first commit has already landed
+- **THEN** it is refused by check 1, unchanged
+
+#### Scenario: an orphan branch in a repo WITH history is never exempted
+- **WHEN** `git checkout --orphan` is run in the main checkout of a repository that already has a commit (e.g. on `main`), making the current HEAD unborn again, and a commit is then attempted on that orphan branch
+- **THEN** the commit is refused by check 2 exactly as any other main-checkout commit — the no-commit-at-all exemption never fires, because `main`'s commit is still reachable from `git rev-list --all`
+
+#### Scenario: the exemption applies again once every ref is deleted
+- **WHEN** every ref of a repository with history is deleted (`git checkout --orphan x; git branch -D main`) so `git rev-list -n 1 --all` is empty, and a commit is attempted
+- **THEN** the exemption applies. It holds while no ref reaches any commit; it is not permanent, and a repository with no ref has no shared history for parallel work to collide on
+
+#### Scenario: no other installed hook needed the same exemption
+- **WHEN** `pre-push`, `commit-msg` and `pre-receive` are reviewed for a branch-name or main-checkout/worktree refusal
+- **THEN** none is found — only `pre-commit` carried this class of check, and no GitLab counterpart exists because "which local checkout made this commit" is not observable server-side
+
+#### Scenario: the published adoption guide is untouched
+- **WHEN** this change is reviewed
+- **THEN** `docs/adoption.md` and `docs/KNOWN-LIMITATIONS.md` are unchanged (they describe the published package and are the orchestrator's to update once, respectively)
