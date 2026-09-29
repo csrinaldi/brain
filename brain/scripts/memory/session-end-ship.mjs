@@ -77,7 +77,7 @@ function defaultUid() {
 function ensurePrivateDir(dir, uid) {
   try {
     mkdirSync(dir, { mode: 0o700 });
-  } catch (err) {
+  } catch (err) { /* swallow-ok: ONLY EEXIST continues (the directory exists, and the lstat checks below refuse a symlink, a foreign owner or loose permissions); every other error is re-thrown */
     if (err?.code !== 'EEXIST') throw err;
   }
   const st = lstatSync(dir);

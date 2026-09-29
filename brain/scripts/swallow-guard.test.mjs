@@ -28,9 +28,10 @@
 // the entry must be replaced by a real marker.
 //
 // WHAT IT CANNOT SEE, said plainly: a spawn whose exit status is never read, a
-// `console.warn` that is not inside a `catch`, a `.then(ok, () => {})`. The scan
-// finds the syntactic swallow, not every way to lose a failure; the design.md
-// inventory is where the rest is judged by a human.
+// `console.warn` that is not inside a `catch`, a `.then(ok, () => {})`, a swallow
+// spelled through a helper (`ignore(() => x())`). The scan finds the syntactic swallow,
+// not every way to lose a failure; the design.md inventory is where the rest is judged
+// by a human. It DOES read JS embedded in shell (`node <<'TAG'`, `node -e/-p`).
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -48,6 +49,7 @@ const SCOPE_FILES = [
   'brain/scripts/lib/init.mjs',
   'brain/scripts/lib/installer.mjs',
   'brain/scripts/cli-entry.mjs',
+  'brain/scripts/install-tools.sh',
   // bootstrap
   'brain/scripts/bootstrap.sh',
   'brain/scripts/harness/cli.mjs',
@@ -66,7 +68,7 @@ const SCOPE_DIRS = [
 
 /** Area of a scoped path, for the inventory and the "no area went empty" check. */
 export function areaOf(rel) {
-  if (/^brain\/scripts\/(lib\/(init|installer)\.mjs|cli-entry\.mjs)$/.test(rel)) return 'install';
+  if (/^brain\/scripts\/(lib\/(init|installer)\.mjs|cli-entry\.mjs|install-tools\.sh)$/.test(rel)) return 'install';
   if (/^brain\/scripts\/(bootstrap\.sh|harness\/)/.test(rel)) return 'bootstrap';
   if (rel === 'brain/scripts/brain-upgrade.mjs') return 'upgrade';
   if (/^brain\/scripts\/(memory|axes\/memory)\//.test(rel)) return 'memory';
@@ -99,13 +101,17 @@ const OWNED_ELSEWHERE = [
   // are stated now; the fixes land as slice-A on top of that summary, not as a second
   // mechanism beside it.
   { file: BOOT, contains: 'VCS_PROVIDER_OVERRIDE="$_override" node', owner: '#1155', reason: 'slice-A the provider override write swallows its own failure (empty catch and `|| true`); it must join REQUIRED_FAILURES' },
+  // Embedded node snippets (heredocs): the scan reads JS inside shell since the cold review (S2).
+  { file: BOOT, contains: "c = JSON.parse(readFileSync('brain.config.json'", owner: '#1155', reason: 'slice-A a corrupt brain.config.json reads as an empty config here, so the derived provider, host and slug silently come out empty' },
+  { file: BOOT, contains: "originHost = m[1]", owner: '#1155', reason: 'swallow-ok: no git origin means no derived host or project; the prompts and the final summary name what is still unset' },
+  { file: BOOT, contains: 'cfg.vcs.provider = process.env.VCS_PROVIDER_OVERRIDE', owner: '#1155', reason: 'slice-A the provider override write swallows its own failure (empty catch); it must join REQUIRED_FAILURES' },
   { file: BOOT, contains: 'env_get() {', owner: '#1155', reason: 'swallow-ok: grep exits 1 when the key is absent, which is the answer env_get exists to give' },
   { file: BOOT, contains: 'grep -vE "^$1=" .env > "$tmp"', owner: '#1155', reason: 'swallow-ok: grep -v exits 1 when .env held only that key; the empty remainder is the correct result' },
   { file: BOOT, contains: 'PM="$(cd "$WORKTREE_ROOT"', owner: '#1155', reason: 'swallow-ok: falls back to npm, the default package manager, when detection is unavailable' },
   { file: BOOT, contains: 'PAT_URL="$(node', owner: '#1155', reason: 'swallow-ok: the URL only pre-fills a browser tab; without it the operator is told to create the token by hand' },
   { file: BOOT, contains: 'xdg-open "$PAT_URL"', owner: '#1155', reason: 'swallow-ok: opening a browser is a convenience; the URL is printed on the next line' },
   { file: BOOT, contains: 'open "$PAT_URL"', owner: '#1155', reason: 'swallow-ok: opening a browser is a convenience; the URL is printed on the next line' },
-  { file: BOOT, contains: 'I18N_BOOTSTRAP_AUTH_FAILED', owner: '#1155', reason: 'credential gate: a failed VCS login is warned and the run reads as ready' },
+  { file: BOOT, contains: 'I18N_BOOTSTRAP_AUTH_FAILED', owner: '#1155', reason: 'slice-A `auth-login || warn`: a failed VCS login is a warning line, then "Environment ready"' },
   { file: BOOT, contains: 'I18N_BOOTSTRAP_SDD_INITFAILED', owner: '#1155', reason: 'slice-A a failed SDD init is a warning line, then "Environment ready"' },
   { file: BOOT, contains: 'I18N_BOOTSTRAP_MEMORY_HOOKFAILED', owner: '#1155', reason: 'slice-A a failed core.hooksPath config is a warning line, then "Environment ready"' },
   { file: BOOT, contains: 'I18N_BOOTSTRAP_MEMORY_ENGRAM_FAILED', owner: '#1155', reason: 'slice-A a failed engram setup is a warning line, then "Environment ready"' },
@@ -113,15 +119,23 @@ const OWNED_ELSEWHERE = [
   { file: BOOT, contains: 'brain:memory:index)', owner: '#1155', reason: 'slice-A a failed memory index is a warning line, then "Environment ready"' },
   { file: BOOT, contains: 'I18N_BOOTSTRAP_BOARD_FAILED', owner: '#1155', reason: 'swallow-ok: the open-ticket board is a read-only listing; a failure loses no state and the message names where to look' },
   // #1154 rewrites these two regions.
-  { file: 'brain/scripts/axes/memory/adapters/engram.mjs', contains: 'return realpathSync(p);', owner: '#1154', reason: 'swallow-ok: an unresolvable directory reads as null, the seam\'s "not resolvable" answer' },
+  { file: 'brain/scripts/axes/memory/adapters/engram.mjs', contains: '_defaultResolveDir', owner: '#1154', reason: 'swallow-ok: an unresolvable directory reads as null, the seam\'s "not resolvable" answer' },
   { file: 'brain/scripts/memory/lib/upstream-records.mjs', contains: "git ls-tree against '${ref}' threw", owner: '#1154', reason: 'surfaced: returned as `{ ok: false, reason }` with the ref and the cause' },
 ];
 
 // ── Scanner ─────────────────────────────────────────────────────────────────
 
 const MARKER_RE = /(swallow-ok|surfaced|follow-up):\s*([^\n]*?)\s*(?:\*\/|$)/m;
-const SELF_EXPLAINING_RE = /\bthrow\b|process\.exit\s*\(|\bexitCode\b|\bdie\s*\(/;
-const SHELL_SWALLOW_RE = /\|\|\s*(?:true|:)(?:\s|;|$|\))|\|\|\s*echo\b|\|\|\s*exit\s+0\b|\|\|\s*warn\b|\bset \+e\b|continue-on-error\s*:/;
+const SHELL_SWALLOW_RE = new RegExp([
+  String.raw`\|\|\s*(?:true|:|/bin/true|/usr/bin/true)(?=\s|;|$|\))`,
+  String.raw`\|\|\s*(?:return\s+0|exit\s+0)\b`,
+  String.raw`\|\|\s*(?:echo|printf|log\w*|warn\w*)\b`,
+  String.raw`\|\|\s*\{\s*:\s*;?\s*\}`,
+  String.raw`;\s*true\b`,
+  String.raw`\bset\s+\+e\b`,
+  String.raw`\bset\s+\+o\s+errexit\b`,
+  String.raw`continue-on-error\s*:`,
+].join('|'));
 
 function lineOf(text, idx) {
   let n = 1;
@@ -154,11 +168,41 @@ function markerIn(text) {
 }
 
 /**
- * scanJs() — every `catch {}` and `.catch()` in `src`, with the text window that
- * holds its verdict: the line before the keyword through the line of the closing
- * brace/paren.
+ * True when the catch body (masked, braces included) ends the failure at its own top
+ * level: a statement-start `throw`, `die(`, `process.exit(<non-zero>)` or
+ * `process.exitCode = <non-zero>`. A throw under an `if`, inside a nested function, or
+ * an `exitCode` that is merely an identifier does NOT count (#1127 cold review, S3).
  */
-export function scanJs(rel, src) {
+export function endsTheFailure(bodyMasked) {
+  // Keep only the body's own top level: nested {…}, (…) and […] contents are dropped, so
+  // an `if (x) throw` (its `)` precedes the keyword) and a throw inside a nested
+  // function are not seen as statement starts.
+  let top = '';
+  let depth = 0;
+  let inner = '';
+  for (const ch of bodyMasked.slice(1, -1)) {
+    if ('{(['.includes(ch)) { if (depth === 0) { top += ch; inner = ''; } depth += 1; if (depth > 1) inner += ch; continue; }
+    if ('})]'.includes(ch)) {
+      depth -= 1;
+      if (depth === 0) {
+        // Keep a one-character stand-in for a call's argument so `exit(0)` and `exit(1)` differ.
+        if (ch === ')') top += inner.trim() === '0' ? '0' : inner.trim() === '' ? '' : '_';
+        top += ch;
+      } else inner += ch;
+      continue;
+    }
+    if (depth === 0) top += ch; else inner += ch;
+  }
+  return /(?:^\s*|[;{}]\s*)(?:throw\b|die\s*\(|process\s*\.\s*exit\s*\(\s*[^)0\s]|process\s*\.\s*exitCode\s*=\s*(?!0\b))/.test(top);
+}
+
+/**
+ * scanJs() — every `catch {}` and `.catch()` in `src`. The verdict window is the
+ * catch's own lines through its closing brace, plus the line directly above ONLY when
+ * that line is a standalone comment: a marker inline on the previous line belongs to
+ * the previous site and must not be inherited (#1127 cold review, S3).
+ */
+export function scanJs(rel, src, lineOffset = 0) {
   const masked = maskNonCode(src);
   const opens = [...masked.matchAll(/\{/g)].length;
   const closes = [...masked.matchAll(/\}/g)].length;
@@ -170,10 +214,13 @@ export function scanJs(rel, src) {
   const push = (kind, startIdx, endIdx, bodyMasked) => {
     const first = lineOf(src, startIdx);
     const last = lineOf(src, endIdx);
-    const window = lines.slice(Math.max(0, first - 2), last).join('\n');
+    const above = first >= 2 && /^\s*(?:\/\/|\/\*)/.test(lines[first - 2]) ? 1 : 0;
+    const window = lines.slice(first - 1 - above, last).join('\n');
     sites.push({
-      file: rel, line: first, kind, window, winStart: Math.max(1, first - 1),
-      selfExplaining: SELF_EXPLAINING_RE.test(bodyMasked),
+      file: rel, line: first + lineOffset, kind, window,
+      context: lines.slice(Math.max(0, first - 5), last).join('\n'),
+      winStart: first - above + lineOffset,
+      selfExplaining: endsTheFailure(bodyMasked),
       marker: markerIn(window),
       text: lines[first - 1].trim(),
     });
@@ -186,27 +233,73 @@ export function scanJs(rel, src) {
   for (const m of masked.matchAll(/\.catch\s*\(/g)) {
     const open = m.index + m[0].length - 1;
     const close = matchingParen(masked, open);
-    push('.catch', m.index, close, masked.slice(open, close + 1));
+    // A promise handler is a function body: judge the top level of its braces, if any.
+    const inner = masked.slice(open, close + 1);
+    const brace = inner.indexOf('{');
+    push('.catch', m.index, close, brace === -1 ? '{}' : inner.slice(brace, inner.lastIndexOf('}') + 1));
   }
   return sites;
 }
 
-/** scanShell() — the swallow-shaped lines of a shell or YAML `run:` script. */
+/**
+ * embeddedJs() — JS living inside a shell/YAML file: heredoc bodies fed to `node`, and
+ * the quoted argument of `node -e` / `-p` / `--eval` / `--print`. Each snippet is
+ * returned with the line it starts on, so its sites report real file lines.
+ */
+export function embeddedJs(src) {
+  const lines = src.split('\n');
+  const out = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    const doc = /\bnode\b[^\n]*<<-?\s*(['"]?)(\w+)\1/.exec(lines[i]);
+    if (doc) {
+      let j = i + 1;
+      while (j < lines.length && lines[j].trim() !== doc[2]) j += 1;
+      out.push({ code: lines.slice(i + 1, j).join('\n'), startLine: i + 2 });
+      i = j;
+      continue;
+    }
+    const ev = /\bnode\b[^\n]*?\s(?:-e|-p|--eval|--print)\s+(["'])/.exec(lines[i]);
+    if (ev) {
+      const quote = ev[1];
+      let text = lines[i].slice(ev.index + ev[0].length);
+      let j = i;
+      const closeAt = (t) => {
+        for (let k = 0; k < t.length; k += 1) {
+          if (t[k] === '\\' && quote === '"') { k += 1; continue; }
+          if (t[k] === quote) return k;
+        }
+        return -1;
+      };
+      let end = closeAt(text);
+      while (end === -1 && j + 1 < lines.length) { j += 1; text += `\n${lines[j]}`; end = closeAt(text); }
+      if (end !== -1) out.push({ code: text.slice(0, end).replace(/\\(["\\$`])/g, '$1'), startLine: i + 1 });
+    }
+  }
+  return out;
+}
+
+/** scanShell() — the swallow-shaped lines of a shell or YAML `run:` script, plus the sites
+ * of any JS embedded in it. */
 export function scanShell(rel, src) {
   const lines = src.split('\n');
   const sites = [];
   lines.forEach((raw, i) => {
-    const code = raw.replace(/^\s*#.*$/, '');
+    let code = raw.replace(/^\s*#.*$/, '');
+    // `cmd ||` (or `cmd || \`) with the swallow on the next line is one statement.
+    if (/\|\|\s*\\?\s*$/.test(code) && i + 1 < lines.length) code = `${code.replace(/\\\s*$/, '')} ${lines[i + 1].trim()}`;
     if (!SHELL_SWALLOW_RE.test(code)) return;
     // The verdict is on the line itself or in the contiguous comment block above.
     let from = i;
     while (from > 0 && /^\s*#/.test(lines[from - 1])) from -= 1;
     const window = lines.slice(from, i + 1).join('\n');
     sites.push({
-      file: rel, line: i + 1, kind: 'shell', window, winStart: from + 1,
+      file: rel, line: i + 1, kind: 'shell', window, context: window, winStart: from + 1,
       selfExplaining: false, marker: markerIn(window), text: raw.trim(),
     });
   });
+  for (const { code, startLine } of embeddedJs(src)) {
+    for (const site of scanJs(rel, code, startLine - 1)) sites.push({ ...site, kind: `embedded-${site.kind}` });
+  }
   return sites;
 }
 
@@ -220,7 +313,7 @@ const WEAK = /^(todo|tbd|n\/a|na|none|ignore|ok|fine|best effort)\.?$/i;
 /** classify() — one site's verdict. */
 export function classify(site, owned = OWNED_ELSEWHERE) {
   if (site.selfExplaining) return { verdict: 'fails', reason: 'the block throws or exits' };
-  const own = owned.find((o) => o.file === site.file && site.window.includes(o.contains));
+  const own = owned.find((o) => o.file === site.file && (site.context ?? site.window).includes(o.contains));
   if (own) return { verdict: 'owned', reason: `${own.owner}: ${own.reason}`, owner: own };
   if (!site.marker) return { verdict: 'unexplained', reason: '' };
   const { kind, reason } = site.marker;
@@ -328,6 +421,41 @@ test('#1127 scanner: shell `|| true`, `set +e`, `|| warn` need a verdict on the 
   );
   assert.deepEqual(verdictsOf('x.sh', 'do_it || warn "failed"\n'), ['unexplained']);
   assert.deepEqual(verdictsOf('x.sh', '# rm -f x || true\n'), [], 'a commented-out swallow is not a site');
+});
+
+test('#1127 scanner: adjacent catches do not inherit each other\'s marker', () => {
+  const src = 'try { a(); } catch { /* swallow-ok: the first probe is advisory only */ }\ntry { b(); } catch { }\n';
+  assert.deepEqual(verdictsOf('x.mjs', src), ['optional', 'unexplained']);
+});
+
+test('#1127 scanner: only an unconditional top-level throw / exit(non-zero) explains itself', () => {
+  const v = (body) => verdictsOf('x.mjs', `try { a(); } catch (e) { ${body} }\n`)[0];
+  assert.equal(v('if (e.code !== "X") throw e;'), 'unexplained', 'a conditional throw swallows the other branch');
+  assert.equal(v('const exitCode = 1; log(exitCode);'), 'unexplained', 'an identifier named exitCode is not an exit');
+  assert.equal(v('const f = () => { throw e; }; log(f);'), 'unexplained', 'a throw in an uncalled nested function');
+  assert.equal(v('process.exit(0);'), 'unexplained', 'exit(0) is success');
+  assert.equal(v('log(e); throw e;'), 'fails');
+  assert.equal(v('process.exitCode = 2;'), 'fails');
+  assert.equal(v('die("nope");'), 'fails');
+});
+
+test('#1127 scanner: shell evasions are sites — return 0, log, printf, /bin/true, ; true, { :; }, set +o errexit, || newline true', () => {
+  for (const line of [
+    'x || return 0', 'x || log "meh"', 'x || printf "meh"', 'x || /bin/true', 'x; true', 'x || { :; }',
+    'set +o errexit', 'x ||\n  true', 'x || \\\n  true', 'x || exit 0',
+  ]) {
+    assert.deepEqual(verdictsOf('x.sh', `${line}\n`), ['unexplained'], line);
+  }
+});
+
+test('#1127 scanner: JS embedded in shell is scanned — heredoc and node -e/-p', () => {
+  const heredoc = "node --input-type=module <<'NODE'\nimport x from 'y';\ntry { a(); } catch {}\nNODE\n";
+  const [h] = scanFile('x.sh', heredoc);
+  assert.equal(h.kind, 'embedded-catch');
+  assert.equal(h.line, 3, 'reports the real file line');
+  assert.deepEqual(verdictsOf('x.sh', 'node -e "try { a(); } catch (e) { }"\n'), ['unexplained']);
+  assert.deepEqual(verdictsOf('x.sh', "node -p 'try { a(); } catch { }'\n"), ['unexplained']);
+  assert.deepEqual(verdictsOf('x.sh', 'node -e "try { a(); } catch (e) { throw e; }"\n'), ['fails']);
 });
 
 test('#1127 scanner: an owned site is recognised by its own text, not its line number', () => {

@@ -39,3 +39,33 @@ the change directory cannot be read at all, throw). A partial hydration MUST NOT
 The scanner MUST be exercised against synthetic sources: unmarked catch, marked catch,
 throwing catch, weak reason, `follow-up` without a slice, `.catch(`, shell lines, owned entry,
 and a source it cannot mask (loud failure, never a silent miss).
+
+The synthetic evasion set MUST include: an adjacent catch (no inherited marker), a conditional
+`throw`, an `exitCode` identifier, a throw in an uncalled nested function, `process.exit(0)`,
+shell `|| return 0` / `|| log` / `|| printf` / `|| /bin/true` / `; true` / `|| { :; }` /
+`set +o errexit` / `||`-newline-`true`, and JS embedded in shell (`node <<'TAG'`, `node -e`, `node -p`).
+
+## REQ-1127-6 — a corrupt input is never read as an absent one on the upgrade path
+
+`brain:upgrade` MUST treat only ENOENT on `brain.config.json` as "first run"; any other error MUST
+refuse before any write, naming the file. An unreadable installed `package.json` MUST be reported as
+a degraded downgrade guard. A migrations module that exists but fails to load MUST refuse before any
+write. `featureCheckpoint` MUST NOT replace an existing `resume.md` it could not read.
+**Falsifiable by**: a corrupt `brain.config.json` with the upgrade proceeding past the guard.
+
+## REQ-1127-7 — a partial `feature-resume` still shows the operator's summary
+
+`tryFeatureResume` MUST return the printed summary followed by a `projection incomplete: <files>`
+line when the verb exited non-zero after printing one, and `null` only when nothing was printed.
+
+## REQ-1127-8 — `install-tools.sh` neither guesses the provider nor over-claims
+
+An unreadable `brain.config.json` MUST be refused (only an ABSENT one keeps the gitlab default), and
+a failed `gentle-ai install` MUST end the run `INCOMPLETE` with exit 1 before the summary.
+
+## REQ-1127-9 — the guard reads JS embedded in shell and rejects inherited or conditional verdicts
+
+Sites inside `node <<'TAG'` heredocs and `node -e/-p` strings are scanned with the JS classifier; a
+marker is honoured only inside its own catch or on a standalone comment line directly above; only an
+unconditional top-level `throw` / `die(` / `process.exit(<non-zero>)` / non-zero `process.exitCode`
+counts as self-explaining. `install-tools.sh` is in scope.

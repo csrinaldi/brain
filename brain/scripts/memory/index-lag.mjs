@@ -57,7 +57,7 @@ export function compareIndexToRecords({ indexLines = [], records = [] } = {}) {
     let entry;
     try {
       entry = JSON.parse(line);
-    } catch { /* surfaced: a corrupt index line is simply not indexed, so its ids show up as missing from the index in the WARNING */
+    } catch { /* surfaced: covers JSON.parse of one index line only (no I/O); the line is not indexed, so its ids show up as missing from the index in the WARNING */
       continue; // a corrupt index line is not this warning's gate to fail on
     }
     if (entry && typeof entry.id === 'string') indexedIds.add(entry.id);

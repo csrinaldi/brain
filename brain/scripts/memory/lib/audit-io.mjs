@@ -25,7 +25,7 @@ export function readRecordLines(recordsDir, { _readdir = readdirSync, _read = re
     for (const line of _read(join(recordsDir, file), 'utf8').split('\n')) {
       if (!line.trim()) continue;
       let o;
-      try { o = JSON.parse(line); } catch { /* swallow-ok: audit measures well-formed records; a corrupt line is the fail-closed rebuildIndex gate's to refuse (store.mjs) */ continue; }
+      try { o = JSON.parse(line); } catch { /* swallow-ok: covers JSON.parse of one line only (no I/O); a corrupt line is the fail-closed rebuildIndex gate's to refuse (store.mjs) */ continue; }
       if (typeof o?.id === 'string' && typeof o?.ts === 'string') out.push({ ...o, file });
     }
   }

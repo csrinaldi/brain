@@ -267,7 +267,7 @@ export function readRecordIds({ recordsDir }) {
       try {
         const record = JSON.parse(line);
         if (record && typeof record.id === 'string') ids.add(record.id);
-      } catch { /* swallow-ok: corrupt line — the fail-closed integrity gate is rebuildIndex above, which throws; this reader is tolerant by design */
+      } catch { /* swallow-ok: covers JSON.parse of one line only (no I/O); the fail-closed integrity gate is rebuildIndex above, which throws, and this reader is tolerant by design */
         continue; // corrupt line — not this function's fail-closed gate
       }
     }
@@ -371,7 +371,7 @@ export function readRecords({ recordsDir }) {
       let record;
       try {
         record = JSON.parse(line);
-      } catch { /* swallow-ok: corrupt line — the fail-closed integrity gate is rebuildIndex above, which throws; this reader is tolerant by design */
+      } catch { /* swallow-ok: covers JSON.parse of one line only (no I/O); the fail-closed integrity gate is rebuildIndex above, which throws, and this reader is tolerant by design */
         continue; // corrupt line — not this function's fail-closed gate
       }
       const id = record && typeof record.id === 'string' ? record.id : undefined;

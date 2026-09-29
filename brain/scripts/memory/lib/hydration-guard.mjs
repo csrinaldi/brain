@@ -128,7 +128,7 @@ export function acquireHydrationGuard({
     const tomb = privateDir('released');
     try {
       renameSync(lockPath, tomb);
-    } catch { /* swallow-ok: the lock is already gone (reclaimed by someone else); nothing of ours to remove */
+    } catch { /* swallow-ok: ENOENT means reclaimed by someone else; any other rename error leaves the lock in place, which the stale-lock rule frees — release must never mask the import */
       return; // already gone — reclaimed by someone else; nothing of ours to remove
     }
     const moved = readOwner(tomb);

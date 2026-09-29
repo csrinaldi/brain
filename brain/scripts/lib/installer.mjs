@@ -539,7 +539,7 @@ export function acquireLock(destRoot) {
         throw new Error(`another brain:upgrade took the lock at ${path} at the same moment.`);
       }
       break;
-    } catch (err) {
+    } catch (err) { /* swallow-ok: ONLY EEXIST continues (a live owner refuses, a dead one is reclaimed, a contended retry throws); every other error is re-thrown */
       if (err?.code !== 'EEXIST') throw err;
       const cur = readLock(destRoot);
       if (cur.alive) {
@@ -623,7 +623,7 @@ export function readJournal(destRoot) {
     if (j?.version !== JOURNAL_VERSION) return null;
     if (!Array.isArray(j.saved) || !Array.isArray(j.created) || !Array.isArray(j.createdDirs)) return null;
     return j;
-  } catch { /* swallow-ok: an unreadable or malformed journal reads as "no journal"; the snapshot directory is then treated as debris */
+  } catch { /* surfaced: any read, parse or version failure returns null; inspectRestorePoint then reports state `corrupt` and refuses whenever a journal file is on disk */
     return null;
   }
 }
@@ -1068,7 +1068,7 @@ function copyManagedImpl({ srcRoot, destRoot, managed, local, dryRun = false, sp
       const destFile = join(destRoot, rel);
       if (existsSync(destFile)) {
         let destBytes = null;
-        try { destBytes = readFileSync(destFile); } catch { /* swallow-ok: unreadable destination means "cannot claim it was edited"; the copy that follows reports a real write failure */ /* unreadable — cannot claim it was edited */ }
+        try { destBytes = readFileSync(destFile); } catch { /* swallow-ok: any read error on an existing destination file (EACCES, EISDIR; ENOENT is excluded by existsSync) means "cannot claim it was edited"; the copy that follows reports a real write failure */ /* unreadable — cannot claim it was edited */ }
         if (destBytes && !destBytes.equals(outBytes)) consumerModified.push(rel);
       }
       try {
