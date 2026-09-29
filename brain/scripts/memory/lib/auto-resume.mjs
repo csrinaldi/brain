@@ -48,7 +48,8 @@ function defaultRunner(root) {
  * @param {object} [opts]          Injectable seams for testing.
  * @param {(root: string) => { status: number|null, stdout: string, stderr: string }}
  *        [opts._runner]           Subprocess runner; defaults to spawnSync wrapper above.
- * @returns {string|null}          stdout on exit 0; null on any failure.
+ * @returns {string|null}          stdout on exit 0 (plus a `projection incomplete` line when a
+ *                                 non-zero exit still printed a summary); null on any other failure.
  */
 export function tryFeatureResume(root, { _runner } = {}) {
   try {
@@ -56,6 +57,14 @@ export function tryFeatureResume(root, { _runner } = {}) {
     const result = run(root);
     if (result.status === 0) {
       return result.stdout ?? '';
+    }
+    // feature-resume prints the resume summary BEFORE it projects, and exits 1 when a
+    // projection failed (#1127). Dropping that stdout would cost the operator the
+    // summary for a failure that did not touch it: keep it and name the failure.
+    const summary = (result.stdout ?? '').trim();
+    if (summary) {
+      const detail = String(result.stderr ?? '').trim().split('\n').pop().replace(/^.*not projected into engram — /, '');
+      return `${result.stdout}\n  ⚠ projection incomplete: ${detail || 'feature-resume exited non-zero'}\n`;
     }
     return null;
   } catch { /* swallow-ok: the resume hint is advisory; a runner that cannot start yields null, the same as no resume point */

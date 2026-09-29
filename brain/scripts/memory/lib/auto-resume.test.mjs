@@ -94,3 +94,17 @@ test('tryFeatureResume: passes root to the runner as first argument', () => {
   assert.equal(capturedRoots.length, 1, 'runner should be called exactly once');
   assert.equal(capturedRoots[0], '/my/specific/root', 'runner must receive the root');
 });
+
+// #1127: feature-resume now exits 1 on a partial projection. The summary it
+// printed BEFORE failing is still the operator's resume point — keep it, and say
+// the projection was incomplete.
+test('tryFeatureResume (#1127): a non-zero exit that printed a summary keeps it and names the incomplete projection', () => {
+  const runner = () => ({
+    status: 1,
+    stdout: '\n  Feature:      my-feature\n  Next action:  do-the-thing\n',
+    stderr: 'memory/cli: engram.featureResume() failed — featureResume: 1 of 2 file(s) were not projected into engram — proposal.md: engram exploded\n',
+  });
+  const out = tryFeatureResume('/fake/root', { _runner: runner });
+  assert.match(out, /Next action:  do-the-thing/);
+  assert.match(out, /projection incomplete: .*proposal\.md/);
+});

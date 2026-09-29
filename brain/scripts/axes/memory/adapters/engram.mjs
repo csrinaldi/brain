@@ -1093,7 +1093,9 @@ export async function featureCheckpoint(
       // File exists but has no parseable frontmatter — treat content as body only.
       body = existing;
     }
-  } catch { /* swallow-ok: an absent resume.md is the documented skeleton-creation case */
+  } catch (err) {
+    // swallow-ok: ONLY ENOENT (no resume.md yet) is the skeleton-creation case; any other read error is re-thrown below
+    if (err?.code !== "ENOENT") throw err;
     // File absent — create skeleton with required fields.
     frontmatter = {
       feature: resolvedFeature,
