@@ -20,6 +20,13 @@ import {
 } from '../../__fixtures__/pull-fixture.mjs';
 import { defaultGitPull, reconcileUntrackedRecords } from './reconcile-pull.mjs';
 
+// The production `git pull` inherits this process's env. Run the whole file
+// against no host/global git config, so a developer's ~/.gitconfig can never
+// make a scenario pass or fail (CI has none). Each test that needs identity or
+// a merge strategy sets it in the fixture repo's own config.
+process.env.GIT_CONFIG_GLOBAL = '/dev/null';
+process.env.GIT_CONFIG_NOSYSTEM = '1';
+
 const quiet = () => {};
 const tracked = (dir) => git(dir, 'ls-files', '--', RECORD_PATH).trim();
 const onDisk = (dir) => readFileSync(join(dir, RECORD_PATH), 'utf8');
@@ -234,12 +241,15 @@ test('(j) a merge that conflicts elsewhere: the record staged in the index is fi
       writeFileSync(join(dir, 'conflict.txt'), 'upstream side\n');
     },
   });
+  // A real merge needs a committer identity and an explicit strategy; CI has neither globally.
   git(capturingDir, 'config', 'pull.rebase', 'false');
+  git(capturingDir, 'config', 'user.name', 'brain-test');
+  git(capturingDir, 'config', 'user.email', 'brain-test@example.invalid');
   writeFileSync(join(capturingDir, 'conflict.txt'), 'local side\n');
   git(capturingDir, 'add', 'conflict.txt');
   git(capturingDir, 'commit', '-q', '-m', 'local edit');
   const logs = [];
-  assert.throws(() => defaultGitPull(capturingDir, { _log: (l) => logs.push(l) }), (err) => {
+  assert.throws(() => defaultGitPull(capturingDir, { _log: (l) => logs.push(l) }), (err) => { console.error('ERR', err.message, JSON.stringify(logs));
     assert.doesNotMatch(err.message, /could not be put back/);
     return true;
   });
