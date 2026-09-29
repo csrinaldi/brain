@@ -50,15 +50,52 @@ bootstrap, forever. The `plainfiles)` case arm runs `setup` and `pull`
 (both genuinely supported) and prints an informational `ok` naming why
 `index` is skipped.
 
-**D5 — item 4 is a stop, not a guess.** The worktree brief explicitly
-names "how the first commit of a new repo should be made under the
-hooks" as an example of a product decision this agent must not invent.
-That is item 4 verbatim: `pre-commit`'s check 2 (#788/#782 slice 2)
-refuses every commit from the main checkout regardless of branch, and the
-adoption commit is necessarily made from the only checkout that exists.
-Three technically valid fixes exist (unborn-HEAD exemption, documented
-`--no-verify`, guide reordering) with real tradeoffs — see `proposal.md`
-— and none is derivable from the issue or the ADRs alone.
+**D5 — item 4 was a stop, then ruled: Option A (maintainer, 2026-09-29).**
+The worktree brief explicitly named "how the first commit of a new repo
+should be made under the hooks" as an example of a product decision this
+agent must not invent, so item 4 was first stopped and reported as a
+fork (three options, `proposal.md`). The maintainer then ruled Option A:
+`pre-commit`'s check 2 (#788/#782 slice 2) refuses every commit from the
+main checkout regardless of branch, and `git worktree add` itself cannot
+run without at least one commit already existing — it cannot create a
+worktree off an unborn branch — so the isolation check 2 exists to force
+is structurally impossible to satisfy for a repository's very first
+commit. The maintainer's own words: "the pre-commit hook exempts a
+commit when HEAD is unborn ... because `git worktree add` cannot run
+without a commit, so worktree isolation is impossible for exactly that
+commit."
+
+**D5.1 — implementation.** A new gate 0, ahead of checks 1 and 2, tests
+`git rev-parse --verify -q HEAD` (silent: `-q` suppresses git's own error
+text, the command's only observable effect here is its exit status).
+Detection is structural (does a commit object exist for HEAD), not by
+branch name — a fresh repo may set its default branch to anything, and
+detecting by name (e.g. exempting only `main`/`master`) would miss check
+2 entirely, which fires regardless of branch. On the unborn-HEAD path,
+the hook prints one line to stdout naming the reason and falls through
+directly to checks 3/4 (`staged-records-check.mjs`, `check-refs.mjs`),
+skipping only checks 1 and 2 — those two are the only ones this issue is
+about, and nothing else changes for the adoption commit. The gate is
+self-closing by construction: once the commit is made, `HEAD` resolves
+and every later commit is evaluated by checks 1 and 2 unchanged — no
+separate "first N commits" counter or flag to go stale.
+
+**D5.2 — other hooks checked, none changed.** `pre-push`, `commit-msg`
+and `pre-receive` were read end-to-end: none contains a branch-name or
+main-checkout/worktree check (`rg` for `MAIN CHECKOUT`/`git-common-dir`/
+`abbrev-ref HEAD` across all four hook files matches only `pre-commit`).
+`commit-msg`/`pre-receive` require Conventional Commit format + a ticket
+reference, which the adoption commit can satisfy by being written
+correctly (`chore: adopt brain (#N)`) — that is ordinary commit hygiene,
+not the class of unconditional, branch-blind refusal item 4 is about, so
+it needed no exemption. `pre-receive` is also not installed by `env:init`
+at all — it is a bare-repo server hook the maintainer installs explicitly
+via `npm run brain:protect-server`, so it is not in a fresh consumer's
+adoption path. No GitLab counterpart is needed for the same structural
+reason check 2 itself only makes sense client-side: "which local checkout
+made this commit" is not observable from a server, so nothing server-side
+(a GitLab CI job, a push rule) could implement or need the same
+exemption.
 
 ## Testing approach
 
@@ -71,3 +108,13 @@ importable (guarded by the main-module check), so those get ordinary unit
 tests plus one true end-to-end run against THIS repo's own
 `brain.config.json` (which has `project.name === ""` today — the live,
 unmodified shape of the defect).
+
+Item 4's tests are the one exception: they run the REAL installed
+`pre-commit` hook against a REAL `git init` fixture (`core.hooksPath`
+pointed at the real hooks directory), copying `brain/scripts` + `brain/core`
+into the fixture the same way `bootstrap.tier-notice.test.mjs`'s own
+`copyBrain` does — checks 3/4 downstream of the new gate need those files
+to exist under the fixture's own `--show-toplevel`. A mocked-git fixture
+(like `pre-commit.test.mjs`'s existing suite) would only prove the gate
+reads the mock correctly, not that `git rev-parse --verify -q HEAD`
+behaves as expected against real git.

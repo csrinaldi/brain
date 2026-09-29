@@ -3,11 +3,14 @@
 ## Review Workload Forecast
 - 400-line budget risk: Low
 - Chained PRs recommended: No
-- Decision needed before apply: No (item 4 stopped, not decided — see `proposal.md`)
+- Decision needed before apply: item 4 was stopped and reported as a fork
+  (see `proposal.md`); the maintainer ruled Option A on 2026-09-29 and
+  phase 6 below implements it.
 - Estimated changed lines (gated: tests, openspec, `.memory` excluded from budget):
   `bootstrap.sh` ~60, `brain-to-engram.mjs` ~60 (rewrite), `engram.mjs` ~10,
-  `i18n/en.mjs`+`i18n/es.mjs` ~12, `test-spawn-hygiene.test.mjs` allowlist ~8.
-  Well under the `standard` tier's 400-line budget.
+  `i18n/en.mjs`+`i18n/es.mjs` ~12, `test-spawn-hygiene.test.mjs` allowlist ~8,
+  `hooks/pre-commit` ~30 (unborn-HEAD gate). Well under the `standard`
+  tier's 400-line budget.
 
 ## Phase 1 — finding 3: `brain-to-engram.mjs` project resolution + exit code
 
@@ -71,9 +74,33 @@
       (`npm pack` of this worktree → `npm i -D` → `brain-upgrade.mjs
       --no-install`): see the worktree report for the transcript.
 
-## Not done — item 4 (stopped on a product-decision fork)
+## Phase 6 — finding 4: unborn-HEAD exemption (maintainer ruling, Option A, 2026-09-29)
 
-- [ ] 6.1 (STOPPED) Hook refusal of the adoption commit /
-      `docs/adoption.md`'s missing first-commit step. See `proposal.md`
-      "Stopped: item 4" for the three options and their tradeoffs. No
-      code or doc change shipped in this change for this item.
+- [x] 6.1 `pre-commit.unborn-head.test.mjs`: a real `git init` fixture with
+      `core.hooksPath` set to the real installed hooks (copying
+      `brain/scripts`+`brain/core` in, like `bootstrap.tier-notice.test.mjs`'s
+      `copyBrain`) — the first commit from the main checkout is accepted,
+      even on `main`; detection is not by branch name (`trunk` too); the
+      exemption is reported; a second commit from the main checkout is
+      still refused by check 2; a direct commit to `main` on a born-HEAD
+      repo is still refused by check 1, unchanged. RED (5/5 — the first
+      commit itself failed without the fix).
+- [x] 6.2 Add gate 0 to `brain/scripts/hooks/pre-commit`: `if ! git
+      rev-parse --verify -q HEAD >/dev/null 2>&1` wraps checks 1 and 2,
+      printing one line naming the reason on the unborn path. GREEN (5/5).
+- [x] 6.3 Checked `pre-push`, `commit-msg`, `pre-receive` for the same
+      class of refusal (branch-name / main-checkout / worktree check):
+      none found (`rg` for the three tells across all four hook files
+      matches only `pre-commit`). `pre-receive` is also not part of a
+      fresh consumer's `env:init` path at all (installed separately, by a
+      maintainer, into a bare repo). No fix needed beyond `pre-commit`.
+      No GitLab counterpart exists or is needed: "which local checkout
+      made this commit" is not observable server-side.
+- [x] 6.4 `proposal.md`/`design.md`/`spec.md` updated: the ruling is
+      recorded, the three original options are kept for the record with
+      "taken"/"not taken" marked, the implementation and its tests are
+      described (D5, D5.1, D5.2).
+- [x] 6.5 `npm test` (full suite), `npm run brain:repo:check`, `npm run
+      brain:nav`: all green/exit 0. Did not touch the real engram store
+      or any real remote this run — the fixture in 6.1 has no `origin`
+      remote at all.

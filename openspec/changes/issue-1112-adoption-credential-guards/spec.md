@@ -67,8 +67,34 @@ issue: 1112
 - **WHEN** `MEMORY_BACKEND` is neither `engram` nor `plainfiles`
 - **THEN** the existing unknown-backend warning still fires
 
-### Requirement: item 4 (hook refusal of the adoption commit) is not silently resolved
+### Requirement: `pre-commit` accepts a repository's first commit even from the main checkout
 
-#### Scenario: no code or doc change ships for item 4
+Ruled by the maintainer 2026-09-29 (Option A) after this change first stopped and reported the fork.
+
+#### Scenario: the first commit is accepted, even on a branch named "main"
+- **WHEN** a commit is attempted in a fresh repository with no prior commits, `core.hooksPath` set to the installed hooks, on a branch named `main`
+- **THEN** the commit succeeds
+
+#### Scenario: detection is structural, not by branch name
+- **WHEN** the same first-commit scenario runs on a default branch named something other than `main`/`master` (e.g. `trunk`)
+- **THEN** the commit still succeeds
+
+#### Scenario: the exemption is reported
+- **WHEN** the first commit is accepted via the unborn-HEAD exemption
+- **THEN** one line naming the reason is printed
+
+#### Scenario: a second commit from the main checkout is still refused
+- **WHEN** a second commit is attempted from the same main checkout, on a non-`main` branch, after the first commit has landed
+- **THEN** it is refused by check 2 (never a branch in the main checkout), unchanged
+
+#### Scenario: check 1 is unchanged once HEAD is born
+- **WHEN** a direct commit to `main` is attempted after the first commit has already landed
+- **THEN** it is refused by check 1, unchanged
+
+#### Scenario: no other installed hook needed the same exemption
+- **WHEN** `pre-push`, `commit-msg` and `pre-receive` are reviewed for a branch-name or main-checkout/worktree refusal
+- **THEN** none is found — only `pre-commit` carried this class of check, and no GitLab counterpart exists because "which local checkout made this commit" is not observable server-side
+
+#### Scenario: the published adoption guide is untouched
 - **WHEN** this change is reviewed
-- **THEN** `brain/scripts/hooks/pre-commit` and `docs/adoption.md` are unchanged, and `proposal.md` names the fork with options and tradeoffs instead
+- **THEN** `docs/adoption.md` and `docs/KNOWN-LIMITATIONS.md` are unchanged (they describe the published package and are the orchestrator's to update once, respectively)

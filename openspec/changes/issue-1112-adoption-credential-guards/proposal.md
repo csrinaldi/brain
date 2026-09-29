@@ -30,12 +30,12 @@ Evidence: `openspec/changes/issue-1081-memory-2-0-exit-audit/findings.md`
 
 ## Scope
 
-Fix items 1, 2, 3, 5 in `bootstrap.sh` / `brain-to-engram.mjs` (the product
-surfaces `env:init` actually runs), each behind a red test that reproduces
-the exact defect first. Item 4 is **not implemented** — see "Stopped:
-item 4" below.
+Fix items 1, 2, 3, 4, 5 in `bootstrap.sh` / `brain-to-engram.mjs` /
+`brain/scripts/hooks/pre-commit` (the product surfaces `env:init` and the
+adoption commit actually run through), each behind a red test that
+reproduces the exact defect first.
 
-## Stopped: item 4 (hook refusal of the adoption commit)
+## Item 4 (hook refusal of the adoption commit) — ruled
 
 `brain/scripts/hooks/pre-commit`'s check 2 (issue #788/#782 slice 2)
 refuses **every** commit from the main checkout, on **any** branch, once
@@ -45,20 +45,36 @@ before the memory-backend case), and in the #1081 repro the adoption
 commit is attempted AFTER `env:init` has already run — so both checks are
 live against the only checkout that exists.
 
-This needs a product decision this agent is not authorized to make (the
-worktree brief names this exact scenario as an example of one). Three
-options, not mutually exclusive:
+This needed a product decision this agent was not authorized to make (the
+worktree brief names this exact scenario as an example of one), so it was
+first stopped and reported as a fork with three options (below).
+
+**Ruling (maintainer, 2026-09-29): Option A.** `git worktree add` itself
+requires at least one commit to exist — it cannot create a worktree off
+an unborn branch — so worktree isolation (what check 2 exists to force)
+is structurally impossible for a repository's first commit. `pre-commit`
+now exempts a commit when `git rev-parse --verify -q HEAD` fails (HEAD is
+unborn), detected structurally rather than by branch name, printing one
+line naming why the commit was allowed. The exemption is self-closing:
+the moment that commit lands, HEAD is born and every later commit is
+judged by checks 1 and 2 exactly as before. See `design.md` for the
+implementation and the real-git-fixture tests that pin the "still
+refused" side (a second commit from the main checkout; a direct commit
+to `main` once HEAD is born).
+
+Options B (document `--no-verify`) and C (reorder the guide) were not
+taken. `docs/adoption.md`/`docs/KNOWN-LIMITATIONS.md` remain untouched by
+this change: the adoption guide describes the PUBLISHED package and
+changes when this fix ships in a release, and `docs/KNOWN-LIMITATIONS.md`
+is the orchestrator's to update once for all phase-1 fixes.
+
+The three original options, for the record:
 
 | Option | What it does | Tradeoff |
 |---|---|---|
-| A — unborn-HEAD exemption | Hook checks 1 and 2 add a guard: exempt when `git rev-parse HEAD` fails (repo has zero commits yet). Self-closing: the exemption stops applying the moment the first commit lands. | Purely mechanical, derivable from the hooks' own stated purpose (protect history / enable parallel work — neither applies before any commit exists). No doc change needed. Does not cover a SECOND pre-adoption commit (e.g. `npm init -y` before `brain init`), which is a real step in the guide. |
+| A — unborn-HEAD exemption (taken) | Hook checks 1 and 2 add a guard: exempt when `git rev-parse HEAD` fails (repo has zero commits yet). Self-closing: the exemption stops applying the moment the first commit lands. | Purely mechanical, derivable from the hooks' own stated purpose (protect history / enable parallel work — neither applies before any commit exists). No doc change needed. Does not cover a SECOND pre-adoption commit (e.g. `npm init -y` before `brain init`), which is a real step in the guide. |
 | B — document `--no-verify` explicitly | `docs/adoption.md` states, in Path A, that the adoption commit uses `git commit --no-verify`, with the reasoning (hooks aren't load-bearing yet on a repo with no history/branches). | Zero code change. Leaves the bypass as the sanctioned path forever, which is what issue #1112 calls "undocumented" today — documenting it doesn't make it not a bypass. |
 | C — reorder the guide | `docs/adoption.md` has the operator commit `npx brain init`'s output BEFORE running `env:init` (which is what sets `core.hooksPath`). | No code change, no bypass. Breaks down as soon as `env:init` itself writes files worth committing (`brain.config.json` `ensure`, `brain/HOME.md` scaffold) — a second commit would still hit the hook once it's installed. |
-
-`docs/adoption.md` is also out of scope here for a second reason: the
-worktree brief reserves `docs/KNOWN-LIMITATIONS.md` for the orchestrator to
-update once for all phase-1 fixes, and the adoption guide's Path A
-narrative is coupled to that same limitations list.
 
 ## Acceptance
 
@@ -69,5 +85,6 @@ narrative is coupled to that same limitations list.
   engram adapter does, and a real indexing failure makes `env:init` report
   failure, not silent success.
 - `MEMORY_BACKEND=plainfiles` is never reported as an unknown backend.
-- Item 4 is described here as a fork, with options and tradeoffs, not
-  silently implemented as an assumed default.
+- The adoption commit (repo's first commit) is accepted by `pre-commit`
+  even from the main checkout, with the reason printed; a second commit
+  from the same main checkout is still refused, unchanged.
