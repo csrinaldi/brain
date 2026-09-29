@@ -22,6 +22,9 @@ issue: 1127
       `featureCheckpoint` never overwrites an unreadable `resume.md`; `tryFeatureResume` keeps the summary.
 - [x] **T9** Guard: embedded JS in shell, own-marker windows, strict self-explaining, shell evasions,
       `install-tools.sh` in scope; `install-tools.sh` provider and summary fixed (`install-tools.test.mjs`).
+- [x] **T10** Round-2 review: incoming migrations module import-checked before the copy on every path;
+      ERR_MODULE_NOT_FOUND for the module vs its imports; guard shell forms and per-catch windows;
+      install-tools no-node provider scope; `tryFeatureResume` label only when the projection message is present.
 - [ ] **slice-A** (after #1155 lands) bootstrap steps, `auth-login || warn` and the three embedded
       snippets join `REQUIRED_FAILURES`.
 - [ ] **slice-B** `brain-upgrade` AGENTS.md regeneration failure vs the closing `Done.`.

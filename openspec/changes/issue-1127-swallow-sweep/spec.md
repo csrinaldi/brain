@@ -69,3 +69,16 @@ Sites inside `node <<'TAG'` heredocs and `node -e/-p` strings are scanned with t
 marker is honoured only inside its own catch or on a standalone comment line directly above; only an
 unconditional top-level `throw` / `die(` / `process.exit(<non-zero>)` / non-zero `process.exitCode`
 counts as self-explaining. `install-tools.sh` is in scope.
+
+## REQ-1127-10 — the incoming migrations module is load-checked before the copy, on every path
+
+`brain:upgrade` MUST import the INCOMING package's `config-migrations.mjs` before `copyManaged`;
+a load failure MUST refuse with "No managed path was written". In the downgrade guard, only the
+module itself being absent counts as "not installed"; a missing import inside it is a broken module.
+**Falsifiable by**: an ordinary (non-downgrade) upgrade with a syntactically broken incoming module
+that copies before failing.
+
+## REQ-1127-11 — the guard covers the round-2 shell forms and per-catch windows
+
+`|| true` / `|| :` followed by a quote, brace or paren, `|| { true; }`, `|| (true)`,
+`if ! cmd; then :; fi` (one line or spread) are sites; two catches on one line each need their own marker.

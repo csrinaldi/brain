@@ -19,8 +19,11 @@
 //                          slice named in the change's design.md (#1127).
 //
 // A JS `catch` (or `.catch(`) whose body throws or exits is self-explaining and needs
-// nothing. Everything else needs a marker. In shell/YAML the sites are `|| true`,
-// `|| :`, `|| echo`, `|| exit 0`, `|| warn`, `set +e` and `continue-on-error`.
+// nothing. Everything else needs a marker. In shell/YAML the sites are `|| true` / `|| :`
+// (also followed by a quote, brace or paren, or wrapped as `|| { true; }` / `|| (true)`),
+// `|| /bin/true`, `|| return 0`, `|| exit 0`, `|| echo|printf|log*|warn*`, `; true`,
+// `if ! cmd; then :; fi` (one line or spread), `set +e`, `set +o errexit` and
+// `continue-on-error`. Two catches on one line each need their own marker.
 //
 // THE ALLOWLIST IS THE REASON. A marker with no reason, or with a one-word reason,
 // fails. A marker that no site claims (an orphan) fails. An OWNED_ELSEWHERE entry that
@@ -126,12 +129,14 @@ const OWNED_ELSEWHERE = [
 // ── Scanner ─────────────────────────────────────────────────────────────────
 
 const MARKER_RE = /(swallow-ok|surfaced|follow-up):\s*([^\n]*?)\s*(?:\*\/|$)/m;
+const END = String.raw`(?=[\s;)"'}]|$)`;
 const SHELL_SWALLOW_RE = new RegExp([
-  String.raw`\|\|\s*(?:true|:|/bin/true|/usr/bin/true)(?=\s|;|$|\))`,
+  String.raw`\|\|\s*(?:true|:|/bin/true|/usr/bin/true)` + END,
+  String.raw`\|\|\s*[{(]\s*(?::|true)\s*;?\s*[})]`,
   String.raw`\|\|\s*(?:return\s+0|exit\s+0)\b`,
   String.raw`\|\|\s*(?:echo|printf|log\w*|warn\w*)\b`,
-  String.raw`\|\|\s*\{\s*:\s*;?\s*\}`,
   String.raw`;\s*true\b`,
+  String.raw`\bif\s+!\s+[^;]+;\s*then\s+(?::|true)\s*;?\s*fi\b`,
   String.raw`\bset\s+\+e\b`,
   String.raw`\bset\s+\+o\s+errexit\b`,
   String.raw`continue-on-error\s*:`,
@@ -216,12 +221,20 @@ export function scanJs(rel, src, lineOffset = 0) {
     const last = lineOf(src, endIdx);
     const above = first >= 2 && /^\s*(?:\/\/|\/\*)/.test(lines[first - 2]) ? 1 : 0;
     const window = lines.slice(first - 1 - above, last).join('\n');
+    // The verdict is searched in THIS catch's own text (so two catches on one line never
+    // share one), a standalone comment line directly above, and a trailing comment after
+    // its closing brace when no other catch follows on that line.
+    const lineEnd = src.indexOf('\n', endIdx) === -1 ? src.length : src.indexOf('\n', endIdx);
+    const rest = src.slice(endIdx + 1, lineEnd);
+    const trailing = /\bcatch\b/.test(maskNonCode(rest)) ? '' : rest;
+    const aboveText = above ? lines[first - 2] : '';
+    const ownText = `${aboveText}\n${src.slice(startIdx, endIdx + 1)}\n${trailing}`;
     sites.push({
       file: rel, line: first + lineOffset, kind, window,
       context: lines.slice(Math.max(0, first - 5), last).join('\n'),
       winStart: first - above + lineOffset,
       selfExplaining: endsTheFailure(bodyMasked),
-      marker: markerIn(window),
+      marker: markerIn(ownText),
       text: lines[first - 1].trim(),
     });
   };
@@ -287,6 +300,8 @@ export function scanShell(rel, src) {
     let code = raw.replace(/^\s*#.*$/, '');
     // `cmd ||` (or `cmd || \`) with the swallow on the next line is one statement.
     if (/\|\|\s*\\?\s*$/.test(code) && i + 1 < lines.length) code = `${code.replace(/\\\s*$/, '')} ${lines[i + 1].trim()}`;
+    // `if ! cmd; then` / `:` / `fi` spread over lines is one swallow.
+    if (/\bif\s+!\s/.test(code) && /\bthen\s*$/.test(code)) code = `${code} ${lines.slice(i + 1, i + 3).map((l) => l.trim()).join(' ')}`;
     if (!SHELL_SWALLOW_RE.test(code)) return;
     // The verdict is on the line itself or in the contiguous comment block above.
     let from = i;
@@ -446,6 +461,22 @@ test('#1127 scanner: shell evasions are sites — return 0, log, printf, /bin/tr
   ]) {
     assert.deepEqual(verdictsOf('x.sh', `${line}\n`), ['unexplained'], line);
   }
+});
+
+test('#1127 scanner: shell evasions round 2 — quote after true, || { true; }, || (true), if ! cmd; then :; fi', () => {
+  for (const line of [
+    'sh -c "x || true"', "sh -c 'x || :'", 'cmd || { true; }', 'cmd || (true)', 'cmd || { :; }',
+    'if ! cmd; then :; fi', 'if ! cmd; then true; fi', 'if ! cmd; then\n  :\nfi',
+  ]) {
+    assert.deepEqual(verdictsOf('x.sh', `${line}\n`), ['unexplained'], line);
+  }
+});
+
+test('#1127 scanner: two catches on ONE line each need their own marker', () => {
+  const src = 'try { a(); } catch { /* swallow-ok: the first probe is advisory only */ } try { b(); } catch { }\n';
+  assert.deepEqual(verdictsOf('x.mjs', src), ['optional', 'unexplained']);
+  const both = 'try { a(); } catch { /* swallow-ok: the first probe is advisory only */ } try { b(); } catch { /* swallow-ok: the second probe is advisory too */ }\n';
+  assert.deepEqual(verdictsOf('x.mjs', both), ['optional', 'optional']);
 });
 
 test('#1127 scanner: JS embedded in shell is scanned — heredoc and node -e/-p', () => {

@@ -619,7 +619,7 @@ test('brain:upgrade (#1127): an unreadable installed package.json is reported as
   assert.match(out, /downgrade guard/i, `the degraded guard must be stated:\n${out}`);
 });
 
-test('brain:upgrade (#1127): a BROKEN installed migrations module refuses before any write; only "not installed" reads as none', (t) => {
+test('brain:upgrade (#1127): on the downgrade path a BROKEN installed migrations module refuses before any write', (t) => {
   const dir = makeConsumerRepo('brain-1127-broken-migrations-');
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   writeFileSync(join(dir, 'brain.config.json'), JSON.stringify({ schemaVersion: '9.0.0' }));
@@ -630,4 +630,29 @@ test('brain:upgrade (#1127): a BROKEN installed migrations module refuses before
   assert.notEqual(r.status, 0, out);
   assert.match(out, /config-migrations/, out);
   assert.match(out, /Nothing was written/, `must refuse before the copy, not crash at the migration step:\n${out}`);
+});
+
+test('brain:upgrade (#1127): an ORDINARY upgrade with a broken incoming migrations module refuses before the copy, not at the step-3 import', (t) => {
+  const dir = makeConsumerRepo('brain-1127-broken-migrations-ordinary-');
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  writeFileSync(join(dir, 'node_modules', 'brain', 'brain', 'core', 'config-migrations.mjs'), 'export const = ;\n');
+
+  const r = runBrainUpgrade(dir, ['--no-install']);
+  const out = `${r.stdout}${r.stderr}`;
+  assert.notEqual(r.status, 0, out);
+  assert.match(out, /config-migrations/, out);
+  assert.match(out, /no managed path was written/i, `must refuse before the copy:\n${out}`);
+});
+
+test('brain:upgrade (#1127): a migrations module whose own IMPORT is missing is broken, not "not installed"', (t) => {
+  const dir = makeConsumerRepo('brain-1127-migrations-missing-import-');
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  writeFileSync(join(dir, 'brain.config.json'), JSON.stringify({ schemaVersion: '9.0.0' }));
+  writeFileSync(join(dir, 'node_modules', 'brain', 'brain', 'core', 'config-migrations.mjs'),
+    "import './does-not-exist.mjs';\nexport const migrations = [];\n");
+
+  const r = runBrainUpgrade(dir, ['--no-install', '--allow-downgrade']);
+  const out = `${r.stdout}${r.stderr}`;
+  assert.notEqual(r.status, 0, out);
+  assert.match(out, /Nothing was written|no managed path was written/i, out);
 });

@@ -40,7 +40,7 @@ warns and exits 0; corrupt line reads as missing).
 `cli.ship.test.mjs` ("a throwing sweepLanes() never turns today's successful ship into a failure"):
 the failure is a `sweep.failed` marker in the JSON and one stderr line. Kept, `surfaced`.
 
-**D7. Cold-review corrections (S1-S6).** The first cut of the guard was blind to JS embedded in shell (`node <<'NODE'` heredocs, `node -e`), let an adjacent catch inherit the previous line's marker, accepted `exitCode`-the-identifier, a conditional `throw` and a throw in an uncalled nested function as "self-explaining", and missed `|| return 0`, `|| log`, `|| printf`, `|| /bin/true`, `; true`, `|| { :; }`, `set +o errexit` and `||`-newline-`true`. Each evasion now has a synthetic test. A self-explaining block is one whose OWN top level unconditionally throws, calls `die(`, `process.exit(<non-zero>)` or sets a non-zero `process.exitCode`. A marker is honoured only inside the catch or on a standalone comment line directly above it. Reasons that were false were rewritten to say what the code does (e.g. `readJournal` returning null is `corrupt` and refuses, not "debris"), and reasons now state which errors they cover: where a non-ENOENT error was swallowed with a consequence, the catch was narrowed (below) or marked `follow-up`.
+**D7. Cold-review corrections (S1-S6).** The first cut of the guard was blind to JS embedded in shell (`node <<'NODE'` heredocs, `node -e`), let an adjacent catch inherit the previous line's marker, accepted `exitCode`-the-identifier, a conditional `throw` and a throw in an uncalled nested function as "self-explaining", and missed (round 2: `sh -c "x || true"`, `|| { true; }`, `|| (true)`, `if ! cmd; then :; fi`, and two catches on one line sharing one marker window) `|| return 0`, `|| log`, `|| printf`, `|| /bin/true`, `; true`, `|| { :; }`, `set +o errexit` and `||`-newline-`true`. Each evasion now has a synthetic test. A self-explaining block is one whose OWN top level unconditionally throws, calls `die(`, `process.exit(<non-zero>)` or sets a non-zero `process.exitCode`. A marker is honoured only inside the catch or on a standalone comment line directly above it. Reasons that were false were rewritten to say what the code does (e.g. `readJournal` returning null is `corrupt` and refuses, not "debris"), and reasons now state which errors they cover: where a non-ENOENT error was swallowed with a consequence, the catch was narrowed (below) or marked `follow-up`.
 
 **D6. One masker.** `maskNonCode` moved out of `test-spawn-hygiene.test.mjs` into
 `lib/mask-non-code.mjs` and gained regex-literal handling (a `/"/g` had unbalanced the scan); both
@@ -53,12 +53,13 @@ silently missing a `catch`.
 |---|---|---|---|
 | `archive.mjs` `--backfill` | unguarded `readdirSync` of `openspec/changes/`: uncaught ENOENT stack, exit 1, in a consumer with no changes yet (#1113's crash, second copy) | `listChangeFolders()`: a missing root is `[]`, other errors still throw | `archive.test.mjs` "#1127: --backfill in a repo with no openspec/changes/" |
 | `engram.mjs` `featureResume` (3 sites) | a failed save, an unreadable file or an unreadable change dir was a `⚠` line; the verb exited 0 over a partial hydration | every file attempted, then throws naming each that did not land | `engram.feature.test.mjs` (two tests) |
-| `lib/auto-resume.mjs` `tryFeatureResume` | (consequence of the row above) a non-zero exit dropped stdout, so session-start lost the resume summary | keeps the summary and appends `projection incomplete: <files>`; an empty-stdout failure is still `null` | `auto-resume.test.mjs` "#1127: a non-zero exit that printed a summary keeps it" |
+| `lib/auto-resume.mjs` `tryFeatureResume` | (consequence of the row above) a non-zero exit dropped stdout, so session-start lost the resume summary | keeps the summary and appends `projection incomplete: <files>` only when stderr carries the projection message, otherwise `feature-resume exited <code>`; an empty-stdout failure is still `null` | `auto-resume.test.mjs` "#1127: a non-zero exit that printed a summary keeps it" |
 | `brain-upgrade.mjs` schema floor (`currentSchema`) | a CORRUPT `brain.config.json` read as "no config yet": the downgrade guard was disarmed and `JSON.parse` threw at the migration step, AFTER the managed copy | only ENOENT is the first run; anything else dies before any write, naming the file | `brain-upgrade.test.mjs` "a corrupt brain.config.json refuses BEFORE any write" (+ the absent-config counter-test) |
 | `brain-upgrade.mjs` `installedSemver` | an unreadable installed `package.json` silently dropped the installed version out of the downgrade floor; the reason claimed "the install step names the problem", which is false | ENOENT stays silent; any other error warns that the guard has no installed-version floor | `brain-upgrade.test.mjs` "an unreadable installed package.json is reported as a degraded downgrade guard" |
-| `brain-upgrade.mjs` `migrationsForGuard` | a migrations module that existed but failed to load read as "no migrations", then crashed at the migration step after the copy | only a missing module reads as none; a load failure dies before any write | `brain-upgrade.test.mjs` "a BROKEN installed migrations module refuses before any write" |
+| `brain-upgrade.mjs` `migrationsForGuard` (downgrade path only) | a migrations module that existed but failed to load read as "no migrations" | only the module ITSELF being absent reads as none (a missing import inside it, or a load failure, dies before any write) | `brain-upgrade.test.mjs` "on the downgrade path a BROKEN installed migrations module refuses" and "whose own IMPORT is missing" |
+| `brain-upgrade.mjs` incoming migrations module (every path) | the ordinary upgrade copied, then crashed at the step-3 import of a broken INCOMING `config-migrations.mjs` (the downgrade-only check above never ran) | the incoming package's module is import-checked before `copyManaged`, on every path; a load failure refuses with "No managed path was written" | `brain-upgrade.test.mjs` "an ORDINARY upgrade with a broken incoming migrations module refuses before the copy" |
 | `engram.mjs` `featureCheckpoint` | any error reading an existing `resume.md` (EACCES) built a skeleton and OVERWROTE the hand-written state | only ENOENT builds the skeleton; any other read error is re-thrown | `engram.feature.test.mjs` "an existing resume.md that cannot be READ is never overwritten" |
-| `install-tools.sh` provider | an unreadable `brain.config.json` defaulted the provider to gitlab, so a GitHub repo got `glab` | absent config keeps the documented default; a corrupt one is refused; without node the one field is read with `sed` | `install-tools.test.mjs` (3 tests, snippets lifted from the script) |
+| `install-tools.sh` provider | an unreadable `brain.config.json` defaulted the provider to gitlab, so a GitHub repo got `glab` | absent config keeps the documented default; a corrupt one is refused; without node the `vcs` object's provider is read by a text match (and the message says so), an empty or missing one takes the node path's gitlab default | `install-tools.test.mjs` (5 tests, snippets lifted from the script) |
 | `install-tools.sh` summary | `gentle-ai install && ok \|\| warn` then a clean "Installation complete" and next steps | a failed configuration is recorded and the run ends `Setup INCOMPLETE`, exit 1, before the summary | `install-tools.test.mjs` "a failing `gentle-ai install` ends the run incomplete" |
 
 ## Follow-ups (each is a slice)
@@ -85,7 +86,7 @@ and `.catch(` sites; window = the catch's own lines plus a standalone comment li
 scanned with the JS classifier); `scanShell` (swallow-shaped lines and their continuation, window = the
 line plus the contiguous comment block above); `classify` (`fails` / `owned` / `optional` /
 `surfaced` / `follow-up` / `weak` / `unexplained`); `scanAll` (adds orphan markers). Four guard
-tests and twelve scanner tests on synthetic sources. `SWALLOW_INVENTORY=1 node
+tests and fourteen scanner tests on synthetic sources. `SWALLOW_INVENTORY=1 node
 brain/scripts/swallow-guard.test.mjs` prints the table below straight from the markers.
 
 ## Inventory (every site, generated from the markers)
@@ -97,17 +98,17 @@ guard matches by content, not line.
 |---|---|---|---|---|---|---|
 | install | 5 | 21 | 8 | 2 | 0 | 36 |
 | bootstrap | 2 | 0 | 0 | 0 | 17 | 19 |
-| upgrade | 4 | 2 | 1 | 1 | 0 | 8 |
+| upgrade | 5 | 2 | 1 | 1 | 0 | 9 |
 | memory | 24 | 31 | 32 | 2 | 2 | 91 |
 | postmerge | 5 | 8 | 9 | 0 | 0 | 22 |
 
-Total: 176 sites.
+Total: 177 sites.
 
 | Area | Site | Verdict | Reason | Pinned by |
 |---|---|---|---|---|
 | install | `brain/scripts/lib/init.mjs:73` | optional | an unreadable or unparseable package.json reads as "no installed tag" — the resolver's documented null | swallow-guard.test.mjs |
 | install | `brain/scripts/lib/init.mjs:158` | surfaced | an unparseable package.json is re-raised, with the real parse error, by the merge that follows | swallow-guard.test.mjs |
-| install | `brain/scripts/lib/installer.mjs:133` | optional | an absent outgoing copy is "unknown", never evidence of a consumer edit; callers treat unknown as unknown | swallow-guard.test.mjs |
+| install | `brain/scripts/lib/installer.mjs:133` | optional | an absent or unreadable outgoing copy is "unknown", never evidence of a consumer edit; callers treat unknown as unknown | swallow-guard.test.mjs |
 | install | `brain/scripts/lib/installer.mjs:157` | follow-up | slice-D an unreadable directory lists as empty, so a file could be skipped from a copy without a report | swallow-guard.test.mjs |
 | install | `brain/scripts/lib/installer.mjs:213` | surfaced | the path is pushed to `failed`, which the restore result returns and the caller prints | swallow-guard.test.mjs |
 | install | `brain/scripts/lib/installer.mjs:221` | surfaced | judged by outcome: pathPresent() on the next line pushes the path to `failed` when it is still on disk | swallow-guard.test.mjs |
@@ -140,7 +141,7 @@ Total: 176 sites.
 | install | `brain/scripts/lib/installer.mjs:1825` | optional | a provenance read must never be what stops an upgrade; `unknown` keeps the prior behaviour and the git fallback | swallow-guard.test.mjs |
 | install | `brain/scripts/lib/installer.mjs:2030` | optional | tries the next candidate path; falling off the end returns null, the "version unknown" answer | swallow-guard.test.mjs |
 | install | `brain/scripts/cli-entry.mjs:123` | optional | an argv[1] that cannot be resolved is not a direct invocation of this file (REPL, -e, stdin) | swallow-guard.test.mjs |
-| install | `brain/scripts/install-tools.sh:177` | optional | a version banner is cosmetic; the tool's presence was already established above | swallow-guard.test.mjs |
+| install | `brain/scripts/install-tools.sh:181` | optional | a version banner is cosmetic; the tool's presence was already established above | swallow-guard.test.mjs |
 | bootstrap | `brain/scripts/bootstrap.sh:124` | owned | #1155: slice-A the provider override write swallows its own failure (empty catch and `\|\| true`); it must join REQUIRED_FAILURES | swallow-guard.test.mjs |
 | bootstrap | `brain/scripts/bootstrap.sh:160` | owned | #1155: swallow-ok: grep exits 1 when the key is absent, which is the answer env_get exists to give | swallow-guard.test.mjs |
 | bootstrap | `brain/scripts/bootstrap.sh:166` | owned | #1155: swallow-ok: grep -v exits 1 when .env held only that key; the empty remainder is the correct result | swallow-guard.test.mjs |
@@ -163,11 +164,12 @@ Total: 176 sites.
 | upgrade | `brain/scripts/brain-upgrade.mjs:160` | fails | the block throws or exits | the block throws or exits |
 | upgrade | `brain/scripts/brain-upgrade.mjs:210` | optional | the check only warns about a pre-v0.8.0 name clobber; an unreadable package.json is reported by the install step | swallow-guard.test.mjs |
 | upgrade | `brain/scripts/brain-upgrade.mjs:255` | fails | the block throws or exits | the block throws or exits |
-| upgrade | `brain/scripts/brain-upgrade.mjs:322` | fails | the block throws or exits | the block throws or exits |
-| upgrade | `brain/scripts/brain-upgrade.mjs:332` | surfaced | ENOENT (not installed yet) is silent; any other error warns that the installed version is not a floor | swallow-guard.test.mjs |
-| upgrade | `brain/scripts/brain-upgrade.mjs:517` | fails | the block throws or exits | the block throws or exits |
-| upgrade | `brain/scripts/brain-upgrade.mjs:692` | optional | detectAgentsClobber treats null as "evidence absent" and warns only when evidence is present | swallow-guard.test.mjs |
-| upgrade | `brain/scripts/brain-upgrade.mjs:733` | follow-up | slice-B a failed AGENTS.md regeneration is a warning plus a hint, then the run still prints "Done." | swallow-guard.test.mjs |
+| upgrade | `brain/scripts/brain-upgrade.mjs:323` | fails | the block throws or exits | the block throws or exits |
+| upgrade | `brain/scripts/brain-upgrade.mjs:333` | surfaced | ENOENT (not installed yet) is silent; any other error warns that the installed version is not a floor | swallow-guard.test.mjs |
+| upgrade | `brain/scripts/brain-upgrade.mjs:492` | fails | the block throws or exits | the block throws or exits |
+| upgrade | `brain/scripts/brain-upgrade.mjs:527` | fails | the block throws or exits | the block throws or exits |
+| upgrade | `brain/scripts/brain-upgrade.mjs:702` | optional | detectAgentsClobber treats null as "evidence absent" and warns only when evidence is present | swallow-guard.test.mjs |
+| upgrade | `brain/scripts/brain-upgrade.mjs:743` | follow-up | slice-B a failed AGENTS.md regeneration is a warning plus a hint, then the run still prints "Done." | swallow-guard.test.mjs |
 | postmerge | `.github/workflows/governance-postmerge.yml:91` | surfaced | the exit code is captured on the next line and branched on; any non-PRESENT state files an alarm and halts | swallow-guard.test.mjs |
 | postmerge | `.github/workflows/governance-postmerge.yml:171` | surfaced | the numeric audit exit code is captured, normalised, and decides revert versus alarm | swallow-guard.test.mjs |
 | postmerge | `.github/workflows/governance-postmerge.yml:315` | optional | cleanup after a failed per-offender revert; the offender is recorded in `failed` and alarmed below | swallow-guard.test.mjs |
@@ -215,7 +217,7 @@ Total: 176 sites.
 | memory | `brain/scripts/memory/lib/audit-io.mjs:72` | optional | an unparseable index line yields a null key that never matches a record id, so the drift shows in the measured row | swallow-guard.test.mjs |
 | memory | `brain/scripts/memory/lib/audit-io.mjs:96` | surfaced | returned as `{ measured: false, reason }`: the audit row says why it degraded | swallow-guard.test.mjs |
 | memory | `brain/scripts/memory/lib/audit-io.mjs:111` | surfaced | returned as `{ measured: false, reason }`: the audit row says why it degraded | swallow-guard.test.mjs |
-| memory | `brain/scripts/memory/lib/auto-resume.mjs:70` | optional | the resume hint is advisory; a runner that cannot start yields null, the same as no resume point | swallow-guard.test.mjs |
+| memory | `brain/scripts/memory/lib/auto-resume.mjs:74` | optional | the resume hint is advisory; a runner that cannot start yields null, the same as no resume point | swallow-guard.test.mjs |
 | memory | `brain/scripts/memory/lib/backend-selection.mjs:132` | surfaced | returned as `available: null` with the reason, which the caller reports | swallow-guard.test.mjs |
 | memory | `brain/scripts/memory/lib/feature-resolution.mjs:56` | optional | no openspec/changes/ means no candidate feature — the nothing-to-resume case | swallow-guard.test.mjs |
 | memory | `brain/scripts/memory/lib/feature-resolution.mjs:66` | optional | an entry that cannot be stat'd is not a candidate change directory | swallow-guard.test.mjs |

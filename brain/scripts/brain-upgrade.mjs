@@ -253,8 +253,9 @@ async function migrationsForGuard() {
     const mod = await import(file);
     return Array.isArray(mod?.migrations) ? mod.migrations : [];
   } catch (err) {
-    // swallow-ok: ONLY a missing module (not installed yet) reads as no migrations; a module that exists but fails to load dies below
-    if (err?.code === 'ERR_MODULE_NOT_FOUND' || err?.code === 'ENOENT') return [];
+    // swallow-ok: ONLY the module itself being absent (not installed yet) reads as no migrations; a load failure or a missing import inside it dies below
+    // Only the module ITSELF being absent is "not installed"; a missing import inside it is a broken module.
+    if ((err?.code === 'ERR_MODULE_NOT_FOUND' || err?.code === 'ENOENT') && String(err.message).includes(file)) return [];
     // Loading it again at the migration step would crash AFTER the managed copy (#1127).
     die(`${file} cannot be loaded (${err?.message ?? err}). Nothing was written.`);
   }
@@ -482,6 +483,15 @@ const { managed, local } = await import(join(pkgRoot, 'brain', 'core', 'managed-
 // the list existed has no module to read, and retires nothing.
 const retiredModule = join(pkgRoot, 'brain', 'scripts', 'lib', 'retired-paths.mjs');
 const { RETIRED_PATHS: retired = [] } = existsSync(retiredModule) ? await import(retiredModule) : {};
+
+// The module step 3 will import is the INCOMING package's. Load it now, on every path,
+// so a broken one refuses before `copyManaged` instead of crashing after it (#1127).
+const incomingMigrations = join(pkgRoot, 'brain', 'core', 'config-migrations.mjs');
+try {
+  await import(incomingMigrations);
+} catch (err) {
+  die(`${incomingMigrations} cannot be loaded (${err?.message ?? err}). No managed path was written.`);
+}
 
 // A signal raised during the install above is delivered here, at the first await
 // after it — before any managed path has been written.

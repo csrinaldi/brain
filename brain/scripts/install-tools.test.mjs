@@ -13,7 +13,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync, chmodSync, readFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, chmodSync, readFileSync, symlinkSync, mkdirSync } from 'node:fs';
 import { removeTempTree } from './__fixtures__/tmp-tree.mjs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -82,4 +82,31 @@ test('#1127 install-tools: a failing `gentle-ai install` ends the run incomplete
   const r = run(script, dir, shim);
   assert.equal(r.code, 1, r.out);
   assert.match(r.out, /gentle-ai configuration/);
+}));
+
+// Without node the provider is read by a text match: scoped to the `vcs` object, and an empty
+// or missing provider takes the same gitlab default the node path uses.
+function noNodeRun(dir, config) {
+  const bin = join(dir, 'nonode');
+  mkdirSync(bin);
+  for (const tool of ['tr', 'sed', 'head']) {
+    const found = spawnSync('sh', ['-c', `command -v ${tool}`], { encoding: 'utf8' }).stdout.trim();
+    symlinkSync(found, join(bin, tool));
+  }
+  writeFileSync(join(dir, 'brain.config.json'), config);
+  const bash = spawnSync('sh', ['-c', 'command -v bash'], { encoding: 'utf8' }).stdout.trim();
+  const r = spawnSync(bash, ['-c', `${PRELUDE}${resolveVcs()}\necho "CLI=$VCS_CLI"`], {
+    cwd: dir, encoding: 'utf8', env: { PATH: bin, HOME: dir, DBUS_SESSION_BUS_ADDRESS: '' },
+  });
+  return `${r.stdout}${r.stderr}`;
+}
+
+test('#1127 install-tools (no node): reads vcs.provider scoped to the vcs object, and says it is a text match', () => inTmp((dir) => {
+  const out = noNodeRun(dir, '{"other": {"provider": "gitlab"}, "vcs": {"gitHost": "x", "provider": "github"}}');
+  assert.match(out, /CLI=gh/);
+  assert.match(out, /text match/);
+}));
+
+test('#1127 install-tools (no node): an empty or missing provider takes the same gitlab default as the node path', () => inTmp((dir) => {
+  assert.match(noNodeRun(dir, '{"vcs": {"provider": ""}}'), /CLI=glab/);
 }));

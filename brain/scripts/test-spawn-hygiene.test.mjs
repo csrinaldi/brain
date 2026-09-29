@@ -367,6 +367,8 @@ const ALLOWLIST = [
   { file: 'brain/scripts/hooks/hooks.attribution-parity.test.mjs', entrypoint: 'brain/scripts/hooks/commit-msg', reason: 'no-vcs-capability' },
   // #1127: bash runs install-tools.sh's provider-resolution and summary snippets, lifted verbatim, in a scratch dir with a gentle-ai shim — no apt, no network.
   { file: 'brain/scripts/install-tools.test.mjs', entrypoint: '<unresolved>', line: 34, reason: 'no-vcs-capability' },
+  { file: 'brain/scripts/install-tools.test.mjs', entrypoint: '<unresolved>', line: 93, reason: 'no-vcs-capability' }, // `command -v` lookups for the no-node PATH
+  { file: 'brain/scripts/install-tools.test.mjs', entrypoint: '<unresolved>', line: 97, reason: 'no-vcs-capability' }, // the same snippet with node off PATH
   { file: 'brain/scripts/brain-promote.golden.test.mjs', entrypoint: 'brain/scripts/hooks/commit-msg', reason: 'no-vcs-capability' }, // #1127: masked away by the old masker (a regex literal holding a quote); runs the hook on a message file, no VCS
   { file: 'brain/scripts/hooks/pre-commit.test.mjs', entrypoint: 'brain/scripts/hooks/pre-commit', reason: 'no-vcs-capability' },
   { file: 'brain/scripts/hooks/pre-push.test.mjs', entrypoint: 'brain/scripts/hooks/pre-push', reason: 'no-vcs-capability' },

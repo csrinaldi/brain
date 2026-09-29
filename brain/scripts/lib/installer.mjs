@@ -130,7 +130,7 @@ export function readOutgoing({ pkgRoot, relPaths }) {
   for (const rel of relPaths) {
     try {
       out.set(rel, readFileSync(join(pkgRoot, rel)));
-    } catch { /* swallow-ok: an absent outgoing copy is "unknown", never evidence of a consumer edit; callers treat unknown as unknown */
+    } catch { /* swallow-ok: an absent or unreadable outgoing copy is "unknown", never evidence of a consumer edit; callers treat unknown as unknown */
       // Absent or unreadable. Absence is NOT evidence of a consumer edit — a
       // path brain ships for the first time has no outgoing copy either — so it
       // is simply left out of the map and callers treat "unknown" as "unknown".

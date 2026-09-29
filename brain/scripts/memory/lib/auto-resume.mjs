@@ -63,8 +63,12 @@ export function tryFeatureResume(root, { _runner } = {}) {
     // summary for a failure that did not touch it: keep it and name the failure.
     const summary = (result.stdout ?? '').trim();
     if (summary) {
-      const detail = String(result.stderr ?? '').trim().split('\n').pop().replace(/^.*not projected into engram — /, '');
-      return `${result.stdout}\n  ⚠ projection incomplete: ${detail || 'feature-resume exited non-zero'}\n`;
+      const stderr = String(result.stderr ?? '');
+      const projected = /not projected into engram — ([^\n]*)/.exec(stderr);
+      const tail = projected
+        ? `projection incomplete: ${projected[1]}`
+        : `feature-resume exited ${result.status ?? 'abnormally'}`;
+      return `${result.stdout}\n  ⚠ ${tail}\n`;
     }
     return null;
   } catch { /* swallow-ok: the resume hint is advisory; a runner that cannot start yields null, the same as no resume point */

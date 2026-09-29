@@ -108,3 +108,11 @@ test('tryFeatureResume (#1127): a non-zero exit that printed a summary keeps it 
   assert.match(out, /Next action:  do-the-thing/);
   assert.match(out, /projection incomplete: .*proposal\.md/);
 });
+
+test('tryFeatureResume (#1127): a non-zero exit WITHOUT the projection message is not labelled "projection incomplete"', () => {
+  const runner = () => ({ status: 3, stdout: '\n  Feature: my-feature\n', stderr: 'memory/cli: something else entirely\n' });
+  const out = tryFeatureResume('/fake/root', { _runner: runner });
+  assert.match(out, /Feature: my-feature/);
+  assert.doesNotMatch(out, /projection incomplete/);
+  assert.match(out, /feature-resume exited 3/);
+});

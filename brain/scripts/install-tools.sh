@@ -33,8 +33,12 @@ if [ -f brain.config.json ]; then
     VCS_PROVIDER="$(node -p "(require('./brain.config.json').vcs||{}).provider||'gitlab'")" \
       || die "brain.config.json exists but cannot be read or parsed — fix it, then re-run. Refusing to guess the VCS provider."
   else
-    VCS_PROVIDER="$(sed -n 's/.*"provider"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' brain.config.json | head -n1)"
-    [ -n "$VCS_PROVIDER" ] || die "cannot read vcs.provider from brain.config.json and node is not installed yet — install node, then re-run."
+    # Without node only a plain `"vcs": { ... "provider": "<name>" ... }` object is understood;
+    # anything else (including no provider, or an empty one) takes the same gitlab default the
+    # node path uses. Corruption cannot be detected here — install node and re-run to validate.
+    printf '  note: node is not installed yet — reading vcs.provider with a simple text match\n' >&2
+    VCS_PROVIDER="$(tr -d '\n' < brain.config.json | sed -n 's/.*"vcs"[[:space:]]*:[[:space:]]*{[^}]*"provider"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
+    VCS_PROVIDER="${VCS_PROVIDER:-gitlab}"
   fi
 else
   VCS_PROVIDER="gitlab"
