@@ -6,6 +6,123 @@ registry (ADR-0030, superseding ADR-0006's git tags); consumers upgrade with
 changes** before upgrading — additive `brain.config.json` migrations apply
 automatically, but renames need manual action.
 
+## v1.9.0 — the consumer path is honest: credentials stay safe, and failures are reported
+
+**Manual step: read before upgrading.** Nothing in your tree has to move, but several
+commands now exit non-zero where 1.8.0 exited 0. If a script, a CI step or an agent
+wraps these commands and treated exit 0 as "fine", it will now see the failures brain
+used to hide. Each item below was measured against the code, not the changelog of
+the PR that shipped it.
+
+| Command | 1.8.0 | 1.9.0 |
+|---|---|---|
+| `npm run brain:env:init` | Always printed `Environment ready` and exited 0, whatever failed on the way. | Exits **1** when a **required** step failed, and names the failure in the closing summary. Optional steps that could not run are listed as next steps and still exit 0 (see the classification below) (#1112, #1127). |
+| `npm run brain:env:init`, PAT prompt | Wrote the token into `.env` wherever it was. | **Refuses** to write the token when `.env` is tracked by git, is a symlink, is hardlinked, is not a regular file, or cannot be confirmed as git-ignored. A refusal names the fix and is a required failure, so exit **1** (#1112). |
+| `npm run brain:env:init`, provider and backend prompts | Accepted any typed text and wrote it into `brain.config.json` or `.env`. | Accepts only `github` or `gitlab` (or empty, keeping the derived default) for the provider, and only `engram` or `plainfiles` (or empty) for the memory backend; anything else re-prompts (#1112). |
+| `npm run brain:upgrade -- <tag>` | A corrupt `brain.config.json`, or a broken incoming `config-migrations.mjs`, was found **after** the managed copy had already run. | Refuses **before any write** and says `Nothing was written` (#1127). An unreadable installed package version now prints a warning instead of vanishing. |
+| `npm run tools:install` (`install-tools.sh`) | A failed `gentle-ai install` printed a warning, then a clean summary. An unreadable `brain.config.json` silently selected `gitlab`. | A failed `gentle-ai install` ends the run with `Setup INCOMPLETE` and exit **1**. An unreadable config is refused instead of guessed (#1127). |
+| `node brain/scripts/lib/brain-config.mjs ensure` (run by `env:init`) | An unparseable `brain.config.json` was treated as absent. | Reports the parse error and exits **1** (#1127). |
+| Feature resume (`feature-resume`) | An unreadable change directory printed a warning and returned. Files not projected into engram were skipped quietly. | Rejects, naming each file that did not land, so a partial projection never reads as a complete one (#1127). |
+| `git commit` in a repository with no commit yet | Refused by `pre-commit` (checks 1 and 2), so the adoption commit needed `--no-verify`. | Allowed, and only while **no ref reaches any commit**. The `repo:check` and staged-records checks still run. Every later commit is judged as before (#1112). |
+
+### How `env:init` now classifies what it could not do
+
+`env:init` ends with a summary in two parts. A **required** failure exits 1. An
+**optional** gap is listed under pending steps with the command that closes it, and the
+run still exits 0, because an environment without it is usable (records-only capture
+needs no memory backend).
+
+| Step | Required (exit 1) | Optional (listed as next step, exit 0) |
+|---|---|---|
+| SDD harness init | the init exits non-zero | |
+| `core.hooksPath` | `git config` fails | |
+| Memory backend `setup` (engram or plainfiles) | `setup` exits non-zero | |
+| Memory `pull` | it was attempted and refused (merge or reconcile refusal, corrupt store) | no commit yet, no upstream, or the remote is unreachable |
+| Memory `index` (engram) | the `engram` binary exists and indexing fails | the `engram` binary is absent, so hydration and indexing are skipped |
+| VCS token | it was typed and could not be saved to `.env`, or `auth login` failed with a token present | no token was given |
+| VCS provider override | the write fails | |
+| `brain.config.json` | it cannot be parsed | any other `ensure` failure, such as the tier notice |
+| Open-ticket board | | a read-only listing |
+
+### `.env` is git-ignored by `env:init`, and a token is never written into an unsafe one (#1112)
+
+`env:init` now runs `git check-ignore` on `.env` and appends `.env` to `.gitignore`
+(creating the file if needed) when nothing already ignores it. A broader pattern you
+already have is respected. It does **not** add `node_modules/`; ignoring that stays
+yours. The refusal cases are in the table above. `.git/info/exclude` and a global
+`core.excludesFile` count as ignored for that clone only, which is why the tracked
+`.gitignore` line is still written.
+
+`MEMORY_BACKEND=plainfiles` is no longer reported as an unknown backend: `env:init` runs
+its `setup` and `pull`, and never `brain:memory:index` (`plainfiles` has no index, by
+design).
+`project.name` may be empty: the engram adapter derives the project from
+`project.slug`, then `project.name`, then the checkout's directory name, and a failed
+doctrine index now makes `brain:memory:index` exit non-zero instead of logging and
+succeeding.
+
+### The archive sweep treats a missing `openspec/changes/` as nothing to archive (#1113, #1151)
+
+A consumer that had not started its first SDD change made every clean post-merge run
+crash and file a false `governance:archive-sweep-failed` alarm. A missing
+`openspec/changes/` is now zero eligible changes. The real diagnostic of a genuine sweep
+failure (stderr) now reaches the alarm's output block, which used to be empty. The same
+reader is used by `archive --backfill` (#1127).
+
+### Memory
+
+- **A fresh engram 2.x store accepts brain's import sessions (#1116, #1152).** Every
+  session row in the import payload now carries `directory` (the repository root).
+  engram 2.0.0 refused the payload without it. Measured against 2.0.0 (accepts) and
+  1.20.0 (accepts the field as extra metadata). Both recovery paths, `memory/cli.mjs
+  import` and `brain:memory:pull`, use the fixed builder. The engram duplicate-heal
+  probe's tested range is unchanged (1.20.x), and outside it the probe still says so.
+- **`prLookupFailed` no longer claims a push that did not happen (#1119, #1153).** Since
+  #936 the PR lookup runs before the push, so a lookup failure means nothing was pushed.
+  The message now states what this run did. A lookup that fails after a push (the
+  one-shot re-scan after creating a PR) gets its own message, `prLookupFailedAfterPush`,
+  in English and Spanish.
+- **The checkout that captured a record can `pull` after its own lane merged (#1118,
+  #1154).** `pull` reconciles a local record file only when it is byte-identical to the
+  blob at `@{u}`, is a regular file and is not staged differently; git's object store is
+  the only backup. Anything else still refuses as before. Applies to both the engram and
+  the plainfiles adapters.
+
+### No step reports success over a failure it saw (#1127, #1156)
+
+The sweep of `|| true`, swallowed `catch` and warn-and-continue sites across install,
+bootstrap, upgrade, the memory CLI and the post-merge workflow. Each site now either
+reports a failure or carries a stated reason it is optional, and `swallow-guard.test.mjs`
+fails on a new unexplained swallow in those paths. The consumer-visible results are the
+exit-code rows above. Also: `checkpoint` no longer overwrites an unreadable `resume.md`,
+and a partial resume still shows its summary with the projection failure named.
+Four slices are deliberately left open (an `AGENTS.md` regeneration failure during
+`brain:upgrade` still ends in `Done.`; an unreadable `records/` directory still reads as
+an empty store; two installer read-failure sites; and swallows outside the five swept
+areas). See `docs/KNOWN-LIMITATIONS.md`.
+
+### Docs
+
+`docs/adoption.md`, `docs/KNOWN-LIMITATIONS.md` and the definition of done were written
+and verified against 1.8.0 (#1147, #1150), and are updated here to describe 1.9.0: the
+first commit needs no `--no-verify`, the `.env` guarantees, the classified `env:init`
+summary, and the closed defects removed.
+
+### Why a minor and not a patch
+
+The release reporter measured 7 commits since v1.8.0 — 0 `feat`, 6 `fix`, 1 internal.
+It counts no `feat`, and that is exactly why this note exists: several fixes change what
+a consumer's automation observes. `env:init` exits 1 on a required failure,
+`brain:upgrade` and `tools:install` refuse where they used to proceed, and
+`pre-commit` allows a first commit it used to refuse. A script that passed on 1.8.0 can
+fail on 1.9.0. Shipping that as a patch would change consumers' results under a version
+number that promises it does not. It is a minor by the rule v1.6.0, v1.7.0 and v1.8.0
+applied. Not a major: nothing you rely on stops working, and the failures it now reports
+were already happening.
+
+No config migration is added above 1.8.0. `brain:upgrade` has nothing to rewrite in your
+`brain.config.json`.
+
 ## v1.8.0 — new consumers get lite and claude, and adapters live one directory per axis
 
 **Manual step: read before upgrading.** `brain/scripts/harness/backends/`,

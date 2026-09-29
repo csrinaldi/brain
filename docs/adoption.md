@@ -18,9 +18,9 @@ anything — several steps below exist only because a real adoption hit them
 # 0. If there is no package.json yet:
 npm init -y
 
-# 1. Ignore the files brain is about to create, BEFORE anything writes a secret.
-#    brain does not yet do this for you (#1112) — do it first, every time.
-printf '.env\nnode_modules/\n' >> .gitignore
+# 1. Ignore node_modules/. env:init git-ignores .env itself, before it writes a
+#    token, but it never touches node_modules/.
+printf 'node_modules/\n' >> .gitignore
 
 # 2. Install brain:
 npm i -D @logikas/brain
@@ -31,9 +31,8 @@ npx brain init
 # 4. Configure the environment (interactive — see "What env:init asks" below):
 npm run brain:env:init
 
-# 5. Make the adoption commit (see "The first commit" below — read it before
-#    you run this):
-git add -A && git commit -m "chore: adopt brain" --no-verify
+# 5. Make the adoption commit (see "The first commit" below):
+git add -A && git commit -m "chore: adopt brain"
 ```
 
 Then: `npm run brain:day:start` every morning, and follow the golden path
@@ -44,7 +43,7 @@ allowlisted bytes into the same directory
 ([ADR-0030 Amendment 1](../brain/project/decisions/adr-0030-distribution-scoped-registry-package.md)):
 
 ```bash
-npm i -D "git+https://github.com/csrinaldi/brain.git#v1.8.0"
+npm i -D "git+https://github.com/csrinaldi/brain.git#v1.9.0"
 ```
 
 ---
@@ -93,10 +92,48 @@ no captured memory. It's a report, not a failure — it tells you what to adopt 
 | Step | Verb | What it does | Interactive? |
 |---|---|---|---|
 | 1 | `npx brain init [tag]` | Writes the one script alias the upgrade cannot inject itself (`brain:upgrade`), then runs it: copies every managed path (`brain/core/**`, `brain/scripts/**`, the governance CI, the PR template, `.gitattributes`) and merges the rest of the `brain:*` script aliases into your `package.json`. Reads the tag from the version you installed; never guesses one. | No — safe for CI and scripted adoption. |
-| 2 | `npm run brain:env:init` | Creates `brain.config.json` if missing (derives `vcs.provider`, `gitHost`, `slug` from your git origin), prompts for a VCS token and writes it to `.env`, sets `core.hooksPath`, resolves the agent platform and SDD engine, sets up the memory backend, prints the governance tier it set, and reports the open tickets on your tracker. | Yes — needs a real TTY for the token prompt. |
+| 2 | `npm run brain:env:init` | Creates `brain.config.json` if missing (derives `vcs.provider`, `gitHost`, `slug` from your git origin), git-ignores `.env`, prompts for a VCS token and writes it to `.env` (refusing an unsafe `.env`, see below), sets `core.hooksPath`, resolves the agent platform and SDD engine, sets up the memory backend, prints the governance tier it set, and reports the open tickets on your tracker. Ends with a summary that separates required failures (exit 1) from optional next steps (exit 0). | Yes — needs a real TTY for the token prompt. |
 
 A bare `npx brain init` leaves the repo half-adopted: files present, nothing
 configured, no hooks, no token. `env:init` is required, not optional.
+
+### `.env` and your token
+
+`env:init` checks `git check-ignore .env` and, when nothing ignores it, appends `.env` to
+`.gitignore` (creating the file if needed). A pattern you already have is respected. It
+does **not** add `node_modules/`.
+
+It **refuses to write the token** into a `.env` that:
+
+| `.env` is | Fix |
+|---|---|
+| tracked by git | `git rm --cached .env`, then re-run (git never reports a tracked file as ignored) |
+| a symlink | replace it with a regular file |
+| hardlinked, or not a regular file | replace it with a regular file |
+| not confirmed as git-ignored | fix your `.gitignore` so `git check-ignore .env` succeeds |
+
+A refusal names the fix and is a **required failure**: `env:init` exits 1.
+
+### What the `env:init` summary tells you
+
+`env:init` ends with a summary in two parts, and its exit code follows them.
+
+| Result | Exit | What it means |
+|---|---|---|
+| A **required** step failed | **1** | The environment is not usable as adopted. The summary names each failure. Fix it and re-run — `env:init` is safe to repeat. |
+| An **optional** step could not run | 0 | The environment is usable. The summary lists what is pending and the command that closes it. |
+
+| Step | Required (exit 1) | Optional (pending, exit 0) |
+|---|---|---|
+| SDD harness init | the init fails | |
+| `core.hooksPath` | it cannot be set | |
+| Memory backend `setup` | it fails | |
+| Memory `pull` | attempted and refused (merge or reconcile refusal, corrupt store) | no commit yet, no upstream, or remote unreachable |
+| Memory `index` (engram) | binary present, indexing fails | binary absent — hydration and indexing skipped |
+| VCS token | typed but not saved (refusals above), or `auth login` failed | no token given |
+| VCS provider override | the write fails | |
+| `brain.config.json` | it cannot be parsed | any other `ensure` failure (e.g. the tier notice) |
+| Open-ticket board | | read-only listing |
 
 ### Choices `env:init` makes for you (and how to change them)
 
@@ -104,36 +141,34 @@ configured, no hooks, no token. `env:init` is required, not optional.
 |---|---|---|---|
 | Governance tier | `lite` — no second approver required to merge ([ADR-0026 Amendment 8](../brain/project/decisions/adr-0026-governance-doctrine-tiers.md)) | `governance.tier` in `brain.config.json` | `npm run brain:config -- set governance.tier standard`, then `npm run brain:protect` |
 | Agent platform | `claude` ([ADR-0024 Amendment 2](../brain/project/decisions/adr-0024-three-axis-decoupling.md)); `antigravity` is the second supported platform | `AGENT_PLATFORM` in `.env` | set `AGENT_PLATFORM=antigravity` in `.env` before running `env:init`, or export it for one run: `AGENT_PLATFORM=antigravity npm run brain:env:init` |
-| Memory backend | `engram` (prompted; `plainfiles` is the other supported value) | `MEMORY_BACKEND` in `.env` | answer the prompt, or set `MEMORY_BACKEND=plainfiles` in `.env` first |
+| Memory backend | `engram` (prompted; `plainfiles` is the other supported value). engram 2.x is supported: a fresh 2.x store accepts brain's record import. Its duplicate-heal probe is still tested on 1.20.x and says so outside that range | `MEMORY_BACKEND` in `.env` | answer the prompt, or set `MEMORY_BACKEND=plainfiles` in `.env` first |
 | VCS provider | derived from your git origin, confirmable on a TTY | `vcs.provider` in `brain.config.json` (tracked) | type `github` or `gitlab` at the prompt |
 
-**On the VCS provider prompt: type exactly `github` or `gitlab`.** `env:init` does not
-yet validate this field (`#1112`) — anything else you type is written verbatim into the
-tracked `brain.config.json`, and downstream tooling that switches on the provider
-silently falls through to a `gitlab`-shaped default.
+**The VCS provider and memory backend prompts validate.** The provider accepts `github`,
+`gitlab` or empty (keep the derived default); the backend accepts `engram`, `plainfiles`
+or empty. Anything else re-prompts, so a pasted token can never land in the tracked
+`brain.config.json`.
 
-**`project.name` stays empty after `env:init`.** Only `project.slug` is filled from your
-git origin; `project.name` is a known gap (`#1112`). If you use the `engram` memory
-backend, set it by hand in `brain.config.json` before your first `brain:memory:index`
-run — indexing silently fails per file otherwise (each failure is logged, but the run
-still reports overall success).
+**`project.name` may stay empty after `env:init`.** Only `project.slug` is filled from
+your git origin. The `engram` adapter derives its project from `project.slug`, then
+`project.name`, then the checkout's directory name, so you do not need to set it. If a
+doctrine index write fails, `brain:memory:index` now exits non-zero and `env:init`
+reports it as a required failure.
 
 ---
 
-## The first commit — no supported path exists yet
+## The first commit
 
-Once `core.hooksPath` is set, the pre-commit hook refuses any commit directly on
-`main`/`master`. In a brand-new repository, your adoption commit (`brain.config.json`,
-the copied managed paths, `.gitignore`) is necessarily the first commit on `main` —
-there is nothing to branch from yet.
+In a brand-new repository your adoption commit (`brain.config.json`, the copied managed
+paths, `.gitignore`) is the first commit on `main`, so there is nothing to branch from.
+The pre-commit hook allows it **without `--no-verify`**: it exempts a commit from its
+"no direct commit to `main`" and "no commit from the main checkout" checks while **no ref
+reaches any commit**. It prints one line saying so.
 
-**There is no documented, supported way to make that commit today.** The only
-guidance is the hook's own bypass hint: `git commit --no-verify`. That is a real
-escape hatch, not a blessed workflow — it skips `repo:check` along with the branch
-check, so verify `npm run brain:repo:check` is green yourself before pushing. This gap
-is tracked as `#1112` (item 4); the guide will document a real bootstrap step once it
-ships. Don't invent your own workaround beyond this — if `--no-verify` doesn't fit
-your workflow, wait for `#1112` or comment on it.
+The exemption ends by itself: once that commit exists, every later commit is judged by
+those checks as before. The other pre-commit checks (`repo:check` and the staged-records
+check) still run on the first commit. In an existing repository with history, nothing
+changes: the hook judges your commit normally.
 
 ---
 
@@ -186,8 +221,8 @@ each tier requires and how to recover if protection locks you out.
 ## Upgrading
 
 ```bash
-npm run brain:upgrade -- v1.8.0             # install a newer tag, copy managed paths
-npm run brain:upgrade -- v1.8.0 --dry-run   # preview what would change
+npm run brain:upgrade -- v1.9.0             # install a newer tag, copy managed paths
+npm run brain:upgrade -- v1.9.0 --dry-run   # preview what would change
 ```
 
 Read the [CHANGELOG](../CHANGELOG.md) first — renames and breaking changes need
@@ -200,13 +235,12 @@ morning and never auto-updates.
 
 ## When a step fails
 
-- **`env:init` reports most step failures inline** (a `⚠` line naming the step) and
-  keeps going rather than aborting the whole run — it's safe to re-run. At the end it
-  lists everything that needs attention under "pending" with the command to fix it.
-- **A failure reported this way is a real failure, not noise** — except where a known
-  gap says otherwise (see `project.name` / doctrine indexing above, `#1112`). Don't
-  assume a run that printed no red text actually finished every step; check the
-  summary at the end.
+- **`env:init` reports step failures inline** (a `⚠` line naming the step) and keeps
+  going rather than aborting the whole run — it's safe to re-run. At the end it lists
+  optional gaps under "pending" with the command that closes each, and any **required**
+  failure by name, with exit code 1 (see "What the `env:init` summary tells you").
+- **Check the exit code, not just the text.** A required failure no longer ends in a
+  clean `Environment ready`; a script that wraps `env:init` sees exit 1.
 - **`brain:upgrade` failures roll back the managed-path copy** to its pre-upgrade
   bytes wherever possible, and print where the snapshot is if it can't finish the
   rollback itself. See `docs/KNOWN-LIMITATIONS.md` for what's not yet covered.
