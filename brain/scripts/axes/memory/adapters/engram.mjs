@@ -304,6 +304,7 @@ export function buildImportPayload({
   records,
   existingTopicKeys,
   startedAt,
+  root = repoRoot,
   _importRecord = importRecord,
 }) {
   // The delta. A record already in engram is SKIPPED rather than re-sent,
@@ -340,6 +341,19 @@ export function buildImportPayload({
   // failed`, and `session_id: null` fails identically — the session row is what
   // establishes the project. Per project, not one global row, so a records file
   // spanning several projects cannot hang observations off the wrong one.
+  //
+  // `directory: root` (#1116, parent #864, found by #1081 F6): engram 2.x's
+  // `import` REJECTS a session with no `directory` — "pulled session
+  // directory is invalid: directory is required" — so a FRESH engram 2.x
+  // store could never be hydrated from `.memory/records/` at all; the whole
+  // batch fails closed (all-or-nothing, see `_defaultEngramImport`'s own
+  // note above). Measured against the real binary both ways (issue #1081
+  // evidence 45): engram 2.0.0 refuses the payload without it and accepts it
+  // with it; engram 1.20.0 accepts the same field as harmless extra
+  // metadata, so this is safe across both tested majors. `root` is already
+  // the repo root every other `root`-accepting export in this file defaults
+  // to (`repoRoot`), so no new concept is introduced — it is simply threaded
+  // one level deeper, into the payload engram actually sees.
   const sessions = [];
   const sessionFor = new Map();
   for (const r of fresh) {
@@ -347,7 +361,7 @@ export function buildImportPayload({
     if (sessionFor.has(project)) continue;
     const id = `brain-batch-import-${project}`;
     sessionFor.set(project, id);
-    sessions.push({ id, project, started_at: startedAt, ended_at: null, summary: null });
+    sessions.push({ id, project, directory: root, started_at: startedAt, ended_at: null, summary: null });
   }
 
   const observations = fresh.map((r) => {
@@ -475,7 +489,7 @@ export async function importMemory({
       unreadable = "the reader returned no key set";
     }
     if (!unreadable) {
-      outcome = buildImportPayload({ records, existingTopicKeys, startedAt: _now(), _importRecord });
+      outcome = buildImportPayload({ records, existingTopicKeys, startedAt: _now(), root, _importRecord });
       if (outcome.payload) _engramImport(outcome.payload);
     }
   } finally {
@@ -553,7 +567,7 @@ export async function pullMemory({
   });
 
   // Step 3: hydrate local engram from the newly merged .memory/.
-  await _import();
+  await _import({ root });
 
   return { indexCount: count, duplicates: normalizeDuplicates(duplicates) };
 }
