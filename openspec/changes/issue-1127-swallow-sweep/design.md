@@ -59,11 +59,44 @@ silently missing a `catch`.
 
 | Slice | Sites | Fix | Note |
 |---|---|---|---|
-| A (done) | `bootstrap.sh` steps that warned and then read "Environment ready" | REQUIRED (appended to #1155's `REQUIRED_FAILURES`): SDD init, `core.hooksPath`, engram setup, plainfiles setup, memory pull (both backends), memory index, the provider-override write (its `catch {}` and `\|\| true` removed), `auth-login` failing with a token present. OPTIONAL with a stated reason: the open-ticket board (read-only listing), no token provided (an explicit operator choice), a browser that will not open, the PAT-URL prefill | `bootstrap.required-steps.test.mjs` (7 tests, snippets lifted from the script). Also fixed: `brain-config.mjs ensure` silently exited 0 over an unparseable `brain.config.json` (the embedded `catch {}` at bootstrap :91 read it as empty); it now reports and exits 1 (`brain-config.test.mjs`) |
+| A (done, reclassified by cause in round 3) | `bootstrap.sh` steps that warned and then read "Environment ready" | see "Bootstrap classification" below | `bootstrap.required-steps.test.mjs`, `bootstrap.e2e.test.mjs` (the real script, hermetic), `brain-config.ensure-cli.test.mjs` |
 | B | `brain-upgrade.mjs` AGENTS.md regeneration | decide whether a failed regeneration belongs in the exit code, and stop printing `Done.` over it | product call: the upgrade proper succeeded, AGENTS.md is a compiled derivative |
 | C | `store.mjs` `readRecords`: unreadable `records/` dir and unreadable record file | surface as a counted, reported read failure instead of an empty store | needs an audit-visible number, so it touches `brain:memory:audit` |
 | D | `installer.mjs` `listFiles`, `escapesRoot` | fail closed: an unreadable source directory or an unresolvable destination root must stop the upgrade | unreachable in a healthy tree, so low urgency |
 | E | `lib/brain-config.mjs` (`ensure` still degrades silently on an unwritable directory) and the paths outside the five areas, not swept here (counts of unmarked swallow sites the scanner finds today): `day-start.mjs` 6, `session-start.mjs` 8, `adopt.mjs` 3, `vcs/**` adapters 29 in 12 files, `hooks/*` 7 in 4 files | run the same inventory, then add the files to the guard's scope | 53 sites; `day-start`/`session-start` first (a swallow there reads as a healthy session) |
+
+## Bootstrap classification (by CAUSE, not by step)
+
+Slice A first made `memory pull` and `memory index` REQUIRED by step. Round 3 reproduced the blocker on
+isolated clones: a USABLE environment (default engram backend with no engram binary; plainfiles with no
+origin, no upstream or offline; a repo with no commits; a new worktree branch) exited 1, its own message
+said "(non-blocking)", and the memory contract says records-only capture needs no backend. The lifted-snippet
+tests could not see it: nothing ran the whole script in a healthy box. `bootstrap.e2e.test.mjs` now does
+(real `bootstrap.sh`, `stdin` closed, isolated HOME/XDG, a PATH of only shimmed host tools with no gh, glab,
+engram, gentle-ai or codex and a python3 `grep`, a COPY of the brain tree): four healthy scenarios assert
+exit 0 and the next step, one real merge refusal asserts exit 1. The four healthy ones failed on the
+previous code first.
+
+| Step | Cause | Verdict | Next step printed |
+|---|---|---|---|
+| SDD init | the harness init exits non-zero | REQUIRED | |
+| `core.hooksPath` | `git config` fails | REQUIRED | |
+| engram / plainfiles setup | the backend `setup` exits non-zero | REQUIRED | |
+| engram hydration + index | the engram BINARY is absent | OPTIONAL (not attempted; `MISSING_OPTIONAL`) | install engram, then `npm run brain:memory:pull && npm run brain:memory:index` |
+| engram index | binary present, `brain:memory:index` fails | REQUIRED | |
+| memory pull (either backend) | preflight: no commits, or no upstream (no remote included) | OPTIONAL (skipped) | `npm run brain:memory:pull` once it exists |
+| memory pull | the pull fails with a connectivity error (one isolated helper reads git's words, tested) | OPTIONAL (skipped) | `npm run brain:memory:pull` once the remote is reachable |
+| memory pull | anything else: merge refusal, reconcile refusal, corrupt store | REQUIRED | |
+| provider-override write | the write fails | REQUIRED | |
+| `auth-login` | fails with a token present | REQUIRED | |
+| no token provided | an operator's explicit choice | OPTIONAL | |
+| `brain.config.json` | `ensure` exits 1 and the file cannot be parsed (checked by cause, not by the exit code) | REQUIRED | |
+| `brain.config.json` | `ensure` exits 1 for any other reason (tier notice) | OPTIONAL | |
+| open-ticket board | read-only listing | OPTIONAL | |
+
+The printed line and the classification agree: the five REQUIRED-step messages say "REQUIRED, env:init will
+exit 1" (a test fails if any message printed for a REQUIRED failure says "non-blocking"), and an optional
+skip prints its next step.
 
 ## What the guard cannot see
 
@@ -135,18 +168,18 @@ Total: 175 sites.
 | install | `brain/scripts/lib/installer.mjs:2030` | optional | tries the next candidate path; falling off the end returns null, the "version unknown" answer | swallow-guard.test.mjs |
 | install | `brain/scripts/cli-entry.mjs:123` | optional | an argv[1] that cannot be resolved is not a direct invocation of this file (REPL, -e, stdin) | swallow-guard.test.mjs |
 | install | `brain/scripts/install-tools.sh:181` | optional | a version banner is cosmetic; the tool's presence was already established above | swallow-guard.test.mjs |
-| bootstrap | `brain/scripts/bootstrap.sh:186` | optional | grep exits 1 when the key is absent, which is the answer env_get exists to give | swallow-guard.test.mjs |
-| bootstrap | `brain/scripts/bootstrap.sh:192` | optional | grep -v exits 1 when .env held only that key; the empty remainder is the correct result | swallow-guard.test.mjs |
-| bootstrap | `brain/scripts/bootstrap.sh:233` | optional | npm is the documented default package manager when detection is unavailable | swallow-guard.test.mjs |
-| bootstrap | `brain/scripts/bootstrap.sh:282` | optional | create-if-absent: `: > file` IS the creation, not a swallowed failure (the guard reads `\|\| :` as a swallow); a failed write surfaces through the final `git check-ignore` and GITIGNORE_FAILED | swallow-guard.test.mjs |
-| bootstrap | `brain/scripts/bootstrap.sh:338` | optional | the target is only quoted in the refusal message; the refusal (ENV_SECRET_SAFE=false) is already decided | swallow-guard.test.mjs |
-| bootstrap | `brain/scripts/bootstrap.sh:342` | optional | GNU-then-BSD portability fallback; if neither stat works the count reads as 1, and the symlink, file-type, tracked and ignore checks around it still gate the write | swallow-guard.test.mjs |
-| bootstrap | `brain/scripts/bootstrap.sh:368` | optional | the URL only pre-fills a browser tab; the token prompt that follows works without it | swallow-guard.test.mjs |
-| bootstrap | `brain/scripts/bootstrap.sh:376` | optional | opening a browser is a convenience; the URL is printed right after | swallow-guard.test.mjs |
-| bootstrap | `brain/scripts/bootstrap.sh:378` | optional | opening a browser is a convenience; the URL is printed right after | swallow-guard.test.mjs |
-| bootstrap | `brain/scripts/bootstrap.sh:593` | optional | the open-ticket board is a read-only listing; a failure loses no state and the message names where to look | swallow-guard.test.mjs |
-| bootstrap | `brain/scripts/bootstrap.sh:100` | optional | an unparseable config reads as empty here and identity falls back to the git origin; `brain-config.mjs ensure` above now reports it and exits 1 (#1127) | swallow-guard.test.mjs |
-| bootstrap | `brain/scripts/bootstrap.sh:107` | optional | no git origin means no derived host or project; the prompts and the final summary name what is still unset | swallow-guard.test.mjs |
+| bootstrap | `brain/scripts/bootstrap.sh:195` | optional | grep exits 1 when the key is absent, which is the answer env_get exists to give | swallow-guard.test.mjs |
+| bootstrap | `brain/scripts/bootstrap.sh:201` | optional | grep -v exits 1 when .env held only that key; the empty remainder is the correct result | swallow-guard.test.mjs |
+| bootstrap | `brain/scripts/bootstrap.sh:242` | optional | npm is the documented default package manager when detection is unavailable | swallow-guard.test.mjs |
+| bootstrap | `brain/scripts/bootstrap.sh:291` | optional | create-if-absent: `: > file` IS the creation, not a swallowed failure (the guard reads `\|\| :` as a swallow); a failed write surfaces through the final `git check-ignore` and GITIGNORE_FAILED | swallow-guard.test.mjs |
+| bootstrap | `brain/scripts/bootstrap.sh:347` | optional | the target is only quoted in the refusal message; the refusal (ENV_SECRET_SAFE=false) is already decided | swallow-guard.test.mjs |
+| bootstrap | `brain/scripts/bootstrap.sh:351` | optional | GNU-then-BSD portability fallback; if BOTH stat forms fail the count reads as 1, so the hardlink check is SKIPPED; the symlink, file-type, tracked and ignore checks around it still gate the write | swallow-guard.test.mjs |
+| bootstrap | `brain/scripts/bootstrap.sh:377` | optional | the URL only pre-fills a browser tab; the token prompt that follows works without it | swallow-guard.test.mjs |
+| bootstrap | `brain/scripts/bootstrap.sh:385` | optional | opening a browser is a convenience; the URL is printed right after | swallow-guard.test.mjs |
+| bootstrap | `brain/scripts/bootstrap.sh:387` | optional | opening a browser is a convenience; the URL is printed right after | swallow-guard.test.mjs |
+| bootstrap | `brain/scripts/bootstrap.sh:670` | optional | the open-ticket board is a read-only listing; a failure loses no state and the message names where to look | swallow-guard.test.mjs |
+| bootstrap | `brain/scripts/bootstrap.sh:109` | optional | an unparseable config reads as empty here and identity falls back to the git origin; `brain-config.mjs ensure` above now reports it and exits 1 (#1127) | swallow-guard.test.mjs |
+| bootstrap | `brain/scripts/bootstrap.sh:116` | optional | no git origin means no derived host or project; the prompts and the final summary name what is still unset | swallow-guard.test.mjs |
 | bootstrap | `brain/scripts/harness/cli.mjs:164` | fails | the block throws or exits | the block throws or exits |
 | bootstrap | `brain/scripts/harness/cli.mjs:273` | fails | the block throws or exits | the block throws or exits |
 | upgrade | `brain/scripts/brain-upgrade.mjs:160` | fails | the block throws or exits | the block throws or exits |

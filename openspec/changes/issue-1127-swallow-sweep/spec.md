@@ -83,7 +83,7 @@ that copies before failing.
 `|| true` / `|| :` followed by a quote, brace or paren, `|| { true; }`, `|| (true)`,
 `if ! cmd; then :; fi` (one line or spread) are sites; two catches on one line each need their own marker.
 
-## REQ-1127-12 — a bootstrap step that leaves the environment unusable is a REQUIRED failure
+## REQ-1127-12 — a bootstrap step that leaves the environment unusable is a REQUIRED failure (by cause)
 
 SDD init, `core.hooksPath`, engram setup, plainfiles setup, memory pull, memory index, the
 provider-override write and a failing VCS login (with a token present) MUST append to #1155's
@@ -99,3 +99,18 @@ and MUST leave the file untouched.
 ## REQ-1127-14 — no owned-elsewhere allowlist entry outlives its owner
 
 `OWNED_ELSEWHERE` is empty; a stale entry fails the guard.
+
+## REQ-1127-15 — a usable environment exits 0
+
+`bootstrap.sh` MUST exit 0, printing the optional next step, when: the engram binary is absent (hydration and
+index not attempted); the repository has no commits; the branch has no upstream or the repository no remote; or
+the pull fails with a connectivity error. A pull that fails for any other reason (a merge or reconcile refusal,
+a corrupt store) and a failing index with engram present MUST be REQUIRED, exit 1. No message printed for a
+REQUIRED failure may say "non-blocking".
+**Falsifiable by**: `bootstrap.e2e.test.mjs` (four healthy scenarios exit 0; the merge refusal exits 1).
+
+## REQ-1127-16 — an unparseable `brain.config.json` is REQUIRED, and `ensure` pins its exit code at the CLI
+
+`ensure` MUST exit 1 (`brain-config.ensure-cli.test.mjs` spawns it on an unparseable fixture and checks the file is
+untouched); `bootstrap.sh` MUST then record a REQUIRED failure when the file cannot be parsed, an optional one
+for any other `ensure` failure.

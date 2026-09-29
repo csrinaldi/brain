@@ -30,6 +30,9 @@ issue: 1127
       that says exactly what it is (create-if-absent, portable stat fallback, ...).
 - [x] **T12** Mutation-checked every guard rule and N1/N3 in a scratch clone; three survivors
       (per-catch trailing text, unscoped sed, empty-provider default) got tests that kill them.
+- [x] **T13** Round 3 (blocker): memory steps classified by cause (engram binary, preflight, connectivity
+      helper), config-parse REQUIRED by cause, `ensure` CLI exit pinned, hermetic e2e over the real
+      `bootstrap.sh` (4 healthy scenarios exit 0, a real merge refusal exits 1), mutation-checked.
 - [ ] **slice-B** `brain-upgrade` AGENTS.md regeneration failure vs the closing `Done.`.
 - [ ] **slice-C** record readers: an unreadable records dir/file must not read as an empty store.
 - [ ] **slice-D** installer walkers that fail open (`listFiles`, `escapesRoot`).
