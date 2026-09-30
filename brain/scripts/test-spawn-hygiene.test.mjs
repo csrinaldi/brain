@@ -371,8 +371,7 @@ const ALLOWLIST = [
   // #1127 slice A: bash runs bootstrap.sh's step snippets, lifted verbatim, against failing stand-in scripts in a scratch dir — no git remote, no network.
   { file: 'brain/scripts/bootstrap.required-steps.test.mjs', entrypoint: '<unresolved>', line: 58, reason: 'no-vcs-capability' },
   // #1127 round 3: the REAL bootstrap.sh in a hermetic box — HOME/XDG under the temp root, a PATH of only shimmed host tools (no gh, glab, engram, gentle-ai, codex; a python3 grep), stdin closed, a COPY of the brain tree; the unhealthy case pulls from a local bare repo, never a network.
-  { file: 'brain/scripts/bootstrap.e2e.test.mjs', entrypoint: '<unresolved>', line: 66, reason: 'no-vcs-capability' },
-  { file: 'brain/scripts/bootstrap.e2e.test.mjs', entrypoint: 'brain/scripts/bootstrap.sh', line: 108, reason: 'no-vcs-capability' },
+  { file: 'brain/scripts/bootstrap.e2e.test.mjs', entrypoint: 'brain/scripts/bootstrap.sh', line: 43, reason: 'no-vcs-capability' },
   // #1165: the same e2e box runs `config set memory.backend` (the write env:init performs on a TTY) and the resolver CLI bash asks — both local, read/write of the fixture's own brain.config.json.
   { file: 'brain/scripts/bootstrap.e2e.test.mjs', entrypoint: 'brain/scripts/config/cli.mjs', reason: 'no-vcs-capability' },
   { file: 'brain/scripts/bootstrap.e2e.test.mjs', entrypoint: 'brain/scripts/memory/lib/backend-resolve.mjs', reason: 'no-vcs-capability' },
