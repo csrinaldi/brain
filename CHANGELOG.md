@@ -18,8 +18,8 @@ against the code on `main`, not against the PR description.
 
 | Where | 1.10.0 | 1.10.1 |
 |---|---|---|
-| `npm run brain:check` | Ran the four governance checks, `npm test` and `brain:repo:check`. | Also runs `brain:nav` (a failure exits 1) and `memory/index-lag.mjs` (warning-only: its output is printed as `::warning::` and the step does not fail `brain:check`). Runs `npm test` only where CI does, see below. The output gains `navCheck`, `indexLag` and `[N/A] npmTest` lines (#1186, #1187). |
-| `npm test` inside `brain:check` | Always ran, so a consumer's `npm init` placeholder `test` script failed the first PR. | Runs only when the `.brain-source` marker exists (the brain source repo) **and** `package.json` has a non-empty `test` script. Otherwise it prints `[N/A] npmTest` with the reason and is never a failure. A consumer's own `npm test` no longer gates `brain:check`, exactly as it does not gate CI (#1187). |
+| `npm run brain:check` | Ran the four governance checks, `npm test` and `brain:repo:check`. | Also runs `brain:nav` (a failure exits 1) and `memory/index-lag.mjs` (warning-only: its output is printed as `::warning::` and the step does not fail `brain:check`). Runs `npm test` only where GitHub's CI does, see below. The output gains `navCheck`, `indexLag` and `[N/A] npmTest` lines (#1186, #1187). |
+| `npm test` inside `brain:check` | Always ran, so a consumer's `npm init` placeholder `test` script failed the first PR. | Runs only when the `.brain-source` marker exists (the brain source repo) **and** `package.json` has a non-empty `test` script. Otherwise it prints `[N/A] npmTest` with the reason and is never a failure. A consumer's own `npm test` no longer gates `brain:check`, as it does not gate GitHub's `local-checks`. The GitLab fragment still runs `npm test` unconditionally (`brain/scripts/ci/gitlab-governance.yml`), so on GitLab a local pass can still be a CI failure there (#1194) (#1187). |
 | `memoryPresence` in `brain:check` | Evaluated raw: at `lite`, a repository with no session summary **failed** locally while CI passed. | Follows the tier, like CI: a failing result at a tier where the memory gate is detection (`lite`) prints `[PASS]` with a `::warning::` reason. At `standard` and `regulated` it still fails. A check whose evidence cannot be read (`uncomputable`) is never softened (#1187). |
 | The post-merge audit's memory check (`brain:audit`, `brain:metrics`, the post-merge workflow) | Repo-wide and tier-blind: passed when **any** `session_summary` existed anywhere in `.memory/records/`. | The memory gate's own predicate (issue-scoped, tier-mapped). At `standard` and `regulated`, a merge whose linked issue has no scoped record can now fail the audit where any session summary used to pass it. A repository with **no `.jsonl` file under `.memory/records/`** abstains: its merges pass with `[memory: no history yet — abstained]` (#1188). |
 | Post-merge alarm issues | Never closed by brain. | Closed by the workflow when a later run clears the condition (below). |
@@ -127,7 +127,7 @@ declared: the local checks match CI, the audit matches the PR gate, and an alarm
 outliving the condition it reports. `issueClose` is a new port verb, but only the post-merge
 workflow calls it. Nothing you configured has to change. Two observable edges remain and are
 listed above rather than hidden: a consumer script that relied on `brain:check` running its own
-`npm test` no longer gets that (CI never ran it either), and at `standard`/`regulated` the audit
+`npm test` no longer gets that (GitHub's CI never ran it either; the GitLab fragment does, #1194), and at `standard`/`regulated` the audit
 can fail a merge that lacks a scoped record.
 
 ## v1.10.0 — a fresh consumer reaches its first PR and its first memory save without manual steps
