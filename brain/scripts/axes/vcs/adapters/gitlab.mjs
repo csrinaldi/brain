@@ -976,6 +976,33 @@ export async function labelList({ project, apiBase, token, proxyUrl, fetchImpl }
 }
 
 /**
+ * labelCreate — creates a label DEFINITION in the project's label set (issue
+ * #1163); see the GitHub adapter for the contract. GitLab answers a duplicate
+ * with 409, which is `{ ok: true, created: false }`. GitLab requires a
+ * `#`-prefixed colour. Never throws.
+ *
+ * @param {{ project: string, name: string, color?: string, description?: string, apiBase?: string, token?: string, proxyUrl?: string|null, fetchImpl?: Function }} params
+ * @returns {Promise<{ ok: true, created: boolean } | { ok: false, error: string }>}
+ */
+export async function labelCreate({ project, name, color, description, apiBase, token, proxyUrl, fetchImpl } = {}) {
+  try {
+    await gitlabApiFetch({
+      apiBase: apiBase ?? 'https://gitlab.com/api/v4',
+      token: glToken(token),
+      proxyUrl: proxyUrl ?? null,
+      path: `projects/${encodeURIComponent(project)}/labels`,
+      method: 'POST',
+      body: { name, color: `#${String(color ?? 'ededed').replace(/^#/, '')}`, description: description ?? '' },
+      fetchImpl,
+    });
+    return { ok: true, created: true };
+  } catch (err) {
+    if (/failed: 409 /.test(err.message)) return { ok: true, created: false };
+    return { ok: false, error: err.message };
+  }
+}
+
+/**
  * Percent-encode a value that is about to be interpolated into a URL (#388).
  *
  * `patSetupUrl` builds a query string by hand on both providers. An unencoded

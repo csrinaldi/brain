@@ -75,6 +75,34 @@ async function whyLine(tier, opts) {
 }
 
 /**
+ * Decides what env:init reports about the memory lane (issue #1166). The lane
+ * (ADR-0034) ships memory records on their own pull request; `memory.lane.enabled`
+ * is false on every tier by default and an absent key reads as false, exactly as
+ * the launcher and the sweep read it. Same two halves as the tier notice.
+ *
+ * @param {{ config: object }} args
+ * @returns {{ enabled: boolean }}
+ */
+export function laneNotice({ config }) {
+  return { enabled: config?.memory?.lane?.enabled === true };
+}
+
+/**
+ * @param {{ enabled: boolean }} notice
+ * @param {{ locale?: string }} [opts]
+ * @returns {Promise<string[]>}
+ */
+export async function renderLaneNotice({ enabled }, { locale } = {}) {
+  const opts = { locale };
+  if (enabled) return [`  ✓ ${await t('config.lane.on', {}, opts)}`];
+  return [
+    `  ✓ ${await t('config.lane.off', {}, opts)}`,
+    `    ${await t('config.lane.why', {}, opts)}`,
+    `    ${await t('config.lane.enable', {}, opts)}`,
+  ];
+}
+
+/**
  * Reads the config env:init just ensured and prints the notice. Never throws:
  * an unreadable config is already reported by the ensure step itself.
  *
@@ -89,4 +117,5 @@ export async function printTierNotice({ created, configPath, log = console.log }
   }
   const locale = config?.docs?.language || 'en';
   for (const l of await renderTierNotice(tierNotice({ created, config }), { locale })) log(l);
+  for (const l of await renderLaneNotice(laneNotice({ config }), { locale })) log(l);
 }

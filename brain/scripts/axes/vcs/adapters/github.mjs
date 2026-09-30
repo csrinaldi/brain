@@ -993,6 +993,26 @@ export async function labelList({ project } = {}) {
 }
 
 /**
+ * labelCreate — creates a label DEFINITION in the remote's label set (issue
+ * #1163). The write half of `labelList`: it applies the label to nothing, so
+ * it cannot hand anyone an approval (that is `labelAdd`'s deny-set). "Already
+ * exists" (HTTP 422 `already_exists`) is a SUCCESS with `created: false`,
+ * which is what makes the caller idempotent. Never throws.
+ *
+ * @param {{ project: string, name: string, color?: string, description?: string }} opts
+ * @returns {Promise<{ ok: true, created: boolean } | { ok: false, error: string }>}
+ */
+export async function labelCreate({ project, name, color, description } = {}) {
+  const r = gh(
+    ['api', '-X', 'POST', `repos/${project}/labels`, '--input', '-'],
+    { input: JSON.stringify({ name, color: String(color ?? 'ededed').replace(/^#/, ''), description: description ?? '' }) },
+  );
+  if (r.ok) return { ok: true, created: true };
+  if (/already_exists/.test(`${r.stdout}${r.stderr}`)) return { ok: true, created: false };
+  return { ok: false, error: r.stderr.trim() || `gh api failed (status ${r.status})` };
+}
+
+/**
  * rerunWorkflowRun — GitHub-only capability (issue #328, closing the
  * stale-GREEN re-evaluation bug). Not a base contract verb (no GitLab
  * equivalent implemented, deliberately out of scope) — callers reach it via

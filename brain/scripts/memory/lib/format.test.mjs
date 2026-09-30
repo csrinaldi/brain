@@ -415,3 +415,8 @@ test('nowUtcSeconds: defaults to the real clock when getNow is omitted', () => {
   const parsed = new Date(ts).getTime();
   assert.ok(parsed >= before - 1000 && parsed <= after + 1000, 'nowUtcSeconds() default clock should be near real time');
 });
+
+test('#1164 HANDLE_RE: a handle may carry . and _ after its first character (GitLab usernames), never shell or path metacharacters', () => {
+  for (const ok of ['@jane.doe', '@jane_doe', '@a-b.c_d']) assert.equal(classifyActor(ok), 'handle', ok);
+  for (const no of ['@.x', '@_x', '@a b', '@a;b', '@a$b', '@a/b']) assert.notEqual(classifyActor(no), 'handle', no);
+});
