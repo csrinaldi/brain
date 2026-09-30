@@ -60,7 +60,11 @@ const EMAIL_ACTOR_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 // redefining them. `HANDLE_RE` is also the positive requirement
 // `capture-provenance.mjs#resolveActor` enforces at the point a handle is
 // minted (imported from here, so the two can never drift).
-export const HANDLE_RE = /^@[A-Za-z0-9][A-Za-z0-9-]*$/;
+// `.` and `_` are allowed AFTER the first character: GitLab usernames carry them (`jane.doe`),
+// and a rule that refuses them leaves those users with no handle they can type (#1163). The class
+// stays closed over letters, digits and `._-`: no whitespace, quote, `$`, backtick, `;` or `/`,
+// so the value is safe as a `git config` argument and never reads as a branch.
+export const HANDLE_RE = /^@[A-Za-z0-9][A-Za-z0-9._-]*$/;
 // A bare default-branch name is a branch too: records captured from the main
 // checkout carry `actor: "main"` (measured: 2 of them) — no `/` to catch.
 // Not exported (MINOR-1, fresh-context review): no consumer outside this

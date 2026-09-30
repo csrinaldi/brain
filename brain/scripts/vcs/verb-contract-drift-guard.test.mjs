@@ -33,7 +33,9 @@ const CONTRACT_DOC = join(REPO_ROOT, 'brain', 'core', 'methodology', 'vcs-contra
 // `labelCreate` (#1163): both adapters implement it and VERBS lists it; its vcs-contract.md
 // row is drafted at openspec/changes/issue-1163-env-init-labels-actor-lane/brain-drafts/
 // and lands with the maintainer's `brain:promote`. REMOVE this entry in that same commit.
-const DOCUMENTED_BUT_NOT_REQUIRED = new Set(['capabilities', 'labelCreate']);
+const DOCUMENTED_BUT_NOT_REQUIRED = new Set(['capabilities']);
+// Verbs implemented and in VERBS whose vcs-contract.md row is still a DRAFT: exempt only until promoted.
+const PENDING_PROMOTION = new Set(['labelCreate']);
 
 // Function-typed exports that BOTH providers legitimately share but that are
 // NOT contract verbs (helpers/constants) — reserved for future entries so the
@@ -82,9 +84,9 @@ test('every verb documented in vcs-contract.md\'s Required Verbs table is presen
   }
 });
 
-test('every DOCUMENTED_BUT_NOT_REQUIRED entry is still ABSENT from the Required Verbs table — promoting a row must remove its exception in the same commit', () => {
+test('every DOCUMENTED_BUT_NOT_REQUIRED / PENDING_PROMOTION entry is still ABSENT from the Required Verbs table — promoting a row must remove its exception in the same commit', () => {
   const docVerbs = new Set(requiredVerbsFromDoc());
-  for (const verb of DOCUMENTED_BUT_NOT_REQUIRED) {
+  for (const verb of [...DOCUMENTED_BUT_NOT_REQUIRED, ...PENDING_PROMOTION]) {
     assert.ok(!docVerbs.has(verb), `'${verb}' is now in vcs-contract.md's Required Verbs table: remove it from DOCUMENTED_BUT_NOT_REQUIRED`);
   }
 });
@@ -93,7 +95,7 @@ test('every verb in cli.mjs VERBS is either documented in the Required Verbs tab
   const docVerbs = new Set(requiredVerbsFromDoc());
   for (const verb of VERBS) {
     assert.ok(
-      docVerbs.has(verb) || DOCUMENTED_BUT_NOT_REQUIRED.has(verb),
+      docVerbs.has(verb) || DOCUMENTED_BUT_NOT_REQUIRED.has(verb) || PENDING_PROMOTION.has(verb),
       `cli.mjs exposes '${verb}' but it is neither in the Required Verbs table nor ` +
         'DOCUMENTED_BUT_NOT_REQUIRED — document it in vcs-contract.md or add it here with a reason',
     );

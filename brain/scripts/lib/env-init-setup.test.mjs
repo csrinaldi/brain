@@ -20,18 +20,23 @@ const REPO = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 function fakeVcs({ existing = [], listThrows = null, createFails = {}, whoamiName = 'octo', whoamiThrows = null } = {}) {
   const labels = new Set(existing);
   const creates = [];
+  const seenArr = [];
+  const seenPush = (a) => seenArr.push(a);
   return {
+    seenArr,
     creates,
     labels,
-    labelList: async () => { if (listThrows) throw new Error(listThrows); return [...labels]; },
-    labelCreate: async ({ name }) => {
+    labelList: async (a) => { seenPush(a); if (listThrows) throw new Error(listThrows); return [...labels]; },
+    labelCreate: async (a) => {
+      const { name } = a;
+      seenPush(a);
       creates.push(name);
       if (createFails[name]) return { ok: false, error: createFails[name] };
       if (labels.has(name)) return { ok: true, created: false };
       labels.add(name);
       return { ok: true, created: true };
     },
-    whoami: async () => { if (whoamiThrows) throw new Error(whoamiThrows); return { username: whoamiName }; },
+    whoami: async (a) => { seenPush(a ?? {}); if (whoamiThrows) throw new Error(whoamiThrows); return { username: whoamiName }; },
   };
 }
 
@@ -142,4 +147,52 @@ test('#1164 resolveBrainActor: a VCS username that is not a handle, or a malform
   assert.equal(bad.status, 'pending');
   const malformed = await resolveBrainActor({ vcs: fakeVcs({ whoamiName: 'octo' }), gitGet: () => 'Jane Doe', gitSet: () => {} });
   assert.equal(malformed.status, 'set', 'a malformed existing value is replaced by the authenticated identity, not trusted');
+});
+
+// ── round 2 review of #1172 ──────────────────────────────────────────────────
+
+test('#1163 cold-1: a self-hosted GitLab consumer\'s label calls carry ITS apiBase (from project.gitHost), never gitlab.com', async () => {
+  const vcs = fakeVcs();
+  const config = { project: { gitHost: 'git.corp.example' } };
+  await ensureLabels({ config, provider: 'gitlab', project: 'g/p', vcs, env: {} });
+  assert.ok(vcs.seenArr.length > 1);
+  for (const a of vcs.seenArr) assert.equal(a.apiBase, 'https://git.corp.example/api/v4');
+});
+
+test('#1163 cold-1: an explicit CI_API_V4_URL wins (the resolution every other GitLab caller uses); gitlab.com and GitHub pass none', async () => {
+  const viaEnv = fakeVcs();
+  await ensureLabels({ config: { project: { gitHost: 'x.example' } }, provider: 'gitlab', project: 'g/p', vcs: viaEnv, env: { CI_API_V4_URL: 'https://ci.example/api/v4' } });
+  assert.equal(viaEnv.seenArr[0].apiBase, 'https://ci.example/api/v4');
+  const com = fakeVcs();
+  await ensureLabels({ config: { project: { gitHost: 'gitlab.com' } }, provider: 'gitlab', project: 'g/p', vcs: com, env: {} });
+  assert.equal(com.seenArr[0].apiBase, undefined, 'the adapter default already is gitlab.com');
+  const gh = fakeVcs();
+  await ensureLabels({ config: { project: { gitHost: 'ghe.example' } }, provider: 'github', project: 'a/b', vcs: gh, env: {} });
+  assert.equal(gh.seenArr[0].apiBase, undefined, 'gh resolves its own host');
+});
+
+test('#1164 cold-1: whoami on a self-hosted GitLab carries the same apiBase', async () => {
+  const vcs = fakeVcs();
+  await resolveBrainActor({ vcs, gitGet: () => null, gitSet: () => {}, transport: { apiBase: 'https://git.corp.example/api/v4' } });
+  assert.equal(vcs.seenArr[0].apiBase, 'https://git.corp.example/api/v4');
+});
+
+test('#1164 cold-2: a GitLab username with . or _ is a handle; shell and git-config metacharacters still are not', async () => {
+  for (const name of ['jane.doe', 'jane_doe']) {
+    const git = gitDouble();
+    const r = await resolveBrainActor({ vcs: fakeVcs({ whoamiName: name }), gitGet: git.get, gitSet: git.set });
+    assert.equal(r.status, 'set', name);
+    assert.equal(r.actor, `@${name}`);
+  }
+  for (const name of ['a b', 'a;rm', 'a$(x)', 'a`x`', '.hidden', '_x', 'a/b', "a'b", 'a\nb']) {
+    const r = await resolveBrainActor({ vcs: fakeVcs({ whoamiName: name }), gitGet: () => null, gitSet: () => assert.fail(`must not write ${name}`) });
+    assert.equal(r.status, 'pending', name);
+  }
+});
+
+test('#1163 cold-3: an unreadable remote lists a hand command for EVERY desired label', async () => {
+  const r = await ensureLabels({ config: {}, provider: 'github', project: 'a/b', vcs: fakeVcs({ listThrows: 'x' }), env: {} });
+  for (const { name } of desiredLabels({ config: {}, provider: 'github' })) {
+    assert.ok(r.pending.next.includes(`gh label create "${name}"`), name);
+  }
 });

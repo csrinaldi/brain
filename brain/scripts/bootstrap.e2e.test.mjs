@@ -246,7 +246,7 @@ test('#1163 #1164 e2e: an unreachable VCS is two pending steps with their exact 
   writeFileSync(join(repo, 'brain.config.json'), JSON.stringify({ vcs: { provider: 'github' }, project: { gitHost: 'github.com', slug: 'acme/widget' } }));
   const r = bootstrap(repo, root);
   assert.equal(r.code, 0, `optional steps must not fail env:init:\n${r.out.slice(-1500)}`);
-  assert.match(r.out, /governance labels \(next: npm run brain:env:init[^)]*gh label create "status:approved"\)/);
+  assert.match(r.out, /governance labels \(next: npm run brain:env:init[^)]*gh label create "status:approved"/);
   assert.match(r.out, /brain\.actor \(next: git config --local brain\.actor @<handle>\)/);
   assert.notEqual(spawnSync('git', ['config', '--local', '--get', 'brain.actor'], { cwd: repo, env: { PATH: shimBin(), HOME: root } }).status, 0, 'nothing was written');
 });
@@ -285,4 +285,14 @@ test('#1163 e2e: from a linked worktree the label step reads the DATA root (main
   const log = readFileSync(gh.env.GH_LOG, 'utf8');
   assert.match(log, /repos\/acme\/widget\/labels/, 'the main tree owns brain.config.json');
   assert.doesNotMatch(log, /other\/wrong/, 'the worktree copy must not pick the project');
+});
+
+test('#1163 cold-4: an unparseable brain.config.json is reported ONCE, as itself — not again as a defect of the setup steps', () => {
+  const { root, repo } = fixture('labels-badconfig');
+  useBackend(repo, 'plainfiles');
+  writeFileSync(join(repo, 'brain.config.json'), '{ not json');
+  const r = bootstrap(repo, root);
+  assert.equal(r.code, 1, r.out.slice(-1500));
+  assert.match(r.out, /brain\.config\.json cannot be parsed/);
+  assert.doesNotMatch(r.out, /env-init-setup (labels|actor) failed/);
 });
