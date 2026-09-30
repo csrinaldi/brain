@@ -173,7 +173,7 @@ const EXPORT_KW = 'ex' + 'port';
 // `migrate-v1` still calls it. `retiredBy` below names that ruling, not a
 // pending deletion.
 const ALLOWLIST = [
-  { file: 'brain/scripts/memory/cli.mjs', line: 756, retiredBy: 'kept — R3 (#955)' }, // #1165 moved it to 756 (the resolver block replaced the env read above); #1119 shifted this line again by adding a comment above the ship op's prLookupFailed/prLookupFailedAfterPush key-selection ternary, earlier in the same block
+  { file: 'brain/scripts/memory/cli.mjs', line: 774, retiredBy: 'kept — R3 (#955)' }, // #1165 moved it to 774 (the resolver block replaced the env read above); #1119 shifted this line again by adding a comment above the ship op's prLookupFailed/prLookupFailedAfterPush key-selection ternary, earlier in the same block
   { file: 'brain/scripts/memory/lib/migrate-v1.test.mjs', line: 13, retiredBy: 'kept — R3 (#955)' },
 ];
 

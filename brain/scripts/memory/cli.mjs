@@ -77,6 +77,23 @@ const RESOLVED = resolveMemoryBackend({
   configFile: process.env.BRAIN_MEMORY_CONFIG_FILE ?? null,
 });
 
+let shadowReported = false;
+/** A losing declaration is reported, not dropped (#1165 S3) — on stderr, and BEFORE any refusal, so an invalid winner still shows what it overrode. Idempotent. */
+async function reportShadowed() {
+  if (shadowReported) return;
+  shadowReported = true;
+  for (const sh of RESOLVED.shadowed) {
+    console.error(
+      `memory/cli: ${await t("memory.backend.shadowed", {
+        winner: RESOLVED.source === "shell" ? "the process env" : RESOLVED.source === "file" ? ".env" : "brain.config.json",
+        backend: RESOLVED.backend ?? RESOLVED.invalidValue ?? "",
+        loser: sh.source === "file" ? ".env" : "brain.config.json",
+        other: sh.value,
+      })}`,
+    );
+  }
+}
+
 /**
  * The refusal for an op that needs a backend when none is (validly) declared.
  * Named fix, exit 1 — never a guess. Ops that never consult a backend
@@ -86,6 +103,7 @@ const RESOLVED = resolveMemoryBackend({
  * record-first and degrades to plainfiles with a deferred-hydration notice.
  */
 async function requireDeclaredBackend() {
+  await reportShadowed();
   if (RESOLVED.status === "declared") return RESOLVED.backend;
   const key = RESOLVED.status === "invalid" ? "memory.backend.invalid" : "memory.backend.undeclared";
   console.error(
@@ -944,17 +962,7 @@ if (op === "save" && RESOLVED.status !== "declared") {
 } else {
   MEMORY_BACKEND = await requireDeclaredBackend();
 }
-// A losing declaration is reported, not dropped (#1165 S3) — on stderr, like every notice here.
-for (const sh of RESOLVED.shadowed) {
-  console.error(
-    `memory/cli: ${await t("memory.backend.shadowed", {
-      winner: RESOLVED.source === "shell" ? "the process env" : RESOLVED.source === "file" ? ".env" : "brain.config.json",
-      backend: RESOLVED.backend ?? "",
-      loser: sh.source === "file" ? ".env" : "brain.config.json",
-      other: sh.value,
-    })}`,
-  );
-}
+await reportShadowed();
 const selection = selectBackend({
   requested: MEMORY_BACKEND,
   // Always stated now (#1165): an undeclared selector was refused above, so the

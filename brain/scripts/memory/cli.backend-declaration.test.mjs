@@ -213,3 +213,10 @@ test('#1165 S3 every backend-consulting op says when one declaration overrides a
   const dotenvOverConfig = run(dir, ['search', MARKER]);
   assert.match(dotenvOverConfig.stderr, /\.env \(engram\) overrides brain\.config\.json \(plainfiles\)/);
 });
+
+test('#1165 S3 (cold-1) an INVALID winning declaration still prints what it overrode, before refusing', () => {
+  const dir = freshClone({ memory: { backend: 'engram' } });
+  const r = run(dir, ['pull'], { MEMORY_BACKEND: 'bogus' });
+  assert.equal(r.status, 4);
+  assert.match(r.stderr, /process env \(bogus\) overrides brain\.config\.json \(engram\)/);
+});
