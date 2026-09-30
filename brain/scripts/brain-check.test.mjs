@@ -122,3 +122,64 @@ test('brain-check: no budget supplied falls back to the pre-tier 400-line defaul
   assert.equal(result.exitCode, 1, 'expected the legacy 400-line default to still apply when no budget is passed');
   assert.ok(result.failures.some(f => f.check === 'diffSize'));
 });
+
+// ── #1187: tier semantics, and "not applicable" ──────────────────────────────────────
+
+test('#1187 (d): a fresh consumer at `lite` with no memory records — memoryPresence does not block, as in CI', async () => {
+  const { runCheck } = await import('./brain-check.mjs');
+  const result = await runCheck(makeCtx({ observations: [], config: { governance: { tier: 'lite' } } }));
+  assert.equal(result.exitCode, 0, `lite detects, it does not block. Failures: ${JSON.stringify(result.failures)}`);
+  assert.match(result.summary, /\[PASS\] memoryPresence — ::warning::memory-gate.*\(tier: lite\)/,
+    'the tier that softened it must be named, never a silent pass');
+});
+
+test('#1187 (d): the same evidence at `standard` still blocks', async () => {
+  const { runCheck } = await import('./brain-check.mjs');
+  const result = await runCheck(makeCtx({ observations: [], config: { governance: { tier: 'standard' } } }));
+  assert.equal(result.exitCode, 1);
+});
+
+test('#1187 (c): npm test that is not applicable is stated, never run, never a failure', async () => {
+  const { runCheck } = await import('./brain-check.mjs');
+  const result = await runCheck(makeCtx({
+    npmTestApplicability: { applicable: false, reason: 'no "test" script in package.json — not applicable' },
+    npmTestFn: async () => { throw new Error('npm test must not run when it is not applicable'); },
+  }));
+  assert.equal(result.exitCode, 0, JSON.stringify(result.failures));
+  assert.match(result.summary, /\[N\/A\] npmTest — no "test" script in package\.json — not applicable/);
+});
+
+// ── #1186: the slug the local issue-link check hands the port ───────────────────────
+
+test('#1186 (a): issue-link asks the port about the configured slug, never `undefined`', async () => {
+  const { runCheck } = await import('./brain-check.mjs');
+  const asked = [];
+  const fakePort = { issueView: async ({ project, number }) => { asked.push({ project, number }); return { labels: ['status:approved'] }; } };
+  const { fetchIssue: _omit, ...ctx } = makeCtx({
+    config: { project: { slug: 'acme/widgets' }, vcs: { provider: 'github' } },
+    getVcs: async () => fakePort,
+  });
+  const result = await runCheck(ctx);
+  assert.deepEqual(asked, [{ project: 'acme/widgets', number: 42 }]);
+  assert.ok(!result.failures.some(f => f.check === 'issueLink') && !result.unverified.some(f => f.check === 'issueLink'),
+    `issueLink must resolve: ${result.summary}`);
+});
+
+// ── local-checks parity: every step of the CI job, not just two of four ─────────────
+
+test('#1186 local-checks: a failing brain:nav blocks locally, as the CI step does', async () => {
+  const { runCheck } = await import('./brain-check.mjs');
+  const result = await runCheck(makeCtx({ navCheckFn: async () => ({ ok: false, output: 'broken link' }) }));
+  assert.equal(result.exitCode, 1);
+  assert.ok(result.failures.some(f => f.check === 'navCheck'), JSON.stringify(result.failures));
+});
+
+test('#1186 local-checks: index lag is a warning, never a failure — same as the CI step', async () => {
+  const { runCheck } = await import('./brain-check.mjs');
+  const result = await runCheck(makeCtx({
+    // The script ALWAYS exits 0 (index-lag.mjs header); even a non-zero exit must not block.
+    indexLagFn: async () => ({ ok: false, output: 'WARNING: index lags records (1 indexed, 2 rebuilt)' }),
+  }));
+  assert.equal(result.exitCode, 0, JSON.stringify(result.failures));
+  assert.match(result.summary, /\[PASS\] indexLag — ::warning::.*index lags records/);
+});

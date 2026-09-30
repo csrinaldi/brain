@@ -24,13 +24,17 @@ import { adrPresence } from './governance/checks/adr-presence.mjs';
 // it was strictly more permissive than the gate it exists to predict. Two of the six
 // checks greenlit PRs CI then rejected. Importing the evaluator is the only version of
 // this fix that cannot drift again, because there is nothing left to keep in sync.
-import { runCheck as runGovernanceCheck } from './governance/run-check.mjs';
+import { runCheckWithPolicy as runGovernanceCheck } from './governance/run-check.mjs';
 import { readRecordObservations } from './memory/lib/store.mjs';
 // Tier resolution (issue #358 Q5, REQ-TIER-9): brain:check is a local
 // golden-path verb, not a labeled-PR gate — it has no size:exception surface —
 // but its diff-size BUDGET must still come from the single tiered source, not
 // a second hardcoded 400 default (diffSize()'s own module-level fallback).
 import { resolveTier, tierParams } from './vcs/governance-tiers.mjs';
+// What the local gates need to know before a PR exists — the slug, the default branch and
+// whether `npm test` applies — resolved the way the rest of the product resolves them
+// (#1186, #1187). One module, so brain:ship reads the same answers.
+import { resolveProjectSlug, resolveDefaultBranch, npmTestApplicability } from './lib/local-gate-context.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -58,40 +62,27 @@ function loadFullConfig(cwd) {
   }
 }
 
-function getBase(cwd) {
-  try {
-    execSync('git rev-parse origin/main', { encoding: 'utf8', cwd, stdio: 'pipe' });
-    return git('merge-base HEAD origin/main', cwd) || 'HEAD';
-  } catch {
-    return 'HEAD';
-  }
-}
-
 /**
- * The remote's default branch, read from git rather than assumed (#340).
- *
- * `null` when it cannot be resolved, and the caller must NOT substitute `'main'`:
- * `requiresClosingKeyword` fails closed on a null, and that is the correct answer.
- * Hardcoding a fallback here would be the second implementation of a rule the gate
- * already owns — and it would be wrong on any repo whose default branch is not `main`.
+ * The commit the diff is measured from: the merge-base with the REMOTE's default branch.
+ * `origin/main` is tried last, and only as a diff base — never as a policy answer: on a
+ * remote whose default is not `main` the old hardcode measured against a branch that did
+ * not exist and fell through to an empty diff, which `diffSize` reads as a pass (#1186).
  */
-function getDefaultBranch(cwd, env = process.env) {
-  // `DEFAULT_BRANCH` first, and it is the SAME env var `ci-context.mjs` reads on the
-  // GitHub side — one name across both surfaces rather than a local-only spelling.
-  if (env.DEFAULT_BRANCH) return env.DEFAULT_BRANCH;
-  // Then git's own record of the remote's default. Not set in a fresh clone, which is
-  // why the remedy is printed rather than a fallback invented: `init.defaultBranch`
-  // describes branches git CREATES, not this remote's, and reading it here would answer
-  // confidently with a value that has nothing to do with the repo.
-  const ref = git('symbolic-ref --short refs/remotes/origin/HEAD', cwd);
-  return ref ? ref.replace(/^origin\//, '') : null;
+function getBase(cwd, defaultBranch) {
+  for (const ref of [defaultBranch && `origin/${defaultBranch}`, 'origin/main']) {
+    if (!ref) continue;
+    try {
+      execSync(`git rev-parse ${ref}`, { encoding: 'utf8', cwd, stdio: 'pipe' });
+      return git(`merge-base HEAD ${ref}`, cwd) || 'HEAD';
+    } catch { /* surfaced: try the next candidate; 'HEAD' (an empty diff) is the last resort below */ }
+  }
+  return 'HEAD';
 }
 
-/** What an operator can actually do about an UNVERIFIED check (#340). */
+/** What an operator can actually do about an UNVERIFIED check (#340). The reason is the check's own (#1186). */
 const REMEDY = {
-  issueLink:
-    'set the remote default (`git remote set-head origin -a`) or export DEFAULT_BRANCH; '
-    + 'a network failure on the approved-label lookup also lands here',
+  issueLink: (reason) =>
+    `${reason ?? 'evidence unavailable'} — check the network; export DEFAULT_BRANCH if the remote's default branch cannot be resolved`,
 };
 
 /**
@@ -107,9 +98,43 @@ const REMEDY = {
  * `BASE_BRANCH` overrides it, matching the env var the CI job already reads, so a slice
  * PR author asks for the laxer rule explicitly instead of receiving it by accident.
  */
-function getTargetBranch(cwd, env = process.env) {
-  return env.BASE_BRANCH || getDefaultBranch(cwd);
+function getTargetBranch(cwd, env = process.env, defaultBranch = resolveDefaultBranch({ cwd, env })) {
+  return env.BASE_BRANCH || defaultBranch;
 }
+
+/**
+ * The CI gate each local check front-runs (#1187). The maintainer rule is that a local
+ * verdict is neither stricter nor looser than CI's for the same inputs, so every local
+ * check must name the gate it anticipates; `null` would mean "no CI counterpart" and the
+ * output would say so. Pinned against `GOVERNANCE_JOBS` in `local-ci-parity.test.mjs`.
+ */
+export const CI_COUNTERPART = Object.freeze({
+  diffSize: 'diff-size',
+  adrPresence: 'decision-gate',
+  issueLink: 'issue-link',
+  memoryPresence: 'memory-gate',
+  npmTest: 'local-checks', // the `npm test` step, which CI runs only in the brain source repo
+  repoCheck: 'local-checks', // the `brain:repo:check` step
+  navCheck: 'local-checks', // the `brain:nav` step
+  indexLag: 'local-checks', // the `memory/index-lag.mjs` step — warning-only in CI, so here too
+});
+
+/**
+ * Every CI `run:` command brain:check executes (or, for the governance jobs, evaluates through
+ * the same predicate). `local-ci-parity.test.mjs` derives the run steps of each mapped job from
+ * `.github/workflows/governance.yml` and requires each to be listed here: a step added to a CI
+ * job fails that test until brain:check runs it too (#1186, PR #1192 review).
+ */
+export const CI_STEPS_COVERED = Object.freeze([
+  'node brain/scripts/governance/run-check.mjs issue-link',
+  'node brain/scripts/governance/run-check.mjs diff-size',
+  'node brain/scripts/governance/run-check.mjs memory-gate',
+  'node brain/scripts/governance/run-check.mjs decision-gate',
+  'npm run brain:repo:check',
+  'npm run brain:nav',
+  'node brain/scripts/memory/index-lag.mjs',
+  'npm test',
+]);
 
 function spawnCommand(cmd, args, cwd) {
   const r = spawnSync(cmd, args, { encoding: 'utf8', cwd });
@@ -162,15 +187,41 @@ export async function runCheck({
   // CI run would. Tests inject a hermetic fake so this stays a pure unit
   // test with no real git/network call.
   readDefaultBranchRecords,
+  // #1186: the repo's own config, so the slug the port is asked about and the tier the
+  // gates resolve come from `brain.config.json` — the same source CI's `readConfig` reads.
+  // `{}` (tier `standard`, no slug) is the hermetic default for unit tests.
+  config = {},
+  // Injected in tests; the CLI leaves it to the origin remote.
+  identity,
+  getVcs,
+  // #1187: `{ applicable: false, reason }` makes `npm test` "not applicable" — stated in
+  // the output, never run, never a failure. See lib/local-gate-context.mjs.
+  npmTestApplicability: npmApplicability = { applicable: true },
   npmTestFn,
   repoCheckFn,
+  // The other two steps of CI's `local-checks`. Default to a pass so hermetic unit tests that
+  // do not exercise them stay pure; the CLI always injects the real scripts.
+  navCheckFn = async () => ({ ok: true }),
+  indexLagFn = async () => ({ ok: true }),
 }) {
   // The context the CI evaluator reads. ONE object feeding both checks, because
   // `memory-gate` resolves the issue number from the same body `issue-link` does — two
   // contexts would be two chances to disagree about which issue this change is about.
-  const govCtx = { body: prBody, targetBranch, defaultBranch };
+  //
+  // `repo` is the slug the port's `issueView` takes as `project`. It was never set, so the
+  // default `fetchIssue` asked for `repos/undefined/issues/N` on every fresh consumer (#1186).
+  const govCtx = {
+    body: prBody,
+    targetBranch,
+    defaultBranch,
+    provider: config?.vcs?.provider,
+    repo: resolveProjectSlug({ config, ...(identity ? { identity } : {}) }),
+  };
   const govDeps = {
     ctx: govCtx,
+    // The config the TIER and the approved-label name come from — the dep CI reads too.
+    readConfig: () => config,
+    ...(getVcs ? { getVcs } : {}),
     ...(fetchIssue ? { fetchIssue } : {}),
     ...(readDefaultBranchRecords ? { readDefaultBranchRecords } : {}),
   };
@@ -195,13 +246,33 @@ export async function runCheck({
     },
   ];
 
-  // Run async checks
-  const [npmResult, repoResult] = await Promise.all([npmTestFn(), repoCheckFn()]);
-  if (!npmResult.ok) checks.push({ check: 'npmTest', result: { pass: false, reason: npmResult.output?.split('\n').slice(-3).join(' ') || 'npm test failed' } });
+  // Run async checks. `npm test` runs only where CI runs it (#1187): an inapplicable one
+  // is REPORTED as not applicable — never silently omitted, never a failure.
+  const npmApplicable = npmApplicability.applicable !== false;
+  const [npmResult, repoResult, navResult, lagResult] = await Promise.all([
+    npmApplicable ? npmTestFn() : Promise.resolve(null),
+    repoCheckFn(),
+    navCheckFn(),
+    indexLagFn(),
+  ]);
+  if (npmResult === null) {
+    checks.push({ check: 'npmTest', result: { pass: true, notApplicable: true, reason: npmApplicability.reason } });
+  } else if (!npmResult.ok) {
+    checks.push({ check: 'npmTest', result: { pass: false, reason: npmResult.output?.split('\n').slice(-3).join(' ') || 'npm test failed' } });
+  } else {
+    checks.push({ check: 'npmTest', result: { pass: true } });
+  }
   if (!repoResult.ok) checks.push({ check: 'repoCheck', result: { pass: false, reason: repoResult.output?.split('\n').slice(-3).join(' ') || 'repo:check failed' } });
-  // Ensure passing async checks are represented
-  if (npmResult.ok) checks.push({ check: 'npmTest', result: { pass: true } });
-  if (repoResult.ok) checks.push({ check: 'repoCheck', result: { pass: true } });
+  else checks.push({ check: 'repoCheck', result: { pass: true } });
+  if (!navResult.ok) checks.push({ check: 'navCheck', result: { pass: false, reason: navResult.output?.split('\n').slice(-3).join(' ') || 'brain:nav failed' } });
+  else checks.push({ check: 'navCheck', result: { pass: true } });
+  // index-lag never blocks in CI (the script always exits 0 and only warns), so it never blocks
+  // here either: whatever it printed becomes a `::warning::`, and the check passes.
+  const lagText = (lagResult.output ?? '').trim();
+  checks.push({
+    check: 'indexLag',
+    result: { pass: true, ...(lagText ? { reason: `::warning::${lagText.split('\n').join(' ')}` } : {}) },
+  });
 
   // THREE outcomes, not two (#340). A check whose evidence could not be gathered —
   // no network for the approved-label lookup, an unresolvable default branch — is
@@ -221,9 +292,10 @@ export async function runCheck({
     .filter(c => !c.result.pass && !c.result.uncomputable)
     .map(c => ({ check: c.check, reason: c.result.reason }));
 
-  const state = (r) => (r.pass ? 'PASS' : r.uncomputable ? 'UNVERIFIED' : 'FAIL');
+  const state = (r) => (r.notApplicable ? 'N/A' : r.pass ? 'PASS' : r.uncomputable ? 'UNVERIFIED' : 'FAIL');
   const lines = checks.map(c =>
     `  [${state(c.result)}] ${c.check}${c.result.reason ? ` — ${c.result.reason}` : ''}`
+    + (CI_COUNTERPART[c.check] === null ? ' (local only — no CI counterpart)' : '')
   );
 
   const summary = lines.join('\n');
@@ -234,14 +306,16 @@ export async function runCheck({
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const cwd = process.cwd();
-  const base = getBase(cwd);
+  const config = loadFullConfig(cwd);
+  // Resolved ONCE and fed to both the diff base and the policy, so they cannot disagree.
+  const defaultBranch = resolveDefaultBranch({ cwd });
+  const base = getBase(cwd, defaultBranch);
   const numstat = git(`diff --numstat ${base} HEAD`, cwd);
   const changedFiles = git(`diff --name-only ${base} HEAD`, cwd).split('\n').filter(Boolean);
   const addedFiles = git(`diff --diff-filter=A --name-only ${base} HEAD`, cwd).split('\n').filter(Boolean);
   // Use the last commit body as the PR body proxy for issueLink check.
   const prBody = git('log -1 --format=%B HEAD', cwd);
   const ignoreList = loadIgnoreList(cwd);
-  const config = loadFullConfig(cwd);
   const budget = tierParams(resolveTier(config)).diffBudget;
 
   const observations = readRecordObservations({ recordsDir: join(cwd, '.memory', 'records') });
@@ -254,10 +328,14 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     ignoreList,
     observations,
     budget,
-    defaultBranch: getDefaultBranch(cwd),
-    targetBranch: getTargetBranch(cwd),
+    config,
+    defaultBranch,
+    targetBranch: getTargetBranch(cwd, process.env, defaultBranch),
+    npmTestApplicability: npmTestApplicability({ cwd }),
     npmTestFn: () => spawnCommand('npm', ['test'], cwd),
     repoCheckFn: () => spawnCommand('node', ['brain/scripts/check-refs.mjs'], cwd),
+    navCheckFn: () => spawnCommand('node', ['brain/scripts/check-brain-nav.mjs'], cwd),
+    indexLagFn: () => spawnCommand('node', ['brain/scripts/memory/index-lag.mjs'], cwd),
   });
 
   console.log('\nbrain:check results:\n');
@@ -272,7 +350,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     // difference between "I checked and it is fine" and "I could not check".
     console.log(`${result.unverified.length} check(s) could NOT be verified locally — CI will still evaluate them:`);
     for (const u of result.unverified) {
-      console.log(`  · ${u.check}${REMEDY[u.check] ? ` — ${REMEDY[u.check]}` : ''}`);
+      console.log(`  · ${u.check}${REMEDY[u.check] ? ` — ${REMEDY[u.check](u.reason)}` : ''}`);
     }
     console.log('\nEverything else passed.');
   } else {

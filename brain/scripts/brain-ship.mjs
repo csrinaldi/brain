@@ -32,6 +32,7 @@ import { fileURLToPath } from 'node:url';
 import { parseIssueBranch } from './lib/branch-grammar.mjs';
 import { deriveBranchType, findTypeLabel } from './lib/branch-type.mjs';
 import { labelPreflight } from './vcs/label-preflight.mjs';
+import { resolveDefaultBranch } from './lib/local-gate-context.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -258,7 +259,9 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     project,
     provider,
     branchName: branch,
-    base: config?.project?.defaultBranch ?? 'main',
+    // The PR's base is the remote's default branch, resolved the way brain:check resolves
+    // it (#1186) — `'main'` is only the last resort, for a remote that cannot be asked.
+    base: config?.project?.defaultBranch ?? resolveDefaultBranch({ cwd }) ?? 'main',
     template,
     checkFn: async () => {
       const r = spawnSync('npm', ['run', 'brain:check'], { encoding: 'utf8', cwd, stdio: 'inherit' });

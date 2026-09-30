@@ -843,6 +843,28 @@ export async function runCheck(checkName, deps = {}) {
 }
 
 /**
+ * The verdict CI ACTS ON: `runCheck`'s evaluation routed through the tier policy
+ * (`mapDetectionToWarning`, #603). `main()` exits on this, and the local gates
+ * (`brain:check`, #1187) call it too — so a check the tier demotes to detection is
+ * demoted in both places from ONE composition, not from a second copy of "run, then
+ * look up the tier". Before this, brain:check evaluated `runCheck` bare and was stricter
+ * than CI for every `lite` consumer, which is every fresh one.
+ *
+ * `deps.readConfig` decides the tier (the same dep `runCheck` reads the approved label
+ * and ignore list through), so a caller that injects a config gets one tier everywhere.
+ *
+ * @param {string} checkName
+ * @param {object} [deps]
+ * @returns {Promise<{ pass: boolean, reason?: string, uncomputable?: boolean, path?: string, pathDetail?: string }>}
+ */
+export async function runCheckWithPolicy(checkName, deps = {}) {
+  const result = await runCheck(checkName, deps);
+  const readConfig = deps.readConfig ?? defaultReadConfig;
+  const tier = resolveTier(readConfig());
+  return mapDetectionToWarning(result, tier, checkName);
+}
+
+/**
  * Runs the named check, prints the reason (if any), and returns the process
  * exit code via the shared 0/1/2 contract (`resultToExit`, REQ-D2-6) — kept
  * separate from `process.exit()` itself so it stays testable. An infra failure
@@ -853,7 +875,6 @@ export async function runCheck(checkName, deps = {}) {
  * @returns {Promise<0|1|2>}
  */
 export async function main(checkName, deps = {}) {
-  const result = await runCheck(checkName, deps);
   // #603 — the tier decides the exit code, and it decides it HERE, once.
   // REQ-TIER-3's scenario is normative: "every job whose lite policy is
   // detection exits 0 with a warning annotation stating the tier as the
@@ -872,9 +893,7 @@ export async function main(checkName, deps = {}) {
   // The helper carries its own three guards: it softens nothing that passed,
   // nothing marked `uncomputable` (absent evidence is not a passing gate), and
   // nothing whose policy at this tier is `required`.
-  const readConfig = deps.readConfig ?? defaultReadConfig;
-  const tier = resolveTier(readConfig());
-  const policied = mapDetectionToWarning(result, tier, checkName);
+  const policied = await runCheckWithPolicy(checkName, deps);
   // #1024, REQ-L3-4: "every run MUST name the path it took... including a
   // clean pass, which named nothing before this change." Only the memory-gate
   // result ever carries a `path` field today — printed generically here (not
