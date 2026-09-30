@@ -50,6 +50,7 @@ the GitLab status enum, etc.).
 | `labelList` | `({ project, apiBase?, token?, proxyUrl?, fetchImpl? }) -> Promise<string[]>` | The remote's full declared label set, normalized to bare name strings (issue #334, vcs-label-preflight contract). Consumed by `vcs/label-preflight.mjs`'s `labelPreflight` as the pre-write conformance check before `mrCreate` — the two providers disagree on an unknown label (GitHub hard-errors, GitLab silently creates it), so this verb + its policy wrapper catch that BEFORE the write. GH: `gh api --paginate repos/{project}/labels?per_page=100` (paginate is load-bearing — a single page can silently drop labels on a >30-label repo). GL: manual page-by-page fetch (`projects/{enc}/labels?per_page=100&page=N`) over `gitlabApiFetch`, stopping once a page comes back short — `gitlabApiFetch` returns only the JSON body (no `Link` header to follow). MAY throw like its sibling normalized READs; `labelPreflight` is the total/never-throws layer, not this verb. |
 | `labelCreate` | `({ project, name, color?, description?, apiBase?, token?, proxyUrl?, fetchImpl? }) -> Promise<{ ok: true, created: boolean }\|{ ok: false, error }>` | Creates a label DEFINITION in the remote's label set (issue #1163); the write half of `labelList`. It applies the label to nothing, so it cannot hand anyone an approval — that stays `labelAdd`'s deny-set. `created: false` with `ok: true` means the label already existed (GH: 422 `already_exists`; GL: 409), which is what makes `env:init`'s label step idempotent. GH: `POST repos/{project}/labels`, colour without `#`. GL: `POST projects/{enc}/labels`, colour `#`-prefixed. Never throws. |
 | `workflowRunSucceeded` | `({ project?, workflow, branch }) -> Promise<{ state: 'succeeded'\|'none'\|'unknown'\|'unsupported', detail }>` | Has the named workflow ever completed successfully on `branch` (issue #1162)? The evidence that tells a never-created post-merge audit cursor (bootstrap) from a deleted one (a successful run advanced it once). Filtered by `branch`, the default branch: a success elsewhere does not count. `unknown` on any read failure or missing `workflow`/`branch`; never throws; never a fabricated `none`. GH: `gh run list --workflow --branch --status success --limit 1`. GL: `unsupported` (no per-workflow run history and no post-merge audit workflow); callers MUST treat `unsupported` as `unknown`. |
+| `issueClose` | `({ project, number }) -> Promise<{ ok: true }\|{ ok: false, error }>` | Closes an issue (issue #1188). The post-merge workflow closes the alarm issues a later clean run resolves. The payload is the state change and nothing else: no body, title or labels (the mirror of `issueUpdate`, which cannot carry `state`). GH: `PATCH repos/{project}/issues/{number}` with `state: closed, state_reason: completed`. GL: `PUT projects/{enc}/issues/{number}` with `state_event: close`. Never throws. |
 
 ### Normalized `commitStatus` enum
 
@@ -86,7 +87,7 @@ lookup fails CLOSED (`{ exists: false, error }`), never treated as "label exists
 
 ## How to add a provider
 
-Create `scripts/axes/vcs/adapters/<name>.mjs` exporting the 29 verbs (and the `capabilities` probe) and add `<name>` as a
+Create `scripts/axes/vcs/adapters/<name>.mjs` exporting the 30 verbs (and the `capabilities` probe) and add `<name>` as a
 valid value of `vcs.provider`. The callers are not touched.
 
 ## Current implementation
@@ -109,3 +110,4 @@ behavior of the scripts (parity — a revert leaves the GitLab flow intact).
 | `issueUpdate` | implemented (issue #533) | implemented (issue #533) |
 | `issueRelations` | implemented (issue #533, `dependencies/*`) | implemented (issue #533, `issues/:iid/links`) |
 | `workflowRunSucceeded` | implemented (issue #1162) | `unsupported` (issue #1162) — no per-workflow run history; callers treat it as `unknown` |
+| `issueClose` | implemented (issue #1188) | implemented (issue #1188) |

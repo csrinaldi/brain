@@ -6,6 +6,130 @@ registry (ADR-0030, superseding ADR-0006's git tags); consumers upgrade with
 changes** before upgrading — additive `brain.config.json` migrations apply
 automatically, but renames need manual action.
 
+## v1.10.1 — a fresh consumer's first PR and first merge need no human
+
+**Manual step: read before upgrading.** Nothing in your tree has to move, no `brain.config.json`
+migration applies, and no new key is added. But six things a consumer's automation observes
+change, and one of them is a managed file you may have edited (`governance-postmerge.yml`: see
+the last row). The 1.10.0 exit run (#1185) found that the first PR and the first real merge of a
+fresh consumer still needed a human; this release makes the local checks and the post-merge
+audit agree with the CI gates they already claimed to mirror. Each item below was checked
+against the code on `main`, not against the PR description.
+
+| Where | 1.10.0 | 1.10.1 |
+|---|---|---|
+| `npm run brain:check` | Ran the four governance checks, `npm test` and `brain:repo:check`. | Also runs `brain:nav` (a failure exits 1) and `memory/index-lag.mjs` (warning-only: its output is printed as `::warning::` and the step does not fail `brain:check`). Runs `npm test` only where GitHub's CI does, see below. The output gains `navCheck`, `indexLag` and `[N/A] npmTest` lines (#1186, #1187). |
+| `npm test` inside `brain:check` | Always ran, so a consumer's `npm init` placeholder `test` script failed the first PR. | Runs only when the `.brain-source` marker exists (the brain source repo) **and** `package.json` has a non-empty `test` script. Otherwise it prints `[N/A] npmTest` with the reason and is never a failure. A consumer's own `npm test` no longer gates `brain:check`, as it does not gate GitHub's `local-checks`. The GitLab fragment still runs `npm test` unconditionally (`brain/scripts/ci/gitlab-governance.yml`), so on GitLab a local pass can still be a CI failure there (#1194) (#1187). |
+| `memoryPresence` in `brain:check` | Evaluated raw: at `lite`, a repository with no session summary **failed** locally while CI passed. | Follows the tier, like CI: a failing result at a tier where the memory gate is detection (`lite`) prints `[PASS]` with a `::warning::` reason. At `standard` and `regulated` it still fails. A check whose evidence cannot be read (`uncomputable`) is never softened (#1187). |
+| The post-merge audit's memory check (`brain:audit`, `brain:metrics`, the post-merge workflow) | Repo-wide and tier-blind: passed when **any** `session_summary` existed anywhere in `.memory/records/`. | The memory gate's own predicate (issue-scoped, tier-mapped). At `standard` and `regulated`, a merge whose linked issue has no scoped record can now fail the audit where any session summary used to pass it. A repository with **no `.jsonl` file under `.memory/records/`** abstains: its merges pass with `[memory: no history yet — abstained]` (#1188). |
+| Post-merge alarm issues | Never closed by brain. | Closed by the workflow when a later run clears the condition (below). |
+| `.github/workflows/governance-postmerge.yml` | As shipped in 1.10.0. | Two new steps. It is a REFUSE-managed file: `brain:upgrade` does **not** replace a copy you edited, and names `--force-managed .github/workflows/governance-postmerge.yml` (#1188). |
+
+### `brain:check` and `brain:ship` work on a fresh consumer's first PR (#1186, #1187)
+
+`brain:check` never set the project slug, so `issue-link` asked the port for
+`repos/undefined/issues/N`, and it read the default branch only from `origin/HEAD`, which a
+clone that never ran `git remote set-head` does not have. Both now come from the sources the
+rest of the product uses (`lib/local-gate-context.mjs`). `brain:ship` uses the same
+`resolveDefaultBranch` for its PR base, but reads `project.defaultBranch` from `brain.config.json`
+first, which `brain:check` does not (two sources, tracked in #1194):
+
+- **Project slug:** `project.slug` in `brain.config.json`, else the origin remote. Never a
+  placeholder.
+- **Default branch:** `DEFAULT_BRANCH` (the variable CI reads), else `origin/HEAD` if git has
+  it, else the remote's own `HEAD` (`git ls-remote --symref origin HEAD`). The last step only
+  reads: it does not write `origin/HEAD`, so **no `git remote set-head` is needed**. If none
+  answers (offline), `issueLink` is reported `UNVERIFIED` with the reason, `brain:check` names
+  the `DEFAULT_BRANCH` override and still exits 0 with "could NOT be verified" instead of
+  "Ready to brain:ship". The closing-keyword rule never assumes `main`; two last-resort
+  fallbacks remain, named below (the diff base and `brain:ship`'s PR base).
+- **Diff base:** the merge-base with `origin/<default branch>`, falling back to `origin/main`.
+  The 1.10.0 code measured only against `origin/main`, which on a remote whose default is not
+  `main` produced an empty diff that `diff-size` reads as a pass.
+- **`brain:ship`'s PR base:** `project.defaultBranch` from `brain.config.json` if set, else the
+  resolved default branch, else `main`. On 1.10.0 it was `project.defaultBranch` or `main`, so a
+  consumer whose remote default is `master` and who never set that key opened its PR against
+  `main`. `brain:ship` now runs `brain:check` first, as before, and opens the PR only if it
+  exits 0.
+
+The `issue-link` and `memory-gate` checks in `brain:check` call the same composition CI's
+`run-check.mjs` exits through (`runCheckWithPolicy`), so the tier mapping is one piece of code.
+The memory gate's predicate itself moved, unchanged, into `checks/memory-gate.mjs` (below).
+`diff-size` and `decision-gate` stay on the pure functions, as before: locally `diff-size`
+cannot honour a `size:exception` label, because no label exists before the PR does, so it is
+the stricter side. A parity test compares the local `issue-link` and `memory-gate` verdicts
+with CI's real exit code at each tier, and another derives the steps of the CI `local-checks` job from `governance.yml` and fails if a
+step is not in `brain:check`'s covered list.
+
+### The post-merge audit and the PR gate agree (#1188)
+
+On 1.10.0 a fresh consumer's first real merge passed `memory-gate` at PR time and then failed
+post-merge as `governance:audit-unrevertible`, because the audit asked a different question
+(any record, any tier). Both now call one function, `checks/memory-gate.mjs`.
+
+- **Scope and tier:** the audit reads the issue from the merge's closing keyword, looks for a
+  record scoped to it in the tree it audits, and applies the tier mapping: at `lite` a
+  violation is a pass carrying a warning, as at PR time. A merge whose body carries no closing
+  keyword falls back to the repo-wide question ("does any session summary exist"), as the gate does.
+- **Abstention:** only when `.memory/records/` holds no `.jsonl` file at all (a missing
+  directory counts). From the first record on, the full predicate applies, tier included. A
+  directory holding only unreadable record files is not "no history": the full predicate runs
+  on it. At PR time the rule is the same as before (`standard` still fails a PR with no scoped
+  record); only the post-merge audit abstains.
+- **Known residual:** a `skip:memory-gate` label honoured at `standard` is not replayed by the
+  audit, which has no label-event evidence, so that merge can still surface post-merge as a
+  memory failure.
+
+### Post-merge alarms close themselves (#1188)
+
+The alarm for the demo's first failure stayed open after the audit went green. Two new
+workflow steps call `alarm.mjs resolve`, which finds the open issue carrying each label, posts a
+comment linking the passing run, and closes it (new port verb `issueClose`, below):
+
+| Step runs when | Closes the open alarm for |
+|---|---|
+| the audit exits 0 **and** the cursor advance succeeded | `governance:cursor-missing`, `governance:cursor-unknown`, `governance:audit-unrevertible`, `governance:revert-blocked`, `governance:audit-uncomputable`, `governance:postmerge-unreported` |
+| the archive sweep succeeded | `governance:archive-sweep-failed` |
+
+A still-failing run closes nothing. It closes the first open issue per label. A comment or
+close that cannot happen is printed as `[WARN]` and never turns the run red. No new
+permission: closing uses the `issues: write` the workflow already holds to file alarms. Alarms
+filed before you upgrade close on the next run that meets the condition in the table, **if** the
+workflow you run is the new one (see the REFUSE-managed note above). This is GitHub-only: the
+GitLab governance fragment ships no post-merge workflow.
+
+### New port verb `issueClose` (#1188)
+
+`issueClose({ project, number })` closes an issue and carries the state change only, with no
+body, title or labels: `PATCH repos/{project}/issues/{number}` with `state: closed,
+state_reason: completed` on GitHub, `PUT projects/{enc}/issues/{number}` with `state_event:
+close` on GitLab. It never throws. Both shipped adapters export it. Its only caller is
+`alarm.mjs resolve`, run by the post-merge workflow; a custom adapter that lacks it makes that
+close a `[WARN]`, not a failure. Its `vcs-contract.md` row is promoted with this cut (#1196).
+
+### What ships
+
+| PR | Change |
+|---|---|
+| #1191 | The 1.10.0 phase-1 exit run: evidence, report and findings, all under `openspec/changes/issue-1185-phase-1-exit-demo-1-10-0/`. No runtime change (#1185). |
+| #1192 | `brain:check` and `brain:ship` resolve the slug and default branch, follow CI's tier and `npm test` condition, and run every step of CI's `local-checks` job (#1186, #1187). |
+| #1193 | The post-merge audit uses the memory-gate's own predicate, an early merge abstains, post-merge alarms close themselves, and `issueClose` joins the port (#1188). |
+
+### Known follow-ups a consumer can hit
+
+Listed in `docs/KNOWN-LIMITATIONS.md`: #1194 (two items), the `skip:memory-gate` residual above, and the 1.10.0 follow-ups that remain open.
+
+### Why a patch and not a minor
+
+The release reporter measured 3 commits since v1.10.0: 0 `feat`, 2 `fix`, 1 internal, and no
+config migration above 1.10.0. The two fixes make the product do what its own gates already
+declared: the local checks match CI, the audit matches the PR gate, and an alarm stops
+outliving the condition it reports. `issueClose` is a new port verb, but only the post-merge
+workflow calls it. Nothing you configured has to change. Two observable edges remain and are
+listed above rather than hidden: a consumer script that relied on `brain:check` running its own
+`npm test` no longer gets that (GitHub's CI never ran it either; the GitLab fragment does, #1194), and at `standard`/`regulated` the audit
+can fail a merge that lacks a scoped record.
+
 ## v1.10.0 — a fresh consumer reaches its first PR and its first memory save without manual steps
 
 **Manual step: read before upgrading.** Nothing in your tree has to move for the upgrade

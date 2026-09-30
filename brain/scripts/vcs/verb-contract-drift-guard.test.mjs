@@ -32,9 +32,8 @@ const CONTRACT_DOC = join(REPO_ROOT, 'brain', 'core', 'methodology', 'vcs-contra
 // See file header — capabilities is a probe verb, documented separately.
 const DOCUMENTED_BUT_NOT_REQUIRED = new Set(['capabilities']);
 // Verbs implemented and in VERBS whose vcs-contract.md row is still a DRAFT: exempt only until promoted.
-// Empty since #1180 promoted the `labelCreate` (#1163) and `workflowRunSucceeded` (#1162) rows.
-// `issueClose` (#1188): row drafted in openspec/changes/issue-1188-*/brain-drafts/; remove on promotion.
-const PENDING_PROMOTION = new Set(['issueClose']);
+// Empty: #1180 promoted `labelCreate` (#1163) and `workflowRunSucceeded` (#1162); #1196 promoted `issueClose` (#1188).
+const PENDING_PROMOTION = new Set([]);
 
 // Function-typed exports that BOTH providers legitimately share but that are
 // NOT contract verbs (helpers/constants) — reserved for future entries so the

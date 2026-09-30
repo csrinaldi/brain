@@ -43,7 +43,7 @@ allowlisted bytes into the same directory
 ([ADR-0030 Amendment 1](../brain/project/decisions/adr-0030-distribution-scoped-registry-package.md)):
 
 ```bash
-npm i -D "git+https://github.com/csrinaldi/brain.git#v1.10.0"
+npm i -D "git+https://github.com/csrinaldi/brain.git#v1.10.1"
 ```
 
 ---
@@ -210,6 +210,18 @@ If a cursor was deleted after a run had succeeded, or the run history cannot be 
 run files a `governance:cursor-missing` alarm with the command to recreate it at the
 adoption commit; it never guesses. GitLab has no post-merge audit, so this is GitHub-only.
 
+**Your first real merge does not alarm, and alarms close themselves** (1.10.1). The post-merge
+audit asks the same memory question the PR gate asked (issue-scoped, and at `lite` a warning,
+not a failure). While `.memory/records/` holds no `.jsonl` file at all, the audit abstains and
+prints `[memory: no history yet — abstained]` on that merge's `[PASS]` line; from the first
+record on, the full rule applies. When a later run clears the condition behind a
+`governance:*` alarm (a clean audit, or a successful archive sweep for
+`governance:archive-sweep-failed`), the workflow comments on the open alarm issue with a link to
+the passing run and closes it. A comment or close that cannot happen is a `[WARN]` line, never
+a red run. This needs the current `governance-postmerge.yml`: it is REFUSE-managed, so if you
+edited your copy `brain:upgrade` leaves it alone and names
+`--force-managed .github/workflows/governance-postmerge.yml`.
+
 **Upgrading from 1.9.0 or earlier with a post-merge run that never succeeded?** Your first
 run audits every commit since your adoption at once, and can open several
 `auto-revert/<sha>` pull requests. The CHANGELOG entry for 1.10.0 says how to pick the
@@ -237,6 +249,28 @@ commit. In an existing repository with history, nothing changes: the hooks judge
 commit normally. If you install the server-side hook (`brain:protect-server`) before your
 first push, its `pre-receive` still asks for a ticket on that push
 ([#1169](https://github.com/csrinaldi/brain/issues/1169)).
+
+---
+
+## Your first PR: `brain:check` and `brain:ship`
+
+On a fresh repository, `brain:start` (or `brain:ticket:start`), your change, then `brain:check`
+and `brain:ship` open the first PR. Before 1.10.1 this needed an undocumented
+`git remote set-head`, a working `test` script and a session summary; none of them is needed
+now (the summary only matters above the default `lite` tier).
+
+| Question `brain:check` answers | Where the answer comes from |
+|---|---|
+| Which repository does `issue-link` ask about? | `project.slug` in `brain.config.json`, else the origin remote (`env:init` fills the slug from it) |
+| Which branch is the default? | `DEFAULT_BRANCH`, else `origin/HEAD`, else the remote's own `HEAD` (read, never written). If none answers (offline), `issueLink` is reported `UNVERIFIED` with the reason and the command prints what could not be verified instead of "Ready to brain:ship"; export `DEFAULT_BRANCH` to override |
+| Does `npm test` run? | Only in the brain source repo (the `.brain-source` marker), as in CI. Elsewhere it prints `[N/A] npmTest` and is never a failure |
+| Does a missing memory record fail? | As CI does: a warning at `lite`, a failure at `standard` and `regulated` |
+
+It also runs `brain:nav` and the warning-only `index-lag` check, so it now covers every step of
+CI's `local-checks` job (`npm test` only where CI runs it).
+`brain:ship` opens the PR against the same default branch (or `project.defaultBranch` if you
+set it) and still requires `vcs.provider` and `project.slug` in `brain.config.json`, which
+`env:init` writes.
 
 ---
 
@@ -289,8 +323,8 @@ each tier requires and how to recover if protection locks you out.
 ## Upgrading
 
 ```bash
-npm run brain:upgrade -- v1.10.0             # install a newer tag, copy managed paths
-npm run brain:upgrade -- v1.10.0 --dry-run   # preview what would change
+npm run brain:upgrade -- v1.10.1             # install a newer tag, copy managed paths
+npm run brain:upgrade -- v1.10.1 --dry-run   # preview what would change
 ```
 
 Read the [CHANGELOG](../CHANGELOG.md) first — renames and breaking changes need
