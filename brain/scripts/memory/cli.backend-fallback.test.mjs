@@ -172,8 +172,8 @@ test('#641 the stated-but-absent signpost (engram DECLARED, binary missing, `pul
   // redirected to /dev/null: a notice on stdout would be discarded exactly where it is needed.
   const w = world(t);
   const r = runCli(w, ['pull']);
-  assert.doesNotMatch(r.stderr, SUBSTITUTED, 'a declared selector is never swapped');
-  assert.match(r.stderr, /MEMORY_BACKEND=engram is set explicitly/);
+  assert.doesNotMatch(r.stderr, SUBSTITUTED, 'an explicit .env selector is never swapped');
+  assert.match(r.stderr, /\.env sets the memory backend to engram explicitly/);
   assert.match(r.stderr, /MEMORY_BACKEND=plainfiles npm run brain:memory:pull/, 'the records-only route is named');
   assert.doesNotMatch(r.stdout, /is set explicitly/);
 });
@@ -350,7 +350,7 @@ test('#641 the notices resolve from the catalogs in es, not English (#638 is abo
   // notice (the SUBSTITUTED one is unreachable from cli.mjs since #1165); `share` left FALLBACK_OPS in #874 split B (R11, B4a).
   const w = world(t);
   const rEn = runCli(w, ['pull']);
-  assert.match(rEn.stderr, /is set explicitly/);
+  assert.match(rEn.stderr, /sets the memory backend to engram explicitly/);
 
   // brain.config.json's docs.language drives the locale; assert the catalog has
   // the keys rather than shelling a second config, and that they differ.

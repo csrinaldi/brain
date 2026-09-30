@@ -27,8 +27,9 @@ Everything else that mentions `MEMORY_BACKEND` is prose, i18n text, or tests.
 **D1 — undeclared refuses; there is no default.** The contract wants it, and a default is the
 defect. Cost: an existing consumer with neither `.env` nor config now sees a refusal where it used
 to get engram silently. That consumer was one machine away from this bug; the refusal names the
-one-line fix. The #641 "unstated default falls back to plainfiles" path becomes unreachable from
-`cli.mjs` (`stated` is always true) and its tests are rewritten; `selectBackend` stays as is.
+one-line fix. The #641 substitution is re-scoped, not removed: a backend declared only in tracked config (the team's)
+whose binary is absent runs `pull` records-only and says hydration is deferred (D10); an env/.env
+selector is still never overridden.
 
 **D2 — `memory.backend` default is `''`, migration 1.9.1.** Keeps `''` = undeclared (the
 `vcs.provider` convention) and makes the path settable (`deriveKnownPaths` reads migration
@@ -63,6 +64,17 @@ per-issue worktrees (no `.env`) work. The value was assumed: `.env` is not reada
 
 **D9 — `brain:config set memory.backend` validates at write time** (`ALLOWED_VALUES` in
 `config-verb.mjs`); `brain:upgrade` prints `undeclaredUpgradeNotice` after migrating.
+
+**D10 — a config-declared backend whose binary is absent (round-2 cold-1).** `pull` is record-first
+(`git pull` + reindex need no backend), like `save`. So `stated` is true only for process env/.env; for a
+config declaration `selectBackend` substitutes plainfiles for `pull` and the notice says hydration into
+the declared backend is deferred. This keeps a fresh clone of THIS repo (which declares engram) working
+without engram. The `statedButAbsent` and `substituted` notices name the real source in both locales;
+the invalid refusal and the `saveDeferred` reason use catalog text, not resolver tokens or English literals.
+
+**D11 — an unreadable config is not "undeclared" (cold-5).** The resolver CLI exits 5 with the reason;
+`bootstrap.sh` neither prompts nor writes, and any other resolver exit is reported as the check failing.
+The `engram` value in this repo's own config is still an assumption (`.env` was unreadable): confirm it.
 
 ## Files
 

@@ -77,6 +77,9 @@ const RESOLVED = resolveMemoryBackend({
   configFile: process.env.BRAIN_MEMORY_CONFIG_FILE ?? null,
 });
 
+/** The source as an operator reads it — never the resolver's raw `shell`/`file`/`config` tokens. */
+const sourceLabel = (src) => (src === "shell" ? "the process env" : src === "file" ? ".env" : "brain.config.json");
+
 let shadowReported = false;
 /** A losing declaration is reported, not dropped (#1165 S3) — on stderr, and BEFORE any refusal, so an invalid winner still shows what it overrode. Idempotent. */
 async function reportShadowed() {
@@ -85,9 +88,9 @@ async function reportShadowed() {
   for (const sh of RESOLVED.shadowed) {
     console.error(
       `memory/cli: ${await t("memory.backend.shadowed", {
-        winner: RESOLVED.source === "shell" ? "the process env" : RESOLVED.source === "file" ? ".env" : "brain.config.json",
+        winner: sourceLabel(RESOLVED.source),
         backend: RESOLVED.backend ?? RESOLVED.invalidValue ?? "",
-        loser: sh.source === "file" ? ".env" : "brain.config.json",
+        loser: sourceLabel(sh.source),
         other: sh.value,
       })}`,
     );
@@ -110,7 +113,7 @@ async function requireDeclaredBackend() {
     `memory/cli: ${await t(key, {
       op,
       value: RESOLVED.invalidValue ?? "",
-      source: RESOLVED.source,
+      source: sourceLabel(RESOLVED.source),
       allowed: MEMORY_BACKENDS.join(" | "),
     })}`,
   );
@@ -955,9 +958,10 @@ let MEMORY_BACKEND;
 if (op === "save" && RESOLVED.status !== "declared") {
   MEMORY_BACKEND = FALLBACK_BACKEND;
   console.error(
-    `memory/cli: ${await t("memory.backend.saveDeferred", {
-      reason: RESOLVED.status === "invalid" ? `'${RESOLVED.invalidValue}' is not a backend` : "no backend is declared",
-    })}`,
+    `memory/cli: ${await t(
+      RESOLVED.status === "invalid" ? "memory.backend.saveDeferred.invalid" : "memory.backend.saveDeferred.undeclared",
+      { value: RESOLVED.invalidValue ?? "" },
+    )}`,
   );
 } else {
   MEMORY_BACKEND = await requireDeclaredBackend();
@@ -965,9 +969,11 @@ if (op === "save" && RESOLVED.status !== "declared") {
 await reportShadowed();
 const selection = selectBackend({
   requested: MEMORY_BACKEND,
-  // Always stated now (#1165): an undeclared selector was refused above, so the
-  // "unstated default may be substituted" branch of #641 is unreachable from here.
-  stated: true,
+  // STATED = an operator named it for this run or machine (process env, .env): never overridden
+  // (ADR-0004). A backend declared only in tracked config is the TEAM's, and a checkout without
+  // its binary must still get the records: `pull` is record-first, so it runs records-only and
+  // says hydration is deferred (#1165 cold-1) — consistent with `save`.
+  stated: RESOLVED.source !== "config",
   op,
   probe: MEMORY_BACKEND === DEFAULT_BACKEND ? probeBinary(ENGRAM_BIN) : { available: true },
 });
@@ -978,6 +984,7 @@ if (selection.reason === REASON.SUBSTITUTED) {
       op,
       from: selection.from,
       fallback: selection.backend,
+      source: sourceLabel(RESOLVED.source),
     })}`,
   );
 } else if (selection.reason === REASON.STATED_BUT_ABSENT) {
@@ -988,6 +995,7 @@ if (selection.reason === REASON.SUBSTITUTED) {
   console.error(
     `memory/cli: ${await t("memory.backend.statedButAbsent", {
       op,
+      source: sourceLabel(RESOLVED.source),
       backend: MEMORY_BACKEND,
       fallback: FALLBACK_BACKEND,
     })}`,

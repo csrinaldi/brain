@@ -28,6 +28,8 @@ export const MEMORY_CONFIG_PATH = 'memory.backend';
  */
 export const EXIT_UNDECLARED = 3;
 export const EXIT_INVALID = 4;
+/** CLI only: nothing declared AND the config could not be read — "could not look" is not "declared nothing". */
+export const EXIT_UNREADABLE = 5;
 
 /** The one-line fix, named wherever an undeclared backend is reported. */
 export const DECLARE_FIX = 'npm run brain:config -- set memory.backend engram|plainfiles';
@@ -99,6 +101,7 @@ export function resolveMemoryBackend({ root, env = process.env, envFile = null, 
 //     declared   → stdout `<backend> <source>`, exit 0
 //     undeclared → stdout empty,                 exit 3
 //     invalid    → stdout `! <value> <source>`,  exit 4
+//     unreadable → the config could not be read and nothing else declares one: stderr says why, exit 5
 // ---------------------------------------------------------------------------
 import { fileURLToPath } from 'node:url';
 
@@ -111,6 +114,9 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   } else if (r.status === 'invalid') {
     process.stdout.write(`! ${r.invalidValue} ${r.source}\n`);
     process.exit(EXIT_INVALID);
+  } else if (r.configError) {
+    process.stderr.write(`brain.config.json unreadable — ${r.configError}\n`);
+    process.exit(EXIT_UNREADABLE);
   } else {
     process.exit(EXIT_UNDECLARED);
   }

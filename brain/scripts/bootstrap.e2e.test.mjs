@@ -241,3 +241,11 @@ test('#1165 e2e: the write env:init performs on a TTY (`config set memory.backen
   assert.equal(res.stdout, 'plainfiles config\n');
   assert.doesNotMatch(envText(repo), /MEMORY_BACKEND/);
 });
+
+test('#1165 cold-5 e2e: an unreadable brain.config.json is reported as unreadable, never as "no memory backend is declared"', () => {
+  const { root, repo } = fixture('decl-badconfig');
+  writeFileSync(join(repo, 'brain.config.json'), '{ not json');
+  const r = bootstrap(repo, root);
+  assert.match(r.out, /could not read brain\.config\.json/, r.out.slice(-1500));
+  assert.doesNotMatch(r.out, /no memory backend is declared/);
+});

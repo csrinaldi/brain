@@ -95,3 +95,10 @@ test('#1165 S4 undeclaredUpgradeNotice: undeclared after migration -> one line n
   assert.equal(undeclaredUpgradeNotice({ root: root({ config: { memory: { backend: '' } }, env: 'MEMORY_BACKEND=engram\n' }), env: {} }), null, '.env declares one: nothing to say');
   assert.equal(undeclaredUpgradeNotice({ root: root({ config: { memory: { backend: '' } } }), env: { MEMORY_BACKEND: 'engram' } }), null);
 });
+
+// ── cold-5: "could not look" must not read as "declared nothing" ────────────────────
+test('#1165 cold-5 the resolver CLI: an unreadable config with nothing else declared exits 5 and says why on stderr, not 3', () => {
+  const r = spawnSync(process.execPath, [CLI, '--root', root({ config: '{ not json' })], { encoding: 'utf8', env: { PATH: process.env.PATH } });
+  assert.equal(r.status, 5);
+  assert.match(r.stderr, /brain\.config\.json/);
+});

@@ -170,7 +170,7 @@ test('#1165 B1 `save` on an UNDECLARED checkout is record-first: exit 0, the rec
   const r = run(dir, ['save', 'a title', 'undeclared-save-body-1165', '--type', 'decision', '--issue', '1165']);
   assert.equal(r.status, 0, `${r.stdout}${r.stderr}`);
   assert.doesNotMatch(r.stderr, REFUSAL, 'save needs no backend (memory-backend-contract rule 2)');
-  assert.match(r.stderr, /deferred until a backend is declared/, 'and it says why nothing was hydrated');
+  assert.match(r.stderr, /deferred until one is declared/, 'and it says why nothing was hydrated');
   const files = readdirSync(recordsDir);
   assert.ok(files.length > before || files.some((f) => readFileSync(join(recordsDir, f), 'utf8').includes('undeclared-save-body-1165')));
   assert.ok(files.some((f) => readFileSync(join(recordsDir, f), 'utf8').includes('undeclared-save-body-1165')), 'record content is durable');
@@ -219,4 +219,45 @@ test('#1165 S3 (cold-1) an INVALID winning declaration still prints what it over
   const r = run(dir, ['pull'], { MEMORY_BACKEND: 'bogus' });
   assert.equal(r.status, 4);
   assert.match(r.stderr, /process env \(bogus\) overrides brain\.config\.json \(engram\)/);
+});
+
+// ── round-2 review (cold-1 … cold-4) ─────────────────────────────────────────────────────────
+
+test('#1165 cold-1 a config-declared engram with NO engram binary: `pull` is record-first — it pulls the records, defers hydration, says so, exits 0', () => {
+  const dir = freshClone({ memory: { backend: 'engram' } });
+  const r = run(dir, ['pull']);
+  assert.equal(r.status, 0, `${r.stdout}${r.stderr}`);
+  assert.match(r.stderr, /ran on the records-only `plainfiles` backend instead/);
+  assert.match(r.stderr, /brain\.config\.json/, 'names where engram was declared');
+  assert.match(r.stderr, /hydration into `engram` is deferred/);
+});
+
+test('#1165 cold-1 an EXPLICIT env/.env engram with no binary is still never overridden, and the notice names its real source', () => {
+  const dir = freshClone({ memory: { backend: 'plainfiles' } });
+  const viaEnv = run(dir, ['pull'], { MEMORY_BACKEND: 'engram' });
+  assert.match(viaEnv.stderr, /the process env sets the memory backend to engram explicitly/);
+  assert.doesNotMatch(viaEnv.stderr, /records-only `plainfiles` backend instead/);
+  writeFileSync(join(dir, '.env'), 'MEMORY_BACKEND=engram\n');
+  const viaFile = run(dir, ['pull']);
+  assert.match(viaFile.stderr, /\.env sets the memory backend to engram explicitly/);
+});
+
+test('#1165 cold-3 the saveDeferred reason is catalog text, not an English literal spliced into es', async () => {
+  const { default: en } = await import('../i18n/en.mjs');
+  const { default: es } = await import('../i18n/es.mjs');
+  for (const key of ['memory.backend.saveDeferred.undeclared', 'memory.backend.saveDeferred.invalid']) {
+    assert.ok(en[key] && es[key], `${key} exists in both locales`);
+    assert.notEqual(es[key], en[key]);
+    assert.doesNotMatch(en[key], /\{reason\}/);
+  }
+  assert.equal(en['memory.backend.saveDeferred'], undefined, 'the {reason}-splicing key is gone');
+  assert.doesNotMatch(es['memory.backend.saveDeferred.undeclared'], /no backend is declared/);
+});
+
+test('#1165 cold-4 the invalid refusal names the source as an operator reads it, not the resolver token', () => {
+  const dir = freshClone({ memory: { backend: 'zzz' } });
+  assert.match(run(dir, ['pull']).stderr, /\(from brain\.config\.json\)/);
+  writeFileSync(join(dir, '.env'), 'MEMORY_BACKEND=zzz\n');
+  assert.match(run(dir, ['pull']).stderr, /\(from \.env\)/);
+  assert.match(run(dir, ['pull'], { MEMORY_BACKEND: 'zzz' }).stderr, /\(from the process env\)/);
 });

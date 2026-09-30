@@ -525,7 +525,8 @@ node "$BRAIN_SCRIPTS/harness/cli.mjs" init \
 say "$I18N_BOOTSTRAP_MEMORY_SECTION"
 MEMORY_BACKEND=""
 _mb_rc=0
-_mb_res="$(node "$BRAIN_SCRIPTS/memory/lib/backend-resolve.mjs" --root "$PWD" 2>/dev/null)" || _mb_rc=$?
+_mb_err="$(mktemp)"
+_mb_res="$(node "$BRAIN_SCRIPTS/memory/lib/backend-resolve.mjs" --root "$PWD" 2>"$_mb_err")" || _mb_rc=$?
 _mb_source=""
 case "$_mb_rc" in
   0)
@@ -537,7 +538,13 @@ case "$_mb_rc" in
     warn "$(printf "$I18N_BOOTSTRAP_MEMORY_INVALID" "${_mb_bad%% *}" "${_mb_bad#* }")"
     MISSING_OPTIONAL+=("memory backend invalid (next: npm run brain:config -- set memory.backend engram|plainfiles)")
     ;;
-  *)
+  5)
+    # brain.config.json exists but could not be read and nothing else declares a backend:
+    # "could not look" is NOT "declared nothing" — do not prompt, do not write over it.
+    warn "$(printf "$I18N_BOOTSTRAP_MEMORY_UNREADABLE" "$(head -c 300 "$_mb_err")")"
+    MISSING_OPTIONAL+=("memory backend not resolved: brain.config.json unreadable (fix or restore it, then re-run env:init)")
+    ;;
+  3)
     if [ -t 0 ]; then
       # --- BEGIN memory-backend-validate (issue #1112, cold-review should-fix 3) ---
       # Same validation shape as vcs-provider-validate (finding 2) — reused
@@ -579,7 +586,13 @@ case "$_mb_rc" in
       MISSING_OPTIONAL+=("memory backend undeclared (next: npm run brain:config -- set memory.backend engram|plainfiles, then re-run env:init)")
     fi
     ;;
+  *)
+    # Any other exit (node crashed, resolver missing) is a FAILURE of the check, not an answer.
+    warn "$(printf "$I18N_BOOTSTRAP_MEMORY_RESOLVERFAILED" "$_mb_rc")"
+    MISSING_OPTIONAL+=("memory backend not resolved: the resolver exited $_mb_rc (next: node brain/scripts/memory/lib/backend-resolve.mjs)")
+    ;;
 esac
+rm -f "$_mb_err"
 if [ -n "$MEMORY_BACKEND" ]; then
   case "$_mb_source" in
     shell) _mb_where="env" ;;
