@@ -104,14 +104,15 @@ function installBrain(dir) {
 }
 
 /** Runs the real bootstrap.sh from `cwd`. */
-function bootstrap(cwd, root) {
+function bootstrap(cwd, root, { bin, env = {} } = {}) {
   const r = spawnSync('bash', ['brain/scripts/bootstrap.sh'], {
     cwd,
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
     timeout: 120000,
     env: {
-      PATH: shimBin(),
+      PATH: bin ? `${bin}:${shimBin()}` : shimBin(),
+      ...env,
       HOME: join(root, 'home'),
       XDG_RUNTIME_DIR: join(root, 'xdg'),
       DBUS_SESSION_BUS_ADDRESS: '',
@@ -248,4 +249,116 @@ test('#1165 cold-5 e2e: an unreadable brain.config.json is reported as unreadabl
   const r = bootstrap(repo, root);
   assert.match(r.out, /could not read brain\.config\.json/, r.out.slice(-1500));
   assert.doesNotMatch(r.out, /no memory backend is declared/);
+});
+
+// ── #1163 / #1164 / #1166: labels, actor and the lane notice, through the real script ──
+// A fake `gh` (a node script, ahead of the curated PATH) answers ONLY what the port asks and
+// records every call, so no test can reach the real GitHub API.
+
+const FAKE_GH = `#!/usr/bin/env node
+const fs = require('fs');
+const a = process.argv.slice(2);
+fs.appendFileSync(process.env.GH_LOG, a.join(' ') + '\\n');
+const st = JSON.parse(fs.readFileSync(process.env.GH_STATE, 'utf8'));
+if (a[0] === 'auth') process.exit(0);
+if (a.includes('/user')) { console.log(JSON.stringify({ login: 'octo' })); process.exit(0); }
+if (a.some((x) => x.includes('/labels?'))) { console.log(JSON.stringify(st.labels.map((name) => ({ name })))); process.exit(0); }
+if (a.includes('POST') && a.some((x) => x.endsWith('/labels'))) {
+  const b = JSON.parse(fs.readFileSync(0, 'utf8'));
+  st.labels.push(b.name);
+  fs.writeFileSync(process.env.GH_STATE, JSON.stringify(st));
+  console.log('{}');
+  process.exit(0);
+}
+process.exit(1);
+`;
+
+function withFakeGh(root, repo) {
+  const bin = join(root, 'ghbin');
+  mkdirSync(bin);
+  writeFileSync(join(bin, 'gh'), FAKE_GH);
+  chmodSync(join(bin, 'gh'), 0o755);
+  const state = join(root, 'gh-state.json');
+  const log = join(root, 'gh.log');
+  writeFileSync(state, JSON.stringify({ labels: [] }));
+  writeFileSync(log, '');
+  writeFileSync(join(repo, 'brain.config.json'), JSON.stringify({ vcs: { provider: 'github' }, project: { gitHost: 'github.com', slug: 'acme/widget' } }));
+  return { bin, env: { GH_LOG: log, GH_STATE: state }, posts: () => readFileSync(log, 'utf8').split('\n').filter((l) => l.includes('POST')).length };
+}
+
+test('#1163 #1164 #1166 e2e: an authenticated VCS gets the labels created, brain.actor set locally, and the lane stated; a re-run changes nothing', () => {
+  const { root, repo } = fixture('labels');
+  useBackend(repo, 'plainfiles');
+  const gh = withFakeGh(root, repo);
+  const first = bootstrap(repo, root, gh);
+  assert.equal(first.code, 0, first.out.slice(-1500));
+  assert.match(first.out, /governance labels created:.*status:approved/);
+  assert.match(first.out, /brain\.actor: @octo/);
+  assert.equal(git(repo, 'config', '--local', '--get', 'brain.actor'), '@octo', 'written to the LOCAL git config');
+  assert.match(first.out, /memory lane: off/);
+  assert.match(first.out, /npm run brain:config -- set memory\.lane\.enabled true/);
+  const posts = gh.posts();
+  assert.ok(posts >= 8, `labels were created through the port (${posts} POSTs)`);
+  const second = bootstrap(repo, root, gh);
+  assert.equal(second.code, 0, second.out.slice(-1500));
+  assert.equal(gh.posts(), posts, 'idempotent: the second run makes no create call');
+  assert.match(second.out, /governance labels: all \d+ already exist/);
+  assert.match(second.out, /brain\.actor: @octo \(already configured/);
+});
+
+test('#1163 #1164 e2e: an unreachable VCS is two pending steps with their exact commands, exit 0 — never a crash, never a guess from user.name', () => {
+  const { root, repo } = fixture('labels-pending');
+  useBackend(repo, 'plainfiles');
+  writeFileSync(join(repo, 'brain.config.json'), JSON.stringify({ vcs: { provider: 'github' }, project: { gitHost: 'github.com', slug: 'acme/widget' } }));
+  const r = bootstrap(repo, root);
+  assert.equal(r.code, 0, `optional steps must not fail env:init:\n${r.out.slice(-1500)}`);
+  assert.match(r.out, /governance labels \(next: npm run brain:env:init[^)]*gh label create "status:approved"/);
+  assert.match(r.out, /brain\.actor \(next: git config --local brain\.actor @<handle>\)/);
+  assert.notEqual(spawnSync('git', ['config', '--local', '--get', 'brain.actor'], { cwd: repo, env: { PATH: shimBin(), HOME: root } }).status, 0, 'nothing was written');
+});
+
+test('#1163 e2e: a CRASH of the setup step is a REQUIRED failure naming the step (exit 1), never a pending entry', () => {
+  const { root, repo } = fixture('labels-crash');
+  useBackend(repo, 'plainfiles');
+  writeFileSync(join(repo, 'brain', 'scripts', 'lib', 'env-init-setup.mjs'), "throw new Error('boom');\n");
+  const r = bootstrap(repo, root);
+  assert.equal(r.code, 1, r.out.slice(-1500));
+  assert.match(r.out, /env-init-setup labels failed \(exit 1\)/);
+  assert.match(r.out, /did NOT complete successfully/);
+});
+
+test('#1163 e2e: exit 3 WITHOUT a NEXT: line is a required failure, not an empty pending entry', () => {
+  const { root, repo } = fixture('labels-nonext');
+  useBackend(repo, 'plainfiles');
+  writeFileSync(join(repo, 'brain', 'scripts', 'lib', 'env-init-setup.mjs'), 'process.exitCode = 3;\n');
+  const r = bootstrap(repo, root);
+  assert.equal(r.code, 1, r.out.slice(-1500));
+  assert.match(r.out, /pending without a next step/);
+});
+
+test('#1163 e2e: from a linked worktree the label step reads the DATA root (main tree) config, not the worktree copy', () => {
+  const { root, repo } = fixture('labels-worktree');
+  useBackend(repo, 'plainfiles');
+  const gh = withFakeGh(root, repo); // main tree config: acme/widget
+  git(repo, 'add', '-A');
+  git(repo, 'commit', '-qm', 'config');
+  const wt = join(root, 'wt');
+  git(repo, 'worktree', 'add', '-q', wt, '-b', 'feature/x');
+  installBrain(wt);
+  writeFileSync(join(wt, 'brain.config.json'), JSON.stringify({ vcs: { provider: 'github' }, project: { gitHost: 'github.com', slug: 'other/wrong' } }));
+  const r = bootstrap(wt, root, gh);
+  assert.equal(r.code, 0, r.out.slice(-1500));
+  const log = readFileSync(gh.env.GH_LOG, 'utf8');
+  assert.match(log, /repos\/acme\/widget\/labels/, 'the main tree owns brain.config.json');
+  assert.doesNotMatch(log, /other\/wrong/, 'the worktree copy must not pick the project');
+});
+
+test('#1163 cold-4: an unparseable brain.config.json is reported ONCE, as itself — not again as a defect of the setup steps', () => {
+  const { root, repo } = fixture('labels-badconfig');
+  useBackend(repo, 'plainfiles');
+  writeFileSync(join(repo, 'brain.config.json'), '{ not json');
+  const r = bootstrap(repo, root);
+  assert.equal(r.code, 1, r.out.slice(-1500));
+  assert.match(r.out, /brain\.config\.json cannot be parsed/);
+  assert.doesNotMatch(r.out, /env-init-setup (labels|actor) failed/);
 });

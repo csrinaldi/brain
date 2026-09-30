@@ -725,6 +725,19 @@ export async function commitPrs({ project, sha, apiBase, token, proxyUrl, fetchI
 }
 
 /**
+ * workflowRunSucceeded — the provider-agnostic READ verb (issue #1162). GitLab
+ * has no per-workflow-file run history equivalent, and this provider's
+ * governance fragment ships no post-merge audit job or cursor, so there is
+ * nothing to ask. It answers `unsupported` explicitly: a caller must treat that
+ * as `unknown` (an alarm), never as "none" (a bootstrap). Never throws.
+ *
+ * @returns {Promise<{ state: 'unsupported', detail: string }>}
+ */
+export async function workflowRunSucceeded() {
+  return { state: 'unsupported', detail: 'GitLab has no post-merge audit workflow or cursor; run history by workflow file is not modelled' };
+}
+
+/**
  * Posts a COMMENT-state merge request review (issue #266, REQ-266-2).
  * GitLab's notes API has no review-event concept (APPROVE/COMMENT/REQUEST
  * CHANGES) — a plain note is posted, which structurally cannot become an
@@ -960,6 +973,33 @@ export async function labelList({ project, apiBase, token, proxyUrl, fetchImpl }
     page += 1;
   }
   return names;
+}
+
+/**
+ * labelCreate — creates a label DEFINITION in the project's label set (issue
+ * #1163); see the GitHub adapter for the contract. GitLab answers a duplicate
+ * with 409, which is `{ ok: true, created: false }`. GitLab requires a
+ * `#`-prefixed colour. Never throws.
+ *
+ * @param {{ project: string, name: string, color?: string, description?: string, apiBase?: string, token?: string, proxyUrl?: string|null, fetchImpl?: Function }} params
+ * @returns {Promise<{ ok: true, created: boolean } | { ok: false, error: string }>}
+ */
+export async function labelCreate({ project, name, color, description, apiBase, token, proxyUrl, fetchImpl } = {}) {
+  try {
+    await gitlabApiFetch({
+      apiBase: apiBase ?? 'https://gitlab.com/api/v4',
+      token: glToken(token),
+      proxyUrl: proxyUrl ?? null,
+      path: `projects/${encodeURIComponent(project)}/labels`,
+      method: 'POST',
+      body: { name, color: `#${String(color ?? 'ededed').replace(/^#/, '')}`, description: description ?? '' },
+      fetchImpl,
+    });
+    return { ok: true, created: true };
+  } catch (err) {
+    if (/failed: 409 /.test(err.message)) return { ok: true, created: false };
+    return { ok: false, error: err.message };
+  }
 }
 
 /**

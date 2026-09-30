@@ -1,0 +1,12 @@
+# Tasks (#1162)
+- [x] Red tests: `bootstrapCursor` unit tests (fresh, deleted, unknown, present, root adoption, race, window includes adoption)
+- [x] Implement `bootstrapCursor` + CLI verb in `cursor.mjs`
+- [x] Red tests: window step (fresh bootstraps, deleted alarms, unreadable evidence alarms)
+- [x] Wire the window step (`advance` deliberately declares no credential: least privilege)
+- [x] Verify: npm test, brain:repo:check, brain:nav
+- [x] Rework: base = adoption; end-to-end real-audit tests (direct push and merge commit)
+- [x] Rework: VCS port verb `workflowRunSucceeded` (GitHub, GitLab unsupported) + contract tests
+- [x] Rework: `SUBCOMMAND_PORT_REACH` for cursor.mjs; `advance` keeps no credential
+- [x] Rework: lost CAS race re-reads the ref
+- [ ] Human: promote the vcs-contract row from brain-drafts and drop the guard exception
+- [x] Round 2: default branch from the remote HEAD when the trigger payload lacks it (schedule); alarm instructs the adoption commit; installed-consumer behavior pinned and stated

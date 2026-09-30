@@ -153,7 +153,7 @@ function entryPoints(script, repoRoot) {
     const nextTokenMatch = rest.match(/^\s+(\S+)/);
     const subcommand =
       nextTokenMatch && !nextTokenMatch[1].startsWith('-')
-        ? nextTokenMatch[1].replace(/^["']|["']$/g, '')
+        ? nextTokenMatch[1].replace(/^["']|["')]+$/g, '')
         : null;
     out.push({ raw: m[1], path: resolve(repoRoot, m[1].replace(/^\.\//, '')), subcommand });
   }

@@ -273,6 +273,10 @@ export default {
   'config.tier.why.standard':  'standard is for a team: a merge needs a second, non-author approval.',
   'config.tier.why.regulated': 'regulated is for audited work: the strictest evidence, and no waivers.',
   'config.tier.change':    'To change it, set governance.tier in brain.config.json to lite, standard (a team: a second, non-author approval) or regulated (audited: the strictest evidence, no waivers) — e.g. npm run brain:config -- set governance.tier standard — then re-run npm run brain:protect.',
+  'config.lane.on':        'memory lane: on — memory records ship to main on their own pull request (memory.lane.enabled in brain.config.json).',
+  'config.lane.off':       'memory lane: off — memory records stay in your clone; nothing ships them to main for you.',
+  'config.lane.why':       'The lane is off by default on every tier because it opens a separate pull request for memory records that a maintainer has to merge; turning it on is a deliberate choice.',
+  'config.lane.enable':    'To turn it on: npm run brain:config -- set memory.lane.enabled true',
 
   // ── install-tools.sh (PR3) ────────────────────────────────────────────────────
   // Pre-check (before eval — inline English default used in the script)

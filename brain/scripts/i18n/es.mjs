@@ -248,6 +248,10 @@ export default {
   'config.tier.why.standard':  'standard es para un equipo: una fusión necesita una segunda aprobación, de alguien que no sea el autor.',
   'config.tier.why.regulated': 'regulated es para trabajo auditado: la evidencia más estricta, y sin excepciones.',
   'config.tier.change':    'Para cambiarlo, establecer governance.tier en brain.config.json a lite, standard (un equipo: una segunda aprobación de alguien que no sea el autor) o regulated (auditado: la evidencia más estricta, sin excepciones) — p. ej. npm run brain:config -- set governance.tier standard — y luego volver a ejecutar npm run brain:protect.',
+  'config.lane.on':        'carril de memoria: activo — los registros de memoria llegan a main en su propio pull request (memory.lane.enabled en brain.config.json).',
+  'config.lane.off':       'carril de memoria: apagado — los registros de memoria quedan en tu clon; nada los lleva a main por vos.',
+  'config.lane.why':       'El carril está apagado por defecto en todos los tiers porque abre un pull request aparte para los registros de memoria que un mantenedor tiene que mergear; encenderlo es una decisión deliberada.',
+  'config.lane.enable':    'Para encenderlo: npm run brain:config -- set memory.lane.enabled true',
 
   // ── install-tools.sh (PR3) ────────────────────────────────────────────────────
   'tools.require.noApt': 'Este script requiere apt-get (Ubuntu/Debian). Instalá las herramientas manualmente según brain/project/methodology/developer-environment.md.',
