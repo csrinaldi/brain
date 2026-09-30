@@ -1,6 +1,6 @@
 # ADR-0024 — Three-axis decoupling: AGENT_PLATFORM · SDD_ENGINE · MEMORY_BACKEND
 
-**Status**: Accepted · **amended 25/09/2026** (Amendments 1-2 — see below)
+**Status**: Accepted · **amended 30/09/2026** (Amendments 1-3 — see below)
 **Date**: 2026-07-24 — Cristian Rinaldi (implements #305; documents the split shipped via PR #307)
 **Extends**: [ADR-0005](adr-0005-adapter-harness-sdd-harness.md) (the `SDD_HARNESS` selector) and
 [ADR-0019](adr-0019-harness-port.md) (the harness port). Does NOT supersede ADR-0019's
@@ -75,7 +75,7 @@ separated and native infrastructure-level hooks emitted per platform.
 ## Evidence
 
 - #305 (the three-axis decoupling issue), PR #307 (implementation).
-- `brain/scripts/harness/cli.mjs` — `resolvePlatform`/`resolveEngine`/`resolveMemory`.
+- `brain/scripts/harness/cli.mjs` — `resolvePlatform`/`resolveEngine` (`resolveMemory` was removed by #1165; see Amendment 3).
 - Audit: `docs/inbox/brain-v2-merge-audit.md` (§1 architecture, gate G3/G4).
 
 ## Amendment 1 — the predicted supersede did not happen (issue #323)
@@ -207,3 +207,16 @@ resolver retires (see below).
   fresh consumer on that path. It was measured on a packed-tarball consumer during #1125 and
   fixed by #1139 before this default shipped: `init` now merges through the same `mergeSettings`
   core the upgrade uses.
+
+## Amendment 3 — `resolveMemory` is gone; the memory selector has one resolver and a tracked home (issue #1165)
+
+**Signed**: 30/09/2026 — Cristian Rinaldi
+
+`resolveMemory` was exported, called by nothing (`memory/cli.mjs` re-read the env on its own), and
+read `config.memory` as a string when that key is an object. It is deleted. The memory backend now
+resolves in ONE place, `brain/scripts/memory/lib/backend-resolve.mjs`, built on the generic
+`brain/scripts/lib/axis-selector.mjs` — the shape #1114 can adopt for the other two axes.
+
+Precedence: process env `MEMORY_BACKEND`, then `.env`, then `brain.config.json` `memory.backend`
+(the team's choice, tracked, so a fresh clone sees it), then undeclared — a refusal that names the
+fix, never a default. The `MEMORY_BACKEND` selector decision of ADR-0004 is otherwise unchanged.
