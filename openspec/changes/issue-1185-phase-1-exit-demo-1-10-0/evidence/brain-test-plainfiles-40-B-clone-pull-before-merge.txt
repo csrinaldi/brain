@@ -1,0 +1,29 @@
+$ gh repo clone csrinaldi/brain-test-plainfiles plainfiles-B (BEFORE lane merge)
+Cloning into 'brain-test-plainfiles-B'...
+.
+..
+.claude
+.gemini
+.git
+.gitattributes
+.github
+.gitignore
+.gitlab
+.memory
+AGENTS.md
+brain
+brain.config.json
+package-lock.json
+package.json
+has .env? no
+$ npm install (product bootstrap: deps)
+added 1 package, and audited 2 packages in 1s
+
+found 0 vulnerabilities
+$ npm run brain:memory:pull
+
+> brain-test-plainfiles@1.0.0 brain:memory:pull
+> node ./brain/scripts/memory/cli.mjs pull
+
+Already up to date.
+exit=0

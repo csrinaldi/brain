@@ -1,0 +1,8 @@
+> node ./brain/scripts/memory/cli.mjs save SYNTHETIC-1185 R2 engram SYNTHETIC-1185 second record body (R2, supersedes R1, engram) --type decision --issue 2 --supersedes rec-e16a0c8fc0e1f1f9
+
+memory/cli: ✓ saved rec-c54e38e7c172e702 → /home/gandalf/IA/brain-test-engram/.memory/records/2026-09-rec-c54e38e7c172e702.jsonl
+exit=0
+Found 2 memories:
+[1] #21 (session_summary) — SYNTHETIC-1185 R1 engram
+[2] #22 (decision) — SYNTHETIC-1185 R2 engram
+?? .memory/

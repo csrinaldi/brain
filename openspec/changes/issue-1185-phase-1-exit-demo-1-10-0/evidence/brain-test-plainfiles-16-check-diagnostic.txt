@@ -1,0 +1,18 @@
+$ GITHUB_REPOSITORY=csrinaldi/brain-test-plainfiles npm run brain:check   (diagnostic only)
+
+> brain-test-plainfiles@1.0.0 brain:check
+> node ./brain/scripts/brain-check.mjs
+
+
+brain:check results:
+
+  [PASS] diffSize
+  [PASS] adrPresence
+  [UNVERIFIED] issueLink — issue-link: could not fetch issue #1 — failing closed (uncomputable): gh api repos/undefined/issues/1 failed (status 1): gh: Not Found (HTTP 404)
+
+  [FAIL] memoryPresence — memory-gate: no memory records scoped to issue #1 — capture a session summary (mem_session_summary) referencing this issue before closing
+  [FAIL] npmTest —  Error: no test specified 
+  [PASS] repoCheck
+
+2 check(s) failed. Fix before brain:ship.
+exit=1

@@ -1,0 +1,20 @@
+$ capturing checkout: brain:memory:pull after own lane merge (#1118)
+
+> brain-test-engram@1.0.0 brain:memory:pull
+> node ./brain/scripts/memory/cli.mjs pull
+
+From https://github.com/csrinaldi/brain-test-engram
+   b9fc0d8..c9bffc7  main       -> origin/main
+Updating b9fc0d8..c9bffc7
+Fast-forward
+ .memory/records/2026-09-rec-c54e38e7c172e702.jsonl | 1 +
+ .memory/records/2026-09-rec-e16a0c8fc0e1f1f9.jsonl | 1 +
+ 2 files changed, 2 insertions(+)
+ create mode 100644 .memory/records/2026-09-rec-c54e38e7c172e702.jsonl
+ create mode 100644 .memory/records/2026-09-rec-e16a0c8fc0e1f1f9.jsonl
+brain:memory:pull: verified .memory/records/2026-09-rec-c54e38e7c172e702.jsonl — present, tracked in HEAD as blob 5d6e42811f248ad330d7456aeb0d5166b832e45a
+brain:memory:pull: verified .memory/records/2026-09-rec-e16a0c8fc0e1f1f9.jsonl — present, tracked in HEAD as blob 9b73215003a0b02b54fd32a73b814b97e22e1ec6
+✓ import complete — 0/2 records imported into engram (records-only, D2/C4).
+exit=0
+## main...origin/main
+?? .memory/index.jsonl

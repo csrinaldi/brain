@@ -1,0 +1,11 @@
+memory/cli: ✓ saved rec-b58bc793a4fc4895 → /home/gandalf/IA/brain-test-plainfiles/.memory/records/2026-09-rec-b58bc793a4fc4895.jsonl
+$ BRAIN_VCS_TEST_MODULE=brain/scripts/memory/__fixtures__/fake-vcs-port.mjs BRAIN_VCS_TEST_SCRIPT=<mrCreate-fails> brain:memory:ship
+
+> brain-test-plainfiles@1.0.0 brain:memory:ship
+> node ./brain/scripts/memory/cli.mjs ship --invoker manual
+
+memory/cli: ✗ ship failed — {ref} diverged from origin; nothing was forced. memory.ship.diverged: refs/heads/memory/gandalf-rog-zephyrus-g15-ga503qr-ga503qr-2026-09-30 is behind origin's matching ref — refusing to force-push.
+exit=1
+--- remote branch after failure:
+0211728b74df2d91699d7941ad5b8fab6608bfcd	refs/heads/memory/gandalf-rog-zephyrus-g15-ga503qr-ga503qr-2026-09-30
+[]

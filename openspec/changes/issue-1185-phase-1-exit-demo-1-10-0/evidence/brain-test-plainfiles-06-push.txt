@@ -1,0 +1,5 @@
+✓ No prohibited references found.
+✓ Artifact structure is valid.
+To https://github.com/csrinaldi/brain-test-plainfiles.git
+ * [new branch]      main -> main
+branch 'main' set up to track 'origin/main'.
