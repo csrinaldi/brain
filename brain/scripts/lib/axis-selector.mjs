@@ -71,7 +71,11 @@ export function resolveAxisSelector({ key, configPath, allowed, config = {}, env
     source = 'config';
   }
 
+  // Every losing declaration is reported, never dropped (#1165 S3): the config value a
+  // winning env/.env layer covers, AND the `.env` value a winning shell covers — the
+  // latter is computed by resolveEnv and used to be discarded here.
   const shadowed = [];
+  if (fromEnv.shadowed && source === 'shell') shadowed.push({ source: 'file', value: fromEnv.shadowed.value });
   if (value !== null && source !== 'config' && fromConfig !== null && fromConfig !== value) {
     shadowed.push({ source: 'config', value: fromConfig });
   }

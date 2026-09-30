@@ -77,3 +77,21 @@ test('CLI (the bash reader): declared -> "<backend> <source>" exit 0; undeclared
   const viaEnv = run(root({ config: { memory: { backend: 'plainfiles' } } }), { MEMORY_BACKEND: 'engram' });
   assert.equal(viaEnv.stdout, 'engram shell\n');
 });
+
+test('#1165 S1 self-hosting: THIS repository declares its own backend in tracked config (per-issue worktrees have no .env)', () => {
+  const repo = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..');
+  const r = resolveMemoryBackend({ root: repo, env: {}, envFile: join(root({}), 'no-such-env') });
+  assert.deepEqual([r.status, r.backend, r.source], ['declared', 'engram', 'config']);
+});
+
+// ── S4: brain:upgrade names the fix when the migration leaves the backend undeclared ──
+import { undeclaredUpgradeNotice } from './backend-resolve.mjs';
+
+test('#1165 S4 undeclaredUpgradeNotice: undeclared after migration -> one line naming the fix; declared anywhere -> null', () => {
+  const none = undeclaredUpgradeNotice({ root: root({ config: { memory: { backend: '' } } }), env: {} });
+  assert.match(none, /memory\.backend/);
+  assert.match(none, /brain:config -- set memory\.backend/);
+  assert.equal(undeclaredUpgradeNotice({ root: root({ config: { memory: { backend: 'plainfiles' } } }), env: {} }), null);
+  assert.equal(undeclaredUpgradeNotice({ root: root({ config: { memory: { backend: '' } }, env: 'MEMORY_BACKEND=engram\n' }), env: {} }), null, '.env declares one: nothing to say');
+  assert.equal(undeclaredUpgradeNotice({ root: root({ config: { memory: { backend: '' } } }), env: { MEMORY_BACKEND: 'engram' } }), null);
+});

@@ -341,6 +341,7 @@ export default {
   'session.change.ambiguous':   'cambio:    ambiguo ({count}): {list}',
   'session.memory.ok':          'memoria:   engram hidratado',
   'session.memory.skip':        'memoria:   engram no disponible (omitido)',
+  'session.memory.notDeclared': "memoria:   hidratación omitida, no se intentó nada — {reason}",
   'session.memory.skip.reason': 'memoria:   engram no disponible (omitido) — {reason}',
   'session.memory.recency.stale':   'memoria:  el registro durable más nuevo tiene {days} días — nada capturado desde entonces (ver #519)',
   'session.memory.recency.unknown': 'memoria:  sin registro durable — no se puede determinar cuándo se capturó memoria por última vez',
@@ -454,6 +455,8 @@ export default {
   // ── memory/cli.mjs — qué backend corrió realmente (issue #641) ───────────────
   'memory.backend.undeclared': "no hay un backend de memoria declarado, así que `{op}` no va a adivinar uno. La elección del equipo va en la config versionada: `npm run brain:config -- set memory.backend engram` (o `plainfiles`). Override por corrida: MEMORY_BACKEND=<backend> (env o .env). O corré `npm run brain:env:init`, que pregunta una vez y lo escribe.",
   'memory.backend.invalid': "el backend de memoria '{value}' (de {source}) no es ninguno de: {allowed}. No se corrió nada. Corregilo donde está seteado: `npm run brain:config -- set memory.backend <backend>` para la config del equipo, o la línea MEMORY_BACKEND de .env.",
+  'memory.backend.saveDeferred': "{reason}, así que este registro se guardó solo en .memory/records/ — la hidratación en un backend queda diferida hasta que se declare uno (`npm run brain:config -- set memory.backend engram|plainfiles`). El registro es durable; no se perdió nada.",
+  'memory.backend.shadowed': "el backend de memoria de {winner} ({backend}) pisa a {loser} ({other}) en esta corrida.",
   'memory.backend.substituted': 'el binario `{from}` no está instalado acá, así que `{op}` corrió sobre el backend `{fallback}` (solo registros) — mismos registros, misma validación, sin backend requerido (ADR-0017). MEMORY_BACKEND no estaba seteado, así que no se pisó ninguna elección explícita; seteálo para fijar cualquiera de los dos backends.',
   'memory.backend.statedButAbsent': 'MEMORY_BACKEND={backend} está seteado explícitamente, pero el binario `{backend}` no está en PATH acá — un selector explícito nunca se pisa (ADR-0004), así que esta corrida va a fallar. La captura solo-registros no necesita backend: `MEMORY_BACKEND={fallback} npm run brain:memory:{op}`.',
   'memory.backend.probeFailed': 'no se pudo determinar si el binario `{backend}` está presente — {reason}. Eso es la VERIFICACIÓN fallando, no el binario faltando, así que no se sustituyó nada y `{op}` sigue sobre `{backend}`. Si falla, la ruta solo-registros es `MEMORY_BACKEND={fallback} npm run brain:memory:{op}`.',

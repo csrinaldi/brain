@@ -121,6 +121,9 @@ function runCli({ root, bin, envPath }, args, extraEnv = {}) {
     PATH: bin,
     BRAIN_MEMORY_TEST_ROOT: root,
     BRAIN_MEMORY_ENV_FILE: envPath,
+    // The repo's own config now declares a backend (#1165 S1): point at an absent file so
+    // the .env fixture above is the ONLY declaration, as these tests assume.
+    BRAIN_MEMORY_CONFIG_FILE: join(root, 'no-brain-config.json'),
     ...extraEnv,
   };
   return spawnSync(process.execPath, [CLI, ...args], { encoding: 'utf8', env });
@@ -158,7 +161,7 @@ test('#1165 the unstated-default substitution of #641 is RETIRED: with nothing d
   // longer be handed a backend it did not choose — in either direction.
   const w = world(t, { envFile: '' });
   const r = runCli(w, ['pull']);
-  assert.equal(r.status, 1);
+  assert.equal(r.status, 3);
   assert.doesNotMatch(r.stderr, SUBSTITUTED);
   assert.match(r.stderr, /brain:config -- set memory\.backend/);
 });

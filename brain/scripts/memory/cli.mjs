@@ -27,7 +27,7 @@ import { hostname } from "node:os";
 
 import { t } from "../i18n/t.mjs";
 import { formatDuplicateReport } from "./lib/duplicates.mjs";
-import { resolveMemoryBackend, MEMORY_BACKENDS } from "./lib/backend-resolve.mjs";
+import { resolveMemoryBackend, MEMORY_BACKENDS, EXIT_UNDECLARED, EXIT_INVALID } from "./lib/backend-resolve.mjs";
 import {
   DEFAULT_BACKEND,
   ENGRAM_BIN,
@@ -80,8 +80,10 @@ const RESOLVED = resolveMemoryBackend({
 /**
  * The refusal for an op that needs a backend when none is (validly) declared.
  * Named fix, exit 1 — never a guess. Ops that never consult a backend
- * (reindex, audit, resolve-index, split-records, collect, ship, migrate-v1,
- * save) are dispatched BEFORE this is called and stay unaffected.
+ * (reindex, audit, resolve-index, split-records, collect, ship, migrate-v1)
+ * are dispatched BEFORE this is called and stay unaffected. `save` is the
+ * exception that DOES reach the selection below but does not refuse: it is
+ * record-first and degrades to plainfiles with a deferred-hydration notice.
  */
 async function requireDeclaredBackend() {
   if (RESOLVED.status === "declared") return RESOLVED.backend;
@@ -95,7 +97,9 @@ async function requireDeclaredBackend() {
     })}`,
   );
   if (RESOLVED.configError) console.error(`memory/cli: brain.config.json unreadable — ${RESOLVED.configError}`);
-  process.exit(1);
+  // Distinct exit codes (3 undeclared, 4 invalid), never a bare 1: the automated callers
+  // (hooks, session-start) tell "nothing was tried" from a real failure by code, not text.
+  process.exit(RESOLVED.status === "invalid" ? EXIT_INVALID : EXIT_UNDECLARED);
 }
 
 // ---------------------------------------------------------------------------
@@ -925,7 +929,32 @@ const fn = VERB_TO_EXPORT[op] ?? op.replace(/-([a-z])/g, (_, c) => c.toUpperCase
 // the substitution is most likely to happen. (#633 covers those two hooks
 // swallowing stderr as well — flagged there, not worked around here.)
 // ---------------------------------------------------------------------------
-const MEMORY_BACKEND = await requireDeclaredBackend();
+// `save` is the record-first capture path (memory-backend-contract rule 2): the record is
+// durable before any backend is involved, so an undeclared/invalid selector must NOT lose
+// the capture. It writes through plainfiles (records only, nothing hydrated) and says the
+// hydration is deferred; every other op that gets here consults a backend and refuses.
+let MEMORY_BACKEND;
+if (op === "save" && RESOLVED.status !== "declared") {
+  MEMORY_BACKEND = FALLBACK_BACKEND;
+  console.error(
+    `memory/cli: ${await t("memory.backend.saveDeferred", {
+      reason: RESOLVED.status === "invalid" ? `'${RESOLVED.invalidValue}' is not a backend` : "no backend is declared",
+    })}`,
+  );
+} else {
+  MEMORY_BACKEND = await requireDeclaredBackend();
+}
+// A losing declaration is reported, not dropped (#1165 S3) — on stderr, like every notice here.
+for (const sh of RESOLVED.shadowed) {
+  console.error(
+    `memory/cli: ${await t("memory.backend.shadowed", {
+      winner: RESOLVED.source === "shell" ? "the process env" : RESOLVED.source === "file" ? ".env" : "brain.config.json",
+      backend: RESOLVED.backend ?? "",
+      loser: sh.source === "file" ? ".env" : "brain.config.json",
+      other: sh.value,
+    })}`,
+  );
+}
 const selection = selectBackend({
   requested: MEMORY_BACKEND,
   // Always stated now (#1165): an undeclared selector was refused above, so the

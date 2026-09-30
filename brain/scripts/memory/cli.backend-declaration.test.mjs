@@ -17,7 +17,7 @@
 import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync, execFileSync } from 'node:child_process';
-import { cpSync, mkdirSync, writeFileSync, readFileSync, symlinkSync } from 'node:fs';
+import { cpSync, mkdirSync, writeFileSync, readFileSync, readdirSync, symlinkSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -118,7 +118,7 @@ test('#1165 (c) nothing declared anywhere is a REFUSAL that names the fix, not e
     const dir = freshClone(config);
     for (const args of [['pull'], ['search', MARKER], ['import'], ['heal-duplicates']]) {
       const r = run(dir, args);
-      assert.equal(r.status, 1, `${args[0]} must refuse: ${r.stdout}${r.stderr}`);
+      assert.equal(r.status, 3, `${args[0]} must refuse with the undeclared exit code: ${r.stdout}${r.stderr}`);
       assert.match(r.stderr, /memory\.backend/, 'names the config key');
       assert.match(r.stderr, /brain:config -- set memory\.backend/, 'names the command that fixes it');
       assert.doesNotMatch(r.stderr, /engram binary not found|not a cli verb|substituted|records-only `plainfiles` backend instead/,
@@ -136,7 +136,7 @@ test('#1165 (c) an undeclared consumer can still do backend-free work (reindex n
 test('#1165 (c) an INVALID declaration is refused as a typo, never coerced', () => {
   const dir = freshClone({ memory: { backend: 'plainfile' } });
   const r = run(dir, ['pull']);
-  assert.equal(r.status, 1);
+  assert.equal(r.status, 4, 'invalid has its own exit code, so callers can tell it from undeclared');
   assert.match(r.stderr, /'plainfile'/);
   assert.match(r.stderr, /engram \| plainfiles/);
 });
@@ -156,4 +156,60 @@ test('#1165 the tracked config the fixture carries is not mutated by a read', ()
   const before = readFileSync(join(dir, 'brain.config.json'), 'utf8');
   run(dir, ['search', MARKER]);
   assert.equal(readFileSync(join(dir, 'brain.config.json'), 'utf8'), before);
+});
+
+// ── per-op behaviour when NOTHING is declared (cold review of #1165, B1) ──────────────────────
+
+const REFUSAL = /no memory backend is declared/;
+
+test('#1165 B1 `save` on an UNDECLARED checkout is record-first: exit 0, the record is on disk, hydration is said to be deferred', () => {
+  const dir = freshClone({});
+  git(dir, 'config', '--local', 'brain.actor', '@test');
+  const recordsDir = join(dir, '.memory', 'records');
+  const before = readdirSync(recordsDir).length;
+  const r = run(dir, ['save', 'a title', 'undeclared-save-body-1165', '--type', 'decision', '--issue', '1165']);
+  assert.equal(r.status, 0, `${r.stdout}${r.stderr}`);
+  assert.doesNotMatch(r.stderr, REFUSAL, 'save needs no backend (memory-backend-contract rule 2)');
+  assert.match(r.stderr, /deferred until a backend is declared/, 'and it says why nothing was hydrated');
+  const files = readdirSync(recordsDir);
+  assert.ok(files.length > before || files.some((f) => readFileSync(join(recordsDir, f), 'utf8').includes('undeclared-save-body-1165')));
+  assert.ok(files.some((f) => readFileSync(join(recordsDir, f), 'utf8').includes('undeclared-save-body-1165')), 'record content is durable');
+});
+
+// The complete table, one assertion per op. WORK: never consults a backend. REFUSE: does.
+const WORK = [['reindex'], ['audit'], ['resolve-index'], ['split-records'], ['collect'], ['ship', '--dry-run'], ['migrate-v1']];
+const REFUSE = [['share'], ['pull'], ['import'], ['index'], ['setup'], ['search', MARKER], ['feature-checkpoint'], ['feature-resume'], ['heal-duplicates']];
+
+for (const args of WORK) {
+  test(`#1165 undeclared: \`${args.join(' ')}\` never consults a backend, so it is NOT refused`, () => {
+    const r = run(freshClone({}), args);
+    assert.doesNotMatch(`${r.stdout}${r.stderr}`, REFUSAL);
+  });
+}
+for (const args of REFUSE) {
+  test(`#1165 undeclared: \`${args.join(' ')}\` consults a backend, so it REFUSES naming the fix`, () => {
+    const r = run(freshClone({}), args);
+    assert.equal(r.status, 3, `${r.stdout}${r.stderr}`);
+    assert.match(r.stderr, REFUSAL);
+    assert.match(r.stderr, /brain:config -- set memory\.backend/);
+  });
+}
+
+// ── S3: a losing declaration is reported, never dropped ───────────────────────────────────────
+
+test('#1165 S3 every backend-consulting op says when one declaration overrides another', () => {
+  const dir = freshClone({ memory: { backend: 'plainfiles' } });
+  writeFileSync(join(dir, '.env'), 'MEMORY_BACKEND=plainfiles\n');
+  const envOverConfig = run(dir, ['search', MARKER], { MEMORY_BACKEND: 'plainfiles' });
+  assert.equal(envOverConfig.status, 0, envOverConfig.stderr);
+  // shell (plainfiles) equals .env and config: nothing shadowed, nothing said.
+  assert.doesNotMatch(envOverConfig.stderr, /overrides/);
+
+  writeFileSync(join(dir, '.env'), 'MEMORY_BACKEND=engram\n');
+  const shellOverDotenv = run(dir, ['search', MARKER], { MEMORY_BACKEND: 'plainfiles' });
+  assert.equal(shellOverDotenv.status, 0, shellOverDotenv.stderr);
+  assert.match(shellOverDotenv.stderr, /process env \(plainfiles\) overrides \.env \(engram\)/, 'the shell-vs-.env shadow resolveEnv computes');
+
+  const dotenvOverConfig = run(dir, ['search', MARKER]);
+  assert.match(dotenvOverConfig.stderr, /\.env \(engram\) overrides brain\.config\.json \(plainfiles\)/);
 });

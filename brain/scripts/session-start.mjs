@@ -31,7 +31,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 import { currentBranch } from './lib/git-branch.mjs';
-import { tryFeatureResume } from './memory/lib/auto-resume.mjs';
+import { tryFeatureResume, EXIT_UNDECLARED, EXIT_INVALID, DECLARE_FIX } from './memory/lib/auto-resume.mjs';
 import { synthesizeContext } from './context/synthesizer.mjs';
 import { t } from './i18n/t.mjs';
 import { CHANGES_ROOT, parseChangeId } from './lib/sdd-layout.mjs';
@@ -216,7 +216,9 @@ export function renderContextBlock(model, strings) {
     // `engram.reason` still renders exactly the old generic line.
     engram.ok
       ? s.memoryOk
-      : (engram.reason ? fill(s.memorySkipReason, { reason: engram.reason }) : s.memorySkip),
+      : engram.undeclared
+        ? fill(s.memoryNotDeclared, { reason: engram.reason })
+        : (engram.reason ? fill(s.memorySkipReason, { reason: engram.reason }) : s.memorySkip),
   ];
 
   // Only when it is worth saying. A store captured today needs no line; an unknown or
@@ -290,6 +292,10 @@ export function step2HydrateEngram(cwd, deps = {}) {
     const args = ['brain/scripts/memory/cli.mjs', 'import'];
     const r = spawn(cmd, args, { cwd, encoding: 'utf8' });
     if (Boolean(r) && r.status === 0) return { ok: true };
+    // The declaration refusal (#1165) — nothing was tried, so it is NOT "engram unavailable".
+    if (r?.status === EXIT_UNDECLARED || r?.status === EXIT_INVALID) {
+      return { ok: false, undeclared: true, reason: `memory backend ${r.status === EXIT_INVALID ? 'invalid' : 'not declared'} — ${DECLARE_FIX}` };
+    }
     const stderr = typeof r?.stderr === 'string' ? r.stderr.trim() : '';
     const reason = stderr || `exited ${r?.status ?? 'unknown'}`;
     return { ok: false, reason };
@@ -476,6 +482,7 @@ const SESSION_I18N_KEYS = {
   memoryOk:         'session.memory.ok',
   memorySkip:       'session.memory.skip',
   memorySkipReason: 'session.memory.skip.reason',
+  memoryNotDeclared: 'session.memory.notDeclared',
   memoryRecencyStale:   'session.memory.recency.stale',
   memoryRecencyUnknown: 'session.memory.recency.unknown',
   ticketLabel:      'session.ticket.label',

@@ -386,6 +386,7 @@ const ALLOWLIST = [
   { file: 'brain/scripts/brain-promote.golden.test.mjs', entrypoint: 'brain/scripts/hooks/commit-msg', reason: 'no-vcs-capability' }, // #1127: masked away by the old masker (a regex literal holding a quote); runs the hook on a message file, no VCS
   { file: 'brain/scripts/hooks/pre-commit.test.mjs', entrypoint: 'brain/scripts/hooks/pre-commit', reason: 'no-vcs-capability' },
   { file: 'brain/scripts/hooks/pre-push.test.mjs', entrypoint: 'brain/scripts/hooks/pre-push', reason: 'no-vcs-capability' },
+  { file: 'brain/scripts/hooks/post-merge.undeclared.test.mjs', entrypoint: 'brain/scripts/hooks/post-merge', reason: 'no-vcs-capability' },
   { file: 'brain/scripts/hooks/hooks.stream-discipline.test.mjs', entrypoint: '<unresolved>', line: 98, reason: 'no-vcs-capability' },
   { file: 'brain/scripts/axes/platform/lib/settings-hooks.test.mjs', entrypoint: '<unresolved>', line: 93, reason: 'no-vcs-capability' },
   { file: 'brain/scripts/bootstrap.worktree.test.mjs', entrypoint: '<unresolved>', line: 64, reason: 'no-vcs-capability' },

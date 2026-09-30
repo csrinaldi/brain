@@ -22,6 +22,28 @@ export const MEMORY_ENV_KEY = 'MEMORY_BACKEND';
 export const MEMORY_CONFIG_PATH = 'memory.backend';
 
 /**
+ * Exit codes of the refusal, shared by `memory/cli.mjs` and this file's CLI so a caller
+ * (a hook, session-start, ticket-start) can tell "no backend declared" from any other
+ * failure WITHOUT matching localized text.
+ */
+export const EXIT_UNDECLARED = 3;
+export const EXIT_INVALID = 4;
+
+/** The one-line fix, named wherever an undeclared backend is reported. */
+export const DECLARE_FIX = 'npm run brain:config -- set memory.backend engram|plainfiles';
+
+/**
+ * `brain:upgrade`'s notice (#1165 S4): after the 1.9.1 migration leaves `memory.backend: ""`,
+ * and neither the process env nor `.env` declares one, say so ONCE and name the fix.
+ * Null when a backend is declared anywhere (nothing to say) or is invalid (the refusal owns it).
+ */
+export function undeclaredUpgradeNotice({ root, env = process.env }) {
+  const r = resolveMemoryBackend({ root, env });
+  if (r.status !== 'undeclared') return null;
+  return `memory.backend is not declared (brain.config.json, .env, env) — memory commands will refuse until it is. Next: ${DECLARE_FIX}`;
+}
+
+/**
  * Reads `<root>/brain.config.json` (or `configFile`). Absent is `{}`; UNREADABLE
  * is `{}` plus a reported `error` — "could not look" must not read as "declared
  * nothing" without saying so.
@@ -88,8 +110,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     process.stdout.write(`${r.backend} ${r.source}\n`);
   } else if (r.status === 'invalid') {
     process.stdout.write(`! ${r.invalidValue} ${r.source}\n`);
-    process.exit(4);
+    process.exit(EXIT_INVALID);
   } else {
-    process.exit(3);
+    process.exit(EXIT_UNDECLARED);
   }
 }

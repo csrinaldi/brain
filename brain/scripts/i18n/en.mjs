@@ -379,6 +379,7 @@ export default {
   'session.memory.ok':          'memory:   engram hydrated',
   'session.memory.skip':        'memory:   engram unavailable (skipped)',
   // #923 — the hydration failure cause, when available (see step2HydrateEngram).
+  'session.memory.notDeclared': "memory:   hydration skipped, nothing was tried — {reason}",
   'session.memory.skip.reason': 'memory:   engram unavailable (skipped) — {reason}',
   'session.memory.recency.stale':   'memory:   newest durable record is {days} days old — nothing captured since (see #519)',
   'session.memory.recency.unknown': 'memory:   no durable record found — cannot determine when memory was last captured',
@@ -496,6 +497,8 @@ export default {
   // #1165: an undeclared/invalid selector is refused with the fix named, never guessed.
   'memory.backend.undeclared': "no memory backend is declared, so `{op}` will not guess one. The team's choice belongs in tracked config: `npm run brain:config -- set memory.backend engram` (or `plainfiles`). Per-run override: MEMORY_BACKEND=<backend> (env or .env). Or run `npm run brain:env:init`, which asks once and writes it.",
   'memory.backend.invalid': "memory backend '{value}' (from {source}) is not one of: {allowed}. Nothing was run. Fix it where it is set: `npm run brain:config -- set memory.backend <backend>` for the team's config, or the MEMORY_BACKEND line in .env.",
+  'memory.backend.saveDeferred': "{reason}, so this record was saved to .memory/records/ only — hydration into a backend is deferred until a backend is declared (`npm run brain:config -- set memory.backend engram|plainfiles`). The record is durable; nothing was lost.",
+  'memory.backend.shadowed': "the memory backend from {winner} ({backend}) overrides {loser} ({other}) on this run.",
   'memory.backend.substituted': 'the `{from}` binary is not installed here, so `{op}` ran on the records-only `{fallback}` backend instead — same records, same validation, no backend required (ADR-0017). MEMORY_BACKEND was not set, so no stated choice was overridden; set it to pin either backend explicitly.',
   'memory.backend.statedButAbsent': 'MEMORY_BACKEND={backend} is set explicitly, but the `{backend}` binary is not on PATH here — a stated selector is never overridden (ADR-0004), so this run will fail. Records-only capture needs no backend: `MEMORY_BACKEND={fallback} npm run brain:memory:{op}`.',
   'memory.backend.probeFailed': 'could not determine whether the `{backend}` binary is present — {reason}. That is the CHECK failing, not the binary being absent, so nothing was substituted and `{op}` continues on `{backend}`. If it fails, the records-only route is `MEMORY_BACKEND={fallback} npm run brain:memory:{op}`.',

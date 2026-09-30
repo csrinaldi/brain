@@ -163,6 +163,7 @@ const SESSION_STRINGS = {
   memoryOk:         en['session.memory.ok'],
   memorySkip:       en['session.memory.skip'],
   memorySkipReason: en['session.memory.skip.reason'],
+  memoryNotDeclared: en['session.memory.notDeclared'],
   ticketLabel:      en['session.ticket.label'],
   ticketNone:       en['session.ticket.none'],
   memoryRecencyStale:   en['session.memory.recency.stale'],
@@ -914,4 +915,20 @@ test('#519: a model with no recency renders exactly as before — the field is a
   const output = renderContextBlock(model, SESSION_STRINGS);
   assert.ok(!output.includes('memory:   newest'), 'an absent recency must add nothing');
   assert.ok(!output.includes('cannot determine'), 'an absent recency is not an unknown recency');
+});
+
+// #1165 S2: "nothing was tried" must not be reported as "engram unavailable".
+test('#1165 step2HydrateEngram: exit 3 → {ok:false, undeclared:true} naming the cause, not an engram outage', () => {
+  const r = step2HydrateEngram('/repo', { _spawn: () => ({ status: 3, stdout: '', stderr: 'memory/cli: no memory backend is declared' }) });
+  assert.equal(r.ok, false);
+  assert.equal(r.undeclared, true);
+  assert.match(r.reason, /memory backend not declared/);
+});
+
+test('#1165 renderContextBlock: an undeclared backend renders "backend not declared" with the fix, never "engram unavailable"', async () => {
+  const strings = { ...(await resolveSessionStrings('en')) };
+  const out = renderContextBlock({ engram: { ok: false, undeclared: true, reason: 'memory backend not declared — npm run brain:config -- set memory.backend engram|plainfiles' }, change: { branch: 'b', token: null, matches: [] }, ticket: null }, strings);
+  assert.match(out, /backend not declared/);
+  assert.match(out, /brain:config -- set memory\.backend/);
+  assert.doesNotMatch(out, /engram unavailable/);
 });
