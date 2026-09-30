@@ -1,0 +1,3 @@
+# Design: phase-1 doctrine promotion (#1180)
+
+One draft, four `amend-find`/`amend-replace` pairs: (1) both rows appended after the `labelList` row (the end of the Required-verbs table, anchored on that row's tail plus the following heading); (2) the verb count; (3) `labelCreate` status row after the `labelList` status row; (4) `workflowRunSucceeded` status row after the last status row. Non-ADR target, so no Status/HOME/body acts. Verified with the real `planAmendment()`. The code half (`PENDING_PROMOTION = new Set([])`) rides in the maintainer's promote commit for this draft, because the guard fails if the rows land without it and vice versa.
