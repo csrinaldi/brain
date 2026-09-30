@@ -120,7 +120,8 @@ pending steps with the command that closes it, and `env:init` still exits 0.
   and is replaced.
 - **Memory lane.** States on every run whether the lane is on. It is off by default on
   every tier; to turn it on: `npm run brain:config -- set memory.lane.enabled true`. The
-  closing next-steps text no longer reads as if the lane were already on.
+  closing next-steps text of `env:init` no longer reads as if the lane were already on.
+  `day:start` and `ticket:start` still say "the enabled memory lane ships it" (#1177).
 
 ### `commit-msg` accepts a repository's first commit (#1161)
 
