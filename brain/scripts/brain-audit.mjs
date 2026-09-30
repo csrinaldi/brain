@@ -72,7 +72,7 @@ import { classifyLane } from './governance/checks/lane.mjs';
 // helper from returning (re-pointed at lib/merge-walk.mjs, issue #324 Phase 2).
 import {
   resolvedSkipLine, listAuditedCommits, readMergeParent, readMergeDiff, fetchPrMeta, resolveVcs, evaluateMerge,
-  resolveBaseline, makeGitIsAncestor,
+  resolveBaseline, makeGitIsAncestor, readMemoryHistory,
 } from './lib/merge-walk.mjs';
 // Tier resolution (issue #358 Q5, REQ-TIER-9): the audit path is the rung-2/
 // rung-3 enforcement surface (release.yml's pre-tag gate, governance-postmerge.yml's
@@ -291,6 +291,9 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     // observations are passed to memoryPresence for every merge. Best-effort — a
     // missing/corrupt/schema-drifted record yields fewer observations, never a crash.
     const allObservations = readRecordObservations({ recordsDir: join(cwd, '.memory', 'records') });
+    // #1188: does ANY record file exist? An unreadable-only tree is history the
+    // audit cannot read (fails), not "no history yet" (abstains).
+    const memoryHistory = readMemoryHistory(cwd);
 
     // --first-parent: audit only the INTEGRATION merges that landed on the audited
     // branch (e.g. main), NOT the nested slice merges inside a feature branch.
@@ -422,14 +425,15 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
         prReviews, prAuthor, prResolved: prNum !== null && !prMetaError,
         botAllowlist: config?.governance?.reviewActors ?? [],
         resolutionGit, windowFrom, windowTo,
-        diffBudget, honorSizeException, tier,
+        diffBudget, honorSizeException, tier, memoryHistory,
       });
 
       const prNote = formatPrSourceSuffix({ subjectRef, prNum, prSource, prMetaError });
 
       if (rec.kind === 'pass') {
         const sizeNote = rec.sizeSkipped ? ' [size:exception]' : '';
-        console.log(`[PASS] ${sha.slice(0, 7)} ${subject}${sizeNote}${prNote}`);
+        const memNote = rec.results.memoryPresence?.note ? ' [memory: no history yet — abstained]' : '';
+        console.log(`[PASS] ${sha.slice(0, 7)} ${subject}${sizeNote}${memNote}${prNote}`);
         continue;
       }
 

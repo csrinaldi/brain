@@ -61,15 +61,14 @@
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 
-import { memoryPresence } from './checks/memory-presence.mjs';
-import { memoryRetrieval } from './checks/memory-retrieval.mjs';
+import { evaluateMemoryGate, extractIssueNumber, requiresClosingKeyword } from './checks/memory-gate.mjs';
 import { adrPresence } from './checks/adr-presence.mjs';
 import { issueLink } from './checks/issue-link.mjs';
 import { diffSize } from './checks/diff-size.mjs';
 import { baseBranchRule } from './checks/base-branch.mjs';
 import { LANE_BRANCH_RE, classifyLane } from './checks/lane.mjs';
 import { SWEEP_BRANCH_RE, classifySweepDiff } from './checks/archive-sweep.mjs';
-import { CLOSING_RE, CHAIN_RE } from './checks/issue-ref-patterns.mjs';
+import { CLOSING_RE } from './checks/issue-ref-patterns.mjs';
 import { resolveApprovedLabel } from './approved-label.mjs';
 import { readRecordObservations } from '../memory/lib/store.mjs';
 import { parseGraphBlock, declaredParent } from '../status/epic-graph.mjs';
@@ -79,7 +78,6 @@ import { loadBrainConfig } from '../lib/brain-config.mjs';
 import { getVcs } from '../vcs/cli.mjs';
 import { resolveTier, tierParams, sizeExceptionRuling, SIZE_EXCEPTION_LABEL } from '../vcs/governance-tiers.mjs';
 import { mapDetectionToWarning } from './detection-policy.mjs';
-import { readDefaultBranchRecords, unionRecordsById } from './default-branch-records.mjs';
 import { decideMemoryGateOverride, SKIP_MEMORY_GATE_LABEL, toActorList } from './memory-gate-override.mjs';
 
 /**
@@ -279,59 +277,6 @@ function defaultFetchIssue(ctx, { getVcs: getVcsFn = getVcs } = {}) {
 // issue's labels to verify, so it matches the same shared regex again here.
 
 /**
- * Extracts the referenced issue number from a PR/MR body, mirroring GitHub
- * bash's OWN branch-conditional precedence (issue #231 CP-A2a review,
- * finding m2 — governance.yml:55-81) rather than a single fixed order:
- *   - Default-branch target (`closingRequired`): the default-branch policy
- *     already requires a closing keyword, so ONLY the closing pattern is
- *     consulted (mirrors governance.yml:56-64 — no Part-of fallback there).
- *   - Slice target (`!closingRequired`): Part-of is tried FIRST, then
- *     closing (mirrors governance.yml:69-76 exactly). This matters when a
- *     body carries BOTH patterns pointing at DIFFERENT issues — bash always
- *     resolves the Part-of issue on a slice target; before m2 this file
- *     always resolved the closing issue instead (a fail-OPEN divergence).
- *
- * @param {string} body
- * @param {boolean} closingRequired  From requiresClosingKeyword(ctx) — true
- *   when ctx.targetBranch === ctx.defaultBranch.
- * @returns {number|null}
- */
-function extractIssueNumber(body, closingRequired) {
-  if (typeof body !== 'string') return null;
-
-  if (closingRequired) {
-    const closing = body.match(CLOSING_RE);
-    return closing ? Number(closing[2]) : null;
-  }
-
-  const chain = body.match(CHAIN_RE);
-  if (chain) return Number(chain[1]);
-  const closing = body.match(CLOSING_RE);
-  return closing ? Number(closing[2]) : null;
-}
-
-/**
- * Default-branch-conditionality (issue #231 A2 phase 2 ADDENDUM — closes the
- * base-branch parity gap vs GitHub bash, governance.yml:45-70): the platform
- * only runs closing keywords (Closes/Fixes/Resolves) on merges to the
- * DEFAULT branch (GitHub and GitLab alike), so the gate mirrors where the
- * keyword actually has effect, not a naming convention ('main'). The pure
- * issueLink() evaluator stays base-branch-UNAWARE by design (REQ-CIC-4) — the
- * conditionality lives HERE, in the wrapper, fed by ci-context's
- * `defaultBranch` (REQ-CIC-2 delta).
- *
- * @param {{ targetBranch?: string|null, defaultBranch?: string|null }} ctx
- * @returns {boolean|null} true = closing keyword required (default-branch
- *   target); false = "Part of #N" also accepted (slice target); null =
- *   indeterminate — targetBranch or defaultBranch is uncomputable, so the
- *   conditional cannot be decided.
- */
-function requiresClosingKeyword(ctx) {
-  if (ctx.targetBranch == null || ctx.defaultBranch == null) return null;
-  return ctx.targetBranch === ctx.defaultBranch;
-}
-
-/**
  * Default `fetchPrLabelEvents` dep for the memory-gate override (D9): the
  * ONE place this file's memory-gate handler reaches the VCS port — a NAMED
  * function declaration (never an inline arrow), so the T7b static-analysis
@@ -357,110 +302,6 @@ function defaultFetchPrLabelEvents(ctx, { getVcs: getVcsFn = getVcs } = {}) {
     const { apiBase, token, proxyUrl } = gitlabApiConfig();
     return vcs.labelEvents({ project: ctx.repo, number: ctx.prNumber, kind: 'mr', apiBase, token, proxyUrl });
   };
-}
-
-/**
- * Steps 2-6 of the memory-gate case (T2.1/#1024, REQ-L3-4/REQ-CIC-3):
- * resolves the scoped/fallback verdict AFTER the override (step 1) has
- * already decided not to short-circuit. Extracted from `runMemoryGateCheck`
- * (Batch 3) so the override's refusal note (`applyOverrideNote`) can wrap
- * EVERY exit point uniformly, instead of duplicating the append at each
- * early return.
- *
- *   2. D6 — a `PR_NUMBER`-bearing but uncomputable `ctx.body`: fails closed
- *      at `standard`/`regulated`, degrades to `path=presence` at `lite`;
- *   3. the pre-existing GLOBAL memoryPresence() fallback when no issue
- *      number can be resolved at all (unchanged — see the ORIGINAL
- *      docstring this replaces: this is a deliberate choice not to
- *      fail-closed on "no issue detectable");
- *   4. D3's LAZY union — the PR tree alone first; the default-branch reader
- *      (`readDefaultBranchRecords`) runs ONLY when the PR tree alone is not
- *      already a clean HIT;
- *   5. D5 — a default-branch read failure fails closed on a miss, but never
- *      overturns an existing PR-tree HIT;
- *   6. D8 — a `regulated` PARTIAL pass carries a visible evidence-gap note.
- *
- * @param {object} ctx
- * @param {Array<object>} records
- * @param {{ readDefaultBranchRecords?: Function, cwd?: string }} deps
- * @param {'lite'|'standard'|'regulated'} tier
- * @returns {{ pass: boolean, reason?: string, path?: string, pathDetail?: string, uncomputable?: boolean }}
- */
-function evaluateMemoryGateFallback(ctx, records, deps, tier) {
-  // ── 2. D6 — PR_NUMBER set but body uncomputable ───────────────────────
-  if (ctx?.prNumber != null && typeof ctx?.body !== 'string') {
-    if (tier === 'lite') {
-      return { ...memoryPresence(records), path: 'presence', pathDetail: 'PR description uncomputable' };
-    }
-    return {
-      pass: false,
-      uncomputable: true,
-      path: 'uncomputable',
-      pathDetail: 'PR description uncomputable',
-      reason:
-        'memory-gate: PR description uncomputable (context API fetch failed) — cannot scope to ' +
-        `an issue; failing closed at the "${tier}" tier`,
-    };
-  }
-
-  // ── 3. No PR context / no issue detectable — global fallback (unchanged) ─
-  if (typeof ctx?.body !== 'string') {
-    return { ...memoryPresence(records), path: 'presence', pathDetail: 'no PR context — PR_NUMBER not provided' };
-  }
-  const closingRequired = requiresClosingKeyword(ctx) === true;
-  const issueNumber = extractIssueNumber(ctx.body, closingRequired);
-  if (issueNumber == null) {
-    return { ...memoryPresence(records), path: 'presence', pathDetail: 'no issue reference in the PR description' };
-  }
-
-  // ── 4. D3 — lazy union: the PR tree alone first ───────────────────────
-  const prOnly = memoryRetrieval(records, issueNumber);
-  const prOnlyIsCleanHit = prOnly.pass && !/partial coverage/.test(prOnly.reason ?? '');
-  if (prOnlyIsCleanHit) {
-    return { ...prOnly, path: `retrieval #${issueNumber}`, pathDetail: 'records: pr-tree' };
-  }
-
-  const fetchDefaultBranchRecords = deps.readDefaultBranchRecords ?? readDefaultBranchRecords;
-  const defaultBranchResult = fetchDefaultBranchRecords({ defaultBranch: ctx.defaultBranch, cwd: deps.cwd });
-
-  // ── 5. D5 — default-branch read failure ───────────────────────────────
-  if (defaultBranchResult.error) {
-    const pathDetail = `records: pr-tree only — default branch unreadable: ${defaultBranchResult.error}`;
-    if (prOnly.pass) {
-      return { ...prOnly, path: `retrieval #${issueNumber}`, pathDetail };
-    }
-    return {
-      pass: false,
-      uncomputable: true,
-      path: `retrieval #${issueNumber}`,
-      pathDetail,
-      reason:
-        `memory-gate: no record scoped to #${issueNumber} on the PR tree and origin/<default> is ` +
-        `unreadable (${defaultBranchResult.error}) — failing closed`,
-    };
-  }
-
-  const union = unionRecordsById(records, defaultBranchResult.records);
-  const unionResult = memoryRetrieval(union, issueNumber);
-  // Batch 3 MINOR (visibility): a full clone reads the LOCAL
-  // refs/remotes/origin/<default> without ever fetching — that read can be
-  // stale (the ref was last updated whenever this clone/worktree last
-  // fetched, which may be long before this run). Name the source explicitly
-  // so a stale local ref is never mistaken for current evidence.
-  const sourceNote = defaultBranchResult.fetched ? 'fetched' : 'local ref, not fetched';
-  let result = { ...unionResult, path: `retrieval #${issueNumber}`, pathDetail: `records: pr-tree+origin/<default> (${sourceNote})` };
-
-  // ── 6. D8 — regulated PARTIAL visibility ──────────────────────────────
-  if (tier === 'regulated' && unionResult.pass && /partial coverage/.test(unionResult.reason ?? '')) {
-    result = {
-      ...result,
-      reason:
-        `${unionResult.reason} — evidence gap: the "regulated" tier declares ` +
-        'issue-linked-session-summary; partial coverage passes until that is enforced',
-    };
-  }
-
-  return result;
 }
 
 /**
@@ -520,7 +361,7 @@ function applyOverrideNote(result, override, tier, labels) {
  * memory-gate case (T2.1/#1024, REQ-L3-4/REQ-L3-5/REQ-CIC-3): resolves the
  * `skip:memory-gate` override first (REQ-L3-5) — short-circuits BEFORE
  * scoped evaluation when honored — then delegates to
- * `evaluateMemoryGateFallback` for steps 2-6, and finally surfaces the
+ * `evaluateMemoryGate` (checks/memory-gate.mjs, shared with the post-merge audit, #1188) for steps 2-6, and finally surfaces the
  * override's decision on the result via `applyOverrideNote` (Batch 3),
  * regardless of which step produced it.
  *
@@ -563,7 +404,7 @@ async function runMemoryGateCheck(ctx, records, deps = {}) {
     };
   }
 
-  const result = evaluateMemoryGateFallback(ctx, records, deps, tier);
+  const result = evaluateMemoryGate(ctx, records, deps, tier);
   return applyOverrideNote(result, override, tier, labels);
 }
 

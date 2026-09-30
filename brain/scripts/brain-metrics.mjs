@@ -38,7 +38,7 @@ import { join } from 'node:path';
 
 import {
   listAuditedCommits, readMergeParent, readMergeDiff, fetchPrMeta, resolveVcs, evaluateMerge, resolvedSkipLine,
-  resolveBaseline, makeGitIsAncestor,
+  resolveBaseline, makeGitIsAncestor, readMemoryHistory,
 } from './lib/merge-walk.mjs';
 // Tier resolution (issue #358 Q5, REQ-TIER-9): metrics re-derives the SAME
 // verdict brain-audit computes (design D1) — it MUST resolve the same
@@ -494,7 +494,7 @@ async function evaluateOneMerge(sha, subject, ctx) {
     const evalRec = evaluateMerge(sha, {
       numstat, changedFiles, addedFiles, issueLinkBody, prLabels, ignoreList, allObservations,
       resolutionGit, windowFrom, windowTo,
-      diffBudget, honorSizeException, tier,
+      diffBudget, honorSizeException, tier, memoryHistory: readMemoryHistory(cwd),
     });
 
     // Lead time: the ISSUE this merge references (not the PR) — best-effort,

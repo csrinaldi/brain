@@ -25,6 +25,8 @@
 // crossCheckExit) stays in brain-audit.mjs — it is a judgment about how to
 // REPORT a verdict, not part of computing the verdict itself.
 
+import { readdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { getVcs } from '../vcs/cli.mjs';
 import { parsePrNumber, shouldSkipSize, selectIssueLinkBody, auditedTip } from './audit-helpers.mjs';
 import { gitOrThrow, gitTry } from '../governance/postmerge/git-seam.mjs';
@@ -32,7 +34,7 @@ import { diffSize } from '../governance/checks/diff-size.mjs';
 import { issueLink } from '../governance/checks/issue-link.mjs';
 import { adrPresence } from '../governance/checks/adr-presence.mjs';
 import { writesGoverned } from '../governance/checks/writes-governed.mjs';
-import { memoryPresence } from '../governance/checks/memory-presence.mjs';
+import { memoryGateVerdict } from '../governance/checks/memory-gate.mjs';
 // COMPOSE the frozen net-parity primitives (design §15, PR2b). NEVER import the
 // retired direction-blind pairwise `isReverterOf` — a no-import drift-guard test
 // (brain-audit.test.mjs) asserts it never reappears in this module.
@@ -52,6 +54,73 @@ export const TREE_KEYED_CHECKS = new Set(['adrPresence', 'diffSize']);
 // authorship — not on the tree, exactly like `issueLink`. So it is never exempted by the
 // reverter-skip and never emits [FAIL-SHA]. Auto-reverting on review evidence would be
 // wrong on its face: the remedy for "nobody reviewed this" is a human reviewing it.
+
+/**
+ * Does ANY record file exist under `<cwd>/.memory/records/`? One reader for
+ * brain-audit and brain-metrics so both hand `evaluateMerge` the same
+ * `memoryHistory` (#1188). A missing directory is exactly "no history yet".
+ *
+ * @param {string} cwd
+ * @returns {boolean}
+ */
+export function readMemoryHistory(cwd) {
+  try {
+    return readdirSync(join(cwd, '.memory', 'records')).some((f) => f.endsWith('.jsonl'));
+  } catch { /* swallow-ok: no .memory/records directory is exactly "no memory history yet" — the early-merge abstention */
+    return false;
+  }
+}
+
+/**
+ * The audit's memory verdict (#1188): the SAME predicate the PR-time
+ * `memory-gate` runs (`checks/memory-gate.mjs`), not a parallel copy.
+ *
+ * The audit walks merges already on the default branch, so the tree it reads
+ * (`allObservations`, HEAD's `.memory/records/`) already CONTAINS whatever the
+ * default branch holds; the gate's second source (`origin/<default>`) is empty
+ * by construction here and is stubbed rather than re-read. The body is the
+ * merge's `issueLinkBody`, and target === default, because every audited commit
+ * is an integration into the default line (the closing-keyword branch of the
+ * gate's issue extraction).
+ *
+ * EARLY MERGES (#1188 req. 2): a repository whose tree holds NO memory record at
+ * all has no history the gate's evidence could come from. A merge there is
+ * abstained on — a pass carrying a visible `note` — instead of becoming
+ * `audit-unrevertible`, which pins the cursor and summons a human over a
+ * precondition (a first record) the consumer had no way to have met yet. This is
+ * the ONLY difference from the gate, it is keyed on the evidence existing at
+ * all, and it ends at the first record: from then on the full predicate applies,
+ * tier semantics included. `memoryPresence` is never auto-revertible, so the
+ * abstention removes no revert — it removes a false alarm.
+ *
+ * `memoryHistory` says whether any record FILE exists (the caller's read of
+ * `.memory/records/`). Omitted, it is inferred from the observations; supplied,
+ * it keeps a tree of only-corrupt records from reading as "no history".
+ *
+ * @param {{ allObservations: Array, issueLinkBody: string|null, tier: string, memoryHistory?: boolean }} input
+ */
+export function auditMemoryVerdict({ allObservations, issueLinkBody, tier, memoryHistory }) {
+  const records = Array.isArray(allObservations) ? allObservations : [];
+  const hasHistory = typeof memoryHistory === 'boolean' ? memoryHistory : records.length > 0;
+  if (!hasHistory) {
+    return {
+      pass: true,
+      note: 'no memory history yet — no record exists in .memory/records/, so there is nothing to audit against; '
+        + 'the audit abstains until the first record lands (#1188)',
+    };
+  }
+  return memoryGateVerdict(
+    {
+      prNumber: null,
+      body: typeof issueLinkBody === 'string' ? issueLinkBody : '',
+      targetBranch: 'default',
+      defaultBranch: 'default',
+    },
+    records,
+    { readDefaultBranchRecords: () => ({ records: [], error: null, fetched: false }) },
+    tier,
+  );
+}
 
 /**
  * Resolve the audit baseline ref from `config.governance.auditBaseline`
@@ -558,6 +627,7 @@ export async function resolveVcs(config) {
  *   `tierParams(resolveTier(config)).honorSizeException`. `regulated` MUST
  *   pass `false` here so the audit path refuses the waiver exactly like the
  *   CI/hook path (`run-check.mjs`'s `runDiffSizeCheck`) already does.
+ * @param {boolean} [ctx.memoryHistory]  #1188: whether any `.memory/records` file exists (see `auditMemoryVerdict`).
  * @param {string} [ctx.tier]  Declared tier name, used ONLY to name the tier
  *   in the refusal message when a size:exception label is present but not
  *   honored — never consulted for policy (that is `honorSizeException`'s job).
@@ -578,7 +648,7 @@ export function evaluateMerge(sha, ctx) {
     numstat, changedFiles, addedFiles = null, issueLinkBody, prLabels, ignoreList,
     prReviews = null, prAuthor = null, prResolved = false, botAllowlist = [],
     allObservations, resolutionGit, windowFrom, windowTo,
-    diffBudget = 400, honorSizeException = true, tier,
+    diffBudget = 400, honorSizeException = true, tier, memoryHistory,
   } = ctx;
 
   const exceptionLabelPresent = shouldSkipSize(prLabels);
@@ -595,7 +665,7 @@ export function evaluateMerge(sha, ctx) {
     diffSize: diffSize(numstat, ignoreList, diffBudget),
     issueLink: issueLink(issueLinkBody),
     adrPresence: adrPresence(changedFiles, addedFiles),
-    memoryPresence: memoryPresence(allObservations),
+    memoryPresence: auditMemoryVerdict({ allObservations, issueLinkBody, tier: tier ?? 'standard', memoryHistory }),
   };
   // Abstention is ABSENCE. A check that has nothing to say about this merge is simply
   // not in the result set — the walk, the reverter-skip, the metrics parity and the

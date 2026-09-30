@@ -57,10 +57,12 @@ function mergeAddingPayload(git, dir, files, label, mergeMsg) {
 }
 
 function makeSessionSummaryRecord() {
-  return JSON.stringify({
-    id: 'rec-1', ts: '2026-07-12T12:00:00Z', actor: '@test', actorKind: 'human',
-    type: 'session_summary', project: 'brain', content: 'Test session summary',
-  }) + '\n';
+  // #1188: scoped to every issue the fixture's merges close — the audit runs the
+  // memory-gate's issue-scoped predicate now, not the repo-wide existence check.
+  return [1, 2, 9].map((issue) => JSON.stringify({
+    id: `rec-${issue}`, ts: '2026-07-12T12:00:00Z', actor: '@test', actorKind: 'human',
+    type: 'session_summary', project: 'brain', issue, content: 'Test session summary',
+  })).join('\n') + '\n';
 }
 
 const bigFile = Array.from({ length: 500 }, (_, i) => `line ${i}`).join('\n') + '\n';
