@@ -62,6 +62,10 @@ export const VERBS = [
   // (brain/core is read-only here) and is tracked as DOCUMENTED_BUT_NOT_REQUIRED
   // in the guard until promoted.
   'workflowRunSucceeded',
+  // issue #1188: closes the alarm issues a later clean post-merge run resolves. Fires the
+  // drift guard's doc-row check by design; the Required Verbs row is drafted at
+  // openspec/changes/issue-1188-*/brain-drafts/ and is tracked in PENDING_PROMOTION until promoted.
+  'issueClose',
 ];
 
 /**

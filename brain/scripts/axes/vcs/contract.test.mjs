@@ -2977,3 +2977,44 @@ test('gitlab.labelCreate (contract): 409 is { ok: true, created: false }; other 
   assert.equal(denied.ok, false);
   assert.match(denied.error, /403/);
 });
+
+// ── issueClose (issue #1188) — closes an issue, nothing else. The post-merge
+// workflow closes the alarm issues a later clean run resolves. The field set is
+// empty on purpose: no body, title or labels travel with it (`issueUpdate`'s
+// refusal to carry `state` is the mirror of this verb's refusal to carry anything
+// but it). `({ project, number }) -> { ok: true } | { ok: false, error }`. Never throws.
+
+test('github.issueClose (contract): PATCHes state=closed on the issue and nothing else', async () => {
+  let captured;
+  setSpawn((_cmd, args, opts) => { captured = { args, input: opts?.input }; return { status: 0, stdout: '{}', stderr: '' }; });
+  const r = await github.issueClose({ project: 'x/y', number: 4 });
+  assert.deepEqual(r, { ok: true });
+  assert.ok(captured.args.includes('repos/x/y/issues/4'));
+  assert.ok(captured.args.includes('PATCH'));
+  assert.deepEqual(JSON.parse(captured.input), { state: 'closed', state_reason: 'completed' });
+});
+
+test('github.issueClose (contract): a failure is { ok: false, error }, never throws', async () => {
+  setSpawn(failSpawn('gh: Resource not accessible (HTTP 403)'));
+  const r = await github.issueClose({ project: 'x/y', number: 4 });
+  assert.equal(r.ok, false);
+  assert.match(r.error, /403/);
+});
+
+test('gitlab.issueClose (contract): PUTs state_event=close on the issue and nothing else', async () => {
+  let seen;
+  const r = await gitlab.issueClose({
+    project: 'g/p', number: 4,
+    fetchImpl: async (url, o) => { seen = { url, o }; return { ok: true, json: async () => ({}) }; },
+  });
+  assert.deepEqual(r, { ok: true });
+  assert.match(seen.url, /projects\/g%2Fp\/issues\/4$/);
+  assert.equal(seen.o.method, 'PUT');
+  assert.deepEqual(JSON.parse(seen.o.body), { state_event: 'close' });
+});
+
+test('gitlab.issueClose (contract): a failure is { ok: false, error }, never throws', async () => {
+  const r = await gitlab.issueClose({ project: 'g/p', number: 4, fetchImpl: async () => ({ ok: false, status: 403 }) });
+  assert.equal(r.ok, false);
+  assert.match(r.error, /403/);
+});
