@@ -250,3 +250,22 @@ test('#1163 #1164 e2e: an unreachable VCS is two pending steps with their exact 
   assert.match(r.out, /brain\.actor \(next: git config --local brain\.actor @<handle>\)/);
   assert.notEqual(spawnSync('git', ['config', '--local', '--get', 'brain.actor'], { cwd: repo, env: { PATH: shimBin(), HOME: root } }).status, 0, 'nothing was written');
 });
+
+test('#1163 e2e: a CRASH of the setup step is a REQUIRED failure naming the step (exit 1), never a pending entry', () => {
+  const { root, repo } = fixture('labels-crash');
+  useBackend(repo, 'plainfiles');
+  writeFileSync(join(repo, 'brain', 'scripts', 'lib', 'env-init-setup.mjs'), "throw new Error('boom');\n");
+  const r = bootstrap(repo, root);
+  assert.equal(r.code, 1, r.out.slice(-1500));
+  assert.match(r.out, /env-init-setup labels failed \(exit 1\)/);
+  assert.match(r.out, /did NOT complete successfully/);
+});
+
+test('#1163 e2e: exit 3 WITHOUT a NEXT: line is a required failure, not an empty pending entry', () => {
+  const { root, repo } = fixture('labels-nonext');
+  useBackend(repo, 'plainfiles');
+  writeFileSync(join(repo, 'brain', 'scripts', 'lib', 'env-init-setup.mjs'), 'process.exitCode = 3;\n');
+  const r = bootstrap(repo, root);
+  assert.equal(r.code, 1, r.out.slice(-1500));
+  assert.match(r.out, /pending without a next step/);
+});

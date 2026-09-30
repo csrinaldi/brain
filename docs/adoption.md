@@ -164,9 +164,9 @@ known limitation of 1.9.0, not a step you skipped.
 
 | What | Why it matters | Command |
 |---|---|---|
-| Create the `status:approved` label | A new repository has no such label, so no issue can be approved and the first PR fails `issue-link`. `env:init` does not create it. | `gh label create "status:approved"` (GitLab: `glab label create --name "status::approved"`; if you renamed it, use your `governance.approvedLabel`). Also create the `type:*` labels `brain:ship` reads: `type:feature`, `type:bug`, `type:docs`, `type:refactor`, `type:chore`, `type:governance`. |
+| Create the `status:approved` label | A new repository has no such label, so no issue can be approved and the first PR fails `issue-link`. `env:init` does not create it. | `gh label create "status:approved"` (GitLab: `glab label create --name "status::approved"`; if you renamed it, use your `governance.approvedLabel`). Also create the `type:*` labels `brain:ship` reads: `type:feature`, `type:bug`, `type:docs`, `type:refactor`, `type:chore`, `type:governance` (GitLab: the scoped `type::feature`, `type::bug`, `type::docs`, `type::refactor`, `type::chore`, `type::governance`). |
 | Set your `brain.actor` | `brain:memory:save` refuses to run without a configured actor. | `git config --local brain.actor @<your-handle>` |
-| Decide on the memory lane | The lane, which ships memory records to `main` on their own pull request, is **off by default** on every tier, and `env:init` does not mention it. | To turn it on: `npm run brain:config -- set memory.lane.enabled true` |
+| Decide on the memory lane | The lane, which ships memory records to `main` on their own pull request, is **off by default** on every tier. 1.9.0's `env:init` never says so: its next-steps text reads as if the lane were on ("the enabled memory lane ships it"), which is only true after you turn it on. | To turn it on: `npm run brain:config -- set memory.lane.enabled true` |
 
 ---
 

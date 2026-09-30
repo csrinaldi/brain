@@ -97,6 +97,8 @@ test('#1163 ensureLabels: a create the remote refuses is pending too, and names 
   assert.ok(r.created.includes('status:approved'), 'the others are still created');
   assert.deepEqual(r.failed, [{ name: 'type:bug', error: 'HTTP 403' }]);
   assert.ok(r.pending, 'a refused create must not read as done');
+  const two = await ensureLabels({ config: {}, provider: 'github', project: 'a/b', vcs: fakeVcs({ createFails: { 'type:bug': 'HTTP 403', 'type:docs': 'HTTP 403' } }) });
+  assert.match(two.pending.next, /gh label create "type:bug"; gh label create "type:docs"/, 'the hand-fix covers EVERY refused label');
 });
 
 test('#1163 ensureLabels: no project slug is pending, not a guess', async () => {

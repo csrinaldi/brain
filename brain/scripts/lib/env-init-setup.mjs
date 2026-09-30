@@ -71,8 +71,9 @@ const HAND_COMMAND = {
 export async function ensureLabels({ config, provider, project, vcs }) {
   const result = { created: [], existing: [], failed: [], pending: null };
   const approved = resolveApprovedLabel(config, provider);
-  const hand = (HAND_COMMAND[provider] ?? HAND_COMMAND.github)(approved);
-  const pending = (reason) => ({ reason, next: `npm run brain:env:init once the VCS is reachable and authenticated, or by hand: ${hand}` });
+  const handFor = (names) => names.map((n) => (HAND_COMMAND[provider] ?? HAND_COMMAND.github)(n)).join('; ');
+  // `npm run brain:env:init` is the one command that creates them all; the hand commands cover what was refused.
+  const pending = (reason, names = [approved]) => ({ reason, next: `npm run brain:env:init once the VCS is reachable and authenticated, or by hand: ${handFor(names)}` });
   if (!project) {
     result.pending = pending('project.slug is empty in brain.config.json');
     return result;
@@ -91,7 +92,7 @@ export async function ensureLabels({ config, provider, project, vcs }) {
     else (r.created ? result.created : result.existing).push(label.name);
   }
   if (result.failed.length) {
-    result.pending = pending(`the remote refused ${result.failed.map((f) => f.name).join(', ')} — ${result.failed[0].error}`);
+    result.pending = pending(`the remote refused ${result.failed.map((f) => `${f.name} (${f.error})`).join(', ')}`, result.failed.map((f) => f.name));
   }
   return result;
 }
@@ -143,6 +144,8 @@ async function runLabels() {
 function report(r) {
   if (r.created.length) say(`  ✓ governance labels created: ${r.created.join(', ')}`);
   if (r.existing.length && !r.created.length && !r.pending) say(`  ✓ governance labels: all ${r.existing.length} already exist`);
+  else if (r.existing.length && r.pending) say(`  ✓ governance labels already existing: ${r.existing.join(', ')}`);
+  if (r.failed.length) say(`  ✗ governance labels refused: ${r.failed.map((f) => `${f.name} (${f.error})`).join(', ')}`);
   if (r.pending) {
     say(`  ⚠ governance labels not fully created — ${r.pending.reason}`);
     say(`NEXT: governance labels (next: ${r.pending.next})`);

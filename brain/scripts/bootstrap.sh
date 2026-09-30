@@ -473,12 +473,14 @@ fi
 # refused create, no identity) and lands in MISSING_OPTIONAL with its exact command;
 # any other non-zero exit is a defect of the step itself and is REQUIRED.
 _setup_step() {
-  local step="$1" out rc=0
+  local step="$1" out rc=0 _next
   out="$(node "$BRAIN_SCRIPTS/lib/env-init-setup.mjs" "$step" 2>&1)" || rc=$?  # rc is captured and classified below — 3 is pending, anything else is a required failure
   printf '%s\n' "$out" | sed '/^NEXT: /d'  # the NEXT: line is machine output; the final Pending summary prints it
   case "$rc" in
     0) ;;
-    3) MISSING_OPTIONAL+=("$(printf '%s\n' "$out" | sed -n 's/^NEXT: //p' | head -1)") ;;
+    3) _next="$(printf '%s\n' "$out" | sed -n 's/^NEXT: //p' | head -1)"
+       # pending is keyed on the NEXT: line: exit 3 without one would be an empty pending entry
+       if [ -n "$_next" ]; then MISSING_OPTIONAL+=("$_next"); else REQUIRED_FAILURES+=("env-init-setup $step reported pending without a next step"); fi ;;
     *) REQUIRED_FAILURES+=("env-init-setup $step failed (exit $rc)") ;;
   esac
 }
@@ -699,7 +701,7 @@ cat <<'EOT'
        (pulls memory, shows open tickets, checks for brain updates)
     3. Pick a ticket and create your branch: {type}/issue-{iid}-{slug}.
     4. Plan a feature with SDD: brain:project:feature -- --issue [ID]
-    5. Before pushing: brain:repo:check; capture durable memory with brain:memory:save --issue <id> (the enabled memory lane ships it)
+    5. Before pushing: brain:repo:check; capture durable memory with brain:memory:save --issue <id> (the memory lane, if enabled, ships it; env:init states whether it is)
 EOT
 if [ "${#MISSING_OPTIONAL[@]}" -gt 0 ]; then
   printf "  $I18N_BOOTSTRAP_DONE_PENDING\n" "${MISSING_OPTIONAL[*]}"

@@ -82,6 +82,13 @@ test('every verb documented in vcs-contract.md\'s Required Verbs table is presen
   }
 });
 
+test('every DOCUMENTED_BUT_NOT_REQUIRED entry is still ABSENT from the Required Verbs table — promoting a row must remove its exception in the same commit', () => {
+  const docVerbs = new Set(requiredVerbsFromDoc());
+  for (const verb of DOCUMENTED_BUT_NOT_REQUIRED) {
+    assert.ok(!docVerbs.has(verb), `'${verb}' is now in vcs-contract.md's Required Verbs table: remove it from DOCUMENTED_BUT_NOT_REQUIRED`);
+  }
+});
+
 test('every verb in cli.mjs VERBS is either documented in the Required Verbs table or a listed deliberate exception', () => {
   const docVerbs = new Set(requiredVerbsFromDoc());
   for (const verb of VERBS) {
