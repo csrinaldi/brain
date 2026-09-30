@@ -14,5 +14,8 @@
 # failure to measure. `-n 1` stops at the first hit; no output is the signal.
 brain_repo_has_no_commit() {
   git rev-parse --git-dir >/dev/null 2>&1 || return 1
-  [ -z "$(git rev-list -n 1 --all 2>/dev/null)" ]
+  # Only "rev-list exited 0 AND printed nothing" means no commit yet. An erroring
+  # rev-list also prints nothing, so its exit status must be read (fail-closed).
+  _brain_out=$(git rev-list -n 1 --all 2>/dev/null) || return 1
+  [ -z "$_brain_out" ]
 }

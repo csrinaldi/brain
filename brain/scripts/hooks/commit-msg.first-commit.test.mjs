@@ -102,3 +102,55 @@ test('#1161 (d) orphan branch in a repo WITH history: a commit without #N is ref
     removeTempTree(dir);
   }
 });
+
+// ── REQ-4: the exemption fails CLOSED (cold-review findings 1 and 2) ─────────
+
+/** Runs commit-msg directly (not through git) so a broken repo cannot mask the hook. */
+function runHook(hooksDir, cwd, msg, env = {}) {
+  const msgFile = join(mkdtempSync(join(tmpdir(), 'brain-1161-msg-')), 'MSG');
+  writeFileSync(msgFile, msg);
+  return spawnSync('sh', [join(hooksDir, 'commit-msg'), msgFile], {
+    cwd, encoding: 'utf8', env: { PATH: process.env.PATH, HOME: process.env.HOME ?? '/tmp', ...env },
+  });
+}
+
+test('#1161 REQ-4 outside a git repository the exemption does not apply', () => {
+  const outside = mkdtempSync(join(tmpdir(), 'brain-1161-norepo-'));
+  try {
+    const r = runHook(HOOKS_DIR, outside, 'chore: adopt brain', { GIT_CEILING_DIRECTORIES: dirname(outside) });
+    assert.notEqual(r.status, 0, `stdout:\n${r.stdout}`);
+    assert.match(`${r.stdout}${r.stderr}`, /must reference a ticket/);
+  } finally {
+    removeTempTree(outside);
+  }
+});
+
+test('#1161 REQ-4 a git error while listing commits does not grant the exemption', () => {
+  const { dir } = makeRepo();
+  try {
+    seed(dir, 'a.md', 'chore: history (#1)');
+    // Corrupt the ref: rev-parse --git-dir still succeeds, rev-list --all errors with empty stdout.
+    writeFileSync(join(dir, '.git', 'refs', 'heads', 'main'), 'not-a-sha\n');
+    const probe = spawnSync('git', ['-C', dir, 'rev-list', '-n', '1', '--all'], { encoding: 'utf8' });
+    assert.notEqual(probe.status, 0, 'fixture precondition: rev-list must error');
+    assert.equal(probe.stdout.trim(), '', 'fixture precondition: rev-list prints nothing');
+    const r = runHook(join(dir, '.hooks-under-test'), dir, 'chore: no ticket here');
+    assert.notEqual(r.status, 0, `exemption granted on a git error; stdout:\n${r.stdout}`);
+    assert.match(`${r.stdout}${r.stderr}`, /must reference a ticket/);
+  } finally {
+    removeTempTree(dir);
+  }
+});
+
+test('#1161 REQ-4 a missing helper means no exemption, even in a repo with no commit', () => {
+  const { dir } = makeRepo();
+  try {
+    const lone = join(dir, '.lone-hook');
+    cpSync(join(HOOKS_DIR, 'commit-msg'), join(lone, 'commit-msg'));
+    const r = runHook(lone, dir, 'chore: adopt brain');
+    assert.notEqual(r.status, 0, `stdout:\n${r.stdout}`);
+    assert.match(`${r.stdout}${r.stderr}`, /must reference a ticket/);
+  } finally {
+    removeTempTree(dir);
+  }
+});
