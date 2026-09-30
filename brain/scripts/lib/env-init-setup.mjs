@@ -21,7 +21,7 @@ import { resolveApprovedLabel } from '../governance/approved-label.mjs';
 import { TYPE_LABELS } from '../vcs/contributor-scaffold.mjs';
 import { HANDLE_RE } from '../memory/lib/format.mjs';
 import { gitConfigGet } from './git-config.mjs';
-import { loadBrainConfig } from './brain-config.mjs';
+import { loadBrainConfigOrThrow } from './brain-config.mjs';
 
 /**
  * The `governance:*` labels `.github/workflows/governance-postmerge.yml` files
@@ -128,13 +128,15 @@ export async function resolveBrainActor({ vcs, gitGet, gitSet }) {
 
 const say = (s) => console.log(s);
 
+// Config is DATA owned by the root bootstrap.sh `cd`s to (REPO_ROOT, the main tree), while this
+// code may run from a linked worktree (#1102): read it from cwd, never from this module's location.
 async function runLabels() {
-  const config = loadBrainConfig();
+  const config = loadBrainConfigOrThrow(process.cwd());
   const provider = process.env.VCS_PROVIDER || config?.vcs?.provider || '';
   let vcs;
   try {
     const { getVcs } = await import('../vcs/cli.mjs');
-    vcs = await getVcs();
+    vcs = await getVcs({ config });
   } catch (e) { // surfaced: the cause becomes the pending reason, which the CLI prints and env:init lists as a pending step
     return report({ pending: { reason: e.message, next: 'npm run brain:env:init once vcs.provider is configured' }, created: [], existing: [], failed: [] });
   }
@@ -156,10 +158,11 @@ function report(r) {
 
 async function runActor() {
   const cwd = process.cwd();
+  const config = loadBrainConfigOrThrow(cwd);
   let vcs = { whoami: async () => { throw new Error('the VCS port could not be loaded'); } };
   try {
     const { getVcs } = await import('../vcs/cli.mjs');
-    vcs = await getVcs();
+    vcs = await getVcs({ config });
   } catch { /* surfaced: the double above throws on use, and resolveBrainActor turns that into the pending step naming the cause */ }
   const r = await resolveBrainActor({
     vcs,

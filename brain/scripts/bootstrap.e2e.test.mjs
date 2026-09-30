@@ -269,3 +269,20 @@ test('#1163 e2e: exit 3 WITHOUT a NEXT: line is a required failure, not an empty
   assert.equal(r.code, 1, r.out.slice(-1500));
   assert.match(r.out, /pending without a next step/);
 });
+
+test('#1163 e2e: from a linked worktree the label step reads the DATA root (main tree) config, not the worktree copy', () => {
+  const { root, repo } = fixture('labels-worktree');
+  useBackend(repo, 'plainfiles');
+  const gh = withFakeGh(root, repo); // main tree config: acme/widget
+  git(repo, 'add', '-A');
+  git(repo, 'commit', '-qm', 'config');
+  const wt = join(root, 'wt');
+  git(repo, 'worktree', 'add', '-q', wt, '-b', 'feature/x');
+  installBrain(wt);
+  writeFileSync(join(wt, 'brain.config.json'), JSON.stringify({ vcs: { provider: 'github' }, project: { gitHost: 'github.com', slug: 'other/wrong' } }));
+  const r = bootstrap(wt, root, gh);
+  assert.equal(r.code, 0, r.out.slice(-1500));
+  const log = readFileSync(gh.env.GH_LOG, 'utf8');
+  assert.match(log, /repos\/acme\/widget\/labels/, 'the main tree owns brain.config.json');
+  assert.doesNotMatch(log, /other\/wrong/, 'the worktree copy must not pick the project');
+});
