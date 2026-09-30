@@ -7,8 +7,11 @@
 > ADR-0017:13, ADR-0004 Amendment 1). Referenced by ADR-0004 and by the memory 2.0 epic (#864,
 > ruling #863). Sibling of `vcs-contract.md`.
 
-The active backend is chosen via `MEMORY_BACKEND` in `.env` (default `engram`; `plainfiles`
-is the second inhabitant, #246). The dispatcher `brain/scripts/memory/cli.mjs` reads that key
+The active backend is the team's declaration in `brain.config.json` `memory.backend`, overridable
+per machine by `.env` and per run by the process env, both `MEMORY_BACKEND` (`engram` and
+`plainfiles`, the second inhabitant #246, are the closed set). There is NO default: with nothing
+declared a reader refuses and names the fix (#1165). The ONE resolver is
+`brain/scripts/memory/lib/backend-resolve.mjs`. The dispatcher `brain/scripts/memory/cli.mjs` reads that key
 and delegates to `brain/scripts/axes/memory/adapters/<backend>.mjs`. Verbs that are
 backend-agnostic by nature — `reindex`, `resolve-index`, `audit`, `split-records` — are
 dispatched directly and never reach a backend.

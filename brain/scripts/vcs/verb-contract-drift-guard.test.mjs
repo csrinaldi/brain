@@ -30,15 +30,10 @@ const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..'
 const CONTRACT_DOC = join(REPO_ROOT, 'brain', 'core', 'methodology', 'vcs-contract.md');
 
 // See file header — capabilities is a probe verb, documented separately.
-// `workflowRunSucceeded` (#1162): the doc row is drafted under
-// openspec/changes/issue-1162-*/brain-drafts/ pending `brain:promote` (brain/core
-// is read-only to the change author). REMOVE it from PENDING_PROMOTION when the row lands.
-// `labelCreate` (#1163): both adapters implement it and VERBS lists it; its vcs-contract.md
-// row is drafted at openspec/changes/issue-1163-env-init-labels-actor-lane/brain-drafts/
-// and lands with the maintainer's `brain:promote`. REMOVE it from PENDING_PROMOTION in that same commit.
 const DOCUMENTED_BUT_NOT_REQUIRED = new Set(['capabilities']);
 // Verbs implemented and in VERBS whose vcs-contract.md row is still a DRAFT: exempt only until promoted.
-const PENDING_PROMOTION = new Set(['labelCreate', 'workflowRunSucceeded']);
+// Empty since #1180 promoted the `labelCreate` (#1163) and `workflowRunSucceeded` (#1162) rows.
+const PENDING_PROMOTION = new Set([]);
 
 // Function-typed exports that BOTH providers legitimately share but that are
 // NOT contract verbs (helpers/constants) — reserved for future entries so the
