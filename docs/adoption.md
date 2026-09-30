@@ -121,19 +121,19 @@ A refusal names the fix and is a **required failure**: `env:init` exits 1.
 | Result | Exit | What it means |
 |---|---|---|
 | A **required** step failed | **1** | The environment is not usable as adopted. The summary names each failure. Fix it and re-run — `env:init` is safe to repeat. |
-| An **optional** step could not run | 0 | The environment is usable. The summary lists what is pending and the command that closes it. |
+| An **optional** step could not run | 0 | The environment is usable. The summary lists what is pending and the command that closes it — except the two rows marked *warning only* below, which are printed once during the run and not repeated in the summary. |
 
-| Step | Required (exit 1) | Optional (pending, exit 0) |
+| Step | Required (exit 1) | Optional (exit 0) |
 |---|---|---|
 | SDD harness init | the init fails | |
 | `core.hooksPath` | it cannot be set | |
 | Memory backend `setup` | it fails | |
 | Memory `pull` | attempted and refused (merge or reconcile refusal, corrupt store) | no commit yet, no upstream, or remote unreachable |
 | Memory `index` (engram) | binary present, indexing fails | binary absent — hydration and indexing skipped |
-| VCS token | typed but not saved (refusals above), or `auth login` failed | no token given |
+| VCS token | typed but not saved (refusals above), or `auth login` failed | no token given — *warning only*: re-run `env:init` with a terminal to add one |
 | VCS provider override | the write fails | |
 | `brain.config.json` | it cannot be parsed | any other `ensure` failure (e.g. the tier notice) |
-| Open-ticket board | | read-only listing |
+| Open-ticket board | | could not be listed — *warning only*: a read-only listing, nothing to close |
 
 ### Choices `env:init` makes for you (and how to change them)
 
