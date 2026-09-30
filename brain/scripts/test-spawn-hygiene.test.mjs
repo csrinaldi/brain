@@ -361,6 +361,7 @@ const ALLOWLIST = [
 
   // ── postmerge cursor: real git push, local bare origin only ────────────
   { file: 'brain/scripts/governance/postmerge/cursor.test.mjs', entrypoint: 'brain/scripts/governance/postmerge/cursor.mjs', reason: 'fixture-root-local-git' },
+  { file: 'brain/scripts/governance/postmerge/cursor.test.mjs', entrypoint: 'brain/scripts/brain-audit.mjs', reason: 'no-vcs-capability' },
 
   // ── git hooks: run directly, never through a real `git push`/network ───
   { file: 'brain/scripts/hooks/commit-msg.test.mjs', entrypoint: 'brain/scripts/hooks/commit-msg', reason: 'no-vcs-capability' },

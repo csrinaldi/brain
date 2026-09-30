@@ -627,62 +627,62 @@ function makeFreshConsumer(t, { adoptionIsRoot = false } = {}) {
 
 const prior = (v) => () => v;
 
-test('bootstrapCursor: #1162 (a) fresh repo, no prior audited run → cursor created at the adoption commit\'s parent, remote only', (t) => {
+test('bootstrapCursor: #1162 (a) fresh repo, no prior audited run → cursor created AT the adoption commit, remote only', async (t) => {
   const f = makeFreshConsumer(t);
-  const r = bootstrapCursor({ git: realGit(f.dir), workflowPath: WORKFLOW, priorAudit: prior('none') });
+  const r = await bootstrapCursor({ git: realGit(f.dir), workflowPath: WORKFLOW, priorAudit: prior('none') });
   assert.equal(r.state, 'bootstrapped');
-  assert.equal(r.base, f.root);
-  assert.equal(remoteCursorSha(f.originDir), f.root);
+  assert.equal(r.base, f.adoption);
+  assert.equal(remoteCursorSha(f.originDir), f.adoption);
 });
 
-test('bootstrapCursor: #1162 (c) the window after initialization INCLUDES the adoption commit', (t) => {
+test('bootstrapCursor: #1162 (c) the window after initialization starts AFTER the adoption commit and holds every later commit', async (t) => {
   const f = makeFreshConsumer(t);
-  bootstrapCursor({ git: realGit(f.dir), workflowPath: WORKFLOW, priorAudit: prior('none') });
+  await bootstrapCursor({ git: realGit(f.dir), workflowPath: WORKFLOW, priorAudit: prior('none') });
   const w = resolveWindow({ git: realGit(f.dir), head: f.head });
   assert.equal(w.state, 'present');
   const commits = spawnSync('git', ['rev-list', w.range], { cwd: f.dir, encoding: 'utf8' }).stdout.trim().split('\n');
-  assert.ok(commits.includes(f.adoption), 'adoption commit must be inside the first audited window');
-  assert.ok(commits.includes(f.head));
+  assert.ok(!commits.includes(f.adoption), 'a gate is not authoritative over the commit that installs it');
+  assert.deepEqual(commits, [f.head], 'every commit AFTER the adoption is inside the window');
 });
 
-test('bootstrapCursor: #1162 adoption commit is the root → base is the root itself (nothing precedes it)', (t) => {
+test('bootstrapCursor: #1162 adoption commit is the root → base is the adoption (same rule in every shape)', async (t) => {
   const f = makeFreshConsumer(t, { adoptionIsRoot: true });
-  const r = bootstrapCursor({ git: realGit(f.dir), workflowPath: WORKFLOW, priorAudit: prior('none') });
+  const r = await bootstrapCursor({ git: realGit(f.dir), workflowPath: WORKFLOW, priorAudit: prior('none') });
   assert.equal(r.state, 'bootstrapped');
   assert.equal(r.base, f.adoption);
 });
 
-test('bootstrapCursor: #1162 (b) DELETED cursor — a prior audited run exists → refused, cursor stays absent (alarm)', (t) => {
+test('bootstrapCursor: #1162 (b) DELETED cursor — a prior audited run exists → refused, cursor stays absent (alarm)', async (t) => {
   const f = makeFreshConsumer(t);
-  const r = bootstrapCursor({ git: realGit(f.dir), workflowPath: WORKFLOW, priorAudit: prior('some') });
+  const r = await bootstrapCursor({ git: realGit(f.dir), workflowPath: WORKFLOW, priorAudit: prior('some') });
   assert.equal(r.state, 'refused');
   assert.match(r.reason, /prior/i);
   assert.equal(remoteCursorSha(f.originDir), '', 'no cursor may be created');
 });
 
-test('bootstrapCursor: #1162 the evidence cannot be read → unknown, never a bootstrap', (t) => {
+test('bootstrapCursor: #1162 the evidence cannot be read → unknown, never a bootstrap', async (t) => {
   const f = makeFreshConsumer(t);
-  const r = bootstrapCursor({ git: realGit(f.dir), workflowPath: WORKFLOW, priorAudit: prior('unknown') });
+  const r = await bootstrapCursor({ git: realGit(f.dir), workflowPath: WORKFLOW, priorAudit: prior('unknown') });
   assert.equal(r.state, 'unknown');
   assert.equal(remoteCursorSha(f.originDir), '');
 });
 
-test('bootstrapCursor: #1162 a cursor already present is never overwritten', (t) => {
+test('bootstrapCursor: #1162 a cursor already present is never overwritten', async (t) => {
   const f = makeFreshConsumer(t);
   spawnSync('git', ['push', 'origin', `${f.adoption}:${CURSOR_REF}`], { cwd: f.dir, encoding: 'utf8' });
-  const r = bootstrapCursor({ git: realGit(f.dir), workflowPath: WORKFLOW, priorAudit: prior('none') });
+  const r = await bootstrapCursor({ git: realGit(f.dir), workflowPath: WORKFLOW, priorAudit: prior('none') });
   assert.equal(r.state, 'present');
   assert.equal(remoteCursorSha(f.originDir), f.adoption);
 });
 
-test('bootstrapCursor: #1162 no adoption commit found on the first-parent line → unknown, never a guessed base', (t) => {
+test('bootstrapCursor: #1162 no adoption commit found on the first-parent line → unknown, never a guessed base', async (t) => {
   const f = makeFreshConsumer(t);
-  const r = bootstrapCursor({ git: realGit(f.dir), workflowPath: 'nope/never-added.yml', priorAudit: prior('none') });
+  const r = await bootstrapCursor({ git: realGit(f.dir), workflowPath: 'nope/never-added.yml', priorAudit: prior('none') });
   assert.equal(r.state, 'unknown');
   assert.equal(remoteCursorSha(f.originDir), '');
 });
 
-test('bootstrapCursor: #1162 creation is a CAS — a cursor that appears in the race is not clobbered', (t) => {
+test('bootstrapCursor: #1162 creation is a CAS — a cursor that appears in the race is not clobbered', async (t) => {
   const f = makeFreshConsumer(t);
   const racer = (real) => ({
     try: (argv) => {
@@ -698,7 +698,67 @@ test('bootstrapCursor: #1162 creation is a CAS — a cursor that appears in the 
       return real.orThrow(argv);
     },
   });
-  const r = bootstrapCursor({ git: racer(realGit(f.dir)), workflowPath: WORKFLOW, priorAudit: prior('none') });
-  assert.equal(r.state, 'unknown');
+  const r = await bootstrapCursor({ git: racer(realGit(f.dir)), workflowPath: WORKFLOW, priorAudit: prior('none') });
+  assert.equal(r.state, 'present', 'a lost race re-reads the ref and proceeds');
+  assert.equal(r.sha, f.head);
   assert.equal(remoteCursorSha(f.originDir), f.head, 'the racing cursor stands');
 });
+
+// ── #1162 END-TO-END: the REAL brain-audit over the bootstrapped window. ──────
+// The adoption installs the gate, so it cannot be judged by it: an over-budget
+// adoption (workflow + a 3000-line file, no issue link, no memory) must NOT be
+// an offender, while a compliant commit after it must still be audited clean.
+
+const AUDIT_SCRIPT = new URL('../../brain-audit.mjs', import.meta.url).pathname;
+
+function compliantCommit(g, dir) {
+  mkdirSync(join(dir, '.memory/records'), { recursive: true });
+  writeFileSync(join(dir, '.memory/records/2026-07.jsonl'), JSON.stringify({
+    id: 'r1', type: 'session_summary', title: 't', content: 'c', issue: 1, created_at: '2026-07-01T00:00:00Z',
+  }) + '\n');
+  g('add', '.'); g('commit', '-m', 'feat: compliant Closes #1');
+}
+
+function bigAdoptionFiles(dir) {
+  mkdirSync(join(dir, '.github/workflows'), { recursive: true });
+  writeFileSync(join(dir, WORKFLOW), 'name: x\n');
+  writeFileSync(join(dir, 'big.txt'), Array.from({ length: 3000 }, (_, i) => `line ${i}`).join('\n') + '\n');
+}
+
+async function e2e(t, { mergeAdoption }) {
+  const scratch = mkdtempSync(join(tmpdir(), 'cursor-e2e-'));
+  t.after(() => removeTempTree(scratch));
+  const originDir = join(scratch, 'origin.git');
+  mkdirSync(originDir);
+  spawnSync('git', ['init', '--bare', '--initial-branch=main', originDir], { encoding: 'utf8' });
+  const dir = join(scratch, 'work');
+  mkdirSync(dir);
+  const g = makeRepo(dir);
+  g('remote', 'add', 'origin', originDir);
+  writeFileSync(join(dir, 'README.md'), 'init\n'); g('add', '.'); g('commit', '-m', 'init');
+  if (mergeAdoption) {
+    g('checkout', '-b', 'adopt');
+    bigAdoptionFiles(dir); g('add', '.'); g('commit', '-m', 'adopt brain');
+    g('checkout', 'main');
+    g('merge', '--no-ff', 'adopt', '-m', 'Merge adopt brain');
+  } else {
+    bigAdoptionFiles(dir); g('add', '.'); g('commit', '-m', 'adopt brain');
+  }
+  compliantCommit(g, dir);
+  g('push', 'origin', 'main');
+  const boot = await bootstrapCursor({ git: realGit(dir), workflowPath: WORKFLOW, priorAudit: prior('none') });
+  assert.equal(boot.state, 'bootstrapped');
+  const head = headSha(dir);
+  const w = resolveWindow({ git: realGit(dir), head });
+  const r = spawnSync('node', [AUDIT_SCRIPT, w.range], { cwd: dir, encoding: 'utf8' });
+  return { r, boot, dir };
+}
+
+for (const mergeAdoption of [false, true]) {
+  test(`bootstrapCursor: #1162 e2e — an over-budget ${mergeAdoption ? 'merge-commit' : 'direct-push'} adoption is never an offender; the real audit over the window exits 0`, async (t) => {
+    const { r, boot } = await e2e(t, { mergeAdoption });
+    assert.doesNotMatch(r.stdout, new RegExp(`\\[FAIL(-SHA)?\\][^\\n]*${boot.adoption.slice(0, 7)}`), `the adoption must not be flagged:\n${r.stdout}`);
+    assert.doesNotMatch(r.stdout, /\[FAIL-SHA\]/, `nothing may be nominated for auto-revert:\n${r.stdout}`);
+    assert.equal(r.status, 0, `audit over the bootstrapped window must be clean:\n${r.stdout}\n${r.stderr}`);
+  });
+}

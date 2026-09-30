@@ -763,6 +763,10 @@ test('C1 skip-over: the window step resolves cursor..HEAD (C..P2, containing M),
 // ── #1162: a fresh consumer has no cursor and never had one. The window step
 // initializes it (bootstrap) and audits — no alarm. A cursor that HAD existed
 // (a prior successful run of this workflow) and is now gone still alarms. ────
+// The window step's own `env:` (the harness does not apply YAML env): the port
+// credential, the fixed provider, and the default branch the evidence filters by.
+const BOOT_ENV = { VCS_PROVIDER: 'github', DEFAULT_BRANCH: 'main', GITHUB_REPOSITORY: 'o/r' };
+
 function freshConsumerSetup(g, repo, homeDir) {
   const origin = join(homeDir, 'origin.git');
   spawnSync('git', ['init', '--bare', origin], { encoding: 'utf8', env: isolatedEnv(homeDir) });
@@ -778,12 +782,14 @@ function freshConsumerSetup(g, repo, homeDir) {
 test('#1162 (a): fresh consumer, no cursor, no prior successful run → window step bootstraps, emits a range, files NO alarm', () => {
   let pre;
   const r = runStepIsolated('window', {
-    repoSetup: (g, repo, homeDir) => { freshConsumerSetup(g, repo, homeDir); pre = g('rev-parse', 'HEAD~2').stdout.trim(); },
+    repoSetup: (g, repo, homeDir) => { freshConsumerSetup(g, repo, homeDir); pre = g('rev-parse', 'HEAD~1').stdout.trim(); },
     ghOpts: { runListPrints: '[]' },
+    env: BOOT_ENV,
   });
   assert.equal(r.status, 0, `bootstrap must let the run proceed:\n${r.stdout}\n${r.stderr}`);
-  assert.match(r.output(), new RegExp(`range=${pre}\\.\\.[0-9a-f]{40}`), `window must start at the adoption commit's parent:\n${r.output()}`);
+  assert.match(r.output(), new RegExp(`range=${pre}\\.\\.[0-9a-f]{40}`), `window must start AT the adoption commit:\n${r.output()}`);
   assert.doesNotMatch(r.ghLog(), /gh (label|issue) create/, 'a bootstrap is not an alarm');
+  assert.match(r.ghLog(), /run list .*--branch main/, 'the evidence is filtered by the default branch');
   assert.doesNotMatch(r.output(), /alarm=/);
 });
 
@@ -791,6 +797,7 @@ test('#1162 (b): cursor deleted on a repo with a prior successful run → still 
   const r = runStepIsolated('window', {
     repoSetup: freshConsumerSetup,
     ghOpts: { runListPrints: '[{"databaseId":42}]' },
+    env: BOOT_ENV,
   });
   assert.equal(r.status, 2, `a deleted cursor must halt:\n${r.stdout}\n${r.stderr}`);
   assert.doesNotMatch(r.output(), /range=/);
@@ -802,6 +809,7 @@ test('#1162: the evidence of a prior run cannot be read (gh fails) → halts lou
   const r = runStepIsolated('window', {
     repoSetup: freshConsumerSetup,
     ghOpts: { runListPrints: '', runListExit: 1 },
+    env: BOOT_ENV,
   });
   assert.equal(r.status, 2);
   assert.doesNotMatch(r.output(), /range=/);
