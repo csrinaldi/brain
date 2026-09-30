@@ -83,3 +83,34 @@ test('#1124 renderTierNotice (es): the notice goes through the catalog — Spani
   assert.match(es, /lite/);
   assert.match(es, /governance\.tier/);
 });
+
+// ── the memory lane (issue #1166) — same two halves, same catalogs ────────────
+
+import { laneNotice, renderLaneNotice } from './tier-notice.mjs';
+
+test('#1166 laneNotice: absent or false reads as OFF (the consumer default); true reads as ON', () => {
+  for (const config of [{}, { memory: {} }, { memory: { lane: {} } }, { memory: { lane: { enabled: false } } }]) {
+    assert.deepEqual(laneNotice({ config }), { enabled: false });
+  }
+  assert.deepEqual(laneNotice({ config: { memory: { lane: { enabled: true } } } }), { enabled: true });
+});
+
+test('#1166 renderLaneNotice (en): OFF says so, why it is off by default, and the exact command to turn it on', async () => {
+  const text = (await renderLaneNotice({ enabled: false }, { locale: 'en' })).join('\n');
+  assert.match(text, /memory lane: off/i);
+  assert.match(text, /off by default/i, 'the why');
+  assert.match(text, /npm run brain:config -- set memory\.lane\.enabled true/);
+});
+
+test('#1166 renderLaneNotice (en): ON says so and does not tell the operator to turn it on', async () => {
+  const text = (await renderLaneNotice({ enabled: true }, { locale: 'en' })).join('\n');
+  assert.match(text, /memory lane: on/i);
+  assert.doesNotMatch(text, /set memory\.lane\.enabled true/);
+});
+
+test('#1166 renderLaneNotice (es): both states render from the Spanish catalog with no raw key leaking', async () => {
+  for (const enabled of [false, true]) {
+    const text = (await renderLaneNotice({ enabled }, { locale: 'es' })).join('\n');
+    assert.doesNotMatch(text, /config\.lane\./, 'a missing catalog key would print the key itself');
+  }
+});

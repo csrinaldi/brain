@@ -13,7 +13,8 @@
 //             here, not through axes/memory/adapters/<backend>.mjs — the record format is
 //             brain-owned and independent of the live memory backend.
 //
-// Reads MEMORY_BACKEND from the environment or .env (default: engram).
+// Reads MEMORY_BACKEND from the environment, .env, or brain.config.json
+// `memory.backend` (no default — undeclared is refused, #1165).
 // Imports the corresponding backend from axes/memory/adapters/<backend>.mjs and
 // dispatches the requested operation.
 //
@@ -26,7 +27,7 @@ import { hostname } from "node:os";
 
 import { t } from "../i18n/t.mjs";
 import { formatDuplicateReport } from "./lib/duplicates.mjs";
-import { parseEnvFile } from "../lib/env-read.mjs";
+import { resolveMemoryBackend, MEMORY_BACKENDS, EXIT_UNDECLARED, EXIT_INVALID } from "./lib/backend-resolve.mjs";
 import {
   DEFAULT_BACKEND,
   ENGRAM_BIN,
@@ -55,34 +56,72 @@ const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../../..");
 const FIXTURE_ROOT = join(repoRoot, "brain/scripts/memory/__fixtures__");
 
 // ---------------------------------------------------------------------------
-// Read MEMORY_BACKEND: env var > .env file > default "engram"
+// Resolve MEMORY_BACKEND (issue #1165): env var > .env > brain.config.json
+// `memory.backend` > UNDECLARED (a refusal, never a default).
 // ---------------------------------------------------------------------------
-// BRAIN_MEMORY_ENV_FILE (test-only seam, mirroring BRAIN_MEMORY_TEST_ROOT and
-// BRAIN_MIGRATE_V1_TEST_ROOT below): when set, `.env` is read from that path
-// instead of `<repoRoot>/.env`. NEVER set this outside tests.
+// The resolution lives in lib/backend-resolve.mjs — the ONE resolver, shared with
+// bootstrap.sh. What used to be here (env ?? .env ?? "engram") was the defect: a
+// second checkout has no `.env`, so it silently ran a backend the team did not
+// choose. The team's choice is tracked config now; see that module.
 //
-// It exists because the STATED-vs-DEFAULTED distinction added for #641 is read
-// partly OUT OF `.env`, and `.env` is gitignored — so whether a maintainer's
-// machine happens to carry `MEMORY_BACKEND=engram` decided the outcome of the
-// very branch under test. That is the ambient-state trap #657's suite already
-// hit with `$VCS_TOKEN`: green here, red on the maintainer's box, for reasons
-// having nothing to do with the code.
-// The PARSE is shared (#316). The precedence is unchanged and already
-// shell-first: `process.env.MEMORY_BACKEND ?? envVars.MEMORY_BACKEND`, below.
-// `BRAIN_MEMORY_ENV_FILE` stays the test seam it was.
-function readEnvFile() {
-  const envPath = process.env.BRAIN_MEMORY_ENV_FILE ?? join(repoRoot, ".env");
-  if (!existsSync(envPath)) return {};
-  return parseEnvFile(readFileSync(envPath, "utf8"));
+// BRAIN_MEMORY_ENV_FILE / BRAIN_MEMORY_CONFIG_FILE (test-only seams, mirroring
+// BRAIN_MEMORY_TEST_ROOT and BRAIN_MIGRATE_V1_TEST_ROOT below): when set, `.env`
+// / `brain.config.json` are read from those paths instead of `<repoRoot>/…`.
+// NEVER set these outside tests. They exist because both files are ambient
+// state — `.env` is gitignored, so whether a maintainer's machine carries
+// `MEMORY_BACKEND=engram` would otherwise decide the outcome of the very branch
+// under test (the ambient-state trap #657's suite hit with `$VCS_TOKEN`).
+const RESOLVED = resolveMemoryBackend({
+  root: repoRoot,
+  envFile: process.env.BRAIN_MEMORY_ENV_FILE ?? null,
+  configFile: process.env.BRAIN_MEMORY_CONFIG_FILE ?? null,
+});
+
+/** The source as an operator reads it — never the resolver's raw `shell`/`file`/`config` tokens. */
+const sourceLabel = (src) => (src === "shell" ? "the process env" : src === "file" ? ".env" : "brain.config.json");
+
+let shadowReported = false;
+/** A losing declaration is reported, not dropped (#1165 S3) — on stderr, and BEFORE any refusal, so an invalid winner still shows what it overrode. Idempotent. */
+async function reportShadowed() {
+  if (shadowReported) return;
+  shadowReported = true;
+  for (const sh of RESOLVED.shadowed) {
+    console.error(
+      `memory/cli: ${await t("memory.backend.shadowed", {
+        winner: sourceLabel(RESOLVED.source),
+        backend: RESOLVED.backend ?? RESOLVED.invalidValue ?? "",
+        loser: sourceLabel(sh.source),
+        other: sh.value,
+      })}`,
+    );
+  }
 }
 
-const envVars = readEnvFile();
-// STATED vs DEFAULTED (issue #641). The resolved value alone cannot tell the two
-// apart — `MEMORY_BACKEND=engram` in `.env` and no `.env` at all both come out
-// "engram" — and the fallback further down turns on exactly that distinction: an
-// unstated default may be filled in, an operator's stated selector may not.
-const STATED_BACKEND = process.env.MEMORY_BACKEND ?? envVars.MEMORY_BACKEND;
-const MEMORY_BACKEND = STATED_BACKEND ?? DEFAULT_BACKEND;
+/**
+ * The refusal for an op that needs a backend when none is (validly) declared.
+ * Named fix, exit 1 — never a guess. Ops that never consult a backend
+ * (reindex, audit, resolve-index, split-records, collect, ship, migrate-v1)
+ * are dispatched BEFORE this is called and stay unaffected. `save` is the
+ * exception that DOES reach the selection below but does not refuse: it is
+ * record-first and degrades to plainfiles with a deferred-hydration notice.
+ */
+async function requireDeclaredBackend() {
+  await reportShadowed();
+  if (RESOLVED.status === "declared") return RESOLVED.backend;
+  const key = RESOLVED.status === "invalid" ? "memory.backend.invalid" : "memory.backend.undeclared";
+  console.error(
+    `memory/cli: ${await t(key, {
+      op,
+      value: RESOLVED.invalidValue ?? "",
+      source: sourceLabel(RESOLVED.source),
+      allowed: MEMORY_BACKENDS.join(" | "),
+    })}`,
+  );
+  if (RESOLVED.configError) console.error(`memory/cli: brain.config.json unreadable — ${RESOLVED.configError}`);
+  // Distinct exit codes (3 undeclared, 4 invalid), never a bare 1: the automated callers
+  // (hooks, session-start) tell "nothing was tried" from a real failure by code, not text.
+  process.exit(RESOLVED.status === "invalid" ? EXIT_INVALID : EXIT_UNDECLARED);
+}
 
 // ---------------------------------------------------------------------------
 // Duplicate reporting (issue #574) — the ONE printer, used by every op.
@@ -199,7 +238,7 @@ if (op === "audit") {
     process.exit(1);
   }
   try {
-    const report = runAudit({ root: memoryRoot, backend: MEMORY_BACKEND, sinceMs });
+    const report = runAudit({ root: memoryRoot, backend: RESOLVED.backend ?? undefined, sinceMs });
     if (rest.includes("--json")) console.log(JSON.stringify(report, null, 2));
     else for (const line of renderReport(report)) console.log(line);
     process.exit(0);
@@ -797,8 +836,9 @@ if (op === "migrate-v1") {
 // never an uncaught stack trace.
 // ---------------------------------------------------------------------------
 if (op === "heal-duplicates") {
-  if (MEMORY_BACKEND !== "engram") {
-    console.error(`memory/cli: ${await t("memory.heal.notEngram", { backend: MEMORY_BACKEND })}`);
+  const healBackend = await requireDeclaredBackend();
+  if (healBackend !== "engram") {
+    console.error(`memory/cli: ${await t("memory.heal.notEngram", { backend: healBackend })}`);
     process.exit(1);
   }
   const rest = process.argv.slice(3);
@@ -910,9 +950,30 @@ const fn = VERB_TO_EXPORT[op] ?? op.replace(/-([a-z])/g, (_, c) => c.toUpperCase
 // the substitution is most likely to happen. (#633 covers those two hooks
 // swallowing stderr as well — flagged there, not worked around here.)
 // ---------------------------------------------------------------------------
+// `save` is the record-first capture path (memory-backend-contract rule 2): the record is
+// durable before any backend is involved, so an undeclared/invalid selector must NOT lose
+// the capture. It writes through plainfiles (records only, nothing hydrated) and says the
+// hydration is deferred; every other op that gets here consults a backend and refuses.
+let MEMORY_BACKEND;
+if (op === "save" && RESOLVED.status !== "declared") {
+  MEMORY_BACKEND = FALLBACK_BACKEND;
+  console.error(
+    `memory/cli: ${await t(
+      RESOLVED.status === "invalid" ? "memory.backend.saveDeferred.invalid" : "memory.backend.saveDeferred.undeclared",
+      { value: RESOLVED.invalidValue ?? "" },
+    )}`,
+  );
+} else {
+  MEMORY_BACKEND = await requireDeclaredBackend();
+}
+await reportShadowed();
 const selection = selectBackend({
   requested: MEMORY_BACKEND,
-  stated: STATED_BACKEND !== undefined,
+  // STATED = an operator named it for this run or machine (process env, .env): never overridden
+  // (ADR-0004). A backend declared only in tracked config is the TEAM's, and a checkout without
+  // its binary must still get the records: `pull` is record-first, so it runs records-only and
+  // says hydration is deferred (#1165 cold-1) — consistent with `save`.
+  stated: RESOLVED.source !== "config",
   op,
   probe: MEMORY_BACKEND === DEFAULT_BACKEND ? probeBinary(ENGRAM_BIN) : { available: true },
 });
@@ -923,6 +984,7 @@ if (selection.reason === REASON.SUBSTITUTED) {
       op,
       from: selection.from,
       fallback: selection.backend,
+      source: sourceLabel(RESOLVED.source),
     })}`,
   );
 } else if (selection.reason === REASON.STATED_BUT_ABSENT) {
@@ -933,6 +995,7 @@ if (selection.reason === REASON.SUBSTITUTED) {
   console.error(
     `memory/cli: ${await t("memory.backend.statedButAbsent", {
       op,
+      source: sourceLabel(RESOLVED.source),
       backend: MEMORY_BACKEND,
       fallback: FALLBACK_BACKEND,
     })}`,

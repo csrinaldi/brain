@@ -33,7 +33,14 @@ fi
 # share or dirty-.memory guard runs here.
 changes_dir="$repo_root/openspec/changes"
 if [ -d "$changes_dir" ] && find "$changes_dir" -mindepth 1 -maxdepth 1 -type d ! -name archive -print -quit 2>/dev/null | grep -q .; then
-  node "$repo_root/brain/scripts/memory/cli.mjs" feature-checkpoint >/dev/null || true
+  # Non-blocking by design: a failed checkpoint never stops a push. stderr is kept (#633).
+  # Exit 3/4 is the memory backend declaration refusal (#1165): the checkpoint was never
+  # attempted, so say that instead of letting it pass as a checkpoint that ran.
+  _cp_rc=0
+  node "$repo_root/brain/scripts/memory/cli.mjs" feature-checkpoint >/dev/null || _cp_rc=$?
+  if [ "$_cp_rc" -eq 3 ] || [ "$_cp_rc" -eq 4 ]; then
+    echo "pre-push: feature checkpoint skipped — memory backend not declared or invalid (npm run brain:config -- set memory.backend engram|plainfiles)" >&2
+  fi
 fi
 
 # Repository reference/prohibition checks remain a hard pre-push boundary.

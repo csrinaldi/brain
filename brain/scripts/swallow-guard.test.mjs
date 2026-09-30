@@ -51,6 +51,7 @@ const SCOPE_FILES = [
   // install
   'brain/scripts/lib/init.mjs',
   'brain/scripts/lib/installer.mjs',
+  'brain/scripts/lib/env-init-setup.mjs',
   'brain/scripts/cli-entry.mjs',
   'brain/scripts/install-tools.sh',
   // bootstrap

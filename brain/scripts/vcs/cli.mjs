@@ -49,13 +49,19 @@ export const VERBS = [
   'commitStatus', 'repoCloneUrl', 'patSetupUrl', 'projectResolve',
   'branchProtect', 'capabilities',
   'prReviewComment', 'issueComment', 'labelAdd', 'labelRemove',
-  'prStatusRollup', 'labelList', 'prCommits',
+  'prStatusRollup', 'labelList', 'labelCreate', 'prCommits',
   // issue #1086, D3/D7: fires verb-contract-drift-guard.test.mjs's :82-91
   // check by design until the maintainer's `brain:promote` lands the
   // vcs-contract.md Required Verbs row drafted at
   // openspec/changes/issue-1086-audit-pr-resolution/brain-drafts/vcs-contract-commitprs-row.md
   // on this same branch.
   'commitPrs',
+  // issue #1162: fires verb-contract-drift-guard's doc-row check by design; the
+  // Required Verbs row is drafted at
+  // openspec/changes/issue-1162-postmerge-cursor-bootstrap/brain-drafts/
+  // (brain/core is read-only here) and is tracked as DOCUMENTED_BUT_NOT_REQUIRED
+  // in the guard until promoted.
+  'workflowRunSucceeded',
 ];
 
 /**

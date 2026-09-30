@@ -606,6 +606,37 @@ export async function prStatusRollup({ project, number } = {}) {
 }
 
 /**
+ * workflowRunSucceeded — the provider-agnostic READ verb (issue #1162): has the
+ * named workflow EVER completed successfully on `branch`? It is the evidence
+ * that tells a repository whose audit cursor was never created (a bootstrap
+ * state) from one whose cursor was deleted (a successful run advanced it once).
+ *
+ * Returns `{ state, detail }`, never throws:
+ *   'succeeded' — at least one successful run exists on `branch`
+ *   'none'      — the read succeeded and there is none
+ *   'unknown'   — the read failed or was malformed; `detail` carries the words
+ * Filtered by `branch` (the default branch): a success on another branch says
+ * nothing about the cursor on the audited one.
+ *
+ * @param {{ project?: string, workflow: string, branch: string }} opts
+ * @returns {Promise<{ state: 'succeeded'|'none'|'unknown', detail: string|null }>}
+ */
+export async function workflowRunSucceeded({ project, workflow, branch } = {}) {
+  if (!workflow || !branch) return { state: 'unknown', detail: 'workflow and branch are both required' };
+  let runs;
+  try {
+    runs = ghJson([
+      'run', 'list', '--workflow', workflow, '--branch', branch, '--status', 'success',
+      '--limit', '1', '--json', 'databaseId', ...(project ? ['-R', project] : []),
+    ]);
+  } catch (err) {
+    return { state: 'unknown', detail: err.message };
+  }
+  if (!Array.isArray(runs)) return { state: 'unknown', detail: `gh run list returned ${typeof runs}, not an array` };
+  return { state: runs.length > 0 ? 'succeeded' : 'none', detail: null };
+}
+
+/**
  * prReviews — the provider-agnostic `prReviews` CONTRACT verb (issue #239
  * A3 TASK2/4th-violation fix, closing the L6 brain-writes-reviewed gate's
  * gh-CLI-hardcoded `defaultFetchReviews`). Wraps GitHub's Reviews API
@@ -959,6 +990,26 @@ export async function labelRemove({ project, number, labels } = {}) {
 export async function labelList({ project } = {}) {
   const arr = ghJson(['api', '--paginate', `repos/${project}/labels?per_page=100`]);
   return arr.map(l => l.name);
+}
+
+/**
+ * labelCreate — creates a label DEFINITION in the remote's label set (issue
+ * #1163). The write half of `labelList`: it applies the label to nothing, so
+ * it cannot hand anyone an approval (that is `labelAdd`'s deny-set). "Already
+ * exists" (HTTP 422 `already_exists`) is a SUCCESS with `created: false`,
+ * which is what makes the caller idempotent. Never throws.
+ *
+ * @param {{ project: string, name: string, color?: string, description?: string }} opts
+ * @returns {Promise<{ ok: true, created: boolean } | { ok: false, error: string }>}
+ */
+export async function labelCreate({ project, name, color, description } = {}) {
+  const r = gh(
+    ['api', '-X', 'POST', `repos/${project}/labels`, '--input', '-'],
+    { input: JSON.stringify({ name, color: String(color ?? 'ededed').replace(/^#/, ''), description: description ?? '' }) },
+  );
+  if (r.ok) return { ok: true, created: true };
+  if (/already_exists/.test(`${r.stdout}${r.stderr}`)) return { ok: true, created: false };
+  return { ok: false, error: r.stderr.trim() || `gh api failed (status ${r.status})` };
 }
 
 /**

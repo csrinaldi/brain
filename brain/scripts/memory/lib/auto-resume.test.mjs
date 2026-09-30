@@ -110,9 +110,21 @@ test('tryFeatureResume (#1127): a non-zero exit that printed a summary keeps it 
 });
 
 test('tryFeatureResume (#1127): a non-zero exit WITHOUT the projection message is not labelled "projection incomplete"', () => {
-  const runner = () => ({ status: 3, stdout: '\n  Feature: my-feature\n', stderr: 'memory/cli: something else entirely\n' });
+  const runner = () => ({ status: 2, stdout: '\n  Feature: my-feature\n', stderr: 'memory/cli: something else entirely\n' }); // not 3/4: those are the declaration refusal (#1165)
   const out = tryFeatureResume('/fake/root', { _runner: runner });
   assert.match(out, /Feature: my-feature/);
   assert.doesNotMatch(out, /projection incomplete/);
-  assert.match(out, /feature-resume exited 3/);
+  assert.match(out, /feature-resume exited 2/);
+});
+
+// #1165 S2: an undeclared-backend refusal must not read as "no resume point".
+test('#1165 tryFeatureResume: exit 3 (backend undeclared) returns a line naming the cause and the fix, not null', () => {
+  const out = tryFeatureResume('/r', { _runner: () => ({ status: 3, stdout: '', stderr: 'memory/cli: no memory backend is declared' }) });
+  assert.match(out, /memory backend not declared/);
+  assert.match(out, /brain:config -- set memory\.backend/);
+});
+
+test('#1165 tryFeatureResume: exit 4 (backend invalid) is named as invalid; other failures stay null', () => {
+  assert.match(tryFeatureResume('/r', { _runner: () => ({ status: 4, stdout: '', stderr: '' }) }), /memory backend invalid/);
+  assert.equal(tryFeatureResume('/r', { _runner: () => ({ status: 1, stdout: '', stderr: '' }) }), null);
 });

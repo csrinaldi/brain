@@ -682,6 +682,14 @@ if (!existsSync(configPath)) {
     }
     ok('Config already up to date — no migrations pending.');
   }
+  // #1165: the 1.9.1 migration adds `memory.backend: ""` (undeclared) and changes nothing else.
+  // Imported from THIS script's own tree, never the target package's: an older target has no such module.
+  // A consumer with no `.env` value should hear once what to do, not at its first refused pull.
+  if (!dryRun) {
+    const { undeclaredUpgradeNotice } = await import('./memory/lib/backend-resolve.mjs');
+    const notice = undeclaredUpgradeNotice({ root: ROOT });
+    if (notice) warn(notice);
+  }
 }
 
 // ── 4. Regenerate AGENTS.md (issue #397, REQ-397-4) ─────────────────────────────

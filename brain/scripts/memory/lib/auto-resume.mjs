@@ -17,6 +17,10 @@
 
 import { spawnSync } from 'node:child_process';
 
+import { EXIT_UNDECLARED, EXIT_INVALID, DECLARE_FIX } from './backend-resolve.mjs';
+// Re-exported: session-start.mjs has a deliberately narrow import allowlist, and this module is on it.
+export { EXIT_UNDECLARED, EXIT_INVALID, DECLARE_FIX };
+
 /**
  * Default subprocess runner — spawns `node brain/scripts/memory/cli.mjs feature-resume`
  * with {cwd: root, encoding: 'utf8'}.
@@ -58,6 +62,10 @@ export function tryFeatureResume(root, { _runner } = {}) {
     if (result.status === 0) {
       return result.stdout ?? '';
     }
+    // Exit 3/4 is memory/cli.mjs's declaration refusal (#1165): nothing was tried, so this must
+    // not read as "no resume point". Matched by CODE, never by (localized) text.
+    if (result.status === EXIT_UNDECLARED) return `  ⚠ memory backend not declared — ${DECLARE_FIX}\n`;
+    if (result.status === EXIT_INVALID) return `  ⚠ memory backend invalid — see the refusal from \`npm run brain:memory:pull\`; ${DECLARE_FIX}\n`;
     // feature-resume prints the resume summary BEFORE it projects, and exits 1 when a
     // projection failed (#1127). Dropping that stdout would cost the operator the
     // summary for a failure that did not touch it: keep it and name the failure.

@@ -119,3 +119,15 @@ test('#823 (round 2): an EMPTY segment is refused — a malformed path is an unk
   }
   assert.equal(resolvePath({ sdd: { map: { '': { x: 1 } } } }, 'sdd.map..x'), undefined);
 });
+
+// #1165 NIT: a typo must be refused at WRITE time, not at the next `pull`.
+test('#1165 planConfigWrite: memory.backend is validated against the closed set at write time', async () => {
+  const { migrations } = await import('../../core/config-migrations.mjs');
+  const bad = planConfigWrite({ config: { schemaVersion: '1.9.0' }, path: 'memory.backend', value: 'plainfile', migrations, targetVersion: '1.9.0' });
+  assert.equal(bad.next, null);
+  assert.match(bad.refusal, /engram \| plainfiles/);
+  const ok = planConfigWrite({ config: { schemaVersion: '1.9.0' }, path: 'memory.backend', value: 'engram', migrations, targetVersion: '1.9.0' });
+  assert.equal(ok.refusal, null);
+  const empty = planConfigWrite({ config: { schemaVersion: '1.9.0' }, path: 'memory.backend', value: '""', migrations, targetVersion: '1.9.0' });
+  assert.equal(empty.refusal, null, 'clearing to undeclared is allowed');
+});

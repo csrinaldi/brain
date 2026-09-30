@@ -465,6 +465,29 @@ else
   warn "$I18N_BOOTSTRAP_AUTH_NOTOKEN"
 fi
 
+# --- 5b. Governance labels and brain.actor (issues #1163, #1164) --------------
+# A fresh consumer has no `status:approved` label (its first PR fails `issue-link`)
+# and no `brain.actor` (its first `brain:memory:save` refuses). Both steps go through
+# the VCS port and are classified by CAUSE, like MISSING_OPTIONAL / REQUIRED_FAILURES
+# elsewhere in this file: exit 3 is "pending" (VCS unreachable or unauthenticated, a
+# refused create, no identity) and lands in MISSING_OPTIONAL with its exact command;
+# any other non-zero exit is a defect of the step itself and is REQUIRED.
+_setup_step() {
+  local step="$1" out rc=0 _next
+  out="$(node "$BRAIN_SCRIPTS/lib/env-init-setup.mjs" "$step" 2>&1)" || rc=$?  # rc is captured and classified below — 3 is pending, anything else is a required failure
+  printf '%s\n' "$out" | sed '/^NEXT: /d'  # the NEXT: line is machine output; the final Pending summary prints it
+  case "$rc" in
+    0) ;;
+    3) _next="$(printf '%s\n' "$out" | sed -n 's/^NEXT: //p' | head -1)"
+       # pending is keyed on the NEXT: line: exit 3 without one would be an empty pending entry
+       if [ -n "$_next" ]; then MISSING_OPTIONAL+=("$_next"); else REQUIRED_FAILURES+=("env-init-setup $step reported pending without a next step"); fi ;;
+    *) REQUIRED_FAILURES+=("env-init-setup $step failed (exit $rc)") ;;
+  esac
+}
+say "Governance labels and actor"
+_setup_step labels
+_setup_step actor
+
 # --- 6. SDD implementation (replaceable harness, ADR-0012) --------------------
 # Harness-specific init is now delegated to brain/scripts/harness/cli.mjs, which
 # dispatches to brain/scripts/axes/<axis>/adapters/<SDD_HARNESS>.mjs. Adding a new
@@ -514,42 +537,108 @@ node "$BRAIN_SCRIPTS/harness/cli.mjs" init \
   || { warn "$I18N_BOOTSTRAP_SDD_INITFAILED"; REQUIRED_FAILURES+=("SDD harness init failed"); }
 
 # --- 7. Team memory (replaceable backend, ADR-0003) --------------------------
-# MEMORY_BACKEND mirrors the SDD_HARNESS pattern from §6: read from .env,
-# prompt on TTY if unset, default to "engram".
+# MEMORY_BACKEND (issue #1165): the team's backend is a TEAM decision, so it lives in
+# tracked config (brain.config.json `memory.backend`), not only in the untracked .env —
+# a second checkout has no .env and used to silently run engram. Resolution is NOT done
+# here: memory/lib/backend-resolve.mjs is the ONE resolver (process env > .env >
+# brain.config.json > undeclared), shared with memory/cli.mjs, and this block only asks
+# it. Undeclared is never guessed: on a TTY the prompt below is where the declaration is
+# CREATED (written to brain.config.json, NOT to .env — see the note at the write);
+# without a TTY nothing is guessed and memory setup is skipped with the fix named.
 say "$I18N_BOOTSTRAP_MEMORY_SECTION"
-MEMORY_BACKEND="$(env_get MEMORY_BACKEND)"
-if [ -z "$MEMORY_BACKEND" ]; then
-  if [ -t 0 ]; then
-    # --- BEGIN memory-backend-validate (issue #1112, cold-review should-fix 3) ---
-    # Same validation shape as vcs-provider-validate (finding 2) — reused
-    # rather than a second style for the same class of prompt: read into a
-    # scratch variable, `case` it against the closed set, re-prompt on
-    # anything else. Only the two real backends
-    # (axes/memory/adapters/engram.mjs, axes/memory/adapters/plainfiles.mjs)
-    # are accepted; anything else would land in .env and fail later,
-    # silently, deep inside memory/cli.mjs's backend dispatch. Reads into
-    # `_membackend_answer`, not `$MEMORY_BACKEND` directly, so this loop's
-    # own `case` is textually distinct from the real backend-dispatch `case
-    # "$MEMORY_BACKEND" in` a few lines below — two different literal lines
-    # for two different jobs, never one string a test's own extraction could
-    # match by accident.
-    while :; do
-      read -r -p "  $I18N_BOOTSTRAP_MEMORY_PROMPT" _membackend_answer
-      case "$_membackend_answer" in
-        engram|plainfiles|'') break ;;
-        *) printf '  ✗ Unknown backend "%s" — only "engram" or "plainfiles" are supported.\n' "$_membackend_answer" >&2 ;;
-      esac
-    done
-    MEMORY_BACKEND="$_membackend_answer"
-    # --- END memory-backend-validate ---
+MEMORY_BACKEND=""
+_mb_rc=0
+_mb_err="$(mktemp)"
+_mb_res="$(node "$BRAIN_SCRIPTS/memory/lib/backend-resolve.mjs" --root "$PWD" 2>"$_mb_err")" || _mb_rc=$?
+_mb_source=""
+case "$_mb_rc" in
+  0)
+    MEMORY_BACKEND="${_mb_res%% *}"
+    _mb_source="${_mb_res#* }"
+    ;;
+  4)
+    _mb_bad="${_mb_res#! }"
+    warn "$(printf "$I18N_BOOTSTRAP_MEMORY_INVALID" "${_mb_bad%% *}" "${_mb_bad#* }")"
+    MISSING_OPTIONAL+=("memory backend invalid (next: npm run brain:config -- set memory.backend engram|plainfiles)")
+    ;;
+  5)
+    # brain.config.json exists but could not be read and nothing else declares a backend:
+    # "could not look" is NOT "declared nothing" — do not prompt, do not write over it.
+    warn "$(printf "$I18N_BOOTSTRAP_MEMORY_UNREADABLE" "$(head -c 300 "$_mb_err")")"
+    MISSING_OPTIONAL+=("memory backend not resolved: brain.config.json unreadable (fix or restore it, then re-run env:init)")
+    ;;
+  3)
+    if [ -t 0 ]; then
+      # --- BEGIN memory-backend-validate (issue #1112, cold-review should-fix 3) ---
+      # Same validation shape as vcs-provider-validate (finding 2) — reused
+      # rather than a second style for the same class of prompt: read into a
+      # scratch variable, `case` it against the closed set, re-prompt on
+      # anything else. Only the two real backends
+      # (axes/memory/adapters/engram.mjs, axes/memory/adapters/plainfiles.mjs)
+      # are accepted; anything else would land in config and be refused later,
+      # far from where the operator typed it. Reads into
+      # `_membackend_answer`, not `$MEMORY_BACKEND` directly, so this loop's
+      # own `case` is textually distinct from the real backend-dispatch `case
+      # "$MEMORY_BACKEND" in` a few lines below — two different literal lines
+      # for two different jobs, never one string a test's own extraction could
+      # match by accident.
+      while :; do
+        read -r -p "  $I18N_BOOTSTRAP_MEMORY_PROMPT" _membackend_answer
+        case "$_membackend_answer" in
+          engram|plainfiles|'') break ;;
+          *) printf '  ✗ Unknown backend "%s" — only "engram" or "plainfiles" are supported.\n' "$_membackend_answer" >&2 ;;
+        esac
+      done
+      MEMORY_BACKEND="$_membackend_answer"
+      # --- END memory-backend-validate ---
+      # Enter accepts the default the prompt itself names — a human's answer, not a guess.
+      MEMORY_BACKEND="${MEMORY_BACKEND:-engram}"
+      # The declaration goes to TRACKED config and NOT to .env: writing .env too would
+      # recreate the drift this exists to stop (a stale per-machine line silently beating
+      # the team's value). .env stays what it always was: a per-machine override.
+      if node "$BRAIN_SCRIPTS/config/cli.mjs" set memory.backend "$MEMORY_BACKEND" >/dev/null 2>&1; then
+        warn "$I18N_BOOTSTRAP_MEMORY_DECLARED"
+        _mb_source="config"
+      else
+        warn "$(printf "$I18N_BOOTSTRAP_MEMORY_DECLAREFAILED" "$MEMORY_BACKEND")"
+        MISSING_OPTIONAL+=("memory backend not saved to brain.config.json (next: npm run brain:config -- set memory.backend $MEMORY_BACKEND)")
+        _mb_source="prompt"
+      fi
+    else
+      warn "$I18N_BOOTSTRAP_MEMORY_UNDECLARED"
+      MISSING_OPTIONAL+=("memory backend undeclared (next: npm run brain:config -- set memory.backend engram|plainfiles, then re-run env:init)")
+    fi
+    ;;
+  *)
+    # Any other exit (node crashed, resolver missing) is a FAILURE of the check, not an answer.
+    warn "$(printf "$I18N_BOOTSTRAP_MEMORY_RESOLVERFAILED" "$_mb_rc")"
+    MISSING_OPTIONAL+=("memory backend not resolved: the resolver exited $_mb_rc (next: node brain/scripts/memory/lib/backend-resolve.mjs)")
+    ;;
+esac
+rm -f "$_mb_err"
+if [ -n "$MEMORY_BACKEND" ]; then
+  case "$_mb_source" in
+    shell) _mb_where="env" ;;
+    file) _mb_where=".env" ;;
+    config) _mb_where="brain.config.json" ;;
+    *) _mb_where="prompt" ;;
+  esac
+  ok "$(printf "$I18N_BOOTSTRAP_MEMORY_BACKEND" "$MEMORY_BACKEND" "$_mb_where")"
+  if [ "$_mb_source" = "file" ]; then
+    # A backend that exists only in this machine's .env is invisible to every other
+    # checkout. Existing consumers keep working unchanged; they are TOLD, and never
+    # migrated silently — moving it is a tracked-file edit the operator commits.
+    _mb_cfg="$(node "$BRAIN_SCRIPTS/config/cli.mjs" get memory.backend 2>/dev/null | tr -d '"' || true)"  # swallow-ok: an unset key is the answer being asked for
+    if [ -z "$_mb_cfg" ]; then
+      warn "$(printf "$I18N_BOOTSTRAP_MEMORY_ENVONLY" "$MEMORY_BACKEND" "$MEMORY_BACKEND")"
+    elif [ "$_mb_cfg" != "$MEMORY_BACKEND" ]; then
+      warn "$(printf "$I18N_BOOTSTRAP_MEMORY_ENVSHADOWS" ".env" "$MEMORY_BACKEND" "$_mb_cfg")"
+    fi
   fi
-  MEMORY_BACKEND="${MEMORY_BACKEND:-engram}"
-  env_set MEMORY_BACKEND "$MEMORY_BACKEND"
+  # Same reasoning as AGENT_PLATFORM/SDD_ENGINE above (issue #1093):
+  # memory/cli.mjs also resolves its selector from its OWN module location.
+  export MEMORY_BACKEND
 fi
-ok "$(printf "$I18N_BOOTSTRAP_MEMORY_BACKEND" "$MEMORY_BACKEND")"
-# Same reasoning as AGENT_PLATFORM/SDD_ENGINE above (issue #1093):
-# memory/cli.mjs also resolves .env from its OWN module location.
-export MEMORY_BACKEND
 
 git config core.hooksPath brain/scripts/hooks \
   && ok "$I18N_BOOTSTRAP_MEMORY_HOOKOK" \
@@ -619,6 +708,9 @@ run_memory_index() {
 # --- END memory-step-helpers ---
 
 case "$MEMORY_BACKEND" in
+  '')
+    # Nothing declared (or invalid): already reported above, and no backend was guessed.
+    ;;
   engram)
     # Delegate setup (symlink + merge driver) to the backend module — no duplication.
     if command -v node >/dev/null 2>&1; then
@@ -678,7 +770,7 @@ cat <<'EOT'
        (pulls memory, shows open tickets, checks for brain updates)
     3. Pick a ticket and create your branch: {type}/issue-{iid}-{slug}.
     4. Plan a feature with SDD: brain:project:feature -- --issue [ID]
-    5. Before pushing: brain:repo:check; capture durable memory with brain:memory:save --issue <id> (the enabled memory lane ships it)
+    5. Before pushing: brain:repo:check; capture durable memory with brain:memory:save --issue <id> (the memory lane, if enabled, ships it; env:init states whether it is)
 EOT
 if [ "${#MISSING_OPTIONAL[@]}" -gt 0 ]; then
   printf "  $I18N_BOOTSTRAP_DONE_PENDING\n" "${MISSING_OPTIONAL[*]}"

@@ -295,7 +295,7 @@ test('PR3 bootstrap: SDD harness section keys exist in en', () => {
 test('PR3 bootstrap: team memory section keys exist in en', () => {
   assert.equal(en['bootstrap.memory.section'],         'Team memory');
   assert.equal(en['bootstrap.memory.prompt'],          'Which memory backend do you use? [engram]: ');
-  assert.equal(en['bootstrap.memory.backend'],         'memory backend: {backend} (.env)');
+  assert.equal(en['bootstrap.memory.backend'],         'memory backend: {backend} ({source})');
   assert.equal(en['bootstrap.memory.hookOk'],          'pre-push hook activated (checkpoints feature working memory before push — ADR-0003)');
   assert.equal(en['bootstrap.memory.hookFailed'],      'could not activate core.hooksPath (pre-push hook)');
   assert.equal(en['bootstrap.memory.nodeAbsent'],      'node absent — engram backend setup skipped');

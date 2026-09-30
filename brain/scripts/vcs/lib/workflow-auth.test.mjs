@@ -622,3 +622,20 @@ test('W2: a corrupt manifest still fails closed via the D2 whole-file fallback �
     }
   );
 });
+
+// ── #1162: a subcommand followed by `)` (command substitution) still resolves ──
+// `win_out="$(node …/cursor.mjs window)"` is the ordinary spelling; the token
+// used to be read as `window)`, an unknown subcommand, so the step was
+// undecidable. cursor.mjs is a multiplexer: `window`/`accept` touch git only,
+// `bootstrap` reaches the port (prior-run evidence).
+
+test('#1162: `$(node cursor.mjs window)` resolves as the git-only subcommand — no credential needed', () => {
+  const y = wrap('      - name: w\n        run: |\n          out="$(node brain/scripts/governance/postmerge/cursor.mjs window)"');
+  assert.deepEqual(audit(y), []);
+});
+
+test('#1162: `$(node cursor.mjs bootstrap …)` reaches the port — flagged without VCS_TOKEN, clean with it', () => {
+  const run = '        run: |\n          out="$(node brain/scripts/governance/postmerge/cursor.mjs bootstrap wf.yml --branch main)"';
+  assert.ok(audit(wrap(`      - name: b\n${run}`)).some(m => /VCS_TOKEN/.test(m)));
+  assert.deepEqual(audit(wrap(`      - name: b\n        env:\n          VCS_TOKEN: \${{ github.token }}\n${run}`)), []);
+});

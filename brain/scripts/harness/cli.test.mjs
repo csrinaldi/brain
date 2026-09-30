@@ -14,7 +14,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { resolveHarness, resolvePlatform, resolveEngine, resolveMemory, dispatch, VALID_OPS } from './cli.mjs';
+import { resolveHarness, resolvePlatform, resolveEngine, dispatch, VALID_OPS } from './cli.mjs';
 import { SDD_ENGINES, DEFAULT_PLATFORM, AGENT_PLATFORMS } from './platform.mjs';
 
 // ── 3-axis resolution tests (issue #305) ───────────────────────────────────
@@ -134,11 +134,6 @@ test('#312 D2: cli.mjs holds no inline engine-membership literal of its own — 
     src, /\[\s*['"]gentle-ai['"]\s*,\s*['"]plain['"]\s*\]/,
     'cli.mjs must read SDD_ENGINES from platform.mjs, not hold its own copy of the engine-axis membership',
   );
-});
-
-test('resolveMemory: defaults to engram when absent', () => {
-  const result = resolveMemory({ env: {}, envVars: {} });
-  assert.equal(result, 'engram');
 });
 
 // ── (b) resolveHarness: .env value used when env var absent ──────────────────

@@ -221,7 +221,15 @@ export default {
   'bootstrap.memory.section':        'Team memory',
   'bootstrap.memory.prompt':         'Which memory backend do you use? [engram]: ',
   // {backend} = backend name (e.g. engram)
-  'bootstrap.memory.backend':        'memory backend: {backend} (.env)',
+  'bootstrap.memory.backend':        'memory backend: {backend} ({source})',
+  'bootstrap.memory.undeclared':     'no memory backend is declared (env, .env, brain.config.json memory.backend) — none was guessed, so memory setup was skipped. Next: npm run brain:config -- set memory.backend engram|plainfiles, then re-run env:init.',
+  'bootstrap.memory.invalid':        "memory backend '{value}' (from {source}) is not 'engram' or 'plainfiles' — memory setup skipped. Fix it where it is set, then re-run env:init.",
+  'bootstrap.memory.unreadable':     "could not read brain.config.json, so no memory backend could be resolved — {detail}. Nothing was prompted or written; fix or restore the file, then re-run env:init.",
+  'bootstrap.memory.resolverFailed': "the memory backend resolver failed (exit {code}) — that is the check failing, not a backend being undeclared. Nothing was prompted or written.",
+  'bootstrap.memory.declared':       'memory backend saved to brain.config.json (memory.backend) — commit it so every checkout runs the same backend',
+  'bootstrap.memory.declareFailed':  'could not write memory.backend to brain.config.json — set it with: npm run brain:config -- set memory.backend {backend}',
+  'bootstrap.memory.envOnly':        'memory backend {backend} comes only from this machine\'s .env — teammates and fresh clones will not see it. To share it with the team: npm run brain:config -- set memory.backend {backend}',
+  'bootstrap.memory.envShadows':     'the {source} value ({backend}) overrides brain.config.json memory.backend ({configured}) on this machine',
   'bootstrap.memory.hookOk':         'pre-push hook activated (checkpoints feature working memory before push — ADR-0003)',
   'bootstrap.memory.hookFailed':     'could not activate core.hooksPath (pre-push hook)',
   'bootstrap.memory.nodeAbsent':     'node absent — engram backend setup skipped',
@@ -265,6 +273,10 @@ export default {
   'config.tier.why.standard':  'standard is for a team: a merge needs a second, non-author approval.',
   'config.tier.why.regulated': 'regulated is for audited work: the strictest evidence, and no waivers.',
   'config.tier.change':    'To change it, set governance.tier in brain.config.json to lite, standard (a team: a second, non-author approval) or regulated (audited: the strictest evidence, no waivers) — e.g. npm run brain:config -- set governance.tier standard — then re-run npm run brain:protect.',
+  'config.lane.on':        'memory lane: on — memory records ship to main on their own pull request (memory.lane.enabled in brain.config.json).',
+  'config.lane.off':       'memory lane: off — memory records stay in your clone; nothing ships them to main for you.',
+  'config.lane.why':       'The lane is off by default on every tier because it opens a separate pull request for memory records that a maintainer has to merge; turning it on is a deliberate choice.',
+  'config.lane.enable':    'To turn it on: npm run brain:config -- set memory.lane.enabled true',
 
   // ── install-tools.sh (PR3) ────────────────────────────────────────────────────
   // Pre-check (before eval — inline English default used in the script)
@@ -373,6 +385,7 @@ export default {
   'session.memory.ok':          'memory:   engram hydrated',
   'session.memory.skip':        'memory:   engram unavailable (skipped)',
   // #923 — the hydration failure cause, when available (see step2HydrateEngram).
+  'session.memory.notDeclared': "memory:   hydration skipped, nothing was tried — {reason}",
   'session.memory.skip.reason': 'memory:   engram unavailable (skipped) — {reason}',
   'session.memory.recency.stale':   'memory:   newest durable record is {days} days old — nothing captured since (see #519)',
   'session.memory.recency.unknown': 'memory:   no durable record found — cannot determine when memory was last captured',
@@ -487,8 +500,14 @@ export default {
   // would assume. Silence is the whole defect: `MEMORY_BACKEND=plainfiles`
   // worked all along, and because nothing ever said so, the engram-only error
   // read as "capture is impossible here".
-  'memory.backend.substituted': 'the `{from}` binary is not installed here, so `{op}` ran on the records-only `{fallback}` backend instead — same records, same validation, no backend required (ADR-0017). MEMORY_BACKEND was not set, so no stated choice was overridden; set it to pin either backend explicitly.',
-  'memory.backend.statedButAbsent': 'MEMORY_BACKEND={backend} is set explicitly, but the `{backend}` binary is not on PATH here — a stated selector is never overridden (ADR-0004), so this run will fail. Records-only capture needs no backend: `MEMORY_BACKEND={fallback} npm run brain:memory:{op}`.',
+  // #1165: an undeclared/invalid selector is refused with the fix named, never guessed.
+  'memory.backend.undeclared': "no memory backend is declared, so `{op}` will not guess one. The team's choice belongs in tracked config: `npm run brain:config -- set memory.backend engram` (or `plainfiles`). Per-run override: MEMORY_BACKEND=<backend> (env or .env). Or run `npm run brain:env:init`, which asks once and writes it.",
+  'memory.backend.invalid': "memory backend '{value}' (from {source}) is not one of: {allowed}. Nothing was run. Fix it where it is set: `npm run brain:config -- set memory.backend <backend>` for the team's config, or the MEMORY_BACKEND line in .env.",
+  'memory.backend.saveDeferred.undeclared': "nothing declares a memory backend, so this record was saved to .memory/records/ only — hydration into a backend is deferred until one is declared (`npm run brain:config -- set memory.backend engram|plainfiles`). The record is durable; nothing was lost.",
+  'memory.backend.saveDeferred.invalid': "the declared memory backend '{value}' is not a backend, so this record was saved to .memory/records/ only — hydration is deferred until it is fixed (`npm run brain:config -- set memory.backend engram|plainfiles`). The record is durable; nothing was lost.",
+  'memory.backend.shadowed': "the memory backend from {winner} ({backend}) overrides {loser} ({other}) on this run.",
+  'memory.backend.substituted': "the `{from}` binary is not installed here, so `{op}` ran on the records-only `{fallback}` backend instead — same records, same validation, no backend required (ADR-0017). {source} still declares `{from}`, and that is unchanged: hydration into `{from}` is deferred until it is installed, then re-run `npm run brain:memory:{op}`.",
+  'memory.backend.statedButAbsent': "{source} sets the memory backend to {backend} explicitly, but the `{backend}` binary is not on PATH here — a stated selector is never overridden (ADR-0004), so this run will fail. Records-only capture needs no backend: `MEMORY_BACKEND={fallback} npm run brain:memory:{op}`.",
   'memory.backend.probeFailed': 'could not determine whether the `{backend}` binary is present — {reason}. That is the CHECK failing, not the binary being absent, so nothing was substituted and `{op}` continues on `{backend}`. If it fails, the records-only route is `MEMORY_BACKEND={fallback} npm run brain:memory:{op}`.',
 
   // ── axes/memory/adapters/engram.mjs — share() secret scrub (issue #214, C1b) ──────

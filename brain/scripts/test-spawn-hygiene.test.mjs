@@ -361,9 +361,11 @@ const ALLOWLIST = [
 
   // ── postmerge cursor: real git push, local bare origin only ────────────
   { file: 'brain/scripts/governance/postmerge/cursor.test.mjs', entrypoint: 'brain/scripts/governance/postmerge/cursor.mjs', reason: 'fixture-root-local-git' },
+  { file: 'brain/scripts/governance/postmerge/cursor.test.mjs', entrypoint: 'brain/scripts/brain-audit.mjs', reason: 'no-vcs-capability' },
 
   // ── git hooks: run directly, never through a real `git push`/network ───
   { file: 'brain/scripts/hooks/commit-msg.test.mjs', entrypoint: 'brain/scripts/hooks/commit-msg', reason: 'no-vcs-capability' },
+  { file: 'brain/scripts/hooks/commit-msg.first-commit.test.mjs', entrypoint: '<unresolved>', line: 112, reason: 'no-vcs-capability' }, // runs the commit-msg hook directly, no VCS port
   { file: 'brain/scripts/hooks/hooks.attribution-parity.test.mjs', entrypoint: 'brain/scripts/hooks/commit-msg', reason: 'no-vcs-capability' },
   // #1127: bash runs install-tools.sh's provider-resolution and summary snippets, lifted verbatim, in a scratch dir with a gentle-ai shim — no apt, no network.
   // #1127 slice A: bash runs bootstrap.sh's step snippets, lifted verbatim, against failing stand-in scripts in a scratch dir — no git remote, no network.
@@ -371,6 +373,13 @@ const ALLOWLIST = [
   // #1127 round 3: the REAL bootstrap.sh in a hermetic box — HOME/XDG under the temp root, a PATH of only shimmed host tools (no gh, glab, engram, gentle-ai, codex; a python3 grep), stdin closed, a COPY of the brain tree; the unhealthy case pulls from a local bare repo, never a network.
   { file: 'brain/scripts/bootstrap.e2e.test.mjs', entrypoint: '<unresolved>', line: 66, reason: 'no-vcs-capability' },
   { file: 'brain/scripts/bootstrap.e2e.test.mjs', entrypoint: 'brain/scripts/bootstrap.sh', line: 108, reason: 'no-vcs-capability' },
+  // #1165: the same e2e box runs `config set memory.backend` (the write env:init performs on a TTY) and the resolver CLI bash asks — both local, read/write of the fixture's own brain.config.json.
+  { file: 'brain/scripts/bootstrap.e2e.test.mjs', entrypoint: 'brain/scripts/config/cli.mjs', reason: 'no-vcs-capability' },
+  { file: 'brain/scripts/bootstrap.e2e.test.mjs', entrypoint: 'brain/scripts/memory/lib/backend-resolve.mjs', reason: 'no-vcs-capability' },
+  // #1165: a real origin + FRESH CLONE carrying a copy of the brain, driving memory/cli.mjs (plainfiles/refusal paths only; PATH has no engram).
+  { file: 'brain/scripts/memory/cli.backend-declaration.test.mjs', entrypoint: 'brain/scripts/memory/cli.mjs', reason: 'no-vcs-capability' },
+  { file: 'brain/scripts/memory/cli.backend-declaration.test.mjs', entrypoint: '<unresolved>', line: 29, reason: 'no-vcs-capability' },
+  { file: 'brain/scripts/memory/lib/backend-resolve.test.mjs', entrypoint: 'brain/scripts/memory/lib/backend-resolve.mjs', reason: 'no-vcs-capability' },
   // #1127: `brain-config.mjs ensure` run from a COPY of the tree in a temp repo, to pin its exit code.
   { file: 'brain/scripts/lib/brain-config.ensure-cli.test.mjs', entrypoint: 'brain/scripts/lib/brain-config.mjs', line: 28, reason: 'no-vcs-capability' },
   { file: 'brain/scripts/install-tools.test.mjs', entrypoint: '<unresolved>', line: 34, reason: 'no-vcs-capability' },
@@ -379,6 +388,7 @@ const ALLOWLIST = [
   { file: 'brain/scripts/brain-promote.golden.test.mjs', entrypoint: 'brain/scripts/hooks/commit-msg', reason: 'no-vcs-capability' }, // #1127: masked away by the old masker (a regex literal holding a quote); runs the hook on a message file, no VCS
   { file: 'brain/scripts/hooks/pre-commit.test.mjs', entrypoint: 'brain/scripts/hooks/pre-commit', reason: 'no-vcs-capability' },
   { file: 'brain/scripts/hooks/pre-push.test.mjs', entrypoint: 'brain/scripts/hooks/pre-push', reason: 'no-vcs-capability' },
+  { file: 'brain/scripts/hooks/post-merge.undeclared.test.mjs', entrypoint: 'brain/scripts/hooks/post-merge', reason: 'no-vcs-capability' },
   { file: 'brain/scripts/hooks/hooks.stream-discipline.test.mjs', entrypoint: '<unresolved>', line: 98, reason: 'no-vcs-capability' },
   { file: 'brain/scripts/axes/platform/lib/settings-hooks.test.mjs', entrypoint: '<unresolved>', line: 93, reason: 'no-vcs-capability' },
   { file: 'brain/scripts/bootstrap.worktree.test.mjs', entrypoint: '<unresolved>', line: 64, reason: 'no-vcs-capability' },
@@ -405,7 +415,7 @@ const ALLOWLIST = [
   { file: 'brain/scripts/memory/lib/hydration-guard.processes.integration.test.mjs', entrypoint: '<unresolved>', line: 40, reason: 'no-vcs-capability' },
 
   // ── postmerge release workflow: real git, extracted YAML steps, local fixture repo ──
-  { file: 'brain/scripts/vcs/release-postmerge-workflows.test.mjs', entrypoint: '<unresolved>', line: 132, reason: 'fixture-root-local-git' },
+  { file: 'brain/scripts/vcs/release-postmerge-workflows.test.mjs', entrypoint: '<unresolved>', line: 135, reason: 'fixture-root-local-git' },
 
   // ── regulated-review e2e: vendored review binary against a fixture PR ──
   { file: 'test/review-regulated/regulated-review.e2e.test.mjs', entrypoint: '<unresolved>', line: 47, reason: 'fixture-root-local-git' },
