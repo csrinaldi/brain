@@ -72,11 +72,14 @@ export function git(cwd, ...args) {
 }
 
 
-/** Copies the brain under test (not its tests) into `dir`. */
-export function installBrain(dir) {
+/**
+ * Copies the brain under test into `dir`. Tests are left out unless `keepTests`: a consumer
+ * gets them with the managed copy, and `brain:nav` checks that core docs' cited test files exist.
+ */
+export function installBrain(dir, { keepTests = false } = {}) {
   cpSync(join(REPO, 'brain'), join(dir, 'brain'), {
     recursive: true,
-    filter: (src) => !src.includes('node_modules') && !/\.test\.mjs$/.test(src),
+    filter: (src) => !src.includes('node_modules') && (keepTests || !/\.test\.mjs$/.test(src)),
   });
   cpSync(join(REPO, 'package.json'), join(dir, 'package.json'));
 }

@@ -7,4 +7,4 @@
 - [x] Red/green: hermetic fresh-consumer e2e, `mrCreate` reaches the fake port (`brain-ship.fresh-consumer.e2e.test.mjs`)
 - [x] Extract `lib/hermetic-box.mjs` from `bootstrap.e2e.test.mjs`
 - [x] `release-notes.md` guide text (adoption.md is not edited here)
-- [ ] Follow-up (out of scope): `brain:check` does not run `brain:nav` / `memory:index-lag` that CI's `local-checks` runs
+- [x] `brain:check` runs `brain:nav` and `index-lag`; step list derived from governance.yml (PR #1192 review)

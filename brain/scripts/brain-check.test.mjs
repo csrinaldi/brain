@@ -164,3 +164,22 @@ test('#1186 (a): issue-link asks the port about the configured slug, never `unde
   assert.ok(!result.failures.some(f => f.check === 'issueLink') && !result.unverified.some(f => f.check === 'issueLink'),
     `issueLink must resolve: ${result.summary}`);
 });
+
+// ── local-checks parity: every step of the CI job, not just two of four ─────────────
+
+test('#1186 local-checks: a failing brain:nav blocks locally, as the CI step does', async () => {
+  const { runCheck } = await import('./brain-check.mjs');
+  const result = await runCheck(makeCtx({ navCheckFn: async () => ({ ok: false, output: 'broken link' }) }));
+  assert.equal(result.exitCode, 1);
+  assert.ok(result.failures.some(f => f.check === 'navCheck'), JSON.stringify(result.failures));
+});
+
+test('#1186 local-checks: index lag is a warning, never a failure — same as the CI step', async () => {
+  const { runCheck } = await import('./brain-check.mjs');
+  const result = await runCheck(makeCtx({
+    // The script ALWAYS exits 0 (index-lag.mjs header); even a non-zero exit must not block.
+    indexLagFn: async () => ({ ok: false, output: 'WARNING: index lags records (1 indexed, 2 rebuilt)' }),
+  }));
+  assert.equal(result.exitCode, 0, JSON.stringify(result.failures));
+  assert.match(result.summary, /\[PASS\] indexLag — ::warning::.*index lags records/);
+});

@@ -17,5 +17,5 @@ The 1.10.0 exit demonstration (#1185) could not open a fresh consumer's first PR
 - `diffSize` and `adrPresence` stay on the pure predicates CI calls (same function, same tier budget); the `size:exception` divergence remains the safe direction (#340).
 
 ## Out of scope
-- CI's `local-checks` also runs `brain:nav` and `memory:index-lag`; `brain:check` does not. That is local laxer than CI, pre-existing, not a fresh-consumer blocker. Left for a follow-up.
+- (Closed in the PR #1192 review: `brain:check` now runs `brain:nav` and `memory:index-lag` too.)
 - `docs/adoption.md` and `brain/core|project/**` are untouched; guide text is in `release-notes.md`.

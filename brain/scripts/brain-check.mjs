@@ -115,7 +115,26 @@ export const CI_COUNTERPART = Object.freeze({
   memoryPresence: 'memory-gate',
   npmTest: 'local-checks', // the `npm test` step, which CI runs only in the brain source repo
   repoCheck: 'local-checks', // the `brain:repo:check` step
+  navCheck: 'local-checks', // the `brain:nav` step
+  indexLag: 'local-checks', // the `memory/index-lag.mjs` step — warning-only in CI, so here too
 });
+
+/**
+ * Every CI `run:` command brain:check executes (or, for the governance jobs, evaluates through
+ * the same predicate). `local-ci-parity.test.mjs` derives the run steps of each mapped job from
+ * `.github/workflows/governance.yml` and requires each to be listed here: a step added to a CI
+ * job fails that test until brain:check runs it too (#1186, PR #1192 review).
+ */
+export const CI_STEPS_COVERED = Object.freeze([
+  'node brain/scripts/governance/run-check.mjs issue-link',
+  'node brain/scripts/governance/run-check.mjs diff-size',
+  'node brain/scripts/governance/run-check.mjs memory-gate',
+  'node brain/scripts/governance/run-check.mjs decision-gate',
+  'npm run brain:repo:check',
+  'npm run brain:nav',
+  'node brain/scripts/memory/index-lag.mjs',
+  'npm test',
+]);
 
 function spawnCommand(cmd, args, cwd) {
   const r = spawnSync(cmd, args, { encoding: 'utf8', cwd });
@@ -180,6 +199,10 @@ export async function runCheck({
   npmTestApplicability: npmApplicability = { applicable: true },
   npmTestFn,
   repoCheckFn,
+  // The other two steps of CI's `local-checks`. Default to a pass so hermetic unit tests that
+  // do not exercise them stay pure; the CLI always injects the real scripts.
+  navCheckFn = async () => ({ ok: true }),
+  indexLagFn = async () => ({ ok: true }),
 }) {
   // The context the CI evaluator reads. ONE object feeding both checks, because
   // `memory-gate` resolves the issue number from the same body `issue-link` does — two
@@ -226,9 +249,11 @@ export async function runCheck({
   // Run async checks. `npm test` runs only where CI runs it (#1187): an inapplicable one
   // is REPORTED as not applicable — never silently omitted, never a failure.
   const npmApplicable = npmApplicability.applicable !== false;
-  const [npmResult, repoResult] = await Promise.all([
+  const [npmResult, repoResult, navResult, lagResult] = await Promise.all([
     npmApplicable ? npmTestFn() : Promise.resolve(null),
     repoCheckFn(),
+    navCheckFn(),
+    indexLagFn(),
   ]);
   if (npmResult === null) {
     checks.push({ check: 'npmTest', result: { pass: true, notApplicable: true, reason: npmApplicability.reason } });
@@ -239,6 +264,15 @@ export async function runCheck({
   }
   if (!repoResult.ok) checks.push({ check: 'repoCheck', result: { pass: false, reason: repoResult.output?.split('\n').slice(-3).join(' ') || 'repo:check failed' } });
   else checks.push({ check: 'repoCheck', result: { pass: true } });
+  if (!navResult.ok) checks.push({ check: 'navCheck', result: { pass: false, reason: navResult.output?.split('\n').slice(-3).join(' ') || 'brain:nav failed' } });
+  else checks.push({ check: 'navCheck', result: { pass: true } });
+  // index-lag never blocks in CI (the script always exits 0 and only warns), so it never blocks
+  // here either: whatever it printed becomes a `::warning::`, and the check passes.
+  const lagText = (lagResult.output ?? '').trim();
+  checks.push({
+    check: 'indexLag',
+    result: { pass: true, ...(lagText ? { reason: `::warning::${lagText.split('\n').join(' ')}` } : {}) },
+  });
 
   // THREE outcomes, not two (#340). A check whose evidence could not be gathered —
   // no network for the approved-label lookup, an unresolvable default branch — is
@@ -300,6 +334,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     npmTestApplicability: npmTestApplicability({ cwd }),
     npmTestFn: () => spawnCommand('npm', ['test'], cwd),
     repoCheckFn: () => spawnCommand('node', ['brain/scripts/check-refs.mjs'], cwd),
+    navCheckFn: () => spawnCommand('node', ['brain/scripts/check-brain-nav.mjs'], cwd),
+    indexLagFn: () => spawnCommand('node', ['brain/scripts/memory/index-lag.mjs'], cwd),
   });
 
   console.log('\nbrain:check results:\n');

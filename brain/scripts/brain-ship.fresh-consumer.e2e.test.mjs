@@ -16,9 +16,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, writeFileSync, readFileSync, chmodSync, existsSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readFileSync, chmodSync, existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { testTmp } from './lib/test-tmp.mjs';
+import { ensureHome } from './lib/home-scaffold.mjs';
 import { git, installBrain, hermeticEnv } from './lib/hermetic-box.mjs';
 
 const SLUG = 'acme/widgets';
@@ -61,7 +62,12 @@ function freshConsumer({ tier = 'lite' } = {}) {
   git(repo, 'init', '-q', '-b', 'main');
   git(repo, 'config', 'user.email', 't@example.com');
   git(repo, 'config', 'user.name', 't');
-  installBrain(repo);
+  // A consumer's tree, not brain's own: the managed copy (tests included, which brain:nav's cited-path
+  // check needs) without `brain/project/**`, and the HOME.md `brain init` scaffolds.
+  installBrain(repo, { keepTests: true });
+  rmSync(join(repo, 'brain', 'project'), { recursive: true, force: true });
+  rmSync(join(repo, 'brain', 'HOME.md'));
+  ensureHome(repo); // the real scaffold `env:init` writes, from the COPY's own template
   // What `npm init -y` leaves behind, plus the two verbs under test.
   writeFileSync(join(repo, 'package.json'), JSON.stringify({
     name: 'brain-test-fresh',

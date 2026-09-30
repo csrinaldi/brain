@@ -11,3 +11,6 @@
 - Fresh consumer, `lite`: `[PASS] issueLink`, `[PASS] memoryPresence — ::warning::... (tier: lite)`, `[N/A] npmTest`, PR opened.
 - Same consumer at `standard`: `[FAIL] memoryPresence`, zero remote writes.
 - No remote reachable and no `origin/HEAD`: `issueLink` UNVERIFIED with its own reason; exit 0 from `brain:check`, as before (#340).
+
+## Addendum (PR #1192 review)
+- REQ-7: `brain:check` runs every `run:` step of each CI job it claims to front-run: for `local-checks`, `brain:repo:check`, `brain:nav`, `memory/index-lag.mjs` (warning-only, never fails) and the conditional `npm test`. `CI_STEPS_COVERED` lists them and `local-ci-parity.test.mjs` derives each mapped job's steps from `governance.yml`, so a new CI step fails the test until `brain:check` runs it.
