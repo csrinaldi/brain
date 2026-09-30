@@ -12,7 +12,6 @@ import {
   AGENT_ENV_DEFAULT,
   AGENT_ENV_DEFAULTS,
   RESERVED_ACTORS,
-  ISSUE_BRANCH_RE,
   resolveActor,
   resolveActorKind,
   deriveIssue,
@@ -172,7 +171,7 @@ test("deriveIssue: 'feat/issue-738-x' branch ⇒ 738, derived", () => {
   const r = deriveIssue({ declared: undefined, branch: 'feat/issue-738-x' });
   assert.equal(r.issue, 738);
   assert.equal(r.derived, true);
-  assert.ok(ISSUE_BRANCH_RE.test('feat/issue-738-x'));
+  
 });
 
 // Digit-bearing branches that are NOT the `issue-<N>` shape (MINOR-3b,

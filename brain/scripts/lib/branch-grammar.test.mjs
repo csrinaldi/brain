@@ -16,3 +16,18 @@ test('branch-grammar: anything else is null, never a fabricated number', () => {
     assert.equal(parseIssueBranch(b), null, String(b));
   }
 });
+
+import { composeIssueBranch, titleSlug } from './branch-grammar.mjs';
+
+test('composeIssueBranch: the branch ticket:start creates, and parseIssueBranch reads it back', () => {
+  const b = composeIssueBranch({ type: 'fix', number: 5, title: 'Fix: Ünï thing!' });
+  assert.equal(b, 'fix/issue-5-fix-uni-thing');
+  assert.equal(parseIssueBranch(b).issueNumber, '5');
+});
+
+test('composeIssueBranch: a title with no ASCII alphanumerics falls back to "task"', () => {
+  for (const title of ['!!!', '日本語', '']) {
+    assert.equal(composeIssueBranch({ type: 'fix', number: 5, title }), 'fix/issue-5-task');
+  }
+  assert.equal(titleSlug('a'.repeat(60)).length, 40);
+});

@@ -19,7 +19,7 @@ import { copyFileSync, existsSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { loadBrainConfig } from './lib/brain-config.mjs';
 import { deriveBranchType } from './lib/branch-type.mjs';
-import { nonEmptySlug } from './lib/branch-grammar.mjs';
+import { composeIssueBranch } from './lib/branch-grammar.mjs';
 import { getVcs, resolveProviderName } from './vcs/cli.mjs';
 import { originIdentity } from './vcs/lib/repo.mjs';
 import { vcsToken, readEnvVar } from './vcs/lib/token.mjs';
@@ -132,17 +132,7 @@ const labels = issue.labels ?? [];
 const branchType = deriveBranchType(labels);
 
 // ── Build the slug from the title ─────────────────────────────────────────────
-const slug = issue.title
-  .toLowerCase()
-  .normalize('NFD').replace(/[̀-ͯ]/g, '')
-  .replace(/[^a-z0-9\s-]/g, '')
-  .trim()
-  .replace(/\s+/g, '-')
-  .replace(/-+/g, '-')
-  .slice(0, 40)
-  .replace(/-$/, '');
-
-const branchName = `${branchType}/issue-${issue.number}-${nonEmptySlug(slug)}`;
+const branchName = composeIssueBranch({ type: branchType, number: issue.number, title: issue.title });
 
 // ── Show the issue context ────────────────────────────────────────────────────
 console.log('');

@@ -23,7 +23,6 @@ const MATRIX = [
   ['feature/42',             N,   N,   N,   42,  N,   N],
   ['claude/some-slug',       N,   N,   N,   N,   N,   N],
   ['memory/host-date',       N,   N,   N,   N,   N,   N],
-  ['issue-12-x',             N,   N,   N,   N,   N,   'issue-12'],
   ['fix/issue-7',            7,   7,   7,   7,   7,   'issue-7'],
   ['Fix/issue-5-x',          N,   N,   N,   5,   N,   'issue-5'],
   ['feat/scope/issue-5-x',   N,   N,   N,   5,   N,   'issue-5'],
@@ -31,6 +30,8 @@ const MATRIX = [
   ['feature/42-',            42,  N,   N,   42,  42,  N],
   ['memory/2026-09-23',      N,   N,   N,   N,   N,   N],
   ['release/2024-01-x',      N,   N,   N,   N,   N,   N],
+  ['12-fix-x',               N,   N,   N,   12,  N,   N],
+  ['issue-12-x',             N,   N,   N,   12,  N,   'issue-12'],
   ['fix/2026-cleanup',       2026, N,  N,   2026, 2026, N],
 ];
 

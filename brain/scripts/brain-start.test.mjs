@@ -149,3 +149,17 @@ test('brain-start: with a custom approvedLabel override, the default label no lo
 
   assert.equal(result.exitCode, 1, `expected exit 1, got ${result.exitCode}`);
 });
+
+for (const title of ['!!!', '日本語']) {
+  test(`brain-start: title "${title}" with no ASCII alphanumerics → feature/<N>-task (#697)`, async () => {
+    const { runStart } = await import('./brain-start.mjs');
+    const created = [];
+    const result = await runStart({
+      issueNumber: '42', project: 'o/r',
+      issueViewFn: async () => ({ number: 42, title, labels: ['status:approved'], body: '' }),
+      createBranchFn: async (b) => { created.push(b); return { ok: true }; },
+    });
+    assert.equal(result.exitCode, 0);
+    assert.deepEqual(created, ['feature/42-task']);
+  });
+}
