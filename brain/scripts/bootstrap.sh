@@ -465,6 +465,27 @@ else
   warn "$I18N_BOOTSTRAP_AUTH_NOTOKEN"
 fi
 
+# --- 5b. Governance labels and brain.actor (issues #1163, #1164) --------------
+# A fresh consumer has no `status:approved` label (its first PR fails `issue-link`)
+# and no `brain.actor` (its first `brain:memory:save` refuses). Both steps go through
+# the VCS port and are classified by CAUSE, like MISSING_OPTIONAL / REQUIRED_FAILURES
+# elsewhere in this file: exit 3 is "pending" (VCS unreachable or unauthenticated, a
+# refused create, no identity) and lands in MISSING_OPTIONAL with its exact command;
+# any other non-zero exit is a defect of the step itself and is REQUIRED.
+_setup_step() {
+  local step="$1" out rc=0
+  out="$(node "$BRAIN_SCRIPTS/lib/env-init-setup.mjs" "$step" 2>&1)" || rc=$?  # rc is captured and classified below — 3 is pending, anything else is a required failure
+  printf '%s\n' "$out" | sed '/^NEXT: /d'  # the NEXT: line is machine output; the final Pending summary prints it
+  case "$rc" in
+    0) ;;
+    3) MISSING_OPTIONAL+=("$(printf '%s\n' "$out" | sed -n 's/^NEXT: //p' | head -1)") ;;
+    *) REQUIRED_FAILURES+=("env-init-setup $step failed (exit $rc)") ;;
+  esac
+}
+say "Governance labels and actor"
+_setup_step labels
+_setup_step actor
+
 # --- 6. SDD implementation (replaceable harness, ADR-0012) --------------------
 # Harness-specific init is now delegated to brain/scripts/harness/cli.mjs, which
 # dispatches to brain/scripts/axes/<axis>/adapters/<SDD_HARNESS>.mjs. Adding a new
