@@ -32,10 +32,28 @@ A fresh clone of a plainfiles consumer, with no `.env`, MUST run `brain:memory:p
 ## REQ-1165-4 — undeclared is refused, never guessed
 
 When nothing declares a backend, every op that consults a backend (`pull`, `import`, `index`,
-`share`, `setup`, `search`, `feature-*`, `heal-duplicates`) MUST exit 1 with a message naming
-`brain:config -- set memory.backend`. An unknown declared value MUST be refused as a typo, never
-coerced. Ops that never consult a backend (`reindex`, `audit`, `resolve-index`, `split-records`,
-`collect`, `ship`, `migrate-v1`, `save`) MUST be unaffected.
+`share`, `setup`, `search`, `feature-*`, `heal-duplicates`) MUST exit 3 (undeclared) or 4 (invalid) with a message
+naming `brain:config -- set memory.backend`. An unknown declared value MUST be refused as a typo,
+never coerced, and `brain:config set memory.backend` MUST refuse it at write time. Ops that never
+consult a backend (`reindex`, `audit`, `resolve-index`, `split-records`, `collect`, `ship`,
+`migrate-v1`) MUST be unaffected. `save` is record-first (memory-backend-contract rule 2): with no
+backend declared it MUST exit 0, write the record, and say hydration is deferred.
+
+| op | undeclared |
+|---|---|
+| reindex, audit, resolve-index, split-records, collect, ship, migrate-v1 | works |
+| save | works — record written, hydration deferred, said on stderr |
+| share, pull, import, index, setup, search, feature-checkpoint, feature-resume, heal-duplicates | refuses, exit 3 |
+
+## REQ-1165-7 — a refusal is never reported as "nothing to report"
+
+Callers MUST tell the refusal apart by exit code, not text. `tryFeatureResume` and session-start
+MUST say "memory backend not declared" with the fix; `pre-push` and `post-merge` MUST print one line
+saying the checkpoint or import was skipped and why, and stay non-blocking. A losing declaration
+(shell over `.env`, `.env` over config) MUST be printed on stderr by every backend-consulting op.
+`brain:upgrade` MUST print one line naming the fix when the migration leaves the backend undeclared
+and nothing else declares one. This repository declares its own backend in `brain.config.json`
+(`engram`; its `.env` could not be read from the agent, so engram was assumed — verify).
 
 **Falsifiable by:** `cli.backend-declaration.test.mjs` (c).
 

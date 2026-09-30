@@ -18,7 +18,7 @@ git add brain.config.json && git commit
 `MEMORY_BACKEND` (one run) → `.env` (this machine) → `brain.config.json` (the team).
 
 **If nothing declares a backend, memory commands refuse** and name this fix instead of guessing
-`engram`. Backend-free commands (`reindex`, `audit`, `save`, `collect`, `ship`) are unaffected.
+`engram`. Backend-free commands (`reindex`, `audit`, `resolve-index`, `split-records`, `collect`, `ship`) are unaffected, and `save` still writes the record (hydration is deferred until a backend is declared). Refusals exit 3 (undeclared) or 4 (invalid).
 
 **Upgrading:** `brain:upgrade` adds `memory.backend: ""` (undeclared). Nothing changes on its own:
 if your backend is in `.env`, it keeps working, and `env:init` prints the one command to share it.

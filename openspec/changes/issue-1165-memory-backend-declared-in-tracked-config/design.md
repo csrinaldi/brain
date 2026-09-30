@@ -53,6 +53,17 @@ config differ, `.env` wins on that machine and `env:init` says so.
 
 **D6 — invalid values are refused, not coerced** (`plainfile` is a typo, not plainfiles).
 
+**D7 — the refusal has its own exit codes (3 undeclared, 4 invalid).** Hooks, session-start and
+ticket-start tell "nothing was tried" from a real failure by code, never by localized text. Each
+prints one line naming the cause and fix and stays non-blocking. `save` is the exception to the
+refusal: it is record-first, so it degrades to plainfiles and says hydration is deferred.
+
+**D8 — self-hosting.** brain's own `brain.config.json` declares `memory.backend: engram`, so
+per-issue worktrees (no `.env`) work. The value was assumed: `.env` is not readable from the agent.
+
+**D9 — `brain:config set memory.backend` validates at write time** (`ALLOWED_VALUES` in
+`config-verb.mjs`); `brain:upgrade` prints `undeclaredUpgradeNotice` after migrating.
+
 ## Files
 
 `lib/axis-selector.mjs`, `memory/lib/backend-resolve.mjs` (new); `memory/cli.mjs`, `bootstrap.sh`
