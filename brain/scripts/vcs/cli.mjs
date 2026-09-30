@@ -56,6 +56,12 @@ export const VERBS = [
   // openspec/changes/issue-1086-audit-pr-resolution/brain-drafts/vcs-contract-commitprs-row.md
   // on this same branch.
   'commitPrs',
+  // issue #1162: fires verb-contract-drift-guard's doc-row check by design; the
+  // Required Verbs row is drafted at
+  // openspec/changes/issue-1162-postmerge-cursor-bootstrap/brain-drafts/
+  // (brain/core is read-only here) and is tracked as DOCUMENTED_BUT_NOT_REQUIRED
+  // in the guard until promoted.
+  'workflowRunSucceeded',
 ];
 
 /**

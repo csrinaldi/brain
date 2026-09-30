@@ -30,7 +30,10 @@ const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..'
 const CONTRACT_DOC = join(REPO_ROOT, 'brain', 'core', 'methodology', 'vcs-contract.md');
 
 // See file header — capabilities is a probe verb, documented separately.
-const DOCUMENTED_BUT_NOT_REQUIRED = new Set(['capabilities']);
+// `workflowRunSucceeded` (#1162): the doc row is drafted under
+// openspec/changes/issue-1162-*/brain-drafts/ pending `brain:promote` (brain/core
+// is read-only to the change author). REMOVE this entry when the row lands.
+const DOCUMENTED_BUT_NOT_REQUIRED = new Set(['capabilities', 'workflowRunSucceeded']);
 
 // Function-typed exports that BOTH providers legitimately share but that are
 // NOT contract verbs (helpers/constants) — reserved for future entries so the

@@ -606,6 +606,37 @@ export async function prStatusRollup({ project, number } = {}) {
 }
 
 /**
+ * workflowRunSucceeded — the provider-agnostic READ verb (issue #1162): has the
+ * named workflow EVER completed successfully on `branch`? It is the evidence
+ * that tells a repository whose audit cursor was never created (a bootstrap
+ * state) from one whose cursor was deleted (a successful run advanced it once).
+ *
+ * Returns `{ state, detail }`, never throws:
+ *   'succeeded' — at least one successful run exists on `branch`
+ *   'none'      — the read succeeded and there is none
+ *   'unknown'   — the read failed or was malformed; `detail` carries the words
+ * Filtered by `branch` (the default branch): a success on another branch says
+ * nothing about the cursor on the audited one.
+ *
+ * @param {{ project?: string, workflow: string, branch: string }} opts
+ * @returns {Promise<{ state: 'succeeded'|'none'|'unknown', detail: string|null }>}
+ */
+export async function workflowRunSucceeded({ project, workflow, branch } = {}) {
+  if (!workflow || !branch) return { state: 'unknown', detail: 'workflow and branch are both required' };
+  let runs;
+  try {
+    runs = ghJson([
+      'run', 'list', '--workflow', workflow, '--branch', branch, '--status', 'success',
+      '--limit', '1', '--json', 'databaseId', ...(project ? ['-R', project] : []),
+    ]);
+  } catch (err) {
+    return { state: 'unknown', detail: err.message };
+  }
+  if (!Array.isArray(runs)) return { state: 'unknown', detail: `gh run list returned ${typeof runs}, not an array` };
+  return { state: runs.length > 0 ? 'succeeded' : 'none', detail: null };
+}
+
+/**
  * prReviews — the provider-agnostic `prReviews` CONTRACT verb (issue #239
  * A3 TASK2/4th-violation fix, closing the L6 brain-writes-reviewed gate's
  * gh-CLI-hardcoded `defaultFetchReviews`). Wraps GitHub's Reviews API

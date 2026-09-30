@@ -725,6 +725,19 @@ export async function commitPrs({ project, sha, apiBase, token, proxyUrl, fetchI
 }
 
 /**
+ * workflowRunSucceeded — the provider-agnostic READ verb (issue #1162). GitLab
+ * has no per-workflow-file run history equivalent, and this provider's
+ * governance fragment ships no post-merge audit job or cursor, so there is
+ * nothing to ask. It answers `unsupported` explicitly: a caller must treat that
+ * as `unknown` (an alarm), never as "none" (a bootstrap). Never throws.
+ *
+ * @returns {Promise<{ state: 'unsupported', detail: string }>}
+ */
+export async function workflowRunSucceeded() {
+  return { state: 'unsupported', detail: 'GitLab has no post-merge audit workflow or cursor; run history by workflow file is not modelled' };
+}
+
+/**
  * Posts a COMMENT-state merge request review (issue #266, REQ-266-2).
  * GitLab's notes API has no review-event concept (APPROVE/COMMENT/REQUEST
  * CHANGES) — a plain note is posted, which structurally cannot become an

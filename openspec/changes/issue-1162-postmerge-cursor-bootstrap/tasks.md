@@ -4,3 +4,8 @@
 - [x] Red tests: window step (fresh bootstraps, deleted alarms, unreadable evidence alarms)
 - [x] Wire the window step; add `GH_TOKEN` to `advance`
 - [x] Verify: npm test, brain:repo:check, brain:nav
+- [x] Rework: base = adoption; end-to-end real-audit tests (direct push and merge commit)
+- [x] Rework: VCS port verb `workflowRunSucceeded` (GitHub, GitLab unsupported) + contract tests
+- [x] Rework: `SUBCOMMAND_PORT_REACH` for cursor.mjs; `advance` keeps no credential
+- [x] Rework: lost CAS race re-reads the ref
+- [ ] Human: promote the vcs-contract row from brain-drafts and drop the guard exception
