@@ -762,3 +762,13 @@ for (const mergeAdoption of [false, true]) {
     assert.equal(r.status, 0, `audit over the bootstrapped window must be clean:\n${r.stdout}\n${r.stderr}`);
   });
 }
+
+test('bootstrapCursor: #1162 the refusal names WHICH kind of unreadable evidence it was (unsupported vs unknown)', async (t) => {
+  const f = makeFreshConsumer(t);
+  const un = await bootstrapCursor({ git: realGit(f.dir), workflowPath: WORKFLOW, priorAudit: () => ({ evidence: 'unknown', why: 'unsupported' }) });
+  assert.equal(un.state, 'unknown');
+  assert.match(un.reason, /unsupported/);
+  const uk = await bootstrapCursor({ git: realGit(f.dir), workflowPath: WORKFLOW, priorAudit: () => ({ evidence: 'unknown', why: 'unknown' }) });
+  assert.doesNotMatch(uk.reason, /unsupported/);
+  assert.match(uk.reason, /unknown/);
+});

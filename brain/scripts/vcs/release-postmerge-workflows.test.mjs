@@ -1567,3 +1567,14 @@ test('#1106 executable: mrCreate itself fails (open-pr exits 1) → treated as a
   const branches = spawnSync('git', ['ls-remote', '--heads', originPath], { encoding: 'utf8' }).stdout;
   assert.doesNotMatch(branches, new RegExp(`auto-archive/${today}`), `a real mrCreate failure must delete the orphan branch:\n${branches}`);
 });
+
+// #1162: `gh run list --workflow` (the bootstrap's prior-run evidence) needs
+// `actions: read`. An explicit `permissions:` block sets every OMITTED scope to
+// none, so without it a PRIVATE consumer reads `unknown` and alarms forever.
+test('#1162: governance-postmerge.yml grants actions: read (and only read) for the bootstrap evidence read', () => {
+  const text = readFileSync(POSTMERGE_YML, 'utf8');
+  const m = text.match(/^permissions:\s*\{([^}]*)\}/m);
+  assert.ok(m, 'the workflow must declare a permissions block');
+  assert.match(m[1], /\bactions:\s*read\b/, 'actions: read is required by `gh run list --workflow`');
+  assert.doesNotMatch(m[1], /\bactions:\s*write\b/, 'least privilege: never actions: write');
+});

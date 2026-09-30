@@ -135,11 +135,15 @@ export async function bootstrapCursor({ git, workflowPath, priorAudit }) {
   if (current.state === 'present') return { state: 'present', sha: current.sha };
   if (current.state !== 'absent') return { state: 'unknown', reason: 'cursor state could not be read' };
 
-  const evidence = await priorAudit();
+  const raw = await priorAudit();
+  // A reader may say WHY it could not read: `{ evidence: 'unknown', why }`, where
+  // `why` is the port's own state ('unsupported' vs 'unknown'), so the alarm names it.
+  const evidence = typeof raw === 'object' && raw !== null ? raw.evidence : raw;
+  const why = typeof raw === 'object' && raw !== null ? raw.why : 'unknown';
   if (evidence === 'some') {
     return { state: 'refused', reason: 'a prior successful audited run exists, so the cursor was deleted, not never created' };
   }
-  if (evidence !== 'none') return { state: 'unknown', reason: 'prior audited-run evidence could not be read' };
+  if (evidence !== 'none') return { state: 'unknown', reason: `prior audited-run evidence could not be read (${why ?? 'unknown'})` };
 
   const log = git.try(['log', '--first-parent', '--diff-filter=A', '--format=%H', '--reverse', '--', workflowPath]);
   const adoption = log.status === 0 ? log.stdout.trim().split('\n')[0] : '';
@@ -206,7 +210,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
         });
         if (r?.state === 'succeeded') return 'some';
         if (r?.state === 'none') return 'none';
-        return 'unknown'; // 'unknown' and 'unsupported' alike: never a bootstrap
+        // 'unknown' and 'unsupported' alike: never a bootstrap, but named apart.
+        return { evidence: 'unknown', why: r?.state === 'unsupported' ? 'unsupported' : 'unknown' };
       } catch { /* surfaced: an unreachable port is 'unknown', which the caller alarms — never a bootstrap */
         return 'unknown';
       }

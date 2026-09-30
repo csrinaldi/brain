@@ -39,6 +39,9 @@ on:
 # trusted: runs post-merge on main.
 #   contents: write        — push auto-revert branches and CAS the governance cursor
 #   pull-requests: write   — open the auto-revert PR
+#   actions: read         — `gh run list --workflow`, the bootstrap's prior-run evidence (#1162).
+#       An explicit block sets every omitted scope to none, so without it a PRIVATE
+#       repository reads `unknown` and alarms forever. Read only, never write.
 #   issues: write          — REQUIRED by every LOUD path, not a nicety (#462):
 #       • `gh label create` (governance:cursor-missing / :cursor-unknown /
 #         :audit-uncomputable / :revert-blocked) is the labels REST endpoint,
@@ -49,7 +52,7 @@ on:
 #         the ISSUES labels endpoint, so the revert path needs it too
 #     Without it the gate still fails closed but cannot TELL anyone, which is
 #     how a 12-day rung-3 outage stayed invisible.
-permissions: { contents: write, pull-requests: write, issues: write }
+permissions: { contents: write, pull-requests: write, issues: write, actions: read }
 
 # Defense-in-depth against overlapping runs (the CAS in cursor.mjs advanceCursor
 # is the actual guarantee; this only narrows the window). REQ-D2-12 / §5.3.
