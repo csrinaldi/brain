@@ -29,6 +29,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { parseIssueBranch } from './lib/branch-grammar.mjs';
 import { deriveBranchType, findTypeLabel } from './lib/branch-type.mjs';
 import { labelPreflight } from './vcs/label-preflight.mjs';
 
@@ -54,13 +55,12 @@ function buildPRBody(template, issueNumber) {
   return `${template.trim()}\n\nCloses #${issueNumber}\n`;
 }
 
-function titleFromBranch(branch, type) {
+export function titleFromBranch(branch, type) {
   // e.g. feature/42-add-cli-i18n + 'feat' → "feat: add cli i18n" — conventional
   // commit format (.github/PULL_REQUEST_TEMPLATE.md:73 requires it; the
   // `type` prefix is derived from the issue's type:* label via
   // deriveBranchType, independently of the label sent to mrCreateFn).
-  const slug = branch
-    .replace(/^.*\/\d+-/, '')   // strip prefix up to and including <number>-
+  const slug = (parseIssueBranch(branch)?.slug ?? branch)
     .replace(/-/g, ' ')
     .trim() || branch;
   return `${type}: ${slug}`;
@@ -68,7 +68,8 @@ function titleFromBranch(branch, type) {
 
 /**
  * Resolves the issue number encoded in the branch name
- * (`<prefix>/<number>-<slug>`, the shape `brain:start` creates).
+ * (`<type>/issue-<number>-<slug>` from `brain:ticket:start`, or the legacy
+ * `<prefix>/<number>-<slug>` from `brain:start`) via the shared parser.
  *
  * FAILS CLOSED rather than falling back to a placeholder: a silent `'0'`
  * fallback produced a PR whose body said `Closes #0` and whose issue lookup
@@ -80,17 +81,18 @@ function titleFromBranch(branch, type) {
  * @returns {{ issueNumber: string } | { exitCode: 1, message: string }}
  */
 export function resolveIssueNumber(branch) {
-  const issueMatch = String(branch ?? '').match(/\/(\d+)-/);
-  if (!issueMatch) {
+  const parsed = parseIssueBranch(branch);
+  if (!parsed) {
     return {
       exitCode: 1,
       message:
         `brain:ship: cannot determine issue number from branch "${branch}" — ` +
-        `expected <prefix>/<number>-<slug> (e.g. feature/42-add-cli-i18n). ` +
-        `Run "npm run brain:start" to create a correctly-named branch.`,
+        `expected <type>/issue-<number>-<slug> (e.g. fix/issue-42-add-cli-i18n) or ` +
+        `the legacy <prefix>/<number>-<slug> (e.g. feature/42-add-cli-i18n). ` +
+        `Run "npm run brain:ticket:start -- <id>" to create a correctly-named branch.`,
     };
   }
-  return { issueNumber: issueMatch[1] };
+  return { issueNumber: parsed.issueNumber };
 }
 
 // ── core logic (injectable for tests) ────────────────────────────────────────
@@ -236,7 +238,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
 
   const branch = git('rev-parse --abbrev-ref HEAD', cwd);
   if (!branch || branch === 'HEAD') {
-    console.error('brain:ship: not on a named branch — run brain:start first');
+    console.error('brain:ship: not on a named branch — run brain:ticket:start first');
     process.exit(1);
   }
 

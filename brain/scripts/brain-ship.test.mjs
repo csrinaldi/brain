@@ -210,6 +210,29 @@ test('brain-ship: resolveIssueNumber extracts the issue number from a convention
   assert.deepEqual(resolveIssueNumber('chore/334-brain-ship-labels'), { issueNumber: '334' });
 });
 
+test('brain-ship: resolveIssueNumber reads the canonical branch brain:ticket:start emits (#697)', async () => {
+  const { resolveIssueNumber } = await import('./brain-ship.mjs');
+
+  assert.deepEqual(resolveIssueNumber('fix/issue-639-some-slug'), { issueNumber: '639' });
+  assert.deepEqual(resolveIssueNumber('feat/issue-3-x'), { issueNumber: '3' });
+});
+
+test('brain-ship: refusal names BOTH accepted shapes and brain:ticket:start (#697)', async () => {
+  const { resolveIssueNumber } = await import('./brain-ship.mjs');
+
+  const { message } = resolveIssueNumber('claude/some-slug');
+  assert.match(message, /<type>\/issue-<number>-<slug>/);
+  assert.match(message, /<prefix>\/<number>-<slug>/);
+  assert.match(message, /brain:ticket:start/);
+});
+
+test('brain-ship: titleFromBranch drops the issue- marker on the canonical shape (#697)', async () => {
+  const { titleFromBranch } = await import('./brain-ship.mjs');
+
+  assert.equal(titleFromBranch('fix/issue-639-some-slug', 'fix'), 'fix: some slug');
+  assert.equal(titleFromBranch('feature/42-add-cli-i18n', 'feat'), 'feat: add cli i18n');
+});
+
 test('brain-ship: resolveIssueNumber on an unparseable branch → exitCode 1, NEVER a fabricated "0"', async () => {
   const { resolveIssueNumber } = await import('./brain-ship.mjs');
 

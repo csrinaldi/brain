@@ -78,3 +78,10 @@ test('brain-next: never requests porcelain .memory/ input', async () => {
   assert.equal(result.state, 'needs-memory');
   assert.equal(called, false);
 });
+
+test('brain-next: issueFromBranch reads both branch shapes via the shared parser (#697)', async () => {
+  const { issueFromBranch } = await import('./brain-next.mjs');
+  assert.equal(issueFromBranch('fix/issue-639-some-slug'), 639);
+  assert.equal(issueFromBranch('feature/42-demo'), 42);
+  assert.equal(issueFromBranch('claude/x'), undefined);
+});
