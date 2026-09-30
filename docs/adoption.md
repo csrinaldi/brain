@@ -157,6 +157,19 @@ reports it as a required failure.
 
 ---
 
+### Three things `env:init` does not do yet (brain 1.9.0)
+
+Do these once, by hand, before your first PR and your first `brain:memory:save` (provenance at capture, #738). Each one is a
+known limitation of 1.9.0, not a step you skipped.
+
+| What | Why it matters | Command |
+|---|---|---|
+| Create the `status:approved` label | A new repository has no such label, so no issue can be approved and the first PR fails `issue-link`. `env:init` does not create it. | `gh label create "status:approved"` (GitLab: `glab label create --name "status::approved"`; if you renamed it, use your `governance.approvedLabel`). Also create the `type:*` labels `brain:ship` reads: `type:feature`, `type:bug`, `type:docs`, `type:refactor`, `type:chore`, `type:governance`. |
+| Set your `brain.actor` | `brain:memory:save` refuses to run without a configured actor. | `git config --local brain.actor @<your-handle>` |
+| Decide on the memory lane | The lane, which ships memory records to `main` on their own pull request, is **off by default** on every tier, and `env:init` does not mention it. | To turn it on: `npm run brain:config -- set memory.lane.enabled true` |
+
+---
+
 ## The first commit
 
 In a brand-new repository your adoption commit (`brain.config.json`, the copied managed
