@@ -9,7 +9,7 @@ automatically, but renames need manual action.
 ## v1.10.1 — a fresh consumer's first PR and first merge need no human
 
 **Manual step: read before upgrading.** Nothing in your tree has to move, no `brain.config.json`
-migration applies, and no new key is added. But five things a consumer's automation observes
+migration applies, and no new key is added. But six things a consumer's automation observes
 change, and one of them is a managed file you may have edited (`governance-postmerge.yml`: see
 the last row). The 1.10.0 exit run (#1185) found that the first PR and the first real merge of a
 fresh consumer still needed a human; this release makes the local checks and the post-merge
@@ -30,8 +30,9 @@ against the code on `main`, not against the PR description.
 `brain:check` never set the project slug, so `issue-link` asked the port for
 `repos/undefined/issues/N`, and it read the default branch only from `origin/HEAD`, which a
 clone that never ran `git remote set-head` does not have. Both now come from the sources the
-rest of the product uses (`lib/local-gate-context.mjs`), and `brain:ship` resolves its PR base
-through the same function:
+rest of the product uses (`lib/local-gate-context.mjs`). `brain:ship` uses the same
+`resolveDefaultBranch` for its PR base, but reads `project.defaultBranch` from `brain.config.json`
+first, which `brain:check` does not (two sources, tracked in #1194):
 
 - **Project slug:** `project.slug` in `brain.config.json`, else the origin remote. Never a
   placeholder.
