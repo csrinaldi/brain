@@ -127,7 +127,7 @@ A refusal names the fix and is a **required failure**: `env:init` exits 1.
 |---|---|---|
 | SDD harness init | the init fails | |
 | `core.hooksPath` | it cannot be set | |
-| Memory backend declaration | | none declared and no terminal to ask on, an invalid value, an unreadable `brain.config.json`, or the answer could not be saved: memory setup is skipped and the command that closes it is listed |
+| Memory backend declaration | | none declared and no terminal to ask on, an invalid value, or an unreadable `brain.config.json`: memory setup is skipped and the command that closes it is listed. If the answer you typed could not be saved, setup still runs for that answer and the save command is listed |
 | Memory backend `setup` | it fails | |
 | Memory `pull` | attempted and refused (merge or reconcile refusal, corrupt store) | no commit yet, no upstream, or remote unreachable |
 | Memory `index` (engram) | binary present, indexing fails | binary absent — hydration and indexing skipped |
@@ -163,12 +163,13 @@ reports it as a required failure.
 
 | Step | What `env:init` does | If it cannot |
 |---|---|---|
-| Governance labels | Creates, through the VCS port, the approved label (`governance.approvedLabel`, default `status:approved`), the `type:*` labels `brain:ship` and `brain:ticket:start` read, `size:exception`, `skip:memory-gate` and, on GitHub, the `governance:*` alarm labels. It only creates what is missing, so a re-run changes nothing, and it reports what it created. On GitLab the labels use the scoped `key::value` form. | Pending step, exit 0: the summary lists it with `npm run brain:env:init` (re-run once the VCS is reachable and authenticated) and the hand command, e.g. `gh label create "status:approved"`. |
+| Governance labels | Creates, through the VCS port, the approved label (`governance.approvedLabel`, default `status:approved`), the `type:*` labels `brain:ship` and `brain:ticket:start` read, `size:exception`, `skip:memory-gate` and, on GitHub, the `governance:*` alarm labels. It only creates what is missing, so a re-run changes nothing, and it reports what it created. On GitLab the approved and `type:*` labels use the scoped `key::value` form; `size:exception` and `skip:memory-gate` keep their names. | Pending step, exit 0: the summary lists it with `npm run brain:env:init` (re-run once the VCS is reachable and authenticated) and the hand command, e.g. `gh label create "status:approved"`. |
 | `brain.actor` | Keeps a valid one you already configured; otherwise writes your authenticated VCS identity as `@<username>` with `git config --local`. It never derives it from `user.name`. A stored `@legacy`, or a value that is not a handle, counts as unset. | Pending step, exit 0: `git config --local brain.actor @<handle>`. |
-| Memory lane | States, on every run, whether the lane is on. It is off by default on every tier because it opens a separate pull request for memory records that a maintainer has to merge. | Nothing to fail; to turn it on: `npm run brain:config -- set memory.lane.enabled true`. |
+| Memory lane | States, on every run, whether the lane is on. It is off by default on every tier because it opens a separate pull request for memory records that may need a maintainer to merge. | Nothing to fail; to turn it on: `npm run brain:config -- set memory.lane.enabled true`. |
 
-The labels step writes to your remote, so it needs the token from the prompt above. Without
-one it is a pending step, not a failure: add the token and re-run `env:init`.
+The labels step writes to your remote, so it needs an authenticated VCS (the token from the prompt above, or on GitHub an
+existing `gh` login). Without one it is a pending step, not a failure: authenticate and
+re-run `env:init`.
 
 ### The memory backend is a team setting
 
@@ -186,10 +187,11 @@ Precedence, first wins: process env `MEMORY_BACKEND` (one run), then `.env` (thi
 then `brain.config.json` (the team). When two disagree the CLI says which one won.
 
 **If nothing declares a backend, memory commands refuse** and name this fix instead of
-guessing `engram`: `pull`, `import`, `index`, `share`, `search` and the feature
-checkpoint exit **3** (nothing declared) or **4** (invalid value). Backend-free commands
-(`reindex`, `audit`, `resolve-index`, `split-records`, `collect`, `ship`) are unaffected,
-and `brain:memory:save` still writes the record, saying hydration is deferred until a
+guessing `engram`: every op that consults a backend (`pull`, `import`, `index`, `share`,
+`search`, `setup`, `heal-duplicates` and the feature checkpoint and resume) exits **3**
+(nothing declared) or **4** (invalid value). `reindex`, `resolve-index`, `split-records`,
+`collect`, `ship` and `migrate-v1` never consult a backend, and `audit` never refuses over a
+missing backend (it reads the backend only when one is declared). `brain:memory:save` still writes the record, saying hydration is deferred until a
 backend is declared. Without a terminal, `env:init` declares nothing and lists the command
 as a pending step.
 

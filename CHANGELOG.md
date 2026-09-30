@@ -9,14 +9,14 @@ automatically, but renames need manual action.
 ## v1.10.0 — a fresh consumer reaches its first PR and its first memory save without manual steps
 
 **Manual step: read before upgrading.** Nothing in your tree has to move for the upgrade
-itself, but six things a consumer's automation observes change. One of them can fail a
+itself (unless you edited `governance-postmerge.yml`: see `actions: read` below), but six things a consumer's automation observes change. One of them can fail a
 command that succeeded on 1.9.0 (the memory backend), and one can open pull requests you
 did not expect on the first post-merge run after you upgrade (the audit cursor). Each
 item below was checked against the code on `main`, not against the PR description.
 
 | Where | 1.9.0 | 1.10.0 |
 |---|---|---|
-| Memory operations that consult a backend (`brain:memory:pull`, `import`, `index`, `share`, `search`, `heal-duplicates`, feature checkpoint and resume) | With no backend stated, guessed `engram` (or fell back to records-only `plainfiles` when the `engram` binary was absent). | **Refuse** when no backend is declared: exit **3**, naming the fix. An invalid value refuses with exit **4**. Nothing is guessed (#1165). |
+| Memory operations that consult a backend (`brain:memory:pull`, `import`, `index`, `share`, `search`, `heal-duplicates`, feature checkpoint and resume) | With no backend stated, guessed `engram` (for `pull` only, it fell back to records-only `plainfiles` when the `engram` binary was absent). | **Refuse** when no backend is declared: exit **3**, naming the fix. An invalid value refuses with exit **4**. Nothing is guessed (#1165). |
 | The first post-merge run of `governance-postmerge.yml` on a repository with no audit cursor | Filed a `governance:cursor-missing` alarm and audited nothing. Every run failed the same way. | **Creates the cursor at the adoption commit** and audits everything after it, when no earlier run of that workflow ever succeeded on the default branch (#1162). |
 | Workflow permissions | `contents`, `pull-requests`, `issues`. | Adds **`actions: read`** (#1162). |
 | `npm run brain:env:init` | Created no labels, wrote no `brain.actor`, never said whether the memory lane was on. | Creates the governance labels, resolves `brain.actor` and prints the lane notice (#1163, #1164, #1166). |
@@ -39,17 +39,21 @@ git add brain.config.json && git commit
   machine), then `brain.config.json` `memory.backend` (the team). When two disagree the
   CLI says which one won.
 - **Values:** `engram` or `plainfiles`. `brain:config set memory.backend` refuses anything
-  else at write time. An invalid value found at run time is the exit **4** refusal.
-- **Not affected:** `reindex`, `audit`, `resolve-index`, `split-records`, `collect` and
-  `ship` never consult a backend. `brain:memory:save` still writes the record and says
+  but those two (or `""`, which clears it) at write time. An invalid value found at run time is the exit **4** refusal.
+- **Not affected:** `reindex`, `resolve-index`, `split-records`, `collect`, `ship` and
+  `migrate-v1` never consult a backend, and `audit` never refuses over a missing backend (it reads the backend
+  only when one is declared). `setup` refuses like the ops in the table. `brain:memory:save` still writes the record and says
   hydration is deferred until a backend is declared (exit 0). `pre-push` and `post-merge`
-  stay non-blocking and print one line saying the memory step was skipped; `session:start`
+  stay non-blocking and print one line saying the memory step was skipped (`pre-push` only
+  when it runs the feature checkpoint, which needs an active change); `session:start`
   prints `hydration skipped, nothing was tried`.
-- **A backend declared only in tracked config, without its binary on `PATH`,** runs
-  records-only and defers hydration. A backend stated in the process env or `.env` is
-  never overridden: without its binary the run fails, as it did on 1.9.0.
+- **A backend declared only in tracked config, without its binary on `PATH`:** `brain:memory:pull`
+  runs records-only and defers hydration. `import` and `index` still need the binary;
+  `search` is unsupported on `engram`; feature checkpoint and resume degrade without it. A
+  backend stated in the process env or `.env` is never overridden: without its binary the ops
+  that need it fail, as they did on 1.9.0.
 - **`brain:upgrade`** applies the migration (below) and, when nothing declares a backend,
-  prints the one command to run. It changes no behavior by itself.
+  prints the one command to run (not on `--dry-run`). It changes no behavior by itself.
 - **`env:init`** asks once, on a terminal (Enter accepts `engram`), and writes the answer
   to `brain.config.json`, not to `.env`. Without a terminal it guesses nothing: memory
   setup is skipped and listed as a pending step (exit 0). If your backend lives only in
@@ -69,24 +73,28 @@ The cursor is placed **at the adoption commit**: the first commit on the first-p
 that added the workflow file. The first window audits everything after it. A gate is not
 authoritative over the commit that installs it, so the adoption itself is never audited
 (or reverted). A cursor that was deleted, or run history that cannot be read, still ends in the
-alarm, never in a guess. Known residual: GitHub expires run history (90 days by
-default), so a cursor deleted after every success expired reads as new and re-audits
+alarm, never in a guess. Known residual: GitHub expires run history (its documented
+default is 90 days), so a cursor deleted after every success expired reads as new and re-audits
 from the adoption. GitLab is unaffected: its
 governance fragment ships no post-merge audit or cursor. The
 alarm now gives the init command at the adoption commit instead of at the repository root.
 
-**If you are already installed and your post-merge run never succeeded** (the state every
-consumer measured in the 1.9.0 demonstration was in), your first run on 1.10.0 reads "no
+**If you are already installed and your post-merge run never succeeded** (the state measured on
+the two 1.9.0 demo consumers), your first run on 1.10.0 reads "no
 prior success" and bootstraps at *your* adoption commit, which may be old. That run
 audits **every commit since adoption for the first time, in one run**. A commit that
 fails a tree-keyed check (`diff-size`, `decision-gate`) is nominated for an
-`auto-revert/<sha>` pull request against current `main`. Expect several revert PRs, or
-`governance:revert-blocked` alarms where a revert conflicts. Nothing is capped
-automatically, because a cap would be a silent skip. To choose the window yourself,
+`auto-revert/<sha>` pull request against current `main`, unless reverting it would
+resurrect a payload or `size:exception` is honored. Commits that fail only `issue-link` or
+`memory-gate` are never reverted: the run files `governance:audit-unrevertible` and the
+cursor stays pinned until you run `cursor.mjs accept`. Expect revert PRs, or
+`governance:revert-blocked` alarms where a revert conflicts; the cursor also stays pinned
+until revert PRs merge. Nothing is capped automatically, because a cap would be a silent skip. To choose the window yourself,
 **before** the upgrade merges:
 
-- Set `governance.auditBaseline` in `brain.config.json` to a recent ref (tag, branch or
-  sha). Commits that do not descend from it are printed as
+- Set `governance.auditBaseline` in `brain.config.json` to a recent ref (tag, sha or
+  `origin/<branch>`; a bare branch name does not resolve in the CI checkout, and an
+  unresolvable ref audits everything with a warning). Commits that do not descend from it are printed as
   `[SKIP] <sha> ... — before audit baseline` and not judged. This does not move the window
   start; it only skips what precedes the ref. `brain:config set` refuses this key (no
   migration declares it), so edit the file by hand.
@@ -98,8 +106,9 @@ automatically, because a cap would be a silent skip. To choose the window yourse
 
 `governance-postmerge.yml` now declares `actions: read`, read only: the bootstrap lists
 past runs of the workflow, and on a **private** repository an explicit `permissions:` block
-that omits it reads as `unknown` and alarms forever. The workflow is a managed file, so
-`brain:upgrade` replaces it. If you edited your copy, or an organization policy caps the
+that omits it reads as `unknown` and alarms forever. The workflow is a managed file: `brain:upgrade`
+replaces it if you have not modified it; if you have, it refuses and names
+`--force-managed .github/workflows/governance-postmerge.yml`. If you keep your edited copy, or an organization policy caps the
 `GITHUB_TOKEN` below `actions: read`, the bootstrap cannot read run history and you get
 the alarm instead of a cursor.
 
@@ -113,15 +122,17 @@ pending steps with the command that closes it, and `env:init` still exits 0.
   labels that `brain:ship` and `brain:ticket:start` read, `size:exception`,
   `skip:memory-gate` and, on GitHub, the `governance:*` alarm labels. It creates only what
   is missing, so a re-run changes nothing. This is a **write to your remote**, and needs a
-  reachable, authenticated VCS. GitLab uses the scoped `key::value` form.
+  reachable, authenticated VCS. On GitLab the approved and `type:*` labels use the scoped
+  `key::value` form; `size:exception` and `skip:memory-gate` keep their names.
 - **`brain.actor`.** Keeps a valid handle you already configured; otherwise writes your
   authenticated VCS identity as `@<username>` with `git config --local`. It never derives
   it from `user.name`. A stored `@legacy`, or a value that is not a handle, counts as unset
-  and is replaced.
+  and is replaced (when a VCS identity is available; otherwise it is left and listed as pending).
 - **Memory lane.** States on every run whether the lane is on. It is off by default on
   every tier; to turn it on: `npm run brain:config -- set memory.lane.enabled true`. The
   closing next-steps text of `env:init` no longer reads as if the lane were already on.
-  `day:start` and `ticket:start` still say "the enabled memory lane ships it" (#1177).
+  `day:start`, `ticket:start` and the `plain` SDD engine's manual-flow step still say "the
+  enabled memory lane ships it" (noted on #1177).
 
 ### `commit-msg` accepts a repository's first commit (#1161)
 
@@ -140,9 +151,10 @@ ticket-less first push where `brain:protect-server` is installed before it (#116
 
 `brain:ship` used to parse only `<prefix>/<N>-<slug>` (what `brain:start` creates), so the
 `{type}/issue-{N}-{slug}` branch of `brain:ticket:start` failed with "cannot determine
-issue number". One parser (`branch-grammar.mjs`) now serves `brain:ship`, `brain:next`,
-`brain:start` and the status snapshot, and the legacy shape still works. A title with no
-ASCII letters yields the slug `task`, not a trailing dash.
+issue number". One module (`branch-grammar.mjs`) now serves them: `brain:ship` and `brain:next` read
+both shapes, `brain:start` uses it only for the slug, and the status snapshot and capture
+provenance read the canonical shape only. A title with no ASCII letters or digits yields
+the slug `task`, not a trailing dash.
 
 ### What ships
 

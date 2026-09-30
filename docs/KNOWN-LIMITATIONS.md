@@ -29,14 +29,15 @@ For the plan to close this class of gap, see the
 ## Memory (`#864` track)
 
 - **`brain:memory:ship` does not print the lane PR it created or found.**
-  ([#1167](https://github.com/csrinaldi/brain/issues/1167)) It prints the auto-merge
-  refusal and the token notice, not the PR number or URL. **Workaround:** look the PR up
+  ([#1167](https://github.com/csrinaldi/brain/issues/1167)) It never prints the PR URL, and
+  when auto-merge is refused or the PR number cannot be derived it prints only that notice,
+  not the number (when auto-merge is armed it prints `#N`). **Workaround:** look the PR up
   on your forge (`gh pr list --head memory/...`).
 
-- **On `plainfiles`, the derived `.memory/index.jsonl` is tracked and every save or pull
-  dirties it; on `engram`, `.memory/` is left untracked.**
-  ([#1168](https://github.com/csrinaldi/brain/issues/1168)) The two backends leave the
-  tree in different states after adoption, and the lane never ships the dirty index.
+- **On `plainfiles`, the derived `.memory/index.jsonl` is tracked and saves and pulls
+  dirty it; on `engram`, `.memory/` is left untracked.**
+  ([#1168](https://github.com/csrinaldi/brain/issues/1168)) Observed on fresh consumers
+  of each backend: the two leave the tree in different states after adoption, and the lane never ships the dirty index.
   **Workaround:** none needed for correctness (records are the truth, the index is
   derived); expect ` M .memory/index.jsonl` in `git status` on `plainfiles`.
 
@@ -72,7 +73,8 @@ For the plan to close this class of gap, see the
 
 These are the follow-up slices left by the failure-reporting sweep
 ([#1127](https://github.com/csrinaldi/brain/issues/1127), closed: the sweep shipped, and
-these four slices were left out of it on purpose, with no open issue of their own). Each
+these five slices were left out of it on purpose; none has an open issue of its own that
+we know of). Each
 is a place where a failure is still not the exit code it should be. None shows up in a
 healthy tree.
 
@@ -115,7 +117,8 @@ healthy tree.
 
 - **`env:init` replaces a `brain.actor` that is not a valid handle without saying so.**
   ([#1177](https://github.com/csrinaldi/brain/issues/1177)) A valid handle is kept; any
-  other stored value is overwritten and the output reads as if none existed.
+  other stored value is overwritten (when a VCS identity is available) and the output reads
+  as if none existed.
   **Workaround:** `git config --local brain.actor @<handle>` after `env:init`, if the
   earlier value mattered.
 
