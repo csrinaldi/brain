@@ -60,7 +60,7 @@ export function titleFromBranch(branch, type) {
   // commit format (.github/PULL_REQUEST_TEMPLATE.md:73 requires it; the
   // `type` prefix is derived from the issue's type:* label via
   // deriveBranchType, independently of the label sent to mrCreateFn).
-  const slug = (parseIssueBranch(branch)?.slug ?? branch)
+  const slug = (parseIssueBranch(branch)?.slug || branch)
     .replace(/-/g, ' ')
     .trim() || branch;
   return `${type}: ${slug}`;

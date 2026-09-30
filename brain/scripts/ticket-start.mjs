@@ -19,6 +19,7 @@ import { copyFileSync, existsSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { loadBrainConfig } from './lib/brain-config.mjs';
 import { deriveBranchType } from './lib/branch-type.mjs';
+import { nonEmptySlug } from './lib/branch-grammar.mjs';
 import { getVcs, resolveProviderName } from './vcs/cli.mjs';
 import { originIdentity } from './vcs/lib/repo.mjs';
 import { vcsToken, readEnvVar } from './vcs/lib/token.mjs';
@@ -141,7 +142,7 @@ const slug = issue.title
   .slice(0, 40)
   .replace(/-$/, '');
 
-const branchName = `${branchType}/issue-${issue.number}-${slug}`;
+const branchName = `${branchType}/issue-${issue.number}-${nonEmptySlug(slug)}`;
 
 // ── Show the issue context ────────────────────────────────────────────────────
 console.log('');

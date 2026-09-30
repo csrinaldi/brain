@@ -37,7 +37,7 @@ import { CHANGES_ROOT, changeDir, archivePath, ARTEFACT_FILE, parseChangeId, isG
 import { requiredArtifactsFor, resolveTier } from '../vcs/governance-tiers.mjs';
 import { parseVerdict } from '../review/lib/parse-verdict.mjs';
 import { readRecords, recordFilename } from '../memory/lib/store.mjs';
-import { ISSUE_BRANCH_RE } from '../memory/lib/capture-provenance.mjs';
+import { parseCanonicalIssueBranch } from '../lib/branch-grammar.mjs';
 
 export const SNAPSHOT_TIER = 'committed';
 export const RECORDS_DIR = '.memory/records';
@@ -53,8 +53,8 @@ export const UNREADABLE = 'unreadable';
 
 /** The issue a PR head branch names under the one grammar `brain:ticket:start` writes, or `null`. */
 export function issueOfBranch(headBranch) {
-  const m = typeof headBranch === 'string' ? headBranch.match(ISSUE_BRANCH_RE) : null;
-  return m ? Number(m[1]) : null;
+  const m = typeof headBranch === 'string' ? parseCanonicalIssueBranch(headBranch) : null;
+  return m ? Number(m.issueNumber) : null;
 }
 
 /**

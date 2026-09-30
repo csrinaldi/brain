@@ -16,6 +16,7 @@ import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
+import { nonEmptySlug } from './lib/branch-grammar.mjs';
 import { resolveApprovedLabel } from './governance/approved-label.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -80,7 +81,7 @@ export async function runStart({ issueNumber, project, issueViewFn, createBranch
     };
   }
 
-  const branch = `feature/${num}-${slugify(issue.title)}`;
+  const branch = `feature/${num}-${nonEmptySlug(slugify(issue.title))}`;
   const created = await createBranchFn(branch);
   if (!created.ok) {
     return {

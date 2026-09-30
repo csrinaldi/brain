@@ -1,22 +1,66 @@
-// branch-grammar.mjs — the ONE reader of "which issue does this branch belong to" (#697).
+// branch-grammar.mjs — the ONE owner of "which issue does this branch belong to" (#697).
 //
-// Two verbs compose branch names and used to have two readers that disagreed:
-//   canonical  {type}/issue-{N}-{slug}  brain:ticket:start (documented in harness-contract.md)
-//   legacy     {type}/{N}-{slug}        brain:start
-// Pure, zero I/O. Returns null for anything else — never a fabricated number.
+// Two verbs compose branch names:
+//   canonical  {type}/issue-{N}[-{slug}]  brain:ticket:start (documented in harness-contract.md)
+//   legacy     {prefix}/{N}-{slug}        brain:start
+// The slug may be empty: a title with no ASCII alphanumerics used to yield `fix/issue-5-`.
+// Pure, zero I/O. Every reader either calls these exports or DECLARES its difference:
+//   - capture-provenance / status snapshot: canonical only (durable writes never guess).
+//   - brain-next: uses findIssueInBranch (lenient) so a numbered branch never reads as "ready".
+//   - session-start: matches `issue-N` anywhere, case-insensitively, against change-dir names.
+// Never returns a fabricated number.
 
-const CANONICAL = /^([a-z]+)\/issue-(\d+)-(.+)$/;
-const LEGACY = /^([a-z]+)\/(\d+)-(.+)$/;
+/** Canonical shape. Group 1 = type, 2 = issue number, 3 = slug (may be empty/absent). */
+export const CANONICAL_BRANCH_RE = /^([a-z]+)\/issue-(\d+)(?:-(.*))?$/;
+const LEGACY = /^([a-z]+)\/(\d+)-(.*)$/;
+// Lenient scan (the historical brain-next regex): a number after any `/`, optionally `issue-`.
+const LENIENT = /\/(?:issue-)?(\d+)(?:-|$)/;
+
+// A `memory/<host>-<date>` lane branch or a date-looking `YYYY-MM-...` segment is not an issue.
+function looksLikeLaneOrDate(branch) {
+  return /^memory\//.test(branch) || /\/(?:19|20)\d{2}-\d{2}(?:-|$)/.test(branch);
+}
 
 /**
+ * Canonical shape only.
+ * @param {unknown} branch
+ * @returns {{issueNumber: string, type: string, slug: string, shape: 'canonical'} | null}
+ */
+export function parseCanonicalIssueBranch(branch) {
+  const m = CANONICAL_BRANCH_RE.exec(String(branch ?? ''));
+  return m ? { issueNumber: m[2], type: m[1], slug: m[3] ?? '', shape: 'canonical' } : null;
+}
+
+/**
+ * Canonical, then legacy.
  * @param {unknown} branch
  * @returns {{issueNumber: string, type: string, slug: string, shape: 'canonical'|'legacy'} | null}
  */
 export function parseIssueBranch(branch) {
   const b = String(branch ?? '');
-  let m = CANONICAL.exec(b);
-  if (m) return { issueNumber: m[2], type: m[1], slug: m[3], shape: 'canonical' };
-  m = LEGACY.exec(b);
-  if (m) return { issueNumber: m[2], type: m[1], slug: m[3], shape: 'legacy' };
-  return null;
+  const canonical = parseCanonicalIssueBranch(b);
+  if (canonical) return canonical;
+  if (looksLikeLaneOrDate(b)) return null;
+  const m = LEGACY.exec(b);
+  return m ? { issueNumber: m[2], type: m[1], slug: m[3], shape: 'legacy' } : null;
+}
+
+/**
+ * Lenient detection for readers that must fail closed (a numbered branch is never "no issue").
+ * Superset of parseIssueBranch: also finds nested/upper-case types and a bare `type/42`.
+ * @param {unknown} branch
+ * @returns {string|null} the issue number
+ */
+export function findIssueInBranch(branch) {
+  const b = String(branch ?? '');
+  const parsed = parseIssueBranch(b);
+  if (parsed) return parsed.issueNumber;
+  if (looksLikeLaneOrDate(b)) return null;
+  const m = LENIENT.exec(b);
+  return m ? m[1] : null;
+}
+
+/** Producers use this so a title with no ASCII alphanumerics never yields `fix/issue-5-`. */
+export function nonEmptySlug(slug) {
+  return slug && slug.length > 0 ? slug : 'task';
 }
