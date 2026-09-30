@@ -107,6 +107,80 @@ export function acceptManually({
   return advanceCursor({ git, from, to });
 }
 
+/**
+ * #1162 — initialize the cursor of a NEW repository. A missing cursor is only
+ * a bootstrap state when the repository has never completed an audited run:
+ * `priorAudit()` reports 'none' | 'some' | 'unknown' from evidence outside the
+ * ref (a successful prior run of this very workflow on the default branch —
+ * that run advanced the cursor, so its existence proves the cursor once
+ * existed and was deleted).
+ *
+ *   • 'some'    → refused: the cursor is GONE, not new. The caller alarms.
+ *   • 'unknown' → unknown: the evidence could not be read. Never a bootstrap.
+ *
+ * The base is the ADOPTION COMMIT itself — the first commit on the first-parent
+ * line that ADDED the postmerge workflow — in every shape (root or not). The
+ * first window (base..HEAD) audits everything AFTER it. A gate cannot be
+ * authoritative over the commit that installs it (it may be over budget, have
+ * no issue link, and would be nominated for auto-revert: reverting your own
+ * adoption), and nothing after the adoption escapes the audit. No adoption
+ * commit found → unknown, never a guessed base.
+ *
+ * Creation is a CAS: `--force-with-lease=<ref>:` (empty expectation) makes the
+ * remote refuse if the ref appeared in the meantime; a lost race re-reads the
+ * ref and proceeds when it now exists (`present`).
+ */
+export async function bootstrapCursor({ git, workflowPath, priorAudit }) {
+  const current = readCursor({ git });
+  if (current.state === 'present') return { state: 'present', sha: current.sha };
+  if (current.state !== 'absent') return { state: 'unknown', reason: 'cursor state could not be read' };
+
+  const raw = await priorAudit();
+  // A reader may say WHY it could not read: `{ evidence: 'unknown', why }`, where
+  // `why` is the port's own state ('unsupported' vs 'unknown'), so the alarm names it.
+  const evidence = typeof raw === 'object' && raw !== null ? raw.evidence : raw;
+  const why = typeof raw === 'object' && raw !== null ? raw.why : 'unknown';
+  if (evidence === 'some') {
+    return { state: 'refused', reason: 'a prior successful audited run exists, so the cursor was deleted, not never created' };
+  }
+  if (evidence !== 'none') return { state: 'unknown', reason: `prior audited-run evidence could not be read (${why ?? 'unknown'})` };
+
+  const log = git.try(['log', '--first-parent', '--diff-filter=A', '--format=%H', '--reverse', '--', workflowPath]);
+  const adoption = log.status === 0 ? log.stdout.trim().split('\n')[0] : '';
+  if (!HEX40.test(adoption)) return { state: 'unknown', reason: `no adoption commit found for ${workflowPath}` };
+
+  const push = git.try(['push', `--force-with-lease=${CURSOR_REF}:`, REMOTE, `${adoption}:${CURSOR_REF}`]);
+  if (push.status !== 0) {
+    const again = readCursor({ git });
+    if (again.state === 'present') return { state: 'present', sha: again.sha };
+    return { state: 'unknown', reason: 'cursor creation was refused by the remote (no permission, or lost a race and the ref is unreadable)' };
+  }
+  return { state: 'bootstrapped', base: adoption, adoption };
+}
+
+/**
+ * The remote's default branch from its own HEAD symref (`ls-remote --symref`):
+ * remote-authoritative and independent of the workflow trigger's payload.
+ * Returns undefined when unreadable (the port then answers unknown: an alarm).
+ */
+export function resolveDefaultBranch(git) {
+  const r = git.try(['ls-remote', '--symref', REMOTE, 'HEAD']);
+  if (r.status !== 0) return undefined;
+  const m = r.stdout.match(/^ref:\s+refs\/heads\/(\S+)\s+HEAD/m);
+  return m ? m[1] : undefined;
+}
+
+/**
+ * Manifest read by `vcs/lib/workflow-auth.mjs` (issue #535): which subcommands
+ * can reach the VCS port. Only `bootstrap` does (its prior-run evidence comes
+ * from the port's `workflowRunSucceeded`); `window` and `accept` touch git only.
+ */
+export const SUBCOMMAND_PORT_REACH = {
+  'window': false,
+  'accept': false,
+  'bootstrap': true,
+};
+
 // ── CLI ────────────────────────────────────────────────────────────────────
 
 function makeRealGit(cwd) {
@@ -114,7 +188,7 @@ function makeRealGit(cwd) {
 }
 
 function usage() {
-  process.stderr.write('Usage: cursor.mjs window | cursor.mjs accept <from> <to> --reason "<text>"\n');
+  process.stderr.write('Usage: cursor.mjs window | cursor.mjs bootstrap [<workflow-path>] [--branch <default-branch>] | cursor.mjs accept <from> <to> --reason "<text>"\n');
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
@@ -132,6 +206,46 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       process.exit(2);
     } else {
       console.log(`UNKNOWN ${result.reason ?? ''}`.trimEnd());
+      process.exit(2);
+    }
+  } else if (cmd === 'bootstrap') {
+    // async body: the prior-run evidence comes through the VCS port.
+    // Flags first, then the positional: `--branch <v>` (and its value) never
+    // counts as the workflow path, wherever it sits.
+    const bi = rest.indexOf('--branch');
+    // `github.event.repository.default_branch` is EMPTY on `schedule` runs, so an
+    // absent/empty --branch falls back to the remote's own HEAD — present on every trigger.
+    const flagged = bi !== -1 ? rest[bi + 1] : undefined;
+    const branch = flagged || resolveDefaultBranch(git);
+    const positional = rest.filter((tok, i) => !tok.startsWith('--') && !(bi !== -1 && i === bi + 1));
+    const workflowPath = positional[0] ?? '.github/workflows/governance-postmerge.yml';
+    const priorAudit = async () => {
+      try {
+        const { getVcs } = await import('../../vcs/cli.mjs');
+        const vcs = await getVcs();
+        const r = await vcs.workflowRunSucceeded({
+          project: process.env.GITHUB_REPOSITORY, workflow: workflowPath.split('/').pop(), branch,
+        });
+        if (r?.state === 'succeeded') return 'some';
+        if (r?.state === 'none') return 'none';
+        // 'unknown' and 'unsupported' alike: never a bootstrap, but named apart.
+        return { evidence: 'unknown', why: r?.state === 'unsupported' ? 'unsupported' : 'unknown' };
+      } catch { /* surfaced: an unreachable port is 'unknown', which the caller alarms — never a bootstrap */
+        return 'unknown';
+      }
+    };
+    const result = await bootstrapCursor({ git, workflowPath, priorAudit });
+    if (result.state === 'bootstrapped') {
+      console.log(`BOOTSTRAPPED ${result.base} ${result.adoption}`);
+      process.exit(0);
+    } else if (result.state === 'present') {
+      console.log(`PRESENT ${result.sha}`);
+      process.exit(0);
+    } else if (result.state === 'refused') {
+      console.log(`REFUSED ${result.reason}`);
+      process.exit(2);
+    } else {
+      console.log(`UNKNOWN ${result.reason}`);
       process.exit(2);
     }
   } else if (cmd === 'accept') {

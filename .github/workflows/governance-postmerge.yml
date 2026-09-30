@@ -39,6 +39,9 @@ on:
 # trusted: runs post-merge on main.
 #   contents: write        — push auto-revert branches and CAS the governance cursor
 #   pull-requests: write   — open the auto-revert PR
+#   actions: read         — `gh run list --workflow`, the bootstrap's prior-run evidence (#1162).
+#       An explicit block sets every omitted scope to none, so without it a PRIVATE
+#       repository reads `unknown` and alarms forever. Read only, never write.
 #   issues: write          — REQUIRED by every LOUD path, not a nicety (#462):
 #       • `gh label create` (governance:cursor-missing / :cursor-unknown /
 #         :audit-uncomputable / :revert-blocked) is the labels REST endpoint,
@@ -49,7 +52,7 @@ on:
 #         the ISSUES labels endpoint, so the revert path needs it too
 #     Without it the gate still fails closed but cannot TELL anyone, which is
 #     how a 12-day rung-3 outage stayed invisible.
-permissions: { contents: write, pull-requests: write, issues: write }
+permissions: { contents: write, pull-requests: write, issues: write, actions: read }
 
 # Defense-in-depth against overlapping runs (the CAS in cursor.mjs advanceCursor
 # is the actual guarantee; this only narrows the window). REQ-D2-12 / §5.3.
@@ -80,6 +83,15 @@ jobs:
         name: Resolve the audit window from the governance cursor
         env:
           GH_TOKEN: ${{ github.token }}
+          # `cursor.mjs bootstrap` reads prior-run evidence through the VCS port
+          # (#1162): the port's credential, this file's fixed provider, and the
+          # default branch the evidence is filtered by.
+          VCS_TOKEN: ${{ github.token }}
+          VCS_PROVIDER: github
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          # EMPTY on `schedule` runs (no repository object in that payload): cursor.mjs
+          # then resolves the default branch from the remote's own HEAD.
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           set -euo pipefail
 
@@ -94,6 +106,32 @@ jobs:
           set -e
 
           state="$(printf '%s\n' "$win_out" | head -n1 | cut -d' ' -f1)"
+
+          # #1162 — a NEW repository has no cursor and never had one: that is a
+          # bootstrap state, not an alarm. `cursor.mjs bootstrap` creates the
+          # cursor (a remote CAS, AT the adoption commit: a gate is not
+          # authoritative over the commit that installs it, and the first window
+          # audits everything after it) ONLY
+          # when no prior run of this workflow ever succeeded. A cursor that
+          # once existed and is gone (a prior success exists), or evidence that
+          # cannot be read, falls through to the alarm below — never a guess.
+          boot_reason=""
+          if [ "$state" = "ABSENT" ]; then
+            set +e  # surfaced: the bootstrap exit code is captured and branched on; anything but a clean bootstrap keeps the ABSENT alarm
+            boot_out="$(node brain/scripts/governance/postmerge/cursor.mjs bootstrap .github/workflows/governance-postmerge.yml --branch "$DEFAULT_BRANCH")"
+            boot_code=$?
+            set -e
+            echo "$boot_out"
+            if [ "$boot_code" -eq 0 ]; then
+              set +e  # surfaced: re-resolving the window; the same capture-and-branch contract applies
+              win_out="$(node brain/scripts/governance/postmerge/cursor.mjs window)"
+              win_code=$?
+              set -e
+              state="$(printf '%s\n' "$win_out" | head -n1 | cut -d' ' -f1)"
+            else
+              boot_reason="$(printf '%s\n' "$boot_out" | head -n1)"
+            fi
+          fi
 
           if [ "$win_code" -eq 0 ] && [ "$state" = "PRESENT" ]; then
             base="$(printf '%s\n' "$win_out" | head -n1 | cut -d' ' -f2)"
@@ -110,9 +148,13 @@ jobs:
             {
               echo "The governance cursor ref does not exist. Post-merge auditing is halted until it is initialized."
               echo ""
-              echo "Initialize it (human action) with:"
+              if [ -n "$boot_reason" ]; then
+                echo "Automatic initialization was NOT performed: ${boot_reason}"
+                echo ""
+              fi
+              echo "Initialize it (human action) AT THE ADOPTION COMMIT — the first commit that added this workflow — never at the root: a cursor before the adoption makes the audit judge (and auto-revert) the very commit that installed the gate. The window then audits everything after it:"
               echo '```'
-              echo "git update-ref refs/governance/audit-cursor \$(git rev-list --max-parents=0 HEAD | tail -n1)"
+              echo "git update-ref refs/governance/audit-cursor \$(git log --first-parent --diff-filter=A --format=%H --reverse -- .github/workflows/governance-postmerge.yml | head -n1)"
               echo "git push origin refs/governance/audit-cursor"
               echo '```'
             } > "$RUNNER_TEMP/body.md"
