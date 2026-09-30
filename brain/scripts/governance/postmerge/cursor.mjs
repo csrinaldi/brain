@@ -198,9 +198,12 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     }
   } else if (cmd === 'bootstrap') {
     // async body: the prior-run evidence comes through the VCS port.
-    const workflowPath = rest[0] ?? '.github/workflows/governance-postmerge.yml';
+    // Flags first, then the positional: `--branch <v>` (and its value) never
+    // counts as the workflow path, wherever it sits.
     const bi = rest.indexOf('--branch');
     const branch = bi !== -1 ? rest[bi + 1] : undefined;
+    const positional = rest.filter((tok, i) => !tok.startsWith('--') && !(bi !== -1 && i === bi + 1));
+    const workflowPath = positional[0] ?? '.github/workflows/governance-postmerge.yml';
     const priorAudit = async () => {
       try {
         const { getVcs } = await import('../../vcs/cli.mjs');

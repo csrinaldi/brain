@@ -11,6 +11,7 @@ import { removeTempTree } from '../../__fixtures__/tmp-tree.mjs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { readFileSync, existsSync, chmodSync } from 'node:fs';
 
 import { gitTry, gitOrThrow } from './git-seam.mjs';
 import {
@@ -771,4 +772,36 @@ test('bootstrapCursor: #1162 the refusal names WHICH kind of unreadable evidence
   const uk = await bootstrapCursor({ git: realGit(f.dir), workflowPath: WORKFLOW, priorAudit: () => ({ evidence: 'unknown', why: 'unknown' }) });
   assert.doesNotMatch(uk.reason, /unsupported/);
   assert.match(uk.reason, /unknown/);
+});
+
+// ── #1162 review: `bootstrap` parses flags BEFORE the positional ─────────────
+// A recording `gh` on PATH proves what the CLI actually asked the port for.
+function bootstrapCli(t, args) {
+  const f = makeFreshConsumer(t);
+  const bin = join(f.scratch, 'bin');
+  mkdirSync(bin);
+  const log = join(f.scratch, 'gh.log');
+  writeFileSync(join(bin, 'gh'), `#!/usr/bin/env bash\necho "gh $*" >> ${log}\nprintf '[]'\n`);
+  chmodSync(join(bin, 'gh'), 0o755);
+  const r = spawnSync('node', [CURSOR_SCRIPT, 'bootstrap', ...args], {
+    cwd: f.dir, encoding: 'utf8',
+    env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, VCS_PROVIDER: 'github' },
+  });
+  return { r, ghLog: existsSync(log) ? readFileSync(log, 'utf8') : '' };
+}
+
+test('CLI: `bootstrap --branch main` uses the default workflow path, not `--branch`', (t) => {
+  const { r, ghLog } = bootstrapCli(t, ['--branch', 'main']);
+  assert.match(ghLog, /--workflow governance-postmerge\.yml --branch main/, `stdout=${r.stdout}\n${ghLog}`);
+  assert.match(r.stdout, /^BOOTSTRAPPED /);
+});
+
+test('CLI: `bootstrap <path> --branch main` takes the positional path and the branch', (t) => {
+  const { ghLog } = bootstrapCli(t, [WORKFLOW, '--branch', 'main']);
+  assert.match(ghLog, /--workflow governance-postmerge\.yml --branch main/);
+});
+
+test('CLI: `bootstrap --branch main <path>` (flag first) still finds the positional', (t) => {
+  const { ghLog } = bootstrapCli(t, ['--branch', 'main', WORKFLOW]);
+  assert.match(ghLog, /--workflow governance-postmerge\.yml --branch main/);
 });
