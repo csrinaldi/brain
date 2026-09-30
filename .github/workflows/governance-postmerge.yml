@@ -241,6 +241,24 @@ jobs:
             --reason "post-merge audit clean over ${range}"
           echo "cursor advanced to ${head}"
 
+      - id: resolve-audit
+        name: Close the alarms this clean audit resolves (#1188)
+        # An alarm the workflow filed closes itself once a later run passes the
+        # condition that filed it. Only a CLEAN audit (code 0) gets here, and only
+        # after the cursor advanced: a still-failing run closes nothing. The alarm
+        # issue used to outlive the recovery it reported (#4 in the 1.10.0 demo
+        # repos). `alarm.mjs resolve` never fails the job — a close that cannot
+        # happen is a printed warning. No new permission: closing an issue is
+        # covered by the `issues: write` held for filing.
+        if: steps.audit.outputs.code == '0' && steps.advance.outcome == 'success'
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          GH_TOKEN: ${{ github.token }}
+          VCS_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          node brain/scripts/governance/postmerge/alarm.mjs resolve "$RUN_URL" audit
+
       - id: revert
         name: Revert the parsed offenders (code 1)
         if: steps.audit.outputs.code == '1'
@@ -687,6 +705,17 @@ jobs:
             echo "alarm=${label}" >> "$GITHUB_OUTPUT"
             echo "PR creation failed; orphan branch cleanup attempted, alarm filed."
           fi
+
+      - id: resolve-sweep
+        name: Close the archive-sweep alarm this clean sweep resolves (#1188)
+        if: steps.sweep.outcome == 'success'
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          GH_TOKEN: ${{ github.token }}
+          VCS_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          node brain/scripts/governance/postmerge/alarm.mjs resolve "$RUN_URL" sweep
 
       - id: terminal
         name: Terminal-state assertion — no terminal state may be both red and silent

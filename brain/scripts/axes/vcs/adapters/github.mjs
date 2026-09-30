@@ -1013,6 +1013,24 @@ export async function labelCreate({ project, name, color, description } = {}) {
 }
 
 /**
+ * issueClose — closes an issue as completed (issue #1188). The post-merge
+ * workflow closes the alarm issues a later clean run resolves. The payload is
+ * `state` and `state_reason` and nothing else: no body, title or labels travel
+ * with it, the mirror of `issueUpdate`'s refusal to carry `state`. Never throws.
+ *
+ * @param {{ project: string, number: number }} opts
+ * @returns {Promise<{ ok: true } | { ok: false, error: string }>}
+ */
+export async function issueClose({ project, number } = {}) {
+  const r = gh(
+    ['api', '-X', 'PATCH', `repos/${project}/issues/${number}`, '--input', '-'],
+    { input: JSON.stringify({ state: 'closed', state_reason: 'completed' }) },
+  );
+  if (r.ok) return { ok: true };
+  return { ok: false, error: r.stderr.trim() || `gh api failed (status ${r.status})` };
+}
+
+/**
  * rerunWorkflowRun — GitHub-only capability (issue #328, closing the
  * stale-GREEN re-evaluation bug). Not a base contract verb (no GitLab
  * equivalent implemented, deliberately out of scope) — callers reach it via
