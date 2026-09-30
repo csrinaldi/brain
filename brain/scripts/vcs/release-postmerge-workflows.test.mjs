@@ -80,7 +80,9 @@ function isolatedEnv(homeDir, extra = {}) {
 // A recording `gh` stub: logs each invocation to $GH_LOG, prints canned output
 // for read subcommands, and (by default) succeeds. Placed on PATH ahead of the
 // real gh so no isolated test ever hits the network or needs a token.
-function writeGhStub(binDir, { prListPrints = '', issueListPrints = '', exitCode = 0 } = {}) {
+function writeGhStub(binDir, {
+  prListPrints = '', issueListPrints = '', runListPrints = '[]', runListExit = 0, exitCode = 0,
+} = {}) {
   mkdirSync(binDir, { recursive: true });
   const gh = join(binDir, 'gh');
   writeFileSync(gh, [
@@ -89,6 +91,7 @@ function writeGhStub(binDir, { prListPrints = '', issueListPrints = '', exitCode
     'case "$1 $2" in',
     `  "pr list") printf '%s' ${JSON.stringify(prListPrints)} ;;`,
     `  "issue list") printf '%s' ${JSON.stringify(issueListPrints)} ;;`,
+    `  "run list") printf '%s' ${JSON.stringify(runListPrints)}; exit ${runListExit} ;;`,
     '  *) : ;;',
     'esac',
     `exit ${exitCode}`,
@@ -755,6 +758,54 @@ test('C1 skip-over: the window step resolves cursor..HEAD (C..P2, containing M),
   const out = r.output();
   assert.match(out, new RegExp(`range=${cSha}\\.\\.${p2Sha}`),
     `window must be C..P2 (contains M=${mSha.slice(0,7)}); got GITHUB_OUTPUT:\n${out}`);
+});
+
+// ── #1162: a fresh consumer has no cursor and never had one. The window step
+// initializes it (bootstrap) and audits — no alarm. A cursor that HAD existed
+// (a prior successful run of this workflow) and is now gone still alarms. ────
+function freshConsumerSetup(g, repo, homeDir) {
+  const origin = join(homeDir, 'origin.git');
+  spawnSync('git', ['init', '--bare', origin], { encoding: 'utf8', env: isolatedEnv(homeDir) });
+  g('remote', 'add', 'origin', origin);
+  writeFileSync(join(repo, 'f'), 'pre\n'); g('add', '.'); g('commit', '-m', 'pre-adoption');
+  mkdirSync(join(repo, '.github/workflows'), { recursive: true });
+  writeFileSync(join(repo, '.github/workflows/governance-postmerge.yml'), 'name: x\n');
+  g('add', '.'); g('commit', '-m', 'adopt brain');
+  writeFileSync(join(repo, 'g'), 'later\n'); g('add', '.'); g('commit', '-m', 'first merge');
+  g('push', 'origin', 'main');
+}
+
+test('#1162 (a): fresh consumer, no cursor, no prior successful run → window step bootstraps, emits a range, files NO alarm', () => {
+  let pre;
+  const r = runStepIsolated('window', {
+    repoSetup: (g, repo, homeDir) => { freshConsumerSetup(g, repo, homeDir); pre = g('rev-parse', 'HEAD~2').stdout.trim(); },
+    ghOpts: { runListPrints: '[]' },
+  });
+  assert.equal(r.status, 0, `bootstrap must let the run proceed:\n${r.stdout}\n${r.stderr}`);
+  assert.match(r.output(), new RegExp(`range=${pre}\\.\\.[0-9a-f]{40}`), `window must start at the adoption commit's parent:\n${r.output()}`);
+  assert.doesNotMatch(r.ghLog(), /gh (label|issue) create/, 'a bootstrap is not an alarm');
+  assert.doesNotMatch(r.output(), /alarm=/);
+});
+
+test('#1162 (b): cursor deleted on a repo with a prior successful run → still alarms governance:cursor-missing, no range', () => {
+  const r = runStepIsolated('window', {
+    repoSetup: freshConsumerSetup,
+    ghOpts: { runListPrints: '[{"databaseId":42}]' },
+  });
+  assert.equal(r.status, 2, `a deleted cursor must halt:\n${r.stdout}\n${r.stderr}`);
+  assert.doesNotMatch(r.output(), /range=/);
+  assert.match(r.output(), /alarm=governance:cursor-missing/);
+  assert.match(r.ghLog(), /gh issue create/);
+});
+
+test('#1162: the evidence of a prior run cannot be read (gh fails) → halts loud, never bootstraps', () => {
+  const r = runStepIsolated('window', {
+    repoSetup: freshConsumerSetup,
+    ghOpts: { runListPrints: '', runListExit: 1 },
+  });
+  assert.equal(r.status, 2);
+  assert.doesNotMatch(r.output(), /range=/);
+  assert.match(r.output(), /alarm=/);
 });
 
 // ── C2 (Phase 4.1): a cursor that resolves to UNKNOWN/ABSENT halts with exit 2

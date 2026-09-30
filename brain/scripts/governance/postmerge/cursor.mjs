@@ -8,6 +8,7 @@
 // governance ref is ever read or written — a plain checkout has none.
 
 import { fileURLToPath } from 'node:url';
+import { execFileSync } from 'node:child_process';
 import { gitTry, gitOrThrow } from './git-seam.mjs';
 
 export const CURSOR_REF = 'refs/governance/audit-cursor';
@@ -107,6 +108,63 @@ export function acceptManually({
   return advanceCursor({ git, from, to });
 }
 
+/**
+ * #1162 — initialize the cursor of a NEW repository. A missing cursor is only
+ * a bootstrap state when the repository has never completed an audited run:
+ * `priorAudit()` reports 'none' | 'some' | 'unknown' from evidence outside the
+ * ref (a successful prior run of this very workflow — that run advanced the
+ * cursor, so its existence proves the cursor once existed and was deleted).
+ *
+ *   • 'some'    → refused: the cursor is GONE, not new. The caller alarms.
+ *   • 'unknown' → unknown: the evidence could not be read. Never a bootstrap.
+ *
+ * The base is the PARENT of the adoption commit — the first commit on the
+ * first-parent line that ADDED the postmerge workflow — so the first window
+ * (base..HEAD) audits the adoption commit and everything after it: no
+ * unaudited commit can sit between "the gate exists" and "the gate audits".
+ * An adoption commit with no parent (the root) is its own base: nothing
+ * precedes it. No adoption commit found → unknown, never a guessed base.
+ *
+ * Creation is a CAS: `--force-with-lease=<ref>:` (empty expectation) makes the
+ * remote refuse if the ref appeared in the meantime.
+ */
+export function bootstrapCursor({ git, workflowPath, priorAudit }) {
+  const current = readCursor({ git });
+  if (current.state === 'present') return { state: 'present', sha: current.sha };
+  if (current.state !== 'absent') return { state: 'unknown', reason: 'cursor state could not be read' };
+
+  const evidence = priorAudit();
+  if (evidence === 'some') {
+    return { state: 'refused', reason: 'a prior successful audited run exists, so the cursor was deleted, not never created' };
+  }
+  if (evidence !== 'none') return { state: 'unknown', reason: 'prior audited-run evidence could not be read' };
+
+  const log = git.try(['log', '--first-parent', '--diff-filter=A', '--format=%H', '--reverse', '--', workflowPath]);
+  const adoption = log.status === 0 ? log.stdout.trim().split('\n')[0] : '';
+  if (!HEX40.test(adoption)) return { state: 'unknown', reason: `no adoption commit found for ${workflowPath}` };
+
+  const parent = git.try(['rev-parse', '--verify', `${adoption}^`]);
+  const base = parent.status === 0 && HEX40.test(parent.stdout.trim()) ? parent.stdout.trim() : adoption;
+
+  const push = git.try(['push', `--force-with-lease=${CURSOR_REF}:`, REMOTE, `${base}:${CURSOR_REF}`]);
+  if (push.status !== 0) return { state: 'unknown', reason: 'cursor creation was refused by the remote (lost a race, or no permission)' };
+  return { state: 'bootstrapped', base, adoption };
+}
+
+/** Real evidence reader: has this workflow ever completed successfully? */
+function ghPriorAudit(workflowFile, cwd) {
+  try {
+    const out = execFileSync('gh', ['run', 'list', '--workflow', workflowFile, '--status', 'success', '--limit', '1', '--json', 'databaseId'], {
+      cwd, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    const runs = JSON.parse(out);
+    if (!Array.isArray(runs)) return 'unknown';
+    return runs.length === 0 ? 'none' : 'some';
+  } catch { /* surfaced: an unreadable evidence source is 'unknown', which the caller alarms — never a bootstrap */
+    return 'unknown';
+  }
+}
+
 // ── CLI ────────────────────────────────────────────────────────────────────
 
 function makeRealGit(cwd) {
@@ -114,7 +172,7 @@ function makeRealGit(cwd) {
 }
 
 function usage() {
-  process.stderr.write('Usage: cursor.mjs window | cursor.mjs accept <from> <to> --reason "<text>"\n');
+  process.stderr.write('Usage: cursor.mjs window | cursor.mjs bootstrap [<workflow-path>] | cursor.mjs accept <from> <to> --reason "<text>"\n');
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
@@ -132,6 +190,24 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       process.exit(2);
     } else {
       console.log(`UNKNOWN ${result.reason ?? ''}`.trimEnd());
+      process.exit(2);
+    }
+  } else if (cmd === 'bootstrap') {
+    const workflowPath = rest[0] ?? '.github/workflows/governance-postmerge.yml';
+    const result = bootstrapCursor({
+      git, workflowPath, priorAudit: () => ghPriorAudit(workflowPath.split('/').pop(), process.cwd()),
+    });
+    if (result.state === 'bootstrapped') {
+      console.log(`BOOTSTRAPPED ${result.base} ${result.adoption}`);
+      process.exit(0);
+    } else if (result.state === 'present') {
+      console.log(`PRESENT ${result.sha}`);
+      process.exit(0);
+    } else if (result.state === 'refused') {
+      console.log(`REFUSED ${result.reason}`);
+      process.exit(2);
+    } else {
+      console.log(`UNKNOWN ${result.reason}`);
       process.exit(2);
     }
   } else if (cmd === 'accept') {

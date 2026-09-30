@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  mkdtempSync, mkdirSync,
+  mkdtempSync, mkdirSync, writeFileSync,
 } from 'node:fs';
 import { removeTempTree } from '../../__fixtures__/tmp-tree.mjs';
 import { tmpdir } from 'node:os';
@@ -14,7 +14,7 @@ import { spawnSync } from 'node:child_process';
 
 import { gitTry, gitOrThrow } from './git-seam.mjs';
 import {
-  CURSOR_REF, readCursor, resolveWindow, advanceCursor, acceptManually,
+  CURSOR_REF, readCursor, resolveWindow, advanceCursor, acceptManually, bootstrapCursor,
 } from './cursor.mjs';
 
 const CURSOR_SCRIPT = new URL('./cursor.mjs', import.meta.url).pathname;
@@ -588,4 +588,117 @@ test('CLI: `cursor.mjs accept` with a missing --reason exits non-zero with a usa
   const r = spawnSync('node', [CURSOR_SCRIPT, 'accept', sha, sha], { cwd: cloneDir, encoding: 'utf8' });
   assert.notEqual(r.status, 0);
   assert.match(r.stderr, /Usage/);
+});
+
+// ── #1162 — bootstrap: a NEW repository's absent cursor is a bootstrap state,
+// a DELETED cursor is an alarm. The two are told apart by evidence the
+// workflow can read (a prior successful run of itself), never by a guess. ────
+
+const WORKFLOW = '.github/workflows/governance-postmerge.yml';
+
+/**
+ * Bare origin + clone with history: R (root, pre-adoption) → A (adds the
+ * postmerge workflow = the adoption commit) → M (a later merge-to-main).
+ * NO cursor ref anywhere — exactly a fresh consumer.
+ */
+function makeFreshConsumer(t, { adoptionIsRoot = false } = {}) {
+  const scratch = mkdtempSync(join(tmpdir(), 'cursor-boot-'));
+  t.after(() => removeTempTree(scratch));
+  const originDir = join(scratch, 'origin.git');
+  mkdirSync(originDir);
+  spawnSync('git', ['init', '--bare', '--initial-branch=main', originDir], { encoding: 'utf8' });
+  const dir = join(scratch, 'work');
+  mkdirSync(dir);
+  const g = makeRepo(dir);
+  g('remote', 'add', 'origin', originDir);
+  const shas = {};
+  if (!adoptionIsRoot) {
+    writeFileSync(join(dir, 'README.md'), 'hello\n'); g('add', '.'); g('commit', '-m', 'R');
+    shas.root = headSha(dir);
+  }
+  mkdirSync(join(dir, '.github/workflows'), { recursive: true });
+  writeFileSync(join(dir, WORKFLOW), 'name: x\n'); g('add', '.'); g('commit', '-m', 'A adoption');
+  shas.adoption = headSha(dir);
+  writeFileSync(join(dir, 'later.txt'), 'x\n'); g('add', '.'); g('commit', '-m', 'M');
+  shas.head = headSha(dir);
+  g('push', 'origin', 'main');
+  return { scratch, originDir, dir, ...shas };
+}
+
+const prior = (v) => () => v;
+
+test('bootstrapCursor: #1162 (a) fresh repo, no prior audited run → cursor created at the adoption commit\'s parent, remote only', (t) => {
+  const f = makeFreshConsumer(t);
+  const r = bootstrapCursor({ git: realGit(f.dir), workflowPath: WORKFLOW, priorAudit: prior('none') });
+  assert.equal(r.state, 'bootstrapped');
+  assert.equal(r.base, f.root);
+  assert.equal(remoteCursorSha(f.originDir), f.root);
+});
+
+test('bootstrapCursor: #1162 (c) the window after initialization INCLUDES the adoption commit', (t) => {
+  const f = makeFreshConsumer(t);
+  bootstrapCursor({ git: realGit(f.dir), workflowPath: WORKFLOW, priorAudit: prior('none') });
+  const w = resolveWindow({ git: realGit(f.dir), head: f.head });
+  assert.equal(w.state, 'present');
+  const commits = spawnSync('git', ['rev-list', w.range], { cwd: f.dir, encoding: 'utf8' }).stdout.trim().split('\n');
+  assert.ok(commits.includes(f.adoption), 'adoption commit must be inside the first audited window');
+  assert.ok(commits.includes(f.head));
+});
+
+test('bootstrapCursor: #1162 adoption commit is the root → base is the root itself (nothing precedes it)', (t) => {
+  const f = makeFreshConsumer(t, { adoptionIsRoot: true });
+  const r = bootstrapCursor({ git: realGit(f.dir), workflowPath: WORKFLOW, priorAudit: prior('none') });
+  assert.equal(r.state, 'bootstrapped');
+  assert.equal(r.base, f.adoption);
+});
+
+test('bootstrapCursor: #1162 (b) DELETED cursor — a prior audited run exists → refused, cursor stays absent (alarm)', (t) => {
+  const f = makeFreshConsumer(t);
+  const r = bootstrapCursor({ git: realGit(f.dir), workflowPath: WORKFLOW, priorAudit: prior('some') });
+  assert.equal(r.state, 'refused');
+  assert.match(r.reason, /prior/i);
+  assert.equal(remoteCursorSha(f.originDir), '', 'no cursor may be created');
+});
+
+test('bootstrapCursor: #1162 the evidence cannot be read → unknown, never a bootstrap', (t) => {
+  const f = makeFreshConsumer(t);
+  const r = bootstrapCursor({ git: realGit(f.dir), workflowPath: WORKFLOW, priorAudit: prior('unknown') });
+  assert.equal(r.state, 'unknown');
+  assert.equal(remoteCursorSha(f.originDir), '');
+});
+
+test('bootstrapCursor: #1162 a cursor already present is never overwritten', (t) => {
+  const f = makeFreshConsumer(t);
+  spawnSync('git', ['push', 'origin', `${f.adoption}:${CURSOR_REF}`], { cwd: f.dir, encoding: 'utf8' });
+  const r = bootstrapCursor({ git: realGit(f.dir), workflowPath: WORKFLOW, priorAudit: prior('none') });
+  assert.equal(r.state, 'present');
+  assert.equal(remoteCursorSha(f.originDir), f.adoption);
+});
+
+test('bootstrapCursor: #1162 no adoption commit found on the first-parent line → unknown, never a guessed base', (t) => {
+  const f = makeFreshConsumer(t);
+  const r = bootstrapCursor({ git: realGit(f.dir), workflowPath: 'nope/never-added.yml', priorAudit: prior('none') });
+  assert.equal(r.state, 'unknown');
+  assert.equal(remoteCursorSha(f.originDir), '');
+});
+
+test('bootstrapCursor: #1162 creation is a CAS — a cursor that appears in the race is not clobbered', (t) => {
+  const f = makeFreshConsumer(t);
+  const racer = (real) => ({
+    try: (argv) => {
+      if (argv[0] === 'push') {
+        spawnSync('git', ['push', 'origin', `${f.head}:${CURSOR_REF}`], { cwd: f.dir, encoding: 'utf8' });
+      }
+      return real.try(argv);
+    },
+    orThrow: (argv) => {
+      if (argv[0] === 'push') {
+        spawnSync('git', ['push', 'origin', `${f.head}:${CURSOR_REF}`], { cwd: f.dir, encoding: 'utf8' });
+      }
+      return real.orThrow(argv);
+    },
+  });
+  const r = bootstrapCursor({ git: racer(realGit(f.dir)), workflowPath: WORKFLOW, priorAudit: prior('none') });
+  assert.equal(r.state, 'unknown');
+  assert.equal(remoteCursorSha(f.originDir), f.head, 'the racing cursor stands');
 });

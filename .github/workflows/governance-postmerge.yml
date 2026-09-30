@@ -95,6 +95,31 @@ jobs:
 
           state="$(printf '%s\n' "$win_out" | head -n1 | cut -d' ' -f1)"
 
+          # #1162 — a NEW repository has no cursor and never had one: that is a
+          # bootstrap state, not an alarm. `cursor.mjs bootstrap` creates the
+          # cursor (a remote CAS, at the parent of the adoption commit, so the
+          # first window audits the adoption commit and everything after) ONLY
+          # when no prior run of this workflow ever succeeded. A cursor that
+          # once existed and is gone (a prior success exists), or evidence that
+          # cannot be read, falls through to the alarm below — never a guess.
+          boot_reason=""
+          if [ "$state" = "ABSENT" ]; then
+            set +e  # surfaced: the bootstrap exit code is captured and branched on; anything but a clean bootstrap keeps the ABSENT alarm
+            boot_out="$(node brain/scripts/governance/postmerge/cursor.mjs bootstrap .github/workflows/governance-postmerge.yml)"
+            boot_code=$?
+            set -e
+            echo "$boot_out"
+            if [ "$boot_code" -eq 0 ]; then
+              set +e  # surfaced: re-resolving the window; the same capture-and-branch contract applies
+              win_out="$(node brain/scripts/governance/postmerge/cursor.mjs window)"
+              win_code=$?
+              set -e
+              state="$(printf '%s\n' "$win_out" | head -n1 | cut -d' ' -f1)"
+            else
+              boot_reason="$(printf '%s\n' "$boot_out" | head -n1)"
+            fi
+          fi
+
           if [ "$win_code" -eq 0 ] && [ "$state" = "PRESENT" ]; then
             base="$(printf '%s\n' "$win_out" | head -n1 | cut -d' ' -f2)"
             head="$(printf '%s\n' "$win_out" | head -n1 | cut -d' ' -f3)"
@@ -110,6 +135,10 @@ jobs:
             {
               echo "The governance cursor ref does not exist. Post-merge auditing is halted until it is initialized."
               echo ""
+              if [ -n "$boot_reason" ]; then
+                echo "Automatic initialization was NOT performed: ${boot_reason}"
+                echo ""
+              fi
               echo "Initialize it (human action) with:"
               echo '```'
               echo "git update-ref refs/governance/audit-cursor \$(git rev-list --max-parents=0 HEAD | tail -n1)"
@@ -190,6 +219,10 @@ jobs:
       - id: advance
         name: Advance the cursor on a clean audit (code 0)
         if: steps.audit.outputs.code == '0'
+        # cursor.mjs also carries the #1162 bootstrap reader (`gh run list`); the
+        # credential is declared for the whole script, as workflow-auth requires.
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           range="${{ steps.window.outputs.range }}"
