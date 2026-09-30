@@ -22,7 +22,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { runCheck as runLocal } from '../brain-check.mjs';
-import { runCheck as runCi } from './run-check.mjs';
+import { runCheck as runCi, main as ciMain } from './run-check.mjs';
+import { GOVERNANCE_JOBS } from '../vcs/governance-checks.mjs';
+import { CI_COUNTERPART } from '../brain-check.mjs';
 
 const APPROVED = async () => ({ labels: ['status:approved'] });
 const UNAPPROVED = async () => ({ labels: ['type:bug'] });
@@ -223,4 +225,87 @@ test('#340: a failed approved-label lookup is UNVERIFIED, never a pass', async (
   assert.ok(result.unverified.some(x => x.check === 'issueLink'));
   assert.ok(!/\[PASS\] issueLink/.test(result.summary),
     'no network must never render as a verified pass');
+});
+
+// ── #1187: the SAME tier semantics, not just the same predicate ─────────────────────
+//
+// The matrix above compares the two surfaces at the default tier and against the RAW
+// evaluator. CI does not exit on the raw evaluator: `main()` routes every result through
+// `mapDetectionToWarning`, so `memory-gate` at `lite` is a warning with exit 0. Comparing
+// against `runCi` let brain:check be stricter than CI for every `lite` consumer — which is
+// every fresh consumer — and brain:ship refused the first PR CI passed.
+//
+// The comparison below is against CI's REAL exit code, per tier, three-valued: 0 pass,
+// 1 fail, 2 uncomputable. Local `UNVERIFIED` is CI's 2; local FAIL is CI's 1.
+
+const NO_DEFAULT_BRANCH_RECORDS = () => ({ records: [], error: null });
+const TIERS = ['lite', 'standard', 'regulated'];
+
+async function localState(check, f, tier) {
+  const result = await runLocal({
+    numstat: '1\t0\tsrc/a.mjs\n',
+    changedFiles: ['src/a.mjs'],
+    addedFiles: [],
+    prBody: f.body,
+    ignoreList: [],
+    observations: f.observations,
+    budget: 1000,
+    config: { governance: { tier } },
+    targetBranch: f.targetBranch,
+    defaultBranch: f.defaultBranch,
+    fetchIssue: f.fetchIssue,
+    readDefaultBranchRecords: NO_DEFAULT_BRANCH_RECORDS,
+    npmTestFn: async () => ({ ok: true }),
+    repoCheckFn: async () => ({ ok: true }),
+  });
+  if (result.failures.some(x => x.check === check)) return 1;
+  if (result.unverified.some(x => x.check === check)) return 2;
+  return 0;
+}
+
+async function ciExit(check, f, tier) {
+  const log = console.log;
+  console.log = () => {};
+  try {
+    return await ciMain(CI_JOB[check], {
+      ctx: { body: f.body, targetBranch: f.targetBranch, defaultBranch: f.defaultBranch },
+      fetchIssue: f.fetchIssue,
+      readRecords: () => f.observations,
+      readConfig: () => ({ governance: { tier } }),
+      readDefaultBranchRecords: NO_DEFAULT_BRANCH_RECORDS,
+    });
+  } finally {
+    console.log = log;
+  }
+}
+
+for (const tier of TIERS) {
+  for (const check of Object.keys(CI_JOB)) {
+    for (const f of FIXTURES) {
+      test(`#1187 parity [${tier}] [${check}] ${f.name}`, async () => {
+        const local = await localState(check, f, tier);
+        const ci = await ciExit(check, f, tier);
+        assert.equal(local, ci,
+          `${check} at the "${tier}" tier: local exits as ${local}, CI's own main() exits ${ci} — ` +
+          'the local verdict must be neither stricter nor looser than CI for the same inputs');
+      });
+    }
+  }
+}
+
+test('#1187: a fresh consumer — lite, no memory records — is the case CI passes and brain:check must pass', async () => {
+  const f = { body: 'Closes #1', targetBranch: 'main', defaultBranch: 'main', fetchIssue: APPROVED, observations: [] };
+  assert.equal(await ciExit('memoryPresence', f, 'lite'), 0);
+  assert.equal(await localState('memoryPresence', f, 'lite'), 0);
+  assert.equal(await ciExit('memoryPresence', f, 'standard'), 1, 'the same evidence still blocks where the tier says required');
+  assert.equal(await localState('memoryPresence', f, 'standard'), 1);
+});
+
+test('#1187: every local check names the CI gate it anticipates, or states it has none', () => {
+  const localChecks = ['diffSize', 'adrPresence', 'issueLink', 'memoryPresence', 'npmTest', 'repoCheck'];
+  for (const c of localChecks) {
+    assert.ok(c in CI_COUNTERPART, `${c} has no CI_COUNTERPART entry — declare its CI job, or null to say it has none`);
+    const job = CI_COUNTERPART[c];
+    assert.ok(job === null || GOVERNANCE_JOBS.includes(job), `${c} → "${job}" is not a governance job`);
+  }
 });

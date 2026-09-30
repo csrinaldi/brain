@@ -122,3 +122,45 @@ test('brain-check: no budget supplied falls back to the pre-tier 400-line defaul
   assert.equal(result.exitCode, 1, 'expected the legacy 400-line default to still apply when no budget is passed');
   assert.ok(result.failures.some(f => f.check === 'diffSize'));
 });
+
+// ── #1187: tier semantics, and "not applicable" ──────────────────────────────────────
+
+test('#1187 (d): a fresh consumer at `lite` with no memory records — memoryPresence does not block, as in CI', async () => {
+  const { runCheck } = await import('./brain-check.mjs');
+  const result = await runCheck(makeCtx({ observations: [], config: { governance: { tier: 'lite' } } }));
+  assert.equal(result.exitCode, 0, `lite detects, it does not block. Failures: ${JSON.stringify(result.failures)}`);
+  assert.match(result.summary, /\[PASS\] memoryPresence — ::warning::memory-gate.*\(tier: lite\)/,
+    'the tier that softened it must be named, never a silent pass');
+});
+
+test('#1187 (d): the same evidence at `standard` still blocks', async () => {
+  const { runCheck } = await import('./brain-check.mjs');
+  const result = await runCheck(makeCtx({ observations: [], config: { governance: { tier: 'standard' } } }));
+  assert.equal(result.exitCode, 1);
+});
+
+test('#1187 (c): npm test that is not applicable is stated, never run, never a failure', async () => {
+  const { runCheck } = await import('./brain-check.mjs');
+  const result = await runCheck(makeCtx({
+    npmTestApplicability: { applicable: false, reason: 'no "test" script in package.json — not applicable' },
+    npmTestFn: async () => { throw new Error('npm test must not run when it is not applicable'); },
+  }));
+  assert.equal(result.exitCode, 0, JSON.stringify(result.failures));
+  assert.match(result.summary, /\[N\/A\] npmTest — no "test" script in package\.json — not applicable/);
+});
+
+// ── #1186: the slug the local issue-link check hands the port ───────────────────────
+
+test('#1186 (a): issue-link asks the port about the configured slug, never `undefined`', async () => {
+  const { runCheck } = await import('./brain-check.mjs');
+  const asked = [];
+  const fakePort = { issueView: async ({ project, number }) => { asked.push({ project, number }); return { labels: ['status:approved'] }; } };
+  const { fetchIssue: _omit, ...ctx } = makeCtx({
+    config: { project: { slug: 'acme/widgets' }, vcs: { provider: 'github' } },
+    getVcs: async () => fakePort,
+  });
+  const result = await runCheck(ctx);
+  assert.deepEqual(asked, [{ project: 'acme/widgets', number: 42 }]);
+  assert.ok(!result.failures.some(f => f.check === 'issueLink') && !result.unverified.some(f => f.check === 'issueLink'),
+    `issueLink must resolve: ${result.summary}`);
+});
