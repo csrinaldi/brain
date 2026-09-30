@@ -73,7 +73,11 @@ command -v node >/dev/null 2>&1 || exit 0
 # takes deliberately deleting every ref, which also leaves no shared history
 # for parallel work to collide on — which is why the rule still has nothing
 # to protect there.
-if [ -z "$(git rev-list -n 1 --all 2>/dev/null)" ]; then
+# The predicate lives in ONE place, shared with commit-msg (issue #1161).
+# Fail-closed: a missing helper means the exemption does not apply.
+brain_repo_has_no_commit() { return 1; }
+[ -f "$(dirname "$0")/no-commit-yet.sh" ] && . "$(dirname "$0")/no-commit-yet.sh"
+if brain_repo_has_no_commit; then
   echo "✓ pre-commit: the repository has no commit yet — no parallel work exists to isolate; allowing it (issue #1112)."
 else
 

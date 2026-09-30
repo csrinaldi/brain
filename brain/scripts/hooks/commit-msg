@@ -3,7 +3,8 @@
 #
 # Hard checks (blocks the commit — both locally unambiguous):
 #   1. Conventional commit format: <type>[(<scope>)][!]: <description>
-#   2. Ticket ref (#N) — skipped for Merge, Revert, chore(release) and
+#   2. Ticket ref (#N) — skipped while the repo has no commit at all (#1161),
+#      and for Merge, Revert, chore(release) and
 #      chore(memory) commits (machine-generated, legitimately ticket-less).
 #
 # No-node guard: exits 0 if node is not available (minimal env).
@@ -97,6 +98,16 @@ fi
 case "$msg" in
   chore\(release\)*|chore\(memory\)*) exit 0 ;;
 esac
+
+# A repository with no commit at all has no issues yet: its adoption commit
+# cannot cite one. Same condition as pre-commit's check 0 (#1112), shared via
+# one helper (#1161). Format (1) and attribution (2) were already enforced above.
+brain_repo_has_no_commit() { return 1; }
+[ -f "$(dirname "$0")/no-commit-yet.sh" ] && . "$(dirname "$0")/no-commit-yet.sh"
+if brain_repo_has_no_commit; then
+  echo "✓ commit-msg: the repository has no commit yet, so there is no ticket to reference; allowing this commit without #N (issue #1161)."
+  exit 0
+fi
 
 if ! echo "$msg" | grep -qE '#[0-9]+'; then
   echo ""
