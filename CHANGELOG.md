@@ -6,6 +6,179 @@ registry (ADR-0030, superseding ADR-0006's git tags); consumers upgrade with
 changes** before upgrading — additive `brain.config.json` migrations apply
 automatically, but renames need manual action.
 
+## v1.10.0 — a fresh consumer reaches its first PR and its first memory save without manual steps
+
+**Manual step: read before upgrading.** Nothing in your tree has to move for the upgrade
+itself, but six things a consumer's automation observes change. One of them can fail a
+command that succeeded on 1.9.0 (the memory backend), and one can open pull requests you
+did not expect on the first post-merge run after you upgrade (the audit cursor). Each
+item below was checked against the code on `main`, not against the PR description.
+
+| Where | 1.9.0 | 1.10.0 |
+|---|---|---|
+| Memory operations that consult a backend (`brain:memory:pull`, `import`, `index`, `share`, `search`, `heal-duplicates`, feature checkpoint and resume) | With no backend stated, guessed `engram` (or fell back to records-only `plainfiles` when the `engram` binary was absent). | **Refuse** when no backend is declared: exit **3**, naming the fix. An invalid value refuses with exit **4**. Nothing is guessed (#1165). |
+| The first post-merge run of `governance-postmerge.yml` on a repository with no audit cursor | Filed a `governance:cursor-missing` alarm and audited nothing. Every run failed the same way. | **Creates the cursor at the adoption commit** and audits everything after it, when no earlier run of that workflow ever succeeded on the default branch (#1162). |
+| Workflow permissions | `contents`, `pull-requests`, `issues`. | Adds **`actions: read`** (#1162). |
+| `npm run brain:env:init` | Created no labels, wrote no `brain.actor`, never said whether the memory lane was on. | Creates the governance labels, resolves `brain.actor` and prints the lane notice (#1163, #1164, #1166). |
+| `commit-msg` | Required `#N` on every non-machine commit, including the first. | Exempts **only** a repository's first commit, the one made while no ref reaches any commit (#1161). |
+| `npm run brain:ship` | Read only `<prefix>/<N>-<slug>` and refused the branches `brain:ticket:start` creates. | Also reads the canonical `{type}/issue-{N}-{slug}` (#697). |
+
+### The memory backend must be declared (#1165)
+
+If you have run `env:init` and your backend is in `.env` (`MEMORY_BACKEND=...`), or you
+export `MEMORY_BACKEND`, **nothing changes for you**: that keeps winning. If you have
+neither, the operations in the table above now exit **3** with a message that names the
+fix, where 1.9.0 silently ran `engram`:
+
+```bash
+npm run brain:config -- set memory.backend engram      # or plainfiles
+git add brain.config.json && git commit
+```
+
+- **Precedence, first wins:** process env `MEMORY_BACKEND` (one run), then `.env` (this
+  machine), then `brain.config.json` `memory.backend` (the team). When two disagree the
+  CLI says which one won.
+- **Values:** `engram` or `plainfiles`. `brain:config set memory.backend` refuses anything
+  else at write time. An invalid value found at run time is the exit **4** refusal.
+- **Not affected:** `reindex`, `audit`, `resolve-index`, `split-records`, `collect` and
+  `ship` never consult a backend. `brain:memory:save` still writes the record and says
+  hydration is deferred until a backend is declared (exit 0). `pre-push` and `post-merge`
+  stay non-blocking and print one line saying the memory step was skipped; `session:start`
+  prints `hydration skipped, nothing was tried`.
+- **A backend declared only in tracked config, without its binary on `PATH`,** runs
+  records-only and defers hydration. A backend stated in the process env or `.env` is
+  never overridden: without its binary the run fails, as it did on 1.9.0.
+- **`brain:upgrade`** applies the migration (below) and, when nothing declares a backend,
+  prints the one command to run. It changes no behavior by itself.
+- **`env:init`** asks once, on a terminal (Enter accepts `engram`), and writes the answer
+  to `brain.config.json`, not to `.env`. Without a terminal it guesses nothing: memory
+  setup is skipped and listed as a pending step (exit 0). If your backend lives only in
+  `.env`, it keeps working and `env:init` prints the command that shares it.
+
+### The first post-merge run bootstraps the audit cursor (#1162)
+
+`refs/governance/audit-cursor` is where the post-merge audit remembers what it has
+audited. Nothing ever created it, so on a new repository every post-merge run ended in
+`governance:cursor-missing`. It now creates the cursor itself, **only** when both hold:
+
+- the ref does not exist, and
+- no earlier run of `governance-postmerge.yml` on the default branch ever succeeded (a
+  success proves the cursor once existed and was deleted).
+
+The cursor is placed **at the adoption commit**: the first commit on the first-parent line
+that added the workflow file. The first window audits everything after it. A gate is not
+authoritative over the commit that installs it, so the adoption itself is never audited
+(or reverted). A cursor that was deleted, or run history that cannot be read, still ends in the
+alarm, never in a guess. Known residual: GitHub expires run history (90 days by
+default), so a cursor deleted after every success expired reads as new and re-audits
+from the adoption. GitLab is unaffected: its
+governance fragment ships no post-merge audit or cursor. The
+alarm now gives the init command at the adoption commit instead of at the repository root.
+
+**If you are already installed and your post-merge run never succeeded** (the state every
+consumer measured in the 1.9.0 demonstration was in), your first run on 1.10.0 reads "no
+prior success" and bootstraps at *your* adoption commit, which may be old. That run
+audits **every commit since adoption for the first time, in one run**. A commit that
+fails a tree-keyed check (`diff-size`, `decision-gate`) is nominated for an
+`auto-revert/<sha>` pull request against current `main`. Expect several revert PRs, or
+`governance:revert-blocked` alarms where a revert conflicts. Nothing is capped
+automatically, because a cap would be a silent skip. To choose the window yourself,
+**before** the upgrade merges:
+
+- Set `governance.auditBaseline` in `brain.config.json` to a recent ref (tag, branch or
+  sha). Commits that do not descend from it are printed as
+  `[SKIP] <sha> ... — before audit baseline` and not judged. This does not move the window
+  start; it only skips what precedes the ref. `brain:config set` refuses this key (no
+  migration declares it), so edit the file by hand.
+- Or create the cursor at a commit you choose, and push it:
+  `git update-ref refs/governance/audit-cursor <sha> && git push origin refs/governance/audit-cursor`.
+  The bootstrap then finds the cursor present and does nothing.
+
+### `actions: read` on the workflow (#1162)
+
+`governance-postmerge.yml` now declares `actions: read`, read only: the bootstrap lists
+past runs of the workflow, and on a **private** repository an explicit `permissions:` block
+that omits it reads as `unknown` and alarms forever. The workflow is a managed file, so
+`brain:upgrade` replaces it. If you edited your copy, or an organization policy caps the
+`GITHUB_TOKEN` below `actions: read`, the bootstrap cannot read run history and you get
+the alarm instead of a cursor.
+
+### What `env:init` now does for you (#1163, #1164, #1166)
+
+Each step is optional in the `env:init` sense: if it cannot run, it is listed under
+pending steps with the command that closes it, and `env:init` still exits 0.
+
+- **Governance labels.** Through the VCS port (new verb `labelCreate`), it creates the
+  approved label (`governance.approvedLabel`, default `status:approved`), the `type:*`
+  labels that `brain:ship` and `brain:ticket:start` read, `size:exception`,
+  `skip:memory-gate` and, on GitHub, the `governance:*` alarm labels. It creates only what
+  is missing, so a re-run changes nothing. This is a **write to your remote**, and needs a
+  reachable, authenticated VCS. GitLab uses the scoped `key::value` form.
+- **`brain.actor`.** Keeps a valid handle you already configured; otherwise writes your
+  authenticated VCS identity as `@<username>` with `git config --local`. It never derives
+  it from `user.name`. A stored `@legacy`, or a value that is not a handle, counts as unset
+  and is replaced.
+- **Memory lane.** States on every run whether the lane is on. It is off by default on
+  every tier; to turn it on: `npm run brain:config -- set memory.lane.enabled true`. The
+  closing next-steps text no longer reads as if the lane were already on.
+
+### `commit-msg` accepts a repository's first commit (#1161)
+
+`pre-commit` (1.9.0) already allowed the adoption commit without `--no-verify`, but
+`commit-msg` then refused it for lacking `#N`, in a repository that cannot have an issue
+yet. Both hooks now share one predicate: **no ref reaches any commit**. Conventional
+Commit format is still enforced. Every later commit is judged as before. The exemption is
+not "HEAD is unborn": a `git checkout --orphan` in a repository with history does not
+earn it, and outside a repository, or on a git error, it is denied.
+
+Two edges you can hit: `git commit --amend` on the adoption commit is refused (it is no
+longer the first commit; #1175), and the **server-side** `pre-receive` still refuses a
+ticket-less first push where `brain:protect-server` is installed before it (#1169).
+
+### `brain:ship` reads the branches `ticket:start` creates (#697)
+
+`brain:ship` used to parse only `<prefix>/<N>-<slug>` (what `brain:start` creates), so the
+`{type}/issue-{N}-{slug}` branch of `brain:ticket:start` failed with "cannot determine
+issue number". One parser (`branch-grammar.mjs`) now serves `brain:ship`, `brain:next`,
+`brain:start` and the status snapshot, and the legacy shape still works. A title with no
+ASCII letters yields the slug `task`, not a trailing dash.
+
+### What ships
+
+| PR | Change |
+|---|---|
+| #1160 | The adoption guide: a missing token and the ticket board are run-time warnings, not summary entries (#1159). |
+| #1170 | `commit-msg` accepts the adoption commit of a repository with no commit yet, sharing one predicate with `pre-commit` (#1161). |
+| #1171 | A fresh consumer's post-merge run bootstraps its audit cursor at the adoption commit instead of alarming; new VCS verb `workflowRunSucceeded`; `actions: read` (#1162). |
+| #1172 | `env:init` creates the governance labels (new VCS verb `labelCreate`), resolves `brain.actor` and states the memory lane (#1163, #1164, #1166). |
+| #1173 | The team's memory backend is declared in tracked `brain.config.json` (`memory.backend`), with one resolver, and nothing is guessed (#1165). |
+| #1174 | `brain:ship` reads the `{type}/issue-{N}-{slug}` branches `ticket:start` emits (#697). |
+| #1181 | Doctrine: `vcs-contract.md` rows for the two new verbs, the `memory-backend-contract.md` selector, ADR-0004 Amendment 3, ADR-0024 Amendments 3 and 4 (#1180). |
+
+### Migration 1.9.1: `memory.backend`
+
+`brain:upgrade` adds `memory.backend: ""` to `brain.config.json`, additive and empty on
+purpose: empty means **undeclared**, because a non-empty default would silently choose a
+backend for a team that never chose one. The migration is numbered 1.9.1 because it was
+declared above the published 1.9.0; it was unreachable until this release. No other key
+changes.
+
+### Known follow-ups a consumer can hit
+
+Listed in `docs/KNOWN-LIMITATIONS.md`: #1167, #1168, #1169, #1175, #1176, #1177, #1178.
+
+### Why a minor and not a patch
+
+The release reporter measured 7 commits since v1.9.0: 1 `feat`, 4 `fix`, 2 internal, and
+a declared migration (1.9.1) that could not be reached without a cut. The `feat` is a new
+required VCS port verb (`labelCreate`, and `workflowRunSucceeded` with it), and there is a
+new config key with a migration. Several fixes also change what a consumer's automation
+observes: memory operations refuse where they guessed, the first post-merge run creates
+a ref and can audit a long history at once, and `env:init` writes to the remote. A script
+that passed on 1.9.0 can fail on 1.10.0, which a patch promises it does not. A minor, by the
+rule v1.6.0 to v1.9.0 applied. Not a major: nothing you rely on stops working once the
+backend is declared, and the refusals name their fix.
+
 ## v1.9.0 — the consumer path is honest: credentials stay safe, and failures are reported
 
 **Manual step: read before upgrading.** Nothing in your tree has to move, but several

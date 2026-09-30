@@ -5,7 +5,7 @@ the first days of using brain in a repository you did not build brain in. Each o
 found live, most of them by the `#1081` consumer demonstration (a fresh, empty
 repository installing the published `@logikas/brain` package). Every item links its
 tracking issue, where one exists, and states the practical workaround, if one exists.
-This list describes brain **1.9.0**.
+This list describes brain **1.10.0**.
 
 This is not a scorecard of brain's own test suite — brain's suite is green on all of
 these, which is the point: none of them shows up in brain's own repository (see
@@ -28,6 +28,28 @@ For the plan to close this class of gap, see the
 
 ## Memory (`#864` track)
 
+- **`brain:memory:ship` does not print the lane PR it created or found.**
+  ([#1167](https://github.com/csrinaldi/brain/issues/1167)) It prints the auto-merge
+  refusal and the token notice, not the PR number or URL. **Workaround:** look the PR up
+  on your forge (`gh pr list --head memory/...`).
+
+- **On `plainfiles`, the derived `.memory/index.jsonl` is tracked and every save or pull
+  dirties it; on `engram`, `.memory/` is left untracked.**
+  ([#1168](https://github.com/csrinaldi/brain/issues/1168)) The two backends leave the
+  tree in different states after adoption, and the lane never ships the dirty index.
+  **Workaround:** none needed for correctness (records are the truth, the index is
+  derived); expect ` M .memory/index.jsonl` in `git status` on `plainfiles`.
+
+- **`env:init` run from a linked worktree can declare the memory backend in the main
+  checkout's `brain.config.json`, not the worktree's.**
+  ([#1178](https://github.com/csrinaldi/brain/issues/1178)) The prompt's answer is
+  written to the main checkout, while `memory/cli.mjs` reads the tree it runs from, so a
+  later `brain:memory:pull` in the worktree can exit 3 until the backend is declared
+  there. `brain:memory:audit` with no backend declared prints
+  `undefined: no export reader for this backend`. **Workaround:** run
+  `npm run brain:config -- set memory.backend <engram|plainfiles>` in the tree you commit
+  from.
+
 - **`session:start` / `day:start` call engram's operations by name instead of the
   configured backend's lifecycle verb.**
   ([#1115](https://github.com/csrinaldi/brain/issues/1115)) On `MEMORY_BACKEND=plainfiles`,
@@ -49,8 +71,10 @@ For the plan to close this class of gap, see the
 ## Failures that are still reported softly
 
 These are the follow-up slices left by the failure-reporting sweep
-([#1127](https://github.com/csrinaldi/brain/issues/1127)). Each is a place where a
-failure is still not the exit code it should be. None shows up in a healthy tree.
+([#1127](https://github.com/csrinaldi/brain/issues/1127), closed: the sweep shipped, and
+these four slices were left out of it on purpose, with no open issue of their own). Each
+is a place where a failure is still not the exit code it should be. None shows up in a
+healthy tree.
 
 - **A failed `AGENTS.md` regeneration during `brain:upgrade` is a warning, then `Done.`.**
   The upgrade itself succeeded. **Workaround:** read the warning and run the printed hint.
@@ -67,6 +91,33 @@ failure is still not the exit code it should be. None shows up in a healthy tree
   `vcs/**` adapters and the `hooks/*` scripts.** A swallowed failure there can read as a
   healthy session. **Workaround:** none; treat a session start that prints nothing about
   memory as unverified.
+
+## Hooks and governance
+
+- **`pre-receive` still refuses a new repository's ticket-less first push.**
+  ([#1169](https://github.com/csrinaldi/brain/issues/1169)) The local `commit-msg` hook
+  accepts the adoption commit without `#N`; the server-side hook, where
+  `brain:protect-server` is installed before the first push, does not. **Workaround:**
+  install `brain:protect-server` after the first push.
+
+- **`git commit --amend` on the adoption commit is refused.**
+  ([#1175](https://github.com/csrinaldi/brain/issues/1175)) The first-commit exemption
+  holds only while no commit exists, and an amend is judged as a later commit.
+  **Workaround:** add a `#N` to the amended message, or make a new commit.
+
+- **When the post-merge cursor bootstrap cannot read run history, the alarm says only
+  `unknown`.** ([#1176](https://github.com/csrinaldi/brain/issues/1176)) The port's own
+  detail (for example an HTTP 403 from a missing `actions: read`) is dropped before the
+  alarm. **Workaround:** run `gh run list --workflow governance-postmerge.yml --branch
+  <default> --status success --limit 1` yourself to see the cause. Also from #1176: a
+  workflow file deleted and re-added moves the bootstrap's start earlier (a wider audit),
+  not later.
+
+- **`env:init` replaces a `brain.actor` that is not a valid handle without saying so.**
+  ([#1177](https://github.com/csrinaldi/brain/issues/1177)) A valid handle is kept; any
+  other stored value is overwritten and the output reads as if none existed.
+  **Workaround:** `git config --local brain.actor @<handle>` after `env:init`, if the
+  earlier value mattered.
 
 ## Platform axis
 
