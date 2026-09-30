@@ -5,7 +5,7 @@ the first days of using brain in a repository you did not build brain in. Each o
 found live, most of them by the `#1081` consumer demonstration (a fresh, empty
 repository installing the published `@logikas/brain` package). Every item links its
 tracking issue, where one exists, and states the practical workaround, if one exists.
-This list describes brain **1.10.0**.
+This list describes brain **1.10.1**.
 
 This is not a scorecard of brain's own test suite — brain's suite is green on all of
 these, which is the point: none of them shows up in brain's own repository (see
@@ -114,6 +114,26 @@ healthy tree.
   <default> --status success --limit 1` yourself to see the cause. Also from #1176: a
   workflow file deleted and re-added moves the bootstrap's start earlier (a wider audit),
   not later.
+
+- **A crash of the `index-lag` step reads as a local pass.**
+  ([#1194](https://github.com/csrinaldi/brain/issues/1194)) CI's `local-checks` job runs
+  `node brain/scripts/memory/index-lag.mjs` and fails if the script itself throws (an unreadable
+  or malformed `.memory`). `brain:check` never reads that step's exit status: it prints
+  `[PASS] indexLag` with the error text as a `::warning::`. **Workaround:** when that line
+  carries an error rather than a lag report, run `node brain/scripts/memory/index-lag.mjs`
+  yourself and read its exit code.
+
+- **`brain:check` and `brain:ship` read the default branch from two different places.**
+  ([#1194](https://github.com/csrinaldi/brain/issues/1194)) `brain:ship` opens the PR against
+  `project.defaultBranch` when that key is set; `brain:check` never reads it and measures the
+  diff and the `issue-link` rule against the remote's default branch. If the two differ, the
+  local verdict is about a different PR than the one `brain:ship` opens. **Workaround:** leave
+  `project.defaultBranch` unset, or keep it equal to the remote's default branch.
+
+- **A `skip:memory-gate` label honoured at `standard` is not replayed by the post-merge audit.**
+  ([#1188](https://github.com/csrinaldi/brain/issues/1188), a residual its fix names) The audit
+  has no label-event evidence, so a merge the gate let through on that label can still surface
+  post-merge as a memory failure. **Workaround:** add a record scoped to the issue.
 
 - **`env:init` replaces a `brain.actor` that is not a valid handle without saying so.**
   ([#1177](https://github.com/csrinaldi/brain/issues/1177)) A valid handle is kept; any
