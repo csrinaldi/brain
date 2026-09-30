@@ -43,7 +43,7 @@ allowlisted bytes into the same directory
 ([ADR-0030 Amendment 1](../brain/project/decisions/adr-0030-distribution-scoped-registry-package.md)):
 
 ```bash
-npm i -D "git+https://github.com/csrinaldi/brain.git#v1.9.0"
+npm i -D "git+https://github.com/csrinaldi/brain.git#v1.10.0"
 ```
 
 ---
@@ -92,7 +92,7 @@ no captured memory. It's a report, not a failure — it tells you what to adopt 
 | Step | Verb | What it does | Interactive? |
 |---|---|---|---|
 | 1 | `npx brain init [tag]` | Writes the one script alias the upgrade cannot inject itself (`brain:upgrade`), then runs it: copies every managed path (`brain/core/**`, `brain/scripts/**`, the governance CI, the PR template, `.gitattributes`) and merges the rest of the `brain:*` script aliases into your `package.json`. Reads the tag from the version you installed; never guesses one. | No — safe for CI and scripted adoption. |
-| 2 | `npm run brain:env:init` | Creates `brain.config.json` if missing (derives `vcs.provider`, `gitHost`, `slug` from your git origin), git-ignores `.env`, prompts for a VCS token and writes it to `.env` (refusing an unsafe `.env`, see below), sets `core.hooksPath`, resolves the agent platform and SDD engine, sets up the memory backend, prints the governance tier it set, and reports the open tickets on your tracker. Ends with a summary that separates required failures (exit 1) from optional next steps (exit 0). | Yes — needs a real TTY for the token prompt. |
+| 2 | `npm run brain:env:init` | Creates `brain.config.json` if missing (derives `vcs.provider`, `gitHost`, `slug` from your git origin), git-ignores `.env`, prompts for a VCS token and writes it to `.env` (refusing an unsafe `.env`, see below), sets `core.hooksPath`, resolves the agent platform and SDD engine, **creates the governance labels, resolves `brain.actor`**, declares and sets up the memory backend, prints the governance tier it set and **whether the memory lane is on**, and reports the open tickets on your tracker. Ends with a summary that separates required failures (exit 1) from optional next steps (exit 0). | Yes — needs a real TTY for the token prompt. |
 
 A bare `npx brain init` leaves the repo half-adopted: files present, nothing
 configured, no hooks, no token. `env:init` is required, not optional.
@@ -127,11 +127,13 @@ A refusal names the fix and is a **required failure**: `env:init` exits 1.
 |---|---|---|
 | SDD harness init | the init fails | |
 | `core.hooksPath` | it cannot be set | |
+| Memory backend declaration | | none declared and no terminal to ask on, an invalid value, or an unreadable `brain.config.json`: memory setup is skipped and the command that closes it is listed. If the answer you typed could not be saved, setup still runs for that answer and the save command is listed |
 | Memory backend `setup` | it fails | |
 | Memory `pull` | attempted and refused (merge or reconcile refusal, corrupt store) | no commit yet, no upstream, or remote unreachable |
 | Memory `index` (engram) | binary present, indexing fails | binary absent — hydration and indexing skipped |
 | VCS token | typed but not saved (refusals above), or `auth login` failed | no token given — *warning only*: re-run `env:init` with a terminal to add one |
 | VCS provider override | the write fails | |
+| Governance labels / `brain.actor` | | VCS unreachable or unauthenticated, a refused label create, or no VCS identity |
 | `brain.config.json` | it cannot be parsed | any other `ensure` failure (e.g. the tier notice) |
 | Open-ticket board | | could not be listed — *warning only*: a read-only listing, nothing to close |
 
@@ -141,7 +143,7 @@ A refusal names the fix and is a **required failure**: `env:init` exits 1.
 |---|---|---|---|
 | Governance tier | `lite` — no second approver required to merge ([ADR-0026 Amendment 8](../brain/project/decisions/adr-0026-governance-doctrine-tiers.md)) | `governance.tier` in `brain.config.json` | `npm run brain:config -- set governance.tier standard`, then `npm run brain:protect` |
 | Agent platform | `claude` ([ADR-0024 Amendment 2](../brain/project/decisions/adr-0024-three-axis-decoupling.md)); `antigravity` is the second supported platform | `AGENT_PLATFORM` in `.env` | set `AGENT_PLATFORM=antigravity` in `.env` before running `env:init`, or export it for one run: `AGENT_PLATFORM=antigravity npm run brain:env:init` |
-| Memory backend | `engram` (prompted; `plainfiles` is the other supported value). engram 2.x is supported: a fresh 2.x store accepts brain's record import. Its duplicate-heal probe is still tested on 1.20.x and says so outside that range | `MEMORY_BACKEND` in `.env` | answer the prompt, or set `MEMORY_BACKEND=plainfiles` in `.env` first |
+| Memory backend | **None is assumed.** `env:init` asks once on a terminal (Enter accepts `engram`; `plainfiles` is the other supported value) and writes the answer to tracked config. See "The memory backend is a team setting" below. engram 2.x is supported: a fresh 2.x store accepts brain's record import. Its duplicate-heal probe is still tested on 1.20.x and says so outside that range | `memory.backend` in `brain.config.json` (tracked) | `npm run brain:config -- set memory.backend plainfiles` (or `engram`) |
 | VCS provider | derived from your git origin, confirmable on a TTY | `vcs.provider` in `brain.config.json` (tracked) | type `github` or `gitlab` at the prompt |
 
 **The VCS provider and memory backend prompts validate.** The provider accepts `github`,
@@ -157,31 +159,84 @@ reports it as a required failure.
 
 ---
 
-### Three things `env:init` does not do yet (brain 1.9.0)
+### What `env:init` sets up for the first PR and the first `brain:memory:save`
 
-Do these once, by hand, before your first PR and your first `brain:memory:save` (provenance at capture, #738). Each one is a
-known limitation of 1.9.0, not a step you skipped.
-
-| What | Why it matters | Command |
+| Step | What `env:init` does | If it cannot |
 |---|---|---|
-| Create the `status:approved` label | A new repository has no such label, so no issue can be approved and the first PR fails `issue-link`. `env:init` does not create it. | `gh label create "status:approved"` (GitLab: `glab label create --name "status::approved"`; if you renamed it, use your `governance.approvedLabel`). Also create the `type:*` labels `brain:ship` reads: `type:feature`, `type:bug`, `type:docs`, `type:refactor`, `type:chore`, `type:governance` (GitLab: the scoped `type::feature`, `type::bug`, `type::docs`, `type::refactor`, `type::chore`, `type::governance`). |
-| Set your `brain.actor` | `brain:memory:save` refuses to run without a configured actor. | `git config --local brain.actor @<your-handle>` |
-| Decide on the memory lane | The lane, which ships memory records to `main` on their own pull request, is **off by default** on every tier. 1.9.0's `env:init` never says so: its next-steps text reads as if the lane were on ("the enabled memory lane ships it"), which is only true after you turn it on. | To turn it on: `npm run brain:config -- set memory.lane.enabled true` |
+| Governance labels | Creates, through the VCS port, the approved label (`governance.approvedLabel`, default `status:approved`), the `type:*` labels `brain:ship` and `brain:ticket:start` read, `size:exception`, `skip:memory-gate` and, on GitHub, the `governance:*` alarm labels. It only creates what is missing, so a re-run changes nothing, and it reports what it created. On GitLab the approved and `type:*` labels use the scoped `key::value` form; `size:exception` and `skip:memory-gate` keep their names. | Pending step, exit 0: the summary lists it with `npm run brain:env:init` (re-run once the VCS is reachable and authenticated) and the hand command, e.g. `gh label create "status:approved"`. |
+| `brain.actor` | Keeps a valid one you already configured; otherwise writes your authenticated VCS identity as `@<username>` with `git config --local`. It never derives it from `user.name`. A stored `@legacy`, or a value that is not a handle, counts as unset. | Pending step, exit 0: `git config --local brain.actor @<handle>`. |
+| Memory lane | States, on every run, whether the lane is on. It is off by default on every tier because it opens a separate pull request for memory records that may need a maintainer to merge. | Nothing to fail; to turn it on: `npm run brain:config -- set memory.lane.enabled true`. |
+
+The labels step writes to your remote, so it needs an authenticated VCS (the token from the prompt above, or on GitHub an
+existing `gh` login). Without one it is a pending step, not a failure: authenticate and
+re-run `env:init`.
+
+### The memory backend is a team setting
+
+The backend used to live only in your untracked `.env`, so a teammate, a CI job or a fresh
+clone had no `.env` and silently ran `engram` even when your team uses `plainfiles`. It is
+now declared in tracked config:
+
+```bash
+npm run brain:config -- set memory.backend plainfiles   # or engram
+git add brain.config.json && git commit
+```
+
+`env:init` asks once and writes it for you, to `brain.config.json` and not to `.env`.
+Precedence, first wins: process env `MEMORY_BACKEND` (one run), then `.env` (this machine),
+then `brain.config.json` (the team). When two disagree the CLI says which one won.
+
+**If nothing declares a backend, memory commands refuse** and name this fix instead of
+guessing `engram`: every op that consults a backend (`pull`, `import`, `index`, `share`,
+`search`, `setup`, `heal-duplicates` and the feature checkpoint and resume) exits **3**
+(nothing declared) or **4** (invalid value). `reindex`, `resolve-index`, `split-records`,
+`collect`, `ship` and `migrate-v1` never consult a backend, and `audit` never refuses over a
+missing backend (it reads the backend only when one is declared). `brain:memory:save` still writes the record, saying hydration is deferred until a
+backend is declared. Without a terminal, `env:init` declares nothing and lists the command
+as a pending step.
+
+If your backend is already in `.env`, it keeps working, and `env:init` prints the one
+command that shares it with the team.
+
+### The audit cursor: nothing to do by hand
+
+The post-merge audit remembers what it has audited in `refs/governance/audit-cursor`.
+You do not create it. The first post-merge run on `main` creates it at the adoption
+commit (the first commit that added `governance-postmerge.yml`) and audits everything
+after it, provided no earlier run of that workflow ever succeeded. The workflow reads run
+history with the `actions: read` permission, which it declares itself.
+
+If a cursor was deleted after a run had succeeded, or the run history cannot be read, the
+run files a `governance:cursor-missing` alarm with the command to recreate it at the
+adoption commit; it never guesses. GitLab has no post-merge audit, so this is GitHub-only.
+
+**Upgrading from 1.9.0 or earlier with a post-merge run that never succeeded?** Your first
+run audits every commit since your adoption at once, and can open several
+`auto-revert/<sha>` pull requests. The CHANGELOG entry for 1.10.0 says how to pick the
+window before you upgrade.
 
 ---
 
 ## The first commit
 
 In a brand-new repository your adoption commit (`brain.config.json`, the copied managed
-paths, `.gitignore`) is the first commit on `main`, so there is nothing to branch from.
-The pre-commit hook allows it **without `--no-verify`**: it exempts a commit from its
-"no direct commit to `main`" and "no commit from the main checkout" checks while **no ref
-reaches any commit**. It prints one line saying so.
+paths, `.gitignore`) is the first commit on `main`, so there is nothing to branch from and
+no issue to cite. **No ticket is needed and there is no `--no-verify`.** Two hooks allow it
+while **no ref reaches any commit**, and each prints one line saying so:
 
-The exemption ends by itself: once that commit exists, every later commit is judged by
-those checks as before. The other pre-commit checks (`repo:check` and the staged-records
-check) still run on the first commit. In an existing repository with history, nothing
-changes: the hook judges your commit normally.
+| Hook | What it exempts on the first commit |
+|---|---|
+| `pre-commit` | its "no direct commit to `main`" and "no commit from the main checkout" checks |
+| `commit-msg` | the `#N` ticket reference (#1161) |
+
+The message must still be a Conventional Commit (`chore: adopt brain`). The exemption ends
+by itself: once that commit exists, every later commit is judged as before, including a
+`git commit --amend` of the adoption commit, which then needs a `#N`. The other
+`pre-commit` checks (`repo:check` and the staged-records check) still run on the first
+commit. In an existing repository with history, nothing changes: the hooks judge your
+commit normally. If you install the server-side hook (`brain:protect-server`) before your
+first push, its `pre-receive` still asks for a ticket on that push
+([#1169](https://github.com/csrinaldi/brain/issues/1169)).
 
 ---
 
@@ -234,8 +289,8 @@ each tier requires and how to recover if protection locks you out.
 ## Upgrading
 
 ```bash
-npm run brain:upgrade -- v1.9.0             # install a newer tag, copy managed paths
-npm run brain:upgrade -- v1.9.0 --dry-run   # preview what would change
+npm run brain:upgrade -- v1.10.0             # install a newer tag, copy managed paths
+npm run brain:upgrade -- v1.10.0 --dry-run   # preview what would change
 ```
 
 Read the [CHANGELOG](../CHANGELOG.md) first — renames and breaking changes need
