@@ -18,7 +18,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync, cpSync, readdirSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, cpSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -34,6 +34,7 @@ function makeRepo() {
   git('config', 'user.email', 'test@example.com');
   git('config', 'user.name', 'test');
   const hooks = join(dir, '.hooks-under-test');
+  mkdirSync(hooks, { recursive: true });
   cpSync(join(HOOKS_DIR, 'commit-msg'), join(hooks, 'commit-msg'), { recursive: true });
   for (const f of readdirSync(HOOKS_DIR)) {
     if (f.endsWith('.sh')) cpSync(join(HOOKS_DIR, f), join(hooks, f));
