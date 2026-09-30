@@ -1607,3 +1607,55 @@ test('#1162 cold-2: the ABSENT alarm tells a human to set the cursor AT the adop
   assert.match(body, /--diff-filter=A/, 'the instruction must compute the adoption commit');
   assert.match(body, /governance-postmerge\.yml/);
 });
+
+// ── #1188: alarms close themselves ────────────────────────────────────────────
+// The demo's alarm issue stayed open after the audit recovered. A clean audit
+// resolves the audit-class alarms; a clean sweep resolves the sweep's. Closing an
+// issue needs `issues: write`, which the workflow already holds for filing — so
+// NO scope is added, and the test pins that the set stayed exactly as it was.
+
+function stepBlock(text, id) {
+  const start = text.indexOf(`- id: ${id}`);
+  assert.ok(start !== -1, `step ${id} must exist`);
+  const next = text.indexOf('\n      - ', start + 1);
+  return text.slice(start, next === -1 ? undefined : next);
+}
+
+test('#1188: a `resolve-audit` step exists after advance, runs ONLY on a clean audit, and resolves the audit alarms by group', () => {
+  const text = readFileSync(POSTMERGE_YML, 'utf8');
+  assert.ok(text.indexOf('- id: resolve-audit') > text.indexOf('- id: advance'), 'must come after the cursor advanced');
+  const block = stepBlock(text, 'resolve-audit');
+  const ifLine = block.split('\n').find((l) => l.trim().startsWith('if:')) || '';
+  assert.match(ifLine, /steps\.audit\.outputs\.code == '0'/, 'a still-failing audit must never close an alarm');
+  assert.match(ifLine, /steps\.advance\.outcome == 'success'/);
+  assert.doesNotMatch(ifLine, /always\(\)/);
+  assert.match(block, /alarm\.mjs resolve "\$RUN_URL" audit/);
+  assert.match(block, /RUN_URL:\s*\$\{\{ github\.server_url \}\}\/\$\{\{ github\.repository \}\}\/actions\/runs\/\$\{\{ github\.run_id \}\}/,
+    'the run link arrives via env:, never ${{ }}-spliced into run:');
+  assert.ok(!/\$\{\{[^}]*\}\}/.test(block.slice(block.indexOf('run: |'))), 'no expression is spliced into the run: body');
+  assert.match(block, /VCS_TOKEN:\s*\$\{\{ github\.token \}\}/, 'the port call is authenticated like the audit (#479)');
+  assert.match(block, /GH_TOKEN:\s*\$\{\{ github\.token \}\}/, "alarm.mjs's own reader shells gh");
+});
+
+test('#1188: a `resolve-sweep` step exists after sweep and runs only when the sweep succeeded', () => {
+  const text = readFileSync(POSTMERGE_YML, 'utf8');
+  assert.ok(text.indexOf('- id: resolve-sweep') > text.indexOf('- id: sweep'));
+  const block = stepBlock(text, 'resolve-sweep');
+  const ifLine = block.split('\n').find((l) => l.trim().startsWith('if:')) || '';
+  assert.match(ifLine, /steps\.sweep\.outcome == 'success'/);
+  assert.match(block, /alarm\.mjs resolve "\$RUN_URL" sweep/);
+});
+
+test('#1188: least privilege — closing alarms adds NO permission scope (issues: write was already held for filing)', () => {
+  const text = readFileSync(POSTMERGE_YML, 'utf8');
+  const m = text.match(/^permissions:\s*\{([^}]*)\}/m);
+  assert.ok(m, 'permissions block must exist');
+  const scopes = Object.fromEntries(m[1].split(',').map((kv) => kv.split(':').map((x) => x.trim())));
+  assert.deepEqual(scopes, { contents: 'write', 'pull-requests': 'write', issues: 'write', actions: 'read' },
+    'the post-merge permission set is exactly the pre-#1188 one; a new scope needs its own justification');
+});
+
+test('#1188: the terminal backstop still runs always() — resolving must not displace it', () => {
+  const text = readFileSync(POSTMERGE_YML, 'utf8');
+  assert.ok(text.indexOf('- id: terminal') > text.indexOf('- id: resolve-sweep'));
+});

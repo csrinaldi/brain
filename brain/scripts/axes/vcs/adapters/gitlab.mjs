@@ -1003,6 +1003,30 @@ export async function labelCreate({ project, name, color, description, apiBase, 
 }
 
 /**
+ * issueClose — closes an issue (issue #1188). The payload is `state_event` and
+ * nothing else. Never throws.
+ *
+ * @param {{ project: string, number: number, apiBase?: string, token?: string, proxyUrl?: string|null, fetchImpl?: Function }} params
+ * @returns {Promise<{ ok: true } | { ok: false, error: string }>}
+ */
+export async function issueClose({ project, number, apiBase, token, proxyUrl, fetchImpl } = {}) {
+  try {
+    await gitlabApiFetch({
+      apiBase: apiBase ?? 'https://gitlab.com/api/v4',
+      token: glToken(token),
+      proxyUrl: proxyUrl ?? null,
+      path: `projects/${encodeURIComponent(project)}/issues/${number}`,
+      method: 'PUT',
+      body: { state_event: 'close' },
+      fetchImpl,
+    });
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+}
+
+/**
  * Percent-encode a value that is about to be interpolated into a URL (#388).
  *
  * `patSetupUrl` builds a query string by hand on both providers. An unencoded
