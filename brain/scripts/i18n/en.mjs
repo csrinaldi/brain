@@ -221,7 +221,13 @@ export default {
   'bootstrap.memory.section':        'Team memory',
   'bootstrap.memory.prompt':         'Which memory backend do you use? [engram]: ',
   // {backend} = backend name (e.g. engram)
-  'bootstrap.memory.backend':        'memory backend: {backend} (.env)',
+  'bootstrap.memory.backend':        'memory backend: {backend} ({source})',
+  'bootstrap.memory.undeclared':     'no memory backend is declared (env, .env, brain.config.json memory.backend) — none was guessed, so memory setup was skipped. Next: npm run brain:config -- set memory.backend engram|plainfiles, then re-run env:init.',
+  'bootstrap.memory.invalid':        "memory backend '{value}' (from {source}) is not 'engram' or 'plainfiles' — memory setup skipped. Fix it where it is set, then re-run env:init.",
+  'bootstrap.memory.declared':       'memory backend saved to brain.config.json (memory.backend) — commit it so every checkout runs the same backend',
+  'bootstrap.memory.declareFailed':  'could not write memory.backend to brain.config.json — set it with: npm run brain:config -- set memory.backend {backend}',
+  'bootstrap.memory.envOnly':        'memory backend {backend} comes only from this machine\'s .env — teammates and fresh clones will not see it. To share it with the team: npm run brain:config -- set memory.backend {backend}',
+  'bootstrap.memory.envShadows':     'the {source} value ({backend}) overrides brain.config.json memory.backend ({configured}) on this machine',
   'bootstrap.memory.hookOk':         'pre-push hook activated (checkpoints feature working memory before push — ADR-0003)',
   'bootstrap.memory.hookFailed':     'could not activate core.hooksPath (pre-push hook)',
   'bootstrap.memory.nodeAbsent':     'node absent — engram backend setup skipped',
@@ -487,6 +493,9 @@ export default {
   // would assume. Silence is the whole defect: `MEMORY_BACKEND=plainfiles`
   // worked all along, and because nothing ever said so, the engram-only error
   // read as "capture is impossible here".
+  // #1165: an undeclared/invalid selector is refused with the fix named, never guessed.
+  'memory.backend.undeclared': "no memory backend is declared, so `{op}` will not guess one. The team's choice belongs in tracked config: `npm run brain:config -- set memory.backend engram` (or `plainfiles`). Per-run override: MEMORY_BACKEND=<backend> (env or .env). Or run `npm run brain:env:init`, which asks once and writes it.",
+  'memory.backend.invalid': "memory backend '{value}' (from {source}) is not one of: {allowed}. Nothing was run. Fix it where it is set: `npm run brain:config -- set memory.backend <backend>` for the team's config, or the MEMORY_BACKEND line in .env.",
   'memory.backend.substituted': 'the `{from}` binary is not installed here, so `{op}` ran on the records-only `{fallback}` backend instead — same records, same validation, no backend required (ADR-0017). MEMORY_BACKEND was not set, so no stated choice was overridden; set it to pin either backend explicitly.',
   'memory.backend.statedButAbsent': 'MEMORY_BACKEND={backend} is set explicitly, but the `{backend}` binary is not on PATH here — a stated selector is never overridden (ADR-0004), so this run will fail. Records-only capture needs no backend: `MEMORY_BACKEND={fallback} npm run brain:memory:{op}`.',
   'memory.backend.probeFailed': 'could not determine whether the `{backend}` binary is present — {reason}. That is the CHECK failing, not the binary being absent, so nothing was substituted and `{op}` continues on `{backend}`. If it fails, the records-only route is `MEMORY_BACKEND={fallback} npm run brain:memory:{op}`.',

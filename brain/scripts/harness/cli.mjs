@@ -69,16 +69,10 @@ export function resolveEngine({ env = process.env, envVars = {}, config = {} } =
   return 'gentle-ai';
 }
 
-/**
- * Resolves the active memory backend.
- * Pure — takes env + envVars + config explicitly for testing.
- *
- * @param {{ env?: object, envVars?: object, config?: object }} [opts]
- * @returns {string}
- */
-export function resolveMemory({ env = process.env, envVars = {}, config = {} } = {}) {
-  return env.MEMORY_BACKEND ?? envVars.MEMORY_BACKEND ?? config.memory ?? 'engram';
-}
+// `resolveMemory` was here and is REMOVED (issue #1165): it was exported, dead (memory/cli.mjs
+// re-read the env on its own), and wrong — it read `config.memory` as a string when that key is an
+// object, and it defaulted to 'engram'. The memory backend has ONE resolver now:
+// memory/lib/backend-resolve.mjs, built on lib/axis-selector.mjs (the shape #1114 generalises).
 
 /**
  * Resolves the active harness name (legacy backwards compatibility).

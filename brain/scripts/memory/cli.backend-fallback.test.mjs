@@ -73,9 +73,11 @@ function initIdentity(root, actor = '@test') {
  * @param {object} t              node:test context, for cleanup
  * @param {{engram?: boolean, envFile?: string}} opts
  *   engram  — plant an executable `engram` on the sandbox PATH
- *   envFile — contents of the `.env` the CLI will read ('' = no keys at all)
+ *   envFile — contents of the `.env` the CLI will read. Defaults to a DECLARED engram (#1165: an
+ *             undeclared selector is refused, so a test about the engram-absent paths must declare
+ *             it; '' = no keys at all, which is the refusal, pinned in cli.backend-declaration.test.mjs)
  */
-function world(t, { engram = false, envFile = '' } = {}) {
+function world(t, { engram = false, envFile = 'MEMORY_BACKEND=engram\n' } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'brain-641-'));
   // removeTempTree, not a bare rmSync: `initIdentity()` below (used by the
   // #874 save test) makes this a fixture that spawns git — issue #802's guard
@@ -126,7 +128,7 @@ function runCli({ root, bin, envPath }, args, extraEnv = {}) {
 
 // ── the defect, in the environment where it happened ────────────────────────
 
-test('#874 (R11, B4a): brain:memory:share with NO engram and NO stated backend now succeeds DIRECTLY on engram — no failure left for the fallback to replace', (t) => {
+test('#874 (R11, B4a): brain:memory:share with NO engram installed and engram declared now succeeds DIRECTLY on engram — no failure left for the fallback to replace', (t) => {
   // MEASURED, post-#874 split B: this test used to be the #641 flagship
   // (share substitutes and says so). R11 changed the underlying defect:
   // engram.share() dropped requireEngram() entirely (B1), so share() no
@@ -150,21 +152,27 @@ test('#874 (R11, B4a): brain:memory:share with NO engram and NO stated backend n
   );
 });
 
-test('#641 the substitution notice (still exercised by `pull`, FALLBACK_OPS\' one remaining covered op) names the backend/verb and goes to STDERR, not stdout', (t) => {
-  // `pull` needs git and a manifest to actually COMPLETE, neither of which
-  // this hermetic world provides — irrelevant here: the notice is printed by
-  // cli.mjs's dispatch BEFORE the backend op runs, so it is on stderr
-  // regardless of what pull does afterward (see cli.mjs:698-706).
-  //
-  // pre-push and post-merge run these verbs with stdout redirected to /dev/null.
-  // A notice on stdout would be discarded exactly where a substitution is most
-  // likely, which is the same outage in a different pipe.
+test('#1165 the unstated-default substitution of #641 is RETIRED: with nothing declared, `pull` refuses (names the fix) instead of substituting', (t) => {
+  // #641 let an UNSTATED backend fall back to plainfiles when engram was absent. #1165 removes
+  // the unstated case altogether: nothing declared is a refusal, so a second checkout can no
+  // longer be handed a backend it did not choose — in either direction.
+  const w = world(t, { envFile: '' });
+  const r = runCli(w, ['pull']);
+  assert.equal(r.status, 1);
+  assert.doesNotMatch(r.stderr, SUBSTITUTED);
+  assert.match(r.stderr, /brain:config -- set memory\.backend/);
+});
+
+test('#641 the stated-but-absent signpost (engram DECLARED, binary missing, `pull`) names the fix and goes to STDERR, not stdout', (t) => {
+  // The notice is printed by cli.mjs's dispatch BEFORE the backend op runs, so it is on stderr
+  // regardless of what pull does afterward. pre-push and post-merge run these verbs with stdout
+  // redirected to /dev/null: a notice on stdout would be discarded exactly where it is needed.
   const w = world(t);
   const r = runCli(w, ['pull']);
-  assert.match(r.stderr, SUBSTITUTED);
-  assert.match(r.stderr, /plainfiles/, 'the notice must name the backend that actually ran');
-  assert.match(r.stderr, /pull/, 'and the verb it ran');
-  assert.doesNotMatch(r.stdout, SUBSTITUTED);
+  assert.doesNotMatch(r.stderr, SUBSTITUTED, 'a declared selector is never swapped');
+  assert.match(r.stderr, /MEMORY_BACKEND=engram is set explicitly/);
+  assert.match(r.stderr, /MEMORY_BACKEND=plainfiles npm run brain:memory:pull/, 'the records-only route is named');
+  assert.doesNotMatch(r.stdout, /is set explicitly/);
 });
 
 test('#874 (D8): `save` is NOT substituted — engram no longer fails on the missing binary at all, it defers', (t) => {
@@ -335,11 +343,11 @@ test('#641 a BROKEN probe is reported as itself and substitutes nothing', (t) =>
 // ── the message is a catalog key, not a literal (so `es` is not handed English) ──
 
 test('#641 the notices resolve from the catalogs in es, not English (#638 is about this exact leak)', (t) => {
-  // `pull` (FALLBACK_OPS' one remaining covered op) drives the SUBSTITUTED
-  // notice; `share` left FALLBACK_OPS in #874 split B (R11, B4a).
+  // `pull` (FALLBACK_OPS' one remaining covered op) drives the stated-but-absent
+  // notice (the SUBSTITUTED one is unreachable from cli.mjs since #1165); `share` left FALLBACK_OPS in #874 split B (R11, B4a).
   const w = world(t);
   const rEn = runCli(w, ['pull']);
-  assert.match(rEn.stderr, SUBSTITUTED);
+  assert.match(rEn.stderr, /is set explicitly/);
 
   // brain.config.json's docs.language drives the locale; assert the catalog has
   // the keys rather than shelling a second config, and that they differ.

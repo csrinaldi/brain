@@ -371,6 +371,13 @@ const ALLOWLIST = [
   // #1127 round 3: the REAL bootstrap.sh in a hermetic box — HOME/XDG under the temp root, a PATH of only shimmed host tools (no gh, glab, engram, gentle-ai, codex; a python3 grep), stdin closed, a COPY of the brain tree; the unhealthy case pulls from a local bare repo, never a network.
   { file: 'brain/scripts/bootstrap.e2e.test.mjs', entrypoint: '<unresolved>', line: 66, reason: 'no-vcs-capability' },
   { file: 'brain/scripts/bootstrap.e2e.test.mjs', entrypoint: 'brain/scripts/bootstrap.sh', line: 108, reason: 'no-vcs-capability' },
+  // #1165: the same e2e box runs `config set memory.backend` (the write env:init performs on a TTY) and the resolver CLI bash asks — both local, read/write of the fixture's own brain.config.json.
+  { file: 'brain/scripts/bootstrap.e2e.test.mjs', entrypoint: 'brain/scripts/config/cli.mjs', reason: 'no-vcs-capability' },
+  { file: 'brain/scripts/bootstrap.e2e.test.mjs', entrypoint: 'brain/scripts/memory/lib/backend-resolve.mjs', reason: 'no-vcs-capability' },
+  // #1165: a real origin + FRESH CLONE carrying a copy of the brain, driving memory/cli.mjs (plainfiles/refusal paths only; PATH has no engram).
+  { file: 'brain/scripts/memory/cli.backend-declaration.test.mjs', entrypoint: 'brain/scripts/memory/cli.mjs', reason: 'no-vcs-capability' },
+  { file: 'brain/scripts/memory/cli.backend-declaration.test.mjs', entrypoint: '<unresolved>', line: 29, reason: 'no-vcs-capability' },
+  { file: 'brain/scripts/memory/lib/backend-resolve.test.mjs', entrypoint: 'brain/scripts/memory/lib/backend-resolve.mjs', reason: 'no-vcs-capability' },
   // #1127: `brain-config.mjs ensure` run from a COPY of the tree in a temp repo, to pin its exit code.
   { file: 'brain/scripts/lib/brain-config.ensure-cli.test.mjs', entrypoint: 'brain/scripts/lib/brain-config.mjs', line: 28, reason: 'no-vcs-capability' },
   { file: 'brain/scripts/install-tools.test.mjs', entrypoint: '<unresolved>', line: 34, reason: 'no-vcs-capability' },
