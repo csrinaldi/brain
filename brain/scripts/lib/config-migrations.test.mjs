@@ -80,7 +80,7 @@ test('#906 C1: a migration walk with nothing left to filter DOES plant 1.6.0 —
   });
   const { config: cfg } = migrateConfig({}, ordered, ordered.at(-1).version);
   assert.equal(cfg.memory.lane.enabled, false, 'a config built from every migration, unfiltered, DOES carry the 1.6.0 default');
-  assert.equal(cfg.schemaVersion, '1.6.0', 'and its schemaVersion is stamped to the latest entry — ahead of package.json until the 1.6.0 cut');
+  assert.equal(cfg.schemaVersion, ordered.at(-1).version, 'and its schemaVersion is stamped to the latest entry — ahead of package.json until that entry is cut');
 });
 
 // ── #1124: new consumers default to lite; existing consumers keep their tier ──
@@ -130,4 +130,29 @@ test('#1124: an existing config that declares standard or regulated keeps it thr
 test('#1124: migrateConfig never reads NEW_CONSUMER_DEFAULTS — an empty config walked through every migration is standard, not lite', () => {
   const { config } = migrateConfig({}, migrations, '99.0.0');
   assert.equal(config.governance.tier, 'standard');
+});
+
+// ── #1165: memory.backend ────────────────────────────────────────────────────
+import { planConfigWrite as _plan1165 } from '../config/config-verb.mjs';
+
+test('#1165 (e) a 1.9.0 config without memory.backend migrates cleanly: key added EMPTY, nothing else touched', () => {
+  const before = { schemaVersion: '1.9.0', governance: { tier: 'standard' }, memory: { lane: { enabled: true } } };
+  const { config, applied } = migrateConfig(structuredClone(before), migrations, '1.10.0');
+  assert.deepEqual(applied, ['1.9.1']);
+  assert.equal(config.memory.backend, '', 'undeclared, so behaviour is unchanged — the backend still comes from env/.env');
+  assert.deepEqual(config.memory.lane, before.memory.lane);
+  assert.equal(config.governance.tier, 'standard');
+  const again = migrateConfig(structuredClone(config), migrations, '1.10.0');
+  assert.deepEqual(again.applied, [], 'idempotent');
+});
+
+test('#1165 (e) a consumer that already declared memory.backend keeps it (additive, never overwrites)', () => {
+  const { config } = migrateConfig({ schemaVersion: '1.9.0', memory: { backend: 'plainfiles' } }, migrations, '1.10.0');
+  assert.equal(config.memory.backend, 'plainfiles');
+});
+
+test('#1165 memory.backend is a settable path (the schema IS the migrations)', () => {
+  const r = _plan1165({ config: { schemaVersion: '1.9.0' }, path: 'memory.backend', value: 'plainfiles', migrations: migrations, targetVersion: '1.9.0' });
+  assert.equal(r.refusal, null);
+  assert.equal(r.next.memory.backend, 'plainfiles');
 });

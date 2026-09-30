@@ -22,6 +22,11 @@
 // site, never a re-implementation.
 
 import { migrateConfig } from '../lib/installer.mjs';
+import { MEMORY_BACKENDS } from '../memory/lib/backend-resolve.mjs';
+
+// Values a path accepts, checked at WRITE time (#1165): a typo in a selector is refused here,
+// not at the next `pull` on another machine. '' is allowed — it clears to undeclared.
+const ALLOWED_VALUES = Object.freeze({ 'memory.backend': MEMORY_BACKENDS });
 
 /**
  * Walks every migration's `defaults` tree once.
@@ -115,6 +120,18 @@ export function planConfigWrite({ config, path, value, migrations, targetVersion
         'mutates the prototype chain, not the addressed key.',
     };
   }
+  const allowedValues = ALLOWED_VALUES[path];
+  if (allowedValues) {
+    const v = parseValue(value);
+    if (v !== '' && !allowedValues.includes(v)) {
+      return {
+        next: null,
+        migrationsApplied: [],
+        refusal: `config: '${path}' must be one of ${allowedValues.join(' | ')} (or "" to clear) — got ${JSON.stringify(v)}. Nothing written.`,
+      };
+    }
+  }
+
   const known = deriveKnownPaths(migrations);
   const inFamily = [...known.families].some((f) => path.startsWith(`${f}.`));
   if (!known.leaves.has(path) && !inFamily) {

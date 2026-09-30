@@ -205,6 +205,25 @@ export const migrations = [
       },
     },
   },
+  {
+    version: "1.9.1",
+    description:
+      "Add memory.backend: the team's memory backend selector (issue #1165). Empty by " +
+      "default — the vcs.provider convention: '' is UNDECLARED, and a declared-but-empty " +
+      "key changes nothing for an existing consumer, whose backend keeps coming from " +
+      "process env / .env exactly as before. A non-empty default is forbidden: it would " +
+      "silently choose a backend for a team that never chose one, which is the defect " +
+      "(MEMORY_BACKEND lived only in the untracked .env, so a second checkout ran " +
+      "engram while the team used plainfiles). Set once, in tracked config, by env:init " +
+      "or `brain:config set memory.backend <engram|plainfiles>`. Versioned 1.9.1, the " +
+      "smallest version above the shipped 1.9.0, so it applies on whichever of 1.9.1 / " +
+      "1.10.0 is cut next. Resolution: brain/scripts/memory/lib/backend-resolve.mjs.",
+    defaults: {
+      memory: {
+        backend: "",
+      },
+    },
+  },
 ];
 
 // NOTE (issue #231 A2, human ruling in tasks.md/design.md): this entry is versioned

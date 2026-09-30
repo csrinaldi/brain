@@ -115,3 +115,18 @@ test('pre-push: tracking, first-push, and explicit-refspec forms share one check
     assert.equal(lines.some(line => line.includes('share') || line.includes('brain-save') || line.includes('ship')), false);
   }
 });
+
+test('#1165 pre-push: a checkpoint skipped because the backend is undeclared SAYS so, and still never blocks the push', (t) => {
+  const { bin } = fixture(t, { checkpointCode: 3 });
+  const result = runHook(bin);
+  assert.equal(result.status, 0, 'non-blocking by design');
+  assert.match(result.stderr, /feature checkpoint skipped — memory backend not declared/);
+  assert.match(result.stderr, /brain:config -- set memory\.backend/);
+});
+
+test('#1165 pre-push: a checkpoint that fails for any OTHER reason stays as quiet as before', (t) => {
+  const { bin } = fixture(t, { checkpointCode: 1 });
+  const result = runHook(bin);
+  assert.equal(result.status, 0);
+  assert.doesNotMatch(result.stderr, /not declared/);
+});

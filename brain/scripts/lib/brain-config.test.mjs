@@ -160,7 +160,8 @@ test('ensureBrainConfig: creates config when missing with github identity', () =
     assert.equal(cfg.vcs.provider, 'github');
     assert.equal(cfg.project.gitHost, 'github.com');
     assert.equal(cfg.project.slug, 'owner/repo');
-    assert.equal(cfg.schemaVersion, '1.6.0', 'memory.lane.enabled (1.6.0, issue #906 A6) is now the latest — the 0.6.0 memory.dualWrite gap (D3/C4, issue #229) stays a deliberate, never-reused retirement mark');
+    assert.equal(cfg.schemaVersion, '1.9.1', 'memory.backend (1.9.1, issue #1165) is now the latest — the 0.6.0 memory.dualWrite gap (D3/C4, issue #229) stays a deliberate, never-reused retirement mark');
+    assert.equal(cfg.memory.backend, '', 'memory.backend ships EMPTY (undeclared): a default would choose a backend for a team that never chose one (#1165) — env:init asks and writes it');
     assert.deepEqual(cfg.sdd.map, {}, 'sdd.map ships EMPTY: a routed cold-review would spawn an engine no consumer asked for');
     assert.deepEqual(cfg.sdd.stages, {}, 'sdd.stages ships EMPTY: the four lifecycle stages live in sdd-layout.mjs LIFECYCLE_STAGES, never duplicated into JSON (#456)');
     assert.deepEqual(cfg.sdd.configs, {}, "sdd.configs ships EMPTY: a stage absent from it takes the inhabitant's declared defaults, never an invented override (#312)");

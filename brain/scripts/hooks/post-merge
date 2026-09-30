@@ -49,7 +49,13 @@ repo_root=$(git rev-parse --show-toplevel)
 # STDERR is not. A hydration that SKIPPED because engram's state was unreadable
 # reports there, and swallowing it would make the skip as invisible as the
 # duplication it replaced. `|| true` still guarantees it cannot block the merge.
-node "$repo_root/brain/scripts/memory/cli.mjs" import >/dev/null || true
+_pm_rc=0
+node "$repo_root/brain/scripts/memory/cli.mjs" import >/dev/null || _pm_rc=$?
+# Exit 3/4 is the memory backend declaration refusal (#1165): nothing was imported because
+# nothing was attempted. Non-blocking still — one line says so instead of silence.
+if [ "$_pm_rc" -eq 3 ] || [ "$_pm_rc" -eq 4 ]; then
+  echo "post-merge: memory import skipped — memory backend not declared or invalid (npm run brain:config -- set memory.backend engram|plainfiles)" >&2
+fi
 
 # Keep the derived index canonical after a merge git resolved on its own
 # (issue #330). This does NOT rescue a conflicted merge — git never fires

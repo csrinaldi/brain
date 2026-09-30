@@ -131,8 +131,9 @@ function assertHealthy(r, nextStep) {
   assert.doesNotMatch(r.out, /did NOT complete successfully/, r.out.slice(-800));
 }
 
-test('#1127 e2e (a): fresh repo, no commits, no origin, engram default, no engram binary -> exit 0 with the next step', () => {
+test('#1127 e2e (a): fresh repo, no commits, no origin, engram declared, no engram binary -> exit 0 with the next step', () => {
   const { root, repo } = fixture('a', { commit: false });
+  useBackend(repo, 'engram'); // #1165: engram is no longer a silent default — it must be declared
   const r = bootstrap(repo, root);
   assertHealthy(r, /brain:memory:pull/);
   assert.match(r.out, /brain:memory:index/);
@@ -183,6 +184,71 @@ test('#1127 e2e (e): plainfiles with a REAL merge refusal is a required failure 
   assert.match(r.out, /memory pull failed/);
   assert.match(r.out, /did NOT complete successfully/);
   assert.doesNotMatch(r.out, /pull failed[^\n]*non-blocking/i, 'a required failure must not call itself non-blocking');
+});
+
+// ── #1165: the team's backend is tracked config; nothing is guessed ─────────────────────────────
+
+const declare = (repo, backend) => writeFileSync(join(repo, 'brain.config.json'), JSON.stringify({ memory: { backend } }));
+const envText = (repo) => (existsSync(join(repo, '.env')) ? readFileSync(join(repo, '.env'), 'utf8') : '');
+
+test('#1165 e2e: a FRESH checkout with no .env runs the backend the tracked config declares, and writes no .env line', () => {
+  const { root, repo } = fixture('decl-config');
+  declare(repo, 'plainfiles');
+  const r = bootstrap(repo, root);
+  assertHealthy(r, /npm run brain:memory:pull/);
+  assert.match(r.out, /memory backend: plainfiles \(brain\.config\.json\)/, r.out.slice(-1500));
+  assert.doesNotMatch(envText(repo), /MEMORY_BACKEND/, 'env:init must not re-create the per-machine drift');
+  assert.equal(existsSync(join(repo, '.engram')), false, 'the engram setup must not have run');
+});
+
+test('#1165 e2e: nothing declared and no TTY -> nothing is guessed: no engram setup, no .env line, the fix is named', () => {
+  const { root, repo } = fixture('decl-none');
+  const r = bootstrap(repo, root);
+  assert.equal(r.code, 0, r.out.slice(-1500));
+  assert.match(r.out, /no memory backend is declared/, r.out.slice(-1500));
+  assert.match(r.out, /brain:config -- set memory\.backend/);
+  assert.doesNotMatch(envText(repo), /MEMORY_BACKEND/);
+  assert.equal(existsSync(join(repo, '.engram')), false, 'engram must not have been guessed');
+  assert.doesNotMatch(r.out, /memory backend: engram/);
+});
+
+test('#1165 e2e: an existing consumer with only .env keeps working unchanged, and is told the value is invisible to teammates', () => {
+  const { root, repo } = fixture('decl-envonly');
+  useBackend(repo, 'plainfiles');
+  const r = bootstrap(repo, root);
+  assertHealthy(r, /npm run brain:memory:pull/);
+  assert.match(r.out, /memory backend: plainfiles \(\.env\)/);
+  assert.match(r.out, /brain:config -- set memory\.backend plainfiles/, 'the move-to-team-config one-liner is printed');
+  const cfg = JSON.parse(readFileSync(join(repo, 'brain.config.json'), 'utf8'));
+  assert.ok(!cfg.memory?.backend, 'never migrated silently: a tracked-file edit is the operator\'s to make');
+});
+
+test('#1165 e2e: .env overriding a different team value is reported', () => {
+  const { root, repo } = fixture('decl-shadow');
+  declare(repo, 'engram');
+  useBackend(repo, 'plainfiles');
+  const r = bootstrap(repo, root);
+  assert.equal(r.code, 0, r.out.slice(-1500));
+  assert.match(r.out, /overrides brain\.config\.json memory\.backend \(engram\)/, r.out.slice(-1500));
+});
+
+test('#1165 e2e: the write env:init performs on a TTY (`config set memory.backend`) lands in tracked config and the resolver reads it', () => {
+  const { root, repo } = fixture('decl-write');
+  const env = { PATH: shimBin(), HOME: join(root, 'home') };
+  writeFileSync(join(repo, 'brain.config.json'), JSON.stringify({ schemaVersion: '1.9.0' }));
+  const set = spawnSync('node', ['brain/scripts/config/cli.mjs', 'set', 'memory.backend', 'plainfiles'], { cwd: repo, encoding: 'utf8', env });
+  assert.equal(set.status, 0, set.stderr);
+  const res = spawnSync('node', ['brain/scripts/memory/lib/backend-resolve.mjs', '--root', '.'], { cwd: repo, encoding: 'utf8', env });
+  assert.equal(res.stdout, 'plainfiles config\n');
+  assert.doesNotMatch(envText(repo), /MEMORY_BACKEND/);
+});
+
+test('#1165 cold-5 e2e: an unreadable brain.config.json is reported as unreadable, never as "no memory backend is declared"', () => {
+  const { root, repo } = fixture('decl-badconfig');
+  writeFileSync(join(repo, 'brain.config.json'), '{ not json');
+  const r = bootstrap(repo, root);
+  assert.match(r.out, /could not read brain\.config\.json/, r.out.slice(-1500));
+  assert.doesNotMatch(r.out, /no memory backend is declared/);
 });
 
 // ── #1163 / #1164 / #1166: labels, actor and the lane notice, through the real script ──
