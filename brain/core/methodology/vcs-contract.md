@@ -86,7 +86,7 @@ lookup fails CLOSED (`{ exists: false, error }`), never treated as "label exists
 
 ## How to add a provider
 
-Create `scripts/axes/vcs/adapters/<name>.mjs` exporting the 30 verbs and add `<name>` as a
+Create `scripts/axes/vcs/adapters/<name>.mjs` exporting the 29 verbs (and the `capabilities` probe) and add `<name>` as a
 valid value of `vcs.provider`. The callers are not touched.
 
 ## Current implementation
