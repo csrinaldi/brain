@@ -805,3 +805,47 @@ test('CLI: `bootstrap --branch main <path>` (flag first) still finds the positio
   const { ghLog } = bootstrapCli(t, ['--branch', 'main', WORKFLOW]);
   assert.match(ghLog, /--workflow governance-postmerge\.yml --branch main/);
 });
+
+// ── #1162 round 2 (cold-1): the default branch must come from a source present on
+// EVERY trigger. `github.event.repository.default_branch` is empty on `schedule`,
+// so an empty `--branch` resolves from the remote's own HEAD (ls-remote --symref).
+test('CLI: `bootstrap --branch ""` (a schedule run) resolves the default branch from the remote HEAD', (t) => {
+  const { ghLog, r } = bootstrapCli(t, ['--branch', '']);
+  assert.match(ghLog, /--workflow governance-postmerge\.yml --branch main/, `stdout=${r.stdout}\n${ghLog}`);
+  assert.match(r.stdout, /^BOOTSTRAPPED /);
+});
+
+test('CLI: `bootstrap` with no --branch at all resolves the default branch from the remote HEAD', (t) => {
+  const { ghLog } = bootstrapCli(t, []);
+  assert.match(ghLog, /--workflow governance-postmerge\.yml --branch main/);
+});
+
+// ── #1162 round 2 (cold-3): what an ALREADY-installed consumer gets. Its runs all
+// failed at ABSENT, so evidence is `none` and the base is its (possibly old)
+// adoption: every merge since is audited for the first time, and a tree-keyed
+// offender among them IS nominated. Pinned so the design's residual stays true.
+test('bootstrapCursor: #1162 an already-installed consumer\'s first window audits every merge since adoption and nominates an old offender', async (t) => {
+  const scratch = mkdtempSync(join(tmpdir(), 'cursor-old-'));
+  t.after(() => removeTempTree(scratch));
+  const originDir = join(scratch, 'origin.git');
+  mkdirSync(originDir);
+  spawnSync('git', ['init', '--bare', '--initial-branch=main', originDir], { encoding: 'utf8' });
+  const dir = join(scratch, 'work');
+  mkdirSync(dir);
+  const g = makeRepo(dir);
+  g('remote', 'add', 'origin', originDir);
+  writeFileSync(join(dir, 'README.md'), 'init\n'); g('add', '.'); g('commit', '-m', 'init');
+  mkdirSync(join(dir, '.github/workflows'), { recursive: true });
+  writeFileSync(join(dir, WORKFLOW), 'name: x\n'); g('add', '.'); g('commit', '-m', 'adopt brain');
+  // weeks later, never audited: an over-budget commit with no issue link
+  writeFileSync(join(dir, 'big.txt'), Array.from({ length: 3000 }, (_, i) => `l${i}`).join('\n') + '\n');
+  g('add', '.'); g('commit', '-m', 'old offender');
+  compliantCommit(g, dir);
+  g('push', 'origin', 'main');
+  const boot = await bootstrapCursor({ git: realGit(dir), workflowPath: WORKFLOW, priorAudit: prior('none') });
+  assert.equal(boot.state, 'bootstrapped');
+  const w = resolveWindow({ git: realGit(dir), head: headSha(dir) });
+  const r = spawnSync('node', [AUDIT_SCRIPT, w.range], { cwd: dir, encoding: 'utf8' });
+  assert.equal(r.status, 1, r.stdout);
+  assert.match(r.stdout, /\[FAIL-SHA\]/);
+});

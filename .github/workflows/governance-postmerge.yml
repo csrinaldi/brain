@@ -89,6 +89,8 @@ jobs:
           VCS_TOKEN: ${{ github.token }}
           VCS_PROVIDER: github
           GITHUB_REPOSITORY: ${{ github.repository }}
+          # EMPTY on `schedule` runs (no repository object in that payload): cursor.mjs
+          # then resolves the default branch from the remote's own HEAD.
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           set -euo pipefail
@@ -150,9 +152,9 @@ jobs:
                 echo "Automatic initialization was NOT performed: ${boot_reason}"
                 echo ""
               fi
-              echo "Initialize it (human action) with:"
+              echo "Initialize it (human action) AT THE ADOPTION COMMIT — the first commit that added this workflow — never at the root: a cursor before the adoption makes the audit judge (and auto-revert) the very commit that installed the gate. The window then audits everything after it:"
               echo '```'
-              echo "git update-ref refs/governance/audit-cursor \$(git rev-list --max-parents=0 HEAD | tail -n1)"
+              echo "git update-ref refs/governance/audit-cursor \$(git log --first-parent --diff-filter=A --format=%H --reverse -- .github/workflows/governance-postmerge.yml | head -n1)"
               echo "git push origin refs/governance/audit-cursor"
               echo '```'
             } > "$RUNNER_TEMP/body.md"

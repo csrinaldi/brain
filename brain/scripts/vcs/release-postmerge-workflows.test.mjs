@@ -769,7 +769,7 @@ const BOOT_ENV = { VCS_PROVIDER: 'github', DEFAULT_BRANCH: 'main', GITHUB_REPOSI
 
 function freshConsumerSetup(g, repo, homeDir) {
   const origin = join(homeDir, 'origin.git');
-  spawnSync('git', ['init', '--bare', origin], { encoding: 'utf8', env: isolatedEnv(homeDir) });
+  spawnSync('git', ['init', '--bare', '--initial-branch=main', origin], { encoding: 'utf8', env: isolatedEnv(homeDir) });
   g('remote', 'add', 'origin', origin);
   writeFileSync(join(repo, 'f'), 'pre\n'); g('add', '.'); g('commit', '-m', 'pre-adoption');
   mkdirSync(join(repo, '.github/workflows'), { recursive: true });
@@ -1577,4 +1577,33 @@ test('#1162: governance-postmerge.yml grants actions: read (and only read) for t
   assert.ok(m, 'the workflow must declare a permissions block');
   assert.match(m[1], /\bactions:\s*read\b/, 'actions: read is required by `gh run list --workflow`');
   assert.doesNotMatch(m[1], /\bactions:\s*write\b/, 'least privilege: never actions: write');
+});
+
+// ── #1162 round 2 (cold-1): every trigger resolves the default branch ─────────
+// push / workflow_dispatch carry `repository.default_branch`; `schedule` does not,
+// so DEFAULT_BRANCH is EMPTY there. The bootstrap must still find `main`.
+for (const [trigger, defaultBranch] of [['push', 'main'], ['workflow_dispatch', 'main'], ['schedule', '']]) {
+  test(`#1162 cold-1: ${trigger} (DEFAULT_BRANCH='${defaultBranch}') bootstraps and asks for main's run history`, () => {
+    const r = runStepIsolated('window', {
+      repoSetup: freshConsumerSetup,
+      ghOpts: { runListPrints: '[]' },
+      env: { ...BOOT_ENV, DEFAULT_BRANCH: defaultBranch },
+    });
+    assert.equal(r.status, 0, `${trigger} must bootstrap:\n${r.stdout}\n${r.stderr}`);
+    assert.match(r.ghLog(), /run list .*--branch main/);
+    assert.doesNotMatch(r.ghLog(), /gh (label|issue) create/);
+  });
+}
+
+// ── #1162 round 2 (cold-2): the alarm's instructions match the safety argument ─
+test('#1162 cold-2: the ABSENT alarm tells a human to set the cursor AT the adoption commit, never at the root', () => {
+  const r = runStepIsolated('window', {
+    repoSetup: freshConsumerSetup,
+    ghOpts: { runListPrints: '[{"databaseId":42}]' },
+    env: BOOT_ENV,
+  });
+  const body = readFileSync(join(r.homeDir, 'body.md'), 'utf8');
+  assert.doesNotMatch(body, /max-parents=0/, 'the root is exactly the base that audits (and reverts) the adoption');
+  assert.match(body, /--diff-filter=A/, 'the instruction must compute the adoption commit');
+  assert.match(body, /governance-postmerge\.yml/);
 });

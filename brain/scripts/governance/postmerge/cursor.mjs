@@ -159,6 +159,18 @@ export async function bootstrapCursor({ git, workflowPath, priorAudit }) {
 }
 
 /**
+ * The remote's default branch from its own HEAD symref (`ls-remote --symref`):
+ * remote-authoritative and independent of the workflow trigger's payload.
+ * Returns undefined when unreadable (the port then answers unknown: an alarm).
+ */
+export function resolveDefaultBranch(git) {
+  const r = git.try(['ls-remote', '--symref', REMOTE, 'HEAD']);
+  if (r.status !== 0) return undefined;
+  const m = r.stdout.match(/^ref:\s+refs\/heads\/(\S+)\s+HEAD/m);
+  return m ? m[1] : undefined;
+}
+
+/**
  * Manifest read by `vcs/lib/workflow-auth.mjs` (issue #535): which subcommands
  * can reach the VCS port. Only `bootstrap` does (its prior-run evidence comes
  * from the port's `workflowRunSucceeded`); `window` and `accept` touch git only.
@@ -201,7 +213,10 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     // Flags first, then the positional: `--branch <v>` (and its value) never
     // counts as the workflow path, wherever it sits.
     const bi = rest.indexOf('--branch');
-    const branch = bi !== -1 ? rest[bi + 1] : undefined;
+    // `github.event.repository.default_branch` is EMPTY on `schedule` runs, so an
+    // absent/empty --branch falls back to the remote's own HEAD — present on every trigger.
+    const flagged = bi !== -1 ? rest[bi + 1] : undefined;
+    const branch = flagged || resolveDefaultBranch(git);
     const positional = rest.filter((tok, i) => !tok.startsWith('--') && !(bi !== -1 && i === bi + 1));
     const workflowPath = positional[0] ?? '.github/workflows/governance-postmerge.yml';
     const priorAudit = async () => {
