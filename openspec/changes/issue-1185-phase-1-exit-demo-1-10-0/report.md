@@ -4,9 +4,9 @@
 
 | Clause | Result | Evidence |
 |---|---|---|
-| Fresh plainfiles and engram installs need no step outside install, bootstrap or upgrade | **No** | See below |
+| Fresh plainfiles and engram installs need no step outside install, bootstrap or upgrade | **No** | `evidence/brain-test-plainfiles-13-commit-ship.txt`, `-14-ship-retry.txt`, `-15-ship-retry2.txt`, `-16-check-diagnostic.txt`, `-17-pr-fallback.txt` (#1186, #1187); `evidence/brain-test-plainfiles-20-postmerge-failure.txt`, `-21-postmerge-alarm.txt`, `-35-postmerge-after-lane.txt`, `evidence/brain-test-engram-12-config-commit-ship.txt`, `brain-test-engram-37-postmerge.txt` (#1188) |
 | No credential committed | **Yes** | `evidence/credential-scan.txt`; `.env` untracked in both repos |
-| #1081's four seams recover | **Yes** | See below |
+| #1081's four seams recover | **Yes** | Per seam in the table below |
 
 ## The stretch that ran clean
 
