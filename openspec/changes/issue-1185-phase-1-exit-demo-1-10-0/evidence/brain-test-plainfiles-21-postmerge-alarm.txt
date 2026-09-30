@@ -1,0 +1,23 @@
+governance: postmerge audit failed with nothing revertible
+The post-merge audit FAILED (exit 1) but nothing is safely auto-revertible — NO revert and NO cursor advance was performed (REQ-TS-4).
+
+This is a legitimate audit state, not a malfunction: every surviving violation is either a
+non-auto-revertible class (`issueLink` / `memoryPresence`) or a tree-keyed failure whose revert
+would resurrect a payload absent at HEAD (design §15.5).
+
+**A human must resolve it.** For each merge below, either fix forward, revert it manually, or
+accept it explicitly with a written reason:
+
+```
+node brain/scripts/governance/postmerge/cursor.mjs accept <sha> --reason "<why this is accepted>"
+```
+
+The cursor stays PINNED until then, so this window is re-audited on every push and daily.
+
+Audit output:
+```
+[FAIL] 2cce3e4 chore(memory): enable the memory lane (#3) — memoryPresence: no session_summary observation found in committed .memory/ — capture a session summary (mem_session_summary) before closing
+```
+
+Part of #259.
+

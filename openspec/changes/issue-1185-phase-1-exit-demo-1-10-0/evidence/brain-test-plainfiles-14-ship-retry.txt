@@ -1,0 +1,30 @@
+✓ No prohibited references found.
+✓ Artifact structure is valid.
+chore(memory): enable the memory lane
+
+Closes #1
+
+$ npm run brain:ship (2nd)
+
+> brain-test-plainfiles@1.0.0 brain:ship
+> node ./brain/scripts/brain-ship.mjs
+
+
+> brain-test-plainfiles@1.0.0 brain:check
+> node ./brain/scripts/brain-check.mjs
+
+
+brain:check results:
+
+  [PASS] diffSize
+  [PASS] adrPresence
+  [UNVERIFIED] issueLink — issue-link: cannot determine whether the PR targets the default branch (ctx.targetBranch or ctx.defaultBranch is null/uncomputable) — failing closed rather than assuming "main".
+  [UNVERIFIED] memoryPresence — memory-gate: no record scoped to #1 on the PR tree and origin/<default> is unreadable (DEFAULT_BRANCH not mapped) — failing closed
+  [FAIL] npmTest —  Error: no test specified 
+  [PASS] repoCheck
+
+1 check(s) failed. Fix before brain:ship.
+brain:ship: checks failed — fix them before shipping.
+  Run "npm run brain:check" for details.
+
+exit=1

@@ -1,0 +1,19 @@
+{"allow_auto_merge":false,"delete_branch_on_merge":false}
+$ (workaround, finding E5) delete merged remote lane branch
+ - [deleted]         memory/gandalf-rog-zephyrus-g15-ga503qr-ga503qr-2026-09-30
++ chore/issue-1-enable-the-memory-lane
+  memory/gandalf-rog-zephyrus-g15-ga503qr-ga503qr-2026-09-30
+  remotes/origin/chore/issue-1-enable-the-memory-lane
+94837fa memory: gandalf-rog-zephyrus-g15-ga503qr-ga503qr 2026-09-30 (1 records)
+f600293 memory: gandalf-rog-zephyrus-g15-ga503qr-ga503qr 2026-09-30 (2 records) (#5)
+2cce3e4 chore(memory): enable the memory lane (#3)
+2258794 chore: adopt brain 1.10.0
+$ ship with mrCreate injected failure
+
+> brain-test-plainfiles@1.0.0 brain:memory:ship
+> node ./brain/scripts/memory/cli.mjs ship --invoker manual
+
+memory/cli: ✗ ship failed — the pull request could not be created. memory.ship.prCreateFailed: mrCreate failed — injected mrCreate failure (seam 2, #1185)
+exit=1
+94837fafbccc255d909a8ebe560641f888b4d883	refs/heads/memory/gandalf-rog-zephyrus-g15-ga503qr-ga503qr-2026-09-30
+[]

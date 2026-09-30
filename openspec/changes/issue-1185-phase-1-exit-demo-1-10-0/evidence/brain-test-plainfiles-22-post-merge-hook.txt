@@ -1,0 +1,5 @@
+$ git pull origin main   (fast-forward 2258794..2cce3e4, output of post-merge hook seen)
+memory/cli: backend 'plainfiles' does not implement op 'import'
+$ bash brain/scripts/hooks/post-merge (re-run for reproduction)
+memory/cli: backend 'plainfiles' does not implement op 'import'
+exit=0

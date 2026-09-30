@@ -1,0 +1,9 @@
+$ npm run brain:memory:ship
+
+> brain-test-plainfiles@1.0.0 brain:memory:ship
+> node ./brain/scripts/memory/cli.mjs ship --invoker manual
+
+memory/cli: auto-merge was refused (unsupported) — the pull request stays open; the next run re-arms it.
+memory/cli: ✓ pushed refs/heads/memory/gandalf-rog-zephyrus-g15-ga503qr-ga503qr-2026-09-30 to origin.
+memory/cli: BRAIN_MEMORY_TOKEN is not set — this run authenticated with the ambient session credential.
+exit=0

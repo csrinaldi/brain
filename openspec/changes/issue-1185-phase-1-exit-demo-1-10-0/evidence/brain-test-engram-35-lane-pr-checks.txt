@@ -1,0 +1,11 @@
+actor-check pass
+base-branch pass
+brain-writes-reviewed pass
+decision-gate pass
+diff-size pass
+issue-link pass
+lane-paths pass
+lane-scrub pass
+local-checks pass
+memory-gate pass
+phase-order pass

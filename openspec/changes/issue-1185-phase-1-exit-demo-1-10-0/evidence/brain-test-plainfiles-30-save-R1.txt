@@ -1,0 +1,15 @@
+$ npm run brain:memory:save -- "SYNTHETIC-1185 R1 plainfiles" "SYNTHETIC-1185 first record body" --type session_summary --issue 2
+
+> brain-test-plainfiles@1.0.0 brain:memory:save
+> node ./brain/scripts/memory/cli.mjs save SYNTHETIC-1185 R1 plainfiles SYNTHETIC-1185 first record body (R1) --type session_summary --issue 2
+
+memory/cli: ✓ saved rec-e8a34c6aa73ad17f → /home/gandalf/IA/brain-test-plainfiles/.memory/records/2026-09-rec-e8a34c6aa73ad17f.jsonl
+exit=0
+ M .memory/index.jsonl
+?? .memory/records/
+.memory:
+index.jsonl
+records
+
+.memory/records:
+2026-09-rec-e8a34c6aa73ad17f.jsonl

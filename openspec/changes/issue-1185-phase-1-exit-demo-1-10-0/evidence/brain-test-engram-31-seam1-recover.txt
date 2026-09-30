@@ -1,0 +1,17 @@
+$ engram search before recovery
+Update available: 2.0.0 -> 2.2.1
+To update:
+  brew update && brew upgrade engram
+  or: go install github.com/Gentleman-Programming/engram/v2/cmd/engram@latest
+
+memory/cli: engram.search() failed — 'search' is not a cli verb for the 'engram' backend — use engram's native mem_search / 'engram search' instead.
+$ npm run brain:memory:pull (recovery)
+
+> brain-test-engram@1.0.0 brain:memory:pull
+> node ./brain/scripts/memory/cli.mjs pull
+
+Already up to date.
+✓ import complete — 1/1 records imported into engram (records-only, D2/C4).
+exit=0
+$ search after recovery
+memory/cli: engram.search() failed — 'search' is not a cli verb for the 'engram' backend — use engram's native mem_search / 'engram search' instead.

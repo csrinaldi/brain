@@ -1,0 +1,40 @@
+audit-and-revert	Terminal-state assertion — no terminal state may be both red and silent	2026-09-30T18:44:29.4026634Z [36;1m  exit 0[0m
+audit-and-revert	Terminal-state assertion — no terminal state may be both red and silent	2026-09-30T18:44:29.4026834Z [36;1mfi[0m
+audit-and-revert	Terminal-state assertion — no terminal state may be both red and silent	2026-09-30T18:44:29.4027013Z [36;1m[0m
+audit-and-revert	Terminal-state assertion — no terminal state may be both red and silent	2026-09-30T18:44:29.4027202Z [36;1mif [ -n "$filed" ]; then[0m
+audit-and-revert	Terminal-state assertion — no terminal state may be both red and silent	2026-09-30T18:44:29.4027590Z [36;1m  echo "job is red and an alarm was already filed (${filed}) — the invariant holds."[0m
+audit-and-revert	Terminal-state assertion — no terminal state may be both red and silent	2026-09-30T18:44:29.4028011Z [36;1m  [ "$mapped" -eq 1 ] || exit 1[0m
+audit-and-revert	Terminal-state assertion — no terminal state may be both red and silent	2026-09-30T18:44:29.4028262Z [36;1m  exit 1[0m
+audit-and-revert	Terminal-state assertion — no terminal state may be both red and silent	2026-09-30T18:44:29.4028448Z [36;1mfi[0m
+audit-and-revert	Terminal-state assertion — no terminal state may be both red and silent	2026-09-30T18:44:29.4028623Z [36;1m[0m
+audit-and-revert	Terminal-state assertion — no terminal state may be both red and silent	2026-09-30T18:44:29.4028892Z [36;1m# RED AND SILENT — the #466 signature. File the backstop alarm.[0m
+audit-and-revert	Terminal-state assertion — no terminal state may be both red and silent	2026-09-30T18:44:29.4029304Z [36;1mlabel="governance:postmerge-unreported"[0m
+audit-and-revert	Terminal-state assertion — no terminal state may be both red and silent	2026-09-30T18:44:29.4029589Z [36;1m{[0m
+audit-and-revert	Terminal-state assertion — no terminal state may be both red and silent	2026-09-30T18:44:29.4030099Z [36;1m  echo "The post-merge governance job failed and **no step filed an alarm** — the state this backstop exists to catch (#466, REQ-TS-5)."[0m
+audit-and-revert	Terminal-state assertion — no terminal state may be both red and silent	2026-09-30T18:44:29.4030699Z [36;1m  echo ""[0m
+audit-and-revert	Terminal-state assertion — no terminal state may be both red and silent	2026-09-30T18:44:29.4030925Z [36;1m  echo "Job status: \`${JOB_STATUS}\`"[0m
+audit-and-revert	Terminal-state assertion — no terminal state may be both red and silent	2026-09-30T18:44:29.4031351Z [36;1m  echo "Audit exit code: \`${code:-<none — the audit step produced no output>}\`"[0m
+audit-and-revert	Terminal-state assertion — no terminal state may be both red and silent	2026-09-30T18:44:29.4031747Z [36;1m  echo ""[0m
+audit-and-revert	Terminal-state assertion — no terminal state may be both red and silent	2026-09-30T18:44:29.4032153Z [36;1m  echo "This means the job reached a terminal state with no handler. The cursor has NOT advanced."[0m
+audit-and-revert	Terminal-state assertion — no terminal state may be both red and silent	2026-09-30T18:44:29.4032849Z [36;1m  echo "Read the job log, then either fix the underlying failure or add an explicit handler for this state."[0m
+audit-and-revert	Terminal-state assertion — no terminal state may be both red and silent	2026-09-30T18:44:29.4033563Z [36;1m  echo ""[0m
+audit-and-revert	Terminal-state assertion — no terminal state may be both red and silent	2026-09-30T18:44:29.4033788Z [36;1m  echo "Part of #259."[0m
+audit-and-revert	Terminal-state assertion — no terminal state may be both red and silent	2026-09-30T18:44:29.4034055Z [36;1m} > "$RUNNER_TEMP/unreported.md"[0m
+audit-and-revert	Terminal-state assertion — no terminal state may be both red and silent	2026-09-30T18:44:29.4034430Z [36;1mnode brain/scripts/governance/postmerge/alarm.mjs "$label" \[0m
+audit-and-revert	Terminal-state assertion — no terminal state may be both red and silent	2026-09-30T18:44:29.4034882Z [36;1m  "governance: postmerge job failed with no alarm filed" \[0m
+audit-and-revert	Terminal-state assertion — no terminal state may be both red and silent	2026-09-30T18:44:29.4035240Z [36;1m  "$RUNNER_TEMP/unreported.md"[0m
+audit-and-revert	Terminal-state assertion — no terminal state may be both red and silent	2026-09-30T18:44:29.4035530Z [36;1mecho "backstop alarm filed: ${label}"[0m
+audit-and-revert	Terminal-state assertion — no terminal state may be both red and silent	2026-09-30T18:44:29.4035807Z [36;1mexit 1[0m
+audit-and-revert	Terminal-state assertion — no terminal state may be both red and silent	2026-09-30T18:44:29.4096886Z shell: /usr/bin/bash -e {0}
+audit-and-revert	Terminal-state assertion — no terminal state may be both red and silent	2026-09-30T18:44:29.4097133Z env:
+audit-and-revert	Terminal-state assertion — no terminal state may be both red and silent	2026-09-30T18:44:29.4099461Z   GH_TOKEN: ***
+audit-and-revert	Terminal-state assertion — no terminal state may be both red and silent	2026-09-30T18:44:29.4099671Z   AUDIT_CODE: 1
+audit-and-revert	Terminal-state assertion — no terminal state may be both red and silent	2026-09-30T18:44:29.4099868Z   JOB_STATUS: failure
+audit-and-revert	Terminal-state assertion — no terminal state may be both red and silent	2026-09-30T18:44:29.4100082Z   ALARM_WINDOW: 
+audit-and-revert	Terminal-state assertion — no terminal state may be both red and silent	2026-09-30T18:44:29.4100323Z   ALARM_REVERT: governance:audit-unrevertible
+audit-and-revert	Terminal-state assertion — no terminal state may be both red and silent	2026-09-30T18:44:29.4100618Z   ALARM_UNCOMPUTABLE: 
+audit-and-revert	Terminal-state assertion — no terminal state may be both red and silent	2026-09-30T18:44:29.4100835Z   ALARM_SWEEP: 
+audit-and-revert	Terminal-state assertion — no terminal state may be both red and silent	2026-09-30T18:44:29.4101028Z ##[endgroup]
+audit-and-revert	Terminal-state assertion — no terminal state may be both red and silent	2026-09-30T18:44:29.4177392Z terminal audit code: 1
+audit-and-revert	Terminal-state assertion — no terminal state may be both red and silent	2026-09-30T18:44:29.4178860Z job is red and an alarm was already filed (governance:audit-unrevertible) — the invariant holds.
+audit-and-revert	Terminal-state assertion — no terminal state may be both red and silent	2026-09-30T18:44:29.4182197Z ##[error]Process completed with exit code 1.
