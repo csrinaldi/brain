@@ -2928,3 +2928,52 @@ test('issueCreate (contract): the approval refusal THROWS on both providers, unl
   await assert.rejects(() => github.issueCreate({ project: 'a/b', title: 'T', labels: ['status:approved'] }), /HUMAN signature/);
   await assert.rejects(() => gitlab.issueCreate({ project: 'a/b', title: 'T', labels: ['status::approved'] }), /HUMAN signature/);
 });
+
+// ── labelCreate (issue #1163) — the write half of `labelList`. Creates a label
+// DEFINITION in the remote's label set; it applies nothing to any issue, so it
+// cannot hand anyone the approval (that is `labelAdd`'s deny-set, not this).
+// `({ project, name, color?, description? }) -> { ok: true, created } | { ok: false, error }`.
+// "Already exists" is a SUCCESS with `created: false` — that is what makes
+// `env:init`'s label step idempotent. Never throws.
+
+test('github.labelCreate (contract): POSTs the label to the labels endpoint and reports created', async () => {
+  let captured;
+  setSpawn((_cmd, args, opts) => { captured = { args, input: opts?.input }; return { status: 0, stdout: '{}', stderr: '' }; });
+  const r = await github.labelCreate({ project: 'x/y', name: 'status:approved', color: '#0E8A16', description: 'Approved' });
+  assert.deepEqual(r, { ok: true, created: true });
+  assert.ok(captured.args.includes('repos/x/y/labels'), 'must target the labels collection');
+  assert.ok(captured.args.includes('POST'));
+  assert.deepEqual(JSON.parse(captured.input), { name: 'status:approved', color: '0E8A16', description: 'Approved' });
+});
+
+test('github.labelCreate (contract): 422 already_exists is { ok: true, created: false }', async () => {
+  setSpawn(() => ({ status: 1, stdout: '{"message":"Validation Failed","errors":[{"resource":"Label","code":"already_exists","field":"name"}]}', stderr: 'gh: Validation Failed (HTTP 422)' }));
+  assert.deepEqual(await github.labelCreate({ project: 'x/y', name: 'type:bug' }), { ok: true, created: false });
+});
+
+test('github.labelCreate (contract): any other failure is { ok: false, error }, never throws', async () => {
+  setSpawn(failSpawn('gh: Resource not accessible (HTTP 403)'));
+  const r = await github.labelCreate({ project: 'x/y', name: 'type:bug' });
+  assert.equal(r.ok, false);
+  assert.match(r.error, /403/);
+});
+
+test('gitlab.labelCreate (contract): POSTs name, a #-prefixed color and description; reports created', async () => {
+  let seen;
+  const r = await gitlab.labelCreate({
+    project: 'g/p', name: 'status::approved', color: '0E8A16', description: 'Approved',
+    fetchImpl: async (url, o) => { seen = { url, o }; return { ok: true, json: async () => ({}) }; },
+  });
+  assert.deepEqual(r, { ok: true, created: true });
+  assert.match(seen.url, /projects\/g%2Fp\/labels$/);
+  assert.equal(seen.o.method, 'POST');
+  assert.deepEqual(JSON.parse(seen.o.body), { name: 'status::approved', color: '#0E8A16', description: 'Approved' });
+});
+
+test('gitlab.labelCreate (contract): 409 is { ok: true, created: false }; other failures are { ok: false, error }', async () => {
+  const conflict = await gitlab.labelCreate({ project: 'g/p', name: 'x', fetchImpl: async () => ({ ok: false, status: 409 }) });
+  assert.deepEqual(conflict, { ok: true, created: false });
+  const denied = await gitlab.labelCreate({ project: 'g/p', name: 'x', fetchImpl: async () => ({ ok: false, status: 403 }) });
+  assert.equal(denied.ok, false);
+  assert.match(denied.error, /403/);
+});

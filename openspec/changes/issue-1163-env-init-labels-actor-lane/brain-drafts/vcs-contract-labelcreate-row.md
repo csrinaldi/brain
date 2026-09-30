@@ -1,0 +1,5 @@
+# Draft — `vcs-contract.md` Required verbs row for `labelCreate` (#1163)
+
+Human step: `brain:promote` this row into `brain/core/methodology/vcs-contract.md` (Required verbs table, after `labelList`; Phase 3 adapter status: implemented / implemented, #1163) and, in the same commit, remove `labelCreate` from `DOCUMENTED_BUT_NOT_REQUIRED` in `brain/scripts/vcs/verb-contract-drift-guard.test.mjs`. Also update the "exporting the 21 verbs" count under "How to add a provider".
+
+| `labelCreate` | `({ project, name, color?, description?, apiBase?, token?, proxyUrl?, fetchImpl? }) -> Promise<{ ok: true, created: boolean }\|{ ok: false, error }>` | Creates a label DEFINITION in the remote's label set (issue #1163); the write half of `labelList`. It applies the label to nothing, so it cannot hand anyone an approval — that stays `labelAdd`'s deny-set. `created: false` with `ok: true` means the label already existed (GH: 422 `already_exists`; GL: 409), which is what makes `env:init`'s label step idempotent. GH: `POST repos/{project}/labels`, colour without `#`. GL: `POST projects/{enc}/labels`, colour `#`-prefixed. Never throws. |

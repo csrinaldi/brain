@@ -49,7 +49,7 @@ export const VERBS = [
   'commitStatus', 'repoCloneUrl', 'patSetupUrl', 'projectResolve',
   'branchProtect', 'capabilities',
   'prReviewComment', 'issueComment', 'labelAdd', 'labelRemove',
-  'prStatusRollup', 'labelList', 'prCommits',
+  'prStatusRollup', 'labelList', 'labelCreate', 'prCommits',
   // issue #1086, D3/D7: fires verb-contract-drift-guard.test.mjs's :82-91
   // check by design until the maintainer's `brain:promote` lands the
   // vcs-contract.md Required Verbs row drafted at

@@ -30,7 +30,10 @@ const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..'
 const CONTRACT_DOC = join(REPO_ROOT, 'brain', 'core', 'methodology', 'vcs-contract.md');
 
 // See file header — capabilities is a probe verb, documented separately.
-const DOCUMENTED_BUT_NOT_REQUIRED = new Set(['capabilities']);
+// `labelCreate` (#1163): both adapters implement it and VERBS lists it; its vcs-contract.md
+// row is drafted at openspec/changes/issue-1163-env-init-labels-actor-lane/brain-drafts/
+// and lands with the maintainer's `brain:promote`. REMOVE this entry in that same commit.
+const DOCUMENTED_BUT_NOT_REQUIRED = new Set(['capabilities', 'labelCreate']);
 
 // Function-typed exports that BOTH providers legitimately share but that are
 // NOT contract verbs (helpers/constants) — reserved for future entries so the
