@@ -7,6 +7,7 @@ import { execSync, spawnSync } from 'node:child_process';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readRecordObservations } from './memory/lib/store.mjs';
+import { findIssueInBranch } from './lib/branch-grammar.mjs';
 import { loadBrainConfigOrThrow } from './lib/brain-config.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -17,10 +18,10 @@ function isFeatureBranch(branch) {
   return !NON_WORKING_BRANCHES.test(branch);
 }
 
-/** Extract the issue provenance encoded by brain:start's branch convention. */
+/** Extract the issue provenance encoded by the branch convention (shared parser, #697). */
 export function issueFromBranch(branch) {
-  const match = String(branch ?? '').match(/\/(?:issue-)?(\d+)(?:-|$)/);
-  return match ? Number(match[1]) : undefined;
+  const found = findIssueInBranch(branch);
+  return found === null ? undefined : Number(found);
 }
 
 function hasIssueRecord(records, issue) {

@@ -18,6 +18,7 @@ const base = (overrides = {}) => ({
   ...overrides,
 });
 
+import { deriveNext } from './brain-next.mjs';
 test('brain-next: no branch recommends brain:start', async () => {
   const { deriveNext } = await import('./brain-next.mjs');
   const result = await deriveNext(base({ branch: 'main' }));
@@ -78,3 +79,19 @@ test('brain-next: never requests porcelain .memory/ input', async () => {
   assert.equal(result.state, 'needs-memory');
   assert.equal(called, false);
 });
+
+test('brain-next: issueFromBranch reads both branch shapes via the shared parser (#697)', async () => {
+  const { issueFromBranch } = await import('./brain-next.mjs');
+  assert.equal(issueFromBranch('fix/issue-639-some-slug'), 639);
+  assert.equal(issueFromBranch('feature/42-demo'), 42);
+  assert.equal(issueFromBranch('claude/x'), undefined);
+});
+
+// #697 review: fail closed. These shapes were detected by the pre-#697 regex; a naive
+// switch to a strict parser would return undefined and report `ready` without memory.
+for (const branch of ['feature/42', 'Fix/issue-5-x', 'feat/scope/issue-5-x', 'fix/issue-5-']) {
+  test(`brain-next: '${branch}' still demands memory (never reads as ready)`, async () => {
+    const result = await deriveNext(base({ branch }));
+    assert.equal(result.state, 'needs-memory');
+  });
+}

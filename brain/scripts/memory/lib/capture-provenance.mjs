@@ -12,6 +12,7 @@
 // things.
 
 import { HANDLE_RE } from './format.mjs';
+import { parseCanonicalIssueBranch } from '../../lib/branch-grammar.mjs';
 
 /** Default agent-marker env var name, overridable via `git config brain.agentEnv`. */
 export const AGENT_ENV_DEFAULT = 'AI_AGENT';
@@ -61,7 +62,6 @@ export const AGENT_ENV_DEFAULTS = [AGENT_ENV_DEFAULT, 'CLAUDECODE', 'CODEX_THREA
 export const RESERVED_ACTORS = new Set(['@legacy']);
 
 /** `<type>/issue-<N>` or `<type>/issue-<N>-<slug>` — never a bare number, never case-insensitive. */
-export const ISSUE_BRANCH_RE = /^[a-z]+\/issue-(\d+)(?:-|$)/;
 
 // The positive handle shape (design A2). Owned by `format.mjs` as `HANDLE_RE`
 // (#738 unit 3, also used there for the write-gate's own classification) and
@@ -127,7 +127,7 @@ export function resolveActorKind({ env = {}, agentEnvConfig } = {}) {
 
 /**
  * Resolves `issue`: `declared` (from `--issue`) wins; otherwise derived from
- * `branch` matching `ISSUE_BRANCH_RE`; otherwise absent, NEVER fabricated.
+ * `branch` matching the canonical grammar (`branch-grammar.mjs`); otherwise absent, NEVER fabricated.
  *
  * @param {{ declared: number|string|undefined|null, branch: string|null|undefined }} input
  * @returns {{issue: number|undefined, derived: boolean, branch?: string, evidence: string|null}}
@@ -140,9 +140,9 @@ export function deriveIssue({ declared, branch }) {
     }
   }
   if (typeof branch === 'string') {
-    const m = ISSUE_BRANCH_RE.exec(branch);
+    const m = parseCanonicalIssueBranch(branch);
     if (m) {
-      const n = Number(m[1]);
+      const n = Number(m.issueNumber);
       return { issue: n, derived: true, branch, evidence: `issue ${n} derived from branch ${branch}` };
     }
   }
