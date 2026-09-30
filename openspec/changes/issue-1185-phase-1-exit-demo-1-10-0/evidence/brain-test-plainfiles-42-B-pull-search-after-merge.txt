@@ -1,0 +1,47 @@
+$ npm run brain:memory:pull (B, after lane merge)
+
+> brain-test-plainfiles@1.0.0 brain:memory:pull
+> node ./brain/scripts/memory/cli.mjs pull
+
+From https://github.com/csrinaldi/brain-test-plainfiles
+   2cce3e4..f600293  main       -> origin/main
+   94efba0..0211728  memory/gandalf-rog-zephyrus-g15-ga503qr-ga503qr-2026-09-30 -> origin/memory/gandalf-rog-zephyrus-g15-ga503qr-ga503qr-2026-09-30
+Updating 2cce3e4..f600293
+Fast-forward
+ .memory/records/2026-09-rec-a54e3896e583bab7.jsonl | 1 +
+ .memory/records/2026-09-rec-e8a34c6aa73ad17f.jsonl | 1 +
+ 2 files changed, 2 insertions(+)
+ create mode 100644 .memory/records/2026-09-rec-a54e3896e583bab7.jsonl
+ create mode 100644 .memory/records/2026-09-rec-e8a34c6aa73ad17f.jsonl
+exit=0
+$ search SYNTHETIC-1185
+memory/cli: 2 matching record(s):
+  - rec-a54e3896e583bab7 [decision] **SYNTHETIC-1185 R2 plainfiles**
+
+SYNTHETIC-1185 second record body (R2, supersedes R1)
+  - rec-e8a34c6aa73ad17f [session_summary] **SYNTHETIC-1185 R1 plainfiles**
+
+SYNTHETIC-1185 first record body (R1)
+exit=0
+$ search R1 (superseded)
+memory/cli: 1 matching record(s):
+  - rec-e8a34c6aa73ad17f [session_summary] **SYNTHETIC-1185 R1 plainfiles**
+
+SYNTHETIC-1185 first record body (R1)
+$ npm run brain:session:start
+
+> brain-test-plainfiles@1.0.0 brain:session:start
+> node ./brain/scripts/session-start.mjs
+
+brain · session context
+========================
+branch:   main
+change:   (no change folder for branch)
+memory:   engram unavailable (skipped) — memory/cli: backend 'plainfiles' does not implement op 'import'
+------------------------------------------
+ticket:
+(no active ticket memory)
+========================
+ M .memory/index.jsonl
+2026-09-rec-a54e3896e583bab7.jsonl
+2026-09-rec-e8a34c6aa73ad17f.jsonl

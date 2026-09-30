@@ -44,15 +44,18 @@ function commit(git, dir, files, message) {
  * Build a plaintext record string containing a single session_summary observation.
  */
 function makeSessionSummaryRecord() {
-  return JSON.stringify({
-    id: 'rec-1',
+  // #1188: the audit runs the memory-gate's issue-scoped predicate, so the base
+  // record is scoped to every issue number the fixtures' merges close (#1..#9, #443).
+  return [1, 2, 3, 4, 5, 6, 7, 8, 9, 443].map((issue) => JSON.stringify({
+    id: `rec-${issue}`,
     ts: '2026-07-12T12:00:00Z',
     actor: '@test',
     actorKind: 'human',
     type: 'session_summary',
     project: 'brain',
+    issue,
     content: 'Test session summary',
-  }) + '\n';
+  })).join('\n') + '\n';
 }
 
 
@@ -664,8 +667,12 @@ test('D2 A9(a) — a memoryPresence-only failure drives exit 1 but emits ZERO [F
   const dir = mkdtempSync(join(tmpdir(), 'audit-a9mem-'));
   t.after(() => removeTempTree(dir));
   const git = makeRepo(dir);
-  // NO session_summary anywhere → memoryPresence fails repo-wide.
-  commit(git, dir, { 'README.md': 'init' }, 'chore: initial (#0)');
+  // History exists (a record for ANOTHER issue) but none is scoped to #1 → the
+  // gate's predicate fails it (#1188: a repo with NO history at all abstains instead).
+  commit(git, dir, {
+    'README.md': 'init',
+    '.memory/records/2026-07.jsonl': JSON.stringify({ id: 'other', type: 'session_summary', issue: 99 }) + '\n',
+  }, 'chore: initial (#0)');
   const base = headShaOf(git);
   mergeAddingPayload(git, dir, { 'src/small.mjs': 'export const x = 1;\n' }, 'N',
     'N: small clean Closes #1');
@@ -2209,4 +2216,64 @@ test('#1086: no suffix for an ordinary subject-resolved merge (unchanged today)'
 
 test('#1086: no suffix when the subject references no PR at all (unchanged today)', () => {
   assert.equal(formatPrSourceSuffix({ subjectRef: null, prNum: null, prSource: null, prMetaError: null }), '');
+});
+
+// ── #1188 — the demo replay: a fresh consumer's first real merge ──────────────
+//
+// The 1.10.0 exit demonstration (#1185) ran adoption, then the lane-enable PR.
+// The PR-time memory-gate passed it; the post-merge audit failed it as
+// `memoryPresence`, filed `governance:audit-unrevertible`, and pinned the cursor.
+// These fixtures replay that history in a real git repo and run the real audit.
+
+function adoptedConsumer(dir, tier) {
+  const git = makeRepo(dir);
+  commit(git, dir, {
+    'README.md': 'consumer',
+    'brain.config.json': JSON.stringify({ governance: { tier }, vcs: { provider: 'github' } }),
+  }, 'chore: adopt brain (#1)');
+  return git;
+}
+
+function laneEnableMerge(git, dir) {
+  git('checkout', '-b', 'chore/enable-memory-lane');
+  commit(git, dir, { 'brain.config.json': JSON.stringify({ memory: { lane: { enabled: true } } }) },
+    'chore(memory): enable the memory lane (#3)');
+  git('checkout', 'main');
+  git('merge', '--no-ff', 'chore/enable-memory-lane', '-m', 'chore(memory): enable the memory lane (#3)\n\nCloses #2');
+}
+
+test('brain-audit #1188: lite consumer, lane-enable merge with no records — no unrevertible failure (demo replay)', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-1188-lite-'));
+  t.after(() => removeTempTree(dir));
+  const git = adoptedConsumer(dir, 'lite');
+  const base = git('rev-parse', 'HEAD').stdout.trim();
+  laneEnableMerge(git, dir);
+  const r = spawnSync('node', [AUDIT_SCRIPT, `${base}..HEAD`], { cwd: dir, encoding: 'utf8' });
+  assert.ok(!/memoryPresence/.test(r.stdout), `memoryPresence must not fail:\n${r.stdout}`);
+  assert.equal(r.status, 0, `expected exit 0, got ${r.status}\n${r.stdout}\n${r.stderr}`);
+});
+
+test('brain-audit #1188: standard consumer with NO memory history — early merge abstains, never fails', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-1188-early-'));
+  t.after(() => removeTempTree(dir));
+  const git = adoptedConsumer(dir, 'standard');
+  const base = git('rev-parse', 'HEAD').stdout.trim();
+  laneEnableMerge(git, dir);
+  const r = spawnSync('node', [AUDIT_SCRIPT, `${base}..HEAD`], { cwd: dir, encoding: 'utf8' });
+  assert.ok(!/memoryPresence/.test(r.stdout), `memoryPresence must not fail:\n${r.stdout}`);
+  assert.equal(r.status, 0, `expected exit 0, got ${r.status}\n${r.stdout}\n${r.stderr}`);
+});
+
+test('brain-audit #1188: standard consumer WITH history — a merge with no scoped record still fails (the predicate applies in full)', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-1188-history-'));
+  t.after(() => removeTempTree(dir));
+  const git = adoptedConsumer(dir, 'standard');
+  commit(git, dir, {
+    '.memory/records/2026-09-x.jsonl': JSON.stringify({ id: 'other', type: 'session_summary', issue: 99, content: 'x' }) + '\n',
+  }, 'chore(memory): a record for another issue (#5)');
+  const base = git('rev-parse', 'HEAD').stdout.trim();
+  laneEnableMerge(git, dir);
+  const r = spawnSync('node', [AUDIT_SCRIPT, `${base}..HEAD`], { cwd: dir, encoding: 'utf8' });
+  assert.match(r.stdout, /memoryPresence/);
+  assert.equal(r.status, 1);
 });

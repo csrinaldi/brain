@@ -1,0 +1,29 @@
+✓ No prohibited references found.
+✓ Artifact structure is valid.
+[chore/issue-1-enable-the-memory-lane ea219de] chore(memory): enable the memory lane (#1)
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+exit=0
+$ npm run brain:ship
+
+> brain-test-plainfiles@1.0.0 brain:ship
+> node ./brain/scripts/brain-ship.mjs
+
+
+> brain-test-plainfiles@1.0.0 brain:check
+> node ./brain/scripts/brain-check.mjs
+
+
+brain:check results:
+
+  [PASS] diffSize
+  [PASS] adrPresence
+  [FAIL] issueLink — no issue reference found — body must contain a closing keyword (Close(s|d)|Fix(es|ed)|Resolve(s|d)) #N or Part of #N
+  [FAIL] memoryPresence — no session_summary observation found in committed .memory/ — capture a session summary (mem_session_summary) before closing
+  [FAIL] npmTest —  Error: no test specified 
+  [PASS] repoCheck
+
+3 check(s) failed. Fix before brain:ship.
+brain:ship: checks failed — fix them before shipping.
+  Run "npm run brain:check" for details.
+
+exit=1

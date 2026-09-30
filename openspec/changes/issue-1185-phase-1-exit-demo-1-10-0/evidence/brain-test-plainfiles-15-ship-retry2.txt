@@ -1,0 +1,27 @@
+$ git remote set-head origin -a  (remedy printed by brain:check REMEDY text)
+'origin/HEAD' is now created and points to 'main'
+$ npm run brain:ship (3rd)
+
+> brain-test-plainfiles@1.0.0 brain:ship
+> node ./brain/scripts/brain-ship.mjs
+
+
+> brain-test-plainfiles@1.0.0 brain:check
+> node ./brain/scripts/brain-check.mjs
+
+
+brain:check results:
+
+  [PASS] diffSize
+  [PASS] adrPresence
+  [UNVERIFIED] issueLink — issue-link: could not fetch issue #1 — failing closed (uncomputable): gh api repos/undefined/issues/1 failed (status 1): gh: Not Found (HTTP 404)
+
+  [FAIL] memoryPresence — memory-gate: no memory records scoped to issue #1 — capture a session summary (mem_session_summary) referencing this issue before closing
+  [FAIL] npmTest —  Error: no test specified 
+  [PASS] repoCheck
+
+2 check(s) failed. Fix before brain:ship.
+brain:ship: checks failed — fix them before shipping.
+  Run "npm run brain:check" for details.
+
+exit=1

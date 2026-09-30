@@ -1,0 +1,15 @@
+$ gh repo clone brain-test-engram engram-B (before lane merge); ENGRAM_DATA_DIR=B-own
+Cloning into 'brain-test-engram-B'...
+has .env? no
+found 0 vulnerabilities
+$ brain:memory:pull (before merge)
+
+> brain-test-engram@1.0.0 brain:memory:pull
+> node ./brain/scripts/memory/cli.mjs pull
+
+Already up to date.
+ℹ no records found in .memory/records/ — nothing to import.
+exit=0
+$ engram search
+
+No memories found for: "SYNTHETIC-1185"

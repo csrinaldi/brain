@@ -1,0 +1,19 @@
+$ node brain/scripts/memory/cli.mjs search SYNTHETIC-1185 (before merge)
+memory/cli: ℹ no matching records found.
+exit=0
+$ npm run brain:session:start
+
+> brain-test-plainfiles@1.0.0 brain:session:start
+> node ./brain/scripts/session-start.mjs
+
+brain · session context
+========================
+branch:   main
+change:   (no change folder for branch)
+memory:   engram unavailable (skipped) — memory/cli: backend 'plainfiles' does not implement op 'import'
+memory:   no durable record found — cannot determine when memory was last captured
+------------------------------------------
+ticket:
+(no active ticket memory)
+========================
+exit=0

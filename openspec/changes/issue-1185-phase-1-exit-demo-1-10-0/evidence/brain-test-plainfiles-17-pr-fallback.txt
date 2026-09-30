@@ -1,0 +1,5 @@
+$ FALLBACK (finding): brain:ship blocked by 3 fresh-consumer gates; using git push + gh pr create
+To https://github.com/csrinaldi/brain-test-plainfiles.git
+ * [new branch]      chore/issue-1-enable-the-memory-lane -> chore/issue-1-enable-the-memory-lane
+branch 'chore/issue-1-enable-the-memory-lane' set up to track 'origin/chore/issue-1-enable-the-memory-lane'.
+https://github.com/csrinaldi/brain-test-plainfiles/pull/3

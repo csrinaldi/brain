@@ -1,0 +1,30 @@
+$ npm run brain:ticket:start -- 1
+
+> brain-test-engram@1.0.0 brain:ticket:start
+> node ./brain/scripts/ticket-start.mjs 1
+
+
+  Searching for issue #1...
+
+  → Base: main — no epic tracker applies (reason: no-parent).
+
+  #1  Enable the memory lane
+  Labels: status:approved, type:chore
+
+  Demo 1185: turn memory.lane.enabled on.
+
+  [1mBranch: chore/issue-1-enable-the-memory-lane[0m
+
+  Fetching origin/main (the branch this task starts from)...
+  ✓ Worktree created at /home/gandalf/IA/brain-test-engram-issue-1
+  ✓ .env copied to worktree.
+  Isolated worktree (the default — harness-contract.md requires it for parallel work).
+
+  Next steps:
+    0. cd /home/gandalf/IA/brain-test-engram-issue-1   (open your work session here)
+    1. Implement — use /sdd-new 1 if the change is complex
+    2. npm run brain:repo:check before each commit
+    3. Capture durable memory with npm run brain:memory:save --issue {id}; the enabled memory lane ships it before pushing
+    4. git push -u origin chore/issue-1-enable-the-memory-lane
+
+exit=0

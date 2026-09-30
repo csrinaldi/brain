@@ -344,7 +344,7 @@ const ALLOWLIST = [
   // ── report/read-only CLIs and their nav-integrity callers ───────────────
   { file: 'brain/scripts/archive.test.mjs', entrypoint: 'brain/scripts/archive.mjs', reason: 'no-vcs-capability' },
   { file: 'brain/scripts/brain-audit.test.mjs', entrypoint: 'brain/scripts/brain-audit.mjs', reason: 'no-vcs-capability' },
-  { file: 'brain/scripts/brain-audit.test.mjs', entrypoint: '<unresolved>', line: 1859, reason: 'fixture-root-local-git' }, // "There is no remote here, so the CAS push cannot succeed" — own comment
+  { file: 'brain/scripts/brain-audit.test.mjs', entrypoint: '<unresolved>', line: 1866, reason: 'fixture-root-local-git' }, // "There is no remote here, so the CAS push cannot succeed" — own comment
   { file: 'brain/scripts/brain-metrics-audit-parity.test.mjs', entrypoint: 'brain/scripts/brain-audit.mjs', reason: 'no-vcs-capability' },
   { file: 'brain/scripts/brain-metrics-audit-parity.test.mjs', entrypoint: 'brain/scripts/brain-metrics.mjs', reason: 'no-vcs-capability' },
   { file: 'brain/scripts/brain-metrics.test.mjs', entrypoint: 'brain/scripts/brain-metrics.mjs', reason: 'no-vcs-capability' },

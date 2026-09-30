@@ -1,0 +1,28 @@
+## main...origin/main
+ M .memory/index.jsonl
+?? .memory/records/
+$ npm run brain:memory:pull (capturing checkout after its own lane merge, #1118)
+
+> brain-test-plainfiles@1.0.0 brain:memory:pull
+> node ./brain/scripts/memory/cli.mjs pull
+
+From https://github.com/csrinaldi/brain-test-plainfiles
+   2cce3e4..f600293  main       -> origin/main
+Updating 2cce3e4..f600293
+Fast-forward
+ .memory/records/2026-09-rec-a54e3896e583bab7.jsonl | 1 +
+ .memory/records/2026-09-rec-e8a34c6aa73ad17f.jsonl | 1 +
+ 2 files changed, 2 insertions(+)
+ create mode 100644 .memory/records/2026-09-rec-a54e3896e583bab7.jsonl
+ create mode 100644 .memory/records/2026-09-rec-e8a34c6aa73ad17f.jsonl
+memory/cli: backend 'plainfiles' does not implement op 'import'
+brain:memory:pull: verified .memory/records/2026-09-rec-a54e3896e583bab7.jsonl — present, tracked in HEAD as blob a4af7d6ca88deca11613f7b3987e9e9e43aefadd
+brain:memory:pull: verified .memory/records/2026-09-rec-e8a34c6aa73ad17f.jsonl — present, tracked in HEAD as blob 1e8f0dc9d698ae2d3dd10195162070b8fb7157fe
+exit=0
+## main...origin/main
+ M .memory/index.jsonl
+2026-09-rec-a54e3896e583bab7.jsonl
+2026-09-rec-e8a34c6aa73ad17f.jsonl
+f600293 memory: gandalf-rog-zephyrus-g15-ga503qr-ga503qr 2026-09-30 (2 records) (#5)
+2cce3e4 chore(memory): enable the memory lane (#3)
+2258794 chore: adopt brain 1.10.0

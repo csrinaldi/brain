@@ -1,0 +1,21 @@
+$ npm run brain:config -- set memory.lane.enabled true
+
+> brain-test-plainfiles@1.0.0 brain:config
+> node ./brain/scripts/config/cli.mjs set memory.lane.enabled true
+
+brain:config: ✓ set memory.lane.enabled (no pending migrations)
+exit=0
+ M brain.config.json
+diff --git a/brain.config.json b/brain.config.json
+index 55fb226..634ca72 100644
+--- a/brain.config.json
++++ b/brain.config.json
+@@ -43,7 +43,7 @@
+   },
+   "memory": {
+     "lane": {
+-      "enabled": false
++      "enabled": true
+     },
+     "backend": "plainfiles"
+   },
