@@ -1,6 +1,6 @@
 # ADR-0024 — Three-axis decoupling: AGENT_PLATFORM · SDD_ENGINE · MEMORY_BACKEND
 
-**Status**: Accepted · **amended 30/09/2026** (Amendments 1-3 — see below)
+**Status**: Accepted · **amended 30/09/2026** (Amendments 1-4 — see below)
 **Date**: 2026-07-24 — Cristian Rinaldi (implements #305; documents the split shipped via PR #307)
 **Extends**: [ADR-0005](adr-0005-adapter-harness-sdd-harness.md) (the `SDD_HARNESS` selector) and
 [ADR-0019](adr-0019-harness-port.md) (the harness port). Does NOT supersede ADR-0019's
@@ -219,4 +219,27 @@ resolves in ONE place, `brain/scripts/memory/lib/backend-resolve.mjs`, built on 
 
 Precedence: process env `MEMORY_BACKEND`, then `.env`, then `brain.config.json` `memory.backend`
 (the team's choice, tracked, so a fresh clone sees it), then undeclared — a refusal that names the
-fix, never a default. The `MEMORY_BACKEND` selector decision of ADR-0004 is otherwise unchanged.
+fix, never a default. The `MEMORY_BACKEND` selector decision of ADR-0004 is otherwise unchanged. **[Amended by Amendment 4 (#1180) — that sentence was wrong. Moving the selector to tracked config with no default IS a change to ADR-0004's selector decision, recorded in ADR-0004 Amendment 3 (#1165). The sentence is what Amendment 3 said, kept as the record.]**
+
+## Amendment 4 — erratum: ADR-0004's selector decision did change (issue #1180)
+
+**Signed**: 30/09/2026 — Cristian Rinaldi
+
+### What this changes
+
+Amendment 3 (above) said: "The `MEMORY_BACKEND` selector decision of ADR-0004 is otherwise
+unchanged." It was not. ADR-0004 decided `MEMORY_BACKEND` in `.env` with a default of `engram`;
+the same change (#1165) moved the team's declaration to `memory.backend` in the tracked
+`brain.config.json`, removed the default, and made backend-consulting ops refuse when it is
+undeclared. ADR-0004 Amendment 3 records that decision and annotates the superseded lines of ADR-0004
+in place.
+
+Amendment 3's own promotion did not touch ADR-0004, so nothing caught the sentence: a reader who
+opened ADR-0004 alone still read a rule the code no longer follows. This amendment annotates that
+sentence in place, under ruling R6 on #961 as amended (option A), the same shape as the errata of
+#973. Everything else Amendment 3 says (the resolver's location and the precedence) is accurate.
+
+### What this does NOT change
+
+The resolver, its precedence, and the deletion of `resolveMemory`. Only the claim about ADR-0004 is
+corrected.
