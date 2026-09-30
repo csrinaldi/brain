@@ -361,6 +361,7 @@ const ALLOWLIST = [
 
   // ── postmerge cursor: real git push, local bare origin only ────────────
   { file: 'brain/scripts/governance/postmerge/cursor.test.mjs', entrypoint: 'brain/scripts/governance/postmerge/cursor.mjs', reason: 'fixture-root-local-git' },
+  { file: 'brain/scripts/governance/postmerge/cursor.test.mjs', entrypoint: 'brain/scripts/brain-audit.mjs', reason: 'no-vcs-capability' },
 
   // ── git hooks: run directly, never through a real `git push`/network ───
   { file: 'brain/scripts/hooks/commit-msg.test.mjs', entrypoint: 'brain/scripts/hooks/commit-msg', reason: 'no-vcs-capability' },
@@ -406,7 +407,7 @@ const ALLOWLIST = [
   { file: 'brain/scripts/memory/lib/hydration-guard.processes.integration.test.mjs', entrypoint: '<unresolved>', line: 40, reason: 'no-vcs-capability' },
 
   // ── postmerge release workflow: real git, extracted YAML steps, local fixture repo ──
-  { file: 'brain/scripts/vcs/release-postmerge-workflows.test.mjs', entrypoint: '<unresolved>', line: 132, reason: 'fixture-root-local-git' },
+  { file: 'brain/scripts/vcs/release-postmerge-workflows.test.mjs', entrypoint: '<unresolved>', line: 135, reason: 'fixture-root-local-git' },
 
   // ── regulated-review e2e: vendored review binary against a fixture PR ──
   { file: 'test/review-regulated/regulated-review.e2e.test.mjs', entrypoint: '<unresolved>', line: 47, reason: 'fixture-root-local-git' },

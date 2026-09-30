@@ -1853,3 +1853,53 @@ test('#348 (round 3): an unreadable probe carries its diagnostic onto the approv
   assert.match(r.approvalDetail, /no such host/, 'and both carry what it could not read');
   assert.equal(r.approvalRemedy, undefined, 'no remedy — we do not know there is anything to remedy');
 });
+
+// ── workflowRunSucceeded (issue #1162) ───────────────────────────────────────────
+// The evidence that tells a never-created audit cursor (bootstrap) from a deleted
+// one (a prior successful run advanced it). Never throws; GitLab is `unsupported`,
+// which callers treat as unknown — never as "none".
+
+function recordingSpawn(data, status = 0) {
+  const calls = [];
+  const fn = (cmd, args) => { calls.push([cmd, ...args]); return { status, stdout: JSON.stringify(data), stderr: status ? 'boom' : '' }; };
+  fn.calls = calls;
+  return fn;
+}
+
+test('github.workflowRunSucceeded: a successful run on the branch → succeeded, filtered by workflow, branch and status', async () => {
+  const spawn = recordingSpawn([{ databaseId: 7 }]);
+  setSpawn(spawn);
+  const r = await github.workflowRunSucceeded({ project: 'o/r', workflow: 'governance-postmerge.yml', branch: 'main' });
+  assert.equal(r.state, 'succeeded');
+  const argv = spawn.calls[0].join(' ');
+  assert.match(argv, /run list/);
+  assert.match(argv, /--workflow governance-postmerge\.yml/);
+  assert.match(argv, /--branch main/, 'a success on another branch must not count');
+  assert.match(argv, /--status success/);
+});
+
+test('github.workflowRunSucceeded: no successful run → none', async () => {
+  setSpawn(recordingSpawn([]));
+  assert.equal((await github.workflowRunSucceeded({ workflow: 'w.yml', branch: 'main' })).state, 'none');
+});
+
+test('github.workflowRunSucceeded: a failing read → unknown, never none, never throws', async () => {
+  setSpawn(recordingSpawn([], 1));
+  const r = await github.workflowRunSucceeded({ workflow: 'w.yml', branch: 'main' });
+  assert.equal(r.state, 'unknown');
+});
+
+test('github.workflowRunSucceeded: a malformed response → unknown', async () => {
+  setSpawn(recordingSpawn({ nope: true }));
+  assert.equal((await github.workflowRunSucceeded({ workflow: 'w.yml', branch: 'main' })).state, 'unknown');
+});
+
+test('github.workflowRunSucceeded: no branch → unknown (an unfiltered answer would count other branches)', async () => {
+  setSpawn(recordingSpawn([{ databaseId: 1 }]));
+  assert.equal((await github.workflowRunSucceeded({ workflow: 'w.yml' })).state, 'unknown');
+});
+
+test('gitlab.workflowRunSucceeded: explicitly unsupported (never "none")', async () => {
+  const r = await gitlab.workflowRunSucceeded({ workflow: 'w.yml', branch: 'main' });
+  assert.equal(r.state, 'unsupported');
+});
