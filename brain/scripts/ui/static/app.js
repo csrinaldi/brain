@@ -1905,7 +1905,11 @@ function showDocumentOutcome(section, doc, outcome) {
 }
 
 function findChildByClass(parent, name) {
-  return parent.childNodes.find((child) => child.classList && child.classList.contains(name)) ?? null;
+  // childNodes is a NodeList: iterable, but it has no find (#1218).
+  for (const child of parent.childNodes) {
+    if (child.classList && child.classList.contains(name)) return child;
+  }
+  return null;
 }
 
 /**

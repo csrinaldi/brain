@@ -25,6 +25,34 @@
 
 import { reply } from '../lib/markdown-worker.mjs';
 
+/**
+ * A browser's `Node.childNodes` is a live NodeList: length, index access, item,
+ * forEach, entries, keys, values and iteration — and NOTHING else. No find, no
+ * filter, no map. A shim that returned an Array let `childNodes.find` pass every
+ * test and throw in the browser (#1218), so the view is deliberately poorer than
+ * an Array. A test that wants Array methods says so: `Array.from(node.childNodes)`.
+ */
+class NodeListView {
+  _owner;
+  constructor(owner) {
+    this._owner = owner;
+    return new Proxy(this, {
+      get: (target, key) => {
+        if (typeof key === 'string' && /^(0|[1-9]\d*)$/.test(key)) return owner._kids[Number(key)];
+        return Reflect.get(target, key, target);
+      },
+      has: (target, key) => (typeof key === 'string' && /^(0|[1-9]\d*)$/.test(key) ? Number(key) < owner._kids.length : Reflect.has(target, key)),
+    });
+  }
+  get length() { return this._owner._kids.length; }
+  item(index) { return this._owner._kids[index] ?? null; }
+  forEach(fn, thisArg) { this._owner._kids.slice().forEach((node, index) => fn.call(thisArg, node, index, this)); }
+  entries() { return this._owner._kids.slice().entries(); }
+  keys() { return this._owner._kids.slice().keys(); }
+  values() { return this._owner._kids.slice().values(); }
+  [Symbol.iterator]() { return this.values(); }
+}
+
 /** Every listener a node was given, so a test can activate one the way a user would. */
 const LISTENERS = Symbol('listeners');
 
@@ -38,11 +66,12 @@ function rawTextNode(text) {
   return {
     tagName: '#text',
     className: '',
-    childNodes: [],
+    _kids: [],
     parentNode: null,
     attributes: Object.create(null),
     [LISTENERS]: Object.create(null),
     _ownText: text,
+    get childNodes() { return (this._view ??= new NodeListView(this)); },
     get textContent() { return this._ownText; },
     set textContent(value) { this._ownText = value === null || value === undefined ? '' : String(value); },
     get firstChild() { return null; },
@@ -80,12 +109,13 @@ export function createElement(tag) {
     className: '',
     hidden: false,
     attributes: Object.create(null),
-    childNodes: [],
+    _kids: [],
     parentNode: null,
     [LISTENERS]: Object.create(null),
     _ownText: '',
 
-    get firstChild() { return this.childNodes[0] ?? null; },
+    get childNodes() { return (this._view ??= new NodeListView(this)); },
+    get firstChild() { return this._kids[0] ?? null; },
     get children() { return this.childNodes; },
 
     // `textContent` is the one property with real semantics here, and getting
@@ -102,29 +132,29 @@ export function createElement(tag) {
     // a test — the harness agreed with itself and disagreed with the browser.
     set textContent(value) {
       const text = value === null || value === undefined ? '' : String(value);
-      this.childNodes = [];
+      this._kids = [];
       this._ownText = '';
       if (text !== '') this.appendChild(rawTextNode(text));
     },
     get textContent() {
-      if (this.childNodes.length === 0) return this._ownText;
-      return this.childNodes.map((child) => child.textContent).join('');
+      if (this._kids.length === 0) return this._ownText;
+      return this._kids.map((child) => child.textContent).join('');
     },
 
     appendChild(child) {
       // A fragment appends its children and keeps nothing, which is the only
       // behaviour of `DocumentFragment` the page depends on.
       if (child.tagName === '#FRAGMENT') {
-        for (const grand of child.childNodes) { grand.parentNode = node; node.childNodes.push(grand); }
-        child.childNodes = [];
+        for (const grand of child._kids) { grand.parentNode = node; node._kids.push(grand); }
+        child._kids = [];
         return child;
       }
       child.parentNode = node;
-      node.childNodes.push(child);
+      node._kids.push(child);
       return child;
     },
     removeChild(child) {
-      node.childNodes = node.childNodes.filter((c) => c !== child);
+      node._kids = node._kids.filter((c) => c !== child);
       child.parentNode = null;
       return child;
     },

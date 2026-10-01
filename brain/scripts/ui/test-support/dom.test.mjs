@@ -189,3 +189,48 @@ test('#1218: the failing modes throw on construction, error, or send junk', asyn
     assert.equal(typeof (await got).tree, 'string');
   } finally { dom.restore(); }
 });
+
+test('#1218: childNodes is a NodeList, not an Array — no find, filter, map, some, every, reduce, includes, indexOf', () => {
+  // A browser's NodeList has forEach, item, entries, keys, values, length, index
+  // access and iteration, and nothing else. A shim that handed the page an Array
+  // let `childNodes.find` pass every test and throw in the browser.
+  const host = createElement('div');
+  host.appendChild(createElement('span'));
+  host.appendChild(createElement('em'));
+  const list = host.childNodes;
+
+  assert.equal(Array.isArray(list), false);
+  for (const name of ['find', 'filter', 'map', 'some', 'every', 'reduce', 'includes', 'indexOf', 'push', 'slice']) {
+    assert.equal(list[name], undefined, `a NodeList has no ${name}`);
+  }
+  assert.equal(list.length, 2);
+  assert.equal(list[0].tagName, 'SPAN');
+  assert.equal(list[2], undefined);
+  assert.equal(list.item(1).tagName, 'EM');
+  assert.equal(list.item(5), null);
+  const seen = [];
+  list.forEach((node, index) => seen.push(`${index}:${node.tagName}`));
+  assert.deepEqual(seen, ['0:SPAN', '1:EM']);
+  assert.deepEqual([...list].map((n) => n.tagName), ['SPAN', 'EM']);
+  assert.deepEqual(Array.from(list.entries()).map(([i, n]) => `${i}:${n.tagName}`), ['0:SPAN', '1:EM']);
+  assert.deepEqual(Array.from(list.keys()), [0, 1]);
+  assert.deepEqual(Array.from(list.values()).map((n) => n.tagName), ['SPAN', 'EM']);
+});
+
+test('#1218: childNodes is live, as a browser NodeList is', () => {
+  const host = createElement('div');
+  const list = host.childNodes;
+  host.appendChild(createElement('span'));
+  assert.equal(list.length, 1, 'the same list sees the append');
+  host.textContent = '';
+  assert.equal(list.length, 0);
+});
+
+test('#1218: the page never calls an Array method on childNodes — a NodeList has none', async () => {
+  const { readFileSync } = await import('node:fs');
+  const source = readFileSync(new URL('../static/app.js', import.meta.url), 'utf8');
+  const hits = source.split('\n')
+    .map((line, i) => ({ line: i + 1, text: line }))
+    .filter(({ text }) => /childNodes\.(find|filter|map|some|every|reduce|includes|indexOf)\b/.test(text));
+  assert.deepEqual(hits, [], 'childNodes is a NodeList in a browser: iterate it with for...of, forEach or index access');
+});

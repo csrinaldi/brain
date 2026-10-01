@@ -59,7 +59,7 @@ async function openSdd(dom) {
   fire(card, 'click');
   await settle();
   const tabs = find(dom.mounts.drawer, byClass('tabs'));
-  fire(tabs.childNodes.find((b) => b.textContent.includes('SDD')), 'click');
+  fire(Array.from(tabs.childNodes).find((b) => b.textContent.includes('SDD')), 'click');
   await settle();
 }
 
@@ -122,9 +122,9 @@ test('#1198 R1198-16: the expanded state survives a drawer re-render (a tab swit
   await openSdd(dom);
   fire(toggleOf(dom, 'proposal').button, 'click');
   await settle();
-  const tabs = find(dom.mounts.drawer, byClass('tabs')).childNodes;
+  const tabs = Array.from(find(dom.mounts.drawer, byClass('tabs')).childNodes);
   fire(tabs.find((b) => b.textContent.includes('Tasks')), 'click');
-  fire(find(dom.mounts.drawer, byClass('tabs')).childNodes.find((b) => b.textContent.includes('SDD')), 'click');
+  fire(Array.from(find(dom.mounts.drawer, byClass('tabs')).childNodes).find((b) => b.textContent.includes('SDD')), 'click');
   await settle();
   const again = toggleOf(dom, 'proposal');
   assert.equal(again.button.getAttribute('aria-expanded'), 'true');
@@ -193,7 +193,7 @@ test('#1198 R1198-7 to 10/12: the hostile fixture builds no active element, no h
 });
 
 test('#1198 R1198-14: two renders of the same input build the same structure', async (t) => {
-  const shape = (n) => ({ tag: n.tagName, cls: n.className, text: n.childNodes.length === 0 ? n.textContent : undefined, attrs: n.attributes && { ...n.attributes }, kids: n.childNodes.map(shape) });
+  const shape = (n) => ({ tag: n.tagName, cls: n.className, text: n.childNodes.length === 0 ? n.textContent : undefined, attrs: n.attributes && { ...n.attributes }, kids: Array.from(n.childNodes).map(shape) });
   const a = await boot({ proposal: RICH });
   await openSdd(a);
   fire(toggleOf(a, 'proposal').button, 'click');
@@ -462,9 +462,9 @@ test('#1218 R1218-7: a re-render reuses the in-flight request; selecting a node 
   t.after(() => dom.restore());
   await openSdd(dom);
   fire(toggleOf(dom, 'proposal').button, 'click');
-  const tabs = find(dom.mounts.drawer, byClass('tabs')).childNodes;
+  const tabs = Array.from(find(dom.mounts.drawer, byClass('tabs')).childNodes);
   fire(tabs.find((b) => b.textContent.includes('Tasks')), 'click');
-  fire(find(dom.mounts.drawer, byClass('tabs')).childNodes.find((b) => b.textContent.includes('SDD')), 'click');
+  fire(Array.from(find(dom.mounts.drawer, byClass('tabs')).childNodes).find((b) => b.textContent.includes('SDD')), 'click');
   assert.equal(dom.workers.length, 1, 'no second worker for the same document');
   assert.equal(find(toggleOf(dom, 'proposal').row, byClass('doc-loading')).textContent, LOADING);
   dom.workers[0].release();
