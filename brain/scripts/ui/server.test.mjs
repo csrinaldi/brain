@@ -12,6 +12,9 @@ import { testTmp } from '../lib/test-tmp.mjs';
 import { createForgeCache } from './forge-cache.mjs';
 import { createUiServer, parseArgs, main, KNOWN_ROUTES, resolveForgeSource } from './server.mjs';
 import { buildChangeView } from './change-route.mjs';
+import { fakeGit } from './test-support/fake-git.mjs';
+import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 
 const NOW = '2026-09-14T00:00:00Z';
 const now = () => new Date(NOW);
@@ -858,7 +861,7 @@ test('#881: R881-5 S3 / A5 (re-run) — with the poller wired in, a full poll cy
 // ── R881-10 S3: no MCP resource route, no heartbeat/agent-pulse endpoint ────
 
 test('#881: R881-10 S3 — the route table has no MCP resource route and no heartbeat/agent-pulse endpoint', () => {
-  assert.deepEqual(KNOWN_ROUTES, ['/', '/app.js', '/app.css', '/lib/{module}.mjs', '/api/snapshot', '/api/stream', '/api/poll/pause', '/api/poll/resume', '/api/poll/once', '/api/change/{issue}']);
+  assert.deepEqual(KNOWN_ROUTES, ['/', '/app.js', '/app.css', '/lib/{module}.mjs', '/vendor/marked.esm.js', '/api/snapshot', '/api/stream', '/api/poll/pause', '/api/poll/resume', '/api/poll/once', '/api/change/{issue}']);
   assert.ok(!KNOWN_ROUTES.some((r) => /mcp|heartbeat|pulse/i.test(r)));
 });
 
@@ -869,13 +872,14 @@ test('#881: GET /api/change/<N> deep-equals buildChangeView() on the same held s
   mkdirSync(join(root, 'openspec/changes/issue-1-a'), { recursive: true });
   writeFileSync(join(root, 'openspec/changes/issue-1-a/spec.md'), '### R1-1: a\n#### Scenario: s\n- **WHEN** w\n- **THEN** t\n');
   writeFileSync(join(root, 'openspec/changes/issue-1-a/tasks.md'), '- [x] done\n- [ ] next one\n');
-  const gitCalls = [];
-  const _run = (file, args) => {
-    gitCalls.push(args);
-    if (args[0] === 'blame') return 'abc1234abc1234abc1234abc1234abc1234abc1 1 1 1\nauthor csrinaldi\nauthor-time 1694700000\n\tdone\n';
-    if (args[0] === 'branch') return '';
-    throw new Error(`unexpected git call: ${args.join(' ')}`);
-  };
+  const _run = fakeGit({
+    files: {
+      'openspec/changes/issue-1-a/spec.md': '### R1-1: a\n#### Scenario: s\n- **WHEN** w\n- **THEN** t\n',
+      'openspec/changes/issue-1-a/tasks.md': '- [x] done\n- [ ] next one\n',
+    },
+    blame: 'abc1234abc1234abc1234abc1234abc1234abc1 1 1 1\nauthor csrinaldi\nauthor-time 1694700000\n\tdone\n',
+  });
+  const gitCalls = _run.calls;
   const server = createUiServer({ root, project: 'o/r', _now: now, poll: false, _run });
   await server.listen(0);
   try {
@@ -901,6 +905,66 @@ test('#881: GET /api/change/<N> deep-equals buildChangeView() on the same held s
     const blameCall = gitCalls.find((args) => args[0] === 'blame');
     assert.ok(blameCall.includes('HEAD'), 'the blame argv must carry HEAD — the committed version, never the working tree');
     assert.ok(!gitCalls.some((args) => args.includes('-C')), 'no git call in this route ever opens a worktree with -C (R881-3)');
+  } finally {
+    await server.close();
+  }
+});
+
+// ── #1198: the vendored tokenizer is served from a literal allow-list entry ──
+
+const VENDOR_FILE = join(dirname(fileURLToPath(import.meta.url)), 'vendor', 'marked.esm.js');
+
+test('#1198 R1198-11: GET /vendor/marked.esm.js serves the pinned file as JavaScript', async () => {
+  const server = createUiServer({ root: makeFixture(), _now: now });
+  await server.listen(0);
+  try {
+    const res = await fetch(`http://127.0.0.1:${server.port}/vendor/marked.esm.js`);
+    assert.equal(res.status, 200);
+    assert.equal(res.headers.get('content-type'), 'application/javascript');
+    const served = createHash('sha256').update(Buffer.from(await res.arrayBuffer())).digest('hex');
+    const pinned = /sha256:([0-9a-f]{64}) marked\.esm\.js/.exec(readFileSync(join(dirname(VENDOR_FILE), 'VERSIONS'), 'utf8'))[1];
+    assert.equal(served, pinned);
+  } finally {
+    await server.close();
+  }
+});
+
+test('#1198 R1198-11: nothing else under /vendor/ is served, and traversal out of it is refused', async () => {
+  const server = createUiServer({ root: makeFixture(), _now: now });
+  await server.listen(0);
+  try {
+    const base = `http://127.0.0.1:${server.port}`;
+    for (const path of ['/vendor/x.js', '/vendor/VERSIONS', '/vendor/LICENSE.marked', '/vendor/vendor.test.mjs', '/vendor/../server.mjs', '/vendor/%2e%2e/server.mjs', '/vendor/', '/vendor/sub/marked.esm.js']) {
+      const res = await fetch(`${base}${path}`);
+      assert.equal(res.status, 404, `${path} must not be served`);
+      assert.doesNotMatch(await res.text(), /createUiServer/, `${path} must serve no file outside ui/vendor/`);
+    }
+  } finally {
+    await server.close();
+  }
+});
+
+// ── #1198 R1198-3/4: the default `run` forwards maxBuffer, proven against a real repository ──
+
+test('#1198 R1198-3/4: through the real git seam a 2 MB committed design is truncated, not unreadable (the third `run` argument reaches execFileSync)', async () => {
+  const root = testTmp('server-docs-');
+  const dir = 'openspec/changes/issue-7-big';
+  mkdirSync(join(root, dir), { recursive: true });
+  writeFileSync(join(root, dir, 'design.md'), `# big\n${'x'.repeat(2 * 1024 * 1024)}\n`);
+  writeFileSync(join(root, dir, 'proposal.md'), '# small\n');
+  const git = (...args) => execFileSync('git', args, { cwd: root, stdio: 'ignore' });
+  git('init', '-q');
+  git('-c', 'user.name=t', '-c', 'user.email=t@example.com', 'add', '-A');
+  git('-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '-q', '-m', 'seed');
+  const server = createUiServer({ root, project: 'o/r', _now: now, poll: false });
+  await server.listen(0);
+  try {
+    const body = await (await fetch(`http://127.0.0.1:${server.port}/api/change/7`)).json();
+    assert.equal(body.value.documents.design.state, 'truncated');
+    assert.equal(body.value.documents.design.truncatedAt, 262144);
+    assert.equal(body.value.documents.proposal.state, 'present');
+    assert.equal(body.value.documents.proposal.text, '# small\n');
+    assert.equal(body.value.documents.verify.state, 'missing');
   } finally {
     await server.close();
   }

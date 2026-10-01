@@ -26,6 +26,7 @@ import { MODES } from '../lib/view-model.mjs';
 import { GOVERNANCE_VIEWS } from '../lib/governance-model.mjs';
 import { installDom, fire, find, findAll, byClass } from '../test-support/dom.mjs';
 import { loadApp, settle } from '../test-support/load-app.mjs';
+import { fakeGit } from '../test-support/fake-git.mjs';
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..');
 // The ids `index.html` carries. A mount the page reads and this list omits
@@ -146,13 +147,22 @@ async function boot({ issues = ISSUES } = {}) {
   // answers with `buildChangeView`. The harness answers it with the SAME
   // builder over the same fixture repo, so the panel's tabs are the shapes
   // the production reader really emits — not a hand-written stand-in.
+  //
+  // Artifacts are read from the object store (#1198), so the harness commits
+  // the fixture's files into an in-memory git rather than leaving them for a
+  // working-tree read the route no longer makes.
+  const changeDir = 'openspec/changes/issue-1059-design-structure';
+  const committed = {};
+  for (const name of ['proposal.md', 'spec.md', 'design.md', 'tasks.md']) {
+    committed[`${changeDir}/${name}`] = readFileSync(join(root, changeDir, name), 'utf8');
+  }
   const changes = {};
   for (const issue of [1059]) {
     changes[issue] = buildChangeView({
       root,
       issue,
       snapshot,
-      _run: () => { throw new Error('git is not available in this harness'); },
+      _run: fakeGit({ files: committed, head: 'abc1234'.padEnd(40, '0') }),
     });
   }
 

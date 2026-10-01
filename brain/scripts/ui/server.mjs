@@ -35,6 +35,7 @@ import { buildChangeView } from './change-route.mjs';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const STATIC_DIR = join(__dirname, 'static');
 const LIB_DIR = join(__dirname, 'lib');
+const VENDOR_DIR = join(__dirname, 'vendor');
 const JS_TYPE = 'application/javascript';
 const ALLOWED_METHODS = new Set(['GET', 'HEAD']);
 
@@ -48,6 +49,9 @@ const ALLOWED_METHODS = new Set(['GET', 'HEAD']);
 const STATIC_FILES = new Map([
   ['/app.js', { dir: STATIC_DIR, name: 'app.js', type: JS_TYPE }],
   ['/app.css', { dir: STATIC_DIR, name: 'app.css', type: 'text/css' }],
+  // #1198: the one vendored file. A literal entry, not a `/vendor/*` pattern, so
+  // the allow-list posture holds: no request path is ever joined onto a path.
+  ['/vendor/marked.esm.js', { dir: VENDOR_DIR, name: 'marked.esm.js', type: JS_TYPE }],
 ]);
 const LIB_MODULE_RE = /^\/lib\/([a-z][a-z0-9-]*)\.mjs$/;
 const POST_ONLY_PATHS = new Set(['/api/poll/pause', '/api/poll/resume', '/api/poll/once']);
@@ -55,7 +59,7 @@ const POST_ONLY_PATHS = new Set(['/api/poll/pause', '/api/poll/resume', '/api/po
 const CHANGE_ROUTE_RE = /^\/api\/change\/(\d+)$/;
 
 /** Every route this server knows — the R881-10 S3 guard test pins this set: no MCP resource route, no heartbeat/agent-pulse endpoint. */
-export const KNOWN_ROUTES = Object.freeze(['/', '/app.js', '/app.css', '/lib/{module}.mjs', '/api/snapshot', '/api/stream', '/api/poll/pause', '/api/poll/resume', '/api/poll/once', '/api/change/{issue}']);
+export const KNOWN_ROUTES = Object.freeze(['/', '/app.js', '/app.css', '/lib/{module}.mjs', '/vendor/marked.esm.js', '/api/snapshot', '/api/stream', '/api/poll/pause', '/api/poll/resume', '/api/poll/once', '/api/change/{issue}']);
 
 const NO_FORGE_REASON = 'no forge port was supplied to the poller';
 const noForgeVcs = {
@@ -84,7 +88,8 @@ export function createUiServer({
   gitCommonDir = null, _watch, _run, _readdir,
   _setTimeout = setTimeout, _clearTimeout = clearTimeout,
   _recomputeCurrent = null, onServerError = null} = {}) {
-  const run = _run ?? ((file, args) => execFileSync(file, args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }));
+  // `opts.maxBuffer` is the only option a caller may pass (#1198): a document read sizes its own buffer.
+  const run = _run ?? ((file, args, opts) => execFileSync(file, args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], ...(opts?.maxBuffer ? { maxBuffer: opts.maxBuffer } : {}) }));
 
   // D1's invariant: `buildSnapshot` NEVER sees a live forge port, only the
   // cache. The server always owns a cache instance so the poller always has

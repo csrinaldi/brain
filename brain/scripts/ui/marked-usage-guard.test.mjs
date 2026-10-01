@@ -40,7 +40,9 @@ export function markedViolations(rel, text) {
   const bad = [];
   const code = codeOnly(text);
   const isDoor = rel === DOOR;
-  const importsVendor = /marked\.esm\.js/.test(code);
+  // An IMPORT of the vendored file: `from '…marked.esm.js'` or `import('…marked.esm.js')`.
+  // A path string elsewhere (server.mjs's allow-list entry) is not an import.
+  const importsVendor = /\bfrom\s*['"][^'"]*marked\.esm\.js['"]|\bimport\s*\(?\s*['"][^'"]*marked\.esm\.js['"]/.test(code);
 
   if (importsVendor && !isDoor) bad.push(`${rel}: imports the vendored marked file, only ${DOOR} may`);
   if (isDoor) {
