@@ -323,3 +323,158 @@ test('#1198 XSS fixture: no node carries an href but an http(s) one, and the scr
   assert.ok(!JSON.stringify(tree).includes('"t":"image"'));
   assert.ok(!hrefs.some((h) => /evil\.example/.test(h)), 'credentials and protocol-relative links are never live');
 });
+
+// ── #1218 pre-scan: pathological inline spans degrade to announced plain text ──
+
+import { prescan } from './markdown.mjs';
+
+const NOTICE = (n) => `a passage with ${n} formatting marks is shown as plain text`;
+const degradedBlocks = (tree) => tree.blocks.filter((b) => b.t === 'degraded');
+const timed = (fn) => {
+  const t0 = performance.now();
+  const value = fn();
+  return { value, ms: performance.now() - t0 };
+};
+
+test('#1218 R1218-1: a 200 KB emphasis run degrades to one passage carrying the N-marks notice, in under 200 ms', () => {
+  const input = '*'.repeat(1e5) + 'a' + '*'.repeat(1e5);
+  const { value, ms } = timed(() => markdownTree(input));
+  const degraded = degradedBlocks(value);
+  assert.equal(degraded.length, 1);
+  assert.equal(degraded[0].notice, NOTICE(2e5));
+  assert.ok(ms < 200, `took ${ms} ms`);
+});
+
+test('#1218 R1218-1: every known pathological class degrades in under 200 ms', () => {
+  const inputs = {
+    underscores: '_'.repeat(2e5),
+    'bold openers': '**a '.repeat(5000),
+    'em openers': '_a '.repeat(5000),
+    'mixed delimiters': '*a_b~'.repeat(4e4),
+    'link openers': '[a]('.repeat(5e4),
+  };
+  for (const [name, input] of Object.entries(inputs)) {
+    const { value, ms } = timed(() => markdownTree(input));
+    assert.equal(degradedBlocks(value).length, 1, `${name} not degraded`);
+    assert.ok(ms < 200, `${name} took ${ms} ms`);
+  }
+});
+
+test('#1218 R1218-1: 601 delimiters degrade, exactly 600 do not', () => {
+  assert.equal(degradedBlocks(markdownTree('a*'.repeat(601))).length, 1);
+  assert.equal(degradedBlocks(markdownTree('a*'.repeat(600))).length, 0);
+});
+
+test('#1218 R1218-1: a run of 51 degrades, a run of exactly 50 does not', () => {
+  assert.equal(degradedBlocks(markdownTree(`${'*'.repeat(51)}word${'*'.repeat(51)}`)).length, 1);
+  assert.equal(degradedBlocks(markdownTree(`${'*'.repeat(50)}word`)).length, 0);
+});
+
+test('#1218 R1218-1: only * _ ~ [ ] are counted', () => {
+  const input = 'x' + '`()<>'.repeat(140);
+  assert.equal(degradedBlocks(markdownTree(input)).length, 0);
+  assert.equal(prescan(input).filter((s) => s.degraded).length, 0);
+});
+
+test('#1218 R1218-1: prescan classifies a 200 KB run without ever calling the tokenizer', () => {
+  const input = '*'.repeat(2e5);
+  const spans = prescan(input);
+  assert.equal(spans.length, 1);
+  assert.equal(spans[0].degraded, true);
+  assert.equal(spans[0].marks, 2e5);
+  assert.equal(spans[0].longestRun, 2e5);
+  const out = markdownTree(input, () => { throw new Error('the tokenizer must not be called'); });
+  assert.equal(degradedBlocks(out).length, 1);
+  assert.deepEqual(out.notices, []);
+});
+
+test('#1218 R1218-1: the counter resets per list item and per table row', () => {
+  const cell = 'a*'.repeat(300);
+  const list = Array.from({ length: 10 }, () => `- ${cell}`).join('\n');
+  assert.equal(degradedBlocks(markdownTree(list)).length, 0);
+  const table = ['| h | i |', '|---|---|', ...Array.from({ length: 10 }, () => `| ${cell} | x |`)].join('\n');
+  const out = markdownTree(table);
+  assert.equal(degradedBlocks(out).length, 0);
+  assert.equal(out.blocks[0].t, 'table');
+});
+
+test('#1218 R1218-1: a blank line, a heading and a quote marker each reset the counter', () => {
+  const part = 'a*'.repeat(400);
+  assert.equal(degradedBlocks(markdownTree(`${part}\n\n${part}`)).length, 0);
+  assert.equal(degradedBlocks(markdownTree(`${part}\n# h\n${part}`)).length, 0);
+  assert.equal(degradedBlocks(markdownTree(`> ${part}\n> ${part}`)).length, 0);
+  assert.equal(degradedBlocks(markdownTree(`${part}\n${part}`)).length, 1);
+});
+
+test('#1218 R1218-1: fenced code is skipped, closed or not, and the closer must match', () => {
+  const stars = '*'.repeat(700);
+  const closed = markdownTree(`\`\`\`\n${stars}\n\`\`\``);
+  assert.equal(degradedBlocks(closed).length, 0);
+  assert.equal(closed.blocks[0].t, 'code');
+  assert.equal(degradedBlocks(markdownTree(`\`\`\`\n${stars}`)).length, 0);
+  assert.equal(degradedBlocks(markdownTree(`\`\`\`\n${stars}\n~~~\n${stars}\n\`\`\``)).length, 0);
+  assert.equal(degradedBlocks(markdownTree(`\`\`\`\`\n${stars}\n\`\`\`\n${stars}\n\`\`\`\``)).length, 0);
+  assert.equal(degradedBlocks(markdownTree(`\`\`\`\nx\n\`\`\`\n${stars}`)).length, 1);
+});
+
+test('#1218 R1218-2: the notice states N and the text is the source', () => {
+  const src = 'a*'.repeat(350);
+  const out = markdownTree(src);
+  assert.deepEqual(degradedBlocks(out), []);
+  const big = `${'*'.repeat(100)}x${'*'.repeat(600)}`;
+  const [block] = degradedBlocks(markdownTree(big));
+  assert.equal(block.notice, NOTICE(700));
+  assert.equal(block.text, big);
+});
+
+test('#1218 R1218-2: the rest of the document still renders, one notice per degraded passage', () => {
+  const bad = 'a*'.repeat(700);
+  const out = markdownTree(`# Title\n\n${bad}\n\nlater **bold** text\n\n${bad}`);
+  assert.equal(out.blocks[0].t, 'heading');
+  assert.equal(degradedBlocks(out).length, 2);
+  assert.ok(JSON.stringify(out.blocks).includes('"strong"'));
+});
+
+test('#1218 R1218-2: the tree stays plain data', () => {
+  const out = markdownTree(`# t\n\n${'a*'.repeat(700)}`);
+  assert.deepEqual(structuredClone(out), out);
+});
+
+function allChangeArtifacts() {
+  const out = [];
+  const walk = (dir) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const p = join(dir, entry.name);
+      if (entry.isDirectory()) walk(p);
+      else if (entry.name.endsWith('.md')) out.push({ name: p, text: readFileSync(p, 'utf8') });
+    }
+  };
+  const root = join(HERE, '..', '..', '..', '..', 'openspec', 'changes');
+  if (existsSync(root)) walk(root);
+  return out;
+}
+
+function assertNoDegradation(files, t) {
+  let max = 0;
+  const hits = [];
+  for (const { name, text } of files) {
+    const spans = prescan(text.replace(/^---\r?\n[\s\S]*?\r?\n---[ \t]*(?:\r?\n|$)/, ''));
+    for (const s of spans) {
+      max = Math.max(max, s.marks);
+      if (s.degraded) hits.push(name);
+    }
+  }
+  t?.diagnostic(`largest real span: ${max} marks over ${files.length} files`);
+  assert.deepEqual(hits, [], `degraded: ${hits.join(', ')}`);
+}
+
+test('#1218 R1218-3: no real artifact under openspec/changes is degraded', (t) => {
+  const files = allChangeArtifacts();
+  assert.ok(files.length > 4, 'the tree carries artifacts');
+  assertNoDegradation(files, t);
+});
+
+test('#1218 R1218-3: the zero-degradation assertion is a real detector and names the fixture', () => {
+  const files = [...allChangeArtifacts(), { name: 'fixture-601', text: 'a*'.repeat(601) }];
+  assert.throws(() => assertNoDegradation(files), /fixture-601/);
+});

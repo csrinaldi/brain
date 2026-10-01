@@ -29,6 +29,115 @@ const INVISIBLE = /[\u0000-\u0020\u007F-\u00A0\u1680\u2000-\u200F\u2028-\u202F\u
 
 const defaultLex = (text, options) => Lexer.lex(text, options);
 
+// ── pre-scan (#1218): bound the cost of an inline span before marked sees it ──
+// marked's emphasis, strikethrough and link rules backtrack quadratically on a
+// long run of delimiters. A span is the lines between the block boundaries
+// below; one holding more than MAX_MARKS delimiters, or one run longer than
+// MAX_RUN, is shown as plain text under a notice. Real artifacts peak at 122
+// marks and a run of 7. Every regex is anchored, so a line is scanned once.
+const MAX_MARKS = 600;
+const MAX_RUN = 50;
+const BLANK = /^\s*$/;
+const BLOCK_START = /^(?:\s*(?:[-+*]|\d{1,9}[.)])(?:\s|$)| {0,3}#{1,6}(?:\s|$)| {0,3}>|\s*\|)/;
+const FENCE = /^\s*(`{3,}|~{3,})/;
+const FENCE_CLOSE = /^\s*(`{3,}|~{3,})\s*$/;
+const isDelimiter = (code) => code === 42 || code === 95 || code === 126 || code === 91 || code === 93;
+
+function countLine(line) {
+  let marks = 0;
+  let longest = 0;
+  let run = 0;
+  let prev = -1;
+  for (let i = 0; i < line.length; i++) {
+    const code = line.charCodeAt(i);
+    if (!isDelimiter(code)) {
+      run = 0;
+      prev = -1;
+      continue;
+    }
+    marks++;
+    run = code === prev ? run + 1 : 1;
+    prev = code;
+    if (run > longest) longest = run;
+  }
+  return { marks, longest };
+}
+
+/**
+ * Cut a markdown body into inline spans and classify each one. Pure and
+ * linear; never calls the tokenizer. `from` is the first line, `to` the line
+ * after the last. Fenced code belongs to no span.
+ * @returns {{from:number, to:number, marks:number, longestRun:number, degraded:boolean}[]}
+ */
+export function prescan(body) {
+  const lines = String(body).split('\n');
+  const spans = [];
+  let open = null;
+  let fence = null;
+  const close = (to) => {
+    if (open) {
+      open.to = to;
+      open.degraded = open.marks > MAX_MARKS || open.longestRun > MAX_RUN;
+      spans.push(open);
+      open = null;
+    }
+  };
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (fence) {
+      const closer = FENCE_CLOSE.exec(line);
+      if (closer && closer[1][0] === fence[0] && closer[1].length >= fence.length) fence = null;
+      continue;
+    }
+    const opener = FENCE.exec(line);
+    if (opener) {
+      close(i);
+      fence = opener[1];
+      continue;
+    }
+    if (BLANK.test(line)) {
+      close(i);
+      continue;
+    }
+    if (BLOCK_START.test(line)) close(i);
+    if (!open) open = { from: i, to: i, marks: 0, longestRun: 0, degraded: false };
+    const { marks, longest } = countLine(line);
+    open.marks += marks;
+    if (longest > open.longestRun) open.longestRun = longest;
+  }
+  close(lines.length);
+  return spans;
+}
+
+const degradedNotice = (marks) => `a passage with ${marks} formatting marks is shown as plain text`;
+
+function lexBody(body, lex) {
+  // A fresh options object per call: the lexer mutates it and a passed
+  // object REPLACES the defaults, so `gfm` must be explicit (tables, task
+  // items, strikethrough, autolinks).
+  return blocks(lex(body, { gfm: true, breaks: false, pedantic: false }), 0);
+}
+
+// No degraded span: one lex, exactly as before. Otherwise lex the text between
+// the degraded spans on its own and put each degraded span in place.
+function bodyBlocks(body, lex) {
+  const degraded = prescan(body).filter((span) => span.degraded);
+  if (degraded.length === 0) return lexBody(body, lex);
+  const lines = body.split('\n');
+  const out = [];
+  let cursor = 0;
+  const normal = (to) => {
+    if (to > cursor) out.push(...lexBody(lines.slice(cursor, to).join('\n'), lex));
+  };
+  for (const span of degraded) {
+    normal(span.from);
+    out.push({ t: 'degraded', notice: degradedNotice(span.marks), text: lines.slice(span.from, span.to).join('\n') });
+    cursor = span.to;
+  }
+  normal(lines.length);
+  return out;
+}
+
 /**
  * Classify an href. Only absolute http(s) URLs with a host and no
  * credentials are ok; everything else says why it is not.
@@ -162,10 +271,7 @@ export function markdownTree(text, lex = defaultLex) {
     body = source.slice(fm[0].length);
   }
   try {
-    // A fresh options object per call: the lexer mutates it and a passed
-    // object REPLACES the defaults, so `gfm` must be explicit (tables, task
-    // items, strikethrough, autolinks).
-    out.push(...blocks(lex(body, { gfm: true, breaks: false, pedantic: false }), 0));
+    out.push(...bodyBlocks(body, lex));
   } catch {
     notices.push('The markdown could not be parsed; the text is shown as written.');
     return { blocks: [{ t: 'code', lang: null, text: source }], notices };
