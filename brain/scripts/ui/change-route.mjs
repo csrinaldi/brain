@@ -31,6 +31,7 @@ import { shapeResumeView } from './lib/resume-view.mjs';
 import { parseFrontmatter } from '../memory/lib/resume-frontmatter.mjs';
 import { LIFECYCLE_STAGES, ARTEFACT_FILE } from '../lib/sdd-layout.mjs';
 import { prUrl } from './lib/forge-url.mjs';
+import { documentWording } from './lib/drawer-model.mjs';
 
 /** D14's caveat, verbatim in the UI, until #880 lands `type: review` records. */
 export const REVIEWS_SOURCE_NOTE = 'forge comments until #880 lands';
@@ -141,6 +142,8 @@ function resolveBranch({ run, snapshot, issue }) {
 function buildWorkingMemoryTab({ resolved, resume }) {
   if (!resolved.ok) return { ok: false, reason: resolved.reason };
   const { branch } = resolved;
+  // Derived from the one resume document so this tab and the SDD row cannot disagree.
+  if (resume.state === 'unreadable') return { ok: false, reason: documentWording(resume) };
   if (resume.state !== 'present' && resume.state !== 'truncated') {
     return { ok: false, reason: `no committed resume.md on ${branch}; the local overlay arrives in slice 5 (#883)` };
   }

@@ -586,6 +586,23 @@ test('#1198 D7: a branch without resume.md is missing; an unresolvable branch is
   assert.match(noBranch.reason, /no open PR and no feat\/issue-881-\* branch/);
 });
 
+test('#1198 cold-2: the Working memory tab tells an unreadable resume.md from a missing one, in the SDD row\'s own words', () => {
+  const unreadables = {
+    symlink: fakeGit({ files: allArtifacts(), head: HEAD, modes: { 'resume.md': '120000' }, branches: { [BRANCH]: { commit: BRANCH_TIP, files: { 'resume.md': RESUME_TEXT } } }, blame: '' }),
+    tree: fakeGit({ files: allArtifacts(), head: HEAD, trees: ['resume.md'], branches: { [BRANCH]: { commit: BRANCH_TIP, files: { 'resume.md': RESUME_TEXT } } }, blame: '' }),
+    oversize: fakeGit({ files: allArtifacts(), head: HEAD, sizes: { 'resume.md': 9 * 1024 * 1024 }, branches: { [BRANCH]: { commit: BRANCH_TIP, files: { 'resume.md': RESUME_TEXT } } }, blame: '' }),
+  };
+  for (const [kind, run] of Object.entries(unreadables)) {
+    const view = viewOf(run);
+    assert.equal(view.documents.resume.state, 'unreadable', kind);
+    assert.equal(view.workingMemory.ok, false, kind);
+    assert.equal(view.workingMemory.reason, `resume.md could not be read at ${BRANCH}: ${view.documents.resume.reason}`, kind);
+    assert.doesNotMatch(view.workingMemory.reason, /no committed resume\.md/, kind);
+  }
+  const missing = viewOf(gitFor({ spec: null, tasks: null, resume: null, files: allArtifacts() }));
+  assert.match(missing.workingMemory.reason, /^no committed resume\.md on /);
+});
+
 test('#1198 D7: resolveBranch runs once per view, shared by the Working memory tab and the resume document', () => {
   const run = fakeWith({ files: allArtifacts() });
   viewOf(run, makeSnapshot());

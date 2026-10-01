@@ -123,13 +123,17 @@ function findingEntries(round) {
  * and NO invented commit, and its two wordings differ — an empty body would
  * read as "the file has nothing in it" (R1198-2).
  */
-function documentView(key, doc) {
+export function documentWording(doc) {
   const file = String(doc.path ?? '').split('/').pop();
   const ref = doc.ref ?? 'the change branch';
+  if (doc.state === 'missing') return `${file} is not committed at ${ref}`;
+  if (doc.state === 'unreadable') return `${file} could not be read at ${ref}: ${doc.reason ?? 'no reason was given'}`;
+  return null;
+}
+
+function documentView(key, doc) {
   const readable = doc.state === 'present' || doc.state === 'truncated';
-  let wording = null;
-  if (doc.state === 'missing') wording = `${file} is not committed at ${ref}`;
-  if (doc.state === 'unreadable') wording = `${file} could not be read at ${ref}: ${doc.reason ?? 'no reason was given'}`;
+  const wording = documentWording(doc);
   return {
     key,
     state: doc.state,
