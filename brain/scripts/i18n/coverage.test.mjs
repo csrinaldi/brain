@@ -10,6 +10,9 @@
 //  5. sh.mjs emits well-formed I18N_* assignments for representative shell keys.
 
 import { spawnSync } from 'node:child_process';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -150,10 +153,15 @@ test('every catalog key renders a legal shell identifier', () => {
 // is caught even if every key is identifier-safe.
 test('the rendered shell catalog evaluates cleanly under set -e', () => {
   const rendered = renderCatalog(es, en);
-  const result = spawnSync('bash', ['-euo', 'pipefail', '-c', `eval "$(cat)"`], {
-    input: rendered,
+  // Read from a file, not the `input` option: a piped stdin never sees EOF in the cold
+  // reviewer's sandbox, and `cat` waits for it (#1221).
+  const dir = mkdtempSync(join(tmpdir(), 'brain-1221-catalog-'));
+  const catalog = join(dir, 'catalog.sh');
+  writeFileSync(catalog, rendered);
+  const result = spawnSync('bash', ['-euo', 'pipefail', '-c', 'eval "$(cat "$1")"', 'bash', catalog], {
     encoding: 'utf8',
   });
+  rmSync(dir, { recursive: true, force: true });
   assert.equal(
     result.status,
     0,

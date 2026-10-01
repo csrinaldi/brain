@@ -223,12 +223,13 @@ test('B1.1/B1.2 — collects clean candidates, routes every skip, and touches no
 
 test('B1.3 — the secret never reaches the object database', () => {
   const repo = buildFixtureRepo();
-  const secretContent = readFileSync(join(repo.wtADir, '.memory', 'records', FILES.secretRecord), 'utf8');
+  const secretFile = join(repo.wtADir, '.memory', 'records', FILES.secretRecord);
 
   const result = collectLane({ root: repo.mainDir, date: '2026-09-09', host: 'test-host' });
 
   // the would-be blob id, computed the same way the shell would have (no -w: never written for real here).
-  const wouldBeOid = execFileSync('git', ['hash-object', '--stdin'], { cwd: repo.mainDir, input: secretContent, encoding: 'utf8' }).trim();
+  // From the file's path, not `--stdin` with the `input` option: a piped stdin never sees EOF in the cold reviewer's sandbox (#1221).
+  const wouldBeOid = execFileSync('git', ['hash-object', '--no-filters', secretFile], { cwd: repo.mainDir, encoding: 'utf8' }).trim();
   const catFile = spawnSync('git', ['cat-file', '-e', wouldBeOid], { cwd: repo.mainDir, encoding: 'utf8' });
   assert.notEqual(catFile.status, 0, 'the secret-bearing blob must never have been written with hash-object -w');
 
