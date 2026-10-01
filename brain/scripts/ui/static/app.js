@@ -50,7 +50,7 @@ function applyTheme(choice) {
 import { buildLaneModel, nodeSummaryFor, childrenOf } from './lib/lane-model.mjs';
 import { issueUrl } from './lib/forge-url.mjs';
 import { buildDrawerModel } from './lib/drawer-model.mjs';
-import { markdownTree } from './lib/markdown.mjs';
+import { renderOffThread, TIMEOUT_NOTICE, FAILED_NOTICE, UNAVAILABLE_NOTICE } from './lib/render-budget.mjs';
 import { buildSddModel, sddForIssue, buildSlicePlan, STAGE_VOCAB } from './lib/sdd-model.mjs';
 import { searchNodes } from './lib/search-model.mjs';
 import { buildMemoryModel } from './lib/memory-model.mjs';
@@ -122,11 +122,19 @@ let holdingPage = 0;
  */
 let expandedDocs = new Set();
 /**
- * `path @ commit` to its markdown tree. A document read at one commit never
- * changes, so the tree is built once per expansion and reused; the map is
- * cleared whenever the selected issue changes so it cannot grow without bound.
+ * `path @ commit` to its render request `{promise, cancel, settled}`. A document
+ * read at one commit never changes, so a tree (or a timeout) is kept and reused;
+ * a request still in flight is shared by a re-render instead of started again.
+ * The map is emptied, with every request cancelled, whenever the selected issue
+ * changes, so it cannot grow without bound.
  */
 let docTrees = new Map();
+
+/** Cancel every request in flight and forget them all. */
+function resetDocTrees() {
+  for (const entry of docTrees.values()) entry.cancel();
+  docTrees = new Map();
+}
 
 // ── DOM helpers ────────────────────────────────────────────────────────────
 
@@ -1540,7 +1548,7 @@ function renderActorRow(row) {
 /** Activating a node selects it and opens the drawer on its Spec tab (R881-8). */
 function selectNode(issue) {
   selectedIssue = issue;
-  docTrees = new Map();
+  resetDocTrees();
   changeView = null;
   activeTab = 'spec';
   render();
@@ -1549,7 +1557,7 @@ function selectNode(issue) {
 
 function closeDrawer() {
   selectedIssue = null;
-  docTrees = new Map();
+  resetDocTrees();
   changeView = null;
   render();
 }
@@ -1827,6 +1835,11 @@ function renderMdBlocks(parent, blocks) {
       case 'frontmatter':
         parent.appendChild(el('pre', 'md-frontmatter', block.text));
         break;
+      case 'degraded':
+        // A passage the pre-scan refused to tokenize (#1218): announced, then shown as written.
+        parent.appendChild(el('p', 'note', block.notice));
+        parent.appendChild(el('p', 'md-literal', block.text ?? ''));
+        break;
       default:
         // `literal`, and anything a future tree adds: shown as written, never dropped.
         parent.appendChild(el('p', 'md-literal', block.text ?? ''));
@@ -1834,21 +1847,66 @@ function renderMdBlocks(parent, blocks) {
   }
 }
 
-/** The expanded document: its stamp, the truncation note when there is one, and the rendered blocks. */
+const DOC_NOTICES = { timeout: TIMEOUT_NOTICE, failed: FAILED_NOTICE, unavailable: UNAVAILABLE_NOTICE };
+
+// The worker is created at call time and only when the browser has one; with
+// none, the render says so. There is no main-thread fallback (#1218).
+const spawnMarkdownWorker = () => (typeof Worker === 'function' ? new Worker('/lib/markdown-worker.mjs', { type: 'module' }) : null);
+
+/** The in-flight or settled render of a document, started once per stamp. */
+function requestDoc(doc) {
+  let entry = docTrees.get(doc.stamp);
+  if (entry) return entry;
+  const run = renderOffThread(doc.text, {
+    spawn: spawnMarkdownWorker,
+    setTimer: (fn, ms) => setTimeout(fn, ms),
+    clearTimer: (handle) => clearTimeout(handle),
+  });
+  entry = { settled: false, cancel: run.cancel };
+  entry.promise = run.promise.then((outcome) => {
+    entry.settled = true;
+    entry.outcome = outcome;
+    // A tree and a timeout are final for this commit; the rest may be retried.
+    if (outcome.kind !== 'tree' && outcome.kind !== 'timeout' && docTrees.get(doc.stamp) === entry) docTrees.delete(doc.stamp);
+    return outcome;
+  });
+  docTrees.set(doc.stamp, entry);
+  return entry;
+}
+
+/** The expanded document's shell: its stamp, the truncation note when there is one, and the loading line. */
 function renderDocumentSection(doc, id) {
   const section = el('section', 'doc-body');
   section.setAttribute('id', id);
   section.setAttribute('role', 'region');
   section.setAttribute('aria-label', doc.stamp);
+  section.setAttribute('aria-busy', 'true');
   section.appendChild(el('p', 'doc-stamp', doc.stamp));
   if (doc.note) section.appendChild(el('p', 'note', doc.note));
-  if (!docTrees.has(doc.stamp)) docTrees.set(doc.stamp, markdownTree(doc.text));
-  const tree = docTrees.get(doc.stamp);
-  for (const notice of tree.notices) section.appendChild(el('p', 'note', notice));
-  const body = el('div', 'md');
-  renderMdBlocks(body, tree.blocks);
-  section.appendChild(body);
+  const loading = el('p', 'note doc-loading', 'rendering the document\u2026');
+  loading.setAttribute('role', 'status');
+  section.appendChild(loading);
   return section;
+}
+
+/** Replace the loading line with what the render produced. */
+function showDocumentOutcome(section, doc, outcome) {
+  const loading = findChildByClass(section, 'doc-loading');
+  if (loading) section.removeChild(loading);
+  section.removeAttribute('aria-busy');
+  if (outcome.kind === 'tree') {
+    for (const notice of outcome.tree.notices) section.appendChild(el('p', 'note', notice));
+    const body = el('div', 'md');
+    renderMdBlocks(body, outcome.tree.blocks);
+    section.appendChild(body);
+  } else if (DOC_NOTICES[outcome.kind]) {
+    section.appendChild(el('p', 'note', DOC_NOTICES[outcome.kind]));
+    section.appendChild(el('pre', 'md-plain', doc.text));
+  }
+}
+
+function findChildByClass(parent, name) {
+  return parent.childNodes.find((child) => child.classList && child.classList.contains(name)) ?? null;
 }
 
 /**
@@ -1867,14 +1925,31 @@ function renderDocumentControl(card, doc) {
   const button = el('button', 'doc-toggle');
   button.setAttribute('aria-controls', id);
   let section = null;
+  // One token per expansion: an answer for any earlier one is dropped.
+  const seq = requestSequence();
   const setOpen = (open) => {
     button.setAttribute('aria-expanded', String(open));
     button.textContent = open ? 'hide document' : 'show document';
     if (open && section === null) {
-      section = renderDocumentSection(doc, id);
-      card.appendChild(section);
+      const mine = renderDocumentSection(doc, id);
+      section = mine;
+      card.appendChild(mine);
+      const token = seq.next();
+      const entry = requestDoc(doc);
+      if (entry.settled) showDocumentOutcome(mine, doc, entry.outcome);
+      else {
+        entry.promise.then((outcome) => {
+          if (seq.isCurrent(token) && section === mine) showDocumentOutcome(mine, doc, outcome);
+        });
+      }
     }
     if (!open && section !== null) {
+      seq.next();
+      const entry = docTrees.get(doc.stamp);
+      if (entry && !entry.settled) {
+        entry.cancel();
+        docTrees.delete(doc.stamp);
+      }
       card.removeChild(section);
       section = null;
     }

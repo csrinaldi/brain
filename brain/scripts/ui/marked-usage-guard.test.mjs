@@ -99,6 +99,50 @@ test('#1198 R1198-11/17: the real door imports the vendored file by a path that 
   assert.equal(new URL(spec, 'http://x/lib/markdown.mjs').pathname, '/vendor/marked.esm.js');
   assert.ok(existsSync(join(UI_DIR, 'lib', spec)), 'and node resolves it to a real file');
   const app = readFileSync(join(UI_DIR, 'static', 'app.js'), 'utf8');
-  assert.doesNotMatch(app, /from\s*['"][^'"]*marked[^'"]*['"]/, 'app.js reaches the tokenizer only through lib/markdown.mjs');
-  assert.match(app, /from '\.\/lib\/markdown\.mjs'/);
+  assert.doesNotMatch(app, /from\s*['"][^'"]*marked[^'"]*['"]/, 'app.js imports no tokenizer');
+});
+
+// ── #1218: the tokenizer runs only in the worker, never on the main thread ──
+// `markdownTree` is imported by exactly one module outside tests, and that
+// module imports nothing but `./markdown.mjs`. `app.js` imports neither the
+// adapter nor the worker file: it reaches the worker only as a URL.
+
+const WORKER = 'lib/markdown-worker.mjs';
+
+/** Violations of the worker-only rule for one file's text (injectable, so the self-tests can feed it). */
+export function mainThreadTokenizerViolations(rel, text) {
+  const bad = [];
+  const code = codeOnly(text);
+  const importsAdapter = /\bimport\s*\{[^}]*\bmarkdownTree\b[^}]*\}\s*from\s*['"][^'"]*markdown\.mjs['"]/.test(code);
+  const importsWorkerFile = /\bimport\b[^;]*['"][^'"]*markdown-worker\.mjs['"]/.test(code);
+  if (rel !== WORKER && importsAdapter) bad.push(`${rel}: imports markdownTree, only ${WORKER} may`);
+  if (rel === 'static/app.js' && importsWorkerFile) bad.push(`${rel}: imports the worker file instead of spawning it`);
+  if (rel === WORKER) {
+    const specs = [...code.matchAll(/\bfrom\s*['"]([^'"]+)['"]/g)].map((m) => m[1]);
+    if (specs.length !== 1 || specs[0] !== './markdown.mjs') bad.push(`${rel}: imports ${JSON.stringify(specs)}, only ./markdown.mjs is allowed`);
+  }
+  return bad;
+}
+
+test('#1218 R1218-4: only the worker imports markdownTree, and the worker imports only the adapter', () => {
+  const files = sourcesUnder(UI_DIR);
+  const bad = files.flatMap((f) => mainThreadTokenizerViolations(relative(UI_DIR, f), readFileSync(f, 'utf8')));
+  assert.deepEqual(bad, []);
+  assert.ok(files.some((f) => relative(UI_DIR, f) === WORKER), 'the scan sees the worker file');
+});
+
+test('#1218 R1218-4 self-test: the main-thread rule fails on injected violations', () => {
+  const adapter = "import { markdownTree } from './lib/markdown.mjs';";
+  assert.notDeepEqual(mainThreadTokenizerViolations('static/app.js', adapter), []);
+  assert.notDeepEqual(mainThreadTokenizerViolations('lib/other.mjs', "import { markdownTree } from './markdown.mjs';"), []);
+  assert.notDeepEqual(mainThreadTokenizerViolations('static/app.js', "import { reply } from './lib/markdown-worker.mjs';"), []);
+  assert.notDeepEqual(mainThreadTokenizerViolations(WORKER, "import { markdownTree } from './markdown.mjs';\nimport { Lexer } from '../vendor/marked.esm.js';"), []);
+  assert.deepEqual(mainThreadTokenizerViolations(WORKER, "import { markdownTree } from './markdown.mjs';"), []);
+});
+
+test('#1218 R1218-4: the worker file reaches the tokenizer only through the adapter, so it resolves to ui/vendor/marked.esm.js and calls no marked.parse', () => {
+  const worker = readFileSync(join(UI_DIR, WORKER), 'utf8');
+  assert.deepEqual(markedViolations(WORKER, worker), []);
+  assert.doesNotMatch(worker, /marked/);
+  assert.equal(new URL('../vendor/marked.esm.js', 'http://x/lib/markdown.mjs').pathname, '/vendor/marked.esm.js');
 });

@@ -33,7 +33,7 @@ const RICH = [
   'struck ~~gone~~ then a hard break  ', 'next line', '',
 ].join('\n');
 
-async function boot({ proposal = XSS, resume = '---\nnext_action: go\n---\n\nresume **body**\n', design } = {}) {
+async function boot({ proposal = XSS, resume = '---\nnext_action: go\n---\n\nresume **body**\n', design, worker } = {}) {
   const root = testTmp('md-render-');
   writeFileSync(join(root, 'brain.config.json'), readFileSync(join(REPO, 'brain.config.json'), 'utf8'));
   mkdirSync(join(root, DIR), { recursive: true });
@@ -48,7 +48,7 @@ async function boot({ proposal = XSS, resume = '---\nnext_action: go\n---\n\nres
   const run = fakeGit({ files, head: HEAD, branches: { [BRANCH]: { commit: TIP, files: resume === null ? {} : { 'resume.md': resume } } } });
   snapshot.prs = { ok: true, value: [{ number: 5, title: 'x', headBranch: BRANCH, issue: ISSUE }] };
   const changes = { [ISSUE]: buildChangeView({ root, issue: ISSUE, snapshot, _run: run }) };
-  const dom = installDom({ mountIds: MOUNT_IDS, snapshot, changes });
+  const dom = installDom({ mountIds: MOUNT_IDS, snapshot, changes, ...(worker === undefined ? {} : { worker }) });
   await loadApp();
   await settle();
   return dom;
@@ -98,6 +98,7 @@ test('#1198 R1198-1/5/16: expanding appends a labelled region with stamp, path a
   assert.equal(find(row, (n) => n.tagName === 'SECTION'), null, 'lazy: nothing rendered before the first expansion');
   const drawerBefore = dom.mounts.drawer.childNodes.length;
   fire(button, 'click');
+  await settle();
   assert.equal(button.getAttribute('aria-expanded'), 'true');
   const region = find(row, (n) => n.tagName === 'SECTION');
   assert.equal(region.getAttribute('role'), 'region');
@@ -110,6 +111,7 @@ test('#1198 R1198-1/5/16: expanding appends a labelled region with stamp, path a
   assert.ok(row.parentNode, 'the row node itself survived, so focus survives');
 
   fire(button, 'click');
+  await settle();
   assert.equal(button.getAttribute('aria-expanded'), 'false');
   assert.equal(find(row, (n) => n.tagName === 'SECTION'), null);
 });
@@ -119,9 +121,11 @@ test('#1198 R1198-16: the expanded state survives a drawer re-render (a tab swit
   t.after(() => dom.restore());
   await openSdd(dom);
   fire(toggleOf(dom, 'proposal').button, 'click');
+  await settle();
   const tabs = find(dom.mounts.drawer, byClass('tabs')).childNodes;
   fire(tabs.find((b) => b.textContent.includes('Tasks')), 'click');
   fire(find(dom.mounts.drawer, byClass('tabs')).childNodes.find((b) => b.textContent.includes('SDD')), 'click');
+  await settle();
   const again = toggleOf(dom, 'proposal');
   assert.equal(again.button.getAttribute('aria-expanded'), 'true');
   assert.ok(find(again.row, (n) => n.tagName === 'SECTION'));
@@ -133,6 +137,7 @@ test('#1198 R1198-6: the page maps blocks to elements — headings, lists, task 
   await openSdd(dom);
   const { row, button } = toggleOf(dom, 'proposal');
   fire(button, 'click');
+  await settle();
   const tags = (tag) => findAll(row, (n) => n.tagName === tag);
   assert.equal(tags('H3').length, 1, 'a level-1 heading is h3, under the drawer title');
   assert.equal(tags('OL')[0].getAttribute('start'), '3');
@@ -161,6 +166,7 @@ test('#1198 R1198-7 to 10/12: the hostile fixture builds no active element, no h
   await openSdd(dom);
   const { row, button } = toggleOf(dom, 'proposal');
   fire(button, 'click');
+  await settle();
 
   const nodes = all(row);
   for (const n of nodes) {
@@ -191,12 +197,14 @@ test('#1198 R1198-14: two renders of the same input build the same structure', a
   const a = await boot({ proposal: RICH });
   await openSdd(a);
   fire(toggleOf(a, 'proposal').button, 'click');
+  await settle();
   const first = shape(find(toggleOf(a, 'proposal').row, (n) => n.tagName === 'SECTION'));
   a.restore();
   const b = await boot({ proposal: RICH });
   t.after(() => b.restore());
   await openSdd(b);
   fire(toggleOf(b, 'proposal').button, 'click');
+  await settle();
   assert.deepEqual(shape(find(toggleOf(b, 'proposal').row, (n) => n.tagName === 'SECTION')), first);
 });
 
@@ -206,6 +214,7 @@ test('#1198 R1198-3: a truncated document shows the note beside its text', async
   await openSdd(dom);
   const { row, button } = toggleOf(dom, 'design');
   fire(button, 'click');
+  await settle();
   assert.match(find(row, (n) => n.tagName === 'SECTION').textContent, /truncated at 262144 bytes/);
 });
 
@@ -217,6 +226,7 @@ test('#1198 D10: resume.md is reachable from the SDD tab as an unnumbered row an
   assert.ok(row, 'the resume row exists');
   assert.equal(find(row, byClass('stage-number')), null, 'unnumbered');
   fire(find(row, byClass('doc-toggle')), 'click');
+  await settle();
   const region = find(row, (n) => n.tagName === 'SECTION');
   assert.match(region.textContent, /next_action: go/, 'the frontmatter is shown');
   assert.ok(find(region, (n) => n.tagName === 'STRONG'), 'the body is markdown');
@@ -230,4 +240,239 @@ test('#1198 R1198-2: a branch with no resume.md says it is not committed, with n
   const row = rows(dom).find((r) => /working memory/.test(r.textContent));
   assert.match(row.textContent, new RegExp(`resume\\.md is not committed at ${BRANCH}`));
   assert.equal(find(row, byClass('doc-toggle')), null);
+});
+
+// ── #1218: the page renders each document off the main thread, within a budget ──
+
+const LOADING = 'rendering the document…';
+const TIMEOUT = 'this document was too slow to render (over 1500 ms) and is shown as plain text';
+const FAILED = 'this document could not be rendered and is shown as plain text';
+const UNAVAILABLE = 'this browser cannot render this document off the page, so it is shown as plain text';
+
+/** Swap setTimeout around a synchronous action so the page's timers are captured, not run. */
+function holdTimers(action) {
+  const realSet = globalThis.setTimeout;
+  const timers = [];
+  globalThis.setTimeout = (fn, ms) => { const handle = { fn, ms }; timers.push(handle); return handle; };
+  try { action(); } finally { globalThis.setTimeout = realSet; }
+  return timers;
+}
+const click = (button) => holdTimers(() => fire(button, 'click'));
+const sectionOf = (row) => find(row, (n) => n.tagName === 'SECTION');
+const hasMd = (row) => find(row, byClass('md')) !== null;
+const NOTE_TEXTS = (row) => findAll(row, byClass('note')).map((n) => n.textContent);
+
+test('#1218 R1218-4: expanding creates exactly one worker, two open rows have two distinct workers, a result terminates its worker once', async (t) => {
+  const dom = await boot({ proposal: RICH });
+  t.after(() => dom.restore());
+  await openSdd(dom);
+  fire(toggleOf(dom, 'proposal').button, 'click');
+  assert.equal(dom.workers.length, 1);
+  assert.equal(dom.workers[0].posted[0].text, RICH);
+  fire(toggleOf(dom, 'spec').button, 'click');
+  assert.equal(dom.workers.length, 2);
+  assert.notEqual(dom.workers[0], dom.workers[1]);
+  await settle();
+  assert.deepEqual(dom.workers.map((w) => w.terminated), [1, 1]);
+  assert.ok(hasMd(toggleOf(dom, 'proposal').row));
+});
+
+test('#1218 R1218-7: a loading line shows while the worker has not answered and is replaced by the elements', async (t) => {
+  const dom = await boot({ proposal: RICH, worker: 'hold' });
+  t.after(() => dom.restore());
+  await openSdd(dom);
+  const { row, button } = toggleOf(dom, 'proposal');
+  fire(button, 'click');
+  const region = sectionOf(row);
+  const loading = find(region, byClass('doc-loading'));
+  assert.equal(loading.tagName, 'P');
+  assert.equal(loading.textContent, LOADING);
+  assert.equal(loading.getAttribute('role'), 'status');
+  assert.equal(region.getAttribute('aria-busy'), 'true');
+  assert.equal(hasMd(row), false, 'no empty body, no half-rendered body');
+  dom.workers[0].release();
+  await settle();
+  assert.equal(find(region, byClass('doc-loading')), null);
+  assert.notEqual(region.getAttribute('aria-busy'), 'true');
+  assert.ok(hasMd(row));
+});
+
+test('#1218 R1218-5: a click on a hostile document returns at once with the loading line', async (t) => {
+  const deepQuote = '>'.repeat(262000);
+  const deepList = Array.from({ length: 700 }, (_, i) => `${' '.repeat(i)}- x`).join('\n');
+  for (const proposal of [deepQuote, deepList]) {
+    const dom = await boot({ proposal, worker: 'hold' });
+    const { row, button } = (await openSdd(dom), toggleOf(dom, 'proposal'));
+    const t0 = performance.now();
+    click(button);
+    const ms = performance.now() - t0;
+    assert.ok(ms < 100, `the click took ${ms} ms`);
+    assert.equal(find(sectionOf(row), byClass('doc-loading')).textContent, LOADING);
+    dom.restore();
+  }
+  assert.ok(t);
+});
+
+test('#1218 R1218-5: a worker that never answers is cut at 1500 ms and the whole document is shown as written', async (t) => {
+  const dom = await boot({ proposal: RICH, worker: 'hold' });
+  t.after(() => dom.restore());
+  await openSdd(dom);
+  const { row, button } = toggleOf(dom, 'proposal');
+  const timers = click(button);
+  assert.equal(timers.find((h) => h.ms === 1500) !== undefined, true);
+  assert.equal(dom.workers[0].terminated, 0);
+  timers.find((h) => h.ms === 1500).fn();
+  await settle();
+  assert.equal(dom.workers[0].terminated, 1);
+  assert.ok(NOTE_TEXTS(row).includes(TIMEOUT));
+  assert.ok(!row.textContent.includes('formatting marks'));
+  assert.equal(find(sectionOf(row), byClass('md-plain')).textContent, RICH);
+  assert.equal(findAll(row, (n) => ['H3', 'TABLE'].includes(n.tagName)).length, 0);
+  assert.equal(find(row, byClass('doc-loading')), null);
+});
+
+test('#1218 R1218-5: a result inside the budget is accepted and carries no timeout notice', async (t) => {
+  const dom = await boot({ proposal: RICH });
+  t.after(() => dom.restore());
+  await openSdd(dom);
+  const { row, button } = toggleOf(dom, 'proposal');
+  const timers = click(button);
+  await settle();
+  assert.ok(hasMd(row));
+  assert.ok(!row.textContent.includes(TIMEOUT));
+  timers.find((h) => h.ms === 1500).fn(); // the late timer must change nothing
+  await settle();
+  assert.ok(hasMd(row));
+  assert.ok(!row.textContent.includes(TIMEOUT));
+});
+
+test('#1218 R1218-5: one row timing out leaves another row and its worker untouched', async (t) => {
+  const dom = await boot({ proposal: RICH, worker: 'hold' });
+  t.after(() => dom.restore());
+  await openSdd(dom);
+  const first = toggleOf(dom, 'proposal');
+  const second = toggleOf(dom, 'spec');
+  const timers = [...click(first.button), ...click(second.button)];
+  timers.filter((h) => h.ms === 1500)[0].fn();
+  await settle();
+  assert.equal(dom.workers[0].terminated, 1);
+  assert.equal(dom.workers[1].terminated, 0);
+  dom.workers[1].release();
+  await settle();
+  assert.ok(hasMd(second.row));
+  assert.ok(!second.row.textContent.includes(TIMEOUT));
+  assert.ok(first.row.textContent.includes(TIMEOUT));
+});
+
+test('#1218 R1218-6: an error event, a throwing constructor and a malformed message each say the render failed, with the source as text', async () => {
+  for (const mode of ['error', 'throw', 'malformed']) {
+    const dom = await boot({ proposal: RICH, worker: mode });
+    try {
+      await openSdd(dom);
+      const { row, button } = toggleOf(dom, 'proposal');
+      fire(button, 'click');
+      await settle();
+      assert.ok(NOTE_TEXTS(row).includes(FAILED), mode);
+      assert.ok(!row.textContent.includes(TIMEOUT), mode);
+      assert.equal(find(sectionOf(row), byClass('md-plain')).textContent, RICH, mode);
+      assert.deepEqual(dom.workers.map((w) => w.terminated), mode === 'throw' ? [] : [1], mode);
+    } finally {
+      dom.restore();
+    }
+  }
+});
+
+test('#1218 R1218-6: with no Worker the page says so, shows the source, and never tokenizes on the main thread', async (t) => {
+  const dom = await boot({ proposal: RICH, worker: null });
+  t.after(() => dom.restore());
+  await openSdd(dom);
+  const { row, button } = toggleOf(dom, 'proposal');
+  fire(button, 'click');
+  await settle();
+  assert.ok(NOTE_TEXTS(row).includes(UNAVAILABLE));
+  assert.ok(!row.textContent.includes(FAILED));
+  assert.equal(find(sectionOf(row), byClass('md-plain')).textContent, RICH);
+  assert.equal(findAll(row, (n) => n.tagName === 'H3').length, 0);
+});
+
+test('#1218 R1218-2: a degraded passage shows its notice beside its text and the rest still renders', async (t) => {
+  const bad = 'a*'.repeat(700);
+  const dom = await boot({ proposal: `# Title\n\n${bad}\n\nlater **bold**\n` });
+  t.after(() => dom.restore());
+  await openSdd(dom);
+  const { row, button } = toggleOf(dom, 'proposal');
+  fire(button, 'click');
+  await settle();
+  assert.ok(NOTE_TEXTS(row).includes('a passage with 700 formatting marks is shown as plain text'));
+  assert.equal(find(row, byClass('md-literal')).textContent, bad);
+  assert.equal(findAll(row, (n) => n.tagName === 'H3').length, 1);
+  assert.equal(findAll(row, (n) => n.tagName === 'STRONG').length, 1);
+});
+
+test('#1218 R1218-7: a result for a collapsed row is dropped and its worker is terminated', async (t) => {
+  const dom = await boot({ proposal: RICH, worker: 'hold' });
+  t.after(() => dom.restore());
+  await openSdd(dom);
+  const { row, button } = toggleOf(dom, 'proposal');
+  fire(button, 'click');
+  fire(button, 'click');
+  assert.equal(dom.workers[0].terminated, 1);
+  dom.workers[0].onmessage({ data: { id: dom.workers[0].posted[0].id, ok: true, tree: { blocks: [{ t: 'hr' }], notices: [] } } });
+  await settle();
+  assert.equal(sectionOf(row), null);
+});
+
+test('#1218 R1218-7: a stale result after collapse and re-expand never reaches the DOM, whatever the arrival order', async (t) => {
+  const dom = await boot({ proposal: RICH, worker: 'hold' });
+  t.after(() => dom.restore());
+  await openSdd(dom);
+  const { row, button } = toggleOf(dom, 'proposal');
+  fire(button, 'click');
+  fire(button, 'click');
+  fire(button, 'click');
+  assert.equal(dom.workers.length, 2, 'a collapse cancelled the first request and the re-expand started a second');
+  dom.workers[1].release();
+  await settle();
+  assert.ok(hasMd(row));
+  const before = findAll(row, () => true).length;
+  const stale = { id: dom.workers[0].posted[0].id, ok: true, tree: { blocks: [{ t: 'hr' }, { t: 'hr' }], notices: [] } };
+  dom.workers[0].onmessage({ data: stale });
+  await settle();
+  assert.equal(findAll(row, () => true).length, before);
+  assert.equal(findAll(row, (n) => n.tagName === 'HR').length, 1, 'only the second request\'s hr');
+});
+
+test('#1218 R1218-7: a stale timer does not show the timeout notice', async (t) => {
+  const dom = await boot({ proposal: RICH, worker: 'hold' });
+  t.after(() => dom.restore());
+  await openSdd(dom);
+  const { row, button } = toggleOf(dom, 'proposal');
+  const firstTimers = click(button);
+  click(button);
+  click(button);
+  firstTimers.find((h) => h.ms === 1500).fn();
+  await settle();
+  assert.ok(!row.textContent.includes(TIMEOUT));
+  assert.equal(find(sectionOf(row), byClass('doc-loading')).textContent, LOADING);
+});
+
+test('#1218 R1218-7: a re-render reuses the in-flight request; selecting a node cancels every request', async (t) => {
+  const dom = await boot({ proposal: RICH, worker: 'hold' });
+  t.after(() => dom.restore());
+  await openSdd(dom);
+  fire(toggleOf(dom, 'proposal').button, 'click');
+  const tabs = find(dom.mounts.drawer, byClass('tabs')).childNodes;
+  fire(tabs.find((b) => b.textContent.includes('Tasks')), 'click');
+  fire(find(dom.mounts.drawer, byClass('tabs')).childNodes.find((b) => b.textContent.includes('SDD')), 'click');
+  assert.equal(dom.workers.length, 1, 'no second worker for the same document');
+  assert.equal(find(toggleOf(dom, 'proposal').row, byClass('doc-loading')).textContent, LOADING);
+  dom.workers[0].release();
+  await settle();
+  assert.ok(hasMd(toggleOf(dom, 'proposal').row), 'the re-rendered row got the result');
+
+  fire(toggleOf(dom, 'spec').button, 'click');
+  assert.equal(dom.workers.length, 2);
+  const card = findAll(dom.mounts.canvas, byClass('node-card')).find((c) => c.getAttribute('data-issue') === String(ISSUE));
+  fire(card, 'click');
+  assert.equal(dom.workers[1].terminated, 1, 'selecting a node cancelled the pending request');
 });

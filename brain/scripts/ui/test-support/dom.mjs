@@ -23,6 +23,8 @@
 // A property the page starts using and this file lacks will throw here too,
 // which is the correct outcome: this file grows when the page does.
 
+import { reply } from '../lib/markdown-worker.mjs';
+
 /** Every listener a node was given, so a test can activate one the way a user would. */
 const LISTENERS = Symbol('listeners');
 
@@ -178,6 +180,42 @@ export function find(root, predicate) {
 export const byClass = (name) => (node) => node.classList && node.classList.contains(name);
 
 /**
+ * A Worker for the page to spawn (#1218). The mode decides what it does with a
+ * request: 'reply' (default) answers with the real `reply` on the next turn,
+ * 'hold' never answers until a test calls `release()`, 'throw' fails to
+ * construct, 'error' raises an error event, 'malformed' posts a non-tree.
+ * Every instance is recorded in `workers`, so a test can count them.
+ */
+function makeWorkerClass(mode, workers) {
+  return class FakeWorker {
+    constructor(url, options) {
+      if (mode === 'throw') throw new Error('cannot construct a worker here');
+      this.url = url;
+      this.options = options;
+      this.posted = [];
+      this.terminated = 0;
+      this.onmessage = null;
+      this.onerror = null;
+      workers.push(this);
+    }
+    postMessage(request) {
+      this.posted.push(request);
+      if (mode === 'hold') return;
+      setImmediate(() => this.release());
+    }
+    terminate() { this.terminated++; }
+    /** Answer the last request now, the way the mode says (also how a held worker is let go). */
+    release() {
+      const request = this.posted[this.posted.length - 1];
+      if (!request || this.terminated > 0) return;
+      if (mode === 'error') this.onerror?.({ message: 'worker failed' });
+      else if (mode === 'malformed') this.onmessage?.({ data: { id: request.id, ok: true, tree: 'not a tree' } });
+      else this.onmessage?.({ data: reply(request) });
+    }
+  };
+}
+
+/**
  * Install a document, a window and the two network globals the page opens, and
  * return the mounts plus a `restore()`. `snapshot` is served at
  * `/api/snapshot`; `changes` answers `/api/change/<issue>` by issue number.
@@ -186,8 +224,11 @@ export const byClass = (name) => (node) => node.classList && node.classList.cont
  * REST read, and a harness that also replayed frames would be testing the
  * stub's timing rather than the render.
  */
-export function installDom({ mountIds, snapshot = null, changes = {}, storage = new Map() } = {}) {
-  const saved = { document: globalThis.document, window: globalThis.window, fetch: globalThis.fetch, EventSource: globalThis.EventSource };
+export function installDom({ mountIds, snapshot = null, changes = {}, storage = new Map(), worker = 'reply' } = {}) {
+  const saved = { document: globalThis.document, window: globalThis.window, fetch: globalThis.fetch, EventSource: globalThis.EventSource, Worker: globalThis.Worker };
+  const workers = [];
+  if (worker === null) delete globalThis.Worker;
+  else globalThis.Worker = makeWorkerClass(worker, workers);
 
   const mounts = Object.fromEntries(mountIds.map((id) => [id, createElement('div')]));
   const documentElement = createElement('html');
@@ -234,11 +275,13 @@ export function installDom({ mountIds, snapshot = null, changes = {}, storage = 
     mounts,
     documentElement,
     storage,
+    workers,
     restore() {
       globalThis.document = saved.document;
       globalThis.window = saved.window;
       globalThis.fetch = saved.fetch;
       globalThis.EventSource = saved.EventSource;
+      if (saved.Worker === undefined) delete globalThis.Worker; else globalThis.Worker = saved.Worker;
     },
   };
 }

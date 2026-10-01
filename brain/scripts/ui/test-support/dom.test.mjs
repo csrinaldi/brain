@@ -122,3 +122,70 @@ test('#1059: installDom restores every global it replaced', () => {
   assert.equal(globalThis.fetch, before.fetch);
   assert.equal(globalThis.EventSource, before.EventSource);
 });
+
+// ── #1218: a Worker for the page to spawn ──
+
+test('#1218: by default the page gets a Worker that answers with the real reply, off the call stack', async () => {
+  const dom = installDom({ mountIds: [] });
+  try {
+    assert.equal(typeof globalThis.Worker, 'function');
+    const worker = new globalThis.Worker('/lib/markdown-worker.mjs', { type: 'module' });
+    assert.equal(dom.workers.length, 1);
+    const got = new Promise((resolve) => { worker.onmessage = (event) => resolve(event.data); });
+    worker.postMessage({ id: 9, text: '# hi' });
+    assert.equal(dom.workers[0].posted.length, 1, 'recorded synchronously');
+    const data = await got;
+    assert.equal(data.id, 9);
+    assert.equal(data.ok, true);
+    assert.equal(data.tree.blocks[0].t, 'heading');
+    worker.terminate();
+    assert.equal(dom.workers[0].terminated, 1);
+  } finally {
+    dom.restore();
+  }
+});
+
+test('#1218: hold mode never answers until the test releases it', async () => {
+  const dom = installDom({ mountIds: [], worker: 'hold' });
+  try {
+    const worker = new globalThis.Worker('/x', { type: 'module' });
+    let answered = false;
+    worker.onmessage = () => { answered = true; };
+    worker.postMessage({ id: 1, text: 'a' });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(answered, false);
+    dom.workers[0].release();
+    assert.equal(answered, true);
+  } finally {
+    dom.restore();
+  }
+});
+
+test('#1218: null removes the Worker global and restore puts the previous one back', () => {
+  const before = globalThis.Worker;
+  const dom = installDom({ mountIds: [], worker: null });
+  assert.equal(globalThis.Worker, undefined);
+  dom.restore();
+  assert.equal(globalThis.Worker, before);
+});
+
+test('#1218: the failing modes throw on construction, error, or send junk', async () => {
+  let dom = installDom({ mountIds: [], worker: 'throw' });
+  try { assert.throws(() => new globalThis.Worker('/x'), /cannot construct/); } finally { dom.restore(); }
+
+  dom = installDom({ mountIds: [], worker: 'error' });
+  try {
+    const worker = new globalThis.Worker('/x');
+    const got = new Promise((resolve) => { worker.onerror = resolve; });
+    worker.postMessage({ id: 1, text: 'a' });
+    await got;
+  } finally { dom.restore(); }
+
+  dom = installDom({ mountIds: [], worker: 'malformed' });
+  try {
+    const worker = new globalThis.Worker('/x');
+    const got = new Promise((resolve) => { worker.onmessage = (event) => resolve(event.data); });
+    worker.postMessage({ id: 1, text: 'a' });
+    assert.equal(typeof (await got).tree, 'string');
+  } finally { dom.restore(); }
+});
