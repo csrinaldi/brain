@@ -1,6 +1,7 @@
 // marked-usage-guard.test.mjs — the vendored tokenizer is reachable through
-// ONE door: `lib/markdown.mjs` importing exactly `{ Lexer }` and calling only
-// `Lexer.lex(` (#1198, R1198-11, R1198-17). marked's own renderer and
+// ONE door: `lib/markdown.mjs` importing exactly `{ Lexer }` and making exactly
+// two calls on it: `Lexer.lex(` (static) and `.blockTokens(` on a `new Lexer(...)`
+// instance (#1198, R1198-11, R1198-17; #1218, R1218-4). marked's own renderer and
 // `marked.parse` emit HTML strings; the page never assigns markup, so the
 // only safe use is the tokenizer.
 
@@ -60,6 +61,31 @@ export function markedViolations(rel, text) {
   for (const m of code.matchAll(/\bLexer\.(\w*)/g)) {
     if (m[1] !== 'lex') bad.push(`${rel}: Lexer.${m[1]} — only Lexer.lex( is allowed`);
   }
+  // The inline phase, in any case, anywhere in the ui sources; `.inline(` only as a member call.
+  for (const m of code.matchAll(/\b(inlineTokens|lexInline)\b|\.\s*(inline)\s*\(/gi)) {
+    bad.push(`${rel}: ${m[1] ?? m[2]} — the inline phase is off limits`);
+  }
+  if (isDoor) {
+    for (const m of code.matchAll(/\b(Parser|Renderer|TextRenderer|Hooks)\b/g)) bad.push(`${rel}: ${m[1]} — the HTML emitters are off limits`);
+  }
+  if (isDoor) {
+    // Every other mention of the class, so an alias cannot dodge the member checks.
+    const noImport = code.replace(/\bimport\s+[^;]*?\bfrom\s*['"][^'"]*['"]\s*;?/g, ' ');
+    const mentions = [...noImport.matchAll(/\bLexer\b/g)].length;
+    const allowed = [...noImport.matchAll(/\bLexer\.lex\s*\(|\bnew\s+Lexer\s*\(/g)].length;
+    if (mentions !== allowed) bad.push(`${rel}: Lexer used other than as Lexer.lex( or new Lexer(`);
+    const instances = new Set([...noImport.matchAll(/([\w$]+)\s*=\s*new\s+Lexer\s*\(/g)].map((m) => m[1]));
+    const members = [
+      ...noImport.matchAll(/\bnew\s+Lexer\s*\((?:[^()]|\([^()]*\))*\)\s*\.\s*([\w$]*)\s*(\(?)/g),
+      ...[...instances].flatMap((name) => [...noImport.matchAll(new RegExp(`(?<![\\w$.])${name.replace(/\$/g, '\\$')}\\s*\\.\\s*([\\w$]*)\\s*(\\(?)`, 'g'))]),
+    ];
+    for (const m of members) {
+      if (m[1] !== 'blockTokens' || m[2] !== '(') bad.push(`${rel}: a Lexer instance's .${m[1]} — only .blockTokens( is allowed`);
+    }
+    for (const name of instances) {
+      if (new RegExp(`(?<![\\w$.])${name.replace(/\$/g, '\\$')}\\s*\\[`).test(noImport)) bad.push(`${rel}: computed member access on the Lexer instance ${name}`);
+    }
+  }
   for (const m of code.matchAll(/([\w$.]*)\.parse\s*\(/g)) {
     if (m[1] !== 'JSON' && m[1] !== 'Date') bad.push(`${rel}: ${m[1] || '(no receiver)'}.parse( — only JSON.parse and Date.parse`);
   }
@@ -88,6 +114,48 @@ test('#1198 self-test: the door itself is held to { Lexer } and Lexer.lex(', () 
   assert.notDeepEqual(markedViolations(DOOR, ok + "\nawait import('../vendor/marked.esm.js');"), []);
   assert.notDeepEqual(markedViolations(DOOR, ok + '\nthing.parse(x);'), []);
   assert.deepEqual(markedViolations(DOOR, ok + '\nJSON.parse(x); Date.parse(y);'), []);
+});
+
+// ── #1218 cold review round 5: instance calls are held to the same rule ──
+// The door may call exactly two things on the tokenizer: `Lexer.lex(` (static) and
+// `.blockTokens(` on a `new Lexer(...)` instance. `inlineTokens`, `lexInline`, an
+// instance `lex`, `Parser`, `Renderer` and `marked(` all run the inline phase or
+// emit HTML, which the pre-scan exists to keep off hostile input.
+
+test('#1218 cold-2 (r5) self-test: the two permitted calls pass', () => {
+  const ok = "import { Lexer } from '../vendor/marked.esm.js';\nconst a = Lexer.lex(s, {});\nconst lexer = new Lexer(opts());\nconst b = lexer.blockTokens(s, []);";
+  assert.deepEqual(markedViolations(DOOR, ok), []);
+  assert.deepEqual(markedViolations(DOOR, ok.replace('const lexer = new Lexer(opts());\nconst b = lexer.blockTokens', 'const b = new Lexer(opts()).blockTokens')), []);
+});
+
+test('#1218 cold-2 (r5) self-test: any other call on a Lexer instance or the class fails the guard', () => {
+  const head = "import { Lexer } from '../vendor/marked.esm.js';\n";
+  const bad = [
+    'new Lexer(o).inlineTokens(x);',
+    'const l = new Lexer(o); l.inlineTokens(x);',
+    'const l = new Lexer(o); l.lex(x);',
+    'const l = new Lexer(o); l.lexInline(x);',
+    'const l = new Lexer(o); l.inline(x);',
+    'const l = new Lexer(o); l.BlockTokens(x);',
+    'const l = new Lexer(o); l["inlineTokens"](x);',
+    'new Lexer(o).lex(x);',
+    'Lexer.lexInline(x);',
+    'Lexer.Lex(x);',
+    'const L = Lexer; L.lexInline(x);',
+    'const p = new Parser(); p.parse(t);',
+    'const r = new Renderer();',
+    'marked(x);',
+  ];
+  for (const snippet of bad) {
+    assert.notDeepEqual(markedViolations(DOOR, head + snippet), [], snippet);
+  }
+});
+
+test('#1218 cold-2 (r5): the real door passes, and it makes exactly the two permitted calls', () => {
+  const door = readFileSync(join(UI_DIR, DOOR), 'utf8');
+  assert.deepEqual(markedViolations(DOOR, door), []);
+  const code = codeOnly(door);
+  assert.ok(/\bLexer\.lex\s*\(/.test(code) && /\bnew\s+Lexer\s*\(/.test(code) && /\.blockTokens\s*\(/.test(code));
 });
 
 test('#1198 R1198-11/17: the real door imports the vendored file by a path that resolves to ui/vendor/marked.esm.js, and app.js imports nothing named marked', () => {

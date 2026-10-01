@@ -8,7 +8,8 @@
 //   R6  an image is its alt text; its URL never reaches the tree
 //   R7  a link is live only for http(s), after `safeHref` has looked at it
 //
-// Only `Lexer.lex` is used. The renderer and `marked.parse` emit HTML
+// Two calls on the tokenizer are used: the static `Lexer.lex` and `.blockTokens` on a
+// `new Lexer(...)` instance (the pre-scan). The renderer and `marked.parse` emit HTML
 // strings, and the page never assigns markup (see marked-usage-guard).
 //
 // Pure and deterministic: no clock, no randomness, no environment.
