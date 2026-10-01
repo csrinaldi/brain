@@ -837,3 +837,117 @@ test('#1218 cold-1 (r4): where a container\'s lines cannot be mapped, the whole 
   const out = markdownTree(src);
   assert.equal(degradedBlocks(out).length, 1);
 });
+
+// ── #1218 cold review round 5: the backslash is never substituted ──
+// A backslash is structural: `\|` keeps a pipe inside a GFM table cell. Substituting it
+// turned the pipe into a cell separator and marked dropped the surplus cells. Only the
+// counted delimiters `* _ ~ [ ]` are substituted.
+
+import { neutralText } from './markdown.mjs';
+
+test('#1218 cold-1 (r5): a degraded table row keeps its cells, an escaped pipe stays inside its cell', () => {
+  // WHEN a row holds `x \| y` in one cell and a 700-mark cell in the next
+  const bad = '*a '.repeat(700);
+  const out = markdownTree(`| A | B |\n|---|---|\n| x \\| y | ${bad} |\n`);
+  const table = out.blocks.find((b) => b.t === 'table');
+  // THEN the row still has 2 cells, the first shows `x | y`, the second its text as typed, with the notice
+  assert.equal(table.rows[0].length, 2);
+  assert.equal(flat(table.rows[0][0]), 'x | y');
+  assert.equal(flat(table.rows[0][1]), bad.trim());
+  assert.equal(degradedBlocks(out).length, 1);
+});
+
+test('#1218 cold-1 (r5): a degraded paragraph with escaped delimiters renders as typed, in bounded time', () => {
+  // WHEN a paragraph with `\*` and `\[` carries 700 marks
+  const src = `\\*x \\[y ${'*a '.repeat(700)}`;
+  const { value, ms } = timed(() => markdownTree(src));
+  // THEN no text is lost, the backslashes stay as typed, and it terminates within the bound
+  assert.equal(degradedBlocks(value).length, 1);
+  assert.equal(flat(value.blocks.find((b) => b.t === 'paragraph').children), src);
+  assert.ok(ms < PRESCAN_BOUND_MS, `took ${ms} ms`);
+});
+
+test('#1218 cold-1 (r5): 200 KB of backslashes and marks stays linear', () => {
+  for (const unit of ['\\*', '\\\\*a', 'a\\_b*', '\\|*']) {
+    const input = unit.repeat(Math.ceil(2e5 / unit.length));
+    const { ms } = timed(() => markdownTree(input));
+    console.log(`backslash ${JSON.stringify(unit)} ${input.length} chars: ${ms.toFixed(1)} ms`);
+    assert.ok(ms < PRESCAN_BOUND_MS, `${JSON.stringify(unit)} took ${ms} ms`);
+  }
+});
+
+// ── structure is unchanged by substitution ──
+
+// A table's cells are compared by text with the counted delimiters and the placeholders
+// both read as `?`: the substitution is same-length, so what must match is where the
+// cells split, and an escaped pipe that became a separator changes that.
+const shape = (cell) => String(cell.text).replace(/[*_~[\]\uE000-\uF8FF]/g, '?');
+const signature = (tokens) => tokens.map((t) => [
+  t.type,
+  t.type === 'table' ? [t.header.map(shape), t.rows.map((r) => r.map(shape))] : null,
+  t.type === 'list' ? t.items.map((i) => [i.task, i.checked, signature(i.tokens ?? [])]) : null,
+  t.type === 'blockquote' ? signature(t.tokens ?? []) : null,
+]);
+const blockSignature = (text) => signature(new Lexer({ gfm: true, breaks: false, pedantic: false }).blockTokens(text, []));
+
+const HAZ_R5 = 'a*'.repeat(700);
+const POOL = [
+  '', 'plain text', '# heading', 'Title\n=====', '---', '***', '* * *', '___', '- item', '* item', '+ item', '1. one',
+  '- [ ] todo', '- [x] done', '> quote', '> - nested', '[r]: https://example.com', '[^1]: note', '[^1] and [r]',
+  '```\ncode *x*\n```', '    indented code', '<div>html</div>', 'x \\* y \\[ z \\\\ w',
+  '| A | B |\n|---|---|\n| x \\| y | z |', '| A | B |\n|:-:|--:|\n| 1 | 2 |\n| 3 \\| 4 | 5 |',
+];
+const HAZARDS_R5 = [
+  (h) => h, (h) => `- ${h}`, (h) => `* ${h}`, (h) => `> ${h}`, (h) => `> - ${h}`, (h) => `1. ${h}`,
+  (h) => `# ${h}`, (h) => `| ${h} | b |`, (h) => `| x \\| y | ${h} |`, (h) => `[h]: https://e.com\n${h}`, (h) => `\\*${h}\\[`,
+];
+
+function lcg(seed) {
+  let s = seed >>> 0;
+  return (n) => { s = (Math.imul(s, 1664525) + 1013904223) >>> 0; return s % n; };
+}
+
+test('#1218 cold-1 (r5): substitution changes no block structure, over random documents with one degraded span', () => {
+  const rnd = lcg(1218);
+  const t0 = performance.now();
+  let degradedDocs = 0;
+  for (let n = 0; n < 1500; n++) {
+    // distinct fragments: marked drops a duplicate reference definition, which makes the
+    // pre-scan fall back to one span for the whole document (reported in the verify-report)
+    const parts = [];
+    for (let k = 2 + rnd(6); k > 0; k--) {
+      const pick = POOL[rnd(POOL.length)];
+      if (!parts.includes(pick)) parts.push(pick);
+    }
+    const hazard = HAZARDS_R5[rnd(HAZARDS_R5.length)](HAZ_R5);
+    // a table row only reads as one inside a table: give the row hazards their header
+    const needsTable = /^\| /.test(hazard) && !/^\[h\]/.test(hazard);
+    parts.splice(rnd(parts.length + 1), 0, needsTable ? `| A | B |\n|---|---|\n${hazard}` : hazard);
+    const doc = parts.join(rnd(2) ? '\n\n' : '\n');
+    const neutral = neutralText(doc);
+    if (neutral === null) continue;
+    degradedDocs++;
+    assert.deepEqual(blockSignature(neutral), blockSignature(doc), JSON.stringify(doc.replaceAll(HAZ_R5, '<H>')));
+  }
+  console.log(`structure property: ${degradedDocs} degraded documents in ${(performance.now() - t0).toFixed(0)} ms`);
+  assert.ok(degradedDocs > 800, `only ${degradedDocs} documents degraded`);
+  assert.ok(performance.now() - t0 < 2000);
+});
+
+test('#1218 cold-1 (r5): each block construct keeps its structure when its neighbour degrades', () => {
+  const cases = {
+    'escaped table pipe': ['| A | B |', '|---|---|', `| x \\| y | ${HAZ_R5} |`],
+    'link reference definition': ['[r]: https://example.com', '', HAZ_R5, '', '[r]'],
+    'footnote-like': ['[^1]: note', '', HAZ_R5],
+    'setext heading': ['Title', '=====', '', HAZ_R5],
+    'star hr': ['***', '', HAZ_R5, '', '* * *'],
+    'underscore hr': ['___', '', HAZ_R5],
+    'star bullet': ['* one', `* ${HAZ_R5}`, '* three'],
+  };
+  for (const [name, lines] of Object.entries(cases)) {
+    const doc = lines.join('\n');
+    const neutral = neutralText(doc);
+    assert.notEqual(neutral, null, `${name} must degrade`);
+    assert.deepEqual(blockSignature(neutral), blockSignature(doc), name);
+  }
+});

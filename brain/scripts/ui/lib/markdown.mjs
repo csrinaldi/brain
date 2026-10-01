@@ -158,18 +158,22 @@ const lexOptions = () => ({ gfm: true, breaks: false, pedantic: false });
 const lexTokens = (text, lex) => lex(text, lexOptions());
 
 // A degraded passage is neutralised by SAME-LENGTH substitution: each character
-// the pre-scan counts (`*` `_` `~` `[` `]`) and the backslash maps to one private-
-// use character the tokenizer treats as plain text. Backslash escaping was tried
-// first and is wrong: an escape is context-sensitive in CommonMark, literal inside
-// a code span and an autolink, so `x_y` there came out as `x\_y`. The length is
+// the pre-scan counts (`*` `_` `~` `[` `]`) maps to one private-use character the
+// tokenizer treats as plain text. The backslash is NEVER substituted: it is
+// structural (`\|` keeps a pipe inside a table cell, and a substituted one let the
+// pipe split the row so marked dropped the surplus cells), and left alone it
+// escapes nothing, since the character after it is now a placeholder. Backslash
+// escaping was tried first and is wrong: an escape is context-sensitive in
+// CommonMark, literal inside a code span and an autolink, so `x_y` there came out
+// as `x\_y`. The length is
 // kept so token offsets, and with them the notice placement, stay true. The line's
 // own block marker (quote prefix, list bullet) is left alone: the passage keeps its
 // quote or its list item and only its inline marks are neutralised.
 const BLOCK_PREFIX = /^(?: {0,3}> ?)*[ \t]*(?:(?:[-+*]|\d{1,9}[.)])[ \t]+)?/;
-const SUBSTITUTED = ['\\', '*', '_', '~', '[', ']'];
+const SUBSTITUTED = ['*', '_', '~', '[', ']'];
 const PUA_CHAR = /[\uE000-\uF8FF]/g;
 
-// Six private-use characters the document does not already use, or null when it
+// Five private-use characters the document does not already use, or null when it
 // uses the whole block (then nothing can be substituted safely).
 function placeholders(text) {
   const taken = new Set(text.match(PUA_CHAR) ?? []);
@@ -183,7 +187,7 @@ function placeholders(text) {
 
 function substituteLine(line, forward) {
   const keep = BLOCK_PREFIX.exec(line)[0].length;
-  return line.slice(0, keep) + line.slice(keep).replace(/[\\*_~[\]]/g, (ch) => forward.get(ch));
+  return line.slice(0, keep) + line.slice(keep).replace(/[*_~[\]]/g, (ch) => forward.get(ch));
 }
 
 // Put the originals back in every string of the token tree — text, code, link text
@@ -205,6 +209,37 @@ function restoreTokens(tokens, forward) {
   walk(tokens);
 }
 
+// The text with every degraded span substituted, and the offset in it of each span's
+// first line, in span order.
+function neutralise(text, degraded, forward) {
+  const lines = text.split('\n');
+  const mark = new Set();
+  for (const span of degraded) for (let i = span.from; i < span.to; i++) mark.add(i);
+  const starts = [];
+  const out = [];
+  let offset = 0;
+  let next = 0;
+  for (let i = 0; i < lines.length; i++) {
+    if (next < degraded.length && degraded[next].from === i) starts[next++] = offset;
+    const line = mark.has(i) ? substituteLine(lines[i], forward) : lines[i];
+    out.push(line);
+    offset += line.length + 1;
+  }
+  return { neutral: out.join('\n'), starts };
+}
+
+/**
+ * The text exactly as the tokenizer receives it: every degraded span substituted, or
+ * null when nothing degrades. Exported so a test can compare its block structure with
+ * the original's.
+ */
+export function neutralText(body) {
+  const text = String(body).replace(/\r\n|\r/g, '\n');
+  const degraded = prescan(text).filter((span) => span.degraded);
+  const forward = degraded.length ? placeholders(text) : null;
+  return forward ? neutralise(text, degraded, forward).neutral : null;
+}
+
 // One lex of the whole document, always. A degraded passage is substituted in place
 // first, so the tokenizer runs in linear time on it and every neighbour (a
 // reference definition, a list's other items) is tokenized in its own context.
@@ -221,20 +256,7 @@ function bodyBlocks(body, lex) {
     const marks = degraded.reduce((sum, span) => sum + span.marks, 0);
     return [{ t: 'degraded', notice: degradedNotice(marks) }, { t: 'literal', text: body }];
   }
-  const lines = text.split('\n');
-  const mark = new Set();
-  for (const span of degraded) for (let i = span.from; i < span.to; i++) mark.add(i);
-  const starts = []; // offset in the substituted text of each degraded span's first line, in span order
-  const out = [];
-  let offset = 0;
-  let next = 0;
-  for (let i = 0; i < lines.length; i++) {
-    if (next < degraded.length && degraded[next].from === i) starts[next++] = offset;
-    const line = mark.has(i) ? substituteLine(lines[i], forward) : lines[i];
-    out.push(line);
-    offset += line.length + 1;
-  }
-  const neutral = out.join('\n');
+  const { neutral, starts } = neutralise(text, degraded, forward);
   const tokens = lexTokens(neutral, lex);
   restoreTokens(tokens, forward);
 
