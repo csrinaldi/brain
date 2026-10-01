@@ -4,7 +4,7 @@
 
 | Clause | Result | Evidence |
 |---|---|---|
-| Fresh plainfiles and engram installs need no step outside install, bootstrap or upgrade | **No** | The first PR needed two manual steps in both repos. `brain:ship` refused for a missing `type:*` label, so the label was added by hand: F1, #1206, `evidence/plainfiles-14-ship.txt`, `evidence/engram-14-ship.txt`. It then failed with a raw GraphQL error until the branch was pushed by hand: F2, #1207, `evidence/plainfiles-15-ship-retry-type-label.txt`, `-16`, and the engram counterparts. A same-day lane re-ship also needed a hand-deleted remote branch: #1190, `evidence/plainfiles-61-seam2-inject.txt`, `-62`. What the 1.10.1 fixes targeted does hold. Once the push was done, `brain:ship` opened PR #2 with no `gh pr create` fallback (#1186/#1187): `-17`. The first real merge's post-merge run succeeded and opened no alarm (#1188): `evidence/plainfiles-20-postmerge-pr2.txt`, `evidence/engram-20-postmerge-pr2.txt` |
+| Fresh plainfiles and engram installs need no step outside install, bootstrap or upgrade | **No** | The first PR needed two manual steps in both repos. `brain:ship` refused for a missing `type:*` label, so the label was added by hand: F1, #1206, `evidence/plainfiles-14-ship.txt`, `evidence/engram-14-ship.txt`. It then failed with a raw GraphQL error until the branch was pushed by hand: F2, #1207, `evidence/plainfiles-15-ship-retry-type-label.txt`, `-16`, and the engram counterparts. A same-day lane re-ship also needed a hand-deleted remote branch: #1190, `evidence/plainfiles-61-seam2-inject.txt`, `-62`. Before any of that, the backend that the Enter default had declared had to be corrected by hand with `brain:config set memory.backend plainfiles`: E6, #1205, `evidence/plainfiles-02b-config-set-backend.txt`, reconstructed and marked as such. What the 1.10.1 fixes targeted does hold. Once the push was done, `brain:ship` opened PR #2 with no `gh pr create` fallback (#1186/#1187): `-17`. The first real merge's post-merge run succeeded and opened no alarm (#1188): `evidence/plainfiles-20-postmerge-pr2.txt`, `evidence/engram-20-postmerge-pr2.txt` |
 | No credential committed | **Yes** | `credential-scan.txt`; `.env` untracked and ignored in both repos and both checkout-B clones |
 | #1081's four seams recover | **Yes** | Per seam in the table below |
 
@@ -57,7 +57,7 @@ The cold review of PR #1208 (rev 1, `judgment:cold-1`) found that an earlier dra
 - #1168: `.memory` tracking differs by backend. After the pulls, plainfiles main showed ` M .memory/index.jsonl` and engram main showed `?? .memory/index.jsonl` (`plainfiles-42`, `engram-42`).
 - #1189: `memory/cli: backend 'plainfiles' does not implement op 'import'` still printed on every plainfiles `pull` (`plainfiles-41`, `-42`).
 - #1190: reproduced, see above.
-- #1115, #1117, #1167, #1168, #1189 and #1190 are open and unchanged by this run; the lane PR's `auto-merge was refused (unsupported)` line is the known `allow_auto_merge: false` setting, so a human or the demo merged.
+- #1115, #1117, #1167, #1168, #1189 and #1190 are open and unchanged by this run; the lane PR's `auto-merge was refused (unsupported)` line is the known `allow_auto_merge: false` setting, so the demo agent merged them with `gh pr merge --squash` (`plainfiles-34`, `-74`; `engram-36`).
 
 ## PRs and issues created
 
