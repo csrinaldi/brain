@@ -219,7 +219,7 @@ export default {
 
   // §7 Team memory
   'bootstrap.memory.section':        'Team memory',
-  'bootstrap.memory.prompt':         'Which memory backend do you use? [engram]: ',
+  'bootstrap.memory.prompt':         'Which memory backend does this team use? (engram|plainfiles): ',
   // {backend} = backend name (e.g. engram)
   'bootstrap.memory.backend':        'memory backend: {backend} ({source})',
   'bootstrap.memory.undeclared':     'no memory backend is declared (env, .env, brain.config.json memory.backend) — none was guessed, so memory setup was skipped. Next: npm run brain:config -- set memory.backend engram|plainfiles, then re-run env:init.',
