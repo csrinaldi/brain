@@ -4,9 +4,17 @@
 
 | Clause | Result | Evidence |
 |---|---|---|
-| Fresh plainfiles and engram installs need no step outside install, bootstrap or upgrade | **Yes, with two usability findings** | `brain:ship` opened the first feature PR in both repos with no `gh pr create` fallback (#1186/#1187 fixed): `evidence/plainfiles-14-ship.txt` (all local gates pass), `-17-ship-after-push.txt`; engram `-14`, `-17`. The first real merge's post-merge run succeeded and opened no alarm (#1188 fixed): `evidence/plainfiles-20-postmerge-pr2.txt`, `evidence/engram-20-postmerge-pr2.txt`. Findings F1 and F2 below needed a human action but are not defects of the fixed gates |
+| Fresh plainfiles and engram installs need no step outside install, bootstrap or upgrade | **No** | The first PR needed two manual steps in both repos. `brain:ship` refused for a missing `type:*` label, so the label was added by hand: F1, #1206, `evidence/plainfiles-14-ship.txt`, `evidence/engram-14-ship.txt`. It then failed with a raw GraphQL error until the branch was pushed by hand: F2, #1207, `evidence/plainfiles-15-ship-retry-type-label.txt`, `-16`, and the engram counterparts. A same-day lane re-ship also needed a hand-deleted remote branch: #1190, `evidence/plainfiles-61-seam2-inject.txt`, `-62`. What the 1.10.1 fixes targeted does hold. Once the push was done, `brain:ship` opened PR #2 with no `gh pr create` fallback (#1186/#1187): `-17`. The first real merge's post-merge run succeeded and opened no alarm (#1188): `evidence/plainfiles-20-postmerge-pr2.txt`, `evidence/engram-20-postmerge-pr2.txt` |
 | No credential committed | **Yes** | `credential-scan.txt`; `.env` untracked and ignored in both repos and both checkout-B clones |
 | #1081's four seams recover | **Yes** | Per seam in the table below |
+
+## Ruling
+
+The cold review of PR #1208 (rev 1, `judgment:cold-1`) found that an earlier draft of this report answered the clause above with "Yes, with two usability findings". The clause is binary, so that answer was a misreport. The maintainer ruled on 2026-09-30:
+
+- the clause is **No**, and phase 1 of #1121 stays open;
+- #1205, #1206 and #1207 ship in a 1.10.2 cut;
+- the first-PR stretch is then re-run on fresh consumers.
 
 ## The stretch that ran clean
 
