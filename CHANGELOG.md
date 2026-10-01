@@ -6,6 +6,125 @@ registry (ADR-0030, superseding ADR-0006's git tags); consumers upgrade with
 changes** before upgrading — additive `brain.config.json` migrations apply
 automatically, but renames need manual action.
 
+## v1.11.0 — a missing label or an unpushed branch is refused up front, the memory backend has no default, and SDD artifacts are readable in the UI
+
+**Manual step: read before upgrading.** Nothing in your tree has to move, no `brain.config.json`
+migration applies (the release reporter measured none above 1.10.1) and no new key is added. But
+three behaviors your automation or your habits may rely on changed, and one new thing ships in the
+package. The 1.10.1 exit run (#1204) found that the first PR of a fresh consumer still needed two
+manual steps (adding a `type:*` label, pushing the branch) and that the backend prompt declared
+`engram` on Enter. **This release does not remove the two manual steps.** It makes each one fail
+at the first moment it matters, with a message that names the fix, instead of at the last step or
+with a provider error. It removes the Enter default, and adds the readable-artifact drawer to the
+local UI. Each item below was checked against the code on `main`, not against the PR description.
+
+| Where | 1.10.1 | 1.11.0 |
+|---|---|---|
+| `npm run brain:env:init`, memory backend prompt (on a terminal, nothing declaring a backend) | Asked `Which memory backend do you use? [engram]: `. Enter declared `engram` and wrote it to `brain.config.json`. | Asks `Which memory backend does this team use? (engram\|plainfiles): ` (the `es` text changed too). **There is no default:** Enter re-prompts, as does any other answer. End of input at the prompt (Ctrl-D) with nothing typed declares nothing: `env:init` warns, lists `memory backend undeclared (next: npm run brain:config -- set memory.backend engram\|plainfiles, then re-run env:init)` as a pending step, still exits 0, and writes nothing. A valid answer with no trailing newline at end of input is kept (#1205, #1214). |
+| `npm run brain:ticket:start -- <id>` on an issue with no `type:*` label | Created the branch or worktree. `brain:ship` refused the same issue later, after the work was done. | Exits 1 before any branch or worktree exists, with the message quoted below. Automation that called `ticket:start` on unlabelled issues now fails at that step (#1206). |
+| `npm run brain:ship` when the head branch is not on the remote at your `HEAD` | Reached the forge, which answered with a raw provider error. | Exits 1 before any forge call and names the push to run. `brain:ship` never pushes (#1207). |
+| The local UI (`npm run brain:ui`), the drawer's SDD tab | Showed which SDD stages are present. | Each stage that is a document has a "show document" control that renders its markdown. `spec.md` and `tasks.md` are now read from the committed tree at `HEAD`, not from the working tree (#1198). |
+
+### `env:init` no longer chooses a memory backend for you (#1205, #1214)
+
+ADR-0004 Amendment 3 made the backend a team decision with no default. 1.10.0's prompt still
+accepted Enter as `engram`, which declared a team-wide setting on a keystroke. **The 1.10.0
+CHANGELOG line saying Enter accepts `engram` is superseded.** The prompt is asked only on a
+terminal and only when nothing declares a backend; the cases are:
+
+- `engram` or `plainfiles`: written to tracked `brain.config.json`, as before.
+- Empty (Enter) or an unknown value: the prompt repeats (an unknown value also prints `Unknown backend "<value>" — only "engram" or "plainfiles" are supported.`).
+- End of input with a valid backend typed and no trailing newline: kept and written. End of input
+  with nothing or an invalid value: undeclared, with the warning and the pending step above.
+- Without a terminal: unchanged, nothing is asked and nothing is declared (pending step, exit 0).
+
+### `ticket:start` refuses an issue with no `type:*` label (#1206)
+
+The check uses the same `findTypeLabel` as `brain:ship`, so the two verbs agree on what "has a
+type" means: a label starting `type:` (GitHub) or `type::` (GitLab). It runs after the issue is read and before the
+branch or worktree is created. The message, from `brain/scripts/i18n/en.mjs`
+(`ticket.error.noTypeLabel`), is:
+
+```
+✗ Issue #<id> has no type:* label (labels found: [<labels>]) — brain:ship would refuse it later. Add one on the issue now (for example type:feature, type:bug or type:chore; type::feature on GitLab), then re-run.
+```
+
+`env:init` already creates the `type:*` labels on your remote (see `docs/adoption.md`); the
+refusal is about an issue that does not carry one.
+
+### `brain:ship` checks the head is pushed before it asks the forge (#1207)
+
+After `brain:check` passes and before the issue is read or any forge call is made, `brain:ship`
+asks git (`ls-remote`, `rev-parse`, `merge-base`; no forge call) whether `origin` holds the head
+branch at your `HEAD`. A red `brain:check` still wins and makes no remote call. The four
+refusals exit 1, and none of them pushes or forces anything:
+
+| State | What `brain:ship` says to do |
+|---|---|
+| The branch is not on the remote | `The branch was never pushed. Run: git push -u origin <branch>`, then re-run. |
+| The remote branch is behind your `HEAD` | `The remote branch is behind your HEAD. Run: git push origin <branch>`, then re-run. |
+| The remote branch has commits you do not have (diverged) | `The remote branch has commits that are not in your local history (it diverged).` Fetch and integrate them, then push; it names no push command. |
+| The remote could not be read | `Could not read the remote branch: <error>.` Check the remote is reachable, then re-run. |
+
+Each message starts `brain:ship: the head branch "<branch>" is not on the remote at your HEAD — no PR was opened.`
+
+### SDD artifacts are readable in the local UI (#1198)
+
+Start the UI with `npm run brain:ui` (it listens on `127.0.0.1`, port 3000 by default). In a
+change's drawer, the SDD tab lists the lifecycle stages; each stage whose file is a document
+(`proposal.md`, `spec.md`, `design.md`, `tasks.md`, `apply-progress.md`, `verify-report.md`)
+expands, through a "show document" control, into that file's markdown. A seventh row, `working
+memory — resume.md`, does the same for the change branch's `resume.md`. `archive` is a stage,
+not a document, and has none. What a consumer gets, and what it can rely on:
+
+- **Committed content only.** Documents are read from the git object store at `HEAD` (and
+  `resume.md` at the change branch's tip), never from the working tree, and each carries a
+  `path @ <commit>` stamp. **Uncommitted edits are not shown.** This also moves the existing
+  spec cards and tasks checklist from the working tree to `HEAD`.
+- **A document is cut at 262144 bytes** and says "truncated at 262144 bytes"; there is no "load
+  full" action. A document that is missing at `HEAD` and one that could not be read use
+  different wording.
+- **Markdown renders as inert DOM.** The page builds elements from text nodes only, with no
+  `innerHTML`. Raw HTML and HTML comments are shown as literal text; an image is shown as
+  `[image: <alt>]` and nothing is loaded; a relative or `#anchor` link is shown as text with its
+  target and is not navigable; only absolute `http(s)` links are live, and they open with
+  `rel="noopener noreferrer"` and `referrerpolicy="no-referrer"`.
+- **A vendored, hash-pinned tokenizer ships in the package.** `marked` 18.0.14 (MIT) is at
+  `brain/scripts/ui/vendor/marked.esm.js`, with its licence beside it
+  (`vendor/LICENSE.marked`) and its sha256 recorded in `vendor/VERSIONS`; a test fails if the
+  file differs from that pin. It is **not** in `dependencies`: installing brain adds no
+  dependency. Only its lexer is used (no HTML-string output). A consumer that audits what
+  ships should expect this one third-party file under `brain/scripts/`.
+
+### What ships
+
+| PR | Change |
+|---|---|
+| #1208 | The 1.10.1 phase-1 exit run: evidence and findings only. No runtime change (#1204). |
+| #1209 | `env:init`'s backend prompt has no default; Enter re-prompts and end of input declares nothing (#1205). |
+| #1210 | `ticket:start` refuses an issue with no `type:*` label before creating a branch (#1206). |
+| #1211 | `brain:ship` refuses an unpushed or stale head and names the push to run (#1207). |
+| #1212 | UI: SDD artifacts readable in the drawer, rendered as inert DOM from markdown (#1198). |
+| #1213 | A memory lane record. Internal. |
+| #1217 | The backend prompt keeps a newline-less answer; the `es` prompt and the caller block are pinned by tests (#1214). |
+| #1222 | Tests feed child stdin from a file, so the suite cannot hang where the cold reviewer runs it (#1221). Internal. |
+
+### Known follow-ups a consumer can hit
+
+Listed in `docs/KNOWN-LIMITATIONS.md`: #1189 (on `plainfiles`, the post-merge hook, and so a
+`git pull` or `brain:memory:pull` that integrates commits, prints an `import` refusal), #1190 (a same-day lane
+re-ship after a squash merge may refuse as diverged), and the 1.10.1 follow-ups that remain open.
+
+### Why a minor and not a patch
+
+The release reporter measured 8 commits since v1.10.1: 1 `feat`, 5 `fix` and 2 internal, with no
+config migration above 1.10.1. By the rule 1.6.0 to 1.10.0 applied, a new capability is a minor:
+#1212 adds the readable-artifact drawer and a vendored third-party file to the package. The
+fixes also change what a consumer observes (a prompt with no default, a refusal in
+`ticket:start`, a refusal in `brain:ship`), which a patch should not do. Nothing you configured
+has to change. The maintainer ruled to cut this from `main` as 1.11.0 rather than cherry-pick the
+fixes into 1.10.2.
+
 ## v1.10.1 — a fresh consumer's first PR and first merge need no human
 
 **Manual step: read before upgrading.** Nothing in your tree has to move, no `brain.config.json`
