@@ -29,20 +29,13 @@ import { parseTasksList } from './lib/tasks-list.mjs';
 import { parseBlame } from './lib/blame.mjs';
 import { shapeResumeView } from './lib/resume-view.mjs';
 import { parseFrontmatter } from '../memory/lib/resume-frontmatter.mjs';
-import { LIFECYCLE_STAGES, ARTEFACT_FILE, parseChangeId } from '../lib/sdd-layout.mjs';
+import { LIFECYCLE_STAGES, ARTEFACT_FILE } from '../lib/sdd-layout.mjs';
+import { parseTreeListing, pickChangeDir } from '../lib/git-tree.mjs';
 import { prUrl } from './lib/forge-url.mjs';
 import { documentWording, NO_CHANGE_BRANCH } from './lib/drawer-model.mjs';
 
 /** D14's caveat, verbatim in the UI, until #880 lands `type: review` records. */
 export const REVIEWS_SOURCE_NOTE = 'forge comments until #880 lands';
-
-/** The one dir under `openspec/changes/` that carries `issue`, or why not. (Moves to lib/git-tree.mjs in phase 2.) */
-function pickChangeDirIn(names, issue) {
-  const matches = names.filter((n) => parseChangeId(n)?.iid === String(issue));
-  if (matches.length === 1) return { ok: true, dir: matches[0] };
-  if (matches.length === 0) return { ok: false, state: 'missing', reason: `no change dir for #${issue}` };
-  return { ok: false, state: 'unreadable', reason: `more than one change dir carries #${issue}: ${matches.join(', ')}` };
-}
 
 /** The path a "no change dir" reason names — a glob, not a file, since none exists to point at. */
 function expectedChangeDirGlob(issue) {
@@ -233,18 +226,6 @@ function documentEntry(path, ref, fields) {
   return { path, ref, commit: null, state: 'missing', text: null, bytes: null, truncated: false, truncatedAt: null, reason: null, note: null, ...fields };
 }
 
-/** `ls-tree -l -z` output to `{path: {mode, type, sha, size}}`. A tree's size is `-`. */
-function parseTreeListing(out) {
-  const entries = new Map();
-  for (const record of String(out ?? '').split('\0')) {
-    if (!record) continue;
-    const tab = record.indexOf('\t');
-    const [mode, type, sha, size] = record.slice(0, tab).trim().split(/\s+/);
-    entries.set(record.slice(tab + 1), { mode, type, sha, size: size === '-' ? null : Number(size) });
-  }
-  return entries;
-}
-
 /** Cut at the cap on a UTF-8 boundary: back up while the first dropped byte is a continuation byte. */
 function capText(text) {
   const buf = Buffer.from(text, 'utf8');
@@ -327,7 +308,7 @@ function listChangeDirNames({ run, commit }) {
 function readResumeAt({ run, commit, issue, label }) {
   const fallbackPath = RESUME_FILE;
   try {
-    const picked = pickChangeDirIn(listChangeDirNames({ run, commit }), issue);
+    const picked = pickChangeDir(listChangeDirNames({ run, commit }), issue);
     if (!picked.ok && picked.state === 'missing') return documentEntry(fallbackPath, label, { state: 'missing', reason: `no change dir for #${issue} on ${label}` });
     if (!picked.ok) return documentEntry(fallbackPath, label, { state: 'unreadable', reason: picked.reason });
     const path = `${CHANGES_ROOT_DIR}/${picked.dir}/${RESUME_FILE}`;
