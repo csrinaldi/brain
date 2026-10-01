@@ -151,3 +151,37 @@ test('#1218 R1218-6: the promise never rejects, even when postMessage throws', a
   assert.deepEqual(await promise, { kind: 'failed' });
   assert.equal(fx.workers[0].terminated, 1);
 });
+
+// ── integration: the real worker file through worker_threads ──
+
+import { nodeWebWorker } from '../test-support/node-web-worker.mjs';
+
+const realEffects = (onSpawn) => ({
+  spawn: () => {
+    const worker = nodeWebWorker('/lib/markdown-worker.mjs');
+    onSpawn?.(worker);
+    return worker;
+  },
+  setTimer: (fn, ms) => setTimeout(fn, ms),
+  clearTimer: (handle) => clearTimeout(handle),
+});
+
+test('#1218 R1218-5: many sub-threshold passages are cut at the budget and the thread exits', async () => {
+  let worker;
+  const input = Array.from({ length: 150 }, () => '_a '.repeat(590)).join('\n\n');
+  const t0 = performance.now();
+  const { promise } = renderOffThread(input, realEffects((w) => { worker = w; }));
+  const outcome = await promise;
+  const elapsed = performance.now() - t0;
+  assert.deepEqual(outcome, { kind: 'timeout' });
+  assert.ok(elapsed < RENDER_BUDGET_MS + 300, `took ${elapsed} ms`);
+  await worker.exited;
+});
+
+test('#1218 R1218-5: the 200 KB emphasis input returns a degraded passage without reaching the timeout', async () => {
+  const input = '*'.repeat(1e5) + 'a' + '*'.repeat(1e5);
+  const { promise } = renderOffThread(input, realEffects());
+  const outcome = await promise;
+  assert.equal(outcome.kind, 'tree');
+  assert.equal(outcome.tree.blocks[0].t, 'degraded');
+});

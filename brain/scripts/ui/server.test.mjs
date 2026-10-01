@@ -1151,6 +1151,7 @@ test('#881: the three static assets answer with their own content-type: /app.js,
       ['/app.css', 'text/css', /\.state-planned/],
       ['/lib/layout.mjs', 'application/javascript', /export function layout/],
       ['/lib/colour.mjs', 'application/javascript', /export function colourClass/],
+      ['/lib/markdown-worker.mjs', 'application/javascript', /export function reply/],
     ];
     for (const [path, type, bodyRe] of cases) {
       const res = await fetch(`${base}${path}`);
