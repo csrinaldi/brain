@@ -26,7 +26,10 @@ export function fakeGit({ files = {}, head = HEAD_DEFAULT, branches = {}, blame,
   const optsLog = [];
 
   const refs = { HEAD: { commit: head, files }, [head]: { commit: head, files } };
-  for (const [name, b] of Object.entries(branches)) refs[name] = { commit: b.commit, files: b.files ?? {} };
+  for (const [name, b] of Object.entries(branches)) {
+    refs[name] = { commit: b.commit, files: b.files ?? {} };
+    refs[b.commit] ??= refs[name]; // a commit id resolves to the tree it names, as in git
+  }
   const blobs = new Map();
   for (const ref of Object.values(refs)) for (const [p, t] of Object.entries(ref.files)) blobs.set(blobId(p, t), { path: p, text: t });
 

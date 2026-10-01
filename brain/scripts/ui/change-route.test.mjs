@@ -88,7 +88,7 @@ test('#881: a change dir + an open PR resolves the branch from the PR, never cal
   assert.deepEqual(result.value.workingMemory.value.next_action, { ok: true, value: 'ship change-route.mjs', source: { path: `${BRANCH}:resume.md` } });
   assert.deepEqual(result.value.workingMemory.value.blockers, { ok: true, value: [], source: { path: `${BRANCH}:resume.md` } });
   assert.ok(!run.calls.some((args) => args[0] === 'branch'), 'a PR headBranch is authoritative — no branch listing needed');
-  assert.deepEqual(run.calls.find((args) => args[0] === 'show'), ['show', `${BRANCH}:resume.md`]);
+  assert.ok(!run.calls.some((args) => args[0] === 'show'), 'resume.md is read as a blob at the resolved commit, never `git show <branch>:`');
 });
 
 // ── 2. a change dir, no PR, exactly one matching branch ─────────────────────
@@ -539,15 +539,42 @@ test('#1198 R1198-5: pathspecs are literal — a `*` in a directory name is neve
 
 // ── resume at the branch tip (D7) ───────────────────────────────────────────
 
-test('#1198 R1198-4/5: resume.md committed on the branch is present, stamped with the branch tip, read with `show <branch>:resume.md`', () => {
+test('#1198 R1198-4/5: resume.md committed on the branch is present, stamped with the branch tip, read as a blob at the resolved tip', () => {
   const run = fakeWith({ files: allArtifacts() });
   const { documents } = viewOf(run);
   assert.equal(documents.resume.state, 'present');
   assert.equal(documents.resume.commit, BRANCH_TIP);
   assert.equal(documents.resume.ref, BRANCH);
   assert.equal(documents.resume.text, RESUME_TEXT);
-  assert.deepEqual(run.calls.find((a) => a[0] === 'show'), ['show', `${BRANCH}:resume.md`]);
+  assert.ok(!run.calls.some((a) => a[0] === 'show'), 'no `git show` is run');
+  assert.ok(run.calls.some((a) => a.includes('ls-tree') && a.includes(BRANCH_TIP)), 'the tree is listed at the resolved commit');
   assert.equal(documents.proposal.commit, HEAD, 'the six HEAD documents are unaffected');
+});
+
+test('#1198 cold-1: resume.md is stamped and read at ONE resolved commit, even when the branch advances between calls', () => {
+  const TIP_A = 'a1'.padEnd(40, '0');
+  const TIP_B = 'b2'.padEnd(40, '0');
+  const TEXT_A = `${RESUME_TEXT}\nfrom A`;
+  const TEXT_B = `${RESUME_TEXT}\nfrom B, a longer and different body`;
+  const base = { files: allArtifacts(), head: HEAD, blame: '' };
+  const before = fakeGit({ ...base, branches: { [BRANCH]: { commit: TIP_A, files: { 'resume.md': TEXT_A } }, [TIP_A]: { commit: TIP_A, files: { 'resume.md': TEXT_A } } } });
+  const after = fakeGit({ ...base, branches: { [BRANCH]: { commit: TIP_B, files: { 'resume.md': TEXT_B } }, [TIP_A]: { commit: TIP_A, files: { 'resume.md': TEXT_A } }, [TIP_B]: { commit: TIP_B, files: { 'resume.md': TEXT_B } } } });
+  const calls = [];
+  let advanced = false;
+  const run = (file, args, opts) => {
+    calls.push(args);
+    const out = (advanced ? after : before)(file, args, opts);
+    if (args[0] === 'rev-parse' && args[2] === `${BRANCH}^{commit}`) advanced = true; // the branch moves right after it was resolved
+    return out;
+  };
+  const { documents } = viewOf(run);
+  assert.equal(documents.resume.state, 'present');
+  assert.equal(documents.resume.commit, TIP_A);
+  assert.equal(documents.resume.text, TEXT_A);
+  assert.equal(documents.resume.bytes, Buffer.byteLength(TEXT_A));
+  const resolvedAt = calls.findIndex((a) => a[0] === 'rev-parse' && a[2] === `${BRANCH}^{commit}`);
+  const later = calls.slice(resolvedAt + 1).filter((a) => a.some((x) => x === BRANCH || x === `${BRANCH}:resume.md`));
+  assert.deepEqual(later, [], 'after resolution no call may name the bare branch again');
 });
 
 test('#1198 D7: a branch without resume.md is missing; an unresolvable branch is unreadable with the reason', () => {

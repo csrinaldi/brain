@@ -299,9 +299,11 @@ function readHeadDocuments({ run, dir }) {
 }
 
 /**
- * `resume.md` at the change branch's tip, as today (`git show <branch>:resume.md`),
- * stamped with the tip commit. `ls-tree` tells "no such file" from "could not
- * read" without parsing stderr, which the `run` seam discards.
+ * `resume.md` at the change branch's tip. The branch is resolved to a commit
+ * ONCE; the tree is listed at that commit and the blob read by its sha, so the
+ * stamp names the commit the text came from even if the branch advances
+ * meanwhile. `ls-tree` tells "no such file" from "could not read" without
+ * parsing stderr, which the `run` seam discards.
  */
 function readResumeDocument({ run, resolved }) {
   const path = 'resume.md';
@@ -309,8 +311,9 @@ function readResumeDocument({ run, resolved }) {
   const { branch } = resolved;
   try {
     const commit = String(run('git', ['rev-parse', '--verify', `${branch}^{commit}`])).trim();
-    const tree = parseTreeListing(run('git', ['--literal-pathspecs', 'ls-tree', '-l', '-z', branch, '--', path]));
-    return documentFromEntry({ path, ref: branch, commit, entry: tree.get(path), read: (maxBuffer) => run('git', ['show', `${branch}:${path}`], { maxBuffer }) });
+    const tree = parseTreeListing(run('git', ['--literal-pathspecs', 'ls-tree', '-l', '-z', commit, '--', path]));
+    const entry = tree.get(path);
+    return documentFromEntry({ path, ref: branch, commit, entry, read: (maxBuffer) => run('git', ['cat-file', 'blob', entry.sha], { maxBuffer }) });
   } catch (err) {
     return documentEntry(path, branch, { state: 'unreadable', reason: errReason(err) });
   }
