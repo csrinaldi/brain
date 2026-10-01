@@ -1,0 +1,13 @@
+# cwd: /home/gandalf/IA/brain-test-engram
+# date: 2026-10-01T17:05:12Z
+$ gh run watch 36896694723 --exit-status | head -3; gh run view 36896694723 | head -8
+Run governance-postmerge (36896694723) has already completed with 'success'
+
+✓ main governance-postmerge · 36896694723
+Triggered via push less than a minute ago
+
+JOBS
+✓ audit-and-revert in 18s (ID 110485356511)
+
+ANNOTATIONS
+exit=0

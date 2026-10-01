@@ -1,0 +1,18 @@
+# cwd: /home/gandalf/IA/brain-test-engram
+# date: 2026-10-01T17:01:26Z
+$ engram search SYNTHETIC-1229
+Update available: 2.0.0 -> 2.2.1
+To update:
+  brew update && brew upgrade engram
+  or: go install github.com/Gentleman-Programming/engram/v2/cmd/engram@latest
+
+Found 1 memories:
+
+[1] #21 (session_summary) — SYNTHETIC-1229-R1-engram
+    **Actor:** @csrinaldi (agente)
+**Fuente:** issue #1 / engram save on gandalf-ROG-Zephyrus-G15-GA503QR-GA503QR; actor from git config brain.actor; actorKind agent from env AI_AGENT=claude-code_2-1-285_agent; issue 1 declared via --issue
+
+SYNTHETIC-1229-first-record-body
+    2026-10-01 14:01:22 | project: brain-test-engram | scope: project
+
+exit=0

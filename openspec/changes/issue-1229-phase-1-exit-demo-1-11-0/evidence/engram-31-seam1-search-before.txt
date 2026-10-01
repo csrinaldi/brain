@@ -1,0 +1,10 @@
+# cwd: /home/gandalf/IA/brain-test-engram
+# date: 2026-10-01T17:01:22Z
+$ engram search SYNTHETIC-1229
+Update available: 2.0.0 -> 2.2.1
+To update:
+  brew update && brew upgrade engram
+  or: go install github.com/Gentleman-Programming/engram/v2/cmd/engram@latest
+
+No memories found for: "SYNTHETIC-1229"
+exit=0

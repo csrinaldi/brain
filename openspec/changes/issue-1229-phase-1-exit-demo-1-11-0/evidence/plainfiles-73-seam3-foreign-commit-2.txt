@@ -1,0 +1,14 @@
+# cwd: /home/gandalf/IA/brain-test-plainfiles-seam3
+# date: 2026-10-01T17:08:24Z
+$ git commit -m 'chore: add a foreign file on the lane branch' -m 'Refs #1'; echo "commit-exit=$?"; git log --oneline -3; git status -sb
+✓ No prohibited references found.
+✓ Artifact structure is valid.
+[memory/gandalf-rog-zephyrus-g15-ga503qr-ga503qr-2026-10-01 77650f0] chore: add a foreign file on the lane branch
+ 1 file changed, 1 insertion(+)
+ create mode 100644 FOREIGN.md
+commit-exit=0
+77650f0 chore: add a foreign file on the lane branch
+0ef721e memory: gandalf-rog-zephyrus-g15-ga503qr-ga503qr 2026-10-01 (1 records)
+18b3684 memory: gandalf-rog-zephyrus-g15-ga503qr-ga503qr 2026-10-01 (2 records) (#3)
+## memory/gandalf-rog-zephyrus-g15-ga503qr-ga503qr-2026-10-01
+exit=0

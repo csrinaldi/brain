@@ -1,0 +1,9 @@
+# cwd: /home/gandalf/IA/brain-test-engram
+# date: 2026-10-01T17:04:59Z
+$ gh pr view 3 --json state,mergedAt,mergeCommit; gh run list --limit 4
+{"mergeCommit":{"oid":"826eb2ce5c578c79f1ff031273bfec3b8fa8b104"},"mergedAt":"2026-10-01T17:04:31Z","state":"MERGED"}
+completed	success	memory: gandalf-rog-zephyrus-g15-ga503qr-ga503qr 2026-10-01 (2 record…	governance-postmerge	main	push	36896694723	23s	2026-10-01T17:04:34Z
+completed	success	memory: gandalf-rog-zephyrus-g15-ga503qr-ga503qr 2026-10-01 (2 records)	governance	memory/gandalf-rog-zephyrus-g15-ga503qr-ga503qr-2026-10-01	pull_request	36896440978	16s	2026-10-01T17:02:29Z
+completed	success	feat: add a demo line to the README (#2)	governance-postmerge	main	push	36896181537	16s	2026-10-01T17:00:27Z
+completed	success	feat: add a demo line to the readme	governance	feat/issue-1-add-a-demo-line-to-the-readme	pull_request	36895798604	15s	2026-10-01T16:57:16Z
+exit=0

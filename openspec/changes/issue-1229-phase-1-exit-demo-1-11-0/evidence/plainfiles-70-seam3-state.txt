@@ -1,0 +1,13 @@
+# cwd: /home/gandalf/IA/brain-test-plainfiles
+# date: 2026-10-01T17:08:16Z
+$ git branch --show-current; git status -sb; git worktree list; git log --oneline -3 memory/gandalf-rog-zephyrus-g15-ga503qr-ga503qr-2026-10-01
+main
+## main...origin/main
+ M .memory/index.jsonl
+?? .memory/records/2026-10-rec-ecdf6e3704aa7064.jsonl
+/home/gandalf/IA/brain-test-plainfiles         18b3684 [main]
+/home/gandalf/IA/brain-test-plainfiles-issue-1 3a8a8a0 [feat/issue-1-add-a-demo-line-to-the-readme]
+0ef721e memory: gandalf-rog-zephyrus-g15-ga503qr-ga503qr 2026-10-01 (1 records)
+18b3684 memory: gandalf-rog-zephyrus-g15-ga503qr-ga503qr 2026-10-01 (2 records) (#3)
+feffc7f feat: add a demo line to the README (#2)
+exit=0

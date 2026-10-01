@@ -1,0 +1,20 @@
+# cwd: /home/gandalf/IA/brain-test-plainfiles-seam3
+# date: 2026-10-01T17:09:38Z
+$ git revert --no-edit HEAD; echo "revert-exit=$?"; git commit --amend -m 'Revert the foreign file on the lane branch' -m 'Refs #1' 2>&1 | tail -3; echo; git log --oneline -3; git show --stat HEAD | tail -4
+[memory/gandalf-rog-zephyrus-g15-ga503qr-ga503qr-2026-10-01 02ec4ce] Revert "chore: add a foreign file on the lane branch"
+ Date: Thu Oct 1 14:09:38 2026 -0300
+ 1 file changed, 1 deletion(-)
+ delete mode 100644 FOREIGN.md
+revert-exit=0
+ Date: Thu Oct 1 14:09:38 2026 -0300
+ 1 file changed, 1 deletion(-)
+ delete mode 100644 FOREIGN.md
+
+1473976 Revert the foreign file on the lane branch
+77650f0 chore: add a foreign file on the lane branch
+0ef721e memory: gandalf-rog-zephyrus-g15-ga503qr-ga503qr 2026-10-01 (1 records)
+    Refs #1
+
+ FOREIGN.md | 1 -
+ 1 file changed, 1 deletion(-)
+exit=0

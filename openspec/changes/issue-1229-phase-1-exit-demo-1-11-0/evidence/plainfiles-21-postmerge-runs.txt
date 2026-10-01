@@ -1,0 +1,9 @@
+# cwd: /home/gandalf/IA/brain-test-plainfiles
+# date: 2026-10-01T17:00:47Z
+$ gh pr view 2 --json state,mergedAt,mergeCommit; gh run list --limit 6
+{"mergeCommit":{"oid":"feffc7f4da8085bce9c5876010f3dd0f16526340"},"mergedAt":"2026-10-01T17:00:08Z","state":"MERGED"}
+completed	success	feat: add a demo line to the README (#2)	governance-postmerge	main	push	36896148401	25s	2026-10-01T17:00:11Z
+completed	success	feat: add a demo line to the readme	governance	feat/issue-1-add-a-demo-line-to-the-readme	pull_request	36895658281	16s	2026-10-01T16:56:01Z
+completed	success	feat: add a demo line to the readme	governance	feat/issue-1-add-a-demo-line-to-the-readme	pull_request	36895657048	15s	2026-10-01T16:56:00Z
+completed	success	chore: adopt brain 1.11.0	governance-postmerge	main	push	36895392990	17s	2026-10-01T16:53:48Z
+exit=0

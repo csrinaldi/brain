@@ -1,0 +1,27 @@
+# cwd: /home/gandalf/IA/brain-test-plainfiles-B
+# date: 2026-10-01T17:05:18Z
+$ test -e .env && echo present || echo 'no .env'; echo ENGRAM_DATA_DIR=${ENGRAM_DATA_DIR:-unset}; npm run brain:memory:pull; if [ plainfiles = engram ]; then engram search SYNTHETIC-1229; else node ./brain/scripts/memory/cli.mjs search SYNTHETIC-1229; fi
+no .env
+ENGRAM_DATA_DIR=/home/gandalf/.cache/brain-1110-demo/engram-data
+
+> brain-test-plainfiles@1.0.0 brain:memory:pull
+> node ./brain/scripts/memory/cli.mjs pull
+
+From https://github.com/csrinaldi/brain-test-plainfiles
+   feffc7f..18b3684  main       -> origin/main
+ * [new branch]      memory/gandalf-rog-zephyrus-g15-ga503qr-ga503qr-2026-10-01 -> origin/memory/gandalf-rog-zephyrus-g15-ga503qr-ga503qr-2026-10-01
+Updating feffc7f..18b3684
+Fast-forward
+ .memory/records/2026-10-rec-8ef0edd26861ab83.jsonl | 1 +
+ .memory/records/2026-10-rec-e8ef65043ff7761b.jsonl | 1 +
+ 2 files changed, 2 insertions(+)
+ create mode 100644 .memory/records/2026-10-rec-8ef0edd26861ab83.jsonl
+ create mode 100644 .memory/records/2026-10-rec-e8ef65043ff7761b.jsonl
+memory/cli: 2 matching record(s):
+  - rec-8ef0edd26861ab83 [session_summary] **SYNTHETIC-1229-R1-plainfiles**
+
+SYNTHETIC-1229-first-record-body
+  - rec-e8ef65043ff7761b [discovery] **SYNTHETIC-1229-R2-plainfiles**
+
+SYNTHETIC-1229-second-record-body
+exit=0

@@ -1,0 +1,5 @@
+# Maintainer action, not run by the agent. The command was run by the maintainer; this file records the verification.
+# command (maintainer): gh api -X DELETE repos/csrinaldi/brain-test-plainfiles/git/refs/heads/memory/gandalf-rog-zephyrus-g15-ga503qr-ga503qr-2026-10-01
+# reason: #1190 workaround (docs/KNOWN-LIMITATIONS.md), after memory.ship.diverged in plainfiles-66
+$ git ls-remote origin 'refs/heads/memory/*'
+exit=0

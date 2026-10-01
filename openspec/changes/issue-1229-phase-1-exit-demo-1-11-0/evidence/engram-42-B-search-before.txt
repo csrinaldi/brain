@@ -1,0 +1,19 @@
+# cwd: /home/gandalf/IA/brain-test-engram-B
+# date: 2026-10-01T17:01:52Z
+$ echo ENGRAM_DATA_DIR=${ENGRAM_DATA_DIR:-unset}; ls .memory/records 2>&1; test -e .env && echo present || echo 'no .env'; if [ engram = engram ]; then npm run brain:memory:pull; engram search SYNTHETIC-1229; else node ./brain/scripts/memory/cli.mjs search SYNTHETIC-1229; fi
+ENGRAM_DATA_DIR=/home/gandalf/.cache/brain-1110-demo/engram-data-B
+ls: cannot access '.memory/records': No such file or directory
+no .env
+
+> brain-test-engram@1.0.0 brain:memory:pull
+> node ./brain/scripts/memory/cli.mjs pull
+
+Already up to date.
+ℹ no records found in .memory/records/ — nothing to import.
+Update available: 2.0.0 -> 2.2.1
+To update:
+  brew update && brew upgrade engram
+  or: go install github.com/Gentleman-Programming/engram/v2/cmd/engram@latest
+
+No memories found for: "SYNTHETIC-1229"
+exit=0

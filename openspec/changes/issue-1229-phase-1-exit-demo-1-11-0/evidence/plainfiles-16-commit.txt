@@ -1,0 +1,12 @@
+# cwd: /home/gandalf/IA/brain-test-plainfiles-issue-1
+# date: 2026-10-01T16:55:37Z
+$ echo 'Phase-1 exit demo line.' >> README.md; git add README.md brain.config.json; git commit -m 'feat: add a demo line to the README' -m 'Closes #1'; git log --oneline -2; git status -sb
+✓ No prohibited references found.
+✓ Artifact structure is valid.
+[feat/issue-1-add-a-demo-line-to-the-readme 3a8a8a0] feat: add a demo line to the README
+ 2 files changed, 2 insertions(+), 1 deletion(-)
+ create mode 100644 README.md
+3a8a8a0 feat: add a demo line to the README
+d33b325 chore: adopt brain 1.11.0
+## feat/issue-1-add-a-demo-line-to-the-readme
+exit=0

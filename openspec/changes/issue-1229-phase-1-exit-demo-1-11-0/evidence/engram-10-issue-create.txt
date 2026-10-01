@@ -1,0 +1,6 @@
+# cwd: /home/gandalf/IA/brain-test-engram
+# date: 2026-10-01T16:56:35Z
+$ echo ENGRAM_DATA_DIR=$ENGRAM_DATA_DIR; gh issue create --title 'Add a demo line to the README' --body 'Phase-1 exit demo: add one line to the README.'
+ENGRAM_DATA_DIR=/home/gandalf/.cache/brain-1110-demo/engram-data
+https://github.com/csrinaldi/brain-test-engram/issues/1
+exit=0

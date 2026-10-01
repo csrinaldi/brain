@@ -1,0 +1,9 @@
+# cwd: /home/gandalf/IA/brain-test-engram
+# date: 2026-10-01T17:01:32Z
+$ npm run brain:memory:save -- SYNTHETIC-1229-R2-engram SYNTHETIC-1229-second-record-body --type discovery --issue 1
+
+> brain-test-engram@1.0.0 brain:memory:save
+> node ./brain/scripts/memory/cli.mjs save SYNTHETIC-1229-R2-engram SYNTHETIC-1229-second-record-body --type discovery --issue 1
+
+memory/cli: ✓ saved rec-382313952346edf2 → /home/gandalf/IA/brain-test-engram/.memory/records/2026-10-rec-382313952346edf2.jsonl
+exit=0

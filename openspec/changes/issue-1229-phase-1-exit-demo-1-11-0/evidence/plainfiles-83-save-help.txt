@@ -1,0 +1,12 @@
+# cwd: /home/gandalf/IA/brain-test-plainfiles
+# date: 2026-10-01T17:15:40Z
+$ npm run brain:memory:save -- --help; echo "save-exit=$?"; git status --short
+
+> brain-test-plainfiles@1.0.0 brain:memory:save
+> node ./brain/scripts/memory/cli.mjs save --help
+
+memory/cli: plainfiles.save() failed — --type is required and has no safe default — it is a choice, not a fact the tool can derive. One of: decision, architecture, pattern, bugfix, config, discovery, session_summary.
+save-exit=1
+ M .memory/index.jsonl
+?? .memory/records/2026-10-rec-ecdf6e3704aa7064.jsonl
+exit=0

@@ -1,0 +1,5 @@
+# cwd: /home/gandalf/IA/brain-test-engram
+# date: 2026-10-01T17:02:30Z
+$ gh pr list --state all --json number,title,headRefName,state,url
+[{"headRefName":"memory/gandalf-rog-zephyrus-g15-ga503qr-ga503qr-2026-10-01","number":3,"state":"OPEN","title":"memory: gandalf-rog-zephyrus-g15-ga503qr-ga503qr 2026-10-01 (2 records)","url":"https://github.com/csrinaldi/brain-test-engram/pull/3"},{"headRefName":"feat/issue-1-add-a-demo-line-to-the-readme","number":2,"state":"MERGED","title":"feat: add a demo line to the readme","url":"https://github.com/csrinaldi/brain-test-engram/pull/2"}]
+exit=0

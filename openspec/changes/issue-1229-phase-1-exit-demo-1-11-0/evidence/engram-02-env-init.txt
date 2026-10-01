@@ -1,0 +1,116 @@
+Script started on 2026-10-01 13:52:26-03:00 [COMMAND="npm run brain:env:init" TERM="xterm-256color" TTY="/dev/pts/4" COLUMNS="190" LINES="43"]
+
+> brain-test-engram@1.0.0 brain:env:init
+> bash ./brain/scripts/bootstrap.sh
+
+  ✓ brain.config.json: created (provider=github)
+  ✓ brain.config.json: gitHost = github.com
+  ✓ brain.config.json: slug = csrinaldi/brain-test-engram
+  ✓ governance tier: lite — set for this new repository (governance.tier in brain.config.json).
+    lite is for one maintainer: no second approval is required to merge, and every gate still runs.
+    To change it, set governance.tier in brain.config.json to lite, standard (a team: a second, non-author approval) or regulated (audited: the strictest evidence, no waivers) — e.g. npm run brain:config -- set governance.tier standard — then re-run npm run brain:protect.
+  ✓ memory lane: off — memory records stay in your clone; nothing ships them to main for you.
+    The lane is off by default on every tier because it opens a separate pull request for memory records that a maintainer has to merge; turning it on is a deliberate choice.
+    To turn it on: npm run brain:config -- set memory.lane.enabled true
+  ✓ brain/HOME.md: created from template
+
+  Derived from git origin:
+    provider : github
+    gitHost  : github.com
+    slug     : csrinaldi/brain-test-engram
+  VCS provider [github]: 
+
+[1m== Base dependencies ==[0m
+  ✓ git, python3 present; package manager: npm
+
+[1m== Ecosystem tools ==[0m
+  ✓ gh
+  ✓ engram
+  ✓ gentle-ai
+  ✓ gga
+  ✓ claude
+
+[1m== Codex cold-review ==[0m
+  ✓ cold-review is routed to no engine; Codex is not required
+
+[1m== Personal access token (.env) ==[0m
+  ✓ .env is git-ignored
+  You need a Personal Access Token from your Git hosting provider.
+  It must be PERSONAL — not a project bot token — so your pushes, issues and
+  MRs/PRs appear under your name.
+  Open the browser with the pre-filled form? [Y/n]: n
+  Create it manually at: "https://github.com/settings/tokens/new?description=brain-dev&scopes=repo"
+  Paste your PAT (not shown): 
+  ✓ VCS_TOKEN saved in .env (gitignored)
+
+[1m== Git credential helper (HTTPS) ==[0m
+  ✓ push/pull over HTTPS use your personal PAT from .env
+
+[1m== VCS authentication ==[0m
+  ✓ already authenticated against github.com
+
+[1m== Governance labels and actor ==[0m
+  ✓ governance labels created: status:approved, type:feature, type:bug, type:docs, type:refactor, type:chore, type:governance, size:exception, skip:memory-gate, governance:archive-sweep-failed, governance:audit-uncomputable, governance:audit-unrevertible, governance:cursor-missing, governance:cursor-unknown, governance:postmerge-unreported, governance:revert-blocked
+  ✓ brain.actor: @csrinaldi (from your authenticated VCS identity, written to the local git config)
+
+[1m== SDD implementation (harness) ==[0m
+  ✓ harness: gentle-ai (claude) (.env)
+  harness: ecosystem already initialized (gentle-ai doctor)
+  harness: skill registry updated
+  harness: SDD context 'sdd-init/brain-test-engram' not found in engram.
+    The agent Init Guard will create it on the first /sdd-* command.
+    To create it now, run: /sdd-init
+  harness: No project ADRs found (brain/project/decisions/ is empty or absent).
+    Run /project:bootstrap-adrs in your AI agent to draft the starter ADR set (Stack, Testing, Build).
+
+[1m== Team memory ==[0m
+  Which memory backend does this team use? (engram|plainfiles): engram
+  ⚠ memory backend saved to brain.config.json (memory.backend) — commit it so every checkout runs the same backend
+  ✓ memory backend: engram (brain.config.json)
+  ✓ pre-push hook activated (checkpoints feature working memory before push — ADR-0003)
+  ⚠ .memory/ does not exist yet — skipping symlink creation
+  ✓ engram backend configured (symlink + merge driver)
+  ⚠ memory pull skipped — this repository has no commits yet. Next: npm run brain:memory:pull once that is in place.
+  ✓ brain/core/anti-patterns/README.md  →  engram [pattern]  topic=brain/core/anti-patterns/README
+  ✓ brain/core/anti-patterns/config-yaml-seq-map-mezclados.md  →  engram [pattern]  topic=brain/core/anti-patterns/config-yaml-seq-map-mezclados
+  ✓ brain/core/anti-patterns/evidence-reader-empty-on-failure.md  →  engram [pattern]  topic=brain/core/anti-patterns/evidence-reader-empty-on-failure
+  ✓ brain/core/anti-patterns/git-diff-no-ve-untracked.md  →  engram [pattern]  topic=brain/core/anti-patterns/git-diff-no-ve-untracked
+  ✓ brain/core/anti-patterns/ia-escribe-brain-sin-gate.md  →  engram [pattern]  topic=brain/core/anti-patterns/ia-escribe-brain-sin-gate
+  ✓ brain/core/anti-patterns/ia-promueve-sus-propios-artefactos.md  →  engram [pattern]  topic=brain/core/anti-patterns/ia-promueve-sus-propios-artefactos
+  ✓ brain/core/anti-patterns/instaladores-autoactualizantes-no-inocuos.md  →  engram [pattern]  topic=brain/core/anti-patterns/instaladores-autoactualizantes-no-inocuos
+  ✓ brain/core/anti-patterns/pre-v0-8-0-upgrade-clobber-lockout.md  →  engram [pattern]  topic=brain/core/anti-patterns/pre-v0-8-0-upgrade-clobber-lockout
+  ✓ brain/core/anti-patterns/red-proof-blind-along-an-unvaried-axis.md  →  engram [pattern]  topic=brain/core/anti-patterns/red-proof-blind-along-an-unvaried-axis
+  ✓ brain/core/anti-patterns/test-spawns-a-live-entrypoint.md  →  engram [pattern]  topic=brain/core/anti-patterns/test-spawns-a-live-entrypoint
+  ✓ brain/core/methodology/agent-authorities.md  →  engram [reference]  topic=brain/core/methodology/agent-authorities
+  ✓ brain/core/methodology/consolidation-protocol.md  →  engram [reference]  topic=brain/core/methodology/consolidation-protocol
+  ✓ brain/core/methodology/feature-working-memory-contract.md  →  engram [reference]  topic=brain/core/methodology/feature-working-memory-contract
+  ✓ brain/core/methodology/harness-contract.md  →  engram [reference]  topic=brain/core/methodology/harness-contract
+  ✓ brain/core/methodology/memory-backend-contract.md  →  engram [reference]  topic=brain/core/methodology/memory-backend-contract
+  ✓ brain/core/methodology/memory-format.md  →  engram [reference]  topic=brain/core/methodology/memory-format
+  ✓ brain/core/methodology/reviewer-protocol.md  →  engram [reference]  topic=brain/core/methodology/reviewer-protocol
+  ✓ brain/core/methodology/sdd-layout.md  →  engram [reference]  topic=brain/core/methodology/sdd-layout
+  ✓ brain/core/methodology/vcs-contract.md  →  engram [reference]  topic=brain/core/methodology/vcs-contract
+  ✓ brain/core/methodology/workflow-governance.md  →  engram [reference]  topic=brain/core/methodology/workflow-governance
+
+20 documentos del cerebro indexados a engram (proyección reconstruible desde brain/).
+  ✓ durable index reprojected (brain/ → engram)
+
+[1m== Open tickets in csrinaldi/brain-test-engram ==[0m
+## Your tickets
+- (none)
+
+## Unassigned
+- (none)
+
+[1m== Environment ready ==[0m
+  Next steps:
+    1. Read brain/HOME.md — the entry point to all project knowledge.
+    2. Every morning: brain:day:start
+       (pulls memory, shows open tickets, checks for brain updates)
+    3. Pick a ticket and create your branch: {type}/issue-{iid}-{slug}.
+    4. Plan a feature with SDD: brain:project:feature -- --issue [ID]
+    5. Before pushing: brain:repo:check; capture durable memory with brain:memory:save --issue <id> (the memory lane, if enabled, ships it; env:init states whether it is)
+  Pending: memory pull (next: npm run brain:memory:pull)
+  Run: npm run tools:install  (installs all at once)
+⠙[1G[0K
+Script done on 2026-10-01 13:53:15-03:00 [COMMAND_EXIT_CODE="0"]

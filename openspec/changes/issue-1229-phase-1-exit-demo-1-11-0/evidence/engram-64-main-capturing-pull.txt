@@ -1,0 +1,29 @@
+# cwd: /home/gandalf/IA/brain-test-engram
+# date: 2026-10-01T17:05:32Z
+$ git status -sb; npm run brain:memory:pull; echo ---; git status -sb; git log --oneline -4; git branch --show-current
+## main...origin/main
+?? .memory/
+
+> brain-test-engram@1.0.0 brain:memory:pull
+> node ./brain/scripts/memory/cli.mjs pull
+
+From https://github.com/csrinaldi/brain-test-engram
+   925c7e1..826eb2c  main       -> origin/main
+Updating 925c7e1..826eb2c
+Fast-forward
+ .memory/records/2026-10-rec-382313952346edf2.jsonl | 1 +
+ .memory/records/2026-10-rec-ddc7460731141e7f.jsonl | 1 +
+ 2 files changed, 2 insertions(+)
+ create mode 100644 .memory/records/2026-10-rec-382313952346edf2.jsonl
+ create mode 100644 .memory/records/2026-10-rec-ddc7460731141e7f.jsonl
+brain:memory:pull: verified .memory/records/2026-10-rec-382313952346edf2.jsonl — present, tracked in HEAD as blob 54b3c6cba15d6dbe6f6d5938e03a848a9bd5b546
+brain:memory:pull: verified .memory/records/2026-10-rec-ddc7460731141e7f.jsonl — present, tracked in HEAD as blob c1f41a1342600a3d0a7df428657395c0f527363f
+✓ import complete — 0/2 records imported into engram (records-only, D2/C4).
+---
+## main...origin/main
+?? .memory/index.jsonl
+826eb2c memory: gandalf-rog-zephyrus-g15-ga503qr-ga503qr 2026-10-01 (2 records) (#3)
+925c7e1 feat: add a demo line to the README (#2)
+f787e71 chore: adopt brain 1.11.0
+main
+exit=0

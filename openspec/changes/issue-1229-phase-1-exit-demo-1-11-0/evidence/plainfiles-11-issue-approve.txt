@@ -1,0 +1,6 @@
+# cwd: /home/gandalf/IA/brain-test-plainfiles
+# date: 2026-10-01T16:55:17Z
+$ gh issue edit 1 --add-label status:approved; gh issue view 1 --json number,title,labels
+https://github.com/csrinaldi/brain-test-plainfiles/issues/1
+{"labels":[{"id":"LA_kwDOU3hemc8AAAAC6OaKgg","name":"status:approved","description":"Issue approved by a human — the issue-link gate reads this","color":"0E8A16"}],"number":1,"title":"Add a demo line to the README"}
+exit=0

@@ -1,0 +1,40 @@
+# cwd: /home/gandalf/IA/brain-test-engram-issue-1
+# date: 2026-10-01T16:57:20Z
+$ for i in $(seq 1 30); do out=$(gh pr checks 2 2>&1); echo "--- poll $i $(date -u +%T)"; echo "$out"; if ! echo "$out" | rg -q "no checks|pending|queued|in_progress"; then if [ -n "$out" ]; then break; fi; fi; sleep 10; done; gh pr checks 2; echo "checks-exit=$?"
+--- poll 1 16:57:22
+actor-check	pending	0	https://github.com/csrinaldi/brain-test-engram/actions/runs/36895796384/job/110482344654	
+base-branch	pending	0	https://github.com/csrinaldi/brain-test-engram/actions/runs/36895798604/job/110482351950	
+brain-writes-reviewed	pending	0	https://github.com/csrinaldi/brain-test-engram/actions/runs/36895796384/job/110482345023	
+decision-gate	pending	0	https://github.com/csrinaldi/brain-test-engram/actions/runs/36895798604/job/110482351795	
+diff-size	pending	0	https://github.com/csrinaldi/brain-test-engram/actions/runs/36895798604/job/110482351461	
+issue-link	pending	0	https://github.com/csrinaldi/brain-test-engram/actions/runs/36895798604/job/110482351764	
+lane-paths	pending	0	https://github.com/csrinaldi/brain-test-engram/actions/runs/36895798604/job/110482351908	
+lane-scrub	pending	0	https://github.com/csrinaldi/brain-test-engram/actions/runs/36895796384/job/110482344675	
+local-checks	pending	0	https://github.com/csrinaldi/brain-test-engram/actions/runs/36895796384/job/110482345237	
+memory-gate	pending	0	https://github.com/csrinaldi/brain-test-engram/actions/runs/36895798604/job/110482351719	
+phase-order	pending	0	https://github.com/csrinaldi/brain-test-engram/actions/runs/36895798604/job/110482351794	
+--- poll 2 16:57:33
+actor-check	pass	7s	https://github.com/csrinaldi/brain-test-engram/actions/runs/36895798604/job/110482351920	
+base-branch	pass	8s	https://github.com/csrinaldi/brain-test-engram/actions/runs/36895798604/job/110482351950	
+brain-writes-reviewed	pass	5s	https://github.com/csrinaldi/brain-test-engram/actions/runs/36895798604/job/110482352010	
+decision-gate	pass	4s	https://github.com/csrinaldi/brain-test-engram/actions/runs/36895798604/job/110482351795	
+diff-size	pass	5s	https://github.com/csrinaldi/brain-test-engram/actions/runs/36895798604/job/110482351461	
+issue-link	pass	6s	https://github.com/csrinaldi/brain-test-engram/actions/runs/36895798604/job/110482351764	
+lane-paths	pass	6s	https://github.com/csrinaldi/brain-test-engram/actions/runs/36895798604/job/110482351908	
+lane-scrub	pass	4s	https://github.com/csrinaldi/brain-test-engram/actions/runs/36895798604/job/110482351916	
+local-checks	pass	9s	https://github.com/csrinaldi/brain-test-engram/actions/runs/36895798604/job/110482351725	
+memory-gate	pass	7s	https://github.com/csrinaldi/brain-test-engram/actions/runs/36895798604/job/110482351719	
+phase-order	pass	6s	https://github.com/csrinaldi/brain-test-engram/actions/runs/36895798604/job/110482351794	
+actor-check	pass	7s	https://github.com/csrinaldi/brain-test-engram/actions/runs/36895798604/job/110482351920	
+base-branch	pass	8s	https://github.com/csrinaldi/brain-test-engram/actions/runs/36895798604/job/110482351950	
+brain-writes-reviewed	pass	5s	https://github.com/csrinaldi/brain-test-engram/actions/runs/36895798604/job/110482352010	
+decision-gate	pass	4s	https://github.com/csrinaldi/brain-test-engram/actions/runs/36895798604/job/110482351795	
+diff-size	pass	5s	https://github.com/csrinaldi/brain-test-engram/actions/runs/36895798604/job/110482351461	
+issue-link	pass	6s	https://github.com/csrinaldi/brain-test-engram/actions/runs/36895798604/job/110482351764	
+lane-paths	pass	6s	https://github.com/csrinaldi/brain-test-engram/actions/runs/36895798604/job/110482351908	
+lane-scrub	pass	4s	https://github.com/csrinaldi/brain-test-engram/actions/runs/36895798604/job/110482351916	
+local-checks	pass	9s	https://github.com/csrinaldi/brain-test-engram/actions/runs/36895798604/job/110482351725	
+memory-gate	pass	7s	https://github.com/csrinaldi/brain-test-engram/actions/runs/36895798604/job/110482351719	
+phase-order	pass	6s	https://github.com/csrinaldi/brain-test-engram/actions/runs/36895798604/job/110482351794	
+checks-exit=0
+exit=0

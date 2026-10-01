@@ -1,0 +1,6 @@
+# cwd: /home/gandalf/IA/brain-test-engram
+# date: 2026-10-01T16:56:43Z
+$ gh issue edit 1 --add-label type:feature; gh issue view 1 --json labels
+https://github.com/csrinaldi/brain-test-engram/issues/1
+{"labels":[{"id":"LA_kwDOU3hfXc8AAAAC6OcuBQ","name":"status:approved","description":"Issue approved by a human — the issue-link gate reads this","color":"0E8A16"},{"id":"LA_kwDOU3hfXc8AAAAC6OcvHg","name":"type:feature","description":"New feature","color":"ededed"}]}
+exit=0
