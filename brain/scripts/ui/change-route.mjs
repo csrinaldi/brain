@@ -31,7 +31,7 @@ import { shapeResumeView } from './lib/resume-view.mjs';
 import { parseFrontmatter } from '../memory/lib/resume-frontmatter.mjs';
 import { LIFECYCLE_STAGES, ARTEFACT_FILE } from '../lib/sdd-layout.mjs';
 import { prUrl } from './lib/forge-url.mjs';
-import { documentWording } from './lib/drawer-model.mjs';
+import { documentWording, NO_CHANGE_BRANCH } from './lib/drawer-model.mjs';
 
 /** D14's caveat, verbatim in the UI, until #880 lands `type: review` records. */
 export const REVIEWS_SOURCE_NOTE = 'forge comments until #880 lands';
@@ -131,18 +131,18 @@ function resolveBranch({ run, snapshot, issue }) {
   try {
     listed = run('git', ['branch', '--list', `feat/issue-${issue}-*`]);
   } catch (err) {
-    return { ok: false, reason: `git branch --list failed: ${err?.message ?? err}` };
+    return { ok: false, kind: 'failed', reason: `git branch --list failed: ${err?.message ?? err}` };
   }
   const names = listed.split(/\r?\n/).map((l) => l.replace(/^\*?\s+/, '').trim()).filter(Boolean);
-  if (names.length === 0) return { ok: false, reason: `no open PR and no feat/issue-${issue}-* branch in this clone` };
-  if (names.length > 1) return { ok: false, reason: `more than one feat/issue-${issue}-* branch in this clone: ${names.join(', ')}` };
+  if (names.length === 0) return { ok: false, kind: 'none', reason: `no open PR and no feat/issue-${issue}-* branch in this clone` };
+  if (names.length > 1) return { ok: false, kind: 'ambiguous', reason: `more than one feat/issue-${issue}-* branch in this clone: ${names.join(', ')}` };
   return { ok: true, branch: names[0] };
 }
 
 function buildWorkingMemoryTab({ resolved, resume }) {
-  if (!resolved.ok) return { ok: false, reason: resolved.reason };
-  const { branch } = resolved;
   // Derived from the one resume document so this tab and the SDD row cannot disagree.
+  if (!resolved.ok) return { ok: false, reason: documentWording(resume) };
+  const { branch } = resolved;
   if (resume.state === 'unreadable') return { ok: false, reason: documentWording(resume) };
   if (resume.state !== 'present' && resume.state !== 'truncated') {
     return { ok: false, reason: `no committed resume.md on ${branch}; the local overlay arrives in slice 5 (#883)` };
@@ -310,6 +310,7 @@ function readHeadDocuments({ run, dir }) {
  */
 function readResumeDocument({ run, resolved }) {
   const path = 'resume.md';
+  if (!resolved.ok && resolved.kind === 'none') return documentEntry(path, null, { state: 'missing', reason: NO_CHANGE_BRANCH });
   if (!resolved.ok) return documentEntry(path, null, { state: 'unreadable', reason: resolved.reason });
   const { branch } = resolved;
   try {

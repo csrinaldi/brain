@@ -1,7 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildDrawerModel, TAB_IDS, sourceLabel } from './drawer-model.mjs';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+import { buildDrawerModel, TAB_IDS, sourceLabel, NO_CHANGE_BRANCH } from './drawer-model.mjs';
 
 const view = (over = {}) => ({
   ok: true,
@@ -531,4 +534,23 @@ test('#1198 R1198-1: the tab set is still the six, and a truncated spec or tasks
   assert.deepEqual(model.value.tabs.map((t) => t.id), TAB_IDS);
   assert.match(model.value.tabs[0].note, /cards cover the read part/);
   assert.match(model.value.tabs[2].note, /items cover the read part/);
+});
+
+// ── #1218 R3: a clone with no change branch is `missing`, said once ──
+
+test('#1218 R1218-8: a missing resume.md with a reason reads as that reason, in the SDD row and the Working memory tab', () => {
+  const resume = { path: 'resume.md', ref: null, commit: null, state: 'missing', text: null, reason: NO_CHANGE_BRANCH };
+  const sdd = docsView({ resume }).entries[7].document;
+  assert.equal(sdd.wording, 'resume.md: no change branch in this clone');
+  assert.doesNotMatch(sdd.wording, /could not be read/);
+  const model = buildDrawerModel(view({ documents: { resume }, workingMemory: { ok: false, reason: sdd.wording } }));
+  assert.equal(model.value.tabs[3].reason, 'resume.md: no change branch in this clone');
+  assert.equal(NO_CHANGE_BRANCH, 'no change branch in this clone');
+});
+
+test('#1218 R1218-8: the no-branch wording has one source — drawer-model.mjs — and change-route.mjs imports it', () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const owners = ['drawer-model.mjs', join('..', 'change-route.mjs')].filter((f) => readFileSync(join(here, f), 'utf8').includes('no change branch in this clone'));
+  assert.deepEqual(owners, ['drawer-model.mjs']);
+  assert.match(readFileSync(join(here, '..', 'change-route.mjs'), 'utf8'), /NO_CHANGE_BRANCH[^;]*from '\.\/lib\/drawer-model\.mjs'/);
 });
