@@ -47,6 +47,12 @@ const BLOCK_START = /^(?:\s*(?:[-+*]|\d{1,9}[.)])(?:\s|$)| {0,3}#{1,6}(?:\s|$)|\
 // Anything looser blinds the pre-scan to text marked will lex as inline.
 const FENCE = /^ {0,3}(`{3,}(?=[^`]*$)|~{3,})/;
 const FENCE_TAIL = /^[~`]* *$/;
+// marked's thematic break (block `hr`) and its setext underline (the tail of
+// block `lheading`), line by line. A thematic break interrupts a paragraph and
+// is a block of its own; an underline closes the paragraph above it, which marked
+// then lexes as a heading, so the underline line is the last line of its span.
+const HR = /^ {0,3}(?:(?:-[ \t]*){3,}|(?:_[ \t]*){3,}|(?:\*[ \t]*){3,})$/;
+const SETEXT = /^ {0,3}(?:=+|-+) *$/;
 const closesFence = (line, opener) => {
   const rest = /^ {0,3}(.*)$/.exec(line)[1];
   return rest.startsWith(opener) && FENCE_TAIL.test(rest.slice(opener.length));
@@ -126,6 +132,14 @@ export function prescan(body) {
     // blank or empty quote line, a block of its own, or a deeper quote.
     const { depth, rest } = unquote(line);
     if (BLANK.test(rest)) {
+      close(i);
+      continue;
+    }
+    if (open && depth === open.quote && SETEXT.test(rest)) {
+      close(i + 1);
+      continue;
+    }
+    if (HR.test(rest)) {
       close(i);
       continue;
     }

@@ -354,7 +354,7 @@ test(`#1218 R1218-1: a 200 KB emphasis run degrades to one passage carrying the 
 
 test(`#1218 R1218-1: every known pathological class degrades in under ${PRESCAN_BOUND_MS} ms`, () => {
   const inputs = {
-    underscores: '_'.repeat(2e5),
+    underscores: `${'_'.repeat(2e5)}x`,
     'bold openers': '**a '.repeat(5000),
     'em openers': '_a '.repeat(5000),
     'mixed delimiters': '*a_b~'.repeat(4e4),
@@ -384,7 +384,7 @@ test('#1218 R1218-1: only * _ ~ [ ] are counted', () => {
 });
 
 test('#1218 R1218-1: prescan classifies a 200 KB run on its own, and the tokenizer sees it escaped, once', () => {
-  const input = '*'.repeat(2e5);
+  const input = `${'*'.repeat(2e5)}x`;
   const spans = prescan(input);
   assert.equal(spans.length, 1);
   assert.equal(spans[0].degraded, true);
@@ -396,7 +396,7 @@ test('#1218 R1218-1: prescan classifies a 200 KB run on its own, and the tokeniz
     return Lexer.lex(text, options);
   });
   assert.equal(seen.length, 1, 'one lex for the whole document');
-  assert.equal(seen[0], '\\*'.repeat(2e5), 'every delimiter reaches the tokenizer escaped');
+  assert.equal(seen[0], `${'\\*'.repeat(2e5)}x`, 'every delimiter reaches the tokenizer escaped');
   assert.equal(degradedBlocks(out).length, 1);
   assert.deepEqual(out.notices, []);
 });
@@ -420,7 +420,7 @@ test('#1218 R1218-1: a blank line, a heading and a quote marker each reset the c
 });
 
 test('#1218 R1218-1: fenced code is skipped, closed or not, and the closer must match', () => {
-  const stars = '*'.repeat(700);
+  const stars = `${'*'.repeat(700)}x`; // a bare run of stars is an hr in marked, not a hazard
   const closed = markdownTree(`\`\`\`\n${stars}\n\`\`\``);
   assert.equal(degradedBlocks(closed).length, 0);
   assert.equal(closed.blocks[0].t, 'code');
@@ -448,19 +448,19 @@ test('#1218 R1218-2: the notice states N, and the passage is shown as its own te
 });
 
 test('#1218 cold-2: a reference definition after a degraded passage still resolves its link', () => {
-  const out = markdownTree(`see [docs][r]\n\n${'*'.repeat(60)}\n\n[r]: https://example.com/x`);
+  const out = markdownTree(`see [docs][r]\n\n${'*'.repeat(60)}x\n\n[r]: https://example.com/x`);
   const link = JSON.stringify(out.blocks).match(/"t":"link","href":"([^"]+)"/);
   assert.equal(link?.[1], 'https://example.com/x');
   assert.deepEqual(degradedBlocks(out).map((b) => b.notice), [NOTICE(60)]);
 });
 
 test('#1218 cold-2: a degraded passage inside a list item leaves one list, and its notice precedes that list', () => {
-  const out = markdownTree(`1. one\n2. two\n\n   ${'*'.repeat(60)}\n\n3. three`);
+  const out = markdownTree(`1. one\n2. two\n\n   ${'*'.repeat(60)}x\n\n3. three`);
   assert.deepEqual(out.blocks.map((b) => b.t), ['degraded', 'list']);
   assert.equal(out.blocks[0].notice, NOTICE(60));
   assert.equal(out.blocks[1].items.length, 3);
   const inItem = out.blocks[1].items[1].blocks.map((b) => (b.t === 'paragraph' ? flat(b.children) : b.t));
-  assert.deepEqual(inItem, ['two', '*'.repeat(60)]);
+  assert.deepEqual(inItem, ['two', `${'*'.repeat(60)}x`]);
 });
 
 test('#1218 cold-2: the notice sits before the block holding the passage, and only there', () => {
@@ -564,7 +564,7 @@ test('#1218 cold-1: a backtick fence whose info string holds a backtick is not a
 });
 
 test('#1218 cold-1: up to three leading spaces still open a fence; a closer needs the opener, at most three spaces, and only blanks after it', () => {
-  const stars = '*'.repeat(700);
+  const stars = `${'*'.repeat(700)}x`; // a bare run of stars is an hr in marked, not a hazard
   const degraded = (src) => prescan(src).filter((s) => s.degraded).length;
   assert.equal(degraded(`   \`\`\`\n${stars}\n   \`\`\``), 0);
   // four spaces: not a closer, the fence stays open
@@ -622,4 +622,49 @@ test('#1218 cold-3: marked itself joins what the span rule joins', () => {
 test('#1218 cold-3: a 262000-character quote prefix is scanned in linear time', () => {
   const { ms } = timed(() => prescan('>'.repeat(262000)));
   assert.ok(ms < 200, `took ${ms} ms`);
+});
+
+// ── #1218 cold review round 2, cold-2: marked's hr and setext rules end a span ──
+
+test('#1218 cold-2 (r2): a thematic break after a degraded paragraph survives as an hr, with the text after it', () => {
+  const out = markdownTree('para' + ' a*b'.repeat(700) + '\n***\nafter');
+  assert.deepEqual(out.blocks.map((b) => b.t), ['degraded', 'paragraph', 'hr', 'paragraph']);
+  assert.equal(flat(out.blocks[3].children), 'after');
+});
+
+test('#1218 cold-2 (r2): a setext underline after a degraded paragraph makes it a heading, as marked does', () => {
+  for (const underline of ['---', '===']) {
+    const out = markdownTree('para' + ' a*b'.repeat(700) + `\n${underline}\nafter`);
+    assert.deepEqual(out.blocks.map((b) => b.t), ['degraded', 'heading', 'paragraph'], underline);
+    assert.ok(flat(out.blocks[1].children).startsWith('para a*b a*b'), underline);
+    assert.equal(flat(out.blocks[2].children), 'after', underline);
+  }
+});
+
+test('#1218 cold-2 (r2): every spelling of marked\'s hr ends a span, and the underline ends it inclusively', () => {
+  const part = 'a*'.repeat(400);
+  for (const hr of ['***', '* * *', '___', '- - -', '  ***', '***   ']) {
+    assert.equal(degradedCount(`${part}\n${hr}\n${part}`), 0, `hr ${JSON.stringify(hr)}`);
+  }
+  for (const underline of ['---', '===', '-', '=', '--  ']) {
+    assert.equal(degradedCount(`${part}\n${underline}\n${part}`), 0, `underline ${JSON.stringify(underline)}`);
+  }
+  const [span] = prescan(`${part}\n${part}\n===\nnext`);
+  assert.equal(span.to, 3, 'the underline line belongs to the span it closes');
+  assert.equal(degradedCount(`${part}\n    ***\n${part}`), 1, 'four spaces is not an hr');
+  assert.equal(degradedCount(`${part}\n--x\n${part}`), 1, 'not an underline');
+});
+
+test('#1218 cold-2 (r2): marked agrees with the rules the pre-scan mirrors', () => {
+  const kinds = (src) => Lexer.lex(src, { gfm: true }).map((t) => t.type);
+  assert.deepEqual(kinds('p\n***\nq'), ['paragraph', 'hr', 'paragraph']);
+  assert.deepEqual(kinds('p\n---\nq'), ['heading', 'paragraph']);
+  assert.deepEqual(kinds('p\n===\nq'), ['heading', 'paragraph']);
+});
+
+test('#1218 cold-2 (r2): a line of nothing but delimiters is marked\'s thematic break, not a passage', () => {
+  for (const line of ['*'.repeat(2e5), '_'.repeat(2e5), '-'.repeat(2e5)]) {
+    const out = markdownTree(line);
+    assert.deepEqual(out.blocks.map((b) => b.t), ['hr'], line.slice(0, 3));
+  }
 });
