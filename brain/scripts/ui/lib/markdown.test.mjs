@@ -625,7 +625,7 @@ test('#1218 cold-3: a 262000-character quote prefix never throws out of markdown
   assert.deepEqual(huge.blocks.map((b) => b.t), ['code']);
   assert.equal(huge.notices.length, 1);
   const { ms } = timed(() => markdownTree('>'.repeat(20000)));
-  assert.ok(ms < 300, `took ${ms} ms`);
+  assert.ok(ms < PRESCAN_BOUND_MS, `took ${ms} ms`);
 });
 
 // ── #1218 cold review round 2, cold-2: marked's hr and setext rules end a span ──
@@ -795,6 +795,12 @@ test('#1218 cold-1 (r4): a tokenizer that throws in the block phase degrades the
   assert.deepEqual(out.notices, ['The markdown could not be parsed; the text is shown as written.']);
 });
 
+// The block phase plus counting takes 2.8-17 ms locally on these inputs. A CI
+// runner is about 3x slower, so 100 ms left a 2x margin, the one that failed for
+// the 300 ms bound above. 250 ms still separates the block phase (milliseconds)
+// from the inline phase it replaces (seconds).
+const PRESCAN_CHEAP_MS = 250;
+
 test('#1218 cold-1 (r4): the pre-scan is cheap, block phase and counting included, on 200 KB inputs', () => {
   const inputs = [
     '*'.repeat(1e5) + 'a' + '*'.repeat(1e5),
@@ -805,7 +811,7 @@ test('#1218 cold-1 (r4): the pre-scan is cheap, block phase and counting include
   for (const input of inputs) {
     const { ms } = timed(() => prescan(input));
     console.log(`prescan ${input.length} chars: ${ms.toFixed(1)} ms`);
-    assert.ok(ms < 100, `took ${ms} ms`);
+    assert.ok(ms < PRESCAN_CHEAP_MS, `took ${ms} ms`);
   }
 });
 

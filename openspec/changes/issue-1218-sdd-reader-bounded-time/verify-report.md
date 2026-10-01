@@ -192,3 +192,9 @@ The cold review returned REVISE with one blocker, one correction and one editori
 Two repository tests also moved: a fixture host became `example.net` (the shipped-hostnames test) and the tarball canary went from 9.1 to 9.2 MB, because the shipped suites grew about 10 KB (`77838a41`).
 
 Limit found by the property test and left as is: marked drops a duplicate reference definition from the token stream, so the raws stop adding up and the pre-scan falls back to one span for the whole document. A document with a degraded passage and a duplicated definition therefore has every definition in it shown as a paragraph, under the notice. Nothing is lost; the generator keeps definitions distinct.
+
+## CI timing (after cold review round 5)
+
+| Finding | Resolution |
+|---|---|
+| `local-checks` failed on the merge head: "20000 `>` are cheap" took 320.7 ms against a hardcoded 300 ms | Every timing bound this change added was swept. The `>` cost test now uses `PRESCAN_BOUND_MS` (750), like the other pathological-document checks. "The pre-scan is cheap" moved from a hardcoded 100 ms to `PRESCAN_CHEAP_MS = 250`, because its local 2.8–17 ms left only about a 2x margin on a CI runner. The 100 ms click bound stays, because it measures a synchronous handler with no tokenizing. The worker tests keep `RENDER_BUDGET_MS + 300`. |
