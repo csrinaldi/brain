@@ -337,7 +337,7 @@ const timed = (fn) => {
   return { value, ms: performance.now() - t0 };
 };
 
-// The pre-scan degrades a hazard by escaping it, and the document is then lexed
+// The pre-scan degrades a hazard by substituting same-length placeholders, and the document is then lexed
 // ONCE so its neighbours render intact (cold-2). That lex is linear but not free:
 // about 100 ms locally and about 230 ms on a CI runner for 200 KB. The bound sits
 // at half the 1500 ms worker budget, 15x under the 11 s freeze it replaced.
@@ -383,7 +383,7 @@ test('#1218 R1218-1: only * _ ~ [ ] are counted', () => {
   assert.equal(prescan(input).filter((s) => s.degraded).length, 0);
 });
 
-test('#1218 R1218-1: prescan classifies a 200 KB run on its own, and the tokenizer sees it escaped, once', () => {
+test('#1218 R1218-1: prescan classifies a 200 KB run on its own, and the tokenizer sees it substituted, once', () => {
   const input = `${'*'.repeat(2e5)}x`;
   const spans = prescan(input);
   assert.equal(spans.length, 1);
@@ -396,7 +396,8 @@ test('#1218 R1218-1: prescan classifies a 200 KB run on its own, and the tokeniz
     return Lexer.lex(text, options);
   });
   assert.equal(seen.length, 1, 'one lex for the whole document');
-  assert.equal(seen[0], `${'\\*'.repeat(2e5)}x`, 'every delimiter reaches the tokenizer escaped');
+  assert.equal(seen[0].length, input.length, 'every delimiter reaches the tokenizer as a same-length placeholder');
+  assert.ok(!seen[0].includes('*'));
   assert.equal(degradedBlocks(out).length, 1);
   assert.deepEqual(out.notices, []);
 });
@@ -443,7 +444,7 @@ test('#1218 R1218-2: the notice states N, and the passage is shown as its own te
   assert.equal(tree.blocks[0].t, 'degraded');
   assert.equal(tree.blocks[1].t, 'paragraph');
   assert.ok(tree.blocks[1].children.every((n) => n.t === 'text'), 'only literal text, no emphasis nodes');
-  assert.ok(tree.blocks[1].children.length <= 3, 'a run of escapes is one node');
+  assert.ok(tree.blocks[1].children.length <= 3, 'a run of placeholders is one node');
   assert.equal(flat(tree.blocks[1].children), big);
 });
 
@@ -485,8 +486,8 @@ test('#1218 cold-2: a degraded quote keeps its quote, a degraded bullet keeps it
   assert.equal(l.blocks[1].items.length, 2);
 });
 
-test(`#1218 cold-2: an escaped 200 KB delimiter run lexes in under ${PRESCAN_BOUND_MS} ms`, () => {
-  const { ms } = timed(() => Lexer.lex('\\*'.repeat(2e5), { gfm: true }));
+test(`#1218 cold-2: a substituted 200 KB delimiter run lexes in under ${PRESCAN_BOUND_MS} ms`, () => {
+  const { ms } = timed(() => Lexer.lex('\uE001'.repeat(2e5), { gfm: true }));
   assert.ok(ms < PRESCAN_BOUND_MS, `took ${ms} ms`);
 });
 
@@ -667,4 +668,81 @@ test('#1218 cold-2 (r2): a line of nothing but delimiters is marked\'s thematic 
     const out = markdownTree(line);
     assert.deepEqual(out.blocks.map((b) => b.t), ['hr'], line.slice(0, 3));
   }
+});
+
+// ── #1218 cold review round 2, cold-3: same-length placeholders, not backslashes ──
+// Backslash escapes are context-sensitive in CommonMark: they are literal inside a
+// code span and inside an autolink, so an escaped `x_y` there shows its backslash.
+
+const HAZARD_LINE = (head) => head + ' a*b'.repeat(700); // 704 delimiters or more, one line
+const nodesOf = (tree) => {
+  const out = [];
+  const walk = (n) => {
+    if (Array.isArray(n)) return n.forEach(walk);
+    if (!n || typeof n !== 'object') return;
+    out.push(n);
+    for (const key of ['children', 'blocks', 'items']) if (n[key]) walk(n[key]);
+  };
+  walk(tree.blocks);
+  return out;
+};
+
+test('#1218 cold-3 (r2): a code span inside a degraded passage keeps exactly what was typed', () => {
+  const out = markdownTree(HAZARD_LINE('Use `x_y*z[0]` here.'));
+  assert.equal(degradedBlocks(out).length, 1);
+  const spans = nodesOf(out).filter((n) => n.t === 'codespan');
+  assert.deepEqual(spans.map((n) => n.text), ['x_y*z[0]']);
+});
+
+test('#1218 cold-3 (r2): an autolink inside a degraded passage keeps its text and its href', () => {
+  const out = markdownTree(HAZARD_LINE('<https://ex.com/a_b>'));
+  assert.equal(degradedBlocks(out).length, 1);
+  const links = nodesOf(out).filter((n) => n.t === 'link');
+  assert.equal(links.length, 1);
+  assert.equal(links[0].href, 'https://ex.com/a_b');
+  assert.equal(flat(links[0].children), 'https://ex.com/a_b');
+});
+
+test('#1218 cold-3 (r2): a bare url, an image alt and an inert link target keep their characters', () => {
+  const out = markdownTree(HAZARD_LINE('see https://ex.com/a_b_c and ![a_b](x_y.png) and [t_u](rel_path.md)'));
+  const nodes = nodesOf(out);
+  assert.ok(nodes.some((n) => n.t === 'link' && n.href === 'https://ex.com/a_b_c'));
+  assert.ok(JSON.stringify(out.blocks).includes('https://ex.com/a_b_c'));
+  assert.ok(!/[-\\]/.test(JSON.stringify(out.blocks.filter((b) => b.t !== 'degraded'))), 'no placeholder and no backslash reaches the tree');
+});
+
+test('#1218 cold-3 (r2): the tokenizer sees a same-length, delimiter-free passage, and the tree is restored', () => {
+  const input = `${'*'.repeat(2e5)}x`;
+  const seen = [];
+  const out = markdownTree(input, (text, options) => {
+    seen.push(text);
+    return Lexer.lex(text, options);
+  });
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].length, input.length, 'substitution keeps the length');
+  assert.ok(!/[*_~[\]\\]/.test(seen[0]), 'no delimiter reaches the tokenizer');
+  assert.equal(flat(out.blocks.find((b) => b.t === 'paragraph').children), input);
+});
+
+test('#1218 cold-3 (r2): a document that already uses private-use characters is restored byte for byte', () => {
+  const head = ' keep ';
+  const out = markdownTree(HAZARD_LINE(head));
+  assert.equal(flat(out.blocks.find((b) => b.t === 'paragraph').children).startsWith(head), true);
+  assert.equal(flat(out.blocks.find((b) => b.t === 'paragraph').children), HAZARD_LINE(head));
+});
+
+test('#1218 cold-3 (r2): when the whole private-use block is taken, the passage is shown as written under its notice', () => {
+  let pua = '';
+  for (let c = 0xe000; c <= 0xf8ff; c++) pua += String.fromCharCode(c);
+  const src = `${pua}\n\n${HAZARD_LINE('tail')}`;
+  const out = markdownTree(src);
+  assert.equal(out.blocks[0].t, 'degraded');
+  assert.equal(out.blocks.at(-1).t, 'literal');
+  assert.equal(out.blocks.at(-1).text, src);
+});
+
+test(`#1218 cold-3 (r2): a 200 KB delimiter run is substituted, lexed and restored in under ${PRESCAN_BOUND_MS} ms`, () => {
+  const { value, ms } = timed(() => markdownTree(`${'*'.repeat(2e5)}x`));
+  assert.equal(degradedBlocks(value).length, 1);
+  assert.ok(ms < PRESCAN_BOUND_MS, `took ${ms} ms`);
 });

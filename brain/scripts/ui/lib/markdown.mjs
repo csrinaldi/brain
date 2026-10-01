@@ -161,21 +161,55 @@ const degradedNotice = (marks) => `a passage with ${marks} formatting marks is s
 // strikethrough, autolinks).
 const lexTokens = (text, lex) => lex(text, { gfm: true, breaks: false, pedantic: false });
 
-// Backslash-escape the openers the pre-scan counts (`*` `_` `~` `[`), plus the
-// backslash itself, so marked reads the passage as literal text and every
-// character shows as typed. `]` stays as written: with no `[` to close it can
-// open nothing, and escaping it measurably slows marked (`\[a\](` x 5e4: 650 ms
-// against 78 ms). The
-// line's own block marker (quote prefix, list bullet) is left alone: the passage
-// keeps its quote or its list item and only its inline marks are neutralized.
+// A degraded passage is neutralised by SAME-LENGTH substitution: each character
+// the pre-scan counts (`*` `_` `~` `[` `]`) and the backslash maps to one private-
+// use character the tokenizer treats as plain text. Backslash escaping was tried
+// first and is wrong: an escape is context-sensitive in CommonMark, literal inside
+// a code span and an autolink, so `x_y` there came out as `x\_y`. The length is
+// kept so token offsets, and with them the notice placement, stay true. The line's
+// own block marker (quote prefix, list bullet) is left alone: the passage keeps its
+// quote or its list item and only its inline marks are neutralised.
 const BLOCK_PREFIX = /^(?: {0,3}> ?)*[ \t]*(?:(?:[-+*]|\d{1,9}[.)])[ \t]+)?/;
-const SPECIAL = /[\\*_~[]/g;
-function escapeLine(line) {
-  const keep = BLOCK_PREFIX.exec(line)[0].length;
-  return line.slice(0, keep) + line.slice(keep).replace(SPECIAL, '\\$&');
+const SUBSTITUTED = ['\\', '*', '_', '~', '[', ']'];
+const PUA_CHAR = /[\uE000-\uF8FF]/g;
+
+// Six private-use characters the document does not already use, or null when it
+// uses the whole block (then nothing can be substituted safely).
+function placeholders(text) {
+  const taken = new Set(text.match(PUA_CHAR) ?? []);
+  const forward = new Map();
+  for (let code = 0xe000; code <= 0xf8ff && forward.size < SUBSTITUTED.length; code++) {
+    const ch = String.fromCharCode(code);
+    if (!taken.has(ch)) forward.set(SUBSTITUTED[forward.size], ch);
+  }
+  return forward.size === SUBSTITUTED.length ? forward : null;
 }
 
-// One lex of the whole document, always. A degraded passage is escaped in place
+function substituteLine(line, forward) {
+  const keep = BLOCK_PREFIX.exec(line)[0].length;
+  return line.slice(0, keep) + line.slice(keep).replace(/[\\*_~[\]]/g, (ch) => forward.get(ch));
+}
+
+// Put the originals back in every string of the token tree — text, code, link text
+// and href, image alt, raw — so no placeholder reaches the page.
+function restoreTokens(tokens, forward) {
+  const back = new Map([...forward].map(([original, placeholder]) => [placeholder, original]));
+  const pattern = new RegExp(`[${[...back.keys()].join('')}]`, 'g');
+  const fix = (s) => s.replace(pattern, (ch) => back.get(ch));
+  const seen = new Set();
+  const walk = (value) => {
+    if (value === null || typeof value !== 'object' || seen.has(value)) return;
+    seen.add(value);
+    for (const key of Object.keys(value)) {
+      const v = value[key];
+      if (typeof v === 'string') value[key] = fix(v);
+      else walk(v);
+    }
+  };
+  walk(tokens);
+}
+
+// One lex of the whole document, always. A degraded passage is substituted in place
 // first, so the tokenizer runs in linear time on it and every neighbour (a
 // reference definition, a list's other items) is tokenized in its own context.
 // Each degraded passage is announced by a notice block placed before the
@@ -185,26 +219,33 @@ function bodyBlocks(body, lex) {
   const degraded = prescan(text).filter((span) => span.degraded);
   if (degraded.length === 0) return blocks(lexTokens(text, lex), 0);
 
+  const forward = placeholders(text);
+  if (forward === null) {
+    // the document uses every private-use character: show it as written
+    const marks = degraded.reduce((sum, span) => sum + span.marks, 0);
+    return [{ t: 'degraded', notice: degradedNotice(marks) }, { t: 'literal', text: body }];
+  }
   const lines = text.split('\n');
   const mark = new Set();
   for (const span of degraded) for (let i = span.from; i < span.to; i++) mark.add(i);
-  const starts = []; // offset in the escaped text of each degraded span's first line, in span order
+  const starts = []; // offset in the substituted text of each degraded span's first line, in span order
   const out = [];
   let offset = 0;
   let next = 0;
   for (let i = 0; i < lines.length; i++) {
     if (next < degraded.length && degraded[next].from === i) starts[next++] = offset;
-    const line = mark.has(i) ? escapeLine(lines[i]) : lines[i];
+    const line = mark.has(i) ? substituteLine(lines[i], forward) : lines[i];
     out.push(line);
     offset += line.length + 1;
   }
-  const escaped = out.join('\n');
-  const tokens = lexTokens(escaped, lex);
+  const neutral = out.join('\n');
+  const tokens = lexTokens(neutral, lex);
+  restoreTokens(tokens, forward);
 
   const notices = degraded.map((span, k) => ({ at: starts[k], node: { t: 'degraded', notice: degradedNotice(span.marks) } }));
   const before = new Map(); // token index -> notice nodes announced before it
   const total = tokens.reduce((sum, token) => sum + (typeof token.raw === 'string' ? token.raw.length : NaN), 0);
-  if (total === escaped.length) {
+  if (total === neutral.length) {
     let start = 0;
     let k = 0; // notices and tokens are both in source order: one merge pass
     tokens.forEach((token, index) => {
@@ -254,7 +295,7 @@ export function safeHref(raw) {
 
 const rawText = (token) => String(token.raw ?? token.text ?? '');
 
-// A run of `escape` tokens is one text node: an escaped passage arrives as one
+// A run of `escape` tokens is one text node: an neutral passage arrives as one
 // token per character, and the page should not carry a node for each.
 function inline(tokens) {
   const out = [];
