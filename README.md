@@ -126,7 +126,8 @@ you already defined, and is safe to re-run. `npx brain --help` lists the verb su
   `gitHost`, and `slug` from your git origin (confirm/override the provider on a TTY).
 - Prompts for your **`VCS_TOKEN`** (offers to open the provider's PAT page),
   writes it to `.env`, and configures the HTTPS git credential helper.
-- Selects and initializes the SDD harness and the memory backend.
+- Selects and initializes the SDD harness, and asks which memory backend the team uses
+  (`engram` or `plainfiles`, no default), writing the answer to tracked `brain.config.json`.
 - Reports any ecosystem tools to install — run `gentle-ai install` for `engram`
   and `gga`.
 - Configures the git **hooks** (`core.hooksPath = brain/scripts/hooks`).
@@ -208,7 +209,7 @@ brain follows the adapter pattern throughout — the repo is agnostic to the too
 | Concern | Selector | Default | ADR |
 |---|---|---|---|
 | SDD harness | `SDD_HARNESS` (`.env`) | `gentle-ai` | [ADR-0005](brain/project/decisions/adr-0005-adapter-harness-sdd-harness.md) / [ADR-0012](brain/project/decisions/adr-0012-harness-init-adapter.md) |
-| Memory backend | `MEMORY_BACKEND` (`.env`) | `engram` | [ADR-0004](brain/project/decisions/adr-0004-adapter-memoria-memory-backend.md) |
+| Memory backend | `memory.backend` (`brain.config.json`, tracked); `MEMORY_BACKEND` in `.env` or the environment is a per-machine override | none: `env:init` asks (`engram` or `plainfiles`), and backend operations refuse while it is undeclared | [ADR-0004](brain/project/decisions/adr-0004-adapter-memoria-memory-backend.md) (Amendment 3) |
 | VCS provider | `vcs.provider` (`brain.config.json`) | from git origin | [ADR-0008](brain/project/decisions/adr-0008-adapter-vcs-provider.md) |
 
 See [ADR-0001](brain/project/decisions/adr-0001-arquitectura-3-capas-harness-reemplazable.md) for the replaceable-harness architecture.
