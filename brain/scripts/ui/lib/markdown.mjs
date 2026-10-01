@@ -39,8 +39,17 @@ const MAX_MARKS = 600;
 const MAX_RUN = 50;
 const BLANK = /^\s*$/;
 const BLOCK_START = /^(?:\s*(?:[-+*]|\d{1,9}[.)])(?:\s|$)| {0,3}#{1,6}(?:\s|$)| {0,3}>|\s*\|)/;
-const FENCE = /^\s*(`{3,}|~{3,})/;
-const FENCE_CLOSE = /^\s*(`{3,}|~{3,})\s*$/;
+// marked's own fence rule (vendor/marked.esm.js, block `fences`), line by line:
+// at most three leading spaces; a backtick run of three or more whose info
+// string holds no backtick, or a tilde run of three or more. A closer is at most
+// three spaces, the opener's exact run, any further ~ or `, then spaces only.
+// Anything looser blinds the pre-scan to text marked will lex as inline.
+const FENCE = /^ {0,3}(`{3,}(?=[^`]*$)|~{3,})/;
+const FENCE_TAIL = /^[~`]* *$/;
+const closesFence = (line, opener) => {
+  const rest = /^ {0,3}(.*)$/.exec(line)[1];
+  return rest.startsWith(opener) && FENCE_TAIL.test(rest.slice(opener.length));
+};
 const isDelimiter = (code) => code === 42 || code === 95 || code === 126 || code === 91 || code === 93;
 
 function countLine(line) {
@@ -85,8 +94,7 @@ export function prescan(body) {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     if (fence) {
-      const closer = FENCE_CLOSE.exec(line);
-      if (closer && closer[1][0] === fence[0] && closer[1].length >= fence.length) fence = null;
+      if (closesFence(line, fence)) fence = null;
       continue;
     }
     const opener = FENCE.exec(line);

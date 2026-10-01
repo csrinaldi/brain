@@ -478,3 +478,40 @@ test('#1218 R1218-3: the zero-degradation assertion is a real detector and names
   const files = [...allChangeArtifacts(), { name: 'fixture-601', text: 'a*'.repeat(601) }];
   assert.throws(() => assertNoDegradation(files), /fixture-601/);
 });
+
+// ── #1218 cold-1: the pre-scan's fence rule is marked's, so a non-fence line cannot blind it ──
+
+const HAZARD = '*a '.repeat(6000);
+
+test('#1218 cold-1: a one-line ```x``` is not a fence, so the hazard after it degrades in under 200 ms', () => {
+  const { value, ms } = timed(() => markdownTree(`\`\`\`x\`\`\`\n${HAZARD}`));
+  assert.equal(degradedBlocks(value).length, 1);
+  assert.ok(ms < 200, `took ${ms} ms`);
+});
+
+test('#1218 cold-1: a four-space indented ``` is code, not a fence, so the hazard after it degrades in under 200 ms', () => {
+  const { value, ms } = timed(() => markdownTree(`    \`\`\`\n${HAZARD}`));
+  assert.equal(degradedBlocks(value).length, 1);
+  assert.ok(ms < 200, `took ${ms} ms`);
+});
+
+test('#1218 cold-1: a backtick fence whose info string holds a backtick is not a fence', () => {
+  assert.equal(prescan(`\`\`\`a\`b\n${HAZARD}`).filter((s) => s.degraded).length, 1);
+  assert.equal(prescan(`~~~a\`b\n${HAZARD}`).filter((s) => s.degraded).length, 0);
+});
+
+test('#1218 cold-1: up to three leading spaces still open a fence; a closer needs the opener, at most three spaces, and only blanks after it', () => {
+  const stars = '*'.repeat(700);
+  const degraded = (src) => prescan(src).filter((s) => s.degraded).length;
+  assert.equal(degraded(`   \`\`\`\n${stars}\n   \`\`\``), 0);
+  // four spaces: not a closer, the fence stays open
+  assert.equal(degraded(`\`\`\`\n${stars}\n    \`\`\`\n${stars}`), 0);
+  // text after the closer: not a closer
+  assert.equal(degraded(`\`\`\`\n${stars}\n\`\`\` x\n${stars}`), 0);
+  // a shorter closer does not close
+  assert.equal(degraded(`\`\`\`\`\n${stars}\n\`\`\`\n${stars}`), 0);
+  // a longer closer closes
+  assert.equal(degraded(`\`\`\`\n${stars}\n\`\`\`\`\n${stars}`), 1);
+  // trailing spaces after the closer are fine
+  assert.equal(degraded(`\`\`\`\n${stars}\n\`\`\`  \n${stars}`), 1);
+});
