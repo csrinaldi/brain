@@ -200,7 +200,7 @@ export default {
 
   // §7 Team memory
   'bootstrap.memory.section':        'Memoria de equipo',
-  'bootstrap.memory.prompt':         '¿Qué backend de memoria usás? [engram]: ',
+  'bootstrap.memory.prompt':         '¿Qué backend de memoria usa este equipo? (engram|plainfiles): ',
   'bootstrap.memory.undeclared':     'no hay backend de memoria declarado (env, .env, brain.config.json memory.backend) — no se adivinó ninguno, así que se saltó el setup de memoria. Siguiente: npm run brain:config -- set memory.backend engram|plainfiles, y volvé a correr env:init.',
   'bootstrap.memory.invalid':        "el backend de memoria '{value}' (de {source}) no es 'engram' ni 'plainfiles' — se saltó el setup de memoria. Corregilo donde está seteado y volvé a correr env:init.",
   'bootstrap.memory.unreadable':     "no se pudo leer brain.config.json, así que no se resolvió el backend de memoria — {detail}. No se preguntó ni se escribió nada; corregí o restaurá el archivo y volvé a correr env:init.",
@@ -327,6 +327,8 @@ export default {
   'ticket.base.epicUnreadable':   '→ Base: {base} — no se pudo leer la épica #{epic}, se continúa igual: {message}',
   'ticket.base.offTracker':       '→ Base: {base} — FUERA DEL TRACKER: la épica #{epic} declara {tracker}, y se pasó --off-tracker.',
   'ticket.error.baseIsTracked':   '✗ se pasó --base {base}, pero la épica #{epic} declara el tracker {tracker} — mientras esa épica está en vuelo una slice arranca de ahí. Usá --base {tracker}, o pasá {flag} para declarar que esta rama deliberadamente no lo hace.',
+
+  'ticket.error.noTypeLabel':     '✗ El issue #{id} no tiene una etiqueta type:* (etiquetas encontradas: [{labels}]) — brain:ship lo rechazaría más adelante. Agregá una ahora en el issue (por ejemplo type:feature, type:bug o type:chore; type::feature en GitLab) y volvé a ejecutar.',
 
   'ticket.nextSteps.header':      'Próximos pasos:',
   'ticket.nextSteps.cd':          '    0. cd {path}   (abrí tu sesión de trabajo acá)',

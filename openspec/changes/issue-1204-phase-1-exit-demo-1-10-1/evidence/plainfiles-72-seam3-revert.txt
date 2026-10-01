@@ -1,0 +1,11 @@
+✓ No prohibited references found.
+✓ Artifact structure is valid.
+[memory/gandalf-rog-zephyrus-g15-ga503qr-ga503qr-2026-10-01 d825139] chore: revert foreign path injection (#1)
+ 1 file changed, 1 deletion(-)
+ delete mode 100644 FOREIGN-1204.txt
+exit=0
+✓ No prohibited references found.
+✓ Artifact structure is valid.
+To https://github.com/csrinaldi/brain-test-plainfiles.git
+   2f2318e..d825139  HEAD -> memory/gandalf-rog-zephyrus-g15-ga503qr-ga503qr-2026-10-01
+exit=0

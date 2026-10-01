@@ -582,27 +582,36 @@ case "$_mb_rc" in
       # "$MEMORY_BACKEND" in` a few lines below — two different literal lines
       # for two different jobs, never one string a test's own extraction could
       # match by accident.
+      # NO default (issue #1205, ADR-0004 Amendment 3): the backend is a team decision, so
+      # Enter re-prompts instead of declaring one, and a closed stdin (read fails) leaves
+      # it empty — the caller then takes the existing undeclared path.
+      _membackend_answer=""
       while :; do
-        read -r -p "  $I18N_BOOTSTRAP_MEMORY_PROMPT" _membackend_answer
+        read -r -p "  $I18N_BOOTSTRAP_MEMORY_PROMPT" _membackend_answer || { _membackend_answer=""; break; }
         case "$_membackend_answer" in
-          engram|plainfiles|'') break ;;
+          engram|plainfiles) break ;;
+          '') ;;
           *) printf '  ✗ Unknown backend "%s" — only "engram" or "plainfiles" are supported.\n' "$_membackend_answer" >&2 ;;
         esac
       done
       MEMORY_BACKEND="$_membackend_answer"
       # --- END memory-backend-validate ---
-      # Enter accepts the default the prompt itself names — a human's answer, not a guess.
-      MEMORY_BACKEND="${MEMORY_BACKEND:-engram}"
-      # The declaration goes to TRACKED config and NOT to .env: writing .env too would
-      # recreate the drift this exists to stop (a stale per-machine line silently beating
-      # the team's value). .env stays what it always was: a per-machine override.
-      if node "$BRAIN_SCRIPTS/config/cli.mjs" set memory.backend "$MEMORY_BACKEND" >/dev/null 2>&1; then
-        warn "$I18N_BOOTSTRAP_MEMORY_DECLARED"
-        _mb_source="config"
+      if [ -z "$MEMORY_BACKEND" ]; then
+        # Closed stdin: nothing was answered and nothing is guessed.
+        warn "$I18N_BOOTSTRAP_MEMORY_UNDECLARED"
+        MISSING_OPTIONAL+=("memory backend undeclared (next: npm run brain:config -- set memory.backend engram|plainfiles, then re-run env:init)")
       else
-        warn "$(printf "$I18N_BOOTSTRAP_MEMORY_DECLAREFAILED" "$MEMORY_BACKEND")"
-        MISSING_OPTIONAL+=("memory backend not saved to brain.config.json (next: npm run brain:config -- set memory.backend $MEMORY_BACKEND)")
-        _mb_source="prompt"
+        # The declaration goes to TRACKED config and NOT to .env: writing .env too would
+        # recreate the drift this exists to stop (a stale per-machine line silently beating
+        # the team's value). .env stays what it always was: a per-machine override.
+        if node "$BRAIN_SCRIPTS/config/cli.mjs" set memory.backend "$MEMORY_BACKEND" >/dev/null 2>&1; then
+          warn "$I18N_BOOTSTRAP_MEMORY_DECLARED"
+          _mb_source="config"
+        else
+          warn "$(printf "$I18N_BOOTSTRAP_MEMORY_DECLAREFAILED" "$MEMORY_BACKEND")"
+          MISSING_OPTIONAL+=("memory backend not saved to brain.config.json (next: npm run brain:config -- set memory.backend $MEMORY_BACKEND)")
+          _mb_source="prompt"
+        fi
       fi
     else
       warn "$I18N_BOOTSTRAP_MEMORY_UNDECLARED"
