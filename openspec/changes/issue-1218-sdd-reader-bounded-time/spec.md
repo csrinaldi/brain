@@ -24,7 +24,7 @@ Fixed values used throughout (all binding from the rulings):
 
 ### R1218-1: A pre-scan degrades pathological inline spans to literal text
 
-`lib/markdown.mjs` MUST run a pure, linear pre-scan over each inline span before marked tokenizes it (R1). A span is a maximal run of lines, cut where marked starts a new inline run: a blank line closes the span; a list item, a heading or a table row closes the span and opens a new one on that line; the continuation lines of a list item, indented or lazy, belong to that item's span. Block quote lines follow marked's own paragraph rule: consecutive quote lines, and a lazy continuation line that has no `>`, are ONE span. That span is closed by a blank line, by a quote line with no text after its prefix, by a list item or heading inside the quote, or by a deeper quote. A quote line directly after a plain paragraph line opens a new span. A thematic break, mirroring marked's `hr` rule (up to three spaces, then three or more of one of `-`, `_` or `*`, each optionally followed by spaces or tabs, and nothing else on the line), closes the span and belongs to none, so it survives as an hr. A setext underline, mirroring the tail of marked's `lheading` rule (up to three spaces, then one or more `=` or one or more `-`, then spaces only) directly after a paragraph line closes the span INCLUSIVELY: marked turns that paragraph into a heading, so the underline is the span's last line. A line of nothing but delimiters (`***`, `___`) is therefore marked's thematic break, not a passage. A fence is detected by marked's own fence rule and by nothing looser: a line of up to three spaces, then three or more backticks whose info string holds no backtick, or three or more tildes. A fence opener closes the span, and the lines of the fenced code are skipped (not counted) until a closer, which is up to three spaces, the opener's exact run (any further `~` or backtick may follow) and only spaces after it, or until the end of the text. A one-line ```` ```x``` ````, a fence indented four or more spaces, and a backtick fence whose info string holds a backtick are NOT fences, and their lines are counted. The pre-scan MUST count the delimiter characters, exactly the five characters `*`, `_`, `~`, `[` and `]`, in the span, and the length of the longest run of one repeated delimiter character. A run is a maximal sequence of one delimiter character inside one line, and a newline ends a run. Backtick, `(`, `)`, `<` and `>` MUST NOT be counted. A span MUST be degraded when it holds MORE than 600 delimiters, or when it holds a single run LONGER than 50. A span at exactly 600 delimiters, or with a longest run of exactly 50, MUST NOT be degraded. The counter MUST reset at every span boundary above, so the count is per passage and never per document. The thresholds sit above the measured real maxima (122 delimiters in one span, a run of 7).
+`lib/markdown.mjs` MUST run a pure pre-scan over each inline span before marked tokenizes any inline text (R1). A span is an inline run as marked's own block phase produces it: the text of a paragraph, a heading, a table cell, a list item or a paragraph inside a quote or list, exactly as `Lexer#blockTokens` segments the document. The pre-scan MUST obtain the spans by running that block phase (which defers all inline work) and reading the block tree, and MUST NOT re-implement marked's block grammar. Behaviour follows from that: a lazy continuation line joins its paragraph, a thematic break or fenced code belongs to no span, a setext underline makes the paragraph above it a heading, and the lines marked treats as one paragraph are one span. The pre-scan MUST count the delimiter characters, exactly the five characters `*`, `_`, `~`, `[` and `]`, in the span, and the length of the longest run of one repeated delimiter character. A run is a maximal sequence of one delimiter character inside one line, and a newline ends a run. Backtick, `(`, `)`, `<` and `>` MUST NOT be counted. A span MUST be degraded when it holds MORE than 600 delimiters, or when it holds a single run LONGER than 50. A span at exactly 600 delimiters, or with a longest run of exactly 50, MUST NOT be degraded. The counter MUST reset at every span boundary marked draws, so the count is per passage and never per document. Each degraded span is mapped back to its source lines; where a container's lines cannot be mapped, the whole container is one span. If the block phase throws (for example on a very deep quote nest), the whole document MUST be degraded to its source text with the "could not be parsed" notice. The thresholds sit above the measured real maxima (122 delimiters in one span, a run of 7).
 
 This requirement modifies R1198-13: rendering terminates on any input, and the cheap known classes terminate without reaching the worker backstop.
 
@@ -68,10 +68,10 @@ This requirement modifies R1198-13: rendering terminates on any input, and the c
 - **WHEN** the adapter builds the tree
 - **THEN** the paragraph is tokenized by marked and the tree carries no pre-scan notice
 
-#### Scenario: The pre-scan is linear and classifies without calling marked
+#### Scenario: The pre-scan runs the block phase only and never the inline phase
 - **GIVEN** a 200 KB `*` run
 - **WHEN** `prescan` classifies it
-- **THEN** it returns one degraded span within the render budget, and the tokenizer is not involved in the classification
+- **THEN** it returns one degraded span within the render budget, and no inline tokenizing runs in the classification
 
 #### Scenario: A one-line triple-backtick pair is not a fence
 - **GIVEN** the text "```x```", a newline, and 6000 repetitions of `*a `
@@ -146,6 +146,26 @@ The document MUST be tokenized ONCE, as a whole, never in pieces. Before that on
 - **GIVEN** the injected tokenize seam recording its calls and a 200 KB `*` run followed by the word x
 - **WHEN** the adapter builds the tree
 - **THEN** the seam is called exactly once, with a text of the same length that holds no `*`
+
+#### Scenario: A numbered line that cannot interrupt a paragraph is part of its span
+- **GIVEN** the line "para start", then 60 lines each of `2. ` followed by 150 repetitions of `*a_`
+- **WHEN** the adapter builds the tree
+- **THEN** the lines are one lazy paragraph span, degraded with its notice within the pre-scan bound (750 ms) (the unfixed rule saw 61 spans, degraded none and took 5966 ms)
+
+#### Scenario: An indented bullet that cannot interrupt a paragraph is part of its span
+- **GIVEN** the line "para start", then 60 lines each of four spaces, `- ` and 150 repetitions of `*a_`
+- **WHEN** the adapter builds the tree
+- **THEN** the lines are one lazy paragraph span, degraded with its notice within the pre-scan bound (750 ms) (the unfixed rule took 6085 ms)
+
+#### Scenario: marked's block segmentation is pinned
+- **GIVEN** a paragraph line followed by `2. ` lines
+- **WHEN** the vendored marked runs its block phase on it
+- **THEN** it returns one paragraph whose inline tokens are still empty, so a marked upgrade that changes this fails a test
+
+#### Scenario: A block phase that throws degrades the whole document
+- **GIVEN** a document of 40000 `> ` prefixes and a word, which overflows marked's recursion
+- **WHEN** the adapter builds the tree
+- **THEN** the tree is one code block holding the source, with the "could not be parsed" notice
 
 #### Scenario: Substitution keeps the whole pipeline linear
 - **GIVEN** a 200 KB `*` run followed by the word x

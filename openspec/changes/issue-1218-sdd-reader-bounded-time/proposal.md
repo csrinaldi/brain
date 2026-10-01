@@ -47,7 +47,7 @@ The round-2 cold review of #1212 (#1198) found one correction and two editorial 
 
 **Option C (chosen, R1).** A pre-scan handles the known classes cheaply. The worker bounds the unknown ones.
 
-- **Pre-scan.** One linear pass per inline span counts delimiters and the longest delimiter run. The counter resets at a blank line, list item, heading or quote. A span over a threshold is emitted as literal text, and the tree carries a notice.
+- **Pre-scan.** One linear pass per inline span counts delimiters and the longest delimiter run. Spans are the inline runs marked's own block phase produces, so the counter resets wherever marked starts a new one. A span over a threshold is emitted as literal text, and the tree carries a notice.
 - **Worker.** `markdown-worker.mjs` runs `lexer` and the adapter, then posts the tree back. `server.mjs:56` `LIB_MODULE_RE` already serves it. Its `../vendor/marked.esm.js` resolves to the allow-listed vendor path, and no CSP is set.
 - **Async seam.** `app.js` takes an injected async `tokenize`. Tests inject a synchronous fake, and the browser gets the worker-backed one. Each expansion carries a token, and a result whose token is stale is discarded.
 
@@ -74,7 +74,7 @@ The round-2 cold review of #1212 (#1198) found one correction and two editorial 
 |---|---|---|
 | Async render races: a fast collapse/re-expand, or a result arriving for a closed row | Med | Each request carries a token, and stale results are dropped. Tests drive the order through the injected seam. |
 | The fake DOM has no `Worker` | High | An injected tokenize seam covers `app.js`. One `worker_threads` integration test runs the real worker file. |
-| The pre-scan heuristic drifts across marked upgrades | Med | The worker is the backstop. The thresholds have wide margins. A test runs every real artifact and asserts zero degradations. |
+| The pre-scan's reading of marked's block phase drifts across marked upgrades | Med | The worker is the backstop, and a pin test fails when marked's block segmentation changes. The thresholds have wide margins. A test runs every real artifact and asserts zero degradations. |
 | Worker startup cost on every expansion | Low | Measure in design. Reuse one worker until it is terminated. |
 | A terminated worker leaves a hung row | Low | The timeout path always renders the plain-text fallback. |
 
