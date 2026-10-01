@@ -328,6 +328,8 @@ export default {
   'ticket.base.offTracker':       '→ Base: {base} — FUERA DEL TRACKER: la épica #{epic} declara {tracker}, y se pasó --off-tracker.',
   'ticket.error.baseIsTracked':   '✗ se pasó --base {base}, pero la épica #{epic} declara el tracker {tracker} — mientras esa épica está en vuelo una slice arranca de ahí. Usá --base {tracker}, o pasá {flag} para declarar que esta rama deliberadamente no lo hace.',
 
+  'ticket.error.noTypeLabel':     '✗ El issue #{id} no tiene una etiqueta type:* (etiquetas encontradas: [{labels}]) — brain:ship lo rechazaría más adelante. Agregá una ahora en el issue (por ejemplo type:feature, type:bug o type:chore; type::feature en GitLab) y volvé a ejecutar.',
+
   'ticket.nextSteps.header':      'Próximos pasos:',
   'ticket.nextSteps.cd':          '    0. cd {path}   (abrí tu sesión de trabajo acá)',
   'ticket.nextSteps.step1':       '    1. Implementar — usá /sdd-new {id} si el cambio es complejo',
