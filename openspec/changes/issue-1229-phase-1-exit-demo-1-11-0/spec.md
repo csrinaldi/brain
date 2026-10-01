@@ -1,6 +1,6 @@
 # Spec — #1229
 
-- REQ-1: Each phase-1 exit clause is reported citing evidence files. Clause 1 (no step outside install, bootstrap or upgrade) is NOT answered by the run: it is left as "Pending maintainer ruling" with every human step listed.
+- REQ-1: Each phase-1 exit clause is reported citing evidence files. The run does NOT answer clause 1 (no step outside install, bootstrap or upgrade) itself: it lists every human step with its evidence, and the clause is answered only by the maintainer's ruling, which `report.md` records in its "Ruling" section with its date and basis.
   - fresh plainfiles and engram installs need no step outside install, bootstrap or upgrade;
   - no credential is committed;
   - the four seams (and #1118) recover.
