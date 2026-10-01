@@ -222,6 +222,29 @@ test('#1198 termination: pathological input returns quickly, never throws, never
   assert.deepEqual(markdownTree('').blocks, []);
 });
 
+// Every string the tree would show: text-bearing fields, walked recursively.
+function visibleText(node) {
+  if (Array.isArray(node)) return node.map(visibleText).join(' ');
+  if (node && typeof node === 'object') {
+    return Object.entries(node).map(([k, v]) => (k === 't' || k === 'lang' ? '' : visibleText(v))).join(' ');
+  }
+  return typeof node === 'string' ? node : '';
+}
+
+test('#1198 R1198-13: malformed constructs degrade to text, the input\'s non-markup characters survive', () => {
+  const cases = [
+    ['```js\nunclosed', ['unclosed']],
+    ['**unclosed', ['unclosed']],
+    ['[a](', ['a']],
+    ['| a | b |\n|---|', ['a', 'b']],
+    ['[x](<', ['x']],
+  ];
+  for (const [input, words] of cases) {
+    const shown = visibleText(markdownTree(input).blocks);
+    for (const w of words) assert.ok(shown.includes(w), `${JSON.stringify(w)} lost for ${JSON.stringify(input)}; tree shows ${JSON.stringify(shown)}`);
+  }
+});
+
 test('#1198 D4: a tokenizer that throws degrades to one code block plus a notice', () => {
   const out = markdownTree('# hello', () => { throw new RangeError('boom'); });
   assert.deepEqual(out.blocks, [{ t: 'code', lang: null, text: '# hello' }]);
