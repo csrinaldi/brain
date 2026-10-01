@@ -362,6 +362,8 @@ export default {
   'ticket.base.offTracker':       '→ Base: {base} — OFF TRACKER: epic #{epic} declares {tracker}, and --off-tracker was given.',
   'ticket.error.baseIsTracked':   '✗ --base {base} was given, but epic #{epic} declares tracker {tracker} — while that epic is in flight a slice starts there. Use --base {tracker}, or pass {flag} to state that this branch deliberately does not.',
 
+  'ticket.error.noTypeLabel':     '✗ Issue #{id} has no type:* label (labels found: [{labels}]) — brain:ship would refuse it later. Add one on the issue now (for example type:feature, type:bug or type:chore; type::feature on GitLab), then re-run.',
+
   'ticket.nextSteps.header':      'Next steps:',
   'ticket.nextSteps.cd':          '    0. cd {path}   (open your work session here)',
   'ticket.nextSteps.step1':       '    1. Implement — use /sdd-new {id} if the change is complex',
