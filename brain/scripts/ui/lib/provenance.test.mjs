@@ -9,15 +9,12 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
-
 import { parseSpecCards } from './spec-cards.mjs';
 import { parseTasksList } from './tasks-list.mjs';
 import { parseBlame } from './blame.mjs';
 import { shapeResumeView } from './resume-view.mjs';
-import { testTmp } from '../../lib/test-tmp.mjs';
 import { buildChangeView } from '../change-route.mjs';
+import { fakeGit } from '../test-support/fake-git.mjs';
 
 const SPEC_PATH = 'openspec/changes/issue-881-ui-server-canvas/spec.md';
 const TASKS_PATH = 'openspec/changes/issue-881-ui-server-canvas/tasks.md';
@@ -86,16 +83,6 @@ test('#881: every resume-view.mjs field carries a non-empty source, including a 
 
 test('#881: change-route.mjs\'s composed view — every Spec/Tasks/Working-memory/Reviews leaf carries a non-empty source', () => {
   const changeDir = 'openspec/changes/issue-881-ui-server-canvas';
-  const root = testTmp('provenance-change-route-');
-  mkdirSync(join(root, changeDir), { recursive: true });
-  writeFileSync(join(root, changeDir, 'spec.md'), [
-    '### R881-8: the inspector drawer, four tabs, every value sourced',
-    '#### Scenario: full drawer for a change with a spec and tasks',
-    "- **WHEN** a node's issue has a change dir",
-    '- **THEN** the Spec tab shows its cards',
-  ].join('\n'));
-  writeFileSync(join(root, changeDir, 'tasks.md'), '- [x] ship it\n');
-
   const snapshot = {
     changes: { ok: true, value: [{ id: 'issue-881-ui-server-canvas', issue: 881, slug: 'ui-server-canvas', dir: changeDir }] },
     prs: { ok: true, value: [{ number: 957, title: 'x', headBranch: BRANCH, issue: 881 }] },
@@ -109,28 +96,34 @@ test('#881: change-route.mjs\'s composed view — every Spec/Tasks/Working-memor
       }],
     },
   };
-  const run = (file, args) => {
-    if (args[0] === 'blame') {
-      return [
-        'abc1234abc1234abc1234abc1234abc1234abc1 1 1 1',
-        'author csrinaldi',
-        'author-mail <c@example.com>',
-        'author-time 1694700000',
-        'author-tz +0000',
-        'committer csrinaldi',
-        'committer-mail <c@example.com>',
-        'committer-time 1694700000',
-        'committer-tz +0000',
-        'summary ship it',
-        'filename tasks.md',
-        '\t- [x] ship it',
-      ].join('\n');
-    }
-    if (args[0] === 'show') return '---\nnext_action: ship it\ncurrent_slice: 3\nblockers:\n---\n';
-    throw new Error(`unexpected git call: ${args.join(' ')}`);
-  };
+  const run = fakeGit({
+    files: {
+      [`${changeDir}/spec.md`]: [
+        '### R881-8: the inspector drawer, four tabs, every value sourced',
+        '#### Scenario: full drawer for a change with a spec and tasks',
+        "- **WHEN** a node's issue has a change dir",
+        '- **THEN** the Spec tab shows its cards',
+      ].join('\n'),
+      [`${changeDir}/tasks.md`]: '- [x] ship it\n',
+    },
+    branches: { [BRANCH]: { commit: 'f'.repeat(40), files: { 'resume.md': '---\nnext_action: ship it\ncurrent_slice: 3\nblockers:\n---\n' } } },
+    blame: [
+      'abc1234abc1234abc1234abc1234abc1234abc1 1 1 1',
+      'author csrinaldi',
+      'author-mail <c@example.com>',
+      'author-time 1694700000',
+      'author-tz +0000',
+      'committer csrinaldi',
+      'committer-mail <c@example.com>',
+      'committer-time 1694700000',
+      'committer-tz +0000',
+      'summary ship it',
+      'filename tasks.md',
+      '\t- [x] ship it',
+    ].join('\n'),
+  });
 
-  const result = buildChangeView({ root, issue: 881, snapshot, project: 'o/r', _run: run });
+  const result = buildChangeView({ issue: 881, snapshot, project: 'o/r', _run: run });
   assert.equal(result.ok, true);
   assert.equal(result.value.spec.ok, true);
   assert.equal(result.value.tasks.ok, true);

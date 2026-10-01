@@ -124,6 +124,32 @@ test('#998: the page never assigns markup — no innerHTML, outerHTML, insertAdj
   assert.doesNotMatch(text, /\b(innerHTML|outerHTML|insertAdjacentHTML|document\.write)\b/, 'text from the forge and from files is rendered as text, never as markup');
 });
 
+// ── #1198: rendered markdown must never become markup, in lib/ either ────────
+// `codeOnly` is defined below (function declarations hoist), and is what keeps
+// the comment in lib/memory-model.mjs that names `innerHTML` from matching.
+const MARKUP_SINK = /\b(innerHTML|outerHTML|insertAdjacentHTML|document\.write)\b/;
+
+function libMarkupSinks(sources) {
+  return Object.entries(sources)
+    .filter(([, text]) => MARKUP_SINK.test(codeOnly(text)))
+    .map(([name]) => name);
+}
+
+test('#1198: no ui/lib/*.mjs assigns markup (innerHTML family), and the real app.js still passes', () => {
+  const sources = {};
+  for (const name of readdirSync(LIB_DIR).filter((n) => n.endsWith('.mjs') && !n.endsWith('.test.mjs'))) {
+    sources[`lib/${name}`] = readFileSync(join(LIB_DIR, name), 'utf8');
+  }
+  assert.ok(Object.keys(sources).length > 10, 'the scan must actually see the lib modules');
+  assert.deepEqual(libMarkupSinks(sources), []);
+  assert.ok(!MARKUP_SINK.test(codeOnly(readFileSync(APP_JS, 'utf8'))), 'app.js stays markup-free');
+});
+
+test('#1198: an injected lib/markdown.mjs that assigns innerHTML is caught and named', () => {
+  const evil = { 'lib/markdown.mjs': 'export const f = (el, s) => { el.innerHTML = s; };', 'lib/ok.mjs': '// innerHTML is banned\nexport const x = 1;' };
+  assert.deepEqual(libMarkupSinks(evil), ['lib/markdown.mjs']);
+});
+
 // ── #1059: a call to a function that does not exist ────────────────────────
 // `saidList` was called in seven places and defined in none. It had been
 // deleted as collateral when phase 5 removed the SVG helpers it happened to
