@@ -61,7 +61,7 @@ function documentFailure(doc, head) {
 
 /** A truncated document still feeds its tab; the tab says the cards or items cover only the read part. */
 function truncationNote(doc, what) {
-  return doc.state === 'truncated' ? `truncated at ${doc.truncatedAt} bytes; ${what} cover the read part` : null;
+  return doc.state === 'truncated' ? `truncated at ${DOCUMENT_CAP} bytes; ${what} cover the read part` : null;
 }
 
 function buildSpecTab({ documents, head, dir, issue }) {
@@ -220,7 +220,7 @@ const HEAD_DOCUMENT_KEYS = SDD_STAGES.filter((stage) => stage !== 'archive');
 const errReason = (err) => String(err?.message ?? err).trim();
 
 function documentEntry(path, ref, fields) {
-  return { path, ref, commit: null, state: 'missing', text: null, bytes: null, truncated: false, truncatedAt: null, reason: null, ...fields };
+  return { path, ref, commit: null, state: 'missing', text: null, bytes: null, truncated: false, truncatedAt: null, reason: null, note: null, ...fields };
 }
 
 /** `ls-tree -l -z` output to `{path: {mode, type, sha, size}}`. A tree's size is `-`. */
@@ -264,6 +264,7 @@ function documentFromEntry({ path, ref, commit, entry, read }) {
   const cut = capText(text);
   return documentEntry(path, ref, {
     commit, state: cut.truncated ? 'truncated' : 'present', text: cut.text, bytes: entry.size, truncated: cut.truncated, truncatedAt: cut.truncatedAt,
+    note: cut.truncated ? `truncated at ${DOCUMENT_CAP} bytes` : null,
   });
 }
 

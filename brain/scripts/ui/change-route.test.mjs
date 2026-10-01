@@ -466,6 +466,7 @@ test('#1198 R1198-3: a 300000-byte design is truncated at 262144 bytes and says 
   assert.equal(documents.design.truncatedAt, 262144);
   assert.ok(Buffer.byteLength(documents.design.text) <= 262144);
   assert.equal(documents.design.bytes, 300000);
+  assert.equal(documents.design.note, 'truncated at 262144 bytes');
 });
 
 test('#1198 R1198-3: exactly 262144 bytes is present, whole, with no truncation', () => {

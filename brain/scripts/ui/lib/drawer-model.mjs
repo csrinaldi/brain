@@ -116,13 +116,37 @@ function findingEntries(round) {
   }));
 }
 
-/** The sdd tab's entries (#998 R998-6): the change's own seven-stage raw presence, `change-route.mjs`'s `buildSddTab`. */
-function sddEntries(items) {
+/**
+ * One document, ready for the DOM (#1198): its state, the `path @ commit`
+ * stamp, the wording a reader sees when it cannot be shown, the truncation
+ * note and the text. A document that is missing or unreadable carries NO text
+ * and NO invented commit, and its two wordings differ — an empty body would
+ * read as "the file has nothing in it" (R1198-2).
+ */
+function documentView(key, doc) {
+  const file = String(doc.path ?? '').split('/').pop();
+  const ref = doc.ref ?? 'the change branch';
+  const readable = doc.state === 'present' || doc.state === 'truncated';
+  let wording = null;
+  if (doc.state === 'missing') wording = `${file} is not committed at ${ref}`;
+  if (doc.state === 'unreadable') wording = `${file} could not be read at ${ref}: ${doc.reason ?? 'no reason was given'}`;
+  return {
+    key,
+    state: doc.state,
+    stamp: readable && doc.commit ? `${doc.path} @ ${doc.commit.slice(0, 12)}` : doc.path,
+    wording,
+    note: readable ? doc.note ?? null : null,
+    text: readable ? doc.text ?? '' : null,
+  };
+}
+
+/** The sdd tab's entries (#998 R998-6): the change's own seven-stage raw presence, `change-route.mjs`'s `buildSddTab`, each stage that IS a document carrying it (#1198). */
+function sddEntries(items, documents) {
   // #1059 region 08: the design numbers the stages and marks each one, so a
   // gap in the middle of the lifecycle is visible at a glance rather than
   // inferred by counting names. The position is the stage's place in the
   // order the reader was given, not an index into whatever was returned.
-  return items.map((item, i) => entry({
+  const rows = items.map((item, i) => entry({
     position: i + 1,
     mark: item.present ? '\u2713' : '\u2014',
     title: item.stage,
@@ -135,7 +159,25 @@ function sddEntries(items) {
     source: item.source,
     done: item.present,
     pending: !item.present,
+    // `archive` is a lifecycle stage, never a document (R1198-1).
+    document: documents?.[item.stage] ? documentView(item.stage, documents[item.stage]) : null,
   }));
+  // Reachable from the SDD tab as an unnumbered row after the seven stages
+  // (D10). Present only when the route answered with it, so a view that
+  // predates documents keeps its seven rows.
+  const resume = documents?.resume;
+  if (resume) {
+    const view = documentView('resume', resume);
+    rows.push(entry({
+      title: 'working memory \u2014 resume.md',
+      file: 'resume.md',
+      detail: view.state === 'present' || view.state === 'truncated' ? 'present' : view.state,
+      source: { path: resume.ref ? `${resume.ref}:resume.md` : 'resume.md' },
+      pending: view.text === null,
+      document: view,
+    }));
+  }
+  return rows;
 }
 
 /**
@@ -217,12 +259,12 @@ function reviewEntries(rounds, unreadable) {
 export function buildDrawerModel(changeView) {
   if (!changeView || typeof changeView !== 'object') return { ok: false, reason: 'no change view was given to the drawer' };
   if (changeView.ok !== true) return { ok: false, reason: changeView.reason };
-  const { issue, changeDir, spec, sdd, tasks, workingMemory, reviews, records } = changeView.value;
+  const { issue, changeDir, spec, sdd, tasks, workingMemory, reviews, records, documents } = changeView.value;
 
   const tabs = [
-    spec.ok ? { id: 'spec', label: TAB_LABELS.spec, ok: true, reason: null, source: null, note: null, entries: specEntries(spec.value), orphans: orphanEntries(spec.orphans) } : failedTab('spec', spec),
-    sdd.ok ? { id: 'sdd', label: TAB_LABELS.sdd, ok: true, reason: null, source: null, note: null, entries: sddEntries(sdd.value), slices: sliceEntries(sdd.slices) } : failedTab('sdd', sdd),
-    tasks.ok ? { id: 'tasks', label: TAB_LABELS.tasks, ok: true, reason: null, source: null, note: null, entries: taskEntries(tasks.value) } : failedTab('tasks', tasks),
+    spec.ok ? { id: 'spec', label: TAB_LABELS.spec, ok: true, reason: null, source: null, note: spec.note ?? null, entries: specEntries(spec.value), orphans: orphanEntries(spec.orphans) } : failedTab('spec', spec),
+    sdd.ok ? { id: 'sdd', label: TAB_LABELS.sdd, ok: true, reason: null, source: null, note: null, entries: sddEntries(sdd.value, documents), slices: sliceEntries(sdd.slices) } : failedTab('sdd', sdd),
+    tasks.ok ? { id: 'tasks', label: TAB_LABELS.tasks, ok: true, reason: null, source: null, note: tasks.note ?? null, entries: taskEntries(tasks.value) } : failedTab('tasks', tasks),
     workingMemory.ok
       ? { id: 'workingMemory', label: TAB_LABELS.workingMemory, ok: true, reason: null, source: null, note: null, entries: workingMemoryEntries(workingMemory.value) }
       : failedTab('workingMemory', workingMemory),

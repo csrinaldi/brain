@@ -6,7 +6,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, relative } from 'node:path';
 
@@ -88,4 +88,17 @@ test('#1198 self-test: the door itself is held to { Lexer } and Lexer.lex(', () 
   assert.notDeepEqual(markedViolations(DOOR, ok + "\nawait import('../vendor/marked.esm.js');"), []);
   assert.notDeepEqual(markedViolations(DOOR, ok + '\nthing.parse(x);'), []);
   assert.deepEqual(markedViolations(DOOR, ok + '\nJSON.parse(x); Date.parse(y);'), []);
+});
+
+test('#1198 R1198-11/17: the real door imports the vendored file by a path that resolves to ui/vendor/marked.esm.js, and app.js imports nothing named marked', () => {
+  const door = readFileSync(join(UI_DIR, DOOR), 'utf8');
+  const spec = /from\s*['"]([^'"]*marked[^'"]*)['"]/.exec(door)?.[1];
+  assert.equal(spec, '../vendor/marked.esm.js');
+  // Resolved the way the browser does it: /lib/markdown.mjs + ../vendor/... = /vendor/marked.esm.js,
+  // which server.mjs serves from ui/vendor/.
+  assert.equal(new URL(spec, 'http://x/lib/markdown.mjs').pathname, '/vendor/marked.esm.js');
+  assert.ok(existsSync(join(UI_DIR, 'lib', spec)), 'and node resolves it to a real file');
+  const app = readFileSync(join(UI_DIR, 'static', 'app.js'), 'utf8');
+  assert.doesNotMatch(app, /from\s*['"][^'"]*marked[^'"]*['"]/, 'app.js reaches the tokenizer only through lib/markdown.mjs');
+  assert.match(app, /from '\.\/lib\/markdown\.mjs'/);
 });

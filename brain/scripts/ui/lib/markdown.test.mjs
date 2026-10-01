@@ -269,7 +269,7 @@ test('#1198 determinism: the adapter source reads no clock, randomness or enviro
 // ── the hostile fixture, asserted on the tree (R7 to R10) ───────────────────
 
 test('#1198 XSS fixture: no node carries an href but an http(s) one, and the script text survives as text', () => {
-  const fixture = readFileSync(join(HERE, '..', 'test-support', 'fixtures', 'markdown-xss.md'), 'utf8');
+  const fixture = readFileSync(join(HERE, '..', 'test-support', 'fixtures', 'markdown-xss.txt'), 'utf8');
   const tree = markdownTree(fixture);
   const hrefs = [];
   const texts = [];
