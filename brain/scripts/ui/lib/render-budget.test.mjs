@@ -185,3 +185,14 @@ test('#1218 R1218-5: the 200 KB emphasis input returns a degraded passage withou
   assert.equal(outcome.kind, 'tree');
   assert.equal(outcome.tree.blocks[0].t, 'degraded');
 });
+
+test('#1218 R1218-5: a 262000-character block quote settles to a timeout or a tree within the budget and never throws', async () => {
+  let worker;
+  const t0 = performance.now();
+  const { promise } = renderOffThread('>'.repeat(262000), realEffects((w) => { worker = w; }));
+  const outcome = await promise;
+  const elapsed = performance.now() - t0;
+  assert.ok(outcome.kind === 'timeout' || outcome.kind === 'tree', `unexpected outcome ${outcome.kind}`);
+  assert.ok(elapsed < RENDER_BUDGET_MS + 300, `took ${elapsed} ms`);
+  await worker.exited;
+});
