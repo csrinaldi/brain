@@ -20,10 +20,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { maskNonCode } from './lib/mask-non-code.mjs';
 
 const BOOTSTRAP = join(dirname(fileURLToPath(import.meta.url)), 'bootstrap.sh');
 const LINES = readFileSync(BOOTSTRAP, 'utf8').split('\n');
@@ -48,25 +49,34 @@ const FRAGMENT = fragment('BEGIN memory-backend-validate', 'END memory-backend-v
  * machinery.
  */
 function runFragment(stdinLines, { eof, raw } = {}) {
-  const script = [
-    'set -euo pipefail',
-    'I18N_BOOTSTRAP_MEMORY_PROMPT="Which memory backend does this team use? (engram|plainfiles): "',
-    FRAGMENT,
-    'printf \'%s\' "$MEMORY_BACKEND"',
-  ].join('\n');
-  // A closed stdin is /dev/null (`stdio: 'ignore'`), never an empty `input`: how an empty
-  // `input` reaches the child varies by environment, and in the cold reviewer's sandbox it
-  // left `read` blocked (#1209 rev 1). The timeout turns any future hang into a failure
-  // instead of a stalled suite.
-  const result = spawnSync('bash', ['-c', script], {
-    ...(eof
-      ? { stdio: ['ignore', 'pipe', 'pipe'] }
-      : { input: raw ?? stdinLines.join('\n') + '\n' }),
-    encoding: 'utf8',
-    timeout: 10_000,
-  });
-  return { backend: result.stdout ?? '', stderr: result.stderr ?? '', status: result.status };
+  // The answer bytes go to a file the script adopts as fd 0 (`exec 0<file`). They are NEVER passed
+  // through spawnSync's `input` option: in the cold reviewer's Codex sandbox that pipe never sees
+  // EOF, so a `read` that needs EOF (the newline-less answers) blocked until the timeout (#1221).
+  // A closed stdin (`eof`) is an empty file: `read` hits EOF at once, the same as /dev/null.
+  const dir = mkdtempSync(join(tmpdir(), 'brain-1221-stdin-'));
+  try {
+    const answers = join(dir, 'answers');
+    writeFileSync(answers, eof ? '' : (raw ?? stdinLines.join('\n') + '\n'));
+    const script = [
+      'set -euo pipefail',
+      `exec 0<${shQuote(answers)}`,
+      'I18N_BOOTSTRAP_MEMORY_PROMPT="Which memory backend does this team use? (engram|plainfiles): "',
+      FRAGMENT,
+      'printf \'%s\' "$MEMORY_BACKEND"',
+    ].join('\n');
+    // The timeout turns any future hang into a failure instead of a stalled suite.
+    const result = spawnSync('bash', ['-c', script], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      encoding: 'utf8',
+      timeout: 10_000,
+    });
+    return { backend: result.stdout ?? '', stderr: result.stderr ?? '', status: result.status };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 }
+
+const shQuote = (v) => "'" + String(v).split("'").join("'\\''") + "'";
 
 test('#1112 an invalid backend is rejected and never accepted', () => {
   const { backend } = runFragment(['not-a-backend', 'engram']);
@@ -192,4 +202,13 @@ test('#1214 declared but the config write fails: reported, source falls back to 
   assert.match(out, /warn:FAILED engram/);
   assert.match(out, /missing:memory backend not saved/);
   assert.match(out, /source:prompt/);
+});
+
+// #1221: a child spawned with `spawnSync(..., { input })` never sees EOF on its stdin pipe in the
+// cold reviewer's Codex sandbox, so anything that reads to EOF hangs until the timeout. This file's
+// spawns therefore feed stdin from a FILE (`exec 0<file`) and never use the `input` option. Read
+// from this file's own source, comments and strings masked, so the guard cannot be satisfied by prose.
+test('#1221 no spawn in this file feeds stdin through the `input` option', () => {
+  const own = readFileSync(fileURLToPath(import.meta.url), 'utf8');
+  assert.doesNotMatch(maskNonCode(own), /\binput\s*:/, 'feed stdin from a file, never the input option');
 });

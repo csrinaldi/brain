@@ -356,7 +356,7 @@ const ALLOWLIST = [
   { file: 'brain/scripts/lib/home-scaffold-nav-integrity.test.mjs', entrypoint: 'brain/scripts/check-brain-nav.mjs', reason: 'no-vcs-capability' },
   { file: 'brain/scripts/lib/home-index.test.mjs', entrypoint: 'brain/scripts/lib/home-index.mjs', reason: 'no-vcs-capability' },
   { file: 'brain/scripts/check-refs.test.mjs', entrypoint: 'brain/scripts/check-refs.mjs', reason: 'no-vcs-capability' },
-  { file: 'brain/scripts/governance/postmerge/parse-failures.test.mjs', entrypoint: 'brain/scripts/governance/postmerge/parse-failures.mjs', reason: 'no-vcs-capability' },
+  { file: 'brain/scripts/governance/postmerge/parse-failures.test.mjs', entrypoint: '<unresolved>', line: 65, reason: 'no-vcs-capability' }, // bash redirects a file onto parse-failures.mjs (#1221)
   { file: 'brain/scripts/new-change.test.mjs', entrypoint: 'brain/scripts/new-change.mjs', reason: 'no-vcs-capability' },
 
   // ── postmerge cursor: real git push, local bare origin only ────────────
@@ -398,10 +398,10 @@ const ALLOWLIST = [
   { file: 'brain/scripts/bootstrap.tier-notice.test.mjs', entrypoint: '<unresolved>', line: 71, reason: 'no-vcs-capability' },
   // #1125: bash runs bootstrap.sh's env helpers and §6 platform block, lifted verbatim, in a scratch dir — no git, no network, no push.
   { file: 'brain/scripts/bootstrap.default-platform.test.mjs', entrypoint: '<unresolved>', line: 85, reason: 'no-vcs-capability' },
-  { file: 'brain/scripts/bootstrap.default-platform.test.mjs', entrypoint: '<unresolved>', line: 179, reason: 'no-vcs-capability' },
+  { file: 'brain/scripts/bootstrap.default-platform.test.mjs', entrypoint: 'brain/scripts/parity.sh', line: 182, reason: 'no-vcs-capability' }, // #1221: the script is a temp file now, not stdin; same bash-in-scratch-dir shape
 
   // ── i18n shell-catalog eval: bash -c, zero VCS surface ──────────────────
-  { file: 'brain/scripts/i18n/coverage.test.mjs', entrypoint: '<unresolved>', line: 153, reason: 'no-vcs-capability' }, // #1061 shifted this line by inserting the memory.heal.* parity test earlier in the file
+  { file: 'brain/scripts/i18n/coverage.test.mjs', entrypoint: '<unresolved>', line: 161, reason: 'no-vcs-capability' }, // #1061 shifted this line by inserting the memory.heal.* parity test earlier in the file
 
   // ── #1061 heal-duplicates cli spawn test's own `which` resolution ───────
   { file: 'brain/scripts/memory/cli.heal-duplicates.test.mjs', entrypoint: '<unresolved>', line: 24, reason: 'no-vcs-capability' },
@@ -433,8 +433,8 @@ const ALLOWLIST = [
   // ── #1112 cold-review follow-up (blockers 2/3): more bootstrap.sh
   //    fragments, lifted verbatim into scratch/fixture dirs — none imports
   //    or calls a VCS/gh port.
-  { file: 'brain/scripts/bootstrap.memory-backend-validate.test.mjs', entrypoint: '<unresolved>', line: 61, reason: 'no-vcs-capability' },
-  { file: 'brain/scripts/bootstrap.memory-backend-validate.test.mjs', entrypoint: '<unresolved>', line: 163, reason: 'no-vcs-capability' },
+  { file: 'brain/scripts/bootstrap.memory-backend-validate.test.mjs', entrypoint: '<unresolved>', line: 68, reason: 'no-vcs-capability' },
+  { file: 'brain/scripts/bootstrap.memory-backend-validate.test.mjs', entrypoint: '<unresolved>', line: 173, reason: 'no-vcs-capability' },
   { file: 'brain/scripts/bootstrap.pat-secret-guard.test.mjs', entrypoint: '<unresolved>', line: 58, reason: 'no-vcs-capability' },
   // #1112 cold-review round 3 (blocker 1, symlink handling): shifted from
   // line 113 by the new symlink/non-regular-file tests added above it.

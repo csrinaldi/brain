@@ -175,9 +175,11 @@ test('#1125 bootstrap.sh and resolvePlatform give ONE answer over every env/.env
       lines.push(platformBlock(), `printf '%s\\n' "$AGENT_PLATFORM"`);
       script.push(`(\n${lines.join('\n')}\n)`);
     });
-    // On stdin, not argv: 625 copies of the block exceed ARG_MAX (E2BIG).
-    const out = execFileSync('bash', ['-s'], {
-      input: script.join('\n'),
+    // From a script FILE, not argv (625 copies of the block exceed ARG_MAX, E2BIG) and not the
+    // `input` option (a piped stdin never sees EOF in the cold reviewer's sandbox, #1221).
+    const scriptFile = join(base, 'parity.sh');
+    writeFileSync(scriptFile, script.join('\n'));
+    const out = execFileSync('bash', [scriptFile], {
       encoding: 'utf8',
       env: BASE_ENV,
       maxBuffer: 16 * 1024 * 1024,
