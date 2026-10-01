@@ -1,0 +1,14 @@
+$ git commit (hooks active, no --no-verify, no hooksPath override)
+✓ No prohibited references found.
+✓ Artifact structure is valid.
+[memory/gandalf-rog-zephyrus-g15-ga503qr-ga503qr-2026-10-01 2f2318e] chore: foreign path injection (#1)
+ 1 file changed, 1 insertion(+)
+ create mode 100644 FOREIGN-1204.txt
+exit=0
+brain/scripts/hooks
+$ git push
+✓ No prohibited references found.
+✓ Artifact structure is valid.
+To https://github.com/csrinaldi/brain-test-plainfiles.git
+   8b15e28..2f2318e  HEAD -> memory/gandalf-rog-zephyrus-g15-ga503qr-ga503qr-2026-10-01
+exit=0

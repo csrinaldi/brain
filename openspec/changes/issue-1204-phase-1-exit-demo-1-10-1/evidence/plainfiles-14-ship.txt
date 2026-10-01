@@ -1,0 +1,25 @@
+
+> brain-test-plainfiles@1.0.0 brain:ship
+> node ./brain/scripts/brain-ship.mjs
+
+
+> brain-test-plainfiles@1.0.0 brain:check
+> node ./brain/scripts/brain-check.mjs
+
+
+brain:check results:
+
+  [PASS] diffSize
+  [PASS] adrPresence
+  [PASS] issueLink
+  [PASS] memoryPresence — ::warning::memory-gate: memory-gate: no memory records scoped to issue #1 — capture a session summary (mem_session_summary) referencing this issue before closing (tier: lite)
+  [N/A] npmTest — CI runs `npm test` only in the brain source repo (.brain-source marker absent) — not applicable here
+  [PASS] repoCheck
+  [PASS] navCheck
+  [PASS] indexLag
+
+All checks passed. Ready to brain:ship.
+brain:ship: no type:* label found on issue #1.
+  Labels found: [status:approved]
+  Add a type:* label before shipping.
+exit=1

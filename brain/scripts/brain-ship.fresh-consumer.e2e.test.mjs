@@ -47,7 +47,7 @@ process.stderr.write('fake gh: unexpected call: ' + line + '\\n');
 process.exit(1);
 `;
 
-function freshConsumer({ tier = 'lite' } = {}) {
+function freshConsumer({ tier = 'lite', push = true } = {}) {
   const root = testTmp('ship-e2e-');
   const repo = join(root, 'repo');
   const origin = join(root, 'origin.git');
@@ -93,6 +93,8 @@ function freshConsumer({ tier = 'lite' } = {}) {
   writeFileSync(join(repo, 'notes.txt'), 'first change\n');
   git(repo, 'add', 'notes.txt');
   git(repo, 'commit', '-qm', 'chore(memory): enable the memory lane\n\nCloses #1');
+  // brain:ship never pushes (#1207): the operator's push is what puts the head on the remote.
+  if (push) git(repo, 'push', '-q', '-u', 'origin', BRANCH);
   return { root, repo, bin, log: join(root, 'gh.log') };
 }
 
@@ -142,4 +144,14 @@ test('#1187 e2e: the same fresh consumer at `standard` is still refused by memor
   assert.equal(r.code, 1, r.out.slice(-2000));
   assert.match(r.out, /\[FAIL\] memoryPresence/, r.out);
   assert.ok(!calls(box.log).some((a) => a[0] === 'pr'), 'a red tree makes zero mrCreate calls');
+});
+
+test('#1207 e2e: an unpushed branch is refused with the push to run, and mrCreate is never reached', () => {
+  const box = freshConsumer({ push: false });
+  const r = run('npm', ['run', 'brain:ship'], box);
+  assert.equal(r.code, 1, r.out.slice(-2000));
+  assert.match(r.out, new RegExp(`git push -u origin ${BRANCH}`), r.out);
+  assert.doesNotMatch(r.out, /GraphQL|createPullRequest/, r.out);
+  assert.ok(!calls(box.log).some((a) => a[0] === 'pr'), 'zero PR-creation calls');
+  assert.equal(git(box.repo, 'ls-remote', 'origin', `refs/heads/${BRANCH}`), '', 'ship must not push');
 });

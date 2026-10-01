@@ -1,0 +1,6 @@
+
+> brain-test-plainfiles@1.0.0 brain:memory:save
+> node ./brain/scripts/memory/cli.mjs save SYNTHETIC-1204-R2-plainfiles SYNTHETIC-1204-second-record-body --type decision --issue 1
+
+memory/cli: ✓ saved rec-85d07d4f92d5030b → /home/gandalf/IA/brain-test-plainfiles/.memory/records/2026-10-rec-85d07d4f92d5030b.jsonl
+exit=0

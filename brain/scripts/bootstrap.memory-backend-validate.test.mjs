@@ -46,16 +46,23 @@ const FRAGMENT = fragment('BEGIN memory-backend-validate', 'END memory-backend-v
  * so the test can read it without needing the surrounding env_get/env_set
  * machinery.
  */
-function runFragment(stdinLines) {
+function runFragment(stdinLines, { eof } = {}) {
   const script = [
     'set -euo pipefail',
-    'I18N_BOOTSTRAP_MEMORY_PROMPT="Which memory backend do you use? [engram]: "',
+    'I18N_BOOTSTRAP_MEMORY_PROMPT="Which memory backend does this team use? (engram|plainfiles): "',
     FRAGMENT,
     'printf \'%s\' "$MEMORY_BACKEND"',
   ].join('\n');
+  // A closed stdin is /dev/null (`stdio: 'ignore'`), never an empty `input`: how an empty
+  // `input` reaches the child varies by environment, and in the cold reviewer's sandbox it
+  // left `read` blocked (#1209 rev 1). The timeout turns any future hang into a failure
+  // instead of a stalled suite.
   const result = spawnSync('bash', ['-c', script], {
-    input: stdinLines.join('\n') + '\n',
+    ...(eof
+      ? { stdio: ['ignore', 'pipe', 'pipe'] }
+      : { input: stdinLines.join('\n') + '\n' }),
     encoding: 'utf8',
+    timeout: 10_000,
   });
   return { backend: result.stdout ?? '', stderr: result.stderr ?? '', status: result.status };
 }
@@ -81,10 +88,26 @@ test('#1112 "plainfiles" is accepted — the fifth #1112 finding\'s own backend'
   assert.equal(backend, 'plainfiles');
 });
 
-test('#1112 an empty answer is accepted as-is (the caller defaults it to engram)', () => {
-  const { backend, status } = runFragment(['']);
+test('#1205 an empty answer re-prompts and never becomes a backend', () => {
+  const { backend, status } = runFragment(['', 'plainfiles']);
   assert.equal(status, 0);
-  assert.equal(backend, '', 'the fragment itself does not default — that stays the caller\'s job, unchanged');
+  assert.equal(backend, 'plainfiles', 'Enter must not select anything; the next real answer does');
+});
+
+test('#1205 several empty answers in a row never default to engram', () => {
+  const { backend } = runFragment(['', '', 'engram']);
+  assert.equal(backend, 'engram');
+});
+
+test('#1205 a closed stdin leaves the backend undeclared (empty), not engram', () => {
+  const result = { ...runFragment([], { eof: true }) };
+  result.stdout = result.backend;
+  assert.equal(result.status, 0, `EOF must not abort the script; stderr:\n${result.stderr}`);
+  assert.equal(result.stdout, '', 'EOF is an undeclared backend, never a guess');
+});
+
+test('#1205 bootstrap.sh no longer defaults the backend to engram after the prompt', () => {
+  assert.ok(!LINES.some((l) => l.includes('MEMORY_BACKEND:-engram')), 'ADR-0004 Amendment 3: NO default');
 });
 
 test('#1112 re-prompts as many times as needed before accepting a valid value', () => {
