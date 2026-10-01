@@ -1,0 +1,24 @@
+$ npm run brain:memory:pull (B, after lane merge)
+
+> brain-test-plainfiles@1.0.0 brain:memory:pull
+> node ./brain/scripts/memory/cli.mjs pull
+
+From https://github.com/csrinaldi/brain-test-plainfiles
+   e478ff6..f80831b  main       -> origin/main
+Updating e478ff6..f80831b
+Fast-forward
+ .memory/records/2026-10-rec-85d07d4f92d5030b.jsonl | 1 +
+ .memory/records/2026-10-rec-8e84aff07aa1b552.jsonl | 1 +
+ 2 files changed, 2 insertions(+)
+ create mode 100644 .memory/records/2026-10-rec-85d07d4f92d5030b.jsonl
+ create mode 100644 .memory/records/2026-10-rec-8e84aff07aa1b552.jsonl
+exit=0
+$ search after
+memory/cli: 2 matching record(s):
+  - rec-85d07d4f92d5030b [decision] **SYNTHETIC-1204-R2-plainfiles**
+
+SYNTHETIC-1204-second-record-body
+  - rec-8e84aff07aa1b552 [session_summary] **SYNTHETIC-1204-R1-plainfiles**
+
+SYNTHETIC-1204-first-record-body
+exit=0
