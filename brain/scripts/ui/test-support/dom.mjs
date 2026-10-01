@@ -23,6 +23,36 @@
 // A property the page starts using and this file lacks will throw here too,
 // which is the correct outcome: this file grows when the page does.
 
+import { reply } from '../lib/markdown-worker.mjs';
+
+/**
+ * A browser's `Node.childNodes` is a live NodeList: length, index access, item,
+ * forEach, entries, keys, values and iteration — and NOTHING else. No find, no
+ * filter, no map. A shim that returned an Array let `childNodes.find` pass every
+ * test and throw in the browser (#1218), so the view is deliberately poorer than
+ * an Array. A test that wants Array methods says so: `Array.from(node.childNodes)`.
+ */
+class NodeListView {
+  _owner;
+  constructor(owner) {
+    this._owner = owner;
+    return new Proxy(this, {
+      get: (target, key) => {
+        if (typeof key === 'string' && /^(0|[1-9]\d*)$/.test(key)) return owner._kids[Number(key)];
+        return Reflect.get(target, key, target);
+      },
+      has: (target, key) => (typeof key === 'string' && /^(0|[1-9]\d*)$/.test(key) ? Number(key) < owner._kids.length : Reflect.has(target, key)),
+    });
+  }
+  get length() { return this._owner._kids.length; }
+  item(index) { return this._owner._kids[index] ?? null; }
+  forEach(fn, thisArg) { this._owner._kids.slice().forEach((node, index) => fn.call(thisArg, node, index, this)); }
+  entries() { return this._owner._kids.slice().entries(); }
+  keys() { return this._owner._kids.slice().keys(); }
+  values() { return this._owner._kids.slice().values(); }
+  [Symbol.iterator]() { return this.values(); }
+}
+
 /** Every listener a node was given, so a test can activate one the way a user would. */
 const LISTENERS = Symbol('listeners');
 
@@ -36,11 +66,12 @@ function rawTextNode(text) {
   return {
     tagName: '#text',
     className: '',
-    childNodes: [],
+    _kids: [],
     parentNode: null,
     attributes: Object.create(null),
     [LISTENERS]: Object.create(null),
     _ownText: text,
+    get childNodes() { return (this._view ??= new NodeListView(this)); },
     get textContent() { return this._ownText; },
     set textContent(value) { this._ownText = value === null || value === undefined ? '' : String(value); },
     get firstChild() { return null; },
@@ -78,12 +109,13 @@ export function createElement(tag) {
     className: '',
     hidden: false,
     attributes: Object.create(null),
-    childNodes: [],
+    _kids: [],
     parentNode: null,
     [LISTENERS]: Object.create(null),
     _ownText: '',
 
-    get firstChild() { return this.childNodes[0] ?? null; },
+    get childNodes() { return (this._view ??= new NodeListView(this)); },
+    get firstChild() { return this._kids[0] ?? null; },
     get children() { return this.childNodes; },
 
     // `textContent` is the one property with real semantics here, and getting
@@ -100,29 +132,29 @@ export function createElement(tag) {
     // a test — the harness agreed with itself and disagreed with the browser.
     set textContent(value) {
       const text = value === null || value === undefined ? '' : String(value);
-      this.childNodes = [];
+      this._kids = [];
       this._ownText = '';
       if (text !== '') this.appendChild(rawTextNode(text));
     },
     get textContent() {
-      if (this.childNodes.length === 0) return this._ownText;
-      return this.childNodes.map((child) => child.textContent).join('');
+      if (this._kids.length === 0) return this._ownText;
+      return this._kids.map((child) => child.textContent).join('');
     },
 
     appendChild(child) {
       // A fragment appends its children and keeps nothing, which is the only
       // behaviour of `DocumentFragment` the page depends on.
       if (child.tagName === '#FRAGMENT') {
-        for (const grand of child.childNodes) { grand.parentNode = node; node.childNodes.push(grand); }
-        child.childNodes = [];
+        for (const grand of child._kids) { grand.parentNode = node; node._kids.push(grand); }
+        child._kids = [];
         return child;
       }
       child.parentNode = node;
-      node.childNodes.push(child);
+      node._kids.push(child);
       return child;
     },
     removeChild(child) {
-      node.childNodes = node.childNodes.filter((c) => c !== child);
+      node._kids = node._kids.filter((c) => c !== child);
       child.parentNode = null;
       return child;
     },
@@ -178,6 +210,42 @@ export function find(root, predicate) {
 export const byClass = (name) => (node) => node.classList && node.classList.contains(name);
 
 /**
+ * A Worker for the page to spawn (#1218). The mode decides what it does with a
+ * request: 'reply' (default) answers with the real `reply` on the next turn,
+ * 'hold' never answers until a test calls `release()`, 'throw' fails to
+ * construct, 'error' raises an error event, 'malformed' posts a non-tree.
+ * Every instance is recorded in `workers`, so a test can count them.
+ */
+function makeWorkerClass(mode, workers) {
+  return class FakeWorker {
+    constructor(url, options) {
+      if (mode === 'throw') throw new Error('cannot construct a worker here');
+      this.url = url;
+      this.options = options;
+      this.posted = [];
+      this.terminated = 0;
+      this.onmessage = null;
+      this.onerror = null;
+      workers.push(this);
+    }
+    postMessage(request) {
+      this.posted.push(request);
+      if (mode === 'hold') return;
+      setImmediate(() => this.release());
+    }
+    terminate() { this.terminated++; }
+    /** Answer the last request now, the way the mode says (also how a held worker is let go). */
+    release() {
+      const request = this.posted[this.posted.length - 1];
+      if (!request || this.terminated > 0) return;
+      if (mode === 'error') this.onerror?.({ message: 'worker failed' });
+      else if (mode === 'malformed') this.onmessage?.({ data: { id: request.id, ok: true, tree: 'not a tree' } });
+      else this.onmessage?.({ data: reply(request) });
+    }
+  };
+}
+
+/**
  * Install a document, a window and the two network globals the page opens, and
  * return the mounts plus a `restore()`. `snapshot` is served at
  * `/api/snapshot`; `changes` answers `/api/change/<issue>` by issue number.
@@ -186,8 +254,11 @@ export const byClass = (name) => (node) => node.classList && node.classList.cont
  * REST read, and a harness that also replayed frames would be testing the
  * stub's timing rather than the render.
  */
-export function installDom({ mountIds, snapshot = null, changes = {}, storage = new Map() } = {}) {
-  const saved = { document: globalThis.document, window: globalThis.window, fetch: globalThis.fetch, EventSource: globalThis.EventSource };
+export function installDom({ mountIds, snapshot = null, changes = {}, storage = new Map(), worker = 'reply' } = {}) {
+  const saved = { document: globalThis.document, window: globalThis.window, fetch: globalThis.fetch, EventSource: globalThis.EventSource, Worker: globalThis.Worker };
+  const workers = [];
+  if (worker === null) delete globalThis.Worker;
+  else globalThis.Worker = makeWorkerClass(worker, workers);
 
   const mounts = Object.fromEntries(mountIds.map((id) => [id, createElement('div')]));
   const documentElement = createElement('html');
@@ -223,9 +294,10 @@ export function installDom({ mountIds, snapshot = null, changes = {}, storage = 
     if (path.startsWith('/api/poll/')) return json({ reason: 'the poller is not part of this harness' }, 503);
     throw new Error(`the page reached for ${path}, which this harness does not answer — ${init?.method ?? 'GET'}`);
   };
+  const streamListeners = new Map();
   globalThis.EventSource = class {
     constructor(url) { this.url = url; }
-    addEventListener() {}
+    addEventListener(name, fn) { streamListeners.set(name, [...(streamListeners.get(name) ?? []), fn]); }
     removeEventListener() {}
     close() {}
   };
@@ -234,11 +306,17 @@ export function installDom({ mountIds, snapshot = null, changes = {}, storage = 
     mounts,
     documentElement,
     storage,
+    workers,
+    /** Deliver one stream frame to the page, as the server would (#1218). */
+    emit(name, data = {}) {
+      for (const fn of streamListeners.get(name) ?? []) fn({ data: JSON.stringify(data) });
+    },
     restore() {
       globalThis.document = saved.document;
       globalThis.window = saved.window;
       globalThis.fetch = saved.fetch;
       globalThis.EventSource = saved.EventSource;
+      if (saved.Worker === undefined) delete globalThis.Worker; else globalThis.Worker = saved.Worker;
     },
   };
 }

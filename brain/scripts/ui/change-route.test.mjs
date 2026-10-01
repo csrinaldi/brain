@@ -8,7 +8,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { buildChangeView, REVIEWS_SOURCE_NOTE } from './change-route.mjs';
+import { documentWording } from './lib/drawer-model.mjs';
 import { fakeGit } from './test-support/fake-git.mjs';
+import { execFileSync } from 'node:child_process';
+import { testTmp } from '../lib/test-tmp.mjs';
 
 const ISSUE = 881;
 const CHANGE_DIR = 'openspec/changes/issue-881-ui-server-canvas';
@@ -582,8 +585,49 @@ test('#1198 D7: a branch without resume.md is missing; an unresolvable branch is
   assert.equal(missing.state, 'missing');
   assert.equal(missing.commit, null);
   const noBranch = viewOf(gitFor({ spec: null, tasks: null, files: allArtifacts() }), makeSnapshot()).documents.resume;
-  assert.equal(noBranch.state, 'unreadable');
-  assert.match(noBranch.reason, /no open PR and no feat\/issue-881-\* branch/);
+  assert.equal(noBranch.state, 'missing', '#1218 R3: no change branch is an absence, not a failure');
+  assert.equal(noBranch.reason, 'no change branch in this clone');
+});
+
+test('#1218 R1218-8: a failing `git branch --list` and an ambiguous listing stay unreadable and carry their reason', () => {
+  const failing = viewOf(gitFor({ files: allArtifacts(), fail: { branch: 'fatal: not a git repository' } }), makeSnapshot());
+  assert.equal(failing.documents.resume.state, 'unreadable');
+  assert.match(failing.documents.resume.reason, /git branch --list failed: fatal: not a git repository/);
+  const two = viewOf(gitFor({ files: allArtifacts(), branches: { 'feat/issue-881-a': { commit: BRANCH_TIP, files: {} }, 'feat/issue-881-b': { commit: BRANCH_TIP, files: {} } } }), makeSnapshot());
+  assert.equal(two.documents.resume.state, 'unreadable');
+  assert.match(two.documents.resume.reason, /more than one feat\/issue-881-\* branch/);
+});
+
+test('#1218 R1218-8: an unresolved branch (ambiguous or git failed) says the branch could not be resolved, on the Working memory tab and the SDD row', () => {
+  const failing = viewOf(gitFor({ files: allArtifacts(), fail: { branch: 'fatal: not a git repository' } }), makeSnapshot());
+  const two = viewOf(gitFor({ files: allArtifacts(), branches: { 'feat/issue-881-a': { commit: BRANCH_TIP, files: {} }, 'feat/issue-881-b': { commit: BRANCH_TIP, files: {} } } }), makeSnapshot());
+  for (const [view, reason] of [[failing, /git branch --list failed: fatal: not a git repository/], [two, /more than one feat\/issue-881-\* branch/]]) {
+    assert.equal(view.documents.resume.state, 'unreadable');
+    assert.match(view.workingMemory.reason, /^resume\.md: the change branch could not be resolved: /);
+    assert.match(view.workingMemory.reason, reason);
+    assert.doesNotMatch(view.workingMemory.reason, /could not be read at/);
+    assert.equal(documentWording(view.documents.resume), view.workingMemory.reason);
+  }
+});
+
+test('#1218 R1218-8: the Working memory tab and the resume document say the no-branch case in the same words', () => {
+  const view = viewOf(gitFor({ files: allArtifacts() }), makeSnapshot());
+  assert.equal(view.workingMemory.ok, false);
+  assert.equal(view.workingMemory.reason, 'resume.md: no change branch in this clone');
+  assert.doesNotMatch(view.workingMemory.reason, /could not be read/);
+});
+
+test('#1218 R1218-8: a change branch that was created and then deleted is missing, in a real repository', (t) => {
+  const root = testTmp('no-branch-');
+  const git = (...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  git('init', '-q', '-b', 'main');
+  git('-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '-q', '--allow-empty', '-m', 'init');
+  git('branch', 'feat/issue-881-gone');
+  git('branch', '-D', 'feat/issue-881-gone');
+  const { documents } = buildChangeView({ root, issue: ISSUE, snapshot: makeSnapshot(), project: 'o/r' }).value;
+  assert.equal(documents.resume.state, 'missing');
+  assert.equal(documents.resume.reason, 'no change branch in this clone');
+  assert.ok(t);
 });
 
 test('#1198 cold-2: the Working memory tab tells an unreadable resume.md from a missing one, in the SDD row\'s own words', () => {
@@ -658,4 +702,20 @@ test('#1198 AC7: a failing spec read makes the document unreadable and the tab r
   assert.equal(v.documents.spec.state, 'unreadable');
   assert.equal(v.spec.ok, false);
   assert.match(v.spec.reason, /bad object/);
+});
+
+test('#1218 R1218-9/10: a headBranch that exists only as a remote ref is unreadable and the reason names git\'s cause', () => {
+  const root = testTmp('remote-only-');
+  const git = (...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  git('init', '-q', '-b', 'main');
+  git('-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '-q', '--allow-empty', '-m', 'init');
+  git('update-ref', 'refs/remotes/origin/feat/issue-881-remote-only', 'HEAD');
+  const snapshot = makeSnapshot({ prs: [{ number: 5, title: 'x', headBranch: 'feat/issue-881-remote-only', issue: ISSUE }] });
+  const { documents, workingMemory } = buildChangeView({ root, issue: ISSUE, snapshot, project: 'o/r' }).value;
+  assert.equal(documents.resume.state, 'unreadable');
+  assert.match(documents.resume.reason, /fatal: Needed a single revision/);
+  assert.doesNotMatch(documents.resume.reason, /[\r\n]/);
+  assert.ok(documents.resume.reason.length <= 200);
+  assert.doesNotMatch(documents.resume.reason, /^Command failed/);
+  assert.match(workingMemory.reason, /fatal: Needed a single revision/);
 });

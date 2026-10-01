@@ -123,10 +123,16 @@ function findingEntries(round) {
  * and NO invented commit, and its two wordings differ — an empty body would
  * read as "the file has nothing in it" (R1198-2).
  */
+/** The reason a resume.md is missing when the clone holds no change branch (#1218 R3). One source, shared with the route. */
+export const NO_CHANGE_BRANCH = 'no change branch in this clone';
+
 export function documentWording(doc) {
   const file = String(doc.path ?? '').split('/').pop();
   const ref = doc.ref ?? 'the change branch';
+  if (doc.state === 'missing' && doc.reason) return `${file}: ${doc.reason}`;
   if (doc.state === 'missing') return `${file} is not committed at ${ref}`;
+  // No ref resolved (ambiguous branch, or git failed listing branches): there is no "at <ref>" to name (#1218 R3).
+  if (doc.state === 'unreadable' && !doc.ref) return `${file}: the change branch could not be resolved: ${doc.reason ?? 'no reason was given'}`;
   if (doc.state === 'unreadable') return `${file} could not be read at ${ref}: ${doc.reason ?? 'no reason was given'}`;
   return null;
 }

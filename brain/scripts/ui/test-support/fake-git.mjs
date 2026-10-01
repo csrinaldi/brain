@@ -45,7 +45,7 @@ export function fakeGit({ files = {}, head = HEAD_DEFAULT, branches = {}, blame,
     return verdict instanceof Error ? verdict : new Error(String(verdict));
   };
 
-  function run(file, args, opts) {
+  function exec(file, args, opts) {
     calls.push(args);
     optsLog.push(opts);
     if (file !== 'git') throw new Error(`fake-git: unmodelled program ${file}`);
@@ -98,6 +98,16 @@ export function fakeGit({ files = {}, head = HEAD_DEFAULT, branches = {}, blame,
     }
 
     throw new Error(`fake-git: unmodelled command git ${args.join(' ')}`);
+  }
+
+  // The piped runner's errors carry git's message on `.stderr`; so do these.
+  function run(file, args, opts) {
+    try {
+      return exec(file, args, opts);
+    } catch (err) {
+      if (err && typeof err.stderr !== 'string') err.stderr = String(err.message ?? err);
+      throw err;
+    }
   }
 
   run.calls = calls;
