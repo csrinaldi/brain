@@ -43,7 +43,7 @@ allowlisted bytes into the same directory
 ([ADR-0030 Amendment 1](../brain/project/decisions/adr-0030-distribution-scoped-registry-package.md)):
 
 ```bash
-npm i -D "git+https://github.com/csrinaldi/brain.git#v1.10.1"
+npm i -D "git+https://github.com/csrinaldi/brain.git#v1.11.0"
 ```
 
 ---
@@ -147,9 +147,9 @@ A refusal names the fix and is a **required failure**: `env:init` exits 1.
 | VCS provider | derived from your git origin, confirmable on a TTY | `vcs.provider` in `brain.config.json` (tracked) | type `github` or `gitlab` at the prompt |
 
 **The VCS provider and memory backend prompts validate.** The provider accepts `github`,
-`gitlab` or empty (keep the derived default); the backend accepts `engram`, `plainfiles`
-or empty. Anything else re-prompts, so a pasted token can never land in the tracked
-`brain.config.json`.
+`gitlab` or empty (keep the derived default); the backend accepts only `engram` or
+`plainfiles` (1.11.0: empty re-prompts, there is no default). Anything else re-prompts, so a
+pasted token can never land in the tracked `brain.config.json`.
 
 **`project.name` may stay empty after `env:init`.** Only `project.slug` is filled from
 your git origin. The `engram` adapter derives its project from `project.slug`, then
@@ -268,6 +268,18 @@ now (the summary only matters above the default `lite` tier).
 
 It also runs `brain:nav` and the warning-only `index-lag` check, so it now covers every step of
 CI's `local-checks` job (`npm test` only where CI runs it).
+
+**Two prerequisites that used to fail late now fail first** (1.11.0):
+
+- **The issue needs a `type:*` label** (`type:feature`, `type:bug`, `type:chore`, and so on;
+  `type::feature` on GitLab). `env:init` creates the labels on your remote, but you still add
+  one to each issue. `brain:ticket:start` checks it and, with none, exits 1 before it creates
+  a branch or worktree, naming the fix. `brain:ship` still refuses an untyped issue too.
+- **The branch must be pushed before `brain:ship`.** `brain:ship` never pushes. After
+  `brain:check` passes it asks git whether `origin` holds your branch at your `HEAD`, and if
+  not it exits 1 before any forge call and names the command: `git push -u origin <branch>`
+  for a branch never pushed, `git push origin <branch>` for a remote behind your `HEAD`. If the
+  remote has commits you lack, it asks you to fetch and integrate them first.
 `brain:ship` opens the PR against the same default branch (or `project.defaultBranch` if you
 set it) and still requires `vcs.provider` and `project.slug` in `brain.config.json`, which
 `env:init` writes.
@@ -323,8 +335,8 @@ each tier requires and how to recover if protection locks you out.
 ## Upgrading
 
 ```bash
-npm run brain:upgrade -- v1.10.1             # install a newer tag, copy managed paths
-npm run brain:upgrade -- v1.10.1 --dry-run   # preview what would change
+npm run brain:upgrade -- v1.11.0             # install a newer tag, copy managed paths
+npm run brain:upgrade -- v1.11.0 --dry-run   # preview what would change
 ```
 
 Read the [CHANGELOG](../CHANGELOG.md) first — renames and breaking changes need

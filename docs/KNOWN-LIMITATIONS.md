@@ -5,7 +5,7 @@ the first days of using brain in a repository you did not build brain in. Each o
 found live, most of them by the `#1081` consumer demonstration (a fresh, empty
 repository installing the published `@logikas/brain` package). Every item links its
 tracking issue, where one exists, and states the practical workaround, if one exists.
-This list describes brain **1.10.1**.
+This list describes brain **1.11.0**.
 
 This is not a scorecard of brain's own test suite — brain's suite is green on all of
 these, which is the point: none of them shows up in brain's own repository (see
@@ -57,6 +57,22 @@ For the plan to close this class of gap, see the
   both report `backend 'plainfiles' does not implement op 'import'` and **no memory
   context reaches the agent** at session start. **Workaround:** none that restores the
   context; `brain:memory:pull` still works to sync records to disk.
+
+- **On `plainfiles`, `brain:memory:pull` and the `post-merge` hook print an `import` refusal.**
+  ([#1189](https://github.com/csrinaldi/brain/issues/1189)) The `post-merge` git hook, which
+  a `git pull` fires when it integrates commits (including the one inside `brain:memory:pull`),
+  calls `memory/cli.mjs import`, which `plainfiles` does not implement, so those pulls print
+  `memory/cli: backend 'plainfiles' does not implement op 'import'`. The hook is
+  non-blocking and `brain:memory:pull` still exits 0 and verifies the records. The same call is
+  behind the `session:start` / `day:start` entry below (#1115). **Workaround:** none needed for
+  correctness; ignore the line.
+
+- **A same-day lane re-ship after squash-merging the lane PR refuses as diverged.**
+  ([#1190](https://github.com/csrinaldi/brain/issues/1190), reproduced in both phase-1 exit
+  runs: `openspec/changes/issue-1185-*/evidence/brain-test-plainfiles-60-seam2-inject.txt` and
+  `openspec/changes/issue-1204-*/evidence/plainfiles-61-seam2-inject.txt`) A merged lane branch is not deleted from the remote; a second
+  `brain:memory:ship` the same day refused with `memory.ship.diverged`. **Workaround:** delete
+  the merged remote lane branch (`git push origin --delete memory/<branch>`), then ship again.
 
 - **`search` serves a superseded record next to its correction, both unmarked.**
   ([#1117](https://github.com/csrinaldi/brain/issues/1117)) The supersession link
