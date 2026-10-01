@@ -110,7 +110,7 @@ This requirement modifies R1198-13: rendering terminates on any input, and the c
 
 ### R1218-2: A degraded passage is announced and the rest of the document still renders
 
-The document MUST be tokenized ONCE, as a whole, never in pieces. Before that one lex, every character that the pre-scan counts (`*`, `_`, `~`, `[`, `]`) and every backslash inside a degraded passage MUST be replaced by a distinct private-use character (the U+E000 block), one for one, so the text keeps its length and marked reads the passage as plain text in linear time. After the lex, the originals MUST be restored in every text-bearing field of the token tree (text, code span text, code, link text and href, image alt, raw), so every character shows as typed, including inside a code span and inside an autolink, and an href is unchanged. Backslash escaping is NOT used, because a backslash escape is context-sensitive in CommonMark: it is literal inside a code span and an autolink. The private-use characters MUST be chosen among those the document does not already contain; if the document uses the whole block, the passage MUST be shown as written under its notice and the document as one literal block. Adjacent text nodes in one inline run MUST be merged into one node, so a passage is never one node per mark. A quote prefix or list bullet at the start of a passage line MUST be left unescaped, so a degraded quote stays a quote and a degraded item stays an item. A passage degraded by the pre-scan MUST therefore render as literal text, and every other passage of the same document, including a reference definition that a link elsewhere resolves against and the other items of a list that holds the passage, MUST render with its normal elements. A visible notice reading "a passage with N formatting marks is shown as plain text" (R5), where N is the number of delimiter characters (`*`, `_`, `~`, `[` and `]` only) counted in that passage, MUST be placed immediately before the top-level block that contains the passage, located by the passage's source offset. Each degraded passage MUST carry its own notice, so the notice count equals the degraded-passage count. No degradation MUST be silent. This notice is distinct from the timeout notice (R1218-5), because the cause and the scope differ.
+The document MUST be tokenized ONCE, as a whole, never in pieces. Before that one lex, every character that the pre-scan counts (`*`, `_`, `~`, `[`, `]`) inside a degraded passage MUST be replaced by a distinct private-use character (the U+E000 block), one for one, and nothing else is substituted: the backslash is NEVER substituted, so an escape such as `\|` keeps its structural meaning (a pipe inside a table cell) and a degraded table row keeps its cells, so the text keeps its length and marked reads the passage as plain text in linear time. After the lex, the originals MUST be restored in every text-bearing field of the token tree (text, code span text, code, link text and href, image alt, raw), so every character shows as typed, including inside a code span and inside an autolink, and an href is unchanged. Backslash escaping is NOT used, because a backslash escape is context-sensitive in CommonMark: it is literal inside a code span and an autolink. The private-use characters MUST be chosen among those the document does not already contain; if the document uses the whole block, the passage MUST be shown as written under its notice and the document as one literal block. Adjacent text nodes in one inline run MUST be merged into one node, so a passage is never one node per mark. A quote prefix, list bullet or task checkbox (`[ ]`, `[x]`, `[X]` right after the bullet) at the start of a passage line MUST be left unsubstituted, so a degraded quote stays a quote, a degraded item stays an item and a degraded task item stays a task item. Substitution MUST NOT change the block structure: the block token types and counts, and where table cells split, are those of the original. A passage degraded by the pre-scan MUST therefore render as literal text, and every other passage of the same document, including a reference definition that a link elsewhere resolves against and the other items of a list that holds the passage, MUST render with its normal elements. A visible notice reading "a passage with N formatting marks is shown as plain text" (R5), where N is the number of delimiter characters (`*`, `_`, `~`, `[` and `]` only) counted in that passage, MUST be placed immediately before the top-level block that contains the passage, located by the passage's source offset. Each degraded passage MUST carry its own notice, so the notice count equals the degraded-passage count. No degradation MUST be silent. This notice is distinct from the timeout notice (R1218-5), because the cause and the scope differ.
 
 #### Scenario: The notice states N
 - **GIVEN** one paragraph of 700 delimiters
@@ -212,6 +212,22 @@ The document MUST be tokenized ONCE, as a whole, never in pieces. Before that on
 - **WHEN** the adapter builds the tree
 - **THEN** the paragraph holds at most three nodes
 
+#### Scenario: An escaped pipe in a degraded table row keeps its cell
+- **WHEN** the adapter builds the tree for a table whose body row holds `x \| y` in one cell and 700 repetitions of "*a " in the next
+- **THEN** the row has two cells, the first reads `x | y`, the second reads its text exactly as typed, and the degraded notice is present
+
+#### Scenario: Escaped delimiters in a degraded paragraph render as typed
+- **WHEN** the adapter builds the tree for a paragraph with `\*` and `\[` and 700 repetitions of "*a "
+- **THEN** the paragraph text equals the source, with its backslashes, and the adapter returns within 750 ms
+
+#### Scenario: Substitution keeps the block structure of random documents
+- **WHEN** 1500 generated documents, each with one degraded span among tables, definitions, footnote-like lines, thematic breaks, bullets and task items, are compared with their substituted text
+- **THEN** the block token types, the counts and the table cell splits of the substituted text equal those of the original
+
+#### Scenario: A degraded task item stays a task item
+- **WHEN** the adapter builds the tree for the line "- [ ] " followed by 700 repetitions of "*a "
+- **THEN** the item is a task item, unchecked, and carries its text
+
 ### R1218-3: No real artifact is degraded
 
 Every file under `openspec/changes/**` MUST render through the adapter with zero pre-scan degradations (AC1.4). This is asserted by a test over the whole tree, not a sample, so a future marked upgrade or a threshold change that touches a real artifact fails it.
@@ -229,6 +245,8 @@ Every file under `openspec/changes/**` MUST render through the adapter with zero
 ### R1218-4: A worker renders each document, one worker per request
 
 `static/app.js` MUST NOT run marked on the main thread when a document is expanded (R6). Each expansion MUST create ONE module Web Worker from `/lib/markdown-worker.mjs`, which imports the same vendored `marked.esm.js` and runs the lexer and the adapter. The worker MUST post its result back as plain data: a tree of objects, arrays, strings, numbers, booleans and null, with no functions, DOM nodes or class instances, so it crosses `postMessage` by structured clone. The worker MUST be terminated as soon as it posts a result, and on timeout (R1218-5) and on error (R1218-6). No worker is shared between rows, so a slow document cannot affect another open row.
+
+The tokenizer calls permitted anywhere are exactly two, both in `lib/markdown.mjs`: the static `Lexer.lex(` and `.blockTokens(` on a `new Lexer(...)` instance. Any other member access on a `Lexer` instance or the class (`inlineTokens`, `lexInline`, an instance `lex`), `Parser`, `Renderer` and `marked(` are refused by the source guard.
 
 This requirement modifies R1198-11: the tokenizer is still the one vendored marked, now also imported by the worker file, and the source guard that forbids `marked.parse` also covers `lib/markdown-worker.mjs`. It modifies R1198-12: the no-`innerHTML` scan also covers the worker file.
 
@@ -256,6 +274,10 @@ This requirement modifies R1198-11: the tokenizer is still the one vendored mark
 - **GIVEN** the source of `lib/markdown-worker.mjs`
 - **WHEN** the source guard scans its imports
 - **THEN** the tokenizer import resolves to `ui/vendor/marked.esm.js`, no bare `marked` specifier exists and no `marked.parse` or `innerHTML` appears
+
+#### Scenario: The guard sees instance calls
+- **WHEN** the source guard scans a snippet `new Lexer(o).inlineTokens(x)`, or any other member of a `Lexer` instance but `blockTokens`
+- **THEN** it reports a violation, while `Lexer.lex(` and `new Lexer(o).blockTokens(` pass and the real `lib/markdown.mjs` passes
 
 #### Scenario: The worker file is served
 - **GIVEN** the running UI server
