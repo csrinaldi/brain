@@ -244,7 +244,7 @@ This requirement modifies R1198-11: the tokenizer is still the one vendored mark
 
 ### R1218-5: A document that exceeds 1500 ms renders as announced plain text
 
-The render budget MUST be 1500 ms per document (R2). When a worker has not posted a result within 1500 ms of its creation, `app.js` MUST terminate it and render the WHOLE document as literal text (preformatted, source verbatim) under the notice "this document was too slow to render (over 1500 ms) and is shown as plain text". The main thread MUST NOT be blocked for longer than the budget by any document, because marked runs only in the worker. The timeout MUST degrade only the document that timed out.
+The render budget MUST be 1500 ms per document (R2). When a worker has not posted a result within 1500 ms of its creation, `app.js` MUST terminate it and render the WHOLE document as literal text (preformatted, source verbatim) under the notice "this document was too slow to render (over 1500 ms) and is shown as plain text", the number being the budget actually enforced. The main thread MUST NOT be blocked for longer than the budget by any document, because marked runs only in the worker. The timeout MUST degrade only the document that timed out.
 
 This requirement modifies R1198-13: the "pathological nesting terminates within a bounded time" scenario now holds for inline emphasis as well, and the bound is the 1500 ms budget, enforced by the worker rather than assumed of marked.
 
@@ -257,6 +257,11 @@ This requirement modifies R1198-13: the "pathological nesting terminates within 
 - **GIVEN** an injected worker that posts a tree at 1499 ms
 - **WHEN** the result is received
 - **THEN** the row shows the rendered elements and no timeout notice
+
+#### Scenario: The timeout notice states the budget enforced
+- **GIVEN** a render with an injected budget of 300 ms and a worker that never answers
+- **WHEN** the 300 ms timer fires
+- **THEN** the timeout outcome carries the budget 300 and its notice reads "over 300 ms"
 
 #### Scenario: The timeout notice wording is exact
 - **GIVEN** a timed-out document
@@ -333,6 +338,8 @@ When no `Worker` is available in the browser (`typeof Worker` is not a function)
 
 Between expanding a row and receiving a result, the row MUST show a loading state (a visible "rendering the document…" line) and MUST NOT show an empty body. Each expansion MUST carry a token. A result, timeout or error whose token is not the row's current token MUST be discarded and MUST NOT change the DOM, including after a collapse and re-expand, after a collapse with no re-expand, and after a result that arrives for a closed row. A discarded request's worker MUST still be terminated.
 
+A `failed`, `unavailable` or `timeout` outcome MUST be sticky for its document stamp across any re-render that is not a user action (a stream frame, a tab switch, a drawer rebuild): the cached outcome is shown, no worker is started and no loading line appears. The explicit retry is a user collapse followed by a re-expand of that row: collapsing a row whose outcome is `failed`, `unavailable` or `timeout` evicts it, so the next expansion requests the render again. A `tree` outcome stays cached. The budget timer starts before the worker is created and so includes worker startup (D21); a cold start that times out is retried by the same collapse and re-expand.
+
 This requirement modifies R1198-1: a stage row still expands in place to its document, now asynchronously.
 
 #### Scenario: The loading state is visible while rendering
@@ -364,6 +371,36 @@ This requirement modifies R1198-1: a stage row still expands in place to its doc
 - **GIVEN** a row re-expanded while the first request's timer is pending
 - **WHEN** the first timer fires
 - **THEN** the row does not show the timeout notice
+
+#### Scenario: A failed document stays across stream frames
+- **GIVEN** an expanded row whose render outcome is `failed`
+- **WHEN** three stream frames re-render the drawer
+- **THEN** no worker was started after the first, the failed notice persists and no loading line appeared
+
+#### Scenario: An unavailable document stays across stream frames
+- **GIVEN** an expanded row whose render outcome is `unavailable` because there is no `Worker`
+- **WHEN** three stream frames re-render the drawer
+- **THEN** no render was requested after the first, the unavailable notice persists and no loading line appeared
+
+#### Scenario: A timed-out document stays across stream frames
+- **GIVEN** an expanded row whose render outcome is `timeout`
+- **WHEN** three stream frames re-render the drawer
+- **THEN** no worker was started after the first, the timeout notice persists and no loading line appeared
+
+#### Scenario: A collapse and re-expand retries a failed document
+- **GIVEN** an expanded row whose render outcome is `failed`
+- **WHEN** the user collapses the row and expands it again
+- **THEN** a second worker is started for the document
+
+#### Scenario: A collapse and re-expand retries a timed-out document
+- **GIVEN** an expanded row whose render outcome is `timeout`
+- **WHEN** the user collapses the row and expands it again
+- **THEN** a second worker is started and its answer is rendered
+
+#### Scenario: A collapse and re-expand retries an unavailable document
+- **GIVEN** an expanded row whose render outcome is `unavailable`
+- **WHEN** the user collapses the row and expands it again
+- **THEN** the render is requested a second time
 
 ### R1218-8: A clone with no change branch is `missing`, not `unreadable`
 

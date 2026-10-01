@@ -156,3 +156,14 @@ The cold review returned REVISE with four findings the maintainer approved. Each
 Linearity, measured through `markdownTree` (substitute, lex, restore): 200000 `*` plus `x` 74 ms, 250000 88 ms, 240 KB of `*a_` 68 ms; the 750 ms bound stands. The bracket class is no longer the costly one: 262144 `[` plus `x` takes 113 ms (about 1.3 s with backslash escaping) and 524000 takes 183 ms, because marked's `reflinkSearch` no longer sees a `[`. Prescan with adversarial hr and underline lines (`- ` x 1e5, a dash plus 2e5 spaces, `*` tab x 1e5) takes 1 to 7 ms.
 
 Round 2 history kept on purpose: the round 1 rows above describe backslash escaping, which round 2 replaced. The spec parse check and the zero-degradation test over every artifact pass.
+
+## Cold review round 3
+
+The cold review returned APPROVE with four findings; the maintainer ruled on each. Each correction was fixed test first.
+
+| Finding | Fix | Test (RED first) and evidence |
+|---|---|---|
+| cold-1 (correction): a failed or unavailable row spawned a new worker on every stream frame | `failed`, `unavailable` and `timeout` are sticky for the document stamp across any re-render that is not a user action; only a user collapse evicts them (R1218-7, D25). Commit `ee03c850`. | `markdown-render.test.mjs` "stays as it was across 3 stream frames" for `failed` and `unavailable`, and the timeout twin: the frames come through a new `emit` on the test EventSource stub, and the test asserts no new worker, no timer requested and no loading line. RED before: 2 failures (a frame requested the render again). |
+| cold-2 (correction): a cold start was shown as "too slow" with no way back | The cold-1 eviction is the retry: collapse and re-expand requests the render again. The timer still starts before `spawn()` and D21 now says why (main-thread guarantee, startup is off-thread). Commit `ee03c850`. | "collapsing and re-expanding a timed-out document asks for it again": worker count 2, second answer rendered. RED before: the timeout stayed cached. Twin tests for `failed` and `unavailable`. |
+| cold-3 (editorial): the timeout notice hard-coded 1500 | `timeoutNotice(budgetMs)`; the `timeout` outcome carries `budgetMs`; `TIMEOUT_NOTICE` is `timeoutNotice(RENDER_BUDGET_MS)`, so the default wording is unchanged. Commit `f19ac6c7`. | `render-budget.test.mjs`: with `budgetMs: 300` the notice says "over 300 ms" and not 1500 (RED: the export did not exist). |
+| cold-4 (editorial): a comment implied the pre-scan bounds the document | The `markdown.mjs` comment now says the pre-scan bounds each inline span and the worker budget bounds the whole document. Included in the docs commit. D16 and D21 already said so and were left as they were. | None (comment only). |

@@ -33,7 +33,9 @@ const defaultLex = (text, options) => Lexer.lex(text, options);
 // marked's emphasis, strikethrough and link rules backtrack quadratically on a
 // long run of delimiters. A span is the lines between the block boundaries
 // below; one holding more than MAX_MARKS delimiters, or one run longer than
-// MAX_RUN, is shown as plain text under a notice. Real artifacts peak at 122
+// MAX_RUN, is shown as plain text under a notice. The pre-scan bounds each
+// inline span; the worker's time budget (render-budget.mjs) bounds the whole
+// document, including costs the pre-scan does not see. Real artifacts peak at 122
 // marks and a run of 7. Every regex is anchored, so a line is scanned once.
 const MAX_MARKS = 600;
 const MAX_RUN = 50;
