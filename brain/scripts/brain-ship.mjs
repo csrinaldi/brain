@@ -4,6 +4,9 @@
 // Usage: npm run brain:ship
 //   1. Runs brain:check (all 4 governance checks + npm test + repo:check).
 //   2. Exits non-zero if any check fails.
+//   2. Confirms the head branch is on the remote and equal to local HEAD
+//      (headPushedFn, #1207) — otherwise refuses and names the push to run.
+//      `ship` NEVER pushes: a push is Tier 2 (agent-authorities.md).
 //   3. Reads the linked issue (issueViewFn) and finds its type:* label
 //      (issue #334 — the label is no longer hardcoded to 'kind:feature',
 //      a label that never existed on this repo's remote).
@@ -18,8 +21,10 @@
 //        • Labels = the issue's type:* label, VERBATIM — never re-mapped
 //   6. Prints the PR URL on success.
 //
-// Ordering (design A4, issue #334): checkFn → issueViewFn → findTypeLabel →
-// labelPreflightFn → mrCreateFn — preserves REQ-S5-4's gate semantics and
+// Ordering (design A4, issue #334; #1207): checkFn → headPushedFn → issueViewFn →
+// findTypeLabel → labelPreflightFn → mrCreateFn — headPushedFn is a local+git check
+// (no forge call), so it sits right after the gate and before any forge read; it
+// preserves REQ-S5-4's gate semantics and
 // the stronger invariant that a red tree makes ZERO remote calls.
 //
 // The script performs NO action on import — side effects are guarded at the bottom.
@@ -54,6 +59,44 @@ function readTemplate(repoRoot) {
 
 function buildPRBody(template, issueNumber) {
   return `${template.trim()}\n\nCloses #${issueNumber}\n`;
+}
+
+/**
+ * Is the head branch on the remote and equal to local HEAD? (#1207)
+ *
+ * Git plumbing only (`ls-remote`, `rev-parse`, `merge-base`) — no forge call, and it
+ * never pushes. `gitFn(args) → {ok, out, err}` is injected so the classification is
+ * testable without a repository.
+ *
+ * @returns {Promise<{state: 'in-sync'|'missing'|'behind'|'diverged'|'unknown', error?: string}>}
+ */
+export async function checkHeadPushed({ branch, gitFn, remote = 'origin' }) {
+  const ls = gitFn(['ls-remote', remote, `refs/heads/${branch}`]);
+  if (!ls.ok) return { state: 'unknown', error: ls.err || 'git ls-remote failed' };
+  const remoteSha = ls.out.split(/\s+/)[0] ?? '';
+  if (!remoteSha) return { state: 'missing' };
+  const head = gitFn(['rev-parse', 'HEAD']);
+  if (!head.ok) return { state: 'unknown', error: head.err || 'git rev-parse HEAD failed' };
+  if (remoteSha === head.out) return { state: 'in-sync' };
+  // The remote commit is an ancestor of HEAD: a plain push fast-forwards it. Otherwise
+  // (or when the object is not even local) the remote holds work this HEAD lacks.
+  const behind = gitFn(['merge-base', '--is-ancestor', remoteSha, 'HEAD']);
+  return { state: behind.ok ? 'behind' : 'diverged' };
+}
+
+function headNotPushedMessage({ state, error }, branch) {
+  const head = `brain:ship: the head branch "${branch}" is not on the remote at your HEAD — no PR was opened.\n`;
+  if (state === 'missing') {
+    return head + `  The branch was never pushed. Run: git push -u origin ${branch}\n  Then re-run brain:ship.`;
+  }
+  if (state === 'behind') {
+    return head + `  The remote branch is behind your HEAD. Run: git push origin ${branch}\n  Then re-run brain:ship.`;
+  }
+  if (state === 'diverged') {
+    return head + `  The remote branch has commits that are not in your local history (it diverged).\n` +
+      `  Fetch and integrate them, then push; brain:ship will not push or force for you.`;
+  }
+  return head + `  Could not read the remote branch${error ? `: ${error}` : ''}.\n  Check the remote is reachable, then re-run brain:ship.`;
 }
 
 export function titleFromBranch(branch, type) {
@@ -101,7 +144,7 @@ export function resolveIssueNumber(branch) {
 /**
  * Run the brain:ship flow.
  *
- * Ordering (design A4): checkFn → issueViewFn → findTypeLabel →
+ * Ordering (design A4, #1207): checkFn → headPushedFn → issueViewFn → findTypeLabel →
  * labelPreflightFn → mrCreateFn. A red checkFn makes ZERO remote calls.
  *
  * @param {object} ctx
@@ -111,6 +154,8 @@ export function resolveIssueNumber(branch) {
  * @param {string}   ctx.branchName       Current git branch.
  * @param {string}   ctx.base             Target base branch (default: 'main').
  * @param {Function} ctx.checkFn          Async fn() → {ok, output?}. Injected for tests.
+ * @param {Function} ctx.headPushedFn     Async fn({branch}) → {state:'in-sync'|'missing'|'behind'|'diverged'|'unknown', error?}.
+ *   Git plumbing, no forge call. Anything but 'in-sync' refuses before any forge call (#1207).
  * @param {Function} ctx.issueViewFn      Async fn({project,number}) → {number,title,labels,body,author}.
  *   REJECTS on an unreachable issue (design A5) — matches the real providers, do not stub with `null`.
  * @param {Function} ctx.labelPreflightFn Async fn({provider,project,label}) → {exists,error?}. Never throws.
@@ -124,6 +169,7 @@ export async function runShip({
   branchName,
   base = 'main',
   checkFn,
+  headPushedFn,
   issueViewFn,
   labelPreflightFn,
   mrCreateFn,
@@ -139,6 +185,13 @@ export async function runShip({
         `  Run "npm run brain:check" for details.\n` +
         (checkResult.output ? `  Output: ${checkResult.output}` : ''),
     };
+  }
+
+  // Step 1b (#1207): the head must be on the remote at local HEAD. Refuses instead of
+  // letting mrCreate surface a raw provider error; never pushes (Tier 2).
+  const pushed = await headPushedFn({ branch: branchName });
+  if (pushed.state !== 'in-sync') {
+    return { exitCode: 1, message: headNotPushedMessage(pushed, branchName) };
   }
 
   // Step 2: read the linked issue — the single source of truth for the PR label.
@@ -267,6 +320,13 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       const r = spawnSync('npm', ['run', 'brain:check'], { encoding: 'utf8', cwd, stdio: 'inherit' });
       return { ok: r.status === 0 };
     },
+    headPushedFn: ({ branch: b }) => checkHeadPushed({
+      branch: b,
+      gitFn: (args) => {
+        const r = spawnSync('git', args, { encoding: 'utf8', cwd });
+        return { ok: r.status === 0, out: (r.stdout ?? '').trim(), err: (r.stderr ?? '').trim() };
+      },
+    }),
     issueViewFn: (args) => providerModule.issueView(args),
     labelPreflightFn: (args) => labelPreflight(args),
     mrCreateFn: (args) => providerModule.mrCreate({ project, ...args }),

@@ -12,18 +12,17 @@
 //   workingMemory  the object store's committed resume.md, ruling 3 (resume-view.mjs)
 //   reviews        the snapshot's review rows, sourced to the PR    (D14)
 //
-// Committed tier only (R881-3, R881-8, R881-10): `spec.md`/`tasks.md` are
-// read from the SERVED ROOT's working tree (the same tree `buildSnapshot`
-// already reads — no worktree content, no linked worktree's `.git`); the
-// blame and the branch/resume reads run `git` on the served root's OWN git
-// dir via a plain `execFileSync`/injected `_run` — never `git -C <worktree>`
-// and never a linked worktree's working tree. `HEAD` is mandatory in the
-// blame argv for exactly that reason: the committed version, never the
-// index or the working copy.
+// Committed tier only (R881-3, R881-8, R881-10, #1198): every artifact is read
+// from the object store, never from a working tree. `readDocuments` resolves
+// HEAD once, lists the six stage artifacts with one `ls-tree`, and reads each
+// present blob with `cat-file`; `resume.md` is read at the change branch's
+// tip. `spec.md` and `tasks.md` are read ONCE, and the spec cards and the
+// tasks checklist are derived from that same string (AC7). Everything runs
+// `git` on the served root's OWN git dir via a plain `execFileSync`/injected
+// `_run` — never `git -C <worktree>`. `HEAD` is mandatory in the blame argv
+// for the same reason: the committed version, never the index or the copy.
 
-import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { join } from 'node:path';
 
 import { parseSpecCards } from './lib/spec-cards.mjs';
 import { parseTasksList } from './lib/tasks-list.mjs';
@@ -32,6 +31,7 @@ import { shapeResumeView } from './lib/resume-view.mjs';
 import { parseFrontmatter } from '../memory/lib/resume-frontmatter.mjs';
 import { LIFECYCLE_STAGES, ARTEFACT_FILE } from '../lib/sdd-layout.mjs';
 import { prUrl } from './lib/forge-url.mjs';
+import { documentWording } from './lib/drawer-model.mjs';
 
 /** D14's caveat, verbatim in the UI, until #880 lands `type: review` records. */
 export const REVIEWS_SOURCE_NOTE = 'forge comments until #880 lands';
@@ -52,12 +52,27 @@ function noChangeDirTab(issue) {
   return { ok: false, reason: `no change dir at ${path}`, source: { path } };
 }
 
-function buildSpecTab({ read, dir, issue }) {
+/** The tab's own said reason for a document that is not a readable text, or `null` when it is. */
+function documentFailure(doc, head) {
+  if (!doc) return null;
+  if (doc.state === 'missing') return `${doc.path} is not committed at HEAD (${String(head ?? '').slice(0, 12)})`;
+  if (doc.state === 'unreadable') return `${doc.path} could not be read at HEAD: ${doc.reason}`;
+  return null;
+}
+
+/** A truncated document still feeds its tab; the tab says the cards or items cover only the read part. */
+function truncationNote(doc, what) {
+  return doc.state === 'truncated' ? `truncated at ${DOCUMENT_CAP} bytes; ${what} cover the read part` : null;
+}
+
+function buildSpecTab({ documents, head, dir, issue }) {
   if (!dir) return noChangeDirTab(issue);
-  const path = `${dir}/spec.md`;
-  let text;
-  try { text = read(path); } catch (err) { return { ok: false, reason: `${path} could not be read: ${err?.message ?? err}`, source: { path } }; }
-  return parseSpecCards({ text, path });
+  const doc = documents.spec;
+  const failure = documentFailure(doc, head);
+  if (failure) return { ok: false, reason: failure, source: { path: doc.path } };
+  const parsed = parseSpecCards({ text: doc.text, path: doc.path });
+  const note = truncationNote(doc, 'cards');
+  return parsed.ok && note ? { ...parsed, note } : parsed;
 }
 
 /**
@@ -76,11 +91,12 @@ function attachAttribution(items, blame) {
   }));
 }
 
-function buildTasksTab({ read, run, dir, issue }) {
+function buildTasksTab({ documents, head, run, dir, issue }) {
   if (!dir) return noChangeDirTab(issue);
-  const path = `${dir}/tasks.md`;
-  let text;
-  try { text = read(path); } catch (err) { return { ok: false, reason: `${path} could not be read: ${err?.message ?? err}`, source: { path } }; }
+  const doc = documents.tasks;
+  const failure = documentFailure(doc, head);
+  if (failure) return { ok: false, reason: failure, source: { path: doc.path } };
+  const path = doc.path;
 
   let blame;
   try {
@@ -96,9 +112,10 @@ function buildTasksTab({ read, run, dir, issue }) {
     ? Object.entries(blame.value).map(([line, a]) => ({ line: Number(line), actor: a.author ?? 'unknown', ts: a.authorTime ?? null }))
     : [];
 
-  const parsed = parseTasksList({ text, path, attribution });
+  const parsed = parseTasksList({ text: doc.text, path, attribution });
   if (!parsed.ok) return parsed;
-  return { ok: true, value: attachAttribution(parsed.value, blame) };
+  const note = truncationNote(doc, 'items');
+  return { ok: true, value: attachAttribution(parsed.value, blame), ...(note ? { note } : {}) };
 }
 
 /**
@@ -122,17 +139,15 @@ function resolveBranch({ run, snapshot, issue }) {
   return { ok: true, branch: names[0] };
 }
 
-function buildWorkingMemoryTab({ run, snapshot, issue }) {
-  const resolved = resolveBranch({ run, snapshot, issue });
+function buildWorkingMemoryTab({ resolved, resume }) {
   if (!resolved.ok) return { ok: false, reason: resolved.reason };
   const { branch } = resolved;
-  let text;
-  try {
-    text = run('git', ['show', `${branch}:resume.md`]);
-  } catch {
+  // Derived from the one resume document so this tab and the SDD row cannot disagree.
+  if (resume.state === 'unreadable') return { ok: false, reason: documentWording(resume) };
+  if (resume.state !== 'present' && resume.state !== 'truncated') {
     return { ok: false, reason: `no committed resume.md on ${branch}; the local overlay arrives in slice 5 (#883)` };
   }
-  const { frontmatter } = parseFrontmatter(text);
+  const { frontmatter } = parseFrontmatter(resume.text);
   return { ok: true, value: shapeResumeView({ frontmatter, branch }) };
 }
 
@@ -192,6 +207,120 @@ const STAGE_FILE = Object.freeze({
   verify: 'verify-report.md',
   archive: 'archive-report.md',
 });
+
+// ── #1198: the seven documents, read from the object store ─────────────────
+
+/** A document is cut here; the note says so and there is no "load full" (R3). */
+export const DOCUMENT_CAP = 262144;
+/** Above this a blob is not read at all: it is said unreadable with its size. */
+export const DOCUMENT_READ_LIMIT = 8 * 1024 * 1024;
+/** Headroom over a blob's size so `execFileSync`'s 1 MiB default never turns a 2 MB document into ENOBUFS. */
+const READ_HEADROOM = 4096;
+
+/** The six documents read at HEAD, keyed by their stage name. `archive` is a stage, not a document. */
+const HEAD_DOCUMENT_KEYS = SDD_STAGES.filter((stage) => stage !== 'archive');
+
+const errReason = (err) => String(err?.message ?? err).trim();
+
+function documentEntry(path, ref, fields) {
+  return { path, ref, commit: null, state: 'missing', text: null, bytes: null, truncated: false, truncatedAt: null, reason: null, note: null, ...fields };
+}
+
+/** `ls-tree -l -z` output to `{path: {mode, type, sha, size}}`. A tree's size is `-`. */
+function parseTreeListing(out) {
+  const entries = new Map();
+  for (const record of String(out ?? '').split('\0')) {
+    if (!record) continue;
+    const tab = record.indexOf('\t');
+    const [mode, type, sha, size] = record.slice(0, tab).trim().split(/\s+/);
+    entries.set(record.slice(tab + 1), { mode, type, sha, size: size === '-' ? null : Number(size) });
+  }
+  return entries;
+}
+
+/** Cut at the cap on a UTF-8 boundary: back up while the first dropped byte is a continuation byte. */
+function capText(text) {
+  const buf = Buffer.from(text, 'utf8');
+  if (buf.length <= DOCUMENT_CAP) return { text, truncated: false, truncatedAt: null };
+  let end = DOCUMENT_CAP;
+  while (end > 0 && (buf[end] & 0xc0) === 0x80) end -= 1;
+  return { text: buf.subarray(0, end).toString('utf8'), truncated: true, truncatedAt: end };
+}
+
+/**
+ * One document from its tree entry: missing (no entry), unreadable (not a
+ * regular blob, over the read limit, or the read failed), present, or
+ * truncated. `read(maxBuffer)` performs the content read for this entry.
+ */
+function documentFromEntry({ path, ref, commit, entry, read }) {
+  if (!entry) return documentEntry(path, ref, { state: 'missing' });
+  const refuse = (reason) => documentEntry(path, ref, { state: 'unreadable', reason, bytes: entry.size });
+  if (entry.type !== 'blob') return refuse(`${path} is a ${entry.type}, not a file`);
+  if (entry.mode === '120000') return refuse(`${path} is a symlink`);
+  if (entry.size > DOCUMENT_READ_LIMIT) return refuse(`${entry.size} bytes exceeds the read limit of ${DOCUMENT_READ_LIMIT}`);
+  let text;
+  try {
+    text = String(read(entry.size + READ_HEADROOM) ?? '');
+  } catch (err) {
+    return refuse(errReason(err));
+  }
+  const cut = capText(text);
+  return documentEntry(path, ref, {
+    commit, state: cut.truncated ? 'truncated' : 'present', text: cut.text, bytes: entry.size, truncated: cut.truncated, truncatedAt: cut.truncatedAt,
+    note: cut.truncated ? `truncated at ${DOCUMENT_CAP} bytes` : null,
+  });
+}
+
+/**
+ * The six stage documents at HEAD: `rev-parse` once, one `ls-tree` for all six
+ * paths (literal pathspecs, so a `*` in a directory name is never globbed),
+ * then one `cat-file blob` per present document. A failure of the first two
+ * says every document unreadable with that reason, never an empty list.
+ * @returns {{head: string|null, documents: Record<string, object|null>}}
+ */
+function readHeadDocuments({ run, dir }) {
+  if (!dir) return { head: null, documents: Object.fromEntries(HEAD_DOCUMENT_KEYS.map((k) => [k, null])) };
+  const paths = HEAD_DOCUMENT_KEYS.map((k) => `${dir}/${STAGE_FILE[k]}`);
+  let head;
+  let tree;
+  try {
+    head = String(run('git', ['rev-parse', '--verify', 'HEAD^{commit}'])).trim();
+    tree = parseTreeListing(run('git', ['--literal-pathspecs', 'ls-tree', '-l', '-z', head, '--', ...paths]));
+  } catch (err) {
+    const reason = errReason(err);
+    return { head: null, documents: Object.fromEntries(HEAD_DOCUMENT_KEYS.map((k, i) => [k, documentEntry(paths[i], 'HEAD', { state: 'unreadable', reason })])) };
+  }
+  const documents = {};
+  HEAD_DOCUMENT_KEYS.forEach((key, i) => {
+    const entry = tree.get(paths[i]);
+    documents[key] = documentFromEntry({
+      path: paths[i], ref: 'HEAD', commit: head, entry,
+      read: (maxBuffer) => run('git', ['cat-file', 'blob', entry.sha], { maxBuffer }),
+    });
+  });
+  return { head, documents };
+}
+
+/**
+ * `resume.md` at the change branch's tip. The branch is resolved to a commit
+ * ONCE; the tree is listed at that commit and the blob read by its sha, so the
+ * stamp names the commit the text came from even if the branch advances
+ * meanwhile. `ls-tree` tells "no such file" from "could not read" without
+ * parsing stderr, which the `run` seam discards.
+ */
+function readResumeDocument({ run, resolved }) {
+  const path = 'resume.md';
+  if (!resolved.ok) return documentEntry(path, null, { state: 'unreadable', reason: resolved.reason });
+  const { branch } = resolved;
+  try {
+    const commit = String(run('git', ['rev-parse', '--verify', `${branch}^{commit}`])).trim();
+    const tree = parseTreeListing(run('git', ['--literal-pathspecs', 'ls-tree', '-l', '-z', commit, '--', path]));
+    const entry = tree.get(path);
+    return documentFromEntry({ path, ref: branch, commit, entry, read: (maxBuffer) => run('git', ['cat-file', 'blob', entry.sha], { maxBuffer }) });
+  } catch (err) {
+    return documentEntry(path, branch, { state: 'unreadable', reason: errReason(err) });
+  }
+}
 
 /**
  * The door's own sdd tab (#998 R998-6, design.md's "TAB_IDS grows sdd and
@@ -293,20 +422,26 @@ export function buildChangeView({ root, issue, snapshot, project = null, _read, 
   // today — `read()`'s own catch already covers "the file is not there".
   void _exists;
 
-  const read = _read ?? ((p) => readFileSync(join(root, p), 'utf8'));
-  const run = _run ?? ((file, args) => execFileSync(file, args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }));
+  // `_read` is accepted for signature parity and unused: no artifact is read from a working tree (#1198).
+  void _read;
+  const run = _run ?? ((file, args, opts) => execFileSync(file, args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], ...(opts?.maxBuffer ? { maxBuffer: opts.maxBuffer } : {}) }));
 
   const dir = findChangeDir(snapshot, issue);
+  const { head, documents: headDocuments } = readHeadDocuments({ run, dir });
+  const resolved = resolveBranch({ run, snapshot, issue });
+  const resume = readResumeDocument({ run, resolved });
+  const documents = { ...headDocuments, resume };
 
   return {
     ok: true,
     value: {
       issue,
       changeDir: dir,
-      spec: buildSpecTab({ read, dir, issue }),
+      documents,
+      spec: buildSpecTab({ documents, head, dir, issue }),
       sdd: buildSddTab({ snapshot, issue, dir }),
-      tasks: buildTasksTab({ read, run, dir, issue }),
-      workingMemory: buildWorkingMemoryTab({ run, snapshot, issue }),
+      tasks: buildTasksTab({ documents, head, run, dir, issue }),
+      workingMemory: buildWorkingMemoryTab({ resolved, resume }),
       reviews: buildReviewsTab({ snapshot, project, issue }),
       records: buildRecordsTab({ snapshot, issue }),
     },

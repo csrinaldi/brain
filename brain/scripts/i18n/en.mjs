@@ -219,7 +219,7 @@ export default {
 
   // §7 Team memory
   'bootstrap.memory.section':        'Team memory',
-  'bootstrap.memory.prompt':         'Which memory backend do you use? [engram]: ',
+  'bootstrap.memory.prompt':         'Which memory backend does this team use? (engram|plainfiles): ',
   // {backend} = backend name (e.g. engram)
   'bootstrap.memory.backend':        'memory backend: {backend} ({source})',
   'bootstrap.memory.undeclared':     'no memory backend is declared (env, .env, brain.config.json memory.backend) — none was guessed, so memory setup was skipped. Next: npm run brain:config -- set memory.backend engram|plainfiles, then re-run env:init.',
@@ -361,6 +361,8 @@ export default {
   'ticket.base.epicUnreadable':   '→ Base: {base} — epic #{epic} could not be read, continuing anyway: {message}',
   'ticket.base.offTracker':       '→ Base: {base} — OFF TRACKER: epic #{epic} declares {tracker}, and --off-tracker was given.',
   'ticket.error.baseIsTracked':   '✗ --base {base} was given, but epic #{epic} declares tracker {tracker} — while that epic is in flight a slice starts there. Use --base {tracker}, or pass {flag} to state that this branch deliberately does not.',
+
+  'ticket.error.noTypeLabel':     '✗ Issue #{id} has no type:* label (labels found: [{labels}]) — brain:ship would refuse it later. Add one on the issue now (for example type:feature, type:bug or type:chore; type::feature on GitLab), then re-run.',
 
   'ticket.nextSteps.header':      'Next steps:',
   'ticket.nextSteps.cd':          '    0. cd {path}   (open your work session here)',

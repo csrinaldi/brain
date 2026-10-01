@@ -35,6 +35,7 @@ function makeCtx(overrides = {}) {
     branchName: 'feature/42-my-feature',
     base: 'main',
     checkFn: async () => ({ ok: true }),
+    headPushedFn: async () => ({ state: 'in-sync' }),
     issueViewFn: async () => ({ number: 42, title: 'add cli i18n', labels: ['type:feature'], body: '', author: 'alice' }),
     labelPreflightFn: async () => ({ exists: true }),
     mrCreateFn: async ({ title, body, head, base, labels }) => ({
@@ -251,4 +252,91 @@ test('brain-ship: resolveIssueNumber rejects branches that carry no <number>- se
     const result = resolveIssueNumber(branch);
     assert.equal(result.exitCode, 1, `branch "${branch}" must not resolve to an issue number`);
   }
+});
+
+// ── #1207: the head must be on the remote and equal to local HEAD ─────────────
+
+test('#1207 an unpushed branch is refused with ZERO forge calls, naming git push -u', async () => {
+  const { runShip } = await import('./brain-ship.mjs');
+  const calls = [];
+  const result = await runShip(makeCtx({
+    headPushedFn: async () => ({ state: 'missing' }),
+    issueViewFn: async () => { calls.push('issueView'); return { labels: ['type:feature'] }; },
+    labelPreflightFn: async () => { calls.push('preflight'); return { exists: true }; },
+    mrCreateFn: async () => { calls.push('mrCreate'); return { url: 'u' }; },
+  }));
+  assert.equal(result.exitCode, 1);
+  assert.deepEqual(calls, [], 'no forge call of any kind before the head is on the remote');
+  assert.match(result.message, /git push -u origin feature\/42-my-feature/);
+  assert.ok(!/GraphQL/.test(result.message));
+});
+
+test('#1207 a remote ref behind local HEAD is refused, naming git push', async () => {
+  const { runShip } = await import('./brain-ship.mjs');
+  let created = false;
+  const result = await runShip(makeCtx({
+    headPushedFn: async () => ({ state: 'behind' }),
+    mrCreateFn: async () => { created = true; return { url: 'u' }; },
+  }));
+  assert.equal(result.exitCode, 1);
+  assert.equal(created, false);
+  assert.match(result.message, /git push origin feature\/42-my-feature/);
+  assert.ok(!/push -u/.test(result.message));
+});
+
+test('#1207 a remote ref that diverged is refused and does not suggest a plain push', async () => {
+  const { runShip } = await import('./brain-ship.mjs');
+  const result = await runShip(makeCtx({ headPushedFn: async () => ({ state: 'diverged' }) }));
+  assert.equal(result.exitCode, 1);
+  assert.match(result.message, /diverged|not in your local history/i);
+});
+
+test('#1207 an unreadable remote refuses, naming the cause', async () => {
+  const { runShip } = await import('./brain-ship.mjs');
+  const result = await runShip(makeCtx({ headPushedFn: async () => ({ state: 'unknown', error: 'could not resolve host' }) }));
+  assert.equal(result.exitCode, 1);
+  assert.match(result.message, /could not resolve host/);
+});
+
+test('#1207 a red check still wins: head check is not consulted, ordering checkFn -> headPushedFn -> issueViewFn', async () => {
+  const { runShip } = await import('./brain-ship.mjs');
+  const order = [];
+  await runShip(makeCtx({
+    checkFn: async () => { order.push('check'); return { ok: false }; },
+    headPushedFn: async () => { order.push('head'); return { state: 'in-sync' }; },
+  }));
+  assert.deepEqual(order, ['check']);
+  order.length = 0;
+  await runShip(makeCtx({
+    checkFn: async () => { order.push('check'); return { ok: true }; },
+    headPushedFn: async () => { order.push('head'); return { state: 'in-sync' }; },
+    issueViewFn: async () => { order.push('issue'); return { labels: ['type:feature'] }; },
+  }));
+  assert.deepEqual(order.slice(0, 3), ['check', 'head', 'issue']);
+});
+
+test('#1207 checkHeadPushed: git plumbing only, classifies missing / in-sync / behind / diverged / unknown', async () => {
+  const { checkHeadPushed } = await import('./brain-ship.mjs');
+  const make = ({ remote, head = 'aaa', ancestor = false, lsOk = true }) => {
+    const seen = [];
+    const gitFn = (args) => {
+      seen.push(args.join(' '));
+      if (args[0] === 'ls-remote') return { ok: lsOk, out: remote ? `${remote}\trefs/heads/b` : '', err: lsOk ? '' : 'boom' };
+      if (args[0] === 'rev-parse') return { ok: true, out: head };
+      if (args[0] === 'merge-base') return { ok: ancestor, out: '' };
+      return { ok: false, out: '' };
+    };
+    return { gitFn, seen };
+  };
+  let c = make({ remote: '' });
+  assert.deepEqual(await checkHeadPushed({ branch: 'b', gitFn: c.gitFn }), { state: 'missing' });
+  assert.deepEqual(c.seen[0].split(' ').slice(0, 3), ['ls-remote', 'origin', 'refs/heads/b']);
+  c = make({ remote: 'aaa' });
+  assert.deepEqual(await checkHeadPushed({ branch: 'b', gitFn: c.gitFn }), { state: 'in-sync' });
+  c = make({ remote: 'bbb', ancestor: true });
+  assert.deepEqual(await checkHeadPushed({ branch: 'b', gitFn: c.gitFn }), { state: 'behind' });
+  c = make({ remote: 'bbb', ancestor: false });
+  assert.deepEqual(await checkHeadPushed({ branch: 'b', gitFn: c.gitFn }), { state: 'diverged' });
+  c = make({ remote: '', lsOk: false });
+  assert.deepEqual(await checkHeadPushed({ branch: 'b', gitFn: c.gitFn }), { state: 'unknown', error: 'boom' });
 });

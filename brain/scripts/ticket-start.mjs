@@ -28,6 +28,7 @@ import { t } from './i18n/t.mjs';
 import { tryFeatureResume } from './memory/lib/auto-resume.mjs';
 import { parseTicketArgs } from './lib/ticket-args.mjs';
 import { resolveBase } from './lib/ticket-base.mjs';
+import { requireTypeLabel } from './lib/ticket-type.mjs';
 import { worktreeAddArgs, inPlaceCheckoutArgs } from './lib/ticket-branch.mjs';
 import { evaluateFreshness } from './lib/checkout-freshness.mjs';
 
@@ -103,6 +104,16 @@ try {
 }
 if (!issue?.number) {
   console.error(`  ${await t('ticket.error.notFound', { id, project })}`);
+  process.exit(1);
+}
+
+// ── Does the issue carry a type:* label? (#1206) ──────────────────────────────
+// `brain:ship` refuses an untyped issue at the LAST step. Said here, it is a
+// one-line fix before any work; said there, it is a surprise after the work. Same
+// `findTypeLabel` as `ship` (via the leaf), and before a branch or worktree exists.
+const typed = requireTypeLabel({ issue });
+if (!typed.ok) {
+  console.error(`  ${await t(typed.refusal.key, typed.refusal.params)}`);
   process.exit(1);
 }
 

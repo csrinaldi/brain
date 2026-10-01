@@ -1240,6 +1240,65 @@ body {
   color: var(--muted);
 }
 
+/* SDD documents (#1198): the toggle beneath a stage row and the markdown it
+   opens. Tokens only; table alignment is a class, never an inline style. */
+.doc-toggle {
+  margin-top: 6px;
+  padding: 2px 8px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--accent);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.doc-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.doc-body {
+  margin-top: 8px;
+  padding: 8px 12px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  overflow-wrap: anywhere;
+}
+.doc-stamp {
+  margin: 0 0 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--stamp);
+}
+.md p, .md li { line-height: 1.5; }
+.md-heading { margin: 14px 0 6px; font-size: 14px; }
+.md blockquote {
+  margin: 8px 0;
+  padding-left: 10px;
+  color: var(--muted);
+  border-left: 3px solid var(--line);
+}
+.md code { font-family: var(--font-mono); font-size: 12px; }
+.md pre {
+  margin: 8px 0;
+  padding: 8px;
+  overflow-x: auto;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+.md table { border-collapse: collapse; margin: 8px 0; }
+.md th, .md td { padding: 3px 8px; border: 1px solid var(--line); }
+.md-align-left { text-align: left; }
+.md-align-center { text-align: center; }
+.md-align-right { text-align: right; }
+.md-literal { font-family: var(--font-mono); font-size: 12px; white-space: pre-wrap; color: var(--muted); }
+.md-inert { color: var(--muted); }
+.md-frontmatter {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--muted);
+  white-space: pre-wrap;
+}
+
 /* Lines the spec grammar could not attach to a scenario (#1067). They are a
    warning about the file, so they read as one. */
 .orphan-title {
