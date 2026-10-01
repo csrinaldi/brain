@@ -1,0 +1,6 @@
+
+> brain-test-plainfiles@1.0.0 brain:memory:save
+> node ./brain/scripts/memory/cli.mjs save SYNTHETIC-1204-R1-plainfiles SYNTHETIC-1204-first-record-body --type session_summary --issue 1
+
+memory/cli: ✓ saved rec-8e84aff07aa1b552 → /home/gandalf/IA/brain-test-plainfiles/.memory/records/2026-10-rec-8e84aff07aa1b552.jsonl
+exit=0

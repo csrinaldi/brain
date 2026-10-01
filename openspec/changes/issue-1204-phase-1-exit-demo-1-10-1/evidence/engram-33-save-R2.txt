@@ -1,0 +1,6 @@
+
+> brain-test-engram@1.0.0 brain:memory:save
+> node ./brain/scripts/memory/cli.mjs save SYNTHETIC-1204-R2-engram SYNTHETIC-1204-second-record-body --type decision --issue 1
+
+memory/cli: ✓ saved rec-5615d356e6e53d0b → /home/gandalf/IA/brain-test-engram/.memory/records/2026-10-rec-5615d356e6e53d0b.jsonl
+exit=0

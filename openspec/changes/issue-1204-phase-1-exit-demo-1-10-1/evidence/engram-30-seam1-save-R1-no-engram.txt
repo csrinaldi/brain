@@ -1,0 +1,9 @@
+$ PATH without ~/.local/bin (no engram): save R1
+engram: not on PATH
+
+> brain-test-engram@1.0.0 brain:memory:save
+> node ./brain/scripts/memory/cli.mjs save SYNTHETIC-1204-R1-engram SYNTHETIC-1204-first-record-body --type session_summary --issue 1
+
+record rec-761e177998984277 is on disk, but hydrating it into engram was deferred — engram binary not found. The record is NOT lost; re-run `npm run brain:memory:pull` (or `brain:memory:share`) once engram is reachable to catch it up.
+memory/cli: ✓ saved rec-761e177998984277 → /home/gandalf/IA/brain-test-engram/.memory/records/2026-10-rec-761e177998984277.jsonl
+exit=0

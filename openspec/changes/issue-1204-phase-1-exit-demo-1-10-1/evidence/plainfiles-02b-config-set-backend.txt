@@ -1,0 +1,17 @@
+# Reconstructed record. This was NOT captured live: the orchestrator ran the command
+# without writing a transcript. The command and its output are copied from the
+# orchestrator's session log.
+#
+# Context: plainfiles-02-env-init-enter-default.txt shows env:init accepting the
+# [engram] default on Enter and writing memory.backend=engram to tracked
+# brain.config.json (E6, #1205). The operator had meant plainfiles. The orchestrator
+# corrected the declaration and moved the stray `typescript` transcript into evidence
+# as plainfiles-02-env-init-enter-default.txt. plainfiles-02-env-init.txt is the
+# second env:init run, made after this correction.
+
+$ cd /home/gandalf/IA/brain-test-plainfiles
+$ mv typescript <evidence>/plainfiles-02-env-init-enter-default.txt
+$ npm run -s brain:config -- set memory.backend plainfiles
+brain:config: ✓ set memory.backend (no pending migrations)
+$ rg -n '"backend"' brain.config.json
+48:    "backend": "plainfiles"

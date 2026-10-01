@@ -1,0 +1,30 @@
+$ npm run brain:memory:pull (capturing checkout, #1118)
+
+> brain-test-plainfiles@1.0.0 brain:memory:pull
+> node ./brain/scripts/memory/cli.mjs pull
+
+From https://github.com/csrinaldi/brain-test-plainfiles
+   e478ff6..f80831b  main       -> origin/main
+Updating e478ff6..f80831b
+Fast-forward
+ .memory/records/2026-10-rec-85d07d4f92d5030b.jsonl | 1 +
+ .memory/records/2026-10-rec-8e84aff07aa1b552.jsonl | 1 +
+ 2 files changed, 2 insertions(+)
+ create mode 100644 .memory/records/2026-10-rec-85d07d4f92d5030b.jsonl
+ create mode 100644 .memory/records/2026-10-rec-8e84aff07aa1b552.jsonl
+memory/cli: backend 'plainfiles' does not implement op 'import'
+brain:memory:pull: verified .memory/records/2026-10-rec-85d07d4f92d5030b.jsonl — present, tracked in HEAD as blob aa03ab83a26f3b4264658a343d43e48ad49ca539
+brain:memory:pull: verified .memory/records/2026-10-rec-8e84aff07aa1b552.jsonl — present, tracked in HEAD as blob a6767e869e4c3bae06b6a4b89ca97cd7665969e3
+exit=0
+## main...origin/main
+ M .memory/index.jsonl
+f80831b memory: gandalf-rog-zephyrus-g15-ga503qr-ga503qr 2026-10-01 (2 records) (#3)
+e478ff6 feat: enable memory lane and add demo README line (#1) (#2)
+4c7fda5 chore: adopt brain 1.10.1
+memory/cli: 2 matching record(s):
+  - rec-85d07d4f92d5030b [decision] **SYNTHETIC-1204-R2-plainfiles**
+
+SYNTHETIC-1204-second-record-body
+  - rec-8e84aff07aa1b552 [session_summary] **SYNTHETIC-1204-R1-plainfiles**
+
+SYNTHETIC-1204-first-record-body
