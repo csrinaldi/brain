@@ -67,3 +67,11 @@ test('#1198 fake-git: modes and trees model the entries the reader must refuse',
   assert.match(lsTree(run, 'link'), /^120000 blob /);
   assert.match(lsTree(run, 'dir'), /^040000 tree /);
 });
+
+test('#1218: every error the fake throws carries .stderr, as the piped runner does', () => {
+  const run = fakeGit({ files: {}, head: 'a'.repeat(40), fail: { 'rev-parse': 'fatal: injected' } });
+  assert.throws(() => run('git', ['rev-parse', '--verify', 'HEAD^{commit}']), (err) => err.stderr === 'fatal: injected');
+  const missing = fakeGit({ files: {}, head: 'a'.repeat(40) });
+  assert.throws(() => missing('git', ['rev-parse', '--verify', 'nope^{commit}']), (err) => /fatal: bad revision/.test(err.stderr));
+  assert.throws(() => missing('git', ['status']), (err) => typeof err.stderr === 'string');
+});

@@ -690,3 +690,19 @@ test('#1198 AC7: a failing spec read makes the document unreadable and the tab r
   assert.equal(v.spec.ok, false);
   assert.match(v.spec.reason, /bad object/);
 });
+
+test('#1218 R1218-9/10: a headBranch that exists only as a remote ref is unreadable and the reason names git\'s cause', () => {
+  const root = testTmp('remote-only-');
+  const git = (...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  git('init', '-q', '-b', 'main');
+  git('-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '-q', '--allow-empty', '-m', 'init');
+  git('update-ref', 'refs/remotes/origin/feat/issue-881-remote-only', 'HEAD');
+  const snapshot = makeSnapshot({ prs: [{ number: 5, title: 'x', headBranch: 'feat/issue-881-remote-only', issue: ISSUE }] });
+  const { documents, workingMemory } = buildChangeView({ root, issue: ISSUE, snapshot, project: 'o/r' }).value;
+  assert.equal(documents.resume.state, 'unreadable');
+  assert.match(documents.resume.reason, /fatal: Needed a single revision/);
+  assert.doesNotMatch(documents.resume.reason, /[\r\n]/);
+  assert.ok(documents.resume.reason.length <= 200);
+  assert.doesNotMatch(documents.resume.reason, /^Command failed/);
+  assert.match(workingMemory.reason, /fatal: Needed a single revision/);
+});

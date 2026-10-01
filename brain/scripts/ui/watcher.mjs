@@ -23,7 +23,7 @@
 // never throws, `state()` reports which paths failed and why.
 
 import { watch as fsWatch, readdirSync, readFileSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
+import { gitRun } from './git-run.mjs';
 import { isAbsolute, join, resolve } from 'node:path';
 
 import { ANTI_PATTERN_DIRS } from '../status/anti-patterns.mjs';
@@ -32,13 +32,9 @@ import { parseWorktrees } from '../memory/lane/collect.mjs';
 
 const DEBOUNCE_MS = 250;
 
-function defaultRun(root) {
-  return (file, args) => execFileSync(file, args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
-}
-
 /** `git rev-parse --git-common-dir`, resolved to an absolute path. */
 export function resolveGitCommonDir({ root, _run } = {}) {
-  const run = _run ?? defaultRun(root);
+  const run = _run ?? gitRun(root);
   const out = run('git', ['rev-parse', '--git-common-dir']).trim();
   return isAbsolute(out) ? out : join(root, out);
 }
@@ -68,7 +64,7 @@ export function createWatcher({
   _clearTimeout = clearTimeout,
   onRecompute = () => {},
 } = {}) {
-  const run = _run ?? defaultRun(root);
+  const run = _run ?? gitRun(root);
   const handles = new Map(); // absPath -> {handle, label, kind, worktreePath}
   const watchedWorktrees = new Map(); // id -> path
   const watchedChangeDirs = new Map(); // name -> absPath
