@@ -377,14 +377,20 @@ test('#1218 R1218-1: only * _ ~ [ ] are counted', () => {
   assert.equal(prescan(input).filter((s) => s.degraded).length, 0);
 });
 
-test('#1218 R1218-1: prescan classifies a 200 KB run without ever calling the tokenizer', () => {
+test('#1218 R1218-1: prescan classifies a 200 KB run on its own, and the tokenizer sees it escaped, once', () => {
   const input = '*'.repeat(2e5);
   const spans = prescan(input);
   assert.equal(spans.length, 1);
   assert.equal(spans[0].degraded, true);
   assert.equal(spans[0].marks, 2e5);
   assert.equal(spans[0].longestRun, 2e5);
-  const out = markdownTree(input, () => { throw new Error('the tokenizer must not be called'); });
+  const seen = [];
+  const out = markdownTree(input, (text, options) => {
+    seen.push(text);
+    return Lexer.lex(text, options);
+  });
+  assert.equal(seen.length, 1, 'one lex for the whole document');
+  assert.equal(seen[0], '\\*'.repeat(2e5), 'every delimiter reaches the tokenizer escaped');
   assert.equal(degradedBlocks(out).length, 1);
   assert.deepEqual(out.notices, []);
 });
@@ -418,14 +424,64 @@ test('#1218 R1218-1: fenced code is skipped, closed or not, and the closer must 
   assert.equal(degradedBlocks(markdownTree(`\`\`\`\nx\n\`\`\`\n${stars}`)).length, 1);
 });
 
-test('#1218 R1218-2: the notice states N and the text is the source', () => {
+const flat = (nodes) => nodes.map((n) => (n.t === 'text' ? n.text : n.children ? flat(n.children) : '')).join('');
+
+test('#1218 R1218-2: the notice states N, and the passage is shown as its own text', () => {
   const src = 'a*'.repeat(350);
   const out = markdownTree(src);
   assert.deepEqual(degradedBlocks(out), []);
   const big = `${'*'.repeat(100)}x${'*'.repeat(600)}`;
-  const [block] = degradedBlocks(markdownTree(big));
-  assert.equal(block.notice, NOTICE(700));
-  assert.equal(block.text, big);
+  const tree = markdownTree(big);
+  assert.equal(degradedBlocks(tree).length, 1);
+  assert.equal(degradedBlocks(tree)[0].notice, NOTICE(700));
+  assert.equal(tree.blocks[0].t, 'degraded');
+  assert.equal(tree.blocks[1].t, 'paragraph');
+  assert.ok(tree.blocks[1].children.every((n) => n.t === 'text'), 'only literal text, no emphasis nodes');
+  assert.ok(tree.blocks[1].children.length <= 3, 'a run of escapes is one node');
+  assert.equal(flat(tree.blocks[1].children), big);
+});
+
+test('#1218 cold-2: a reference definition after a degraded passage still resolves its link', () => {
+  const out = markdownTree(`see [docs][r]\n\n${'*'.repeat(60)}\n\n[r]: https://example.com/x`);
+  const link = JSON.stringify(out.blocks).match(/"t":"link","href":"([^"]+)"/);
+  assert.equal(link?.[1], 'https://example.com/x');
+  assert.deepEqual(degradedBlocks(out).map((b) => b.notice), [NOTICE(60)]);
+});
+
+test('#1218 cold-2: a degraded passage inside a list item leaves one list, and its notice precedes that list', () => {
+  const out = markdownTree(`1. one\n2. two\n\n   ${'*'.repeat(60)}\n\n3. three`);
+  assert.deepEqual(out.blocks.map((b) => b.t), ['degraded', 'list']);
+  assert.equal(out.blocks[0].notice, NOTICE(60));
+  assert.equal(out.blocks[1].items.length, 3);
+  const inItem = out.blocks[1].items[1].blocks.map((b) => (b.t === 'paragraph' ? flat(b.children) : b.t));
+  assert.deepEqual(inItem, ['two', '*'.repeat(60)]);
+});
+
+test('#1218 cold-2: the notice sits before the block holding the passage, and only there', () => {
+  const bad = 'a*'.repeat(700);
+  const out = markdownTree(`# Title\n\nfirst **bold**\n\n${bad}\n\nlast`);
+  assert.deepEqual(out.blocks.map((b) => b.t), ['heading', 'paragraph', 'degraded', 'paragraph', 'paragraph']);
+  assert.equal(flat(out.blocks[3].children), bad);
+});
+
+test('#1218 cold-2: a backslash and every delimiter in a degraded passage come out as typed', () => {
+  const src = `\\*x ${'*_~[]'.repeat(130)}\\`;
+  const out = markdownTree(src);
+  assert.equal(flat(out.blocks.find((b) => b.t === 'paragraph').children), src);
+});
+
+test('#1218 cold-2: a degraded quote keeps its quote, a degraded bullet keeps its bullet', () => {
+  const bad = 'a*'.repeat(700);
+  const q = markdownTree(`> ${bad}`);
+  assert.deepEqual(q.blocks.map((b) => b.t), ['degraded', 'blockquote']);
+  const l = markdownTree(`- ${bad}\n- fine`);
+  assert.deepEqual(l.blocks.map((b) => b.t), ['degraded', 'list']);
+  assert.equal(l.blocks[1].items.length, 2);
+});
+
+test('#1218 cold-2: an escaped 200 KB delimiter run lexes in under 200 ms', () => {
+  const { ms } = timed(() => Lexer.lex('\\*'.repeat(2e5), { gfm: true }));
+  assert.ok(ms < 200, `took ${ms} ms`);
 });
 
 test('#1218 R1218-2: the rest of the document still renders, one notice per degraded passage', () => {

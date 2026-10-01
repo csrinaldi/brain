@@ -395,7 +395,7 @@ test('#1218 R1218-6: with no Worker the page says so, shows the source, and neve
   assert.equal(findAll(row, (n) => n.tagName === 'H3').length, 0);
 });
 
-test('#1218 R1218-2: a degraded passage shows its notice beside its text and the rest still renders', async (t) => {
+test('#1218 R1218-2: a degraded passage shows its notice, then its text as typed, and the rest still renders', async (t) => {
   const bad = 'a*'.repeat(700);
   const dom = await boot({ proposal: `# Title\n\n${bad}\n\nlater **bold**\n` });
   t.after(() => dom.restore());
@@ -404,7 +404,8 @@ test('#1218 R1218-2: a degraded passage shows its notice beside its text and the
   fire(button, 'click');
   await settle();
   assert.ok(NOTE_TEXTS(row).includes('a passage with 700 formatting marks is shown as plain text'));
-  assert.equal(find(row, byClass('md-literal')).textContent, bad);
+  assert.ok(row.textContent.includes(bad), 'the passage is shown as typed');
+  assert.equal(findAll(row, (n) => n.tagName === 'EM').length, 0);
   assert.equal(findAll(row, (n) => n.tagName === 'H3').length, 1);
   assert.equal(findAll(row, (n) => n.tagName === 'STRONG').length, 1);
 });

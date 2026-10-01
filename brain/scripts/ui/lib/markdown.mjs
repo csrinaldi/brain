@@ -142,31 +142,77 @@ export function prescan(body) {
 
 const degradedNotice = (marks) => `a passage with ${marks} formatting marks is shown as plain text`;
 
-function lexBody(body, lex) {
-  // A fresh options object per call: the lexer mutates it and a passed
-  // object REPLACES the defaults, so `gfm` must be explicit (tables, task
-  // items, strikethrough, autolinks).
-  return blocks(lex(body, { gfm: true, breaks: false, pedantic: false }), 0);
+// A fresh options object per call: the lexer mutates it and a passed object
+// REPLACES the defaults, so `gfm` must be explicit (tables, task items,
+// strikethrough, autolinks).
+const lexTokens = (text, lex) => lex(text, { gfm: true, breaks: false, pedantic: false });
+
+// Backslash-escape the openers the pre-scan counts (`*` `_` `~` `[`), plus the
+// backslash itself, so marked reads the passage as literal text and every
+// character shows as typed. `]` stays as written: with no `[` to close it can
+// open nothing, and escaping it measurably slows marked (`\[a\](` x 5e4: 650 ms
+// against 78 ms). The
+// line's own block marker (quote prefix, list bullet) is left alone: the passage
+// keeps its quote or its list item and only its inline marks are neutralized.
+const BLOCK_PREFIX = /^(?: {0,3}> ?)*[ \t]*(?:(?:[-+*]|\d{1,9}[.)])[ \t]+)?/;
+const SPECIAL = /[\\*_~[]/g;
+function escapeLine(line) {
+  const keep = BLOCK_PREFIX.exec(line)[0].length;
+  return line.slice(0, keep) + line.slice(keep).replace(SPECIAL, '\\$&');
 }
 
-// No degraded span: one lex, exactly as before. Otherwise lex the text between
-// the degraded spans on its own and put each degraded span in place.
+// One lex of the whole document, always. A degraded passage is escaped in place
+// first, so the tokenizer runs in linear time on it and every neighbour (a
+// reference definition, a list's other items) is tokenized in its own context.
+// Each degraded passage is announced by a notice block placed before the
+// top-level block that contains it, found by source offset.
 function bodyBlocks(body, lex) {
-  const degraded = prescan(body).filter((span) => span.degraded);
-  if (degraded.length === 0) return lexBody(body, lex);
-  const lines = body.split('\n');
+  const text = body.replace(/\r\n|\r/g, '\n'); // what marked does first; keeps token offsets true
+  const degraded = prescan(text).filter((span) => span.degraded);
+  if (degraded.length === 0) return blocks(lexTokens(text, lex), 0);
+
+  const lines = text.split('\n');
+  const mark = new Set();
+  for (const span of degraded) for (let i = span.from; i < span.to; i++) mark.add(i);
+  const starts = []; // offset in the escaped text of each degraded span's first line, in span order
   const out = [];
-  let cursor = 0;
-  const normal = (to) => {
-    if (to > cursor) out.push(...lexBody(lines.slice(cursor, to).join('\n'), lex));
-  };
-  for (const span of degraded) {
-    normal(span.from);
-    out.push({ t: 'degraded', notice: degradedNotice(span.marks), text: lines.slice(span.from, span.to).join('\n') });
-    cursor = span.to;
+  let offset = 0;
+  let next = 0;
+  for (let i = 0; i < lines.length; i++) {
+    if (next < degraded.length && degraded[next].from === i) starts[next++] = offset;
+    const line = mark.has(i) ? escapeLine(lines[i]) : lines[i];
+    out.push(line);
+    offset += line.length + 1;
   }
-  normal(lines.length);
-  return out;
+  const escaped = out.join('\n');
+  const tokens = lexTokens(escaped, lex);
+
+  const notices = degraded.map((span, k) => ({ at: starts[k], node: { t: 'degraded', notice: degradedNotice(span.marks) } }));
+  const before = new Map(); // token index -> notice nodes announced before it
+  const total = tokens.reduce((sum, token) => sum + (typeof token.raw === 'string' ? token.raw.length : NaN), 0);
+  if (total === escaped.length) {
+    let start = 0;
+    let k = 0; // notices and tokens are both in source order: one merge pass
+    tokens.forEach((token, index) => {
+      const end = start + token.raw.length;
+      while (k < notices.length && notices[k].at < end) before.set(index, [...(before.get(index) ?? []), notices[k++].node]);
+      start = end;
+    });
+  } else {
+    // raw offsets do not add up (a tokenizer that is not marked): announce first
+    before.set(0, notices.map((n) => n.node));
+  }
+  const result = [];
+  let pending = [];
+  tokens.forEach((token, index) => {
+    pending.push(...(before.get(index) ?? []));
+    const node = blockNode(token, 0);
+    if (!node) return;
+    result.push(...pending, node);
+    pending = [];
+  });
+  result.push(...pending);
+  return result;
 }
 
 /**
@@ -194,8 +240,20 @@ export function safeHref(raw) {
 
 const rawText = (token) => String(token.raw ?? token.text ?? '');
 
+// A run of `escape` tokens is one text node: an escaped passage arrives as one
+// token per character, and the page should not carry a node for each.
 function inline(tokens) {
-  return (tokens ?? []).map(inlineNode);
+  const out = [];
+  let prevEscape = false;
+  for (const token of tokens ?? []) {
+    const node = inlineNode(token);
+    const last = out[out.length - 1];
+    const isEscape = token.type === 'escape';
+    if (isEscape && prevEscape && last?.t === 'text') last.text += node.text;
+    else out.push(node);
+    prevEscape = isEscape;
+  }
+  return out;
 }
 
 function inlineNode(token) {

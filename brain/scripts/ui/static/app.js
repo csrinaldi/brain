@@ -1836,9 +1836,8 @@ function renderMdBlocks(parent, blocks) {
         parent.appendChild(el('pre', 'md-frontmatter', block.text));
         break;
       case 'degraded':
-        // A passage the pre-scan refused to tokenize (#1218): announced, then shown as written.
+        // A passage the pre-scan neutralized (#1218): announced here, shown as plain text by the block that follows.
         parent.appendChild(el('p', 'note', block.notice));
-        parent.appendChild(el('p', 'md-literal', block.text ?? ''));
         break;
       default:
         // `literal`, and anything a future tree adds: shown as written, never dropped.
