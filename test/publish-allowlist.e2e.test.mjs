@@ -63,7 +63,7 @@ const MUST_NOT_SHIP = Object.freeze([
  * delivery.mjs and their suites). Organic growth, no bulk. Whether every
  * vendored suite must ship is tracked in #1076.
  */
-const SIZE_CANARY_MB = 9;
+const SIZE_CANARY_MB = 9.2; // 9 -> 9.1 -> 9.2 (#1218): read what was added, +0.07 MB of ui source and suites, no bulk (#1076)
 
 /**
  * The real packed contents — read from the ACTUAL tarball, not from npm's

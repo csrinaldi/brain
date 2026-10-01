@@ -1292,6 +1292,13 @@ body {
 .md-align-right { text-align: right; }
 .md-literal { font-family: var(--font-mono); font-size: 12px; white-space: pre-wrap; color: var(--muted); }
 .md-inert { color: var(--muted); }
+.doc-loading { color: var(--muted); font-style: italic; }
+.md-plain {
+  margin: 8px 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+}
 .md-frontmatter {
   font-family: var(--font-mono);
   font-size: 12px;

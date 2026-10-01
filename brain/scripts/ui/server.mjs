@@ -20,7 +20,7 @@
 // known or unknown.
 
 import { createServer as createHttpServer } from 'node:http';
-import { execFileSync } from 'node:child_process';
+import { gitRun, gitErrorLine } from './git-run.mjs';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -89,7 +89,7 @@ export function createUiServer({
   _setTimeout = setTimeout, _clearTimeout = clearTimeout,
   _recomputeCurrent = null, onServerError = null} = {}) {
   // `opts.maxBuffer` is the only option a caller may pass (#1198): a document read sizes its own buffer.
-  const run = _run ?? ((file, args, opts) => execFileSync(file, args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], ...(opts?.maxBuffer ? { maxBuffer: opts.maxBuffer } : {}) }));
+  const run = _run ?? gitRun(root);
 
   // D1's invariant: `buildSnapshot` NEVER sees a live forge port, only the
   // cache. The server always owns a cache instance so the poller always has
@@ -155,7 +155,7 @@ export function createUiServer({
       const branch = run('git', ['symbolic-ref', '--short', 'HEAD']).trim();
       servedBranch = { ok: true, branch, source: { path: 'HEAD' } };
     } catch (err) {
-      servedBranch = { ok: false, reason: err?.message ?? String(err), source: { path: 'HEAD' } };
+      servedBranch = { ok: false, reason: gitErrorLine(err), source: { path: 'HEAD' } };
     }
     return servedBranch;
   }

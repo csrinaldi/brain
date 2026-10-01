@@ -1,0 +1,598 @@
+---
+status: draft
+issue: 1218
+---
+
+# Spec — sdd-reader-bounded-time (issue 1218)
+
+Capability: `sdd-artifact-reader` (modified; introduced by #1198, not yet archived to `openspec/specs/`). Delta requirements: what MUST be true after this change. The proposal's rulings R1-R6 are binding and are referenced by number. Requirement keywords follow RFC 2119. Requirements that modify an R1198-n requirement say so explicitly; every R1198-n not named here is unchanged.
+
+Scenario grammar: each scenario carries one `WHEN` and one `THEN` line and an optional `GIVEN`, so the UI's spec cards (`ui/lib/spec-cards.mjs`, which keeps only the last `THEN`) render this file in full. A scenario that needs several observable outcomes states them in its single `THEN` line.
+
+Fixed values used throughout (all binding from the rulings):
+
+- Pre-scan thresholds: more than 600 delimiters in one inline span, or a single delimiter run longer than 50.
+- Render budget: 1500 ms.
+- Pre-scan notice: "a passage with N formatting marks is shown as plain text".
+- Timeout notice: "this document was too slow to render (over 1500 ms) and is shown as plain text".
+- Pre-scan delimiters: `*`, `_`, `~`, `[` and `]`, and no other character.
+- Loading text: "rendering the document…".
+- Worker-error notice: "this document could not be rendered and is shown as plain text".
+- No-worker notice: "this browser cannot render this document off the page, so it is shown as plain text".
+- No-branch reason: "no change branch in this clone".
+- Unreadable reason cap: 200 characters.
+
+### R1218-1: A pre-scan degrades pathological inline spans to literal text
+
+`lib/markdown.mjs` MUST run a pure pre-scan over each inline span before marked tokenizes any inline text (R1). A span is an inline run as marked's own block phase produces it: the text of a paragraph, a heading, a table cell, a list item or a paragraph inside a quote or list, exactly as `Lexer#blockTokens` segments the document. The pre-scan MUST obtain the spans by running that block phase (which defers all inline work) and reading the block tree, and MUST NOT re-implement marked's block grammar. Behaviour follows from that: a lazy continuation line joins its paragraph, a thematic break or fenced code belongs to no span, a setext underline makes the paragraph above it a heading, and the lines marked treats as one paragraph are one span. The pre-scan MUST count the delimiter characters, exactly the five characters `*`, `_`, `~`, `[` and `]`, in the span, and the length of the longest run of one repeated delimiter character. A run is a maximal sequence of one delimiter character inside one line, and a newline ends a run. Backtick, `(`, `)`, `<` and `>` MUST NOT be counted. A span MUST be degraded when it holds MORE than 600 delimiters, or when it holds a single run LONGER than 50. A span at exactly 600 delimiters, or with a longest run of exactly 50, MUST NOT be degraded. The counter MUST reset at every span boundary marked draws, so the count is per passage and never per document. Each degraded span is mapped back to its source lines; where a container's lines cannot be mapped, the whole container is one span. If the block phase throws (for example on a very deep quote nest), the whole document MUST be degraded to its source text with the "could not be parsed" notice. The thresholds sit above the measured real maxima (122 delimiters in one span, a run of 7).
+
+This requirement modifies R1198-13: rendering terminates on any input, and the cheap known classes terminate without reaching the worker backstop.
+
+#### Scenario: A span over 600 delimiters is degraded
+- **GIVEN** one paragraph of 601 delimiter characters mixed with text
+- **WHEN** the adapter builds the tree
+- **THEN** the paragraph's content is literal text nodes only and no strong, em, del, code or a element is produced from it
+
+#### Scenario: A span at exactly 600 delimiters is not degraded
+- **GIVEN** one paragraph of exactly 600 delimiter characters with no run longer than 50
+- **WHEN** the adapter builds the tree
+- **THEN** the paragraph is tokenized by marked and the tree carries no pre-scan notice
+
+#### Scenario: A single run longer than 50 is degraded
+- **GIVEN** a paragraph containing a run of 51 `*` characters around a word
+- **WHEN** the adapter builds the tree
+- **THEN** the paragraph is emitted as literal text and carries the pre-scan notice
+
+#### Scenario: A run of exactly 50 is not degraded
+- **GIVEN** a paragraph containing a run of 50 `*` characters
+- **WHEN** the adapter builds the tree
+- **THEN** the paragraph is tokenized by marked and carries no pre-scan notice
+
+#### Scenario: The counter resets at span boundaries
+- **GIVEN** a document of 10 list items, each holding 300 delimiters, so the document holds 3000 delimiters and no single item holds more than 600
+- **WHEN** the adapter builds the tree
+- **THEN** no item is degraded and the tree carries no pre-scan notice
+
+#### Scenario: A table row opens its own span
+- **GIVEN** a table of 10 rows, each row holding 300 delimiters, so the table holds 3000 delimiters and no single row holds more than 600
+- **WHEN** the adapter builds the tree
+- **THEN** no row is degraded and the tree carries no pre-scan notice
+
+#### Scenario: Fenced code is skipped by the pre-scan
+- **GIVEN** a fenced code block holding 700 `*` characters between a fence opener and its closer
+- **WHEN** the adapter builds the tree
+- **THEN** no span is degraded, the tree carries no pre-scan notice and the block renders as code
+
+#### Scenario: Characters outside the five delimiters are not counted
+- **GIVEN** one paragraph of 700 characters drawn from backtick, `(`, `)`, `<` and `>` with no run longer than 50
+- **WHEN** the adapter builds the tree
+- **THEN** the paragraph is tokenized by marked and the tree carries no pre-scan notice
+
+#### Scenario: The pre-scan runs the block phase only and never the inline phase
+- **GIVEN** a 200 KB `*` run
+- **WHEN** `prescan` classifies it
+- **THEN** it returns one degraded span within the render budget, and no inline tokenizing runs in the classification
+
+#### Scenario: A one-line triple-backtick pair is not a fence
+- **GIVEN** the text "```x```", a newline, and 6000 repetitions of `*a `
+- **WHEN** the adapter builds the tree
+- **THEN** the passage is degraded with its notice, within the pre-scan bound (750 ms) (the unfixed rule took 2736 ms and did not degrade)
+
+#### Scenario: A fence indented four spaces is not a fence
+- **GIVEN** a line of four spaces and three backticks, a newline, and 6000 repetitions of `*a `
+- **WHEN** the adapter builds the tree
+- **THEN** the passage is degraded with its notice, within the pre-scan bound (750 ms) (the unfixed rule took 2862 ms and did not degrade)
+
+#### Scenario: A backtick fence whose info string holds a backtick is not a fence
+- **GIVEN** a line of three backticks, `a`, a backtick and `b`, followed by a hazard span
+- **WHEN** `prescan` classifies it
+- **THEN** the hazard span is degraded, while the same line written with tildes opens a fence and skips it
+
+#### Scenario: A closing fence needs the opener's run, at most three spaces and only blanks after it
+- **GIVEN** a fenced block whose candidate closers are a shorter run, a four-space-indented run, a run followed by text, a longer run, and a run followed by spaces
+- **WHEN** `prescan` classifies the text after each candidate
+- **THEN** only the longer run and the run followed by spaces close the fence
+
+#### Scenario: A multi-line quote paragraph is one span
+- **GIVEN** 20 lines, each `> ` followed by 290 repetitions of `*a `
+- **WHEN** the adapter builds the tree
+- **THEN** the 20 lines are one span, which is degraded with its notice within the pre-scan bound (750 ms) (the unfixed rule counted each line alone and took 2392 ms without degrading)
+
+#### Scenario: A quote paragraph ends where marked ends it
+- **GIVEN** quote lines of 400 delimiters each, separated in turn by a lazy line without `>`, a `>`-only line, a blank line, a heading in the quote, a list item in the quote, a plain paragraph before the quote, and a deeper quote
+- **WHEN** `prescan` classifies each
+- **THEN** the lazy line joins the quote paragraph (one degraded span), and every other separator yields spans that are each under the threshold
+
+#### Scenario: A list item and its continuation lines are one span
+- **GIVEN** a list item of 400 delimiters followed by an indented continuation line, or a lazy one, of 400 more
+- **WHEN** `prescan` classifies it
+- **THEN** the item is one span of 800 delimiters and is degraded, while two consecutive items of 400 each are not
+
+### R1218-2: A degraded passage is announced and the rest of the document still renders
+
+The document MUST be tokenized ONCE, as a whole, never in pieces. Before that one lex, every character that the pre-scan counts (`*`, `_`, `~`, `[`, `]`) inside a degraded passage MUST be replaced by a distinct private-use character (the U+E000 block), one for one, and nothing else is substituted: the backslash is NEVER substituted, so an escape such as `\|` keeps its structural meaning (a pipe inside a table cell) and a degraded table row keeps its cells, so the text keeps its length and marked reads the passage as plain text in linear time. After the lex, the originals MUST be restored in every text-bearing field of the token tree (text, code span text, code, link text and href, image alt, raw), so every character shows as typed, including inside a code span and inside an autolink, and an href is unchanged. Backslash escaping is NOT used, because a backslash escape is context-sensitive in CommonMark: it is literal inside a code span and an autolink. The private-use characters MUST be chosen among those the document does not already contain; if the document uses the whole block, the passage MUST be shown as written under its notice and the document as one literal block. Adjacent text nodes in one inline run MUST be merged into one node, so a passage is never one node per mark. A quote prefix, list bullet or task checkbox (`[ ]`, `[x]`, `[X]` right after the bullet) at the start of a passage line MUST be left unsubstituted, so a degraded quote stays a quote, a degraded item stays an item and a degraded task item stays a task item. Substitution MUST NOT change the block structure: the block token types and counts, and where table cells split, are those of the original. A passage degraded by the pre-scan MUST therefore render as literal text, and every other passage of the same document, including a reference definition that a link elsewhere resolves against and the other items of a list that holds the passage, MUST render with its normal elements. A visible notice reading "a passage with N formatting marks is shown as plain text" (R5), where N is the number of delimiter characters (`*`, `_`, `~`, `[` and `]` only) counted in that passage, MUST be placed immediately before the top-level block that contains the passage, located by the passage's source offset. Each degraded passage MUST carry its own notice, so the notice count equals the degraded-passage count. No degradation MUST be silent. This notice is distinct from the timeout notice (R1218-5), because the cause and the scope differ.
+
+#### Scenario: The notice states N
+- **GIVEN** one paragraph of 700 delimiters
+- **WHEN** the document is rendered
+- **THEN** the output contains the text "a passage with 700 formatting marks is shown as plain text"
+
+#### Scenario: Other passages still render
+- **GIVEN** a document with a heading, one degraded paragraph and a later paragraph holding `**bold**`
+- **WHEN** the document is rendered
+- **THEN** the output holds the h1 and one strong element for the later paragraph, and the degraded paragraph appears as literal text after its notice
+
+#### Scenario: Two degraded passages give two notices
+- **GIVEN** a document with two separate paragraphs, each over the threshold
+- **WHEN** the document is rendered
+- **THEN** the output contains exactly two pre-scan notices
+
+#### Scenario: The degraded text is the source, not a dropped passage
+- **GIVEN** a degraded paragraph whose source is known
+- **WHEN** the document is rendered
+- **THEN** the visible text of the passage equals its source characters
+
+#### Scenario: A reference definition after a degraded passage still resolves
+- **GIVEN** the text "see [docs][r]", a blank line, 60 `*` followed by the word x, a blank line and "[r]: https://example.com/x"
+- **WHEN** the adapter builds the tree
+- **THEN** the first paragraph holds a live link to https://example.com/x and the 60-mark passage carries its notice
+
+#### Scenario: A degraded passage inside a list leaves one list
+- **GIVEN** the items "1. one" and "2. two", a blank line, an indented line of 60 `*` followed by the word x, a blank line and "3. three"
+- **WHEN** the adapter builds the tree
+- **THEN** the tree holds one list of three items, the run of `*` shown as literal text inside the second item, and the notice immediately before that list
+
+#### Scenario: The document is lexed once, on placeholder text
+- **GIVEN** the injected tokenize seam recording its calls and a 200 KB `*` run followed by the word x
+- **WHEN** the adapter builds the tree
+- **THEN** the seam is called exactly once, with a text of the same length that holds no `*`
+
+#### Scenario: A numbered line that cannot interrupt a paragraph is part of its span
+- **GIVEN** the line "para start", then 60 lines each of `2. ` followed by 150 repetitions of `*a_`
+- **WHEN** the adapter builds the tree
+- **THEN** the lines are one lazy paragraph span, degraded with its notice within the pre-scan bound (750 ms) (the unfixed rule saw 61 spans, degraded none and took 5966 ms)
+
+#### Scenario: An indented bullet that cannot interrupt a paragraph is part of its span
+- **GIVEN** the line "para start", then 60 lines each of four spaces, `- ` and 150 repetitions of `*a_`
+- **WHEN** the adapter builds the tree
+- **THEN** the lines are one lazy paragraph span, degraded with its notice within the pre-scan bound (750 ms) (the unfixed rule took 6085 ms)
+
+#### Scenario: marked's block segmentation is pinned
+- **GIVEN** a paragraph line followed by `2. ` lines
+- **WHEN** the vendored marked runs its block phase on it
+- **THEN** it returns one paragraph whose inline tokens are still empty, so a marked upgrade that changes this fails a test
+
+#### Scenario: A block phase that throws degrades the whole document
+- **GIVEN** a document of 40000 `> ` prefixes and a word, which overflows marked's recursion
+- **WHEN** the adapter builds the tree
+- **THEN** the tree is one code block holding the source, with the "could not be parsed" notice
+
+#### Scenario: Substitution keeps the whole pipeline linear
+- **GIVEN** a 200 KB `*` run followed by the word x
+- **WHEN** the adapter substitutes, lexes and restores it
+- **THEN** it returns within 750 ms
+
+#### Scenario: A thematic break after a degraded paragraph survives
+- **GIVEN** the word para, 700 repetitions of " a*b", a line `***` and a line "after"
+- **WHEN** the adapter builds the tree
+- **THEN** the block types are the pre-scan notice, a paragraph, an hr and a paragraph holding "after"
+
+#### Scenario: A setext dash underline after a degraded paragraph makes it a heading
+- **GIVEN** the word para, 700 repetitions of " a*b", a line `---` and a line "after"
+- **WHEN** the adapter builds the tree
+- **THEN** the block types are the pre-scan notice, a heading and a paragraph holding "after"
+
+#### Scenario: A setext equals underline after a degraded paragraph makes it a heading
+- **GIVEN** the word para, 700 repetitions of " a*b", a line `===` and a line "after"
+- **WHEN** the adapter builds the tree
+- **THEN** the block types are the pre-scan notice, a heading and a paragraph holding "after"
+
+#### Scenario: A code span in a degraded passage shows what was typed
+- **GIVEN** the line "Use `x_y*z[0]` here." followed by 700 repetitions of " a*b"
+- **WHEN** the adapter builds the tree
+- **THEN** the code span's text is exactly x_y*z[0], with no backslash
+
+#### Scenario: An autolink in a degraded passage keeps its text and its href
+- **GIVEN** the line "<https://example.com/a_b>" followed by 700 repetitions of " a*b"
+- **WHEN** the adapter builds the tree
+- **THEN** the link's text and its href are both exactly https://example.com/a_b
+
+#### Scenario: A document that already uses private-use characters is restored exactly
+- **GIVEN** a degraded line that begins with U+E000, U+E001 and U+E002
+- **WHEN** the adapter builds the tree
+- **THEN** the visible text of the passage equals the source, including those three characters
+
+#### Scenario: A document that uses the whole private-use block is shown as written
+- **GIVEN** a document that contains every character U+E000 to U+F8FF and a degraded passage
+- **WHEN** the adapter builds the tree
+- **THEN** the first block is the pre-scan notice and the last is one literal block holding the source
+
+#### Scenario: A degraded line is a handful of text nodes
+- **GIVEN** a degraded line of 700 repetitions of " a*<b>"
+- **WHEN** the adapter builds the tree
+- **THEN** the paragraph holds at most three nodes
+
+#### Scenario: An escaped pipe in a degraded table row keeps its cell
+- **WHEN** the adapter builds the tree for a table whose body row holds `x \| y` in one cell and 700 repetitions of "*a " in the next
+- **THEN** the row has two cells, the first reads `x | y`, the second reads its text exactly as typed, and the degraded notice is present
+
+#### Scenario: Escaped delimiters in a degraded paragraph render as typed
+- **WHEN** the adapter builds the tree for a paragraph with `\*` and `\[` and 700 repetitions of "*a "
+- **THEN** the paragraph text equals the source, with its backslashes, and the adapter returns within 750 ms
+
+#### Scenario: Substitution keeps the block structure of random documents
+- **WHEN** 1500 generated documents, each with one degraded span among tables, definitions, footnote-like lines, thematic breaks, bullets and task items, are compared with their substituted text
+- **THEN** the block token types, the counts and the table cell splits of the substituted text equal those of the original
+
+#### Scenario: A degraded task item stays a task item
+- **WHEN** the adapter builds the tree for the line "- [ ] " followed by 700 repetitions of "*a "
+- **THEN** the item is a task item, unchecked, and carries its text
+
+### R1218-3: No real artifact is degraded
+
+Every file under `openspec/changes/**` MUST render through the adapter with zero pre-scan degradations (AC1.4). This is asserted by a test over the whole tree, not a sample, so a future marked upgrade or a threshold change that touches a real artifact fails it.
+
+#### Scenario: The whole change tree renders with zero degradations
+- **GIVEN** every markdown file under `openspec/changes/**`, including the archive
+- **WHEN** each is run through the pre-scan
+- **THEN** none yields a degraded span and none carries a pre-scan notice
+
+#### Scenario: The assertion is a real detector
+- **GIVEN** the same test run with one fixture of 601 delimiters added to the file set
+- **WHEN** the test runs
+- **THEN** it fails and names the fixture
+
+### R1218-4: A worker renders each document, one worker per request
+
+`static/app.js` MUST NOT run marked on the main thread when a document is expanded (R6). Each expansion MUST create ONE module Web Worker from `/lib/markdown-worker.mjs`, which imports the same vendored `marked.esm.js` and runs the lexer and the adapter. The worker MUST post its result back as plain data: a tree of objects, arrays, strings, numbers, booleans and null, with no functions, DOM nodes or class instances, so it crosses `postMessage` by structured clone. The worker MUST be terminated as soon as it posts a result, and on timeout (R1218-5) and on error (R1218-6). No worker is shared between rows, so a slow document cannot affect another open row.
+
+The tokenizer calls permitted anywhere are exactly two, both in `lib/markdown.mjs`: the static `Lexer.lex(` and `.blockTokens(` on a `new Lexer(...)` instance. Any other member access on a `Lexer` instance or the class (`inlineTokens`, `lexInline`, an instance `lex`), `Parser`, `Renderer` and `marked(` are refused by the source guard.
+
+This requirement modifies R1198-11: the tokenizer is still the one vendored marked, now also imported by the worker file, and the source guard that forbids `marked.parse` also covers `lib/markdown-worker.mjs`. It modifies R1198-12: the no-`innerHTML` scan also covers the worker file.
+
+#### Scenario: Expanding a row creates one worker
+- **GIVEN** an injected worker factory counting its calls
+- **WHEN** the user expands one document row
+- **THEN** the factory is called exactly once and no marked call runs on the main thread
+
+#### Scenario: Two open rows have two workers
+- **GIVEN** two document rows expanded in turn
+- **WHEN** the second row's worker is created
+- **THEN** the two workers are distinct instances and the first row's worker is not touched
+
+#### Scenario: A result terminates its worker
+- **GIVEN** a worker that posts a tree
+- **WHEN** the result is received
+- **THEN** that worker's `terminate` has been called exactly once
+
+#### Scenario: The posted tree is plain data
+- **GIVEN** the real worker file run under `worker_threads` against a fixture covering every construct in the R1198-6 subset
+- **WHEN** the worker posts its tree
+- **THEN** the received value deep-equals the tree the adapter builds in-process and `structuredClone` of it equals itself
+
+#### Scenario: The worker file imports only the vendored tokenizer
+- **GIVEN** the source of `lib/markdown-worker.mjs`
+- **WHEN** the source guard scans its imports
+- **THEN** the tokenizer import resolves to `ui/vendor/marked.esm.js`, no bare `marked` specifier exists and no `marked.parse` or `innerHTML` appears
+
+#### Scenario: The guard sees instance calls
+- **WHEN** the source guard scans a snippet `new Lexer(o).inlineTokens(x)`, or any other member of a `Lexer` instance but `blockTokens`
+- **THEN** it reports a violation, while `Lexer.lex(` and `new Lexer(o).blockTokens(` pass and the real `lib/markdown.mjs` passes
+
+#### Scenario: The worker file is served
+- **GIVEN** the running UI server
+- **WHEN** `/lib/markdown-worker.mjs` is requested
+- **THEN** the response is 200 with a JavaScript content type
+
+### R1218-5: A document that exceeds 1500 ms renders as announced plain text
+
+The render budget MUST be 1500 ms per document (R2). When a worker has not posted a result within 1500 ms of its creation, `app.js` MUST terminate it and render the WHOLE document as literal text (preformatted, source verbatim) under the notice "this document was too slow to render (over 1500 ms) and is shown as plain text", the number being the budget actually enforced. The main thread MUST NOT be blocked for longer than the budget by any document, because marked runs only in the worker. The timeout MUST degrade only the document that timed out.
+
+This requirement modifies R1198-13: the "pathological nesting terminates within a bounded time" scenario now holds for inline emphasis as well, and the bound is the 1500 ms budget, enforced by the worker rather than assumed of marked.
+
+#### Scenario: A worker that never answers is cut at the budget
+- **GIVEN** an injected worker that never posts and an injected clock and timer
+- **WHEN** the timer advances by 1500 ms
+- **THEN** the worker is terminated and the row shows the timeout notice and the document source as literal text
+
+#### Scenario: A result just inside the budget is accepted
+- **GIVEN** an injected worker that posts a tree at 1499 ms
+- **WHEN** the result is received
+- **THEN** the row shows the rendered elements and no timeout notice
+
+#### Scenario: The timeout notice states the budget enforced
+- **GIVEN** a render with an injected budget of 300 ms and a worker that never answers
+- **WHEN** the 300 ms timer fires
+- **THEN** the timeout outcome carries the budget 300 and its notice reads "over 300 ms"
+
+#### Scenario: The timeout notice wording is exact
+- **GIVEN** a timed-out document
+- **WHEN** the row is rendered
+- **THEN** the row text contains "this document was too slow to render (over 1500 ms) and is shown as plain text" and differs from the pre-scan notice
+
+#### Scenario: The fallback is the whole document verbatim
+- **GIVEN** a timed-out document with a heading and a table
+- **WHEN** the row is rendered
+- **THEN** the visible text equals the document source and no h1 or table element exists in the row
+
+#### Scenario: One timeout does not touch another row
+- **GIVEN** two expanded rows, the first with a worker that never answers and the second with a worker that answers
+- **WHEN** the first row times out
+- **THEN** the second row keeps its rendered elements and its worker is unaffected
+
+#### Scenario: The 200 KB emphasis input is bounded
+- **GIVEN** the 200 KB input of `*`x1e5 + `a` + `*`x1e5 and the real worker file under `worker_threads` with a 1500 ms budget
+- **WHEN** the document is rendered through the pre-scan and the worker
+- **THEN** the pre-scan degrades the passage with its notice, and the worker round trip completes without reaching the timeout
+
+#### Scenario: A link-backtracking input is bounded by the worker
+- **GIVEN** the 200 KB input `[a](` repeated 50000 times, which the pre-scan counts as over 600 delimiters or hands to the worker
+- **WHEN** the document is rendered
+- **THEN** it either shows the pre-scan notice or the timeout notice within 1500 ms plus teardown, and the main thread is never blocked
+
+#### Scenario: A deep block quote is bounded
+- **GIVEN** an input of 262000 `>` characters
+- **WHEN** the document is rendered
+- **THEN** the row shows the timeout notice as plain text, or the rendered tree if the worker finishes under budget, and the main thread is never blocked
+
+#### Scenario: A deeply nested list is bounded
+- **GIVEN** an input of 700 nested list indents
+- **WHEN** the document is rendered
+- **THEN** the row shows the rendered tree, which the real worker returns in about 197 ms, and the main thread is never blocked
+
+#### Scenario: Timing is testable through the injected seam
+- **GIVEN** `app.js` loaded with an injected async tokenize and an injected timer in the fake DOM
+- **WHEN** a never-resolving tokenize is expanded and the timer is advanced by 1500 ms
+- **THEN** the timeout path runs with no real waiting and no `Worker` global
+
+### R1218-6: A worker failure or a missing worker is announced and not silent
+
+A worker that raises an error event, throws on construction, or posts a message of an unrecognized shape MUST be treated as a failed render, not as a timeout. `app.js` MUST terminate the worker and render the whole document as literal text under the notice "this document could not be rendered and is shown as plain text". This wording differs from the timeout notice on purpose, because "too slow" would misstate the cause. A `RangeError` raised inside the worker (the stack overflow of the measured `>` and `*` inputs) is such an error.
+
+When no `Worker` is available in the browser (`typeof Worker` is not a function), the outcome is `unavailable`, which is distinct from a failed render. `app.js` MUST render the whole document as literal text under the notice "this browser cannot render this document off the page, so it is shown as plain text". There MUST NOT be a main-thread marked call as a fallback, because that would reopen the freeze.
+
+#### Scenario: A worker error shows its own notice
+- **GIVEN** an injected worker that raises an error event
+- **WHEN** the error is received
+- **THEN** the row shows the notice "this document could not be rendered and is shown as plain text" and the document source as literal text
+
+#### Scenario: A worker that cannot be constructed fails said
+- **GIVEN** an injected worker factory that throws
+- **WHEN** the user expands a row
+- **THEN** the row shows the worker-error notice and no exception escapes `app.js`
+
+#### Scenario: A malformed message is an error
+- **GIVEN** an injected worker that posts a value that is not a tree
+- **WHEN** the message is received
+- **THEN** the worker is terminated and the row shows the worker-error notice
+
+#### Scenario: No Worker available shows its own notice
+- **GIVEN** a browser environment where `Worker` is undefined
+- **WHEN** the user expands a row
+- **THEN** the row shows the notice "this browser cannot render this document off the page, so it is shown as plain text" and the document source as literal text, with no marked call on the main thread and no worker-error notice
+
+#### Scenario: An error terminates its worker
+- **GIVEN** an injected worker that raises an error event
+- **WHEN** the error is received
+- **THEN** that worker's `terminate` has been called exactly once
+
+### R1218-7: Expanding a row shows a loading state and drops stale results
+
+Between expanding a row and receiving a result, the row MUST show a loading state (a visible "rendering the document…" line) and MUST NOT show an empty body. Each expansion MUST carry a token. A result, timeout or error whose token is not the row's current token MUST be discarded and MUST NOT change the DOM, including after a collapse and re-expand, after a collapse with no re-expand, and after a result that arrives for a closed row. A discarded request's worker MUST still be terminated.
+
+A `failed`, `unavailable` or `timeout` outcome MUST be sticky for its document stamp across any re-render that is not a user action (a stream frame, a tab switch, a drawer rebuild): the cached outcome is shown, no worker is started and no loading line appears. The explicit retry is a user collapse followed by a re-expand of that row: collapsing a row whose outcome is `failed`, `unavailable` or `timeout` evicts it, so the next expansion requests the render again. A `tree` outcome stays cached. The budget timer starts before the worker is created and so includes worker startup (D21); a cold start that times out is retried by the same collapse and re-expand.
+
+This requirement modifies R1198-1: a stage row still expands in place to its document, now asynchronously.
+
+#### Scenario: The loading state is visible while rendering
+- **GIVEN** an injected tokenize that has not resolved
+- **WHEN** the user expands a row
+- **THEN** the row shows the loading line "rendering the document…" and holds no document body
+
+#### Scenario: A result replaces the loading state
+- **GIVEN** an expanded row showing the loading line
+- **WHEN** the tokenize resolves with a tree
+- **THEN** the loading line is gone and the rendered elements are shown
+
+#### Scenario: A stale result after re-expand is dropped
+- **GIVEN** a row expanded, collapsed and expanded again, with the first request still pending
+- **WHEN** the first request resolves after the second
+- **THEN** the row shows the second request's result and the first result is not rendered
+
+#### Scenario: A result for a collapsed row is dropped
+- **GIVEN** a row expanded and then collapsed with its request pending
+- **WHEN** the request resolves
+- **THEN** the collapsed row's DOM is unchanged and the request's worker has been terminated
+
+#### Scenario: Result order does not matter
+- **GIVEN** two requests for one row, the second resolving before the first
+- **WHEN** the first then resolves
+- **THEN** the DOM still shows only the second request's result
+
+#### Scenario: A stale timeout is dropped
+- **GIVEN** a row re-expanded while the first request's timer is pending
+- **WHEN** the first timer fires
+- **THEN** the row does not show the timeout notice
+
+#### Scenario: A failed document stays across stream frames
+- **GIVEN** an expanded row whose render outcome is `failed`
+- **WHEN** three stream frames re-render the drawer
+- **THEN** no worker was started after the first, the failed notice persists and no loading line appeared
+
+#### Scenario: An unavailable document stays across stream frames
+- **GIVEN** an expanded row whose render outcome is `unavailable` because there is no `Worker`
+- **WHEN** three stream frames re-render the drawer
+- **THEN** no render was requested after the first, the unavailable notice persists and no loading line appeared
+
+#### Scenario: A timed-out document stays across stream frames
+- **GIVEN** an expanded row whose render outcome is `timeout`
+- **WHEN** three stream frames re-render the drawer
+- **THEN** no worker was started after the first, the timeout notice persists and no loading line appeared
+
+#### Scenario: A collapse and re-expand retries a failed document
+- **GIVEN** an expanded row whose render outcome is `failed`
+- **WHEN** the user collapses the row and expands it again
+- **THEN** a second worker is started for the document
+
+#### Scenario: A collapse and re-expand retries a timed-out document
+- **GIVEN** an expanded row whose render outcome is `timeout`
+- **WHEN** the user collapses the row and expands it again
+- **THEN** a second worker is started and its answer is rendered
+
+#### Scenario: A collapse and re-expand retries an unavailable document
+- **GIVEN** an expanded row whose render outcome is `unavailable`
+- **WHEN** the user collapses the row and expands it again
+- **THEN** the render is requested a second time
+
+### R1218-8: A clone with no change branch is `missing`, not `unreadable`
+
+When `resolveBranch` finds no change branch in the clone, `readResumeDocument` MUST return `state: 'missing'` with the reason "no change branch in this clone" (R3). No new state is added: the four states of R1198-2 stay `present`, `missing`, `unreadable` and `truncated`. A real failure of `git branch --list` (a non-zero exit, a spawn error) MUST stay `unreadable` and MUST carry the failure reason (R1218-10). When no ref resolved (an ambiguous branch or a git failure), the shared wording MUST say "the change branch could not be resolved: <reason>", never "could not be read at the change branch", because no ref was read. The SDD row and the Working memory tab MUST show the same wording for the no-branch case, both derived from one constant rather than two strings.
+
+This requirement modifies R1198-2: the "missing" state now also covers a change whose branch is absent from the clone, and `missing` and `unreadable` still MUST NOT share wording.
+
+#### Scenario: No change branch yields missing
+- **GIVEN** a clone where the change's branch does not exist locally
+- **WHEN** the change view is built
+- **THEN** the `resume` document has state `missing` and reason "no change branch in this clone"
+
+#### Scenario: A branch listing failure stays unreadable
+- **GIVEN** a `git branch --list` that exits non-zero
+- **WHEN** the change view is built
+- **THEN** the `resume` document has state `unreadable` and carries the failure reason
+
+#### Scenario: An unresolved branch says it could not be resolved
+- **GIVEN** a change whose branch listing is ambiguous or whose `git branch --list` failed
+- **WHEN** the SDD row and the Working memory tab are both rendered
+- **THEN** both read "resume.md: the change branch could not be resolved: <reason>" and the state stays `unreadable`
+
+#### Scenario: The SDD row and the Working memory tab share the wording
+- **GIVEN** a change with no branch in the clone
+- **WHEN** the SDD row and the Working memory tab are both rendered
+- **THEN** both contain the exact text "no change branch in this clone" and neither contains the unreadable wording
+
+#### Scenario: The wording has one source
+- **GIVEN** the sources of `change-route.mjs` and `lib/drawer-model.mjs`
+- **WHEN** a guard scans for the literal "no change branch in this clone"
+- **THEN** it appears in exactly one module and the other imports it
+
+#### Scenario: A deleted change branch is missing
+- **GIVEN** a real temporary git repository where the change branch was created and then deleted
+- **WHEN** the change view is built
+- **THEN** the `resume` document has state `missing` and the reason is the no-branch wording
+
+### R1218-9: One shared `run` helper pipes stderr
+
+The default command runner MUST exist once. `server.mjs`, `change-route.mjs` and `watcher.mjs` MUST use the same helper, `gitRun(root)` in `brain/scripts/ui/git-run.mjs`, which MUST spawn with stderr piped (`stdio` of `['ignore', 'pipe', 'pipe']`) so a failure's `err.stderr` holds git's message (R4). The three duplicate default `run` definitions (`server.mjs`, `change-route.mjs` and `watcher.mjs`) MUST be removed. A guard test MUST fail if `child_process` is imported anywhere under `brain/scripts/ui/` other than in `git-run.mjs` (tests and `vendor/` excluded), so a second default runner cannot reappear.
+
+#### Scenario: A failing command exposes its stderr
+- **GIVEN** the shared helper run against `git rev-parse` of a revision that does not exist
+- **WHEN** the command fails
+- **THEN** the thrown error's `stderr` contains git's message, such as "fatal: Needed a single revision"
+
+#### Scenario: All three consumers import the same helper
+- **GIVEN** the sources of `server.mjs`, `change-route.mjs` and `watcher.mjs`
+- **WHEN** their imports are scanned
+- **THEN** all three use `gitRun` from `git-run.mjs` and none defines its own default runner
+
+#### Scenario: A duplicate default run fails the guard
+- **GIVEN** a copy of `change-route.mjs` that imports `child_process` and defines a local default `run` using `execFileSync`
+- **WHEN** the guard scans `brain/scripts/ui/`
+- **THEN** the guard fails and names the file
+
+#### Scenario: The guard passes on the real tree
+- **GIVEN** the real `brain/scripts/ui/` sources
+- **WHEN** the guard scans for `child_process` imports
+- **THEN** `child_process` appears only in `git-run.mjs`
+
+### R1218-10: The unreadable reason is one cause line from git's stderr, capped
+
+`gitErrorLine`, exported from `brain/scripts/ui/git-run.mjs`, MUST return the cause of a failure, not the command that failed (R4). It MUST select ONE line from the error's stderr: the first line starting with `fatal:` or `error:`; otherwise the first non-empty line of stderr; otherwise, when the error carries no stderr, the first line of the error's message. The selected line MUST be trimmed and capped at 200 characters in total. A line cut by the cap MUST end with the ellipsis `…` within that 200. The reason MUST NOT contain a newline.
+
+#### Scenario: Stderr becomes the reason
+- **GIVEN** an error whose stderr is "fatal: Needed a single revision\n"
+- **WHEN** `gitErrorLine` runs
+- **THEN** it returns "fatal: Needed a single revision" with no trailing newline
+
+#### Scenario: The fatal or error line wins over earlier lines
+- **GIVEN** an error whose stderr is "hint: something\nfatal: bad revision\nhint: more"
+- **WHEN** `gitErrorLine` runs
+- **THEN** it returns "fatal: bad revision" and the result holds no newline
+
+#### Scenario: Without a fatal or error line the first non-empty line is used
+- **GIVEN** an error whose stderr is "\n\nwarning: first\nsecond\n"
+- **WHEN** `gitErrorLine` runs
+- **THEN** it returns "warning: first"
+
+#### Scenario: A long line is capped
+- **GIVEN** an error whose stderr is a single line of 500 characters
+- **WHEN** `gitErrorLine` runs
+- **THEN** the result is exactly 200 characters and ends with an ellipsis
+
+#### Scenario: A line at exactly 200 characters is not cut
+- **GIVEN** an error whose stderr is exactly 200 characters on one line
+- **WHEN** `gitErrorLine` runs
+- **THEN** the result equals the stderr and carries no ellipsis
+
+#### Scenario: A missing stderr falls back to the message
+- **GIVEN** a plain `Error` whose message is "boom\nsecond line" and no `stderr` property, as `fakeGit({fail})` throws
+- **WHEN** `gitErrorLine` runs
+- **THEN** it returns "boom", the first message line trimmed
+
+#### Scenario: A remote-only headBranch names the cause
+- **GIVEN** a real temporary git repository whose `headBranch` exists only as a remote ref
+- **WHEN** the change view is built and the `resume` document is read
+- **THEN** the document is `unreadable` and its reason contains git's message about the missing revision and not only the name of the command
+
+### R1218-11: The documented state set and the existing reader contract are otherwise unchanged
+
+No new document state, tab, route, dependency or marked version is introduced. The tab set of R1198-1, the four states of R1198-2, the 262144-byte cap of R1198-3, the stamp of R1198-5, the link and HTML rules of R1198-7 to R1198-10 and the dependency rule of R1198-17 MUST hold unchanged. `package.json` MUST NOT gain any dependency entry, and `vendor/VERSIONS` MUST still record `marked@18.0.14` with an unchanged sha256.
+
+#### Scenario: The vendored tokenizer is untouched
+- **GIVEN** `vendor/VERSIONS` and the vendored `marked.esm.js`
+- **WHEN** the drift test of R1198-11 runs
+- **THEN** it passes with the original version and hash
+
+#### Scenario: Dependencies are unchanged
+- **GIVEN** `package.json` before and after the change
+- **WHEN** their dependency sections are compared
+- **THEN** the sections are equal
+
+#### Scenario: The tab set is unchanged
+- **GIVEN** the change view built for a change
+- **WHEN** its tab keys are read
+- **THEN** they are spec, sdd, tasks, workingMemory, reviews and records
+
+## Out of scope
+
+- Changing marked's version, or patching the vendored file.
+- An LLM, or any non-deterministic rendering.
+- A file-serving route for repo files.
+- #883's uncommitted overlay: no working-tree or index content is read or shown.
+- A new document state: the no-branch case reuses `missing`.
+- A worker pool or a reused worker across requests. R6 allows reuse only if the worker is discarded on every timeout, and this spec requires one worker per request.
+- A user-visible setting for the thresholds or the budget.
+- Changing the 256 KB document cap of R1198-3.
+- Fixing `RangeError` paths inside marked itself: they are caught and announced, not repaired.
+
+## Traceability
+
+| Source | Requirement IDs |
+|---|---|
+| Intent 1 (a pathological inline span freezes the page) | R1218-1, R1218-4, R1218-5 |
+| Intent 2 (no change branch is not `unreadable`) | R1218-8 |
+| Intent 3 (the unreadable reason names the cause) | R1218-9, R1218-10 |
+| AC1.1 (main thread never blocked over 1500 ms, worker terminated at the budget) | R1218-4, R1218-5 |
+| AC1.2 (every degraded render shows a notice, including a missing worker) | R1218-2, R1218-5, R1218-6 |
+| AC1.3 (200 KB emphasis, `>` and nesting tests fail before and pass after) | R1218-5, R1218-1 |
+| AC1.4 (zero degradations over real artifacts) | R1218-3 |
+| AC2 (missing with the no-branch wording in both places; listing failure stays unreadable) | R1218-8 |
+| AC3 (stderr reason, remote-only headBranch test, one `run` helper for server, change-route and watcher) | R1218-9, R1218-10 |
+| R1 (pre-scan thresholds, worker backstop) | R1218-1, R1218-2, R1218-4 |
+| R2 (1500 ms budget, whole-document literal fallback, async render with loading text "rendering the document…", stale results) | R1218-5, R1218-7 |
+| R3 (`missing`, "no change branch in this clone", shared wording) | R1218-8 |
+| R4 (one `run` piping stderr, `gitErrorLine` one capped cause line) | R1218-9, R1218-10 |
+| R5 (distinct pre-scan notice, one passage) | R1218-2, R1218-5 |
+| R6 (one worker per request, terminated on result or timeout) | R1218-4, R1218-5, R1218-7 |
+| Modified R1198-13 (bounded time now covers inline emphasis) | R1218-1, R1218-5 |
+| Modified R1198-1, R1198-2, R1198-11, R1198-12 | R1218-7, R1218-8, R1218-4 |
+| Unchanged contract (no dependency, no new state) | R1218-11 |

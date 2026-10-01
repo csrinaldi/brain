@@ -431,7 +431,7 @@ test('#1059: the panel\'s SDD tab names the file of every stage, present or miss
 
   const tabs = find(dom.mounts.drawer, byClass('tabs'));
   assert.ok(tabs, 'the panel has its tab bar');
-  const sddTab = tabs.childNodes.find((b) => b.textContent.includes('SDD'));
+  const sddTab = Array.from(tabs.childNodes).find((b) => b.textContent.includes('SDD'));
   assert.ok(sddTab, 'and an SDD tab');
   fire(sddTab, 'click');
   await settle();

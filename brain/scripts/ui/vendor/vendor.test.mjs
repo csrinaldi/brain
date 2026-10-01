@@ -52,3 +52,9 @@ test('#1198: the vendored file reaches no network, no global and no DOM', () => 
     assert.ok(!text.includes(needle), `marked.esm.js contains ${needle}`);
   }
 });
+
+test('#1218 R1218-11: the tokenizer is still the one pinned at #1198 — marked 18.0.14, same bytes', () => {
+  const versions = readFileSync(join(VENDOR_DIR, 'VERSIONS'), 'utf8');
+  assert.match(versions, /^marked 18\.0\.14 sha256:528a1b88bef88fc27277e06036ce7f4afb6a220b18110ba57c09e292b24a7ce0 marked\.esm\.js$/m);
+  assert.equal(sha256(readFileSync(join(VENDOR_DIR, FILE))), '528a1b88bef88fc27277e06036ce7f4afb6a220b18110ba57c09e292b24a7ce0');
+});

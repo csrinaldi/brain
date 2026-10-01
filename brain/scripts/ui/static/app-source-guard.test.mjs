@@ -165,7 +165,7 @@ test('#1198: an injected lib/markdown.mjs that assigns innerHTML is caught and n
 // global here, never to loosen the rule.
 const PLATFORM_GLOBALS = new Set([
   'fetch', 'setInterval', 'clearInterval', 'setTimeout', 'clearTimeout',
-  'EventSource', 'Error', 'Object', 'Array', 'Number', 'String', 'Boolean',
+  'EventSource', 'Worker', 'Error', 'Object', 'Array', 'Number', 'String', 'Boolean',
   'Math', 'JSON', 'Date', 'Map', 'Set', 'Promise', 'RegExp', 'Symbol',
   'parseInt', 'parseFloat', 'isNaN', 'isFinite',
   'encodeURIComponent', 'decodeURIComponent', 'structuredClone',
@@ -224,4 +224,25 @@ test('#1059: every function app.js calls is really defined — a ReferenceError 
 
   assert.deepEqual([...unknown].sort(), [],
     'these names are called in app.js but never defined, imported or bound — each one throws a ReferenceError the moment its branch runs');
+});
+
+// ── #1218: the one worker the page spawns ──
+
+const WORKER_SPAWN = /new Worker\('\/lib\/markdown-worker\.mjs', \{ type: 'module' \}\)/g;
+
+test('#1218 R1218-4: app.js spawns exactly one markdown worker, as a module, and that file exists', () => {
+  const text = read(APP_JS);
+  assert.equal(text.match(/new Worker\(/g)?.length, 1, 'the page creates workers in one place');
+  assert.equal(text.match(WORKER_SPAWN)?.length, 1);
+  assert.ok(existsSync(join(LIB_DIR, 'markdown-worker.mjs')));
+});
+
+test('#1218 R1218-4: the markup-sink scan names an injected sink in the render budget or the worker file, and reads both real files', () => {
+  const evil = {
+    'lib/render-budget.mjs': 'export const f = (el, s) => { el.innerHTML = s; };',
+    'lib/markdown-worker.mjs': 'self.document.write(s);',
+  };
+  assert.deepEqual(libMarkupSinks(evil), ['lib/render-budget.mjs', 'lib/markdown-worker.mjs']);
+  const names = readdirSync(LIB_DIR).filter((n) => n.endsWith('.mjs') && !n.endsWith('.test.mjs'));
+  assert.ok(names.includes('render-budget.mjs') && names.includes('markdown-worker.mjs'), 'the directory scan above reaches both');
 });

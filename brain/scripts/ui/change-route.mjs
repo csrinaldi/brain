@@ -18,11 +18,11 @@
 // present blob with `cat-file`; `resume.md` is read at the change branch's
 // tip. `spec.md` and `tasks.md` are read ONCE, and the spec cards and the
 // tasks checklist are derived from that same string (AC7). Everything runs
-// `git` on the served root's OWN git dir via a plain `execFileSync`/injected
+// `git` on the served root's OWN git dir via the shared `gitRun`/injected
 // `_run` — never `git -C <worktree>`. `HEAD` is mandatory in the blame argv
 // for the same reason: the committed version, never the index or the copy.
 
-import { execFileSync } from 'node:child_process';
+import { gitRun, gitErrorLine } from './git-run.mjs';
 
 import { parseSpecCards } from './lib/spec-cards.mjs';
 import { parseTasksList } from './lib/tasks-list.mjs';
@@ -31,7 +31,7 @@ import { shapeResumeView } from './lib/resume-view.mjs';
 import { parseFrontmatter } from '../memory/lib/resume-frontmatter.mjs';
 import { LIFECYCLE_STAGES, ARTEFACT_FILE } from '../lib/sdd-layout.mjs';
 import { prUrl } from './lib/forge-url.mjs';
-import { documentWording } from './lib/drawer-model.mjs';
+import { documentWording, NO_CHANGE_BRANCH } from './lib/drawer-model.mjs';
 
 /** D14's caveat, verbatim in the UI, until #880 lands `type: review` records. */
 export const REVIEWS_SOURCE_NOTE = 'forge comments until #880 lands';
@@ -105,7 +105,7 @@ function buildTasksTab({ documents, head, run, dir, issue }) {
     const blameText = run('git', ['blame', '--porcelain', 'HEAD', '--', path]);
     blame = parseBlame({ text: blameText });
   } catch (err) {
-    blame = { ok: false, reason: err?.message ?? String(err) };
+    blame = { ok: false, reason: gitErrorLine(err) };
   }
 
   const attribution = blame.ok
@@ -131,18 +131,18 @@ function resolveBranch({ run, snapshot, issue }) {
   try {
     listed = run('git', ['branch', '--list', `feat/issue-${issue}-*`]);
   } catch (err) {
-    return { ok: false, reason: `git branch --list failed: ${err?.message ?? err}` };
+    return { ok: false, kind: 'failed', reason: `git branch --list failed: ${gitErrorLine(err)}` };
   }
   const names = listed.split(/\r?\n/).map((l) => l.replace(/^\*?\s+/, '').trim()).filter(Boolean);
-  if (names.length === 0) return { ok: false, reason: `no open PR and no feat/issue-${issue}-* branch in this clone` };
-  if (names.length > 1) return { ok: false, reason: `more than one feat/issue-${issue}-* branch in this clone: ${names.join(', ')}` };
+  if (names.length === 0) return { ok: false, kind: 'none', reason: `no open PR and no feat/issue-${issue}-* branch in this clone` };
+  if (names.length > 1) return { ok: false, kind: 'ambiguous', reason: `more than one feat/issue-${issue}-* branch in this clone: ${names.join(', ')}` };
   return { ok: true, branch: names[0] };
 }
 
 function buildWorkingMemoryTab({ resolved, resume }) {
-  if (!resolved.ok) return { ok: false, reason: resolved.reason };
-  const { branch } = resolved;
   // Derived from the one resume document so this tab and the SDD row cannot disagree.
+  if (!resolved.ok) return { ok: false, reason: documentWording(resume) };
+  const { branch } = resolved;
   if (resume.state === 'unreadable') return { ok: false, reason: documentWording(resume) };
   if (resume.state !== 'present' && resume.state !== 'truncated') {
     return { ok: false, reason: `no committed resume.md on ${branch}; the local overlay arrives in slice 5 (#883)` };
@@ -220,7 +220,6 @@ const READ_HEADROOM = 4096;
 /** The six documents read at HEAD, keyed by their stage name. `archive` is a stage, not a document. */
 const HEAD_DOCUMENT_KEYS = SDD_STAGES.filter((stage) => stage !== 'archive');
 
-const errReason = (err) => String(err?.message ?? err).trim();
 
 function documentEntry(path, ref, fields) {
   return { path, ref, commit: null, state: 'missing', text: null, bytes: null, truncated: false, truncatedAt: null, reason: null, note: null, ...fields };
@@ -262,7 +261,7 @@ function documentFromEntry({ path, ref, commit, entry, read }) {
   try {
     text = String(read(entry.size + READ_HEADROOM) ?? '');
   } catch (err) {
-    return refuse(errReason(err));
+    return refuse(gitErrorLine(err));
   }
   const cut = capText(text);
   return documentEntry(path, ref, {
@@ -287,7 +286,7 @@ function readHeadDocuments({ run, dir }) {
     head = String(run('git', ['rev-parse', '--verify', 'HEAD^{commit}'])).trim();
     tree = parseTreeListing(run('git', ['--literal-pathspecs', 'ls-tree', '-l', '-z', head, '--', ...paths]));
   } catch (err) {
-    const reason = errReason(err);
+    const reason = gitErrorLine(err);
     return { head: null, documents: Object.fromEntries(HEAD_DOCUMENT_KEYS.map((k, i) => [k, documentEntry(paths[i], 'HEAD', { state: 'unreadable', reason })])) };
   }
   const documents = {};
@@ -306,10 +305,11 @@ function readHeadDocuments({ run, dir }) {
  * ONCE; the tree is listed at that commit and the blob read by its sha, so the
  * stamp names the commit the text came from even if the branch advances
  * meanwhile. `ls-tree` tells "no such file" from "could not read" without
- * parsing stderr, which the `run` seam discards.
+ * parsing stderr: stderr feeds only the reason line (`gitErrorLine`).
  */
 function readResumeDocument({ run, resolved }) {
   const path = 'resume.md';
+  if (!resolved.ok && resolved.kind === 'none') return documentEntry(path, null, { state: 'missing', reason: NO_CHANGE_BRANCH });
   if (!resolved.ok) return documentEntry(path, null, { state: 'unreadable', reason: resolved.reason });
   const { branch } = resolved;
   try {
@@ -318,7 +318,7 @@ function readResumeDocument({ run, resolved }) {
     const entry = tree.get(path);
     return documentFromEntry({ path, ref: branch, commit, entry, read: (maxBuffer) => run('git', ['cat-file', 'blob', entry.sha], { maxBuffer }) });
   } catch (err) {
-    return documentEntry(path, branch, { state: 'unreadable', reason: errReason(err) });
+    return documentEntry(path, branch, { state: 'unreadable', reason: gitErrorLine(err) });
   }
 }
 
@@ -424,7 +424,7 @@ export function buildChangeView({ root, issue, snapshot, project = null, _read, 
 
   // `_read` is accepted for signature parity and unused: no artifact is read from a working tree (#1198).
   void _read;
-  const run = _run ?? ((file, args, opts) => execFileSync(file, args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], ...(opts?.maxBuffer ? { maxBuffer: opts.maxBuffer } : {}) }));
+  const run = _run ?? gitRun(root);
 
   const dir = findChangeDir(snapshot, issue);
   const { head, documents: headDocuments } = readHeadDocuments({ run, dir });

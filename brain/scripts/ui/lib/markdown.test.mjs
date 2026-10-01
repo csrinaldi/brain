@@ -103,7 +103,7 @@ test('#1198 R1198-6: a hard line break maps to its own br element', () => {
 
 test('#1198 R6: an image is its alt text and never carries the URL', () => {
   const tree = markdownTree('![architecture diagram](https://a.example/x.png) and ![](u)');
-  assert.deepEqual(tree.blocks[0].children.filter((k) => k.t === 'text').map((k) => k.text), ['[image: architecture diagram]', ' and ', '[image: ]']);
+  assert.deepEqual(tree.blocks[0].children.filter((k) => k.t === 'text').map((k) => k.text), ['[image: architecture diagram] and [image: ]'], 'adjacent text is one node');
   assert.ok(!JSON.stringify(tree).includes('a.example'));
   assert.ok(!JSON.stringify(tree).includes('"u"'));
 });
@@ -322,4 +322,651 @@ test('#1198 XSS fixture: no node carries an href but an http(s) one, and the scr
   assert.ok(all.includes('<style>'));
   assert.ok(!JSON.stringify(tree).includes('"t":"image"'));
   assert.ok(!hrefs.some((h) => /evil\.example/.test(h)), 'credentials and protocol-relative links are never live');
+});
+
+// ── #1218 pre-scan: pathological inline spans degrade to announced plain text ──
+
+import { prescan } from './markdown.mjs';
+import { Lexer } from '../vendor/marked.esm.js';
+
+const NOTICE = (n) => `a passage with ${n} formatting marks is shown as plain text`;
+const degradedBlocks = (tree) => tree.blocks.filter((b) => b.t === 'degraded');
+const timed = (fn) => {
+  const t0 = performance.now();
+  const value = fn();
+  return { value, ms: performance.now() - t0 };
+};
+
+// The pre-scan degrades a hazard by substituting same-length placeholders, and the document is then lexed
+// ONCE so its neighbours render intact (cold-2). That lex is linear but not free:
+// about 100 ms locally and about 230 ms on a CI runner for 200 KB. The bound sits
+// at half the 1500 ms worker budget, 15x under the 11 s freeze it replaced.
+const PRESCAN_BOUND_MS = 750;
+
+test(`#1218 R1218-1: a 200 KB emphasis run degrades to one passage carrying the N-marks notice, in under ${PRESCAN_BOUND_MS} ms`, () => {
+  const input = '*'.repeat(1e5) + 'a' + '*'.repeat(1e5);
+  const { value, ms } = timed(() => markdownTree(input));
+  const degraded = degradedBlocks(value);
+  assert.equal(degraded.length, 1);
+  assert.equal(degraded[0].notice, NOTICE(2e5));
+  assert.ok(ms < PRESCAN_BOUND_MS, `took ${ms} ms`);
+});
+
+test(`#1218 R1218-1: every known pathological class degrades in under ${PRESCAN_BOUND_MS} ms`, () => {
+  const inputs = {
+    underscores: `${'_'.repeat(2e5)}x`,
+    'bold openers': '**a '.repeat(5000),
+    'em openers': '_a '.repeat(5000),
+    'mixed delimiters': '*a_b~'.repeat(4e4),
+    'link openers': '[a]('.repeat(5e4),
+  };
+  for (const [name, input] of Object.entries(inputs)) {
+    const { value, ms } = timed(() => markdownTree(input));
+    assert.equal(degradedBlocks(value).length, 1, `${name} not degraded`);
+    assert.ok(ms < PRESCAN_BOUND_MS, `${name} took ${ms} ms`);
+  }
+});
+
+test('#1218 R1218-1: 601 delimiters degrade, exactly 600 do not', () => {
+  assert.equal(degradedBlocks(markdownTree('a*'.repeat(601))).length, 1);
+  assert.equal(degradedBlocks(markdownTree('a*'.repeat(600))).length, 0);
+});
+
+test('#1218 R1218-1: a run of 51 degrades, a run of exactly 50 does not', () => {
+  assert.equal(degradedBlocks(markdownTree(`${'*'.repeat(51)}word${'*'.repeat(51)}`)).length, 1);
+  assert.equal(degradedBlocks(markdownTree(`${'*'.repeat(50)}word`)).length, 0);
+});
+
+test('#1218 R1218-1: only * _ ~ [ ] are counted', () => {
+  const input = 'x' + '`()<>'.repeat(140);
+  assert.equal(degradedBlocks(markdownTree(input)).length, 0);
+  assert.equal(prescan(input).filter((s) => s.degraded).length, 0);
+});
+
+test('#1218 R1218-1: prescan classifies a 200 KB run on its own, and the tokenizer sees it substituted, once', () => {
+  const input = `${'*'.repeat(2e5)}x`;
+  const spans = prescan(input);
+  assert.equal(spans.length, 1);
+  assert.equal(spans[0].degraded, true);
+  assert.equal(spans[0].marks, 2e5);
+  assert.equal(spans[0].longestRun, 2e5);
+  const seen = [];
+  const out = markdownTree(input, (text, options) => {
+    seen.push(text);
+    return Lexer.lex(text, options);
+  });
+  assert.equal(seen.length, 1, 'one lex for the whole document');
+  assert.equal(seen[0].length, input.length, 'every delimiter reaches the tokenizer as a same-length placeholder');
+  assert.ok(!seen[0].includes('*'));
+  assert.equal(degradedBlocks(out).length, 1);
+  assert.deepEqual(out.notices, []);
+});
+
+test('#1218 R1218-1: the counter resets per list item and per table row', () => {
+  const cell = 'a*'.repeat(300);
+  const list = Array.from({ length: 10 }, () => `- ${cell}`).join('\n');
+  assert.equal(degradedBlocks(markdownTree(list)).length, 0);
+  const table = ['| h | i |', '|---|---|', ...Array.from({ length: 10 }, () => `| ${cell} | x |`)].join('\n');
+  const out = markdownTree(table);
+  assert.equal(degradedBlocks(out).length, 0);
+  assert.equal(out.blocks[0].t, 'table');
+});
+
+test('#1218 R1218-1: a blank line, a heading and a quote marker each reset the counter', () => {
+  const part = 'a*'.repeat(400);
+  assert.equal(degradedBlocks(markdownTree(`${part}\n\n${part}`)).length, 0);
+  assert.equal(degradedBlocks(markdownTree(`${part}\n# h\n${part}`)).length, 0);
+  assert.equal(degradedBlocks(markdownTree(`> ${part}\n>\n> ${part}`)).length, 0);
+  assert.equal(degradedBlocks(markdownTree(`${part}\n${part}`)).length, 1);
+});
+
+test('#1218 R1218-1: fenced code is skipped, closed or not, and the closer must match', () => {
+  const stars = `${'*'.repeat(700)}x`; // a bare run of stars is an hr in marked, not a hazard
+  const closed = markdownTree(`\`\`\`\n${stars}\n\`\`\``);
+  assert.equal(degradedBlocks(closed).length, 0);
+  assert.equal(closed.blocks[0].t, 'code');
+  assert.equal(degradedBlocks(markdownTree(`\`\`\`\n${stars}`)).length, 0);
+  assert.equal(degradedBlocks(markdownTree(`\`\`\`\n${stars}\n~~~\n${stars}\n\`\`\``)).length, 0);
+  assert.equal(degradedBlocks(markdownTree(`\`\`\`\`\n${stars}\n\`\`\`\n${stars}\n\`\`\`\``)).length, 0);
+  assert.equal(degradedBlocks(markdownTree(`\`\`\`\nx\n\`\`\`\n${stars}`)).length, 1);
+});
+
+const flat = (nodes) => nodes.map((n) => (n.t === 'text' ? n.text : n.children ? flat(n.children) : '')).join('');
+
+test('#1218 R1218-2: the notice states N, and the passage is shown as its own text', () => {
+  const src = 'a*'.repeat(350);
+  const out = markdownTree(src);
+  assert.deepEqual(degradedBlocks(out), []);
+  const big = `${'*'.repeat(100)}x${'*'.repeat(600)}`;
+  const tree = markdownTree(big);
+  assert.equal(degradedBlocks(tree).length, 1);
+  assert.equal(degradedBlocks(tree)[0].notice, NOTICE(700));
+  assert.equal(tree.blocks[0].t, 'degraded');
+  assert.equal(tree.blocks[1].t, 'paragraph');
+  assert.ok(tree.blocks[1].children.every((n) => n.t === 'text'), 'only literal text, no emphasis nodes');
+  assert.ok(tree.blocks[1].children.length <= 3, 'a run of placeholders is one node');
+  assert.equal(flat(tree.blocks[1].children), big);
+});
+
+test('#1218 cold-2: a reference definition after a degraded passage still resolves its link', () => {
+  const out = markdownTree(`see [docs][r]\n\n${'*'.repeat(60)}x\n\n[r]: https://example.com/x`);
+  const link = JSON.stringify(out.blocks).match(/"t":"link","href":"([^"]+)"/);
+  assert.equal(link?.[1], 'https://example.com/x');
+  assert.deepEqual(degradedBlocks(out).map((b) => b.notice), [NOTICE(60)]);
+});
+
+test('#1218 cold-2: a degraded passage inside a list item leaves one list, and its notice precedes that list', () => {
+  const out = markdownTree(`1. one\n2. two\n\n   ${'*'.repeat(60)}x\n\n3. three`);
+  assert.deepEqual(out.blocks.map((b) => b.t), ['degraded', 'list']);
+  assert.equal(out.blocks[0].notice, NOTICE(60));
+  assert.equal(out.blocks[1].items.length, 3);
+  const inItem = out.blocks[1].items[1].blocks.map((b) => (b.t === 'paragraph' ? flat(b.children) : b.t));
+  assert.deepEqual(inItem, ['two', `${'*'.repeat(60)}x`]);
+});
+
+test('#1218 cold-2: the notice sits before the block holding the passage, and only there', () => {
+  const bad = 'a*'.repeat(700);
+  const out = markdownTree(`# Title\n\nfirst **bold**\n\n${bad}\n\nlast`);
+  assert.deepEqual(out.blocks.map((b) => b.t), ['heading', 'paragraph', 'degraded', 'paragraph', 'paragraph']);
+  assert.equal(flat(out.blocks[3].children), bad);
+});
+
+test('#1218 cold-2: a backslash and every delimiter in a degraded passage come out as typed', () => {
+  const src = `\\*x ${'*_~[]'.repeat(130)}\\`;
+  const out = markdownTree(src);
+  assert.equal(flat(out.blocks.find((b) => b.t === 'paragraph').children), src);
+});
+
+test('#1218 cold-2: a degraded quote keeps its quote, a degraded bullet keeps its bullet', () => {
+  const bad = 'a*'.repeat(700);
+  const q = markdownTree(`> ${bad}`);
+  assert.deepEqual(q.blocks.map((b) => b.t), ['degraded', 'blockquote']);
+  const l = markdownTree(`- ${bad}\n- fine`);
+  assert.deepEqual(l.blocks.map((b) => b.t), ['degraded', 'list']);
+  assert.equal(l.blocks[1].items.length, 2);
+});
+
+test(`#1218 cold-2: a substituted 200 KB delimiter run lexes in under ${PRESCAN_BOUND_MS} ms`, () => {
+  const { ms } = timed(() => Lexer.lex('\uE001'.repeat(2e5), { gfm: true }));
+  assert.ok(ms < PRESCAN_BOUND_MS, `took ${ms} ms`);
+});
+
+test('#1218 R1218-2: the rest of the document still renders, one notice per degraded passage', () => {
+  const bad = 'a*'.repeat(700);
+  const out = markdownTree(`# Title\n\n${bad}\n\nlater **bold** text\n\n${bad}`);
+  assert.equal(out.blocks[0].t, 'heading');
+  assert.equal(degradedBlocks(out).length, 2);
+  assert.ok(JSON.stringify(out.blocks).includes('"strong"'));
+});
+
+test('#1218 R1218-2: the tree stays plain data', () => {
+  const out = markdownTree(`# t\n\n${'a*'.repeat(700)}`);
+  assert.deepEqual(structuredClone(out), out);
+});
+
+function allChangeArtifacts() {
+  const out = [];
+  const walk = (dir) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const p = join(dir, entry.name);
+      if (entry.isDirectory()) walk(p);
+      else if (entry.name.endsWith('.md')) out.push({ name: p, text: readFileSync(p, 'utf8') });
+    }
+  };
+  const root = join(HERE, '..', '..', '..', '..', 'openspec', 'changes');
+  if (existsSync(root)) walk(root);
+  return out;
+}
+
+function assertNoDegradation(files, t) {
+  let max = 0;
+  const hits = [];
+  for (const { name, text } of files) {
+    const spans = prescan(text.replace(/^---\r?\n[\s\S]*?\r?\n---[ \t]*(?:\r?\n|$)/, ''));
+    for (const s of spans) {
+      max = Math.max(max, s.marks);
+      if (s.degraded) hits.push(name);
+    }
+  }
+  t?.diagnostic(`largest real span: ${max} marks over ${files.length} files`);
+  assert.deepEqual(hits, [], `degraded: ${hits.join(', ')}`);
+}
+
+test('#1218 R1218-3: no real artifact under openspec/changes is degraded', (t) => {
+  const files = allChangeArtifacts();
+  assert.ok(files.length > 4, 'the tree carries artifacts');
+  assertNoDegradation(files, t);
+});
+
+test('#1218 R1218-3: the zero-degradation assertion is a real detector and names the fixture', () => {
+  const files = [...allChangeArtifacts(), { name: 'fixture-601', text: 'a*'.repeat(601) }];
+  assert.throws(() => assertNoDegradation(files), /fixture-601/);
+});
+
+// ── #1218 cold-1: the pre-scan's fence rule is marked's, so a non-fence line cannot blind it ──
+
+const HAZARD = '*a '.repeat(6000);
+
+test('#1218 cold-1: a one-line ```x``` is not a fence, so the hazard after it degrades in under ' + PRESCAN_BOUND_MS + ' ms', () => {
+  const { value, ms } = timed(() => markdownTree(`\`\`\`x\`\`\`\n${HAZARD}`));
+  assert.equal(degradedBlocks(value).length, 1);
+  assert.ok(ms < PRESCAN_BOUND_MS, `took ${ms} ms`);
+});
+
+test('#1218 cold-1: a four-space indented ``` is code, not a fence, so the hazard after it degrades in under ' + PRESCAN_BOUND_MS + ' ms', () => {
+  const { value, ms } = timed(() => markdownTree(`    \`\`\`\n${HAZARD}`));
+  assert.equal(degradedBlocks(value).length, 1);
+  assert.ok(ms < PRESCAN_BOUND_MS, `took ${ms} ms`);
+});
+
+test('#1218 cold-1: a backtick fence whose info string holds a backtick is not a fence', () => {
+  assert.equal(prescan(`\`\`\`a\`b\n${HAZARD}`).filter((s) => s.degraded).length, 1);
+  assert.equal(prescan(`~~~a\`b\n${HAZARD}`).filter((s) => s.degraded).length, 0);
+});
+
+test('#1218 cold-1: up to three leading spaces still open a fence; a closer needs the opener, at most three spaces, and only blanks after it', () => {
+  const stars = `${'*'.repeat(700)}x`; // a bare run of stars is an hr in marked, not a hazard
+  const degraded = (src) => prescan(src).filter((s) => s.degraded).length;
+  assert.equal(degraded(`   \`\`\`\n${stars}\n   \`\`\``), 0);
+  // four spaces: not a closer, the fence stays open
+  assert.equal(degraded(`\`\`\`\n${stars}\n    \`\`\`\n${stars}`), 0);
+  // text after the closer: not a closer
+  assert.equal(degraded(`\`\`\`\n${stars}\n\`\`\` x\n${stars}`), 0);
+  // a shorter closer does not close
+  assert.equal(degraded(`\`\`\`\`\n${stars}\n\`\`\`\n${stars}`), 0);
+  // a longer closer closes
+  assert.equal(degraded(`\`\`\`\n${stars}\n\`\`\`\`\n${stars}`), 1);
+  // trailing spaces after the closer are fine
+  assert.equal(degraded(`\`\`\`\n${stars}\n\`\`\`  \n${stars}`), 1);
+});
+
+// ── #1218 cold-3: a multi-line quote paragraph is one span, as it is to marked ──
+
+const degradedCount = (src) => prescan(src).filter((s) => s.degraded).length;
+
+test('#1218 cold-3: 20 quote lines of one paragraph are one span and degrade in under ' + PRESCAN_BOUND_MS + ' ms', () => {
+  const input = Array.from({ length: 20 }, () => `> ${'*a '.repeat(290)}`).join('\n');
+  const { value, ms } = timed(() => markdownTree(input));
+  assert.equal(degradedBlocks(value).length, 1);
+  assert.ok(ms < PRESCAN_BOUND_MS, `took ${ms} ms`);
+});
+
+test('#1218 cold-3: a quote paragraph continues lazily, and ends at a blank, an empty quote line, or a block of its own', () => {
+  const part = 'a*'.repeat(400);
+  assert.equal(degradedCount(`> ${part}\n${part}`), 1, 'lazy continuation joins');
+  assert.equal(degradedCount(`> ${part}\n> ${part}`), 1);
+  assert.equal(degradedCount(`> ${part}\n>\n> ${part}`), 0, 'an empty quote line ends it');
+  assert.equal(degradedCount(`> ${part}\n\n> ${part}`), 0, 'a blank line ends it');
+  assert.equal(degradedCount(`> ${part}\n> # h\n> ${part}`), 0);
+  assert.equal(degradedCount(`> ${part}\n> - ${part}`), 0, 'a list inside the quote is its own span');
+  assert.equal(degradedCount(`${part}\n> ${part}`), 0, 'a quote interrupts a plain paragraph');
+  assert.equal(degradedCount(`>> ${part}\n> ${part}`), 1, 'marked joins a shallower lazy line');
+  assert.equal(degradedCount(`> ${part}\n>> ${part}`), 0, 'a deeper quote is a new block');
+});
+
+test('#1218 cold-3: a list item and its continuation lines are one span', () => {
+  const part = 'a*'.repeat(400);
+  assert.equal(degradedCount(`- ${part}\n  ${part}`), 1);
+  assert.equal(degradedCount(`- ${part}\n${part}`), 1);
+  assert.equal(degradedCount(`- ${part}\n- ${part}`), 0);
+});
+
+test('#1218 cold-3: marked itself joins what the span rule joins', () => {
+  const kinds = (src) => Lexer.lex(src, { gfm: true }).map((t) => t.type);
+  assert.deepEqual(kinds('> a\n> b'), ['blockquote']);
+  const quote = Lexer.lex('> a\nb', { gfm: true })[0];
+  assert.equal(quote.tokens.length, 1);
+  const item = Lexer.lex('- a\n  b\nc', { gfm: true })[0].items[0];
+  assert.equal(item.tokens.length, 1);
+});
+
+test('#1218 cold-3: a 262000-character quote prefix never throws out of markdownTree, and 20000 of them are cheap', () => {
+  const huge = markdownTree('>'.repeat(262000));
+  assert.deepEqual(huge.blocks.map((b) => b.t), ['code']);
+  assert.equal(huge.notices.length, 1);
+  const { ms } = timed(() => markdownTree('>'.repeat(20000)));
+  assert.ok(ms < PRESCAN_BOUND_MS, `took ${ms} ms`);
+});
+
+// ── #1218 cold review round 2, cold-2: marked's hr and setext rules end a span ──
+
+test('#1218 cold-2 (r2): a thematic break after a degraded paragraph survives as an hr, with the text after it', () => {
+  const out = markdownTree('para' + ' a*b'.repeat(700) + '\n***\nafter');
+  assert.deepEqual(out.blocks.map((b) => b.t), ['degraded', 'paragraph', 'hr', 'paragraph']);
+  assert.equal(flat(out.blocks[3].children), 'after');
+});
+
+test('#1218 cold-2 (r2): a setext underline after a degraded paragraph makes it a heading, as marked does', () => {
+  for (const underline of ['---', '===']) {
+    const out = markdownTree('para' + ' a*b'.repeat(700) + `\n${underline}\nafter`);
+    assert.deepEqual(out.blocks.map((b) => b.t), ['degraded', 'heading', 'paragraph'], underline);
+    assert.ok(flat(out.blocks[1].children).startsWith('para a*b a*b'), underline);
+    assert.equal(flat(out.blocks[2].children), 'after', underline);
+  }
+});
+
+test('#1218 cold-2 (r2): every spelling of marked\'s hr ends a span, and the underline ends it inclusively', () => {
+  const part = 'a*'.repeat(400);
+  for (const hr of ['***', '* * *', '___', '- - -', '  ***', '***   ']) {
+    assert.equal(degradedCount(`${part}\n${hr}\n${part}`), 0, `hr ${JSON.stringify(hr)}`);
+  }
+  for (const underline of ['---', '===', '-', '=', '--  ']) {
+    assert.equal(degradedCount(`${part}\n${underline}\n${part}`), 0, `underline ${JSON.stringify(underline)}`);
+  }
+  const [span] = prescan(`${part}\n${part}\n===\nnext`);
+  assert.equal(span.to, 3, 'the underline line belongs to the span it closes');
+  assert.equal(degradedCount(`${part}\n    ***\n${part}`), 1, 'four spaces is not an hr');
+  assert.equal(degradedCount(`${part}\n--x\n${part}`), 1, 'not an underline');
+});
+
+test('#1218 cold-2 (r2): the hr and setext segmentation of marked, which the pre-scan now reads rather than mirrors', () => {
+  const kinds = (src) => Lexer.lex(src, { gfm: true }).map((t) => t.type);
+  assert.deepEqual(kinds('p\n***\nq'), ['paragraph', 'hr', 'paragraph']);
+  assert.deepEqual(kinds('p\n---\nq'), ['heading', 'paragraph']);
+  assert.deepEqual(kinds('p\n===\nq'), ['heading', 'paragraph']);
+});
+
+test('#1218 cold-2 (r2): a line of nothing but delimiters is marked\'s thematic break, not a passage', () => {
+  for (const line of ['*'.repeat(2e5), '_'.repeat(2e5), '-'.repeat(2e5)]) {
+    const out = markdownTree(line);
+    assert.deepEqual(out.blocks.map((b) => b.t), ['hr'], line.slice(0, 3));
+  }
+});
+
+// ── #1218 cold review round 2, cold-3: same-length placeholders, not backslashes ──
+// Backslash escapes are context-sensitive in CommonMark: they are literal inside a
+// code span and inside an autolink, so an escaped `x_y` there shows its backslash.
+
+const HAZARD_LINE = (head) => head + ' a*b'.repeat(700); // 704 delimiters or more, one line
+const nodesOf = (tree) => {
+  const out = [];
+  const walk = (n) => {
+    if (Array.isArray(n)) return n.forEach(walk);
+    if (!n || typeof n !== 'object') return;
+    out.push(n);
+    for (const key of ['children', 'blocks', 'items']) if (n[key]) walk(n[key]);
+  };
+  walk(tree.blocks);
+  return out;
+};
+
+test('#1218 cold-3 (r2): a code span inside a degraded passage keeps exactly what was typed', () => {
+  const out = markdownTree(HAZARD_LINE('Use `x_y*z[0]` here.'));
+  assert.equal(degradedBlocks(out).length, 1);
+  const spans = nodesOf(out).filter((n) => n.t === 'codespan');
+  assert.deepEqual(spans.map((n) => n.text), ['x_y*z[0]']);
+});
+
+test('#1218 cold-3 (r2): an autolink inside a degraded passage keeps its text and its href', () => {
+  const out = markdownTree(HAZARD_LINE('<https://example.com/a_b>'));
+  assert.equal(degradedBlocks(out).length, 1);
+  const links = nodesOf(out).filter((n) => n.t === 'link');
+  assert.equal(links.length, 1);
+  assert.equal(links[0].href, 'https://example.com/a_b');
+  assert.equal(flat(links[0].children), 'https://example.com/a_b');
+});
+
+test('#1218 cold-3 (r2): a bare url, an image alt and an inert link target keep their characters', () => {
+  const out = markdownTree(HAZARD_LINE('see https://example.com/a_b_c and ![a_b](x_y.png) and [t_u](rel_path.md)'));
+  const nodes = nodesOf(out);
+  assert.ok(nodes.some((n) => n.t === 'link' && n.href === 'https://example.com/a_b_c'));
+  assert.ok(JSON.stringify(out.blocks).includes('https://example.com/a_b_c'));
+  assert.ok(!/[-\\]/.test(JSON.stringify(out.blocks.filter((b) => b.t !== 'degraded'))), 'no placeholder and no backslash reaches the tree');
+});
+
+test('#1218 cold-3 (r2): the tokenizer sees a same-length, delimiter-free passage, and the tree is restored', () => {
+  const input = `${'*'.repeat(2e5)}x`;
+  const seen = [];
+  const out = markdownTree(input, (text, options) => {
+    seen.push(text);
+    return Lexer.lex(text, options);
+  });
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].length, input.length, 'substitution keeps the length');
+  assert.ok(!/[*_~[\]\\]/.test(seen[0]), 'no delimiter reaches the tokenizer');
+  assert.equal(flat(out.blocks.find((b) => b.t === 'paragraph').children), input);
+});
+
+test('#1218 cold-3 (r2): a document that already uses private-use characters is restored byte for byte', () => {
+  const head = ' keep ';
+  const out = markdownTree(HAZARD_LINE(head));
+  assert.equal(flat(out.blocks.find((b) => b.t === 'paragraph').children).startsWith(head), true);
+  assert.equal(flat(out.blocks.find((b) => b.t === 'paragraph').children), HAZARD_LINE(head));
+});
+
+test('#1218 cold-3 (r2): when the whole private-use block is taken, the passage is shown as written under its notice', () => {
+  let pua = '';
+  for (let c = 0xe000; c <= 0xf8ff; c++) pua += String.fromCharCode(c);
+  const src = `${pua}\n\n${HAZARD_LINE('tail')}`;
+  const out = markdownTree(src);
+  assert.equal(out.blocks[0].t, 'degraded');
+  assert.equal(out.blocks.at(-1).t, 'literal');
+  assert.equal(out.blocks.at(-1).text, src);
+});
+
+test(`#1218 cold-3 (r2): a 200 KB delimiter run is substituted, lexed and restored in under ${PRESCAN_BOUND_MS} ms`, () => {
+  const { value, ms } = timed(() => markdownTree(`${'*'.repeat(2e5)}x`));
+  assert.equal(degradedBlocks(value).length, 1);
+  assert.ok(ms < PRESCAN_BOUND_MS, `took ${ms} ms`);
+});
+// ── cold-4: adjacent text merges ──
+
+test('#1218 cold-4 (r2): a degraded line is a handful of text nodes, not one per mark', () => {
+  for (const unit of [' a*b', ' a*<b>', ' a*<!-- c -->', ' a\\*b']) {
+    const out = markdownTree('x' + unit.repeat(700));
+    const p = out.blocks.find((b) => b.t === 'paragraph');
+    assert.ok(p.children.length <= 3, `${JSON.stringify(unit)}: ${p.children.length} nodes`);
+    assert.equal(flat(p.children).length > 1000, true);
+  }
+});
+
+// ── #1218 cold review round 4: spans come from marked's own block phase ──
+// Four review rounds found four divergences between a hand-copied block grammar and
+// marked's. The pre-scan now asks marked (Lexer#blockTokens, inline work deferred).
+
+test(`#1218 cold-1 (r4): a "2. " line after a paragraph line is lazy continuation, so the span degrades in under ${PRESCAN_BOUND_MS} ms`, () => {
+  const input = 'para start\n' + Array.from({ length: 60 }, () => '2. ' + '*a_'.repeat(150)).join('\n');
+  const { value, ms } = timed(() => markdownTree(input));
+  assert.equal(degradedBlocks(value).length, 1);
+  assert.ok(ms < PRESCAN_BOUND_MS, `took ${ms} ms`);
+});
+
+test(`#1218 cold-1 (r4): a "    - " line after a paragraph line is lazy continuation, so the span degrades in under ${PRESCAN_BOUND_MS} ms`, () => {
+  const input = 'para start\n' + Array.from({ length: 60 }, () => '    - ' + '*a_'.repeat(150)).join('\n');
+  const { value, ms } = timed(() => markdownTree(input));
+  assert.equal(degradedBlocks(value).length, 1);
+  assert.ok(ms < PRESCAN_BOUND_MS, `took ${ms} ms`);
+});
+
+test('#1218 cold-1 (r4): marked\'s block segmentation is pinned: one paragraph, inline work deferred', () => {
+  const src = 'para start\n' + Array.from({ length: 5 }, () => '2. ').join('\n') + '*a_*a_';
+  const lx = new Lexer({ gfm: true, breaks: false, pedantic: false });
+  const blocks = lx.blockTokens(src, []);
+  assert.deepEqual(blocks.map((b) => b.type), ['paragraph']);
+  assert.deepEqual(blocks[0].tokens, [], 'the block phase leaves the inline tokens empty');
+  assert.equal(lx.inlineQueue.length, 1, 'and queues the paragraph text for the inline phase');
+  assert.equal(lx.inlineQueue[0].src, blocks[0].text);
+});
+
+test('#1218 cold-1 (r4): a tokenizer that throws in the block phase degrades the whole document, with its notice', () => {
+  const out = markdownTree('> '.repeat(40000) + 'x');
+  assert.equal(out.blocks.length, 1);
+  assert.equal(out.blocks[0].t, 'code');
+  assert.deepEqual(out.notices, ['The markdown could not be parsed; the text is shown as written.']);
+});
+
+// The block phase plus counting takes 2.8-17 ms locally on these inputs. A CI
+// runner is about 3x slower, so 100 ms left a 2x margin, the one that failed for
+// the 300 ms bound above. 250 ms still separates the block phase (milliseconds)
+// from the inline phase it replaces (seconds).
+const PRESCAN_CHEAP_MS = 250;
+
+test('#1218 cold-1 (r4): the pre-scan is cheap, block phase and counting included, on 200 KB inputs', () => {
+  const inputs = [
+    '*'.repeat(1e5) + 'a' + '*'.repeat(1e5),
+    'para\n' + '2. \n'.repeat(5e4),
+    '*a_'.repeat(66000),
+    Array.from({ length: 4000 }, (_, i) => `- item ${i} a*b_c [d]`).join('\n'),
+  ];
+  for (const input of inputs) {
+    const { ms } = timed(() => prescan(input));
+    console.log(`prescan ${input.length} chars: ${ms.toFixed(1)} ms`);
+    assert.ok(ms < PRESCAN_CHEAP_MS, `took ${ms} ms`);
+  }
+});
+
+test('#1218 cold-1 (r4): a span is mapped to its own source lines inside nested, loose and quoted containers', () => {
+  const part = 'a*'.repeat(700);
+  const cases = {
+    'loose list': ['- one', '', `- ${part}`, '', '- three'],
+    'nested list': ['- a', '  - b', `    - ${part}`, '  - c'],
+    'quote list': ['> - one', `> - ${part}`],
+    'table row': ['| h | i |', '|---|---|', '| a | b |', `| ${part} | d |`],
+    'task item': ['- [ ] one', `- [x] ${part}`],
+  };
+  for (const [name, lines] of Object.entries(cases)) {
+    const spans = prescan(['intro', '', ...lines, '', 'outro'].join('\n')).filter((s) => s.degraded);
+    assert.equal(spans.length, 1, name);
+    const hazard = lines.findIndex((l) => l.includes(part)) + 2;
+    assert.ok(spans[0].from <= hazard && hazard < spans[0].to, `${name}: ${JSON.stringify(spans[0])}`);
+    assert.ok(spans[0].to - spans[0].from <= 2, `${name} stays on its own line`);
+  }
+});
+
+test('#1218 cold-1 (r4): where a container\'s lines cannot be mapped, the whole container is one span', () => {
+  const part = 'a*'.repeat(700);
+  // marked drops the separator between a quote paragraph and the table that follows it
+  const src = `> x\n> m\n| a | b |\n|---|---|\n| t | x |\n| ${part} | y |`;
+  const spans = prescan(src);
+  assert.equal(spans.filter((s) => s.degraded).length, 1);
+  assert.deepEqual([spans[0].from, spans[0].to], [0, 6]);
+  const out = markdownTree(src);
+  assert.equal(degradedBlocks(out).length, 1);
+});
+
+// ── #1218 cold review round 5: the backslash is never substituted ──
+// A backslash is structural: `\|` keeps a pipe inside a GFM table cell. Substituting it
+// turned the pipe into a cell separator and marked dropped the surplus cells. Only the
+// counted delimiters `* _ ~ [ ]` are substituted.
+
+import { neutralText } from './markdown.mjs';
+
+test('#1218 cold-1 (r5): a degraded table row keeps its cells, an escaped pipe stays inside its cell', () => {
+  // WHEN a row holds `x \| y` in one cell and a 700-mark cell in the next
+  const bad = '*a '.repeat(700);
+  const out = markdownTree(`| A | B |\n|---|---|\n| x \\| y | ${bad} |\n`);
+  const table = out.blocks.find((b) => b.t === 'table');
+  // THEN the row still has 2 cells, the first shows `x | y`, the second its text as typed, with the notice
+  assert.equal(table.rows[0].length, 2);
+  assert.equal(flat(table.rows[0][0]), 'x | y');
+  assert.equal(flat(table.rows[0][1]), bad.trim());
+  assert.equal(degradedBlocks(out).length, 1);
+});
+
+test('#1218 cold-1 (r5): a degraded paragraph with escaped delimiters renders as typed, in bounded time', () => {
+  // WHEN a paragraph with `\*` and `\[` carries 700 marks
+  const src = `\\*x \\[y ${'*a '.repeat(700)}`;
+  const { value, ms } = timed(() => markdownTree(src));
+  // THEN no text is lost, the backslashes stay as typed, and it terminates within the bound
+  assert.equal(degradedBlocks(value).length, 1);
+  assert.equal(flat(value.blocks.find((b) => b.t === 'paragraph').children), src);
+  assert.ok(ms < PRESCAN_BOUND_MS, `took ${ms} ms`);
+});
+
+test('#1218 cold-1 (r5): 200 KB of backslashes and marks stays linear', () => {
+  for (const unit of ['\\*', '\\\\*a', 'a\\_b*', '\\|*']) {
+    const input = unit.repeat(Math.ceil(2e5 / unit.length));
+    const { ms } = timed(() => markdownTree(input));
+    console.log(`backslash ${JSON.stringify(unit)} ${input.length} chars: ${ms.toFixed(1)} ms`);
+    assert.ok(ms < PRESCAN_BOUND_MS, `${JSON.stringify(unit)} took ${ms} ms`);
+  }
+});
+
+// ── structure is unchanged by substitution ──
+
+// A table's cells are compared by text with the counted delimiters and the placeholders
+// both read as `?`: the substitution is same-length, so what must match is where the
+// cells split, and an escaped pipe that became a separator changes that.
+const shape = (cell) => String(cell.text).replace(/[*_~[\]\uE000-\uF8FF]/g, '?');
+const signature = (tokens) => tokens.map((t) => [
+  t.type,
+  t.type === 'table' ? [t.header.map(shape), t.rows.map((r) => r.map(shape))] : null,
+  t.type === 'list' ? t.items.map((i) => [i.task, i.checked, signature(i.tokens ?? [])]) : null,
+  t.type === 'blockquote' ? signature(t.tokens ?? []) : null,
+]);
+const blockSignature = (text) => signature(new Lexer({ gfm: true, breaks: false, pedantic: false }).blockTokens(text, []));
+
+const HAZ_R5 = 'a*'.repeat(700);
+const POOL = [
+  '', 'plain text', '# heading', 'Title\n=====', '---', '***', '* * *', '___', '- item', '* item', '+ item', '1. one',
+  '- [ ] todo', '- [x] done', '> quote', '> - nested', '[r]: https://example.com', '[^1]: note', '[^1] and [r]',
+  '```\ncode *x*\n```', '    indented code', '<div>html</div>', 'x \\* y \\[ z \\\\ w',
+  '| A | B |\n|---|---|\n| x \\| y | z |', '| A | B |\n|:-:|--:|\n| 1 | 2 |\n| 3 \\| 4 | 5 |',
+];
+const HAZARDS_R5 = [
+  (h) => h, (h) => `- ${h}`, (h) => `* ${h}`, (h) => `- [ ] ${h}`, (h) => `> ${h}`, (h) => `> - ${h}`, (h) => `1. ${h}`,
+  (h) => `# ${h}`, (h) => `| ${h} | b |`, (h) => `| x \\| y | ${h} |`, (h) => `[h]: https://example.net\n${h}`, (h) => `\\*${h}\\[`,
+];
+
+function lcg(seed) {
+  let s = seed >>> 0;
+  return (n) => { s = (Math.imul(s, 1664525) + 1013904223) >>> 0; return s % n; };
+}
+
+test('#1218 cold-1 (r5): substitution changes no block structure, over random documents with one degraded span', () => {
+  const rnd = lcg(1218);
+  const t0 = performance.now();
+  let degradedDocs = 0;
+  for (let n = 0; n < 1500; n++) {
+    // distinct fragments: marked drops a duplicate reference definition, which makes the
+    // pre-scan fall back to one span for the whole document (reported in the verify-report)
+    const parts = [];
+    for (let k = 2 + rnd(6); k > 0; k--) {
+      const pick = POOL[rnd(POOL.length)];
+      if (!parts.includes(pick)) parts.push(pick);
+    }
+    const hazard = HAZARDS_R5[rnd(HAZARDS_R5.length)](HAZ_R5);
+    // a table row only reads as one inside a table: give the row hazards their header
+    const needsTable = /^\| /.test(hazard) && !/^\[h\]/.test(hazard);
+    parts.splice(rnd(parts.length + 1), 0, needsTable ? `| A | B |\n|---|---|\n${hazard}` : hazard);
+    const doc = parts.join(rnd(2) ? '\n\n' : '\n');
+    const neutral = neutralText(doc);
+    if (neutral === null) continue;
+    degradedDocs++;
+    assert.deepEqual(blockSignature(neutral), blockSignature(doc), JSON.stringify(doc.replaceAll(HAZ_R5, '<H>')));
+  }
+  console.log(`structure property: ${degradedDocs} degraded documents in ${(performance.now() - t0).toFixed(0)} ms`);
+  assert.ok(degradedDocs > 800, `only ${degradedDocs} documents degraded`);
+  assert.ok(performance.now() - t0 < 2000);
+});
+
+test('#1218 cold-1 (r5): each block construct keeps its structure when its neighbour degrades', () => {
+  const cases = {
+    'escaped table pipe': ['| A | B |', '|---|---|', `| x \\| y | ${HAZ_R5} |`],
+    'link reference definition': ['[r]: https://example.com', '', HAZ_R5, '', '[r]'],
+    'footnote-like': ['[^1]: note', '', HAZ_R5],
+    'setext heading': ['Title', '=====', '', HAZ_R5],
+    'star hr': ['***', '', HAZ_R5, '', '* * *'],
+    'underscore hr': ['___', '', HAZ_R5],
+    'star bullet': ['* one', `* ${HAZ_R5}`, '* three'],
+    'task checkbox': ['- [ ] one', `- [x] ${HAZ_R5}`],
+  };
+  for (const [name, lines] of Object.entries(cases)) {
+    const doc = lines.join('\n');
+    const neutral = neutralText(doc);
+    assert.notEqual(neutral, null, `${name} must degrade`);
+    assert.deepEqual(blockSignature(neutral), blockSignature(doc), name);
+  }
+});
+
+test('#1218 cold-3 (r5): a degraded task item stays a task item, unchecked, with its text', () => {
+  const bad = '*a '.repeat(700);
+  const out = markdownTree(`- [ ] ${bad}`);
+  const list = out.blocks.find((b) => b.t === 'list');
+  assert.equal(degradedBlocks(out).length, 1);
+  assert.equal(list.items[0].task, true);
+  assert.equal(list.items[0].checked, false);
+  assert.equal(flat(list.items[0].blocks[0].children), bad.trim());
+  const done = markdownTree(`- [X] ${bad}`).blocks.find((b) => b.t === 'list');
+  assert.deepEqual([done.items[0].task, done.items[0].checked], [true, true]);
 });
