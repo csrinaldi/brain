@@ -1,0 +1,13 @@
+$ ship with mrCreate injected failure (BRAIN_VCS_TEST_MODULE fake-vcs-port)
+
+> brain-test-plainfiles@1.0.0 brain:memory:ship
+> node ./brain/scripts/memory/cli.mjs ship --invoker manual
+
+memory/cli: ✗ ship failed — {ref} diverged from origin; nothing was forced. memory.ship.diverged: refs/heads/memory/gandalf-rog-zephyrus-g15-ga503qr-ga503qr-2026-10-01 is behind origin's matching ref — refusing to force-push.
+exit=1
+--- remote branches
+369ac169d3c954578ad9614600c19190b52ee9c9	refs/heads/feat/issue-1-demo-first-feature
+f80831b3526c33aee63698711a950c1feb042918	refs/heads/main
+b65029df7c0ba7fb157747ac6af857d7671c28ff	refs/heads/memory/gandalf-rog-zephyrus-g15-ga503qr-ga503qr-2026-10-01
+--- open PRs
+[]

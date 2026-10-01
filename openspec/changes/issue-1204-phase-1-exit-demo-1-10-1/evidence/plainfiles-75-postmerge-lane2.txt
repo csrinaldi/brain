@@ -1,0 +1,6 @@
+completed	success	memory: gandalf-rog-zephyrus-g15-ga503qr-ga503qr 2026-10-01 (1 record…	governance-postmerge	main	push	36797746562	19s	2026-10-01T00:45:23Z
+completed	success	memory: gandalf-rog-zephyrus-g15-ga503qr-ga503qr 2026-10-01 (2 record…	governance-postmerge	main	push	36797403470	20s	2026-10-01T00:41:11Z
+completed	success	feat: enable memory lane and add demo README line (#1) (#2)	governance-postmerge	main	push	36797240334	14s	2026-10-01T00:39:11Z
+completed	success	chore: adopt brain 1.10.1	governance-postmerge	main	push	36796749398	19s	2026-10-01T00:33:13Z
+--- issues
+1	CLOSED	demo: first feature	status:approved, type:feature	2026-10-01T00:39:10Z

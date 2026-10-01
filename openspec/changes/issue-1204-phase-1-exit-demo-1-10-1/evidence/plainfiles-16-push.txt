@@ -1,0 +1,10 @@
+✓ No prohibited references found.
+✓ Artifact structure is valid.
+remote: 
+remote: Create a pull request for 'feat/issue-1-demo-first-feature' on GitHub by visiting:        
+remote:      https://github.com/csrinaldi/brain-test-plainfiles/pull/new/feat/issue-1-demo-first-feature        
+remote: 
+To https://github.com/csrinaldi/brain-test-plainfiles.git
+ * [new branch]      feat/issue-1-demo-first-feature -> feat/issue-1-demo-first-feature
+branch 'feat/issue-1-demo-first-feature' set up to track 'origin/feat/issue-1-demo-first-feature'.
+exit=0

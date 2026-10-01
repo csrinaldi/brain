@@ -1,0 +1,6 @@
+
+> brain-test-engram@1.0.0 brain:config
+> node ./brain/scripts/config/cli.mjs set memory.lane.enabled true
+
+brain:config: ✓ set memory.lane.enabled (no pending migrations)
+exit=0
