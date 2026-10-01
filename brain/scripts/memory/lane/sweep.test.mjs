@@ -8,6 +8,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { sweepLanes, noCollect } from './sweep.mjs';
+import { shipLane } from './ship.mjs';
 import { emptyDuplicates } from '../lib/duplicates.mjs';
 
 const ROOT = '/repo';
@@ -257,4 +258,79 @@ test('where:\'both\' — a branch present locally AND on the remote is still pro
   assert.equal(result.branches.length, 1, 'a branch present in both listings must produce exactly one row, never two');
   assert.equal(result.branches[0].where, 'both');
   assert.equal(result.branches[0].action, 'deleted');
+});
+
+// ── #1190 — the sweep inherits the two-key replace through shipLane ─────────
+// sweep.mjs calls shipLane for a prior-day `pending` ref, so the replace path
+// is reachable here. Both keys are still required: nothing unmerged is ever
+// replaced. These run the REAL shipLane (injected git/vcs fakes only).
+
+const SW_BRANCH = 'memory/gandalf-2026-09-01';
+const SW_REF = `refs/heads/${SW_BRANCH}`;
+const SW_TIP = 'r3m0t3tip';
+const SW_PATH = '.memory/records/2026-09-rec-1.jsonl';
+
+function replaceSweepRules({ remoteUndelivered = [] } = {}) {
+  return [
+    { match: (a) => a[0] === 'fetch', result: ok() },
+    { match: (a) => a[0] === 'for-each-ref', result: ok(SW_REF) },
+    { match: (a) => a[0] === 'ls-remote', result: ok('') },
+    { match: (a) => a[0] === 'rev-parse' && a.at(-1) === `refs/remotes/origin/${SW_BRANCH}`, result: ok(`${SW_TIP}\n`) },
+    { match: (a) => a[0] === 'rev-parse', result: ok('sha1') },
+    { match: (a) => a[0] === 'rev-list' && a[2] === `${SW_REF}..refs/remotes/origin/${SW_BRANCH}`, result: ok('2') },
+    { match: (a) => a[0] === 'rev-list', result: ok('1') },
+    { match: (a) => a[0] === 'diff' && a.includes('--') && a[2] === SW_TIP, result: ok(remoteUndelivered.join('\n')) },
+    { match: (a) => a[0] === 'diff' && a.includes('--'), result: ok(SW_PATH) },
+    { match: (a) => a[0] === 'diff', result: ok(SW_PATH) },
+    { match: (a) => a[0] === 'push', result: ok() },
+  ];
+}
+
+function swVcs(list) {
+  return {
+    mrList: async () => list,
+    mrCreate: async () => ({ url: 'https://example.invalid/pull/42' }),
+    mrAutoMerge: async () => ({ enabled: true, url: null }),
+  };
+}
+
+const runSweep = (git, vcs) => sweepLanes({ root: ROOT, project: 'x/y', tier: 'lite', host: 'gandalf', today: TODAY, git, vcs, ship: shipLane });
+
+test('#1190 sweep: a leaseStale error maps to a diverged row; a replaceRefused error maps to a failed row carrying the message', async () => {
+  const { git } = fakeGit(replaceSweepRules());
+  const stale = async () => { const e = new Error('memory.ship.leaseStale: lease refused'); e.leaseStale = true; e.diverged = true; throw e; };
+  const refused = async () => { const e = new Error('memory.ship.replaceRefused: origin refused'); e.replaceRefused = true; throw e; };
+  const a = await sweepLanes({ root: ROOT, project: 'x/y', tier: 'lite', host: 'gandalf', today: TODAY, git, vcs: noVcs, ship: stale });
+  assert.equal(a.branches[0].action, 'diverged');
+  const b = await sweepLanes({ root: ROOT, project: 'x/y', tier: 'lite', host: 'gandalf', today: TODAY, git, vcs: noVcs, ship: refused });
+  assert.equal(b.branches[0].action, 'failed');
+  assert.match(b.branches[0].reason, /replaceRefused/);
+});
+
+test('#1190 sweep: remote delivered but no merged PR ⇒ diverged, no push; closed-unmerged ⇒ closedUnmerged, no push', async () => {
+  for (const [list, action] of [
+    [[], 'diverged'],
+    [[{ number: 3, headBranch: SW_BRANCH, state: 'open', merged: false }], 'diverged'],
+    [[{ number: 3, headBranch: SW_BRANCH, state: 'closed', merged: false }], 'closedUnmerged'],
+  ]) {
+    const { git, calls } = fakeGit(replaceSweepRules());
+    const result = await runSweep(git, swVcs(list));
+    assert.equal(result.branches[0].action, action);
+    assert.ok(!calls.some((c) => c.argv[0] === 'push'), 'neither key alone may push');
+  }
+});
+
+test('#1190 sweep: PR merged but the remote tip carries undelivered content ⇒ diverged, no push', async () => {
+  const { git, calls } = fakeGit(replaceSweepRules({ remoteUndelivered: [SW_PATH] }));
+  const result = await runSweep(git, swVcs([{ number: 3, headBranch: SW_BRANCH, state: 'closed', merged: true }]));
+  assert.equal(result.branches[0].action, 'diverged');
+  assert.ok(!calls.some((c) => c.argv[0] === 'push'));
+});
+
+test('#1190 sweep: both keys hold ⇒ the prior-day ref is replaced under a lease and shipped', async () => {
+  const { git, calls } = fakeGit(replaceSweepRules());
+  const result = await runSweep(git, swVcs([{ number: 3, headBranch: SW_BRANCH, state: 'closed', merged: true }]));
+  assert.equal(result.branches[0].action, 'shipped');
+  const push = calls.find((c) => c.argv[0] === 'push').argv;
+  assert.equal(push[2], `--force-with-lease=${SW_REF}:${SW_TIP}`);
 });
