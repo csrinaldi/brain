@@ -106,7 +106,7 @@ None.
 
 ## Design coherence (D15-D28)
 
-D15-D19 (pre-scan, five delimiters, reset rules, thresholds, per-chunk lex), D20 (worker file 18 lines, binds `onmessage` only in a worker), D21 (`renderOffThread`, timer before spawn, single `settle`), D22 (one worker per request), D23-D25 (app.js without a markdown import, states, stale drop), D26 (`kind: none|ambiguous|failed`, only `none` maps to `missing`), D27 (`gitRun` plus `gitErrorLine`, all three default runners migrated), D28 (guards with self-tests): all match the code. No design deviation breaks a spec.
+D15-D19 (pre-scan, five delimiters, reset rules, thresholds, single lex over escaped passages; revised in cold review round 1), D20 (worker file 18 lines, binds `onmessage` only in a worker), D21 (`renderOffThread`, timer before spawn, single `settle`), D22 (one worker per request), D23-D25 (app.js without a markdown import, states, stale drop), D26 (`kind: none|ambiguous|failed`, only `none` maps to `missing`), D27 (`gitRun` plus `gitErrorLine`, all three default runners migrated), D28 (guards with self-tests): all match the code. No design deviation breaks a spec.
 
 ## Final verdict
 
@@ -120,3 +120,18 @@ PASS WITH WARNINGS. Ready for archive; W1 is the one worth fixing first (a spec/
 | W2 | `documentWording` (`lib/drawer-model.mjs`) says "resume.md: the change branch could not be resolved: <reason>" for an unreadable document with no ref; state stays `unreadable` (R3). R1218-8 gained a scenario and its text was extended; D26 updated. | RED then GREEN: `change-route.test.mjs` (ambiguous and git-failed, Working memory tab and SDD row) and `lib/drawer-model.test.mjs` (both surfaces, both reasons). |
 | S1 | Tarball canary lowered from 9.25 to 9.1 MB (measured 9.053 MiB), net-zero line count so `test-spawn-hygiene.test.mjs:423` stays valid. | `test/publish-allowlist.e2e.test.mjs` and `brain/scripts/test-spawn-hygiene.test.mjs` pass. |
 | S3 | `tasks.md` holds 38 tasks. The "36" appears only in this report's own findings (line 25 and S3) as the discrepancy being recorded; proposal, design and tasks carry no count claim. | `rg '36 tasks'` over the change dir finds nothing. |
+
+
+## Cold review round 1
+
+The cold review returned APPROVE with three corrections the maintainer approved. Measured inputs are the reviewer's; "before" is the reviewer's figure, "after" is this branch.
+
+| Finding | Fix | Test (RED first) and evidence |
+|---|---|---|
+| cold-1: the fence detector was looser than marked's | `FENCE` and the closer are marked's own `fences` rule (D16): three spaces at most, a backtick info string without a backtick, a closer of the opener's run with spaces only after it. Commit `62c6f642`. | `markdown.test.mjs` "cold-1" (4 tests). A one-line ```` ```x``` ```` plus `*a `x6000: 2698 ms and not degraded before, 22 ms and degraded after. Four spaces then ```` ``` ```` plus the same body: 2751 ms before, 12 ms after. |
+| cold-3: each quote line was its own span | `unquote` reads the prefix in one linear pass; consecutive quote lines and lazy lines are one span; a blank, an empty quote line, a block in the quote, or a deeper quote ends it (D16). A list item and its continuation lines were already one span, confirmed with marked and pinned by a test. Commit `6ce5a3a6`. | "cold-3" (5 tests, one reading marked's own tokens). 20 lines of `> ` + `*a `x290: 2515 ms and not degraded before, 9 ms and degraded after. A 262000-character `>` prefix scans in under 200 ms. |
+| cold-2: lexing in segments broke neighbours | The document is lexed once after each degraded passage is backslash-escaped (D19); the notice is a block before the top-level block holding the passage, located by token offsets. Commit `b80b0a25`. | "cold-2" (7 tests): the `[r]` reference input keeps its link to https://example.com/x, the `1. one` input stays one list of three items with the notice before it, the passage survives as literal text, one lex call on escaped text, a degraded quote and bullet keep their structure. An escaped 200 KB `*` run lexes in 91 ms (116 ms through `markdownTree`). |
+
+Escaping linearity, measured with `Lexer.lex` on the escaped text: 400000 chars of `\*` 91 ms, `_` 65 ms, `~` 80 ms, mixed `*a_b~` 84 ms, `**a ` x5000 10 ms. Doubling the input doubles the time for every class. The costly class is `[`: about 5 µs per bracket inside marked's own `reflinkSearch` (escaped or not): `\[` x 2e5 takes 991 ms, so a bracket-only passage near the 524288-byte adapter cap can reach the 1500 ms worker budget and end as the timeout notice. `]` is not escaped, which keeps `[a](` x 5e4 at 78 ms instead of 650 ms.
+
+Real artifacts: unchanged. The zero-degradation test over every `openspec/changes` artifact passes with the new span rules, and no real file's token `raw` lengths disagree with its text (1394 files under `openspec`, `brain`, `docs`).

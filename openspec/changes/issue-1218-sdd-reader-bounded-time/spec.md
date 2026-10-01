@@ -24,14 +24,14 @@ Fixed values used throughout (all binding from the rulings):
 
 ### R1218-1: A pre-scan degrades pathological inline spans to literal text
 
-`lib/markdown.mjs` MUST run a pure, linear pre-scan over each inline span before marked tokenizes it (R1). A span is a maximal run of lines closed by these reset rules: a blank line closes the span; a list item, a heading, a block quote marker or a table row closes the span and opens a new one on that line; a fence opener closes the span, and the lines of the fenced code are skipped (not counted) until a closer of the same character at least as long as the opener, or until the end of the text. The pre-scan MUST count the delimiter characters, exactly the five characters `*`, `_`, `~`, `[` and `]`, in the span, and the length of the longest run of one repeated delimiter character. A run is a maximal sequence of one delimiter character inside one line, and a newline ends a run. Backtick, `(`, `)`, `<` and `>` MUST NOT be counted. A span MUST be degraded when it holds MORE than 600 delimiters, or when it holds a single run LONGER than 50. A span at exactly 600 delimiters, or with a longest run of exactly 50, MUST NOT be degraded. The counter MUST reset at every span boundary above, so the count is per passage and never per document. The thresholds sit above the measured real maxima (122 delimiters in one span, a run of 7).
+`lib/markdown.mjs` MUST run a pure, linear pre-scan over each inline span before marked tokenizes it (R1). A span is a maximal run of lines, cut where marked starts a new inline run: a blank line closes the span; a list item, a heading or a table row closes the span and opens a new one on that line; the continuation lines of a list item, indented or lazy, belong to that item's span. Block quote lines follow marked's own paragraph rule: consecutive quote lines, and a lazy continuation line that has no `>`, are ONE span. That span is closed by a blank line, by a quote line with no text after its prefix, by a list item or heading inside the quote, or by a deeper quote. A quote line directly after a plain paragraph line opens a new span. A fence is detected by marked's own fence rule and by nothing looser: a line of up to three spaces, then three or more backticks whose info string holds no backtick, or three or more tildes. A fence opener closes the span, and the lines of the fenced code are skipped (not counted) until a closer, which is up to three spaces, the opener's exact run (any further `~` or backtick may follow) and only spaces after it, or until the end of the text. A one-line ```` ```x``` ````, a fence indented four or more spaces, and a backtick fence whose info string holds a backtick are NOT fences, and their lines are counted. The pre-scan MUST count the delimiter characters, exactly the five characters `*`, `_`, `~`, `[` and `]`, in the span, and the length of the longest run of one repeated delimiter character. A run is a maximal sequence of one delimiter character inside one line, and a newline ends a run. Backtick, `(`, `)`, `<` and `>` MUST NOT be counted. A span MUST be degraded when it holds MORE than 600 delimiters, or when it holds a single run LONGER than 50. A span at exactly 600 delimiters, or with a longest run of exactly 50, MUST NOT be degraded. The counter MUST reset at every span boundary above, so the count is per passage and never per document. The thresholds sit above the measured real maxima (122 delimiters in one span, a run of 7).
 
 This requirement modifies R1198-13: rendering terminates on any input, and the cheap known classes terminate without reaching the worker backstop.
 
 #### Scenario: A span over 600 delimiters is degraded
 - **GIVEN** one paragraph of 601 delimiter characters mixed with text
 - **WHEN** the adapter builds the tree
-- **THEN** the paragraph's content is a single literal text node and no strong, em, del, code or a element is produced from it
+- **THEN** the paragraph's content is literal text nodes only and no strong, em, del, code or a element is produced from it
 
 #### Scenario: A span at exactly 600 delimiters is not degraded
 - **GIVEN** one paragraph of exactly 600 delimiter characters with no run longer than 50
@@ -68,14 +68,49 @@ This requirement modifies R1198-13: rendering terminates on any input, and the c
 - **WHEN** the adapter builds the tree
 - **THEN** the paragraph is tokenized by marked and the tree carries no pre-scan notice
 
-#### Scenario: The pre-scan is linear and does not call marked
-- **GIVEN** the injected tokenize seam replaced by a function that throws
-- **WHEN** the pre-scan classifies a 200 KB `*` run
-- **THEN** it returns the degraded verdict without calling the seam and within the render budget
+#### Scenario: The pre-scan is linear and classifies without calling marked
+- **GIVEN** a 200 KB `*` run
+- **WHEN** `prescan` classifies it
+- **THEN** it returns one degraded span within the render budget, and the tokenizer is not involved in the classification
+
+#### Scenario: A one-line triple-backtick pair is not a fence
+- **GIVEN** the text "```x```", a newline, and 6000 repetitions of `*a `
+- **WHEN** the adapter builds the tree
+- **THEN** the passage is degraded with its notice, in under 200 ms (the unfixed rule took 2736 ms and did not degrade)
+
+#### Scenario: A fence indented four spaces is not a fence
+- **GIVEN** a line of four spaces and three backticks, a newline, and 6000 repetitions of `*a `
+- **WHEN** the adapter builds the tree
+- **THEN** the passage is degraded with its notice, in under 200 ms (the unfixed rule took 2862 ms and did not degrade)
+
+#### Scenario: A backtick fence whose info string holds a backtick is not a fence
+- **GIVEN** a line of three backticks, `a`, a backtick and `b`, followed by a hazard span
+- **WHEN** `prescan` classifies it
+- **THEN** the hazard span is degraded, while the same line written with tildes opens a fence and skips it
+
+#### Scenario: A closing fence needs the opener's run, at most three spaces and only blanks after it
+- **GIVEN** a fenced block whose candidate closers are a shorter run, a four-space-indented run, a run followed by text, a longer run, and a run followed by spaces
+- **WHEN** `prescan` classifies the text after each candidate
+- **THEN** only the longer run and the run followed by spaces close the fence
+
+#### Scenario: A multi-line quote paragraph is one span
+- **GIVEN** 20 lines, each `> ` followed by 290 repetitions of `*a `
+- **WHEN** the adapter builds the tree
+- **THEN** the 20 lines are one span, which is degraded with its notice in under 200 ms (the unfixed rule counted each line alone and took 2392 ms without degrading)
+
+#### Scenario: A quote paragraph ends where marked ends it
+- **GIVEN** quote lines of 400 delimiters each, separated in turn by a lazy line without `>`, a `>`-only line, a blank line, a heading in the quote, a list item in the quote, a plain paragraph before the quote, and a deeper quote
+- **WHEN** `prescan` classifies each
+- **THEN** the lazy line joins the quote paragraph (one degraded span), and every other separator yields spans that are each under the threshold
+
+#### Scenario: A list item and its continuation lines are one span
+- **GIVEN** a list item of 400 delimiters followed by an indented continuation line, or a lazy one, of 400 more
+- **WHEN** `prescan` classifies it
+- **THEN** the item is one span of 800 delimiters and is degraded, while two consecutive items of 400 each are not
 
 ### R1218-2: A degraded passage is announced and the rest of the document still renders
 
-A passage degraded by the pre-scan MUST render as literal text and MUST be preceded or followed by a visible notice reading "a passage with N formatting marks is shown as plain text" (R5), where N is the number of delimiter characters (`*`, `_`, `~`, `[` and `]` only) counted in that passage. Every other passage of the same document MUST render with its normal elements. Each degraded passage MUST carry its own notice, so the notice count equals the degraded-passage count. No degradation MUST be silent. This notice is distinct from the timeout notice (R1218-5), because the cause and the scope differ.
+The document MUST be tokenized ONCE, as a whole, never in pieces. Before that one lex, every delimiter that the pre-scan counts as an opener (`*`, `_`, `~`, `[`) and every backslash inside a degraded passage MUST be backslash-escaped, so marked reads the passage as literal text in linear time and every character shows as typed; a quote prefix or list bullet at the start of a passage line MUST be left unescaped, so a degraded quote stays a quote and a degraded item stays an item. A passage degraded by the pre-scan MUST therefore render as literal text, and every other passage of the same document, including a reference definition that a link elsewhere resolves against and the other items of a list that holds the passage, MUST render with its normal elements. A visible notice reading "a passage with N formatting marks is shown as plain text" (R5), where N is the number of delimiter characters (`*`, `_`, `~`, `[` and `]` only) counted in that passage, MUST be placed immediately before the top-level block that contains the passage, located by the passage's source offset. Each degraded passage MUST carry its own notice, so the notice count equals the degraded-passage count. No degradation MUST be silent. This notice is distinct from the timeout notice (R1218-5), because the cause and the scope differ.
 
 #### Scenario: The notice states N
 - **GIVEN** one paragraph of 700 delimiters
@@ -85,7 +120,7 @@ A passage degraded by the pre-scan MUST render as literal text and MUST be prece
 #### Scenario: Other passages still render
 - **GIVEN** a document with a heading, one degraded paragraph and a later paragraph holding `**bold**`
 - **WHEN** the document is rendered
-- **THEN** the output holds the h1 and one strong element for the later paragraph, and the degraded paragraph appears as literal text with its notice
+- **THEN** the output holds the h1 and one strong element for the later paragraph, and the degraded paragraph appears as literal text after its notice
 
 #### Scenario: Two degraded passages give two notices
 - **GIVEN** a document with two separate paragraphs, each over the threshold
@@ -96,6 +131,26 @@ A passage degraded by the pre-scan MUST render as literal text and MUST be prece
 - **GIVEN** a degraded paragraph whose source is known
 - **WHEN** the document is rendered
 - **THEN** the visible text of the passage equals its source characters
+
+#### Scenario: A reference definition after a degraded passage still resolves
+- **GIVEN** the text "see [docs][r]", a blank line, a run of 60 `*`, a blank line and "[r]: https://example.com/x"
+- **WHEN** the adapter builds the tree
+- **THEN** the first paragraph holds a live link to https://example.com/x and the 60-mark passage carries its notice
+
+#### Scenario: A degraded passage inside a list leaves one list
+- **GIVEN** the items "1. one" and "2. two", a blank line, an indented run of 60 `*`, a blank line and "3. three"
+- **WHEN** the adapter builds the tree
+- **THEN** the tree holds one list of three items, the run of `*` shown as literal text inside the second item, and the notice immediately before that list
+
+#### Scenario: The document is lexed once, on escaped text
+- **GIVEN** the injected tokenize seam recording its calls and a 200 KB `*` run
+- **WHEN** the adapter builds the tree
+- **THEN** the seam is called exactly once, with every `*` preceded by a backslash
+
+#### Scenario: Escaping keeps the tokenizer linear
+- **GIVEN** a 200 KB `*` run with every character backslash-escaped
+- **WHEN** marked tokenizes it
+- **THEN** it returns within 200 ms
 
 ### R1218-3: No real artifact is degraded
 
