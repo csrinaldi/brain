@@ -548,6 +548,17 @@ test('#1218 R1218-8: a missing resume.md with a reason reads as that reason, in 
   assert.equal(NO_CHANGE_BRANCH, 'no change branch in this clone');
 });
 
+test('#1218 R1218-8: an unresolved branch reads "the change branch could not be resolved" in the SDD row and the Working memory tab', () => {
+  for (const reason of ['more than one feat/issue-881-* branch in this clone: a, b', 'git branch --list failed: fatal: not a git repository']) {
+    const resume = { path: 'resume.md', ref: null, commit: null, state: 'unreadable', text: null, reason };
+    const sdd = docsView({ resume }).entries[7].document;
+    assert.equal(sdd.wording, `resume.md: the change branch could not be resolved: ${reason}`);
+    assert.doesNotMatch(sdd.wording, /could not be read at/);
+    const model = buildDrawerModel(view({ documents: { resume }, workingMemory: { ok: false, reason: sdd.wording } }));
+    assert.equal(model.value.tabs[3].reason, sdd.wording);
+  }
+});
+
 test('#1218 R1218-8: the no-branch wording has one source — drawer-model.mjs — and change-route.mjs imports it', () => {
   const here = dirname(fileURLToPath(import.meta.url));
   const owners = ['drawer-model.mjs', join('..', 'change-route.mjs')].filter((f) => readFileSync(join(here, f), 'utf8').includes('no change branch in this clone'));

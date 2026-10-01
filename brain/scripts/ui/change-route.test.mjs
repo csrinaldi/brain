@@ -8,6 +8,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { buildChangeView, REVIEWS_SOURCE_NOTE } from './change-route.mjs';
+import { documentWording } from './lib/drawer-model.mjs';
 import { fakeGit } from './test-support/fake-git.mjs';
 import { execFileSync } from 'node:child_process';
 import { testTmp } from '../lib/test-tmp.mjs';
@@ -595,6 +596,18 @@ test('#1218 R1218-8: a failing `git branch --list` and an ambiguous listing stay
   const two = viewOf(gitFor({ files: allArtifacts(), branches: { 'feat/issue-881-a': { commit: BRANCH_TIP, files: {} }, 'feat/issue-881-b': { commit: BRANCH_TIP, files: {} } } }), makeSnapshot());
   assert.equal(two.documents.resume.state, 'unreadable');
   assert.match(two.documents.resume.reason, /more than one feat\/issue-881-\* branch/);
+});
+
+test('#1218 R1218-8: an unresolved branch (ambiguous or git failed) says the branch could not be resolved, on the Working memory tab and the SDD row', () => {
+  const failing = viewOf(gitFor({ files: allArtifacts(), fail: { branch: 'fatal: not a git repository' } }), makeSnapshot());
+  const two = viewOf(gitFor({ files: allArtifacts(), branches: { 'feat/issue-881-a': { commit: BRANCH_TIP, files: {} }, 'feat/issue-881-b': { commit: BRANCH_TIP, files: {} } } }), makeSnapshot());
+  for (const [view, reason] of [[failing, /git branch --list failed: fatal: not a git repository/], [two, /more than one feat\/issue-881-\* branch/]]) {
+    assert.equal(view.documents.resume.state, 'unreadable');
+    assert.match(view.workingMemory.reason, /^resume\.md: the change branch could not be resolved: /);
+    assert.match(view.workingMemory.reason, reason);
+    assert.doesNotMatch(view.workingMemory.reason, /could not be read at/);
+    assert.equal(documentWording(view.documents.resume), view.workingMemory.reason);
+  }
 });
 
 test('#1218 R1218-8: the Working memory tab and the resume document say the no-branch case in the same words', () => {

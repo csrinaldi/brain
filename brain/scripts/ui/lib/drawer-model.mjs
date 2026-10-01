@@ -131,6 +131,8 @@ export function documentWording(doc) {
   const ref = doc.ref ?? 'the change branch';
   if (doc.state === 'missing' && doc.reason) return `${file}: ${doc.reason}`;
   if (doc.state === 'missing') return `${file} is not committed at ${ref}`;
+  // No ref resolved (ambiguous branch, or git failed listing branches): there is no "at <ref>" to name (#1218 R3).
+  if (doc.state === 'unreadable' && !doc.ref) return `${file}: the change branch could not be resolved: ${doc.reason ?? 'no reason was given'}`;
   if (doc.state === 'unreadable') return `${file} could not be read at ${ref}: ${doc.reason ?? 'no reason was given'}`;
   return null;
 }
