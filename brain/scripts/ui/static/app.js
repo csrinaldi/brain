@@ -50,7 +50,7 @@ function applyTheme(choice) {
 import { buildLaneModel, nodeSummaryFor, childrenOf } from './lib/lane-model.mjs';
 import { issueUrl } from './lib/forge-url.mjs';
 import { buildDrawerModel } from './lib/drawer-model.mjs';
-import { renderOffThread, TIMEOUT_NOTICE, FAILED_NOTICE, UNAVAILABLE_NOTICE } from './lib/render-budget.mjs';
+import { renderOffThread, timeoutNotice, FAILED_NOTICE, UNAVAILABLE_NOTICE } from './lib/render-budget.mjs';
 import { buildSddModel, sddForIssue, buildSlicePlan, STAGE_VOCAB } from './lib/sdd-model.mjs';
 import { searchNodes } from './lib/search-model.mjs';
 import { buildMemoryModel } from './lib/memory-model.mjs';
@@ -1846,7 +1846,7 @@ function renderMdBlocks(parent, blocks) {
   }
 }
 
-const DOC_NOTICES = { timeout: TIMEOUT_NOTICE, failed: FAILED_NOTICE, unavailable: UNAVAILABLE_NOTICE };
+const DOC_NOTICES = { failed: FAILED_NOTICE, unavailable: UNAVAILABLE_NOTICE };
 
 // The worker is created at call time and only when the browser has one; with
 // none, the render says so. There is no main-thread fallback (#1218).
@@ -1901,8 +1901,8 @@ function showDocumentOutcome(section, doc, outcome) {
     const body = el('div', 'md');
     renderMdBlocks(body, outcome.tree.blocks);
     section.appendChild(body);
-  } else if (DOC_NOTICES[outcome.kind]) {
-    section.appendChild(el('p', 'note', DOC_NOTICES[outcome.kind]));
+  } else if (outcome.kind === 'timeout' || DOC_NOTICES[outcome.kind]) {
+    section.appendChild(el('p', 'note', outcome.kind === 'timeout' ? timeoutNotice(outcome.budgetMs) : DOC_NOTICES[outcome.kind]));
     section.appendChild(el('pre', 'md-plain', doc.text));
   }
 }

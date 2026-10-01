@@ -5,13 +5,15 @@
 //
 // Outcomes, as one promise that never rejects:
 //   {kind:'tree', tree}   the worker answered in time
-//   {kind:'timeout'}      the budget ran out
+//   {kind:'timeout', budgetMs}  the budget ran out; budgetMs is the one enforced
 //   {kind:'failed'}       the worker errored, would not start, or sent junk
 //   {kind:'unavailable'}  there is no worker to ask
 //   {kind:'cancelled'}    the caller stopped waiting
 
 export const RENDER_BUDGET_MS = 1500;
-export const TIMEOUT_NOTICE = 'this document was too slow to render (over 1500 ms) and is shown as plain text';
+/** The notice for the budget that was enforced, never a number written by hand. */
+export const timeoutNotice = (budgetMs) => `this document was too slow to render (over ${budgetMs} ms) and is shown as plain text`;
+export const TIMEOUT_NOTICE = timeoutNotice(RENDER_BUDGET_MS);
 export const FAILED_NOTICE = 'this document could not be rendered and is shown as plain text';
 export const UNAVAILABLE_NOTICE = 'this browser cannot render this document off the page, so it is shown as plain text';
 
@@ -41,7 +43,7 @@ export function renderOffThread(text, { spawn, setTimer, clearTimer, budgetMs = 
   };
 
   // The timer starts first, so the budget includes the worker's startup.
-  timer = setTimer(() => settle({ kind: 'timeout' }), budgetMs);
+  timer = setTimer(() => settle({ kind: 'timeout', budgetMs }), budgetMs);
   try {
     worker = typeof spawn === 'function' ? spawn() : null;
   } catch {

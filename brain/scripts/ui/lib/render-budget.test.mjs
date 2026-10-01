@@ -4,7 +4,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { renderOffThread, RENDER_BUDGET_MS, TIMEOUT_NOTICE, FAILED_NOTICE, UNAVAILABLE_NOTICE } from './render-budget.mjs';
+import { renderOffThread, RENDER_BUDGET_MS, TIMEOUT_NOTICE, timeoutNotice, FAILED_NOTICE, UNAVAILABLE_NOTICE } from './render-budget.mjs';
 
 function fakeEffects({ spawnThrows = false, noWorker = false } = {}) {
   const log = [];
@@ -62,7 +62,7 @@ test('#1218 R1218-5: the timer firing resolves timeout and terminates the worker
   const fx = fakeEffects();
   const { promise } = start(fx);
   fx.timers[0].fn();
-  assert.deepEqual(await promise, { kind: 'timeout' });
+  assert.deepEqual(await promise, { kind: 'timeout', budgetMs: 1500 });
   assert.equal(fx.workers[0].terminated, 1);
 });
 
@@ -134,7 +134,7 @@ test('#1218 R1218-7: a message with another id is ignored; a late message after 
   worker.onmessage({ data: { id: idOf(worker) + 1000, ok: true, tree: TREE } });
   assert.equal(worker.terminated, 0);
   fx.timers[0].fn();
-  assert.deepEqual(await promise, { kind: 'timeout' });
+  assert.deepEqual(await promise, { kind: 'timeout', budgetMs: 1500 });
   worker.onmessage({ data: { id: idOf(worker), ok: true, tree: TREE } });
   worker.onerror({});
   assert.equal(worker.terminated, 1);
@@ -173,7 +173,7 @@ test('#1218 R1218-5: many sub-threshold passages are cut at the budget and the t
   const { promise } = renderOffThread(input, realEffects((w) => { worker = w; }));
   const outcome = await promise;
   const elapsed = performance.now() - t0;
-  assert.deepEqual(outcome, { kind: 'timeout' });
+  assert.deepEqual(outcome, { kind: 'timeout', budgetMs: 1500 });
   assert.ok(elapsed < RENDER_BUDGET_MS + 300, `took ${elapsed} ms`);
   await worker.exited;
 });
@@ -195,4 +195,16 @@ test('#1218 R1218-5: a 262000-character block quote settles to a timeout or a tr
   assert.ok(outcome.kind === 'timeout' || outcome.kind === 'tree', `unexpected outcome ${outcome.kind}`);
   assert.ok(elapsed < RENDER_BUDGET_MS + 300, `took ${elapsed} ms`);
   await worker.exited;
+});
+
+test('#1218 R1218-5: the timeout notice states the budget actually enforced, an injected one included', async () => {
+  const fx = fakeEffects();
+  const { promise } = renderOffThread('x', { spawn: fx.spawn, setTimer: fx.setTimer, clearTimer: fx.clearTimer, budgetMs: 300 });
+  assert.equal(fx.timers[0].ms, 300);
+  fx.timers[0].fn();
+  const outcome = await promise;
+  assert.equal(outcome.kind, 'timeout');
+  assert.match(timeoutNotice(outcome.budgetMs), /over 300 ms/);
+  assert.doesNotMatch(timeoutNotice(outcome.budgetMs), /1500/);
+  assert.equal(timeoutNotice(RENDER_BUDGET_MS), TIMEOUT_NOTICE);
 });
