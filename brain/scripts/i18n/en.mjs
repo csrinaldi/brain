@@ -461,6 +461,12 @@ export default {
   'memory.ship.identityAmbient':  'BRAIN_MEMORY_TOKEN is not set — this run authenticated with the ambient session credential.',
   'memory.ship.diverged':         '✗ ship failed — {ref} diverged from origin; nothing was forced. {message}',
   'memory.ship.pushFailed':       '✗ ship failed — the push did not land. {message}',
+  // #1190: the replace path — a same-day re-ship after a squash replaces its own
+  // merged remote lane branch under a lease; these name its two refusals and
+  // the evidence line.
+  'memory.ship.leaseStale':       '✗ ship failed — origin\'s lane branch moved after it was surveyed, so the lease refused the replace; nothing was overwritten, retried or deleted. Run the ship again to re-survey it. {message}',
+  'memory.ship.replaceRefused':   '✗ ship failed — origin refused to replace its merged lane branch, most likely a protection or rule forbidding forced updates on memory/*; nothing was retried or deleted. Allow forced updates on memory/* or delete the merged branch by hand, then ship again. {message}',
+  'memory.ship.replaced':         '✓ replaced {branch} on origin under a lease — pull request #{number} was merged and every record it carried is on main.',
   // #1119: this lookup runs before the push (D4) — a failure here means
   // nothing was pushed, not that the push landed. Retrying is safe: the
   // next run starts over from the same unpushed state.
