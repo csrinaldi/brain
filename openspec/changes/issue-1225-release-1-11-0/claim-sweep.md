@@ -83,7 +83,7 @@ Overclaim found and fixed (counted below): the first draft headline said the fir
 | 53 | Reporter: 8 commits, 1 feat, 5 fix, 2 internal, no migration above 1.10.1 | issue #1225 body (reporter output); `status/release-debt.mjs:22-34` classifies an unprefixed subject (`memory: ...`, #1213) as a fix; no migration entry above 1.10.1 per the issue | YES (count taken from the issue; the classifier rule explains the 5) |
 | 54 | The maintainer ruled A over a 1.10.2 cherry-pick | issue #1225 body | YES |
 | 55 | #1189: on `plainfiles`, the post-merge hook and a pull or `brain:memory:pull` that integrates commits print the `import` refusal | `hooks/post-merge:53`; `memory/cli.mjs:1032-1034`; evidence `issue-1185-.../evidence/brain-test-plainfiles-22-post-merge-hook.txt`, `-43-capturing-pull.txt` | YES |
-| 56 | #1190: a same-day lane re-ship after a squash merge may refuse as diverged | issue #1190 (candidate); `memory/lane/ship.mjs:400,430` produce `memory.ship.diverged` | YES (stated as a candidate) |
+| 56 | #1190: a same-day lane re-ship after a squash merge refuses as diverged, reproduced in both exit runs | `memory/lane/ship.mjs:400,430` produce `memory.ship.diverged`; reproduced in `issue-1185-*/evidence/brain-test-plainfiles-60-seam2-inject.txt` and `issue-1204-*/evidence/plainfiles-61-seam2-inject.txt` | YES (corrected by the orchestrator: the first draft called it an unreproduced candidate) |
 
 ## docs/adoption.md
 

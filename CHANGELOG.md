@@ -113,7 +113,7 @@ not a document, and has none. What a consumer gets, and what it can rely on:
 
 Listed in `docs/KNOWN-LIMITATIONS.md`: #1189 (on `plainfiles`, the post-merge hook, and so a
 `git pull` or `brain:memory:pull` that integrates commits, prints an `import` refusal), #1190 (a same-day lane
-re-ship after a squash merge may refuse as diverged), and the 1.10.1 follow-ups that remain open.
+re-ship after a squash merge refuses as diverged, reproduced in both exit runs), and the 1.10.1 follow-ups that remain open.
 
 ### Why a minor and not a patch
 
