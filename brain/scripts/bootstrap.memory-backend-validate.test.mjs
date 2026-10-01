@@ -46,16 +46,23 @@ const FRAGMENT = fragment('BEGIN memory-backend-validate', 'END memory-backend-v
  * so the test can read it without needing the surrounding env_get/env_set
  * machinery.
  */
-function runFragment(stdinLines, { raw } = {}) {
+function runFragment(stdinLines, { eof } = {}) {
   const script = [
     'set -euo pipefail',
     'I18N_BOOTSTRAP_MEMORY_PROMPT="Which memory backend does this team use? (engram|plainfiles): "',
     FRAGMENT,
     'printf \'%s\' "$MEMORY_BACKEND"',
   ].join('\n');
+  // A closed stdin is /dev/null (`stdio: 'ignore'`), never an empty `input`: how an empty
+  // `input` reaches the child varies by environment, and in the cold reviewer's sandbox it
+  // left `read` blocked (#1209 rev 1). The timeout turns any future hang into a failure
+  // instead of a stalled suite.
   const result = spawnSync('bash', ['-c', script], {
-    input: raw ?? stdinLines.join('\n') + '\n',
+    ...(eof
+      ? { stdio: ['ignore', 'pipe', 'pipe'] }
+      : { input: stdinLines.join('\n') + '\n' }),
     encoding: 'utf8',
+    timeout: 10_000,
   });
   return { backend: result.stdout ?? '', stderr: result.stderr ?? '', status: result.status };
 }
@@ -93,7 +100,7 @@ test('#1205 several empty answers in a row never default to engram', () => {
 });
 
 test('#1205 a closed stdin leaves the backend undeclared (empty), not engram', () => {
-  const result = { ...runFragment([], { raw: '' }) };
+  const result = { ...runFragment([], { eof: true }) };
   result.stdout = result.backend;
   assert.equal(result.status, 0, `EOF must not abort the script; stderr:\n${result.stderr}`);
   assert.equal(result.stdout, '', 'EOF is an undeclared backend, never a guess');
