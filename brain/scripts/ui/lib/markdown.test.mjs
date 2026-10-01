@@ -92,6 +92,15 @@ test('#1198 inline constructs: codespan, strong, em, del, br', () => {
   assert.deepEqual(kids.find((k) => k.t === 'strong').children, [T('s')]);
 });
 
+test('#1198 R1198-6: strikethrough maps to its own del element', () => {
+  const kids = first('a ~~gone~~ b').children;
+  assert.deepEqual(kids.find((k) => k.t === 'del').children, [T('gone')]);
+});
+
+test('#1198 R1198-6: a hard line break maps to its own br element', () => {
+  assert.equal(first('line one  \nline two').children.filter((k) => k.t === 'br').length, 1);
+});
+
 test('#1198 R6: an image is its alt text and never carries the URL', () => {
   const tree = markdownTree('![architecture diagram](https://a.example/x.png) and ![](u)');
   assert.deepEqual(tree.blocks[0].children.filter((k) => k.t === 'text').map((k) => k.text), ['[image: architecture diagram]', ' and ', '[image: ]']);

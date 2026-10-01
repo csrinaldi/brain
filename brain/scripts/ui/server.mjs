@@ -325,7 +325,7 @@ export function createUiServer({
   // D8/D11: the drawer's IO — `buildChangeView` composes the six `ui/lib/**`
   // shapers over the SAME `current` snapshot every other route serves (D1 —
   // one held value, never a per-request recompute); its own `git blame`/
-  // `git show` reads run through the same `run` seam `recomputeAndBroadcast`
+  // `git cat-file` reads run through the same `run` seam `recomputeAndBroadcast`
   // uses above, on the served root's own git dir, never a worktree's.
   async function serveChange(res, issueNumber) {
     if (current === null) await recomputeCurrent();

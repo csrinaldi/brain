@@ -68,7 +68,7 @@ A document whose committed content exceeds 262144 bytes MUST be cut at that cap 
 
 ### R1198-4: One read path, committed content only
 
-Six documents (`proposal.md`, `spec.md`, `design.md`, `tasks.md`, `apply-progress.md`, `verify-report.md`) MUST be read from committed content at HEAD with `git show HEAD:<path>` (R2). `resume.md` MUST be read as `git show <branch>:resume.md` at the change branch's tip, unchanged from today. No document MUST be read from the working tree or the index. `spec.md` and `tasks.md` MUST no longer read the working tree.
+Six documents (`proposal.md`, `spec.md`, `design.md`, `tasks.md`, `apply-progress.md`, `verify-report.md`) MUST be read from the committed content at the resolved HEAD commit (R2). `resume.md` MUST be read from the committed content at the change branch's tip, resolved to a commit once, so the stamp names the commit the text came from. No command is prescribed. No document MUST be read from the working tree or the index. `spec.md` and `tasks.md` MUST no longer read the working tree.
 
 #### Scenario: An uncommitted edit is not shown
 - **GIVEN** `spec.md` committed at HEAD with three requirements and a working-tree edit that adds a fourth
@@ -111,7 +111,7 @@ Every document in a `present` or `truncated` state MUST carry a stamp `{path, co
 
 ### R1198-6: The renderer produces the full artifact subset as elements
 
-The renderer MUST turn markdown text into elements for exactly this subset: headings (h1-h4 at least), paragraphs, nested ordered and unordered lists, task items (`- [ ]` / `- [x]`), GFM tables, fenced code blocks, block quotes, horizontal rules, and inline code, bold, italic and links. Any construct outside the subset MUST render as its literal source text. Each construct MUST map to its own element type, so removing one construct's rule fails that construct's test.
+The renderer MUST turn markdown text into elements for exactly this subset: headings (h1-h4 at least), paragraphs, nested ordered and unordered lists, task items (`- [ ]` / `- [x]`), GFM tables, fenced code blocks, block quotes, horizontal rules, and inline code, bold, italic, strikethrough (`del`), hard line breaks (`br`) and links. Any construct outside the subset MUST render as its literal source text. Each construct MUST map to its own element type, so removing one construct's rule fails that construct's test.
 
 #### Scenario: Block constructs map to elements
 - **GIVEN** markdown with a `##` heading, a paragraph, a blockquote and a `---` rule
@@ -193,7 +193,7 @@ A link MUST become an anchor only when its target, after the normalization below
 
 ### R1198-9: HTML is literal text
 
-Any HTML in a document, whether a block, an inline tag or a comment, MUST render as visible literal text (R5). It MUST NOT be parsed, dropped or executed. No element other than those the subset names MUST be created from document content.
+Any HTML in a document, whether a block, an inline tag or a comment, MUST render as visible literal text (R5). It MUST NOT be parsed, dropped or executed. No element other than those the R1198-6 subset names (including `del` and `br`) MUST be created from document content.
 
 #### Scenario: A script tag is shown, not run
 - **GIVEN** the markdown `<script>alert(1)</script>`
@@ -302,7 +302,7 @@ For identical input text the adapter MUST return an identical tree and the DOM b
 
 ### R1198-15: Spec raw text and spec cards come from one read
 
-The `spec` document text and the spec cards MUST derive from a single `git show HEAD:<path>` read of `spec.md`, so the two cannot disagree. The count of `### R<n>-<m>:` headings in the raw text MUST equal the number of cards.
+The `spec` document text and the spec cards MUST derive from a single read of the committed content of `spec.md` at the resolved HEAD commit, so the two cannot disagree. The count of `### R<n>-<m>:` headings in the raw text MUST equal the number of cards.
 
 #### Scenario: Raw text and cards agree on the requirement count
 - **GIVEN** a committed `spec.md` with four requirement headings

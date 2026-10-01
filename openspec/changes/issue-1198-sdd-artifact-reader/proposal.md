@@ -27,7 +27,7 @@ The drawer shows most SDD artifacts as presence only. `spec` renders as cards, `
 | # | Ruling |
 |---|---|
 | R1 | A relative link renders as inert text showing its path. It is never a live link. |
-| R2 | All 7 documents come from committed content (`git show HEAD:<path>`), including `spec.md` and `tasks.md`, which today read the working tree. There is one read path. The exception is `resume.md`: it is branch-local working memory and is already read as `git show <branch>:resume.md` (`change-route.mjs:131`). That read is committed content too, at the change branch's tip rather than HEAD, and it stays as is. |
+| R2 | All 7 documents come from committed content at the resolved HEAD commit, including `spec.md` and `tasks.md`, which today read the working tree. There is one read path. The exception is `resume.md`: it is branch-local working memory and is read from committed content at the change branch's tip rather than HEAD, resolved to a commit once and read by blob sha, so the stamp names the commit the text came from. |
 | R3 | Documents are capped at 256 KB. A capped document carries the note "truncated at N bytes". |
 | R4 | Documents are read in the existing SDD tab. Each stage row expands to show its document. No new tabs are added. |
 | R5 | An HTML comment renders as visible literal text. |
@@ -61,7 +61,7 @@ The drawer shows most SDD artifacts as presence only. `spec` renders as cards, `
   - every other link passes through a scheme allowlist.
   The tree shape stays ours, so the DOM builder does not depend on marked's token format.
 - **The DOM builder in `static/app.js`** turns the tree into elements using `textContent` only.
-- **`change-route.mjs`** adds a `documents` payload. A single `git show HEAD:<path>` read feeds both the raw text and the existing spec cards, so the two cannot disagree.
+- **`change-route.mjs`** adds a `documents` payload. A single read of the committed blob at the resolved HEAD commit feeds both the raw text and the existing spec cards, so the two cannot disagree.
 
 **Rejected:**
 - **A hand-written tokenizer** (about 380 lines). It re-implements CommonMark and GFM tables and carries the edge cases ourselves.

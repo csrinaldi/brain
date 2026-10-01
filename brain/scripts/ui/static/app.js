@@ -2032,7 +2032,7 @@ function subscribe() {
       state = applyFrame(state, name, parsed.frame);
       render();
       // Q3/A2: a worktree's head moved, so the open drawer's Working memory
-      // tab (`git show <branch>:resume.md`) is the one value the snapshot
+      // tab (`resume.md` read at the branch tip) is the one value the snapshot
       // diff cannot refresh on its own.
       if (name === 'refs' && selectedIssue !== null) loadChange(selectedIssue);
     });
