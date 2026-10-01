@@ -327,6 +327,7 @@ test('#1198 XSS fixture: no node carries an href but an http(s) one, and the scr
 // ── #1218 pre-scan: pathological inline spans degrade to announced plain text ──
 
 import { prescan } from './markdown.mjs';
+import { Lexer } from '../vendor/marked.esm.js';
 
 const NOTICE = (n) => `a passage with ${n} formatting marks is shown as plain text`;
 const degradedBlocks = (tree) => tree.blocks.filter((b) => b.t === 'degraded');
@@ -402,7 +403,7 @@ test('#1218 R1218-1: a blank line, a heading and a quote marker each reset the c
   const part = 'a*'.repeat(400);
   assert.equal(degradedBlocks(markdownTree(`${part}\n\n${part}`)).length, 0);
   assert.equal(degradedBlocks(markdownTree(`${part}\n# h\n${part}`)).length, 0);
-  assert.equal(degradedBlocks(markdownTree(`> ${part}\n> ${part}`)).length, 0);
+  assert.equal(degradedBlocks(markdownTree(`> ${part}\n>\n> ${part}`)).length, 0);
   assert.equal(degradedBlocks(markdownTree(`${part}\n${part}`)).length, 1);
 });
 
@@ -514,4 +515,49 @@ test('#1218 cold-1: up to three leading spaces still open a fence; a closer need
   assert.equal(degraded(`\`\`\`\n${stars}\n\`\`\`\`\n${stars}`), 1);
   // trailing spaces after the closer are fine
   assert.equal(degraded(`\`\`\`\n${stars}\n\`\`\`  \n${stars}`), 1);
+});
+
+// ── #1218 cold-3: a multi-line quote paragraph is one span, as it is to marked ──
+
+const degradedCount = (src) => prescan(src).filter((s) => s.degraded).length;
+
+test('#1218 cold-3: 20 quote lines of one paragraph are one span and degrade in under 200 ms', () => {
+  const input = Array.from({ length: 20 }, () => `> ${'*a '.repeat(290)}`).join('\n');
+  const { value, ms } = timed(() => markdownTree(input));
+  assert.equal(degradedBlocks(value).length, 1);
+  assert.ok(ms < 200, `took ${ms} ms`);
+});
+
+test('#1218 cold-3: a quote paragraph continues lazily, and ends at a blank, an empty quote line, or a block of its own', () => {
+  const part = 'a*'.repeat(400);
+  assert.equal(degradedCount(`> ${part}\n${part}`), 1, 'lazy continuation joins');
+  assert.equal(degradedCount(`> ${part}\n> ${part}`), 1);
+  assert.equal(degradedCount(`> ${part}\n>\n> ${part}`), 0, 'an empty quote line ends it');
+  assert.equal(degradedCount(`> ${part}\n\n> ${part}`), 0, 'a blank line ends it');
+  assert.equal(degradedCount(`> ${part}\n> # h\n> ${part}`), 0);
+  assert.equal(degradedCount(`> ${part}\n> - ${part}`), 0, 'a list inside the quote is its own span');
+  assert.equal(degradedCount(`${part}\n> ${part}`), 0, 'a quote interrupts a plain paragraph');
+  assert.equal(degradedCount(`>> ${part}\n> ${part}`), 1, 'marked joins a shallower lazy line');
+  assert.equal(degradedCount(`> ${part}\n>> ${part}`), 0, 'a deeper quote is a new block');
+});
+
+test('#1218 cold-3: a list item and its continuation lines are one span', () => {
+  const part = 'a*'.repeat(400);
+  assert.equal(degradedCount(`- ${part}\n  ${part}`), 1);
+  assert.equal(degradedCount(`- ${part}\n${part}`), 1);
+  assert.equal(degradedCount(`- ${part}\n- ${part}`), 0);
+});
+
+test('#1218 cold-3: marked itself joins what the span rule joins', () => {
+  const kinds = (src) => Lexer.lex(src, { gfm: true }).map((t) => t.type);
+  assert.deepEqual(kinds('> a\n> b'), ['blockquote']);
+  const quote = Lexer.lex('> a\nb', { gfm: true })[0];
+  assert.equal(quote.tokens.length, 1);
+  const item = Lexer.lex('- a\n  b\nc', { gfm: true })[0].items[0];
+  assert.equal(item.tokens.length, 1);
+});
+
+test('#1218 cold-3: a 262000-character quote prefix is scanned in linear time', () => {
+  const { ms } = timed(() => prescan('>'.repeat(262000)));
+  assert.ok(ms < 200, `took ${ms} ms`);
 });

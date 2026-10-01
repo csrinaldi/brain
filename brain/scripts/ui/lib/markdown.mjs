@@ -38,7 +38,8 @@ const defaultLex = (text, options) => Lexer.lex(text, options);
 const MAX_MARKS = 600;
 const MAX_RUN = 50;
 const BLANK = /^\s*$/;
-const BLOCK_START = /^(?:\s*(?:[-+*]|\d{1,9}[.)])(?:\s|$)| {0,3}#{1,6}(?:\s|$)| {0,3}>|\s*\|)/;
+// What starts a block of its own once any quote prefix is gone.
+const BLOCK_START = /^(?:\s*(?:[-+*]|\d{1,9}[.)])(?:\s|$)| {0,3}#{1,6}(?:\s|$)|\s*\|)/;
 // marked's own fence rule (vendor/marked.esm.js, block `fences`), line by line:
 // at most three leading spaces; a backtick run of three or more whose info
 // string holds no backtick, or a tilde run of three or more. A closer is at most
@@ -50,6 +51,23 @@ const closesFence = (line, opener) => {
   const rest = /^ {0,3}(.*)$/.exec(line)[1];
   return rest.startsWith(opener) && FENCE_TAIL.test(rest.slice(opener.length));
 };
+
+// Quote depth and the text after the prefix, in one linear pass: a quote marker
+// is up to three spaces, `>`, and one optional space, repeated.
+function unquote(line) {
+  let pos = 0;
+  let depth = 0;
+  for (;;) {
+    let p = pos;
+    while (p < line.length && p - pos < 3 && line.charCodeAt(p) === 32) p++;
+    if (line.charCodeAt(p) !== 62) break;
+    p++;
+    if (line.charCodeAt(p) === 32) p++;
+    pos = p;
+    depth++;
+  }
+  return { depth, rest: depth === 0 ? line : line.slice(pos) };
+}
 const isDelimiter = (code) => code === 42 || code === 95 || code === 126 || code === 91 || code === 93;
 
 function countLine(line) {
@@ -87,7 +105,8 @@ export function prescan(body) {
     if (open) {
       open.to = to;
       open.degraded = open.marks > MAX_MARKS || open.longestRun > MAX_RUN;
-      spans.push(open);
+      const { quote, ...span } = open;
+      spans.push(span);
       open = null;
     }
   };
@@ -103,12 +122,16 @@ export function prescan(body) {
       fence = opener[1];
       continue;
     }
-    if (BLANK.test(line)) {
+    // marked lexes a quote's lines as one paragraph (lazy lines included) until a
+    // blank or empty quote line, a block of its own, or a deeper quote.
+    const { depth, rest } = unquote(line);
+    if (BLANK.test(rest)) {
       close(i);
       continue;
     }
-    if (BLOCK_START.test(line)) close(i);
-    if (!open) open = { from: i, to: i, marks: 0, longestRun: 0, degraded: false };
+    if (BLOCK_START.test(rest)) close(i);
+    else if (depth > 0 && open && depth > open.quote) close(i);
+    if (!open) open = { from: i, to: i, marks: 0, longestRun: 0, degraded: false, quote: depth };
     const { marks, longest } = countLine(line);
     open.marks += marks;
     if (longest > open.longestRun) open.longestRun = longest;
