@@ -292,6 +292,18 @@ test('PR3 bootstrap: SDD harness section keys exist in en', () => {
   assert.equal(en['bootstrap.sdd.unknownHarness'],     "harness '{harness}' has no known init routine — configure its skills manually");
 });
 
+// #1214: the prompt names both backends and carries NO bracketed default (ADR-0004 Amendment 3),
+// in every catalog — a catalog could otherwise regain `[engram]` with every test green.
+test('#1214 bootstrap.memory.prompt: no bracketed default, names both backends (en, es)', () => {
+  for (const [lang, cat] of [['en', en], ['es', es]]) {
+    const prompt = cat['bootstrap.memory.prompt'];
+    assert.match(prompt, /engram/, `${lang} prompt must name engram`);
+    assert.match(prompt, /plainfiles/, `${lang} prompt must name plainfiles`);
+    assert.doesNotMatch(prompt, /\[[^\]]*\]/, `${lang} prompt must carry no bracketed default`);
+  }
+  assert.equal(es['bootstrap.memory.prompt'], '¿Qué backend de memoria usa este equipo? (engram|plainfiles): ');
+});
+
 test('PR3 bootstrap: team memory section keys exist in en', () => {
   assert.equal(en['bootstrap.memory.section'],         'Team memory');
   assert.equal(en['bootstrap.memory.prompt'],          'Which memory backend does this team use? (engram|plainfiles): ');

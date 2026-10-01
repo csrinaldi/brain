@@ -20,7 +20,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -46,7 +47,7 @@ const FRAGMENT = fragment('BEGIN memory-backend-validate', 'END memory-backend-v
  * so the test can read it without needing the surrounding env_get/env_set
  * machinery.
  */
-function runFragment(stdinLines, { eof } = {}) {
+function runFragment(stdinLines, { eof, raw } = {}) {
   const script = [
     'set -euo pipefail',
     'I18N_BOOTSTRAP_MEMORY_PROMPT="Which memory backend does this team use? (engram|plainfiles): "',
@@ -60,7 +61,7 @@ function runFragment(stdinLines, { eof } = {}) {
   const result = spawnSync('bash', ['-c', script], {
     ...(eof
       ? { stdio: ['ignore', 'pipe', 'pipe'] }
-      : { input: stdinLines.join('\n') + '\n' }),
+      : { input: raw ?? stdinLines.join('\n') + '\n' }),
     encoding: 'utf8',
     timeout: 10_000,
   });
@@ -115,4 +116,80 @@ test('#1112 re-prompts as many times as needed before accepting a valid value', 
   assert.equal(backend, 'plainfiles');
   const rejections = (stderr.match(/Unknown backend/g) || []).length;
   assert.equal(rejections, 3, `expected exactly 3 rejections before the valid answer; stderr:\n${stderr}`);
+});
+
+// #1214 correction 1: `read` returns non-zero at EOF even when it filled the variable (a final
+// line with no trailing newline). That answer was typed; discarding it left the backend
+// undeclared after the operator typed `plainfiles` then Ctrl-D.
+test('#1214 a valid answer without a trailing newline is kept', () => {
+  const { backend, status } = runFragment([], { raw: 'plainfiles' });
+  assert.equal(status, 0);
+  assert.equal(backend, 'plainfiles');
+});
+
+test('#1214 a valid engram answer without a trailing newline is kept', () => {
+  assert.equal(runFragment([], { raw: 'engram' }).backend, 'engram');
+});
+
+test('#1214 an invalid answer at EOF is undeclared and does not loop forever', () => {
+  const { backend, status } = runFragment([], { raw: 'typo' });
+  assert.equal(status, 0, 'must terminate (the spawn timeout would give a null status)');
+  assert.equal(backend, '');
+});
+
+// #1214 correction 3: the caller block after the fragment. Lifted between its own markers and
+// driven with `node` and `warn` stubbed as shell functions, so nothing touches a real config.
+const DECLARE = fragment('BEGIN memory-backend-declare', 'END memory-backend-declare');
+
+function runDeclare(answer, { nodeExit = 0 } = {}) {
+  const dir = mkdtempSync(join(tmpdir(), 'brain-1214-'));
+  const log = join(dir, 'node.log');
+  const script = [
+    'set -euo pipefail',
+    'BRAIN_SCRIPTS=/stub',
+    'I18N_BOOTSTRAP_MEMORY_UNDECLARED=UNDECLARED',
+    'I18N_BOOTSTRAP_MEMORY_DECLARED=DECLARED',
+    'I18N_BOOTSTRAP_MEMORY_DECLAREFAILED="FAILED %s"',
+    'MISSING_OPTIONAL=()',
+    '_mb_source=""',
+    'warn() { printf "warn:%s\\n" "$1"; }',
+    // The caller sends node's output to /dev/null, so the stub records its argv in a file.
+    `node() { printf "node:%s\\n" "$*" >> ${JSON.stringify(log)}; return ${nodeExit}; }`,
+    `MEMORY_BACKEND=${JSON.stringify(answer)}`,
+    DECLARE,
+    'printf "missing:%s\\n" "${MISSING_OPTIONAL[*]:-}"',
+    'printf "source:%s\\n" "$_mb_source"',
+  ].join('\n');
+  const result = spawnSync('bash', ['-c', script], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+    encoding: 'utf8',
+    timeout: 10_000,
+  });
+  const nodeCalls = existsSync(log) ? readFileSync(log, 'utf8') : '';
+  rmSync(dir, { recursive: true, force: true });
+  return { out: (result.stdout ?? '') + nodeCalls, stderr: result.stderr ?? '', status: result.status };
+}
+
+test('#1214 undeclared: warns, records MISSING_OPTIONAL and writes nothing to config', () => {
+  const { out, status } = runDeclare('');
+  assert.equal(status, 0);
+  assert.match(out, /warn:UNDECLARED/);
+  assert.match(out, /missing:memory backend undeclared/);
+  assert.doesNotMatch(out, /node:/, 'config/cli.mjs set must not run when nothing was declared');
+});
+
+test('#1214 declared: calls config/cli.mjs set memory.backend <value>', () => {
+  const { out, status } = runDeclare('plainfiles');
+  assert.equal(status, 0);
+  assert.match(out, /node:\/stub\/config\/cli\.mjs set memory\.backend plainfiles/);
+  assert.match(out, /warn:DECLARED/);
+  assert.match(out, /source:config/);
+  assert.doesNotMatch(out, /UNDECLARED/);
+});
+
+test('#1214 declared but the config write fails: reported, source falls back to prompt', () => {
+  const { out } = runDeclare('engram', { nodeExit: 1 });
+  assert.match(out, /warn:FAILED engram/);
+  assert.match(out, /missing:memory backend not saved/);
+  assert.match(out, /source:prompt/);
 });

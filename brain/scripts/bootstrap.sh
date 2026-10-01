@@ -587,7 +587,13 @@ case "$_mb_rc" in
       # it empty — the caller then takes the existing undeclared path.
       _membackend_answer=""
       while :; do
-        read -r -p "  $I18N_BOOTSTRAP_MEMORY_PROMPT" _membackend_answer || { _membackend_answer=""; break; }
+        # At EOF `read` returns non-zero even when it filled the variable (a final line with no
+        # trailing newline, or Ctrl-D after typing). Keep what was read when it is a valid
+        # backend; only an empty or invalid answer at EOF is undeclared (issue #1214).
+        if ! read -r -p "  $I18N_BOOTSTRAP_MEMORY_PROMPT" _membackend_answer; then
+          case "$_membackend_answer" in engram|plainfiles) ;; *) _membackend_answer="" ;; esac
+          break
+        fi
         case "$_membackend_answer" in
           engram|plainfiles) break ;;
           '') ;;
@@ -596,6 +602,7 @@ case "$_mb_rc" in
       done
       MEMORY_BACKEND="$_membackend_answer"
       # --- END memory-backend-validate ---
+      # --- BEGIN memory-backend-declare (issue #1214) ---
       if [ -z "$MEMORY_BACKEND" ]; then
         # Closed stdin: nothing was answered and nothing is guessed.
         warn "$I18N_BOOTSTRAP_MEMORY_UNDECLARED"
@@ -613,6 +620,7 @@ case "$_mb_rc" in
           _mb_source="prompt"
         fi
       fi
+      # --- END memory-backend-declare ---
     else
       warn "$I18N_BOOTSTRAP_MEMORY_UNDECLARED"
       MISSING_OPTIONAL+=("memory backend undeclared (next: npm run brain:config -- set memory.backend engram|plainfiles, then re-run env:init)")

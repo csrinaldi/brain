@@ -433,7 +433,8 @@ const ALLOWLIST = [
   // ── #1112 cold-review follow-up (blockers 2/3): more bootstrap.sh
   //    fragments, lifted verbatim into scratch/fixture dirs — none imports
   //    or calls a VCS/gh port.
-  { file: 'brain/scripts/bootstrap.memory-backend-validate.test.mjs', entrypoint: '<unresolved>', line: 60, reason: 'no-vcs-capability' },
+  { file: 'brain/scripts/bootstrap.memory-backend-validate.test.mjs', entrypoint: '<unresolved>', line: 61, reason: 'no-vcs-capability' },
+  { file: 'brain/scripts/bootstrap.memory-backend-validate.test.mjs', entrypoint: '<unresolved>', line: 163, reason: 'no-vcs-capability' },
   { file: 'brain/scripts/bootstrap.pat-secret-guard.test.mjs', entrypoint: '<unresolved>', line: 58, reason: 'no-vcs-capability' },
   // #1112 cold-review round 3 (blocker 1, symlink handling): shifted from
   // line 113 by the new symlink/non-regular-file tests added above it.
