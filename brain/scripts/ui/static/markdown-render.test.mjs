@@ -30,6 +30,7 @@ const RICH = [
   '# Title', '', 'para with `code` and **bold** and [rel](./design.md)', '',
   '- [x] done', '- [ ] open', '', '3. three', '4. four', '',
   '| a | b |', '|:-|-:|', '| 1 | 2 |', '', '> quote', '', '---', '', '```js', '<b>raw</b>', '```', '',
+  'struck ~~gone~~ then a hard break  ', 'next line', '',
 ].join('\n');
 
 async function boot({ proposal = XSS, resume = '---\nnext_action: go\n---\n\nresume **body**\n', design } = {}) {
@@ -126,7 +127,7 @@ test('#1198 R1198-16: the expanded state survives a drawer re-render (a tab swit
   assert.ok(find(again.row, (n) => n.tagName === 'SECTION'));
 });
 
-test('#1198 R1198-6: the page maps blocks to elements — headings, lists, task marks, tables, code, quote, hr, inert links', async (t) => {
+test('#1198 R1198-6: the page maps blocks to elements — headings, lists, task marks, tables, code, quote, hr, del, br, inert links', async (t) => {
   const dom = await boot({ proposal: RICH });
   t.after(() => dom.restore());
   await openSdd(dom);
@@ -144,6 +145,9 @@ test('#1198 R1198-6: the page maps blocks to elements — headings, lists, task 
   assert.equal(tags('HR').length, 1);
   assert.equal(tags('PRE')[0].textContent, '<b>raw</b>');
   assert.equal(tags('B').length, 0, 'fenced code interprets nothing');
+  assert.equal(tags('DEL').length, 1, 'strikethrough is part of the R1198-6 subset');
+  assert.equal(tags('DEL')[0].textContent, 'gone');
+  assert.equal(tags('BR').length, 1, 'a hard line break is part of the R1198-6 subset');
   const inert = find(row, byClass('md-inert'));
   assert.match(inert.textContent, /rel/);
   assert.equal(find(inert, (n) => n.tagName === 'CODE').textContent, './design.md');
