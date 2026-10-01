@@ -17,13 +17,13 @@
 const FIELDS = ['next_action', 'current_slice', 'blockers'];
 
 /**
- * shapeResumeView({frontmatter, branch}) -> {next_action, current_slice, blockers}
+ * shapeResumeView({frontmatter, branch, path}) -> {next_action, current_slice, blockers}
  * — each a drawer field `{ok:true, value, source} | {ok:false, reason, source?}`.
  *
- * @param {{frontmatter: Record<string, unknown>|null, branch: string}} input
+ * @param {{frontmatter: Record<string, unknown>|null, branch: string, path?: string}} input
  */
-export function shapeResumeView({ frontmatter, branch } = {}) {
-  const source = { path: `${branch}:resume.md` };
+export function shapeResumeView({ frontmatter, branch, path = 'resume.md' } = {}) {
+  const source = { path: `${branch}:${path}` };
   const out = {};
   for (const key of FIELDS) {
     const value = frontmatter?.[key];

@@ -182,7 +182,7 @@ function sddEntries(items, documents) {
       title: 'working memory \u2014 resume.md',
       file: 'resume.md',
       detail: view.state === 'present' || view.state === 'truncated' ? 'present' : view.state,
-      source: { path: resume.ref ? `${resume.ref}:resume.md` : 'resume.md' },
+      source: { path: resume.ref ? `${resume.ref}:${resume.path}` : resume.path },
       pending: view.text === null,
       document: view,
     }));

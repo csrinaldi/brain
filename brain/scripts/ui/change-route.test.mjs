@@ -17,6 +17,7 @@ const ISSUE = 881;
 const CHANGE_DIR = 'openspec/changes/issue-881-ui-server-canvas';
 const BRANCH = 'feat/issue-881-slice-3-lib';
 const TASKS_PATH = `${CHANGE_DIR}/tasks.md`;
+const RESUME_PATH = `${CHANGE_DIR}/resume.md`; // the writer's path (#1201 R2), never the branch root
 
 const SPEC_TEXT = [
   '### R881-8: the inspector drawer, four tabs, every value sourced',
@@ -60,7 +61,7 @@ function gitFor({ spec = SPEC_TEXT, tasks = TASKS_TEXT, files = {}, branches = {
   if (spec !== null) committed[`${CHANGE_DIR}/spec.md`] = spec;
   if (tasks !== null) committed[`${CHANGE_DIR}/tasks.md`] = tasks;
   const refs = { ...branches };
-  if (resume !== undefined) refs[BRANCH] = { commit: BRANCH_TIP, files: resume === null ? {} : { 'resume.md': resume } };
+  if (resume !== undefined) refs[BRANCH] = { commit: BRANCH_TIP, files: resume === null ? {} : { [RESUME_PATH]: resume } };
   return fakeGit({ files: committed, head: HEAD, branches: refs, blame, fail });
 }
 
@@ -88,8 +89,8 @@ test('#881: a change dir + an open PR resolves the branch from the PR, never cal
   assert.equal(result.value.spec.ok, true);
   assert.equal(result.value.spec.value.length, 1);
   assert.equal(result.value.workingMemory.ok, true);
-  assert.deepEqual(result.value.workingMemory.value.next_action, { ok: true, value: 'ship change-route.mjs', source: { path: `${BRANCH}:resume.md` } });
-  assert.deepEqual(result.value.workingMemory.value.blockers, { ok: true, value: [], source: { path: `${BRANCH}:resume.md` } });
+  assert.deepEqual(result.value.workingMemory.value.next_action, { ok: true, value: 'ship change-route.mjs', source: { path: `${BRANCH}:${RESUME_PATH}` } });
+  assert.deepEqual(result.value.workingMemory.value.blockers, { ok: true, value: [], source: { path: `${BRANCH}:${RESUME_PATH}` } });
   assert.ok(!run.calls.some((args) => args[0] === 'branch'), 'a PR headBranch is authoritative — no branch listing needed');
   assert.ok(!run.calls.some((args) => args[0] === 'show'), 'resume.md is read as a blob at the resolved commit, never `git show <branch>:`');
 });
@@ -179,9 +180,9 @@ test('#881: a resolved branch with a committed resume.md shapes all three ruling
   const result = buildChangeView({ issue: ISSUE, snapshot, _run: run });
   assert.equal(result.value.workingMemory.ok, true);
   const { next_action: nextAction, current_slice: currentSlice, blockers } = result.value.workingMemory.value;
-  assert.deepEqual(nextAction, { ok: true, value: 'ship change-route.mjs', source: { path: `${BRANCH}:resume.md` } });
-  assert.deepEqual(currentSlice, { ok: true, value: '3', source: { path: `${BRANCH}:resume.md` } }); // parseFrontmatter scalars are always strings
-  assert.deepEqual(blockers, { ok: true, value: [], source: { path: `${BRANCH}:resume.md` } });
+  assert.deepEqual(nextAction, { ok: true, value: 'ship change-route.mjs', source: { path: `${BRANCH}:${RESUME_PATH}` } });
+  assert.deepEqual(currentSlice, { ok: true, value: '3', source: { path: `${BRANCH}:${RESUME_PATH}` } }); // parseFrontmatter scalars are always strings
+  assert.deepEqual(blockers, { ok: true, value: [], source: { path: `${BRANCH}:${RESUME_PATH}` } });
 });
 
 // ── 9. reviews with two rounds ───────────────────────────────────────────────
@@ -443,7 +444,7 @@ test('#1198 R1198-2: a failing cat-file makes only that document unreadable, wit
 });
 
 test('#1198 R1198-2: a tree or a symlink in the artifact slot is unreadable, and missing and unreadable are worded differently', () => {
-  const run = fakeGit({ files: allArtifacts(), head: HEAD, modes: { [docPath('design')]: '120000' }, trees: [docPath('verify')], branches: { [BRANCH]: { commit: BRANCH_TIP, files: { 'resume.md': RESUME_TEXT } } }, blame: '' });
+  const run = fakeGit({ files: allArtifacts(), head: HEAD, modes: { [docPath('design')]: '120000' }, trees: [docPath('verify')], branches: { [BRANCH]: { commit: BRANCH_TIP, files: { [RESUME_PATH]: RESUME_TEXT } } }, blame: '' });
   const { documents } = viewOf(run);
   assert.equal(documents.design.state, 'unreadable');
   assert.match(documents.design.reason, /symlink/);
@@ -560,8 +561,8 @@ test('#1198 cold-1: resume.md is stamped and read at ONE resolved commit, even w
   const TEXT_A = `${RESUME_TEXT}\nfrom A`;
   const TEXT_B = `${RESUME_TEXT}\nfrom B, a longer and different body`;
   const base = { files: allArtifacts(), head: HEAD, blame: '' };
-  const before = fakeGit({ ...base, branches: { [BRANCH]: { commit: TIP_A, files: { 'resume.md': TEXT_A } }, [TIP_A]: { commit: TIP_A, files: { 'resume.md': TEXT_A } } } });
-  const after = fakeGit({ ...base, branches: { [BRANCH]: { commit: TIP_B, files: { 'resume.md': TEXT_B } }, [TIP_A]: { commit: TIP_A, files: { 'resume.md': TEXT_A } }, [TIP_B]: { commit: TIP_B, files: { 'resume.md': TEXT_B } } } });
+  const before = fakeGit({ ...base, branches: { [BRANCH]: { commit: TIP_A, files: { [RESUME_PATH]: TEXT_A } }, [TIP_A]: { commit: TIP_A, files: { [RESUME_PATH]: TEXT_A } } } });
+  const after = fakeGit({ ...base, branches: { [BRANCH]: { commit: TIP_B, files: { [RESUME_PATH]: TEXT_B } }, [TIP_A]: { commit: TIP_A, files: { [RESUME_PATH]: TEXT_A } }, [TIP_B]: { commit: TIP_B, files: { [RESUME_PATH]: TEXT_B } } } });
   const calls = [];
   let advanced = false;
   const run = (file, args, opts) => {
@@ -632,9 +633,9 @@ test('#1218 R1218-8: a change branch that was created and then deleted is missin
 
 test('#1198 cold-2: the Working memory tab tells an unreadable resume.md from a missing one, in the SDD row\'s own words', () => {
   const unreadables = {
-    symlink: fakeGit({ files: allArtifacts(), head: HEAD, modes: { 'resume.md': '120000' }, branches: { [BRANCH]: { commit: BRANCH_TIP, files: { 'resume.md': RESUME_TEXT } } }, blame: '' }),
-    tree: fakeGit({ files: allArtifacts(), head: HEAD, trees: ['resume.md'], branches: { [BRANCH]: { commit: BRANCH_TIP, files: { 'resume.md': RESUME_TEXT } } }, blame: '' }),
-    oversize: fakeGit({ files: allArtifacts(), head: HEAD, sizes: { 'resume.md': 9 * 1024 * 1024 }, branches: { [BRANCH]: { commit: BRANCH_TIP, files: { 'resume.md': RESUME_TEXT } } }, blame: '' }),
+    symlink: fakeGit({ files: allArtifacts(), head: HEAD, modes: { [RESUME_PATH]: '120000' }, branches: { [BRANCH]: { commit: BRANCH_TIP, files: { [RESUME_PATH]: RESUME_TEXT } } }, blame: '' }),
+    tree: fakeGit({ files: allArtifacts(), head: HEAD, trees: [RESUME_PATH], branches: { [BRANCH]: { commit: BRANCH_TIP, files: { [RESUME_PATH]: RESUME_TEXT } } }, blame: '' }),
+    oversize: fakeGit({ files: allArtifacts(), head: HEAD, sizes: { [RESUME_PATH]: 9 * 1024 * 1024 }, branches: { [BRANCH]: { commit: BRANCH_TIP, files: { [RESUME_PATH]: RESUME_TEXT } } }, blame: '' }),
   };
   for (const [kind, run] of Object.entries(unreadables)) {
     const view = viewOf(run);

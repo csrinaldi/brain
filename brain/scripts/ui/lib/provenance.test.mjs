@@ -106,7 +106,7 @@ test('#881: change-route.mjs\'s composed view — every Spec/Tasks/Working-memor
       ].join('\n'),
       [`${changeDir}/tasks.md`]: '- [x] ship it\n',
     },
-    branches: { [BRANCH]: { commit: 'f'.repeat(40), files: { 'resume.md': '---\nnext_action: ship it\ncurrent_slice: 3\nblockers:\n---\n' } } },
+    branches: { [BRANCH]: { commit: 'f'.repeat(40), files: { [`${changeDir}/resume.md`]: '---\nnext_action: ship it\ncurrent_slice: 3\nblockers:\n---\n' } } },
     blame: [
       'abc1234abc1234abc1234abc1234abc1234abc1 1 1 1',
       'author csrinaldi',

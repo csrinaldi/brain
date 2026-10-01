@@ -29,12 +29,20 @@ import { parseTasksList } from './lib/tasks-list.mjs';
 import { parseBlame } from './lib/blame.mjs';
 import { shapeResumeView } from './lib/resume-view.mjs';
 import { parseFrontmatter } from '../memory/lib/resume-frontmatter.mjs';
-import { LIFECYCLE_STAGES, ARTEFACT_FILE } from '../lib/sdd-layout.mjs';
+import { LIFECYCLE_STAGES, ARTEFACT_FILE, parseChangeId } from '../lib/sdd-layout.mjs';
 import { prUrl } from './lib/forge-url.mjs';
 import { documentWording, NO_CHANGE_BRANCH } from './lib/drawer-model.mjs';
 
 /** D14's caveat, verbatim in the UI, until #880 lands `type: review` records. */
 export const REVIEWS_SOURCE_NOTE = 'forge comments until #880 lands';
+
+/** The one dir under `openspec/changes/` that carries `issue`, or why not. (Moves to lib/git-tree.mjs in phase 2.) */
+function pickChangeDirIn(names, issue) {
+  const matches = names.filter((n) => parseChangeId(n)?.iid === String(issue));
+  if (matches.length === 1) return { ok: true, dir: matches[0] };
+  if (matches.length === 0) return { ok: false, state: 'missing', reason: `no change dir for #${issue}` };
+  return { ok: false, state: 'unreadable', reason: `more than one change dir carries #${issue}: ${matches.join(', ')}` };
+}
 
 /** The path a "no change dir" reason names — a glob, not a file, since none exists to point at. */
 function expectedChangeDirGlob(issue) {
@@ -148,7 +156,7 @@ function buildWorkingMemoryTab({ resolved, resume }) {
     return { ok: false, reason: `no committed resume.md on ${branch}; the local overlay arrives in slice 5 (#883)` };
   }
   const { frontmatter } = parseFrontmatter(resume.text);
-  return { ok: true, value: shapeResumeView({ frontmatter, branch }) };
+  return { ok: true, value: shapeResumeView({ frontmatter, branch, path: resume.path }) };
 }
 
 // Delegates to `lib/forge-url.mjs`'s `prUrl` (#882 cold review of PR 1,
@@ -300,26 +308,49 @@ function readHeadDocuments({ run, dir }) {
   return { head, documents };
 }
 
+const RESUME_FILE = 'resume.md';
+const CHANGES_ROOT_DIR = 'openspec/changes';
+
+/** The change dirs listed directly under `openspec/changes/` at `commit`, as bare names. */
+function listChangeDirNames({ run, commit }) {
+  const listing = parseTreeListing(run('git', ['ls-tree', '-z', commit, '--', `${CHANGES_ROOT_DIR}/`]));
+  return [...listing.entries()].filter(([, e]) => e.type === 'tree').map(([path]) => path.slice(path.lastIndexOf('/') + 1));
+}
+
 /**
- * `resume.md` at the change branch's tip. The branch is resolved to a commit
- * ONCE; the tree is listed at that commit and the blob read by its sha, so the
- * stamp names the commit the text came from even if the branch advances
- * meanwhile. `ls-tree` tells "no such file" from "could not read" without
+ * `resume.md` of one change at `commit` (D38): list `openspec/changes/` at the
+ * commit, pick the dir carrying `issue`, read `<dir>/resume.md` by its blob sha.
+ * The path is the contract path (`feature-working-memory-contract.md`), never
+ * the branch root. `ls-tree` tells "no such file" from "could not read" without
  * parsing stderr: stderr feeds only the reason line (`gitErrorLine`).
  */
-function readResumeDocument({ run, resolved }) {
-  const path = 'resume.md';
-  if (!resolved.ok && resolved.kind === 'none') return documentEntry(path, null, { state: 'missing', reason: NO_CHANGE_BRANCH });
-  if (!resolved.ok) return documentEntry(path, null, { state: 'unreadable', reason: resolved.reason });
-  const { branch } = resolved;
+function readResumeAt({ run, commit, issue, label }) {
+  const fallbackPath = RESUME_FILE;
   try {
-    const commit = String(run('git', ['rev-parse', '--verify', `${branch}^{commit}`])).trim();
+    const picked = pickChangeDirIn(listChangeDirNames({ run, commit }), issue);
+    if (!picked.ok && picked.state === 'missing') return documentEntry(fallbackPath, label, { state: 'missing', reason: `no change dir for #${issue} on ${label}` });
+    if (!picked.ok) return documentEntry(fallbackPath, label, { state: 'unreadable', reason: picked.reason });
+    const path = `${CHANGES_ROOT_DIR}/${picked.dir}/${RESUME_FILE}`;
     const tree = parseTreeListing(run('git', ['--literal-pathspecs', 'ls-tree', '-l', '-z', commit, '--', path]));
     const entry = tree.get(path);
-    return documentFromEntry({ path, ref: branch, commit, entry, read: (maxBuffer) => run('git', ['cat-file', 'blob', entry.sha], { maxBuffer }) });
+    return documentFromEntry({ path, ref: label, commit, entry, read: (maxBuffer) => run('git', ['cat-file', 'blob', entry.sha], { maxBuffer }) });
   } catch (err) {
-    return documentEntry(path, branch, { state: 'unreadable', reason: gitErrorLine(err) });
+    return documentEntry(fallbackPath, label, { state: 'unreadable', reason: gitErrorLine(err) });
   }
+}
+
+/** `resume.md` at the change branch's tip: the branch is resolved to a commit ONCE, so the stamp names the commit the text came from. */
+function readResumeDocument({ run, resolved, issue }) {
+  if (!resolved.ok && resolved.kind === 'none') return documentEntry(RESUME_FILE, null, { state: 'missing', reason: NO_CHANGE_BRANCH });
+  if (!resolved.ok) return documentEntry(RESUME_FILE, null, { state: 'unreadable', reason: resolved.reason });
+  const { branch } = resolved;
+  let commit;
+  try {
+    commit = String(run('git', ['rev-parse', '--verify', `${branch}^{commit}`])).trim();
+  } catch (err) {
+    return documentEntry(RESUME_FILE, branch, { state: 'unreadable', reason: gitErrorLine(err) });
+  }
+  return readResumeAt({ run, commit, issue, label: branch });
 }
 
 /**
@@ -429,7 +460,7 @@ export function buildChangeView({ root, issue, snapshot, project = null, _read, 
   const dir = findChangeDir(snapshot, issue);
   const { head, documents: headDocuments } = readHeadDocuments({ run, dir });
   const resolved = resolveBranch({ run, snapshot, issue });
-  const resume = readResumeDocument({ run, resolved });
+  const resume = readResumeDocument({ run, resolved, issue });
   const documents = { ...headDocuments, resume };
 
   return {
