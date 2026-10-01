@@ -1,0 +1,6 @@
+
+> brain-test-plainfiles@1.0.0 brain:memory:save
+> node ./brain/scripts/memory/cli.mjs save SYNTHETIC-1204-R3-seam2 SYNTHETIC-1204-third-record-body --type discovery --issue 1
+
+memory/cli: ✓ saved rec-e882357530bc4a85 → /home/gandalf/IA/brain-test-plainfiles/.memory/records/2026-10-rec-e882357530bc4a85.jsonl
+exit=0

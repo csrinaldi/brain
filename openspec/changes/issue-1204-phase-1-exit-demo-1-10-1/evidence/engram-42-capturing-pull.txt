@@ -1,0 +1,31 @@
+$ capturing checkout pull (#1118)
+
+> brain-test-engram@1.0.0 brain:memory:pull
+> node ./brain/scripts/memory/cli.mjs pull
+
+From https://github.com/csrinaldi/brain-test-engram
+   0efa030..645798b  main       -> origin/main
+Updating 0efa030..645798b
+Fast-forward
+ .memory/records/2026-10-rec-5615d356e6e53d0b.jsonl | 1 +
+ .memory/records/2026-10-rec-761e177998984277.jsonl | 1 +
+ 2 files changed, 2 insertions(+)
+ create mode 100644 .memory/records/2026-10-rec-5615d356e6e53d0b.jsonl
+ create mode 100644 .memory/records/2026-10-rec-761e177998984277.jsonl
+brain:memory:pull: verified .memory/records/2026-10-rec-5615d356e6e53d0b.jsonl — present, tracked in HEAD as blob d9f375b469f42ec4bc3bb03b1614097a4f02977d
+brain:memory:pull: verified .memory/records/2026-10-rec-761e177998984277.jsonl — present, tracked in HEAD as blob c30ceb7eefa71eb03d26dbcd98c61a4513b11cdb
+✓ import complete — 0/2 records imported into engram (records-only, D2/C4).
+exit=0
+## main...origin/main
+?? .memory/index.jsonl
+645798b memory: gandalf-rog-zephyrus-g15-ga503qr-ga503qr 2026-10-01 (2 records) (#3)
+0efa030 feat: enable memory lane and add demo README line (#1) (#2)
+97bcdc4 chore: adopt brain 1.10.1
+Update available: 2.0.0 -> 2.2.1
+To update:
+  brew update && brew upgrade engram
+  or: go install github.com/Gentleman-Programming/engram/v2/cmd/engram@latest
+
+Found 2 memories:
+[1] #22 (decision) — SYNTHETIC-1204-R2-engram
+[2] #21 (session_summary) — SYNTHETIC-1204-R1-engram

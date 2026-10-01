@@ -1,0 +1,4 @@
+$ node brain/scripts/memory/cli.mjs search SYNTHETIC-1204 (before merge)
+memory/cli: ℹ no matching records found.
+exit=0
+env-present-count above (0/blank = none)

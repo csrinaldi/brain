@@ -1,0 +1,6 @@
+completed	success	feat: enable memory lane and add demo README line (#1) (#2)	governance-postmerge	main	push	36797244121	22s	2026-10-01T00:39:14Z
+completed	success	chore: adopt brain 1.10.1	governance-postmerge	main	push	36796768433	20s	2026-10-01T00:33:27Z
+--- issues (all)
+1	CLOSED	demo: first feature	status:approved, type:feature	2026-10-01T00:39:13Z
+--- pr1 gate: issue1 state
+CLOSED

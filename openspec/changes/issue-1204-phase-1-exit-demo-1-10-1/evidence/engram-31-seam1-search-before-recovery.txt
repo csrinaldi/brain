@@ -1,0 +1,8 @@
+$ engram search before recovery
+Update available: 2.0.0 -> 2.2.1
+To update:
+  brew update && brew upgrade engram
+  or: go install github.com/Gentleman-Programming/engram/v2/cmd/engram@latest
+
+No memories found for: "SYNTHETIC-1204"
+exit=0

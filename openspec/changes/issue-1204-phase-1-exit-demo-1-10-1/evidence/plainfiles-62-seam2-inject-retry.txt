@@ -1,0 +1,19 @@
+$ (workaround, #1190, same as #1185) delete merged remote lane branch
+✓ No prohibited references found.
+✓ Artifact structure is valid.
+To https://github.com/csrinaldi/brain-test-plainfiles.git
+ - [deleted]         memory/gandalf-rog-zephyrus-g15-ga503qr-ga503qr-2026-10-01
+exit=0
+$ ship with mrCreate injected failure
+
+> brain-test-plainfiles@1.0.0 brain:memory:ship
+> node ./brain/scripts/memory/cli.mjs ship --invoker manual
+
+memory/cli: ✗ ship failed — the pull request could not be created. memory.ship.prCreateFailed: mrCreate failed — injected mrCreate failure (seam 2, #1204)
+exit=1
+--- remote branches after failure (branch pushed, no PR)
+369ac169d3c954578ad9614600c19190b52ee9c9	refs/heads/feat/issue-1-demo-first-feature
+f80831b3526c33aee63698711a950c1feb042918	refs/heads/main
+8b15e28d06b24f8de9f4ad2f3da3c39424b94460	refs/heads/memory/gandalf-rog-zephyrus-g15-ga503qr-ga503qr-2026-10-01
+--- open PRs
+[]
