@@ -898,7 +898,7 @@ const POOL = [
   '| A | B |\n|---|---|\n| x \\| y | z |', '| A | B |\n|:-:|--:|\n| 1 | 2 |\n| 3 \\| 4 | 5 |',
 ];
 const HAZARDS_R5 = [
-  (h) => h, (h) => `- ${h}`, (h) => `* ${h}`, (h) => `> ${h}`, (h) => `> - ${h}`, (h) => `1. ${h}`,
+  (h) => h, (h) => `- ${h}`, (h) => `* ${h}`, (h) => `- [ ] ${h}`, (h) => `> ${h}`, (h) => `> - ${h}`, (h) => `1. ${h}`,
   (h) => `# ${h}`, (h) => `| ${h} | b |`, (h) => `| x \\| y | ${h} |`, (h) => `[h]: https://e.com\n${h}`, (h) => `\\*${h}\\[`,
 ];
 
@@ -943,6 +943,7 @@ test('#1218 cold-1 (r5): each block construct keeps its structure when its neigh
     'star hr': ['***', '', HAZ_R5, '', '* * *'],
     'underscore hr': ['___', '', HAZ_R5],
     'star bullet': ['* one', `* ${HAZ_R5}`, '* three'],
+    'task checkbox': ['- [ ] one', `- [x] ${HAZ_R5}`],
   };
   for (const [name, lines] of Object.entries(cases)) {
     const doc = lines.join('\n');
@@ -950,4 +951,16 @@ test('#1218 cold-1 (r5): each block construct keeps its structure when its neigh
     assert.notEqual(neutral, null, `${name} must degrade`);
     assert.deepEqual(blockSignature(neutral), blockSignature(doc), name);
   }
+});
+
+test('#1218 cold-3 (r5): a degraded task item stays a task item, unchecked, with its text', () => {
+  const bad = '*a '.repeat(700);
+  const out = markdownTree(`- [ ] ${bad}`);
+  const list = out.blocks.find((b) => b.t === 'list');
+  assert.equal(degradedBlocks(out).length, 1);
+  assert.equal(list.items[0].task, true);
+  assert.equal(list.items[0].checked, false);
+  assert.equal(flat(list.items[0].blocks[0].children), bad.trim());
+  const done = markdownTree(`- [X] ${bad}`).blocks.find((b) => b.t === 'list');
+  assert.deepEqual([done.items[0].task, done.items[0].checked], [true, true]);
 });

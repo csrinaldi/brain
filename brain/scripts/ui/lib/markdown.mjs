@@ -168,9 +168,9 @@ const lexTokens = (text, lex) => lex(text, lexOptions());
 // CommonMark, literal inside a code span and an autolink, so `x_y` there came out
 // as `x\_y`. The length is
 // kept so token offsets, and with them the notice placement, stay true. The line's
-// own block marker (quote prefix, list bullet) is left alone: the passage keeps its
+// own block marker (quote prefix, list bullet, task checkbox) is left alone: the passage keeps its
 // quote or its list item and only its inline marks are neutralised.
-const BLOCK_PREFIX = /^(?: {0,3}> ?)*[ \t]*(?:(?:[-+*]|\d{1,9}[.)])[ \t]+)?/;
+const BLOCK_PREFIX = /^(?: {0,3}> ?)*[ \t]*(?:(?:[-+*]|\d{1,9}[.)])[ \t]+(?:\[[ xX]\][ \t]+)?)?/;
 const SUBSTITUTED = ['*', '_', '~', '[', ']'];
 const PUA_CHAR = /[\uE000-\uF8FF]/g;
 
