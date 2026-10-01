@@ -620,9 +620,12 @@ test('#1218 cold-3: marked itself joins what the span rule joins', () => {
   assert.equal(item.tokens.length, 1);
 });
 
-test('#1218 cold-3: a 262000-character quote prefix is scanned in linear time', () => {
-  const { ms } = timed(() => prescan('>'.repeat(262000)));
-  assert.ok(ms < 200, `took ${ms} ms`);
+test('#1218 cold-3: a 262000-character quote prefix never throws out of markdownTree, and 20000 of them are cheap', () => {
+  const huge = markdownTree('>'.repeat(262000));
+  assert.deepEqual(huge.blocks.map((b) => b.t), ['code']);
+  assert.equal(huge.notices.length, 1);
+  const { ms } = timed(() => markdownTree('>'.repeat(20000)));
+  assert.ok(ms < 300, `took ${ms} ms`);
 });
 
 // ── #1218 cold review round 2, cold-2: marked's hr and setext rules end a span ──
@@ -656,7 +659,7 @@ test('#1218 cold-2 (r2): every spelling of marked\'s hr ends a span, and the und
   assert.equal(degradedCount(`${part}\n--x\n${part}`), 1, 'not an underline');
 });
 
-test('#1218 cold-2 (r2): marked agrees with the rules the pre-scan mirrors', () => {
+test('#1218 cold-2 (r2): the hr and setext segmentation of marked, which the pre-scan now reads rather than mirrors', () => {
   const kinds = (src) => Lexer.lex(src, { gfm: true }).map((t) => t.type);
   assert.deepEqual(kinds('p\n***\nq'), ['paragraph', 'hr', 'paragraph']);
   assert.deepEqual(kinds('p\n---\nq'), ['heading', 'paragraph']);
@@ -755,4 +758,82 @@ test('#1218 cold-4 (r2): a degraded line is a handful of text nodes, not one per
     assert.ok(p.children.length <= 3, `${JSON.stringify(unit)}: ${p.children.length} nodes`);
     assert.equal(flat(p.children).length > 1000, true);
   }
+});
+
+// ── #1218 cold review round 4: spans come from marked's own block phase ──
+// Four review rounds found four divergences between a hand-copied block grammar and
+// marked's. The pre-scan now asks marked (Lexer#blockTokens, inline work deferred).
+
+test(`#1218 cold-1 (r4): a "2. " line after a paragraph line is lazy continuation, so the span degrades in under ${PRESCAN_BOUND_MS} ms`, () => {
+  const input = 'para start\n' + Array.from({ length: 60 }, () => '2. ' + '*a_'.repeat(150)).join('\n');
+  const { value, ms } = timed(() => markdownTree(input));
+  assert.equal(degradedBlocks(value).length, 1);
+  assert.ok(ms < PRESCAN_BOUND_MS, `took ${ms} ms`);
+});
+
+test(`#1218 cold-1 (r4): a "    - " line after a paragraph line is lazy continuation, so the span degrades in under ${PRESCAN_BOUND_MS} ms`, () => {
+  const input = 'para start\n' + Array.from({ length: 60 }, () => '    - ' + '*a_'.repeat(150)).join('\n');
+  const { value, ms } = timed(() => markdownTree(input));
+  assert.equal(degradedBlocks(value).length, 1);
+  assert.ok(ms < PRESCAN_BOUND_MS, `took ${ms} ms`);
+});
+
+test('#1218 cold-1 (r4): marked\'s block segmentation is pinned: one paragraph, inline work deferred', () => {
+  const src = 'para start\n' + Array.from({ length: 5 }, () => '2. ').join('\n') + '*a_*a_';
+  const lx = new Lexer({ gfm: true, breaks: false, pedantic: false });
+  const blocks = lx.blockTokens(src, []);
+  assert.deepEqual(blocks.map((b) => b.type), ['paragraph']);
+  assert.deepEqual(blocks[0].tokens, [], 'the block phase leaves the inline tokens empty');
+  assert.equal(lx.inlineQueue.length, 1, 'and queues the paragraph text for the inline phase');
+  assert.equal(lx.inlineQueue[0].src, blocks[0].text);
+});
+
+test('#1218 cold-1 (r4): a tokenizer that throws in the block phase degrades the whole document, with its notice', () => {
+  const out = markdownTree('> '.repeat(40000) + 'x');
+  assert.equal(out.blocks.length, 1);
+  assert.equal(out.blocks[0].t, 'code');
+  assert.deepEqual(out.notices, ['The markdown could not be parsed; the text is shown as written.']);
+});
+
+test('#1218 cold-1 (r4): the pre-scan is cheap, block phase and counting included, on 200 KB inputs', () => {
+  const inputs = [
+    '*'.repeat(1e5) + 'a' + '*'.repeat(1e5),
+    'para\n' + '2. \n'.repeat(5e4),
+    '*a_'.repeat(66000),
+    Array.from({ length: 4000 }, (_, i) => `- item ${i} a*b_c [d]`).join('\n'),
+  ];
+  for (const input of inputs) {
+    const { ms } = timed(() => prescan(input));
+    console.log(`prescan ${input.length} chars: ${ms.toFixed(1)} ms`);
+    assert.ok(ms < 100, `took ${ms} ms`);
+  }
+});
+
+test('#1218 cold-1 (r4): a span is mapped to its own source lines inside nested, loose and quoted containers', () => {
+  const part = 'a*'.repeat(700);
+  const cases = {
+    'loose list': ['- one', '', `- ${part}`, '', '- three'],
+    'nested list': ['- a', '  - b', `    - ${part}`, '  - c'],
+    'quote list': ['> - one', `> - ${part}`],
+    'table row': ['| h | i |', '|---|---|', '| a | b |', `| ${part} | d |`],
+    'task item': ['- [ ] one', `- [x] ${part}`],
+  };
+  for (const [name, lines] of Object.entries(cases)) {
+    const spans = prescan(['intro', '', ...lines, '', 'outro'].join('\n')).filter((s) => s.degraded);
+    assert.equal(spans.length, 1, name);
+    const hazard = lines.findIndex((l) => l.includes(part)) + 2;
+    assert.ok(spans[0].from <= hazard && hazard < spans[0].to, `${name}: ${JSON.stringify(spans[0])}`);
+    assert.ok(spans[0].to - spans[0].from <= 2, `${name} stays on its own line`);
+  }
+});
+
+test('#1218 cold-1 (r4): where a container\'s lines cannot be mapped, the whole container is one span', () => {
+  const part = 'a*'.repeat(700);
+  // marked drops the separator between a quote paragraph and the table that follows it
+  const src = `> x\n> m\n| a | b |\n|---|---|\n| t | x |\n| ${part} | y |`;
+  const spans = prescan(src);
+  assert.equal(spans.filter((s) => s.degraded).length, 1);
+  assert.deepEqual([spans[0].from, spans[0].to], [0, 6]);
+  const out = markdownTree(src);
+  assert.equal(degradedBlocks(out).length, 1);
 });

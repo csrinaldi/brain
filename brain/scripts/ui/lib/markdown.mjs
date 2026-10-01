@@ -31,60 +31,25 @@ const defaultLex = (text, options) => Lexer.lex(text, options);
 
 // ── pre-scan (#1218): bound the cost of an inline span before marked sees it ──
 // marked's emphasis, strikethrough and link rules backtrack quadratically on a
-// long run of delimiters. A span is the lines between the block boundaries
-// below; one holding more than MAX_MARKS delimiters, or one run longer than
-// MAX_RUN, is shown as plain text under a notice. The pre-scan bounds each
-// inline span; the worker's time budget (render-budget.mjs) bounds the whole
-// document, including costs the pre-scan does not see. Real artifacts peak at 122
-// marks and a run of 7. Every regex is anchored, so a line is scanned once.
+// long run of delimiters. A span is an inline run as marked's own block phase
+// produces it (Lexer#blockTokens, which defers all inline work); one holding more
+// than MAX_MARKS delimiters, or one run longer than MAX_RUN, is shown as plain text
+// under a notice. Four review rounds each found a divergence between a hand-copied
+// block grammar and marked's, so no grammar is copied here: the block tree is read.
+// The pre-scan bounds each inline span; the worker's time budget (render-budget.mjs)
+// bounds the whole document, including costs the pre-scan does not see. Real
+// artifacts peak at 122 marks and a run of 7.
 const MAX_MARKS = 600;
 const MAX_RUN = 50;
-const BLANK = /^\s*$/;
-// What starts a block of its own once any quote prefix is gone.
-const BLOCK_START = /^(?:\s*(?:[-+*]|\d{1,9}[.)])(?:\s|$)| {0,3}#{1,6}(?:\s|$)|\s*\|)/;
-// marked's own fence rule (vendor/marked.esm.js, block `fences`), line by line:
-// at most three leading spaces; a backtick run of three or more whose info
-// string holds no backtick, or a tilde run of three or more. A closer is at most
-// three spaces, the opener's exact run, any further ~ or `, then spaces only.
-// Anything looser blinds the pre-scan to text marked will lex as inline.
-const FENCE = /^ {0,3}(`{3,}(?=[^`]*$)|~{3,})/;
-const FENCE_TAIL = /^[~`]* *$/;
-// marked's thematic break (block `hr`) and its setext underline (the tail of
-// block `lheading`), line by line. A thematic break interrupts a paragraph and
-// is a block of its own; an underline closes the paragraph above it, which marked
-// then lexes as a heading, so the underline line is the last line of its span.
-const HR = /^ {0,3}(?:(?:-[ \t]*){3,}|(?:_[ \t]*){3,}|(?:\*[ \t]*){3,})$/;
-const SETEXT = /^ {0,3}(?:=+|-+) *$/;
-const closesFence = (line, opener) => {
-  const rest = /^ {0,3}(.*)$/.exec(line)[1];
-  return rest.startsWith(opener) && FENCE_TAIL.test(rest.slice(opener.length));
-};
-
-// Quote depth and the text after the prefix, in one linear pass: a quote marker
-// is up to three spaces, `>`, and one optional space, repeated.
-function unquote(line) {
-  let pos = 0;
-  let depth = 0;
-  for (;;) {
-    let p = pos;
-    while (p < line.length && p - pos < 3 && line.charCodeAt(p) === 32) p++;
-    if (line.charCodeAt(p) !== 62) break;
-    p++;
-    if (line.charCodeAt(p) === 32) p++;
-    pos = p;
-    depth++;
-  }
-  return { depth, rest: depth === 0 ? line : line.slice(pos) };
-}
 const isDelimiter = (code) => code === 42 || code === 95 || code === 126 || code === 91 || code === 93;
 
-function countLine(line) {
+function countText(text) {
   let marks = 0;
   let longest = 0;
   let run = 0;
   let prev = -1;
-  for (let i = 0; i < line.length; i++) {
-    const code = line.charCodeAt(i);
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
     if (!isDelimiter(code)) {
       run = 0;
       prev = -1;
@@ -98,62 +63,90 @@ function countLine(line) {
   return { marks, longest };
 }
 
+const newlines = (s) => {
+  let n = 0;
+  for (let i = s.indexOf('\n'); i !== -1; i = s.indexOf('\n', i + 1)) n++;
+  return n;
+};
+
+// Lines a block occupies, trailing newlines aside.
+const lineCount = (s) => newlines(s.replace(/\n+$/, '')) + 1;
+const spanOf = (from, to, marks, longestRun) => ({ from, to, marks, longestRun, degraded: marks > MAX_MARKS || longestRun > MAX_RUN });
+const rawOf = (token) => (typeof token.raw === 'string' ? token.raw : '');
+
+// A token's source lines, relative to the first line of the text it was lexed from.
+// A container (quote, list item) lexes its content with the prefix removed but the
+// line count intact, so a child's line index maps straight back to the source. That
+// holds only when the children's raws add up to the container's text; where they do
+// not (marked drops a separator between a paragraph and a table inside a quote), the
+// line index is unreliable and the whole container becomes one span.
+function collectSpans(tokens, base, text, out) {
+  const mine = [];
+  let line = base;
+  let joined = '';
+  let reliable = true;
+  const leaf = (token, text) => {
+    const { marks, longest } = countText(text);
+    mine.push(spanOf(line, line + newlines(rawOf(token).replace(/\n+$/, '')) + 1, marks, longest));
+  };
+  for (const token of tokens) {
+    switch (token.type) {
+      case 'paragraph':
+      case 'text':
+      case 'heading':
+        leaf(token, String(token.text ?? ''));
+        break;
+      case 'blockquote':
+        collectSpans(token.tokens ?? [], line, String(token.text ?? ''), mine);
+        break;
+      case 'list': {
+        const items = token.items ?? [];
+        let at = line;
+        for (const item of items) {
+          collectSpans(item.tokens ?? [], at, String(item.text ?? ''), mine);
+          at += newlines(rawOf(item));
+        }
+        if (lineCount(items.map(rawOf).join('')) !== lineCount(rawOf(token))) reliable = false;
+        break;
+      }
+      case 'table': {
+        const row = (cells, at) => {
+          const counted = cells.map((c) => countText(String(c.text ?? '')));
+          mine.push(spanOf(at, at + 1, counted.reduce((n, c) => n + c.marks, 0), Math.max(0, ...counted.map((c) => c.longest))));
+        };
+        row(token.header ?? [], line);
+        (token.rows ?? []).forEach((cells, r) => row(cells, line + 2 + r));
+        break;
+      }
+      default:
+    }
+    line += newlines(rawOf(token));
+    // a task item's checkbox is part of the item's raw but not of its text
+    if (token.type !== 'checkbox') joined += rawOf(token);
+  }
+  const lines = lineCount(text);
+  if (reliable && lineCount(joined) === lines) {
+    out.push(...mine);
+    return;
+  }
+  const marks = mine.reduce((n, span) => n + span.marks, 0);
+  const longest = Math.max(0, ...mine.map((span) => span.longestRun));
+  out.push(spanOf(base, base + lines, marks, longest));
+}
+
 /**
- * Cut a markdown body into inline spans and classify each one. Pure and
- * linear; never calls the tokenizer. `from` is the first line, `to` the line
- * after the last. Fenced code belongs to no span.
+ * Cut a markdown body into inline spans and classify each one, from marked's block
+ * phase: no inline tokenizing runs. `from` is the first line, `to` the line after
+ * the last. Fenced code, html and definitions belong to no span. May throw, as the
+ * block phase does on pathological nesting; the caller degrades the document.
  * @returns {{from:number, to:number, marks:number, longestRun:number, degraded:boolean}[]}
  */
 export function prescan(body) {
-  const lines = String(body).split('\n');
-  const spans = [];
-  let open = null;
-  let fence = null;
-  const close = (to) => {
-    if (open) {
-      open.to = to;
-      open.degraded = open.marks > MAX_MARKS || open.longestRun > MAX_RUN;
-      const { quote, ...span } = open;
-      spans.push(span);
-      open = null;
-    }
-  };
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    if (fence) {
-      if (closesFence(line, fence)) fence = null;
-      continue;
-    }
-    const opener = FENCE.exec(line);
-    if (opener) {
-      close(i);
-      fence = opener[1];
-      continue;
-    }
-    // marked lexes a quote's lines as one paragraph (lazy lines included) until a
-    // blank or empty quote line, a block of its own, or a deeper quote.
-    const { depth, rest } = unquote(line);
-    if (BLANK.test(rest)) {
-      close(i);
-      continue;
-    }
-    if (open && depth === open.quote && SETEXT.test(rest)) {
-      close(i + 1);
-      continue;
-    }
-    if (HR.test(rest)) {
-      close(i);
-      continue;
-    }
-    if (BLOCK_START.test(rest)) close(i);
-    else if (depth > 0 && open && depth > open.quote) close(i);
-    if (!open) open = { from: i, to: i, marks: 0, longestRun: 0, degraded: false, quote: depth };
-    const { marks, longest } = countLine(line);
-    open.marks += marks;
-    if (longest > open.longestRun) open.longestRun = longest;
-  }
-  close(lines.length);
-  return spans;
+  const lexer = new Lexer(lexOptions());
+  const out = [];
+  const text = String(body).replace(/\r\n|\r/g, '\n');
+  collectSpans(lexer.blockTokens(text, []), 0, text, out);
+  return out;
 }
 
 const degradedNotice = (marks) => `a passage with ${marks} formatting marks is shown as plain text`;
@@ -161,7 +154,8 @@ const degradedNotice = (marks) => `a passage with ${marks} formatting marks is s
 // A fresh options object per call: the lexer mutates it and a passed object
 // REPLACES the defaults, so `gfm` must be explicit (tables, task items,
 // strikethrough, autolinks).
-const lexTokens = (text, lex) => lex(text, { gfm: true, breaks: false, pedantic: false });
+const lexOptions = () => ({ gfm: true, breaks: false, pedantic: false });
+const lexTokens = (text, lex) => lex(text, lexOptions());
 
 // A degraded passage is neutralised by SAME-LENGTH substitution: each character
 // the pre-scan counts (`*` `_` `~` `[` `]`) and the backslash maps to one private-
