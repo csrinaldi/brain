@@ -294,9 +294,10 @@ export function installDom({ mountIds, snapshot = null, changes = {}, storage = 
     if (path.startsWith('/api/poll/')) return json({ reason: 'the poller is not part of this harness' }, 503);
     throw new Error(`the page reached for ${path}, which this harness does not answer — ${init?.method ?? 'GET'}`);
   };
+  const streamListeners = new Map();
   globalThis.EventSource = class {
     constructor(url) { this.url = url; }
-    addEventListener() {}
+    addEventListener(name, fn) { streamListeners.set(name, [...(streamListeners.get(name) ?? []), fn]); }
     removeEventListener() {}
     close() {}
   };
@@ -306,6 +307,10 @@ export function installDom({ mountIds, snapshot = null, changes = {}, storage = 
     documentElement,
     storage,
     workers,
+    /** Deliver one stream frame to the page, as the server would (#1218). */
+    emit(name, data = {}) {
+      for (const fn of streamListeners.get(name) ?? []) fn({ data: JSON.stringify(data) });
+    },
     restore() {
       globalThis.document = saved.document;
       globalThis.window = saved.window;

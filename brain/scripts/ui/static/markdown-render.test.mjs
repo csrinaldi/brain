@@ -477,3 +477,83 @@ test('#1218 R1218-7: a re-render reuses the in-flight request; selecting a node 
   fire(card, 'click');
   assert.equal(dom.workers[1].terminated, 1, 'selecting a node cancelled the pending request');
 });
+
+// ── #1218 cold review round 3: an outcome that failed stays put until the user retries ──
+
+const FRAMES = 3;
+
+for (const [outcome, worker, notice] of [['failed', 'error', FAILED], ['unavailable', null, UNAVAILABLE]]) {
+  test(`#1218 R1218-6: the ${outcome} outcome stays as it was across ${FRAMES} stream frames, with no new worker and no loading line`, async (t) => {
+    const dom = await boot({ proposal: RICH, worker });
+    t.after(() => dom.restore());
+    await openSdd(dom);
+    fire(toggleOf(dom, 'proposal').button, 'click');
+    await settle();
+    const spawned = dom.workers.length;
+    const timers = holdTimers(() => { for (let i = 0; i < FRAMES; i += 1) dom.emit('sync'); });
+    await settle();
+    const { row } = toggleOf(dom, 'proposal');
+    assert.equal(dom.workers.length, spawned, 'no worker was started by a frame');
+    assert.equal(timers.length, 0, 'no render was requested by a frame');
+    assert.ok(NOTE_TEXTS(row).includes(notice));
+    assert.equal(find(row, byClass('doc-loading')), null);
+  });
+}
+
+test('#1218 R1218-5: a timed-out document stays as it was across stream frames, with no new worker and no loading line', async (t) => {
+  const dom = await boot({ proposal: RICH, worker: 'hold' });
+  t.after(() => dom.restore());
+  await openSdd(dom);
+  const timers = click(toggleOf(dom, 'proposal').button);
+  timers.find((h) => h.ms === 1500).fn();
+  await settle();
+  const later = holdTimers(() => { for (let i = 0; i < FRAMES; i += 1) dom.emit('sync'); });
+  await settle();
+  const { row } = toggleOf(dom, 'proposal');
+  assert.equal(dom.workers.length, 1);
+  assert.equal(later.length, 0);
+  assert.ok(NOTE_TEXTS(row).includes(TIMEOUT));
+  assert.equal(find(row, byClass('doc-loading')), null);
+});
+
+test('#1218 R1218-7: collapsing and re-expanding a failed document asks for it again', async (t) => {
+  const dom = await boot({ proposal: RICH, worker: 'error' });
+  t.after(() => dom.restore());
+  await openSdd(dom);
+  const { button } = toggleOf(dom, 'proposal');
+  click(button);
+  await settle();
+  assert.equal(dom.workers.length, 1);
+  click(button);
+  click(button);
+  await settle();
+  assert.equal(dom.workers.length, 2);
+});
+
+test('#1218 R1218-7: collapsing and re-expanding a timed-out document asks for it again', async (t) => {
+  const dom = await boot({ proposal: RICH, worker: 'hold' });
+  t.after(() => dom.restore());
+  await openSdd(dom);
+  const { button } = toggleOf(dom, 'proposal');
+  const timers = click(button);
+  timers.find((h) => h.ms === 1500).fn();
+  await settle();
+  assert.equal(dom.workers.length, 1);
+  click(button);
+  click(button);
+  assert.equal(dom.workers.length, 2);
+  dom.workers[1].release();
+  await settle();
+  assert.ok(hasMd(toggleOf(dom, 'proposal').row), 'the second request is answered');
+});
+
+test('#1218 R1218-7: collapsing and re-expanding an unavailable document asks for it again', async (t) => {
+  const dom = await boot({ proposal: RICH, worker: null });
+  t.after(() => dom.restore());
+  await openSdd(dom);
+  const { button } = toggleOf(dom, 'proposal');
+  click(button);
+  await settle();
+  const again = holdTimers(() => { fire(button, 'click'); fire(button, 'click'); });
+  assert.equal(again.length, 1, 'the re-expand requested the render again');
+});

@@ -123,7 +123,7 @@ let holdingPage = 0;
 let expandedDocs = new Set();
 /**
  * `path @ commit` to its render request `{promise, cancel, settled}`. A document
- * read at one commit never changes, so a tree (or a timeout) is kept and reused;
+ * read at one commit never changes, so every outcome is kept and reused until the user collapses a failed one;
  * a request still in flight is shared by a re-render instead of started again.
  * The map is emptied, with every request cancelled, whenever the selected issue
  * changes, so it cannot grow without bound.
@@ -1865,8 +1865,11 @@ function requestDoc(doc) {
   entry.promise = run.promise.then((outcome) => {
     entry.settled = true;
     entry.outcome = outcome;
-    // A tree and a timeout are final for this commit; the rest may be retried.
-    if (outcome.kind !== 'tree' && outcome.kind !== 'timeout' && docTrees.get(doc.stamp) === entry) docTrees.delete(doc.stamp);
+    // Every outcome is kept for this commit, so a re-render that is not a user
+    // action (a stream frame, a tab switch) reuses it: no new worker, no loading
+    // flash. A failed, unavailable or timed-out one is retried only by a user
+    // collapse, which evicts it (setOpen).
+    if (outcome.kind === 'cancelled' && docTrees.get(doc.stamp) === entry) docTrees.delete(doc.stamp);
     return outcome;
   });
   docTrees.set(doc.stamp, entry);
@@ -1952,6 +1955,8 @@ function renderDocumentControl(card, doc) {
       if (entry && !entry.settled) {
         entry.cancel();
         docTrees.delete(doc.stamp);
+      } else if (entry && entry.outcome.kind !== 'tree') {
+        docTrees.delete(doc.stamp); // the explicit retry: collapse, then expand
       }
       card.removeChild(section);
       section = null;
