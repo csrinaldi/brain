@@ -76,12 +76,12 @@ This requirement modifies R1198-13: rendering terminates on any input, and the c
 #### Scenario: A one-line triple-backtick pair is not a fence
 - **GIVEN** the text "```x```", a newline, and 6000 repetitions of `*a `
 - **WHEN** the adapter builds the tree
-- **THEN** the passage is degraded with its notice, in under 200 ms (the unfixed rule took 2736 ms and did not degrade)
+- **THEN** the passage is degraded with its notice, within the pre-scan bound (750 ms) (the unfixed rule took 2736 ms and did not degrade)
 
 #### Scenario: A fence indented four spaces is not a fence
 - **GIVEN** a line of four spaces and three backticks, a newline, and 6000 repetitions of `*a `
 - **WHEN** the adapter builds the tree
-- **THEN** the passage is degraded with its notice, in under 200 ms (the unfixed rule took 2862 ms and did not degrade)
+- **THEN** the passage is degraded with its notice, within the pre-scan bound (750 ms) (the unfixed rule took 2862 ms and did not degrade)
 
 #### Scenario: A backtick fence whose info string holds a backtick is not a fence
 - **GIVEN** a line of three backticks, `a`, a backtick and `b`, followed by a hazard span
@@ -96,7 +96,7 @@ This requirement modifies R1198-13: rendering terminates on any input, and the c
 #### Scenario: A multi-line quote paragraph is one span
 - **GIVEN** 20 lines, each `> ` followed by 290 repetitions of `*a `
 - **WHEN** the adapter builds the tree
-- **THEN** the 20 lines are one span, which is degraded with its notice in under 200 ms (the unfixed rule counted each line alone and took 2392 ms without degrading)
+- **THEN** the 20 lines are one span, which is degraded with its notice within the pre-scan bound (750 ms) (the unfixed rule counted each line alone and took 2392 ms without degrading)
 
 #### Scenario: A quote paragraph ends where marked ends it
 - **GIVEN** quote lines of 400 delimiters each, separated in turn by a lazy line without `>`, a `>`-only line, a blank line, a heading in the quote, a list item in the quote, a plain paragraph before the quote, and a deeper quote

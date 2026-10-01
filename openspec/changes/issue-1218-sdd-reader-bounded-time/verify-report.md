@@ -135,3 +135,9 @@ The cold review returned APPROVE with three corrections the maintainer approved.
 Escaping linearity, measured with `Lexer.lex` on the escaped text: 400000 chars of `\*` 91 ms, `_` 65 ms, `~` 80 ms, mixed `*a_b~` 84 ms, `**a ` x5000 10 ms. Doubling the input doubles the time for every class. The costly class is `[`: about 5 µs per bracket inside marked's own `reflinkSearch` (escaped or not): `\[` x 2e5 takes 991 ms, so a bracket-only passage near the 524288-byte adapter cap can reach the 1500 ms worker budget and end as the timeout notice. `]` is not escaped, which keeps `[a](` x 5e4 at 78 ms instead of 650 ms.
 
 Real artifacts: unchanged. The zero-degradation test over every `openspec/changes` artifact passes with the new span rules, and no real file's token `raw` lengths disagree with its text (1394 files under `openspec`, `brain`, `docs`).
+
+## CI timing (after cold review round 1)
+
+| Finding | Resolution |
+|---|---|
+| `local-checks` failed on PR #1223: two pre-scan timing tests ran at 204 ms and 232 ms against a 200 ms bound | That bound assumed the degraded passage was never lexed. Since cold-2, the escaped document is lexed once (about 100 ms locally, about 230 ms on CI for 200 KB), so the CI margin had fallen to 1x. The pre-scan tests now share `PRESCAN_BOUND_MS = 750` (half the worker budget, 15x under the 11 s freeze). The quote-prefix scan keeps 200 ms because it is a pure scan. Spec R1218-1 scenarios and design risks are updated. |
