@@ -356,7 +356,7 @@ const ALLOWLIST = [
   { file: 'brain/scripts/lib/home-scaffold-nav-integrity.test.mjs', entrypoint: 'brain/scripts/check-brain-nav.mjs', reason: 'no-vcs-capability' },
   { file: 'brain/scripts/lib/home-index.test.mjs', entrypoint: 'brain/scripts/lib/home-index.mjs', reason: 'no-vcs-capability' },
   { file: 'brain/scripts/check-refs.test.mjs', entrypoint: 'brain/scripts/check-refs.mjs', reason: 'no-vcs-capability' },
-  { file: 'brain/scripts/governance/postmerge/parse-failures.test.mjs', entrypoint: 'brain/scripts/governance/postmerge/parse-failures.mjs', reason: 'no-vcs-capability' },
+  { file: 'brain/scripts/governance/postmerge/parse-failures.test.mjs', entrypoint: '<unresolved>', line: 65, reason: 'no-vcs-capability' }, // bash redirects a file onto parse-failures.mjs (#1221)
   { file: 'brain/scripts/new-change.test.mjs', entrypoint: 'brain/scripts/new-change.mjs', reason: 'no-vcs-capability' },
 
   // ── postmerge cursor: real git push, local bare origin only ────────────

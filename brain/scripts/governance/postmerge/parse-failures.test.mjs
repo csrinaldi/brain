@@ -8,7 +8,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { closeSync, mkdtempSync, openSync, rmSync, writeSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -53,16 +53,23 @@ test('parseFailingShas: null / undefined / empty input yields empty list', () =>
 
 test('parse-failures CLI: reads stdin, prints deduped full-sha list one per line', () => {
   const stdin = [`[FAIL-SHA] ${A}`, '[PASS] 1234567 x', `[FAIL-SHA] ${A}`, `[FAIL-SHA] ${B}`].join('\n');
-  // stdin is a file descriptor, not the `input` option: a piped stdin never sees EOF in the cold
-  // reviewer's sandbox, and the CLI reads to EOF (#1221).
+  // stdin is a FILE that bash redirects onto the CLI (`node SCRIPT <file`), never the `input`
+  // option: a piped stdin never sees EOF in the cold reviewer's sandbox, and the CLI reads to EOF
+  // (#1221). Handing spawnSync an inherited fd was not enough there either (PR #1222 rev 1: exit 0,
+  // empty stdout), so the redirect is bash's, the same mechanism the backend-prompt tests use.
   const dir = mkdtempSync(join(tmpdir(), 'brain-1221-failsha-'));
-  const fd = openSync(join(dir, 'stdin'), 'w+');
-  writeSync(fd, stdin);
-  closeSync(fd);
-  const inFd = openSync(join(dir, 'stdin'), 'r');
-  const r = spawnSync('node', [SCRIPT], { stdio: [inFd, 'pipe', 'pipe'], encoding: 'utf8' });
-  closeSync(inFd);
-  rmSync(dir, { recursive: true, force: true });
+  let r;
+  try {
+    const file = join(dir, 'stdin');
+    writeFileSync(file, stdin);
+    r = spawnSync('bash', ['-c', 'exec node "$0" <"$1"', SCRIPT, file], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      encoding: 'utf8',
+      timeout: 10_000,
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
   assert.equal(r.status, 0, `expected exit 0, got ${r.status}\n${r.stderr}`);
   assert.equal(r.stdout, `${A}\n${B}\n`);
 });

@@ -11,7 +11,7 @@ how the harness wires pipes.
 | `bootstrap.memory-backend-validate.test.mjs` runFragment | bash `read` (needs EOF for newline-less answers) | (b) | `exec 0<file` |
 | `bootstrap.default-platform.test.mjs` | `bash -s` reads script to EOF | (b) | script written to a file, `bash <file>` |
 | `i18n/coverage.test.mjs` | `eval "$(cat)"` | (b) | `cat "$1"` of a temp file |
-| `governance/postmerge/parse-failures.test.mjs` | node CLI reads all stdin | (b) | stdin is an fd opened on a temp file |
+| `governance/postmerge/parse-failures.test.mjs` | node CLI reads all stdin | (b) | bash redirects a temp file onto the CLI (`exec node "$0" <"$1"`). An fd handed to `spawnSync` read empty in the reviewer sandbox (PR #1222 rev 1) |
 | `hooks/hooks.attribution-parity.test.mjs` | `grep -qiE` on stdin | (b) | message written to a file, passed as grep operand |
 | `memory/lane/collect.integration.test.mjs` | `git hash-object --stdin` | (b) | hash the already-existing record file by path (`--no-filters`) |
 | `bootstrap.vcs-provider-validate.test.mjs` | bash `read` loop, every answer ends in `\n` and breaks before EOF | (a) | unchanged |
