@@ -34,19 +34,42 @@ test('#881: ui/lib/ exists and ships at least one pure module', () => {
   assert.ok(modules.length > 0, 'brain/scripts/ui/lib/ must contain at least one .mjs module');
 });
 
+// The ONE exemption to the `./`-only rule: the markdown adapter's door to the
+// vendored tokenizer (#1198, R1198-11). It is an exact (file, specifier) pair,
+// never a pattern, so no other lib module can reach outside ui/lib/**.
+const IMPORT_EXEMPTIONS = [['markdown.mjs', '../vendor/marked.esm.js']];
+
+/** The specifiers of `name` that break the `./`-only rule, exemptions applied. */
+function outsideImports(name, specs, exemptions = IMPORT_EXEMPTIONS) {
+  return specs.filter((spec) => !spec.startsWith('./') && !exemptions.some(([f, s]) => f === name && s === spec));
+}
+
 test('#881: no file under ui/lib/** imports anything outside ui/lib/** (D9)', () => {
   const modules = libModules();
   assert.ok(modules.length > 0, 'no modules to scan — see the previous test');
   for (const name of modules) {
     const text = readFileSync(join(LIB_DIR, name), 'utf8');
-    for (const spec of importSpecifiers(text)) {
-      assert.ok(
-        spec.startsWith('./'),
-        `${name}: imports "${spec}" — only sibling ./*.mjs imports are allowed under ui/lib/** ` +
-          '(no node: builtin, no ../status/*, no npm package)',
-      );
-    }
+    const bad = outsideImports(name, importSpecifiers(text));
+    assert.deepEqual(
+      bad,
+      [],
+      `${name}: imports ${JSON.stringify(bad)} — only sibling ./*.mjs imports are allowed under ui/lib/** ` +
+        '(no node: builtin, no ../status/*, no npm package)',
+    );
   }
+});
+
+test('#1198: the ./-only rule has exactly one exemption, scoped to (markdown.mjs, ../vendor/marked.esm.js)', () => {
+  assert.deepEqual(IMPORT_EXEMPTIONS, [['markdown.mjs', '../vendor/marked.esm.js']]);
+  assert.deepEqual(outsideImports('markdown.mjs', ['../vendor/marked.esm.js']), []);
+  assert.deepEqual(outsideImports('other.mjs', ['../vendor/marked.esm.js']), ['../vendor/marked.esm.js']);
+  assert.deepEqual(outsideImports('markdown.mjs', ['../vendor/other.js']), ['../vendor/other.js']);
+  assert.deepEqual(outsideImports('markdown.mjs', ['node:fs']), ['node:fs']);
+});
+
+test('#1198: the exemption is used — markdown.mjs really imports the vendored file', () => {
+  const text = readFileSync(join(LIB_DIR, 'markdown.mjs'), 'utf8');
+  assert.ok(importSpecifiers(text).includes('../vendor/marked.esm.js'), 'an unused exemption must be deleted');
 });
 
 test('#881: no ui/lib/** module reaches for wall-clock time, randomness, process, or the network', () => {

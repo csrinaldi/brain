@@ -50,6 +50,7 @@ function applyTheme(choice) {
 import { buildLaneModel, nodeSummaryFor, childrenOf } from './lib/lane-model.mjs';
 import { issueUrl } from './lib/forge-url.mjs';
 import { buildDrawerModel } from './lib/drawer-model.mjs';
+import { markdownTree } from './lib/markdown.mjs';
 import { buildSddModel, sddForIssue, buildSlicePlan, STAGE_VOCAB } from './lib/sdd-model.mjs';
 import { searchNodes } from './lib/search-model.mjs';
 import { buildMemoryModel } from './lib/memory-model.mjs';
@@ -114,6 +115,18 @@ let activeTab = 'spec';
 let collapsedTracks = new Set(['?']);
 /** The `?` holding lane's current page (#998 R998-3), 24 rows at a time. */
 let holdingPage = 0;
+/**
+ * Which SDD documents are expanded (#1198), keyed `<issue>:<document>`: the
+ * same kind of page-only interaction state as `collapsedTracks`, so a drawer
+ * re-render (a tab switch, a refs frame) restores what the reader opened.
+ */
+let expandedDocs = new Set();
+/**
+ * `path @ commit` to its markdown tree. A document read at one commit never
+ * changes, so the tree is built once per expansion and reused; the map is
+ * cleared whenever the selected issue changes so it cannot grow without bound.
+ */
+let docTrees = new Map();
 
 // ── DOM helpers ────────────────────────────────────────────────────────────
 
@@ -1527,6 +1540,7 @@ function renderActorRow(row) {
 /** Activating a node selects it and opens the drawer on its Spec tab (R881-8). */
 function selectNode(issue) {
   selectedIssue = issue;
+  docTrees = new Map();
   changeView = null;
   activeTab = 'spec';
   render();
@@ -1535,6 +1549,7 @@ function selectNode(issue) {
 
 function closeDrawer() {
   selectedIssue = null;
+  docTrees = new Map();
   changeView = null;
   render();
 }
@@ -1690,6 +1705,186 @@ function renderTab(tab) {
   return wrap;
 }
 
+// ── markdown documents (#1198) ─────────────────────────────────────────────
+// The tree comes from `lib/markdown.mjs`, which has already applied every
+// ruling (inert relative links, html as text, images as alt text, http(s)
+// only). These two functions are a plain walk over it, built from `el()`,
+// text nodes and `setAttribute` — the page never assigns markup.
+
+const MD_ALIGN = new Set(['left', 'center', 'right']);
+
+function renderMdInline(parent, nodes) {
+  for (const node of nodes) {
+    switch (node.t) {
+      case 'text':
+        parent.appendChild(document.createTextNode(node.text));
+        break;
+      case 'strong':
+      case 'em':
+      case 'del': {
+        const wrapper = el(node.t === 'del' ? 'del' : node.t);
+        renderMdInline(wrapper, node.children);
+        parent.appendChild(wrapper);
+        break;
+      }
+      case 'codespan':
+        parent.appendChild(el('code', null, node.text));
+        break;
+      case 'br':
+        parent.appendChild(el('br'));
+        break;
+      case 'link': {
+        const link = el('a');
+        link.setAttribute('href', node.href);
+        link.setAttribute('rel', 'noopener noreferrer');
+        link.setAttribute('target', '_blank');
+        link.setAttribute('referrerpolicy', 'no-referrer');
+        renderMdInline(link, node.children);
+        parent.appendChild(link);
+        break;
+      }
+      case 'inert': {
+        // A relative, anchor or refused link is not a link here: its text,
+        // and where it pointed, are shown and nothing is navigable.
+        const span = el('span', 'md-inert');
+        renderMdInline(span, node.children);
+        span.appendChild(document.createTextNode(' '));
+        span.appendChild(el('code', null, node.target));
+        parent.appendChild(span);
+        break;
+      }
+      default:
+        parent.appendChild(document.createTextNode(JSON.stringify(node)));
+    }
+  }
+}
+
+function renderMdCell(tag, align, cells) {
+  const cell = el(tag, MD_ALIGN.has(align) ? `md-align-${align}` : null);
+  renderMdInline(cell, cells);
+  return cell;
+}
+
+function renderMdBlocks(parent, blocks) {
+  for (const block of blocks) {
+    switch (block.t) {
+      case 'heading': {
+        const heading = el(`h${Math.min(6, block.level + 2)}`, 'md-heading');
+        renderMdInline(heading, block.children);
+        parent.appendChild(heading);
+        break;
+      }
+      case 'paragraph': {
+        const p = el('p');
+        renderMdInline(p, block.children);
+        parent.appendChild(p);
+        break;
+      }
+      case 'list': {
+        const list = el(block.ordered ? 'ol' : 'ul');
+        if (block.ordered && block.start !== 1) list.setAttribute('start', String(block.start));
+        for (const item of block.items) {
+          const li = el('li');
+          if (item.task) li.appendChild(el('span', 'md-task', item.checked ? '\u2611 ' : '\u2610 '));
+          renderMdBlocks(li, item.blocks);
+          list.appendChild(li);
+        }
+        parent.appendChild(list);
+        break;
+      }
+      case 'code': {
+        const pre = el('pre');
+        pre.appendChild(el('code', block.lang ? `lang-${block.lang}` : null, block.text));
+        parent.appendChild(pre);
+        break;
+      }
+      case 'blockquote': {
+        const quote = el('blockquote');
+        renderMdBlocks(quote, block.blocks);
+        parent.appendChild(quote);
+        break;
+      }
+      case 'hr':
+        parent.appendChild(el('hr'));
+        break;
+      case 'table': {
+        const table = el('table');
+        const head = el('thead');
+        const headRow = el('tr');
+        block.header.forEach((cells, i) => headRow.appendChild(renderMdCell('th', block.align[i], cells)));
+        head.appendChild(headRow);
+        table.appendChild(head);
+        const body = el('tbody');
+        for (const row of block.rows) {
+          const tr = el('tr');
+          row.forEach((cells, i) => tr.appendChild(renderMdCell('td', block.align[i], cells)));
+          body.appendChild(tr);
+        }
+        table.appendChild(body);
+        parent.appendChild(table);
+        break;
+      }
+      case 'frontmatter':
+        parent.appendChild(el('pre', 'md-frontmatter', block.text));
+        break;
+      default:
+        // `literal`, and anything a future tree adds: shown as written, never dropped.
+        parent.appendChild(el('p', 'md-literal', block.text ?? ''));
+    }
+  }
+}
+
+/** The expanded document: its stamp, the truncation note when there is one, and the rendered blocks. */
+function renderDocumentSection(doc, id) {
+  const section = el('section', 'doc-body');
+  section.setAttribute('id', id);
+  section.setAttribute('role', 'region');
+  section.setAttribute('aria-label', doc.stamp);
+  section.appendChild(el('p', 'doc-stamp', doc.stamp));
+  if (doc.note) section.appendChild(el('p', 'note', doc.note));
+  if (!docTrees.has(doc.stamp)) docTrees.set(doc.stamp, markdownTree(doc.text));
+  const tree = docTrees.get(doc.stamp);
+  for (const notice of tree.notices) section.appendChild(el('p', 'note', notice));
+  const body = el('div', 'md');
+  renderMdBlocks(body, tree.blocks);
+  section.appendChild(body);
+  return section;
+}
+
+/**
+ * A stage row's document: a native toggle when it can be read, the said reason
+ * when it cannot (never an empty body, R1198-2). The click toggles in place —
+ * it does not re-render the drawer, so the button keeps focus.
+ */
+function renderDocumentControl(card, doc) {
+  if (!doc) return;
+  if (doc.state !== 'present' && doc.state !== 'truncated') {
+    card.appendChild(said(doc.wording));
+    return;
+  }
+  const id = `doc-${selectedIssue}-${doc.key}`;
+  const key = `${selectedIssue}:${doc.key}`;
+  const button = el('button', 'doc-toggle');
+  button.setAttribute('aria-controls', id);
+  let section = null;
+  const setOpen = (open) => {
+    button.setAttribute('aria-expanded', String(open));
+    button.textContent = open ? 'hide document' : 'show document';
+    if (open && section === null) {
+      section = renderDocumentSection(doc, id);
+      card.appendChild(section);
+    }
+    if (!open && section !== null) {
+      card.removeChild(section);
+      section = null;
+    }
+    if (open) expandedDocs.add(key); else expandedDocs.delete(key);
+  };
+  button.addEventListener('click', () => setOpen(button.getAttribute('aria-expanded') !== 'true'));
+  card.appendChild(button);
+  setOpen(expandedDocs.has(key));
+}
+
 function renderEntry(item) {
   const card = el('div', item.pending ? 'card pending' : 'card');
   // A numbered, marked entry is the design's stage strip (#1059 region 08);
@@ -1705,6 +1900,7 @@ function renderEntry(item) {
     card.appendChild(line);
     if (item.detail) card.appendChild(el('p', null, item.detail));
     card.appendChild(renderSourceStamp(item.sourceStamp));
+    renderDocumentControl(card, item.document);
     for (const child of item.children ?? []) card.appendChild(renderEntry(child));
     return card;
   }
@@ -1712,6 +1908,7 @@ function renderEntry(item) {
   card.appendChild(el('strong', null, `${done}${item.title}`));
   if (item.detail) card.appendChild(el('p', null, item.detail));
   card.appendChild(renderSourceStamp(item.sourceStamp)); // #998 R998-2: the design's stamp, beside the value itself (A3)
+  renderDocumentControl(card, item.document);
   for (const child of item.children ?? []) card.appendChild(renderEntry(child));
   return card;
 }
@@ -1835,7 +2032,7 @@ function subscribe() {
       state = applyFrame(state, name, parsed.frame);
       render();
       // Q3/A2: a worktree's head moved, so the open drawer's Working memory
-      // tab (`git show <branch>:resume.md`) is the one value the snapshot
+      // tab (`resume.md` read at the branch tip) is the one value the snapshot
       // diff cannot refresh on its own.
       if (name === 'refs' && selectedIssue !== null) loadChange(selectedIssue);
     });

@@ -464,3 +464,71 @@ test('#1067: a spec with nothing orphaned carries an empty list, never an absent
   const spec = model.value.tabs.find((t) => t.id === 'spec');
   assert.deepEqual(spec.orphans, []);
 });
+
+// ── #1198: the seven documents ride the SDD tab's rows ──────────────────────
+
+const DIR = 'openspec/changes/issue-881-ui';
+const H = 'abc1234'.padEnd(40, '0');
+const present = (file, text, extra = {}) => ({ path: `${DIR}/${file}`, ref: 'HEAD', commit: H, state: 'present', text, bytes: text.length, truncated: false, truncatedAt: null, reason: null, note: null, ...extra });
+const stageRows = ['proposal', 'spec', 'design', 'tasks', 'apply', 'verify', 'archive'].map((stage) => ({ stage, file: `${stage}.md`, present: true, source: { path: `${DIR}/${stage}.md` } }));
+const docsView = (documents, items = stageRows) => buildDrawerModel(view({ sdd: { ok: true, value: items }, documents })).value.tabs.find((t) => t.id === 'sdd');
+
+test('#1198 R1198-1/5: each stage row carries its document view with the path @ commit12 stamp; archive carries none', () => {
+  const documents = {
+    proposal: present('proposal.md', '# P'), spec: present('spec.md', '# S'), design: present('design.md', '# D'),
+    tasks: present('tasks.md', '# T'), apply: present('apply-progress.md', '# A'), verify: present('verify-report.md', '# V'),
+  };
+  const sdd = docsView(documents);
+  assert.deepEqual(sdd.entries.map((e) => e.document?.key ?? null), ['proposal', 'spec', 'design', 'tasks', 'apply', 'verify', null]);
+  const proposal = sdd.entries[0].document;
+  assert.equal(proposal.state, 'present');
+  assert.equal(proposal.stamp, `${DIR}/proposal.md @ abc123400000`);
+  assert.equal(proposal.text, '# P');
+  assert.equal(proposal.wording, null);
+  assert.equal(sdd.entries[6].document, null, 'archive is a stage, not a document');
+});
+
+test('#1198 R1198-2: missing and unreadable are worded differently, name the file and the ref, and never carry a body', () => {
+  const documents = {
+    design: { path: `${DIR}/design.md`, ref: 'HEAD', commit: null, state: 'missing', text: null, reason: null },
+    tasks: { path: `${DIR}/tasks.md`, ref: 'HEAD', commit: null, state: 'unreadable', text: null, reason: 'fatal: bad object' },
+  };
+  const sdd = docsView(documents);
+  const design = sdd.entries.find((e) => e.title === 'design').document;
+  const tasks = sdd.entries.find((e) => e.title === 'tasks').document;
+  assert.equal(design.wording, 'design.md is not committed at HEAD');
+  assert.equal(tasks.wording, 'tasks.md could not be read at HEAD: fatal: bad object');
+  assert.notEqual(design.wording, tasks.wording);
+  assert.equal(design.text, null);
+  assert.equal(tasks.text, null);
+  assert.equal(design.stamp, `${DIR}/design.md`, 'no invented commit');
+});
+
+test('#1198 R1198-3: a truncated document carries the note and still has its text', () => {
+  const sdd = docsView({ design: present('design.md', 'xx', { state: 'truncated', truncated: true, truncatedAt: 2, note: 'truncated at 262144 bytes' }) });
+  const design = sdd.entries.find((e) => e.title === 'design').document;
+  assert.equal(design.state, 'truncated');
+  assert.equal(design.note, 'truncated at 262144 bytes');
+  assert.equal(design.text, 'xx');
+});
+
+test('#1198 D10: the unnumbered resume row is appended after the seven stages only when documents.resume exists', () => {
+  assert.equal(docsView(undefined).entries.length, 7, 'no documents: the seven stages only');
+  const documents = { resume: { path: 'resume.md', ref: 'feat/x', commit: 'f'.repeat(40), state: 'present', text: '---\nnext_action: go\n---\nbody', reason: null, note: null } };
+  const sdd = docsView(documents);
+  assert.equal(sdd.entries.length, 8);
+  const row = sdd.entries[7];
+  assert.equal(row.title, 'working memory — resume.md');
+  assert.equal(row.position, undefined, 'unnumbered');
+  assert.equal(row.document.key, 'resume');
+  assert.equal(row.document.stamp, 'resume.md @ ffffffffffff');
+  const missing = docsView({ resume: { path: 'resume.md', ref: 'feat/x', commit: null, state: 'missing', text: null, reason: null } }).entries[7].document;
+  assert.equal(missing.wording, 'resume.md is not committed at feat/x');
+});
+
+test('#1198 R1198-1: the tab set is still the six, and a truncated spec or tasks tab note is shown', () => {
+  const model = buildDrawerModel(view({ documents: {}, spec: { ok: true, value: [], note: 'truncated at 262144 bytes; cards cover the read part' }, tasks: { ok: true, value: [], note: 'truncated at 262144 bytes; items cover the read part' } }));
+  assert.deepEqual(model.value.tabs.map((t) => t.id), TAB_IDS);
+  assert.match(model.value.tabs[0].note, /cards cover the read part/);
+  assert.match(model.value.tabs[2].note, /items cover the read part/);
+});
