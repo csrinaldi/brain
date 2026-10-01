@@ -89,7 +89,7 @@ npm run brain:env:init
 > ([ADR-0030 Amendment 1](brain/project/decisions/adr-0030-distribution-scoped-registry-package.md)):
 >
 > ```bash
-> npm i -D "git+https://github.com/csrinaldi/brain.git#v1.10.1"
+> npm i -D "git+https://github.com/csrinaldi/brain.git#v1.11.0"
 > ```
 
 `npx brain init` needs no aliases to exist first — it is a `bin` entry, which is
@@ -104,7 +104,7 @@ you already defined, and is safe to re-run. `npx brain --help` lists the verb su
 >
 > ```bash
 > #      "brain:upgrade": "node node_modules/@logikas/brain/brain/scripts/brain-upgrade.mjs"
-> npm run brain:upgrade -- v1.10.1
+> npm run brain:upgrade -- v1.11.0
 > ```
 
 > **Using pnpm / yarn / bun?** brain is **package-manager-agnostic** — it detects your
@@ -126,7 +126,8 @@ you already defined, and is safe to re-run. `npx brain --help` lists the verb su
   `gitHost`, and `slug` from your git origin (confirm/override the provider on a TTY).
 - Prompts for your **`VCS_TOKEN`** (offers to open the provider's PAT page),
   writes it to `.env`, and configures the HTTPS git credential helper.
-- Selects and initializes the SDD harness and the memory backend.
+- Selects and initializes the SDD harness, and asks which memory backend the team uses
+  (`engram` or `plainfiles`, no default), writing the answer to tracked `brain.config.json`.
 - Reports any ecosystem tools to install — run `gentle-ai install` for `engram`
   and `gga`.
 - Configures the git **hooks** (`core.hooksPath = brain/scripts/hooks`).
@@ -153,8 +154,8 @@ Then:
 ### Updating brain
 
 ```bash
-npm run brain:upgrade -- v1.10.1             # install a newer tag, copy managed paths
-npm run brain:upgrade -- v1.10.1 --dry-run   # preview what would change
+npm run brain:upgrade -- v1.11.0             # install a newer tag, copy managed paths
+npm run brain:upgrade -- v1.11.0 --dry-run   # preview what would change
 ```
 
 Read the [CHANGELOG](CHANGELOG.md) before upgrading — **renames / breaking
@@ -208,7 +209,7 @@ brain follows the adapter pattern throughout — the repo is agnostic to the too
 | Concern | Selector | Default | ADR |
 |---|---|---|---|
 | SDD harness | `SDD_HARNESS` (`.env`) | `gentle-ai` | [ADR-0005](brain/project/decisions/adr-0005-adapter-harness-sdd-harness.md) / [ADR-0012](brain/project/decisions/adr-0012-harness-init-adapter.md) |
-| Memory backend | `MEMORY_BACKEND` (`.env`) | `engram` | [ADR-0004](brain/project/decisions/adr-0004-adapter-memoria-memory-backend.md) |
+| Memory backend | `memory.backend` (`brain.config.json`, tracked); `MEMORY_BACKEND` in `.env` or the environment is a per-machine override | none: `env:init` asks (`engram` or `plainfiles`), and backend operations refuse while it is undeclared | [ADR-0004](brain/project/decisions/adr-0004-adapter-memoria-memory-backend.md) (Amendment 3) |
 | VCS provider | `vcs.provider` (`brain.config.json`) | from git origin | [ADR-0008](brain/project/decisions/adr-0008-adapter-vcs-provider.md) |
 
 See [ADR-0001](brain/project/decisions/adr-0001-arquitectura-3-capas-harness-reemplazable.md) for the replaceable-harness architecture.

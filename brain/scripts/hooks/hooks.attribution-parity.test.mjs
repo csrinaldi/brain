@@ -127,8 +127,16 @@ function shPattern(path) {
  * the same shell primitive the hook uses, so this measures the pattern rather
  * than re-implementing the matching in JS. */
 function grepMatches(pattern, message) {
-  const r = spawnSync('grep', ['-qiE', pattern], { input: message, encoding: 'utf8' });
-  return r.status === 0;
+  // The message is read from a file, not the `input` option: a piped stdin never sees EOF in the
+  // cold reviewer's sandbox (#1221).
+  const dir = mkdtempSync(join(tmpdir(), 'brain-1221-grep-'));
+  try {
+    const file = join(dir, 'message');
+    writeFileSync(file, message);
+    return spawnSync('grep', ['-qiE', pattern, file], { encoding: 'utf8' }).status === 0;
+  } finally {
+    removeTempTree(dir);
+  }
 }
 
 /** The reviewer's real exported pattern — imported, never scraped from source.

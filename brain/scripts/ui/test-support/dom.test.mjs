@@ -122,3 +122,115 @@ test('#1059: installDom restores every global it replaced', () => {
   assert.equal(globalThis.fetch, before.fetch);
   assert.equal(globalThis.EventSource, before.EventSource);
 });
+
+// ── #1218: a Worker for the page to spawn ──
+
+test('#1218: by default the page gets a Worker that answers with the real reply, off the call stack', async () => {
+  const dom = installDom({ mountIds: [] });
+  try {
+    assert.equal(typeof globalThis.Worker, 'function');
+    const worker = new globalThis.Worker('/lib/markdown-worker.mjs', { type: 'module' });
+    assert.equal(dom.workers.length, 1);
+    const got = new Promise((resolve) => { worker.onmessage = (event) => resolve(event.data); });
+    worker.postMessage({ id: 9, text: '# hi' });
+    assert.equal(dom.workers[0].posted.length, 1, 'recorded synchronously');
+    const data = await got;
+    assert.equal(data.id, 9);
+    assert.equal(data.ok, true);
+    assert.equal(data.tree.blocks[0].t, 'heading');
+    worker.terminate();
+    assert.equal(dom.workers[0].terminated, 1);
+  } finally {
+    dom.restore();
+  }
+});
+
+test('#1218: hold mode never answers until the test releases it', async () => {
+  const dom = installDom({ mountIds: [], worker: 'hold' });
+  try {
+    const worker = new globalThis.Worker('/x', { type: 'module' });
+    let answered = false;
+    worker.onmessage = () => { answered = true; };
+    worker.postMessage({ id: 1, text: 'a' });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(answered, false);
+    dom.workers[0].release();
+    assert.equal(answered, true);
+  } finally {
+    dom.restore();
+  }
+});
+
+test('#1218: null removes the Worker global and restore puts the previous one back', () => {
+  const before = globalThis.Worker;
+  const dom = installDom({ mountIds: [], worker: null });
+  assert.equal(globalThis.Worker, undefined);
+  dom.restore();
+  assert.equal(globalThis.Worker, before);
+});
+
+test('#1218: the failing modes throw on construction, error, or send junk', async () => {
+  let dom = installDom({ mountIds: [], worker: 'throw' });
+  try { assert.throws(() => new globalThis.Worker('/x'), /cannot construct/); } finally { dom.restore(); }
+
+  dom = installDom({ mountIds: [], worker: 'error' });
+  try {
+    const worker = new globalThis.Worker('/x');
+    const got = new Promise((resolve) => { worker.onerror = resolve; });
+    worker.postMessage({ id: 1, text: 'a' });
+    await got;
+  } finally { dom.restore(); }
+
+  dom = installDom({ mountIds: [], worker: 'malformed' });
+  try {
+    const worker = new globalThis.Worker('/x');
+    const got = new Promise((resolve) => { worker.onmessage = (event) => resolve(event.data); });
+    worker.postMessage({ id: 1, text: 'a' });
+    assert.equal(typeof (await got).tree, 'string');
+  } finally { dom.restore(); }
+});
+
+test('#1218: childNodes is a NodeList, not an Array — no find, filter, map, some, every, reduce, includes, indexOf', () => {
+  // A browser's NodeList has forEach, item, entries, keys, values, length, index
+  // access and iteration, and nothing else. A shim that handed the page an Array
+  // let `childNodes.find` pass every test and throw in the browser.
+  const host = createElement('div');
+  host.appendChild(createElement('span'));
+  host.appendChild(createElement('em'));
+  const list = host.childNodes;
+
+  assert.equal(Array.isArray(list), false);
+  for (const name of ['find', 'filter', 'map', 'some', 'every', 'reduce', 'includes', 'indexOf', 'push', 'slice']) {
+    assert.equal(list[name], undefined, `a NodeList has no ${name}`);
+  }
+  assert.equal(list.length, 2);
+  assert.equal(list[0].tagName, 'SPAN');
+  assert.equal(list[2], undefined);
+  assert.equal(list.item(1).tagName, 'EM');
+  assert.equal(list.item(5), null);
+  const seen = [];
+  list.forEach((node, index) => seen.push(`${index}:${node.tagName}`));
+  assert.deepEqual(seen, ['0:SPAN', '1:EM']);
+  assert.deepEqual([...list].map((n) => n.tagName), ['SPAN', 'EM']);
+  assert.deepEqual(Array.from(list.entries()).map(([i, n]) => `${i}:${n.tagName}`), ['0:SPAN', '1:EM']);
+  assert.deepEqual(Array.from(list.keys()), [0, 1]);
+  assert.deepEqual(Array.from(list.values()).map((n) => n.tagName), ['SPAN', 'EM']);
+});
+
+test('#1218: childNodes is live, as a browser NodeList is', () => {
+  const host = createElement('div');
+  const list = host.childNodes;
+  host.appendChild(createElement('span'));
+  assert.equal(list.length, 1, 'the same list sees the append');
+  host.textContent = '';
+  assert.equal(list.length, 0);
+});
+
+test('#1218: the page never calls an Array method on childNodes — a NodeList has none', async () => {
+  const { readFileSync } = await import('node:fs');
+  const source = readFileSync(new URL('../static/app.js', import.meta.url), 'utf8');
+  const hits = source.split('\n')
+    .map((line, i) => ({ line: i + 1, text: line }))
+    .filter(({ text }) => /childNodes\.(find|filter|map|some|every|reduce|includes|indexOf)\b/.test(text));
+  assert.deepEqual(hits, [], 'childNodes is a NodeList in a browser: iterate it with for...of, forEach or index access');
+});
