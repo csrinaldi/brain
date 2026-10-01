@@ -103,7 +103,7 @@ test('#1198 R1198-6: a hard line break maps to its own br element', () => {
 
 test('#1198 R6: an image is its alt text and never carries the URL', () => {
   const tree = markdownTree('![architecture diagram](https://a.example/x.png) and ![](u)');
-  assert.deepEqual(tree.blocks[0].children.filter((k) => k.t === 'text').map((k) => k.text), ['[image: architecture diagram]', ' and ', '[image: ]']);
+  assert.deepEqual(tree.blocks[0].children.filter((k) => k.t === 'text').map((k) => k.text), ['[image: architecture diagram] and [image: ]'], 'adjacent text is one node');
   assert.ok(!JSON.stringify(tree).includes('a.example'));
   assert.ok(!JSON.stringify(tree).includes('"u"'));
 });
@@ -695,19 +695,19 @@ test('#1218 cold-3 (r2): a code span inside a degraded passage keeps exactly wha
 });
 
 test('#1218 cold-3 (r2): an autolink inside a degraded passage keeps its text and its href', () => {
-  const out = markdownTree(HAZARD_LINE('<https://ex.com/a_b>'));
+  const out = markdownTree(HAZARD_LINE('<https://example.com/a_b>'));
   assert.equal(degradedBlocks(out).length, 1);
   const links = nodesOf(out).filter((n) => n.t === 'link');
   assert.equal(links.length, 1);
-  assert.equal(links[0].href, 'https://ex.com/a_b');
-  assert.equal(flat(links[0].children), 'https://ex.com/a_b');
+  assert.equal(links[0].href, 'https://example.com/a_b');
+  assert.equal(flat(links[0].children), 'https://example.com/a_b');
 });
 
 test('#1218 cold-3 (r2): a bare url, an image alt and an inert link target keep their characters', () => {
-  const out = markdownTree(HAZARD_LINE('see https://ex.com/a_b_c and ![a_b](x_y.png) and [t_u](rel_path.md)'));
+  const out = markdownTree(HAZARD_LINE('see https://example.com/a_b_c and ![a_b](x_y.png) and [t_u](rel_path.md)'));
   const nodes = nodesOf(out);
-  assert.ok(nodes.some((n) => n.t === 'link' && n.href === 'https://ex.com/a_b_c'));
-  assert.ok(JSON.stringify(out.blocks).includes('https://ex.com/a_b_c'));
+  assert.ok(nodes.some((n) => n.t === 'link' && n.href === 'https://example.com/a_b_c'));
+  assert.ok(JSON.stringify(out.blocks).includes('https://example.com/a_b_c'));
   assert.ok(!/[-\\]/.test(JSON.stringify(out.blocks.filter((b) => b.t !== 'degraded'))), 'no placeholder and no backslash reaches the tree');
 });
 
@@ -745,4 +745,14 @@ test(`#1218 cold-3 (r2): a 200 KB delimiter run is substituted, lexed and restor
   const { value, ms } = timed(() => markdownTree(`${'*'.repeat(2e5)}x`));
   assert.equal(degradedBlocks(value).length, 1);
   assert.ok(ms < PRESCAN_BOUND_MS, `took ${ms} ms`);
+});
+// ── cold-4: adjacent text merges ──
+
+test('#1218 cold-4 (r2): a degraded line is a handful of text nodes, not one per mark', () => {
+  for (const unit of [' a*b', ' a*<b>', ' a*<!-- c -->', ' a\\*b']) {
+    const out = markdownTree('x' + unit.repeat(700));
+    const p = out.blocks.find((b) => b.t === 'paragraph');
+    assert.ok(p.children.length <= 3, `${JSON.stringify(unit)}: ${p.children.length} nodes`);
+    assert.equal(flat(p.children).length > 1000, true);
+  }
 });

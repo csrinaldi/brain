@@ -295,18 +295,16 @@ export function safeHref(raw) {
 
 const rawText = (token) => String(token.raw ?? token.text ?? '');
 
-// A run of `escape` tokens is one text node: an neutral passage arrives as one
-// token per character, and the page should not carry a node for each.
+// Adjacent text nodes are one node: marked emits an `escape` token per escaped
+// character and an `html` token per inline tag, all shown as plain text, so a long
+// passage would otherwise be one node per mark (#1218).
 function inline(tokens) {
   const out = [];
-  let prevEscape = false;
   for (const token of tokens ?? []) {
     const node = inlineNode(token);
     const last = out[out.length - 1];
-    const isEscape = token.type === 'escape';
-    if (isEscape && prevEscape && last?.t === 'text') last.text += node.text;
+    if (node.t === 'text' && last?.t === 'text') last.text += node.text;
     else out.push(node);
-    prevEscape = isEscape;
   }
   return out;
 }
