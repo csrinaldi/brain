@@ -1,0 +1,8 @@
+# cwd: /home/gandalf/IA/brain-test-plainfiles-B
+# date: 2026-10-01T17:01:46Z
+$ echo ENGRAM_DATA_DIR=${ENGRAM_DATA_DIR:-unset}; ls .memory/records 2>&1; test -e .env && echo present || echo 'no .env'; if [ plainfiles = engram ]; then npm run brain:memory:pull; engram search SYNTHETIC-1229; else node ./brain/scripts/memory/cli.mjs search SYNTHETIC-1229; fi
+ENGRAM_DATA_DIR=unset
+ls: cannot access '.memory/records': No such file or directory
+no .env
+memory/cli: ℹ no matching records found.
+exit=0

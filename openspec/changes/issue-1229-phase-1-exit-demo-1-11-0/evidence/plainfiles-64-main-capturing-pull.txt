@@ -1,0 +1,30 @@
+# cwd: /home/gandalf/IA/brain-test-plainfiles
+# date: 2026-10-01T17:05:29Z
+$ git status -sb; npm run brain:memory:pull; echo ---; git status -sb; git log --oneline -4; git branch --show-current
+## main...origin/main
+ M .memory/index.jsonl
+?? .memory/records/
+
+> brain-test-plainfiles@1.0.0 brain:memory:pull
+> node ./brain/scripts/memory/cli.mjs pull
+
+From https://github.com/csrinaldi/brain-test-plainfiles
+   feffc7f..18b3684  main       -> origin/main
+Updating feffc7f..18b3684
+Fast-forward
+ .memory/records/2026-10-rec-8ef0edd26861ab83.jsonl | 1 +
+ .memory/records/2026-10-rec-e8ef65043ff7761b.jsonl | 1 +
+ 2 files changed, 2 insertions(+)
+ create mode 100644 .memory/records/2026-10-rec-8ef0edd26861ab83.jsonl
+ create mode 100644 .memory/records/2026-10-rec-e8ef65043ff7761b.jsonl
+memory/cli: backend 'plainfiles' does not implement op 'import'
+brain:memory:pull: verified .memory/records/2026-10-rec-8ef0edd26861ab83.jsonl — present, tracked in HEAD as blob 580692f2cbc9d9b7cdfa0adeb02f82b58303ff52
+brain:memory:pull: verified .memory/records/2026-10-rec-e8ef65043ff7761b.jsonl — present, tracked in HEAD as blob 3f03a805c7628b3d46d74d9986966f905a424eec
+---
+## main...origin/main
+ M .memory/index.jsonl
+18b3684 memory: gandalf-rog-zephyrus-g15-ga503qr-ga503qr 2026-10-01 (2 records) (#3)
+feffc7f feat: add a demo line to the README (#2)
+d33b325 chore: adopt brain 1.11.0
+main
+exit=0

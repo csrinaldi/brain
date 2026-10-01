@@ -1,0 +1,9 @@
+# cwd: /home/gandalf/IA/brain-test-plainfiles
+# date: 2026-10-01T17:01:31Z
+$ npm run brain:memory:save -- SYNTHETIC-1229-R2-plainfiles SYNTHETIC-1229-second-record-body --type discovery --issue 1
+
+> brain-test-plainfiles@1.0.0 brain:memory:save
+> node ./brain/scripts/memory/cli.mjs save SYNTHETIC-1229-R2-plainfiles SYNTHETIC-1229-second-record-body --type discovery --issue 1
+
+memory/cli: ✓ saved rec-e8ef65043ff7761b → /home/gandalf/IA/brain-test-plainfiles/.memory/records/2026-10-rec-e8ef65043ff7761b.jsonl
+exit=0

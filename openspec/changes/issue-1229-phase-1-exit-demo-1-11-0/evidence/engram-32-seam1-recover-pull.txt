@@ -1,0 +1,11 @@
+# cwd: /home/gandalf/IA/brain-test-engram
+# date: 2026-10-01T17:01:22Z
+$ command -v engram; npm run brain:memory:pull
+/home/gandalf/.local/bin/engram
+
+> brain-test-engram@1.0.0 brain:memory:pull
+> node ./brain/scripts/memory/cli.mjs pull
+
+Already up to date.
+✓ import complete — 1/1 records imported into engram (records-only, D2/C4).
+exit=0

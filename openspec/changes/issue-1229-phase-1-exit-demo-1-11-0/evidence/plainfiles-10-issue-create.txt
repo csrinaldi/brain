@@ -1,0 +1,5 @@
+# cwd: /home/gandalf/IA/brain-test-plainfiles
+# date: 2026-10-01T16:55:15Z
+$ gh issue create --title 'Add a demo line to the README' --body 'Phase-1 exit demo: add one line to the README.'
+https://github.com/csrinaldi/brain-test-plainfiles/issues/1
+exit=0

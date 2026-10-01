@@ -1,0 +1,42 @@
+# cwd: /home/gandalf/IA/brain-test-engram-B
+# date: 2026-10-01T17:05:20Z
+$ test -e .env && echo present || echo 'no .env'; echo ENGRAM_DATA_DIR=${ENGRAM_DATA_DIR:-unset}; npm run brain:memory:pull; if [ engram = engram ]; then engram search SYNTHETIC-1229; else node ./brain/scripts/memory/cli.mjs search SYNTHETIC-1229; fi
+no .env
+ENGRAM_DATA_DIR=/home/gandalf/.cache/brain-1110-demo/engram-data-B
+
+> brain-test-engram@1.0.0 brain:memory:pull
+> node ./brain/scripts/memory/cli.mjs pull
+
+From https://github.com/csrinaldi/brain-test-engram
+   925c7e1..826eb2c  main       -> origin/main
+ * [new branch]      memory/gandalf-rog-zephyrus-g15-ga503qr-ga503qr-2026-10-01 -> origin/memory/gandalf-rog-zephyrus-g15-ga503qr-ga503qr-2026-10-01
+Updating 925c7e1..826eb2c
+Fast-forward
+ .memory/records/2026-10-rec-382313952346edf2.jsonl | 1 +
+ .memory/records/2026-10-rec-ddc7460731141e7f.jsonl | 1 +
+ 2 files changed, 2 insertions(+)
+ create mode 100644 .memory/records/2026-10-rec-382313952346edf2.jsonl
+ create mode 100644 .memory/records/2026-10-rec-ddc7460731141e7f.jsonl
+✓ import complete — 2/2 records imported into engram (records-only, D2/C4).
+Update available: 2.0.0 -> 2.2.1
+To update:
+  brew update && brew upgrade engram
+  or: go install github.com/Gentleman-Programming/engram/v2/cmd/engram@latest
+
+Found 2 memories:
+
+[1] #1 (discovery) — SYNTHETIC-1229-R2-engram
+    **Actor:** @csrinaldi (agente)
+**Fuente:** issue #1 / engram save on gandalf-ROG-Zephyrus-G15-GA503QR-GA503QR; actor from git config brain.actor; actorKind agent from env AI_AGENT=claude-code_2-1-285_agent; issue 1 declared via --issue
+
+SYNTHETIC-1229-second-record-body
+    2026-10-01 14:01:32 | project: brain-test-engram | scope: project
+
+[2] #2 (session_summary) — SYNTHETIC-1229-R1-engram
+    **Actor:** @csrinaldi (agente)
+**Fuente:** issue #1 / engram save on gandalf-ROG-Zephyrus-G15-GA503QR-GA503QR; actor from git config brain.actor; actorKind agent from env AI_AGENT=claude-code_2-1-285_agent; issue 1 declared via --issue
+
+SYNTHETIC-1229-first-record-body
+    2026-10-01 14:01:22 | project: brain-test-engram | scope: project
+
+exit=0

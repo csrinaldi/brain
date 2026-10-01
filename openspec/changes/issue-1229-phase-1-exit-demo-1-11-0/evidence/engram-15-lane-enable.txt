@@ -1,0 +1,10 @@
+# cwd: /home/gandalf/IA/brain-test-engram-issue-1
+# date: 2026-10-01T16:56:54Z
+$ npm run brain:config -- set memory.lane.enabled true; git status --short
+
+> brain-test-engram@1.0.0 brain:config
+> node ./brain/scripts/config/cli.mjs set memory.lane.enabled true
+
+brain:config: ✓ set memory.lane.enabled (no pending migrations)
+ M brain.config.json
+exit=0

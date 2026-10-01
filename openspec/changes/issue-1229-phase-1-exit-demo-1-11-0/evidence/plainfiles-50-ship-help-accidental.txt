@@ -1,0 +1,10 @@
+# NOTE: unrecorded-at-the-time accidental run; transcribed afterwards from the terminal output.
+# cwd: /home/gandalf/IA/brain-test-plainfiles
+$ npm run brain:memory:ship -- --help
+> brain-test-plainfiles@1.0.0 brain:memory:ship
+> node ./brain/scripts/memory/cli.mjs ship --invoker manual --help
+
+memory/cli: auto-merge was refused (unsupported) — the pull request stays open; the next run re-arms it.
+memory/cli: ✓ pushed refs/heads/memory/gandalf-rog-zephyrus-g15-ga503qr-ga503qr-2026-10-01 to origin.
+memory/cli: BRAIN_MEMORY_TOKEN is not set — this run authenticated with the ambient session credential.
+# (--help is not honoured by `ship`: it ran a real ship. Exit code was not captured.)

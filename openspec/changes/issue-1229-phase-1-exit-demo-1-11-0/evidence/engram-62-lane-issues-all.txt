@@ -1,0 +1,5 @@
+# cwd: /home/gandalf/IA/brain-test-engram
+# date: 2026-10-01T17:05:17Z
+$ gh issue list --state all --limit 50 --json number,title,state
+[{"number":1,"state":"CLOSED","title":"Add a demo line to the README"}]
+exit=0

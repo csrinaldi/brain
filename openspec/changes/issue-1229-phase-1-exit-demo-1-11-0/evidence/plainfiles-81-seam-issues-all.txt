@@ -1,0 +1,6 @@
+# cwd: /home/gandalf/IA/brain-test-plainfiles
+# date: 2026-10-01T17:14:40Z
+$ gh issue list --state all --limit 50 --json number,title,state; echo "list-exit=$?"
+[{"number":1,"state":"CLOSED","title":"Add a demo line to the README"}]
+list-exit=0
+exit=0

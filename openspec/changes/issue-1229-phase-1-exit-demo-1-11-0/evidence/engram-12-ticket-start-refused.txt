@@ -1,0 +1,11 @@
+# cwd: /home/gandalf/IA/brain-test-engram
+# date: 2026-10-01T16:56:42Z
+$ npm run brain:ticket:start -- 1
+
+> brain-test-engram@1.0.0 brain:ticket:start
+> node ./brain/scripts/ticket-start.mjs 1
+
+
+  Searching for issue #1...
+  ✗ Issue #1 has no type:* label (labels found: [status:approved]) — brain:ship would refuse it later. Add one on the issue now (for example type:feature, type:bug or type:chore; type::feature on GitLab), then re-run.
+exit=1

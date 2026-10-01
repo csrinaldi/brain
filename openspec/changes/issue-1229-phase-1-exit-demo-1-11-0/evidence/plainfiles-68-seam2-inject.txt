@@ -1,0 +1,16 @@
+# cwd: /home/gandalf/IA/brain-test-plainfiles
+# date: 2026-10-01T17:07:52Z
+$ BRAIN_VCS_TEST_MODULE=/home/gandalf/IA/brain-test-plainfiles/brain/scripts/memory/__fixtures__/fake-vcs-port.mjs BRAIN_VCS_TEST_SCRIPT=/tmp/claude-1000/-home-gandalf-IA-brain/d53d5a1f-10c9-4e27-a1f9-7dd5af425ce9/scratchpad/seam2.json npm run brain:memory:ship; echo "ship-exit=$?"; echo '--- remote branches'; git ls-remote --heads origin; echo '--- open PRs'; gh pr list --state open --json number,headRefName
+
+> brain-test-plainfiles@1.0.0 brain:memory:ship
+> node ./brain/scripts/memory/cli.mjs ship --invoker manual
+
+memory/cli: ✗ ship failed — the pull request could not be created. memory.ship.prCreateFailed: mrCreate failed — injected mrCreate failure (seam 2, #1229)
+ship-exit=1
+--- remote branches
+3a8a8a0d68df6e52d48f90f4a807094a924ea270	refs/heads/feat/issue-1-add-a-demo-line-to-the-readme
+18b36846ddcedbfd22187ffc576cf0a870f1d813	refs/heads/main
+0ef721e7d60f424bc4c1a7dfc7e7c4664ff83b83	refs/heads/memory/gandalf-rog-zephyrus-g15-ga503qr-ga503qr-2026-10-01
+--- open PRs
+[]
+exit=0

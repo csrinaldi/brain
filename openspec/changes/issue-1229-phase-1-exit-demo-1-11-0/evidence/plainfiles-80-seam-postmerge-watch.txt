@@ -1,0 +1,14 @@
+# cwd: /home/gandalf/IA/brain-test-plainfiles
+# date: 2026-10-01T17:14:33Z
+$ gh run watch 36897876206 --exit-status | head -3; echo "watch-exit=$?"; gh run view 36897876206 | head -6
+✓ main governance-postmerge · 36897876206
+Triggered via push less than a minute ago
+
+watch-exit=0
+
+✓ main governance-postmerge · 36897876206
+Triggered via push less than a minute ago
+
+JOBS
+✓ audit-and-revert in 21s (ID 110489352350)
+exit=0

@@ -1,0 +1,93 @@
+Script started on 2026-10-01 13:49:51-03:00 [COMMAND="npm run brain:env:init" TERM="xterm-256color" TTY="/dev/pts/1" COLUMNS="190" LINES="43"]
+
+> brain-test-plainfiles@1.0.0 brain:env:init
+> bash ./brain/scripts/bootstrap.sh
+
+  ✓ brain.config.json: created (provider=github)
+  ✓ brain.config.json: gitHost = github.com
+  ✓ brain.config.json: slug = csrinaldi/brain-test-plainfiles
+  ✓ governance tier: lite — set for this new repository (governance.tier in brain.config.json).
+    lite is for one maintainer: no second approval is required to merge, and every gate still runs.
+    To change it, set governance.tier in brain.config.json to lite, standard (a team: a second, non-author approval) or regulated (audited: the strictest evidence, no waivers) — e.g. npm run brain:config -- set governance.tier standard — then re-run npm run brain:protect.
+  ✓ memory lane: off — memory records stay in your clone; nothing ships them to main for you.
+    The lane is off by default on every tier because it opens a separate pull request for memory records that a maintainer has to merge; turning it on is a deliberate choice.
+    To turn it on: npm run brain:config -- set memory.lane.enabled true
+  ✓ brain/HOME.md: created from template
+
+  Derived from git origin:
+    provider : github
+    gitHost  : github.com
+    slug     : csrinaldi/brain-test-plainfiles
+  VCS provider [github]: 
+
+[1m== Base dependencies ==[0m
+  ✓ git, python3 present; package manager: npm
+
+[1m== Ecosystem tools ==[0m
+  ✓ gh
+  ✓ engram
+  ✓ gentle-ai
+  ✓ gga
+  ✓ claude
+
+[1m== Codex cold-review ==[0m
+  ✓ cold-review is routed to no engine; Codex is not required
+
+[1m== Personal access token (.env) ==[0m
+  ✓ .env is git-ignored
+  You need a Personal Access Token from your Git hosting provider.
+  It must be PERSONAL — not a project bot token — so your pushes, issues and
+  MRs/PRs appear under your name.
+  Open the browser with the pre-filled form? [Y/n]: N
+  Create it manually at: "https://github.com/settings/tokens/new?description=brain-dev&scopes=repo"
+  Paste your PAT (not shown): 
+  ✓ VCS_TOKEN saved in .env (gitignored)
+
+[1m== Git credential helper (HTTPS) ==[0m
+  ✓ push/pull over HTTPS use your personal PAT from .env
+
+[1m== VCS authentication ==[0m
+  ✓ already authenticated against github.com
+
+[1m== Governance labels and actor ==[0m
+  ✓ governance labels created: status:approved, type:feature, type:bug, type:docs, type:refactor, type:chore, type:governance, size:exception, skip:memory-gate, governance:archive-sweep-failed, governance:audit-uncomputable, governance:audit-unrevertible, governance:cursor-missing, governance:cursor-unknown, governance:postmerge-unreported, governance:revert-blocked
+  ✓ brain.actor: @csrinaldi (from your authenticated VCS identity, written to the local git config)
+
+[1m== SDD implementation (harness) ==[0m
+  ✓ harness: gentle-ai (claude) (.env)
+  harness: ecosystem already initialized (gentle-ai doctor)
+  harness: skill registry updated
+  harness: SDD context 'sdd-init/brain-test-plainfiles' not found in engram.
+    The agent Init Guard will create it on the first /sdd-* command.
+    To create it now, run: /sdd-init
+  harness: No project ADRs found (brain/project/decisions/ is empty or absent).
+    Run /project:bootstrap-adrs in your AI agent to draft the starter ADR set (Stack, Testing, Build).
+
+[1m== Team memory ==[0m
+  Which memory backend does this team use? (engram|plainfiles): engram      plainfiles
+  ⚠ memory backend saved to brain.config.json (memory.backend) — commit it so every checkout runs the same backend
+  ✓ memory backend: plainfiles (brain.config.json)
+  ✓ pre-push hook activated (checkpoints feature working memory before push — ADR-0003)
+  ✓ plainfiles backend ready (.memory/records/ + index)
+  ⚠ memory pull skipped — this repository has no commits yet. Next: npm run brain:memory:pull once that is in place.
+  ✓ brain/ → memory indexing is engram-only; plainfiles has no doc projection by design
+
+[1m== Open tickets in csrinaldi/brain-test-plainfiles ==[0m
+## Your tickets
+- (none)
+
+## Unassigned
+- (none)
+
+[1m== Environment ready ==[0m
+  Next steps:
+    1. Read brain/HOME.md — the entry point to all project knowledge.
+    2. Every morning: brain:day:start
+       (pulls memory, shows open tickets, checks for brain updates)
+    3. Pick a ticket and create your branch: {type}/issue-{iid}-{slug}.
+    4. Plan a feature with SDD: brain:project:feature -- --issue [ID]
+    5. Before pushing: brain:repo:check; capture durable memory with brain:memory:save --issue <id> (the memory lane, if enabled, ships it; env:init states whether it is)
+  Pending: memory pull (next: npm run brain:memory:pull)
+  Run: npm run tools:install  (installs all at once)
+⠙[1G[0K
+Script done on 2026-10-01 13:51:15-03:00 [COMMAND_EXIT_CODE="0"]

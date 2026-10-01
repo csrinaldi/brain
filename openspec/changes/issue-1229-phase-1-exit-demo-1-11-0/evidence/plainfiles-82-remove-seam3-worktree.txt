@@ -1,0 +1,7 @@
+# cwd: /home/gandalf/IA/brain-test-plainfiles
+# date: 2026-10-01T17:14:41Z
+$ git worktree remove /home/gandalf/IA/brain-test-plainfiles-seam3; echo "exit-remove=$?"; git worktree list
+exit-remove=0
+/home/gandalf/IA/brain-test-plainfiles         18b3684 [main]
+/home/gandalf/IA/brain-test-plainfiles-issue-1 3a8a8a0 [feat/issue-1-add-a-demo-line-to-the-readme]
+exit=0

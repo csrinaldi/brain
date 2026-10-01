@@ -1,0 +1,11 @@
+# cwd: /home/gandalf/IA/brain-test-engram
+# date: 2026-10-01T17:01:22Z
+$ export PATH=$(echo "$PATH" | tr ":" "\n" | rg -v "^/home/gandalf/.local/bin$" | paste -sd:); command -v engram || echo "engram: not on PATH"; npm run brain:memory:save -- SYNTHETIC-1229-R1-engram SYNTHETIC-1229-first-record-body --type session_summary --issue 1
+engram: not on PATH
+
+> brain-test-engram@1.0.0 brain:memory:save
+> node ./brain/scripts/memory/cli.mjs save SYNTHETIC-1229-R1-engram SYNTHETIC-1229-first-record-body --type session_summary --issue 1
+
+record rec-ddc7460731141e7f is on disk, but hydrating it into engram was deferred — engram binary not found. The record is NOT lost; re-run `npm run brain:memory:pull` (or `brain:memory:share`) once engram is reachable to catch it up.
+memory/cli: ✓ saved rec-ddc7460731141e7f → /home/gandalf/IA/brain-test-engram/.memory/records/2026-10-rec-ddc7460731141e7f.jsonl
+exit=0

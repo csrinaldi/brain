@@ -1,0 +1,52 @@
+# cwd: /home/gandalf/IA/brain-test-plainfiles-issue-1
+# date: 2026-10-01T16:56:03Z
+$ for i in $(seq 1 30); do out=$(gh pr checks 2 2>&1); echo "--- poll $i $(date -u +%T)"; echo "$out"; if ! echo "$out" | rg -q "no checks|pending|queued|in_progress"; then if [ -n "$out" ]; then break; fi; fi; sleep 10; done; gh pr checks 2; echo "checks-exit=$?"
+--- poll 1 16:56:05
+actor-check	pending	0	https://github.com/csrinaldi/brain-test-plainfiles/actions/runs/36895658281/job/110481870389	
+base-branch	pending	0	https://github.com/csrinaldi/brain-test-plainfiles/actions/runs/36895657048/job/110481866865	
+brain-writes-reviewed	pending	0	https://github.com/csrinaldi/brain-test-plainfiles/actions/runs/36895658281/job/110481870328	
+decision-gate	pending	0	https://github.com/csrinaldi/brain-test-plainfiles/actions/runs/36895658281/job/110481870610	
+diff-size	pending	0	https://github.com/csrinaldi/brain-test-plainfiles/actions/runs/36895657048/job/110481865838	
+issue-link	pending	0	https://github.com/csrinaldi/brain-test-plainfiles/actions/runs/36895658281/job/110481870488	
+lane-paths	pending	0	https://github.com/csrinaldi/brain-test-plainfiles/actions/runs/36895657048/job/110481866486	
+lane-scrub	pending	0	https://github.com/csrinaldi/brain-test-plainfiles/actions/runs/36895658281/job/110481870448	
+local-checks	pending	0	https://github.com/csrinaldi/brain-test-plainfiles/actions/runs/36895657048/job/110481866299	
+memory-gate	pending	0	https://github.com/csrinaldi/brain-test-plainfiles/actions/runs/36895658281/job/110481869763	
+phase-order	pending	0	https://github.com/csrinaldi/brain-test-plainfiles/actions/runs/36895658281/job/110481870374	
+--- poll 2 16:56:17
+local-checks	pending	0	https://github.com/csrinaldi/brain-test-plainfiles/actions/runs/36895658281/job/110481870465	
+actor-check	pass	9s	https://github.com/csrinaldi/brain-test-plainfiles/actions/runs/36895658281/job/110481870389	
+base-branch	pass	9s	https://github.com/csrinaldi/brain-test-plainfiles/actions/runs/36895657048/job/110481866865	
+brain-writes-reviewed	pass	8s	https://github.com/csrinaldi/brain-test-plainfiles/actions/runs/36895657048/job/110481866348	
+decision-gate	pass	6s	https://github.com/csrinaldi/brain-test-plainfiles/actions/runs/36895658281/job/110481870610	
+diff-size	pass	6s	https://github.com/csrinaldi/brain-test-plainfiles/actions/runs/36895658281/job/110481870183	
+issue-link	pass	6s	https://github.com/csrinaldi/brain-test-plainfiles/actions/runs/36895658281/job/110481870488	
+lane-paths	pass	4s	https://github.com/csrinaldi/brain-test-plainfiles/actions/runs/36895658281/job/110481870477	
+lane-scrub	pass	7s	https://github.com/csrinaldi/brain-test-plainfiles/actions/runs/36895658281/job/110481870448	
+memory-gate	pass	10s	https://github.com/csrinaldi/brain-test-plainfiles/actions/runs/36895657048/job/110481866204	
+phase-order	pass	6s	https://github.com/csrinaldi/brain-test-plainfiles/actions/runs/36895658281/job/110481870374	
+--- poll 3 16:56:29
+actor-check	pass	9s	https://github.com/csrinaldi/brain-test-plainfiles/actions/runs/36895658281/job/110481870389	
+base-branch	pass	9s	https://github.com/csrinaldi/brain-test-plainfiles/actions/runs/36895657048/job/110481866865	
+brain-writes-reviewed	pass	5s	https://github.com/csrinaldi/brain-test-plainfiles/actions/runs/36895658281/job/110481870328	
+decision-gate	pass	6s	https://github.com/csrinaldi/brain-test-plainfiles/actions/runs/36895658281/job/110481870610	
+diff-size	pass	6s	https://github.com/csrinaldi/brain-test-plainfiles/actions/runs/36895658281/job/110481870183	
+issue-link	pass	6s	https://github.com/csrinaldi/brain-test-plainfiles/actions/runs/36895658281/job/110481870488	
+lane-paths	pass	4s	https://github.com/csrinaldi/brain-test-plainfiles/actions/runs/36895658281/job/110481870477	
+lane-scrub	pass	5s	https://github.com/csrinaldi/brain-test-plainfiles/actions/runs/36895657048/job/110481866240	
+local-checks	pass	5s	https://github.com/csrinaldi/brain-test-plainfiles/actions/runs/36895658281/job/110481870465	
+memory-gate	pass	10s	https://github.com/csrinaldi/brain-test-plainfiles/actions/runs/36895657048/job/110481866204	
+phase-order	pass	6s	https://github.com/csrinaldi/brain-test-plainfiles/actions/runs/36895658281/job/110481870374	
+actor-check	pass	9s	https://github.com/csrinaldi/brain-test-plainfiles/actions/runs/36895658281/job/110481870389	
+base-branch	pass	9s	https://github.com/csrinaldi/brain-test-plainfiles/actions/runs/36895657048/job/110481866865	
+brain-writes-reviewed	pass	5s	https://github.com/csrinaldi/brain-test-plainfiles/actions/runs/36895658281/job/110481870328	
+decision-gate	pass	6s	https://github.com/csrinaldi/brain-test-plainfiles/actions/runs/36895658281/job/110481870610	
+diff-size	pass	6s	https://github.com/csrinaldi/brain-test-plainfiles/actions/runs/36895658281/job/110481870183	
+issue-link	pass	6s	https://github.com/csrinaldi/brain-test-plainfiles/actions/runs/36895658281/job/110481870488	
+lane-paths	pass	4s	https://github.com/csrinaldi/brain-test-plainfiles/actions/runs/36895658281/job/110481870477	
+lane-scrub	pass	5s	https://github.com/csrinaldi/brain-test-plainfiles/actions/runs/36895657048/job/110481866240	
+local-checks	pass	5s	https://github.com/csrinaldi/brain-test-plainfiles/actions/runs/36895658281/job/110481870465	
+memory-gate	pass	10s	https://github.com/csrinaldi/brain-test-plainfiles/actions/runs/36895657048/job/110481866204	
+phase-order	pass	6s	https://github.com/csrinaldi/brain-test-plainfiles/actions/runs/36895658281/job/110481870374	
+checks-exit=0
+exit=0
