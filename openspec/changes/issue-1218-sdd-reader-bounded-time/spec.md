@@ -24,7 +24,7 @@ Fixed values used throughout (all binding from the rulings):
 
 ### R1218-1: A pre-scan degrades pathological inline spans to literal text
 
-`lib/markdown.mjs` MUST run a pure, linear pre-scan over each inline span before marked tokenizes it (R1). A span is a maximal run of lines, cut where marked starts a new inline run: a blank line closes the span; a list item, a heading or a table row closes the span and opens a new one on that line; the continuation lines of a list item, indented or lazy, belong to that item's span. Block quote lines follow marked's own paragraph rule: consecutive quote lines, and a lazy continuation line that has no `>`, are ONE span. That span is closed by a blank line, by a quote line with no text after its prefix, by a list item or heading inside the quote, or by a deeper quote. A quote line directly after a plain paragraph line opens a new span. A fence is detected by marked's own fence rule and by nothing looser: a line of up to three spaces, then three or more backticks whose info string holds no backtick, or three or more tildes. A fence opener closes the span, and the lines of the fenced code are skipped (not counted) until a closer, which is up to three spaces, the opener's exact run (any further `~` or backtick may follow) and only spaces after it, or until the end of the text. A one-line ```` ```x``` ````, a fence indented four or more spaces, and a backtick fence whose info string holds a backtick are NOT fences, and their lines are counted. The pre-scan MUST count the delimiter characters, exactly the five characters `*`, `_`, `~`, `[` and `]`, in the span, and the length of the longest run of one repeated delimiter character. A run is a maximal sequence of one delimiter character inside one line, and a newline ends a run. Backtick, `(`, `)`, `<` and `>` MUST NOT be counted. A span MUST be degraded when it holds MORE than 600 delimiters, or when it holds a single run LONGER than 50. A span at exactly 600 delimiters, or with a longest run of exactly 50, MUST NOT be degraded. The counter MUST reset at every span boundary above, so the count is per passage and never per document. The thresholds sit above the measured real maxima (122 delimiters in one span, a run of 7).
+`lib/markdown.mjs` MUST run a pure, linear pre-scan over each inline span before marked tokenizes it (R1). A span is a maximal run of lines, cut where marked starts a new inline run: a blank line closes the span; a list item, a heading or a table row closes the span and opens a new one on that line; the continuation lines of a list item, indented or lazy, belong to that item's span. Block quote lines follow marked's own paragraph rule: consecutive quote lines, and a lazy continuation line that has no `>`, are ONE span. That span is closed by a blank line, by a quote line with no text after its prefix, by a list item or heading inside the quote, or by a deeper quote. A quote line directly after a plain paragraph line opens a new span. A thematic break, mirroring marked's `hr` rule (up to three spaces, then three or more of one of `-`, `_` or `*`, each optionally followed by spaces or tabs, and nothing else on the line), closes the span and belongs to none, so it survives as an hr. A setext underline, mirroring the tail of marked's `lheading` rule (up to three spaces, then one or more `=` or one or more `-`, then spaces only) directly after a paragraph line closes the span INCLUSIVELY: marked turns that paragraph into a heading, so the underline is the span's last line. A line of nothing but delimiters (`***`, `___`) is therefore marked's thematic break, not a passage. A fence is detected by marked's own fence rule and by nothing looser: a line of up to three spaces, then three or more backticks whose info string holds no backtick, or three or more tildes. A fence opener closes the span, and the lines of the fenced code are skipped (not counted) until a closer, which is up to three spaces, the opener's exact run (any further `~` or backtick may follow) and only spaces after it, or until the end of the text. A one-line ```` ```x``` ````, a fence indented four or more spaces, and a backtick fence whose info string holds a backtick are NOT fences, and their lines are counted. The pre-scan MUST count the delimiter characters, exactly the five characters `*`, `_`, `~`, `[` and `]`, in the span, and the length of the longest run of one repeated delimiter character. A run is a maximal sequence of one delimiter character inside one line, and a newline ends a run. Backtick, `(`, `)`, `<` and `>` MUST NOT be counted. A span MUST be degraded when it holds MORE than 600 delimiters, or when it holds a single run LONGER than 50. A span at exactly 600 delimiters, or with a longest run of exactly 50, MUST NOT be degraded. The counter MUST reset at every span boundary above, so the count is per passage and never per document. The thresholds sit above the measured real maxima (122 delimiters in one span, a run of 7).
 
 This requirement modifies R1198-13: rendering terminates on any input, and the cheap known classes terminate without reaching the worker backstop.
 
@@ -110,7 +110,7 @@ This requirement modifies R1198-13: rendering terminates on any input, and the c
 
 ### R1218-2: A degraded passage is announced and the rest of the document still renders
 
-The document MUST be tokenized ONCE, as a whole, never in pieces. Before that one lex, every delimiter that the pre-scan counts as an opener (`*`, `_`, `~`, `[`) and every backslash inside a degraded passage MUST be backslash-escaped, so marked reads the passage as literal text in linear time and every character shows as typed; a quote prefix or list bullet at the start of a passage line MUST be left unescaped, so a degraded quote stays a quote and a degraded item stays an item. A passage degraded by the pre-scan MUST therefore render as literal text, and every other passage of the same document, including a reference definition that a link elsewhere resolves against and the other items of a list that holds the passage, MUST render with its normal elements. A visible notice reading "a passage with N formatting marks is shown as plain text" (R5), where N is the number of delimiter characters (`*`, `_`, `~`, `[` and `]` only) counted in that passage, MUST be placed immediately before the top-level block that contains the passage, located by the passage's source offset. Each degraded passage MUST carry its own notice, so the notice count equals the degraded-passage count. No degradation MUST be silent. This notice is distinct from the timeout notice (R1218-5), because the cause and the scope differ.
+The document MUST be tokenized ONCE, as a whole, never in pieces. Before that one lex, every character that the pre-scan counts (`*`, `_`, `~`, `[`, `]`) and every backslash inside a degraded passage MUST be replaced by a distinct private-use character (the U+E000 block), one for one, so the text keeps its length and marked reads the passage as plain text in linear time. After the lex, the originals MUST be restored in every text-bearing field of the token tree (text, code span text, code, link text and href, image alt, raw), so every character shows as typed, including inside a code span and inside an autolink, and an href is unchanged. Backslash escaping is NOT used, because a backslash escape is context-sensitive in CommonMark: it is literal inside a code span and an autolink. The private-use characters MUST be chosen among those the document does not already contain; if the document uses the whole block, the passage MUST be shown as written under its notice and the document as one literal block. Adjacent text nodes in one inline run MUST be merged into one node, so a passage is never one node per mark. A quote prefix or list bullet at the start of a passage line MUST be left unescaped, so a degraded quote stays a quote and a degraded item stays an item. A passage degraded by the pre-scan MUST therefore render as literal text, and every other passage of the same document, including a reference definition that a link elsewhere resolves against and the other items of a list that holds the passage, MUST render with its normal elements. A visible notice reading "a passage with N formatting marks is shown as plain text" (R5), where N is the number of delimiter characters (`*`, `_`, `~`, `[` and `]` only) counted in that passage, MUST be placed immediately before the top-level block that contains the passage, located by the passage's source offset. Each degraded passage MUST carry its own notice, so the notice count equals the degraded-passage count. No degradation MUST be silent. This notice is distinct from the timeout notice (R1218-5), because the cause and the scope differ.
 
 #### Scenario: The notice states N
 - **GIVEN** one paragraph of 700 delimiters
@@ -133,24 +133,64 @@ The document MUST be tokenized ONCE, as a whole, never in pieces. Before that on
 - **THEN** the visible text of the passage equals its source characters
 
 #### Scenario: A reference definition after a degraded passage still resolves
-- **GIVEN** the text "see [docs][r]", a blank line, a run of 60 `*`, a blank line and "[r]: https://example.com/x"
+- **GIVEN** the text "see [docs][r]", a blank line, 60 `*` followed by the word x, a blank line and "[r]: https://example.com/x"
 - **WHEN** the adapter builds the tree
 - **THEN** the first paragraph holds a live link to https://example.com/x and the 60-mark passage carries its notice
 
 #### Scenario: A degraded passage inside a list leaves one list
-- **GIVEN** the items "1. one" and "2. two", a blank line, an indented run of 60 `*`, a blank line and "3. three"
+- **GIVEN** the items "1. one" and "2. two", a blank line, an indented line of 60 `*` followed by the word x, a blank line and "3. three"
 - **WHEN** the adapter builds the tree
 - **THEN** the tree holds one list of three items, the run of `*` shown as literal text inside the second item, and the notice immediately before that list
 
-#### Scenario: The document is lexed once, on escaped text
-- **GIVEN** the injected tokenize seam recording its calls and a 200 KB `*` run
+#### Scenario: The document is lexed once, on placeholder text
+- **GIVEN** the injected tokenize seam recording its calls and a 200 KB `*` run followed by the word x
 - **WHEN** the adapter builds the tree
-- **THEN** the seam is called exactly once, with every `*` preceded by a backslash
+- **THEN** the seam is called exactly once, with a text of the same length that holds no `*`
 
-#### Scenario: Escaping keeps the tokenizer linear
-- **GIVEN** a 200 KB `*` run with every character backslash-escaped
-- **WHEN** marked tokenizes it
-- **THEN** it returns within 200 ms
+#### Scenario: Substitution keeps the whole pipeline linear
+- **GIVEN** a 200 KB `*` run followed by the word x
+- **WHEN** the adapter substitutes, lexes and restores it
+- **THEN** it returns within 750 ms
+
+#### Scenario: A thematic break after a degraded paragraph survives
+- **GIVEN** the word para, 700 repetitions of " a*b", a line `***` and a line "after"
+- **WHEN** the adapter builds the tree
+- **THEN** the block types are the pre-scan notice, a paragraph, an hr and a paragraph holding "after"
+
+#### Scenario: A setext dash underline after a degraded paragraph makes it a heading
+- **GIVEN** the word para, 700 repetitions of " a*b", a line `---` and a line "after"
+- **WHEN** the adapter builds the tree
+- **THEN** the block types are the pre-scan notice, a heading and a paragraph holding "after"
+
+#### Scenario: A setext equals underline after a degraded paragraph makes it a heading
+- **GIVEN** the word para, 700 repetitions of " a*b", a line `===` and a line "after"
+- **WHEN** the adapter builds the tree
+- **THEN** the block types are the pre-scan notice, a heading and a paragraph holding "after"
+
+#### Scenario: A code span in a degraded passage shows what was typed
+- **GIVEN** the line "Use `x_y*z[0]` here." followed by 700 repetitions of " a*b"
+- **WHEN** the adapter builds the tree
+- **THEN** the code span's text is exactly x_y*z[0], with no backslash
+
+#### Scenario: An autolink in a degraded passage keeps its text and its href
+- **GIVEN** the line "<https://example.com/a_b>" followed by 700 repetitions of " a*b"
+- **WHEN** the adapter builds the tree
+- **THEN** the link's text and its href are both exactly https://example.com/a_b
+
+#### Scenario: A document that already uses private-use characters is restored exactly
+- **GIVEN** a degraded line that begins with U+E000, U+E001 and U+E002
+- **WHEN** the adapter builds the tree
+- **THEN** the visible text of the passage equals the source, including those three characters
+
+#### Scenario: A document that uses the whole private-use block is shown as written
+- **GIVEN** a document that contains every character U+E000 to U+F8FF and a degraded passage
+- **WHEN** the adapter builds the tree
+- **THEN** the first block is the pre-scan notice and the last is one literal block holding the source
+
+#### Scenario: A degraded line is a handful of text nodes
+- **GIVEN** a degraded line of 700 repetitions of " a*<b>"
+- **WHEN** the adapter builds the tree
+- **THEN** the paragraph holds at most three nodes
 
 ### R1218-3: No real artifact is degraded
 
