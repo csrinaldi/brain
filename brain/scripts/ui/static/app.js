@@ -49,6 +49,7 @@ function applyTheme(choice) {
 
 import { buildLaneModel, nodeSummaryFor, childrenOf } from './lib/lane-model.mjs';
 import { SOURCE, progressLabel } from './lib/progress-view.mjs';
+import { hierarchyOf, epicRollup, rollupLabel } from './lib/rollup-model.mjs';
 import { issueUrl } from './lib/forge-url.mjs';
 import { buildDrawerModel } from './lib/drawer-model.mjs';
 import { remoteBadges, remotePanel, tipAge } from './lib/remote-model.mjs';
@@ -691,7 +692,7 @@ function renderEpicClusters(grouping) {
     head.appendChild(chip);
     head.appendChild(el('h3', 'epic-title', epic.title || '(no title)'));
     if (epic.track) head.appendChild(el('span', 'epic-track', epic.track));
-    head.appendChild(el('span', 'epic-count', `${epic.children.length} slice(s)`));
+    head.appendChild(el('span', 'epic-count', rollupLabel(epicRollup(sectionOf(state, 'hierarchy'), sectionOf(state, 'forgeLoad'), epic.number))));
     cluster.appendChild(head);
     for (const mark of epic.marks) cluster.appendChild(said(mark));
 
@@ -1742,10 +1743,15 @@ function renderRemoteBlocks({ remote, remoteNote }) {
  */
 function renderChildren(issue) {
   const wrap = el('div', 'drawer-children');
-  const found = childrenOf(sectionOf(state, 'graph'), issue);
+  const found = childrenOf(sectionOf(state, 'graph'), sectionOf(state, 'hierarchy'), issue);
   if (!found.ok) {
     wrap.appendChild(said(found.reason));
     return wrap;
+  }
+  // An epic's drawer leads with its rollup (#1199 D62); closed children are counted there, not listed below.
+  if (hierarchyOf(sectionOf(state, 'hierarchy')).value?.issues.get(issue)?.level === 'epic') {
+    wrap.appendChild(el('p', 'epic-rollup', rollupLabel(epicRollup(sectionOf(state, 'hierarchy'), sectionOf(state, 'forgeLoad'), issue))));
+    wrap.appendChild(el('p', 'note', 'the list shows open children; closed children are counted above'));
   }
   wrap.appendChild(el('h3', 'drawer-section-title', `tickets that declare #${issue} as their parent`));
   if (found.value.length === 0) {

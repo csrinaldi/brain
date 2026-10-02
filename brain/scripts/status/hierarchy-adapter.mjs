@@ -1,4 +1,4 @@
-// hierarchy-adapter.mjs — the ADR-0039 resolver contract over today's `kind`
+// hierarchy-adapter.mjs — the ticket-hierarchy resolver contract (#1251) over today's `kind`
 // and `parent` (#1199 R1199-5, D59).
 //
 // The contract is `{issues: Map<number, Entry>, divergences}` with

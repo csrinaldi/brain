@@ -1,4 +1,4 @@
-// hierarchy-adapter.test.mjs — #1199 R1199-5/D59: the ADR-0039 resolver contract,
+// hierarchy-adapter.test.mjs — #1199 R1199-5/D59: the ticket-hierarchy resolver contract,
 // computed over today's `kind` and `parent`. Hand-built nodes where one field is
 // the point, `buildGraph` where the divergence mapping must meet the real thing.
 

@@ -214,7 +214,7 @@ test('#1059 region 08: nodeSummaryFor gives the drawer the node a card would sho
 // node field since #967, so the relation is already data — it just had no
 // reader. The relation is DECLARED by the child, so the parent's list is
 // whoever points at it, never a list the parent itself carries.
-test('#1059: childrenOf lists the issues that declare this one as their parent', () => {
+test('#1059/#1199: childrenOf lists the open children the hierarchy declares, ascending, from `children` and not from `parent`', () => {
   const graph = { ok: true, value: {
     nodes: [
       { number: 878, title: 'the epic', track: 'UI', status: 'ready', blockedBy: [], parent: null },
@@ -224,15 +224,26 @@ test('#1059: childrenOf lists the issues that declare this one as their parent',
     ],
     edges: [], tracks: new Map(),
   } };
+  const e = (children) => ({ level: 'ticket', levelSource: 'default', parent: null, children, tracker: null, milestone: null, state: 'open', divergences: [] });
+  const hierarchy = { ok: true, value: { issues: [[878, e([880, 1032, 1059])], [1026, e([])], [1032, e([])], [1059, e([])], [880, e([])]], divergences: [], closedUnresolved: [] } };
 
-  const children = childrenOf(graph, 878);
+  const children = childrenOf(graph, hierarchy, 878);
   assert.equal(children.ok, true);
-  assert.deepEqual(children.value.map((c) => c.number), [1032, 1059], 'ascending, so the list does not depend on the forge\'s order');
+  assert.deepEqual(children.value.map((c) => c.number), [1032, 1059], 'ascending, and the closed #880 is counted by the rollup, not listed');
   assert.equal(children.value[0].title, 'epic lanes');
   assert.equal(typeof children.value[0].state.mark, 'string', 'a child is shown with the same state vocabulary a card uses');
 
-  assert.deepEqual(childrenOf(graph, 1026).value, [], 'a node nobody declares as parent has no children — that is a fact, not a failure');
-  assert.equal(childrenOf({ ok: false, reason: 'the forge would not answer' }, 878).reason, 'the forge would not answer');
+  assert.deepEqual(childrenOf(graph, hierarchy, 1026).value, [], 'a node nobody declares as parent has no children — that is a fact, not a failure');
+  assert.equal(childrenOf({ ok: false, reason: 'the forge would not answer' }, hierarchy, 878).reason, 'the forge would not answer');
+  assert.equal(childrenOf(graph, { ok: false, pending: true, reason: 'loading open issues from the forge…' }, 878).reason, 'loading open issues from the forge…');
+});
+
+test('#1199 R1199-6: childrenOf follows `children` even when a node\'s own `parent` field disagrees — the detector', () => {
+  const node = (number, parent) => ({ number, title: `t${number}`, track: 'UI', status: 'ready', blockedBy: [], parent });
+  const graph = { ok: true, value: { nodes: [node(1, null), node(2, 1), node(3, null)], edges: [], tracks: new Map() } };
+  const e = (children) => ({ level: 'ticket', levelSource: 'default', parent: null, children, tracker: null, milestone: null, state: 'open', divergences: [] });
+  const hierarchy = { ok: true, value: { issues: [[1, e([3])], [2, e([])], [3, e([])]], divergences: [], closedUnresolved: [] } };
+  assert.deepEqual(childrenOf(graph, hierarchy, 1).value.map((c) => c.number), [3], 'the hierarchy says 3; the stale parent field saying 2 is ignored');
 });
 
 // ── #1032: epicGrouping becomes real — kind and parent are data since #967 ─
