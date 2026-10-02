@@ -9,7 +9,7 @@ import { hierarchyOf, epicRollup, rollupLabel, NO_CHILDREN } from './rollup-mode
 const entry = (over = {}) => ({ level: 'ticket', levelSource: 'default', parent: null, children: [], tracker: null, milestone: null, state: 'open', divergences: [], ...over });
 
 /** An epic #878 whose children are `{closed, open, unknown}` counts, as a serialized hierarchy section. */
-function hierarchy({ closed = 0, open = 0, unknown = 0, unresolved = [], grandchildren = 0 } = {}) {
+function hierarchy({ closed = 0, open = 0, unknown = 0, unresolved = [], grandchildren = 0, closedRead = { ok: true } } = {}) {
   const pairs = [];
   const children = [];
   let n = 1000;
@@ -25,7 +25,7 @@ function hierarchy({ closed = 0, open = 0, unknown = 0, unresolved = [], grandch
   }
   pairs.push([878, entry({ level: 'epic', levelSource: 'block', children })]);
   pairs.sort((a, b) => a[0] - b[0]);
-  return { ok: true, value: { issues: pairs, divergences: [], closedUnresolved: unresolved } };
+  return { ok: true, value: { issues: pairs, divergences: [], closedUnresolved: unresolved, closedRead } };
 }
 const load = (closed) => ({ ok: true, value: { open: { state: 'complete', at: 'T' }, closed } });
 const COMPLETE = { state: 'complete', at: 'T' };
@@ -104,4 +104,26 @@ test('#1199 R1199-7: a section that is not a value is not a rollup, and a loadin
   assert.equal(epicRollup(hierarchy({ open: 1 }), load(COMPLETE), 9999).ok, false, 'an issue the hierarchy does not hold');
   assert.equal(rollupLabel(loading), 'loading open issues from the forge…');
   assert.match(rollupLabel({ ok: false, reason: 'no VCS' }), /^rollup unavailable: no VCS$/);
+});
+
+test('#1199 R1199-7: a complete closed lane over an unreadable closed list is "unknown", never "0 / n"', () => {
+  const h = hierarchy({ open: 2, closedRead: { ok: false, reason: 'the closed-issue list could not be read: cache unreadable' } });
+  const t = label(h, load(COMPLETE));
+  assert.equal(t, 'closed children unknown (the closed-issue list could not be read: cache unreadable) · 2 open');
+  assert.doesNotMatch(t, /0 \//);
+  const r = epicRollup(h, load(COMPLETE), 878);
+  assert.equal(r.value.closed, null);
+  assert.equal(r.value.total, null);
+});
+
+test('#1199 R1199-7: a section that does not report closedRead is not trusted as a count', () => {
+  const h = hierarchy({ open: 2 });
+  delete h.value.closedRead;
+  assert.match(label(h, load(COMPLETE)), /^closed children unknown \(/);
+});
+
+test('#1199 R8: no children declared with unresolved closed issues says they could not be read', () => {
+  const unresolved = [{ number: 1, reason: 'r' }, { number: 2, reason: 'r' }];
+  assert.equal(label(hierarchy({ unresolved }), load(COMPLETE)), 'no children declared; 2 closed issues could not be read');
+  assert.equal(label(hierarchy({ unresolved: [{ number: 1, reason: 'r' }] }), load(COMPLETE)), 'no children declared; 1 closed issue could not be read');
 });

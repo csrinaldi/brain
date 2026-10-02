@@ -5,12 +5,6 @@
 //
 // The grammar is `sdd-layout.md`'s "Checked-task pattern": `- [ ]` (open),
 // `- [x]`/`- [X]` (done), matched case-insensitively and at any indent.
-//
-// Q2 (design.md): per-line actor/timestamp is NOT in `tasks.md`'s text —
-// the SERVER reads it via one `git blame --porcelain` per drawer open
-// (`blame.mjs` parses it) and hands this module `{line, actor, ts}` rows.
-// This module never shells out; a line with no matching row renders
-// `actor: 'unknown'`, never a blank.
 
 const CHECKBOX_RE = /^\s*- \[([ xX])\]\s*(.*)$/;
 const NO_ITEMS = 'tasks.md has no checklist items';
@@ -36,6 +30,11 @@ export function countTasks(text) {
  * parseTasksList({text, path, attribution}) -> {ok:true, value: Array<Item>} | {ok:false, reason}
  *
  * Item: {line, text, done, actor, ts, source:{path,line}}
+ *
+ * Per-line actor/timestamp is NOT in `tasks.md`'s text: the SERVER reads it via one
+ * `git blame --porcelain` per drawer open (`blame.mjs` parses it) and hands this
+ * function `{line, actor, ts}` rows. It never shells out; a line with no matching
+ * row renders `actor: 'unknown'`, never a blank.
  *
  * @param {{text: string|null, path: string, attribution?: Array<{line:number,actor:string,ts:string}>}} input
  */

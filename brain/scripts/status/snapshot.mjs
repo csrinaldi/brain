@@ -492,13 +492,14 @@ async function readForge({ vcs, project, forgeLoad = null, closed = true, genera
  * because JSON drops a Map. It is pending or uncomputable exactly when the graph is, with the
  * graph's reason. `closedUnresolved` is the closed section's list when it is a value, else `[]`;
  * the rollup states the closed lane's load from `forgeLoad`, so an empty list is never read as
- * "all resolved".
+ * "all resolved". `closedRead` says whether the closed list was actually read: a lane the poller
+ * marked complete can still have an unreadable cache, and a count over open children only is not a count.
  */
 function readHierarchy(graph, closedIssues) {
   if (!graph.ok) return graph.pending === true ? pending(graph.reason) : uncomputable(graph.reason);
   const closed = closedIssues.ok ? closedIssues.value : null;
   const { issues, divergences } = hierarchyFromGraph({ nodes: graph.value.nodes, declarationDivergences: graph.value.declarationDivergences, closed });
-  return field({ issues: [...issues], divergences, closedUnresolved: closed?.unresolved ?? [] });
+  return field({ issues: [...issues], divergences, closedUnresolved: closed?.unresolved ?? [], closedRead: closedIssues.ok ? { ok: true } : { ok: false, reason: closedIssues.reason } });
 }
 
 // ── the composition ─────────────────────────────────────────────────────────

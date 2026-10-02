@@ -717,6 +717,18 @@ test('#1199 R1199-6: a closed failure leaves the hierarchy open-only, with no un
   assert.deepEqual(new Map(s.hierarchy.value.issues).get(878).children, [900]);
 });
 
+test('#1199 R1199-6: closedRead says whether the closed list was read, so a complete lane over an unreadable list is never a count', async () => {
+  const forgeLoad = { open: { state: 'complete', at: 'T' }, closed: { state: 'complete', at: 'T' } };
+  const { port } = listPort({ open: [openRow(878, { body: EPIC_BLOCK }), openRow(900, { body: 'Parent: #878 (the epic)' })], closedError: 'cache unreadable' });
+  const s = await buildSnapshot({ root: makeFixture(), now: NOW, vcs: port, project: 'o/r', forgeLoad });
+  assert.equal(s.hierarchy.ok, true);
+  assert.deepEqual(s.hierarchy.value.closedRead, { ok: false, reason: s.closedIssues.reason });
+  assert.match(s.hierarchy.value.closedRead.reason, /cache unreadable/);
+  const good = listPort({ open: [openRow(878, { body: EPIC_BLOCK })], closed: [] });
+  const g = await buildSnapshot({ root: makeFixture(), now: NOW, vcs: good.port, project: 'o/r' });
+  assert.deepEqual(g.hierarchy.value.closedRead, { ok: true });
+});
+
 test('#1199 R1199-6: the hierarchy is pending when the graph is pending, and uncomputable when the graph is', async () => {
   const { port } = listPort({ open: [openRow(5)] });
   const forgeLoad = { open: { state: 'pending', at: null }, closed: { state: 'pending', at: null } };

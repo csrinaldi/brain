@@ -6,7 +6,7 @@
 // DIRECT children (R9) by `state`: closed, open, and unknown apart, because a
 // child whose state nobody knows is never "not done" (R3). The closed count is
 // worded from the closed lane's load (#1257's `forgeLoad`): while that lane is
-// loading, failed with no data, or disabled, the numbers are `null` and the
+// loading, failed with no data, or disabled (or the closed list was not actually read), the numbers are `null` and the
 // sentence says so, because "0 / n" there would be a count nobody took.
 
 export const NO_CHILDREN = 'no children declared';
@@ -15,8 +15,10 @@ export const NO_CHILDREN = 'no children declared';
 export function hierarchyOf(section) {
   if (!section || typeof section !== 'object') return { ok: false, reason: 'no hierarchy section was given' };
   if (section.ok !== true) return { ok: false, ...(section.pending === true ? { pending: true } : {}), reason: section.reason };
-  const { issues, divergences, closedUnresolved } = section.value;
-  return { ok: true, value: { issues: new Map(issues), divergences, closedUnresolved } };
+  const { issues, divergences, closedUnresolved, closedRead } = section.value;
+  // A section that does not say its closed list was read is not trusted as having it.
+  const read = closedRead && typeof closedRead === 'object' ? closedRead : { ok: false, reason: 'the hierarchy did not report whether the closed list was read' };
+  return { ok: true, value: { issues: new Map(issues), divergences, closedUnresolved, closedRead: read } };
 }
 
 const unavailable = (section) => ({ ok: false, ...(section.pending === true ? { pending: true } : {}), reason: section.reason });
@@ -38,8 +40,10 @@ export function epicRollup(hierarchySection, forgeLoadSection, epic) {
   if (!entry) return { ok: false, reason: `the hierarchy holds no issue #${epic}` };
 
   const states = entry.children.map((n) => h.value.issues.get(n)?.state ?? null);
-  const load = forgeLoadSection.value.closed;
-  const counted = hasClosedData(load);
+  // The lane's state is a claim about the poller; `closedRead` is the fact about the data in hand.
+  const lane = forgeLoadSection.value.closed;
+  const counted = hasClosedData(lane) && h.value.closedRead.ok;
+  const load = hasClosedData(lane) && !h.value.closedRead.ok ? { state: 'failed', at: lane.at ?? null, reason: h.value.closedRead.reason, lastCompleteAt: null } : lane;
   return {
     ok: true,
     value: {
@@ -66,7 +70,7 @@ export function rollupLabel(rollup) {
   const { closed, open, unknown, total, unresolved, load } = rollup.value;
   const unknownSuffix = unknown > 0 ? ` · ${unknown} state unknown` : '';
   if (closed === null) return `${uncountedWords(load)}${open > 0 ? ` · ${open} open` : ''}${unknownSuffix}`;
-  if (total === 0) return NO_CHILDREN;
+  if (total === 0) return unresolved > 0 ? `${NO_CHILDREN}; ${unresolved} closed issue${unresolved === 1 ? '' : 's'} could not be read` : NO_CHILDREN;
   const stale = load.state === 'failed' ? ` · closed list as of ${load.lastCompleteAt}; refresh failed (${load.reason})` : '';
   const more = unresolved > 0 ? ` · ${unresolved} closed issue(s) unresolved, so more children may exist` : '';
   return `${closed} / ${total} children closed${unknownSuffix}${stale}${more}`;
