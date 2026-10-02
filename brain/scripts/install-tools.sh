@@ -32,8 +32,16 @@ if [ -f brain.config.json ]; then
   if command -v node >/dev/null 2>&1; then
     # The ADR-0038 shape first, the legacy `vcs.provider` as its alias (#1114 S3.3): `config/cli.mjs default`
     # is the one reader, so this script never parses JSON by hand. An undeclared axis prints an empty line.
-    VCS_PROVIDER="$(node "${BRAIN_SCRIPTS:-brain/scripts}/config/cli.mjs" default vcs 2>/dev/null)" \
-      || die "brain.config.json exists but cannot be read or parsed — fix it, then re-run. Refusing to guess the VCS provider."
+    # A missing or failing CLI is not an unreadable config (#1114 S3.4): say which one it is, and keep the cause.
+    _vcs_cli="${BRAIN_SCRIPTS:-brain/scripts}/config/cli.mjs"
+    [ -f "$_vcs_cli" ] \
+      || die "the brain config CLI is missing ($_vcs_cli) — reinstall brain (npm run brain:upgrade) and re-run. Refusing to guess the VCS provider."
+    _vcs_err="$(mktemp)"
+    if ! VCS_PROVIDER="$(node "$_vcs_cli" default vcs 2>"$_vcs_err")"; then
+      _vcs_cause="$(<"$_vcs_err")"; rm -f "$_vcs_err"
+      die "the config CLI ($_vcs_cli default vcs) failed: ${_vcs_cause:-no output} — fix the cause (brain.config.json, or the install), then re-run. Refusing to guess the VCS provider."
+    fi
+    rm -f "$_vcs_err"
     VCS_PROVIDER="${VCS_PROVIDER:-gitlab}"
   else
     # Without node only a plain `"vcs": { ... "provider": "<name>" ... }` object is understood (the legacy

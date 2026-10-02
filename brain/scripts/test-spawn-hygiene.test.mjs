@@ -399,6 +399,7 @@ const ALLOWLIST = [
   // #1125: bash runs bootstrap.sh's env helpers and §6 platform block, lifted verbatim, in a scratch dir — no git, no network, no push.
   { file: 'brain/scripts/bootstrap.default-platform.test.mjs', entrypoint: '<unresolved>', line: 134, reason: 'no-vcs-capability' },
   { file: 'brain/scripts/bootstrap.default-platform.test.mjs', entrypoint: 'brain/scripts/parity.sh', line: 246, reason: 'no-vcs-capability' }, // #1221: the script is a temp file, not stdin
+  { file: 'brain/scripts/bootstrap.default-platform.test.mjs', entrypoint: '<unresolved>', line: 421, reason: 'no-vcs-capability' }, // #1114 S3.4: the lifted success-line fragment; stdin is ignored, not piped
   { file: 'brain/scripts/bootstrap.default-platform.test.mjs', entrypoint: '<unresolved>', line: 349, reason: 'no-vcs-capability' },
   { file: 'brain/scripts/bootstrap.default-platform.test.mjs', entrypoint: '<unresolved>', line: 364, reason: 'no-vcs-capability' },
   { file: 'brain/scripts/bootstrap.default-platform.test.mjs', entrypoint: '<unresolved>', line: 380, reason: 'no-vcs-capability' },

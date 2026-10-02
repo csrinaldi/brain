@@ -18,9 +18,24 @@ import { LIFECYCLE_STAGES } from './sdd-layout.mjs';
 import { DEFAULT_PLATFORM, DEFAULT_ENGINE } from '../harness/platform.mjs';
 
 const where = (res, key) => (res.source === 'shell' ? `process env ${key}` : `.env ${key}`);
+const perMachine = (source) => /^(process env|\.env)/.test(source);
 const stated = (res) => res.value !== null && res.value !== undefined;
 
-function effective({ axis, selectorKey, members, fallback, config, env, root, envSources }) {
+function effective(args) {
+  const { envSources } = args;
+  if (!envSources) {
+    // INSPECT, never promote (#1114 S3.4, the S3.3 cold review): when the effective value comes from the process env or
+    // `.env`, it is a per-machine choice and the team never made one, so the axis is left UNDECLARED. Writing today's
+    // default instead would hand the team a value nobody chose. Only the SOURCE is read here; no value is copied.
+    const full = resolveEffective({ ...args, envSources: true });
+    if (perMachine(full.source)) {
+      return { value: '', source: `${full.source} (per-machine, left undeclared)`, undeclared: true };
+    }
+  }
+  return resolveEffective(args);
+}
+
+function resolveEffective({ axis, selectorKey, members, fallback, config, env, root, envSources }) {
   // 1. process env, then .env — a stated-but-empty value stops this level (the resolvers use `??`).
   // `envSources: false` skips BOTH (and the SDD_HARNESS read in step 3): nothing per-machine is consulted.
   const NOT_STATED = { value: undefined, source: null };
@@ -48,8 +63,10 @@ function effective({ axis, selectorKey, members, fallback, config, env, root, en
 }
 
 /**
- * `envSources: false` (every caller but `brain:upgrade`) consults the config and today's defaults ONLY: a per-machine
+ * `envSources: false` (every caller but `brain:upgrade`) declares from the config and today's defaults ONLY: a per-machine
  * value is promoted into tracked config by the upgrade, which prints its source (ADR-0038 section 7), and by nothing else.
+ * An axis whose effective value IS per-machine comes back `{ value: '', undeclared: true }`: the env and `.env` are
+ * inspected for the SOURCE, and no value from them ever enters the result.
  * @param {{config?: object, env?: object, root?: string, envSources?: boolean}} args
  * @returns {{platform: {value: string, source: string}, sdd: {value: string, source: string}, lifecycleStages: string[]}}
  */

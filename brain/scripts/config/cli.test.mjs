@@ -107,18 +107,20 @@ test('#1114 S3.3 cli: set <axis>.default writes the default AND its provider ent
 });
 
 // ── #1114 S3.3 review: `brain:config` never promotes a per-machine value; brain:upgrade does ──
-test('#1114 S3.3 BLOCKER: brain:config\'s migration context ignores env and .env — the reviewer\'s case writes claude, never antigravity', async (t) => {
+test('#1114 S3.4: brain:config\'s migration leaves an axis whose effective value is in .env UNDECLARED — never antigravity, never claude', async (t) => {
   const { axisContextFor } = await import('./cli.mjs');
   const { planConfigWrite } = await import('./config-verb.mjs');
   const { migrations } = await import('../../core/config-migrations.mjs');
-  const root = world(t, { schemaVersion: '1.9.1', vcs: { provider: 'github' } });
+  const root = world(t, { schemaVersion: '1.11.0', memory: { backend: '' }, vcs: { provider: 'github' }, sdd: {} });
   writeFileSync(join(root, '.env'), 'AGENT_PLATFORM=antigravity\n');
   const config = JSON.parse(readFileSync(join(root, 'brain.config.json'), 'utf8'));
   const axisContext = axisContextFor(config, root);
-  const { next, refusal } = planConfigWrite({ config, path: 'sdd.default', value: 'gentle-ai', migrations, targetVersion: '1.11.1', axisContext });
+  const { next, refusal } = planConfigWrite({ config, path: 'memory.default', value: 'plainfiles', migrations, targetVersion: '1.11.1', axisContext });
   assert.equal(refusal, null);
-  assert.equal(next.platform.default, 'claude', 'today\'s default, not the machine\'s .env');
-  assert.equal(next.sdd.default, 'gentle-ai');
+  assert.equal(next.platform.default, '', 'the machine\'s .env is not the team\'s choice, and neither is a default nobody chose');
+  assert.deepEqual(next.platform.providers, {});
+  assert.equal(next.sdd.default, 'gentle-ai', 'an axis nothing per-machine states keeps today\'s default');
+  assert.equal(next.memory.default, 'plainfiles');
 });
 
 test('#1114 S3.3: the SAME config migrated through brain:upgrade\'s context still writes antigravity, with the .env source', async (t) => {
@@ -165,4 +167,34 @@ test('#1114 S3.3 cli: resolve over an unknown axis exits 1; a legacy-keyed confi
   assert.equal(runEnv(root, {}, 'resolve', 'vcs').status, 1);
   assert.equal(runEnv(root, {}, 'resolve', 'platform').stdout, 'antigravity antigravity config\n');
   assert.equal(runEnv(root, {}, 'resolve', 'sdd').stdout, 'plain plain config\n');
+});
+
+// ── #1114 S3.4: `diagnose` prints diagnoseAxes' findings as JSON — findings, never failures ──
+test('#1114 S3.4 cli: diagnose prints the findings as JSON, exits 0, and never prints .env', (t) => {
+  const root = world(t, { schemaVersion: '1.11.1', platform: { default: 'claude', providers: { claude: {} } }, sdd: { default: 'brain', providers: { brain: { version: 'self' } } } });
+  writeFileSync(join(root, '.env'), 'AGENT_PLATFORM=antigravity\nCANARY_KEY=leak-canary-123\n');
+  const r = runEnv(root, {}, 'diagnose');
+  assert.equal(r.status, 0, r.stderr);
+  const findings = JSON.parse(r.stdout);
+  const codes = findings.map((f) => f.code);
+  assert.ok(codes.includes('env-shadows-config'), r.stdout);
+  assert.ok(codes.includes('version-unverified'), 'claude declares no version');
+  assert.ok(!findings.some((f) => f.axis === 'sdd' && f.code.startsWith('version')), '"self" is verified against the installed brain');
+  assert.doesNotMatch(r.stdout + r.stderr, /leak-canary-123|CANARY_KEY/);
+});
+
+test('#1114 S3.4 cli: diagnose reads the process env too, and an invalid config is a finding, not an exit code', (t) => {
+  const root = world(t, { schemaVersion: '1.11.1', platform: { default: 'codex', providers: { codex: {} } } });
+  const r = runEnv(root, { MEMORY_BACKEND: 'engram' }, 'diagnose');
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(JSON.parse(r.stdout).some((f) => f.code === 'invalid-config'));
+});
+
+test('#1114 S3.4 cli: the version fix diagnose prints is a command the verb accepts', (t) => {
+  const root = world(t, { schemaVersion: '1.11.1', sdd: { default: 'gentle-ai', providers: { 'gentle-ai': {} } } });
+  const f = JSON.parse(runEnv(root, {}, 'diagnose').stdout).find((x) => x.code === 'version-unverified');
+  assert.match(f.fix, /^npm run brain:config -- set sdd\.providers\.gentle-ai\.version /);
+  const w = runEnv(root, {}, 'set', 'sdd.providers.gentle-ai.version', '1.2.3');
+  assert.equal(w.status, 0, w.stderr);
+  assert.equal(JSON.parse(readFileSync(join(root, 'brain.config.json'), 'utf8')).sdd.providers['gentle-ai'].version, '1.2.3');
 });

@@ -268,7 +268,7 @@ function migrateToAxisShape(config, helpers = {}) {
     const node = isObj(out[axis]) ? out[axis] : {};
     out[axis] = { ...node, default: value, providers: value ? { [value]: {} } : {} };
     if (value === '') {
-      say(`${axis}.default = "" (undeclared: ${source} is empty; declare it with: npm run brain:config -- set ${axis}.default <name>)`);
+      say(`${axis}.default = "" (undeclared: ${source}; declare it with: npm run brain:config -- set ${axis}.default <name>)`);
     } else {
       say(`${axis}.default = ${value} (from ${source})` +
         (perMachine(source) ? ' - a per-machine value, now the team\'s tracked default' : ''));

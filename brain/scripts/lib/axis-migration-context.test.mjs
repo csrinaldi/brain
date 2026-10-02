@@ -86,17 +86,35 @@ test('it never writes: the .env on disk is byte-identical afterwards', () => {
 });
 
 // ── #1114 S3.3 review: only brain:upgrade may promote a per-machine value into tracked config ──
-test('envSources:false builds the context from config and today\'s defaults ONLY — process env and .env are never read', () => {
+test('envSources:false never PROMOTES a per-machine value: an axis whose effective value is in env or .env is left undeclared (S3.3 review)', () => {
   withRoot('AGENT_PLATFORM=antigravity\nSDD_ENGINE=plain\nSDD_HARNESS=plain\n', (root) => {
     const ctx = resolveAxisMigrationContext({ config: {}, env: { AGENT_PLATFORM: 'antigravity', SDD_HARNESS: 'plain' }, root, envSources: false });
+    assert.equal(ctx.platform.value, '', 'never today\'s default, never the machine\'s value');
+    assert.equal(ctx.sdd.value, '');
+    assert.match(ctx.platform.source, /per-machine/);
+    assert.doesNotMatch(JSON.stringify(ctx), /antigravity/, 'the per-machine VALUE is never copied into the context');
+  });
+});
+
+test('envSources:false still declares an axis whose effective value is today\'s default (nothing per-machine states it)', () => {
+  withRoot('OTHER=1\n', (root) => {
+    const ctx = resolveAxisMigrationContext({ config: {}, env: {}, root, envSources: false });
     assert.equal(ctx.platform.value, 'claude');
     assert.equal(ctx.sdd.value, 'gentle-ai');
     assert.match(ctx.platform.source, /default/);
   });
 });
 
-test('envSources:false still reads the config\'s own keys (flat keys and legacy harness)', () => {
+test('envSources:false: a per-machine value on ONE axis leaves only that axis undeclared', () => {
   withRoot('AGENT_PLATFORM=antigravity\n', (root) => {
+    const ctx = resolveAxisMigrationContext({ config: {}, env: {}, root, envSources: false });
+    assert.equal(ctx.platform.value, '');
+    assert.equal(ctx.sdd.value, 'gentle-ai');
+  });
+});
+
+test('envSources:false still reads the config\'s own keys (flat keys and legacy harness)', () => {
+  withRoot('OTHER=1\n', (root) => {
     const ctx = resolveAxisMigrationContext({ config: { platform: 'plain', engine: 'plain' }, env: {}, root, envSources: false });
     assert.equal(ctx.platform.value, 'plain');
     assert.equal(ctx.sdd.value, 'plain');

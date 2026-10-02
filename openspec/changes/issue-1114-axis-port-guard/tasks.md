@@ -13,6 +13,7 @@
 - [x] S3.2 Existing consumers get the value they effectively run today (env or `.env`, else `claude` / `gentle-ai`); undeclared memory/vcs stay undeclared
 - [ ] Read-only aliases for the old keys for one minor, then a refusal with a named fix
 - [x] S3.3 `env:init` declares each axis default on a fresh consumer through `brain:config` (no axis selector written to `.env`); `brain:config set <axis>.default` declares the provider; scaffold writes the shape; shell readers routed through `config/cli.mjs default`
+- [x] S3.4 the three S3.3 review corrections (non-upgrade migration leaves per-machine axes undeclared; bootstrap success line names the real source; install-tools distinguishes a missing/failing CLI from a corrupt config and keeps stderr) and axis diagnosis: `diagnoseAxes` (env-shadows-config, version-unverified, version-unverifiable, version-mismatch, invalid-config) surfaced in `brain:governance-status` and `config/cli.mjs diagnose`; only brain's own version is probed (spawning probes are #1130)
 
 ## S2 one resolver and the refusal (after S3)
 - [ ] `resolveAxis` over `lib/axis-selector.mjs` for vcs, memory, platform, sdd; one precedence; retire `resolvePlatform`, `resolveEngine/Harness`, `resolveProviderName` and the `bootstrap.sh` platform resolver

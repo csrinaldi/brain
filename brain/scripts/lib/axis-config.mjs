@@ -16,6 +16,8 @@
 // an error. Refusing it is S2's job (`resolveAxis`), so `validateAxisConfig` is
 // not wired into any runtime path yet.
 
+import en from '../i18n/en.mjs';
+
 /**
  * Closed memberships. They live HERE (re-exported by `harness/platform.mjs`, which
  * its importers keep using) because `platform.mjs` must read this module, and a
@@ -172,4 +174,97 @@ export function validateAxisConfig(config) {
     errors.push({ axis: '*', path: '', code: 'validator-failed', message: `axis config could not be validated: ${e?.message ?? e}` });
   }
   return { ok: errors.length === 0, errors };
+}
+
+// ── diagnoseAxes (#1114 S3.4) ───────────────────────────────────────────────
+// Findings about the declared axes, for `brain:governance-status` today and `brain:doctor` (#1130) later.
+// PURE and total: it reads what it is handed, spawns nothing, never throws, and a finding is never a failure.
+
+/** The per-machine selector keys of each axis. VCS has NO `.env` level (ADR-0038 section 2): the process env only. */
+const SELECTORS = Object.freeze({
+  vcs: Object.freeze({ keys: ['VCS_PROVIDER'], dotenv: false, members: null }),
+  memory: Object.freeze({ keys: ['MEMORY_BACKEND'], dotenv: true, members: null }),
+  platform: Object.freeze({ keys: ['AGENT_PLATFORM', 'SDD_HARNESS'], dotenv: true, members: AGENT_PLATFORMS }),
+  sdd: Object.freeze({ keys: ['SDD_ENGINE', 'SDD_HARNESS'], dotenv: true, members: SDD_ENGINES }),
+});
+
+const fill = (tpl, params) => String(tpl).replace(/\{(\w+)\}/g, (_, k) => (k in params ? String(params[k]) : `{${k}}`));
+
+/** A value the `brain:config` verb would store as a string: JSON-looking text ("2", "1.5") is quoted. */
+function shellVersionArg(v) {
+  try { JSON.parse(v); return `'"${v}"'`; } catch { return v; }
+}
+
+/**
+ * @param {{config?: object, env?: object, dotenv?: object, installed?: Record<string, Record<string, string>>, catalog?: Record<string, string>}} [args]
+ *   `env` is the process env, `dotenv` the PARSED `.env` (only the selector keys are ever read from either);
+ *   `installed[axis][name]` is a detected version; `catalog` is the i18n catalog (English when omitted).
+ * @returns {Array<{axis: string, code: string, severity: 'error'|'warning'|'info', message: string, fix: string}>}
+ */
+export function diagnoseAxes(args) {
+  const findings = [];
+  try {
+    const { config, env, dotenv, installed, catalog } = isObj(args) ? args : {};
+    const cfg = isObj(config) ? config : {};
+    const procEnv = isObj(env) ? env : {};
+    const dot = isObj(dotenv) ? dotenv : {};
+    const inst = isObj(installed) ? installed : {};
+    const cat = isObj(catalog) ? catalog : en;
+    const tr = (key, params = {}) => fill(cat[key] ?? en[key] ?? key, params);
+    const add = (axis, code, severity, message, fix) => findings.push({ axis, code, severity, message, fix });
+
+    // invalid-config: everything the validator says.
+    for (const e of validateAxisConfig(cfg).errors) {
+      add(e.axis, 'invalid-config', 'error',
+        tr('axes.diagnose.invalidConfig', { path: e.path || e.axis, detail: e.message }),
+        tr('axes.diagnose.invalidConfig.fix', { path: e.path || e.axis }));
+    }
+
+    for (const axis of AXES) {
+      const declared = readAxis(cfg, axis).default;
+
+      // env-shadows-config: this machine runs something other than the team's declared choice.
+      const sel = SELECTORS[axis];
+      if (declared !== '') {
+        const levels = [['shell', procEnv], ...(sel.dotenv ? [['dotenv', dot]] : [])];
+        for (const [level, source] of levels) {
+          for (const key of sel.keys) {
+            const value = typeof source[key] === 'string' ? source[key].trim() : '';
+            if (value === '' || value === declared) continue;
+            if (sel.members && !sel.members.includes(value)) continue; // the legacy SDD_HARNESS names a member of ONE axis
+            const where = level === 'shell' ? tr('axes.diagnose.where.shell') : '.env';
+            add(axis, 'env-shadows-config', 'warning',
+              tr('axes.diagnose.envShadows', { key, where, value, axis, declared }),
+              tr(level === 'shell' ? 'axes.diagnose.envShadows.fixShell' : 'axes.diagnose.envShadows.fixDotenv', { key, axis, value }));
+          }
+        }
+      }
+
+      // Versions. RANGE semantics (and spawning probes) are #1130's: today an exact-string compare.
+      const providers = isObj(cfg[axis]) && isObj(cfg[axis].providers) ? cfg[axis].providers : {};
+      for (const [name, entry] of Object.entries(providers)) {
+        const version = nonEmpty(isObj(entry) ? entry.version : '');
+        const found = nonEmpty(isObj(inst[axis]) ? inst[axis][name] : '');
+        const setCmd = (v) => `npm run brain:config -- set ${axis}.providers.${name}.version ${v}`;
+        if (version === '') {
+          add(axis, 'version-unverified', 'info',
+            found ? tr('axes.diagnose.versionUnverified.detected', { axis, name, installed: found }) : tr('axes.diagnose.versionUnverified', { axis, name }),
+            setCmd(found ? shellVersionArg(found) : '<version>'));
+        } else if (found === '') {
+          add(axis, 'version-unverifiable', 'info',
+            tr('axes.diagnose.versionUnverifiable', { axis, name, declared: version }),
+            tr('axes.diagnose.versionUnverifiable.fix'));
+        } else if (version === 'self' && axis === 'sdd' && name === 'brain') {
+          continue; // brain's own provider: "self" is the package's version, verified by being the one that is installed
+        } else if (version !== found) {
+          add(axis, 'version-mismatch', 'warning',
+            tr('axes.diagnose.versionMismatch', { axis, name, declared: version, installed: found }),
+            tr('axes.diagnose.versionMismatch.fix', { axis, name, declared: version, installed: shellVersionArg(found) }));
+        }
+      }
+    }
+  } catch (e) { // surfaced: diagnosis never throws; its own failure is a finding
+    findings.push({ axis: '*', code: 'invalid-config', severity: 'error', message: `axes could not be diagnosed: ${e?.message ?? e}`, fix: 'report this as a brain defect' });
+  }
+  return findings;
 }
