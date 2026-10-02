@@ -17,7 +17,7 @@ two layers by owner, the precedence `env > .env > ~/.brain > team > undeclared` 
 All four land on the #1114 tracker (`feature/issue-1114-axis-ports`) before it integrates into `main`, so S3.3's team-config writes never reach a release.
 
 ## Change-dir completeness
-This docs-only PR carries `proposal.md`, `spec.md` and the ADR draft. `design.md` and `tasks.md` arrive with the first implementation slice PR, so the change dir is intentionally incomplete here.
+This docs-only PR carries `proposal.md`, `spec.md` and the ADR draft. `design.md` and `tasks.md` carry the slice outline and checklist; each slice adds its own design detail when implemented.
 
 ## Non-goals
 Credentials in `~/.brain` (a separate decision, ruling 7).
