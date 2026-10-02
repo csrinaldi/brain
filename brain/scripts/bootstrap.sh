@@ -198,7 +198,20 @@ warn() { printf '  ⚠ %s\n' "$1"; }
 # `_axis_declared <axis>` prints the declared default ("" when the shape is absent or undeclared).
 # `_axis_declare <axis> <name>` declares it ONLY when nothing is declared yet: a declared default is the
 # team's and is never rewritten here. A failed write is reported with its fix, never silent.
-_axis_declared() { node "$BRAIN_SCRIPTS/config/cli.mjs" get "$1.default" 2>/dev/null | tr -d '"' || true; }  # swallow-ok: an unset key is the answer being asked for
+# It reads through `config/cli.mjs default`: the ADR-0038 shape, else the LEGACY keys. On a pre-1.11.1 consumer
+# the legacy keys ARE the declaration; reading only the shape would resolve the wrong value and write over it.
+_axis_declared() { node "$BRAIN_SCRIPTS/config/cli.mjs" default "$1" 2>/dev/null | tr -d '"\n' || true; }  # swallow-ok: an unreadable or absent config reads as undeclared, and the declare step then reports its own failure
+# `_axis_env_only <axis> <name>`: the value exists only on THIS machine (.env or the legacy SDD_HARNESS), so it is
+# NOT declared. One developer's override must not become the team's tracked default through env:init (the memory
+# prompt refuses the same thing). The sanctioned promotion of a per-machine value into config is the 1.11.1
+# migration, which prints the source of every value it writes (ADR-0038 section 7); this tells the operator the
+# explicit command instead.
+_axis_env_only() {
+  # swallow-ok: a config that already declares this axis makes the per-machine value an ordinary override, which needs no warning
+  [ -z "$(_axis_declared "$1")" ] || return 0
+  warn "$(printf "$I18N_BOOTSTRAP_AXIS_ENVONLY" "$1" "$2" "$1" "$2")"
+  MISSING_OPTIONAL+=("$1 $2 is declared only on this machine (next: npm run brain:config -- set $1.default $2)")
+}
 _axis_declare() {
   # swallow-ok: nothing to declare, or a default already declared (the team's, never rewritten) — both are the answer, not a failure
   [ -n "$2" ] || return 0
@@ -533,23 +546,35 @@ say "$I18N_BOOTSTRAP_SDD_SECTION"
 # move the repo off the platform it states, or off the default.
 _DOTENV_PLATFORM="$(env_get AGENT_PLATFORM)"
 _REPO_PLATFORM="${_DOTENV_PLATFORM:-$(_axis_declared platform)}"
+_PLATFORM_ENV_ONLY=false
+[ -z "$_DOTENV_PLATFORM" ] || _PLATFORM_ENV_ONLY=true
 if [ -z "$_REPO_PLATFORM" ]; then
   _LEGACY_PLATFORM="${SDD_HARNESS:-$(env_get SDD_HARNESS)}"
   case "$_LEGACY_PLATFORM" in
-    claude|antigravity|plain) _REPO_PLATFORM="$_LEGACY_PLATFORM" ;;
+    claude|antigravity|plain) _REPO_PLATFORM="$_LEGACY_PLATFORM"; _PLATFORM_ENV_ONLY=true ;;
     *) _REPO_PLATFORM="claude" ;;
   esac
 fi
-_axis_declare platform "$_REPO_PLATFORM"
+# Only a value from the config or from today's default is declared; a per-machine one is reported (see _axis_env_only).
+if [ "$_PLATFORM_ENV_ONLY" = true ]; then _axis_env_only platform "$_REPO_PLATFORM"; else _axis_declare platform "$_REPO_PLATFORM"; fi
 AGENT_PLATFORM="${AGENT_PLATFORM:-$_REPO_PLATFORM}"
 
+# The engine: the same shape. A legacy SDD_HARNESS feeds it only when it names an ENGINE, as resolveEngine does:
+# `antigravity` there is a platform, and `set sdd.default antigravity` would be refused.
 SDD_ENGINE="$(env_get SDD_ENGINE)"
-[ -n "$SDD_ENGINE" ] || SDD_ENGINE="$(_axis_declared sdd)"
-if [ -z "$SDD_ENGINE" ]; then
-  _LEGACY_HARNESS="$(env_get SDD_HARNESS)"
-  SDD_ENGINE="${_LEGACY_HARNESS:-gentle-ai}"
+_SDD_ENV_ONLY=false
+if [ -n "$SDD_ENGINE" ]; then
+  _SDD_ENV_ONLY=true
+else
+  SDD_ENGINE="$(_axis_declared sdd)"
 fi
-_axis_declare sdd "$SDD_ENGINE"
+if [ -z "$SDD_ENGINE" ]; then
+  case "$(env_get SDD_HARNESS)" in
+    gentle-ai|plain) SDD_ENGINE="$(env_get SDD_HARNESS)"; _SDD_ENV_ONLY=true ;;
+    *) SDD_ENGINE="gentle-ai" ;;
+  esac
+fi
+if [ "$_SDD_ENV_ONLY" = true ]; then _axis_env_only sdd "$SDD_ENGINE"; else _axis_declare sdd "$SDD_ENGINE"; fi
 ok "$(printf "$I18N_BOOTSTRAP_SDD_OK" "$SDD_ENGINE ($AGENT_PLATFORM)")"
 # Exported, not just written to .env (issue #1093): harness/cli.mjs resolves
 # its own repoRoot from ITS OWN module location, which is now WORKTREE_ROOT —
