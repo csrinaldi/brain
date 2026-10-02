@@ -314,7 +314,7 @@ was ever chosen.
 `design` resolves to agent `gentle-ai:<the role gentle-ai declares for design>`, engine `claude`,
 model `claude-opus-5-5`. Leaving out `agent` is valid only because `gentle-ai` declares a default
 role for `design` (`sdd-design`, `axes/sdd-engine/adapters/gentle-ai.roles.mjs:44-45`).
-`cold-review` has no such role, which is why its entry names `agent` explicitly (section 4). A stage absent from `roles` resolves all three fields by the cascade. The
+`cold-review` has no such role, which is why its entry names `agent` explicitly (section 4). A stage absent from `roles` resolves all three fields by the cascade only when its provider declares a default role for it; `cold-review` or a custom stage absent from `roles` is refused (section 4). The
 version strings are illustrative.
 
 Two configs this decision refuses:
