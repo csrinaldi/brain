@@ -37,7 +37,10 @@ export function pollBanner({ lastOkAt, lastPolledAt, lastError }) {
  * snapshot section carries no fetch state (D30), so it could never say this.
  * A server whose fetch never succeeded has no time to show, and says that instead.
  */
-export function remotesBanner({ lastOkAt, lastError }) {
+export function remotesBanner({ lastOkAt, lastError, lastAttemptAt = null }) {
+  if (!lastError && !lastOkAt && !lastAttemptAt) {
+    return 'no fetch has run since this server started (polling is paused or it has not ticked yet); the list is this clone\'s remote-tracking refs, use the refresh control';
+  }
   const asOf = lastOkAt
     ? `remote branches as of ${lastOkAt}`
     : 'no fetch has succeeded since this server started; the list is this clone\'s remote-tracking refs';
@@ -82,7 +85,8 @@ export function degradationBands({ stream, controls, meta, snapshot }) {
     });
   }
   if (meta?.poller?.lastError) bands.push({ id: 'poller', text: pollBanner(meta.poller) });
-  if (meta?.poller?.remotes?.lastError) bands.push({ id: 'remotes', text: remotesBanner(meta.poller.remotes) });
+  const rm = meta?.poller?.remotes;
+  if (rm && (rm.lastError || (!rm.lastOkAt && !rm.lastAttemptAt && !rm.inFlight))) bands.push({ id: 'remotes', text: remotesBanner(meta.poller.remotes) });
   const failed = failedSections(snapshot);
   if (failed.length > 0) {
     bands.push({

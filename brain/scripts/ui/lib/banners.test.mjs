@@ -164,9 +164,17 @@ test('#1201 R1201-11: recovery clears the band, and a healthy or absent remotes 
   assert.ok(!degradationBands({ meta: null }).some((b) => b.id === 'remotes'));
 });
 
+test('#1201 R1201-11 W3: a remotes lane that has never attempted a fetch and is not running says so', () => {
+  const band = degradationBands({ meta: remotesMeta({ lastAttemptAt: null, lastOkAt: null, lastError: null, inFlight: false }) }).find((b) => b.id === 'remotes');
+  assert.ok(band, 'no silent stale refs');
+  assert.match(band.text, /no fetch has run/);
+  assert.doesNotMatch(band.text, /\d{4}-\d{2}-\d{2}/);
+  assert.ok(!degradationBands({ meta: remotesMeta({ lastAttemptAt: null, lastOkAt: null, lastError: null, inFlight: true }) }).some((b) => b.id === 'remotes'), 'a running first fetch is not a degradation');
+});
+
 test('#1201 R1201-11: the band comes from meta.poller only — a section carrying fetch-looking fields adds nothing', () => {
   const snapshot = { remoteChanges: { ok: true, value: { lastError: 'x', lastOkAt: null } } };
-  assert.ok(!degradationBands({ snapshot, meta: remotesMeta({ lastAttemptAt: null, lastOkAt: null, lastError: null, inFlight: false }) }).some((b) => b.id === 'remotes'));
+  assert.ok(!degradationBands({ snapshot, meta: remotesMeta({ lastAttemptAt: 'x', lastOkAt: 'y', lastError: null, inFlight: false }) }).some((b) => b.id === 'remotes'));
 });
 
 test('#1201 R1201-11: the remotes band sits after the forge poller band and before the failed sections', () => {

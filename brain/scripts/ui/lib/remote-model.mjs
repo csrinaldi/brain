@@ -4,7 +4,7 @@
 // lane card, the "Remote work" panel and (through `resume-view.mjs`) the drawer.
 //
 // The author is "last commit by <name>" and nothing more: a git author name, no
-// handle derived from an email, no email, no session (R3, AC3).
+// handle derived from an email, no email, and no per-agent identity (R3, AC3).
 
 import { ago } from './banners.mjs';
 import { resumeWording } from './resume-view.mjs';

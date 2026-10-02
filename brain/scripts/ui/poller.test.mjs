@@ -701,6 +701,40 @@ test('#1201 R1201-9: a paused poller does not fetch on its timer; refreshRemotes
   poller.close();
 });
 
+test('#1201 R1201-9 W3: a forge-less poller (initialError) still fetches on its timer; the forge lane never runs', async () => {
+  const spy = fetchSpy();
+  const callLog = [];
+  const scheduler = fakeScheduler();
+  const poller = createPoller({
+    vcs: makeVcs({ callLog }), cache: createForgeCache(), project: 'o/r', interval: 60000, fetchRemotes: spy.fn,
+    initialError: 'no VCS token', _setTimeout: scheduler.setTimeout, _clearTimeout: scheduler.clearTimeout, _now: () => new Date(0),
+  });
+  await poller.start();
+  assert.equal(spy.calls, 1, 'the first tick fetched');
+  assert.equal(scheduler.pending(), 1, 'the timer is armed');
+  await scheduler.runNext();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(spy.calls, 2, 'the second tick fetched');
+  assert.deepEqual(callLog, [], 'the forge port was never called');
+  assert.match(poller.state().lastError, /no VCS token/);
+  poller.close();
+});
+
+test('#1201 R1201-9 W3: a forge-less poller the USER paused (--no-poll) does not fetch on a timer', async () => {
+  const spy = fetchSpy();
+  const scheduler = fakeScheduler();
+  const poller = createPoller({
+    vcs: makeVcs({ callLog: [] }), cache: createForgeCache(), project: 'o/r', interval: 60000, fetchRemotes: spy.fn, enabled: false,
+    initialError: 'no VCS token', _setTimeout: scheduler.setTimeout, _clearTimeout: scheduler.clearTimeout, _now: () => new Date(0),
+  });
+  await poller.start();
+  assert.equal(spy.calls, 0);
+  assert.equal(scheduler.pending(), 0);
+  await poller.refreshRemotes();
+  assert.equal(spy.calls, 1, 'only the explicit refresh fetches');
+  poller.close();
+});
+
 test('#1201 R1201-9: two refreshes within ONCE_COLLAPSE_MS run one fetch; one after the window runs another', async () => {
   const spy = fetchSpy();
   const { poller, now } = remotesPoller({ fetchRemotes: spy.fn, enabled: false });

@@ -84,7 +84,15 @@ export function createPoller({
   // a time are visible on `state()` immediately, the same shape a real
   // failed tick would leave, so a caller reading `/api/poll/pause`'s
   // response cannot tell the two apart.
-  let paused = !enabled || Boolean(initialError);
+  //
+  // #1201 W3/D40: the remotes lane is NOT the forge's. `userPaused` is the
+  // operator's own pause (`--no-poll`, the Pause button); `forgeHalted` is the
+  // forge being unusable. The reported `paused` is either, but the timer, and
+  // with it the remotes lane, stops only for `userPaused`. A forge-less server
+  // therefore still fetches on its timer; its forge lane just never runs.
+  let userPaused = !enabled;
+  let forgeHalted = Boolean(initialError);
+  const isPaused = () => userPaused || forgeHalted;
   let timer = null;
   let inFlight = null;
   let lastOnceAt = -Infinity;
@@ -115,7 +123,7 @@ export function createPoller({
   let lastRefreshAt = -Infinity;
 
   function state() {
-    return { paused, lastPolledAt, lastOkAt, lastError, forgeAsOf: { ...forgeAsOf }, intervalMs: interval, nextAttemptAt, remotes: { ...remotes } };
+    return { paused: isPaused(), lastPolledAt, lastOkAt, lastError, forgeAsOf: { ...forgeAsOf }, intervalMs: interval, nextAttemptAt, remotes: { ...remotes } };
   }
 
   /** One fetch at a time: a caller that arrives while one runs joins it. Absent `fetchRemotes` is a no-op. */
@@ -250,10 +258,13 @@ export function createPoller({
 
   /** Both lanes, each with its own catch, so one failing never skips the other. */
   async function tick() {
-    await Promise.allSettled([forgeLane(), runRemotes()]);
+    await Promise.allSettled([forgeHalted ? Promise.resolve() : forgeLane(), runRemotes()]);
   }
 
   let closed = false;
+
+  /** The timer runs unless the USER paused; a halted forge alone keeps it only when there is a remotes lane to feed. */
+  function tickWanted() { return !userPaused && (!forgeHalted || fetchRemotes !== null); }
 
   function scheduleNext() {
     // `closed` matters here, not just in `close()` itself: a tick already
@@ -262,7 +273,7 @@ export function createPoller({
     // would arm a brand-new real timer AFTER the server believes it has shut
     // down, leaking a handle that keeps the process alive (measured: a
     // `node --test` run that passes every assertion but never exits).
-    if (closed || paused || interval <= 0) { nextAttemptAt = null; return; }
+    if (closed || !tickWanted() || interval <= 0) { nextAttemptAt = null; return; }
     nextAttemptAt = new Date(_now().getTime() + interval).toISOString();
     timer = _setTimeout(runTick, interval);
   }
@@ -278,13 +289,13 @@ export function createPoller({
   }
 
   return {
-    start() { return paused ? undefined : runTick(); },
+    start() { return tickWanted() ? runTick() : undefined; },
     // The countdown goes with the timer, as it does in `pause()`: after
     // `close()` no tick will ever fire, so a surviving `nextAttemptAt` would
     // report a poll that is never coming (#1015 cold review).
     close() { closed = true; if (timer) { _clearTimeout(timer); timer = null; } nextAttemptAt = null; },
     pause() {
-      paused = true;
+      userPaused = true;
       if (timer) { _clearTimeout(timer); timer = null; }
       nextAttemptAt = null;
       return state();
@@ -295,7 +306,7 @@ export function createPoller({
       // as distinct controls). `start()` polls immediately because a
       // process that has NEVER polled needs data as soon as possible; a
       // paused-then-resumed poller already has whatever it last held.
-      if (paused) { paused = false; scheduleNext(); }
+      if (isPaused()) { userPaused = false; forgeHalted = false; scheduleNext(); }
       return state();
     },
     async once() {

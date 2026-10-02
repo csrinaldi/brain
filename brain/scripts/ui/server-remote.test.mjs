@@ -21,9 +21,11 @@ const now = () => new Date(NOW);
 function recordingScheduler() {
   let seq = 0;
   const timers = new Map();
+  const timerMs = new Map();
   const delays = [];
   return {
-    setTimeout: (fn, ms) => { const id = ++seq; timers.set(id, fn); delays.push(ms); return id; },
+    setTimeout: (fn, ms) => { const id = ++seq; timers.set(id, fn); timerMs.set(id, ms); delays.push(ms); return id; },
+    async runDelay(ms) { const id = [...timers.keys()].find((k) => timerMs.get(k) === ms); const fn = timers.get(id); timers.delete(id); await fn(); },
     clearTimeout: (id) => { timers.delete(id); },
     pending: () => timers.size,
     delays,
@@ -158,6 +160,27 @@ test('#1201 R1201-9 AC6: refresh while paused fetches and the new branch appears
     assert.equal(fetchRun.calls.length, 1, 'collapsed');
     assert.deepEqual(fetchRun.calls[0], FETCH_ARGV);
     assert.ok(names(await sectionOf(server)).includes('feat/issue-50-new'), 'the snapshot was recomputed after the fetch');
+  } finally {
+    await server.close();
+  }
+});
+
+test('#1201 R1201-9 W3: a server with no forge provider (forgeUnavailable) fetches on its timer and the remotes section updates', async () => {
+  const fx = makeRemoteFixture();
+  const fetchRun = recordedFetch(fx.served);
+  const scheduler = recordingScheduler();
+  const server = createUiServer({
+    root: fx.served, poll: true, forgeUnavailable: 'no VCS token', interval: 60000, _now: now,
+    _setTimeout: scheduler.setTimeout, _clearTimeout: scheduler.clearTimeout, _watch: () => ({ close() {} }), _fetchRun: fetchRun,
+  });
+  await server.listen(0);
+  try {
+    await until(async () => fetchRun.calls.length === 1);
+    await until(async () => scheduler.delays.includes(60000)); // armed once the first tick settles, despite the forge being unavailable
+    fx.addBranch('feat/issue-52-timer', { 'openspec/changes/issue-52-timer/proposal.md': 'x' });
+    await scheduler.runDelay(60000);
+    await until(async () => names(await sectionOf(server)).includes('feat/issue-52-timer'));
+    assert.equal(fetchRun.calls.length, 2, 'the timer fetched again');
   } finally {
     await server.close();
   }
