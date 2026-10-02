@@ -422,6 +422,11 @@ export default {
   'memory.ship.identityAmbient':  'BRAIN_MEMORY_TOKEN no está configurado — esta corrida se autenticó con la credencial ambiente de la sesión.',
   'memory.ship.diverged':         '✗ el envío falló — {ref} divergió de origin; no se forzó nada. {message}',
   'memory.ship.pushFailed':       '✗ el envío falló — el push no se concretó. {message}',
+  // #1190: camino de reemplazo — un re-envío del mismo día tras un squash reemplaza
+  // su propia rama de lane ya fusionada bajo un lease.
+  'memory.ship.leaseStale':       '✗ el envío falló — la rama del lane en origin se movió después de relevarla, así que el lease rechazó el reemplazo; no se sobrescribió, reintentó ni borró nada. Volvé a correr el envío para relevarla de nuevo. {message}',
+  'memory.ship.replaceRefused':   '✗ el envío falló — origin rechazó reemplazar la rama del lane ya fusionada, probablemente por una protección o regla que prohíbe updates forzados en memory/*; no se reintentó ni se borró nada. Permití updates forzados en memory/* o borrá a mano la rama fusionada, y volvé a enviar. {message}',
+  'memory.ship.replaced':         '✓ se reemplazó {branch} en origin con lease — el pull request #{number} se fusionó y cada registro que llevaba está en main.',
   // #1119: esta consulta corre antes del push (D4) — un fallo acá significa
   // que no se envió nada, no que el push se concretó. Reintentar es seguro:
   // la próxima corrida arranca de nuevo desde el mismo estado sin enviar.

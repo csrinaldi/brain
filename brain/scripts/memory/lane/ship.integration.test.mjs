@@ -12,8 +12,8 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { testTmp } from '../../lib/test-tmp.mjs';
-import { shipLane } from './ship.mjs';
-import { collectLane } from './collect.mjs';
+import { shipLane, classifyReplaceFailure } from './ship.mjs';
+import { collectLane, defaultGit } from './collect.mjs';
 
 const GIT_ENV = {
   ...process.env,
@@ -24,7 +24,7 @@ const GIT_ENV = {
 };
 
 function git(cwd, ...args) {
-  const r = spawnSync('git', args, { cwd, encoding: 'utf8', env: GIT_ENV });
+  const r = spawnSync('git', args, { cwd, encoding: 'utf8', env: GIT_ENV, timeout: 30_000, stdio: ['ignore', 'pipe', 'pipe'] });
   if (r.status !== 0) throw new Error(`git ${args.join(' ')} (cwd=${cwd}) failed: ${r.stderr}`);
   return r.stdout;
 }
@@ -271,11 +271,10 @@ test('#1050 repro: a same-day append after a squash-merge reparents onto origin/
   // Squash-merge X into main — same plumbing as the "R3 under a real squash"
   // test above (auto-merge is hardcoded --squash on both providers, R3): no
   // commit-ancestry relationship between the lane ref and main survives.
-  // Also delete the remote lane branch, matching the provider's own
-  // delete-branch-on-merge convention this same auto-merge relies on
-  // (design.md's Reparent note: a SURVIVING stale remote branch is a
-  // different, already-documented case — `surveyRef` computes `behind>0`
-  // and ship throws `diverged` rather than force-pushing over it).
+  // Also delete the remote lane branch. This variant DELETES the remote
+  // branch; it does not model what the providers do — auto-merge is a squash
+  // and nothing deletes the branch (#1190), so the surviving-branch case is
+  // the '#1190:' tests below, which this variant deliberately leaves apart.
   const mainHead = git(mainDir, 'rev-parse', 'main').trim();
   const laneTree = git(mainDir, 'rev-parse', `${first.commit}^{tree}`).trim();
   const squashCommit = git(mainDir, 'commit-tree', laneTree, '-p', mainHead, '-m', 'squash merge lane').trim();
@@ -378,4 +377,121 @@ test('the main checkout is untouched: git status and HEAD are byte-identical bef
     head: git(mainDir, 'rev-parse', 'HEAD'),
   };
   assert.deepEqual(after, before, 'the ship touches no working tree (D6\'s scope boundary)');
+});
+
+// ── #1190 — a same-day re-ship after a squash, the remote branch surviving ──
+
+/** Ship once, squash-merge the lane into main WITHOUT deleting the remote
+ * branch (what both providers actually do), and mark the first PR merged. */
+async function shipThenSquash(mainDir, { merged = true } = {}) {
+  const rec = recordingVcs();
+  addCandidate(mainDir, '2026-09-rec-1111111111111111.jsonl', recordJson('rec-1111111111111111', 'x'));
+  const first = await shipLane({ root: mainDir, project: 'x/y', tier: 'lite', host: 'test-host', date: '2026-09-09', vcs: rec.vcs });
+  const mainHead = git(mainDir, 'rev-parse', 'main').trim();
+  const laneTree = git(mainDir, 'rev-parse', `${first.commit}^{tree}`).trim();
+  const squash = git(mainDir, 'commit-tree', laneTree, '-p', mainHead, '-m', 'squash merge lane').trim();
+  git(mainDir, 'update-ref', 'refs/heads/main', squash);
+  git(mainDir, 'push', 'origin', 'main');
+  if (merged) { rec.prs[0].state = 'closed'; rec.prs[0].merged = true; }
+  addCandidate(mainDir, '2026-09-rec-2222222222222222.jsonl', recordJson('rec-2222222222222222', 'y'));
+  return { ...rec, first };
+}
+
+const shipSecond = (mainDir, vcs, extra = {}) =>
+  shipLane({ root: mainDir, project: 'x/y', tier: 'lite', host: 'test-host', date: '2026-09-09', vcs, ...extra });
+
+test('#1190: squash with the branch surviving, PR merged ⇒ lease replace, new PR, remote = second.commit', async () => {
+  const { mainDir, originDir } = buildFixtureRepo();
+  const { vcs, calls, first } = await shipThenSquash(mainDir);
+  const surviving = git(originDir, 'rev-parse', `refs/heads/${first.branch}`).trim();
+  assert.equal(surviving, first.commit, 'precondition: the squash left the remote branch at its pre-squash tip');
+
+  const second = await shipSecond(mainDir, vcs);
+
+  assert.equal(second.pushed, true);
+  assert.deepEqual(second.replaced, { from: first.commit, mergedPr: 100 });
+  assert.equal(git(originDir, 'rev-parse', `refs/heads/${first.branch}`).trim(), second.commit);
+  assert.equal(calls.mrCreate, 2, 'a NEW pull request is opened for the replaced branch');
+  assert.equal(second.pr.number, 101);
+  assert.equal(second.autoMerge.enabled, true);
+  const paths = git(mainDir, 'diff', '--name-only', `origin/main...${second.commit}`).trim().split('\n');
+  assert.deepEqual(paths, ['.memory/records/2026-09-rec-2222222222222222.jsonl']);
+});
+
+test('#1190: surviving branch, PR still open ⇒ diverged, remote sha unchanged', async () => {
+  const { mainDir, originDir } = buildFixtureRepo();
+  const { vcs, first } = await shipThenSquash(mainDir, { merged: false });
+  await assert.rejects(() => shipSecond(mainDir, vcs), (err) => { assert.equal(err.diverged, true); return true; });
+  assert.equal(git(originDir, 'rev-parse', `refs/heads/${first.branch}`).trim(), first.commit);
+});
+
+/** A second clone of origin pushes a commit onto the lane branch that main
+ * does not carry — a concurrent writer's unmerged content. */
+function pushUnmergedCommit(base, originDir, branch) {
+  const other = join(base, 'other');
+  git(base, 'clone', '-q', originDir, other);
+  git(other, 'config', 'user.email', 'o@example.invalid');
+  git(other, 'config', 'user.name', 'other');
+  git(other, 'checkout', '-q', branch);
+  addCandidate(other, '2026-09-rec-9999999999999999.jsonl', recordJson('rec-9999999999999999', 'u'));
+  git(other, 'add', '-A');
+  git(other, 'commit', '-q', '-m', 'unmerged writer');
+  git(other, 'push', '-q', 'origin', `${branch}:${branch}`);
+  return git(other, 'rev-parse', 'HEAD').trim();
+}
+
+test('#1190: extra unmerged commit on the remote, PR merged ⇒ diverged, remote sha unchanged, mrList count unchanged', async () => {
+  const { base, mainDir, originDir } = buildFixtureRepo();
+  const { vcs, calls, first } = await shipThenSquash(mainDir);
+  const racer = pushUnmergedCommit(base, originDir, first.branch);
+  const listBefore = calls.mrList;
+
+  await assert.rejects(() => shipSecond(mainDir, vcs), (err) => { assert.equal(err.diverged, true); return true; });
+
+  assert.equal(git(originDir, 'rev-parse', `refs/heads/${first.branch}`).trim(), racer);
+  assert.equal(calls.mrList, listBefore, 'the content key refuses before any port call');
+});
+
+test('#1190: lease race — a git wrapper moves origin just before the lease push ⇒ leaseStale, racer\'s sha survives', async () => {
+  const { base, mainDir, originDir } = buildFixtureRepo();
+  const { vcs, first } = await shipThenSquash(mainDir);
+  let racer = null;
+  let pushes = 0;
+  const racingGit = (argv, opts) => {
+    if (argv[0] === 'push' && argv.some((a) => String(a).startsWith('--force-with-lease'))) {
+      pushes++;
+      // Another writer lands a commit after the survey, before the push.
+      racer = pushUnmergedCommit(base, originDir, first.branch);
+    }
+    return defaultGit(argv, opts);
+  };
+
+  await assert.rejects(() => shipSecond(mainDir, vcs, { git: racingGit }), (err) => {
+    assert.equal(err.leaseStale, true);
+    assert.equal(err.diverged, true);
+    return true;
+  });
+  assert.equal(pushes, 1);
+  assert.equal(git(originDir, 'rev-parse', `refs/heads/${first.branch}`).trim(), racer, 'the racer\'s sha survives');
+});
+
+test('#1190: origin with receive.denyNonFastForwards=true ⇒ replaceRefused, remote sha unchanged', async () => {
+  const { mainDir, originDir } = buildFixtureRepo();
+  const { vcs, first } = await shipThenSquash(mainDir);
+  git(originDir, 'config', 'receive.denyNonFastForwards', 'true');
+
+  let thrown = null;
+  const calls = [];
+  const spyGit = (argv, opts) => { calls.push(argv); return defaultGit(argv, opts); };
+  await assert.rejects(() => shipSecond(mainDir, vcs, { git: spyGit }), (err) => { thrown = err; return true; });
+
+  assert.equal(thrown.replaceRefused, true, thrown.message);
+  assert.notEqual(thrown.diverged, true);
+  // The REAL stderr of the refusal (git 2.53.0), classified by the pure fn.
+  assert.match(thrown.message, /denying non-fast-forward/);
+  assert.match(thrown.message, /\[remote rejected\]/);
+  assert.equal(classifyReplaceFailure(thrown.message), 'replaceRefused');
+  assert.equal(calls.filter((a) => a[0] === 'push').length, 1, 'no retry');
+  assert.ok(!calls.some((a) => a.includes('--delete')), 'never deletes');
+  assert.equal(git(originDir, 'rev-parse', `refs/heads/${first.branch}`).trim(), first.commit);
 });

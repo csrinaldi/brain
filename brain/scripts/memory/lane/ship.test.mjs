@@ -8,6 +8,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { shipLane } from './ship.mjs';
+import * as shipModule from './ship.mjs';
 
 const REF = 'refs/heads/memory/test-host-2026-09-09';
 const BRANCH = 'memory/test-host-2026-09-09';
@@ -415,7 +416,10 @@ test('push argv contains --no-verify and never --force or a leading +, on any ar
   const pushCall = calls.find((a) => a[0] === 'push');
   assert.ok(pushCall.includes('--no-verify'));
   for (const argv of calls) {
-    assert.ok(!argv.includes('--force'), `--force must never appear in any argv: ${JSON.stringify(argv)}`);
+    // #1190: tightened — no `--force*` flag of any spelling (`--force`,
+    // `--force-with-lease=…`) on a non-replace path. Only the two-key replace
+    // path (its own tests below) may carry a lease.
+    assert.ok(!argv.some((a) => typeof a === 'string' && a.startsWith('--force')), `--force* must never appear in any argv on a non-replace path: ${JSON.stringify(argv)}`);
     assert.ok(!argv.some((a) => typeof a === 'string' && a.startsWith('+') && a !== '+refs/heads/' + BRANCH + ':refs/remotes/origin/' + BRANCH), `a bare leading + push refspec must never appear: ${JSON.stringify(argv)}`);
   }
   const source = await (await import('node:fs/promises')).readFile(new URL('./ship.mjs', import.meta.url), 'utf8');
@@ -956,4 +960,258 @@ test('the result object, JSON-stringified, contains no value of BRAIN_MEMORY_TOK
     assert.doesNotMatch(dump, /BRAIN_MEMORY_TOKEN|sekrit-token-value/, 'no credential value may ever appear in the returned shape');
     assert.equal(typeof result.identityBound, 'boolean');
   }
+});
+
+
+// ── #1190 — decidePr basis, surveyRef remoteTip ─────────────────────────────
+
+test('#1190 decidePr: a create decision carries basis none | merged | other', async () => {
+  const mk = (list) => ({ mrList: async () => list });
+  const none = await shipModule.decidePr({ vcs: mk([]), project: 'x/y', branch: BRANCH });
+  assert.deepEqual(none, { action: 'create', basis: 'none' });
+
+  const merged = await shipModule.decidePr({
+    vcs: mk([{ number: 5, headBranch: BRANCH, state: 'closed', merged: true }]), project: 'x/y', branch: BRANCH,
+  });
+  assert.deepEqual(merged, { action: 'create', basis: 'merged', number: 5 });
+
+  // Any other computable combination (a non-open state that is neither
+  // closed-unmerged nor merged:true) is `other`, never `merged`.
+  const other = await shipModule.decidePr({
+    vcs: mk([{ number: 6, headBranch: BRANCH, state: 'merged', merged: false }]), project: 'x/y', branch: BRANCH,
+  });
+  assert.deepEqual(other, { action: 'create', basis: 'other' });
+});
+
+test('#1190 surveyRef: remoteTip is the sha of origin/<branch> after a successful fetch, null on every other return', () => {
+  const remoteRef = `refs/remotes/origin/${BRANCH}`;
+  const base = [
+    { match: (a) => a[0] === 'rev-parse' && a.at(-1) === remoteRef, result: ok('r3m0t3\n') },
+    { match: (a) => a[0] === 'rev-parse', result: ok('l0c4l\n') },
+    { match: (a) => a[0] === 'rev-list', result: ok('1') },
+  ];
+  const okSurvey = shipModule.surveyRef({
+    git: fakeGit([{ match: (a) => a[0] === 'fetch', result: ok() }, ...base]).git, root: '/repo', ref: REF, branch: BRANCH,
+  });
+  assert.equal(okSurvey.remoteTip, 'r3m0t3');
+
+  const missingRemote = shipModule.surveyRef({
+    git: fakeGit([{ match: (a) => a[0] === 'fetch', result: fail("fatal: couldn't find remote ref refs/heads/x") }, ...base]).git,
+    root: '/repo', ref: REF, branch: BRANCH,
+  });
+  assert.equal(missingRemote.remoteTip, null);
+
+  const fetchFailed = shipModule.surveyRef({
+    git: fakeGit([{ match: (a) => a[0] === 'fetch', result: fail('fatal: unable to access') }, ...base]).git,
+    root: '/repo', ref: REF, branch: BRANCH,
+  });
+  assert.equal(fetchFailed.remoteTip, null);
+
+  const noLocal = shipModule.surveyRef({
+    git: fakeGit([{ match: (a) => a[0] === 'rev-parse', result: fail('') }]).git, root: '/repo', ref: REF, branch: BRANCH,
+  });
+  assert.equal(noLocal.remoteTip, null);
+});
+
+// ── #1190 — the two-key replace path ────────────────────────────────────────
+
+const P = '.memory/records/2026-09-rec-1.jsonl';
+const REMOTE_TIP = 'r3m0t3tip';
+
+// Real git 2.53.0 stderr, measured from a bare remote with
+// `receive.denyNonFastForwards=true` and from a moved remote (see
+// ship.integration.test.mjs, which re-measures them against real git).
+const REAL_REFUSED_STDERR = [
+  'remote: error: denying non-fast-forward refs/heads/lane (you should pull first)',
+  'To /path/o.git',
+  ' ! [remote rejected] lane2 -> lane (non-fast-forward)',
+  "error: failed to push some refs to '/path/o.git'",
+].join('\n');
+const REAL_STALE_STDERR = [
+  'To /path/o.git',
+  ' ! [rejected]        lane2 -> lane (stale info)',
+  "error: failed to push some refs to '/path/o.git'",
+].join('\n');
+
+/** behind>0 survey where the remote tip is a distinct sha (REMOTE_TIP), its
+ * own three-dot and `--` diffs are answered separately from the local ref's. */
+function replaceRules({
+  behind = '2', ahead = '1', remoteTip = REMOTE_TIP,
+  remoteLanePaths = [P], remoteUndelivered = [], push = ok(),
+} = {}) {
+  return [
+    { match: (a) => a[0] === 'rev-parse' && a.at(-1) === `refs/remotes/origin/${BRANCH}`, result: remoteTip === null ? fail('') : ok(`${remoteTip}\n`) },
+    { match: (a) => a[0] === 'rev-parse', result: ok('deadbeef') },
+    { match: (a) => a[0] === 'fetch', result: ok() },
+    { match: (a) => a[0] === 'rev-list' && a[2] === `${REF}..refs/remotes/origin/${BRANCH}`, result: ok(behind) },
+    { match: (a) => a[0] === 'rev-list' && a[2] === `refs/remotes/origin/${BRANCH}..${REF}`, result: ok(ahead) },
+    { match: (a) => a[0] === 'diff' && a.includes('--') && a[2] === remoteTip, result: ok(remoteUndelivered.join('\n')) },
+    { match: (a) => a[0] === 'diff' && a[2] === `origin/main...${remoteTip}`, result: ok(remoteLanePaths.join('\n')) },
+    { match: (a) => a[0] === 'diff' && a.includes('--'), result: ok(P) },
+    { match: (a) => a[0] === 'diff', result: ok(P) },
+    { match: (a) => a[0] === 'push', result: push },
+  ];
+}
+
+const MERGED_PR = [{ number: 5, title: 't', headBranch: BRANCH, state: 'closed', merged: true }];
+const shipArgs = (git, vcs, extra = {}) => ({
+  root: '/repo', project: 'x/y', tier: 'lite', host: 'test-host', date: '2026-09-09',
+  collect: fakeCollect(), git, vcs, ...extra,
+});
+
+test('#1190 replace: both keys hold ⇒ one push with --force-with-lease=<ref>:<observed remoteTip>, new PR, armed, replaced set', async () => {
+  const { git, calls } = fakeGit(replaceRules());
+  const { vcs, calls: vcsCalls } = fakeVcs({ mrList: async () => { vcsCalls.mrList++; return MERGED_PR; } });
+
+  const result = await shipLane(shipArgs(git, vcs));
+
+  const pushes = calls.filter((a) => a[0] === 'push');
+  assert.equal(pushes.length, 1, 'exactly one push, no retry');
+  assert.deepEqual(pushes[0], ['push', '--no-verify', `--force-with-lease=${REF}:${REMOTE_TIP}`, 'origin', `${REF}:${REF}`]);
+  assert.ok(!pushes[0].includes('--force'), 'never a bare --force');
+  assert.ok(!pushes[0].some((a) => a.startsWith('+')), 'no leading + refspec');
+  assert.ok(!calls.some((a) => a[0] === 'push' && a.includes('--delete')), 'no delete');
+  assert.equal(result.pushed, true);
+  assert.deepEqual(result.replaced, { from: REMOTE_TIP, mergedPr: 5 });
+  assert.equal(result.pr.number, 42);
+  assert.deepEqual(vcsCalls, { mrList: 1, mrCreate: 1, mrAutoMerge: 1 });
+});
+
+test('#1190 an ordinary run reports replaced:null', async () => {
+  const { git } = fakeGit([...surveyOkRules(), { match: (a) => a[0] === 'push', result: ok() }]);
+  const { vcs } = fakeVcs();
+  const result = await shipLane(shipArgs(git, vcs));
+  assert.equal(result.replaced, null);
+});
+
+test('#1190 remote delivered, no PR ⇒ diverged, one mrList, no push', async () => {
+  const { git, calls } = fakeGit(replaceRules());
+  const { vcs, calls: vcsCalls } = fakeVcs();
+  await assert.rejects(() => shipLane(shipArgs(git, vcs)), (err) => {
+    assert.equal(err.diverged, true);
+    assert.ok(err.message.includes(REF), 'message keeps the ref');
+    return true;
+  });
+  assert.equal(vcsCalls.mrList, 1);
+  assert.equal(vcsCalls.mrCreate, 0);
+  assert.ok(!calls.some((a) => a[0] === 'push'));
+});
+
+test('#1190 remote delivered, newest PR open ⇒ diverged, no push', async () => {
+  const { git, calls } = fakeGit(replaceRules());
+  const { vcs, calls: vcsCalls } = fakeVcs({
+    mrList: async () => { vcsCalls.mrList++; return [{ number: 7, headBranch: BRANCH, state: 'open', merged: false }]; },
+  });
+  await assert.rejects(() => shipLane(shipArgs(git, vcs)), (err) => { assert.equal(err.diverged, true); return true; });
+  assert.ok(!calls.some((a) => a[0] === 'push'));
+  assert.equal(vcsCalls.mrCreate, 0);
+});
+
+test('#1190 newest PR merged but remote tip pending ⇒ diverged, zero port calls', async () => {
+  const { git, calls } = fakeGit(replaceRules({ remoteUndelivered: [P] }));
+  const { vcs, calls: vcsCalls } = fakeVcs({ mrList: async () => { vcsCalls.mrList++; return MERGED_PR; } });
+  await assert.rejects(() => shipLane(shipArgs(git, vcs)), (err) => {
+    assert.equal(err.diverged, true);
+    assert.ok(err.message.includes(REF));
+    assert.match(err.message, /carries content not on origin\/main/);
+    return true;
+  });
+  assert.deepEqual(vcsCalls, { mrList: 0, mrCreate: 0, mrAutoMerge: 0 });
+  assert.ok(!calls.some((a) => a[0] === 'push'));
+});
+
+test('#1190 baseFetched:false ⇒ remote unknown ⇒ diverged, zero port calls', async () => {
+  const { git, calls } = fakeGit(replaceRules());
+  const { vcs, calls: vcsCalls } = fakeVcs({ mrList: async () => { vcsCalls.mrList++; return MERGED_PR; } });
+  await assert.rejects(
+    () => shipLane(shipArgs(git, vcs, { collect: fakeCollect({ baseFetched: false }) })),
+    (err) => { assert.equal(err.diverged, true); assert.match(err.message, /delivery unknown \(baseStale\)/); return true; },
+  );
+  assert.deepEqual(vcsCalls, { mrList: 0, mrCreate: 0, mrAutoMerge: 0 });
+  assert.ok(!calls.some((a) => a[0] === 'push'));
+});
+
+test('#1190 behind>0, remote delivered, closed-unmerged ⇒ closedUnmerged outcome, no push', async () => {
+  const { git, calls } = fakeGit(replaceRules());
+  const { vcs, calls: vcsCalls } = fakeVcs({
+    mrList: async () => { vcsCalls.mrList++; return [{ number: 11, headBranch: BRANCH, state: 'closed', merged: false }]; },
+  });
+  const result = await shipLane(shipArgs(git, vcs));
+  assert.equal(result.closedUnmerged, true);
+  assert.equal(result.pushed, false);
+  assert.equal(result.replaced, null);
+  assert.ok(!calls.some((a) => a[0] === 'push'));
+});
+
+test('#1190 behind:null with a stale remote ⇒ no lease argv, the non-ff backstop yields diverged', async () => {
+  const { git, calls } = fakeGit([
+    { match: (a) => a[0] === 'rev-parse', result: ok('deadbeef') },
+    { match: (a) => a[0] === 'fetch', result: fail('fatal: unable to access origin') },
+    { match: (a) => a[0] === 'diff' && a.includes('--'), result: ok(P) },
+    { match: (a) => a[0] === 'diff', result: ok(P) },
+    { match: (a) => a[0] === 'push', result: fail('! [rejected] x -> x (non-fast-forward)') },
+  ]);
+  const { vcs } = fakeVcs();
+  await assert.rejects(() => shipLane(shipArgs(git, vcs)), (err) => { assert.equal(err.diverged, true); assert.notEqual(err.leaseStale, true); return true; });
+  assert.ok(!calls.some((a) => a.some((x) => typeof x === 'string' && x.startsWith('--force'))), 'a replace is unreachable without a successful survey');
+});
+
+test('#1190 ahead:0 ⇒ diverged, no lease, zero port calls', async () => {
+  const { git, calls } = fakeGit(replaceRules({ ahead: '0' }));
+  const { vcs, calls: vcsCalls } = fakeVcs({ mrList: async () => { vcsCalls.mrList++; return MERGED_PR; } });
+  await assert.rejects(() => shipLane(shipArgs(git, vcs)), (err) => { assert.equal(err.diverged, true); return true; });
+  assert.deepEqual(vcsCalls, { mrList: 0, mrCreate: 0, mrAutoMerge: 0 });
+  assert.ok(!calls.some((a) => a[0] === 'push'));
+});
+
+test('#1190 remoteTip null (unresolvable) ⇒ diverged, no lease, zero port calls', async () => {
+  const { git, calls } = fakeGit(replaceRules({ remoteTip: null }));
+  const { vcs, calls: vcsCalls } = fakeVcs({ mrList: async () => { vcsCalls.mrList++; return MERGED_PR; } });
+  await assert.rejects(() => shipLane(shipArgs(git, vcs)), (err) => { assert.equal(err.diverged, true); return true; });
+  assert.deepEqual(vcsCalls, { mrList: 0, mrCreate: 0, mrAutoMerge: 0 });
+  assert.ok(!calls.some((a) => a[0] === 'push'));
+});
+
+// ── #1190 — failure classification on the replace path ──────────────────────
+
+test('#1190 classifyReplaceFailure: pinned on real git stderr — stale lease, refused rule, anything else', () => {
+  assert.equal(shipModule.classifyReplaceFailure(REAL_STALE_STDERR), 'leaseStale');
+  assert.equal(shipModule.classifyReplaceFailure(REAL_REFUSED_STDERR), 'replaceRefused');
+  assert.equal(shipModule.classifyReplaceFailure('remote: GH006: Protected branch update failed'), 'replaceRefused');
+  assert.equal(shipModule.classifyReplaceFailure('fatal: unable to access origin: Could not resolve host'), 'pushFailed');
+  // Order: a stale lease line wins even if other words overlap.
+  assert.equal(shipModule.classifyReplaceFailure('! [rejected] a -> b (stale info)\n[remote rejected]'), 'leaseStale');
+});
+
+test('#1190 lease push "[remote rejected] … (protected branch hook declined)" ⇒ replaceRefused, exactly one push, no delete argv', async () => {
+  const { git, calls } = fakeGit(replaceRules({ push: fail(' ! [remote rejected] a -> b (protected branch hook declined)') }));
+  const { vcs, calls: vcsCalls } = fakeVcs({ mrList: async () => { vcsCalls.mrList++; return MERGED_PR; } });
+  await assert.rejects(() => shipLane(shipArgs(git, vcs)), (err) => {
+    assert.equal(err.replaceRefused, true);
+    assert.notEqual(err.diverged, true);
+    assert.match(err.message, /^memory\.ship\.replaceRefused:/);
+    assert.ok(err.message.includes(REF));
+    return true;
+  });
+  assert.equal(calls.filter((a) => a[0] === 'push').length, 1);
+  assert.ok(!calls.some((a) => a.includes('--delete') || a.some((x) => typeof x === 'string' && x.startsWith(':refs'))));
+  assert.equal(vcsCalls.mrCreate, 0);
+});
+
+test('#1190 lease push "(stale info)" ⇒ leaseStale + diverged, exactly one push', async () => {
+  const { git, calls } = fakeGit(replaceRules({ push: fail(REAL_STALE_STDERR) }));
+  const { vcs } = fakeVcs({ mrList: async () => MERGED_PR });
+  await assert.rejects(() => shipLane(shipArgs(git, vcs)), (err) => {
+    assert.equal(err.leaseStale, true);
+    assert.equal(err.diverged, true);
+    assert.match(err.message, /^memory\.ship\.leaseStale:/);
+    return true;
+  });
+  assert.equal(calls.filter((a) => a[0] === 'push').length, 1, 'no retry');
+});
+
+test('#1190 lease push with an unrelated failure ⇒ the existing pushFailed', async () => {
+  const { git } = fakeGit(replaceRules({ push: fail('fatal: unable to access origin: Could not resolve host') }));
+  const { vcs } = fakeVcs({ mrList: async () => MERGED_PR });
+  await assert.rejects(() => shipLane(shipArgs(git, vcs)), (err) => { assert.equal(err.pushFailed, true); return true; });
 });

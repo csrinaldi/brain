@@ -51,10 +51,10 @@ function parseCount(result) {
  * `ahead === 0` reading (`ahead === 0` is also true for a ref that exists
  * and is simply unreconciled — the exact state #920 repairs).
  */
-function surveyRef({ git, root, ref, branch }) {
+export function surveyRef({ git, root, ref, branch }) {
   const tipResult = git(['rev-parse', '--verify', '--quiet', ref], { cwd: root });
   if (tipResult.status !== 0) {
-    return { ahead: 0, behind: 0, remoteRefPresent: null, tip: null };
+    return { ahead: 0, behind: 0, remoteRefPresent: null, tip: null, remoteTip: null };
   }
   const tip = tipResult.stdout.trim();
 
@@ -63,14 +63,18 @@ function surveyRef({ git, root, ref, branch }) {
   if (fetchResult.status !== 0) {
     if (/couldn't find remote ref/.test(fetchResult.stderr)) {
       const aheadAll = git(['rev-list', '--count', ref], { cwd: root });
-      return { ahead: parseCount(aheadAll), behind: 0, remoteRefPresent: false, tip };
+      return { ahead: parseCount(aheadAll), behind: 0, remoteRefPresent: false, tip, remoteTip: null };
     }
-    return { ahead: 1, behind: null, remoteRefPresent: null, tip };
+    return { ahead: 1, behind: null, remoteRefPresent: null, tip, remoteTip: null };
   }
 
   const behindResult = git(['rev-list', '--count', `${ref}..${remoteRef}`], { cwd: root });
   const aheadResult = git(['rev-list', '--count', `${remoteRef}..${ref}`], { cwd: root });
-  return { ahead: parseCount(aheadResult), behind: parseCount(behindResult), remoteRefPresent: true, tip };
+  // #1190: the exact sha the survey observed — the content proof and the
+  // lease both name THIS object, so a re-fetch in between cannot split them.
+  const remoteTipResult = git(['rev-parse', '--verify', '--quiet', remoteRef], { cwd: root });
+  const remoteTip = remoteTipResult.status === 0 ? remoteTipResult.stdout.trim() : null;
+  return { ahead: parseCount(aheadResult), behind: parseCount(behindResult), remoteRefPresent: true, tip, remoteTip };
 }
 
 /**
@@ -189,7 +193,7 @@ function parsePrNumber(url) {
  * a push onto a branch whose only PR was closed unmerged would itself be a
  * re-ship, which spec.md forbids regardless of whether a fresh PR follows.
  */
-async function decidePr({ vcs, project, branch }) {
+export async function decidePr({ vcs, project, branch }) {
   let list;
   try {
     list = await vcs.mrList({ project, state: 'all', headBranch: branch });
@@ -207,7 +211,7 @@ async function decidePr({ vcs, project, branch }) {
   const matches = list.filter((m) => m.headBranch === branch);
   const open = matches.find((m) => m.state === 'open');
   if (open) return { action: 'reuse', number: open.number };
-  if (matches.length === 0) return { action: 'create' };
+  if (matches.length === 0) return { action: 'create', basis: 'none' };
 
   const newest = matches.reduce((a, b) => (b.number > a.number ? b : a));
   if (newest.state == null || newest.merged == null) {
@@ -222,8 +226,28 @@ async function decidePr({ vcs, project, branch }) {
   // `merged === true` (or, in principle, any other computable combination
   // D1's enum does not actually produce) — a merged PR's branch is being
   // re-shipped with fresh content, so a NEW PR is the correct outcome, same
-  // as an empty list.
-  return { action: 'create' };
+  // as an empty list. #1190: only `merged === true` earns basis 'merged',
+  // the one value that unlocks replacing a surviving remote lane branch.
+  if (newest.merged === true) return { action: 'create', basis: 'merged', number: newest.number };
+  return { action: 'create', basis: 'other' };
+}
+
+/**
+ * classifyReplaceFailure() — #1190. Classifies the stderr of the one forced
+ * lease push, in this order: a stale lease first, then a remote refusing the
+ * forced update (a branch rule, a protected branch, `denyNonFastForwards`),
+ * then anything else. The ordinary push keeps its own `/rejected/` test, which
+ * also matches `[remote rejected]` and would mislabel a rule as a divergence.
+ * Pinned on real git stderr (ship.test.mjs, ship.integration.test.mjs).
+ *
+ * @param {string} stderr
+ * @returns {'leaseStale'|'replaceRefused'|'pushFailed'}
+ */
+export function classifyReplaceFailure(stderr) {
+  const text = String(stderr ?? '');
+  if (/\(stale info\)/.test(text)) return 'leaseStale';
+  if (/\[remote rejected\]|protected branch|GH006|GH013|not allowed to force push|repository rule/i.test(text)) return 'replaceRefused';
+  return 'pushFailed';
 }
 
 /** createPr() — A1 step 5, the `action: 'create'` half of `decidePr()`'s
@@ -303,6 +327,8 @@ export async function shipLane({
     commit, collected: collectedCount, skipped, duplicates, baseFetched,
     skippedWorktrees,
     identityBound, dryRun,
+    // #1190: set only on a run that replaced its own merged remote lane branch.
+    replaced: null,
   };
 
   // A7: under --dry-run, steps 3-6 are never reached (vcs:null, no push, no
@@ -324,7 +350,7 @@ export async function shipLane({
     };
   }
 
-  const { ahead, behind, remoteRefPresent, tip } = surveyRef({ git, root, ref, branch });
+  const { ahead, behind, remoteRefPresent, tip, remoteTip } = surveyRef({ git, root, ref, branch });
 
   // R2 (#920): `tip === null` is the STRUCTURAL cold-1 no-op — the ref was
   // never created locally, so there is nothing to survey for delivery
@@ -396,10 +422,35 @@ export async function shipLane({
   // network — "nothing else runs" (A1). An UNKNOWN divergence (behind:null,
   // a degraded fetch) still reaches the real push below, which is the
   // authoritative check (A3).
+  //
+  // #1190: ONE exception to the refusal. A squash auto-merge leaves the
+  // remote lane branch at its pre-squash tip, so a same-day re-ship is
+  // `behind>0` against a branch whose every byte is already on main. The
+  // lane replaces its OWN remote branch, under a lease on the observed tip,
+  // only when TWO independent keys hold:
+  //   1. the content key (git, no port call, runs first): the remote tip is
+  //      content-delivered on origin/main, so nothing on it can be lost;
+  //   2. the PR key (the port read): the newest PR for the head is
+  //      merged === true (decidePr's basis 'merged').
+  // Either key alone, an unknown, or a missing survey keeps the refusal.
+  let decision;
+  let replace = null;
   if (behind !== null && behind > 0) {
-    const err = new Error(`memory.ship.diverged: ${ref} is behind origin's matching ref — refusing to force-push.`);
-    err.diverged = true;
-    throw err;
+    const refuse = (suffix) => {
+      const err = new Error(`memory.ship.diverged: ${ref} is behind origin's matching ref — refusing to force-push.${suffix ? ` ${suffix}` : ''}`);
+      err.diverged = true;
+      return err;
+    };
+    if (!(ahead > 0 && remoteTip !== null)) throw refuse('');
+    const remote = contentDelivery({ git, root, rev: remoteTip, baseFetched });
+    if (remote.status === 'pending') throw refuse(`remote tip ${remoteTip} carries content not on origin/main`);
+    if (remote.status !== 'delivered') throw refuse(`remote tip ${remoteTip} delivery unknown (${remote.reason})`);
+    decision = await decidePr({ vcs, project, branch });
+    if (decision.action === 'create' && decision.basis === 'merged') {
+      replace = { from: remoteTip, mergedPr: decision.number };
+    } else if (decision.action !== 'closedUnmerged') {
+      throw refuse(`remote tip ${remoteTip} is delivered but the newest pull request is not merged`);
+    }
   }
 
   // R8 REVERSAL (#920 -> #936, D4): the PR lookup now runs BEFORE the push
@@ -412,7 +463,7 @@ export async function shipLane({
   // itself (a push onto a human-closed PR's branch is a re-ship, which
   // spec.md forbids), not merely skip creating a new PR after already
   // pushing.
-  const decision = await decidePr({ vcs, project, branch });
+  decision ??= await decidePr({ vcs, project, branch });
 
   if (decision.action === 'closedUnmerged') {
     return {
@@ -424,14 +475,32 @@ export async function shipLane({
 
   let pushed = false;
   if (pendingPush) {
-    const pushResult = git(['push', '--no-verify', 'origin', `${ref}:${ref}`], { cwd: root });
+    const pushArgv = replace
+      ? ['push', '--no-verify', `--force-with-lease=${ref}:${replace.from}`, 'origin', `${ref}:${ref}`]
+      : ['push', '--no-verify', 'origin', `${ref}:${ref}`];
+    const pushResult = git(pushArgv, { cwd: root });
     if (pushResult.status !== 0) {
-      if (/non-fast-forward|fetch first|rejected/.test(pushResult.stderr)) {
-        const err = new Error(`memory.ship.diverged: push refused — ${pushResult.stderr.trim()}`);
+      const stderr = pushResult.stderr.trim();
+      if (replace) {
+        // The replace push runs once: no retry, no delete.
+        const kind = classifyReplaceFailure(stderr);
+        if (kind === 'leaseStale') {
+          const err = new Error(`memory.ship.leaseStale: lease on ${ref} at ${replace.from} refused — ${stderr}`);
+          err.leaseStale = true;
+          err.diverged = true;
+          throw err;
+        }
+        if (kind === 'replaceRefused') {
+          const err = new Error(`memory.ship.replaceRefused: origin refused the forced update of ${ref} — ${stderr}`);
+          err.replaceRefused = true;
+          throw err;
+        }
+      } else if (/non-fast-forward|fetch first|rejected/.test(pushResult.stderr)) {
+        const err = new Error(`memory.ship.diverged: push refused — ${stderr}`);
         err.diverged = true;
         throw err;
       }
-      const err = new Error(`memory.ship.pushFailed: git push exited ${pushResult.status} — ${pushResult.stderr.trim()}`);
+      const err = new Error(`memory.ship.pushFailed: git push exited ${pushResult.status} — ${stderr}`);
       err.pushFailed = true;
       throw err;
     }
@@ -457,7 +526,7 @@ export async function shipLane({
   if (pr.number === null) {
     return {
       ...base, title, body, ahead, behind, remoteRefPresent, pushed, diverged: false, pr, autoMerge: null,
-      delivered, deliveredReason, reconciled: true, closedUnmerged: false,
+      delivered, deliveredReason, reconciled: true, closedUnmerged: false, replaced: replace,
     };
   }
 
@@ -478,6 +547,6 @@ export async function shipLane({
 
   return {
     ...base, title, body, ahead, behind, remoteRefPresent, pushed, diverged: false, pr, autoMerge,
-    delivered, deliveredReason, reconciled: true, closedUnmerged: false,
+    delivered, deliveredReason, reconciled: true, closedUnmerged: false, replaced: replace,
   };
 }
