@@ -527,6 +527,7 @@ export async function main(argv = [], deps = {}) {
     root: parsed.root, vcs: deps.vcs ?? null, project,
     forgeSource, forgeUnavailable, interval: parsed.interval, poll: parsed.poll,
     _recomputeCurrent: deps._recomputeCurrent ?? null,
+    _fetchRun: deps._fetchRun, // test seam only: undefined keeps the production default (a real fetch)
     onServerError: (err) => error(`✗ server error: ${err?.message ?? err} — still serving`),
   });
   try {
