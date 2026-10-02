@@ -33,3 +33,21 @@ export function shapeResumeView({ frontmatter, branch, path = 'resume.md' } = {}
   }
   return out;
 }
+
+/**
+ * The words a reader sees for a resume that is not shown (#1201 R1201-8). Four
+ * states, four sentences: collapsing any two would make "no resume exists" read
+ * the same as "one exists and could not be read". `null` for a resume that is
+ * present. One source for the lane card and the drawer block.
+ *
+ * @param {{state: string, reason?: string|null}|null} resume
+ */
+export function resumeWording(resume) {
+  if (!resume) return null;
+  const why = resume.reason ? `: ${resume.reason}` : '';
+  if (resume.state === 'missing') return 'no resume was found for this branch';
+  if (resume.state === 'unreadable') return `resume.md could not be read${why}`;
+  if (resume.state === 'invalid') return `resume.md is not valid${why}`;
+  if (resume.state === 'deferred') return 'resume.md not read yet: this build\'s read budget was spent';
+  return null;
+}

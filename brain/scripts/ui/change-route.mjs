@@ -27,8 +27,9 @@ import { gitRun, gitErrorLine } from './git-run.mjs';
 import { parseSpecCards } from './lib/spec-cards.mjs';
 import { parseTasksList } from './lib/tasks-list.mjs';
 import { parseBlame } from './lib/blame.mjs';
-import { shapeResumeView } from './lib/resume-view.mjs';
+import { shapeResumeView, resumeWording } from './lib/resume-view.mjs';
 import { parseFrontmatter } from '../memory/lib/resume-frontmatter.mjs';
+import { validateResume } from '../memory/lib/resume-schema.mjs';
 import { LIFECYCLE_STAGES, ARTEFACT_FILE } from '../lib/sdd-layout.mjs';
 import { parseTreeListing, pickChangeDir } from '../lib/git-tree.mjs';
 import { prUrl } from './lib/forge-url.mjs';
@@ -260,29 +261,31 @@ function documentFromEntry({ path, ref, commit, entry, read }) {
 }
 
 /**
- * The six stage documents at HEAD: `rev-parse` once, one `ls-tree` for all six
- * paths (literal pathspecs, so a `*` in a directory name is never globbed),
- * then one `cat-file blob` per present document. A failure of the first two
- * says every document unreadable with that reason, never an empty list.
+ * The six stage documents at `ref` (default HEAD): `rev-parse` once, one `ls-tree`
+ * for all six paths (literal pathspecs, so a `*` in a directory name is never
+ * globbed), then one `cat-file blob` per present document. A failure of the first
+ * two says every document unreadable with that reason, never an empty list. A ref
+ * that no longer resolves (a pruned SHA) is that failure. `label` is what the
+ * provenance stamps name (default: the ref); nothing here touches a working tree.
  * @returns {{head: string|null, documents: Record<string, object|null>}}
  */
-function readHeadDocuments({ run, dir }) {
+export function readHeadDocuments({ run, dir, ref = 'HEAD', label = ref }) {
   if (!dir) return { head: null, documents: Object.fromEntries(HEAD_DOCUMENT_KEYS.map((k) => [k, null])) };
   const paths = HEAD_DOCUMENT_KEYS.map((k) => `${dir}/${STAGE_FILE[k]}`);
   let head;
   let tree;
   try {
-    head = String(run('git', ['rev-parse', '--verify', 'HEAD^{commit}'])).trim();
+    head = String(run('git', ['rev-parse', '--verify', `${ref}^{commit}`])).trim();
     tree = parseTreeListing(run('git', ['--literal-pathspecs', 'ls-tree', '-l', '-z', head, '--', ...paths]));
   } catch (err) {
     const reason = gitErrorLine(err);
-    return { head: null, documents: Object.fromEntries(HEAD_DOCUMENT_KEYS.map((k, i) => [k, documentEntry(paths[i], 'HEAD', { state: 'unreadable', reason })])) };
+    return { head: null, documents: Object.fromEntries(HEAD_DOCUMENT_KEYS.map((k, i) => [k, documentEntry(paths[i], label, { state: 'unreadable', reason })])) };
   }
   const documents = {};
   HEAD_DOCUMENT_KEYS.forEach((key, i) => {
     const entry = tree.get(paths[i]);
     documents[key] = documentFromEntry({
-      path: paths[i], ref: 'HEAD', commit: head, entry,
+      path: paths[i], ref: label, commit: head, entry,
       read: (maxBuffer) => run('git', ['cat-file', 'blob', entry.sha], { maxBuffer }),
     });
   });
@@ -411,6 +414,54 @@ function buildRecordsTab({ snapshot, issue }) {
   };
 }
 
+// ── #1201 D37: a teammate's branch, read at its SHA, below the served change ──
+
+/** Remote blocks that carry documents; the rest of an issue's entries are listed without them. */
+export const REMOTE_DRAWER_CAP = 3;
+
+/** A remote resume document to `{state, reason, document, view}`: `invalid` is told from `present` by the same schema the writer validates against. */
+function remoteResume({ doc, label }) {
+  if (doc.state === 'missing') return { state: 'missing', reason: doc.reason, document: doc, view: null };
+  if (doc.state === 'unreadable') return { state: 'unreadable', reason: doc.reason, document: doc, view: null };
+  const { frontmatter } = parseFrontmatter(doc.text);
+  if (!frontmatter) return { state: 'invalid', reason: 'resume.md has no frontmatter', document: doc, view: null };
+  try {
+    validateResume(frontmatter);
+  } catch (err) {
+    return { state: 'invalid', reason: gitErrorLine(err), document: doc, view: null };
+  }
+  return { state: 'present', reason: null, document: doc, view: shapeResumeView({ frontmatter, branch: label, path: doc.path }) };
+}
+
+const NO_BLOCK_STATE = { missing: 'no-change-dir' };
+
+/** One remote entry of this issue, as the drawer's block. Entries past the cap and entries the served HEAD already is are listed, not re-read. */
+function remoteBlock({ run, entry, index, head, issue }) {
+  const label = `origin/${entry.branch}`;
+  const base = {
+    branch: entry.branch, sha: entry.sha, label: `on ${label} @ ${entry.sha.slice(0, 12)}`, pr: entry.pr, author: entry.author, tipAt: entry.tipAt,
+    dir: entry.change?.ok ? entry.change.value.dir : null, documents: null, sameAsServed: entry.sha === head,
+  };
+  const listed = (state) => ({ ...base, state, resume: { state: entry.resume?.state ?? 'missing', reason: entry.resume?.reason ?? null, document: null, view: null } });
+  if (base.sameAsServed) return listed('same-as-served');
+  if (index >= REMOTE_DRAWER_CAP) return listed('capped');
+  if (!entry.change?.ok) return listed(NO_BLOCK_STATE[entry.change?.state] ?? entry.change?.state ?? 'unreadable');
+  const { documents } = readHeadDocuments({ run, dir: base.dir, ref: entry.sha, label });
+  return {
+    ...base, state: 'read', documents,
+    resume: remoteResume({ doc: readResumeAt({ run, commit: entry.sha, issue, label }), label }),
+  };
+}
+
+/** `snapshot.remoteChanges`'s grammar entries of this issue, as blocks (never touching the served change). */
+function readRemoteBlocks({ run, snapshot, issue, head }) {
+  const section = snapshot?.remoteChanges;
+  const mine = section?.ok ? section.value.branches.filter((e) => e.issue === issue) : [];
+  const remote = mine.map((entry, index) => remoteBlock({ run, entry, index, head, issue }));
+  const note = mine.length > REMOTE_DRAWER_CAP ? `showing documents for ${REMOTE_DRAWER_CAP} of ${mine.length} remote branches; the others are listed without documents` : null;
+  return { remote, remoteNote: note };
+}
+
 /**
  * buildChangeView() — the drawer's one composition. Server-side only (D11):
  * the six tabs' IO happens here, the pure shapers just attach `source`.
@@ -423,7 +474,7 @@ function buildRecordsTab({ snapshot, issue }) {
  *
  * @param {{root: string, issue: number, snapshot: object, project?: string|null,
  *   _read?: Function, _run?: Function, _exists?: Function}} opts
- * @returns {{ok:true, value:{issue:number, changeDir:string|null, spec:object, tasks:object, workingMemory:object, reviews:object}} | {ok:false, reason:string}}
+ * @returns {{ok:true, value:{issue:number, changeDir:string|null, spec:object, tasks:object, workingMemory:object, reviews:object, remote:object[], remoteNote:string|null}} | {ok:false, reason:string}}
  */
 export function buildChangeView({ root, issue, snapshot, project = null, _read, _run, _exists } = {}) {
   if (!Number.isInteger(issue) || issue <= 0) return { ok: false, reason: 'issue must be a positive integer' };
@@ -456,6 +507,7 @@ export function buildChangeView({ root, issue, snapshot, project = null, _read, 
       workingMemory: buildWorkingMemoryTab({ resolved, resume }),
       reviews: buildReviewsTab({ snapshot, project, issue }),
       records: buildRecordsTab({ snapshot, issue }),
+      ...readRemoteBlocks({ run, snapshot, issue, head }),
     },
   };
 }

@@ -33,6 +33,7 @@ const TAB_LABELS = { spec: 'Spec', sdd: 'SDD', tasks: 'Tasks', workingMemory: 'W
 // entries render from PR 2 on, with the href a forge/link chip may carry.
 import { sourceLabel, sourceStamp } from './provenance.mjs';
 import { KNOWN_VERDICTS } from './review-timeline.mjs';
+import { resumeWording } from './resume-view.mjs';
 export { sourceLabel };
 
 function entry({ title, detail, source, pending = false, ...rest }) {
@@ -260,6 +261,54 @@ function reviewEntries(rounds, unreadable) {
   return [...read, ...missed];
 }
 
+/** Why a remote block shows no documents (#1201 D37); `null` for a block that does. One sentence per state, so none is mistaken for another. */
+const REMOTE_STATE_WORDING = {
+  capped: 'listed without documents: the drawer reads at most 3 remote branches of an issue',
+  'same-as-served': 'the same commit as the served checkout: its documents are the ones above',
+  'no-change-dir': 'this branch has no change dir for this issue',
+  unreadable: 'the change dir of this branch could not be read',
+  deferred: 'not read yet: this build\'s read budget was spent',
+};
+
+/** One remote block's documents as the rows the SDD tab already draws: same `documentView`, stamp `path @ sha12`, ref `origin/<branch>`. */
+function remoteDocumentEntries(block) {
+  return Object.entries(block.documents).map(([stage, doc]) => {
+    const view = documentView(`${block.sha.slice(0, 12)}-${stage}`, doc);
+    return entry({
+      title: stage,
+      file: doc.path.split('/').pop(),
+      detail: view.state === 'present' || view.state === 'truncated' ? 'present' : view.state,
+      source: { path: `${doc.ref}:${doc.path}` },
+      pending: view.text === null,
+      document: view,
+    });
+  });
+}
+
+/** A remote block ready for the DOM: byline, resume state wording and fields, document rows. The age is the page's to add from `tipAt` (D9: no clock here). */
+function remoteBlockModel(block) {
+  const read = block.state === 'read';
+  return {
+    key: `${block.branch}@${block.sha.slice(0, 12)}`,
+    label: block.label,
+    branch: block.branch,
+    ref: `origin/${block.branch}`,
+    sha12: block.sha.slice(0, 12),
+    byline: `last commit by ${block.author}`,
+    tipAt: block.tipAt,
+    pr: block.pr,
+    state: block.state,
+    sameAsServed: block.sameAsServed,
+    wording: read ? null : REMOTE_STATE_WORDING[block.state] ?? null,
+    documents: read ? remoteDocumentEntries(block) : null,
+    resume: {
+      state: block.resume.state,
+      wording: resumeWording(block.resume),
+      entries: block.resume.view ? workingMemoryEntries(block.resume.view) : null,
+    },
+  };
+}
+
 /**
  * buildDrawerModel(changeView) -> {ok:true, value:{issue, changeDir, tabs}} |
  * {ok:false, reason}
@@ -269,7 +318,7 @@ function reviewEntries(rounds, unreadable) {
 export function buildDrawerModel(changeView) {
   if (!changeView || typeof changeView !== 'object') return { ok: false, reason: 'no change view was given to the drawer' };
   if (changeView.ok !== true) return { ok: false, reason: changeView.reason };
-  const { issue, changeDir, spec, sdd, tasks, workingMemory, reviews, records, documents } = changeView.value;
+  const { issue, changeDir, spec, sdd, tasks, workingMemory, reviews, records, documents, remote = [], remoteNote = null } = changeView.value;
 
   const tabs = [
     spec.ok ? { id: 'spec', label: TAB_LABELS.spec, ok: true, reason: null, source: null, note: spec.note ?? null, entries: specEntries(spec.value), orphans: orphanEntries(spec.orphans) } : failedTab('spec', spec),
@@ -284,5 +333,5 @@ export function buildDrawerModel(changeView) {
     records.ok ? { id: 'records', label: TAB_LABELS.records, ok: true, reason: null, source: null, note: null, entries: recordsEntries(records.value) } : failedTab('records', records),
   ];
 
-  return { ok: true, value: { issue, changeDir, tabs } };
+  return { ok: true, value: { issue, changeDir, tabs, remote: remote.map(remoteBlockModel), remoteNote } };
 }
