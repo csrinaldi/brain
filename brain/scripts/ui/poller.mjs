@@ -26,6 +26,13 @@
 // until every one of them has had its body refreshed at least once (see
 // `pendingBodyRefresh` below; judgment:cold-4).
 //
+// Remotes lane (#1201 D40): beside the forge lane, each tick also runs the
+// injected `fetchRemotes` (one `git fetch origin …`, asynchronous, killed at its
+// timeout). The two lanes settle independently — one failing never skips the
+// other — and `onTick` fires after both, so the recompute sees the new refs.
+// Fetch has exactly two callers: this timer and the explicit `refreshRemotes()`
+// (the POST route); a recompute or a watch event never fetches.
+//
 // A poll failure NEVER empties a section it once filled (R881-9): the fast
 // lane's own failure aborts the whole tick before any cache setter runs, so
 // every previously-cached section keeps its last known value; per-item
@@ -53,6 +60,7 @@ function rowsEqual(a, b) {
  *   interval?: number, enabled?: boolean,
  *   _setTimeout?: Function, _clearTimeout?: Function, _now?: () => Date,
  *   onTick?: (state: object) => void,
+ *   fetchRemotes?: () => Promise<void>,  // throws an Error whose message is the one-line cause
  *   initialError?: string|null,
  * }} opts
  */
@@ -66,6 +74,7 @@ export function createPoller({
   _clearTimeout = clearTimeout,
   _now = () => new Date(),
   onTick = () => {},
+  fetchRemotes = null,
   initialError = null,
 } = {}) {
   // `initialError` (#881, judgment:cold-6): the CALLER already knows, before
@@ -75,7 +84,15 @@ export function createPoller({
   // a time are visible on `state()` immediately, the same shape a real
   // failed tick would leave, so a caller reading `/api/poll/pause`'s
   // response cannot tell the two apart.
-  let paused = !enabled || Boolean(initialError);
+  //
+  // #1201 W3/D40: the remotes lane is NOT the forge's. `userPaused` is the
+  // operator's own pause (`--no-poll`, the Pause button); `forgeHalted` is the
+  // forge being unusable. The reported `paused` is either, but the timer, and
+  // with it the remotes lane, stops only for `userPaused`. A forge-less server
+  // therefore still fetches on its timer; its forge lane just never runs.
+  let userPaused = !enabled;
+  let forgeHalted = Boolean(initialError);
+  const isPaused = () => userPaused || forgeHalted;
   let timer = null;
   let inFlight = null;
   let lastOnceAt = -Infinity;
@@ -99,8 +116,34 @@ export function createPoller({
   // opposite.
   let nextAttemptAt = null;
 
+  // #1201 D30/D40: fetch state lives HERE, never in the snapshot — it reaches the
+  // page through `meta.poller.remotes`, so the section changes only when refs do.
+  let remotes = { lastAttemptAt: null, lastOkAt: null, lastError: null, inFlight: false };
+  let remotesFlight = null;
+  let lastRefreshAt = -Infinity;
+
   function state() {
-    return { paused, lastPolledAt, lastOkAt, lastError, forgeAsOf: { ...forgeAsOf }, intervalMs: interval, nextAttemptAt };
+    return { paused: isPaused(), lastPolledAt, lastOkAt, lastError, forgeAsOf: { ...forgeAsOf }, intervalMs: interval, nextAttemptAt, remotes: { ...remotes } };
+  }
+
+  /** One fetch at a time: a caller that arrives while one runs joins it. Absent `fetchRemotes` is a no-op. */
+  function runRemotes() {
+    if (!fetchRemotes) return Promise.resolve();
+    if (remotesFlight) return remotesFlight;
+    const attemptAt = _now().toISOString();
+    remotes = { ...remotes, lastAttemptAt: attemptAt, inFlight: true };
+    remotesFlight = (async () => {
+      try {
+        await fetchRemotes();
+        remotes = { ...remotes, lastOkAt: attemptAt, lastError: null };
+      } catch (err) {
+        remotes = { ...remotes, lastError: err?.message ?? String(err) };
+      } finally {
+        remotes = { ...remotes, inFlight: false };
+        remotesFlight = null;
+      }
+    })();
+    return remotesFlight;
   }
 
   function pickReviewTargets(prNumbers) {
@@ -165,7 +208,7 @@ export function createPoller({
     return [...newNumbers, ...changed, ...rest];
   }
 
-  async function tick() {
+  async function forgeLane() {
     tickCount += 1;
     const attemptAt = _now();
     try {
@@ -213,7 +256,30 @@ export function createPoller({
     }
   }
 
+  // True from `runTick()` until its forge lane settles. The remotes lane's
+  // completion hook reads it: a fetch that ends INSIDE the tick is covered by the
+  // tick's own `onTick`; one that ends after it must notify on its own.
+  let tickRunning = false;
+
+  /**
+   * The lanes are independent in time as well as in failure (D40). Only the forge
+   * lane is awaited: the fetch can take up to its 20 s timeout and must never hold
+   * back the reschedule. It runs fire-and-forget under its own single flight, and
+   * `runRemotes()` never rejects, so no promise is left unhandled.
+   */
+  async function tick() {
+    if (fetchRemotes && !remotesFlight) {
+      runRemotes().then(() => { if (!tickRunning && !closed) onTick(state()); });
+    } else {
+      runRemotes(); // joins the flight in progress (or is the no-op); starts nothing
+    }
+    if (!forgeHalted) await forgeLane();
+  }
+
   let closed = false;
+
+  /** The timer runs unless the USER paused; a halted forge alone keeps it only when there is a remotes lane to feed. */
+  function tickWanted() { return !userPaused && (!forgeHalted || fetchRemotes !== null); }
 
   function scheduleNext() {
     // `closed` matters here, not just in `close()` itself: a tick already
@@ -222,14 +288,16 @@ export function createPoller({
     // would arm a brand-new real timer AFTER the server believes it has shut
     // down, leaking a handle that keeps the process alive (measured: a
     // `node --test` run that passes every assertion but never exits).
-    if (closed || paused || interval <= 0) { nextAttemptAt = null; return; }
+    if (closed || !tickWanted() || interval <= 0) { nextAttemptAt = null; return; }
     nextAttemptAt = new Date(_now().getTime() + interval).toISOString();
     timer = _setTimeout(runTick, interval);
   }
 
   function runTick() {
     timer = null;
+    tickRunning = true;
     inFlight = tick().finally(() => {
+      tickRunning = false;
       inFlight = null;
       onTick(state());
       scheduleNext();
@@ -238,13 +306,13 @@ export function createPoller({
   }
 
   return {
-    start() { return paused ? undefined : runTick(); },
+    start() { return tickWanted() ? runTick() : undefined; },
     // The countdown goes with the timer, as it does in `pause()`: after
     // `close()` no tick will ever fire, so a surviving `nextAttemptAt` would
     // report a poll that is never coming (#1015 cold review).
     close() { closed = true; if (timer) { _clearTimeout(timer); timer = null; } nextAttemptAt = null; },
     pause() {
-      paused = true;
+      userPaused = true;
       if (timer) { _clearTimeout(timer); timer = null; }
       nextAttemptAt = null;
       return state();
@@ -255,7 +323,7 @@ export function createPoller({
       // as distinct controls). `start()` polls immediately because a
       // process that has NEVER polled needs data as soon as possible; a
       // paused-then-resumed poller already has whatever it last held.
-      if (paused) { paused = false; scheduleNext(); }
+      if (isPaused()) { userPaused = false; forgeHalted = false; scheduleNext(); }
       return state();
     },
     async once() {
@@ -265,6 +333,16 @@ export function createPoller({
       lastOnceAt = nowMs;
       if (timer) { _clearTimeout(timer); timer = null; }
       await runTick();
+      return state();
+    },
+    /** The explicit fetch (POST /api/remotes/refresh): allowed while paused, collapsed like `once`, single flight. */
+    async refreshRemotes() {
+      if (remotesFlight) { await remotesFlight; return state(); }
+      const nowMs = _now().getTime();
+      if (nowMs - lastRefreshAt < ONCE_COLLAPSE_MS) return state();
+      lastRefreshAt = nowMs;
+      await runRemotes();
+      onTick(state());
       return state();
     },
     state,

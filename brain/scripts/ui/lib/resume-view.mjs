@@ -17,13 +17,13 @@
 const FIELDS = ['next_action', 'current_slice', 'blockers'];
 
 /**
- * shapeResumeView({frontmatter, branch}) -> {next_action, current_slice, blockers}
+ * shapeResumeView({frontmatter, branch, path}) -> {next_action, current_slice, blockers}
  * — each a drawer field `{ok:true, value, source} | {ok:false, reason, source?}`.
  *
- * @param {{frontmatter: Record<string, unknown>|null, branch: string}} input
+ * @param {{frontmatter: Record<string, unknown>|null, branch: string, path?: string}} input
  */
-export function shapeResumeView({ frontmatter, branch } = {}) {
-  const source = { path: `${branch}:resume.md` };
+export function shapeResumeView({ frontmatter, branch, path = 'resume.md' } = {}) {
+  const source = { path: `${branch}:${path}` };
   const out = {};
   for (const key of FIELDS) {
     const value = frontmatter?.[key];
@@ -32,4 +32,22 @@ export function shapeResumeView({ frontmatter, branch } = {}) {
       : { ok: true, value, source };
   }
   return out;
+}
+
+/**
+ * The words a reader sees for a resume that is not shown (#1201 R1201-8). Four
+ * states, four sentences: collapsing any two would make "no resume exists" read
+ * the same as "one exists and could not be read". `null` for a resume that is
+ * present. One source for the lane card and the drawer block.
+ *
+ * @param {{state: string, reason?: string|null}|null} resume
+ */
+export function resumeWording(resume) {
+  if (!resume) return null;
+  const why = resume.reason ? `: ${resume.reason}` : '';
+  if (resume.state === 'missing') return 'no resume was found for this branch';
+  if (resume.state === 'unreadable') return `resume.md could not be read${why}`;
+  if (resume.state === 'invalid') return `resume.md is not valid${why}`;
+  if (resume.state === 'deferred') return 'resume.md not read yet: this build\'s read budget was spent';
+  return null;
 }

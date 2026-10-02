@@ -10,18 +10,19 @@ import assert from 'node:assert/strict';
 import { shapeResumeView } from './resume-view.mjs';
 
 const BRANCH = 'feat/issue-881-slice-3-lib';
+const PATH = 'openspec/changes/issue-881-slice-3-lib/resume.md';
 
-test('#881: a complete frontmatter object shapes all three fields, each sourced to <branch>:resume.md', () => {
+test('#881: a complete frontmatter object shapes all three fields, each sourced to <branch>:<change dir>/resume.md', () => {
   const frontmatter = { next_action: 'ship PR 3', current_slice: 3, blockers: [] };
-  const result = shapeResumeView({ frontmatter, branch: BRANCH });
-  assert.deepEqual(result.next_action, { ok: true, value: 'ship PR 3', source: { path: `${BRANCH}:resume.md` } });
-  assert.deepEqual(result.current_slice, { ok: true, value: 3, source: { path: `${BRANCH}:resume.md` } });
-  assert.deepEqual(result.blockers, { ok: true, value: [], source: { path: `${BRANCH}:resume.md` } });
+  const result = shapeResumeView({ frontmatter, branch: BRANCH, path: PATH });
+  assert.deepEqual(result.next_action, { ok: true, value: 'ship PR 3', source: { path: `${BRANCH}:${PATH}` } });
+  assert.deepEqual(result.current_slice, { ok: true, value: 3, source: { path: `${BRANCH}:${PATH}` } });
+  assert.deepEqual(result.blockers, { ok: true, value: [], source: { path: `${BRANCH}:${PATH}` } });
 });
 
 test('#881: a missing field renders {ok:false, reason} beside the fields that ARE present', () => {
   const frontmatter = { current_slice: 3, blockers: [] }; // next_action missing
-  const result = shapeResumeView({ frontmatter, branch: BRANCH });
+  const result = shapeResumeView({ frontmatter, branch: BRANCH, path: PATH });
   assert.equal(result.next_action.ok, false);
   assert.equal(result.next_action.reason, `resume.md on ${BRANCH} has no next_action`);
   assert.equal(result.current_slice.ok, true);
@@ -30,14 +31,14 @@ test('#881: a missing field renders {ok:false, reason} beside the fields that AR
 
 test('#881: an empty blockers array is a value, not absence — zero blockers renders ok:true', () => {
   const frontmatter = { next_action: 'x', current_slice: 1, blockers: [] };
-  const result = shapeResumeView({ frontmatter, branch: BRANCH });
+  const result = shapeResumeView({ frontmatter, branch: BRANCH, path: PATH });
   assert.equal(result.blockers.ok, true);
   assert.deepEqual(result.blockers.value, []);
 });
 
 test('#881: validateResume is not used as a gate — two missing fields still shape the one field that is present', () => {
   const frontmatter = { blockers: ['#882'] };
-  const result = shapeResumeView({ frontmatter, branch: BRANCH });
+  const result = shapeResumeView({ frontmatter, branch: BRANCH, path: PATH });
   assert.equal(result.next_action.ok, false);
   assert.equal(result.current_slice.ok, false);
   assert.equal(result.blockers.ok, true);

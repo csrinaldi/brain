@@ -45,7 +45,7 @@ async function boot({ proposal = XSS, resume = '---\nnext_action: go\n---\n\nres
     async issueView() { return { body: ISSUES[0].body, assignees: [] }; },
   };
   const snapshot = await buildSnapshot({ root, project: 'csrinaldi/brain', vcs, now: '2026-09-19T12:00:00.000Z', _run: () => { throw new Error('no git'); } });
-  const run = fakeGit({ files, head: HEAD, branches: { [BRANCH]: { commit: TIP, files: resume === null ? {} : { 'resume.md': resume } } } });
+  const run = fakeGit({ files, head: HEAD, branches: { [BRANCH]: { commit: TIP, files: { [`${DIR}/proposal.md`]: proposal, ...(resume === null ? {} : { [`${DIR}/resume.md`]: resume }) } } } });
   snapshot.prs = { ok: true, value: [{ number: 5, title: 'x', headBranch: BRANCH, issue: ISSUE }] };
   const changes = { [ISSUE]: buildChangeView({ root, issue: ISSUE, snapshot, _run: run }) };
   const dom = installDom({ mountIds: MOUNT_IDS, snapshot, changes, ...(worker === undefined ? {} : { worker }) });

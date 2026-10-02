@@ -11,6 +11,7 @@
 //     modes     {path: '120000'} — override a path's tree mode
 //     trees     [path] — paths that are trees, not blobs
 //     sizes     {path: n} — the size ls-tree reports, without allocating n bytes
+//     (ls-tree -z <ref> -- <dir>/ lists a directory's immediate children, #1201)
 //     fail      {subcommand | 'subcommand:path': message} or (args) => message|Error|null
 //
 // `run.calls` is every argv in order; `run.opts` the matching third arguments.
@@ -55,6 +56,21 @@ export function fakeGit({ files = {}, head = HEAD_DEFAULT, branches = {}, blame,
     if (failure) throw failure;
 
     if (sub === 'rev-parse' && rest[0] === '--verify') return `${refOf(rest[1].replace(/\^\{commit\}$/, '')).commit}\n`;
+
+    // `ls-tree -z <ref> -- <dir>/`: the IMMEDIATE children of a directory, files as blobs, deeper paths as one tree.
+    if (sub === 'ls-tree' && rest[0] === '-z') {
+      const ref = refOf(rest[1]);
+      const dir = rest[rest.indexOf('--') + 1].replace(/\/$/, '');
+      const seen = new Map();
+      for (const [p, text] of Object.entries(ref.files)) {
+        if (!p.startsWith(`${dir}/`)) continue;
+        const tail = p.slice(dir.length + 1);
+        const slash = tail.indexOf('/');
+        const child = `${dir}/${slash === -1 ? tail : tail.slice(0, slash)}`;
+        seen.set(child, slash === -1 ? `${modes[p] ?? '100644'} blob ${blobId(p, text)}` : `040000 tree ${blobId(child, '')}`);
+      }
+      return [...seen].map(([child, head]) => `${head}\t${child}\0`).join('');
+    }
 
     if (sub === 'ls-tree' && rest[0] === '-l' && rest[1] === '-z') {
       const ref = refOf(rest[2]);

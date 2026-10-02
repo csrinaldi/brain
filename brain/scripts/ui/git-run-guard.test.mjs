@@ -29,7 +29,8 @@ const codeOnly = (text) => text.split('\n').map((line) => line.replace(/(^|[^:])
 export function gitRunViolations(rel, text) {
   const bad = [];
   const code = codeOnly(text);
-  if (rel !== HELPER && /['"](?:node:)?child_process['"]/.test(code)) bad.push(`${rel}: imports child_process, only ${HELPER} may`);
+  // test-support/ builds REAL git topologies (#1201 git-remote-fixture): it is test plumbing, never a runner the server uses.
+  if (rel !== HELPER && !rel.startsWith('test-support/') && /['"](?:node:)?child_process['"]/.test(code)) bad.push(`${rel}: imports child_process, only ${HELPER} may`);
   for (const m of code.matchAll(/\bstdio\s*:\s*\[([^\]]*)\]/g)) {
     const stderr = m[1].split(',')[2]?.trim().replace(/['"]/g, '');
     if (stderr === 'ignore') bad.push(`${rel}: a stdio array ignores stderr`);
