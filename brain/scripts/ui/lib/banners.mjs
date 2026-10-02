@@ -64,8 +64,17 @@ export function controlBanner({ action, reason }) {
 export function failedSections(snapshot) {
   if (!snapshot || typeof snapshot !== 'object') return [];
   return Object.entries(snapshot)
-    .filter(([, section]) => section && typeof section === 'object' && section.ok === false)
+    // A section that is still loading (`pending: true`, #1257 D65) is not a failure.
+    .filter(([, section]) => section && typeof section === 'object' && section.ok === false && section.pending !== true)
     .map(([name, section]) => ({ name, reason: section.reason }));
+}
+
+/** The sections still waiting on a forge read, by name, in snapshot order. */
+function loadingSections(snapshot) {
+  if (!snapshot || typeof snapshot !== 'object') return [];
+  return Object.entries(snapshot)
+    .filter(([, section]) => section && typeof section === 'object' && section.ok === false && section.pending === true)
+    .map(([name]) => name);
 }
 
 /**
@@ -87,6 +96,8 @@ export function degradationBands({ stream, controls, meta, snapshot }) {
   if (meta?.poller?.lastError) bands.push({ id: 'poller', text: pollBanner(meta.poller) });
   const rm = meta?.poller?.remotes;
   if (rm && (rm.lastError || (!rm.lastOkAt && !rm.lastAttemptAt && !rm.inFlight))) bands.push({ id: 'remotes', text: remotesBanner(meta.poller.remotes) });
+  const loading = loadingSections(snapshot);
+  if (loading.length > 0) bands.push({ id: 'loading', text: `still loading from the forge: ${loading.join(', ')}` });
   const failed = failedSections(snapshot);
   if (failed.length > 0) {
     bands.push({

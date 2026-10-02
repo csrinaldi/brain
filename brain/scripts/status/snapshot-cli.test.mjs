@@ -45,7 +45,7 @@ test('#879: text mode prints every section with its count or its reason, and exi
 });
 
 test('#879: arguments — --json, --now needs an ISO date, unknown flags are refused with exit 2', async () => {
-  assert.deepEqual(parseArgs(['--json']), { ok: true, json: true, now: undefined, root: undefined });
+  assert.deepEqual(parseArgs(['--json']), { ok: true, json: true, now: undefined, root: undefined, noClosed: false });
   assert.equal(parseArgs(['--now', 'yesterday']).ok, false);
   assert.equal(parseArgs(['--bogus']).ok, false);
   assert.equal(await main(['--bogus'], { say: () => {} }), 2);
@@ -87,4 +87,65 @@ test('#1201 R1201-1: the snapshot never fetches and never touches the forge for 
   assert.ok(!run.calls.some((a) => ['fetch', 'pull', 'ls-remote', 'remote'].includes(a[0])), JSON.stringify(run.calls.map((a) => a[0])));
   assert.ok(forgeCalls.every((n) => ['issueList', 'issueView', 'mrList', 'prReviews'].includes(n)), forgeCalls.join());
   assert.equal(snapshot.remoteChanges.value.prsApplied.ok, false, 'the PR list failed: said, not hidden');
+});
+
+// ── #1257 R1257-7/8: the closed read, `--no-closed`, and a deterministic forgeLoad ──
+
+function listFake(calls = []) {
+  return {
+    issueList: async ({ state }) => {
+      calls.push(state);
+      return state === 'closed'
+        ? [{ number: 3, title: 'c3', labels: [], assignees: [], state: 'closed', body: '' }]
+        : [{ number: 5, title: 'five', labels: [], assignees: [], state: 'open', body: '' }];
+    },
+    issueView: async () => { throw new Error('issueView must not be called'); },
+    mrList: async () => [],
+    prReviews: async () => [],
+  };
+}
+
+test('#1257 R1257-7: --no-closed parses and is the only difference in what the verb asks the forge', () => {
+  assert.equal(parseArgs(['--no-closed']).noClosed, true);
+  assert.equal(parseArgs([]).noClosed, false);
+});
+
+test('#1257 R1257-7: --no-closed disables the closed read', async () => {
+  const root = makeFixture();
+  const calls = [];
+  const lines = [];
+  const code = await main(['--json', '--no-closed', '--now', NOW, '--root', root], { say: (s) => lines.push(s), vcs: listFake(calls), project: 'o/r' });
+  assert.equal(code, 0);
+  assert.deepEqual(calls, ['open'], 'the closed list was never asked for');
+  const out = JSON.parse(lines.join('\n'));
+  assert.deepEqual(out.forgeLoad.value.closed, { state: 'disabled', at: null, reason: '--no-closed was given' });
+  assert.deepEqual(out.closedIssues, { ok: false, reason: '--no-closed was given' });
+});
+
+test('#1257 R1257-8: without the flag the CLI reads closed issues, and --json is byte-identical for a fixed --now', async () => {
+  const root = makeFixture();
+  const run = async () => {
+    const lines = [];
+    const calls = [];
+    await main(['--json', '--now', '2026-10-02T12:00:00.000Z', '--root', root], { say: (s) => lines.push(s), vcs: listFake(calls), project: 'o/r' });
+    return { out: lines.join('\n'), calls };
+  };
+  const a = await run();
+  const b = await run();
+  assert.equal(a.out, b.out);
+  assert.deepEqual(a.calls, ['open', 'closed']);
+  const parsed = JSON.parse(a.out);
+  assert.deepEqual(parsed.forgeLoad.value, { open: { state: 'complete', at: '2026-10-02T12:00:00.000Z' }, closed: { state: 'complete', at: '2026-10-02T12:00:00.000Z' } });
+});
+
+test('#1257: text mode prints a forge load line and a closed issues line', async () => {
+  const root = makeFixture();
+  const lines = [];
+  await main(['--now', NOW, '--root', root], { say: (s) => lines.push(s), vcs: listFake(), project: 'o/r' });
+  const out = lines.join('\n');
+  assert.match(out, /^forge load\s+open complete, closed complete$/m);
+  assert.match(out, /^closed issues\s+1 node\(s\), 0 unresolved$/m);
+  const off = [];
+  await main(['--no-closed', '--now', NOW, '--root', root], { say: (s) => off.push(s), vcs: listFake(), project: 'o/r' });
+  assert.match(off.join('\n'), /^closed issues\s+not computed — --no-closed was given$/m);
 });

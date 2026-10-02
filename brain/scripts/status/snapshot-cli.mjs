@@ -10,16 +10,20 @@
 // included: each section says what it could not read. Exit 2 only for an
 // argument this verb does not understand.
 //
-// Usage: npm run brain:snapshot -- [--json] [--now <iso>] [--root <dir>]
+// `--no-closed` skips the full closed-issue read, which is the costliest forge call this
+// verb makes (#1257 D67); `forgeLoad.closed` then says `disabled`.
+//
+// Usage: npm run brain:snapshot -- [--json] [--now <iso>] [--root <dir>] [--no-closed]
 
 import { buildSnapshot, renderSnapshotText } from './snapshot.mjs';
 
 /** @returns {{ok:true,json:boolean,now:string|undefined,root:string|undefined}|{ok:false,error:string}} */
 export function parseArgs(argv = []) {
-  const out = { ok: true, json: false, now: undefined, root: undefined };
+  const out = { ok: true, json: false, now: undefined, root: undefined, noClosed: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--json') out.json = true;
+    else if (a === '--no-closed') out.noClosed = true;
     else if (a === '--now') {
       const v = argv[++i];
       if (!v || Number.isNaN(Date.parse(v))) return { ok: false, error: '--now needs an ISO-8601 timestamp' };
@@ -45,6 +49,7 @@ export async function main(argv = [], deps = {}) {
     now: parsed.now,
     vcs: deps.vcs ?? null,
     project: deps.project ?? null,
+    closed: !parsed.noClosed,
   });
   say(parsed.json ? JSON.stringify(snapshot, null, 2) : renderSnapshotText(snapshot));
   return 0;
