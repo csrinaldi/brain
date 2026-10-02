@@ -1,6 +1,6 @@
 # ADR-0040 — Who defines the project: an owned team config, a `~/.brain` user layer, and locked axes
 
-> **status:** proposed — rulings recorded from #1263 (maintainer, 2026-10-02), open questions pending, pending human promotion | **date:** 2026-10-02 | **owner:** @crinaldi
+> **status:** proposed — rulings recorded from #1263 (maintainer, 2026-10-02), open points ratified 2026-10-02, pending human promotion | **date:** 2026-10-02 | **owner:** @crinaldi
 > **relates to:** ADR-0004 Amendment 3 (memory selector in tracked config), ADR-0020 (the `reviewActors`/`approvalActors` two-key split), ADR-0026 (tiers; Amendment 8, additive migration), ADR-0036 (fresh-consumer cost bar), ADR-0037 (the producer never approves or merges), ADR-0038 (one config shape per axis); maintainer rulings on #1263, 2026-10-02; #1114 (S3.3, S2)
 
 > **Tier 2 draft.** `brain/project/decisions/**` is human-promoted (`agent-authorities.md` Tier 2).
@@ -66,11 +66,19 @@ something else. Nothing applies to the person across all their repositories.
 
 | Layer | File | Tracked | Scope | Holds |
 |---|---|---|---|---|
-| **Team** | `brain.config.json` | yes | the repository, every clone, CI | what must be the same for everyone, and what CI reads: `governance`, `vcs`, the team's memory backend, the SDD pipeline and `sdd.roles`, the providers the team allows, and per-axis `locked` |
-| **User** | `~/.brain/config.json` | no | one person on one machine, every repository | the person's orchestrator, the runtimes they have installed and their versions |
+| **Team** | `brain.config.json` | yes | the repository, every clone, CI | what must be the same for everyone, and what CI reads: `governance`, `vcs`, the team's memory backend, the SDD pipeline and `sdd.roles`, the providers the team allows, per-axis `locked`, and a declared `default` for every axis |
+| **User** | `<BRAIN_HOME>/config.json` | no | one person on one machine, every repository | the person's orchestrator, the runtimes they have installed and their versions |
 
 The user layer uses the ADR-0038 shape: `<axis>.default` and `<axis>.providers.<name>`. It holds
 no `governance` and no `vcs`.
+
+**Where the user layer lives** (Ratified points 1 and 2). The directory is `BRAIN_HOME` when that
+variable is set, otherwise `<os.homedir()>/.brain`, on every operating system. `~/.brain` in this
+ADR means that directory. XDG support (`XDG_CONFIG_HOME`) is deferred.
+
+**`BRAIN_HOME` is required in tests.** Every test, and the hermetic box, sets `BRAIN_HOME`, so no
+test ever reads a developer's real home. A guard test enforces it: a test that reaches the user
+layer without `BRAIN_HOME` set fails.
 
 ### 2. Precedence for an overridable axis
 
@@ -82,28 +90,38 @@ process env  >  .env  >  ~/.brain/config.json  >  brain.config.json  >  undeclar
 - **Every value is checked against that union.** A value from any level that is not a key of the
   union is refused, never coerced (ADR-0038 §2). The capability rules of ADR-0038 §5 apply
   unchanged: `platform.default` must still name a provider that declares `orchestrate`.
+- **`version` when both layers list a provider** (Ratified point 7). On that machine the user
+  layer's `version` wins, because it is what is installed there. The team's `version` stays the
+  expectation, and `diagnoseAxes` reports a difference between the two as a mismatch.
+- **The team layer alone is complete.** The foundation declares a team `default` for every axis
+  (Ratified point 3). CI has no `~/.brain` and always resolves from the team config; the user
+  layer only overrides, on a free axis.
 - An axis no level declares still refuses (ADR-0038 §3).
 
 ### 3. `locked`
 
-`<axis>.locked: true` in the team config forbids a user-level (`~/.brain`) or `.env` override of
-that axis. It is a key of the team layer only.
+`<axis>.locked: true` in the team config forbids every override of that axis: the user layer,
+`.env` **and the process env** (Ratified point 5). A different memory backend, even for one run,
+corrupts the shared memory, so a per-run override is not harmless. `locked` is a key of the team
+layer only.
 
-| Axis | Proposed default | Why |
+| Axis | Default for a NEW adoption | Why |
 |---|---|---|
 | `memory` | locked | the team's records hydrate into one backend; two backends in one team split the index |
 | `sdd` | locked | the pipeline and its roles are the team's process |
 | `platform` | free | the orchestrator is the person's tool |
-| `vcs` | never overridable | the provider is where the repository lives (ADR-0038 §2); it has no `.env` level, and the user layer does not add one |
+| `vcs` | never overridable from `.env` or the user layer | the provider is where the repository lives (ADR-0038 §2); it has no `.env` level, and the user layer does not add one |
 
-The defaults above are proposed for the scaffold; the maintainer's ruling names them as proposed
-defaults, not as a migration of existing consumers (open question 6).
+**Existing consumers are not locked by a migration** (Ratified point 6). The migration writes
+`locked: false` on every axis, so nothing they run changes (ADR-0038 §7). An owner turns `locked`
+on deliberately, by a team-config PR. This also keeps the `SDD_ENGINE` and `MEMORY_BACKEND` lines
+that released versions wrote into `.env` valid until that owner decides.
 
 ### 4. Three moments
 
 | Moment | When | Who writes the team config |
 |---|---|---|
-| **Foundation** | the repository has no `brain.config.json` | `brain init` + `env:init`, and only then. The adoption commit is the founding decision, signed by whoever adopts. |
+| **Foundation** | the repository has no `brain.config.json` | `brain init` + `env:init`, and only then. It declares a `default` for every axis, the new-adoption `locked` defaults, and the owner. The adoption commit is the founding decision, signed by whoever adopts. |
 | **Daily use** | `brain.config.json` exists | **nobody.** `env:init` writes the user layer only. For a team axis the config does not declare, it refuses with a named fix: ask an owner, or propose it with `npm run brain:config -- set <axis>.default <name>` in a PR. This corrects #1114 S3.3. |
 | **Change** | any later edit of the team config | a PR, approved by a project owner (section 5) |
 
@@ -113,17 +131,21 @@ defaults, not as a migration of existing consumers (open question 6).
   ADR-0020's two-key split rather than adding a third identity list. `approvalActors` already
   means "the identities trusted to approve on the team's behalf"; it now also owns the team config.
   The reviewer handle stays out of it, as ADR-0020 requires.
+- **It is a list, so a project may have several owners** (Ratified point 4).
 - **Adoption seeds it** with the adopter's `brain.actor`.
-- **Changing owners is a team-config change.** It goes through section 4's change moment, and an
-  existing owner approves it.
+- **Changing owners is a team-config change.** Removing an owner is a PR approved by another owner.
+- **A sole owner approving their own team-config change** is valid only at `lite` in autonomy mode
+  A: ADR-0037's solo-maintainer exception, reported as such, never as independent.
+- **Existing consumers are not auto-seeded.** Seeding from the machine that runs `brain:upgrade`
+  would repeat the defect this ADR corrects. `diagnoseAxes` reports "no owner declared" until an
+  owner is added by PR.
 
 ### 6. Enforcement
 
-- **CODEOWNERS.** The `.github/CODEOWNERS` brain ships covers `brain.config.json`, owned by the
-  project owners.
-- **A gate.** A governance job in the style of `brain-writes-reviewed` requires an approval from an
-  identity in `governance.approvalActors` on any PR that touches `brain.config.json`. It follows
-  the tier ladder:
+- **One source of truth: `governance.approvalActors`** (Ratified point 8).
+- **The gate is the enforcement.** A governance job in the style of `brain-writes-reviewed`
+  requires an approval from an identity in `governance.approvalActors` on any PR that touches
+  `brain.config.json`. It follows the tier ladder:
 
   | Tier | Policy |
   |---|---|
@@ -133,6 +155,10 @@ defaults, not as a migration of existing consumers (open question 6).
 
   This differs from `brain-writes-reviewed`, which is required at every tier
   (`vcs/governance-tiers.mjs:211-219`). The job's name and its evidence form are slice 4's.
+- **CODEOWNERS is an optional mirror.** Where a consumer keeps a `.github/CODEOWNERS` line for
+  `brain.config.json`, a drift check verifies it names the same identities as `approvalActors`; it
+  is never a second hand-kept list. GitLab has no identical equivalent, so on GitLab the gate alone
+  enforces.
 
 ### 7. Out of scope
 
@@ -216,7 +242,8 @@ explicitly, so it runs on `codex` on both machines.
 `memory` is locked by the team config, so the user layer may not override it. The refusal names
 the axis, the file the value came from, and the fix: ask an owner in `governance.approvalActors`,
 or propose the change with `npm run brain:config -- set memory.default plainfiles` in a PR. The
-same value in `.env` as `MEMORY_BACKEND=plainfiles` is refused the same way.
+same value in `.env`, or in the process env for one run (`MEMORY_BACKEND=plainfiles npm run …`), is
+refused the same way (section 3).
 
 **Refused: a user default that is not in the union.** Dave's `~/.brain/config.json` is:
 
@@ -255,10 +282,15 @@ Adding `"providers": { "antigravity": {} }` to his user layer makes it valid, as
   on a different runtime per machine. A team that wants one runtime for a stage names its `engine`.
 - **"The providers the team allows" binds only on locked axes.** The union lets a user add a
   provider to a free axis. A team that wants to restrict a free axis has to lock it.
-- **A sole owner cannot approve their own config change on the forge.** At `standard` and
-  `regulated` a one-owner project needs a second identity in `approvalActors`. That is consistent
-  with ADR-0037 (the producer never approves) and with ADR-0036 check 1, because `lite`, the
-  default for new consumers (ADR-0026 Amendment 8), only reports.
+- **A sole owner needs a second owner outside `lite` mode A.** A sole owner's approval of their own
+  team-config change counts only under ADR-0037's solo-maintainer exception (section 5). Anywhere
+  else a one-owner project needs a second identity in `approvalActors`. That is consistent with
+  ADR-0037 (the producer never approves) and with ADR-0036 check 1, because `lite`, the default for
+  new consumers (ADR-0026 Amendment 8), only reports.
+- **A locked axis loses the per-run override.** `MEMORY_BACKEND=… npm run …` stops working on a
+  repository whose owner locks `memory`. That is the point of Ratified point 5, and it reverses
+  ADR-0004 Amendment 3's "a backend named by the process env or `.env` is an operator's statement",
+  for locked axes only.
 - **Every `brain:upgrade` that migrates the config needs an owner's approval** at
   `standard`/`regulated`, since it touches `brain.config.json`.
 - **Seeding has an ordering and a format cost.** `ensureBrainConfig` runs at `bootstrap.sh:81`, and
@@ -270,10 +302,13 @@ Adding `"providers": { "antigravity": {} }` to his user layer makes it valid, as
   already also read by L6 for `override:*` labels, as the same trust grant
   (`vcs/brain-writes-reviewed.mjs:265-289`). The new gate is a third reader in the same direction,
   and ADR-0020's amendment has to state that.
-- **CODEOWNERS is shipped, not generated.** It is a copied managed file with a placeholder owner
-  and `REFUSE` on upgrade. A consumer who filled in their owner does not get the new
-  `brain.config.json` line from `brain:upgrade`; it has to be added by hand or by a new mechanism.
-  Brain ships no GitLab CODEOWNERS today, so the GitLab half of the enforcement is the gate alone.
+- **CODEOWNERS needs a drift check.** Brain ships it as a copied managed file with a placeholder
+  owner and `REFUSE` on upgrade, so `brain:upgrade` does not maintain a consumer's lines. Because it
+  is only a mirror of `approvalActors` (section 6), the cost is a drift check, not a second list to
+  keep. Brain ships no GitLab CODEOWNERS, and GitLab has no identical equivalent, so on GitLab the
+  gate alone enforces.
+- **The guard on `BRAIN_HOME` is one more test-hygiene rule** every new test that reaches the user
+  layer must satisfy.
 
 ### Existing consumers
 
@@ -288,11 +323,11 @@ Adding `"providers": { "antigravity": {} }` to his user layer makes it valid, as
   It is a team value either way; only its author was unrecorded. Nothing is rewritten.
 - **Released `env:init` wrote axis selectors into `.env`:** `SDD_ENGINE` on every run with none set
   (v1.11.0 `bootstrap.sh:522-527`), and `MEMORY_BACKEND` up to the 1.8 line (v1.8.0
-  `bootstrap.sh:371-378`). If `memory` and `sdd` became locked on those consumers, these
-  machine-written lines would be refused overrides. Open question 6.
+  `bootstrap.sh:371-378`). They stay valid: the migration writes `locked: false` on every axis of an
+  existing consumer (section 3), so nothing refuses them until an owner locks the axis.
 - **No existing consumer declares `approvalActors` as the owner list**, this repository included.
-  Seeding it from the machine that runs `brain:upgrade` would repeat the defect this ADR corrects.
-  Open question 4.
+  They are not auto-seeded (section 5); `diagnoseAxes` reports "no owner declared" until an owner is
+  added by PR.
 
 ## Rejected alternatives
 
@@ -323,58 +358,71 @@ governance; changing it without an owner is self-authorization one level up.
   that may run different brain versions. Who migrates it, and what an older brain does with a newer
   file, is not decided here.
 - **How `brain:doctor` reports the layers** belongs to #1130.
-- **GitLab CODEOWNERS** and code-owner approval on GitLab.
+- **XDG support** (`XDG_CONFIG_HOME`) is deferred (Ratified point 2).
+- **A GitLab CODEOWNERS mirror.** GitLab has no identical equivalent; the gate is the enforcement
+  there.
+- **A foundation with no TTY and no memory answer.** Ratified point 3 says the foundation declares
+  every axis; ADR-0004 Amendment 3 says the memory backend is never guessed, and with no TTY
+  `env:init` skips memory setup. The two meet only on a non-interactive adoption. Not ruled here.
 
 ## Implementation (four slices on the #1114 tracker)
 
-1. Read the `~/.brain` layer, merge it with the team layer and apply `locked` in `resolveAxis`
+1. Read the user layer (`BRAIN_HOME`, else `<os.homedir()>/.brain`), with the guard test that
+   every test sets `BRAIN_HOME`; merge it with the team layer and apply `locked` in `resolveAxis`
    (#1114 S2, PR #1259). S2's `resolveAxis` already takes `env`, `dotenv` and `config` as parameters
    and reads no file (`lib/axis-config.mjs:247-257` on `feat/issue-1114-s2-resolve-axis`), so the
    user layer is one more injected input.
 2. `env:init` writes the user layer and never the team config in an existing repository. This
    corrects S3.3.
-3. Adoption seeds `approvalActors`, and the shipped `CODEOWNERS` covers `brain.config.json`.
+3. Adoption seeds `approvalActors`; `diagnoseAxes` reports "no owner declared"; the optional
+   `CODEOWNERS` mirror gets its drift check.
 4. The team-config approval gate, on the tier ladder of section 6.
 
 ## Amendments this requires (none are made here)
 
-- **ADR-0038.** The user layer as a level between `.env` and the team config; the providers union;
-  `locked`; and `env:init` declaring the team config only at foundation (its §7 "a new consumer"
-  bullet).
+- **ADR-0038.** The user layer as a level between `.env` and the team config; the providers union
+  and the user layer's `version` winning on its machine; `locked`, including over the process env;
+  the migration writing `locked: false` for existing consumers; and `env:init` declaring the team
+  config only at foundation, a `default` for every axis (its §7 "a new consumer" bullet).
 - **ADR-0020.** `approvalActors` also owns the team config and is read by the new gate. The reviewer
   handle stays out of it.
 - **ADR-0026.** The new gate's row in the tier table: detection at `lite`, required at `standard`
   and `regulated`.
 - **ADR-0004.** Amendment 3's adoption bullet: the memory prompt declares into tracked config only
-  at foundation; in an existing repository an undeclared backend is refused with the named fix.
+  at foundation; in an existing repository an undeclared backend is refused with the named fix. And
+  its "a backend named by the process env or `.env` is an operator's statement" holds only while
+  `memory` is not locked.
 - **`agent-authorities.md`.** Tier 2 names `.gitlab-ci.yml`, `settings.xml` and `CODEOWNERS` as
   team-wide infrastructure an agent changes only with confirmation; `brain.config.json` belongs in
   that list.
 
-## Open questions for the maintainer
+## Ratified points (maintainer, 2026-10-02)
 
-1. **An override path for `~/.brain`.** Should `BRAIN_HOME` (or another variable) relocate the user
-   layer? Tests must never read a developer's real home, and ADR-0036's fresh-install definition
-   forbids an inherited `HOME`. No such variable exists today; the only home read in `brain/scripts`
-   is `axes/review-engine/adapters/gemini.mjs:21`.
-2. **Windows.** `%USERPROFILE%\.brain`, `%APPDATA%\brain`, or something else? Should Linux honour
-   `XDG_CONFIG_HOME`?
-3. **CI with no `~/.brain`.** CI runs the governance gates, which read `brain.config.json` directly,
-   plus `node --test` and the bootstrap smoke (`.github/workflows/*.yml`). It should resolve from
-   the team config alone. That holds only if every axis CI consults is declared there. Must the
-   team declare a default for every axis, free ones included, so that CI never meets an axis
-   declared only in users' homes?
-4. **Owners.** How are several owners, a leaving owner, and a sole owner authoring their own change
-   at `standard` handled? How does an existing consumer get its first `approvalActors`, given that
-   seeding from the upgrading machine repeats this ADR's defect?
-5. **`locked` and the process env.** Ruling 3 forbids user-level and `.env` overrides. Does a locked
-   axis also refuse a process-env value, or does the per-run override stay, as for `vcs`?
-6. **Locked defaults on existing consumers.** Are `memory` and `sdd` locked only in a new
-   consumer's scaffold, following ADR-0026 Amendment 8, or migrated? And is a `.env` value equal to
-   the team's default an override to refuse, given the `SDD_ENGINE` and `MEMORY_BACKEND` lines
-   released versions wrote?
-7. **`version` when both layers list a provider.** The team's `version` is an expectation
-   (ADR-0038 §6); the user's is what is installed. Which one does the merged entry carry, and is a
-   difference a mismatch to report?
-8. **One owner list or two.** Is the `CODEOWNERS` line for `brain.config.json` generated from
-   `approvalActors`, or kept by hand? Two hand-kept lists drift.
+These eight points were open in the first draft. The maintainer ruled on each one, and the Decision
+above already reflects them.
+
+1. **`BRAIN_HOME`.** The user layer lives at `BRAIN_HOME` when set, otherwise
+   `<os.homedir()>/.brain`. Tests and the hermetic box always set `BRAIN_HOME`, so a test never
+   reads a developer's real home. This is required, and a guard test enforces it (section 1). No
+   such variable existed before; the only home read in `brain/scripts` was
+   `axes/review-engine/adapters/gemini.mjs:21`.
+2. **Paths.** `BRAIN_HOME`, otherwise `os.homedir()/.brain`, on every operating system, Windows
+   included. XDG support is deferred.
+3. **CI and the team layer.** The foundation declares a team `default` for every axis. The user
+   layer overrides only free axes. CI has no `~/.brain` and always resolves from the team config.
+4. **Owners.** `approvalActors` is a list, so there may be several owners. Removing an owner is a PR
+   approved by another owner. A sole owner approving their own team-config change is valid only at
+   `lite` in mode A, ADR-0037's solo-maintainer exception. Existing consumers are not auto-seeded;
+   `diagnoseAxes` reports "no owner declared".
+5. **`locked` and the process env.** `locked` refuses a process-env value too. A different memory
+   backend, even for one run, corrupts the shared memory.
+6. **Locked defaults.** `memory` and `sdd` locked is the default for new adoptions. For existing
+   consumers the migration writes `locked: false` on every axis: no behaviour change, per ADR-0038
+   §7. The owner turns it on deliberately. This also keeps valid the `.env` `SDD_ENGINE` and
+   `MEMORY_BACKEND` lines released versions wrote.
+7. **Which `version` wins.** When both layers list a provider, the user layer's `version` wins on
+   that machine, because it is what is installed there. The team's is the expectation, and
+   `diagnoseAxes` reports any mismatch.
+8. **CODEOWNERS.** One source of truth, `governance.approvalActors`; the approval gate is the
+   enforcement. CODEOWNERS is an optional mirror, verified by a drift check, never a second
+   hand-kept list. GitLab has no identical equivalent.
