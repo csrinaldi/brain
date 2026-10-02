@@ -50,6 +50,7 @@ function applyTheme(choice) {
 import { buildLaneModel, nodeSummaryFor, childrenOf } from './lib/lane-model.mjs';
 import { issueUrl } from './lib/forge-url.mjs';
 import { buildDrawerModel } from './lib/drawer-model.mjs';
+import { remoteBadges, remotePanel, tipAge } from './lib/remote-model.mjs';
 import { renderOffThread, timeoutNotice, FAILED_NOTICE, UNAVAILABLE_NOTICE } from './lib/render-budget.mjs';
 import { buildSddModel, sddForIssue, buildSlicePlan, STAGE_VOCAB } from './lib/sdd-model.mjs';
 import { searchNodes } from './lib/search-model.mjs';
@@ -113,6 +114,8 @@ let activeTab = 'spec';
  * default), so this page never has to decide that on its own.
  */
 let collapsedTracks = new Set(['?']);
+/** Whether the "Remote work" panel's unjoined group is open (#1201 R1201-5). Page-only, like `collapsedTracks`; collapsed by default. */
+let remoteUnjoinedOpen = false;
 /** The `?` holding lane's current page (#998 R998-3), 24 rows at a time. */
 let holdingPage = 0;
 /**
@@ -552,6 +555,9 @@ function renderStatus() {
   once.addEventListener('click', () => postPoll('once'));
   mounts.status.appendChild(toggle);
   mounts.status.appendChild(once);
+  const refresh = el('button', 'remotes-refresh', state.meta?.poller?.remotes?.inFlight ? 'fetching remotes\u2026' : 'refresh remotes');
+  refresh.addEventListener('click', () => postRemotesRefresh());
+  mounts.status.appendChild(refresh);
 }
 
 /**
@@ -599,6 +605,7 @@ function renderLanes() {
     if (shown.nodes.length > 0) mounts.canvas.appendChild(renderLaneRow({ ...shown, count: shown.nodes.length }));
   }
   mounts.canvas.appendChild(renderHoldingLane(holding));
+  mounts.canvas.appendChild(renderRemotePanel());
 
   // A cross-lane edge is never a line (R998-3: lanes have no shared
   // coordinate space to draw one across) — it is said, like every other
@@ -801,6 +808,60 @@ function renderNodeSdd(issue) {
   return strip;
 }
 
+/**
+ * A ticket's remote work (#1201 D42): at most two lines, each naming the branch,
+ * the PR when there is one, the tip author and the age, plus the resume state in
+ * its own words when it is not present. A branch and its open PR are one line.
+ */
+function renderNodeRemote(issue) {
+  const badges = remoteBadges(sectionOf(state, 'remoteChanges'), issue, nowMs());
+  const wrap = el('div', 'node-remote');
+  for (const line of badges.lines) {
+    wrap.appendChild(el('p', 'node-remote-line', line.text));
+    if (line.resume) wrap.appendChild(el('p', 'node-remote-resume', line.resume));
+  }
+  if (badges.more) wrap.appendChild(el('p', 'node-remote-more', badges.more));
+  return wrap;
+}
+
+/**
+ * The "Remote work" panel (#1201 D42): teammates' branches whose ticket is not on
+ * the board, and the unjoined branches in one group that starts collapsed and
+ * shows its count. Hidden branches (lane, merged, base) are in no list and no count.
+ */
+function renderRemotePanel() {
+  const graph = sectionOf(state, 'graph');
+  const model = remotePanel(sectionOf(state, 'remoteChanges'), graph.ok ? graph.value.nodes.map((n) => n.number) : [], nowMs());
+  const wrap = el('section', 'remote-panel');
+  wrap.appendChild(el('h3', 'remote-panel-title', 'Remote work'));
+  if (!model.ok) {
+    wrap.appendChild(said(model.reason));
+    return wrap;
+  }
+  const { remoteWork, unjoined, deferredNote } = model.value;
+  if (remoteWork.count === 0) wrap.appendChild(said('no remote branch belongs to a ticket outside the board'));
+  const list = el('ul', 'remote-work-list');
+  for (const row of remoteWork.rows) {
+    const item = el('li', 'remote-work-row', row.text);
+    item.appendChild(el('span', 'remote-work-reason', row.reason));
+    if (row.resume) item.appendChild(el('span', 'node-remote-resume', row.resume));
+    list.appendChild(item);
+  }
+  wrap.appendChild(list);
+  if (deferredNote) wrap.appendChild(said(deferredNote));
+
+  const toggle = el('button', 'remote-unjoined-toggle', unjoined.header);
+  toggle.setAttribute('aria-expanded', String(remoteUnjoinedOpen));
+  toggle.addEventListener('click', () => { remoteUnjoinedOpen = !remoteUnjoinedOpen; render(); });
+  wrap.appendChild(toggle);
+  if (remoteUnjoinedOpen) {
+    const rows = el('ul', 'remote-unjoined-list');
+    for (const row of unjoined.rows) rows.appendChild(el('li', 'remote-unjoined-row', row.text));
+    wrap.appendChild(rows);
+  }
+  return wrap;
+}
+
 function renderLaneCards(lane) {
   const grid = el('div', 'lane-grid');
   for (const node of lane.nodes) grid.appendChild(renderNodeCard(node));
@@ -828,6 +889,7 @@ function renderNodeCard(node) {
   }
   for (const mark of node.marks) card.appendChild(said(mark));
   card.appendChild(renderNodeSdd(node.number));
+  card.appendChild(renderNodeRemote(node.number));
 
   card.addEventListener('click', () => selectNode(node.number));
   card.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') selectNode(node.number); });
@@ -1637,6 +1699,33 @@ function renderDrawer() {
   }
   mounts.drawer.appendChild(tabs);
   mounts.drawer.appendChild(renderTab(model.value.tabs.find((t) => t.id === activeTab) ?? model.value.tabs[0]));
+  mounts.drawer.appendChild(renderRemoteBlocks(model.value));
+}
+
+/**
+ * A teammate's branch of the selected ticket, BELOW the served change (#1201 D37):
+ * the byline, the resume in its own words, and the documents as the same rows the
+ * SDD tab draws. Names, branches and reasons are set as text, never as markup.
+ */
+function renderRemoteBlock(block) {
+  const card = el('div', 'remote-block');
+  card.appendChild(el('strong', 'remote-block-label', block.label));
+  const byline = [block.byline, block.pr ? `PR #${block.pr.number}` : null, tipAge(block.tipAt, nowMs())].filter(Boolean).join(' \u00b7 ');
+  card.appendChild(el('p', 'remote-byline', byline));
+  if (block.wording) card.appendChild(said(block.wording));
+  if (block.resume.wording) card.appendChild(said(block.resume.wording));
+  for (const item of block.resume.entries ?? []) card.appendChild(renderEntry(item));
+  for (const item of block.documents ?? []) card.appendChild(renderEntry(item));
+  return card;
+}
+
+function renderRemoteBlocks({ remote, remoteNote }) {
+  const wrap = el('div', 'remote-blocks');
+  if (remote.length === 0) return wrap;
+  wrap.appendChild(el('h3', 'drawer-section-title', 'on origin'));
+  if (remoteNote) wrap.appendChild(el('p', 'note', remoteNote));
+  for (const block of remote) wrap.appendChild(renderRemoteBlock(block));
+  return wrap;
 }
 
 /**
@@ -2100,6 +2189,18 @@ async function postPoll(action) {
     // Its own band: the stream is still connected and every value on screen
     // is still current — only this button did not take (R881-4).
     state = controlFailed(state, { action, reason: err.message });
+  }
+  render();
+}
+
+/** The explicit fetch (#1201 R1201-9): a POST whose answer IS the new poller state, like the poll controls. */
+async function postRemotesRefresh() {
+  try {
+    const res = await fetch('/api/remotes/refresh', { method: 'POST' });
+    if (!res.ok) throw new Error(`POST /api/remotes/refresh answered ${res.status}`);
+    state = { ...state, controls: { ok: true }, meta: { ...(state.meta ?? {}), poller: await res.json() } };
+  } catch (err) {
+    state = controlFailed(state, { action: 'refresh remotes', reason: err.message });
   }
   render();
 }

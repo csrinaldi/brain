@@ -248,13 +248,14 @@ function makeWorkerClass(mode, workers) {
 /**
  * Install a document, a window and the two network globals the page opens, and
  * return the mounts plus a `restore()`. `snapshot` is served at
- * `/api/snapshot`; `changes` answers `/api/change/<issue>` by issue number.
+ * `/api/snapshot`; `changes` answers `/api/change/<issue>` by issue number; `remotesRefresh`
+ * is what `POST /api/remotes/refresh` answers (#1201).
  *
  * The stream is a stub that never emits: the page's first paint comes from the
  * REST read, and a harness that also replayed frames would be testing the
  * stub's timing rather than the render.
  */
-export function installDom({ mountIds, snapshot = null, changes = {}, storage = new Map(), worker = 'reply' } = {}) {
+export function installDom({ mountIds, snapshot = null, changes = {}, storage = new Map(), worker = 'reply', remotesRefresh = { remotes: { lastOkAt: null, lastError: null, inFlight: false } } } = {}) {
   const saved = { document: globalThis.document, window: globalThis.window, fetch: globalThis.fetch, EventSource: globalThis.EventSource, Worker: globalThis.Worker };
   const workers = [];
   if (worker === null) delete globalThis.Worker;
@@ -281,8 +282,11 @@ export function installDom({ mountIds, snapshot = null, changes = {}, storage = 
   };
 
   const json = (body, status = 200) => ({ ok: status >= 200 && status < 300, status, json: async () => body });
+  const posts = [];
   globalThis.fetch = async (url, init) => {
     const path = String(url);
+    if (init?.method === 'POST') posts.push(path);
+    if (path === '/api/remotes/refresh') return json(remotesRefresh);
     if (path === '/api/snapshot') {
       return snapshot === null ? json({ reason: 'no snapshot in this harness' }, 503) : json(snapshot);
     }
@@ -307,6 +311,8 @@ export function installDom({ mountIds, snapshot = null, changes = {}, storage = 
     documentElement,
     storage,
     workers,
+    /** Every POST the page made, in order (#1201). */
+    posts,
     /** Deliver one stream frame to the page, as the server would (#1218). */
     emit(name, data = {}) {
       for (const fn of streamListeners.get(name) ?? []) fn({ data: JSON.stringify(data) });

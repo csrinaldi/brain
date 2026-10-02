@@ -10,13 +10,23 @@ import { buildSnapshot } from '../status/snapshot.mjs';
 import { makeSnapshotFixture as makeFixture } from '../__fixtures__/snapshot-tree.mjs';
 import { testTmp } from '../lib/test-tmp.mjs';
 import { createForgeCache } from './forge-cache.mjs';
-import { createUiServer, parseArgs, main, KNOWN_ROUTES, resolveForgeSource } from './server.mjs';
+import { createUiServer as realCreateUiServer, parseArgs, main as realMain, KNOWN_ROUTES, resolveForgeSource } from './server.mjs';
 import { buildChangeView } from './change-route.mjs';
 import { fakeGit } from './test-support/fake-git.mjs';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 
 const NOW = '2026-09-14T00:00:00Z';
+
+/**
+ * #1201: no test in this file may run a real `git fetch`. A poll-enabled server
+ * fetches on its cold-start tick, so every server built here gets this recorded
+ * no-op unless the test passes its own `_fetchRun`.
+ */
+const noFetchCalls = [];
+const noRealFetch = async (...args) => { noFetchCalls.push(args); return ''; };
+const createUiServer = (opts = {}) => realCreateUiServer({ _fetchRun: noRealFetch, ...opts });
+const main = (argv, deps = {}) => realMain(argv, { _fetchRun: noRealFetch, ...deps });
 const now = () => new Date(NOW);
 
 /** A `fs.watch`-shaped spy: records every registration, fires listeners on demand. */
@@ -861,7 +871,7 @@ test('#881: R881-5 S3 / A5 (re-run) — with the poller wired in, a full poll cy
 // ── R881-10 S3: no MCP resource route, no heartbeat/agent-pulse endpoint ────
 
 test('#881: R881-10 S3 — the route table has no MCP resource route and no heartbeat/agent-pulse endpoint', () => {
-  assert.deepEqual(KNOWN_ROUTES, ['/', '/app.js', '/app.css', '/lib/{module}.mjs', '/vendor/marked.esm.js', '/api/snapshot', '/api/stream', '/api/poll/pause', '/api/poll/resume', '/api/poll/once', '/api/change/{issue}']);
+  assert.deepEqual(KNOWN_ROUTES, ['/', '/app.js', '/app.css', '/lib/{module}.mjs', '/vendor/marked.esm.js', '/api/snapshot', '/api/stream', '/api/poll/pause', '/api/poll/resume', '/api/poll/once', '/api/remotes/refresh', '/api/change/{issue}']);
   assert.ok(!KNOWN_ROUTES.some((r) => /mcp|heartbeat|pulse/i.test(r)));
 });
 
@@ -1202,5 +1212,33 @@ test('#881: the static routes answer through main() too, with every seam default
     assert.equal((await fetch(`${base}/lib/nope.mjs`)).status, 404);
   } finally {
     await result.close();
+  }
+});
+
+// ── #1201: no server test runs a real `git fetch` ────────────────────────────
+//
+// A poll-enabled server fetches on its cold-start tick. Against a fixture with no
+// origin that is a real child process racing the fake scheduler, which is how
+// R881-2 S3 flaked on a slow runner. This file reaches the server only through
+// the `createUiServer`/`main` wrappers at the top, which default `_fetchRun` to
+// a recorded no-op; an explicit `_fetchRun` still wins.
+
+test('#1201: the server tests default _fetchRun, so none spawns a real git fetch', async () => {
+  const source = readFileSync(fileURLToPath(import.meta.url), 'utf8');
+  const code = source.split('\n').filter((line) => !/^\s*(\/\/|\*|\/\*)/.test(line)).join('\n');
+  assert.equal((code.match(/realCreateUiServer\(/g) ?? []).length, 1, 'only the wrapper calls the real factory');
+  assert.equal((code.match(/realMain\(/g) ?? []).length, 1, 'only the wrapper calls the real main');
+  assert.doesNotMatch(code.replace(/doesNotMatch\(.*\n/, ''), new RegExp(['git', 'Run', 'Async'].join('')), 'this file never builds a real async git runner');
+
+  const before = noFetchCalls.length;
+  const scheduler = fakeScheduler();
+  const server = createUiServer({ root: makeFixture(), _now: now, _setTimeout: scheduler.setTimeout, _clearTimeout: scheduler.clearTimeout, _watch: () => ({ close() {} }) });
+  await server.listen(0); // poll is on by default: the cold-start tick fetches
+  try {
+    await waitUntil(() => noFetchCalls.length > before);
+    assert.equal(noFetchCalls[before][0], 'git');
+    assert.equal(noFetchCalls[before][1][0], 'fetch', 'the tick reached the injected default, not a child process');
+  } finally {
+    await server.close();
   }
 });

@@ -32,6 +32,22 @@ export function pollBanner({ lastOkAt, lastPolledAt, lastError }) {
 }
 
 /**
+ * #1201 R1201-11 / R7: a failed `git fetch` keeps the last known branch list on
+ * screen and says how old it is. Read from `meta.poller.remotes` only — the
+ * snapshot section carries no fetch state (D30), so it could never say this.
+ * A server whose fetch never succeeded has no time to show, and says that instead.
+ */
+export function remotesBanner({ lastOkAt, lastError, lastAttemptAt = null }) {
+  if (!lastError && !lastOkAt && !lastAttemptAt) {
+    return 'no fetch has run since this server started (polling is paused or it has not ticked yet); the list is this clone\'s remote-tracking refs, use the refresh control';
+  }
+  const asOf = lastOkAt
+    ? `remote branches as of ${lastOkAt}`
+    : 'no fetch has succeeded since this server started; the list is this clone\'s remote-tracking refs';
+  return `${asOf} — last fetch failed: ${lastError}`;
+}
+
+/**
  * R881-4: a poll control's own POST failed. The stream is untouched and the
  * values on screen are current — only the button did not take, so this is
  * said as its own fact rather than as "the live stream dropped".
@@ -69,6 +85,8 @@ export function degradationBands({ stream, controls, meta, snapshot }) {
     });
   }
   if (meta?.poller?.lastError) bands.push({ id: 'poller', text: pollBanner(meta.poller) });
+  const rm = meta?.poller?.remotes;
+  if (rm && (rm.lastError || (!rm.lastOkAt && !rm.lastAttemptAt && !rm.inFlight))) bands.push({ id: 'remotes', text: remotesBanner(meta.poller.remotes) });
   const failed = failedSections(snapshot);
   if (failed.length > 0) {
     bands.push({
@@ -81,7 +99,7 @@ export function degradationBands({ stream, controls, meta, snapshot }) {
 }
 
 /** "5 s ago" / "3 min ago" / "2 h ago" — the same wording at every scale, no library. */
-function ago(ms) {
+export function ago(ms) {
   const seconds = Math.max(0, Math.round(ms / 1000));
   if (seconds < 60) return `${seconds} s ago`;
   if (seconds < 3600) return `${Math.round(seconds / 60)} min ago`;

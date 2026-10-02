@@ -118,7 +118,7 @@ test('#881 R881-8 S3: an absent committed resume.md keeps the tab\'s own reason,
 });
 
 test('#881 R881-8: Working memory shows the three fields, each with its branch-qualified source, a missing one said', () => {
-  const source = { path: 'feat/issue-881-x:resume.md' };
+  const source = { path: 'feat/issue-881-x:openspec/changes/issue-881-x/resume.md' };
   const model = buildDrawerModel(view({
     workingMemory: {
       ok: true,
@@ -132,7 +132,7 @@ test('#881 R881-8: Working memory shows the three fields, each with its branch-q
   const wm = model.value.tabs[3];
   assert.deepEqual(wm.entries.map((e) => e.title), ['next_action', 'current_slice', 'blockers']);
   assert.equal(wm.entries[0].detail, 'ship PR 4');
-  assert.equal(wm.entries[0].source, 'feat/issue-881-x:resume.md');
+  assert.equal(wm.entries[0].source, 'feat/issue-881-x:openspec/changes/issue-881-x/resume.md');
   assert.equal(wm.entries[2].pending, true);
   assert.match(wm.entries[2].detail, /has no blockers/);
 });
@@ -333,7 +333,7 @@ test('#881 A3: every leaf the drawer renders carries a non-empty source label', 
   const model = buildDrawerModel(view({
     spec: { ok: true, value: [{ id: 'R1', title: 't', line: 1, source: { path: 'spec.md', line: 1 }, scenarios: [{ name: 's', when: 'w', then: 't', complete: true, source: { path: 'spec.md', line: 3 } }] }] },
     tasks: { ok: true, value: [{ line: 2, text: 'do it', done: false, actor: 'a', ts: null, source: { path: 'tasks.md', line: 2 }, attribution: { ok: true, value: { actor: 'a', ts: null } } }] },
-    workingMemory: { ok: true, value: { next_action: { ok: true, value: 'x', source: { path: 'b:resume.md' } }, current_slice: { ok: false, reason: 'none', source: { path: 'b:resume.md' } }, blockers: { ok: true, value: 'none', source: { path: 'b:resume.md' } } } },
+    workingMemory: { ok: true, value: { next_action: { ok: true, value: 'x', source: { path: 'b:openspec/changes/issue-1-b/resume.md' } }, current_slice: { ok: false, reason: 'none', source: { path: 'b:openspec/changes/issue-1-b/resume.md' } }, blockers: { ok: true, value: 'none', source: { path: 'b:openspec/changes/issue-1-b/resume.md' } } } },
     reviews: { ok: true, sourceNote: 'n', unreadable: [], value: [{ pr: 1, rev: 1, verdict: 'APPROVE', author: 'a', findings: [], findingCount: 0, head_sha: 'h', malformed: [], source: { url: 'https://f/pull/1' } }] },
   }));
   const all = leaves(model);
@@ -517,15 +517,17 @@ test('#1198 R1198-3: a truncated document carries the note and still has its tex
 
 test('#1198 D10: the unnumbered resume row is appended after the seven stages only when documents.resume exists', () => {
   assert.equal(docsView(undefined).entries.length, 7, 'no documents: the seven stages only');
-  const documents = { resume: { path: 'resume.md', ref: 'feat/x', commit: 'f'.repeat(40), state: 'present', text: '---\nnext_action: go\n---\nbody', reason: null, note: null } };
+  const RESUME = 'openspec/changes/issue-1-x/resume.md';
+  const documents = { resume: { path: RESUME, ref: 'feat/x', commit: 'f'.repeat(40), state: 'present', text: '---\nnext_action: go\n---\nbody', reason: null, note: null } };
   const sdd = docsView(documents);
   assert.equal(sdd.entries.length, 8);
   const row = sdd.entries[7];
   assert.equal(row.title, 'working memory — resume.md');
   assert.equal(row.position, undefined, 'unnumbered');
   assert.equal(row.document.key, 'resume');
-  assert.equal(row.document.stamp, 'resume.md @ ffffffffffff');
-  const missing = docsView({ resume: { path: 'resume.md', ref: 'feat/x', commit: null, state: 'missing', text: null, reason: null } }).entries[7].document;
+  assert.equal(row.document.stamp, `${RESUME} @ ffffffffffff`);
+  assert.equal(row.source, `feat/x:${RESUME}`, 'sourced to the writer\'s path on the branch (#1201 R2)');
+  const missing = docsView({ resume: { path: RESUME, ref: 'feat/x', commit: null, state: 'missing', text: null, reason: null } }).entries[7].document;
   assert.equal(missing.wording, 'resume.md is not committed at feat/x');
 });
 
