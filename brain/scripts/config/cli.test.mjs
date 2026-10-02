@@ -81,3 +81,88 @@ test('#906 A6: memory.lane.enabled is a known settable leaf today, get/set round
   assert.equal(getResult.status, 0, getResult.stderr);
   assert.equal(getResult.stdout.trim(), 'true');
 });
+
+// ── #1114 S3.3: `default <axis>` — the one reader shell scripts call instead of parsing JSON ──
+test('#1114 S3.3 cli: default <axis> prints the effective default, shape first, legacy as the fallback', (t) => {
+  const shaped = world(t, { schemaVersion: '1.11.1', vcs: { provider: 'gitlab', default: 'github', providers: { github: {} } } });
+  assert.equal(run(shaped, 'default', 'vcs').stdout, 'github\n');
+  const legacy = world(t, { schemaVersion: '1.9.1', vcs: { provider: 'gitlab' } });
+  assert.equal(run(legacy, 'default', 'vcs').stdout, 'gitlab\n');
+});
+
+test('#1114 S3.3 cli: default <axis> on an undeclared axis prints an empty line and exits 0; an unknown axis exits 1', (t) => {
+  const root = world(t, { schemaVersion: '1.11.1', memory: { default: '', providers: {} } });
+  const r = run(root, 'default', 'memory');
+  assert.equal(r.status, 0);
+  assert.equal(r.stdout, '\n');
+  assert.equal(run(root, 'default', 'cache').status, 1);
+});
+
+test('#1114 S3.3 cli: set <axis>.default writes the default AND its provider entry', (t) => {
+  const root = world(t, { schemaVersion: '1.11.1', platform: { default: '', providers: {} } });
+  const r = run(root, 'set', 'platform.default', 'claude');
+  assert.equal(r.status, 0, r.stderr);
+  const next = JSON.parse(readFileSync(join(root, 'brain.config.json'), 'utf8'));
+  assert.deepEqual(next.platform, { default: 'claude', providers: { claude: {} } });
+});
+
+// ── #1114 S3.3 review: `brain:config` never promotes a per-machine value; brain:upgrade does ──
+test('#1114 S3.3 BLOCKER: brain:config\'s migration context ignores env and .env — the reviewer\'s case writes claude, never antigravity', async (t) => {
+  const { axisContextFor } = await import('./cli.mjs');
+  const { planConfigWrite } = await import('./config-verb.mjs');
+  const { migrations } = await import('../../core/config-migrations.mjs');
+  const root = world(t, { schemaVersion: '1.9.1', vcs: { provider: 'github' } });
+  writeFileSync(join(root, '.env'), 'AGENT_PLATFORM=antigravity\n');
+  const config = JSON.parse(readFileSync(join(root, 'brain.config.json'), 'utf8'));
+  const axisContext = axisContextFor(config, root);
+  const { next, refusal } = planConfigWrite({ config, path: 'sdd.default', value: 'gentle-ai', migrations, targetVersion: '1.11.1', axisContext });
+  assert.equal(refusal, null);
+  assert.equal(next.platform.default, 'claude', 'today\'s default, not the machine\'s .env');
+  assert.equal(next.sdd.default, 'gentle-ai');
+});
+
+test('#1114 S3.3: the SAME config migrated through brain:upgrade\'s context still writes antigravity, with the .env source', async (t) => {
+  const { resolveAxisMigrationContext } = await import('../lib/axis-migration-context.mjs');
+  const { migrateConfig } = await import('../lib/installer.mjs');
+  const { migrations } = await import('../../core/config-migrations.mjs');
+  const root = world(t, { schemaVersion: '1.9.1', vcs: { provider: 'github' } });
+  writeFileSync(join(root, '.env'), 'AGENT_PLATFORM=antigravity\n');
+  const config = JSON.parse(readFileSync(join(root, 'brain.config.json'), 'utf8'));
+  const axisContext = resolveAxisMigrationContext({ config, env: {}, root });
+  const { config: out, notices } = migrateConfig(config, migrations, '1.11.1', axisContext);
+  assert.equal(out.platform.default, 'antigravity');
+  assert.ok(notices.some((l) => /platform\.default = antigravity \(from \.env AGENT_PLATFORM\)/.test(l)), notices.join('\n'));
+});
+
+// ── #1114 S3.3 review: `resolve <platform|sdd>` IS the runtime resolver, so the shell composes no precedence ──
+const runEnv = (root, env, ...args) => spawnSync(process.execPath, [CLI, ...args], { cwd: root, encoding: 'utf8', timeout: 30_000, env: { PATH: process.env.PATH, ...env } });
+
+test('#1114 S3.3 cli: resolve prints "<run> <repo> <source>" — the reviewer\'s case (config harness + .env SDD_HARNESS) agrees with resolvePlatform', async (t) => {
+  const { resolvePlatform } = await import('../harness/platform.mjs');
+  const root = world(t, { schemaVersion: '1.11.0', harness: 'plain' });
+  writeFileSync(join(root, '.env'), 'SDD_HARNESS=antigravity\n');
+  const r = runEnv(root, {}, 'resolve', 'platform');
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(resolvePlatform({ env: {}, envVars: { SDD_HARNESS: 'antigravity' }, config: { harness: 'plain' } }), 'antigravity');
+  assert.equal(r.stdout, 'antigravity antigravity .env\n', 'the .env SDD_HARNESS outranks config.harness, exactly as resolvePlatform ranks it');
+});
+
+test('#1114 S3.3 cli: resolve reports the source — config, default, .env — and keeps the run value apart from the repo value', (t) => {
+  const declared = world(t, { schemaVersion: '1.11.1', platform: { default: 'antigravity', providers: { antigravity: {} } } });
+  assert.equal(runEnv(declared, {}, 'resolve', 'platform').stdout, 'antigravity antigravity config\n');
+  const none = world(t, { schemaVersion: '1.11.1' });
+  assert.equal(runEnv(none, {}, 'resolve', 'platform').stdout, 'claude claude default\n');
+  assert.equal(runEnv(none, {}, 'resolve', 'sdd').stdout, 'gentle-ai gentle-ai default\n');
+  // A process-env value is per-invocation: it is the RUN value, never the repo's.
+  assert.equal(runEnv(none, { AGENT_PLATFORM: 'antigravity' }, 'resolve', 'platform').stdout, 'antigravity claude default\n');
+  const dot = world(t, { schemaVersion: '1.11.1' });
+  writeFileSync(join(dot, '.env'), 'SDD_ENGINE=plain\n');
+  assert.equal(runEnv(dot, {}, 'resolve', 'sdd').stdout, 'plain plain .env\n');
+});
+
+test('#1114 S3.3 cli: resolve over an unknown axis exits 1; a legacy-keyed config counts as declared', (t) => {
+  const root = world(t, { schemaVersion: '1.11.0', platform: 'antigravity', engine: 'plain' });
+  assert.equal(runEnv(root, {}, 'resolve', 'vcs').status, 1);
+  assert.equal(runEnv(root, {}, 'resolve', 'platform').stdout, 'antigravity antigravity config\n');
+  assert.equal(runEnv(root, {}, 'resolve', 'sdd').stdout, 'plain plain config\n');
+});

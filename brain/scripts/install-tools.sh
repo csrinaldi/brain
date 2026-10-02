@@ -30,10 +30,14 @@ fi
 # one field is read without it in that case.
 if [ -f brain.config.json ]; then
   if command -v node >/dev/null 2>&1; then
-    VCS_PROVIDER="$(node -p "(require('./brain.config.json').vcs||{}).provider||'gitlab'")" \
+    # The ADR-0038 shape first, the legacy `vcs.provider` as its alias (#1114 S3.3): `config/cli.mjs default`
+    # is the one reader, so this script never parses JSON by hand. An undeclared axis prints an empty line.
+    VCS_PROVIDER="$(node "${BRAIN_SCRIPTS:-brain/scripts}/config/cli.mjs" default vcs 2>/dev/null)" \
       || die "brain.config.json exists but cannot be read or parsed — fix it, then re-run. Refusing to guess the VCS provider."
+    VCS_PROVIDER="${VCS_PROVIDER:-gitlab}"
   else
-    # Without node only a plain `"vcs": { ... "provider": "<name>" ... }` object is understood;
+    # Without node only a plain `"vcs": { ... "provider": "<name>" ... }` object is understood (the legacy
+    # key, which the scaffold and `brain:config set vcs.default` keep in step during the alias window);
     # anything else (including no provider, or an empty one) takes the same gitlab default the
     # node path uses. Corruption cannot be detected here — install node and re-run to validate.
     printf '  note: node is not installed yet — reading vcs.provider with a simple text match\n' >&2

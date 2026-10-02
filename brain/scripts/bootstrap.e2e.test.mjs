@@ -145,7 +145,7 @@ test('#1165 e2e: an existing consumer with only .env keeps working unchanged, an
   const r = bootstrap(repo, root);
   assertHealthy(r, /npm run brain:memory:pull/);
   assert.match(r.out, /memory backend: plainfiles \(\.env\)/);
-  assert.match(r.out, /brain:config -- set memory\.backend plainfiles/, 'the move-to-team-config one-liner is printed');
+  assert.match(r.out, /brain:config -- set memory\.default plainfiles/, 'the move-to-team-config one-liner is printed');
   const cfg = JSON.parse(readFileSync(join(repo, 'brain.config.json'), 'utf8'));
   assert.ok(!cfg.memory?.backend, 'never migrated silently: a tracked-file edit is the operator\'s to make');
 });
@@ -156,7 +156,7 @@ test('#1165 e2e: .env overriding a different team value is reported', () => {
   useBackend(repo, 'plainfiles');
   const r = bootstrap(repo, root);
   assert.equal(r.code, 0, r.out.slice(-1500));
-  assert.match(r.out, /overrides brain\.config\.json memory\.backend \(engram\)/, r.out.slice(-1500));
+  assert.match(r.out, /overrides brain\.config\.json memory\.default \(engram\)/, r.out.slice(-1500));
 });
 
 test('#1165 e2e: the write env:init performs on a TTY (`config set memory.backend`) lands in tracked config and the resolver reads it', () => {

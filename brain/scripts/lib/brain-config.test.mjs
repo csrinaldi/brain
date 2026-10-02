@@ -161,8 +161,8 @@ test('ensureBrainConfig: creates config when missing with github identity', () =
     assert.equal(cfg.project.gitHost, 'github.com');
     assert.equal(cfg.project.slug, 'owner/repo');
     assert.equal(cfg.schemaVersion, '1.11.1', 'the ADR-0038 axis-shape migration (1.11.1, issue #1114 S3.2) is now the latest — the 0.6.0 memory.dualWrite gap (D3/C4, issue #229) stays a deliberate, never-reused retirement mark');
-    assert.equal(cfg.platform, undefined, 'a fresh config carries NO axis shape yet: the 1.11.1 entry needs the env context buildDefaultConfig cannot read, so it is a no-op there; env:init declaring each axis is the open S3 task');
-    assert.equal(cfg.vcs.default, undefined);
+    assert.equal(cfg.vcs.default, 'github', 'a fresh config writes the ADR-0038 shape for vcs (#1114 S3.3), with the legacy key beside it for the alias window');
+    assert.deepEqual(cfg.vcs.providers, { github: {} });
     assert.equal(cfg.memory.backend, '', 'memory.backend ships EMPTY (undeclared): a default would choose a backend for a team that never chose one (#1165) — env:init asks and writes it');
     assert.deepEqual(cfg.sdd.map, {}, 'sdd.map ships EMPTY: a routed cold-review would spawn an engine no consumer asked for');
     assert.deepEqual(cfg.sdd.stages, {}, 'sdd.stages ships EMPTY: the four lifecycle stages live in sdd-layout.mjs LIFECYCLE_STAGES, never duplicated into JSON (#456)');
@@ -403,4 +403,39 @@ test('ensureBrainConfig (#1127): an existing brain.config.json that cannot be pa
     assert.match(result.error ?? '', /parse|JSON/i);
     assert.equal(readFileSync(join(dir, 'brain.config.json'), 'utf8'), '{ not json', 'the file is left untouched');
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// ── #1114 S3.3: a fresh config carries the ADR-0038 shape on every axis ───────────────────────
+test('#1114 S3.3 ensureBrainConfig: a fresh config declares the shape for all four axes; only vcs is derived, the rest are undeclared until env:init', async () => {
+  const { readAxis, validateAxisConfig, AXES } = await import('./axis-config.mjs');
+  const dir = mkdtempSync(join(tmpdir(), 'brain-ensure-shape-'));
+  try {
+    ensureBrainConfig(dir, { identity: { host: 'gitlab.com', project: 'group/repo' } });
+    const cfg = JSON.parse(readFileSync(join(dir, 'brain.config.json'), 'utf8'));
+    for (const axis of AXES) assert.equal(readAxis(cfg, axis).source, 'shape', `${axis} is written in the ADR-0038 shape`);
+    assert.equal(cfg.vcs.default, 'gitlab');
+    assert.equal(cfg.vcs.provider, 'gitlab', 'legacy key kept during the alias window');
+    assert.deepEqual(cfg.vcs.providers, { gitlab: {} });
+    assert.equal(cfg.memory.default, '', 'memory is a team choice: never defaulted (#1165)');
+    assert.equal(cfg.memory.backend, '');
+    assert.equal(cfg.platform.default, '');
+    assert.equal(cfg.sdd.default, '');
+    assert.deepEqual(cfg.sdd.providers, { brain: { version: 'self' } }, "the brain SDD provider is declared on every consumer, as the migration does");
+    assert.equal(typeof cfg.platform, 'object', 'the flat `platform` string never appears');
+    assert.deepEqual(validateAxisConfig(cfg).errors, []);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('#1114 S3.3 ensureBrainConfig: no origin identity leaves vcs undeclared in the shape, not absent', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'brain-ensure-noid-'));
+  try {
+    ensureBrainConfig(dir, { identity: { host: null, project: null } });
+    const cfg = JSON.parse(readFileSync(join(dir, 'brain.config.json'), 'utf8'));
+    assert.equal(cfg.vcs.default, '');
+    assert.deepEqual(cfg.vcs.providers, {});
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

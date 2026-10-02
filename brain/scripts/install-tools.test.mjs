@@ -34,12 +34,13 @@ function run(script, dir, extraPath = '') {
   const r = spawnSync('bash', ['-c', script], {
     cwd: dir,
     encoding: 'utf8',
+    timeout: 60_000,
     env: { PATH: `${extraPath}${extraPath ? ':' : ''}${process.env.PATH}`, HOME: dir, DBUS_SESSION_BUS_ADDRESS: '' },
   });
   return { code: r.status, out: `${r.stdout}${r.stderr}`, stdout: r.stdout };
 }
 
-const PRELUDE = 'set -euo pipefail\ndie() { printf "\\n  x %s\\n" "$1" >&2; exit 1; }\n';
+const PRELUDE = `set -euo pipefail\nBRAIN_SCRIPTS=${JSON.stringify(HERE)}\ndie() { printf "\\n  x %s\\n" "$1" >&2; exit 1; }\n`;
 const resolveVcs = () => region('# ── Resolve VCS provider', '# ── i18n');
 
 function inTmp(fn) {
@@ -58,6 +59,17 @@ test('#1127 install-tools: a corrupt brain.config.json is refused, never default
 test('#1127 install-tools: a GitHub config resolves to gh, an absent config keeps the documented gitlab default', () => inTmp((dir) => {
   writeFileSync(join(dir, 'brain.config.json'), JSON.stringify({ vcs: { provider: 'github' } }));
   assert.match(run(`${PRELUDE}${resolveVcs()}\necho "CLI=$VCS_CLI"`, dir).stdout, /CLI=gh/);
+}));
+
+test('#1114 S3.3 install-tools: the ADR-0038 shape is read first, the legacy key is the fallback', () => inTmp((dir) => {
+  const cli = (config) => {
+    writeFileSync(join(dir, 'brain.config.json'), JSON.stringify(config));
+    return run(`${PRELUDE}${resolveVcs()}\necho "CLI=$VCS_CLI PROVIDER=$VCS_PROVIDER"`, dir).stdout;
+  };
+  assert.match(cli({ vcs: { default: 'github', providers: { github: {} } } }), /CLI=gh PROVIDER=github/, 'shape only');
+  assert.match(cli({ vcs: { provider: 'gitlab', default: 'github', providers: { github: {} } } }), /PROVIDER=github/, 'the shape wins over a stale legacy key');
+  assert.match(cli({ vcs: { provider: 'github' } }), /PROVIDER=github/, 'legacy only (not yet migrated)');
+  assert.match(cli({ vcs: { default: '', providers: {} } }), /CLI=glab PROVIDER=gitlab/, 'undeclared keeps the documented gitlab default');
 }));
 
 test('#1127 install-tools: no brain.config.json at all keeps the documented gitlab default', () => inTmp((dir) => {

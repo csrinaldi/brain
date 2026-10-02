@@ -174,3 +174,92 @@ test('#1114 S3.2: planConfigWrite hands the migrations the axis context it was g
   planConfigWrite({ config: { schemaVersion: '0.0.0', docs: { language: 'en' } }, path: 'docs.language', value: 'es', migrations: [...migrations, { version: '0.2.0', description: 't', defaults: { docs: { language: 'en' } } }], targetVersion: '0.2.0', axisContext: { marker: 1 } });
   assert.deepEqual(seen, [{ marker: 1 }]);
 });
+
+// ── #1114 S3.3: the shape is settable, and the command a refusal names yields a VALID config ──
+test('#1114 S3.3: set <axis>.default declares the provider as {} when absent (ratified point 2)', () => {
+  for (const [axis, name] of [['memory', 'plainfiles'], ['vcs', 'github'], ['platform', 'claude'], ['sdd', 'gentle-ai']]) {
+    const { next, refusal } = planConfigWrite({ config: { schemaVersion: '1.9.1' }, path: `${axis}.default`, value: name, migrations: AXIS_MIGRATIONS, targetVersion: '1.9.1' });
+    assert.equal(refusal, null, `${axis}.default must be settable`);
+    assert.equal(next[axis].default, name);
+    assert.deepEqual(next[axis].providers[name], {}, `${axis}.providers.${name} is declared, so default is a key of providers`);
+  }
+});
+
+test('#1114 S3.3: set <axis>.default never overwrites an existing provider entry\'s settings', () => {
+  const config = { schemaVersion: '1.9.1', vcs: { default: 'github', providers: { github: {}, gitlab: { version: '17' } } } };
+  const { next } = planConfigWrite({ config, path: 'vcs.default', value: 'gitlab', migrations: AXIS_MIGRATIONS, targetVersion: '1.9.1' });
+  assert.deepEqual(next.vcs.providers.gitlab, { version: '17' });
+  assert.equal(next.vcs.default, 'gitlab');
+});
+
+test('#1114 S3.3: the config the command writes passes validateAxisConfig', async () => {
+  const { validateAxisConfig } = await import('../lib/axis-config.mjs');
+  let config = { schemaVersion: '1.9.1' };
+  for (const [axis, name] of [['memory', 'engram'], ['vcs', 'gitlab'], ['platform', 'claude'], ['sdd', 'gentle-ai']]) {
+    config = planConfigWrite({ config, path: `${axis}.default`, value: name, migrations: AXIS_MIGRATIONS, targetVersion: '1.9.1' }).next;
+  }
+  assert.deepEqual(validateAxisConfig(config).errors, []);
+});
+
+test('#1114 S3.3: set <axis>.default validates the value at write time, "" clears', () => {
+  const bad = planConfigWrite({ config: { schemaVersion: '1.9.1' }, path: 'platform.default', value: 'codex', migrations: AXIS_MIGRATIONS, targetVersion: '1.9.1' });
+  assert.equal(bad.next, null);
+  assert.match(bad.refusal, /claude \| antigravity \| plain/);
+  const badVcs = planConfigWrite({ config: { schemaVersion: '1.9.1' }, path: 'vcs.default', value: 'ghp_x', migrations: AXIS_MIGRATIONS, targetVersion: '1.9.1' });
+  assert.match(badVcs.refusal, /github \| gitlab/);
+  const clear = planConfigWrite({ config: { schemaVersion: '1.9.1', sdd: { default: 'plain', providers: { plain: {} } } }, path: 'sdd.default', value: '""', migrations: AXIS_MIGRATIONS, targetVersion: '1.9.1' });
+  assert.equal(clear.refusal, null);
+  assert.equal(clear.next.sdd.default, '');
+  assert.deepEqual(clear.next.sdd.providers, { plain: {} }, 'clearing never deletes a provider');
+});
+
+test('#1114 S3.3: during the alias window, memory.default and vcs.default also write the legacy key a reader still needs', () => {
+  const m = planConfigWrite({ config: { schemaVersion: '1.9.1' }, path: 'memory.default', value: 'engram', migrations: AXIS_MIGRATIONS, targetVersion: '1.9.1' }).next;
+  assert.equal(m.memory.backend, 'engram');
+  const v = planConfigWrite({ config: { schemaVersion: '1.9.1' }, path: 'vcs.default', value: 'github', migrations: AXIS_MIGRATIONS, targetVersion: '1.9.1' }).next;
+  assert.equal(v.vcs.provider, 'github');
+  const p = planConfigWrite({ config: { schemaVersion: '1.9.1' }, path: 'platform.default', value: 'claude', migrations: AXIS_MIGRATIONS, targetVersion: '1.9.1' }).next;
+  assert.equal(Object.hasOwn(p.platform, 'backend'), false);
+  assert.deepEqual(Object.keys(p.platform).sort(), ['default', 'providers'], 'platform has no legacy key to mirror: the flat `platform` string is the same key');
+});
+
+test('#1114 S3.3: <axis>.providers.<name> is a settable family; an unknown axis default is still refused', () => {
+  const ok = planConfigWrite({ config: { schemaVersion: '1.9.1' }, path: 'sdd.providers.gentle-ai', value: '{"version":"1.2.3"}', migrations: AXIS_MIGRATIONS, targetVersion: '1.9.1' });
+  assert.equal(ok.refusal, null);
+  assert.deepEqual(ok.next.sdd.providers['gentle-ai'], { version: '1.2.3' });
+  const no = planConfigWrite({ config: { schemaVersion: '1.9.1' }, path: 'cache.default', value: 'x', migrations: AXIS_MIGRATIONS, targetVersion: '1.9.1' });
+  assert.match(no.refusal, /unknown path/);
+});
+
+// ── #1114 S3.3 review: the legacy aliases and the providers map obey the SAME closed sets ──
+const TOKEN = ['ghp', 'x'.repeat(20)].join('_'); // built at runtime so no secret-shaped literal is committed
+
+test('#1114 S3.3 BLOCKER: vcs.provider (the legacy alias) refuses a token-shaped value and writes nothing', () => {
+  const config = { schemaVersion: '0.3.0', vcs: { provider: 'github', default: 'github', providers: { github: {} } } };
+  const r = planConfigWrite({ config, path: 'vcs.provider', value: TOKEN, migrations: AXIS_MIGRATIONS, targetVersion: '0.3.0' });
+  assert.equal(r.next, null);
+  assert.match(r.refusal, /github \| gitlab/);
+  assert.doesNotMatch(r.refusal, /ghp_/, 'the refusal must not echo a secret-shaped value back');
+});
+
+test('#1114 S3.3 BLOCKER: memory.backend refuses a value outside the closed set (alias and default agree)', () => {
+  const config = { schemaVersion: '1.9.1', memory: { backend: 'engram', default: 'engram', providers: { engram: {} } } };
+  for (const path of ['memory.backend', 'memory.default']) {
+    const r = planConfigWrite({ config, path, value: TOKEN, migrations: AXIS_MIGRATIONS, targetVersion: '1.9.1' });
+    assert.equal(r.next, null, path);
+    assert.match(r.refusal, /engram \| plainfiles/);
+  }
+  assert.equal(planConfigWrite({ config, path: 'vcs.provider', value: 'gitlab', migrations: AXIS_MIGRATIONS, targetVersion: '1.9.1' }).refusal, null, 'a valid alias write still works');
+});
+
+test('#1114 S3.3 BLOCKER: <axis>.providers.<name> refuses a name outside the axis closed set', () => {
+  for (const path of [`vcs.providers.${TOKEN}`, 'memory.providers.mongo', 'platform.providers.nope', 'sdd.providers.nope']) {
+    const r = planConfigWrite({ config: { schemaVersion: '1.9.1' }, path, value: '{}', migrations: AXIS_MIGRATIONS, targetVersion: '1.9.1' });
+    assert.equal(r.next, null, path);
+    assert.match(r.refusal, /providers/);
+    assert.doesNotMatch(r.refusal, /ghp_/);
+  }
+  for (const path of ['vcs.providers.github', 'memory.providers.plainfiles', 'platform.providers.codex', 'sdd.providers.gentle-ai', 'sdd.providers.brain']) {
+    assert.equal(planConfigWrite({ config: { schemaVersion: '1.9.1' }, path, value: '{}', migrations: AXIS_MIGRATIONS, targetVersion: '1.9.1' }).refusal, null, path);
+  }
+});

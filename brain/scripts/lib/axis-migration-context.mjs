@@ -20,9 +20,11 @@ import { DEFAULT_PLATFORM, DEFAULT_ENGINE } from '../harness/platform.mjs';
 const where = (res, key) => (res.source === 'shell' ? `process env ${key}` : `.env ${key}`);
 const stated = (res) => res.value !== null && res.value !== undefined;
 
-function effective({ axis, selectorKey, members, fallback, config, env, root }) {
+function effective({ axis, selectorKey, members, fallback, config, env, root, envSources }) {
   // 1. process env, then .env — a stated-but-empty value stops this level (the resolvers use `??`).
-  const selector = resolveEnv(selectorKey, { env, root });
+  // `envSources: false` skips BOTH (and the SDD_HARNESS read in step 3): nothing per-machine is consulted.
+  const NOT_STATED = { value: undefined, source: null };
+  const selector = envSources ? resolveEnv(selectorKey, { env, root }) : NOT_STATED;
   if (stated(selector)) {
     if (selector.value) return { value: selector.value, source: where(selector, selectorKey) };
   } else {
@@ -34,7 +36,7 @@ function effective({ axis, selectorKey, members, fallback, config, env, root }) 
     }
   }
   // 3. the legacy harness, only when it names a member of THIS axis.
-  const harness = resolveEnv('SDD_HARNESS', { env, root });
+  const harness = envSources ? resolveEnv('SDD_HARNESS', { env, root }) : NOT_STATED;
   if (stated(harness)) {
     if (harness.value && members.includes(harness.value)) return { value: harness.value, source: where(harness, 'SDD_HARNESS') };
   } else {
@@ -46,13 +48,15 @@ function effective({ axis, selectorKey, members, fallback, config, env, root }) 
 }
 
 /**
- * @param {{config?: object, env?: object, root?: string}} args
+ * `envSources: false` (every caller but `brain:upgrade`) consults the config and today's defaults ONLY: a per-machine
+ * value is promoted into tracked config by the upgrade, which prints its source (ADR-0038 section 7), and by nothing else.
+ * @param {{config?: object, env?: object, root?: string, envSources?: boolean}} args
  * @returns {{platform: {value: string, source: string}, sdd: {value: string, source: string}, lifecycleStages: string[]}}
  */
-export function resolveAxisMigrationContext({ config = {}, env = process.env, root = process.cwd() } = {}) {
+export function resolveAxisMigrationContext({ config = {}, env = process.env, root = process.cwd(), envSources = true } = {}) {
   return {
-    platform: effective({ axis: 'platform', selectorKey: 'AGENT_PLATFORM', members: AGENT_PLATFORMS, fallback: DEFAULT_PLATFORM, config, env, root }),
-    sdd: effective({ axis: 'sdd', selectorKey: 'SDD_ENGINE', members: SDD_ENGINES, fallback: DEFAULT_ENGINE, config, env, root }),
+    platform: effective({ axis: 'platform', selectorKey: 'AGENT_PLATFORM', members: AGENT_PLATFORMS, fallback: DEFAULT_PLATFORM, config, env, root, envSources }),
+    sdd: effective({ axis: 'sdd', selectorKey: 'SDD_ENGINE', members: SDD_ENGINES, fallback: DEFAULT_ENGINE, config, env, root, envSources }),
     lifecycleStages: [...LIFECYCLE_STAGES],
   };
 }

@@ -84,3 +84,31 @@ test('it never writes: the .env on disk is byte-identical afterwards', () => {
     assert.equal(readFileSync(join(root, '.env'), 'utf8'), text);
   });
 });
+
+// ── #1114 S3.3 review: only brain:upgrade may promote a per-machine value into tracked config ──
+test('envSources:false builds the context from config and today\'s defaults ONLY — process env and .env are never read', () => {
+  withRoot('AGENT_PLATFORM=antigravity\nSDD_ENGINE=plain\nSDD_HARNESS=plain\n', (root) => {
+    const ctx = resolveAxisMigrationContext({ config: {}, env: { AGENT_PLATFORM: 'antigravity', SDD_HARNESS: 'plain' }, root, envSources: false });
+    assert.equal(ctx.platform.value, 'claude');
+    assert.equal(ctx.sdd.value, 'gentle-ai');
+    assert.match(ctx.platform.source, /default/);
+  });
+});
+
+test('envSources:false still reads the config\'s own keys (flat keys and legacy harness)', () => {
+  withRoot('AGENT_PLATFORM=antigravity\n', (root) => {
+    const ctx = resolveAxisMigrationContext({ config: { platform: 'plain', engine: 'plain' }, env: {}, root, envSources: false });
+    assert.equal(ctx.platform.value, 'plain');
+    assert.equal(ctx.sdd.value, 'plain');
+    const h = resolveAxisMigrationContext({ config: { harness: 'antigravity' }, env: {}, root, envSources: false });
+    assert.equal(h.platform.value, 'antigravity');
+  });
+});
+
+test('the default (brain:upgrade) still reads process env and .env, and reports the source', () => {
+  withRoot('AGENT_PLATFORM=antigravity\n', (root) => {
+    const ctx = resolveAxisMigrationContext({ config: {}, env: {}, root });
+    assert.equal(ctx.platform.value, 'antigravity');
+    assert.match(ctx.platform.source, /\.env AGENT_PLATFORM/);
+  });
+});
