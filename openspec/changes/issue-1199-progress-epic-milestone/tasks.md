@@ -58,7 +58,7 @@ Strict TDD (`npm test`, node:test). Every unit is one work-unit commit holding i
 
 ## Review Workload Forecast
 
-- Estimated changed lines (gated, tests excluded): about 440, measured (426 at verify plus the W1/S2/S3 fixes). The design's 350 was an underestimate.
+- Estimated changed lines (gated, tests excluded): 430, measured (426 at verify plus the W1/S2/S3 fixes). The design's 350 was an underestimate.
 - 400-line budget risk: Low against the `lite` budget of 1000.
 - Chained PRs recommended: No.
 - Decision needed before apply: No. Single PR, `delivery_strategy: ask-on-risk` does not trigger.
