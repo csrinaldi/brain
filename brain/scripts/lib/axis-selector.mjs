@@ -43,6 +43,7 @@ const present = (v) => (typeof v === 'string' && v.trim() !== '' ? v.trim() : nu
  * @param {string} args.configPath   dotted path in brain.config.json, e.g. `memory.backend`
  * @param {ReadonlyArray<string>} args.allowed  the closed set of valid values
  * @param {object} [args.config]     parsed brain.config.json ({} when absent)
+ * @param {string} [args.configValue] the config-level value, already read (overrides `configPath`)
  * @param {object} [args.env]        process env
  * @param {string} [args.root]       where `.env` lives
  * @param {string|null} [args.envFile] explicit `.env` path (test seam)
@@ -53,12 +54,14 @@ const present = (v) => (typeof v === 'string' && v.trim() !== '' ? v.trim() : nu
  *   value WAS declared but is outside `allowed` — a typo is reported as a typo,
  *   never coerced into a different backend.
  */
-export function resolveAxisSelector({ key, configPath, allowed, config = {}, env = process.env, root = process.cwd(), envFile = null }) {
+export function resolveAxisSelector({ key, configPath, allowed, config = {}, env = process.env, root = process.cwd(), envFile = null, configValue }) {
   // An EMPTY shell value is an unset one: hand resolveEnv an env without the key
   // so it falls through to `.env` instead of stopping at the empty string.
   const shellEnv = present(env?.[key]) === null ? { ...env, [key]: undefined } : env;
   const fromEnv = resolveEnv(key, { env: shellEnv, root, envFile });
-  const fromConfig = present(readPath(config, configPath));
+  // `configValue` lets a caller that already read the config through `axis-config.readAxis`
+  // (the ADR-0038 shape, or its legacy alias) hand the value in; `configPath` is then unused.
+  const fromConfig = present(configValue !== undefined ? configValue : readPath(config, configPath));
   const envValue = present(fromEnv.value === null || typeof fromEnv.value !== 'string' ? null : fromEnv.value);
 
   let value = null;

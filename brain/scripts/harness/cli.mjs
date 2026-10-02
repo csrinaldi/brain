@@ -43,6 +43,7 @@ function readEnvFile(root = repoRoot) {
 // ADR-0024, and moving it out from under its callers would be a second defect
 // to fix the first.
 import { resolvePlatform, SDD_ENGINES } from './platform.mjs';
+import { readAxis, legacyHarness } from '../lib/axis-config.mjs';
 import { harnessAdapterUrl } from '../axes/lib/harness-adapter-url.mjs';
 export { resolvePlatform, SDD_ENGINES };
 
@@ -54,14 +55,14 @@ export { resolvePlatform, SDD_ENGINES };
  * @returns {string}
  */
 export function resolveEngine({ env = process.env, envVars = {}, config = {} } = {}) {
-  const engineVal = env.SDD_ENGINE ?? envVars.SDD_ENGINE ?? config.engine;
+  const engineVal = env.SDD_ENGINE ?? envVars.SDD_ENGINE ?? readAxis(config, 'sdd', { harness: false }).default;
   if (engineVal) return engineVal;
 
   // SDD_ENGINES (platform.mjs, issue #312 D2) is the ONE declaration of this
   // membership — reading it here, rather than holding a second inline copy,
   // is the whole point of the extraction. Behavior is unchanged: same two
   // names, same fallback.
-  const harnessVal = env.SDD_HARNESS ?? envVars.SDD_HARNESS ?? config.harness;
+  const harnessVal = env.SDD_HARNESS ?? envVars.SDD_HARNESS ?? legacyHarness(config);
   if (harnessVal && SDD_ENGINES.includes(harnessVal)) {
     return harnessVal;
   }
@@ -81,7 +82,7 @@ export function resolveEngine({ env = process.env, envVars = {}, config = {} } =
  * @returns {string}
  */
 export function resolveHarness({ env = process.env, envVars = {}, config = {} } = {}) {
-  return env.SDD_HARNESS ?? envVars.SDD_HARNESS ?? config.harness ?? resolveEngine({ env, envVars, config });
+  return env.SDD_HARNESS ?? envVars.SDD_HARNESS ?? legacyHarness(config) ?? resolveEngine({ env, envVars, config });
 }
 
 // ---------------------------------------------------------------------------
