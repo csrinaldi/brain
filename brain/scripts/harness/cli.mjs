@@ -42,7 +42,7 @@ function readEnvFile(root = repoRoot) {
 // silently: `resolvePlatform` has been part of this module's surface since
 // ADR-0024, and moving it out from under its callers would be a second defect
 // to fix the first.
-import { resolvePlatform, SDD_ENGINES } from './platform.mjs';
+import { resolvePlatform, SDD_ENGINES, DEFAULT_ENGINE } from './platform.mjs';
 import { readAxis, legacyHarness } from '../lib/axis-config.mjs';
 import { harnessAdapterUrl } from '../axes/lib/harness-adapter-url.mjs';
 export { resolvePlatform, SDD_ENGINES };
@@ -67,7 +67,7 @@ export function resolveEngine({ env = process.env, envVars = {}, config = {} } =
     return harnessVal;
   }
 
-  return 'gentle-ai';
+  return DEFAULT_ENGINE;
 }
 
 // `resolveMemory` was here and is REMOVED (issue #1165): it was exported, dead (memory/cli.mjs

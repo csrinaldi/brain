@@ -95,13 +95,34 @@ function nearestKnown(path, known) {
 }
 
 /**
+ * #1114 S3.2: `memory.backend` and `vcs.provider` are the keys every refusal, hook and script still
+ * names as the fix, and `readAxis` PREFERS the ADR-0038 shape once the migration wrote it. Without
+ * this, `brain:config set memory.backend plainfiles` on a migrated config would write a key nothing
+ * reads. So on an axis that already has the shape, the legacy write also moves `<axis>.default` and
+ * declares the provider (`{}` when absent, never overwriting an entry's settings). S2 retires the
+ * legacy keys and the fixes name `<axis>.default` instead; this goes with them.
+ */
+const LEGACY_SELECTORS = Object.freeze({ 'memory.backend': 'memory', 'vcs.provider': 'vcs' });
+function mirrorLegacySelector(next, path) {
+  const axis = LEGACY_SELECTORS[path];
+  const node = next[axis];
+  if (!axis || node === null || typeof node !== 'object' || !Object.hasOwn(node, 'default')) return;
+  const value = node[path.split('.')[1]];
+  if (typeof value !== 'string') return;
+  node.default = value;
+  if (value === '') return;
+  if (node.providers === null || typeof node.providers !== 'object' || Array.isArray(node.providers)) node.providers = {};
+  if (!Object.hasOwn(node.providers, value)) node.providers[value] = {};
+}
+
+/**
  * The ONE write path. Refuses closed on an unknown path; migrates first;
  * writes one value. Never touches I/O.
  *
  * @param {{config: object, path: string, value: string, migrations: Array<object>, targetVersion: string}} args
  * @returns {{next: object|null, migrationsApplied: string[], refusal: string|null}}
  */
-export function planConfigWrite({ config, path, value, migrations, targetVersion }) {
+export function planConfigWrite({ config, path, value, migrations, targetVersion, axisContext }) {
   if (hasEmptySegment(path)) {
     return {
       next: null,
@@ -145,7 +166,7 @@ export function planConfigWrite({ config, path, value, migrations, targetVersion
     };
   }
 
-  const { config: migrated, applied } = migrateConfig(config, migrations, targetVersion);
+  const { config: migrated, applied } = migrateConfig(config, migrations, targetVersion, axisContext);
 
   const next = structuredClone(migrated);
   const keys = path.split('.');
@@ -155,6 +176,7 @@ export function planConfigWrite({ config, path, value, migrations, targetVersion
     node = node[key];
   }
   node[keys[keys.length - 1]] = parseValue(value);
+  mirrorLegacySelector(next, path);
 
   return { next, migrationsApplied: applied, refusal: null };
 }

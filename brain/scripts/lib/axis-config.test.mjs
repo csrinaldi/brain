@@ -44,6 +44,21 @@ test('readAxis: the legacy declared-but-empty key is undeclared, as every resolv
   assert.deepEqual(readAxis({ vcs: { provider: '' } }, 'vcs'), { default: '', providers: {}, source: 'none' });
 });
 
+test('readAxis: a shape that is undeclared ("") lets a later legacy value through (S3.2: `brain:config set memory.backend` after the migration)', () => {
+  assert.deepEqual(
+    readAxis({ memory: { default: '', providers: {}, backend: 'plainfiles', lane: { enabled: true } } }, 'memory'),
+    { default: 'plainfiles', providers: { plainfiles: {} }, source: 'legacy' },
+  );
+  assert.deepEqual(
+    readAxis({ vcs: { default: '', providers: { gitlab: { version: '1' } }, provider: 'github' } }, 'vcs'),
+    { default: 'github', providers: { gitlab: { version: '1' }, github: {} }, source: 'legacy' },
+  );
+  // a declared shape default still wins over the legacy key
+  assert.equal(readAxis({ vcs: { default: 'gitlab', providers: { gitlab: {} }, provider: 'github' } }, 'vcs').default, 'gitlab');
+  // undeclared on both sides stays a shape result
+  assert.deepEqual(readAxis({ vcs: { default: '', providers: {} } }, 'vcs'), { default: '', providers: {}, source: 'shape' });
+});
+
 test('readAxis: legacy `harness` feeds platform or sdd by membership, never both', () => {
   assert.equal(readAxis({ harness: 'antigravity' }, 'platform').default, 'antigravity');
   assert.equal(readAxis({ harness: 'antigravity' }, 'sdd').default, '');
@@ -113,6 +128,18 @@ test('validateAxisConfig: default must be a key of providers, per axis; empty is
     assert.equal(validateAxisConfig({ [axis]: { default: 'x' } }).ok, false, `${axis} without providers`);
     assert.equal(validateAxisConfig({ [axis]: { default: '', providers: {} } }).ok, true, `${axis} undeclared`);
   }
+});
+
+test('validateAxisConfig: a shape object without a `default` key is refused (missing-default, #1114 S3.2)', () => {
+  for (const axis of ['vcs', 'memory', 'platform', 'sdd']) {
+    const r = validateAxisConfig({ [axis]: { providers: { github: {} } } });
+    assert.equal(r.ok, false, axis);
+    assert.deepEqual(codes(r), ['missing-default'], axis);
+    assert.equal(r.errors[0].path, `${axis}.default`);
+  }
+  // an axis node that is not the shape at all (no providers, no default) is not this error
+  assert.equal(validateAxisConfig({ sdd: { map: {} } }).ok, true);
+  assert.equal(validateAxisConfig({ memory: { lane: { enabled: true } } }).ok, true);
 });
 
 test('validateAxisConfig: a role engine must be able to execute a stage prompt', () => {

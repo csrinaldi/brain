@@ -88,6 +88,12 @@ export function readAxis(config, axis, { harness = true } = {}) {
   const legacy = legacyValue(isObj(config) ? config : {}, axis, harness);
 
   if (isObj(node) && (has(node, 'default') || has(node, 'providers'))) {
+    // An UNDECLARED shape ("") does not shadow a legacy value written after the migration
+    // (`brain:config set memory.backend x` still targets the legacy key until S2 retires it).
+    if (str(node.default) === '' && legacy !== '') {
+      const providers = isObj(node.providers) ? node.providers : {};
+      return { default: legacy, providers: { ...providers, [legacy]: providers[legacy] ?? {} }, source: 'legacy' };
+    }
     const out = {
       default: str(node.default),
       providers: isObj(node.providers) ? node.providers : {},
@@ -116,6 +122,10 @@ export function validateAxisConfig(config) {
       if (!isObj(node)) continue;
       if (has(node, 'providers') && !isObj(node.providers)) {
         err(axis, `${axis}.providers`, 'providers-not-a-map', `${axis}.providers must be a map of provider name to its settings`);
+      }
+      if (has(node, 'providers') && !has(node, 'default')) {
+        err(axis, `${axis}.default`, 'missing-default',
+          `${axis} has providers but no default key — write "default": "" when the axis is undeclared`);
       }
       if (has(node, 'default') && typeof node.default !== 'string') {
         err(axis, `${axis}.default`, 'default-not-a-string', `${axis}.default must be a provider name ("" when undeclared)`);

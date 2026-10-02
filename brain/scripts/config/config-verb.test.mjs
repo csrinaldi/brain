@@ -131,3 +131,46 @@ test('#1165 planConfigWrite: memory.backend is validated against the closed set 
   const empty = planConfigWrite({ config: { schemaVersion: '1.9.0' }, path: 'memory.backend', value: '""', migrations, targetVersion: '1.9.0' });
   assert.equal(empty.refusal, null, 'clearing to undeclared is allowed');
 });
+
+// ── #1114 S3.2: the legacy selector keys keep working after the axis migration ──────────────
+const AXIS_MIGRATIONS = [
+  { version: '0.3.0', description: 't', defaults: { vcs: { provider: '' } } },
+  { version: '1.9.1', description: 't', defaults: { memory: { backend: '' } } },
+];
+
+test('#1114 S3.2: setting memory.backend on a migrated config moves the axis default too, and declares the provider', () => {
+  const config = { schemaVersion: '1.9.1', memory: { backend: 'engram', default: 'engram', providers: { engram: {} }, lane: { enabled: true } } };
+  const { next, refusal } = planConfigWrite({ config, path: 'memory.backend', value: 'plainfiles', migrations: AXIS_MIGRATIONS, targetVersion: '1.9.1' });
+  assert.equal(refusal, null);
+  assert.equal(next.memory.backend, 'plainfiles');
+  assert.equal(next.memory.default, 'plainfiles');
+  assert.deepEqual(next.memory.providers, { engram: {}, plainfiles: {} });
+  assert.deepEqual(next.memory.lane, { enabled: true });
+});
+
+test('#1114 S3.2: setting vcs.provider on a migrated config does the same; an existing provider entry keeps its settings', () => {
+  const config = { schemaVersion: '0.3.0', vcs: { provider: 'github', default: 'github', providers: { github: {}, gitlab: { version: '17' } } } };
+  const { next } = planConfigWrite({ config, path: 'vcs.provider', value: 'gitlab', migrations: AXIS_MIGRATIONS, targetVersion: '0.3.0' });
+  assert.equal(next.vcs.default, 'gitlab');
+  assert.deepEqual(next.vcs.providers.gitlab, { version: '17' });
+});
+
+test('#1114 S3.2: on an un-migrated config, setting a legacy key writes only that key', () => {
+  const config = { schemaVersion: '1.9.1', memory: { backend: '' } };
+  const { next } = planConfigWrite({ config, path: 'memory.backend', value: 'engram', migrations: AXIS_MIGRATIONS, targetVersion: '1.9.1' });
+  assert.deepEqual(next.memory, { backend: 'engram' });
+});
+
+test('#1114 S3.2: clearing the legacy key clears the axis default and leaves providers alone', () => {
+  const config = { schemaVersion: '1.9.1', memory: { backend: 'engram', default: 'engram', providers: { engram: {} } } };
+  const { next } = planConfigWrite({ config, path: 'memory.backend', value: '', migrations: AXIS_MIGRATIONS, targetVersion: '1.9.1' });
+  assert.equal(next.memory.default, '');
+  assert.deepEqual(next.memory.providers, { engram: {} });
+});
+
+test('#1114 S3.2: planConfigWrite hands the migrations the axis context it was given', () => {
+  const seen = [];
+  const migrations = [{ version: '0.1.0', description: 't', migrate: (c, h) => { seen.push(h.axisContext); return c; } }];
+  planConfigWrite({ config: { schemaVersion: '0.0.0', docs: { language: 'en' } }, path: 'docs.language', value: 'es', migrations: [...migrations, { version: '0.2.0', description: 't', defaults: { docs: { language: 'en' } } }], targetVersion: '0.2.0', axisContext: { marker: 1 } });
+  assert.deepEqual(seen, [{ marker: 1 }]);
+});

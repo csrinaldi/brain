@@ -160,7 +160,9 @@ test('ensureBrainConfig: creates config when missing with github identity', () =
     assert.equal(cfg.vcs.provider, 'github');
     assert.equal(cfg.project.gitHost, 'github.com');
     assert.equal(cfg.project.slug, 'owner/repo');
-    assert.equal(cfg.schemaVersion, '1.9.1', 'memory.backend (1.9.1, issue #1165) is now the latest — the 0.6.0 memory.dualWrite gap (D3/C4, issue #229) stays a deliberate, never-reused retirement mark');
+    assert.equal(cfg.schemaVersion, '1.11.1', 'the ADR-0038 axis-shape migration (1.11.1, issue #1114 S3.2) is now the latest — the 0.6.0 memory.dualWrite gap (D3/C4, issue #229) stays a deliberate, never-reused retirement mark');
+    assert.equal(cfg.platform, undefined, 'a fresh config carries NO axis shape yet: the 1.11.1 entry needs the env context buildDefaultConfig cannot read, so it is a no-op there; env:init declaring each axis is the open S3 task');
+    assert.equal(cfg.vcs.default, undefined);
     assert.equal(cfg.memory.backend, '', 'memory.backend ships EMPTY (undeclared): a default would choose a backend for a team that never chose one (#1165) — env:init asks and writes it');
     assert.deepEqual(cfg.sdd.map, {}, 'sdd.map ships EMPTY: a routed cold-review would spawn an engine no consumer asked for');
     assert.deepEqual(cfg.sdd.stages, {}, 'sdd.stages ships EMPTY: the four lifecycle stages live in sdd-layout.mjs LIFECYCLE_STAGES, never duplicated into JSON (#456)');
