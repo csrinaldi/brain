@@ -1646,6 +1646,35 @@ test('#1188: a `resolve-sweep` step exists after sweep and runs only when the sw
   assert.match(block, /alarm\.mjs resolve "\$RUN_URL" sweep/);
 });
 
+test("#1235: `resolve-sweep` never closes an alarm this same run filed — gated on the sweep's `alarm` output being empty", () => {
+  const text = readFileSync(POSTMERGE_YML, 'utf8');
+  const block = stepBlock(text, 'resolve-sweep');
+  const ifLine = block.split('\n').find((l) => l.trim().startsWith('if:')) || '';
+  assert.match(ifLine, /steps\.sweep\.outcome == 'success'/);
+  assert.match(ifLine, /steps\.sweep\.outputs\.alarm == ''/,
+    'the sweep exits 0 after filing its alarm; outcome alone would close it in the same run (#1235)');
+  // One rule, every path: each `sweep` alarm.mjs filing is followed by an alarm= output write.
+  const sweep = stepBlock(text, 'sweep');
+  const filings = sweep.split('alarm.mjs "$label"').length - 1;
+  const records = sweep.split('echo "alarm=${label}" >> "$GITHUB_OUTPUT"').length - 1;
+  assert.ok(filings >= 1, 'the sweep step files alarms');
+  assert.equal(records, filings, 'every alarm-filing path in the sweep records alarm= to GITHUB_OUTPUT');
+});
+
+test("#1235: `resolve-audit` cannot run in a run that filed an audit-class alarm (its gate is code 0 + advance success; every filer exits non-zero)", () => {
+  const text = readFileSync(POSTMERGE_YML, 'utf8');
+  const ifLine = stepBlock(text, 'resolve-audit').split('\n').find((l) => l.trim().startsWith('if:')) || '';
+  assert.match(ifLine, /steps\.audit\.outputs\.code == '0'/);
+  assert.match(ifLine, /steps\.advance\.outcome == 'success'/);
+  for (const id of ['window', 'revert', 'uncomputable']) {
+    const b = stepBlock(text, id);
+    const lastExit = [...b.matchAll(/^\s*exit (\d+)\s*$/gm)].pop();
+    assert.ok(lastExit && Number(lastExit[1]) !== 0, `${id} ends its alarm path non-zero, so later non-always() steps never run`);
+  }
+  assert.match(stepBlock(text, 'revert').split('\n').find((l) => l.trim().startsWith('if:')) || '', /code == '1'/);
+  assert.match(stepBlock(text, 'uncomputable').split('\n').find((l) => l.trim().startsWith('if:')) || '', /code == '2'/);
+});
+
 test('#1188: least privilege — closing alarms adds NO permission scope (issues: write was already held for filing)', () => {
   const text = readFileSync(POSTMERGE_YML, 'utf8');
   const m = text.match(/^permissions:\s*\{([^}]*)\}/m);
