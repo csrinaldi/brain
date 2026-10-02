@@ -81,7 +81,7 @@ Every axis is one object in the tracked `brain.config.json`:
 - **Undeclared is `"default": ""`**, the empty-string convention `vcs.provider` and
   `memory.backend` already use (`axis-selector.mjs:20-22`).
 
-### 2. Four axes, one resolver, one precedence
+### 2. Four axes, one resolver, one precedence (VCS excepted at one level)
 
 The axes are `vcs`, `memory`, `platform` and `sdd`. Each selector is `<axis>.default`, read by one
 `resolveAxis` (#1114 S2) built on `axis-selector.mjs`, with one precedence:
@@ -261,7 +261,7 @@ consumer is asked.
   edit `.env`. For an existing `.env`, `brain:doctor` warns when an axis selector there shadows the
   axis `default` in config, and prints the command that removes it.
 - **The value an existing consumer runs today is written into config.** It is taken from the
-  process env or `.env` when either declares it, and otherwise from today's default: `claude` for
+  process env or `.env` when either declares it (VCS reads no `.env`, §2), and otherwise from today's default: `claude` for
   `platform`, `gentle-ai` for `sdd`. An undeclared `memory` or `vcs` stays undeclared, since it
   refuses today too.
 - **Old keys keep working as a read-only alias for one minor version**, then refuse with a named
