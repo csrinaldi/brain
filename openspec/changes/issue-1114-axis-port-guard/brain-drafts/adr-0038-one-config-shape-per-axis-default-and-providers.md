@@ -155,9 +155,18 @@ Consequences for the ADRs this touches:
 
 ### 6. `version` is verified
 
-`providers.<name>.version` is what the team expects to run. `brain:env:init` and `brain:doctor`
-(#1130) compare it with the installed provider and report the mismatch. For the `brain` provider,
-`"self"` means the version of the installed brain package.
+`providers.<name>.version` is optional. When present, it is what the team expects to run, and
+`brain:env:init` and `brain:doctor` (#1130) compare it with the installed provider and report the
+mismatch. Each provider entry ends in one of three reported states:
+
+| State | When |
+|---|---|
+| verified | `version` is declared and the installed provider matches it |
+| unverified | `version` is absent: a migration or `brain:config -- set` created the entry as `{}` (Ratified points 2 and 3); when the provider declares a version probe, the detected version and the pin command are printed |
+| unverifiable | the provider declares no version probe, so neither a match nor a mismatch can be measured |
+
+For the `brain` provider, `"self"` means the version of the installed brain package, which is
+always verifiable.
 
 ### 7. Migration: additive, through `brain:upgrade`, and no consumer changes behaviour
 
