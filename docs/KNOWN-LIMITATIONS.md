@@ -67,13 +67,6 @@ For the plan to close this class of gap, see the
   behind the `session:start` / `day:start` entry below (#1115). **Workaround:** none needed for
   correctness; ignore the line.
 
-- **A same-day lane re-ship after squash-merging the lane PR refuses as diverged.**
-  ([#1190](https://github.com/csrinaldi/brain/issues/1190), reproduced in both phase-1 exit
-  runs: `openspec/changes/issue-1185-*/evidence/brain-test-plainfiles-60-seam2-inject.txt` and
-  `openspec/changes/issue-1204-*/evidence/plainfiles-61-seam2-inject.txt`) A merged lane branch is not deleted from the remote; a second
-  `brain:memory:ship` the same day refused with `memory.ship.diverged`. **Workaround:** delete
-  the merged remote lane branch (`git push origin --delete memory/<branch>`), then ship again.
-
 - **`search` serves a superseded record next to its correction, both unmarked.**
   ([#1117](https://github.com/csrinaldi/brain/issues/1117)) The supersession link
   exists in the data (`supersedes`) but isn't surfaced to the reader, so a stale claim

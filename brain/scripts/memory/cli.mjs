@@ -637,6 +637,9 @@ if (op === "ship") {
     }
     if (!result.dryRun) {
       if (result.pushed) console.error(`memory/cli: ${await t("memory.ship.pushed", { ref: result.ref })}`);
+      if (result.replaced) {
+        console.error(`memory/cli: ${await t("memory.ship.replaced", { branch: result.branch, number: result.replaced.mergedPr })}`);
+      }
       if (result.pr && result.pr.url === null && result.pr.number !== null) {
         console.error(`memory/cli: ${await t("memory.ship.prExisting", { number: result.pr.number })}`);
       }
@@ -677,6 +680,8 @@ if (op === "ship") {
     // for each — never a single message claiming one outcome for both.
     const key = err?.raced ? "raced"
       : err?.badHost ? "badHost"
+      : err?.leaseStale ? "leaseStale"
+      : err?.replaceRefused ? "replaceRefused"
       : err?.diverged ? "diverged"
       : err?.pushFailed ? "pushFailed"
       : err?.prLookupFailed ? (err.pushed ? "prLookupFailedAfterPush" : "prLookupFailed")

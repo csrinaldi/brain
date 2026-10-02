@@ -34,7 +34,7 @@ const GIT_ENV = {
 };
 
 function git(cwd, ...args) {
-  const r = spawnSync('git', args, { cwd, encoding: 'utf8', env: GIT_ENV });
+  const r = spawnSync('git', args, { cwd, encoding: 'utf8', env: GIT_ENV, timeout: 30_000, stdio: ['ignore', 'pipe', 'pipe'] });
   if (r.status !== 0) throw new Error(`git ${args.join(' ')} (cwd=${cwd}): ${r.stderr}`);
   return r.stdout;
 }
@@ -131,6 +131,8 @@ function runCli(root, ...args) {
       MEMORY_BACKEND: 'no-such-backend',
       BRAIN_VCS_TEST_MODULE: FAKE_VCS_MODULE,
     },
+    timeout: 60_000,
+    stdio: ['ignore', 'pipe', 'pipe'],
   });
 }
 
@@ -846,4 +848,88 @@ test('brain:memory:ship resolves from package.json, beside the other memory:* sc
   // #1012: the manual invoker declares itself at the script level — every
   // caller of cli.mjs ship must pass a marker, including this one.
   assert.equal(pkg.scripts['memory:ship'], 'node ./brain/scripts/memory/cli.mjs ship --invoker manual');
+});
+
+// ── #1190 — a same-day re-ship after a squash, the remote branch surviving ──
+
+/** Ship-then-squash fixture at the CLI's own host/date (see
+ * fixtureRepoDiverged): the lane is on origin at its pre-squash tip, main
+ * gained the lane's tree by a squash, and a NEW record waits to be shipped.
+ * Returns the branch the CLI will compute. */
+function fixtureRepoSquashedSurviving() {
+  const host = hostname();
+  const date = new Date().toISOString().slice(0, 10);
+  const { mainDir, originDir } = fixtureRepo({ withCandidate: true });
+  const first = collectLane({ root: mainDir, host, date });
+  git(mainDir, 'push', 'origin', `${first.ref}:${first.ref}`);
+  const mainHead = git(mainDir, 'rev-parse', 'main').trim();
+  const laneTree = git(mainDir, 'rev-parse', `${first.commit}^{tree}`).trim();
+  const squash = git(mainDir, 'commit-tree', laneTree, '-p', mainHead, '-m', 'squash merge lane').trim();
+  git(mainDir, 'update-ref', 'refs/heads/main', squash);
+  git(mainDir, 'push', 'origin', 'main');
+  writeFileSync(
+    join(mainDir, '.memory', 'records', '2026-09-rec-2222222222222222.jsonl'),
+    JSON.stringify({ id: 'rec-2222222222222222', ts: '2026-09-09T00:00:00Z', actor: '@t', actorKind: 'agent', type: 'discovery', project: 'brain', content: 'y' }) + '\n',
+    'utf8',
+  );
+  return { mainDir, originDir, ref: first.ref, branch: first.ref.replace('refs/heads/', ''), preSquashTip: first.commit };
+}
+
+function runShipWithScript(mainDir, script) {
+  const scriptPath = writeVcsTestScript(testTmp('cli-ship-fake-vcs-'), script);
+  return spawnSync(process.execPath, [CLI, 'ship'], {
+    encoding: 'utf8',
+    env: {
+      ...process.env, BRAIN_MEMORY_TEST_ROOT: mainDir, MEMORY_BACKEND: 'no-such-backend',
+      BRAIN_VCS_TEST_MODULE: FAKE_VCS_MODULE, BRAIN_VCS_TEST_SCRIPT: scriptPath,
+    },
+    timeout: 60_000,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+}
+
+test('#1190: a same-day re-ship after a squash exits 0 and prints memory.ship.replaced', () => {
+  const { mainDir, originDir, branch, preSquashTip } = fixtureRepoSquashedSurviving();
+  const run = runShipWithScript(mainDir, {
+    mrList: [{ number: 5, headBranch: branch, state: 'closed', merged: true }],
+    mrCreate: { url: 'https://fake-vcs.invalid/pull/6' },
+    mrAutoMerge: { enabled: true, url: null },
+  });
+
+  assert.equal(run.status, 0, run.stderr);
+  assert.ok(
+    run.stderr.includes(en['memory.ship.replaced'].replace('{branch}', branch).replace('{number}', '5')),
+    `expected the replaced evidence line on stderr; got: ${run.stderr}`,
+  );
+  const remoteSha = git(originDir, 'rev-parse', `refs/heads/${branch}`).trim();
+  assert.notEqual(remoteSha, preSquashTip, 'the surviving lane branch was replaced');
+});
+
+test("#1190: a refused forced update exits 1 with memory.ship.replaceRefused's en text, origin unchanged", () => {
+  const { mainDir, originDir, branch, preSquashTip } = fixtureRepoSquashedSurviving();
+  git(originDir, 'config', 'receive.denyNonFastForwards', 'true');
+  const run = runShipWithScript(mainDir, {
+    mrList: [{ number: 5, headBranch: branch, state: 'closed', merged: true }],
+    mrCreate: { url: 'https://fake-vcs.invalid/pull/6' },
+    mrAutoMerge: { enabled: true, url: null },
+  });
+
+  assert.equal(run.status, 1);
+  const prefix = en['memory.ship.replaceRefused'].split('{message}')[0];
+  assert.ok(run.stderr.includes(prefix), `expected the replaceRefused en text; got: ${run.stderr}`);
+  assert.doesNotMatch(run.stderr, /nothing was forced/, 'must not be mislabelled as a plain divergence');
+  assert.equal(git(originDir, 'rev-parse', `refs/heads/${branch}`).trim(), preSquashTip);
+});
+
+test('#1190: leaseStale, replaceRefused and replaced exist in both catalogs, and the CLI maps both errors before diverged', () => {
+  for (const key of ['memory.ship.leaseStale', 'memory.ship.replaceRefused', 'memory.ship.replaced']) {
+    assert.equal(typeof en[key], 'string', `en.mjs must carry ${key}`);
+    assert.equal(typeof es[key], 'string', `es.mjs must carry ${key}`);
+  }
+  const source = readFileSync(CLI, 'utf8');
+  const leaseIdx = source.indexOf('err?.leaseStale ? "leaseStale"');
+  const refusedIdx = source.indexOf('err?.replaceRefused ? "replaceRefused"');
+  const divergedIdx = source.indexOf('err?.diverged ? "diverged"');
+  assert.ok(leaseIdx !== -1 && refusedIdx !== -1 && divergedIdx !== -1);
+  assert.ok(leaseIdx < divergedIdx && refusedIdx < divergedIdx, 'leaseStale carries diverged:true, so it must be mapped first');
 });
