@@ -4,8 +4,12 @@
 // RULE ZERO (#878): every fact the UI shows is reconstructible from the
 // repository plus the tickets. So every row here names its source — a `path`,
 // a `file`, a PR number, an issue number — and nothing here is ever written:
-// no cache, no store, no file. A snapshot that persisted would be the second
-// source of truth the epic forbids.
+// no store, no file. A snapshot that persisted would be the second source of
+// truth the epic forbids. One injected thing is allowed (#1201 D36): an
+// in-memory memo of immutable-object reads (`_remoteCache`, keyed by commit
+// sha), owned by the caller. It holds no fact the tree does not, a commit
+// cannot change under its key, and the CLI passes none, so the verb is always
+// cold and deterministic.
 //
 // SINGLE ACCESSOR RULE (RFC §2.1): this module IMPORTS brain's pure functions —
 // `buildGraph`, the `sdd-layout` accessors, `deriveTasks`, `parseVerdict`,
@@ -38,6 +42,7 @@ import { requiredArtifactsFor, resolveTier } from '../vcs/governance-tiers.mjs';
 import { parseVerdict } from '../review/lib/parse-verdict.mjs';
 import { readRecords, recordFilename } from '../memory/lib/store.mjs';
 import { parseCanonicalIssueBranch } from '../lib/branch-grammar.mjs';
+import { readRemoteChanges, REMOTE_READ_BUDGET } from './remote-changes.mjs';
 
 export const SNAPSHOT_TIER = 'committed';
 export const RECORDS_DIR = '.memory/records';
@@ -392,9 +397,10 @@ async function readForge({ vcs, project }) {
  * buildSnapshot() — the one shape every consumer reads (R879-1).
  *
  * @param {{root?: string, now?: string|Date, vcs?: object|null, project?: string|null,
- *   _read?: Function, _list?: Function, _exists?: Function, _run?: Function}} opts
+ *   _read?: Function, _list?: Function, _exists?: Function, _run?: Function,
+ *   _remoteCache?: Map<string, object>|null, remoteBudget?: number}} opts
  */
-export async function buildSnapshot({ root = process.cwd(), now, vcs = null, project = null, _read, _list, _exists, _run } = {}) {
+export async function buildSnapshot({ root = process.cwd(), now, vcs = null, project = null, _read, _list, _exists, _run, _remoteCache = null, remoteBudget = REMOTE_READ_BUDGET } = {}) {
   const read = _read ?? ((p) => readFileSync(join(root, p), 'utf8'));
   const list = _list ?? ((p) => readdirSync(join(root, p)));
   const exists = _exists ?? ((p) => existsSync(join(root, p)));
@@ -429,6 +435,7 @@ export async function buildSnapshot({ root = process.cwd(), now, vcs = null, pro
     changes: readChanges({ root, tier: typeof tier === 'string' ? tier : null, _read: read, _list: list, _exists: exists }),
     prs: forge.prs,
     reviews: forge.reviews,
+    remoteChanges: readRemoteChanges({ run, prs: forge.prs, cache: _remoteCache, budget: remoteBudget }),
     records,
     adrs,
     antiPatterns: readAntiPatterns({ root, _read: read, _list: list }),
@@ -449,6 +456,7 @@ export function renderSnapshotText(s) {
     line('graph', s.graph, (g) => `${g.nodes.length} node(s), ${g.edges.length} edge(s)${g.issuesUnreadable.length ? `, ${g.issuesUnreadable.length} issue body(ies) unreadable` : ''}`),
     line('changes', s.changes, (c) => `${c.length} change dir(s)`),
     line('prs', s.prs, (p) => `${p.length} open`),
+    line('remote', s.remoteChanges, (r) => `${r.branches.length} branch(es), ${r.unjoined.length} unjoined, ${r.hidden.base + r.hidden.lane + r.hidden.merged} hidden${r.deferred ? `, ${r.deferred} not read yet` : ''}`),
     line('reviews', s.reviews, (r) => `${r.filter((x) => x.ok).length} thread(s) read, ${r.filter((x) => !x.ok).length} unreadable`),
     line('records', s.records, (r) => `${r.records.length} record(s), ${r.duplicates.ids} duplicated id(s)`),
     line('adrs', s.adrs, (a) => `${a.filter((x) => x.ok).length} parsed, ${a.filter((x) => !x.ok).length} unreadable`),

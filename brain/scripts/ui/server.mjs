@@ -14,18 +14,20 @@
 // SAME held value, refreshed only by a completed poll or a debounced watch
 // event, never per-request.
 //
-// Every route accepts GET/HEAD only, EXCEPT the three poller controls
-// (`/api/poll/pause|resume|once`), which accept POST only — the method
+// Every route accepts GET/HEAD only, EXCEPT the poller controls
+// (`/api/poll/pause|resume|once`) and the remote refresh (`/api/remotes/refresh`,
+// #1201), which accept POST only — the method
 // check runs BEFORE routing (D7), so any other verb gets 405 on any path,
 // known or unknown.
 
 import { createServer as createHttpServer } from 'node:http';
-import { gitRun, gitErrorLine } from './git-run.mjs';
+import { gitRun, gitRunAsync, gitErrorLine, FETCH_TIMEOUT_MS } from './git-run.mjs';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { buildSnapshot } from '../status/snapshot.mjs';
+import { REMOTE_FOLLOWUP_MS, REMOTE_READ_BUDGET } from '../status/remote-changes.mjs';
 import { createForgeCache } from './forge-cache.mjs';
 import { diffSections } from './diff.mjs';
 import { createWatcher, resolveGitCommonDir } from './watcher.mjs';
@@ -54,12 +56,14 @@ const STATIC_FILES = new Map([
   ['/vendor/marked.esm.js', { dir: VENDOR_DIR, name: 'marked.esm.js', type: JS_TYPE }],
 ]);
 const LIB_MODULE_RE = /^\/lib\/([a-z][a-z0-9-]*)\.mjs$/;
-const POST_ONLY_PATHS = new Set(['/api/poll/pause', '/api/poll/resume', '/api/poll/once']);
+const POST_ONLY_PATHS = new Set(['/api/poll/pause', '/api/poll/resume', '/api/poll/once', '/api/remotes/refresh']);
+/** R1 + D39: the one fetch, pinned. `--no-write-fetch-head` keeps every write under refs/remotes and the object store (AC4). */
+const FETCH_ARGV = Object.freeze(['fetch', 'origin', '--no-tags', '--prune', '--no-write-fetch-head']);
 /** `GET /api/change/<N digits>` — a non-numeric id falls through to the 404 below (D8's `change-route.mjs`). */
 const CHANGE_ROUTE_RE = /^\/api\/change\/(\d+)$/;
 
 /** Every route this server knows — the R881-10 S3 guard test pins this set: no MCP resource route, no heartbeat/agent-pulse endpoint. */
-export const KNOWN_ROUTES = Object.freeze(['/', '/app.js', '/app.css', '/lib/{module}.mjs', '/vendor/marked.esm.js', '/api/snapshot', '/api/stream', '/api/poll/pause', '/api/poll/resume', '/api/poll/once', '/api/change/{issue}']);
+export const KNOWN_ROUTES = Object.freeze(['/', '/app.js', '/app.css', '/lib/{module}.mjs', '/vendor/marked.esm.js', '/api/snapshot', '/api/stream', '/api/poll/pause', '/api/poll/resume', '/api/poll/once', '/api/remotes/refresh', '/api/change/{issue}']);
 
 const NO_FORGE_REASON = 'no forge port was supplied to the poller';
 const noForgeVcs = {
@@ -80,6 +84,7 @@ const noForgeVcs = {
  *   forgeSource?: object|null, forgeUnavailable?: string|null, interval?: number, poll?: boolean,
  *   gitCommonDir?: string|null, _watch?: Function, _run?: Function, _readdir?: Function,
  *   _setTimeout?: Function, _clearTimeout?: Function, _recomputeCurrent?: () => Promise<object>,
+ *   remoteBudget?: number, _snapshotRun?: Function, _fetchRun?: Function,
  * }} opts
  */
 export function createUiServer({
@@ -87,7 +92,7 @@ export function createUiServer({
   forgeSource = null, forgeUnavailable = null, interval = 60000, poll = true,
   gitCommonDir = null, _watch, _run, _readdir,
   _setTimeout = setTimeout, _clearTimeout = clearTimeout,
-  _recomputeCurrent = null, onServerError = null} = {}) {
+  _recomputeCurrent = null, onServerError = null, remoteBudget = REMOTE_READ_BUDGET, _snapshotRun, _fetchRun } = {}) {
   // `opts.maxBuffer` is the only option a caller may pass (#1198): a document read sizes its own buffer.
   const run = _run ?? gitRun(root);
 
@@ -182,15 +187,28 @@ export function createUiServer({
   // sections here says the real reason in band without `buildSnapshot`
   // ever seeing a live port (D1 is unchanged: no forge call happens either
   // way).
+  // D36: the memo of immutable-object reads the remote section may use. It lives
+  // here, never in the snapshot, so the CLI stays cold and deterministic.
+  const remoteCache = new Map();
   const computeSnapshot = _recomputeCurrent ?? (async () => {
-    const snapshot = await buildSnapshot({ root, now: _now(), vcs: forgeVcs, project });
+    const snapshot = await buildSnapshot({ root, now: _now(), vcs: forgeVcs, project, _remoteCache: remoteCache, remoteBudget, ...(_snapshotRun ? { _run: _snapshotRun } : {}) });
     if (!forgeUnavailable) return snapshot;
     const unreachable = { ok: false, reason: forgeUnavailable };
     return { ...snapshot, graph: unreachable, prs: unreachable, reviews: unreachable };
   });
 
+  // D36: while the remote section left branches `deferred` (over the per-build
+  // read budget), ONE follow-up recompute is armed; each build re-arms it only if
+  // something is still deferred, so the chain ends by itself at 0 and never stacks.
+  let followUp = null;
+  function armRemoteFollowUp() {
+    if (followUp !== null || !(current?.remoteChanges?.value?.deferred > 0)) return;
+    followUp = _setTimeout(() => { followUp = null; return recomputeAndBroadcast({ causes: ['remote'] }); }, REMOTE_FOLLOWUP_MS);
+  }
+
   async function recomputeCurrent() {
     current = await computeSnapshot();
+    armRemoteFollowUp();
     return current;
   }
 
@@ -229,10 +247,22 @@ export function createUiServer({
     } catch { /* a failed recompute leaves `current` at its last good value; nothing to broadcast */ }
   }
 
+  // D39/D40: the ONLY fetch this server runs. Asynchronous (the event loop never
+  // waits on a network), killed at FETCH_TIMEOUT_MS, and reported as one line.
+  // Its two callers are the poller's timer and `POST /api/remotes/refresh`.
+  const runFetch = _fetchRun ?? gitRunAsync(root);
+  async function fetchRemotes() {
+    try {
+      await runFetch('git', [...FETCH_ARGV], { timeout: FETCH_TIMEOUT_MS });
+    } catch (err) {
+      throw new Error(err?.killed ? `fetch timed out after ${FETCH_TIMEOUT_MS} ms` : gitErrorLine(err));
+    }
+  }
+
   const watcher = createWatcher({ root, gitCommonDir, _watch, _run: run, _readdir, _now, _setTimeout, _clearTimeout, onRecompute: recomputeAndBroadcast });
   const poller = createPoller({
     vcs: forgeSource ?? noForgeVcs, cache: forgeCache, project, interval, enabled: poll,
-    initialError: forgeUnavailable, _setTimeout, _clearTimeout, _now,
+    fetchRemotes, initialError: forgeUnavailable, _setTimeout, _clearTimeout, _now,
     onTick: () => { recomputeAndBroadcast({ causes: ['poll'] }); },
   });
 
@@ -276,6 +306,7 @@ export function createUiServer({
     if (pathname === '/api/poll/pause') return servePollControl(res, poller.pause);
     if (pathname === '/api/poll/resume') return servePollControl(res, poller.resume);
     if (pathname === '/api/poll/once') return servePollControl(res, poller.once);
+    if (pathname === '/api/remotes/refresh') return servePollControl(res, poller.refreshRemotes);
     const changeMatch = CHANGE_ROUTE_RE.exec(pathname);
     if (changeMatch) return serveChange(res, Number(changeMatch[1]));
     res.writeHead(404, { 'content-type': 'text/plain' });
@@ -371,6 +402,7 @@ export function createUiServer({
       });
     },
     close() {
+      if (followUp !== null) { _clearTimeout(followUp); followUp = null; }
       poller.close();
       watcher.close();
       for (const client of clients) { try { client.end(); } catch { /* best effort */ } }
@@ -495,6 +527,7 @@ export async function main(argv = [], deps = {}) {
     root: parsed.root, vcs: deps.vcs ?? null, project,
     forgeSource, forgeUnavailable, interval: parsed.interval, poll: parsed.poll,
     _recomputeCurrent: deps._recomputeCurrent ?? null,
+    _fetchRun: deps._fetchRun, // test seam only: undefined keeps the production default (a real fetch)
     onServerError: (err) => error(`✗ server error: ${err?.message ?? err} — still serving`),
   });
   try {

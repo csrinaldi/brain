@@ -652,3 +652,218 @@ test("#1015 cold review: close() clears the countdown — a poll that will never
   assert.equal(poller.state().nextAttemptAt, null, 'after close() no tick will ever fire, so the countdown says nothing rather than a stale future time');
   assert.equal(scheduler.pending(), 0, 'and the timer it was counting down to is gone');
 });
+
+// ── #1201 D40: the remotes lane ──────────────────────────────────────────────
+
+/** A `fetchRemotes` spy: records calls, can be made to fail, and can be held open to prove single flight. */
+function fetchSpy({ events = [], fail = null, hold = false } = {}) {
+  const spy = { calls: 0, release: null };
+  spy.fn = async () => {
+    spy.calls += 1;
+    events.push('fetch:start');
+    if (hold) await new Promise((resolve) => { spy.release = resolve; });
+    events.push('fetch:end');
+    if (spy.fail ?? fail) throw new Error(spy.fail ?? fail);
+  };
+  return spy;
+}
+
+function remotesPoller({ fetchRemotes, vcs, enabled = true, onTick, now = { t: 0 } } = {}) {
+  const scheduler = fakeScheduler();
+  const callLog = [];
+  const poller = createPoller({
+    vcs: vcs ?? makeVcs({ callLog }), cache: createForgeCache(), project: 'o/r', interval: 60000, enabled, fetchRemotes,
+    _setTimeout: scheduler.setTimeout, _clearTimeout: scheduler.clearTimeout, _now: () => new Date(now.t), ...(onTick ? { onTick } : {}),
+  });
+  return { poller, scheduler, callLog, now };
+}
+
+const ONCE_COLLAPSE_MS = 5000;
+
+test('#1201 R1201-9: a tick fetches once, and onTick fires only after BOTH lanes settle', async () => {
+  const events = [];
+  const spy = fetchSpy({ events });
+  const { poller } = remotesPoller({ fetchRemotes: spy.fn, onTick: () => events.push('onTick') });
+  await poller.start();
+  assert.equal(spy.calls, 1);
+  assert.deepEqual(events, ['fetch:start', 'fetch:end', 'onTick']);
+  poller.close();
+});
+
+test('#1201 R1201-9: a paused poller does not fetch on its timer; refreshRemotes() fetches while paused', async () => {
+  const spy = fetchSpy();
+  const { poller, scheduler } = remotesPoller({ fetchRemotes: spy.fn, enabled: false });
+  await poller.start();
+  assert.equal(spy.calls, 0);
+  assert.equal(scheduler.pending(), 0, 'no timer, so no tick can fetch');
+  await poller.refreshRemotes();
+  assert.equal(spy.calls, 1);
+  poller.close();
+});
+
+test('#1201 R1201-9 W3: a forge-less poller (initialError) still fetches on its timer; the forge lane never runs', async () => {
+  const spy = fetchSpy();
+  const callLog = [];
+  const scheduler = fakeScheduler();
+  const poller = createPoller({
+    vcs: makeVcs({ callLog }), cache: createForgeCache(), project: 'o/r', interval: 60000, fetchRemotes: spy.fn,
+    initialError: 'no VCS token', _setTimeout: scheduler.setTimeout, _clearTimeout: scheduler.clearTimeout, _now: () => new Date(0),
+  });
+  await poller.start();
+  assert.equal(spy.calls, 1, 'the first tick fetched');
+  assert.equal(scheduler.pending(), 1, 'the timer is armed');
+  await scheduler.runNext();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(spy.calls, 2, 'the second tick fetched');
+  assert.deepEqual(callLog, [], 'the forge port was never called');
+  assert.match(poller.state().lastError, /no VCS token/);
+  poller.close();
+});
+
+test('#1201 R1201-9 W3: a forge-less poller the USER paused (--no-poll) does not fetch on a timer', async () => {
+  const spy = fetchSpy();
+  const scheduler = fakeScheduler();
+  const poller = createPoller({
+    vcs: makeVcs({ callLog: [] }), cache: createForgeCache(), project: 'o/r', interval: 60000, fetchRemotes: spy.fn, enabled: false,
+    initialError: 'no VCS token', _setTimeout: scheduler.setTimeout, _clearTimeout: scheduler.clearTimeout, _now: () => new Date(0),
+  });
+  await poller.start();
+  assert.equal(spy.calls, 0);
+  assert.equal(scheduler.pending(), 0);
+  await poller.refreshRemotes();
+  assert.equal(spy.calls, 1, 'only the explicit refresh fetches');
+  poller.close();
+});
+
+test('#1201 R1201-9: two refreshes within ONCE_COLLAPSE_MS run one fetch; one after the window runs another', async () => {
+  const spy = fetchSpy();
+  const { poller, now } = remotesPoller({ fetchRemotes: spy.fn, enabled: false });
+  await poller.refreshRemotes();
+  now.t += 1000;
+  await poller.refreshRemotes();
+  assert.equal(spy.calls, 1);
+  now.t += ONCE_COLLAPSE_MS;
+  await poller.refreshRemotes();
+  assert.equal(spy.calls, 2);
+  poller.close();
+});
+
+test('#1201 D40: single flight — a tick and a second refresh during an in-flight fetch never start another', async () => {
+  const spy = fetchSpy({ hold: true });
+  const { poller, now } = remotesPoller({ fetchRemotes: spy.fn, enabled: false });
+  const first = poller.refreshRemotes();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(poller.state().remotes.inFlight, true);
+  now.t += ONCE_COLLAPSE_MS * 2;
+  const second = poller.refreshRemotes();
+  const once = poller.once(); // a whole tick: its remotes lane joins the one in flight
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(spy.calls, 1);
+  spy.release();
+  await Promise.all([first, second, once]);
+  assert.equal(spy.calls, 1);
+  assert.equal(poller.state().remotes.inFlight, false);
+  poller.close();
+});
+
+test('#1201 D40: one failing lane never skips the other, in either direction', async () => {
+  const log = [];
+  const failingVcs = { ...makeVcs({ callLog: log }), issueList: async () => { log.push('issueList'); throw new Error('forge down'); } };
+  const spy = fetchSpy();
+  const a = remotesPoller({ fetchRemotes: spy.fn, vcs: failingVcs });
+  await a.poller.start();
+  assert.equal(spy.calls, 1, 'the forge failed, the fetch still ran');
+  assert.equal(a.poller.state().lastError, 'forge down');
+  assert.equal(a.poller.state().remotes.lastError, null);
+  a.poller.close();
+
+  const callLog = [];
+  const bad = fetchSpy({ fail: 'fatal: Could not resolve host' });
+  const b = remotesPoller({ fetchRemotes: bad.fn, vcs: makeVcs({ callLog }) });
+  await b.poller.start();
+  assert.ok(callLog.includes('issueList'), 'the fetch failed, the forge lane still ran');
+  assert.equal(b.poller.state().lastError, null);
+  b.poller.close();
+});
+
+test('#1201 R1201-11: a failed fetch sets lastError and keeps lastOkAt; a later success clears the error and moves lastOkAt', async () => {
+  const spy = fetchSpy();
+  const { poller, now } = remotesPoller({ fetchRemotes: spy.fn, enabled: false });
+  assert.deepEqual(poller.state().remotes, { lastAttemptAt: null, lastOkAt: null, lastError: null, inFlight: false });
+  now.t = Date.UTC(2026, 8, 1, 10, 0, 0);
+  await poller.refreshRemotes();
+  const ok = poller.state().remotes;
+  assert.equal(ok.lastOkAt, '2026-09-01T10:00:00.000Z');
+  assert.equal(ok.lastError, null);
+
+  spy.fail = 'fatal: Could not resolve host';
+  now.t += 60000;
+  await poller.refreshRemotes();
+  const failed = poller.state().remotes;
+  assert.equal(failed.lastError, 'fatal: Could not resolve host');
+  assert.equal(failed.lastOkAt, '2026-09-01T10:00:00.000Z', 'the last good time is kept');
+  assert.equal(failed.lastAttemptAt, '2026-09-01T10:01:00.000Z');
+
+  spy.fail = null;
+  now.t += 60000;
+  await poller.refreshRemotes();
+  assert.equal(poller.state().remotes.lastError, null);
+  assert.equal(poller.state().remotes.lastOkAt, '2026-09-01T10:02:00.000Z');
+  poller.close();
+});
+
+test('#1201 D40: with no fetchRemotes the lane is a no-op and refreshRemotes() still answers', async () => {
+  const { poller } = remotesPoller({});
+  await poller.start();
+  const state = await poller.refreshRemotes();
+  assert.deepEqual(state.remotes, { lastAttemptAt: null, lastOkAt: null, lastError: null, inFlight: false });
+  poller.close();
+});
+
+// ── #1201 D40: the lanes are independent in time, not only in failure ────────
+
+test('#1201 R1201-9: a slow fetch never delays the forge lane — the next tick is armed and a forge change lands while the fetch is pending', async () => {
+  const spy = fetchSpy({ hold: true });
+  const ticks = [];
+  const callLog = [];
+  let issues = [{ number: 5, title: 'five', labels: [], assignees: [] }];
+  const vcs = makeVcs({ callLog });
+  vcs.issueList = async () => { callLog.push('issueList'); return issues.map((i) => ({ ...i })); };
+  const { poller, scheduler } = remotesPoller({ fetchRemotes: spy.fn, vcs, onTick: () => ticks.push('onTick') });
+
+  await poller.start(); // the fetch is held open and never released
+  assert.equal(poller.state().remotes.inFlight, true, 'the fetch is still pending');
+  assert.equal(scheduler.pending(), 1, 'the next forge tick is armed without waiting for the fetch');
+  assert.deepEqual(ticks, ['onTick'], 'the tick reported on forge settle alone');
+
+  issues = [{ number: 5, title: 'five', labels: ['status:approved'], assignees: [] }];
+  await scheduler.runNext(); // the second tick: forge polls again, the in-flight fetch is joined, not re-run
+  assert.equal(spy.calls, 1, 'single flight: an overlapping tick never starts a second fetch');
+  assert.equal(callLog.filter((c) => c === 'issueList').length, 2, 'the forge lane polled again while the fetch was pending');
+  assert.equal(scheduler.pending(), 1, 'and armed the tick after it');
+
+  spy.release(); // the fetch finally settles
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(poller.state().remotes.inFlight, false);
+  assert.equal(ticks.length, 3, 'its completion notifies once more so the section recomputes');
+  poller.close();
+});
+
+test('#1201 R1201-9: a fetch that rejects after its tick ended lands in remotes.lastError and leaves no unhandled rejection', async () => {
+  const unhandled = [];
+  const onUnhandled = (e) => unhandled.push(e);
+  process.on('unhandledRejection', onUnhandled);
+  try {
+    const spy = fetchSpy({ hold: true, fail: 'boom' });
+    const { poller } = remotesPoller({ fetchRemotes: spy.fn });
+    await poller.start();
+    spy.release();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(poller.state().remotes.lastError, 'boom');
+    assert.equal(poller.state().remotes.inFlight, false);
+    assert.deepEqual(unhandled, []);
+    poller.close();
+  } finally {
+    process.off('unhandledRejection', onUnhandled);
+  }
+});
