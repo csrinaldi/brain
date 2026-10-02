@@ -708,7 +708,10 @@ jobs:
 
       - id: resolve-sweep
         name: Close the archive-sweep alarm this clean sweep resolves (#1188)
-        if: steps.sweep.outcome == 'success'
+        # The sweep exits 0 even after filing governance:archive-sweep-failed, so
+        # outcome alone would close the alarm this same run just filed (#1235).
+        # Every filing path records `alarm=`; an empty output means none fired.
+        if: steps.sweep.outcome == 'success' && steps.sweep.outputs.alarm == ''
         env:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           GH_TOKEN: ${{ github.token }}
