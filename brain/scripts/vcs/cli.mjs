@@ -13,6 +13,7 @@
 //                     e.g. node brain/scripts/vcs/cli.mjs issue-list '{"state":"open"}'
 
 import { pathToFileURL } from 'node:url';
+import { readAxis } from '../lib/axis-config.mjs';
 import { runAsIdentity } from './lib/identity-context.mjs';
 import { vcsToken } from './lib/token.mjs';
 import { loadBrainConfig } from '../lib/brain-config.mjs';
@@ -80,7 +81,7 @@ export function resolveProviderName({ config, env = process.env, provider } = {}
   // ci-context's ctx.provider — finding #14) wins over VCS_PROVIDER env, which
   // wins over config.vcs.provider. A CI job on GitLab must dispatch to the
   // gitlab provider even when this repo's own config says github.
-  const resolved = provider || env.VCS_PROVIDER || config?.vcs?.provider;
+  const resolved = provider || env.VCS_PROVIDER || readAxis(config, 'vcs').default;
   if (!resolved) {
     throw new Error(
       'vcs: no provider configured. Set "vcs": { "provider": "github" } in ' +

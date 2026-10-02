@@ -22,6 +22,7 @@ import { fileURLToPath } from 'node:url';
 import { checkContexts, diffArmedChecks } from './vcs/governance-checks.mjs';
 import { resolveTier, tierParams } from './vcs/governance-tiers.mjs';
 import { t } from './i18n/t.mjs';
+import { readAxis } from './lib/axis-config.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -122,7 +123,7 @@ export async function activateProtection({ _config = null, _providerModule = nul
     }
   }
 
-  const provider = config?.vcs?.provider;
+  const provider = readAxis(config, 'vcs').default;
   const project = config?.project?.slug;
 
   if (!provider) {

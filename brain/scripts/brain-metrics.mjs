@@ -58,6 +58,7 @@ import {
 import { leadTimeDays, selectApprovalEvent } from './lib/lead-time.mjs';
 import { decideMemoryGateOverride, toActorList } from './governance/memory-gate-override.mjs';
 import { computeMemoryCoverage } from './lib/memory-coverage.mjs';
+import { readAxis } from './lib/axis-config.mjs';
 
 // ── Argument parsing (Phase 4.1) ─────────────────────────────────────────────
 
@@ -633,7 +634,7 @@ export async function runMetrics({ argv, cwd = process.cwd(), vcs: injectedVcs }
 
   const config = loadConfig(cwd);
   const ignoreList = Array.isArray(config?.governance?.ignoreList) ? config.governance.ignoreList : [];
-  const approvedLabel = resolveApprovedLabel(config, config?.vcs?.provider);
+  const approvedLabel = resolveApprovedLabel(config, readAxis(config, 'vcs').default);
   // Tier-scoped detection-job names (issue #358 Q5 Phase 5 review finding 2):
   // resolved ONCE from THIS repo's own declared `governance.tier` — never the
   // stale, tier-blind DETECTION_JOB_NAMES literal (metrics-aggregate.mjs). At

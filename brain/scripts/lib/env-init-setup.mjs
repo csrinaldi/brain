@@ -23,6 +23,7 @@ import { HANDLE_RE } from '../memory/lib/format.mjs';
 import { gitConfigGet } from './git-config.mjs';
 import { gitlabApiConfig } from '../vcs/ci-context.mjs';
 import { loadBrainConfigOrThrow } from './brain-config.mjs';
+import { readAxis } from './axis-config.mjs';
 
 /**
  * The `governance:*` labels `.github/workflows/governance-postmerge.yml` files
@@ -167,7 +168,7 @@ function readConfig(cwd) {
 async function runLabels() {
   const config = readConfig(process.cwd());
   if (!config) return 0;
-  const provider = process.env.VCS_PROVIDER || config?.vcs?.provider || '';
+  const provider = process.env.VCS_PROVIDER || readAxis(config, 'vcs').default || '';
   let vcs;
   try {
     const { getVcs } = await import('../vcs/cli.mjs');
@@ -202,7 +203,7 @@ async function runActor() {
   } catch { /* surfaced: the double above throws on use, and resolveBrainActor turns that into the pending step naming the cause */ }
   const r = await resolveBrainActor({
     vcs,
-    transport: vcsTransport({ config, provider: process.env.VCS_PROVIDER || config?.vcs?.provider || '' }),
+    transport: vcsTransport({ config, provider: process.env.VCS_PROVIDER || readAxis(config, 'vcs').default || '' }),
     gitGet: () => gitConfigGet('brain.actor', cwd),
     gitSet: (v) => {
       const w = spawnSync('git', ['config', '--local', 'brain.actor', v], { cwd, encoding: 'utf8' });

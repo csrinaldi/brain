@@ -27,6 +27,7 @@
 // degrades that rung to unavailable (never propagates, never crashes the caller).
 
 import { checkContexts } from './governance-checks.mjs';
+import { readAxis } from '../lib/axis-config.mjs';
 
 /**
  * Runs an injected probe defensively — never throws. Returns `undefined` on any
@@ -635,7 +636,7 @@ function evalPreReceiveGate({ config }) {
 }
 
 async function evalRung1({ config, vcs, env, probes }) {
-  const provider = config?.vcs?.provider;
+  const provider = readAxis(config, 'vcs').default;
   const result = await safeProbe(probes.branchProtection, { config, vcs, env });
   const status = result?.status;
   const contexts = Array.isArray(result?.contexts) ? result.contexts : [];
@@ -674,7 +675,7 @@ async function evalRung1({ config, vcs, env, probes }) {
 // active at detection / rung 2 / rung 3 regardless of this gate). Reported
 // honestly when unavailable, per provider, never inferred.
 async function evalBrainWritesReviewedGate({ config, vcs, env, probes }) {
-  const provider = config?.vcs?.provider;
+  const provider = readAxis(config, 'vcs').default;
 
   // The probe is only meaningful for providers that actually expose a rung-1
   // code-owner-review mechanism. Calling it for Bitbucket (no such capability)

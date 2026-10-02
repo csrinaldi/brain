@@ -16,6 +16,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { resolveAxisSelector } from '../../lib/axis-selector.mjs';
+import { readAxis } from '../../lib/axis-config.mjs';
 
 export const MEMORY_BACKENDS = Object.freeze(['engram', 'plainfiles']);
 export const MEMORY_ENV_KEY = 'MEMORY_BACKEND';
@@ -80,6 +81,7 @@ export function resolveMemoryBackend({ root, env = process.env, envFile = null, 
     configPath: MEMORY_CONFIG_PATH,
     allowed: MEMORY_BACKENDS,
     config,
+    configValue: readAxis(config, 'memory').default,
     env,
     root,
     envFile,

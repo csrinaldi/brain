@@ -39,6 +39,11 @@
 // belongs here, where both can reach it and neither depends on the other.
 // `cli.mjs` re-exports `resolvePlatform` so its own importers are unaffected.
 
+import { AGENT_PLATFORMS, SDD_ENGINES, readAxis, legacyHarness } from '../lib/axis-config.mjs';
+// The two memberships are declared in lib/axis-config.mjs (#1114 S3.1) and re-exported here, so
+// every importer of this file is unaffected.
+export { AGENT_PLATFORMS, SDD_ENGINES };
+
 /**
  * The SDD_ENGINE axis membership (issue #312, design D2 supporting change).
  * Lives here, not `cli.mjs`, for the same reason this whole file does: a
@@ -49,7 +54,6 @@
  * (`cli.mjs:136-145`) / `IMPLEMENTED_AXES`-from-`RUNNERS`
  * (`resolve-challenger.mjs:64-74`) house pattern.
  */
-export const SDD_ENGINES = Object.freeze(['gentle-ai', 'plain']);
 
 /**
  * The AGENT_PLATFORM axis membership (ADR-0024), and the value a repo gets when
@@ -62,7 +66,6 @@ export const SDD_ENGINES = Object.freeze(['gentle-ai', 'plain']);
  * parity table. #1114 retires the second resolver; until then, a change here
  * is a change there too, and the parity test says so.
  */
-export const AGENT_PLATFORMS = Object.freeze(['claude', 'antigravity', 'plain']);
 export const DEFAULT_PLATFORM = 'claude';
 
 /**
@@ -73,10 +76,10 @@ export const DEFAULT_PLATFORM = 'claude';
  * @returns {string}
  */
 export function resolvePlatform({ env = process.env, envVars = {}, config = {} } = {}) {
-  const platformVal = env.AGENT_PLATFORM ?? envVars.AGENT_PLATFORM ?? config.platform;
+  const platformVal = env.AGENT_PLATFORM ?? envVars.AGENT_PLATFORM ?? readAxis(config, 'platform', { harness: false }).default;
   if (platformVal) return platformVal;
 
-  const harnessVal = env.SDD_HARNESS ?? envVars.SDD_HARNESS ?? config.harness;
+  const harnessVal = env.SDD_HARNESS ?? envVars.SDD_HARNESS ?? legacyHarness(config);
   if (harnessVal && AGENT_PLATFORMS.includes(harnessVal)) {
     return harnessVal;
   }

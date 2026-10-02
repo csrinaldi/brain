@@ -25,6 +25,7 @@ import { run } from './vcs/lib/exec.mjs';
 import { detectSubstrate, POSTMERGE_STALE_LABEL } from './vcs/substrate.mjs';
 import { GOVERNANCE_JOBS } from './vcs/governance-checks.mjs';
 import { resolveTier, requiredJobs } from './vcs/governance-tiers.mjs';
+import { readAxis } from './lib/axis-config.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, '..', '..');
@@ -56,7 +57,7 @@ function repoFileExists(relPath) {
  * a fresh dynamic import.
  */
 async function realBranchProtectionProbe({ config, vcs }) {
-  const provider = config?.vcs?.provider;
+  const provider = readAxis(config, 'vcs').default;
   const project = config?.project?.slug;
   const branch = config?.project?.defaultBranch ?? 'main';
   if (!project) return { status: undefined, contexts: [] };
@@ -135,7 +136,7 @@ async function realPostMergeCiProbe({ config }) {
     return { workflowPresent, read: 'skipped', lastRun: null, error: null, observedAt };
   }
 
-  if (config?.vcs?.provider !== 'github') {
+  if (readAxis(config, 'vcs').default !== 'github') {
     // No ledger reader wired for this provider — keeps today's inert +
     // remedy behavior for GitLab (design "Provider safety"), no `gh`/`glab`
     // spawn either way.
@@ -187,7 +188,7 @@ async function realPostMergeCiProbe({ config }) {
 
 /** rungs[1].gates.brainWritesReviewed — per-provider L6 rung-1 sub-probe. */
 async function realBrainWritesReviewedProbe({ config }) {
-  const provider = config?.vcs?.provider;
+  const provider = readAxis(config, 'vcs').default;
 
   if (provider === 'github') {
     const project = config?.project?.slug;
@@ -445,7 +446,7 @@ export async function reportGovernanceStatus({
     }
   }
 
-  const provider = config?.vcs?.provider ?? 'unknown';
+  const provider = (readAxis(config, 'vcs').default || 'unknown');
   const project = config?.project?.slug ?? 'unknown';
 
   console.log(`\nbrain:governance status — ${project} (${provider})\n`);
@@ -462,7 +463,7 @@ export async function reportGovernanceStatus({
   let providerModule = providerModuleOverride;
   let platformKnown = true;
 
-  if (!config?.vcs?.provider) {
+  if (!readAxis(config, 'vcs').default) {
     console.log('  platform    UNKNOWN (vcs.provider not configured)');
     platformKnown = false;
   } else if (!providerModule) {
