@@ -31,7 +31,7 @@ import { shapeResumeView, resumeWording } from './lib/resume-view.mjs';
 import { parseFrontmatter } from '../memory/lib/resume-frontmatter.mjs';
 import { validateResume } from '../memory/lib/resume-schema.mjs';
 import { LIFECYCLE_STAGES, ARTEFACT_FILE } from '../lib/sdd-layout.mjs';
-import { parseTreeListing, pickChangeDir } from '../lib/git-tree.mjs';
+import { changeDirNames, parseTreeListing, pickChangeDir } from '../lib/git-tree.mjs';
 import { prUrl } from './lib/forge-url.mjs';
 import { documentWording, NO_CHANGE_BRANCH } from './lib/drawer-model.mjs';
 
@@ -297,8 +297,7 @@ const CHANGES_ROOT_DIR = 'openspec/changes';
 
 /** The change dirs listed directly under `openspec/changes/` at `commit`, as bare names. */
 function listChangeDirNames({ run, commit }) {
-  const listing = parseTreeListing(run('git', ['ls-tree', '-z', commit, '--', `${CHANGES_ROOT_DIR}/`]));
-  return [...listing.entries()].filter(([, e]) => e.type === 'tree').map(([path]) => path.slice(path.lastIndexOf('/') + 1));
+  return changeDirNames(parseTreeListing(run('git', ['ls-tree', '-z', commit, '--', `${CHANGES_ROOT_DIR}/`])));
 }
 
 /**

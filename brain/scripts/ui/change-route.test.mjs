@@ -185,6 +185,17 @@ test('#881: a resolved branch with a committed resume.md shapes all three ruling
   assert.deepEqual(blockers, { ok: true, value: [], source: { path: `${BRANCH}:${RESUME_PATH}` } });
 });
 
+test('#1243 R1243-6: a stray blob named like a change id beside the change dir does not hide resume.md', () => {
+  const snapshot = makeSnapshot({ prs: [{ number: 5, title: 'x', headBranch: BRANCH, issue: ISSUE }] });
+  const stray = `openspec/changes/issue-${ISSUE}-notes.md`;
+  const run = fakeGit({
+    files: { [`${CHANGE_DIR}/spec.md`]: SPEC_TEXT, [`${CHANGE_DIR}/tasks.md`]: TASKS_TEXT }, head: HEAD, blame: BLAME_PORCELAIN,
+    branches: { [BRANCH]: { commit: BRANCH_TIP, files: { [RESUME_PATH]: RESUME_TEXT, [stray]: 'n' } } },
+  });
+  const result = buildChangeView({ issue: ISSUE, snapshot, _run: run });
+  assert.equal(result.value.workingMemory.ok, true);
+});
+
 // ── 9. reviews with two rounds ───────────────────────────────────────────────
 
 test('#881: two review rounds on the issue\'s PR render oldest first, each sourced to the PR URL, with the D14 caveat note', () => {

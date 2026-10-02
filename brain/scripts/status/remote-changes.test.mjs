@@ -191,6 +191,15 @@ test('#1201 R1201-6: a grammar branch without its change dir is missing and stay
   assert.equal(amb.resume.state, 'unreadable');
 });
 
+test('#1243 R1243-6: a stray blob named like a change id beside the change dir is not a candidate (defect 3)', () => {
+  const fx = makeRemoteFixture({ standard: false });
+  fx.addBranch('feat/issue-5-x', { 'openspec/changes/issue-5-x/proposal.md': 'p', 'openspec/changes/issue-5-notes.md': 'n' });
+  fx.refresh();
+  const entry = entryOf(build(fx), 'feat/issue-5-x');
+  assert.equal(entry.change.ok, true, JSON.stringify(entry.change));
+  assert.equal(entry.change.value.dir, 'openspec/changes/issue-5-x');
+});
+
 test('#1201 D31 R1201-12: an unjoined entry carries the grammar-less shape and its tree is never read', () => {
   const fx = makeRemoteFixture();
   const run = recordingGit(gitRun(fx.served));
