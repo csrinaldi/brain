@@ -7,4 +7,4 @@
 - REQ-5 The guard fails on: an uncovered hit; a count above `max`; a stale entry; a count below `max` (debt only shrinks); an empty or placeholder reason; a debt owner that is not an issue reference.
 - REQ-6 A masker desync is detected (unbalanced brackets); the scan falls back to a template-aware masker and fails naming the file if that is also unbalanced.
 - REQ-7 S1 changes no production behavior.
-- S2-S5: one resolver with defaults declared once (S2); `platform` and `sdd.engine` declared in the schema (S3); each per-axis fix removes its entry (S4); ADR-0024 Known state points at #1114 (S5).
+- S2-S5 (ADR-0038, order S3 then S2): the ADR-0038 shape and additive migrations (S3); one `resolveAxis` that refuses every undeclared axis, with no code defaults (S2); each per-axis fix removes its entry (S4); ADR-0038 and the amendments it names (S5).

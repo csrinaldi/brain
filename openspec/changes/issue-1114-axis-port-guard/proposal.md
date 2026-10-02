@@ -14,4 +14,4 @@ State the rule and enforce it: one guard that freezes every leak, one resolver, 
 - S5 ADR-0024 Amendment 3, drafted in `brain-drafts/`, promoted by a human (Tier 2). PENDING.
 
 ## Non-goals
-Fixing any offender in S1; changing the platform default `claude` or VCS fail-closed; a second "undeclared key" scanner (#807 owns that).
+Fixing any offender in S1; a second "undeclared key" scanner (#807 owns that). (Superseded 2026-10-02: the platform `claude` default is removed by ruling, and every axis refuses when undeclared; see ADR-0038 and the S3-before-S2 order in `tasks.md`.)

@@ -7,11 +7,18 @@
 - [x] Mutation: removed entry (uncovered) and added entry (stale) fail the guard
 - [x] `npm test` and `npm run brain:repo:check`
 
-## S2 one resolver
-- [ ] `lib/axis-registry.mjs` + `resolveAxis`; migrate platform, engine/harness, vcs resolvers; ruling on defaults first
+## S3 schema and migrations (lands BEFORE S2, ADR-0038 §8)
+- [ ] Migrations to the ADR-0038 shape: `memory.backend` -> `memory.default` + `memory.providers`; `vcs.provider` -> `vcs.default` + `vcs.providers`; flat `platform`/`engine`/`harness` and `SDD_HARNESS` -> `platform.default` / `sdd.default` (resolves #643; coordinate #807)
+- [ ] Existing consumers get the value they effectively run today (env or `.env`, else `claude` / `gentle-ai`); undeclared memory/vcs stay undeclared
+- [ ] Read-only aliases for the old keys for one minor, then a refusal with a named fix
+- [ ] `env:init` declares or asks for each axis default on a fresh consumer
 
-## S3 schema
-- [ ] Migration declaring `platform` and `sdd.engine`; resolve #643; coordinate #807
+## S2 one resolver and the refusal (after S3)
+- [ ] `resolveAxis` over `lib/axis-selector.mjs` for vcs, memory, platform, sdd; one precedence; retire `resolvePlatform`, `resolveEngine/Harness`, `resolveProviderName` and the `bootstrap.sh` platform resolver
+- [ ] Every axis refuses when undeclared or when the value is not a key of `providers`; the refusal names `brain:config -- set <axis>.default`
+
+## sdd.roles (owned by #1132)
+- [ ] `sdd.configs` + `sdd.map` -> `sdd.roles` with the ADR-0038 cascade and refusals
 
 ## S4 per-offender fixes (other tickets; each deletes its allowlist entry)
 - [ ] #1115/#864 memory, day-start, session-start
@@ -19,5 +26,7 @@
 - [ ] #1107/#1109 VCS spawns and imports
 - [ ] day-start engine section (no owner yet, #1114)
 
-## S5 ADR-0024 Amendment 3
-- [ ] Draft in `brain-drafts/`; a human promotes it
+## S5 doctrine (ADR-0038)
+- [x] Draft ADR-0038 in `brain-drafts/`
+- [ ] A human promotes ADR-0038
+- [ ] Draft the amendments it names (ADR-0004, ADR-0008, ADR-0023, ADR-0024, ADR-0033); promote after ADR-0038
