@@ -262,7 +262,7 @@ A valid file MUST yield `state: present` with `fields` populated (`checkpointed_
 
 ### R1201-9: The poller owns the remote fetch
 
-The poller MUST run `git fetch origin --no-tags --prune --no-write-fetch-head` on each tick, asynchronously through `gitRunAsync` (so the server's event loop is never blocked), with `GIT_TERMINAL_PROMPT=0` in the child's environment and a 20 s timeout (R1; D39). A timeout kill MUST be reported as `fetch timed out after 20000 ms`. The fetch MUST run outside `buildSnapshot`, in a remotes lane that settles independently of the forge lane (D40): a failure of one MUST NOT skip the other. The server MUST expose `POST /api/remotes/refresh`, which runs the same fetch and then recomputes the snapshot; it reuses `once`'s 5 s collapse, so repeated calls within the window run one fetch. The remotes lane MUST NOT depend on the forge: it ticks whenever polling is not paused by the USER (the Pause button or `--no-poll`), including on a server whose forge is unavailable (W3, D40). While the user has paused polling, a tick MUST NOT fetch, and only the explicit action fetches. A tick that finds the fetch still running MUST NOT start a second one. After a fetch the poller MUST recompute and broadcast the snapshot so the new refs appear. `gitRunAsync` MUST pass the environment so the variable reaches the child without mutating the server's own environment, and its rejected error MUST carry `.stderr` so `gitErrorLine` works unchanged. Fetch has exactly two callers, the timer and the POST route: a recompute or a watch event MUST NOT fetch.
+The poller MUST run `git fetch origin --no-tags --prune --no-write-fetch-head` on each tick, asynchronously through `gitRunAsync` (so the server's event loop is never blocked), with `GIT_TERMINAL_PROMPT=0` in the child's environment and a 20 s timeout (R1; D39). A timeout kill MUST be reported as `fetch timed out after 20000 ms`. The fetch MUST run outside `buildSnapshot`, in a remotes lane that is independent of the forge lane in time as well as in failure (D40): a failure of one MUST NOT skip the other, and a tick MUST NOT wait for the fetch before scheduling the next tick or reporting the forge lane. The server MUST expose `POST /api/remotes/refresh`, which runs the same fetch and then recomputes the snapshot; it reuses `once`'s 5 s collapse, so repeated calls within the window run one fetch. The remotes lane MUST NOT depend on the forge: it ticks whenever polling is not paused by the USER (the Pause button or `--no-poll`), including on a server whose forge is unavailable (W3, D40). While the user has paused polling, a tick MUST NOT fetch, and only the explicit action fetches. A tick that finds the fetch still running MUST NOT start a second one. After a fetch the poller MUST recompute and broadcast the snapshot so the new refs appear, including when the fetch ends after the tick that started it. `gitRunAsync` MUST pass the environment so the variable reaches the child without mutating the server's own environment, and its rejected error MUST carry `.stderr` so `gitErrorLine` works unchanged. Fetch has exactly two callers, the timer and the POST route: a recompute or a watch event MUST NOT fetch.
 
 #### Scenario: A tick fetches (AC6)
 - **GIVEN** a running poller and a recording git shim
@@ -288,6 +288,11 @@ The poller MUST run `git fetch origin --no-tags --prune --no-write-fetch-head` o
 - **GIVEN** two `POST /api/remotes/refresh` calls 1 s apart
 - **WHEN** both are served
 - **THEN** one fetch ran
+
+#### Scenario: A slow fetch never delays the forge lane
+- **GIVEN** a poller whose fetch is held open and never settles
+- **WHEN** the cold-start tick runs
+- **THEN** the next tick is already scheduled, the forge lane polls again on it while the first fetch is still pending, an overlapping tick starts no second fetch, and the fetch's later completion notifies once more so the section recomputes
 
 #### Scenario: A hung fetch is killed at the timeout
 - **GIVEN** a fetch child that never exits and a timeout of 200 ms in the test

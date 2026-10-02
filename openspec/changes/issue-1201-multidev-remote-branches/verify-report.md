@@ -125,3 +125,21 @@ SUGGESTION
 | S2 | Not changed (credential prompt stays proven by env pass-through and the kill timeout). |
 | S3 | The remote-model.mjs header comment no longer contains the word "session"; it says no per-agent identity is shown. Included in 23e757c8. |
 | S4 | Spec and design now share one phrasing: "at most 2 + 3×24 = 74 spawns per cold build". |
+
+## CI flake
+
+`governance / local-checks` failed once of three runs at `server.test.mjs` "#881: R881-2 S3" (`assert.equal(scheduler.pending(), 1)`, actual 0).
+
+Root cause, two defects:
+
+1. Lane coupling. `tick()` awaited both lanes, so the next tick was scheduled only after the remote fetch settled. The forge lane's cadence therefore waited on a fetch that may take up to its 20 s timeout, contradicting D40's independence claim, which held for failure but not for time.
+2. A real fetch in tests. Server tests built without `_fetchRun` ran a real `git fetch` through `gitRunAsync` against a fixture with no origin, racing the fake scheduler. It passed locally and failed on a slower runner.
+
+Fix:
+
+| Defect | Fix |
+|---|---|
+| Lane coupling | `tick()` awaits only the forge lane; the fetch runs fire-and-forget under its own single flight and never rejects. A fetch that ends after its tick notifies with one more `onTick`. Commit f3cfd12b (RED first: the new poller test hung on the old code, green after). |
+| Real fetch in tests | `main()` passes a `_fetchRun` seam through; `server.test.mjs` wraps `createUiServer` and `main` with a recorded no-op default, and a guard test fails if a call bypasses the wrappers or the default is removed (checked by mutation). Production defaults are unchanged. Commit 751efea3. |
+
+Evidence: `server.test.mjs` run 20 times plain, 20 times under `taskset -c 0`, and 20 times under `taskset -c 0` while `npm test` ran in parallel: 0 failures in all 60 runs.
