@@ -78,21 +78,19 @@ export function createPoller({
   initialError = null,
 } = {}) {
   // `initialError` (#881, judgment:cold-6): the CALLER already knows, before
-  // any tick, that `vcs` cannot be polled (forge resolution failed) —
-  // forcing `paused` regardless of `enabled` means `start()` is a no-op and
-  // no tick ever runs against a port that would only throw. The reason and
-  // a time are visible on `state()` immediately, the same shape a real
-  // failed tick would leave, so a caller reading `/api/poll/pause`'s
-  // response cannot tell the two apart.
+  // any tick, that `vcs` cannot be polled (forge resolution failed), so the
+  // forge lane never runs and the reason is on `state()` immediately, the same
+  // shape a real failed tick would leave.
   //
-  // #1201 W3/D40: the remotes lane is NOT the forge's. `userPaused` is the
-  // operator's own pause (`--no-poll`, the Pause button); `forgeHalted` is the
-  // forge being unusable. The reported `paused` is either, but the timer, and
-  // with it the remotes lane, stops only for `userPaused`. A forge-less server
-  // therefore still fetches on its timer; its forge lane just never runs.
+  // #1243 R1/R2: that halt is NOT a pause. `userPaused` is the operator's own
+  // pause (`--no-poll`, the Pause button) and the only thing `paused` reports
+  // and `resume()` lifts; `forgeHalted` is the forge being unusable, set once
+  // at startup because only a restart can re-resolve the forge. The timer, and
+  // with it the remotes lane, stops only for `userPaused`: a forge-less server
+  // still fetches on its timer; its forge lane just never runs (#1201 W3/D40).
   let userPaused = !enabled;
-  let forgeHalted = Boolean(initialError);
-  const isPaused = () => userPaused || forgeHalted;
+  const forgeHalted = Boolean(initialError);
+  const forgeHaltReason = initialError;
   let timer = null;
   let inFlight = null;
   let lastOnceAt = -Infinity;
@@ -123,7 +121,7 @@ export function createPoller({
   let lastRefreshAt = -Infinity;
 
   function state() {
-    return { paused: isPaused(), lastPolledAt, lastOkAt, lastError, forgeAsOf: { ...forgeAsOf }, intervalMs: interval, nextAttemptAt, remotes: { ...remotes } };
+    return { paused: userPaused, forgeHalted, forgeHaltReason, remotesLane: fetchRemotes !== null, lastPolledAt, lastOkAt, lastError, forgeAsOf: { ...forgeAsOf }, intervalMs: interval, nextAttemptAt, remotes: { ...remotes } };
   }
 
   /** One fetch at a time: a caller that arrives while one runs joins it. Absent `fetchRemotes` is a no-op. */
@@ -278,6 +276,17 @@ export function createPoller({
 
   let closed = false;
 
+  // #1243 D44: the ONLY writer of a live handle. Clearing before setting makes
+  // "at most one armed handle" a property of this function, whatever order
+  // start/pause/resume/once and an in-flight tick's re-arm happen in.
+  function disarm() { if (timer !== null) { _clearTimeout(timer); timer = null; } }
+  function arm(fn, ms) {
+    disarm();
+    if (closed) return false;
+    timer = _setTimeout(() => { timer = null; return fn(); }, ms);
+    return true;
+  }
+
   /** The timer runs unless the USER paused; a halted forge alone keeps it only when there is a remotes lane to feed. */
   function tickWanted() { return !userPaused && (!forgeHalted || fetchRemotes !== null); }
 
@@ -289,12 +298,10 @@ export function createPoller({
     // down, leaking a handle that keeps the process alive (measured: a
     // `node --test` run that passes every assertion but never exits).
     if (closed || !tickWanted() || interval <= 0) { nextAttemptAt = null; return; }
-    nextAttemptAt = new Date(_now().getTime() + interval).toISOString();
-    timer = _setTimeout(runTick, interval);
+    if (arm(runTick, interval)) nextAttemptAt = new Date(_now().getTime() + interval).toISOString();
   }
 
   function runTick() {
-    timer = null;
     tickRunning = true;
     inFlight = tick().finally(() => {
       tickRunning = false;
@@ -310,10 +317,10 @@ export function createPoller({
     // The countdown goes with the timer, as it does in `pause()`: after
     // `close()` no tick will ever fire, so a surviving `nextAttemptAt` would
     // report a poll that is never coming (#1015 cold review).
-    close() { closed = true; if (timer) { _clearTimeout(timer); timer = null; } nextAttemptAt = null; },
+    close() { closed = true; disarm(); nextAttemptAt = null; },
     pause() {
       userPaused = true;
-      if (timer) { _clearTimeout(timer); timer = null; }
+      disarm();
       nextAttemptAt = null;
       return state();
     },
@@ -323,7 +330,7 @@ export function createPoller({
       // as distinct controls). `start()` polls immediately because a
       // process that has NEVER polled needs data as soon as possible; a
       // paused-then-resumed poller already has whatever it last held.
-      if (isPaused()) { userPaused = false; forgeHalted = false; scheduleNext(); }
+      if (userPaused) { userPaused = false; scheduleNext(); }
       return state();
     },
     async once() {
@@ -331,7 +338,7 @@ export function createPoller({
       const nowMs = _now().getTime();
       if (nowMs - lastOnceAt < ONCE_COLLAPSE_MS) return state();
       lastOnceAt = nowMs;
-      if (timer) { _clearTimeout(timer); timer = null; }
+      disarm();
       await runTick();
       return state();
     },

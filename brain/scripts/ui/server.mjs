@@ -179,8 +179,8 @@ export function createUiServer({
   //
   // `forgeUnavailable` (#881, judgment:cold-6): set when `main()` could not
   // resolve a live forge port at all (no origin remote, no provider
-  // configured, `getVcs()` threw). The poller is constructed paused with
-  // the same reason (below), so the cache-only port never fills — but
+  // configured, `getVcs()` threw). The poller is constructed forge-halted
+  // with the same reason (below), so the cache-only port never fills — but
   // `buildSnapshot`'s own `readForge` would otherwise report a generic
   // "the first forge poll has not completed" forever, which is TRUE but not
   // the actual reason an operator needs. Overriding the three forge
@@ -200,9 +200,12 @@ export function createUiServer({
   // D36: while the remote section left branches `deferred` (over the per-build
   // read budget), ONE follow-up recompute is armed; each build re-arms it only if
   // something is still deferred, so the chain ends by itself at 0 and never stacks.
+  // `closed` is set first thing in `close()`: a recompute that started before it
+  // settles after it, and this arm is the one writer of `followUp` (#1243 D45).
   let followUp = null;
+  let closed = false;
   function armRemoteFollowUp() {
-    if (followUp !== null || !(current?.remoteChanges?.value?.deferred > 0)) return;
+    if (closed || followUp !== null || !(current?.remoteChanges?.value?.deferred > 0)) return;
     followUp = _setTimeout(() => { followUp = null; return recomputeAndBroadcast({ causes: ['remote'] }); }, REMOTE_FOLLOWUP_MS);
   }
 
@@ -402,6 +405,7 @@ export function createUiServer({
       });
     },
     close() {
+      closed = true;
       if (followUp !== null) { _clearTimeout(followUp); followUp = null; }
       poller.close();
       watcher.close();
@@ -519,7 +523,7 @@ export async function main(argv = [], deps = {}) {
       if (project === null) project = resolved.project;
     } else {
       forgeUnavailable = resolved.reason;
-      error(`✗ forge: ${resolved.reason} — polling paused; tree sections still served`);
+      error(`✗ forge: ${resolved.reason} — forge lane halted; tree sections and remote fetch still served`);
     }
   }
 
@@ -591,7 +595,7 @@ export async function main(argv = [], deps = {}) {
 // (#881, judgment:cold-6): `main()` never resolved one, so every real
 // `npm run brain:ui` run polled with `deps.forgeSource` undefined and the
 // poller's four verbs always threw. `main()` now resolves a live port
-// itself (unless `--no-poll`), with the poller starting paused and the
+// itself (unless `--no-poll`), with the poller starting forge-halted and the
 // reason said in band on any resolution failure — this guard stays thin on
 // purpose and lets `main()` own that decision.
 if (import.meta.url === `file://${process.argv[1]}`) {

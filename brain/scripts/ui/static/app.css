@@ -186,6 +186,7 @@ body {
 
 .status-bar .poll-indicator { font-variant-numeric: tabular-nums; }
 .status-bar .poll-indicator.paused { color: var(--warn); }
+.status-bar .poll-indicator.halted { color: var(--warn); }
 .status-bar button {
   font-family: var(--font-mono);
   font-size: 11px;

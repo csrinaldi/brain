@@ -129,11 +129,23 @@ function pollCountdown({ poller, now }) {
  * `text` stays exactly what it already was, never a second projection of it.
  */
 export function pollIndicator({ poller, nowMs }) {
-  if (!poller) return { text: 'the poll state is unknown until the stream connects', paused: false, countdown: 'polling disabled' };
+  if (!poller) return { text: 'the poll state is unknown until the stream connects', paused: false, halted: false, countdown: 'polling disabled', toggle: null };
   const when = poller.lastOkAt ? `forge polled ${ago(nowMs - Date.parse(poller.lastOkAt))}` : 'the forge has not been polled yet';
+  const paused = Boolean(poller.paused);
+  // #1243 R1/R3: the forge halt is its own state. Resume cannot lift it, so it is
+  // never offered; the one control that can act is Pause, and only while a
+  // remotes lane is running.
+  const halted = Boolean(poller.forgeHalted) && !paused;
+  const reason = poller.forgeHaltReason ?? poller.lastError ?? 'unknown';
+  if (halted && poller.remotesLane) {
+    return { text: `forge unavailable: ${reason}; remotes fetched every ${Math.round(poller.intervalMs / 1000)} s`, paused, halted, countdown: pollCountdown({ poller, now: nowMs }), toggle: 'pause' };
+  }
+  if (halted) return { text: `forge unavailable: ${reason}`, paused, halted, countdown: 'polling disabled', toggle: null };
   return {
-    text: poller.paused ? `polling is paused — ${when}` : when,
-    paused: Boolean(poller.paused),
+    text: paused ? `polling is paused — ${when}` : when,
+    paused,
+    halted: false,
     countdown: pollCountdown({ poller, now: nowMs }),
+    toggle: paused ? 'resume' : 'pause',
   };
 }

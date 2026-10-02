@@ -1094,7 +1094,7 @@ test('#881: judgment:cold-6 — main() resolves a live forge port for the poller
   }
 });
 
-test('#881: judgment:cold-6 — a failed forge resolution says the reason on stderr, starts the poller paused with that reason, and the reason reaches /api/snapshot in band', async () => {
+test('#881: judgment:cold-6 — a failed forge resolution says the reason on stderr, starts the poller halted with that reason, and the reason reaches /api/snapshot in band', async () => {
   const root = makeFixture();
   const errors = [];
   const result = await main(['--port', '0', '--root', root], {
@@ -1102,7 +1102,7 @@ test('#881: judgment:cold-6 — a failed forge resolution says the reason on std
     _resolveForgeSource: async () => ({ ok: false, reason: 'no VCS token' }),
   });
   try {
-    assert.match(errors.join('\n'), /✗ forge: no VCS token — polling paused; tree sections still served/);
+    assert.match(errors.join('\n'), /✗ forge: no VCS token — forge lane halted; tree sections and remote fetch still served/);
 
     const base = `http://127.0.0.1:${result.port}`;
     const snap = await (await fetch(`${base}/api/snapshot`)).json();
@@ -1113,9 +1113,10 @@ test('#881: judgment:cold-6 — a failed forge resolution says the reason on std
     assert.equal(snap.reviews.ok, false);
     assert.match(snap.reviews.reason, /no VCS token/);
 
-    const pauseRes = await fetch(`${base}/api/poll/pause`, { method: 'POST' }); // idempotent state read
-    const state = await pauseRes.json();
-    assert.equal(state.paused, true);
+    const resumeRes = await fetch(`${base}/api/poll/resume`, { method: 'POST' }); // a no-op on an unpaused poller: the state read
+    const state = await resumeRes.json();
+    assert.equal(state.paused, false, 'a forge halt is not the user\'s pause');
+    assert.equal(state.forgeHalted, true);
     assert.match(state.lastError, /no VCS token/);
     assert.ok(state.lastPolledAt, 'the reason carries a time, not just text');
   } finally {

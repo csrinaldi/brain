@@ -178,6 +178,7 @@ test('#1201 R1201-9 W3: a server with no forge provider (forgeUnavailable) fetch
     await until(async () => fetchRun.calls.length === 1);
     await until(async () => scheduler.delays.includes(60000)); // armed once the first tick settles, despite the forge being unavailable
     await until(async () => (await pollerState(server)).remotes.lastOkAt !== null); // the timer is armed BEFORE the fetch ends (D40): wait for it, or the next tick joins the flight
+    assert.equal(scheduler.pending(), 1, 'the probe (a resume on an unpaused poller) armed no second chain (#1243)');
     fx.addBranch('feat/issue-52-timer', { 'openspec/changes/issue-52-timer/proposal.md': 'x' });
     await scheduler.runDelay(60000);
     await until(async () => names(await sectionOf(server)).includes('feat/issue-52-timer'));
@@ -305,4 +306,32 @@ test('#1201 D39: a fetch killed at its timeout is reported as "fetch timed out a
   } finally {
     await server.close();
   }
+});
+
+// ── #1243 R1243-2: a recompute that settles after close() arms nothing ──────────
+
+test('#1243 R1243-2: close() with a follow-up recompute in flight leaves no armed handle when it settles', async () => {
+  const scheduler = recordingScheduler();
+  const deferredSnapshot = { generatedAt: NOW, remoteChanges: { ok: true, value: { deferred: 1 } } };
+  let calls = 0;
+  let release = null;
+  const server = createUiServer({
+    root: '.', poll: false, _now: now, _setTimeout: scheduler.setTimeout, _clearTimeout: scheduler.clearTimeout,
+    _watch: () => ({ close() {} }),
+    _recomputeCurrent: () => {
+      calls += 1;
+      if (calls === 1) return Promise.resolve(deferredSnapshot); // startup arms the follow-up
+      return new Promise((resolve) => { release = () => resolve(deferredSnapshot); }); // the follow-up's recompute is held
+    },
+  });
+  await server.listen(0);
+  assert.equal(scheduler.pending(), 1, 'startup armed the follow-up');
+  const fired = scheduler.runNext(); // the follow-up fires; its recompute is now in flight
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(calls, 2);
+  const closing = server.close();
+  release();
+  await fired;
+  await closing;
+  assert.equal(scheduler.pending(), 0, 'a recompute that settled after close() armed a new follow-up');
 });
