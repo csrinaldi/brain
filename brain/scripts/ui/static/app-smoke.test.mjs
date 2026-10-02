@@ -124,7 +124,7 @@ function fixtureRepo() {
   return root;
 }
 
-async function boot({ issues = ISSUES } = {}) {
+async function boot({ issues = ISSUES, forgeLoad = null } = {}) {
   const root = fixtureRepo();
   const vcs = {
     async issueList() { return issues.map(({ number, title, labels }) => ({ number, title, labels, assignees: [] })); },
@@ -140,6 +140,7 @@ async function boot({ issues = ISSUES } = {}) {
     project: 'csrinaldi/brain',
     vcs,
     now: '2026-09-19T12:00:00.000Z',
+    ...(forgeLoad ? { forgeLoad } : {}),
     // No git in a temp directory, and a harness must not depend on one.
     _run: () => { throw new Error('git is not available in this harness'); },
   });
@@ -565,4 +566,23 @@ test('#1079: a node with no track that an epic claims is drawn once, and the bat
   // Not hidden, shown elsewhere. A batch that silently shrank would read as
   // the graph changing when only the view did.
   assert.match(find(dom.mounts.canvas, byClass('batch')).textContent, /1 more shown under their epic/);
+});
+
+// ── #1257 R1257-9 / D65: a pending graph is a loading page, not an empty board ──
+
+test('#1257 smoke: a pending graph shows the loading sentence, no failure wording, no count of 0 and no empty-lane message', async (t) => {
+  const dom = await boot({ forgeLoad: { open: { state: 'pending', at: null }, closed: { state: 'pending', at: null } } });
+  t.after(() => dom.restore());
+
+  const text = (node) => [node.textContent, ...findAll(node, () => true).map((n) => n.textContent)].join(' ');
+  const canvas = text(dom.mounts.canvas);
+  assert.match(canvas, /loading open issues from the forge…/);
+  assert.doesNotMatch(canvas, /could not be computed/, 'loading is not a failure');
+  assert.doesNotMatch(canvas, /\b0 track lane/, 'no empty board is counted');
+  assert.equal(cards(dom).length, 0, 'no card is drawn from a graph that has not loaded');
+  const banners = text(dom.mounts.banners);
+  assert.match(banners, /still loading from the forge: graph, prs, reviews, closedIssues/);
+  // Other sections may fail honestly in this harness (no git, no ADR tree); what matters is that no
+  // pending forge section is among the failures the sections band lists.
+  assert.doesNotMatch(banners, /(graph|prs|reviews|closedIssues): loading/, 'a section that is only loading is not listed as failed');
 });

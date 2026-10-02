@@ -13,6 +13,7 @@ import { createForgeCache } from './forge-cache.mjs';
 import { createUiServer as realCreateUiServer, parseArgs, main as realMain, KNOWN_ROUTES, resolveForgeSource } from './server.mjs';
 import { buildChangeView } from './change-route.mjs';
 import { fakeGit } from './test-support/fake-git.mjs';
+import { STATUS, RESULT, RESULT_OK, createBlockingAdapter, freePort, startRequester } from './test-support/blocking-forge-adapter.mjs';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 
@@ -1240,6 +1241,155 @@ test('#1201: the server tests default _fetchRun, so none spawns a real git fetch
     assert.equal(noFetchCalls[before][0], 'git');
     assert.equal(noFetchCalls[before][1][0], 'fetch', 'the tick reached the injected default, not a child process');
   } finally {
+    await server.close();
+  }
+});
+
+// ── #1257 R1257-9: the event-loop probe ──────────────────────────────────────
+//
+// "No view waits on a forge read" is a claim about the SERVER'S THREAD, so it is proved with
+// an adapter that blocks its own thread on `Atomics.wait` and a helper worker that asks the
+// server for `GET /` meanwhile. If the adapter runs on the server's thread, nobody can answer
+// the helper, the wait ends at the deadlock guard and the result slot says so. If it runs in
+// a forge thread, the server answers, the helper releases the adapter, and the result slot
+// says `ok`. No assertion measures time.
+
+const BLOCKING_ADAPTER_URL = new URL('./test-support/blocking-forge-adapter.mjs', import.meta.url).href;
+
+test('#1257 R1257-9: an HTTP request is answered while a forge adapter blocks its thread (the probe)', async (t) => {
+  const sab = new SharedArrayBuffer(16);
+  const slots = new Int32Array(sab);
+  const port = await freePort();
+  const requester = startRequester({ sab, port });
+  t.after(() => requester.worker.terminate());
+
+  const server = await main(['--port', String(port), '--root', makeFixture()], {
+    say: () => {}, error: () => {}, process: makeFakeProcess(),
+    _resolveForgeSource: async () => ({ ok: true, vcs: createBlockingAdapter({ sab }), project: 'o/r' }),
+    _forgeThreadResolve: { module: BLOCKING_ADAPTER_URL, export: 'createBlockingAdapter', workerData: { sab } },
+  });
+  t.after(() => server.close());
+  await requester.done;
+
+  assert.equal(Atomics.load(slots, STATUS), 200, 'GET / was answered');
+  assert.equal(Atomics.load(slots, RESULT), RESULT_OK, 'the adapter was released by the response, not by its deadlock guard');
+});
+
+// ── #1257 R1257-9: no view's first render waits on a forge read ──────────────
+
+// A deadlock guard for an async wait, sized for a CI runner (3x a local run): a passing run never reaches it.
+const POLL_GUARD_MS = 5000;
+async function pollUntil(predicate, { timeoutMs = POLL_GUARD_MS } = {}) {
+  const start = Date.now();
+  while (!(await predicate())) {
+    if (Date.now() - start > timeoutMs) throw new Error('pollUntil: timed out');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+
+const deferred = () => { let release; const promise = new Promise((resolve) => { release = resolve; }); return { promise, release }; };
+
+const forgeRows = [{ number: 5, title: 'five', labels: [], assignees: [], state: 'open', body: '' }];
+
+/** A forge source whose `issueList` for the given state is held until released. */
+function heldForge({ open = null, closed = null } = {}) {
+  const calls = [];
+  const source = {
+    issueList: async ({ state }) => {
+      calls.push(state);
+      if (state === 'closed') { if (closed) await closed.promise; return []; }
+      if (open) await open.promise;
+      return forgeRows.map((r) => ({ ...r }));
+    },
+    mrList: async () => [],
+    issueView: async ({ number }) => ({ number, body: '' }),
+    prReviews: async () => [],
+  };
+  return { source, calls };
+}
+
+test('#1257 R1257-9: the first snapshot is served while a forge call is held', async () => {
+  const open = deferred();
+  const { source } = heldForge({ open });
+  const server = createUiServer({ root: makeFixture(), project: 'o/r', _now: now, forgeSource: source, closedForgeSource: source });
+  await server.listen(0); // resolves with the open list still held
+  try {
+    const snap = await (await fetch(`http://127.0.0.1:${server.port}/api/snapshot`)).json();
+    assert.equal(snap.graph.pending, true);
+    assert.equal(snap.graph.reason, 'loading open issues from the forge…');
+    assert.equal(snap.forgeLoad.value.open.state, 'pending');
+    assert.equal(snap.prs.pending, true);
+  } finally {
+    open.release();
+    await server.close();
+  }
+});
+
+test('#1257 R1257-9: the stream syncs while a forge call is held', async () => {
+  const open = deferred();
+  const { source } = heldForge({ open });
+  const server = createUiServer({ root: makeFixture(), project: 'o/r', _now: now, forgeSource: source, closedForgeSource: source });
+  await server.listen(0);
+  const ac = new AbortController();
+  try {
+    const res = await fetch(`http://127.0.0.1:${server.port}/api/stream`, { signal: ac.signal });
+    const frame = await frameReader(res)();
+    assert.match(frame, /^event: sync\n/);
+    ac.abort();
+  } finally {
+    open.release();
+    await server.close();
+  }
+});
+
+test('#1257 R1257-9: closed issues are loading while the open graph is real', async () => {
+  const closed = deferred();
+  const { source } = heldForge({ closed });
+  const server = createUiServer({ root: makeFixture(), project: 'o/r', _now: now, forgeSource: source, closedForgeSource: source });
+  await server.listen(0);
+  try {
+    const url = `http://127.0.0.1:${server.port}/api/snapshot`;
+    let snap = null;
+    await pollUntil(async () => { snap = await (await fetch(url)).json(); return snap.graph.ok === true; });
+    assert.equal(snap.closedIssues.pending, true);
+    assert.equal(snap.closedIssues.reason, 'loading closed issues from the forge…');
+    assert.equal(snap.forgeLoad.value.closed.state, 'pending');
+  } finally {
+    closed.release();
+    await server.close();
+  }
+});
+
+test('#1257 R1257-8: the snapshot mirrors the poller — current.forgeLoad deep-equals meta.poller.forgeLoad in the status frame', async () => {
+  const closed = deferred();
+  const scheduler = fakeScheduler();
+  const { source } = heldForge({ closed });
+  const server = createUiServer({
+    root: makeFixture(), project: 'o/r', _now: now, forgeSource: source, closedForgeSource: source,
+    _setTimeout: scheduler.setTimeout, _clearTimeout: scheduler.clearTimeout,
+  });
+  await server.listen(0);
+  const ac = new AbortController();
+  try {
+    const res = await fetch(`http://127.0.0.1:${server.port}/api/stream`, { signal: ac.signal });
+    const readFrame = frameReader(res);
+    await readFrame(); // sync
+    await pollUntil(async () => (await (await fetch(`http://127.0.0.1:${server.port}/api/snapshot`)).json()).graph.ok === true);
+    // Quiet the stream: drain what the cold tick broadcast, then let one more tick settle with the closed lane still in flight.
+    await scheduler.runNext();
+    let status = null;
+    await pollUntil(async () => {
+      const frame = await readFrame();
+      if (!frame.startsWith('event: status')) return false;
+      status = JSON.parse(frame.split('\ndata: ')[1]);
+      return status.poller.forgeLoad.open.state === 'complete';
+    });
+    const snap = await (await fetch(`http://127.0.0.1:${server.port}/api/snapshot`)).json();
+    assert.deepEqual(snap.forgeLoad.value, status.poller.forgeLoad);
+    assert.equal(snap.forgeLoad.value.closed.state, 'pending');
+    ac.abort();
+  } finally {
+    closed.release();
     await server.close();
   }
 });

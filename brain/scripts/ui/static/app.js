@@ -167,6 +167,12 @@ function said(text) {
   return el('p', 'said', text);
 }
 
+/** A model that is unavailable. A section still loading says its own sentence as is (#1257 D65); anything else is a failure. */
+function saidUnavailable(failure, model, ...sectionNames) {
+  const loading = sectionNames.map((name) => sectionOf(state, name)).find((section) => section.pending === true);
+  return said(loading ? loading.reason : `${failure}: ${model.reason}`);
+}
+
 /** A stated list — the same rule as `said`, for facts that come by the handful.
  *  Restored in #1059: phase 5 removed the SVG helpers this sat above and took
  *  it along, leaving seven call sites pointing at nothing. */
@@ -575,7 +581,7 @@ function renderLanes() {
   const model = buildLaneModel(sectionOf(state, 'graph'), { collapsedTracks, holdingPage, project: state.meta?.project ?? null, clustering });
   clear(mounts.canvas);
   if (!model.ok) {
-    mounts.canvas.appendChild(said(`the graph could not be computed: ${model.reason}`));
+    mounts.canvas.appendChild(saidUnavailable('the graph could not be computed', model, 'graph'));
     return;
   }
   const { lanes, crossEdges, holding, droppedEdges, issuesUnreadable, edgeSummary } = model.value;
@@ -1109,7 +1115,7 @@ function renderReviews() {
   const model = buildReviewTimeline(sectionOf(state, 'reviews'), sectionOf(state, 'prs'));
   clear(mounts.canvas);
   if (!model.ok) {
-    mounts.canvas.appendChild(said(`the reviews timeline could not be computed: ${model.reason}`));
+    mounts.canvas.appendChild(saidUnavailable('the reviews timeline could not be computed', model, 'reviews', 'prs'));
     return;
   }
   const { threads, queue, totals } = model.value;
@@ -1297,7 +1303,7 @@ function renderGovernance() {
 function renderRoadmap() {
   const model = buildRoadmapModel(sectionOf(state, 'graph'), { project: state.meta?.project ?? null });
   if (!model.ok) {
-    mounts.canvas.appendChild(said(`the roadmap could not be computed: ${model.reason}`));
+    mounts.canvas.appendChild(saidUnavailable('the roadmap could not be computed', model, 'graph'));
     return;
   }
   const { epics, unlinked } = model.value;

@@ -71,6 +71,44 @@ const gh = (args, opts) => run('gh', args, ghOpts(opts));
 /** `runJson('gh', …)` under the bound identity. */
 const ghJson = (args, opts) => runJson('gh', args, ghOpts(opts));
 
+/**
+ * Spawn buffer ceiling for the list verbs (#1257). Node's default is 1 MiB and a
+ * paginated `gh api` list overruns it: the closed issues of this repository were
+ * 9 MB raw (GitHub's /issues also returns PRs, each with its body) and `spawnSync`
+ * died with ENOBUFS, surfacing as "failed (status null)". Every spawn-based list verb
+ * passes this; a list that still exceeds it fails with a reason that names the ceiling.
+ */
+export const LIST_MAX_BUFFER = 64 * 1024 * 1024;
+
+/** `gh` for a list read: the buffer ceiling above, and a readable reason for ENOBUFS. */
+function ghListRaw(args, opts) {
+  const r = gh(args, { maxBuffer: LIST_MAX_BUFFER, ...opts });
+  if (r.error?.code === 'ENOBUFS') {
+    throw new Error(`gh ${args.join(' ')} failed: the list exceeded ${LIST_MAX_BUFFER / (1024 * 1024)} MiB (ENOBUFS)`);
+  }
+  if (!r.ok) throw new Error(`gh ${args.join(' ')} failed (status ${r.status}): ${r.stderr}`);
+  return r.stdout;
+}
+
+/** `ghJson` with the list buffer ceiling. */
+function ghListJson(args, opts) {
+  const out = ghListRaw(args, opts);
+  try { return JSON.parse(out); } catch (e) { throw new Error(`gh: invalid JSON — ${e.message}`); }
+}
+
+/** Parses a JSON array OR newline-delimited JSON objects (what `gh api --paginate --jq` emits). */
+function parseJsonRows(out) {
+  const text = out.trim();
+  if (text === '') return [];
+  try {
+    const whole = JSON.parse(text);
+    return Array.isArray(whole) ? whole : [whole];
+  } catch {
+    try { return text.split('\n').filter(l => l.trim() !== '').map(l => JSON.parse(l)); }
+    catch (e) { throw new Error(`gh: invalid JSON — ${e.message}`); }
+  }
+}
+
 const toQs = (params) =>
   Object.entries(params)
     .filter(([, v]) => v !== undefined && v !== null)
@@ -202,7 +240,7 @@ export async function issueUpdate({ project, number, body } = {}) {
 export async function issueRelations({ project, number } = {}) {
   const fetchSide = (side) => {
     try {
-      const arr = ghJson(['api', '--paginate', `repos/${project}/issues/${number}/dependencies/${side}`]);
+      const arr = ghListJson(['api', '--paginate', `repos/${project}/issues/${number}/dependencies/${side}`]);
       return Array.isArray(arr) ? arr : null;
     } catch {
       return null;
@@ -450,19 +488,30 @@ export async function prView({ project, number } = {}) {
   }
 }
 
-export async function issueList({ project, state = 'open', assignee } = {}) {
+const ISSUE_LIST_JQ = '.[] | select(.pull_request | not)'
+  + ' | with_entries(select(.key | IN("number","title","state","body","labels","assignees","assignee")))'
+  + ' | if has("labels") then .labels |= map({name}) else . end'
+  + ' | if has("assignees") then .assignees |= map({login}) else . end'
+  + ' | if (.assignee | type) == "object" then .assignee |= {login} else . end';
+
+export async function issueList({ project, state = 'open', assignee, updatedSince } = {}) {
   let currentUser;
   if (assignee === 'me') currentUser = (await whoami()).username;
   const assigneePs = assigneeParams('github', assignee, currentUser);
   const extra = Object.keys(assigneePs).length > 0 ? '&' + toQs(assigneePs) : '';
-  const endpoint = `repos/${project}/issues?state=${providerState('github', state)}&per_page=100${extra}`;
+  // `updatedSince` (#1257, R1257-5) is the incremental read: GitHub's `since` filters on
+  // update time, and `sort=updated&direction=asc` keeps the walk deterministic.
+  const delta = updatedSince ? `&since=${encodeURIComponent(updatedSince)}&sort=updated&direction=asc` : '';
+  const endpoint = `repos/${project}/issues?state=${providerState('github', state)}&per_page=100${extra}${delta}`;
   // `--paginate` is load-bearing, same discipline as `labelEvents`/`prReviews`/
   // `labelList`: `gh api` does not auto-paginate, so a repo with more than one page
   // of open issues silently returned a PREFIX. Every consumer of this verb reads the
   // result as "the issues", and `brain:epic:map` (#459) draws a dependency graph from
   // it — a truncated list makes the map assert there is no dependency where there is
   // one, which is a stronger and falser statement than admitting it cannot see.
-  const arr = ghJson(['api', '--paginate', endpoint]);
+  // Drop PRs and unused fields at the source: the closed list went from 9.0 MB raw to
+  // 1.6 MB. Key presence survives the filter (R12: absent body -> null, JSON null -> '').
+  const arr = parseJsonRows(ghListRaw(['api', '--paginate', '--jq', ISSUE_LIST_JQ, endpoint]));
   // GitHub /issues returns both issues and PRs — filter out PRs.
   return arr
     .filter(r => !r.pull_request)
@@ -474,6 +523,11 @@ export async function issueList({ project, state = 'open', assignee } = {}) {
       title: r.title,
       labels: (r.labels ?? []).map(l => l.name),
       assignees: normalizeAssignees(r, 'login'),
+      // #1257 (R4, R10, R12): `state` is GitHub's own literal when representable, else
+      // null. `body` is null when the payload did not carry the key, and '' when it
+      // carried an empty or JSON-null one: "cannot see" is not "empty".
+      state: r.state === 'open' || r.state === 'closed' ? r.state : null,
+      body: 'body' in r ? (r.body ?? '') : null,
     }));
 }
 
@@ -499,7 +553,7 @@ export async function issueList({ project, state = 'open', assignee } = {}) {
 export async function mrList({ project, state = 'open', headBranch } = {}) {
   const owner = project.split('/')[0];
   const headParam = headBranch !== undefined ? `&head=${encodeURIComponent(`${owner}:${headBranch}`)}` : '';
-  const arr = ghJson(['api', `repos/${project}/pulls?state=${providerState('github', state)}${headParam}&per_page=100`]);
+  const arr = ghListJson(['api', `repos/${project}/pulls?state=${providerState('github', state)}${headParam}&per_page=100`]);
   if (headBranch !== undefined && arr.length === 100) {
     throw new Error(`mrList: a full page (100) came back for headBranch ${headBranch} — cannot rule out truncation, failing closed`);
   }
@@ -543,10 +597,8 @@ export async function commitStatus({ project, sha }) {
  * @returns {Promise<number[]|null>}
  */
 export async function commitPrs({ project, sha } = {}) {
-  const r = gh(['api', '--paginate', `repos/${project}/commits/${sha}/pulls`]);
-  if (!r.ok) return null;
   try {
-    const data = JSON.parse(r.stdout);
+    const data = ghListJson(['api', '--paginate', `repos/${project}/commits/${sha}/pulls`]);
     if (!Array.isArray(data)) return null;
     return data.map(pr => pr.number).sort((a, b) => a - b);
   } catch {
@@ -625,7 +677,7 @@ export async function workflowRunSucceeded({ project, workflow, branch } = {}) {
   if (!workflow || !branch) return { state: 'unknown', detail: 'workflow and branch are both required' };
   let runs;
   try {
-    runs = ghJson([
+    runs = ghListJson([
       'run', 'list', '--workflow', workflow, '--branch', branch, '--status', 'success',
       '--limit', '1', '--json', 'databaseId', ...(project ? ['-R', project] : []),
     ]);
@@ -673,7 +725,7 @@ export async function workflowRunSucceeded({ project, workflow, branch } = {}) {
 export async function prReviews({ project, number } = {}) {
   let reviews;
   try {
-    reviews = ghJson(['api', '--paginate', `repos/${project}/pulls/${number}/reviews`]);
+    reviews = ghListJson(['api', '--paginate', `repos/${project}/pulls/${number}/reviews`]);
   } catch {
     return null;
   }
@@ -790,7 +842,7 @@ export async function mrAutoMerge({ project, number, requiredReviews = 1 } = {})
 export async function labelEvents({ project, number, kind: _kind } = {}) {
   let events;
   try {
-    events = ghJson(['api', '--paginate', `repos/${project}/issues/${number}/events`]);
+    events = ghListJson(['api', '--paginate', `repos/${project}/issues/${number}/events`]);
   } catch {
     return null;
   }
@@ -833,7 +885,7 @@ export async function labelEvents({ project, number, kind: _kind } = {}) {
 export async function prCommits({ project, number } = {}) {
   let commits;
   try {
-    commits = ghJson(['api', '--paginate', `repos/${project}/pulls/${number}/commits`]);
+    commits = ghListJson(['api', '--paginate', `repos/${project}/pulls/${number}/commits`]);
   } catch {
     return null;
   }
@@ -988,7 +1040,7 @@ export async function labelRemove({ project, number, labels } = {}) {
  * @returns {Promise<string[]>}
  */
 export async function labelList({ project } = {}) {
-  const arr = ghJson(['api', '--paginate', `repos/${project}/labels?per_page=100`]);
+  const arr = ghListJson(['api', '--paginate', `repos/${project}/labels?per_page=100`]);
   return arr.map(l => l.name);
 }
 
@@ -1058,7 +1110,7 @@ export async function issueClose({ project, number } = {}) {
 export async function rerunWorkflowRun({ project, ref, workflow = 'governance.yml' } = {}) {
   let runsResp;
   try {
-    runsResp = ghJson(['api', `repos/${project}/actions/runs?branch=${encodeURIComponent(ref)}&per_page=100`]);
+    runsResp = ghListJson(['api', `repos/${project}/actions/runs?branch=${encodeURIComponent(ref)}&per_page=100`]);
   } catch (err) {
     return { ok: false, reason: `could not list workflow runs: ${err.message}` };
   }

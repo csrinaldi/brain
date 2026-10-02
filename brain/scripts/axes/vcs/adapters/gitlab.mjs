@@ -603,7 +603,20 @@ export async function prCommits({ project, number, apiBase, token, proxyUrl, fet
   return commits.map(c => ({ sha: c.id, login: null, at: c.committed_date }));
 }
 
-export async function issueList({ project, state = 'open', assignee } = {}) {
+/** Spawn buffer ceiling for the list verbs (#1257); see github.mjs LIST_MAX_BUFFER. */
+export const LIST_MAX_BUFFER = 64 * 1024 * 1024;
+
+/** `runJson` for a list read: the buffer ceiling, and a readable reason for ENOBUFS (mirrors github's ghListRaw). */
+function glabListJson(args) {
+  const r = run('glab', args, { maxBuffer: LIST_MAX_BUFFER });
+  if (r.error?.code === 'ENOBUFS') {
+    throw new Error(`glab ${args.join(' ')} failed: the list exceeded ${LIST_MAX_BUFFER / (1024 * 1024)} MiB (ENOBUFS)`);
+  }
+  if (!r.ok) throw new Error(`glab ${args.join(' ')} failed (status ${r.status}): ${r.stderr}`);
+  try { return JSON.parse(r.stdout); } catch (e) { throw new Error(`glab: invalid JSON — ${e.message}`); }
+}
+
+export async function issueList({ project, state = 'open', assignee, updatedSince } = {}) {
   let currentUser;
   if (assignee === 'me') currentUser = (await whoami()).username;
   const encoded = encodeURIComponent(project);
@@ -617,9 +630,11 @@ export async function issueList({ project, state = 'open', assignee } = {}) {
   // a graph missing nodes and say nothing about it.
   const perPage = 100;
   const arr = [];
+  // `updatedSince` (#1257, R1257-5): the incremental read, on every page.
+  const delta = updatedSince ? `&updated_after=${encodeURIComponent(updatedSince)}&order_by=updated_at&sort=asc` : '';
   for (let page = 1; ; page += 1) {
-    const endpoint = `projects/${encoded}/issues?state=${providerState('gitlab', state)}&per_page=${perPage}&page=${page}${extra}`;
-    const chunk = runJson('glab', ['api', endpoint]);
+    const endpoint = `projects/${encoded}/issues?state=${providerState('gitlab', state)}&per_page=${perPage}&page=${page}${extra}${delta}`;
+    const chunk = glabListJson(['api', endpoint]);
     if (!Array.isArray(chunk)) break;
     arr.push(...chunk);
     if (chunk.length < perPage) break;
@@ -632,7 +647,18 @@ export async function issueList({ project, state = 'open', assignee } = {}) {
     title: r.title,
     labels: r.labels ?? [],
     assignees: normalizeAssignees(r, 'username'),
+    // #1257 (R4, R10, R12): the same two fields as github.mjs, in the same order.
+    state: mapGitlabIssueState(r.state),
+    body: 'description' in r ? (r.description ?? '') : null,
   }));
+}
+
+/** GitLab issues report `opened`|`closed`; the shared enum is `open`|`closed`.
+ * Anything else is unrepresentable and reports `null` rather than guessing. */
+function mapGitlabIssueState(raw) {
+  if (raw === 'opened') return 'open';
+  if (raw === 'closed') return 'closed';
+  return null;
 }
 
 /** D1 — GitLab's native merge_requests `state` has no distinct GitHub-shaped
@@ -664,7 +690,7 @@ export async function mrList({ project, state = 'open', headBranch } = {}) {
   const endpoint = headBranch !== undefined
     ? `projects/${encoded}/merge_requests?state=${providerState('gitlab', state)}&source_branch=${encodeURIComponent(headBranch)}&per_page=100`
     : `projects/${encoded}/merge_requests?state=${providerState('gitlab', state)}&per_page=50`;
-  const arr = runJson('glab', ['api', endpoint]);
+  const arr = glabListJson(['api', endpoint]);
   if (headBranch !== undefined && arr.length === 100) {
     throw new Error(`mrList: a full page (100) came back for headBranch ${headBranch} — cannot rule out truncation, failing closed`);
   }

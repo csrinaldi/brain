@@ -73,3 +73,34 @@ test('#881: before any poll completes, both per-number verbs keep the first-poll
   await assert.rejects(() => cache.port.issueView({ project: 'o/r', number: 5 }), /^Error: the first forge poll has not completed$/);
   await assert.rejects(() => cache.port.prReviews({ project: 'o/r', number: 10 }), /^Error: the first forge poll has not completed$/);
 });
+
+// ── #1257 (R1257-10, D57): one issueList per state ──────────────────────────
+//
+// The port used to ignore `state`, so a closed read through the cache would have
+// been answered with the OPEN list: a silent wrong answer.
+
+test('#1257: the cache keeps one list per state', async () => {
+  const cache = createForgeCache();
+  const openRows = [{ number: 5 }];
+  const closedRows = [{ number: 3 }];
+  cache.setIssueList(openRows);
+  cache.setIssueList(closedRows, 'closed');
+
+  assert.equal(await cache.port.issueList({ state: 'closed' }), closedRows);
+  assert.equal(await cache.port.issueList({}), openRows, 'no state means open');
+  assert.equal(await cache.port.issueList({ state: 'open' }), openRows);
+});
+
+test('#1257: a closed miss is not the open list', async () => {
+  const cache = createForgeCache();
+  cache.setIssueList([{ number: 5 }]);
+  await assert.rejects(
+    () => cache.port.issueList({ state: 'closed' }),
+    /^Error: the closed-issue list has not been fetched yet \(queued\)$/,
+  );
+});
+
+test('#1257: a closed read on an empty cache keeps the first-poll wording', async () => {
+  const cache = createForgeCache();
+  await assert.rejects(() => cache.port.issueList({ state: 'closed' }), /^Error: the first forge poll has not completed$/);
+});

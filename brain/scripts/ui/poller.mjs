@@ -1,30 +1,23 @@
-// poller.mjs — the forge poll loop: three lanes bounded by the Q1/D2 budget
-// (#881 PR 2). The ONLY caller of any `gh`-backed VCS read verb this server
-// makes (D1) — `buildSnapshot` never sees a live port, only the cache this
+// poller.mjs — the forge poll loop: the open lane, the remotes lane and the closed
+// lane (#881 PR 2, #1201, #1257). The ONLY caller of any `gh`-backed VCS read verb
+// this server makes (D1) — `buildSnapshot` never sees a live port, only the cache this
 // module fills through `forge-cache.mjs`'s setters.
 //
-// Fast lane, every tick: `issueList` + `mrList` — their rows ARE the change
-// key (Q1: no ETag, no `updated_at` anywhere in the provider). Review lane,
-// every tick, capped at 10 PRs, round-robin beyond the cap (`min(P,10)`).
-// Body lane: on the very first tick ever ("cold start"), every open issue,
-// uncapped — the page cannot render a graph at all otherwise, and this
-// happens exactly once per process. On every later tick the body lane spends
-// at most B = 5 calls in three priority buckets: brand-new issue numbers
-// (same tick, capped at 20, so a new issue never sits `unreadable`), then
-// issues whose fast-lane row changed, then the longest-unrefreshed issues.
-// That last bucket runs even when the first two are empty — it is what bounds
-// the staleness of body-only facts, which no list-level field can signal
-// (design.md Q1/D2 (c)). A brand-new number beyond the cap of 20 is queued,
-// not dropped: it has no previous row, so the "changed" test could never see
-// it again, and by the end of its own tick it has stopped being new.
+// Open lane, every tick: `issueList` + `mrList`. The issue rows carry `state` and
+// `body` (#1257 R10), so a row IS the change key and the body; there is no body
+// refresh to schedule. The review lane runs every tick, capped at 10 PRs,
+// round-robin beyond the cap (`min(P,10)`). The only per-issue read left is the
+// null-body fallback: rows whose `body` is not a string and that are not yet cached,
+// ascending, at most BODY_CAP per tick (R1257-11), on the cold start too.
 //
-// The body lane's TOTAL per tick is bounded at BODY_CAP + NEW_BODY_CAP (25)
-// even when every open issue changes in the same tick (a bulk label rename
-// is one ordinary GitHub action, not an adversarial input). `changed` rows
-// that do not fit this tick's budget are never dropped — they stay in a
-// FIFO pending set and drain on the following ticks, oldest-changed-first,
-// until every one of them has had its body refreshed at least once (see
-// `pendingBodyRefresh` below; judgment:cold-4).
+// The open list's FIRST landing recomputes at once (D66), before the review lane, so
+// the graph fills in before the reviews. `forgeLoad` says what is still loading
+// (D64): the page never reads a pending lane as a failure or as an empty list.
+//
+// Closed lane (#1257 D56): the closed issues are read on their own single flight,
+// never awaited by a tick and never awaiting one: full first, then incremental
+// (`updatedSince`), with a periodic full re-list. Its failure never touches the open
+// lane's `lastError`.
 //
 // Remotes lane (#1201 D40): beside the forge lane, each tick also runs the
 // injected `fetchRemotes` (one `git fetch origin …`, asynchronous, killed at its
@@ -41,20 +34,18 @@
 
 const REVIEW_CAP = 10;
 const BODY_CAP = 5;
-const NEW_BODY_CAP = 20;
 const ONCE_COLLAPSE_MS = 5000;
-
-function rowsEqual(a, b) {
-  return a.title === b.title
-    && JSON.stringify(a.labels ?? []) === JSON.stringify(b.labels ?? [])
-    && JSON.stringify(a.assignees ?? []) === JSON.stringify(b.assignees ?? []);
-}
+// #1257 D56: every 60th closed run re-lists in full, which drops issues a delta never reports
+// (transferred, deleted); the 10 minutes absorb clock skew between this host and the forge.
+const CLOSED_FULL_EVERY_RUNS = 60;
+const CLOSED_SINCE_OVERLAP_MS = 600000;
 
 /**
  * createPoller() — the three lanes, pause/resume/once (D2, D7, #881 PR 2).
  *
  * @param {{
  *   vcs: {issueList: Function, mrList: Function, issueView: Function, prReviews: Function},
+ *   closedVcs?: {issueList: Function}|null,  // the closed lane's own port (own thread in production)
  *   cache: {setIssueList: Function, setMrList: Function, setIssueView: Function, setPrReviews: Function},
  *   project?: string|null,
  *   interval?: number, enabled?: boolean,
@@ -66,6 +57,7 @@ function rowsEqual(a, b) {
  */
 export function createPoller({
   vcs,
+  closedVcs = null,
   cache,
   project = null,
   interval = 60000,
@@ -94,16 +86,26 @@ export function createPoller({
   let timer = null;
   let inFlight = null;
   let lastOnceAt = -Infinity;
-  let previousIssues = null; // Map<number, row> | null — null means "no tick has completed yet"
-  const lastBodyRefreshTick = new Map();
-  const pendingBodyRefresh = new Set(); // numbers whose fast-lane row changed but have not yet had a body refresh — drains FIFO (judgment:cold-4)
-  let tickCount = 0;
+  const bodyCached = new Set(); // open numbers whose null body was already read through `issueView`
   let reviewOffset = 0;
 
   let lastPolledAt = initialError ? _now().toISOString() : null;
   let lastOkAt = null;
   let lastError = initialError;
   let forgeAsOf = { issues: null, bodies: null, reviews: null };
+  // #1257 D64: the open lane's load state. `completeAt` is the last successful landing.
+  let openLoad = { state: 'pending', at: null };
+  let openCompleteAt = null;
+  // The closed lane (D56). `closedHeld` is the merged set by number; a delta only ever
+  // upserts, so it is `complete` only once a FULL list has landed in this process.
+  let closedLoad = { state: 'pending', at: null };
+  let closedCompleteAt = null;
+  let closedFlight = null;
+  let closedHeld = null; // Map<number, row> | null — null until a full list lands
+  let closedRunNumber = 0;
+  let closedAnchorMs = null; // start of the last SUCCESSFUL closed run
+  let fullOverdue = false; // a scheduled periodic full failed: the next run is full again
+  let lastOpenNumbers = new Set();
   // #998 R998-6: the status bar's countdown. Armed by `scheduleNext()` from
   // the SAME injected `_now()` this whole module already uses, never the
   // wall clock (D9: no clock in `lib/`, the caller passes it). A manual
@@ -120,8 +122,21 @@ export function createPoller({
   let remotesFlight = null;
   let lastRefreshAt = -Infinity;
 
+  /** One lane entry in the spec's shapes. A halted forge fails both lanes with no data; a pause before any landing says so. */
+  function forgeLoad() {
+    if (forgeHalted) {
+      const halted = { state: 'failed', at: lastPolledAt, reason: forgeHaltReason, lastCompleteAt: null };
+      return { open: { ...halted }, closed: { ...halted } };
+    }
+    const paused = (entry, flying) => (entry.state === 'pending' && userPaused && !flying ? { ...entry, reason: 'polling is paused' } : { ...entry });
+    const closedEntry = closedVcs === null
+      ? { state: 'disabled', at: null, reason: 'no closed-issue lane is configured' }
+      : paused(closedLoad, closedFlight !== null);
+    return { open: paused(openLoad, tickRunning), closed: closedEntry };
+  }
+
   function state() {
-    return { paused: userPaused, forgeHalted, forgeHaltReason, remotesLane: fetchRemotes !== null, lastPolledAt, lastOkAt, lastError, forgeAsOf: { ...forgeAsOf }, intervalMs: interval, nextAttemptAt, remotes: { ...remotes } };
+    return { paused: userPaused, forgeHalted, forgeHaltReason, remotesLane: fetchRemotes !== null, lastPolledAt, lastOkAt, lastError, forgeAsOf: { ...forgeAsOf }, forgeLoad: forgeLoad(), intervalMs: interval, nextAttemptAt, remotes: { ...remotes } };
   }
 
   /** One fetch at a time: a caller that arrives while one runs joins it. Absent `fetchRemotes` is a no-op. */
@@ -152,62 +167,59 @@ export function createPoller({
     return picked;
   }
 
+  /** The null-body fallback: rows with no string body, not yet read, ascending, capped (R1257-11). */
   function pickBodyTargets(issueRows) {
-    const numbers = issueRows.map((r) => r.number);
-    if (previousIssues === null) return numbers; // cold start: every open issue, uncapped
-
-    const numberSet = new Set(numbers);
-    for (const n of pendingBodyRefresh) if (!numberSet.has(n)) pendingBodyRefresh.delete(n); // closed issues cannot be refreshed
-
-    // (a) brand-new numbers, ascending, capped at NEW_BODY_CAP. The overflow
-    // of a bulk import is QUEUED, never dropped (judgment:cold-1, tracker PR
-    // #970): an overflow number has `prev === undefined`, so the `changed`
-    // loop below can never queue it, and by the end of this tick it is
-    // recorded in `previousIssues` and stops being new — without this queue
-    // its body would never be fetched at all and its node would render
-    // `UNREADABLE` forever. It is deliberately NOT spent this tick: (a)'s cap
-    // is NEW_BODY_CAP, so the overflow drains on the ticks that follow.
-    const allNew = numbers.filter((n) => !previousIssues.has(n)).sort((a, b) => a - b);
-    const newNumbers = allNew.slice(0, NEW_BODY_CAP);
-    const newSet = new Set(newNumbers);
-    const deferred = new Set(allNew.slice(NEW_BODY_CAP));
-    for (const n of deferred) pendingBodyRefresh.add(n); // insertion order = FIFO drain order
-
-    // (b) numbers whose fast-lane row moved.
-    for (const n of numbers) {
-      if (newSet.has(n) || deferred.has(n)) continue;
-      const prev = previousIssues.get(n);
-      const row = issueRows.find((r) => r.number === n);
-      if (prev !== undefined && !rowsEqual(prev, row)) pendingBodyRefresh.add(n);
+    const byNumber = new Map(issueRows.map((r) => [r.number, r]));
+    for (const n of bodyCached) {
+      const row = byNumber.get(n);
+      if (row === undefined || typeof row.body === 'string') bodyCached.delete(n); // gone, or the list carries it now
     }
+    return issueRows
+      .filter((r) => typeof r.body !== 'string' && !bodyCached.has(r.number))
+      .map((r) => r.number)
+      .sort((a, b) => a - b)
+      .slice(0, BODY_CAP);
+  }
 
-    // The tick's total is bounded at BODY_CAP + NEW_BODY_CAP even when every
-    // open issue changed at once — `changed` on its own has no cap, unlike
-    // `newNumbers` above. Anything in `pendingBodyRefresh` that does not fit
-    // this tick's slice stays there and is picked up, oldest-first, on a
-    // later tick (see the `.delete()` in `tick()` below, which only fires on
-    // an actual successful fetch).
-    const cap = BODY_CAP + NEW_BODY_CAP;
-    const changed = [...pendingBodyRefresh]
-      .filter((n) => !newSet.has(n) && !deferred.has(n))
-      .slice(0, Math.max(cap - newNumbers.length, 0));
+  /** The merged closed set, descending by number, minus anything the latest open list holds (a reopened issue). */
+  function publishClosed() {
+    if (closedHeld === null) return;
+    for (const n of lastOpenNumbers) closedHeld.delete(n);
+    cache.setIssueList([...closedHeld.values()].sort((a, b) => b.number - a.number), 'closed');
+  }
 
-    // (c) the least-recently-refreshed catch-up. There is no early return
-    // above it: when nothing is new and nothing is pending this bucket is the
-    // ONLY thing the body lane does, and foreclosing it is what made the
-    // overflow of (a) unreachable forever. A number that has never been
-    // fetched has refresh tick -1 and therefore wins this ordering outright.
-    const changedSet = new Set(changed);
-    const remaining = Math.max(BODY_CAP - newNumbers.length - changed.length, 0);
-    const rest = numbers
-      .filter((n) => !newSet.has(n) && !changedSet.has(n) && !pendingBodyRefresh.has(n))
-      .sort((a, b) => (lastBodyRefreshTick.get(a) ?? -1) - (lastBodyRefreshTick.get(b) ?? -1))
-      .slice(0, remaining);
-    return [...newNumbers, ...changed, ...rest];
+  /** One closed run: full first and every CLOSED_FULL_EVERY_RUNS-th, a delta otherwise. Never rejects. */
+  function runClosed() {
+    if (!closedVcs || forgeHalted) return Promise.resolve();
+    if (closedFlight) return closedFlight;
+    closedRunNumber += 1;
+    const startAt = _now();
+    const periodic = closedRunNumber % CLOSED_FULL_EVERY_RUNS === 0;
+    const full = closedHeld === null || periodic || fullOverdue;
+    const args = { project, state: 'closed' };
+    if (!full) args.updatedSince = new Date(closedAnchorMs - CLOSED_SINCE_OVERLAP_MS).toISOString();
+    closedFlight = (async () => {
+      try {
+        const list = await closedVcs.issueList(args);
+        if (closed) return;
+        if (full) closedHeld = new Map(list.map((r) => [r.number, r]));
+        else for (const r of list) closedHeld.set(r.number, r);
+        fullOverdue = false;
+        closedAnchorMs = startAt.getTime();
+        closedCompleteAt = startAt.toISOString();
+        closedLoad = { state: 'complete', at: closedCompleteAt };
+        publishClosed();
+      } catch (err) {
+        if (full && closedHeld !== null) fullOverdue = true;
+        closedLoad = { state: 'failed', at: startAt.toISOString(), reason: err?.message ?? String(err), lastCompleteAt: closedCompleteAt };
+      } finally {
+        closedFlight = null;
+      }
+    })();
+    return closedFlight;
   }
 
   async function forgeLane() {
-    tickCount += 1;
     const attemptAt = _now();
     try {
       const [issueRows, mrRows] = await Promise.all([
@@ -217,6 +229,13 @@ export function createPoller({
       cache.setIssueList(issueRows);
       cache.setMrList(mrRows);
       forgeAsOf = { ...forgeAsOf, issues: attemptAt.toISOString() };
+      const firstLanding = openCompleteAt === null;
+      openCompleteAt = attemptAt.toISOString();
+      openLoad = { state: 'complete', at: openCompleteAt };
+      lastOpenNumbers = new Set(issueRows.map((r) => r.number));
+      publishClosed(); // an issue reopened since the last closed read leaves the closed set at once
+      // D66: the graph does not wait for the reviews. Only the first landing recomputes early.
+      if (firstLanding && !closed) onTick(state());
 
       const prNumbers = mrRows.map((p) => p.number);
       // No cold-start exception here (unlike the body lane below): the
@@ -235,13 +254,11 @@ export function createPoller({
       await Promise.all(bodyTargets.map(async (number) => {
         try {
           cache.setIssueView(number, await vcs.issueView({ project, number }));
-          lastBodyRefreshTick.set(number, tickCount);
-          pendingBodyRefresh.delete(number); // drained — a failed fetch stays pending and is retried next tick
+          bodyCached.add(number); // a failed fetch is not cached and is retried next tick
         } catch { /* previous value stays cached (R881-9) */ }
       }));
       if (bodyTargets.length > 0) forgeAsOf = { ...forgeAsOf, bodies: attemptAt.toISOString() };
 
-      previousIssues = new Map(issueRows.map((r) => [r.number, r]));
       lastOkAt = attemptAt.toISOString();
       lastError = null;
     } catch (err) {
@@ -249,6 +266,7 @@ export function createPoller({
       // cache setter ran above and every previously-cached section is
       // untouched (R881-9).
       lastError = err?.message ?? String(err);
+      openLoad = { state: 'failed', at: attemptAt.toISOString(), reason: lastError, lastCompleteAt: openCompleteAt };
     } finally {
       lastPolledAt = attemptAt.toISOString();
     }
@@ -270,6 +288,10 @@ export function createPoller({
       runRemotes().then(() => { if (!tickRunning && !closed) onTick(state()); });
     } else {
       runRemotes(); // joins the flight in progress (or is the no-op); starts nothing
+    }
+    // D56: the closed lane has its own single flight. A tick starts it and never awaits it.
+    if (closedVcs && !closedFlight && !forgeHalted) {
+      runClosed().then(() => { if (!tickRunning && !closed) onTick(state()); });
     }
     if (!forgeHalted) await forgeLane();
   }
