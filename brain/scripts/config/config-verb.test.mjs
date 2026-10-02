@@ -230,3 +230,36 @@ test('#1114 S3.3: <axis>.providers.<name> is a settable family; an unknown axis 
   const no = planConfigWrite({ config: { schemaVersion: '1.9.1' }, path: 'cache.default', value: 'x', migrations: AXIS_MIGRATIONS, targetVersion: '1.9.1' });
   assert.match(no.refusal, /unknown path/);
 });
+
+// ── #1114 S3.3 review: the legacy aliases and the providers map obey the SAME closed sets ──
+const TOKEN = ['ghp', 'x'.repeat(20)].join('_'); // built at runtime so no secret-shaped literal is committed
+
+test('#1114 S3.3 BLOCKER: vcs.provider (the legacy alias) refuses a token-shaped value and writes nothing', () => {
+  const config = { schemaVersion: '0.3.0', vcs: { provider: 'github', default: 'github', providers: { github: {} } } };
+  const r = planConfigWrite({ config, path: 'vcs.provider', value: TOKEN, migrations: AXIS_MIGRATIONS, targetVersion: '0.3.0' });
+  assert.equal(r.next, null);
+  assert.match(r.refusal, /github \| gitlab/);
+  assert.doesNotMatch(r.refusal, /ghp_/, 'the refusal must not echo a secret-shaped value back');
+});
+
+test('#1114 S3.3 BLOCKER: memory.backend refuses a value outside the closed set (alias and default agree)', () => {
+  const config = { schemaVersion: '1.9.1', memory: { backend: 'engram', default: 'engram', providers: { engram: {} } } };
+  for (const path of ['memory.backend', 'memory.default']) {
+    const r = planConfigWrite({ config, path, value: TOKEN, migrations: AXIS_MIGRATIONS, targetVersion: '1.9.1' });
+    assert.equal(r.next, null, path);
+    assert.match(r.refusal, /engram \| plainfiles/);
+  }
+  assert.equal(planConfigWrite({ config, path: 'vcs.provider', value: 'gitlab', migrations: AXIS_MIGRATIONS, targetVersion: '1.9.1' }).refusal, null, 'a valid alias write still works');
+});
+
+test('#1114 S3.3 BLOCKER: <axis>.providers.<name> refuses a name outside the axis closed set', () => {
+  for (const path of [`vcs.providers.${TOKEN}`, 'memory.providers.mongo', 'platform.providers.nope', 'sdd.providers.nope']) {
+    const r = planConfigWrite({ config: { schemaVersion: '1.9.1' }, path, value: '{}', migrations: AXIS_MIGRATIONS, targetVersion: '1.9.1' });
+    assert.equal(r.next, null, path);
+    assert.match(r.refusal, /providers/);
+    assert.doesNotMatch(r.refusal, /ghp_/);
+  }
+  for (const path of ['vcs.providers.github', 'memory.providers.plainfiles', 'platform.providers.codex', 'sdd.providers.gentle-ai', 'sdd.providers.brain']) {
+    assert.equal(planConfigWrite({ config: { schemaVersion: '1.9.1' }, path, value: '{}', migrations: AXIS_MIGRATIONS, targetVersion: '1.9.1' }).refusal, null, path);
+  }
+});

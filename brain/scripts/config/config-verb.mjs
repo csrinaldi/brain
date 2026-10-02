@@ -23,7 +23,7 @@
 
 import { migrateConfig } from '../lib/installer.mjs';
 import { MEMORY_BACKENDS } from '../memory/lib/backend-resolve.mjs';
-import { AXES, AGENT_PLATFORMS, SDD_ENGINES } from '../lib/axis-config.mjs';
+import { AXES, AGENT_PLATFORMS, SDD_ENGINES, PLATFORM_CAPABILITIES } from '../lib/axis-config.mjs';
 
 // Values a path accepts, checked at WRITE time (#1165): a typo in a selector is refused here,
 // not at the next `pull` on another machine. '' is allowed — it clears to undeclared.
@@ -33,6 +33,7 @@ const ALLOWED_VALUES = Object.freeze({
   'memory.backend': MEMORY_BACKENDS,
   'memory.default': MEMORY_BACKENDS,
   'vcs.default': VCS_PROVIDERS,
+  'vcs.provider': VCS_PROVIDERS, // the legacy alias: the same closed set, or a token-shaped value reaches TRACKED config through it (#1112)
   'platform.default': AGENT_PLATFORMS,
   'sdd.default': SDD_ENGINES,
 });
@@ -43,6 +44,15 @@ const ALLOWED_VALUES = Object.freeze({
  */
 const AXIS_DEFAULT_PATHS = Object.freeze(AXES.map((axis) => `${axis}.default`));
 const AXIS_PROVIDER_FAMILIES = Object.freeze(AXES.map((axis) => `${axis}.providers`));
+// The names `<axis>.providers.<name>` may take: the same closed sets as `<axis>.default`, so a provider
+// key cannot carry arbitrary text into tracked config. Platform providers also include the routed
+// runtimes of PLATFORM_CAPABILITIES (codex, gemini); sdd also has brain's own provider.
+const PROVIDER_NAMES = Object.freeze({
+  vcs: VCS_PROVIDERS,
+  memory: MEMORY_BACKENDS,
+  platform: Object.keys(PLATFORM_CAPABILITIES),
+  sdd: [...SDD_ENGINES, 'brain'],
+});
 
 /**
  * Walks every migration's `defaults` tree once.
@@ -185,9 +195,18 @@ export function planConfigWrite({ config, path, value, migrations, targetVersion
       return {
         next: null,
         migrationsApplied: [],
-        refusal: `config: '${path}' must be one of ${allowedValues.join(' | ')} (or "" to clear) — got ${JSON.stringify(v)}. Nothing written.`,
+        // The rejected value is NOT echoed: a value refused for being token-shaped must not be printed either.
+        refusal: `config: '${path}' must be one of ${allowedValues.join(' | ')} (or "" to clear). Nothing written.`,
       };
     }
+  }
+  const [pAxis, pKey, pName] = path.split('.');
+  if (pKey === 'providers' && pName !== undefined && PROVIDER_NAMES[pAxis] && !PROVIDER_NAMES[pAxis].includes(pName)) {
+    return {
+      next: null,
+      migrationsApplied: [],
+      refusal: `config: '${pAxis}.providers.<name>' takes a name from ${PROVIDER_NAMES[pAxis].join(' | ')}. Nothing written.`,
+    };
   }
 
   const known = deriveKnownPaths(migrations);
