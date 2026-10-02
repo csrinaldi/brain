@@ -55,14 +55,13 @@ test('#879: arguments — --json, --now needs an ISO date, unknown flags are ref
 
 test('#1201 R1201-1: on a clone with remote-tracking refs the verb and the module agree, remoteChanges is ok, and the CLI runs cold (two runs identical)', async () => {
   const fx = makeRemoteFixture();
-  const argv = [CLI, '--json', '--now', NOW, '--root', fx.served];
-  const r = spawnSync(process.execPath, argv, { encoding: 'utf8' });
+  const r = spawnSync(process.execPath, [CLI, '--json', '--now', NOW, '--root', fx.served], { encoding: 'utf8' });
   assert.equal(r.status, 0, r.stderr);
   const fromVerb = JSON.parse(r.stdout);
   assert.equal(fromVerb.remoteChanges.ok, true, JSON.stringify(fromVerb.remoteChanges));
   assert.deepEqual(fromVerb.remoteChanges.value.branches.map((e) => e.branch), ['feat/issue-11-a', 'feat/issue-12-b']);
   assert.deepEqual(fromVerb, JSON.parse(JSON.stringify(await buildSnapshot({ root: fx.served, now: NOW }))));
-  assert.equal(spawnSync(process.execPath, argv, { encoding: 'utf8' }).stdout, r.stdout, 'no cache was passed: identical output');
+  assert.equal(spawnSync(process.execPath, [CLI, '--json', '--now', NOW, '--root', fx.served], { encoding: 'utf8' }).stdout, r.stdout, 'no cache was passed: identical output');
   assert.doesNotMatch(r.stdout, /session/i);
 });
 
