@@ -819,3 +819,51 @@ test('#1201 D40: with no fetchRemotes the lane is a no-op and refreshRemotes() s
   assert.deepEqual(state.remotes, { lastAttemptAt: null, lastOkAt: null, lastError: null, inFlight: false });
   poller.close();
 });
+
+// ── #1201 D40: the lanes are independent in time, not only in failure ────────
+
+test('#1201 R1201-9: a slow fetch never delays the forge lane — the next tick is armed and a forge change lands while the fetch is pending', async () => {
+  const spy = fetchSpy({ hold: true });
+  const ticks = [];
+  const callLog = [];
+  let issues = [{ number: 5, title: 'five', labels: [], assignees: [] }];
+  const vcs = makeVcs({ callLog });
+  vcs.issueList = async () => { callLog.push('issueList'); return issues.map((i) => ({ ...i })); };
+  const { poller, scheduler } = remotesPoller({ fetchRemotes: spy.fn, vcs, onTick: () => ticks.push('onTick') });
+
+  await poller.start(); // the fetch is held open and never released
+  assert.equal(poller.state().remotes.inFlight, true, 'the fetch is still pending');
+  assert.equal(scheduler.pending(), 1, 'the next forge tick is armed without waiting for the fetch');
+  assert.deepEqual(ticks, ['onTick'], 'the tick reported on forge settle alone');
+
+  issues = [{ number: 5, title: 'five', labels: ['status:approved'], assignees: [] }];
+  await scheduler.runNext(); // the second tick: forge polls again, the in-flight fetch is joined, not re-run
+  assert.equal(spy.calls, 1, 'single flight: an overlapping tick never starts a second fetch');
+  assert.equal(callLog.filter((c) => c === 'issueList').length, 2, 'the forge lane polled again while the fetch was pending');
+  assert.equal(scheduler.pending(), 1, 'and armed the tick after it');
+
+  spy.release(); // the fetch finally settles
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(poller.state().remotes.inFlight, false);
+  assert.equal(ticks.length, 3, 'its completion notifies once more so the section recomputes');
+  poller.close();
+});
+
+test('#1201 R1201-9: a fetch that rejects after its tick ended lands in remotes.lastError and leaves no unhandled rejection', async () => {
+  const unhandled = [];
+  const onUnhandled = (e) => unhandled.push(e);
+  process.on('unhandledRejection', onUnhandled);
+  try {
+    const spy = fetchSpy({ hold: true, fail: 'boom' });
+    const { poller } = remotesPoller({ fetchRemotes: spy.fn });
+    await poller.start();
+    spy.release();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(poller.state().remotes.lastError, 'boom');
+    assert.equal(poller.state().remotes.inFlight, false);
+    assert.deepEqual(unhandled, []);
+    poller.close();
+  } finally {
+    process.off('unhandledRejection', onUnhandled);
+  }
+});

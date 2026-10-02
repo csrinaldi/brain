@@ -256,9 +256,24 @@ export function createPoller({
     }
   }
 
-  /** Both lanes, each with its own catch, so one failing never skips the other. */
+  // True from `runTick()` until its forge lane settles. The remotes lane's
+  // completion hook reads it: a fetch that ends INSIDE the tick is covered by the
+  // tick's own `onTick`; one that ends after it must notify on its own.
+  let tickRunning = false;
+
+  /**
+   * The lanes are independent in time as well as in failure (D40). Only the forge
+   * lane is awaited: the fetch can take up to its 20 s timeout and must never hold
+   * back the reschedule. It runs fire-and-forget under its own single flight, and
+   * `runRemotes()` never rejects, so no promise is left unhandled.
+   */
   async function tick() {
-    await Promise.allSettled([forgeHalted ? Promise.resolve() : forgeLane(), runRemotes()]);
+    if (fetchRemotes && !remotesFlight) {
+      runRemotes().then(() => { if (!tickRunning && !closed) onTick(state()); });
+    } else {
+      runRemotes(); // joins the flight in progress (or is the no-op); starts nothing
+    }
+    if (!forgeHalted) await forgeLane();
   }
 
   let closed = false;
@@ -280,7 +295,9 @@ export function createPoller({
 
   function runTick() {
     timer = null;
+    tickRunning = true;
     inFlight = tick().finally(() => {
+      tickRunning = false;
       inFlight = null;
       onTick(state());
       scheduleNext();
