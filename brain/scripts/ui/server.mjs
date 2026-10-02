@@ -200,9 +200,12 @@ export function createUiServer({
   // D36: while the remote section left branches `deferred` (over the per-build
   // read budget), ONE follow-up recompute is armed; each build re-arms it only if
   // something is still deferred, so the chain ends by itself at 0 and never stacks.
+  // `closed` is set first thing in `close()`: a recompute that started before it
+  // settles after it, and this arm is the one writer of `followUp` (#1243 D45).
   let followUp = null;
+  let closed = false;
   function armRemoteFollowUp() {
-    if (followUp !== null || !(current?.remoteChanges?.value?.deferred > 0)) return;
+    if (closed || followUp !== null || !(current?.remoteChanges?.value?.deferred > 0)) return;
     followUp = _setTimeout(() => { followUp = null; return recomputeAndBroadcast({ causes: ['remote'] }); }, REMOTE_FOLLOWUP_MS);
   }
 
@@ -402,6 +405,7 @@ export function createUiServer({
       });
     },
     close() {
+      closed = true;
       if (followUp !== null) { _clearTimeout(followUp); followUp = null; }
       poller.close();
       watcher.close();
