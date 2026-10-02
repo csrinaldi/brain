@@ -1,6 +1,6 @@
 # ADR-0038 — One configuration shape per axis: a `default` that names a key of `providers`, and no axis defaults in code
 
-> **status:** proposed — pending human promotion | **date:** 2026-10-02 | **owner:** @crinaldi
+> **status:** proposed — open points ratified 2026-10-02, pending human promotion | **date:** 2026-10-02 | **owner:** @crinaldi
 > **relates to:** ADR-0004 (memory selector), ADR-0008 (VCS provider), ADR-0016 (CI context), ADR-0019 Amendment 1 (routed stages), ADR-0023 (role port), ADR-0024 (three axes), ADR-0026 Amendment 8 (additive migration for existing consumers), ADR-0033 (cold-review transport), ADR-0036 (fresh-consumer done); maintainer rulings on #1114, 2026-10-02; #643, #807, #833, #1129, #1130, #1132
 
 > **Tier 2 draft.** `brain/project/decisions/**` is human-promoted (`agent-authorities.md` Tier 2).
@@ -333,7 +333,7 @@ declaration per runtime.
   with a one-minor read-only alias. Amendment 3's precedence and no-default rule are unchanged.
 - **ADR-0008.** `vcs.provider` becomes `vcs.default` plus `vcs.providers`, with the same alias.
   VCS gains the `.env` level of the shared precedence, which reverses ADR-0008's "not in `.env`".
-  The runtime-detected CI provider's place is under *Requires ratification* below.
+  The runtime-detected CI provider sits outside the precedence (Ratified point 1).
 - **ADR-0023.** The shelf becomes an SDD provider named `brain` (`"version": "self"`). Stage → role
   routing, including the model that decision 4 leaves to routing, lives in `sdd.roles`.
 - **ADR-0024.** Four config axes in one shape. `AGENT_PLATFORM` covers every agent runtime.
@@ -342,16 +342,29 @@ declaration per runtime.
 - **ADR-0033.** Decision part 1 resolves through `sdd.roles['cold-review']`, with `engine` a key of
   `platform.providers`. The transport and the credential table are unchanged.
 
-## Requires ratification at promotion
+## Ratified points (maintainer, 2026-10-02)
 
-- **The runtime-detected VCS provider.** `resolveProviderName` lets a CI-detected provider
-  (ADR-0016's `ctx.provider`) win over every declaration, so that a GitLab job dispatches to
-  `gitlab`. This draft treats it as a fact about the host passed by the caller, outside the
-  precedence, rather than as a fifth level. It must still be a key of `vcs.providers`.
-- **Whether `brain:config -- set <axis>.default <name>` also writes `providers.<name>`** when it is
-  absent. Without that, the command the refusal names produces an invalid config.
-- **What the migration writes for `version`.** This draft writes the provider entry without a
-  `version` and does not invent a pin. A provider without `version` is reported by `brain:doctor`
-  as unverified.
-- **Whether `plain` stays a member of `platform.providers` and `sdd.providers`.** Today it is a
-  member of both axes (`platform.mjs:52,65`). The ruling's list of runtimes does not name it.
+These four points were open in the first draft. The maintainer ruled on each one.
+
+1. **The runtime-detected VCS provider.** A CI-detected provider (ADR-0016's `ctx.provider`, for
+   example `gitlab` on a GitLab job) is a fact about the host that the caller passes. It sits
+   outside the env > `.env` > config precedence and is not a fifth level. It must still be a key of
+   `vcs.providers`; if it is not, it is refused.
+2. **`brain:config -- set <axis>.default <name>` also creates `providers.<name>` as `{}`** when that
+   entry is absent. The command a refusal names therefore always produces a valid config.
+3. **`version` is suggested, never written by a migration.**
+   - Each provider may declare a version probe in its adapter, for example `engram --version` or
+     `gh --version`. A provider with no easy way to report its version declares none. The probe
+     lives in the adapter, so the axis-port guard does not flag it.
+   - The migration writes no `version`. It prints the detected version and the exact command to pin
+     it, for example
+     `npm run brain:config -- set memory.providers.engram.version 1.15.3`.
+   - `brain:doctor` reports the provider as unverified, shows the detected version and prints the
+     same command.
+   - Reason: the detected version belongs to the machine running the upgrade. Writing it would pin
+     one person's installation as the team's expectation, the same risk Consequences names for
+     `default`.
+   - The `brain` provider is the exception. It is written as `"self"`, because it is the package's
+     own version and does not depend on the machine.
+4. **`plain` stays a provider of `sdd`** (a valid SDD framework: the manual flow) **and leaves
+   `platform`** (it is not an agent runtime that executes prompts).
