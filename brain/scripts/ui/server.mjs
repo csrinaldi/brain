@@ -32,6 +32,7 @@ import { createForgeCache } from './forge-cache.mjs';
 import { diffSections } from './diff.mjs';
 import { createWatcher, resolveGitCommonDir } from './watcher.mjs';
 import { createPoller } from './poller.mjs';
+import { createForgeThread, PRODUCTION_RESOLVE } from './forge-thread.mjs';
 import { buildChangeView } from './change-route.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -89,7 +90,7 @@ const noForgeVcs = {
  */
 export function createUiServer({
   root = process.cwd(), port = 3000, vcs = null, project = null, _now = () => new Date(),
-  forgeSource = null, forgeUnavailable = null, interval = 60000, poll = true,
+  forgeSource = null, closedForgeSource = null, forgeUnavailable = null, interval = 60000, poll = true,
   gitCommonDir = null, _watch, _run, _readdir,
   _setTimeout = setTimeout, _clearTimeout = clearTimeout,
   _recomputeCurrent = null, onServerError = null, remoteBudget = REMOTE_READ_BUDGET, _snapshotRun, _fetchRun } = {}) {
@@ -191,10 +192,13 @@ export function createUiServer({
   // here, never in the snapshot, so the CLI stays cold and deterministic.
   const remoteCache = new Map();
   const computeSnapshot = _recomputeCurrent ?? (async () => {
-    const snapshot = await buildSnapshot({ root, now: _now(), vcs: forgeVcs, project, _remoteCache: remoteCache, remoteBudget, ...(_snapshotRun ? { _run: _snapshotRun } : {}) });
+    // #1257 D64: the poller's `forgeLoad` says what the cache-only port has not been given yet,
+    // so a section still loading is pending rather than a miss. An injected `vcs` (a test) is read
+    // directly and never loads, so there it is derived the way the CLI derives it.
+    const snapshot = await buildSnapshot({ root, now: _now(), vcs: forgeVcs, project, ...(vcs ? {} : { forgeLoad: poller.state().forgeLoad }), _remoteCache: remoteCache, remoteBudget, ...(_snapshotRun ? { _run: _snapshotRun } : {}) });
     if (!forgeUnavailable) return snapshot;
     const unreachable = { ok: false, reason: forgeUnavailable };
-    return { ...snapshot, graph: unreachable, prs: unreachable, reviews: unreachable };
+    return { ...snapshot, graph: unreachable, prs: unreachable, reviews: unreachable, closedIssues: unreachable };
   });
 
   // D36: while the remote section left branches `deferred` (over the per-build
@@ -264,7 +268,7 @@ export function createUiServer({
 
   const watcher = createWatcher({ root, gitCommonDir, _watch, _run: run, _readdir, _now, _setTimeout, _clearTimeout, onRecompute: recomputeAndBroadcast });
   const poller = createPoller({
-    vcs: forgeSource ?? noForgeVcs, cache: forgeCache, project, interval, enabled: poll,
+    vcs: forgeSource ?? noForgeVcs, closedVcs: closedForgeSource, cache: forgeCache, project, interval, enabled: poll,
     fetchRemotes, initialError: forgeUnavailable, _setTimeout, _clearTimeout, _now,
     onTick: () => { recomputeAndBroadcast({ causes: ['poll'] }); },
   });
@@ -514,13 +518,28 @@ export async function main(argv = [], deps = {}) {
   // attempted at all, matching R881-4 S2's existing contract.
   let project = deps.project ?? null;
   let forgeSource = deps.forgeSource ?? null;
+  let closedForgeSource = deps.closedForgeSource ?? null;
+  const forgeThreads = [];
   let forgeUnavailable = null;
   if (deps.forgeSource === undefined && parsed.poll) {
     const resolve = deps._resolveForgeSource ?? resolveForgeSource;
     const resolved = await resolve();
     if (resolved.ok) {
-      forgeSource = resolved.vcs;
       if (project === null) project = resolved.project;
+      // #1257 D63: every forge verb is a `spawnSync`, so the live port runs in worker threads, one per
+      // lane, and the server's own thread never waits on a spawn. A caller that injects
+      // `_resolveForgeSource` and no `_forgeThreadResolve` is a test handing over a stub port: it is used
+      // as given, so no test can reach the production resolver and run a real `gh` in a thread.
+      const threadResolve = deps._forgeThreadResolve ?? (deps._resolveForgeSource ? null : PRODUCTION_RESOLVE);
+      if (threadResolve) {
+        const open = createForgeThread({ resolve: threadResolve });
+        const closedLane = createForgeThread({ resolve: threadResolve });
+        forgeThreads.push(open, closedLane);
+        forgeSource = open.port;
+        closedForgeSource = closedLane.port;
+      } else {
+        forgeSource = resolved.vcs;
+      }
     } else {
       forgeUnavailable = resolved.reason;
       error(`✗ forge: ${resolved.reason} — forge lane halted; tree sections and remote fetch still served`);
@@ -529,7 +548,7 @@ export async function main(argv = [], deps = {}) {
 
   const server = createUiServer({
     root: parsed.root, vcs: deps.vcs ?? null, project,
-    forgeSource, forgeUnavailable, interval: parsed.interval, poll: parsed.poll,
+    forgeSource, closedForgeSource, forgeUnavailable, interval: parsed.interval, poll: parsed.poll,
     _recomputeCurrent: deps._recomputeCurrent ?? null,
     _fetchRun: deps._fetchRun, // test seam only: undefined keeps the production default (a real fetch)
     onServerError: (err) => error(`✗ server error: ${err?.message ?? err} — still serving`),
@@ -546,6 +565,7 @@ export async function main(argv = [], deps = {}) {
     } else {
       error(`✗ ${err?.message ?? err}`);
     }
+    await Promise.all(forgeThreads.map((thread) => thread.close()));
     return 2;
   }
   say(`brain:ui listening on http://127.0.0.1:${server.port}`);
@@ -576,10 +596,15 @@ export async function main(argv = [], deps = {}) {
   // by wrapping `close()` once here rather than duplicating the removal in
   // both places.
   const realClose = server.close.bind(server);
-  server.close = () => {
+  server.close = async () => {
     proc.off('SIGINT', onSigint);
     proc.off('SIGTERM', onSigterm);
-    return realClose();
+    try {
+      return await realClose();
+    } finally {
+      // `terminate()` cannot interrupt a `spawnSync` already running in a thread; the signal path exits the process anyway.
+      await Promise.all(forgeThreads.map((thread) => thread.close()));
+    }
   };
 
   return server;
