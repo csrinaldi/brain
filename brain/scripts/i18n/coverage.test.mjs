@@ -289,7 +289,7 @@ test('PR3 bootstrap: VCS auth section keys exist in en', () => {
 test('PR3 bootstrap: SDD harness section keys exist in en', () => {
   assert.equal(en['bootstrap.sdd.section'],            'SDD implementation (harness)');
   assert.equal(en['bootstrap.sdd.prompt'],             'Which SDD implementation do you use? [gentle-ai]: ');
-  assert.equal(en['bootstrap.sdd.ok'],                 'harness: {harness} (brain.config.json)');
+  assert.equal(en['bootstrap.sdd.ok'],                 'harness: {harness} ({source})');
   assert.equal(en['bootstrap.sdd.gentleaiMissing'],    'gentle-ai missing — brew install gentle-ai and re-run brain:env:init');
   assert.equal(en['bootstrap.sdd.ecosystemOk'],        'ecosystem already initialized (gentle-ai doctor)');
   assert.equal(en['bootstrap.sdd.ecosystemConfigured'],'ecosystem configured (skills, engram, gga)');

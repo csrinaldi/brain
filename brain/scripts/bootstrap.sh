@@ -229,7 +229,7 @@ _axis_declare() {
 # (what the repo states, the process env being per-invocation) and _R_SRC (.env|config|default). The shell composes
 # no precedence of its own: a second resolver is exactly the divergence #1114 retires.
 _axis_resolve() {
-  _R_RUN=""; _R_REPO=""; _R_SRC=""
+  _R_RUN=""; _R_REPO=""; _R_SRC=""; _R_RUNSRC=""
   # swallow-ok: a failed resolve is reported just below and falls back to the default; read returns 1 on EOF
   read -r _R_RUN _R_REPO _R_SRC < <(node "$BRAIN_SCRIPTS/config/cli.mjs" resolve "$1" 2>/dev/null) || true
   if [ -z "$_R_RUN" ] || [ -z "$_R_REPO" ] || [ -z "$_R_SRC" ]; then
@@ -237,6 +237,24 @@ _axis_resolve() {
     MISSING_OPTIONAL+=("$1 not resolved from brain.config.json; ran with $2 (next: npm run brain:config -- resolve $1)")
     _R_RUN="$2"; _R_REPO="$2"; _R_SRC="default"
   fi
+  # Where the value THIS RUN uses comes from (#1114 S3.4): a run value that differs from the repo's is the process env's.
+  if [ "$_R_RUN" != "$_R_REPO" ]; then _R_RUNSRC="shell"; else _R_RUNSRC="$_R_SRC"; fi
+}
+# `_axis_source_label <platform-src> <engine-src>` names, in words, where the run's harness values came from
+# (shell|.env|config|default, as `_axis_resolve` leaves them in _R_RUNSRC), so the success line never claims
+# brain.config.json for a value that came from .env or the process env.
+_axis_source_label() {
+  local one two
+  one="$(_axis_source_word "$1")"; two="$(_axis_source_word "$2")"
+  if [ "$one" = "$two" ]; then printf '%s' "$one"; else printf "$I18N_BOOTSTRAP_AXIS_SOURCE_SPLIT" "$one" "$two"; fi
+}
+_axis_source_word() {
+  case "$1" in
+    shell) printf '%s' "$I18N_BOOTSTRAP_AXIS_SOURCE_SHELL" ;;
+    .env) printf '%s' "$I18N_BOOTSTRAP_AXIS_SOURCE_DOTENV" ;;
+    config) printf '%s' "$I18N_BOOTSTRAP_AXIS_SOURCE_CONFIG" ;;
+    *) printf '%s' "$I18N_BOOTSTRAP_AXIS_SOURCE_DEFAULT" ;;
+  esac
 }
 # `_axis_settle <axis>`: a value that comes from today's default is declared in config; one that exists only on this
 # machine's .env is reported and never declared; one the config already declares is left exactly as written.
@@ -569,10 +587,12 @@ say "$I18N_BOOTSTRAP_SDD_SECTION"
 _axis_resolve platform claude
 _axis_settle platform
 AGENT_PLATFORM="$_R_RUN"
+_PLATFORM_SRC="$_R_RUNSRC"
 _axis_resolve sdd gentle-ai
 _axis_settle sdd
 SDD_ENGINE="$_R_RUN"
-ok "$(printf "$I18N_BOOTSTRAP_SDD_OK" "$SDD_ENGINE ($AGENT_PLATFORM)")"
+_SDD_SRC="$_R_RUNSRC"
+ok "$(printf "$I18N_BOOTSTRAP_SDD_OK" "$SDD_ENGINE ($AGENT_PLATFORM)" "$(_axis_source_label "$_PLATFORM_SRC" "$_SDD_SRC")")"
 # Exported, not just written to .env (issue #1093): harness/cli.mjs resolves
 # its own repoRoot from ITS OWN module location, which is now WORKTREE_ROOT —
 # a tree that never gets this .env write. Its precedence is already

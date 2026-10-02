@@ -11,20 +11,24 @@ import { fileURLToPath } from 'node:url';
 
 import { planConfigWrite, resolvePath } from './config-verb.mjs';
 import { parseEnvFile } from '../lib/env-read.mjs';
-import { AXES, readAxis } from '../lib/axis-config.mjs';
+import { AXES, readAxis, diagnoseAxes } from '../lib/axis-config.mjs';
+import { detectInstalled } from '../lib/axis-installed.mjs';
 import { resolveAxisMigrationContext } from '../lib/axis-migration-context.mjs';
 
 const USAGE = `Usage: npm run brain:config -- get <path>
        npm run brain:config -- set <path> <value>
        npm run brain:config -- default <axis>
        npm run brain:config -- resolve <platform|sdd>
+       npm run brain:config -- diagnose
   <path> is dot-separated (e.g. docs.language, sdd.map.cold-review).
   <value> parses as JSON first, bare string on failure.
   default <axis> prints the axis default (${AXES.join('|')}): the ADR-0038 shape, else the legacy key;
   an empty line when undeclared.
   resolve <platform|sdd> runs the real resolver (process env, .env, config, default) and prints
   "<run> <repo> <source>": the value this run uses, the value the repo states (the process env is
-  per-invocation and never the repo's), and where that repo value comes from (.env|config|default).`;
+  per-invocation and never the repo's), and where that repo value comes from (.env|config|default).
+  diagnose prints the axis findings as JSON: [{ axis, code, severity, message, fix }]. Findings, never
+  failures: it exits 0. It names selector keys only and never prints .env.`;
 
 function fail(msg) {
   console.error(`brain:config: ${msg}`);
@@ -34,22 +38,36 @@ function fail(msg) {
 /**
  * The migration context every non-upgrade caller uses: config and today's defaults ONLY. A process-env or
  * `.env` value is per-machine, and only `brain:upgrade` may promote one into tracked config (it prints the
- * source, ADR-0038 section 7). At runtime nothing changes: `.env` still wins by precedence.
+ * source, ADR-0038 section 7). An axis a per-machine value states is written UNDECLARED, never as today's default
+ * (#1114 S3.4); at runtime nothing changes: `.env` still wins by precedence.
  */
 export function axisContextFor(config, root) {
-  return resolveAxisMigrationContext({ config, env: {}, root, envSources: false });
+  return resolveAxisMigrationContext({ config, env: process.env, root, envSources: false });
 }
 
 export async function main(argv = process.argv.slice(2), root = process.cwd()) {
   const [op, path, value] = argv;
-  if (op !== 'get' && op !== 'set' && op !== 'default' && op !== 'resolve') fail(`unknown op '${op ?? ''}'.\n${USAGE}`);
-  if (!path || (op === 'set' && value === undefined)) fail(`missing argument.\n${USAGE}`);
+  if (op !== 'get' && op !== 'set' && op !== 'default' && op !== 'resolve' && op !== 'diagnose') fail(`unknown op '${op ?? ''}'.\n${USAGE}`);
+  if ((!path && op !== 'diagnose') || (op === 'set' && value === undefined)) fail(`missing argument.\n${USAGE}`);
 
   const configPath = join(root, 'brain.config.json');
   if (!existsSync(configPath)) {
     fail(`brain.config.json not found in ${root} — run from the repo root, or run env:init first.`);
   }
-  const config = JSON.parse(readFileSync(configPath, 'utf8'));
+  let config;
+  try {
+    config = JSON.parse(readFileSync(configPath, 'utf8'));
+  } catch (e) { // surfaced: the shell readers keep this line as the cause of their refusal
+    fail(`brain.config.json is not valid JSON or cannot be read (${e.message})`);
+  }
+
+  if (op === 'diagnose') {
+    // The input of #1130's `brain:doctor`: the same findings `brain:governance-status` prints (ADR-0038 section 6).
+    const dotenvPath = join(root, '.env');
+    const dotenv = existsSync(dotenvPath) ? parseEnvFile(readFileSync(dotenvPath, 'utf8')) : {};
+    console.log(JSON.stringify(diagnoseAxes({ config, env: process.env, dotenv, installed: detectInstalled() }), null, 2));
+    return;
+  }
 
   if (op === 'default') {
     // The one reader for shell callers (install-tools.sh, bootstrap.sh): they must not hand-parse JSON.

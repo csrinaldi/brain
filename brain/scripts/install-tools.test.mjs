@@ -126,3 +126,34 @@ test('#1127 install-tools (no node): the vcs object wins whichever order the fil
 test('#1127 install-tools (no node): an empty or missing provider takes the same gitlab default as the node path', () => inTmp((dir) => {
   assert.match(noNodeRun(dir, '{"vcs": {"provider": ""}}'), /PROVIDER=gitlab/, 'the same default value the node path uses, not an empty string');
 }));
+
+// ── #1114 S3.4 (S3.3 cold review): a failed or missing CLI is not an unreadable config, and the cause is kept ──
+test('#1114 S3.4 install-tools: a corrupt brain.config.json is refused WITH the parser\'s own cause', () => inTmp((dir) => {
+  writeFileSync(join(dir, 'brain.config.json'), '{ not json');
+  const r = run(`${PRELUDE}${resolveVcs()}\necho "CLI=$VCS_CLI"`, dir);
+  assert.notEqual(r.code, 0, r.out);
+  assert.match(r.out, /not valid JSON/, 'the cause comes from the CLI, not from a guess in the shell');
+  assert.doesNotMatch(r.out, /CLI=glab/);
+}));
+
+test('#1114 S3.4 install-tools: a MISSING config CLI is named as such, never blamed on brain.config.json', () => inTmp((dir) => {
+  writeFileSync(join(dir, 'brain.config.json'), JSON.stringify({ vcs: { provider: 'github' } }));
+  const empty = join(dir, 'no-scripts');
+  mkdirSync(empty);
+  const r = run(`${PRELUDE}BRAIN_SCRIPTS=${JSON.stringify(empty)}\n${resolveVcs()}\necho "CLI=$VCS_CLI"`, dir);
+  assert.notEqual(r.code, 0, r.out);
+  assert.match(r.out, /config CLI is missing/);
+  assert.doesNotMatch(r.out, /cannot be read or parsed/);
+  assert.doesNotMatch(r.out, /CLI=gh|CLI=glab/);
+}));
+
+test('#1114 S3.4 install-tools: a CLI that FAILS keeps its stderr in the refusal', () => inTmp((dir) => {
+  writeFileSync(join(dir, 'brain.config.json'), JSON.stringify({ vcs: { provider: 'github' } }));
+  const fake = join(dir, 'fake-scripts');
+  mkdirSync(join(fake, 'config'), { recursive: true });
+  writeFileSync(join(fake, 'config', 'cli.mjs'), 'console.error("boom: module graph broken"); process.exit(3);\n');
+  const r = run(`${PRELUDE}BRAIN_SCRIPTS=${JSON.stringify(fake)}\n${resolveVcs()}\necho "CLI=$VCS_CLI"`, dir);
+  assert.notEqual(r.code, 0, r.out);
+  assert.match(r.out, /boom: module graph broken/);
+  assert.match(r.out, /config CLI .*failed/);
+}));

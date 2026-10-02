@@ -396,3 +396,51 @@ test('#1114 S3.3 a FRESH install ends with every axis declared in config (the S2
     removeTempTree(dir);
   }
 });
+
+// ── #1114 S3.4 (S3.3 cold review): the success line names the ACTUAL source of the run's values ──
+function successLine({ procEnv = {}, envFile = null, config = {} } = {}) {
+  const dir = mkdtempSync(join(tmpdir(), 'brain-1114-srcline-'));
+  try {
+    if (envFile !== null) writeFileSync(join(dir, '.env'), envFile);
+    writeFileSync(join(dir, 'brain.config.json'), JSON.stringify(config, null, 2) + '\n');
+    const src = (prefix) => LINES.find((l) => l.startsWith(prefix));
+    const okLine = src('ok "$(printf "$I18N_BOOTSTRAP_SDD_OK"');
+    assert.ok(okLine, 'bootstrap.sh must report the harness through I18N_BOOTSTRAP_SDD_OK');
+    const script = [
+      'set -euo pipefail',
+      STUBS.replace('ok() { :; }', 'ok() { printf "OK:%s\\n" "$1"; }'),
+      `eval "$(node ${JSON.stringify(join(SCRIPTS, 'i18n/sh.mjs'))})"`,
+      envHelpers(),
+      declareHelpers(),
+      platformBlock(),
+      src('_PLATFORM_SRC='),
+      sddBlock(),
+      src('_SDD_SRC='),
+      okLine,
+    ].join('\n');
+    const r = spawnSync('bash', ['-c', script], { cwd: dir, encoding: 'utf8', env: { ...BASE_ENV, ...procEnv }, stdio: ['ignore', 'pipe', 'pipe'], timeout: 60_000 });
+    assert.equal(r.status, 0, r.stderr);
+    return r.stdout.split('\n').find((l) => l.startsWith('OK:harness')) ?? r.stdout;
+  } finally {
+    removeTempTree(dir);
+  }
+}
+
+test('#1114 S3.4 bootstrap.sh: the harness success line names where the run values came from', () => {
+  const declared = { schemaVersion: '1.11.1', platform: { default: 'claude', providers: { claude: {} } }, sdd: { default: 'gentle-ai', providers: { 'gentle-ai': {} } } };
+  assert.equal(successLine({ config: declared }), 'OK:harness: gentle-ai (claude) (brain.config.json)');
+  assert.equal(successLine({ config: declared, envFile: 'AGENT_PLATFORM=antigravity\nSDD_ENGINE=plain\n' }), 'OK:harness: plain (antigravity) (.env)');
+  assert.equal(successLine({ config: declared, procEnv: { AGENT_PLATFORM: 'antigravity', SDD_ENGINE: 'plain' } }), 'OK:harness: plain (antigravity) (process env)');
+  assert.equal(successLine({ config: { schemaVersion: '1.11.1' } }), 'OK:harness: gentle-ai (claude) (default)');
+  assert.equal(successLine({ config: declared, envFile: 'AGENT_PLATFORM=antigravity\n' }), 'OK:harness: gentle-ai (antigravity) (platform: .env; engine: brain.config.json)');
+});
+
+test('#1114 S3.4 bootstrap.sh: the source words exist in en and es, and the success line carries {source}', async () => {
+  const en = (await import('./i18n/en.mjs')).default;
+  const es = (await import('./i18n/es.mjs')).default;
+  for (const cat of [en, es]) {
+    for (const k of ['shell', 'dotenv', 'config', 'default', 'split']) assert.ok(cat[`bootstrap.axis.source.${k}`], `bootstrap.axis.source.${k}`);
+    assert.match(cat['bootstrap.sdd.ok'], /\{harness\}.*\{source\}/);
+    assert.doesNotMatch(cat['bootstrap.sdd.ok'], /brain\.config\.json/);
+  }
+});

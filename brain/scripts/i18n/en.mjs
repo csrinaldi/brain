@@ -200,8 +200,8 @@ export default {
   // §6 SDD harness
   'bootstrap.sdd.section':            'SDD implementation (harness)',
   'bootstrap.sdd.prompt':             'Which SDD implementation do you use? [gentle-ai]: ',
-  // {harness} = harness name (e.g. gentle-ai)
-  'bootstrap.sdd.ok':                 'harness: {harness} (brain.config.json)',
+  // {harness} = harness name (e.g. gentle-ai), {source} = where the run's values came from (never assumed to be brain.config.json)
+  'bootstrap.sdd.ok':                 'harness: {harness} ({source})',
   'bootstrap.sdd.gentleaiMissing':    'gentle-ai missing — brew install gentle-ai and re-run brain:env:init',
   'bootstrap.sdd.ecosystemOk':        'ecosystem already initialized (gentle-ai doctor)',
   'bootstrap.sdd.ecosystemConfigured':'ecosystem configured (skills, engram, gga)',
@@ -228,6 +228,28 @@ export default {
   'bootstrap.memory.resolverFailed': "the memory backend resolver failed (exit {code}) — that is the check failing, not a backend being undeclared. Nothing was prompted or written.",
   'bootstrap.axis.declared':         '{axis}.default = {name} declared in brain.config.json — commit it so every checkout runs the same {axis}',
   'bootstrap.axis.envOnly':          '{axis} {name} comes only from this machine (.env or SDD_HARNESS) — teammates and fresh clones will not see it, so it was NOT written to brain.config.json. To share it with the team: npm run brain:config -- set {axis}.default {name}',
+  'bootstrap.axis.source.shell':     'process env',
+  'bootstrap.axis.source.dotenv':    '.env',
+  'bootstrap.axis.source.config':    'brain.config.json',
+  'bootstrap.axis.source.default':   'default',
+  // {platform} = where the platform value came from, {engine} = where the SDD engine value came from
+  'bootstrap.axis.source.split':     'platform: {platform}; engine: {engine}',
+  // #1114 S3.4 — diagnoseAxes findings (lib/axis-config.mjs). {key} is a selector key, {value}/{declared} axis values; no other .env key is ever named.
+  'axes.diagnose.where.shell':              'the process env',
+  'axes.diagnose.envShadows':               '{key} in {where} ({value}) differs from {axis}.default ({declared})',
+  'axes.diagnose.envShadows.fixDotenv':     'remove the {key} line from .env, or make it the team choice: npm run brain:config -- set {axis}.default {value}',
+  'axes.diagnose.envShadows.fixShell':      'unset {key} in the shell, or make it the team choice: npm run brain:config -- set {axis}.default {value}',
+  'axes.diagnose.versionUnverified':        '{axis}.providers.{name} declares no version, so nothing says which {name} the team means',
+  'axes.diagnose.versionUnverified.detected': '{axis}.providers.{name} declares no version; {installed} is installed here',
+  'axes.diagnose.versionUnverifiable':      '{axis}.providers.{name} declares version {declared}, but there is no probe for {name} to check it against',
+  'axes.diagnose.versionUnverifiable.fix':  'nothing to do until a probe exists (#1130); the declared version stays as the team record',
+  'axes.diagnose.versionMismatch':          '{axis}.providers.{name} declares version {declared}, but {installed} is installed here',
+  'axes.diagnose.versionMismatch.fix':      'install {name} {declared}, or record what is installed: npm run brain:config -- set {axis}.providers.{name}.version {installed}',
+  'axes.diagnose.invalidConfig':            'brain.config.json is invalid at {path}: {detail}',
+  'axes.diagnose.invalidConfig.fix':        'correct {path} in brain.config.json (npm run brain:config -- get {path} shows what is there)',
+  // brain:governance-status "axes" section
+  'axes.status.title':                      'axes',
+  'axes.status.clean':                      'every axis is declared and consistent',
   'bootstrap.axis.resolveFailed':     'could not resolve the {axis} (config/cli.mjs resolve failed) — running with {name}; nothing was declared',
   'bootstrap.axis.declareFailed':    'could not declare {axis}.default in brain.config.json — set it with: npm run brain:config -- set {axis}.default {name}',
   'bootstrap.memory.declared':       'memory backend saved to brain.config.json (memory.default) — commit it so every checkout runs the same backend',

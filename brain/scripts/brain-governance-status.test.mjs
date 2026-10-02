@@ -1156,3 +1156,37 @@ test('#348: a provider that omits the axis is REPORTED, never silently absent', 
     'silent omission is the one thing `unknown` may not degrade into — cold-4 of round 1');
   assert.ok(approvalLines(undefined).length > 0, 'and an absent capability object is still a report');
 });
+
+// ── #1114 S3.4: the "axes" section — findings, never failures ──────────────────
+import { axesLines } from './brain-governance-status.mjs';
+
+test('S3.4 axesLines: no findings prints one clean line; findings print severity, axis, code, message and the fix', () => {
+  assert.deepEqual(axesLines([]), ['  --- axes ---', '  every axis is declared and consistent', '']);
+  const lines = axesLines([{ axis: 'platform', code: 'env-shadows-config', severity: 'warning', message: 'AGENT_PLATFORM in .env (antigravity) differs from platform.default (claude)', fix: 'remove the line' }]);
+  assert.equal(lines[0], '  --- axes ---');
+  assert.equal(lines[1], '  warning  platform  env-shadows-config: AGENT_PLATFORM in .env (antigravity) differs from platform.default (claude)');
+  assert.equal(lines[2], '             → remove the line');
+});
+
+test('S3.4 reportGovernanceStatus: an env-shadowed axis is reported in the axes section and NEVER changes the exit path (it resolves)', async () => {
+  const logs = await captureLog(() =>
+    reportGovernanceStatus({
+      config: { ...baseConfig, vcs: { default: 'github', providers: { github: { version: '2.0.0' } } }, platform: { default: 'claude', providers: { claude: {} } } },
+      env: {},
+      dotenv: { AGENT_PLATFORM: 'antigravity', CANARY_KEY: 'leak-canary-123' },
+      installed: {},
+      providerModule: fakeProviderModule,
+      probes: {
+        branchProtection: async () => ({ status: 200, contexts: OUR_CONTEXTS }),
+        releaseGate: async () => true,
+        postMergeCi: async () => true,
+        brainWritesReviewed: async () => ({ requireCodeOwnerReviews: true, codeownersPresent: true }),
+      },
+    })
+  );
+  const output = logs.join('\n');
+  assert.match(output, /--- axes ---/);
+  assert.match(output, /AGENT_PLATFORM in \.env \(antigravity\) differs from platform\.default \(claude\)/);
+  assert.match(output, /version-unverifiable/, 'vcs declares 2.0.0 and nothing probes gh');
+  assert.doesNotMatch(output, /leak-canary-123|CANARY_KEY/, '.env is never printed');
+});

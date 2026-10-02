@@ -25,7 +25,11 @@ import { run } from './vcs/lib/exec.mjs';
 import { detectSubstrate, POSTMERGE_STALE_LABEL } from './vcs/substrate.mjs';
 import { GOVERNANCE_JOBS } from './vcs/governance-checks.mjs';
 import { resolveTier, requiredJobs } from './vcs/governance-tiers.mjs';
-import { readAxis } from './lib/axis-config.mjs';
+import { readAxis, diagnoseAxes } from './lib/axis-config.mjs';
+import { detectInstalled } from './lib/axis-installed.mjs';
+import { parseEnvFile } from './lib/env-read.mjs';
+import { loadCatalog } from './i18n/t.mjs';
+import en from './i18n/en.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, '..', '..');
@@ -429,9 +433,30 @@ export function approvalLines(cap = {}) {
   return out;
 }
 
+/**
+ * Pure: the lines of the "axes" section (#1114 S3.4). Findings, never failures: nothing here changes an exit code.
+ * @param {Array<{axis: string, code: string, severity: string, message: string, fix: string}>} findings
+ * @param {Record<string, string>} [catalog]  i18n catalog (English when omitted)
+ * @returns {string[]}
+ */
+export function axesLines(findings, catalog = en) {
+  const out = ['  --- axes ---'];
+  if (!findings.length) {
+    out.push(`  ${catalog['axes.status.clean'] ?? en['axes.status.clean']}`);
+  }
+  for (const f of findings) {
+    out.push(`  ${f.severity.padEnd(7)}  ${f.axis}  ${f.code}: ${f.message}`);
+    out.push(`             → ${f.fix}`);
+  }
+  out.push('');
+  return out;
+}
+
 export async function reportGovernanceStatus({
   config: configOverride,
   env = process.env,
+  dotenv: dotenvOverride,
+  installed: installedOverride,
   providerModule: providerModuleOverride,
   probes: probeOverrides,
 } = {}) {
@@ -514,6 +539,17 @@ export async function reportGovernanceStatus({
   // default, so this is intentionally NOT wrapped in a try/catch.
   const tier = resolveTier(config);
   printDoctrineReport(tier, substrate);
+
+  // Axis diagnosis (#1114 S3.4): findings, never failures. `.env` is parsed for its selector keys only and never printed.
+  // An injected config means a hermetic caller: it gets no `.env` from disk unless it injects one.
+  let dotenv = dotenvOverride;
+  if (!dotenv) {
+    try { dotenv = configOverride ? {} : parseEnvFile(readFileSync(resolve(REPO_ROOT, '.env'), 'utf8')); } catch { dotenv = {}; }
+  }
+  const lang = config?.docs?.language;
+  const catalog = { ...en, ...(await loadCatalog(lang)) };
+  const findings = diagnoseAxes({ config, env, dotenv, installed: installedOverride ?? detectInstalled(), catalog });
+  for (const line of axesLines(findings, catalog)) console.log(line);
 }
 
 // CLI guard — the report runs ONLY when this file is invoked directly
