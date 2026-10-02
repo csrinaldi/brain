@@ -5,8 +5,17 @@
 
 const FORBIDDEN = new Set(['checkout', 'switch', 'reset', 'merge', 'pull', 'push', 'update-ref', 'rebase', 'stash', 'restore', 'clean']);
 
+// git's global options that consume the NEXT argument: skipped with their value
+// before the verb is identified, so `git -C <path> checkout x` is still a checkout.
+const VALUE_OPTIONS = new Set(['-C', '-c', '--git-dir', '--work-tree', '--namespace']);
+
 function subcommand(args) {
-  return args.find((a) => !a.startsWith('-') && !/^[A-Za-z0-9_.-]+=/.test(a));
+  for (let i = 0; i < args.length; i += 1) {
+    if (VALUE_OPTIONS.has(args[i])) { i += 1; continue; }
+    if (args[i].startsWith('-')) continue;
+    return args[i];
+  }
+  return undefined;
 }
 
 function refuse(args) {
