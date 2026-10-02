@@ -86,6 +86,7 @@ See [`brain/project/README.md`](project/README.md) for directory conventions.
 - [ADR-0035](project/decisions/adr-0035-archive-sweep-issue-link-exemption-is-content-earned.md) — The archive sweep's `issue-link` exemption is content-earned, never granted by branch name (**Amendment 1, 23/09/2026** — residual risk 2 is CLOSED — no added file under `openspec/changes/archive/**` is ever exempt, at any destination, under any condition, #557)
 - [ADR-0036](project/decisions/adr-0036-a-change-is-done-when-it-works-on-a-fresh-consumer-install.md) — A change is done when it works on a fresh consumer install, at a cost one person can pay
 - [ADR-0037](project/decisions/adr-0037-autonomy-is-configurable-modes-a-b-c.md) — Autonomy is configurable: modes A, B and C, B by default, and the producing identity never approves or merges
+- [ADR-0038](project/decisions/adr-0038-one-config-shape-per-axis-default-and-providers.md) — One configuration shape per axis: a `default` that names a key of `providers`, and no axis defaults in code
 
 ### Project-specific rules
 
