@@ -8,6 +8,7 @@ import {
   buildSnapshot, roadmapState, aggregateActors, projectRecord, readChanges, readRecordRows, reviewRows,
   issueOfBranch, renderSnapshotText, PLANNED, IN_FLIGHT, DONE, UNREADABLE,
 } from './snapshot.mjs';
+import { hierarchyFromGraph } from './hierarchy-adapter.mjs';
 
 const NOW = '2026-09-13T00:00:00Z';
 
@@ -685,4 +686,58 @@ test('#1257 R1257-7: in the server the closed list is read only when forgeLoad.c
   const pendingClosed = await read({ state: 'pending', at: null });
   assert.deepEqual(pendingClosed.s.closedIssues, { ok: false, pending: true, reason: 'loading closed issues from the forge…' });
   assert.equal(pendingClosed.s.graph.ok, true, 'the open lane is complete, so the graph is real');
+});
+
+// ── #1199 R1199-6: the hierarchy section ────────────────────────────────────
+
+const EPIC_BLOCK = '```brain-graph/1\ntrack: UI\nkind: epic\nblocks: []\nneeds: []\nfiles: []\n```';
+
+test('#1199 R1199-6: closed children come from closedIssues, and a closed row without a body is only listed as unresolved', async () => {
+  const { port } = listPort({
+    open: [openRow(878, { body: EPIC_BLOCK })],
+    closed: [closedRow(880, { body: 'Parent: #878 (the epic)' }), closedRow(881, { body: null })],
+  });
+  const s = await buildSnapshot({ root: makeFixture(), now: NOW, vcs: port, project: 'o/r' });
+  assert.equal(s.hierarchy.ok, true);
+  const issues = new Map(s.hierarchy.value.issues);
+  assert.equal(issues.get(880).parent, 878);
+  assert.equal(issues.get(880).state, 'closed');
+  assert.equal(issues.has(881), false);
+  assert.deepEqual(issues.get(878).children, [880]);
+  assert.deepEqual(s.hierarchy.value.closedUnresolved, [{ number: 881, reason: 'the forge list carried no body' }]);
+  assert.deepEqual([...issues.keys()], [...issues.keys()].sort((a, b) => a - b), 'ascending pairs');
+});
+
+test('#1199 R1199-6: a closed failure leaves the hierarchy open-only, with no unresolved list', async () => {
+  const { port } = listPort({ open: [openRow(878, { body: EPIC_BLOCK }), openRow(900, { body: 'Parent: #878 (the epic)' })], closedError: 'rate limited' });
+  const s = await buildSnapshot({ root: makeFixture(), now: NOW, vcs: port, project: 'o/r' });
+  assert.equal(s.hierarchy.ok, true);
+  assert.equal(s.hierarchy.value.issues.filter(([, e]) => e.state === 'closed').length, 0);
+  assert.deepEqual(s.hierarchy.value.closedUnresolved, []);
+  assert.deepEqual(new Map(s.hierarchy.value.issues).get(878).children, [900]);
+});
+
+test('#1199 R1199-6: the hierarchy is pending when the graph is pending, and uncomputable when the graph is', async () => {
+  const { port } = listPort({ open: [openRow(5)] });
+  const forgeLoad = { open: { state: 'pending', at: null }, closed: { state: 'pending', at: null } };
+  const p = await buildSnapshot({ root: makeFixture(), now: NOW, vcs: port, project: 'o/r', forgeLoad });
+  assert.deepEqual(p.hierarchy, { ok: false, pending: true, reason: p.graph.reason });
+  const u = await buildSnapshot({ root: makeFixture(), now: NOW });
+  assert.deepEqual(u.hierarchy, { ok: false, reason: u.graph.reason });
+});
+
+test('#1199 R1199-6: one shape — the section survives JSON and rebuilds the adapter\'s Map', async () => {
+  const { port } = listPort({ open: [openRow(878, { body: EPIC_BLOCK })], closed: [closedRow(880, { body: 'Parent: #878 (the epic)' })] });
+  const s = await buildSnapshot({ root: makeFixture(), now: NOW, vcs: port, project: 'o/r' });
+  const parsed = JSON.parse(JSON.stringify(s));
+  assert.deepEqual(parsed, s);
+  const expected = hierarchyFromGraph({ nodes: s.graph.value.nodes, declarationDivergences: s.graph.value.declarationDivergences, closed: s.closedIssues.value });
+  assert.deepEqual(new Map(parsed.hierarchy.value.issues), expected.issues);
+  assert.deepEqual(parsed.hierarchy.value.divergences, expected.divergences);
+});
+
+test('#1199 R1199-6: the text mode prints a hierarchy line', async () => {
+  const { port } = listPort({ open: [openRow(878, { body: EPIC_BLOCK })] });
+  const s = await buildSnapshot({ root: makeFixture(), now: NOW, vcs: port, project: 'o/r' });
+  assert.match(renderSnapshotText(s), /^hierarchy +1 issue\(s\), 0 divergence\(s\)$/m);
 });
