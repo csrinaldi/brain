@@ -207,6 +207,7 @@ export default {
   'bootstrap.memory.resolverFailed': "el resolvedor del backend de memoria falló (exit {code}) — es la verificación fallando, no un backend sin declarar. No se preguntó ni se escribió nada.",
   'bootstrap.axis.declared':         '{axis}.default = {name} declarado en brain.config.json — commitealo para que todos los checkouts usen el mismo {axis}',
   'bootstrap.axis.envOnly':          '{axis} {name} viene solo de esta máquina (.env o SDD_HARNESS) — tus compañeros y los clones nuevos no lo ven, así que NO se escribió en brain.config.json. Para compartirlo con el equipo: npm run brain:config -- set {axis}.default {name}',
+  'bootstrap.axis.resolveFailed':     'no se pudo resolver {axis} (falló config/cli.mjs resolve) — se corre con {name}; no se declaró nada',
   'bootstrap.axis.declareFailed':    'no se pudo declarar {axis}.default en brain.config.json — seteálo con: npm run brain:config -- set {axis}.default {name}',
   'bootstrap.memory.declared':       'backend de memoria guardado en brain.config.json (memory.default) — commitealo para que todos los checkouts usen el mismo backend',
   'bootstrap.memory.declareFailed':  'no se pudo escribir memory.default en brain.config.json — seteálo con: npm run brain:config -- set memory.default {backend}',

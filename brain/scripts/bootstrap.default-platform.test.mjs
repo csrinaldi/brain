@@ -37,13 +37,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, existsSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { removeTempTree } from './__fixtures__/tmp-tree.mjs';
-import { resolvePlatform, AGENT_PLATFORMS } from './harness/platform.mjs';
+import { resolvePlatform } from './harness/platform.mjs';
+import { resolveEngine } from './harness/cli.mjs';
 import { readAxis, validateAxisConfig, AXES } from './lib/axis-config.mjs';
 import { ensureBrainConfig } from './lib/brain-config.mjs';
 
@@ -70,11 +71,11 @@ function envHelpers() {
 function platformBlock() {
   const banner = LINES.findIndex((l) => l.startsWith('say "$I18N_BOOTSTRAP_SDD_SECTION"'));
   assert.ok(banner !== -1, 'bootstrap.sh §6 must open with the SDD section banner');
-  const persist = LINES.findIndex((l, i) => i > banner && l.includes('_axis_declare platform'));
-  assert.ok(persist !== -1, '§6 must declare platform.default in config with _axis_declare');
+  assert.ok(LINES.some((l, i) => i > banner && l.startsWith('_axis_resolve platform')), '§6 must resolve the platform through `config/cli.mjs resolve` (_axis_resolve)');
   assert.ok(!LINES.some((l) => /env_set (AGENT_PLATFORM|SDD_ENGINE)\b/.test(l)), 'bootstrap.sh must not write an axis selector into .env (#1114 S3.3)');
-  const end = LINES.findIndex((l, i) => i >= persist && l.startsWith('AGENT_PLATFORM="${AGENT_PLATFORM:-'));
-  assert.ok(end !== -1, "§6 must set the run's AGENT_PLATFORM after persisting the repo's");
+  assert.ok(!LINES.some((l) => /env_get (AGENT_PLATFORM|SDD_ENGINE|SDD_HARNESS)\b/.test(l)), 'bootstrap.sh must not compose its own platform/engine precedence from .env (#1114 S3.3)');
+  const end = LINES.findIndex((l, i) => i > banner && l.startsWith('AGENT_PLATFORM="$_R_RUN"'));
+  assert.ok(end !== -1, "§6 must set the run's AGENT_PLATFORM from the resolver");
   return LINES.slice(banner + 1, end + 1).join('\n');
 }
 
@@ -87,13 +88,13 @@ function declareHelpers() {
   return LINES.slice(start + 1, end).join('\n');
 }
 
-/** The SDD-engine block of §6, verbatim: after the platform line up to the `ok` that reports both. */
+/** The SDD-engine block of §6, verbatim: from its resolve up to and including the run's SDD_ENGINE. */
 function sddBlock() {
-  const start = LINES.findIndex((l) => l.startsWith('SDD_ENGINE="$(env_get SDD_ENGINE)"'));
-  assert.ok(start !== -1, '§6 must resolve SDD_ENGINE from .env first');
-  const end = LINES.findIndex((l, i) => i > start && l.startsWith('ok "$(printf "$I18N_BOOTSTRAP_SDD_OK"'));
-  assert.ok(end !== -1, '§6 must report the engine after resolving it');
-  return LINES.slice(start, end).join('\n');
+  const start = LINES.findIndex((l) => l.startsWith('_axis_resolve sdd'));
+  assert.ok(start !== -1, '§6 must resolve the engine through `config/cli.mjs resolve`');
+  const end = LINES.findIndex((l, i) => i > start && l.startsWith('SDD_ENGINE="$_R_RUN"'));
+  assert.ok(end !== -1, "§6 must set the run's SDD_ENGINE from the resolver");
+  return LINES.slice(start, end + 1).join('\n');
 }
 
 const STUBS = [
@@ -101,6 +102,7 @@ const STUBS = [
   'MISSING_OPTIONAL=()',
   'REQUIRED_FAILURES=()',
   'I18N_BOOTSTRAP_AXIS_DECLARED="declared %s=%s %s"',
+  'I18N_BOOTSTRAP_AXIS_RESOLVEFAILED="resolvefailed %s %s"',
   'I18N_BOOTSTRAP_AXIS_ENVONLY="envonly %s %s %s %s"',
   'I18N_BOOTSTRAP_AXIS_DECLAREFAILED="failed %s %s %s"',
   'ok() { :; }',
@@ -190,7 +192,7 @@ test('#1125 bootstrap.sh: a process-env platform wins for the run and does NOT r
   });
   assert.equal(platform, 'antigravity');
   assert.equal(dotenv, 'AGENT_PLATFORM=claude\n', '.env is left exactly as stated');
-  assert.equal(config.platform, undefined, 'a platform stated only in .env is not written to tracked config');
+  assert.equal(config.platform.default, 'claude', 'the repo value here equals today\'s default, so that default is declared; the process-env one-off never is');
 });
 
 test('#1125 bootstrap.sh: a process-env platform on a fresh repo is NOT declared — config records the repo\'s own answer', () => {
@@ -208,45 +210,45 @@ test('#1125 bootstrap.sh: a legacy SDD_HARNESS naming an ENGINE is not a platfor
   assert.equal(runBlock({ envFile: 'SDD_HARNESS=gentle-ai\n' }).platform, 'claude');
 });
 
-test('#1125 bootstrap.sh and resolvePlatform give ONE answer over every env/.env combination (parity until #1114)', () => {
-  // Every combination of the four inputs both resolvers read. The legacy
-  // `.env` SDD_HARNESS — the input the shell used to ignore — takes every value
-  // (unset, each supported platform, an engine name); the other three take
-  // unset plus values that differ from the default and from each other, so
-  // each precedence edge flips the answer somewhere in the table. One bash
-  // process runs every case in its own subshell and scratch dir: each case
-  // forks grep/cut/mktemp, and a full 5^4 table measured 25 s.
+test('#1125/#1114 bootstrap.sh and resolvePlatform/resolveEngine give ONE answer over env, .env and config (incl. config.harness with .env SDD_HARNESS)', () => {
+  // bootstrap.sh no longer composes a precedence: it asks `config/cli.mjs resolve`, which calls the real
+  // resolvers. This table holds that to the resolvers' own answers, with the legacy `harness` key in config
+  // crossed against SDD_HARNESS in process env and `.env` (the reviewer's divergence). One bash process runs
+  // every case in its own subshell and scratch dir; declare helpers are stubbed (their writes are covered below).
   const unsetOr = (...v) => [undefined, ...v];
   const cases = [];
   for (const envAP of unsetOr('antigravity'))
-    for (const envSH of unsetOr('antigravity', 'gentle-ai'))
-      for (const fileAP of unsetOr('antigravity', 'claude'))
-        for (const fileSH of unsetOr(...AGENT_PLATFORMS, 'gentle-ai')) cases.push({ envAP, envSH, fileAP, fileSH });
+    for (const envSH of unsetOr('antigravity', 'plain'))
+      for (const fileSH of unsetOr('plain', 'antigravity'))
+        for (const cfgH of unsetOr('plain', 'antigravity')) cases.push({ envAP, envSH, fileSH, cfgH });
+  for (const fileAP of ['claude', 'antigravity']) cases.push({ fileAP, fileSH: 'plain', cfgH: 'antigravity' });
+  cases.push({ fileSE: 'plain', cfgH: 'antigravity' }, { envSE: 'plain', fileSH: 'antigravity' });
 
   const base = mkdtempSync(join(tmpdir(), 'brain-1125-parity-'));
   try {
     const q = (v) => `'${v}'`;
-    // The parity table is about the PRECEDENCE; the config reads/writes are covered above. Stubbed here
-    // so 90 cases do not spawn 180 node processes: nothing is declared, so the chain falls through.
-    const script = ['set -euo pipefail', STUBS, envHelpers(), declareHelpers(), '_axis_declared() { :; }', '_axis_declare() { :; }', '_axis_env_only() { :; }'];
+    const script = ['set -euo pipefail', STUBS, envHelpers(), declareHelpers(), '_axis_declare() { :; }', '_axis_env_only() { :; }'];
     cases.forEach((c, i) => {
       const dir = join(base, String(i));
-      const lines = [`mkdir -p ${q(dir)}`, `cd ${q(dir)}`];
+      const lines = [`mkdir -p ${q(dir)}`, `cd ${q(dir)}`, `printf '%s' ${q(JSON.stringify(c.cfgH ? { harness: c.cfgH } : {}))} > brain.config.json`];
       if (c.fileAP) lines.push(`printf 'AGENT_PLATFORM=%s\\n' ${q(c.fileAP)} >> .env`);
       if (c.fileSH) lines.push(`printf 'SDD_HARNESS=%s\\n' ${q(c.fileSH)} >> .env`);
+      if (c.fileSE) lines.push(`printf 'SDD_ENGINE=%s\\n' ${q(c.fileSE)} >> .env`);
       lines.push(c.envAP ? `export AGENT_PLATFORM=${q(c.envAP)}` : 'unset AGENT_PLATFORM');
       lines.push(c.envSH ? `export SDD_HARNESS=${q(c.envSH)}` : 'unset SDD_HARNESS');
-      lines.push(platformBlock(), `printf '%s\\n' "$AGENT_PLATFORM"`);
+      lines.push(c.envSE ? `export SDD_ENGINE=${q(c.envSE)}` : 'unset SDD_ENGINE');
+      lines.push(platformBlock(), sddBlock(), `printf '%s %s\\n' "$AGENT_PLATFORM" "$SDD_ENGINE"`);
       script.push(`(\n${lines.join('\n')}\n)`);
     });
-    // From a script FILE, not argv (625 copies of the block exceed ARG_MAX, E2BIG) and not the
-    // `input` option (a piped stdin never sees EOF in the cold reviewer's sandbox, #1221).
+    // From a script FILE, not argv and not the `input` option (a piped stdin never sees EOF in the cold reviewer's sandbox, #1221).
     const scriptFile = join(base, 'parity.sh');
     writeFileSync(scriptFile, script.join('\n'));
     const out = execFileSync('bash', [scriptFile], {
       encoding: 'utf8',
       env: BASE_ENV,
       maxBuffer: 16 * 1024 * 1024,
+      timeout: 300_000,
+      stdio: ['ignore', 'pipe', 'pipe'],
     }).split('\n');
 
     const mismatches = [];
@@ -254,17 +256,26 @@ test('#1125 bootstrap.sh and resolvePlatform give ONE answer over every env/.env
       const env = {};
       if (c.envAP) env.AGENT_PLATFORM = c.envAP;
       if (c.envSH) env.SDD_HARNESS = c.envSH;
+      if (c.envSE) env.SDD_ENGINE = c.envSE;
       const envVars = {};
       if (c.fileAP) envVars.AGENT_PLATFORM = c.fileAP;
       if (c.fileSH) envVars.SDD_HARNESS = c.fileSH;
-      const js = resolvePlatform({ env, envVars, config: {} });
+      if (c.fileSE) envVars.SDD_ENGINE = c.fileSE;
+      const config = c.cfgH ? { harness: c.cfgH } : {};
+      const js = `${resolvePlatform({ env, envVars, config })} ${resolveEngine({ env, envVars, config })}`;
       if (out[i] !== js) mismatches.push({ ...c, shell: out[i], js });
     });
-    assert.equal(cases.length, 90, 'the table is exhaustive over the chosen values');
-    assert.deepEqual(mismatches, [], 'bootstrap.sh must resolve what resolvePlatform resolves');
+    assert.deepEqual(mismatches, [], 'bootstrap.sh must run what the resolvers resolve');
+    assert.ok(cases.some((c) => c.cfgH === 'plain' && c.fileSH === 'antigravity'), 'the table contains the reviewer\'s case');
   } finally {
     removeTempTree(base);
   }
+});
+
+test('#1114 S3.3 bootstrap.sh: the reviewer\'s exact case — config {harness:plain} with .env SDD_HARNESS=antigravity runs antigravity, as resolvePlatform does', () => {
+  const r = runBlock({ config: { schemaVersion: '1.11.0', harness: 'plain' }, envFile: 'SDD_HARNESS=antigravity\n' });
+  assert.equal(r.platform, resolvePlatform({ env: {}, envVars: { SDD_HARNESS: 'antigravity' }, config: { harness: 'plain' } }));
+  assert.equal(r.platform, 'antigravity');
 });
 
 // ── #1114 S3.3: the config is where an axis is declared ─────────────────────────────────────────
@@ -306,11 +317,11 @@ test('#1114 S3.3 bootstrap.sh: a legacy SDD_HARNESS naming a PLATFORM never beco
 
 test('#1114 S3.3 bootstrap.sh: a legacy SDD_HARNESS naming an ENGINE seeds the engine, env-only (not declared)', () => {
   // schemaVersion 1.11.1: the shape migration does not re-run, so only what env:init itself writes can appear.
-  const r = runBlock({ envFile: 'SDD_HARNESS=gentle-ai\n', config: { schemaVersion: '1.11.1' } });
-  assert.equal(r.engine, 'gentle-ai');
-  assert.equal(r.platform, 'claude');
+  const r = runBlock({ envFile: 'SDD_HARNESS=plain\n', config: { schemaVersion: '1.11.1' } });
+  assert.equal(r.engine, 'plain');
+  assert.equal(r.platform, 'plain', '`plain` is a member of both axes');
   assert.equal(r.config.sdd, undefined);
-  assert.match(r.stderr, /envonly sdd gentle-ai/);
+  assert.match(r.stderr, /envonly sdd plain/);
 });
 
 test('#1114 S3.3 bootstrap.sh: a platform the config already declares is the repo\'s answer, and is not rewritten', () => {
@@ -331,12 +342,29 @@ test('#1114 S3.3 bootstrap.sh: .env still beats the config, as every resolver ha
 test('#1114 S3.3 bootstrap.sh: a failed declaration is reported, and the run still resolves its answer', () => {
   const dir = mkdtempSync(join(tmpdir(), 'brain-1114-declfail-'));
   try {
-    // No brain.config.json: `brain:config` refuses, which is the failure being reported.
+    // A readable config in a directory that cannot be written: resolve works, `brain:config set` cannot.
+    writeFileSync(join(dir, 'brain.config.json'), '{"schemaVersion":"1.11.1"}\n');
+    chmodSync(dir, 0o555);
     const script = ['set -euo pipefail', STUBS, envHelpers(), declareHelpers(), platformBlock(), 'printf "%s|%s" "$AGENT_PLATFORM" "${MISSING_OPTIONAL[*]:-}"'].join('\n');
     const r = spawnSync('bash', ['-c', script], { cwd: dir, encoding: 'utf8', env: BASE_ENV, stdio: ['ignore', 'pipe', 'pipe'], timeout: 60_000 });
     assert.equal(r.status, 0, r.stderr);
     assert.match(r.stdout, /^claude\|.*platform\.default/, 'resolved, and the missing declaration is named with its fix');
     assert.match(r.stderr, /failed platform platform claude/);
+  } finally {
+    chmodSync(dir, 0o755);
+    removeTempTree(dir);
+  }
+});
+
+test('#1114 S3.3 bootstrap.sh: an unresolvable config is reported and the run falls back to the default, declaring nothing', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'brain-1114-resfail-'));
+  try {
+    writeFileSync(join(dir, 'brain.config.json'), '{ not json');
+    const script = ['set -euo pipefail', STUBS, envHelpers(), declareHelpers(), platformBlock(), sddBlock(), 'printf "%s %s|%s" "$AGENT_PLATFORM" "$SDD_ENGINE" "${MISSING_OPTIONAL[*]:-}"'].join('\n');
+    const r = spawnSync('bash', ['-c', script], { cwd: dir, encoding: 'utf8', env: BASE_ENV, stdio: ['ignore', 'pipe', 'pipe'], timeout: 60_000 });
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /^claude gentle-ai\|platform not resolved.*sdd not resolved/);
+    assert.equal(readFileSync(join(dir, 'brain.config.json'), 'utf8'), '{ not json', 'a config that could not be read is never written over');
   } finally {
     removeTempTree(dir);
   }

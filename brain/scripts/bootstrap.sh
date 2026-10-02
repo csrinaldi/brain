@@ -224,6 +224,29 @@ _axis_declare() {
     MISSING_OPTIONAL+=("$1 not declared in brain.config.json (next: npm run brain:config -- set $1.default $2)")
   fi
 }
+# `_axis_resolve <axis> <fallback>` runs the REAL resolver (`config/cli.mjs resolve`, the code the runtime runs:
+# process env, .env, config, legacy SDD_HARNESS/harness, default) and sets _R_RUN (what this run uses), _R_REPO
+# (what the repo states, the process env being per-invocation) and _R_SRC (.env|config|default). The shell composes
+# no precedence of its own: a second resolver is exactly the divergence #1114 retires.
+_axis_resolve() {
+  _R_RUN=""; _R_REPO=""; _R_SRC=""
+  # swallow-ok: a failed resolve is reported just below and falls back to the default; read returns 1 on EOF
+  read -r _R_RUN _R_REPO _R_SRC < <(node "$BRAIN_SCRIPTS/config/cli.mjs" resolve "$1" 2>/dev/null) || true
+  if [ -z "$_R_RUN" ] || [ -z "$_R_REPO" ] || [ -z "$_R_SRC" ]; then
+    warn "$(printf "$I18N_BOOTSTRAP_AXIS_RESOLVEFAILED" "$1" "$2")"
+    MISSING_OPTIONAL+=("$1 not resolved from brain.config.json; ran with $2 (next: npm run brain:config -- resolve $1)")
+    _R_RUN="$2"; _R_REPO="$2"; _R_SRC="default"
+  fi
+}
+# `_axis_settle <axis>`: a value that comes from today's default is declared in config; one that exists only on this
+# machine's .env is reported and never declared; one the config already declares is left exactly as written.
+_axis_settle() {
+  case "$_R_SRC" in
+    default) _axis_declare "$1" "$_R_REPO" ;;
+    .env) _axis_env_only "$1" "$_R_REPO" ;;
+    *) : ;; # config already declares it: the team's, never rewritten
+  esac
+}
 # --- END axis-declare-helpers ---
 
 env_get() { grep -E "^$1=" .env 2>/dev/null | head -1 | cut -d= -f2- || true; }  # swallow-ok: grep exits 1 when the key is absent, which is the answer env_get exists to give
@@ -530,51 +553,25 @@ _setup_step actor
 # Runs BEFORE the memory sync so the ecosystem (skills, engram, gga) is
 # ready when memory is imported.
 say "$I18N_BOOTSTRAP_SDD_SECTION"
-# AGENT_PLATFORM — the same precedence and default as harness/platform.mjs's
-# resolvePlatform (issue #1125): process env > .env > the config's declared
-# `platform.default` > legacy SDD_HARNESS (only when it names a platform) >
-# `claude`. This is a SECOND resolver, held to the first by
-# bootstrap.default-platform.test.mjs's parity table until #1114 S2 leaves
-# exactly one.
+# AGENT_PLATFORM and SDD_ENGINE are resolved by the REAL resolvers (`config/cli.mjs resolve`, issue #1114
+# S3.3): resolvePlatform / resolveEngine, so this script composes no precedence of its own (it used to be a
+# second resolver held to the first by a parity table; see bootstrap.default-platform.test.mjs).
 #
-# Two answers, on purpose. The REPO states a platform in tracked config: an
-# existing declaration is never rewritten, and a repo that states nothing gets
-# the resolved answer declared explicitly (#1114 S3.3 — NOT written into .env,
-# which is only read here). A process-env AGENT_PLATFORM is per-invocation, as
-# it is for resolvePlatform: `AGENT_PLATFORM=antigravity npm run brain:env:init`
-# (the hint brain:upgrade prints) runs antigravity for that run and does not
-# move the repo off the platform it states, or off the default.
-_DOTENV_PLATFORM="$(env_get AGENT_PLATFORM)"
-_REPO_PLATFORM="${_DOTENV_PLATFORM:-$(_axis_declared platform)}"
-_PLATFORM_ENV_ONLY=false
-[ -z "$_DOTENV_PLATFORM" ] || _PLATFORM_ENV_ONLY=true
-if [ -z "$_REPO_PLATFORM" ]; then
-  _LEGACY_PLATFORM="${SDD_HARNESS:-$(env_get SDD_HARNESS)}"
-  case "$_LEGACY_PLATFORM" in
-    claude|antigravity|plain) _REPO_PLATFORM="$_LEGACY_PLATFORM"; _PLATFORM_ENV_ONLY=true ;;
-    *) _REPO_PLATFORM="claude" ;;
-  esac
-fi
-# Only a value from the config or from today's default is declared; a per-machine one is reported (see _axis_env_only).
-if [ "$_PLATFORM_ENV_ONLY" = true ]; then _axis_env_only platform "$_REPO_PLATFORM"; else _axis_declare platform "$_REPO_PLATFORM"; fi
-AGENT_PLATFORM="${AGENT_PLATFORM:-$_REPO_PLATFORM}"
-
-# The engine: the same shape. A legacy SDD_HARNESS feeds it only when it names an ENGINE, as resolveEngine does:
-# `antigravity` there is a platform, and `set sdd.default antigravity` would be refused.
-SDD_ENGINE="$(env_get SDD_ENGINE)"
-_SDD_ENV_ONLY=false
-if [ -n "$SDD_ENGINE" ]; then
-  _SDD_ENV_ONLY=true
-else
-  SDD_ENGINE="$(_axis_declared sdd)"
-fi
-if [ -z "$SDD_ENGINE" ]; then
-  case "$(env_get SDD_HARNESS)" in
-    gentle-ai|plain) SDD_ENGINE="$(env_get SDD_HARNESS)"; _SDD_ENV_ONLY=true ;;
-    *) SDD_ENGINE="gentle-ai" ;;
-  esac
-fi
-if [ "$_SDD_ENV_ONLY" = true ]; then _axis_env_only sdd "$SDD_ENGINE"; else _axis_declare sdd "$SDD_ENGINE"; fi
+# Two answers, on purpose. The RUN value is what this invocation uses, process env included:
+# `AGENT_PLATFORM=antigravity npm run brain:env:init` (the hint brain:upgrade prints) runs antigravity for that
+# run. The REPO value is what the repo states, and only that is ever declared, through `brain:config`:
+#   - from today's default  -> declared (explicit in tracked config, with its providers entry);
+#   - from the config       -> left exactly as the team wrote it (a legacy-keyed config counts as declared);
+#   - only from .env        -> NEVER declared: one developer's override must not become the team's tracked
+#                              default through env:init. It is reported with the command that would declare it;
+#                              promoting a per-machine value is brain:upgrade's job, which prints its source
+#                              (ADR-0038 section 7). `.env` is only ever READ here.
+_axis_resolve platform claude
+_axis_settle platform
+AGENT_PLATFORM="$_R_RUN"
+_axis_resolve sdd gentle-ai
+_axis_settle sdd
+SDD_ENGINE="$_R_RUN"
 ok "$(printf "$I18N_BOOTSTRAP_SDD_OK" "$SDD_ENGINE ($AGENT_PLATFORM)")"
 # Exported, not just written to .env (issue #1093): harness/cli.mjs resolves
 # its own repoRoot from ITS OWN module location, which is now WORKTREE_ROOT —

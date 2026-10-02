@@ -228,6 +228,7 @@ export default {
   'bootstrap.memory.resolverFailed': "the memory backend resolver failed (exit {code}) — that is the check failing, not a backend being undeclared. Nothing was prompted or written.",
   'bootstrap.axis.declared':         '{axis}.default = {name} declared in brain.config.json — commit it so every checkout runs the same {axis}',
   'bootstrap.axis.envOnly':          '{axis} {name} comes only from this machine (.env or SDD_HARNESS) — teammates and fresh clones will not see it, so it was NOT written to brain.config.json. To share it with the team: npm run brain:config -- set {axis}.default {name}',
+  'bootstrap.axis.resolveFailed':     'could not resolve the {axis} (config/cli.mjs resolve failed) — running with {name}; nothing was declared',
   'bootstrap.axis.declareFailed':    'could not declare {axis}.default in brain.config.json — set it with: npm run brain:config -- set {axis}.default {name}',
   'bootstrap.memory.declared':       'memory backend saved to brain.config.json (memory.default) — commit it so every checkout runs the same backend',
   'bootstrap.memory.declareFailed':  'could not write memory.default to brain.config.json — set it with: npm run brain:config -- set memory.default {backend}',

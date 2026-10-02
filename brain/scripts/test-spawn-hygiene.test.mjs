@@ -397,12 +397,13 @@ const ALLOWLIST = [
   // #1124: bootstrap.sh's own brain-config.mjs ensure line — reads `git remote get-url origin` only, never the network
   { file: 'brain/scripts/bootstrap.tier-notice.test.mjs', entrypoint: '<unresolved>', line: 71, reason: 'no-vcs-capability' },
   // #1125: bash runs bootstrap.sh's env helpers and §6 platform block, lifted verbatim, in a scratch dir — no git, no network, no push.
-  { file: 'brain/scripts/bootstrap.default-platform.test.mjs', entrypoint: '<unresolved>', line: 132, reason: 'no-vcs-capability' },
+  { file: 'brain/scripts/bootstrap.default-platform.test.mjs', entrypoint: '<unresolved>', line: 134, reason: 'no-vcs-capability' },
+  { file: 'brain/scripts/bootstrap.default-platform.test.mjs', entrypoint: 'brain/scripts/parity.sh', line: 246, reason: 'no-vcs-capability' }, // #1221: the script is a temp file, not stdin
+  { file: 'brain/scripts/bootstrap.default-platform.test.mjs', entrypoint: '<unresolved>', line: 349, reason: 'no-vcs-capability' },
+  { file: 'brain/scripts/bootstrap.default-platform.test.mjs', entrypoint: '<unresolved>', line: 364, reason: 'no-vcs-capability' },
+  { file: 'brain/scripts/bootstrap.default-platform.test.mjs', entrypoint: '<unresolved>', line: 380, reason: 'no-vcs-capability' },
+  { file: 'brain/scripts/bootstrap.default-platform.test.mjs', entrypoint: 'brain/scripts/config/cli.mjs', line: 383, reason: 'no-vcs-capability' },
   // #1114 S3.3: the lifted §6 blocks run against a scratch dir holding a real brain.config.json, so `brain:config` is the writer under test (bash -c scripts, each with a timeout).
-  { file: 'brain/scripts/bootstrap.default-platform.test.mjs', entrypoint: '<unresolved>', line: 336, reason: 'no-vcs-capability' },
-  { file: 'brain/scripts/bootstrap.default-platform.test.mjs', entrypoint: '<unresolved>', line: 352, reason: 'no-vcs-capability' },
-  { file: 'brain/scripts/bootstrap.default-platform.test.mjs', entrypoint: 'brain/scripts/config/cli.mjs', line: 355, reason: 'no-vcs-capability' },
-  { file: 'brain/scripts/bootstrap.default-platform.test.mjs', entrypoint: 'brain/scripts/parity.sh', line: 246, reason: 'no-vcs-capability' }, // #1221: the script is a temp file now, not stdin; same bash-in-scratch-dir shape
 
   // ── i18n shell-catalog eval: bash -c, zero VCS surface ──────────────────
   { file: 'brain/scripts/i18n/coverage.test.mjs', entrypoint: '<unresolved>', line: 161, reason: 'no-vcs-capability' }, // #1061 shifted this line by inserting the memory.heal.* parity test earlier in the file
