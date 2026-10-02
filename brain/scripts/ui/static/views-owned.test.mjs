@@ -38,6 +38,7 @@ test('#998 R998-2: the page reaches exactly the endpoints this slice owns — no
   assert.deepEqual(endpoints(APP_JS), [
     '/api/change/${issue}',
     '/api/poll/${action}',
+    '/api/remotes/refresh',
     '/api/snapshot',
     '/api/stream',
   ]);

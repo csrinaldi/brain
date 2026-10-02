@@ -670,6 +670,22 @@ body {
 .node-sdd-dir { color: var(--stamp); word-break: break-all; }
 .node-sdd-none { color: var(--stamp); }
 
+/* ── #1201: teammates' branches — a card line, the Remote work panel, the drawer block ── */
+.node-remote { display: flex; flex-direction: column; gap: 2px; font-family: var(--font-mono); font-size: 10px; color: var(--muted); }
+.node-remote:empty { display: none; }
+.node-remote-line { margin: 0; padding-top: 6px; word-break: break-all; }
+.node-remote-resume, .node-remote-more, .remote-work-reason { margin: 0; color: var(--stamp); }
+.remote-panel { margin: 16px 0; padding: 12px 14px; border: 1px solid var(--line); background: var(--surface); }
+.remote-panel-title { margin: 0 0 8px; font-size: 13px; }
+.remote-work-list, .remote-unjoined-list { margin: 6px 0; padding-left: 18px; font-family: var(--font-mono); font-size: 11px; }
+.remote-work-row, .remote-unjoined-row { margin: 2px 0; word-break: break-all; }
+.remote-work-reason { display: block; }
+.remote-unjoined-toggle { font: inherit; font-size: 12px; cursor: pointer; border: 1px solid var(--line); background: var(--paper); color: var(--ink); padding: 2px 8px; }
+.remote-block { margin: 10px 0; padding: 8px 10px; border: 1px solid var(--line); border-left: 3px solid var(--accent); }
+.remote-block-label { font-family: var(--font-mono); font-size: 12px; word-break: break-all; }
+.remote-byline { margin: 2px 0 6px; font-size: 12px; color: var(--muted); }
+.status-bar .remotes-refresh { font-family: var(--font-mono); font-size: 11px; cursor: pointer; }
+
 
 /* ── #1059 region 04: the undeclared batch ────────────────────────────────
    Not a lane — a panel that states the proportion, shows what to paste, and

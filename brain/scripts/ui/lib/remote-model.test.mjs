@@ -74,10 +74,12 @@ test('#1201 R1201-5: the unjoined group is collapsed by default, headed by its c
   assert.equal(group.rows[2].text, 'wip/stale · last commit by Linus T · 400 d ago');
 });
 
-test('#1201 R1201-3: the panel states what it hides, as counts, never silence; and what is not read yet', () => {
+test('#1201 R1201-3: the panel counts no hidden branch anywhere, and says how many are not read yet', () => {
   const panel = remotePanel(section([], [], { deferred: 4 }), new Set(), NOW).value;
-  assert.equal(panel.hiddenNote, '6 hidden: 2 base, 1 lane, 3 merged');
   assert.equal(panel.deferredNote, '4 branches not read yet');
+  assert.equal(panel.unjoined.count, 0, 'the 2 base, 1 lane and 3 merged refs of the section are in no count');
+  assert.doesNotMatch(JSON.stringify(panel), /hidden|merged|lane/);
+  assert.equal(remotePanel(section(), new Set(), NOW).value.deferredNote, null);
 });
 
 test('#1201 R1201-8: four unfavourable resume states say four different things, and a present one says nothing', () => {

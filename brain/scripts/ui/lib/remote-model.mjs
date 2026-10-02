@@ -19,7 +19,7 @@ export function authorLine(author) {
 }
 
 /** `ago` has no days (its scale stops at hours); a two-week-old branch reading "336 h ago" would be a riddle. */
-function age(tipAt, nowMs) {
+export function tipAge(tipAt, nowMs) {
   const ms = nowMs - Date.parse(tipAt);
   return ms >= 2 * DAY_MS ? `${Math.round(ms / DAY_MS)} d ago` : ago(ms);
 }
@@ -27,7 +27,7 @@ function age(tipAt, nowMs) {
 /** Newest tip first, then branch: the section already sorts, but the order is a promise of THIS view, so it does not depend on the producer. */
 const newestFirst = (a, b) => (a.tipAt < b.tipAt ? 1 : a.tipAt > b.tipAt ? -1 : a.branch.localeCompare(b.branch));
 
-const cardText = (e, nowMs) => ['on origin: ' + e.branch, e.pr ? `PR #${e.pr.number}` : null, authorLine(e.author), age(e.tipAt, nowMs)].filter(Boolean).join(' · ');
+const cardText = (e, nowMs) => ['on origin: ' + e.branch, e.pr ? `PR #${e.pr.number}` : null, authorLine(e.author), tipAge(e.tipAt, nowMs)].filter(Boolean).join(' · ');
 
 /** One badge line: the text, and the resume wording only when the resume is not present. */
 const cardLine = (e, nowMs) => ({ text: cardText(e, nowMs), resume: resumeWording(e.resume) });
@@ -46,17 +46,17 @@ export function remoteBadges(section, issue, nowMs) {
 /**
  * The "Remote work" panel: joined entries whose issue is not on the board (with
  * why), and the unjoined group — collapsed by default, newest first, every row
- * with its age, none filtered by age (R8). The hidden and deferred counts are said.
+ * with its age, none filtered by age (R8). A hidden branch (lane, merged, base) is in no
+ * list and no count here (R1201-3); only the branches not read yet are said.
  *
  * @param {Set<number>|number[]} nodeNumbers the issues the board draws
  */
 export function remotePanel(section, nodeNumbers, nowMs) {
   if (!section?.ok) return { ok: false, reason: section?.reason ?? 'the remote branches could not be read' };
   const onBoard = new Set(nodeNumbers);
-  const { branches, hidden, deferred } = section.value;
+  const { branches, deferred } = section.value;
   const unjoined = [...section.value.unjoined].sort(newestFirst);
   const offBoard = branches.filter((e) => !onBoard.has(e.issue));
-  const hiddenTotal = hidden.base + hidden.lane + hidden.merged;
   return {
     ok: true,
     value: {
@@ -68,9 +68,8 @@ export function remotePanel(section, nodeNumbers, nowMs) {
         count: unjoined.length,
         header: `unjoined branches (${unjoined.length})`,
         collapsedByDefault: true,
-        rows: unjoined.map((e) => ({ branch: e.branch, age: age(e.tipAt, nowMs), text: [e.branch, authorLine(e.author), age(e.tipAt, nowMs)].join(' · ') })),
+        rows: unjoined.map((e) => ({ branch: e.branch, age: tipAge(e.tipAt, nowMs), text: [e.branch, authorLine(e.author), tipAge(e.tipAt, nowMs)].join(' · ') })),
       },
-      hiddenNote: `${hiddenTotal} hidden: ${hidden.base} base, ${hidden.lane} lane, ${hidden.merged} merged`,
       deferredNote: deferred > 0 ? `${deferred} branch${deferred === 1 ? '' : 'es'} not read yet` : null,
     },
   };
