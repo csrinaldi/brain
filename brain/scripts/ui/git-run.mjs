@@ -20,16 +20,4 @@ export function gitRun(root) {
   });
 }
 
-const CAUSE = /^(?:fatal|error):/;
-
-/**
- * One line naming why a command failed: the first `fatal:`/`error:` line of
- * stderr, else its first non-empty line, else the first line of the message.
- * Trimmed, on one line, at most `cap` characters (`…` replaces the cut).
- */
-export function gitErrorLine(err, cap = 200) {
-  const lines = (text) => String(text ?? '').split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  const stderr = lines(err?.stderr);
-  const line = stderr.find((l) => CAUSE.test(l)) ?? stderr[0] ?? lines(err?.message ?? err)[0] ?? '';
-  return line.length > cap ? `${line.slice(0, cap - 1)}…` : line;
-}
+export { gitErrorLine } from '../lib/git-tree.mjs';
