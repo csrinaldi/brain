@@ -32,6 +32,7 @@ const TAB_LABELS = { spec: 'Spec', sdd: 'SDD', tasks: 'Tasks', workingMemory: 'W
 // already gets, `sourceStamp` is the design's bracketed form the door's
 // entries render from PR 2 on, with the href a forge/link chip may carry.
 import { sourceLabel, sourceStamp } from './provenance.mjs';
+import { SOURCE, progressLabel } from './progress-view.mjs';
 import { KNOWN_VERDICTS } from './review-timeline.mjs';
 import { resumeWording } from './resume-view.mjs';
 export { sourceLabel };
@@ -323,7 +324,7 @@ export function buildDrawerModel(changeView) {
   const tabs = [
     spec.ok ? { id: 'spec', label: TAB_LABELS.spec, ok: true, reason: null, source: null, note: spec.note ?? null, entries: specEntries(spec.value), orphans: orphanEntries(spec.orphans) } : failedTab('spec', spec),
     sdd.ok ? { id: 'sdd', label: TAB_LABELS.sdd, ok: true, reason: null, source: null, note: null, entries: sddEntries(sdd.value, documents), slices: sliceEntries(sdd.slices) } : failedTab('sdd', sdd),
-    tasks.ok ? { id: 'tasks', label: TAB_LABELS.tasks, ok: true, reason: null, source: null, note: tasks.note ?? null, entries: taskEntries(tasks.value) } : failedTab('tasks', tasks),
+    tasks.ok ? { id: 'tasks', label: TAB_LABELS.tasks, ok: true, reason: null, source: null, header: progressLabel(tasks.progress, SOURCE.head), note: tasks.note ?? null, entries: taskEntries(tasks.value) } : failedTab('tasks', tasks),
     workingMemory.ok
       ? { id: 'workingMemory', label: TAB_LABELS.workingMemory, ok: true, reason: null, source: null, note: null, entries: workingMemoryEntries(workingMemory.value) }
       : failedTab('workingMemory', workingMemory),

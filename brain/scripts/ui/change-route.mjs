@@ -25,7 +25,7 @@
 import { gitRun, gitErrorLine } from './git-run.mjs';
 
 import { parseSpecCards } from './lib/spec-cards.mjs';
-import { parseTasksList } from '../lib/tasks-list.mjs';
+import { parseTasksList, countTasks } from '../lib/tasks-list.mjs';
 import { parseBlame } from './lib/blame.mjs';
 import { shapeResumeView, resumeWording } from './lib/resume-view.mjs';
 import { parseFrontmatter } from '../memory/lib/resume-frontmatter.mjs';
@@ -117,7 +117,11 @@ function buildTasksTab({ documents, head, run, dir, issue }) {
   const parsed = parseTasksList({ text: doc.text, path, attribution });
   if (!parsed.ok) return parsed;
   const note = truncationNote(doc, 'items');
-  return { ok: true, value: attachAttribution(parsed.value, blame), ...(note ? { note } : {}) };
+  // #1199 D52: the drawer counts its own HEAD text. A count over a truncated read is not a total.
+  const progress = doc.state === 'truncated'
+    ? { ok: false, code: 'truncated', reason: `${path} is larger than ${DOCUMENT_CAP} bytes at HEAD, so no total is known` }
+    : countTasks(doc.text);
+  return { ok: true, value: attachAttribution(parsed.value, blame), progress, ...(note ? { note } : {}) };
 }
 
 /**

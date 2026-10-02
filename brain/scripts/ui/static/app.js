@@ -48,6 +48,7 @@ function applyTheme(choice) {
 }
 
 import { buildLaneModel, nodeSummaryFor, childrenOf } from './lib/lane-model.mjs';
+import { SOURCE, progressLabel } from './lib/progress-view.mjs';
 import { issueUrl } from './lib/forge-url.mjs';
 import { buildDrawerModel } from './lib/drawer-model.mjs';
 import { remoteBadges, remotePanel, tipAge } from './lib/remote-model.mjs';
@@ -808,10 +809,7 @@ function renderNodeSdd(issue) {
   const reached = [...change.stages].reverse().find((stage) => stage.state === 'present' || stage.state === 'done');
   strip.appendChild(el('span', 'node-sdd-label', change.archived ? 'archived' : 'SDD'));
   strip.appendChild(el('span', 'node-sdd-stage', reached ? reached.id : 'no stage present'));
-  if (change.tasks && typeof change.tasks.checked === 'number') {
-    const total = change.tasks.checked + (change.tasks.open ?? 0);
-    strip.appendChild(el('span', 'node-sdd-tasks', `tasks ${change.tasks.checked}/${total}`));
-  }
+  strip.appendChild(el('span', 'node-sdd-tasks', progressLabel(change.progress, SOURCE.workingTree, { prefix: 'tasks' })));
   strip.appendChild(el('span', 'node-sdd-dir', change.dir));
   return strip;
 }
@@ -1080,7 +1078,7 @@ function renderSddRow(change, sliceNote) {
   row.appendChild(matrix);
 
   const t = change.tasks;
-  const tasksLine = el('p', 'sdd-tasks', `tasks: ${t.checked} checked, ${t.open} open${t.next ? ` — next: ${t.next}` : ''} `);
+  const tasksLine = el('p', 'sdd-tasks', `${progressLabel(change.progress, SOURCE.workingTree, { prefix: 'tasks' })}${t.next ? ` — next: ${t.next}` : ''} `);
   tasksLine.appendChild(el('span', 'source', sourceStamp(t.source).label));
   row.appendChild(tasksLine);
 
@@ -1775,6 +1773,7 @@ function renderChildren(issue) {
 
 function renderTab(tab) {
   const wrap = document.createElement('div');
+  if (tab.header) wrap.appendChild(el('p', 'tab-progress', tab.header));
   if (tab.note) wrap.appendChild(el('p', 'note', `source: ${tab.note}`));
   if (!tab.ok) {
     wrap.appendChild(said(tab.reason));
