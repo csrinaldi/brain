@@ -886,3 +886,168 @@ test('#1257 R1257-9: only the first landing recomputes early; a steady tick has 
   assert.equal(seen.length, 1);
   poller.close();
 });
+
+// ── #1257 R1257-10: the closed lane ──────────────────────────────────────────
+
+const CLOSED_SINCE_OVERLAP_MS = 600000;
+const CLOSED_FULL_EVERY_RUNS = 60;
+
+/** A `closedVcs` double: records every call, can be held, can fail, and answers from `answer(args, callNumber)`. */
+function closedSpy({ answer = () => [], hold = false } = {}) {
+  const spy = { calls: [], fail: null, release: null };
+  const gate = new Promise((resolve) => { spy.release = resolve; });
+  spy.port = {
+    issueList: async (args) => {
+      spy.calls.push(args);
+      if (hold) await gate;
+      if (spy.fail) throw new Error(spy.fail);
+      return answer(args, spy.calls.length).map((r) => ({ ...r }));
+    },
+  };
+  return spy;
+}
+const closedRow = (number, extra = {}) => ({ number, title: `c${number}`, labels: [], assignees: [], state: 'closed', body: 'b', ...extra });
+
+test('#1257 R1257-10: the closed lane does not delay the open lane', async () => {
+  const callLog = [];
+  const closed = closedSpy({ hold: true });
+  const { poller, scheduler, now } = simplePoller({ vcs: makeVcs({ callLog }), closedVcs: closed.port });
+  await poller.start();
+  for (let i = 0; i < 2; i++) { now.t += 60000; await scheduler.runNext(); }
+  assert.equal(callLog.filter((c) => c === 'issueList').length, 3, 'the open issueList ran on each of the three ticks');
+  assert.equal(closed.calls.length, 1, 'one flight: the held closed read is not started again');
+  closed.release();
+  await flush();
+  poller.close();
+});
+
+test('#1257 R1257-10: first run full, second run incremental from the first run start minus the overlap', async () => {
+  const closed = closedSpy({ answer: () => [closedRow(3)] });
+  const { poller, scheduler, now } = simplePoller({ vcs: makeVcs({ callLog: [] }), closedVcs: closed.port, now: { t: 5000000 } });
+  await poller.start();
+  await flush();
+  now.t = 6000000;
+  await scheduler.runNext();
+  await flush();
+  assert.equal(closed.calls.length, 2);
+  assert.deepEqual(closed.calls[0], { project: 'o/r', state: 'closed' }, 'the first run is full: no updatedSince');
+  assert.equal(closed.calls[1].state, 'closed');
+  assert.equal(closed.calls[1].updatedSince, T(5000000 - CLOSED_SINCE_OVERLAP_MS));
+  poller.close();
+});
+
+test('#1257 R1257-10: a delta upserts by number and the cache serves the merged set in descending order', async () => {
+  const closed = closedSpy({ answer: (_a, n) => (n === 1 ? [closedRow(3), closedRow(5)] : [closedRow(3, { title: 'edited' }), closedRow(9)]) });
+  const { poller, scheduler, now, cache } = simplePoller({ vcs: makeVcs({ callLog: [] }), closedVcs: closed.port });
+  await poller.start();
+  await flush();
+  now.t += 60000;
+  await scheduler.runNext();
+  await flush();
+  const rowsNow = await cache.port.issueList({ state: 'closed' });
+  assert.deepEqual(rowsNow.map((r) => r.number), [9, 5, 3]);
+  assert.equal(rowsNow.find((r) => r.number === 3).title, 'edited');
+  poller.close();
+});
+
+test('#1257 R1257-10: a reopened issue leaves the closed set, whichever lane settles first', async () => {
+  let openRows = rows(2);
+  const vcs = { ...makeVcs({ callLog: [] }), issueList: async () => openRows.map((r) => ({ ...r })) };
+  const closed = closedSpy({ answer: (_a, n) => (n === 1 ? [closedRow(7), closedRow(3)] : []) });
+  const { poller, scheduler, now, cache } = simplePoller({ vcs, closedVcs: closed.port });
+  await poller.start();
+  await flush();
+  assert.deepEqual((await cache.port.issueList({ state: 'closed' })).map((r) => r.number), [7, 3]);
+  openRows = [...rows(2), { ...rows(1)[0], number: 7 }];
+  now.t += 60000;
+  await scheduler.runNext();
+  await flush();
+  assert.deepEqual((await cache.port.issueList({ state: 'closed' })).map((r) => r.number), [3], '#7 is open again, so it is no longer closed');
+  poller.close();
+});
+
+test('#1257 R1257-10: every 60th run is a full re-list that replaces the held set', async () => {
+  const closed = closedSpy({ answer: (_args, n) => (n === CLOSED_FULL_EVERY_RUNS ? [closedRow(500)] : [closedRow(n + 100)]) });
+  const { poller, scheduler, now, cache } = simplePoller({ vcs: makeVcs({ callLog: [] }), closedVcs: closed.port });
+  await poller.start();
+  await flush();
+  for (let run = 2; run <= CLOSED_FULL_EVERY_RUNS; run++) { now.t += 60000; await scheduler.runNext(); await flush(); }
+  assert.equal(closed.calls.length, CLOSED_FULL_EVERY_RUNS);
+  assert.equal(closed.calls[CLOSED_FULL_EVERY_RUNS - 1].updatedSince, undefined, 'run 60 is full');
+  assert.ok(closed.calls.slice(1, CLOSED_FULL_EVERY_RUNS - 1).every((c) => typeof c.updatedSince === 'string'), 'runs 2 to 59 are deltas');
+  assert.deepEqual((await cache.port.issueList({ state: 'closed' })).map((r) => r.number), [500], 'the full list replaced the held set');
+  poller.close();
+});
+
+test('#1257 R1257-10: a closed-lane failure is contained and retries from the same anchor', async () => {
+  const closed = closedSpy({ answer: () => [closedRow(3)] });
+  const now = { t: 1000000 };
+  const { poller, scheduler, cache } = simplePoller({ vcs: makeVcs({ callLog: [] }), closedVcs: closed.port, now });
+  await poller.start();
+  await flush();
+  closed.fail = 'rate limited';
+  now.t = 2000000;
+  await scheduler.runNext();
+  await flush();
+  const s = poller.state();
+  assert.equal(s.lastError, null, 'the open lane is untouched');
+  assert.equal(s.forgeLoad.open.state, 'complete');
+  assert.deepEqual((await cache.port.issueList({ state: 'closed' })).map((r) => r.number), [3], 'the held closed list is still served');
+  assert.deepEqual(s.forgeLoad.closed, { state: 'failed', at: T(2000000), reason: 'rate limited', lastCompleteAt: T(1000000) });
+  closed.fail = null;
+  now.t = 3000000;
+  await scheduler.runNext();
+  await flush();
+  assert.equal(closed.calls[2].updatedSince, T(1000000 - CLOSED_SINCE_OVERLAP_MS), 'the retry uses the anchor of the last SUCCESSFUL run');
+  assert.deepEqual(poller.state().forgeLoad.closed, { state: 'complete', at: T(3000000) });
+  poller.close();
+});
+
+test('#1257 R1257-8: closed pending, complete after a full list, and a delta keeps it complete', async () => {
+  const closed = closedSpy({ hold: true, answer: () => [closedRow(3)] });
+  const now = { t: 1000000 };
+  const { poller, scheduler } = simplePoller({ vcs: makeVcs({ callLog: [] }), closedVcs: closed.port, now });
+  await poller.start();
+  assert.deepEqual(poller.state().forgeLoad.closed, { state: 'pending', at: null }, 'a full list is in flight');
+  closed.release();
+  await flush();
+  assert.deepEqual(poller.state().forgeLoad.closed, { state: 'complete', at: T(1000000) });
+  now.t = 2000000;
+  await scheduler.runNext();
+  await flush();
+  assert.deepEqual(poller.state().forgeLoad.closed, { state: 'complete', at: T(2000000) }, 'a delta keeps it complete with a new at');
+  poller.close();
+});
+
+test('#1257 R1257-8: closed failed with no data has lastCompleteAt null', async () => {
+  const closed = closedSpy();
+  closed.fail = 'boom';
+  const { poller } = simplePoller({ vcs: makeVcs({ callLog: [] }), closedVcs: closed.port, now: { t: 1000000 } });
+  await poller.start();
+  await flush();
+  assert.deepEqual(poller.state().forgeLoad.closed, { state: 'failed', at: T(1000000), reason: 'boom', lastCompleteAt: null });
+  assert.equal(poller.state().lastError, null);
+  poller.close();
+});
+
+test('#1257 R1257-10: a closed read that settles outside a tick calls onTick itself', async () => {
+  const closed = closedSpy({ hold: true });
+  const seen = [];
+  const { poller } = simplePoller({ vcs: makeVcs({ callLog: [] }), closedVcs: closed.port, onTick: (s) => seen.push(s.forgeLoad.closed.state) });
+  await poller.start();
+  const before = seen.length;
+  closed.release();
+  await flush();
+  assert.equal(seen.length, before + 1);
+  assert.equal(seen.at(-1), 'complete');
+  poller.close();
+});
+
+test('#1257 R1257-10: a halted forge never starts the closed lane', async () => {
+  const closed = closedSpy();
+  const { poller } = simplePoller({ vcs: makeVcs({ callLog: [] }), closedVcs: closed.port, initialError: 'no git origin remote' });
+  await poller.start();
+  await poller.once();
+  assert.equal(closed.calls.length, 0);
+  poller.close();
+});

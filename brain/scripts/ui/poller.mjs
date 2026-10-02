@@ -35,12 +35,17 @@
 const REVIEW_CAP = 10;
 const BODY_CAP = 5;
 const ONCE_COLLAPSE_MS = 5000;
+// #1257 D56: every 60th closed run re-lists in full, which drops issues a delta never reports
+// (transferred, deleted); the 10 minutes absorb clock skew between this host and the forge.
+const CLOSED_FULL_EVERY_RUNS = 60;
+const CLOSED_SINCE_OVERLAP_MS = 600000;
 
 /**
  * createPoller() — the three lanes, pause/resume/once (D2, D7, #881 PR 2).
  *
  * @param {{
  *   vcs: {issueList: Function, mrList: Function, issueView: Function, prReviews: Function},
+ *   closedVcs?: {issueList: Function}|null,  // the closed lane's own port (own thread in production)
  *   cache: {setIssueList: Function, setMrList: Function, setIssueView: Function, setPrReviews: Function},
  *   project?: string|null,
  *   interval?: number, enabled?: boolean,
@@ -52,6 +57,7 @@ const ONCE_COLLAPSE_MS = 5000;
  */
 export function createPoller({
   vcs,
+  closedVcs = null,
   cache,
   project = null,
   interval = 60000,
@@ -90,6 +96,16 @@ export function createPoller({
   // #1257 D64: the open lane's load state. `completeAt` is the last successful landing.
   let openLoad = { state: 'pending', at: null };
   let openCompleteAt = null;
+  // The closed lane (D56). `closedHeld` is the merged set by number; a delta only ever
+  // upserts, so it is `complete` only once a FULL list has landed in this process.
+  let closedLoad = { state: 'pending', at: null };
+  let closedCompleteAt = null;
+  let closedFlight = null;
+  let closedHeld = null; // Map<number, row> | null — null until a full list lands
+  let closedRunNumber = 0;
+  let closedAnchorMs = null; // start of the last SUCCESSFUL closed run
+  let fullOverdue = false; // a scheduled periodic full failed: the next run is full again
+  let lastOpenNumbers = new Set();
   // #998 R998-6: the status bar's countdown. Armed by `scheduleNext()` from
   // the SAME injected `_now()` this whole module already uses, never the
   // wall clock (D9: no clock in `lib/`, the caller passes it). A manual
@@ -113,7 +129,10 @@ export function createPoller({
       return { open: { ...halted }, closed: { ...halted } };
     }
     const paused = (entry, flying) => (entry.state === 'pending' && userPaused && !flying ? { ...entry, reason: 'polling is paused' } : { ...entry });
-    return { open: paused(openLoad, tickRunning), closed: { state: 'disabled', at: null, reason: 'no closed-issue lane is configured' } };
+    const closedEntry = closedVcs === null
+      ? { state: 'disabled', at: null, reason: 'no closed-issue lane is configured' }
+      : paused(closedLoad, closedFlight !== null);
+    return { open: paused(openLoad, tickRunning), closed: closedEntry };
   }
 
   function state() {
@@ -162,6 +181,44 @@ export function createPoller({
       .slice(0, BODY_CAP);
   }
 
+  /** The merged closed set, descending by number, minus anything the latest open list holds (a reopened issue). */
+  function publishClosed() {
+    if (closedHeld === null) return;
+    for (const n of lastOpenNumbers) closedHeld.delete(n);
+    cache.setIssueList([...closedHeld.values()].sort((a, b) => b.number - a.number), 'closed');
+  }
+
+  /** One closed run: full first and every CLOSED_FULL_EVERY_RUNS-th, a delta otherwise. Never rejects. */
+  function runClosed() {
+    if (!closedVcs || forgeHalted) return Promise.resolve();
+    if (closedFlight) return closedFlight;
+    closedRunNumber += 1;
+    const startAt = _now();
+    const periodic = closedRunNumber % CLOSED_FULL_EVERY_RUNS === 0;
+    const full = closedHeld === null || periodic || fullOverdue;
+    const args = { project, state: 'closed' };
+    if (!full) args.updatedSince = new Date(closedAnchorMs - CLOSED_SINCE_OVERLAP_MS).toISOString();
+    closedFlight = (async () => {
+      try {
+        const list = await closedVcs.issueList(args);
+        if (closed) return;
+        if (full) closedHeld = new Map(list.map((r) => [r.number, r]));
+        else for (const r of list) closedHeld.set(r.number, r);
+        fullOverdue = false;
+        closedAnchorMs = startAt.getTime();
+        closedCompleteAt = startAt.toISOString();
+        closedLoad = { state: 'complete', at: closedCompleteAt };
+        publishClosed();
+      } catch (err) {
+        if (full && closedHeld !== null) fullOverdue = true;
+        closedLoad = { state: 'failed', at: startAt.toISOString(), reason: err?.message ?? String(err), lastCompleteAt: closedCompleteAt };
+      } finally {
+        closedFlight = null;
+      }
+    })();
+    return closedFlight;
+  }
+
   async function forgeLane() {
     const attemptAt = _now();
     try {
@@ -175,6 +232,8 @@ export function createPoller({
       const firstLanding = openCompleteAt === null;
       openCompleteAt = attemptAt.toISOString();
       openLoad = { state: 'complete', at: openCompleteAt };
+      lastOpenNumbers = new Set(issueRows.map((r) => r.number));
+      publishClosed(); // an issue reopened since the last closed read leaves the closed set at once
       // D66: the graph does not wait for the reviews. Only the first landing recomputes early.
       if (firstLanding && !closed) onTick(state());
 
@@ -229,6 +288,10 @@ export function createPoller({
       runRemotes().then(() => { if (!tickRunning && !closed) onTick(state()); });
     } else {
       runRemotes(); // joins the flight in progress (or is the no-op); starts nothing
+    }
+    // D56: the closed lane has its own single flight. A tick starts it and never awaits it.
+    if (closedVcs && !closedFlight && !forgeHalted) {
+      runClosed().then(() => { if (!tickRunning && !closed) onTick(state()); });
     }
     if (!forgeHalted) await forgeLane();
   }
