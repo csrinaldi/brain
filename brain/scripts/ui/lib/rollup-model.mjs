@@ -70,8 +70,13 @@ export function rollupLabel(rollup) {
   const { closed, open, unknown, total, unresolved, load } = rollup.value;
   const unknownSuffix = unknown > 0 ? ` · ${unknown} state unknown` : '';
   if (closed === null) return `${uncountedWords(load)}${open > 0 ? ` · ${open} open` : ''}${unknownSuffix}`;
-  if (total === 0) return unresolved > 0 ? `${NO_CHILDREN}; ${unresolved} closed issue${unresolved === 1 ? '' : 's'} could not be read` : NO_CHILDREN;
+  // Built before the zero-children branch: an answer counted from a list a refresh failed to renew is
+  // as-of that list whether it found children or not, and must say so either way.
   const stale = load.state === 'failed' ? ` · closed list as of ${load.lastCompleteAt}; refresh failed (${load.reason})` : '';
+  if (total === 0) {
+    const none = unresolved > 0 ? `${NO_CHILDREN}; ${unresolved} closed issue${unresolved === 1 ? '' : 's'} could not be read` : NO_CHILDREN;
+    return `${none}${stale}`;
+  }
   const more = unresolved > 0 ? ` · ${unresolved} closed issue(s) unresolved, so more children may exist` : '';
   return `${closed} / ${total} children closed${unknownSuffix}${stale}${more}`;
 }

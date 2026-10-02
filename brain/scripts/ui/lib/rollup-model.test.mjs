@@ -92,6 +92,16 @@ test('#1199 R8: an epic with no children reads "no children declared" only once 
   assert.doesNotMatch(counting, /no children declared/);
 });
 
+test('#1199 R8: an epic with no children under a failed refresh says the answer is as of the last complete list', () => {
+  const failed = load({ state: 'failed', at: 'c', reason: 'rate limited', lastCompleteAt: 'b' });
+  assert.equal(label(hierarchy(), failed), 'no children declared · closed list as of b; refresh failed (rate limited)');
+  const unresolved = [{ number: 1, reason: 'r' }];
+  assert.equal(
+    label(hierarchy({ unresolved }), failed),
+    'no children declared; 1 closed issue could not be read · closed list as of b; refresh failed (rate limited)',
+  );
+});
+
 test('#1199 R9: only direct children count, and a nested epic counts once by its own state', () => {
   const r = epicRollup(hierarchy({ closed: 1, grandchildren: 5 }), load(COMPLETE), 878);
   assert.deepEqual([r.value.closed, r.value.open, r.value.total], [1, 1, 2]);
