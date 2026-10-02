@@ -20,6 +20,7 @@
 // be tested against a world it did not read. The I/O lives in `cli.mjs`.
 
 import { field, uncomputable } from './report.mjs';
+import { taskItems } from '../lib/tasks-list.mjs';
 
 /**
  * The issue, at the top, because a reader learns what is TRUE before they learn
@@ -78,15 +79,15 @@ export function deriveTasks({ tasksText = null, reason = null } = {}) {
       fields: [['checked', uncomputable(why)], ['open', uncomputable(why)], ['next', uncomputable(why)]],
     };
   }
-  const lines = tasksText.split('\n');
-  const checked = lines.filter((l) => /^\s*- \[x\]/i.test(l)).length;
-  const openLines = lines.filter((l) => /^\s*- \[ \]/.test(l));
-  const next = openLines[0]?.replace(/^\s*- \[ \]\s*/, '').trim();
+  const items = taskItems(tasksText);
+  const checked = items.filter((i) => i.done).length;
+  const open = items.filter((i) => !i.done);
+  const next = open[0]?.text;
   return {
     title: 'Tasks (local artefact)',
     fields: [
       ['checked', field(checked)],
-      ['open', field(openLines.length)],
+      ['open', field(open.length)],
       ['next', field(next || '—')],
     ],
   };

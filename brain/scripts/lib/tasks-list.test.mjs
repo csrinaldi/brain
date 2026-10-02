@@ -7,7 +7,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { parseTasksList } from './tasks-list.mjs';
+import { parseTasksList, taskItems, countTasks } from './tasks-list.mjs';
+import { deriveTasks } from '../status/derive.mjs';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const PATH = 'openspec/changes/issue-881-ui-server-canvas/tasks.md';
 
@@ -61,4 +65,37 @@ test('#881: no text given is a said failure, never an empty array read as "no ta
   const result = parseTasksList({ text: null, path: PATH });
   assert.equal(result.ok, false);
   assert.ok(result.reason.length > 0);
+});
+
+test('#1199 R1199-1: countTasks counts done and total over the one grammar, nested items included', () => {
+  assert.deepEqual(countTasks('- [x] a\n- [ ] b\n  - [X] c\n- [ ] d\n- [x] e'), { ok: true, value: { done: 3, total: 5 } });
+});
+
+test('#1199 R1199-1/R7: zero checkboxes is a reason with no numbers, never 0/0', () => {
+  const r = countTasks('# Tasks\nprose');
+  assert.deepEqual(r, { ok: false, code: 'no-items', reason: 'tasks.md has no checklist items' });
+  assert.equal('done' in r, false);
+  assert.equal('total' in r, false);
+});
+
+test('#1199 R1199-1: deriveTasks and countTasks agree on any text, CRLF included', () => {
+  for (const text of ['- [x] a\r\n- [ ] b\r\n', '- [ ] only\n', '  - [X] x\n- [x] y\n- [ ] z\n- [ ] w']) {
+    const items = taskItems(text);
+    const f = Object.fromEntries(deriveTasks({ tasksText: text }).fields);
+    const c = countTasks(text);
+    assert.equal(f.checked.value, c.value.done, text);
+    assert.equal(f.checked.value + f.open.value, c.value.total, text);
+    assert.equal(f.next.value, items.find((i) => !i.done)?.text ?? '—', text);
+  }
+});
+
+test('#1199 R1199-1: no module under status/** or ui/** declares a checkbox regular expression', () => {
+  const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+  const walk = (dir) => readdirSync(dir).flatMap((n) => {
+    const p = join(dir, n);
+    return statSync(p).isDirectory() ? walk(p) : p.endsWith('.mjs') && !p.endsWith('.test.mjs') ? [p] : [];
+  });
+  const offenders = [...walk(join(root, 'status')), ...walk(join(root, 'ui'))]
+    .filter((p) => { const t = readFileSync(p, 'utf8'); return t.includes('- \\['); });
+  assert.deepEqual(offenders, []);
 });

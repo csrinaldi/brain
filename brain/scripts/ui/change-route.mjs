@@ -25,7 +25,7 @@
 import { gitRun, gitErrorLine } from './git-run.mjs';
 
 import { parseSpecCards } from './lib/spec-cards.mjs';
-import { parseTasksList } from './lib/tasks-list.mjs';
+import { parseTasksList } from '../lib/tasks-list.mjs';
 import { parseBlame } from './lib/blame.mjs';
 import { shapeResumeView, resumeWording } from './lib/resume-view.mjs';
 import { parseFrontmatter } from '../memory/lib/resume-frontmatter.mjs';
