@@ -603,6 +603,9 @@ export async function prCommits({ project, number, apiBase, token, proxyUrl, fet
   return commits.map(c => ({ sha: c.id, login: null, at: c.committed_date }));
 }
 
+/** Spawn buffer ceiling for the list verbs (#1257); see github.mjs LIST_MAX_BUFFER. */
+export const LIST_MAX_BUFFER = 64 * 1024 * 1024;
+
 export async function issueList({ project, state = 'open', assignee, updatedSince } = {}) {
   let currentUser;
   if (assignee === 'me') currentUser = (await whoami()).username;
@@ -621,7 +624,7 @@ export async function issueList({ project, state = 'open', assignee, updatedSinc
   const delta = updatedSince ? `&updated_after=${encodeURIComponent(updatedSince)}&order_by=updated_at&sort=asc` : '';
   for (let page = 1; ; page += 1) {
     const endpoint = `projects/${encoded}/issues?state=${providerState('gitlab', state)}&per_page=${perPage}&page=${page}${extra}${delta}`;
-    const chunk = runJson('glab', ['api', endpoint]);
+    const chunk = runJson('glab', ['api', endpoint], { maxBuffer: LIST_MAX_BUFFER });
     if (!Array.isArray(chunk)) break;
     arr.push(...chunk);
     if (chunk.length < perPage) break;
@@ -677,7 +680,7 @@ export async function mrList({ project, state = 'open', headBranch } = {}) {
   const endpoint = headBranch !== undefined
     ? `projects/${encoded}/merge_requests?state=${providerState('gitlab', state)}&source_branch=${encodeURIComponent(headBranch)}&per_page=100`
     : `projects/${encoded}/merge_requests?state=${providerState('gitlab', state)}&per_page=50`;
-  const arr = runJson('glab', ['api', endpoint]);
+  const arr = runJson('glab', ['api', endpoint], { maxBuffer: LIST_MAX_BUFFER });
   if (headBranch !== undefined && arr.length === 100) {
     throw new Error(`mrList: a full page (100) came back for headBranch ${headBranch} — cannot rule out truncation, failing closed`);
   }

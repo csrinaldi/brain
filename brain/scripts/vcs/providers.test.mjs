@@ -1964,3 +1964,59 @@ test('gitlab.workflowRunSucceeded: explicitly unsupported (never "none")', async
   const r = await gitlab.workflowRunSucceeded({ workflow: 'w.yml', branch: 'main' });
   assert.equal(r.state, 'unsupported');
 });
+
+// ── #1257: the list reads past node's default 1 MiB spawn buffer ─────────────────
+// Found by the real `brain:ui` smoke against csrinaldi/brain: the closed list was 9 MB
+// (GitHub's /issues carries PRs and bodies) and `spawnSync` died with ENOBUFS, which
+// surfaced as "failed (status null)". The adapter owns the fix: a named buffer ceiling,
+// PRs dropped at the source, and a readable reason when the ceiling is still exceeded.
+
+for (const state of ['open', 'closed']) {
+  test(`#1257: github.issueList(${state}) hands spawn a maxBuffer that fits a full paginated list`, async () => {
+    let seen = null;
+    setSpawn((cmd, args, opts) => { seen = opts; return { status: 0, stdout: '[]', stderr: '' }; });
+    await github.issueList({ project: 'o/r', state });
+    assert.ok(Number.isInteger(github.LIST_MAX_BUFFER) && github.LIST_MAX_BUFFER >= 64 * 1024 * 1024);
+    assert.ok(seen.maxBuffer >= github.LIST_MAX_BUFFER, `maxBuffer was ${seen.maxBuffer}`);
+  });
+}
+
+test('#1257: github.issueList drops pull requests at the source (--jq) and parses the NDJSON it emits', async () => {
+  let argv = null;
+  const rows = [
+    { number: 1, title: 'a', labels: [{ name: 'x' }], assignees: [{ login: 'u' }], state: 'closed', body: null },
+    { number: 2, title: 'b', labels: [], assignees: [], state: 'closed', body: 'hi' },
+  ];
+  setSpawn((cmd, args) => { argv = args; return { status: 0, stdout: rows.map(r => JSON.stringify(r)).join('\n') + '\n', stderr: '' }; });
+  const out = await github.issueList({ project: 'o/r', state: 'closed' });
+  const i = argv.indexOf('--jq');
+  assert.ok(i > 0, 'a --jq filter must run server-side of the pipe');
+  assert.match(argv[i + 1], /pull_request/);
+  assert.equal(argv[argv.length - 1].startsWith('repos/o/r/issues?'), true, 'endpoint stays the last argument');
+  assert.deepEqual(out.map(r => [r.number, r.body, r.labels, r.assignees]), [[1, '', ['x'], ['u']], [2, 'hi', [], []]]);
+});
+
+test('#1257: github.issueList keeps absent body as null (R12) through the NDJSON path', async () => {
+  setSpawn(() => ({ status: 0, stdout: JSON.stringify({ number: 3, title: 'c', state: 'open' }) + '\n', stderr: '' }));
+  const [row] = await github.issueList({ project: 'o/r', state: 'open' });
+  assert.equal(row.body, null);
+});
+
+test('#1257: an ENOBUFS spawn failure becomes a readable reason, not "status null"', async () => {
+  setSpawn(() => ({ status: null, stdout: null, stderr: null, error: Object.assign(new Error('spawnSync gh ENOBUFS'), { code: 'ENOBUFS' }) }));
+  await assert.rejects(
+    () => github.issueList({ project: 'o/r', state: 'closed' }),
+    (e) => /exceeded 64 MiB/.test(e.message) && !/status null/.test(e.message),
+  );
+});
+
+test('#1257: the other spawn-based lists carry the same buffer ceiling', async () => {
+  const seen = [];
+  setSpawn((cmd, args, opts) => { seen.push([args[args.length - 1], opts?.maxBuffer]); return { status: 0, stdout: '[]', stderr: '' }; });
+  await github.mrList({ project: 'o/r', state: 'open' });
+  await github.prReviews({ project: 'o/r', number: 1 });
+  await gitlab.issueList({ project: 'g/r', state: 'open' });
+  await gitlab.mrList({ project: 'g/r', state: 'open' });
+  assert.equal(seen.length >= 4, true);
+  for (const [ep, mb] of seen) assert.ok(mb >= 64 * 1024 * 1024, `${ep} ran with maxBuffer ${mb}`);
+});
