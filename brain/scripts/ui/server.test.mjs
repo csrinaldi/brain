@@ -861,7 +861,7 @@ test('#881: R881-5 S3 / A5 (re-run) — with the poller wired in, a full poll cy
 // ── R881-10 S3: no MCP resource route, no heartbeat/agent-pulse endpoint ────
 
 test('#881: R881-10 S3 — the route table has no MCP resource route and no heartbeat/agent-pulse endpoint', () => {
-  assert.deepEqual(KNOWN_ROUTES, ['/', '/app.js', '/app.css', '/lib/{module}.mjs', '/vendor/marked.esm.js', '/api/snapshot', '/api/stream', '/api/poll/pause', '/api/poll/resume', '/api/poll/once', '/api/change/{issue}']);
+  assert.deepEqual(KNOWN_ROUTES, ['/', '/app.js', '/app.css', '/lib/{module}.mjs', '/vendor/marked.esm.js', '/api/snapshot', '/api/stream', '/api/poll/pause', '/api/poll/resume', '/api/poll/once', '/api/remotes/refresh', '/api/change/{issue}']);
   assert.ok(!KNOWN_ROUTES.some((r) => /mcp|heartbeat|pulse/i.test(r)));
 });
 

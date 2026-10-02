@@ -26,6 +26,13 @@
 // until every one of them has had its body refreshed at least once (see
 // `pendingBodyRefresh` below; judgment:cold-4).
 //
+// Remotes lane (#1201 D40): beside the forge lane, each tick also runs the
+// injected `fetchRemotes` (one `git fetch origin …`, asynchronous, killed at its
+// timeout). The two lanes settle independently — one failing never skips the
+// other — and `onTick` fires after both, so the recompute sees the new refs.
+// Fetch has exactly two callers: this timer and the explicit `refreshRemotes()`
+// (the POST route); a recompute or a watch event never fetches.
+//
 // A poll failure NEVER empties a section it once filled (R881-9): the fast
 // lane's own failure aborts the whole tick before any cache setter runs, so
 // every previously-cached section keeps its last known value; per-item
@@ -53,6 +60,7 @@ function rowsEqual(a, b) {
  *   interval?: number, enabled?: boolean,
  *   _setTimeout?: Function, _clearTimeout?: Function, _now?: () => Date,
  *   onTick?: (state: object) => void,
+ *   fetchRemotes?: () => Promise<void>,  // throws an Error whose message is the one-line cause
  *   initialError?: string|null,
  * }} opts
  */
@@ -66,6 +74,7 @@ export function createPoller({
   _clearTimeout = clearTimeout,
   _now = () => new Date(),
   onTick = () => {},
+  fetchRemotes = null,
   initialError = null,
 } = {}) {
   // `initialError` (#881, judgment:cold-6): the CALLER already knows, before
@@ -99,8 +108,34 @@ export function createPoller({
   // opposite.
   let nextAttemptAt = null;
 
+  // #1201 D30/D40: fetch state lives HERE, never in the snapshot — it reaches the
+  // page through `meta.poller.remotes`, so the section changes only when refs do.
+  let remotes = { lastAttemptAt: null, lastOkAt: null, lastError: null, inFlight: false };
+  let remotesFlight = null;
+  let lastRefreshAt = -Infinity;
+
   function state() {
-    return { paused, lastPolledAt, lastOkAt, lastError, forgeAsOf: { ...forgeAsOf }, intervalMs: interval, nextAttemptAt };
+    return { paused, lastPolledAt, lastOkAt, lastError, forgeAsOf: { ...forgeAsOf }, intervalMs: interval, nextAttemptAt, remotes: { ...remotes } };
+  }
+
+  /** One fetch at a time: a caller that arrives while one runs joins it. Absent `fetchRemotes` is a no-op. */
+  function runRemotes() {
+    if (!fetchRemotes) return Promise.resolve();
+    if (remotesFlight) return remotesFlight;
+    const attemptAt = _now().toISOString();
+    remotes = { ...remotes, lastAttemptAt: attemptAt, inFlight: true };
+    remotesFlight = (async () => {
+      try {
+        await fetchRemotes();
+        remotes = { ...remotes, lastOkAt: attemptAt, lastError: null };
+      } catch (err) {
+        remotes = { ...remotes, lastError: err?.message ?? String(err) };
+      } finally {
+        remotes = { ...remotes, inFlight: false };
+        remotesFlight = null;
+      }
+    })();
+    return remotesFlight;
   }
 
   function pickReviewTargets(prNumbers) {
@@ -165,7 +200,7 @@ export function createPoller({
     return [...newNumbers, ...changed, ...rest];
   }
 
-  async function tick() {
+  async function forgeLane() {
     tickCount += 1;
     const attemptAt = _now();
     try {
@@ -211,6 +246,11 @@ export function createPoller({
     } finally {
       lastPolledAt = attemptAt.toISOString();
     }
+  }
+
+  /** Both lanes, each with its own catch, so one failing never skips the other. */
+  async function tick() {
+    await Promise.allSettled([forgeLane(), runRemotes()]);
   }
 
   let closed = false;
@@ -265,6 +305,16 @@ export function createPoller({
       lastOnceAt = nowMs;
       if (timer) { _clearTimeout(timer); timer = null; }
       await runTick();
+      return state();
+    },
+    /** The explicit fetch (POST /api/remotes/refresh): allowed while paused, collapsed like `once`, single flight. */
+    async refreshRemotes() {
+      if (remotesFlight) { await remotesFlight; return state(); }
+      const nowMs = _now().getTime();
+      if (nowMs - lastRefreshAt < ONCE_COLLAPSE_MS) return state();
+      lastRefreshAt = nowMs;
+      await runRemotes();
+      onTick(state());
       return state();
     },
     state,
