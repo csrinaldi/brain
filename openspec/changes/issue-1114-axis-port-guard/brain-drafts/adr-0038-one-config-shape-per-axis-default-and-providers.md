@@ -120,31 +120,86 @@ Each field is optional and cascades:
 | `model` | the engine's own default; brain passes no model |
 
 An `agent` whose provider part is not a key of `sdd.providers`, or an `engine` that is not a key of
-`platform.providers`, makes the config invalid. It is **refused, never warned about**. This is how
-several SDD providers coexist, for example `gentle-ai` and brain's own first-party roles (ADR-0023's
-shelf, as the provider `brain`), with one of them as `sdd.default`.
+`platform.providers`, makes the config invalid. So does an explicit `engine` whose provider does not
+declare the ability to execute a stage prompt (section 5): `plain` can never be an `engine`. It is
+**refused, never warned about**. This is how several SDD providers coexist, for example `gentle-ai`
+and brain's own first-party roles (ADR-0023's shelf, as the provider `brain`), with one of them as
+`sdd.default`.
+
+**A stage with no default role must declare `agent`.** The `agent` cascade is defined only when
+`sdd.default` declares, through the role port, a default role of its own for the stage. A role the
+provider merely derives for a stage it never declared (`gentle-ai`'s `derivedRole`, marked
+`derived: true`, `axes/sdd-engine/adapters/gentle-ai.roles.mjs:66-75`) is not a default role.
+`cold-review` and every custom stage are in this case under `gentle-ai`. Such a stage MUST give
+`agent` explicitly in `sdd.roles`. A stage that does not is refused, and the message names the
+stage. `plain` declares the human role for every stage it is asked about
+(`axes/sdd-engine/adapters/plain.mjs:57-62`), so under `"sdd": { "default": "plain" }` the cascade is
+always defined.
+
+**`engine` under a human orchestrator.** When `platform.default` is `plain` (section 5), the
+`engine` cascade names a provider that cannot execute a stage prompt. A stage that gives no
+`engine` then has no runtime and the person runs it by hand, which is what `plain` means today. A
+stage that needs a runtime under a human orchestrator names its `engine` explicitly.
 
 In `sdd.roles`, `engine` means one thing: a platform provider, the runtime that executes. The
 framework that declares the role is the provider part of `agent`. This ends the two meanings of
 "engine" described in Context.
 
-### 5. `platform.providers` is the set of agent runtimes
+### 5. `platform.providers` is the set of agent runtimes, and `platform.default` is the orchestrator
 
 `platform.providers` holds every runtime that executes a prompt: `claude`, `codex`, `gemini`,
-`antigravity`. It unifies today's agent platform with the cold-review engines (#1129, #833).
+`antigravity`. It unifies today's agent platform with the cold-review engines (#1129, #833). It also
+holds `plain`, the human orchestrator, below.
+
+**`platform.default` is the orchestrator.** It is the agent brain talks to and the one that runs
+the whole flow: it holds the workspace, the session hooks and the skills, and it delegates to
+sub-agents.
+
+- **There is exactly one orchestrator per session.** It is resolved once, when the session starts,
+  with the shared precedence of section 2: process env, then `.env`, then `platform.default`. It
+  never changes mid-session.
+- The team declares its orchestrator in `platform.default`. A person may override it for their own
+  machine in their `.env` (`AGENT_PLATFORM`). Every session still has exactly one.
+- **A stage runtime is never the orchestrator.** `codex` running the cold review is a process the
+  orchestrator spawns. It opens no session of its own and orchestrates nothing.
+
+**Every platform provider declares capabilities, in its adapter.** This ADR names two:
+`orchestrate`, and the ability to execute a stage prompt. The rest of the capability vocabulary
+belongs to #1129 and #1128.
+
+| Provider | `orchestrate` | Executes a stage prompt | May appear as |
+|---|---|---|---|
+| `claude` | yes | yes | `platform.default`, `engine` |
+| `antigravity` | yes | per its adapter | `platform.default`; `engine` only if its adapter declares the ability |
+| `codex` | no | yes | `engine` only |
+| `gemini` | no | yes | `engine` only |
+| `plain` | yes, as a human orchestrator | no | `platform.default` only |
+
+- **`platform.default` must name a provider that declares `orchestrate`.** Otherwise the config is
+  invalid and is refused. The same check applies to a value from the process env or `.env`. This is
+  why `"platform": { "default": "codex" }` is refused even when `codex` is listed: no workspace or
+  hook adapter exists for it (`axes/platform/adapters/` holds `claude`, `antigravity` and `plain`;
+  `codex` and `gemini` live only under `axes/review-engine/adapters/`).
+- **`platform.default: "plain"` means the orchestrator is a human.** No agent runs, and the person
+  runs the verbs by hand. `plain` cannot execute a stage prompt, so it is never an `engine` in
+  `sdd.roles` (section 4). `AGENT_PLATFORM=plain` is valid today (`harness/platform.mjs:65`), and
+  `bootstrap.sh:513-519` writes it into `.env` from a legacy `SDD_HARNESS=plain`. Keeping `plain`
+  is what keeps section 7's promise for those consumers.
 
 **Why one axis.** Each member is an agent CLI that receives a prompt and a model and executes it.
 What differs between "the platform a developer works in" and "the engine a stage spawns" is the
 caller, not the thing called. Two axes would give `claude` two declarations, two versions to verify
-and two adapter directories, which is the state Context measures. What a member can do (emit
-session hooks, return a final message, write an artifact) is a per-provider capability declared by
-the provider. It is not a reason to put the member on a second axis.
+and two adapter directories, which is the state Context measures. What a member can do (orchestrate,
+execute a stage prompt, emit session hooks, return a final message, write an artifact) is a
+per-provider capability declared by the provider. It is not a reason to put the member on a second
+axis.
 
 Consequences for the ADRs this touches:
 
 - **ADR-0024.** Its three axes become four config axes in one shape, with VCS on the same footing.
-  `AGENT_PLATFORM` widens from the platforms that emit workspace files to every agent runtime.
-  Per-stage selection (Amendment 1's "per stage rather than per repo") lives in `sdd.roles`, and its
+  `platform.providers` widens from the platforms that emit workspace files to every agent runtime.
+  `AGENT_PLATFORM` still selects only the orchestrator, and must name a provider that declares
+  `orchestrate`. Per-stage selection (Amendment 1's "per stage rather than per repo") lives in `sdd.roles`, and its
   `engine` field names a platform provider, not an `SDD_ENGINE` framework. The `claude` default
   (Amendment 2) and the `SDD_HARNESS` legacy fallback are retired.
 - **ADR-0033.** Decision part 1, `sdd.map['cold-review'] → { engine, model }`, becomes
@@ -180,6 +235,10 @@ consumer is asked.
 | flat `platform`, `engine`, `harness`; legacy `SDD_HARNESS` (#643) | `platform.default` / `sdd.default` plus the matching `providers.<name>` |
 | `sdd.configs` + `sdd.map` | `sdd.roles`; #1132 owns this reshape and implements it, and this ADR fixes only its target |
 
+- **Every routed engine is declared too.** The migration adds to `platform.providers`, as `{}`, every
+  engine already referenced in `sdd.map` and, if present, `sdd.configs`. This repository's own
+  `brain.config.json` routes `cold-review` to `codex` (`brain.config.json:51-52`); without this step,
+  the reshaped `sdd.roles['cold-review']` would be refused by section 4.
 - **The value an existing consumer runs today is written into config.** It is taken from the
   process env or `.env` when either declares it, and otherwise from today's default: `claude` for
   `platform`, `gentle-ai` for `sdd`. An undeclared `memory` or `vcs` stays undeclared, since it
@@ -232,7 +291,9 @@ was ever chosen.
 ```
 
 `design` resolves to agent `gentle-ai:<the role gentle-ai declares for design>`, engine `claude`,
-model `claude-opus-5-5`. A stage absent from `roles` resolves all three fields by the cascade. The
+model `claude-opus-5-5`. Leaving out `agent` is valid only because `gentle-ai` declares a default
+role for `design` (`sdd-design`, `axes/sdd-engine/adapters/gentle-ai.roles.mjs:44-45`).
+`cold-review` has no such role, which is why its entry names `agent` explicitly (section 4). A stage absent from `roles` resolves all three fields by the cascade. The
 version strings are illustrative.
 
 Two configs this decision refuses:
@@ -252,7 +313,8 @@ Two configs this decision refuses:
 }
 ```
 
-The first names a default it does not list. The second routes to an SDD provider (`brain`) and a
+The first names a default it does not list. Listing `codex` would not save it: `codex` does not
+declare `orchestrate` (section 5). The second routes to an SDD provider (`brain`) and a
 platform provider (`gemini`) that the config does not declare.
 
 ## Consequences
@@ -324,8 +386,11 @@ declaration per runtime.
   #1132's work, under ADR-0023.
 - **The runtime adapters are not merged.** `axes/platform/adapters/` and
   `axes/review-engine/adapters/` stay two directories until a slice moves them. This ADR rules that
-  they are one axis in config, and the cold-review engine contract (#1129) is where the per-provider
-  capabilities get written.
+  they are one axis in config, and that a provider lacking a capability is refused wherever that
+  capability is required: `platform.default` requires `orchestrate`, and an `engine` requires the
+  ability to execute a stage prompt (section 5). A missing capability is never a warning and never a
+  fallback to another provider. The declaration lives in each provider's adapter. The rest of the
+  vocabulary, and where capabilities beyond these two are checked, belong to #1129 and #1128.
 - **How `version` is compared** (exact match or a range) and what `env:init` does on a mismatch
   (warn or refuse) belong to #1130.
 - **The call-site leaks** S1's guard allowlists (`day-start.mjs` calling `gentle-ai` and `engram`
@@ -345,7 +410,9 @@ declaration per runtime.
   The runtime-detected CI provider sits outside the precedence (Ratified point 1).
 - **ADR-0023.** The shelf becomes an SDD provider named `brain` (`"version": "self"`). Stage → role
   routing, including the model that decision 4 leaves to routing, lives in `sdd.roles`.
-- **ADR-0024.** Four config axes in one shape. `AGENT_PLATFORM` covers every agent runtime.
+- **ADR-0024.** Four config axes in one shape. `platform.providers` covers every agent runtime, and
+  `platform.default` (`AGENT_PLATFORM`) names the one orchestrator per session, which must declare
+  `orchestrate`; `plain` stays, as the human orchestrator.
   Amendment 2's `claude` default and the `SDD_HARNESS` legacy fallback are withdrawn. Amendment 1's
   per-stage selection moves to `sdd.roles`, whose `engine` names a platform provider.
 - **ADR-0033.** Decision part 1 resolves through `sdd.roles['cold-review']`, with `engine` a key of
@@ -375,5 +442,10 @@ These four points were open in the first draft. The maintainer ruled on each one
      `default`.
    - The `brain` provider is the exception. It is written as `"self"`, because it is the package's
      own version and does not depend on the machine.
-4. **`plain` stays a provider of `sdd`** (a valid SDD framework: the manual flow) **and leaves
-   `platform`** (it is not an agent runtime that executes prompts).
+4. **`plain` stays a provider of both `sdd` and `platform`.** In `sdd` it is a valid SDD framework:
+   the manual flow. In `platform` it is the human orchestrator: it declares `orchestrate`, cannot
+   execute a stage prompt, and so is never an `engine` (section 5).
+   - **Corrected after the cold review of PR #1249.** The first ruling said `plain` leaves
+     `platform`. The maintainer reversed it on 2026-10-02, because `AGENT_PLATFORM=plain` is valid
+     today (`harness/platform.mjs:65`) and `bootstrap.sh:513-519` writes it into `.env`. Removing it
+     would change what those consumers run, which breaks section 7's promise.
