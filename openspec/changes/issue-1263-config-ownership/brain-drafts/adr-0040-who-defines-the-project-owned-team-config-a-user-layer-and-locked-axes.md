@@ -1,7 +1,7 @@
 # ADR-0040 — Who defines the project: an owned team config, a `~/.brain` user layer, and locked axes
 
 > **status:** proposed — rulings recorded from #1263 (maintainer, 2026-10-02), open points ratified 2026-10-02, pending human promotion | **date:** 2026-10-02 | **owner:** @crinaldi
-> **relates to:** ADR-0004 Amendment 3 (memory selector in tracked config), ADR-0020 (the `reviewActors`/`approvalActors` two-key split), ADR-0026 (tiers; Amendment 8, additive migration), ADR-0036 (fresh-consumer cost bar), ADR-0037 (the producer never approves or merges), ADR-0038 (one config shape per axis); maintainer rulings on #1263, 2026-10-02; #1114 (S3.3, S2)
+> **relates to:** ADR-0004 Amendment 3 (memory selector in tracked config), ADR-0020 (the `reviewActors`/`approvalActors` two-key split, unchanged; `governance.owners` is a new key beside it), ADR-0026 (tiers; Amendment 8, additive migration), ADR-0036 (fresh-consumer cost bar), ADR-0037 (the producer never approves or merges), ADR-0038 (one config shape per axis); maintainer rulings on #1263, 2026-10-02; #1114 (S3.3, S2)
 
 > **Tier 2 draft.** `brain/project/decisions/**` is human-promoted (`agent-authorities.md` Tier 2).
 > Promote with `npm run brain:promote -- <this path>`: the verb writes the house header, adds the
@@ -27,7 +27,7 @@ ADR-0038 gave every axis one shape and one precedence. It did not say who writes
 `lib/brain-config.mjs ensure` (`bootstrap.sh:81`). With no `brain.config.json`, `ensureBrainConfig`
 builds the whole file from the migrations and the git origin (`lib/brain-config.mjs:297-327`): the
 tier, the VCS provider (`:313`), the scaffolded axes. Nobody is asked who the project's owner is,
-and the file records none. This repository's own config has no `governance.approvalActors` at all
+and the file records none. This repository's own config has no owner key and no `governance.approvalActors` at all
 (`brain.config.json:21-42`).
 
 **2. After adoption, nothing guards it.**
@@ -94,8 +94,13 @@ process env  >  .env  >  ~/.brain/config.json  >  brain.config.json  >  undeclar
   layer's `version` wins, because it is what is installed there. The team's `version` stays the
   expectation, and `diagnoseAxes` reports a difference between the two as a mismatch.
 - **The team layer alone is complete.** The foundation declares a team `default` for every axis
-  (Ratified point 3). CI has no `~/.brain` and always resolves from the team config; the user
-  layer only overrides, on a free axis.
+  (Ratified point 3), except a memory backend nobody chose (section 4). CI has no `~/.brain` and
+  resolves every axis from the team config, with one exception: `vcs`. The user layer only
+  overrides, on a free axis.
+- **The CI exception for `vcs`.** In CI the runtime-detected provider (ADR-0016's `ctx.provider`)
+  wins. It sits outside this precedence and needs only an adapter brain ships, not a
+  `vcs.providers` key (ADR-0038 Ratified point 1). It is a fact about the host, not a user
+  override, so it is not what "`vcs` is never overridable" forbids.
 - An axis no level declares still refuses (ADR-0038 §3).
 
 ### 3. `locked`
@@ -110,7 +115,7 @@ layer only.
 | `memory` | locked | the team's records hydrate into one backend; two backends in one team split the index |
 | `sdd` | locked | the pipeline and its roles are the team's process |
 | `platform` | free | the orchestrator is the person's tool |
-| `vcs` | never overridable from `.env` or the user layer | the provider is where the repository lives (ADR-0038 §2); it has no `.env` level, and the user layer does not add one |
+| `vcs` | never overridable from `.env` or the user layer | the provider is where the repository lives (ADR-0038 §2); it has no `.env` level, and the user layer does not add one. The CI runtime-detected provider is not an override: it sits outside the precedence (section 2) |
 
 **Existing consumers are not locked by a migration** (Ratified point 6). The migration writes
 `locked: false` on every axis, so nothing they run changes (ADR-0038 §7). An owner turns `locked`
@@ -121,18 +126,24 @@ that released versions wrote into `.env` valid until that owner decides.
 
 | Moment | When | Who writes the team config |
 |---|---|---|
-| **Foundation** | the repository has no `brain.config.json` | `brain init` + `env:init`, and only then. It declares a `default` for every axis, the new-adoption `locked` defaults, and the owner. The adoption commit is the founding decision, signed by whoever adopts. |
+| **Foundation** | the repository has no `brain.config.json` | `brain init` + `env:init`, and only then. It declares a `default` for every axis, the new-adoption `locked` defaults, and the owner. **A non-interactive foundation (no TTY) leaves `memory` undeclared** (`"default": ""`): the backend is never guessed (ADR-0004 Amendment 3), and `diagnoseAxes` reports "memory backend undeclared" as an ERROR-severity finding until someone chooses one. Every other axis still gets its team default. The adoption commit is the founding decision, signed by whoever adopts. |
 | **Daily use** | `brain.config.json` exists | **nobody.** `env:init` writes the user layer only. For a team axis the config does not declare, it refuses with a named fix: ask an owner, or propose it with `npm run brain:config -- set <axis>.default <name>` in a PR. This corrects #1114 S3.3. |
 | **Change** | any later edit of the team config | a PR, approved by a project owner (section 5) |
 
 ### 5. The owner
 
-- **The owner is declared in the team config itself:** `governance.approvalActors`. This reuses
-  ADR-0020's two-key split rather than adding a third identity list. `approvalActors` already
-  means "the identities trusted to approve on the team's behalf"; it now also owns the team config.
-  The reviewer handle stays out of it, as ADR-0020 requires.
-- **It is a list, so a project may have several owners** (Ratified point 4).
-- **Adoption seeds it** with the adopter's `brain.actor`.
+- **The owner is a NEW key, `governance.owners`:** the list of humans who own the team config,
+  kept apart from automation identities. *Corrected after the cold review of PR #1264:* the first
+  draft reused `governance.approvalActors`. In code that key is an automation allow-list that
+  short-circuits the self-approval check: `vcs/actor-check.mjs:807`
+  (`if (actor && botAllowlist.includes(actor))` returns `pass`) runs before the tier branch
+  (`:826`) and before the `actor === author` failure (`:839`). A human owner seeded there could
+  self-approve at any tier, which ADR-0037 forbids.
+- **`approvalActors` keeps its meaning, unchanged**, and so does ADR-0020's two-key split.
+  `governance.owners` is a third key beside it, with one reader: the team-config gate.
+- **It is a list, so a project may have several owners.**
+- **Adoption seeds it** with the adopter's login. `brain.actor` is written as `@<login>`
+  (`lib/env-init-setup.mjs:141-146`); `governance.owners` holds the bare forge login.
 - **Changing owners is a team-config change.** Removing an owner is a PR approved by another owner.
 - **A sole owner approving their own team-config change** is valid only at `lite` in autonomy mode
   A: ADR-0037's solo-maintainer exception, reported as such, never as independent.
@@ -142,10 +153,11 @@ that released versions wrote into `.env` valid until that owner decides.
 
 ### 6. Enforcement
 
-- **One source of truth: `governance.approvalActors`** (Ratified point 8).
+- **One source of truth: `governance.owners`** (Ratified point 8).
 - **The gate is the enforcement.** A governance job in the style of `brain-writes-reviewed`
-  requires an approval from an identity in `governance.approvalActors` on any PR that touches
-  `brain.config.json`. It follows the tier ladder:
+  requires, on any PR that touches `brain.config.json`, an approval from a `governance.owners`
+  member who is NOT the PR author. The one exception is ADR-0037's solo maintainer at `lite` in
+  mode A (section 5). It follows the tier ladder:
 
   | Tier | Policy |
   |---|---|
@@ -156,7 +168,7 @@ that released versions wrote into `.env` valid until that owner decides.
   This differs from `brain-writes-reviewed`, which is required at every tier
   (`vcs/governance-tiers.mjs:211-219`). The job's name and its evidence form are slice 4's.
 - **CODEOWNERS is an optional mirror.** Where a consumer keeps a `.github/CODEOWNERS` line for
-  `brain.config.json`, a drift check verifies it names the same identities as `approvalActors`; it
+  `brain.config.json`, a drift check verifies it names the same identities as `governance.owners`; it
   is never a second hand-kept list. GitLab has no identical equivalent, so on GitLab the gate alone
   enforces.
 
@@ -173,7 +185,7 @@ token lives.
 {
   "governance": {
     "tier": "standard",
-    "approvalActors": ["alice", "bob"],
+    "owners": ["alice", "bob"],
     "reviewActors": ["review-bot"]
   },
   "vcs": {
@@ -240,7 +252,7 @@ explicitly, so it runs on `codex` on both machines.
 ```
 
 `memory` is locked by the team config, so the user layer may not override it. The refusal names
-the axis, the file the value came from, and the fix: ask an owner in `governance.approvalActors`,
+the axis, the file the value came from, and the fix: ask an owner in `governance.owners`,
 or propose the change with `npm run brain:config -- set memory.default plainfiles` in a PR. The
 same value in `.env`, or in the process env for one run (`MEMORY_BACKEND=plainfiles npm run …`), is
 refused the same way (section 3).
@@ -263,14 +275,15 @@ Adding `"providers": { "antigravity": {} }` to his user layer makes it valid, as
   have a home that applies to every repository, so nobody needs to edit `brain.config.json` or a
   per-worktree `.env` to run their own setup.
 - **The team config has an author, an owner and a reviewer.** Foundation names who signed it,
-  `approvalActors` names who may change it, and the gate reports, or at `standard`/`regulated`
+  `governance.owners` names who may change it, and the gate reports, or at `standard`/`regulated`
   refuses, a change nobody owning it approved.
 - **`env:init` becomes read-only on team state in daily use.** A second developer's bootstrap
   leaves `brain.config.json` byte-identical, which is #1263's first acceptance criterion and makes
   the diff of a fresh clone empty.
 - **`locked` turns a convention into a rule.** "We all use engram" is checkable, and a stray
   `MEMORY_BACKEND` in someone's `.env` is refused instead of silently splitting the index.
-- **No new identity list.** Reusing `approvalActors` keeps ADR-0020's split at two keys.
+- **Owners and automation never share a key.** `governance.owners` holds humans only, so the
+  automation allow-list in `approvalActors` cannot let an owner approve their own change.
 
 ### Negative
 
@@ -284,7 +297,7 @@ Adding `"providers": { "antigravity": {} }` to his user layer makes it valid, as
   provider to a free axis. A team that wants to restrict a free axis has to lock it.
 - **A sole owner needs a second owner outside `lite` mode A.** A sole owner's approval of their own
   team-config change counts only under ADR-0037's solo-maintainer exception (section 5). Anywhere
-  else a one-owner project needs a second identity in `approvalActors`. That is consistent with
+  else a one-owner project needs a second human in `governance.owners`. That is consistent with
   ADR-0037 (the producer never approves) and with ADR-0036 check 1, because `lite`, the default for
   new consumers (ADR-0026 Amendment 8), only reports.
 - **A locked axis loses the per-run override.** `MEMORY_BACKEND=… npm run …` stops working on a
@@ -295,16 +308,14 @@ Adding `"providers": { "antigravity": {} }` to his user layer makes it valid, as
   `standard`/`regulated`, since it touches `brain.config.json`.
 - **Seeding has an ordering and a format cost.** `ensureBrainConfig` runs at `bootstrap.sh:81`, and
   `brain.actor` is resolved later, in §5b (`bootstrap.sh:543-565`). `brain.actor` is written as
-  `@<login>` (`lib/env-init-setup.mjs:141-146`), while `actor-check` compares forge logins exactly
-  (`vcs/actor-check.mjs:807`). Slice 3 has to resolve the actor before the config is created and
-  store the bare login.
-- **`approvalActors` gains a third reader.** ADR-0020's decision says it is read only by L5. It is
-  already also read by L6 for `override:*` labels, as the same trust grant
-  (`vcs/brain-writes-reviewed.mjs:265-289`). The new gate is a third reader in the same direction,
-  and ADR-0020's amendment has to state that.
+  `@<login>` (`lib/env-init-setup.mjs:141-146`), while forge identities are bare logins. Slice 3 has
+  to resolve the actor before the config is created and store the bare login in `governance.owners`.
+- **One more identity key.** `governance` now holds `reviewActors`, `approvalActors`, `agentActors`
+  and `owners`. The cost is one more list to keep current; the gain is that no key mixes humans who
+  own the config with automation that may skip the self-approval check.
 - **CODEOWNERS needs a drift check.** Brain ships it as a copied managed file with a placeholder
   owner and `REFUSE` on upgrade, so `brain:upgrade` does not maintain a consumer's lines. Because it
-  is only a mirror of `approvalActors` (section 6), the cost is a drift check, not a second list to
+  is only a mirror of `governance.owners` (section 6), the cost is a drift check, not a second list to
   keep. Brain ships no GitLab CODEOWNERS, and GitLab has no identical equivalent, so on GitLab the
   gate alone enforces.
 - **The guard on `BRAIN_HOME` is one more test-hygiene rule** every new test that reaches the user
@@ -325,7 +336,7 @@ Adding `"providers": { "antigravity": {} }` to his user layer makes it valid, as
   (v1.11.0 `bootstrap.sh:522-527`), and `MEMORY_BACKEND` up to the 1.8 line (v1.8.0
   `bootstrap.sh:371-378`). They stay valid: the migration writes `locked: false` on every axis of an
   existing consumer (section 3), so nothing refuses them until an owner locks the axis.
-- **No existing consumer declares `approvalActors` as the owner list**, this repository included.
+- **No existing consumer declares `governance.owners`**, this repository included.
   They are not auto-seeded (section 5); `diagnoseAxes` reports "no owner declared" until an owner is
   added by PR.
 
@@ -361,9 +372,6 @@ governance; changing it without an owner is self-authorization one level up.
 - **XDG support** (`XDG_CONFIG_HOME`) is deferred (Ratified point 2).
 - **A GitLab CODEOWNERS mirror.** GitLab has no identical equivalent; the gate is the enforcement
   there.
-- **A foundation with no TTY and no memory answer.** Ratified point 3 says the foundation declares
-  every axis; ADR-0004 Amendment 3 says the memory backend is never guessed, and with no TTY
-  `env:init` skips memory setup. The two meet only on a non-interactive adoption. Not ruled here.
 
 ## Implementation (four slices on the #1114 tracker)
 
@@ -374,7 +382,7 @@ governance; changing it without an owner is self-authorization one level up.
    user layer is one more injected input.
 2. `env:init` writes the user layer and never the team config in an existing repository. This
    corrects S3.3.
-3. Adoption seeds `approvalActors`; `diagnoseAxes` reports "no owner declared"; the optional
+3. Adoption seeds `governance.owners`; `diagnoseAxes` reports "no owner declared"; the optional
    `CODEOWNERS` mirror gets its drift check.
 4. The team-config approval gate, on the tier ladder of section 6.
 
@@ -384,8 +392,8 @@ governance; changing it without an owner is self-authorization one level up.
   and the user layer's `version` winning on its machine; `locked`, including over the process env;
   the migration writing `locked: false` for existing consumers; and `env:init` declaring the team
   config only at foundation, a `default` for every axis (its §7 "a new consumer" bullet).
-- **ADR-0020.** `approvalActors` also owns the team config and is read by the new gate. The reviewer
-  handle stays out of it.
+- **ADR-0020.** A new `governance.owners` key, distinct from the two-key split, read only by the
+  team-config gate. `approvalActors` and `reviewActors` are unchanged.
 - **ADR-0026.** The new gate's row in the tier table: detection at `lite`, required at `standard`
   and `regulated`.
 - **ADR-0004.** Amendment 3's adoption bullet: the memory prompt declares into tracked config only
@@ -409,11 +417,22 @@ above already reflects them.
 2. **Paths.** `BRAIN_HOME`, otherwise `os.homedir()/.brain`, on every operating system, Windows
    included. XDG support is deferred.
 3. **CI and the team layer.** The foundation declares a team `default` for every axis. The user
-   layer overrides only free axes. CI has no `~/.brain` and always resolves from the team config.
-4. **Owners.** `approvalActors` is a list, so there may be several owners. Removing an owner is a PR
-   approved by another owner. A sole owner approving their own team-config change is valid only at
-   `lite` in mode A, ADR-0037's solo-maintainer exception. Existing consumers are not auto-seeded;
-   `diagnoseAxes` reports "no owner declared".
+   layer overrides only free axes. CI has no `~/.brain` and resolves from the team config, except
+   `vcs`: there the runtime-detected provider (ADR-0016 `ctx.provider`, ADR-0038 Ratified point 1)
+   wins, outside the precedence, and needs only an adapter. It is a host fact, not a user override.
+   - **Added after the cold review of PR #1264:** a non-interactive (no-TTY) foundation leaves
+     `memory` undeclared (`"default": ""`), never guessed (ADR-0004 Amendment 3). `diagnoseAxes`
+     reports "memory backend undeclared" as an ERROR until someone chooses one.
+4. **Owners.** The owners are a NEW list, `governance.owners`, of the humans who own the team
+   config. There may be several. The gate requires an approval from an owner who is not the PR
+   author; a sole owner approving their own change is valid only at `lite` in mode A, ADR-0037's
+   solo-maintainer exception. Removing an owner is a PR approved by another owner. Adoption seeds
+   the adopter's bare login. Existing consumers are not auto-seeded; `diagnoseAxes` reports "no
+   owner declared".
+   - **Corrected after the cold review of PR #1264.** The first ruling named
+     `governance.approvalActors`. That key is an automation allow-list that short-circuits the
+     self-approval check (`vcs/actor-check.mjs:807`, before `:826` and `:839`), so an owner listed
+     there could self-approve at any tier, against ADR-0037. `approvalActors` is unchanged.
 5. **`locked` and the process env.** `locked` refuses a process-env value too. A different memory
    backend, even for one run, corrupts the shared memory.
 6. **Locked defaults.** `memory` and `sdd` locked is the default for new adoptions. For existing
@@ -423,6 +442,8 @@ above already reflects them.
 7. **Which `version` wins.** When both layers list a provider, the user layer's `version` wins on
    that machine, because it is what is installed there. The team's is the expectation, and
    `diagnoseAxes` reports any mismatch.
-8. **CODEOWNERS.** One source of truth, `governance.approvalActors`; the approval gate is the
-   enforcement. CODEOWNERS is an optional mirror, verified by a drift check, never a second
-   hand-kept list. GitLab has no identical equivalent.
+8. **CODEOWNERS.** One source of truth, `governance.owners`; the approval gate is the enforcement.
+   CODEOWNERS is an optional mirror, verified by a drift check, never a second hand-kept list.
+   GitLab has no identical equivalent.
+   - **Corrected after the cold review of PR #1264:** the first ruling named
+     `governance.approvalActors` as the source, for the reason given in point 4.
