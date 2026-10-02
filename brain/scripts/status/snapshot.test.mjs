@@ -280,8 +280,8 @@ test('#879: a record is projected to its index metadata plus the file that holds
 
 test('#879: with a port the graph carries roadmap per node, and one unreadable thread does not take the others', async () => {
   const issues = [
-    { number: 5, title: 'five', labels: ['status:approved'], assignees: [] },
-    { number: 6, title: 'six', labels: [], assignees: null },
+    { number: 5, title: 'five', labels: ['status:approved'], assignees: [], state: 'open' },
+    { number: 6, title: 'six', labels: [], assignees: null, state: 'open' },
   ];
   const port = readOnlyPort({
     issueList: async () => issues,
@@ -375,8 +375,8 @@ test('#967 R967-2 (PR D, review round 2): a slice body with Parent: prose and NO
 
 test('#879: one issue body that cannot be read is a node that says so — never an issue that declared nothing', async () => {
   const issues = [
-    { number: 5, title: 'five', labels: ['status:approved'], assignees: [] },
-    { number: 6, title: 'six', labels: [], assignees: null },
+    { number: 5, title: 'five', labels: ['status:approved'], assignees: [], state: 'open' },
+    { number: 6, title: 'six', labels: [], assignees: null, state: 'open' },
   ];
   const body5 = '```brain-graph/1\ntrack: UI\nblocks: []\nneeds: [6]\nfiles: []\n```';
   const port = (view6) => readOnlyPort({
@@ -508,4 +508,140 @@ test('#998 R998-5: a verdict that declares findings: [] (genuinely empty) has fi
   const r = reviewRows(7, [{ body: VERDICT('ghi', 1, 'APPROVE'), author: 'bot' }]);
   assert.deepEqual(r.verdicts[0].findings, []);
   assert.equal(r.verdicts[0].findingCount, 0);
+});
+
+// ── #1257 R1257-6: the open read takes bodies and state from the list ───────
+
+const openRow = (number, extra = {}) => ({ number, title: `t${number}`, labels: ['status:approved'], assignees: [], state: 'open', body: '', ...extra });
+const closedRow = (number, extra = {}) => ({ number, title: `c${number}`, labels: [], assignees: [], state: 'closed', body: '', ...extra });
+const BLOCK = (needs = '[]') => `\`\`\`brain-graph/1\ntrack: UI\nblocks: []\nneeds: ${needs}\nfiles: []\n\`\`\``;
+
+/** A port that answers `issueList` by state and records every `issueView`. */
+function listPort({ open = [], closed = [], closedError = null, openError = null, viewBody = () => '' } = {}) {
+  const views = [];
+  const lists = [];
+  const port = readOnlyPort({
+    issueList: async ({ state }) => {
+      lists.push(state);
+      if (state === 'closed') { if (closedError) throw new Error(closedError); return closed; }
+      if (openError) throw new Error(openError);
+      return open;
+    },
+    issueView: async ({ number }) => { views.push(number); return { body: viewBody(number), assignees: null }; },
+    mrList: async () => [],
+    prReviews: async () => [],
+  });
+  return { port, views, lists };
+}
+
+test('#1257 R1257-6: no body is read when the list carries bodies, and declared comes from the row', async () => {
+  const { port, views } = listPort({ open: [openRow(5, { body: BLOCK() }), openRow(6, { body: '' })] });
+  const s = await buildSnapshot({ root: makeFixture(), now: NOW, vcs: port, project: 'o/r' });
+  assert.deepEqual(views, [], 'the issueView spy was never called');
+  assert.equal(s.graph.value.nodes.find((n) => n.number === 5).declared, true);
+});
+
+test('#1257 R1257-6: a null body falls back to issueView, for that row only', async () => {
+  const { port, views } = listPort({ open: [openRow(5, { body: 'x' }), openRow(6, { body: null })], viewBody: () => BLOCK() });
+  const s = await buildSnapshot({ root: makeFixture(), now: NOW, vcs: port, project: 'o/r' });
+  assert.deepEqual(views, [6]);
+  assert.equal(s.graph.value.nodes.find((n) => n.number === 6).declared, true, 'the fallback body was parsed');
+});
+
+test('#1257 R1257-6: an empty body is read, not re-fetched (R12)', async () => {
+  const { port, views } = listPort({ open: [openRow(7, { body: '' })] });
+  const s = await buildSnapshot({ root: makeFixture(), now: NOW, vcs: port, project: 'o/r' });
+  assert.deepEqual(views, []);
+  const n = s.graph.value.nodes.find((x) => x.number === 7);
+  assert.equal(n.ok, true);
+  assert.equal(n.declared, false);
+});
+
+test('#1257 R1257-6: a node state comes from the port, and a null state blocks nothing', async () => {
+  const { port } = listPort({ open: [openRow(5, { body: BLOCK('[6, 7]') }), openRow(6, { state: 'open' }), openRow(7, { state: null })] });
+  const s = await buildSnapshot({ root: makeFixture(), now: NOW, vcs: port, project: 'o/r' });
+  const by = (n) => s.graph.value.nodes.find((x) => x.number === n);
+  assert.equal(by(6).state, 'open');
+  assert.equal(by(7).state, null);
+  assert.deepEqual(by(5).blockedBy, [6], 'only the OPEN prerequisite blocks; the stateless one does not');
+});
+
+// ── #1257 R1257-8/9: forgeLoad and the pending sections ─────────────────────
+
+test('#1257 R1257-8: the CLI derives forgeLoad from its own reads, with at = generatedAt', async () => {
+  const { port } = listPort({ open: [openRow(5)], closed: [closedRow(3)] });
+  const s = await buildSnapshot({ root: makeFixture(), now: '2026-10-02T12:00:00.000Z', vcs: port, project: 'o/r' });
+  assert.deepEqual(s.forgeLoad, { ok: true, value: {
+    open: { state: 'complete', at: '2026-10-02T12:00:00.000Z' },
+    closed: { state: 'complete', at: '2026-10-02T12:00:00.000Z' },
+  } });
+});
+
+test('#1257 R1257-8: a failed open list is forgeLoad failed with the raw reason, and the graph says so', async () => {
+  const { port } = listPort({ openError: 'offline' });
+  const s = await buildSnapshot({ root: makeFixture(), now: '2026-10-02T12:00:00.000Z', vcs: port, project: 'o/r' });
+  assert.deepEqual(s.forgeLoad.value.open, { state: 'failed', at: '2026-10-02T12:00:00.000Z', reason: 'offline', lastCompleteAt: null });
+  assert.equal(s.graph.ok, false);
+});
+
+test('#1257 R1257-9: while forgeLoad.open is pending the graph, prs and reviews are pending with the loading wording, and the port is not read', async () => {
+  const { port, lists } = listPort({ open: [openRow(5)] });
+  const forgeLoad = { open: { state: 'pending', at: null }, closed: { state: 'pending', at: null } };
+  const s = await buildSnapshot({ root: makeFixture(), now: NOW, vcs: port, project: 'o/r', forgeLoad });
+  assert.deepEqual(s.graph, { ok: false, pending: true, reason: 'loading open issues from the forge…' });
+  assert.deepEqual(s.prs, { ok: false, pending: true, reason: 'loading open PRs from the forge…' });
+  assert.deepEqual(s.reviews, { ok: false, pending: true, reason: 'loading PR reviews from the forge…' });
+  assert.deepEqual(s.closedIssues, { ok: false, pending: true, reason: 'loading closed issues from the forge…' });
+  assert.deepEqual(lists, [], 'a pending lane is not read at all');
+  assert.deepEqual(s.forgeLoad, { ok: true, value: forgeLoad }, 'the server value is passed through untouched');
+});
+
+// ── #1257 R1257-7: the closed issues ────────────────────────────────────────
+
+test('#1257 R1257-7: the graph survives a closed failure', async () => {
+  const { port } = listPort({ open: [openRow(5)], closedError: 'rate limited' });
+  const s = await buildSnapshot({ root: makeFixture(), now: NOW, vcs: port, project: 'o/r' });
+  assert.equal(s.graph.ok, true);
+  assert.deepEqual(s.closedIssues, { ok: false, reason: 'the closed-issue list could not be read: rate limited' });
+  assert.deepEqual(s.forgeLoad.value.closed, { state: 'failed', at: '2026-09-13T00:00:00.000Z', reason: 'rate limited', lastCompleteAt: null });
+});
+
+test('#1257 R1257-7: a closed row without a body is unresolved, not dropped silently, and closed nodes never enter the graph', async () => {
+  const { port, views } = listPort({ open: [openRow(5)], closed: [closedRow(880, { body: 'Parent: #878 (the epic)' }), closedRow(881, { body: null })] });
+  const s = await buildSnapshot({ root: makeFixture(), now: NOW, vcs: port, project: 'o/r' });
+  assert.deepEqual(s.closedIssues.value.nodes.map((n) => [n.number, n.parent]), [[880, 878]]);
+  assert.deepEqual(s.closedIssues.value.unresolved, [{ number: 881, reason: 'the forge list carried no body' }]);
+  assert.deepEqual(s.graph.value.nodes.map((n) => n.number), [5]);
+  assert.deepEqual(views, [], 'no issueView for a closed row');
+  assert.deepEqual(JSON.parse(JSON.stringify(s)), s);
+});
+
+test('#1257 R1257-7: closed:false skips the read and says why', async () => {
+  const { port, lists } = listPort({ open: [openRow(5)], closed: [closedRow(3)] });
+  const s = await buildSnapshot({ root: makeFixture(), now: NOW, vcs: port, project: 'o/r', closed: false });
+  assert.deepEqual(lists, ['open']);
+  assert.deepEqual(s.forgeLoad.value.closed, { state: 'disabled', at: null, reason: '--no-closed was given' });
+  assert.deepEqual(s.closedIssues, { ok: false, reason: '--no-closed was given' });
+});
+
+test('#1257 R1257-7: in the server the closed list is read only when forgeLoad.closed allows it', async () => {
+  const done = { open: { state: 'complete', at: 'a' } };
+  const read = async (closedEntry) => {
+    const { port, lists } = listPort({ open: [openRow(5)], closed: [closedRow(3, { body: 'x' })] });
+    const s = await buildSnapshot({ root: makeFixture(), now: NOW, vcs: port, project: 'o/r', forgeLoad: { ...done, closed: closedEntry } });
+    return { s, closedReads: lists.filter((l) => l === 'closed').length };
+  };
+  const complete = await read({ state: 'complete', at: 'b' });
+  assert.equal(complete.s.closedIssues.ok, true);
+  assert.equal(complete.closedReads, 1);
+  const failedWithData = await read({ state: 'failed', at: 'c', reason: 'rate limited', lastCompleteAt: 'b' });
+  assert.equal(failedWithData.s.closedIssues.ok, true, 'the held list is still shown');
+  const failedNoData = await read({ state: 'failed', at: 'c', reason: 'boom', lastCompleteAt: null });
+  assert.deepEqual(failedNoData.s.closedIssues, { ok: false, reason: 'the closed-issue list could not be read: boom' });
+  assert.equal(failedNoData.closedReads, 0);
+  const disabled = await read({ state: 'disabled', at: null, reason: 'no closed-issue lane is configured' });
+  assert.deepEqual(disabled.s.closedIssues, { ok: false, reason: 'no closed-issue lane is configured' });
+  const pendingClosed = await read({ state: 'pending', at: null });
+  assert.deepEqual(pendingClosed.s.closedIssues, { ok: false, pending: true, reason: 'loading closed issues from the forge…' });
+  assert.equal(pendingClosed.s.graph.ok, true, 'the open lane is complete, so the graph is real');
 });
