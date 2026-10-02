@@ -26,6 +26,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { buildSnapshot } from '../status/snapshot.mjs';
+import { REMOTE_FOLLOWUP_MS, REMOTE_READ_BUDGET } from '../status/remote-changes.mjs';
 import { createForgeCache } from './forge-cache.mjs';
 import { diffSections } from './diff.mjs';
 import { createWatcher, resolveGitCommonDir } from './watcher.mjs';
@@ -80,6 +81,7 @@ const noForgeVcs = {
  *   forgeSource?: object|null, forgeUnavailable?: string|null, interval?: number, poll?: boolean,
  *   gitCommonDir?: string|null, _watch?: Function, _run?: Function, _readdir?: Function,
  *   _setTimeout?: Function, _clearTimeout?: Function, _recomputeCurrent?: () => Promise<object>,
+ *   remoteBudget?: number, _snapshotRun?: Function,
  * }} opts
  */
 export function createUiServer({
@@ -87,7 +89,7 @@ export function createUiServer({
   forgeSource = null, forgeUnavailable = null, interval = 60000, poll = true,
   gitCommonDir = null, _watch, _run, _readdir,
   _setTimeout = setTimeout, _clearTimeout = clearTimeout,
-  _recomputeCurrent = null, onServerError = null} = {}) {
+  _recomputeCurrent = null, onServerError = null, remoteBudget = REMOTE_READ_BUDGET, _snapshotRun } = {}) {
   // `opts.maxBuffer` is the only option a caller may pass (#1198): a document read sizes its own buffer.
   const run = _run ?? gitRun(root);
 
@@ -182,15 +184,28 @@ export function createUiServer({
   // sections here says the real reason in band without `buildSnapshot`
   // ever seeing a live port (D1 is unchanged: no forge call happens either
   // way).
+  // D36: the memo of immutable-object reads the remote section may use. It lives
+  // here, never in the snapshot, so the CLI stays cold and deterministic.
+  const remoteCache = new Map();
   const computeSnapshot = _recomputeCurrent ?? (async () => {
-    const snapshot = await buildSnapshot({ root, now: _now(), vcs: forgeVcs, project });
+    const snapshot = await buildSnapshot({ root, now: _now(), vcs: forgeVcs, project, _remoteCache: remoteCache, remoteBudget, ...(_snapshotRun ? { _run: _snapshotRun } : {}) });
     if (!forgeUnavailable) return snapshot;
     const unreachable = { ok: false, reason: forgeUnavailable };
     return { ...snapshot, graph: unreachable, prs: unreachable, reviews: unreachable };
   });
 
+  // D36: while the remote section left branches `deferred` (over the per-build
+  // read budget), ONE follow-up recompute is armed; each build re-arms it only if
+  // something is still deferred, so the chain ends by itself at 0 and never stacks.
+  let followUp = null;
+  function armRemoteFollowUp() {
+    if (followUp !== null || !(current?.remoteChanges?.value?.deferred > 0)) return;
+    followUp = _setTimeout(() => { followUp = null; return recomputeAndBroadcast({ causes: ['remote'] }); }, REMOTE_FOLLOWUP_MS);
+  }
+
   async function recomputeCurrent() {
     current = await computeSnapshot();
+    armRemoteFollowUp();
     return current;
   }
 
@@ -371,6 +386,7 @@ export function createUiServer({
       });
     },
     close() {
+      if (followUp !== null) { _clearTimeout(followUp); followUp = null; }
       poller.close();
       watcher.close();
       for (const client of clients) { try { client.end(); } catch { /* best effort */ } }
