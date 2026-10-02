@@ -134,12 +134,53 @@ test('#879: changes read tasks, slice scopes and missing artefacts; an absent ta
   assert.deepEqual(a.sliceScopes, { ok: true, value: [{ slice: 1, claims: ['R1-1'], terminal_pr: 'this PR -> main' }] });
   assert.deepEqual(a.missing, { ok: true, value: [] });
   assert.equal(b.tasks.checked.ok, false);
-  assert.match(b.tasks.checked.reason, /issue-2-no-tasks\/tasks\.md could not be read/);
+  assert.match(b.tasks.checked.reason, /issue-2-no-tasks\/tasks\.md does not exist/);
   assert.deepEqual(b.missing.value, [], 'at lite only spec.md is required, and it is there');
   assert.deepEqual(readChanges({ root, tier: 'standard' }).value.filter((x) => !x.archived)[1].missing.value, ['proposal.md', 'design.md', 'tasks.md'], 'the tier decides the required set');
   assert.equal(readChanges({ root: '/nowhere', tier: 'lite' }).ok, false);
   const unresolved = readChanges({ root, tier: null });
   assert.equal(unresolved.value.filter((x) => !x.archived)[0].missing.ok, false, 'no tier → the required set cannot be resolved, and that is said');
+});
+
+// ── #1199 R1199-2: progress, with three distinct reasons ────────────────────
+
+/** One active change dir whose tasks.md is whatever the seams say. */
+function progressRow({ exists, read }) {
+  const dir = 'openspec/changes/issue-5-p';
+  const c = readChanges({
+    root: '/fake',
+    tier: 'lite',
+    _list: (p) => { if (p === 'openspec/changes') return ['issue-5-p']; throw new Error(`ENOENT: ${p}`); },
+    _exists: (p) => (p === `${dir}/tasks.md` ? exists : false),
+    _read: (p) => { if (p === `${dir}/tasks.md`) return read(); throw new Error(`ENOENT: ${p}`); },
+  });
+  return c.value[0];
+}
+
+test('#1199 R1199-2: progress is done/total from the same read as tasks, 3 of 5', () => {
+  const row = progressRow({ exists: true, read: () => '- [x] a\n- [ ] b\n  - [X] c\n- [ ] d\n- [x] e' });
+  assert.deepEqual(row.progress, { ok: true, value: { done: 3, total: 5 } });
+  assert.equal(row.tasks.checked.value, row.progress.value.done);
+  assert.equal(row.tasks.open.value, 2);
+});
+
+test('#1199 R1199-2: a missing tasks.md, an unreadable one and one with no items are three codes with three reasons', () => {
+  const missing = progressRow({ exists: false, read: () => { throw new Error('must not be read'); } });
+  const unreadable = progressRow({ exists: true, read: () => { throw new Error('EACCES: permission denied'); } });
+  const none = progressRow({ exists: true, read: () => '# Tasks\nprose' });
+  assert.deepEqual([missing.progress.code, unreadable.progress.code, none.progress.code], ['missing', 'unreadable', 'no-items']);
+  for (const r of [missing, unreadable, none]) assert.equal(r.progress.ok, false);
+  assert.match(unreadable.progress.reason, /issue-5-p\/tasks\.md/);
+  assert.match(unreadable.progress.reason, /EACCES/);
+  assert.equal(new Set([missing.progress.reason, unreadable.progress.reason, none.progress.reason]).size, 3);
+  assert.equal(missing.tasks.checked.reason, missing.progress.reason, 'the tasks field says the same reason');
+  assert.equal(unreadable.tasks.checked.reason, unreadable.progress.reason);
+});
+
+test('#1199 R1199-2: an archived row carries progress too', () => {
+  const root = makeFixture();
+  const nine = readChanges({ root, tier: 'lite' }).value.find((x) => x.archived);
+  assert.deepEqual(nine.progress, { ok: true, value: { done: 2, total: 2 } });
 });
 
 // ── R998-4: the archive reader ──────────────────────────────────────────────

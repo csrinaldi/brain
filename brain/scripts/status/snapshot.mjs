@@ -32,6 +32,7 @@ import { join } from 'node:path';
 
 import { field, pending, uncomputable } from './report.mjs';
 import { deriveTasks } from './derive.mjs';
+import { countTasks } from '../lib/tasks-list.mjs';
 import { buildGraph } from './epic-graph.mjs';
 import { gatherReleaseFacts, releaseDebt } from './release-debt.mjs';
 import { gatherHistoryFacts } from './history.mjs';
@@ -232,9 +233,25 @@ function readArtefactPresence(dir, missingId, { exists, list }) {
 
 /** One change dir's row, active or archived (R998-4) — same shape either way. `missingId` is the identifier `missingRequiredArtifacts`/`isGrandfathered` resolve a path from; for an archived row it is a synthetic `archive/<name>`, which `changeDir()` templates into the exact `openspec/changes/archive/<name>` location (no second path-building rule needed). */
 function readOneChange({ id, missingId, dir, issue, slug, archived, artefacts, read, list, exists }) {
+  // One read feeds `tasks` and `progress` (#1199 D51). `exists` decides `missing` before any
+  // read, so an absent file and a throwing read never share a sentence.
+  const tasksPath = `${dir}/tasks.md`;
   let tasksText = null;
-  try { tasksText = read(`${dir}/tasks.md`); } catch { tasksText = null; }
-  const tasks = deriveTasks({ tasksText, reason: `${dir}/tasks.md could not be read` });
+  let progress;
+  let reason;
+  if (!exists(tasksPath)) {
+    reason = `${tasksPath} does not exist`;
+    progress = { ok: false, code: 'missing', reason };
+  } else {
+    try {
+      tasksText = read(tasksPath);
+      progress = countTasks(tasksText);
+    } catch (err) {
+      reason = `${tasksPath} could not be read: ${errMessage(err)}`;
+      progress = { ok: false, code: 'unreadable', reason };
+    }
+  }
+  const tasks = deriveTasks({ tasksText, reason });
   const scopes = parseSliceScopes(tasksText ?? '');
   return {
     id, issue, slug, dir, archived,
@@ -244,6 +261,7 @@ function readOneChange({ id, missingId, dir, issue, slug, archived, artefacts, r
       : uncomputable(`the required artefact set could not be resolved: ${artefacts.reason}`),
     artefacts: readArtefactPresence(dir, missingId, { exists, list }),
     tasks: Object.fromEntries(tasks.fields),
+    progress,
     sliceScopes: scopes.refusal ? uncomputable(scopes.refusal) : field(scopes.scopes),
   };
 }
