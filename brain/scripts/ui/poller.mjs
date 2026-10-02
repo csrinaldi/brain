@@ -278,6 +278,17 @@ export function createPoller({
 
   let closed = false;
 
+  // #1243 D44: the ONLY writer of a live handle. Clearing before setting makes
+  // "at most one armed handle" a property of this function, whatever order
+  // start/pause/resume/once and an in-flight tick's re-arm happen in.
+  function disarm() { if (timer !== null) { _clearTimeout(timer); timer = null; } }
+  function arm(fn, ms) {
+    disarm();
+    if (closed) return false;
+    timer = _setTimeout(() => { timer = null; return fn(); }, ms);
+    return true;
+  }
+
   /** The timer runs unless the USER paused; a halted forge alone keeps it only when there is a remotes lane to feed. */
   function tickWanted() { return !userPaused && (!forgeHalted || fetchRemotes !== null); }
 
@@ -289,12 +300,10 @@ export function createPoller({
     // down, leaking a handle that keeps the process alive (measured: a
     // `node --test` run that passes every assertion but never exits).
     if (closed || !tickWanted() || interval <= 0) { nextAttemptAt = null; return; }
-    nextAttemptAt = new Date(_now().getTime() + interval).toISOString();
-    timer = _setTimeout(runTick, interval);
+    if (arm(runTick, interval)) nextAttemptAt = new Date(_now().getTime() + interval).toISOString();
   }
 
   function runTick() {
-    timer = null;
     tickRunning = true;
     inFlight = tick().finally(() => {
       tickRunning = false;
@@ -310,10 +319,10 @@ export function createPoller({
     // The countdown goes with the timer, as it does in `pause()`: after
     // `close()` no tick will ever fire, so a surviving `nextAttemptAt` would
     // report a poll that is never coming (#1015 cold review).
-    close() { closed = true; if (timer) { _clearTimeout(timer); timer = null; } nextAttemptAt = null; },
+    close() { closed = true; disarm(); nextAttemptAt = null; },
     pause() {
       userPaused = true;
-      if (timer) { _clearTimeout(timer); timer = null; }
+      disarm();
       nextAttemptAt = null;
       return state();
     },
@@ -331,7 +340,7 @@ export function createPoller({
       const nowMs = _now().getTime();
       if (nowMs - lastOnceAt < ONCE_COLLAPSE_MS) return state();
       lastOnceAt = nowMs;
-      if (timer) { _clearTimeout(timer); timer = null; }
+      disarm();
       await runTick();
       return state();
     },

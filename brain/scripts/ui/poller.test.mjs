@@ -867,3 +867,77 @@ test('#1201 R1201-9: a fetch that rejects after its tick ended lands in remotes.
     process.off('unhandledRejection', onUnhandled);
   }
 });
+
+// ── #1243 R1243-1/2: the poller holds at most one armed handle ───────────────
+
+/** A forge whose `issueList` is held until `release()`, so a tick can be paused mid-flight. */
+function gatedVcs() {
+  const gate = { release: null };
+  const vcs = makeVcs({ callLog: [] });
+  vcs.issueList = () => new Promise((resolve) => {
+    gate.release = () => resolve([{ number: 1, title: 't', labels: [], assignees: [] }]);
+  });
+  return { vcs, gate };
+}
+
+function gatedPoller(extra = {}) {
+  const scheduler = fakeScheduler();
+  const { vcs, gate } = gatedVcs();
+  const poller = createPoller({
+    vcs, cache: createForgeCache(), project: 'o/r', interval: 60000,
+    _setTimeout: scheduler.setTimeout, _clearTimeout: scheduler.clearTimeout, _now: () => new Date(0), ...extra,
+  });
+  return { poller, scheduler, gate };
+}
+
+test('#1243 R1243-1: a forge-halted poller with a remotes lane holds ONE handle after start, resume, resume', async () => {
+  const spy = fetchSpy();
+  const scheduler = fakeScheduler();
+  const poller = createPoller({
+    vcs: makeVcs({ callLog: [] }), cache: createForgeCache(), project: 'o/r', interval: 60000, fetchRemotes: spy.fn,
+    initialError: 'no VCS token', _setTimeout: scheduler.setTimeout, _clearTimeout: scheduler.clearTimeout, _now: () => new Date(0),
+  });
+  const t = poller.start();
+  poller.resume();
+  poller.resume();
+  await t;
+  assert.equal(scheduler.pending(), 1, 'one chain, whatever the order of start and resume');
+  poller.close();
+  assert.equal(scheduler.pending(), 0, 'close() stops every chain the poller started');
+});
+
+test('#1243 R1243-1: pause during an in-flight tick, then resume before it settles, leaves ONE handle', async () => {
+  const { poller, scheduler, gate } = gatedPoller();
+  const t = poller.start();
+  poller.pause();
+  poller.resume();
+  gate.release();
+  await t;
+  assert.equal(scheduler.pending(), 1);
+  poller.pause();
+  assert.equal(scheduler.pending(), 0, 'pause clears the only chain');
+  poller.close();
+});
+
+test('#1243 R1243-1: a tick that settles while the user has paused arms nothing', async () => {
+  const { poller, scheduler, gate } = gatedPoller();
+  const t = poller.start();
+  poller.pause();
+  gate.release();
+  await t;
+  assert.equal(scheduler.pending(), 0);
+  assert.equal(poller.state().nextAttemptAt, null);
+  poller.close();
+});
+
+test('#1243 R1243-2: close() after pause-resume with a tick in flight arms nothing when the tick settles', async () => {
+  const { poller, scheduler, gate } = gatedPoller();
+  const t = poller.start();
+  poller.pause();
+  poller.resume();
+  poller.close();
+  gate.release();
+  await t;
+  assert.equal(scheduler.pending(), 0);
+  assert.equal(poller.state().nextAttemptAt, null);
+});
