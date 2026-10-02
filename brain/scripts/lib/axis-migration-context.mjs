@@ -7,19 +7,30 @@
 // the SOURCE of the winner, because the upgrade prints it: a per-machine `.env` value becomes the
 // team's tracked default, and the reviewer of that commit must be able to see it.
 //
-// It mirrors `resolvePlatform` / `resolveEngine` exactly (same `??` semantics, an empty value
-// stops the level and falls to the harness step), and axis-migration-context.test.mjs holds the
-// two to a parity table. READ-ONLY: `.env` is read through the one reader and never edited, and
-// no value other than the two axis selectors is ever returned.
+// Since #1114 S2 the chain is `resolveAxis`'s own (no second precedence here); this module adds only what the
+// migration alone needs: today's default for an axis nothing declares, and the SOURCE label. READ-ONLY: `.env`
+// is read through the one reader and never edited, and no value other than the two axis selectors is ever returned.
 
-import { resolveEnv } from './env-read.mjs';
-import { AGENT_PLATFORMS, SDD_ENGINES, readAxis, legacyHarness } from './axis-config.mjs';
+import { readDotenv } from './env-read.mjs';
+import { tryResolveAxis } from './axis-config.mjs';
 import { LIFECYCLE_STAGES } from './sdd-layout.mjs';
-import { DEFAULT_PLATFORM, DEFAULT_ENGINE } from '../harness/platform.mjs';
 
-const where = (res, key) => (res.source === 'shell' ? `process env ${key}` : `.env ${key}`);
+// What an EXISTING consumer ran before #1114 S2, when the resolvers defaulted in code (ADR-0024 Amendment 2 and
+// `harness/cli.mjs`). The migration writes it into tracked config for a consumer that stated nothing, so no behaviour
+// changes (ADR-0038 section 7). The resolvers hold NO default any more: this is the migration's own record.
+const DEFAULT_PLATFORM = 'claude';
+const DEFAULT_ENGINE = 'gentle-ai';
+
 const perMachine = (source) => /^(process env|\.env)/.test(source);
-const stated = (res) => res.value !== null && res.value !== undefined;
+
+/** The human label of where `resolveAxis` found a value: the file/key an upgrade prints next to it. */
+function label(axis, r) {
+  if (r.where === 'process-env') return `process env ${r.key}`;
+  if (r.where === 'dotenv') return `.env ${r.key}`;
+  if (r.source === 'legacy-harness') return 'brain.config.json harness';
+  if (r.source === 'legacy-config') return `brain.config.json ${axis === 'sdd' ? 'engine' : axis}`;
+  return `brain.config.json ${axis}.default`;
+}
 
 function effective(args) {
   const { envSources } = args;
@@ -35,30 +46,21 @@ function effective(args) {
   return resolveEffective(args);
 }
 
-function resolveEffective({ axis, selectorKey, members, fallback, config, env, root, envSources }) {
-  // 1. process env, then .env — a stated-but-empty value stops this level (the resolvers use `??`).
-  // `envSources: false` skips BOTH (and the SDD_HARNESS read in step 3): nothing per-machine is consulted.
-  const NOT_STATED = { value: undefined, source: null };
-  const selector = envSources ? resolveEnv(selectorKey, { env, root }) : NOT_STATED;
-  if (stated(selector)) {
-    if (selector.value) return { value: selector.value, source: where(selector, selectorKey) };
-  } else {
-    // 2. the config's own key: the flat legacy key (the shape is read too; a shaped axis is not migrated).
-    const fromConfig = readAxis(config, axis, { harness: false });
-    if (fromConfig.default) {
-      const key = fromConfig.source === 'shape' ? `${axis}.default` : axis === 'sdd' ? 'engine' : axis;
-      return { value: fromConfig.default, source: `brain.config.json ${key}` };
-    }
+// The ONE resolver answers (`resolveAxis`); this adds only the migration's own question: what to write when it says
+// "undeclared" (today's default, which is what ran before S2) or refuses a value (never copied into tracked config).
+// `envSources: false` hands it neither the process env nor `.env`.
+function resolveEffective({ axis, fallback, config, env, root, envSources }) {
+  const r = tryResolveAxis(axis, {
+    env: envSources ? env : {},
+    dotenv: envSources ? readDotenv(root) : {},
+    config,
+    notice: () => {},
+  });
+  if (r.ok) return { value: r.value, source: label(axis, r) };
+  if (r.refusal.code === 'invalid-value') {
+    const where = r.refusal.where === 'process-env' ? 'process env' : r.refusal.where === 'dotenv' ? '.env' : 'brain.config.json';
+    return { value: '', source: `${where} ${axis} value refused (not a ${axis} brain ships; left undeclared)`, undeclared: true };
   }
-  // 3. the legacy harness, only when it names a member of THIS axis.
-  const harness = envSources ? resolveEnv('SDD_HARNESS', { env, root }) : NOT_STATED;
-  if (stated(harness)) {
-    if (harness.value && members.includes(harness.value)) return { value: harness.value, source: where(harness, 'SDD_HARNESS') };
-  } else {
-    const fromConfig = legacyHarness(config);
-    if (fromConfig && members.includes(fromConfig)) return { value: fromConfig, source: 'brain.config.json harness' };
-  }
-  // 4. today's code default.
   return { value: fallback, source: "today's default" };
 }
 
@@ -72,8 +74,8 @@ function resolveEffective({ axis, selectorKey, members, fallback, config, env, r
  */
 export function resolveAxisMigrationContext({ config = {}, env = process.env, root = process.cwd(), envSources = true } = {}) {
   return {
-    platform: effective({ axis: 'platform', selectorKey: 'AGENT_PLATFORM', members: AGENT_PLATFORMS, fallback: DEFAULT_PLATFORM, config, env, root, envSources }),
-    sdd: effective({ axis: 'sdd', selectorKey: 'SDD_ENGINE', members: SDD_ENGINES, fallback: DEFAULT_ENGINE, config, env, root, envSources }),
+    platform: effective({ axis: 'platform', fallback: DEFAULT_PLATFORM, config, env, root, envSources }),
+    sdd: effective({ axis: 'sdd', fallback: DEFAULT_ENGINE, config, env, root, envSources }),
     lifecycleStages: [...LIFECYCLE_STAGES],
   };
 }

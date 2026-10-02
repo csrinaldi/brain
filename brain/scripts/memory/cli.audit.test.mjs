@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 
 import { testTmp } from '../lib/test-tmp.mjs';
 
-const CLI = join(dirname(fileURLToPath(import.meta.url)), 'cli.mjs');
+const CLI = join(dirname(fileURLToPath(import.meta.url)), 'cli.mjs'); const MEMORY_TEST_CONFIG = join(dirname(CLI), '__fixtures__', 'brain.config.memory.json');
 
 function git(root, ...args) {
   const r = spawnSync('git', args, { cwd: root, encoding: 'utf8', env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' } });
@@ -38,7 +38,7 @@ function fixtureRepo({ withRecords = true } = {}) {
 function runCli(root, ...args) {
   return spawnSync(process.execPath, [CLI, 'audit', ...args], {
     encoding: 'utf8',
-    env: { ...process.env, BRAIN_MEMORY_TEST_ROOT: root, MEMORY_BACKEND: 'plainfiles' },
+    env: { ...process.env, BRAIN_MEMORY_TEST_ROOT: root, MEMORY_BACKEND: 'plainfiles', BRAIN_MEMORY_CONFIG_FILE: MEMORY_TEST_CONFIG },
   });
 }
 

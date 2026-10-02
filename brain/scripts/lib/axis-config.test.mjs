@@ -6,7 +6,7 @@ import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { readAxis, validateAxisConfig, PLATFORM_CAPABILITIES, AGENT_PLATFORMS, SDD_ENGINES } from './axis-config.mjs';
+import { readAxis, validateAxisConfig, resolveAxis, AxisRefusal, PLATFORM_CAPABILITIES, AGENT_PLATFORMS, SDD_ENGINES } from './axis-config.mjs';
 import { resolvePlatform } from '../harness/platform.mjs';
 import { resolveEngine, resolveHarness } from '../harness/cli.mjs';
 import { resolveProviderName } from '../vcs/cli.mjs';
@@ -173,48 +173,56 @@ test('validateAxisConfig: never throws on hostile input', () => {
   assert.equal(validateAxisConfig({ platform: { providers: 3 } }).ok, false);
 });
 
-// ── parity: every migrated reader, legacy config vs new-shape config ───────
+// ── parity: every resolver is a thin caller of resolveAxis (#1114 S2) ────────
+// Legacy config vs new-shape config resolve identically; where S2 removed a code default the answer is a REFUSAL.
+const refuses = (fn, code) => assert.throws(fn, (e) => e instanceof AxisRefusal && e.code === code, `expected a ${code} refusal`);
+
 test('parity: resolveProviderName (env and runtime provider keep their precedence)', () => {
   assert.equal(resolveProviderName({ config: { vcs: { provider: 'github' } }, env: {} }), 'github');
   assert.equal(resolveProviderName({ config: { vcs: shape('github') }, env: {} }), 'github');
-  assert.equal(resolveProviderName({ config: { vcs: shape('github') }, env: { VCS_PROVIDER: 'gitlab' } }), 'gitlab');
-  assert.equal(resolveProviderName({ config: { vcs: shape('github') }, env: { VCS_PROVIDER: 'gitlab' }, provider: 'github' }), 'github');
-  assert.throws(() => resolveProviderName({ config: { vcs: { provider: '' } }, env: {} }), /no provider configured/);
-  assert.throws(() => resolveProviderName({ config: { vcs: shape('') }, env: {} }), /no provider configured/);
-  assert.throws(() => resolveProviderName({ config: {}, env: {} }), /no provider configured/);
+  const both = { vcs: { default: 'github', providers: { github: {}, gitlab: {} } } };
+  assert.equal(resolveProviderName({ config: both, env: { VCS_PROVIDER: 'gitlab' } }), 'gitlab');
+  assert.equal(resolveProviderName({ config: both, env: { VCS_PROVIDER: 'gitlab' }, provider: 'github' }), 'github');
+  assert.equal(resolveProviderName({ config: {}, env: {}, provider: 'gitlab' }), 'gitlab', 'a runtime provider needs no vcs.providers entry');
+  refuses(() => resolveProviderName({ config: { vcs: { provider: '' } }, env: {} }), 'undeclared');
+  refuses(() => resolveProviderName({ config: { vcs: shape('') }, env: {} }), 'undeclared');
+  refuses(() => resolveProviderName({ config: {}, env: {} }), 'undeclared');
 });
 
-test('parity: resolvePlatform (precedence and the claude default are unchanged)', () => {
+test('parity: resolvePlatform (precedence is unchanged; the claude default is GONE)', () => {
+  const quiet = { notice: () => {} };
   const cases = [
     [{ platform: 'antigravity' }, {}, 'antigravity'],
     [{ platform: shape('antigravity') }, {}, 'antigravity'],
-    [{ platform: shape('antigravity') }, { AGENT_PLATFORM: 'plain' }, 'plain'],
+    [{ platform: { default: 'antigravity', providers: { antigravity: {}, plain: {} } } }, { AGENT_PLATFORM: 'plain' }, 'plain'],
     [{ harness: 'plain' }, {}, 'plain'],
     [{ harness: 'plain' }, { SDD_HARNESS: 'antigravity' }, 'antigravity'],
     [{ platform: 'claude', harness: 'plain' }, {}, 'claude'],
-    [{ harness: 'gentle-ai' }, {}, 'claude'],
-    [{}, {}, 'claude'],
   ];
+  for (const [config, env, want] of cases) assert.equal(resolveAxis('platform', { env, config, ...quiet }).value, want, JSON.stringify([config, env]));
   for (const [config, env, want] of cases) assert.equal(resolvePlatform({ env, envVars: {}, config }), want, JSON.stringify([config, env]));
-  assert.equal(resolvePlatform({ env: {}, envVars: { AGENT_PLATFORM: 'plain' }, config: { platform: shape('antigravity') } }), 'plain');
+  assert.equal(resolvePlatform({ env: {}, envVars: { AGENT_PLATFORM: 'plain' }, config: { platform: { default: 'antigravity', providers: { antigravity: {}, plain: {} } } } }), 'plain');
+  // the old code default: nothing declared, or only an engine-only harness, is now a refusal
+  refuses(() => resolvePlatform({ env: {}, envVars: {}, config: { harness: 'gentle-ai' } }), 'undeclared');
+  refuses(() => resolvePlatform({ env: {}, envVars: {}, config: {} }), 'undeclared');
 });
 
-test('parity: resolveEngine and resolveHarness', () => {
+test('parity: resolveEngine and resolveHarness (the gentle-ai default is GONE)', () => {
   const cases = [
     [{ engine: 'plain' }, {}, 'plain'],
     [{ sdd: shape('plain') }, {}, 'plain'],
-    [{ sdd: shape('plain') }, { SDD_ENGINE: 'gentle-ai' }, 'gentle-ai'],
+    [{ sdd: { default: 'plain', providers: { plain: {}, 'gentle-ai': {} } } }, { SDD_ENGINE: 'gentle-ai' }, 'gentle-ai'],
     [{ harness: 'plain' }, {}, 'plain'],
     [{ harness: 'plain' }, { SDD_HARNESS: 'gentle-ai' }, 'gentle-ai'],
     [{ engine: 'gentle-ai', harness: 'plain' }, {}, 'gentle-ai'],
-    [{ harness: 'antigravity' }, {}, 'gentle-ai'],
-    [{ sdd: { map: {} } }, {}, 'gentle-ai'],
-    [{}, {}, 'gentle-ai'],
   ];
   for (const [config, env, want] of cases) assert.equal(resolveEngine({ env, envVars: {}, config }), want, JSON.stringify([config, env]));
-  assert.equal(resolveHarness({ env: {}, envVars: {}, config: { harness: 'antigravity' } }), 'antigravity');
   assert.equal(resolveHarness({ env: {}, envVars: {}, config: { sdd: shape('plain') } }), 'plain');
-  assert.equal(resolveHarness({ env: {}, envVars: {}, config: {} }), 'gentle-ai');
+  assert.equal(resolveHarness({ env: {}, envVars: {}, config: { harness: 'plain' } }), 'plain');
+  for (const config of [{ harness: 'antigravity' }, { sdd: { map: {} } }, {}]) {
+    refuses(() => resolveEngine({ env: {}, envVars: {}, config }), 'undeclared');
+    refuses(() => resolveHarness({ env: {}, envVars: {}, config }), 'undeclared');
+  }
 });
 
 test('parity: resolveMemoryBackend (config level only; env keeps its precedence; undeclared stays a refusal)', () => {
@@ -231,7 +239,8 @@ test('parity: resolveMemoryBackend (config level only; env keeps its precedence;
       assert.equal(r.backend, 'plainfiles');
       assert.equal(r.source, 'config');
     }
-    assert.equal(run({ memory: shape('plainfiles') }, { MEMORY_BACKEND: 'engram' }).backend, 'engram');
+    assert.equal(run({ memory: { default: 'plainfiles', providers: { plainfiles: {}, engram: {} } } }, { MEMORY_BACKEND: 'engram' }).backend, 'engram');
+    assert.equal(run({ memory: shape('plainfiles') }, { MEMORY_BACKEND: 'engram' }).status, 'invalid', 'an unlisted per-machine value is refused, not coerced');
     assert.equal(run({ memory: { backend: '' } }).status, 'undeclared');
     assert.equal(run({ memory: shape('') }).status, 'undeclared');
     assert.equal(run({}).status, 'undeclared');

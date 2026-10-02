@@ -12,11 +12,12 @@
 // This slice changes no behaviour: the resolvers keep their own precedence and
 // defaults and only ask HERE for "what does the config say".
 //
-// Where a value is NOT enforced here: undeclared (`default: ''`) is a result, not
-// an error. Refusing it is S2's job (`resolveAxis`), so `validateAxisConfig` is
-// not wired into any runtime path yet.
+// `readAxis` reports undeclared (`default: ''`) as a result. REFUSING it is `resolveAxis`
+// (#1114 S2, ADR-0038 sections 2-3), below: the ONE resolver of every axis, which also runs
+// `validateAxisConfig` and refuses an invalid config with its errors.
 
 import en from '../i18n/en.mjs';
+import { resolveAxisSelector } from './axis-selector.mjs';
 
 /**
  * Closed memberships. They live HERE (re-exported by `harness/platform.mjs`, which
@@ -27,6 +28,9 @@ import en from '../i18n/en.mjs';
  */
 export const SDD_ENGINES = Object.freeze(['gentle-ai', 'plain']);
 export const AGENT_PLATFORMS = Object.freeze(['claude', 'antigravity', 'plain']);
+/** The memory backends and VCS providers brain ships an adapter for (re-exported by `memory/lib/backend-resolve.mjs`). */
+export const MEMORY_BACKENDS = Object.freeze(['engram', 'plainfiles']);
+export const VCS_PROVIDERS = Object.freeze(['github', 'gitlab']);
 
 export const AXES = Object.freeze(['vcs', 'memory', 'platform', 'sdd']);
 
@@ -176,17 +180,165 @@ export function validateAxisConfig(config) {
   return { ok: errors.length === 0, errors };
 }
 
+// ── resolveAxis (#1114 S2, ADR-0038 sections 2, 3 and 7) ─────────────────────
+// ONE resolver for every axis. It replaces resolvePlatform, resolveEngine, resolveHarness, resolveMemoryBackend's
+// own precedence, resolveProviderName and platformConfig, which are thin callers of it now.
+//
+//   memory, platform, sdd : process env > .env > <axis>.default > legacy alias > UNDECLARED
+//   vcs                   : process env > vcs.default > legacy vcs.provider > UNDECLARED   (no .env level)
+//   a RUNTIME-detected VCS provider (CI) sits OUTSIDE that: it wins when present.
+//
+// The legacy alias is READ-ONLY and lasts one minor version (ADR-0038 section 7): the old config key
+// (`memory.backend`, `vcs.provider`, flat `platform`/`engine`) and, for platform and sdd, the legacy
+// `SDD_HARNESS` / `config.harness`, which feeds an axis only when it names a member of THAT axis. A use of the
+// legacy harness is reported through `notice`, never silent.
+
+/** The per-axis closed membership: the providers brain ships an adapter for. */
+export const AXIS_MEMBERS = Object.freeze({
+  vcs: VCS_PROVIDERS,
+  memory: MEMORY_BACKENDS,
+  platform: AGENT_PLATFORMS,
+  sdd: SDD_ENGINES,
+});
+
+/** The per-machine selector key of each axis. */
+export const AXIS_ENV_KEY = Object.freeze({ vcs: 'VCS_PROVIDER', memory: 'MEMORY_BACKEND', platform: 'AGENT_PLATFORM', sdd: 'SDD_ENGINE' });
+
+/** The legacy key that names an axis member (platform and sdd only). */
+export const LEGACY_HARNESS_KEY = 'SDD_HARNESS';
+
+const LEVELS = Object.freeze({
+  vcs: 'the process env (VCS_PROVIDER) or brain.config.json vcs.default',
+  memory: 'the process env (MEMORY_BACKEND), .env, or brain.config.json memory.default',
+  platform: 'the process env (AGENT_PLATFORM), .env, or brain.config.json platform.default',
+  sdd: 'the process env (SDD_ENGINE), .env, or brain.config.json sdd.default',
+});
+
+/**
+ * A refusal of `resolveAxis`. `code`: `undeclared` | `invalid-value` | `not-a-provider` | `invalid-config`.
+ * `key` + `params` are the i18n catalog entry, so a CLI re-renders it in the active locale; `message` is English.
+ * A refused per-machine value also carries `where` (its physical place) and the `shadowed` losers beneath it.
+ */
+export class AxisRefusal extends Error {
+  constructor(code, axis, key, params, fix) {
+    super(fill(en[key] ?? key, params));
+    this.name = 'AxisRefusal';
+    this.code = code;
+    this.axis = axis;
+    this.key = key;
+    this.params = params;
+    this.fix = fix;
+  }
+}
+
+const NOTICED = new Set();
+/** The default notice sink: stderr, once per process per message, so a hot resolver does not repeat itself. */
+function defaultNotice(line) {
+  if (NOTICED.has(line)) return;
+  NOTICED.add(line);
+  process.stderr.write(`brain: ${line}\n`);
+}
+
+const WHERE = Object.freeze({ shell: 'process-env', file: 'dotenv', config: 'config' });
+const WHERE_LABEL = Object.freeze({ 'process-env': 'the process env', dotenv: '.env', config: 'brain.config.json', runtime: 'the detected CI provider' });
+
+/**
+ * @param {'vcs'|'memory'|'platform'|'sdd'} axis
+ * @param {{env?: object, dotenv?: object, config?: object, runtimeProvider?: string|null, notice?: (line: string) => void}} [opts]
+ *   `env` is the process env, `dotenv` the PARSED `.env` (no file is read here); VCS never reads `dotenv`.
+ *   `runtimeProvider` is the CI-detected VCS provider; it needs only an adapter brain ships, not a `vcs.providers` entry.
+ * @returns {{value: string, source: 'process-env'|'dotenv'|'config'|'legacy-config'|'legacy-harness'|'runtime',
+ *            where: 'process-env'|'dotenv'|'config'|'runtime', key: string,
+ *            shadowed: Array<{source: 'file'|'config', value: string}>}}
+ *   `where` is the PHYSICAL place the winner was read from (a legacy `SDD_HARNESS` may sit in the process env).
+ * @throws {AxisRefusal} undeclared, a value that is not a provider brain ships or not a key of `<axis>.providers`,
+ *   or an invalid axis config. Never guesses and never coerces.
+ */
+export function resolveAxis(axis, { env = process.env, dotenv = {}, config = {}, runtimeProvider = null, notice = defaultNotice } = {}) {
+  if (!AXES.includes(axis)) throw new TypeError(`resolveAxis: unknown axis '${axis}'`);
+  const cfg = isObj(config) ? config : {};
+  const members = AXIS_MEMBERS[axis];
+  const names = members.join('|');
+  const keyName = AXIS_ENV_KEY[axis];
+
+  const runtime = nonEmpty(runtimeProvider);
+  if (axis === 'vcs' && runtime !== '') {
+    if (!members.includes(runtime)) {
+      throw new AxisRefusal('invalid-value', axis, 'axes.refusal.invalid',
+        { axis, value: runtime, source: WHERE_LABEL.runtime, names }, `npm run brain:config -- set ${axis}.default <${names}>`);
+    }
+    return { value: runtime, source: 'runtime', where: 'runtime', key: 'runtimeProvider', shadowed: [] };
+  }
+
+  const bad = validateAxisConfig(cfg).errors.filter((e) => e.axis === axis);
+  if (bad.length > 0) {
+    const detail = bad.map((e) => e.message).join('; ');
+    throw new AxisRefusal('invalid-config', axis, 'axes.refusal.invalidConfig', { axis, detail },
+      `correct ${bad[0].path || axis} in brain.config.json`);
+  }
+
+  const shape = readAxis(cfg, axis, { harness: false });
+  const sel = resolveAxisSelector({
+    key: keyName,
+    allowed: members,
+    configValue: shape.default,
+    env: isObj(env) ? env : {},
+    dotenv: axis === 'vcs' ? {} : (isObj(dotenv) ? dotenv : {}),
+  });
+
+  if (sel.value !== null) {
+    const where = WHERE[sel.source];
+    const source = where === 'config' && shape.source === 'legacy' ? 'legacy-config' : where;
+    const sourceText = `${WHERE_LABEL[where]}${source === 'legacy-config' ? ' (legacy key)' : ''}`;
+    if (!sel.valid) {
+      throw Object.assign(new AxisRefusal('invalid-value', axis, 'axes.refusal.invalid',
+        { axis, value: sel.value, source: sourceText, names }, `npm run brain:config -- set ${axis}.default <${names}>`),
+      { shadowed: sel.shadowed, where });
+    }
+    // A per-machine value must be a provider the TEAM listed (ADR-0038 section 2); an axis that lists none yet
+    // (a fresh scaffold, a legacy config) has nothing to check it against.
+    const listed = isObj(cfg[axis]?.providers) ? Object.keys(cfg[axis].providers) : [];
+    if (source !== 'legacy-config' && listed.length > 0 && !listed.includes(sel.value)) {
+      throw Object.assign(new AxisRefusal('not-a-provider', axis, 'axes.refusal.notListed',
+        { axis, value: sel.value, source: sourceText, listed: listed.join(', ') },
+        `npm run brain:config -- set ${axis}.providers.${sel.value} '{}'`),
+      { shadowed: sel.shadowed, where });
+    }
+    const shadowed = sel.shadowed.map((x) => ({ ...x }));
+    return { value: sel.value, source, where, key: where === 'config' ? `${axis}.default` : keyName, shadowed };
+  }
+
+  if (axis === 'platform' || axis === 'sdd') {
+    // The legacy harness: the first level that STATES one, and only when it names a member of THIS axis.
+    const procVal = nonEmpty(isObj(env) ? env[LEGACY_HARNESS_KEY] : '');
+    const dotVal = nonEmpty(isObj(dotenv) ? dotenv[LEGACY_HARNESS_KEY] : '');
+    const cfgVal = nonEmpty(legacyHarness(cfg));
+    const hit = procVal !== '' ? ['process-env', procVal] : dotVal !== '' ? ['dotenv', dotVal] : cfgVal !== '' ? ['config', cfgVal] : null;
+    if (hit && members.includes(hit[1])) {
+      const [where, value] = hit;
+      const key = where === 'config' ? 'harness' : LEGACY_HARNESS_KEY;
+      notice(fill(en['axes.notice.legacyHarness'], { key, where: WHERE_LABEL[where], value, axis }));
+      return { value, source: 'legacy-harness', where, key, shadowed: [] };
+    }
+  }
+
+  throw new AxisRefusal('undeclared', axis, 'axes.refusal.undeclared',
+    { axis, levels: LEVELS[axis], names }, `npm run brain:config -- set ${axis}.default <${names}>`);
+}
+
+/** `resolveAxis` that returns the refusal instead of throwing (for readers that report a refusal and carry on). */
+export function tryResolveAxis(axis, opts) {
+  try {
+    return { ok: true, ...resolveAxis(axis, opts) };
+  } catch (e) {
+    if (e instanceof AxisRefusal) return { ok: false, refusal: e };
+    throw e;
+  }
+}
+
 // ── diagnoseAxes (#1114 S3.4) ───────────────────────────────────────────────
 // Findings about the declared axes, for `brain:governance-status` today and `brain:doctor` (#1130) later.
 // PURE and total: it reads what it is handed, spawns nothing, never throws, and a finding is never a failure.
-
-/** The per-machine selector keys of each axis. VCS has NO `.env` level (ADR-0038 section 2): the process env only. */
-const SELECTORS = Object.freeze({
-  vcs: Object.freeze({ keys: ['VCS_PROVIDER'], dotenv: false, members: null }),
-  memory: Object.freeze({ keys: ['MEMORY_BACKEND'], dotenv: true, members: null }),
-  platform: Object.freeze({ keys: ['AGENT_PLATFORM', 'SDD_HARNESS'], dotenv: true, members: AGENT_PLATFORMS }),
-  sdd: Object.freeze({ keys: ['SDD_ENGINE', 'SDD_HARNESS'], dotenv: true, members: SDD_ENGINES }),
-});
 
 const fill = (tpl, params) => String(tpl).replace(/\{(\w+)\}/g, (_, k) => (k in params ? String(params[k]) : `{${k}}`));
 
@@ -223,21 +375,18 @@ export function diagnoseAxes(args) {
     for (const axis of AXES) {
       const declared = readAxis(cfg, axis).default;
 
-      // env-shadows-config: this machine runs something other than the team's declared choice.
-      const sel = SELECTORS[axis];
-      if (declared !== '') {
-        const levels = [['shell', procEnv], ...(sel.dotenv ? [['dotenv', dot]] : [])];
-        for (const [level, source] of levels) {
-          for (const key of sel.keys) {
-            const value = typeof source[key] === 'string' ? source[key].trim() : '';
-            if (value === '' || value === declared) continue;
-            if (sel.members && !sel.members.includes(value)) continue; // the legacy SDD_HARNESS names a member of ONE axis
-            const where = level === 'shell' ? tr('axes.diagnose.where.shell') : '.env';
-            add(axis, 'env-shadows-config', 'warning',
-              tr('axes.diagnose.envShadows', { key, where, value, axis, declared }),
-              tr(level === 'shell' ? 'axes.diagnose.envShadows.fixShell' : 'axes.diagnose.envShadows.fixDotenv', { key, axis, value }));
-          }
-        }
+      // env-shadows-config: this machine runs something other than the team's declared choice. Derived from
+      // `resolveAxis`, never from inequality (#1114 S3.4): it is reported only when a per-machine selector WINS by the
+      // real precedence. A legacy SDD_HARNESS ranks below `<axis>.default`, so it never shadows a declared one.
+      const won = tryResolveAxis(axis, { env: procEnv, dotenv: dot, config: cfg, notice: () => {} });
+      if (declared !== '' && won.ok && (won.source === 'process-env' || won.source === 'dotenv') && won.value !== declared) {
+        const shell = won.source === 'process-env';
+        add(axis, 'env-shadows-config', 'warning',
+          tr('axes.diagnose.envShadows', { key: won.key, where: shell ? tr('axes.diagnose.where.shell') : '.env', value: won.value, axis, declared }),
+          tr(shell ? 'axes.diagnose.envShadows.fixShell' : 'axes.diagnose.envShadows.fixDotenv', { key: won.key, axis, value: won.value }));
+      } else if (!won.ok && (won.refusal.code === 'invalid-value' || won.refusal.code === 'not-a-provider')) {
+        // a selector that WOULD win but is refused is the most visible shadow there is: say so instead of staying silent
+        add(axis, 'selector-refused', 'error', tr(won.refusal.key, won.refusal.params), won.refusal.fix);
       }
 
       // Versions. RANGE semantics (and spawning probes) are #1130's: today an exact-string compare.

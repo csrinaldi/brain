@@ -1171,7 +1171,7 @@ test('S3.4 axesLines: no findings prints one clean line; findings print severity
 test('S3.4 reportGovernanceStatus: an env-shadowed axis is reported in the axes section and NEVER changes the exit path (it resolves)', async () => {
   const logs = await captureLog(() =>
     reportGovernanceStatus({
-      config: { ...baseConfig, vcs: { default: 'github', providers: { github: { version: '2.0.0' } } }, platform: { default: 'claude', providers: { claude: {} } } },
+      config: { ...baseConfig, vcs: { default: 'github', providers: { github: { version: '2.0.0' } } }, platform: { default: 'claude', providers: { claude: {}, antigravity: {} } } },
       env: {},
       dotenv: { AGENT_PLATFORM: 'antigravity', CANARY_KEY: 'leak-canary-123' },
       installed: {},

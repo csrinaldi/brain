@@ -224,21 +224,40 @@ _axis_declare() {
     MISSING_OPTIONAL+=("$1 not declared in brain.config.json (next: npm run brain:config -- set $1.default $2)")
   fi
 }
-# `_axis_resolve <axis> <fallback>` runs the REAL resolver (`config/cli.mjs resolve`, the code the runtime runs:
-# process env, .env, config, legacy SDD_HARNESS/harness, default) and sets _R_RUN (what this run uses), _R_REPO
-# (what the repo states, the process env being per-invocation) and _R_SRC (.env|config|default). The shell composes
-# no precedence of its own: a second resolver is exactly the divergence #1114 retires.
+# `_axis_resolve <axis>` runs the REAL resolver (`config/cli.mjs resolve`, `resolveAxis`, the code the runtime runs:
+# process env, .env, `<axis>.default`, the legacy alias; NO default) and sets _R_RUN (what this run uses), _R_REPO
+# (what the repo states, the process env being per-invocation) and _R_SRC (the repo value's place), _R_RUNSRC (the
+# run value's place), each one of shell|.env|config|none. The shell composes no precedence of its own: a second
+# resolver is exactly the divergence #1114 retires. The place is the resolver's `where`, never inferred by comparing values.
+#   exit 0 -> parsed; exit 3 -> nothing declares the axis (_R_UNDECLARED=1, nothing guessed);
+#   anything else -> the resolver REFUSED a value or failed: reported with its fix, no fallback, _R_REFUSED=1.
+_axis_where() {
+  case "$1" in
+    process-env) printf 'shell' ;;
+    dotenv) printf '.env' ;;
+    config|runtime) printf 'config' ;;
+    *) printf 'none' ;;
+  esac
+}
 _axis_resolve() {
-  _R_RUN=""; _R_REPO=""; _R_SRC=""; _R_RUNSRC=""
-  # swallow-ok: a failed resolve is reported just below and falls back to the default; read returns 1 on EOF
-  read -r _R_RUN _R_REPO _R_SRC < <(node "$BRAIN_SCRIPTS/config/cli.mjs" resolve "$1" 2>/dev/null) || true
-  if [ -z "$_R_RUN" ] || [ -z "$_R_REPO" ] || [ -z "$_R_SRC" ]; then
-    warn "$(printf "$I18N_BOOTSTRAP_AXIS_RESOLVEFAILED" "$1" "$2")"
-    MISSING_OPTIONAL+=("$1 not resolved from brain.config.json; ran with $2 (next: npm run brain:config -- resolve $1)")
-    _R_RUN="$2"; _R_REPO="$2"; _R_SRC="default"
-  fi
-  # Where the value THIS RUN uses comes from (#1114 S3.4): a run value that differs from the repo's is the process env's.
-  if [ "$_R_RUN" != "$_R_REPO" ]; then _R_RUNSRC="shell"; else _R_RUNSRC="$_R_SRC"; fi
+  _R_RUN=""; _R_REPO=""; _R_SRC="none"; _R_RUNSRC="none"; _R_UNDECLARED=0; _R_REFUSED=0
+  local _out _rc=0 _err _w1 _w2
+  _err="$(mktemp)"
+  _out="$(node "$BRAIN_SCRIPTS/config/cli.mjs" resolve "$1" 2>"$_err")" || _rc=$?  # rc is classified just below: 3 is undeclared, anything else is a refusal
+  case "$_rc" in
+    0)
+      read -r _R_RUN _R_REPO _w1 _w2 <<<"$_out"
+      [ "$_R_REPO" != "-" ] || _R_REPO=""
+      _R_RUNSRC="$(_axis_where "$_w1")"; _R_SRC="$(_axis_where "$_w2")"
+      ;;
+    3) _R_UNDECLARED=1 ;;
+    *)
+      _R_REFUSED=1
+      warn "$(printf "$I18N_BOOTSTRAP_AXIS_REFUSED" "$1" "$(head -c 400 "$_err" | tr '\n' ' ')")"
+      MISSING_OPTIONAL+=("$(printf "$I18N_BOOTSTRAP_AXIS_REFUSEDNEXT" "$1" "npm run brain:config -- resolve $1")")
+      ;;
+  esac
+  rm -f "$_err"
 }
 # `_axis_source_label <platform-src> <engine-src>` names, in words, where the run's harness values came from
 # (shell|.env|config|default, as `_axis_resolve` leaves them in _R_RUNSRC), so the success line never claims
@@ -256,11 +275,19 @@ _axis_source_word() {
     *) printf '%s' "$I18N_BOOTSTRAP_AXIS_SOURCE_DEFAULT" ;;
   esac
 }
-# `_axis_settle <axis>`: a value that comes from today's default is declared in config; one that exists only on this
-# machine's .env is reported and never declared; one the config already declares is left exactly as written.
+# `_axis_settle <axis> <new-consumer-default>`: nothing in the repo declares the axis (a new consumer), so env:init
+# DECLARES the starting value in tracked config, visibly (ADR-0038 section 7: "a new consumer: env:init declares each
+# axis's default or asks"). A value that exists only on this machine's .env is reported and never declared; one the
+# config already declares is left exactly as written. A refused axis is never settled: it is reported by `_axis_resolve`.
 _axis_settle() {
+  # swallow-ok: a refused axis was already reported with its fix by _axis_resolve and is never declared over
+  [ "$_R_REFUSED" -eq 0 ] || return 0
   case "$_R_SRC" in
-    default) _axis_declare "$1" "$_R_REPO" ;;
+    none)
+      _axis_declare "$1" "$2"
+      [ -n "$_R_RUN" ] || { _R_RUN="$2"; _R_RUNSRC="config"; }
+      [ -n "$_R_REPO" ] || _R_REPO="$2"
+      ;;
     .env) _axis_env_only "$1" "$_R_REPO" ;;
     *) : ;; # config already declares it: the team's, never rewritten
   esac
@@ -571,36 +598,41 @@ _setup_step actor
 # Runs BEFORE the memory sync so the ecosystem (skills, engram, gga) is
 # ready when memory is imported.
 say "$I18N_BOOTSTRAP_SDD_SECTION"
-# AGENT_PLATFORM and SDD_ENGINE are resolved by the REAL resolvers (`config/cli.mjs resolve`, issue #1114
-# S3.3): resolvePlatform / resolveEngine, so this script composes no precedence of its own (it used to be a
-# second resolver held to the first by a parity table; see bootstrap.default-platform.test.mjs).
+# AGENT_PLATFORM and SDD_ENGINE are resolved by the REAL resolver (`config/cli.mjs resolve`, `resolveAxis`, issue
+# #1114 S2): this script composes no precedence of its own, and there is NO default in code. An axis the resolver
+# REFUSES (an invalid or unlisted value) is reported with its fix and nothing runs on a guess.
 #
 # Two answers, on purpose. The RUN value is what this invocation uses, process env included:
 # `AGENT_PLATFORM=antigravity npm run brain:env:init` (the hint brain:upgrade prints) runs antigravity for that
 # run. The REPO value is what the repo states, and only that is ever declared, through `brain:config`:
-#   - from today's default  -> declared (explicit in tracked config, with its providers entry);
+#   - from nothing         -> declared (a new consumer: explicit in tracked config, with its providers entry);
 #   - from the config       -> left exactly as the team wrote it (a legacy-keyed config counts as declared);
 #   - only from .env        -> NEVER declared: one developer's override must not become the team's tracked
 #                              default through env:init. It is reported with the command that would declare it;
 #                              promoting a per-machine value is brain:upgrade's job, which prints its source
 #                              (ADR-0038 section 7). `.env` is only ever READ here.
-_axis_resolve platform claude
-_axis_settle platform
+_axis_resolve platform
+_axis_settle platform claude
 AGENT_PLATFORM="$_R_RUN"
 _PLATFORM_SRC="$_R_RUNSRC"
-_axis_resolve sdd gentle-ai
-_axis_settle sdd
+_axis_resolve sdd
+_axis_settle sdd gentle-ai
 SDD_ENGINE="$_R_RUN"
 _SDD_SRC="$_R_RUNSRC"
-ok "$(printf "$I18N_BOOTSTRAP_SDD_OK" "$SDD_ENGINE ($AGENT_PLATFORM)" "$(_axis_source_label "$_PLATFORM_SRC" "$_SDD_SRC")")"
-# Exported, not just written to .env (issue #1093): harness/cli.mjs resolves
-# its own repoRoot from ITS OWN module location, which is now WORKTREE_ROOT —
-# a tree that never gets this .env write. Its precedence is already
-# `process.env.X ?? envVars.X ?? config.X`, so exporting here is enough
-# regardless of which .env (if any) that resolution finds.
-export AGENT_PLATFORM SDD_ENGINE
-node "$BRAIN_SCRIPTS/harness/cli.mjs" init \
-  || { warn "$I18N_BOOTSTRAP_SDD_INITFAILED"; REQUIRED_FAILURES+=("SDD harness init failed"); }
+if [ -z "$AGENT_PLATFORM" ] || [ -z "$SDD_ENGINE" ]; then
+  # Refused above, with its fix: nothing is guessed, so harness init has no harness to run.
+  warn "$I18N_BOOTSTRAP_SDD_INITFAILED"
+  REQUIRED_FAILURES+=("SDD harness not resolved (platform and engine must resolve before init)")
+else
+  ok "$(printf "$I18N_BOOTSTRAP_SDD_OK" "$SDD_ENGINE ($AGENT_PLATFORM)" "$(_axis_source_label "$_PLATFORM_SRC" "$_SDD_SRC")")"
+  # Exported, not just written to .env (issue #1093): harness/cli.mjs resolves
+  # its own repoRoot from ITS OWN module location, which is now WORKTREE_ROOT —
+  # a tree that never gets this .env write. Exporting here puts the run's values
+  # at the process-env level of `resolveAxis`, whichever .env (if any) it finds.
+  export AGENT_PLATFORM SDD_ENGINE
+  node "$BRAIN_SCRIPTS/harness/cli.mjs" init \
+    || { warn "$I18N_BOOTSTRAP_SDD_INITFAILED"; REQUIRED_FAILURES+=("SDD harness init failed"); }
+fi
 
 # --- 7. Team memory (replaceable backend, ADR-0003) --------------------------
 # MEMORY_BACKEND (issue #1165): the team's backend is a TEAM decision, so it lives in

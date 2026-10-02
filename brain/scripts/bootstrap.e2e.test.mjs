@@ -84,6 +84,15 @@ test('#1127 e2e (c): plainfiles with an origin but no upstream branch -> exit 0 
 test('#1127 e2e (d): a new worktree branch with no upstream -> exit 0 with the next step', () => {
   const { root, repo } = fixture('d');
   useBackend(repo, 'plainfiles');
+  // A consumer's brain.config.json is TRACKED, so every worktree has it. Without one, env:init scaffolds it into the
+  // worktree (where its code lives) while `brain:config` reads the main tree's: two trees, one of them config-less.
+  // The axes are declared here, as a real consumer's are (#1114 S2: nothing is resolved from a code default any more).
+  writeFileSync(join(repo, 'brain.config.json'), JSON.stringify({
+    platform: { default: 'claude', providers: { claude: {} } },
+    sdd: { default: 'gentle-ai', providers: { 'gentle-ai': {} } },
+  }));
+  git(repo, 'add', 'brain.config.json');
+  git(repo, 'commit', '-qm', 'config');
   const wt = join(root, 'wt');
   git(repo, 'worktree', 'add', '-q', wt, '-b', 'feature/x');
   installBrain(wt);
