@@ -505,7 +505,7 @@ function renderStatus() {
   live.setAttribute('title', indicator.paused ? 'polling is paused' : 'the page is connected to the stream');
   mounts.status.appendChild(live);
 
-  mounts.status.appendChild(el('span', indicator.paused ? 'poll-indicator paused' : 'poll-indicator', indicator.text));
+  mounts.status.appendChild(el('span', indicator.paused ? 'poll-indicator paused' : indicator.halted ? 'poll-indicator halted' : 'poll-indicator', indicator.text));
   mounts.status.appendChild(el('span', 'poll-countdown', indicator.countdown));
 
   // The epic this checkout serves: an epic declares its tracker branch, and
@@ -549,11 +549,13 @@ function renderStatus() {
   themeWrap.appendChild(select);
   mounts.status.appendChild(themeWrap);
 
-  const toggle = el('button', 'poll-toggle', indicator.paused ? 'resume polling' : 'disable polling');
-  toggle.addEventListener('click', () => postPoll(indicator.paused ? 'resume' : 'pause'));
   const once = el('button', 'poll-once', 'poll now');
   once.addEventListener('click', () => postPoll('once'));
-  mounts.status.appendChild(toggle);
+  if (indicator.toggle) {
+    const toggle = el('button', 'poll-toggle', indicator.toggle === 'resume' ? 'resume polling' : 'disable polling');
+    toggle.addEventListener('click', () => postPoll(indicator.toggle));
+    mounts.status.appendChild(toggle);
+  }
   mounts.status.appendChild(once);
   const refresh = el('button', 'remotes-refresh', state.meta?.poller?.remotes?.inFlight ? 'fetching remotes\u2026' : 'refresh remotes');
   refresh.addEventListener('click', () => postRemotesRefresh());

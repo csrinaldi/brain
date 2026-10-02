@@ -178,6 +178,7 @@ test('#1201 R1201-9 W3: a server with no forge provider (forgeUnavailable) fetch
     await until(async () => fetchRun.calls.length === 1);
     await until(async () => scheduler.delays.includes(60000)); // armed once the first tick settles, despite the forge being unavailable
     await until(async () => (await pollerState(server)).remotes.lastOkAt !== null); // the timer is armed BEFORE the fetch ends (D40): wait for it, or the next tick joins the flight
+    assert.equal(scheduler.pending(), 1, 'the probe (a resume on an unpaused poller) armed no second chain (#1243)');
     fx.addBranch('feat/issue-52-timer', { 'openspec/changes/issue-52-timer/proposal.md': 'x' });
     await scheduler.runDelay(60000);
     await until(async () => names(await sectionOf(server)).includes('feat/issue-52-timer'));

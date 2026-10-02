@@ -189,14 +189,15 @@ test('#881: judgment:cold-6 — createPoller({ initialError }) starts paused wit
   });
 
   const state = poller.state();
-  assert.equal(state.paused, true);
+  assert.equal(state.paused, false, 'a forge halt is not the user\'s pause (R1243-3)');
+  assert.equal(state.forgeHalted, true);
   assert.match(state.lastError, /no VCS token/);
   assert.equal(state.lastPolledAt, new Date(now.t).toISOString(), 'the reason carries a time, the same shape a real failed tick would leave');
   assert.equal(state.lastOkAt, null);
 
-  poller.start(); // paused: a no-op, exactly like `enabled: false`
+  poller.start(); // halted with no remotes lane: a no-op
   assert.equal(scheduler.pending(), 0, 'no timer was armed');
-  assert.deepEqual(callLog, [], 'the port was never called — an initial resolution error means no tick, ever, until a manual resume');
+  assert.deepEqual(callLog, [], 'the port was never called — an initial resolution error means no tick, ever: Resume never lifts it (R2)');
   poller.close();
 });
 
@@ -279,7 +280,7 @@ test('#998 R998-6: state() carries intervalMs and a nextAttemptAt armed to now +
   poller.close();
 });
 
-test('#998 R998-6: createPoller({initialError}) starts with nextAttemptAt null — nothing is scheduled before the first resume', () => {
+test('#998 R998-6: createPoller({initialError}) starts with nextAttemptAt null — a halt with no remotes lane schedules nothing', () => {
   const scheduler = fakeScheduler();
   const now = { t: 0 };
   const vcs = makeVcs({ callLog: [] });
@@ -717,6 +718,8 @@ test('#1201 R1201-9 W3: a forge-less poller (initialError) still fetches on its 
   assert.equal(spy.calls, 2, 'the second tick fetched');
   assert.deepEqual(callLog, [], 'the forge port was never called');
   assert.match(poller.state().lastError, /no VCS token/);
+  assert.equal(poller.state().paused, false, 'halted, not user-paused');
+  assert.equal(poller.state().forgeHalted, true);
   poller.close();
 });
 
@@ -732,6 +735,8 @@ test('#1201 R1201-9 W3: a forge-less poller the USER paused (--no-poll) does not
   assert.equal(scheduler.pending(), 0);
   await poller.refreshRemotes();
   assert.equal(spy.calls, 1, 'only the explicit refresh fetches');
+  assert.equal(poller.state().paused, true, 'the user paused it');
+  assert.equal(poller.state().forgeHalted, true, 'and the forge is still halted');
   poller.close();
 });
 
@@ -940,4 +945,64 @@ test('#1243 R1243-2: close() after pause-resume with a tick in flight arms nothi
   await t;
   assert.equal(scheduler.pending(), 0);
   assert.equal(poller.state().nextAttemptAt, null);
+});
+
+// ── #1243 R1243-3/4: `paused` is the user's pause; Resume never lifts a forge halt ──
+
+function haltedPoller({ fetchRemotes = fetchSpy().fn, enabled = true, callLog = [] } = {}) {
+  const scheduler = fakeScheduler();
+  const poller = createPoller({
+    vcs: makeVcs({ callLog }), cache: createForgeCache(), project: 'o/r', interval: 60000, fetchRemotes, enabled,
+    initialError: 'no VCS token', _setTimeout: scheduler.setTimeout, _clearTimeout: scheduler.clearTimeout, _now: () => new Date(0),
+  });
+  return { poller, scheduler, callLog };
+}
+
+test('#1243 R1243-3: state() carries forgeHalted, forgeHaltReason and remotesLane; a user pause on a halt is a pause', () => {
+  const { poller } = haltedPoller();
+  let s = poller.state();
+  assert.deepEqual([s.paused, s.forgeHalted, s.forgeHaltReason, s.remotesLane], [false, true, 'no VCS token', true]);
+  assert.match(s.lastError, /no VCS token/);
+  s = poller.pause();
+  assert.deepEqual([s.paused, s.forgeHalted], [true, true]);
+  poller.close();
+
+  const plain = createPoller({ vcs: makeVcs({ callLog: [] }), cache: createForgeCache(), project: 'o/r' });
+  s = plain.state();
+  assert.deepEqual([s.paused, s.forgeHalted, s.forgeHaltReason, s.remotesLane], [false, false, null, false]);
+  plain.close();
+});
+
+test('#1243 R1243-4: Resume never lifts the halt: the forge port is not called and the reason stays', async () => {
+  const { poller, scheduler, callLog } = haltedPoller();
+  poller.pause();
+  poller.resume();
+  assert.equal(scheduler.pending(), 1);
+  await scheduler.runNext();
+  await new Promise((resolve) => setImmediate(resolve));
+  const s = poller.state();
+  assert.equal(s.forgeHalted, true);
+  assert.match(s.lastError, /no VCS token/);
+  assert.deepEqual(callLog, []);
+  poller.close();
+});
+
+test('#1243 R1243-4: resume after a user pause re-arms only the remotes timer; resume on an unpaused poller is a no-op', () => {
+  const { poller, scheduler } = haltedPoller({ enabled: false });
+  assert.equal(poller.state().paused, true);
+  const s = poller.resume();
+  assert.deepEqual([s.paused, s.forgeHalted, scheduler.pending()], [false, true, 1]);
+  const due = poller.state().nextAttemptAt;
+  poller.resume();
+  assert.equal(scheduler.pending(), 1, 'the same single handle');
+  assert.equal(poller.state().nextAttemptAt, due);
+  poller.close();
+});
+
+test('#1243 R1243-4: a halted poller with no remotes lane arms nothing on resume', () => {
+  const { poller, scheduler } = haltedPoller({ fetchRemotes: null, enabled: false });
+  poller.resume();
+  assert.equal(scheduler.pending(), 0);
+  assert.equal(poller.state().remotesLane, false);
+  poller.close();
 });

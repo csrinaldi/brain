@@ -184,3 +184,15 @@ test('#1201 AC3 D43: no rendered text, attribute or label on the page names a se
   assert.doesNotMatch(everything, /session/i);
   assert.match(find(dom.mounts.canvas, byClass('remote-panel')).textContent, /2 branches not read yet/);
 });
+
+test('#1243 R1243-5 R3: a halted forge with no remotes lane renders the reason, "polling disabled" and no poll toggle', async (t) => {
+  const meta = { project: 'o/r', watcher: { ok: true, watched: 1, failed: [] }, poller: { paused: false, forgeHalted: true, forgeHaltReason: 'no VCS token', remotesLane: false, lastPolledAt: null, lastOkAt: null, lastError: 'no VCS token', intervalMs: 60000, nextAttemptAt: null, remotes: { lastAttemptAt: null, lastOkAt: null, lastError: null, inFlight: false } } };
+  const dom = await boot({ branches: [entry()], meta });
+  t.after(() => dom.restore());
+  const status = dom.mounts.status;
+  assert.equal(find(status, byClass('poll-toggle')), null, 'no toggle: nothing to disable or resume');
+  assert.doesNotMatch(status.textContent, /resume polling/);
+  assert.match(find(status, byClass('poll-indicator')).textContent, /forge unavailable: no VCS token/);
+  assert.match(find(status, byClass('poll-countdown')).textContent, /polling disabled/);
+  assert.match(find(status, byClass('poll-indicator')).className, /halted/);
+});

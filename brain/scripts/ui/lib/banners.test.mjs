@@ -109,7 +109,7 @@ test('#881 R881-9 S1: every {ok:false} section of the snapshot is named with its
 });
 
 test('#881 R881-4: the poll indicator says how long ago the forge was polled', () => {
-  assert.deepEqual(pollIndicator({ poller: meta().poller, nowMs: NOW }), { text: 'forge polled 5 s ago', paused: false, countdown: 'next poll in 55 s' });
+  assert.deepEqual(pollIndicator({ poller: meta().poller, nowMs: NOW }), { text: 'forge polled 5 s ago', paused: false, halted: false, countdown: 'next poll in 55 s', toggle: 'pause' });
   assert.equal(pollIndicator({ poller: { ...meta().poller, lastOkAt: at(180) }, nowMs: NOW }).text, 'forge polled 3 min ago');
   assert.equal(pollIndicator({ poller: { ...meta().poller, lastOkAt: at(7200) }, nowMs: NOW }).text, 'forge polled 2 h ago');
 });
@@ -117,16 +117,18 @@ test('#881 R881-4: the poll indicator says how long ago the forge was polled', (
 test('#881 R881-4 S2: paused is visible in the indicator itself, not only in the control', () => {
   const paused = pollIndicator({ poller: { ...meta().poller, paused: true }, nowMs: NOW });
   assert.equal(paused.paused, true);
+  assert.equal(paused.toggle, 'resume');
   assert.equal(paused.text, 'polling is paused — forge polled 5 s ago');
   assert.equal(paused.countdown, 'paused', 'the countdown says paused even though a nextAttemptAt is still in the fixture — paused always wins');
 
   const never = pollIndicator({ poller: { paused: true, lastPolledAt: null, lastOkAt: null, lastError: null, forgeAsOf: {}, intervalMs: 60000, nextAttemptAt: null }, nowMs: NOW });
   assert.equal(never.text, 'polling is paused — the forge has not been polled yet');
   assert.equal(never.countdown, 'paused');
+  assert.equal(never.toggle, 'resume');
 });
 
 test('#881: with no meta yet the indicator states that, rather than claiming a fresh poll', () => {
-  assert.deepEqual(pollIndicator({ poller: null, nowMs: NOW }), { text: 'the poll state is unknown until the stream connects', paused: false, countdown: 'polling disabled' });
+  assert.deepEqual(pollIndicator({ poller: null, nowMs: NOW }), { text: 'the poll state is unknown until the stream connects', paused: false, halted: false, countdown: 'polling disabled', toggle: null });
 });
 
 // ── #998 R998-6: the countdown text ─────────────────────────────────────────
@@ -140,6 +142,35 @@ test('#998 R998-6: the countdown reads "next poll in N s" while scheduled, "paus
 
   const disabled = pollIndicator({ poller: { ...meta().poller, nextAttemptAt: null, intervalMs: 0 }, nowMs: NOW });
   assert.equal(disabled.countdown, 'polling disabled');
+});
+
+// ── #1243 R1243-5: the forge halt is said, and only controls that can act are offered ──
+
+const halted = (extra = {}) => ({ ...meta().poller, paused: false, forgeHalted: true, forgeHaltReason: 'no VCS token', remotesLane: true, ...extra });
+
+test('#1243 R1243-5: a halted forge with a remotes lane says so, keeps the live countdown and offers "pause" only', () => {
+  const ind = pollIndicator({ poller: halted({ nextAttemptAt: at(-55) }), nowMs: NOW });
+  assert.equal(ind.text, 'forge unavailable: no VCS token; remotes fetched every 60 s');
+  assert.equal(ind.countdown, 'next poll in 55 s');
+  assert.equal(ind.paused, false);
+  assert.equal(ind.halted, true);
+  assert.equal(ind.toggle, 'pause');
+});
+
+test('#1243 R1243-5 R3: a halted forge with no remotes lane says the reason, "polling disabled" and offers no toggle', () => {
+  const ind = pollIndicator({ poller: halted({ remotesLane: false, nextAttemptAt: null }), nowMs: NOW });
+  assert.equal(ind.text, 'forge unavailable: no VCS token');
+  assert.equal(ind.countdown, 'polling disabled');
+  assert.equal(ind.halted, true);
+  assert.equal(ind.toggle, null);
+});
+
+test('#1243 R1243-5: a user pause on a halted forge is still a pause and offers Resume', () => {
+  const ind = pollIndicator({ poller: halted({ paused: true }), nowMs: NOW });
+  assert.equal(ind.paused, true);
+  assert.equal(ind.toggle, 'resume');
+  assert.equal(ind.countdown, 'paused');
+  assert.match(ind.text, /^polling is paused/);
 });
 
 // ── #1201 R1201-11: the remotes band reads meta.poller.remotes, never the section ──
