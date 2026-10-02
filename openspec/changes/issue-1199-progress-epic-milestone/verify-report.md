@@ -175,3 +175,9 @@ PASS WITH WARNINGS. All eight requirements and all 33 scenarios are proven by pa
 | S1 | Done. The progress wording table names `progressLabel(null)` as "no progress was read". |
 | S2 | Done. A complete list with no children and unresolved closed issues reads "no children declared; N closed issue(s) could not be read". RED first. |
 | S3 | Done. The `git blame` paragraph moved from the module header to `parseTasksList`'s doc comment. |
+
+## Cold review round 1 (PR #1265)
+
+| Finding | Resolution |
+|---|---|
+| judgment:cold-1 (blocker): an epic with no children under a `failed` refresh with a `lastCompleteAt` read a bare "no children declared". `rollupLabel` returned before building the stale suffix, so a stale answer was shown as current. | The as-of suffix is now built before the zero-children branch and applied to both of its forms. RED first: `rollup-model.test.mjs` "an epic with no children under a failed refresh says the answer is as of the last complete list" failed with actual `'no children declared'`; it passes after the fix. Spec R1199-7: the R8 sentence, a wording-table row and a scenario ("No children under a failed refresh says it is stale"). |

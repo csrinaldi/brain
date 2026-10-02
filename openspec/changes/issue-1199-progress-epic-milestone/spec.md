@@ -57,6 +57,7 @@ Every other requirement of #881, #1032, #1059 and #1201 is unchanged. That inclu
   | Any wording with numbers, unresolved closed issues | plus " · `<n>` closed issue(s) unresolved, so more children may exist" |
   | `complete` and no children (R8) | "no children declared" |
   | `complete`, no children, `<n>` unresolved closed issues | "no children declared; `<n>` closed issue(s) could not be read" (singular "issue" when `<n>` is 1) |
+  | `failed` with `lastCompleteAt`, no children | the matching row above, followed by " · closed list as of `<lastCompleteAt>`; refresh failed (`<reason>`)" |
   | `complete` with `closedRead.ok` false | "closed children unknown (`<closedRead.reason>`)" plus the open suffix |
 
 ## Per-change progress
@@ -264,7 +265,7 @@ Two consumers MUST read only that contract:
 - `total` is the number of children;
 - `unresolved` is the length of `closedUnresolved`.
 
-When `forgeLoad.closed` is `pending`, `failed` with `lastCompleteAt: null`, or `disabled`, `closed` and `total` MUST be `null`, never 0, and the wording is the matching row of the rollup table. When it is `complete`, or `failed` with a `lastCompleteAt`, `closed` and `total` are numbers only if `hierarchy.value.closedRead.ok` is true; a lane state is a claim about the poller, `closedRead` is the fact about the data, so with `closedRead.ok` false the numbers are `null` and the wording is the `failed`, `lastCompleteAt` null row with `closedRead.reason`. An unknown child MUST NOT count as open or as closed (R3). An epic with no children reads "no children declared" only when `forgeLoad.closed` is `complete` (R8).
+When `forgeLoad.closed` is `pending`, `failed` with `lastCompleteAt: null`, or `disabled`, `closed` and `total` MUST be `null`, never 0, and the wording is the matching row of the rollup table. When it is `complete`, or `failed` with a `lastCompleteAt`, `closed` and `total` are numbers only if `hierarchy.value.closedRead.ok` is true; a lane state is a claim about the poller, `closedRead` is the fact about the data, so with `closedRead.ok` false the numbers are `null` and the wording is the `failed`, `lastCompleteAt` null row with `closedRead.reason`. An unknown child MUST NOT count as open or as closed (R3). An epic with no children reads "no children declared" only when `forgeLoad.closed` is `complete` (R8); under `failed` with a `lastCompleteAt` the same words carry the as-of suffix " · closed list as of `<lastCompleteAt>`; refresh failed (`<reason>`)", because a stale answer is never stated as current, with children or without.
 
 #### Scenario: Counting closed children
 - **GIVEN** `forgeLoad.closed` `{state:'pending', at:null}` and an epic with 4 open children
@@ -300,6 +301,11 @@ When `forgeLoad.closed` is `pending`, `failed` with `lastCompleteAt: null`, or `
 - **GIVEN** `forgeLoad.closed` complete and an epic with no children
 - **WHEN** the rollup renders
 - **THEN** it reads "no children declared" and shows no number
+
+#### Scenario: No children under a failed refresh says it is stale
+- **GIVEN** `forgeLoad.closed` failed with reason "rate limited" and `lastCompleteAt` b, and an epic with no children
+- **WHEN** the rollup renders
+- **THEN** it reads "no children declared · closed list as of b; refresh failed (rate limited)"
 
 #### Scenario: No children while counting is not "no children"
 - **GIVEN** `forgeLoad.closed` pending and an epic with no open children
