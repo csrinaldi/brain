@@ -227,7 +227,7 @@ _axis_declare() {
 # `_axis_resolve <axis>` runs the REAL resolver (`config/cli.mjs resolve`, `resolveAxis`, the code the runtime runs:
 # process env, .env, `<axis>.default`, the legacy alias; NO default) and sets _R_RUN (what this run uses), _R_REPO
 # (what the repo states, the process env being per-invocation) and _R_SRC (the repo value's place), _R_RUNSRC (the
-# run value's place), each one of shell|.env|config|none. The shell composes no precedence of its own: a second
+# run value's place), each one of shell|.env|user|config|none (`user` is the ~/.brain user layer, ADR-0040). The shell composes no precedence of its own: a second
 # resolver is exactly the divergence #1114 retires. The place is the resolver's `where`, never inferred by comparing values.
 #   exit 0 -> parsed; exit 3 -> nothing declares the axis (_R_UNDECLARED=1, nothing guessed);
 #   anything else -> the resolver REFUSED a value or failed: reported with its fix, no fallback, _R_REFUSED=1.
@@ -235,6 +235,7 @@ _axis_where() {
   case "$1" in
     process-env) printf 'shell' ;;
     dotenv) printf '.env' ;;
+    user) printf 'user' ;;
     config|runtime) printf 'config' ;;
     *) printf 'none' ;;
   esac
@@ -271,6 +272,7 @@ _axis_source_word() {
   case "$1" in
     shell) printf '%s' "$I18N_BOOTSTRAP_AXIS_SOURCE_SHELL" ;;
     .env) printf '%s' "$I18N_BOOTSTRAP_AXIS_SOURCE_DOTENV" ;;
+    user) printf '%s' "$I18N_BOOTSTRAP_AXIS_SOURCE_USER" ;;
     config) printf '%s' "$I18N_BOOTSTRAP_AXIS_SOURCE_CONFIG" ;;
     *) printf '%s' "$I18N_BOOTSTRAP_AXIS_SOURCE_DEFAULT" ;;
   esac

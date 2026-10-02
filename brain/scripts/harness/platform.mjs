@@ -40,6 +40,7 @@
 // `cli.mjs` re-exports `resolvePlatform` so its own importers are unaffected.
 
 import { AGENT_PLATFORMS, SDD_ENGINES, resolveAxis } from '../lib/axis-config.mjs';
+import { readUserConfig } from '../lib/user-config.mjs';
 // The two memberships are declared in lib/axis-config.mjs (#1114 S3.1) and re-exported here, so
 // every importer of this file is unaffected.
 export { AGENT_PLATFORMS, SDD_ENGINES };
@@ -52,10 +53,11 @@ export { AGENT_PLATFORMS, SDD_ENGINES };
  * Resolves the active agent platform: a thin caller of `resolveAxis` (process env > `.env` > `platform.default` >
  * the legacy flat key and `SDD_HARNESS`, one minor version).
  *
- * @param {{ env?: object, envVars?: object, config?: object }} [opts]  `envVars` is the parsed `.env`
+ * @param {{ env?: object, envVars?: object, config?: object, user?: ReturnType<typeof readUserConfig> }} [opts]
+ *   `envVars` is the parsed `.env`; `user` is the user layer, read through the ONE reader (`BRAIN_HOME`, else `~/.brain`) when not injected
  * @returns {string}
  * @throws {import('../lib/axis-config.mjs').AxisRefusal} when nothing declares a platform
  */
-export function resolvePlatform({ env = process.env, envVars = {}, config = {} } = {}) {
-  return resolveAxis('platform', { env, dotenv: envVars, config }).value;
+export function resolvePlatform({ env = process.env, envVars = {}, config = {}, user = readUserConfig({ env }) } = {}) {
+  return resolveAxis('platform', { env, dotenv: envVars, config, ...user }).value;
 }

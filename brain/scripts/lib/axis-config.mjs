@@ -184,9 +184,15 @@ export function validateAxisConfig(config) {
 // ONE resolver for every axis. It replaces resolvePlatform, resolveEngine, resolveHarness, resolveMemoryBackend's
 // own precedence, resolveProviderName and platformConfig, which are thin callers of it now.
 //
-//   memory, platform, sdd : process env > .env > <axis>.default > legacy alias > UNDECLARED
-//   vcs                   : process env > vcs.default > legacy vcs.provider > UNDECLARED   (no .env level)
+//   memory, platform, sdd : process env > .env > USER <axis>.default > team <axis>.default > legacy alias > UNDECLARED
+//   vcs                   : process env > vcs.default > legacy vcs.provider > UNDECLARED   (no .env level, no user level)
 //   a RUNTIME-detected VCS provider (CI) sits OUTSIDE that: it wins when present.
+//
+// The USER layer (`<BRAIN_HOME>/config.json`, ADR-0040, issue #1263) is injected as `userConfig`, read by
+// `lib/user-config.mjs`'s ONE reader. The providers on a machine are the UNION of the team's and the user's (the user's
+// `version` wins for a provider both list), and every value from any level is checked against it. A team axis with
+// `locked: true` refuses an override that DIFFERS from its team default at every level above it (the user layer, `.env` AND
+// the process env): an override equal to the team's value changes nothing, and `bootstrap.sh` exports the resolved value.
 //
 // The legacy alias is READ-ONLY and lasts one minor version (ADR-0038 section 7): the old config key
 // (`memory.backend`, `vcs.provider`, flat `platform`/`engine`) and, for platform and sdd, the legacy
@@ -240,21 +246,72 @@ function defaultNotice(line) {
 }
 
 const WHERE = Object.freeze({ shell: 'process-env', file: 'dotenv', config: 'config' });
-const WHERE_LABEL = Object.freeze({ 'process-env': 'the process env', dotenv: '.env', config: 'brain.config.json', runtime: 'the detected CI provider' });
+const WHERE_LABEL = Object.freeze({ 'process-env': 'the process env', dotenv: '.env', config: 'brain.config.json', user: 'the user layer', runtime: 'the detected CI provider' });
+const USER_PATH_FALLBACK = '~/.brain/config.json';
+
+/**
+ * The shape of the USER layer (ADR-0040 section 1). It uses the ADR-0038 shape, but a user `default` is checked against the
+ * UNION of the layers' providers (not its own), so only what no union could repair is an error here: a `locked` key (a key of
+ * the team layer only), a `providers` that is not a map, a `default` that is not a string. `vcs` and `governance` are ignored.
+ * Pure and total.
+ * @returns {{ok: boolean, errors: Array<{axis: string, path: string, code: string, message: string}>}}
+ */
+export function validateUserConfig(userConfig) {
+  const errors = [];
+  const err = (axis, path, code, message) => errors.push({ axis, path, code, message });
+  try {
+    const u = isObj(userConfig) ? userConfig : {};
+    for (const axis of AXES) {
+      if (axis === 'vcs') continue; // the user layer holds no vcs: it is ignored, never read
+      const node = u[axis];
+      if (!isObj(node)) continue;
+      if (has(node, 'locked')) err(axis, `${axis}.locked`, 'user-locked-forbidden', `${axis}.locked is a key of the team config only: the user layer may never set it`);
+      if (has(node, 'providers') && !isObj(node.providers)) err(axis, `${axis}.providers`, 'providers-not-a-map', `${axis}.providers must be a map of provider name to its settings`);
+      if (has(node, 'default') && typeof node.default !== 'string') err(axis, `${axis}.default`, 'default-not-a-string', `${axis}.default must be a provider name ("" when undeclared)`);
+    }
+  } catch (e) { // surfaced: validation never throws; the failure is itself a reported error
+    errors.push({ axis: '*', path: '', code: 'validator-failed', message: `user config could not be validated: ${e?.message ?? e}` });
+  }
+  return { ok: errors.length === 0, errors };
+}
+
+/**
+ * The config a MACHINE runs: the team's with each non-vcs axis's `providers` replaced by the UNION of the team's and the
+ * user's (the user's entry wins, so its `version` is what is installed here). `default` and `locked` are never touched.
+ */
+function mergeUserProviders(cfg, userConfig) {
+  const u = isObj(userConfig) ? userConfig : {};
+  const out = { ...cfg };
+  for (const axis of AXES) {
+    if (axis === 'vcs') continue;
+    const up = isObj(u[axis]) && isObj(u[axis].providers) ? u[axis].providers : null;
+    if (!up || Object.keys(up).length === 0) continue;
+    const t = isObj(cfg[axis]) ? cfg[axis] : {};
+    const tp = isObj(t.providers) ? t.providers : {};
+    const providers = { ...tp };
+    for (const [name, entry] of Object.entries(up)) {
+      providers[name] = isObj(entry) ? { ...(isObj(tp[name]) ? tp[name] : {}), ...entry } : (tp[name] ?? {});
+    }
+    out[axis] = { ...t, providers, ...(has(t, 'default') ? {} : { default: '' }) };
+  }
+  return out;
+}
 
 /**
  * @param {'vcs'|'memory'|'platform'|'sdd'} axis
- * @param {{env?: object, dotenv?: object, config?: object, runtimeProvider?: string|null, notice?: (line: string) => void}} [opts]
+ * @param {{env?: object, dotenv?: object, config?: object, userConfig?: object, userError?: string|null, userPath?: string,
+ *          runtimeProvider?: string|null, notice?: (line: string) => void}} [opts]
  *   `env` is the process env, `dotenv` the PARSED `.env` (no file is read here); VCS never reads `dotenv`.
+ *   `userConfig`/`userError`/`userPath` are `readUserConfig`'s result, spread in (lib/user-config.mjs); VCS never reads them.
  *   `runtimeProvider` is the CI-detected VCS provider; it needs only an adapter brain ships, not a `vcs.providers` entry.
- * @returns {{value: string, source: 'process-env'|'dotenv'|'config'|'legacy-config'|'legacy-harness'|'runtime',
- *            where: 'process-env'|'dotenv'|'config'|'runtime', key: string,
- *            shadowed: Array<{source: 'file'|'config', value: string}>}}
+ * @returns {{value: string, source: 'process-env'|'dotenv'|'user'|'config'|'legacy-config'|'legacy-harness'|'runtime',
+ *            where: 'process-env'|'dotenv'|'user'|'config'|'runtime', key: string,
+ *            shadowed: Array<{source: 'file'|'user'|'config', value: string}>}}
  *   `where` is the PHYSICAL place the winner was read from (a legacy `SDD_HARNESS` may sit in the process env).
- * @throws {AxisRefusal} undeclared, a value that is not a provider brain ships or not a key of `<axis>.providers`,
- *   or an invalid axis config. Never guesses and never coerces.
+ * @throws {AxisRefusal} undeclared, a value that is not a provider brain ships or not a key of the union of the
+ *   layers' `<axis>.providers`, an invalid axis config or user layer, or an override of a locked axis. Never guesses and never coerces.
  */
-export function resolveAxis(axis, { env = process.env, dotenv = {}, config = {}, runtimeProvider = null, notice = defaultNotice } = {}) {
+export function resolveAxis(axis, { env = process.env, dotenv = {}, config = {}, userConfig = {}, userError = null, userPath = USER_PATH_FALLBACK, runtimeProvider = null, notice = defaultNotice } = {}) {
   if (!AXES.includes(axis)) throw new TypeError(`resolveAxis: unknown axis '${axis}'`);
   const cfg = isObj(config) ? config : {};
   const members = AXIS_MEMBERS[axis];
@@ -270,42 +327,89 @@ export function resolveAxis(axis, { env = process.env, dotenv = {}, config = {},
     return { value: runtime, source: 'runtime', where: 'runtime', key: 'runtimeProvider', shadowed: [] };
   }
 
-  const bad = validateAxisConfig(cfg).errors.filter((e) => e.axis === axis);
+  // The user layer (ADR-0040): vcs has none. An unreadable or invalid one is a refusal with a fix, never ignored.
+  const userLayer = axis === 'vcs' ? {} : (isObj(userConfig) ? userConfig : {});
+  const uPath = nonEmpty(userPath) || USER_PATH_FALLBACK;
+  if (axis !== 'vcs') {
+    const userBad = userError ? [{ path: '', message: String(userError) }] : validateUserConfig(userLayer).errors.filter((e) => e.axis === axis);
+    if (userBad.length > 0) {
+      throw new AxisRefusal('user-layer-invalid', axis, 'axes.refusal.userLayer', { axis, path: uPath, detail: userBad.map((e) => e.message).join('; ') },
+        `correct or remove ${userBad[0].path ? `${userBad[0].path} in ` : ''}${uPath}`);
+    }
+  }
+
+  // Every value from any level is checked against the union of the team's and the user's providers.
+  const merged = axis === 'vcs' ? cfg : mergeUserProviders(cfg, userLayer);
+  const bad = validateAxisConfig(merged).errors.filter((e) => e.axis === axis);
   if (bad.length > 0) {
     const detail = bad.map((e) => e.message).join('; ');
     throw new AxisRefusal('invalid-config', axis, 'axes.refusal.invalidConfig', { axis, detail },
       `correct ${bad[0].path || axis} in brain.config.json`);
   }
 
-  const shape = readAxis(cfg, axis, { harness: false });
+  const shape = readAxis(merged, axis, { harness: false });
+  const userDefault = nonEmpty(isObj(userLayer[axis]) ? userLayer[axis].default : '');
+  const isLocked = cfg[axis]?.locked === true;
+  const dotenvMap = axis === 'vcs' ? {} : (isObj(dotenv) ? dotenv : {});
+  const envMap = isObj(env) ? env : {};
+
+  // `locked` (ADR-0040 section 3): the user layer, `.env` AND the process env may not override it. An override EQUAL to
+  // the team value is not one (and `bootstrap.sh` exports the resolved value), so it is not refused; the run then reads
+  // the team layer alone.
+  let selUser = userDefault;
+  let selEnv = envMap;
+  let selDotenv = dotenvMap;
+  if (isLocked) {
+    for (const [where, raw] of [['process-env', envMap[keyName]], ['dotenv', dotenvMap[keyName]], ['user', userDefault]]) {
+      const v = nonEmpty(raw);
+      if (v !== '' && v !== nonEmpty(shape.default)) {
+        const command = `npm run brain:config -- set ${axis}.default ${v}`;
+        throw Object.assign(new AxisRefusal('locked', axis, 'axes.refusal.locked',
+          { axis, value: v, source: where === 'user' ? uPath : WHERE_LABEL[where] },
+          `ask an owner in governance.owners, or propose the change in a PR: ${command}`),
+        { shadowed: [], where });
+      }
+    }
+    selUser = '';
+    selEnv = {};
+    selDotenv = {};
+  }
+
   const sel = resolveAxisSelector({
     key: keyName,
     allowed: members,
-    configValue: shape.default,
-    env: isObj(env) ? env : {},
-    dotenv: axis === 'vcs' ? {} : (isObj(dotenv) ? dotenv : {}),
+    configValue: selUser !== '' ? selUser : shape.default,
+    env: selEnv,
+    dotenv: selDotenv,
   });
 
   if (sel.value !== null) {
-    const where = WHERE[sel.source];
+    const fromUser = sel.source === 'config' && selUser !== '';
+    const where = fromUser ? 'user' : WHERE[sel.source];
     const source = where === 'config' && shape.source === 'legacy' ? 'legacy-config' : where;
-    const sourceText = `${WHERE_LABEL[where]}${source === 'legacy-config' ? ' (legacy key)' : ''}`;
+    const sourceText = where === 'user' ? uPath : `${WHERE_LABEL[where]}${source === 'legacy-config' ? ' (legacy key)' : ''}`;
+    // Every losing declaration is reported: the selector reports the layer value it covered as `config`, which is the
+    // USER's when one stated a default, so the team's default is re-added beneath it.
+    const shadowed = sel.shadowed.map((x) => (x.source === 'config' && selUser !== '' ? { ...x, source: 'user' } : { ...x }));
+    const teamDefault = nonEmpty(shape.default);
+    if (selUser !== '' && teamDefault !== '' && teamDefault !== sel.value && !shadowed.some((x) => x.source === 'config')) {
+      shadowed.push({ source: 'config', value: teamDefault });
+    }
     if (!sel.valid) {
-      throw Object.assign(new AxisRefusal('invalid-value', axis, 'axes.refusal.invalid',
-        { axis, value: sel.value, source: sourceText, names }, `npm run brain:config -- set ${axis}.default <${names}>`),
-      { shadowed: sel.shadowed, where });
+      throw Object.assign(new AxisRefusal('invalid-value', axis, where === 'user' ? 'axes.refusal.invalid.user' : 'axes.refusal.invalid',
+        { axis, value: sel.value, source: sourceText, names }, where === 'user' ? `correct ${axis}.default in ${uPath}` : `npm run brain:config -- set ${axis}.default <${names}>`),
+      { shadowed, where });
     }
-    // A per-machine value must be a provider the TEAM listed (ADR-0038 section 2); an axis that lists none yet
-    // (a fresh scaffold, a legacy config) has nothing to check it against.
-    const listed = isObj(cfg[axis]?.providers) ? Object.keys(cfg[axis].providers) : [];
+    // A per-machine value must be a provider the machine lists: the team's or the user's (ADR-0038 section 2, ADR-0040
+    // section 2). An axis that lists none yet (a fresh scaffold, a legacy config) has nothing to check it against.
+    const listed = isObj(merged[axis]?.providers) ? Object.keys(merged[axis].providers) : [];
     if (source !== 'legacy-config' && listed.length > 0 && !listed.includes(sel.value)) {
-      throw Object.assign(new AxisRefusal('not-a-provider', axis, 'axes.refusal.notListed',
+      throw Object.assign(new AxisRefusal('not-a-provider', axis, where === 'user' ? 'axes.refusal.notListed.user' : 'axes.refusal.notListed',
         { axis, value: sel.value, source: sourceText, listed: listed.join(', ') },
-        `npm run brain:config -- set ${axis}.providers.${sel.value} '{}'`),
-      { shadowed: sel.shadowed, where });
+        where === 'user' ? `add ${axis}.providers.${sel.value} to ${uPath}` : `npm run brain:config -- set ${axis}.providers.${sel.value} '{}'`),
+      { shadowed, where });
     }
-    const shadowed = sel.shadowed.map((x) => ({ ...x }));
-    return { value: sel.value, source, where, key: where === 'config' ? `${axis}.default` : keyName, shadowed };
+    return { value: sel.value, source, where, key: where === 'config' || where === 'user' ? `${axis}.default` : keyName, shadowed };
   }
 
   if (axis === 'platform' || axis === 'sdd') {
@@ -348,16 +452,20 @@ function shellVersionArg(v) {
 }
 
 /**
- * @param {{config?: object, env?: object, dotenv?: object, installed?: Record<string, Record<string, string>>, catalog?: Record<string, string>}} [args]
+ * @param {{config?: object, env?: object, dotenv?: object, userConfig?: object, userError?: string|null, userPath?: string,
+ *          installed?: Record<string, Record<string, string>>, catalog?: Record<string, string>}} [args]
  *   `env` is the process env, `dotenv` the PARSED `.env` (only the selector keys are ever read from either);
+ *   `userConfig`/`userError`/`userPath` are the user layer (`readUserConfig`'s result, lib/user-config.mjs);
  *   `installed[axis][name]` is a detected version; `catalog` is the i18n catalog (English when omitted).
  * @returns {Array<{axis: string, code: string, severity: 'error'|'warning'|'info', message: string, fix: string}>}
  */
 export function diagnoseAxes(args) {
   const findings = [];
   try {
-    const { config, env, dotenv, installed, catalog } = isObj(args) ? args : {};
+    const { config, env, dotenv, userConfig, userError, userPath, installed, catalog } = isObj(args) ? args : {};
     const cfg = isObj(config) ? config : {};
+    const user = isObj(userConfig) ? userConfig : {};
+    const uPath = nonEmpty(userPath) || USER_PATH_FALLBACK;
     const procEnv = isObj(env) ? env : {};
     const dot = isObj(dotenv) ? dotenv : {};
     const inst = isObj(installed) ? installed : {};
@@ -372,14 +480,46 @@ export function diagnoseAxes(args) {
         tr('axes.diagnose.invalidConfig.fix', { path: e.path || e.axis }));
     }
 
+    // user-layer-invalid: an unreadable file, or a shape the layer may not have. The refusal itself is `resolveAxis`'s.
+    if (userError) {
+      add('*', 'user-layer-invalid', 'error', tr('axes.diagnose.userLayerInvalid', { path: uPath, detail: String(userError) }), tr('axes.diagnose.userLayerInvalid.fix', { path: uPath }));
+    } else {
+      for (const e of validateUserConfig(user).errors) {
+        add(e.axis, 'user-layer-invalid', 'error', tr('axes.diagnose.userLayerInvalid', { path: uPath, detail: e.message }), tr('axes.diagnose.userLayerInvalid.fix', { path: uPath }));
+      }
+    }
+
     for (const axis of AXES) {
       const declared = readAxis(cfg, axis).default;
+
+      // locked-override-refused: a selector at a level the team's lock forbids (the user layer, `.env`, the process env),
+      // whose value differs from the team's. One finding per level, so the person sees every place to clean.
+      if (cfg[axis]?.locked === true) {
+        const keyName = AXIS_ENV_KEY[axis];
+        const levels = [
+          ['process-env', procEnv[keyName], keyName, tr('axes.diagnose.where.shell')],
+          ['dotenv', axis === 'vcs' ? '' : dot[keyName], keyName, '.env'],
+          ['user', axis === 'vcs' || isObj(user[axis]) === false ? '' : user[axis].default, `${axis}.default`, uPath],
+        ];
+        for (const [, raw, key, whereText] of levels) {
+          const v = nonEmpty(raw);
+          if (v === '' || v === nonEmpty(declared)) continue;
+          add(axis, 'locked-override-refused', 'error',
+            tr('axes.diagnose.lockedOverride', { axis, key, where: whereText, value: v }),
+            tr('axes.diagnose.lockedOverride.fix', { axis, where: whereText, value: v }));
+        }
+      }
 
       // env-shadows-config: this machine runs something other than the team's declared choice. Derived from
       // `resolveAxis`, never from inequality (#1114 S3.4): it is reported only when a per-machine selector WINS by the
       // real precedence. A legacy SDD_HARNESS ranks below `<axis>.default`, so it never shadows a declared one.
-      const won = tryResolveAxis(axis, { env: procEnv, dotenv: dot, config: cfg, notice: () => {} });
-      if (declared !== '' && won.ok && (won.source === 'process-env' || won.source === 'dotenv') && won.value !== declared) {
+      const won = tryResolveAxis(axis, { env: procEnv, dotenv: dot, config: cfg, userConfig: user, userError, userPath: uPath, notice: () => {} });
+      if (declared !== '' && won.ok && won.source === 'user' && won.value !== declared) {
+        // the user layer is where a person declares their own tools: reported so "why does my machine run X" has an answer
+        add(axis, 'env-shadows-config', 'info',
+          tr('axes.diagnose.userShadows', { axis, where: uPath, value: won.value, declared }),
+          tr('axes.diagnose.userShadows.fix', { axis, value: won.value }));
+      } else if (declared !== '' && won.ok && (won.source === 'process-env' || won.source === 'dotenv') && won.value !== declared) {
         const shell = won.source === 'process-env';
         add(axis, 'env-shadows-config', 'warning',
           tr('axes.diagnose.envShadows', { key: won.key, where: shell ? tr('axes.diagnose.where.shell') : '.env', value: won.value, axis, declared }),
@@ -390,10 +530,14 @@ export function diagnoseAxes(args) {
       }
 
       // Versions. RANGE semantics (and spawning probes) are #1130's: today an exact-string compare.
+      // The team's `version` is the EXPECTATION (ADR-0040 section 2). What is installed here is the detected version, or
+      // the one the USER layer declares for the provider when nothing probes it: that is the version the user layer
+      // wins with on this machine. A provider only the user lists has no team expectation, so nothing to compare.
       const providers = isObj(cfg[axis]) && isObj(cfg[axis].providers) ? cfg[axis].providers : {};
+      const userProviders = !userError && isObj(user[axis]) && isObj(user[axis].providers) ? user[axis].providers : {};
       for (const [name, entry] of Object.entries(providers)) {
         const version = nonEmpty(isObj(entry) ? entry.version : '');
-        const found = nonEmpty(isObj(inst[axis]) ? inst[axis][name] : '');
+        const found = nonEmpty(isObj(inst[axis]) ? inst[axis][name] : '') || nonEmpty(isObj(userProviders[name]) ? userProviders[name].version : '');
         const setCmd = (v) => `npm run brain:config -- set ${axis}.providers.${name}.version ${v}`;
         if (version === '') {
           add(axis, 'version-unverified', 'info',

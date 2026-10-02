@@ -27,6 +27,7 @@ import { GOVERNANCE_JOBS } from './vcs/governance-checks.mjs';
 import { resolveTier, requiredJobs } from './vcs/governance-tiers.mjs';
 import { readAxis, diagnoseAxes } from './lib/axis-config.mjs';
 import { detectInstalled } from './lib/axis-installed.mjs';
+import { readUserConfig } from './lib/user-config.mjs';
 import { parseEnvFile } from './lib/env-read.mjs';
 import { loadCatalog } from './i18n/t.mjs';
 import en from './i18n/en.mjs';
@@ -457,6 +458,7 @@ export async function reportGovernanceStatus({
   env = process.env,
   dotenv: dotenvOverride,
   installed: installedOverride,
+  user: userOverride,
   providerModule: providerModuleOverride,
   probes: probeOverrides,
 } = {}) {
@@ -548,7 +550,9 @@ export async function reportGovernanceStatus({
   }
   const lang = config?.docs?.language;
   const catalog = { ...en, ...(await loadCatalog(lang)) };
-  const findings = diagnoseAxes({ config, env, dotenv, installed: installedOverride ?? detectInstalled(), catalog });
+  // The user layer (ADR-0040) through the one reader; like `.env`, an injected config is a hermetic caller and gets none unless it injects one.
+  const user = userOverride ?? (configOverride ? {} : readUserConfig({ env }));
+  const findings = diagnoseAxes({ config, env, dotenv, ...user, installed: installedOverride ?? detectInstalled(), catalog });
   for (const line of axesLines(findings, catalog)) console.log(line);
 }
 
