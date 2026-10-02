@@ -91,6 +91,11 @@ The axes are `vcs`, `memory`, `platform` and `sdd`. Each selector is `<axis>.def
 3. `brain.config.json` `<axis>.default`, the team's choice;
 4. otherwise **undeclared**.
 
+**VCS is the single exception: it has no `.env` level.** Its precedence is the process env, then
+`brain.config.json` `vcs.default`, then undeclared. The provider is dictated by where the repo lives,
+and there is no per-developer freedom: a project lives in one repository (ADR-0008, lines 12 and 18).
+A CI-detected provider sits outside this precedence (Ratified point 1).
+
 The env keys keep their names: `VCS_PROVIDER`, `MEMORY_BACKEND`, `AGENT_PLATFORM`, `SDD_ENGINE`.
 A value from any level that is not a key of `<axis>.providers` is invalid and is refused. It is
 never coerced to another provider.
@@ -170,7 +175,7 @@ belongs to #1129 and #1128.
 | Provider | `orchestrate` | Executes a stage prompt | May appear as |
 |---|---|---|---|
 | `claude` | yes | yes | `platform.default`, `engine` |
-| `antigravity` | yes | per its adapter | `platform.default`; `engine` only if its adapter declares the ability |
+| `antigravity` | yes | not until a stage-runtime adapter exists (#1128, #1129) | `platform.default` |
 | `codex` | no | yes | `engine` only |
 | `gemini` | no | yes | `engine` only |
 | `plain` | yes, as a human orchestrator | no | `platform.default` only |
@@ -235,10 +240,26 @@ consumer is asked.
 | flat `platform`, `engine`, `harness`; legacy `SDD_HARNESS` (#643) | `platform.default` / `sdd.default` plus the matching `providers.<name>` |
 | `sdd.configs` + `sdd.map` | `sdd.roles`; #1132 owns this reshape and implements it, and this ADR fixes only its target |
 
-- **Every routed engine is declared too.** The migration adds to `platform.providers`, as `{}`, every
-  engine already referenced in `sdd.map` and, if present, `sdd.configs`. This repository's own
-  `brain.config.json` routes `cold-review` to `codex` (`brain.config.json:51-52`); without this step,
-  the reshaped `sdd.roles['cold-review']` would be refused by section 4.
+- **`sdd.map.<stage>.engine` is migrated by what it names.**
+  - For a lifecycle stage it names a FRAMEWORK: only `gentle-ai` or `plain` are valid there
+    (`lib/stage-engine.mjs:227-233`, `assertRoutedStage`). The migration maps it to the provider part
+    of `agent`, as `"agent": "<that framework>:<the stage's role>"`, and NEVER adds it to
+    `platform.providers`.
+  - For a custom stage it names a RUNTIME. It goes to `sdd.roles.<stage>.engine` and is added to
+    `platform.providers` as `{}`. The same applies to an engine a custom stage names in
+    `sdd.configs`, if present. This repository's own `brain.config.json` routes `cold-review` to
+    `codex` (`brain.config.json:51-52`); without this step, the reshaped `sdd.roles['cold-review']`
+    would be refused by section 4.
+- **The `brain` SDD provider is declared on every consumer.** The migration writes
+  `sdd.providers.brain` as `{ "version": "self" }`. It is not a provider to build later: it is what
+  brain already runs, given a name. Today `brain:review` itself runs the cold-review stage
+  (ADR-0033), so the migration writes `sdd.roles['cold-review'].agent` as `"brain:cold-review"`,
+  plus the `engine` and `model` it finds in `sdd.map['cold-review']`.
+- **A machine-written `.env` no longer shadows the team's choice.** From S3 on, `env:init` writes no
+  axis selector (`AGENT_PLATFORM` or any other) into `.env`. It declares the value in tracked config,
+  as memory does since #1165. The writer to change is `bootstrap.sh:511-521`. The migration does not
+  edit `.env`. For an existing `.env`, `brain:doctor` warns when an axis selector there shadows the
+  axis `default` in config, and prints the command that removes it.
 - **The value an existing consumer runs today is written into config.** It is taken from the
   process env or `.env` when either declares it, and otherwise from today's default: `claude` for
   `platform`, `gentle-ai` for `sdd`. An undeclared `memory` or `vcs` stays undeclared, since it
@@ -283,7 +304,7 @@ was ever chosen.
       "brain": { "version": "self" }
     },
     "roles": {
-      "cold-review": { "agent": "brain:adversary-cold-review", "engine": "codex", "model": "gpt-5.5" },
+      "cold-review": { "agent": "brain:cold-review", "engine": "codex", "model": "gpt-5.5" },
       "design": { "model": "claude-opus-5-5" }
     }
   }
@@ -308,7 +329,7 @@ Two configs this decision refuses:
   "sdd": {
     "default": "gentle-ai",
     "providers": { "gentle-ai": { "version": "1.20.0" } },
-    "roles": { "cold-review": { "agent": "brain:adversary-cold-review", "engine": "gemini" } }
+    "roles": { "cold-review": { "agent": "brain:cold-review", "engine": "gemini" } }
   }
 }
 ```
@@ -324,8 +345,10 @@ platform provider (`gemini`) that the config does not declare.
 - **One reader for every axis.** One precedence, one refusal and one validation rule replace the
   four resolvers in Context and the shell resolver in `bootstrap.sh`.
 - **Defaults are declared, not inherited.** A fresh clone, a teammate or CI runs what the tracked
-  config names, never what the code happens to default to (the #1165 defect, closed for the two
-  axes it did not reach).
+  config names, never what the code happens to default to. This closes the #1165 defect for the two
+  axes it did not reach, from the moment `env:init` stops writing axis selectors into `.env`
+  (section 7). A `.env` written before that still shadows the config on its own machine;
+  `brain:doctor` reports it and prints the fix.
 - **"Engine" has one meaning per field.** `agent` names the framework and role, and `engine` names
   the runtime. The runner can stop branching on runtime names (#1129).
 - **Several SDD providers coexist** under one validated table, and the first-party shelf gets a
@@ -371,6 +394,10 @@ and two axes would answer "undeclared" by guessing while two refuse. ADR-0004 Am
 ruled this for memory, for the reason that applies here: a second checkout runs something other
 than the team's choice and nobody is told.
 
+**VCS with the `.env` level like every other axis.** The VCS provider is dictated by where the
+repo lives, and there is no per-developer freedom: a project lives in one repository (ADR-0008,
+lines 12 and 18). A per-machine level would only let one checkout disagree with the host.
+
 **Two runtime axes** (a platform axis and a review-engine axis). Both hold agent CLIs that execute
 a prompt, `claude` belongs to both, and each stage would have to say which of the two axes its
 `engine` comes from. One axis with per-provider capabilities expresses the same thing with one
@@ -381,9 +408,9 @@ declaration per runtime.
 - **No code changes here.** `resolveAxis`, the migrations, the aliases and the refusals are #1114
   S2 and S3. The `sdd.configs` + `sdd.map` → `sdd.roles` reshape and its projection into each
   platform are #1132.
-- **The `brain` SDD provider does not exist yet.** `axes/sdd-engine/adapters/` holds `gentle-ai`
-  and `plain`. Making the first-party shelf a provider that declares roles through the port is
-  #1132's work, under ADR-0023.
+- **The `brain` SDD provider's roles beyond cold-review.** The provider exists as the roles brain
+  already ships: `cold-review` today, run by `brain:review` (ADR-0033). First-party roles for other
+  stages, declared through the port, are #1132's work, under ADR-0023.
 - **The runtime adapters are not merged.** `axes/platform/adapters/` and
   `axes/review-engine/adapters/` stay two directories until a slice moves them. This ADR rules that
   they are one axis in config, and that a provider lacking a capability is refused wherever that
@@ -406,8 +433,9 @@ declaration per runtime.
 - **ADR-0004.** The selector key `memory.backend` becomes `memory.default` plus `memory.providers`,
   with a one-minor read-only alias. Amendment 3's precedence and no-default rule are unchanged.
 - **ADR-0008.** `vcs.provider` becomes `vcs.default` plus `vcs.providers`, with the same alias.
-  VCS gains the `.env` level of the shared precedence, which reverses ADR-0008's "not in `.env`".
-  The runtime-detected CI provider sits outside the precedence (Ratified point 1).
+  ADR-0008's no-`.env` rule stands: VCS is the exception to the shared precedence (section 2). The
+  runtime-detected CI provider sits outside the precedence and needs only a shipped adapter
+  (Ratified point 1).
 - **ADR-0023.** The shelf becomes an SDD provider named `brain` (`"version": "self"`). Stage → role
   routing, including the model that decision 4 leaves to routing, lives in `sdd.roles`.
 - **ADR-0024.** Four config axes in one shape. `platform.providers` covers every agent runtime, and
@@ -424,8 +452,13 @@ These four points were open in the first draft. The maintainer ruled on each one
 
 1. **The runtime-detected VCS provider.** A CI-detected provider (ADR-0016's `ctx.provider`, for
    example `gitlab` on a GitLab job) is a fact about the host that the caller passes. It sits
-   outside the env > `.env` > config precedence and is not a fifth level. It must still be a key of
-   `vcs.providers`; if it is not, it is refused.
+   outside the VCS precedence (section 2) and is not another level. It does NOT need to be a key of
+   `vcs.providers`; it needs only that brain ships an adapter for it.
+   - **Corrected after the cold review of PR #1249.** The first ruling required it to be a key of
+     `vcs.providers`. The maintainer revised that on 2026-10-02: the detected provider is a fact
+     about the host, not a team choice, and today it lets a GitLab CI job on a mirror of a
+     github-configured repo dispatch to `gitlab` (`vcs/cli.mjs:79-82`, finding #14). Requiring the
+     key would refuse that job.
 2. **`brain:config -- set <axis>.default <name>` also creates `providers.<name>` as `{}`** when that
    entry is absent. The command a refusal names therefore always produces a valid config.
 3. **`version` is suggested, never written by a migration.**
