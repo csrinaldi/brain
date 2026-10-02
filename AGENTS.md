@@ -95,6 +95,7 @@ See [`brain/project/README.md`](brain/project/README.md) for directory conventio
 - [ADR-0036](brain/project/decisions/adr-0036-a-change-is-done-when-it-works-on-a-fresh-consumer-install.md) — A change is done when it works on a fresh consumer install, at a cost one person can pay
 - [ADR-0037](brain/project/decisions/adr-0037-autonomy-is-configurable-modes-a-b-c.md) — Autonomy is configurable: modes A, B and C, B by default, and the producing identity never approves or merges
 - [ADR-0038](brain/project/decisions/adr-0038-one-config-shape-per-axis-default-and-providers.md) — One configuration shape per axis: a `default` that names a key of `providers`, and no axis defaults in code
+- [ADR-0040](brain/project/decisions/adr-0040-who-defines-the-project-owned-team-config-a-user-layer-and-locked-axes.md) — Who defines the project: an owned team config, a `~/.brain` user layer, and locked axes
 
 ### Project-specific rules
 
