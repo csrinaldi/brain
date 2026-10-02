@@ -95,8 +95,13 @@ function unquote(value) {
   return value;
 }
 
-/** Reads and parses `<root>/.env`. A missing or unreadable file is `{}` — an
- *  absent file is the common case, not an error. */
+/** Reads and parses `<root>/.env` (or `envFile`). A missing or unreadable file is `{}` — an
+ *  absent file is the common case, not an error. Exported for callers that hand a PARSED `.env`
+ *  to `resolveAxis` (#1114 S2); the value is never printed. */
+export function readDotenv(root = process.cwd(), envFile = null) {
+  return readFile(root, envFile);
+}
+
 function readFile(root, envFile) {
   const path = envFile ?? join(root, '.env');
   try {

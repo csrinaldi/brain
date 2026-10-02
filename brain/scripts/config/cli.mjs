@@ -11,24 +11,30 @@ import { fileURLToPath } from 'node:url';
 
 import { planConfigWrite, resolvePath } from './config-verb.mjs';
 import { parseEnvFile } from '../lib/env-read.mjs';
-import { AXES, readAxis, diagnoseAxes } from '../lib/axis-config.mjs';
+import { AXES, readAxis, diagnoseAxes, tryResolveAxis } from '../lib/axis-config.mjs';
+import { t } from '../i18n/t.mjs';
 import { detectInstalled } from '../lib/axis-installed.mjs';
 import { resolveAxisMigrationContext } from '../lib/axis-migration-context.mjs';
 
 const USAGE = `Usage: npm run brain:config -- get <path>
        npm run brain:config -- set <path> <value>
        npm run brain:config -- default <axis>
-       npm run brain:config -- resolve <platform|sdd>
+       npm run brain:config -- resolve <${AXES.join('|')}>
        npm run brain:config -- diagnose
   <path> is dot-separated (e.g. docs.language, sdd.map.cold-review).
   <value> parses as JSON first, bare string on failure.
   default <axis> prints the axis default (${AXES.join('|')}): the ADR-0038 shape, else the legacy key;
   an empty line when undeclared.
-  resolve <platform|sdd> runs the real resolver (process env, .env, config, default) and prints
-  "<run> <repo> <source>": the value this run uses, the value the repo states (the process env is
-  per-invocation and never the repo's), and where that repo value comes from (.env|config|default).
+  resolve <axis> runs the real resolver (resolveAxis: process env, .env, config, legacy alias; no default) and prints
+  "<run> <repo> <run-where> <repo-where>": the value this run uses, the value the repo states (the process env is
+  per-invocation and never the repo's; "-" when only the process env states one), and where each comes from
+  (process-env|dotenv|config|runtime). Exit 3 when nothing declares the axis, 4 when a declared value is refused.
   diagnose prints the axis findings as JSON: [{ axis, code, severity, message, fix }]. Findings, never
   failures: it exits 0. It names selector keys only and never prints .env.`;
+
+/** `resolve` exit codes (bootstrap.sh reads them): nothing declared, and a declared value that is refused. */
+export const EXIT_UNDECLARED = 3;
+export const EXIT_REFUSED = 4;
 
 function fail(msg) {
   console.error(`brain:config: ${msg}`);
@@ -77,18 +83,21 @@ export async function main(argv = process.argv.slice(2), root = process.cwd()) {
   }
 
   if (op === 'resolve') {
-    // The shell must not compose its own precedence (#1114 S3.3 review): this is the code the runtime runs.
-    if (path !== 'platform' && path !== 'sdd') fail(`unknown axis '${path}' — resolve takes platform or sdd.`);
-    const { resolvePlatform } = await import('../harness/platform.mjs');
-    const { resolveEngine } = await import('../harness/cli.mjs');
-    const resolver = path === 'platform' ? resolvePlatform : resolveEngine;
+    // The shell must not compose its own precedence (#1114 S3.3 review): this is the code the runtime runs, `resolveAxis`.
+    if (!AXES.includes(path)) fail(`unknown axis '${path}' — resolve takes ${AXES.join(', ')}.`);
     const dotenvPath = join(root, '.env');
-    const envVars = existsSync(dotenvPath) ? parseEnvFile(readFileSync(dotenvPath, 'utf8')) : {};
-    const run = resolver({ env: process.env, envVars, config });
-    const repo = resolver({ env: {}, envVars, config });
-    const bare = resolver({ env: {}, envVars: {}, config });
-    const source = repo !== bare ? '.env' : readAxis(config, path).default !== '' ? 'config' : 'default';
-    console.log(`${run} ${repo} ${source}`);
+    const dotenv = existsSync(dotenvPath) ? parseEnvFile(readFileSync(dotenvPath, 'utf8')) : {};
+    const run = tryResolveAxis(path, { env: process.env, dotenv, config });
+    // The REPO value: what the repo states without this invocation's process env (it is per-run, never the team's).
+    const repo = tryResolveAxis(path, { env: {}, dotenv, config, notice: () => {} });
+    // A refusal prints its fix in the active locale; the exit status names the kind: 3 undeclared, 4 refused.
+    if (!run.ok) {
+      console.error(`brain:config: ${await t(run.refusal.key, run.refusal.params)}`);
+      process.exit(run.refusal.code === 'undeclared' ? EXIT_UNDECLARED : EXIT_REFUSED);
+    }
+    // `<run> <repo> <run-where> <repo-where>`: where is process-env|dotenv|config|runtime. A repo that states nothing
+    // of its own (only this run's process env does) prints `-` for both repo fields.
+    console.log(`${run.value} ${repo.ok ? repo.value : '-'} ${run.where} ${repo.ok ? repo.where : '-'}`);
     return;
   }
 

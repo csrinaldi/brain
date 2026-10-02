@@ -13,11 +13,9 @@ import { fileURLToPath } from 'node:url';
 
 import { migrations, NEW_CONSUMER_DEFAULTS } from '../../core/config-migrations.mjs';
 import { migrateConfig, mergeDefaults } from './installer.mjs';
-import { validateAxisConfig, readAxis } from './axis-config.mjs';
+import { validateAxisConfig, readAxis, resolveAxis, tryResolveAxis } from './axis-config.mjs';
 import { resolveAxisMigrationContext } from './axis-migration-context.mjs';
 import { LIFECYCLE_STAGES } from './sdd-layout.mjs';
-import { resolvePlatform } from '../harness/platform.mjs';
-import { resolveEngine } from '../harness/cli.mjs';
 import { resolveProviderName } from '../vcs/cli.mjs';
 import { resolveMemoryBackend } from '../memory/lib/backend-resolve.mjs';
 import { parseEnvFile } from './env-read.mjs';
@@ -237,6 +235,14 @@ test('this repository: cold-review keeps routing to codex through sdd.roles and 
 });
 
 // ── parity: the resolvers answer the same before and after ─────────────────
+// "Before" is what the resolvers ran BEFORE #1114 S2: today's code default (claude, gentle-ai) where nothing was
+// declared. S2 removed those defaults, so the oracle below applies them and the migrated config must still answer the same.
+const PRE_S2_DEFAULTS = { platform: 'claude', sdd: 'gentle-ai' };
+const preS2 = (axis, config, env, envVars) => {
+  const r = tryResolveAxis(axis, { env, dotenv: envVars, config, notice: () => {} });
+  return r.ok ? r.value : PRE_S2_DEFAULTS[axis];
+};
+
 const PARITY = [
   ['legacy everything', { vcs: { provider: 'github' }, memory: { backend: 'engram' }, platform: 'antigravity', engine: 'plain' }, {}, null],
   ['nothing stated', { vcs: { provider: 'gitlab' }, memory: { backend: '' } }, {}, null],
@@ -244,7 +250,6 @@ const PARITY = [
   ['process env states the platform', { vcs: { provider: 'github' } }, { AGENT_PLATFORM: 'antigravity' }, null],
   ['legacy SDD_HARNESS names a platform', { vcs: { provider: 'github' } }, {}, 'SDD_HARNESS=plain\n'],
   ['config harness', { vcs: { provider: 'github' }, harness: 'antigravity' }, {}, null],
-  ['env overrides config afterwards', { vcs: { provider: 'github' }, memory: { backend: 'plainfiles' }, platform: 'plain' }, { MEMORY_BACKEND: 'engram', VCS_PROVIDER: 'gitlab' }, null],
 ];
 
 for (const [name, before, env, dotenv] of PARITY) {
@@ -256,10 +261,11 @@ for (const [name, before, env, dotenv] of PARITY) {
       const c = resolveAxisMigrationContext({ config: before, env, root });
       const after = run(before, c).out;
 
-      assert.equal(resolvePlatform({ env, envVars, config: after }), resolvePlatform({ env, envVars, config: before }), 'platform');
-      assert.equal(resolveEngine({ env, envVars, config: after }), resolveEngine({ env, envVars, config: before }), 'engine');
+      const quiet = { notice: () => {} };
+      assert.equal(resolveAxis('platform', { env, dotenv: envVars, config: after, ...quiet }).value, preS2('platform', before, env, envVars), 'platform');
+      assert.equal(resolveAxis('sdd', { env, dotenv: envVars, config: after, ...quiet }).value, preS2('sdd', before, env, envVars), 'engine');
 
-      const vcs = (config) => { try { return resolveProviderName({ config, env }); } catch (e) { return `refused:${e.message}`; } };
+      const vcs = (config) => { try { return resolveProviderName({ config, env }); } catch (e) { return `refused:${e.code}`; } };
       assert.equal(vcs(after), vcs(before), 'vcs');
 
       const memory = (config) => {
@@ -274,3 +280,16 @@ for (const [name, before, env, dotenv] of PARITY) {
     }
   });
 }
+
+test('an env override of a provider the migration did not list is REFUSED afterwards (ADR-0038 section 2), and listing it restores it', () => {
+  const before = { vcs: { provider: 'github' }, memory: { backend: 'plainfiles' }, platform: 'plain' };
+  const after = run(before, resolveAxisMigrationContext({ config: before, env: {}, root: tmpdir() })).out;
+  const env = { MEMORY_BACKEND: 'engram', VCS_PROVIDER: 'gitlab', AGENT_PLATFORM: 'antigravity' };
+  assert.throws(() => resolveProviderName({ config: after, env }), (e) => e.code === 'not-a-provider');
+  assert.throws(() => resolveAxis('platform', { env, config: after }), (e) => e.code === 'not-a-provider');
+  const listed = structuredClone(after);
+  listed.vcs.providers.gitlab = {};
+  listed.platform.providers.antigravity = {};
+  assert.equal(resolveProviderName({ config: listed, env }), 'gitlab');
+  assert.equal(resolveAxis('platform', { env, config: listed }).value, 'antigravity');
+});

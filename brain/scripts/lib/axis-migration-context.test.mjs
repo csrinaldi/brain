@@ -9,8 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { resolveAxisMigrationContext } from './axis-migration-context.mjs';
-import { resolvePlatform } from '../harness/platform.mjs';
-import { resolveEngine } from '../harness/cli.mjs';
+import { tryResolveAxis } from './axis-config.mjs';
 import { parseEnvFile } from './env-read.mjs';
 import { LIFECYCLE_STAGES } from './sdd-layout.mjs';
 
@@ -42,17 +41,35 @@ const TABLE = [
   ['empty process env value', { AGENT_PLATFORM: '', SDD_ENGINE: '' }, null, { platform: 'plain', engine: 'plain' }],
 ];
 
+// What the resolvers answered before #1114 S2: `resolveAxis`'s answer, and today's code default where it refuses as
+// undeclared. The migration writes exactly that, so a consumer keeps running what it ran.
+const PRE_S2 = { platform: 'claude', sdd: 'gentle-ai' };
+const effectiveToday = (axis, { env, envVars, config }) => {
+  const r = tryResolveAxis(axis, { env, dotenv: envVars, config, notice: () => {} });
+  return r.ok ? r.value : PRE_S2[axis];
+};
+
 for (const [name, env, dotenv, config] of TABLE) {
-  test(`parity with resolvePlatform / resolveEngine: ${name}`, () => {
+  test(`parity with resolveAxis (plus today's default where it is undeclared): ${name}`, () => {
     withRoot(dotenv, (root) => {
       const envVars = dotenv === null ? {} : parseEnvFile(dotenv);
       const ctx = resolveAxisMigrationContext({ config, env, root });
-      assert.equal(ctx.platform.value, resolvePlatform({ env, envVars, config }), 'platform');
-      assert.equal(ctx.sdd.value, resolveEngine({ env, envVars, config }), 'sdd');
+      assert.equal(ctx.platform.value, effectiveToday('platform', { env, envVars, config }), 'platform');
+      assert.equal(ctx.sdd.value, effectiveToday('sdd', { env, envVars, config }), 'sdd');
       assert.ok(ctx.platform.source && ctx.sdd.source, 'every value names its source');
     });
   });
 }
+
+test('a per-machine value the resolver would REFUSE is never written into tracked config: the axis is left undeclared', () => {
+  withRoot('AGENT_PLATFORM=bogus\n', (root) => {
+    const ctx = resolveAxisMigrationContext({ config: {}, env: {}, root });
+    assert.equal(ctx.platform.value, '');
+    assert.match(ctx.platform.source, /refused/);
+    assert.doesNotMatch(JSON.stringify(ctx), /bogus/);
+    assert.equal(ctx.sdd.value, 'gentle-ai');
+  });
+});
 
 test('sources name where the value came from, and never carry the value of an unrelated key', () => {
   withRoot('AGENT_PLATFORM=plain\nSDD_ENGINE=plain\nSECRET_TOKEN=hunter2\n', (root) => {

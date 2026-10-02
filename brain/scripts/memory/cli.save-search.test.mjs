@@ -22,7 +22,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const cliPath = join(dirname(fileURLToPath(import.meta.url)), 'cli.mjs');
+const cliPath = join(dirname(fileURLToPath(import.meta.url)), 'cli.mjs'); const MEMORY_TEST_CONFIG = join(dirname(cliPath), '__fixtures__', 'brain.config.memory.json');
 
 const ISOLATED_GIT_ENV = { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' };
 // #714: `BRAIN_MEMORY_UPSTREAM_REF` is stripped alongside `AI_AGENT` — the
@@ -51,7 +51,7 @@ function runCli(args, { backend = 'plainfiles', testRoot, withAgent = true } = {
   const base = withAgent ? { ...ENV_NO_AI_AGENT, AI_AGENT: 'test-agent' } : ENV_NO_AI_AGENT;
   return spawnSync(process.execPath, [cliPath, ...args], {
     encoding: 'utf8',
-    env: { ...base, ...ISOLATED_GIT_ENV, MEMORY_BACKEND: backend, ...(testRoot ? { BRAIN_MEMORY_TEST_ROOT: testRoot } : {}) },
+    env: { ...base, ...ISOLATED_GIT_ENV, MEMORY_BACKEND: backend, BRAIN_MEMORY_CONFIG_FILE: MEMORY_TEST_CONFIG, ...(testRoot ? { BRAIN_MEMORY_TEST_ROOT: testRoot } : {}) },
   });
 }
 
@@ -142,7 +142,7 @@ test(
         ...ENV_NO_AI_AGENT,
         ...ISOLATED_GIT_ENV,
         HOME: isolatedHome,
-        MEMORY_BACKEND: 'plainfiles',
+        MEMORY_BACKEND: 'plainfiles', BRAIN_MEMORY_CONFIG_FILE: MEMORY_TEST_CONFIG,
         BRAIN_MEMORY_TEST_ROOT: testRoot,
       },
     });

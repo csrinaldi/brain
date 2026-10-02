@@ -45,7 +45,7 @@ import { fileURLToPath } from 'node:url';
 import { removeTempTree } from './__fixtures__/tmp-tree.mjs';
 import { resolvePlatform } from './harness/platform.mjs';
 import { resolveEngine } from './harness/cli.mjs';
-import { readAxis, validateAxisConfig, AXES } from './lib/axis-config.mjs';
+import { readAxis, validateAxisConfig, resolveAxis, AXES } from './lib/axis-config.mjs';
 import { ensureBrainConfig } from './lib/brain-config.mjs';
 
 const SCRIPTS = dirname(fileURLToPath(import.meta.url));
@@ -102,7 +102,8 @@ const STUBS = [
   'MISSING_OPTIONAL=()',
   'REQUIRED_FAILURES=()',
   'I18N_BOOTSTRAP_AXIS_DECLARED="declared %s=%s %s"',
-  'I18N_BOOTSTRAP_AXIS_RESOLVEFAILED="resolvefailed %s %s"',
+  'I18N_BOOTSTRAP_AXIS_REFUSED="refused %s: %s"',
+  'I18N_BOOTSTRAP_AXIS_REFUSEDNEXT="refused-next %s (%s)"',
   'I18N_BOOTSTRAP_AXIS_ENVONLY="envonly %s %s %s %s"',
   'I18N_BOOTSTRAP_AXIS_DECLAREFAILED="failed %s %s %s"',
   'ok() { :; }',
@@ -186,13 +187,17 @@ test('#1125 bootstrap.sh: a process-env platform wins for the run and does NOT r
   // The antigravity backend's REGENERATE_HINT is
   // `AGENT_PLATFORM=antigravity npm run brain:env:init`. It must run antigravity
   // for that invocation, and must not silently switch a claude repo's .env.
-  const { platform, dotenv, config } = runBlock({
+  const { platform, dotenv, config, missing } = runBlock({
     procEnv: { AGENT_PLATFORM: 'antigravity' },
     envFile: 'AGENT_PLATFORM=claude\n',
   });
   assert.equal(platform, 'antigravity');
   assert.equal(dotenv, 'AGENT_PLATFORM=claude\n', '.env is left exactly as stated');
-  assert.equal(config.platform.default, 'claude', 'the repo value here equals today\'s default, so that default is declared; the process-env one-off never is');
+  // The repo value claude comes from `.env`, and the resolver SAYS so (#1114 S3.4): it used to be inferred by comparing
+  // values, so a `.env` claude that equalled the old code default was declared as if nothing stated it. A per-machine value
+  // is never the team's tracked default; the process-env one-off never is either.
+  assert.equal(config.platform, undefined, 'a value only .env states is not declared');
+  assert.match(missing, /platform claude is declared only on this machine/);
 });
 
 test('#1125 bootstrap.sh: a process-env platform on a fresh repo is NOT declared — config records the repo\'s own answer', () => {
@@ -262,7 +267,9 @@ test('#1125/#1114 bootstrap.sh and resolvePlatform/resolveEngine give ONE answer
       if (c.fileSH) envVars.SDD_HARNESS = c.fileSH;
       if (c.fileSE) envVars.SDD_ENGINE = c.fileSE;
       const config = c.cfgH ? { harness: c.cfgH } : {};
-      const js = `${resolvePlatform({ env, envVars, config })} ${resolveEngine({ env, envVars, config })}`;
+      // Where the resolver REFUSES as undeclared, bootstrap declares a NEW consumer's starting value (claude, gentle-ai) in config.
+      const orNew = (fn, fallback) => { try { return fn({ env, envVars, config }); } catch (e) { if (e.code !== 'undeclared') throw e; return fallback; } };
+      const js = `${orNew(resolvePlatform, 'claude')} ${orNew(resolveEngine, 'gentle-ai')}`;
       if (out[i] !== js) mismatches.push({ ...c, shell: out[i], js });
     });
     assert.deepEqual(mismatches, [], 'bootstrap.sh must run what the resolvers resolve');
@@ -333,7 +340,7 @@ test('#1114 S3.3 bootstrap.sh: a platform the config already declares is the rep
 });
 
 test('#1114 S3.3 bootstrap.sh: .env still beats the config, as every resolver has it, and a stale .env is not "fixed"', () => {
-  const config = { platform: { default: 'claude', providers: { claude: {} } } };
+  const config = { platform: { default: 'claude', providers: { claude: {}, antigravity: {} } } };
   const r = runBlock({ config, envFile: 'AGENT_PLATFORM=antigravity\n' });
   assert.equal(r.platform, 'antigravity');
   assert.equal(r.config.platform.default, 'claude');
@@ -356,18 +363,30 @@ test('#1114 S3.3 bootstrap.sh: a failed declaration is reported, and the run sti
   }
 });
 
-test('#1114 S3.3 bootstrap.sh: an unresolvable config is reported and the run falls back to the default, declaring nothing', () => {
+test('#1114 S2 bootstrap.sh: an unresolvable config is REFUSED and reported; nothing falls back to claude/gentle-ai, nothing is declared', () => {
   const dir = mkdtempSync(join(tmpdir(), 'brain-1114-resfail-'));
   try {
     writeFileSync(join(dir, 'brain.config.json'), '{ not json');
-    const script = ['set -euo pipefail', STUBS, envHelpers(), declareHelpers(), platformBlock(), sddBlock(), 'printf "%s %s|%s" "$AGENT_PLATFORM" "$SDD_ENGINE" "${MISSING_OPTIONAL[*]:-}"'].join('\n');
+    const script = ['set -euo pipefail', STUBS, envHelpers(), declareHelpers(), platformBlock(), sddBlock(), 'printf "[%s] [%s]|%s" "$AGENT_PLATFORM" "$SDD_ENGINE" "${MISSING_OPTIONAL[*]:-}"'].join('\n');
     const r = spawnSync('bash', ['-c', script], { cwd: dir, encoding: 'utf8', env: BASE_ENV, stdio: ['ignore', 'pipe', 'pipe'], timeout: 60_000 });
     assert.equal(r.status, 0, r.stderr);
-    assert.match(r.stdout, /^claude gentle-ai\|platform not resolved.*sdd not resolved/);
+    assert.match(r.stdout, /^\[\] \[\]\|/, 'no harness is resolved: the old claude/gentle-ai fallback is gone');
+    assert.match(r.stdout, /refused-next platform .*brain:config -- resolve platform.*refused-next sdd/);
+    assert.match(r.stderr, /refused platform: .*not valid JSON/);
     assert.equal(readFileSync(join(dir, 'brain.config.json'), 'utf8'), '{ not json', 'a config that could not be read is never written over');
   } finally {
     removeTempTree(dir);
   }
+});
+
+test('#1114 S2 bootstrap.sh: a per-machine value the resolver REFUSES (not listed in platform.providers) is reported with its fix, and is not run', () => {
+  const config = { platform: { default: 'claude', providers: { claude: {} } }, sdd: { default: 'gentle-ai', providers: { 'gentle-ai': {} } } };
+  const r = runBlock({ config, envFile: 'AGENT_PLATFORM=antigravity\n' });
+  assert.equal(r.platform, '', 'nothing runs on a refused value');
+  assert.equal(r.engine, 'gentle-ai');
+  assert.match(r.missing, /refused-next platform/);
+  assert.match(r.stderr, /refused platform: .*not a key of platform\.providers/);
+  assert.deepEqual(r.config, config, 'a refused axis is never rewritten');
 });
 
 test('#1114 S3.3 a FRESH install ends with every axis declared in config (the S2 refusal never fires)', () => {
@@ -391,6 +410,13 @@ test('#1114 S3.3 a FRESH install ends with every axis declared in config (the S2
       assert.ok(Object.hasOwn(a.providers, a.default), `${axis}.default is a key of ${axis}.providers`);
     }
     assert.deepEqual(validateAxisConfig(config).errors, []);
+    // The #1114 S2 proof: with the code defaults GONE, the fresh install's own config answers every axis through the one resolver
+    // (no .env, no process env: a second checkout and CI see exactly this).
+    for (const axis of AXES) {
+      const r = resolveAxis(axis, { env: {}, dotenv: {}, config });
+      assert.equal(r.source, 'config', `${axis} resolves from the tracked config alone`);
+      assert.equal(r.value, readAxis(config, axis).default, axis);
+    }
     assert.equal(existsSync(join(dir, '.env')), false, 'no .env was needed or written');
   } finally {
     removeTempTree(dir);
@@ -403,7 +429,7 @@ function successLine({ procEnv = {}, envFile = null, config = {} } = {}) {
   try {
     if (envFile !== null) writeFileSync(join(dir, '.env'), envFile);
     writeFileSync(join(dir, 'brain.config.json'), JSON.stringify(config, null, 2) + '\n');
-    const src = (prefix) => LINES.find((l) => l.startsWith(prefix));
+    const src = (prefix) => LINES.map((l) => l.trim()).find((l) => l.startsWith(prefix));
     const okLine = src('ok "$(printf "$I18N_BOOTSTRAP_SDD_OK"');
     assert.ok(okLine, 'bootstrap.sh must report the harness through I18N_BOOTSTRAP_SDD_OK');
     const script = [
@@ -427,11 +453,14 @@ function successLine({ procEnv = {}, envFile = null, config = {} } = {}) {
 }
 
 test('#1114 S3.4 bootstrap.sh: the harness success line names where the run values came from', () => {
-  const declared = { schemaVersion: '1.11.1', platform: { default: 'claude', providers: { claude: {} } }, sdd: { default: 'gentle-ai', providers: { 'gentle-ai': {} } } };
+  const declared = { schemaVersion: '1.11.1', platform: { default: 'claude', providers: { claude: {}, antigravity: {} } }, sdd: { default: 'gentle-ai', providers: { 'gentle-ai': {}, plain: {} } } };
   assert.equal(successLine({ config: declared }), 'OK:harness: gentle-ai (claude) (brain.config.json)');
   assert.equal(successLine({ config: declared, envFile: 'AGENT_PLATFORM=antigravity\nSDD_ENGINE=plain\n' }), 'OK:harness: plain (antigravity) (.env)');
   assert.equal(successLine({ config: declared, procEnv: { AGENT_PLATFORM: 'antigravity', SDD_ENGINE: 'plain' } }), 'OK:harness: plain (antigravity) (process env)');
-  assert.equal(successLine({ config: { schemaVersion: '1.11.1' } }), 'OK:harness: gentle-ai (claude) (default)');
+  assert.equal(successLine({ config: { schemaVersion: '1.11.1' } }), 'OK:harness: gentle-ai (claude) (brain.config.json)', 'a new consumer: declared by env:init just now');
+  // The label is the resolver's WINNING level, never an inequality (#1114 S3.4): a process env EQUAL to the config is still the process env.
+  assert.equal(successLine({ config: declared, procEnv: { AGENT_PLATFORM: 'claude', SDD_ENGINE: 'gentle-ai' } }), 'OK:harness: gentle-ai (claude) (process env)');
+  assert.equal(successLine({ config: declared, envFile: 'AGENT_PLATFORM=claude\nSDD_ENGINE=gentle-ai\n' }), 'OK:harness: gentle-ai (claude) (.env)');
   assert.equal(successLine({ config: declared, envFile: 'AGENT_PLATFORM=antigravity\n' }), 'OK:harness: gentle-ai (antigravity) (platform: .env; engine: brain.config.json)');
 });
 

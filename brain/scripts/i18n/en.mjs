@@ -248,9 +248,16 @@ export default {
   'axes.diagnose.invalidConfig':            'brain.config.json is invalid at {path}: {detail}',
   'axes.diagnose.invalidConfig.fix':        'correct {path} in brain.config.json (npm run brain:config -- get {path} shows what is there)',
   // brain:governance-status "axes" section
+  // #1114 S2 — the refusals of resolveAxis (lib/axis-config.mjs). {names} is the closed set, e.g. github|gitlab.
+  'axes.refusal.undeclared':        "no {axis} is declared: none of {levels} names one, and brain does not guess. Declare the team's choice: npm run brain:config -- set {axis}.default <{names}>",
+  'axes.refusal.invalid':           "{axis} \"{value}\" (from {source}) is not a {axis} brain ships ({names}) — it was refused, not coerced. Fix it where it is set, or declare the team's choice: npm run brain:config -- set {axis}.default <{names}>",
+  'axes.refusal.notListed':         "{axis} \"{value}\" (from {source}) is not a key of {axis}.providers ({listed}) — it was refused, not coerced. List it: npm run brain:config -- set {axis}.providers.{value} '{}'",
+  'axes.refusal.invalidConfig':     "brain.config.json is invalid for {axis}, so it was refused: {detail}",
+  'axes.notice.legacyHarness':      "{key} ({value}, from {where}) is a deprecated way to name the {axis} and stops working after one more minor version. Declare it: npm run brain:config -- set {axis}.default {value}",
+  'bootstrap.axis.refused':         "{axis} was not resolved: {detail}",
+  'bootstrap.axis.refusedNext':     "{axis} refused (next: {fix})",
   'axes.status.title':                      'axes',
   'axes.status.clean':                      'every axis is declared and consistent',
-  'bootstrap.axis.resolveFailed':     'could not resolve the {axis} (config/cli.mjs resolve failed) — running with {name}; nothing was declared',
   'bootstrap.axis.declareFailed':    'could not declare {axis}.default in brain.config.json — set it with: npm run brain:config -- set {axis}.default {name}',
   'bootstrap.memory.declared':       'memory backend saved to brain.config.json (memory.default) — commit it so every checkout runs the same backend',
   'bootstrap.memory.declareFailed':  'could not write memory.default to brain.config.json — set it with: npm run brain:config -- set memory.default {backend}',

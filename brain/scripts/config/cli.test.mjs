@@ -136,42 +136,79 @@ test('#1114 S3.3: the SAME config migrated through brain:upgrade\'s context stil
   assert.ok(notices.some((l) => /platform\.default = antigravity \(from \.env AGENT_PLATFORM\)/.test(l)), notices.join('\n'));
 });
 
-// ── #1114 S3.3 review: `resolve <platform|sdd>` IS the runtime resolver, so the shell composes no precedence ──
+// ── #1114 S3.3 review + S2: `resolve <axis>` IS the runtime resolver (resolveAxis), so the shell composes no precedence ──
 const runEnv = (root, env, ...args) => spawnSync(process.execPath, [CLI, ...args], { cwd: root, encoding: 'utf8', timeout: 30_000, env: { PATH: process.env.PATH, ...env } });
 
-test('#1114 S3.3 cli: resolve prints "<run> <repo> <source>" — the reviewer\'s case (config harness + .env SDD_HARNESS) agrees with resolvePlatform', async (t) => {
+test('#1114 S2 cli: resolve prints "<run> <repo> <run-where> <repo-where>" — the reviewer\'s case (config harness + .env SDD_HARNESS) agrees with resolvePlatform', async (t) => {
   const { resolvePlatform } = await import('../harness/platform.mjs');
   const root = world(t, { schemaVersion: '1.11.0', harness: 'plain' });
   writeFileSync(join(root, '.env'), 'SDD_HARNESS=antigravity\n');
   const r = runEnv(root, {}, 'resolve', 'platform');
   assert.equal(r.status, 0, r.stderr);
-  assert.equal(resolvePlatform({ env: {}, envVars: { SDD_HARNESS: 'antigravity' }, config: { harness: 'plain' } }), 'antigravity');
-  assert.equal(r.stdout, 'antigravity antigravity .env\n', 'the .env SDD_HARNESS outranks config.harness, exactly as resolvePlatform ranks it');
+  assert.equal(resolvePlatform({ env: {}, envVars: { SDD_HARNESS: 'antigravity' }, config: { harness: 'plain' }, notice: () => {} }), 'antigravity');
+  assert.equal(r.stdout, 'antigravity antigravity dotenv dotenv\n', 'the .env SDD_HARNESS outranks config.harness, exactly as resolvePlatform ranks it');
+  assert.match(r.stderr, /SDD_HARNESS .* deprecated/, 'the legacy harness is never used silently');
 });
 
-test('#1114 S3.3 cli: resolve reports the source — config, default, .env — and keeps the run value apart from the repo value', (t) => {
+test('#1114 S2 cli: resolve reports the WINNING level, and keeps the run value apart from the repo value', (t) => {
   const declared = world(t, { schemaVersion: '1.11.1', platform: { default: 'antigravity', providers: { antigravity: {} } } });
-  assert.equal(runEnv(declared, {}, 'resolve', 'platform').stdout, 'antigravity antigravity config\n');
-  const none = world(t, { schemaVersion: '1.11.1' });
-  assert.equal(runEnv(none, {}, 'resolve', 'platform').stdout, 'claude claude default\n');
-  assert.equal(runEnv(none, {}, 'resolve', 'sdd').stdout, 'gentle-ai gentle-ai default\n');
-  // A process-env value is per-invocation: it is the RUN value, never the repo's.
-  assert.equal(runEnv(none, { AGENT_PLATFORM: 'antigravity' }, 'resolve', 'platform').stdout, 'antigravity claude default\n');
-  const dot = world(t, { schemaVersion: '1.11.1' });
+  assert.equal(runEnv(declared, {}, 'resolve', 'platform').stdout, 'antigravity antigravity config config\n');
+  // A process-env value is per-invocation: it is the RUN value, never the repo's. The level is the resolver's, not an inference:
+  // a process env EQUAL to the config still reports process-env (#1114 S3.4 review).
+  assert.equal(runEnv(declared, { AGENT_PLATFORM: 'antigravity' }, 'resolve', 'platform').stdout, 'antigravity antigravity process-env config\n');
+  const two = world(t, { schemaVersion: '1.11.1', platform: { default: 'claude', providers: { claude: {}, antigravity: {} } } });
+  assert.equal(runEnv(two, { AGENT_PLATFORM: 'antigravity' }, 'resolve', 'platform').stdout, 'antigravity claude process-env config\n');
+  const dot = world(t, { schemaVersion: '1.11.1', sdd: { default: '', providers: {} } });
   writeFileSync(join(dot, '.env'), 'SDD_ENGINE=plain\n');
-  assert.equal(runEnv(dot, {}, 'resolve', 'sdd').stdout, 'plain plain .env\n');
+  assert.equal(runEnv(dot, {}, 'resolve', 'sdd').stdout, 'plain plain dotenv dotenv\n');
+  // Only the process env states one: the repo states nothing (`-`).
+  const none = world(t, { schemaVersion: '1.11.1' });
+  assert.equal(runEnv(none, { AGENT_PLATFORM: 'antigravity' }, 'resolve', 'platform').stdout, 'antigravity - process-env -\n');
 });
 
-test('#1114 S3.3 cli: resolve over an unknown axis exits 1; a legacy-keyed config counts as declared', (t) => {
+test('#1114 S2 cli: resolve of an UNDECLARED axis exits 3 with the fix named; a REFUSED value exits 4; no default is ever printed', (t) => {
+  const none = world(t, { schemaVersion: '1.11.1' });
+  for (const [axis, names] of [['platform', 'claude|antigravity|plain'], ['sdd', 'gentle-ai|plain'], ['memory', 'engram|plainfiles'], ['vcs', 'github|gitlab']]) {
+    const r = runEnv(none, {}, 'resolve', axis);
+    assert.equal(r.status, 3, `${axis}: ${r.stderr}`);
+    assert.equal(r.stdout, '', `${axis} prints nothing: a guess is not expressible`);
+    assert.match(r.stderr, new RegExp(`brain:config -- set ${axis}\\.default <${names.replace('|', '\\|').replace('|', '\\|')}>`));
+  }
+  const listed = world(t, { schemaVersion: '1.11.1', platform: { default: 'claude', providers: { claude: {} } } });
+  const refused = runEnv(listed, { AGENT_PLATFORM: 'antigravity' }, 'resolve', 'platform');
+  assert.equal(refused.status, 4);
+  assert.match(refused.stderr, /not a key of platform\.providers/);
+  assert.match(refused.stderr, /set platform\.providers\.antigravity/);
+  const bad = runEnv(none, { AGENT_PLATFORM: 'codex' }, 'resolve', 'platform');
+  assert.equal(bad.status, 4);
+  assert.match(bad.stderr, /not a platform brain ships/);
+});
+
+test('#1114 S2 cli: the fix a refusal prints is a command the verb accepts, and it lifts the refusal', (t) => {
+  const listed = world(t, { schemaVersion: '1.11.1', platform: { default: 'claude', providers: { claude: {} } } });
+  const w = runEnv(listed, {}, 'set', 'platform.providers.antigravity', '{}');
+  assert.equal(w.status, 0, w.stderr);
+  assert.equal(runEnv(listed, { AGENT_PLATFORM: 'antigravity' }, 'resolve', 'platform').status, 0);
+});
+
+test('#1114 S2 cli: resolve over an unknown axis exits 1; a legacy-keyed config counts as declared', (t) => {
   const root = world(t, { schemaVersion: '1.11.0', platform: 'antigravity', engine: 'plain' });
-  assert.equal(runEnv(root, {}, 'resolve', 'vcs').status, 1);
-  assert.equal(runEnv(root, {}, 'resolve', 'platform').stdout, 'antigravity antigravity config\n');
-  assert.equal(runEnv(root, {}, 'resolve', 'sdd').stdout, 'plain plain config\n');
+  assert.equal(runEnv(root, {}, 'resolve', 'nope').status, 1);
+  assert.equal(runEnv(root, {}, 'resolve', 'platform').stdout, 'antigravity antigravity config config\n');
+  assert.equal(runEnv(root, {}, 'resolve', 'sdd').stdout, 'plain plain config config\n');
+});
+
+test('#1114 S2 cli: an invalid axis config refuses with the validator\'s errors (exit 4)', (t) => {
+  const root = world(t, { schemaVersion: '1.11.1', platform: { default: 'antigravity', providers: { claude: {} } } });
+  const r = runEnv(root, {}, 'resolve', 'platform');
+  assert.equal(r.status, 4);
+  assert.match(r.stderr, /invalid for platform/);
+  assert.match(r.stderr, /not a key of platform\.providers/);
 });
 
 // ── #1114 S3.4: `diagnose` prints diagnoseAxes' findings as JSON — findings, never failures ──
 test('#1114 S3.4 cli: diagnose prints the findings as JSON, exits 0, and never prints .env', (t) => {
-  const root = world(t, { schemaVersion: '1.11.1', platform: { default: 'claude', providers: { claude: {} } }, sdd: { default: 'brain', providers: { brain: { version: 'self' } } } });
+  const root = world(t, { schemaVersion: '1.11.1', platform: { default: 'claude', providers: { claude: {}, antigravity: {} } }, sdd: { default: 'plain', providers: { plain: { version: '1' }, brain: { version: 'self' } } } });
   writeFileSync(join(root, '.env'), 'AGENT_PLATFORM=antigravity\nCANARY_KEY=leak-canary-123\n');
   const r = runEnv(root, {}, 'diagnose');
   assert.equal(r.status, 0, r.stderr);
@@ -179,7 +216,7 @@ test('#1114 S3.4 cli: diagnose prints the findings as JSON, exits 0, and never p
   const codes = findings.map((f) => f.code);
   assert.ok(codes.includes('env-shadows-config'), r.stdout);
   assert.ok(codes.includes('version-unverified'), 'claude declares no version');
-  assert.ok(!findings.some((f) => f.axis === 'sdd' && f.code.startsWith('version')), '"self" is verified against the installed brain');
+  assert.ok(!findings.some((f) => f.axis === 'sdd' && f.code.startsWith('version') && /sdd\.providers\.brain\b/.test(f.message)), '"self" is verified against the installed brain');
   assert.doesNotMatch(r.stdout + r.stderr, /leak-canary-123|CANARY_KEY/);
 });
 

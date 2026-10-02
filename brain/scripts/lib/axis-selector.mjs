@@ -25,6 +25,24 @@
 
 import { resolveEnv } from './env-read.mjs';
 
+const own = (o, k) => Object.prototype.hasOwnProperty.call(o ?? {}, k);
+
+/**
+ * `resolveEnv`'s shell-first answer over ALREADY-PARSED maps (#1114 S2): `resolveAxis` is handed the process env and
+ * the parsed `.env` and reads no file of its own. Same shape as `resolveEnv`'s result.
+ */
+function resolveFromMaps(key, env, dotenv) {
+  const fromShell = own(env, key) ? env[key] : undefined;
+  const hasFile = own(dotenv, key);
+  const fromFile = hasFile ? dotenv[key] : undefined;
+  if (fromShell !== undefined) {
+    const shadowed = hasFile && fromFile !== fromShell ? { source: 'file', value: fromFile } : null;
+    return { key, value: fromShell, source: 'shell', shadowed };
+  }
+  if (hasFile) return { key, value: fromFile, source: 'file', shadowed: null };
+  return { key, value: null, source: 'absent', shadowed: null };
+}
+
 /** Reads a dot-separated path from a plain object; own keys only. */
 function readPath(obj, path) {
   let node = obj;
@@ -47,6 +65,7 @@ const present = (v) => (typeof v === 'string' && v.trim() !== '' ? v.trim() : nu
  * @param {object} [args.env]        process env
  * @param {string} [args.root]       where `.env` lives
  * @param {string|null} [args.envFile] explicit `.env` path (test seam)
+ * @param {object} [args.dotenv]     the PARSED `.env`: when given, no file is read (`root`/`envFile` unused)
  * @returns {{value: string|null, source: 'shell'|'file'|'config'|'none',
  *            valid: boolean, allowed: ReadonlyArray<string>,
  *            shadowed: Array<{source: string, value: string}>}}
@@ -54,11 +73,11 @@ const present = (v) => (typeof v === 'string' && v.trim() !== '' ? v.trim() : nu
  *   value WAS declared but is outside `allowed` — a typo is reported as a typo,
  *   never coerced into a different backend.
  */
-export function resolveAxisSelector({ key, configPath, allowed, config = {}, env = process.env, root = process.cwd(), envFile = null, configValue }) {
+export function resolveAxisSelector({ key, configPath, allowed, config = {}, env = process.env, root = process.cwd(), envFile = null, configValue, dotenv }) {
   // An EMPTY shell value is an unset one: hand resolveEnv an env without the key
   // so it falls through to `.env` instead of stopping at the empty string.
   const shellEnv = present(env?.[key]) === null ? { ...env, [key]: undefined } : env;
-  const fromEnv = resolveEnv(key, { env: shellEnv, root, envFile });
+  const fromEnv = dotenv !== undefined ? resolveFromMaps(key, shellEnv, dotenv) : resolveEnv(key, { env: shellEnv, root, envFile });
   // `configValue` lets a caller that already read the config through `axis-config.readAxis`
   // (the ADR-0038 shape, or its legacy alias) hand the value in; `configPath` is then unused.
   const fromConfig = present(configValue !== undefined ? configValue : readPath(config, configPath));
