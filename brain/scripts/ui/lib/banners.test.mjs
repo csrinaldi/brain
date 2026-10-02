@@ -141,3 +141,38 @@ test('#998 R998-6: the countdown reads "next poll in N s" while scheduled, "paus
   const disabled = pollIndicator({ poller: { ...meta().poller, nextAttemptAt: null, intervalMs: 0 }, nowMs: NOW });
   assert.equal(disabled.countdown, 'polling disabled');
 });
+
+// ── #1201 R1201-11: the remotes band reads meta.poller.remotes, never the section ──
+
+const remotesMeta = (remotes) => ({ poller: { paused: false, lastError: null, remotes } });
+
+test('#1201 R1201-11: a failed fetch is a band naming the time of the last good one and the cause', () => {
+  const bands = degradationBands({ meta: remotesMeta({ lastAttemptAt: '2026-10-01T10:05:00.000Z', lastOkAt: '2026-10-01T10:00:00.000Z', lastError: 'fatal: Could not resolve host: example.com', inFlight: false }) });
+  const band = bands.find((b) => b.id === 'remotes');
+  assert.equal(band.text, 'remote branches as of 2026-10-01T10:00:00.000Z — last fetch failed: fatal: Could not resolve host: example.com');
+});
+
+test('#1201 R1201-11: a fetch that never succeeded says so and shows no time', () => {
+  const band = degradationBands({ meta: remotesMeta({ lastAttemptAt: '2026-10-01T10:05:00.000Z', lastOkAt: null, lastError: 'fatal: nope', inFlight: false }) }).find((b) => b.id === 'remotes');
+  assert.equal(band.text, 'no fetch has succeeded since this server started; the list is this clone\'s remote-tracking refs — last fetch failed: fatal: nope');
+  assert.doesNotMatch(band.text, /\d{4}-\d{2}-\d{2}/);
+});
+
+test('#1201 R1201-11: recovery clears the band, and a healthy or absent remotes state never adds one', () => {
+  assert.ok(!degradationBands({ meta: remotesMeta({ lastAttemptAt: 'x', lastOkAt: '2026-10-01T10:10:00.000Z', lastError: null, inFlight: false }) }).some((b) => b.id === 'remotes'));
+  assert.ok(!degradationBands({ meta: { poller: { paused: false, lastError: null } } }).some((b) => b.id === 'remotes'));
+  assert.ok(!degradationBands({ meta: null }).some((b) => b.id === 'remotes'));
+});
+
+test('#1201 R1201-11: the band comes from meta.poller only — a section carrying fetch-looking fields adds nothing', () => {
+  const snapshot = { remoteChanges: { ok: true, value: { lastError: 'x', lastOkAt: null } } };
+  assert.ok(!degradationBands({ snapshot, meta: remotesMeta({ lastAttemptAt: null, lastOkAt: null, lastError: null, inFlight: false }) }).some((b) => b.id === 'remotes'));
+});
+
+test('#1201 R1201-11: the remotes band sits after the forge poller band and before the failed sections', () => {
+  const ids = degradationBands({
+    meta: { poller: { paused: false, lastError: 'forge down', lastPolledAt: 'x', lastOkAt: null, remotes: { lastAttemptAt: 'x', lastOkAt: null, lastError: 'fatal: no', inFlight: false } } },
+    snapshot: { records: { ok: false, reason: 'gone' } },
+  }).map((b) => b.id);
+  assert.deepEqual(ids, ['poller', 'remotes', 'sections']);
+});
