@@ -56,16 +56,23 @@ function runFragment({ derivedProvider, stdinLines, initialProvider }) {
       join(dir, 'brain.config.json'),
       JSON.stringify({ vcs: { provider: initialProvider ?? derivedProvider } }, null, 2) + '\n',
     );
+    // stdin comes from a FILE, never the `input` option (#1221): a piped stdin never sees EOF in the cold reviewer's sandbox.
+    const answers = join(dir, 'answers.txt');
+    writeFileSync(answers, stdinLines.join('\n') + '\n');
     const script = [
       'set -euo pipefail',
       `cd "${dir}"`,
+      `exec 0<"${answers}"`,
+      `BRAIN_SCRIPTS="${dirname(fileURLToPath(import.meta.url))}"`,
+      'REQUIRED_FAILURES=()',
       `VCS_PROVIDER="${derivedProvider}"`,
       FRAGMENT,
     ].join('\n');
 
     const result = spawnSync('bash', ['-c', script], {
-      input: stdinLines.join('\n') + '\n',
+      stdio: ['ignore', 'pipe', 'pipe'],
       encoding: 'utf8',
+      timeout: 60_000,
     });
     const config = JSON.parse(readFileSync(join(dir, 'brain.config.json'), 'utf8'));
     return { config, stdout: result.stdout ?? '', stderr: result.stderr ?? '', status: result.status };
@@ -116,4 +123,11 @@ test('#1112 re-prompts as many times as needed before accepting a valid value', 
   assert.equal(config.vcs.provider, 'gitlab');
   const rejections = (stderr.match(/Unknown provider/g) || []).length;
   assert.equal(rejections, 3, `expected exactly 3 rejections before the valid answer; stderr:\n${stderr}`);
+});
+
+test('#1114 S3.3 a provider override is declared in the ADR-0038 shape, with the legacy key kept in step', () => {
+  const { config } = runFragment({ derivedProvider: 'github', stdinLines: ['gitlab'] });
+  assert.equal(config.vcs.default, 'gitlab');
+  assert.deepEqual(config.vcs.providers.gitlab, {});
+  assert.equal(config.vcs.provider, 'gitlab', 'the legacy key still read by install-tools.sh stays equal');
 });

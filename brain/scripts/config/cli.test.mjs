@@ -81,3 +81,27 @@ test('#906 A6: memory.lane.enabled is a known settable leaf today, get/set round
   assert.equal(getResult.status, 0, getResult.stderr);
   assert.equal(getResult.stdout.trim(), 'true');
 });
+
+// ── #1114 S3.3: `default <axis>` — the one reader shell scripts call instead of parsing JSON ──
+test('#1114 S3.3 cli: default <axis> prints the effective default, shape first, legacy as the fallback', (t) => {
+  const shaped = world(t, { schemaVersion: '1.11.1', vcs: { provider: 'gitlab', default: 'github', providers: { github: {} } } });
+  assert.equal(run(shaped, 'default', 'vcs').stdout, 'github\n');
+  const legacy = world(t, { schemaVersion: '1.9.1', vcs: { provider: 'gitlab' } });
+  assert.equal(run(legacy, 'default', 'vcs').stdout, 'gitlab\n');
+});
+
+test('#1114 S3.3 cli: default <axis> on an undeclared axis prints an empty line and exits 0; an unknown axis exits 1', (t) => {
+  const root = world(t, { schemaVersion: '1.11.1', memory: { default: '', providers: {} } });
+  const r = run(root, 'default', 'memory');
+  assert.equal(r.status, 0);
+  assert.equal(r.stdout, '\n');
+  assert.equal(run(root, 'default', 'cache').status, 1);
+});
+
+test('#1114 S3.3 cli: set <axis>.default writes the default AND its provider entry', (t) => {
+  const root = world(t, { schemaVersion: '1.11.1', platform: { default: '', providers: {} } });
+  const r = run(root, 'set', 'platform.default', 'claude');
+  assert.equal(r.status, 0, r.stderr);
+  const next = JSON.parse(readFileSync(join(root, 'brain.config.json'), 'utf8'));
+  assert.deepEqual(next.platform, { default: 'claude', providers: { claude: {} } });
+});

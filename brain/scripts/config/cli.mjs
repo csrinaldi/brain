@@ -10,12 +10,16 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { planConfigWrite, resolvePath } from './config-verb.mjs';
+import { AXES, readAxis } from '../lib/axis-config.mjs';
 import { resolveAxisMigrationContext } from '../lib/axis-migration-context.mjs';
 
 const USAGE = `Usage: npm run brain:config -- get <path>
        npm run brain:config -- set <path> <value>
+       npm run brain:config -- default <axis>
   <path> is dot-separated (e.g. docs.language, sdd.map.cold-review).
-  <value> parses as JSON first, bare string on failure.`;
+  <value> parses as JSON first, bare string on failure.
+  default <axis> prints the axis default (${AXES.join('|')}): the ADR-0038 shape, else the legacy key;
+  an empty line when undeclared.`;
 
 function fail(msg) {
   console.error(`brain:config: ${msg}`);
@@ -24,7 +28,7 @@ function fail(msg) {
 
 export async function main(argv = process.argv.slice(2), root = process.cwd()) {
   const [op, path, value] = argv;
-  if (op !== 'get' && op !== 'set') fail(`unknown op '${op ?? ''}'.\n${USAGE}`);
+  if (op !== 'get' && op !== 'set' && op !== 'default') fail(`unknown op '${op ?? ''}'.\n${USAGE}`);
   if (!path || (op === 'set' && value === undefined)) fail(`missing argument.\n${USAGE}`);
 
   const configPath = join(root, 'brain.config.json');
@@ -32,6 +36,13 @@ export async function main(argv = process.argv.slice(2), root = process.cwd()) {
     fail(`brain.config.json not found in ${root} — run from the repo root, or run env:init first.`);
   }
   const config = JSON.parse(readFileSync(configPath, 'utf8'));
+
+  if (op === 'default') {
+    // The one reader for shell callers (install-tools.sh, bootstrap.sh): they must not hand-parse JSON.
+    if (!AXES.includes(path)) fail(`unknown axis '${path}' — one of ${AXES.join(', ')}.`);
+    console.log(readAxis(config, path).default);
+    return;
+  }
 
   if (op === 'get') {
     // NOT validated against deriveKnownPaths, on purpose (#823 cold review,

@@ -19,6 +19,15 @@
 // so the default and the precedence move together, and the parity test below
 // holds the shell to the JS resolver until #1114 leaves exactly one resolver.
 //
+// ── #1114 S3.3 ──────────────────────────────────────────────────────────────
+//
+// `env:init` no longer writes an axis selector into `.env`. What the repo states
+// is declared in TRACKED config (`platform.default`, `sdd.default`) through
+// `brain:config`; `.env` stays a per-machine override and is only ever READ. The
+// precedence below is unchanged (`.env` still beats config, as the resolvers
+// have it), with the config's declared default taking the place `.env` used to
+// hold for a repo that states nothing per machine.
+//
 // ── Idiom ───────────────────────────────────────────────────────────────────
 //
 // Same as bootstrap.cross-tree-code.test.mjs (#1093) and
@@ -27,7 +36,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -35,6 +44,10 @@ import { fileURLToPath } from 'node:url';
 
 import { removeTempTree } from './__fixtures__/tmp-tree.mjs';
 import { resolvePlatform, AGENT_PLATFORMS } from './harness/platform.mjs';
+import { readAxis, validateAxisConfig, AXES } from './lib/axis-config.mjs';
+import { ensureBrainConfig } from './lib/brain-config.mjs';
+
+const SCRIPTS = dirname(fileURLToPath(import.meta.url));
 
 const BOOTSTRAP = join(dirname(fileURLToPath(import.meta.url)), 'bootstrap.sh');
 const LINES = readFileSync(BOOTSTRAP, 'utf8').split('\n');
@@ -57,12 +70,41 @@ function envHelpers() {
 function platformBlock() {
   const banner = LINES.findIndex((l) => l.startsWith('say "$I18N_BOOTSTRAP_SDD_SECTION"'));
   assert.ok(banner !== -1, 'bootstrap.sh §6 must open with the SDD section banner');
-  const persist = LINES.findIndex((l, i) => i > banner && l.includes('env_set AGENT_PLATFORM'));
-  assert.ok(persist !== -1, '§6 must persist AGENT_PLATFORM with env_set');
+  const persist = LINES.findIndex((l, i) => i > banner && l.startsWith('_axis_declare platform'));
+  assert.ok(persist !== -1, '§6 must declare platform.default in config with _axis_declare');
+  assert.ok(!LINES.some((l) => /env_set (AGENT_PLATFORM|SDD_ENGINE)\b/.test(l)), 'bootstrap.sh must not write an axis selector into .env (#1114 S3.3)');
   const end = LINES.findIndex((l, i) => i >= persist && l.startsWith('AGENT_PLATFORM="${AGENT_PLATFORM:-'));
   assert.ok(end !== -1, "§6 must set the run's AGENT_PLATFORM after persisting the repo's");
   return LINES.slice(banner + 1, end + 1).join('\n');
 }
+
+/** The declare helpers, verbatim, between their sentinels. */
+function declareHelpers() {
+  const start = LINES.findIndex((l) => l.includes('BEGIN axis-declare-helpers'));
+  assert.ok(start !== -1, 'bootstrap.sh must mark BEGIN axis-declare-helpers');
+  const end = LINES.findIndex((l, i) => i > start && l.includes('END axis-declare-helpers'));
+  assert.ok(end > start, 'bootstrap.sh must mark END axis-declare-helpers');
+  return LINES.slice(start + 1, end).join('\n');
+}
+
+/** The SDD-engine block of §6, verbatim: after the platform line up to the `ok` that reports both. */
+function sddBlock() {
+  const start = LINES.findIndex((l) => l.startsWith('SDD_ENGINE="$(env_get SDD_ENGINE)"'));
+  assert.ok(start !== -1, '§6 must resolve SDD_ENGINE from .env first');
+  const end = LINES.findIndex((l, i) => i > start && l.startsWith('ok "$(printf "$I18N_BOOTSTRAP_SDD_OK"'));
+  assert.ok(end !== -1, '§6 must report the engine after resolving it');
+  return LINES.slice(start, end).join('\n');
+}
+
+const STUBS = [
+  'BRAIN_SCRIPTS=' + JSON.stringify(SCRIPTS),
+  'MISSING_OPTIONAL=()',
+  'REQUIRED_FAILURES=()',
+  'I18N_BOOTSTRAP_AXIS_DECLARED="declared %s=%s %s"',
+  'I18N_BOOTSTRAP_AXIS_DECLAREFAILED="failed %s %s %s"',
+  'ok() { :; }',
+  'warn() { printf "warn:%s\\n" "$1" >&2; }',
+].join('\n');
 
 const BASE_ENV = { ...process.env };
 for (const k of ['AGENT_PLATFORM', 'SDD_HARNESS', 'SDD_ENGINE']) delete BASE_ENV[k];
@@ -72,39 +114,55 @@ for (const k of ['AGENT_PLATFORM', 'SDD_HARNESS', 'SDD_ENGINE']) delete BASE_ENV
  * with `procEnv` layered on a clean environment. Returns what the block
  * resolved and the `.env` it left behind.
  */
-function runBlock({ procEnv = {}, envFile = null } = {}) {
+function runBlock({ procEnv = {}, envFile = null, config = {} } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'brain-1125-bootstrap-'));
   try {
     if (envFile !== null) writeFileSync(join(dir, '.env'), envFile);
+    writeFileSync(join(dir, 'brain.config.json'), JSON.stringify(config, null, 2) + '\n');
     const script = [
       'set -euo pipefail',
+      STUBS,
       envHelpers(),
+      declareHelpers(),
       platformBlock(),
-      'printf \'%s\' "$AGENT_PLATFORM"',
+      sddBlock(),
+      'printf \'%s %s\' "$AGENT_PLATFORM" "$SDD_ENGINE"',
     ].join('\n');
-    const out = execFileSync('bash', ['-c', script], {
+    const r = spawnSync('bash', ['-c', script], {
       cwd: dir,
       encoding: 'utf8',
       env: { ...BASE_ENV, ...procEnv },
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: 60_000,
     });
+    assert.equal(r.status, 0, r.stderr);
+    const [platform, engine] = r.stdout.split(' ');
     const envPath = join(dir, '.env');
-    return { platform: out, dotenv: existsSync(envPath) ? readFileSync(envPath, 'utf8') : null };
+    return {
+      platform,
+      engine,
+      dotenv: existsSync(envPath) ? readFileSync(envPath, 'utf8') : null,
+      config: JSON.parse(readFileSync(join(dir, 'brain.config.json'), 'utf8')),
+      stderr: r.stderr,
+    };
   } finally {
     removeTempTree(dir);
   }
 }
 
-test('#1125 bootstrap.sh: with nothing stated anywhere, the platform is claude and .env records it', () => {
-  const { platform, dotenv } = runBlock();
+test('#1125 bootstrap.sh: with nothing stated anywhere, the platform is claude and the CONFIG records it (#1114 S3.3)', () => {
+  const { platform, dotenv, config } = runBlock();
   assert.equal(platform, 'claude');
-  assert.match(dotenv, /^AGENT_PLATFORM=claude$/m, 'the default is stated explicitly in .env');
+  assert.equal(dotenv, null, 'no .env is created for an axis selector');
+  assert.equal(config.platform.default, 'claude', 'the default is declared in tracked config');
+  assert.deepEqual(config.platform.providers.claude, {}, 'and its provider entry exists, so the refusal never fires');
 });
 
 test('#1125 bootstrap.sh: an .env without AGENT_PLATFORM still defaults to claude', () => {
-  const { platform, dotenv } = runBlock({ envFile: 'VCS_TOKEN=tok\n' });
+  const { platform, dotenv, config } = runBlock({ envFile: 'VCS_TOKEN=tok\n' });
   assert.equal(platform, 'claude');
-  assert.match(dotenv, /^AGENT_PLATFORM=claude$/m);
-  assert.match(dotenv, /^VCS_TOKEN=tok$/m, 'other keys survive');
+  assert.equal(dotenv, 'VCS_TOKEN=tok\n', '.env is left byte-for-byte as it was');
+  assert.equal(config.platform.default, 'claude');
 });
 
 test('#1125 bootstrap.sh: a stated antigravity still resolves to antigravity on every shell path', () => {
@@ -123,23 +181,24 @@ test('#1125 bootstrap.sh: a process-env platform wins for the run and does NOT r
   // The antigravity backend's REGENERATE_HINT is
   // `AGENT_PLATFORM=antigravity npm run brain:env:init`. It must run antigravity
   // for that invocation, and must not silently switch a claude repo's .env.
-  const { platform, dotenv } = runBlock({
+  const { platform, dotenv, config } = runBlock({
     procEnv: { AGENT_PLATFORM: 'antigravity' },
     envFile: 'AGENT_PLATFORM=claude\n',
   });
   assert.equal(platform, 'antigravity');
   assert.equal(dotenv, 'AGENT_PLATFORM=claude\n', '.env is left exactly as stated');
+  assert.equal(config.platform.default, 'claude', 'config declares what the repo states (.env), not the one-off');
 });
 
-test('#1125 bootstrap.sh: a process-env platform on a fresh .env is NOT persisted — .env records the repo\'s own answer', () => {
+test('#1125 bootstrap.sh: a process-env platform on a fresh repo is NOT declared — config records the repo\'s own answer', () => {
   // `brain:upgrade` prints `AGENT_PLATFORM=antigravity npm run brain:env:init`
   // to a FRESH consumer (to regenerate AGENTS.md). Persisting the process value
   // would silently move that consumer off the claude default for good. The
   // process env is per-invocation, exactly as resolvePlatform treats it; .env is
   // what the repo states, and a repo that stated nothing gets the default.
-  const { platform, dotenv } = runBlock({ procEnv: { AGENT_PLATFORM: 'antigravity' } });
+  const { platform, config } = runBlock({ procEnv: { AGENT_PLATFORM: 'antigravity' } });
   assert.equal(platform, 'antigravity', 'the invocation runs what it was asked to');
-  assert.match(dotenv, /^AGENT_PLATFORM=claude$/m, '.env records the default, not the one-off');
+  assert.equal(config.platform.default, 'claude', 'config records the default, not the one-off');
 });
 
 test('#1125 bootstrap.sh: a legacy SDD_HARNESS naming an ENGINE is not a platform — the default applies', () => {
@@ -164,7 +223,9 @@ test('#1125 bootstrap.sh and resolvePlatform give ONE answer over every env/.env
   const base = mkdtempSync(join(tmpdir(), 'brain-1125-parity-'));
   try {
     const q = (v) => `'${v}'`;
-    const script = ['set -euo pipefail', envHelpers()];
+    // The parity table is about the PRECEDENCE; the config reads/writes are covered above. Stubbed here
+    // so 90 cases do not spawn 180 node processes: nothing is declared, so the chain falls through.
+    const script = ['set -euo pipefail', STUBS, envHelpers(), declareHelpers(), '_axis_declared() { :; }', '_axis_declare() { :; }'];
     cases.forEach((c, i) => {
       const dir = join(base, String(i));
       const lines = [`mkdir -p ${q(dir)}`, `cd ${q(dir)}`];
@@ -200,5 +261,80 @@ test('#1125 bootstrap.sh and resolvePlatform give ONE answer over every env/.env
     assert.deepEqual(mismatches, [], 'bootstrap.sh must resolve what resolvePlatform resolves');
   } finally {
     removeTempTree(base);
+  }
+});
+
+// ── #1114 S3.3: the config is where an axis is declared ─────────────────────────────────────────
+test('#1114 S3.3 bootstrap.sh: an existing .env value is declared into config once and .env is never edited', () => {
+  const envFile = 'AGENT_PLATFORM=antigravity\nSDD_ENGINE=plain\nVCS_TOKEN=secret\n';
+  const { platform, engine, dotenv, config } = runBlock({ envFile });
+  assert.equal(platform, 'antigravity');
+  assert.equal(engine, 'plain');
+  assert.equal(dotenv, envFile, '.env is byte-identical');
+  assert.equal(config.platform.default, 'antigravity');
+  assert.equal(config.sdd.default, 'plain');
+});
+
+test('#1114 S3.3 bootstrap.sh: a platform the config already declares is the repo\'s answer, and is not rewritten', () => {
+  const config = { platform: { default: 'antigravity', providers: { antigravity: { version: '9' } } }, sdd: { default: 'plain', providers: { plain: {} } } };
+  const r = runBlock({ config });
+  assert.equal(r.platform, 'antigravity', 'a second checkout with no .env runs the team\'s declared platform');
+  assert.equal(r.engine, 'plain');
+  assert.deepEqual(r.config.platform.providers, { antigravity: { version: '9' } }, 'a declared entry is never overwritten');
+});
+
+test('#1114 S3.3 bootstrap.sh: .env still beats the config, as every resolver has it, and a stale .env is not "fixed"', () => {
+  const config = { platform: { default: 'claude', providers: { claude: {} } } };
+  const r = runBlock({ config, envFile: 'AGENT_PLATFORM=antigravity\n' });
+  assert.equal(r.platform, 'antigravity');
+  assert.equal(r.config.platform.default, 'claude');
+});
+
+test('#1114 S3.3 bootstrap.sh: a legacy SDD_HARNESS in .env still seeds the engine declaration', () => {
+  const r = runBlock({ envFile: 'SDD_HARNESS=plain\n' });
+  assert.equal(r.engine, 'plain');
+  assert.equal(r.config.sdd.default, 'plain');
+  assert.equal(r.platform, 'plain', '`plain` is a member of both axes, so the one legacy key seeds both (as resolvePlatform does)');
+  assert.equal(r.config.platform.default, 'plain');
+});
+
+test('#1114 S3.3 bootstrap.sh: a failed declaration is reported, and the run still resolves its answer', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'brain-1114-declfail-'));
+  try {
+    // No brain.config.json: `brain:config` refuses, which is the failure being reported.
+    const script = ['set -euo pipefail', STUBS, envHelpers(), declareHelpers(), platformBlock(), 'printf "%s|%s" "$AGENT_PLATFORM" "${MISSING_OPTIONAL[*]:-}"'].join('\n');
+    const r = spawnSync('bash', ['-c', script], { cwd: dir, encoding: 'utf8', env: BASE_ENV, stdio: ['ignore', 'pipe', 'pipe'], timeout: 60_000 });
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /^claude\|.*platform\.default/, 'resolved, and the missing declaration is named with its fix');
+    assert.match(r.stderr, /failed platform platform claude/);
+  } finally {
+    removeTempTree(dir);
+  }
+});
+
+test('#1114 S3.3 a FRESH install ends with every axis declared in config (the S2 refusal never fires)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'brain-1114-fresh-'));
+  try {
+    // 1. the scaffold env:init runs first: shape on every axis, vcs derived from the origin.
+    ensureBrainConfig(dir, { identity: { host: 'github.com', project: 'o/r' } });
+    // 2. §6 of env:init: platform and sdd, through the real helpers and the real `brain:config`.
+    const script = ['set -euo pipefail', STUBS, envHelpers(), declareHelpers(), platformBlock(), sddBlock(), 'printf done'].join('\n');
+    const r = spawnSync('bash', ['-c', script], { cwd: dir, encoding: 'utf8', env: BASE_ENV, stdio: ['ignore', 'pipe', 'pipe'], timeout: 60_000 });
+    assert.equal(r.status, 0, r.stderr);
+    // 3. §7: the memory prompt's answer, through the same command.
+    const m = spawnSync(process.execPath, [join(SCRIPTS, 'config/cli.mjs'), 'set', 'memory.default', 'plainfiles'], { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 60_000 });
+    assert.equal(m.status, 0, m.stderr);
+
+    const config = JSON.parse(readFileSync(join(dir, 'brain.config.json'), 'utf8'));
+    for (const axis of AXES) {
+      const a = readAxis(config, axis);
+      assert.equal(a.source, 'shape', `${axis} is in the ADR-0038 shape`);
+      assert.notEqual(a.default, '', `${axis}.default is declared`);
+      assert.ok(Object.hasOwn(a.providers, a.default), `${axis}.default is a key of ${axis}.providers`);
+    }
+    assert.deepEqual(validateAxisConfig(config).errors, []);
+    assert.equal(existsSync(join(dir, '.env')), false, 'no .env was needed or written');
+  } finally {
+    removeTempTree(dir);
   }
 });

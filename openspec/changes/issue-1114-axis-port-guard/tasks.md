@@ -12,7 +12,7 @@
 - [x] S3.2 Migrations to the ADR-0038 shape (1.11.1; legacy keys kept for the alias window, see design.md): `memory.backend` -> `memory.default` + `memory.providers`; `vcs.provider` -> `vcs.default` + `vcs.providers`; flat `platform`/`engine`/`harness` and `SDD_HARNESS` -> `platform.default` / `sdd.default` (resolves #643; coordinate #807)
 - [x] S3.2 Existing consumers get the value they effectively run today (env or `.env`, else `claude` / `gentle-ai`); undeclared memory/vcs stay undeclared
 - [ ] Read-only aliases for the old keys for one minor, then a refusal with a named fix
-- [ ] `env:init` declares or asks for each axis default on a fresh consumer
+- [x] S3.3 `env:init` declares each axis default on a fresh consumer through `brain:config` (no axis selector written to `.env`); `brain:config set <axis>.default` declares the provider; scaffold writes the shape; shell readers routed through `config/cli.mjs default`
 
 ## S2 one resolver and the refusal (after S3)
 - [ ] `resolveAxis` over `lib/axis-selector.mjs` for vcs, memory, platform, sdd; one precedence; retire `resolvePlatform`, `resolveEngine/Harness`, `resolveProviderName` and the `bootstrap.sh` platform resolver

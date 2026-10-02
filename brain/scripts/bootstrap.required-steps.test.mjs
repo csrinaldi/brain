@@ -115,7 +115,7 @@ test('#1127 bootstrap: a failing VCS login (a token was provided) is a REQUIRED 
 
 test('#1127 bootstrap: an unwritable VCS-provider override is a REQUIRED failure, not a swallowed catch', () => inTmp((dir) => {
   writeFileSync(join(dir, 'brain.config.json'), '{ this is not json');
-  const out = required(region('VCS_PROVIDER_OVERRIDE="$_override" node', 'fi'), '_override=github', dir);
+  const out = required(region('node "$BRAIN_SCRIPTS/config/cli.mjs" set vcs.default', 'fi'), `_override=github; BRAIN_SCRIPTS=${JSON.stringify(HERE)}`, dir);
   assert.match(out, /REQ=.*provider override/i, out);
 }));
 

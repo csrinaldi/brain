@@ -23,10 +23,26 @@
 
 import { migrateConfig } from '../lib/installer.mjs';
 import { MEMORY_BACKENDS } from '../memory/lib/backend-resolve.mjs';
+import { AXES, AGENT_PLATFORMS, SDD_ENGINES } from '../lib/axis-config.mjs';
 
 // Values a path accepts, checked at WRITE time (#1165): a typo in a selector is refused here,
 // not at the next `pull` on another machine. '' is allowed — it clears to undeclared.
-const ALLOWED_VALUES = Object.freeze({ 'memory.backend': MEMORY_BACKENDS });
+// VCS providers are the two adapters under axes/vcs/adapters/ (ADR-0008).
+const VCS_PROVIDERS = Object.freeze(['github', 'gitlab']);
+const ALLOWED_VALUES = Object.freeze({
+  'memory.backend': MEMORY_BACKENDS,
+  'memory.default': MEMORY_BACKENDS,
+  'vcs.default': VCS_PROVIDERS,
+  'platform.default': AGENT_PLATFORMS,
+  'sdd.default': SDD_ENGINES,
+});
+
+/**
+ * ADR-0038 shape paths, settable on every axis without a migration declaring them (the shape is the
+ * schema's, not a consumer's): `<axis>.default` is a leaf, `<axis>.providers` an open family.
+ */
+const AXIS_DEFAULT_PATHS = Object.freeze(AXES.map((axis) => `${axis}.default`));
+const AXIS_PROVIDER_FAMILIES = Object.freeze(AXES.map((axis) => `${axis}.providers`));
 
 /**
  * Walks every migration's `defaults` tree once.
@@ -116,6 +132,27 @@ function mirrorLegacySelector(next, path) {
 }
 
 /**
+ * #1114 S3.3 (ratified point 2): `set <axis>.default <name>` also declares `<axis>.providers.<name>`
+ * as `{}` when absent, so the command every refusal names always yields a config where the default
+ * is a key of `providers`. Never overwrites an entry's settings; clearing deletes nothing.
+ * During the alias window `memory.default` and `vcs.default` also write the legacy key the
+ * un-routed readers still read (`memory.backend`, `vcs.provider`); platform and sdd have none to
+ * mirror (the flat `platform` string is the same key as the new object). S2 retires this mirror.
+ */
+const LEGACY_OF_DEFAULT = Object.freeze({ memory: 'backend', vcs: 'provider' });
+function declareDefault(next, path) {
+  const [axis, key, ...rest] = path.split('.');
+  if (key !== 'default' || rest.length > 0 || !AXES.includes(axis)) return;
+  const node = next[axis];
+  const value = node.default;
+  if (typeof value !== 'string') return;
+  if (LEGACY_OF_DEFAULT[axis]) node[LEGACY_OF_DEFAULT[axis]] = value;
+  if (value === '') return;
+  if (node.providers === null || typeof node.providers !== 'object' || Array.isArray(node.providers)) node.providers = {};
+  if (!Object.hasOwn(node.providers, value)) node.providers[value] = {};
+}
+
+/**
  * The ONE write path. Refuses closed on an unknown path; migrates first;
  * writes one value. Never touches I/O.
  *
@@ -154,6 +191,8 @@ export function planConfigWrite({ config, path, value, migrations, targetVersion
   }
 
   const known = deriveKnownPaths(migrations);
+  for (const p of AXIS_DEFAULT_PATHS) known.leaves.add(p);
+  for (const f of AXIS_PROVIDER_FAMILIES) known.families.add(f);
   const inFamily = [...known.families].some((f) => path.startsWith(`${f}.`));
   if (!known.leaves.has(path) && !inFamily) {
     const near = nearestKnown(path, known);
@@ -177,6 +216,7 @@ export function planConfigWrite({ config, path, value, migrations, targetVersion
   }
   node[keys[keys.length - 1]] = parseValue(value);
   mirrorLegacySelector(next, path);
+  declareDefault(next, path);
 
   return { next, migrationsApplied: applied, refusal: null };
 }

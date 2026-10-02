@@ -242,11 +242,19 @@ function buildDefaultConfig() {
     return 0;
   });
   let cfg = mergeDefaults({}, NEW_CONSUMER_DEFAULTS);
+  // #1114 S3.3: a fresh config is written in the ADR-0038 shape by the SAME 1.11.1 entry that migrates
+  // an existing one. A fresh install has nothing to inherit from env or `.env`, so every axis starts
+  // undeclared; `env:init` declares platform, sdd and memory, and the scaffold below declares vcs.
+  const axisContext = {
+    platform: { value: '', source: 'a fresh install' },
+    sdd: { value: '', source: 'a fresh install' },
+    lifecycleStages: [],
+  };
   for (const m of ordered) {
     if (m.defaults) {
       cfg = mergeDefaults(cfg, m.defaults);
     } else if (typeof m.migrate === 'function') {
-      cfg = m.migrate(cfg, { mergeDefaults });
+      cfg = m.migrate(cfg, { mergeDefaults, axisContext });
     }
   }
   cfg.schemaVersion = ordered.at(-1)?.version ?? '0.0.0';
@@ -300,7 +308,10 @@ export function ensureBrainConfig(root = REPO_ROOT, { identity, write = true } =
         cfg.project.slug = id.project;
         filled.push('slug');
       }
-      cfg.vcs.provider = providerFromHost(id.host);
+      const provider = providerFromHost(id.host);
+      cfg.vcs.provider = provider; // legacy key, kept for the alias window (install-tools.sh fallback, un-routed readers)
+      cfg.vcs.default = provider;
+      cfg.vcs.providers = provider ? { [provider]: {} } : {};
     }
 
     if (write) {
