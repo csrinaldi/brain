@@ -160,6 +160,30 @@ test('#881: tasks.md present but `git blame` throws — the checklist still rend
   assert.deepEqual(blameCall, ['blame', '--porcelain', 'HEAD', '--', TASKS_PATH]);
 });
 
+// ── #1199 R1199-4: the tab counts its own HEAD text ─────────────────────────
+
+test('#1199 R1199-4: the Tasks tab carries the count of the HEAD text, not the working tree', () => {
+  const snapshot = makeSnapshot();
+  const head = ['- [x] a', '- [x] b', '- [ ] c', '- [ ] d', '- [ ] e'].join('\n');
+  const result = buildChangeView({ issue: ISSUE, snapshot, _run: gitFor({ tasks: head }) });
+  assert.deepEqual(result.value.tasks.progress, { ok: true, value: { done: 2, total: 5 } });
+});
+
+test('#1199 R1199-4: a tasks.md with no checkboxes carries the no-items reason', () => {
+  const result = buildChangeView({ issue: ISSUE, snapshot: makeSnapshot(), _run: gitFor({ tasks: '# Tasks\nprose' }) });
+  assert.equal(result.value.tasks.progress.code, 'no-items');
+});
+
+test('#1199 R1199-4: a truncated tasks.md has no total, and its items still render', () => {
+  const big = `- [x] first\n- [ ] second\n${'a'.repeat(300000)}`;
+  const result = buildChangeView({ issue: ISSUE, snapshot: makeSnapshot(), _run: gitFor({ tasks: big }) });
+  assert.equal(result.value.tasks.ok, true);
+  assert.equal(result.value.tasks.progress.ok, false);
+  assert.equal(result.value.tasks.progress.code, 'truncated');
+  assert.match(result.value.tasks.progress.reason, /larger than 262144 bytes/);
+  assert.equal(result.value.tasks.value.length, 2);
+});
+
 // ── 7. resume.md absent on the branch ────────────────────────────────────────
 
 test('#881: a resolved branch with no committed resume.md — the tab says so and points at slice 5 / #883', () => {

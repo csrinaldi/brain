@@ -48,6 +48,8 @@ function applyTheme(choice) {
 }
 
 import { buildLaneModel, nodeSummaryFor, childrenOf } from './lib/lane-model.mjs';
+import { SOURCE, progressLabel } from './lib/progress-view.mjs';
+import { hierarchyOf, epicRollup, rollupLabel } from './lib/rollup-model.mjs';
 import { issueUrl } from './lib/forge-url.mjs';
 import { buildDrawerModel } from './lib/drawer-model.mjs';
 import { remoteBadges, remotePanel, tipAge } from './lib/remote-model.mjs';
@@ -690,7 +692,7 @@ function renderEpicClusters(grouping) {
     head.appendChild(chip);
     head.appendChild(el('h3', 'epic-title', epic.title || '(no title)'));
     if (epic.track) head.appendChild(el('span', 'epic-track', epic.track));
-    head.appendChild(el('span', 'epic-count', `${epic.children.length} slice(s)`));
+    head.appendChild(el('span', 'epic-count', rollupLabel(epicRollup(sectionOf(state, 'hierarchy'), sectionOf(state, 'forgeLoad'), epic.number))));
     cluster.appendChild(head);
     for (const mark of epic.marks) cluster.appendChild(said(mark));
 
@@ -808,10 +810,7 @@ function renderNodeSdd(issue) {
   const reached = [...change.stages].reverse().find((stage) => stage.state === 'present' || stage.state === 'done');
   strip.appendChild(el('span', 'node-sdd-label', change.archived ? 'archived' : 'SDD'));
   strip.appendChild(el('span', 'node-sdd-stage', reached ? reached.id : 'no stage present'));
-  if (change.tasks && typeof change.tasks.checked === 'number') {
-    const total = change.tasks.checked + (change.tasks.open ?? 0);
-    strip.appendChild(el('span', 'node-sdd-tasks', `tasks ${change.tasks.checked}/${total}`));
-  }
+  strip.appendChild(el('span', 'node-sdd-tasks', progressLabel(change.progress, SOURCE.workingTree, { prefix: 'tasks' })));
   strip.appendChild(el('span', 'node-sdd-dir', change.dir));
   return strip;
 }
@@ -1080,7 +1079,7 @@ function renderSddRow(change, sliceNote) {
   row.appendChild(matrix);
 
   const t = change.tasks;
-  const tasksLine = el('p', 'sdd-tasks', `tasks: ${t.checked} checked, ${t.open} open${t.next ? ` — next: ${t.next}` : ''} `);
+  const tasksLine = el('p', 'sdd-tasks', `${progressLabel(change.progress, SOURCE.workingTree, { prefix: 'tasks' })}${t.next ? ` — next: ${t.next}` : ''} `);
   tasksLine.appendChild(el('span', 'source', sourceStamp(t.source).label));
   row.appendChild(tasksLine);
 
@@ -1744,10 +1743,15 @@ function renderRemoteBlocks({ remote, remoteNote }) {
  */
 function renderChildren(issue) {
   const wrap = el('div', 'drawer-children');
-  const found = childrenOf(sectionOf(state, 'graph'), issue);
+  const found = childrenOf(sectionOf(state, 'graph'), sectionOf(state, 'hierarchy'), issue);
   if (!found.ok) {
     wrap.appendChild(said(found.reason));
     return wrap;
+  }
+  // An epic's drawer leads with its rollup (#1199 D62); closed children are counted there, not listed below.
+  if (hierarchyOf(sectionOf(state, 'hierarchy')).value?.issues.get(issue)?.level === 'epic') {
+    wrap.appendChild(el('p', 'epic-rollup', rollupLabel(epicRollup(sectionOf(state, 'hierarchy'), sectionOf(state, 'forgeLoad'), issue))));
+    wrap.appendChild(el('p', 'note', 'the list shows open children; closed children are counted above'));
   }
   wrap.appendChild(el('h3', 'drawer-section-title', `tickets that declare #${issue} as their parent`));
   if (found.value.length === 0) {
@@ -1775,6 +1779,7 @@ function renderChildren(issue) {
 
 function renderTab(tab) {
   const wrap = document.createElement('div');
+  if (tab.header) wrap.appendChild(el('p', 'tab-progress', tab.header));
   if (tab.note) wrap.appendChild(el('p', 'note', `source: ${tab.note}`));
   if (!tab.ok) {
     wrap.appendChild(said(tab.reason));

@@ -10,7 +10,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseSpecCards } from './spec-cards.mjs';
-import { parseTasksList } from './tasks-list.mjs';
+import { parseTasksList } from '../../lib/tasks-list.mjs';
 import { parseBlame } from './blame.mjs';
 import { shapeResumeView } from './resume-view.mjs';
 import { buildChangeView } from '../change-route.mjs';

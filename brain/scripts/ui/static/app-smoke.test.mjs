@@ -225,7 +225,7 @@ test('#1059 smoke: the page boots against a real snapshot and draws the board', 
   // took `renderLanes` down with it — a blank board, not a failing test.
   const card = cardFor(dom, 1059);
   assert.ok(card, 'the issue that owns a change directory is on the board');
-  assert.match(card.textContent, /tasks 1\/2/, 'its strip counts the change directory\'s ticked tasks');
+  assert.match(card.textContent, /tasks 1 \/ 2 · working tree/, 'its strip counts the change directory\'s ticked tasks');
 });
 
 test('#1059 smoke: clicking a ticket opens its panel, from every mode', async (t) => {

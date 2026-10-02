@@ -90,6 +90,13 @@ test('#881 R881-8 S2: no change dir states the expected path in the tab AND as i
   }
 });
 
+test('#1199 R1199-4: the Tasks tab header names the count and its source', () => {
+  const tab = (progress) => buildDrawerModel(view({ tasks: { ok: true, value: [], progress } })).value.tabs[2];
+  assert.equal(tab({ ok: true, value: { done: 2, total: 5 } }).header, '2 / 5 tasks done · at HEAD');
+  assert.equal(tab({ ok: false, code: 'truncated', reason: 'x' }).header, 'tasks.md is truncated; no total is shown · at HEAD');
+  assert.equal(tab({ ok: false, code: 'no-items', reason: 'x' }).header, 'tasks.md has no checklist items · at HEAD');
+});
+
 test('#881 R881-8: Tasks show done/pending, the file line, and attribution — a blame failure is said per row, never dropped', () => {
   const model = buildDrawerModel(view({
     tasks: {
