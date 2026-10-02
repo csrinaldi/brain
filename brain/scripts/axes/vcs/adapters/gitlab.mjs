@@ -606,6 +606,16 @@ export async function prCommits({ project, number, apiBase, token, proxyUrl, fet
 /** Spawn buffer ceiling for the list verbs (#1257); see github.mjs LIST_MAX_BUFFER. */
 export const LIST_MAX_BUFFER = 64 * 1024 * 1024;
 
+/** `runJson` for a list read: the buffer ceiling, and a readable reason for ENOBUFS (mirrors github's ghListRaw). */
+function glabListJson(args) {
+  const r = run('glab', args, { maxBuffer: LIST_MAX_BUFFER });
+  if (r.error?.code === 'ENOBUFS') {
+    throw new Error(`glab ${args.join(' ')} failed: the list exceeded ${LIST_MAX_BUFFER / (1024 * 1024)} MiB (ENOBUFS)`);
+  }
+  if (!r.ok) throw new Error(`glab ${args.join(' ')} failed (status ${r.status}): ${r.stderr}`);
+  try { return JSON.parse(r.stdout); } catch (e) { throw new Error(`glab: invalid JSON — ${e.message}`); }
+}
+
 export async function issueList({ project, state = 'open', assignee, updatedSince } = {}) {
   let currentUser;
   if (assignee === 'me') currentUser = (await whoami()).username;
@@ -624,7 +634,7 @@ export async function issueList({ project, state = 'open', assignee, updatedSinc
   const delta = updatedSince ? `&updated_after=${encodeURIComponent(updatedSince)}&order_by=updated_at&sort=asc` : '';
   for (let page = 1; ; page += 1) {
     const endpoint = `projects/${encoded}/issues?state=${providerState('gitlab', state)}&per_page=${perPage}&page=${page}${extra}${delta}`;
-    const chunk = runJson('glab', ['api', endpoint], { maxBuffer: LIST_MAX_BUFFER });
+    const chunk = glabListJson(['api', endpoint]);
     if (!Array.isArray(chunk)) break;
     arr.push(...chunk);
     if (chunk.length < perPage) break;
@@ -680,7 +690,7 @@ export async function mrList({ project, state = 'open', headBranch } = {}) {
   const endpoint = headBranch !== undefined
     ? `projects/${encoded}/merge_requests?state=${providerState('gitlab', state)}&source_branch=${encodeURIComponent(headBranch)}&per_page=100`
     : `projects/${encoded}/merge_requests?state=${providerState('gitlab', state)}&per_page=50`;
-  const arr = runJson('glab', ['api', endpoint], { maxBuffer: LIST_MAX_BUFFER });
+  const arr = glabListJson(['api', endpoint]);
   if (headBranch !== undefined && arr.length === 100) {
     throw new Error(`mrList: a full page (100) came back for headBranch ${headBranch} — cannot rule out truncation, failing closed`);
   }

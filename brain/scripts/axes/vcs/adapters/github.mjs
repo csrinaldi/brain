@@ -597,10 +597,8 @@ export async function commitStatus({ project, sha }) {
  * @returns {Promise<number[]|null>}
  */
 export async function commitPrs({ project, sha } = {}) {
-  const r = gh(['api', '--paginate', `repos/${project}/commits/${sha}/pulls`]);
-  if (!r.ok) return null;
   try {
-    const data = JSON.parse(r.stdout);
+    const data = ghListJson(['api', '--paginate', `repos/${project}/commits/${sha}/pulls`]);
     if (!Array.isArray(data)) return null;
     return data.map(pr => pr.number).sort((a, b) => a - b);
   } catch {
@@ -679,7 +677,7 @@ export async function workflowRunSucceeded({ project, workflow, branch } = {}) {
   if (!workflow || !branch) return { state: 'unknown', detail: 'workflow and branch are both required' };
   let runs;
   try {
-    runs = ghJson([
+    runs = ghListJson([
       'run', 'list', '--workflow', workflow, '--branch', branch, '--status', 'success',
       '--limit', '1', '--json', 'databaseId', ...(project ? ['-R', project] : []),
     ]);
@@ -1112,7 +1110,7 @@ export async function issueClose({ project, number } = {}) {
 export async function rerunWorkflowRun({ project, ref, workflow = 'governance.yml' } = {}) {
   let runsResp;
   try {
-    runsResp = ghJson(['api', `repos/${project}/actions/runs?branch=${encodeURIComponent(ref)}&per_page=100`]);
+    runsResp = ghListJson(['api', `repos/${project}/actions/runs?branch=${encodeURIComponent(ref)}&per_page=100`]);
   } catch (err) {
     return { ok: false, reason: `could not list workflow runs: ${err.message}` };
   }

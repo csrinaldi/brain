@@ -2020,3 +2020,32 @@ test('#1257: the other spawn-based lists carry the same buffer ceiling', async (
   assert.equal(seen.length >= 4, true);
   for (const [ep, mb] of seen) assert.ok(mb >= 64 * 1024 * 1024, `${ep} ran with maxBuffer ${mb}`);
 });
+
+// ── #1257 (S1): the class is closed — every gh list read carries the ceiling ─────
+test('#1257: github commitPrs, workflowRunSucceeded and rerunWorkflowRun list reads carry the buffer ceiling', async () => {
+  const seen = [];
+  setSpawn((cmd, args, opts) => {
+    seen.push([args.join(' '), opts?.maxBuffer]);
+    return { status: 0, stdout: args.includes('run') ? '[]' : (args.some(a => /commits\/.*\/pulls/.test(a)) ? '[]' : '{"workflow_runs":[]}'), stderr: '' };
+  });
+  await github.commitPrs({ project: 'o/r', sha: 'abc' });
+  await github.workflowRunSucceeded({ project: 'o/r', workflow: 'w.yml', branch: 'main' });
+  await github.rerunWorkflowRun({ project: 'o/r', ref: 'main' });
+  assert.equal(seen.length, 3);
+  for (const [argv, mb] of seen) assert.ok(mb >= github.LIST_MAX_BUFFER, `${argv} ran with maxBuffer ${mb}`);
+});
+
+test('#1257 guard: github.mjs makes no --paginate / per_page / list call without the list-buffer helper', () => {
+  const src = readFileSync(fileURLToPath(new URL('../axes/vcs/adapters/github.mjs', import.meta.url)), 'utf8');
+  const bare = [...src.matchAll(/\b(gh|ghJson)\(\s*\[([^\]]*)\]/g)]
+    .filter(m => /--paginate|per_page|'list'/.test(m[2]))
+    .map(m => m[0].replace(/\s+/g, ' ').slice(0, 90));
+  assert.deepEqual(bare, [], 'list reads must go through ghListRaw/ghListJson (LIST_MAX_BUFFER)');
+});
+
+test('#1257 (S3): a GitLab list that overflows the buffer says so, naming the ceiling (ENOBUFS)', async () => {
+  setSpawn(() => ({ status: null, stdout: null, stderr: null, error: Object.assign(new Error('spawnSync glab ENOBUFS'), { code: 'ENOBUFS' }) }));
+  const readable = (e) => /exceeded 64 MiB/.test(e.message) && /ENOBUFS/.test(e.message) && !/status null/.test(e.message);
+  await assert.rejects(() => gitlab.issueList({ project: 'g/r', state: 'closed' }), readable);
+  await assert.rejects(() => gitlab.mrList({ project: 'g/r', state: 'open' }), readable);
+});
