@@ -68,6 +68,9 @@ export { AGENT_PLATFORMS, SDD_ENGINES };
  */
 export const DEFAULT_PLATFORM = 'claude';
 
+/** The SDD engine a repo gets when it states none. Declared here so the S3.2 migration reads the same value `resolveEngine` falls back to. */
+export const DEFAULT_ENGINE = 'gentle-ai';
+
 /**
  * Resolves the active agent platform.
  * Pure — takes env + envVars + config explicitly for testing.

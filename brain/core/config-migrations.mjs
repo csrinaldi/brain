@@ -224,7 +224,90 @@ export const migrations = [
       },
     },
   },
+  {
+    version: "1.11.1",
+    description:
+      "Move every axis to the ADR-0038 shape: { default, providers } for vcs, memory, platform " +
+      "and sdd (issue #1114 S3.2). No consumer changes behaviour: each default is the value that " +
+      "axis EFFECTIVELY resolves to today (process env, then .env, then the config's own key, " +
+      "then today's code default for platform and sdd; undeclared memory and vcs stay \"\"), and " +
+      "brain:upgrade prints every value it wrote with its source. No `version` is written, except " +
+      "the `brain` SDD provider's \"self\". A custom stage routed in sdd.map adds its runtime to " +
+      "platform.providers as {}, and cold-review gets sdd.roles['cold-review'] = " +
+      "{ agent: 'brain:cold-review', engine, model }. sdd.map and sdd.configs are not reshaped " +
+      "(#1132). The legacy keys (memory.backend, vcs.provider, engine, harness) STAY for the alias " +
+      "window: shell readers (install-tools.sh, bootstrap.sh), the brain-config scaffold and the " +
+      "brain:config verb still read or write them, and readAxis prefers the shape. The one key that " +
+      "cannot stay is the flat `platform` string, which is the same key as the new `platform` object. " +
+      "Needs the axisContext migrateConfig hands it (brain-upgrade and brain:config build it from " +
+      "env and .env); with none, the entry changes nothing, so buildDefaultConfig is untouched. " +
+      "Versioned 1.11.1, the smallest version above the shipped 1.11.0.",
+    migrate: migrateToAxisShape,
+  },
 ];
+
+// ── 1.11.1: the ADR-0038 axis shape ─────────────────────────────────────────
+// Pure over (config, helpers.axisContext). The context carries the two values that live outside
+// the file (see brain/scripts/lib/axis-migration-context.mjs); everything else is read from the
+// config itself. `helpers.notice(line)` is optional: the caller that prints (brain:upgrade) gets
+// one line per value written.
+function migrateToAxisShape(config, helpers = {}) {
+  const ctx = helpers.axisContext;
+  if (!ctx) return config;
+  const say = (line) => { if (typeof helpers.notice === 'function') helpers.notice(line); };
+  const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+  const has = (o, k) => isObj(o) && Object.prototype.hasOwnProperty.call(o, k);
+  const isShape = (n) => isObj(n) && (has(n, 'default') || has(n, 'providers'));
+  const text = (v) => (typeof v === 'string' ? v.trim() : '');
+  const perMachine = (source) => /^(process env|\.env)/.test(source);
+
+  const out = structuredClone(config);
+
+  const toShape = (axis, value, source) => {
+    if (isShape(out[axis])) return;
+    const node = isObj(out[axis]) ? out[axis] : {};
+    out[axis] = { ...node, default: value, providers: value ? { [value]: {} } : {} };
+    if (value === '') {
+      say(`${axis}.default = "" (undeclared: ${source} is empty; declare it with: npm run brain:config -- set ${axis}.default <name>)`);
+    } else {
+      say(`${axis}.default = ${value} (from ${source})` +
+        (perMachine(source) ? ' - a per-machine value, now the team\'s tracked default' : ''));
+    }
+  };
+
+  toShape('memory', text(out.memory?.backend), 'brain.config.json memory.backend');
+  toShape('vcs', text(out.vcs?.provider), 'brain.config.json vcs.provider');
+  toShape('platform', ctx.platform.value, ctx.platform.source);
+  toShape('sdd', ctx.sdd.value, ctx.sdd.source);
+
+  // The `brain` SDD provider: what brain already runs, given a name. "self" is the one version a
+  // migration may write (ratified point 3): it is the package's own, not the machine's.
+  if (isObj(out.sdd.providers) && !has(out.sdd.providers, 'brain')) {
+    out.sdd.providers.brain = { version: 'self' };
+    say('sdd.providers.brain = {"version":"self"} (brain\'s own provider, declared on every consumer)');
+  }
+
+  // Routed engines (ADR-0038 section 7). A LIFECYCLE stage's engine is a framework and is never a
+  // platform provider; a CUSTOM stage's engine is a runtime and is.
+  const lifecycle = new Set(ctx.lifecycleStages ?? []);
+  const map = isObj(out.sdd.map) ? out.sdd.map : {};
+  for (const [stage, route] of Object.entries(map)) {
+    const engine = text(route?.engine);
+    if (!engine || lifecycle.has(stage)) continue;
+    if (isObj(out.platform.providers) && !has(out.platform.providers, engine)) {
+      out.platform.providers[engine] = {};
+      say(`platform.providers.${engine} = {} (runtime routed by sdd.map["${stage}"].engine)`);
+    }
+    if (stage === 'cold-review' && !has(out.sdd.roles, stage)) {
+      const role = { agent: 'brain:cold-review', engine };
+      const model = text(route?.model);
+      if (model) role.model = model;
+      out.sdd.roles = { ...(isObj(out.sdd.roles) ? out.sdd.roles : {}), [stage]: role };
+      say(`sdd.roles["${stage}"] = ${JSON.stringify(role)} (from sdd.map["${stage}"])`);
+    }
+  }
+  return out;
+}
 
 // NOTE (issue #231 A2, human ruling in tasks.md/design.md): this entry is versioned
 // 0.7.0, NOT the 0.6.0 gap left by C4's removal of the never-shipped `memory.dualWrite`

@@ -9,8 +9,8 @@
 
 ## S3 schema and migrations (lands BEFORE S2, ADR-0038 §8)
 - [x] S3.1 `lib/axis-config.mjs`: `readAxis` (shape, legacy alias, none) and `validateAxisConfig`; every existing reader routed through `readAxis` with no behaviour change; parity tests; no guard allowlist change needed
-- [ ] Migrations to the ADR-0038 shape: `memory.backend` -> `memory.default` + `memory.providers`; `vcs.provider` -> `vcs.default` + `vcs.providers`; flat `platform`/`engine`/`harness` and `SDD_HARNESS` -> `platform.default` / `sdd.default` (resolves #643; coordinate #807)
-- [ ] Existing consumers get the value they effectively run today (env or `.env`, else `claude` / `gentle-ai`); undeclared memory/vcs stay undeclared
+- [x] S3.2 Migrations to the ADR-0038 shape (1.11.1; legacy keys kept for the alias window, see design.md): `memory.backend` -> `memory.default` + `memory.providers`; `vcs.provider` -> `vcs.default` + `vcs.providers`; flat `platform`/`engine`/`harness` and `SDD_HARNESS` -> `platform.default` / `sdd.default` (resolves #643; coordinate #807)
+- [x] S3.2 Existing consumers get the value they effectively run today (env or `.env`, else `claude` / `gentle-ai`); undeclared memory/vcs stay undeclared
 - [ ] Read-only aliases for the old keys for one minor, then a refusal with a named fix
 - [ ] `env:init` declares or asks for each axis default on a fresh consumer
 

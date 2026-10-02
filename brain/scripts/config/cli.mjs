@@ -10,6 +10,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { planConfigWrite, resolvePath } from './config-verb.mjs';
+import { resolveAxisMigrationContext } from '../lib/axis-migration-context.mjs';
 
 const USAGE = `Usage: npm run brain:config -- get <path>
        npm run brain:config -- set <path> <value>
@@ -53,7 +54,9 @@ export async function main(argv = process.argv.slice(2), root = process.cwd()) {
   const { migrations } = await import(join(here, '../../core/config-migrations.mjs'));
   const targetVersion = JSON.parse(readFileSync(join(here, '../../../package.json'), 'utf8')).version;
 
-  const { next, migrationsApplied, refusal } = planConfigWrite({ config, path, value, migrations, targetVersion });
+  // The ADR-0038 migration (1.11.1) writes what each axis effectively runs today, which lives in env and `.env`.
+  const axisContext = resolveAxisMigrationContext({ config, env: process.env, root });
+  const { next, migrationsApplied, refusal } = planConfigWrite({ config, path, value, migrations, targetVersion, axisContext });
   if (refusal) fail(refusal);
 
   // Atomic: same-directory tmp + rename, so a crash mid-write never leaves a
