@@ -32,11 +32,12 @@
 // offender; every entry is either debt owned by an issue or `legitimate`.
 //
 // KNOWN LIMITS OF THE MASKER (documented, not hidden). `maskNonCode` ends a
-// template literal at its first unescaped backtick, so a template nested inside
-// `${...}` desyncs it (three production files do this today). A desync leaves
-// the masked text unbalanced, which `maskIsInSync` detects; the scan then retries
-// with `maskNonCodeNested`, a local template-aware masker, and only if that is
-// ALSO unbalanced does it FAIL NAMING THE FILE rather than trust a bad mask.
+// template literal at its first unescaped backtick (so a template nested inside
+// `${...}` desyncs it, and the code inside `${...}` is blanked and invisible).
+// The scan therefore ALWAYS uses `maskNonCodeNested`, a local template-aware
+// masker that keeps `${...}` code visible. A desync leaves the masked text
+// unbalanced, which `maskIsInSync` detects; the scan then FAILS NAMING THE FILE
+// rather than trust a bad mask. The shared `maskNonCode` is untouched.
 // Not detected: whatever hides behind a variable (`const T = 'gh'; spawn(T)`)
 // and `['github'].includes(x)` literal-array membership; the guard is a net
 // for the idiomatic spellings, not a type checker.
@@ -171,9 +172,9 @@ function lineOf(src, idx) {
  * Returns { hits: [{ file, rule, line, text }], desync: boolean }.
  */
 export function scanSource(rel, src, values = axisValues()) {
-  let masked = maskNonCode(src);
-  let fallback = false;
-  if (!maskIsInSync(masked)) { masked = maskNonCodeNested(src); fallback = true; }
+  // Always the template-aware masker: the shared `maskNonCode` blanks the code
+  // inside `${ }` too, which hid real calls and branches (#1114 review).
+  const masked = maskNonCodeNested(src);
   const hits = [];
   const push = (rule, idx, text) => hits.push({ file: rel, rule, line: lineOf(src, idx), text });
   const codeAt = (i) => masked[i] !== undefined && masked[i] !== ' ' && masked[i] !== '\n';
@@ -189,7 +190,7 @@ export function scanSource(rel, src, values = axisValues()) {
   for (const m of src.matchAll(spawnRe)) if (codeAt(m.index)) push(`spawn-concrete:${m[2]}`, m.index, m[0]);
 
   // 2. adapter-import: from '<spec>' / import('<spec>') naming axes/<axis>/adapters/<x>
-  const importRe = /\b(?:from|import\s*\()\s*(['"])([^'"\n]*\/adapters\/[^'"\n]*)\1/g;
+  const importRe = /\b(?:from|import\s*\(|import)\s*(['"])([^'"\n]*\/adapters\/[^'"\n]*)\1/g;
   const own = rel.startsWith('axes/') ? rel.split('/')[1] : null;
   for (const m of src.matchAll(importRe)) {
     if (!codeAt(m.index)) continue;
@@ -211,7 +212,7 @@ export function scanSource(rel, src, values = axisValues()) {
     if (codeAt(opIdx)) push('axis-branch', m.index, m[0]);
   }
 
-  return { hits, desync: !maskIsInSync(masked), fallback };
+  return { hits, desync: !maskIsInSync(masked) };
 }
 
 /** Production files in scope, as brain/scripts-relative `/` paths. */
@@ -312,6 +313,22 @@ test('#1114 S1: importing a concrete adapter from outside its axis is a hit', ()
   assert.deepEqual(rulesOf("import x from '../vcs/adapters/github.mjs';", 'axes/vcs/x.mjs'), []);
 });
 
+test('#1114 S1: side-effect and re-export imports of a concrete adapter are hits', () => {
+  assert.deepEqual(rulesOf("import '../axes/vcs/adapters/github.mjs';\n"), ['adapter-import']);
+  assert.deepEqual(rulesOf("import\"../axes/vcs/adapters/github.mjs\";\n"), ['adapter-import']);
+  assert.deepEqual(rulesOf("export * from '../axes/vcs/adapters/github.mjs';\n"), ['adapter-import']);
+  assert.deepEqual(rulesOf("export { a } from '../axes/memory/adapters/engram.mjs';\n"), ['adapter-import']);
+  assert.deepEqual(rulesOf("import '../axes/vcs/adapters/github.mjs';\n", 'axes/vcs/x.mjs'), []);
+  assert.deepEqual(rulesOf("// import '../axes/vcs/adapters/github.mjs';\n"), []);
+});
+
+test('#1114 S1: code inside a template interpolation is scanned, the literal text around it is not', () => {
+  assert.deepEqual(rulesOf("const x = `${ capture('gh', []) }`;"), ['spawn-concrete:gh']);
+  assert.deepEqual(rulesOf("const x = `a ${ provider === 'gitlab' } b`;"), ['axis-branch']);
+  assert.deepEqual(rulesOf("const x = `a ${ y ? `n ${ p === 'github' }` : '' } b`;"), ['axis-branch']);
+  assert.deepEqual(rulesOf("const x = `text capture('gh', []) and p === 'gitlab'`;"), []);
+});
+
 test('#1114 S1: an escaped quote inside a template literal does not desync the mask', () => {
   const src = "const t = `say \\`hi\\` and 'x' === 'github'`;\nif (p === 'gitlab') {}\n";
   const r = scanSource('foo/bar.mjs', src);
@@ -319,11 +336,10 @@ test('#1114 S1: an escaped quote inside a template literal does not desync the m
   assert.deepEqual(r.hits.map((h) => h.line), [2]);
 });
 
-test('#1114 S1: a template nested in ${} desyncs maskNonCode; the nested-aware fallback recovers and still sees code in ${}', () => {
+test('#1114 S1: a template nested in ${} desyncs maskNonCode; the template-aware masker the scan always uses recovers and sees code in ${}', () => {
   const src = "const a = `x ${ t ? ` (\\`${t}\\`)` : '' } y`;\nconst b = `p ${ capture('gh', []) } q`;\nif (p === 'gitlab') {}\n";
   assert.equal(maskIsInSync(maskNonCode(src)), false, 'precondition: the shared masker loses sync here');
   const r = scanSource('foo/bar.mjs', src);
-  assert.equal(r.fallback, true);
   assert.equal(r.desync, false);
   assert.deepEqual(r.hits.map((h) => [h.rule, h.line]), [['spawn-concrete:gh', 2], ['axis-branch', 3]]);
 });
