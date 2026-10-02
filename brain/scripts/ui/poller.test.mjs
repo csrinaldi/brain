@@ -895,7 +895,7 @@ function gatedPoller(extra = {}) {
   return { poller, scheduler, gate };
 }
 
-test('#1243 R1243-1: a forge-halted poller with a remotes lane holds ONE handle after start, resume, resume', async () => {
+test('#1243 R1243-1/4: start, resume, resume on a forge-halted poller with a remotes lane holds ONE handle (resume is a no-op while not paused; this is a guard, arm()\'s clear is pinned below)', async () => {
   const spy = fetchSpy();
   const scheduler = fakeScheduler();
   const poller = createPoller({
@@ -909,6 +909,33 @@ test('#1243 R1243-1: a forge-halted poller with a remotes lane holds ONE handle 
   assert.equal(scheduler.pending(), 1, 'one chain, whatever the order of start and resume');
   poller.close();
   assert.equal(scheduler.pending(), 0, 'close() stops every chain the poller started');
+});
+
+test('#1243 R1243-1: arm() clears a live handle before setting, so two settling ticks leave ONE handle', async () => {
+  const scheduler = fakeScheduler();
+  const poller = createPoller({
+    vcs: makeVcs({ callLog: [] }), cache: createForgeCache(), project: 'o/r', interval: 60000,
+    _setTimeout: scheduler.setTimeout, _clearTimeout: scheduler.clearTimeout, _now: () => new Date(0),
+  });
+  // Two ticks in flight; each settles into scheduleNext() -> arm(), the second with a live handle.
+  await Promise.all([poller.start(), poller.start()]);
+  assert.equal(scheduler.pending(), 1, 'the second arm() cleared the first handle');
+  poller.close();
+  assert.equal(scheduler.pending(), 0);
+});
+
+test('#1243 R1243-1: pause clears the only chain', async () => {
+  const scheduler = fakeScheduler();
+  const poller = createPoller({
+    vcs: makeVcs({ callLog: [] }), cache: createForgeCache(), project: 'o/r', interval: 60000,
+    _setTimeout: scheduler.setTimeout, _clearTimeout: scheduler.clearTimeout, _now: () => new Date(0),
+  });
+  await poller.start();
+  assert.equal(scheduler.pending(), 1);
+  poller.pause();
+  assert.equal(scheduler.pending(), 0, 'no handle is armed after pause');
+  assert.equal(poller.state().nextAttemptAt, null);
+  poller.close();
 });
 
 test('#1243 R1243-1: pause during an in-flight tick, then resume before it settles, leaves ONE handle', async () => {

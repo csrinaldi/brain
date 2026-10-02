@@ -131,6 +131,12 @@ test('#881: with no meta yet the indicator states that, rather than claiming a f
   assert.deepEqual(pollIndicator({ poller: null, nowMs: NOW }), { text: 'the poll state is unknown until the stream connects', paused: false, halted: false, countdown: 'polling disabled', toggle: null });
 });
 
+test('#1243 R1243-5: the halt text falls back to lastError when forgeHaltReason is absent, then to unknown', () => {
+  const base = { forgeHalted: true, paused: false, remotesLane: false, intervalMs: 60000, nextAttemptAt: null, lastOkAt: null };
+  assert.equal(pollIndicator({ poller: { ...base, lastError: 'no VCS token' }, nowMs: NOW }).text, 'forge unavailable: no VCS token');
+  assert.equal(pollIndicator({ poller: { ...base, lastError: null }, nowMs: NOW }).text, 'forge unavailable: unknown');
+});
+
 // ── #998 R998-6: the countdown text ─────────────────────────────────────────
 
 test('#998 R998-6: the countdown reads "next poll in N s" while scheduled, "paused" while paused, "polling disabled" with no schedule armed', () => {
