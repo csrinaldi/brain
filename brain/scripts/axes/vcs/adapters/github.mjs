@@ -450,12 +450,15 @@ export async function prView({ project, number } = {}) {
   }
 }
 
-export async function issueList({ project, state = 'open', assignee } = {}) {
+export async function issueList({ project, state = 'open', assignee, updatedSince } = {}) {
   let currentUser;
   if (assignee === 'me') currentUser = (await whoami()).username;
   const assigneePs = assigneeParams('github', assignee, currentUser);
   const extra = Object.keys(assigneePs).length > 0 ? '&' + toQs(assigneePs) : '';
-  const endpoint = `repos/${project}/issues?state=${providerState('github', state)}&per_page=100${extra}`;
+  // `updatedSince` (#1257, R1257-5) is the incremental read: GitHub's `since` filters on
+  // update time, and `sort=updated&direction=asc` keeps the walk deterministic.
+  const delta = updatedSince ? `&since=${encodeURIComponent(updatedSince)}&sort=updated&direction=asc` : '';
+  const endpoint = `repos/${project}/issues?state=${providerState('github', state)}&per_page=100${extra}${delta}`;
   // `--paginate` is load-bearing, same discipline as `labelEvents`/`prReviews`/
   // `labelList`: `gh api` does not auto-paginate, so a repo with more than one page
   // of open issues silently returned a PREFIX. Every consumer of this verb reads the
@@ -474,6 +477,11 @@ export async function issueList({ project, state = 'open', assignee } = {}) {
       title: r.title,
       labels: (r.labels ?? []).map(l => l.name),
       assignees: normalizeAssignees(r, 'login'),
+      // #1257 (R4, R10, R12): `state` is GitHub's own literal when representable, else
+      // null. `body` is null when the payload did not carry the key, and '' when it
+      // carried an empty or JSON-null one: "cannot see" is not "empty".
+      state: r.state === 'open' || r.state === 'closed' ? r.state : null,
+      body: 'body' in r ? (r.body ?? '') : null,
     }));
 }
 

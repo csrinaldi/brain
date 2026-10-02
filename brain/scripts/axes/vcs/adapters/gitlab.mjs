@@ -603,7 +603,7 @@ export async function prCommits({ project, number, apiBase, token, proxyUrl, fet
   return commits.map(c => ({ sha: c.id, login: null, at: c.committed_date }));
 }
 
-export async function issueList({ project, state = 'open', assignee } = {}) {
+export async function issueList({ project, state = 'open', assignee, updatedSince } = {}) {
   let currentUser;
   if (assignee === 'me') currentUser = (await whoami()).username;
   const encoded = encodeURIComponent(project);
@@ -617,8 +617,10 @@ export async function issueList({ project, state = 'open', assignee } = {}) {
   // a graph missing nodes and say nothing about it.
   const perPage = 100;
   const arr = [];
+  // `updatedSince` (#1257, R1257-5): the incremental read, on every page.
+  const delta = updatedSince ? `&updated_after=${encodeURIComponent(updatedSince)}&order_by=updated_at&sort=asc` : '';
   for (let page = 1; ; page += 1) {
-    const endpoint = `projects/${encoded}/issues?state=${providerState('gitlab', state)}&per_page=${perPage}&page=${page}${extra}`;
+    const endpoint = `projects/${encoded}/issues?state=${providerState('gitlab', state)}&per_page=${perPage}&page=${page}${extra}${delta}`;
     const chunk = runJson('glab', ['api', endpoint]);
     if (!Array.isArray(chunk)) break;
     arr.push(...chunk);
@@ -632,7 +634,18 @@ export async function issueList({ project, state = 'open', assignee } = {}) {
     title: r.title,
     labels: r.labels ?? [],
     assignees: normalizeAssignees(r, 'username'),
+    // #1257 (R4, R10, R12): the same two fields as github.mjs, in the same order.
+    state: mapGitlabIssueState(r.state),
+    body: 'description' in r ? (r.description ?? '') : null,
   }));
+}
+
+/** GitLab issues report `opened`|`closed`; the shared enum is `open`|`closed`.
+ * Anything else is unrepresentable and reports `null` rather than guessing. */
+function mapGitlabIssueState(raw) {
+  if (raw === 'opened') return 'open';
+  if (raw === 'closed') return 'closed';
+  return null;
 }
 
 /** D1 — GitLab's native merge_requests `state` has no distinct GitHub-shaped

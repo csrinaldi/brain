@@ -188,14 +188,14 @@ test('github.issueList filters pull_request entries', async () => {
   ]));
   const result = await github.issueList({ project: 'o/r', state: 'open' });
   assert.equal(result.length, 1);
-  assert.deepEqual(result[0], { number: 1, title: 'Issue A', labels: ['bug'], assignees: null });
+  assert.deepEqual(result[0], { number: 1, title: 'Issue A', labels: ['bug'], assignees: null, state: null, body: null });
 });
 
 test('gitlab.issueList returns normalized array', async () => {
   setSpawn(fakeSpawn([{ iid: 10, title: 'GL Issue', labels: ['backend'] }]));
   const result = await gitlab.issueList({ project: 'g/r', state: 'open' });
   assert.equal(result.length, 1);
-  assert.deepEqual(result[0], { number: 10, title: 'GL Issue', labels: ['backend'], assignees: null });
+  assert.deepEqual(result[0], { number: 10, title: 'GL Issue', labels: ['backend'], assignees: null, state: null, body: null });
 });
 
 // #459: both verbs used to return a PREFIX of the issue list — GitHub capped at one
@@ -241,6 +241,67 @@ test('#459: gitlab.issueList stops after a single short page — no wasted round
   const result = await gitlab.issueList({ project: 'g/r', state: 'open' });
   assert.equal(result.length, 1);
   assert.equal(calls, 1);
+});
+
+// #1257: the closed filter and the incremental `updatedSince` read. Both providers
+// paginate in full for either; an absent `updatedSince` leaves the endpoint as it was.
+
+test('#1257: state=closed reaches both endpoints and both still paginate', async () => {
+  let ghArgv = null;
+  setSpawn((cmd, args) => { ghArgv = args; return { status: 0, stdout: '[]', stderr: '' }; });
+  await github.issueList({ project: 'o/r', state: 'closed' });
+  assert.ok(ghArgv.includes('--paginate'));
+  assert.match(ghArgv[ghArgv.length - 1], /[?&]state=closed(&|$)/);
+
+  const glSeen = [];
+  const page1 = Array.from({ length: 100 }, (_, i) => ({ iid: i + 1, title: 't', labels: [] }));
+  setSpawn((cmd, args) => {
+    const endpoint = args[args.length - 1];
+    glSeen.push(endpoint);
+    return { status: 0, stdout: JSON.stringify(/[&?]page=1(&|$)/.test(endpoint) ? page1 : []), stderr: '' };
+  });
+  await gitlab.issueList({ project: 'g/r', state: 'closed' });
+  assert.equal(glSeen.length, 2, 'a full page is followed by page 2');
+  for (const e of glSeen) assert.match(e, /[?&]state=closed(&|$)/);
+});
+
+test('#1257: github.issueList updatedSince adds since, sort and direction, and still paginates', async () => {
+  let argv = null;
+  setSpawn((cmd, args) => { argv = args; return { status: 0, stdout: '[]', stderr: '' }; });
+  await github.issueList({ project: 'o/r', state: 'closed', updatedSince: '2026-10-02T10:00:00.000Z' });
+  const endpoint = argv[argv.length - 1];
+  assert.ok(argv.includes('--paginate'));
+  assert.match(endpoint, /state=closed/);
+  assert.match(endpoint, /since=2026-10-02T10%3A00%3A00\.000Z/);
+  assert.match(endpoint, /sort=updated/);
+  assert.match(endpoint, /direction=asc/);
+});
+
+test('#1257: gitlab.issueList updatedSince adds updated_after, order_by and sort on every page', async () => {
+  const page1 = Array.from({ length: 100 }, (_, i) => ({ iid: i + 1, title: 't', labels: [] }));
+  const seen = [];
+  setSpawn((cmd, args) => {
+    const endpoint = args[args.length - 1];
+    seen.push(endpoint);
+    return { status: 0, stdout: JSON.stringify(/[&?]page=1(&|$)/.test(endpoint) ? page1 : []), stderr: '' };
+  });
+  await gitlab.issueList({ project: 'g/r', state: 'closed', updatedSince: '2026-10-02T10:00:00.000Z' });
+  assert.equal(seen.length, 2);
+  for (const e of seen) {
+    assert.match(e, /state=closed/);
+    assert.match(e, /updated_after=2026-10-02T10%3A00%3A00\.000Z/);
+    assert.match(e, /order_by=updated_at/);
+    assert.match(e, /sort=asc/);
+  }
+});
+
+test('#1257: an absent updatedSince leaves both endpoints unchanged', async () => {
+  const seen = [];
+  setSpawn((cmd, args) => { seen.push(args[args.length - 1]); return { status: 0, stdout: '[]', stderr: '' }; });
+  await github.issueList({ project: 'o/r', state: 'open' });
+  await gitlab.issueList({ project: 'g/r', state: 'open' });
+  assert.equal(seen.length, 2);
+  for (const e of seen) assert.doesNotMatch(e, /since|updated_after|sort=|order_by|direction/);
 });
 
 // ── mrList ───────────────────────────────────────────────────────────────────────
