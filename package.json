@@ -62,7 +62,7 @@
     "brain:governance-status": "node ./brain/scripts/brain-governance-status.mjs",
     "brain:port:coverage": "node brain/scripts/vcs/port-coverage.mjs",
     "pretest": "node brain/scripts/test-hygiene.mjs",
-    "test": "node --test \"brain/scripts/**/*.test.mjs\" \"test/**/*.e2e.test.mjs\"",
+    "test": "node --import ./brain/scripts/lib/test-brain-home.mjs --test \"brain/scripts/**/*.test.mjs\" \"test/**/*.e2e.test.mjs\"",
     "test:fresh-install": "bash test/fresh-install/run.sh",
     "test:upgrade": "bash test/upgrade/run.sh",
     "memory:save": "node ./brain/scripts/memory/cli.mjs save",

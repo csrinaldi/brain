@@ -44,6 +44,7 @@ function readEnvFile(root = repoRoot) {
 // to fix the first.
 import { resolvePlatform, SDD_ENGINES } from './platform.mjs';
 import { resolveAxis, AxisRefusal } from '../lib/axis-config.mjs';
+import { readUserConfig } from '../lib/user-config.mjs';
 import { loadBrainConfig } from '../lib/brain-config.mjs';
 import { t } from '../i18n/t.mjs';
 import { harnessAdapterUrl } from '../axes/lib/harness-adapter-url.mjs';
@@ -53,12 +54,12 @@ export { resolvePlatform, SDD_ENGINES };
  * Resolves the active SDD engine: a thin caller of `resolveAxis` (process env > `.env` > `sdd.default` > the legacy
  * flat key and `SDD_HARNESS`, one minor version). No default: an undeclared engine is refused (#1114 S2).
  *
- * @param {{ env?: object, envVars?: object, config?: object }} [opts]
+ * @param {{ env?: object, envVars?: object, config?: object, user?: ReturnType<typeof readUserConfig> }} [opts]  `user`: the user layer, read through the ONE reader when not injected
  * @returns {string}
  * @throws {AxisRefusal} when nothing declares an SDD engine
  */
-export function resolveEngine({ env = process.env, envVars = {}, config = {} } = {}) {
-  return resolveAxis('sdd', { env, dotenv: envVars, config }).value;
+export function resolveEngine({ env = process.env, envVars = {}, config = {}, user = readUserConfig({ env }) } = {}) {
+  return resolveAxis('sdd', { env, dotenv: envVars, config, ...user }).value;
 }
 
 // `resolveMemory` was here and is REMOVED (issue #1165): it was exported, dead (memory/cli.mjs

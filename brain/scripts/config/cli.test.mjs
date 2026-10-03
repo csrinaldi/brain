@@ -137,7 +137,7 @@ test('#1114 S3.3: the SAME config migrated through brain:upgrade\'s context stil
 });
 
 // ── #1114 S3.3 review + S2: `resolve <axis>` IS the runtime resolver (resolveAxis), so the shell composes no precedence ──
-const runEnv = (root, env, ...args) => spawnSync(process.execPath, [CLI, ...args], { cwd: root, encoding: 'utf8', timeout: 30_000, env: { PATH: process.env.PATH, ...env } });
+const runEnv = (root, env, ...args) => spawnSync(process.execPath, [CLI, ...args], { cwd: root, encoding: 'utf8', timeout: 30_000, env: { PATH: process.env.PATH, BRAIN_HOME: process.env.BRAIN_HOME || '/nonexistent/brain-home', ...env } });
 
 test('#1114 S2 cli: resolve prints "<run> <repo> <run-where> <repo-where>" — the reviewer\'s case (config harness + .env SDD_HARNESS) agrees with resolvePlatform', async (t) => {
   const { resolvePlatform } = await import('../harness/platform.mjs');
@@ -234,4 +234,53 @@ test('#1114 S3.4 cli: the version fix diagnose prints is a command the verb acce
   const w = runEnv(root, {}, 'set', 'sdd.providers.gentle-ai.version', '1.2.3');
   assert.equal(w.status, 0, w.stderr);
   assert.equal(JSON.parse(readFileSync(join(root, 'brain.config.json'), 'utf8')).sdd.providers['gentle-ai'].version, '1.2.3');
+});
+
+// ── #1263 S1: the user layer (BRAIN_HOME) through the one reader ──
+const userHome = (t, body) => {
+  const dir = mkdtempSync(join(tmpdir(), 'brain-1263-home-'));
+  t.after(() => removeTempTree(dir));
+  if (body !== undefined) writeFileSync(join(dir, 'config.json'), typeof body === 'string' ? body : JSON.stringify(body));
+  return dir;
+};
+const TEAM_CLAUDE = { schemaVersion: '1.11.1', platform: { default: 'claude', providers: { claude: {} } } };
+const CAROL = { platform: { default: 'antigravity', providers: { antigravity: {} } } };
+
+test('#1263 S1 cli: resolve prints `user` for a user-layer win, and the REPO value leaves the user layer out', (t) => {
+  const root = world(t, TEAM_CLAUDE);
+  const r = runEnv(root, { BRAIN_HOME: userHome(t, CAROL) }, 'resolve', 'platform');
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout, 'antigravity claude user config\n', 'run = the person\'s; repo = what the team states');
+});
+
+test('#1263 S1 cli: a missing user file is the empty layer; an invalid one is a refusal (exit 4) naming the file', (t) => {
+  const root = world(t, TEAM_CLAUDE);
+  assert.equal(runEnv(root, { BRAIN_HOME: userHome(t) }, 'resolve', 'platform').stdout, 'claude claude config config\n');
+  const home = userHome(t, '{ not json');
+  const bad = runEnv(root, { BRAIN_HOME: home }, 'resolve', 'platform');
+  assert.equal(bad.status, 4);
+  assert.ok(bad.stderr.includes(join(home, 'config.json')), bad.stderr);
+});
+
+test('#1263 S1 cli: a locked axis refuses the user layer, .env and the process env (exit 4); an unlocked one does not', (t) => {
+  const root = world(t, { ...TEAM_CLAUDE, platform: { default: 'claude', locked: true, providers: { claude: {} } } });
+  const refused = runEnv(root, { BRAIN_HOME: userHome(t, CAROL) }, 'resolve', 'platform');
+  assert.equal(refused.status, 4);
+  assert.match(refused.stderr, /locked by the team/);
+  assert.equal(runEnv(root, { BRAIN_HOME: userHome(t), AGENT_PLATFORM: 'antigravity' }, 'resolve', 'platform').status, 4);
+  assert.equal(runEnv(root, { BRAIN_HOME: userHome(t) }, 'resolve', 'platform').stdout, 'claude claude config config\n');
+});
+
+test('#1263 S1 cli: vcs ignores the user layer, even a broken one', (t) => {
+  const root = world(t, { schemaVersion: '1.11.1', vcs: { default: 'github', providers: { github: {} } } });
+  const r = runEnv(root, { BRAIN_HOME: userHome(t, '{ not json') }, 'resolve', 'vcs');
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout, 'github github config config\n');
+});
+
+test('#1263 S1 cli: diagnose reads the user layer through the same reader', (t) => {
+  const root = world(t, TEAM_CLAUDE);
+  const out = runEnv(root, { BRAIN_HOME: userHome(t, { platform: { locked: true } }) }, 'diagnose');
+  assert.equal(out.status, 0, out.stderr);
+  assert.ok(JSON.parse(out.stdout).some((f) => f.code === 'user-layer-invalid' && f.severity === 'error'));
 });

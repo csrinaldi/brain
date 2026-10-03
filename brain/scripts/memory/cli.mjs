@@ -78,7 +78,7 @@ const RESOLVED = resolveMemoryBackend({
 });
 
 /** The source as an operator reads it — never the resolver's raw `shell`/`file`/`config` tokens. */
-const sourceLabel = (src) => (src === "shell" ? "the process env" : src === "file" ? ".env" : "brain.config.json");
+const sourceLabel = (src) => (src === "shell" ? "the process env" : src === "file" ? ".env" : src === "user" ? "the user config (~/.brain)" : "brain.config.json");
 
 let shadowReported = false;
 /** A losing declaration is reported, not dropped (#1165 S3) — on stderr, and BEFORE any refusal, so an invalid winner still shows what it overrode. Idempotent. */

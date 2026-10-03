@@ -37,7 +37,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync, readFileSync, existsSync, chmodSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -424,9 +424,12 @@ test('#1114 S3.3 a FRESH install ends with every axis declared in config (the S2
 });
 
 // ── #1114 S3.4 (S3.3 cold review): the success line names the ACTUAL source of the run's values ──
-function successLine({ procEnv = {}, envFile = null, config = {} } = {}) {
+function successLine({ procEnv = {}, envFile = null, config = {}, userConfig = null } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'brain-1114-srcline-'));
   try {
+    // The user layer (#1263): a BRAIN_HOME of the fixture's own, seeded only when the scenario asks.
+    mkdirSync(join(dir, 'brain-home'), { recursive: true });
+    if (userConfig !== null) writeFileSync(join(dir, 'brain-home', 'config.json'), JSON.stringify(userConfig));
     if (envFile !== null) writeFileSync(join(dir, '.env'), envFile);
     writeFileSync(join(dir, 'brain.config.json'), JSON.stringify(config, null, 2) + '\n');
     const src = (prefix) => LINES.map((l) => l.trim()).find((l) => l.startsWith(prefix));
@@ -444,7 +447,7 @@ function successLine({ procEnv = {}, envFile = null, config = {} } = {}) {
       src('_SDD_SRC='),
       okLine,
     ].join('\n');
-    const r = spawnSync('bash', ['-c', script], { cwd: dir, encoding: 'utf8', env: { ...BASE_ENV, ...procEnv }, stdio: ['ignore', 'pipe', 'pipe'], timeout: 60_000 });
+    const r = spawnSync('bash', ['-c', script], { cwd: dir, encoding: 'utf8', env: { ...BASE_ENV, BRAIN_HOME: join(dir, 'brain-home'), ...procEnv }, stdio: ['ignore', 'pipe', 'pipe'], timeout: 60_000 });
     assert.equal(r.status, 0, r.stderr);
     return r.stdout.split('\n').find((l) => l.startsWith('OK:harness')) ?? r.stdout;
   } finally {
@@ -464,11 +467,19 @@ test('#1114 S3.4 bootstrap.sh: the harness success line names where the run valu
   assert.equal(successLine({ config: declared, envFile: 'AGENT_PLATFORM=antigravity\n' }), 'OK:harness: gentle-ai (antigravity) (platform: .env; engine: brain.config.json)');
 });
 
+test('#1263 S1 bootstrap.sh: a user-layer platform wins for the run and the success line names the user config; the team config is not rewritten', () => {
+  const declared = { schemaVersion: '1.11.1', platform: { default: 'claude', providers: { claude: {} } }, sdd: { default: 'gentle-ai', providers: { 'gentle-ai': {} } } };
+  const carol = { platform: { default: 'antigravity', providers: { antigravity: {} } } };
+  assert.equal(successLine({ config: declared, userConfig: carol }), 'OK:harness: gentle-ai (antigravity) (platform: user config (~/.brain); engine: brain.config.json)');
+  // the team config stays byte-identical: the user layer is read, never declared into the repo
+  assert.equal(successLine({ config: declared, userConfig: carol, procEnv: { SDD_ENGINE: 'gentle-ai' } }), 'OK:harness: gentle-ai (antigravity) (platform: user config (~/.brain); engine: process env)');
+});
+
 test('#1114 S3.4 bootstrap.sh: the source words exist in en and es, and the success line carries {source}', async () => {
   const en = (await import('./i18n/en.mjs')).default;
   const es = (await import('./i18n/es.mjs')).default;
   for (const cat of [en, es]) {
-    for (const k of ['shell', 'dotenv', 'config', 'default', 'split']) assert.ok(cat[`bootstrap.axis.source.${k}`], `bootstrap.axis.source.${k}`);
+    for (const k of ['shell', 'dotenv', 'user', 'config', 'default', 'split']) assert.ok(cat[`bootstrap.axis.source.${k}`], `bootstrap.axis.source.${k}`);
     assert.match(cat['bootstrap.sdd.ok'], /\{harness\}.*\{source\}/);
     assert.doesNotMatch(cat['bootstrap.sdd.ok'], /brain\.config\.json/);
   }

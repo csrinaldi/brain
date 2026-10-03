@@ -17,6 +17,7 @@ import { join } from 'node:path';
 
 import { readDotenv } from '../../lib/env-read.mjs';
 import { tryResolveAxis, MEMORY_BACKENDS } from '../../lib/axis-config.mjs';
+import { readUserConfig } from '../../lib/user-config.mjs';
 
 // The closed set lives with the other axes' (lib/axis-config.mjs) and is re-exported: its importers are unaffected.
 export { MEMORY_BACKENDS };
@@ -70,17 +71,17 @@ export function readConfig({ root, configFile = null }) {
 }
 
 /** The resolver's physical place → this module's historical source tokens (memory/cli.mjs and bootstrap.sh read them). */
-const token = { 'process-env': 'shell', dotenv: 'file', config: 'config' };
+const token = { 'process-env': 'shell', dotenv: 'file', user: 'user', config: 'config' };
 
 /**
  * @param {{root: string, env?: object, envFile?: string|null, configFile?: string|null}} args
- * @returns {{backend: string|null, source: 'shell'|'file'|'config'|'none',
+ * @returns {{backend: string|null, source: 'shell'|'file'|'user'|'config'|'none',
  *            status: 'declared'|'undeclared'|'invalid', invalidValue?: string,
  *            configError: string|null, shadowed: Array<{source: string, value: string}>}}
  */
-export function resolveMemoryBackend({ root, env = process.env, envFile = null, configFile = null }) {
+export function resolveMemoryBackend({ root, env = process.env, envFile = null, configFile = null, user = readUserConfig({ env }) }) {
   const { config, error } = readConfig({ root, configFile });
-  const r = tryResolveAxis('memory', { env, dotenv: readDotenv(root, envFile), config, notice: () => {} });
+  const r = tryResolveAxis('memory', { env, dotenv: readDotenv(root, envFile), config, ...user, notice: () => {} });
   if (r.ok) {
     return { backend: r.value, source: token[r.where], status: 'declared', configError: error, shadowed: r.shadowed };
   }
