@@ -338,9 +338,11 @@ export function resolveAxis(axis, { env = process.env, dotenv = {}, config = {},
     }
   }
 
-  // Every value from any level is checked against the union of the team's and the user's providers.
+  // The union of the team's and the user's providers validates the per-machine SELECTED value only.
   const merged = axis === 'vcs' ? cfg : mergeUserProviders(cfg, userLayer);
-  const bad = validateAxisConfig(merged).errors.filter((e) => e.axis === axis);
+  // Team structure (default, roles, capabilities) is a property of the TEAM config alone: the user layer never repairs it.
+  // The union below checks only the per-machine SELECTED value.
+  const bad = validateAxisConfig(cfg).errors.filter((e) => e.axis === axis);
   if (bad.length > 0) {
     const detail = bad.map((e) => e.message).join('; ');
     throw new AxisRefusal('invalid-config', axis, 'axes.refusal.invalidConfig', { axis, detail },

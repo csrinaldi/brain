@@ -104,11 +104,24 @@ test('union: capability rules apply — a user default must still orchestrate', 
   assert.ok(['invalid-value', 'invalid-config'].includes(rf.code));
 });
 
-test('union: sdd.roles may name an engine only the user lists', () => {
-  const config = team({ sdd: { default: 'gentle-ai', providers: { 'gentle-ai': {} }, roles: { review: { engine: 'codex' } } } });
-  assert.equal(refusal('sdd', { config, userConfig: {} }).code, 'invalid-config');
-  const ok = run('sdd', { config, userConfig: { platform: { providers: { codex: {} } } } });
-  assert.equal(ok.value, 'gentle-ai');
+test('team structure: sdd.roles are validated against the TEAM providers alone — a user layer cannot complete the pipeline', () => {
+  const config = team({ platform: { default: 'claude', providers: { claude: {} } }, sdd: { default: 'gentle-ai', providers: { 'gentle-ai': {} }, roles: { review: { engine: 'codex' } } } });
+  for (const userConfig of [{}, { platform: { providers: { codex: {} } } }]) {
+    const rf = refusal('sdd', { config, userConfig });
+    assert.equal(rf.code, 'invalid-config');
+    assert.match(rf.message, /sdd\.roles\.review\.engine/);
+  }
+});
+
+test('team structure: a user layer cannot "fix" a team default missing from the team providers', () => {
+  const config = { platform: { default: 'antigravity', providers: { claude: {} } } };
+  const rf = refusal('platform', { config, userConfig: user({ providers: { antigravity: {} } }) });
+  assert.equal(rf.code, 'invalid-config');
+});
+
+test('union: a user-only provider is still selectable as this machine\'s platform default', () => {
+  const r = run('platform', { config: team(), userConfig: user({ default: 'antigravity', providers: { antigravity: {} } }) });
+  assert.deepEqual([r.value, r.source], ['antigravity', 'user']);
 });
 
 // ── version ─────────────────────────────────────────────────────────────────
