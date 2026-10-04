@@ -100,3 +100,51 @@ test('readCodeowners reads .github/CODEOWNERS (then root, docs/, .gitlab/), and 
     assert.equal(readCodeowners(root, 'github'), '/brain.config.json @alice\n');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+// ── GitLab sections (#1283): https://docs.gitlab.com/user/project/codeowners/reference/#sections ──────────────────────
+
+test('GitLab: a correct sectioned mirror reports no drift — section defaults are inherited, [N] counts and ^ are headers', () => {
+  const text = [
+    '[Docs] @writer',
+    'docs/ @writer',
+    '^[Governance] @alice @bob',
+    '/brain.config.json',
+    '[Release][2] @carol',
+    '/dist/',
+  ].join('\n');
+  assert.equal(codeownersDrift(text, ['alice', 'bob'], 'gitlab'), null);
+  assert.equal(codeownersDrift('[Governance][2] @alice @bob\n/brain.config.json\n', ['bob', 'alice'], 'gitlab'), null);
+  assert.equal(codeownersDrift('[Governance]\n/brain.config.json @alice\n', ['alice'], 'gitlab'), null, 'a header without defaults is still a header');
+});
+
+test('GitLab: a sectioned mirror with the WRONG defaults is drift, naming both sides', () => {
+  assert.deepEqual(codeownersDrift('[Governance] @mallory\n/brain.config.json\n', ['alice'], 'gitlab'), { codeowners: ['mallory'], owners: ['alice'] });
+  assert.deepEqual(codeownersDrift('^[Governance][2] @mallory\n/brain.config.json @alice\n', ['alice'], 'gitlab'), null, 'the pattern\'s own owners beat the defaults');
+  assert.deepEqual(codeownersDrift('[A] @alice\n/brain.config.json\n[B] @bob\n/brain.config.json\n', ['alice'], 'gitlab'), { codeowners: ['bob'], owners: ['alice'] }, 'every section applies');
+});
+
+test('GitLab: a section name repeated in another case is the same section; a pattern without owners and no defaults is unowned', () => {
+  assert.equal(codeownersDrift('[Gov] @alice\n[gov]\n/brain.config.json\n', ['alice'], 'gitlab'), null);
+  assert.deepEqual(codeownersDrift('[Gov]\n/brain.config.json\n', ['alice'], 'gitlab'), { codeowners: [], owners: ['alice'] });
+});
+
+test('GitHub keeps its semantics: no sections — a `[Section] @x` line is just a pattern and defaults are never inherited', () => {
+  const text = '[Governance] @alice\n/brain.config.json\n';
+  assert.deepEqual(codeownersDrift(text, ['alice'], 'github'), { codeowners: [], owners: ['alice'] });
+  assert.deepEqual(codeownersDrift(text, ['alice']), { codeowners: [], owners: ['alice'] });
+  assert.equal(codeownersDrift('/brain.config.json @alice\n', ['alice'], 'gitlab'), null, 'a plain GitLab file without sections behaves the same');
+});
+
+test('diagnoseAxes passes the declared vcs provider: a sectioned GitLab mirror is no drift, the same text under GitHub is', () => {
+  const codeowners = '[Governance] @alice\n/brain.config.json\n';
+  const find = (vcs) => diagnoseAxes({ config: { vcs: { default: vcs }, governance: { owners: ['alice'] } }, env: {}, dotenv: {}, codeowners }).filter((f) => f.code === 'codeowners-drift');
+  assert.deepEqual(find('gitlab'), []);
+  assert.equal(find('github').length, 1);
+});
+
+test('GitLab: drift in a REQUIRED section is reported before an optional (^) one; an optional-only drift is marked optional', () => {
+  const both = '^[Opt] @mallory\n/brain.config.json\n[Req] @bob\n/brain.config.json\n';
+  assert.deepEqual(codeownersDrift(both, ['alice'], 'gitlab'), { codeowners: ['bob'], owners: ['alice'] });
+  assert.deepEqual(codeownersDrift('^[Opt] @mallory\n/brain.config.json\n', ['alice'], 'gitlab'), { codeowners: ['mallory'], owners: ['alice'], optional: true });
+  assert.equal(codeownersDrift('^[Opt] @mallory\n/brain.config.json\n[Req] @alice\n/brain.config.json\n', ['alice'], 'gitlab')?.optional, true, 'optional drift still surfaces when the required section agrees');
+});

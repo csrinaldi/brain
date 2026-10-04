@@ -372,12 +372,12 @@ const removedRun = (over = {}) => runTeamConfigReviewedCheck({
   ...over,
 });
 
-test('removed then re-added: the owners are read from the version BEFORE the deleting commit (DEL^), and a previous owner\'s current approval passes', async () => {
+test('removed then re-added: the owners are read from the version BEFORE the deleting commit (DEL^1, the mainline), and a previous owner\'s current approval passes', async () => {
   const asked = [];
   const r = await removedRun({
     gitShow: (ref) => { asked.push(ref); return ref === 'BASE' ? null : baseConfig({ governance: { owners: ['alice', 'bob'], tier: 'standard' } }); },
   });
-  assert.deepEqual(asked, ['BASE', 'DEL^']);
+  assert.deepEqual(asked, ['BASE', 'DEL^1']);
   assert.equal(r.level, 'pass');
   assert.equal(r.founding, undefined);
 });

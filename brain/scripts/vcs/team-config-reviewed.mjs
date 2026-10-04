@@ -151,9 +151,17 @@ function defaultGitShow(cwd) {
 
 const gitOpts = (cwd) => ({ cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 30000 });
 
-/** The commit that last touched `brain.config.json` at or before `ref`, or `''` when it has no history. Throws on failure. */
+/**
+ * The newest MAINLINE commit that touched `brain.config.json` at or before `ref`, or `''` when it has none. Throws on failure.
+ *
+ * Owners always come from the last MAINLINE version, so the walk is `--first-parent` (#1283): each commit is compared only
+ * to its first parent. A merge that DROPPED a file main had is listed (default simplification would hide it, being
+ * TREESAME to the side parent that never had the file), and its `^1` is mainline and has the file. A merge TREESAME to
+ * main because main had already deleted the file is skipped, so the real deleting commit is found. Without it, a side
+ * branch's unmerged edit of the file could be read as the owners (full-history reproduced exactly that).
+ */
 function defaultLastTouchSha(cwd) {
-  return (ref) => execFileSync('git', ['log', '-1', '--format=%H', ref, '--', TEAM_CONFIG_PATH], gitOpts(cwd)).trim();
+  return (ref) => execFileSync('git', ['log', '-1', '--first-parent', '--format=%H', ref, '--', TEAM_CONFIG_PATH], gitOpts(cwd)).trim();
 }
 
 /** Whether the clone's history is truncated: a missing file cannot then be told from one that never existed. */
@@ -216,7 +224,8 @@ export async function gatherTeamConfigReviewedInputs({ baseSha, headSha, prNumbe
     const lastTouch = (deps.lastTouchSha ?? defaultLastTouchSha(cwd))(baseSha);
     if (lastTouch) {
       removed = true;
-      const prev = gitShow(`${lastTouch}^`, TEAM_CONFIG_PATH); // the version before the deleting commit
+      // The version before the deleting commit, always on the MAINLINE: its first parent (never a side branch's).
+      const prev = gitShow(`${lastTouch}^1`, TEAM_CONFIG_PATH);
       baseConfig = prev == null ? {} : parseConfig(prev);
     } else {
       // The ADOPTION PR: no owner can exist. Its tier is the new-consumer default (ADR-0026 Am8), never its own head's.
