@@ -2,10 +2,10 @@
 // Every call here names BRAIN_HOME (a temp dir) or injects `homedir`: no test reads a real home.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
-import { readUserConfig, userConfigDir, USER_CONFIG_FILE, UserHomeUnderTestError } from './user-config.mjs';
+import { readUserConfig, userConfigDir, USER_CONFIG_FILE, UserHomeUnderTestError, writeUserConfig, setUserDefault, UserConfigWriteError } from './user-config.mjs';
 import { testTmp } from './test-tmp.mjs';
 
 const home = (config) => {
@@ -88,4 +88,63 @@ test('guard: outside a test the fallback is the real home (the production path)'
     if (saved !== undefined) process.env.NODE_TEST_CONTEXT = saved;
     if (savedHome !== undefined) process.env.BRAIN_HOME = savedHome;
   }
+});
+
+// ── the ONE writer (#1263 slice 2) ──────────────────────────────────────────
+const mode = (p) => statSync(p).mode & 0o777;
+
+test('writeUserConfig: creates the dir 0700 and the file 0600, atomically (no temp file left behind)', () => {
+  const dir = join(testTmp('user-config-w-'), 'brain-home'); // does not exist yet
+  const body = { platform: { default: 'claude', providers: { claude: {} } } };
+  const r = writeUserConfig(body, { env: { BRAIN_HOME: dir } });
+  assert.equal(r.userPath, join(dir, USER_CONFIG_FILE));
+  assert.equal(mode(dir), 0o700);
+  assert.equal(mode(r.userPath), 0o600);
+  assert.deepEqual(JSON.parse(readFileSync(r.userPath, 'utf8')), body);
+  assert.deepEqual(readdirSync(dir), [USER_CONFIG_FILE], 'the temp file was renamed away');
+  assert.deepEqual(readUserConfig({ env: { BRAIN_HOME: dir } }).userConfig, body);
+});
+
+test('writeUserConfig: replaces an existing file in one rename and keeps it 0600', () => {
+  const dir = home(JSON.stringify({ platform: { default: 'plain' } }));
+  const next = { platform: { default: 'claude', providers: { claude: {} } } };
+  writeUserConfig(next, { env: { BRAIN_HOME: dir } });
+  assert.deepEqual(JSON.parse(readFileSync(join(dir, USER_CONFIG_FILE), 'utf8')), next);
+  assert.equal(mode(join(dir, USER_CONFIG_FILE)), 0o600);
+  assert.deepEqual(readdirSync(dir), [USER_CONFIG_FILE]);
+});
+
+test('writeUserConfig: REFUSES a locked key (a key of the team config only) and writes nothing', () => {
+  const dir = join(testTmp('user-config-w-'), 'bh');
+  assert.throws(() => writeUserConfig({ memory: { default: 'engram', locked: true } }, { env: { BRAIN_HOME: dir } }), (e) => e instanceof UserConfigWriteError && /locked/.test(e.message));
+  assert.equal(existsSync(join(dir, USER_CONFIG_FILE)), false);
+});
+
+test('writeUserConfig: refuses a body that is not a plain object', () => {
+  const dir = join(testTmp('user-config-w-'), 'bh');
+  for (const bad of [null, [], 'x', 3]) assert.throws(() => writeUserConfig(bad, { env: { BRAIN_HOME: dir } }), UserConfigWriteError);
+  assert.equal(existsSync(join(dir, USER_CONFIG_FILE)), false);
+});
+
+test('setUserDefault: sets <axis>.default and lists the provider, keeping everything else the person had', () => {
+  const dir = home(JSON.stringify({ sdd: { default: 'plain', providers: { plain: { version: '1' } } } }));
+  setUserDefault('platform', 'claude', { env: { BRAIN_HOME: dir } });
+  assert.deepEqual(readUserConfig({ env: { BRAIN_HOME: dir } }).userConfig, {
+    sdd: { default: 'plain', providers: { plain: { version: '1' } } },
+    platform: { default: 'claude', providers: { claude: {} } },
+  });
+});
+
+test('setUserDefault: refuses vcs (the user layer holds none), an unknown axis and a name that is not a provider name', () => {
+  const dir = home();
+  for (const [axis, name] of [['vcs', 'github'], ['nope', 'x'], ['platform', ''], ['platform', 'a b'], ['platform', 'ghp_' + 'x'.repeat(30) + '/..']]) {
+    assert.throws(() => setUserDefault(axis, name, { env: { BRAIN_HOME: dir } }), UserConfigWriteError, `${axis} ${name}`);
+  }
+  assert.equal(existsSync(join(dir, USER_CONFIG_FILE)), false);
+});
+
+test('setUserDefault: never overwrites a user file it could not read (malformed JSON stays as it is)', () => {
+  const dir = home('{ not json');
+  assert.throws(() => setUserDefault('platform', 'claude', { env: { BRAIN_HOME: dir } }), UserConfigWriteError);
+  assert.equal(readFileSync(join(dir, USER_CONFIG_FILE), 'utf8'), '{ not json');
 });

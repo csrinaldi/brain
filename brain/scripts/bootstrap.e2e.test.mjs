@@ -124,7 +124,13 @@ test('#1127 e2e (e): plainfiles with a REAL merge refusal is a required failure 
 
 // ── #1165: the team's backend is tracked config; nothing is guessed ─────────────────────────────
 
-const declare = (repo, backend) => writeFileSync(join(repo, 'brain.config.json'), JSON.stringify({ memory: { backend } }));
+// An EXISTING repo's team config declares its axes, as a real consumer's does: env:init never writes brain.config.json there
+// (ADR-0040, #1263 slice 2), so a repo that declared neither platform nor sdd would be refused with the named fix.
+const TEAM_AXES = {
+  platform: { default: 'claude', providers: { claude: {} } },
+  sdd: { default: 'gentle-ai', providers: { 'gentle-ai': {} } },
+};
+const declare = (repo, backend) => writeFileSync(join(repo, 'brain.config.json'), JSON.stringify({ ...TEAM_AXES, memory: { backend } }));
 const envText = (repo) => (existsSync(join(repo, '.env')) ? readFileSync(join(repo, '.env'), 'utf8') : '');
 
 test('#1165 e2e: a FRESH checkout with no .env runs the backend the tracked config declares, and writes no .env line', () => {
@@ -218,7 +224,7 @@ function withFakeGh(root, repo) {
   const log = join(root, 'gh.log');
   writeFileSync(state, JSON.stringify({ labels: [] }));
   writeFileSync(log, '');
-  writeFileSync(join(repo, 'brain.config.json'), JSON.stringify({ vcs: { provider: 'github' }, project: { gitHost: 'github.com', slug: 'acme/widget' } }));
+  writeFileSync(join(repo, 'brain.config.json'), JSON.stringify({ ...TEAM_AXES, vcs: { provider: 'github' }, project: { gitHost: 'github.com', slug: 'acme/widget' } }));
   return { bin, env: { GH_LOG: log, GH_STATE: state }, posts: () => readFileSync(log, 'utf8').split('\n').filter((l) => l.includes('POST')).length };
 }
 
@@ -245,7 +251,7 @@ test('#1163 #1164 #1166 e2e: an authenticated VCS gets the labels created, brain
 test('#1163 #1164 e2e: an unreachable VCS is two pending steps with their exact commands, exit 0 — never a crash, never a guess from user.name', () => {
   const { root, repo } = fixture('labels-pending');
   useBackend(repo, 'plainfiles');
-  writeFileSync(join(repo, 'brain.config.json'), JSON.stringify({ vcs: { provider: 'github' }, project: { gitHost: 'github.com', slug: 'acme/widget' } }));
+  writeFileSync(join(repo, 'brain.config.json'), JSON.stringify({ ...TEAM_AXES, vcs: { provider: 'github' }, project: { gitHost: 'github.com', slug: 'acme/widget' } }));
   const r = bootstrap(repo, root);
   assert.equal(r.code, 0, `optional steps must not fail env:init:\n${r.out.slice(-1500)}`);
   assert.match(r.out, /governance labels \(next: npm run brain:env:init[^)]*gh label create "status:approved"/);
@@ -281,7 +287,7 @@ test('#1163 e2e: from a linked worktree the label step reads the DATA root (main
   const wt = join(root, 'wt');
   git(repo, 'worktree', 'add', '-q', wt, '-b', 'feature/x');
   installBrain(wt);
-  writeFileSync(join(wt, 'brain.config.json'), JSON.stringify({ vcs: { provider: 'github' }, project: { gitHost: 'github.com', slug: 'other/wrong' } }));
+  writeFileSync(join(wt, 'brain.config.json'), JSON.stringify({ ...TEAM_AXES, vcs: { provider: 'github' }, project: { gitHost: 'github.com', slug: 'other/wrong' } }));
   const r = bootstrap(wt, root, gh);
   assert.equal(r.code, 0, r.out.slice(-1500));
   const log = readFileSync(gh.env.GH_LOG, 'utf8');

@@ -366,6 +366,18 @@ export function ensureBrainConfig(root = REPO_ROOT, { identity, write = true } =
 // Main-module guard: run as `node brain/scripts/lib/brain-config.mjs ensure`
 if (process.argv[1] === __filename && process.argv[2] === 'ensure') {
   const result = ensureBrainConfig();
+  // The FOUNDING signal (ADR-0040 section 4, #1263 slice 2): `created` is the one fact that this run is the foundation, and the
+  // creator is the only place that knows it. `--founding-file <path>` hands it to env:init, which must not re-derive it from a
+  // file test (a second reader of the same fact). An ensure that failed reports "existing": the safe side, nothing team-wide is written.
+  const flagAt = process.argv.indexOf('--founding-file');
+  if (flagAt !== -1 && process.argv[flagAt + 1]) {
+    try {
+      writeFileSync(process.argv[flagAt + 1], `${result.created && !result.error ? 'founding' : 'existing'}\n`, 'utf8');
+    } catch (err) {
+      console.error(`  ✗ brain.config.json: could not report the founding signal (${err.message})`);
+      process.exitCode = 1;
+    }
+  }
   if (result.error) {
     console.error(`  ✗ brain.config.json: ${result.error}`);
     process.exitCode = 1;

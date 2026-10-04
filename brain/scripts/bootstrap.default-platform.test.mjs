@@ -101,6 +101,12 @@ const STUBS = [
   'BRAIN_SCRIPTS=' + JSON.stringify(SCRIPTS),
   'MISSING_OPTIONAL=()',
   'REQUIRED_FAILURES=()',
+  // These blocks exercise the FOUNDING run (the one that declares team defaults). The EXISTING-repo half
+  // (never writes brain.config.json) is bootstrap.config-ownership.test.mjs (#1263 slice 2).
+  '_founding=true',
+  'I18N_BOOTSTRAP_AXIS_TEAMUNDECLARED="team-undeclared %s %s"',
+  'I18N_BOOTSTRAP_AXIS_USERDECLARED="user-declared %s=%s %s"',
+  'I18N_BOOTSTRAP_AXIS_USERWRITEFAILED="user-write-failed %s %s"',
   'I18N_BOOTSTRAP_AXIS_DECLARED="declared %s=%s %s"',
   'I18N_BOOTSTRAP_AXIS_REFUSED="refused %s: %s"',
   'I18N_BOOTSTRAP_AXIS_REFUSEDNEXT="refused-next %s (%s)"',
