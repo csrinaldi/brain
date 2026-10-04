@@ -187,6 +187,11 @@ section 5, the version states of section 6, and VCS's exception at the `.env` le
 - **The `brain` provider's roles are a hand-kept table.** `BRAIN_PROVIDER_ROLES` in `role-port.mjs`
   names `cold-review` and the generic `stage`. #1132 replaces it with an inhabitant that declares
   through the port.
+- **`brain:stage` is a name, not a defined agent.** `brain:cold-review` points at authored content
+  on the first-party shelf (`roles/first-party/adversary-cold-review.mjs`). `brain:stage` has no
+  role text, archetype or `model_tier`: it only names the generic runner that already runs a custom
+  stage with its engine. Until #1132 gives it shelf content declared through the port, writing
+  `brain:stage` routes nothing new and defines no agent.
 - **A legacy config is not checked by §4.** Until the migration runs, a config with no `sdd` shape
   can route a stage with no defined agent, and nothing says so.
 - **The runner still reads `sdd.map`.** The rule validates the declaration. Routing through
