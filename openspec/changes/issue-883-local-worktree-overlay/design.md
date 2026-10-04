@@ -1,0 +1,100 @@
+---
+status: draft
+issue: 883
+---
+
+# Design — local-worktree-overlay (issue 883)
+
+## Technical approach
+
+This design extends #1201 (D30–D43), #1243 (D44–D49), #1257 (D53–D58, D63–D68) and #1199 (D50–D62). It contradicts none of them. It amends R881-3 and R1198-4 (D82); the R881-3 amendment is recorded in this change's `spec.md`, not in the archive. Numbering continues at D69.
+
+```
+buildSnapshot ─▶ readLocalWorktrees({run, root, graph, _fs})        [status/local-worktrees.mjs]
+   1 spawn: worktree list --porcelain ─▶ grammar ─▶ open-issue filter (graph) ─▶ readdir + lstat per kept entry
+   ─▶ section localWorktrees {entries, hidden, tier:'working-tree'}  (fingerprint per entry, no content)
+server.recomputeAndBroadcast ─▶ diffSections ─▶ 'section' frame ─▶ watcher.setLocalTargets(uncapped entries)
+watcher: <wt>/openspec/changes/ and <wt>/openspec/changes/<dir>/ ─fire─▶ 250 ms debounce ─▶ recompute
+page: 'section' localWorktrees changed for selectedIssue ─▶ loadChange(issue)
+GET /api/change/N ─▶ buildChangeView ─▶ readLocalBlocks({run, snapshot, issue, mainDocs, _fs})  [ui/local-overlay.mjs]
+   per uncapped entry: 1 spawn ls-tree -l -z <head> -- <7 paths>  +  safe fs read of 7 files ─▶ blob hash ─▶ state
+```
+
+## Decisions
+
+| # | Decision | Rejected | Why |
+|---|---|---|---|
+| D69 | **The section's shape.** `localWorktrees` is `field({entries, hidden: {served, bare, prunable, detached, notIssue, closed}, tier: 'working-tree'})`, `pending(reason)` or `uncomputable(reason)`. An entry is `{path, leaf, branch, head, issue, dir, dirState: 'present'\|'missing'\|'unreadable', reason, touchedAt, fingerprint, capped}`. It carries no document text and no blob hash. It is placed after `remoteChanges` in `buildSnapshot`'s literal (`status/snapshot.mjs:556`). `renderSnapshotText` gains one `local` line with the count or the reason. | Document states in the snapshot | States need one `ls-tree` per worktree and a read of every file on every recompute. 13 worktrees × 7 files on each watcher fire buys nothing the drawer cannot read on demand, the #1201 D31 precedent. |
+| D70 | **Discovery.** One `git worktree list --porcelain` through the snapshot's `run` (`snapshot.mjs:523`). `parseWorktrees` (`memory/lane/collect.mjs:116`) gains `head` (`HEAD <sha>`), `branch` (`branch refs/heads/<b>`, prefix stripped) and `detached`: additive, its existing callers read `path`, `bare` and `prunable` only. The issue is `parseCanonicalIssueBranch(branch)` (`lib/branch-grammar.mjs:31`), every `[a-z]+` type (`:16`). The served root is excluded by `realpathSync` equality, so a server run from a linked worktree hides itself (R883-1). The change dir is `pickChangeDir` (`lib/git-tree.mjs:38`) over the `readdir(..., {withFileTypes: true})` directory names of `<wt>/openspec/changes/`; a symlinked dir or one whose real path leaves the worktree is `unreadable` (D77). | Reusing the watcher's listing (the exploration's "0 extra spawns") | Measured: `buildSnapshot` runs no worktree listing today (`rg worktree status/` finds none), and the CLI has no watcher. One spawn of 6 ms keeps the CLI and the server on one shape (the #1201 D30 rule). |
+| D71 | **The open-issue filter (R6).** The open set is `graph.value.nodes` numbers, from the same build (`snapshot.mjs:539`). `graph.pending` gives `pending(graph.reason)`; any other non-ok graph gives `uncomputable('the open-issue list could not be read, so worktrees cannot be filtered to open issues (R6): <reason>')`, mirroring `readHierarchy` (`:498`). The server's forge-unavailable override (`server.mjs:199-201`) adds `localWorktrees` with the same reason. | Showing every worktree when the set is unknown | 62 worktrees, 49 of them on closed issues, is the stale list R6 forbids. A said reason is honest; an unfiltered list is not. |
+| D72 | **Order, cap and fingerprint.** Entries sort by issue, then `touchedAt` descending (the max `mtimeMs` over the change dir and its seven documents' `lstat`, ISO; none sorts last), then path. Rank ≥ `LOCAL_DRAWER_CAP = 3` within an issue is `capped`. `fingerprint` is the first 16 hex digits of a sha1 over `dir`, `dirState` and each document's `[file, size, mtimeMs]`. | Hashing content at snapshot time | Content reads on every recompute for a change detector; `lstat` is enough to trigger, and the drawer's read hashes the content (D74). |
+| D73 | **The local reader module.** `brain/scripts/ui/local-overlay.mjs`, server-side only. Pure exports: `gitBlobHash(bytes, algo)` and `classifyLocalDocument({hash, headEntry, mainBlob, isResume})`. I/O: `readLocalDocument({abs, changeDirReal, _fs})` (D77) and `readLocalBlocks({run, snapshot, issue, mainDocuments, remote, _fs})`, the `_fs` seam being `{lstatSync, realpathSync, openSync, readSync, fstatSync, closeSync}`. `change-route.mjs` imports it and keeps no `node:fs` import, so R1198-4's guard (`change-route.test.mjs:546`) still holds literally. | Reading inside `change-route.mjs`; a `ui/lib/` module | The first breaks R1198-4's guard by hiding a reader in the one file it scans. `ui/lib/` is browser-importable (D9) and cannot use `node:fs` or `node:crypto`. |
+| D74 | **The blob comparison.** One `git --literal-pathspecs ls-tree -l -z <entry.head> -- <7 paths>` per uncapped entry, run by the served root's own `run`. A linked worktree shares the object store, so its HEAD sha resolves there. The hash is `sha1("blob " + n + "\0" + bytes)`, or sha256 when the tree's object ids are 64 hex digits. Main's blob is the served HEAD's tree entry sha, carried by a new `blob` field on `documentEntry` (`change-route.mjs:230`, set at `:262`). | `git --git-dir=<common>/worktrees/<id> ls-tree HEAD` (the exploration's measured form); `git -C <wt>` | The `--git-dir` form needs the admin id, which the snapshot would have to derive from `<common>/worktrees/*/gitdir` (the watcher's `activeWorktrees`, `watcher.mjs:234`) plus a `rev-parse --git-common-dir` spawn. The porcelain's `HEAD <sha>` already names the commit. `-C` is what R881-3 forbids. A head moved between snapshot and drawer read is caught by the `logs/` watch, which recomputes. |
+| D75 | **The states and their order.** `same-as-main` when `hash === mainBlob`; else `new` when `headEntry` is absent; else `modified` when `hash !== headEntry.sha`; else `committed`. `resume` skips the first test (main's HEAD has no resume reader, `readHeadDocuments` lists six, `change-route.mjs:227`). A document entry gains `uncommitted` (true for `new` and `modified`), `overlay` (the state), `marker` (`<bytes> B · <blob12>`) and `commit: null`. `tasks` also carries `progress: countTasks(text)` (`lib/tasks-list.mjs`), so a ticked box changes a visible number. | `same-as-main` last | R3 is about content: an untracked copy of main's file is not news. |
+| D76 | **Assembly and precedence (R1).** `buildChangeView` (`change-route.mjs:482`) adds `...readLocalBlocks(...)`, giving `local` and `localNote`, beside `...readRemoteBlocks` (`:513`). Tabs are unchanged and stay on the served HEAD. A block is `{leaf, branch, head, path, dir, state, label, documents, absent, resume, progress}`, `state` ∈ `read`, `capped`, `no-change-dir`, `unreadable`, `same-as-origin`. `same-as-origin`: the block's head equals a `remoteChanges` entry's sha for the same branch and no document is uncommitted; it is read (to know), then emitted without documents. `remoteResume` (`:426`) is renamed `resumeOutcome` and shared. The Working memory reason at `:154` becomes "no committed resume.md on <branch>; an uncommitted one is on this machine, below" when a local resume exists, else "no committed resume.md on <branch>". | Tabs falling through to the first local document | Spec cards cite `path @ sha` and the tasks tab blames `HEAD` (`:107`); an uncommitted text has neither, so the tabs would need a second provenance shape. The stacked blocks are R1's order, visible. |
+| D77 | **Safe reads.** `lstat` the change dir and refuse a symlink. `realpath` the worktree, the change dir and each file, and refuse a real path not under the change dir's real path plus `/`. For each file: refuse a symlink, a non-regular file, or `size > DOCUMENT_READ_LIMIT`. Then `openSync(abs, O_RDONLY \| O_NOFOLLOW)`, read to EOF, `fstatSync`. If the bytes read, the `fstat` size and the `lstat` size disagree, read once more; a second disagreement is `unreadable: changed while it was read; the next recompute reads it again`. The hash covers every byte; the text goes through `capText` (`change-route.mjs:235`, exported). | `readFileSync` alone | It follows symlinks and cannot tell a torn read. |
+| D78 | **Drawer model and page.** `drawer-model.mjs` adds `localBlockModel`, a sibling of `remoteBlockModel` (`:290`), with `LOCAL_STATE_WORDING` beside `REMOTE_STATE_WORDING` (`:266`) and the wordings "uncommitted: new", "uncommitted: modified", "committed on <branch>, not on main" and "same as main". `documentView` (`:142`) stamps `${path} @ worktree ${ref} · ${marker}` when `doc.marker` is set, else as today (`:148`), so `docTrees` (`app.js:136`, `requestDoc` `:1958`) re-renders on any content change. A `same-as-main` row has `document: null`. `localChangedFor(prev, next, issue)` is exported and pure. `app.js` adds `renderLocalBlock(s)` beside `renderRemoteBlock` (`:1717`), placed before the tabs when `changeDir` is null and local is non-empty, else between the tabs and `renderRemoteBlocks` (`:1709`). The empty-state line (`:1698`) gains the local wording. Text is set only through `el()`/`textContent`; any DOM walk in a test uses `Array.from` over a NodeList (D29). | Rendering through `lane-model.mjs` | The drawer is not a lane (D42 precedent). |
+| D79 | **Watcher handles.** `createWatcher` returns `setLocalTargets(targets)`, `targets` = `[{key: path, changesDir, dir}]`. Each target holds a `local`-kind `watchDir` (`watcher.mjs:84`) on `changesDir` and on `dir` when present, with `ignoreEnoent`, tracked in a `watchedLocal` map like `watchedChangeDirs` (`:70`). `onFire` (`:125`) adds the cause `watch:local:<leaf>/<rel>`. Reconciliation closes targets that left the list; a failed watch stays eligible and is retried on the next call. The server calls it after `recomputeCurrent` (`server.mjs:216`) only when the section is `ok`. Handles: 2 per uncapped entry, about 26 today. | Recursive watches of each worktree | Linux has no recursive `fs.watch` before Node 20's emulation, and a whole worktree is thousands of paths. |
+| D80 | **How an edit reaches the page.** Through the section diff: an edit changes `fingerprint`, `diffSections` (`ui/diff.mjs:23`) sends a `section` frame, and `subscribe` (`app.js:2221`) calls `loadChange(selectedIssue)` when `localChangedFor(before, after, selectedIssue)` holds, `before` read before `applyFrame`. | A `refs` frame per local fire; a new `local` frame type | A `refs` frame means "a head moved" (`server.mjs:251`) and its handler reloads unconditionally (`app.js:2234`); a new frame type is a second stream contract. The section is the fact, the CLI prints it, and the diff already exists. |
+| D81 | **`resolveBranch` widens here.** `change-route.mjs:132` lists `git branch --list '*/issue-N' '*/issue-N-*'` and keeps names for which `parseCanonicalIssueBranch(name)?.issueNumber === String(N)`. The reasons become `no open PR and no */issue-N branch in this clone` and `more than one */issue-N branch in this clone: <names>`. Tests at `change-route.test.mjs:106,113-117,634,640` and `drawer-model.test.mjs:561` change wording. | Leaving `feat/` only | Discovery joins `fix/`, `chore/` and `docs/` worktrees (D70). The same drawer would then show a `fix/issue-N` worktree in "on this machine" and say "no feat/issue-N-* branch" in its own Working memory tab. **Amended after verify (W2):** several matching names are now broken by the snapshot, not by a spawn: the one checked out in exactly one kept `localWorktrees` entry of the issue with `dirState` `present` wins; several such entries refuse and the reason names their leaves. A `feat/` slice branch beside a `feature/` tracker branch therefore resolves. Precedence is the PR head, then that worktree, then the refusal. |
+| D82 | **Amended invariants, never deleted.** (1) R881-3: the archived spec (`archive/881/spec.md:54`) is history and is NOT edited. The amendment is recorded in this change's own `spec.md`, in a "Modifies R881-3 (amended 2026-10-03, #883)" note beside R883-16: it admits the two local watches and the drawer's reads of an open issue's linked-worktree change dir; git still never runs in a worktree. Its "uncommitted edit produces no event" scenario stays, scoped to the served root and non-target paths. (2) `server.test.mjs:918`: the assertion stays, its fixture gains a linked worktree, and the message cites R883-16. (3) R1198-4 (`change-route.test.mjs:546`): the guard stays, plus a guard that `local-overlay.mjs` never joins a path onto `root`. (4) Headers of `watcher.mjs:1`, `change-route.mjs:15-23` and `snapshot.mjs:4-12` name the overlay as the one working-tree exception; `server.mjs:237-241` adds that the overlay's `ls-tree` uses a sha, not `-C`. `SNAPSHOT_TIER` stays `committed` (`snapshot.mjs:49`; `diff.mjs:16` excludes it as a constant). | Deleting R881-3's scenario; appending a note to the archived 881 spec | The scenario still guards the served root, and deleting a pinned invariant is how the next regression goes unseen. An archived change is history: its amendment belongs to the change that makes it. |
+| D83 | **R4 holds by construction.** `readLocalWorktrees` drops the served root before any fs call, and `readLocalBlocks` reads only `entry.path`s from the section. | A served-root dirty check | R4 rules it out. |
+| D84 | **The map card names a worktree-only change (S1).** `sddForIssue(changesSection, issue, localSection)` takes the snapshot's `localWorktrees` section as an optional third argument and, when the served root has no change dir for the issue and an entry for it has `dirState` `present`, returns the reason `change in worktree <leaf> (not on main)` (` and N more` for several) from `sdd-model.mjs`, the module that already owns the card's wording. `renderNodeSdd` passes `sectionOf(state, 'localWorktrees')`. No progress is invented: the card reads no file content. | A new card state fed by file reads | The card is a map-level glance; the drawer owns documents. |
+
+## Interfaces
+
+```js
+// status/local-worktrees.mjs
+readLocalWorktrees({ run, root, graph, _fs }) -> field({ entries, hidden, tier: 'working-tree' }) | pending(reason) | uncomputable(reason)
+// ui/local-overlay.mjs
+gitBlobHash(bytes, algo = 'sha1') -> hex
+classifyLocalDocument({ hash, headEntry, mainBlob, isResume }) -> 'same-as-main'|'new'|'modified'|'committed'
+readLocalBlocks({ run, snapshot, issue, mainDocuments, _fs }) -> { local: Block[], localNote: string|null }
+// ui/watcher.mjs
+watcher.setLocalTargets([{ key, changesDir, dir }]) -> void
+// ui/lib/drawer-model.mjs
+localChangedFor(prevSection, nextSection, issue) -> boolean
+```
+
+## Testing strategy (strict TDD, node:test)
+
+**First RED:** `ui/local-overlay.test.mjs`, "R883-6: an untracked proposal in a linked worktree shows as uncommitted: new when main has no change dir". `makeWorktreeRepo()` creates a repo whose main has no change dir and a linked worktree `feat/issue-7-x` holding an untracked `openspec/changes/issue-7-x/proposal.md`. A stub vcs lists issue 7 open. `buildSnapshot` then `buildChangeView({issue: 7})` with real `gitRun`. Assert `value.local[0].documents.proposal.overlay === 'new'` and `uncommitted === true`. It fails today: `value.local` is undefined and every tab says "no change dir". It is first because it is the defect.
+
+| File | Action |
+|---|---|
+| `ui/test-support/git-worktree-fixture.mjs` | Create. Real git with pinned `GIT_*_DATE`, name and email, `-c init.defaultBranch=main`; `addWorktree(branch, files, {commit})` via `git worktree add -b`; `mkdtemp` under `os.tmpdir()`, removed in `after`. |
+| `status/local-worktrees.test.mjs` | Create. R883-1 to R883-4: grammar for all types, served root, hidden counts, one spawn, empty, failed listing, open filter, pending and uncomputable graph, order and cap, escape. |
+| `ui/local-overlay.test.mjs` | Create. The first RED; R883-5 to R883-8; the four states and their order; `gitBlobHash` against `git hash-object`; safe reads through an `_fs` seam (symlink, escape, size, torn read); R883-13 (spawn count, no `-C`, throwing vcs); R883-14 (byte-identity, recording runner that throws on write verbs). |
+| `ui/watcher.test.mjs` | Modify. R883-10 with fake `_watch` and `_setTimeout`; R881-3's set test stays and gains a local-target variant (R883-16). |
+| `ui/server.test.mjs` | Modify. The `:918` fixture gains a linked worktree; R883-11 end to end with fake watch and timers (edit the file, fire the handle, flush the debounce, read the frame). |
+| `ui/change-route.test.mjs`, `lib/drawer-model.test.mjs`, `static/*-render.test.mjs` | Modify. D81 wordings, the `blob` field, `localBlockModel`, stamps, `localChangedFor`, block order, text-only rendering of a hostile branch name. |
+| `status/snapshot-cli.test.mjs` | Modify. The `local` text line. `parseWorktrees`' new fields are pinned in `status/local-worktrees.test.mjs`, because no unit test of `parseWorktrees` exists today (only `collect.integration.test.mjs` exercises it). |
+
+No real timers and no network: the debounce runs on injected timers, and the fixture never has a remote.
+
+## Size (gated, excluding `*.test.mjs`)
+
+| File | Lines |
+|---|---|
+| `status/local-worktrees.mjs` (new) | ~110 |
+| `ui/local-overlay.mjs` (new) | ~130 |
+| `ui/test-support/git-worktree-fixture.mjs` (new) | ~50 |
+| `ui/watcher.mjs` | +~40 |
+| `ui/lib/drawer-model.mjs` | +~50 |
+| `ui/static/app.js`, `app.css` | +~45, +~10 |
+| `ui/change-route.mjs` | +~25 |
+| `status/snapshot.mjs`, `ui/server.mjs`, `memory/lane/collect.mjs` | +~12, +~12, +~6 |
+
+About 490 in all, against the `lite` budget of 1000. One PR. The archived spec's note and this change dir are on the ignore list.
+
+## Migration / rollout
+
+No migration. All new fields and the section are additive.
+
+## Risks
+
+- **Filters.** A clean/smudge filter or `core.autocrlf` makes the bytes differ from the blob, so the file reads as `modified`. This repository has none. The reader claims "the bytes differ", nothing more.
+- **Deviation from the exploration.** The exploration measured `--git-dir` (D74) and claimed no extra snapshot spawn (D70). This design uses the HEAD sha instead and adds one spawn; both are measured or verifiable, and both are noted for the maintainer.
+- **Forge-less servers** have no overlay (D71). It is said, not hidden.
+- **`mtime` granularity** can miss an edit with the same size within one millisecond until the next recompute (D72).
+- **Design length** exceeds the skill's 800 words, because the brief asked for these sections with evidence.
