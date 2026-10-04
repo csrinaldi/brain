@@ -25,6 +25,8 @@
 import { resolveStageSet } from '../../lib/sdd-layout.mjs';
 import { resolveStageConfigs } from '../../lib/stage-config.mjs';
 import { harnessAdapterUrl } from '../lib/harness-adapter-url.mjs';
+import { declareRoles as declareGentleAi } from './adapters/gentle-ai.roles.mjs';
+import { declareRoles as declarePlain } from './adapters/plain.mjs';
 
 /**
  * The abstract model tiers a role may declare. `null` is a CHECKED value
@@ -174,6 +176,44 @@ export function resolveRoles({ config, engine, inhabitant }) {
     };
   }
   return result;
+}
+
+/**
+ * The roles the `brain` SDD provider declares (ADR-0023's shelf, named `brain` by ADR-0038 §7).
+ * `brain` has no adapter yet, so its roles cannot be read through `declareRoles`: this table is
+ * the explicit stand-in, and THE SEAM #1132 REPLACES with a real inhabitant. Today brain runs one
+ * stage itself, `cold-review`, through `brain:review` (ADR-0033).
+ */
+export const BRAIN_PROVIDER_ROLES = Object.freeze({ 'cold-review': 'cold-review' });
+
+/**
+ * The inhabitants whose declarations a SYNCHRONOUS reader may consult. Both modules do no I/O on
+ * import (`plain.mjs`, and gentle-ai's recording in `gentle-ai.roles.mjs`), which is why the pure
+ * axis-config validator can ask them; the runtime path still goes through `loadInhabitant`.
+ */
+const DECLARING_INHABITANTS = Object.freeze({
+  'gentle-ai': { declareRoles: declareGentleAi },
+  plain: { declareRoles: declarePlain },
+});
+
+/**
+ * The role `provider` DECLARES as its default for `stage` (ADR-0038 §4), or `null` when it declares
+ * none. A role the provider merely DERIVES for a stage it never declared (`derived: true`, gentle-ai's
+ * `derivedRole`) is not a default role and answers `null`. An unknown provider answers `null`.
+ * Pure and total; `inhabitants` is injectable for tests.
+ *
+ * @param {string} provider  an `sdd.providers` key
+ * @param {string} stage
+ * @returns {string|null}
+ */
+export function declaredDefaultRole(provider, stage, { inhabitants = DECLARING_INHABITANTS, brainRoles = BRAIN_PROVIDER_ROLES } = {}) {
+  if (typeof provider !== 'string' || typeof stage !== 'string' || stage === '') return null;
+  if (provider === 'brain') return Object.prototype.hasOwnProperty.call(brainRoles, stage) ? brainRoles[stage] : null;
+  const inhabitant = Object.prototype.hasOwnProperty.call(inhabitants, provider) ? inhabitants[provider] : null;
+  if (!inhabitant || typeof inhabitant.declareRoles !== 'function') return null;
+  const role = inhabitant.declareRoles([stage])?.[stage];
+  if (!role || role.derived === true) return null;
+  return typeof role.agent === 'string' && role.agent !== '' ? role.agent : null;
 }
 
 async function defaultLoad(engine) {
