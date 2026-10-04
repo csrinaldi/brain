@@ -179,6 +179,14 @@ test('locked: with no override the team value resolves normally', () => {
   assert.equal(run('memory', { config, userConfig: {} }).value, 'engram');
 });
 
+test('locked: a locked axis the team has NOT declared refuses no override (#1263 slice 3: nothing declared, nothing to override)', () => {
+  const config = team({ memory: { default: '', locked: true, providers: {} } });
+  const r = tryResolveAxis('memory', { env: { MEMORY_BACKEND: 'engram' }, dotenv: {}, config, notice: () => {} });
+  assert.equal(r.ok, true);
+  assert.equal(r.value, 'engram');
+  assert.equal(tryResolveAxis('memory', { env: {}, dotenv: {}, config, notice: () => {} }).refusal.code, 'undeclared');
+});
+
 test('locked: the reviewer case repeated with `locked: true` refuses', () => {
   const config = { platform: { default: 'claude', locked: true, providers: { claude: {} } } };
   const userConfig = user({ default: 'antigravity', providers: { antigravity: {} } });

@@ -14,6 +14,7 @@ import { join } from 'node:path';
 import { testTmp } from './lib/test-tmp.mjs';
 import { git, installBrain, hermeticEnv } from './lib/hermetic-box.mjs';
 import { readUserConfig } from './lib/user-config.mjs';
+import { validateAxisConfig } from './lib/axis-config.mjs';
 
 const NODE = process.execPath;
 
@@ -144,3 +145,56 @@ test('#1263 founding run WITH a TTY: every axis is declared in the team config',
   assert.equal(cfg.memory.default, 'plainfiles');
   assert.equal(cfg.vcs.default, 'github');
 });
+
+// ── slice 3: the foundation names its owner and locks what the team owns (ADR-0040 sections 3-5, ratified points 4 and 6) ──
+const lockState = (cfg) => ({ memory: cfg.memory.locked, sdd: cfg.sdd.locked, platform: cfg.platform.locked === true });
+
+test('#1263 founding WITH a TTY and a resolvable login: governance.owners holds the BARE login; memory and sdd are locked, platform is free', () => {
+  const box = fixture('found-owner', { origin: true });
+  writeFileSync(join(box.repo, '.env'), 'VCS_TOKEN=dummy-token-for-the-test\n');
+  git(box.repo, 'config', '--local', 'brain.actor', '@Alice'); // brain.actor is @login; the owner is the login, which is what actor-check compares
+  const r = bootstrap(box, { tty: 'github\nplainfiles\n' });
+  const cfg = JSON.parse(teamFile(box));
+  assert.deepEqual(cfg.governance.owners, ['Alice'], r.out.slice(-2000));
+  assert.deepEqual(lockState(cfg), { memory: true, sdd: true, platform: false });
+  assert.equal(cfg.memory.default, 'plainfiles');
+  assert.equal(diagnoseCodes(box).includes('governance:owners-undeclared'), false);
+});
+
+test('#1263 founding WITHOUT a TTY: memory is LOCKED and undeclared, and that config is valid and resolves as undeclared', () => {
+  const box = fixture('found-notty-locked');
+  const r = bootstrap(box);
+  const cfg = JSON.parse(teamFile(box));
+  assert.equal(cfg.memory.locked, true, r.out.slice(-1500));
+  assert.equal(cfg.memory.default, '');
+  assert.equal(cfg.sdd.locked, true);
+  assert.equal(validateAxisConfig(cfg).ok, true, JSON.stringify(validateAxisConfig(cfg).errors));
+  const resolved = cliOut(box, 'resolve', 'memory');
+  assert.equal(resolved.status, 3, 'undeclared, not a lock refusal (4)');
+  assert.equal(diagnoseCodes(box).includes('memory:locked-override-refused'), false);
+});
+
+test('#1263 founding WITHOUT a login: governance.owners stays [] and diagnose reports owners-undeclared with the fix', () => {
+  const box = fixture('found-nologin');
+  const r = bootstrap(box);
+  const cfg = JSON.parse(teamFile(box));
+  assert.deepEqual(cfg.governance.owners, []);
+  assert.match(r.out, /governance\.owners is empty/);
+  assert.match(r.out, /brain:config -- set governance\.owners <login>/);
+  const f = JSON.parse(cliOut(box, 'diagnose').stdout).find((x) => x.code === 'owners-undeclared');
+  assert.equal(f.severity, 'warning');
+  assert.match(f.fix, /brain:config -- set governance\.owners <login>/);
+});
+
+test('#1263 an EXISTING repo is never seeded: with a resolvable login the team config stays byte-identical', () => {
+  const box = fixture('existing-noseed');
+  const before = existingTeam(box, (c) => { declareAxis(c, 'platform', 'claude'); declareAxis(c, 'sdd', 'gentle-ai'); declareAxis(c, 'memory', 'plainfiles'); });
+  git(box.repo, 'config', '--local', 'brain.actor', '@alice');
+  bootstrap(box);
+  assert.equal(teamFile(box), before);
+  assert.equal(Object.hasOwn(JSON.parse(teamFile(box)).governance ?? {}, 'owners') && JSON.parse(teamFile(box)).governance.owners.length > 0, false);
+});
+
+function diagnoseCodes(box) {
+  return JSON.parse(cliOut(box, 'diagnose').stdout).map((f) => `${f.axis}:${f.code}`);
+}

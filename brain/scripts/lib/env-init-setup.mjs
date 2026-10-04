@@ -16,6 +16,8 @@
 
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
+import { writeFileSync, renameSync } from 'node:fs';
+import { join } from 'node:path';
 
 import { resolveApprovedLabel } from '../governance/approved-label.mjs';
 import { TYPE_LABELS } from '../vcs/contributor-scaffold.mjs';
@@ -146,6 +148,36 @@ export async function resolveBrainActor({ vcs, gitGet, gitSet, transport = {} })
   return { status: 'set', actor: handle };
 }
 
+/**
+ * The bare forge login of a `brain.actor` handle (ADR-0040 section 5). `brain.actor` is `@<login>` (`HANDLE_RE`); a forge identity
+ * is the bare login, which is what `actor-check.mjs` compares (`isForeignCommit`, case-insensitive on `commit.login`, no `@`), so
+ * `governance.owners` holds `login`. The reserved `@legacy` sentinel names no human. Null when there is no usable login.
+ * @param {string|null|undefined} actor
+ * @returns {string|null}
+ */
+export function ownerLoginFromActor(actor) {
+  const handle = typeof actor === 'string' ? actor.trim() : '';
+  if (!HANDLE_RE.test(handle) || handle === '@legacy') return null;
+  return handle.slice(1);
+}
+
+const OWNERS_NEXT = 'npm run brain:config -- set governance.owners <login>';
+
+/**
+ * The FOUNDING seed of `governance.owners` (ADR-0040 sections 4 and 5, ratified point 4). PURE: returns the config to write, or null
+ * when nothing changes. Only a founding run calls this; it never replaces owners a person already named.
+ * @param {{ config: object, actor: string|null|undefined }} args
+ * @returns {{ status: 'seeded'|'kept'|'pending', owner?: string, next: object|null, reason?: string }}
+ */
+export function seedOwners({ config, actor }) {
+  const gov = config?.governance;
+  const current = Array.isArray(gov?.owners) ? gov.owners.filter((o) => typeof o === 'string' && o.trim() !== '') : [];
+  if (current.length > 0) return { status: 'kept', next: null };
+  const login = ownerLoginFromActor(actor);
+  if (login === null) return { status: 'pending', next: null, reason: 'no forge login could be resolved (no authenticated VCS identity, so brain.actor is unset)' };
+  return { status: 'seeded', owner: login, next: { ...config, governance: { ...(gov && typeof gov === 'object' ? gov : {}), owners: [login] } } };
+}
+
 // ── CLI ────────────────────────────────────────────────────────────────────────
 
 const say = (s) => console.log(s);
@@ -220,12 +252,32 @@ async function runActor() {
   return 0;
 }
 
+/** Founding runs only (bootstrap.sh gates it): seeds governance.owners with the login `brain.actor` resolved, after the actor step. */
+async function runOwners() {
+  const cwd = process.cwd();
+  const config = readConfig(cwd);
+  if (!config) return 0;
+  const r = seedOwners({ config, actor: gitConfigGet('brain.actor', cwd) });
+  if (r.status === 'seeded') {
+    const path = join(cwd, 'brain.config.json');
+    const tmp = `${path}.tmp-${process.pid}`;
+    writeFileSync(tmp, `${JSON.stringify(r.next, null, 2)}\n`, 'utf8');
+    renameSync(tmp, path);
+    say(`  ✓ governance.owners: ${r.owner} (the adopter; brain.actor without the @, written to the new team config)`);
+  } else if (r.status === 'pending') {
+    say(`  ⚠ governance.owners is empty — ${r.reason}`);
+    say(`NEXT: governance.owners (next: ${OWNERS_NEXT})`);
+    return 3;
+  }
+  return 0;
+}
+
 const isMain = import.meta.url === pathToFileURL(process.argv[1] ?? '').href;
 if (isMain) {
   const sub = process.argv[2];
-  const run = { labels: runLabels, actor: runActor }[sub];
+  const run = { labels: runLabels, actor: runActor, owners: runOwners }[sub];
   if (!run) {
-    console.error(`env-init-setup: unknown step '${sub}'. One of: labels, actor`);
+    console.error(`env-init-setup: unknown step '${sub}'. One of: labels, actor, owners`);
     process.exit(2);
   }
   process.exitCode = await run();

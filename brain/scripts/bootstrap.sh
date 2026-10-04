@@ -628,6 +628,9 @@ _setup_step() {
 say "Governance labels and actor"
 _setup_step labels
 _setup_step actor
+# The FOUNDING run names its adopter as the owner of the team config (ADR-0040 sections 4-5): after `actor`, so the login is resolved.
+# An existing repo's owners are its team's decision, never seeded here (ratified point 4).
+if [ "$_founding" = true ]; then _setup_step owners; fi
 
 # --- 6. SDD implementation (replaceable harness, ADR-0012) --------------------
 # Harness-specific init is now delegated to brain/scripts/harness/cli.mjs, which

@@ -355,7 +355,10 @@ export function resolveAxis(axis, { env = process.env, dotenv = {}, config = {},
 
   const shape = readAxis(merged, axis, { harness: false });
   const userDefault = nonEmpty(isObj(userLayer[axis]) ? userLayer[axis].default : '');
-  const isLocked = cfg[axis]?.locked === true;
+  // A lock forbids overriding what the team DECLARED. A locked axis nobody declared yet (a no-TTY foundation locks memory and leaves it
+  // undeclared, ADR-0040 section 4) has nothing to override: refusing a per-machine value there would only break a working `.env`, and
+  // the gap is already an ERROR finding (`axis-undeclared`) until the team declares it (#1263 slice 3).
+  const isLocked = cfg[axis]?.locked === true && nonEmpty(shape.default) !== '';
   const dotenvMap = axis === 'vcs' ? {} : (isObj(dotenv) ? dotenv : {});
   const envMap = isObj(env) ? env : {};
 
@@ -495,12 +498,19 @@ export function diagnoseAxes(args) {
       }
     }
 
+    // owners-undeclared (ADR-0040 section 5): nobody is named to own the team config. A warning, not an error: nothing
+    // refuses on it until the approval gate (slice 4) reads the list. An empty config is no team config to diagnose.
+    const owners = isObj(cfg.governance) && Array.isArray(cfg.governance.owners) ? cfg.governance.owners.filter((o) => nonEmpty(o) !== '') : [];
+    if (Object.keys(cfg).length > 0 && owners.length === 0) {
+      add('governance', 'owners-undeclared', 'warning', tr('axes.diagnose.ownersUndeclared'), tr('axes.diagnose.ownersUndeclared.fix'));
+    }
+
     for (const axis of AXES) {
       const declared = readAxis(cfg, axis).default;
 
       // locked-override-refused: a selector at a level the team's lock forbids (the user layer, `.env`, the process env),
       // whose value differs from the team's. One finding per level, so the person sees every place to clean.
-      if (cfg[axis]?.locked === true) {
+      if (cfg[axis]?.locked === true && nonEmpty(declared) !== '') {
         const keyName = AXIS_ENV_KEY[axis];
         const levels = [
           ['process-env', procEnv[keyName], keyName, tr('axes.diagnose.where.shell')],

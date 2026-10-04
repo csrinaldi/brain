@@ -263,3 +263,30 @@ test('#1114 S3.3 BLOCKER: <axis>.providers.<name> refuses a name outside the axi
     assert.equal(planConfigWrite({ config: { schemaVersion: '1.9.1' }, path, value: '{}', migrations: AXIS_MIGRATIONS, targetVersion: '1.9.1' }).refusal, null, path);
   }
 });
+
+// ── governance.owners and <axis>.locked (#1263 slice 3) ───────────────────────────────────────────────────────────────
+const setPath = (path, value, config = {}) => planConfigWrite({ config, path, value, migrations: MIGRATIONS, targetVersion: '0.3.0' });
+
+test('#1263 governance.owners is settable as a LIST: a bare login, a comma run, or a JSON array; `@` is dropped; duplicates collapse', () => {
+  assert.deepEqual(setPath('governance.owners', 'alice').next.governance.owners, ['alice']);
+  assert.deepEqual(setPath('governance.owners', '@alice, bob,alice').next.governance.owners, ['alice', 'bob']);
+  assert.deepEqual(setPath('governance.owners', '["alice","@bob"]').next.governance.owners, ['alice', 'bob']);
+  assert.deepEqual(setPath('governance.owners', 'carol', { governance: { owners: ['alice'], tier: 'standard' } }).next.governance, { owners: ['carol'], tier: 'standard' });
+});
+
+test('#1263 governance.owners refuses what is not a login, and writes nothing', () => {
+  for (const bad of ['a b', '{"x":1}', '[1,2]', 'al/ice', '"ok", "ev il"']) {
+    const r = setPath('governance.owners', bad);
+    assert.equal(r.next, null, bad);
+    assert.match(r.refusal, /governance\.owners/);
+  }
+});
+
+test('#1263 <axis>.locked is settable on memory, platform and sdd as a boolean; vcs has none', () => {
+  for (const axis of ['memory', 'platform', 'sdd']) {
+    assert.equal(setPath(`${axis}.locked`, 'true').next[axis].locked, true);
+    assert.equal(setPath(`${axis}.locked`, 'false').next[axis].locked, false);
+    assert.match(setPath(`${axis}.locked`, 'yes').refusal, /true or false/);
+  }
+  assert.match(setPath('vcs.locked', 'true').refusal, /unknown path/);
+});

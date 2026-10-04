@@ -97,7 +97,11 @@ import { NEW_CONSUMER_DEFAULTS } from '../../core/config-migrations.mjs';
 import { resolveTier } from '../vcs/governance-tiers.mjs';
 
 test('#1124: NEW_CONSUMER_DEFAULTS declares lite — the overlay a fresh config is built from', () => {
-  assert.deepEqual(NEW_CONSUMER_DEFAULTS, { governance: { tier: 'lite' } });
+  assert.deepEqual(NEW_CONSUMER_DEFAULTS, {
+    governance: { tier: 'lite', owners: [] },
+    memory: { locked: true },
+    sdd: { locked: true },
+  }, '#1263: a new adoption locks memory and sdd, leaves platform free, and starts with no owner until env:init seeds one');
   assert.ok(Object.isFrozen(NEW_CONSUMER_DEFAULTS), 'a shared default must not be mutable by a caller');
 });
 
