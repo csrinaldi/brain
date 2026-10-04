@@ -801,7 +801,7 @@ function renderClusteringBar() {
  */
 function renderNodeSdd(issue) {
   const strip = el('div', 'node-sdd');
-  const found = sddForIssue(sectionOf(state, 'changes'), issue);
+  const found = sddForIssue(sectionOf(state, 'changes'), issue, sectionOf(state, 'localWorktrees'));
   if (!found.ok) {
     strip.appendChild(el('span', 'node-sdd-none', found.reason));
     return strip;

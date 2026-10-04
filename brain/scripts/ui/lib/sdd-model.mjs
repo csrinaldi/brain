@@ -192,7 +192,7 @@ function buildChangeRow(change) {
  * model — rows sort by issue number before anything else runs over them.
  */
 /**
- * sddForIssue(changesSection, issue) -> {ok:true, value:<the change row>} |
+ * sddForIssue(changesSection, issue, localSection?) -> {ok:true, value:<the change row>} |
  * {ok:false, reason}
  *
  * One change, found by the issue that owns it (#1059 region 03). A node card
@@ -253,11 +253,24 @@ export function buildSlicePlan(changesSection) {
   };
 }
 
-export function sddForIssue(changesSection, issue) {
+/**
+ * #883 S1: the card's words for a change that exists only in a local worktree.
+ * `localSection` is the snapshot's `localWorktrees` section; the card reads no
+ * file content (the drawer does), so there is no progress number here.
+ */
+function localOnlyReason(localSection, issue) {
+  if (!localSection || localSection.ok !== true) return null;
+  const held = (localSection.value?.entries ?? []).filter((e) => e.issue === issue && e.dirState === 'present');
+  if (held.length === 0) return null;
+  const more = held.length > 1 ? ` and ${held.length - 1} more` : '';
+  return `change in worktree ${held[0].leaf}${more} (not on main)`;
+}
+
+export function sddForIssue(changesSection, issue, localSection) {
   if (!changesSection || typeof changesSection !== 'object') return { ok: false, reason: 'no changes section was given' };
   if (changesSection.ok !== true) return { ok: false, reason: changesSection.reason };
   const found = (changesSection.value ?? []).find((c) => c.issue === issue);
-  if (!found) return { ok: false, reason: `no change directory names issue #${issue}` };
+  if (!found) return { ok: false, reason: localOnlyReason(localSection, issue) ?? `no change directory names issue #${issue}` };
   // A ROW, not the raw snapshot entry. `readChanges()` emits `artefacts`
   // booleans and `{ok,value}` task envelopes; a caller wants the seven stages
   // and two numbers, which is exactly what every row in `buildSddModel` gets.
