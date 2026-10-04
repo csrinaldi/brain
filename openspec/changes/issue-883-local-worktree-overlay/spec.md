@@ -109,7 +109,7 @@ For each uncapped entry with one change dir, the drawer MUST look up all seven d
 
 ### R883-6: Each present document carries one state; identical to main is collapsed (R3)
 
-Each present document MUST carry exactly one state, decided in this order by hashing its bytes as a git blob: `same-as-main` when the hash equals main's blob for the same stage at the served HEAD; else `new` when the worktree's HEAD tree has no entry at its path; else `modified` when the hash differs from that entry; else `committed`. A `same-as-main` row MUST NOT carry a body. Every `new` or `modified` document MUST carry `uncommitted: true` and render with its marker; `committed` and `same-as-main` MUST carry `uncommitted: false`. `resume.md` MUST NOT be compared with main, because main's HEAD has no reader for it. A tasks document that is read MUST carry its own task count.
+Each present document MUST carry exactly one state, decided in this order by hashing its bytes as a git blob: `same-as-main` when the hash equals main's blob for the same stage at the served HEAD; else `new` when the worktree's HEAD tree has no entry at its path; else `modified` when the hash differs from that entry; else `committed`. A document in the worktree's HEAD tree and absent from its working tree MUST carry the state `deleted`, decided from the `ls-tree` already read, and MUST NOT carry a body; it is distinct from a document that was never in the worktree, which is only named in the absent line. A `same-as-main` row MUST NOT carry a body. Every `new`, `modified` or `deleted` document MUST carry `uncommitted: true` and render with its marker; `committed` and `same-as-main` MUST carry `uncommitted: false`. `resume.md` MUST NOT be compared with main, because main's HEAD has no reader for it. A tasks document that is read MUST carry its own task count.
 
 #### Scenario: An untracked proposal is new while main has no change dir
 - **GIVEN** a temp repo whose main has no change dir and a linked worktree for open issue N holding an untracked `proposal.md`
@@ -125,6 +125,11 @@ Each present document MUST carry exactly one state, decided in this order by has
 - **GIVEN** a worktree whose `spec.md` is committed on its branch, unchanged since, and absent from main
 - **WHEN** the drawer opens
 - **THEN** the spec row reads "committed on <branch>, not on main" and is not marked uncommitted
+
+#### Scenario: A document committed on the branch and deleted in the worktree is deleted
+- **GIVEN** a worktree whose `tasks.md` is committed on its branch and removed from its working tree
+- **WHEN** the drawer opens
+- **THEN** the tasks row reads "uncommitted: deleted (committed on <branch>, missing from the working tree)", carries no body, and is not named as not in this worktree
 
 #### Scenario: A document identical to main is collapsed
 - **GIVEN** a worktree whose `proposal.md` has the same bytes as main's at the served HEAD
@@ -178,7 +183,7 @@ No reader added by this change MUST read a path under the served root's working 
 
 ### R883-9: The drawer stacks main, then this machine, then origin (R1)
 
-The change view MUST carry `local` (one block per entry of the issue) and `localNote`, beside the unchanged tabs and the unchanged `remote` blocks. The page MUST render the served change first, then an "on this machine" heading with the local blocks, then the "on origin" blocks; when the served HEAD has no change dir for the issue and a local block exists, the local blocks MUST be rendered first and the empty-state line MUST say the served HEAD has none and this machine's worktrees follow. Each local block MUST be labelled `worktree <leaf> · <branch>`. A local block whose head equals the sha of an `origin` entry for the same branch, with no uncommitted document, MUST be listed as `same-as-origin` without documents. The tabs MUST keep reading the served HEAD only.
+The change view MUST carry `local` (one block per entry of the issue) and `localNote`, beside the unchanged tabs and the unchanged `remote` blocks. The page MUST render the served change first, then an "on this machine" heading with the local blocks, then the "on origin" blocks; when the served HEAD has no change dir for the issue and a local block exists, the local blocks MUST be rendered first and the empty-state line MUST say the served HEAD has none and this machine's worktrees follow. Each local block MUST be labelled `worktree <leaf> · <branch>`. A local block whose head equals the sha of an `origin` entry for the same branch, MUST be listed as `same-as-origin` without documents only when every document is readable, none is uncommitted and none is deleted from the working tree; otherwise the block MUST be read, so the refusal or the deletion is shown. The tabs MUST keep reading the served HEAD only.
 
 #### Scenario: Local before origin
 - **GIVEN** issue 11 with a served change dir, one local worktree and one remote branch
@@ -190,6 +195,11 @@ The change view MUST carry `local` (one block per entry of the issue) and `local
 - **WHEN** the drawer renders
 - **THEN** the "on this machine" block is the first block and the empty-state line says the served HEAD has no change dir
 
+#### Scenario: An unreadable or deleted document keeps a block at its origin tip read
+- **GIVEN** a worktree at its origin tip whose `proposal.md` is now a symbolic link and whose committed `tasks.md` is missing on disk
+- **WHEN** the drawer renders
+- **THEN** the block is read, the proposal row says it is a symbolic link and the tasks row reads "uncommitted: deleted"
+
 #### Scenario: A clean worktree at its origin tip collapses into origin
 - **GIVEN** a worktree whose head equals `origin/feat/issue-11-a` and whose documents are all committed or same as main
 - **WHEN** the drawer renders
@@ -199,7 +209,7 @@ The change view MUST carry `local` (one block per entry of the issue) and `local
 
 ### R883-10: The watcher notices a worktree edit within one tick
 
-This modifies R881-3. The watcher MUST expose `setLocalTargets(targets)` and MUST hold, for each uncapped entry, a non-recursive directory watch on its `openspec/changes/` and, when it has one, on its change dir. A fire MUST go through the existing 250 ms debounce with a `watch:local:` cause. Targets that leave the list MUST be closed; a watch that fails MUST be said in `state().failed` and retried on the next `setLocalTargets` call. An uncomputable section MUST leave the current targets untouched. The server MUST call `setLocalTargets` after each recompute with the section's uncapped entries.
+This modifies R881-3. The watcher MUST expose `setLocalTargets(targets)` and MUST hold, for each uncapped entry, a non-recursive directory watch on its `openspec/changes/` and, when it has one, on its change dir. A fire MUST go through the existing 250 ms debounce with a `watch:local:` cause. Targets that leave the list MUST be closed; a watch that fails MUST be said in `state().failed` and retried on the next `setLocalTargets` call. An uncomputable section MUST leave the current targets untouched. The server MUST call `setLocalTargets` after each recompute with the section's uncapped entries. When a worktree has no `openspec/changes/` yet, the server MUST pass the nearest existing directory above it inside the worktree (`openspec/`, else the worktree root) as an `ancestor`, watched non-recursively as one extra handle and dropped once the changes dir exists; a path that resolves outside the worktree MUST never be passed.
 
 #### Scenario: An edit fires one debounced recompute
 - **GIVEN** a watcher with a fake `fs.watch`, fake timers, and one local target
@@ -210,6 +220,11 @@ This modifies R881-3. The watcher MUST expose `setLocalTargets(targets)` and MUS
 - **GIVEN** a watcher holding targets for worktrees A and B
 - **WHEN** `setLocalTargets` is called with B and C
 - **THEN** A's handles are closed, B's are kept, and C's are opened
+
+#### Scenario: The first change dir of a bare worktree is noticed
+- **GIVEN** a worktree of an open issue with no `openspec/` directory
+- **WHEN** a change dir is created in it and the worktree's handle fires
+- **THEN** a recompute runs, the changes dir and the change dir are watched, and the worktree root handle is closed
 
 #### Scenario: An uncomputable section keeps the watches
 - **GIVEN** a server whose previous section listed worktree A and whose next build is uncomputable
@@ -328,9 +343,9 @@ R881-3 is amended by this change, and the amendment is recorded here, in the not
 
 | Item | Requirement | Scenarios proving it |
 |---|---|---|
-| R1 lookup order | R883-9 | Local before origin; No change dir on main puts the local block first; A clean worktree at its origin tip collapses into origin |
+| R1 lookup order | R883-9 | Local before origin; No change dir on main puts the local block first; A clean worktree at its origin tip collapses into origin; An unreadable or deleted document keeps a block at its origin tip read |
 | R2 seven documents | R883-5 | All seven are looked up |
-| R3 states, same as main collapsed | R883-6 | An untracked proposal is new while main has no change dir; An edited committed file is modified; A committed file not on main; A document identical to main is collapsed; Same as main wins over uncommitted |
+| R3 states, same as main collapsed | R883-6 | An untracked proposal is new while main has no change dir; An edited committed file is modified; A committed file not on main; A document identical to main is collapsed; Same as main wins over uncommitted; A document committed on the branch and deleted in the worktree is deleted |
 | R4 served root out of scope | R883-8 | A stray untracked file in the served root is ignored; A served root that is itself a linked worktree is still never read |
 | R5 cold-review cache split out | Out of scope | — |
 | R6 open-issue filter | R883-3 | A closed issue's worktree is hidden; An unknown open set filters nothing in; A loading open set is loading |
@@ -338,7 +353,7 @@ R881-3 is amended by this change, and the amendment is recorded here, in the not
 | Served root excluded | R883-1 | The served root is excluded |
 | Safe reads | R883-7 | A symlinked document is refused; A change dir that escapes is refused; A large document is cut, not refused; A torn read is said |
 | R11, no forge, bounded spawns | R883-1, R883-13 | Discovery costs one spawn; The drawer's local reads are bounded and forge-free |
-| Acceptance 1 (ticked task within one tick) | R883-10, R883-11 | An edit fires one debounced recompute; A ticked task shows as uncommitted within one tick |
+| Acceptance 1 (ticked task within one tick) | R883-10, R883-11 | An edit fires one debounced recompute; A ticked task shows as uncommitted within one tick; The first change dir of a bare worktree is noticed |
 | Content-marker stamp | R883-12 | An edit gets a new stamp |
 | Acceptance 2 (no worktrees, empty overlay) | R883-2 | No linked worktrees; An unreadable section is said in the drawer |
 | Read-only, never publishes | R883-14 | A drawer read leaves every worktree byte-identical |

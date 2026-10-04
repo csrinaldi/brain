@@ -161,3 +161,13 @@ Closed after the verify run, in three commits over the verified head `cf4ef68c`.
 | S3 `localNote` unspecified | Fixed. R883-2 states the note and gains one scenario. |
 | S4 watcher check-then-watch window | No change. The consequence is a watch, never a read, on a path that moved, and the next `setLocalTargets` closes it; closing the window needs an fd-based watch API that `fs.watch` does not offer. |
 | S5 publish canary 9.5 to 9.6 MB | No change. The tarball measures 9.50 MB, the raise is one line with the same slack as before, and deriving the canary from the previous release is a separate follow-up. |
+
+## Cold review round 1
+
+The cold review returned REVISE with one blocker and two lesser findings, all closed in this change.
+
+| Finding | Resolution |
+|---|---|
+| cold-1 (BLOCKER) the same-as-origin collapse hides unreadable and deleted documents | Fixed (D85, R883-9). The collapse requires every document readable, none uncommitted and none deleted from the working tree. RED first: with `proposal.md` a symlink and `tasks.md` committed but missing on disk at the origin sha, the block collapsed to `same-as-origin`; it is now `read`, with the refusal shown. |
+| cold-2 an uncommitted deletion has no state | Fixed (D85, R883-6). A fifth state `deleted`, detected from the `ls-tree` already read, `uncommitted: true`, no body, worded "uncommitted: deleted (committed on <branch>, missing from the working tree)", distinct from "not in this worktree". A deleted `resume.md` is a missing resume with a reason. RED first at the reader, drawer-model and render levels. |
+| cold-3 (editorial) the first change dir in a worktree produces no event | Fixed (D85, R883-10). A worktree without `openspec/changes/` is watched at its nearest existing ancestor inside the worktree, one extra non-recursive handle, dropped once the changes dir exists; the `escapes` guard is unchanged. RED first with the injected watch seam, at the watcher and the server. The watcher docstring now states that the caller supplies the ancestor. |

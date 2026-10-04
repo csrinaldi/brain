@@ -69,6 +69,16 @@ Strict TDD: every phase is RED → GREEN → REFACTOR. A RED task names the test
 - [x] 8.5 `ui/local-overlay.test.mjs`: a served root that is itself a linked worktree is never read (S2, R883-8).
 - [x] 8.6 Docs — proposal points at R883-16 (W1); spec adds R883-17, the R883-2 note and scenarios; verify-report gains a Resolution section.
 
+## Phase 9 — Fixes from cold review round 1 (cold-1, cold-2, cold-3, D85)
+
+- [x] 9.1 RED — `ui/local-overlay.test.mjs`: at the origin sha, a symlinked `proposal.md` and a committed `tasks.md` missing on disk keep the block `read`. Fails: it collapses to `same-as-origin`.
+- [x] 9.2 GREEN — the collapse requires every document readable and none uncommitted (D85).
+- [x] 9.3 RED — reader, drawer-model and render tests for the `deleted` state, and for a deleted `resume.md`. Fail: no such state.
+- [x] 9.4 GREEN — `documentFor` returns a `deleted` document from the `ls-tree` in hand; `LOCAL_STATE_WORDING.deleted`; no body; a deleted resume is `missing` with a reason.
+- [x] 9.5 RED — `watcher.test.mjs` and `server.test.mjs`: a target's `ancestor` is one extra handle and is closed when the changes dir appears; a bare worktree is watched at its root and the first change dir re-targets. Fail: no ancestor.
+- [x] 9.6 GREEN — `setLocalTargets` accepts `ancestor`; `server.mjs` names the nearest existing ancestor inside the worktree; the watcher docstring states the dependency.
+- [x] 9.7 Docs — spec R883-6, R883-9, R883-10 and traceability, design D85, verify-report "Cold review round 1".
+
 ## Review Workload Forecast
 
 | Field | Value |
