@@ -380,3 +380,55 @@ test('R883-8: local-overlay.mjs never joins a path onto the served root, and ope
   assert.doesNotMatch(code, /\b(?:writeFileSync|appendFileSync|createWriteStream|mkdirSync|renameSync|unlinkSync|rmSync|utimesSync|O_WRONLY|O_RDWR|O_CREAT)\b/);
   assert.doesNotMatch(code, /\breadFileSync\b/, 'every read goes through the lstat-then-O_NOFOLLOW path');
 });
+
+// ── R883-9 / R883-15: precedence and the Working memory wording ─────────────
+
+/** The snapshot, with `origin` knowing `branch` at `sha` (the remote reader's own entry shape). */
+const withOrigin = (snapshot, branch, sha) => ({
+  ...snapshot,
+  remoteChanges: { ok: true, value: { base: 'origin/main', branches: [{ branch, sha, tipAt: '2026-10-01T00:00:00Z', author: 'Ada Lovelace', kind: 'grammar', issue: 7, pr: null, change: { ok: false, state: 'missing', reason: 'no change dir' }, resume: { state: 'missing' } }], unjoined: [], hidden: { base: 0, lane: 0, merged: 0 }, prsApplied: true, deferred: 0 } },
+});
+
+test('R883-9: local sits beside remote and the tabs keep reading the served HEAD', async (t) => {
+  const repo = makeWorktreeRepo({ mainFiles: { [`${D7}/proposal.md`]: '# served\n' } });
+  t.after(() => repo.dispose());
+  repo.addWorktree('feat/issue-7-x', { [`${D7}/spec.md`]: '### R7-1: a\n#### Scenario: s\n- **WHEN** w\n- **THEN** t\n' });
+  const v = await view(repo);
+  assert.deepEqual(Object.keys(v).filter((k) => ['remote', 'remoteNote', 'local', 'localNote'].includes(k)).sort(), ['local', 'localNote', 'remote', 'remoteNote']);
+  assert.equal(v.spec.ok, false, 'the spec tab does not fall through to the worktree spec');
+  assert.equal(v.documents.proposal.text, '# served\n');
+});
+
+test('R883-9: a block at its origin tip with nothing uncommitted is same-as-origin without documents; one uncommitted document keeps it read', async (t) => {
+  const repo = makeWorktreeRepo();
+  t.after(() => repo.dispose());
+  const wt = repo.addWorktree('feat/issue-7-x', { [`${D7}/proposal.md`]: '# p\n' }, { commit: true });
+  const snapshot = withOrigin(await snapshotOf(repo.root, [7]), 'feat/issue-7-x', wt.head);
+  const clean = buildChangeView({ root: repo.root, issue: 7, snapshot, _run: gitRun(repo.root) }).value.local[0];
+  assert.equal(clean.state, 'same-as-origin');
+  assert.equal(clean.documents, null);
+
+  put(wt.path, { [`${D7}/proposal.md`]: '# p edited\n' });
+  const dirty = buildChangeView({ root: repo.root, issue: 7, snapshot: withOrigin(await snapshotOf(repo.root, [7]), 'feat/issue-7-x', wt.head), _run: gitRun(repo.root) }).value.local[0];
+  assert.equal(dirty.state, 'read');
+  assert.equal(dirty.documents.proposal.overlay, 'modified');
+
+  const other = buildChangeView({ root: repo.root, issue: 7, snapshot: withOrigin(await snapshotOf(repo.root, [7]), 'feat/issue-7-x', 'f'.repeat(40)), _run: gitRun(repo.root) }).value.local[0];
+  assert.equal(other.state, 'read', 'a different origin sha is not the same as origin');
+});
+
+test('R883-15: with no committed resume, the Working memory reason points at "on this machine" only when a local resume exists, and never says slice 5', async (t) => {
+  const withLocal = makeWorktreeRepo();
+  t.after(() => withLocal.dispose());
+  withLocal.addWorktree('feat/issue-7-x', { [`${D7}/resume.md`]: RESUME_VALID });
+  const a = (await view(withLocal)).workingMemory;
+  assert.equal(a.ok, false);
+  assert.match(a.reason, /on this machine/);
+  assert.doesNotMatch(a.reason, /slice 5/);
+
+  const without = makeWorktreeRepo();
+  t.after(() => without.dispose());
+  without.addWorktree('feat/issue-7-x', { [`${D7}/proposal.md`]: '# p\n' });
+  const b = (await view(without)).workingMemory;
+  assert.equal(b.reason, 'no committed resume.md on feat/issue-7-x');
+});

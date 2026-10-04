@@ -123,7 +123,7 @@ function checkChangeDir({ fs, entry }) {
   }
 }
 
-function localBlock({ run, fs, entry, mainDocuments }) {
+function localBlock({ run, fs, entry, mainDocuments, origin }) {
   const base = { leaf: entry.leaf, branch: entry.branch, head: entry.head, path: entry.path, dir: entry.dir, label: `worktree ${entry.leaf} · ${entry.branch}`, documents: null, absent: [], resume: null, progress: null };
   if (entry.capped) return { ...base, state: 'capped' };
   if (entry.dirState !== 'present') return { ...base, state: entry.dirState === 'missing' ? 'no-change-dir' : 'unreadable', reason: entry.reason };
@@ -143,6 +143,8 @@ function localBlock({ run, fs, entry, mainDocuments }) {
     const doc = documentFor({ fs, key, file, entry, dirReal: checked.dirReal, headEntry: tree.get(`${entry.dir}/${file}`), mainBlob: mainDocuments?.[key]?.blob ?? null, algo, leaf: entry.leaf });
     if (doc) documents[key] = doc; else absent.push(file);
   }
+  const clean = !Object.values(documents).some((d) => d.uncommitted);
+  if (clean && origin) return { ...base, state: 'same-as-origin', absent, resume: null };
   const resume = documents.resume ?? { state: 'missing', reason: `no resume.md in worktree ${entry.leaf}` };
   return { ...base, state: 'read', documents, absent, resume: resumeOutcome({ doc: resume, label: `worktree ${entry.leaf}` }) };
 }
@@ -154,7 +156,9 @@ function localBlock({ run, fs, entry, mainDocuments }) {
 export function readLocalBlocks({ run, snapshot, issue, mainDocuments, _fs = defaultFs }) {
   const section = snapshot?.localWorktrees;
   const mine = section?.ok ? section.value.entries.filter((e) => e.issue === issue) : [];
+  const remote = snapshot?.remoteChanges?.ok ? snapshot.remoteChanges.value.branches : [];
+  const atOrigin = (e) => remote.some((r) => r.branch === e.branch && r.sha === e.head);
   const capped = mine.filter((e) => e.capped).length;
   const note = capped > 0 ? `showing documents for ${mine.length - capped} of ${mine.length} worktrees; the others are listed without documents (cap of ${LOCAL_DRAWER_CAP})` : null;
-  return { local: mine.map((entry) => localBlock({ run, fs: _fs, entry, mainDocuments })), localNote: note };
+  return { local: mine.map((entry) => localBlock({ run, fs: _fs, entry, mainDocuments, origin: atOrigin(entry) })), localNote: note };
 }

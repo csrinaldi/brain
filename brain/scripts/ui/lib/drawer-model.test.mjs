@@ -117,11 +117,11 @@ test('#881 R881-8: Tasks show done/pending, the file line, and attribution — a
   assert.equal(tasks.entries[1].source, 'tasks.md:11');
 });
 
-test('#881 R881-8 S3: an absent committed resume.md keeps the tab\'s own reason, which names slice 5', () => {
-  const model = buildDrawerModel(view({ workingMemory: { ok: false, reason: 'no committed resume.md on feat/issue-881-x; the local overlay arrives in slice 5 (#883)' } }));
+test('#881 R881-8 S3: an absent committed resume.md keeps the tab\'s own reason, whatever it says', () => {
+  const model = buildDrawerModel(view({ workingMemory: { ok: false, reason: 'no committed resume.md on feat/issue-881-x; an uncommitted one is on this machine, below' } }));
   const wm = model.value.tabs[3];
   assert.equal(wm.ok, false);
-  assert.match(wm.reason, /slice 5 \(#883\)/);
+  assert.match(wm.reason, /on this machine/);
 });
 
 test('#881 R881-8: Working memory shows the three fields, each with its branch-qualified source, a missing one said', () => {
@@ -558,7 +558,7 @@ test('#1218 R1218-8: a missing resume.md with a reason reads as that reason, in 
 });
 
 test('#1218 R1218-8: an unresolved branch reads "the change branch could not be resolved" in the SDD row and the Working memory tab', () => {
-  for (const reason of ['more than one feat/issue-881-* branch in this clone: a, b', 'git branch --list failed: fatal: not a git repository']) {
+  for (const reason of ['more than one */issue-881 branch in this clone: a, b', 'git branch --list failed: fatal: not a git repository']) {
     const resume = { path: 'resume.md', ref: null, commit: null, state: 'unreadable', text: null, reason };
     const sdd = docsView({ resume }).entries[7].document;
     assert.equal(sdd.wording, `resume.md: the change branch could not be resolved: ${reason}`);

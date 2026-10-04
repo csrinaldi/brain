@@ -35,6 +35,7 @@ import { changeDirNames, parseTreeListing, pickChangeDir } from '../lib/git-tree
 import { prUrl } from './lib/forge-url.mjs';
 import { documentWording, NO_CHANGE_BRANCH } from './lib/drawer-model.mjs';
 import { readLocalBlocks } from './local-overlay.mjs';
+import { parseCanonicalIssueBranch } from '../lib/branch-grammar.mjs';
 
 /** D14's caveat, verbatim in the UI, until #880 lands `type: review` records. */
 export const REVIEWS_SOURCE_NOTE = 'forge comments until #880 lands';
@@ -127,8 +128,10 @@ function buildTasksTab({ documents, head, run, dir, issue }) {
 
 /**
  * D12's branch resolution, in order: the issue's open PR headBranch, else the
- * single `feat/issue-<N>-*` branch in this clone — never picking among more
- * than one.
+ * single local branch of this issue, whatever its type (#883 D81) — never
+ * picking among more than one. `*\/issue-N` and `*\/issue-N-*` are the two
+ * globs `git branch --list` needs; `parseCanonicalIssueBranch` is the one
+ * grammar that says which names are really this issue's.
  */
 function resolveBranch({ run, snapshot, issue }) {
   const prMatch = snapshot?.prs?.ok ? snapshot.prs.value.find((p) => p.issue === issue) : null;
@@ -136,23 +139,23 @@ function resolveBranch({ run, snapshot, issue }) {
 
   let listed;
   try {
-    listed = run('git', ['branch', '--list', `feat/issue-${issue}-*`]);
+    listed = run('git', ['branch', '--list', `*/issue-${issue}`, `*/issue-${issue}-*`]);
   } catch (err) {
     return { ok: false, kind: 'failed', reason: `git branch --list failed: ${gitErrorLine(err)}` };
   }
-  const names = listed.split(/\r?\n/).map((l) => l.replace(/^\*?\s+/, '').trim()).filter(Boolean);
-  if (names.length === 0) return { ok: false, kind: 'none', reason: `no open PR and no feat/issue-${issue}-* branch in this clone` };
-  if (names.length > 1) return { ok: false, kind: 'ambiguous', reason: `more than one feat/issue-${issue}-* branch in this clone: ${names.join(', ')}` };
+  const names = listed.split(/\r?\n/).map((l) => l.replace(/^[*+]?\s+/, '').trim()).filter((n) => n && parseCanonicalIssueBranch(n)?.issueNumber === String(issue));
+  if (names.length === 0) return { ok: false, kind: 'none', reason: `no open PR and no */issue-${issue} branch in this clone` };
+  if (names.length > 1) return { ok: false, kind: 'ambiguous', reason: `more than one */issue-${issue} branch in this clone: ${names.join(', ')}` };
   return { ok: true, branch: names[0] };
 }
 
-function buildWorkingMemoryTab({ resolved, resume }) {
+function buildWorkingMemoryTab({ resolved, resume, localResume = false }) {
   // Derived from the one resume document so this tab and the SDD row cannot disagree.
   if (!resolved.ok) return { ok: false, reason: documentWording(resume) };
   const { branch } = resolved;
   if (resume.state === 'unreadable') return { ok: false, reason: documentWording(resume) };
   if (resume.state !== 'present' && resume.state !== 'truncated') {
-    return { ok: false, reason: `no committed resume.md on ${branch}; the local overlay arrives in slice 5 (#883)` };
+    return { ok: false, reason: `no committed resume.md on ${branch}${localResume ? '; an uncommitted one is on this machine, below' : ''}` };
   }
   const { frontmatter } = parseFrontmatter(resume.text);
   return { ok: true, value: shapeResumeView({ frontmatter, branch, path: resume.path }) };
@@ -498,6 +501,7 @@ export function buildChangeView({ root, issue, snapshot, project = null, _read, 
   const resolved = resolveBranch({ run, snapshot, issue });
   const resume = readResumeDocument({ run, resolved, issue });
   const documents = { ...headDocuments, resume };
+  const localRead = readLocalBlocks({ run, snapshot, issue, mainDocuments: headDocuments });
 
   return {
     ok: true,
@@ -508,11 +512,11 @@ export function buildChangeView({ root, issue, snapshot, project = null, _read, 
       spec: buildSpecTab({ documents, head, dir, issue }),
       sdd: buildSddTab({ snapshot, issue, dir }),
       tasks: buildTasksTab({ documents, head, run, dir, issue }),
-      workingMemory: buildWorkingMemoryTab({ resolved, resume }),
+      workingMemory: buildWorkingMemoryTab({ resolved, resume, localResume: localRead.local.some((b) => b.documents?.resume) }),
       reviews: buildReviewsTab({ snapshot, project, issue }),
       records: buildRecordsTab({ snapshot, issue }),
       ...readRemoteBlocks({ run, snapshot, issue, head }),
-      ...readLocalBlocks({ run, snapshot, issue, mainDocuments: headDocuments }),
+      ...localRead,
     },
   };
 }
