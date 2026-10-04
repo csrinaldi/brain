@@ -103,3 +103,13 @@ test('#1201 D39: a child that never exits is killed with SIGKILL at the timeout,
   assert.ok(elapsed < FETCH_TIMEOUT_TEST_BOUND_MS, `killed within the bound (${elapsed} ms)`);
   assert.ok(ticks >= 2, `the event loop stayed responsive while the child hung (${ticks} ticks)`);
 });
+
+test('#1276 D91: `opts.input` is piped to git\'s stdin, and a call without it still has no stdin', async () => {
+  const { execFileSync } = await import('node:child_process');
+  const root = testTmp('git-run-input-');
+  execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: root });
+  const run = gitRun(root);
+  const expected = execFileSync('git', ['hash-object', '--stdin'], { cwd: root, input: 'hello\n', encoding: 'utf8' });
+  assert.equal(run('git', ['hash-object', '--stdin'], { input: 'hello\n' }), expected);
+  assert.equal(run('git', ['hash-object', '--stdin']), execFileSync('git', ['hash-object', '--stdin'], { cwd: root, input: '', encoding: 'utf8' }), 'no input: stdin is closed and git reads an empty one');
+});
