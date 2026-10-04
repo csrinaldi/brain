@@ -281,7 +281,8 @@ function readOneChange({ id, missingId, dir, issue, slug, archived, artefacts, r
  * A missing `archive/` dir is "no archived changes" (a fact, checked via
  * `exists` before ever listing it); any OTHER failure to list an existing
  * `archive/` dir is this whole section's reason, same as a failure to list
- * `CHANGES_ROOT` itself. A dir under `archive/` that is not a bare issue
+ * `CHANGES_ROOT` itself. An absent `CHANGES_ROOT` (ENOENT) is a repository with
+ * no changes: `{ok: true, value: []}` (#1276). A dir under `archive/` that is not a bare issue
  * number (a pre-convention dated-slug dir, a named one) is never silently
  * dropped: it is excluded from `value`'s rows AND named on the returned
  * section's own `archiveSkipped` array (review of PR 4, fix 1).
@@ -294,7 +295,10 @@ export function readChanges({ root, tier, _read, _list, _exists } = {}) {
   try {
     names = list(CHANGES_ROOT).filter((n) => parseChangeId(n) !== null).sort();
   } catch (err) {
-    return uncomputable(`${CHANGES_ROOT} could not be listed: ${err?.message ?? err}`);
+    // A repository that has no `openspec/changes` directory has no changes: that is a fact, not a
+    // failure to read (#1276). Any other error leaves the section unread.
+    if (err?.code !== 'ENOENT') return uncomputable(`${CHANGES_ROOT} could not be listed: ${err?.message ?? err}`);
+    names = [];
   }
   let artefacts = null;
   try { artefacts = requiredArtifactsFor(tier); } catch (err) { artefacts = { reason: err.message }; }

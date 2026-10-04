@@ -138,7 +138,12 @@ test('#879: changes read tasks, slice scopes and missing artefacts; an absent ta
   assert.match(b.tasks.checked.reason, /issue-2-no-tasks\/tasks\.md does not exist/);
   assert.deepEqual(b.missing.value, [], 'at lite only spec.md is required, and it is there');
   assert.deepEqual(readChanges({ root, tier: 'standard' }).value.filter((x) => !x.archived)[1].missing.value, ['proposal.md', 'design.md', 'tasks.md'], 'the tier decides the required set');
-  assert.equal(readChanges({ root: '/nowhere', tier: 'lite' }).ok, false);
+  const none = readChanges({ root: '/nowhere', tier: 'lite' });
+  assert.equal(none.ok, true, '#1276: an absent openspec/changes is a repository with no changes');
+  assert.deepEqual(none.value, []);
+  const denied = readChanges({ root, tier: 'lite', _list: () => { throw Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' }); } });
+  assert.equal(denied.ok, false, 'any other read error stays unread');
+  assert.match(denied.reason, /could not be listed: EACCES/);
   const unresolved = readChanges({ root, tier: null });
   assert.equal(unresolved.value.filter((x) => !x.archived)[0].missing.ok, false, 'no tier → the required set cannot be resolved, and that is said');
 });

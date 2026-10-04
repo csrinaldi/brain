@@ -26,7 +26,7 @@ function stubVcs(open = []) {
 
 const snapshotOf = (root, open) => buildSnapshot({ root, now: '2026-10-03T00:00:00Z', vcs: stubVcs(open), project: 'example/repo' });
 const D7 = 'openspec/changes/issue-7-x';
-/** Main holds a change of ANOTHER issue: a served root with no `openspec/changes` at all has an unreadable `changes` section (ENOENT), and R1276-5 keeps today's reason for that. */
+/** Main holds a change of ANOTHER issue, so the served root has a `changes` directory with no row for #7. */
 const MAIN_OTHER = { 'openspec/changes/issue-1-other/proposal.md': '# other\n' };
 const repoWith = (mainFiles = MAIN_OTHER) => makeWorktreeRepo({ mainFiles });
 
@@ -289,6 +289,20 @@ test('R1276-2: a change on main keeps the three tabs as the served HEAD builds t
   assert.equal(wt.branch, 'feat/issue-11-a');
 });
 
+test('R1276-2 (S1): the three tabs of a change on main are byte-equal to what the code before #1276 built, with a worktree beside it', async (t) => {
+  const D11 = 'openspec/changes/issue-11-a';
+  const repo = makeWorktreeRepo({ mainFiles: { [`${D11}/proposal.md`]: '# p\n', [`${D11}/spec.md`]: SPEC_ONE, [`${D11}/tasks.md`]: THREE } });
+  t.after(() => repo.dispose());
+  repo.addWorktree('feat/issue-11-a', { [`${D11}/tasks.md`]: '- [x] 1.1 a\n- [ ] 1.2 b\n- [ ] 1.3 c\n', [`${D11}/design.md`]: '# d\n' });
+  const snapshot = await snapshotOf(repo.root, [11]);
+
+  const { value } = buildChangeView({ root: repo.root, issue: 11, snapshot, _run: gitRun(repo.root) });
+
+  // Recorded from origin/main (53c78854, before #1276) with the same fixture: a regression here is a tab that moved.
+  const golden = readFileSync(new URL('./test-support/golden/tab-source-main-change.golden.json', import.meta.url), 'utf8');
+  assert.equal(JSON.stringify({ spec: value.spec, sdd: value.sdd, tasks: value.tasks }, null, 2), golden.trimEnd());
+});
+
 // ── R1276-1 / R1276-5: precedence and the unread step ────────────────────────
 
 /** An origin entry the remote reader would have kept, holding the change at `sha`. */
@@ -340,17 +354,34 @@ test('R1276-5: a holding worktree whose change dir cannot be read is said with i
   }
 });
 
-test('R1276-5: a served changes section that could not be read keeps today\'s reason, whatever lies below it', async (t) => {
+test('R1276-5: a served changes section that could not be read for any other reason than being absent keeps today\'s reason, whatever lies below it', async (t) => {
   const repo = makeWorktreeRepo();
   t.after(() => repo.dispose());
   repo.addWorktree('feat/issue-7-x', { [`${D7}/spec.md`]: SPEC_ONE });
   const snapshot = await snapshotOf(repo.root, [7]);
+  snapshot.changes = { ok: false, reason: 'openspec/changes could not be listed: EACCES: permission denied, scandir' };
 
   const { value } = buildChangeView({ root: repo.root, issue: 7, snapshot, _run: gitRun(repo.root) });
 
-  assert.equal(snapshot.changes.ok, false);
   assert.equal(value.tabSource.kind, 'none');
   assert.equal(value.spec.reason, 'no change dir at openspec/changes/issue-7-*');
+});
+
+test('R1276-5: a served root with no openspec/changes directory is main holding no change dir, so a worktree change still shows (#1276 W1)', async (t) => {
+  const repo = makeWorktreeRepo({ mainFiles: {} });
+  t.after(() => repo.dispose());
+  repo.addWorktree('feat/issue-7-x', {
+    [`${D7}/spec.md`]: SPEC_ONE,
+    [`${D7}/tasks.md`]: '- [ ] 1.1 first\n',
+  });
+  const snapshot = await snapshotOf(repo.root, [7]);
+
+  const { value } = buildChangeView({ root: repo.root, issue: 7, snapshot, _run: gitRun(repo.root) });
+
+  assert.deepEqual(snapshot.changes, { ok: true, value: [], archiveSkipped: [] });
+  assert.equal(value.tabSource.kind, 'worktree');
+  assert.equal(value.spec.ok, true);
+  assert.equal(value.sdd.ok, true);
 });
 
 test('R1276-1: with no source anywhere each tab keeps today\'s no-change-dir reason', async (t) => {
