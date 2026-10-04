@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // brain-governance-status.mjs — Report the current state of all three governance layers.
 //
-// Reads vcs.provider and project.slug from brain.config.json, probes the VCS
+// Reads vcs.provider and project.slug (brain.config.json, else the origin remote — lib/project-slug.mjs), probes the VCS
 // provider's capability API, and prints a per-consumer status table.
 //
 // USAGE: npm run brain:governance-status
@@ -26,6 +26,7 @@ import { detectSubstrate, POSTMERGE_STALE_LABEL } from './vcs/substrate.mjs';
 import { GOVERNANCE_JOBS } from './vcs/governance-checks.mjs';
 import { resolveTier, requiredJobs } from './vcs/governance-tiers.mjs';
 import { readAxis, diagnoseAxes } from './lib/axis-config.mjs';
+import { projectSlugOrNull, describeSlugRefusal } from './lib/project-slug.mjs';
 import { readCodeowners } from './lib/codeowners-drift.mjs';
 import { detectInstalled } from './lib/axis-installed.mjs';
 import { readUserConfig } from './lib/user-config.mjs';
@@ -64,7 +65,7 @@ function repoFileExists(relPath) {
  */
 async function realBranchProtectionProbe({ config, vcs }) {
   const provider = readAxis(config, 'vcs').default;
-  const project = config?.project?.slug;
+  const project = projectSlugOrNull({ config });
   const branch = config?.project?.defaultBranch ?? 'main';
   if (!project) return { status: undefined, contexts: [] };
 
@@ -149,9 +150,9 @@ async function realPostMergeCiProbe({ config }) {
     return { workflowPresent, read: 'unsupported', lastRun: null, error: null, observedAt };
   }
 
-  const project = config?.project?.slug;
+  const project = projectSlugOrNull({ config });
   if (!project) {
-    return { workflowPresent, read: 'failed', lastRun: null, error: 'no project.slug configured', observedAt };
+    return { workflowPresent, read: 'failed', lastRun: null, error: await describeSlugRefusal(), observedAt };
   }
   const branch = config?.project?.defaultBranch ?? 'main';
 
@@ -197,7 +198,7 @@ async function realBrainWritesReviewedProbe({ config }) {
   const provider = readAxis(config, 'vcs').default;
 
   if (provider === 'github') {
-    const project = config?.project?.slug;
+    const project = projectSlugOrNull({ config });
     const branch = config?.project?.defaultBranch ?? 'main';
     const codeownersPresent = repoFileExists('.github/CODEOWNERS');
     if (!project) return { requireCodeOwnerReviews: false, codeownersPresent };
@@ -475,7 +476,7 @@ export async function reportGovernanceStatus({
   }
 
   const provider = (readAxis(config, 'vcs').default || 'unknown');
-  const project = config?.project?.slug ?? 'unknown';
+  const project = projectSlugOrNull({ config }) ?? 'unknown';
 
   console.log(`\nbrain:governance status — ${project} (${provider})\n`);
   // Hooks and brain:audit are always ON regardless of provider tier.

@@ -239,6 +239,7 @@ export default {
   'axes.diagnose.userShadows':              '{axis}.default en {where} ({value}) pisa el {axis}.default del equipo ({declared}) en esta máquina',
   'axes.diagnose.userShadows.fix':          'nada que hacer si esta máquina debe diferir; para hacerlo la elección del equipo: npm run brain:config -- set {axis}.default {value}',
   'config.identity.missing': 'la config del equipo no tiene project.{key}; proponelo con `npm run brain:config -- set project.{key} {value}` en un PR (env:init no escribe la config del equipo en un repositorio existente)',
+  'config.slug.refused': 'no se puede saber de qué repositorio se trata: brain.config.json no tiene project.slug y no hay remoto origin del cual leerlo. Proponelo en un PR: {fix}',
   'axes.diagnose.undeclared': '{axis} no está declarado: nada define un {axis} y no se adivinó ninguno',
   'axes.diagnose.undeclared.fix': 'elegir uno y declararlo en un PR: npm run brain:config -- set {axis}.default <nombre>',
   'axes.diagnose.ownersUndeclared': 'governance.owners está vacío o ausente: nadie figura como dueño de la config del equipo',

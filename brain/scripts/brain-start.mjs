@@ -19,6 +19,7 @@ import { spawnSync } from 'node:child_process';
 import { nonEmptySlug } from './lib/branch-grammar.mjs';
 import { resolveApprovedLabel } from './governance/approved-label.mjs';
 import { readAxis } from './lib/axis-config.mjs';
+import { resolveProjectSlug, ProjectSlugError, describeSlugRefusal } from './lib/project-slug.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -116,10 +117,16 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   }
 
   const provider = readAxis(config, 'vcs').default;
-  const project = config?.project?.slug;
-
-  if (!provider || !project) {
-    console.error('brain:start: vcs.provider and project.slug must be set in brain.config.json');
+  if (!provider) {
+    console.error('brain:start: vcs.provider must be set in brain.config.json');
+    process.exit(1);
+  }
+  let project;
+  try {
+    ({ slug: project } = resolveProjectSlug({ config }));
+  } catch (e) {
+    if (!(e instanceof ProjectSlugError)) throw e;
+    console.error(`brain:start: ${await describeSlugRefusal(e)}`);
     process.exit(1);
   }
 

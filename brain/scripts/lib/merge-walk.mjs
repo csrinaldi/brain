@@ -34,6 +34,7 @@ import { diffSize } from '../governance/checks/diff-size.mjs';
 import { issueLink } from '../governance/checks/issue-link.mjs';
 import { adrPresence } from '../governance/checks/adr-presence.mjs';
 import { writesGoverned } from '../governance/checks/writes-governed.mjs';
+import { projectSlugOrNull } from './project-slug.mjs';
 import { memoryGateVerdict } from '../governance/checks/memory-gate.mjs';
 // COMPOSE the frozen net-parity primitives (design §15, PR2b). NEVER import the
 // retired direction-blind pairwise `isReverterOf` — a no-import drift-guard test
@@ -397,7 +398,7 @@ export async function fetchPrMeta(subject, vcs, config, sha) {
   if (subjectRef !== null && vcs) {
     try {
       const pr = await vcs.prView({
-        project: config?.project?.slug,
+        project: projectSlugOrNull({ config }),
         number: subjectRef,
       });
       if (pr.absent === true) {
@@ -484,7 +485,7 @@ export async function fetchPrMeta(subject, vcs, config, sha) {
  */
 async function fetchReviews(vcs, config, number, onError) {
   if (typeof vcs.prReviews !== 'function') return null;
-  const prReviews = await vcs.prReviews({ project: config?.project?.slug, number });
+  const prReviews = await vcs.prReviews({ project: projectSlugOrNull({ config }), number });
   if (prReviews === null) {
     onError(`PR reviews unreadable for #${number} — the API call failed; `
       + 'the evaluator has no evidence, not empty evidence');
@@ -507,7 +508,7 @@ async function fetchReviews(vcs, config, number, onError) {
  * @returns {Promise<{ prLabels, prBody, prAuthor, prReviews, error: string|null }>}
  */
 async function readPr(vcs, config, number) {
-  const pr = await vcs.prView({ project: config?.project?.slug, number });
+  const pr = await vcs.prView({ project: projectSlugOrNull({ config }), number });
   const prLabels = pr.labels;
   const prBody = pr.body;
   const prAuthor = pr.author;
@@ -544,7 +545,7 @@ async function resolveByCommitSha({ vcs, config, sha, subjectRef }) {
     return uncomputable('the commit-sha pull request lookup is unavailable on this provider');
   }
 
-  const prs = await vcs.commitPrs({ project: config?.project?.slug, sha });
+  const prs = await vcs.commitPrs({ project: projectSlugOrNull({ config }), sha });
   if (prs === null) {
     return uncomputable('the commit-sha pull request lookup failed');
   }

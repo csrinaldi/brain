@@ -59,6 +59,7 @@ import { leadTimeDays, selectApprovalEvent } from './lib/lead-time.mjs';
 import { decideMemoryGateOverride, toActorList } from './governance/memory-gate-override.mjs';
 import { computeMemoryCoverage } from './lib/memory-coverage.mjs';
 import { readAxis } from './lib/axis-config.mjs';
+import { projectSlugOrNull } from './lib/project-slug.mjs';
 
 // ── Argument parsing (Phase 4.1) ─────────────────────────────────────────────
 
@@ -508,7 +509,7 @@ async function evaluateOneMerge(sha, subject, ctx) {
     const issueNum = extractIssueNumber(issueLinkBody);
     if (issueNum !== null && vcs) {
       if (!leadTimeCache.has(issueNum)) {
-        leadTimeCache.set(issueNum, vcs.labelEvents({ project: config?.project?.slug, number: issueNum }).catch(() => null));
+        leadTimeCache.set(issueNum, vcs.labelEvents({ project: projectSlugOrNull({ config }), number: issueNum }).catch(() => null));
       }
       const events = await leadTimeCache.get(issueNum);
       leadTime = leadTimeDays(events, approvedLabel, mergedAt);
@@ -523,7 +524,7 @@ async function evaluateOneMerge(sha, subject, ctx) {
     const prNumForRollup = parsePrNumber(subject);
     if (prNumForRollup !== null && vcs && typeof vcs.prStatusRollup === 'function') {
       try {
-        const rollup = await vcs.prStatusRollup({ project: config?.project?.slug, number: prNumForRollup });
+        const rollup = await vcs.prStatusRollup({ project: projectSlugOrNull({ config }), number: prNumForRollup });
         detection = Object.fromEntries(detectionJobs.map((j) => [j, detectionConclusion(rollup, j)]));
       } catch {
         detection = null;
@@ -554,7 +555,7 @@ async function evaluateOneMerge(sha, subject, ctx) {
       if (!bypassAuthorCache.has(prNumForRollup)) {
         bypassAuthorCache.set(
           prNumForRollup,
-          vcs.labelEvents({ project: config?.project?.slug, number: prNumForRollup, kind: 'mr' }).catch(() => null),
+          vcs.labelEvents({ project: projectSlugOrNull({ config }), number: prNumForRollup, kind: 'mr' }).catch(() => null),
         );
       }
       const events = await bypassAuthorCache.get(prNumForRollup);
