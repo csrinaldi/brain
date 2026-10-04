@@ -1697,7 +1697,12 @@ function renderDrawer() {
   }
   // #883 R883-9: with no change dir at the served HEAD and a worktree that has one, "on this machine" is the first thing read.
   const localFirst = !model.value.changeDir && model.value.local.length > 0;
-  const emptyLine = localFirst ? 'the served HEAD has no change dir for this issue; this machine\'s worktrees follow' : 'no change dir for this issue in the read model';
+  // #1276 D92: when the tabs read a worktree or an origin branch, the line says which.
+  const tabSource = model.value.tabSource;
+  const sourced = !model.value.changeDir && (tabSource?.kind === 'worktree' || tabSource?.kind === 'origin');
+  const emptyLine = sourced
+    ? `the served HEAD has no change dir for this issue; the tabs read ${tabSource.label}`
+    : localFirst ? 'the served HEAD has no change dir for this issue; this machine\'s worktrees follow' : 'no change dir for this issue in the read model';
   mounts.drawer.appendChild(el('p', 'note', model.value.changeDir ? `change dir: ${model.value.changeDir}` : emptyLine));
   if (localFirst) mounts.drawer.appendChild(renderLocalBlocks(model.value));
 
@@ -1810,6 +1815,7 @@ function renderChildren(issue) {
 
 function renderTab(tab) {
   const wrap = document.createElement('div');
+  if (tab.from) wrap.appendChild(el('p', 'tab-from', tab.from));
   if (tab.header) wrap.appendChild(el('p', 'tab-progress', tab.header));
   if (tab.note) wrap.appendChild(el('p', 'note', `source: ${tab.note}`));
   if (!tab.ok) {

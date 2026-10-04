@@ -1374,9 +1374,9 @@ body {
   white-space: nowrap;
 }
 .epic-count { white-space: normal; text-align: right; }
-.epic-rollup, .tab-progress { margin: 0 0 6px; font-size: 12px; font-family: var(--font-mono); }
+.epic-rollup, .tab-progress, .tab-from { margin: 0 0 6px; font-size: 12px; font-family: var(--font-mono); }
 .epic-rollup { color: var(--ink); }
-.tab-progress { color: var(--muted); }
+.tab-progress, .tab-from { color: var(--muted); }
 .epic-tracker {
   display: flex;
   flex-wrap: wrap;

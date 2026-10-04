@@ -41,7 +41,7 @@ const remoteBlock = () => ({
 const entryOf = (issue, over = {}) => ({ path: `/srv/wt-${issue}`, leaf: `wt-${issue}`, branch: `feat/issue-${issue}-x`, head: 'd'.repeat(40), issue, dir: DIR, dirState: 'present', reason: null, touchedAt: null, fingerprint: 'f1', capped: false, ...over });
 const sectionOf = (...entries) => ({ ok: true, value: { entries, hidden: { served: 1 }, tier: 'working-tree' } });
 
-async function boot({ local = [], remote = [], servedDir = true, section = sectionOf(entryOf(1198), entryOf(1199)) } = {}) {
+async function boot({ local = [], remote = [], servedDir = true, section = sectionOf(entryOf(1198), entryOf(1199)), extra = {} } = {}) {
   const root = testTmp('local-render-');
   writeFileSync(join(root, 'brain.config.json'), readFileSync(join(REPO, 'brain.config.json'), 'utf8'));
   if (servedDir) {
@@ -59,6 +59,7 @@ async function boot({ local = [], remote = [], servedDir = true, section = secti
   view.value.local = local;
   view.value.remote = remote;
   view.value.localNote = null;
+  Object.assign(view.value, extra);
   const changes = { 1198: view, 1199: buildChangeView({ root, issue: 1199, snapshot, _run: run }) };
   const dom = installDom({ mountIds: MOUNT_IDS, snapshot, changes });
   const fetched = [];
@@ -187,4 +188,58 @@ test('R883-12: an edit reloads the drawer with a new stamp and starts a new rend
   dom.emit('section', frame(sectionOf(entryOf(1198, { fingerprint: 'fa' }), entryOf(1199))));
   await settle();
   assert.equal(dom.workers.length, 2, 'the same bytes under a new fingerprint reuse the settled render');
+});
+
+// ── #1276: the tabs name the worktree or the origin branch they were read from ──
+
+const worktreeSource = (leaf) => ({ kind: 'worktree', leaf, branch: 'feat/issue-1198-x', dir: DIR, label: `worktree ${leaf}` });
+const specFrom = (from) => ({ ok: true, value: [], from });
+
+test('R1276-6: a from line is drawn first in the tab, as text', async (t) => {
+  const dom = await boot({ servedDir: false, extra: { spec: specFrom('from worktree wt-a · uncommitted: new'), tabSource: worktreeSource('wt-a') } });
+  t.after(() => dom.restore());
+  await open(dom);
+  const line = find(dom.mounts.drawer, byClass('tab-from'));
+  assert.equal(line.textContent, 'from worktree wt-a · uncommitted: new');
+  assert.equal(line.tagName, 'P');
+});
+
+test('R1276-6: a failed tab still draws its from line', async (t) => {
+  const dom = await boot({ servedDir: false, extra: { spec: { ok: false, reason: 'spec.md is not in worktree wt-a', from: 'from worktree wt-a · not in this worktree' }, tabSource: worktreeSource('wt-a') } });
+  t.after(() => dom.restore());
+  await open(dom);
+  assert.equal(find(dom.mounts.drawer, byClass('tab-from')).textContent, 'from worktree wt-a · not in this worktree');
+  assert.match(dom.mounts.drawer.textContent, /spec\.md is not in worktree wt-a/);
+});
+
+test('R1276-6: a served-HEAD tab draws no from line', async (t) => {
+  const dom = await boot();
+  t.after(() => dom.restore());
+  await open(dom);
+  assert.equal(find(dom.mounts.drawer, byClass('tab-from')), null);
+});
+
+test('R1276-10: a hostile worktree leaf in the from line is text and makes no element', async (t) => {
+  const leaf = 'wt-<img src=x onerror=alert(1)>';
+  const dom = await boot({ servedDir: false, extra: { spec: specFrom(`from worktree ${leaf} · feat/issue-1198-x`), tabSource: worktreeSource(leaf) } });
+  t.after(() => dom.restore());
+  await open(dom);
+  assert.equal(find(dom.mounts.drawer, byClass('tab-from')).textContent, `from worktree ${leaf} · feat/issue-1198-x`);
+  assert.equal(Array.from(findAll(dom.mounts.drawer, (n) => n.tagName === 'IMG')).length, 0);
+  assert.match(dom.mounts.drawer.textContent, /the tabs read worktree wt-<img src=x onerror=alert\(1\)>/);
+});
+
+test('R1276-6: with no change dir at the served HEAD, the empty-state line names the worktree the tabs read', async (t) => {
+  const dom = await boot({ servedDir: false, extra: { tabSource: worktreeSource('wt-a') } });
+  t.after(() => dom.restore());
+  await open(dom);
+  assert.match(dom.mounts.drawer.textContent, /the served HEAD has no change dir for this issue; the tabs read worktree wt-a/);
+});
+
+test('R1276-6: with no change dir at the served HEAD, the empty-state line names the origin branch the tabs read', async (t) => {
+  const label = `origin/feat/issue-1198-r @ ${'e'.repeat(12)}`;
+  const dom = await boot({ servedDir: false, extra: { tabSource: { kind: 'origin', branch: 'feat/issue-1198-r', sha12: 'e'.repeat(12), dir: DIR, label } } });
+  t.after(() => dom.restore());
+  await open(dom);
+  assert.match(dom.mounts.drawer.textContent, new RegExp(`the served HEAD has no change dir for this issue; the tabs read ${label}`));
 });
