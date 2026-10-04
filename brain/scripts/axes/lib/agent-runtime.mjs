@@ -77,6 +77,14 @@ function failureDetail(result) {
 export const RUN_TIMEOUT_MS = 10_000;
 
 /**
+ * Explicit output cap for `defaultRun` (#1274). Node's `spawnSync` default is 1 MiB;
+ * codex streams its progress to stdout, so on a large PR the spawn died with ENOBUFS
+ * and the cold review was lost. Same value and same reason as
+ * `review/lib/base-comparison.mjs`.
+ */
+export const RUN_MAX_BUFFER = 64 * 1024 * 1024;
+
+/**
  * Default command runner: captured output, never a shell, always bounded.
  *
  * `cwd` IS PART OF THE CONTRACT, and it was silently dropped until #682's cold
@@ -108,10 +116,18 @@ export const RUN_TIMEOUT_MS = 10_000;
  *
  * @param {string} cmd
  * @param {string[]} args
- * @param {{ timeoutMs?: number, cwd?: string, env?: object }} [opts]
+ * `discardStdout` is for engines that answer through a file (codex's
+ * `--output-last-message`): stdout is dropped, so a chatty progress stream can
+ * neither overflow the buffer nor be mistaken for a diagnostic. stderr is kept.
+ *
+ * @param {{ timeoutMs?: number, cwd?: string, env?: object, discardStdout?: boolean }} [opts]
  */
-export function defaultRun(cmd, args, { timeoutMs = RUN_TIMEOUT_MS, cwd, env } = {}) {
-  return spawnSync(cmd, args, { stdio: 'pipe', encoding: 'utf8', timeout: timeoutMs, cwd, env });
+export function defaultRun(cmd, args, { timeoutMs = RUN_TIMEOUT_MS, cwd, env, discardStdout = false } = {}) {
+  // stdin stays a pipe exactly as before; only stdout may be dropped.
+  const stdio = discardStdout ? ['pipe', 'ignore', 'pipe'] : 'pipe';
+  return spawnSync(cmd, args, {
+    stdio, encoding: 'utf8', timeout: timeoutMs, cwd, env, maxBuffer: RUN_MAX_BUFFER,
+  });
 }
 
 /**
