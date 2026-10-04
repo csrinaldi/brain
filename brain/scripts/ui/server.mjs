@@ -22,8 +22,8 @@
 
 import { createServer as createHttpServer } from 'node:http';
 import { gitRun, gitRunAsync, gitErrorLine, FETCH_TIMEOUT_MS } from './git-run.mjs';
-import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { readFileSync, realpathSync } from 'node:fs';
+import { dirname, join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { buildSnapshot } from '../status/snapshot.mjs';
@@ -34,6 +34,7 @@ import { createWatcher, resolveGitCommonDir } from './watcher.mjs';
 import { createPoller } from './poller.mjs';
 import { createForgeThread, PRODUCTION_RESOLVE } from './forge-thread.mjs';
 import { buildChangeView } from './change-route.mjs';
+import { CHANGES_ROOT } from '../lib/sdd-layout.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const STATIC_DIR = join(__dirname, 'static');
@@ -213,9 +214,32 @@ export function createUiServer({
     followUp = _setTimeout(() => { followUp = null; return recomputeAndBroadcast({ causes: ['remote'] }); }, REMOTE_FOLLOWUP_MS);
   }
 
+  /** True only when `path` resolves, and resolves outside `base`: a symlink that leaves the worktree is never watched (R6). A path that does not exist yet is not an escape. */
+  function escapes(path, base) {
+    try { return !realpathSync(path).startsWith(`${realpathSync(base)}${sep}`); } catch { return false; }
+  }
+
+  /**
+   * #883 D79: the overlay's watches follow the section. Each uncapped worktree's `openspec/changes/`
+   * and, when readable, its change dir. A section that could not be read leaves the current handles
+   * alone, exactly as an unreadable change-dir listing does in the watcher.
+   */
+  function syncLocalWatches() {
+    const section = current?.localWorktrees;
+    if (closed || !section?.ok) return;
+    const targets = section.value.entries.filter((e) => !e.capped).flatMap((e) => {
+      const changesDir = join(e.path, CHANGES_ROOT);
+      if (escapes(changesDir, e.path)) return [];
+      const dir = e.dir && e.dirState === 'present' && !escapes(join(e.path, e.dir), e.path) ? join(e.path, e.dir) : null;
+      return [{ key: e.path, changesDir, dir }];
+    });
+    watcher.setLocalTargets(targets);
+  }
+
   async function recomputeCurrent() {
     current = await computeSnapshot();
     armRemoteFollowUp();
+    syncLocalWatches();
     return current;
   }
 
@@ -238,7 +262,10 @@ export function createUiServer({
       // the common dir — never `-C worktreePath` — so no path under the
       // worktree itself is ever opened (R881-3: "not even a linked worktree's
       // own `.git` file"). The primary checkout has no admin dir; a plain
-      // call (default cwd) resolves its own HEAD instead.
+      // call (default cwd) resolves its own HEAD instead. (#883, R883-16: this
+      // read still opens nothing in a worktree. The local overlay is the one
+      // exception, and only for an open issue's change dir; its `ls-tree` names
+      // the worktree's HEAD by sha on the served root's own git dir, never `-C`.)
       for (const { path: worktreePath, id } of refWorktrees) {
         let head = null;
         try {

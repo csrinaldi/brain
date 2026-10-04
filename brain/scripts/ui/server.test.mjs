@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { readFileSync, writeFileSync, readdirSync, statSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, readdirSync, statSync, mkdirSync, utimesSync, symlinkSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { EventEmitter } from 'node:events';
@@ -13,6 +13,7 @@ import { createForgeCache } from './forge-cache.mjs';
 import { createUiServer as realCreateUiServer, parseArgs, main as realMain, KNOWN_ROUTES, resolveForgeSource } from './server.mjs';
 import { buildChangeView } from './change-route.mjs';
 import { fakeGit } from './test-support/fake-git.mjs';
+import { makeWorktreeRepo } from './test-support/git-worktree-fixture.mjs';
 import { STATUS, RESULT, RESULT_OK, createBlockingAdapter, freePort, startRequester } from './test-support/blocking-forge-adapter.mjs';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
@@ -883,7 +884,18 @@ test('#881: GET /api/change/<N> deep-equals buildChangeView() on the same held s
   mkdirSync(join(root, 'openspec/changes/issue-1-a'), { recursive: true });
   writeFileSync(join(root, 'openspec/changes/issue-1-a/spec.md'), '### R1-1: a\n#### Scenario: s\n- **WHEN** w\n- **THEN** t\n');
   writeFileSync(join(root, 'openspec/changes/issue-1-a/tasks.md'), '- [x] done\n- [ ] next one\n');
+  // #883 R883-16: the fixture gains a linked worktree on the open issue 1, holding a change dir, so the
+  // `-C` assertion below runs against a drawer that really reads a worktree.
+  const wtPath = testTmp('linked-worktree-');
+  mkdirSync(join(wtPath, 'openspec/changes/issue-1-a'), { recursive: true });
+  writeFileSync(join(wtPath, 'openspec/changes/issue-1-a/tasks.md'), '- [ ] only in the worktree\n');
+  const wtHead = 'c'.repeat(40);
+  const _snapshotRun = (file, args) => {
+    if (args[0] === 'worktree') return `worktree ${root}\nHEAD ${'a'.repeat(40)}\nbranch refs/heads/main\n\nworktree ${wtPath}\nHEAD ${wtHead}\nbranch refs/heads/feat/issue-1-a\n`;
+    return execFileSync(file, args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+  };
   const _run = fakeGit({
+    branches: { 'feat/issue-1-a': { commit: wtHead, files: {} } },
     files: {
       'openspec/changes/issue-1-a/spec.md': '### R1-1: a\n#### Scenario: s\n- **WHEN** w\n- **THEN** t\n',
       'openspec/changes/issue-1-a/tasks.md': '- [x] done\n- [ ] next one\n',
@@ -891,7 +903,7 @@ test('#881: GET /api/change/<N> deep-equals buildChangeView() on the same held s
     blame: 'abc1234abc1234abc1234abc1234abc1234abc1 1 1 1\nauthor csrinaldi\nauthor-time 1694700000\n\tdone\n',
   });
   const gitCalls = _run.calls;
-  const server = createUiServer({ root, project: 'o/r', _now: now, poll: false, _run });
+  const server = createUiServer({ root, vcs: openIssuesVcs(1), project: 'o/r', _now: now, poll: false, _run, _snapshotRun });
   await server.listen(0);
   try {
     const base = `http://127.0.0.1:${server.port}`;
@@ -915,7 +927,9 @@ test('#881: GET /api/change/<N> deep-equals buildChangeView() on the same held s
 
     const blameCall = gitCalls.find((args) => args[0] === 'blame');
     assert.ok(blameCall.includes('HEAD'), 'the blame argv must carry HEAD — the committed version, never the working tree');
-    assert.ok(!gitCalls.some((args) => args.includes('-C')), 'no git call in this route ever opens a worktree with -C (R881-3)');
+    assert.equal(fromRoute.value.local.length, 1, 'the linked worktree is read: a local block is present (R883-16)');
+    assert.equal(fromRoute.value.local[0].documents.tasks.overlay, 'new');
+    assert.ok(!gitCalls.some((args) => args.includes('-C')), 'no git call in this route ever opens a worktree with -C, even with a linked worktree in the fixture (R881-3, R883-16)');
   } finally {
     await server.close();
   }
@@ -1402,6 +1416,119 @@ test('#1199 R1199-6: with no forge provider the hierarchy carries the same reaso
     assert.deepEqual(snap.graph, { ok: false, reason: 'no VCS token' });
     assert.deepEqual(snap.hierarchy, { ok: false, reason: 'no VCS token' });
     assert.deepEqual(snap.localWorktrees, { ok: false, reason: 'no VCS token' }, '#883 D71: the open set is unknown, so the overlay says why rather than listing unfiltered');
+  } finally {
+    await server.close();
+  }
+});
+
+// ── #883 R883-10 / R883-11: a worktree edit reaches the page within one tick ─
+
+const LOCAL_FRAME_TIMEOUT_MS = 5000;
+const openIssuesVcs = (...numbers) => ({
+  issueList: async ({ state }) => (state === 'open' ? numbers.map((number) => ({ number, title: `issue ${number}`, labels: [], state: 'open', body: '' })) : []),
+  issueView: async ({ number }) => ({ number, body: '' }),
+  mrList: async () => [],
+  prReviews: async () => [],
+});
+const D7 = 'openspec/changes/issue-7-x';
+/** Frames off the stream until one satisfies `want`, or a named timeout: a frame that never comes fails, never hangs. */
+async function frameUntil(readFrame, want) {
+  const deadline = new Promise((_, reject) => setTimeout(() => reject(new Error('no matching frame arrived')), LOCAL_FRAME_TIMEOUT_MS).unref());
+  for (;;) {
+    const frame = await Promise.race([readFrame(), deadline]);
+    if (want(frame)) return frame;
+  }
+}
+const frameData = (frame) => JSON.parse(frame.slice(frame.indexOf('data: ') + 'data: '.length));
+
+test('#883 acceptance 1: ticking a box in a worktree edits the file, fires its change-dir handle, and one debounce later a localWorktrees section frame arrives and the drawer says "uncommitted: modified" with the new count', async (t) => {
+  const repo = makeWorktreeRepo();
+  t.after(() => repo.dispose());
+  const wt = repo.addWorktree('feat/issue-7-x', { [`${D7}/tasks.md`]: '- [ ] a\n- [ ] b\n', [`${D7}/proposal.md`]: '# p\n' }, { commit: true });
+  const _watch = spyWatch();
+  const scheduler = fakeScheduler();
+  const server = createUiServer({ root: repo.root, vcs: openIssuesVcs(7), project: 'o/r', _now: now, poll: false, _watch, _setTimeout: scheduler.setTimeout, _clearTimeout: scheduler.clearTimeout });
+  await server.listen(0);
+  const base = `http://127.0.0.1:${server.port}`;
+  try {
+    const stream = await fetch(`${base}/api/stream`);
+    const readFrame = frameReader(stream);
+    const sync = frameData(await readFrame());
+    assert.equal(sync.snapshot.localWorktrees.ok, true);
+    assert.deepEqual(_watch.calls.map((c) => c.path).filter((p) => p.startsWith(wt.path)).sort(), [`${wt.path}/${D7}`, `${wt.path}/openspec/changes`].sort());
+
+    const before = await (await fetch(`${base}/api/change/7`)).json();
+    assert.equal(before.value.local[0].documents.tasks.overlay, 'committed');
+
+    const tasks = join(wt.path, D7, 'tasks.md');
+    writeFileSync(tasks, '- [x] a\n- [ ] b\n');
+    const later = new Date(Date.now() + 60_000);
+    utimesSync(tasks, later, later);
+    _watch.fire(`${wt.path}/${D7}`);
+    assert.equal(scheduler.pending(), 1, 'one trailing debounce armed');
+    scheduler.runLatest();
+
+    const frame = frameData(await frameUntil(readFrame, (f) => f.startsWith('event: section') && f.includes('"name":"localWorktrees"')));
+    assert.equal(frame.name, 'localWorktrees');
+    assert.match(frame.cause, /^watch:local:/);
+
+    const after = await (await fetch(`${base}/api/change/7`)).json();
+    const row = after.value.local[0].documents.tasks;
+    assert.equal(row.overlay, 'modified');
+    assert.equal(row.uncommitted, true);
+    assert.deepEqual(row.progress, { ok: true, value: { done: 1, total: 2 } });
+    await readFrame.reader.cancel();
+  } finally {
+    await server.close();
+  }
+});
+
+test('#883 R883-10: a recompute whose section is not readable keeps the handles; one that no longer lists the worktree closes them', async (t) => {
+  const repo = makeWorktreeRepo();
+  t.after(() => repo.dispose());
+  const wt = repo.addWorktree('feat/issue-7-x', { [`${D7}/proposal.md`]: '# p\n' }, { commit: true });
+  const good = await buildSnapshot({ root: repo.root, now: now(), vcs: openIssuesVcs(7), project: 'o/r' });
+  assert.equal(good.localWorktrees.ok, true);
+  const queue = [good, { ...good, localWorktrees: { ok: false, reason: 'the worktree list could not be read: boom' } }, { ...good, localWorktrees: { ok: true, value: { entries: [], hidden: {}, tier: 'working-tree' } } }];
+  const closes = [];
+  const calls = [];
+  const _watch = (path, _o, listener) => { calls.push({ path, listener }); return { close: () => closes.push(path) }; };
+  const scheduler = fakeScheduler();
+  const server = createUiServer({ root: repo.root, vcs: openIssuesVcs(7), project: 'o/r', _now: now, poll: false, _watch, _setTimeout: scheduler.setTimeout, _clearTimeout: scheduler.clearTimeout, _recomputeCurrent: async () => queue.shift() });
+  await server.listen(0);
+  try {
+    const mine = (p) => p.startsWith(wt.path);
+    assert.equal(calls.filter((c) => mine(c.path)).length, 2);
+    const fire = async () => { calls.find((c) => mine(c.path)).listener('change', null); await scheduler.runLatest(); await new Promise((r) => setImmediate(r)); };
+    await fire();
+    assert.deepEqual(closes.filter(mine), [], 'an unreadable section leaves A\'s handles open');
+    await fire();
+    assert.equal(closes.filter(mine).length, 2, 'a readable section without A closes both');
+  } finally {
+    await server.close();
+  }
+});
+
+test('#883 R6: a worktree whose openspec/changes, or whose change dir, is a symlink out of it is never watched through the link', async (t) => {
+  const repo = makeWorktreeRepo();
+  t.after(() => repo.dispose());
+  const outside = join(repo.base, 'outside');
+  mkdirSync(join(outside, 'issue-7-x'), { recursive: true });
+  mkdirSync(join(outside, 'issue-8-y'), { recursive: true });
+  const w7 = repo.addWorktree('feat/issue-7-x', {});
+  mkdirSync(join(w7.path, 'openspec'), { recursive: true });
+  symlinkSync(outside, join(w7.path, 'openspec/changes'));
+  const w8 = repo.addWorktree('feat/issue-8-y', {});
+  mkdirSync(join(w8.path, 'openspec/changes'), { recursive: true });
+  symlinkSync(join(outside, 'issue-8-y'), join(w8.path, 'openspec/changes/issue-8-y'));
+  const _watch = spyWatch();
+  const server = createUiServer({ root: repo.root, vcs: openIssuesVcs(7, 8), project: 'o/r', _now: now, poll: false, _watch });
+  await server.listen(0);
+  try {
+    const watched = _watch.calls.map((c) => c.path);
+    assert.deepEqual(watched.filter((p) => p.startsWith(w7.path)), [], 'a changes root that leaves the worktree is not watched');
+    assert.deepEqual(watched.filter((p) => p.startsWith(w8.path)), [`${w8.path}/openspec/changes`], 'the change dir link is not followed; its parent still is watched');
+    assert.ok(!watched.some((p) => p.startsWith(outside)), 'nothing outside the worktrees is watched');
   } finally {
     await server.close();
   }

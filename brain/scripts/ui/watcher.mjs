@@ -21,10 +21,16 @@
 //
 // A watch that cannot be registered is caught PER DIRECTORY — the watcher
 // never throws, `state()` reports which paths failed and why.
+//
+// THE ONE WORKING-TREE EXCEPTION (#883, R883-10, amends R881-3): `setLocalTargets()`
+// holds two non-recursive directory watches per linked worktree of an OPEN issue —
+// its `openspec/changes/` and its change dir — and nothing else outside the Q3 set.
+// The served root's working tree stays as unwatched as before: an edit there, outside
+// the set above, still produces no event. Git still never runs inside a worktree.
 
 import { watch as fsWatch, readdirSync, readFileSync } from 'node:fs';
 import { gitRun } from './git-run.mjs';
-import { isAbsolute, join, resolve } from 'node:path';
+import { basename, isAbsolute, join, relative, resolve } from 'node:path';
 
 import { ANTI_PATTERN_DIRS } from '../status/anti-patterns.mjs';
 import { CHANGES_ROOT, parseChangeId } from '../lib/sdd-layout.mjs';
@@ -68,6 +74,8 @@ export function createWatcher({
   const handles = new Map(); // absPath -> {handle, label, kind, worktreePath}
   const watchedWorktrees = new Map(); // id -> path
   const watchedChangeDirs = new Map(); // name -> absPath
+  const watchedLocal = new Map(); // worktree path -> Map(absPath -> label), the paths wanted whether or not a handle is open (#883)
+  let closed = false;
   let failed = [];
   let resolvedGitCommonDir = gitCommonDir;
   let debounceTimer = null;
@@ -299,6 +307,39 @@ export function createWatcher({
     }
   }
 
+  /**
+   * The local overlay's watches (#883 D79, R883-10): for each target — an open issue's
+   * linked worktree — its `openspec/changes/` and, when it has one, its change dir. Two
+   * non-recursive directory watches, never the worktree itself. `targets` is the whole
+   * wanted set: a target that left is closed, one that stays is untouched, and a watch
+   * that failed (or errored later) is retried by the next call, like the worktree rescan.
+   * A fire is debounced with the others and carries a `watch:local:` cause. A closed
+   * watcher ignores the call, so a late recompute never arms a handle nobody will close.
+   *
+   * @param {Array<{key: string, changesDir: string, dir: string|null}>} targets absolute paths
+   */
+  function setLocalTargets(targets) {
+    if (closed) return;
+    const wanted = new Map(targets.map((t) => {
+      const paths = new Map();
+      for (const abs of [t.changesDir, t.dir].filter(Boolean)) paths.set(abs, `local:${basename(t.key)}/${relative(t.key, abs)}/`);
+      return [t.key, paths];
+    }));
+    for (const [key, paths] of watchedLocal) {
+      const keep = wanted.get(key) ?? new Map();
+      for (const [abs, label] of paths) {
+        if (keep.has(abs)) continue;
+        closeWatch(abs);
+        failed = failed.filter((f) => f.path !== label);
+      }
+      if (!wanted.has(key)) watchedLocal.delete(key);
+    }
+    for (const [key, paths] of wanted) {
+      for (const [abs, label] of paths) watchDir(abs, label, 'local', undefined, undefined, undefined, { ignoreEnoent: true });
+      watchedLocal.set(key, paths);
+    }
+  }
+
   function start() {
     watchDir(root, '<root>', 'tree');
     watchDir(join(root, 'brain'), 'brain/', 'tree');
@@ -320,6 +361,8 @@ export function createWatcher({
   }
 
   function close() {
+    closed = true;
+    watchedLocal.clear();
     if (debounceTimer) { _clearTimeout(debounceTimer); debounceTimer = null; }
     for (const absPath of [...handles.keys()]) closeWatch(absPath);
     watchedWorktrees.clear();
@@ -331,5 +374,5 @@ export function createWatcher({
       : { ok: false, reason: `${failed.length} watch(es) failed`, watched: handles.size, failed: failed.map((f) => ({ ...f })) };
   }
 
-  return { start, close, state };
+  return { start, close, state, setLocalTargets };
 }

@@ -21,6 +21,11 @@
 // `git` on the served root's OWN git dir via the shared `gitRun`/injected
 // `_run` — never `git -C <worktree>`. `HEAD` is mandatory in the blame argv
 // for the same reason: the committed version, never the index or the copy.
+//
+// THE ONE WORKING-TREE EXCEPTION (#883, R883-8, R883-16; amends R1198-4): the
+// drawer also shows an open issue's change dir in a LINKED worktree, "on this
+// machine". That read lives in `local-overlay.mjs`, never here: this file keeps no
+// `node:fs` import, and no artifact is read from the SERVED ROOT's working tree.
 
 import { gitRun, gitErrorLine } from './git-run.mjs';
 

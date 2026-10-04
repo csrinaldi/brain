@@ -6,10 +6,11 @@
 // config). There is no remote: nothing here can reach the network.
 
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 import { testTmp } from '../../lib/test-tmp.mjs';
+import { removeTempTree } from '../../lib/tmp-tree.mjs';
 
 export const WORKTREE_EPOCH = Date.UTC(2026, 9, 1, 12, 0, 0);
 
@@ -65,7 +66,7 @@ export function makeWorktreeRepo({ mainFiles = {} } = {}) {
       try { git(root, ['worktree', 'remove', '--force', path]); } catch { /* already gone */ }
     }
     try { git(root, ['worktree', 'prune']); } catch { /* the repo may be gone */ }
-    rmSync(base, { recursive: true, force: true });
+    removeTempTree(base);
   }
 
   return { base, root, addWorktree, dispose };
