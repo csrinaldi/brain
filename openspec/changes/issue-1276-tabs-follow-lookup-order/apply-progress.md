@@ -4,7 +4,7 @@ issue: 1276
 
 # Apply progress — tabs-follow-lookup-order (issue 1276)
 
-Mode: Strict TDD. Batch 1 of 1: all phases (1 to 6) done, 20 of 20 tasks.
+Mode: Strict TDD. Batch 1 of 1: all phases (1 to 6) done, 22 of 22 tasks.
 
 ## Step 0 (maintainer rulings, recorded before coding)
 
