@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { planConfigWrite, resolvePath } from './config-verb.mjs';
 import { parseEnvFile } from '../lib/env-read.mjs';
 import { AXES, readAxis, diagnoseAxes, tryResolveAxis } from '../lib/axis-config.mjs';
-import { readUserConfig } from '../lib/user-config.mjs';
+import { readUserConfig, setUserDefault, UserConfigWriteError } from '../lib/user-config.mjs';
 import { t } from '../i18n/t.mjs';
 import { detectInstalled } from '../lib/axis-installed.mjs';
 import { resolveAxisMigrationContext } from '../lib/axis-migration-context.mjs';
@@ -22,6 +22,7 @@ const USAGE = `Usage: npm run brain:config -- get <path>
        npm run brain:config -- default <axis>
        npm run brain:config -- resolve <${AXES.join('|')}>
        npm run brain:config -- diagnose
+       npm run brain:config -- user-set <axis>.default <name>
   <path> is dot-separated (e.g. docs.language, sdd.map.cold-review).
   <value> parses as JSON first, bare string on failure.
   default <axis> prints the axis default (${AXES.join('|')}): the ADR-0038 shape, else the legacy key;
@@ -30,6 +31,9 @@ const USAGE = `Usage: npm run brain:config -- get <path>
   "<run> <repo> <run-where> <repo-where>": the value this run uses, the value the repo states (the process env is
   per-invocation and never the repo's; "-" when only the process env states one), and where each comes from
   (process-env|dotenv|config|runtime). Exit 3 when nothing declares the axis, 4 when a declared value is refused.
+  user-set writes YOUR user config (BRAIN_HOME or ~/.brain, ADR-0040) and never brain.config.json: <axis> is platform, memory or
+  sdd. It refuses a team-locked axis whose team value differs (exit 4), and a memory/sdd axis the team has not declared (exit 3);
+  platform is free. The ONE write path of env:init to a person's own layer.
   diagnose prints the axis findings as JSON: [{ axis, code, severity, message, fix }]. Findings, never
   failures: it exits 0. It names selector keys only and never prints .env.`;
 
@@ -54,7 +58,7 @@ export function axisContextFor(config, root) {
 
 export async function main(argv = process.argv.slice(2), root = process.cwd()) {
   const [op, path, value] = argv;
-  if (op !== 'get' && op !== 'set' && op !== 'default' && op !== 'resolve' && op !== 'diagnose') fail(`unknown op '${op ?? ''}'.\n${USAGE}`);
+  if (op !== 'get' && op !== 'set' && op !== 'default' && op !== 'resolve' && op !== 'diagnose' && op !== 'user-set') fail(`unknown op '${op ?? ''}'.\n${USAGE}`);
   if ((!path && op !== 'diagnose') || (op === 'set' && value === undefined)) fail(`missing argument.\n${USAGE}`);
 
   const configPath = join(root, 'brain.config.json');
@@ -73,6 +77,34 @@ export async function main(argv = process.argv.slice(2), root = process.cwd()) {
     const dotenvPath = join(root, '.env');
     const dotenv = existsSync(dotenvPath) ? parseEnvFile(readFileSync(dotenvPath, 'utf8')) : {};
     console.log(JSON.stringify(diagnoseAxes({ config, env: process.env, dotenv, ...readUserConfig({ env: process.env }), installed: detectInstalled() }), null, 2));
+    return;
+  }
+
+  if (op === 'user-set') {
+    // The person's own layer (ADR-0040): never brain.config.json. The team config is only READ, to apply `locked` and to refuse
+    // an axis the team never declared (a team decision env:init may not make for them). Platform is free.
+    const m = /^(memory|platform|sdd)\.default$/.exec(path);
+    if (!m) fail(`user-set takes memory.default, platform.default or sdd.default (the user layer holds no other key), got '${path}'.\n${USAGE}`);
+    const axis = m[1];
+    const name = String(value).trim();
+    const declared = readAxis(config, axis).default;
+    if (config[axis]?.locked === true && name !== declared) {
+      const command = `npm run brain:config -- set ${axis}.default ${name}`;
+      const { userPath } = readUserConfig({ env: process.env });
+      console.error(`brain:config: ${await t('axes.refusal.locked', { axis, value: name, source: userPath })} (${command})`);
+      process.exit(EXIT_REFUSED);
+    }
+    if (axis !== 'platform' && declared === '') {
+      console.error(`brain:config: ${await t('bootstrap.axis.teamUndeclared', { axis })}`);
+      process.exit(EXIT_UNDECLARED);
+    }
+    try {
+      const { userPath } = setUserDefault(axis, name, { env: process.env });
+      console.log(`brain:config: ✓ ${axis}.default = ${name} saved to ${userPath}`);
+    } catch (e) {
+      if (e instanceof UserConfigWriteError) fail(e.message);
+      throw e;
+    }
     return;
   }
 

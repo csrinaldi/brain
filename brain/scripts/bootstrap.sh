@@ -76,9 +76,15 @@ cd "$REPO_ROOT"
 # Non-fatal: degrades gracefully if git is absent or node is not yet available.
 # The failure is still REPORTED (not silently walked past, issue #1093): a
 # bare `|| true` here gave zero signal, not even a warning line.
-_config_existed=true
-[ -f brain.config.json ] || _config_existed=false
-node "$BRAIN_SCRIPTS/lib/brain-config.mjs" ensure || {
+# FOUNDING vs EXISTING (ADR-0040 section 4, issue #1263 slice 2), decided ONCE, here, by the creator of the file:
+# `ensure --founding-file` records whether THIS run created brain.config.json. Nothing below re-derives it from a file test.
+#   founding -> env:init declares the team defaults (every axis; memory only from a TTY answer);
+#   existing -> env:init NEVER writes brain.config.json: a personal choice goes to the user layer through
+#               `config/cli.mjs user-set`, and a team axis nobody declared is refused with its named fix.
+# A signal that cannot be read means "existing": the safe side, where nothing team-wide is written.
+_founding=false
+_founding_file="$(mktemp)"
+node "$BRAIN_SCRIPTS/lib/brain-config.mjs" ensure --founding-file "$_founding_file" || {
   printf '  \xe2\x9a\xa0 brain.config.json: ensure step failed (see error above)\n' >&2
   # By CAUSE: a config that cannot be parsed makes every later config read meaningless, so it is
   # REQUIRED; any other ensure failure (e.g. the tier notice) stays optional (#1127).
@@ -88,6 +94,8 @@ node "$BRAIN_SCRIPTS/lib/brain-config.mjs" ensure || {
     MISSING_OPTIONAL+=("brain.config.json ensure")
   fi
 }
+if [ "$(cat "$_founding_file" 2>/dev/null)" = "founding" ]; then _founding=true; fi
+rm -f "$_founding_file"
 
 # Scaffold brain/HOME.md if absent (never overwrites an existing one — the file
 # is consumer-owned once it exists). Non-fatal, idempotent: re-running env:init
@@ -133,7 +141,7 @@ export VCS_HOST
 
 # Interactive: on a TTY, after a fresh creation, show derived values and let the
 # developer confirm or override the VCS provider. Non-TTY → use derived silently.
-if [ -t 0 ] && [ "$_config_existed" = false ] && [ -n "$VCS_PROVIDER$VCS_HOST$PROJECT_PATH" ]; then
+if [ -t 0 ] && [ "$_founding" = true ] && [ -n "$VCS_PROVIDER$VCS_HOST$PROJECT_PATH" ]; then
   printf '\n  Derived from git origin:\n'
   printf '    provider : %s\n' "${VCS_PROVIDER:-?}"
   printf '    gitHost  : %s\n' "${VCS_HOST:-?}"
@@ -277,22 +285,51 @@ _axis_source_word() {
     *) printf '%s' "$I18N_BOOTSTRAP_AXIS_SOURCE_DEFAULT" ;;
   esac
 }
-# `_axis_settle <axis> <new-consumer-default>`: nothing in the repo declares the axis (a new consumer), so env:init
-# DECLARES the starting value in tracked config, visibly (ADR-0038 section 7: "a new consumer: env:init declares each
-# axis's default or asks"). A value that exists only on this machine's .env is reported and never declared; one the
-# config already declares is left exactly as written. A refused axis is never settled: it is reported by `_axis_resolve`.
+# `_axis_settle <axis> <default>`: what env:init does about an axis nothing in the repo declares (ADR-0040 section 4).
+#   FOUNDING run (it created brain.config.json): DECLARES the starting value in tracked config, visibly (ADR-0038 section 7:
+#     "a new consumer: env:init declares each axis's default or asks"). A value that exists only on this machine's .env is
+#     reported and never declared; one the config already declares is left exactly as written.
+#   EXISTING repo: NEVER writes brain.config.json. The team's axes (memory, sdd, vcs) are the team's: an undeclared one is
+#     REFUSED with the named fix. Platform is free: the person's own choice goes to the user layer, through `user-set`.
+# A refused axis is never settled: it is reported by `_axis_resolve`.
 _axis_settle() {
   # swallow-ok: a refused axis was already reported with its fix by _axis_resolve and is never declared over
   [ "$_R_REFUSED" -eq 0 ] || return 0
   case "$_R_SRC" in
     none)
-      _axis_declare "$1" "$2"
-      [ -n "$_R_RUN" ] || { _R_RUN="$2"; _R_RUNSRC="config"; }
-      [ -n "$_R_REPO" ] || _R_REPO="$2"
+      if [ "$_founding" = true ]; then
+        _axis_declare "$1" "$2"
+        [ -n "$_R_RUN" ] || { _R_RUN="$2"; _R_RUNSRC="config"; }
+        [ -n "$_R_REPO" ] || _R_REPO="$2"
+      else
+        _axis_settle_existing "$1" "$2"
+      fi
       ;;
     .env) _axis_env_only "$1" "$_R_REPO" ;;
     *) : ;; # config already declares it: the team's, never rewritten
   esac
+}
+# `_axis_team_undeclared <axis>`: the refusal for a team axis nobody declared, with its named fix. Nothing is written anywhere.
+_axis_team_undeclared() {
+  warn "$(printf "$I18N_BOOTSTRAP_AXIS_TEAMUNDECLARED" "$1" "$1")"
+  MISSING_OPTIONAL+=("$1 is not declared by the team (next: ask an owner, or propose npm run brain:config -- set $1.default <name> in a PR)")
+}
+# `_axis_settle_existing <axis> <default>`: the EXISTING-repo half of `_axis_settle`.
+_axis_settle_existing() {
+  if [ "$1" != "platform" ]; then _axis_team_undeclared "$1"; return 0; fi
+  # swallow-ok: something already states the platform for THIS person (their shell or their user layer): nothing to write
+  [ "$_R_RUNSRC" = "none" ] || return 0
+  local _err _rc=0
+  _err="$(mktemp)"
+  node "$BRAIN_SCRIPTS/config/cli.mjs" user-set "$1.default" "$2" >/dev/null 2>"$_err" || _rc=$?  # rc classified just below: a locked axis or a failed write is reported, never swallowed
+  if [ "$_rc" -eq 0 ]; then
+    ok "$(printf "$I18N_BOOTSTRAP_AXIS_USERDECLARED" "$1" "$2" "${BRAIN_HOME:-$HOME/.brain}/config.json")"
+    _R_RUN="$2"; _R_RUNSRC="user"
+  else
+    warn "$(printf "$I18N_BOOTSTRAP_AXIS_USERWRITEFAILED" "$1" "$(head -c 400 "$_err" | tr '\n' ' ')")"
+    MISSING_OPTIONAL+=("$1 not saved to your user config (next: npm run brain:config -- user-set $1.default $2)")
+  fi
+  rm -f "$_err"
 }
 # --- END axis-declare-helpers ---
 
@@ -646,10 +683,12 @@ fi
 # CREATED (written to brain.config.json, NOT to .env — see the note at the write);
 # without a TTY nothing is guessed and memory setup is skipped with the fix named.
 say "$I18N_BOOTSTRAP_MEMORY_SECTION"
-MEMORY_BACKEND=""
 _mb_rc=0
 _mb_err="$(mktemp)"
+# The resolver reads the PROCESS env, so an exported MEMORY_BACKEND must still be there when it runs: clearing the variable first
+# (as this block used to) silently dropped a per-run override, including the one a `locked` memory axis must refuse (#1263).
 _mb_res="$(node "$BRAIN_SCRIPTS/memory/lib/backend-resolve.mjs" --root "$PWD" 2>"$_mb_err")" || _mb_rc=$?
+MEMORY_BACKEND=""
 _mb_source=""
 case "$_mb_rc" in
   0)
@@ -668,7 +707,11 @@ case "$_mb_rc" in
     MISSING_OPTIONAL+=("memory backend not resolved: brain.config.json unreadable (fix or restore it, then re-run env:init)")
     ;;
   3)
-    if [ -t 0 ]; then
+    if [ "$_founding" != true ]; then
+      # EXISTING repo (ADR-0040 section 4): the backend is the team's decision and env:init writes no team config here. No
+      # prompt, no guess, no write: the refusal names the fix.
+      _axis_team_undeclared memory
+    elif [ -t 0 ]; then
       # --- BEGIN memory-backend-validate (issue #1112, cold-review should-fix 3) ---
       # Same validation shape as vcs-provider-validate (finding 2) — reused
       # rather than a second style for the same class of prompt: read into a

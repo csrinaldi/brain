@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { removeTempTree } from '../__fixtures__/tmp-tree.mjs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
@@ -283,4 +283,61 @@ test('#1263 S1 cli: diagnose reads the user layer through the same reader', (t) 
   const out = runEnv(root, { BRAIN_HOME: userHome(t, { platform: { locked: true } }) }, 'diagnose');
   assert.equal(out.status, 0, out.stderr);
   assert.ok(JSON.parse(out.stdout).some((f) => f.code === 'user-layer-invalid' && f.severity === 'error'));
+});
+
+// ── user-set (#1263 slice 2): the ONE write path of env:init to a person's own layer ────────────────────────────────
+const teamCfg = (extra = {}) => ({
+  schemaVersion: '1.11.1',
+  platform: { default: '', providers: {} },
+  memory: { default: 'engram', providers: { engram: {}, plainfiles: {} } },
+  sdd: { default: '', providers: {} },
+  vcs: { default: 'github', providers: { github: {} } },
+  ...extra,
+});
+const userRun = (root, brainHome, ...args) => spawnSync(process.execPath, [CLI, ...args], {
+  cwd: root, encoding: 'utf8', timeout: 60000, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, BRAIN_HOME: brainHome },
+});
+const userFile = (brainHome) => join(brainHome, 'config.json');
+
+test('#1263 user-set: platform is free — it writes the user layer and leaves brain.config.json byte-identical', (t) => {
+  const root = world(t, teamCfg());
+  const home = join(mkdtempSync(join(tmpdir(), 'brain-1263-home-')), 'bh');
+  t.after(() => removeTempTree(dirname(home)));
+  const before = readFileSync(join(root, 'brain.config.json'), 'utf8');
+  const r = userRun(root, home, 'user-set', 'platform.default', 'claude');
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(JSON.parse(readFileSync(userFile(home), 'utf8')), { platform: { default: 'claude', providers: { claude: {} } } });
+  assert.equal(readFileSync(join(root, 'brain.config.json'), 'utf8'), before);
+});
+
+test('#1263 user-set: a LOCKED axis whose team value differs is refused (exit 4) with the locked fix, and nothing is written', (t) => {
+  const root = world(t, teamCfg({ memory: { default: 'engram', locked: true, providers: { engram: {}, plainfiles: {} } } }));
+  const home = join(mkdtempSync(join(tmpdir(), 'brain-1263-home-')), 'bh');
+  t.after(() => removeTempTree(dirname(home)));
+  const r = userRun(root, home, 'user-set', 'memory.default', 'plainfiles');
+  assert.equal(r.status, 4);
+  assert.match(r.stderr, /locked/);
+  assert.match(r.stderr, /brain:config -- set memory\.default plainfiles/);
+  assert.equal(existsSync(userFile(home)), false);
+});
+
+test('#1263 user-set: an undeclared team axis (memory, sdd) is refused (exit 3) with the named fix; no user write', (t) => {
+  const root = world(t, teamCfg({ memory: { default: '', providers: {} } }));
+  const home = join(mkdtempSync(join(tmpdir(), 'brain-1263-home-')), 'bh');
+  t.after(() => removeTempTree(dirname(home)));
+  for (const axis of ['memory', 'sdd']) {
+    const r = userRun(root, home, 'user-set', `${axis}.default`, axis === 'memory' ? 'engram' : 'gentle-ai');
+    assert.equal(r.status, 3, r.stderr);
+    assert.match(r.stderr, new RegExp(`the team has not declared ${axis}; ask an owner, or propose it with .*brain:config -- set ${axis}\\.default <name>`));
+  }
+  assert.equal(existsSync(userFile(home)), false);
+});
+
+test('#1263 user-set: vcs and unknown keys are refused', (t) => {
+  const root = world(t, teamCfg());
+  const home = join(mkdtempSync(join(tmpdir(), 'brain-1263-home-')), 'bh');
+  t.after(() => removeTempTree(dirname(home)));
+  assert.equal(userRun(root, home, 'user-set', 'vcs.default', 'github').status, 1);
+  assert.equal(userRun(root, home, 'user-set', 'platform.locked', 'true').status, 1);
+  assert.equal(existsSync(userFile(home)), false);
 });

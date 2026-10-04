@@ -136,6 +136,10 @@ export function validateAxisConfig(config) {
       if (has(node, 'default') && typeof node.default !== 'string') {
         err(axis, `${axis}.default`, 'default-not-a-string', `${axis}.default must be a provider name ("" when undeclared)`);
       }
+      // `locked` is a boolean or absent: "true" or 1 would otherwise read as not-locked and silently UNLOCK the axis (#1263 slice 1 review).
+      if (has(node, 'locked') && typeof node.locked !== 'boolean') {
+        err(axis, `${axis}.locked`, 'locked-not-a-boolean', `${axis}.locked must be true or false (a boolean), not ${JSON.stringify(node.locked)}`);
+      }
       const def = nonEmpty(node.default);
       if (def !== '' && !has(node.providers, def)) {
         err(axis, `${axis}.default`, 'default-not-in-providers',
@@ -512,6 +516,16 @@ export function diagnoseAxes(args) {
         }
       }
 
+      // axis-undeclared: memory only. A no-TTY foundation leaves the backend undeclared on purpose (ADR-0004 Am3, ADR-0040) and
+      // nothing is guessed, so the gap is an ERROR until someone chooses one. Raised only when NO level states a backend.
+      // Raised when the config HAS the memory shape with an empty default (what a foundation writes); a config that says nothing about memory is not diagnosed here.
+      if (axis === 'memory' && declared === '' && isObj(cfg.memory) && has(cfg.memory, 'default')) {
+        const states = tryResolveAxis(axis, { env: procEnv, dotenv: dot, config: cfg, userConfig: user, userError, userPath: uPath, notice: () => {} });
+        if (!states.ok && states.refusal.code === 'undeclared') {
+          add(axis, 'axis-undeclared', 'error', tr('axes.diagnose.undeclared', { axis }), tr('axes.diagnose.undeclared.fix', { axis }));
+        }
+      }
+
       // env-shadows-config: this machine runs something other than the team's declared choice. Derived from
       // `resolveAxis`, never from inequality (#1114 S3.4): it is reported only when a per-machine selector WINS by the
       // real precedence. A legacy SDD_HARNESS ranks below `<axis>.default`, so it never shadows a declared one.
@@ -539,12 +553,19 @@ export function diagnoseAxes(args) {
       const userProviders = !userError && isObj(user[axis]) && isObj(user[axis].providers) ? user[axis].providers : {};
       for (const [name, entry] of Object.entries(providers)) {
         const version = nonEmpty(isObj(entry) ? entry.version : '');
-        const found = nonEmpty(isObj(inst[axis]) ? inst[axis][name] : '') || nonEmpty(isObj(userProviders[name]) ? userProviders[name].version : '');
+        // `found` is ONLY a probe's result. A user-layer version is what that machine CLAIMS, never proof (#1263 slice 1 review).
+        const found = nonEmpty(isObj(inst[axis]) ? inst[axis][name] : '');
+        const claimed = nonEmpty(isObj(userProviders[name]) ? userProviders[name].version : '');
         const setCmd = (v) => `npm run brain:config -- set ${axis}.providers.${name}.version ${v}`;
         if (version === '') {
           add(axis, 'version-unverified', 'info',
             found ? tr('axes.diagnose.versionUnverified.detected', { axis, name, installed: found }) : tr('axes.diagnose.versionUnverified', { axis, name }),
             setCmd(found ? shellVersionArg(found) : '<version>'));
+        } else if (found === '' && claimed !== '' && claimed !== version && !(version === 'self' && axis === 'sdd' && name === 'brain')) {
+          // no probe, but the person's own claim differs from the team's expectation: reported as a difference (maintainer reading 2, 2026-10-03)
+          add(axis, 'version-mismatch', 'warning',
+            tr('axes.diagnose.versionMismatch', { axis, name, declared: version, installed: claimed }),
+            tr('axes.diagnose.versionMismatch.fix', { axis, name, declared: version, installed: shellVersionArg(claimed) }));
         } else if (found === '') {
           add(axis, 'version-unverifiable', 'info',
             tr('axes.diagnose.versionUnverifiable', { axis, name, declared: version }),

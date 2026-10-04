@@ -380,7 +380,11 @@ const ALLOWLIST = [
   { file: 'brain/scripts/memory/cli.backend-declaration.test.mjs', entrypoint: '<unresolved>', line: 29, reason: 'no-vcs-capability' },
   { file: 'brain/scripts/memory/lib/backend-resolve.test.mjs', entrypoint: 'brain/scripts/memory/lib/backend-resolve.mjs', reason: 'no-vcs-capability' },
   // #1127: `brain-config.mjs ensure` run from a COPY of the tree in a temp repo, to pin its exit code.
-  { file: 'brain/scripts/lib/brain-config.ensure-cli.test.mjs', entrypoint: 'brain/scripts/lib/brain-config.mjs', line: 28, reason: 'no-vcs-capability' },
+  { file: 'brain/scripts/lib/brain-config.ensure-cli.test.mjs', entrypoint: 'brain/scripts/lib/brain-config.mjs', line: 29, reason: 'no-vcs-capability' },
+  // #1263 slice 2: the founding signal — the same `ensure` CLI from a COPY of the tree, stdin closed, a temp BRAIN_HOME; reads and writes only the fixture.
+  { file: 'brain/scripts/lib/brain-config.ensure-cli.test.mjs', entrypoint: 'brain/scripts/lib/brain-config.mjs', line: 49, reason: 'no-vcs-capability' },
+  // #1263 slice 2: the REAL bootstrap.sh in the hermetic box (stdin from a FILE, a pty via script(1) for the TTY cases, 240s timeout, a temp BRAIN_HOME): existing-repo and founding runs against a fixture repo with no network.
+  { file: 'brain/scripts/bootstrap.config-ownership.test.mjs', entrypoint: '<unresolved>', line: 65, reason: 'no-vcs-capability' },
   { file: 'brain/scripts/install-tools.test.mjs', entrypoint: '<unresolved>', line: 34, reason: 'no-vcs-capability' },
   { file: 'brain/scripts/install-tools.test.mjs', entrypoint: '<unresolved>', line: 105, reason: 'no-vcs-capability' }, // `command -v` lookups for the no-node PATH
   { file: 'brain/scripts/install-tools.test.mjs', entrypoint: '<unresolved>', line: 109, reason: 'no-vcs-capability' }, // the same snippet with node off PATH
@@ -397,13 +401,13 @@ const ALLOWLIST = [
   // #1124: bootstrap.sh's own brain-config.mjs ensure line — reads `git remote get-url origin` only, never the network
   { file: 'brain/scripts/bootstrap.tier-notice.test.mjs', entrypoint: '<unresolved>', line: 71, reason: 'no-vcs-capability' },
   // #1125: bash runs bootstrap.sh's env helpers and §6 platform block, lifted verbatim, in a scratch dir — no git, no network, no push.
-  { file: 'brain/scripts/bootstrap.default-platform.test.mjs', entrypoint: '<unresolved>', line: 135, reason: 'no-vcs-capability' },
-  { file: 'brain/scripts/bootstrap.default-platform.test.mjs', entrypoint: 'brain/scripts/parity.sh', line: 251, reason: 'no-vcs-capability' }, // #1221: the script is a temp file, not stdin
-  { file: 'brain/scripts/bootstrap.default-platform.test.mjs', entrypoint: '<unresolved>', line: 450, reason: 'no-vcs-capability' }, // #1114 S3.4: the lifted success-line fragment; stdin is ignored, not piped
-  { file: 'brain/scripts/bootstrap.default-platform.test.mjs', entrypoint: '<unresolved>', line: 356, reason: 'no-vcs-capability' },
-  { file: 'brain/scripts/bootstrap.default-platform.test.mjs', entrypoint: '<unresolved>', line: 371, reason: 'no-vcs-capability' },
-  { file: 'brain/scripts/bootstrap.default-platform.test.mjs', entrypoint: '<unresolved>', line: 399, reason: 'no-vcs-capability' },
-  { file: 'brain/scripts/bootstrap.default-platform.test.mjs', entrypoint: 'brain/scripts/config/cli.mjs', line: 402, reason: 'no-vcs-capability' },
+  { file: 'brain/scripts/bootstrap.default-platform.test.mjs', entrypoint: '<unresolved>', line: 141, reason: 'no-vcs-capability' },
+  { file: 'brain/scripts/bootstrap.default-platform.test.mjs', entrypoint: 'brain/scripts/parity.sh', line: 257, reason: 'no-vcs-capability' }, // #1221: the script is a temp file, not stdin
+  { file: 'brain/scripts/bootstrap.default-platform.test.mjs', entrypoint: '<unresolved>', line: 456, reason: 'no-vcs-capability' }, // #1114 S3.4: the lifted success-line fragment; stdin is ignored, not piped
+  { file: 'brain/scripts/bootstrap.default-platform.test.mjs', entrypoint: '<unresolved>', line: 362, reason: 'no-vcs-capability' },
+  { file: 'brain/scripts/bootstrap.default-platform.test.mjs', entrypoint: '<unresolved>', line: 377, reason: 'no-vcs-capability' },
+  { file: 'brain/scripts/bootstrap.default-platform.test.mjs', entrypoint: '<unresolved>', line: 405, reason: 'no-vcs-capability' },
+  { file: 'brain/scripts/bootstrap.default-platform.test.mjs', entrypoint: 'brain/scripts/config/cli.mjs', line: 408, reason: 'no-vcs-capability' },
   // #1114 S3.3: the lifted §6 blocks run against a scratch dir holding a real brain.config.json, so `brain:config` is the writer under test (bash -c scripts, each with a timeout).
 
   // ── i18n shell-catalog eval: bash -c, zero VCS surface ──────────────────

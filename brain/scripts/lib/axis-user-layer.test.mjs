@@ -191,10 +191,12 @@ test('locked: only the locked axis is affected', () => {
   assert.equal(r.value, 'antigravity');
 });
 
-test('locked: `locked: false` and a non-true value lock nothing', () => {
-  for (const lockedValue of [false, 'true', 1, null]) {
-    const config = team({ memory: { default: 'engram', locked: lockedValue, providers: { engram: {}, plainfiles: {} } } });
-    assert.equal(run('memory', { config, env: { MEMORY_BACKEND: 'plainfiles' } }).value, 'plainfiles');
+test('locked: `locked: false` locks nothing; a non-boolean value is invalid-config, never a silent unlock (#1263 slice 2)', () => {
+  const config = team({ memory: { default: 'engram', locked: false, providers: { engram: {}, plainfiles: {} } } });
+  assert.equal(run('memory', { config, env: { MEMORY_BACKEND: 'plainfiles' } }).value, 'plainfiles');
+  for (const lockedValue of ['true', 1, null]) {
+    const bad = team({ memory: { default: 'engram', locked: lockedValue, providers: { engram: {}, plainfiles: {} } } });
+    assert.equal(refusal('memory', { config: bad, env: { MEMORY_BACKEND: 'plainfiles' } }).code, 'invalid-config');
   }
 });
 
@@ -322,4 +324,39 @@ test('callers: resolvePlatform and resolveEngine take the user layer the reader 
   assert.equal(resolvePlatform({ env: {}, config, user: carol }), 'antigravity');
   assert.equal(resolveEngine({ env: {}, config, user: carol }), 'gentle-ai', 'the user layer states no sdd');
   assert.throws(() => resolvePlatform({ env: {}, config, user: { userConfig: {}, userError: 'broken' } }), (e) => e instanceof AxisRefusal && e.code === 'user-layer-invalid');
+});
+
+// ── slice-1 review corrections (#1263 slice 2) ──────────────────────────────
+test('validateAxisConfig: <axis>.locked must be a boolean; "true" and 1 are invalid-config, never a silent unlock', () => {
+  for (const bad of ['true', 1, 'false', null, {}]) {
+    const config = team({ memory: { default: 'engram', locked: bad, providers: { engram: {} } } });
+    const f = codes(diagnoseAxes({ config }), 'invalid-config').filter((x) => x.axis === 'memory');
+    assert.equal(f.length, 1, `locked=${JSON.stringify(bad)} must be invalid-config`);
+    assert.match(f[0].message, /locked/);
+    assert.equal(refusal('memory', { config }).code, 'invalid-config');
+  }
+  for (const good of [true, false]) {
+    const config = team({ memory: { default: 'engram', locked: good, providers: { engram: {} } } });
+    assert.deepEqual(codes(diagnoseAxes({ config }), 'invalid-config'), []);
+  }
+});
+
+test('version: a user-layer version is never the found value; with no probe it stays version-unverifiable (info)', () => {
+  const config = team();
+  const f = codes(diagnoseAxes({ config, userConfig: user({ providers: { claude: { version: '2.1.0' } } }) }), 'version-unverifiable').filter((x) => x.axis === 'platform');
+  assert.equal(f.length, 1, 'a self-declared version equal to the expectation does not verify it');
+  assert.equal(f[0].severity, 'info');
+  // and for a team provider with NO declared version, the user's claim is not reported as "installed here"
+  const bare = { platform: { default: 'claude', providers: { claude: {} } } };
+  const u = codes(diagnoseAxes({ config: bare, userConfig: user({ providers: { claude: { version: '9.9.9' } } }) }), 'version-unverified').filter((x) => x.axis === 'platform');
+  assert.equal(u.length, 1);
+  assert.doesNotMatch(u[0].message, /9\.9\.9/);
+});
+
+test('diagnose: an undeclared memory backend is an ERROR finding (ADR-0040: a no-TTY foundation leaves it undeclared)', () => {
+  const f = codes(diagnoseAxes({ config: team({ memory: { default: '', providers: {} } }) }), 'axis-undeclared').filter((x) => x.axis === 'memory');
+  assert.equal(f.length, 1);
+  assert.equal(f[0].severity, 'error');
+  assert.match(f[0].fix, /brain:config -- set memory\.default/);
+  assert.deepEqual(codes(diagnoseAxes({ config: team() }), 'axis-undeclared'), []);
 });

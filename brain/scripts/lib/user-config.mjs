@@ -12,9 +12,11 @@
 // only, and only when `BRAIN_HOME` is unset; under `node --test` (NODE_TEST_CONTEXT) reaching that fallback THROWS, so a test
 // that forgot `BRAIN_HOME` fails at the exact call that would have read the real home. `user-config.guard.test.mjs` pins it.
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, renameSync, mkdirSync, chmodSync, unlinkSync } from 'node:fs';
 import { homedir as osHomedir } from 'node:os';
 import { join, resolve } from 'node:path';
+
+import { AXES, validateUserConfig } from './axis-config.mjs';
 
 /** The file name inside the user's brain directory. */
 export const USER_CONFIG_FILE = 'config.json';
@@ -67,4 +69,62 @@ export function readUserConfig({ env = process.env, homedir } = {}) {
   } catch (err) { // surfaced: malformed JSON is returned as `userError` and refused by resolveAxis, with its fix
     return { userConfig: {}, userPath, userError: `${userPath}: ${err.message}` };
   }
+}
+
+// ── the ONE writer (issue #1263 slice 2) ─────────────────────────────────────────────────────────────────────────────
+// Every write to the user layer goes through `writeUserConfig`: atomic (a temp file in the same directory, then rename), the
+// directory 0700 and the file 0600, and never a `locked` key (a key of the team config only). The layer holds a person's
+// selectors (`<axis>.default`, `<axis>.providers.<name>.version`), never a credential: `setUserDefault` only ever adds a provider
+// NAME, and refuses anything that is not shaped like one.
+
+/** Thrown when a write to the user layer is refused; the message names the reason. Nothing was written. */
+export class UserConfigWriteError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'UserConfigWriteError';
+  }
+}
+
+const PROVIDER_NAME = /^[a-z0-9][a-z0-9._-]{0,63}$/i;
+
+/**
+ * @param {object} next  the WHOLE user layer to store
+ * @param {{env?: object, homedir?: () => string}} [opts]
+ * @returns {{userPath: string}}
+ * @throws {UserConfigWriteError} not an object, or a shape the layer may not have (a `locked` key, a non-map `providers`...)
+ */
+export function writeUserConfig(next, { env = process.env, homedir } = {}) {
+  if (next === null || typeof next !== 'object' || Array.isArray(next)) throw new UserConfigWriteError('the user config must be a JSON object');
+  const bad = validateUserConfig(next).errors;
+  if (bad.length > 0) throw new UserConfigWriteError(`the user config was not written: ${bad.map((e) => e.message).join('; ')}`);
+  const dir = userConfigDir({ env, homedir });
+  const userPath = join(dir, USER_CONFIG_FILE);
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const tmp = `${userPath}.tmp-${process.pid}`;
+  try {
+    writeFileSync(tmp, `${JSON.stringify(next, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
+    chmodSync(tmp, 0o600); // the create mode is masked by umask and ignored on an existing temp: say it
+    renameSync(tmp, userPath);
+  } catch (err) {
+    try { unlinkSync(tmp); } catch { /* swallow-ok: the temp file may never have been created; the original error is the one rethrown */ }
+    throw err;
+  }
+  return { userPath };
+}
+
+/**
+ * Sets `<axis>.default` to a provider NAME and lists it under `<axis>.providers` (the union makes it a valid selection), keeping
+ * everything else the person had. A user file that cannot be read is never overwritten.
+ * @param {string} axis  memory | platform | sdd (the user layer holds no vcs)
+ * @throws {UserConfigWriteError}
+ */
+export function setUserDefault(axis, name, { env = process.env, homedir } = {}) {
+  if (!AXES.includes(axis) || axis === 'vcs') throw new UserConfigWriteError(`the user config holds no '${axis}' axis (one of ${AXES.filter((a) => a !== 'vcs').join(', ')})`);
+  if (typeof name !== 'string' || !PROVIDER_NAME.test(name)) throw new UserConfigWriteError(`'${name}' is not a provider name`);
+  const { userConfig, userError } = readUserConfig({ env, homedir });
+  if (userError) throw new UserConfigWriteError(`the existing user config was not overwritten: ${userError}`);
+  const node = userConfig[axis] !== null && typeof userConfig[axis] === 'object' && !Array.isArray(userConfig[axis]) ? userConfig[axis] : {};
+  const providers = node.providers !== null && typeof node.providers === 'object' && !Array.isArray(node.providers) ? node.providers : {};
+  const next = { ...userConfig, [axis]: { ...node, default: name, providers: { ...providers, [name]: providers[name] ?? {} } } };
+  return writeUserConfig(next, { env, homedir });
 }
