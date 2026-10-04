@@ -68,6 +68,7 @@ import { resolveActor, resolveActorKind, deriveIssue, composeSource } from "../.
 import { classifySupersedes } from "../../../memory/lib/supersedes.mjs";
 import { loadBrainConfigOrThrow } from "../../../lib/brain-config.mjs";
 import { t } from "../../../i18n/t.mjs";
+import { projectSlugOrNull } from "../../../lib/project-slug.mjs";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../../../../..");
 
@@ -598,8 +599,10 @@ export async function pull() {
  *  (plainfiles/engram) staying independent, not about every other caller
  *  reinventing project resolution. */
 export function deriveProject(config, root) {
-  const slug = config?.project?.slug;
-  if (typeof slug === "string" && slug.trim() !== "") return slug.split("/").pop();
+  // #1273: the repository's slug (tracked, else the origin) BEFORE the directory name — from an
+  // isolated worktree the directory is the worktree's name, not the repository's.
+  const slug = projectSlugOrNull({ config, cwd: root });
+  if (slug) return slug.split("/").pop();
   const name = config?.project?.name;
   if (typeof name === "string" && name.trim() !== "") return name;
   return String(root).replace(/\/+$/, "").split("/").pop();

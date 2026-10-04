@@ -26,7 +26,7 @@ import { detectSubstrate, POSTMERGE_STALE_LABEL } from './vcs/substrate.mjs';
 import { GOVERNANCE_JOBS } from './vcs/governance-checks.mjs';
 import { resolveTier, requiredJobs } from './vcs/governance-tiers.mjs';
 import { readAxis, diagnoseAxes } from './lib/axis-config.mjs';
-import { projectSlugOrNull } from './lib/project-slug.mjs';
+import { projectSlugOrNull, describeSlugRefusal } from './lib/project-slug.mjs';
 import { readCodeowners } from './lib/codeowners-drift.mjs';
 import { detectInstalled } from './lib/axis-installed.mjs';
 import { readUserConfig } from './lib/user-config.mjs';
@@ -152,7 +152,7 @@ async function realPostMergeCiProbe({ config }) {
 
   const project = projectSlugOrNull({ config });
   if (!project) {
-    return { workflowPresent, read: 'failed', lastRun: null, error: 'no project.slug configured', observedAt };
+    return { workflowPresent, read: 'failed', lastRun: null, error: await describeSlugRefusal(), observedAt };
   }
   const branch = config?.project?.defaultBranch ?? 'main';
 

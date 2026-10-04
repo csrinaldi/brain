@@ -34,6 +34,20 @@ export class ProjectSlugError extends Error {
   }
 }
 
+// One origin lookup per (config object, cwd): the audit readers (`merge-walk`, `brain:metrics`) ask
+// once per merge, and with an empty tracked slug each ask used to spawn `git remote get-url origin`.
+// Only the default seam is memoised — an injected `git`/`identity` is the caller's own and never cached.
+const _memo = new WeakMap();
+function originMemo(config, cwd) {
+  const key = config !== null && typeof config === 'object' ? config : null;
+  const byCwd = key ? (_memo.get(key) ?? _memo.set(key, new Map()).get(key)) : null;
+  if (byCwd?.has(cwd)) return byCwd.get(cwd);
+  const r = gitTry(['remote', 'get-url', 'origin'], { cwd });
+  const origin = r.status === 0 ? parseRemote(r.stdout).project : null;
+  byCwd?.set(cwd, origin);
+  return origin;
+}
+
 /**
  * @param {{ config?: object, cwd?: string, git?: { try: (argv: string[]) => { status: number, stdout: string } },
  *           identity?: () => ({ project: string|null }|null) }} [opts]
@@ -44,15 +58,16 @@ export class ProjectSlugError extends Error {
  */
 export function resolveProjectSlug({ config, cwd = process.cwd(), git, identity } = {}) {
   const configured = config?.project?.slug;
-  if (typeof configured === 'string' && configured.trim() !== '') return { slug: configured, source: 'config' };
+  if (typeof configured === 'string' && configured.trim() !== '') return { slug: configured.trim(), source: 'config' };
 
   let origin = null;
   if (identity) {
     origin = identity()?.project ?? null;
-  } else {
-    const seam = git ?? { try: (argv) => gitTry(argv, { cwd }) };
-    const r = seam.try(['remote', 'get-url', 'origin']);
+  } else if (git) {
+    const r = git.try(['remote', 'get-url', 'origin']);
     if (r.status === 0) origin = parseRemote(r.stdout).project;
+  } else {
+    origin = originMemo(config, cwd);
   }
   if (origin) return { slug: origin, source: 'origin' };
   throw new ProjectSlugError();

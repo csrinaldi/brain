@@ -60,3 +60,9 @@ test('#1273 env:init labels: an empty tracked slug no longer reads as "nothing t
   const r = await ensureLabels({ config: EMPTY, provider: 'github', project: slug, vcs: { labelList: async () => [], labelCreate: async () => ({}) } });
   assert.equal(r.pending?.reason?.includes('project.slug is empty'), false);
 });
+
+test('#1273 env:init labels: with neither slug nor origin the pending reason is the shared refusal text and fix', async () => {
+  const r = await ensureLabels({ config: EMPTY, provider: 'github', project: null, vcs: {} });
+  assert.match(r.pending.reason, /brain:config -- set project\.slug <owner\/repo>/);
+  assert.match(r.pending.reason, /origin/);
+});

@@ -26,9 +26,11 @@ import { loadBrainConfigOrThrow } from "../../../lib/brain-config.mjs";
 
 /** The repository this record belongs to, from config, falling back to the checkout
  *  directory name. Records in this repo carry the bare name ("brain"), not the slug. */
-function deriveProject(config, root) {
-  const slug = config?.project?.slug;
-  if (typeof slug === "string" && slug.trim() !== "") return slug.split("/").pop();
+export function deriveProject(config, root) {
+  // #1273: the repository's slug (tracked, else the origin) BEFORE the directory name — from an
+  // isolated worktree the directory is the worktree's name, not the repository's.
+  const slug = projectSlugOrNull({ config, cwd: root });
+  if (slug) return slug.split("/").pop();
   const name = config?.project?.name;
   if (typeof name === "string" && name.trim() !== "") return name;
   return String(root).replace(/\/+$/, "").split("/").pop();
@@ -36,6 +38,7 @@ function deriveProject(config, root) {
 import { resolveSecretConfig, compilePatterns, scanTextForSecrets } from "../../../memory/lib/secret-scrub.mjs";
 import { unsupportedOp } from "../../../memory/lib/unsupported-op.mjs";
 import { t } from "../../../i18n/t.mjs";
+import { projectSlugOrNull } from "../../../lib/project-slug.mjs";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../../../../..");
 

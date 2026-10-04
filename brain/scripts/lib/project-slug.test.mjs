@@ -4,6 +4,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { writeFileSync, chmodSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { testTmp } from './test-tmp.mjs';
 import {
   resolveProjectSlug,
@@ -61,3 +63,26 @@ test('#1273: the refusal is localised, en and es, both naming the same fix', asy
   assert.match(es, /brain:config -- set project\.slug <owner\/repo>/);
   assert.notEqual(en, es);
 });
+
+test('#1273: the resolved slug is TRIMMED', () => {
+  assert.deepEqual(resolveProjectSlug({ config: { project: { slug: ' acme/widgets ' } } }), { slug: 'acme/widgets', source: 'config' });
+});
+
+test('#1273: the origin lookup is memoised per (config, cwd) — N calls, one git spawn', () => {
+  let spawns = 0;
+  // the default seam is the memoised one; count real spawns through a PATH shim
+  const dir = testTmp('git-shim-');
+  const log = join(dir, 'calls.log');
+  writeFileSync(join(dir, 'git'), `#!/bin/sh\necho x >> "${log}"\nPATH="${process.env.PATH}" exec git "$@"\n`);
+  chmodSync(join(dir, 'git'), 0o755);
+  const cwd = repoWithOrigin('git@github.com:acme/widgets.git');
+  const config = {};
+  const prev = process.env.PATH;
+  process.env.PATH = `${dir}:${prev}`;
+  try {
+    for (let i = 0; i < 25; i++) assert.equal(resolveProjectSlug({ config, cwd }).slug, 'acme/widgets');
+  } finally { process.env.PATH = prev; }
+  spawns = readFileSync(log, 'utf8').trim().split('\n').length;
+  assert.equal(spawns, 1);
+});
+

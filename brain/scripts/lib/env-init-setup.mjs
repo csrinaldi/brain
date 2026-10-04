@@ -26,7 +26,7 @@ import { gitConfigGet } from './git-config.mjs';
 import { gitlabApiConfig } from '../vcs/ci-context.mjs';
 import { loadBrainConfigOrThrow } from './brain-config.mjs';
 import { readAxis } from './axis-config.mjs';
-import { projectSlugOrNull } from './project-slug.mjs';
+import { projectSlugOrNull, describeSlugRefusal } from './project-slug.mjs';
 
 /**
  * The `governance:*` labels `.github/workflows/governance-postmerge.yml` files
@@ -100,7 +100,7 @@ export async function ensureLabels({ config, provider, project, vcs, env }) {
   const allNames = desiredLabels({ config, provider }).map((l) => l.name);
   const pending = (reason, names = allNames) => ({ reason, next: `npm run brain:env:init once the VCS is reachable and authenticated, or by hand: ${handFor(names)}` });
   if (!project) {
-    result.pending = pending('project.slug is empty in brain.config.json');
+    result.pending = pending(await describeSlugRefusal());
     return result;
   }
   let have;

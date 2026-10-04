@@ -19,8 +19,6 @@ const READ = /\bproject\s*(?:\?\.|\.)\s*slug\b/g;
 const ALLOWLIST = [
   { file: 'lib/project-slug.mjs', reason: 'The resolver itself: the one place that reads the tracked value.' },
   { file: 'lib/brain-config.mjs', reason: 'Writer/migrator: ensureProjectIdentity and ensureBrainConfig WRITE the slug from the origin; they do not resolve it for a verb.' },
-  { file: 'axes/memory/adapters/plainfiles.mjs', reason: 'Derives the bare repo name stamped on a record, with config.project.name and the checkout directory as fallbacks; not a VCS slug and must not refuse.' },
-  { file: 'axes/memory/adapters/engram.mjs', reason: 'Same bare-name derivation (exported deriveProject) for the engram project; adapters stay independent of each other.' },
   { file: 'axes/sdd-engine/adapters/gentle-ai.mjs', reason: 'Resolves the engram project name from the slug and already falls back to the origin remote itself; a bare name, not a VCS slug.' },
 ];
 
