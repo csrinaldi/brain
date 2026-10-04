@@ -432,3 +432,13 @@ test('R883-15: with no committed resume, the Working memory reason points at "on
   const b = (await view(without)).workingMemory;
   assert.equal(b.reason, 'no committed resume.md on feat/issue-7-x');
 });
+
+test('R883-2: an ok section with no entry is no block and no note; a section that could not be read says so; a loading one says nothing yet', () => {
+  const read = (localWorktrees) => readLocalBlocks({ run: () => { throw new Error('no git'); }, snapshot: { localWorktrees }, issue: 7, mainDocuments: {} });
+  assert.deepEqual(read({ ok: true, value: { entries: [], hidden: {}, tier: 'working-tree' } }), { local: [], localNote: null });
+  const down = read({ ok: false, reason: 'the worktree list could not be read: fatal: boom' });
+  assert.deepEqual(down.local, []);
+  assert.equal(down.localNote, "this machine's worktrees were not read: the worktree list could not be read: fatal: boom");
+  assert.deepEqual(read({ ok: false, pending: true, reason: 'loading open issues from the forge…' }), { local: [], localNote: null });
+  assert.deepEqual(read(undefined), { local: [], localNote: null }, 'a snapshot from an older server has no section');
+});

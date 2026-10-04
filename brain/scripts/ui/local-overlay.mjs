@@ -155,6 +155,7 @@ function localBlock({ run, fs, entry, mainDocuments, origin }) {
  */
 export function readLocalBlocks({ run, snapshot, issue, mainDocuments, _fs = defaultFs }) {
   const section = snapshot?.localWorktrees;
+  if (section && !section.ok && section.pending !== true) return { local: [], localNote: `this machine's worktrees were not read: ${section.reason}` };
   const mine = section?.ok ? section.value.entries.filter((e) => e.issue === issue) : [];
   const remote = snapshot?.remoteChanges?.ok ? snapshot.remoteChanges.value.branches : [];
   const atOrigin = (e) => remote.some((r) => r.branch === e.branch && r.sha === e.head);
