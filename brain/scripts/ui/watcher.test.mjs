@@ -823,6 +823,29 @@ test('#883 R883-10: a target that leaves has its two handles closed, and a targe
   w.close();
 });
 
+test('#883 R883-10: a target with no openspec/changes/ yet is watched at its nearest existing ancestor, one handle, closed when the changes dir takes over', () => {
+  const closed = [];
+  const _watch = (path, _o, listener) => ({ close: () => closed.push(path), path, listener });
+  const { w } = startedWatcher({ _watch });
+  const bare = { key: '/srv/a', changesDir: '/srv/a/openspec/changes', dir: null, ancestor: '/srv/a/openspec' };
+  w.setLocalTargets([bare]);
+  w.setLocalTargets([{ ...bare, ancestor: null }]);
+  assert.deepEqual(closed, ['/srv/a/openspec'], 'the ancestor handle is dropped once the changes dir exists');
+  w.close();
+});
+
+test('#883 R883-10: the ancestor of a bare target is one extra handle, and its fire is a watch:local: recompute', async () => {
+  const { _watch, scheduler, recomputes, w } = startedWatcher();
+  const before = _watch.calls.length;
+  w.setLocalTargets([{ key: '/srv/a', changesDir: '/srv/a/openspec/changes', dir: null, ancestor: '/srv/a' }]);
+  assert.deepEqual(_watch.calls.slice(before).map((c) => c.path), ['/srv/a/openspec/changes', '/srv/a']);
+  _watch.fire('/srv/a');
+  scheduler.runLatest();
+  await tick();
+  assert.match(recomputes[0].causes[0], /^watch:local:a\//);
+  w.close();
+});
+
 test('#883 R883-10: a failed local watch is in state().failed and retried on the next call; ENOENT is not a failure', () => {
   const attempts = new Map();
   const calls = [];

@@ -25,6 +25,11 @@
 // THE ONE WORKING-TREE EXCEPTION (#883, R883-10, amends R881-3): `setLocalTargets()`
 // holds two non-recursive directory watches per linked worktree of an OPEN issue —
 // its `openspec/changes/` and its change dir — and nothing else outside the Q3 set.
+// A worktree whose `openspec/changes/` does not exist yet cannot be watched there (ENOENT is
+// not a failure), so the CALLER names the nearest existing ancestor inside the worktree
+// (`ancestor`, one extra non-recursive handle): its creation event is what makes the first
+// change dir appear. The watcher itself never looks for it; without the caller's `ancestor`
+// the first change dir produces no event until an unrelated recompute re-targets.
 // The served root's working tree stays as unwatched as before: an edit there, outside
 // the set above, still produces no event. Git still never runs inside a worktree.
 
@@ -316,13 +321,14 @@ export function createWatcher({
    * A fire is debounced with the others and carries a `watch:local:` cause. A closed
    * watcher ignores the call, so a late recompute never arms a handle nobody will close.
    *
-   * @param {Array<{key: string, changesDir: string, dir: string|null}>} targets absolute paths
+   * @param {Array<{key: string, changesDir: string, dir: string|null, ancestor?: string|null}>} targets absolute paths;
+   *   `ancestor` is the nearest existing directory above a `changesDir` that does not exist yet
    */
   function setLocalTargets(targets) {
     if (closed) return;
     const wanted = new Map(targets.map((t) => {
       const paths = new Map();
-      for (const abs of [t.changesDir, t.dir].filter(Boolean)) paths.set(abs, `local:${basename(t.key)}/${relative(t.key, abs)}/`);
+      for (const abs of [t.changesDir, t.dir, t.ancestor].filter(Boolean)) paths.set(abs, `local:${basename(t.key)}/${relative(t.key, abs)}/`);
       return [t.key, paths];
     }));
     for (const [key, paths] of watchedLocal) {

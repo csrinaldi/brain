@@ -1483,6 +1483,42 @@ test('#883 acceptance 1: ticking a box in a worktree edits the file, fires its c
   }
 });
 
+test('#883 R883-10: a worktree with no openspec/ yet is watched at its root, and the first change dir re-targets the watches', async (t) => {
+  const repo = makeWorktreeRepo();
+  t.after(() => repo.dispose());
+  const wt = repo.addWorktree('feat/issue-7-x', {});
+  const closesByPath = new Map();
+  const spy = spyWatch();
+  const _watch = (path, o, listener) => { spy(path, o, listener); return { close() { closesByPath.set(path, (closesByPath.get(path) ?? 0) + 1); } }; };
+  _watch.calls = spy.calls;
+  _watch.fire = spy.fire;
+  _watch.closesByPath = closesByPath;
+  const scheduler = fakeScheduler();
+  const server = createUiServer({ root: repo.root, vcs: openIssuesVcs(7), project: 'o/r', _now: now, poll: false, _watch, _setTimeout: scheduler.setTimeout, _clearTimeout: scheduler.clearTimeout });
+  await server.listen(0);
+  const base = `http://127.0.0.1:${server.port}`;
+  try {
+    const stream = await fetch(`${base}/api/stream`);
+    const readFrame = frameReader(stream);
+    await readFrame();
+    const mine = () => _watch.calls.map((c) => c.path).filter((p) => p.startsWith(wt.path));
+    assert.ok(mine().includes(wt.path), 'no openspec/ yet: the worktree root is watched');
+    assert.equal(mine().filter((p) => p === wt.path).length, 1);
+
+    mkdirSync(join(wt.path, D7), { recursive: true });
+    writeFileSync(join(wt.path, D7, 'proposal.md'), '# p\n');
+    _watch.fire(wt.path);
+    scheduler.runLatest();
+    await frameUntil(readFrame, (f) => f.startsWith('event: section') && f.includes('"name":"localWorktrees"'));
+    assert.ok(mine().includes(`${wt.path}/openspec/changes`), 'the changes dir is now watched');
+    assert.ok(mine().includes(`${wt.path}/${D7}`), 'and so is the change dir');
+    assert.equal(_watch.closesByPath.get(wt.path), 1, 'the root handle is released once the changes dir takes over');
+    await readFrame.reader.cancel();
+  } finally {
+    await server.close();
+  }
+});
+
 test('#883 R883-10: a recompute whose section is not readable keeps the handles; one that no longer lists the worktree closes them', async (t) => {
   const repo = makeWorktreeRepo();
   t.after(() => repo.dispose());

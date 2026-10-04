@@ -22,7 +22,7 @@
 
 import { createServer as createHttpServer } from 'node:http';
 import { gitRun, gitRunAsync, gitErrorLine, FETCH_TIMEOUT_MS } from './git-run.mjs';
-import { readFileSync, realpathSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -220,6 +220,17 @@ export function createUiServer({
   }
 
   /**
+   * #883: when a worktree has no `openspec/changes/` yet, the nearest existing directory above it inside the
+   * worktree (`openspec/`, else the worktree root) to watch non-recursively, so the first change dir is noticed.
+   * `null` when the changes dir exists, or when that ancestor resolves outside the worktree (never followed).
+   */
+  function nearestAncestor(worktree, changesDir) {
+    if (existsSync(changesDir)) return null;
+    const candidate = existsSync(dirname(changesDir)) ? dirname(changesDir) : worktree;
+    return candidate !== worktree && escapes(candidate, worktree) ? null : candidate;
+  }
+
+  /**
    * #883 D79: the overlay's watches follow the section. Each uncapped worktree's `openspec/changes/`
    * and, when readable, its change dir. A section that could not be read leaves the current handles
    * alone, exactly as an unreadable change-dir listing does in the watcher.
@@ -231,7 +242,7 @@ export function createUiServer({
       const changesDir = join(e.path, CHANGES_ROOT);
       if (escapes(changesDir, e.path)) return [];
       const dir = e.dir && e.dirState === 'present' && !escapes(join(e.path, e.dir), e.path) ? join(e.path, e.dir) : null;
-      return [{ key: e.path, changesDir, dir }];
+      return [{ key: e.path, changesDir, dir, ancestor: nearestAncestor(e.path, changesDir) }];
     });
     watcher.setLocalTargets(targets);
   }
