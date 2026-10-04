@@ -32,7 +32,9 @@ import { join } from 'node:path';
 
 import { field, pending, uncomputable } from './report.mjs';
 import { deriveTasks } from './derive.mjs';
+import { countTasks } from '../lib/tasks-list.mjs';
 import { buildGraph } from './epic-graph.mjs';
+import { hierarchyFromGraph } from './hierarchy-adapter.mjs';
 import { gatherReleaseFacts, releaseDebt } from './release-debt.mjs';
 import { gatherHistoryFacts } from './history.mjs';
 import { readAdrIndex, homeAdrList, adrDrift } from './adr-index.mjs';
@@ -232,9 +234,25 @@ function readArtefactPresence(dir, missingId, { exists, list }) {
 
 /** One change dir's row, active or archived (R998-4) — same shape either way. `missingId` is the identifier `missingRequiredArtifacts`/`isGrandfathered` resolve a path from; for an archived row it is a synthetic `archive/<name>`, which `changeDir()` templates into the exact `openspec/changes/archive/<name>` location (no second path-building rule needed). */
 function readOneChange({ id, missingId, dir, issue, slug, archived, artefacts, read, list, exists }) {
+  // One read feeds `tasks` and `progress` (#1199 D51). `exists` decides `missing` before any
+  // read, so an absent file and a throwing read never share a sentence.
+  const tasksPath = `${dir}/tasks.md`;
   let tasksText = null;
-  try { tasksText = read(`${dir}/tasks.md`); } catch { tasksText = null; }
-  const tasks = deriveTasks({ tasksText, reason: `${dir}/tasks.md could not be read` });
+  let progress;
+  let reason;
+  if (!exists(tasksPath)) {
+    reason = `${tasksPath} does not exist`;
+    progress = { ok: false, code: 'missing', reason };
+  } else {
+    try {
+      tasksText = read(tasksPath);
+      progress = countTasks(tasksText);
+    } catch (err) {
+      reason = `${tasksPath} could not be read: ${errMessage(err)}`;
+      progress = { ok: false, code: 'unreadable', reason };
+    }
+  }
+  const tasks = deriveTasks({ tasksText, reason });
   const scopes = parseSliceScopes(tasksText ?? '');
   return {
     id, issue, slug, dir, archived,
@@ -244,6 +262,7 @@ function readOneChange({ id, missingId, dir, issue, slug, archived, artefacts, r
       : uncomputable(`the required artefact set could not be resolved: ${artefacts.reason}`),
     artefacts: readArtefactPresence(dir, missingId, { exists, list }),
     tasks: Object.fromEntries(tasks.fields),
+    progress,
     sliceScopes: scopes.refusal ? uncomputable(scopes.refusal) : field(scopes.scopes),
   };
 }
@@ -468,6 +487,21 @@ async function readForge({ vcs, project, forgeLoad = null, closed = true, genera
   return { graph, prs, reviews, closedIssues, forgeLoad: field({ open: openEntry, closed: closedEntry }) };
 }
 
+/**
+ * The `hierarchy` section (#1199 D60): the adapter's Map as ascending `[number, Entry]` pairs,
+ * because JSON drops a Map. It is pending or uncomputable exactly when the graph is, with the
+ * graph's reason. `closedUnresolved` is the closed section's list when it is a value, else `[]`;
+ * the rollup states the closed lane's load from `forgeLoad`, so an empty list is never read as
+ * "all resolved". `closedRead` says whether the closed list was actually read: a lane the poller
+ * marked complete can still have an unreadable cache, and a count over open children only is not a count.
+ */
+function readHierarchy(graph, closedIssues) {
+  if (!graph.ok) return graph.pending === true ? pending(graph.reason) : uncomputable(graph.reason);
+  const closed = closedIssues.ok ? closedIssues.value : null;
+  const { issues, divergences } = hierarchyFromGraph({ nodes: graph.value.nodes, declarationDivergences: graph.value.declarationDivergences, closed });
+  return field({ issues: [...issues], divergences, closedUnresolved: closed?.unresolved ?? [], closedRead: closedIssues.ok ? { ok: true } : { ok: false, reason: closedIssues.reason } });
+}
+
 // ── the composition ─────────────────────────────────────────────────────────
 
 /**
@@ -506,6 +540,8 @@ export async function buildSnapshot({ root = process.cwd(), now, vcs = null, pro
     ? field({ ...forge.graph.value, nodes: forge.graph.value.nodes.map((n) => ({ ...n, roadmap: roadmapState(n, forge.prs, forge.reviews) })) })
     : forge.graph;
 
+  const hierarchy = readHierarchy(graph, forge.closedIssues);
+
   return {
     generatedAt,
     tier: SNAPSHOT_TIER,
@@ -515,6 +551,7 @@ export async function buildSnapshot({ root = process.cwd(), now, vcs = null, pro
     prs: forge.prs,
     reviews: forge.reviews,
     closedIssues: forge.closedIssues,
+    hierarchy,
     forgeLoad: forge.forgeLoad,
     remoteChanges: readRemoteChanges({ run, prs: forge.prs, cache: _remoteCache, budget: remoteBudget }),
     records,
@@ -538,6 +575,7 @@ export function renderSnapshotText(s) {
     line('changes', s.changes, (c) => `${c.length} change dir(s)`),
     line('prs', s.prs, (p) => `${p.length} open`),
     line('remote', s.remoteChanges, (r) => `${r.branches.length} branch(es), ${r.unjoined.length} unjoined, ${r.hidden.base + r.hidden.lane + r.hidden.merged} hidden${r.deferred ? `, ${r.deferred} not read yet` : ''}`),
+    line('hierarchy', s.hierarchy, (h) => `${h.issues.length} issue(s), ${h.divergences.length} divergence(s)`),
     line('closed issues', s.closedIssues, (c) => `${c.nodes.length} node(s), ${c.unresolved.length} unresolved`),
     line('reviews', s.reviews, (r) => `${r.filter((x) => x.ok).length} thread(s) read, ${r.filter((x) => !x.ok).length} unreadable`),
     s.forgeLoad.ok ? `${'forge load'.padEnd(14)} open ${s.forgeLoad.value.open.state}, closed ${s.forgeLoad.value.closed.state}` : `${'forge load'.padEnd(14)} not computed — ${s.forgeLoad.reason}`,

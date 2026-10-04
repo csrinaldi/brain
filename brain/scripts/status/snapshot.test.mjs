@@ -8,6 +8,7 @@ import {
   buildSnapshot, roadmapState, aggregateActors, projectRecord, readChanges, readRecordRows, reviewRows,
   issueOfBranch, renderSnapshotText, PLANNED, IN_FLIGHT, DONE, UNREADABLE,
 } from './snapshot.mjs';
+import { hierarchyFromGraph } from './hierarchy-adapter.mjs';
 
 const NOW = '2026-09-13T00:00:00Z';
 
@@ -134,12 +135,53 @@ test('#879: changes read tasks, slice scopes and missing artefacts; an absent ta
   assert.deepEqual(a.sliceScopes, { ok: true, value: [{ slice: 1, claims: ['R1-1'], terminal_pr: 'this PR -> main' }] });
   assert.deepEqual(a.missing, { ok: true, value: [] });
   assert.equal(b.tasks.checked.ok, false);
-  assert.match(b.tasks.checked.reason, /issue-2-no-tasks\/tasks\.md could not be read/);
+  assert.match(b.tasks.checked.reason, /issue-2-no-tasks\/tasks\.md does not exist/);
   assert.deepEqual(b.missing.value, [], 'at lite only spec.md is required, and it is there');
   assert.deepEqual(readChanges({ root, tier: 'standard' }).value.filter((x) => !x.archived)[1].missing.value, ['proposal.md', 'design.md', 'tasks.md'], 'the tier decides the required set');
   assert.equal(readChanges({ root: '/nowhere', tier: 'lite' }).ok, false);
   const unresolved = readChanges({ root, tier: null });
   assert.equal(unresolved.value.filter((x) => !x.archived)[0].missing.ok, false, 'no tier → the required set cannot be resolved, and that is said');
+});
+
+// ── #1199 R1199-2: progress, with three distinct reasons ────────────────────
+
+/** One active change dir whose tasks.md is whatever the seams say. */
+function progressRow({ exists, read }) {
+  const dir = 'openspec/changes/issue-5-p';
+  const c = readChanges({
+    root: '/fake',
+    tier: 'lite',
+    _list: (p) => { if (p === 'openspec/changes') return ['issue-5-p']; throw new Error(`ENOENT: ${p}`); },
+    _exists: (p) => (p === `${dir}/tasks.md` ? exists : false),
+    _read: (p) => { if (p === `${dir}/tasks.md`) return read(); throw new Error(`ENOENT: ${p}`); },
+  });
+  return c.value[0];
+}
+
+test('#1199 R1199-2: progress is done/total from the same read as tasks, 3 of 5', () => {
+  const row = progressRow({ exists: true, read: () => '- [x] a\n- [ ] b\n  - [X] c\n- [ ] d\n- [x] e' });
+  assert.deepEqual(row.progress, { ok: true, value: { done: 3, total: 5 } });
+  assert.equal(row.tasks.checked.value, row.progress.value.done);
+  assert.equal(row.tasks.open.value, 2);
+});
+
+test('#1199 R1199-2: a missing tasks.md, an unreadable one and one with no items are three codes with three reasons', () => {
+  const missing = progressRow({ exists: false, read: () => { throw new Error('must not be read'); } });
+  const unreadable = progressRow({ exists: true, read: () => { throw new Error('EACCES: permission denied'); } });
+  const none = progressRow({ exists: true, read: () => '# Tasks\nprose' });
+  assert.deepEqual([missing.progress.code, unreadable.progress.code, none.progress.code], ['missing', 'unreadable', 'no-items']);
+  for (const r of [missing, unreadable, none]) assert.equal(r.progress.ok, false);
+  assert.match(unreadable.progress.reason, /issue-5-p\/tasks\.md/);
+  assert.match(unreadable.progress.reason, /EACCES/);
+  assert.equal(new Set([missing.progress.reason, unreadable.progress.reason, none.progress.reason]).size, 3);
+  assert.equal(missing.tasks.checked.reason, missing.progress.reason, 'the tasks field says the same reason');
+  assert.equal(unreadable.tasks.checked.reason, unreadable.progress.reason);
+});
+
+test('#1199 R1199-2: an archived row carries progress too', () => {
+  const root = makeFixture();
+  const nine = readChanges({ root, tier: 'lite' }).value.find((x) => x.archived);
+  assert.deepEqual(nine.progress, { ok: true, value: { done: 2, total: 2 } });
 });
 
 // ── R998-4: the archive reader ──────────────────────────────────────────────
@@ -644,4 +686,70 @@ test('#1257 R1257-7: in the server the closed list is read only when forgeLoad.c
   const pendingClosed = await read({ state: 'pending', at: null });
   assert.deepEqual(pendingClosed.s.closedIssues, { ok: false, pending: true, reason: 'loading closed issues from the forge…' });
   assert.equal(pendingClosed.s.graph.ok, true, 'the open lane is complete, so the graph is real');
+});
+
+// ── #1199 R1199-6: the hierarchy section ────────────────────────────────────
+
+const EPIC_BLOCK = '```brain-graph/1\ntrack: UI\nkind: epic\nblocks: []\nneeds: []\nfiles: []\n```';
+
+test('#1199 R1199-6: closed children come from closedIssues, and a closed row without a body is only listed as unresolved', async () => {
+  const { port } = listPort({
+    open: [openRow(878, { body: EPIC_BLOCK })],
+    closed: [closedRow(880, { body: 'Parent: #878 (the epic)' }), closedRow(881, { body: null })],
+  });
+  const s = await buildSnapshot({ root: makeFixture(), now: NOW, vcs: port, project: 'o/r' });
+  assert.equal(s.hierarchy.ok, true);
+  const issues = new Map(s.hierarchy.value.issues);
+  assert.equal(issues.get(880).parent, 878);
+  assert.equal(issues.get(880).state, 'closed');
+  assert.equal(issues.has(881), false);
+  assert.deepEqual(issues.get(878).children, [880]);
+  assert.deepEqual(s.hierarchy.value.closedUnresolved, [{ number: 881, reason: 'the forge list carried no body' }]);
+  assert.deepEqual([...issues.keys()], [...issues.keys()].sort((a, b) => a - b), 'ascending pairs');
+});
+
+test('#1199 R1199-6: a closed failure leaves the hierarchy open-only, with no unresolved list', async () => {
+  const { port } = listPort({ open: [openRow(878, { body: EPIC_BLOCK }), openRow(900, { body: 'Parent: #878 (the epic)' })], closedError: 'rate limited' });
+  const s = await buildSnapshot({ root: makeFixture(), now: NOW, vcs: port, project: 'o/r' });
+  assert.equal(s.hierarchy.ok, true);
+  assert.equal(s.hierarchy.value.issues.filter(([, e]) => e.state === 'closed').length, 0);
+  assert.deepEqual(s.hierarchy.value.closedUnresolved, []);
+  assert.deepEqual(new Map(s.hierarchy.value.issues).get(878).children, [900]);
+});
+
+test('#1199 R1199-6: closedRead says whether the closed list was read, so a complete lane over an unreadable list is never a count', async () => {
+  const forgeLoad = { open: { state: 'complete', at: 'T' }, closed: { state: 'complete', at: 'T' } };
+  const { port } = listPort({ open: [openRow(878, { body: EPIC_BLOCK }), openRow(900, { body: 'Parent: #878 (the epic)' })], closedError: 'cache unreadable' });
+  const s = await buildSnapshot({ root: makeFixture(), now: NOW, vcs: port, project: 'o/r', forgeLoad });
+  assert.equal(s.hierarchy.ok, true);
+  assert.deepEqual(s.hierarchy.value.closedRead, { ok: false, reason: s.closedIssues.reason });
+  assert.match(s.hierarchy.value.closedRead.reason, /cache unreadable/);
+  const good = listPort({ open: [openRow(878, { body: EPIC_BLOCK })], closed: [] });
+  const g = await buildSnapshot({ root: makeFixture(), now: NOW, vcs: good.port, project: 'o/r' });
+  assert.deepEqual(g.hierarchy.value.closedRead, { ok: true });
+});
+
+test('#1199 R1199-6: the hierarchy is pending when the graph is pending, and uncomputable when the graph is', async () => {
+  const { port } = listPort({ open: [openRow(5)] });
+  const forgeLoad = { open: { state: 'pending', at: null }, closed: { state: 'pending', at: null } };
+  const p = await buildSnapshot({ root: makeFixture(), now: NOW, vcs: port, project: 'o/r', forgeLoad });
+  assert.deepEqual(p.hierarchy, { ok: false, pending: true, reason: p.graph.reason });
+  const u = await buildSnapshot({ root: makeFixture(), now: NOW });
+  assert.deepEqual(u.hierarchy, { ok: false, reason: u.graph.reason });
+});
+
+test('#1199 R1199-6: one shape — the section survives JSON and rebuilds the adapter\'s Map', async () => {
+  const { port } = listPort({ open: [openRow(878, { body: EPIC_BLOCK })], closed: [closedRow(880, { body: 'Parent: #878 (the epic)' })] });
+  const s = await buildSnapshot({ root: makeFixture(), now: NOW, vcs: port, project: 'o/r' });
+  const parsed = JSON.parse(JSON.stringify(s));
+  assert.deepEqual(parsed, s);
+  const expected = hierarchyFromGraph({ nodes: s.graph.value.nodes, declarationDivergences: s.graph.value.declarationDivergences, closed: s.closedIssues.value });
+  assert.deepEqual(new Map(parsed.hierarchy.value.issues), expected.issues);
+  assert.deepEqual(parsed.hierarchy.value.divergences, expected.divergences);
+});
+
+test('#1199 R1199-6: the text mode prints a hierarchy line', async () => {
+  const { port } = listPort({ open: [openRow(878, { body: EPIC_BLOCK })] });
+  const s = await buildSnapshot({ root: makeFixture(), now: NOW, vcs: port, project: 'o/r' });
+  assert.match(renderSnapshotText(s), /^hierarchy +1 issue\(s\), 0 divergence\(s\)$/m);
 });

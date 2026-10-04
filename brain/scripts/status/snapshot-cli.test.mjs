@@ -135,6 +135,7 @@ test('#1257 R1257-8: without the flag the CLI reads closed issues, and --json is
   assert.equal(a.out, b.out);
   assert.deepEqual(a.calls, ['open', 'closed']);
   const parsed = JSON.parse(a.out);
+  assert.deepEqual(parsed.hierarchy.value.issues.map(([n]) => n), [3, 5], '#1199: the hierarchy section is in the same bytes, closed and open');
   assert.deepEqual(parsed.forgeLoad.value, { open: { state: 'complete', at: '2026-10-02T12:00:00.000Z' }, closed: { state: 'complete', at: '2026-10-02T12:00:00.000Z' } });
 });
 

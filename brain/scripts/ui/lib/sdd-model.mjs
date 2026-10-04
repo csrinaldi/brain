@@ -173,6 +173,7 @@ function buildChangeRow(change) {
     grandfathered: change.grandfathered === true,
     stages: buildStages(change),
     tasks: buildTasksSummary(change),
+    progress: change.progress ?? null,
     slices: buildSlices(change),
     phaseOrder,
   };

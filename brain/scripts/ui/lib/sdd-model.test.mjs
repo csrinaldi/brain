@@ -150,6 +150,14 @@ test('#998 cold-1008: a real next task value survives untouched', () => {
   assert.equal(c.tasks.next, 'do the thing');
 });
 
+test('#1199 R1199-3: the row passes the snapshot progress through untouched', () => {
+  const progress = { ok: true, value: { done: 3, total: 5 } };
+  const model = buildSddModel({ ok: true, value: [{ ...HALF_TICKED, progress }] });
+  assert.deepEqual(model.value.changes[0].progress, progress);
+  const no = { ok: false, code: 'no-items', reason: 'tasks.md has no checklist items' };
+  assert.deepEqual(buildSddModel({ ok: true, value: [{ ...HALF_TICKED, progress: no }] }).value.changes[0].progress, no);
+});
+
 // ── review of PR 4, fix 5: tasks.md exists but could not be read/parsed ────
 
 test('#998 fix5: tasks.md exists but its checked count could not be read — the tasks stage is unreadable, distinct from missing, with the reason', () => {

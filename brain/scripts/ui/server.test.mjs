@@ -1393,3 +1393,15 @@ test('#1257 R1257-8: the snapshot mirrors the poller — current.forgeLoad deep-
     await server.close();
   }
 });
+
+test('#1199 R1199-6: with no forge provider the hierarchy carries the same reason as the graph, not one derived from a stand-in', async () => {
+  const server = createUiServer({ root: makeFixture(), project: 'o/r', _now: now, forgeUnavailable: 'no VCS token', poll: false, _watch: () => ({ close() {} }) });
+  await server.listen(0);
+  try {
+    const snap = await (await fetch(`http://127.0.0.1:${server.port}/api/snapshot`)).json();
+    assert.deepEqual(snap.graph, { ok: false, reason: 'no VCS token' });
+    assert.deepEqual(snap.hierarchy, { ok: false, reason: 'no VCS token' });
+  } finally {
+    await server.close();
+  }
+});
