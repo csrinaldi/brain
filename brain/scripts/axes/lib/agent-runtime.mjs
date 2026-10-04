@@ -114,12 +114,12 @@ export const RUN_MAX_BUFFER = 64 * 1024 * 1024;
  * are — see `lib/credential-env.mjs`; it only stops the pass-through from
  * being unrepresentable.
  *
- * @param {string} cmd
- * @param {string[]} args
  * `discardStdout` is for engines that answer through a file (codex's
  * `--output-last-message`): stdout is dropped, so a chatty progress stream can
  * neither overflow the buffer nor be mistaken for a diagnostic. stderr is kept.
  *
+ * @param {string} cmd
+ * @param {string[]} args
  * @param {{ timeoutMs?: number, cwd?: string, env?: object, discardStdout?: boolean }} [opts]
  */
 export function defaultRun(cmd, args, { timeoutMs = RUN_TIMEOUT_MS, cwd, env, discardStdout = false } = {}) {

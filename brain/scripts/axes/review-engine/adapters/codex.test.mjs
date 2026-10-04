@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 import { runStage } from './codex.mjs';
+import { defaultRun } from '../../lib/agent-runtime.mjs';
 
 function makePaths(t) {
   const root = mkdtempSync(join(tmpdir(), 'codex-backend-'));
@@ -191,7 +192,6 @@ test('cleans the isolated home when copying OAuth authentication fails', async (
 // spawn died with ENOBUFS and the cold review was lost, although the verdict is
 // read from --output-last-message, a file. The oracle is the REAL runner, because a
 // spy would accept whatever defaultRun does with the options.
-import { defaultRun } from '../../lib/agent-runtime.mjs';
 
 function fakeEngine(paths, body) {
   const script = join(paths.root, 'fake-codex.sh');
@@ -242,4 +242,36 @@ test('#1274 defaultRun discardStdout drops stdout and keeps stderr; the default 
   const big = defaultRun('bash', ['-c', 'head -c 3000000 /dev/zero | tr "\\0" "x"']);
   assert.equal(big.error, undefined, 'the generic default survives >1 MiB of stdout');
   assert.equal(big.stdout.length, 3000000);
+});
+
+async function failWithStderr(t, stderr) {
+  const paths = makePaths(t);
+  return runStage({
+    stage: 'cold-review', prompt: 'p', model: 'gpt-5.5', cwd: paths.candidate,
+    credentialEnv: ['BRAIN_REVIEWER_TOKEN'], output: output(paths),
+    _env: testEnv(paths, { BRAIN_REVIEWER_TOKEN: SECRET }), _run: () => ({ status: 3, stderr }),
+  });
+}
+
+const SECRET = ['tok', 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'].join('-');
+
+function leaks(text) {
+  for (let i = 0; i + 6 <= SECRET.length; i += 1) {
+    if (text.includes(SECRET.slice(i, i + 6))) return SECRET.slice(i, i + 6);
+  }
+  return null;
+}
+
+test('#1274 a secret followed by carriage-return redraws is redacted before the tail is cut', async (t) => {
+  const result = await failWithStderr(t, `auth ${SECRET}${'\r'.repeat(4078)} usage limit`);
+  assert.equal(leaks(result.reason), null);
+  assert.match(result.reason, /usage limit/);
+});
+
+test('#1274 a secret straddling the 4096-char boundary is redacted', async (t) => {
+  for (const shift of [1, 10, 20, 30, 40]) {
+    const tailPart = ' '.repeat(4096 - shift);
+    const result = await failWithStderr(t, `x${SECRET}${tailPart}end`.replace(/ /g, '.'));
+    assert.equal(leaks(result.reason), null, `shift ${shift}`);
+  }
 });
