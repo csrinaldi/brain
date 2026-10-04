@@ -11,6 +11,12 @@
 // cannot change under its key, and the CLI passes none, so the verb is always
 // cold and deterministic.
 //
+// ONE WORKING-TREE READ (#883, R883-16): `localWorktrees` lists the linked
+// worktrees of open issues from directory names and `lstat` metadata, so it is
+// the single section that looks at a working tree. It reads no content and runs
+// no git inside a worktree; it declares `tier: 'working-tree'` itself, while
+// `SNAPSHOT_TIER` stays `committed` for every other section.
+//
 // SINGLE ACCESSOR RULE (RFC §2.1): this module IMPORTS brain's pure functions —
 // `buildGraph`, the `sdd-layout` accessors, `deriveTasks`, `parseVerdict`,
 // `readRecords`, `releaseDebt` — and the two readers this slice adds. It parses
@@ -45,6 +51,7 @@ import { parseVerdict } from '../review/lib/parse-verdict.mjs';
 import { readRecords, recordFilename } from '../memory/lib/store.mjs';
 import { parseCanonicalIssueBranch } from '../lib/branch-grammar.mjs';
 import { readRemoteChanges, REMOTE_READ_BUDGET } from './remote-changes.mjs';
+import { readLocalWorktrees } from './local-worktrees.mjs';
 
 export const SNAPSHOT_TIER = 'committed';
 export const RECORDS_DIR = '.memory/records';
@@ -554,6 +561,7 @@ export async function buildSnapshot({ root = process.cwd(), now, vcs = null, pro
     hierarchy,
     forgeLoad: forge.forgeLoad,
     remoteChanges: readRemoteChanges({ run, prs: forge.prs, cache: _remoteCache, budget: remoteBudget }),
+    localWorktrees: readLocalWorktrees({ run, root, graph }),
     records,
     adrs,
     antiPatterns: readAntiPatterns({ root, _read: read, _list: list }),
@@ -575,6 +583,7 @@ export function renderSnapshotText(s) {
     line('changes', s.changes, (c) => `${c.length} change dir(s)`),
     line('prs', s.prs, (p) => `${p.length} open`),
     line('remote', s.remoteChanges, (r) => `${r.branches.length} branch(es), ${r.unjoined.length} unjoined, ${r.hidden.base + r.hidden.lane + r.hidden.merged} hidden${r.deferred ? `, ${r.deferred} not read yet` : ''}`),
+    line('local', s.localWorktrees, (l) => `${l.entries.length} worktree(s), ${Object.values(l.hidden).reduce((a, b) => a + b, 0)} hidden`),
     line('hierarchy', s.hierarchy, (h) => `${h.issues.length} issue(s), ${h.divergences.length} divergence(s)`),
     line('closed issues', s.closedIssues, (c) => `${c.nodes.length} node(s), ${c.unresolved.length} unresolved`),
     line('reviews', s.reviews, (r) => `${r.filter((x) => x.ok).length} thread(s) read, ${r.filter((x) => !x.ok).length} unreadable`),

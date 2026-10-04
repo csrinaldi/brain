@@ -34,6 +34,7 @@ import { LIFECYCLE_STAGES, ARTEFACT_FILE } from '../lib/sdd-layout.mjs';
 import { changeDirNames, parseTreeListing, pickChangeDir } from '../lib/git-tree.mjs';
 import { prUrl } from './lib/forge-url.mjs';
 import { documentWording, NO_CHANGE_BRANCH } from './lib/drawer-model.mjs';
+import { readLocalBlocks } from './local-overlay.mjs';
 
 /** D14's caveat, verbatim in the UI, until #880 lands `type: review` records. */
 export const REVIEWS_SOURCE_NOTE = 'forge comments until #880 lands';
@@ -232,7 +233,7 @@ function documentEntry(path, ref, fields) {
 }
 
 /** Cut at the cap on a UTF-8 boundary: back up while the first dropped byte is a continuation byte. */
-function capText(text) {
+export function capText(text) {
   const buf = Buffer.from(text, 'utf8');
   if (buf.length <= DOCUMENT_CAP) return { text, truncated: false, truncatedAt: null };
   let end = DOCUMENT_CAP;
@@ -511,6 +512,7 @@ export function buildChangeView({ root, issue, snapshot, project = null, _read, 
       reviews: buildReviewsTab({ snapshot, project, issue }),
       records: buildRecordsTab({ snapshot, issue }),
       ...readRemoteBlocks({ run, snapshot, issue, head }),
+      ...readLocalBlocks({ run, snapshot, issue, mainDocuments: headDocuments }),
     },
   };
 }

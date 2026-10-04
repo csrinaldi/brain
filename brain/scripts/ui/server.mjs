@@ -198,7 +198,7 @@ export function createUiServer({
     const snapshot = await buildSnapshot({ root, now: _now(), vcs: forgeVcs, project, ...(vcs ? {} : { forgeLoad: poller.state().forgeLoad }), _remoteCache: remoteCache, remoteBudget, ...(_snapshotRun ? { _run: _snapshotRun } : {}) });
     if (!forgeUnavailable) return snapshot;
     const unreachable = { ok: false, reason: forgeUnavailable };
-    return { ...snapshot, graph: unreachable, prs: unreachable, reviews: unreachable, closedIssues: unreachable, hierarchy: unreachable };
+    return { ...snapshot, graph: unreachable, prs: unreachable, reviews: unreachable, closedIssues: unreachable, hierarchy: unreachable, localWorktrees: unreachable };
   });
 
   // D36: while the remote section left branches `deferred` (over the per-build
