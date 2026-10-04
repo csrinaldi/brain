@@ -20,6 +20,8 @@ const ALLOWLIST = [
   { file: 'lib/project-slug.mjs', reason: 'The resolver itself: the one place that reads the tracked value.' },
   { file: 'lib/brain-config.mjs', reason: 'Writer/migrator: ensureProjectIdentity and ensureBrainConfig WRITE the slug from the origin; they do not resolve it for a verb.' },
   { file: 'axes/sdd-engine/adapters/gentle-ai.mjs', reason: 'Resolves the engram project name from the slug and already falls back to the origin remote itself; a bare name, not a VCS slug.' },
+  { file: 'axes/memory/adapters/plainfiles.mjs', reason: 'deriveProject reads the TRACKED slug first (then project.name, then the origin via the resolver, then the directory): a declared value always beats a derived one, so existing record scopes do not split.' },
+  { file: 'axes/memory/adapters/engram.mjs', reason: 'Same deriveProject order, exported for brain-to-engram; adapters stay independent of each other (R1).' },
 ];
 
 function productionFiles() {

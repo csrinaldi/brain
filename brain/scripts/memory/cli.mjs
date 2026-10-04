@@ -26,6 +26,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { hostname } from "node:os";
 
 import { t } from "../i18n/t.mjs";
+import { slugRefusalText } from "./lib/ship-failure.mjs";
 import { resolveProjectSlug } from "../lib/project-slug.mjs";
 import { formatDuplicateReport } from "./lib/duplicates.mjs";
 import { resolveMemoryBackend, MEMORY_BACKENDS, EXIT_UNDECLARED, EXIT_INVALID } from "./lib/backend-resolve.mjs";
@@ -681,6 +682,12 @@ if (op === "ship") {
     // ever runs AFTER the push step, so a real push may already have landed.
     // `err.pushed` (set at both throw sites, ship.mjs) picks the honest key
     // for each — never a single message claiming one outcome for both.
+    // #1273: an unresolvable repository slug is refused in the operator's language with the named fix.
+    const slugRefusal = await slugRefusalText(err);
+    if (slugRefusal !== null) {
+      console.error(`memory/cli: ${slugRefusal}`);
+      process.exit(1);
+    }
     const key = err?.raced ? "raced"
       : err?.badHost ? "badHost"
       : err?.leaseStale ? "leaseStale"

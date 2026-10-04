@@ -13,6 +13,10 @@
 //   2. the origin remote (`git remote get-url origin`, parsed by `vcs/lib/repo.mjs#parseRemote`),
 //   3. refusal naming `npm run brain:config -- set project.slug <owner/repo>`.
 //
+// NOT every reader refuses on this: the memory adapters' `deriveProject` stamps a BARE repo name and
+// orders its sources slug > declared project.name > origin > checkout directory — a declared name
+// beats a derived one, and the origin only replaces the directory fallback (#1273).
+//
 // CI note: no reader consults `GITHUB_REPOSITORY` / `CI_PROJECT_PATH` for the slug today —
 // `ci-context.mjs` carries those for the governance jobs, which read them from the environment
 // directly. This resolver therefore keeps config-then-origin and does NOT add a CI step: adding
@@ -79,6 +83,6 @@ export function projectSlugOrNull(opts = {}) {
 }
 
 /** The refusal text in the active (or given) locale — what a CLI prints before exiting 1. */
-export async function describeSlugRefusal(_err, { locale } = {}) {
-  return t('config.slug.refused', { fix: PROJECT_SLUG_FIX }, { locale });
+export async function describeSlugRefusal(err, { locale } = {}) {
+  return t(err?.i18nKey ?? 'config.slug.refused', { fix: PROJECT_SLUG_FIX }, { locale });
 }

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // brain-governance-status.mjs — Report the current state of all three governance layers.
 //
-// Reads vcs.provider and project.slug from brain.config.json, probes the VCS
+// Reads vcs.provider and project.slug (brain.config.json, else the origin remote — lib/project-slug.mjs), probes the VCS
 // provider's capability API, and prints a per-consumer status table.
 //
 // USAGE: npm run brain:governance-status

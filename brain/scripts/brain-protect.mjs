@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // brain-protect.mjs — One-time operator command to activate branch protection on main.
 //
-// Reads vcs.provider and project.slug from brain.config.json, then calls the
+// Reads vcs.provider and project.slug (brain.config.json, else the origin remote — lib/project-slug.mjs), then calls the
 // provider's branchProtect verb with the current governance check contexts.
 //
 // USAGE: npm run brain:protect

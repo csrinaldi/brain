@@ -35,3 +35,10 @@ for (const [label, derive] of [['engram', engramDerive], ['plainfiles', plainDer
     assert.equal(derive({ project: {} }, root), 'some-dir');
   });
 }
+
+for (const [label, derive] of [['engram', engramDerive], ['plainfiles', plainDerive]]) {
+  test(`#1273 ${label}: a declared project.name beats the origin (empty slug)`, () => {
+    const root = worktreeNamed('brain-issue-1273', 'git@github.com:acme/widgets.git');
+    assert.equal(derive({ project: { slug: '', name: 'my-team-name' } }, root), 'my-team-name');
+  });
+}

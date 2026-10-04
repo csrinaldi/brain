@@ -24,15 +24,19 @@ import { defaultGitPull } from "../../../memory/lib/reconcile-pull.mjs";
 import { classifySupersedes } from "../../../memory/lib/supersedes.mjs";
 import { loadBrainConfigOrThrow } from "../../../lib/brain-config.mjs";
 
-/** The repository this record belongs to, from config, falling back to the checkout
- *  directory name. Records in this repo carry the bare name ("brain"), not the slug. */
+/** The repository this record belongs to, from config: tracked slug, then declared
+ *  project.name, then the origin remote, then the checkout directory name. Records in this repo carry the bare name ("brain"), not the slug. */
 export function deriveProject(config, root) {
-  // #1273: the repository's slug (tracked, else the origin) BEFORE the directory name — from an
-  // isolated worktree the directory is the worktree's name, not the repository's.
-  const slug = projectSlugOrNull({ config, cwd: root });
-  if (slug) return slug.split("/").pop();
+  // Order: tracked slug > declared project.name > origin > checkout directory. A DECLARED name always
+  // beats a derived one (it is what existing records and the engram scope already carry); the origin
+  // replaces only the directory fallback — from an isolated worktree (#782) the directory is the
+  // worktree's name, not the repository's (#1273).
+  const tracked = config?.project?.slug;
+  if (typeof tracked === "string" && tracked.trim() !== "") return tracked.trim().split("/").pop();
   const name = config?.project?.name;
   if (typeof name === "string" && name.trim() !== "") return name;
+  const origin = projectSlugOrNull({ config, cwd: root });
+  if (origin) return origin.split("/").pop();
   return String(root).replace(/\/+$/, "").split("/").pop();
 }
 import { resolveSecretConfig, compilePatterns, scanTextForSecrets } from "../../../memory/lib/secret-scrub.mjs";
