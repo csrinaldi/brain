@@ -143,7 +143,10 @@ function localBlock({ run, fs, entry, mainDocuments, origin }) {
     const doc = documentFor({ fs, key, file, entry, dirReal: checked.dirReal, headEntry: tree.get(`${entry.dir}/${file}`), mainBlob: mainDocuments?.[key]?.blob ?? null, algo, leaf: entry.leaf });
     if (doc) documents[key] = doc; else absent.push(file);
   }
-  const clean = !Object.values(documents).some((d) => d.uncommitted);
+  // The collapse hides every document, so it needs all of them accounted for (R883-9): readable,
+  // committed, and none committed at HEAD but missing from the working tree.
+  const deletedLocally = absent.some((file) => tree.has(`${entry.dir}/${file}`));
+  const clean = !deletedLocally && Object.values(documents).every((d) => d.state !== 'unreadable' && !d.uncommitted);
   if (clean && origin) return { ...base, state: 'same-as-origin', absent, resume: null };
   const resume = documents.resume ?? { state: 'missing', reason: `no resume.md in worktree ${entry.leaf}` };
   return { ...base, state: 'read', documents, absent, resume: resumeOutcome({ doc: resume, label: `worktree ${entry.leaf}` }) };

@@ -430,6 +430,22 @@ test('R883-9: a block at its origin tip with nothing uncommitted is same-as-orig
   assert.equal(other.state, 'read', 'a different origin sha is not the same as origin');
 });
 
+test('R883-9: at the origin tip, an unreadable document or a document deleted from the working tree keeps the block read, never same-as-origin', async (t) => {
+  const repo = makeWorktreeRepo();
+  t.after(() => repo.dispose());
+  const wt = repo.addWorktree('feat/issue-7-x', { [`${D7}/proposal.md`]: '# p\n', [`${D7}/tasks.md`]: '- [ ] a\n' }, { commit: true });
+  realFs.unlinkSync(join(wt.path, D7, 'proposal.md'));
+  put(repo.base, { 'outside/p.md': 'OUTSIDE\n' });
+  symlinkSync(join(repo.base, 'outside/p.md'), join(wt.path, D7, 'proposal.md'));
+  realFs.unlinkSync(join(wt.path, D7, 'tasks.md'));
+  const snapshot = withOrigin(await snapshotOf(repo.root, [7]), 'feat/issue-7-x', wt.head);
+  const block = buildChangeView({ root: repo.root, issue: 7, snapshot, _run: gitRun(repo.root) }).value.local[0];
+  assert.equal(block.state, 'read');
+  assert.equal(block.documents.proposal.state, 'unreadable');
+  assert.match(block.documents.proposal.reason, /symbolic link/);
+  assert.ok(!JSON.stringify(block).includes('OUTSIDE'));
+});
+
 test('R883-15: with no committed resume, the Working memory reason points at "on this machine" only when a local resume exists, and never says slice 5', async (t) => {
   const withLocal = makeWorktreeRepo();
   t.after(() => withLocal.dispose());
