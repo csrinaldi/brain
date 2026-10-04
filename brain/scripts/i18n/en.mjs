@@ -267,6 +267,8 @@ export default {
   'config.identity.missing': 'the team config has no project.{key}; propose it with `npm run brain:config -- set project.{key} {value}` in a PR (env:init writes no team config in an existing repository)',
   'axes.diagnose.undeclared': '{axis} is undeclared: nothing states a {axis} and none was guessed',
   'axes.diagnose.undeclared.fix': 'choose one and declare it in a PR: npm run brain:config -- set {axis}.default <name>',
+  'axes.diagnose.ownersUndeclared': 'governance.owners is empty or absent: nobody is named to own the team config',
+  'axes.diagnose.ownersUndeclared.fix': 'name the owner(s) in a PR: npm run brain:config -- set governance.owners <login>',
   'bootstrap.axis.teamUndeclared': 'the team has not declared {axis}; ask an owner, or propose it with `npm run brain:config -- set {axis}.default <name>` in a PR. env:init writes no team config in an existing repository.',
   'bootstrap.axis.userDeclared': '{axis}.default = {name} saved to your user config ({path}) — it is yours alone; brain.config.json was not touched',
   'bootstrap.axis.userWriteFailed': 'could not save {axis}.default to your user config: {detail}',

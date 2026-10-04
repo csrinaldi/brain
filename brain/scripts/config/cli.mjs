@@ -59,6 +59,11 @@ export function axisContextFor(config, root) {
 export async function main(argv = process.argv.slice(2), root = process.cwd()) {
   const [op, path, value] = argv;
   if (op !== 'get' && op !== 'set' && op !== 'default' && op !== 'resolve' && op !== 'diagnose' && op !== 'user-set') fail(`unknown op '${op ?? ''}'.\n${USAGE}`);
+  // user-set with no value is a USAGE error (exit 2) and writes nothing: String(undefined) is the valid-looking provider name "undefined" (#1263 slice 2 review).
+  if (op === 'user-set' && (!path || value === undefined || String(value).trim() === '')) {
+    console.error(`brain:config: user-set takes <axis>.default and a <name>, none was given.\n${USAGE}`);
+    process.exit(2);
+  }
   if ((!path && op !== 'diagnose') || (op === 'set' && value === undefined)) fail(`missing argument.\n${USAGE}`);
 
   const configPath = join(root, 'brain.config.json');
@@ -88,7 +93,7 @@ export async function main(argv = process.argv.slice(2), root = process.cwd()) {
     const axis = m[1];
     const name = String(value).trim();
     const declared = readAxis(config, axis).default;
-    if (config[axis]?.locked === true && name !== declared) {
+    if (config[axis]?.locked === true && declared !== '' && name !== declared) {
       const command = `npm run brain:config -- set ${axis}.default ${name}`;
       const { userPath } = readUserConfig({ env: process.env });
       console.error(`brain:config: ${await t('axes.refusal.locked', { axis, value: name, source: userPath })} (${command})`);

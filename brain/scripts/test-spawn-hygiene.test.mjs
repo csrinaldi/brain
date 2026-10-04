@@ -384,7 +384,7 @@ const ALLOWLIST = [
   // #1263 slice 2: the founding signal — the same `ensure` CLI from a COPY of the tree, stdin closed, a temp BRAIN_HOME; reads and writes only the fixture.
   { file: 'brain/scripts/lib/brain-config.ensure-cli.test.mjs', entrypoint: 'brain/scripts/lib/brain-config.mjs', line: 49, reason: 'no-vcs-capability' },
   // #1263 slice 2: the REAL bootstrap.sh in the hermetic box (stdin from a FILE, a pty via script(1) for the TTY cases, 240s timeout, a temp BRAIN_HOME): existing-repo and founding runs against a fixture repo with no network.
-  { file: 'brain/scripts/bootstrap.config-ownership.test.mjs', entrypoint: '<unresolved>', line: 65, reason: 'no-vcs-capability' },
+  { file: 'brain/scripts/bootstrap.config-ownership.test.mjs', entrypoint: '<unresolved>', line: 66, reason: 'no-vcs-capability' },
   { file: 'brain/scripts/install-tools.test.mjs', entrypoint: '<unresolved>', line: 34, reason: 'no-vcs-capability' },
   { file: 'brain/scripts/install-tools.test.mjs', entrypoint: '<unresolved>', line: 105, reason: 'no-vcs-capability' }, // `command -v` lookups for the no-node PATH
   { file: 'brain/scripts/install-tools.test.mjs', entrypoint: '<unresolved>', line: 109, reason: 'no-vcs-capability' }, // the same snippet with node off PATH

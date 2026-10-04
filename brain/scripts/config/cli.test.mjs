@@ -341,3 +341,27 @@ test('#1263 user-set: vcs and unknown keys are refused', (t) => {
   assert.equal(userRun(root, home, 'user-set', 'platform.locked', 'true').status, 1);
   assert.equal(existsSync(userFile(home)), false);
 });
+
+test('#1263 user-set: a MISSING value is a usage error (exit 2) and writes nothing — it used to store the provider "undefined"', (t) => {
+  const root = world(t, teamCfg());
+  const home = join(mkdtempSync(join(tmpdir(), 'brain-1263-home-')), 'bh');
+  t.after(() => removeTempTree(dirname(home)));
+  const before = readFileSync(join(root, 'brain.config.json'), 'utf8');
+  for (const args of [['user-set', 'platform.default'], ['user-set', 'platform.default', ''], ['user-set']]) {
+    const r = userRun(root, home, ...args);
+    assert.equal(r.status, 2, `${args.join(' ')}: ${r.stderr}`);
+    assert.match(r.stderr, /Usage/);
+  }
+  assert.equal(existsSync(userFile(home)), false, 'no user write');
+  assert.equal(readFileSync(join(root, 'brain.config.json'), 'utf8'), before, 'no team write');
+});
+
+test('#1263 user-set: a LOCKED but undeclared team axis is the undeclared refusal (exit 3), not a lock refusal', (t) => {
+  const root = world(t, teamCfg({ memory: { default: '', locked: true, providers: {} } }));
+  const home = join(mkdtempSync(join(tmpdir(), 'brain-1263-home-')), 'bh');
+  t.after(() => removeTempTree(dirname(home)));
+  const r = userRun(root, home, 'user-set', 'memory.default', 'engram');
+  assert.equal(r.status, 3, r.stderr);
+  assert.match(r.stderr, /the team has not declared memory/);
+  assert.equal(existsSync(userFile(home)), false);
+});

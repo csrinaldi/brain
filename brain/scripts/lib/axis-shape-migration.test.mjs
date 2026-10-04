@@ -156,12 +156,12 @@ test('idempotent: a second run changes nothing and says nothing', () => {
   assert.deepEqual(second.notices, []);
 });
 
-test('a config already in the new shape is a no-op, even when the context disagrees', () => {
+test('a config already in the new shape (locks stated) is a no-op, even when the context disagrees', () => {
   const cfg = {
     vcs: { default: 'github', providers: { github: { version: '2.63.0' } } },
-    memory: { default: 'plainfiles', providers: { plainfiles: {} } },
-    platform: { default: 'antigravity', providers: { antigravity: {} } },
-    sdd: { default: 'plain', providers: { plain: {}, brain: { version: 'self' } } },
+    memory: { default: 'plainfiles', locked: true, providers: { plainfiles: {} } },
+    platform: { default: 'antigravity', locked: false, providers: { antigravity: {} } },
+    sdd: { default: 'plain', locked: true, providers: { plain: {}, brain: { version: 'self' } } },
   };
   const { out, notices } = run(cfg, ctx('claude', 'gentle-ai', '.env AGENT_PLATFORM'));
   assert.deepEqual(out, cfg);
@@ -292,4 +292,51 @@ test('an env override of a provider the migration did not list is REFUSED afterw
   listed.platform.providers.antigravity = {};
   assert.equal(resolveProviderName({ config: listed, env }), 'gitlab');
   assert.equal(resolveAxis('platform', { env, config: listed }).value, 'antigravity');
+});
+
+// ── locked: false for existing consumers (#1263 slice 3, ADR-0040 section 3, ratified points 4 and 6) ───────────────────
+test('#1263 locked: the entry writes locked:false on memory, platform and sdd and never on vcs; the defaults do not move', () => {
+  const cfg = {
+    vcs: { default: 'github', providers: { github: {} } },
+    memory: { default: 'plainfiles', providers: { plainfiles: {} } },
+    platform: { default: 'claude', providers: { claude: {} } },
+    sdd: { default: 'gentle-ai', providers: { 'gentle-ai': {}, brain: { version: 'self' } } },
+  };
+  const { out, notices } = run(cfg);
+  for (const axis of ['memory', 'platform', 'sdd']) assert.equal(out[axis].locked, false, axis);
+  assert.equal(Object.hasOwn(out.vcs, 'locked'), false);
+  assert.equal(out.memory.default, 'plainfiles');
+  assert.ok(notices.some((n) => /memory\.locked, platform\.locked, sdd\.locked = false/.test(n) && /owner|turns it on|set memory\.locked true/.test(n)), notices.join('\n'));
+});
+
+test('#1263 locked: it also reaches an axis the same run reshapes (a legacy config)', () => {
+  const { out } = run({ memory: { backend: 'engram' }, vcs: { provider: 'github' } });
+  for (const axis of ['memory', 'platform', 'sdd']) assert.equal(out[axis].locked, false, axis);
+});
+
+test('#1263 locked: a locked value already stated, true or false, is never touched', () => {
+  const { out } = run({ memory: { default: 'engram', locked: true, providers: { engram: {} } }, sdd: { default: 'plain', locked: false, providers: { plain: {} } } });
+  assert.equal(out.memory.locked, true);
+  assert.equal(out.sdd.locked, false);
+  assert.equal(out.platform.locked, false);
+});
+
+test('#1263 locked: it NEVER seeds governance.owners, and it is idempotent', () => {
+  const cfg = { vcs: { provider: 'github' }, memory: { backend: 'engram' }, governance: { tier: 'standard' } };
+  const first = run(cfg);
+  assert.deepEqual(first.out.governance, { tier: 'standard' }, 'owners stay absent: an existing consumer\'s owners are its team\'s decision');
+  const second = run(first.out);
+  assert.deepEqual(second.out, first.out);
+  assert.deepEqual(second.notices, []);
+  assert.equal(Object.hasOwn(run({}).out.governance ?? {}, 'owners'), false);
+});
+
+test('#1263 locked: migrateConfig on an existing consumer locks nothing and a resolve still behaves as before', () => {
+  const base = { schemaVersion: '1.11.0', vcs: { provider: 'github' }, memory: { backend: 'plainfiles' } };
+  const { config } = migrateConfig(base, migrations, '1.11.1', ctx());
+  assert.deepEqual([config.memory.locked, config.platform.locked, config.sdd.locked], [false, false, false]);
+  assert.equal(validateAxisConfig(config).ok, true);
+  const r = tryResolveAxis('memory', { env: { MEMORY_BACKEND: 'engram' }, dotenv: {}, config: { ...config, memory: { ...config.memory, providers: { plainfiles: {}, engram: {} } } }, notice: () => {} });
+  assert.equal(r.ok, true, 'an unlocked axis still takes the per-run override');
+  assert.equal(r.value, 'engram');
 });

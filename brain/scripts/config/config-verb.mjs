@@ -47,6 +47,23 @@ const AXIS_PROVIDER_FAMILIES = Object.freeze(AXES.map((axis) => `${axis}.provide
 // The names `<axis>.providers.<name>` may take: the same closed sets as `<axis>.default`, so a provider
 // key cannot carry arbitrary text into tracked config. Platform providers also include the routed
 // runtimes of PLATFORM_CAPABILITIES (codex, gemini); sdd also has brain's own provider.
+// `<axis>.locked` (ADR-0040 section 3): a boolean on the three axes a person may override. vcs has no per-person level to lock.
+const LOCKABLE_AXES = Object.freeze(AXES.filter((a) => a !== 'vcs'));
+const LOCKED_PATHS = Object.freeze(LOCKABLE_AXES.map((axis) => `${axis}.locked`));
+// `governance.owners` (ADR-0040 section 5): the humans who own the team config, as a LIST of bare forge logins. It is the one list
+// this verb writes: a JSON array, or one login / a comma-separated run of them, and a leading `@` is dropped (a forge login is bare).
+// A login is token-shaped text in tracked config, so it is held to the forge-login charset and refused otherwise.
+const LIST_PATHS = Object.freeze(['governance.owners']);
+const LOGIN_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+/** @returns {{list: string[]}|{error: string}} */
+function parseOwners(raw) {
+  const v = parseValue(raw);
+  const items = Array.isArray(v) ? v : typeof v === 'string' ? v.split(',') : null;
+  if (items === null || items.some((i) => typeof i !== 'string')) return { error: 'must be a login, a comma-separated list of logins, or a JSON array of logins' };
+  const list = [...new Set(items.map((i) => i.trim().replace(/^@/, '')).filter((i) => i !== ''))];
+  const bad = list.find((l) => !LOGIN_RE.test(l));
+  return bad === undefined ? { list } : { error: 'every owner must be a bare forge login (letters, digits, ".", "_", "-")' };
+}
 const PROVIDER_NAMES = Object.freeze({
   vcs: VCS_PROVIDERS,
   memory: MEMORY_BACKENDS,
@@ -200,6 +217,15 @@ export function planConfigWrite({ config, path, value, migrations, targetVersion
       };
     }
   }
+  if (LOCKED_PATHS.includes(path) && typeof parseValue(value) !== 'boolean') {
+    return { next: null, migrationsApplied: [], refusal: `config: '${path}' must be true or false. Nothing written.` };
+  }
+  let listValue;
+  if (LIST_PATHS.includes(path)) {
+    const parsed = parseOwners(value);
+    if (parsed.error) return { next: null, migrationsApplied: [], refusal: `config: '${path}' ${parsed.error}. Nothing written.` };
+    listValue = parsed.list;
+  }
   const [pAxis, pKey, pName] = path.split('.');
   if (pKey === 'providers' && pName !== undefined && PROVIDER_NAMES[pAxis] && !PROVIDER_NAMES[pAxis].includes(pName)) {
     return {
@@ -212,6 +238,7 @@ export function planConfigWrite({ config, path, value, migrations, targetVersion
   const known = deriveKnownPaths(migrations);
   for (const p of AXIS_DEFAULT_PATHS) known.leaves.add(p);
   for (const f of AXIS_PROVIDER_FAMILIES) known.families.add(f);
+  for (const p of [...LOCKED_PATHS, ...LIST_PATHS]) known.leaves.add(p);
   const inFamily = [...known.families].some((f) => path.startsWith(`${f}.`));
   if (!known.leaves.has(path) && !inFamily) {
     const near = nearestKnown(path, known);
@@ -233,7 +260,7 @@ export function planConfigWrite({ config, path, value, migrations, targetVersion
     if (node[key] == null || typeof node[key] !== 'object') node[key] = {};
     node = node[key];
   }
-  node[keys[keys.length - 1]] = parseValue(value);
+  node[keys[keys.length - 1]] = listValue ?? parseValue(value);
   mirrorLegacySelector(next, path);
   declareDefault(next, path);
 

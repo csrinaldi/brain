@@ -439,3 +439,26 @@ test('#1114 S3.3 ensureBrainConfig: no origin identity leaves vcs undeclared in 
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// ── the founding shape (#1263 slice 3, ADR-0040 sections 3-5) ─────────────────────────────────────────────────────────
+test('#1263 founding: memory and sdd are locked, platform is free, governance.owners starts empty, and the config validates', async () => {
+  const { validateAxisConfig, tryResolveAxis } = await import('./axis-config.mjs');
+  const dir = mkdtempSync(join(tmpdir(), 'brain-found-'));
+  try {
+    ensureBrainConfig(dir, { identity: { host: 'github.com', project: 'o/r' } });
+    const cfg = readCfg(dir);
+    assert.equal(cfg.memory.locked, true);
+    assert.equal(cfg.sdd.locked, true);
+    assert.notEqual(cfg.platform.locked, true, 'platform stays free: a person owns the tool they run');
+    assert.equal(Object.hasOwn(cfg.vcs, 'locked'), false);
+    assert.deepEqual(cfg.governance.owners, []);
+    assert.equal(cfg.memory.default, '', 'a locked axis may be undeclared: the team must declare it');
+    assert.equal(validateAxisConfig(cfg).ok, true, JSON.stringify(validateAxisConfig(cfg).errors));
+    // a locked + undeclared axis resolves to UNDECLARED (the honest answer), never to a lock refusal, when nothing overrides it
+    const r = tryResolveAxis('memory', { env: {}, dotenv: {}, config: cfg, notice: () => {} });
+    assert.equal(r.ok, false);
+    assert.equal(r.refusal.code, 'undeclared');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

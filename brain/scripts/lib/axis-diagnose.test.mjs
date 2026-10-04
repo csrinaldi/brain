@@ -7,6 +7,7 @@ import es from '../i18n/es.mjs';
 import en from '../i18n/en.mjs';
 
 const declared = {
+  governance: { owners: ['alice'] },
   vcs: { default: 'github', providers: { github: { version: '2.0.0' } } },
   memory: { default: 'plainfiles', providers: { plainfiles: { version: '1.0.0' } } },
   platform: { default: 'claude', providers: { claude: { version: '1.0.0' } } },
@@ -15,11 +16,14 @@ const declared = {
 // The same axes, with every closed-set provider the env-shadow cases name LISTED: a per-machine value that is not a key of
 // `<axis>.providers` is refused by resolveAxis (ADR-0038 section 2), which is a different finding (`selector-refused`).
 const wide = {
+  governance: { owners: ['alice'] },
   vcs: { default: 'github', providers: { github: { version: '2.0.0' }, gitlab: {} } },
   memory: { default: 'plainfiles', providers: { plainfiles: { version: '1.0.0' }, engram: {} } },
   platform: { default: 'claude', providers: { claude: { version: '1.0.0' }, plain: {}, antigravity: {} } },
   sdd: { default: 'gentle-ai', providers: { 'gentle-ai': { version: '1.0.0' }, plain: {}, brain: { version: 'self' } } },
 };
+// The axis tests below are about AXES; `governance.owners` has its own tests at the end of this file, so these see through that one finding.
+const diagnose = (args) => diagnoseAxes(args).filter((f) => f.code !== 'owners-undeclared');
 const codes = (fs) => fs.map((f) => `${f.axis}:${f.code}`).sort();
 
 test('diagnoseAxes never throws and returns [] for hostile input', () => {
@@ -31,11 +35,11 @@ test('diagnoseAxes never throws and returns [] for hostile input', () => {
 
 test('a fully declared, version-probed config has no findings; "self" is verified against installed.sdd.brain', () => {
   const installed = { vcs: { github: '2.0.0' }, memory: { plainfiles: '1.0.0' }, platform: { claude: '1.0.0' }, sdd: { 'gentle-ai': '1.0.0', brain: '1.11.1' } };
-  assert.deepEqual(diagnoseAxes({ config: declared, env: {}, dotenv: {}, installed }), []);
+  assert.deepEqual(diagnose({ config: declared, env: {}, dotenv: {}, installed }), []);
 });
 
 test('env-shadows-config: .env and process env selectors that differ from the declared default are named, never their file', () => {
-  const f = diagnoseAxes({
+  const f = diagnose({
     config: wide,
     env: { AGENT_PLATFORM: 'plain' },
     dotenv: { AGENT_PLATFORM: 'antigravity', MEMORY_BACKEND: 'engram', CANARY_KEY: 'leak-canary-123', SDD_ENGINE: 'gentle-ai' },
@@ -45,7 +49,7 @@ test('env-shadows-config: .env and process env selectors that differ from the de
   // `.env` antigravity is shadowed by a shadow and is not a finding of its own; the sdd value equals the default.
   assert.equal(f.length, 2, JSON.stringify(f));
   assert.ok(f.some((x) => x.axis === 'platform' && /process env/.test(x.message) && /\(plain\)/.test(x.message)));
-  const dotenvPlatform = diagnoseAxes({ config: wide, env: {}, dotenv: { AGENT_PLATFORM: 'antigravity' } }).find((x) => x.code === 'env-shadows-config');
+  const dotenvPlatform = diagnose({ config: wide, env: {}, dotenv: { AGENT_PLATFORM: 'antigravity' } }).find((x) => x.code === 'env-shadows-config');
   assert.equal(dotenvPlatform.message, 'AGENT_PLATFORM in .env (antigravity) differs from platform.default (claude)');
   assert.match(dotenvPlatform.fix, /AGENT_PLATFORM/);
   assert.match(dotenvPlatform.fix, /brain:config -- set platform\.default antigravity/);
@@ -56,15 +60,15 @@ test('env-shadows-config: .env and process env selectors that differ from the de
 });
 
 test('env-shadows-config: a value equal to the default, an empty one and an undeclared axis are not findings', () => {
-  const quiet = diagnoseAxes({ config: { platform: { default: 'claude', providers: { claude: { version: '1' } } } }, env: {}, dotenv: { AGENT_PLATFORM: 'claude', SDD_ENGINE: 'plain' }, installed: { platform: { claude: '1' } } });
+  const quiet = diagnose({ config: { platform: { default: 'claude', providers: { claude: { version: '1' } } } }, env: {}, dotenv: { AGENT_PLATFORM: 'claude', SDD_ENGINE: 'plain' }, installed: { platform: { claude: '1' } } });
   assert.deepEqual(codes(quiet), [], 'equal is not a shadow; an undeclared sdd has nothing to differ from');
-  assert.deepEqual(codes(diagnoseAxes({ config: declared, env: {}, dotenv: { AGENT_PLATFORM: '' } }).filter((x) => x.code === 'env-shadows-config')), []);
+  assert.deepEqual(codes(diagnose({ config: declared, env: {}, dotenv: { AGENT_PLATFORM: '' } }).filter((x) => x.code === 'env-shadows-config')), []);
 });
 
 test('env-shadows-config: VCS has no .env level (ADR-0038 section 2), so only the process env counts', () => {
-  const dot = diagnoseAxes({ config: wide, env: {}, dotenv: { VCS_PROVIDER: 'gitlab' } }).filter((x) => x.code === 'env-shadows-config');
+  const dot = diagnose({ config: wide, env: {}, dotenv: { VCS_PROVIDER: 'gitlab' } }).filter((x) => x.code === 'env-shadows-config');
   assert.deepEqual(dot, []);
-  const proc = diagnoseAxes({ config: wide, env: { VCS_PROVIDER: 'gitlab' }, dotenv: {} }).filter((x) => x.code === 'env-shadows-config');
+  const proc = diagnose({ config: wide, env: { VCS_PROVIDER: 'gitlab' }, dotenv: {} }).filter((x) => x.code === 'env-shadows-config');
   assert.equal(proc.length, 1);
   assert.equal(proc[0].axis, 'vcs');
   assert.match(proc[0].message, /VCS_PROVIDER in the process env \(gitlab\) differs from vcs\.default \(github\)/);
@@ -75,17 +79,17 @@ test('env-shadows-config: a legacy SDD_HARNESS never shadows a declared axis: it
   // SDD_HARNESS=plain. The resolvers read SDD_HARNESS only after the config default, so nothing is shadowed.
   const cfg = { platform: { default: 'claude', providers: { claude: { version: '1' } } }, sdd: { default: 'gentle-ai', providers: { 'gentle-ai': { version: '1' } } } };
   const installed = { platform: { claude: '1' }, sdd: { 'gentle-ai': '1' } };
-  assert.deepEqual(codes(diagnoseAxes({ config: cfg, env: { SDD_HARNESS: 'plain' }, dotenv: {}, installed })), []);
-  assert.deepEqual(codes(diagnoseAxes({ config: cfg, env: {}, dotenv: { SDD_HARNESS: 'plain' }, installed })), []);
-  assert.deepEqual(codes(diagnoseAxes({ config: { ...cfg, harness: 'plain' }, env: { SDD_HARNESS: 'antigravity' }, dotenv: {}, installed })), []);
+  assert.deepEqual(codes(diagnose({ config: cfg, env: { SDD_HARNESS: 'plain' }, dotenv: {}, installed })), []);
+  assert.deepEqual(codes(diagnose({ config: cfg, env: {}, dotenv: { SDD_HARNESS: 'plain' }, installed })), []);
+  assert.deepEqual(codes(diagnose({ config: { ...cfg, harness: 'plain' }, env: { SDD_HARNESS: 'antigravity' }, dotenv: {}, installed })), []);
 });
 
 test('env-shadows-config: an UNDECLARED axis has nothing to be shadowed from, even when SDD_HARNESS states a value', () => {
-  assert.deepEqual(diagnoseAxes({ config: {}, env: { SDD_HARNESS: 'plain' }, dotenv: {} }), []);
+  assert.deepEqual(diagnose({ config: {}, env: { SDD_HARNESS: 'plain' }, dotenv: {} }), []);
 });
 
 test('selector-refused: a per-machine value the resolver would refuse is reported, never silent (#1114 S2)', () => {
-  const f = diagnoseAxes({ config: declared, env: { AGENT_PLATFORM: 'antigravity', MEMORY_BACKEND: 'mongo' }, dotenv: {} }).filter((x) => x.code === 'selector-refused');
+  const f = diagnose({ config: declared, env: { AGENT_PLATFORM: 'antigravity', MEMORY_BACKEND: 'mongo' }, dotenv: {} }).filter((x) => x.code === 'selector-refused');
   assert.deepEqual(f.map((x) => x.axis).sort(), ['memory', 'platform']);
   assert.ok(f.every((x) => x.severity === 'error' && x.fix));
   assert.match(f.find((x) => x.axis === 'platform').message, /not a key of platform\.providers/);
@@ -94,23 +98,23 @@ test('selector-refused: a per-machine value the resolver would refuse is reporte
 
 test('version-unverified: no version declared; the message carries a detected version and the fix is the exact set command', () => {
   const config = { sdd: { default: 'gentle-ai', providers: { 'gentle-ai': {} } } };
-  const [withInstalled] = diagnoseAxes({ config, installed: { sdd: { 'gentle-ai': '1.4.2' } } });
+  const [withInstalled] = diagnose({ config, installed: { sdd: { 'gentle-ai': '1.4.2' } } });
   assert.equal(withInstalled.code, 'version-unverified');
   assert.equal(withInstalled.severity, 'info');
   assert.match(withInstalled.message, /1\.4\.2/);
   assert.equal(withInstalled.fix, 'npm run brain:config -- set sdd.providers.gentle-ai.version 1.4.2');
-  const [bare] = diagnoseAxes({ config, installed: {} });
+  const [bare] = diagnose({ config, installed: {} });
   assert.equal(bare.code, 'version-unverified');
   assert.match(bare.fix, /set sdd\.providers\.gentle-ai\.version <version>/);
 });
 
 test('version-unverified: a numeric-looking detected version is quoted so the verb stores a string', () => {
-  const [f] = diagnoseAxes({ config: { sdd: { default: 'plain', providers: { plain: {} } } }, installed: { sdd: { plain: '2' } } });
+  const [f] = diagnose({ config: { sdd: { default: 'plain', providers: { plain: {} } } }, installed: { sdd: { plain: '2' } } });
   assert.equal(f.fix, `npm run brain:config -- set sdd.providers.plain.version '"2"'`);
 });
 
 test('version-unverifiable: a version is declared but nothing probed the provider', () => {
-  const [f] = diagnoseAxes({ config: { vcs: { default: 'github', providers: { github: { version: '2.0.0' } } } }, installed: {} });
+  const [f] = diagnose({ config: { vcs: { default: 'github', providers: { github: { version: '2.0.0' } } } }, installed: {} });
   assert.equal(f.code, 'version-unverifiable');
   assert.equal(f.severity, 'info');
   assert.match(f.message, /github/);
@@ -118,7 +122,7 @@ test('version-unverifiable: a version is declared but nothing probed the provide
 });
 
 test('version-mismatch: declared and installed differ (exact-string compare; ranges are #1130)', () => {
-  const [f] = diagnoseAxes({ config: { vcs: { default: 'github', providers: { github: { version: '2.0.0' } } } }, installed: { vcs: { github: '2.1.0' } } });
+  const [f] = diagnose({ config: { vcs: { default: 'github', providers: { github: { version: '2.0.0' } } } }, installed: { vcs: { github: '2.1.0' } } });
   assert.equal(f.code, 'version-mismatch');
   assert.equal(f.severity, 'warning');
   assert.match(f.message, /2\.0\.0/);
@@ -128,12 +132,12 @@ test('version-mismatch: declared and installed differ (exact-string compare; ran
 
 test('"self" is verified only against installed.sdd.brain; with no installed version it is unverifiable', () => {
   const config = { sdd: { default: 'plain', providers: { plain: { version: '1' }, brain: { version: 'self' } } } };
-  assert.deepEqual(diagnoseAxes({ config, installed: { sdd: { brain: '1.11.1', plain: '1' } } }), []);
-  assert.deepEqual(codes(diagnoseAxes({ config, installed: { sdd: { plain: '1' } } })), ['sdd:version-unverifiable']);
+  assert.deepEqual(diagnose({ config, installed: { sdd: { brain: '1.11.1', plain: '1' } } }), []);
+  assert.deepEqual(codes(diagnose({ config, installed: { sdd: { plain: '1' } } })), ['sdd:version-unverifiable']);
 });
 
 test('invalid-config: every validateAxisConfig error is surfaced as an error finding', () => {
-  const f = diagnoseAxes({ config: { platform: { default: 'codex', providers: { codex: {} } } } }).filter((x) => x.code === 'invalid-config');
+  const f = diagnose({ config: { platform: { default: 'codex', providers: { codex: {} } } } }).filter((x) => x.code === 'invalid-config');
   assert.equal(f.length, 1);
   assert.equal(f[0].severity, 'error');
   assert.equal(f[0].axis, 'platform');
@@ -143,7 +147,7 @@ test('invalid-config: every validateAxisConfig error is surfaced as an error fin
 });
 
 test('every finding has the documented shape', () => {
-  const fs = diagnoseAxes({ config: { ...declared, platform: { default: 'codex', providers: { codex: {} } } }, env: { MEMORY_BACKEND: 'engram' }, dotenv: { AGENT_PLATFORM: 'plain' }, installed: { vcs: { github: '9' } } });
+  const fs = diagnose({ config: { ...declared, platform: { default: 'codex', providers: { codex: {} } } }, env: { MEMORY_BACKEND: 'engram' }, dotenv: { AGENT_PLATFORM: 'plain' }, installed: { vcs: { github: '9' } } });
   assert.ok(fs.length >= 4);
   for (const f of fs) {
     assert.deepEqual(Object.keys(f).sort(), ['axis', 'code', 'fix', 'message', 'severity']);
@@ -163,6 +167,29 @@ test('every diagnose message is an i18n key present in en and es (es actually tr
 });
 
 test('diagnoseAxes renders through an injected catalog (es)', () => {
-  const f = diagnoseAxes({ config: wide, env: {}, dotenv: { AGENT_PLATFORM: "plain" }, catalog: { ...en, ...es } }).find((x) => x.code === "env-shadows-config");
+  const f = diagnose({ config: wide, env: {}, dotenv: { AGENT_PLATFORM: "plain" }, catalog: { ...en, ...es } }).find((x) => x.code === "env-shadows-config");
   assert.match(f.message, /AGENT_PLATFORM en \.env \(plain\)/);
+});
+
+// ── owners-undeclared (#1263 slice 3, ADR-0040 section 5) ─────────────────────────────────────────────────────────────
+const ownerFindings = (config) => diagnoseAxes({ config, env: {}, dotenv: {} }).filter((f) => f.code === 'owners-undeclared');
+
+test('owners-undeclared: a config with no governance.owners, or an empty list, is a warning with the exact fix, in English and Spanish', () => {
+  for (const cfg of [{ ...declared, governance: {} }, { ...declared, governance: { owners: [] } }, { ...declared, governance: { owners: ['', '  '] } }, { ...declared, governance: undefined }]) {
+    const [f, ...more] = ownerFindings(cfg);
+    assert.equal(more.length, 0);
+    assert.equal(f.severity, 'warning');
+    assert.equal(f.fix, 'name the owner(s) in a PR: npm run brain:config -- set governance.owners <login>');
+    const es_ = diagnoseAxes({ config: cfg, env: {}, dotenv: {}, catalog: es }).find((x) => x.code === 'owners-undeclared');
+    assert.match(es_.message, /dueño/);
+    assert.match(es_.fix, /brain:config -- set governance\.owners <login>/);
+  }
+});
+
+test('owners-undeclared: a named owner silences it', () => {
+  assert.deepEqual(ownerFindings({ ...declared, governance: { owners: ['alice'] } }), []);
+});
+
+test('owners-undeclared: the i18n catalogs carry both keys', () => {
+  for (const cat of [en, es]) for (const k of ['axes.diagnose.ownersUndeclared', 'axes.diagnose.ownersUndeclared.fix']) assert.ok(cat[k], k);
 });

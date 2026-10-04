@@ -239,6 +239,8 @@ export const migrations = [
       "window: shell readers (install-tools.sh, bootstrap.sh), the brain-config scaffold and the " +
       "brain:config verb still read or write them, and readAxis prefers the shape. The one key that " +
       "cannot stay is the flat `platform` string, which is the same key as the new `platform` object. " +
+      "Also writes `locked: false` on memory, platform and sdd where none is stated, so no existing consumer is locked by an upgrade " +
+      "(ADR-0040, #1263); it never seeds governance.owners. " +
       "Needs the axisContext migrateConfig hands it (brain-upgrade and brain:config build it from " +
       "env and .env); with none, the entry changes nothing, so buildDefaultConfig is untouched. " +
       "Versioned 1.11.1, the smallest version above the shipped 1.11.0.",
@@ -279,6 +281,21 @@ function migrateToAxisShape(config, helpers = {}) {
   toShape('vcs', text(out.vcs?.provider), 'brain.config.json vcs.provider');
   toShape('platform', ctx.platform.value, ctx.platform.source);
   toShape('sdd', ctx.sdd.value, ctx.sdd.source);
+
+  // `locked: false` on every overridable axis that states no `locked` (ADR-0040 section 3, ratified point 6): an existing consumer's
+  // behaviour does not change, and an owner turns a lock on deliberately. A key already present (true or false) is never touched.
+  // `governance.owners` is NOT seeded here (ratified point 4): an existing consumer's owners are a decision its team makes.
+  const unlocked = [];
+  for (const axis of ['memory', 'platform', 'sdd']) {
+    if (isObj(out[axis]) && !has(out[axis], 'locked')) {
+      out[axis].locked = false;
+      unlocked.push(axis);
+    }
+  }
+  if (unlocked.length > 0) {
+    say(`${unlocked.map((a) => `${a}.locked`).join(', ')} = false (nothing changes for you: no axis is locked until an owner turns it on, ` +
+      'e.g. npm run brain:config -- set memory.locked true, in a PR; and declare who owns the team config: npm run brain:config -- set governance.owners <login>)');
+  }
 
   // The `brain` SDD provider: what brain already runs, given a name. "self" is the one version a
   // migration may write (ratified point 3): it is the package's own, not the machine's.
@@ -339,6 +356,13 @@ function migrateToAxisShape(config, helpers = {}) {
 // migrations after it. mergeDefaults never overwrites a value already present, so
 // a fresh config is exactly "a consumer that declared lite before any migration
 // ran" — the same path a declared tier already takes through every upgrade.
+//
+// #1263 slice 3 (ADR-0040 section 3, ratified points 4 and 6): a NEW adoption also starts with `memory` and `sdd` LOCKED (the team's
+// records hydrate into one backend; the pipeline and its roles are the team's process) and `platform` free, and with an empty
+// `governance.owners` that `env:init` seeds from the adopter's login. An EXISTING consumer gets none of this from here: the 1.11.1
+// migration writes `locked: false` for it, so nothing it runs changes, and it never seeds an owner.
 export const NEW_CONSUMER_DEFAULTS = Object.freeze({
-  governance: Object.freeze({ tier: 'lite' }),
+  governance: Object.freeze({ tier: 'lite', owners: Object.freeze([]) }),
+  memory: Object.freeze({ locked: true }),
+  sdd: Object.freeze({ locked: true }),
 });
