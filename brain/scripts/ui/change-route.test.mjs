@@ -67,9 +67,10 @@ function gitFor({ spec = SPEC_TEXT, tasks = TASKS_TEXT, files = {}, branches = {
 
 function makeSnapshot({
   changes = [{ id: 'issue-881-ui-server-canvas', issue: ISSUE, slug: 'ui-server-canvas', dir: CHANGE_DIR }],
-  prs = [], reviews = [], records = { ok: true, value: { records: [], duplicates: { ids: 0 } } },
+  prs = [], reviews = [], records = { ok: true, value: { records: [], duplicates: { ids: 0 } } }, localWorktrees,
 } = {}) {
   return {
+    ...(localWorktrees ? { localWorktrees } : {}),
     changes: { ok: true, value: changes },
     prs: { ok: true, value: prs },
     reviews: { ok: true, value: reviews },
@@ -125,6 +126,32 @@ test('#881: two matching */issue-<N>[-*] branches renders none, listing both, an
   assert.match(result.value.workingMemory.reason, new RegExp(`feat/issue-${ISSUE}-a`));
   assert.match(result.value.workingMemory.reason, new RegExp(`feat/issue-${ISSUE}-b`));
   assert.ok(!run.calls.some((args) => args[0] === 'show'), 'ambiguous branch resolution must never guess which one to read');
+});
+
+const localEntry = (branch, dirState = 'present') => ({ path: `/wt/${branch.replace(/\//g, '-')}`, leaf: branch.replace(/\//g, '-'), branch, head: BRANCH_TIP, issue: ISSUE, dirState, dir: dirState === 'present' ? CHANGE_DIR : null, capped: false });
+const localSection = (...entries) => ({ ok: true, value: { entries, hidden: {}, tier: 'working-tree' } });
+
+test('#883 W2: several matching branches resolve to the one a kept worktree holding the change dir has checked out', () => {
+  const feat = `feat/issue-${ISSUE}-x`;
+  const tracker = `feature/issue-${ISSUE}-y`;
+  const run = gitFor({ branches: { [feat]: { commit: BRANCH_TIP, files: { [RESUME_PATH]: RESUME_TEXT } }, [tracker]: { commit: BRANCH_TIP, files: {} } } });
+  const snapshot = makeSnapshot({ prs: [], localWorktrees: localSection(localEntry(feat), localEntry(tracker, 'missing')) });
+  const result = buildChangeView({ issue: ISSUE, snapshot, _run: run });
+  assert.equal(result.value.workingMemory.ok, true);
+  assert.equal(result.value.workingMemory.value.current_slice.source.path.startsWith(`${feat}:`), true);
+});
+
+test('#883 W2: several matching branches each held by a kept worktree with the change dir refuse, naming the worktrees', () => {
+  const a = `feat/issue-${ISSUE}-x`;
+  const b = `feature/issue-${ISSUE}-y`;
+  const run = gitFor({ branches: { [a]: { commit: BRANCH_TIP, files: {} }, [b]: { commit: BRANCH_TIP, files: {} } } });
+  const snapshot = makeSnapshot({ prs: [], localWorktrees: localSection(localEntry(a), localEntry(b)) });
+  const result = buildChangeView({ issue: ISSUE, snapshot, _run: run });
+  assert.equal(result.value.workingMemory.ok, false);
+  assert.match(result.value.workingMemory.reason, /more than one \*\/issue-881 branch/);
+  assert.match(result.value.workingMemory.reason, /feat-issue-881-x/);
+  assert.match(result.value.workingMemory.reason, /feature-issue-881-y/);
+  assert.ok(!run.calls.some((args) => args[0] === 'show'));
 });
 
 // ── 4. no change dir ─────────────────────────────────────────────────────────

@@ -353,6 +353,19 @@ test('R883-8: an untracked apply-progress.md in the served root appears nowhere 
   assert.ok(!JSON.stringify(v).includes('STRAY-SERVED-ROOT-BODY'));
 });
 
+test('R883-8: when the served root is itself a linked worktree, its untracked document appears nowhere and no block names it', async (t) => {
+  const repo = makeWorktreeRepo();
+  t.after(() => repo.dispose());
+  const served = repo.addWorktree('feat/issue-7-x', { [`${D7}/proposal.md`]: '# served\n' }, { commit: true });
+  put(served.path, { [`${D7}/apply-progress.md`]: 'STRAY-LINKED-SERVED-BODY\n' });
+  const snapshot = await snapshotOf(served.path, [7]);
+  assert.deepEqual(snapshot.localWorktrees.value.entries.filter((e) => e.path === served.path), [], 'the served root is hidden even though it is a kept-looking issue branch');
+  const v = buildChangeView({ root: served.path, issue: 7, snapshot, _run: gitRun(served.path) }).value;
+  assert.equal(v.documents.apply.state, 'missing');
+  assert.deepEqual(v.local.filter((b) => b.path === served.path || b.branch === 'feat/issue-7-x'), []);
+  assert.ok(!JSON.stringify(v).includes('STRAY-LINKED-SERVED-BODY'));
+});
+
 test('R883-9: the block carries its resume outcome through the same reader the remote blocks use', async (t) => {
   const valid = makeWorktreeRepo();
   t.after(() => valid.dispose());

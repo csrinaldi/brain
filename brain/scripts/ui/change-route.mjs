@@ -134,7 +134,8 @@ function buildTasksTab({ documents, head, run, dir, issue }) {
 /**
  * D12's branch resolution, in order: the issue's open PR headBranch, else the
  * single local branch of this issue, whatever its type (#883 D81) — never
- * picking among more than one. `*\/issue-N` and `*\/issue-N-*` are the two
+ * picking among more than one unless exactly one of them is checked out in a
+ * kept local worktree that holds the change dir (#883 W2). `*\/issue-N` and `*\/issue-N-*` are the two
  * globs `git branch --list` needs; `parseCanonicalIssueBranch` is the one
  * grammar that says which names are really this issue's.
  */
@@ -150,8 +151,16 @@ function resolveBranch({ run, snapshot, issue }) {
   }
   const names = listed.split(/\r?\n/).map((l) => l.replace(/^[*+]?\s+/, '').trim()).filter((n) => n && parseCanonicalIssueBranch(n)?.issueNumber === String(issue));
   if (names.length === 0) return { ok: false, kind: 'none', reason: `no open PR and no */issue-${issue} branch in this clone` };
-  if (names.length > 1) return { ok: false, kind: 'ambiguous', reason: `more than one */issue-${issue} branch in this clone: ${names.join(', ')}` };
-  return { ok: true, branch: names[0] };
+  if (names.length === 1) return { ok: true, branch: names[0] };
+  // #883 W2: several names. The worktree that holds this issue's change dir is
+  // the one the maintainer is working in; the snapshot already says which
+  // (no extra spawn). Two such worktrees stay ambiguous and are named.
+  const entries = snapshot?.localWorktrees?.ok ? snapshot.localWorktrees.value.entries : [];
+  const holding = entries.filter((e) => e.issue === issue && e.dirState === 'present' && names.includes(e.branch));
+  const held = [...new Set(holding.map((e) => e.branch))];
+  if (held.length === 1) return { ok: true, branch: held[0] };
+  const named = held.length > 1 ? `; held by worktrees ${holding.map((e) => e.leaf).join(', ')}` : '';
+  return { ok: false, kind: 'ambiguous', reason: `more than one */issue-${issue} branch in this clone: ${names.join(', ')}${named}` };
 }
 
 function buildWorkingMemoryTab({ resolved, resume, localResume = false }) {
