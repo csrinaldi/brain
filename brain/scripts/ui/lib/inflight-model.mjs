@@ -73,6 +73,8 @@ function titleOf(graph, issue) {
   return node?.title ?? '';
 }
 
+const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+
 function rowOf(c, state, graph) {
   const authors = [...new Set(c.branches.map((b) => b.author).filter(Boolean))];
   // A change-dir-only row has no branch to read an author from; the dir's last committer is the only name there is.
@@ -91,6 +93,12 @@ function rowOf(c, state, graph) {
     authors,
     authorLines: authors.map(authorLine),
     onThisMachine: c.worktrees.length > 0,
+    facts: [
+      c.worktrees.length > 0 ? `${plural(c.worktrees.length, 'worktree', 'worktrees')} on this machine` : null,
+      c.branches.length > 0 ? `${plural(c.branches.length, 'branch', 'branches')} on origin` : null,
+      ...c.prs.map((p) => `PR #${p.number}`),
+      ...authors.map(authorLine),
+    ].filter(Boolean),
   };
 }
 
@@ -114,7 +122,7 @@ export function buildInflight(sections, { nowMs }) {
   const h = hierarchyOf(s.hierarchy);
   if (!h.ok) {
     // D96: with no state there is no filter, so no row is drawn; the count says how many were named.
-    value.notices = [`${candidates.size} candidate issue(s); their open/closed state is not read yet (hierarchy: ${h.reason})`, ...notices.filter((n) => !n.startsWith('hierarchy:'))];
+    value.notices = [`${candidates.size} candidate issue(s); their open/closed state is not read yet (hierarchy: ${h.pending === true ? 'still loading' : 'could not be read'} — ${h.reason})`, ...notices.filter((n) => !n.startsWith('hierarchy:'))];
     return { ok: true, value };
   }
 

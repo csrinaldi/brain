@@ -54,7 +54,7 @@ import { issueUrl } from './lib/forge-url.mjs';
 import { buildDrawerModel, localChangedFor } from './lib/drawer-model.mjs';
 import { remoteBadges, remotePanel, tipAge } from './lib/remote-model.mjs';
 import { renderOffThread, timeoutNotice, FAILED_NOTICE, UNAVAILABLE_NOTICE } from './lib/render-budget.mjs';
-import { buildSddModel, sddForIssue, buildSlicePlan, STAGE_VOCAB } from './lib/sdd-model.mjs';
+import { buildSddModel, sddForIssue, quietAbsence, buildSlicePlan, STAGE_VOCAB } from './lib/sdd-model.mjs';
 import { searchNodes } from './lib/search-model.mjs';
 import { buildMemoryModel } from './lib/memory-model.mjs';
 import { buildReviewTimeline } from './lib/review-timeline.mjs';
@@ -62,6 +62,7 @@ import { buildRoadmapModel } from './lib/roadmap-model.mjs';
 import { buildDecisionsModel } from './lib/decisions-model.mjs';
 import { buildAntiPatternsModel } from './lib/anti-patterns-model.mjs';
 import { buildHeaderModel } from './lib/header-model.mjs';
+import { buildInflight } from './lib/inflight-model.mjs';
 import { STATES } from './lib/state-vocab.mjs';
 import { buildHistoryModel, capNote } from './lib/history-model.mjs';
 import { buildActorsModel } from './lib/actors-model.mjs';
@@ -118,6 +119,8 @@ let activeTab = 'spec';
 let collapsedTracks = new Set(['?']);
 /** Whether the "Remote work" panel's unjoined group is open (#1201 R1201-5). Page-only, like `collapsedTracks`; collapsed by default. */
 let remoteUnjoinedOpen = false;
+/** The in-flight section's stale group starts collapsed (#1284 R1284-5). */
+let inflightStaleOpen = false;
 /** The `?` holding lane's current page (#998 R998-3), 24 rows at a time. */
 let holdingPage = 0;
 /**
@@ -493,7 +496,9 @@ function renderServedBranch(servedBranch) {
     return frag;
   }
   const text = servedBranch.ok ? `serving ${servedBranch.branch}` : `serving: unknown (${servedBranch.reason})`;
-  frag.appendChild(el('span', 'served-branch', text));
+  const branchEl = el('span', 'served-branch', text);
+  branchEl.setAttribute('title', text);
+  frag.appendChild(branchEl);
   frag.appendChild(renderSourceStamp(sourceStamp(servedBranch.source)));
   return frag;
 }
@@ -514,14 +519,18 @@ function renderStatus() {
   live.setAttribute('title', indicator.paused ? 'polling is paused' : 'the page is connected to the stream');
   mounts.status.appendChild(live);
 
-  mounts.status.appendChild(el('span', indicator.paused ? 'poll-indicator paused' : indicator.halted ? 'poll-indicator halted' : 'poll-indicator', indicator.text));
+  const pollEl = el('span', indicator.paused ? 'poll-indicator paused' : indicator.halted ? 'poll-indicator halted' : 'poll-indicator', indicator.text);
+  pollEl.setAttribute('title', indicator.text);
+  mounts.status.appendChild(pollEl);
   mounts.status.appendChild(el('span', 'poll-countdown', indicator.countdown));
 
   // The epic this checkout serves: an epic declares its tracker branch, and
   // nothing joins the two yet, so the bar says that rather than parsing an
-  // epic out of a branch name.
-  mounts.status.appendChild(el('span', 'status-epic', epic.ok ? `epic #${epic.issue}` : 'epic: not resolved'));
-  mounts.status.appendChild(el('span', 'status-epic-reason', epic.ok ? '' : epic.reason));
+  // epic out of a branch name. The one-line bar carries the short form; the
+  // explanation is its title and a banner (#1284 D99, D101).
+  const epicEl = el('span', 'status-epic', epic.ok ? `epic #${epic.issue}` : epic.short);
+  if (!epic.ok) epicEl.setAttribute('title', epic.reason);
+  mounts.status.appendChild(epicEl);
 
   const countsEl = el('span', 'status-counts');
   if (counts.ok) {
@@ -535,6 +544,7 @@ function renderStatus() {
   } else {
     countsEl.appendChild(el('span', 'count-label', `nodes: not counted — ${counts.reason}`));
   }
+  countsEl.setAttribute('title', countsEl.textContent);
   mounts.status.appendChild(countsEl);
 
   mounts.status.appendChild(el('span', 'spacer'));
@@ -571,6 +581,48 @@ function renderStatus() {
   mounts.status.appendChild(refresh);
 }
 
+/** One in-flight row (#1284 D97): the issue, its state when unknown, its facts and its age — text only, opening the card's drawer. */
+function renderInflightRow(row) {
+  const node = el('div', 'inflight-row');
+  node.setAttribute('role', 'button');
+  node.setAttribute('tabindex', '0');
+  node.setAttribute('data-issue', String(row.issue));
+  node.appendChild(el('span', 'inflight-number', `#${row.issue}`));
+  node.appendChild(el('span', 'inflight-title', row.title || '(no title)'));
+  if (row.state === 'unknown') node.appendChild(el('span', 'inflight-state', 'state unknown'));
+  node.appendChild(el('span', 'inflight-facts', row.facts.join(' \u00b7 ')));
+  node.appendChild(el('span', 'inflight-age', row.activityAt ? tipAge(row.activityAt, nowMs()) : 'activity unknown'));
+  node.addEventListener('click', () => selectNode(row.issue));
+  node.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') selectNode(row.issue); });
+  return node;
+}
+
+/**
+ * The home's first section (#1284 R-H): the open issues with work in flight, newest first, from
+ * whatever sections have arrived. Every missing source is named; "nothing in flight" is said only
+ * when every source is ready (`inflight-model.mjs` decides, this places).
+ */
+function renderInflight() {
+  const model = buildInflight({
+    changes: sectionOf(state, 'changes'), localWorktrees: sectionOf(state, 'localWorktrees'), remoteChanges: sectionOf(state, 'remoteChanges'),
+    prs: sectionOf(state, 'prs'), hierarchy: sectionOf(state, 'hierarchy'), graph: sectionOf(state, 'graph'),
+  }, { nowMs: nowMs() }).value;
+  const wrap = el('section', 'inflight');
+  wrap.appendChild(el('h3', 'inflight-title-bar', 'In flight'));
+  for (const line of model.notices) wrap.appendChild(el('p', 'inflight-notice said', line));
+  if (model.empty) wrap.appendChild(el('p', 'inflight-empty said', model.empty));
+  for (const row of [...model.rows, ...model.unknown]) wrap.appendChild(renderInflightRow(row));
+  if (model.stale.length > 0) {
+    const toggle = el('button', 'inflight-stale-toggle', `stale (${model.stale.length})`);
+    toggle.type = 'button';
+    toggle.setAttribute('aria-expanded', String(inflightStaleOpen));
+    toggle.addEventListener('click', () => { inflightStaleOpen = !inflightStaleOpen; render(); });
+    wrap.appendChild(toggle);
+    if (inflightStaleOpen) for (const row of model.stale) wrap.appendChild(renderInflightRow(row));
+  }
+  return wrap;
+}
+
 /**
  * The DAG, drawn as track lanes (#998 R998-3): one row per declared track —
  * each with its OWN board, `layout()` run once per lane by `lane-model.mjs`
@@ -583,6 +635,7 @@ function renderStatus() {
 function renderLanes() {
   const model = buildLaneModel(sectionOf(state, 'graph'), { collapsedTracks, holdingPage, project: state.meta?.project ?? null, clustering });
   clear(mounts.canvas);
+  mounts.canvas.appendChild(renderInflight());
   if (!model.ok) {
     mounts.canvas.appendChild(saidUnavailable('the graph could not be computed', model, 'graph'));
     return;
@@ -803,6 +856,8 @@ function renderClusteringBar() {
 function renderNodeSdd(issue) {
   const strip = el('div', 'node-sdd');
   const found = sddForIssue(sectionOf(state, 'changes'), issue, sectionOf(state, 'localWorktrees'));
+  // #1284 D102: an issue nobody works on says nothing on its card; the drawer still states the absence.
+  if (quietAbsence(found, sectionOf(state, 'localWorktrees'), sectionOf(state, 'remoteChanges'), issue)) return null;
   if (!found.ok) {
     strip.appendChild(el('span', 'node-sdd-none', found.reason));
     return strip;
@@ -896,7 +951,8 @@ function renderNodeCard(node) {
     card.appendChild(el('p', 'node-blocked', `blocked by ${node.blockedBy.map((n) => `#${n}`).join(', ')}`));
   }
   for (const mark of node.marks) card.appendChild(said(mark));
-  card.appendChild(renderNodeSdd(node.number));
+  const sddStrip = renderNodeSdd(node.number);
+  if (sddStrip !== null) card.appendChild(sddStrip);
   card.appendChild(renderNodeRemote(node.number));
 
   card.addEventListener('click', () => selectNode(node.number));

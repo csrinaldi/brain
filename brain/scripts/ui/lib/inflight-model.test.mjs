@@ -89,6 +89,18 @@ test('R1284-2/D97: a change-dir-only row names the last committer of its dir', (
   assert.deepEqual(r.value.rows[0].authors, ['cris']);
 });
 
+test('D97: a row states its facts as text — the machine, the branches, the PRs, the authors — and never a name it could not read', () => {
+  const r = build({
+    hierarchy: hierarchy({ 1114: 'open', 978: 'open' }),
+    localWorktrees: ok({ entries: [wt(1114), wt(1114)] }),
+    remoteChanges: ok({ branches: [br(978, { author: 'ana' }), br(978, { author: 'bo' })] }),
+    prs: ok([{ number: 55, issue: 978 }]),
+  });
+  const by = Object.fromEntries([...r.value.rows, ...r.value.unknown].map((x) => [x.issue, x]));
+  assert.deepEqual(by[1114].facts, ['2 worktrees on this machine']);
+  assert.deepEqual(by[978].facts, ['2 branches on origin', 'PR #55', 'last commit by ana', 'last commit by bo']);
+});
+
 test('R1284-3: a null-state issue is kept and marked state unknown; an issue the hierarchy does not list is not open (D96)', () => {
   const r = build({
     hierarchy: ok({ issues: [[700, { state: null, children: [] }]], divergences: [], closedUnresolved: [], closedRead: { ok: true } }),
@@ -189,7 +201,7 @@ test('R1284-6/D96: while hierarchy is not ready no row is drawn; the candidate c
   assert.deepEqual([r.value.rows, r.value.unknown, r.value.stale], [[], [], []]);
   assert.equal(r.value.candidates, 3);
   assert.deepEqual(r.value.missingSources, [{ name: 'hierarchy', state: 'failed', reason: 'rate limited' }]);
-  assert.match(r.value.notices.join('\n'), /3 candidate issue\(s\); their open\/closed state is not read yet \(hierarchy: rate limited\)/);
+  assert.match(r.value.notices.join('\n'), /3 candidate issue\(s\); their open\/closed state is not read yet \(hierarchy: could not be read — rate limited\)/);
   assert.equal(r.value.empty, null, 'never "nothing in flight" while a source is missing');
 });
 

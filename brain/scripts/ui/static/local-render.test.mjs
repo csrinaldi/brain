@@ -41,7 +41,7 @@ const remoteBlock = () => ({
 const entryOf = (issue, over = {}) => ({ path: `/srv/wt-${issue}`, leaf: `wt-${issue}`, branch: `feat/issue-${issue}-x`, head: 'd'.repeat(40), issue, dir: DIR, dirState: 'present', reason: null, touchedAt: null, fingerprint: 'f1', capped: false, ...over });
 const sectionOf = (...entries) => ({ ok: true, value: { entries, hidden: { served: 1 }, tier: 'working-tree' } });
 
-async function boot({ local = [], remote = [], servedDir = true, section = sectionOf(entryOf(1198), entryOf(1199)), extra = {} } = {}) {
+async function boot({ local = [], remote = [], servedDir = true, section = sectionOf(entryOf(1198), entryOf(1199)), extra = {}, snapshotPatch = {} } = {}) {
   const root = testTmp('local-render-');
   writeFileSync(join(root, 'brain.config.json'), readFileSync(join(REPO, 'brain.config.json'), 'utf8'));
   if (servedDir) {
@@ -54,6 +54,7 @@ async function boot({ local = [], remote = [], servedDir = true, section = secti
   };
   const snapshot = await buildSnapshot({ root, project: 'o/r', vcs, now: '2026-10-01T12:00:00.000Z', _run: () => { throw new Error('no git'); } });
   snapshot.localWorktrees = section;
+  Object.assign(snapshot, snapshotPatch);
   const run = fakeGit({ files: servedDir ? { [`${DIR}/proposal.md`]: '# served\n' } : {}, head: HEAD, blame: '', branches: {} });
   const view = buildChangeView({ root, issue: 1198, snapshot, _run: run });
   view.value.local = local;
@@ -242,4 +243,33 @@ test('R1276-6: with no change dir at the served HEAD, the empty-state line names
   t.after(() => dom.restore());
   await open(dom);
   assert.match(dom.mounts.drawer.textContent, new RegExp(`the served HEAD has no change dir for this issue; the tabs read ${label}`));
+});
+
+// ── #1284 D102: a card with no work omits the absence line; the drawer keeps it ─────────────────
+
+const remoteOk = (...branches) => ({ ok: true, value: { base: 'origin/main', branches, unjoined: [], hidden: {}, prsApplied: true, deferred: 0 } });
+const branchOf = (issue) => ({ kind: 'grammar', issue, branch: `feat/issue-${issue}-r`, sha: 'e'.repeat(40), tipAt: '2026-10-01T00:00:00Z', author: 'Ada', pr: null, change: { ok: false, reason: 'x' }, resume: null });
+
+test('R1284-12: a card whose issue has no change dir, no worktree and no branch shows no absence line, and its drawer still says it', async (t) => {
+  const dom = await boot({ section: sectionOf(entryOf(1198)), snapshotPatch: { remoteChanges: remoteOk() } });
+  t.after(() => dom.restore());
+  const card = cardOf(dom, 1199)[0];
+  assert.equal(find(card, byClass('node-sdd')), null, 'no strip at all');
+  assert.doesNotMatch(card.textContent, /no change directory names issue/);
+  await open(dom, 1199);
+  assert.match(dom.mounts.drawer.textContent, /no change dir/);
+});
+
+test('R1284-12: an unread forge section keeps the line — "not read" is not "no work"', async (t) => {
+  const dom = await boot({ section: sectionOf(entryOf(1198)) });
+  t.after(() => dom.restore());
+  assert.match(cardOf(dom, 1199)[0].textContent, /no change directory names issue #1199/);
+});
+
+test('R1284-12: a remote-only card keeps its line', async (t) => {
+  const dom = await boot({ section: sectionOf(entryOf(1198)), snapshotPatch: { remoteChanges: remoteOk(branchOf(1199)) } });
+  t.after(() => dom.restore());
+  const card = cardOf(dom, 1199)[0];
+  assert.match(find(card, byClass('node-remote')).textContent, /on origin: feat\/issue-1199-r/);
+  assert.match(card.textContent, /no change directory names issue #1199/);
 });
