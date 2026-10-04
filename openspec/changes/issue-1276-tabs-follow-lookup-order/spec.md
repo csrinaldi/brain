@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 1276
 ---
 
@@ -84,7 +84,12 @@ When neither main nor a worktree holds the change, the source MUST be an origin 
 
 ### R1276-5: A step that could not be read stops the walk (ruled, Q2)
 
-When the served root's `changes` section is not readable, the tabs MUST keep today's behaviour. When the `localWorktrees` section is not readable or still pending, the walk MUST stop, `tabSource.kind` MUST be `none`, and each tab MUST say `this machine's worktrees were not read, so the tabs cannot fall back past them: <reason>`. When the holding worktree's block is `unreadable`, each tab MUST fail with `the change dir in worktree <leaf> could not be read: <reason>`. A step that was not read MUST NOT be reported as a step that holds nothing.
+When the served root's `changes` section could not be read for any reason other than the directory being absent, the tabs MUST keep today's behaviour. A served root with no `openspec/changes` directory is a repository with no changes, so main holds no change dir and the walk MUST continue to the worktree step. When the `localWorktrees` section is not readable or still pending, the walk MUST stop, `tabSource.kind` MUST be `none`, and each tab MUST say `this machine's worktrees were not read, so the tabs cannot fall back past them: <reason>`. When the holding worktree's block is `unreadable`, each tab MUST fail with `the change dir in worktree <leaf> could not be read: <reason>`. A step that was not read MUST NOT be reported as a step that holds nothing.
+
+#### Scenario: A root with no changes directory still shows a worktree change
+- **GIVEN** a served root with no `openspec/changes` directory and a worktree holding an uncommitted `spec.md` and `tasks.md` for the issue
+- **WHEN** `buildChangeView` runs
+- **THEN** `tabSource.kind` is `worktree` and the Spec and SDD tabs are ok
 
 #### Scenario: An unreadable worktree section is said, not skipped
 - **GIVEN** no change dir on main, a `localWorktrees` section that is uncomputable, and an origin branch holding the change
