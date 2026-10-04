@@ -82,7 +82,7 @@ function loadingSections(snapshot) {
  * order the page shows them: the transport first (it explains why everything
  * else may be stale), then the controls, the watcher, the poller, the sections.
  */
-export function degradationBands({ stream, controls, meta, snapshot }) {
+export function degradationBands({ stream, controls, meta, snapshot, epic }) {
   const bands = [];
   if (stream && stream.ok === false) bands.push({ id: 'stream', text: stream.reason });
   if (controls && controls.ok === false) bands.push({ id: 'controls', text: controlBanner(controls) });
@@ -106,6 +106,8 @@ export function degradationBands({ stream, controls, meta, snapshot }) {
       detail: failed.map((f) => `${f.name}: ${f.reason}`),
     });
   }
+  // #1284 D101: the long epic explanation left the header line; it is said here, not dropped.
+  if (epic && epic.ok === false) bands.push({ id: 'epic', text: epic.reason });
   return bands;
 }
 

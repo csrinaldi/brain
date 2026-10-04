@@ -466,7 +466,8 @@ function renderContent() {
 /** R881-9: one band per degraded thing, each one BESIDE the data, never instead of it. */
 function renderBands() {
   clear(mounts.banners);
-  for (const band of degradationBands({ stream: state.stream, controls: state.controls, meta: state.meta, snapshot: state.snapshot })) {
+  const { epic } = buildHeaderModel(sectionOf(state, 'graph'), state.meta ?? {}).value;
+  for (const band of degradationBands({ stream: state.stream, controls: state.controls, meta: state.meta, snapshot: state.snapshot, epic })) {
     const node = el('div', 'band');
     node.appendChild(el('span', null, band.text));
     if (band.detail?.length) {

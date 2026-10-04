@@ -55,3 +55,9 @@ test('#1059 region 01: no meta at all still draws a header', () => {
   assert.equal(model.value.servedBranch.branch, null);
   assert.equal(model.value.counts.nodes, 1);
 });
+
+test('#1284 D99: the epic carries a short form for the one-line header and keeps the long reason apart', () => {
+  const model = buildHeaderModel(graph([node({})]), {});
+  assert.deepEqual(model.value.epic, { ok: false, short: 'epic: not resolved', reason: EPIC_JOIN_PENDING });
+  assert.deepEqual(Object.keys(model.value).sort(), ['counts', 'epic', 'servedBranch'], 'every other field it yields is unchanged');
+});

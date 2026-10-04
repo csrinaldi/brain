@@ -270,13 +270,28 @@ export function sddForIssue(changesSection, issue, localSection) {
   if (!changesSection || typeof changesSection !== 'object') return { ok: false, reason: 'no changes section was given' };
   if (changesSection.ok !== true) return { ok: false, reason: changesSection.reason };
   const found = (changesSection.value ?? []).find((c) => c.issue === issue);
-  if (!found) return { ok: false, reason: localOnlyReason(localSection, issue) ?? `no change directory names issue #${issue}` };
+  if (!found) {
+    const local = localOnlyReason(localSection, issue);
+    return local ? { ok: false, reason: local } : { ok: false, absent: true, reason: `no change directory names issue #${issue}` };
+  }
   // A ROW, not the raw snapshot entry. `readChanges()` emits `artefacts`
   // booleans and `{ok,value}` task envelopes; a caller wants the seven stages
   // and two numbers, which is exactly what every row in `buildSddModel` gets.
   // Returning the raw entry here made the card strip read a `stages` that has
   // never existed on it, and one card throwing takes the whole render with it.
   return { ok: true, value: buildChangeRow(found) };
+}
+
+/**
+ * #1284 D102: true when the card's absence line has nothing to say — no change dir, and BOTH the
+ * local and the remote sections were read and neither holds the issue. A section that is not ready
+ * keeps the line: "not read" is never "nothing there".
+ */
+export function quietAbsence(found, localSection, remoteSection, issue) {
+  if (!found || found.absent !== true) return false;
+  if (localSection?.ok !== true || remoteSection?.ok !== true) return false;
+  if ((localSection.value?.entries ?? []).some((e) => e.issue === issue)) return false;
+  return !(remoteSection.value?.branches ?? []).some((b) => b.issue === issue);
 }
 
 export function buildSddModel(changesSection, { tier } = {}) {
