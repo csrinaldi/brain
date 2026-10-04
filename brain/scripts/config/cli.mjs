@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { planConfigWrite, resolvePath } from './config-verb.mjs';
 import { parseEnvFile } from '../lib/env-read.mjs';
 import { AXES, readAxis, diagnoseAxes, tryResolveAxis } from '../lib/axis-config.mjs';
+import { readUserConfig } from '../lib/user-config.mjs';
 import { t } from '../i18n/t.mjs';
 import { detectInstalled } from '../lib/axis-installed.mjs';
 import { resolveAxisMigrationContext } from '../lib/axis-migration-context.mjs';
@@ -71,7 +72,7 @@ export async function main(argv = process.argv.slice(2), root = process.cwd()) {
     // The input of #1130's `brain:doctor`: the same findings `brain:governance-status` prints (ADR-0038 section 6).
     const dotenvPath = join(root, '.env');
     const dotenv = existsSync(dotenvPath) ? parseEnvFile(readFileSync(dotenvPath, 'utf8')) : {};
-    console.log(JSON.stringify(diagnoseAxes({ config, env: process.env, dotenv, installed: detectInstalled() }), null, 2));
+    console.log(JSON.stringify(diagnoseAxes({ config, env: process.env, dotenv, ...readUserConfig({ env: process.env }), installed: detectInstalled() }), null, 2));
     return;
   }
 
@@ -87,15 +88,16 @@ export async function main(argv = process.argv.slice(2), root = process.cwd()) {
     if (!AXES.includes(path)) fail(`unknown axis '${path}' — resolve takes ${AXES.join(', ')}.`);
     const dotenvPath = join(root, '.env');
     const dotenv = existsSync(dotenvPath) ? parseEnvFile(readFileSync(dotenvPath, 'utf8')) : {};
-    const run = tryResolveAxis(path, { env: process.env, dotenv, config });
-    // The REPO value: what the repo states without this invocation's process env (it is per-run, never the team's).
+    // The USER layer (ADR-0040) is read once, through the one reader, and belongs to THIS run: the repo value below leaves it out.
+    const run = tryResolveAxis(path, { env: process.env, dotenv, config, ...readUserConfig({ env: process.env }) });
+    // The REPO value: what the repo states without this invocation's process env or this person's user layer.
     const repo = tryResolveAxis(path, { env: {}, dotenv, config, notice: () => {} });
     // A refusal prints its fix in the active locale; the exit status names the kind: 3 undeclared, 4 refused.
     if (!run.ok) {
       console.error(`brain:config: ${await t(run.refusal.key, run.refusal.params)}`);
       process.exit(run.refusal.code === 'undeclared' ? EXIT_UNDECLARED : EXIT_REFUSED);
     }
-    // `<run> <repo> <run-where> <repo-where>`: where is process-env|dotenv|config|runtime. A repo that states nothing
+    // `<run> <repo> <run-where> <repo-where>`: where is process-env|dotenv|user|config|runtime. A repo that states nothing
     // of its own (only this run's process env does) prints `-` for both repo fields.
     console.log(`${run.value} ${repo.ok ? repo.value : '-'} ${run.where} ${repo.ok ? repo.where : '-'}`);
     return;

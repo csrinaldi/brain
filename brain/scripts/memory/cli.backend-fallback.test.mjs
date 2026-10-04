@@ -117,7 +117,7 @@ function runCli({ root, bin, envPath }, args, extraEnv = {}) {
   const env = {
     // Deliberately NOT `...process.env`: PATH and MEMORY_BACKEND are the two
     // variables under test and inheriting either makes the result ambient.
-    HOME: process.env.HOME,
+    HOME: process.env.HOME, BRAIN_HOME: process.env.BRAIN_HOME || '/nonexistent/brain-home',
     PATH: bin,
     BRAIN_MEMORY_TEST_ROOT: root,
     BRAIN_MEMORY_ENV_FILE: envPath,

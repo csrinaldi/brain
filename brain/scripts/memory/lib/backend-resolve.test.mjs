@@ -67,7 +67,7 @@ test('axis-selector is generic: another axis resolves through the same precedenc
 });
 
 test('CLI (the bash reader): declared -> "<backend> <source>" exit 0; undeclared -> exit 3; invalid -> exit 4', () => {
-  const run = (dir, env = {}) => spawnSync(process.execPath, [CLI, '--root', dir], { encoding: 'utf8', env: { PATH: process.env.PATH, ...env } });
+  const run = (dir, env = {}) => spawnSync(process.execPath, [CLI, '--root', dir], { encoding: 'utf8', env: { PATH: process.env.PATH, BRAIN_HOME: process.env.BRAIN_HOME || '/nonexistent/brain-home', ...env } });
   const ok = run(root({ config: { memory: { backend: 'plainfiles' } } }));
   assert.deepEqual([ok.status, ok.stdout], [0, 'plainfiles config\n']);
   const none = run(root({}));
@@ -98,7 +98,19 @@ test('#1165 S4 undeclaredUpgradeNotice: undeclared after migration -> one line n
 
 // ── cold-5: "could not look" must not read as "declared nothing" ────────────────────
 test('#1165 cold-5 the resolver CLI: an unreadable config with nothing else declared exits 5 and says why on stderr, not 3', () => {
-  const r = spawnSync(process.execPath, [CLI, '--root', root({ config: '{ not json' })], { encoding: 'utf8', env: { PATH: process.env.PATH } });
+  const r = spawnSync(process.execPath, [CLI, '--root', root({ config: '{ not json' })], { encoding: 'utf8', env: { PATH: process.env.PATH, BRAIN_HOME: process.env.BRAIN_HOME || '/nonexistent/brain-home' } });
   assert.equal(r.status, 5);
   assert.match(r.stderr, /brain\.config\.json/);
+});
+
+// ── #1263 S1: the user layer reaches the memory resolver through the one reader ──
+test('#1263 S1 resolveMemoryBackend: a user-layer default wins over the team default, source `user`; locked refuses it', () => {
+  const dir = root({ config: { memory: { default: 'engram', providers: { engram: {} } } } });
+  const user = { userConfig: { memory: { default: 'plainfiles', providers: { plainfiles: {} } } }, userPath: '/h/.brain/config.json', userError: null };
+  const free = resolveMemoryBackend({ root: dir, env: {}, user });
+  assert.deepEqual([free.backend, free.source, free.status], ['plainfiles', 'user', 'declared']);
+  const lockedDir = root({ config: { memory: { default: 'engram', locked: true, providers: { engram: {} } } } });
+  const refused = resolveMemoryBackend({ root: lockedDir, env: {}, user });
+  assert.deepEqual([refused.backend, refused.status, refused.source], [null, 'invalid', 'user']);
+  assert.equal(resolveMemoryBackend({ root: lockedDir, env: { MEMORY_BACKEND: 'plainfiles' }, user: {} }).status, 'invalid', 'the process env is refused too');
 });

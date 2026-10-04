@@ -259,7 +259,7 @@ test('MEMORY_BACKEND=engram + no engram binary: save exits 0, writes exactly one
   const result = spawnSync(process.execPath, [cliPath, 'save', 'A title', 'The body', '--type', 'discovery', '--project', 'brain'], {
     encoding: 'utf8',
     env: {
-      HOME: process.env.HOME,
+      HOME: process.env.HOME, BRAIN_HOME: process.env.BRAIN_HOME || '/nonexistent/brain-home',
       PATH: bin,
       ...ISOLATED_GIT_ENV,
       MEMORY_BACKEND: 'engram',
@@ -325,7 +325,7 @@ test('MEMORY_BACKEND=engram + a throwing hydration guard: save STILL exits 0, wr
     result = spawnSync(process.execPath, [cliPath, 'save', 'A title', 'The body', '--type', 'discovery', '--project', 'brain'], {
       encoding: 'utf8',
       env: {
-        HOME: process.env.HOME,
+        HOME: process.env.HOME, BRAIN_HOME: process.env.BRAIN_HOME || '/nonexistent/brain-home',
         PATH: bin,
         TMPDIR: readonlyTmp,
         ...ISOLATED_GIT_ENV,

@@ -170,7 +170,7 @@ test('#1165 e2e: .env overriding a different team value is reported', () => {
 
 test('#1165 e2e: the write env:init performs on a TTY (`config set memory.backend`) lands in tracked config and the resolver reads it', () => {
   const { root, repo } = fixture('decl-write');
-  const env = { PATH: shimBin(), HOME: join(root, 'home') };
+  const env = { PATH: shimBin(), HOME: join(root, 'home'), BRAIN_HOME: join(root, 'brain-home') };
   writeFileSync(join(repo, 'brain.config.json'), JSON.stringify({ schemaVersion: '1.9.0' }));
   const set = spawnSync('node', ['brain/scripts/config/cli.mjs', 'set', 'memory.backend', 'plainfiles'], { cwd: repo, encoding: 'utf8', env });
   assert.equal(set.status, 0, set.stderr);
@@ -250,7 +250,7 @@ test('#1163 #1164 e2e: an unreachable VCS is two pending steps with their exact 
   assert.equal(r.code, 0, `optional steps must not fail env:init:\n${r.out.slice(-1500)}`);
   assert.match(r.out, /governance labels \(next: npm run brain:env:init[^)]*gh label create "status:approved"/);
   assert.match(r.out, /brain\.actor \(next: git config --local brain\.actor @<handle>\)/);
-  assert.notEqual(spawnSync('git', ['config', '--local', '--get', 'brain.actor'], { cwd: repo, env: { PATH: shimBin(), HOME: root } }).status, 0, 'nothing was written');
+  assert.notEqual(spawnSync('git', ['config', '--local', '--get', 'brain.actor'], { cwd: repo, env: { PATH: shimBin(), HOME: root, BRAIN_HOME: join(root, 'brain-home') } }).status, 0, 'nothing was written');
 });
 
 test('#1163 e2e: a CRASH of the setup step is a REQUIRED failure naming the step (exit 1), never a pending entry', () => {

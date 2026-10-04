@@ -4,7 +4,7 @@
 // runs in the SAME box instead of a copy that drifts: a PATH made ONLY of a curated shim
 // dir — every host binary EXCEPT gh, glab, engram, gentle-ai, codex, gga, claude and grep
 // (grep is a python3 shim, so nothing depends on the host having one) — an isolated HOME and
-// XDG_RUNTIME_DIR, empty DBUS_SESSION_BUS_ADDRESS, stdin closed. The brain tree under test
+// XDG_RUNTIME_DIR and BRAIN_HOME (the user layer, #1263), empty DBUS_SESSION_BUS_ADDRESS, stdin closed. The brain tree under test
 // is COPIED into the fixture: `memory/cli.mjs` resolves its repo root from its own module
 // location, so a symlink would make it pull in the developer's real checkout.
 
@@ -88,6 +88,9 @@ export function installBrain(dir, { keepTests = false } = {}) {
 export function hermeticEnv(root, { bin, env = {} } = {}) {
   return {
     PATH: bin ? `${bin}:${shimBin()}` : shimBin(),
+    // The user layer (ADR-0040 ratified point 1): an EMPTY dir inside the box, never the developer's real home. A caller that
+    // seeds a user layer for its scenario names its own BRAIN_HOME in `env`.
+    BRAIN_HOME: join(root, 'brain-home'),
     ...env,
     HOME: join(root, 'home'),
     XDG_RUNTIME_DIR: join(root, 'xdg'),

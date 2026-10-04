@@ -87,7 +87,7 @@ const STRIPPED_ENV = Object.freeze([
 
 /** The environment every fixture command sees. Pure, so a test can read it. */
 function fixtureEnv(home) {
-  const env = { ...process.env, HOME: home, CI: '1' };
+  const env = { ...process.env, HOME: home, BRAIN_HOME: join(home, '.brain'), CI: '1' }; // the user layer (#1263): the fixture's own, never the developer's
   for (const k of STRIPPED_ENV) delete env[k];
   return env;
 }
