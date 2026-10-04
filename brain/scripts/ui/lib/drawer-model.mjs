@@ -314,12 +314,13 @@ function remoteBlockModel(block) {
 
 // ── #883: a linked worktree of this clone, "on this machine" ────────────────
 
-/** The four states of a present local document (R883-6), in the words a reader sees. */
+/** The five states of a local document (R883-6), in the words a reader sees. */
 export const LOCAL_STATE_WORDING = Object.freeze({
   new: 'uncommitted: new',
   modified: 'uncommitted: modified',
   committed: (branch) => `committed on ${branch}, not on main`,
   'same-as-main': 'same as main',
+  deleted: (branch) => `uncommitted: deleted (committed on ${branch}, missing from the working tree)`,
 });
 
 /** Why a local block shows no documents; `null` for a block that does. One sentence per state. */
@@ -332,6 +333,7 @@ const LOCAL_BLOCK_WORDING = {
 
 function localRowDetail(doc, branch) {
   if (doc.overlay === 'committed') return LOCAL_STATE_WORDING.committed(branch);
+  if (doc.overlay === 'deleted') return LOCAL_STATE_WORDING.deleted(branch);
   const state = LOCAL_STATE_WORDING[doc.overlay] ?? doc.state;
   return doc.progress ? `${state} \u00b7 ${progressLabel(doc.progress, SOURCE.workingTree)}` : state;
 }
@@ -346,7 +348,7 @@ function localDocumentEntries(block) {
       detail: localRowDetail(doc, block.branch),
       source: { path: `${doc.ref}:${doc.path}` },
       pending: view.text === null,
-      document: doc.overlay === 'same-as-main' ? null : view,
+      document: doc.overlay === 'same-as-main' || doc.overlay === 'deleted' ? null : view,
     });
   });
 }

@@ -606,6 +606,13 @@ test('#883 R883-6: the four document states have their own wording, and a block 
   assert.equal(localModel(localBlock()).wording, null, 'a read block carries no state wording');
 });
 
+test('#883 R883-6: a deleted row says it was committed on the branch and is missing from the working tree, and has no body', () => {
+  assert.equal(LOCAL_STATE_WORDING.deleted('feat/issue-7-x'), 'uncommitted: deleted (committed on feat/issue-7-x, missing from the working tree)');
+  const m = localModel(localBlock({ documents: { tasks: localDoc({ path: 'openspec/changes/issue-7-x/tasks.md', state: 'deleted', overlay: 'deleted', uncommitted: true, text: null, blob: null, marker: null }) } }));
+  assert.equal(m.documents[0].detail, 'uncommitted: deleted (committed on feat/issue-7-x, missing from the working tree)');
+  assert.equal(m.documents[0].document, null);
+});
+
 test('#883 R883-6: a same-as-main row has no document, an unreadable one says why, and the absent documents are named in one line', () => {
   const m = localModel(localBlock({ documents: { proposal: localDoc({ overlay: 'same-as-main', uncommitted: false, text: null }), spec: localDoc({ path: 'openspec/changes/issue-7-x/spec.md', state: 'unreadable', text: null, reason: 'x is a symbolic link', overlay: 'unreadable', uncommitted: false, marker: null }) } }));
   assert.equal(m.documents[0].document, null);

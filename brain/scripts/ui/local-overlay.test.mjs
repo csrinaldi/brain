@@ -446,6 +446,32 @@ test('R883-9: at the origin tip, an unreadable document or a document deleted fr
   assert.ok(!JSON.stringify(block).includes('OUTSIDE'));
 });
 
+test('R883-6: a document committed on the branch and deleted from the working tree is overlay deleted: uncommitted, no body, and distinct from "not in this worktree"', async (t) => {
+  const repo = makeWorktreeRepo();
+  t.after(() => repo.dispose());
+  const wt = repo.addWorktree('feat/issue-7-x', { [`${D7}/proposal.md`]: '# p\n', [`${D7}/tasks.md`]: '- [ ] a\n' }, { commit: true });
+  realFs.unlinkSync(join(wt.path, D7, 'tasks.md'));
+  const { local } = readLocalBlocks({ run: gitRun(repo.root), snapshot: await snapshotOf(repo.root, [7]), issue: 7, mainDocuments: {}, _fs: realFs });
+  const tasks = local[0].documents.tasks;
+  assert.equal(tasks.overlay, 'deleted');
+  assert.equal(tasks.uncommitted, true);
+  assert.equal(tasks.text, null);
+  assert.equal(tasks.blob, null);
+  assert.ok(!local[0].absent.includes('tasks.md'), 'a deleted document is not "not in this worktree"');
+  assert.ok(local[0].absent.includes('spec.md'), 'a never-present one still is');
+});
+
+test('R883-6: a resume.md deleted from the working tree is a missing resume with its reason, never a parse of no text', async (t) => {
+  const repo = makeWorktreeRepo();
+  t.after(() => repo.dispose());
+  const wt = repo.addWorktree('feat/issue-7-x', { [`${D7}/proposal.md`]: '# p\n', [`${D7}/resume.md`]: 'x\n' }, { commit: true });
+  realFs.unlinkSync(join(wt.path, D7, 'resume.md'));
+  const { local } = readLocalBlocks({ run: gitRun(repo.root), snapshot: await snapshotOf(repo.root, [7]), issue: 7, mainDocuments: {}, _fs: realFs });
+  assert.equal(local[0].documents.resume.overlay, 'deleted');
+  assert.equal(local[0].resume.state, 'missing');
+  assert.match(local[0].resume.reason, /deleted/);
+});
+
 test('R883-15: with no committed resume, the Working memory reason points at "on this machine" only when a local resume exists, and never says slice 5', async (t) => {
   const withLocal = makeWorktreeRepo();
   t.after(() => withLocal.dispose());

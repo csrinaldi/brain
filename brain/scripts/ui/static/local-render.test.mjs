@@ -123,6 +123,16 @@ test('R883-9: a branch named with markup is drawn as text, and a same-as-main ro
   assert.equal(findAll(section, byClass('doc-toggle')).length, 1, 'only the design has a body to open');
 });
 
+test('R883-6: a deleted document is drawn as text with no toggle', async (t) => {
+  const gone = block({ documents: { tasks: doc({ path: `${DIR}/tasks.md`, state: 'deleted', overlay: 'deleted', uncommitted: true, text: null, blob: null, marker: null }) } });
+  const dom = await boot({ local: [gone] });
+  t.after(() => dom.restore());
+  await open(dom);
+  const section = find(dom.mounts.drawer, byClass('local-blocks'));
+  assert.match(section.textContent, /uncommitted: deleted \(committed on feat\/issue-1198-x, missing from the working tree\)/);
+  assert.equal(findAll(section, byClass('doc-toggle')).length, 0);
+});
+
 test('R883-12: a local document opens through the worker path and its stamp names the worktree and the content marker', async (t) => {
   const dom = await boot({ local: [block()] });
   t.after(() => dom.restore());

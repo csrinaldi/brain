@@ -96,7 +96,9 @@ function documentFor({ fs, key, file, entry, dirReal, headEntry, mainBlob, algo,
   const rel = `${entry.dir}/${file}`;
   const ref = `worktree ${leaf}`;
   const read = readLocalDocument({ fs, abs: join(entry.path, rel), rel, dirReal });
-  if (read.absent) return null;
+  // Committed at the worktree's HEAD but gone from its working tree: an uncommitted deletion (R883-6),
+  // read from the ls-tree already in hand. A document that was never there is no row.
+  if (read.absent) return headEntry ? { path: rel, ref, commit: null, blob: null, state: 'deleted', text: null, bytes: null, truncated: false, truncatedAt: null, reason: null, note: null, overlay: 'deleted', uncommitted: true, marker: null } : null;
   if (read.refused) return { path: rel, ref, commit: null, blob: null, state: 'unreadable', text: null, bytes: null, truncated: false, truncatedAt: null, reason: read.refused, note: null, overlay: 'unreadable', uncommitted: false, marker: null };
   const hash = gitBlobHash(read.bytes, algo);
   const overlay = classifyLocalDocument({ hash, headEntry, mainBlob, isResume: key === 'resume' });
@@ -144,11 +146,11 @@ function localBlock({ run, fs, entry, mainDocuments, origin }) {
     if (doc) documents[key] = doc; else absent.push(file);
   }
   // The collapse hides every document, so it needs all of them accounted for (R883-9): readable,
-  // committed, and none committed at HEAD but missing from the working tree.
-  const deletedLocally = absent.some((file) => tree.has(`${entry.dir}/${file}`));
-  const clean = !deletedLocally && Object.values(documents).every((d) => d.state !== 'unreadable' && !d.uncommitted);
+  // committed and present (a deleted one counts as uncommitted).
+  const clean = Object.values(documents).every((d) => d.state !== 'unreadable' && !d.uncommitted);
   if (clean && origin) return { ...base, state: 'same-as-origin', absent, resume: null };
-  const resume = documents.resume ?? { state: 'missing', reason: `no resume.md in worktree ${entry.leaf}` };
+  const deletedResume = documents.resume?.state === 'deleted';
+  const resume = deletedResume ? { state: 'missing', reason: `resume.md was deleted from worktree ${entry.leaf} (committed on ${entry.branch})` } : documents.resume ?? { state: 'missing', reason: `no resume.md in worktree ${entry.leaf}` };
   return { ...base, state: 'read', documents, absent, resume: resumeOutcome({ doc: resume, label: `worktree ${entry.leaf}` }) };
 }
 
