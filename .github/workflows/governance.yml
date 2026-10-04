@@ -14,6 +14,13 @@ name: governance
 on:
   pull_request:
     types: [opened, synchronize, reopened, edited, labeled, unlabeled]
+  # #1263 slice 4: `team-config-reviewed` is decided by a REVIEW, so a review must re-run it — otherwise an owner's
+  # approval leaves the required check red until someone pushes, and a push makes the approval stale. The payload
+  # still carries `pull_request` (head/base shas, author, labels, body), so every job reads the same fields it reads
+  # under `pull_request`, with the same read-only token and no secrets. Every job re-runs on a review; the check-runs
+  # of the same head are superseded by the newer run.
+  pull_request_review:
+    types: [submitted, dismissed]
 
 permissions:
   contents: read

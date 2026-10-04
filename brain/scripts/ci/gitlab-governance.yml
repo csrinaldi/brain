@@ -209,6 +209,16 @@ base-branch:
 # brain-writes-reviewed above — this static job needs no `allow_failure:`.
 # Owners are read from the base ref via `git show`, never the MR head. Reviews are
 # read through the same `prReviews` port verb the L6 gate uses (GitLab approvals).
+#
+# TWO DOCUMENTED GAPS ON GITLAB (#1263 S4):
+#   · GitLab's approvals endpoint says WHO approved, not against which commit, so
+#     `prReviews` returns `commitId: null` there and a current approval cannot be
+#     told from a stale one. The gate FAILS CLOSED at standard/regulated naming that
+#     limitation (warn at lite). Until the adapter can say, a team config change on
+#     GitLab at those tiers cannot satisfy this gate by approval.
+#   · A GitLab MR pipeline does not re-run when an approval lands (GitHub's
+#     `pull_request_review` trigger has no equivalent in this static fragment): re-run
+#     the pipeline after approving.
 team-config-reviewed:
   extends: .governance_mr_rules
   stage: test

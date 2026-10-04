@@ -305,3 +305,22 @@ test('REQ-A2-3: governance.yml issue-link resolves the approved label from confi
     'the job must delegate to the portable check, which owns the resolution (#130)',
   );
 });
+// ── #1263 slice 4: a review re-runs the gate that a review decides ────────────
+
+test('governance.yml re-runs on pull_request_review (submitted, dismissed) and keeps its pull_request types', () => {
+  const yaml = readFileSync(resolve(REPO_ROOT, '.github/workflows/governance.yml'), 'utf8');
+  const on = yaml.slice(yaml.indexOf('\non:'), yaml.indexOf('\npermissions:'));
+  assert.match(on, /^  pull_request:\n    types: \[opened, synchronize, reopened, edited, labeled, unlabeled\]$/m);
+  assert.match(on, /^  pull_request_review:\n    types: \[submitted, dismissed\]$/m);
+  assert.ok(!/pull_request_target/.test(on), 'never pull_request_target');
+});
+
+test('team-config-reviewed job: reads only pull_request payload fields (valid under a review event), fetch-depth 0, and runs its script', () => {
+  const yaml = readFileSync(resolve(REPO_ROOT, '.github/workflows/governance.yml'), 'utf8');
+  const job = yaml.slice(yaml.indexOf('\n  team-config-reviewed:'));
+  assert.match(job, /fetch-depth: 0/);
+  assert.match(job, /node brain\/scripts\/vcs\/team-config-reviewed\.mjs/);
+  for (const m of job.matchAll(/\$\{\{\s*([^}]+?)\s*\}\}/g)) {
+    assert.match(m[1], /^(github\.event\.pull_request\.|github\.event\.repository\.default_branch|github\.token)/, `unexpected expression: ${m[1]}`);
+  }
+});

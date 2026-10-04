@@ -14,40 +14,42 @@ import {
 import { GATE_MATRIX, resolveGatePolicy } from './governance-tiers.mjs';
 
 const touched = [TEAM_CONFIG_PATH, 'README.md'];
-const ok = (author) => ({ state: 'APPROVED', author });
+const HEAD = 'HEAD';
+const ok = (author, commitId = HEAD) => ({ state: 'APPROVED', author, commitId });
+const ev = (o) => evaluateTeamConfigReviewed({ headSha: HEAD, ...o });
 
 // ── pure evaluator: the decision table ────────────────────────────────────────
 
 test('not touching brain.config.json passes at every tier, whatever the owners and reviews', () => {
   for (const tier of ['lite', 'standard', 'regulated']) {
-    const r = evaluateTeamConfigReviewed({ changedFiles: ['README.md', 'sub/brain.config.json'], reviews: [], author: 'alice', owners: [], tier });
+    const r = ev({ changedFiles: ['README.md', 'sub/brain.config.json'], reviews: [], author: 'alice', owners: [], tier });
     assert.equal(r.level, 'pass', tier);
     assert.match(r.reason, /does not touch/i);
   }
 });
 
 test('touched + approved by an owner who is not the author passes (bare login, case-insensitive)', () => {
-  const r = evaluateTeamConfigReviewed({ changedFiles: touched, reviews: [ok('BOB')], author: 'alice', owners: ['alice', 'bob'], tier: 'standard' });
+  const r = ev({ changedFiles: touched, reviews: [ok('BOB')], author: 'alice', owners: ['alice', 'bob'], tier: 'standard' });
   assert.equal(r.level, 'pass');
   assert.match(r.reason, /BOB/);
   assert.equal(r.soloMaintainer, undefined);
 });
 
 test('touched + approved only by the author (an owner) fails at standard', () => {
-  const r = evaluateTeamConfigReviewed({ changedFiles: touched, reviews: [ok('alice')], author: 'Alice', owners: ['alice', 'bob'], tier: 'standard' });
+  const r = ev({ changedFiles: touched, reviews: [ok('alice')], author: 'Alice', owners: ['alice', 'bob'], tier: 'standard' });
   assert.equal(r.level, 'fail');
   assert.match(r.reason, /owner/i);
 });
 
 test('touched + approved by a non-owner fails at standard and regulated', () => {
   for (const tier of ['standard', 'regulated']) {
-    const r = evaluateTeamConfigReviewed({ changedFiles: touched, reviews: [ok('carol')], author: 'alice', owners: ['alice', 'bob'], tier });
+    const r = ev({ changedFiles: touched, reviews: [ok('carol')], author: 'alice', owners: ['alice', 'bob'], tier });
     assert.equal(r.level, 'fail', tier);
   }
 });
 
 test('only an APPROVED review counts: a COMMENTED or CHANGES_REQUESTED owner review does not', () => {
-  const r = evaluateTeamConfigReviewed({
+  const r = ev({
     changedFiles: touched,
     reviews: [{ state: 'COMMENTED', author: 'bob' }, { state: 'CHANGES_REQUESTED', author: 'bob' }],
     author: 'alice', owners: ['alice', 'bob'], tier: 'regulated',
@@ -56,11 +58,11 @@ test('only an APPROVED review counts: a COMMENTED or CHANGES_REQUESTED owner rev
 });
 
 test('no reviews at all fails (absent evidence is not a pass: this gate does not warn-and-pass)', () => {
-  assert.equal(evaluateTeamConfigReviewed({ changedFiles: touched, reviews: [], author: 'alice', owners: ['alice', 'bob'], tier: 'standard' }).level, 'fail');
+  assert.equal(ev({ changedFiles: touched, reviews: [], author: 'alice', owners: ['alice', 'bob'], tier: 'standard' }).level, 'fail');
 });
 
 test('solo maintainer at lite: one owner, who is the author, passes and is LABELLED the exception, never independent review', () => {
-  const r = evaluateTeamConfigReviewed({ changedFiles: touched, reviews: [], author: 'Alice', owners: ['alice'], tier: 'lite' });
+  const r = ev({ changedFiles: touched, reviews: [], author: 'Alice', owners: ['alice'], tier: 'lite' });
   assert.equal(r.level, 'pass');
   assert.equal(r.soloMaintainer, true);
   assert.match(r.reason, /solo-maintainer exception/i);
@@ -69,7 +71,7 @@ test('solo maintainer at lite: one owner, who is the author, passes and is LABEL
 
 test('the solo exception is lite-only: the same shape fails at standard and regulated', () => {
   for (const tier of ['standard', 'regulated']) {
-    const r = evaluateTeamConfigReviewed({ changedFiles: touched, reviews: [], author: 'alice', owners: ['alice'], tier });
+    const r = ev({ changedFiles: touched, reviews: [], author: 'alice', owners: ['alice'], tier });
     assert.equal(r.level, 'fail', tier);
     assert.equal(r.soloMaintainer, undefined);
   }
@@ -77,11 +79,11 @@ test('the solo exception is lite-only: the same shape fails at standard and regu
 
 test('the solo exception needs EXACTLY one owner, and that owner is the author', () => {
   // two owners at lite: no exception; lite is detection so the unmet requirement is a warning, not a pass
-  const two = evaluateTeamConfigReviewed({ changedFiles: touched, reviews: [], author: 'alice', owners: ['alice', 'bob'], tier: 'lite' });
+  const two = ev({ changedFiles: touched, reviews: [], author: 'alice', owners: ['alice', 'bob'], tier: 'lite' });
   assert.equal(two.level, 'warn');
   assert.equal(two.soloMaintainer, undefined);
   // one owner who is NOT the author: no exception
-  const other = evaluateTeamConfigReviewed({ changedFiles: touched, reviews: [], author: 'mallory', owners: ['alice'], tier: 'lite' });
+  const other = ev({ changedFiles: touched, reviews: [], author: 'mallory', owners: ['alice'], tier: 'lite' });
   assert.equal(other.level, 'warn');
   assert.equal(other.soloMaintainer, undefined);
 });
@@ -89,11 +91,11 @@ test('the solo exception needs EXACTLY one owner, and that owner is the author',
 test('owners empty or absent: "no owner declared" is a failure at standard/regulated and detection (warn) at lite', () => {
   for (const owners of [[], undefined, null]) {
     for (const tier of ['standard', 'regulated']) {
-      const r = evaluateTeamConfigReviewed({ changedFiles: touched, reviews: [ok('bob')], author: 'alice', owners, tier });
+      const r = ev({ changedFiles: touched, reviews: [ok('bob')], author: 'alice', owners, tier });
       assert.equal(r.level, 'fail', tier);
       assert.match(r.reason, /no owner declared/i);
     }
-    const lite = evaluateTeamConfigReviewed({ changedFiles: touched, reviews: [ok('bob')], author: 'alice', owners, tier: 'lite' });
+    const lite = ev({ changedFiles: touched, reviews: [ok('bob')], author: 'alice', owners, tier: 'lite' });
     assert.equal(lite.level, 'warn');
     assert.match(lite.reason, /no owner declared/i);
     assert.match(lite.reason, /detection/i);
@@ -101,20 +103,20 @@ test('owners empty or absent: "no owner declared" is a failure at standard/regul
 });
 
 test('owners normalise: a leading @ and non-string entries are tolerated on read', () => {
-  const r = evaluateTeamConfigReviewed({ changedFiles: touched, reviews: [ok('bob')], author: 'alice', owners: ['@Bob', 42, null, ''], tier: 'standard' });
+  const r = ev({ changedFiles: touched, reviews: [ok('bob')], author: 'alice', owners: ['@Bob', 42, null, ''], tier: 'standard' });
   assert.equal(r.level, 'pass');
 });
 
 test('lite is detection: a real violation is a warning that names the tier, never a bare pass or a fail', () => {
-  const r = evaluateTeamConfigReviewed({ changedFiles: touched, reviews: [ok('carol')], author: 'alice', owners: ['alice', 'bob'], tier: 'lite' });
+  const r = ev({ changedFiles: touched, reviews: [ok('carol')], author: 'alice', owners: ['alice', 'bob'], tier: 'lite' });
   assert.equal(r.level, 'warn');
   assert.match(r.reason, /lite/);
 });
 
 test('an unknown author fails closed where the policy is required', () => {
-  const r = evaluateTeamConfigReviewed({ changedFiles: touched, reviews: [ok('bob')], author: undefined, owners: ['bob'], tier: 'standard' });
+  const r = ev({ changedFiles: touched, reviews: [ok('bob')], author: undefined, owners: ['bob'], tier: 'standard' });
   assert.equal(r.level, 'pass', 'an owner approval with no known author is still an owner approval');
-  const solo = evaluateTeamConfigReviewed({ changedFiles: touched, reviews: [], author: undefined, owners: ['bob'], tier: 'lite' });
+  const solo = ev({ changedFiles: touched, reviews: [], author: undefined, owners: ['bob'], tier: 'lite' });
   assert.equal(solo.level, 'warn', 'no author, so no solo exception');
 });
 
@@ -170,13 +172,102 @@ test('the tier is read from the base too: a PR cannot demote itself to lite to d
   assert.equal(result.level, 'fail');
 });
 
-test('a base with no brain.config.json (gitShow -> null) means no owners and the default tier (standard)', async () => {
+test('a base with no brain.config.json (gitShow -> null) is the ADOPTION PR: no owners, founding, and the new-consumer tier lite — never standard', async () => {
   const inputs = await gatherTeamConfigReviewedInputs({
     baseSha: 'BASE', headSha: 'HEAD', prNumber: 7, repo: 'o/r', author: 'alice',
     deps: { diffNameOnly: () => touched, fetchReviews: async () => [], gitShow: () => null },
   });
   assert.deepEqual(inputs.owners, []);
-  assert.equal(inputs.tier, 'standard');
+  assert.equal(inputs.founding, true);
+  assert.equal(inputs.tier, 'lite');
+  assert.equal(inputs.headSha, 'HEAD');
+});
+
+test('the founding PR passes, labelled — not "no owner declared", and not independent review — even though its own head declares tier standard', async () => {
+  const r = await runTeamConfigReviewedCheck({
+    baseSha: 'BASE', headSha: 'HEAD', prNumber: 7, repo: 'o/r', author: 'alice',
+    diffNameOnly: () => touched, fetchReviews: async () => [],
+    gitShow: () => null,
+  });
+  assert.equal(r.level, 'pass');
+  assert.equal(r.founding, true);
+  assert.match(r.reason, /adoption PR — the founding decision; no owners can exist yet/);
+  assert.match(r.reason, /NOT independent review/);
+  assert.equal(r.soloMaintainer, undefined);
+});
+
+test('a founding PR that does not touch the config is just "not touched"', () => {
+  assert.match(ev({ changedFiles: ['README.md'], founding: true, tier: 'lite' }).reason, /does not touch/);
+});
+
+// ── the approval must be CURRENT and the owner's LATEST ───────────────────────
+
+test('an approval on an OLDER head (a commit was pushed after) is stale: fail at standard/regulated, warn at lite', () => {
+  const reviews = [ok('bob', 'OLD')];
+  for (const tier of ['standard', 'regulated']) {
+    const r = ev({ changedFiles: touched, reviews, author: 'alice', owners: ['alice', 'bob'], tier });
+    assert.equal(r.level, 'fail', tier);
+    assert.match(r.reason, /stale|older commit/i);
+  }
+  assert.equal(ev({ changedFiles: touched, reviews, author: 'alice', owners: ['alice', 'bob'], tier: 'lite' }).level, 'warn');
+});
+
+test('an approval on the CURRENT head passes, and an older approval by someone else does not matter', () => {
+  const r = ev({ changedFiles: touched, reviews: [ok('carol', 'OLD'), ok('bob', HEAD)], author: 'alice', owners: ['alice', 'bob', 'carol'], tier: 'standard' });
+  assert.equal(r.level, 'pass');
+  assert.match(r.reason, /bob/);
+});
+
+test('approve, then a LATER CHANGES_REQUESTED by the same owner: only the latest counts, so it fails', () => {
+  const reviews = [ok('bob'), { state: 'CHANGES_REQUESTED', author: 'bob', commitId: HEAD }];
+  assert.equal(ev({ changedFiles: touched, reviews, author: 'alice', owners: ['alice', 'bob'], tier: 'standard' }).level, 'fail');
+});
+
+test('approve, then a later DISMISSED by the same owner: fails; but approve-after-request-changes passes', () => {
+  assert.equal(ev({ changedFiles: touched, reviews: [ok('bob'), { state: 'DISMISSED', author: 'bob', commitId: HEAD }], author: 'alice', owners: ['alice', 'bob'], tier: 'standard' }).level, 'fail');
+  assert.equal(ev({ changedFiles: touched, reviews: [{ state: 'CHANGES_REQUESTED', author: 'bob', commitId: 'OLD' }, ok('BOB')], author: 'alice', owners: ['alice', 'bob'], tier: 'standard' }).level, 'pass');
+});
+
+test('a later COMMENTED review does not cancel an approval (it decides nothing)', () => {
+  const reviews = [ok('bob'), { state: 'COMMENTED', author: 'bob', commitId: HEAD }];
+  assert.equal(ev({ changedFiles: touched, reviews, author: 'alice', owners: ['alice', 'bob'], tier: 'standard' }).level, 'pass');
+});
+
+test('commitId null (the forge cannot say, e.g. GitLab): fail closed at standard/regulated naming the limitation, warn at lite', () => {
+  const reviews = [ok('bob', null)];
+  for (const tier of ['standard', 'regulated']) {
+    const r = ev({ changedFiles: touched, reviews, author: 'alice', owners: ['alice', 'bob'], tier });
+    assert.equal(r.level, 'fail', tier);
+    assert.match(r.reason, /commitId is null/);
+    assert.match(r.reason, /GitLab/);
+  }
+  assert.equal(ev({ changedFiles: touched, reviews, author: 'alice', owners: ['alice', 'bob'], tier: 'lite' }).level, 'warn');
+});
+
+test('no headSha known: an approval cannot be proven current, so it fails closed', () => {
+  assert.equal(evaluateTeamConfigReviewed({ changedFiles: touched, reviews: [ok('bob')], author: 'alice', owners: ['bob'], tier: 'standard' }).level, 'fail');
+});
+
+test('reviews null (could not be fetched) is "evidence could not be fetched", never "no APPROVED review": fail at standard/regulated, warn at lite', () => {
+  for (const tier of ['standard', 'regulated']) {
+    const r = ev({ changedFiles: touched, reviews: null, author: 'alice', owners: ['alice', 'bob'], tier });
+    assert.equal(r.level, 'fail', tier);
+    assert.match(r.reason, /could not be fetched/);
+  }
+  const lite = ev({ changedFiles: touched, reviews: null, author: 'alice', owners: ['alice', 'bob'], tier: 'lite' });
+  assert.equal(lite.level, 'warn');
+  assert.match(lite.reason, /could not be fetched/);
+});
+
+test('the default fetchReviews keeps a null port result null (not []) end to end', async () => {
+  const r = await runTeamConfigReviewedCheck({
+    baseSha: 'BASE', headSha: 'HEAD', prNumber: 7, repo: 'o/r', author: 'alice',
+    diffNameOnly: () => touched,
+    getVcs: async () => ({ prReviews: async () => null }),
+    gitShow: () => baseConfig({ governance: { owners: ['bob'], tier: 'standard' } }),
+  });
+  assert.equal(r.level, 'fail');
+  assert.match(r.reason, /could not be fetched/);
 });
 
 test('reviews are fetched only when the config is touched', async () => {

@@ -1467,12 +1467,12 @@ test('gitlab.labelEvents returns null (never []) when the underlying fetch throw
 test('github.prReviews normalizes gh reviews to { state, author, body }', async () => {
   setSpawn(fakeSpawn([
     { state: 'COMMENTED', user: { login: 'carol' }, body: 'looks good' },
-    { state: 'APPROVED', user: { login: 'bob' }, body: '' },
+    { state: 'APPROVED', user: { login: 'bob' }, body: '', commit_id: 'abc123' },
   ]));
   const result = await github.prReviews({ project: 'o/r', number: 144 });
   assert.deepEqual(result, [
-    { state: 'COMMENTED', author: 'carol', body: 'looks good' },
-    { state: 'APPROVED', author: 'bob', body: '' },
+    { state: 'COMMENTED', author: 'carol', body: 'looks good', commitId: null },
+    { state: 'APPROVED', author: 'bob', body: '', commitId: 'abc123' },
   ]);
 });
 
@@ -1526,8 +1526,8 @@ test('gitlab.prReviews normalizes notes to {state:"COMMENTED", author, body} and
   // APPROVED — see the security-boundary test in the contract suite); the
   // approver is appended after the chronological notes.
   assert.deepEqual(result, [
-    { state: 'COMMENTED', author: 'carol', body: 'a human comment' },
-    { state: 'APPROVED', author: 'bob', body: '' },
+    { state: 'COMMENTED', author: 'carol', body: 'a human comment', commitId: null },
+    { state: 'APPROVED', author: 'bob', body: '', commitId: null },
   ]);
 });
 

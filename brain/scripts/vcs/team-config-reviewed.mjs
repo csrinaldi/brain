@@ -4,9 +4,12 @@
 // root) carry an APPROVED review from a `governance.owners` login who is not the PR author?
 //
 //   · not touched                         → pass
+//   · the base has no team config (the ADOPTION PR, the founding decision) → pass, labelled, tier `lite`
 //   · solo maintainer, tier lite (ADR-0037 mode A): exactly one owner, and that owner is the author → pass,
 //     labelled the exception, never independent review
-//   · an APPROVED review from an owner other than the author → pass
+//   · an APPROVED review from an owner other than the author, ON THE CURRENT HEAD, and still that owner's latest
+//     decisive review (a later CHANGES_REQUESTED/DISMISSED cancels it; an approval on an older commit is stale) → pass
+//     — a `null` commitId (the forge cannot say) cannot be told from stale, so it fails closed
 //   · otherwise → fail ("no owner declared" when the list is empty)
 //
 // `lite` is `detection` in GATE_MATRIX, so there a failure is a warning that names the tier; at standard and
@@ -46,9 +49,19 @@ function normalizeOwners(owners) {
  * @param {'lite'|'standard'|'regulated'} [input.tier]
  * @returns {{ level: 'pass'|'warn'|'fail', reason: string, soloMaintainer?: true }}
  */
-export function evaluateTeamConfigReviewed({ changedFiles = [], reviews = [], author, owners, tier = 'standard' } = {}) {
+export function evaluateTeamConfigReviewed({ changedFiles = [], reviews = [], author, owners, tier = 'standard', headSha, founding = false } = {}) {
   if (!changedFiles.includes(TEAM_CONFIG_PATH)) {
     return { level: 'pass', reason: `the change does not touch ${TEAM_CONFIG_PATH} — no owner review required.` };
+  }
+
+  // The ADOPTION PR (ADR-0040 section 4): the base has no team config, so this PR founds it and no owner can exist yet.
+  // Said as such, never as independent review.
+  if (founding) {
+    return {
+      level: 'pass',
+      founding: true,
+      reason: `adoption PR — the founding decision; no owners can exist yet. ${TEAM_CONFIG_PATH} is created by this change, which is NOT independent review.`,
+    };
   }
 
   const list = normalizeOwners(owners);
@@ -65,29 +78,42 @@ export function evaluateTeamConfigReviewed({ changedFiles = [], reviews = [], au
     };
   }
 
-  let verdict;
+  const detect = (reason) => (resolveGatePolicy(GATE, tier) === 'detection'
+    ? { level: 'warn', reason: `${reason} (detection at the "${tier}" tier — reported, not blocking.)` }
+    : { level: 'fail', reason });
+
   if (list.length === 0) {
-    verdict = {
-      level: 'fail',
-      reason: `${TEAM_CONFIG_PATH} changed but no owner declared: governance.owners is empty or absent on the base branch, so nobody can approve it.`,
-    };
-  } else {
-    const approvers = [...new Set(reviews.filter((r) => r?.state === 'APPROVED' && r.author).map((r) => r.author))];
-    const owner = approvers.find((a) => list.some((o) => lower(o) === lower(a)) && !isAuthor(a));
-    verdict = owner
-      ? { level: 'pass', reason: `${TEAM_CONFIG_PATH} approved by owner "${owner}", distinct from the PR author "${author ?? 'unknown'}".` }
-      : {
-          level: 'fail',
-          reason:
-            `${TEAM_CONFIG_PATH} changed without an APPROVED review from a governance.owners login (${list.join(', ')}) ` +
-            `other than the PR author "${author ?? 'unknown'}" — the author, or a non-owner, cannot approve the team config.`,
-        };
+    return detect(`${TEAM_CONFIG_PATH} changed but no owner declared: governance.owners is empty or absent on the base branch, so nobody can approve it.`);
+  }
+  if (reviews === null) {
+    return detect(`${TEAM_CONFIG_PATH} changed but review evidence could not be fetched — the owner approval cannot be verified.`);
   }
 
-  if (verdict.level === 'fail' && resolveGatePolicy(GATE, tier) === 'detection') {
-    return { level: 'warn', reason: `${verdict.reason} (detection at the "${tier}" tier — reported, not blocking.)` };
+  // Only each owner's LATEST decisive review counts: a later CHANGES_REQUESTED or DISMISSED cancels an earlier APPROVED.
+  // (A COMMENTED review decides nothing, on the forge too.) The array is chronological.
+  const latest = new Map();
+  for (const r of reviews) {
+    if (!r?.author || !['APPROVED', 'CHANGES_REQUESTED', 'DISMISSED'].includes(r.state)) continue;
+    latest.set(lower(r.author), r);
   }
-  return verdict;
+  const approvals = [...latest.values()].filter((r) => r.state === 'APPROVED' && list.some((o) => lower(o) === lower(r.author)) && !isAuthor(r.author));
+
+  // An approval counts only on the CURRENT head: a push after it makes it stale.
+  const current = approvals.find((r) => r.commitId != null && headSha != null && lower(r.commitId) === lower(headSha));
+  if (current) {
+    return { level: 'pass', reason: `${TEAM_CONFIG_PATH} approved by owner "${current.author}" on the current head, distinct from the PR author "${author ?? 'unknown'}".` };
+  }
+  if (approvals.some((r) => r.commitId == null)) {
+    return detect(
+      `${TEAM_CONFIG_PATH} has an owner approval but the forge does not report which commit it was against (commitId is null — a GitLab limitation), ` +
+      'so a current approval cannot be told from a stale one — failing closed.');
+  }
+  if (approvals.length > 0) {
+    return detect(`${TEAM_CONFIG_PATH} was approved by owner "${approvals[0].author}" on an older commit, not the current head — the approval is stale; an owner must approve again.`);
+  }
+  return detect(
+    `${TEAM_CONFIG_PATH} changed without a current APPROVED review from a governance.owners login (${list.join(', ')}) ` +
+    `other than the PR author "${author ?? 'unknown'}" — the author, a non-owner, or an owner whose latest review is not an approval cannot approve the team config.`);
 }
 
 // ── I/O wrapper ──────────────────────────────────────────────────────────────
@@ -115,14 +141,15 @@ function defaultFetchReviews(repo, provider, { getVcs: getVcsFn = getVcs } = {})
   return async (prNumber) => {
     const vcs = await getVcsFn({ provider });
     const { apiBase, token, proxyUrl } = gitlabApiConfig();
-    return (await vcs.prReviews({ project: repo, number: prNumber, apiBase, token, proxyUrl })) ?? [];
+    // `null` (could not fetch) stays distinct from `[]` (no reviews yet): it is not evidence of absence.
+    return (await vcs.prReviews({ project: repo, number: prNumber, apiBase, token, proxyUrl })) ?? null;
   };
 }
 
 /**
  * Gathers the evaluator's inputs. Owners and tier come from `git show <baseSha>:brain.config.json`; reviews are
  * fetched only when the config is touched.
- * @returns {Promise<{changedFiles: string[], reviews: Array, author: string, owners: string[], tier: string}>}
+ * @returns {Promise<{changedFiles: string[], reviews: Array, author: string, owners: string[], tier: string, headSha: string, founding: boolean}>}
  */
 export async function gatherTeamConfigReviewedInputs({ baseSha, headSha, prNumber, repo, author, provider, cwd = process.cwd(), tier: tierOverride, deps = {} } = {}) {
   const diffNameOnly = deps.diffNameOnly ?? defaultDiffNameOnly(cwd);
@@ -131,11 +158,14 @@ export async function gatherTeamConfigReviewedInputs({ baseSha, headSha, prNumbe
 
   const changedFiles = diffNameOnly(baseSha, headSha);
   const text = gitShow(baseSha, TEAM_CONFIG_PATH);
-  const baseConfig = text == null ? {} : JSON.parse(text);
+  // No team config on the base: this PR is the ADOPTION, the founding decision. Its tier is the new-consumer default
+  // (ADR-0026 Am8), never one its own head declares.
+  const founding = text == null;
+  const baseConfig = founding ? {} : JSON.parse(text);
   const owners = normalizeOwners(baseConfig?.governance?.owners);
-  const tier = tierOverride ?? deps.tier ?? resolveTier(baseConfig);
-  const reviews = changedFiles.includes(TEAM_CONFIG_PATH) ? await fetchReviews(prNumber) : [];
-  return { changedFiles, reviews, author, owners, tier };
+  const tier = tierOverride ?? deps.tier ?? (founding ? 'lite' : resolveTier(baseConfig));
+  const reviews = changedFiles.includes(TEAM_CONFIG_PATH) && !founding ? await fetchReviews(prNumber) : [];
+  return { changedFiles, reviews, author, owners, tier, headSha, founding };
 }
 
 /** Never throws. A failed read means the owner evidence CANNOT BE VERIFIED: fail where the gate is required. */
