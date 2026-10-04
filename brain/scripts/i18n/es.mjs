@@ -243,6 +243,8 @@ export default {
   'axes.diagnose.undeclared.fix': 'elegir uno y declararlo en un PR: npm run brain:config -- set {axis}.default <nombre>',
   'axes.diagnose.ownersUndeclared': 'governance.owners está vacío o ausente: nadie figura como dueño de la config del equipo',
   'axes.diagnose.ownersUndeclared.fix': 'nombrar al dueño (o dueños) en un PR: npm run brain:config -- set governance.owners <login>',
+  'axes.diagnose.codeownersDrift': 'CODEOWNERS nombra {codeowners} para brain.config.json pero governance.owners es {owners}',
+  'axes.diagnose.codeownersDrift.fix': 'CODEOWNERS es un espejo opcional: que su regla de brain.config.json liste exactamente governance.owners, o quitar la regla',
   'bootstrap.axis.teamUndeclared': 'el equipo no declaró {axis}; pedile a un owner, o proponelo con `npm run brain:config -- set {axis}.default <nombre>` en un PR. env:init no escribe la config del equipo en un repositorio existente.',
   'bootstrap.axis.userDeclared': '{axis}.default = {name} guardado en tu config de usuario ({path}) — es solo tuyo; brain.config.json no se tocó',
   'bootstrap.axis.userWriteFailed': 'no se pudo guardar {axis}.default en tu config de usuario: {detail}',

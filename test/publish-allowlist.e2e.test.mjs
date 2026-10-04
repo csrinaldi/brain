@@ -63,7 +63,7 @@ const MUST_NOT_SHIP = Object.freeze([
  * delivery.mjs and their suites). Organic growth, no bulk. Whether every
  * vendored suite must ship is tracked in #1076.
  */
-const SIZE_CANARY_MB = 9.6; // 9 -> 9.1 -> 9.2 (#1218) -> 9.3 (#1201) -> 9.5 (#1114 S1): read what was added, +27 KB (the axis-port guard and its allowlist), no bulk; -> 9.6 (#1263 S1): +~35 KB, the user-layer reader and its tests (resolveAxis, the guard, the reader), no bulk; main sat at 9.277 MiB and *.test.mjs is 59% of the tarball (#1076)
+const SIZE_CANARY_MB = 9.7; // 9 -> 9.1 -> 9.2 (#1218) -> 9.3 (#1201) -> 9.5 (#1114 S1): read what was added, +27 KB (the axis-port guard and its allowlist), no bulk; -> 9.6 (#1263 S1): +~35 KB, the user-layer reader and its tests (resolveAxis, the guard, the reader), no bulk; main sat at 9.277 MiB and *.test.mjs is 59% of the tarball (#1076) -> 9.7 (#1263 S4): +~25 KB, the team-config-reviewed gate and its suite plus the scaffold row, no bulk
 
 /**
  * The real packed contents — read from the ACTUAL tarball, not from npm's

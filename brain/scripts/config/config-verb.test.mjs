@@ -290,3 +290,10 @@ test('#1263 <axis>.locked is settable on memory, platform and sdd as a boolean; 
   }
   assert.match(setPath('vcs.locked', 'true').refusal, /unknown path/);
 });
+
+test('#1263 s4 governance.owners: a bare all-digit token is a STRING login, never parsed as a number; only an explicit JSON array is JSON', () => {
+  assert.deepEqual(setPath('governance.owners', '12345').next.governance.owners, ['12345']);
+  assert.deepEqual(setPath('governance.owners', '12345,alice').next.governance.owners, ['12345', 'alice']);
+  assert.deepEqual(setPath('governance.owners', '["12345","alice"]').next.governance.owners, ['12345', 'alice']);
+  assert.ok(setPath('governance.owners', '[12345]').refusal, 'a JSON array of numbers is still refused');
+});
