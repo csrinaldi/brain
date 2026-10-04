@@ -196,10 +196,27 @@ test('§4: under plain every stage has a default role (the human), so the cascad
   assert.equal(validateAxisConfig(cfg).ok, true);
 });
 
-test('§4: the brain provider knows cold-review (the explicit seam #1132 replaces) and nothing else', () => {
+test('§4: the brain provider declares cold-review and brain:stage for every other custom stage, no lifecycle role (seam #1132 replaces)', () => {
   const cfg = (roles) => ({ sdd: { default: 'brain', providers: { brain: { version: 'self' } }, roles } });
   assert.equal(validateAxisConfig(cfg({ 'cold-review': { model: 'm' } })).ok, true);
-  assert.deepEqual(codes(validateAxisConfig(cfg({ lint: { model: 'm' } }))), ['role-agent-required']);
+  assert.equal(validateAxisConfig(cfg({ lint: { model: 'm' } })).ok, true);
+  assert.deepEqual(codes(validateAxisConfig(cfg({ design: { model: 'm' } }))), ['role-agent-required']);
+});
+
+test('§4: cold-review routed by sdd.map with no role and no agent is refused', () => {
+  const r = validateAxisConfig(SDD_GENTLE(undefined, { map: { 'cold-review': { engine: 'codex' } } }));
+  assert.deepEqual(codes(r), ['role-agent-required']);
+  assert.equal(r.errors[0].path, 'sdd.roles.cold-review.agent');
+});
+
+test('§4: any sdd.map key is routed, declared in sdd.stages or not', () => {
+  assert.deepEqual(codes(validateAxisConfig(SDD_GENTLE(undefined, { map: { lint: { engine: 'gemini' } } }))), ['role-agent-required']);
+});
+
+test('§4: a legacy (unshaped) sdd is not validated by §4 — it is migrated first', () => {
+  const stages = { proposal: {}, spec: {}, design: {}, tasks: {}, lint: { artefact: 'lint.md' } };
+  assert.deepEqual(validateAxisConfig({ engine: 'gentle-ai', sdd: { stages, map: { 'cold-review': { engine: 'codex' }, lint: { engine: 'gemini' } } } }), { ok: true, errors: [] });
+  assert.deepEqual(validateAxisConfig({ harness: 'gentle-ai', sdd: { map: { lint: { engine: 'gemini' } } } }), { ok: true, errors: [] });
 });
 
 test('§4: a declared stage routed only by sdd.map, with no sdd.roles entry and no default role, is refused', () => {

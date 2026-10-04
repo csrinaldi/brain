@@ -12,7 +12,7 @@
 target: brain/project/decisions/adr-0038-one-config-shape-per-axis-default-and-providers.md
 amendment: 1
 issue: 1263
-home-summary: the precedence gains the user layer `<BRAIN_HOME>/config.json` (else `~/.brain/config.json`) between `.env` and the team config — process env > `.env` > user > team > legacy alias > undeclared, VCS excepted; a machine's providers are the union of the team's and the user's, while the config's structure is validated on the team layer alone; a team `<axis>.locked: true` refuses a differing override from the user layer, `.env` and the process env once the team has declared a value; and §4's must-declare-`agent` rule is enforced by `validateAxisConfig` for every routed stage (ADR-0040), #1263
+home-summary: the precedence gains the user layer `<BRAIN_HOME>/config.json` (else `~/.brain/config.json`) between `.env` and the team config — process env > `.env` > user > team > legacy alias > undeclared, VCS excepted; a machine's providers are the union of the team's and the user's, while the config's structure is validated on the team layer alone; a team `<axis>.locked: true` refuses a differing override from the user layer, `.env` and the process env once the team has declared a value; and §4's must-declare-`agent` rule is enforced by `validateAxisConfig` on a shaped `sdd` axis for every stage `sdd.roles` or `sdd.map` routes, with the 1.11.1 migration writing `brain:stage` for each custom routed stage other than `cold-review` (ADR-0040), #1263
 body: ## Amendment 1 — a user layer below `.env`, the providers union, `locked`, and §4 enforced (issue #1263)
 body-end: ### Notes for the promoter
 ```
@@ -80,11 +80,15 @@ stage.
 stage. **[Amended by Amendment 1 (#1263): enforced by `validateAxisConfig`
 (`brain/scripts/lib/axis-config.mjs`), as an `invalid-config` refusal (`role-agent-required`) that
 names the stage and the `brain:config -- set sdd.roles.<stage>.agent` fix. The rule applies to a
-ROUTED stage: a key of `sdd.roles`, or a stage of the resolved stage set that `sdd.map` names. A
-stage nothing routes is not refused. The default role is read from the role port
-(`declaredDefaultRole`, `axes/sdd-engine/role-port.mjs`), which counts no derived role. The `brain`
-provider has no adapter yet, so its roles come from an explicit table that lists only
-`cold-review`, the seam #1132 replaces.]**
+ROUTED stage: any key of `sdd.roles` or of `sdd.map`, `cold-review` included. A stage nothing
+routes is not refused. It applies only when the `sdd` axis has this ADR's shape (`sdd.default` or
+`sdd.providers` present); a legacy config is migrated first. The default role is read from the role
+port (`declaredDefaultRole`, `axes/sdd-engine/role-port.mjs`), which counts no derived role. The
+`brain` provider has no adapter yet, so its roles come from an explicit table, the seam #1132
+replaces: `cold-review` for that stage, and `stage`, the generic custom-stage runner, for every
+other custom stage. The 1.11.1 migration writes `sdd.roles.<stage>` as
+`{ "agent": "brain:stage", engine, model }` for every custom stage `sdd.map` routes other than
+`cold-review`, so its output passes this rule.]**
 ```
 
 ```amend-find
@@ -92,7 +96,7 @@ A stage absent from `roles` resolves all three fields by the cascade only when i
 ```
 
 ```amend-replace
-A stage absent from `roles` resolves all three fields by the cascade only when its provider declares a default role for it; `cold-review` or a custom stage absent from `roles` is refused (section 4). **[Amended by Amendment 1 (#1263): refused when the stage is routed. A custom stage declared in `sdd.stages` that neither `sdd.roles` nor `sdd.map` names is not refused.]**
+A stage absent from `roles` resolves all three fields by the cascade only when its provider declares a default role for it; `cold-review` or a custom stage absent from `roles` is refused (section 4). **[Amended by Amendment 1 (#1263): refused when the stage is routed, that is, named by `sdd.roles` or `sdd.map`. A custom stage declared in `sdd.stages` that neither names is not refused.]**
 ```
 
 ```amend-find
@@ -141,12 +145,22 @@ ADR-0040 names this ADR in "Amendments this requires". What is on the
   locked. The 1.11.1 migration writes `locked: false` on an existing consumer's `memory`, `platform`
   and `sdd`.
 - **§4 is enforced.** `validateAxisConfig` refuses a routed stage that gives no `agent` when
-  `sdd.default` declares no default role for it. A routed stage is a key of `sdd.roles`, or a stage of
-  the resolved stage set that `sdd.map` names. The refusal is `role-agent-required`, catalogued in
-  `en` and `es`, and it names the stage and the `brain:config` fix. The default role comes from the
-  role port's `declaredDefaultRole` (`axes/sdd-engine/role-port.mjs`), which is injected so the
-  validator stays pure. It counts no `derived: true` role. This repository's own config, whose
-  `cold-review` gives `agent: "brain:cold-review"`, passes. So does the 1.11.1 migration's output.
+  `sdd.default` declares no default role for it. A routed stage is any key of `sdd.roles` or of
+  `sdd.map`, `cold-review` included. The rule runs only on a shaped `sdd` axis (`sdd.default` or
+  `sdd.providers` present): a legacy config is not checked, it is migrated first. The refusal is
+  `role-agent-required`, catalogued in `en` and `es`, and it names the stage and the `brain:config`
+  fix. The default role comes from the role port's `declaredDefaultRole`
+  (`axes/sdd-engine/role-port.mjs`), which is injected so the validator stays pure. It counts no
+  `derived: true` role.
+- **The `brain` provider's roles, and the migration (maintainer ruling, 2026-10-04).** `brain`
+  declares `cold-review` for that stage and `stage`, its generic custom-stage runner (run stage X
+  with engine Y), for every other custom stage; it declares no lifecycle role. The 1.11.1 migration
+  writes `sdd.roles.<stage>` as `{ "agent": "brain:stage", engine, model }` for every custom stage
+  `sdd.map` routes other than `cold-review`, which keeps `brain:cold-review`. It keeps an existing
+  role, stays idempotent and prints each role it writes. Without this, an existing consumer with a
+  custom routed stage would have been refused on upgrade, against §7. This repository's config, and
+  the migration's output for a fresh consumer, a GitLab consumer, a `plain` platform, an
+  `antigravity` platform and a custom `lint` stage, all pass.
 
 ### Why
 
@@ -171,8 +185,10 @@ section 5, the version states of section 6, and VCS's exception at the `.env` le
 - **An explicit `agent` is checked by its provider part only.** The role part, the `cold-review` in
   `brain:cold-review`, is not looked up.
 - **The `brain` provider's roles are a hand-kept table.** `BRAIN_PROVIDER_ROLES` in `role-port.mjs`
-  lists `cold-review` and nothing else. #1132 replaces it with an inhabitant that declares through
-  the port.
+  names `cold-review` and the generic `stage`. #1132 replaces it with an inhabitant that declares
+  through the port.
+- **A legacy config is not checked by §4.** Until the migration runs, a config with no `sdd` shape
+  can route a stage with no defined agent, and nothing says so.
 - **The runner still reads `sdd.map`.** The rule validates the declaration. Routing through
   `sdd.roles` is #1132's.
 - **The user file has no schema version and no migration.** ADR-0040 leaves that open.

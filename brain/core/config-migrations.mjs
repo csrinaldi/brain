@@ -308,15 +308,18 @@ function migrateToAxisShape(config, helpers = {}) {
   // platform provider; a CUSTOM stage's engine is a runtime and is.
   const lifecycle = new Set(ctx.lifecycleStages ?? []);
   const map = isObj(out.sdd.map) ? out.sdd.map : {};
+  // Every custom routed stage gets a role (ADR-0038 §4, maintainer ruling 2026-10-04): `cold-review` is
+  // `brain:cold-review`, any other custom stage `brain:stage`, brain's generic custom-stage runner. An existing role is kept.
   for (const [stage, route] of Object.entries(map)) {
     const engine = text(route?.engine);
-    if (!engine || lifecycle.has(stage)) continue;
-    if (isObj(out.platform.providers) && !has(out.platform.providers, engine)) {
+    if (lifecycle.has(stage)) continue;
+    if (engine && isObj(out.platform.providers) && !has(out.platform.providers, engine)) {
       out.platform.providers[engine] = {};
       say(`platform.providers.${engine} = {} (runtime routed by sdd.map["${stage}"].engine)`);
     }
-    if (stage === 'cold-review' && !has(out.sdd.roles, stage)) {
-      const role = { agent: 'brain:cold-review', engine };
+    if (!has(out.sdd.roles, stage)) {
+      const role = { agent: stage === 'cold-review' ? 'brain:cold-review' : 'brain:stage' };
+      if (engine) role.engine = engine;
       const model = text(route?.model);
       if (model) role.model = model;
       out.sdd.roles = { ...(isObj(out.sdd.roles) ? out.sdd.roles : {}), [stage]: role };

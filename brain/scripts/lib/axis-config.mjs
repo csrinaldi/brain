@@ -19,7 +19,6 @@
 import en from '../i18n/en.mjs';
 import { resolveAxisSelector } from './axis-selector.mjs';
 import { codeownersDrift } from './codeowners-drift.mjs';
-import { resolveStageSet } from './sdd-layout.mjs';
 import { declaredDefaultRole } from '../axes/sdd-engine/role-port.mjs';
 
 /**
@@ -115,20 +114,19 @@ export function readAxis(config, axis, { harness = true } = {}) {
   return { default: '', providers: {}, source: 'none' };
 }
 
-/** The stages a config ROUTES (ADR-0038 §4): every key of `sdd.roles`, and every resolved stage `sdd.map` names. */
+/** The stages a config ROUTES (ADR-0038 §4): every key of `sdd.roles` and every key of `sdd.map`, `cold-review` included. */
 function routedStages(cfg) {
   const roles = isObj(cfg.sdd?.roles) ? cfg.sdd.roles : {};
   const map = isObj(cfg.sdd?.map) ? cfg.sdd.map : {};
-  let resolved = [];
-  try { resolved = resolveStageSet(cfg).stages; } catch { resolved = []; } // a malformed sdd.stages is sdd-layout's refusal, reported where the stage set is read
   const out = Object.keys(roles);
-  for (const stage of resolved) if (has(map, stage) && !out.includes(stage)) out.push(stage);
+  for (const stage of Object.keys(map)) if (!out.includes(stage)) out.push(stage);
   return out;
 }
 
 /**
  * Validates the ADR-0038 shape. Only the new shape is checked; a legacy config has
- * nothing to validate. Never throws.
+ * nothing to validate: it is migrated first (1.11.1). That includes §4, which runs only when the
+ * `sdd` axis has the shape (`sdd.default` or `sdd.providers` present). Never throws.
  *
  * `defaultRole(provider, stage)` answers the role an SDD provider DECLARES as its default for a stage,
  * or null (ADR-0038 §4). It defaults to the role port's `declaredDefaultRole`, which counts no DERIVED
@@ -201,8 +199,10 @@ export function validateAxisConfig(config, { defaultRole = declaredDefaultRole }
 
     // ADR-0038 §4: the `agent` cascade is defined only when `sdd.default` DECLARES a default role for the stage. A routed
     // stage without one (cold-review and every custom stage under gentle-ai) must give `agent` in `sdd.roles`, or it is
-    // refused. An undeclared `sdd.default` has no cascade to check: `resolveAxis` refuses the axis itself.
-    const sddDefault = nonEmpty(readAxis(cfg, 'sdd').default);
+    // refused. A legacy (unshaped) `sdd` is not checked: the 1.11.1 migration writes its roles first. An undeclared
+    // `sdd.default` has no cascade to check: `resolveAxis` refuses the axis itself.
+    const sddShaped = isObj(cfg.sdd) && (has(cfg.sdd, 'default') || has(cfg.sdd, 'providers'));
+    const sddDefault = sddShaped ? nonEmpty(cfg.sdd.default) : '';
     if (sddDefault !== '') {
       for (const stage of routedStages(cfg)) {
         const role = roles[stage];
