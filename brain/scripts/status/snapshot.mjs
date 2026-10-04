@@ -34,6 +34,7 @@
 
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
+import { gitErrorLine } from '../lib/git-tree.mjs';
 import { join } from 'node:path';
 
 import { field, pending, uncomputable } from './report.mjs';
@@ -275,6 +276,35 @@ function readOneChange({ id, missingId, dir, issue, slug, archived, artefacts, r
 }
 
 /**
+ * #1284 D94: when the newest commit touching each active change dir landed, from ONE
+ * `git log` (newest first, so the first record naming a path under a dir is that dir's).
+ * Returns a Map dir -> {ok:true, at, author} | {ok:false, reason}; a throwing call gives
+ * every dir the same reason, never a time nobody read.
+ */
+function readLastCommits(dirs, run) {
+  const out = new Map();
+  if (dirs.length === 0) return out;
+  let text;
+  try {
+    text = String(run('git', ['log', '--no-renames', '--format=%x1e%cI%x1f%an', '--name-only', '--', ...dirs]));
+  } catch (err) {
+    for (const d of dirs) out.set(d, { ok: false, reason: `the change-dir log could not be read: ${gitErrorLine(err)}` });
+    return out;
+  }
+  for (const record of text.split('\x1e')) {
+    if (record.trim() === '') continue;
+    const [head, ...rest] = record.split('\n');
+    const [at, author] = head.split('\x1f');
+    const paths = rest.map((l) => l.trim()).filter(Boolean);
+    for (const d of dirs) {
+      if (!out.has(d) && paths.some((p) => p.startsWith(`${d}/`))) out.set(d, { ok: true, at, author });
+    }
+  }
+  for (const d of dirs) if (!out.has(d)) out.set(d, { ok: false, reason: `no commit touches ${d} on the served tree` });
+  return out;
+}
+
+/**
  * Every change dir, active AND archived, read through the layout accessor
  * (R879-8, extended R998-4): `openspec/changes/<issue-N-slug>` rows plus
  * `openspec/changes/archive/<issue>` rows (`archived: true`), same shape.
@@ -287,7 +317,8 @@ function readOneChange({ id, missingId, dir, issue, slug, archived, artefacts, r
  * dropped: it is excluded from `value`'s rows AND named on the returned
  * section's own `archiveSkipped` array (review of PR 4, fix 1).
  */
-export function readChanges({ root, tier, _read, _list, _exists } = {}) {
+export function readChanges({ root, tier, _read, _list, _exists, _run } = {}) {
+  const run = _run ?? ((file, args) => execFileSync(file, args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }));
   const read = _read ?? ((p) => readFileSync(join(root, p), 'utf8'));
   const list = _list ?? ((p) => readdirSync(join(root, p)));
   const exists = _exists ?? ((p) => existsSync(join(root, p)));
@@ -308,6 +339,9 @@ export function readChanges({ root, tier, _read, _list, _exists } = {}) {
     return readOneChange({ id, missingId: id, dir: changeDir(id), issue: Number(iid), slug, archived: false, artefacts, read, list, exists });
   });
 
+  const lastCommits = readLastCommits(activeRows.map((r) => r.dir), run);
+  for (const row of activeRows) row.lastCommit = lastCommits.get(row.dir);
+
   const archiveDirRel = `${CHANGES_ROOT}/archive`;
   let archivedRows = [];
   const archiveSkipped = [];
@@ -325,7 +359,7 @@ export function readChanges({ root, tier, _read, _list, _exists } = {}) {
     }
     archiveNames.sort((a, b) => Number(a) - Number(b));
     archivedRows = archiveNames.map((name) =>
-      readOneChange({ id: name, missingId: `archive/${name}`, dir: archivePath(name), issue: Number(name), slug: null, archived: true, artefacts, read, list, exists })
+      ({ ...readOneChange({ id: name, missingId: `archive/${name}`, dir: archivePath(name), issue: Number(name), slug: null, archived: true, artefacts, read, list, exists }), lastCommit: { ok: false, reason: 'not read for archived dirs' } })
     );
   }
 
@@ -558,7 +592,7 @@ export async function buildSnapshot({ root = process.cwd(), now, vcs = null, pro
     tier: SNAPSHOT_TIER,
     governanceTier: typeof tier === 'string' ? field(tier) : uncomputable(tier.reason),
     graph,
-    changes: readChanges({ root, tier: typeof tier === 'string' ? tier : null, _read: read, _list: list, _exists: exists }),
+    changes: readChanges({ root, tier: typeof tier === 'string' ? tier : null, _read: read, _list: list, _exists: exists, _run: run }),
     prs: forge.prs,
     reviews: forge.reviews,
     closedIssues: forge.closedIssues,

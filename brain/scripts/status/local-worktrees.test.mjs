@@ -72,7 +72,7 @@ test('R883-1: worktrees on feat/ and fix/ branches of open issues join, with the
   assert.equal(section.ok, true);
   assert.equal(section.value.tier, 'working-tree');
   assert.deepEqual(section.value.entries.map((e) => [e.issue, e.branch, e.head, e.leaf]), [[11, 'feat/issue-11-a', '1'.repeat(40), 'a'], [12, 'fix/issue-12-b', '2'.repeat(40), 'b']]);
-  assert.deepEqual(Object.keys(section.value.entries[0]).sort(), ['branch', 'capped', 'dir', 'dirState', 'fingerprint', 'head', 'issue', 'leaf', 'path', 'reason', 'touchedAt'].sort());
+  assert.deepEqual(Object.keys(section.value.entries[0]).sort(), ['branch', 'capped', 'dir', 'dirState', 'fingerprint', 'head', 'headCommitAt', 'issue', 'leaf', 'path', 'reason', 'touchedAt'].sort());
   assert.equal(section.value.entries[0].dir, 'openspec/changes/issue-11-x');
   assert.equal(section.value.entries[0].dirState, 'present');
 });
@@ -201,4 +201,47 @@ test('R883-1: the section reads names and lstat metadata only, never a file', ()
   for (const name of Object.keys(fs)) if (typeof fs[name] === 'function') { const orig = fs[name]; fs[name] = (...a) => { seen.push(name); return orig(...a); }; }
   readLocalWorktrees({ run: recorder(listing(stanza('/srv/a', 'feat/issue-11-a'))), root: ROOT, graph: openGraph(11), _fs: fs });
   assert.deepEqual([...new Set(seen)].sort(), ['lstatSync', 'readdirSync', 'realpathSync']);
+});
+
+// ── #1284 D103: a worktree with no change dir gets its head commit time ─────
+
+const SHA_A = 'a1'.repeat(20);
+const SHA_B = 'b2'.repeat(20);
+const SHA_C = 'c3'.repeat(20);
+function dispatchRun(listingOut, show) {
+  const calls = [];
+  const run = (file, args) => {
+    calls.push(args);
+    if (args[0] === 'worktree') return listingOut;
+    if (args[0] === 'show') { if (show instanceof Error) throw show; return show; }
+    throw new Error(`unexpected git ${args.join(' ')}`);
+  };
+  run.calls = calls;
+  return run;
+}
+const withRun = (run, nodes) => readLocalWorktrees({ run, root: ROOT, graph: openGraph(11, 12, 13), _fs: fakeFs({ ...FS_ROOT, ...nodes }) });
+
+test('#1284 D103: ONE git show over the head shas of missing-dir worktrees gives them headCommitAt', () => {
+  const out = listing(stanza('/srv/m1', 'feat/issue-11-a', SHA_A), stanza('/srv/m2', 'feat/issue-12-b', SHA_B), stanza('/srv/p', 'feat/issue-13-c', SHA_C));
+  const run = dispatchRun(out, '2026-10-02T09:00:00+00:00\n2026-10-03T09:00:00+00:00\n');
+  const section = withRun(run, { '/srv/m1': 'dir', '/srv/m2': 'dir', ...worktreeNodes('/srv/p', 13) });
+  const shows = run.calls.filter((a) => a[0] === 'show');
+  assert.deepEqual(shows, [['show', '-s', '--format=%cI', SHA_A, SHA_B]], 'present-dir worktrees are not asked');
+  const by = Object.fromEntries(section.value.entries.map((e) => [e.issue, e]));
+  assert.equal(by[11].headCommitAt, '2026-10-02T09:00:00+00:00');
+  assert.equal(by[12].headCommitAt, '2026-10-03T09:00:00+00:00');
+  assert.equal(by[13].headCommitAt, null);
+});
+
+test('#1284 D103: a failing git show leaves the entries without a time, never a wrong one; no call when none qualifies', () => {
+  const out = listing(stanza('/srv/m1', 'feat/issue-11-a', SHA_A));
+  const failing = dispatchRun(out, new Error('boom'));
+  const section = withRun(failing, { '/srv/m1': 'dir' });
+  assert.equal(section.ok, true);
+  assert.equal(section.value.entries[0].headCommitAt, null);
+  const none = dispatchRun(listing(stanza('/srv/p', 'feat/issue-13-c', SHA_C)), '');
+  withRun(none, worktreeNodes('/srv/p', 13));
+  assert.equal(none.calls.filter((a) => a[0] === 'show').length, 0);
+  const short = dispatchRun(out, '');
+  assert.equal(withRun(short, { '/srv/m1': 'dir' }).value.entries[0].headCommitAt, null, 'an output that does not match the sha count assigns nothing');
 });

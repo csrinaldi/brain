@@ -94,6 +94,25 @@ const byIssueThenNewest = (a, b) => a.issue - b.issue
   || a.path.localeCompare(b.path);
 
 /**
+ * #1284 D103: a worktree whose change dir is `missing` has no `touchedAt`, so ONE
+ * `git show -s --format=%cI <sha...>` gives it the time of its head commit. Local, read-only.
+ * A failed call, or an output that does not line up with the shas, assigns nothing: a time
+ * nobody read is `null`, never a guess.
+ */
+function readHeadCommitTimes(entries, run) {
+  const asked = entries.filter((e) => e.dirState === 'missing' && e.touchedAt === null && e.head);
+  const shas = [...new Set(asked.map((e) => e.head))];
+  if (shas.length === 0) return;
+  let lines;
+  try {
+    lines = String(run('git', ['show', '-s', '--format=%cI', ...shas])).split('\n').map((l) => l.trim()).filter(Boolean);
+  } catch { return; }
+  if (lines.length !== shas.length) return;
+  const bySha = new Map(shas.map((sha, i) => [sha, lines[i]]));
+  for (const e of asked) e.headCommitAt = bySha.get(e.head);
+}
+
+/**
  * The worktrees of open issues, as a section.
  * @param {{run: Function, root: string, graph: object, _fs?: object}} opts
  */
@@ -123,9 +142,10 @@ export function readLocalWorktrees({ run, root, graph, _fs = defaultFs }) {
     const found = readChangeDir({ fs: _fs, path: s.path, issue });
     kept.push({
       path: s.path, leaf: basename(s.path), branch: s.branch, head: s.head, issue,
-      ...found, ...readTouch({ fs: _fs, path: s.path, found }), capped: false,
+      ...found, ...readTouch({ fs: _fs, path: s.path, found }), headCommitAt: null, capped: false,
     });
   }
+  readHeadCommitTimes(kept, run);
   kept.sort(byIssueThenNewest);
   const rank = new Map();
   for (const entry of kept) {
