@@ -229,3 +229,51 @@ test('R1284-13: the model imports no I/O module and reads no clock', () => {
   assert.doesNotMatch(text, /\bDate\.now\s*\(/);
   assert.doesNotMatch(text, /\bfetch\s*\(/);
 });
+
+// ---- #1284 batch 2: R1284-4 activity is the max of every measured time; R1284-14 kind and progress ----
+
+const hEntry = (n, extra) => ok({ issues: [[n, { state: 'open', children: [], ...extra }]], divergences: [], closedUnresolved: [], closedRead: { ok: true } });
+const allRows = (r) => [...r.value.rows, ...r.value.unknown, ...r.value.stale];
+
+test('R1284-4: a fresher change-dir commit beats an older branch tip', () => {
+  const r = build({
+    hierarchy: hierarchy({ 901: 'open' }),
+    changes: ok([change(901, { ok: true, at: '2026-10-03T00:00:00Z', author: 'dev' })]),
+    remoteChanges: ok({ branches: [br(901, { tipAt: '2026-10-01T00:00:00Z' })] }),
+  });
+  assert.equal(r.value.rows[0].activityAt, '2026-10-03T00:00:00Z');
+  assert.equal(r.value.rows[0].activityFrom, 'change dir last commit');
+});
+
+test('R1284-4: headCommitAt is a fallback only; a measured touchedAt wins even when older', () => {
+  const r = build({
+    hierarchy: hierarchy({ 902: 'open' }),
+    localWorktrees: ok({ entries: [wt(902, { touchedAt: '2026-10-01T00:00:00Z', headCommitAt: '2026-10-03T00:00:00Z' })] }),
+  });
+  assert.equal(r.value.rows[0].activityAt, '2026-10-01T00:00:00Z');
+  assert.equal(r.value.rows[0].activityFrom, 'worktree files');
+});
+
+test('R1284-14: a declared level is the row kind; a default or absent level shows none', () => {
+  const declared = buildInflight(sections({ hierarchy: hEntry(878, { level: 'epic', levelSource: 'block' }), changes: ok([change(878)]) }), { nowMs: NOW });
+  assert.equal(allRows(declared)[0].kind, 'epic');
+  assert.ok(allRows(declared)[0].facts.includes('epic'));
+  const dflt = buildInflight(sections({ hierarchy: hEntry(903, { level: 'ticket', levelSource: 'default' }), changes: ok([change(903)]) }), { nowMs: NOW });
+  assert.equal(allRows(dflt)[0].kind, null);
+  assert.ok(!allRows(dflt)[0].facts.some((f) => /ticket/.test(f)));
+  const absent = buildInflight(sections({ hierarchy: hEntry(906, {}), changes: ok([change(906)]) }), { nowMs: NOW });
+  assert.equal(allRows(absent)[0].kind, null);
+});
+
+test('R1284-14: progress is worded by progressLabel from the served change dir only', () => {
+  const r = build({
+    hierarchy: hierarchy({ 904: 'open', 905: 'open', 907: 'open' }),
+    changes: ok([{ ...change(904), progress: { ok: true, value: { done: 3, total: 5 } } }, change(907)]),
+    remoteChanges: ok({ branches: [br(905)] }),
+  });
+  const by = Object.fromEntries(allRows(r).map((x) => [x.issue, x]));
+  assert.equal(by[904].progress, 'tasks 3 / 5 · working tree');
+  assert.ok(by[904].facts.includes('tasks 3 / 5 · working tree'));
+  assert.equal(by[905].progress, null);
+  assert.equal(by[907].progress, null, 'a change dir row with no progress value claims none');
+});

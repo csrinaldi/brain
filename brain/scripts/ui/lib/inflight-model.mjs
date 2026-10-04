@@ -8,6 +8,7 @@
 
 import { hierarchyOf } from './rollup-model.mjs';
 import { authorLine } from './remote-model.mjs';
+import { SOURCE, progressLabel } from './progress-view.mjs';
 
 /** A row with no activity for this many days moves to the collapsed stale group. */
 export const STALE_DAYS = 7;
@@ -50,22 +51,34 @@ function collect(sections) {
 
 const ms = (iso) => (typeof iso === 'string' ? Date.parse(iso) : NaN);
 
-/** The row's activity: the latest worktree `touchedAt` / branch `tipAt`; failing that the change dir's last commit, then a bare worktree's head commit (D98, D103). */
+/**
+ * The row's activity: the latest of every measured time (worktree `touchedAt`, branch `tipAt`, the change dir's
+ * last commit when its read succeeded); only when none exists, a bare worktree's head commit (D98, D103, D105).
+ */
 function activityOf(c) {
-  const direct = [
+  const measured = [
     ...c.worktrees.map((w) => [w.touchedAt, 'worktree files']),
     ...c.branches.map((b) => [b.tipAt, 'branch tip']),
-  ];
-  const fallback = [
     ...c.changes.map((x) => [x.lastCommit?.ok === true ? x.lastCommit.at : null, 'change dir last commit']),
-    ...c.worktrees.map((w) => [w.headCommitAt, 'worktree head commit']),
   ];
-  for (const pool of [direct, fallback]) {
+  const fallback = c.worktrees.map((w) => [w.headCommitAt, 'worktree head commit']);
+  for (const pool of [measured, fallback]) {
     let best = null;
     for (const [at, from] of pool) if (!Number.isNaN(ms(at)) && (best === null || ms(at) > ms(best.at))) best = { at, from };
     if (best) return { activityAt: best.at, activityFrom: best.from };
   }
   return { activityAt: null, activityFrom: ACTIVITY_UNKNOWN };
+}
+
+/** The issue kind, only when the hierarchy entry's level is declared; a defaulted level is not data (D104). */
+function kindOf(entry) {
+  return typeof entry?.level === 'string' && entry.levelSource && entry.levelSource !== 'default' ? entry.level : null;
+}
+
+/** Tasks progress, only from a served-tree change dir row that carries a `progress` value (D104). */
+function progressOf(c) {
+  const withProgress = c.changes.find((x) => x.progress);
+  return withProgress ? progressLabel(withProgress.progress, SOURCE.workingTree, { prefix: 'tasks' }) : null;
 }
 
 function titleOf(graph, issue) {
@@ -75,7 +88,7 @@ function titleOf(graph, issue) {
 
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 
-function rowOf(c, state, graph) {
+function rowOf(c, state, graph, entry) {
   const authors = [...new Set(c.branches.map((b) => b.author).filter(Boolean))];
   // A change-dir-only row has no branch to read an author from; the dir's last committer is the only name there is.
   if (authors.length === 0 && c.worktrees.length === 0) {
@@ -85,6 +98,8 @@ function rowOf(c, state, graph) {
     issue: c.issue,
     title: titleOf(graph, c.issue),
     state,
+    kind: kindOf(entry),
+    progress: progressOf(c),
     ...activityOf(c),
     worktrees: c.worktrees.map((w) => ({ leaf: w.leaf, dirState: w.dirState })),
     branches: c.branches.map((b) => ({ branch: b.branch, author: b.author, tipAt: b.tipAt })),
@@ -94,6 +109,8 @@ function rowOf(c, state, graph) {
     authorLines: authors.map(authorLine),
     onThisMachine: c.worktrees.length > 0,
     facts: [
+      kindOf(entry),
+      progressOf(c),
       c.worktrees.length > 0 ? `${plural(c.worktrees.length, 'worktree', 'worktrees')} on this machine` : null,
       c.branches.length > 0 ? `${plural(c.branches.length, 'branch', 'branches')} on origin` : null,
       ...c.prs.map((p) => `PR #${p.number}`),
@@ -131,7 +148,7 @@ export function buildInflight(sections, { nowMs }) {
     const entry = h.value.issues.get(c.issue);
     if (!entry) continue; // D96: the open list feeds the map completely, so an unlisted issue is not open
     if (entry.state === 'closed') continue;
-    const row = rowOf(c, entry.state === 'open' ? 'open' : 'unknown', s.graph);
+    const row = rowOf(c, entry.state === 'open' ? 'open' : 'unknown', s.graph, entry);
     if (row.activityAt === null) value.unknown.push(row);
     else dated.push(row);
   }

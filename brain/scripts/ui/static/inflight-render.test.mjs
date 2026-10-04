@@ -162,3 +162,23 @@ test('R1284-9: a hostile author name is text — the literal is in textContent a
   assert.ok(rowOf(dom, 1198)[0].textContent.includes(XSS_AUTHOR));
   assert.equal(Array.from(findAll(section(dom), (n) => n.tagName === 'IMG')).length, 0);
 });
+
+test('R1284-14: the row shows a declared kind and tasks progress, and nothing for a default level or a branch-only row', async (t) => {
+  const hier = ok({ issues: [
+    [1198, { state: 'open', children: [], level: 'epic', levelSource: 'block' }],
+    [1199, { state: 'open', children: [], level: 'ticket', levelSource: 'default' }],
+  ], divergences: [], closedUnresolved: [], closedRead: { ok: true } });
+  const dom = await boot({
+    hierarchy: hier,
+    changes: ok([{ issue: 1198, archived: false, id: 'issue-1198-x', lastCommit: { ok: false, reason: 'x' }, progress: { ok: true, value: { done: 3, total: 5 } } }]),
+    remoteChanges: remote(branch(1199)),
+  });
+  t.after(() => dom.restore());
+  const [a] = rowOf(dom, 1198);
+  const [b] = rowOf(dom, 1199);
+  assert.match(a.textContent, /epic/);
+  assert.match(a.textContent, /tasks 3 \/ 5 · working tree/);
+  const facts = find(b, byClass('inflight-facts')).textContent;
+  assert.doesNotMatch(facts, /ticket/);
+  assert.doesNotMatch(b.textContent, /tasks/);
+});
