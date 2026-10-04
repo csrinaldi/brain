@@ -682,6 +682,8 @@ body {
 .remote-work-row, .remote-unjoined-row { margin: 2px 0; word-break: break-all; }
 .remote-work-reason { display: block; }
 .remote-unjoined-toggle { font: inherit; font-size: 12px; cursor: pointer; border: 1px solid var(--line); background: var(--paper); color: var(--ink); padding: 2px 8px; }
+.local-block { margin: 10px 0; padding: 8px 10px; border: 1px solid var(--line); border-left: 3px solid var(--accent); }
+.local-block-label { font-family: var(--font-mono); font-size: 12px; word-break: break-all; }
 .remote-block { margin: 10px 0; padding: 8px 10px; border: 1px solid var(--line); border-left: 3px solid var(--accent); }
 .remote-block-label { font-family: var(--font-mono); font-size: 12px; word-break: break-all; }
 .remote-byline { margin: 2px 0 6px; font-size: 12px; color: var(--muted); }

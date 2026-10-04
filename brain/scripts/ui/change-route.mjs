@@ -21,6 +21,11 @@
 // `git` on the served root's OWN git dir via the shared `gitRun`/injected
 // `_run` — never `git -C <worktree>`. `HEAD` is mandatory in the blame argv
 // for the same reason: the committed version, never the index or the copy.
+//
+// THE ONE WORKING-TREE EXCEPTION (#883, R883-8, R883-16; amends R1198-4): the
+// drawer also shows an open issue's change dir in a LINKED worktree, "on this
+// machine". That read lives in `local-overlay.mjs`, never here: this file keeps no
+// `node:fs` import, and no artifact is read from the SERVED ROOT's working tree.
 
 import { gitRun, gitErrorLine } from './git-run.mjs';
 
@@ -34,6 +39,8 @@ import { LIFECYCLE_STAGES, ARTEFACT_FILE } from '../lib/sdd-layout.mjs';
 import { changeDirNames, parseTreeListing, pickChangeDir } from '../lib/git-tree.mjs';
 import { prUrl } from './lib/forge-url.mjs';
 import { documentWording, NO_CHANGE_BRANCH } from './lib/drawer-model.mjs';
+import { readLocalBlocks } from './local-overlay.mjs';
+import { parseCanonicalIssueBranch } from '../lib/branch-grammar.mjs';
 
 /** D14's caveat, verbatim in the UI, until #880 lands `type: review` records. */
 export const REVIEWS_SOURCE_NOTE = 'forge comments until #880 lands';
@@ -126,8 +133,11 @@ function buildTasksTab({ documents, head, run, dir, issue }) {
 
 /**
  * D12's branch resolution, in order: the issue's open PR headBranch, else the
- * single `feat/issue-<N>-*` branch in this clone — never picking among more
- * than one.
+ * single local branch of this issue, whatever its type (#883 D81) — never
+ * picking among more than one unless exactly one of them is checked out in a
+ * kept local worktree that holds the change dir (#883 W2). `*\/issue-N` and `*\/issue-N-*` are the two
+ * globs `git branch --list` needs; `parseCanonicalIssueBranch` is the one
+ * grammar that says which names are really this issue's.
  */
 function resolveBranch({ run, snapshot, issue }) {
   const prMatch = snapshot?.prs?.ok ? snapshot.prs.value.find((p) => p.issue === issue) : null;
@@ -135,23 +145,31 @@ function resolveBranch({ run, snapshot, issue }) {
 
   let listed;
   try {
-    listed = run('git', ['branch', '--list', `feat/issue-${issue}-*`]);
+    listed = run('git', ['branch', '--list', `*/issue-${issue}`, `*/issue-${issue}-*`]);
   } catch (err) {
     return { ok: false, kind: 'failed', reason: `git branch --list failed: ${gitErrorLine(err)}` };
   }
-  const names = listed.split(/\r?\n/).map((l) => l.replace(/^\*?\s+/, '').trim()).filter(Boolean);
-  if (names.length === 0) return { ok: false, kind: 'none', reason: `no open PR and no feat/issue-${issue}-* branch in this clone` };
-  if (names.length > 1) return { ok: false, kind: 'ambiguous', reason: `more than one feat/issue-${issue}-* branch in this clone: ${names.join(', ')}` };
-  return { ok: true, branch: names[0] };
+  const names = listed.split(/\r?\n/).map((l) => l.replace(/^[*+]?\s+/, '').trim()).filter((n) => n && parseCanonicalIssueBranch(n)?.issueNumber === String(issue));
+  if (names.length === 0) return { ok: false, kind: 'none', reason: `no open PR and no */issue-${issue} branch in this clone` };
+  if (names.length === 1) return { ok: true, branch: names[0] };
+  // #883 W2: several names. The worktree that holds this issue's change dir is
+  // the one the maintainer is working in; the snapshot already says which
+  // (no extra spawn). Two such worktrees stay ambiguous and are named.
+  const entries = snapshot?.localWorktrees?.ok ? snapshot.localWorktrees.value.entries : [];
+  const holding = entries.filter((e) => e.issue === issue && e.dirState === 'present' && names.includes(e.branch));
+  const held = [...new Set(holding.map((e) => e.branch))];
+  if (held.length === 1) return { ok: true, branch: held[0] };
+  const named = held.length > 1 ? `; held by worktrees ${holding.map((e) => e.leaf).join(', ')}` : '';
+  return { ok: false, kind: 'ambiguous', reason: `more than one */issue-${issue} branch in this clone: ${names.join(', ')}${named}` };
 }
 
-function buildWorkingMemoryTab({ resolved, resume }) {
+function buildWorkingMemoryTab({ resolved, resume, localResume = false }) {
   // Derived from the one resume document so this tab and the SDD row cannot disagree.
   if (!resolved.ok) return { ok: false, reason: documentWording(resume) };
   const { branch } = resolved;
   if (resume.state === 'unreadable') return { ok: false, reason: documentWording(resume) };
   if (resume.state !== 'present' && resume.state !== 'truncated') {
-    return { ok: false, reason: `no committed resume.md on ${branch}; the local overlay arrives in slice 5 (#883)` };
+    return { ok: false, reason: `no committed resume.md on ${branch}${localResume ? '; an uncommitted one is on this machine, below' : ''}` };
   }
   const { frontmatter } = parseFrontmatter(resume.text);
   return { ok: true, value: shapeResumeView({ frontmatter, branch, path: resume.path }) };
@@ -228,11 +246,11 @@ const HEAD_DOCUMENT_KEYS = SDD_STAGES.filter((stage) => stage !== 'archive');
 
 
 function documentEntry(path, ref, fields) {
-  return { path, ref, commit: null, state: 'missing', text: null, bytes: null, truncated: false, truncatedAt: null, reason: null, note: null, ...fields };
+  return { path, ref, commit: null, blob: null, state: 'missing', text: null, bytes: null, truncated: false, truncatedAt: null, reason: null, note: null, ...fields };
 }
 
 /** Cut at the cap on a UTF-8 boundary: back up while the first dropped byte is a continuation byte. */
-function capText(text) {
+export function capText(text) {
   const buf = Buffer.from(text, 'utf8');
   if (buf.length <= DOCUMENT_CAP) return { text, truncated: false, truncatedAt: null };
   let end = DOCUMENT_CAP;
@@ -247,7 +265,7 @@ function capText(text) {
  */
 function documentFromEntry({ path, ref, commit, entry, read }) {
   if (!entry) return documentEntry(path, ref, { state: 'missing' });
-  const refuse = (reason) => documentEntry(path, ref, { state: 'unreadable', reason, bytes: entry.size });
+  const refuse = (reason) => documentEntry(path, ref, { state: 'unreadable', reason, bytes: entry.size, blob: entry.sha });
   if (entry.type !== 'blob') return refuse(`${path} is a ${entry.type}, not a file`);
   if (entry.mode === '120000') return refuse(`${path} is a symlink`);
   if (entry.size > DOCUMENT_READ_LIMIT) return refuse(`${entry.size} bytes exceeds the read limit of ${DOCUMENT_READ_LIMIT}`);
@@ -259,7 +277,7 @@ function documentFromEntry({ path, ref, commit, entry, read }) {
   }
   const cut = capText(text);
   return documentEntry(path, ref, {
-    commit, state: cut.truncated ? 'truncated' : 'present', text: cut.text, bytes: entry.size, truncated: cut.truncated, truncatedAt: cut.truncatedAt,
+    commit, blob: entry.sha, state: cut.truncated ? 'truncated' : 'present', text: cut.text, bytes: entry.size, truncated: cut.truncated, truncatedAt: cut.truncatedAt,
     note: cut.truncated ? `truncated at ${DOCUMENT_CAP} bytes` : null,
   });
 }
@@ -422,8 +440,8 @@ function buildRecordsTab({ snapshot, issue }) {
 /** Remote blocks that carry documents; the rest of an issue's entries are listed without them. */
 export const REMOTE_DRAWER_CAP = 3;
 
-/** A remote resume document to `{state, reason, document, view}`: `invalid` is told from `present` by the same schema the writer validates against. */
-function remoteResume({ doc, label }) {
+/** A resume document (remote or local) to `{state, reason, document, view}`: `invalid` is told from `present` by the same schema the writer validates against. */
+export function resumeOutcome({ doc, label }) {
   if (doc.state === 'missing') return { state: 'missing', reason: doc.reason, document: doc, view: null };
   if (doc.state === 'unreadable') return { state: 'unreadable', reason: doc.reason, document: doc, view: null };
   const { frontmatter } = parseFrontmatter(doc.text);
@@ -452,7 +470,7 @@ function remoteBlock({ run, entry, index, head, issue }) {
   const { documents } = readHeadDocuments({ run, dir: base.dir, ref: entry.sha, label });
   return {
     ...base, state: 'read', documents,
-    resume: remoteResume({ doc: readResumeAt({ run, commit: entry.sha, issue, label }), label }),
+    resume: resumeOutcome({ doc: readResumeAt({ run, commit: entry.sha, issue, label }), label }),
   };
 }
 
@@ -497,6 +515,7 @@ export function buildChangeView({ root, issue, snapshot, project = null, _read, 
   const resolved = resolveBranch({ run, snapshot, issue });
   const resume = readResumeDocument({ run, resolved, issue });
   const documents = { ...headDocuments, resume };
+  const localRead = readLocalBlocks({ run, snapshot, issue, mainDocuments: headDocuments });
 
   return {
     ok: true,
@@ -507,10 +526,11 @@ export function buildChangeView({ root, issue, snapshot, project = null, _read, 
       spec: buildSpecTab({ documents, head, dir, issue }),
       sdd: buildSddTab({ snapshot, issue, dir }),
       tasks: buildTasksTab({ documents, head, run, dir, issue }),
-      workingMemory: buildWorkingMemoryTab({ resolved, resume }),
+      workingMemory: buildWorkingMemoryTab({ resolved, resume, localResume: localRead.local.some((b) => b.documents?.resume) }),
       reviews: buildReviewsTab({ snapshot, project, issue }),
       records: buildRecordsTab({ snapshot, issue }),
       ...readRemoteBlocks({ run, snapshot, issue, head }),
+      ...localRead,
     },
   };
 }

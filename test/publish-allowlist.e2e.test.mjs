@@ -63,7 +63,7 @@ const MUST_NOT_SHIP = Object.freeze([
  * delivery.mjs and their suites). Organic growth, no bulk. Whether every
  * vendored suite must ship is tracked in #1076.
  */
-const SIZE_CANARY_MB = 9.5; // 9 -> 9.1 -> 9.2 (#1218) -> 9.3 (#1201) -> 9.4 (#1257) -> 9.5 (#1199): read what was added, the hierarchy adapter, the rollup and progress modules and their suites, no bulk (#1076)
+const SIZE_CANARY_MB = 9.6; // 9 -> 9.1 -> 9.2 (#1218) -> 9.3 (#1201) -> 9.4 (#1257) -> 9.5 (#1199) -> 9.6 (#883): read what was added, the local overlay, its reader and watcher hooks and their suites, no bulk (#1076)
 
 /**
  * The real packed contents — read from the ACTUAL tarball, not from npm's

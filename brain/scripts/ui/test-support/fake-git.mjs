@@ -108,8 +108,8 @@ export function fakeGit({ files = {}, head = HEAD_DEFAULT, branches = {}, blame,
     }
 
     if (sub === 'branch' && rest[0] === '--list') {
-      const re = globToRe(rest[1] ?? '*');
-      const names = Object.keys(branches).filter((n) => re.test(n));
+      const res = (rest.length > 1 ? rest.slice(1) : ['*']).map(globToRe);
+      const names = Object.keys(branches).filter((n) => res.some((re) => re.test(n)));
       return names.map((n) => `  ${n}\n`).join('');
     }
 
