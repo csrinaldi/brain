@@ -57,7 +57,10 @@ const LIST_PATHS = Object.freeze(['governance.owners']);
 const LOGIN_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 /** @returns {{list: string[]}|{error: string}} */
 function parseOwners(raw) {
-  const v = parseValue(raw);
+  // Only an explicit JSON array is parsed as JSON: a bare token such as `12345` is a string login, never a number.
+  const text = String(raw).trim();
+  let v = text;
+  if (text.startsWith('[')) { try { v = JSON.parse(text); } catch { v = text; } }
   const items = Array.isArray(v) ? v : typeof v === 'string' ? v.split(',') : null;
   if (items === null || items.some((i) => typeof i !== 'string')) return { error: 'must be a login, a comma-separated list of logins, or a JSON array of logins' };
   const list = [...new Set(items.map((i) => i.trim().replace(/^@/, '')).filter((i) => i !== ''))];

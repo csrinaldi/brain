@@ -1,0 +1,68 @@
+// codeowners-drift.test.mjs — CODEOWNERS is an OPTIONAL mirror of governance.owners (ADR-0040 ratified point 8).
+// The drift is a finding, never a gate.
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import { codeownersDrift, readCodeowners } from './codeowners-drift.mjs';
+import { diagnoseAxes } from './axis-config.mjs';
+import en from '../i18n/en.mjs';
+import es from '../i18n/es.mjs';
+
+test('no brain.config.json rule: nothing is reported, whatever else CODEOWNERS says', () => {
+  assert.equal(codeownersDrift('# c\n/brain/core/** @team\n* @alice\n', ['bob']), null);
+  assert.equal(codeownersDrift('', ['bob']), null);
+  assert.equal(codeownersDrift(null, ['bob']), null);
+  assert.equal(codeownersDrift(undefined, ['bob']), null);
+});
+
+test('a rule whose owners equal governance.owners (order, case and @ are ignored) is no drift', () => {
+  assert.equal(codeownersDrift('/brain.config.json @Alice @bob\n', ['bob', 'alice']), null);
+  assert.equal(codeownersDrift('brain.config.json  @alice   # trailing comment\n', ['alice']), null);
+});
+
+test('a rule whose owners differ is drift, naming both sides', () => {
+  const d = codeownersDrift('/brain.config.json @alice @carol\n', ['alice', 'bob']);
+  assert.deepEqual(d, { codeowners: ['alice', 'carol'], owners: ['alice', 'bob'] });
+});
+
+test('a rule with owners while governance.owners is empty or absent is drift', () => {
+  assert.deepEqual(codeownersDrift('/brain.config.json @alice\n', []), { codeowners: ['alice'], owners: [] });
+  assert.deepEqual(codeownersDrift('/brain.config.json @alice\n', undefined), { codeowners: ['alice'], owners: [] });
+});
+
+test('the LAST matching rule wins, as in CODEOWNERS itself', () => {
+  assert.equal(codeownersDrift('/brain.config.json @old\n/brain.config.json @alice\n', ['alice']), null);
+});
+
+test('only the root file counts: a nested brain.config.json rule is not the team config', () => {
+  assert.equal(codeownersDrift('/sub/brain.config.json @zed\n', ['alice']), null);
+});
+
+test('diagnoseAxes surfaces codeowners-drift as a WARNING with a fix, in English and Spanish; no input, no finding', () => {
+  const config = { governance: { owners: ['alice'] } };
+  const find = (args) => diagnoseAxes({ config, env: {}, dotenv: {}, ...args }).filter((f) => f.code === 'codeowners-drift');
+  assert.deepEqual(find({}), []);
+  assert.deepEqual(find({ codeowners: '/brain.config.json @alice\n' }), []);
+  const [f, ...more] = find({ codeowners: '/brain.config.json @bob\n' });
+  assert.equal(more.length, 0);
+  assert.equal(f.severity, 'warning');
+  assert.match(f.message, /bob/);
+  assert.match(f.message, /alice/);
+  assert.ok(f.fix);
+  const [fes] = diagnoseAxes({ config, env: {}, dotenv: {}, codeowners: '/brain.config.json @bob\n', catalog: es }).filter((x) => x.code === 'codeowners-drift');
+  assert.ok(fes.message !== f.message, 'Spanish catalog is used');
+  for (const cat of [en, es]) for (const k of ['axes.diagnose.codeownersDrift', 'axes.diagnose.codeownersDrift.fix']) assert.ok(cat[k], k);
+});
+
+test('readCodeowners reads .github/CODEOWNERS (then root, docs/, .gitlab/), and returns null when there is none', () => {
+  const root = mkdtempSync(join(tmpdir(), 'codeowners-'));
+  try {
+    assert.equal(readCodeowners(root), null);
+    mkdirSync(join(root, '.github'));
+    writeFileSync(join(root, '.github', 'CODEOWNERS'), '/brain.config.json @alice\n');
+    assert.equal(readCodeowners(root), '/brain.config.json @alice\n');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

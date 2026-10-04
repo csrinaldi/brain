@@ -18,6 +18,7 @@
 
 import en from '../i18n/en.mjs';
 import { resolveAxisSelector } from './axis-selector.mjs';
+import { codeownersDrift } from './codeowners-drift.mjs';
 
 /**
  * Closed memberships. They live HERE (re-exported by `harness/platform.mjs`, which
@@ -471,7 +472,7 @@ function shellVersionArg(v) {
 export function diagnoseAxes(args) {
   const findings = [];
   try {
-    const { config, env, dotenv, userConfig, userError, userPath, installed, catalog } = isObj(args) ? args : {};
+    const { config, env, dotenv, userConfig, userError, userPath, installed, catalog, codeowners } = isObj(args) ? args : {};
     const cfg = isObj(config) ? config : {};
     const user = isObj(userConfig) ? userConfig : {};
     const uPath = nonEmpty(userPath) || USER_PATH_FALLBACK;
@@ -503,6 +504,16 @@ export function diagnoseAxes(args) {
     const owners = isObj(cfg.governance) && Array.isArray(cfg.governance.owners) ? cfg.governance.owners.filter((o) => nonEmpty(o) !== '') : [];
     if (Object.keys(cfg).length > 0 && owners.length === 0) {
       add('governance', 'owners-undeclared', 'warning', tr('axes.diagnose.ownersUndeclared'), tr('axes.diagnose.ownersUndeclared.fix'));
+    }
+
+    // codeowners-drift (ADR-0040 ratified point 8): CODEOWNERS is an optional mirror of governance.owners. A finding, never a gate;
+    // `codeowners` is the file's text (the caller reads it), and with no rule for brain.config.json nothing is said.
+    const drift = codeownersDrift(codeowners, owners);
+    if (drift !== null) {
+      const list = (l) => (l.length === 0 ? '(none)' : l.join(', '));
+      add('governance', 'codeowners-drift', 'warning',
+        tr('axes.diagnose.codeownersDrift', { codeowners: list(drift.codeowners), owners: list(drift.owners) }),
+        tr('axes.diagnose.codeownersDrift.fix'));
     }
 
     for (const axis of AXES) {

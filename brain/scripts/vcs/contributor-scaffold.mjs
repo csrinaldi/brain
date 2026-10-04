@@ -138,6 +138,7 @@ export const GATE_SUMMARY = Object.freeze({
   'lane-paths': 'Runs on every {{noun}}, not only a memory lane one. On the lane branch it verifies every changed path under `.memory/records/` is an ADDED file and nothing else changed; on any other {{noun}} it passes with nothing to check. Never tiers.',
   'lane-scrub': 'Runs on every {{noun}}, lane or not. Every record file added under `.memory/records/` is scanned for a committed secret and fails closed on a match, naming only the pattern and line number — never the matched text. Not softened at any tier.',
   'base-branch': 'A {{noun}} whose linked issue names a parent that declares a tracker must base on that tracker while the epic is in flight; a {{noun}} with no linked issue, no parent, or an epic with no tracker passes untouched. Required at every tier, including the lightest.',
+  'team-config-reviewed': 'A {{noun}} that changes `brain.config.json` carries an APPROVED review from a `governance.owners` login other than its author. The owners are read from the base branch, never from the {{noun}}, so a {{noun}} cannot name its own author an owner. With no owner declared it fails above the lightest tier; at the lightest tier it only reports, and a sole owner changing their own config passes as a named solo-maintainer exception, not as independent review.',
 });
 
 /**

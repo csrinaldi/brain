@@ -359,3 +359,35 @@ jobs:
           # identity (ADR-0016 ruling 1).
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: node brain/scripts/governance/run-check.mjs base-branch
+
+  # ── Invariant 12 (issue #1263 slice 4, ADR-0040) — the team config is owner-reviewed ─
+  #
+  # Wraps evaluateTeamConfigReviewed() over the PR's changed files + its review
+  # history. A PR that touches `brain.config.json` needs an APPROVED review from a
+  # `governance.owners` login who is not the author. The owners (and the tier) are
+  # read from the BASE ref, never the head, so a PR cannot add its own author as an
+  # owner and approve itself. Tiered by position (governance-tiers.mjs
+  # GATE_MATRIX['team-config-reviewed']): `detection` at `lite` — the checker itself
+  # downgrades a failure to a warning there, and the solo maintainer (one owner, the
+  # author) passes as a named exception (ADR-0037 mode A) — `required` at `standard`
+  # and `regulated`. fetch-depth: 0 because the base config is read with `git show`.
+  team-config-reviewed:
+    name: team-config-reviewed
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: team-config-reviewed (a brain.config.json change carries an owner's approval, owners read from the base)
+        env:
+          # VCS_TOKEN, not GH_TOKEN (#535): this step reaches the server directly
+          # from its own handler code, through the port.
+          VCS_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          # See memory-gate above (issue #231 A2 phase 2 addendum).
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: node brain/scripts/vcs/team-config-reviewed.mjs

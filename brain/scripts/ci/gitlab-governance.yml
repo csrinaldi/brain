@@ -201,3 +201,16 @@ base-branch:
   stage: test
   script:
     - node brain/scripts/governance/run-check.mjs base-branch
+
+# ── Invariant 12 (issue #1263 slice 4, ADR-0040) — the team config is owner-reviewed ─
+# `detection` at `lite`, REQUIRED at standard/regulated (GATE_MATRIX['team-config-reviewed']).
+# The checker resolves the tier itself (from the BASE config) and downgrades a
+# failure to a warning where the policy is `detection`, so — like
+# brain-writes-reviewed above — this static job needs no `allow_failure:`.
+# Owners are read from the base ref via `git show`, never the MR head. Reviews are
+# read through the same `prReviews` port verb the L6 gate uses (GitLab approvals).
+team-config-reviewed:
+  extends: .governance_mr_rules
+  stage: test
+  script:
+    - node brain/scripts/vcs/team-config-reviewed.mjs

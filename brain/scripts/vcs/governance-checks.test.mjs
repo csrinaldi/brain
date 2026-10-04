@@ -114,7 +114,7 @@ test('resolveJobSets("standard") matches the REQUIRED_JOBS/DETECTION_JOBS snapsh
 
 test('resolveJobSets("lite") differs from the standard-tier snapshot: memory-gate/phase-order are detection, actor-check/brain-writes-reviewed stay required', () => {
   const { required, detection } = resolveJobSets('lite');
-  assert.deepEqual(detection, ['memory-gate', 'phase-order']);
+  assert.deepEqual(detection, ['memory-gate', 'phase-order', 'team-config-reviewed']);
   assert.ok(required.includes('actor-check'), '"lite" must still require actor-check (never-tiered core)');
   assert.ok(required.includes('brain-writes-reviewed'), '"lite" must still require brain-writes-reviewed (never-tiered core)');
   assert.ok(!required.includes('phase-order'), '"lite" demotes phase-order to detection (proportionality)');
@@ -138,7 +138,7 @@ test('resolveJobSets(tier).required ∪ .detection reproduces GOVERNANCE_JOBS at
 test('lane governance (#905): GOVERNANCE_JOBS gains lane-paths and lane-scrub, appended at the end', () => {
   // #967 PR C appended 'base-branch' after these two — the tail is now
   // three long, lane-paths/lane-scrub still adjacent and in order.
-  assert.deepEqual(GOVERNANCE_JOBS.slice(-3), ['lane-paths', 'lane-scrub', 'base-branch']);
+  assert.deepEqual(GOVERNANCE_JOBS.slice(-4), ['lane-paths', 'lane-scrub', 'base-branch', 'team-config-reviewed']);
 });
 
 test('lane governance (#905): checkContexts("lite") contains both lane-paths and lane-scrub (required at every tier)', () => {
@@ -147,15 +147,15 @@ test('lane governance (#905): checkContexts("lite") contains both lane-paths and
   assert.ok(contexts.includes('lane-scrub'), 'checkContexts("lite") must include lane-scrub');
 });
 
-test('lane governance (#905) + base-branch (#967): eleven jobs, matching order, in GOVERNANCE_JOBS/checkContexts("standard")/governance.yml', () => {
+test('lane governance (#905) + base-branch (#967): twelve jobs, matching order, in GOVERNANCE_JOBS/checkContexts("standard")/governance.yml', () => {
   const yamlPath = resolve(REPO_ROOT, '.github/workflows/governance.yml');
   const yamlText = readFileSync(yamlPath, 'utf8');
   const matches = [...yamlText.matchAll(/^    name: (\S+)\s*$/mg)];
   const yamlJobNames = matches.map(m => m[1]);
 
-  assert.equal(GOVERNANCE_JOBS.length, 11, `GOVERNANCE_JOBS must list eleven jobs: ${JSON.stringify(GOVERNANCE_JOBS)}`);
+  assert.equal(GOVERNANCE_JOBS.length, 12, `GOVERNANCE_JOBS must list twelve jobs: ${JSON.stringify(GOVERNANCE_JOBS)}`);
   assert.deepEqual(checkContexts('standard'), GOVERNANCE_JOBS, 'every gate is required at "standard"');
-  assert.deepEqual(yamlJobNames, GOVERNANCE_JOBS, 'governance.yml must declare the same eleven names in the same order');
+  assert.deepEqual(yamlJobNames, GOVERNANCE_JOBS, 'governance.yml must declare the same twelve names in the same order');
 });
 
 // ── L1 local-checks job (REQ-L1-1) ──────────────────────────────────────────────
@@ -200,6 +200,7 @@ test('checkContexts returns bare job names (no workflow-name prefix)', () => {
     'lane-paths',
     'lane-scrub',
     'base-branch',
+    'team-config-reviewed',
   ]);
 });
 
