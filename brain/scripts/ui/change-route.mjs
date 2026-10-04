@@ -229,7 +229,7 @@ const HEAD_DOCUMENT_KEYS = SDD_STAGES.filter((stage) => stage !== 'archive');
 
 
 function documentEntry(path, ref, fields) {
-  return { path, ref, commit: null, state: 'missing', text: null, bytes: null, truncated: false, truncatedAt: null, reason: null, note: null, ...fields };
+  return { path, ref, commit: null, blob: null, state: 'missing', text: null, bytes: null, truncated: false, truncatedAt: null, reason: null, note: null, ...fields };
 }
 
 /** Cut at the cap on a UTF-8 boundary: back up while the first dropped byte is a continuation byte. */
@@ -248,7 +248,7 @@ export function capText(text) {
  */
 function documentFromEntry({ path, ref, commit, entry, read }) {
   if (!entry) return documentEntry(path, ref, { state: 'missing' });
-  const refuse = (reason) => documentEntry(path, ref, { state: 'unreadable', reason, bytes: entry.size });
+  const refuse = (reason) => documentEntry(path, ref, { state: 'unreadable', reason, bytes: entry.size, blob: entry.sha });
   if (entry.type !== 'blob') return refuse(`${path} is a ${entry.type}, not a file`);
   if (entry.mode === '120000') return refuse(`${path} is a symlink`);
   if (entry.size > DOCUMENT_READ_LIMIT) return refuse(`${entry.size} bytes exceeds the read limit of ${DOCUMENT_READ_LIMIT}`);
@@ -260,7 +260,7 @@ function documentFromEntry({ path, ref, commit, entry, read }) {
   }
   const cut = capText(text);
   return documentEntry(path, ref, {
-    commit, state: cut.truncated ? 'truncated' : 'present', text: cut.text, bytes: entry.size, truncated: cut.truncated, truncatedAt: cut.truncatedAt,
+    commit, blob: entry.sha, state: cut.truncated ? 'truncated' : 'present', text: cut.text, bytes: entry.size, truncated: cut.truncated, truncatedAt: cut.truncatedAt,
     note: cut.truncated ? `truncated at ${DOCUMENT_CAP} bytes` : null,
   });
 }
@@ -423,8 +423,8 @@ function buildRecordsTab({ snapshot, issue }) {
 /** Remote blocks that carry documents; the rest of an issue's entries are listed without them. */
 export const REMOTE_DRAWER_CAP = 3;
 
-/** A remote resume document to `{state, reason, document, view}`: `invalid` is told from `present` by the same schema the writer validates against. */
-function remoteResume({ doc, label }) {
+/** A resume document (remote or local) to `{state, reason, document, view}`: `invalid` is told from `present` by the same schema the writer validates against. */
+export function resumeOutcome({ doc, label }) {
   if (doc.state === 'missing') return { state: 'missing', reason: doc.reason, document: doc, view: null };
   if (doc.state === 'unreadable') return { state: 'unreadable', reason: doc.reason, document: doc, view: null };
   const { frontmatter } = parseFrontmatter(doc.text);
@@ -453,7 +453,7 @@ function remoteBlock({ run, entry, index, head, issue }) {
   const { documents } = readHeadDocuments({ run, dir: base.dir, ref: entry.sha, label });
   return {
     ...base, state: 'read', documents,
-    resume: remoteResume({ doc: readResumeAt({ run, commit: entry.sha, issue, label }), label }),
+    resume: resumeOutcome({ doc: readResumeAt({ run, commit: entry.sha, issue, label }), label }),
   };
 }
 

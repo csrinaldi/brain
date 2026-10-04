@@ -8,12 +8,13 @@
 // no `-C`, `--git-dir` or `--work-tree` (D74), and no verb that writes (R883-14).
 
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { constants, closeSync, fstatSync, lstatSync, openSync, readSync, realpathSync } from 'node:fs';
+import { join, sep } from 'node:path';
 
 import { gitErrorLine, parseTreeListing } from '../lib/git-tree.mjs';
-import { LOCAL_DOCUMENT_FILES } from '../status/local-worktrees.mjs';
-import { capText, DOCUMENT_CAP } from './change-route.mjs';
+import { countTasks } from '../lib/tasks-list.mjs';
+import { LOCAL_DOCUMENT_FILES, LOCAL_DRAWER_CAP } from '../status/local-worktrees.mjs';
+import { capText, DOCUMENT_CAP, DOCUMENT_READ_LIMIT, resumeOutcome } from './change-route.mjs';
 
 const SHA256_HEX = 64;
 
@@ -33,34 +34,101 @@ export function classifyLocalDocument({ hash, headEntry, mainBlob, isResume = fa
   return hash !== headEntry.sha ? 'modified' : 'committed';
 }
 
-function readLocalDocument({ abs }) {
-  const bytes = readFileSync(abs);
-  return { bytes };
+const defaultFs = { lstatSync, realpathSync, openSync, readSync, fstatSync, closeSync };
+const OPEN_FLAGS = constants.O_RDONLY | constants.O_NOFOLLOW;
+const READ_CHUNK = 65536;
+const TORN = 'changed while it was read; the next recompute reads it again';
+const errLine = (err) => String(err?.message ?? err).split('\n')[0];
+
+/** Every byte of an open file, never more than the read limit plus one chunk. */
+function readAll(fs, fd) {
+  const chunks = [];
+  let total = 0;
+  for (;;) {
+    const buf = Buffer.alloc(READ_CHUNK);
+    const n = fs.readSync(fd, buf, 0, READ_CHUNK, null);
+    if (n === 0) break;
+    chunks.push(buf.subarray(0, n));
+    total += n;
+    if (total > DOCUMENT_READ_LIMIT) break;
+  }
+  return Buffer.concat(chunks);
 }
 
-function documentFor({ key, file, entry, dirPath, headEntry, mainBlob, algo, leaf }) {
-  const rel = `${entry.dir}/${file}`;
-  let read;
+/**
+ * One document of a worktree's change dir (D77): `{absent}`, `{refused: reason}` or `{bytes}`.
+ * `lstat` first (a link, a FIFO or a huge file is refused before any open), the real path must
+ * stay under the change dir, then `O_NOFOLLOW`, read, `fstat`; a size that disagrees is read once
+ * more and a second disagreement is said, never guessed.
+ */
+function readLocalDocument({ fs, abs, rel, dirReal }) {
+  let before;
   try {
-    read = readLocalDocument({ abs: join(dirPath, file) });
+    before = fs.lstatSync(abs);
   } catch (err) {
-    if (err?.code === 'ENOENT') return null;
-    return { path: rel, ref: `worktree ${leaf}`, state: 'unreadable', reason: gitErrorLine(err) };
+    return err?.code === 'ENOENT' ? { absent: true } : { refused: `${rel} could not be read: ${errLine(err)}` };
   }
+  if (before.isSymbolicLink()) return { refused: `${rel} is a symbolic link` };
+  if (!before.isFile()) return { refused: `${rel} is not a regular file` };
+  if (before.size > DOCUMENT_READ_LIMIT) return { refused: `${before.size} bytes exceeds the read limit of ${DOCUMENT_READ_LIMIT}` };
+  try {
+    if (!fs.realpathSync(abs).startsWith(`${dirReal}${sep}`)) return { refused: `${rel} resolves outside the change dir` };
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const expected = attempt === 0 ? before.size : fs.lstatSync(abs).size;
+      const fd = fs.openSync(abs, OPEN_FLAGS);
+      let bytes;
+      let size;
+      try {
+        bytes = readAll(fs, fd);
+        size = fs.fstatSync(fd).size;
+      } finally {
+        fs.closeSync(fd);
+      }
+      if (bytes.length === size && size === expected) return { bytes };
+    }
+    return { refused: `${rel} ${TORN}` };
+  } catch (err) {
+    return { refused: `${rel} could not be read: ${errLine(err)}` };
+  }
+}
+
+function documentFor({ fs, key, file, entry, dirReal, headEntry, mainBlob, algo, leaf }) {
+  const rel = `${entry.dir}/${file}`;
+  const ref = `worktree ${leaf}`;
+  const read = readLocalDocument({ fs, abs: join(entry.path, rel), rel, dirReal });
+  if (read.absent) return null;
+  if (read.refused) return { path: rel, ref, commit: null, blob: null, state: 'unreadable', text: null, bytes: null, truncated: false, truncatedAt: null, reason: read.refused, note: null, overlay: 'unreadable', uncommitted: false, marker: null };
   const hash = gitBlobHash(read.bytes, algo);
   const overlay = classifyLocalDocument({ hash, headEntry, mainBlob, isResume: key === 'resume' });
   const cut = capText(read.bytes.toString('utf8'));
   return {
-    path: rel, ref: `worktree ${leaf}`, commit: null, state: cut.truncated ? 'truncated' : 'present',
+    path: rel, ref, commit: null, state: cut.truncated ? 'truncated' : 'present',
     text: overlay === 'same-as-main' ? null : cut.text, bytes: read.bytes.length, truncated: cut.truncated, truncatedAt: cut.truncatedAt,
     reason: null, note: cut.truncated ? `truncated at ${DOCUMENT_CAP} bytes` : null,
     blob: hash, overlay, uncommitted: overlay === 'new' || overlay === 'modified', marker: `${read.bytes.length} B · ${hash.slice(0, 12)}`,
+    ...(key === 'tasks' && !cut.truncated ? { progress: countTasks(cut.text) } : {}),
   };
 }
 
-function localBlock({ run, entry, mainDocuments }) {
+/** The change dir's real path, or the one-line reason it must not be read (R883-7): a link, or a real path outside the worktree. */
+function checkChangeDir({ fs, entry }) {
+  const abs = join(entry.path, entry.dir);
+  try {
+    if (fs.lstatSync(abs).isSymbolicLink()) return { reason: `${entry.dir} is a symbolic link` };
+    const dirReal = fs.realpathSync(abs);
+    if (!dirReal.startsWith(`${fs.realpathSync(entry.path)}${sep}`)) return { reason: `${entry.dir} resolves outside the worktree` };
+    return { dirReal };
+  } catch (err) {
+    return { reason: `${entry.dir} could not be checked: ${errLine(err)}` };
+  }
+}
+
+function localBlock({ run, fs, entry, mainDocuments }) {
   const base = { leaf: entry.leaf, branch: entry.branch, head: entry.head, path: entry.path, dir: entry.dir, label: `worktree ${entry.leaf} · ${entry.branch}`, documents: null, absent: [], resume: null, progress: null };
+  if (entry.capped) return { ...base, state: 'capped' };
   if (entry.dirState !== 'present') return { ...base, state: entry.dirState === 'missing' ? 'no-change-dir' : 'unreadable', reason: entry.reason };
+  const checked = checkChangeDir({ fs, entry });
+  if (checked.reason) return { ...base, state: 'unreadable', reason: checked.reason };
   const paths = Object.values(LOCAL_DOCUMENT_FILES).map((file) => `${entry.dir}/${file}`);
   let tree;
   try {
@@ -72,18 +140,21 @@ function localBlock({ run, entry, mainDocuments }) {
   const documents = {};
   const absent = [];
   for (const [key, file] of Object.entries(LOCAL_DOCUMENT_FILES)) {
-    const doc = documentFor({ key, file, entry, dirPath: join(entry.path, entry.dir), headEntry: tree.get(`${entry.dir}/${file}`), mainBlob: mainDocuments?.[key]?.blob ?? null, algo, leaf: entry.leaf });
+    const doc = documentFor({ fs, key, file, entry, dirReal: checked.dirReal, headEntry: tree.get(`${entry.dir}/${file}`), mainBlob: mainDocuments?.[key]?.blob ?? null, algo, leaf: entry.leaf });
     if (doc) documents[key] = doc; else absent.push(file);
   }
-  return { ...base, state: 'read', documents, absent };
+  const resume = documents.resume ?? { state: 'missing', reason: `no resume.md in worktree ${entry.leaf}` };
+  return { ...base, state: 'read', documents, absent, resume: resumeOutcome({ doc: resume, label: `worktree ${entry.leaf}` }) };
 }
 
 /**
  * The local blocks of one issue, from the snapshot's section: `{local, localNote}`.
  * An absent or unreadable section yields no block (the section says why in the snapshot).
  */
-export function readLocalBlocks({ run, snapshot, issue, mainDocuments }) {
+export function readLocalBlocks({ run, snapshot, issue, mainDocuments, _fs = defaultFs }) {
   const section = snapshot?.localWorktrees;
   const mine = section?.ok ? section.value.entries.filter((e) => e.issue === issue) : [];
-  return { local: mine.map((entry) => localBlock({ run, entry, mainDocuments })), localNote: null };
+  const capped = mine.filter((e) => e.capped).length;
+  const note = capped > 0 ? `showing documents for ${mine.length - capped} of ${mine.length} worktrees; the others are listed without documents (cap of ${LOCAL_DRAWER_CAP})` : null;
+  return { local: mine.map((entry) => localBlock({ run, fs: _fs, entry, mainDocuments })), localNote: note };
 }
