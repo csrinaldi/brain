@@ -82,7 +82,7 @@ export async function main(argv = process.argv.slice(2), root = process.cwd()) {
     // The input of #1130's `brain:doctor`: the same findings `brain:governance-status` prints (ADR-0038 section 6).
     const dotenvPath = join(root, '.env');
     const dotenv = existsSync(dotenvPath) ? parseEnvFile(readFileSync(dotenvPath, 'utf8')) : {};
-    console.log(JSON.stringify(diagnoseAxes({ config, env: process.env, dotenv, ...readUserConfig({ env: process.env }), installed: detectInstalled(), codeowners: readCodeowners(root) }), null, 2));
+    console.log(JSON.stringify(diagnoseAxes({ config, env: process.env, dotenv, ...readUserConfig({ env: process.env }), installed: detectInstalled(), codeowners: readCodeowners(root, readAxis(config, 'vcs').default) }), null, 2));
     return;
   }
 

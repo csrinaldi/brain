@@ -553,7 +553,7 @@ export async function reportGovernanceStatus({
   const catalog = { ...en, ...(await loadCatalog(lang)) };
   // The user layer (ADR-0040) through the one reader; like `.env`, an injected config is a hermetic caller and gets none unless it injects one.
   const user = userOverride ?? (configOverride ? {} : readUserConfig({ env }));
-  const findings = diagnoseAxes({ config, env, dotenv, ...user, installed: installedOverride ?? detectInstalled(), catalog, codeowners: configOverride ? undefined : readCodeowners(REPO_ROOT) });
+  const findings = diagnoseAxes({ config, env, dotenv, ...user, installed: installedOverride ?? detectInstalled(), catalog, codeowners: configOverride ? undefined : readCodeowners(REPO_ROOT, readAxis(config, 'vcs').default) });
   for (const line of axesLines(findings, catalog)) console.log(line);
 }
 

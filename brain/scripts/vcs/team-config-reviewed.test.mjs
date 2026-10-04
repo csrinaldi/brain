@@ -10,6 +10,7 @@ import {
   runTeamConfigReviewedCheck,
   main,
   TEAM_CONFIG_PATH,
+  diffNameOnlyArgs,
 } from './team-config-reviewed.mjs';
 import { GATE_MATRIX, resolveGatePolicy } from './governance-tiers.mjs';
 
@@ -175,7 +176,7 @@ test('the tier is read from the base too: a PR cannot demote itself to lite to d
 test('a base with no brain.config.json (gitShow -> null) is the ADOPTION PR: no owners, founding, and the new-consumer tier lite — never standard', async () => {
   const inputs = await gatherTeamConfigReviewedInputs({
     baseSha: 'BASE', headSha: 'HEAD', prNumber: 7, repo: 'o/r', author: 'alice',
-    deps: { diffNameOnly: () => touched, fetchReviews: async () => [], gitShow: () => null },
+    deps: { diffNameOnly: () => touched, fetchReviews: async () => [], gitShow: () => null, everHadConfig: () => false },
   });
   assert.deepEqual(inputs.owners, []);
   assert.equal(inputs.founding, true);
@@ -187,7 +188,7 @@ test('the founding PR passes, labelled — not "no owner declared", and not inde
   const r = await runTeamConfigReviewedCheck({
     baseSha: 'BASE', headSha: 'HEAD', prNumber: 7, repo: 'o/r', author: 'alice',
     diffNameOnly: () => touched, fetchReviews: async () => [],
-    gitShow: () => null,
+    gitShow: () => null, everHadConfig: () => false,
   });
   assert.equal(r.level, 'pass');
   assert.equal(r.founding, true);
@@ -322,4 +323,53 @@ test('main prints the verdict and returns 1 only on fail', async () => {
     assert.equal(await run('standard'), 1);
     assert.equal(await run('lite'), 0); // solo-maintainer exception
   } finally { console.log = orig; }
+});
+
+// ── the rename/delete bypass: any touch of the root file counts, and a removed config is not a founding ──────────
+
+test('the diff is listed with rename detection OFF, so a rename away lists the deletion of brain.config.json', () => {
+  const args = diffNameOnlyArgs('BASE', 'HEAD');
+  assert.ok(args.includes('--no-renames'));
+  assert.ok(args.includes('--name-only'));
+  assert.ok(args.includes('BASE...HEAD'));
+});
+
+test('rename away / delete: the deletion lists brain.config.json, so it is touched and needs an owner approval', () => {
+  // with --no-renames, `git mv brain.config.json team.json` lists BOTH paths
+  const r = ev({ changedFiles: [TEAM_CONFIG_PATH, 'team.json'], reviews: [], author: 'alice', owners: ['alice', 'bob'], tier: 'standard' });
+  assert.equal(r.level, 'fail');
+  assert.equal(ev({ changedFiles: [TEAM_CONFIG_PATH], reviews: [ok('bob')], author: 'alice', owners: ['alice', 'bob'], tier: 'standard' }).level, 'pass');
+});
+
+test('re-creating the config after a deletion is NOT a founding: the base once had it', async () => {
+  const gather = (everHadConfig) => gatherTeamConfigReviewedInputs({
+    baseSha: 'BASE', headSha: 'HEAD', prNumber: 7, repo: 'o/r', author: 'alice',
+    deps: { diffNameOnly: () => touched, fetchReviews: async () => [], gitShow: () => null, everHadConfig },
+  });
+  const genuine = await gather(() => false);
+  assert.equal(genuine.founding, true);
+  assert.equal(genuine.removed, false);
+  const recreated = await gather(() => true);
+  assert.equal(recreated.founding, false);
+  assert.equal(recreated.removed, true);
+});
+
+test('a removed team config: fail closed at standard/regulated with the reason, warn at lite', () => {
+  for (const tier of ['standard', 'regulated']) {
+    const r = ev({ changedFiles: touched, reviews: [ok('bob')], author: 'alice', owners: [], tier, removed: true });
+    assert.equal(r.level, 'fail', tier);
+    assert.match(r.reason, /team config was removed — re-adding it needs an owner/);
+  }
+  const lite = ev({ changedFiles: touched, reviews: [], author: 'alice', owners: [], tier: 'lite', removed: true });
+  assert.equal(lite.level, 'warn');
+  assert.match(lite.reason, /team config was removed/);
+});
+
+test('end to end: a re-creation after a deletion fails at standard, and the genuine founding still passes', async () => {
+  const run = (everHadConfig) => runTeamConfigReviewedCheck({
+    baseSha: 'BASE', headSha: 'HEAD', prNumber: 7, repo: 'o/r', author: 'alice',
+    diffNameOnly: () => touched, fetchReviews: async () => [], gitShow: () => null, everHadConfig,
+  });
+  assert.equal((await run(() => true)).level, 'fail');
+  assert.equal((await run(() => false)).founding, true);
 });

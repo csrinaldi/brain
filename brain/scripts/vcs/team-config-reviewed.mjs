@@ -4,7 +4,9 @@
 // root) carry an APPROVED review from a `governance.owners` login who is not the PR author?
 //
 //   · not touched                         → pass
-//   · the base has no team config (the ADOPTION PR, the founding decision) → pass, labelled, tier `lite`
+//   · the base has no team config AND never had one (the ADOPTION PR, the founding decision) → pass, labelled, tier `lite`;
+//     a base that once had it and lost it is a REMOVAL: re-adding it needs an owner (fail closed above lite)
+//   · any touch of the root file counts — added, modified, deleted, renamed away or onto (the diff runs --no-renames)
 //   · solo maintainer, tier lite (ADR-0037 mode A): exactly one owner, and that owner is the author → pass,
 //     labelled the exception, never independent review
 //   · an APPROVED review from an owner other than the author, ON THE CURRENT HEAD, and still that owner's latest
@@ -49,7 +51,7 @@ function normalizeOwners(owners) {
  * @param {'lite'|'standard'|'regulated'} [input.tier]
  * @returns {{ level: 'pass'|'warn'|'fail', reason: string, soloMaintainer?: true }}
  */
-export function evaluateTeamConfigReviewed({ changedFiles = [], reviews = [], author, owners, tier = 'standard', headSha, founding = false } = {}) {
+export function evaluateTeamConfigReviewed({ changedFiles = [], reviews = [], author, owners, tier = 'standard', headSha, founding = false, removed = false } = {}) {
   if (!changedFiles.includes(TEAM_CONFIG_PATH)) {
     return { level: 'pass', reason: `the change does not touch ${TEAM_CONFIG_PATH} — no owner review required.` };
   }
@@ -65,6 +67,11 @@ export function evaluateTeamConfigReviewed({ changedFiles = [], reviews = [], au
   }
 
   const list = normalizeOwners(owners);
+  const detectEarly = (reason) => (resolveGatePolicy(GATE, tier) === 'detection'
+    ? { level: 'warn', reason: `${reason} (detection at the "${tier}" tier — reported, not blocking.)` }
+    : { level: 'fail', reason });
+  // The base once had a team config and lost it: re-adding it is NOT a founding, and nobody on the base can approve it.
+  if (removed) return detectEarly(`${TEAM_CONFIG_PATH} changed but the team config was removed — re-adding it needs an owner.`);
   const isAuthor = (login) => author != null && login != null && lower(login) === lower(author);
 
   // ADR-0037 mode A: a solo maintainer at lite owns the config and authored the change. Said as the exception.
@@ -118,9 +125,17 @@ export function evaluateTeamConfigReviewed({ changedFiles = [], reviews = [], au
 
 // ── I/O wrapper ──────────────────────────────────────────────────────────────
 
+/**
+ * Rename detection is OFF: with it on, `git mv brain.config.json team.json` lists only `team.json` and the gate would
+ * never see the team config leave. With it off the rename is a deletion plus an addition, both listed.
+ */
+export function diffNameOnlyArgs(baseSha, headSha) {
+  return ['diff', '--no-renames', '--name-only', `${baseSha}...${headSha}`];
+}
+
 function defaultDiffNameOnly(cwd) {
   return (baseSha, headSha) =>
-    execFileSync('git', ['diff', '--name-only', `${baseSha}...${headSha}`], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 30000 })
+    execFileSync('git', diffNameOnlyArgs(baseSha, headSha), { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 30000 })
       .split('\n').filter(Boolean);
 }
 
@@ -137,6 +152,12 @@ function defaultGitShow(cwd) {
   };
 }
 
+/** Whether `brain.config.json` has any history at or before `ref`. A failure throws, so the caller fails closed. */
+function defaultEverHadConfig(cwd) {
+  return (ref) =>
+    execFileSync('git', ['log', '--oneline', '-1', ref, '--', TEAM_CONFIG_PATH], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 30000 }).trim() !== '';
+}
+
 function defaultFetchReviews(repo, provider, { getVcs: getVcsFn = getVcs } = {}) {
   return async (prNumber) => {
     const vcs = await getVcsFn({ provider });
@@ -149,7 +170,7 @@ function defaultFetchReviews(repo, provider, { getVcs: getVcsFn = getVcs } = {})
 /**
  * Gathers the evaluator's inputs. Owners and tier come from `git show <baseSha>:brain.config.json`; reviews are
  * fetched only when the config is touched.
- * @returns {Promise<{changedFiles: string[], reviews: Array, author: string, owners: string[], tier: string, headSha: string, founding: boolean}>}
+ * @returns {Promise<{changedFiles: string[], reviews: Array, author: string, owners: string[], tier: string, headSha: string, founding: boolean, removed: boolean}>}
  */
 export async function gatherTeamConfigReviewedInputs({ baseSha, headSha, prNumber, repo, author, provider, cwd = process.cwd(), tier: tierOverride, deps = {} } = {}) {
   const diffNameOnly = deps.diffNameOnly ?? defaultDiffNameOnly(cwd);
@@ -160,12 +181,16 @@ export async function gatherTeamConfigReviewedInputs({ baseSha, headSha, prNumbe
   const text = gitShow(baseSha, TEAM_CONFIG_PATH);
   // No team config on the base: this PR is the ADOPTION, the founding decision. Its tier is the new-consumer default
   // (ADR-0026 Am8), never one its own head declares.
-  const founding = text == null;
+  // FOUNDING only when the base has no team config AND has never had one: a base that lost it is a removal.
+  const missing = text == null;
+  const everHad = missing && changedFiles.includes(TEAM_CONFIG_PATH) ? (deps.everHadConfig ?? defaultEverHadConfig(cwd))(baseSha) : false;
+  const founding = missing && !everHad;
+  const removed = missing && everHad;
   const baseConfig = founding ? {} : JSON.parse(text);
   const owners = normalizeOwners(baseConfig?.governance?.owners);
   const tier = tierOverride ?? deps.tier ?? (founding ? 'lite' : resolveTier(baseConfig));
-  const reviews = changedFiles.includes(TEAM_CONFIG_PATH) && !founding ? await fetchReviews(prNumber) : [];
-  return { changedFiles, reviews, author, owners, tier, headSha, founding };
+  const reviews = changedFiles.includes(TEAM_CONFIG_PATH) && !founding && !removed ? await fetchReviews(prNumber) : [];
+  return { changedFiles, reviews, author, owners, tier, headSha, founding, removed };
 }
 
 /** Never throws. A failed read means the owner evidence CANNOT BE VERIFIED: fail where the gate is required. */

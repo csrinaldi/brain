@@ -11,8 +11,8 @@ import { diagnoseAxes } from './axis-config.mjs';
 import en from '../i18n/en.mjs';
 import es from '../i18n/es.mjs';
 
-test('no brain.config.json rule: nothing is reported, whatever else CODEOWNERS says', () => {
-  assert.equal(codeownersDrift('# c\n/brain/core/** @team\n* @alice\n', ['bob']), null);
+test('no rule MATCHING brain.config.json: nothing is reported, whatever else CODEOWNERS says', () => {
+  assert.equal(codeownersDrift('# c\n/brain/core/** @team\n/docs/ @alice\n*.md @zed\n/sub/* @y\n', ['bob']), null);
   assert.equal(codeownersDrift('', ['bob']), null);
   assert.equal(codeownersDrift(null, ['bob']), null);
   assert.equal(codeownersDrift(undefined, ['bob']), null);
@@ -57,12 +57,46 @@ test('diagnoseAxes surfaces codeowners-drift as a WARNING with a fix, in English
   for (const cat of [en, es]) for (const k of ['axes.diagnose.codeownersDrift', 'axes.diagnose.codeownersDrift.fix']) assert.ok(cat[k], k);
 });
 
+test('the forge applies the last rule that MATCHES the path, globs included: a later `*` overrides an earlier explicit rule', () => {
+  assert.deepEqual(codeownersDrift('/brain.config.json @alice\n* @bob\n', ['alice']), { codeowners: ['bob'], owners: ['alice'] });
+  assert.equal(codeownersDrift('* @bob\n/brain.config.json @alice\n', ['alice']), null, 'the explicit rule is last, so it wins');
+});
+
+test('CODEOWNERS globs against the root file: *, *.json, **, /**, /*, **/name, ?; and what does not match', () => {
+  const owned = (pattern) => codeownersDrift(`${pattern} @x\n`, ['y']) !== null; // drift <=> the rule matched
+  for (const m of ['*', '*.json', '/*.json', '**', '/**', '/*', '**/brain.config.json', 'brain.config.*', '/brain.config.jso?', 'brain.config.json', '/brain.config.json']) assert.ok(owned(m), `${m} matches`);
+  for (const n of ['/brain/', 'brain.config.json/', '*.md', '/sub/*.json', 'docs/**', '/brain.config.yaml', '/*/brain.config.json', '/brain']) assert.ok(!owned(n), `${n} does not match`);
+});
+
+test('a matching rule with NO owners un-owns the file: drift against declared owners', () => {
+  assert.deepEqual(codeownersDrift('* @bob\n/brain.config.json\n', ['bob']), { codeowners: [], owners: ['bob'] });
+});
+
+test('readCodeowners is provider-aware: GitHub reads .github/, root, docs/; GitLab reads root, docs/, .gitlab/ and NEVER .github/', () => {
+  const root = mkdtempSync(join(tmpdir(), 'codeowners-prov-'));
+  try {
+    mkdirSync(join(root, '.github')); mkdirSync(join(root, '.gitlab')); mkdirSync(join(root, 'docs'));
+    writeFileSync(join(root, '.github', 'CODEOWNERS'), 'GH');
+    assert.equal(readCodeowners(root, 'github'), 'GH');
+    assert.equal(readCodeowners(root, 'gitlab'), null, 'GitLab does not read .github/');
+    writeFileSync(join(root, '.gitlab', 'CODEOWNERS'), 'GL-dir');
+    assert.equal(readCodeowners(root, 'gitlab'), 'GL-dir');
+    assert.equal(readCodeowners(root, 'github'), 'GH', 'GitHub does not read .gitlab/');
+    writeFileSync(join(root, 'docs', 'CODEOWNERS'), 'DOCS');
+    assert.equal(readCodeowners(root, 'gitlab'), 'DOCS', 'docs/ beats .gitlab/ for GitLab');
+    writeFileSync(join(root, 'CODEOWNERS'), 'ROOT');
+    assert.equal(readCodeowners(root, 'gitlab'), 'ROOT');
+    assert.equal(readCodeowners(root, 'github'), 'GH', '.github/ beats root for GitHub');
+    assert.equal(readCodeowners(root), 'GH', 'an unknown provider falls back to the GitHub order');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test('readCodeowners reads .github/CODEOWNERS (then root, docs/, .gitlab/), and returns null when there is none', () => {
   const root = mkdtempSync(join(tmpdir(), 'codeowners-'));
   try {
-    assert.equal(readCodeowners(root), null);
+    assert.equal(readCodeowners(root, 'github'), null);
     mkdirSync(join(root, '.github'));
     writeFileSync(join(root, '.github', 'CODEOWNERS'), '/brain.config.json @alice\n');
-    assert.equal(readCodeowners(root), '/brain.config.json @alice\n');
+    assert.equal(readCodeowners(root, 'github'), '/brain.config.json @alice\n');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
