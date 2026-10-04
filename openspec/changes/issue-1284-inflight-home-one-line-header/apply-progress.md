@@ -41,3 +41,13 @@ Eight mutations, each failed at least one test: drop the open filter; drop the s
 ## Left undone
 
 Nothing. `proposal.md`, `spec.md`, `design.md`, `tasks.md` and this file are untracked in the worktree and are left for the orchestrator to persist and commit.
+
+## Batch 2
+
+Closes verify WARNINGs 1 and 2 and the kind/progress scope lost between proposal and spec.
+
+- Spec: R1284-14 (kind only when `levelSource` is declared, progress only from a served-tree change dir row), plus R1284-4 activity text and two scenarios. Design: D104 (kind and progress), D105 (activity is the max of every measured time, `headCommitAt` fallback only).
+- Model: `kind`, `progress` row fields; `facts` leads with them; `activityOf` takes the max over `touchedAt`, `tipAt` and the dir's `lastCommit.at` together, `headCommitAt` only when none exists. `app.js` unchanged (it renders `facts`).
+- Tests: model (fresher dir commit, headCommitAt fallback, kind gating, progress wording) and fake-DOM render. Red run recorded: 4 failures before the model change (the headCommitAt guard already passed, it is a regression guard).
+- `npm test`: 7590 tests, 7587 pass, 0 fail, 3 skipped. `brain:repo:check` and `brain:nav` pass. Gated diff 330 added + 17 deleted at batch 1, now 347 lines total against budget 1000.
+- Mutations (reverted): drop kind gating failed 2 tests; drop `lastCommit` from the max failed 3 tests.

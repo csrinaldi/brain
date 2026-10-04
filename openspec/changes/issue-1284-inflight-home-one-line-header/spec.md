@@ -14,7 +14,7 @@ Fixed values used throughout:
 - **Sources**: the snapshot sections `changes` (non-archived change dirs on the served tree), `localWorktrees` (this machine's worktrees), `remoteChanges` (pushed branches joined to issues) and `prs` (open pull requests). Issue state comes from `hierarchy`: `open`, `closed` or `null`.
 - **In flight**: an issue that is `open` (or has `null` state, R1284-3) and is named by at least one source entry (R-B).
 - **`STALE_DAYS`**: a named constant, value 7, exported by `lib/inflight-model.mjs`.
-- **Activity time** of a row: the latest of its worktrees' `touchedAt`, its branches' `tipAt`, and (change-dir-only rows) the date of the last commit touching the change dir on the served tree (R-G). Absent values are ignored.
+- **Activity time** of a row: the latest of its worktrees' `touchedAt`, its branches' `tipAt` and the date of the last commit touching its change dir on the served tree (R-G), whenever that read succeeded. Absent values are ignored. Only when none of those exists, a bare worktree's head commit time (D103) is the fallback.
 - **Pure model**: `lib/inflight-model.mjs`, tested without a DOM. **Render tests** use the fake DOM (`test-support/dom.mjs`, `load-app.mjs`).
 
 ## The in-flight list
@@ -58,12 +58,22 @@ An issue whose `hierarchy` state is `null` MUST be included as a row marked `sta
 
 ### R1284-4: Activity time and the unknown-activity placement (R-A, R-G)
 
-Each row's activity time MUST be the latest of its worktrees' `touchedAt`, its branches' `tipAt`, and, for a row in flight only through a change dir on the served tree, the date of the last commit touching that dir (read locally with `git log -1`, never the forge). When the last-commit read fails or yields no date and no other source gives a time, the row MUST be marked `activity unknown`, MUST be placed at the end of the main list, and MUST NOT be placed in the stale group.
+Each row's activity time MUST be the latest of every measured time among its worktrees' `touchedAt`, its branches' `tipAt` and the date of the last commit touching its change dir on the served tree (read locally, never the forge); the change dir's last commit participates whenever its read succeeded, not only for change-dir-only rows. A worktree's head commit time (D103) MUST be used only as a fallback when none of those three exists; it MUST NOT win over a measured time even when it is newer. When the last-commit read fails or yields no date and no other source gives a time, the row MUST be marked `activity unknown`, MUST be placed at the end of the main list, and MUST NOT be placed in the stale group.
 
 #### Scenario: The latest of the available times wins
 - **GIVEN** issue #900 with a worktree `touchedAt` of 2026-10-01 and a branch `tipAt` of 2026-10-03
 - **WHEN** the model computes the row
 - **THEN** the row's activity time is 2026-10-03
+
+#### Scenario: A fresher change-dir commit beats an older branch tip
+- **GIVEN** open issue #901 with a branch `tipAt` of 2026-10-01 and a change dir whose last commit is dated 2026-10-03
+- **WHEN** the model computes the row
+- **THEN** the row's activity time is 2026-10-03
+
+#### Scenario: The head commit time is a fallback only
+- **GIVEN** open issue #902 with a worktree `touchedAt` of 2026-10-01 and `headCommitAt` of 2026-10-03
+- **WHEN** the model computes the row
+- **THEN** the row's activity time is 2026-10-01
 
 #### Scenario: A change-dir-only row uses the last commit on the dir
 - **GIVEN** open issue #267 named only by a change dir whose last commit on the served tree is dated 2026-09-30
@@ -198,6 +208,25 @@ A card for an issue with no change dir and no local or remote work MUST NOT rend
 - **WHEN** its map card renders
 - **THEN** the card still renders its remote-only line
 
+### R1284-14: A row shows its issue kind and tasks progress only when measured (#1284 scope A)
+
+A row MUST show the issue kind (`epic`, `feature` or `ticket`, the `hierarchy` entry's `level`) only when that entry's `levelSource` is present and is not `default`, that is, when the level is declared. An entry whose level is the default, unreadable or absent MUST show no kind; the row MUST NOT print `ticket` as if it had been measured. A row MUST show tasks progress only when a non-archived change dir row of the served tree (`changes` section) names the issue and carries a `progress` value; the wording MUST be `progressLabel(progress, SOURCE.workingTree, {prefix: 'tasks'})` (#1199). A row held only by a worktree, branch or PR has no such change dir row and MUST show no progress, because the snapshot does not measure it.
+
+#### Scenario: A declared level is shown
+- **GIVEN** open issue #878 whose hierarchy entry has `level` `epic` and `levelSource` `block`
+- **WHEN** the model builds the row and the section renders
+- **THEN** the row's kind is `epic` and its text contains `epic`
+
+#### Scenario: A default level shows nothing
+- **GIVEN** open issue #903 whose hierarchy entry has `level` `ticket` and `levelSource` `default`
+- **WHEN** the model builds the row and the section renders
+- **THEN** the row has no kind and its text does not contain `ticket`
+
+#### Scenario: Progress comes from the served tree's change dir
+- **GIVEN** open issue #904 named by a change dir whose `progress` is 3 of 5, and open issue #905 named only by a remote branch
+- **WHEN** the section renders
+- **THEN** the row for #904 contains `tasks 3 / 5 · working tree` and the row for #905 contains no `tasks` text
+
 ## Bounds
 
 ### R1284-13: Read-only, no new data source, no schema change
@@ -231,4 +260,5 @@ This change MUST NOT write a file, call the forge from the model, add or alter a
 | R-H placement, drawer, text-only | R1284-9 | Section precedes the lanes; A row click opens the drawer; A hostile author name is text |
 | R-D header | R1284-10, R1284-11 | Unresolved epic shortened; The epic explanation moves, it is not deleted; Degraded detail is reachable |
 | R-E cards | R1284-12 | No work, no absence line on the card; The drawer still says it; A remote-only card keeps its line |
+| Kind and progress | R1284-14 | A declared level is shown; A default level shows nothing; Progress comes from the served tree's change dir |
 | Read-only bounds | R1284-13 | The model imports no I/O |
