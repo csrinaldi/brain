@@ -152,20 +152,16 @@ function defaultGitShow(cwd) {
 const gitOpts = (cwd) => ({ cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 30000 });
 
 /**
- * The newest commit that touched `brain.config.json` at or before `ref`, or `''` when it has no history. Throws on failure.
+ * The newest MAINLINE commit that touched `brain.config.json` at or before `ref`, or `''` when it has none. Throws on failure.
  *
- * `--full-history` is load-bearing (#1283): git's default simplification follows only the parent a merge is TREESAME to,
- * so a merge that DROPPED the file (its tree equal to a parent that never had it) hides the deletion and `git log` prints
- * nothing — a re-add would then read as a founding. `--full-history` follows every parent and lists the merge. Verified
- * on real git: `--diff-merges` only changes the patch output, never which commits are listed, so it is not needed here.
+ * Owners always come from the last MAINLINE version, so the walk is `--first-parent` (#1283): each commit is compared only
+ * to its first parent. A merge that DROPPED a file main had is listed (default simplification would hide it, being
+ * TREESAME to the side parent that never had the file), and its `^1` is mainline and has the file. A merge TREESAME to
+ * main because main had already deleted the file is skipped, so the real deleting commit is found. Without it, a side
+ * branch's unmerged edit of the file could be read as the owners (full-history reproduced exactly that).
  */
 function defaultLastTouchSha(cwd) {
-  return (ref) => execFileSync('git', ['log', '-1', '--full-history', '--format=%H', ref, '--', TEAM_CONFIG_PATH], gitOpts(cwd)).trim();
-}
-
-/** The parent commits of `sha`, first parent first (empty for a root commit). Throws on failure. */
-function defaultParentShas(cwd) {
-  return (sha) => execFileSync('git', ['rev-list', '--parents', '-n', '1', sha], gitOpts(cwd)).trim().split(/\s+/).slice(1).filter(Boolean);
+  return (ref) => execFileSync('git', ['log', '-1', '--first-parent', '--format=%H', ref, '--', TEAM_CONFIG_PATH], gitOpts(cwd)).trim();
 }
 
 /** Whether the clone's history is truncated: a missing file cannot then be told from one that never existed. */
@@ -228,13 +224,8 @@ export async function gatherTeamConfigReviewedInputs({ baseSha, headSha, prNumbe
     const lastTouch = (deps.lastTouchSha ?? defaultLastTouchSha(cwd))(baseSha);
     if (lastTouch) {
       removed = true;
-      // The version before the deleting commit. A merge has several parents and only some of them had the file (the one it
-      // dropped it from): take the FIRST parent that has it, so the choice is deterministic and always a real last version.
-      let prev = null;
-      for (const parent of (deps.parentShas ?? defaultParentShas(cwd))(lastTouch)) {
-        prev = gitShow(parent, TEAM_CONFIG_PATH);
-        if (prev != null) break;
-      }
+      // The version before the deleting commit, always on the MAINLINE: its first parent (never a side branch's).
+      const prev = gitShow(`${lastTouch}^1`, TEAM_CONFIG_PATH);
       baseConfig = prev == null ? {} : parseConfig(prev);
     } else {
       // The ADOPTION PR: no owner can exist. Its tier is the new-consumer default (ADR-0026 Am8), never its own head's.

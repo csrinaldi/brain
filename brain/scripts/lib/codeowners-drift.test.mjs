@@ -141,3 +141,10 @@ test('diagnoseAxes passes the declared vcs provider: a sectioned GitLab mirror i
   assert.deepEqual(find('gitlab'), []);
   assert.equal(find('github').length, 1);
 });
+
+test('GitLab: drift in a REQUIRED section is reported before an optional (^) one; an optional-only drift is marked optional', () => {
+  const both = '^[Opt] @mallory\n/brain.config.json\n[Req] @bob\n/brain.config.json\n';
+  assert.deepEqual(codeownersDrift(both, ['alice'], 'gitlab'), { codeowners: ['bob'], owners: ['alice'] });
+  assert.deepEqual(codeownersDrift('^[Opt] @mallory\n/brain.config.json\n', ['alice'], 'gitlab'), { codeowners: ['mallory'], owners: ['alice'], optional: true });
+  assert.equal(codeownersDrift('^[Opt] @mallory\n/brain.config.json\n[Req] @alice\n/brain.config.json\n', ['alice'], 'gitlab')?.optional, true, 'optional drift still surfaces when the required section agrees');
+});

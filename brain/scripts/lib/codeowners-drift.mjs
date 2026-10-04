@@ -60,7 +60,7 @@ export function codeownersDrift(text, owners, provider) {
   if (typeof text !== 'string' || text === '') return null;
   const gitlab = HAS_SECTIONS[provider] === true;
   // One entry per section, in file order; the unsectioned head of the file is the section `''`.
-  const sections = [{ defaults: [], rule: null }];
+  const sections = [{ defaults: [], rule: null, optional: false }];
   const byName = new Map([['', sections[0]]]);
   let current = sections[0];
   for (const raw of text.split('\n')) {
@@ -71,8 +71,9 @@ export function codeownersDrift(text, owners, provider) {
       if (m) {
         // A repeated section name (case-insensitive) is the same section.
         const key = m[1].trim().toLowerCase();
-        current = byName.get(key) ?? { defaults: [], rule: null };
+        current = byName.get(key) ?? { defaults: [], rule: null, optional: false };
         if (!byName.has(key)) { byName.set(key, current); sections.push(current); }
+        if (line.startsWith('^')) current.optional = true; // `^[Name]`: approval not required
         const defaults = (m[2] ?? '').split(/\s+/).filter(Boolean);
         if (defaults.length > 0) current.defaults = defaults;
         continue;
@@ -82,13 +83,19 @@ export function codeownersDrift(text, owners, provider) {
     if (matchesTeamConfig(pattern)) current.rule = gitlab && who.length === 0 ? current.defaults : who;
   }
   const declared = [...new Set((Array.isArray(owners) ? owners : []).filter((o) => typeof o === 'string' && o.trim() !== '').map(bare))];
-  let drift = null;
-  for (const { rule } of sections) {
+  // An OPTIONAL section requires no approval: drift in a required section is what matters and is reported first; an
+  // optional section's drift is reported only when no required one disagrees, and marked `optional: true`.
+  let required = null;
+  let optional = null;
+  for (const { rule, optional: opt } of sections) {
     if (rule === null) continue;
     const mirrored = [...new Set(rule.map(bare))];
     const same = mirrored.length === declared.length && mirrored.every((o) => declared.includes(o));
-    if (!same && drift === null) drift = { codeowners: mirrored, owners: declared };
+    if (same) continue;
+    if (opt) optional ??= { codeowners: mirrored, owners: declared, optional: true };
+    else required ??= { codeowners: mirrored, owners: declared };
   }
+  const drift = required ?? optional;
   return drift;
 }
 

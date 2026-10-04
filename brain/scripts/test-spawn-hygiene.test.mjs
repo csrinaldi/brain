@@ -426,7 +426,7 @@ const ALLOWLIST = [
   // ── postmerge release workflow: real git, extracted YAML steps, local fixture repo ──
   // #1283 the team-config gate's real-git suite: one bash-wrapped `git` helper, only ever against mkdtemp repos (HOME and
   // BRAIN_HOME are throwaways, stdin comes from a file, timeout 30s); the forge reviews are the only thing faked.
-  { file: 'brain/scripts/vcs/team-config-reviewed.git.test.mjs', entrypoint: '<unresolved>', line: 32, reason: 'fixture-root-local-git' },
+  { file: 'brain/scripts/vcs/team-config-reviewed.git.test.mjs', entrypoint: '<unresolved>', line: 38, reason: 'fixture-root-local-git' },
   { file: 'brain/scripts/vcs/release-postmerge-workflows.test.mjs', entrypoint: '<unresolved>', line: 135, reason: 'fixture-root-local-git' },
 
   // ── regulated-review e2e: vendored review binary against a fixture PR ──

@@ -344,7 +344,7 @@ test('rename away / delete: the deletion lists brain.config.json, so it is touch
 test('re-creating the config after a deletion is NOT a founding: the base once had it', async () => {
   const gather = (lastTouchSha) => gatherTeamConfigReviewedInputs({
     baseSha: 'BASE', headSha: 'HEAD', prNumber: 7, repo: 'o/r', author: 'alice',
-    deps: { diffNameOnly: () => touched, fetchReviews: async () => [], gitShow: () => null, lastTouchSha, parentShas: () => ['DELP'], isShallow: () => false },
+    deps: { diffNameOnly: () => touched, fetchReviews: async () => [], gitShow: () => null, lastTouchSha, isShallow: () => false },
   });
   const genuine = await gather(() => '');
   assert.equal(genuine.founding, true);
@@ -367,17 +367,17 @@ test('the genuine founding still passes end to end', async () => {
 const removedRun = (over = {}) => runTeamConfigReviewedCheck({
   baseSha: 'BASE', headSha: 'HEAD', prNumber: 7, repo: 'o/r', author: 'alice',
   diffNameOnly: () => touched, fetchReviews: async () => [ok('bob')],
-  isShallow: () => false, lastTouchSha: () => 'DEL', parentShas: () => ['DELP'],
+  isShallow: () => false, lastTouchSha: () => 'DEL',
   gitShow: (ref) => (ref === 'BASE' ? null : baseConfig({ governance: { owners: ['alice', 'bob'], tier: 'standard' } })),
   ...over,
 });
 
-test('removed then re-added: the owners are read from the version BEFORE the deleting commit (first parent of DEL that has the file), and a previous owner\'s current approval passes', async () => {
+test('removed then re-added: the owners are read from the version BEFORE the deleting commit (DEL^1, the mainline), and a previous owner\'s current approval passes', async () => {
   const asked = [];
   const r = await removedRun({
     gitShow: (ref) => { asked.push(ref); return ref === 'BASE' ? null : baseConfig({ governance: { owners: ['alice', 'bob'], tier: 'standard' } }); },
   });
-  assert.deepEqual(asked, ['BASE', 'DELP']);
+  assert.deepEqual(asked, ['BASE', 'DEL^1']);
   assert.equal(r.level, 'pass');
   assert.equal(r.founding, undefined);
 });

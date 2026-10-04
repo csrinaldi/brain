@@ -29,9 +29,13 @@ const emptyStdin = join(home, 'stdin');
 writeFileSync(emptyStdin, '');
 
 function git(cwd, ...args) {
-  const r = spawnSync('bash', ['-c', 'exec git "$@" < "$0"', emptyStdin, ...args], { cwd, encoding: 'utf8', timeout: 30000, env: process.env });
+  const r = gitRaw(cwd, ...args);
   assert.equal(r.status, 0, `git ${args.join(' ')} failed: ${r.stderr}`);
   return r.stdout.trim();
+}
+
+function gitRaw(cwd, ...args) {
+  return spawnSync('bash', ['-c', 'exec git "$@" < "$0"', emptyStdin, ...args], { cwd, encoding: 'utf8', timeout: 30000, env: process.env });
 }
 
 const CONFIG = 'brain.config.json';
@@ -121,18 +125,25 @@ test('removal through a MERGE is seen by real git, and the owners come from the 
   assert.equal((await run(dir, base, head, approval('bob', head))).level, 'pass');
 });
 
-test('removal through a merge whose FIRST parent never had the file: the owners come from the second parent', async () => {
+test('owners never come from a SIDE branch: a merge that keeps main\'s earlier deletion does not make the side edit the owners', async () => {
   const dir = newRepo();
   commit(dir, 'root', { 'README.md': 'x\n' });
-  git(dir, 'checkout', '-q', '-b', 'withconfig');
-  commit(dir, 'add config', { [CONFIG]: cfg(['alice', 'bob']) });
+  const add = commit(dir, 'add', { [CONFIG]: cfg(['alice', 'bob']) });
+  git(dir, 'checkout', '-q', '-b', 'side');
+  commit(dir, 'x1', { [CONFIG]: cfg(['mallory']) });
+  commit(dir, 'x2', { [CONFIG]: cfg(['mallory', 'eve']) });
   git(dir, 'checkout', '-q', 'main');
-  commit(dir, 'main work', { 'main.txt': 'm\n' });
-  git(dir, 'merge', '-q', '--no-commit', '--no-ff', 'withconfig');
+  git(dir, 'rm', '-q', CONFIG);
+  git(dir, 'commit', '-q', '-m', 'D');
+  const merge = gitRaw(dir, 'merge', '--no-commit', '--no-ff', 'side');
+  assert.notEqual(merge.status, 0, 'a modify/delete conflict is the premise');
   git(dir, 'rm', '-q', '-f', CONFIG);
-  git(dir, 'commit', '-q', '-m', 'merge dropping the config');
-  const { base, head } = pr(dir, () => { commit(dir, 're-add', { [CONFIG]: cfg(['alice', 'mallory']) }); });
-  assert.equal((await run(dir, base, head)).level, 'fail');
+  git(dir, 'commit', '-q', '-m', 'M keeps the deletion');
+  assert.equal(git(dir, 'rev-parse', 'HEAD^1:README.md').length > 0, true);
+  const { base, head } = pr(dir, () => { commit(dir, 're-add', { [CONFIG]: cfg(['mallory']) }); });
+  const inputs = await gatherTeamConfigReviewedInputs({ baseSha: base, headSha: head, prNumber: 7, repo: 'o/r', author: 'alice', provider: 'github', cwd: dir, deps: { fetchReviews: async () => [] } });
+  assert.deepEqual(inputs.owners, ['alice', 'bob'], `owners come from the mainline version at ${add}`);
+  assert.equal((await run(dir, base, head, approval('mallory', head))).level, 'fail');
   assert.equal((await run(dir, base, head, approval('bob', head))).level, 'pass');
 });
 
