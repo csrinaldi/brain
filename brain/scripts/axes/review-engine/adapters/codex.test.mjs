@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 import { runStage } from './codex.mjs';
+import { defaultRun } from '../../lib/agent-runtime.mjs';
 
 function makePaths(t) {
   const root = mkdtempSync(join(tmpdir(), 'codex-backend-'));
@@ -185,4 +186,92 @@ test('cleans the isolated home when copying OAuth authentication fails', async (
   assert.match(result.reason, /copy denied/i);
   assert.equal(spawned, false);
   assert.equal(existsSync(isolatedHome), false);
+});
+
+// #1274 — Codex streams progress to stdout; with Node's 1 MiB spawnSync default the
+// spawn died with ENOBUFS and the cold review was lost, although the verdict is
+// read from --output-last-message, a file. The oracle is the REAL runner, because a
+// spy would accept whatever defaultRun does with the options.
+
+function fakeEngine(paths, body) {
+  const script = join(paths.root, 'fake-codex.sh');
+  writeFileSync(script, `#!/usr/bin/env bash\nout=""\nwhile [ $# -gt 0 ]; do\n  if [ "$1" = "--output-last-message" ]; then out="$2"; fi\n  shift\ndone\n${body}\n`);
+  return script;
+}
+
+function realRun(script, paths) {
+  const stdin = join(paths.root, 'stdin.txt');
+  writeFileSync(stdin, '');
+  // bash runs the fake engine; stdin comes from a file, never the terminal.
+  return (_bin, args, opts) => defaultRun('bash', ['-c', 'exec bash "$0" "$@" < "$STDIN_FILE"', script, ...args], {
+    ...opts, timeoutMs: 30_000, env: { ...opts.env, STDIN_FILE: stdin, BRAIN_HOME: join(paths.root, 'brain-home') },
+  });
+}
+
+test('#1274 a 3 MiB stdout stream does not kill the engine: the verdict is read from the file', async (t) => {
+  const paths = makePaths(t);
+  const script = fakeEngine(paths, 'head -c 3000000 /dev/zero | tr "\\0" "x"\nprintf "verdict" > "$out"\nexit 0');
+  const result = await runStage({
+    stage: 'cold-review', prompt: 'p', model: 'gpt-5.5', cwd: paths.candidate,
+    output: output(paths), _env: testEnv(paths), _run: realRun(script, paths),
+  });
+  assert.equal(result.ok, true, result.reason);
+  assert.equal(readFileSync(paths.tempPath, 'utf8'), 'verdict');
+});
+
+test('#1274 a failing engine reports a bounded, printable stderr tail even after huge stdout', async (t) => {
+  const paths = makePaths(t);
+  const script = fakeEngine(paths, 'head -c 3000000 /dev/zero | tr "\\0" "x"\nhead -c 20000 /dev/zero | tr "\\0" "e" >&2\nprintf "\\001\\002 usage limit reached\\n" >&2\nexit 3');
+  const result = await runStage({
+    stage: 'cold-review', prompt: 'p', model: 'gpt-5.5', cwd: paths.candidate,
+    output: output(paths), _env: testEnv(paths), _run: realRun(script, paths),
+  });
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /status 3/);
+  assert.match(result.reason, /the engine last said: .*usage limit reached/);
+  assert.doesNotMatch(result.reason, /[\u0000-\u0008\u000B-\u001F\u007F]/);
+  assert.ok(result.reason.length < 1000, `reason is bounded (${result.reason.length})`);
+});
+
+test('#1274 defaultRun discardStdout drops stdout and keeps stderr; the default keeps both', () => {
+  const kept = defaultRun('bash', ['-c', 'echo out; echo err >&2']);
+  assert.equal(kept.stdout.trim(), 'out');
+  const dropped = defaultRun('bash', ['-c', 'echo out; echo err >&2'], { discardStdout: true });
+  assert.equal(dropped.stdout, null);
+  assert.equal(dropped.stderr.trim(), 'err');
+  const big = defaultRun('bash', ['-c', 'head -c 3000000 /dev/zero | tr "\\0" "x"']);
+  assert.equal(big.error, undefined, 'the generic default survives >1 MiB of stdout');
+  assert.equal(big.stdout.length, 3000000);
+});
+
+async function failWithStderr(t, stderr) {
+  const paths = makePaths(t);
+  return runStage({
+    stage: 'cold-review', prompt: 'p', model: 'gpt-5.5', cwd: paths.candidate,
+    credentialEnv: ['BRAIN_REVIEWER_TOKEN'], output: output(paths),
+    _env: testEnv(paths, { BRAIN_REVIEWER_TOKEN: SECRET }), _run: () => ({ status: 3, stderr }),
+  });
+}
+
+const SECRET = ['tok', 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'].join('-');
+
+function leaks(text) {
+  for (let i = 0; i + 6 <= SECRET.length; i += 1) {
+    if (text.includes(SECRET.slice(i, i + 6))) return SECRET.slice(i, i + 6);
+  }
+  return null;
+}
+
+test('#1274 a secret followed by carriage-return redraws is redacted before the tail is cut', async (t) => {
+  const result = await failWithStderr(t, `auth ${SECRET}${'\r'.repeat(4078)} usage limit`);
+  assert.equal(leaks(result.reason), null);
+  assert.match(result.reason, /usage limit/);
+});
+
+test('#1274 a secret straddling the 4096-char boundary is redacted', async (t) => {
+  for (const shift of [1, 10, 20, 30, 40]) {
+    const tailPart = ' '.repeat(4096 - shift);
+    const result = await failWithStderr(t, `x${SECRET}${tailPart}end`.replace(/ /g, '.'));
+    assert.equal(leaks(result.reason), null, `shift ${shift}`);
+  }
 });

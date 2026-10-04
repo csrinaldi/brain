@@ -20,14 +20,19 @@ export const CODEX_HOME_MODE = 0o700;
 export const CODEX_AUTH_MODE = 0o600;
 
 function tail(result, secrets, max = 300) {
-  const text = String(result?.stderr ?? '').trim() || String(result?.stdout ?? '').trim();
-  if (!text) return '';
-  let safe = text;
+  const raw = String(result?.stderr ?? '').trim() || String(result?.stdout ?? '').trim();
+  if (!raw) return '';
+  // Redact over the FULL text first: truncating first would cut a secret that
+  // straddles the window and leave its suffix unmatched (#1274).
+  let safe = raw;
   for (const secret of secrets) {
     if (typeof secret === 'string' && secret.length > 0) safe = safe.split(secret).join('[redacted]');
   }
+  // Then bounded and printable: control bytes dropped, last 4 KiB only.
+  safe = safe.replace(/[\u0000-\u0008\u000B-\u001F\u007F]/g, '').slice(-4096).trim();
+  if (!safe) return '';
   const last = safe.split('\n').filter(Boolean).slice(-2).join(' / ');
-  return ` — the engine last said: ${last.length > max ? `${last.slice(0, max)}…` : last}`;
+  return ` — the engine last said: ${last.length > max ? `…${last.slice(-max)}` : last}`;
 }
 
 function canonicalPath(path) {
@@ -174,7 +179,7 @@ export async function runStage({
           '--skip-git-repo-check', '--ephemeral', '--ignore-user-config',
           '--output-last-message', output.tempPath, prompt,
         ];
-        result = _run('codex', args, { cwd, timeoutMs, env: { ...env, CODEX_HOME: codexHome } });
+        result = _run('codex', args, { cwd, timeoutMs, env: { ...env, CODEX_HOME: codexHome }, discardStdout: true });
       } catch (err) {
         result = { spawnError: err };
       }
