@@ -201,17 +201,17 @@ test('ensureBrainConfig: creates config when missing with gitlab identity', () =
   }
 });
 
-test('ensureBrainConfig: existing config → fills empty gitHost/slug, does NOT overwrite provider', () => {
+test('ensureBrainConfig: existing config → REPORTS empty gitHost/slug (derived value included) and writes nothing (#1263)', () => {
   const dir = makeTmpConfig(); // provider='github', gitHost='', slug=''
   try {
     const result = ensureBrainConfig(dir, { identity: { host: 'github.com', project: 'owner/repo' } });
     assert.equal(result.created, false);
-    assert.ok(result.filled.includes('gitHost'), 'should fill gitHost');
-    assert.ok(result.filled.includes('slug'), 'should fill slug');
+    assert.deepEqual(result.filled, []);
+    assert.deepEqual(result.missing, [{ key: 'gitHost', value: 'github.com' }, { key: 'slug', value: 'owner/repo' }]);
 
     const cfg = readCfg(dir);
-    assert.equal(cfg.project.gitHost, 'github.com');
-    assert.equal(cfg.project.slug, 'owner/repo');
+    assert.equal(cfg.project.gitHost, '');
+    assert.equal(cfg.project.slug, '');
     assert.equal(cfg.vcs.provider, 'github'); // NOT overwritten
   } finally {
     rmSync(dir, { recursive: true, force: true });

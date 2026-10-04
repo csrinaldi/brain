@@ -264,6 +264,7 @@ export default {
   'axes.diagnose.lockedOverride.fix':       "remove it from {where}, or ask an owner in governance.owners to change the team's choice: npm run brain:config -- set {axis}.default {value}",
   'axes.diagnose.userShadows':              '{axis}.default in {where} ({value}) overrides the team {axis}.default ({declared}) on this machine',
   'axes.diagnose.userShadows.fix':          'nothing to do if this machine should differ; to make it the team choice: npm run brain:config -- set {axis}.default {value}',
+  'config.identity.missing': 'the team config has no project.{key}; propose it with `npm run brain:config -- set project.{key} {value}` in a PR (env:init writes no team config in an existing repository)',
   'axes.diagnose.undeclared': '{axis} is undeclared: nothing states a {axis} and none was guessed',
   'axes.diagnose.undeclared.fix': 'choose one and declare it in a PR: npm run brain:config -- set {axis}.default <name>',
   'bootstrap.axis.teamUndeclared': 'the team has not declared {axis}; ask an owner, or propose it with `npm run brain:config -- set {axis}.default <name>` in a PR. env:init writes no team config in an existing repository.',

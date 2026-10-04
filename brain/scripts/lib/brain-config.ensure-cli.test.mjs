@@ -13,6 +13,7 @@ import { cpSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { testTmp } from './test-tmp.mjs';
+const git = (cwd, ...a) => { const r = spawnSync('git', a, { cwd, encoding: 'utf8' }); assert.equal(r.status, 0, r.stderr); };
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
@@ -68,4 +69,28 @@ test('#1263 ensure --founding-file: a run on an EXISTING brain.config.json repor
   assert.equal(r.status, 0, `${r.stdout}${r.stderr}`);
   assert.equal(readFileSync(flag, 'utf8').trim(), 'existing');
   assert.equal(readFileSync(config, 'utf8'), body);
+});
+
+// ── identity backfill is a team write: never in an existing repo (#1263 slice 2, ruling on ADR-0040) ──────────────────
+test('#1263 ensure: an EXISTING repo with an empty slug keeps brain.config.json BYTE-IDENTICAL and the gap is reported with a copy-paste fix', () => {
+  const { root, repo } = copyRepo('ensure-nofill-');
+  git(repo, 'init', '-q');
+  git(repo, 'remote', 'add', 'origin', 'https://example.com/acme/widget.git');
+  const config = join(repo, 'brain.config.json');
+  const body = `${JSON.stringify({ schemaVersion: '1.11.1', project: { gitHost: '', slug: '' } }, null, 2)}\n`;
+  writeFileSync(config, body);
+  const r = ensureWith(root, repo);
+  assert.equal(r.status, 0, `${r.stdout}${r.stderr}`);
+  assert.equal(readFileSync(config, 'utf8'), body);
+  assert.match(r.stdout + r.stderr, /the team config has no project\.slug; propose it with `npm run brain:config -- set project\.slug acme\/widget` in a PR/);
+});
+
+test('#1263 ensure: the FOUNDING run still derives and writes gitHost and slug', () => {
+  const { root, repo } = copyRepo('ensure-fill-');
+  git(repo, 'init', '-q');
+  git(repo, 'remote', 'add', 'origin', 'https://example.com/acme/widget.git');
+  assert.equal(ensureWith(root, repo).status, 0);
+  const cfg = JSON.parse(readFileSync(join(repo, 'brain.config.json'), 'utf8'));
+  assert.equal(cfg.project.slug, 'acme/widget');
+  assert.equal(cfg.project.gitHost, 'example.com');
 });
