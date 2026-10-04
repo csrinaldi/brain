@@ -125,18 +125,19 @@ function checkChangeDir({ fs, entry }) {
   }
 }
 
+/** `{block, held}`: the block the page gets, and the documents it read before the same-as-origin collapse dropped them (#1276 D88), for the tab source. */
 function localBlock({ run, fs, entry, mainDocuments, origin }) {
   const base = { leaf: entry.leaf, branch: entry.branch, head: entry.head, path: entry.path, dir: entry.dir, label: `worktree ${entry.leaf} · ${entry.branch}`, documents: null, absent: [], resume: null, progress: null };
-  if (entry.capped) return { ...base, state: 'capped' };
-  if (entry.dirState !== 'present') return { ...base, state: entry.dirState === 'missing' ? 'no-change-dir' : 'unreadable', reason: entry.reason };
+  if (entry.capped) return { block: { ...base, state: 'capped' }, held: null };
+  if (entry.dirState !== 'present') return { block: { ...base, state: entry.dirState === 'missing' ? 'no-change-dir' : 'unreadable', reason: entry.reason }, held: null };
   const checked = checkChangeDir({ fs, entry });
-  if (checked.reason) return { ...base, state: 'unreadable', reason: checked.reason };
+  if (checked.reason) return { block: { ...base, state: 'unreadable', reason: checked.reason }, held: null };
   const paths = Object.values(LOCAL_DOCUMENT_FILES).map((file) => `${entry.dir}/${file}`);
   let tree;
   try {
     tree = parseTreeListing(run('git', ['--literal-pathspecs', 'ls-tree', '-l', '-z', entry.head, '--', ...paths]));
   } catch (err) {
-    return { ...base, state: 'unreadable', reason: gitErrorLine(err) };
+    return { block: { ...base, state: 'unreadable', reason: gitErrorLine(err) }, held: null };
   }
   const algo = entry.head.length === SHA256_HEX ? 'sha256' : 'sha1';
   const documents = {};
@@ -148,23 +149,27 @@ function localBlock({ run, fs, entry, mainDocuments, origin }) {
   // The collapse hides every document, so it needs all of them accounted for (R883-9): readable,
   // committed and present (a deleted one counts as uncommitted).
   const clean = Object.values(documents).every((d) => d.state !== 'unreadable' && !d.uncommitted);
-  if (clean && origin) return { ...base, state: 'same-as-origin', absent, resume: null };
+  const held = { documents, absent };
+  if (clean && origin) return { block: { ...base, state: 'same-as-origin', absent, resume: null }, held };
   const deletedResume = documents.resume?.state === 'deleted';
   const resume = deletedResume ? { state: 'missing', reason: `resume.md was deleted from worktree ${entry.leaf} (committed on ${entry.branch})` } : documents.resume ?? { state: 'missing', reason: `no resume.md in worktree ${entry.leaf}` };
-  return { ...base, state: 'read', documents, absent, resume: resumeOutcome({ doc: resume, label: `worktree ${entry.leaf}` }) };
+  return { block: { ...base, state: 'read', documents, absent, resume: resumeOutcome({ doc: resume, label: `worktree ${entry.leaf}` }) }, held };
 }
 
 /**
- * The local blocks of one issue, from the snapshot's section: `{local, localNote}`.
+ * The local blocks of one issue, from the snapshot's section: `{local, localNote, held}`.
  * An absent or unreadable section yields no block (the section says why in the snapshot).
+ * `held` maps `entry.path` to the documents that worktree was read with; it is for the route's
+ * tab source and is never serialized (#1276 D88).
  */
 export function readLocalBlocks({ run, snapshot, issue, mainDocuments, _fs = defaultFs }) {
   const section = snapshot?.localWorktrees;
-  if (section && !section.ok && section.pending !== true) return { local: [], localNote: `this machine's worktrees were not read: ${section.reason}` };
+  if (section && !section.ok && section.pending !== true) return { local: [], localNote: `this machine's worktrees were not read: ${section.reason}`, held: new Map() };
   const mine = section?.ok ? section.value.entries.filter((e) => e.issue === issue) : [];
   const remote = snapshot?.remoteChanges?.ok ? snapshot.remoteChanges.value.branches : [];
   const atOrigin = (e) => remote.some((r) => r.branch === e.branch && r.sha === e.head);
   const capped = mine.filter((e) => e.capped).length;
   const note = capped > 0 ? `showing documents for ${mine.length - capped} of ${mine.length} worktrees; the others are listed without documents (cap of ${LOCAL_DRAWER_CAP})` : null;
-  return { local: mine.map((entry) => localBlock({ run, fs: _fs, entry, mainDocuments, origin: atOrigin(entry) })), localNote: note };
+  const read = mine.map((entry) => ({ entry, ...localBlock({ run, fs: _fs, entry, mainDocuments, origin: atOrigin(entry) }) }));
+  return { local: read.map((r) => r.block), localNote: note, held: new Map(read.filter((r) => r.held).map((r) => [r.entry.path, r.held])) };
 }

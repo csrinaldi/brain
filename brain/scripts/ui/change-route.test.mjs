@@ -7,7 +7,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildChangeView, REVIEWS_SOURCE_NOTE } from './change-route.mjs';
+import { buildChangeView, REMOTE_DRAWER_CAP, REVIEWS_SOURCE_NOTE } from './change-route.mjs';
 import { documentWording } from './lib/drawer-model.mjs';
 import { fakeGit } from './test-support/fake-git.mjs';
 import { execFileSync } from 'node:child_process';
@@ -790,4 +790,92 @@ test('#1218 R1218-9/10: a headBranch that exists only as a remote ref is unreada
   assert.ok(documents.resume.reason.length <= 200);
   assert.doesNotMatch(documents.resume.reason, /^Command failed/);
   assert.match(workingMemory.reason, /fatal: Needed a single revision/);
+});
+
+// ── #1276 R1276-4: origin is the source only when main and every worktree hold nothing ──
+
+const OR_ISSUE = 7;
+const OR_DIR = 'openspec/changes/issue-7-x';
+const OR_SHA = (n) => `${n}`.padStart(2, '0').padEnd(40, 'e');
+const OR_SPEC = '### R7-1: Title\n#### Scenario: s\n- **WHEN** w\n- **THEN** t\n';
+const OR_TASKS = '- [x] 1.1 a\n- [ ] 1.2 b\n';
+
+function originEntry(n, branch = `feat/issue-7-r${n}`) {
+  return {
+    branch, sha: OR_SHA(n), tipAt: '2026-10-01T00:00:00Z', author: 'Ada Lovelace', kind: 'grammar', issue: OR_ISSUE, pr: null,
+    change: { ok: true, value: { dir: OR_DIR, artefacts: {} } }, resume: { state: 'missing' },
+  };
+}
+
+function originSnapshot(entries, { prs = [], localWorktrees } = {}) {
+  return {
+    ...(localWorktrees ? { localWorktrees } : {}),
+    changes: { ok: true, value: [] },
+    prs: { ok: true, value: prs }, reviews: { ok: true, value: [] },
+    records: { ok: true, value: { records: [], duplicates: { ids: 0 } } },
+    remoteChanges: { ok: true, value: { base: 'origin/main', branches: entries, unjoined: [], hidden: { base: 0, lane: 0, merged: 0 }, prsApplied: true, deferred: 0 } },
+  };
+}
+
+function originGit(n, extra = {}) {
+  const branches = {};
+  for (let i = 1; i <= n; i += 1) branches[`origin/feat/issue-7-r${i}`] = { commit: OR_SHA(i), files: { [`${OR_DIR}/spec.md`]: OR_SPEC, [`${OR_DIR}/tasks.md`]: OR_TASKS, ...extra } };
+  return fakeGit({ files: {}, head: HEAD, branches, blame: BLAME_PORCELAIN });
+}
+
+test('R1276-4: an origin-only change feeds the Spec, SDD and Tasks tabs, each saying so, with the blame at the origin sha', () => {
+  const run = originGit(1);
+  const { value } = buildChangeView({ issue: OR_ISSUE, snapshot: originSnapshot([originEntry(1)]), _run: run });
+
+  const from = `from origin/feat/issue-7-r1 @ ${OR_SHA(1).slice(0, 12)}`;
+  assert.equal(value.tabSource.kind, 'origin');
+  assert.equal(value.spec.ok, true);
+  assert.equal(value.spec.value[0].id, 'R7-1');
+  assert.equal(value.spec.value[0].source.path, `origin/feat/issue-7-r1:${OR_DIR}/spec.md`);
+  assert.equal(value.spec.from, from);
+  assert.equal(value.sdd.from, from);
+  assert.equal(value.tasks.from, from);
+  assert.deepEqual(value.sdd.value.filter((r) => r.present).map((r) => r.stage), ['spec', 'tasks']);
+  assert.equal(value.tasks.progressSource, 'at origin/feat/issue-7-r1');
+  assert.deepEqual(run.calls.filter((a) => a[0] === 'blame'), [['blame', '--porcelain', OR_SHA(1), '--', `${OR_DIR}/tasks.md`]]);
+});
+
+test('R1276-4: several origin branches hold the change — the open PR\'s head branch is the source', () => {
+  const run = originGit(2);
+  const snapshot = originSnapshot([originEntry(1), originEntry(2)], { prs: [{ number: 9, title: 'x', headBranch: 'feat/issue-7-r2', issue: OR_ISSUE }] });
+
+  const { value } = buildChangeView({ issue: OR_ISSUE, snapshot, _run: run });
+
+  assert.equal(value.tabSource.kind, 'origin');
+  assert.equal(value.tabSource.branch, 'feat/issue-7-r2');
+  assert.equal(value.spec.from, `from origin/feat/issue-7-r2 @ ${OR_SHA(2).slice(0, 12)}`);
+});
+
+test('R1276-4: several origin branches and no open PR naming one of them are refused, naming the branches', () => {
+  for (const prs of [[], [{ number: 9, title: 'x', headBranch: 'feat/issue-7-other', issue: OR_ISSUE }]]) {
+    const { value } = buildChangeView({ issue: OR_ISSUE, snapshot: originSnapshot([originEntry(1), originEntry(2)], { prs }), _run: originGit(2) });
+    assert.equal(value.tabSource.kind, 'refused');
+    for (const tab of [value.spec, value.sdd, value.tasks]) {
+      assert.equal(tab.reason, 'several origin branches hold the change dir for #7: feat/issue-7-r1, feat/issue-7-r2; no open PR names one of them, so the tabs read none');
+    }
+  }
+});
+
+test('R1276-4: the one holder past the drawer\'s read cap is said, and never read for the tabs', () => {
+  const run = originGit(4);
+  const entries = [1, 2, 3, 4].map((n) => originEntry(n));
+  const snapshot = originSnapshot(entries, { prs: [{ number: 9, title: 'x', headBranch: 'feat/issue-7-r4', issue: OR_ISSUE }] });
+
+  const { value } = buildChangeView({ issue: OR_ISSUE, snapshot, _run: run });
+
+  assert.equal(value.tabSource.kind, 'none');
+  assert.equal(value.spec.reason, `origin/feat/issue-7-r4 holds the change dir but is past the drawer's read cap of ${REMOTE_DRAWER_CAP}`);
+  assert.equal(run.calls.some((a) => a.includes(OR_SHA(4)) && a[0] !== 'rev-parse'), false, 'the capped branch\'s documents were not read');
+});
+
+test('R1276-4: a change on main never consults origin', () => {
+  const snapshot = { ...originSnapshot([originEntry(1)]), changes: { ok: true, value: [{ id: 'issue-7-x', issue: OR_ISSUE, slug: 'x', dir: OR_DIR }] } };
+  const { value } = buildChangeView({ issue: OR_ISSUE, snapshot, _run: fakeGit({ files: { [`${OR_DIR}/spec.md`]: OR_SPEC }, head: HEAD, branches: {}, blame: '' }) });
+  assert.equal(value.tabSource.kind, 'head');
+  assert.equal(value.spec.from, undefined);
 });

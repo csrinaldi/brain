@@ -43,8 +43,11 @@ function entry({ title, detail, source, pending = false, ...rest }) {
 
 /** A failed tab: the reason stays, and so does whatever path the failure knew about. */
 function failedTab(id, tabView, entries = []) {
-  return { id, label: TAB_LABELS[id], ok: false, reason: tabView.reason, source: tabView.source ? sourceLabel(tabView.source) : null, entries, note: tabView.sourceNote ?? null };
+  return { id, label: TAB_LABELS[id], ok: false, reason: tabView.reason, source: tabView.source ? sourceLabel(tabView.source) : null, entries, note: tabView.sourceNote ?? null, ...fromOf(tabView) };
 }
+
+/** The `from` line of a tab whose documents came from a worktree or an origin branch (#1276 D92); nothing for the served HEAD. */
+const fromOf = (tabView) => (tabView.from ? { from: tabView.from } : {});
 
 /**
  * The lines `spec-cards.mjs` could not attach to a scenario (#1067 cold
@@ -169,7 +172,7 @@ function sddEntries(items, documents) {
     // `design.md`; a missing stage is only actionable when the file it would
     // be is on screen.
     file: item.file ?? null,
-    detail: item.present ? 'present' : 'missing',
+    detail: item.detail ?? (item.present ? 'present' : 'missing'),
     source: item.source,
     done: item.present,
     pending: !item.present,
@@ -331,10 +334,16 @@ const LOCAL_BLOCK_WORDING = {
   'same-as-origin': () => 'same as origin: this worktree is at the tip of its branch on origin, and nothing in it is uncommitted',
 };
 
-function localRowDetail(doc, branch) {
+/** One local document's state in #883's words, without its task count. */
+export function localStateWording(doc, branch) {
   if (doc.overlay === 'committed') return LOCAL_STATE_WORDING.committed(branch);
   if (doc.overlay === 'deleted') return LOCAL_STATE_WORDING.deleted(branch);
-  const state = LOCAL_STATE_WORDING[doc.overlay] ?? doc.state;
+  return LOCAL_STATE_WORDING[doc.overlay] ?? doc.state;
+}
+
+/** One local document's row detail: its state, and for a tasks.md its count named as read from the working tree. */
+export function localRowDetail(doc, branch) {
+  const state = localStateWording(doc, branch);
   return doc.progress ? `${state} \u00b7 ${progressLabel(doc.progress, SOURCE.workingTree)}` : state;
 }
 
@@ -400,12 +409,12 @@ export function localChangedFor(prevSection, nextSection, issue) {
 export function buildDrawerModel(changeView) {
   if (!changeView || typeof changeView !== 'object') return { ok: false, reason: 'no change view was given to the drawer' };
   if (changeView.ok !== true) return { ok: false, reason: changeView.reason };
-  const { issue, changeDir, spec, sdd, tasks, workingMemory, reviews, records, documents, remote = [], remoteNote = null, local = [], localNote = null } = changeView.value;
+  const { issue, changeDir, spec, sdd, tasks, workingMemory, reviews, records, documents, remote = [], remoteNote = null, local = [], localNote = null, tabSource = null } = changeView.value;
 
   const tabs = [
-    spec.ok ? { id: 'spec', label: TAB_LABELS.spec, ok: true, reason: null, source: null, note: spec.note ?? null, entries: specEntries(spec.value), orphans: orphanEntries(spec.orphans) } : failedTab('spec', spec),
-    sdd.ok ? { id: 'sdd', label: TAB_LABELS.sdd, ok: true, reason: null, source: null, note: null, entries: sddEntries(sdd.value, documents), slices: sliceEntries(sdd.slices) } : failedTab('sdd', sdd),
-    tasks.ok ? { id: 'tasks', label: TAB_LABELS.tasks, ok: true, reason: null, source: null, header: progressLabel(tasks.progress, SOURCE.head), note: tasks.note ?? null, entries: taskEntries(tasks.value) } : failedTab('tasks', tasks),
+    spec.ok ? { id: 'spec', label: TAB_LABELS.spec, ok: true, reason: null, source: null, note: spec.note ?? null, entries: specEntries(spec.value), orphans: orphanEntries(spec.orphans), ...fromOf(spec) } : failedTab('spec', spec),
+    sdd.ok ? { id: 'sdd', label: TAB_LABELS.sdd, ok: true, reason: null, source: null, note: null, entries: sddEntries(sdd.value, documents), slices: sliceEntries(sdd.slices), ...fromOf(sdd) } : failedTab('sdd', sdd),
+    tasks.ok ? { id: 'tasks', label: TAB_LABELS.tasks, ok: true, reason: null, source: null, header: progressLabel(tasks.progress, tasks.progressSource ?? SOURCE.head), note: tasks.note ?? null, entries: taskEntries(tasks.value), ...fromOf(tasks) } : failedTab('tasks', tasks),
     workingMemory.ok
       ? { id: 'workingMemory', label: TAB_LABELS.workingMemory, ok: true, reason: null, source: null, note: null, entries: workingMemoryEntries(workingMemory.value) }
       : failedTab('workingMemory', workingMemory),
@@ -415,5 +424,5 @@ export function buildDrawerModel(changeView) {
     records.ok ? { id: 'records', label: TAB_LABELS.records, ok: true, reason: null, source: null, note: null, entries: recordsEntries(records.value) } : failedTab('records', records),
   ];
 
-  return { ok: true, value: { issue, changeDir, tabs, remote: remote.map(remoteBlockModel), remoteNote, local: local.map(localBlockModel), localNote } };
+  return { ok: true, value: { issue, changeDir, tabs, remote: remote.map(remoteBlockModel), remoteNote, local: local.map(localBlockModel), localNote, tabSource } };
 }

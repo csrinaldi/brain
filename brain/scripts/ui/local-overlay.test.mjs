@@ -402,7 +402,7 @@ const withOrigin = (snapshot, branch, sha) => ({
   remoteChanges: { ok: true, value: { base: 'origin/main', branches: [{ branch, sha, tipAt: '2026-10-01T00:00:00Z', author: 'Ada Lovelace', kind: 'grammar', issue: 7, pr: null, change: { ok: false, state: 'missing', reason: 'no change dir' }, resume: { state: 'missing' } }], unjoined: [], hidden: { base: 0, lane: 0, merged: 0 }, prsApplied: true, deferred: 0 } },
 });
 
-test('R883-9: local sits beside remote and the tabs keep reading the served HEAD', async (t) => {
+test('R883-9/R1276-2: with the change dir on main, local sits beside remote and the tabs keep reading the served HEAD', async (t) => {
   const repo = makeWorktreeRepo({ mainFiles: { [`${D7}/proposal.md`]: '# served\n' } });
   t.after(() => repo.dispose());
   repo.addWorktree('feat/issue-7-x', { [`${D7}/spec.md`]: '### R7-1: a\n#### Scenario: s\n- **WHEN** w\n- **THEN** t\n' });
@@ -428,6 +428,19 @@ test('R883-9: a block at its origin tip with nothing uncommitted is same-as-orig
 
   const other = buildChangeView({ root: repo.root, issue: 7, snapshot: withOrigin(await snapshotOf(repo.root, [7]), 'feat/issue-7-x', 'f'.repeat(40)), _run: gitRun(repo.root) }).value.local[0];
   assert.equal(other.state, 'read', 'a different origin sha is not the same as origin');
+});
+
+test('R1276-1: a same-as-origin block lists no documents, but hands the ones it read to the tab source', async (t) => {
+  const repo = makeWorktreeRepo();
+  t.after(() => repo.dispose());
+  const wt = repo.addWorktree('feat/issue-7-x', { [`${D7}/proposal.md`]: '# p\n' }, { commit: true });
+  const snapshot = withOrigin(await snapshotOf(repo.root, [7]), 'feat/issue-7-x', wt.head);
+
+  const read = readLocalBlocks({ run: gitRun(repo.root), snapshot, issue: 7, mainDocuments: {} });
+
+  assert.equal(read.local[0].state, 'same-as-origin');
+  assert.equal(read.local[0].documents, null);
+  assert.equal(read.held.get(wt.path).documents.proposal.text, '# p\n');
 });
 
 test('R883-9: at the origin tip, an unreadable document or a document deleted from the working tree keeps the block read, never same-as-origin', async (t) => {
@@ -490,10 +503,10 @@ test('R883-15: with no committed resume, the Working memory reason points at "on
 
 test('R883-2: an ok section with no entry is no block and no note; a section that could not be read says so; a loading one says nothing yet', () => {
   const read = (localWorktrees) => readLocalBlocks({ run: () => { throw new Error('no git'); }, snapshot: { localWorktrees }, issue: 7, mainDocuments: {} });
-  assert.deepEqual(read({ ok: true, value: { entries: [], hidden: {}, tier: 'working-tree' } }), { local: [], localNote: null });
+  assert.deepEqual(read({ ok: true, value: { entries: [], hidden: {}, tier: 'working-tree' } }), { local: [], localNote: null, held: new Map() });
   const down = read({ ok: false, reason: 'the worktree list could not be read: fatal: boom' });
   assert.deepEqual(down.local, []);
   assert.equal(down.localNote, "this machine's worktrees were not read: the worktree list could not be read: fatal: boom");
-  assert.deepEqual(read({ ok: false, pending: true, reason: 'loading open issues from the forge…' }), { local: [], localNote: null });
-  assert.deepEqual(read(undefined), { local: [], localNote: null }, 'a snapshot from an older server has no section');
+  assert.deepEqual(read({ ok: false, pending: true, reason: 'loading open issues from the forge…' }), { local: [], localNote: null, held: new Map() });
+  assert.deepEqual(read(undefined), { local: [], localNote: null, held: new Map() }, 'a snapshot from an older server has no section');
 });

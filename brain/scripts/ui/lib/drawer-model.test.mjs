@@ -656,3 +656,47 @@ test('#883 R883-11: localChangedFor is true for the selected issue\'s fingerprin
   assert.equal(localChangedFor({ ok: false, pending: true, reason: 'loading' }, base, 7), true, 'the section arriving with this issue\'s entries');
   assert.equal(localChangedFor({ ok: false, reason: 'x' }, { ok: false, reason: 'y' }, 7), false);
 });
+
+// ── #1276: the tabs say where their documents came from ─────────────────────
+
+const FIVE = { ok: true, value: { done: 3, total: 5 } };
+
+test('#1276 R1276-6: a worktree or origin source puts its from line on ok and failed tabs; a served-HEAD view has none', () => {
+  const sourced = buildDrawerModel(view({
+    spec: { ok: true, value: [], from: 'from worktree wt-a · uncommitted: new' },
+    sdd: { ok: false, reason: 'boom', from: 'from worktree wt-a · feat/x' },
+    tasks: { ok: true, value: [], progress: FIVE, from: 'from origin/feat/x @ aaaaaaaaaaaa' },
+  }));
+  const [spec, sdd, tasks] = sourced.value.tabs;
+  assert.equal(spec.from, 'from worktree wt-a · uncommitted: new');
+  assert.equal(sdd.from, 'from worktree wt-a · feat/x');
+  assert.equal(sdd.ok, false);
+  assert.equal(tasks.from, 'from origin/feat/x @ aaaaaaaaaaaa');
+
+  const served = buildDrawerModel(view({ tasks: { ok: true, value: [], progress: FIVE } }));
+  for (const tab of served.value.tabs) assert.equal('from' in tab, false, `${tab.id} has no from key`);
+  assert.equal(served.value.tabs[2].header, '3 / 5 tasks done · at HEAD');
+});
+
+test('#1276 R1276-6: the tasks header names its source: working tree for a worktree, at origin/<branch> for origin', () => {
+  const header = (progressSource) => buildDrawerModel(view({ tasks: { ok: true, value: [], progress: FIVE, progressSource } })).value.tabs[2].header;
+  assert.equal(header('working tree'), '3 / 5 tasks done · working tree');
+  assert.equal(header('at origin/feat/x'), '3 / 5 tasks done · at origin/feat/x');
+});
+
+test('#1276 R1276-8: an sdd row uses its own detail when the route sent one, and present/missing otherwise', () => {
+  const rows = buildDrawerModel(view({
+    sdd: { ok: true, value: [
+      { stage: 'design', file: 'design.md', present: false, detail: 'uncommitted: deleted (committed on feat/x, missing from the working tree)', source: { path: 'a' } },
+      { stage: 'spec', file: 'spec.md', present: true, source: { path: 'b' } },
+      { stage: 'tasks', file: 'tasks.md', present: false, source: { path: 'c' } },
+    ] },
+  })).value.tabs[1].entries;
+  assert.deepEqual(rows.map((r) => r.detail), ['uncommitted: deleted (committed on feat/x, missing from the working tree)', 'present', 'missing']);
+});
+
+test('#1276 D92: the model carries the tab source for the empty-state line, and null when the route sent none', () => {
+  const tabSource = { kind: 'worktree', leaf: 'wt-a', branch: 'feat/x', dir: 'd', label: 'worktree wt-a' };
+  assert.deepEqual(buildDrawerModel(view({ tabSource })).value.tabSource, tabSource);
+  assert.equal(buildDrawerModel(view()).value.tabSource, null);
+});

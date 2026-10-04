@@ -26,6 +26,10 @@
 // drawer also shows an open issue's change dir in a LINKED worktree, "on this
 // machine". That read lives in `local-overlay.mjs`, never here: this file keeps no
 // `node:fs` import, and no artifact is read from the SERVED ROOT's working tree.
+//
+// WHICH documents the Spec, SDD and Tasks tabs show follows the lookup order (#1276, amends
+// #883 D76): the served HEAD, else the one local worktree that holds the change dir, else the one
+// origin branch that holds it (`pickTabSource`). The worktree read stays in `local-overlay.mjs`.
 
 import { gitRun, gitErrorLine } from './git-run.mjs';
 
@@ -35,10 +39,10 @@ import { parseBlame } from './lib/blame.mjs';
 import { shapeResumeView, resumeWording } from './lib/resume-view.mjs';
 import { parseFrontmatter } from '../memory/lib/resume-frontmatter.mjs';
 import { validateResume } from '../memory/lib/resume-schema.mjs';
-import { LIFECYCLE_STAGES, ARTEFACT_FILE } from '../lib/sdd-layout.mjs';
+import { LIFECYCLE_STAGES, ARTEFACT_FILE, parseSliceScopes } from '../lib/sdd-layout.mjs';
 import { changeDirNames, parseTreeListing, pickChangeDir } from '../lib/git-tree.mjs';
 import { prUrl } from './lib/forge-url.mjs';
-import { documentWording, NO_CHANGE_BRANCH } from './lib/drawer-model.mjs';
+import { documentWording, localRowDetail, localStateWording, NO_CHANGE_BRANCH } from './lib/drawer-model.mjs';
 import { readLocalBlocks } from './local-overlay.mjs';
 import { parseCanonicalIssueBranch } from '../lib/branch-grammar.mjs';
 
@@ -61,74 +65,148 @@ function noChangeDirTab(issue) {
   return { ok: false, reason: `no change dir at ${path}`, source: { path } };
 }
 
+/** The three tabs' sources that hold no documents: the walk found nothing, refused to choose, or could not read a step (#1276 D86). */
+const isUnsourced = (source) => source.kind === 'none' || source.kind === 'refused';
+
+/** A tab of a source that holds no change dir: the source said why, and the tab names the glob an operator can look for. */
+function sourceFailure(source, issue) {
+  return { ok: false, reason: source.reason, source: { path: expectedChangeDirGlob(issue) } };
+}
+
+/** A path as a tab cites it: plain at the served HEAD, `<ref>:<path>` from anywhere else, so no card cites a main path it was not read from. */
+const docPath = (source, path) => (source.kind === 'head' ? path : `${source.ref}:${path}`);
+
 /** The tab's own said reason for a document that is not a readable text, or `null` when it is. */
-function documentFailure(doc, head) {
+function documentFailure(doc, source, file) {
+  if (source.kind === 'worktree') {
+    if (!doc) return `${file} is not in ${source.ref}`;
+    if (doc.state === 'deleted') return localStateWording(doc, source.branch);
+    if (doc.state === 'unreadable') return doc.reason;
+    return null;
+  }
   if (!doc) return null;
-  if (doc.state === 'missing') return `${doc.path} is not committed at HEAD (${String(head ?? '').slice(0, 12)})`;
-  if (doc.state === 'unreadable') return `${doc.path} could not be read at HEAD: ${doc.reason}`;
+  const sha = String(source.sha ?? source.head ?? '').slice(0, 12);
+  if (doc.state === 'missing') return `${doc.path} is not committed at ${source.ref} (${sha})`;
+  if (doc.state === 'unreadable') return `${doc.path} could not be read at ${source.ref}: ${doc.reason}`;
   return null;
 }
+
+/** The `from` line of a tab (#1276 D92): only a worktree or an origin source names itself; the served HEAD adds nothing. */
+function withFrom(tab, source, detail) {
+  if (source.kind === 'worktree') return { ...tab, from: `from ${source.ref} · ${detail}` };
+  if (source.kind === 'origin') return { ...tab, from: `from ${source.ref} @ ${source.sha.slice(0, 12)}` };
+  return tab;
+}
+
+/** What a worktree document's state says in the `from` line: #883's wording, or that the file is not there. */
+const stateDetail = (source, doc) => (doc ? localStateWording(doc, source.branch) : 'not in this worktree');
 
 /** A truncated document still feeds its tab; the tab says the cards or items cover only the read part. */
 function truncationNote(doc, what) {
   return doc.state === 'truncated' ? `truncated at ${DOCUMENT_CAP} bytes; ${what} cover the read part` : null;
 }
 
-function buildSpecTab({ documents, head, dir, issue }) {
-  if (!dir) return noChangeDirTab(issue);
-  const doc = documents.spec;
-  const failure = documentFailure(doc, head);
-  if (failure) return { ok: false, reason: failure, source: { path: doc.path } };
-  const parsed = parseSpecCards({ text: doc.text, path: doc.path });
+function buildSpecTab({ source, issue }) {
+  if (isUnsourced(source)) return sourceFailure(source, issue);
+  const file = STAGE_FILE.spec;
+  const doc = source.documents.spec;
+  const detail = stateDetail(source, doc);
+  const failure = documentFailure(doc, source, file);
+  if (failure) return withFrom({ ok: false, reason: failure, source: { path: docPath(source, doc?.path ?? `${source.dir}/${file}`) } }, source, detail);
+  const parsed = parseSpecCards({ text: doc.text, path: docPath(source, doc.path) });
   const note = truncationNote(doc, 'cards');
-  return parsed.ok && note ? { ...parsed, note } : parsed;
+  return withFrom(parsed.ok && note ? { ...parsed, note } : parsed, source, detail);
 }
+
+const UNCOMMITTED_SHA = /^0+$/;
 
 /**
  * `tasks-list.mjs` already never drops a line for missing attribution (it
  * renders `actor: 'unknown'`) — this wraps EVERY item with its own
  * `attribution` leaf so a blame failure is SAID per row (source-guard's
  * "never empty-on-failure"), not silently folded into "unknown", while the
- * checklist itself still renders in full either way.
+ * checklist itself still renders in full either way. `uncommitted` is
+ * `{reason, all}`: a row blamed to the all-zero sha, or every row when `all`,
+ * says it is uncommitted instead of carrying git's placeholder author (#1276 D91).
  */
-function attachAttribution(items, blame) {
-  return items.map((item) => ({
-    ...item,
-    attribution: blame.ok
-      ? { ok: true, value: { actor: item.actor, ts: item.ts } }
-      : { ok: false, reason: blame.reason },
-  }));
+function attachAttribution(items, blame, uncommitted = null) {
+  return items.map((item) => {
+    if (uncommitted && (uncommitted.all || (blame?.ok && UNCOMMITTED_SHA.test(blame.value[item.line]?.sha ?? '')))) {
+      return { ...item, attribution: { ok: false, reason: uncommitted.reason } };
+    }
+    return {
+      ...item,
+      attribution: blame.ok
+        ? { ok: true, value: { actor: item.actor, ts: item.ts } }
+        : { ok: false, reason: blame.reason },
+    };
+  });
 }
 
-function buildTasksTab({ documents, head, run, dir, issue }) {
-  if (!dir) return noChangeDirTab(issue);
-  const doc = documents.tasks;
-  const failure = documentFailure(doc, head);
-  if (failure) return { ok: false, reason: failure, source: { path: doc.path } };
+/**
+ * The one blame of the Tasks tab, run on the served root's git dir by sha (D91). A worktree's
+ * modified `tasks.md` is blamed at the worktree's head with the bytes already read as the final
+ * image (`--contents -`, on stdin): git marks the lines that differ with the all-zero sha, and no
+ * file under a worktree is ever named. An untracked one has nothing to blame: `null`, no spawn.
+ */
+function blameTasks({ source, doc, path, run }) {
+  if (source.kind === 'worktree' && doc.overlay === 'new') return null;
+  try {
+    const text = source.kind === 'worktree' && doc.overlay === 'modified'
+      ? run('git', ['blame', '--porcelain', '--contents', '-', source.head, '--', path], { input: doc.text })
+      : run('git', ['blame', '--porcelain', source.kind === 'head' ? 'HEAD' : source.sha ?? source.head, '--', path]);
+    return parseBlame({ text });
+  } catch (err) {
+    return { ok: false, reason: gitErrorLine(err) };
+  }
+}
+
+/** Where the Tasks tab's count names its read from: the served HEAD's own words stay as they were. */
+const PROGRESS_SOURCE = { worktree: () => 'working tree', origin: (source) => `at ${source.ref}` };
+const READ_AT = { head: 'at HEAD', worktree: 'in the working tree', origin: (source) => `at ${source.ref}` };
+
+function buildTasksTab({ source, run, issue }) {
+  if (isUnsourced(source)) return sourceFailure(source, issue);
+  const file = STAGE_FILE.tasks;
+  const doc = source.documents.tasks;
+  const detail = stateDetail(source, doc);
+  const failure = documentFailure(doc, source, file);
+  if (failure) return withFrom({ ok: false, reason: failure, source: { path: docPath(source, doc?.path ?? `${source.dir}/${file}`) } }, source, detail);
   const path = doc.path;
 
-  let blame;
-  try {
-    // Committed version only — `HEAD` is mandatory (R881-3): never the
-    // working tree, never the index.
-    const blameText = run('git', ['blame', '--porcelain', 'HEAD', '--', path]);
-    blame = parseBlame({ text: blameText });
-  } catch (err) {
-    blame = { ok: false, reason: gitErrorLine(err) };
-  }
+  // Committed version only at the served HEAD — `HEAD` is mandatory (R881-3): never the working tree, never the index.
+  const blame = blameTasks({ source, doc, path, run });
 
-  const attribution = blame.ok
+  const attribution = blame?.ok
     ? Object.entries(blame.value).map(([line, a]) => ({ line: Number(line), actor: a.author ?? 'unknown', ts: a.authorTime ?? null }))
     : [];
 
-  const parsed = parseTasksList({ text: doc.text, path, attribution });
-  if (!parsed.ok) return parsed;
+  const parsed = parseTasksList({ text: doc.text, path: docPath(source, path), attribution });
+  if (!parsed.ok) return withFrom(parsed, source, detail);
   const note = truncationNote(doc, 'items');
-  // #1199 D52: the drawer counts its own HEAD text. A count over a truncated read is not a total.
+  const readAt = typeof READ_AT[source.kind] === 'function' ? READ_AT[source.kind](source) : READ_AT[source.kind];
+  // #1199 D52: the drawer counts its own text. A count over a truncated read is not a total.
   const progress = doc.state === 'truncated'
-    ? { ok: false, code: 'truncated', reason: `${path} is larger than ${DOCUMENT_CAP} bytes at HEAD, so no total is known` }
+    ? { ok: false, code: 'truncated', reason: `${path} is larger than ${DOCUMENT_CAP} bytes ${readAt}, so no total is known` }
     : countTasks(doc.text);
-  return { ok: true, value: attachAttribution(parsed.value, blame), progress, ...(note ? { note } : {}) };
+  const uncommitted = source.kind === 'worktree' ? { reason: `uncommitted in ${source.ref}: no blame`, all: doc.overlay === 'new' } : null;
+  const progressSource = PROGRESS_SOURCE[source.kind]?.(source);
+  return withFrom({
+    ok: true,
+    value: attachAttribution(parsed.value, blame ?? { ok: false, reason: uncommitted?.reason }, uncommitted),
+    progress,
+    ...(note ? { note } : {}),
+    ...(progressSource ? { progressSource } : {}),
+  }, source, detail);
+}
+
+/**
+ * The kept worktrees of `issue` whose change dir is present: the ONE predicate of #883's W2 tie-break,
+ * shared by `resolveBranch` (which branch) and `pickTabSource` (which documents), so the two cannot disagree (#1276 D87).
+ */
+export function holdingWorktrees(snapshot, issue) {
+  const entries = snapshot?.localWorktrees?.ok ? snapshot.localWorktrees.value.entries : [];
+  return entries.filter((e) => e.issue === issue && e.dirState === 'present');
 }
 
 /**
@@ -155,8 +233,7 @@ function resolveBranch({ run, snapshot, issue }) {
   // #883 W2: several names. The worktree that holds this issue's change dir is
   // the one the maintainer is working in; the snapshot already says which
   // (no extra spawn). Two such worktrees stay ambiguous and are named.
-  const entries = snapshot?.localWorktrees?.ok ? snapshot.localWorktrees.value.entries : [];
-  const holding = entries.filter((e) => e.issue === issue && e.dirState === 'present' && names.includes(e.branch));
+  const holding = holdingWorktrees(snapshot, issue).filter((e) => names.includes(e.branch));
   const held = [...new Set(holding.map((e) => e.branch))];
   if (held.length === 1) return { ok: true, branch: held[0] };
   const named = held.length > 1 ? `; held by worktrees ${holding.map((e) => e.leaf).join(', ')}` : '';
@@ -366,9 +443,8 @@ function readResumeDocument({ run, resolved, issue }) {
  * `STAGE_VOCAB` word/mark: that derivation is the SDD MODE's own concern
  * (every change, at once); a single row's own tab draws the raw fact.
  */
-/** The declared slice plan of one change, or its own said reason. */
-function sliceTab(row, dir) {
-  const scopes = row.sliceScopes;
+/** The declared slice plan of one change, or its own said reason. `scopes` is a snapshot `sliceScopes` field. */
+function sliceTab(scopes, path) {
   if (!scopes || typeof scopes !== 'object') return { ok: false, reason: 'no slice plan is declared in this change\'s tasks.md' };
   if (scopes.ok !== true) return { ok: false, reason: scopes.reason };
   const value = scopes.value ?? [];
@@ -380,22 +456,42 @@ function sliceTab(row, dir) {
       slice: slice.slice,
       claims: [...(slice.claims ?? [])],
       terminalPr: slice.terminal_pr ?? null,
-      source: { path: dir },
+      source: { path },
     })),
   };
 }
 
-function buildSddTab({ snapshot, issue, dir }) {
-  // `dir` is `findChangeDir(snapshot, issue)` — the SAME `snapshot.changes
-  // .value.find(c => c.issue === issue)` predicate this function would
-  // otherwise re-run, over the same (already-checked-ok) `snapshot.changes`
-  // section. `!dir` already covers "the changes section could not be read"
-  // and "no row for this issue" — `readChanges` never yields a row without
-  // a `dir`, so a second, differently-worded reason for the same cause
-  // would only ever be a dead branch (found by cold review of #1008/PR6:
-  // the row-lookup branch below was unreachable — `noChangeDirTab` always
-  // fired first). One reason, said once, shared with the spec/tasks tabs.
-  if (!dir) return noChangeDirTab(issue);
+/** `snapshot.changes`'s `sliceScopes` shape, from a tasks.md text the drawer read itself. */
+function sliceScopesOf(tasksDoc) {
+  if (typeof tasksDoc?.text !== 'string') return { ok: false, reason: 'tasks.md was not read, so no slice plan is known' };
+  const parsed = parseSliceScopes(tasksDoc.text);
+  return parsed.refusal ? { ok: false, reason: parsed.refusal } : { ok: true, value: parsed.scopes };
+}
+
+const ARCHIVE_NOT_READ = 'not read outside the served root';
+
+/** The SDD tab of a worktree or origin source: a stage is present when the source holds its document; `archive` is never read there (R1276-8). */
+function buildSourcedSddTab(source) {
+  const rows = SDD_STAGES.map((stage) => {
+    const doc = source.documents[stage];
+    const base = { stage, file: STAGE_FILE[stage], source: { path: docPath(source, `${source.dir}/${STAGE_FILE[stage]}`) } };
+    if (stage === 'archive') return { ...base, present: false, detail: ARCHIVE_NOT_READ };
+    const present = Boolean(doc) && doc.state !== 'missing' && doc.state !== 'deleted';
+    return { ...base, present, ...(source.kind === 'worktree' ? { detail: doc ? localRowDetail(doc, source.branch) : 'missing' } : {}) };
+  });
+  const detail = source.kind === 'worktree' ? source.branch : null;
+  return withFrom({ ok: true, value: rows, slices: sliceTab(sliceScopesOf(source.documents.tasks), docPath(source, source.dir)) }, source, detail);
+}
+
+function buildSddTab({ snapshot, issue, source }) {
+  // `source.dir` is `findChangeDir(snapshot, issue)` at the served HEAD — the SAME `snapshot.changes
+  // .value.find(c => c.issue === issue)` predicate this function would otherwise re-run, over the same
+  // (already-checked-ok) `snapshot.changes` section. A source with no documents already covers "the changes
+  // section could not be read" and "no row for this issue" (found by cold review of #1008/PR6: the row-lookup
+  // branch below was unreachable). One reason, said once, shared with the spec/tasks tabs.
+  if (isUnsourced(source)) return sourceFailure(source, issue);
+  if (source.kind !== 'head') return buildSourcedSddTab(source);
+  const { dir } = source;
   const row = snapshot.changes.value.find((c) => c.issue === issue);
   const artefacts = row.artefacts ?? {};
   return {
@@ -413,7 +509,7 @@ function buildSddTab({ snapshot, issue, dir }) {
     // `sliceScopes`; what a pull request actually did with it is not read
     // anywhere on this page, so the note says that rather than letting a
     // reader assume a drawn slice is a merged one.
-    slices: sliceTab(row, dir),
+    slices: sliceTab(row.sliceScopes, dir),
   };
 }
 
@@ -483,6 +579,64 @@ function readRemoteBlocks({ run, snapshot, issue, head }) {
   return { remote, remoteNote: note };
 }
 
+// ── #1276: the document tabs follow the lookup order ─────────────────────────
+
+const WORKTREES_NOT_READ = "this machine's worktrees were not read, so the tabs cannot fall back past them";
+
+/**
+ * pickTabSource() — the ONE document source of a drawer read (#1276 D86), walked in the lookup order of
+ * #883: the served HEAD, then the one worktree of this machine that holds the change dir, then the one
+ * origin branch that holds it. The first step that holds the change wins and a later step is never
+ * consulted. `none` says why nothing was found, or which step could not be read; `refused` says the walk
+ * would have had to choose between several holders. `documents` is always set, so the view's
+ * `documents` map keeps its shape (the served HEAD's nulls when no source holds the change).
+ */
+export function pickTabSource({ snapshot, issue, dir, head, headDocuments, local, held, remote }) {
+  const stop = (kind, reason) => ({ kind, reason, documents: headDocuments });
+  if (dir) return { kind: 'head', dir, ref: 'HEAD', head, documents: headDocuments };
+  const plain = noChangeDirTab(issue).reason;
+  // R1276-5: a `changes` section that could not be read is today's said reason, whatever lies below it.
+  if (!snapshot?.changes?.ok) return stop('none', plain);
+
+  const worktrees = snapshot.localWorktrees;
+  if (worktrees && !worktrees.ok) return stop('none', `${WORKTREES_NOT_READ}: ${worktrees.reason}`);
+  const holding = holdingWorktrees(snapshot, issue).sort((a, b) => a.path.localeCompare(b.path));
+  if (holding.length > 1) {
+    return stop('refused', `several worktrees hold the change dir for #${issue}: ${holding.map((e) => e.leaf).join(', ')}; the tabs read none of them — each is under "on this machine"`);
+  }
+  if (holding.length === 1) {
+    const [entry] = holding;
+    const read = held.get(entry.path);
+    if (!read) return stop('none', `the change dir in worktree ${entry.leaf} could not be read: ${local.find((b) => b.path === entry.path)?.reason ?? 'its documents were not read'}`);
+    return { kind: 'worktree', dir: entry.dir, leaf: entry.leaf, branch: entry.branch, head: entry.head, ref: `worktree ${entry.leaf}`, documents: read.documents };
+  }
+
+  const branches = snapshot.remoteChanges?.ok ? snapshot.remoteChanges.value.branches : [];
+  const holders = branches.filter((e) => e.issue === issue && e.change?.ok);
+  if (holders.length === 0) return stop('none', plain);
+  let chosen = holders[0];
+  if (holders.length > 1) {
+    // Q1 (ruled): the open PR's head branch, the same first precedence `resolveBranch` uses; no such holder, no choice.
+    const prBranch = snapshot.prs?.ok ? snapshot.prs.value.find((p) => p.issue === issue)?.headBranch : null;
+    chosen = holders.find((e) => prBranch && e.branch === prBranch);
+    if (!chosen) return stop('refused', `several origin branches hold the change dir for #${issue}: ${holders.map((e) => e.branch).join(', ')}; no open PR names one of them, so the tabs read none`);
+  }
+  const block = remote.find((b) => b.branch === chosen.branch && b.sha === chosen.sha);
+  if (block?.state === 'read') return { kind: 'origin', dir: block.dir, branch: chosen.branch, sha: chosen.sha, ref: `origin/${chosen.branch}`, documents: block.documents };
+  if (block?.state === 'capped') return stop('none', `origin/${chosen.branch} holds the change dir but is past the drawer's read cap of ${REMOTE_DRAWER_CAP}`);
+  return stop('none', plain);
+}
+
+/** The source as the page gets it: its kind and where it is, never a document's text. */
+function publicSource(source) {
+  switch (source.kind) {
+    case 'head': return { kind: 'head', dir: source.dir };
+    case 'worktree': return { kind: 'worktree', leaf: source.leaf, branch: source.branch, dir: source.dir, label: source.ref };
+    case 'origin': return { kind: 'origin', branch: source.branch, sha12: source.sha.slice(0, 12), dir: source.dir, label: `${source.ref} @ ${source.sha.slice(0, 12)}` };
+    default: return { kind: source.kind, reason: source.reason };
+  }
+}
+
 /**
  * buildChangeView() — the drawer's one composition. Server-side only (D11):
  * the six tabs' IO happens here, the pure shapers just attach `source`.
@@ -514,8 +668,10 @@ export function buildChangeView({ root, issue, snapshot, project = null, _read, 
   const { head, documents: headDocuments } = readHeadDocuments({ run, dir });
   const resolved = resolveBranch({ run, snapshot, issue });
   const resume = readResumeDocument({ run, resolved, issue });
-  const documents = { ...headDocuments, resume };
-  const localRead = readLocalBlocks({ run, snapshot, issue, mainDocuments: headDocuments });
+  const { held, ...localRead } = readLocalBlocks({ run, snapshot, issue, mainDocuments: headDocuments });
+  const remoteRead = readRemoteBlocks({ run, snapshot, issue, head });
+  const source = pickTabSource({ snapshot, issue, dir, head, headDocuments, local: localRead.local, held, remote: remoteRead.remote });
+  const documents = { ...source.documents, resume };
 
   return {
     ok: true,
@@ -523,13 +679,14 @@ export function buildChangeView({ root, issue, snapshot, project = null, _read, 
       issue,
       changeDir: dir,
       documents,
-      spec: buildSpecTab({ documents, head, dir, issue }),
-      sdd: buildSddTab({ snapshot, issue, dir }),
-      tasks: buildTasksTab({ documents, head, run, dir, issue }),
+      tabSource: publicSource(source),
+      spec: buildSpecTab({ source, issue }),
+      sdd: buildSddTab({ snapshot, issue, source }),
+      tasks: buildTasksTab({ source, run, issue }),
       workingMemory: buildWorkingMemoryTab({ resolved, resume, localResume: localRead.local.some((b) => b.documents?.resume) }),
       reviews: buildReviewsTab({ snapshot, project, issue }),
       records: buildRecordsTab({ snapshot, issue }),
-      ...readRemoteBlocks({ run, snapshot, issue, head }),
+      ...remoteRead,
       ...localRead,
     },
   };
