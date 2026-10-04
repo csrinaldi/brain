@@ -4,8 +4,10 @@
 // root) carry an APPROVED review from a `governance.owners` login who is not the PR author?
 //
 //   · not touched                         → pass
-//   · the base has no team config AND never had one (the ADOPTION PR, the founding decision) → pass, labelled, tier `lite`;
-//     a base that once had it and lost it is a REMOVAL: re-adding it needs an owner (fail closed above lite)
+//   · the base has no team config AND never had one, in a history that is not shallow (the ADOPTION PR, the founding
+//     decision) → pass, labelled, tier `lite`. A base that once had it and lost it is a REMOVAL: the owners are those of
+//     its LAST version (the commit before the deleting one) and the ordinary approval rule applies. A shallow history
+//     cannot tell the two apart, so it is an evidence failure, never a founding.
 //   · any touch of the root file counts — added, modified, deleted, renamed away or onto (the diff runs --no-renames)
 //   · solo maintainer, tier lite (ADR-0037 mode A): exactly one owner, and that owner is the author → pass,
 //     labelled the exception, never independent review
@@ -51,7 +53,7 @@ function normalizeOwners(owners) {
  * @param {'lite'|'standard'|'regulated'} [input.tier]
  * @returns {{ level: 'pass'|'warn'|'fail', reason: string, soloMaintainer?: true }}
  */
-export function evaluateTeamConfigReviewed({ changedFiles = [], reviews = [], author, owners, tier = 'standard', headSha, founding = false, removed = false } = {}) {
+export function evaluateTeamConfigReviewed({ changedFiles = [], reviews = [], author, owners, tier = 'standard', headSha, founding = false } = {}) {
   if (!changedFiles.includes(TEAM_CONFIG_PATH)) {
     return { level: 'pass', reason: `the change does not touch ${TEAM_CONFIG_PATH} — no owner review required.` };
   }
@@ -67,11 +69,6 @@ export function evaluateTeamConfigReviewed({ changedFiles = [], reviews = [], au
   }
 
   const list = normalizeOwners(owners);
-  const detectEarly = (reason) => (resolveGatePolicy(GATE, tier) === 'detection'
-    ? { level: 'warn', reason: `${reason} (detection at the "${tier}" tier — reported, not blocking.)` }
-    : { level: 'fail', reason });
-  // The base once had a team config and lost it: re-adding it is NOT a founding, and nobody on the base can approve it.
-  if (removed) return detectEarly(`${TEAM_CONFIG_PATH} changed but the team config was removed — re-adding it needs an owner.`);
   const isAuthor = (login) => author != null && login != null && lower(login) === lower(author);
 
   // ADR-0037 mode A: a solo maintainer at lite owns the config and authored the change. Said as the exception.
@@ -152,10 +149,16 @@ function defaultGitShow(cwd) {
   };
 }
 
-/** Whether `brain.config.json` has any history at or before `ref`. A failure throws, so the caller fails closed. */
-function defaultEverHadConfig(cwd) {
-  return (ref) =>
-    execFileSync('git', ['log', '--oneline', '-1', ref, '--', TEAM_CONFIG_PATH], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 30000 }).trim() !== '';
+const gitOpts = (cwd) => ({ cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 30000 });
+
+/** The commit that last touched `brain.config.json` at or before `ref`, or `''` when it has no history. Throws on failure. */
+function defaultLastTouchSha(cwd) {
+  return (ref) => execFileSync('git', ['log', '-1', '--format=%H', ref, '--', TEAM_CONFIG_PATH], gitOpts(cwd)).trim();
+}
+
+/** Whether the clone's history is truncated: a missing file cannot then be told from one that never existed. */
+function defaultIsShallow(cwd) {
+  return () => execFileSync('git', ['rev-parse', '--is-shallow-repository'], gitOpts(cwd)).trim() === 'true';
 }
 
 function defaultFetchReviews(repo, provider, { getVcs: getVcsFn = getVcs } = {}) {
@@ -167,35 +170,76 @@ function defaultFetchReviews(repo, provider, { getVcs: getVcsFn = getVcs } = {})
   };
 }
 
+/** A base config that could not be read or parsed: its tier (and owners) are unknown. */
+class BaseConfigUnreadable extends Error {}
+
+const parseConfig = (text) => {
+  try { return JSON.parse(text); } catch (e) { throw new BaseConfigUnreadable(`brain.config.json is not valid JSON (${e.message})`); }
+};
+
 /**
- * Gathers the evaluator's inputs. Owners and tier come from `git show <baseSha>:brain.config.json`; reviews are
- * fetched only when the config is touched.
+ * Gathers the evaluator's inputs, in this order:
+ *   1. the diff (rename detection off) — if the PR does not touch the root `brain.config.json` it passes at once and
+ *      the base config is never read, so an unreadable base cannot block a PR that does not touch it;
+ *   2. the BASE config (`git show <baseSha>:brain.config.json`) → owners and tier. Missing on the base: the ADOPTION
+ *      (founding) only if it never existed and the history is not shallow; if it once existed (REMOVED) the owners and
+ *      tier are those of its last version, the commit before the deleting one;
+ *   3. reviews (including for a removed config).
+ * `state.tier` is set the moment the tier is known so a later failure can be mapped through GATE_MATRIX.
  * @returns {Promise<{changedFiles: string[], reviews: Array, author: string, owners: string[], tier: string, headSha: string, founding: boolean, removed: boolean}>}
  */
-export async function gatherTeamConfigReviewedInputs({ baseSha, headSha, prNumber, repo, author, provider, cwd = process.cwd(), tier: tierOverride, deps = {} } = {}) {
+export async function gatherTeamConfigReviewedInputs({ baseSha, headSha, prNumber, repo, author, provider, cwd = process.cwd(), tier: tierOverride, deps = {}, state = {} } = {}) {
   const diffNameOnly = deps.diffNameOnly ?? defaultDiffNameOnly(cwd);
   const fetchReviews = deps.fetchReviews ?? defaultFetchReviews(repo, provider, deps);
   const gitShow = deps.gitShow ?? defaultGitShow(cwd);
+  const injected = [tierOverride, deps.tier].find((t) => t && TIERS.includes(t));
+  if (injected) state.tier = injected;
 
   const changedFiles = diffNameOnly(baseSha, headSha);
+  if (!changedFiles.includes(TEAM_CONFIG_PATH)) {
+    return { changedFiles, reviews: [], author, owners: [], tier: state.tier ?? 'standard', headSha, founding: false, removed: false };
+  }
+
   const text = gitShow(baseSha, TEAM_CONFIG_PATH);
-  // No team config on the base: this PR is the ADOPTION, the founding decision. Its tier is the new-consumer default
-  // (ADR-0026 Am8), never one its own head declares.
-  // FOUNDING only when the base has no team config AND has never had one: a base that lost it is a removal.
-  const missing = text == null;
-  const everHad = missing && changedFiles.includes(TEAM_CONFIG_PATH) ? (deps.everHadConfig ?? defaultEverHadConfig(cwd))(baseSha) : false;
-  const founding = missing && !everHad;
-  const removed = missing && everHad;
-  const baseConfig = founding ? {} : JSON.parse(text);
+  let baseConfig;
+  let founding = false;
+  let removed = false;
+  if (text != null) {
+    baseConfig = parseConfig(text);
+  } else {
+    // Missing on the base. A shallow history cannot say whether it ever existed: an evidence failure, never a founding.
+    // With no config to read, the tier a failure maps through is the default one (`standard`), the fail-closed side.
+    state.tier = state.tier ?? resolveTier({});
+    if ((deps.isShallow ?? defaultIsShallow(cwd))()) {
+      throw new Error('the clone history is shallow, so a missing brain.config.json cannot be told from one that was deleted — fetch the full history (GIT_DEPTH 0 / fetch-depth 0)');
+    }
+    const lastTouch = (deps.lastTouchSha ?? defaultLastTouchSha(cwd))(baseSha);
+    if (lastTouch) {
+      removed = true;
+      const prev = gitShow(`${lastTouch}^`, TEAM_CONFIG_PATH); // the version before the deleting commit
+      baseConfig = prev == null ? {} : parseConfig(prev);
+    } else {
+      // The ADOPTION PR: no owner can exist. Its tier is the new-consumer default (ADR-0026 Am8), never its own head's.
+      founding = true;
+      baseConfig = {};
+    }
+  }
   const owners = normalizeOwners(baseConfig?.governance?.owners);
-  const tier = tierOverride ?? deps.tier ?? (founding ? 'lite' : resolveTier(baseConfig));
-  const reviews = changedFiles.includes(TEAM_CONFIG_PATH) && !founding && !removed ? await fetchReviews(prNumber) : [];
+  const tier = injected ?? (founding ? 'lite' : resolveTier(baseConfig));
+  state.tier = tier;
+
+  const reviews = founding ? [] : await fetchReviews(prNumber);
   return { changedFiles, reviews, author, owners, tier, headSha, founding, removed };
 }
 
-/** Never throws. A failed read means the owner evidence CANNOT BE VERIFIED: fail where the gate is required. */
-function tierForFailure(deps) {
-  return deps.tier && TIERS.includes(deps.tier) ? deps.tier : 'standard';
+/** Best effort: the tier the base config declares, or `undefined` when it cannot be read or parsed. Never throws. */
+function readableBaseTier(baseSha, deps, cwd) {
+  try {
+    const text = (deps.gitShow ?? defaultGitShow(cwd))(baseSha, TEAM_CONFIG_PATH);
+    return text == null ? resolveTier({}) : resolveTier(JSON.parse(text));
+  } catch {
+    return undefined;
+  }
 }
 
 export async function runTeamConfigReviewedCheck(deps = {}) {
@@ -216,15 +260,23 @@ export async function runTeamConfigReviewedCheck(deps = {}) {
   }
 
   let inputs;
+  const state = {};
   try {
-    inputs = await gatherTeamConfigReviewedInputs({ baseSha, headSha, prNumber, repo, author, provider, cwd, deps });
+    inputs = await gatherTeamConfigReviewedInputs({ baseSha, headSha, prNumber, repo, author, provider, cwd, deps, state });
   } catch (err) {
-    const tier = tierForFailure(deps);
+    // The tier is whatever gather already learned, or the base's own when it can still be read. If it cannot be known
+    // the team config is unreadable and a PR that touches it deserves a closed door — there is no `standard` fallback.
+    let tier = err instanceof BaseConfigUnreadable ? undefined : state.tier;
+    if (tier === undefined && !(err instanceof BaseConfigUnreadable)) tier = readableBaseTier(baseSha, deps, cwd);
+    if (err instanceof BaseConfigUnreadable && deps.tier && TIERS.includes(deps.tier)) tier = deps.tier;
+    if (tier === undefined) {
+      return { level: 'fail', reason: `team-config-reviewed: team config on base unreadable — ${err.message} — failing closed: a change that touches ${TEAM_CONFIG_PATH} cannot be verified.` };
+    }
     const required = resolveGatePolicy(GATE, tier) === 'required';
     return {
       level: required ? 'fail' : 'warn',
       reason:
-        `team-config-reviewed: could not gather inputs (git or brain.config.json failure) — ${err.message}` +
+        `team-config-reviewed: could not gather inputs — ${err.message}` +
         (required ? ` — failing closed: this gate is required at the "${tier}" tier.` : ` (detection at the "${tier}" tier).`),
     };
   }

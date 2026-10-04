@@ -222,5 +222,10 @@ base-branch:
 team-config-reviewed:
   extends: .governance_mr_rules
   stage: test
+  variables:
+    # The full history: on GitLab's default shallow clone a config deleted before the depth horizon would look like it
+    # never existed, and its re-creation would pass as a founding. The checker also refuses to call a shallow
+    # history a founding, but the clone should not be shallow in the first place.
+    GIT_DEPTH: "0"
   script:
     - node brain/scripts/vcs/team-config-reviewed.mjs

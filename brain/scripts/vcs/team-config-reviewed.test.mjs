@@ -176,7 +176,7 @@ test('the tier is read from the base too: a PR cannot demote itself to lite to d
 test('a base with no brain.config.json (gitShow -> null) is the ADOPTION PR: no owners, founding, and the new-consumer tier lite — never standard', async () => {
   const inputs = await gatherTeamConfigReviewedInputs({
     baseSha: 'BASE', headSha: 'HEAD', prNumber: 7, repo: 'o/r', author: 'alice',
-    deps: { diffNameOnly: () => touched, fetchReviews: async () => [], gitShow: () => null, everHadConfig: () => false },
+    deps: { diffNameOnly: () => touched, fetchReviews: async () => [], gitShow: () => null, isShallow: () => false, lastTouchSha: () => '' },
   });
   assert.deepEqual(inputs.owners, []);
   assert.equal(inputs.founding, true);
@@ -188,7 +188,7 @@ test('the founding PR passes, labelled — not "no owner declared", and not inde
   const r = await runTeamConfigReviewedCheck({
     baseSha: 'BASE', headSha: 'HEAD', prNumber: 7, repo: 'o/r', author: 'alice',
     diffNameOnly: () => touched, fetchReviews: async () => [],
-    gitShow: () => null, everHadConfig: () => false,
+    gitShow: () => null, isShallow: () => false, lastTouchSha: () => '',
   });
   assert.equal(r.level, 'pass');
   assert.equal(r.founding, true);
@@ -342,34 +342,133 @@ test('rename away / delete: the deletion lists brain.config.json, so it is touch
 });
 
 test('re-creating the config after a deletion is NOT a founding: the base once had it', async () => {
-  const gather = (everHadConfig) => gatherTeamConfigReviewedInputs({
+  const gather = (lastTouchSha) => gatherTeamConfigReviewedInputs({
     baseSha: 'BASE', headSha: 'HEAD', prNumber: 7, repo: 'o/r', author: 'alice',
-    deps: { diffNameOnly: () => touched, fetchReviews: async () => [], gitShow: () => null, everHadConfig },
+    deps: { diffNameOnly: () => touched, fetchReviews: async () => [], gitShow: () => null, lastTouchSha, isShallow: () => false },
   });
-  const genuine = await gather(() => false);
+  const genuine = await gather(() => '');
   assert.equal(genuine.founding, true);
   assert.equal(genuine.removed, false);
-  const recreated = await gather(() => true);
+  const recreated = await gather(() => 'DEL');
   assert.equal(recreated.founding, false);
   assert.equal(recreated.removed, true);
 });
 
-test('a removed team config: fail closed at standard/regulated with the reason, warn at lite', () => {
-  for (const tier of ['standard', 'regulated']) {
-    const r = ev({ changedFiles: touched, reviews: [ok('bob')], author: 'alice', owners: [], tier, removed: true });
-    assert.equal(r.level, 'fail', tier);
-    assert.match(r.reason, /team config was removed — re-adding it needs an owner/);
-  }
-  const lite = ev({ changedFiles: touched, reviews: [], author: 'alice', owners: [], tier: 'lite', removed: true });
-  assert.equal(lite.level, 'warn');
-  assert.match(lite.reason, /team config was removed/);
+test('the genuine founding still passes end to end', async () => {
+  const r = await runTeamConfigReviewedCheck({
+    baseSha: 'BASE', headSha: 'HEAD', prNumber: 7, repo: 'o/r', author: 'alice',
+    diffNameOnly: () => touched, fetchReviews: async () => [], gitShow: () => null, lastTouchSha: () => '', isShallow: () => false,
+  });
+  assert.equal(r.founding, true);
 });
 
-test('end to end: a re-creation after a deletion fails at standard, and the genuine founding still passes', async () => {
-  const run = (everHadConfig) => runTeamConfigReviewedCheck({
-    baseSha: 'BASE', headSha: 'HEAD', prNumber: 7, repo: 'o/r', author: 'alice',
-    diffNameOnly: () => touched, fetchReviews: async () => [], gitShow: () => null, everHadConfig,
+// ── a REMOVED config: owners come from its last version; the normal approval rule applies ─────────────────────────
+
+const removedRun = (over = {}) => runTeamConfigReviewedCheck({
+  baseSha: 'BASE', headSha: 'HEAD', prNumber: 7, repo: 'o/r', author: 'alice',
+  diffNameOnly: () => touched, fetchReviews: async () => [ok('bob')],
+  isShallow: () => false, lastTouchSha: () => 'DEL',
+  gitShow: (ref) => (ref === 'BASE' ? null : baseConfig({ governance: { owners: ['alice', 'bob'], tier: 'standard' } })),
+  ...over,
+});
+
+test('removed then re-added: the owners are read from the version BEFORE the deleting commit (DEL^), and a previous owner\'s current approval passes', async () => {
+  const asked = [];
+  const r = await removedRun({
+    gitShow: (ref) => { asked.push(ref); return ref === 'BASE' ? null : baseConfig({ governance: { owners: ['alice', 'bob'], tier: 'standard' } }); },
   });
-  assert.equal((await run(() => true)).level, 'fail');
-  assert.equal((await run(() => false)).founding, true);
+  assert.deepEqual(asked, ['BASE', 'DEL^']);
+  assert.equal(r.level, 'pass');
+  assert.equal(r.founding, undefined);
+});
+
+test('removed then re-added with NO approval fails at standard', async () => {
+  assert.equal((await removedRun({ fetchReviews: async () => [] })).level, 'fail');
+});
+
+test('removed then re-added where the previous config had no owners: "no owner declared" — fail at standard, warn at lite', async () => {
+  const std = await removedRun({ gitShow: (ref) => (ref === 'BASE' ? null : baseConfig({ governance: { tier: 'standard' } })) });
+  assert.equal(std.level, 'fail');
+  assert.match(std.reason, /no owner declared/);
+  const lite = await removedRun({ gitShow: (ref) => (ref === 'BASE' ? null : baseConfig({ governance: { tier: 'lite' } })) });
+  assert.equal(lite.level, 'warn');
+});
+
+test('removed: the approver must still be a previous owner, on the current head, and not the author', async () => {
+  assert.equal((await removedRun({ fetchReviews: async () => [ok('carol')] })).level, 'fail');
+  assert.equal((await removedRun({ fetchReviews: async () => [ok('bob', 'OLD')] })).level, 'fail');
+  assert.equal((await removedRun({ fetchReviews: async () => [ok('alice')] })).level, 'fail');
+});
+
+// ── a shallow history can never classify a missing config as a founding ───────────────────────────────────────
+
+test('a shallow repository never yields a founding pass: a missing config cannot be classified, so it is an evidence failure', async () => {
+  const base = {
+    baseSha: 'BASE', headSha: 'HEAD', prNumber: 7, repo: 'o/r', author: 'alice',
+    diffNameOnly: () => touched, fetchReviews: async () => [], gitShow: () => null, lastTouchSha: () => '', isShallow: () => true,
+  };
+  const std = await runTeamConfigReviewedCheck(base);
+  assert.equal(std.level, 'fail');
+  assert.equal(std.founding, undefined);
+  assert.match(std.reason, /shallow/);
+  const lite = await runTeamConfigReviewedCheck({ ...base, tier: 'lite' });
+  assert.equal(lite.level, 'warn');
+  assert.equal(lite.founding, undefined);
+});
+
+// ── ordering and the tier on failures ─────────────────────────────────────────────────────────────────────────
+
+test('a PR that does not touch brain.config.json passes WITHOUT reading the base config: an unreadable base never blocks it', async () => {
+  let shown = 0;
+  const r = await runTeamConfigReviewedCheck({
+    baseSha: 'BASE', headSha: 'HEAD', prNumber: 7, repo: 'o/r', author: 'alice',
+    diffNameOnly: () => ['README.md'], fetchReviews: async () => [],
+    gitShow: () => { shown++; throw new Error('boom'); },
+  });
+  assert.equal(r.level, 'pass');
+  assert.equal(shown, 0);
+});
+
+test('a touching PR whose base config cannot be read or parsed has an unknown tier: fail closed "team config on base unreadable"', async () => {
+  const base = { baseSha: 'BASE', headSha: 'HEAD', prNumber: 7, repo: 'o/r', author: 'alice', diffNameOnly: () => touched, fetchReviews: async () => [] };
+  for (const gitShow of [() => '{not json', () => { throw new Error('boom'); }]) {
+    const r = await runTeamConfigReviewedCheck({ ...base, gitShow });
+    assert.equal(r.level, 'fail');
+    assert.match(r.reason, /team config on base unreadable/);
+  }
+});
+
+test('a gather failure with a READABLE base tier maps through GATE_MATRIX: warn at lite, fail at standard (no unconditional standard fallback)', async () => {
+  const run = (tier) => runTeamConfigReviewedCheck({
+    baseSha: 'BASE', headSha: 'HEAD', prNumber: 7, repo: 'o/r', author: 'alice',
+    diffNameOnly: () => touched, gitShow: () => baseConfig({ governance: { owners: ['bob'], tier } }),
+    fetchReviews: async () => { throw new Error('git timeout'); },
+  });
+  const lite = await run('lite');
+  assert.equal(lite.level, 'warn');
+  assert.match(lite.reason, /git timeout/);
+  assert.equal((await run('standard')).level, 'fail');
+  assert.equal((await run('regulated')).level, 'fail');
+});
+
+test('a diff failure (a git timeout) takes the tier from the base when it is readable: lite warns, standard fails; unreadable fails', async () => {
+  const run = (gitShow) => runTeamConfigReviewedCheck({
+    baseSha: 'BASE', headSha: 'HEAD', prNumber: 7, repo: 'o/r', author: 'alice',
+    diffNameOnly: () => { throw new Error('git timeout'); }, fetchReviews: async () => [], gitShow,
+  });
+  assert.equal((await run(() => baseConfig({ governance: { tier: 'lite' } }))).level, 'warn');
+  assert.equal((await run(() => baseConfig({ governance: { tier: 'standard' } }))).level, 'fail');
+  assert.equal((await run(() => { throw new Error('boom'); })).level, 'fail');
+});
+
+test('main wires deps.tier: an injected tier decides the exit code of a gather failure', async () => {
+  const run = (tier) => main({
+    baseSha: 'B', headSha: 'H', prNumber: 1, repo: 'o/r', author: 'alice', tier,
+    diffNameOnly: () => { throw new Error('git timeout'); },
+  });
+  const orig = console.log; console.log = () => {};
+  try {
+    assert.equal(await run('lite'), 0);
+    assert.equal(await run('standard'), 1);
+  } finally { console.log = orig; }
 });

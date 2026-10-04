@@ -324,3 +324,10 @@ test('team-config-reviewed job: reads only pull_request payload fields (valid un
     assert.match(m[1], /^(github\.event\.pull_request\.|github\.event\.repository\.default_branch|github\.token)/, `unexpected expression: ${m[1]}`);
   }
 });
+
+test('GitLab fragment: the team-config-reviewed job clones the full history (GIT_DEPTH "0") so a deleted config is not mistaken for a founding', () => {
+  const yaml = readFileSync(resolve(REPO_ROOT, 'brain/scripts/ci/gitlab-governance.yml'), 'utf8');
+  const job = yaml.slice(yaml.indexOf('\nteam-config-reviewed:'));
+  assert.match(job, /GIT_DEPTH: "0"/);
+  assert.match(job, /node brain\/scripts\/vcs\/team-config-reviewed\.mjs/);
+});
