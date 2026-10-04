@@ -67,9 +67,10 @@ function gitFor({ spec = SPEC_TEXT, tasks = TASKS_TEXT, files = {}, branches = {
 
 function makeSnapshot({
   changes = [{ id: 'issue-881-ui-server-canvas', issue: ISSUE, slug: 'ui-server-canvas', dir: CHANGE_DIR }],
-  prs = [], reviews = [], records = { ok: true, value: { records: [], duplicates: { ids: 0 } } },
+  prs = [], reviews = [], records = { ok: true, value: { records: [], duplicates: { ids: 0 } } }, localWorktrees,
 } = {}) {
   return {
+    ...(localWorktrees ? { localWorktrees } : {}),
     changes: { ok: true, value: changes },
     prs: { ok: true, value: prs },
     reviews: { ok: true, value: reviews },
@@ -97,18 +98,27 @@ test('#881: a change dir + an open PR resolves the branch from the PR, never cal
 
 // ── 2. a change dir, no PR, exactly one matching branch ─────────────────────
 
-test('#881: no PR but exactly one feat/issue-<N>-* branch resolves working memory from it', () => {
+test('#881: no PR but exactly one */issue-<N>[-*] branch resolves working memory from it', () => {
   const snapshot = makeSnapshot({ prs: [] });
   const run = gitFor({ resume: RESUME_TEXT });
   const result = buildChangeView({ issue: ISSUE, snapshot, _run: run });
   assert.equal(result.value.workingMemory.ok, true);
   assert.equal(result.value.workingMemory.value.current_slice.value, '3'); // parseFrontmatter scalars are always strings — resume-frontmatter.mjs does no type coercion
-  assert.deepEqual(run.calls.find((args) => args[0] === 'branch'), ['branch', '--list', `feat/issue-${ISSUE}-*`]);
+  assert.deepEqual(run.calls.find((args) => args[0] === 'branch'), ['branch', '--list', `*/issue-${ISSUE}`, `*/issue-${ISSUE}-*`]);
+});
+
+test('#883 R883-15: a fix/ branch, with or without a slug, resolves working memory like a feat/ one', () => {
+  for (const name of ['fix/issue-881-x', 'chore/issue-881']) {
+    const run = gitFor({ branches: { [name]: { commit: BRANCH_TIP, files: { [RESUME_PATH]: RESUME_TEXT } }, 'feat/issue-8810-other': { commit: BRANCH_TIP, files: {} } } });
+    const result = buildChangeView({ issue: ISSUE, snapshot: makeSnapshot({ prs: [] }), _run: run });
+    assert.equal(result.value.workingMemory.ok, true, name);
+    assert.equal(result.value.workingMemory.value.current_slice.source.path.startsWith(`${name}:`), true);
+  }
 });
 
 // ── 3. two matching branches ─────────────────────────────────────────────────
 
-test('#881: two matching feat/issue-<N>-* branches renders none, listing both, and never calls `git show`', () => {
+test('#881: two matching */issue-<N>[-*] branches renders none, listing both, and never calls `git show`', () => {
   const snapshot = makeSnapshot({ prs: [] });
   const run = gitFor({ branches: { [`feat/issue-${ISSUE}-a`]: { commit: BRANCH_TIP, files: {} }, [`feat/issue-${ISSUE}-b`]: { commit: BRANCH_TIP, files: {} } } });
   const result = buildChangeView({ issue: ISSUE, snapshot, _run: run });
@@ -116,6 +126,32 @@ test('#881: two matching feat/issue-<N>-* branches renders none, listing both, a
   assert.match(result.value.workingMemory.reason, new RegExp(`feat/issue-${ISSUE}-a`));
   assert.match(result.value.workingMemory.reason, new RegExp(`feat/issue-${ISSUE}-b`));
   assert.ok(!run.calls.some((args) => args[0] === 'show'), 'ambiguous branch resolution must never guess which one to read');
+});
+
+const localEntry = (branch, dirState = 'present') => ({ path: `/wt/${branch.replace(/\//g, '-')}`, leaf: branch.replace(/\//g, '-'), branch, head: BRANCH_TIP, issue: ISSUE, dirState, dir: dirState === 'present' ? CHANGE_DIR : null, capped: false });
+const localSection = (...entries) => ({ ok: true, value: { entries, hidden: {}, tier: 'working-tree' } });
+
+test('#883 W2: several matching branches resolve to the one a kept worktree holding the change dir has checked out', () => {
+  const feat = `feat/issue-${ISSUE}-x`;
+  const tracker = `feature/issue-${ISSUE}-y`;
+  const run = gitFor({ branches: { [feat]: { commit: BRANCH_TIP, files: { [RESUME_PATH]: RESUME_TEXT } }, [tracker]: { commit: BRANCH_TIP, files: {} } } });
+  const snapshot = makeSnapshot({ prs: [], localWorktrees: localSection(localEntry(feat), localEntry(tracker, 'missing')) });
+  const result = buildChangeView({ issue: ISSUE, snapshot, _run: run });
+  assert.equal(result.value.workingMemory.ok, true);
+  assert.equal(result.value.workingMemory.value.current_slice.source.path.startsWith(`${feat}:`), true);
+});
+
+test('#883 W2: several matching branches each held by a kept worktree with the change dir refuse, naming the worktrees', () => {
+  const a = `feat/issue-${ISSUE}-x`;
+  const b = `feature/issue-${ISSUE}-y`;
+  const run = gitFor({ branches: { [a]: { commit: BRANCH_TIP, files: {} }, [b]: { commit: BRANCH_TIP, files: {} } } });
+  const snapshot = makeSnapshot({ prs: [], localWorktrees: localSection(localEntry(a), localEntry(b)) });
+  const result = buildChangeView({ issue: ISSUE, snapshot, _run: run });
+  assert.equal(result.value.workingMemory.ok, false);
+  assert.match(result.value.workingMemory.reason, /more than one \*\/issue-881 branch/);
+  assert.match(result.value.workingMemory.reason, /feat-issue-881-x/);
+  assert.match(result.value.workingMemory.reason, /feature-issue-881-y/);
+  assert.ok(!run.calls.some((args) => args[0] === 'show'));
 });
 
 // ── 4. no change dir ─────────────────────────────────────────────────────────
@@ -186,13 +222,13 @@ test('#1199 R1199-4: a truncated tasks.md has no total, and its items still rend
 
 // ── 7. resume.md absent on the branch ────────────────────────────────────────
 
-test('#881: a resolved branch with no committed resume.md — the tab says so and points at slice 5 / #883', () => {
+test('#881: a resolved branch with no committed resume.md — the tab says so, and no longer promises a later slice (#883)', () => {
   const snapshot = makeSnapshot({ prs: [{ number: 5, title: 'x', headBranch: BRANCH, issue: ISSUE }] });
   const run = gitFor({ resume: null });
   const result = buildChangeView({ issue: ISSUE, snapshot, _run: run });
   assert.deepEqual(result.value.workingMemory, {
     ok: false,
-    reason: `no committed resume.md on ${BRANCH}; the local overlay arrives in slice 5 (#883)`,
+    reason: `no committed resume.md on ${BRANCH}`,
   });
 });
 
@@ -631,13 +667,13 @@ test('#1218 R1218-8: a failing `git branch --list` and an ambiguous listing stay
   assert.match(failing.documents.resume.reason, /git branch --list failed: fatal: not a git repository/);
   const two = viewOf(gitFor({ files: allArtifacts(), branches: { 'feat/issue-881-a': { commit: BRANCH_TIP, files: {} }, 'feat/issue-881-b': { commit: BRANCH_TIP, files: {} } } }), makeSnapshot());
   assert.equal(two.documents.resume.state, 'unreadable');
-  assert.match(two.documents.resume.reason, /more than one feat\/issue-881-\* branch/);
+  assert.match(two.documents.resume.reason, /more than one \*\/issue-881 branch in this clone/);
 });
 
 test('#1218 R1218-8: an unresolved branch (ambiguous or git failed) says the branch could not be resolved, on the Working memory tab and the SDD row', () => {
   const failing = viewOf(gitFor({ files: allArtifacts(), fail: { branch: 'fatal: not a git repository' } }), makeSnapshot());
   const two = viewOf(gitFor({ files: allArtifacts(), branches: { 'feat/issue-881-a': { commit: BRANCH_TIP, files: {} }, 'feat/issue-881-b': { commit: BRANCH_TIP, files: {} } } }), makeSnapshot());
-  for (const [view, reason] of [[failing, /git branch --list failed: fatal: not a git repository/], [two, /more than one feat\/issue-881-\* branch/]]) {
+  for (const [view, reason] of [[failing, /git branch --list failed: fatal: not a git repository/], [two, /more than one \*\/issue-881 branch in this clone/]]) {
     assert.equal(view.documents.resume.state, 'unreadable');
     assert.match(view.workingMemory.reason, /^resume\.md: the change branch could not be resolved: /);
     assert.match(view.workingMemory.reason, reason);

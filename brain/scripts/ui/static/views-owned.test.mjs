@@ -325,6 +325,7 @@ test('#1059 region 03: a node card carries the design\'s SDD strip, sourced from
   const m = APP_JS.match(/function renderNodeSdd\([^)]*\) \{[\s\S]*?\n}\n/);
   assert.ok(m, 'renderNodeSdd must exist in app.js');
   assert.match(m[0], /sddForIssue\(/, 'the change comes from the model, never a scan written into the page');
+  assert.match(m[0], /sddForIssue\(.*sectionOf\(state, 'localWorktrees'\)\)/, '#883 S1: the card is given the local section, so a worktree-only change is said');
   assert.match(m[0], /found\.reason/, 'an issue with no change directory says so rather than showing an empty strip');
   assert.match(m[0], /change\.dir/, 'the strip names where the change lives, as the design does');
 });

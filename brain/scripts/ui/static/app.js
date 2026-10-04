@@ -51,7 +51,7 @@ import { buildLaneModel, nodeSummaryFor, childrenOf } from './lib/lane-model.mjs
 import { SOURCE, progressLabel } from './lib/progress-view.mjs';
 import { hierarchyOf, epicRollup, rollupLabel } from './lib/rollup-model.mjs';
 import { issueUrl } from './lib/forge-url.mjs';
-import { buildDrawerModel } from './lib/drawer-model.mjs';
+import { buildDrawerModel, localChangedFor } from './lib/drawer-model.mjs';
 import { remoteBadges, remotePanel, tipAge } from './lib/remote-model.mjs';
 import { renderOffThread, timeoutNotice, FAILED_NOTICE, UNAVAILABLE_NOTICE } from './lib/render-budget.mjs';
 import { buildSddModel, sddForIssue, buildSlicePlan, STAGE_VOCAB } from './lib/sdd-model.mjs';
@@ -801,7 +801,7 @@ function renderClusteringBar() {
  */
 function renderNodeSdd(issue) {
   const strip = el('div', 'node-sdd');
-  const found = sddForIssue(sectionOf(state, 'changes'), issue);
+  const found = sddForIssue(sectionOf(state, 'changes'), issue, sectionOf(state, 'localWorktrees'));
   if (!found.ok) {
     strip.appendChild(el('span', 'node-sdd-none', found.reason));
     return strip;
@@ -1695,7 +1695,11 @@ function renderDrawer() {
     mounts.drawer.appendChild(said(model.reason));
     return;
   }
-  mounts.drawer.appendChild(el('p', 'note', model.value.changeDir ? `change dir: ${model.value.changeDir}` : 'no change dir for this issue in the read model'));
+  // #883 R883-9: with no change dir at the served HEAD and a worktree that has one, "on this machine" is the first thing read.
+  const localFirst = !model.value.changeDir && model.value.local.length > 0;
+  const emptyLine = localFirst ? 'the served HEAD has no change dir for this issue; this machine\'s worktrees follow' : 'no change dir for this issue in the read model';
+  mounts.drawer.appendChild(el('p', 'note', model.value.changeDir ? `change dir: ${model.value.changeDir}` : emptyLine));
+  if (localFirst) mounts.drawer.appendChild(renderLocalBlocks(model.value));
 
   const tabs = el('div', 'tabs');
   for (const tab of model.value.tabs) {
@@ -1706,6 +1710,7 @@ function renderDrawer() {
   }
   mounts.drawer.appendChild(tabs);
   mounts.drawer.appendChild(renderTab(model.value.tabs.find((t) => t.id === activeTab) ?? model.value.tabs[0]));
+  if (!localFirst) mounts.drawer.appendChild(renderLocalBlocks(model.value));
   mounts.drawer.appendChild(renderRemoteBlocks(model.value));
 }
 
@@ -1719,11 +1724,37 @@ function renderRemoteBlock(block) {
   card.appendChild(el('strong', 'remote-block-label', block.label));
   const byline = [block.byline, block.pr ? `PR #${block.pr.number}` : null, tipAge(block.tipAt, nowMs())].filter(Boolean).join(' \u00b7 ');
   card.appendChild(el('p', 'remote-byline', byline));
+  appendBlockRows(card, block);
+  return card;
+}
+
+/** What a remote block and a local block share: why it shows no documents, the resume in its words, then the document rows. */
+function appendBlockRows(card, block) {
   if (block.wording) card.appendChild(said(block.wording));
+  if (block.absentLine) card.appendChild(el('p', 'note', block.absentLine));
   if (block.resume.wording) card.appendChild(said(block.resume.wording));
   for (const item of block.resume.entries ?? []) card.appendChild(renderEntry(item));
   for (const item of block.documents ?? []) card.appendChild(renderEntry(item));
+}
+
+/**
+ * A worktree of the selected ticket on this machine (#883 D78): its label, the
+ * state of each document in words, the content stamp. Every string is set as text.
+ */
+function renderLocalBlock(block) {
+  const card = el('div', 'local-block');
+  card.appendChild(el('strong', 'local-block-label', block.label));
+  appendBlockRows(card, block);
   return card;
+}
+
+function renderLocalBlocks({ local, localNote }) {
+  const wrap = el('div', 'local-blocks');
+  if (local.length === 0 && !localNote) return wrap;
+  wrap.appendChild(el('h3', 'drawer-section-title', 'on this machine'));
+  if (localNote) wrap.appendChild(el('p', 'note', localNote));
+  for (const block of local) wrap.appendChild(renderLocalBlock(block));
+  return wrap;
 }
 
 function renderRemoteBlocks({ remote, remoteNote }) {
@@ -2226,8 +2257,12 @@ function subscribe() {
       // A frame this page cannot read is a band, not an exception swallowed
       // by the callback: every held value stays, the reason is on screen.
       if (!parsed.ok) { state = streamFailed(state, parsed.reason); render(); return; }
+      // #883 D80: the open drawer's local blocks are read from the working tree, so the one
+      // section frame that can change them is compared here, with `before` read ahead of applyFrame.
+      const localBefore = name === 'section' && parsed.frame.name === 'localWorktrees' ? sectionOf(state, 'localWorktrees') : null;
       state = applyFrame(state, name, parsed.frame);
       render();
+      if (localBefore !== null && selectedIssue !== null && localChangedFor(localBefore, sectionOf(state, 'localWorktrees'), selectedIssue)) loadChange(selectedIssue);
       // Q3/A2: a worktree's head moved, so the open drawer's Working memory
       // tab (`resume.md` read at the branch tip) is the one value the snapshot
       // diff cannot refresh on its own.

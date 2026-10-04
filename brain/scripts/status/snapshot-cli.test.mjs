@@ -10,6 +10,7 @@ import { makeSnapshotFixture as makeFixture } from '../__fixtures__/snapshot-tre
 import { makeRemoteFixture } from '../ui/test-support/git-remote-fixture.mjs';
 import { recordingGit } from '../ui/test-support/recording-git.mjs';
 import { gitRun } from '../ui/git-run.mjs';
+import { makeWorktreeRepo } from '../ui/test-support/git-worktree-fixture.mjs';
 
 const CLI = join(dirname(fileURLToPath(import.meta.url)), 'snapshot-cli.mjs');
 const NOW = '2026-09-13T00:00:00Z';
@@ -149,4 +150,38 @@ test('#1257: text mode prints a forge load line and a closed issues line', async
   const off = [];
   await main(['--no-closed', '--now', NOW, '--root', root], { say: (s) => off.push(s), vcs: listFake(), project: 'o/r' });
   assert.match(off.join('\n'), /^closed issues\s+not computed — --no-closed was given$/m);
+});
+
+// ── #883: the localWorktrees section, in the same bytes as the module ──────
+
+const openIssueVcs = (...numbers) => ({
+  issueList: async ({ state }) => (state === 'open' ? numbers.map((number) => ({ number, title: `issue ${number}`, labels: [], state: 'open', body: '' })) : []),
+  issueView: async ({ number }) => ({ number, body: '' }),
+  mrList: async () => [],
+  prReviews: async () => [],
+});
+
+test('#883 R883-1: text mode lists a local line with the worktree count, or its reason', async (t) => {
+  const repo = makeWorktreeRepo();
+  t.after(() => repo.dispose());
+  repo.addWorktree('feat/issue-7-x', { 'openspec/changes/issue-7-x/proposal.md': '# p\n' });
+  const lines = [];
+  assert.equal(await main(['--now', NOW, '--root', repo.root], { say: (s) => lines.push(s), vcs: openIssueVcs(7), project: 'o/r' }), 0);
+  assert.match(lines.join('\n'), /^local\s+1 worktree\(s\), 1 hidden/m);
+  const bare = [];
+  await main(['--now', NOW, '--root', makeFixture()], { say: (s) => bare.push(s) });
+  assert.match(bare.join('\n'), /^local\s+not computed — /m);
+});
+
+test('#883 R883-1: the JSON carries localWorktrees with its tier while the snapshot tier stays committed', async (t) => {
+  const repo = makeWorktreeRepo();
+  t.after(() => repo.dispose());
+  repo.addWorktree('feat/issue-7-x', { 'openspec/changes/issue-7-x/proposal.md': '# p\n' });
+  const lines = [];
+  await main(['--json', '--now', NOW, '--root', repo.root], { say: (s) => lines.push(s), vcs: openIssueVcs(7), project: 'o/r' });
+  const parsed = JSON.parse(lines.join('\n'));
+  assert.equal(parsed.localWorktrees.ok, true);
+  assert.equal(parsed.localWorktrees.value.tier, 'working-tree');
+  assert.equal(parsed.tier, 'committed', 'SNAPSHOT_TIER stays committed (R883-16)');
+  assert.deepEqual(parsed.localWorktrees.value.entries.map((e) => [e.issue, e.branch]), [[7, 'feat/issue-7-x']]);
 });

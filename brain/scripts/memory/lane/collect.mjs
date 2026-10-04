@@ -103,7 +103,9 @@ function _defaultLoadConfig(root) {
 }
 
 /**
- * Parse `git worktree list --porcelain` into `{path, bare, prunable}` stanzas.
+ * Parse `git worktree list --porcelain` into `{path, bare, prunable, head, branch, detached}`
+ * stanzas. `head`/`branch`/`detached` are additive (#883): existing callers read `path`, `bare`
+ * and `prunable` only.
  *
  * E3: a `locked` stanza is deliberately NOT tracked here. Per design.md's
  * scope table (:234), a locked worktree is INCLUDED in the scan by design —
@@ -118,8 +120,14 @@ export function parseWorktrees(stdout) {
   let current = null;
   for (const line of stdout.split('\n')) {
     if (line.startsWith('worktree ')) {
-      current = { path: line.slice('worktree '.length), bare: false, prunable: false };
+      current = { path: line.slice('worktree '.length), bare: false, prunable: false, head: null, branch: null, detached: false };
       stanzas.push(current);
+    } else if (current && line.startsWith('HEAD ')) {
+      current.head = line.slice('HEAD '.length);
+    } else if (current && line.startsWith('branch ')) {
+      current.branch = line.slice('branch '.length).replace(/^refs\/heads\//, '');
+    } else if (current && line === 'detached') {
+      current.detached = true;
     } else if (current && line === 'bare') {
       current.bare = true;
     } else if (current && line.startsWith('prunable')) {

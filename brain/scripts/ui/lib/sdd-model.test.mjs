@@ -306,6 +306,25 @@ test('#1059 region 03: sddForIssue returns a BUILT ROW, on the shape the snapsho
   assert.equal(unreadable.reason, 'the changes dir could not be read', "the section's own reason passes through");
 });
 
+test('#883 S1: a card whose change exists only in a local worktree says so instead of claiming none exists', () => {
+  const section = { ok: true, value: [FULL] };
+  const entry = (issue, leaf, dirState = 'present') => ({ issue, leaf, branch: `feat/issue-${issue}-x`, dirState, dir: dirState === 'present' ? `openspec/changes/issue-${issue}-x` : null });
+  const local = { ok: true, value: { entries: [entry(7, 'wt-seven'), entry(8, 'wt-eight', 'missing')], hidden: {}, tier: 'working-tree' } };
+
+  const only = sddForIssue(section, 7, local);
+  assert.equal(only.ok, false);
+  assert.equal(only.reason, 'change in worktree wt-seven (not on main)');
+  assert.doesNotMatch(only.reason, /no change directory/);
+
+  const two = sddForIssue(section, 7, { ok: true, value: { entries: [entry(7, 'wt-a'), entry(7, 'wt-b')] } });
+  assert.equal(two.reason, 'change in worktree wt-a and 1 more (not on main)');
+
+  assert.equal(sddForIssue(section, 8, local).reason, 'no change directory names issue #8', 'a worktree without the change dir does not claim one');
+  assert.equal(sddForIssue(section, 9, local).reason, 'no change directory names issue #9');
+  assert.equal(sddForIssue(section, 7, { ok: false, reason: 'x' }).reason, 'no change directory names issue #7', 'an unreadable local section changes nothing');
+  assert.equal(sddForIssue(section, 1, local).ok, true, 'the served root wins when it has the change');
+});
+
 // ── #1059 phase 10: the fourth mode is the project's slice plan ───────────
 // The design's fourth mode is "implementation slices": the chained PRs a
 // change declares, across the project. The seven-stage matrix that used to
