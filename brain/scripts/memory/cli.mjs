@@ -26,6 +26,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { hostname } from "node:os";
 
 import { t } from "../i18n/t.mjs";
+import { resolveProjectSlug } from "../lib/project-slug.mjs";
 import { formatDuplicateReport } from "./lib/duplicates.mjs";
 import { resolveMemoryBackend, MEMORY_BACKENDS, EXIT_UNDECLARED, EXIT_INVALID } from "./lib/backend-resolve.mjs";
 import {
@@ -536,6 +537,8 @@ if (op === "ship") {
       throw new Error("memory/cli: BRAIN_VCS_TEST_MODULE is set but empty — unset it to use the real port");
     }
     const config = loadBrainConfig();
+    // #1273: the repository identity has ONE resolver; an empty tracked slug falls back to the origin.
+    const { slug: project } = resolveProjectSlug({ config, cwd: memoryRoot });
     const rawToken = process.env[MEMORY_TOKEN_ENV]; // ONE read, in ONE place (A5)
     // (cold review, PR 2): a set-but-blank BRAIN_MEMORY_TOKEN reads as '' —
     // not null/undefined, so `identity` below would have stayed truthy and
@@ -557,7 +560,7 @@ if (op === "ship") {
         : await (await import("../vcs/cli.mjs")).getVcs({ config, identity });
     const result = await shipLane({
       root: memoryRoot,
-      project: config.project.slug,
+      project,
       tier: config.governance.tier,
       host: hostname(),
       date: new Date().toISOString().slice(0, 10),
@@ -597,7 +600,7 @@ if (op === "ship") {
         const { defaultGit } = await import("./lane/collect.mjs");
         sweep = await sweepLanes({
           root: memoryRoot,
-          project: config.project.slug,
+          project,
           tier: config.governance.tier,
           host: hostname(),
           today: result.date,

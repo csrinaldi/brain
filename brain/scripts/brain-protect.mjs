@@ -23,6 +23,7 @@ import { checkContexts, diffArmedChecks } from './vcs/governance-checks.mjs';
 import { resolveTier, tierParams } from './vcs/governance-tiers.mjs';
 import { t } from './i18n/t.mjs';
 import { readAxis } from './lib/axis-config.mjs';
+import { resolveProjectSlug, ProjectSlugError, describeSlugRefusal } from './lib/project-slug.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -124,14 +125,17 @@ export async function activateProtection({ _config = null, _providerModule = nul
   }
 
   const provider = readAxis(config, 'vcs').default;
-  const project = config?.project?.slug;
 
   if (!provider) {
     console.error('brain:protect: vcs.provider not set in brain.config.json');
     process.exit(1);
   }
-  if (!project) {
-    console.error('brain:protect: project.slug not set in brain.config.json');
+  let project;
+  try {
+    ({ slug: project } = resolveProjectSlug({ config }));
+  } catch (e) {
+    if (!(e instanceof ProjectSlugError)) throw e;
+    console.error(`brain:protect: ${await describeSlugRefusal(e)}`);
     process.exit(1);
   }
 

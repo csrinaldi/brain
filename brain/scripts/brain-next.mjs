@@ -10,6 +10,7 @@ import { readRecordObservations } from './memory/lib/store.mjs';
 import { findIssueInBranch } from './lib/branch-grammar.mjs';
 import { loadBrainConfigOrThrow } from './lib/brain-config.mjs';
 import { readAxis } from './lib/axis-config.mjs';
+import { projectSlugOrNull } from './lib/project-slug.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const NON_WORKING_BRANCHES = /^(main|master|dev|develop|release\/.*)$/;
@@ -83,7 +84,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   try {
     config = loadBrainConfigOrThrow(repoRoot);
     const provider = readAxis(config, 'vcs').default;
-    const project = config?.project?.slug;
+    const project = projectSlugOrNull({ config });
     if (provider && project) {
       providerModule = await import(`./axes/vcs/adapters/${provider}.mjs`);
       providerModule._project = project;

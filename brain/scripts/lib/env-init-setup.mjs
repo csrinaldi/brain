@@ -26,6 +26,7 @@ import { gitConfigGet } from './git-config.mjs';
 import { gitlabApiConfig } from '../vcs/ci-context.mjs';
 import { loadBrainConfigOrThrow } from './brain-config.mjs';
 import { readAxis } from './axis-config.mjs';
+import { projectSlugOrNull } from './project-slug.mjs';
 
 /**
  * The `governance:*` labels `.github/workflows/governance-postmerge.yml` files
@@ -208,7 +209,7 @@ async function runLabels() {
   } catch (e) { // surfaced: the cause becomes the pending reason, which the CLI prints and env:init lists as a pending step
     return report({ pending: { reason: e.message, next: 'npm run brain:env:init once vcs.provider is configured' }, created: [], existing: [], failed: [] });
   }
-  return report(await ensureLabels({ config, provider, project: config?.project?.slug ?? '', vcs }));
+  return report(await ensureLabels({ config, provider, project: projectSlugOrNull({ config }) ?? '', vcs }));
 }
 
 function report(r) {
