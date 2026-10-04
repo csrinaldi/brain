@@ -499,8 +499,9 @@ export function diagnoseAxes(args) {
       }
     }
 
-    // owners-undeclared (ADR-0040 section 5): nobody is named to own the team config. A warning, not an error: nothing
-    // refuses on it until the approval gate (slice 4) reads the list. An empty config is no team config to diagnose.
+    // owners-undeclared (ADR-0040 section 5): nobody is named to own the team config. A warning here, not an error: the
+    // `team-config-reviewed` gate (slice 4) is what refuses a change to the team config and reads this same list, at the
+    // tier's own policy (a failure at standard/regulated, a warning at lite). An empty config is no team config to diagnose.
     const owners = isObj(cfg.governance) && Array.isArray(cfg.governance.owners) ? cfg.governance.owners.filter((o) => nonEmpty(o) !== '') : [];
     if (Object.keys(cfg).length > 0 && owners.length === 0) {
       add('governance', 'owners-undeclared', 'warning', tr('axes.diagnose.ownersUndeclared'), tr('axes.diagnose.ownersUndeclared.fix'));
@@ -508,7 +509,7 @@ export function diagnoseAxes(args) {
 
     // codeowners-drift (ADR-0040 ratified point 8): CODEOWNERS is an optional mirror of governance.owners. A finding, never a gate;
     // `codeowners` is the file's text (the caller reads it), and with no rule for brain.config.json nothing is said.
-    const drift = codeownersDrift(codeowners, owners);
+    const drift = codeownersDrift(codeowners, owners, readAxis(cfg, 'vcs').default);
     if (drift !== null) {
       const list = (l) => (l.length === 0 ? '(none)' : l.join(', '));
       add('governance', 'codeowners-drift', 'warning',
