@@ -51,22 +51,6 @@ For the plan to close this class of gap, see the
   `npm run brain:config -- set memory.backend <engram|plainfiles>` in the tree you commit
   from.
 
-- **`session:start` / `day:start` call engram's operations by name instead of the
-  configured backend's lifecycle verb.**
-  ([#1115](https://github.com/csrinaldi/brain/issues/1115)) On `MEMORY_BACKEND=plainfiles`,
-  both report `backend 'plainfiles' does not implement op 'import'` and **no memory
-  context reaches the agent** at session start. **Workaround:** none that restores the
-  context; `brain:memory:pull` still works to sync records to disk.
-
-- **On `plainfiles`, `brain:memory:pull` and the `post-merge` hook print an `import` refusal.**
-  ([#1189](https://github.com/csrinaldi/brain/issues/1189)) The `post-merge` git hook, which
-  a `git pull` fires when it integrates commits (including the one inside `brain:memory:pull`),
-  calls `memory/cli.mjs import`, which `plainfiles` does not implement, so those pulls print
-  `memory/cli: backend 'plainfiles' does not implement op 'import'`. The hook is
-  non-blocking and `brain:memory:pull` still exits 0 and verifies the records. The same call is
-  behind the `session:start` / `day:start` entry below (#1115). **Workaround:** none needed for
-  correctness; ignore the line.
-
 - **`search` serves a superseded record next to its correction, both unmarked.**
   ([#1117](https://github.com/csrinaldi/brain/issues/1117)) The supersession link
   exists in the data (`supersedes`) but isn't surfaced to the reader, so a stale claim

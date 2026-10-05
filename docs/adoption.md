@@ -190,7 +190,7 @@ declares it with `set memory.default` in a PR. Precedence, first wins: process e
 `brain.config.json` (the team). When two disagree the CLI says which one won.
 
 **If nothing declares a backend, memory commands refuse** and name this fix instead of
-guessing `engram`: every op that consults a backend (`pull`, `import`, `index`, `share`,
+guessing `engram`: every op that consults a backend (`pull`, `hydrate` and its deprecated alias `import`, `index`, `share`,
 `search`, `setup`, `heal-duplicates` and the feature checkpoint and resume) exits **3**
 (nothing declared) or **4** (invalid value). `reindex`, `resolve-index`, `split-records`,
 `collect`, `ship` and `migrate-v1` never consult a backend, and `audit` never refuses over a

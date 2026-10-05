@@ -33,6 +33,13 @@ export const EXIT_UNDECLARED = 3;
 export const EXIT_INVALID = 4;
 /** CLI only: nothing declared AND the config could not be read — "could not look" is not "declared nothing". */
 export const EXIT_UNREADABLE = 5;
+/**
+ * `cli.mjs hydrate` only (#1115): the hydration was DEFERRED — the backend could not run it now
+ * (binary absent, guard contended, state unreadable) and said why on stderr. A distinct code, so
+ * a deferral can never read as "done" at the process boundary. It is NOT a failure for the
+ * entrypoints that load context: `post-merge` and `session-start` treat it as non-fatal.
+ */
+export const EXIT_DEFERRED = 6;
 
 /** The one-line fix, named wherever an undeclared backend is reported. */
 export const DECLARE_FIX = 'npm run brain:config -- set memory.backend engram|plainfiles';

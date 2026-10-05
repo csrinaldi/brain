@@ -55,7 +55,7 @@ test('PR2 day-start: ecosystem + brain + memory + done keys exist in en', () => 
   assert.equal(en['day.brain.newVersion'],         'New brain version available: {installed} → {latest}');
   assert.equal(en['day.brain.upToDate'],           'brain up to date ({installed}).');
   assert.equal(en['day.memory.hookActive'],        'Pre-push hook active — checkpoints feature working memory before push.');
-  assert.equal(en['day.memory.exported'],          'Memory exported to .memory/ — ready to commit with the next push.');
+  assert.equal(en['day.memory.hydrating'],         'Hydrating the memory backend from .memory/records/...');
   assert.equal(en['day.done.withTicket'],          'With a ticket:');
   assert.equal(en['day.done.noTicket'],            'No ticket — explore or propose:');
   assert.equal(en['day.run.exitCode'],             '↳ exited with code {code} (non-blocking).');
@@ -443,8 +443,8 @@ test('PR3 session: all session.* keys exist in en with the planned English templ
   assert.equal(en['session.change.one'],         'change:   {change}');
   assert.equal(en['session.change.none'],        'change:   (no change folder for branch)');
   assert.equal(en['session.change.ambiguous'],   'change:   ambiguous ({count}): {list}');
-  assert.equal(en['session.memory.ok'],          'memory:   engram hydrated');
-  assert.equal(en['session.memory.skip'],        'memory:   engram unavailable (skipped)');
+  assert.equal(en['session.memory.ok'],          'memory:   {backend} hydrated');
+  assert.equal(en['session.memory.skip'],        'memory:   {backend} hydration skipped');
   assert.equal(en['session.ticket.label'],       'ticket:');
   assert.equal(en['session.ticket.none'],        '(no active ticket memory)');
 });
@@ -483,4 +483,51 @@ test('translate: tools.node.reloadShell returns Spanish string', () => {
     translate('tools.node.reloadShell', {}, es, en),
     'Abrí una terminal nueva o ejecutá: source ~/.bashrc',
   );
+});
+
+// ── #1115: the backend-owned `hydrate` verb — keys added, keys retired ──
+
+const HYDRATE_1115_KEYS = [
+  'memory.hydrate.deferred',
+  'memory.hydrate.indexStale',
+  'memory.import.deprecated',
+  'day.memory.hydrating',
+  'session.memory.ok',
+  'session.memory.skip',
+  'session.memory.skip.reason',
+  'session.memory.deferred',
+  'session.memory.verified',
+  'session.memory.stale',
+  'session.memory.backend.unknown',
+  'session.memory.records',
+  'session.memory.records.unknown',
+  'session.memory.issue',
+  'session.memory.issue.item',
+  'session.memory.issue.none',
+];
+
+test('#1115: every new or changed hydrate key exists in en and es, and es is translated', () => {
+  for (const key of HYDRATE_1115_KEYS) {
+    assert.ok(key in en, `en.mjs is missing ${key}`);
+    assert.ok(key in es, `es.mjs is missing ${key}`);
+    // The list-item row is pure placeholders — it has no words to translate.
+    if (key !== 'session.memory.issue.item') assert.notEqual(es[key], en[key], `es.mjs ${key} must be translated, not copied from en`);
+  }
+});
+
+test('#1115: the retired day-start export/import keys are absent from en and es', () => {
+  for (const key of ['day.memory.importing', 'day.memory.exporting', 'day.memory.exported', 'day.memory.exportFailed']) {
+    assert.ok(!(key in en), `en.mjs must not carry ${key}`);
+    assert.ok(!(key in es), `es.mjs must not carry ${key}`);
+  }
+});
+
+test('#1115: the session memory lines name the backend through {backend}, never the word engram', () => {
+  for (const key of ['session.memory.ok', 'session.memory.skip', 'session.memory.skip.reason', 'session.memory.deferred',
+    'session.memory.verified', 'session.memory.stale']) {
+    assert.match(en[key], /\{backend\}/, `${key} (en) must interpolate {backend}`);
+    assert.match(es[key], /\{backend\}/, `${key} (es) must interpolate {backend}`);
+    assert.doesNotMatch(en[key], /engram/i, `${key} (en) must not name engram`);
+    assert.doesNotMatch(es[key], /engram/i, `${key} (es) must not name engram`);
+  }
 });
