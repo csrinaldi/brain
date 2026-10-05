@@ -131,7 +131,7 @@ test('migrateConfig applies a new additive migration without clobbering', () => 
     { version: '0.1.0', description: 'initial', defaults: { project: { name: '', owner: '' } } },
     { version: '0.2.0', description: 'add ci section', defaults: { ci: { provider: 'github-actions' } } },
   ];
-  const { config: migrated, applied } = migrateConfig(config, migrations, '0.2.0');
+  const { config: migrated, applied } = migrateConfig(config, migrations, '0.2.0', null);
 
   assert.deepEqual(applied, ['0.2.0']);            // only the pending one ran
   assert.equal(migrated.project.name, 'mine');     // existing untouched
@@ -142,7 +142,7 @@ test('migrateConfig applies a new additive migration without clobbering', () => 
 test('migrateConfig is idempotent — re-running applies nothing', () => {
   const config = { schemaVersion: '0.2.0', project: { name: 'mine' }, ci: { provider: 'x' } };
   const migrations = [{ version: '0.2.0', defaults: { ci: { provider: 'default' } } }];
-  const { applied } = migrateConfig(config, migrations, '0.2.0');
+  const { applied } = migrateConfig(config, migrations, '0.2.0', null);
   assert.deepEqual(applied, []);
 });
 
@@ -301,7 +301,7 @@ test('0.4.0 migration adds governance.ignoreList when missing', () => {
     docs: { language: 'en' },
     vcs: { provider: 'github' },
   };
-  const { config: migrated, applied } = migrateConfig(config, migrations, '0.4.0');
+  const { config: migrated, applied } = migrateConfig(config, migrations, '0.4.0', null);
 
   assert.deepEqual(applied, ['0.4.0']);
   assert.equal(migrated.schemaVersion, '0.4.0');
@@ -321,7 +321,7 @@ test('0.4.0 migration is idempotent — re-running on an already-migrated config
     vcs: { provider: 'github' },
     governance: { ignoreList: ['.memory/**', 'openspec/changes/**', 'package-lock.json', 'pnpm-lock.yaml', 'yarn.lock'] },
   };
-  const { applied } = migrateConfig(config, migrations, '0.4.0');
+  const { applied } = migrateConfig(config, migrations, '0.4.0', null);
   assert.deepEqual(applied, []);
 });
 
@@ -333,7 +333,7 @@ test('0.4.0 migration preserves a consumer-set governance.ignoreList', () => {
     vcs: { provider: 'github' },
     governance: { ignoreList: ['dist/**', 'coverage/**'] },
   };
-  const { config: migrated } = migrateConfig(config, migrations, '0.4.0');
+  const { config: migrated } = migrateConfig(config, migrations, '0.4.0', null);
 
   // Consumer-set list must be preserved (mergeDefaults never overwrites existing values).
   assert.deepEqual(migrated.governance.ignoreList, ['dist/**', 'coverage/**']);
@@ -349,7 +349,7 @@ test('0.5.0 migration adds governance.memorySecretPatterns + memorySecretAllowPa
     vcs: { provider: 'github' },
     governance: { ignoreList: ['.memory/**'] },
   };
-  const { config: migrated, applied } = migrateConfig(config, migrations, '0.5.0');
+  const { config: migrated, applied } = migrateConfig(config, migrations, '0.5.0', null);
 
   assert.deepEqual(applied, ['0.5.0']);
   assert.equal(migrated.schemaVersion, '0.5.0');
@@ -372,7 +372,7 @@ test('0.5.0 migration is idempotent — re-running on an already-migrated config
       memorySecretAllowPatterns: [],
     },
   };
-  const { applied } = migrateConfig(config, migrations, '0.5.0');
+  const { applied } = migrateConfig(config, migrations, '0.5.0', null);
   assert.deepEqual(applied, []);
 });
 
@@ -384,7 +384,7 @@ test('0.5.0 migration preserves a consumer-set memorySecretAllowPatterns', () =>
     vcs: { provider: 'github' },
     governance: { memorySecretAllowPatterns: ['glpat-TUTORIAL-EXAMPLE'] },
   };
-  const { config: migrated } = migrateConfig(config, migrations, '0.5.0');
+  const { config: migrated } = migrateConfig(config, migrations, '0.5.0', null);
 
   // Consumer-set allowlist must be preserved (mergeDefaults never overwrites existing values).
   assert.deepEqual(migrated.governance.memorySecretAllowPatterns, ['glpat-TUTORIAL-EXAMPLE']);

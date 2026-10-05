@@ -27,7 +27,7 @@ test('#906 A6: a 1.6.0 entry exists and declares memory.lane.enabled: false', ()
 });
 
 test('#906 A6: additive — a config with no memory key gets enabled:false after 1.6.0', () => {
-  const { config } = migrateConfig({ schemaVersion: '0.1.0' }, migrations, '1.6.0');
+  const { config } = migrateConfig({ schemaVersion: '0.1.0' }, migrations, '1.6.0', null);
   assert.equal(config.memory.lane.enabled, false);
 });
 
@@ -36,6 +36,7 @@ test('#906 A6: additive-only — an already-true value is NEVER overwritten by t
     { schemaVersion: '0.1.0', memory: { lane: { enabled: true } } },
     migrations,
     '1.6.0',
+    null,
   );
   assert.equal(config.memory.lane.enabled, true, 'a consumer-set true must survive the migration');
 });
@@ -53,7 +54,7 @@ test('#906 A6: every migration version is unique (never reused, per config-migra
 // exception to this dormancy — it applies every migration unfiltered and is
 // pinned separately below.
 test('#906 A6/C1: dormant against a real caller — targetVersion 1.5.0 never applies the 1.6.0 entry, memory stays absent', () => {
-  const { config, applied } = migrateConfig({ schemaVersion: '0.1.0' }, migrations, '1.5.0');
+  const { config, applied } = migrateConfig({ schemaVersion: '0.1.0' }, migrations, '1.5.0', null);
   assert.ok(!applied.includes('1.6.0'), '1.6.0 must not be in the applied list when targetVersion is 1.5.0');
   assert.equal(config.memory, undefined, 'memory must be entirely absent, not just enabled:false — the entry never ran');
 });
@@ -78,7 +79,7 @@ test('#906 C1: a migration walk with nothing left to filter DOES plant 1.6.0 —
     }
     return 0;
   });
-  const { config: cfg } = migrateConfig({}, ordered, ordered.at(-1).version);
+  const { config: cfg } = migrateConfig({}, ordered, ordered.at(-1).version, null);
   assert.equal(cfg.memory.lane.enabled, false, 'a config built from every migration, unfiltered, DOES carry the 1.6.0 default');
   assert.equal(cfg.schemaVersion, ordered.at(-1).version, 'and its schemaVersion is stamped to the latest entry — ahead of package.json until that entry is cut');
 });
@@ -116,7 +117,7 @@ test('#1124: no migration entry defaults governance.tier to lite — an upgrade 
 test('#1124: an existing config that lacks the tier key migrates to standard — the same tier resolveTier() already read for it', () => {
   const before = { schemaVersion: '0.8.0', governance: { approvedLabel: 'status:approved' } };
   const readBefore = resolveTier(before);
-  const { config, applied } = migrateConfig(before, migrations, '1.7.0');
+  const { config, applied } = migrateConfig(before, migrations, '1.7.0', null);
   assert.ok(applied.includes('0.9.0'), 'the tier migration is pending for a pre-0.9.0 config');
   assert.equal(config.governance.tier, 'standard');
   assert.equal(resolveTier(config), readBefore, 'the effective tier is identical before and after the migration');
@@ -125,14 +126,14 @@ test('#1124: an existing config that lacks the tier key migrates to standard —
 test('#1124: an existing config that declares standard or regulated keeps it through every migration', () => {
   for (const tier of ['standard', 'regulated', 'lite']) {
     for (const schemaVersion of ['0.1.0', '0.8.0', '1.5.0']) {
-      const { config } = migrateConfig({ schemaVersion, governance: { tier } }, migrations, '99.0.0');
+      const { config } = migrateConfig({ schemaVersion, governance: { tier } }, migrations, '99.0.0', null);
       assert.equal(config.governance.tier, tier, `a declared ${tier} (schemaVersion ${schemaVersion}) must survive the upgrade`);
     }
   }
 });
 
 test('#1124: migrateConfig never reads NEW_CONSUMER_DEFAULTS — an empty config walked through every migration is standard, not lite', () => {
-  const { config } = migrateConfig({}, migrations, '99.0.0');
+  const { config } = migrateConfig({}, migrations, '99.0.0', null);
   assert.equal(config.governance.tier, 'standard');
 });
 
@@ -141,17 +142,17 @@ import { planConfigWrite as _plan1165 } from '../config/config-verb.mjs';
 
 test('#1165 (e) a 1.9.0 config without memory.backend migrates cleanly: key added EMPTY, nothing else touched', () => {
   const before = { schemaVersion: '1.9.0', governance: { tier: 'standard' }, memory: { lane: { enabled: true } } };
-  const { config, applied } = migrateConfig(structuredClone(before), migrations, '1.10.0');
+  const { config, applied } = migrateConfig(structuredClone(before), migrations, '1.10.0', null);
   assert.deepEqual(applied, ['1.9.1']);
   assert.equal(config.memory.backend, '', 'undeclared, so behaviour is unchanged — the backend still comes from env/.env');
   assert.deepEqual(config.memory.lane, before.memory.lane);
   assert.equal(config.governance.tier, 'standard');
-  const again = migrateConfig(structuredClone(config), migrations, '1.10.0');
+  const again = migrateConfig(structuredClone(config), migrations, '1.10.0', null);
   assert.deepEqual(again.applied, [], 'idempotent');
 });
 
 test('#1165 (e) a consumer that already declared memory.backend keeps it (additive, never overwrites)', () => {
-  const { config } = migrateConfig({ schemaVersion: '1.9.0', memory: { backend: 'plainfiles' } }, migrations, '1.10.0');
+  const { config } = migrateConfig({ schemaVersion: '1.9.0', memory: { backend: 'plainfiles' } }, migrations, '1.10.0', null);
   assert.equal(config.memory.backend, 'plainfiles');
 });
 

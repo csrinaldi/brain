@@ -189,7 +189,7 @@ function declareDefault(next, path) {
  * @param {{config: object, path: string, value: string, migrations: Array<object>, targetVersion: string}} args
  * @returns {{next: object|null, migrationsApplied: string[], refusal: string|null}}
  */
-export function planConfigWrite({ config, path, value, migrations, targetVersion, axisContext }) {
+export function planConfigWrite({ config, path, value, migrations, targetVersion, axisContext = null }) {
   if (hasEmptySegment(path)) {
     return {
       next: null,

@@ -160,7 +160,7 @@ test('ensureBrainConfig: creates config when missing with github identity', () =
     assert.equal(cfg.vcs.provider, 'github');
     assert.equal(cfg.project.gitHost, 'github.com');
     assert.equal(cfg.project.slug, 'owner/repo');
-    assert.equal(cfg.schemaVersion, '1.11.1', 'the ADR-0038 axis-shape migration (1.11.1, issue #1114 S3.2) is now the latest — the 0.6.0 memory.dualWrite gap (D3/C4, issue #229) stays a deliberate, never-reused retirement mark');
+    assert.equal(cfg.schemaVersion, '1.12.1', 'the axis-shape repair (1.12.1, issue #1344) is now the latest; the ADR-0038 axis-shape migration (1.11.1, issue #1114 S3.2) precedes it — the 0.6.0 memory.dualWrite gap (D3/C4, issue #229) stays a deliberate, never-reused retirement mark');
     assert.equal(cfg.vcs.default, 'github', 'a fresh config writes the ADR-0038 shape for vcs (#1114 S3.3), with the legacy key beside it for the alias window');
     assert.deepEqual(cfg.vcs.providers, { github: {} });
     assert.equal(cfg.memory.backend, '', 'memory.backend ships EMPTY (undeclared): a default would choose a backend for a team that never chose one (#1165) — env:init asks and writes it');

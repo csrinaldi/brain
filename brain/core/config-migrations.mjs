@@ -15,6 +15,12 @@
 // common additive case) OR { version, description, migrate(config, helpers) }
 // for renames / restructures. `defaults` is sugar for a pure additive merge.
 
+// #1344: shipped inside the package, next to the migrations it serves. The ADR-0038 migration must be
+// correct under ANY upgrader, including the OLDER one a consumer already has installed (it imports THIS
+// file from the incoming package but calls its own `migrateConfig`, which hands a migration no context),
+// so it builds its own from the same module the new upgrader uses.
+import { resolveAxisMigrationContext } from '../scripts/lib/axis-migration-context.mjs';
+
 export const migrations = [
   {
     version: '0.1.0',
@@ -241,10 +247,26 @@ export const migrations = [
       "cannot stay is the flat `platform` string, which is the same key as the new `platform` object. " +
       "Also writes `locked: false` on memory, platform and sdd where none is stated, so no existing consumer is locked by an upgrade " +
       "(ADR-0040, #1263); it never seeds governance.owners. " +
-      "Needs the axisContext migrateConfig hands it (brain-upgrade and brain:config build it from " +
-      "env and .env); with none, the entry changes nothing, so buildDefaultConfig is untouched. " +
+      "Uses the axisContext migrateConfig hands it (brain-upgrade and brain:config build it from " +
+      "env and .env). With NONE (undefined) it builds its own from process.env and the repo's .env, " +
+      "and prints each value it wrote: an older upgrader, the one a consumer already has installed, " +
+      "hands it nothing (#1344). An explicit `axisContext: null` is the env-blind opt-out " +
+      "(buildDefaultConfig, brain:promote's proof, planConfigWrite's default) and changes nothing. " +
       "Versioned 1.11.1, the smallest version above the shipped 1.11.0.",
     migrate: migrateToAxisShape,
+  },
+  {
+    version: "1.12.1",
+    description:
+      "Repair a config stamped 1.12.0 without the ADR-0038 shape (issue #1344). Under the 1.11.0 " +
+      "upgrader, migration 1.11.1 changed nothing (it got no axisContext) while schemaVersion was " +
+      "still stamped 1.12.0, so those consumers carry no { default, providers } on one or more axes " +
+      "and, with no .env, `resolve platform` and `resolve sdd` exit 3. When any axis lacks the shape " +
+      "this applies the same shaping as 1.11.1 (the context is built from process.env and .env when " +
+      "none is handed in, and every value written is printed with its source); on a correctly " +
+      "shaped config it changes nothing and prints nothing. Idempotent. Versioned 1.12.1, the " +
+      "smallest version above the shipped 1.12.0.",
+    migrate: repairAxisShape,
   },
 ];
 
@@ -253,10 +275,53 @@ export const migrations = [
 // the file (see brain/scripts/lib/axis-migration-context.mjs); everything else is read from the
 // config itself. `helpers.notice(line)` is optional: the caller that prints (brain:upgrade) gets
 // one line per value written.
+//
+// THE CONTEXT (#1344). `helpers.axisContext`:
+//   - an object        -> used as given (brain-upgrade, brain:config).
+//   - null             -> the EXPLICIT env-blind opt-out: the config is returned unchanged. For callers that
+//                         must never read env or `.env` (buildDefaultConfig, brain:promote's proof, planConfigWrite
+//                         when its caller gave none). It has to be explicit because...
+//   - undefined/absent -> ...an OLDER upgrader (1.11.0's `migrateConfig`) hands a migration `{ mergeDefaults }` and
+//                         nothing else, and that is exactly the case that must NOT be a no-op. The migration builds
+//                         the context itself (`helpers.buildAxisContext`, injectable; default: the same
+//                         `resolveAxisMigrationContext` the new upgrader uses, over `helpers.env` (default
+//                         process.env) and `helpers.root` (default process.cwd(), the consumer root under an
+//                         upgrader that does `const ROOT = process.cwd()`)). With no `helpers.notice` sink it prints
+//                         each value it writes with its source, the way the new upgrader does.
+function printingSink() {
+  let first = true;
+  return (line) => {
+    if (first) {
+      console.log('  \u2139  brain.config.json axis shape written by the config migration (value and where it came from):');
+      first = false;
+    }
+    console.log(`  \u2139    ${line}`);
+  };
+}
+
+const AXES = ['vcs', 'memory', 'platform', 'sdd'];
+const isShapeNode = (n) => n !== null && typeof n === 'object' && !Array.isArray(n) &&
+  (Object.prototype.hasOwnProperty.call(n, 'default') || Object.prototype.hasOwnProperty.call(n, 'providers'));
+
+// 1.12.1: the repair. Same shaping, gated on "some axis lacks the shape" so a correctly migrated config is untouched.
+function repairAxisShape(config, helpers = {}) {
+  if (helpers.axisContext === null) return config;
+  if (AXES.every((a) => isShapeNode(config?.[a]))) return config;
+  return migrateToAxisShape(config, helpers);
+}
+
 function migrateToAxisShape(config, helpers = {}) {
-  const ctx = helpers.axisContext;
-  if (!ctx) return config;
-  const say = (line) => { if (typeof helpers.notice === 'function') helpers.notice(line); };
+  let ctx = helpers.axisContext;
+  if (ctx === null) return config;
+  let notice = helpers.notice;
+  if (!ctx) {
+    const build = typeof helpers.buildAxisContext === 'function'
+      ? helpers.buildAxisContext
+      : (cfg) => resolveAxisMigrationContext({ config: cfg, env: helpers.env ?? process.env, root: helpers.root ?? process.cwd() });
+    ctx = build(config);
+    if (typeof notice !== 'function') notice = printingSink();
+  }
+  const say = (line) => { if (typeof notice === 'function') notice(line); };
   const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
   const has = (o, k) => isObj(o) && Object.prototype.hasOwnProperty.call(o, k);
   const isShape = (n) => isObj(n) && (has(n, 'default') || has(n, 'providers'));
