@@ -175,7 +175,7 @@ healthy tree.
   for the same defect (#1333); this one was not. **Workaround:** re-run the check when the forge is
   reachable.
 
-- **The memory refusal still tells you to run `env:init`.** (not tracked yet) The text of the
+- **The memory refusal still tells you to run `env:init`.** (#1341) The text of the
   `brain:memory:*` refusal ends "Or run `npm run brain:env:init`, which asks once and writes it".
   In a repository that already has a `brain.config.json`, `env:init` asks nothing and writes
   nothing (1.12.0). **Workaround:** `npm run brain:config -- set memory.default <engram|plainfiles>`
