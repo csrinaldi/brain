@@ -15,6 +15,7 @@
      defined here; the dark palette below redefines the same names and
      nothing else, so a token never has its only definition in a media
      query. The values here are the page's colours before #998, unchanged. */
+  color-scheme: light;
   --font-sans: ui-sans-serif, system-ui, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
   /* #1059 phase 1: the light palette is the design's own slate ramp read for a
@@ -74,6 +75,7 @@
    defined for the first time inside one of these blocks. */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) {
+    color-scheme: dark;
     --ink: #f1f5f9;
     --muted: #94a3b8;
     --line: rgba(255, 255, 255, 0.08);
@@ -106,6 +108,7 @@
 }
 
 :root[data-theme='dark'] {
+    color-scheme: dark;
     --ink: #f1f5f9;
     --muted: #94a3b8;
     --line: rgba(255, 255, 255, 0.08);
@@ -137,6 +140,16 @@
   }
 
 * { box-sizing: border-box; }
+
+/* #1311 D118: an element nobody styled keeps the UA colour (black text on the
+   dark surface, #0000EE links). Element selectors have the lowest specificity,
+   so every class rule below still wins; this only fills what none of them set. */
+button, select, input {
+  color: var(--ink);
+  background: var(--surface);
+  border-color: var(--line);
+}
+a { color: var(--accent); }
 
 /* #1059 phase 2 — the app shell the design draws: a full-height column on the
    ground colour, so the page IS the application rather than a document that
