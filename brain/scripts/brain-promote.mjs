@@ -40,7 +40,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync, existsSync, lstatSync, realpathSync, rmSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, lstatSync, realpathSync, rmSync, readdirSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { join, basename, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -612,6 +612,14 @@ async function planMigrationPromotion({ root, draftPath, draftText }) {
   const targetAbs = join(root, MIGRATIONS_REL);
   if (!existsSync(targetAbs)) return { ok: false, lines: [`✗ ${MIGRATIONS_REL} not found.`] };
   const fileText = readFileSync(targetAbs, 'utf8');
+
+  // A proof file a killed run left beside the target (#1346): brain/core ships whole, so a stale one would
+  // be packed. Sweep only this verb's own `.brain-promote-proof-*.mjs` names, best effort.
+  try {
+    for (const name of readdirSync(dirname(targetAbs))) {
+      if (/^\.brain-promote-proof-.*\.mjs$/.test(name)) rmSync(join(dirname(targetAbs), name), { force: true });
+    }
+  } catch { /* best effort */ }
 
   let current;
   try {

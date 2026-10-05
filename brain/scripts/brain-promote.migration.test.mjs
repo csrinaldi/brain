@@ -133,3 +133,14 @@ test('#1344: a migrations file with a RELATIVE import proves itself, and the pro
   assert.match(readFileSync(join(root, 'brain/core/config-migrations.mjs'), 'utf8'), /1\.4\.0|sdd/);
   assert.deepEqual(readdirSync(join(root, 'brain/core')), ['config-migrations.mjs'], 'no proof file survives beside the target');
 });
+
+test('#1346: a stale proof file from a killed run is swept at start, and only proof files are touched', async (t) => {
+  const root = world(t);
+  const core = join(root, 'brain/core');
+  writeFileSync(join(core, '.brain-promote-proof-111-222.mjs'), 'export const stale = true;\n');
+  writeFileSync(join(core, '.brain-promote-proof-333-444.mjs'), 'export const stale = true;\n');
+  writeFileSync(join(core, '.keep-me.mjs'), 'export const mine = true;\n');
+  const r = await drive(root);
+  assert.equal(r.exitCode, 0, r.output);
+  assert.deepEqual(readdirSync(core).sort(), ['.keep-me.mjs', 'config-migrations.mjs']);
+});
