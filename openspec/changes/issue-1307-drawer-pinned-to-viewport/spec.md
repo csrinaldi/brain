@@ -34,6 +34,20 @@ The tab bar MUST be a full-width line of `.drawer-head` (`flex: 1 0 100%`), so i
 - **WHEN** the body is scrolled
 - **THEN** the tab bar's top edge is unchanged
 
+### R1307-5: A tab click shows the panel; a data re-render does not move the reader
+
+Rebuilding the drawer resets the body's scroll, so the page sets it deliberately. A tab click MUST scroll the body so the selected panel's top sits at the body's top. A re-render the reader did not ask for (stream or data refresh) of the same node MUST keep the body's scrollTop. Opening a node MUST start the body at 0.
+
+#### Scenario: Switching tab on an epic with many children
+- **GIVEN** an open drawer whose children list pushes the tab panel below the fold of the body
+- **WHEN** a tab button is clicked
+- **THEN** the panel's top edge is at the body's top edge
+
+#### Scenario: A data re-render
+- **GIVEN** an open drawer whose body is scrolled
+- **WHEN** the page re-renders from new data
+- **THEN** the body's scrollTop is unchanged
+
 ### R1307-4: Unchanged behaviour
 
 Esc closes the drawer, the tab buttons switch tabs, and the phone layout (`max-width: 760px`) keeps a full-width, non-sticky drawer. Light and Dark use the same tokens.

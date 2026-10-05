@@ -96,10 +96,10 @@ test('R883-9: with no served change dir the local block comes first and the empt
   t.after(() => dom.restore());
   await open(dom);
   const local = positionOf(dom, 'local-blocks');
-  // #1307: the tab bar moved into the head; "before the tabs" now means before the tab panel, the unclassed div that follows.
+  // #1307: the tab bar moved into the head; "before the tabs" now means before the tab panel, the .tab-panel that follows.
   const kids = Array.from(find(dom.mounts.drawer, byClass('drawer-body')).childNodes);
   const at = kids.findIndex((n) => n.classList && n.classList.contains('local-blocks'));
-  assert.ok(at >= 0 && kids[at + 1] && !kids[at + 1].className, 'the local blocks are drawn before the tab panel');
+  assert.ok(at >= 0 && kids[at + 1] && kids[at + 1].className === 'tab-panel', 'the local blocks are drawn before the tab panel');
   assert.match(dom.mounts.drawer.textContent, /the served HEAD has no change dir for this issue; this machine's worktrees follow/);
 });
 
