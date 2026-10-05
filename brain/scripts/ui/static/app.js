@@ -49,7 +49,7 @@ function applyTheme(choice) {
 
 import { buildLaneModel, nodeSummaryFor, childrenOf } from './lib/lane-model.mjs';
 import { SOURCE, progressLabel } from './lib/progress-view.mjs';
-import { hierarchyOf, epicRollup, rollupLabel } from './lib/rollup-model.mjs';
+import { hierarchyOf, epicRollup, rollupLabel, rollupNote } from './lib/rollup-model.mjs';
 import { issueUrl } from './lib/forge-url.mjs';
 import { buildDrawerModel, localChangedFor } from './lib/drawer-model.mjs';
 import { remoteBadges, remotePanel, tipAge } from './lib/remote-model.mjs';
@@ -109,6 +109,10 @@ let searchResultsMount = null;
 /** The last `GET /api/change/<N>` body for the selected issue; `null` while it is still being read. */
 let changeView = null;
 let activeTab = 'spec';
+// #1307 D122: set by a tab click so the next drawer render scrolls the body to the panel.
+let tabScrollPending = false;
+let drawerRenderedFor = null;
+let panelPadded = false;
 /**
  * Which track lanes are collapsed (#998 R998-3): a local Set, the same kind
  * of page-only interaction state `selectedIssue`/`activeTab` already are —
@@ -436,9 +440,11 @@ function renderMemory() {
     // would have gone — never a blank cell, and never a guessed age.
     tr.appendChild(el('td', 'memory-when', record.relativeTime ?? (record.tsUnparseable ? `unparseable: ${record.ts}` : record.ts)));
     tr.appendChild(el('td', 'memory-type', record.type));
-    const actor = el('td', 'memory-actor');
-    actor.appendChild(el('span', 'memory-actor-name', record.actor));
-    actor.appendChild(el('span', 'memory-actor-kind', record.actorKind ?? 'unknown'));
+    const actor = el('td', 'memory-actor-cell');
+    const stack = el('div', 'memory-actor');
+    stack.appendChild(el('span', 'memory-actor-name', record.actor));
+    stack.appendChild(el('span', 'memory-actor-kind', record.actorKind ?? 'unknown'));
+    actor.appendChild(stack);
     tr.appendChild(actor);
     tr.appendChild(el('td', 'memory-id', record.id));
     const source = el('td', 'memory-source');
@@ -1458,7 +1464,10 @@ function renderDecisionRow(row) {
 
   tr.appendChild(el('td', 'decision-number', String(row.number).padStart(4, '0')));
   tr.appendChild(el('td', 'decision-title', row.title));
-  tr.appendChild(el('td', `decision-status status-${String(row.status).replace(/\s+/g, '-').toLowerCase()}`, row.status));
+  // The chip is an inner <span>: a display on the <td> itself breaks the table layout (#1310).
+  const statusCell = el('td', 'decision-status-cell');
+  statusCell.appendChild(el('span', `decision-status status-${String(row.status).replace(/\s+/g, '-').toLowerCase()}`, row.status));
+  tr.appendChild(statusCell);
 
   const amendments = el('td', 'decision-amendments');
   if (row.amendments.length === 0) {
@@ -1550,7 +1559,9 @@ function renderAntiPatternRow(row) {
     return tr;
   }
 
-  tr.appendChild(el('td', 'anti-pattern-scope', row.scope));
+  const scopeCell = el('td', 'anti-pattern-scope-cell');
+  scopeCell.appendChild(el('span', 'anti-pattern-scope', row.scope));
+  tr.appendChild(scopeCell);
   tr.appendChild(el('td', 'anti-pattern-title', row.title));
 
   const cited = el('td', 'anti-pattern-issues');
@@ -1697,9 +1708,33 @@ function closeDrawer() {
  * branch to get wrong.
  */
 function renderDrawer() {
+  // #1307 D122: the rebuild resets the body's scrollTop. Re-opening the same node keeps it (an SSE
+  // re-render must not jump); a tab click brings the panel to the top of the body; a new node starts at 0.
+  let kept = 0;
+  for (const child of mounts.drawer.childNodes) if (child.className === 'drawer-body') kept = child.scrollTop || 0;
+  if (drawerRenderedFor !== selectedIssue) { kept = 0; panelPadded = false; }
+  drawerRenderedFor = selectedIssue;
+  const built = buildDrawer();
+  const toPanel = tabScrollPending;
+  tabScrollPending = false;
+  if (!built) return;
+  if (toPanel) panelPadded = true;
+  // A short panel at the end of a long body cannot reach the top (the browser clamps scrollTop), so once a tab was
+  // clicked the panel is at least one body tall: its top can always be the body's top.
+  if (panelPadded && built.panel) built.panel.style.minHeight = `${built.body.clientHeight || 0}px`;
+  if (toPanel && built.panel) {
+    built.body.scrollTop = 0;
+    built.body.scrollTop = built.panel.getBoundingClientRect().top - built.body.getBoundingClientRect().top;
+  } else {
+    built.body.scrollTop = kept;
+  }
+}
+
+/** Builds the drawer; returns its scroller and the active tab panel (null when there is none yet). */
+function buildDrawer() {
   clear(mounts.drawer);
   mounts.drawer.hidden = selectedIssue === null;
-  if (selectedIssue === null) return;
+  if (selectedIssue === null) return null;
 
   // Region 08's header: the number, the state the card showed, the track, a
   // link to the issue on the forge, and the close control — all from the same
@@ -1731,26 +1766,29 @@ function renderDrawer() {
   close.addEventListener('click', closeDrawer);
   head.appendChild(close);
   mounts.drawer.appendChild(head);
+  // #1307 D120: the head (id line + tab bar) never scrolls; everything below it is the scrolling body.
+  const body = el('div', 'drawer-body');
+  mounts.drawer.appendChild(body);
 
   if (summary.ok) {
-    if (summary.value.title) mounts.drawer.appendChild(el('h2', 'drawer-title', summary.value.title));
-    for (const mark of summary.value.marks) mounts.drawer.appendChild(said(mark));
+    if (summary.value.title) body.appendChild(el('h2', 'drawer-title', summary.value.title));
+    for (const mark of summary.value.marks) body.appendChild(said(mark));
     if (summary.value.blockedBy.length > 0) {
-      mounts.drawer.appendChild(el('p', 'drawer-blocked', `blocked by ${summary.value.blockedBy.map((n) => `#${n}`).join(', ')}`));
+      body.appendChild(el('p', 'drawer-blocked', `blocked by ${summary.value.blockedBy.map((n) => `#${n}`).join(', ')}`));
     }
-    mounts.drawer.appendChild(renderChildren(selectedIssue));
+    body.appendChild(renderChildren(selectedIssue));
   } else {
-    mounts.drawer.appendChild(said(summary.reason));
+    body.appendChild(said(summary.reason));
   }
 
   if (changeView === null) {
-    mounts.drawer.appendChild(el('p', 'note', 'reading this change…'));
-    return;
+    body.appendChild(el('p', 'note', 'reading this change…'));
+    return { body, panel: null };
   }
   const model = buildDrawerModel(changeView);
   if (!model.ok) {
-    mounts.drawer.appendChild(said(model.reason));
-    return;
+    body.appendChild(said(model.reason));
+    return { body, panel: null };
   }
   // #883 R883-9: with no change dir at the served HEAD and a worktree that has one, "on this machine" is the first thing read.
   const localFirst = !model.value.changeDir && model.value.local.length > 0;
@@ -1760,20 +1798,22 @@ function renderDrawer() {
   const emptyLine = sourced
     ? `the served HEAD has no change dir for this issue; the tabs read ${tabSource.label}`
     : localFirst ? 'the served HEAD has no change dir for this issue; this machine\'s worktrees follow' : 'no change dir for this issue in the read model';
-  mounts.drawer.appendChild(el('p', 'note', model.value.changeDir ? `change dir: ${model.value.changeDir}` : emptyLine));
-  if (localFirst) mounts.drawer.appendChild(renderLocalBlocks(model.value));
+  body.appendChild(el('p', 'note', model.value.changeDir ? `change dir: ${model.value.changeDir}` : emptyLine));
+  if (localFirst) body.appendChild(renderLocalBlocks(model.value));
 
   const tabs = el('div', 'tabs');
   for (const tab of model.value.tabs) {
     const button = el('button', null, tab.ok ? tab.label : `${tab.label} !`);
     button.setAttribute('aria-selected', String(tab.id === activeTab));
-    button.addEventListener('click', () => { activeTab = tab.id; renderDrawer(); });
+    button.addEventListener('click', () => { activeTab = tab.id; tabScrollPending = true; renderDrawer(); });
     tabs.appendChild(button);
   }
-  mounts.drawer.appendChild(tabs);
-  mounts.drawer.appendChild(renderTab(model.value.tabs.find((t) => t.id === activeTab) ?? model.value.tabs[0]));
-  if (!localFirst) mounts.drawer.appendChild(renderLocalBlocks(model.value));
-  mounts.drawer.appendChild(renderRemoteBlocks(model.value));
+  head.appendChild(tabs);
+  const panel = renderTab(model.value.tabs.find((t) => t.id === activeTab) ?? model.value.tabs[0]);
+  body.appendChild(panel);
+  if (!localFirst) body.appendChild(renderLocalBlocks(model.value));
+  body.appendChild(renderRemoteBlocks(model.value));
+  return { body, panel };
 }
 
 /**
@@ -1843,8 +1883,10 @@ function renderChildren(issue) {
   }
   // An epic's drawer leads with its rollup (#1199 D62); closed children are counted there, not listed below.
   if (hierarchyOf(sectionOf(state, 'hierarchy')).value?.issues.get(issue)?.level === 'epic') {
-    wrap.appendChild(el('p', 'epic-rollup', rollupLabel(epicRollup(sectionOf(state, 'hierarchy'), sectionOf(state, 'forgeLoad'), issue))));
-    wrap.appendChild(el('p', 'note', 'the list shows open children; closed children are counted above'));
+    const rollup = epicRollup(sectionOf(state, 'hierarchy'), sectionOf(state, 'forgeLoad'), issue);
+    wrap.appendChild(el('p', 'epic-rollup', rollupLabel(rollup)));
+    const countedNote = rollupNote(rollup); // null while nothing was counted (#1267)
+    if (countedNote !== null) wrap.appendChild(el('p', 'note', countedNote));
   }
   wrap.appendChild(el('h3', 'drawer-section-title', `tickets that declare #${issue} as their parent`));
   if (found.value.length === 0) {
@@ -1872,6 +1914,7 @@ function renderChildren(issue) {
 
 function renderTab(tab) {
   const wrap = document.createElement('div');
+  wrap.className = 'tab-panel';
   if (tab.from) wrap.appendChild(el('p', 'tab-from', tab.from));
   if (tab.header) wrap.appendChild(el('p', 'tab-progress', tab.header));
   if (tab.note) wrap.appendChild(el('p', 'note', `source: ${tab.note}`));

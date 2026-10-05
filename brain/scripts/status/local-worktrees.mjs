@@ -9,7 +9,7 @@ import { basename, join, resolve, sep } from 'node:path';
 import { createHash } from 'node:crypto';
 import { lstatSync, readdirSync, realpathSync } from 'node:fs';
 
-import { field, pending, uncomputable } from './report.mjs';
+import { field, pendingFrom, uncomputable } from './report.mjs';
 import { parseCanonicalIssueBranch } from '../lib/branch-grammar.mjs';
 import { gitErrorLine, pickChangeDir } from '../lib/git-tree.mjs';
 import { CHANGES_ROOT, LIFECYCLE_STAGES, ARTEFACT_FILE } from '../lib/sdd-layout.mjs';
@@ -36,7 +36,7 @@ export const LOCAL_DOCUMENT_FILES = Object.freeze({
 /** R883-2/R6: a graph that is not ready says so; it never lists worktrees unfiltered. */
 function graphGate(graph) {
   if (graph.ok) return null;
-  if (graph.pending === true) return pending(graph.reason);
+  if (graph.pending === true) return pendingFrom(graph);
   return uncomputable(`the open-issue list could not be read, so worktrees cannot be filtered to open issues (R6): ${graph.reason}`);
 }
 

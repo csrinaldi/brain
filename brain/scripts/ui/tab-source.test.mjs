@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 
 import { buildSnapshot } from '../status/snapshot.mjs';
@@ -392,4 +392,65 @@ test('R1276-1: with no source anywhere each tab keeps today\'s no-change-dir rea
 
   assert.equal(v.tabSource.kind, 'none');
   for (const tab of [v.spec, v.sdd, v.tasks]) assert.equal(tab.reason, 'no change dir at openspec/changes/issue-7-*');
+});
+
+// ── R1282: an unreadable document is never present and says why ──────────────
+
+/** A branch holding D7 with a committed `design.md` symlink, its worktree removed so only the sha is left; returns that sha. */
+function originShaWithSymlinkDesign(repo) {
+  const wt = repo.addWorktree('feat/issue-7-x', { [`${D7}/spec.md`]: SPEC_ONE });
+  symlinkSync('spec.md', join(wt.path, D7, 'design.md'));
+  git(wt.path, ['add', '-A']);
+  git(wt.path, ['commit', '-q', '-m', 'work']);
+  const sha = git(wt.path, ['rev-parse', 'HEAD']).trim();
+  git(repo.root, ['worktree', 'remove', '--force', wt.path]);
+  return sha;
+}
+
+test('R1282-1: a worktree document that cannot be read is neither present nor done, and its row says why', async (t) => {
+  const repo = repoWith();
+  t.after(() => repo.dispose());
+  const wt = repo.addWorktree('feat/issue-7-x', { [`${D7}/spec.md`]: SPEC_ONE });
+  symlinkSync('spec.md', join(wt.path, D7, 'design.md'));
+
+  const v = await viewOf(repo);
+
+  const rows = Object.fromEntries(v.sdd.value.map((r) => [r.stage, r]));
+  assert.equal(rows.design.present, false);
+  assert.match(rows.design.detail, /could not be read: .*design\.md is a symbolic link/);
+  assert.equal(rows.spec.present, true);
+});
+
+test('R1282-2: an origin entry that cannot be read (a symlink) is not present and says why', async (t) => {
+  const repo = repoWith();
+  t.after(() => repo.dispose());
+  const sha = originShaWithSymlinkDesign(repo);
+  const snapshot = withOrigin(await snapshotOf(repo.root, [7]), [originEntry('feat/issue-7-x', sha)]);
+
+  const { value } = buildChangeView({ root: repo.root, issue: 7, snapshot, _run: gitRun(repo.root) });
+
+  assert.equal(value.tabSource.kind, 'origin');
+  const rows = Object.fromEntries(value.sdd.value.map((r) => [r.stage, r]));
+  assert.equal(rows.design.present, false);
+  assert.match(rows.design.detail, /could not be read: .*design\.md is a symlink/);
+  assert.equal(rows.spec.present, true);
+  assert.equal(rows.spec.detail, undefined);
+});
+
+test('R1282-3: when the origin tree cannot be listed, no stage is present and each says the reason', async (t) => {
+  const repo = repoWith();
+  t.after(() => repo.dispose());
+  repo.addWorktree('feat/issue-7-x', { [`${D7}/spec.md`]: SPEC_ONE });
+  const snapshot = withOrigin(await snapshotOf(repo.root, [7]), [originEntry('feat/issue-7-x', 'f'.repeat(40))]);
+  // drop the worktree so the walk reaches origin
+  const noWt = { ...snapshot, localWorktrees: { ok: true, value: { entries: [] } } };
+
+  const { value } = buildChangeView({ root: repo.root, issue: 7, snapshot: noWt, _run: gitRun(repo.root) });
+
+  assert.equal(value.tabSource.kind, 'origin');
+  const rows = value.sdd.value.filter((r) => r.stage !== 'archive');
+  for (const row of rows) {
+    assert.equal(row.present, false, row.stage);
+    assert.match(row.detail, /^could not be read: /);
+  }
 });

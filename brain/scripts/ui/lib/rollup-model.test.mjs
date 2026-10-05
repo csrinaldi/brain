@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { hierarchyOf, epicRollup, rollupLabel, NO_CHILDREN } from './rollup-model.mjs';
+import { hierarchyOf, epicRollup, rollupLabel, rollupNote, NO_CHILDREN } from './rollup-model.mjs';
 
 const entry = (over = {}) => ({ level: 'ticket', levelSource: 'default', parent: null, children: [], tracker: null, milestone: null, state: 'open', divergences: [], ...over });
 
@@ -136,4 +136,22 @@ test('#1199 R8: no children declared with unresolved closed issues says they cou
   const unresolved = [{ number: 1, reason: 'r' }, { number: 2, reason: 'r' }];
   assert.equal(label(hierarchy({ unresolved }), load(COMPLETE)), 'no children declared; 2 closed issues could not be read');
   assert.equal(label(hierarchy({ unresolved: [{ number: 1, reason: 'r' }] }), load(COMPLETE)), 'no children declared; 1 closed issue could not be read');
+});
+
+const NOTE = 'the list shows open children; closed children are counted above';
+const note = (h, l) => rollupNote(epicRollup(h, l, 878));
+
+test('#1267 R1267-1: the note is the sentence when a count was taken, including a stale one', () => {
+  assert.equal(note(hierarchy({ closed: 2, open: 3 }), load(COMPLETE)), NOTE);
+  assert.equal(note(hierarchy(), load(COMPLETE)), NOTE, 'zero children is still a count');
+  assert.equal(note(hierarchy({ closed: 2 }), load({ state: 'failed', at: 'c', reason: 'r', lastCompleteAt: 'b' })), NOTE);
+});
+
+test('#1267 R1267-1: the note is null in every state where nothing was counted', () => {
+  assert.equal(note(hierarchy({ open: 2 }), load({ state: 'pending', at: null })), null);
+  assert.equal(note(hierarchy({ open: 2 }), load({ state: 'pending', at: null, reason: 'polling is paused' })), null);
+  assert.equal(note(hierarchy({ open: 2 }), load({ state: 'disabled', at: null, reason: 'no VCS' })), null);
+  assert.equal(note(hierarchy({ open: 2 }), load({ state: 'failed', at: 'c', reason: 'r', lastCompleteAt: null })), null);
+  assert.equal(note(hierarchy({ open: 2, closedRead: { ok: false, reason: 'x' } }), load(COMPLETE)), null);
+  assert.equal(rollupNote({ ok: false, reason: 'no VCS' }), null, 'an unavailable rollup counted nothing either');
 });

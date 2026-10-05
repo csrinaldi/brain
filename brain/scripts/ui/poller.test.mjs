@@ -966,6 +966,38 @@ test('#1257 R1257-10: a reopened issue leaves the closed set, whichever lane set
   poller.close();
 });
 
+// ── #1262: a closed delta that lands before the open list ───────────────────
+
+test('#1262: a closed delta landing before the open list does not drop a just-closed issue', async () => {
+  // #5 is open at tick 1 and closed at tick 2. Tick 2's delta returns #5 and lands while the
+  // open list of tick 2 is still held, so `lastOpenNumbers` is the STALE tick-1 set that holds #5.
+  let openCalls = 0;
+  let releaseOpen = null;
+  const gate = new Promise((resolve) => { releaseOpen = resolve; });
+  const base = makeVcs({ callLog: [] });
+  const vcs = {
+    ...base,
+    issueList: async () => {
+      openCalls += 1;
+      if (openCalls === 2) { await gate; return rows(2).map((r) => ({ ...r })); }
+      return [...rows(2), { ...rows(1)[0], number: 5 }].map((r) => ({ ...r }));
+    },
+  };
+  const closed = closedSpy({ answer: (_a, n) => (n === 1 ? [closedRow(3)] : [closedRow(5)]) });
+  const { poller, scheduler, now, cache } = simplePoller({ vcs, closedVcs: closed.port });
+  await poller.start();
+  await flush();
+  now.t += 60000;
+  const second = scheduler.runNext();
+  await flush();
+  assert.equal(closed.calls.length, 2, 'the closed delta has landed');
+  releaseOpen();
+  await second;
+  await flush();
+  assert.deepEqual((await cache.port.issueList({ state: 'closed' })).map((r) => r.number), [5, 3], '#5 is closed now and the open list no longer holds it');
+  poller.close();
+});
+
 test('#1257 R1257-10: every 60th run is a full re-list that replaces the held set', async () => {
   const closed = closedSpy({ answer: (_args, n) => (n === CLOSED_FULL_EVERY_RUNS ? [closedRow(500)] : [closedRow(n + 100)]) });
   const { poller, scheduler, now, cache } = simplePoller({ vcs: makeVcs({ callLog: [] }), closedVcs: closed.port });

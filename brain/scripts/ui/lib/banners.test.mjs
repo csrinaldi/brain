@@ -239,6 +239,27 @@ test('#1257 R1257-9: loading is not failure — pending sections get one loading
   assert.equal(bands[0].text, 'still loading from the forge: graph, prs, reviews');
 });
 
+test('#1262: an idle pending section gets no loading band; its own reason is said instead', () => {
+  const idle = { ok: false, pending: true, idle: true, reason: 'polling is paused' };
+  const snapshot = { graph: idle, prs: idle, reviews: idle, changes: { ok: true, value: [] } };
+  const bands = degradationBands({ stream: { ok: true }, meta: meta(), snapshot });
+  assert.deepEqual(bands.map((b) => b.id), ['idle']);
+  assert.equal(bands[0].text, 'not read yet, polling is paused: graph, prs, reviews');
+  assert.deepEqual(failedSections(snapshot), []);
+});
+
+test('#1262: loading and idle sections each get their own band', () => {
+  const snapshot = {
+    graph: { ok: false, pending: true, idle: true, reason: 'polling is paused' },
+    closedIssues: pendingSection('loading closed issues from the forge…'),
+  };
+  const bands = degradationBands({ stream: { ok: true }, meta: meta(), snapshot });
+  assert.deepEqual(bands.map((b) => [b.id, b.text]), [
+    ['loading', 'still loading from the forge: closedIssues'],
+    ['idle', 'not read yet, polling is paused: graph'],
+  ]);
+});
+
 test('#1257 R1257-9: a genuine failure beside pending sections still gets its sections band, after the loading band', () => {
   const snapshot = {
     graph: pendingSection('loading open issues from the forge…'),

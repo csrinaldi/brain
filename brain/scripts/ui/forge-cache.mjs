@@ -38,13 +38,11 @@ export function createForgeCache() {
   // `issueList` is keyed by state (#1257, D57): the closed list is its own lane.
   const store = { issueList: new Map(), mrList: undefined, issueView: new Map(), prReviews: new Map() };
 
-  // "Has this cache ever been written to" stands in for "has a poll
-  // completed": a successful tick always sets both lists before it touches
-  // anything per-number, and nothing else writes here (D1).
-  const holdsAnyAnswer = () => store.issueList.size > 0
-    || store.mrList !== undefined
-    || store.issueView.size > 0
-    || store.prReviews.size > 0;
+  // "Has the OPEN lane landed" stands in for "has a poll completed", and it is what "queued" claims:
+  // the open lane has answered and its bounded body and review lanes have not reached this number.
+  // The closed lane writes `issueList('closed')` on its own flight (#1257), so a closed landing alone
+  // is not that, and neither is anything else here: the open lists are the first thing a tick sets (#1262).
+  const holdsAnyAnswer = () => store.issueList.has('open') || store.mrList !== undefined;
 
   function miss(queuedReason) {
     throw new Error(holdsAnyAnswer() ? queuedReason : FIRST_POLL_REASON);

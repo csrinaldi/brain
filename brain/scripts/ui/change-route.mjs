@@ -476,7 +476,10 @@ function buildSourcedSddTab(source) {
     const doc = source.documents[stage];
     const base = { stage, file: STAGE_FILE[stage], source: { path: docPath(source, `${source.dir}/${STAGE_FILE[stage]}`) } };
     if (stage === 'archive') return { ...base, present: false, detail: ARCHIVE_NOT_READ };
-    const present = Boolean(doc) && doc.state !== 'missing' && doc.state !== 'deleted';
+    // R1282-1: a document the source could not read is not there to be done, and its row says why.
+    const unreadable = doc?.state === 'unreadable';
+    const present = Boolean(doc) && !unreadable && doc.state !== 'missing' && doc.state !== 'deleted';
+    if (unreadable) return { ...base, present, detail: `could not be read: ${doc.reason ?? 'no reason was given'}` };
     return { ...base, present, ...(source.kind === 'worktree' ? { detail: doc ? localRowDetail(doc, source.branch) : 'missing' } : {}) };
   });
   const detail = source.kind === 'worktree' ? source.branch : null;
