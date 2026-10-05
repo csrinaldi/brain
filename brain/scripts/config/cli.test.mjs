@@ -103,7 +103,10 @@ test('#1114 S3.3 cli: set <axis>.default writes the default AND its provider ent
   const r = run(root, 'set', 'platform.default', 'claude');
   assert.equal(r.status, 0, r.stderr);
   const next = JSON.parse(readFileSync(join(root, 'brain.config.json'), 'utf8'));
-  assert.deepEqual(next.platform, { default: 'claude', providers: { claude: {} } });
+  assert.equal(next.platform.default, 'claude');
+  assert.deepEqual(next.platform.providers, { claude: {} });
+  // the fixture's other axes are unshaped, so the 1.12.1 repair (#1344) also shapes them, and locks nothing
+  assert.equal(next.platform.locked, false);
 });
 
 // ── #1114 S3.3 review: `brain:config` never promotes a per-machine value; brain:upgrade does ──

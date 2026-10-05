@@ -120,3 +120,16 @@ test('#842: the D3 proof dir dies with the proof — success AND refusal leave t
 
   assert.deepEqual(proofDirs(), before, 'no brain-promote-proof-* dir survives either path');
 });
+
+test('#1344: a migrations file with a RELATIVE import proves itself, and the proof leaves no file beside it', async (t) => {
+  // brain/core/config-migrations.mjs imports ../scripts/lib/axis-migration-context.mjs (#1344). The proof must
+  // resolve that import exactly as the real file does, so the candidate cannot live in a tmpdir.
+  const withImport = `import { HELPER } from '../scripts/lib/helper.mjs';\n${MIGRATIONS_FILE}export const helper = HELPER;\n`;
+  const root = world(t, { migrationsFile: withImport });
+  mkdirSync(join(root, 'brain/scripts/lib'), { recursive: true });
+  writeFileSync(join(root, 'brain/scripts/lib/helper.mjs'), 'export const HELPER = 1;\n');
+  const r = await drive(root);
+  assert.equal(r.exitCode, 0, r.output);
+  assert.match(readFileSync(join(root, 'brain/core/config-migrations.mjs'), 'utf8'), /1\.4\.0|sdd/);
+  assert.deepEqual(readdirSync(join(root, 'brain/core')), ['config-migrations.mjs'], 'no proof file survives beside the target');
+});
