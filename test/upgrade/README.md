@@ -27,7 +27,8 @@ npm run test:upgrade                     # second-latest → latest tag
 2. Adds consumer customizations: a `brain/project/` ADR, a `.env` variable, a custom
    `brain.config.json` value (`project.owner`), an `openspec/changes/` dir and a
    consumer-owned `brain:day:start`.
-3. Upgrades to **TO** (`npm i -D @logikas/brain@TO` + `brain:upgrade`, default path).
+3. Upgrades to **TO** with `npm run brain:upgrade -- TO`, which installs TO itself (the
+   documented default path; the outgoing package stays the pre-upgrade one, REQ-397-1).
 4. Asserts (exits non-zero on any breach): brain is at **TO**, the `brain:*` verbs
    were injected, and every customization above survives.
 

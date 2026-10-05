@@ -45,8 +45,7 @@ node -e "const p=require('./package.json');p.scripts['brain:day:start']='consume
 info "planted brain:day:start='consumer-day-start' (must survive specialMerge)"
 git add -A >/dev/null 2>&1; git commit -q -m "consumer @ ${FROM}" >/dev/null 2>&1
 
-line "3. UPGRADE ${FROM} → ${TO} (npm i registry + brain:upgrade, default install path)"
-npm i -D "${PKG}@${TO#v}" >/dev/null 2>&1 || { echo "✗ npm i ${PKG}@${TO#v} failed"; exit 2; }
+line "3. UPGRADE ${FROM} → ${TO} (brain:upgrade installs TO itself — the documented default path, so the outgoing package is the pre-upgrade one, REQ-397-1)"
 npm run brain:upgrade -- "${TO}" 2>&1 | tail -3
 
 line "4. ASSERT — core updated + project untouched"
