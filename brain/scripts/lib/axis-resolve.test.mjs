@@ -270,3 +270,12 @@ test('this repository declares every axis in tracked config, and resolves each f
   assert.deepEqual(config.sdd.roles['cold-review'], { agent: 'brain:cold-review', engine: 'codex', model: 'gpt-5.5' });
   assert.ok(Object.hasOwn(config.platform.providers, 'codex'), 'the routed cold-review runtime is a platform provider');
 });
+
+test('#1263: the §4 refusal detail is rendered in the active locale, not English-only', () => {
+  const config = { sdd: { default: 'gentle-ai', providers: { 'gentle-ai': {} }, roles: { lint: { engine: 'claude' } } }, platform: { default: 'claude', providers: { claude: {} } } };
+  const e = (() => { try { resolveAxis('sdd', { ...quiet, config, catalog: es }); } catch (x) { return x; } })();
+  assert.ok(e instanceof AxisRefusal);
+  assert.equal(e.params.detail, es['axes.validate.roleAgentRequired'].replace(/\{(\w+)\}/g, (_, k) => ({ stage: 'lint', provider: 'gentle-ai' })[k]));
+  assert.match(e.params.detail, /no indica agent/);
+  assert.equal(e.details[0].key, 'axes.validate.roleAgentRequired');
+});

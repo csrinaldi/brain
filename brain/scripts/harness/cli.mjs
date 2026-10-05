@@ -50,6 +50,13 @@ import { t } from '../i18n/t.mjs';
 import { harnessAdapterUrl } from '../axes/lib/harness-adapter-url.mjs';
 export { resolvePlatform, SDD_ENGINES };
 
+/** A refusal's params with its validation `detail` re-rendered in the active locale (resolveAxis has no async access to it). */
+async function localizedParams(err) {
+  if (!Array.isArray(err.details)) return err.params;
+  const parts = await Promise.all(err.details.map((d) => (d.key ? t(d.key, d.params ?? {}) : d.message)));
+  return { ...err.params, detail: parts.join('; ') };
+}
+
 /**
  * Resolves the active SDD engine: a thin caller of `resolveAxis` (process env > `.env` > `sdd.default` > the legacy
  * flat key and `SDD_HARNESS`, one minor version). No default: an undeclared engine is refused (#1114 S2).
@@ -238,7 +245,7 @@ if (isMain) {
     engine = resolveEngine({ env: process.env, envVars, config });
   } catch (err) {
     // A refusal names its fix (#1114 S2): print it in the active locale and stop, never run a guessed harness.
-    console.error(`harness/cli: ${err instanceof AxisRefusal ? await t(err.key, err.params) : err.message}`);
+    console.error(`harness/cli: ${err instanceof AxisRefusal ? await t(err.key, await localizedParams(err)) : err.message}`);
     process.exit(1);
   }
 
