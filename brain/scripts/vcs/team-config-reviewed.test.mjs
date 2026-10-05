@@ -472,3 +472,39 @@ test('main wires deps.tier: an injected tier decides the exit code of a gather f
     assert.equal(await run('standard'), 1);
   } finally { console.log = orig; }
 });
+
+// ── PR author unresolvable (forge API failed): fail closed, never skip (#1263) ─
+
+const prCtxNoAuthor = { baseSha: 'BASE', headSha: 'HEAD', prNumber: 7, repo: 'o/r', author: null };
+const stdBase = (tier) => () => baseConfig({ governance: { owners: ['alice'], tier } });
+
+test('author unresolved + PR context + config touched + standard tier: FAILS closed, naming the unresolved author', async () => {
+  const r = await runTeamConfigReviewedCheck({ ...prCtxNoAuthor, diffNameOnly: () => touched, gitShow: stdBase('standard') });
+  assert.equal(r.level, 'fail');
+  assert.match(r.reason, /author could not be resolved/);
+});
+
+test('author unresolved + config touched + lite tier: warns (detection), does not fail', async () => {
+  const r = await runTeamConfigReviewedCheck({ ...prCtxNoAuthor, diffNameOnly: () => touched, gitShow: stdBase('lite') });
+  assert.equal(r.level, 'warn');
+  assert.match(r.reason, /author could not be resolved/);
+});
+
+test('author unresolved + config touched + unreadable base: FAILS closed', async () => {
+  const r = await runTeamConfigReviewedCheck({ ...prCtxNoAuthor, diffNameOnly: () => touched, gitShow: () => '{not json' });
+  assert.equal(r.level, 'fail');
+});
+
+test('author unresolved + config NOT touched: not a failure, and the base is never read', async () => {
+  const r = await runTeamConfigReviewedCheck({
+    ...prCtxNoAuthor, diffNameOnly: () => ['src/a.mjs'],
+    gitShow: () => { throw new Error('must not read the base'); },
+  });
+  assert.notEqual(r.level, 'fail');
+});
+
+test('no PR context at all (no shas / pr number) still takes the skip-warn', async () => {
+  const r = await runTeamConfigReviewedCheck({ author: null, diffNameOnly: () => { throw new Error('must not diff'); } });
+  assert.equal(r.level, 'warn');
+  assert.match(r.reason, /skipping/);
+});

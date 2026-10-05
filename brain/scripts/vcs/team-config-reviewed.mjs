@@ -261,10 +261,38 @@ export async function runTeamConfigReviewedCheck(deps = {}) {
   const provider = deps.provider ?? ctx.provider ?? undefined;
   const cwd = deps.cwd ?? process.cwd();
 
-  if (!baseSha || !headSha || !prNumber || !repo || !author) {
+  // No PR context at all (not running on a PR): nothing to verify, skip.
+  if (!baseSha || !headSha || !prNumber) {
     return {
       level: 'warn',
-      reason: 'BASE_SHA/HEAD_SHA/PR_NUMBER/GITHUB_REPOSITORY/PR_AUTHOR not set — cannot verify team-config review; skipping team-config-reviewed check.',
+      reason: 'BASE_SHA/HEAD_SHA/PR_NUMBER not set — cannot verify team-config review; skipping team-config-reviewed check.',
+    };
+  }
+
+  // PR context exists but the author or repo is unresolved (the forge API failed). The distinct-actor rule cannot be
+  // verified, so this must NOT skip (#1263): a required gate on a PR touching the team config fails closed.
+  if (!repo || !author) {
+    const missing = [!author && 'PR author', !repo && 'repository'].filter(Boolean).join(' and ');
+    const unresolved = `the ${missing} could not be resolved (forge API), so the distinct-actor rule cannot be verified`;
+    let changedFiles;
+    try {
+      changedFiles = (deps.diffNameOnly ?? defaultDiffNameOnly(cwd))(baseSha, headSha);
+    } catch (err) {
+      return { level: 'fail', reason: `team-config-reviewed: ${unresolved}, and the diff could not be read (${err.message}) — failing closed.` };
+    }
+    if (!changedFiles.includes(TEAM_CONFIG_PATH)) {
+      return { level: 'pass', reason: `team-config-reviewed: ${TEAM_CONFIG_PATH} is not touched; ${unresolved}, but nothing here depends on it.` };
+    }
+    const tier = [deps.tier].find((t) => t && TIERS.includes(t)) ?? readableBaseTier(baseSha, deps, cwd);
+    if (tier === undefined) {
+      return { level: 'fail', reason: `team-config-reviewed: team config on base unreadable and ${unresolved} — failing closed: a change that touches ${TEAM_CONFIG_PATH} cannot be verified.` };
+    }
+    const required = resolveGatePolicy(GATE, tier) === 'required';
+    return {
+      level: required ? 'fail' : 'warn',
+      reason:
+        `team-config-reviewed: ${unresolved}` +
+        (required ? ` — failing closed: this gate is required at the "${tier}" tier.` : ` (detection at the "${tier}" tier).`),
     };
   }
 
