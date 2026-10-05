@@ -344,27 +344,24 @@ if (!existsSync(hookFile)) {
   }
 }
 
+// 4a. Hydrate the ACTIVE memory backend from .memory/records/ through its own verb (#1115).
+//     Whatever the backend is: engram projects the records into its store (deferring, exit 6, when
+//     its binary is absent), plainfiles rebuilds the derived index. Step 2 already ran git fetch +
+//     merge, so the working tree is up-to-date; `hydrate` runs no git, so there is no redundant
+//     network call and no risk of post-merge hook recursion. It runs BEFORE the engram probe: the
+//     probe below gates only step 4b.
+console.log(`  ${C.dim}${await t('day.memory.hydrating')}${C.reset}`);
+await run(NODE, ['brain/scripts/memory/cli.mjs', 'hydrate']);
+
 const engram = capture('engram', ['--version']);
 if (engram.status === 0) {
-  // 4a. Import team memory from .memory/ → local engram (import-only, no git pull).
-  //     Step 2 already ran git fetch + merge, so the working tree is up-to-date.
-  //     Using "import" avoids a redundant network call and eliminates any risk
-  //     of post-merge hook recursion.
-  console.log(`  ${C.dim}${await t('day.memory.importing')}${C.reset}`);
-  await run(NODE, ['brain/scripts/memory/cli.mjs', 'import']);
-
-  // 4b. Re-project brain/ → ~/.engram (ADRs, anti-patterns, domain)
+  // 4b. Re-project brain/ → ~/.engram (ADRs, anti-patterns, domain). Unchanged by #1115: routing it
+  //     through the `index` verb, and retiring this probe, is follow-up #1349.
   console.log(`  ${C.dim}${await t('day.memory.reprojecting')}${C.reset}`);
   await run(NODE, ['brain/scripts/brain-to-engram.mjs']);
-
-  // 4c. Export ~/.engram → .memory/ in the repo (closes the loop: without this step, nothing flows)
-  console.log(`  ${C.dim}${await t('day.memory.exporting')}${C.reset}`);
-  const exportResult = capture('engram', ['sync', '--export']);
-  if (exportResult.status === 0) {
-    ok(await t('day.memory.exported'));
-  } else {
-    warn(await t('day.memory.exportFailed', { pm: PM }));
-  }
+  // (There is no 4c. `engram sync --export` copied the backend into .memory/, the reverse of
+  //  record-first — memory-backend-contract rule 2 — and promised a commit "with the next push",
+  //  which ADR-0034 retired. Records reach .memory/ through `brain:memory:save` only.)
 } else {
   info(await t('day.memory.notAvailable'));
   console.log(`       ${await t('day.memory.install')}`);

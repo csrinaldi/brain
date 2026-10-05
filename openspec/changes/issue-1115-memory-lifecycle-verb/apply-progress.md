@@ -32,3 +32,10 @@ Rulings Q1-Q4 (2026-10-05) are folded into spec/design/tasks first (commit `docs
 | 4.7 `no-artifact.parity.test.mjs` | 2 of 12 failed (spawn argv `import` vs `hydrate --verify`; plainfiles leg) | 12/12 |
 
 The Q4 condition is proven in session-start by `runSessionStart: a deferred hydration (exit 6) renders the deferred line and STILL resolves exitCode 0`.
+
+## T5, T6, T7 — day-start, allowlist, docs
+| step | RED | GREEN |
+|---|---|---|
+| 5.1 `day-start.test.mjs` source guards (hydrate not import, 4a before the probe, no `sync --export`, one probe) | 4 of 8 failed | 8/8 after 4a moved out of the probe and 4c was deleted; i18n suite 75/75 (removed keys absent) |
+| 6.1 `axis-port.guard.test.mjs` | `SHRANK day-start.mjs spawn-concrete:engram: 1 hits < max 2 — lower max to 1` (1 failed) | 14/14 after max 1, owner #1349, brain-to-engram entries → #1349 |
+| 7 docs | n/a | KNOWN-LIMITATIONS drops the #1115 and #1189 entries; adoption.md names `hydrate` and the deprecated `import` |

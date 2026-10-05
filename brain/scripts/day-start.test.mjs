@@ -69,3 +69,29 @@ test('day-start.mjs step-5 lane-sweep block also renders laneSweepBranchLines(),
     'day-start.mjs must not re-derive sweep.outcome directly — laneSweepBranchLines() owns that read',
   );
 });
+
+// ── #1115: step 4 hydrates through the backend-owned verb, for every backend, and exports nothing ──
+
+test('#1115 day-start: step 4a calls `cli.mjs hydrate` and never the deprecated `import` alias', () => {
+  assert.match(SOURCE, /'brain\/scripts\/memory\/cli\.mjs',\s*'hydrate'/);
+  assert.doesNotMatch(SOURCE, /'brain\/scripts\/memory\/cli\.mjs',\s*'import'/);
+});
+
+test('#1115 day-start: 4a runs BEFORE the engram probe, so it runs whatever the backend is', () => {
+  const hydrate = SOURCE.search(/'brain\/scripts\/memory\/cli\.mjs',\s*'hydrate'/);
+  const probe = SOURCE.search(/capture\('engram'/);
+  assert.ok(hydrate > 0 && probe > 0);
+  assert.ok(hydrate < probe, '`hydrate` must precede the engram probe that now gates only step 4b');
+});
+
+test('#1115 day-start: step 4c is gone — nothing exports the backend into .memory/ (record-first, contract rule 2)', () => {
+  assert.doesNotMatch(SOURCE, /'sync',\s*'--export'/);
+  assert.doesNotMatch(SOURCE, /day\.memory\.(exporting|exported|exportFailed)/);
+});
+
+test('#1115 day-start: the probe still gates 4b (brain-to-engram) — unchanged, owned by follow-up #1349', () => {
+  const probe = SOURCE.search(/capture\('engram', \['--version'\]\)/);
+  const projector = SOURCE.search(/brain-to-engram\.mjs/);
+  assert.ok(probe > 0 && projector > probe);
+  assert.equal((SOURCE.match(/capture\('engram'/g) ?? []).length, 1, 'exactly one engram probe remains');
+});
