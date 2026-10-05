@@ -7,6 +7,12 @@ contract ([ADR-0003](../../brain/project/decisions/adr-0003-split-core-project-s
 
 Maintainer/CI test; not part of `brain/core` and not part of `npm test`.
 
+**Scope: published releases only.** FROM and TO are installed from the registry, and FROM's
+published `brain-upgrade.mjs` installs TO's published tarball. It does not exercise a PR's own
+upgrader (that is the danger-path suite's job, below). If FROM or TO is tagged but not yet
+published on the registry, it prints `⚠ SKIP: ... not published yet` and exits 0; a registry or
+network error (anything other than E404) is an error (exit 2), not a skip.
+
 ## Run
 
 ```bash
@@ -29,10 +35,13 @@ npm run test:upgrade                     # second-latest → latest tag
    consumer-owned `brain:day:start`.
 3. Upgrades to **TO** with `npm run brain:upgrade -- TO`, which installs TO itself (the
    documented default path; the outgoing package stays the pre-upgrade one, REQ-397-1).
-4. Asserts (exits non-zero on any breach): brain is at **TO**, the `brain:*` verbs
-   were injected, and every customization above survives.
+4. Asserts (exits non-zero on any breach): brain is at **TO**; every `brain/scripts` file
+   whose content differs between FROM's and TO's package is TO's content in the consumer's
+   managed copy (proves `copyManaged` ran, not just `npm i`); the `brain:*` verbs were
+   injected; and every customization above survives. `brain:env:init` and `brain:upgrade`
+   exit codes are checked (the env:init log is printed on failure).
 
-CI runs it informationally via `.github/workflows/upgrade-smoke.yml` (not a required check).
+CI runs it informationally via `.github/workflows/upgrade-smoke.yml` (not a required check), on pushes to `main` and on PRs touching `test/upgrade/**` or the workflow.
 
 ---
 
