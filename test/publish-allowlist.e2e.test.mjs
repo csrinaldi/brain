@@ -63,7 +63,7 @@ const MUST_NOT_SHIP = Object.freeze([
  * delivery.mjs and their suites). Organic growth, no bulk. Whether every
  * vendored suite must ship is tracked in #1076.
  */
-const SIZE_CANARY_MB = 10.1; // the #1114 tracker line (… -> 9.8, #1263) and main's line (… -> 9.7, #1284) merged on 2026-10-05: measured 10.06 MiB / 896 files after the merge, both lines' growth read and no bulk. *.test.mjs suites are most of it — #1076 is the real fix, and every raise since 9.3 says so
+const SIZE_CANARY_MB = 10.2; // 1.12.0 cut (#1340): measured 10.10 MiB / 898 files, +1.5 KB over the 10.1 line from the README adapters table and the version string (CHANGELOG, docs and openspec do not ship); no bulk. Previous line, 10.1: the #1114 tracker line (… -> 9.8, #1263) and main's line (… -> 9.7, #1284) merged on 2026-10-05: measured 10.06 MiB / 896 files after the merge, both lines' growth read and no bulk. *.test.mjs suites are most of it — #1076 is the real fix, and every raise since 9.3 says so
 
 /**
  * The real packed contents — read from the ACTUAL tarball, not from npm's

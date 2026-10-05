@@ -202,7 +202,7 @@ test('#1125 bootstrap.sh: a process-env platform wins for the run and does NOT r
   // The repo value claude comes from `.env`, and the resolver SAYS so (#1114 S3.4): it used to be inferred by comparing
   // values, so a `.env` claude that equalled the old code default was declared as if nothing stated it. A per-machine value
   // is never the team's tracked default; the process-env one-off never is either.
-  assert.equal(config.platform, undefined, 'a value only .env states is not declared');
+  assert.ok(!config.platform?.default, 'a value only .env states is not declared (the 1.11.1 migration writes the axis undeclared from 1.12.0, #1340)');
   assert.match(missing, /platform claude is declared only on this machine/);
 });
 
@@ -308,7 +308,7 @@ test('#1114 S3.3 bootstrap.sh: a value that exists ONLY in .env is never written
 
 test('#1114 S3.3 bootstrap.sh: each axis is judged on its own — an .env platform alone leaves sdd to be declared from the default', () => {
   const r = runBlock({ envFile: 'AGENT_PLATFORM=antigravity\n' });
-  assert.equal(r.config.platform, undefined);
+  assert.ok(!r.config.platform?.default, 'a value only .env states is not declared (the 1.11.1 migration writes it undeclared since 1.12.0, #1340)');
   assert.equal(r.config.sdd.default, 'gentle-ai');
 });
 
