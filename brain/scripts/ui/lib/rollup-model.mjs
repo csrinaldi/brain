@@ -28,7 +28,7 @@ const hasClosedData = (entry) => entry.state === 'complete' || (entry.state === 
 
 /**
  * epicRollup(hierarchySection, forgeLoadSection, epic) ->
- *   {ok:true, value:{closed:number|null, open, unknown, total:number|null, unresolved, load}} | {ok:false, pending?, reason}
+ *   {ok:true, value:{closed:number|null, open, unknown, total:number|null, unresolved, openChildren:number[], load}} | {ok:false, pending?, reason}
  *
  * `forgeLoadSection` is the snapshot's `forgeLoad` SECTION; its `closed` entry is `load`.
  */
@@ -52,9 +52,18 @@ export function epicRollup(hierarchySection, forgeLoadSection, epic) {
       unknown: states.filter((s) => s === null).length,
       total: counted ? states.length : null,
       unresolved: h.value.closedUnresolved.length,
+      openChildren: entry.children.filter((n) => h.value.issues.get(n)?.state === 'open').sort((a, b) => a - b),
       load,
     },
   };
+}
+
+/**
+ * rollupFor(node, epics) -> the epic's rollup, or `undefined` for a non-epic or when no `epics` sections were given
+ * (#1309 D134/D135: no argument is the legacy path). `epics` is `{hierarchy, forgeLoad}`, the snapshot's two sections.
+ */
+export function rollupFor(node, epics) {
+  return epics && node.kind === 'epic' ? epicRollup(epics.hierarchy, epics.forgeLoad, node.number) : undefined;
 }
 
 /** The wording of one closed-lane state that carries no count (the numbers are `null`). */

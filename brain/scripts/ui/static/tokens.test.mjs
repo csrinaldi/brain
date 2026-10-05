@@ -136,3 +136,17 @@ test('#1311: text on controls and links meets WCAG AA 4.5:1 in the light and the
     }
   }
 });
+
+test('#1309 D138: the Ready to close tokens exist in all three theme blocks and meet AA 4.5:1', () => {
+  const bodies = {
+    light: (css.match(/^:root \{([\s\S]*?)\n\}/m) ?? [, ''])[1],
+    media: (css.match(/@media \(prefers-color-scheme: dark\) \{([\s\S]*?)\n\}/) ?? [, ''])[1],
+    stamp: (css.match(/:root\[data-theme='dark'\] \{([\s\S]*?)\n\}/) ?? [, ''])[1],
+  };
+  for (const [name, body] of Object.entries(bodies)) {
+    const t = tokenMap(body);
+    assert.ok(t['state-ready-to-close-fg'] && t['state-ready-to-close-bg'], `${name}: ready-to-close tokens missing`);
+    const r = ratio(t['state-ready-to-close-fg'], t['state-ready-to-close-bg']);
+    assert.ok(r >= 4.5, `${name}: ready-to-close is ${r.toFixed(2)}:1, below 4.5`);
+  }
+});
