@@ -210,7 +210,7 @@ test('migrateConfig hands the entry its context and returns the notices; the oth
 const FIXTURES = {
   'this repository (brain.config.json as committed)': () => JSON.parse(readFileSync(join(REPO_ROOT, 'brain.config.json'), 'utf8')),
   'a fresh consumer (new-consumer defaults + every shipped migration, provider filled)': () => {
-    const c = migrateConfig(mergeDefaults({}, NEW_CONSUMER_DEFAULTS), migrations, '1.11.0').config;
+    const c = migrateConfig(mergeDefaults({}, NEW_CONSUMER_DEFAULTS), migrations, '1.11.0', null).config;
     c.vcs.provider = 'github';
     return c;
   },
