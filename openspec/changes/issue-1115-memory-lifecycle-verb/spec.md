@@ -90,16 +90,24 @@ does not satisfy this.
 - WHEN scanned for a `cli.mjs` invocation
 - THEN each names `hydrate`, and none names `import` as the op
 
-### REQ-1115-5 day-start step 4c is gone; 4b is unchanged
+### REQ-1115-5 day-start step 4c is gone; 4b's projection is unchanged, its skip line is honest
 `day-start.mjs` MUST NOT spawn `engram sync --export` and MUST NOT print the
 `day.memory.exporting/exported/exportFailed` lines. Those keys are removed from `en` and `es`.
 Step 4a (`hydrate`) MUST run whatever the backend is, before and outside the engram probe. Step 4b
-(`brain-to-engram.mjs`) stays behind the `engram --version` probe, unchanged.
+(`brain-to-engram.mjs`) stays behind the `engram --version` probe, and its projection is unchanged.
+**[Amended 2026-10-05, maintainer ruling B on the cold review of #1354:]** when the probe fails, step 4
+prints ONE neutral line, `day.memory.reprojectSkipped` ("engram not available — skipping the doctrine
+projection (step 4b, #1349)"), and no install hint. The former `day.memory.notAvailable` ("skipping
+shared memory") and `day.memory.install` lines are removed: after this change 4a has already hydrated
+the backend, so "skipping shared memory" was false, and on plainfiles the engram install hint was wrong.
+An engram-declared checkout without the binary still gets the `gentle-ai install` hint, once, from the
+adapter's deferral (exit 6, which day-start's `run` keeps quiet).
 
 #### Scenario: plainfiles day:start
 - GIVEN a plainfiles consumer without the engram binary
 - WHEN `brain:day:start` runs
 - THEN step 4 prints the hydrating line, `hydrate` exits 0, and nothing is exported into `.memory/`
+- AND it prints the neutral 4b skip line with no `engram` install hint and no "skipping shared memory"
 
 ### REQ-1115-6 session-start names the active backend
 The session-start memory line MUST name the backend that the one resolver
