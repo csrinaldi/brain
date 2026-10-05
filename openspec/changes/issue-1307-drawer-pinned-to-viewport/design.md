@@ -9,9 +9,9 @@ issue: 1307
 
 `.workspace` is a flex row with `align-items: stretch`, so the drawer takes the page height. The drawer gets `align-self: flex-start; position: sticky; top: 0; max-height: 100vh; overflow: hidden`. The status bar is not sticky, so `top: 0` cannot cover it. Known limit: at scroll 0 the drawer's lower edge is below the fold by the height of the chrome above it; the body scrolls, and the rest comes into view as the page scrolls.
 
-### D120: Header outside the scroller, tabs sticky inside it
+### D120: Header and tab bar outside the scroller
 
-`renderDrawer` builds `.drawer-head` (never scrolls) and a `.drawer-body` (`flex: 1; min-height: 0; overflow: auto`) that receives everything else. The tab bar sits mid-body (after the title, children and notes), so it is `position: sticky; top: 0` in the body: it scrolls up to the top and stays. The old `.drawer-head { position: sticky }` is dropped (the head is outside the scroller). The padding rule `.drawer > .note, > .said, > div` becomes `.drawer-body > ...`.
+`renderDrawer` builds `.drawer-head` (never scrolls; `flex: none; flex-wrap: wrap`) and a `.drawer-body` (`flex: 1; min-height: 0; overflow: auto`) that receives everything else. The tab bar is appended to the head as a full-width line (`flex: 1 0 100%`). A first attempt kept the tabs mid-body with `position: sticky`; the browser measurement showed it never engages for an epic: the 49-children list pushes the tabs to the bottom of the body, so the body cannot scroll far enough for them to reach the top. The old `.drawer-head { position: sticky }` is dropped. The padding rule `.drawer > .note, > .said, > div` becomes `.drawer-body > ...`. Cost: the tab bar now sits above the title instead of below the children list.
 
 ### D121: Phone layout unchanged
 

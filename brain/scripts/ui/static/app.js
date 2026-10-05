@@ -1738,7 +1738,7 @@ function renderDrawer() {
   close.addEventListener('click', closeDrawer);
   head.appendChild(close);
   mounts.drawer.appendChild(head);
-  // #1307 D120: the head never scrolls; everything below it is the scrolling body, with the tab bar sticky inside it.
+  // #1307 D120: the head (id line + tab bar) never scrolls; everything below it is the scrolling body.
   const body = el('div', 'drawer-body');
   mounts.drawer.appendChild(body);
 
@@ -1780,7 +1780,7 @@ function renderDrawer() {
     button.addEventListener('click', () => { activeTab = tab.id; renderDrawer(); });
     tabs.appendChild(button);
   }
-  body.appendChild(tabs);
+  head.appendChild(tabs);
   body.appendChild(renderTab(model.value.tabs.find((t) => t.id === activeTab) ?? model.value.tabs[0]));
   if (!localFirst) body.appendChild(renderLocalBlocks(model.value));
   body.appendChild(renderRemoteBlocks(model.value));

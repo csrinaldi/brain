@@ -18,16 +18,16 @@ Above the phone breakpoint, `.drawer` MUST be `position: sticky` with `top: 0`, 
 
 ### R1307-2: The header does not scroll; the body does
 
-The drawer's children MUST be exactly a `.drawer-head` region and a `.drawer-body` region. `.drawer-body` MUST have `flex: 1`, `min-height: 0` and `overflow: auto`. Everything the drawer drew before (title, marks, children, notes, tabs, tab content, blocks) MUST live in `.drawer-body`.
+The drawer's children MUST be exactly a `.drawer-head` region and a `.drawer-body` region. `.drawer-head` MUST hold the id line, the close control and the tab bar, and MUST NOT scroll (`flex: none`). `.drawer-body` MUST have `flex: 1`, `min-height: 0` and `overflow: auto`, and MUST hold everything else (title, marks, children, notes, tab content, blocks).
 
 #### Scenario: Header and body are separate regions
 - **GIVEN** an open drawer with a loaded change
 - **WHEN** the DOM is read
-- **THEN** the drawer has two children, `.drawer-head` holding the close control and `.drawer-body` holding the tab bar and the tab content
+- **THEN** the drawer has two children, `.drawer-head` holding the close control and the tab bar, and `.drawer-body` holding the title and the tab content
 
 ### R1307-3: The tab bar stays visible
 
-`.drawer-body .tabs` MUST be `position: sticky; top: 0` with an opaque background, so the tabs stay visible while the body scrolls.
+The tab bar MUST be a full-width line of `.drawer-head` (`flex: 1 0 100%`), so it stays visible however long the body is.
 
 #### Scenario: Scrolling the drawer body
 - **GIVEN** an open drawer whose body is taller than the drawer

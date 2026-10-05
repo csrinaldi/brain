@@ -15,7 +15,7 @@ The design (`stitch_brain_ui_dashboard_design_system/brain_ui_interactive_surfac
 
 ### In
 - The drawer is pinned to the viewport (`position: sticky; top: 0`, viewport-bounded height) and scrolls independently.
-- The drawer DOM separates a non-scrolling header from a scrolling body; the tab bar is sticky at the top of the body.
+- The drawer DOM separates a non-scrolling header from a scrolling body; the tab bar is part of the non-scrolling header.
 
 ### Out
 - The phone layout (`max-width: 760px`): the drawer stays a full-width block under the canvas.
@@ -35,4 +35,4 @@ About 40 gated lines, against the `lite` budget of 1000. One PR.
 ## Success criteria
 
 - At any page scroll, opening a node shows the drawer header in view (top >= 0, < viewport height).
-- Scrolling the drawer body leaves the tab bar's top unchanged.
+- Scrolling the drawer body leaves the tab bar's top unchanged (the tab bar is in the fixed head).

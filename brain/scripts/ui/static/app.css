@@ -541,9 +541,9 @@ body {
   display: flex;
   flex-direction: column;
 }
-/* #1307 D120: the head is outside the scroller; the body scrolls. */
+/* #1307 D120: the head (id line and tab bar) is outside the scroller; the body scrolls. */
 .drawer-body { flex: 1; min-height: 0; overflow: auto; }
-.drawer-body .tabs { position: sticky; top: 0; z-index: 1; background: var(--surface); }
+.drawer-head .tabs { flex: 1 0 100%; padding: 0; margin: 0; }
 @media (max-width: 760px) {
   .workspace { flex-direction: column; }
   .drawer { width: 100%; border-left: 0; border-top: 1px solid var(--line); position: static; max-height: none; overflow: visible; }
@@ -917,6 +917,7 @@ body {
   border-bottom: 1px solid var(--line);
   background: var(--paper);
   flex: none;
+  flex-wrap: wrap;
 }
 .drawer-id { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-family: var(--font-mono); font-size: 11px; }
 .drawer-number { color: var(--accent); font-weight: 700; font-size: 12px; }

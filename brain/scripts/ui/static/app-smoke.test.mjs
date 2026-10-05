@@ -587,7 +587,7 @@ test('#1257 smoke: a pending graph shows the loading sentence, no failure wordin
   assert.doesNotMatch(banners, /(graph|prs|reviews|closedIssues): loading/, 'a section that is only loading is not listed as failed');
 });
 
-test('#1307: the drawer separates a non-scrolling head from a scrolling body that holds the tabs', async (t) => {
+test('#1307: the drawer separates a non-scrolling head from a scrolling body; the tabs stay in the head', async (t) => {
   const dom = await boot();
   t.after(() => dom.restore());
 
@@ -599,6 +599,7 @@ test('#1307: the drawer separates a non-scrolling head from a scrolling body tha
   const head = find(dom.mounts.drawer, byClass('drawer-head'));
   const body = find(dom.mounts.drawer, byClass('drawer-body'));
   assert.ok(find(head, byClass('close')), 'the close control is in the head');
-  assert.ok(find(body, byClass('tabs')), 'the tab bar is in the scrolling body (sticky there)');
-  assert.equal(find(head, byClass('tabs')), null, 'and not in the head');
+  assert.ok(find(head, byClass('tabs')), 'the tab bar is in the head, so it stays visible while the body scrolls');
+  assert.equal(find(body, byClass('tabs')), null, 'and not in the scrolling body');
+  assert.ok(find(body, byClass('drawer-title')), 'the title and the tab content are in the body');
 });

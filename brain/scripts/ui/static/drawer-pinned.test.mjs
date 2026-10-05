@@ -39,11 +39,12 @@ test('R1307-2: the drawer body is the scroller', () => {
   assert.match(body, /min-height:\s*0/, 'without it a flex child never shrinks below its content and never scrolls');
 });
 
-test('R1307-3: the tab bar sticks to the top of the body with an opaque background', () => {
-  const body = declarationsFor('.drawer-body .tabs');
-  assert.match(body, /position:\s*sticky/);
-  assert.match(body, /top:\s*0/);
-  assert.match(body, /background:/);
+test('R1307-3: the tab bar lives in the head, a full-width line that does not scroll', () => {
+  const head = declarationsFor('.drawer-head');
+  assert.match(head, /flex:\s*none/, 'the head keeps its height; only the body shrinks');
+  assert.match(head, /flex-wrap:\s*wrap/);
+  assert.doesNotMatch(head, /position:\s*sticky/, 'it is outside the scroller, so it needs no sticky');
+  assert.match(declarationsFor('.drawer-head .tabs'), /flex:\s*1 0 100%/);
 });
 
 test('R1307-4: the phone layout keeps a full-width, non-sticky drawer', () => {
