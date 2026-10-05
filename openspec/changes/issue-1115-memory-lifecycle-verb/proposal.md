@@ -48,6 +48,19 @@ The contract already names the operation: `hydrate({root, recordId?})` is a requ
    `agent-authorities.md` wherever they say `cli.mjs import`.
 7. **One PR** with the code and the drafts.
 
+## Rulings on the plan's open questions (maintainer, 2026-10-05)
+
+8. **Q1 — `session:start` does not write.** `hydrate` under session-start only VERIFIES the
+   plainfiles index (reports drift, writes nothing); `.memory/index.jsonl` is tracked and
+   `session:start` is read-only (`harness-contract.md:30`). The rebuild happens in `post-merge` and
+   in the `hydrate` / `memory:pull` calls that already write. Engram's import projects into the
+   engram store, not the tracked tree, so under session-start it stays as today.
+9. **Q2 — day-start 4b stays as is.** Follow-up #1349 owns it.
+10. **Q3 — the records context shows for every backend**, read from `.memory/records/` with no
+    backend call. The richer backend-provided context is follow-up #1350.
+11. **Q4 — exit 6 means deferred**, accepted ON CONDITION that `post-merge` and `session-start`
+    treat 6 as non-fatal, with tests proving it.
+
 ## Scope
 
 - `hydrate` bulk form on both adapters: `brain/scripts/axes/memory/adapters/engram.mjs`
@@ -93,18 +106,17 @@ The spec records the verified and unverified parts (REQ-1115-11).
   They are a different leak class (heal/audit), and #1115 does not close them. Their `owner`
   re-points to a follow-up (see tasks).
 
-## Follow-ups to file (before the PR is merged, so the allowlist owners point at open issues)
+## Follow-ups (filed by the maintainer)
 
-1. **day-start 4b → `cli.mjs index`.** Retire the `engram --version` probe and the
-   `brain-to-engram.mjs` spawn from day-start, and take over the `day-start.mjs
-   spawn-concrete:engram` allowlist entry (max 1 after this change).
-2. **`hydrate` returns a context payload** (contract widening, ADR-level). session-start would then
-   render the backend's own context instead of reading records itself.
-3. **Remove the `import` alias** in the release after the one that ships `hydrate`. That covers
-   `VALID_OPS`, the alias block, the i18n deprecation key and `ROOTED_OPS`.
-4. **Owner for the residual #1115 allowlist entries** (`memory/cli.mjs` adapter-import and
-   axis-branch for heal, `memory/lib/audit-io.mjs` adapter-import and axis-branch, and the two
-   `brain-to-engram.mjs` entries). #1115 closes, so each entry needs a live issue.
+1. **#1349 — day-start 4b → `cli.mjs index`.** Retire the `engram --version` probe and the
+   `brain-to-engram.mjs` spawn from day-start. It owns the `day-start.mjs spawn-concrete:engram`
+   allowlist entry (max 1 after this change) and the two `brain-to-engram.mjs` entries.
+2. **#1350 — `hydrate` returns a context payload** (contract widening, ADR-level). session-start
+   would then render the backend's own context instead of reading records itself.
+3. **#1351 — remove the `import` alias** in the release after the one that ships `hydrate`
+   (`VALID_OPS`, the alias block, the i18n deprecation key).
+4. No number was given for the residual `memory/cli.mjs` heal and `memory/lib/audit-io.mjs`
+   allowlist entries. They keep owner `#1115`, which this PR's `Closes` retires: flagged.
 
 ## Change-dir completeness
 

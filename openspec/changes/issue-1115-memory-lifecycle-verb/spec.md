@@ -25,6 +25,19 @@ return `{ written, skipped, deferred?, contended? }`. It MAY also return the sha
 - AND it returns `{ written: 0, skipped: N, indexCount: N, duplicates }`
 - AND no git command runs
 
+### REQ-1115-1b A read-only `verify` form of bulk `hydrate` (ruling Q1)
+`hydrate({ root, verify: true })` on plainfiles MUST NOT write or create any file under `.memory/`.
+It reports whether `.memory/index.jsonl` matches what `rebuildIndex` would write, returning
+`{ written: 0, skipped: N, indexCount: N, duplicates, verified: true, stale }`. On engram the flag is
+ignored: the import projects into the engram store, outside the tracked tree, as `session:start`
+already did.
+
+#### Scenario: verify on a stale plainfiles index
+- GIVEN plainfiles, N records and an `index.jsonl` that differs from the canonical bytes
+- WHEN `hydrate({ root, verify: true })` runs
+- THEN it returns `stale: true` and `verified: true`
+- AND `index.jsonl` is byte-identical and `git status --porcelain .memory` is unchanged
+
 #### Scenario: the single-record form is unchanged
 - GIVEN `hydrate({ root, recordId: 'rec-unknown' })` on engram with no such record
 - WHEN it runs
@@ -35,7 +48,8 @@ When the engram binary is absent or unresolvable, or the import throws, or the g
 or engram's state is unreadable, bulk `hydrate` MUST return `deferred: true` and say why on
 stderr. When the binary is absent, the reason MUST name the install fix (`gentle-ai install`).
 The dispatcher MUST exit with `EXIT_DEFERRED` (6) for a deferred `hydrate`, so the result can
-never read as "done" (contract failure discipline).
+never read as "done" (contract failure discipline). **Condition (ruling Q4):** `post-merge` and
+`session-start` MUST treat 6 as non-fatal: the hook still exits 0, session-start still exits 0.
 
 #### Scenario: engram declared, binary absent
 - GIVEN `memory.default: engram` and no `engram` on PATH
@@ -67,7 +81,8 @@ Both spellings MUST refuse with exit 3 or 4 when the backend is undeclared or in
 
 ### REQ-1115-4 Every entrypoint calls only `hydrate`
 `session-start.mjs`, `day-start.mjs` and `brain/scripts/hooks/post-merge` MUST invoke
-`memory/cli.mjs hydrate` and MUST NOT invoke `memory/cli.mjs import`. Renaming the step alone
+`memory/cli.mjs hydrate` and MUST NOT invoke `memory/cli.mjs import`. `session-start.mjs` MUST pass
+`--verify` (ruling Q1), so it never writes the tracked tree. Renaming the step alone
 does not satisfy this.
 
 #### Scenario: source scan
@@ -93,9 +108,16 @@ unless that backend is engram. It distinguishes four outcomes: hydrated, deferre
 skipped (any other non-zero exit, with the reason), and not declared (exit 3 or 4, unchanged).
 
 #### Scenario: plainfiles banner
-- GIVEN a plainfiles consumer
+- GIVEN a plainfiles consumer with a canonical index
 - WHEN `brain:session:start` runs
-- THEN the memory line reads `memory:   plainfiles hydrated`, and the output contains no `engram`
+- THEN the memory line reads `memory:   plainfiles verified — index current (read-only)`, the output
+  contains no `engram`, and `git status --porcelain` is unchanged by the run
+
+#### Scenario: plainfiles with a stale index
+- GIVEN a plainfiles consumer whose `index.jsonl` drifted
+- WHEN `brain:session:start` runs
+- THEN the memory line says the index is stale and names `npm run brain:memory:share`, and the
+  index file is NOT rewritten
 
 #### Scenario: engram without its binary
 - GIVEN engram declared and the binary absent
@@ -162,7 +184,9 @@ NOT on the allowlist (it is a deprecated alias, never called from here).
 
 ### MODIFIED Requirement: REQ-4 Local Backend Hydration (was "Local Engram Hydration")
 The system MUST hydrate the ACTIVE memory backend from `.memory/records/` by invoking
-`memory/cli.mjs hydrate`, a local-only operation that the backend implements. It MUST NOT name or
+`memory/cli.mjs hydrate --verify`, a local-only operation that the backend implements and that
+writes nothing in the tracked tree (the rebuild belongs to `post-merge`, `memory:pull` and the
+other callers that already write). It MUST NOT name or
 call a backend-specific op.
 
 #### Scenario: engram hydrated from records
@@ -170,11 +194,11 @@ call a backend-specific op.
 - WHEN `session:start` runs
 - THEN engram is populated through `hydrate`, with no network call, and the line reads `engram hydrated`
 
-#### Scenario: plainfiles hydrated from records
+#### Scenario: plainfiles verified from records
 - GIVEN plainfiles declared
 - WHEN `session:start` runs
-- THEN `hydrate` rebuilds the derived index, the line reads `plainfiles hydrated`, and no
-  "does not implement" text appears
+- THEN `hydrate --verify` only checks the derived index (no write), the line reads
+  `plainfiles verified …`, and no "does not implement" text appears
 
 #### Scenario: hydration deferred
 - GIVEN `hydrate` exits 6
@@ -215,7 +239,8 @@ unreadable state, or a thrown import.
 
 ### ADDED Requirement: REQ-MB-7: Bulk Hydrate On plainfiles
 `plainfiles.hydrate({root})` MUST run `rebuildIndex` only (no git) and report
-`skipped = indexCount`, because the records ARE the backend (rule 1 by construction).
+`skipped = indexCount`, because the records ARE the backend (rule 1 by construction). With
+`verify: true` it MUST write nothing and report `stale` (REQ-1115-1b).
 
 ### ADDED Requirement: REQ-MB-8: `import` Is A Deprecated Alias Of `hydrate`
 For one release, `cli.mjs import` MUST dispatch `hydrate` after a single stderr notice naming

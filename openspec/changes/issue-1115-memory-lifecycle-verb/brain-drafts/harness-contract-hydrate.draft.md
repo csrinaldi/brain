@@ -36,7 +36,9 @@ and `plainfiles` refused it. The dispatcher's op is now `hydrate`, implemented b
 ### What this does NOT change
 
 The verb table and the `session:start` row's "hydrates the active memory backend". That row was
-already backend-neutral.
+already backend-neutral, and `session:start` stays read-only: it calls `hydrate` in its `verify`
+form, which on `plainfiles` checks the derived index and writes nothing
+(`memory-backend-contract.md` Amendment 3).
 
 ### Notes for the promoter
 

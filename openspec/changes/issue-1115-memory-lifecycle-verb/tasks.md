@@ -4,8 +4,8 @@ Strict TDD: in every pair, the RED test is written and seen failing before the G
 Run the touched tests with `node --test <file>`, and the whole suite with `npm test` at T8.
 
 ## T0 Pre-apply
-- [ ] 0.1 Maintainer answers design Q1-Q4 (or confirms the defaults written in design.md).
-- [ ] 0.2 File the follow-ups (proposal §Follow-ups 1-4) and record their numbers here; D9 needs the 4b issue number as the allowlist `owner`.
+- [x] 0.1 Maintainer answered Q1-Q4 on 2026-10-05 (see design "Rulings"). Q1 adds the `verify` mode (T1b).
+- [x] 0.2 Follow-ups filed: #1349 (4b), #1350 (context payload), #1351 (remove `import`). D9 owner is #1349.
 
 ## T1 Adapters — bulk `hydrate`
 - [ ] 1.1 RED `engram.hydrate.test.mjs`: bulk delegates to `_importMemory({root})` once and normalizes (`skipped` defaults to 0).
@@ -15,20 +15,26 @@ Run the touched tests with `node --test <file>`, and the whole suite with `npm t
 - [ ] 1.5 GREEN `plainfiles.mjs`: `hydrate` export (D2).
 - [ ] 1.6 i18n: `memory.hydrate.deferred` in en and es (RED key-existence assertion first in `coverage.test.mjs`).
 
+## T1b Read-only `verify` (ruling Q1)
+- [ ] 1b.1 RED `store.verify-index.test.mjs`: `verifyIndex` stale/current/absent cases, never writes, corrupt record throws.
+- [ ] 1b.2 GREEN `store.mjs`: extract `buildIndex`, add `verifyIndex`; `rebuildIndex` behaviour unchanged.
+- [ ] 1b.3 RED `plainfiles.hydrate.test.mjs`: `verify: true` never calls `_rebuildIndex`, returns `verified` and `stale`.
+- [ ] 1b.4 GREEN `plainfiles.mjs` `hydrate` verify branch (D2); `engram.hydrate` ignores `verify` (a test pins it).
+
 ## T2 Dispatcher
-- [ ] 2.1 RED `memory/cli.hydrate.test.mjs`: plainfiles `hydrate` exits 0 with no `does not implement`; `import` exits 0 with one deprecation notice naming `hydrate`; engram declared with the binary absent exits 6, stderr has `gentle-ai install`, no `plainfiles`; undeclared exits 3 for both spellings; `FALLBACK_OPS` deep-equals `["pull"]`.
+- [ ] 2.1 RED `memory/cli.hydrate.test.mjs`: plainfiles `hydrate` exits 0 with no `does not implement`; `import` exits 0 with one deprecation notice naming `hydrate`; `hydrate --verify` on a stale index exits 0, prints the stdout JSON line, rewrites nothing; engram declared with the binary absent exits 6, stderr has `gentle-ai install`, no `plainfiles`; undeclared exits 3 for both spellings; `FALLBACK_OPS` deep-equals `["pull"]`.
 - [ ] 2.2 GREEN `backend-resolve.mjs`: `EXIT_DEFERRED = 6`.
 - [ ] 2.3 GREEN `cli.mjs` (D3, D4): `requestedOp`/`op` rewrite, `VALID_OPS` + `hydrate`, deprecation notice, delete `VERB_TO_EXPORT`, `ROOTED_OPS`, shape-keyed duplicate surface, `exitCode = EXIT_DEFERRED`, comment at `:146`.
 - [ ] 2.4 i18n: `memory.import.deprecated` in en and es.
 - [ ] 2.5 Update pins: `cli.backend-fallback.test.mjs:303-315`, `cli.backend-declaration.test.mjs:119,181`, `lib/backend-selection.test.mjs:179,202-203`.
 
 ## T3 post-merge
-- [ ] 3.1 RED `hooks/post-merge.op.test.mjs`: the stub `node` records `hydrate` as argv[2] and never `import`.
+- [ ] 3.1 RED `hooks/post-merge.op.test.mjs`: the stub `node` records `hydrate` as argv[2] and never `import`; a stub exiting 6 leaves the hook at exit 0 with the reason on stderr (Q4).
 - [ ] 3.2 GREEN `hooks/post-merge` (D5); update `post-merge.undeclared.test.mjs:25` to "memory hydration skipped".
 
 ## T4 session-start
-- [ ] 4.1 RED `session-start.test.mjs`: the step spawns `hydrate`; `assertLocalArgv` rejects `import`; the import-graph allowlist includes `./memory/lib/backend-resolve.mjs` (update the pin).
-- [ ] 4.2 RED: the banner names the `_resolveBackend` backend (`plainfiles hydrated`, no `engram` substring); exit 6 → deferred line; 3/4 → the not-declared line is unchanged.
+- [ ] 4.1 RED `session-start.test.mjs`: the step spawns `hydrate --verify`; `assertLocalArgv` accepts only that 3-arg form; `assertLocalArgv` rejects `import`; the import-graph allowlist includes `./memory/lib/backend-resolve.mjs` (update the pin).
+- [ ] 4.2 RED: the banner names the `_resolveBackend` backend (`plainfiles hydrated`, no `engram` substring); exit 6 → deferred line and `exitCode` 0 (Q4); stdout `verified`/`stale` lines render the verified and stale banners; 3/4 → the not-declared line is unchanged.
 - [ ] 4.3 GREEN `session-start.mjs` (D6): allowlist, `step2Hydrate`, backend name, model key `hydration`, render.
 - [ ] 4.4 RED `step4cMemoryRecords`: dedupe by id, title extraction and truncation, ≤5 scoped newest first, unreadable → `count:null`, ambiguous change → no issue line.
 - [ ] 4.5 GREEN `session-start.mjs` (D7): reader, wiring in `runSessionStart`, render order (REQ-7).
@@ -42,7 +48,7 @@ Run the touched tests with `node --test <file>`, and the whole suite with `npm t
 
 ## T6 Allowlist and parity
 - [ ] 6.1 Run `node --test brain/scripts/axes/axis-port.guard.test.mjs` and see `SHRANK day-start.mjs spawn-concrete:engram`.
-- [ ] 6.2 GREEN `axis-port.allowlist.mjs` (D9): max 1, the new reason, owner = the 4b follow-up; re-point the residual #1115 owners to follow-up 4.
+- [ ] 6.2 GREEN `axis-port.allowlist.mjs` (D9): max 1, the new reason, owner `#1349`; the two `brain-to-engram.mjs` entries move to `#1349`; heal/audit-io keep `#1115` (no number given).
 - [ ] 6.3 `no-artifact.parity.test.mjs:153-181`: the plainfiles leg asserts `hydrate` (and `import`) exit 0 and the tree is byte-identical; update the header comment (`:11-15`).
 
 ## T7 Docs (code half) and comments
@@ -89,4 +95,5 @@ Estimated changed lines (added + deleted) **excluding** the ignoreList (`**/*.te
 - Above 1000 (the tier in force here is `lite`, `brain.config.json` `governance.tier`): **No**.
 - Chained PRs recommended: **No**. Ruling 7 asks for one PR, and the change fits `lite` with a
   wide margin. Tests (~600-800 lines) and drafts are outside the gated count.
-- Decision needed before apply: **Yes**, but only for design Q1-Q4. Not for size.
+- Decision needed before apply: **No**. Q1-Q4 are answered (design "Rulings"). The `verify` mode adds
+  roughly 60 gated lines (store, plainfiles, dispatcher); still well under 1000.

@@ -45,13 +45,22 @@ the bulk form, `hydrate({root})`, exists on both backends as of #1115 and is dis
   the guard is contended, engram's state is unreadable, or the import fails.
   `plainfiles.hydrate({root})` is `rebuildIndex`, which matches the Conformance row that already
   said so. Both are in `brain/scripts/axes/memory/adapters/`.
+- **A read-only form, `hydrate({root, verify: true})`.** An adapter given `verify: true` MUST NOT
+  write the tracked tree. `plainfiles` then does not rebuild `.memory/index.jsonl`: it compares it
+  with what the rebuild would write and returns `verified: true` and `stale`. `engram` ignores the
+  flag: its import projects into the engram store, which is not a write to the tracked tree.
+  `session:start` is the caller that passes it, because it is read-only (`harness-contract.md`).
+  Callers that already write (`post-merge`, `brain:memory:pull`, `day:start`) call the default form.
 - **One op name for every caller.** `cli.mjs hydrate` is the op `session:start`, `day:start` and
   the `post-merge` hook call. None of them names a backend op any more. `cli.mjs import` remains
   for one release as an alias. It prints a deprecation notice naming `hydrate` and then
   dispatches `hydrate`. It is not in `FALLBACK_OPS`, which stays `["pull"]`.
+- **`verified` and `stale` are the only fields beyond the shared accounting**, and only the
+  `verify` form returns them.
 - **A deferred bulk hydration has its own exit status, 6** (`EXIT_DEFERRED`,
   `brain/scripts/memory/lib/backend-resolve.mjs`), so a caller can never read a deferral as
-  "done". That is this contract's failure discipline, applied at the process boundary.
+  "done". That is this contract's failure discipline, applied at the process boundary. The
+  callers that load context (`post-merge`, `session:start`) treat 6 as non-fatal.
 
 ### Why
 
@@ -69,8 +78,9 @@ The three rules, the other required verbs (`setup`, `share`, `save`), the single
 ### What the code does not do yet, said plainly
 
 - **The alias is not removed.** It goes in the release after the one that ships `hydrate`.
-- **On `plainfiles`, `session:start` now rebuilds `.memory/index.jsonl`.** The rebuild is
-  deterministic from the records, so a canonical index is untouched, but a stale one is rewritten.
+- **On `plainfiles`, `session:start` reports a stale index and does not repair it.** The repair
+  is the rebuild in `post-merge` or `brain:memory:share`. A consumer that never pulls through the
+  hook keeps seeing the stale line until it runs one.
 
 ### Notes for the promoter
 
