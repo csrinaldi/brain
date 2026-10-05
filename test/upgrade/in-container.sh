@@ -50,7 +50,9 @@ ENV_INIT_RC=$?
 [ -f brain.config.json ] || { echo "✗ env:init did not create brain.config.json"; exit 2; }
 # A team that declared its memory backend (a CI run never declares it for you): without this the memory axis is
 # honestly undeclared and cannot resolve, which would make the all-four-axes assertion in step 4b vacuous (#1344).
-npm run brain:config -- set memory.backend plainfiles >/dev/null 2>&1 || info "could not declare memory.backend on ${FROM}; step 4b skips the memory resolve"
+# MEMORY_DECLARED records whether the declaration landed: step 4b must not excuse a memory resolve failure when it did (#1346).
+MEMORY_DECLARED=yes
+npm run brain:config -- set memory.backend plainfiles >/dev/null 2>&1 || { MEMORY_DECLARED=no; info "could not declare memory.backend on ${FROM}; step 4b reports a memory resolve failure as info only"; }
 # Snapshot FROM's shipped brain/scripts BEFORE the upgrade (#1325). After the upgrade, every file
 # whose content differs between FROM's and TO's package must be TO's content in the consumer's
 # managed copy: that is what proves copyManaged ran, not merely that `npm i` fetched TO.
@@ -112,7 +114,7 @@ if [ "$HAS_SHAPE_MIGRATION" = "yes" ]; then
   for AXIS in vcs memory platform sdd; do
     out=$(node "${PKG_DIR}/brain/scripts/config/cli.mjs" resolve "$AXIS" 2>&1); rc=$?
     if [ "$rc" = 0 ]; then ok "resolve ${AXIS} (no .env) -> ${out%% *}"
-    elif [ "$AXIS" = memory ] && [ "$rc" = 3 ]; then info "resolve memory (no .env) rc=3: the FROM consumer could not declare it"
+    elif [ "$AXIS" = memory ] && [ "$MEMORY_DECLARED" = no ]; then info "resolve memory (no .env) rc=${rc}: the FROM consumer could not declare memory.backend (the declaration failed at setup), so this is not asserted"
     else fail "resolve ${AXIS} with no .env exited ${rc}: ${out}"; fi
   done
   mv .env.aside .env
