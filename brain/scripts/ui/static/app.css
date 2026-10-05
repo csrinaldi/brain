@@ -94,7 +94,7 @@
     --state-done-fg: #6366f1;           --state-done-bg: #1e1b4b;
     --state-blocked-fg: #fb7185;        --state-blocked-bg: #4c0519;
     --state-awaiting-review-fg: #f59e0b; --state-awaiting-review-bg: #451a03;
-      --state-unreadable-fg: #d946ef;     --state-unreadable-bg: #3b0764;
+    --state-unreadable-fg: #d946ef;     --state-unreadable-bg: #3b0764;
     --state-not-computed-fg: #475569;   --state-not-computed-bg: #0f172a;
     --state-unknown-fg: #fbbf24;        --state-unknown-bg: #0f172a;
     --severity-blocker-fg: #fb7185;     --severity-blocker-bg: #4c0519;
@@ -126,7 +126,7 @@
     --state-done-fg: #6366f1;           --state-done-bg: #1e1b4b;
     --state-blocked-fg: #fb7185;        --state-blocked-bg: #4c0519;
     --state-awaiting-review-fg: #f59e0b; --state-awaiting-review-bg: #451a03;
-      --state-unreadable-fg: #d946ef;     --state-unreadable-bg: #3b0764;
+    --state-unreadable-fg: #d946ef;     --state-unreadable-bg: #3b0764;
     --state-not-computed-fg: #475569;   --state-not-computed-bg: #0f172a;
     --state-unknown-fg: #fbbf24;        --state-unknown-bg: #0f172a;
     --severity-blocker-fg: #fb7185;     --severity-blocker-bg: #4c0519;

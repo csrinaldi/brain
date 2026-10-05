@@ -1,5 +1,5 @@
 // state-vocab.mjs — the ONE table of node states (#998 R998-1): code, word,
-// mark and CSS class, in colour.mjs's priority. Pure, imported by the browser
+// mark and CSS class; the precedence between them is `stateOf`'s alone (below). Pure, imported by the browser
 // and by node:test (D9), so the status and roadmap strings are literals here;
 // `state-vocab.test.mjs` imports the real constants and pins every one.
 //
@@ -83,12 +83,29 @@ export const TRACK_MARKS = Object.freeze({
   declared: Object.freeze({ code: 'declared', mark: '', className: 'track-declared', warning: false }),
   'no-track': Object.freeze({ code: 'no-track', label: 'No track', mark: '?', className: 'track-no-track', warning: false }),
   undeclared: Object.freeze({ code: 'undeclared', label: 'Configuration missing', mark: '⚠', className: 'track-undeclared', warning: true }),
+  // A block exists and the graph could not read it (#1308 cold-1, D129): a different fact from "no block", and the
+  // remedy is the opposite — fix the block, never paste another one.
+  'unreadable-config': Object.freeze({ code: 'unreadable-config', label: 'Configuration unreadable', mark: '⚠', className: 'track-undeclared', warning: true }),
 });
+
+/**
+ * withBlockErrors(graphValue) -> graphValue whose nodes carry `blockError` (the graph's own error text) when their
+ * `brain-graph/1` block exists and could not be read. `buildGraph` sets `declared: false` for that body AND for a
+ * body with no block, so the node alone cannot tell them apart; the graph-level `blocksUnreadable` list can.
+ * Every lane-model entry point applies this once, so the chips and the paste block read one fact.
+ */
+export function withBlockErrors(graphValue) {
+  const value = graphValue ?? {};
+  const errors = new Map((value.blocksUnreadable ?? []).map((b) => [b.number, b.error]));
+  if (errors.size === 0) return value;
+  return { ...value, nodes: (value.nodes ?? []).map((n) => (errors.has(n.number) ? { ...n, blockError: errors.get(n.number) } : n)) };
+}
 
 /** trackMarkOf(node) -> {code, label, mark, className, warning} | null — null for an unreadable body: its declaration is unknown, not absent. */
 export function trackMarkOf(node) {
   if (node.status === 'unreadable') return null;
   if (node.track != null) return { ...TRACK_MARKS.declared, label: `Track ${node.track}` };
+  if (node.blockError != null) return { ...TRACK_MARKS['unreadable-config'] };
   if (node.declared === false) return { ...TRACK_MARKS.undeclared };
   return { ...TRACK_MARKS['no-track'] };
 }

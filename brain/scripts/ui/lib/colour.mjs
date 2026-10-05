@@ -5,12 +5,10 @@
 // constants and asserts every one still maps to a defined class — a
 // renamed constant fails that test instead of quietly painting a node grey.
 //
-// Priority, highest first (R881-6):
-//   1. `node.status === 'unreadable'` — the issue body could not be read.
-//   2. `roadmap.ok === false` — "not computed", MUST NOT read as `planned`.
-//   3. an open `blockedBy` — the blocked mark, overrides the state colour.
-//   4. `node.status === 'awaiting-human'` — the RFC's awaiting-review mark.
-//   5. otherwise, `roadmap.value.state` (`planned` / `in-flight` / `done`).
+// Precedence (#1308 R1308-3): `stateOf` in state-vocab.mjs is the ONE authority and this comment
+// restates nothing it could drift from. In order: Unreadable > Done > Blocked > Awaiting review >
+// In flight > Not computed > Planned. (R881-6 once ranked an open `blockedBy` above the roadmap
+// state; Done now outranks Blocked.)
 // `node.status === 'unclassified'` (no declaring source at all) is no longer a
 // state (#1308): it reads its lifecycle like every node, and the missing
 // declaration is the track chip's warning (`trackMarkOf`), a different fact.

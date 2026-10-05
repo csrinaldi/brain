@@ -36,3 +36,18 @@ Server `node brain/scripts/ui/server.mjs --port 4327 --root /home/gandalf/IA/bra
 - `tasks.md` heading `Micro-decisions` renamed to English.
 - The holding-lane tile (the card of an undeclared issue) now carries both chips, so the warning is on the card as ruled; the tile gained `data-issue`.
 - Legend track group lists `Track <id>`, `? No track`, `⚠ Configuration missing`.
+
+## Batch 2 (review round 1)
+
+| Finding | RED | GREEN |
+|---|---|---|
+| cold-1 | 3 new tests failed: no `withBlockErrors`, malformed body read `Configuration missing` with a paste block | `unreadable-config` mark, `withBlockErrors` in `state-vocab.mjs` applied at the three `lane-model.mjs` entry points, `declareFor` null, error as a said mark; spec R1308-2/R1308-10 + S14, design D129 |
+| cold-2 | comment only | `colour.mjs` header and `state-vocab.mjs` line 2 point to `stateOf` and the ruled precedence |
+| cold-3 | n/a | `renderDeclareBlock` moved above `renderChildren`'s JSDoc |
+| cold-4 | n/a | `trackMark:` and `--state-unreadable-*` indentation restored |
+
+- `blocksUnreadable` is GRAPH-level (`epic-graph.mjs:643`, pushed at `:651`, returned at `:791`), a list of `{number, error}`; it reaches the UI through the snapshot graph section value (`...g`). No change to `epic-graph.mjs`.
+- Correction to the finding: the bare `protocol:` scalar body is NOT in `blocksUnreadable` (the graph reads it as no block). The legacy shape the graph flags is a ```yaml fence with `protocol:` inside; that is the shape tested.
+- `npm test`: 7649 tests, 7646 pass, 0 fail, 3 skipped. repo:check and nav clean.
+- Mutation: `trackMarkOf` ignoring `blockError` -> 2 failing tests (more in the targeted files); reverted.
+- Real-browser proof skipped: no issue on the forge has a malformed block; the fake-DOM render test runs the real app.js.

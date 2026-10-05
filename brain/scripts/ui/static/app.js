@@ -1912,12 +1912,7 @@ function renderRemoteBlocks({ remote, remoteNote }) {
   return wrap;
 }
 
-/**
- * The tickets that belong to the selected one (#1059 phase 10): the issues
- * that DECLARE it as their parent, each with the state vocabulary a card
- * shows. A node nobody declares says so — "no ticket names this as its
- * parent" is a fact about the declarations, not a failure to read them.
- */
+/** The paste block of an issue with NO brain-graph/1 block (#1308 D128). A malformed block gets none (D129). */
 function renderDeclareBlock(declare) {
   const wrap = el('div', 'declare-block');
   wrap.appendChild(el('span', 'declare-label', 'this issue is missing its brain-graph/1 configuration — paste in the issue body'));
@@ -1928,6 +1923,12 @@ function renderDeclareBlock(declare) {
   return wrap;
 }
 
+/**
+ * The tickets that belong to the selected one (#1059 phase 10): the issues
+ * that DECLARE it as their parent, each with the state vocabulary a card
+ * shows. A node nobody declares says so — "no ticket names this as its
+ * parent" is a fact about the declarations, not a failure to read them.
+ */
 function renderChildren(issue) {
   const wrap = el('div', 'drawer-children');
   const found = childrenOf(sectionOf(state, 'graph'), sectionOf(state, 'hierarchy'), issue, { work: currentWork() });

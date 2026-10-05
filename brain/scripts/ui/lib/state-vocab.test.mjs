@@ -58,7 +58,8 @@ test('#998: every className has a rule in app.css', () => {
 });
 
 // ── #1308: lifecycle state is separate from the track mark ────────────────
-import { trackMarkOf, TRACK_MARKS } from './state-vocab.mjs';
+import { trackMarkOf, TRACK_MARKS, withBlockErrors } from './state-vocab.mjs';
+import { buildGraph } from '../../status/epic-graph.mjs';
 
 const READY_WORK = { missing: [], byIssue: new Map() };
 const workWith = (...issues) => ({ missing: [], byIssue: new Map(issues.map((i) => [i, { issue: i, changes: [], worktrees: [{ leaf: 'w' }], branches: [], prs: [] }])) });
@@ -109,7 +110,7 @@ test('R1308-9/S12: stale evidence is still evidence — the index holds it and t
 });
 
 test('R1308-2: the track mark — Track <id>, ? No track, a warning for missing configuration, none when unreadable', () => {
-  assert.deepEqual(Object.keys(TRACK_MARKS).sort(), ['declared', 'no-track', 'undeclared']);
+  assert.deepEqual(Object.keys(TRACK_MARKS).sort(), ['declared', 'no-track', 'undeclared', 'unreadable-config']);
   assert.deepEqual(trackMarkOf({ status: READY, track: 'UI', declared: true }), { code: 'declared', label: 'Track UI', mark: '', className: 'track-declared', warning: false });
   assert.equal(trackMarkOf({ status: READY, track: null, declared: true }).label, 'No track');
   assert.equal(trackMarkOf({ status: READY, track: null, declared: true }).mark, '?');
@@ -124,4 +125,33 @@ test('R1308-2: the track mark — Track <id>, ? No track, a warning for missing 
 test('R1308-5: the legacy call without a work index keeps the roadmap reading minus the unclassified branch', () => {
   assert.equal(stateOf(undeclared()).code, 'planned');
   assert.equal(stateOf(undeclared({ roadmap: { ok: true, value: { state: IN_FLIGHT } } })).code, 'in-flight');
+});
+
+// #1308 cold-1: a body whose block cannot be read is NOT a body with no block. buildGraph sets
+// `declared: false` for both; the graph's own `blocksUnreadable` is what tells them apart.
+const BLOCK = ['```brain-graph/1', 'track: UI', 'blocks: []', 'needs: []', '```'];
+const MALFORMED = {
+  'two fences': [...BLOCK, '', ...BLOCK].join('\n'),
+  'an unterminated fence': BLOCK.slice(0, -1).join('\n'),
+  'the legacy yaml fence with a protocol scalar': '```yaml\nprotocol: brain-graph/1\ntrack: UI\n```',
+};
+const realGraph = (body) => buildGraph([{ number: 7, title: 't', labels: ['status:approved'], state: 'open', body }]);
+
+for (const [shape, body] of Object.entries(MALFORMED)) {
+  test(`R1308-2/cold-1: ${shape} reads Configuration unreadable with the graph's error, never Configuration missing`, () => {
+    const g = realGraph(body);
+    assert.equal(g.blocksUnreadable.length, 1, 'the graph itself calls this body unreadable');
+    const n = withBlockErrors(g).nodes[0];
+    const mark = trackMarkOf(n);
+    assert.equal(mark.code, 'unreadable-config');
+    assert.equal(mark.label, 'Configuration unreadable');
+    assert.equal(mark.warning, true);
+    assert.equal(n.blockError, g.blocksUnreadable[0].error);
+  });
+}
+
+test('R1308-2/cold-1: a body with no block at all stays Configuration missing through withBlockErrors', () => {
+  const g = realGraph('nothing here');
+  assert.deepEqual(g.blocksUnreadable, []);
+  assert.equal(trackMarkOf(withBlockErrors(g).nodes[0]).code, 'undeclared');
 });

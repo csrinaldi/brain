@@ -16,8 +16,10 @@ carries track information and the track chip never carries lifecycle information
 
 **R1308-2 — Track chip.** `Track <id>` when the node declares a track; `? No track` when it
 declares a `brain-graph/1` block without a track; a WARNING chip `⚠ Configuration missing` (own
-chip, warning colours, accessible text "configuration missing") when it declares no block. An
-unreadable node (body not read) shows no track chip — its declaration is unknown, not absent.
+chip, warning colours, accessible text "configuration missing") when it declares no block at all;
+a distinct WARNING chip `⚠ Configuration unreadable` when a block exists and the graph could not
+read it (`blocksUnreadable`: two `brain-graph/1` fences, an unterminated fence, the legacy
+`yaml` + `protocol:` shape). An unreadable node (body not read) shows no track chip — its declaration is unknown, not absent.
 
 **R1308-3 — In flight from work evidence.** An open issue named by at least one work-evidence
 source reads `◐ In flight`, whether or not it declares a track.
@@ -41,7 +43,8 @@ Awaiting review is read from `status:approved` in its labels, by the same rule a
 undeclared node shows, in the drawer, the `brain-graph/1` block to paste — `DECLARE_SNIPPET` with
 `parent:` prefilled when known, with its example-not-form note — as text only. No command line is
 shown: `declareCommand` is `null` until #1335 ships `brain:ticket:declare`. A declared node shows
-no such block.
+no such block. A node whose block exists but is unreadable shows the graph's own error text in
+the drawer and NO paste block: pasting would add another fence.
 
 **R1308-6 — One derivation.** Cards, holding rows, epic clusters, the drawer header, the drawer's
 children list, the roadmap rows and the home "In flight" section read the same evidence join; an
@@ -113,3 +116,11 @@ as a state. Each lane header's state counts sum to the lane's node count and use
 - THEN the body shows a copyable `brain-graph/1` block with `parent: 878` and the example note
 - AND no command line is shown, and the model's `declareCommand` is `null`
 - AND a declared node's drawer shows no such block
+
+### S14 — a malformed declaration is not a missing one
+- GIVEN an issue whose body carries two `brain-graph/1` fences (or an unterminated fence)
+- WHEN its card renders and its drawer opens
+- THEN the track chip reads `⚠ Configuration unreadable`, never `Configuration missing`
+- AND the drawer shows the graph's error (e.g. "2 `brain-graph/1` blocks found")
+- AND the drawer shows no paste block, and `declare` is `null`
+- AND an issue with no block at all still reads `Configuration missing` with the paste block

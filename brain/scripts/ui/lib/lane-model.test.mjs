@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { buildLaneModel, nodeSummaryFor, childrenOf } from './lane-model.mjs';
-import { parseGraphBlock } from '../../status/epic-graph.mjs';
+import { parseGraphBlock, buildGraph } from '../../status/epic-graph.mjs';
 
 const node = (number, over = {}) => ({
   number,
@@ -602,4 +602,27 @@ test('R1308-10/S13: the drawer of an undeclared node carries the paste block wit
   assert.match(nodeSummaryFor(g, 1264, { work: NO_WORK }).value.declare.snippet, /track: A/, 'no parent known: the generic example, with its note');
   assert.equal(nodeSummaryFor(g, 7, { work: NO_WORK }).value.declare, null);
   assert.equal(nodeSummaryFor(graph({ nodes: [undeclaredNode(5, { status: 'unreadable' })] }), 5, { work: NO_WORK }).value.declare, null, 'an unreadable body is unknown, not missing');
+});
+
+test('R1308-10/cold-1: a malformed declaration shows its error and NO paste block; a body with no block still shows the block', () => {
+  const fenceBlock = ['```brain-graph/1', 'track: UI', 'blocks: []', 'needs: []', '```'];
+  const bodies = {
+    1: [...fenceBlock, '', ...fenceBlock].join('\n'),
+    2: fenceBlock.slice(0, -1).join('\n'),
+    3: 'no block at all',
+  };
+  const g = buildGraph(Object.entries(bodies).map(([n, body]) => ({ number: Number(n), title: 't', labels: ['status:approved'], state: 'open', body })));
+  const section = graph(g);
+  for (const n of [1, 2]) {
+    const v = nodeSummaryFor(section, n, { work: NO_WORK }).value;
+    assert.equal(v.declare, null, `#${n}: pasting would add another fence`);
+    assert.equal(v.trackMark.code, 'unreadable-config');
+    const said = g.blocksUnreadable.find((b) => b.number === n).error;
+    assert.ok(v.marks.some((m) => m.includes(said)), `#${n}: the drawer says what is wrong`);
+  }
+  const missing = nodeSummaryFor(section, 3, { work: NO_WORK }).value;
+  assert.equal(missing.trackMark.code, 'undeclared');
+  assert.ok(missing.declare, 'no block at all: the paste block');
+  const holding = buildLaneModel(section, { work: NO_WORK }).value.holding.nodes.find((r) => r.number === 1);
+  assert.equal(holding.trackMark.code, 'unreadable-config', 'the card carries it too');
 });

@@ -39,7 +39,7 @@
 // cannot back (#1032 scope note).
 
 import { layout } from './layout.mjs';
-import { stateOf, trackMarkOf, STATES } from './state-vocab.mjs';
+import { stateOf, trackMarkOf, withBlockErrors, STATES } from './state-vocab.mjs';
 import { sourceStamp } from './provenance.mjs';
 import { issueUrl } from './forge-url.mjs';
 import { hierarchyOf } from './rollup-model.mjs';
@@ -87,6 +87,7 @@ const DECLARE_NOTE = 'keep the lines that are true: `kind: epic` only if this is
 function stateAndMarks(node, work) {
   const marks = [];
   if (node.status === 'unreadable') marks.push('unreadable');
+  if (node.blockError != null) marks.push(`brain-graph/1 configuration unreadable: ${node.blockError}`);
   if (Array.isArray(node.blockedBy) && node.blockedBy.length > 0) {
     marks.push(`blocked by ${node.blockedBy.map((n) => `#${n}`).join(', ')}`);
   }
@@ -114,7 +115,7 @@ const stateView = (state) => ({ code: state.code, label: state.label, mark: stat
  * and the page shows no command line.
  */
 function declareFor(node) {
-  if (node.status === 'unreadable' || node.declared !== false) return null;
+  if (node.status === 'unreadable' || node.blockError != null || node.declared !== false) return null;
   const snippet = node.parent == null ? DECLARE_SNIPPET : DECLARE_SNIPPET.replace('parent: 878', `parent: ${node.parent}`);
   return { snippet, note: DECLARE_NOTE, declareCommand: null };
 }
@@ -131,7 +132,7 @@ function declareFor(node) {
 export function nodeSummaryFor(graphSection, issue, { work } = {}) {
   if (!graphSection || typeof graphSection !== 'object') return { ok: false, reason: 'no graph section was given' };
   if (graphSection.ok !== true) return { ok: false, reason: graphSection.reason };
-  const node = (graphSection.value?.nodes ?? []).find((n) => n.number === issue);
+  const node = (withBlockErrors(graphSection.value).nodes ?? []).find((n) => n.number === issue);
   if (!node) return { ok: false, reason: `the graph holds no issue #${issue}` };
   const { marks, state } = stateAndMarks(node, work);
   return {
@@ -141,7 +142,7 @@ export function nodeSummaryFor(graphSection, issue, { work } = {}) {
       title: node.title ?? '',
       track: node.track ?? null,
       state: stateView(state),
-    trackMark: trackMarkOf(node),
+      trackMark: trackMarkOf(node),
       marks,
       blockedBy: [...(node.blockedBy ?? [])].sort((a, b) => a - b),
       declare: declareFor(node),
@@ -165,7 +166,7 @@ export function childrenOf(graphSection, hierarchySection, issue, { work } = {})
   if (graphSection.ok !== true) return { ok: false, reason: graphSection.reason };
   const h = hierarchyOf(hierarchySection);
   if (!h.ok) return { ok: false, reason: h.reason };
-  const nodes = new Map((graphSection.value?.nodes ?? []).map((n) => [n.number, n]));
+  const nodes = new Map((withBlockErrors(graphSection.value).nodes ?? []).map((n) => [n.number, n]));
   const value = (h.value.issues.get(issue)?.children ?? [])
     .filter((n) => nodes.has(n))
     .sort((a, b) => a - b)
@@ -177,7 +178,7 @@ export function childrenOf(graphSection, hierarchySection, issue, { work } = {})
         title: node.title ?? '',
         track: node.track ?? null,
         state: stateView(state),
-    trackMark: trackMarkOf(node),
+        trackMark: trackMarkOf(node),
       };
     });
   return { ok: true, value };
@@ -415,7 +416,7 @@ export function buildLaneModel(graphSection, { collapsedTracks = new Set(['?']),
   if (!graphSection || typeof graphSection !== 'object') return { ok: false, reason: 'no graph section was given to the lanes' };
   if (graphSection.ok !== true) return { ok: false, reason: graphSection.reason };
 
-  const { nodes = [], edges = [], issuesUnreadable = [], declarationDivergences = [] } = graphSection.value ?? {};
+  const { nodes = [], edges = [], issuesUnreadable = [], declarationDivergences = [] } = withBlockErrors(graphSection.value);
 
   const trackOf = new Map(nodes.map((n) => [n.number, n.track ?? null]));
   const byTrack = new Map();

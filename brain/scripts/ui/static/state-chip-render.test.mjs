@@ -22,6 +22,7 @@ const ISSUES = [
   { number: 1199, title: 'declared, no work', labels: ['status:approved'], body: fence(['track:    UI', 'blocks:   []', 'needs:    []']) },
   { number: 1263, title: 'undeclared with a worktree', labels: ['status:approved'], body: 'No block here.\n\nParent: #878\n' },
   { number: 1300, title: 'undeclared, no work', labels: ['status:approved'], body: 'No block here either.\n' },
+  { number: 1301, title: 'two blocks', labels: ['status:approved'], body: [fence(['track:    UI']), fence(['track:    UI'])].join('\n') },
 ];
 
 const ago = (ms) => new Date(Date.now() - ms).toISOString();
@@ -42,7 +43,7 @@ async function boot(sections = {}) {
   const snapshot = await buildSnapshot({ root, project: 'o/r', vcs, now: '2026-10-01T12:00:00.000Z', _run: () => { throw new Error('no git'); } });
   Object.assign(snapshot, {
     changes: ok([]), localWorktrees: worktrees(wt(1198), wt(1263)), remoteChanges: ok({ base: 'origin/main', branches: [], unjoined: [], hidden: {}, prsApplied: true, deferred: 0 }),
-    prs: ok([]), hierarchy: hierarchy({ 1198: 'open', 1199: 'open', 1263: 'open', 1300: 'open' }),
+    prs: ok([]), hierarchy: hierarchy({ 1198: 'open', 1199: 'open', 1263: 'open', 1300: 'open', 1301: 'open' }),
   }, sections);
   const dom = installDom({ mountIds: MOUNT_IDS, snapshot });
   await loadApp();
@@ -128,4 +129,17 @@ test('R1308-1/R1308-10/S13: the drawer head shows both chips; an undeclared issu
   await settle();
   assert.equal(find(dom.mounts.drawer, byClass('declare-block')), null, 'a declared node shows no paste block');
   assert.equal(trackChip(find(dom.mounts.drawer, byClass('drawer-head'))).textContent, 'Track UI');
+});
+
+test('R1308-10/cold-1: the drawer of a malformed declaration shows the error and no paste block', async (t) => {
+  const dom = await boot();
+  t.after(() => dom.restore());
+  await expandHolding(dom);
+  fire(card(dom, 1301), 'click');
+  await settle();
+  const head = find(dom.mounts.drawer, byClass('drawer-head'));
+  assert.match(trackChip(head).textContent, /Configuration unreadable/);
+  assert.doesNotMatch(trackChip(head).textContent, /missing/);
+  assert.match(dom.mounts.drawer.textContent, /2 `brain-graph\/1` blocks found/);
+  assert.equal(find(dom.mounts.drawer, byClass('declare-block')), null, 'pasting would add another fence');
 });
