@@ -142,3 +142,12 @@ test('#882 cold review of PR #1037 (correction 2): an epic declaring another epi
   const grandparentRow = model.value.epics.find((e) => e.number === 40);
   assert.deepEqual(grandparentRow.divergences, [], 'the parent epic itself carries no divergence of its own');
 });
+
+// ── #1308: the roadmap rows read the same lifecycle ───────────────────────
+test('R1308-6: roadmap rows take the work index — a worktree-only issue is In flight on the roadmap too', () => {
+  const g = { ok: true, value: { nodes: [{ number: 1, title: 'a', status: 'unclassified', track: null, declared: false, blockedBy: [], kind: 'epic', roadmap: { ok: true, value: { state: 'planned' } } }, { number: 2, title: 'b', status: 'ready', track: 'UI', declared: true, blockedBy: [], parent: 1, roadmap: { ok: true, value: { state: 'planned' } } }], declarationDivergences: [] } };
+  const work = { missing: [], byIssue: new Map([[2, { issue: 2, changes: [], worktrees: [{ leaf: 'w' }], branches: [], prs: [] }]]) };
+  const r = buildRoadmapModel(g, { work }).value;
+  assert.equal(r.epics[0].children[0].state.code, 'in-flight');
+  assert.equal(r.epics[0].state.code, 'planned');
+});

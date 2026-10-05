@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { buildInflight, STALE_DAYS } from './inflight-model.mjs';
+import { buildInflight, workIndex, STALE_DAYS } from './inflight-model.mjs';
 
 const DAY = 86400000;
 const NOW = Date.parse('2026-10-04T12:00:00Z');
@@ -276,4 +276,30 @@ test('R1284-14: progress is worded by progressLabel from the served change dir o
   assert.ok(by[904].facts.includes('tasks 3 / 5 · working tree'));
   assert.equal(by[905].progress, null);
   assert.equal(by[907].progress, null, 'a change dir row with no progress value claims none');
+});
+
+// ── #1308 R1308-6: one join for the section and the chips ─────────────────
+test('R1308-6: workIndex names every issue a source names, minus hierarchy, and every in-flight row is in it', () => {
+  const secs = sections({
+    hierarchy: hierarchy({ 1: 'open', 2: 'open', 3: 'open', 4: 'open' }),
+    changes: ok([change(1), archived(9)]),
+    localWorktrees: ok({ entries: [wt(2, { touchedAt: '2026-08-01T00:00:00Z' })] }),
+    remoteChanges: ok({ branches: [br(3)] }),
+    prs: ok([{ number: 70, issue: 4 }]),
+  });
+  const idx = workIndex(secs);
+  assert.deepEqual([...idx.byIssue.keys()].sort((a, b) => a - b), [1, 2, 3, 4], 'an archived change dir names nothing; a stale worktree still counts');
+  assert.deepEqual(idx.missing, []);
+  const { rows, unknown, stale } = buildInflight(secs, { nowMs: NOW }).value;
+  for (const r of [...rows, ...unknown, ...stale]) assert.ok(idx.byIssue.has(r.issue), `#${r.issue} is in the section and so in the index`);
+});
+
+test('R1308-5: workIndex.missing names the not-ready work sources with their state and never lists hierarchy', () => {
+  const idx = workIndex(sections({
+    hierarchy: { ok: false, pending: true, reason: 'loading' },
+    prs: { ok: false, pending: true, reason: 'loading from the forge…' },
+    remoteChanges: { ok: false, reason: 'git fetch failed' },
+  }));
+  assert.deepEqual(idx.missing.map((m) => [m.name, m.state]), [['remoteChanges', 'failed'], ['prs', 'pending']]);
+  assert.equal(idx.missing[0].reason, 'git fetch failed');
 });
