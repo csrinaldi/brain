@@ -1,6 +1,6 @@
 # ADR-0040 — Who defines the project: an owned team config, a `~/.brain` user layer, and locked axes
 
-**Status**: Accepted
+**Status**: Accepted · **amended 05/10/2026** (Amendment 1 — see below)
 **Date**: 2026-10-02 — Cristian Rinaldi
 
 ## Context
@@ -156,7 +156,9 @@ that released versions wrote into `.env` valid until that owner decides.
 - **CODEOWNERS is an optional mirror.** Where a consumer keeps a `.github/CODEOWNERS` line for
   `brain.config.json`, a drift check verifies it names the same identities as `governance.owners`; it
   is never a second hand-kept list. GitLab has no identical equivalent, so on GitLab the gate alone
-  enforces.
+  enforces. **[Amended by Amendment 1 (#1263): on GitLab the gate cannot pass by approval today. The
+  adapter reports no commit for an approval, so the gate fails closed: at `standard` and `regulated`
+  a change to `brain.config.json` is blocked until #1281. See Amendment 1.]**
 
 ### 7. Out of scope
 
@@ -303,7 +305,8 @@ Adding `"providers": { "antigravity": {} }` to his user layer makes it valid, as
   owner and `REFUSE` on upgrade, so `brain:upgrade` does not maintain a consumer's lines. Because it
   is only a mirror of `governance.owners` (section 6), the cost is a drift check, not a second list to
   keep. Brain ships no GitLab CODEOWNERS, and GitLab has no identical equivalent, so on GitLab the
-  gate alone enforces.
+  gate alone enforces. **[Amended by Amendment 1 (#1263): and today that gate cannot pass by approval
+  on GitLab, so at `standard` and `regulated` it blocks every team config change until #1281.]**
 - **The guard on `BRAIN_HOME` is one more test-hygiene rule** every new test that reaches the user
   layer must satisfy.
 
@@ -357,7 +360,8 @@ governance; changing it without an owner is self-authorization one level up.
 - **How `brain:doctor` reports the layers** belongs to #1130.
 - **XDG support** (`XDG_CONFIG_HOME`) is deferred (Ratified point 2).
 - **A GitLab CODEOWNERS mirror.** GitLab has no identical equivalent; the gate is the enforcement
-  there.
+  there. **[Amended by Amendment 1 (#1263): and that gate cannot pass by approval on GitLab until
+  #1281.]**
 
 ## Implementation (four slices on the #1114 tracker)
 
@@ -433,3 +437,50 @@ above already reflects them.
    GitLab has no identical equivalent.
    - **Corrected after the cold review of PR #1264:** the first ruling named
      `governance.approvalActors` as the source, for the reason given in point 4.
+
+## Amendment 1 — on GitLab, the owner gate fails closed at `standard` and `regulated` until #1281 (issue #1263)
+
+**Signed**: 05/10/2026 — Cristian Rinaldi
+
+### What changed
+
+Nothing in the code. This amendment records a cost the ADR did not name.
+
+Section 6, the CODEOWNERS consequence and "What this does NOT close" each say that on GitLab the
+gate alone enforces. None of them says that, on GitLab, the gate cannot pass by approval today:
+
+- The GitLab adapter's `prReviews` (`brain/scripts/axes/vcs/adapters/gitlab.mjs`) returns
+  `commitId: null` on every entry. GitLab's approvals API says who approved, not on which commit.
+- `team-config-reviewed` (`brain/scripts/vcs/team-config-reviewed.mjs`) counts an approval only on
+  the current head. An approval with a `null` commit cannot be told from a stale one, so the gate
+  fails closed and its reason names the GitLab limitation.
+- At `lite` the gate is `detection` and only warns. At `standard` and `regulated` it is required,
+  so **every change to `brain.config.json` on a GitLab consumer at those tiers is blocked**. That
+  includes the rewrites `brain:upgrade` makes through `config-migrations.mjs`, once committed.
+- A GitLab MR pipeline does not re-run when an approval lands, so even a future fix needs the
+  pipeline re-run after approving.
+
+Until now this was written only in a comment in `brain/scripts/ci/gitlab-governance.yml`.
+
+### Why
+
+The cold review of the tracker (PR #1296, Opus 5.5 round, head `2b5027ad`) found the ADR
+claiming enforcement where the code can only refuse. A reader of ADR-0040 alone would expect a
+GitLab owner's approval to satisfy the gate.
+
+### The accepted cost, and its exit
+
+Failing closed is the deliberate choice: passing an approval nobody can tie to the current head
+would let a push after approval through unreviewed, which is the stale-approval case the gate
+exists to stop. The cost is that a GitLab consumer at `standard` or `regulated` cannot change its
+team config through brain's gate until #1281 lands. Brain offers no way through in the meantime.
+Any way through is the forge's own control over a failed required job, outside brain.
+
+#1281 (approved) is the exit. It accepts GitLab's project setting "Reset approvals on push" as
+evidence that a present approval is on the current head, keeps failing closed when the setting is
+off, and names the setting in the reason.
+
+### What this does NOT change
+
+The gate, its tier table, owners read from the base, the founding rule, and GitHub's behaviour,
+where `prReviews` reports each review's `commit_id` and the gate passes on a current owner approval.
