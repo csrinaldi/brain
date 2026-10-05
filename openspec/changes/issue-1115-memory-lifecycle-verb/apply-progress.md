@@ -17,3 +17,9 @@ Rulings Q1-Q4 (2026-10-05) are folded into spec/design/tasks first (commit `docs
 | 2.1 `cli.hydrate.test.mjs` | import error, then (with `EXIT_DEFERRED` added) 9 of 11 failed: hydrate/import/verify/exit 6/refusals | 11/11 |
 | 2.5 pins (`backend-fallback` import → exit 6, `backend-declaration` lists + `hydrate`, `backend-selection` no `importMemory` map and `!FALLBACK_OPS.includes('hydrate')`) | n/a (pins updated with the behaviour) | `memory/*.test.mjs` + `backend-selection` 293/293 |
 | `chunk-boundary.test.mjs` line-keyed allowlist | 1 failed (cli.mjs line 792 became 797) | re-keyed, 15/15 |
+
+## T3 — post-merge
+| step | RED | GREEN |
+|---|---|---|
+| 3.1 `hooks/post-merge.op.test.mjs` (stub `node` argv log; stub exiting 6) | 3 of 5 failed (`hydrate` never called; exit-6 case; undeclared message pin renamed to "memory hydration skipped") | `hooks/*.test.mjs` 70/70 after the hook change and the stream-discipline pin `import` → `hydrate` |
+| Q4 | the hook exits 0 on 6, the reason reaches stderr, and `resolve-index` still runs (asserted) | green |
