@@ -16,27 +16,23 @@ npm run test:upgrade                     # second-latest → latest tag
 
 ## Requirements
 
-- **Docker**, and a **github token** (`VCS_TOKEN` or `gh auth token`) with read
-  access to the private brain repo (never logged).
+- **Docker**, and a **github token** (`VCS_TOKEN` or `gh auth token`) that can clone
+  the sample consumer repo (never logged). brain itself is installed from the npm
+  registry as `@logikas/brain` (ADR-0030).
 
 ## What it does
 
-1. Installs brain @ **FROM** in a clean container, seeds the managed paths + runs `env:init`.
+1. Installs `@logikas/brain@FROM` in a clean container, runs `npx brain init` and
+   `brain:env:init` (the consumer flow in `docs/adoption.md`).
 2. Adds consumer customizations: a `brain/project/` ADR, a `.env` variable, a custom
-   `brain.config.json` value (`project.owner`), and an `openspec/changes/` dir.
-3. Upgrades to **TO** (re-install `git+https` + `brain:upgrade`).
-4. Asserts (exits non-zero on any breach):
-   - brain is now at **TO** and the managed scripts/core were updated;
-   - the `brain/project` ADR, the `.env` var, the custom `brain.config.json` value,
-     and the `openspec/changes/` dir **all survive**.
+   `brain.config.json` value (`project.owner`), an `openspec/changes/` dir and a
+   consumer-owned `brain:day:start`.
+3. Upgrades to **TO** with `npm run brain:upgrade -- TO`, which installs TO itself (the
+   documented default path; the outgoing package stays the pre-upgrade one, REQ-397-1).
+4. Asserts (exits non-zero on any breach): brain is at **TO**, the `brain:*` verbs
+   were injected, and every customization above survives.
 
-## Note
-
-The FROM managed state is seeded via a managed-paths copy: a pre-v0.4.1
-`brain-upgrade` uses the SSH `github:` shorthand and can't run over HTTPS. The
-**TO** upgrade uses the real `brain:upgrade` (git+https, #44). Existing
-pre-v0.4.1 consumers need a one-time `npm i -D "git+https://…#v0.4.1"` to cross
-that boundary; after v0.4.1, HTTPS upgrades work directly.
+CI runs it informationally via `.github/workflows/upgrade-smoke.yml` (not a required check).
 
 ---
 
