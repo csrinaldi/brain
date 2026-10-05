@@ -129,7 +129,7 @@ function routedStages(cfg) {
  * `sdd` axis has the shape (`sdd.default` or `sdd.providers` present). Never throws.
  *
  * `defaultRole(provider, stage)` answers the role an SDD provider DECLARES as its default for a stage,
- * or null (ADR-0038 §4). It defaults to the role port's `declaredDefaultRole`, which counts no DERIVED
+ * or null (ADR-0038 §4), as `<provider>:<role>`. It defaults to the role port's `declaredDefaultRole`, which counts no DERIVED
  * role; it is injected so the validator stays pure and testable.
  * @param {object} config
  * @param {{defaultRole?: (provider: string, stage: string) => string|null}} [opts]
@@ -340,7 +340,8 @@ function mergeUserProviders(cfg, userConfig) {
 /**
  * @param {'vcs'|'memory'|'platform'|'sdd'} axis
  * @param {{env?: object, dotenv?: object, config?: object, userConfig?: object, userError?: string|null, userPath?: string,
- *          runtimeProvider?: string|null, notice?: (line: string) => void}} [opts]
+ *          runtimeProvider?: string|null, notice?: (line: string) => void, catalog?: object}} [opts]
+ *   `catalog` is the i18n catalog the validation detail of an `invalid-config` refusal renders in (English when omitted).
  *   `env` is the process env, `dotenv` the PARSED `.env` (no file is read here); VCS never reads `dotenv`.
  *   `userConfig`/`userError`/`userPath` are `readUserConfig`'s result, spread in (lib/user-config.mjs); VCS never reads them.
  *   `runtimeProvider` is the CI-detected VCS provider; it needs only an adapter brain ships, not a `vcs.providers` entry.
@@ -351,7 +352,7 @@ function mergeUserProviders(cfg, userConfig) {
  * @throws {AxisRefusal} undeclared, a value that is not a provider brain ships or not a key of the union of the
  *   layers' `<axis>.providers`, an invalid axis config or user layer, or an override of a locked axis. Never guesses and never coerces.
  */
-export function resolveAxis(axis, { env = process.env, dotenv = {}, config = {}, userConfig = {}, userError = null, userPath = USER_PATH_FALLBACK, runtimeProvider = null, notice = defaultNotice } = {}) {
+export function resolveAxis(axis, { env = process.env, dotenv = {}, config = {}, userConfig = {}, userError = null, userPath = USER_PATH_FALLBACK, runtimeProvider = null, notice = defaultNotice, catalog = en } = {}) {
   if (!AXES.includes(axis)) throw new TypeError(`resolveAxis: unknown axis '${axis}'`);
   const cfg = isObj(config) ? config : {};
   const members = AXIS_MEMBERS[axis];
@@ -384,9 +385,12 @@ export function resolveAxis(axis, { env = process.env, dotenv = {}, config = {},
   // The union below checks only the per-machine SELECTED value.
   const bad = validateAxisConfig(cfg).errors.filter((e) => e.axis === axis);
   if (bad.length > 0) {
-    const detail = bad.map((e) => e.message).join('; ');
-    throw new AxisRefusal('invalid-config', axis, 'axes.refusal.invalidConfig', { axis, detail },
-      `correct ${bad[0].path || axis} in brain.config.json`);
+    // Each error is rendered through its i18n { key, params } in the active catalog, as diagnoseAxes does; an error with no key stays English.
+    const cat = isObj(catalog) ? catalog : en;
+    const details = bad.map((e) => ({ key: e.key, params: e.params, message: e.message }));
+    const detail = bad.map((e) => (e.key ? fill(cat[e.key] ?? en[e.key] ?? e.key, e.params ?? {}) : e.message)).join('; ');
+    throw Object.assign(new AxisRefusal('invalid-config', axis, 'axes.refusal.invalidConfig', { axis, detail },
+      `correct ${bad[0].path || axis} in brain.config.json`), { details });
   }
 
   const shape = readAxis(merged, axis, { harness: false });
