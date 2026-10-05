@@ -15,7 +15,7 @@ import { spawnSync } from "node:child_process";
 
 import { _getGitBranch } from "./engram.mjs";
 import { buildRecord, serializeRecord, nowUtcSeconds, RECORD_TYPES } from "../../../memory/lib/format.mjs";
-import { appendRecord, rebuildIndex, readRecords, readRecordIds } from "../../../memory/lib/store.mjs";
+import { appendRecord, rebuildIndex, verifyIndex, readRecords, readRecordIds } from "../../../memory/lib/store.mjs";
 import { normalizeDuplicates } from "../../../memory/lib/duplicates.mjs";
 import { gitConfigGet } from "../../../lib/git-config.mjs";
 import { resolveActor, resolveActorKind, deriveIssue, composeSource } from "../../../memory/lib/capture-provenance.mjs";
@@ -392,6 +392,44 @@ export async function share({ root = repoRoot } = {}, { _rebuildIndex = rebuildI
   const indexPath = join(root, ".memory", "index.jsonl");
   const { count, duplicates } = _rebuildIndex({ recordsDir, indexPath });
   return { indexCount: count, duplicates: normalizeDuplicates(duplicates) };
+}
+
+/**
+ * hydrate() — the bulk form of the required `hydrate` verb (#1115, REQ-MB-7).
+ *
+ * On plainfiles the records ARE the backend (contract rule 1 holds by construction), so
+ * "project the records into the backend" is "rebuild the derived index" — `share`'s body,
+ * under the verb name every caller now uses. No git. A `recordId` is accepted and ignored: a
+ * record handed to `hydrate` is already in the only store plainfiles has.
+ *
+ * `verify: true` is the READ-ONLY form (ruling Q1). `session:start` is read-only and
+ * `.memory/index.jsonl` is tracked, so the loader may report that the index drifted but
+ * must not repair it: nothing under `.memory/` is written or created, and the result says
+ * `verified: true` and whether the index is `stale`. The rebuild is `post-merge`'s, `memory:pull`'s
+ * and `day:start`'s, the callers that already write.
+ *
+ * @param {{root?: string, recordId?: string, verify?: boolean}} [args]
+ * @param {{_rebuildIndex?: typeof rebuildIndex, _verifyIndex?: typeof verifyIndex}} [seams]
+ */
+export async function hydrate(
+  { root = repoRoot, verify = false } = {},
+  { _rebuildIndex = rebuildIndex, _verifyIndex = verifyIndex } = {},
+) {
+  const recordsDir = join(root, ".memory", "records");
+  const indexPath = join(root, ".memory", "index.jsonl");
+  if (verify) {
+    const { count, duplicates, stale } = _verifyIndex({ recordsDir, indexPath });
+    return {
+      written: 0,
+      skipped: count,
+      indexCount: count,
+      duplicates: normalizeDuplicates(duplicates),
+      verified: true,
+      stale,
+    };
+  }
+  const { count, duplicates } = _rebuildIndex({ recordsDir, indexPath });
+  return { written: 0, skipped: count, indexCount: count, duplicates: normalizeDuplicates(duplicates) };
 }
 
 /**

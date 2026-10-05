@@ -238,3 +238,101 @@ test('hydrate: a throwing _guard() ⇒ {deferred:true, reason: "guard-failed: <c
   assert.match(result.reason, /guard-failed/);
   assert.match(result.reason, /ENOSPC/);
 });
+
+// ── bulk form (#1115, REQ-1115-1/2, REQ-MB-6): no recordId, no record ──
+
+test('hydrate (bulk): delegates to importMemory exactly once with {root} and defaults skipped to 0', async () => {
+  const calls = [];
+  const result = await hydrate(
+    { root: '/tmp/some-root' },
+    {
+      _probe: () => ({ available: true }),
+      _importMemory: async (args) => { calls.push(args); return { written: 3 }; }, // the empty-store shape has no `skipped`
+    },
+  );
+  assert.deepEqual(calls, [{ root: '/tmp/some-root' }]);
+  assert.equal(result.written, 3);
+  assert.equal(result.skipped, 0, 'skipped defaults to 0, never undefined');
+  assert.equal(result.deferred, undefined);
+});
+
+test('hydrate (bulk): carries skipped, duplicates and contended through from importMemory', async () => {
+  const duplicates = { ids: 1, lines: 1, divergent: 0, groups: [] };
+  const result = await hydrate(
+    { root: '/tmp/r' },
+    {
+      _probe: () => ({ available: true }),
+      _importMemory: async () => ({ written: 0, skipped: 0, deferred: true, contended: true, duplicates }),
+    },
+  );
+  assert.equal(result.deferred, true);
+  assert.equal(result.contended, true);
+  assert.deepEqual(result.duplicates, duplicates);
+});
+
+test('hydrate (bulk): binary absent defers, names gentle-ai install, and never imports', async () => {
+  const warns = [];
+  let imported = false;
+  const result = await hydrate(
+    { root: '/tmp/r' },
+    {
+      _probe: () => ({ available: false }),
+      _importMemory: async () => { imported = true; return { written: 0 }; },
+      _warn: (m) => warns.push(m),
+    },
+  );
+  assert.equal(imported, false);
+  assert.equal(result.deferred, true);
+  assert.equal(result.written, 0);
+  assert.equal(result.skipped, 0);
+  assert.match(result.reason, /engram binary not found/);
+  assert.match(warns.join('\n'), /gentle-ai install/);
+});
+
+test('hydrate (bulk): an unresolvable binary (probe null) defers with the probe reason', async () => {
+  const warns = [];
+  const result = await hydrate(
+    { root: '/tmp/r' },
+    {
+      _probe: () => ({ available: null, reason: 'PATH lookup timed out' }),
+      _importMemory: async () => { throw new Error('must not run'); },
+      _warn: (m) => warns.push(m),
+    },
+  );
+  assert.equal(result.deferred, true);
+  assert.match(result.reason, /PATH lookup timed out/);
+  assert.match(warns.join('\n'), /PATH lookup timed out/);
+});
+
+test('hydrate (bulk): an import that throws resolves deferred, never rejects', async () => {
+  const warns = [];
+  const result = await hydrate(
+    { root: '/tmp/r' },
+    {
+      _probe: () => ({ available: true }),
+      _importMemory: async () => { throw new Error('boom'); },
+      _warn: (m) => warns.push(m),
+    },
+  );
+  assert.equal(result.deferred, true);
+  assert.equal(result.written, 0);
+  assert.equal(result.skipped, 0);
+  assert.match(warns.join('\n'), /deferred/);
+});
+
+test('hydrate (bulk): the verify flag is ignored on engram — the import runs as today', async () => {
+  let imported = 0;
+  const result = await hydrate(
+    { root: '/tmp/r', verify: true },
+    { _probe: () => ({ available: true }), _importMemory: async () => { imported += 1; return { written: 1, skipped: 0 }; } },
+  );
+  assert.equal(imported, 1);
+  assert.equal(result.verified, undefined, 'engram never claims a verification it did not do');
+});
+
+test('hydrate (single record): an unknown recordId still throws recordNotFound — only the bulk form is new', async () => {
+  await assert.rejects(
+    hydrate({ root: '/tmp/r', recordId: 'rec-unknown' }, { _readRecords: () => ({ records: [], duplicates: {} }) }),
+    /no record with id 'rec-unknown'/,
+  );
+});

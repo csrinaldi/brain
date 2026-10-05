@@ -69,11 +69,8 @@ export default {
   'day.memory.hookActivated':  'Pre-push hook activated (core.hooksPath={hooksPath}).',
   'day.memory.hookFailed':     'Could not activate the pre-push hook (core.hooksPath).',
   'day.memory.hookActive':     'Pre-push hook active — checkpoints feature working memory before push.',
-  'day.memory.importing':      'Importing chunks from .memory/ to local DB...',
+  'day.memory.hydrating':      'Hydrating the memory backend from .memory/records/...',
   'day.memory.reprojecting':   'Reprojecting brain/ to engram...',
-  'day.memory.exporting':      'Exporting memory to repo (.memory/)...',
-  'day.memory.exported':       'Memory exported to .memory/ — ready to commit with the next push.',
-  'day.memory.exportFailed':   'engram export failed — run {pm} run brain:memory:share manually.',
   'day.memory.notAvailable':   'engram not available — skipping shared memory.',
   'day.memory.install':        'Install: gentle-ai install   or   npm run tools:install',
 
@@ -441,11 +438,22 @@ export default {
   'session.change.one':         'change:   {change}',
   'session.change.none':        'change:   (no change folder for branch)',
   'session.change.ambiguous':   'change:   ambiguous ({count}): {list}',
-  'session.memory.ok':          'memory:   engram hydrated',
-  'session.memory.skip':        'memory:   engram unavailable (skipped)',
+  'session.memory.ok':          'memory:   {backend} hydrated',
+  'session.memory.skip':        'memory:   {backend} hydration skipped',
+  // #1115 — read-only verification (session:start never writes the tracked tree), a deferred
+  // hydration (exit 6), and the durable-records context read straight from .memory/records/.
+  'session.memory.deferred':    'memory:   {backend} hydration deferred — {reason}',
+  'session.memory.verified':    'memory:   {backend} verified — index current (read-only)',
+  'session.memory.stale':       'memory:   {backend} index is stale — session:start does not write; run npm run brain:memory:share',
+  'session.memory.backend.unknown': '(unknown backend)',
+  'session.memory.records':     'records:  {count} durable, newest {date} — {title}',
+  'session.memory.records.unknown': 'records:  durable store unreadable or empty — count unknown',
+  'session.memory.issue':       'issue #{issue}: {count} record(s)',
+  'session.memory.issue.item':  '  - {date} {title}',
+  'session.memory.issue.none':  'issue #{issue}: no record yet',
   // #923 — the hydration failure cause, when available (see step2HydrateEngram).
   'session.memory.notDeclared': "memory:   hydration skipped, nothing was tried — {reason}",
-  'session.memory.skip.reason': 'memory:   engram unavailable (skipped) — {reason}',
+  'session.memory.skip.reason': 'memory:   {backend} hydration skipped — {reason}',
   'session.memory.recency.stale':   'memory:   newest durable record is {days} days old — nothing captured since (see #519)',
   'session.memory.recency.unknown': 'memory:   no durable record found — cannot determine when memory was last captured',
   'session.ticket.label':       'ticket:',
@@ -614,6 +622,11 @@ export default {
   'memory.import.progress': '  ✓ {written}/{total} records imported',
   'memory.import.done':     '✓ import complete — {written}/{total} records imported into engram (records-only, D2/C4).',
   'memory.import.contended': '⚠ another hydration is running (pid {pid}, started {age}s ago) — import SKIPPED so records are not duplicated. Nothing was written; the next run retries.',
+  // #1115 — the bulk `hydrate` verb: its deferral line, the stale-index notice of its read-only
+  // form, and the deprecation notice for the `import` alias (removed by #1351).
+  'memory.hydrate.deferred': '⚠ hydrating .memory/records/ into {backend} was deferred — {reason}. The records are durable; the next hydration retries.',
+  'memory.hydrate.indexStale': '⚠ .memory/index.jsonl is stale against .memory/records/ — verified read-only, nothing was written. Run npm run brain:memory:share to rebuild it.',
+  'memory.import.deprecated': "memory/cli: 'import' is deprecated and is removed in the next release — it now runs 'hydrate'. Call 'hydrate'.",
   'memory.import.stateUnreadable': '⚠ engram\'s current state could not be read — import SKIPPED so records are not duplicated. Reason: {reason}. Nothing was written; run the import again once engram responds.',
 
   // ── memory/cli.mjs — migrate-v1 (issue #217, C2a / #219 C2-migrate / #222 C2b-2) ──
