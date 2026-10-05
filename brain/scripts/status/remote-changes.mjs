@@ -8,7 +8,7 @@
 
 import { field, uncomputable } from './report.mjs';
 import { parseCanonicalIssueBranch } from '../lib/branch-grammar.mjs';
-import { gitErrorLine, parseTreeListing, pickChangeDir } from '../lib/git-tree.mjs';
+import { changeDirNames, gitErrorLine, parseTreeListing, pickChangeDir } from '../lib/git-tree.mjs';
 import { LIFECYCLE_STAGES, ARTEFACT_FILE, CHANGES_ROOT } from '../lib/sdd-layout.mjs';
 import { parseFrontmatter } from '../memory/lib/resume-frontmatter.mjs';
 import { validateResume } from '../memory/lib/resume-schema.mjs';
@@ -118,7 +118,7 @@ function readBranch({ run, branch, sha, issue }) {
   let listing;
   const stagePaths = (dir) => Object.values(STAGE_FILES).map((f) => `${CHANGES_ROOT}/${dir}/${f}`);
   try {
-    const names = [...parseTreeListing(run('git', ['ls-tree', '-z', sha, '--', `${CHANGES_ROOT}/`])).keys()].map((p) => p.slice(p.lastIndexOf('/') + 1));
+    const names = changeDirNames(parseTreeListing(run('git', ['ls-tree', '-z', sha, '--', `${CHANGES_ROOT}/`])));
     picked = pickChangeDir(names, issue);
     if (!picked.ok) return fail(picked.state, picked.state === 'missing' ? `${picked.reason} on ${label}` : picked.reason, true);
     const resumePath = `${CHANGES_ROOT}/${picked.dir}/${RESUME_FILE}`;

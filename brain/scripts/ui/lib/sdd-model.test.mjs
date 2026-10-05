@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildSddModel, sddForIssue, buildSlicePlan, STAGE_IDS, STAGE_VOCAB, LIFECYCLE_ORDER, SLICE_NOTE } from './sdd-model.mjs';
+import { buildSddModel, sddForIssue, quietAbsence, buildSlicePlan, STAGE_IDS, STAGE_VOCAB, LIFECYCLE_ORDER, SLICE_NOTE } from './sdd-model.mjs';
 import { evaluatePhaseOrder } from '../../vcs/phase-order-check.mjs';
 import { LIFECYCLE_STAGES } from '../../lib/sdd-layout.mjs';
 
@@ -148,6 +148,14 @@ test('#998 cold-1008: a real next task value survives untouched', () => {
   const model = buildSddModel({ ok: true, value: [HALF_TICKED] });
   const c = model.value.changes[0];
   assert.equal(c.tasks.next, 'do the thing');
+});
+
+test('#1199 R1199-3: the row passes the snapshot progress through untouched', () => {
+  const progress = { ok: true, value: { done: 3, total: 5 } };
+  const model = buildSddModel({ ok: true, value: [{ ...HALF_TICKED, progress }] });
+  assert.deepEqual(model.value.changes[0].progress, progress);
+  const no = { ok: false, code: 'no-items', reason: 'tasks.md has no checklist items' };
+  assert.deepEqual(buildSddModel({ ok: true, value: [{ ...HALF_TICKED, progress: no }] }).value.changes[0].progress, no);
 });
 
 // ── review of PR 4, fix 5: tasks.md exists but could not be read/parsed ────
@@ -298,6 +306,25 @@ test('#1059 region 03: sddForIssue returns a BUILT ROW, on the shape the snapsho
   assert.equal(unreadable.reason, 'the changes dir could not be read', "the section's own reason passes through");
 });
 
+test('#883 S1: a card whose change exists only in a local worktree says so instead of claiming none exists', () => {
+  const section = { ok: true, value: [FULL] };
+  const entry = (issue, leaf, dirState = 'present') => ({ issue, leaf, branch: `feat/issue-${issue}-x`, dirState, dir: dirState === 'present' ? `openspec/changes/issue-${issue}-x` : null });
+  const local = { ok: true, value: { entries: [entry(7, 'wt-seven'), entry(8, 'wt-eight', 'missing')], hidden: {}, tier: 'working-tree' } };
+
+  const only = sddForIssue(section, 7, local);
+  assert.equal(only.ok, false);
+  assert.equal(only.reason, 'change in worktree wt-seven (not on main)');
+  assert.doesNotMatch(only.reason, /no change directory/);
+
+  const two = sddForIssue(section, 7, { ok: true, value: { entries: [entry(7, 'wt-a'), entry(7, 'wt-b')] } });
+  assert.equal(two.reason, 'change in worktree wt-a and 1 more (not on main)');
+
+  assert.equal(sddForIssue(section, 8, local).reason, 'no change directory names issue #8', 'a worktree without the change dir does not claim one');
+  assert.equal(sddForIssue(section, 9, local).reason, 'no change directory names issue #9');
+  assert.equal(sddForIssue(section, 7, { ok: false, reason: 'x' }).reason, 'no change directory names issue #7', 'an unreadable local section changes nothing');
+  assert.equal(sddForIssue(section, 1, local).ok, true, 'the served root wins when it has the change');
+});
+
 // ── #1059 phase 10: the fourth mode is the project's slice plan ───────────
 // The design's fourth mode is "implementation slices": the chained PRs a
 // change declares, across the project. The seven-stage matrix that used to
@@ -329,4 +356,32 @@ test('#1059: the slice plan carries the archive dirs the section skipped, so the
   const section = { ok: true, value: [], archiveSkipped: [{ name: 'governance', reason: 'not an issue-numbered archive dir' }] };
   const plan = buildSlicePlan(section);
   assert.deepEqual(plan.value.archiveSkipped, { count: 1, names: ['governance'] });
+});
+
+// ── #1284 D102: a card with no work at all omits the absence line ───────────
+
+test('#1284 D102: sddForIssue marks absent only for an issue with no change dir and no local-only reason; the text is unchanged', () => {
+  const section = { ok: true, value: [FULL] };
+  const local = { ok: true, value: { entries: [{ issue: 7, leaf: 'wt-seven', dirState: 'present' }] } };
+  const none = sddForIssue(section, 99999, local);
+  assert.equal(none.absent, true);
+  assert.equal(none.reason, 'no change directory names issue #99999');
+  assert.notEqual(sddForIssue(section, 7, local).absent, true, 'a local-only change is not absent');
+  assert.notEqual(sddForIssue({ ok: false, reason: 'x' }, 7, local).absent, true, 'an unread section is not an absence');
+});
+
+test('#1284 D102: quietAbsence is true only when absent AND both sections are read AND nobody holds the issue', () => {
+  const section = { ok: true, value: [FULL] };
+  const local = (entries) => ({ ok: true, value: { entries } });
+  const remote = (branches) => ({ ok: true, value: { branches } });
+  const absent = sddForIssue(section, 50, local([]));
+  assert.equal(quietAbsence(absent, local([]), remote([]), 50), true);
+  assert.equal(quietAbsence(absent, local([{ issue: 50, dirState: 'missing' }]), remote([]), 50), false, 'a worktree of any dirState holds the issue');
+  assert.equal(quietAbsence(absent, local([]), remote([{ issue: 50, kind: 'grammar' }]), 50), false, 'a remote branch holds the issue');
+  assert.equal(quietAbsence(absent, { ok: false, pending: true, reason: 'loading' }, remote([]), 50), false, 'an unread local section is not "no work"');
+  assert.equal(quietAbsence(absent, local([]), { ok: false, reason: 'x' }, 50), false, 'an unread remote section is not "no work"');
+  assert.equal(quietAbsence(sddForIssue(section, FULL.issue, local([])), local([]), remote([]), FULL.issue), false, 'not absent');
+  assert.equal(quietAbsence({ ok: false, reason: 'x' }, local([]), remote([]), 50), false);
+  const localOnly = sddForIssue(section, 50, local([{ issue: 50, leaf: 'w', dirState: 'present' }]));
+  assert.equal(quietAbsence(localOnly, local([{ issue: 50, leaf: 'w', dirState: 'present' }]), remote([]), 50), false, 'a local-only issue keeps its line');
 });

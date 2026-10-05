@@ -1,0 +1,20 @@
+{
+  "_provenance": {
+    "endpoint": "GET repos/csrinaldi/brain/issues?state=open&per_page=100",
+    "date": "2026-10-02",
+    "derived": true,
+    "note": "Hand-authored for issue #1257 to exercise the outcomes of `state` and `body` on issueList, which github-issueList-happy.json cannot: that fixture was trimmed at record time and carries neither field. 911 open, 912 closed, 913 no state key, 914 empty state, 915 an unrepresentable state; 921 a string body, 922 no body key at all (the provider did not carry it), 923 a JSON null body (carried, and empty), 924 an empty-string body.",
+    "measured": "the live GitHub /issues payload carries state and body on every entry; the absent and null shapes are constructed, not observed"
+  },
+  "data": [
+    { "number": 911, "title": "open", "labels": [], "state": "open", "body": "x" },
+    { "number": 912, "title": "closed", "labels": [], "state": "closed", "body": "x" },
+    { "number": 913, "title": "no state key", "labels": [], "body": "x" },
+    { "number": 914, "title": "empty state", "labels": [], "state": "", "body": "x" },
+    { "number": 915, "title": "unrepresentable state", "labels": [], "state": "locked", "body": "x" },
+    { "number": 921, "title": "string body", "labels": [], "state": "open", "body": "Part of #878" },
+    { "number": 922, "title": "no body key", "labels": [], "state": "open" },
+    { "number": 923, "title": "JSON null body", "labels": [], "state": "open", "body": null },
+    { "number": 924, "title": "empty body", "labels": [], "state": "open", "body": "" }
+  ]
+}

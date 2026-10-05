@@ -22,6 +22,9 @@ import { row } from './governance-model.mjs';
 /** The ticket that will make `epic` answerable; until it lands the header says so. */
 export const EPIC_JOIN_PENDING = 'the epic this branch serves is not resolved yet — an epic declares its tracker branch, and no reader joins the served branch to it';
 
+/** What the one-line header shows for an unresolved epic; the long reason is its `title` and a banner (#1284 D99). */
+export const EPIC_SHORT = 'epic: not resolved';
+
 /**
  * buildHeaderModel(graphSection, meta) -> {ok:true, value:{servedBranch, counts, epic}}
  * | {ok:false, reason}
@@ -51,7 +54,7 @@ export function buildHeaderModel(graphSection, meta = {}) {
     value: {
       servedBranch: row({ source: servedBranch?.source ?? null, branch: servedBranch?.ok === true ? servedBranch.branch : null, reason: servedBranch?.ok === false ? servedBranch.reason : null }),
       counts,
-      epic: { ok: false, reason: EPIC_JOIN_PENDING },
+      epic: { ok: false, short: EPIC_SHORT, reason: EPIC_JOIN_PENDING },
     },
   };
 }

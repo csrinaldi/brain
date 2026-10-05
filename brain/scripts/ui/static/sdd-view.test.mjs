@@ -63,3 +63,11 @@ test('#998 cold-1008: the tasks line omits the "next" fragment when t.next is fa
   const rowBody = functionBody(read(APP_JS), 'function renderSddRow(');
   assert.match(rowBody, /\$\{t\.next \? `[^`]*next:[^`]*`\s*:\s*''\}/, 'the tasks line must guard the "— next: …" fragment on t.next being truthy');
 });
+
+// ── #1199 R1199-3: the SDD view's tasks line renders the snapshot's progress ──
+
+test('#1199 R1199-3: the SDD tasks line renders progressLabel over change.progress and never adds checked + open itself', () => {
+  const rowBody = functionBody(read(APP_JS), 'function renderSddRow(');
+  assert.match(rowBody, /progressLabel\(change\.progress, SOURCE\.workingTree/);
+  assert.doesNotMatch(rowBody, /t\.checked\s*\+\s*t\.open/);
+});

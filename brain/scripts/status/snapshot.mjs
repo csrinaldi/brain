@@ -11,6 +11,12 @@
 // cannot change under its key, and the CLI passes none, so the verb is always
 // cold and deterministic.
 //
+// ONE WORKING-TREE READ (#883, R883-16): `localWorktrees` lists the linked
+// worktrees of open issues from directory names and `lstat` metadata, so it is
+// the single section that looks at a working tree. It reads no content and runs
+// no git inside a worktree; it declares `tier: 'working-tree'` itself, while
+// `SNAPSHOT_TIER` stays `committed` for every other section.
+//
 // SINGLE ACCESSOR RULE (RFC §2.1): this module IMPORTS brain's pure functions —
 // `buildGraph`, the `sdd-layout` accessors, `deriveTasks`, `parseVerdict`,
 // `readRecords`, `releaseDebt` — and the two readers this slice adds. It parses
@@ -28,11 +34,14 @@
 
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
+import { gitErrorLine } from '../lib/git-tree.mjs';
 import { join } from 'node:path';
 
-import { field, uncomputable } from './report.mjs';
+import { field, pending, uncomputable } from './report.mjs';
 import { deriveTasks } from './derive.mjs';
+import { countTasks } from '../lib/tasks-list.mjs';
 import { buildGraph } from './epic-graph.mjs';
+import { hierarchyFromGraph } from './hierarchy-adapter.mjs';
 import { gatherReleaseFacts, releaseDebt } from './release-debt.mjs';
 import { gatherHistoryFacts } from './history.mjs';
 import { readAdrIndex, homeAdrList, adrDrift } from './adr-index.mjs';
@@ -43,6 +52,7 @@ import { parseVerdict } from '../review/lib/parse-verdict.mjs';
 import { readRecords, recordFilename } from '../memory/lib/store.mjs';
 import { parseCanonicalIssueBranch } from '../lib/branch-grammar.mjs';
 import { readRemoteChanges, REMOTE_READ_BUDGET } from './remote-changes.mjs';
+import { readLocalWorktrees } from './local-worktrees.mjs';
 
 export const SNAPSHOT_TIER = 'committed';
 export const RECORDS_DIR = '.memory/records';
@@ -232,9 +242,25 @@ function readArtefactPresence(dir, missingId, { exists, list }) {
 
 /** One change dir's row, active or archived (R998-4) — same shape either way. `missingId` is the identifier `missingRequiredArtifacts`/`isGrandfathered` resolve a path from; for an archived row it is a synthetic `archive/<name>`, which `changeDir()` templates into the exact `openspec/changes/archive/<name>` location (no second path-building rule needed). */
 function readOneChange({ id, missingId, dir, issue, slug, archived, artefacts, read, list, exists }) {
+  // One read feeds `tasks` and `progress` (#1199 D51). `exists` decides `missing` before any
+  // read, so an absent file and a throwing read never share a sentence.
+  const tasksPath = `${dir}/tasks.md`;
   let tasksText = null;
-  try { tasksText = read(`${dir}/tasks.md`); } catch { tasksText = null; }
-  const tasks = deriveTasks({ tasksText, reason: `${dir}/tasks.md could not be read` });
+  let progress;
+  let reason;
+  if (!exists(tasksPath)) {
+    reason = `${tasksPath} does not exist`;
+    progress = { ok: false, code: 'missing', reason };
+  } else {
+    try {
+      tasksText = read(tasksPath);
+      progress = countTasks(tasksText);
+    } catch (err) {
+      reason = `${tasksPath} could not be read: ${errMessage(err)}`;
+      progress = { ok: false, code: 'unreadable', reason };
+    }
+  }
+  const tasks = deriveTasks({ tasksText, reason });
   const scopes = parseSliceScopes(tasksText ?? '');
   return {
     id, issue, slug, dir, archived,
@@ -244,8 +270,38 @@ function readOneChange({ id, missingId, dir, issue, slug, archived, artefacts, r
       : uncomputable(`the required artefact set could not be resolved: ${artefacts.reason}`),
     artefacts: readArtefactPresence(dir, missingId, { exists, list }),
     tasks: Object.fromEntries(tasks.fields),
+    progress,
     sliceScopes: scopes.refusal ? uncomputable(scopes.refusal) : field(scopes.scopes),
   };
+}
+
+/**
+ * #1284 D94: when the newest commit touching each active change dir landed, from ONE
+ * `git log` (newest first, so the first record naming a path under a dir is that dir's).
+ * Returns a Map dir -> {ok:true, at, author} | {ok:false, reason}; a throwing call gives
+ * every dir the same reason, never a time nobody read.
+ */
+function readLastCommits(dirs, run) {
+  const out = new Map();
+  if (dirs.length === 0) return out;
+  let text;
+  try {
+    text = String(run('git', ['log', '--no-renames', '--format=%x1e%cI%x1f%an', '--name-only', '--', ...dirs]));
+  } catch (err) {
+    for (const d of dirs) out.set(d, { ok: false, reason: `the change-dir log could not be read: ${gitErrorLine(err)}` });
+    return out;
+  }
+  for (const record of text.split('\x1e')) {
+    if (record.trim() === '') continue;
+    const [head, ...rest] = record.split('\n');
+    const [at, author] = head.split('\x1f');
+    const paths = rest.map((l) => l.trim()).filter(Boolean);
+    for (const d of dirs) {
+      if (!out.has(d) && paths.some((p) => p.startsWith(`${d}/`))) out.set(d, { ok: true, at, author });
+    }
+  }
+  for (const d of dirs) if (!out.has(d)) out.set(d, { ok: false, reason: `no commit touches ${d} on the served tree` });
+  return out;
 }
 
 /**
@@ -255,12 +311,14 @@ function readOneChange({ id, missingId, dir, issue, slug, archived, artefacts, r
  * A missing `archive/` dir is "no archived changes" (a fact, checked via
  * `exists` before ever listing it); any OTHER failure to list an existing
  * `archive/` dir is this whole section's reason, same as a failure to list
- * `CHANGES_ROOT` itself. A dir under `archive/` that is not a bare issue
+ * `CHANGES_ROOT` itself. An absent `CHANGES_ROOT` (ENOENT) is a repository with
+ * no changes: `{ok: true, value: []}` (#1276). A dir under `archive/` that is not a bare issue
  * number (a pre-convention dated-slug dir, a named one) is never silently
  * dropped: it is excluded from `value`'s rows AND named on the returned
  * section's own `archiveSkipped` array (review of PR 4, fix 1).
  */
-export function readChanges({ root, tier, _read, _list, _exists } = {}) {
+export function readChanges({ root, tier, _read, _list, _exists, _run } = {}) {
+  const run = _run ?? ((file, args) => execFileSync(file, args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }));
   const read = _read ?? ((p) => readFileSync(join(root, p), 'utf8'));
   const list = _list ?? ((p) => readdirSync(join(root, p)));
   const exists = _exists ?? ((p) => existsSync(join(root, p)));
@@ -268,7 +326,10 @@ export function readChanges({ root, tier, _read, _list, _exists } = {}) {
   try {
     names = list(CHANGES_ROOT).filter((n) => parseChangeId(n) !== null).sort();
   } catch (err) {
-    return uncomputable(`${CHANGES_ROOT} could not be listed: ${err?.message ?? err}`);
+    // A repository that has no `openspec/changes` directory has no changes: that is a fact, not a
+    // failure to read (#1276). Any other error leaves the section unread.
+    if (err?.code !== 'ENOENT') return uncomputable(`${CHANGES_ROOT} could not be listed: ${err?.message ?? err}`);
+    names = [];
   }
   let artefacts = null;
   try { artefacts = requiredArtifactsFor(tier); } catch (err) { artefacts = { reason: err.message }; }
@@ -277,6 +338,9 @@ export function readChanges({ root, tier, _read, _list, _exists } = {}) {
     const { iid, slug } = parseChangeId(id);
     return readOneChange({ id, missingId: id, dir: changeDir(id), issue: Number(iid), slug, archived: false, artefacts, read, list, exists });
   });
+
+  const lastCommits = readLastCommits(activeRows.map((r) => r.dir), run);
+  for (const row of activeRows) row.lastCommit = lastCommits.get(row.dir);
 
   const archiveDirRel = `${CHANGES_ROOT}/archive`;
   let archivedRows = [];
@@ -295,7 +359,7 @@ export function readChanges({ root, tier, _read, _list, _exists } = {}) {
     }
     archiveNames.sort((a, b) => Number(a) - Number(b));
     archivedRows = archiveNames.map((name) =>
-      readOneChange({ id: name, missingId: `archive/${name}`, dir: archivePath(name), issue: Number(name), slug: null, archived: true, artefacts, read, list, exists })
+      ({ ...readOneChange({ id: name, missingId: `archive/${name}`, dir: archivePath(name), issue: Number(name), slug: null, archived: true, artefacts, read, list, exists }), lastCommit: { ok: false, reason: 'not read for archived dirs' } })
     );
   }
 
@@ -310,85 +374,177 @@ export function readRecordRows({ root, _exists } = {}) {
   return field({ records: records.map(projectRecord), duplicates });
 }
 
-async function readForge({ vcs, project }) {
+// ── the forge read: one table for what a lane that is not readable says (D65, D68) ──
+
+const LOADING = {
+  graph: 'loading open issues from the forge…',
+  prs: 'loading open PRs from the forge…',
+  reviews: 'loading PR reviews from the forge…',
+  closedIssues: 'loading closed issues from the forge…',
+};
+const CLOSED_DISABLED_BY_FLAG = '--no-closed was given';
+const CLOSED_ROW_NO_BODY = 'the forge list carried no body';
+const closedUnreadable = (reason) => `the closed-issue list could not be read: ${reason}`;
+
+const errMessage = (err) => err?.message ?? String(err);
+const completeAt = (at) => ({ state: 'complete', at });
+const failedAt = (at, reason, lastCompleteAt = null) => ({ state: 'failed', at, reason, lastCompleteAt });
+
+/** The closed graph (D68): rows with a string body are parsed, every other row is listed as unresolved. */
+function readClosedIssues(listed) {
+  const parsed = listed.filter((r) => typeof r.body === 'string');
+  const unresolved = listed.filter((r) => typeof r.body !== 'string').map((r) => ({ number: r.number, reason: CLOSED_ROW_NO_BODY }));
+  const g = buildGraph(parsed.map((i) => ({ number: i.number, title: i.title, labels: i.labels ?? [], state: i.state ?? null, body: i.body, assignees: i.assignees ?? null })));
+  return field({ nodes: g.nodes, declarationDivergences: g.declarationDivergences, unresolved });
+}
+
+/**
+ * `forgeLoad` is the server's value (the poller's, D64); without it this derives its own from
+ * the synchronous reads it makes, with `at = generatedAt`, so the CLI never reports `pending`
+ * and `--json` stays byte-identical for a fixed `--now`.
+ */
+async function readForge({ vcs, project, forgeLoad = null, closed = true, generatedAt }) {
   const noPort = !vcs ? 'no VCS port was supplied' : !project ? 'no project could be resolved for the forge read' : null;
-  if (noPort) return { graph: uncomputable(noPort), prs: uncomputable(noPort), reviews: uncomputable(noPort) };
+  if (noPort) {
+    const none = uncomputable(noPort);
+    return { graph: none, prs: none, reviews: none, closedIssues: none, forgeLoad: none };
+  }
 
   let graph;
-  try {
-    const listed = await vcs.issueList({ project, state: 'open' });
-    const issues = [];
-    const unreadable = new Map();
-    for (const i of listed) {
-      let full;
-      try {
-        full = await vcs.issueView({ project, number: i.number });
-      } catch (err) {
-        // The body is UNKNOWN, not empty. Substituting '' here placed the node as
-        // "declared nothing" — byte-identical to a real undeclared issue, the
-        // pattern `evidence-reader-empty-on-failure.md` names verbatim (cold
-        // review of #953, rev 1). The issue still enters the graph with what the
-        // LIST did say — number, title, labels, open state — so an edge another
-        // issue declares INTO it still blocks; what the body would have said
-        // (its own edges, track, files) is unknown, and the node says so below.
-        unreadable.set(i.number, err?.message ?? String(err));
-        full = null;
-      }
-      issues.push({ number: i.number, title: i.title, labels: i.labels ?? [], state: 'open', body: full?.body ?? '', assignees: i.assignees ?? full?.assignees ?? null });
-    }
-    const g = buildGraph(issues);
-    // The reset enumerates EVERY field a body would have contributed, so an
-    // unreadable node can never carry one. #967 adds `kind`, `tracker`, `parent` and
-    // `parentSource` to that list: a node whose body nobody could read must not
-    // report a tracker or a parent it never declared.
-    //
-    // `declarationDivergences` needs no line here — it is graph-level, `graph` is
-    // built with `...g` below, and an unreadable body enters `buildGraph` as `body:
-    // ''`, so it contributes none.
-    const nodes = g.nodes.map((n) => (unreadable.has(n.number)
-      ? { ...n, ok: false, reason: `the issue body could not be read: ${unreadable.get(n.number)}`, status: UNREADABLE, declared: null, track: null, kind: null, tracker: null, parent: null, parentSource: null, files: [], sources: [] }
-      : { ...n, ok: true }));
-    // `tracks` is a Map, which JSON drops to `{}`; the verb and the module must
-    // print one shape, so it is a sorted object of member numbers here. An
-    // unreadable node has no known track and is listed in `issuesUnreadable`
-    // instead of under `?`, which is the track of issues that DECLARED none.
-    const tracks = Object.fromEntries(
-      [...g.tracks].sort(([a], [b]) => a.localeCompare(b))
-        .map(([k, ms]) => [k, ms.map((n) => n.number).filter((num) => !unreadable.has(num))])
-        .filter(([, members]) => members.length > 0),
-    );
-    graph = field({
-      ...g, nodes, tracks,
-      issuesUnreadable: [...unreadable].map(([number, reason]) => ({ number, reason })),
-    });
-  } catch (err) {
-    graph = uncomputable(`the issue list could not be read: ${err?.message ?? err}`);
-  }
-
   let prs;
-  try {
-    const listed = await vcs.mrList({ project, state: 'open' });
-    prs = field(listed.map((p) => ({ number: p.number, title: p.title, headBranch: p.headBranch ?? null, issue: issueOfBranch(p.headBranch) })));
-  } catch (err) {
-    prs = uncomputable(`the PR list could not be read: ${err?.message ?? err}`);
+  let reviews;
+  let openEntry;
+  if (forgeLoad?.open.state === 'pending') {
+    graph = pending(LOADING.graph);
+    prs = pending(LOADING.prs);
+    reviews = pending(LOADING.reviews);
+    openEntry = forgeLoad.open;
+  } else {
+    let openError = null;
+    try {
+      const listed = await vcs.issueList({ project, state: 'open' });
+      const issues = [];
+      const unreadable = new Map();
+      for (const i of listed) {
+        // The list carries the body (#1257 R10). `issueView` is the fallback for a row that
+        // carries none; a string, the empty one included, is a body (R12).
+        let body = typeof i.body === 'string' ? i.body : null;
+        let assignees = i.assignees ?? null;
+        if (body === null) {
+          try {
+            const full = await vcs.issueView({ project, number: i.number });
+            body = full?.body ?? '';
+            assignees = i.assignees ?? full?.assignees ?? null;
+          } catch (err) {
+            // The body is UNKNOWN, not empty. Substituting '' here placed the node as
+            // "declared nothing" — byte-identical to a real undeclared issue, the
+            // pattern `evidence-reader-empty-on-failure.md` names verbatim (cold
+            // review of #953, rev 1). The issue still enters the graph with what the
+            // LIST did say — number, title, labels, state — so an edge another
+            // issue declares INTO it still blocks; what the body would have said
+            // (its own edges, track, files) is unknown, and the node says so below.
+            unreadable.set(i.number, errMessage(err));
+            body = '';
+          }
+        }
+        issues.push({ number: i.number, title: i.title, labels: i.labels ?? [], state: i.state ?? null, body, assignees });
+      }
+      const g = buildGraph(issues);
+      // The reset enumerates EVERY field a body would have contributed, so an
+      // unreadable node can never carry one. #967 adds `kind`, `tracker`, `parent` and
+      // `parentSource` to that list: a node whose body nobody could read must not
+      // report a tracker or a parent it never declared.
+      //
+      // `declarationDivergences` needs no line here — it is graph-level, `graph` is
+      // built with `...g` below, and an unreadable body enters `buildGraph` as `body:
+      // ''`, so it contributes none.
+      const nodes = g.nodes.map((n) => (unreadable.has(n.number)
+        ? { ...n, ok: false, reason: `the issue body could not be read: ${unreadable.get(n.number)}`, status: UNREADABLE, declared: null, track: null, kind: null, tracker: null, parent: null, parentSource: null, files: [], sources: [] }
+        : { ...n, ok: true }));
+      // `tracks` is a Map, which JSON drops to `{}`; the verb and the module must
+      // print one shape, so it is a sorted object of member numbers here. An
+      // unreadable node has no known track and is listed in `issuesUnreadable`
+      // instead of under `?`, which is the track of issues that DECLARED none.
+      const tracks = Object.fromEntries(
+        [...g.tracks].sort(([a], [b]) => a.localeCompare(b))
+          .map(([k, ms]) => [k, ms.map((n) => n.number).filter((num) => !unreadable.has(num))])
+          .filter(([, members]) => members.length > 0),
+      );
+      graph = field({
+        ...g, nodes, tracks,
+        issuesUnreadable: [...unreadable].map(([number, reason]) => ({ number, reason })),
+      });
+    } catch (err) {
+      openError = errMessage(err);
+      graph = uncomputable(`the issue list could not be read: ${openError}`);
+    }
+
+    try {
+      const listed = await vcs.mrList({ project, state: 'open' });
+      prs = field(listed.map((p) => ({ number: p.number, title: p.title, headBranch: p.headBranch ?? null, issue: issueOfBranch(p.headBranch) })));
+    } catch (err) {
+      openError ??= errMessage(err);
+      prs = uncomputable(`the PR list could not be read: ${errMessage(err)}`);
+    }
+
+    if (!prs.ok) {
+      reviews = uncomputable(`no PR list to read threads for (${prs.reason})`);
+    } else {
+      const rows = [];
+      for (const p of prs.value) {
+        try {
+          const list = await vcs.prReviews({ project, number: p.number });
+          rows.push(Array.isArray(list) ? reviewRows(p.number, list) : { pr: p.number, ok: false, reason: 'the forge returned no reviews list' });
+        } catch (err) {
+          rows.push({ pr: p.number, ok: false, reason: errMessage(err) });
+        }
+      }
+      reviews = field(rows);
+    }
+    openEntry = forgeLoad ? forgeLoad.open : (openError === null ? completeAt(generatedAt) : failedAt(generatedAt, openError));
   }
 
-  let reviews;
-  if (!prs.ok) {
-    reviews = uncomputable(`no PR list to read threads for (${prs.reason})`);
-  } else {
-    const rows = [];
-    for (const p of prs.value) {
-      try {
-        const list = await vcs.prReviews({ project, number: p.number });
-        rows.push(Array.isArray(list) ? reviewRows(p.number, list) : { pr: p.number, ok: false, reason: 'the forge returned no reviews list' });
-      } catch (err) {
-        rows.push({ pr: p.number, ok: false, reason: err?.message ?? String(err) });
-      }
+  let closedIssues;
+  let closedEntry;
+  if (!closed) {
+    closedIssues = uncomputable(CLOSED_DISABLED_BY_FLAG);
+    closedEntry = { state: 'disabled', at: null, reason: CLOSED_DISABLED_BY_FLAG };
+  } else if (forgeLoad) {
+    closedEntry = forgeLoad.closed;
+    const c = closedEntry;
+    if (c.state === 'pending') closedIssues = pending(LOADING.closedIssues);
+    else if (c.state === 'disabled') closedIssues = uncomputable(c.reason);
+    else if (c.state === 'failed' && c.lastCompleteAt === null) closedIssues = uncomputable(closedUnreadable(c.reason));
+    else {
+      try { closedIssues = readClosedIssues(await vcs.issueList({ project, state: 'closed' })); }
+      catch (err) { closedIssues = uncomputable(closedUnreadable(errMessage(err))); }
     }
-    reviews = field(rows);
+  } else {
+    try {
+      closedIssues = readClosedIssues(await vcs.issueList({ project, state: 'closed' }));
+      closedEntry = completeAt(generatedAt);
+    } catch (err) {
+      closedIssues = uncomputable(closedUnreadable(errMessage(err)));
+      closedEntry = failedAt(generatedAt, errMessage(err));
+    }
   }
-  return { graph, prs, reviews };
+
+  return { graph, prs, reviews, closedIssues, forgeLoad: field({ open: openEntry, closed: closedEntry }) };
+}
+
+/**
+ * The `hierarchy` section (#1199 D60): the adapter's Map as ascending `[number, Entry]` pairs,
+ * because JSON drops a Map. It is pending or uncomputable exactly when the graph is, with the
+ * graph's reason. `closedUnresolved` is the closed section's list when it is a value, else `[]`;
+ * the rollup states the closed lane's load from `forgeLoad`, so an empty list is never read as
+ * "all resolved". `closedRead` says whether the closed list was actually read: a lane the poller
+ * marked complete can still have an unreadable cache, and a count over open children only is not a count.
+ */
+function readHierarchy(graph, closedIssues) {
+  if (!graph.ok) return graph.pending === true ? pending(graph.reason) : uncomputable(graph.reason);
+  const closed = closedIssues.ok ? closedIssues.value : null;
+  const { issues, divergences } = hierarchyFromGraph({ nodes: graph.value.nodes, declarationDivergences: graph.value.declarationDivergences, closed });
+  return field({ issues: [...issues], divergences, closedUnresolved: closed?.unresolved ?? [], closedRead: closedIssues.ok ? { ok: true } : { ok: false, reason: closedIssues.reason } });
 }
 
 // ── the composition ─────────────────────────────────────────────────────────
@@ -397,10 +553,12 @@ async function readForge({ vcs, project }) {
  * buildSnapshot() — the one shape every consumer reads (R879-1).
  *
  * @param {{root?: string, now?: string|Date, vcs?: object|null, project?: string|null,
+ *   forgeLoad?: object|null,  // the server's poller value (#1257 D64); the CLI passes none and derives it
+ *   closed?: boolean,         // false is `--no-closed`: the closed list is not read
  *   _read?: Function, _list?: Function, _exists?: Function, _run?: Function,
  *   _remoteCache?: Map<string, object>|null, remoteBudget?: number}} opts
  */
-export async function buildSnapshot({ root = process.cwd(), now, vcs = null, project = null, _read, _list, _exists, _run, _remoteCache = null, remoteBudget = REMOTE_READ_BUDGET } = {}) {
+export async function buildSnapshot({ root = process.cwd(), now, vcs = null, project = null, forgeLoad = null, closed = true, _read, _list, _exists, _run, _remoteCache = null, remoteBudget = REMOTE_READ_BUDGET } = {}) {
   const read = _read ?? ((p) => readFileSync(join(root, p), 'utf8'));
   const list = _list ?? ((p) => readdirSync(join(root, p)));
   const exists = _exists ?? ((p) => existsSync(join(root, p)));
@@ -422,20 +580,26 @@ export async function buildSnapshot({ root = process.cwd(), now, vcs = null, pro
   const records = readRecordRows({ root, _exists: exists });
   const actors = records.ok ? field(aggregateActors(records.value.records)) : uncomputable(records.reason);
 
-  const forge = await readForge({ vcs, project });
+  const forge = await readForge({ vcs, project, forgeLoad, closed, generatedAt });
   const graph = forge.graph.ok
     ? field({ ...forge.graph.value, nodes: forge.graph.value.nodes.map((n) => ({ ...n, roadmap: roadmapState(n, forge.prs, forge.reviews) })) })
     : forge.graph;
+
+  const hierarchy = readHierarchy(graph, forge.closedIssues);
 
   return {
     generatedAt,
     tier: SNAPSHOT_TIER,
     governanceTier: typeof tier === 'string' ? field(tier) : uncomputable(tier.reason),
     graph,
-    changes: readChanges({ root, tier: typeof tier === 'string' ? tier : null, _read: read, _list: list, _exists: exists }),
+    changes: readChanges({ root, tier: typeof tier === 'string' ? tier : null, _read: read, _list: list, _exists: exists, _run: run }),
     prs: forge.prs,
     reviews: forge.reviews,
+    closedIssues: forge.closedIssues,
+    hierarchy,
+    forgeLoad: forge.forgeLoad,
     remoteChanges: readRemoteChanges({ run, prs: forge.prs, cache: _remoteCache, budget: remoteBudget }),
+    localWorktrees: readLocalWorktrees({ run, root, graph }),
     records,
     adrs,
     antiPatterns: readAntiPatterns({ root, _read: read, _list: list }),
@@ -457,7 +621,11 @@ export function renderSnapshotText(s) {
     line('changes', s.changes, (c) => `${c.length} change dir(s)`),
     line('prs', s.prs, (p) => `${p.length} open`),
     line('remote', s.remoteChanges, (r) => `${r.branches.length} branch(es), ${r.unjoined.length} unjoined, ${r.hidden.base + r.hidden.lane + r.hidden.merged} hidden${r.deferred ? `, ${r.deferred} not read yet` : ''}`),
+    line('local', s.localWorktrees, (l) => `${l.entries.length} worktree(s), ${Object.values(l.hidden).reduce((a, b) => a + b, 0)} hidden`),
+    line('hierarchy', s.hierarchy, (h) => `${h.issues.length} issue(s), ${h.divergences.length} divergence(s)`),
+    line('closed issues', s.closedIssues, (c) => `${c.nodes.length} node(s), ${c.unresolved.length} unresolved`),
     line('reviews', s.reviews, (r) => `${r.filter((x) => x.ok).length} thread(s) read, ${r.filter((x) => !x.ok).length} unreadable`),
+    s.forgeLoad.ok ? `${'forge load'.padEnd(14)} open ${s.forgeLoad.value.open.state}, closed ${s.forgeLoad.value.closed.state}` : `${'forge load'.padEnd(14)} not computed — ${s.forgeLoad.reason}`,
     line('records', s.records, (r) => `${r.records.length} record(s), ${r.duplicates.ids} duplicated id(s)`),
     line('adrs', s.adrs, (a) => `${a.filter((x) => x.ok).length} parsed, ${a.filter((x) => !x.ok).length} unreadable`),
     line('anti-patterns', s.antiPatterns, (a) => `${a.entries.length} entr${a.entries.length === 1 ? 'y' : 'ies'}${a.unlistable.length ? `, ${a.unlistable.length} dir(s) unlistable` : ''}`),

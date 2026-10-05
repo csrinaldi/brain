@@ -55,6 +55,18 @@ export function uncomputable(reason) {
   return { ok: false, reason: reason.trim() };
 }
 
+/**
+ * Marks a fact that is still being loaded (#1257 D65). It is `ok:false`, so every reader that
+ * checks `ok` already treats it as unavailable, and `pending:true` lets a view say "loading"
+ * instead of reporting a failure. The reason is required, for the reason `uncomputable`'s is.
+ */
+export function pending(reason) {
+  if (typeof reason !== 'string' || reason.trim() === '') {
+    throw new Error('status/report: pending() requires a reason: a loading state that says nothing reads as an empty answer.');
+  }
+  return { ok: false, pending: true, reason: reason.trim() };
+}
+
 /** @returns {boolean} */
 export function isUncomputable(f) {
   return Boolean(f) && f.ok === false;

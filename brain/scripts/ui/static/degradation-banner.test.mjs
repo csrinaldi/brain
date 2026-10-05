@@ -35,7 +35,7 @@ test('#881 T3a / R881-9 S2: the poll-failure band is the design\'s sentence, unc
 
 test('#881 T3a: app.js wires the band builders into the page instead of writing its own sentences', () => {
   assert.match(APP_JS, /import \{[^}]*degradationBands[^}]*\} from '\.\/lib\/banners\.mjs'/, 'the bands come from the tested module');
-  assert.match(APP_JS, /degradationBands\(\{ stream: state\.stream, controls: state\.controls, meta: state\.meta, snapshot: state\.snapshot \}\)/, 'every input the bands need is passed: transport, poll controls, watcher/poller meta, and the snapshot sections');
+  assert.match(APP_JS, /degradationBands\(\{ stream: state\.stream, controls: state\.controls, meta: state\.meta, snapshot: state\.snapshot, epic \}\)/, 'every input the bands need is passed: transport, poll controls, watcher/poller meta, and the snapshot sections');
   assert.ok(!/the watcher failed:/.test(APP_JS), 'the sentence must not be duplicated in the browser file — one owner, one test');
   assert.ok(!/last poll failed:/.test(APP_JS), 'the sentence must not be duplicated in the browser file — one owner, one test');
 });
@@ -60,4 +60,18 @@ test('#881 R881-9: every {ok:false} branch in the page renders the reason, so no
   assert.ok(okChecks.length > 0, 'the page must branch on {ok} at all');
   assert.ok(reasonUses.length > 0, 'the page must render reasons');
   assert.match(APP_JS, /function said\(/, 'the page has one helper for a stated reason, so no branch has to invent its own');
+});
+
+test('#1284 D101: degradationBands adds an epic band after the sections band when the epic is not resolved, and none when it is', async () => {
+  const { degradationBands } = await import('../lib/banners.mjs');
+  const snapshot = { prs: { ok: false, reason: 'rate limited' } };
+  const bands = degradationBands({ snapshot, epic: { ok: false, short: 'epic: not resolved', reason: 'the epic reason sentence' } });
+  assert.deepEqual(bands.map((b) => b.id), ['sections', 'epic']);
+  assert.equal(bands[1].text, 'the epic reason sentence');
+  assert.deepEqual(degradationBands({ snapshot: {}, epic: { ok: true, issue: 5 } }), []);
+  assert.deepEqual(degradationBands({ snapshot: {} }), [], 'no epic input adds nothing');
+});
+
+test('#1284 D101: renderBands hands the header model\'s epic to the band builder', () => {
+  assert.match(APP_JS, /degradationBands\(\{[^}]*snapshot: state\.snapshot, epic \}\)/);
 });

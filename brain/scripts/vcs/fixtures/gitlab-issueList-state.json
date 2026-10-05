@@ -1,0 +1,19 @@
+{
+  "_provenance": {
+    "endpoint": "GET /projects/:id/issues?state=opened&per_page=100",
+    "date": "2026-10-02",
+    "derived": true,
+    "note": "Hand-authored for issue #1257, mirroring github-issueList-state.json entry for entry. No live GitLab mirror is reachable from this environment, so the shape comes from the documented GitLab REST API v4 issues response, which carries `state` as opened or closed and the body under `description`. 911 opened (must become open), 912 closed, 913 no state key, 914 empty state, 915 an unrepresentable state; 921 a string description, 922 no description key, 923 a JSON null description, 924 an empty description."
+  },
+  "data": [
+    { "iid": 911, "title": "opened", "labels": [], "state": "opened", "description": "x" },
+    { "iid": 912, "title": "closed", "labels": [], "state": "closed", "description": "x" },
+    { "iid": 913, "title": "no state key", "labels": [], "description": "x" },
+    { "iid": 914, "title": "empty state", "labels": [], "state": "", "description": "x" },
+    { "iid": 915, "title": "unrepresentable state", "labels": [], "state": "locked", "description": "x" },
+    { "iid": 921, "title": "string description", "labels": [], "state": "opened", "description": "Part of #878" },
+    { "iid": 922, "title": "no description key", "labels": [], "state": "opened" },
+    { "iid": 923, "title": "JSON null description", "labels": [], "state": "opened", "description": null },
+    { "iid": 924, "title": "empty description", "labels": [], "state": "opened", "description": "" }
+  ]
+}

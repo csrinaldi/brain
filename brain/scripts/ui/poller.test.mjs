@@ -6,7 +6,7 @@ import { createPoller } from './poller.mjs';
 
 // ── test doubles ─────────────────────────────────────────────────────────
 
-function makeVcs({ callLog, issues = [{ number: 1, title: 't', labels: [], assignees: [] }], prs = [] }) {
+function makeVcs({ callLog, issues = [{ number: 1, title: 't', labels: [], assignees: [], state: 'open', body: 'b' }], prs = [] }) {
   return {
     issueList: async () => { callLog.push('issueList'); return issues.map((i) => ({ ...i })); },
     mrList: async () => { callLog.push('mrList'); return prs.map((p) => ({ ...p })); },
@@ -40,40 +40,6 @@ function fakeScheduler() {
     },
   };
 }
-
-// ── R881-4 S1: an unchanged issue never costs a poll of its own ───────────
-//
-// The claim ruling 2 actually bought is that the body lane's cost does not
-// scale with the number of open issues: N unchanged issues do NOT produce N
-// `issueView` calls. It is not "zero calls" — the least-recently-refreshed
-// catch-up (design.md Q1/D2 (c)) still spends its B = 5 share, because a body
-// edit that moves no list-level field is invisible to the fast lane and would
-// otherwise never be re-read at all. N = 60 here precisely so a bounded tick
-// and an unconditional re-fetch cannot be confused for one another.
-
-test('#881: R881-4 S1 — N unchanged issues cost at most B calls on the next poll, not N', async () => {
-  const scheduler = fakeScheduler();
-  const now = { t: 0 };
-  const callLog = [];
-  const BODY_CAP = 5;
-  const ISSUE_COUNT = 60;
-  const issues = Array.from({ length: ISSUE_COUNT }, (_, i) => ({ number: i + 1, title: `t${i + 1}`, labels: [], assignees: [] }));
-  const vcs = makeVcs({ callLog, issues });
-  const poller = createPoller({
-    vcs, cache: createForgeCache(), project: 'o/r', interval: 60000,
-    _setTimeout: scheduler.setTimeout, _clearTimeout: scheduler.clearTimeout, _now: () => new Date(now.t),
-  });
-
-  await poller.start(); // cold start — every issue's body is fetched once
-  assert.equal(callLog.filter((c) => c.startsWith('issueView:')).length, ISSUE_COUNT);
-
-  callLog.length = 0;
-  now.t += 60000;
-  await scheduler.runNext(); // nothing in issueList changed
-  const spent = callLog.filter((c) => c.startsWith('issueView:'));
-  assert.equal(spent.length, BODY_CAP, 'the second poll re-reads only the B least-recently-refreshed bodies, never one call per unchanged issue');
-  poller.close();
-});
 
 // ── R881-4 S2: disable, manual poll, and the /once collapse ────────────────
 
@@ -189,14 +155,15 @@ test('#881: judgment:cold-6 — createPoller({ initialError }) starts paused wit
   });
 
   const state = poller.state();
-  assert.equal(state.paused, true);
+  assert.equal(state.paused, false, 'a forge halt is not the user\'s pause (R1243-3)');
+  assert.equal(state.forgeHalted, true);
   assert.match(state.lastError, /no VCS token/);
   assert.equal(state.lastPolledAt, new Date(now.t).toISOString(), 'the reason carries a time, the same shape a real failed tick would leave');
   assert.equal(state.lastOkAt, null);
 
-  poller.start(); // paused: a no-op, exactly like `enabled: false`
+  poller.start(); // halted with no remotes lane: a no-op
   assert.equal(scheduler.pending(), 0, 'no timer was armed');
-  assert.deepEqual(callLog, [], 'the port was never called — an initial resolution error means no tick, ever, until a manual resume');
+  assert.deepEqual(callLog, [], 'the port was never called — an initial resolution error means no tick, ever: Resume never lifts it (R2)');
   poller.close();
 });
 
@@ -279,7 +246,7 @@ test('#998 R998-6: state() carries intervalMs and a nextAttemptAt armed to now +
   poller.close();
 });
 
-test('#998 R998-6: createPoller({initialError}) starts with nextAttemptAt null — nothing is scheduled before the first resume', () => {
+test('#998 R998-6: createPoller({initialError}) starts with nextAttemptAt null — a halt with no remotes lane schedules nothing', () => {
   const scheduler = fakeScheduler();
   const now = { t: 0 };
   const vcs = makeVcs({ callLog: [] });
@@ -357,286 +324,6 @@ test('#881: judgment:cold-1 — the review lane is capped at REVIEW_CAP on the v
   poller.close();
 });
 
-// ── judgment:cold-4: the body lane is bounded even when every issue changes ─
-//
-// `pickBodyTargets()` (poller.mjs) never capped `changed` — only
-// `newNumbers` was capped at NEW_BODY_CAP=20. A tick where every one of 90
-// open issues' labels move at once (a bulk label rename, one ordinary
-// GitHub action) made `issueView` uncapped: 90 calls in one tick, over 2x
-// the corrected worst-bounded-case budget (design.md Q1/D2, `2 + 10 + 25 =
-// 37` calls/tick after this fix). The fix bounds the tick's total at
-// BODY_CAP + NEW_BODY_CAP = 25; anything that does not fit stays pending and
-// drains FIFO on later ticks.
-
-test('#881: judgment:cold-4 — the body lane is bounded to BODY_CAP + NEW_BODY_CAP per tick even when every issue changes at once; the rest drains FIFO', async () => {
-  const scheduler = fakeScheduler();
-  const now = { t: 0 };
-  const callLog = [];
-  const ISSUE_COUNT = 90;
-  const BOUND = 25; // BODY_CAP (5) + NEW_BODY_CAP (20)
-  let allLabelsMoved = false;
-  const baseIssues = Array.from({ length: ISSUE_COUNT }, (_, i) => ({ number: i + 1, title: `issue ${i + 1}`, labels: [], assignees: [] }));
-  const vcs = {
-    issueList: async () => {
-      callLog.push('issueList');
-      return baseIssues.map((r) => (allLabelsMoved ? { ...r, labels: ['status:approved'] } : { ...r }));
-    },
-    mrList: async () => { callLog.push('mrList'); return []; },
-    issueView: async ({ number }) => { callLog.push(`issueView:${number}`); return { number, body: 'b' }; },
-    prReviews: async () => [],
-  };
-  const poller = createPoller({
-    vcs, cache: createForgeCache(), project: 'o/r', interval: 60000,
-    _setTimeout: scheduler.setTimeout, _clearTimeout: scheduler.clearTimeout, _now: () => new Date(now.t),
-  });
-
-  await poller.start(); // tick 1 — cold start, steady: every issue's body is fetched once, no fast-lane change recorded yet
-  callLog.length = 0;
-
-  allLabelsMoved = true;
-  now.t += 60000;
-  await scheduler.runNext(); // tick 2 — every one of the 90 issues' labels move at once
-  const tick2Calls = callLog.filter((c) => c.startsWith('issueView:')).length;
-  assert.ok(tick2Calls <= BOUND, `tick 2 spent ${tick2Calls} issueView calls, over the ${BOUND} bound`);
-  assert.equal(tick2Calls, BOUND, 'the tick is saturated: 90 changed issues against a 25-call bound spends the whole budget');
-
-  const seen = new Set();
-  for (const c of callLog) if (c.startsWith('issueView:')) seen.add(Number(c.split(':')[1]));
-
-  const totalTicksNeeded = Math.ceil(ISSUE_COUNT / BOUND); // tick 2 is the first of these
-  for (let i = 1; i < totalTicksNeeded; i++) {
-    now.t += 60000;
-    await scheduler.runNext();
-    for (const c of callLog) if (c.startsWith('issueView:')) seen.add(Number(c.split(':')[1]));
-  }
-  assert.equal(seen.size, ISSUE_COUNT, `every one of the ${ISSUE_COUNT} changed issues is refreshed within ${totalTicksNeeded} ticks of the mass change`);
-
-  poller.close();
-});
-
-// ── Q1/D2: the call-count budget over 30 simulated ticks ───────────────────
-
-test('#881: Q1/D2 — 30 simulated ticks hold the budget: cold start once, then 2 + min(P,10) + B per steady tick', async () => {
-  const scheduler = fakeScheduler();
-  const now = { t: 0 };
-  const callLog = [];
-  const ISSUE_COUNT = 90;
-  const PR_COUNT = 3;
-  let tick = 0;
-  const baseIssues = Array.from({ length: ISSUE_COUNT }, (_, i) => ({ number: i + 1, title: `issue ${i + 1}`, labels: [], assignees: [] }));
-  const prs = Array.from({ length: PR_COUNT }, (_, i) => ({ number: 1000 + i, title: `pr ${i}`, headBranch: `feat/x-${i}` }));
-  const vcs = {
-    issueList: async () => {
-      callLog.push('issueList');
-      tick += 1;
-      const rows = baseIssues.map((r) => ({ ...r }));
-      if (tick > 1) {
-        // exactly one issue's label moves per steady tick, rotating through the set
-        const idx = (tick - 2) % ISSUE_COUNT;
-        rows[idx] = { ...rows[idx], labels: [`moved-on-tick-${tick}`] };
-        baseIssues[idx] = rows[idx];
-      }
-      return rows;
-    },
-    mrList: async () => { callLog.push('mrList'); return prs.map((p) => ({ ...p })); },
-    issueView: async ({ number }) => { callLog.push(`issueView:${number}`); return { number, body: 'b' }; },
-    prReviews: async ({ number }) => { callLog.push(`prReviews:${number}`); return []; },
-  };
-
-  const poller = createPoller({
-    vcs, cache: createForgeCache(), project: 'o/r', interval: 60000,
-    _setTimeout: scheduler.setTimeout, _clearTimeout: scheduler.clearTimeout, _now: () => new Date(now.t),
-  });
-
-  await poller.start(); // tick 1 — cold start
-  assert.equal(callLog.length, 1 /* issueList */ + ISSUE_COUNT + 1 /* mrList */ + PR_COUNT, 'cold start: 1 + I + 1 + P');
-
-  for (let i = 0; i < 29; i++) {
-    const before = callLog.length;
-    now.t += 60000;
-    await scheduler.runNext();
-    const spent = callLog.length - before;
-    assert.equal(spent, 2 + Math.min(PR_COUNT, 10) + 5, `steady tick ${i + 2}: 2 + min(P,10) + B`);
-  }
-
-  poller.close();
-});
-
-// ── judgment:cold-1 (tracker PR #970): a bulk import drains, and the ───────
-// least-recently-refreshed bucket is never foreclosed
-//
-// Two halves of one hole in `pickBodyTargets()`:
-//
-// (1) `newNumbers` was capped at NEW_BODY_CAP=20 and the overflow was simply
-//     DROPPED. An issue in the overflow has `prev === undefined`, so the
-//     `changed` check could never queue it either; by the end of that same
-//     tick it is recorded in `previousIssues` and stops being new. Its body
-//     was never fetched and never would be — `forge-cache` misses on it
-//     forever and the node renders permanently `status: UNREADABLE`.
-//
-// (2) The early return fired when nothing was new and nothing was pending,
-//     BEFORE the `rest` bucket was computed. design.md:96-100 promises (c) a
-//     least-recently-refreshed catch-up "to bound staleness of body-only
-//     facts"; the early return foreclosed it, so a body edit that moves no
-//     list-level field was invisible until something else happened to move.
-//     That is also what left the overflow of (1) unreachable.
-
-test('#881: a bulk import of new issues beyond NEW_BODY_CAP queues the overflow and drains it under the per-tick bound', async () => {
-  const scheduler = fakeScheduler();
-  const now = { t: 0 };
-  const callLog = [];
-  const NEW_BODY_CAP = 20;
-  const BODY_CAP = 5;
-  const BOUND = BODY_CAP + NEW_BODY_CAP;
-
-  const cold = Array.from({ length: 5 }, (_, i) => ({ number: i + 1, title: `old ${i + 1}`, labels: [], assignees: [] }));
-  const imported = Array.from({ length: 30 }, (_, i) => ({ number: 100 + i, title: `imported ${100 + i}`, labels: [], assignees: [] }));
-  let issues = cold;
-  const vcs = {
-    issueList: async () => { callLog.push('issueList'); return issues.map((r) => ({ ...r })); },
-    mrList: async () => { callLog.push('mrList'); return []; },
-    issueView: async ({ number }) => { callLog.push(`issueView:${number}`); return { number, body: 'b' }; },
-    prReviews: async () => [],
-  };
-  const poller = createPoller({
-    vcs, cache: createForgeCache(), project: 'o/r', interval: 60000,
-    _setTimeout: scheduler.setTimeout, _clearTimeout: scheduler.clearTimeout, _now: () => new Date(now.t),
-  });
-
-  const bodiesSince = (from) => callLog.slice(from).filter((c) => c.startsWith('issueView:')).map((c) => Number(c.split(':')[1]));
-
-  await poller.start(); // tick 1 — cold start over the 5 pre-existing issues
-  assert.deepEqual(bodiesSince(0).sort((a, b) => a - b), [1, 2, 3, 4, 5], 'cold start fetches every open body once');
-
-  issues = [...cold, ...imported]; // the bulk import lands between tick 1 and tick 2
-  let mark = callLog.length;
-  now.t += 60000;
-  await scheduler.runNext(); // tick 2
-  const tick2 = bodiesSince(mark);
-  assert.ok(tick2.length <= NEW_BODY_CAP, `tick 2 spent ${tick2.length} issueView calls on brand-new issues, over the NEW_BODY_CAP of ${NEW_BODY_CAP}`);
-
-  const seen = new Set(tick2);
-  const drainTicks = Math.ceil((imported.length - NEW_BODY_CAP) / BODY_CAP);
-  for (let i = 0; i < drainTicks; i++) {
-    mark = callLog.length;
-    now.t += 60000;
-    await scheduler.runNext();
-    const spent = bodiesSince(mark);
-    assert.ok(spent.length <= BOUND, `a drain tick spent ${spent.length} issueView calls, over the ${BOUND} per-tick bound`);
-    for (const n of spent) seen.add(n);
-  }
-
-  const neverFetched = imported.map((r) => r.number).filter((n) => !seen.has(n));
-  assert.deepEqual(neverFetched, [], `every imported issue must have its body fetched within ${drainTicks} ticks of the import; these never were`);
-
-  poller.close();
-});
-
-test('#881: with nothing new and nothing changed, the body lane still refreshes up to BODY_CAP least-recently-refreshed bodies, oldest first', async () => {
-  const scheduler = fakeScheduler();
-  const now = { t: 0 };
-  const callLog = [];
-  const BODY_CAP = 5;
-  const ISSUE_COUNT = 12;
-
-  const rows = Array.from({ length: ISSUE_COUNT }, (_, i) => ({ number: i + 1, title: `issue ${i + 1}`, labels: [], assignees: [] }));
-  const moveRow = (number) => { const r = rows.find((x) => x.number === number); r.labels = ['moved']; };
-  const vcs = {
-    issueList: async () => {
-      callLog.push('issueList');
-      return rows.map((r) => ({ ...r }));
-    },
-    mrList: async () => { callLog.push('mrList'); return []; },
-    issueView: async ({ number }) => { callLog.push(`issueView:${number}`); return { number, body: 'b' }; },
-    prReviews: async () => [],
-  };
-  const poller = createPoller({
-    vcs, cache: createForgeCache(), project: 'o/r', interval: 60000,
-    _setTimeout: scheduler.setTimeout, _clearTimeout: scheduler.clearTimeout, _now: () => new Date(now.t),
-  });
-
-  const bodiesSince = (from) => callLog.slice(from).filter((c) => c.startsWith('issueView:')).map((c) => Number(c.split(':')[1]));
-
-  await poller.start(); // tick 1 — every body refreshed, so every issue's refresh tick is 1
-
-  for (const n of [1, 2, 3]) moveRow(n); // tick 2 moves three rows, permanently; whatever tick 2 touches is now fresher than the rest
-  let mark = callLog.length;
-  now.t += 60000;
-  await scheduler.runNext();
-  const refreshedOnTick2 = new Set(bodiesSince(mark));
-
-  // tick 3 — the list is byte-for-byte what tick 2 already recorded: nothing moved
-  mark = callLog.length;
-  now.t += 60000;
-  await scheduler.runNext();
-  const tick3 = bodiesSince(mark);
-
-  assert.equal(tick3.length, BODY_CAP, 'the least-recently-refreshed catch-up (design.md:96-100 (c)) still spends its B=5 share when no row moved');
-  const stale = tick3.filter((n) => refreshedOnTick2.has(n));
-  assert.deepEqual(stale, [], 'the catch-up takes the oldest refresh ticks first — it must not re-read a body tick 2 just refreshed while older ones wait');
-
-  poller.close();
-});
-
-// The (c) bucket alone is NOT enough to save a bulk import's overflow, which
-// is why the overflow is queued as well: `rest`'s share is
-// `BODY_CAP - new - changed`, so a forge with sustained churn — every tick
-// saturating the `changed` bucket — leaves it at zero forever and a
-// never-fetched number starves indefinitely, exactly the permanent
-// `UNREADABLE` the tracker review found. Queueing the overflow puts it AHEAD
-// of that churn in the FIFO instead of behind it.
-
-test('#881: a queued import overflow drains ahead of later churn, even while the changed bucket is saturated every tick', async () => {
-  const scheduler = fakeScheduler();
-  const now = { t: 0 };
-  const callLog = [];
-  const NEW_BODY_CAP = 20;
-  const BOUND = 25; // BODY_CAP + NEW_BODY_CAP
-
-  const existing = Array.from({ length: 40 }, (_, i) => ({ number: i + 1, title: `old ${i + 1}`, labels: [], assignees: [] }));
-  const imported = Array.from({ length: 30 }, (_, i) => ({ number: 100 + i, title: `imported ${100 + i}`, labels: [], assignees: [] }));
-  let importLanded = false;
-  let churn = 0;
-  const vcs = {
-    issueList: async () => {
-      callLog.push('issueList');
-      const rows = existing.map((r) => ({ ...r, labels: churn > 0 ? [`churn-${churn}`] : [] }));
-      return importLanded ? [...rows, ...imported.map((r) => ({ ...r }))] : rows;
-    },
-    mrList: async () => { callLog.push('mrList'); return []; },
-    issueView: async ({ number }) => { callLog.push(`issueView:${number}`); return { number, body: 'b' }; },
-    prReviews: async () => [],
-  };
-  const poller = createPoller({
-    vcs, cache: createForgeCache(), project: 'o/r', interval: 60000,
-    _setTimeout: scheduler.setTimeout, _clearTimeout: scheduler.clearTimeout, _now: () => new Date(now.t),
-  });
-
-  const bodiesSince = (from) => callLog.slice(from).filter((c) => c.startsWith('issueView:')).map((c) => Number(c.split(':')[1]));
-
-  await poller.start(); // tick 1 — cold start over the 40 pre-existing issues
-
-  importLanded = true;
-  let mark = callLog.length;
-  now.t += 60000;
-  await scheduler.runNext(); // tick 2 — 30 arrive at once; 20 are fetched, 10 overflow
-  const tick2 = bodiesSince(mark);
-  assert.equal(tick2.length, NEW_BODY_CAP, 'tick 2 spends exactly the new-issue cap');
-  const overflow = imported.map((r) => r.number).filter((n) => !tick2.includes(n));
-  assert.equal(overflow.length, 10, 'ten imported issues did not fit tick 2');
-
-  churn = 1; // from here on every one of the 40 pre-existing rows moves on every tick
-  mark = callLog.length;
-  now.t += 60000;
-  await scheduler.runNext(); // tick 3 — the changed bucket is saturated, so `rest` gets nothing
-  const tick3 = bodiesSince(mark);
-  assert.ok(tick3.length <= BOUND, `tick 3 spent ${tick3.length} issueView calls, over the ${BOUND} per-tick bound`);
-  const starved = overflow.filter((n) => !tick3.includes(n));
-  assert.deepEqual(starved, [], 'the queued overflow is drained FIFO ahead of the churn that arrived after it');
-
-  poller.close();
-});
-
 test("#1015 cold review: close() clears the countdown — a poll that will never fire must not be reported as pending", async () => {
   const scheduler = fakeScheduler();
   const now = { t: 1726272000000 };
@@ -686,7 +373,9 @@ test('#1201 R1201-9: a tick fetches once, and onTick fires only after BOTH lanes
   const { poller } = remotesPoller({ fetchRemotes: spy.fn, onTick: () => events.push('onTick') });
   await poller.start();
   assert.equal(spy.calls, 1);
-  assert.deepEqual(events, ['fetch:start', 'fetch:end', 'onTick']);
+  // #1257 D66: the open list's first landing recomputes at once, so a first tick reports twice;
+  // the LAST report is still the one after both lanes settled.
+  assert.deepEqual(events, ['fetch:start', 'fetch:end', 'onTick', 'onTick']);
   poller.close();
 });
 
@@ -717,6 +406,8 @@ test('#1201 R1201-9 W3: a forge-less poller (initialError) still fetches on its 
   assert.equal(spy.calls, 2, 'the second tick fetched');
   assert.deepEqual(callLog, [], 'the forge port was never called');
   assert.match(poller.state().lastError, /no VCS token/);
+  assert.equal(poller.state().paused, false, 'halted, not user-paused');
+  assert.equal(poller.state().forgeHalted, true);
   poller.close();
 });
 
@@ -732,6 +423,8 @@ test('#1201 R1201-9 W3: a forge-less poller the USER paused (--no-poll) does not
   assert.equal(scheduler.pending(), 0);
   await poller.refreshRemotes();
   assert.equal(spy.calls, 1, 'only the explicit refresh fetches');
+  assert.equal(poller.state().paused, true, 'the user paused it');
+  assert.equal(poller.state().forgeHalted, true, 'and the forge is still halted');
   poller.close();
 });
 
@@ -834,7 +527,7 @@ test('#1201 R1201-9: a slow fetch never delays the forge lane — the next tick 
   await poller.start(); // the fetch is held open and never released
   assert.equal(poller.state().remotes.inFlight, true, 'the fetch is still pending');
   assert.equal(scheduler.pending(), 1, 'the next forge tick is armed without waiting for the fetch');
-  assert.deepEqual(ticks, ['onTick'], 'the tick reported on forge settle alone');
+  assert.deepEqual(ticks, ['onTick', 'onTick'], 'the first landing recomputes early (#1257 D66), then the tick reported on forge settle alone');
 
   issues = [{ number: 5, title: 'five', labels: ['status:approved'], assignees: [] }];
   await scheduler.runNext(); // the second tick: forge polls again, the in-flight fetch is joined, not re-run
@@ -845,7 +538,7 @@ test('#1201 R1201-9: a slow fetch never delays the forge lane — the next tick 
   spy.release(); // the fetch finally settles
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(poller.state().remotes.inFlight, false);
-  assert.equal(ticks.length, 3, 'its completion notifies once more so the section recomputes');
+  assert.equal(ticks.length, 4, 'its completion notifies once more so the section recomputes');
   poller.close();
 });
 
@@ -866,4 +559,495 @@ test('#1201 R1201-9: a fetch that rejects after its tick ended lands in remotes.
   } finally {
     process.off('unhandledRejection', onUnhandled);
   }
+});
+
+// ── #1243 R1243-1/2: the poller holds at most one armed handle ───────────────
+
+/** A forge whose `issueList` is held until `release()`, so a tick can be paused mid-flight. */
+function gatedVcs() {
+  const gate = { release: null };
+  const vcs = makeVcs({ callLog: [] });
+  vcs.issueList = () => new Promise((resolve) => {
+    gate.release = () => resolve([{ number: 1, title: 't', labels: [], assignees: [] }]);
+  });
+  return { vcs, gate };
+}
+
+function gatedPoller(extra = {}) {
+  const scheduler = fakeScheduler();
+  const { vcs, gate } = gatedVcs();
+  const poller = createPoller({
+    vcs, cache: createForgeCache(), project: 'o/r', interval: 60000,
+    _setTimeout: scheduler.setTimeout, _clearTimeout: scheduler.clearTimeout, _now: () => new Date(0), ...extra,
+  });
+  return { poller, scheduler, gate };
+}
+
+test('#1243 R1243-1/4: start, resume, resume on a forge-halted poller with a remotes lane holds ONE handle (resume is a no-op while not paused; this is a guard, arm()\'s clear is pinned below)', async () => {
+  const spy = fetchSpy();
+  const scheduler = fakeScheduler();
+  const poller = createPoller({
+    vcs: makeVcs({ callLog: [] }), cache: createForgeCache(), project: 'o/r', interval: 60000, fetchRemotes: spy.fn,
+    initialError: 'no VCS token', _setTimeout: scheduler.setTimeout, _clearTimeout: scheduler.clearTimeout, _now: () => new Date(0),
+  });
+  const t = poller.start();
+  poller.resume();
+  poller.resume();
+  await t;
+  assert.equal(scheduler.pending(), 1, 'one chain, whatever the order of start and resume');
+  poller.close();
+  assert.equal(scheduler.pending(), 0, 'close() stops every chain the poller started');
+});
+
+test('#1243 R1243-1: arm() clears a live handle before setting, so two settling ticks leave ONE handle', async () => {
+  const scheduler = fakeScheduler();
+  const poller = createPoller({
+    vcs: makeVcs({ callLog: [] }), cache: createForgeCache(), project: 'o/r', interval: 60000,
+    _setTimeout: scheduler.setTimeout, _clearTimeout: scheduler.clearTimeout, _now: () => new Date(0),
+  });
+  // Two ticks in flight; each settles into scheduleNext() -> arm(), the second with a live handle.
+  await Promise.all([poller.start(), poller.start()]);
+  assert.equal(scheduler.pending(), 1, 'the second arm() cleared the first handle');
+  poller.close();
+  assert.equal(scheduler.pending(), 0);
+});
+
+test('#1243 R1243-1: pause clears the only chain', async () => {
+  const scheduler = fakeScheduler();
+  const poller = createPoller({
+    vcs: makeVcs({ callLog: [] }), cache: createForgeCache(), project: 'o/r', interval: 60000,
+    _setTimeout: scheduler.setTimeout, _clearTimeout: scheduler.clearTimeout, _now: () => new Date(0),
+  });
+  await poller.start();
+  assert.equal(scheduler.pending(), 1);
+  poller.pause();
+  assert.equal(scheduler.pending(), 0, 'no handle is armed after pause');
+  assert.equal(poller.state().nextAttemptAt, null);
+  poller.close();
+});
+
+test('#1243 R1243-1: pause during an in-flight tick, then resume before it settles, leaves ONE handle', async () => {
+  const { poller, scheduler, gate } = gatedPoller();
+  const t = poller.start();
+  poller.pause();
+  poller.resume();
+  gate.release();
+  await t;
+  assert.equal(scheduler.pending(), 1);
+  poller.pause();
+  assert.equal(scheduler.pending(), 0, 'pause clears the only chain');
+  poller.close();
+});
+
+test('#1243 R1243-1: a tick that settles while the user has paused arms nothing', async () => {
+  const { poller, scheduler, gate } = gatedPoller();
+  const t = poller.start();
+  poller.pause();
+  gate.release();
+  await t;
+  assert.equal(scheduler.pending(), 0);
+  assert.equal(poller.state().nextAttemptAt, null);
+  poller.close();
+});
+
+test('#1243 R1243-2: close() after pause-resume with a tick in flight arms nothing when the tick settles', async () => {
+  const { poller, scheduler, gate } = gatedPoller();
+  const t = poller.start();
+  poller.pause();
+  poller.resume();
+  poller.close();
+  gate.release();
+  await t;
+  assert.equal(scheduler.pending(), 0);
+  assert.equal(poller.state().nextAttemptAt, null);
+});
+
+// ── #1243 R1243-3/4: `paused` is the user's pause; Resume never lifts a forge halt ──
+
+function haltedPoller({ fetchRemotes = fetchSpy().fn, enabled = true, callLog = [] } = {}) {
+  const scheduler = fakeScheduler();
+  const poller = createPoller({
+    vcs: makeVcs({ callLog }), cache: createForgeCache(), project: 'o/r', interval: 60000, fetchRemotes, enabled,
+    initialError: 'no VCS token', _setTimeout: scheduler.setTimeout, _clearTimeout: scheduler.clearTimeout, _now: () => new Date(0),
+  });
+  return { poller, scheduler, callLog };
+}
+
+test('#1243 R1243-3: state() carries forgeHalted, forgeHaltReason and remotesLane; a user pause on a halt is a pause', () => {
+  const { poller } = haltedPoller();
+  let s = poller.state();
+  assert.deepEqual([s.paused, s.forgeHalted, s.forgeHaltReason, s.remotesLane], [false, true, 'no VCS token', true]);
+  assert.match(s.lastError, /no VCS token/);
+  s = poller.pause();
+  assert.deepEqual([s.paused, s.forgeHalted], [true, true]);
+  poller.close();
+
+  const plain = createPoller({ vcs: makeVcs({ callLog: [] }), cache: createForgeCache(), project: 'o/r' });
+  s = plain.state();
+  assert.deepEqual([s.paused, s.forgeHalted, s.forgeHaltReason, s.remotesLane], [false, false, null, false]);
+  plain.close();
+});
+
+test('#1243 R1243-4: Resume never lifts the halt: the forge port is not called and the reason stays', async () => {
+  const { poller, scheduler, callLog } = haltedPoller();
+  poller.pause();
+  poller.resume();
+  assert.equal(scheduler.pending(), 1);
+  await scheduler.runNext();
+  await new Promise((resolve) => setImmediate(resolve));
+  const s = poller.state();
+  assert.equal(s.forgeHalted, true);
+  assert.match(s.lastError, /no VCS token/);
+  assert.deepEqual(callLog, []);
+  poller.close();
+});
+
+test('#1243 R1243-4: resume after a user pause re-arms only the remotes timer; resume on an unpaused poller is a no-op', () => {
+  const { poller, scheduler } = haltedPoller({ enabled: false });
+  assert.equal(poller.state().paused, true);
+  const s = poller.resume();
+  assert.deepEqual([s.paused, s.forgeHalted, scheduler.pending()], [false, true, 1]);
+  const due = poller.state().nextAttemptAt;
+  poller.resume();
+  assert.equal(scheduler.pending(), 1, 'the same single handle');
+  assert.equal(poller.state().nextAttemptAt, due);
+  poller.close();
+});
+
+test('#1243 R1243-4: a halted poller with no remotes lane arms nothing on resume', () => {
+  const { poller, scheduler } = haltedPoller({ fetchRemotes: null, enabled: false });
+  poller.resume();
+  assert.equal(scheduler.pending(), 0);
+  assert.equal(poller.state().remotesLane, false);
+  poller.close();
+});
+
+// ── #1257 R1257-11: the open lane reads bodies from the list ─────────────────
+//
+// The list carries every body (R10), so an `issueView` is only the fallback for a
+// row whose `body` is null, capped per tick. A row that carries a string body, the
+// empty string included (R12), is never fetched again.
+
+const BODY_CAP = 5;
+const flush = () => new Promise((resolve) => setImmediate(resolve));
+const T = (ms) => new Date(ms).toISOString();
+
+function rows(count, extra = {}) {
+  return Array.from({ length: count }, (_, i) => ({ number: i + 1, title: `t${i + 1}`, labels: [], assignees: [], state: 'open', body: 'b', ...extra }));
+}
+
+function simplePoller({ vcs, closedVcs, now = { t: 0 }, onTick, enabled = true, initialError = null, scheduler = fakeScheduler(), cache = createForgeCache() } = {}) {
+  const poller = createPoller({
+    vcs, cache, project: 'o/r', interval: 60000, enabled, initialError,
+    ...(closedVcs ? { closedVcs } : {}),
+    _setTimeout: scheduler.setTimeout, _clearTimeout: scheduler.clearTimeout, _now: () => new Date(now.t),
+    ...(onTick ? { onTick } : {}),
+  });
+  return { poller, scheduler, now, cache };
+}
+
+test('#1257 R1257-11: the open lane reads no body it already has', async () => {
+  const callLog = [];
+  const vcs = makeVcs({ callLog, issues: rows(133) });
+  const { poller } = simplePoller({ vcs });
+  await poller.start();
+  assert.equal(callLog.filter((c) => c.startsWith('issueView:')).length, 0, 'every row carried a string body');
+  poller.close();
+});
+
+test('#1257 R1257-11: the fallback is capped, ascending, and a cached number is not re-read', async () => {
+  const callLog = [];
+  const vcs = makeVcs({ callLog, issues: rows(8, { body: null }) });
+  const { poller, scheduler, now } = simplePoller({ vcs });
+  await poller.start();
+  assert.deepEqual(callLog.filter((c) => c.startsWith('issueView:')), ['issueView:1', 'issueView:2', 'issueView:3', 'issueView:4', 'issueView:5']);
+
+  callLog.length = 0;
+  now.t += 60000;
+  await scheduler.runNext();
+  assert.deepEqual(callLog.filter((c) => c.startsWith('issueView:')), ['issueView:6', 'issueView:7', 'issueView:8'], 'the next tick reads only the numbers not yet cached');
+
+  callLog.length = 0;
+  now.t += 60000;
+  await scheduler.runNext();
+  assert.deepEqual(callLog.filter((c) => c.startsWith('issueView:')), [], 'a cached number is not re-read while its row body stays null');
+  poller.close();
+});
+
+test('#1257 R1257-11: the cold start is capped too', async () => {
+  const callLog = [];
+  const vcs = makeVcs({ callLog, issues: rows(133, { body: null }) });
+  const { poller } = simplePoller({ vcs });
+  await poller.start();
+  assert.equal(callLog.filter((c) => c.startsWith('issueView:')).length, BODY_CAP);
+  poller.close();
+});
+
+test('#1257 R1257-11: an empty body is a body, not a reason to fetch', async () => {
+  const callLog = [];
+  const vcs = makeVcs({ callLog, issues: rows(3, { body: '' }) });
+  const { poller } = simplePoller({ vcs });
+  await poller.start();
+  assert.equal(callLog.filter((c) => c.startsWith('issueView:')).length, 0);
+  poller.close();
+});
+
+// ── #1257 R1257-8: forgeLoad, the open lane and the lane-independent cases ───
+
+test('#1257 R1257-8: open pending while the first tick has not settled', async () => {
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const vcs = { ...makeVcs({ callLog: [] }), issueList: async () => { await gate; return rows(1); } };
+  const { poller } = simplePoller({ vcs });
+  assert.deepEqual(poller.state().forgeLoad.open, { state: 'pending', at: null }, 'before start');
+  const started = poller.start();
+  await flush();
+  assert.deepEqual(poller.state().forgeLoad.open, { state: 'pending', at: null }, 'a read in flight is pending, with no reason');
+  release();
+  await started;
+  poller.close();
+});
+
+test('#1257 R1257-8: open complete once the list lands', async () => {
+  const now = { t: 1000 };
+  const { poller } = simplePoller({ vcs: makeVcs({ callLog: [] }), now });
+  await poller.start();
+  assert.deepEqual(poller.state().forgeLoad.open, { state: 'complete', at: T(1000) });
+  poller.close();
+});
+
+test('#1257 R1257-8: open failed after complete keeps the cached list and says when it was last complete', async () => {
+  const now = { t: 1000 };
+  let fail = false;
+  const vcs = { ...makeVcs({ callLog: [] }), issueList: async () => { if (fail) throw new Error('boom'); return rows(2); } };
+  const { poller, scheduler, cache } = simplePoller({ vcs, now });
+  await poller.start();
+  fail = true;
+  now.t = 2000;
+  await scheduler.runNext();
+  assert.deepEqual(poller.state().forgeLoad.open, { state: 'failed', at: T(2000), reason: 'boom', lastCompleteAt: T(1000) });
+  assert.equal((await cache.port.issueList({ state: 'open' })).length, 2, 'the T1 list is still served');
+  poller.close();
+});
+
+test('#1257 R1257-8: open failed with no data has lastCompleteAt null', async () => {
+  const now = { t: 1000 };
+  const vcs = { ...makeVcs({ callLog: [] }), issueList: async () => { throw new Error('offline'); } };
+  const { poller } = simplePoller({ vcs, now });
+  await poller.start();
+  assert.deepEqual(poller.state().forgeLoad.open, { state: 'failed', at: T(1000), reason: 'offline', lastCompleteAt: null });
+  poller.close();
+});
+
+test('#1257 R1257-8: a forge-halted poller reports both lanes failed with the halt reason', () => {
+  const { poller } = simplePoller({ vcs: makeVcs({ callLog: [] }), initialError: 'no git origin remote', now: { t: 500 } });
+  const fl = poller.state().forgeLoad;
+  assert.deepEqual(fl.open, { state: 'failed', at: T(500), reason: 'no git origin remote', lastCompleteAt: null });
+  assert.deepEqual(fl.closed, { state: 'failed', at: T(500), reason: 'no git origin remote', lastCompleteAt: null });
+  poller.close();
+});
+
+test('#1257 R1257-8: a poller paused before any load is pending with the reason "polling is paused"', () => {
+  const { poller } = simplePoller({ vcs: makeVcs({ callLog: [] }), enabled: false });
+  assert.deepEqual(poller.state().forgeLoad.open, { state: 'pending', at: null, reason: 'polling is paused' });
+  poller.close();
+});
+
+test('#1257 R1257-8: closed is disabled without a closed port', () => {
+  const { poller } = simplePoller({ vcs: makeVcs({ callLog: [] }) });
+  assert.deepEqual(poller.state().forgeLoad.closed, { state: 'disabled', at: null, reason: 'no closed-issue lane is configured' });
+  poller.close();
+});
+
+// ── #1257 D66: the graph lands before the reviews ────────────────────────────
+
+test('#1257 R1257-9: the graph lands before the reviews — onTick fires on the open list landing, before a held prReviews settles', async () => {
+  let releaseReviews;
+  const held = new Promise((resolve) => { releaseReviews = resolve; });
+  const seen = [];
+  const vcs = { ...makeVcs({ callLog: [], issues: rows(2), prs: [{ number: 9, title: 'p', headBranch: 'x' }] }), prReviews: async () => { await held; return []; } };
+  const { poller } = simplePoller({ vcs, onTick: (s) => seen.push(s.forgeLoad.open.state) });
+  const started = poller.start();
+  await flush();
+  assert.deepEqual(seen, ['complete'], 'one recompute, with the open list already complete, while the review is still held');
+  releaseReviews();
+  await started;
+  assert.deepEqual(seen, ['complete', 'complete'], 'the tick keeps its own single onTick');
+  poller.close();
+});
+
+test('#1257 R1257-9: only the first landing recomputes early; a steady tick has one onTick', async () => {
+  const seen = [];
+  const { poller, scheduler, now } = simplePoller({ vcs: makeVcs({ callLog: [] }), onTick: (s) => seen.push(s.forgeLoad.open.state) });
+  await poller.start();
+  seen.length = 0;
+  now.t += 60000;
+  await scheduler.runNext();
+  assert.equal(seen.length, 1);
+  poller.close();
+});
+
+// ── #1257 R1257-10: the closed lane ──────────────────────────────────────────
+
+const CLOSED_SINCE_OVERLAP_MS = 600000;
+const CLOSED_FULL_EVERY_RUNS = 60;
+
+/** A `closedVcs` double: records every call, can be held, can fail, and answers from `answer(args, callNumber)`. */
+function closedSpy({ answer = () => [], hold = false } = {}) {
+  const spy = { calls: [], fail: null, release: null };
+  const gate = new Promise((resolve) => { spy.release = resolve; });
+  spy.port = {
+    issueList: async (args) => {
+      spy.calls.push(args);
+      if (hold) await gate;
+      if (spy.fail) throw new Error(spy.fail);
+      return answer(args, spy.calls.length).map((r) => ({ ...r }));
+    },
+  };
+  return spy;
+}
+const closedRow = (number, extra = {}) => ({ number, title: `c${number}`, labels: [], assignees: [], state: 'closed', body: 'b', ...extra });
+
+test('#1257 R1257-10: the closed lane does not delay the open lane', async () => {
+  const callLog = [];
+  const closed = closedSpy({ hold: true });
+  const { poller, scheduler, now } = simplePoller({ vcs: makeVcs({ callLog }), closedVcs: closed.port });
+  await poller.start();
+  for (let i = 0; i < 2; i++) { now.t += 60000; await scheduler.runNext(); }
+  assert.equal(callLog.filter((c) => c === 'issueList').length, 3, 'the open issueList ran on each of the three ticks');
+  assert.equal(closed.calls.length, 1, 'one flight: the held closed read is not started again');
+  closed.release();
+  await flush();
+  poller.close();
+});
+
+test('#1257 R1257-10: first run full, second run incremental from the first run start minus the overlap', async () => {
+  const closed = closedSpy({ answer: () => [closedRow(3)] });
+  const { poller, scheduler, now } = simplePoller({ vcs: makeVcs({ callLog: [] }), closedVcs: closed.port, now: { t: 5000000 } });
+  await poller.start();
+  await flush();
+  now.t = 6000000;
+  await scheduler.runNext();
+  await flush();
+  assert.equal(closed.calls.length, 2);
+  assert.deepEqual(closed.calls[0], { project: 'o/r', state: 'closed' }, 'the first run is full: no updatedSince');
+  assert.equal(closed.calls[1].state, 'closed');
+  assert.equal(closed.calls[1].updatedSince, T(5000000 - CLOSED_SINCE_OVERLAP_MS));
+  poller.close();
+});
+
+test('#1257 R1257-10: a delta upserts by number and the cache serves the merged set in descending order', async () => {
+  const closed = closedSpy({ answer: (_a, n) => (n === 1 ? [closedRow(3), closedRow(5)] : [closedRow(3, { title: 'edited' }), closedRow(9)]) });
+  const { poller, scheduler, now, cache } = simplePoller({ vcs: makeVcs({ callLog: [] }), closedVcs: closed.port });
+  await poller.start();
+  await flush();
+  now.t += 60000;
+  await scheduler.runNext();
+  await flush();
+  const rowsNow = await cache.port.issueList({ state: 'closed' });
+  assert.deepEqual(rowsNow.map((r) => r.number), [9, 5, 3]);
+  assert.equal(rowsNow.find((r) => r.number === 3).title, 'edited');
+  poller.close();
+});
+
+test('#1257 R1257-10: a reopened issue leaves the closed set, whichever lane settles first', async () => {
+  let openRows = rows(2);
+  const vcs = { ...makeVcs({ callLog: [] }), issueList: async () => openRows.map((r) => ({ ...r })) };
+  const closed = closedSpy({ answer: (_a, n) => (n === 1 ? [closedRow(7), closedRow(3)] : []) });
+  const { poller, scheduler, now, cache } = simplePoller({ vcs, closedVcs: closed.port });
+  await poller.start();
+  await flush();
+  assert.deepEqual((await cache.port.issueList({ state: 'closed' })).map((r) => r.number), [7, 3]);
+  openRows = [...rows(2), { ...rows(1)[0], number: 7 }];
+  now.t += 60000;
+  await scheduler.runNext();
+  await flush();
+  assert.deepEqual((await cache.port.issueList({ state: 'closed' })).map((r) => r.number), [3], '#7 is open again, so it is no longer closed');
+  poller.close();
+});
+
+test('#1257 R1257-10: every 60th run is a full re-list that replaces the held set', async () => {
+  const closed = closedSpy({ answer: (_args, n) => (n === CLOSED_FULL_EVERY_RUNS ? [closedRow(500)] : [closedRow(n + 100)]) });
+  const { poller, scheduler, now, cache } = simplePoller({ vcs: makeVcs({ callLog: [] }), closedVcs: closed.port });
+  await poller.start();
+  await flush();
+  for (let run = 2; run <= CLOSED_FULL_EVERY_RUNS; run++) { now.t += 60000; await scheduler.runNext(); await flush(); }
+  assert.equal(closed.calls.length, CLOSED_FULL_EVERY_RUNS);
+  assert.equal(closed.calls[CLOSED_FULL_EVERY_RUNS - 1].updatedSince, undefined, 'run 60 is full');
+  assert.ok(closed.calls.slice(1, CLOSED_FULL_EVERY_RUNS - 1).every((c) => typeof c.updatedSince === 'string'), 'runs 2 to 59 are deltas');
+  assert.deepEqual((await cache.port.issueList({ state: 'closed' })).map((r) => r.number), [500], 'the full list replaced the held set');
+  poller.close();
+});
+
+test('#1257 R1257-10: a closed-lane failure is contained and retries from the same anchor', async () => {
+  const closed = closedSpy({ answer: () => [closedRow(3)] });
+  const now = { t: 1000000 };
+  const { poller, scheduler, cache } = simplePoller({ vcs: makeVcs({ callLog: [] }), closedVcs: closed.port, now });
+  await poller.start();
+  await flush();
+  closed.fail = 'rate limited';
+  now.t = 2000000;
+  await scheduler.runNext();
+  await flush();
+  const s = poller.state();
+  assert.equal(s.lastError, null, 'the open lane is untouched');
+  assert.equal(s.forgeLoad.open.state, 'complete');
+  assert.deepEqual((await cache.port.issueList({ state: 'closed' })).map((r) => r.number), [3], 'the held closed list is still served');
+  assert.deepEqual(s.forgeLoad.closed, { state: 'failed', at: T(2000000), reason: 'rate limited', lastCompleteAt: T(1000000) });
+  closed.fail = null;
+  now.t = 3000000;
+  await scheduler.runNext();
+  await flush();
+  assert.equal(closed.calls[2].updatedSince, T(1000000 - CLOSED_SINCE_OVERLAP_MS), 'the retry uses the anchor of the last SUCCESSFUL run');
+  assert.deepEqual(poller.state().forgeLoad.closed, { state: 'complete', at: T(3000000) });
+  poller.close();
+});
+
+test('#1257 R1257-8: closed pending, complete after a full list, and a delta keeps it complete', async () => {
+  const closed = closedSpy({ hold: true, answer: () => [closedRow(3)] });
+  const now = { t: 1000000 };
+  const { poller, scheduler } = simplePoller({ vcs: makeVcs({ callLog: [] }), closedVcs: closed.port, now });
+  await poller.start();
+  assert.deepEqual(poller.state().forgeLoad.closed, { state: 'pending', at: null }, 'a full list is in flight');
+  closed.release();
+  await flush();
+  assert.deepEqual(poller.state().forgeLoad.closed, { state: 'complete', at: T(1000000) });
+  now.t = 2000000;
+  await scheduler.runNext();
+  await flush();
+  assert.deepEqual(poller.state().forgeLoad.closed, { state: 'complete', at: T(2000000) }, 'a delta keeps it complete with a new at');
+  poller.close();
+});
+
+test('#1257 R1257-8: closed failed with no data has lastCompleteAt null', async () => {
+  const closed = closedSpy();
+  closed.fail = 'boom';
+  const { poller } = simplePoller({ vcs: makeVcs({ callLog: [] }), closedVcs: closed.port, now: { t: 1000000 } });
+  await poller.start();
+  await flush();
+  assert.deepEqual(poller.state().forgeLoad.closed, { state: 'failed', at: T(1000000), reason: 'boom', lastCompleteAt: null });
+  assert.equal(poller.state().lastError, null);
+  poller.close();
+});
+
+test('#1257 R1257-10: a closed read that settles outside a tick calls onTick itself', async () => {
+  const closed = closedSpy({ hold: true });
+  const seen = [];
+  const { poller } = simplePoller({ vcs: makeVcs({ callLog: [] }), closedVcs: closed.port, onTick: (s) => seen.push(s.forgeLoad.closed.state) });
+  await poller.start();
+  const before = seen.length;
+  closed.release();
+  await flush();
+  assert.equal(seen.length, before + 1);
+  assert.equal(seen.at(-1), 'complete');
+  poller.close();
+});
+
+test('#1257 R1257-10: a halted forge never starts the closed lane', async () => {
+  const closed = closedSpy();
+  const { poller } = simplePoller({ vcs: makeVcs({ callLog: [] }), closedVcs: closed.port, initialError: 'no git origin remote' });
+  await poller.start();
+  await poller.once();
+  assert.equal(closed.calls.length, 0);
+  poller.close();
 });

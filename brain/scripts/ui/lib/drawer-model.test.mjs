@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { buildDrawerModel, TAB_IDS, sourceLabel, NO_CHANGE_BRANCH } from './drawer-model.mjs';
+import { buildDrawerModel, TAB_IDS, sourceLabel, NO_CHANGE_BRANCH, LOCAL_STATE_WORDING, localChangedFor } from './drawer-model.mjs';
 
 const view = (over = {}) => ({
   ok: true,
@@ -90,6 +90,13 @@ test('#881 R881-8 S2: no change dir states the expected path in the tab AND as i
   }
 });
 
+test('#1199 R1199-4: the Tasks tab header names the count and its source', () => {
+  const tab = (progress) => buildDrawerModel(view({ tasks: { ok: true, value: [], progress } })).value.tabs[2];
+  assert.equal(tab({ ok: true, value: { done: 2, total: 5 } }).header, '2 / 5 tasks done · at HEAD');
+  assert.equal(tab({ ok: false, code: 'truncated', reason: 'x' }).header, 'tasks.md is truncated; no total is shown · at HEAD');
+  assert.equal(tab({ ok: false, code: 'no-items', reason: 'x' }).header, 'tasks.md has no checklist items · at HEAD');
+});
+
 test('#881 R881-8: Tasks show done/pending, the file line, and attribution — a blame failure is said per row, never dropped', () => {
   const model = buildDrawerModel(view({
     tasks: {
@@ -110,11 +117,11 @@ test('#881 R881-8: Tasks show done/pending, the file line, and attribution — a
   assert.equal(tasks.entries[1].source, 'tasks.md:11');
 });
 
-test('#881 R881-8 S3: an absent committed resume.md keeps the tab\'s own reason, which names slice 5', () => {
-  const model = buildDrawerModel(view({ workingMemory: { ok: false, reason: 'no committed resume.md on feat/issue-881-x; the local overlay arrives in slice 5 (#883)' } }));
+test('#881 R881-8 S3: an absent committed resume.md keeps the tab\'s own reason, whatever it says', () => {
+  const model = buildDrawerModel(view({ workingMemory: { ok: false, reason: 'no committed resume.md on feat/issue-881-x; an uncommitted one is on this machine, below' } }));
   const wm = model.value.tabs[3];
   assert.equal(wm.ok, false);
-  assert.match(wm.reason, /slice 5 \(#883\)/);
+  assert.match(wm.reason, /on this machine/);
 });
 
 test('#881 R881-8: Working memory shows the three fields, each with its branch-qualified source, a missing one said', () => {
@@ -551,7 +558,7 @@ test('#1218 R1218-8: a missing resume.md with a reason reads as that reason, in 
 });
 
 test('#1218 R1218-8: an unresolved branch reads "the change branch could not be resolved" in the SDD row and the Working memory tab', () => {
-  for (const reason of ['more than one feat/issue-881-* branch in this clone: a, b', 'git branch --list failed: fatal: not a git repository']) {
+  for (const reason of ['more than one */issue-881 branch in this clone: a, b', 'git branch --list failed: fatal: not a git repository']) {
     const resume = { path: 'resume.md', ref: null, commit: null, state: 'unreadable', text: null, reason };
     const sdd = docsView({ resume }).entries[7].document;
     assert.equal(sdd.wording, `resume.md: the change branch could not be resolved: ${reason}`);
@@ -566,4 +573,130 @@ test('#1218 R1218-8: the no-branch wording has one source — drawer-model.mjs �
   const owners = ['drawer-model.mjs', join('..', 'change-route.mjs')].filter((f) => readFileSync(join(here, f), 'utf8').includes('no change branch in this clone'));
   assert.deepEqual(owners, ['drawer-model.mjs']);
   assert.match(readFileSync(join(here, '..', 'change-route.mjs'), 'utf8'), /NO_CHANGE_BRANCH[^;]*from '\.\/lib\/drawer-model\.mjs'/);
+});
+
+// ── #883: the "on this machine" blocks and the page's reload rule ───────────
+
+const HEAD40 = 'a'.repeat(40);
+const localDoc = (over = {}) => ({
+  path: 'openspec/changes/issue-7-x/proposal.md', ref: 'worktree wt-1', commit: null, blob: 'b'.repeat(40), state: 'present', text: '# p\n', bytes: 4, truncated: false,
+  truncatedAt: null, reason: null, note: null, overlay: 'new', uncommitted: true, marker: `4 B · ${'b'.repeat(12)}`, ...over,
+});
+const localBlock = (over = {}) => ({
+  leaf: 'wt-1', branch: 'feat/issue-7-x', head: HEAD40, path: '/srv/wt-1', dir: 'openspec/changes/issue-7-x', label: 'worktree wt-1 · feat/issue-7-x',
+  state: 'read', documents: { proposal: localDoc() }, absent: ['spec.md', 'resume.md'], resume: { state: 'missing', reason: null, document: null, view: null }, progress: null, ...over,
+});
+const localModel = (block) => buildDrawerModel(view({ local: [block] })).value.local[0];
+
+test('#883 R883-6: the four document states have their own wording, and a block says why it shows no documents', () => {
+  assert.equal(LOCAL_STATE_WORDING.new, 'uncommitted: new');
+  assert.equal(LOCAL_STATE_WORDING.modified, 'uncommitted: modified');
+  assert.equal(LOCAL_STATE_WORDING.committed('feat/issue-7-x'), 'committed on feat/issue-7-x, not on main');
+  assert.equal(LOCAL_STATE_WORDING['same-as-main'], 'same as main');
+  const row = (overlay, over = {}) => localModel(localBlock({ documents: { proposal: localDoc({ overlay, uncommitted: overlay === 'new' || overlay === 'modified', ...over }) } })).documents[0];
+  assert.equal(row('new').detail, 'uncommitted: new');
+  assert.equal(row('modified').detail, 'uncommitted: modified');
+  assert.equal(row('committed').detail, 'committed on feat/issue-7-x, not on main');
+  assert.equal(row('same-as-main', { text: null }).detail, 'same as main');
+  const states = (state, extra = {}) => localModel(localBlock({ state, documents: null, ...extra }));
+  assert.match(states('capped').wording, /at most 3 worktrees/);
+  assert.equal(states('no-change-dir', { reason: 'no change dir in this worktree' }).wording, 'no change dir in this worktree');
+  assert.match(states('unreadable', { reason: 'openspec/changes/issue-7-x is a symbolic link' }).wording, /could not be read: .*symbolic link/);
+  assert.match(states('same-as-origin').wording, /same as origin/);
+  assert.equal(localModel(localBlock()).wording, null, 'a read block carries no state wording');
+});
+
+test('#883 R883-6: a deleted row says it was committed on the branch and is missing from the working tree, and has no body', () => {
+  assert.equal(LOCAL_STATE_WORDING.deleted('feat/issue-7-x'), 'uncommitted: deleted (committed on feat/issue-7-x, missing from the working tree)');
+  const m = localModel(localBlock({ documents: { tasks: localDoc({ path: 'openspec/changes/issue-7-x/tasks.md', state: 'deleted', overlay: 'deleted', uncommitted: true, text: null, blob: null, marker: null }) } }));
+  assert.equal(m.documents[0].detail, 'uncommitted: deleted (committed on feat/issue-7-x, missing from the working tree)');
+  assert.equal(m.documents[0].document, null);
+});
+
+test('#883 R883-6: a same-as-main row has no document, an unreadable one says why, and the absent documents are named in one line', () => {
+  const m = localModel(localBlock({ documents: { proposal: localDoc({ overlay: 'same-as-main', uncommitted: false, text: null }), spec: localDoc({ path: 'openspec/changes/issue-7-x/spec.md', state: 'unreadable', text: null, reason: 'x is a symbolic link', overlay: 'unreadable', uncommitted: false, marker: null }) } }));
+  assert.equal(m.documents[0].document, null);
+  assert.equal(m.documents[1].document.state, 'unreadable');
+  assert.match(m.documents[1].document.wording, /symbolic link/);
+  assert.equal(m.absentLine, 'not in this worktree: spec.md, resume.md');
+  assert.equal(localModel(localBlock({ absent: [] })).absentLine, null);
+});
+
+test('#883 R883-12: a local stamp is <path> @ worktree <leaf> · <bytes> B · <blob12> and changes with one added line', () => {
+  const a = localModel(localBlock({ documents: { proposal: localDoc({ marker: `4 B · ${'1'.repeat(12)}` }) } })).documents[0].document;
+  const b = localModel(localBlock({ documents: { proposal: localDoc({ marker: `9 B · ${'2'.repeat(12)}` }) } })).documents[0].document;
+  assert.equal(a.stamp, `openspec/changes/issue-7-x/proposal.md @ worktree wt-1 · 4 B · ${'1'.repeat(12)}`);
+  assert.notEqual(a.stamp, b.stamp);
+  assert.equal(a.text, '# p\n');
+});
+
+test('#883 R883-6: the tasks row carries its own count, said as read from the working tree', () => {
+  const m = localModel(localBlock({ documents: { tasks: localDoc({ path: 'openspec/changes/issue-7-x/tasks.md', overlay: 'modified', progress: { ok: true, value: { done: 1, total: 2 } } }) } }));
+  assert.equal(m.documents[0].detail, 'uncommitted: modified · 1 / 2 tasks done · working tree');
+});
+
+test('#883 R883-9: the model carries local blocks with the same shape the page draws, and none when the route sent none', () => {
+  const m = localModel(localBlock());
+  assert.deepEqual([m.key, m.label, m.leaf, m.branch, m.head12], [`wt-1@${'a'.repeat(12)}`, 'worktree wt-1 · feat/issue-7-x', 'wt-1', 'feat/issue-7-x', 'a'.repeat(12)]);
+  assert.deepEqual(buildDrawerModel(view()).value.local, []);
+  assert.equal(buildDrawerModel(view()).value.localNote, null);
+  assert.equal(buildDrawerModel(view({ localNote: 'x' })).value.localNote, 'x');
+});
+
+test('#883 R883-11: localChangedFor is true for the selected issue\'s fingerprint, dirState or entry-set change, and false for another issue\'s', () => {
+  const entry = (issue, over = {}) => ({ path: `/srv/w${issue}`, issue, fingerprint: 'f1', dirState: 'present', ...over });
+  const section = (...entries) => ({ ok: true, value: { entries, hidden: {}, tier: 'working-tree' } });
+  const base = section(entry(7), entry(8));
+  assert.equal(localChangedFor(base, section(entry(7), entry(8)), 7), false);
+  assert.equal(localChangedFor(base, section(entry(7, { fingerprint: 'f2' }), entry(8)), 7), true);
+  assert.equal(localChangedFor(base, section(entry(7, { dirState: 'unreadable' }), entry(8)), 7), true);
+  assert.equal(localChangedFor(base, section(entry(7), entry(8), entry(7, { path: '/srv/other' })), 7), true);
+  assert.equal(localChangedFor(base, section(entry(7)), 7), false, 'issue 8 leaving does not concern issue 7');
+  assert.equal(localChangedFor(base, section(entry(7), entry(8, { fingerprint: 'f2' })), 7), false, 'another issue only');
+  assert.equal(localChangedFor({ ok: false, pending: true, reason: 'loading' }, base, 7), true, 'the section arriving with this issue\'s entries');
+  assert.equal(localChangedFor({ ok: false, reason: 'x' }, { ok: false, reason: 'y' }, 7), false);
+});
+
+// ── #1276: the tabs say where their documents came from ─────────────────────
+
+const FIVE = { ok: true, value: { done: 3, total: 5 } };
+
+test('#1276 R1276-6: a worktree or origin source puts its from line on ok and failed tabs; a served-HEAD view has none', () => {
+  const sourced = buildDrawerModel(view({
+    spec: { ok: true, value: [], from: 'from worktree wt-a · uncommitted: new' },
+    sdd: { ok: false, reason: 'boom', from: 'from worktree wt-a · feat/x' },
+    tasks: { ok: true, value: [], progress: FIVE, from: 'from origin/feat/x @ aaaaaaaaaaaa' },
+  }));
+  const [spec, sdd, tasks] = sourced.value.tabs;
+  assert.equal(spec.from, 'from worktree wt-a · uncommitted: new');
+  assert.equal(sdd.from, 'from worktree wt-a · feat/x');
+  assert.equal(sdd.ok, false);
+  assert.equal(tasks.from, 'from origin/feat/x @ aaaaaaaaaaaa');
+
+  const served = buildDrawerModel(view({ tasks: { ok: true, value: [], progress: FIVE } }));
+  for (const tab of served.value.tabs) assert.equal('from' in tab, false, `${tab.id} has no from key`);
+  assert.equal(served.value.tabs[2].header, '3 / 5 tasks done · at HEAD');
+});
+
+test('#1276 R1276-6: the tasks header names its source: working tree for a worktree, at origin/<branch> for origin', () => {
+  const header = (progressSource) => buildDrawerModel(view({ tasks: { ok: true, value: [], progress: FIVE, progressSource } })).value.tabs[2].header;
+  assert.equal(header('working tree'), '3 / 5 tasks done · working tree');
+  assert.equal(header('at origin/feat/x'), '3 / 5 tasks done · at origin/feat/x');
+});
+
+test('#1276 R1276-8: an sdd row uses its own detail when the route sent one, and present/missing otherwise', () => {
+  const rows = buildDrawerModel(view({
+    sdd: { ok: true, value: [
+      { stage: 'design', file: 'design.md', present: false, detail: 'uncommitted: deleted (committed on feat/x, missing from the working tree)', source: { path: 'a' } },
+      { stage: 'spec', file: 'spec.md', present: true, source: { path: 'b' } },
+      { stage: 'tasks', file: 'tasks.md', present: false, source: { path: 'c' } },
+    ] },
+  })).value.tabs[1].entries;
+  assert.deepEqual(rows.map((r) => r.detail), ['uncommitted: deleted (committed on feat/x, missing from the working tree)', 'present', 'missing']);
+});
+
+test('#1276 D92: the model carries the tab source for the empty-state line, and null when the route sent none', () => {
+  const tabSource = { kind: 'worktree', leaf: 'wt-a', branch: 'feat/x', dir: 'd', label: 'worktree wt-a' };
+  assert.deepEqual(buildDrawerModel(view({ tabSource })).value.tabSource, tabSource);
+  assert.equal(buildDrawerModel(view()).value.tabSource, null);
 });

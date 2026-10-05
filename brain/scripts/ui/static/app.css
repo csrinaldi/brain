@@ -158,7 +158,8 @@ body {
 .status-bar {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  overflow: hidden;
   gap: 8px 14px;
   padding: 10px 20px;
   border-bottom: 1px solid var(--line);
@@ -166,7 +167,17 @@ body {
   font-family: var(--font-mono);
   font-size: 11px;
 }
+/* #1284 D100: one line. What can grow long truncates (its full text is its title); the rest never shrinks. */
+.status-bar .served-branch, .status-bar .poll-indicator, .status-bar .status-epic, .status-bar .status-counts {
+  min-width: 0;
+  flex: 0 1 auto;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.status-bar .status-live, .status-bar .poll-countdown, .status-bar .theme-choice, .status-bar button, .status-bar .source, .status-bar .source-chip { flex: none; }
 .status-bar .title {
+  flex: none;
   font-family: var(--font-mono);
   font-weight: 600;
   letter-spacing: 0.08em;
@@ -186,6 +197,7 @@ body {
 
 .status-bar .poll-indicator { font-variant-numeric: tabular-nums; }
 .status-bar .poll-indicator.paused { color: var(--warn); }
+.status-bar .poll-indicator.halted { color: var(--warn); }
 .status-bar button {
   font-family: var(--font-mono);
   font-size: 11px;
@@ -221,7 +233,6 @@ body {
   background: var(--live);
 }
 .status-bar .status-epic { font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
-.status-bar .status-epic-reason { font-size: 11px; color: var(--stamp); max-width: 46ch; }
 .status-bar .status-counts {
   display: inline-flex;
   align-items: baseline;
@@ -681,6 +692,8 @@ body {
 .remote-work-row, .remote-unjoined-row { margin: 2px 0; word-break: break-all; }
 .remote-work-reason { display: block; }
 .remote-unjoined-toggle { font: inherit; font-size: 12px; cursor: pointer; border: 1px solid var(--line); background: var(--paper); color: var(--ink); padding: 2px 8px; }
+.local-block { margin: 10px 0; padding: 8px 10px; border: 1px solid var(--line); border-left: 3px solid var(--accent); }
+.local-block-label { font-family: var(--font-mono); font-size: 12px; word-break: break-all; }
 .remote-block { margin: 10px 0; padding: 8px 10px; border: 1px solid var(--line); border-left: 3px solid var(--accent); }
 .remote-block-label { font-family: var(--font-mono); font-size: 12px; word-break: break-all; }
 .remote-byline { margin: 2px 0 6px; font-size: 12px; color: var(--muted); }
@@ -1370,6 +1383,10 @@ body {
   font-family: var(--font-mono);
   white-space: nowrap;
 }
+.epic-count { white-space: normal; text-align: right; }
+.epic-rollup, .tab-progress, .tab-from { margin: 0 0 6px; font-size: 12px; font-family: var(--font-mono); }
+.epic-rollup { color: var(--ink); }
+.tab-progress, .tab-from { color: var(--muted); }
 .epic-tracker {
   display: flex;
   flex-wrap: wrap;
@@ -1409,3 +1426,15 @@ body {
   font-size: 11px;
   color: var(--accent);
 }
+
+/* ── #1284: the in-flight section above the lanes ────────────────────────── */
+.inflight { margin: 0 0 16px; padding: 12px 14px; border: 1px solid var(--line); background: var(--surface); }
+.inflight-title-bar { margin: 0 0 8px; font-size: 13px; }
+.inflight-notice, .inflight-empty { margin: 4px 0; }
+.inflight-row { display: flex; align-items: baseline; gap: 4px 12px; flex-wrap: wrap; padding: 5px 0; border-top: 1px solid var(--line); cursor: pointer; font-family: var(--font-mono); font-size: 11px; }
+.inflight-number { font-weight: 600; color: var(--accent); }
+.inflight-title { font-family: var(--font-body, inherit); font-size: 12px; }
+.inflight-state { color: var(--warn); }
+.inflight-facts { color: var(--muted); word-break: break-all; }
+.inflight-age { margin-left: auto; color: var(--stamp); font-variant-numeric: tabular-nums; }
+.inflight-stale-toggle { margin-top: 8px; font: inherit; font-size: 12px; cursor: pointer; border: 1px solid var(--line); background: var(--paper); color: var(--ink); padding: 2px 8px; }
