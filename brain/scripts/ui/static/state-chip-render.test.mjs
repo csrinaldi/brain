@@ -123,6 +123,7 @@ test('R1308-1/R1308-10/S13: the drawer head shows both chips; an undeclared issu
   assert.match(block.textContent, /parent: 878/);
   assert.match(block.textContent, /keep the lines that are true/);
   assert.doesNotMatch(dom.mounts.drawer.textContent, /brain:ticket:declare/, 'a command that does not exist is never shown');
+  assert.match(trackChip(find(dom.mounts.drawer, byClass('drawer-head'))).getAttribute('title'), /no brain-graph\/1 block: configuration missing/);
   fire(find(dom.mounts.drawer, byClass('close')), 'click');
   await settle();
   fire(card(dom, 1198), 'click');
@@ -140,6 +141,8 @@ test('R1308-10/cold-1: the drawer of a malformed declaration shows the error and
   const head = find(dom.mounts.drawer, byClass('drawer-head'));
   assert.match(trackChip(head).textContent, /Configuration unreadable/);
   assert.doesNotMatch(trackChip(head).textContent, /missing/);
+  assert.match(trackChip(head).getAttribute('title'), /unreadable: 2 `brain-graph\/1` blocks found/, 'the tooltip carries the graph error');
+  assert.doesNotMatch(trackChip(head).getAttribute('title'), /no brain-graph\/1 block|missing/, 'a malformed block is never described as absent');
   assert.match(dom.mounts.drawer.textContent, /2 `brain-graph\/1` blocks found/);
   assert.equal(find(dom.mounts.drawer, byClass('declare-block')), null, 'pasting would add another fence');
 });

@@ -82,7 +82,7 @@ export function stateOf(node, work) {
 export const TRACK_MARKS = Object.freeze({
   declared: Object.freeze({ code: 'declared', mark: '', className: 'track-declared', warning: false }),
   'no-track': Object.freeze({ code: 'no-track', label: 'No track', mark: '?', className: 'track-no-track', warning: false }),
-  undeclared: Object.freeze({ code: 'undeclared', label: 'Configuration missing', mark: '⚠', className: 'track-undeclared', warning: true }),
+  undeclared: Object.freeze({ code: 'undeclared', label: 'Configuration missing', mark: '⚠', className: 'track-undeclared', warning: true, title: 'this issue has no brain-graph/1 block: configuration missing' }),
   // A block exists and the graph could not read it (#1308 cold-1, D129): a different fact from "no block", and the
   // remedy is the opposite — fix the block, never paste another one.
   'unreadable-config': Object.freeze({ code: 'unreadable-config', label: 'Configuration unreadable', mark: '⚠', className: 'track-undeclared', warning: true }),
@@ -105,7 +105,8 @@ export function withBlockErrors(graphValue) {
 export function trackMarkOf(node) {
   if (node.status === 'unreadable') return null;
   if (node.track != null) return { ...TRACK_MARKS.declared, label: `Track ${node.track}` };
-  if (node.blockError != null) return { ...TRACK_MARKS['unreadable-config'] };
+  // The tooltip carries the graph's own error: a malformed block is never described as absent (#1308 review round 2).
+  if (node.blockError != null) return { ...TRACK_MARKS['unreadable-config'], title: `brain-graph/1 configuration unreadable: ${node.blockError}` };
   if (node.declared === false) return { ...TRACK_MARKS.undeclared };
   return { ...TRACK_MARKS['no-track'] };
 }

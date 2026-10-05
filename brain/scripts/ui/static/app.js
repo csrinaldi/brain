@@ -630,7 +630,7 @@ function trackChipEl(trackMark) {
   const chip = el('span', `track-chip ${trackMark.className}`);
   if (trackMark.mark) chip.appendChild(el('span', 'track-chip-mark', trackMark.mark));
   chip.appendChild(el('span', 'track-chip-word', trackMark.label));
-  if (trackMark.warning) chip.setAttribute('title', 'this issue has no brain-graph/1 block: configuration missing');
+  if (trackMark.title) chip.setAttribute('title', trackMark.title);
   return chip;
 }
 
