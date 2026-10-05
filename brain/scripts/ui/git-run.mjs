@@ -9,15 +9,17 @@ import { execFile, execFileSync } from 'node:child_process';
 import { promisify } from 'node:util';
 
 /**
- * `(file, args, {maxBuffer}?) => stdout` run in `root`. `opts.maxBuffer` is the
- * only option a caller may pass: a document read sizes its own buffer (#1198).
+ * `(file, args, {maxBuffer, input}?) => stdout` run in `root`. `opts.maxBuffer` sizes a
+ * document read's own buffer (#1198); `opts.input` is written to git's stdin (#1276 D91:
+ * the bytes `git blame --contents -` reads). stdin is only a pipe when input is given.
  */
 export function gitRun(root) {
   return (file, args, opts) => execFileSync(file, args, {
     cwd: root,
     encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'pipe'],
+    stdio: [opts?.input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
     ...(opts?.maxBuffer ? { maxBuffer: opts.maxBuffer } : {}),
+    ...(opts?.input === undefined ? {} : { input: opts.input }),
   });
 }
 

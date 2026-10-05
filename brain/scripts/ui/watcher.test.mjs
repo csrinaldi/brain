@@ -739,3 +739,153 @@ test('#881: resolveGitCommonDir resolves a relative "git rev-parse --git-common-
 test('#881: resolveGitCommonDir keeps an already-absolute answer as-is', () => {
   assert.equal(resolveGitCommonDir({ root: '/repo', _run: () => '/elsewhere/.git\n' }), '/elsewhere/.git');
 });
+
+// ── #883 R883-10 / R883-16: the local overlay's own watches ─────────────────
+
+const LOCAL_DEBOUNCE_MS = 250;
+const localTarget = (name, { dir = true } = {}) => ({
+  key: `/srv/${name}`, changesDir: `/srv/${name}/openspec/changes`, dir: dir ? `/srv/${name}/openspec/changes/issue-7-x` : null,
+});
+const startedWatcher = (over = {}) => {
+  const root = makeWatcherFixture();
+  const gitCommonDir = makeGitCommonFixture();
+  const _watch = over._watch ?? spyWatch();
+  const scheduler = fakeScheduler();
+  const delays = [];
+  const recomputes = [];
+  const w = createWatcher({
+    root, gitCommonDir, _watch, _run: () => `worktree ${root}\n`,
+    _setTimeout: (fn, ms) => { delays.push(ms); return scheduler.setTimeout(fn); }, _clearTimeout: scheduler.clearTimeout,
+    onRecompute: async (evt) => { recomputes.push(evt); },
+  });
+  w.start();
+  return { root, gitCommonDir, _watch, scheduler, delays, recomputes, w };
+};
+const tick = async () => { await Promise.resolve(); await Promise.resolve(); };
+
+test('#883 R883-10: setLocalTargets opens exactly two handles per target — its openspec/changes/ and its change dir — and nothing else', () => {
+  const { _watch, w } = startedWatcher();
+  const before = _watch.calls.length;
+  w.setLocalTargets([localTarget('wt-a')]);
+  assert.deepEqual(_watch.calls.slice(before).map((c) => c.path), ['/srv/wt-a/openspec/changes', '/srv/wt-a/openspec/changes/issue-7-x']);
+  w.setLocalTargets([localTarget('wt-a')]);
+  assert.equal(_watch.calls.length, before + 2, 'a second identical call opens nothing');
+  w.close();
+});
+
+test('#883 R883-16: the Q3 set plus ONE local target is exactly that set plus its two paths, so an edit elsewhere in the served root can fire nothing', () => {
+  const { root, gitCommonDir, _watch, scheduler, w } = startedWatcher();
+  w.setLocalTargets([localTarget('wt-a')]);
+  const q3 = [root, join(root, 'brain'), join(root, 'brain/project/decisions'), join(root, 'brain/core/anti-patterns'), join(root, 'brain/project/anti-patterns'), join(root, '.memory/records'), join(root, 'openspec/changes'), join(root, 'openspec/changes/issue-1-a'), gitCommonDir, join(gitCommonDir, 'logs'), join(gitCommonDir, 'worktrees')];
+  assert.deepEqual(_watch.calls.map((c) => c.path).sort(), [...q3, '/srv/wt-a/openspec/changes', '/srv/wt-a/openspec/changes/issue-7-x'].sort());
+  _watch.fire(join(root, 'src'));
+  _watch.fire(join(root, 'openspec/changes/issue-1-a/tasks.md'));
+  assert.equal(scheduler.pending(), 0, 'a path outside the watched set has no handle to fire');
+  w.close();
+});
+
+test('#883 R883-10: a fire plus the 250 ms debounce is exactly one recompute whose cause starts watch:local:', async () => {
+  const { _watch, scheduler, delays, recomputes, w } = startedWatcher();
+  w.setLocalTargets([localTarget('wt-a')]);
+  _watch.fire('/srv/wt-a/openspec/changes/issue-7-x');
+  _watch.fire('/srv/wt-a/openspec/changes/issue-7-x');
+  assert.equal(scheduler.pending(), 1, 'two fires, one trailing timer');
+  assert.deepEqual(delays.slice(-2), [LOCAL_DEBOUNCE_MS, LOCAL_DEBOUNCE_MS]);
+  scheduler.runLatest();
+  await tick();
+  assert.equal(recomputes.length, 1);
+  assert.deepEqual(recomputes[0].causes, ['watch:local:wt-a/openspec/changes/issue-7-x/']);
+  assert.deepEqual(recomputes[0].refWorktrees, [], 'a local fire says nothing about a head moving');
+  w.close();
+});
+
+test('#883 R883-10: targets are reconciled — A,B then B,C closes A, keeps B, opens C', () => {
+  const { _watch, w } = startedWatcher();
+  w.setLocalTargets([localTarget('a'), localTarget('b')]);
+  w.setLocalTargets([localTarget('b'), localTarget('c')]);
+  const paths = (n) => [`/srv/${n}/openspec/changes`, `/srv/${n}/openspec/changes/issue-7-x`];
+  for (const p of paths('a')) assert.equal(_watch.closesByPath.get(p), 1, `${p} closed once`);
+  for (const p of paths('b')) assert.equal(_watch.closesByPath.get(p), undefined, `${p} kept`);
+  const opened = (p) => _watch.calls.filter((c) => c.path === p).length;
+  for (const p of [...paths('b'), ...paths('c')]) assert.equal(opened(p), 1, `${p} opened once`);
+  assert.deepEqual(w.state().failed, []);
+  w.close();
+});
+
+test('#883 R883-10: a target that leaves has its two handles closed, and a target whose change dir appears later gets its second watch', () => {
+  const closed = [];
+  const _watch = (path, _o, listener) => ({ close: () => closed.push(path), path, listener });
+  const { w } = startedWatcher({ _watch });
+  w.setLocalTargets([localTarget('a', { dir: false })]);
+  w.setLocalTargets([localTarget('a')]);
+  w.setLocalTargets([]);
+  assert.deepEqual(closed.slice(-2).sort(), ['/srv/a/openspec/changes', '/srv/a/openspec/changes/issue-7-x']);
+  w.close();
+});
+
+test('#883 R883-10: a target with no openspec/changes/ yet is watched at its nearest existing ancestor, one handle, closed when the changes dir takes over', () => {
+  const closed = [];
+  const _watch = (path, _o, listener) => ({ close: () => closed.push(path), path, listener });
+  const { w } = startedWatcher({ _watch });
+  const bare = { key: '/srv/a', changesDir: '/srv/a/openspec/changes', dir: null, ancestor: '/srv/a/openspec' };
+  w.setLocalTargets([bare]);
+  w.setLocalTargets([{ ...bare, ancestor: null }]);
+  assert.deepEqual(closed, ['/srv/a/openspec'], 'the ancestor handle is dropped once the changes dir exists');
+  w.close();
+});
+
+test('#883 R883-10: the ancestor of a bare target is one extra handle, and its fire is a watch:local: recompute', async () => {
+  const { _watch, scheduler, recomputes, w } = startedWatcher();
+  const before = _watch.calls.length;
+  w.setLocalTargets([{ key: '/srv/a', changesDir: '/srv/a/openspec/changes', dir: null, ancestor: '/srv/a' }]);
+  assert.deepEqual(_watch.calls.slice(before).map((c) => c.path), ['/srv/a/openspec/changes', '/srv/a']);
+  _watch.fire('/srv/a');
+  scheduler.runLatest();
+  await tick();
+  assert.match(recomputes[0].causes[0], /^watch:local:a\//);
+  w.close();
+});
+
+test('#883 R883-10: a failed local watch is in state().failed and retried on the next call; ENOENT is not a failure', () => {
+  const attempts = new Map();
+  const calls = [];
+  const flaky = (path, _o, listener) => {
+    attempts.set(path, (attempts.get(path) ?? 0) + 1);
+    if (path === '/srv/a/openspec/changes' && attempts.get(path) === 1) throw Object.assign(new Error('EMFILE: too many open files'), { code: 'EMFILE' });
+    if (path === '/srv/a/openspec/changes/issue-7-x' && attempts.get(path) === 1) throw Object.assign(new Error('ENOENT: gone'), { code: 'ENOENT' });
+    calls.push(path);
+    return { close() {}, listener };
+  };
+  const { w } = startedWatcher({ _watch: flaky });
+  w.setLocalTargets([localTarget('a')]);
+  const failed = w.state().failed.map((f) => f.path);
+  assert.deepEqual(failed, ['local:a/openspec/changes/']);
+  assert.match(w.state().failed[0].reason, /EMFILE/);
+  w.setLocalTargets([localTarget('a')]);
+  assert.deepEqual(w.state().failed, []);
+  assert.ok(calls.includes('/srv/a/openspec/changes') && calls.includes('/srv/a/openspec/changes/issue-7-x'));
+  w.close();
+});
+
+test('#883 R883-10: once the watcher is closed, setLocalTargets opens nothing and arms nothing', () => {
+  const { _watch, scheduler, w } = startedWatcher();
+  w.close();
+  const before = _watch.calls.length;
+  w.setLocalTargets([localTarget('a')]);
+  assert.equal(_watch.calls.length, before);
+  assert.equal(scheduler.pending(), 0);
+});
+
+test('#883 R883-10: a live handle that errors is said, closed, and reopened by the next setLocalTargets', () => {
+  const _watch = spyWatchEmitter();
+  const { w } = startedWatcher({ _watch });
+  w.setLocalTargets([localTarget('a')]);
+  const handle = _watch.calls.find((c) => c.path === '/srv/a/openspec/changes').handle;
+  handle.emit('error', new Error('ENOSPC'));
+  assert.equal(handle.closed, true);
+  assert.equal(w.state().failed.length, 1);
+  w.setLocalTargets([localTarget('a')]);
+  assert.equal(_watch.calls.filter((c) => c.path === '/srv/a/openspec/changes').length, 2);
+  assert.deepEqual(w.state().failed, []);
+  w.close();
+});

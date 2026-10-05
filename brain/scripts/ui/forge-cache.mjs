@@ -22,24 +22,26 @@
 
 const FIRST_POLL_REASON = 'the first forge poll has not completed';
 const QUEUED_BODY_REASON = "this issue's body has not been fetched yet (queued)";
+const QUEUED_CLOSED_REASON = 'the closed-issue list has not been fetched yet (queued)';
 const QUEUED_REVIEWS_REASON = "this PR's reviews have not been fetched yet (queued)";
 
 /**
  * @returns {{
  *   port: {issueList: Function, mrList: Function, issueView: Function, prReviews: Function},
- *   setIssueList: (value: unknown) => void,
+ *   setIssueList: (value: unknown, state?: 'open'|'closed') => void,
  *   setMrList: (value: unknown) => void,
  *   setIssueView: (number: number, value: unknown) => void,
  *   setPrReviews: (number: number, value: unknown) => void,
  * }}
  */
 export function createForgeCache() {
-  const store = { issueList: undefined, mrList: undefined, issueView: new Map(), prReviews: new Map() };
+  // `issueList` is keyed by state (#1257, D57): the closed list is its own lane.
+  const store = { issueList: new Map(), mrList: undefined, issueView: new Map(), prReviews: new Map() };
 
   // "Has this cache ever been written to" stands in for "has a poll
   // completed": a successful tick always sets both lists before it touches
   // anything per-number, and nothing else writes here (D1).
-  const holdsAnyAnswer = () => store.issueList !== undefined
+  const holdsAnyAnswer = () => store.issueList.size > 0
     || store.mrList !== undefined
     || store.issueView.size > 0
     || store.prReviews.size > 0;
@@ -51,7 +53,9 @@ export function createForgeCache() {
   const port = {
     // A list is never "queued": the fast lane fetches both on every tick, so
     // a missing list can only mean no tick has completed.
-    issueList: async () => (store.issueList !== undefined ? store.issueList : miss(FIRST_POLL_REASON)),
+    issueList: async ({ state = 'open' } = {}) => (store.issueList.has(state)
+      ? store.issueList.get(state)
+      : miss(state === 'closed' ? QUEUED_CLOSED_REASON : FIRST_POLL_REASON)),
     mrList: async () => (store.mrList !== undefined ? store.mrList : miss(FIRST_POLL_REASON)),
     issueView: async ({ number } = {}) => (store.issueView.has(number) ? store.issueView.get(number) : miss(QUEUED_BODY_REASON)),
     prReviews: async ({ number } = {}) => (store.prReviews.has(number) ? store.prReviews.get(number) : miss(QUEUED_REVIEWS_REASON)),
@@ -59,7 +63,7 @@ export function createForgeCache() {
 
   return {
     port,
-    setIssueList: (value) => { store.issueList = value; },
+    setIssueList: (value, state = 'open') => { store.issueList.set(state, value); },
     setMrList: (value) => { store.mrList = value; },
     setIssueView: (number, value) => { store.issueView.set(number, value); },
     setPrReviews: (number, value) => { store.prReviews.set(number, value); },

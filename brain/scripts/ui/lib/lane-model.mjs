@@ -42,6 +42,7 @@ import { layout } from './layout.mjs';
 import { stateOf, STATES } from './state-vocab.mjs';
 import { sourceStamp } from './provenance.mjs';
 import { issueUrl } from './forge-url.mjs';
+import { hierarchyOf } from './rollup-model.mjs';
 
 const PAGE_SIZE = 24;
 
@@ -133,23 +134,27 @@ export function nodeSummaryFor(graphSection, issue) {
 }
 
 /**
- * childrenOf(graphSection, issue) -> {ok:true, value:[{number, title, state,
+ * childrenOf(graphSection, hierarchySection, issue) -> {ok:true, value:[{number, title, state,
  * track}]} | {ok:false, reason}
  *
- * The tickets that belong to this one (#1059 phase 10). The relation is
- * DECLARED BY THE CHILD — `parent` is a node field since #967 — so a parent's
- * list is whoever points at it, never a list the parent carries about itself.
- * That asymmetry is why nobody had read it yet, and why a node nobody declares
- * has an empty list rather than a missing one: "no ticket names this as its
- * parent" is a fact, not a failure.
+ * The OPEN tickets that belong to this one (#1059 phase 10, #1199 D61). The relation is read
+ * from the hierarchy's `children` (the hierarchy resolver contract, #1251), never by inverting `parent` here, so
+ * a resolver that gets it from somewhere else (#1251) changes nothing in this function. A closed
+ * child is not a graph node: the rollup counts it, and this list does not show it. A node nobody
+ * declares has an empty list rather than a missing one: "no ticket names this as its parent" is a
+ * fact, not a failure.
  */
-export function childrenOf(graphSection, issue) {
+export function childrenOf(graphSection, hierarchySection, issue) {
   if (!graphSection || typeof graphSection !== 'object') return { ok: false, reason: 'no graph section was given' };
   if (graphSection.ok !== true) return { ok: false, reason: graphSection.reason };
-  const value = (graphSection.value?.nodes ?? [])
-    .filter((n) => n.parent === issue)
-    .sort((a, b) => a.number - b.number)
-    .map((node) => {
+  const h = hierarchyOf(hierarchySection);
+  if (!h.ok) return { ok: false, reason: h.reason };
+  const nodes = new Map((graphSection.value?.nodes ?? []).map((n) => [n.number, n]));
+  const value = (h.value.issues.get(issue)?.children ?? [])
+    .filter((n) => nodes.has(n))
+    .sort((a, b) => a - b)
+    .map((n) => {
+      const node = nodes.get(n);
       const { state } = stateAndMarks(node);
       return {
         number: node.number,

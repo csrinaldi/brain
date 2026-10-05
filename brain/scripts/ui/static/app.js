@@ -48,11 +48,13 @@ function applyTheme(choice) {
 }
 
 import { buildLaneModel, nodeSummaryFor, childrenOf } from './lib/lane-model.mjs';
+import { SOURCE, progressLabel } from './lib/progress-view.mjs';
+import { hierarchyOf, epicRollup, rollupLabel } from './lib/rollup-model.mjs';
 import { issueUrl } from './lib/forge-url.mjs';
-import { buildDrawerModel } from './lib/drawer-model.mjs';
+import { buildDrawerModel, localChangedFor } from './lib/drawer-model.mjs';
 import { remoteBadges, remotePanel, tipAge } from './lib/remote-model.mjs';
 import { renderOffThread, timeoutNotice, FAILED_NOTICE, UNAVAILABLE_NOTICE } from './lib/render-budget.mjs';
-import { buildSddModel, sddForIssue, buildSlicePlan, STAGE_VOCAB } from './lib/sdd-model.mjs';
+import { buildSddModel, sddForIssue, quietAbsence, buildSlicePlan, STAGE_VOCAB } from './lib/sdd-model.mjs';
 import { searchNodes } from './lib/search-model.mjs';
 import { buildMemoryModel } from './lib/memory-model.mjs';
 import { buildReviewTimeline } from './lib/review-timeline.mjs';
@@ -60,6 +62,7 @@ import { buildRoadmapModel } from './lib/roadmap-model.mjs';
 import { buildDecisionsModel } from './lib/decisions-model.mjs';
 import { buildAntiPatternsModel } from './lib/anti-patterns-model.mjs';
 import { buildHeaderModel } from './lib/header-model.mjs';
+import { buildInflight } from './lib/inflight-model.mjs';
 import { STATES } from './lib/state-vocab.mjs';
 import { buildHistoryModel, capNote } from './lib/history-model.mjs';
 import { buildActorsModel } from './lib/actors-model.mjs';
@@ -116,6 +119,8 @@ let activeTab = 'spec';
 let collapsedTracks = new Set(['?']);
 /** Whether the "Remote work" panel's unjoined group is open (#1201 R1201-5). Page-only, like `collapsedTracks`; collapsed by default. */
 let remoteUnjoinedOpen = false;
+/** The in-flight section's stale group starts collapsed (#1284 R1284-5). */
+let inflightStaleOpen = false;
 /** The `?` holding lane's current page (#998 R998-3), 24 rows at a time. */
 let holdingPage = 0;
 /**
@@ -165,6 +170,12 @@ function clear(node) {
 /** A stated reason, in band. The one thing this page never does is show an empty area instead (R881-9). */
 function said(text) {
   return el('p', 'said', text);
+}
+
+/** A model that is unavailable. A section still loading says its own sentence as is (#1257 D65); anything else is a failure. */
+function saidUnavailable(failure, model, ...sectionNames) {
+  const loading = sectionNames.map((name) => sectionOf(state, name)).find((section) => section.pending === true);
+  return said(loading ? loading.reason : `${failure}: ${model.reason}`);
 }
 
 /** A stated list — the same rule as `said`, for facts that come by the handful.
@@ -458,7 +469,8 @@ function renderContent() {
 /** R881-9: one band per degraded thing, each one BESIDE the data, never instead of it. */
 function renderBands() {
   clear(mounts.banners);
-  for (const band of degradationBands({ stream: state.stream, controls: state.controls, meta: state.meta, snapshot: state.snapshot })) {
+  const { epic } = buildHeaderModel(sectionOf(state, 'graph'), state.meta ?? {}).value;
+  for (const band of degradationBands({ stream: state.stream, controls: state.controls, meta: state.meta, snapshot: state.snapshot, epic })) {
     const node = el('div', 'band');
     node.appendChild(el('span', null, band.text));
     if (band.detail?.length) {
@@ -484,7 +496,9 @@ function renderServedBranch(servedBranch) {
     return frag;
   }
   const text = servedBranch.ok ? `serving ${servedBranch.branch}` : `serving: unknown (${servedBranch.reason})`;
-  frag.appendChild(el('span', 'served-branch', text));
+  const branchEl = el('span', 'served-branch', text);
+  branchEl.setAttribute('title', text);
+  frag.appendChild(branchEl);
   frag.appendChild(renderSourceStamp(sourceStamp(servedBranch.source)));
   return frag;
 }
@@ -505,14 +519,18 @@ function renderStatus() {
   live.setAttribute('title', indicator.paused ? 'polling is paused' : 'the page is connected to the stream');
   mounts.status.appendChild(live);
 
-  mounts.status.appendChild(el('span', indicator.paused ? 'poll-indicator paused' : 'poll-indicator', indicator.text));
+  const pollEl = el('span', indicator.paused ? 'poll-indicator paused' : indicator.halted ? 'poll-indicator halted' : 'poll-indicator', indicator.text);
+  pollEl.setAttribute('title', indicator.text);
+  mounts.status.appendChild(pollEl);
   mounts.status.appendChild(el('span', 'poll-countdown', indicator.countdown));
 
   // The epic this checkout serves: an epic declares its tracker branch, and
   // nothing joins the two yet, so the bar says that rather than parsing an
-  // epic out of a branch name.
-  mounts.status.appendChild(el('span', 'status-epic', epic.ok ? `epic #${epic.issue}` : 'epic: not resolved'));
-  mounts.status.appendChild(el('span', 'status-epic-reason', epic.ok ? '' : epic.reason));
+  // epic out of a branch name. The one-line bar carries the short form; the
+  // explanation is its title and a banner (#1284 D99, D101).
+  const epicEl = el('span', 'status-epic', epic.ok ? `epic #${epic.issue}` : epic.short);
+  if (!epic.ok) epicEl.setAttribute('title', epic.reason);
+  mounts.status.appendChild(epicEl);
 
   const countsEl = el('span', 'status-counts');
   if (counts.ok) {
@@ -526,6 +544,7 @@ function renderStatus() {
   } else {
     countsEl.appendChild(el('span', 'count-label', `nodes: not counted — ${counts.reason}`));
   }
+  countsEl.setAttribute('title', countsEl.textContent);
   mounts.status.appendChild(countsEl);
 
   mounts.status.appendChild(el('span', 'spacer'));
@@ -549,15 +568,59 @@ function renderStatus() {
   themeWrap.appendChild(select);
   mounts.status.appendChild(themeWrap);
 
-  const toggle = el('button', 'poll-toggle', indicator.paused ? 'resume polling' : 'disable polling');
-  toggle.addEventListener('click', () => postPoll(indicator.paused ? 'resume' : 'pause'));
   const once = el('button', 'poll-once', 'poll now');
   once.addEventListener('click', () => postPoll('once'));
-  mounts.status.appendChild(toggle);
+  if (indicator.toggle) {
+    const toggle = el('button', 'poll-toggle', indicator.toggle === 'resume' ? 'resume polling' : 'disable polling');
+    toggle.addEventListener('click', () => postPoll(indicator.toggle));
+    mounts.status.appendChild(toggle);
+  }
   mounts.status.appendChild(once);
   const refresh = el('button', 'remotes-refresh', state.meta?.poller?.remotes?.inFlight ? 'fetching remotes\u2026' : 'refresh remotes');
   refresh.addEventListener('click', () => postRemotesRefresh());
   mounts.status.appendChild(refresh);
+}
+
+/** One in-flight row (#1284 D97): the issue, its state when unknown, its facts and its age — text only, opening the card's drawer. */
+function renderInflightRow(row) {
+  const node = el('div', 'inflight-row');
+  node.setAttribute('role', 'button');
+  node.setAttribute('tabindex', '0');
+  node.setAttribute('data-issue', String(row.issue));
+  node.appendChild(el('span', 'inflight-number', `#${row.issue}`));
+  node.appendChild(el('span', 'inflight-title', row.title || '(no title)'));
+  if (row.state === 'unknown') node.appendChild(el('span', 'inflight-state', 'state unknown'));
+  node.appendChild(el('span', 'inflight-facts', row.facts.join(' \u00b7 ')));
+  node.appendChild(el('span', 'inflight-age', row.activityAt ? tipAge(row.activityAt, nowMs()) : 'activity unknown'));
+  node.addEventListener('click', () => selectNode(row.issue));
+  node.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') selectNode(row.issue); });
+  return node;
+}
+
+/**
+ * The home's first section (#1284 R-H): the open issues with work in flight, newest first, from
+ * whatever sections have arrived. Every missing source is named; "nothing in flight" is said only
+ * when every source is ready (`inflight-model.mjs` decides, this places).
+ */
+function renderInflight() {
+  const model = buildInflight({
+    changes: sectionOf(state, 'changes'), localWorktrees: sectionOf(state, 'localWorktrees'), remoteChanges: sectionOf(state, 'remoteChanges'),
+    prs: sectionOf(state, 'prs'), hierarchy: sectionOf(state, 'hierarchy'), graph: sectionOf(state, 'graph'),
+  }, { nowMs: nowMs() }).value;
+  const wrap = el('section', 'inflight');
+  wrap.appendChild(el('h3', 'inflight-title-bar', 'In flight'));
+  for (const line of model.notices) wrap.appendChild(el('p', 'inflight-notice said', line));
+  if (model.empty) wrap.appendChild(el('p', 'inflight-empty said', model.empty));
+  for (const row of [...model.rows, ...model.unknown]) wrap.appendChild(renderInflightRow(row));
+  if (model.stale.length > 0) {
+    const toggle = el('button', 'inflight-stale-toggle', `stale (${model.stale.length})`);
+    toggle.type = 'button';
+    toggle.setAttribute('aria-expanded', String(inflightStaleOpen));
+    toggle.addEventListener('click', () => { inflightStaleOpen = !inflightStaleOpen; render(); });
+    wrap.appendChild(toggle);
+    if (inflightStaleOpen) for (const row of model.stale) wrap.appendChild(renderInflightRow(row));
+  }
+  return wrap;
 }
 
 /**
@@ -572,8 +635,9 @@ function renderStatus() {
 function renderLanes() {
   const model = buildLaneModel(sectionOf(state, 'graph'), { collapsedTracks, holdingPage, project: state.meta?.project ?? null, clustering });
   clear(mounts.canvas);
+  mounts.canvas.appendChild(renderInflight());
   if (!model.ok) {
-    mounts.canvas.appendChild(said(`the graph could not be computed: ${model.reason}`));
+    mounts.canvas.appendChild(saidUnavailable('the graph could not be computed', model, 'graph'));
     return;
   }
   const { lanes, crossEdges, holding, droppedEdges, issuesUnreadable, edgeSummary } = model.value;
@@ -682,7 +746,7 @@ function renderEpicClusters(grouping) {
     head.appendChild(chip);
     head.appendChild(el('h3', 'epic-title', epic.title || '(no title)'));
     if (epic.track) head.appendChild(el('span', 'epic-track', epic.track));
-    head.appendChild(el('span', 'epic-count', `${epic.children.length} slice(s)`));
+    head.appendChild(el('span', 'epic-count', rollupLabel(epicRollup(sectionOf(state, 'hierarchy'), sectionOf(state, 'forgeLoad'), epic.number))));
     cluster.appendChild(head);
     for (const mark of epic.marks) cluster.appendChild(said(mark));
 
@@ -791,7 +855,9 @@ function renderClusteringBar() {
  */
 function renderNodeSdd(issue) {
   const strip = el('div', 'node-sdd');
-  const found = sddForIssue(sectionOf(state, 'changes'), issue);
+  const found = sddForIssue(sectionOf(state, 'changes'), issue, sectionOf(state, 'localWorktrees'));
+  // #1284 D102: an issue nobody works on says nothing on its card; the drawer still states the absence.
+  if (quietAbsence(found, sectionOf(state, 'localWorktrees'), sectionOf(state, 'remoteChanges'), issue)) return null;
   if (!found.ok) {
     strip.appendChild(el('span', 'node-sdd-none', found.reason));
     return strip;
@@ -800,10 +866,7 @@ function renderNodeSdd(issue) {
   const reached = [...change.stages].reverse().find((stage) => stage.state === 'present' || stage.state === 'done');
   strip.appendChild(el('span', 'node-sdd-label', change.archived ? 'archived' : 'SDD'));
   strip.appendChild(el('span', 'node-sdd-stage', reached ? reached.id : 'no stage present'));
-  if (change.tasks && typeof change.tasks.checked === 'number') {
-    const total = change.tasks.checked + (change.tasks.open ?? 0);
-    strip.appendChild(el('span', 'node-sdd-tasks', `tasks ${change.tasks.checked}/${total}`));
-  }
+  strip.appendChild(el('span', 'node-sdd-tasks', progressLabel(change.progress, SOURCE.workingTree, { prefix: 'tasks' })));
   strip.appendChild(el('span', 'node-sdd-dir', change.dir));
   return strip;
 }
@@ -888,7 +951,8 @@ function renderNodeCard(node) {
     card.appendChild(el('p', 'node-blocked', `blocked by ${node.blockedBy.map((n) => `#${n}`).join(', ')}`));
   }
   for (const mark of node.marks) card.appendChild(said(mark));
-  card.appendChild(renderNodeSdd(node.number));
+  const sddStrip = renderNodeSdd(node.number);
+  if (sddStrip !== null) card.appendChild(sddStrip);
   card.appendChild(renderNodeRemote(node.number));
 
   card.addEventListener('click', () => selectNode(node.number));
@@ -1072,7 +1136,7 @@ function renderSddRow(change, sliceNote) {
   row.appendChild(matrix);
 
   const t = change.tasks;
-  const tasksLine = el('p', 'sdd-tasks', `tasks: ${t.checked} checked, ${t.open} open${t.next ? ` — next: ${t.next}` : ''} `);
+  const tasksLine = el('p', 'sdd-tasks', `${progressLabel(change.progress, SOURCE.workingTree, { prefix: 'tasks' })}${t.next ? ` — next: ${t.next}` : ''} `);
   tasksLine.appendChild(el('span', 'source', sourceStamp(t.source).label));
   row.appendChild(tasksLine);
 
@@ -1107,7 +1171,7 @@ function renderReviews() {
   const model = buildReviewTimeline(sectionOf(state, 'reviews'), sectionOf(state, 'prs'));
   clear(mounts.canvas);
   if (!model.ok) {
-    mounts.canvas.appendChild(said(`the reviews timeline could not be computed: ${model.reason}`));
+    mounts.canvas.appendChild(saidUnavailable('the reviews timeline could not be computed', model, 'reviews', 'prs'));
     return;
   }
   const { threads, queue, totals } = model.value;
@@ -1295,7 +1359,7 @@ function renderGovernance() {
 function renderRoadmap() {
   const model = buildRoadmapModel(sectionOf(state, 'graph'), { project: state.meta?.project ?? null });
   if (!model.ok) {
-    mounts.canvas.appendChild(said(`the roadmap could not be computed: ${model.reason}`));
+    mounts.canvas.appendChild(saidUnavailable('the roadmap could not be computed', model, 'graph'));
     return;
   }
   const { epics, unlinked } = model.value;
@@ -1688,7 +1752,16 @@ function renderDrawer() {
     mounts.drawer.appendChild(said(model.reason));
     return;
   }
-  mounts.drawer.appendChild(el('p', 'note', model.value.changeDir ? `change dir: ${model.value.changeDir}` : 'no change dir for this issue in the read model'));
+  // #883 R883-9: with no change dir at the served HEAD and a worktree that has one, "on this machine" is the first thing read.
+  const localFirst = !model.value.changeDir && model.value.local.length > 0;
+  // #1276 D92: when the tabs read a worktree or an origin branch, the line says which.
+  const tabSource = model.value.tabSource;
+  const sourced = !model.value.changeDir && (tabSource?.kind === 'worktree' || tabSource?.kind === 'origin');
+  const emptyLine = sourced
+    ? `the served HEAD has no change dir for this issue; the tabs read ${tabSource.label}`
+    : localFirst ? 'the served HEAD has no change dir for this issue; this machine\'s worktrees follow' : 'no change dir for this issue in the read model';
+  mounts.drawer.appendChild(el('p', 'note', model.value.changeDir ? `change dir: ${model.value.changeDir}` : emptyLine));
+  if (localFirst) mounts.drawer.appendChild(renderLocalBlocks(model.value));
 
   const tabs = el('div', 'tabs');
   for (const tab of model.value.tabs) {
@@ -1699,6 +1772,7 @@ function renderDrawer() {
   }
   mounts.drawer.appendChild(tabs);
   mounts.drawer.appendChild(renderTab(model.value.tabs.find((t) => t.id === activeTab) ?? model.value.tabs[0]));
+  if (!localFirst) mounts.drawer.appendChild(renderLocalBlocks(model.value));
   mounts.drawer.appendChild(renderRemoteBlocks(model.value));
 }
 
@@ -1712,11 +1786,37 @@ function renderRemoteBlock(block) {
   card.appendChild(el('strong', 'remote-block-label', block.label));
   const byline = [block.byline, block.pr ? `PR #${block.pr.number}` : null, tipAge(block.tipAt, nowMs())].filter(Boolean).join(' \u00b7 ');
   card.appendChild(el('p', 'remote-byline', byline));
+  appendBlockRows(card, block);
+  return card;
+}
+
+/** What a remote block and a local block share: why it shows no documents, the resume in its words, then the document rows. */
+function appendBlockRows(card, block) {
   if (block.wording) card.appendChild(said(block.wording));
+  if (block.absentLine) card.appendChild(el('p', 'note', block.absentLine));
   if (block.resume.wording) card.appendChild(said(block.resume.wording));
   for (const item of block.resume.entries ?? []) card.appendChild(renderEntry(item));
   for (const item of block.documents ?? []) card.appendChild(renderEntry(item));
+}
+
+/**
+ * A worktree of the selected ticket on this machine (#883 D78): its label, the
+ * state of each document in words, the content stamp. Every string is set as text.
+ */
+function renderLocalBlock(block) {
+  const card = el('div', 'local-block');
+  card.appendChild(el('strong', 'local-block-label', block.label));
+  appendBlockRows(card, block);
   return card;
+}
+
+function renderLocalBlocks({ local, localNote }) {
+  const wrap = el('div', 'local-blocks');
+  if (local.length === 0 && !localNote) return wrap;
+  wrap.appendChild(el('h3', 'drawer-section-title', 'on this machine'));
+  if (localNote) wrap.appendChild(el('p', 'note', localNote));
+  for (const block of local) wrap.appendChild(renderLocalBlock(block));
+  return wrap;
 }
 
 function renderRemoteBlocks({ remote, remoteNote }) {
@@ -1736,10 +1836,15 @@ function renderRemoteBlocks({ remote, remoteNote }) {
  */
 function renderChildren(issue) {
   const wrap = el('div', 'drawer-children');
-  const found = childrenOf(sectionOf(state, 'graph'), issue);
+  const found = childrenOf(sectionOf(state, 'graph'), sectionOf(state, 'hierarchy'), issue);
   if (!found.ok) {
     wrap.appendChild(said(found.reason));
     return wrap;
+  }
+  // An epic's drawer leads with its rollup (#1199 D62); closed children are counted there, not listed below.
+  if (hierarchyOf(sectionOf(state, 'hierarchy')).value?.issues.get(issue)?.level === 'epic') {
+    wrap.appendChild(el('p', 'epic-rollup', rollupLabel(epicRollup(sectionOf(state, 'hierarchy'), sectionOf(state, 'forgeLoad'), issue))));
+    wrap.appendChild(el('p', 'note', 'the list shows open children; closed children are counted above'));
   }
   wrap.appendChild(el('h3', 'drawer-section-title', `tickets that declare #${issue} as their parent`));
   if (found.value.length === 0) {
@@ -1767,6 +1872,8 @@ function renderChildren(issue) {
 
 function renderTab(tab) {
   const wrap = document.createElement('div');
+  if (tab.from) wrap.appendChild(el('p', 'tab-from', tab.from));
+  if (tab.header) wrap.appendChild(el('p', 'tab-progress', tab.header));
   if (tab.note) wrap.appendChild(el('p', 'note', `source: ${tab.note}`));
   if (!tab.ok) {
     wrap.appendChild(said(tab.reason));
@@ -2213,8 +2320,12 @@ function subscribe() {
       // A frame this page cannot read is a band, not an exception swallowed
       // by the callback: every held value stays, the reason is on screen.
       if (!parsed.ok) { state = streamFailed(state, parsed.reason); render(); return; }
+      // #883 D80: the open drawer's local blocks are read from the working tree, so the one
+      // section frame that can change them is compared here, with `before` read ahead of applyFrame.
+      const localBefore = name === 'section' && parsed.frame.name === 'localWorktrees' ? sectionOf(state, 'localWorktrees') : null;
       state = applyFrame(state, name, parsed.frame);
       render();
+      if (localBefore !== null && selectedIssue !== null && localChangedFor(localBefore, sectionOf(state, 'localWorktrees'), selectedIssue)) loadChange(selectedIssue);
       // Q3/A2: a worktree's head moved, so the open drawer's Working memory
       // tab (`resume.md` read at the branch tip) is the one value the snapshot
       // diff cannot refresh on its own.

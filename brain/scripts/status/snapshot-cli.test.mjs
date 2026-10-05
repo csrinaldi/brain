@@ -10,6 +10,7 @@ import { makeSnapshotFixture as makeFixture } from '../__fixtures__/snapshot-tre
 import { makeRemoteFixture } from '../ui/test-support/git-remote-fixture.mjs';
 import { recordingGit } from '../ui/test-support/recording-git.mjs';
 import { gitRun } from '../ui/git-run.mjs';
+import { makeWorktreeRepo } from '../ui/test-support/git-worktree-fixture.mjs';
 
 const CLI = join(dirname(fileURLToPath(import.meta.url)), 'snapshot-cli.mjs');
 const NOW = '2026-09-13T00:00:00Z';
@@ -45,7 +46,7 @@ test('#879: text mode prints every section with its count or its reason, and exi
 });
 
 test('#879: arguments — --json, --now needs an ISO date, unknown flags are refused with exit 2', async () => {
-  assert.deepEqual(parseArgs(['--json']), { ok: true, json: true, now: undefined, root: undefined });
+  assert.deepEqual(parseArgs(['--json']), { ok: true, json: true, now: undefined, root: undefined, noClosed: false });
   assert.equal(parseArgs(['--now', 'yesterday']).ok, false);
   assert.equal(parseArgs(['--bogus']).ok, false);
   assert.equal(await main(['--bogus'], { say: () => {} }), 2);
@@ -87,4 +88,100 @@ test('#1201 R1201-1: the snapshot never fetches and never touches the forge for 
   assert.ok(!run.calls.some((a) => ['fetch', 'pull', 'ls-remote', 'remote'].includes(a[0])), JSON.stringify(run.calls.map((a) => a[0])));
   assert.ok(forgeCalls.every((n) => ['issueList', 'issueView', 'mrList', 'prReviews'].includes(n)), forgeCalls.join());
   assert.equal(snapshot.remoteChanges.value.prsApplied.ok, false, 'the PR list failed: said, not hidden');
+});
+
+// ── #1257 R1257-7/8: the closed read, `--no-closed`, and a deterministic forgeLoad ──
+
+function listFake(calls = []) {
+  return {
+    issueList: async ({ state }) => {
+      calls.push(state);
+      return state === 'closed'
+        ? [{ number: 3, title: 'c3', labels: [], assignees: [], state: 'closed', body: '' }]
+        : [{ number: 5, title: 'five', labels: [], assignees: [], state: 'open', body: '' }];
+    },
+    issueView: async () => { throw new Error('issueView must not be called'); },
+    mrList: async () => [],
+    prReviews: async () => [],
+  };
+}
+
+test('#1257 R1257-7: --no-closed parses and is the only difference in what the verb asks the forge', () => {
+  assert.equal(parseArgs(['--no-closed']).noClosed, true);
+  assert.equal(parseArgs([]).noClosed, false);
+});
+
+test('#1257 R1257-7: --no-closed disables the closed read', async () => {
+  const root = makeFixture();
+  const calls = [];
+  const lines = [];
+  const code = await main(['--json', '--no-closed', '--now', NOW, '--root', root], { say: (s) => lines.push(s), vcs: listFake(calls), project: 'o/r' });
+  assert.equal(code, 0);
+  assert.deepEqual(calls, ['open'], 'the closed list was never asked for');
+  const out = JSON.parse(lines.join('\n'));
+  assert.deepEqual(out.forgeLoad.value.closed, { state: 'disabled', at: null, reason: '--no-closed was given' });
+  assert.deepEqual(out.closedIssues, { ok: false, reason: '--no-closed was given' });
+});
+
+test('#1257 R1257-8: without the flag the CLI reads closed issues, and --json is byte-identical for a fixed --now', async () => {
+  const root = makeFixture();
+  const run = async () => {
+    const lines = [];
+    const calls = [];
+    await main(['--json', '--now', '2026-10-02T12:00:00.000Z', '--root', root], { say: (s) => lines.push(s), vcs: listFake(calls), project: 'o/r' });
+    return { out: lines.join('\n'), calls };
+  };
+  const a = await run();
+  const b = await run();
+  assert.equal(a.out, b.out);
+  assert.deepEqual(a.calls, ['open', 'closed']);
+  const parsed = JSON.parse(a.out);
+  assert.deepEqual(parsed.hierarchy.value.issues.map(([n]) => n), [3, 5], '#1199: the hierarchy section is in the same bytes, closed and open');
+  assert.deepEqual(parsed.forgeLoad.value, { open: { state: 'complete', at: '2026-10-02T12:00:00.000Z' }, closed: { state: 'complete', at: '2026-10-02T12:00:00.000Z' } });
+});
+
+test('#1257: text mode prints a forge load line and a closed issues line', async () => {
+  const root = makeFixture();
+  const lines = [];
+  await main(['--now', NOW, '--root', root], { say: (s) => lines.push(s), vcs: listFake(), project: 'o/r' });
+  const out = lines.join('\n');
+  assert.match(out, /^forge load\s+open complete, closed complete$/m);
+  assert.match(out, /^closed issues\s+1 node\(s\), 0 unresolved$/m);
+  const off = [];
+  await main(['--no-closed', '--now', NOW, '--root', root], { say: (s) => off.push(s), vcs: listFake(), project: 'o/r' });
+  assert.match(off.join('\n'), /^closed issues\s+not computed — --no-closed was given$/m);
+});
+
+// ── #883: the localWorktrees section, in the same bytes as the module ──────
+
+const openIssueVcs = (...numbers) => ({
+  issueList: async ({ state }) => (state === 'open' ? numbers.map((number) => ({ number, title: `issue ${number}`, labels: [], state: 'open', body: '' })) : []),
+  issueView: async ({ number }) => ({ number, body: '' }),
+  mrList: async () => [],
+  prReviews: async () => [],
+});
+
+test('#883 R883-1: text mode lists a local line with the worktree count, or its reason', async (t) => {
+  const repo = makeWorktreeRepo();
+  t.after(() => repo.dispose());
+  repo.addWorktree('feat/issue-7-x', { 'openspec/changes/issue-7-x/proposal.md': '# p\n' });
+  const lines = [];
+  assert.equal(await main(['--now', NOW, '--root', repo.root], { say: (s) => lines.push(s), vcs: openIssueVcs(7), project: 'o/r' }), 0);
+  assert.match(lines.join('\n'), /^local\s+1 worktree\(s\), 1 hidden/m);
+  const bare = [];
+  await main(['--now', NOW, '--root', makeFixture()], { say: (s) => bare.push(s) });
+  assert.match(bare.join('\n'), /^local\s+not computed — /m);
+});
+
+test('#883 R883-1: the JSON carries localWorktrees with its tier while the snapshot tier stays committed', async (t) => {
+  const repo = makeWorktreeRepo();
+  t.after(() => repo.dispose());
+  repo.addWorktree('feat/issue-7-x', { 'openspec/changes/issue-7-x/proposal.md': '# p\n' });
+  const lines = [];
+  await main(['--json', '--now', NOW, '--root', repo.root], { say: (s) => lines.push(s), vcs: openIssueVcs(7), project: 'o/r' });
+  const parsed = JSON.parse(lines.join('\n'));
+  assert.equal(parsed.localWorktrees.ok, true);
+  assert.equal(parsed.localWorktrees.value.tier, 'working-tree');
+  assert.equal(parsed.tier, 'committed', 'SNAPSHOT_TIER stays committed (R883-16)');
+  assert.deepEqual(parsed.localWorktrees.value.entries.map((e) => [e.issue, e.branch]), [[7, 'feat/issue-7-x']]);
 });

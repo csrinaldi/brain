@@ -32,6 +32,7 @@ const TAB_LABELS = { spec: 'Spec', sdd: 'SDD', tasks: 'Tasks', workingMemory: 'W
 // already gets, `sourceStamp` is the design's bracketed form the door's
 // entries render from PR 2 on, with the href a forge/link chip may carry.
 import { sourceLabel, sourceStamp } from './provenance.mjs';
+import { SOURCE, progressLabel } from './progress-view.mjs';
 import { KNOWN_VERDICTS } from './review-timeline.mjs';
 import { resumeWording } from './resume-view.mjs';
 export { sourceLabel };
@@ -42,8 +43,11 @@ function entry({ title, detail, source, pending = false, ...rest }) {
 
 /** A failed tab: the reason stays, and so does whatever path the failure knew about. */
 function failedTab(id, tabView, entries = []) {
-  return { id, label: TAB_LABELS[id], ok: false, reason: tabView.reason, source: tabView.source ? sourceLabel(tabView.source) : null, entries, note: tabView.sourceNote ?? null };
+  return { id, label: TAB_LABELS[id], ok: false, reason: tabView.reason, source: tabView.source ? sourceLabel(tabView.source) : null, entries, note: tabView.sourceNote ?? null, ...fromOf(tabView) };
 }
+
+/** The `from` line of a tab whose documents came from a worktree or an origin branch (#1276 D92); nothing for the served HEAD. */
+const fromOf = (tabView) => (tabView.from ? { from: tabView.from } : {});
 
 /**
  * The lines `spec-cards.mjs` could not attach to a scenario (#1067 cold
@@ -144,7 +148,9 @@ function documentView(key, doc) {
   return {
     key,
     state: doc.state,
-    stamp: readable && doc.commit ? `${doc.path} @ ${doc.commit.slice(0, 12)}` : doc.path,
+    // A working-tree document has no commit: its stamp carries a content marker instead (#883 R883-12),
+    // so the page's render cache, keyed by stamp, renders an edit afresh and reuses a render only for identical bytes.
+    stamp: readable && doc.marker ? `${doc.path} @ ${doc.ref} \u00b7 ${doc.marker}` : readable && doc.commit ? `${doc.path} @ ${doc.commit.slice(0, 12)}` : doc.path,
     wording,
     note: readable ? doc.note ?? null : null,
     text: readable ? doc.text ?? '' : null,
@@ -166,7 +172,7 @@ function sddEntries(items, documents) {
     // `design.md`; a missing stage is only actionable when the file it would
     // be is on screen.
     file: item.file ?? null,
-    detail: item.present ? 'present' : 'missing',
+    detail: item.detail ?? (item.present ? 'present' : 'missing'),
     source: item.source,
     done: item.present,
     pending: !item.present,
@@ -309,6 +315,91 @@ function remoteBlockModel(block) {
   };
 }
 
+// ── #883: a linked worktree of this clone, "on this machine" ────────────────
+
+/** The five states of a local document (R883-6), in the words a reader sees. */
+export const LOCAL_STATE_WORDING = Object.freeze({
+  new: 'uncommitted: new',
+  modified: 'uncommitted: modified',
+  committed: (branch) => `committed on ${branch}, not on main`,
+  'same-as-main': 'same as main',
+  deleted: (branch) => `uncommitted: deleted (committed on ${branch}, missing from the working tree)`,
+});
+
+/** Why a local block shows no documents; `null` for a block that does. One sentence per state. */
+const LOCAL_BLOCK_WORDING = {
+  capped: 'listed without documents: the drawer reads at most 3 worktrees of an issue',
+  'no-change-dir': (block) => block.reason ?? 'no change dir in this worktree',
+  unreadable: (block) => `the change dir of this worktree could not be read: ${block.reason ?? 'no reason was given'}`,
+  'same-as-origin': () => 'same as origin: this worktree is at the tip of its branch on origin, and nothing in it is uncommitted',
+};
+
+/** One local document's state in #883's words, without its task count. */
+export function localStateWording(doc, branch) {
+  if (doc.overlay === 'committed') return LOCAL_STATE_WORDING.committed(branch);
+  if (doc.overlay === 'deleted') return LOCAL_STATE_WORDING.deleted(branch);
+  return LOCAL_STATE_WORDING[doc.overlay] ?? doc.state;
+}
+
+/** One local document's row detail: its state, and for a tasks.md its count named as read from the working tree. */
+export function localRowDetail(doc, branch) {
+  const state = localStateWording(doc, branch);
+  return doc.progress ? `${state} \u00b7 ${progressLabel(doc.progress, SOURCE.workingTree)}` : state;
+}
+
+/** One local block's documents as the rows the SDD tab draws. A document identical to main has no body (`document: null`). */
+function localDocumentEntries(block) {
+  return Object.entries(block.documents).map(([stage, doc]) => {
+    const view = documentView(`local-${block.leaf}-${stage}`, doc);
+    return entry({
+      title: stage,
+      file: doc.path.split('/').pop(),
+      detail: localRowDetail(doc, block.branch),
+      source: { path: `${doc.ref}:${doc.path}` },
+      pending: view.text === null,
+      document: doc.overlay === 'same-as-main' || doc.overlay === 'deleted' ? null : view,
+    });
+  });
+}
+
+/** A local block ready for the DOM: the label, why it shows no documents, the absent ones in one line, the resume, the rows. */
+function localBlockModel(block) {
+  const read = block.state === 'read';
+  const word = LOCAL_BLOCK_WORDING[block.state];
+  const resumeState = block.resume?.state ?? 'missing';
+  return {
+    key: `${block.leaf}@${block.head.slice(0, 12)}`,
+    label: block.label,
+    leaf: block.leaf,
+    branch: block.branch,
+    head12: block.head.slice(0, 12),
+    state: block.state,
+    wording: read ? null : word ? (typeof word === 'function' ? word(block) : word) : null,
+    absentLine: read && block.absent?.length > 0 ? `not in this worktree: ${block.absent.join(', ')}` : null,
+    documents: read ? localDocumentEntries(block) : null,
+    resume: {
+      state: resumeState,
+      // A missing resume is already named in the absent line; only the other states need words of their own.
+      wording: resumeState === 'missing' ? null : resumeWording(block.resume),
+      entries: block.resume?.view ? workingMemoryEntries(block.resume.view) : null,
+    },
+  };
+}
+
+/** The `[path, fingerprint, dirState, capped]` tuples of one issue's worktrees, by path; `[]` for a section that is not readable. */
+function localEntriesOf(section, issue) {
+  if (!section?.ok) return [];
+  return section.value.entries.filter((e) => e.issue === issue).map((e) => [e.path, e.fingerprint, e.dirState, e.capped]).sort(([a], [b]) => a.localeCompare(b));
+}
+
+/**
+ * Whether the open drawer of `issue` must be read again after a `localWorktrees` section frame (#883 R883-11, D80):
+ * only a change in THIS issue's entry set, a fingerprint, a `dirState` or a cap flips it.
+ */
+export function localChangedFor(prevSection, nextSection, issue) {
+  return JSON.stringify(localEntriesOf(prevSection, issue)) !== JSON.stringify(localEntriesOf(nextSection, issue));
+}
+
 /**
  * buildDrawerModel(changeView) -> {ok:true, value:{issue, changeDir, tabs}} |
  * {ok:false, reason}
@@ -318,12 +409,12 @@ function remoteBlockModel(block) {
 export function buildDrawerModel(changeView) {
   if (!changeView || typeof changeView !== 'object') return { ok: false, reason: 'no change view was given to the drawer' };
   if (changeView.ok !== true) return { ok: false, reason: changeView.reason };
-  const { issue, changeDir, spec, sdd, tasks, workingMemory, reviews, records, documents, remote = [], remoteNote = null } = changeView.value;
+  const { issue, changeDir, spec, sdd, tasks, workingMemory, reviews, records, documents, remote = [], remoteNote = null, local = [], localNote = null, tabSource = null } = changeView.value;
 
   const tabs = [
-    spec.ok ? { id: 'spec', label: TAB_LABELS.spec, ok: true, reason: null, source: null, note: spec.note ?? null, entries: specEntries(spec.value), orphans: orphanEntries(spec.orphans) } : failedTab('spec', spec),
-    sdd.ok ? { id: 'sdd', label: TAB_LABELS.sdd, ok: true, reason: null, source: null, note: null, entries: sddEntries(sdd.value, documents), slices: sliceEntries(sdd.slices) } : failedTab('sdd', sdd),
-    tasks.ok ? { id: 'tasks', label: TAB_LABELS.tasks, ok: true, reason: null, source: null, note: tasks.note ?? null, entries: taskEntries(tasks.value) } : failedTab('tasks', tasks),
+    spec.ok ? { id: 'spec', label: TAB_LABELS.spec, ok: true, reason: null, source: null, note: spec.note ?? null, entries: specEntries(spec.value), orphans: orphanEntries(spec.orphans), ...fromOf(spec) } : failedTab('spec', spec),
+    sdd.ok ? { id: 'sdd', label: TAB_LABELS.sdd, ok: true, reason: null, source: null, note: null, entries: sddEntries(sdd.value, documents), slices: sliceEntries(sdd.slices), ...fromOf(sdd) } : failedTab('sdd', sdd),
+    tasks.ok ? { id: 'tasks', label: TAB_LABELS.tasks, ok: true, reason: null, source: null, header: progressLabel(tasks.progress, tasks.progressSource ?? SOURCE.head), note: tasks.note ?? null, entries: taskEntries(tasks.value), ...fromOf(tasks) } : failedTab('tasks', tasks),
     workingMemory.ok
       ? { id: 'workingMemory', label: TAB_LABELS.workingMemory, ok: true, reason: null, source: null, note: null, entries: workingMemoryEntries(workingMemory.value) }
       : failedTab('workingMemory', workingMemory),
@@ -333,5 +424,5 @@ export function buildDrawerModel(changeView) {
     records.ok ? { id: 'records', label: TAB_LABELS.records, ok: true, reason: null, source: null, note: null, entries: recordsEntries(records.value) } : failedTab('records', records),
   ];
 
-  return { ok: true, value: { issue, changeDir, tabs, remote: remote.map(remoteBlockModel), remoteNote } };
+  return { ok: true, value: { issue, changeDir, tabs, remote: remote.map(remoteBlockModel), remoteNote, local: local.map(localBlockModel), localNote, tabSource } };
 }

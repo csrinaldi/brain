@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { parseTreeListing, pickChangeDir } from './git-tree.mjs';
+import { changeDirNames, parseTreeListing, pickChangeDir } from './git-tree.mjs';
 
 const SHA = 'a'.repeat(40);
 
@@ -46,4 +46,10 @@ test('pickChangeDir: an ambiguous issue is unreadable and names the dirs', () =>
 
 test('pickChangeDir accepts the issue as a string or a number', () => {
   assert.deepEqual(pickChangeDir(['issue-7-x'], '7'), { ok: true, dir: 'issue-7-x' });
+});
+
+test('#1243 R1243-6: changeDirNames keeps tree entries as bare names and drops a blob that parses as a change id', () => {
+  const out = `040000 tree ${SHA}\topenspec/changes/issue-5-x\u0000100644 blob ${SHA}\topenspec/changes/issue-5-notes.md\u0000`;
+  assert.deepEqual(changeDirNames(parseTreeListing(out)), ['issue-5-x']);
+  assert.deepEqual(changeDirNames(new Map()), []);
 });

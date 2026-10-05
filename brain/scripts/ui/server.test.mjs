@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { readFileSync, writeFileSync, readdirSync, statSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, readdirSync, statSync, mkdirSync, utimesSync, symlinkSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { EventEmitter } from 'node:events';
@@ -13,6 +13,8 @@ import { createForgeCache } from './forge-cache.mjs';
 import { createUiServer as realCreateUiServer, parseArgs, main as realMain, KNOWN_ROUTES, resolveForgeSource } from './server.mjs';
 import { buildChangeView } from './change-route.mjs';
 import { fakeGit } from './test-support/fake-git.mjs';
+import { makeWorktreeRepo } from './test-support/git-worktree-fixture.mjs';
+import { STATUS, RESULT, RESULT_OK, createBlockingAdapter, freePort, startRequester } from './test-support/blocking-forge-adapter.mjs';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 
@@ -882,7 +884,18 @@ test('#881: GET /api/change/<N> deep-equals buildChangeView() on the same held s
   mkdirSync(join(root, 'openspec/changes/issue-1-a'), { recursive: true });
   writeFileSync(join(root, 'openspec/changes/issue-1-a/spec.md'), '### R1-1: a\n#### Scenario: s\n- **WHEN** w\n- **THEN** t\n');
   writeFileSync(join(root, 'openspec/changes/issue-1-a/tasks.md'), '- [x] done\n- [ ] next one\n');
+  // #883 R883-16: the fixture gains a linked worktree on the open issue 1, holding a change dir, so the
+  // `-C` assertion below runs against a drawer that really reads a worktree.
+  const wtPath = testTmp('linked-worktree-');
+  mkdirSync(join(wtPath, 'openspec/changes/issue-1-a'), { recursive: true });
+  writeFileSync(join(wtPath, 'openspec/changes/issue-1-a/tasks.md'), '- [ ] only in the worktree\n');
+  const wtHead = 'c'.repeat(40);
+  const _snapshotRun = (file, args) => {
+    if (args[0] === 'worktree') return `worktree ${root}\nHEAD ${'a'.repeat(40)}\nbranch refs/heads/main\n\nworktree ${wtPath}\nHEAD ${wtHead}\nbranch refs/heads/feat/issue-1-a\n`;
+    return execFileSync(file, args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+  };
   const _run = fakeGit({
+    branches: { 'feat/issue-1-a': { commit: wtHead, files: {} } },
     files: {
       'openspec/changes/issue-1-a/spec.md': '### R1-1: a\n#### Scenario: s\n- **WHEN** w\n- **THEN** t\n',
       'openspec/changes/issue-1-a/tasks.md': '- [x] done\n- [ ] next one\n',
@@ -890,7 +903,7 @@ test('#881: GET /api/change/<N> deep-equals buildChangeView() on the same held s
     blame: 'abc1234abc1234abc1234abc1234abc1234abc1 1 1 1\nauthor csrinaldi\nauthor-time 1694700000\n\tdone\n',
   });
   const gitCalls = _run.calls;
-  const server = createUiServer({ root, project: 'o/r', _now: now, poll: false, _run });
+  const server = createUiServer({ root, vcs: openIssuesVcs(1), project: 'o/r', _now: now, poll: false, _run, _snapshotRun });
   await server.listen(0);
   try {
     const base = `http://127.0.0.1:${server.port}`;
@@ -914,7 +927,9 @@ test('#881: GET /api/change/<N> deep-equals buildChangeView() on the same held s
 
     const blameCall = gitCalls.find((args) => args[0] === 'blame');
     assert.ok(blameCall.includes('HEAD'), 'the blame argv must carry HEAD — the committed version, never the working tree');
-    assert.ok(!gitCalls.some((args) => args.includes('-C')), 'no git call in this route ever opens a worktree with -C (R881-3)');
+    assert.equal(fromRoute.value.local.length, 1, 'the linked worktree is read: a local block is present (R883-16)');
+    assert.equal(fromRoute.value.local[0].documents.tasks.overlay, 'new');
+    assert.ok(!gitCalls.some((args) => args.includes('-C')), 'no git call in this route ever opens a worktree with -C, even with a linked worktree in the fixture (R881-3, R883-16)');
   } finally {
     await server.close();
   }
@@ -1094,7 +1109,7 @@ test('#881: judgment:cold-6 — main() resolves a live forge port for the poller
   }
 });
 
-test('#881: judgment:cold-6 — a failed forge resolution says the reason on stderr, starts the poller paused with that reason, and the reason reaches /api/snapshot in band', async () => {
+test('#881: judgment:cold-6 — a failed forge resolution says the reason on stderr, starts the poller halted with that reason, and the reason reaches /api/snapshot in band', async () => {
   const root = makeFixture();
   const errors = [];
   const result = await main(['--port', '0', '--root', root], {
@@ -1102,7 +1117,7 @@ test('#881: judgment:cold-6 — a failed forge resolution says the reason on std
     _resolveForgeSource: async () => ({ ok: false, reason: 'no VCS token' }),
   });
   try {
-    assert.match(errors.join('\n'), /✗ forge: no VCS token — polling paused; tree sections still served/);
+    assert.match(errors.join('\n'), /✗ forge: no VCS token — forge lane halted; tree sections and remote fetch still served/);
 
     const base = `http://127.0.0.1:${result.port}`;
     const snap = await (await fetch(`${base}/api/snapshot`)).json();
@@ -1113,9 +1128,10 @@ test('#881: judgment:cold-6 — a failed forge resolution says the reason on std
     assert.equal(snap.reviews.ok, false);
     assert.match(snap.reviews.reason, /no VCS token/);
 
-    const pauseRes = await fetch(`${base}/api/poll/pause`, { method: 'POST' }); // idempotent state read
-    const state = await pauseRes.json();
-    assert.equal(state.paused, true);
+    const resumeRes = await fetch(`${base}/api/poll/resume`, { method: 'POST' }); // a no-op on an unpaused poller: the state read
+    const state = await resumeRes.json();
+    assert.equal(state.paused, false, 'a forge halt is not the user\'s pause');
+    assert.equal(state.forgeHalted, true);
     assert.match(state.lastError, /no VCS token/);
     assert.ok(state.lastPolledAt, 'the reason carries a time, not just text');
   } finally {
@@ -1238,6 +1254,317 @@ test('#1201: the server tests default _fetchRun, so none spawns a real git fetch
     await waitUntil(() => noFetchCalls.length > before);
     assert.equal(noFetchCalls[before][0], 'git');
     assert.equal(noFetchCalls[before][1][0], 'fetch', 'the tick reached the injected default, not a child process');
+  } finally {
+    await server.close();
+  }
+});
+
+// ── #1257 R1257-9: the event-loop probe ──────────────────────────────────────
+//
+// "No view waits on a forge read" is a claim about the SERVER'S THREAD, so it is proved with
+// an adapter that blocks its own thread on `Atomics.wait` and a helper worker that asks the
+// server for `GET /` meanwhile. If the adapter runs on the server's thread, nobody can answer
+// the helper, the wait ends at the deadlock guard and the result slot says so. If it runs in
+// a forge thread, the server answers, the helper releases the adapter, and the result slot
+// says `ok`. No assertion measures time.
+
+const BLOCKING_ADAPTER_URL = new URL('./test-support/blocking-forge-adapter.mjs', import.meta.url).href;
+
+test('#1257 R1257-9: an HTTP request is answered while a forge adapter blocks its thread (the probe)', async (t) => {
+  const sab = new SharedArrayBuffer(16);
+  const slots = new Int32Array(sab);
+  const port = await freePort();
+  const requester = startRequester({ sab, port });
+  t.after(() => requester.worker.terminate());
+
+  const server = await main(['--port', String(port), '--root', makeFixture()], {
+    say: () => {}, error: () => {}, process: makeFakeProcess(),
+    _resolveForgeSource: async () => ({ ok: true, vcs: createBlockingAdapter({ sab }), project: 'o/r' }),
+    _forgeThreadResolve: { module: BLOCKING_ADAPTER_URL, export: 'createBlockingAdapter', workerData: { sab } },
+  });
+  t.after(() => server.close());
+  await requester.done;
+
+  assert.equal(Atomics.load(slots, STATUS), 200, 'GET / was answered');
+  assert.equal(Atomics.load(slots, RESULT), RESULT_OK, 'the adapter was released by the response, not by its deadlock guard');
+});
+
+// ── #1257 R1257-9: no view's first render waits on a forge read ──────────────
+
+// A deadlock guard for an async wait, sized for a CI runner (3x a local run): a passing run never reaches it.
+const POLL_GUARD_MS = 5000;
+async function pollUntil(predicate, { timeoutMs = POLL_GUARD_MS } = {}) {
+  const start = Date.now();
+  while (!(await predicate())) {
+    if (Date.now() - start > timeoutMs) throw new Error('pollUntil: timed out');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+
+const deferred = () => { let release; const promise = new Promise((resolve) => { release = resolve; }); return { promise, release }; };
+
+const forgeRows = [{ number: 5, title: 'five', labels: [], assignees: [], state: 'open', body: '' }];
+
+/** A forge source whose `issueList` for the given state is held until released. */
+function heldForge({ open = null, closed = null } = {}) {
+  const calls = [];
+  const source = {
+    issueList: async ({ state }) => {
+      calls.push(state);
+      if (state === 'closed') { if (closed) await closed.promise; return []; }
+      if (open) await open.promise;
+      return forgeRows.map((r) => ({ ...r }));
+    },
+    mrList: async () => [],
+    issueView: async ({ number }) => ({ number, body: '' }),
+    prReviews: async () => [],
+  };
+  return { source, calls };
+}
+
+test('#1257 R1257-9: the first snapshot is served while a forge call is held', async () => {
+  const open = deferred();
+  const { source } = heldForge({ open });
+  const server = createUiServer({ root: makeFixture(), project: 'o/r', _now: now, forgeSource: source, closedForgeSource: source });
+  await server.listen(0); // resolves with the open list still held
+  try {
+    const snap = await (await fetch(`http://127.0.0.1:${server.port}/api/snapshot`)).json();
+    assert.equal(snap.graph.pending, true);
+    assert.equal(snap.graph.reason, 'loading open issues from the forge…');
+    assert.equal(snap.forgeLoad.value.open.state, 'pending');
+    assert.equal(snap.prs.pending, true);
+  } finally {
+    open.release();
+    await server.close();
+  }
+});
+
+test('#1257 R1257-9: the stream syncs while a forge call is held', async () => {
+  const open = deferred();
+  const { source } = heldForge({ open });
+  const server = createUiServer({ root: makeFixture(), project: 'o/r', _now: now, forgeSource: source, closedForgeSource: source });
+  await server.listen(0);
+  const ac = new AbortController();
+  try {
+    const res = await fetch(`http://127.0.0.1:${server.port}/api/stream`, { signal: ac.signal });
+    const frame = await frameReader(res)();
+    assert.match(frame, /^event: sync\n/);
+    ac.abort();
+  } finally {
+    open.release();
+    await server.close();
+  }
+});
+
+test('#1257 R1257-9: closed issues are loading while the open graph is real', async () => {
+  const closed = deferred();
+  const { source } = heldForge({ closed });
+  const server = createUiServer({ root: makeFixture(), project: 'o/r', _now: now, forgeSource: source, closedForgeSource: source });
+  await server.listen(0);
+  try {
+    const url = `http://127.0.0.1:${server.port}/api/snapshot`;
+    let snap = null;
+    await pollUntil(async () => { snap = await (await fetch(url)).json(); return snap.graph.ok === true; });
+    assert.equal(snap.closedIssues.pending, true);
+    assert.equal(snap.closedIssues.reason, 'loading closed issues from the forge…');
+    assert.equal(snap.forgeLoad.value.closed.state, 'pending');
+  } finally {
+    closed.release();
+    await server.close();
+  }
+});
+
+test('#1257 R1257-8: the snapshot mirrors the poller — current.forgeLoad deep-equals meta.poller.forgeLoad in the status frame', async () => {
+  const closed = deferred();
+  const scheduler = fakeScheduler();
+  const { source } = heldForge({ closed });
+  const server = createUiServer({
+    root: makeFixture(), project: 'o/r', _now: now, forgeSource: source, closedForgeSource: source,
+    _setTimeout: scheduler.setTimeout, _clearTimeout: scheduler.clearTimeout,
+  });
+  await server.listen(0);
+  const ac = new AbortController();
+  try {
+    const res = await fetch(`http://127.0.0.1:${server.port}/api/stream`, { signal: ac.signal });
+    const readFrame = frameReader(res);
+    await readFrame(); // sync
+    await pollUntil(async () => (await (await fetch(`http://127.0.0.1:${server.port}/api/snapshot`)).json()).graph.ok === true);
+    // Quiet the stream: drain what the cold tick broadcast, then let one more tick settle with the closed lane still in flight.
+    await scheduler.runNext();
+    let status = null;
+    await pollUntil(async () => {
+      const frame = await readFrame();
+      if (!frame.startsWith('event: status')) return false;
+      status = JSON.parse(frame.split('\ndata: ')[1]);
+      return status.poller.forgeLoad.open.state === 'complete';
+    });
+    const snap = await (await fetch(`http://127.0.0.1:${server.port}/api/snapshot`)).json();
+    assert.deepEqual(snap.forgeLoad.value, status.poller.forgeLoad);
+    assert.equal(snap.forgeLoad.value.closed.state, 'pending');
+    ac.abort();
+  } finally {
+    closed.release();
+    await server.close();
+  }
+});
+
+test('#1199 R1199-6: with no forge provider the hierarchy carries the same reason as the graph, not one derived from a stand-in', async () => {
+  const server = createUiServer({ root: makeFixture(), project: 'o/r', _now: now, forgeUnavailable: 'no VCS token', poll: false, _watch: () => ({ close() {} }) });
+  await server.listen(0);
+  try {
+    const snap = await (await fetch(`http://127.0.0.1:${server.port}/api/snapshot`)).json();
+    assert.deepEqual(snap.graph, { ok: false, reason: 'no VCS token' });
+    assert.deepEqual(snap.hierarchy, { ok: false, reason: 'no VCS token' });
+    assert.deepEqual(snap.localWorktrees, { ok: false, reason: 'no VCS token' }, '#883 D71: the open set is unknown, so the overlay says why rather than listing unfiltered');
+  } finally {
+    await server.close();
+  }
+});
+
+// ── #883 R883-10 / R883-11: a worktree edit reaches the page within one tick ─
+
+const LOCAL_FRAME_TIMEOUT_MS = 5000;
+const openIssuesVcs = (...numbers) => ({
+  issueList: async ({ state }) => (state === 'open' ? numbers.map((number) => ({ number, title: `issue ${number}`, labels: [], state: 'open', body: '' })) : []),
+  issueView: async ({ number }) => ({ number, body: '' }),
+  mrList: async () => [],
+  prReviews: async () => [],
+});
+const D7 = 'openspec/changes/issue-7-x';
+/** Frames off the stream until one satisfies `want`, or a named timeout: a frame that never comes fails, never hangs. */
+async function frameUntil(readFrame, want) {
+  const deadline = new Promise((_, reject) => setTimeout(() => reject(new Error('no matching frame arrived')), LOCAL_FRAME_TIMEOUT_MS).unref());
+  for (;;) {
+    const frame = await Promise.race([readFrame(), deadline]);
+    if (want(frame)) return frame;
+  }
+}
+const frameData = (frame) => JSON.parse(frame.slice(frame.indexOf('data: ') + 'data: '.length));
+
+test('#883 acceptance 1: ticking a box in a worktree edits the file, fires its change-dir handle, and one debounce later a localWorktrees section frame arrives and the drawer says "uncommitted: modified" with the new count', async (t) => {
+  const repo = makeWorktreeRepo();
+  t.after(() => repo.dispose());
+  const wt = repo.addWorktree('feat/issue-7-x', { [`${D7}/tasks.md`]: '- [ ] a\n- [ ] b\n', [`${D7}/proposal.md`]: '# p\n' }, { commit: true });
+  const _watch = spyWatch();
+  const scheduler = fakeScheduler();
+  const server = createUiServer({ root: repo.root, vcs: openIssuesVcs(7), project: 'o/r', _now: now, poll: false, _watch, _setTimeout: scheduler.setTimeout, _clearTimeout: scheduler.clearTimeout });
+  await server.listen(0);
+  const base = `http://127.0.0.1:${server.port}`;
+  try {
+    const stream = await fetch(`${base}/api/stream`);
+    const readFrame = frameReader(stream);
+    const sync = frameData(await readFrame());
+    assert.equal(sync.snapshot.localWorktrees.ok, true);
+    assert.deepEqual(_watch.calls.map((c) => c.path).filter((p) => p.startsWith(wt.path)).sort(), [`${wt.path}/${D7}`, `${wt.path}/openspec/changes`].sort());
+
+    const before = await (await fetch(`${base}/api/change/7`)).json();
+    assert.equal(before.value.local[0].documents.tasks.overlay, 'committed');
+
+    const tasks = join(wt.path, D7, 'tasks.md');
+    writeFileSync(tasks, '- [x] a\n- [ ] b\n');
+    const later = new Date(Date.now() + 60_000);
+    utimesSync(tasks, later, later);
+    _watch.fire(`${wt.path}/${D7}`);
+    assert.equal(scheduler.pending(), 1, 'one trailing debounce armed');
+    scheduler.runLatest();
+
+    const frame = frameData(await frameUntil(readFrame, (f) => f.startsWith('event: section') && f.includes('"name":"localWorktrees"')));
+    assert.equal(frame.name, 'localWorktrees');
+    assert.match(frame.cause, /^watch:local:/);
+
+    const after = await (await fetch(`${base}/api/change/7`)).json();
+    const row = after.value.local[0].documents.tasks;
+    assert.equal(row.overlay, 'modified');
+    assert.equal(row.uncommitted, true);
+    assert.deepEqual(row.progress, { ok: true, value: { done: 1, total: 2 } });
+    await readFrame.reader.cancel();
+  } finally {
+    await server.close();
+  }
+});
+
+test('#883 R883-10: a worktree with no openspec/ yet is watched at its root, and the first change dir re-targets the watches', async (t) => {
+  const repo = makeWorktreeRepo();
+  t.after(() => repo.dispose());
+  const wt = repo.addWorktree('feat/issue-7-x', {});
+  const closesByPath = new Map();
+  const spy = spyWatch();
+  const _watch = (path, o, listener) => { spy(path, o, listener); return { close() { closesByPath.set(path, (closesByPath.get(path) ?? 0) + 1); } }; };
+  _watch.calls = spy.calls;
+  _watch.fire = spy.fire;
+  _watch.closesByPath = closesByPath;
+  const scheduler = fakeScheduler();
+  const server = createUiServer({ root: repo.root, vcs: openIssuesVcs(7), project: 'o/r', _now: now, poll: false, _watch, _setTimeout: scheduler.setTimeout, _clearTimeout: scheduler.clearTimeout });
+  await server.listen(0);
+  const base = `http://127.0.0.1:${server.port}`;
+  try {
+    const stream = await fetch(`${base}/api/stream`);
+    const readFrame = frameReader(stream);
+    await readFrame();
+    const mine = () => _watch.calls.map((c) => c.path).filter((p) => p.startsWith(wt.path));
+    assert.ok(mine().includes(wt.path), 'no openspec/ yet: the worktree root is watched');
+    assert.equal(mine().filter((p) => p === wt.path).length, 1);
+
+    mkdirSync(join(wt.path, D7), { recursive: true });
+    writeFileSync(join(wt.path, D7, 'proposal.md'), '# p\n');
+    _watch.fire(wt.path);
+    scheduler.runLatest();
+    await frameUntil(readFrame, (f) => f.startsWith('event: section') && f.includes('"name":"localWorktrees"'));
+    assert.ok(mine().includes(`${wt.path}/openspec/changes`), 'the changes dir is now watched');
+    assert.ok(mine().includes(`${wt.path}/${D7}`), 'and so is the change dir');
+    assert.equal(_watch.closesByPath.get(wt.path), 1, 'the root handle is released once the changes dir takes over');
+    await readFrame.reader.cancel();
+  } finally {
+    await server.close();
+  }
+});
+
+test('#883 R883-10: a recompute whose section is not readable keeps the handles; one that no longer lists the worktree closes them', async (t) => {
+  const repo = makeWorktreeRepo();
+  t.after(() => repo.dispose());
+  const wt = repo.addWorktree('feat/issue-7-x', { [`${D7}/proposal.md`]: '# p\n' }, { commit: true });
+  const good = await buildSnapshot({ root: repo.root, now: now(), vcs: openIssuesVcs(7), project: 'o/r' });
+  assert.equal(good.localWorktrees.ok, true);
+  const queue = [good, { ...good, localWorktrees: { ok: false, reason: 'the worktree list could not be read: boom' } }, { ...good, localWorktrees: { ok: true, value: { entries: [], hidden: {}, tier: 'working-tree' } } }];
+  const closes = [];
+  const calls = [];
+  const _watch = (path, _o, listener) => { calls.push({ path, listener }); return { close: () => closes.push(path) }; };
+  const scheduler = fakeScheduler();
+  const server = createUiServer({ root: repo.root, vcs: openIssuesVcs(7), project: 'o/r', _now: now, poll: false, _watch, _setTimeout: scheduler.setTimeout, _clearTimeout: scheduler.clearTimeout, _recomputeCurrent: async () => queue.shift() });
+  await server.listen(0);
+  try {
+    const mine = (p) => p.startsWith(wt.path);
+    assert.equal(calls.filter((c) => mine(c.path)).length, 2);
+    const fire = async () => { calls.find((c) => mine(c.path)).listener('change', null); await scheduler.runLatest(); await new Promise((r) => setImmediate(r)); };
+    await fire();
+    assert.deepEqual(closes.filter(mine), [], 'an unreadable section leaves A\'s handles open');
+    await fire();
+    assert.equal(closes.filter(mine).length, 2, 'a readable section without A closes both');
+  } finally {
+    await server.close();
+  }
+});
+
+test('#883 R6: a worktree whose openspec/changes, or whose change dir, is a symlink out of it is never watched through the link', async (t) => {
+  const repo = makeWorktreeRepo();
+  t.after(() => repo.dispose());
+  const outside = join(repo.base, 'outside');
+  mkdirSync(join(outside, 'issue-7-x'), { recursive: true });
+  mkdirSync(join(outside, 'issue-8-y'), { recursive: true });
+  const w7 = repo.addWorktree('feat/issue-7-x', {});
+  mkdirSync(join(w7.path, 'openspec'), { recursive: true });
+  symlinkSync(outside, join(w7.path, 'openspec/changes'));
+  const w8 = repo.addWorktree('feat/issue-8-y', {});
+  mkdirSync(join(w8.path, 'openspec/changes'), { recursive: true });
+  symlinkSync(join(outside, 'issue-8-y'), join(w8.path, 'openspec/changes/issue-8-y'));
+  const _watch = spyWatch();
+  const server = createUiServer({ root: repo.root, vcs: openIssuesVcs(7, 8), project: 'o/r', _now: now, poll: false, _watch });
+  await server.listen(0);
+  try {
+    const watched = _watch.calls.map((c) => c.path);
+    assert.deepEqual(watched.filter((p) => p.startsWith(w7.path)), [], 'a changes root that leaves the worktree is not watched');
+    assert.deepEqual(watched.filter((p) => p.startsWith(w8.path)), [`${w8.path}/openspec/changes`], 'the change dir link is not followed; its parent still is watched');
+    assert.ok(!watched.some((p) => p.startsWith(outside)), 'nothing outside the worktrees is watched');
   } finally {
     await server.close();
   }

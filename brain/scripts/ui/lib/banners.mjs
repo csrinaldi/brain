@@ -64,8 +64,17 @@ export function controlBanner({ action, reason }) {
 export function failedSections(snapshot) {
   if (!snapshot || typeof snapshot !== 'object') return [];
   return Object.entries(snapshot)
-    .filter(([, section]) => section && typeof section === 'object' && section.ok === false)
+    // A section that is still loading (`pending: true`, #1257 D65) is not a failure.
+    .filter(([, section]) => section && typeof section === 'object' && section.ok === false && section.pending !== true)
     .map(([name, section]) => ({ name, reason: section.reason }));
+}
+
+/** The sections still waiting on a forge read, by name, in snapshot order. */
+function loadingSections(snapshot) {
+  if (!snapshot || typeof snapshot !== 'object') return [];
+  return Object.entries(snapshot)
+    .filter(([, section]) => section && typeof section === 'object' && section.ok === false && section.pending === true)
+    .map(([name]) => name);
 }
 
 /**
@@ -73,7 +82,7 @@ export function failedSections(snapshot) {
  * order the page shows them: the transport first (it explains why everything
  * else may be stale), then the controls, the watcher, the poller, the sections.
  */
-export function degradationBands({ stream, controls, meta, snapshot }) {
+export function degradationBands({ stream, controls, meta, snapshot, epic }) {
   const bands = [];
   if (stream && stream.ok === false) bands.push({ id: 'stream', text: stream.reason });
   if (controls && controls.ok === false) bands.push({ id: 'controls', text: controlBanner(controls) });
@@ -87,6 +96,8 @@ export function degradationBands({ stream, controls, meta, snapshot }) {
   if (meta?.poller?.lastError) bands.push({ id: 'poller', text: pollBanner(meta.poller) });
   const rm = meta?.poller?.remotes;
   if (rm && (rm.lastError || (!rm.lastOkAt && !rm.lastAttemptAt && !rm.inFlight))) bands.push({ id: 'remotes', text: remotesBanner(meta.poller.remotes) });
+  const loading = loadingSections(snapshot);
+  if (loading.length > 0) bands.push({ id: 'loading', text: `still loading from the forge: ${loading.join(', ')}` });
   const failed = failedSections(snapshot);
   if (failed.length > 0) {
     bands.push({
@@ -95,6 +106,8 @@ export function degradationBands({ stream, controls, meta, snapshot }) {
       detail: failed.map((f) => `${f.name}: ${f.reason}`),
     });
   }
+  // #1284 D101: the long epic explanation left the header line; it is said here, not dropped.
+  if (epic && epic.ok === false) bands.push({ id: 'epic', text: epic.reason });
   return bands;
 }
 
@@ -129,11 +142,23 @@ function pollCountdown({ poller, now }) {
  * `text` stays exactly what it already was, never a second projection of it.
  */
 export function pollIndicator({ poller, nowMs }) {
-  if (!poller) return { text: 'the poll state is unknown until the stream connects', paused: false, countdown: 'polling disabled' };
+  if (!poller) return { text: 'the poll state is unknown until the stream connects', paused: false, halted: false, countdown: 'polling disabled', toggle: null };
   const when = poller.lastOkAt ? `forge polled ${ago(nowMs - Date.parse(poller.lastOkAt))}` : 'the forge has not been polled yet';
+  const paused = Boolean(poller.paused);
+  // #1243 R1/R3: the forge halt is its own state. Resume cannot lift it, so it is
+  // never offered; the one control that can act is Pause, and only while a
+  // remotes lane is running.
+  const halted = Boolean(poller.forgeHalted) && !paused;
+  const reason = poller.forgeHaltReason ?? poller.lastError ?? 'unknown';
+  if (halted && poller.remotesLane) {
+    return { text: `forge unavailable: ${reason}; remotes fetched every ${Math.round(poller.intervalMs / 1000)} s`, paused, halted, countdown: pollCountdown({ poller, now: nowMs }), toggle: 'pause' };
+  }
+  if (halted) return { text: `forge unavailable: ${reason}`, paused, halted, countdown: 'polling disabled', toggle: null };
   return {
-    text: poller.paused ? `polling is paused — ${when}` : when,
-    paused: Boolean(poller.paused),
+    text: paused ? `polling is paused — ${when}` : when,
+    paused,
+    halted: false,
     countdown: pollCountdown({ poller, now: nowMs }),
+    toggle: paused ? 'resume' : 'pause',
   };
 }

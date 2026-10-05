@@ -22,6 +22,15 @@ export function parseTreeListing(out) {
 }
 
 /**
+ * The bare names of the TREE entries of a parsed listing (#1243 D49): a blob whose
+ * name parses as a change id (`issue-5-notes.md`) is not a change dir. Both
+ * readers build `pickChangeDir`'s input with this, so neither keeps its own filter.
+ */
+export function changeDirNames(listing) {
+  return [...listing].filter(([, entry]) => entry.type === 'tree').map(([path]) => path.slice(path.lastIndexOf('/') + 1));
+}
+
+/**
  * The one dir name carrying `issue`, or why not: `missing` (none), `unreadable`
  * (more than one — never a guess among them).
  * @returns {{ok: true, dir: string} | {ok: false, state: 'missing'|'unreadable', reason: string}}
