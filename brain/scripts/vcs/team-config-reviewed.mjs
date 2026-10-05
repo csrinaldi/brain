@@ -15,6 +15,10 @@
 //     decisive review (a later CHANGES_REQUESTED/DISMISSED cancels it; an approval on an older commit is stale) → pass
 //     — a `null` commitId (the forge cannot say) cannot be told from stale, so it fails closed
 //   · otherwise → fail ("no owner declared" when the list is empty)
+//   · PR context but the PR author or repository unresolved (the forge API failed): founding, removal and shallow
+//     history are judged as above, and a touched team config that is not a founding fails, even if an owner approved
+//     on the current head, because the distinct-actor rule cannot be verified. Only with no PR context at all
+//     (no base, head or PR number) does the check skip.
 //
 // `lite` is `detection` in GATE_MATRIX, so there a failure is a warning that names the tier; at standard and
 // regulated it is required and a failure exits 1.
@@ -261,17 +265,25 @@ export async function runTeamConfigReviewedCheck(deps = {}) {
   const provider = deps.provider ?? ctx.provider ?? undefined;
   const cwd = deps.cwd ?? process.cwd();
 
-  if (!baseSha || !headSha || !prNumber || !repo || !author) {
+  // No PR context at all (not running on a PR): nothing to verify, skip.
+  if (!baseSha || !headSha || !prNumber) {
     return {
       level: 'warn',
-      reason: 'BASE_SHA/HEAD_SHA/PR_NUMBER/GITHUB_REPOSITORY/PR_AUTHOR not set — cannot verify team-config review; skipping team-config-reviewed check.',
+      reason: 'BASE_SHA/HEAD_SHA/PR_NUMBER not set — cannot verify team-config review; skipping team-config-reviewed check.',
     };
   }
+  // PR context exists but the author or repo is unresolved (the forge API failed). The distinct-actor rule cannot be
+  // verified, so this must NOT skip (#1263). It takes the ORDINARY path through gather, so founding, removal and
+  // shallow-history are judged exactly as with a known author; only the author-dependent verdict is replaced.
+  const missing = [!author && "PR author", !repo && "repository"].filter(Boolean).join(" and ");
+  const unresolved = missing ? `the ${missing} could not be resolved (forge API), so the distinct-actor rule cannot be verified` : null;
 
   let inputs;
   const state = {};
   try {
-    inputs = await gatherTeamConfigReviewedInputs({ baseSha, headSha, prNumber, repo, author, provider, cwd, deps, state });
+    // With no repo there is no forge to ask, and with no author no review can be judged: reviews are not fetched.
+    const gatherDeps = unresolved ? { ...deps, fetchReviews: async () => [] } : deps;
+    inputs = await gatherTeamConfigReviewedInputs({ baseSha, headSha, prNumber, repo, author, provider, cwd, deps: gatherDeps, state });
   } catch (err) {
     // The tier is whatever gather already learned, or the base's own when it can still be read. If it cannot be known
     // the team config is unreadable and a PR that touches it deserves a closed door — there is no `standard` fallback.
@@ -285,8 +297,17 @@ export async function runTeamConfigReviewedCheck(deps = {}) {
     return {
       level: required ? 'fail' : 'warn',
       reason:
-        `team-config-reviewed: could not gather inputs — ${err.message}` +
+        `team-config-reviewed: could not gather inputs — ${err.message}` + (unresolved ? `; ${unresolved}` : "") +
         (required ? ` — failing closed: this gate is required at the "${tier}" tier.` : ` (detection at the "${tier}" tier).`),
+    };
+  }
+  if (unresolved && inputs.changedFiles.includes(TEAM_CONFIG_PATH) && !inputs.founding) {
+    const required = resolveGatePolicy(GATE, inputs.tier) === "required";
+    return {
+      level: required ? "fail" : "warn",
+      reason:
+        `team-config-reviewed: ${TEAM_CONFIG_PATH} changed and ${unresolved}` +
+        (required ? ` — failing closed: this gate is required at the "${inputs.tier}" tier.` : ` (detection at the "${inputs.tier}" tier).`),
     };
   }
   return evaluateTeamConfigReviewed(inputs);
