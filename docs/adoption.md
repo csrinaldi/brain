@@ -43,7 +43,7 @@ allowlisted bytes into the same directory
 ([ADR-0030 Amendment 1](../brain/project/decisions/adr-0030-distribution-scoped-registry-package.md)):
 
 ```bash
-npm i -D "git+https://github.com/csrinaldi/brain.git#v1.11.0"
+npm i -D "git+https://github.com/csrinaldi/brain.git#v1.12.0"
 ```
 
 ---
@@ -67,13 +67,14 @@ hooks (`core.hooksPath`, wired by `env:init`) start refusing commits that don't 
 - [ ] **CI / PR template.** brain adds `.github/workflows/governance.yml` (or the
       GitLab fragment) and a PR/MR template. Reconcile with anything you already have.
 
-**Your agent platform default does not change on upgrade.** `env:init` has always
-written whatever it resolved back into `.env`. If you have ever run `env:init` before
-(even on an older brain version), your `.env` already has `AGENT_PLATFORM=antigravity`
-recorded explicitly, and an existing, non-empty `.env` value is never rewritten — you
-keep `antigravity`, not the new-consumer `claude` default. Only a repository with no
-`AGENT_PLATFORM` in `.env` yet (a brand-new install) resolves and persists `claude` the
-first time `env:init` runs.
+**Your agent platform does not change on upgrade, and none is chosen for you in code (1.12.0).**
+The `1.11.1` migration that `brain:upgrade` applies writes `platform.default` and `sdd.default` into
+`brain.config.json` from what your repository effectively resolves today (process env, then
+`.env`, then the config's own key, then `claude` / `gentle-ai`), and prints each value with where
+it came from. A value that came from your `.env` becomes the team's tracked default, so read that
+output before you commit. A brand-new adoption has no such value: the `env:init` that creates
+`brain.config.json` declares `claude` and `gentle-ai` for you, unless your shell or `.env` already
+states one. Either way, an axis nothing declares is **refused**, not defaulted.
 
 Then run the same five steps as the quick path above, and once `env:init` finishes:
 
@@ -142,8 +143,8 @@ A refusal names the fix and is a **required failure**: `env:init` exits 1.
 | Axis | Default for a new repo | Where it's declared | How to change it |
 |---|---|---|---|
 | Governance tier | `lite` — no second approver required to merge ([ADR-0026 Amendment 8](../brain/project/decisions/adr-0026-governance-doctrine-tiers.md)) | `governance.tier` in `brain.config.json` | `npm run brain:config -- set governance.tier standard`, then `npm run brain:protect` |
-| Agent platform | `claude` ([ADR-0024 Amendment 2](../brain/project/decisions/adr-0024-three-axis-decoupling.md)); `antigravity` is the second supported platform | `AGENT_PLATFORM` in `.env` | set `AGENT_PLATFORM=antigravity` in `.env` before running `env:init`, or export it for one run: `AGENT_PLATFORM=antigravity npm run brain:env:init` |
-| Memory backend | **None is assumed.** `env:init` asks once on a terminal (there is no default: Enter re-prompts, and a closed stdin leaves it undeclared; the answer is `engram` or `plainfiles`) and writes the answer to tracked config. See "The memory backend is a team setting" below. engram 2.x is supported: a fresh 2.x store accepts brain's record import. Its duplicate-heal probe is still tested on 1.20.x and says so outside that range | `memory.backend` in `brain.config.json` (tracked) | `npm run brain:config -- set memory.backend plainfiles` (or `engram`) |
+| Agent platform | None in code. The `env:init` that creates `brain.config.json` declares `claude` ([ADR-0038](../brain/project/decisions/adr-0038-one-config-shape-per-axis-default-and-providers.md)); `antigravity` is the second supported platform | `platform.default` in `brain.config.json` (tracked); `AGENT_PLATFORM` in `.env` or your shell, or your user layer, override it on your machine | for the team: `npm run brain:config -- set platform.default antigravity` in a PR; for you alone: `npm run brain:config -- user-set platform.default antigravity` |
+| Memory backend | **None is assumed.** The `env:init` that **creates** `brain.config.json` asks once on a terminal (there is no default: Enter re-prompts, and a closed stdin leaves it undeclared; the answer is `engram` or `plainfiles`) and writes the answer to tracked config. In a repository that already has one, `env:init` asks nothing and writes nothing: declare it with `set memory.default`. See "The memory backend is a team setting" below. engram 2.x is supported: a fresh 2.x store accepts brain's record import. Its duplicate-heal probe is still tested on 1.20.x and says so outside that range | `memory.default` in `brain.config.json` (tracked; the legacy `memory.backend` is kept in step) | `npm run brain:config -- set memory.default plainfiles` (or `engram`) |
 | VCS provider | derived from your git origin, confirmable on a TTY | `vcs.provider` in `brain.config.json` (tracked) | type `github` or `gitlab` at the prompt |
 
 **The VCS provider and memory backend prompts validate.** The provider accepts `github`,
@@ -182,9 +183,11 @@ npm run brain:config -- set memory.backend plainfiles   # or engram
 git add brain.config.json && git commit
 ```
 
-`env:init` asks once and writes it for you, to `brain.config.json` and not to `.env`.
-Precedence, first wins: process env `MEMORY_BACKEND` (one run), then `.env` (this machine),
-then `brain.config.json` (the team). When two disagree the CLI says which one won.
+The `env:init` that creates `brain.config.json` asks once and writes it for you, to
+`brain.config.json` and not to `.env`; in an existing repository nobody is asked, and the team
+declares it with `set memory.default` in a PR. Precedence, first wins: process env
+`MEMORY_BACKEND` (one run), then `.env` (this machine), then your user layer, then
+`brain.config.json` (the team). When two disagree the CLI says which one won.
 
 **If nothing declares a backend, memory commands refuse** and name this fix instead of
 guessing `engram`: every op that consults a backend (`pull`, `import`, `index`, `share`,
@@ -196,7 +199,14 @@ backend is declared. Without a terminal, `env:init` declares nothing and lists t
 as a pending step.
 
 If your backend is already in `.env`, it keeps working, and `env:init` prints the one
-command that shares it with the team.
+command that shares it with the team. The `1.11.1` migration that `brain:upgrade` runs does **not**
+promote a backend that lives only in `.env`: it copies `memory.backend` from the config and
+leaves `memory.default` empty otherwise.
+
+**Known text mismatch:** the refusal the memory commands print still ends "Or run
+`npm run brain:env:init`, which asks once and writes it". In an existing repository `env:init` no
+longer asks: use `npm run brain:config -- set memory.default <engram|plainfiles>`
+(#1341, [KNOWN-LIMITATIONS](KNOWN-LIMITATIONS.md)).
 
 ### The audit cursor: nothing to do by hand
 
@@ -228,6 +238,50 @@ run audits every commit since your adoption at once, and can open several
 window before you upgrade.
 
 ---
+
+### Who defines the project: the team config and your own layer
+
+Four axes choose an implementation: `vcs`, `memory`, `platform` and `sdd`. Each is
+`"<axis>": { "default": "<name>", "providers": { "<name>": {} } }` in the tracked
+`brain.config.json`, and **none has a default in code**: an axis nothing declares is refused, and
+the refusal names the fix. Check what a run resolves, and why:
+
+```bash
+npm run brain:config -- resolve memory     # prints "<run> <repo> <run-where> <repo-where>"
+npm run brain:config -- diagnose           # the axis findings as JSON; exits 0
+```
+
+`resolve` exits **3** when nothing declares the axis and **4** when a declared value is refused.
+
+**Your own layer.** `${BRAIN_HOME:-~/.brain}/config.json` is untracked and per person. It holds
+your `memory`, `platform` and `sdd` selectors (no `vcs`), and you write it with:
+
+```bash
+npm run brain:config -- user-set platform.default antigravity   # memory.default and sdd.default too
+```
+
+`user-set` never writes `brain.config.json`. For `memory` and `sdd` it refuses with exit 3 while the
+team has not declared the axis. Precedence for those three, first wins: process env, `.env`, your
+user layer, the team's `<axis>.default`, the legacy key. `vcs` has no `.env` and no user level.
+
+**Locking an axis.** A team can set `memory.locked`, `platform.locked` or `sdd.locked` to `true`
+(`npm run brain:config -- set memory.locked true`, in a PR). A locked axis refuses a value that
+differs from the team's, from your user layer, your `.env` or your process env, and `user-set`
+refuses it too (exit 4). A new adoption starts with `memory` and `sdd` locked and `platform` free;
+an upgrade locks nothing.
+
+**Owners.** `governance.owners` lists the logins that own the team config:
+
+```bash
+npm run brain:config -- set governance.owners alice,bob   # a login, a comma list, or a JSON array
+```
+
+A new adoption names its adopter. An existing repository is not seeded, and `brain:governance-status`
+warns `owners-undeclared` until you name some. A pull request that changes `brain.config.json` then
+needs an approving review from an owner who is not its author, checked by the gate
+`team-config-reviewed` (a warning at `lite`, required at `standard` and `regulated`). Owners are read
+from the base branch. On GitLab at `standard` and `regulated` the gate cannot pass by approval yet
+([KNOWN-LIMITATIONS](KNOWN-LIMITATIONS.md), #1281).
 
 ## The first commit
 
@@ -318,7 +372,8 @@ GitLab has no archive-sweep workflow yet — this section is GitHub-only.
 ## `brain:protect`
 
 A repo admin runs this **once**, after the first `env:init` (and again any time you
-change `governance.tier`):
+change `governance.tier`, and after upgrading to 1.12.0 so that `standard` and `regulated`
+repositories also require `team-config-reviewed`, once your `governance.yml` carries that job):
 
 ```bash
 npm run brain:protect
@@ -335,8 +390,8 @@ each tier requires and how to recover if protection locks you out.
 ## Upgrading
 
 ```bash
-npm run brain:upgrade -- v1.11.0             # install a newer tag, copy managed paths
-npm run brain:upgrade -- v1.11.0 --dry-run   # preview what would change
+npm run brain:upgrade -- v1.12.0             # install a newer tag, copy managed paths
+npm run brain:upgrade -- v1.12.0 --dry-run   # preview what would change
 ```
 
 Read the [CHANGELOG](../CHANGELOG.md) first — renames and breaking changes need
