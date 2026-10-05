@@ -39,3 +39,28 @@ The Q4 condition is proven in session-start by `runSessionStart: a deferred hydr
 | 5.1 `day-start.test.mjs` source guards (hydrate not import, 4a before the probe, no `sync --export`, one probe) | 4 of 8 failed | 8/8 after 4a moved out of the probe and 4c was deleted; i18n suite 75/75 (removed keys absent) |
 | 6.1 `axis-port.guard.test.mjs` | `SHRANK day-start.mjs spawn-concrete:engram: 1 hits < max 2 — lower max to 1` (1 failed) | 14/14 after max 1, owner #1349, brain-to-engram entries → #1349 |
 | 7 docs | n/a | KNOWN-LIMITATIONS drops the #1115 and #1189 entries; adoption.md names `hydrate` and the deprecated `import` |
+
+## T8 — gates
+- `npm run brain:repo:check`: green.
+- First `npm test` run: 3 failures, all introduced by this change and fixed (RED→GREEN): a bare `memory:pull` token in a `plainfiles.mjs` comment (memory-script-prefix guard), an unannotated `catch` in `verifyIndex` (swallow guard, now `swallow-ok` with the ENOENT reason), and three new test spawns missing from the spawn-hygiene allowlist (line-keyed).
+- `npm test` normal: 8146 tests, 8143 pass, 0 fail, 3 skipped.
+- `AGENT_PLATFORM=hostile SDD_ENGINE=hostile npm test`: 8146 tests, 8131 pass, 12 fail, 3 skipped. All 12 are in `lib/axis-user-layer.test.mjs` and `config/cli.test.mjs` (the known #1347 set); none touches memory, session-start, day-start or hooks.
+- `planAmendment()` on the six drafts against the branch: every act `pending` (adr-0004: 5, agent-authorities: 2, consolidation-protocol: 2, harness-contract: 2, memory-backend-contract: 3, memory-format: 2). No `*.md` under `brain/` changed.
+- Gated diff (`git diff --numstat origin/main...HEAD` minus `*.test.mjs`, `.memory/**`, `openspec/changes/**`): 462 added + 135 deleted = 597 lines (tier `lite`, budget 1000).
+
+## T9 — e2e (scratch consumers under the scratchpad; BRAIN_HOME, HOME and ENGRAM_DATA_DIR sandboxed; the real `~/.engram/engram.db` md5 `40eea8d2...` is unchanged before and after)
+Consumers are copies of this worktree's `brain/` in a scratch git repo with a bare origin and a teammate clone (not an `npm pack` install).
+
+plainfiles:
+- `session:start` on a canonical index: `memory:   plainfiles verified — index current (read-only)`, `records:  1 durable, newest 2026-10-05 — first record`, no `engram` anywhere, `git status` clean after.
+- On branch `fix/issue-1115-x` with a change dir: `issue #1115: 1 record(s)` and `  - 2026-10-05 first record`.
+- With a deliberately drifted index: `memory:   plainfiles index is stale — session:start does not write; run npm run brain:memory:share`; the index md5 is identical before and after, `git status` unchanged.
+- `git pull` of a teammate record (post-merge fires) and `npm run brain:memory:pull`: exit 0, no `does not implement`; when upstream left the index stale the pull leaves a rebuilt index (`M .memory/index.jsonl`, 4 lines for 4 records).
+- `day:start` (engram off PATH): step 5/6 prints `Hydrating the memory backend from .memory/records/...`, the 4b else line, no export line, exit 0, reaches 6/6.
+
+engram (project name = repo name, isolated store):
+- `session:start`: `memory:   engram hydrated`; records line present.
+- Three more `cli.mjs hydrate` runs plus one `import` alias run: exit 0, `engram export --project` shows exactly 1 row for the record's `topic_key` (REQ-MB-9). The alias prints the deprecation notice naming `hydrate`.
+- `git pull` of a teammate record: post-merge hydrates it, 2 rows for 2 ids.
+- `hydrate` with engram off PATH: stderr `engram binary not found. Install via: gentle-ai install`, exit 6; `session:start` prints `memory:   engram hydration deferred — engram binary not found. Install via: gentle-ai install` and exits 0; the post-merge hook exits 0 on the same deferral.
+- Finding outside this change: engram 2.0.0's `export` is scoped to the cwd-detected project, so when the detected name differs from brain's project name `importMemory` reads an empty key set and re-imports (4 rows for 1 record before the scratch consumer's names were aligned). `importMemory` is untouched here.

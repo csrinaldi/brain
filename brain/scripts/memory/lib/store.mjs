@@ -184,7 +184,7 @@ export function verifyIndex({ recordsDir, indexPath }) {
   let onDisk = null;
   try {
     onDisk = readFileSync(indexPath, 'utf8');
-  } catch (err) {
+  } catch (err) { // swallow-ok: ENOENT only means there is no index file yet, which is reported as `stale` when records exist; every other error is rethrown
     if (err?.code !== 'ENOENT') throw err;
   }
   const stale = onDisk === null ? entries.size > 0 : onDisk !== canonical;

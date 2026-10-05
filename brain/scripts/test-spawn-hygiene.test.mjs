@@ -321,6 +321,7 @@ const ALLOWLIST = [
   // ── memory cli.mjs ops OTHER than ship never import vcs/cli.mjs at all ──
   { file: 'brain/scripts/memory/cli.audit.test.mjs', entrypoint: 'brain/scripts/memory/cli.mjs', reason: 'no-vcs-capability' },
   { file: 'brain/scripts/memory/cli.backend-fallback.test.mjs', entrypoint: 'brain/scripts/memory/cli.mjs', reason: 'no-vcs-capability' },
+  { file: 'brain/scripts/memory/cli.hydrate.test.mjs', entrypoint: 'brain/scripts/memory/cli.mjs', reason: 'no-vcs-capability' },
   { file: 'brain/scripts/memory/cli.collect.test.mjs', entrypoint: 'brain/scripts/memory/cli.mjs', reason: 'no-vcs-capability' },
   { file: 'brain/scripts/memory/cli.heal-duplicates.test.mjs', entrypoint: 'brain/scripts/memory/cli.mjs', reason: 'no-vcs-capability' },
   { file: 'brain/scripts/memory/cli.migrate-v1.test.mjs', entrypoint: 'brain/scripts/memory/cli.mjs', reason: 'no-vcs-capability' },
@@ -338,6 +339,7 @@ const ALLOWLIST = [
   { file: 'brain/scripts/memory/capture-reachable.test.mjs', entrypoint: '<unresolved>', line: 124, reason: 'no-vcs-capability' },
   { file: 'brain/scripts/memory/cli.backend-fallback.test.mjs', entrypoint: '<unresolved>', line: 56, reason: 'no-vcs-capability' },
   { file: 'brain/scripts/memory/cli.backend-fallback.test.mjs', entrypoint: '<unresolved>', line: 59, reason: 'no-vcs-capability' },
+  { file: 'brain/scripts/memory/cli.hydrate.test.mjs', entrypoint: '<unresolved>', line: 25, reason: 'no-vcs-capability' },
   { file: 'brain/scripts/memory/cli.save-search.test.mjs', entrypoint: '<unresolved>', line: 241, reason: 'no-vcs-capability' },
   { file: 'brain/scripts/memory/cli.save-search.test.mjs', entrypoint: '<unresolved>', line: 242, reason: 'no-vcs-capability' },
 
@@ -392,6 +394,7 @@ const ALLOWLIST = [
   { file: 'brain/scripts/hooks/pre-commit.test.mjs', entrypoint: 'brain/scripts/hooks/pre-commit', reason: 'no-vcs-capability' },
   { file: 'brain/scripts/hooks/pre-push.test.mjs', entrypoint: 'brain/scripts/hooks/pre-push', reason: 'no-vcs-capability' },
   { file: 'brain/scripts/hooks/post-merge.undeclared.test.mjs', entrypoint: 'brain/scripts/hooks/post-merge', reason: 'no-vcs-capability' },
+  { file: 'brain/scripts/hooks/post-merge.op.test.mjs', entrypoint: 'brain/scripts/hooks/post-merge', reason: 'no-vcs-capability' },
   { file: 'brain/scripts/hooks/hooks.stream-discipline.test.mjs', entrypoint: '<unresolved>', line: 98, reason: 'no-vcs-capability' },
   { file: 'brain/scripts/axes/platform/lib/settings-hooks.test.mjs', entrypoint: '<unresolved>', line: 93, reason: 'no-vcs-capability' },
   { file: 'brain/scripts/bootstrap.worktree.test.mjs', entrypoint: '<unresolved>', line: 64, reason: 'no-vcs-capability' },

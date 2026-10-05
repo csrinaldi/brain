@@ -405,7 +405,7 @@ export async function share({ root = repoRoot } = {}, { _rebuildIndex = rebuildI
  * `verify: true` is the READ-ONLY form (ruling Q1). `session:start` is read-only and
  * `.memory/index.jsonl` is tracked, so the loader may report that the index drifted but
  * must not repair it: nothing under `.memory/` is written or created, and the result says
- * `verified: true` and whether the index is `stale`. The rebuild is `post-merge`'s, `memory:pull`'s
+ * `verified: true` and whether the index is `stale`. The rebuild is `post-merge`'s, `brain:memory:pull`'s
  * and `day:start`'s, the callers that already write.
  *
  * @param {{root?: string, recordId?: string, verify?: boolean}} [args]
