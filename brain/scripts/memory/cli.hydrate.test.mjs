@@ -124,6 +124,10 @@ test('engram declared, binary absent: hydrate DEFERS — exit 6, names gentle-ai
   assert.match(r.stderr, /deferred/);
   assert.doesNotMatch(r.stderr, /plainfiles/);
   assert.doesNotMatch(r.stderr, NOT_IMPLEMENTED);
+  // The same cause on stdout as one JSON line, so session-start can render it without parsing prose.
+  const line = JSON.parse(r.stdout.trim().split('\n').pop());
+  assert.equal(line.hydrate, 'deferred');
+  assert.match(line.reason, /gentle-ai install/);
 });
 
 test('engram declared, binary absent: the `import` alias defers the same way (exit 6) and prints the notice', (t) => {

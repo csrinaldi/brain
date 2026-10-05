@@ -1267,7 +1267,10 @@ try {
     // A deferred hydration has its own exit status, so it can never read as "done". The adapter has
     // already printed the reason. Callers that load context treat this as non-fatal (post-merge,
     // session-start); it is the CLI's honest answer, not a failure.
-    if (result?.deferred === true) process.exitCode = EXIT_DEFERRED;
+    if (result?.deferred === true) {
+      console.log(JSON.stringify({ hydrate: "deferred", reason: result.reason ?? null }));
+      process.exitCode = EXIT_DEFERRED;
+    }
   }
 } catch (err) {
   console.error(`memory/cli: ${BACKEND}.${fn}() failed — ${err.message}`);

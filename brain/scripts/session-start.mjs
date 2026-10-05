@@ -12,7 +12,8 @@
 //
 // Dependency boundary (design §1.5a — statically asserted by
 // session-start.test.mjs's import-graph test): this module imports ONLY
-// node:* builtins, lib/git-branch.mjs, and memory/lib/auto-resume.mjs. It
+// node:* builtins, lib/git-branch.mjs, memory/lib/auto-resume.mjs and
+// memory/lib/backend-resolve.mjs (local config reads only). It
 // MUST NOT import day-start.mjs, vcs/*, lib/installer.mjs, or
 // memory/cli.mjs's `pull` path.
 //
@@ -32,6 +33,7 @@ import { fileURLToPath } from 'node:url';
 
 import { currentBranch } from './lib/git-branch.mjs';
 import { tryFeatureResume, EXIT_UNDECLARED, EXIT_INVALID, DECLARE_FIX } from './memory/lib/auto-resume.mjs';
+import { resolveMemoryBackend, EXIT_DEFERRED } from './memory/lib/backend-resolve.mjs';
 import { synthesizeContext } from './context/synthesizer.mjs';
 import { t } from './i18n/t.mjs';
 import { CHANGES_ROOT, parseChangeId } from './lib/sdd-layout.mjs';
@@ -86,7 +88,10 @@ export function deriveChangeFromBranch(branchName, changesDir, { _readdir = read
 // ── assertLocalArgv — runtime local-op allowlist gate (design §1.5b) ─────────
 
 const GIT_ALLOWED_SUBCOMMANDS = new Set(['rev-parse']);
-const MEMORY_CLI_ALLOWED_OPS = new Set(['import', 'feature-resume']);
+const MEMORY_CLI_ALLOWED_OPS = new Set(['hydrate', 'feature-resume']);
+// `hydrate --verify` (#1115, ruling Q1) is the READ-ONLY form, and the only flag any allowed op may carry:
+// session-start never writes the tracked tree. `import` (the deprecated alias) is NOT allowed here.
+const HYDRATE_READONLY_FLAG = '--verify';
 
 // Defense in depth: reject these anywhere in argv, even on an otherwise-
 // allowed cmd — guards against a future bug appending a network verb or flag
@@ -103,12 +108,14 @@ const FORBIDDEN_ARGV_TOKEN = /^(pull|fetch|merge|clone|ls-remote|push)$|--export
  *     `restore` were dropped (#955, D3): their only user was the manifest
  *     restore step, now retired — a dead `restore` entry would let a
  *     read-only loader run a tree-mutating git verb.
- *   - `<node> brain/scripts/memory/cli.mjs import|feature-resume`, called
+ *   - `<node> brain/scripts/memory/cli.mjs hydrate|feature-resume`, called
  *     with EXACTLY those 2 args — no trailing flags (local-only ops per
- *     memory/cli.mjs:7-10 — never `pull`).
+ *     memory/cli.mjs:7-10 — never `pull`) — plus the one 3-arg form
+ *     `hydrate --verify`, the read-only hydration (#1115). The deprecated
+ *     `import` alias is not allowed.
  *
  * Any other argv (notably `git fetch|pull|merge|clone|ls-remote|push`,
- * `memory/cli.mjs pull`, `memory/cli.mjs import --export`, `engram sync
+ * `memory/cli.mjs pull`, `memory/cli.mjs hydrate --export`, `engram sync
  * --export`) is rejected. This is the runtime gate ALL subprocess calls
  * session-start.mjs controls are routed through — directly (step2) and via
  * the injected `_spawn` seam threaded into `currentBranch` (step3) and the
@@ -130,6 +137,7 @@ export function assertLocalArgv(cmd, args = []) {
 
   const isMemoryCli = typeof a[0] === 'string' && a[0].includes('memory/cli.mjs');
   if (isMemoryCli && a.length === 2 && MEMORY_CLI_ALLOWED_OPS.has(a[1])) return;
+  if (isMemoryCli && a.length === 3 && a[1] === 'hydrate' && a[2] === HYDRATE_READONLY_FLAG) return;
 
   throw new Error(`assertLocalArgv: blocked non-allowlisted local op: ${describe()}`);
 }
@@ -191,7 +199,7 @@ function formatChangeLine(change, strings) {
  * and passes the resolved map in as `strings` — design §1.8). Fixed section
  * order; lines are present/absent based only on the inputs.
  *
- * @param {{ engram: {ok: boolean},
+ * @param {{ hydration: {ok: boolean, backend: string|null},
  *           change: {branch: string|null, token: string|null, matches: string[]},
  *           ticket: string|null }} model
  * @param {{ header: string, branch: string, branchUnknown: string, changeOne: string,
@@ -203,23 +211,38 @@ function formatChangeLine(change, strings) {
  * @returns {string}
  */
 export function renderContextBlock(model, strings) {
-  const { engram, change, ticket, recency = null } = model;
+  const { hydration, change, ticket, recency = null, records = null } = model;
   const s = strings;
+  const backend = hydration.backend ?? s.backendUnknown;
 
   const lines = [
     s.header,
     RULE_DOUBLE,
     fill(s.branch, { branch: change.branch ?? s.branchUnknown }),
     formatChangeLine(change, s),
-    // #923 (acceptance A): when a failure reason is available, surface it —
-    // additive over the bare skip line so a caller/test that never supplies
-    // `engram.reason` still renders exactly the old generic line.
-    engram.ok
-      ? s.memoryOk
-      : engram.undeclared
-        ? fill(s.memoryNotDeclared, { reason: engram.reason })
-        : (engram.reason ? fill(s.memorySkipReason, { reason: engram.reason }) : s.memorySkip),
+    // The memory line names the backend the one resolver reports — never a hardcoded one — and is
+    // the same shape for every backend (#1115). #923: when a failure reason is available, surface
+    // it, additive over the bare skip line.
+    formatMemoryLine(hydration, backend, s),
   ];
+
+  // The durable records context (#1115), read from .memory/records/ with no backend. Unknown is
+  // never rendered as zero. Issue lines only when an issue resolved and the store was readable.
+  if (records) {
+    if (records.count === null || records.count === undefined || !records.newest) {
+      lines.push(s.memoryRecordsUnknown);
+    } else {
+      lines.push(fill(s.memoryRecords, { count: records.count, date: records.newest.ts.slice(0, 10), title: records.newest.title }));
+      if (records.issue !== null && records.issue !== undefined) {
+        if (records.scopedCount > 0) {
+          lines.push(fill(s.memoryIssue, { issue: records.issue, count: records.scopedCount }));
+          for (const item of records.scoped) lines.push(fill(s.memoryIssueItem, { date: item.ts.slice(0, 10), title: item.title }));
+        } else {
+          lines.push(fill(s.memoryIssueNone, { issue: records.issue }));
+        }
+      }
+    }
+  }
 
   // Only when it is worth saying. A store captured today needs no line; an unknown or
   // stale one does. The threshold is a REPORTING choice, not a policy — nothing branches
@@ -240,6 +263,16 @@ export function renderContextBlock(model, strings) {
   );
 
   return lines.join('\n');
+}
+
+function formatMemoryLine(h, backend, s) {
+  if (h.undeclared) return fill(s.memoryNotDeclared, { reason: h.reason });
+  if (h.deferred) return fill(s.memoryDeferred, { backend, reason: h.reason ?? '' });
+  if (h.ok) {
+    if (h.verified) return fill(h.stale ? s.memoryStale : s.memoryVerified, { backend });
+    return fill(s.memoryOk, { backend });
+  }
+  return h.reason ? fill(s.memorySkipReason, { backend, reason: h.reason }) : fill(s.memorySkip, { backend });
 }
 
 // ── ordered step functions — injectable deps seam (design §1.1) ─────────────
@@ -273,35 +306,70 @@ function boundGatedSpawn(deps) {
 }
 
 /**
- * Step 2 — hydrate local engram from `.memory/` via the allowlisted
- * `memory/cli.mjs import` (REQ-4). Local-only: gated by `assertLocalArgv`.
+ * Step 2 — hydrate the ACTIVE memory backend from `.memory/records/` through the backend-owned
+ * `memory/cli.mjs hydrate --verify` (REQ-4, #1115). Local-only: gated by `assertLocalArgv`.
  *
- * #923 (acceptance A): a non-zero exit or a thrown exception used to
- * collapse to a bare `{ok:false}` — the failure CAUSE (stderr, exit code, or
- * the caught exception's own message) is now preserved on the return shape,
- * so the printed context block can say WHY hydration failed, not just THAT
- * it did. This is additive to the contract, never fatal: `runSessionStart()`
- * still always resolves `exitCode: 0` regardless of what this step reports.
+ * `--verify` is the read-only form (ruling Q1): session-start is read-only and `.memory/index.jsonl`
+ * is tracked, so on plainfiles the verb only CHECKS the derived index and reports drift; the rebuild
+ * is `post-merge`'s. Engram's import projects into the engram store, not the tracked tree, and runs
+ * as it always did here. This function names no backend op and branches on no backend name: the
+ * backend is whatever the one resolver (`memory/lib/backend-resolve.mjs`) says is declared, and every
+ * outcome renders the same way for every backend.
  *
- * @returns {{ ok: true } | { ok: false, reason: string }}
+ * Outcomes (all non-fatal — `runSessionStart()` always resolves `exitCode: 0`):
+ *   - exit 0               → `{ ok: true, backend }`, plus `{ verified, stale }` when the CLI's stdout
+ *                            line says the form that ran was a verification.
+ *   - exit 6 (`EXIT_DEFERRED`, ruling Q4) → `{ ok: false, deferred: true, backend, reason }`.
+ *   - exit 3 / 4           → the declaration refusal (#1165): `{ ok: false, undeclared: true, reason }`.
+ *   - anything else        → `{ ok: false, backend, reason }` (#923: the cause is kept).
+ *
+ * @returns {{ ok: boolean, backend: string|null, verified?: true, stale?: boolean,
+ *             deferred?: true, undeclared?: true, reason?: string }}
  */
-export function step2HydrateEngram(cwd, deps = {}) {
+export function step2Hydrate(cwd, deps = {}) {
+  let backend = null;
+  try {
+    const resolved = (deps._resolveBackend ?? (() => resolveMemoryBackend({ root: cwd })))(cwd);
+    if (resolved?.status === 'declared' && typeof resolved.backend === 'string') backend = resolved.backend;
+  } catch { /* the name is cosmetic: an unresolvable backend renders as "unknown backend", never breaks the step */ }
   try {
     const spawn = boundGatedSpawn(deps);
     const cmd = process.execPath;
-    const args = ['brain/scripts/memory/cli.mjs', 'import'];
+    const args = ['brain/scripts/memory/cli.mjs', 'hydrate', HYDRATE_READONLY_FLAG];
     const r = spawn(cmd, args, { cwd, encoding: 'utf8' });
-    if (Boolean(r) && r.status === 0) return { ok: true };
-    // The declaration refusal (#1165) — nothing was tried, so it is NOT "engram unavailable".
+    const line = lastJsonLine(r?.stdout);
+    if (Boolean(r) && r.status === 0) {
+      return line?.hydrate === 'verified'
+        ? { ok: true, backend, verified: true, stale: line.stale === true }
+        : { ok: true, backend };
+    }
+    // The declaration refusal (#1165) — nothing was tried, so it is NOT an outage of any backend.
     if (r?.status === EXIT_UNDECLARED || r?.status === EXIT_INVALID) {
-      return { ok: false, undeclared: true, reason: `memory backend ${r.status === EXIT_INVALID ? 'invalid' : 'not declared'} — ${DECLARE_FIX}` };
+      return { ok: false, undeclared: true, backend: null, reason: `memory backend ${r.status === EXIT_INVALID ? 'invalid' : 'not declared'} — ${DECLARE_FIX}` };
     }
     const stderr = typeof r?.stderr === 'string' ? r.stderr.trim() : '';
+    if (r?.status === EXIT_DEFERRED) {
+      const reason = (typeof line?.reason === 'string' && line.reason) || stderr || 'deferred';
+      return { ok: false, deferred: true, backend, reason };
+    }
     const reason = stderr || `exited ${r?.status ?? 'unknown'}`;
-    return { ok: false, reason };
+    return { ok: false, backend, reason };
   } catch (err) {
-    return { ok: false, reason: err?.message ?? String(err) };
+    return { ok: false, backend, reason: err?.message ?? String(err) };
   }
+}
+
+/** The last stdout line that parses as a JSON object, or null. The CLI prints one such line for a verified or deferred hydration. */
+function lastJsonLine(stdout) {
+  if (typeof stdout !== 'string') return null;
+  const lines = stdout.split('\n').map((l) => l.trim()).filter((l) => l.startsWith('{'));
+  for (let i = lines.length - 1; i >= 0; i--) {
+    try {
+      const parsed = JSON.parse(lines[i]);
+      if (parsed !== null && typeof parsed === 'object') return parsed;
+    } catch { /* not ours — keep looking */ }
+  }
+  return null;
 }
 
 /**
@@ -398,6 +466,70 @@ export function step4bMemoryRecency(cwd, deps = {}) {
 }
 
 /**
+ * Step 4c — the durable-records context (#1115, REQ-1115-7; rulings 5 and Q3).
+ *
+ * Reads `.memory/records/*.jsonl` DIRECTLY — no backend, no spawn, so the no-network invariant (REQ-2)
+ * holds and the context is the same for every backend. Shown for engram consumers too: branching on
+ * the backend name here is exactly the axis leak the axis-port guard flags. The richer,
+ * backend-provided context is follow-up #1350.
+ *
+ * Records are deduplicated by `id` (a `merge=union` pull mints repeated lines). The title is the first
+ * non-empty line of `content`, `**` stripped, cut at 80 characters. `scoped` is the records whose
+ * `issue === N`, newest first, at most 5; `scopedCount` is how many exist.
+ *
+ * An unreadable, absent or EMPTY store is `count: null` — "unknown", never `0` (the
+ * `evidence-reader-empty-on-failure` class). The loop deliberately duplicates step4b's tolerant read
+ * rather than importing `memory/lib/store.mjs`, which would widen this module's import graph for a
+ * 20-line loop; #1350 replaces both with the backend's payload.
+ *
+ * @param {string} cwd
+ * @param {{ issue: number|null }} ctx
+ * @returns {{ count: number|null, newest: {ts: string, title: string}|null,
+ *             scoped: Array<{ts: string, title: string}>, scopedCount: number }}
+ */
+export function step4cMemoryRecords(cwd, { issue = null } = {}, deps = {}) {
+  const none = { count: null, newest: null, scoped: [], scopedCount: 0 };
+  try {
+    if (deps._records) return deps._records(cwd, { issue });
+    const dir = join(cwd, '.memory', 'records');
+    if (!existsSync(dir)) return none;
+    /** @type {Map<string, {ts: string, title: string, issue: unknown, ms: number}>} */
+    const byId = new Map();
+    for (const name of readdirSync(dir)) {
+      if (!name.endsWith('.jsonl')) continue;
+      for (const line of readFileSync(join(dir, name), 'utf8').split('\n')) {
+        if (!line.trim()) continue;
+        let rec;
+        try { rec = JSON.parse(line); } catch { continue; }
+        if (!rec || typeof rec.id !== 'string' || typeof rec.ts !== 'string' || byId.has(rec.id)) continue;
+        const ms = Date.parse(rec.ts);
+        if (!Number.isFinite(ms)) continue;
+        byId.set(rec.id, { ts: rec.ts, title: recordTitle(rec.content), issue: rec.issue, ms });
+      }
+    }
+    if (byId.size === 0) return none;
+    const newestFirst = [...byId.values()].sort((a, b) => b.ms - a.ms);
+    const scopedAll = issue === null ? [] : newestFirst.filter((r) => r.issue === issue);
+    const slim = ({ ts, title }) => ({ ts, title });
+    return {
+      count: byId.size,
+      newest: slim(newestFirst[0]),
+      scoped: scopedAll.slice(0, 5).map(slim),
+      scopedCount: scopedAll.length,
+    };
+  } catch {
+    return none;
+  }
+}
+
+/** First non-empty line of `content`, with the bold markers stripped, at most 80 characters. */
+function recordTitle(content) {
+  const first = String(content ?? '').split('\n').map((l) => l.trim()).find((l) => l !== '') ?? '';
+  const clean = first.replaceAll('**', '').trim();
+  return clean.length > 80 ? `${clean.slice(0, 79)}…` : clean;
+}
+
+/**
  * Step 5 — synthesize targeted agent context floor + ADRs (REQ-CTX-4).
  * @returns {Promise<{ coreFloor: string[], matchedDecisions: string[], markdown: string }>}
  */
@@ -427,8 +559,8 @@ export async function step5SynthesizeContext(cwd, deps = {}) {
 // ── runSessionStart — top-level orchestrator (design §1.1) ──────────────────
 
 /**
- * Runs the full brain:session:start loop in order: hydrate engram → resolve
- * branch/change → load ticket memory → render.
+ * Runs the full brain:session:start loop in order: hydrate (verify) the active
+ * backend → resolve branch/change → load ticket memory → records context → render.
  *
  * ALWAYS resolves with `exitCode: 0`. brain:session:start is a best-effort
  * context loader — a missing engram, a non-git dir, or an ambiguous branch must
@@ -454,11 +586,16 @@ export async function step5SynthesizeContext(cwd, deps = {}) {
  * @returns {Promise<{ exitCode: 0, output: string }>}
  */
 export async function runSessionStart(cwd, deps = {}, strings) {
-  const engram = step2HydrateEngram(cwd, deps);
+  const hydration = step2Hydrate(cwd, deps);
   const change = step3ResolveChange(cwd, deps);
   const ticket = step4LoadTicketMemory(cwd, deps);
   const recency = step4bMemoryRecency(cwd, deps);
-  const output = renderContextBlock({ engram, change, ticket, recency }, strings);
+  // The issue for the records context: only when exactly one change folder resolves. Zero or several
+  // is "no issue", never a guess.
+  const iid = change.matches.length === 1 ? Number(parseChangeId(change.matches[0])?.iid) : NaN;
+  const issue = Number.isInteger(iid) ? iid : null;
+  const records = { ...step4cMemoryRecords(cwd, { issue }, deps), issue };
+  const output = renderContextBlock({ hydration, change, ticket, recency, records }, strings);
   return { exitCode: 0, output };
 }
 
@@ -483,6 +620,15 @@ const SESSION_I18N_KEYS = {
   memorySkip:       'session.memory.skip',
   memorySkipReason: 'session.memory.skip.reason',
   memoryNotDeclared: 'session.memory.notDeclared',
+  memoryDeferred:   'session.memory.deferred',
+  memoryVerified:   'session.memory.verified',
+  memoryStale:      'session.memory.stale',
+  backendUnknown:   'session.memory.backend.unknown',
+  memoryRecords:    'session.memory.records',
+  memoryRecordsUnknown: 'session.memory.records.unknown',
+  memoryIssue:      'session.memory.issue',
+  memoryIssueItem:  'session.memory.issue.item',
+  memoryIssueNone:  'session.memory.issue.none',
   memoryRecencyStale:   'session.memory.recency.stale',
   memoryRecencyUnknown: 'session.memory.recency.unknown',
   ticketLabel:      'session.ticket.label',

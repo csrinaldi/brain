@@ -23,3 +23,12 @@ Rulings Q1-Q4 (2026-10-05) are folded into spec/design/tasks first (commit `docs
 |---|---|---|
 | 3.1 `hooks/post-merge.op.test.mjs` (stub `node` argv log; stub exiting 6) | 3 of 5 failed (`hydrate` never called; exit-6 case; undeclared message pin renamed to "memory hydration skipped") | `hooks/*.test.mjs` 70/70 after the hook change and the stream-discipline pin `import` → `hydrate` |
 | Q4 | the hook exits 0 on 6, the reason reaches stderr, and `resolve-index` still runs (asserted) | green |
+
+## T4 — session-start (verify-only hydration, backend named, records context)
+| step | RED | GREEN |
+|---|---|---|
+| 4.1-4.2, 4.4 `session-start.test.mjs` (step2Hydrate, argv gate, banners, step4cMemoryRecords, exit-6 non-fatal) | `SyntaxError: ... does not provide an export named 'step2Hydrate'` (whole file failed to load) | 88/88 |
+| deferred reason on stdout (`cli.hydrate.test.mjs`) | 1 of 11 failed (no `{"hydrate":"deferred","reason"}` line) | 11/11 |
+| 4.7 `no-artifact.parity.test.mjs` | 2 of 12 failed (spawn argv `import` vs `hydrate --verify`; plainfiles leg) | 12/12 |
+
+The Q4 condition is proven in session-start by `runSessionStart: a deferred hydration (exit 6) renders the deferred line and STILL resolves exitCode 0`.
