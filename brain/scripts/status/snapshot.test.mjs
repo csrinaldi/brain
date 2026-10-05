@@ -758,3 +758,55 @@ test('#1199 R1199-6: the text mode prints a hierarchy line', async () => {
   const s = await buildSnapshot({ root: makeFixture(), now: NOW, vcs: port, project: 'o/r' });
   assert.match(renderSnapshotText(s), /^hierarchy +1 issue\(s\), 0 divergence\(s\)$/m);
 });
+
+// ── #1284 D94: lastCommit on every change row, from ONE git log ─────────────
+
+const REC = (iso, author, ...paths) => `\x1e${iso}\x1f${author}\n\n${paths.join('\n')}\n`;
+const logRun = (out) => { const calls = []; const run = (file, args) => { calls.push([file, ...args]); if (out instanceof Error) throw out; return out; }; run.calls = calls; return run; };
+
+test('#1284 D94: one git log names the newest commit per active change dir; archived rows keep the shape', () => {
+  const root = makeFixture();
+  const run = logRun(REC('2026-10-03T10:00:00+00:00', 'ana', 'openspec/changes/issue-2-no-tasks/proposal.md') + REC('2026-09-01T10:00:00+00:00', 'bo', 'openspec/changes/issue-2-no-tasks/old.md', 'openspec/changes/issue-1-a/tasks.md'));
+  const c = readChanges({ root, tier: 'lite', _run: run });
+  assert.equal(run.calls.length, 1, 'ONE git call for every active dir');
+  const [file, ...args] = run.calls[0];
+  assert.equal(file, 'git');
+  assert.deepEqual(args.slice(0, 5), ['log', '--no-renames', '--format=%x1e%cI%x1f%an', '--name-only', '--']);
+  assert.deepEqual(args.slice(5), ['openspec/changes/issue-1-a', 'openspec/changes/issue-2-no-tasks']);
+  const byId = Object.fromEntries(c.value.map((x) => [x.id, x]));
+  assert.deepEqual(byId['issue-2-no-tasks'].lastCommit, { ok: true, at: '2026-10-03T10:00:00+00:00', author: 'ana' }, 'the first (newest) record wins');
+  assert.deepEqual(byId['issue-1-a'].lastCommit, { ok: true, at: '2026-09-01T10:00:00+00:00', author: 'bo' });
+  const archived = c.value.filter((x) => x.archived);
+  assert.ok(archived.length > 0);
+  for (const a of archived) assert.deepEqual(a.lastCommit, { ok: false, reason: 'not read for archived dirs' });
+});
+
+test('#1284 D94: an untracked dir says no commit touches it; a throwing log degrades every active row', () => {
+  const root = makeFixture();
+  const untracked = readChanges({ root, tier: 'lite', _run: logRun(REC('2026-10-03T10:00:00+00:00', 'ana', 'openspec/changes/issue-1-a/x.md')) });
+  const two = untracked.value.find((x) => x.id === 'issue-2-no-tasks');
+  assert.deepEqual(two.lastCommit, { ok: false, reason: 'no commit touches openspec/changes/issue-2-no-tasks on the served tree' });
+  const broke = readChanges({ root, tier: 'lite', _run: logRun(new Error('fatal: not a git repository\nsecond line')) });
+  for (const x of broke.value.filter((r) => !r.archived)) assert.deepEqual(x.lastCommit, { ok: false, reason: 'the change-dir log could not be read: fatal: not a git repository' });
+});
+
+test('#1284 D94: zero active dirs make no git call', () => {
+  const run = logRun('');
+  const c = readChanges({ root: '/nowhere', tier: 'lite', _run: run, _list: () => [], _exists: () => false });
+  assert.equal(c.ok, true);
+  assert.equal(run.calls.length, 0);
+});
+
+test('#1284 D94: buildSnapshot passes its own run to readChanges (no second git seam)', async () => {
+  const calls = [];
+  const s = await buildSnapshot({ root: makeFixture(), now: NOW, _run: (f, a) => { calls.push(a); return ''; } });
+  assert.ok(calls.some((a) => a[0] === 'log' && a.includes('--no-renames')));
+  assert.equal(s.changes.value.find((x) => x.id === 'issue-1-a').lastCommit.ok, false);
+});
+
+test('#1284: the CLI text mode ignores lastCommit (additive field, no new output)', async () => {
+  const run = (f, a) => (a[0] === 'log' && a.includes('--no-renames') ? REC('2026-10-03T10:00:00+00:00', 'zelda-author', 'openspec/changes/issue-1-a/tasks.md') : '');
+  const s = await buildSnapshot({ root: makeFixture(), now: NOW, _run: run });
+  assert.equal(s.changes.value.find((x) => x.id === 'issue-1-a').lastCommit.author, 'zelda-author');
+  assert.doesNotMatch(renderSnapshotText(s), /zelda-author|2026-10-03T10/);
+});
