@@ -11,9 +11,9 @@
 //   3. an open `blockedBy` — the blocked mark, overrides the state colour.
 //   4. `node.status === 'awaiting-human'` — the RFC's awaiting-review mark.
 //   5. otherwise, `roadmap.value.state` (`planned` / `in-flight` / `done`).
-// `node.status === 'unclassified'` (no declaring source at all) gets its
-// own mark rather than falling through to a roadmap state that describes a
-// node nothing ever placed.
+// `node.status === 'unclassified'` (no declaring source at all) is no longer a
+// state (#1308): it reads its lifecycle like every node, and the missing
+// declaration is the track chip's warning (`trackMarkOf`), a different fact.
 
 import { stateOf, STATES } from './state-vocab.mjs';
 

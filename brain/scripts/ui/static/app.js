@@ -62,8 +62,8 @@ import { buildRoadmapModel } from './lib/roadmap-model.mjs';
 import { buildDecisionsModel } from './lib/decisions-model.mjs';
 import { buildAntiPatternsModel } from './lib/anti-patterns-model.mjs';
 import { buildHeaderModel } from './lib/header-model.mjs';
-import { buildInflight } from './lib/inflight-model.mjs';
-import { STATES } from './lib/state-vocab.mjs';
+import { buildInflight, workIndex } from './lib/inflight-model.mjs';
+import { STATES, TRACK_MARKS } from './lib/state-vocab.mjs';
 import { buildHistoryModel, capNote } from './lib/history-model.mjs';
 import { buildActorsModel } from './lib/actors-model.mjs';
 import { sourceStamp } from './lib/provenance.mjs';
@@ -604,6 +604,37 @@ function renderInflightRow(row) {
 }
 
 /**
+ * The work-evidence index every lifecycle chip reads (#1308 D123): the SAME join the "In flight" section
+ * draws from, built once per call from whatever sections have arrived, so a card can never disagree with
+ * the section above it.
+ */
+function currentWork() {
+  return workIndex({
+    changes: sectionOf(state, 'changes'), localWorktrees: sectionOf(state, 'localWorktrees'),
+    remoteChanges: sectionOf(state, 'remoteChanges'), prs: sectionOf(state, 'prs'),
+  });
+}
+
+/** The lifecycle chip: mark + word, nothing about the track (#1308 R1308-1). */
+function stateChipEl(stateView) {
+  const chip = el('span', `node-state state-${stateView.code}`);
+  chip.appendChild(el('span', 'node-state-mark', stateView.mark));
+  chip.appendChild(el('span', 'node-state-word', stateView.label));
+  if (stateView.reason) chip.setAttribute('title', stateView.reason);
+  return chip;
+}
+
+/** The track chip: `Track X`, `? No track`, or the missing-configuration warning; nothing for an unreadable body (#1308 R1308-2). */
+function trackChipEl(trackMark) {
+  if (!trackMark) return null;
+  const chip = el('span', `track-chip ${trackMark.className}`);
+  if (trackMark.mark) chip.appendChild(el('span', 'track-chip-mark', trackMark.mark));
+  chip.appendChild(el('span', 'track-chip-word', trackMark.label));
+  if (trackMark.warning) chip.setAttribute('title', 'this issue has no brain-graph/1 block: configuration missing');
+  return chip;
+}
+
+/**
  * The home's first section (#1284 R-H): the open issues with work in flight, newest first, from
  * whatever sections have arrived. Every missing source is named; "nothing in flight" is said only
  * when every source is ready (`inflight-model.mjs` decides, this places).
@@ -639,7 +670,7 @@ function renderInflight() {
  * into elements.
  */
 function renderLanes() {
-  const model = buildLaneModel(sectionOf(state, 'graph'), { collapsedTracks, holdingPage, project: state.meta?.project ?? null, clustering });
+  const model = buildLaneModel(sectionOf(state, 'graph'), { collapsedTracks, holdingPage, project: state.meta?.project ?? null, clustering, work: currentWork() });
   clear(mounts.canvas);
   mounts.canvas.appendChild(renderInflight());
   if (!model.ok) {
@@ -746,12 +777,10 @@ function renderEpicClusters(grouping) {
     // going. The chip is built from the same `state` words every card uses.
     const head = el('div', 'epic-head');
     head.appendChild(el('span', 'epic-number', `#${epic.number}`));
-    const chip = el('span', `node-state state-${epic.state.code}`);
-    chip.appendChild(el('span', 'node-state-mark', epic.state.mark));
-    chip.appendChild(el('span', 'node-state-word', epic.state.label));
-    head.appendChild(chip);
+    head.appendChild(stateChipEl(epic.state));
     head.appendChild(el('h3', 'epic-title', epic.title || '(no title)'));
-    if (epic.track) head.appendChild(el('span', 'epic-track', epic.track));
+    const epicTrack = trackChipEl(epic.trackMark);
+    if (epicTrack) head.appendChild(epicTrack);
     head.appendChild(el('span', 'epic-count', rollupLabel(epicRollup(sectionOf(state, 'hierarchy'), sectionOf(state, 'forgeLoad'), epic.number))));
     cluster.appendChild(head);
     for (const mark of epic.marks) cluster.appendChild(said(mark));
@@ -843,12 +872,25 @@ function renderClusteringBar() {
 
   const legend = el('div', 'legend');
   legend.appendChild(el('span', 'legend-label', 'legend'));
+  // Two groups, each built from its own table in state-vocab.mjs (#1308 R1308-7): lifecycle, then track.
+  const stateGroup = el('span', 'legend-group legend-states');
+  stateGroup.appendChild(el('span', 'legend-group-label', 'state'));
   for (const state of Object.values(STATES)) {
     const item = el('span', `legend-item state-${state.code}`);
     item.appendChild(el('span', 'legend-mark', state.mark));
     item.appendChild(el('span', 'legend-word', state.label));
-    legend.appendChild(item);
+    stateGroup.appendChild(item);
   }
+  legend.appendChild(stateGroup);
+  const trackGroup = el('span', 'legend-group legend-tracks');
+  trackGroup.appendChild(el('span', 'legend-group-label', 'track'));
+  for (const mark of Object.values(TRACK_MARKS)) {
+    const item = el('span', `legend-item ${mark.className}`);
+    if (mark.mark) item.appendChild(el('span', 'legend-mark', mark.mark));
+    item.appendChild(el('span', 'legend-word', mark.label ?? 'Track <id>'));
+    trackGroup.appendChild(item);
+  }
+  legend.appendChild(trackGroup);
   bar.appendChild(legend);
   return bar;
 }
@@ -945,10 +987,9 @@ function renderNodeCard(node) {
 
   const head = el('div', 'node-card-head');
   head.appendChild(el('span', 'node-number', `#${node.number}`));
-  const chip = el('span', `node-state state-${node.state.code}`);
-  chip.appendChild(el('span', 'node-state-mark', node.state.mark));
-  chip.appendChild(el('span', 'node-state-word', node.state.label));
-  head.appendChild(chip);
+  head.appendChild(stateChipEl(node.state));
+  const cardTrack = trackChipEl(node.trackMark);
+  if (cardTrack) head.appendChild(cardTrack);
   card.appendChild(head);
 
   card.appendChild(el('h4', 'node-title', node.title || '(no title)'));
@@ -1030,7 +1071,11 @@ function renderHoldingLane(holding) {
     const tile = el('div', 'batch-tile');
     tile.setAttribute('role', 'button');
     tile.setAttribute('tabindex', '0');
+    tile.setAttribute('data-issue', String(node.number));
     tile.appendChild(el('span', 'batch-tile-number', `#${node.number}`));
+    tile.appendChild(stateChipEl(node.state));
+    const tileTrack = trackChipEl(node.trackMark);
+    if (tileTrack) tile.appendChild(tileTrack);
     tile.appendChild(el('p', 'batch-tile-title', node.title || '(no title)'));
     tile.addEventListener('click', () => selectNode(node.number));
     tile.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') selectNode(node.number); });
@@ -1363,7 +1408,7 @@ function renderGovernance() {
  * divergences; this renders one loop over rows this page never re-derives.
  */
 function renderRoadmap() {
-  const model = buildRoadmapModel(sectionOf(state, 'graph'), { project: state.meta?.project ?? null });
+  const model = buildRoadmapModel(sectionOf(state, 'graph'), { project: state.meta?.project ?? null, work: currentWork() });
   if (!model.ok) {
     mounts.canvas.appendChild(saidUnavailable('the roadmap could not be computed', model, 'graph'));
     return;
@@ -1740,16 +1785,14 @@ function buildDrawer() {
   // link to the issue on the forge, and the close control — all from the same
   // model the card used, so the panel never contradicts what was clicked.
   const head = el('div', 'drawer-head');
-  const summary = nodeSummaryFor(sectionOf(state, 'graph'), selectedIssue);
+  const summary = nodeSummaryFor(sectionOf(state, 'graph'), selectedIssue, { work: currentWork() });
 
   const idLine = el('div', 'drawer-id');
   idLine.appendChild(el('span', 'drawer-number', `#${selectedIssue}`));
   if (summary.ok) {
-    const chip = el('span', `node-state state-${summary.value.state.code}`);
-    chip.appendChild(el('span', 'node-state-mark', summary.value.state.mark));
-    chip.appendChild(el('span', 'node-state-word', summary.value.state.label));
-    idLine.appendChild(chip);
-    if (summary.value.track) idLine.appendChild(el('span', 'drawer-track', `track ${summary.value.track}`));
+    idLine.appendChild(stateChipEl(summary.value.state));
+    const drawerTrack = trackChipEl(summary.value.trackMark);
+    if (drawerTrack) idLine.appendChild(drawerTrack);
   }
   const project = state.meta?.project ?? null;
   if (project) {
@@ -1773,6 +1816,7 @@ function buildDrawer() {
   if (summary.ok) {
     if (summary.value.title) body.appendChild(el('h2', 'drawer-title', summary.value.title));
     for (const mark of summary.value.marks) body.appendChild(said(mark));
+    if (summary.value.declare) body.appendChild(renderDeclareBlock(summary.value.declare));
     if (summary.value.blockedBy.length > 0) {
       body.appendChild(el('p', 'drawer-blocked', `blocked by ${summary.value.blockedBy.map((n) => `#${n}`).join(', ')}`));
     }
@@ -1874,9 +1918,19 @@ function renderRemoteBlocks({ remote, remoteNote }) {
  * shows. A node nobody declares says so — "no ticket names this as its
  * parent" is a fact about the declarations, not a failure to read them.
  */
+function renderDeclareBlock(declare) {
+  const wrap = el('div', 'declare-block');
+  wrap.appendChild(el('span', 'declare-label', 'this issue is missing its brain-graph/1 configuration — paste in the issue body'));
+  wrap.appendChild(el('code', null, declare.snippet));
+  wrap.appendChild(el('p', 'declare-note', declare.note));
+  // #1335 fills `declareCommand` with the provider-agnostic `brain:ticket:declare`; a command that does not exist is never drawn.
+  if (declare.declareCommand) wrap.appendChild(el('code', 'declare-command', declare.declareCommand));
+  return wrap;
+}
+
 function renderChildren(issue) {
   const wrap = el('div', 'drawer-children');
-  const found = childrenOf(sectionOf(state, 'graph'), sectionOf(state, 'hierarchy'), issue);
+  const found = childrenOf(sectionOf(state, 'graph'), sectionOf(state, 'hierarchy'), issue, { work: currentWork() });
   if (!found.ok) {
     wrap.appendChild(said(found.reason));
     return wrap;
@@ -1899,10 +1953,9 @@ function renderChildren(issue) {
     item.setAttribute('role', 'button');
     item.setAttribute('tabindex', '0');
     item.appendChild(el('span', 'child-number', `#${child.number}`));
-    const chip = el('span', `node-state state-${child.state.code}`);
-    chip.appendChild(el('span', 'node-state-mark', child.state.mark));
-    chip.appendChild(el('span', 'node-state-word', child.state.label));
-    item.appendChild(chip);
+    item.appendChild(stateChipEl(child.state));
+    const childTrack = trackChipEl(child.trackMark);
+    if (childTrack) item.appendChild(childTrack);
     item.appendChild(el('span', 'child-title', child.title || '(no title)'));
     item.addEventListener('click', () => selectNode(child.number));
     item.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') selectNode(child.number); });
@@ -2287,7 +2340,7 @@ async function loadChange(issue) {
  */
 function drawnNodes() {
   if (view !== 'map') return [];
-  const model = buildLaneModel(sectionOf(state, 'graph'), { collapsedTracks, holdingPage, project: state.meta?.project ?? null, clustering });
+  const model = buildLaneModel(sectionOf(state, 'graph'), { collapsedTracks, holdingPage, project: state.meta?.project ?? null, clustering, work: currentWork() });
   if (!model.ok) return [];
   const nodes = [];
   model.value.lanes.forEach((lane, laneIndex) => {

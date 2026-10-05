@@ -33,6 +33,17 @@ function missingSources(sections) {
   return out;
 }
 
+/**
+ * workIndex(sections) -> {missing, byIssue} — the SAME join `buildInflight` reads, for the chips (#1308 D123).
+ * `byIssue` maps an issue number to the entries of the four work sources that name it (any age: staleness is the
+ * section's grouping, not a state); `missing` is the four work sources that are not ready (`hierarchy` is not
+ * work evidence, so it is never listed here).
+ */
+export function workIndex(sections) {
+  const s = sections ?? {};
+  return { missing: missingSources(s).filter((m) => m.name !== 'hierarchy'), byIssue: collect(s) };
+}
+
 const noticeFor = (m) => (m.state === 'pending' ? `${m.name}: still loading` : `${m.name}: could not be read — ${m.reason}`);
 
 /** Every issue number one of the four sources names, with that source's entries. */

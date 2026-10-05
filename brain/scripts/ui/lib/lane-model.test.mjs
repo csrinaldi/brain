@@ -536,3 +536,70 @@ test('#1079: in epic clustering the `?` batch excludes what an epic already clai
     'the one it is not showing is stated — a batch that silently shrank would misreport how much of the graph declared no track');
   assert.equal(byEpic.value.holding.total, 3, 'the proportion is still of every open issue');
 });
+
+// ── #1308: two chips, one derivation ──────────────────────────────────────
+const NO_WORK = { missing: [], byIssue: new Map() };
+const WORK_ON = (...issues) => ({ missing: [], byIssue: new Map(issues.map((i) => [i, { issue: i, changes: [], worktrees: [{ leaf: 'w' }], branches: [], prs: [] }])) });
+const undeclaredNode = (number, over = {}) => node(number, { track: null, declared: false, status: 'unclassified', labels: ['status:approved'], roadmap: { ok: true, value: { state: 'planned' } }, ...over });
+const declaredNode = (number, over = {}) => node(number, { track: 'UI', declared: true, labels: ['status:approved'], ...over });
+
+test('R1308-6/S2: a card, a holding row, an epic row, the drawer header and the children list read ONE lifecycle state', () => {
+  const nodes = [
+    declaredNode(10, { kind: 'epic', tracker: null }),
+    undeclaredNode(1263, { parent: 10, parentSource: 'prose' }),
+    declaredNode(20, { parent: 10 }),
+  ];
+  const g = graph({ nodes });
+  const work = WORK_ON(10, 1263, 20);
+  const model = buildLaneModel(g, { work, clustering: 'epic', collapsedTracks: new Set() }).value;
+  const card = model.lanes.flatMap((l) => l.nodes).find((n) => n.number === 20);
+  const holding = model.holding.nodes.find((n) => n.number === 1263) ?? model.holding.boardNodes.find((n) => n.number === 1263);
+  const epic = model.epicGrouping.value.epics.find((e) => e.number === 10);
+  const child = epic.children.find((c) => c.number === 1263);
+  const summary = nodeSummaryFor(g, 1263, { work }).value;
+  const kids = childrenOf(g, { ok: true, value: { issues: [[10, { state: 'open', children: [1263, 20] }]] } }, 10, { work }).value;
+  for (const s of [card.state, child.state, summary.state, kids.find((k) => k.number === 1263).state, epic.state]) assert.equal(s.code, 'in-flight');
+  assert.equal(holding?.state.code ?? 'in-flight', 'in-flight');
+});
+
+test('R1308-1/R1308-2: every row shape carries its own trackMark and the `? track` mark is gone', () => {
+  const g = graph({ nodes: [declaredNode(1), declaredNode(2, { track: null }), undeclaredNode(3)] });
+  const model = buildLaneModel(g, { work: NO_WORK, collapsedTracks: new Set() }).value;
+  assert.equal(model.lanes[0].nodes[0].trackMark.label, 'Track UI');
+  const [noTrack, undecl] = model.holding.nodes;
+  assert.equal(noTrack.trackMark.label, 'No track');
+  assert.equal(undecl.trackMark.code, 'undeclared');
+  assert.equal(undecl.trackMark.warning, true);
+  for (const row of [...model.lanes[0].nodes, ...model.holding.nodes, ...model.holding.boardNodes]) {
+    assert.ok(!row.marks.includes('? track'), 'the chip says it');
+  }
+  assert.equal(nodeSummaryFor(g, 3, { work: NO_WORK }).value.trackMark.code, 'undeclared');
+  assert.equal(childrenOf(g, { ok: true, value: { issues: [[9, { state: 'open', children: [3] }]] } }, 9, { work: NO_WORK }).value[0].trackMark.code, 'undeclared');
+});
+
+test('R1308-5: a Not computed state travels with its reason as a said mark', () => {
+  const work = { missing: [{ name: 'prs', state: 'pending', reason: 'loading' }], byIssue: new Map() };
+  const { marks, state } = buildLaneModel(graph({ nodes: [declaredNode(1)] }), { work }).value.lanes[0].nodes[0];
+  assert.equal(state.code, 'not-computed');
+  assert.ok(marks.some((m) => /prs/.test(m)), 'the reason names the missing source');
+});
+
+test('R1308-7/S9: each lane\'s state codes sum to its node count and are lifecycle codes only', () => {
+  const nodes = [declaredNode(1), declaredNode(2, { blockedBy: [9] }), declaredNode(3), undeclaredNode(4)];
+  const model = buildLaneModel(graph({ nodes }), { work: WORK_ON(1) }).value;
+  const codes = model.lanes[0].nodes.map((n) => n.state.code).sort();
+  assert.deepEqual(codes, ['blocked', 'in-flight', 'planned']);
+  assert.ok(![...codes, ...model.holding.nodes.map((n) => n.state.code)].includes('unclassified'));
+});
+
+test('R1308-10/S13: the drawer of an undeclared node carries the paste block with its parent prefilled and NO command; a declared node carries none', () => {
+  const g = graph({ nodes: [undeclaredNode(1263, { parent: 878, parentSource: 'prose' }), undeclaredNode(1264), declaredNode(7)] });
+  const { declare } = nodeSummaryFor(g, 1263, { work: NO_WORK }).value;
+  assert.match(declare.snippet, /^```brain-graph\/1/);
+  assert.match(declare.snippet, /parent: 878/);
+  assert.match(declare.note, /keep the lines that are true/);
+  assert.equal(declare.declareCommand, null, '#1335 has not shipped `brain:ticket:declare` — a command that does not exist is never shown');
+  assert.match(nodeSummaryFor(g, 1264, { work: NO_WORK }).value.declare.snippet, /track: A/, 'no parent known: the generic example, with its note');
+  assert.equal(nodeSummaryFor(g, 7, { work: NO_WORK }).value.declare, null);
+  assert.equal(nodeSummaryFor(graph({ nodes: [undeclaredNode(5, { status: 'unreadable' })] }), 5, { work: NO_WORK }).value.declare, null, 'an unreadable body is unknown, not missing');
+});
