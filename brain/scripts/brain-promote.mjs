@@ -62,8 +62,6 @@ import {
   spliceMigrationEntry,
 } from './lib/migration-draft.mjs';
 import { migrateConfig } from './lib/installer.mjs';
-import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { pathToFileURL } from 'node:url';
 import { checkShippedContent } from './lib/promote-guards.mjs';
 
@@ -632,12 +630,14 @@ async function planMigrationPromotion({ root, draftPath, draftText }) {
   if (spliced.refusal) return { ok: false, lines: [`✗ ${spliced.refusal}`] };
 
   // D3 — the proof, BEFORE the plan. The candidate must import and migrate.
-  // The proof dir dies with the proof (#842): the module is already loaded
-  // when the finally runs, so removal is safe on every path.
-  let proofDir = null;
+  // It is written BESIDE the real file (#1344): config-migrations.mjs imports
+  // ../scripts/lib/axis-migration-context.mjs, and a relative import resolves
+  // against the importing file, so a tmpdir candidate would fail to import. The
+  // proof file dies with the proof (#842): the module is already loaded when the
+  // finally runs, so removal is safe on every path.
+  let proofPath = null;
   try {
-    proofDir = mkdtempSync(join(tmpdir(), 'brain-promote-proof-'));
-    const proofPath = join(proofDir, 'candidate.mjs');
+    proofPath = join(dirname(targetAbs), `.brain-promote-proof-${process.pid}-${Date.now()}.mjs`);
     writeFileSync(proofPath, spliced.next, 'utf8');
     const mod = await import(pathToFileURL(proofPath).href);
     const { applied } = migrateConfig({}, mod.migrations, version, null);
@@ -650,8 +650,8 @@ async function planMigrationPromotion({ root, draftPath, draftText }) {
       '  Nothing was written or staged. The current file is untouched.',
     ] };
   } finally {
-    if (proofDir !== null) {
-      try { rmSync(proofDir, { recursive: true, force: true }); } catch { /* best effort */ }
+    if (proofPath !== null) {
+      try { rmSync(proofPath, { force: true }); } catch { /* best effort */ }
     }
   }
 
