@@ -42,9 +42,9 @@ test('a 1.11.1 entry exists, is a migrate function, and sits above the shipped 1
   assert.match(ENTRY.description, /1114|ADR-0038/);
 });
 
-test('without a context the entry is a no-op (buildDefaultConfig and unaware callers are untouched)', () => {
+test('with an explicit null context the entry is a no-op (the env-blind opt-out; an ABSENT context builds its own since #1344)', () => {
   const cfg = { vcs: { provider: 'github' }, memory: { backend: 'engram' }, platform: 'plain' };
-  assert.deepEqual(ENTRY.migrate(structuredClone(cfg), { mergeDefaults }), cfg);
+  assert.deepEqual(ENTRY.migrate(structuredClone(cfg), { mergeDefaults, axisContext: null }), cfg);
 });
 
 // ── per-axis rules ──────────────────────────────────────────────────────────
@@ -201,9 +201,9 @@ test('migrateConfig hands the entry its context and returns the notices; the oth
   assert.equal(res.config.schemaVersion, VERSION);
   assert.equal(res.config.vcs.default, 'github');
   assert.ok(res.notices.length > 0);
-  const bare = migrateConfig({ schemaVersion: '1.9.1', vcs: { provider: 'github' } }, migrations, VERSION);
+  const bare = migrateConfig({ schemaVersion: '1.9.1', vcs: { provider: 'github' } }, migrations, VERSION, null);
   assert.deepEqual(bare.notices, []);
-  assert.equal(bare.config.vcs.default, undefined, 'no context, no migration: a caller that cannot read .env must not guess');
+  assert.equal(bare.config.vcs.default, undefined, 'null context, no migration: a caller that must not read .env says so explicitly (#1344)');
 });
 
 // ── validation after migrating, on fixtures ─────────────────────────────────

@@ -640,7 +640,7 @@ async function planMigrationPromotion({ root, draftPath, draftText }) {
     const proofPath = join(proofDir, 'candidate.mjs');
     writeFileSync(proofPath, spliced.next, 'utf8');
     const mod = await import(pathToFileURL(proofPath).href);
-    const { applied } = migrateConfig({}, mod.migrations, version);
+    const { applied } = migrateConfig({}, mod.migrations, version, null);
     if (!applied.includes(version)) {
       return { ok: false, lines: [`✗ the proof import succeeded but migrateConfig did not apply ${version} — the spliced entry is not reachable. Nothing was staged.`] };
     }

@@ -1536,7 +1536,8 @@ export function compareSemver(a, b) {
  * @param {string} targetVersion The brain version being installed.
  * @param {object} [axisContext]  What a migration needs from OUTSIDE the file (#1114 S3.2: the
  *   effective platform and sdd values, from env and `.env`). Handed to `migrate` as
- *   `helpers.axisContext`; a migration that needs it does nothing without it.
+ *   `helpers.axisContext`. `undefined` means the caller has none: the ADR-0038 migration then builds its own
+ *   (#1344, the older-upgrader case); `null` is the explicit env-blind opt-out and it does nothing.
  * @returns {{ config: object, applied: string[], notices: string[] }}  `notices` are the lines
  *   migrations asked to have shown (every value they wrote and where it came from).
  */
