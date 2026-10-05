@@ -508,3 +508,14 @@ test('no PR context at all (no shas / pr number) still takes the skip-warn', asy
   assert.equal(r.level, 'warn');
   assert.match(r.reason, /skipping/);
 });
+
+test('author unresolved + unreadable diff: follows the base tier — warns at lite, fails at standard, fails when the base is unreadable', async () => {
+  const noDiff = () => { throw new Error('git timeout'); };
+  const lite = await runTeamConfigReviewedCheck({ ...prCtxNoAuthor, diffNameOnly: noDiff, gitShow: stdBase('lite') });
+  assert.equal(lite.level, 'warn');
+  assert.match(lite.reason, /diff could not be read/);
+  const std = await runTeamConfigReviewedCheck({ ...prCtxNoAuthor, diffNameOnly: noDiff, gitShow: stdBase('standard') });
+  assert.equal(std.level, 'fail');
+  const unreadable = await runTeamConfigReviewedCheck({ ...prCtxNoAuthor, diffNameOnly: noDiff, gitShow: () => '{not json' });
+  assert.equal(unreadable.level, 'fail');
+});

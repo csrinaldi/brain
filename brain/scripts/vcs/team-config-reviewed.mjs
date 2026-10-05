@@ -278,7 +278,16 @@ export async function runTeamConfigReviewedCheck(deps = {}) {
     try {
       changedFiles = (deps.diffNameOnly ?? defaultDiffNameOnly(cwd))(baseSha, headSha);
     } catch (err) {
-      return { level: 'fail', reason: `team-config-reviewed: ${unresolved}, and the diff could not be read (${err.message}) — failing closed.` };
+      // Whether the team config is touched is unknown, so the base tier decides, as on the ordinary path:
+      // required fails closed, detection warns, and an unreadable base fails.
+      const tier = [deps.tier].find((t) => t && TIERS.includes(t)) ?? readableBaseTier(baseSha, deps, cwd);
+      const reason = `team-config-reviewed: ${unresolved}, and the diff could not be read (${err.message})`;
+      if (tier === undefined) return { level: 'fail', reason: `${reason}; team config on base unreadable — failing closed.` };
+      const required = resolveGatePolicy(GATE, tier) === 'required';
+      return {
+        level: required ? 'fail' : 'warn',
+        reason: reason + (required ? ` — failing closed: this gate is required at the "${tier}" tier.` : ` (detection at the "${tier}" tier).`),
+      };
     }
     if (!changedFiles.includes(TEAM_CONFIG_PATH)) {
       return { level: 'pass', reason: `team-config-reviewed: ${TEAM_CONFIG_PATH} is not touched; ${unresolved}, but nothing here depends on it.` };
