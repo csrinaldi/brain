@@ -372,3 +372,13 @@ test('resolveDetectionBody: no PR_BODY and no API body → null (never throws, n
   const result = resolveDetectionBody(ctx, { env: {} });
   assert.equal(result, null);
 });
+
+test('loadContext: a pull_request_review event is a merge-request context too (#1263 S4); an unrelated event is not', async () => {
+  const run = (GITHUB_EVENT_NAME) => loadContext({
+    env: { GITHUB_ACTIONS: 'true', PR_NUMBER: '193', BASE_SHA: 'a', HEAD_SHA: 'b', GITHUB_REPOSITORY: 'o/r', GITHUB_EVENT_NAME },
+    prView: async ({ number }) => ({ number, labels: [], body: '', author: 'alice' }),
+  });
+  assert.equal((await run('pull_request_review')).isMergeRequest, true);
+  assert.equal((await run('pull_request')).isMergeRequest, true);
+  assert.equal((await run('push')).isMergeRequest, false);
+});

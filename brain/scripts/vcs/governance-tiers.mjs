@@ -241,6 +241,15 @@ export const GATE_MATRIX = Object.freeze({
     standard: Object.freeze({ policy: 'required', evidence: 'declared-tracker' }),
     regulated: Object.freeze({ policy: 'required', evidence: 'declared-tracker' }),
   }),
+  // #1263 slice 4 (ADR-0040) — the owner gate over the TEAM config. `detection` at lite by proportionality: the
+  // solo maintainer at lite owns the config and is exempt (ADR-0037 mode A), and a team that declared no owner
+  // yet is told, not blocked. `required` at standard and regulated: a team config change needs an APPROVED review
+  // from a `governance.owners` login who is not the author. APPENDED AT THE END, mirroring GOVERNANCE_JOBS.
+  'team-config-reviewed': Object.freeze({
+    lite: Object.freeze({ policy: 'detection', evidence: 'owner-approval-or-solo-maintainer' }),
+    standard: Object.freeze({ policy: 'required', evidence: 'owner-approved-review' }),
+    regulated: Object.freeze({ policy: 'required', evidence: 'owner-approved-review' }),
+  }),
 });
 
 /**

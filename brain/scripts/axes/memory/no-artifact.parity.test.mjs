@@ -29,7 +29,7 @@ import { share as plainfilesShare, pull as plainfilesPull } from './adapters/pla
 import { share as engramShare, pullMemory as engramPullMemory, importMemory } from './adapters/engram.mjs';
 import { runSessionStart, resolveSessionStrings } from '../../session-start.mjs';
 
-const CLI_PATH = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'memory', 'cli.mjs');
+const CLI_PATH = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'memory', 'cli.mjs'); const MEMORY_TEST_CONFIG = join(dirname(CLI_PATH), '__fixtures__', 'brain.config.memory.json');
 
 /** Builds a fresh temp root with exactly one seeded record under `.memory/records/`. */
 function fixtureWithOneRecord(prefix) {
@@ -175,7 +175,7 @@ test('no-artifact parity: import — engram hydrates the one record from records
     const before = walkTree(root);
     const r = spawnSync(process.execPath, [CLI_PATH, 'import'], {
       encoding: 'utf8',
-      env: { ...process.env, MEMORY_BACKEND: 'plainfiles', BRAIN_MEMORY_TEST_ROOT: root },
+      env: { ...process.env, MEMORY_BACKEND: 'plainfiles', BRAIN_MEMORY_CONFIG_FILE: MEMORY_TEST_CONFIG, BRAIN_MEMORY_TEST_ROOT: root },
     });
     assert.equal(r.status, 1, `plainfiles import must refuse (D5); stdout:\n${r.stdout}\nstderr:\n${r.stderr}`);
     assert.match(r.stderr, /backend 'plainfiles' does not implement op 'import'/);

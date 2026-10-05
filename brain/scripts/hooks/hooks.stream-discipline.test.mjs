@@ -96,7 +96,7 @@ const SAFE_SYSTEM_PATH = '/usr/local/bin:/usr/bin:/bin';
 function runHook(name) {
   const bin = mockBin();
   return spawnSync('sh', [join(HOOKS_DIR, name)], {
-    env: { PATH: `${bin}:${SAFE_SYSTEM_PATH}`, HOME: process.env.HOME ?? '/tmp' },
+    env: { PATH: `${bin}:${SAFE_SYSTEM_PATH}`, HOME: process.env.HOME ?? '/tmp', BRAIN_HOME: process.env.BRAIN_HOME || '/nonexistent/brain-home' },
     encoding: 'utf8',
     timeout: 10000,
   });

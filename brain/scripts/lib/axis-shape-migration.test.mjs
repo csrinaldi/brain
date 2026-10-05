@@ -1,0 +1,356 @@
+// axis-shape-migration.test.mjs — #1114 S3.2: the 1.11.1 config migration to the ADR-0038 shape.
+//
+// Every consumer keeps running what it runs today (ADR-0038 section 7): the migration writes the
+// value each axis EFFECTIVELY resolves to, never a new choice, and reports where each value came
+// from. Pure tests over the migration entry; the only I/O is a temp dir for the parity rows.
+
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtempSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import { migrations, NEW_CONSUMER_DEFAULTS } from '../../core/config-migrations.mjs';
+import { migrateConfig, mergeDefaults } from './installer.mjs';
+import { validateAxisConfig, readAxis, resolveAxis, tryResolveAxis } from './axis-config.mjs';
+import { resolveAxisMigrationContext } from './axis-migration-context.mjs';
+import { LIFECYCLE_STAGES } from './sdd-layout.mjs';
+import { resolveProviderName } from '../vcs/cli.mjs';
+import { resolveMemoryBackend } from '../memory/lib/backend-resolve.mjs';
+import { parseEnvFile } from './env-read.mjs';
+
+const VERSION = '1.11.1';
+const ENTRY = migrations.find((m) => m.version === VERSION);
+const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+
+const ctx = (platform = 'claude', sdd = 'gentle-ai', src = "today's default") => ({
+  platform: { value: platform, source: src },
+  sdd: { value: sdd, source: src },
+  lifecycleStages: [...LIFECYCLE_STAGES],
+});
+/** Runs the entry alone, collecting its notices. */
+function run(config, axisContext = ctx()) {
+  const notices = [];
+  const out = ENTRY.migrate(structuredClone(config), { mergeDefaults, axisContext, notice: (l) => notices.push(l) });
+  return { out, notices };
+}
+
+test('a 1.11.1 entry exists, is a migrate function, and sits above the shipped 1.11.0', () => {
+  assert.ok(ENTRY, 'migrations must contain a 1.11.1 entry');
+  assert.equal(typeof ENTRY.migrate, 'function');
+  assert.match(ENTRY.description, /1114|ADR-0038/);
+});
+
+test('without a context the entry is a no-op (buildDefaultConfig and unaware callers are untouched)', () => {
+  const cfg = { vcs: { provider: 'github' }, memory: { backend: 'engram' }, platform: 'plain' };
+  assert.deepEqual(ENTRY.migrate(structuredClone(cfg), { mergeDefaults }), cfg);
+});
+
+// ── per-axis rules ──────────────────────────────────────────────────────────
+test('memory: backend becomes default + providers.<v>; lane and the legacy key stay', () => {
+  const { out } = run({ memory: { backend: 'engram', lane: { enabled: true } } });
+  assert.equal(out.memory.default, 'engram');
+  assert.deepEqual(out.memory.providers, { engram: {} });
+  assert.deepEqual(out.memory.lane, { enabled: true });
+  assert.equal(out.memory.backend, 'engram');
+});
+
+test('memory: undeclared stays default "" with providers {} (an empty key and an absent key alike)', () => {
+  for (const memory of [{ backend: '' }, undefined, {}]) {
+    const { out } = run(memory === undefined ? {} : { memory });
+    assert.equal(out.memory.default, '');
+    assert.deepEqual(out.memory.providers, {});
+  }
+});
+
+test('vcs: provider becomes default + providers.<v>; every other vcs key stays', () => {
+  const { out } = run({ vcs: { provider: 'gitlab', slug: 'a/b', gitHost: 'gitlab.example.com' } });
+  assert.equal(out.vcs.default, 'gitlab');
+  assert.deepEqual(out.vcs.providers, { gitlab: {} });
+  assert.equal(out.vcs.slug, 'a/b');
+  assert.equal(out.vcs.gitHost, 'gitlab.example.com');
+  assert.equal(out.vcs.provider, 'gitlab');
+});
+
+test('vcs: undeclared stays default ""', () => {
+  const { out } = run({ vcs: { provider: '' } });
+  assert.equal(out.vcs.default, '');
+  assert.deepEqual(out.vcs.providers, {});
+});
+
+test('platform and sdd take the value the context says they effectively run', () => {
+  const { out } = run({ platform: 'antigravity', engine: 'plain' }, ctx('antigravity', 'plain', 'brain.config.json platform'));
+  assert.equal(out.platform.default, 'antigravity');
+  assert.deepEqual(Object.keys(out.platform.providers), ['antigravity']);
+  assert.equal(out.sdd.default, 'plain');
+  assert.ok(out.sdd.providers.plain);
+  assert.equal(out.engine, 'plain', 'the flat engine key stays for the alias window');
+});
+
+test('platform: the flat `platform` string cannot coexist with the axis object of the same name', () => {
+  const { out } = run({ platform: 'plain' }, ctx('plain', 'gentle-ai'));
+  assert.equal(typeof out.platform, 'object');
+  assert.equal(out.platform.default, 'plain');
+});
+
+test('legacy harness is kept (agent-runtime platformConfig and resolveHarness still read it)', () => {
+  const { out } = run({ harness: 'antigravity' }, ctx('antigravity', 'gentle-ai', 'brain.config.json harness'));
+  assert.equal(out.harness, 'antigravity');
+});
+
+test('the brain SDD provider is declared on every consumer, as "self", and nothing else carries a version', () => {
+  const { out } = run({ vcs: { provider: 'github' }, memory: { backend: 'engram' } });
+  assert.deepEqual(out.sdd.providers.brain, { version: 'self' });
+  const versions = [];
+  for (const axis of ['vcs', 'memory', 'platform', 'sdd']) {
+    for (const [name, p] of Object.entries(out[axis].providers)) if ('version' in p) versions.push(`${axis}.${name}`);
+  }
+  assert.deepEqual(versions, ['sdd.brain']);
+});
+
+test('an existing sdd.providers.brain is never overwritten', () => {
+  const { out } = run({ sdd: { default: 'gentle-ai', providers: { 'gentle-ai': {}, brain: { version: '9.9.9' } } } });
+  assert.deepEqual(out.sdd.providers.brain, { version: '9.9.9' });
+});
+
+// ── routed engines (ADR-0038 section 7, ruling 2) ───────────────────────────
+test('a custom stage routed to a runtime adds that runtime to platform.providers; cold-review gets its role', () => {
+  const map = { 'cold-review': { engine: 'codex', model: 'gpt-5.5' } };
+  const { out } = run({ sdd: { map } });
+  assert.deepEqual(out.platform.providers.codex, {});
+  assert.deepEqual(out.sdd.roles['cold-review'], { agent: 'brain:cold-review', engine: 'codex', model: 'gpt-5.5' });
+  assert.deepEqual(out.sdd.map, map, 'sdd.map is not reshaped (#1132)');
+});
+
+test('a lifecycle stage routed to a framework never reaches platform.providers', () => {
+  const { out } = run({ sdd: { map: { design: { engine: 'gentle-ai' }, spec: { engine: 'plain' } } } });
+  assert.deepEqual(Object.keys(out.platform.providers), ['claude']);
+  assert.equal(out.sdd.roles, undefined);
+});
+
+test('a custom stage other than cold-review adds its runtime and is routed to brain:stage (maintainer ruling 2026-10-04)', () => {
+  const { out, notices } = run({ sdd: { map: { lint: { engine: 'gemini', model: 'g-2' }, bare: {} } } });
+  assert.deepEqual(out.platform.providers.gemini, {});
+  assert.deepEqual(out.sdd.roles, { lint: { agent: 'brain:stage', engine: 'gemini', model: 'g-2' }, bare: { agent: 'brain:stage' } });
+  assert.ok(notices.some((l) => l.startsWith('sdd.roles["lint"] = {"agent":"brain:stage"')), notices.join('\n'));
+  assert.equal(validateAxisConfig(out).ok, true);
+  const again = run(out);
+  assert.deepEqual(again.out, out);
+  assert.deepEqual(again.notices, []);
+});
+
+test('a lifecycle stage in sdd.map gets no brain role (its engine names a framework)', () => {
+  const { out } = run({ sdd: { map: { design: { engine: 'gentle-ai', model: 'm' } } } });
+  assert.equal(out.sdd.roles, undefined);
+});
+
+test('an existing cold-review role is kept, not rewritten', () => {
+  const roles = { 'cold-review': { agent: 'brain:cold-review', engine: 'claude', model: 'm' } };
+  const { out } = run({ sdd: { map: { 'cold-review': { engine: 'codex' } }, roles } });
+  assert.deepEqual(out.sdd.roles, roles);
+});
+
+test('sdd.configs and sdd.map are left exactly where they were', () => {
+  const sdd = { map: { 'cold-review': { engine: 'codex', model: 'gpt-5.5' } }, configs: { design: { agent: 'gentle-ai', enabled: false } }, stages: {}, engines: {} };
+  const { out } = run({ sdd });
+  for (const k of Object.keys(sdd)) assert.deepEqual(out.sdd[k], sdd[k], k);
+});
+
+// ── idempotency, no-op on the new shape, notices ────────────────────────────
+test('idempotent: a second run changes nothing and says nothing', () => {
+  const cfg = { vcs: { provider: 'github' }, memory: { backend: 'engram', lane: { enabled: true } }, platform: 'plain', sdd: { map: { 'cold-review': { engine: 'codex', model: 'm' } } } };
+  const first = run(cfg, ctx('plain', 'gentle-ai', 'brain.config.json platform'));
+  const second = run(first.out, ctx('plain', 'gentle-ai', 'brain.config.json platform'));
+  assert.deepEqual(second.out, first.out);
+  assert.deepEqual(second.notices, []);
+});
+
+test('a config already in the new shape (locks stated) is a no-op, even when the context disagrees', () => {
+  const cfg = {
+    vcs: { default: 'github', providers: { github: { version: '2.63.0' } } },
+    memory: { default: 'plainfiles', locked: true, providers: { plainfiles: {} } },
+    platform: { default: 'antigravity', locked: false, providers: { antigravity: {} } },
+    sdd: { default: 'plain', locked: true, providers: { plain: {}, brain: { version: 'self' } } },
+  };
+  const { out, notices } = run(cfg, ctx('claude', 'gentle-ai', '.env AGENT_PLATFORM'));
+  assert.deepEqual(out, cfg);
+  assert.deepEqual(notices, []);
+});
+
+test('notices print every value written and its source; a per-machine source says so', () => {
+  const { notices } = run(
+    { vcs: { provider: 'github' }, memory: { backend: '' }, sdd: { map: { 'cold-review': { engine: 'codex', model: 'gpt-5.5' } } } },
+    { ...ctx('antigravity', 'gentle-ai', '.env AGENT_PLATFORM'), sdd: { value: 'gentle-ai', source: "today's default" } },
+  );
+  const all = notices.join('\n');
+  assert.match(all, /platform\.default = antigravity \(from \.env AGENT_PLATFORM\)/);
+  assert.match(all, /per-machine/);
+  assert.match(all, /sdd\.default = gentle-ai \(from today's default\)/);
+  assert.match(all, /vcs\.default = github \(from brain\.config\.json vcs\.provider\)/);
+  assert.match(all, /memory\.default = "" /);
+  assert.match(all, /sdd\.providers\.brain/);
+  assert.match(all, /platform\.providers\.codex/);
+  assert.match(all, /sdd\.roles\["cold-review"\]/);
+  assert.ok(!/per-machine/.test(notices.find((n) => n.startsWith('sdd.default'))), 'a code default is not a per-machine value');
+});
+
+test('migrateConfig hands the entry its context and returns the notices; the other callers keep working', () => {
+  const res = migrateConfig({ schemaVersion: '1.9.1', vcs: { provider: 'github' } }, migrations, VERSION, ctx());
+  assert.ok(res.applied.includes(VERSION));
+  assert.equal(res.config.schemaVersion, VERSION);
+  assert.equal(res.config.vcs.default, 'github');
+  assert.ok(res.notices.length > 0);
+  const bare = migrateConfig({ schemaVersion: '1.9.1', vcs: { provider: 'github' } }, migrations, VERSION);
+  assert.deepEqual(bare.notices, []);
+  assert.equal(bare.config.vcs.default, undefined, 'no context, no migration: a caller that cannot read .env must not guess');
+});
+
+// ── validation after migrating, on fixtures ─────────────────────────────────
+const FIXTURES = {
+  'this repository (brain.config.json as committed)': () => JSON.parse(readFileSync(join(REPO_ROOT, 'brain.config.json'), 'utf8')),
+  'a fresh consumer (new-consumer defaults + every shipped migration, provider filled)': () => {
+    const c = migrateConfig(mergeDefaults({}, NEW_CONSUMER_DEFAULTS), migrations, '1.11.0').config;
+    c.vcs.provider = 'github';
+    return c;
+  },
+  'a gitlab consumer': () => ({ vcs: { provider: 'gitlab', slug: 'g/p' }, memory: { backend: 'plainfiles' } }),
+  'AGENT_PLATFORM=plain': () => ({ vcs: { provider: 'github' }, memory: { backend: '' } }),
+  'antigravity': () => ({ vcs: { provider: 'github' }, platform: 'antigravity', memory: { backend: 'engram' } }),
+  'a custom lint stage routed by sdd.map': () => ({
+    vcs: { provider: 'github' }, memory: { backend: 'engram' },
+    sdd: { stages: { proposal: {}, spec: {}, design: {}, tasks: {}, lint: { artefact: 'lint.md' } }, map: { lint: { engine: 'gemini', model: 'g-2' }, 'cold-review': { engine: 'codex' } } },
+  }),
+};
+const FIXTURE_ENV = { 'AGENT_PLATFORM=plain': { AGENT_PLATFORM: 'plain' } };
+
+for (const [name, make] of Object.entries(FIXTURES)) {
+  test(`after migrating, validateAxisConfig passes: ${name}`, () => {
+    const root = mkdtempSync(join(tmpdir(), 'axis-shape-'));
+    try {
+      const before = make();
+      const c = resolveAxisMigrationContext({ config: before, env: FIXTURE_ENV[name] ?? {}, root });
+      const { out } = run(before, c);
+      const v = validateAxisConfig(out);
+      assert.deepEqual(v.errors, []);
+      assert.equal(v.ok, true);
+      for (const axis of ['vcs', 'memory', 'platform', 'sdd']) assert.equal(readAxis(out, axis).source, 'shape', axis);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+}
+
+test('this repository: cold-review keeps routing to codex through sdd.roles and platform.providers', () => {
+  const before = FIXTURES['this repository (brain.config.json as committed)']();
+  const { out } = run(before, ctx());
+  assert.equal(out.sdd.roles['cold-review'].engine, before.sdd.map['cold-review'].engine);
+  assert.ok(out.platform.providers[before.sdd.map['cold-review'].engine]);
+});
+
+// ── parity: the resolvers answer the same before and after ─────────────────
+// "Before" is what the resolvers ran BEFORE #1114 S2: today's code default (claude, gentle-ai) where nothing was
+// declared. S2 removed those defaults, so the oracle below applies them and the migrated config must still answer the same.
+const PRE_S2_DEFAULTS = { platform: 'claude', sdd: 'gentle-ai' };
+const preS2 = (axis, config, env, envVars) => {
+  const r = tryResolveAxis(axis, { env, dotenv: envVars, config, notice: () => {} });
+  return r.ok ? r.value : PRE_S2_DEFAULTS[axis];
+};
+
+const PARITY = [
+  ['legacy everything', { vcs: { provider: 'github' }, memory: { backend: 'engram' }, platform: 'antigravity', engine: 'plain' }, {}, null],
+  ['nothing stated', { vcs: { provider: 'gitlab' }, memory: { backend: '' } }, {}, null],
+  ['.env states the platform', { vcs: { provider: 'github' } }, {}, 'AGENT_PLATFORM=plain\nSDD_ENGINE=plain\n'],
+  ['process env states the platform', { vcs: { provider: 'github' } }, { AGENT_PLATFORM: 'antigravity' }, null],
+  ['legacy SDD_HARNESS names a platform', { vcs: { provider: 'github' } }, {}, 'SDD_HARNESS=plain\n'],
+  ['config harness', { vcs: { provider: 'github' }, harness: 'antigravity' }, {}, null],
+];
+
+for (const [name, before, env, dotenv] of PARITY) {
+  test(`parity before/after the migration: ${name}`, () => {
+    const root = mkdtempSync(join(tmpdir(), 'axis-parity-'));
+    try {
+      if (dotenv !== null) writeFileSync(join(root, '.env'), dotenv);
+      const envVars = dotenv === null ? {} : parseEnvFile(dotenv);
+      const c = resolveAxisMigrationContext({ config: before, env, root });
+      const after = run(before, c).out;
+
+      const quiet = { notice: () => {} };
+      assert.equal(resolveAxis('platform', { env, dotenv: envVars, config: after, ...quiet }).value, preS2('platform', before, env, envVars), 'platform');
+      assert.equal(resolveAxis('sdd', { env, dotenv: envVars, config: after, ...quiet }).value, preS2('sdd', before, env, envVars), 'engine');
+
+      const vcs = (config) => { try { return resolveProviderName({ config, env }); } catch (e) { return `refused:${e.code}`; } };
+      assert.equal(vcs(after), vcs(before), 'vcs');
+
+      const memory = (config) => {
+        const configFile = join(root, 'brain.config.json');
+        writeFileSync(configFile, JSON.stringify(config));
+        const r = resolveMemoryBackend({ root, env, configFile });
+        return [r.status, r.backend, r.source];
+      };
+      assert.deepEqual(memory(after), memory(before), 'memory');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+}
+
+test('an env override of a provider the migration did not list is REFUSED afterwards (ADR-0038 section 2), and listing it restores it', () => {
+  const before = { vcs: { provider: 'github' }, memory: { backend: 'plainfiles' }, platform: 'plain' };
+  const after = run(before, resolveAxisMigrationContext({ config: before, env: {}, root: tmpdir() })).out;
+  const env = { MEMORY_BACKEND: 'engram', VCS_PROVIDER: 'gitlab', AGENT_PLATFORM: 'antigravity' };
+  assert.throws(() => resolveProviderName({ config: after, env }), (e) => e.code === 'not-a-provider');
+  assert.throws(() => resolveAxis('platform', { env, config: after }), (e) => e.code === 'not-a-provider');
+  const listed = structuredClone(after);
+  listed.vcs.providers.gitlab = {};
+  listed.platform.providers.antigravity = {};
+  assert.equal(resolveProviderName({ config: listed, env }), 'gitlab');
+  assert.equal(resolveAxis('platform', { env, config: listed }).value, 'antigravity');
+});
+
+// ── locked: false for existing consumers (#1263 slice 3, ADR-0040 section 3, ratified points 4 and 6) ───────────────────
+test('#1263 locked: the entry writes locked:false on memory, platform and sdd and never on vcs; the defaults do not move', () => {
+  const cfg = {
+    vcs: { default: 'github', providers: { github: {} } },
+    memory: { default: 'plainfiles', providers: { plainfiles: {} } },
+    platform: { default: 'claude', providers: { claude: {} } },
+    sdd: { default: 'gentle-ai', providers: { 'gentle-ai': {}, brain: { version: 'self' } } },
+  };
+  const { out, notices } = run(cfg);
+  for (const axis of ['memory', 'platform', 'sdd']) assert.equal(out[axis].locked, false, axis);
+  assert.equal(Object.hasOwn(out.vcs, 'locked'), false);
+  assert.equal(out.memory.default, 'plainfiles');
+  assert.ok(notices.some((n) => /memory\.locked, platform\.locked, sdd\.locked = false/.test(n) && /owner|turns it on|set memory\.locked true/.test(n)), notices.join('\n'));
+});
+
+test('#1263 locked: it also reaches an axis the same run reshapes (a legacy config)', () => {
+  const { out } = run({ memory: { backend: 'engram' }, vcs: { provider: 'github' } });
+  for (const axis of ['memory', 'platform', 'sdd']) assert.equal(out[axis].locked, false, axis);
+});
+
+test('#1263 locked: a locked value already stated, true or false, is never touched', () => {
+  const { out } = run({ memory: { default: 'engram', locked: true, providers: { engram: {} } }, sdd: { default: 'plain', locked: false, providers: { plain: {} } } });
+  assert.equal(out.memory.locked, true);
+  assert.equal(out.sdd.locked, false);
+  assert.equal(out.platform.locked, false);
+});
+
+test('#1263 locked: it NEVER seeds governance.owners, and it is idempotent', () => {
+  const cfg = { vcs: { provider: 'github' }, memory: { backend: 'engram' }, governance: { tier: 'standard' } };
+  const first = run(cfg);
+  assert.deepEqual(first.out.governance, { tier: 'standard' }, 'owners stay absent: an existing consumer\'s owners are its team\'s decision');
+  const second = run(first.out);
+  assert.deepEqual(second.out, first.out);
+  assert.deepEqual(second.notices, []);
+  assert.equal(Object.hasOwn(run({}).out.governance ?? {}, 'owners'), false);
+});
+
+test('#1263 locked: migrateConfig on an existing consumer locks nothing and a resolve still behaves as before', () => {
+  const base = { schemaVersion: '1.11.0', vcs: { provider: 'github' }, memory: { backend: 'plainfiles' } };
+  const { config } = migrateConfig(base, migrations, '1.11.1', ctx());
+  assert.deepEqual([config.memory.locked, config.platform.locked, config.sdd.locked], [false, false, false]);
+  assert.equal(validateAxisConfig(config).ok, true);
+  const r = tryResolveAxis('memory', { env: { MEMORY_BACKEND: 'engram' }, dotenv: {}, config: { ...config, memory: { ...config.memory, providers: { plainfiles: {}, engram: {} } } }, notice: () => {} });
+  assert.equal(r.ok, true, 'an unlocked axis still takes the per-run override');
+  assert.equal(r.value, 'engram');
+});

@@ -87,7 +87,7 @@ const SAFE_SYSTEM_PATH = '/usr/local/bin:/usr/bin:/bin';
 
 function runHook(binDir) {
   return spawnSync('sh', [HOOK_PATH], {
-    env: { PATH: `${binDir}:${SAFE_SYSTEM_PATH}`, HOME: process.env.HOME ?? '/tmp' },
+    env: { PATH: `${binDir}:${SAFE_SYSTEM_PATH}`, HOME: process.env.HOME ?? '/tmp', BRAIN_HOME: process.env.BRAIN_HOME || '/nonexistent/brain-home' },
     encoding: 'utf8',
     timeout: 5000,
   });

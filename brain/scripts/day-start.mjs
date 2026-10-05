@@ -16,7 +16,7 @@ import { vcsToken } from './vcs/lib/token.mjs';
 import { detectPM } from './lib/pm.mjs';
 import { t } from './i18n/t.mjs';
 import { currentBranch } from './lib/git-branch.mjs';
-import { agentRuntimeReport, platformEnvVars, platformConfig } from './axes/lib/agent-runtime.mjs';
+import { agentRuntimeReport, platformEnvVars } from './axes/lib/agent-runtime.mjs';
 import { readEnv } from './lib/env-read.mjs';
 import { laneSweepEnabled, runLaneSweep, laneSweepLine, laneSweepBranchLines } from './memory/day-start-sweep.mjs';
 
@@ -313,9 +313,9 @@ sep(await t('day.brain.section'));
   const { platform, notice } = await agentRuntimeReport({
     env: process.env,
     envVars: platformEnvVars(readEnvVar),
-    config: platformConfig(config),
+    config,
   });
-  console.log(`  ${C.dim}harness: ${platform}${C.reset}`);
+  console.log(`  ${C.dim}harness: ${platform ?? 'unresolved'}${C.reset}`);
   ({ ok, warn, info }[notice.level] ?? info)(notice.message);
   if (notice.hint) console.log(`       ${C.dim}${notice.hint}${C.reset}`);
 }

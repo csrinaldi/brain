@@ -98,7 +98,7 @@ async function loadGithubContext(env, deps) {
     body,
     author,
     repo: env.GITHUB_REPOSITORY ?? null,
-    isMergeRequest: env.GITHUB_EVENT_NAME === 'pull_request',
+    isMergeRequest: env.GITHUB_EVENT_NAME === 'pull_request' || env.GITHUB_EVENT_NAME === 'pull_request_review',
   };
 }
 

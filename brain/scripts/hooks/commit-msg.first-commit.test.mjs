@@ -110,7 +110,7 @@ function runHook(hooksDir, cwd, msg, env = {}) {
   const msgFile = join(mkdtempSync(join(tmpdir(), 'brain-1161-msg-')), 'MSG');
   writeFileSync(msgFile, msg);
   return spawnSync('sh', [join(hooksDir, 'commit-msg'), msgFile], {
-    cwd, encoding: 'utf8', env: { PATH: process.env.PATH, HOME: process.env.HOME ?? '/tmp', ...env },
+    cwd, encoding: 'utf8', env: { PATH: process.env.PATH, HOME: process.env.HOME ?? '/tmp', BRAIN_HOME: process.env.BRAIN_HOME || '/nonexistent/brain-home', ...env },
   });
 }
 

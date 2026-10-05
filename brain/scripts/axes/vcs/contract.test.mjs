@@ -747,7 +747,7 @@ for (const providerName of Object.keys(PROVIDERS)) {
   // moment someone normalized `body` to `undefined`, and a hand-written
   // review object in the test would reintroduce exactly the injection this
   // block replaces.
-  test(`${providerName}.prReviews (contract): happy fixture normalizes to exactly { state, author, body } per entry`, async () => {
+  test(`${providerName}.prReviews (contract): happy fixture normalizes to exactly { state, author, body, commitId } per entry`, async () => {
     const fixtureName = `${providerName}-prReviews-happy.json`;
     const fixture = loadFixture(fixtureName);
     assertProvenance(fixture, fixtureName);
@@ -759,9 +759,10 @@ for (const providerName of Object.keys(PROVIDERS)) {
     for (const entry of result) {
       assert.deepEqual(
         Object.keys(entry).sort(),
-        ['author', 'body', 'state'],
-        'each prReviews entry must normalize to EXACTLY { state, author, body } — a narrowed shape is the #317 defect itself',
+        ['author', 'body', 'commitId', 'state'],
+        'each prReviews entry must normalize to EXACTLY { state, author, body, commitId } — a narrowed shape is the #317 defect itself; commitId is the #1263 S4 additive widening',
       );
+      assert.ok(entry.commitId === null || typeof entry.commitId === 'string', 'commitId is the head sha the review was submitted against, or null where the forge cannot say — never undefined');
       assert.equal(
         typeof entry.body,
         'string',
@@ -773,6 +774,17 @@ for (const providerName of Object.keys(PROVIDERS)) {
       assert.ok(!('username' in entry), 'must not leak raw GitLab username (only author)');
       assert.ok(!('system' in entry), 'must not leak GitLab note system flag');
       assert.ok(!('created_at' in entry), 'must not leak raw created_at');
+    }
+  });
+
+  test(`${providerName}.prReviews (contract): commitId is the review's head sha on GitHub (commit_id) and null on GitLab (its notes and approvals carry none)`, async () => {
+    const fixtureName = `${providerName}-prReviews-happy.json`;
+    const fixture = loadFixture(fixtureName);
+    const result = await vcs.prReviews({ project: 'x/y', number: 1, ...prReviewsArgs(fixture) });
+    if (providerName === 'github') {
+      assert.ok(result.every(e => /^[0-9a-f]{40}$/.test(e.commitId)), 'every GitHub review carries its commit_id');
+    } else {
+      assert.ok(result.every(e => e.commitId === null), 'GitLab cannot say which head a review was against: null, never guessed');
     }
   });
 
@@ -2745,7 +2757,7 @@ test('github.prReviews (contract): a review with no comment normalizes body to \
   // same empty-vs-uncomputable rule prView.body follows (A3 task 3.7).
   setSpawn(jsonSpawn([{ state: 'APPROVED', user: { login: 'bob' }, body: null }]));
   const result = await github.prReviews({ project: 'o/r', number: 144 });
-  assert.deepEqual(result, [{ state: 'APPROVED', author: 'bob', body: '' }]);
+  assert.deepEqual(result, [{ state: 'APPROVED', author: 'bob', body: '', commitId: null }]);
 });
 
 test('github.prReviews (contract): body passes through VERBATIM — no trimming, no re-encoding of the fenced verdict block', async () => {

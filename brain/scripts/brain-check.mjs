@@ -34,7 +34,9 @@ import { resolveTier, tierParams } from './vcs/governance-tiers.mjs';
 // What the local gates need to know before a PR exists — the slug, the default branch and
 // whether `npm test` applies — resolved the way the rest of the product resolves them
 // (#1186, #1187). One module, so brain:ship reads the same answers.
-import { resolveProjectSlug, resolveDefaultBranch, npmTestApplicability } from './lib/local-gate-context.mjs';
+import { resolveDefaultBranch, npmTestApplicability } from './lib/local-gate-context.mjs';
+import { projectSlugOrNull } from './lib/project-slug.mjs';
+import { readAxis } from './lib/axis-config.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -214,8 +216,8 @@ export async function runCheck({
     body: prBody,
     targetBranch,
     defaultBranch,
-    provider: config?.vcs?.provider,
-    repo: resolveProjectSlug({ config, ...(identity ? { identity } : {}) }),
+    provider: readAxis(config, 'vcs').default,
+    repo: projectSlugOrNull({ config, ...(identity ? { identity } : {}) }),
   };
   const govDeps = {
     ctx: govCtx,

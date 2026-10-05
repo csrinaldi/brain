@@ -38,6 +38,8 @@ import { parseIssueBranch } from './lib/branch-grammar.mjs';
 import { deriveBranchType, findTypeLabel } from './lib/branch-type.mjs';
 import { labelPreflight } from './vcs/label-preflight.mjs';
 import { resolveDefaultBranch } from './lib/local-gate-context.mjs';
+import { readAxis } from './lib/axis-config.mjs';
+import { resolveProjectSlug, ProjectSlugError, describeSlugRefusal } from './lib/project-slug.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -275,10 +277,17 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     process.exit(1);
   }
 
-  const provider = config?.vcs?.provider;
-  const project = config?.project?.slug;
-  if (!provider || !project) {
-    console.error('brain:ship: vcs.provider and project.slug must be set in brain.config.json');
+  const provider = readAxis(config, 'vcs').default;
+  if (!provider) {
+    console.error('brain:ship: vcs.provider must be set in brain.config.json');
+    process.exit(1);
+  }
+  let project;
+  try {
+    ({ slug: project } = resolveProjectSlug({ config }));
+  } catch (e) {
+    if (!(e instanceof ProjectSlugError)) throw e;
+    console.error(`brain:ship: ${await describeSlugRefusal(e)}`);
     process.exit(1);
   }
 
