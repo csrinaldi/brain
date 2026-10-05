@@ -206,7 +206,7 @@ leaves `memory.default` empty otherwise.
 **Known text mismatch:** the refusal the memory commands print still ends "Or run
 `npm run brain:env:init`, which asks once and writes it". In an existing repository `env:init` no
 longer asks: use `npm run brain:config -- set memory.default <engram|plainfiles>`
-([KNOWN-LIMITATIONS](KNOWN-LIMITATIONS.md)).
+(#1341, [KNOWN-LIMITATIONS](KNOWN-LIMITATIONS.md)).
 
 ### The audit cursor: nothing to do by hand
 

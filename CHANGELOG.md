@@ -49,7 +49,7 @@ and keeps the legacy `memory.backend` in step; `set memory.backend` still works 
 **The memory commands (`brain:memory:*`) still refuse with their own 1.11.0 text**, which names
 `set memory.backend` and ends "Or run `npm run brain:env:init`, which asks once and writes it"
 (exit 3). In a repository that already has a `brain.config.json`, `env:init` no longer asks (see
-below), so declare it with `set memory.default` instead.
+below), so declare it with `set memory.default` instead (#1341).
 
 The old `SDD_HARNESS` variable and the flat `harness` config key are a deprecated alias for
 `platform` and `sdd`: a use prints `<key> (<value>, from <where>) is a deprecated way to name the

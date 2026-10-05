@@ -9,6 +9,6 @@ The release reporter measured `main` at `d731fbad`: 74 commits since v1.11.0 (13
 - Close the gap #1340 names: before publish, run the 1.11.0 to 1.12.0 upgrade by hand against `npm pack` of this commit, because `test:upgrade` tests published releases only (#1325).
 
 ## Scope
-- `package.json` (no lockfile exists) and the README/adoption pins to 1.12.0; a new CHANGELOG entry; `docs/adoption.md` (axes must be declared, the user layer, `user-set`, `locked`, owners); `docs/KNOWN-LIMITATIONS.md` (#1281, #1339, #1334, the #1325 scope, one untracked text mismatch; #1190 is fixed and was already retired); the README adapters table.
+- `package.json` (no lockfile exists) and the README/adoption pins to 1.12.0; a new CHANGELOG entry; `docs/adoption.md` (axes must be declared, the user layer, `user-set`, `locked`, owners); `docs/KNOWN-LIMITATIONS.md` (#1281, #1339, #1334, the #1325 scope, the stale memory refusal text (#1341); #1190 is fixed and was already retired); the README adapters table.
 - `claim-sweep.md`: every behavioural sentence of the new entry and each changed doc line, traced to code.
 - Not in scope: tagging, pushing, publishing, the post-publish exit run, a fix for any finding listed in the known limitations.
