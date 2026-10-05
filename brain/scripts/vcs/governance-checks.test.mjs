@@ -114,7 +114,7 @@ test('resolveJobSets("standard") matches the REQUIRED_JOBS/DETECTION_JOBS snapsh
 
 test('resolveJobSets("lite") differs from the standard-tier snapshot: memory-gate/phase-order are detection, actor-check/brain-writes-reviewed stay required', () => {
   const { required, detection } = resolveJobSets('lite');
-  assert.deepEqual(detection, ['memory-gate', 'phase-order']);
+  assert.deepEqual(detection, ['memory-gate', 'phase-order', 'team-config-reviewed']);
   assert.ok(required.includes('actor-check'), '"lite" must still require actor-check (never-tiered core)');
   assert.ok(required.includes('brain-writes-reviewed'), '"lite" must still require brain-writes-reviewed (never-tiered core)');
   assert.ok(!required.includes('phase-order'), '"lite" demotes phase-order to detection (proportionality)');
@@ -138,7 +138,7 @@ test('resolveJobSets(tier).required ∪ .detection reproduces GOVERNANCE_JOBS at
 test('lane governance (#905): GOVERNANCE_JOBS gains lane-paths and lane-scrub, appended at the end', () => {
   // #967 PR C appended 'base-branch' after these two — the tail is now
   // three long, lane-paths/lane-scrub still adjacent and in order.
-  assert.deepEqual(GOVERNANCE_JOBS.slice(-3), ['lane-paths', 'lane-scrub', 'base-branch']);
+  assert.deepEqual(GOVERNANCE_JOBS.slice(-4), ['lane-paths', 'lane-scrub', 'base-branch', 'team-config-reviewed']);
 });
 
 test('lane governance (#905): checkContexts("lite") contains both lane-paths and lane-scrub (required at every tier)', () => {
@@ -147,15 +147,15 @@ test('lane governance (#905): checkContexts("lite") contains both lane-paths and
   assert.ok(contexts.includes('lane-scrub'), 'checkContexts("lite") must include lane-scrub');
 });
 
-test('lane governance (#905) + base-branch (#967): eleven jobs, matching order, in GOVERNANCE_JOBS/checkContexts("standard")/governance.yml', () => {
+test('lane governance (#905) + base-branch (#967): twelve jobs, matching order, in GOVERNANCE_JOBS/checkContexts("standard")/governance.yml', () => {
   const yamlPath = resolve(REPO_ROOT, '.github/workflows/governance.yml');
   const yamlText = readFileSync(yamlPath, 'utf8');
   const matches = [...yamlText.matchAll(/^    name: (\S+)\s*$/mg)];
   const yamlJobNames = matches.map(m => m[1]);
 
-  assert.equal(GOVERNANCE_JOBS.length, 11, `GOVERNANCE_JOBS must list eleven jobs: ${JSON.stringify(GOVERNANCE_JOBS)}`);
+  assert.equal(GOVERNANCE_JOBS.length, 12, `GOVERNANCE_JOBS must list twelve jobs: ${JSON.stringify(GOVERNANCE_JOBS)}`);
   assert.deepEqual(checkContexts('standard'), GOVERNANCE_JOBS, 'every gate is required at "standard"');
-  assert.deepEqual(yamlJobNames, GOVERNANCE_JOBS, 'governance.yml must declare the same eleven names in the same order');
+  assert.deepEqual(yamlJobNames, GOVERNANCE_JOBS, 'governance.yml must declare the same twelve names in the same order');
 });
 
 // ── L1 local-checks job (REQ-L1-1) ──────────────────────────────────────────────
@@ -200,6 +200,7 @@ test('checkContexts returns bare job names (no workflow-name prefix)', () => {
     'lane-paths',
     'lane-scrub',
     'base-branch',
+    'team-config-reviewed',
   ]);
 });
 
@@ -303,4 +304,30 @@ test('REQ-A2-3: governance.yml issue-link resolves the approved label from confi
     code, /run-check\.mjs issue-link/,
     'the job must delegate to the portable check, which owns the resolution (#130)',
   );
+});
+// ── #1263 slice 4: a review re-runs the gate that a review decides ────────────
+
+test('governance.yml re-runs on pull_request_review (submitted, dismissed) and keeps its pull_request types', () => {
+  const yaml = readFileSync(resolve(REPO_ROOT, '.github/workflows/governance.yml'), 'utf8');
+  const on = yaml.slice(yaml.indexOf('\non:'), yaml.indexOf('\npermissions:'));
+  assert.match(on, /^  pull_request:\n    types: \[opened, synchronize, reopened, edited, labeled, unlabeled\]$/m);
+  assert.match(on, /^  pull_request_review:\n    types: \[submitted, dismissed\]$/m);
+  assert.ok(!/pull_request_target/.test(on), 'never pull_request_target');
+});
+
+test('team-config-reviewed job: reads only pull_request payload fields (valid under a review event), fetch-depth 0, and runs its script', () => {
+  const yaml = readFileSync(resolve(REPO_ROOT, '.github/workflows/governance.yml'), 'utf8');
+  const job = yaml.slice(yaml.indexOf('\n  team-config-reviewed:'));
+  assert.match(job, /fetch-depth: 0/);
+  assert.match(job, /node brain\/scripts\/vcs\/team-config-reviewed\.mjs/);
+  for (const m of job.matchAll(/\$\{\{\s*([^}]+?)\s*\}\}/g)) {
+    assert.match(m[1], /^(github\.event\.pull_request\.|github\.event\.repository\.default_branch|github\.token)/, `unexpected expression: ${m[1]}`);
+  }
+});
+
+test('GitLab fragment: the team-config-reviewed job clones the full history (GIT_DEPTH "0") so a deleted config is not mistaken for a founding', () => {
+  const yaml = readFileSync(resolve(REPO_ROOT, 'brain/scripts/ci/gitlab-governance.yml'), 'utf8');
+  const job = yaml.slice(yaml.indexOf('\nteam-config-reviewed:'));
+  assert.match(job, /GIT_DEPTH: "0"/);
+  assert.match(job, /node brain\/scripts\/vcs\/team-config-reviewed\.mjs/);
 });

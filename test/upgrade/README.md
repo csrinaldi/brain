@@ -39,7 +39,12 @@ npm run test:upgrade                     # second-latest → latest tag
    whose content differs between FROM's and TO's package is TO's content in the consumer's
    managed copy (proves `copyManaged` ran, not just `npm i`); the `brain:*` verbs were
    injected; and every customization above survives. `brain:env:init` and `brain:upgrade`
-   exit codes are checked (the env:init log is printed on failure).
+   exit codes are checked (the env:init log is printed on failure). When TO ships the ADR-0038
+   axis-shape migration (`1.11.1`, i.e. TO >= 1.12.0) it also asserts the outcome (#1344): every
+   one of `vcs`, `memory`, `platform`, `sdd` in `brain.config.json` has `default` and `providers`,
+   and all four resolve through TO's `config/cli.mjs resolve` with `.env` moved aside. The old
+   upgrader runs the incoming migrations, so this is the check that catches a migration that
+   reports `Applied` and changes nothing.
 
 CI runs it informationally via `.github/workflows/upgrade-smoke.yml` (not a required check), on pushes to `main` and on PRs touching `test/upgrade/**` or the workflow.
 

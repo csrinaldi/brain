@@ -48,6 +48,11 @@ CI=1 npm run brain:env:init </dev/null >/tmp/env-init.log 2>&1
 ENV_INIT_RC=$?
 [ "$ENV_INIT_RC" = 0 ] || { echo "✗ brain:env:init exited ${ENV_INIT_RC}:"; cat /tmp/env-init.log; exit 2; }
 [ -f brain.config.json ] || { echo "✗ env:init did not create brain.config.json"; exit 2; }
+# A team that declared its memory backend (a CI run never declares it for you): without this the memory axis is
+# honestly undeclared and cannot resolve, which would make the all-four-axes assertion in step 4b vacuous (#1344).
+# MEMORY_DECLARED records whether the declaration landed: step 4b must not excuse a memory resolve failure when it did (#1346).
+MEMORY_DECLARED=yes
+npm run brain:config -- set memory.backend plainfiles >/dev/null 2>&1 || { MEMORY_DECLARED=no; info "could not declare memory.backend on ${FROM}; step 4b reports a memory resolve failure as info only"; }
 # Snapshot FROM's shipped brain/scripts BEFORE the upgrade (#1325). After the upgrade, every file
 # whose content differs between FROM's and TO's package must be TO's content in the consumer's
 # managed copy: that is what proves copyManaged ran, not merely that `npm i` fetched TO.
@@ -92,6 +97,30 @@ fi
 grep -q "MY_SECRET=keep-me" .env && ok ".env preserved (MY_SECRET)" || fail ".env LOST"
 [ "$(node -e "console.log(require('./brain.config.json').project.owner)" 2>/dev/null)" = "ACME" ] && ok "brain.config.json custom value preserved (owner=ACME)" || fail "brain.config.json custom value LOST"
 [ -f openspec/changes/my-feature/proposal.md ] && ok "openspec/changes preserved" || fail "openspec/changes LOST"
+
+line "4b. ASSERT — the config migration LANDED: every axis has the ADR-0038 shape and all four resolve with no .env (#1344)"
+# Why this exists: `brain:upgrade` runs the OLD (FROM) upgrader, which imports TO's migrations but calls its own
+# migrateConfig. Under 1.11.0 that handed migration 1.11.1 no context, nothing was shaped, and schemaVersion was still stamped.
+# Every other assertion here stayed green. Applies only when TO's package carries migration 1.11.1 (the ADR-0038 shape, >= 1.12.0).
+HAS_SHAPE_MIGRATION=$(node --input-type=module -e "
+const { migrations } = await import('./${PKG_DIR}/brain/core/config-migrations.mjs');
+console.log(migrations.some((m) => m.version === '1.11.1') ? 'yes' : 'no');" 2>/dev/null)
+if [ "$HAS_SHAPE_MIGRATION" = "yes" ]; then
+  for AXIS in vcs memory platform sdd; do
+    SHAPED=$(node -e "const a=require('./brain.config.json')['${AXIS}'];console.log(a&&typeof a==='object'&&'default' in a&&'providers' in a?'yes':'no')" 2>/dev/null)
+    [ "$SHAPED" = "yes" ] && ok "brain.config.json ${AXIS} has { default, providers }" || fail "brain.config.json ${AXIS} lacks the ADR-0038 shape — the migration did not land"
+  done
+  mv .env .env.aside
+  for AXIS in vcs memory platform sdd; do
+    out=$(node "${PKG_DIR}/brain/scripts/config/cli.mjs" resolve "$AXIS" 2>&1); rc=$?
+    if [ "$rc" = 0 ]; then ok "resolve ${AXIS} (no .env) -> ${out%% *}"
+    elif [ "$AXIS" = memory ] && [ "$MEMORY_DECLARED" = no ]; then info "resolve memory (no .env) rc=${rc}: the FROM consumer could not declare memory.backend (the declaration failed at setup), so this is not asserted"
+    else fail "resolve ${AXIS} with no .env exited ${rc}: ${out}"; fi
+  done
+  mv .env.aside .env
+else
+  info "TO's package has no migration 1.11.1 (< 1.12.0): axis-shape assertions not applicable"
+fi
 
 line "5. ASSERT — package.json brain:* verb injection (specialMerge)"
 # Assert brain:* verbs were injected into the consumer package.json.

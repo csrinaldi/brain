@@ -52,6 +52,8 @@ export const GOVERNANCE_JOBS = [
   'lane-paths',
   'lane-scrub',
   'base-branch',
+  // #1263 slice 4 (ADR-0040) — the owner gate over the team config, appended at the end.
+  'team-config-reviewed',
 ];
 
 /**

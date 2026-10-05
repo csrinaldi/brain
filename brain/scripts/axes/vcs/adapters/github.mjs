@@ -720,7 +720,7 @@ export async function workflowRunSucceeded({ project, workflow, branch } = {}) {
  * can distinguish "zero reviews" from "couldn't fetch".
  *
  * @param {{ project: string, number: number }} params
- * @returns {Promise<Array<{ state: string, author: string|null, body: string }>|null>}
+ * @returns {Promise<Array<{ state: string, author: string|null, body: string, commitId: string|null }>|null>}
  */
 export async function prReviews({ project, number } = {}) {
   let reviews;
@@ -729,7 +729,9 @@ export async function prReviews({ project, number } = {}) {
   } catch {
     return null;
   }
-  return reviews.map(r => ({ state: r.state, author: r.user?.login ?? null, body: r.body ?? '' }));
+  // `commitId` (#1263 S4): the head the review was submitted against (`commit_id`) — what lets a gate tell a current
+  // approval from a stale one. Additive; `null` when the API omits it, never undefined.
+  return reviews.map(r => ({ state: r.state, author: r.user?.login ?? null, body: r.body ?? '', commitId: r.commit_id ?? null }));
 }
 
 /**

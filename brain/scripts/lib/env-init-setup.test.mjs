@@ -196,3 +196,21 @@ test('#1163 cold-3: an unreadable remote lists a hand command for EVERY desired 
     assert.ok(r.pending.next.includes(`gh label create "${name}"`), name);
   }
 });
+
+// ── governance.owners seed (#1263 slice 3, ADR-0040 section 5) ────────────────────────────────────────────────────────
+test('#1263 ownerLoginFromActor: brain.actor is @login, the forge login (what actor-check compares) is bare', async () => {
+  const { ownerLoginFromActor } = await import('./env-init-setup.mjs');
+  assert.equal(ownerLoginFromActor('@alice'), 'alice');
+  assert.equal(ownerLoginFromActor(' @Alice.B-c_d '), 'Alice.B-c_d');
+  for (const bad of [undefined, null, '', 'alice', '@', '@legacy', '@a b', 42]) assert.equal(ownerLoginFromActor(bad), null, String(bad));
+});
+
+test('#1263 seedOwners: seeds the bare login into an empty or absent list; keeps owners already named; pends without a login', async () => {
+  const { seedOwners } = await import('./env-init-setup.mjs');
+  assert.deepEqual(seedOwners({ config: { governance: { tier: 'lite', owners: [] } }, actor: '@alice' }).next.governance, { tier: 'lite', owners: ['alice'] });
+  assert.deepEqual(seedOwners({ config: {}, actor: '@alice' }).next.governance, { owners: ['alice'] });
+  const kept = seedOwners({ config: { governance: { owners: ['bob'] } }, actor: '@alice' });
+  assert.deepEqual([kept.status, kept.next], ['kept', null]);
+  const none = seedOwners({ config: { governance: { owners: [] } }, actor: null });
+  assert.deepEqual([none.status, none.next], ['pending', null]);
+});

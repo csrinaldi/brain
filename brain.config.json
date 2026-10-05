@@ -10,12 +10,20 @@
     "language": "en"
   },
   "vcs": {
-    "provider": "github"
+    "provider": "github",
+    "default": "github",
+    "providers": {
+      "github": {}
+    }
   },
   "memory": {
     "backend": "engram",
     "lane": {
       "enabled": true
+    },
+    "default": "engram",
+    "providers": {
+      "engram": {}
     }
   },
   "governance": {
@@ -52,6 +60,27 @@
         "engine": "codex",
         "model": "gpt-5.5"
       }
+    },
+    "default": "gentle-ai",
+    "providers": {
+      "gentle-ai": {},
+      "brain": {
+        "version": "self"
+      }
+    },
+    "roles": {
+      "cold-review": {
+        "agent": "brain:cold-review",
+        "engine": "codex",
+        "model": "gpt-5.5"
+      }
+    }
+  },
+  "platform": {
+    "default": "claude",
+    "providers": {
+      "claude": {},
+      "codex": {}
     }
   }
 }

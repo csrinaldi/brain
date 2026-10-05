@@ -69,7 +69,7 @@ test('#874 (D8): capture stays reachable with NO engram installed — save defer
 
   const r = spawnSync(process.execPath, [`${REPO}/brain/scripts/memory/cli.mjs`, 'save', 'title', 'content', '--type', 'discovery'], {
     encoding: 'utf8',
-    env: { HOME: process.env.HOME, PATH: bin, MEMORY_BACKEND: 'engram', BRAIN_MEMORY_TEST_ROOT: root, ...isolatedGitEnv },
+    env: { HOME: process.env.HOME, BRAIN_HOME: process.env.BRAIN_HOME || '/nonexistent/brain-home', PATH: bin, MEMORY_BACKEND: 'engram', BRAIN_MEMORY_TEST_ROOT: root, ...isolatedGitEnv },
   });
 
   assert.equal(r.status, 0, `save must be reachable with no engram installed:\n${r.stdout}\n${r.stderr}`);

@@ -13,6 +13,7 @@
 //                     e.g. node brain/scripts/vcs/cli.mjs issue-list '{"state":"open"}'
 
 import { pathToFileURL } from 'node:url';
+import { resolveAxis } from '../lib/axis-config.mjs';
 import { runAsIdentity } from './lib/identity-context.mjs';
 import { vcsToken } from './lib/token.mjs';
 import { loadBrainConfig } from '../lib/brain-config.mjs';
@@ -69,25 +70,16 @@ export const VERBS = [
 ];
 
 /**
- * Resolves the active provider name. Pure — takes config + env explicitly so it
- * can be unit-tested. VCS_PROVIDER env wins over brain.config.json (for overrides
- * and CI), then vcs.provider from config.
- * @param {{ config?: object, env?: object }} [opts]
+ * Resolves the active provider name: a thin caller of `resolveAxis` (#1114 S2). Pure — takes config + env
+ * explicitly so it can be unit-tested. An explicit `provider` (the RUNTIME-detected platform, e.g. ci-context's
+ * ctx.provider — finding #14) wins over everything: a CI job on GitLab must dispatch to the gitlab provider even
+ * when this repo's own config says github. Then VCS_PROVIDER env, then `vcs.default` (the legacy `vcs.provider`
+ * for one minor version). VCS has no `.env` level (ADR-0038 section 2). Undeclared throws an AxisRefusal.
+ * @param {{ config?: object, env?: object, provider?: string }} [opts]
  * @returns {string}
  */
 export function resolveProviderName({ config, env = process.env, provider } = {}) {
-  // Precedence: an explicit `provider` (the RUNTIME-detected platform, e.g.
-  // ci-context's ctx.provider — finding #14) wins over VCS_PROVIDER env, which
-  // wins over config.vcs.provider. A CI job on GitLab must dispatch to the
-  // gitlab provider even when this repo's own config says github.
-  const resolved = provider || env.VCS_PROVIDER || config?.vcs?.provider;
-  if (!resolved) {
-    throw new Error(
-      'vcs: no provider configured. Set "vcs": { "provider": "github" } in ' +
-      'brain.config.json (or VCS_PROVIDER in the environment). See ADR-0008.',
-    );
-  }
-  return resolved;
+  return resolveAxis('vcs', { env, config, runtimeProvider: provider }).value;
 }
 
 /**

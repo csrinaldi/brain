@@ -1,6 +1,6 @@
 # ADR-0033 — The cold review runs as a spawned subagent: the transport is a stage engine, and the producer never holds a credential
 
-**Status**: Accepted · **amended 28/08/2026** (Amendments 1-2 — see below)
+**Status**: Accepted · **amended 04/10/2026** (Amendments 1-3 — see below)
 **Date**: 2026-08-21 — Cristian Rinaldi
 
 ## Context
@@ -39,8 +39,11 @@ port. Its output is a file. Only `brain:review` touches the forge.**
 
 Four parts, and each is separable:
 
-1. **Resolution.** `sdd.map['cold-review'] → { engine, model }`. `model` is a
-   pass-through: brain does not interpret it, validate it against a catalogue, or map it
+1. **Resolution.** `sdd.map['cold-review'] → { engine, model }`. **[Amended by Amendment 3
+   (#1114, #1263): the declared target is `sdd.roles['cold-review'] → { agent, engine, model }`,
+   with `agent` = `"brain:cold-review"` and `engine` a key of `platform.providers` that can execute
+   a stage prompt (ADR-0038). The runner still reads `sdd.map` until #1132; see Amendment 3.]**
+   `model` is a pass-through: brain does not interpret it, validate it against a catalogue, or map it
    to a tier. This is #323's already-ruled shape for M8's router; the cold review is its
    first inhabitant rather than a second opinion.
 2. **Execution.** The orchestrator spawns the engine through the harness with a prompt
@@ -365,3 +368,49 @@ The directory is per-run and disposable because `gh` **writes** a `config.yml` i
 directory it is given. A reused path would be a place a session could accumulate, which would
 turn this fix into the channel it closes. It is removed in a `finally`, so a refused run cleans
 up on the very path an operator is already debugging.
+
+## Amendment 3 — part 1 resolves through `sdd.roles['cold-review']`, with `engine` a platform provider (issue #1263)
+
+**Signed**: 04/10/2026 — Cristian Rinaldi
+
+### What changed
+
+ADR-0038 names this ADR in "Amendments this requires". Decision part 1, `sdd.map['cold-review'] →
+{ engine, model }`, becomes `sdd.roles['cold-review'] → { agent, engine, model }`:
+
+- `agent` is `"brain:cold-review"`: the role, declared by brain's own SDD provider `brain`
+  (ADR-0023 Amendment 2).
+- `engine` is a key of `platform.providers`: the runtime that executes the stage, for example `codex`.
+  It must declare the ability to execute a stage prompt. `plain` and `antigravity` cannot.
+- `model` stays an opaque pass-through, as decided.
+
+What is on the `feature/issue-1114-axis-ports` tracker:
+
+- The 1.11.1 migration (`brain/core/config-migrations.mjs`) writes `sdd.roles['cold-review']` from
+  `sdd.map['cold-review']`, and adds the routed runtime to `platform.providers` as `{}`. This
+  repository's own `codex` route is migrated that way.
+- `validateAxisConfig` (`brain/scripts/lib/axis-config.mjs`) refuses a `cold-review` entry whose
+  `agent` provider is not a key of `sdd.providers`, or whose `engine` is not a key of
+  `platform.providers` or cannot execute a stage prompt (`PLATFORM_CAPABILITIES`).
+
+### Why
+
+`engine` meant two things in one field: an SDD framework for a lifecycle stage, and a runtime for
+`cold-review`. ADR-0038 separates them. #833's option C, where the SDD framework holds the transport,
+is not taken. The field split replaces it.
+
+### What this does NOT change
+
+Parts 2-4: spawning through the harness, a file as the output, and only `brain:review` touching the
+forge. The warrant table, the credential channels, and Amendments 1 and 2 are unchanged.
+
+### What the code does not do yet, said plainly
+
+- **The runner still reads `sdd.map`.** `review/lib/run-cold-review-stage.mjs` resolves the stage with
+  `resolveStageEngine(config, 'cold-review')` over `sdd.map`, and still branches on `codex`/`gemini`
+  by name to choose the final-message output. `brain:review --engine/--model` override
+  `sdd.map['cold-review']`, not `sdd.roles`. `sdd.roles['cold-review']` is declared, migrated and
+  validated, and read by nothing that routes. Moving the reader is #1132, and dropping the name branch
+  is #1129.
+- **Nothing resolves `brain:cold-review` to a role instance.** The Adversary instance for the stage
+  still comes from `roles/first-party/`, as before.

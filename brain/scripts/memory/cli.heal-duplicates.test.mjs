@@ -20,7 +20,7 @@ import { fileURLToPath } from 'node:url';
 
 import { testTmp } from '../lib/test-tmp.mjs';
 
-const CLI = join(dirname(fileURLToPath(import.meta.url)), 'cli.mjs');
+const CLI = join(dirname(fileURLToPath(import.meta.url)), 'cli.mjs'); const MEMORY_TEST_CONFIG = join(dirname(CLI), '__fixtures__', 'brain.config.memory.json');
 const REAL_WHICH = execFileSync('sh', ['-c', 'command -v which'], { encoding: 'utf8' }).trim();
 
 /**
@@ -118,7 +118,7 @@ function runCli({ bin, root }, args, extraEnv = {}) {
     HOME: root,
     PATH: bin,
     ENGRAM_DATA_DIR: root,
-    MEMORY_BACKEND: 'engram',
+    MEMORY_BACKEND: 'engram', BRAIN_MEMORY_CONFIG_FILE: MEMORY_TEST_CONFIG,
     ...extraEnv,
   };
   return spawnSync(process.execPath, [CLI, 'heal-duplicates', ...args], { encoding: 'utf8', env });

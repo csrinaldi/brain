@@ -23,10 +23,56 @@
 
 import { migrateConfig } from '../lib/installer.mjs';
 import { MEMORY_BACKENDS } from '../memory/lib/backend-resolve.mjs';
+import { AXES, AGENT_PLATFORMS, SDD_ENGINES, PLATFORM_CAPABILITIES } from '../lib/axis-config.mjs';
 
 // Values a path accepts, checked at WRITE time (#1165): a typo in a selector is refused here,
 // not at the next `pull` on another machine. '' is allowed — it clears to undeclared.
-const ALLOWED_VALUES = Object.freeze({ 'memory.backend': MEMORY_BACKENDS });
+// VCS providers are the two adapters under axes/vcs/adapters/ (ADR-0008).
+const VCS_PROVIDERS = Object.freeze(['github', 'gitlab']);
+const ALLOWED_VALUES = Object.freeze({
+  'memory.backend': MEMORY_BACKENDS,
+  'memory.default': MEMORY_BACKENDS,
+  'vcs.default': VCS_PROVIDERS,
+  'vcs.provider': VCS_PROVIDERS, // the legacy alias: the same closed set, or a token-shaped value reaches TRACKED config through it (#1112)
+  'platform.default': AGENT_PLATFORMS,
+  'sdd.default': SDD_ENGINES,
+});
+
+/**
+ * ADR-0038 shape paths, settable on every axis without a migration declaring them (the shape is the
+ * schema's, not a consumer's): `<axis>.default` is a leaf, `<axis>.providers` an open family.
+ */
+const AXIS_DEFAULT_PATHS = Object.freeze(AXES.map((axis) => `${axis}.default`));
+const AXIS_PROVIDER_FAMILIES = Object.freeze(AXES.map((axis) => `${axis}.providers`));
+// The names `<axis>.providers.<name>` may take: the same closed sets as `<axis>.default`, so a provider
+// key cannot carry arbitrary text into tracked config. Platform providers also include the routed
+// runtimes of PLATFORM_CAPABILITIES (codex, gemini); sdd also has brain's own provider.
+// `<axis>.locked` (ADR-0040 section 3): a boolean on the three axes a person may override. vcs has no per-person level to lock.
+const LOCKABLE_AXES = Object.freeze(AXES.filter((a) => a !== 'vcs'));
+const LOCKED_PATHS = Object.freeze(LOCKABLE_AXES.map((axis) => `${axis}.locked`));
+// `governance.owners` (ADR-0040 section 5): the humans who own the team config, as a LIST of bare forge logins. It is the one list
+// this verb writes: a JSON array, or one login / a comma-separated run of them, and a leading `@` is dropped (a forge login is bare).
+// A login is token-shaped text in tracked config, so it is held to the forge-login charset and refused otherwise.
+const LIST_PATHS = Object.freeze(['governance.owners']);
+const LOGIN_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+/** @returns {{list: string[]}|{error: string}} */
+function parseOwners(raw) {
+  // Only an explicit JSON array is parsed as JSON: a bare token such as `12345` is a string login, never a number.
+  const text = String(raw).trim();
+  let v = text;
+  if (text.startsWith('[')) { try { v = JSON.parse(text); } catch { v = text; } }
+  const items = Array.isArray(v) ? v : typeof v === 'string' ? v.split(',') : null;
+  if (items === null || items.some((i) => typeof i !== 'string')) return { error: 'must be a login, a comma-separated list of logins, or a JSON array of logins' };
+  const list = [...new Set(items.map((i) => i.trim().replace(/^@/, '')).filter((i) => i !== ''))];
+  const bad = list.find((l) => !LOGIN_RE.test(l));
+  return bad === undefined ? { list } : { error: 'every owner must be a bare forge login (letters, digits, ".", "_", "-")' };
+}
+const PROVIDER_NAMES = Object.freeze({
+  vcs: VCS_PROVIDERS,
+  memory: MEMORY_BACKENDS,
+  platform: Object.keys(PLATFORM_CAPABILITIES),
+  sdd: [...SDD_ENGINES, 'brain'],
+});
 
 /**
  * Walks every migration's `defaults` tree once.
@@ -95,13 +141,55 @@ function nearestKnown(path, known) {
 }
 
 /**
+ * #1114 S3.2: `memory.backend` and `vcs.provider` are the keys every refusal, hook and script still
+ * names as the fix, and `readAxis` PREFERS the ADR-0038 shape once the migration wrote it. Without
+ * this, `brain:config set memory.backend plainfiles` on a migrated config would write a key nothing
+ * reads. So on an axis that already has the shape, the legacy write also moves `<axis>.default` and
+ * declares the provider (`{}` when absent, never overwriting an entry's settings). S2 retires the
+ * legacy keys and the fixes name `<axis>.default` instead; this goes with them.
+ */
+const LEGACY_SELECTORS = Object.freeze({ 'memory.backend': 'memory', 'vcs.provider': 'vcs' });
+function mirrorLegacySelector(next, path) {
+  const axis = LEGACY_SELECTORS[path];
+  const node = next[axis];
+  if (!axis || node === null || typeof node !== 'object' || !Object.hasOwn(node, 'default')) return;
+  const value = node[path.split('.')[1]];
+  if (typeof value !== 'string') return;
+  node.default = value;
+  if (value === '') return;
+  if (node.providers === null || typeof node.providers !== 'object' || Array.isArray(node.providers)) node.providers = {};
+  if (!Object.hasOwn(node.providers, value)) node.providers[value] = {};
+}
+
+/**
+ * #1114 S3.3 (ratified point 2): `set <axis>.default <name>` also declares `<axis>.providers.<name>`
+ * as `{}` when absent, so the command every refusal names always yields a config where the default
+ * is a key of `providers`. Never overwrites an entry's settings; clearing deletes nothing.
+ * During the alias window `memory.default` and `vcs.default` also write the legacy key the
+ * un-routed readers still read (`memory.backend`, `vcs.provider`); platform and sdd have none to
+ * mirror (the flat `platform` string is the same key as the new object). S2 retires this mirror.
+ */
+const LEGACY_OF_DEFAULT = Object.freeze({ memory: 'backend', vcs: 'provider' });
+function declareDefault(next, path) {
+  const [axis, key, ...rest] = path.split('.');
+  if (key !== 'default' || rest.length > 0 || !AXES.includes(axis)) return;
+  const node = next[axis];
+  const value = node.default;
+  if (typeof value !== 'string') return;
+  if (LEGACY_OF_DEFAULT[axis]) node[LEGACY_OF_DEFAULT[axis]] = value;
+  if (value === '') return;
+  if (node.providers === null || typeof node.providers !== 'object' || Array.isArray(node.providers)) node.providers = {};
+  if (!Object.hasOwn(node.providers, value)) node.providers[value] = {};
+}
+
+/**
  * The ONE write path. Refuses closed on an unknown path; migrates first;
  * writes one value. Never touches I/O.
  *
  * @param {{config: object, path: string, value: string, migrations: Array<object>, targetVersion: string}} args
  * @returns {{next: object|null, migrationsApplied: string[], refusal: string|null}}
  */
-export function planConfigWrite({ config, path, value, migrations, targetVersion }) {
+export function planConfigWrite({ config, path, value, migrations, targetVersion, axisContext = null }) {
   if (hasEmptySegment(path)) {
     return {
       next: null,
@@ -127,12 +215,33 @@ export function planConfigWrite({ config, path, value, migrations, targetVersion
       return {
         next: null,
         migrationsApplied: [],
-        refusal: `config: '${path}' must be one of ${allowedValues.join(' | ')} (or "" to clear) — got ${JSON.stringify(v)}. Nothing written.`,
+        // The rejected value is NOT echoed: a value refused for being token-shaped must not be printed either.
+        refusal: `config: '${path}' must be one of ${allowedValues.join(' | ')} (or "" to clear). Nothing written.`,
       };
     }
   }
+  if (LOCKED_PATHS.includes(path) && typeof parseValue(value) !== 'boolean') {
+    return { next: null, migrationsApplied: [], refusal: `config: '${path}' must be true or false. Nothing written.` };
+  }
+  let listValue;
+  if (LIST_PATHS.includes(path)) {
+    const parsed = parseOwners(value);
+    if (parsed.error) return { next: null, migrationsApplied: [], refusal: `config: '${path}' ${parsed.error}. Nothing written.` };
+    listValue = parsed.list;
+  }
+  const [pAxis, pKey, pName] = path.split('.');
+  if (pKey === 'providers' && pName !== undefined && PROVIDER_NAMES[pAxis] && !PROVIDER_NAMES[pAxis].includes(pName)) {
+    return {
+      next: null,
+      migrationsApplied: [],
+      refusal: `config: '${pAxis}.providers.<name>' takes a name from ${PROVIDER_NAMES[pAxis].join(' | ')}. Nothing written.`,
+    };
+  }
 
   const known = deriveKnownPaths(migrations);
+  for (const p of AXIS_DEFAULT_PATHS) known.leaves.add(p);
+  for (const f of AXIS_PROVIDER_FAMILIES) known.families.add(f);
+  for (const p of [...LOCKED_PATHS, ...LIST_PATHS]) known.leaves.add(p);
   const inFamily = [...known.families].some((f) => path.startsWith(`${f}.`));
   if (!known.leaves.has(path) && !inFamily) {
     const near = nearestKnown(path, known);
@@ -145,7 +254,7 @@ export function planConfigWrite({ config, path, value, migrations, targetVersion
     };
   }
 
-  const { config: migrated, applied } = migrateConfig(config, migrations, targetVersion);
+  const { config: migrated, applied } = migrateConfig(config, migrations, targetVersion, axisContext);
 
   const next = structuredClone(migrated);
   const keys = path.split('.');
@@ -154,7 +263,9 @@ export function planConfigWrite({ config, path, value, migrations, targetVersion
     if (node[key] == null || typeof node[key] !== 'object') node[key] = {};
     node = node[key];
   }
-  node[keys[keys.length - 1]] = parseValue(value);
+  node[keys[keys.length - 1]] = listValue ?? parseValue(value);
+  mirrorLegacySelector(next, path);
+  declareDefault(next, path);
 
   return { next, migrationsApplied: applied, refusal: null };
 }

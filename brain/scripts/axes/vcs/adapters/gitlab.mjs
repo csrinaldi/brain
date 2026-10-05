@@ -504,7 +504,7 @@ export async function labelEvents({ project, number, kind = 'issue', apiBase, to
  * — never a fabricated `[]`.
  *
  * @param {{ project: string, number: number, apiBase?: string, token?: string, proxyUrl?: string|null, fetchImpl?: Function }} params
- * @returns {Promise<Array<{ state: 'COMMENTED'|'APPROVED', author: string|null, body: string }>|null>}
+ * @returns {Promise<Array<{ state: 'COMMENTED'|'APPROVED', author: string|null, body: string, commitId: null }>|null>}
  */
 export async function prReviews({ project, number, apiBase, token, proxyUrl, fetchImpl } = {}) {
   const encoded = encodeURIComponent(project);
@@ -544,12 +544,14 @@ export async function prReviews({ project, number, apiBase, token, proxyUrl, fet
   // block, so they are dropped rather than passed through as noise.
   const commented = notes
     .filter(n => n?.system !== true)
-    .map(n => ({ state: 'COMMENTED', author: n?.author?.username ?? null, body: n?.body ?? '' }));
+    .map(n => ({ state: 'COMMENTED', author: n?.author?.username ?? null, body: n?.body ?? '', commitId: null }));
 
   const approved = (approvals?.approved_by ?? []).map(a => ({
     state: 'APPROVED',
     author: a.user?.username ?? null,
     body: '',
+    // #1263 S4: GitLab's approvals endpoint says WHO approved, not against which head — `null`, never guessed.
+    commitId: null,
   }));
 
   // Approvals are appended AFTER the chronological notes rather than

@@ -26,7 +26,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -63,7 +63,7 @@ const MUST_NOT_SHIP = Object.freeze([
  * delivery.mjs and their suites). Organic growth, no bulk. Whether every
  * vendored suite must ship is tracked in #1076.
  */
-const SIZE_CANARY_MB = 9.7; // 9 -> 9.1 -> 9.2 (#1218) -> 9.3 (#1201) -> 9.4 (#1257) -> 9.5 (#1199) -> 9.6 (#883) -> 9.7 (#1284): read what was added, the in-flight model, the change-dir log reader, their suites, ~60 KB, no bulk (#1076)
+const SIZE_CANARY_MB = 10.2; // 1.12.0 cut (#1340): measured 10.10 MiB / 898 files, +1.5 KB over the 10.1 line from the README adapters table and the version string (CHANGELOG, docs and openspec do not ship); no bulk. Previous line, 10.1: the #1114 tracker line (… -> 9.8, #1263) and main's line (… -> 9.7, #1284) merged on 2026-10-05: measured 10.06 MiB / 896 files after the merge, both lines' growth read and no bulk. *.test.mjs suites are most of it — #1076 is the real fix, and every raise since 9.3 says so
 
 /**
  * The real packed contents — read from the ACTUAL tarball, not from npm's
@@ -127,7 +127,19 @@ function isPacked(managedPath, files) {
   return files.includes(managedPath);
 }
 
-const { files, unpackedSize, entryCount } = packedContents();
+// A promote proof file (#1346) is planted for the pack and removed right after: `brain:promote` writes one beside
+// brain/core/config-migrations.mjs and removes it in a finally, but a killed run could leave it, and brain/core
+// ships as a whole directory. The exclusion is asserted against the real tarball, below.
+const PLANTED_PROOF = join(REPO_ROOT, 'brain', 'core', `.brain-promote-proof-${process.pid}-0.mjs`);
+writeFileSync(PLANTED_PROOF, '// planted by publish-allowlist.e2e.test.mjs\n', 'utf8');
+let packed;
+try { packed = packedContents(); } finally { rmSync(PLANTED_PROOF, { force: true }); }
+const { files, unpackedSize, entryCount } = packed;
+
+test('publish-allowlist: a stale promote proof file never ships (#1346)', () => {
+  assert.ok(files.includes('brain/core/config-migrations.mjs'), 'vacuity guard: brain/core did ship, so the absence below is the exclusion');
+  assert.deepEqual(files.filter((f) => f.includes('.brain-promote-proof-')), []);
+});
 const byteNeeding = managed.filter((p) => NEEDS_BYTES.includes(managedStrategy[p] ?? STRATEGY.COPY));
 
 // ── Vacuity guards — a broken reader must not read as a clean tarball ───────

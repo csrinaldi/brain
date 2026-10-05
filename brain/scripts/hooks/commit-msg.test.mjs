@@ -38,7 +38,7 @@ function runHook(message) {
     const msgFile = join(dir, 'COMMIT_EDITMSG');
     writeFileSync(msgFile, message);
     const result = spawnSync('sh', [HOOK_PATH, msgFile], {
-      env: { PATH: process.env.PATH, HOME: process.env.HOME ?? '/tmp' },
+      env: { PATH: process.env.PATH, HOME: process.env.HOME ?? '/tmp', BRAIN_HOME: process.env.BRAIN_HOME || '/nonexistent/brain-home' },
       encoding: 'utf8',
       timeout: 5000,
     });

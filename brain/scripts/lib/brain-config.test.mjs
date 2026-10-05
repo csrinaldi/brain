@@ -160,7 +160,9 @@ test('ensureBrainConfig: creates config when missing with github identity', () =
     assert.equal(cfg.vcs.provider, 'github');
     assert.equal(cfg.project.gitHost, 'github.com');
     assert.equal(cfg.project.slug, 'owner/repo');
-    assert.equal(cfg.schemaVersion, '1.9.1', 'memory.backend (1.9.1, issue #1165) is now the latest — the 0.6.0 memory.dualWrite gap (D3/C4, issue #229) stays a deliberate, never-reused retirement mark');
+    assert.equal(cfg.schemaVersion, '1.12.1', 'the axis-shape repair (1.12.1, issue #1344) is now the latest; the ADR-0038 axis-shape migration (1.11.1, issue #1114 S3.2) precedes it — the 0.6.0 memory.dualWrite gap (D3/C4, issue #229) stays a deliberate, never-reused retirement mark');
+    assert.equal(cfg.vcs.default, 'github', 'a fresh config writes the ADR-0038 shape for vcs (#1114 S3.3), with the legacy key beside it for the alias window');
+    assert.deepEqual(cfg.vcs.providers, { github: {} });
     assert.equal(cfg.memory.backend, '', 'memory.backend ships EMPTY (undeclared): a default would choose a backend for a team that never chose one (#1165) — env:init asks and writes it');
     assert.deepEqual(cfg.sdd.map, {}, 'sdd.map ships EMPTY: a routed cold-review would spawn an engine no consumer asked for');
     assert.deepEqual(cfg.sdd.stages, {}, 'sdd.stages ships EMPTY: the four lifecycle stages live in sdd-layout.mjs LIFECYCLE_STAGES, never duplicated into JSON (#456)');
@@ -199,17 +201,17 @@ test('ensureBrainConfig: creates config when missing with gitlab identity', () =
   }
 });
 
-test('ensureBrainConfig: existing config → fills empty gitHost/slug, does NOT overwrite provider', () => {
+test('ensureBrainConfig: existing config → REPORTS empty gitHost/slug (derived value included) and writes nothing (#1263)', () => {
   const dir = makeTmpConfig(); // provider='github', gitHost='', slug=''
   try {
     const result = ensureBrainConfig(dir, { identity: { host: 'github.com', project: 'owner/repo' } });
     assert.equal(result.created, false);
-    assert.ok(result.filled.includes('gitHost'), 'should fill gitHost');
-    assert.ok(result.filled.includes('slug'), 'should fill slug');
+    assert.deepEqual(result.filled, []);
+    assert.deepEqual(result.missing, [{ key: 'gitHost', value: 'github.com' }, { key: 'slug', value: 'owner/repo' }]);
 
     const cfg = readCfg(dir);
-    assert.equal(cfg.project.gitHost, 'github.com');
-    assert.equal(cfg.project.slug, 'owner/repo');
+    assert.equal(cfg.project.gitHost, '');
+    assert.equal(cfg.project.slug, '');
     assert.equal(cfg.vcs.provider, 'github'); // NOT overwritten
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -401,4 +403,62 @@ test('ensureBrainConfig (#1127): an existing brain.config.json that cannot be pa
     assert.match(result.error ?? '', /parse|JSON/i);
     assert.equal(readFileSync(join(dir, 'brain.config.json'), 'utf8'), '{ not json', 'the file is left untouched');
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// ── #1114 S3.3: a fresh config carries the ADR-0038 shape on every axis ───────────────────────
+test('#1114 S3.3 ensureBrainConfig: a fresh config declares the shape for all four axes; only vcs is derived, the rest are undeclared until env:init', async () => {
+  const { readAxis, validateAxisConfig, AXES } = await import('./axis-config.mjs');
+  const dir = mkdtempSync(join(tmpdir(), 'brain-ensure-shape-'));
+  try {
+    ensureBrainConfig(dir, { identity: { host: 'gitlab.com', project: 'group/repo' } });
+    const cfg = JSON.parse(readFileSync(join(dir, 'brain.config.json'), 'utf8'));
+    for (const axis of AXES) assert.equal(readAxis(cfg, axis).source, 'shape', `${axis} is written in the ADR-0038 shape`);
+    assert.equal(cfg.vcs.default, 'gitlab');
+    assert.equal(cfg.vcs.provider, 'gitlab', 'legacy key kept during the alias window');
+    assert.deepEqual(cfg.vcs.providers, { gitlab: {} });
+    assert.equal(cfg.memory.default, '', 'memory is a team choice: never defaulted (#1165)');
+    assert.equal(cfg.memory.backend, '');
+    assert.equal(cfg.platform.default, '');
+    assert.equal(cfg.sdd.default, '');
+    assert.deepEqual(cfg.sdd.providers, { brain: { version: 'self' } }, "the brain SDD provider is declared on every consumer, as the migration does");
+    assert.equal(typeof cfg.platform, 'object', 'the flat `platform` string never appears');
+    assert.deepEqual(validateAxisConfig(cfg).errors, []);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('#1114 S3.3 ensureBrainConfig: no origin identity leaves vcs undeclared in the shape, not absent', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'brain-ensure-noid-'));
+  try {
+    ensureBrainConfig(dir, { identity: { host: null, project: null } });
+    const cfg = JSON.parse(readFileSync(join(dir, 'brain.config.json'), 'utf8'));
+    assert.equal(cfg.vcs.default, '');
+    assert.deepEqual(cfg.vcs.providers, {});
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ── the founding shape (#1263 slice 3, ADR-0040 sections 3-5) ─────────────────────────────────────────────────────────
+test('#1263 founding: memory and sdd are locked, platform is free, governance.owners starts empty, and the config validates', async () => {
+  const { validateAxisConfig, tryResolveAxis } = await import('./axis-config.mjs');
+  const dir = mkdtempSync(join(tmpdir(), 'brain-found-'));
+  try {
+    ensureBrainConfig(dir, { identity: { host: 'github.com', project: 'o/r' } });
+    const cfg = readCfg(dir);
+    assert.equal(cfg.memory.locked, true);
+    assert.equal(cfg.sdd.locked, true);
+    assert.notEqual(cfg.platform.locked, true, 'platform stays free: a person owns the tool they run');
+    assert.equal(Object.hasOwn(cfg.vcs, 'locked'), false);
+    assert.deepEqual(cfg.governance.owners, []);
+    assert.equal(cfg.memory.default, '', 'a locked axis may be undeclared: the team must declare it');
+    assert.equal(validateAxisConfig(cfg).ok, true, JSON.stringify(validateAxisConfig(cfg).errors));
+    // a locked + undeclared axis resolves to UNDECLARED (the honest answer), never to a lock refusal, when nothing overrides it
+    const r = tryResolveAxis('memory', { env: {}, dotenv: {}, config: cfg, notice: () => {} });
+    assert.equal(r.ok, false);
+    assert.equal(r.refusal.code, 'undeclared');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

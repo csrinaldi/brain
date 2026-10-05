@@ -76,9 +76,15 @@ cd "$REPO_ROOT"
 # Non-fatal: degrades gracefully if git is absent or node is not yet available.
 # The failure is still REPORTED (not silently walked past, issue #1093): a
 # bare `|| true` here gave zero signal, not even a warning line.
-_config_existed=true
-[ -f brain.config.json ] || _config_existed=false
-node "$BRAIN_SCRIPTS/lib/brain-config.mjs" ensure || {
+# FOUNDING vs EXISTING (ADR-0040 section 4, issue #1263 slice 2), decided ONCE, here, by the creator of the file:
+# `ensure --founding-file` records whether THIS run created brain.config.json. Nothing below re-derives it from a file test.
+#   founding -> env:init declares the team defaults (every axis; memory only from a TTY answer);
+#   existing -> env:init NEVER writes brain.config.json: a personal choice goes to the user layer through
+#               `config/cli.mjs user-set`, and a team axis nobody declared is refused with its named fix.
+# A signal that cannot be read means "existing": the safe side, where nothing team-wide is written.
+_founding=false
+_founding_file="$(mktemp)"
+node "$BRAIN_SCRIPTS/lib/brain-config.mjs" ensure --founding-file "$_founding_file" || {
   printf '  \xe2\x9a\xa0 brain.config.json: ensure step failed (see error above)\n' >&2
   # By CAUSE: a config that cannot be parsed makes every later config read meaningless, so it is
   # REQUIRED; any other ensure failure (e.g. the tier notice) stays optional (#1127).
@@ -88,6 +94,8 @@ node "$BRAIN_SCRIPTS/lib/brain-config.mjs" ensure || {
     MISSING_OPTIONAL+=("brain.config.json ensure")
   fi
 }
+if [ "$(cat "$_founding_file" 2>/dev/null)" = "founding" ]; then _founding=true; fi
+rm -f "$_founding_file"
 
 # Scaffold brain/HOME.md if absent (never overwrites an existing one — the file
 # is consumer-owned once it exists). Non-fatal, idempotent: re-running env:init
@@ -101,9 +109,13 @@ node "$BRAIN_SCRIPTS/lib/home-scaffold.mjs" ensure || { printf '  \xe2\x9a\xa0 b
 # PROJECT_PATH: brain.config.json project.slug, then origin project path.
 # Read via mapfile (one value per line) — never eval — so repo-identity values
 # (which can contain shell metacharacters) can't inject commands.
-mapfile -t _IDENT < <(node --input-type=module <<'NODE'
+mapfile -t _IDENT < <(BRAIN_SCRIPTS_DIR="$BRAIN_SCRIPTS" node --input-type=module <<'NODE'
 import { readFileSync } from 'node:fs';
 import { execSync } from 'node:child_process';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
+// The ADR-0038 shape first, the legacy `vcs.provider` as the alias (#1114 S3.3): one reader, no hand parsing.
+const { readAxis } = await import(pathToFileURL(join(process.env.BRAIN_SCRIPTS_DIR, 'lib/axis-config.mjs')).href);
 
 let c = {};
 try { c = JSON.parse(readFileSync('brain.config.json', 'utf8')); } catch { /* swallow-ok: an unparseable config reads as empty here and identity falls back to the git origin; `brain-config.mjs ensure` above now reports it and exits 1 (#1127) */ }
@@ -115,7 +127,7 @@ try {
   if (m) { originHost = m[1]; originProject = m[2]; }
 } catch { /* swallow-ok: no git origin means no derived host or project; the prompts and the final summary name what is still unset */ }
 
-console.log(process.env.VCS_PROVIDER || c.vcs?.provider || '');
+console.log(process.env.VCS_PROVIDER || readAxis(c, 'vcs').default || '');
 console.log(c.project?.gitHost || originHost  || '');
 console.log(c.project?.slug    || originProject || '');
 NODE
@@ -129,7 +141,7 @@ export VCS_HOST
 
 # Interactive: on a TTY, after a fresh creation, show derived values and let the
 # developer confirm or override the VCS provider. Non-TTY → use derived silently.
-if [ -t 0 ] && [ "$_config_existed" = false ] && [ -n "$VCS_PROVIDER$VCS_HOST$PROJECT_PATH" ]; then
+if [ -t 0 ] && [ "$_founding" = true ] && [ -n "$VCS_PROVIDER$VCS_HOST$PROJECT_PATH" ]; then
   printf '\n  Derived from git origin:\n'
   printf '    provider : %s\n' "${VCS_PROVIDER:-?}"
   printf '    gitHost  : %s\n' "${VCS_HOST:-?}"
@@ -154,16 +166,12 @@ if [ -t 0 ] && [ "$_config_existed" = false ] && [ -n "$VCS_PROVIDER$VCS_HOST$PR
   done
   if [ -n "$_override" ] && [ "$_override" != "$VCS_PROVIDER" ]; then
     VCS_PROVIDER="$_override"
-    # Persist the override to brain.config.json — use env var to avoid injection.
+    # Persist the override to brain.config.json through `brain:config` (#1114 S3.3): it declares
+    # `vcs.default` + `vcs.providers.<name>` and keeps the legacy `vcs.provider` in step for the
+    # alias window. The value is a validated two-value enum, passed as one argv word (no injection).
     # A failed write is a REQUIRED failure (issue #1127): the operator typed this value,
     # and losing it silently means the next run derives the wrong provider.
-    VCS_PROVIDER_OVERRIDE="$_override" node --input-type=module <<'NODE' || { printf '  \xe2\x9a\xa0 brain.config.json: could not persist the VCS provider override\n' >&2; REQUIRED_FAILURES+=("VCS provider override not persisted to brain.config.json"); }
-import { readFileSync, writeFileSync } from 'node:fs';
-const cfg = JSON.parse(readFileSync('brain.config.json', 'utf8'));
-if (!cfg.vcs) cfg.vcs = {};
-cfg.vcs.provider = process.env.VCS_PROVIDER_OVERRIDE;
-writeFileSync('brain.config.json', JSON.stringify(cfg, null, 2) + '\n');
-NODE
+    node "$BRAIN_SCRIPTS/config/cli.mjs" set vcs.default "$_override" >/dev/null 2>&1 || { printf '  \xe2\x9a\xa0 brain.config.json: could not persist the VCS provider override\n' >&2; REQUIRED_FAILURES+=("VCS provider override not persisted to brain.config.json"); }
   fi
   # --- END vcs-provider-validate ---
 fi
@@ -191,6 +199,139 @@ esac
 say()  { printf '\n\033[1m== %s ==\033[0m\n' "$1"; }
 ok()   { printf '  ✓ %s\n' "$1"; }
 warn() { printf '  ⚠ %s\n' "$1"; }
+
+# --- BEGIN axis-declare-helpers (issue #1114 S3.3, ADR-0038) ---
+# An axis selector is declared in TRACKED config (`<axis>.default` + `<axis>.providers.<name>`) through
+# `brain:config`, never written into `.env`. `.env` stays a per-machine override that is only READ.
+# `_axis_declared <axis>` prints the declared default ("" when the shape is absent or undeclared).
+# `_axis_declare <axis> <name>` declares it ONLY when nothing is declared yet: a declared default is the
+# team's and is never rewritten here. A failed write is reported with its fix, never silent.
+# It reads through `config/cli.mjs default`: the ADR-0038 shape, else the LEGACY keys. On a pre-1.11.1 consumer
+# the legacy keys ARE the declaration; reading only the shape would resolve the wrong value and write over it.
+_axis_declared() { node "$BRAIN_SCRIPTS/config/cli.mjs" default "$1" 2>/dev/null | tr -d '"\n' || true; }  # swallow-ok: an unreadable or absent config reads as undeclared, and the declare step then reports its own failure
+# `_axis_env_only <axis> <name>`: the value exists only on THIS machine (.env or the legacy SDD_HARNESS), so it is
+# NOT declared. One developer's override must not become the team's tracked default through env:init (the memory
+# prompt refuses the same thing). The sanctioned promotion of a per-machine value into config is the 1.11.1
+# migration, which prints the source of every value it writes (ADR-0038 section 7); this tells the operator the
+# explicit command instead.
+_axis_env_only() {
+  # swallow-ok: a config that already declares this axis makes the per-machine value an ordinary override, which needs no warning
+  [ -z "$(_axis_declared "$1")" ] || return 0
+  warn "$(printf "$I18N_BOOTSTRAP_AXIS_ENVONLY" "$1" "$2" "$1" "$2")"
+  MISSING_OPTIONAL+=("$1 $2 is declared only on this machine (next: npm run brain:config -- set $1.default $2)")
+}
+_axis_declare() {
+  # swallow-ok: nothing to declare, or a default already declared (the team's, never rewritten) — both are the answer, not a failure
+  [ -n "$2" ] || return 0
+  # swallow-ok: an axis that already has a declared default is left exactly as the team wrote it
+  [ -z "$(_axis_declared "$1")" ] || return 0
+  if node "$BRAIN_SCRIPTS/config/cli.mjs" set "$1.default" "$2" >/dev/null 2>&1; then
+    ok "$(printf "$I18N_BOOTSTRAP_AXIS_DECLARED" "$1" "$2" "$1")"
+  else
+    warn "$(printf "$I18N_BOOTSTRAP_AXIS_DECLAREFAILED" "$1" "$1" "$2")"
+    MISSING_OPTIONAL+=("$1 not declared in brain.config.json (next: npm run brain:config -- set $1.default $2)")
+  fi
+}
+# `_axis_resolve <axis>` runs the REAL resolver (`config/cli.mjs resolve`, `resolveAxis`, the code the runtime runs:
+# process env, .env, `<axis>.default`, the legacy alias; NO default) and sets _R_RUN (what this run uses), _R_REPO
+# (what the repo states, the process env being per-invocation) and _R_SRC (the repo value's place), _R_RUNSRC (the
+# run value's place), each one of shell|.env|user|config|none (`user` is the ~/.brain user layer, ADR-0040). The shell composes no precedence of its own: a second
+# resolver is exactly the divergence #1114 retires. The place is the resolver's `where`, never inferred by comparing values.
+#   exit 0 -> parsed; exit 3 -> nothing declares the axis (_R_UNDECLARED=1, nothing guessed);
+#   anything else -> the resolver REFUSED a value or failed: reported with its fix, no fallback, _R_REFUSED=1.
+_axis_where() {
+  case "$1" in
+    process-env) printf 'shell' ;;
+    dotenv) printf '.env' ;;
+    user) printf 'user' ;;
+    config|runtime) printf 'config' ;;
+    *) printf 'none' ;;
+  esac
+}
+_axis_resolve() {
+  _R_RUN=""; _R_REPO=""; _R_SRC="none"; _R_RUNSRC="none"; _R_UNDECLARED=0; _R_REFUSED=0
+  local _out _rc=0 _err _w1 _w2
+  _err="$(mktemp)"
+  _out="$(node "$BRAIN_SCRIPTS/config/cli.mjs" resolve "$1" 2>"$_err")" || _rc=$?  # rc is classified just below: 3 is undeclared, anything else is a refusal
+  case "$_rc" in
+    0)
+      read -r _R_RUN _R_REPO _w1 _w2 <<<"$_out"
+      [ "$_R_REPO" != "-" ] || _R_REPO=""
+      _R_RUNSRC="$(_axis_where "$_w1")"; _R_SRC="$(_axis_where "$_w2")"
+      ;;
+    3) _R_UNDECLARED=1 ;;
+    *)
+      _R_REFUSED=1
+      warn "$(printf "$I18N_BOOTSTRAP_AXIS_REFUSED" "$1" "$(head -c 400 "$_err" | tr '\n' ' ')")"
+      MISSING_OPTIONAL+=("$(printf "$I18N_BOOTSTRAP_AXIS_REFUSEDNEXT" "$1" "npm run brain:config -- resolve $1")")
+      ;;
+  esac
+  rm -f "$_err"
+}
+# `_axis_source_label <platform-src> <engine-src>` names, in words, where the run's harness values came from
+# (shell|.env|config|default, as `_axis_resolve` leaves them in _R_RUNSRC), so the success line never claims
+# brain.config.json for a value that came from .env or the process env.
+_axis_source_label() {
+  local one two
+  one="$(_axis_source_word "$1")"; two="$(_axis_source_word "$2")"
+  if [ "$one" = "$two" ]; then printf '%s' "$one"; else printf "$I18N_BOOTSTRAP_AXIS_SOURCE_SPLIT" "$one" "$two"; fi
+}
+_axis_source_word() {
+  case "$1" in
+    shell) printf '%s' "$I18N_BOOTSTRAP_AXIS_SOURCE_SHELL" ;;
+    .env) printf '%s' "$I18N_BOOTSTRAP_AXIS_SOURCE_DOTENV" ;;
+    user) printf '%s' "$I18N_BOOTSTRAP_AXIS_SOURCE_USER" ;;
+    config) printf '%s' "$I18N_BOOTSTRAP_AXIS_SOURCE_CONFIG" ;;
+    *) printf '%s' "$I18N_BOOTSTRAP_AXIS_SOURCE_DEFAULT" ;;
+  esac
+}
+# `_axis_settle <axis> <default>`: what env:init does about an axis nothing in the repo declares (ADR-0040 section 4).
+#   FOUNDING run (it created brain.config.json): DECLARES the starting value in tracked config, visibly (ADR-0038 section 7:
+#     "a new consumer: env:init declares each axis's default or asks"). A value that exists only on this machine's .env is
+#     reported and never declared; one the config already declares is left exactly as written.
+#   EXISTING repo: NEVER writes brain.config.json. The team's axes (memory, sdd, vcs) are the team's: an undeclared one is
+#     REFUSED with the named fix. Platform is free: the person's own choice goes to the user layer, through `user-set`.
+# A refused axis is never settled: it is reported by `_axis_resolve`.
+_axis_settle() {
+  # swallow-ok: a refused axis was already reported with its fix by _axis_resolve and is never declared over
+  [ "$_R_REFUSED" -eq 0 ] || return 0
+  case "$_R_SRC" in
+    none)
+      if [ "$_founding" = true ]; then
+        _axis_declare "$1" "$2"
+        [ -n "$_R_RUN" ] || { _R_RUN="$2"; _R_RUNSRC="config"; }
+        [ -n "$_R_REPO" ] || _R_REPO="$2"
+      else
+        _axis_settle_existing "$1" "$2"
+      fi
+      ;;
+    .env) _axis_env_only "$1" "$_R_REPO" ;;
+    *) : ;; # config already declares it: the team's, never rewritten
+  esac
+}
+# `_axis_team_undeclared <axis>`: the refusal for a team axis nobody declared, with its named fix. Nothing is written anywhere.
+_axis_team_undeclared() {
+  warn "$(printf "$I18N_BOOTSTRAP_AXIS_TEAMUNDECLARED" "$1" "$1")"
+  MISSING_OPTIONAL+=("$1 is not declared by the team (next: ask an owner, or propose npm run brain:config -- set $1.default <name> in a PR)")
+}
+# `_axis_settle_existing <axis> <default>`: the EXISTING-repo half of `_axis_settle`.
+_axis_settle_existing() {
+  if [ "$1" != "platform" ]; then _axis_team_undeclared "$1"; return 0; fi
+  # swallow-ok: something already states the platform for THIS person (their shell or their user layer): nothing to write
+  [ "$_R_RUNSRC" = "none" ] || return 0
+  local _err _rc=0
+  _err="$(mktemp)"
+  node "$BRAIN_SCRIPTS/config/cli.mjs" user-set "$1.default" "$2" >/dev/null 2>"$_err" || _rc=$?  # rc classified just below: a locked axis or a failed write is reported, never swallowed
+  if [ "$_rc" -eq 0 ]; then
+    ok "$(printf "$I18N_BOOTSTRAP_AXIS_USERDECLARED" "$1" "$2" "${BRAIN_HOME:-$HOME/.brain}/config.json")"
+    _R_RUN="$2"; _R_RUNSRC="user"
+  else
+    warn "$(printf "$I18N_BOOTSTRAP_AXIS_USERWRITEFAILED" "$1" "$(head -c 400 "$_err" | tr '\n' ' ')")"
+    MISSING_OPTIONAL+=("$1 not saved to your user config (next: npm run brain:config -- user-set $1.default $2)")
+  fi
+  rm -f "$_err"
+}
+# --- END axis-declare-helpers ---
 
 env_get() { grep -E "^$1=" .env 2>/dev/null | head -1 | cut -d= -f2- || true; }  # swallow-ok: grep exits 1 when the key is absent, which is the answer env_get exists to give
 env_set() {
@@ -487,6 +628,9 @@ _setup_step() {
 say "Governance labels and actor"
 _setup_step labels
 _setup_step actor
+# The FOUNDING run names its adopter as the owner of the team config (ADR-0040 sections 4-5): after `actor`, so the login is resolved.
+# An existing repo's owners are its team's decision, never seeded here (ratified point 4).
+if [ "$_founding" = true ]; then _setup_step owners; fi
 
 # --- 6. SDD implementation (replaceable harness, ADR-0012) --------------------
 # Harness-specific init is now delegated to brain/scripts/harness/cli.mjs, which
@@ -496,45 +640,41 @@ _setup_step actor
 # Runs BEFORE the memory sync so the ecosystem (skills, engram, gga) is
 # ready when memory is imported.
 say "$I18N_BOOTSTRAP_SDD_SECTION"
-# AGENT_PLATFORM — the same precedence and default as harness/platform.mjs's
-# resolvePlatform (issue #1125): process env > .env > legacy SDD_HARNESS (only
-# when it names a platform) > `claude`. This is a SECOND resolver, held to the
-# first by bootstrap.default-platform.test.mjs's parity table until #1114
-# leaves exactly one.
+# AGENT_PLATFORM and SDD_ENGINE are resolved by the REAL resolver (`config/cli.mjs resolve`, `resolveAxis`, issue
+# #1114 S2): this script composes no precedence of its own, and there is NO default in code. An axis the resolver
+# REFUSES (an invalid or unlisted value) is reported with its fix and nothing runs on a guess.
 #
-# Two answers, on purpose. `.env` records what the REPO states: an existing
-# value is never rewritten, and a repo that states nothing gets the default
-# written explicitly. A process-env AGENT_PLATFORM is per-invocation, as it is
-# for resolvePlatform: `AGENT_PLATFORM=antigravity npm run brain:env:init` (the
-# hint brain:upgrade prints) runs antigravity for that run and does not move
-# the repo off the platform it states, or off the default.
-_DOTENV_PLATFORM="$(env_get AGENT_PLATFORM)"
-_REPO_PLATFORM="$_DOTENV_PLATFORM"
-if [ -z "$_REPO_PLATFORM" ]; then
-  _LEGACY_PLATFORM="${SDD_HARNESS:-$(env_get SDD_HARNESS)}"
-  case "$_LEGACY_PLATFORM" in
-    claude|antigravity|plain) _REPO_PLATFORM="$_LEGACY_PLATFORM" ;;
-    *) _REPO_PLATFORM="claude" ;;
-  esac
+# Two answers, on purpose. The RUN value is what this invocation uses, process env included:
+# `AGENT_PLATFORM=antigravity npm run brain:env:init` (the hint brain:upgrade prints) runs antigravity for that
+# run. The REPO value is what the repo states, and only that is ever declared, through `brain:config`:
+#   - from nothing         -> declared (a new consumer: explicit in tracked config, with its providers entry);
+#   - from the config       -> left exactly as the team wrote it (a legacy-keyed config counts as declared);
+#   - only from .env        -> NEVER declared: one developer's override must not become the team's tracked
+#                              default through env:init. It is reported with the command that would declare it;
+#                              promoting a per-machine value is brain:upgrade's job, which prints its source
+#                              (ADR-0038 section 7). `.env` is only ever READ here.
+_axis_resolve platform
+_axis_settle platform claude
+AGENT_PLATFORM="$_R_RUN"
+_PLATFORM_SRC="$_R_RUNSRC"
+_axis_resolve sdd
+_axis_settle sdd gentle-ai
+SDD_ENGINE="$_R_RUN"
+_SDD_SRC="$_R_RUNSRC"
+if [ -z "$AGENT_PLATFORM" ] || [ -z "$SDD_ENGINE" ]; then
+  # Refused above, with its fix: nothing is guessed, so harness init has no harness to run.
+  warn "$I18N_BOOTSTRAP_SDD_INITFAILED"
+  REQUIRED_FAILURES+=("SDD harness not resolved (platform and engine must resolve before init)")
+else
+  ok "$(printf "$I18N_BOOTSTRAP_SDD_OK" "$SDD_ENGINE ($AGENT_PLATFORM)" "$(_axis_source_label "$_PLATFORM_SRC" "$_SDD_SRC")")"
+  # Exported, not just written to .env (issue #1093): harness/cli.mjs resolves
+  # its own repoRoot from ITS OWN module location, which is now WORKTREE_ROOT —
+  # a tree that never gets this .env write. Exporting here puts the run's values
+  # at the process-env level of `resolveAxis`, whichever .env (if any) it finds.
+  export AGENT_PLATFORM SDD_ENGINE
+  node "$BRAIN_SCRIPTS/harness/cli.mjs" init \
+    || { warn "$I18N_BOOTSTRAP_SDD_INITFAILED"; REQUIRED_FAILURES+=("SDD harness init failed"); }
 fi
-[ -n "$_DOTENV_PLATFORM" ] || env_set AGENT_PLATFORM "$_REPO_PLATFORM"
-AGENT_PLATFORM="${AGENT_PLATFORM:-$_REPO_PLATFORM}"
-
-SDD_ENGINE="$(env_get SDD_ENGINE)"
-if [ -z "$SDD_ENGINE" ]; then
-  _LEGACY_HARNESS="$(env_get SDD_HARNESS)"
-  SDD_ENGINE="${_LEGACY_HARNESS:-gentle-ai}"
-  env_set SDD_ENGINE "$SDD_ENGINE"
-fi
-ok "$(printf "$I18N_BOOTSTRAP_SDD_OK" "$SDD_ENGINE ($AGENT_PLATFORM)")"
-# Exported, not just written to .env (issue #1093): harness/cli.mjs resolves
-# its own repoRoot from ITS OWN module location, which is now WORKTREE_ROOT —
-# a tree that never gets this .env write. Its precedence is already
-# `process.env.X ?? envVars.X ?? config.X`, so exporting here is enough
-# regardless of which .env (if any) that resolution finds.
-export AGENT_PLATFORM SDD_ENGINE
-node "$BRAIN_SCRIPTS/harness/cli.mjs" init \
-  || { warn "$I18N_BOOTSTRAP_SDD_INITFAILED"; REQUIRED_FAILURES+=("SDD harness init failed"); }
 
 # --- 7. Team memory (replaceable backend, ADR-0003) --------------------------
 # MEMORY_BACKEND (issue #1165): the team's backend is a TEAM decision, so it lives in
@@ -546,10 +686,12 @@ node "$BRAIN_SCRIPTS/harness/cli.mjs" init \
 # CREATED (written to brain.config.json, NOT to .env — see the note at the write);
 # without a TTY nothing is guessed and memory setup is skipped with the fix named.
 say "$I18N_BOOTSTRAP_MEMORY_SECTION"
-MEMORY_BACKEND=""
 _mb_rc=0
 _mb_err="$(mktemp)"
+# The resolver reads the PROCESS env, so an exported MEMORY_BACKEND must still be there when it runs: clearing the variable first
+# (as this block used to) silently dropped a per-run override, including the one a `locked` memory axis must refuse (#1263).
 _mb_res="$(node "$BRAIN_SCRIPTS/memory/lib/backend-resolve.mjs" --root "$PWD" 2>"$_mb_err")" || _mb_rc=$?
+MEMORY_BACKEND=""
 _mb_source=""
 case "$_mb_rc" in
   0)
@@ -568,7 +710,11 @@ case "$_mb_rc" in
     MISSING_OPTIONAL+=("memory backend not resolved: brain.config.json unreadable (fix or restore it, then re-run env:init)")
     ;;
   3)
-    if [ -t 0 ]; then
+    if [ "$_founding" != true ]; then
+      # EXISTING repo (ADR-0040 section 4): the backend is the team's decision and env:init writes no team config here. No
+      # prompt, no guess, no write: the refusal names the fix.
+      _axis_team_undeclared memory
+    elif [ -t 0 ]; then
       # --- BEGIN memory-backend-validate (issue #1112, cold-review should-fix 3) ---
       # Same validation shape as vcs-provider-validate (finding 2) — reused
       # rather than a second style for the same class of prompt: read into a
@@ -611,12 +757,12 @@ case "$_mb_rc" in
         # The declaration goes to TRACKED config and NOT to .env: writing .env too would
         # recreate the drift this exists to stop (a stale per-machine line silently beating
         # the team's value). .env stays what it always was: a per-machine override.
-        if node "$BRAIN_SCRIPTS/config/cli.mjs" set memory.backend "$MEMORY_BACKEND" >/dev/null 2>&1; then
+        if node "$BRAIN_SCRIPTS/config/cli.mjs" set memory.default "$MEMORY_BACKEND" >/dev/null 2>&1; then
           warn "$I18N_BOOTSTRAP_MEMORY_DECLARED"
           _mb_source="config"
         else
           warn "$(printf "$I18N_BOOTSTRAP_MEMORY_DECLAREFAILED" "$MEMORY_BACKEND")"
-          MISSING_OPTIONAL+=("memory backend not saved to brain.config.json (next: npm run brain:config -- set memory.backend $MEMORY_BACKEND)")
+          MISSING_OPTIONAL+=("memory backend not saved to brain.config.json (next: npm run brain:config -- set memory.default $MEMORY_BACKEND)")
           _mb_source="prompt"
         fi
       fi

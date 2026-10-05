@@ -5,8 +5,7 @@
 // already answers, in the same order, so a local verdict is computed from the same inputs
 // as the CI verdict it anticipates:
 //
-//   · project slug    — `brain.config.json` `project.slug`, else the origin remote
-//                       (the two sources `ensureProjectIdentity` fills the field from).
+//   · project slug    — `lib/project-slug.mjs` (#1273): `project.slug`, else the origin remote.
 //   · default branch  — `DEFAULT_BRANCH` (what ci-context reads), else git's recorded
 //                       `origin/HEAD`, else the remote's own HEAD symref via
 //                       `postmerge/cursor.mjs#resolveDefaultBranch` (#1162).
@@ -18,28 +17,10 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { originIdentity } from '../vcs/lib/repo.mjs';
 import { gitTry } from '../governance/postmerge/git-seam.mjs';
 // The remote-authoritative reader #1162 added for the post-merge audit. Reused, not copied:
 // one implementation of "ask the remote what its default branch is".
 import { resolveDefaultBranch as remoteDefaultBranch } from '../governance/postmerge/cursor.mjs';
-
-/**
- * The slug the VCS port's verbs take as `project`.
- *
- * `brain.config.json` first — `brain:ship`, `brain:protect`, `brain:governance-status` and
- * `brain:next` all read `project.slug` and nothing else — then the origin remote, which is
- * where `ensureProjectIdentity` copies the slug from on `env:init`. Returns `null`, never
- * a placeholder: `repos/undefined/issues/1` is what an unset field became (#1186).
- *
- * @param {{ config?: object, identity?: () => { project: string|null } }} [opts]
- * @returns {string|null}
- */
-export function resolveProjectSlug({ config = {}, identity = originIdentity } = {}) {
-  const configured = config?.project?.slug;
-  if (typeof configured === 'string' && configured !== '') return configured;
-  return identity()?.project ?? null;
-}
 
 /**
  * The remote's default branch, with no `git remote set-head` owed by the operator (#1186).

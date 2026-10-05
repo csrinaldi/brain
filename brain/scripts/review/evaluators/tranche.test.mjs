@@ -288,7 +288,7 @@ test('gatherTrancheInputs: deps.tier="lite" resolves requiredJobs/detectionJobs 
     },
   });
   assert.equal(inputs.tier, 'lite');
-  assert.deepEqual(inputs.detectionJobs, ['memory-gate', 'phase-order']);
+  assert.deepEqual(inputs.detectionJobs, ['memory-gate', 'phase-order', 'team-config-reviewed']);
   assert.ok(inputs.requiredJobs.includes('actor-check'));
   assert.ok(inputs.requiredJobs.includes('brain-writes-reviewed'));
   assert.ok(!inputs.requiredJobs.includes('phase-order'));

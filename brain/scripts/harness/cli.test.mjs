@@ -3,7 +3,7 @@
 // Acceptance criteria:
 //   (a) resolveHarness: env var (SDD_HARNESS) wins over .env file value.
 //   (b) resolveHarness: .env value used when env var absent.
-//   (c) resolveHarness: defaults to 'gentle-ai' when both absent.
+//   (c) resolveHarness: both absent is refused (no default since #1114 S2).
 //   (d) dispatch: calls 'init' on the resolved backend (injectable fake).
 //   (e) dispatch: unknown harness → throws a clear error.
 //   (f) dispatch: unknown op → throws a clear error.
@@ -15,7 +15,11 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { resolveHarness, resolvePlatform, resolveEngine, dispatch, VALID_OPS } from './cli.mjs';
-import { SDD_ENGINES, DEFAULT_PLATFORM, AGENT_PLATFORMS } from './platform.mjs';
+import { SDD_ENGINES, AGENT_PLATFORMS } from './platform.mjs';
+import * as platformModule from './platform.mjs';
+import { AxisRefusal } from '../lib/axis-config.mjs';
+
+const refusal = (fn, code = 'undeclared') => assert.throws(fn, (e) => e instanceof AxisRefusal && e.code === code);
 
 // ── 3-axis resolution tests (issue #305) ───────────────────────────────────
 
@@ -39,25 +43,22 @@ test('resolvePlatform: falls back to legacy SDD_HARNESS when platform absent', (
   assert.equal(result, 'antigravity');
 });
 
-// #1125 — the default is `claude` (ADR-0024 Amendment 2). Until #1125 this test
-// pinned `antigravity`, ADR-0024's "deliberate default"; the maintainer's ruling
-// of 2026-09-24 moved it. Updated, not deleted: the default is still pinned, it is
-// just a different value.
-test('resolvePlatform: defaults to claude when nothing is stated (#1125)', () => {
-  assert.equal(resolvePlatform({ env: {}, envVars: {} }), 'claude');
-  assert.equal(resolvePlatform({ env: {}, envVars: {}, config: {} }), 'claude');
-  assert.equal(resolvePlatform({ env: {} }), 'claude');
+// #1114 S2 (ADR-0038 section 3) — there is NO default platform. #1125 made `claude` the default (ADR-0024 Amendment 2) and
+// S2 retires it: nothing declared is a REFUSAL that names the fix. Updated, not deleted: the absence is still pinned.
+test('resolvePlatform: nothing stated is REFUSED with the fix named, never claude (#1114 S2)', () => {
+  for (const opts of [{ env: {}, envVars: {} }, { env: {}, envVars: {}, config: {} }, { env: {} }]) {
+    assert.throws(() => resolvePlatform(opts), (e) => e instanceof AxisRefusal && e.code === 'undeclared' && /brain:config -- set platform\.default <claude\|antigravity\|plain>/.test(e.message));
+  }
 });
 
-test('resolvePlatform: DEFAULT_PLATFORM is the one declaration of the default, and it is claude (#1125)', () => {
-  assert.equal(DEFAULT_PLATFORM, 'claude');
-  assert.equal(resolvePlatform({ env: {}, envVars: {} }), DEFAULT_PLATFORM);
+test('resolvePlatform: there is no DEFAULT_PLATFORM / DEFAULT_ENGINE declaration left to fall back to (#1114 S2)', () => {
+  assert.equal('DEFAULT_PLATFORM' in platformModule, false);
+  assert.equal('DEFAULT_ENGINE' in platformModule, false);
 });
 
-test('resolvePlatform: a legacy SDD_HARNESS outside the platform set falls to the claude default, not to itself (#1125)', () => {
-  // `gentle-ai` is an ENGINE (ADR-0024); as a legacy SDD_HARNESS it must not
-  // leak into the platform axis.
-  assert.equal(resolvePlatform({ env: {}, envVars: { SDD_HARNESS: 'gentle-ai' } }), 'claude');
+test('resolvePlatform: a legacy SDD_HARNESS outside the platform set is REFUSED as undeclared, not leaked into the axis', () => {
+  // `gentle-ai` is an ENGINE (ADR-0024); as a legacy SDD_HARNESS it must not feed the platform axis.
+  refusal(() => resolvePlatform({ env: {}, envVars: { SDD_HARNESS: 'gentle-ai' } }));
 });
 
 test('resolvePlatform: a stated antigravity still resolves to antigravity on EVERY path (#1125)', () => {
@@ -97,9 +98,8 @@ test('resolveEngine: falls back to legacy SDD_HARNESS when engine absent', () =>
   assert.equal(result, 'plain');
 });
 
-test('resolveEngine: defaults to gentle-ai when absent', () => {
-  const result = resolveEngine({ env: {}, envVars: {} });
-  assert.equal(result, 'gentle-ai');
+test('resolveEngine: nothing stated is REFUSED with the fix named, never gentle-ai (#1114 S2)', () => {
+  assert.throws(() => resolveEngine({ env: {}, envVars: {} }), (e) => e instanceof AxisRefusal && e.code === 'undeclared' && /brain:config -- set sdd\.default <gentle-ai\|plain>/.test(e.message));
 });
 
 // ── #312 D2 supporting change: SDD_ENGINES is ONE declaration, cli.mjs is a reader ──
@@ -122,8 +122,7 @@ test('#312 D2: resolveEngine via SDD_HARNESS is unchanged — every SDD_ENGINES 
     const result = resolveEngine({ env: {}, envVars: { SDD_HARNESS: engine } });
     assert.equal(result, engine, `${engine} must still resolve via the legacy SDD_HARNESS fallback`);
   }
-  const result = resolveEngine({ env: {}, envVars: { SDD_HARNESS: 'not-a-real-engine' } });
-  assert.equal(result, 'gentle-ai', 'an SDD_HARNESS value outside SDD_ENGINES must still fall through to the default, unchanged');
+  refusal(() => resolveEngine({ env: {}, envVars: { SDD_HARNESS: 'not-a-real-engine' } }));
 });
 
 test('#312 D2: cli.mjs holds no inline engine-membership literal of its own — SDD_ENGINES is the one declaration', async () => {
@@ -139,20 +138,15 @@ test('#312 D2: cli.mjs holds no inline engine-membership literal of its own — 
 // ── (b) resolveHarness: .env value used when env var absent ──────────────────
 
 test('resolveHarness: envVars used when env var absent', () => {
-  const result = resolveHarness({ env: {}, envVars: { SDD_HARNESS: 'from-file' } });
-  assert.equal(result, 'from-file');
+  const result = resolveHarness({ env: {}, envVars: { SDD_HARNESS: 'plain' } });
+  assert.equal(result, 'plain');
 });
 
 // ── (c) resolveHarness: defaults to gentle-ai ────────────────────────────────
 
-test('resolveHarness: defaults to gentle-ai when both absent', () => {
-  const result = resolveHarness({ env: {}, envVars: {} });
-  assert.equal(result, 'gentle-ai');
-});
-
-test('resolveHarness: defaults to gentle-ai when env is empty object and no envVars', () => {
-  const result = resolveHarness({ env: {} });
-  assert.equal(result, 'gentle-ai');
+test('resolveHarness: both absent is REFUSED (the gentle-ai default is retired, #1114 S2)', () => {
+  refusal(() => resolveHarness({ env: {}, envVars: {} }));
+  refusal(() => resolveHarness({ env: {} }));
 });
 
 // ── (d) dispatch: calls init on the resolved backend ─────────────────────────

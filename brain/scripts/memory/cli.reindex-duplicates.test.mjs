@@ -23,7 +23,7 @@ import { fileURLToPath } from 'node:url';
 import { buildRecord, serializeRecord } from './lib/format.mjs';
 import { removeTempTree } from '../lib/tmp-tree.mjs';
 
-const CLI = join(dirname(fileURLToPath(import.meta.url)), 'cli.mjs');
+const CLI = join(dirname(fileURLToPath(import.meta.url)), 'cli.mjs'); const MEMORY_TEST_CONFIG = join(dirname(CLI), '__fixtures__', 'brain.config.memory.json');
 
 const base = {
   ts: '2026-07-04T12:00:00Z',
@@ -55,7 +55,7 @@ function fixtureRoot(t, lines) {
 function runCli(root, ...args) {
   return spawnSync(process.execPath, [CLI, ...args], {
     encoding: 'utf8',
-    env: { ...process.env, BRAIN_MEMORY_TEST_ROOT: root, MEMORY_BACKEND: 'plainfiles', ...ISOLATED_GIT_ENV },
+    env: { ...process.env, BRAIN_MEMORY_TEST_ROOT: root, MEMORY_BACKEND: 'plainfiles', BRAIN_MEMORY_CONFIG_FILE: MEMORY_TEST_CONFIG, ...ISOLATED_GIT_ENV },
   });
 }
 

@@ -5,7 +5,7 @@ the first days of using brain in a repository you did not build brain in. Each o
 found live, most of them by the `#1081` consumer demonstration (a fresh, empty
 repository installing the published `@logikas/brain` package). Every item links its
 tracking issue, where one exists, and states the practical workaround, if one exists.
-This list describes brain **1.11.0**.
+This list describes brain **1.12.1**.
 
 This is not a scorecard of brain's own test suite — brain's suite is green on all of
 these, which is the point: none of them shows up in brain's own repository (see
@@ -150,6 +150,54 @@ healthy tree.
   as if none existed.
   **Workaround:** `git config --local brain.actor @<handle>` after `env:init`, if the
   earlier value mattered.
+
+## Team config, owners and the user layer (1.12.0)
+
+- **On GitLab at `standard` and `regulated`, `team-config-reviewed` cannot pass by approval.**
+  ([#1281](https://github.com/csrinaldi/brain/issues/1281)) GitLab's approvals API does not say
+  which commit an approval was given on, so `prReviews` returns `commitId: null` and the gate fails
+  closed rather than accept a possibly stale approval (ADR-0040 Amendment 1). A change to
+  `brain.config.json` is blocked at those tiers, and brain offers no way through. At `lite` the gate
+  only warns. An MR pipeline also does not re-run when an approval lands. **Workaround:** re-run the
+  pipeline after approving; on GitLab at `standard` or `regulated` there is none for the gate itself.
+
+- **`brain:config user-set` can write a value the resolver then refuses.**
+  ([#1339](https://github.com/csrinaldi/brain/issues/1339)) It checks only that the name is
+  provider-shaped. `user-set platform.default codex` succeeds and saves to your user layer, and the
+  next `brain:config -- resolve platform` exits 4 (`platform "codex" ... is not a platform brain
+  ships (claude|antigravity|plain)`). **Workaround:** use a name the axis ships, and correct or
+  remove the line in `${BRAIN_HOME:-~/.brain}/config.json`.
+
+- **`brain-writes-reviewed` skips when the PR author cannot be resolved.**
+  ([#1334](https://github.com/csrinaldi/brain/issues/1334)) If the forge call that reads the author
+  fails, the gate returns a warning and reads no diff, so a change to `brain/core/**` or
+  `brain/project/**` passes a gate that is required at every tier. `team-config-reviewed` was fixed
+  for the same defect (#1333); this one was not. **Workaround:** re-run the check when the forge is
+  reachable.
+
+- **The memory refusal still tells you to run `env:init`.** (#1341) The text of the
+  `brain:memory:*` refusal ends "Or run `npm run brain:env:init`, which asks once and writes it".
+  In a repository that already has a `brain.config.json`, `env:init` asks nothing and writes
+  nothing (1.12.0). **Workaround:** `npm run brain:config -- set memory.default <engram|plainfiles>`
+  in a PR.
+
+## Release safety
+
+- **`test:upgrade` and the `upgrade-smoke` workflow test published releases only.**
+  ([#1325](https://github.com/csrinaldi/brain/issues/1325), closed) FROM is installed from the
+  registry and TO is the newest git tag, so an upgrade cannot be measured on the registry before it
+  is published, and nothing in a pull request's own tree reaches the run. Before a publish, run the
+  upgrade by hand against `npm pack` of the release commit; `brain:upgrade -- <tag> --no-install`
+  then cannot tell a file you edited from one brain changed (it says so).
+
+- **`brain:upgrade` runs the upgrader you already have, against the incoming migrations.**
+  ([#1344](https://github.com/csrinaldi/brain/issues/1344)) `npm i` replaces the package after the
+  script is loaded, so the old script calls its own `migrateConfig` over the new migration list. 1.12.0
+  broke on this (a migration that needs a context got none); 1.12.1 makes the axis-shape migration build its
+  own and adds a repair migration, but the contract trap remains for any future migration that needs
+  something new from its caller. **Follow-up:** the upgrader should re-exec the incoming
+  `brain-upgrade.mjs` after install. **Workaround:** after any upgrade, check that what the CHANGELOG says
+  was written is in `brain.config.json`.
 
 ## Platform axis
 

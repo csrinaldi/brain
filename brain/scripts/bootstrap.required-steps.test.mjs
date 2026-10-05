@@ -13,7 +13,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, readFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, readFileSync, existsSync } from 'node:fs';
 import { removeTempTree } from './__fixtures__/tmp-tree.mjs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -72,8 +72,16 @@ const scriptsWith = (dir, rel, body) => {
 
 test('#1127 bootstrap: a failing SDD init is a REQUIRED failure', () => inTmp((dir) => {
   const scripts = scriptsWith(dir, 'harness/cli.mjs', 'process.exit(1);\n');
-  const out = required(region('node "$BRAIN_SCRIPTS/harness/cli.mjs" init', '# --- 7.'), `BRAIN_SCRIPTS=${JSON.stringify(scripts)}`, dir);
+  // the init call sits inside §6's `else` (it only runs once both axes resolved), so the lifted region opens its own `if`.
+  const out = required(`if true; then\n${region('node "$BRAIN_SCRIPTS/harness/cli.mjs" init', '# --- 7.')}`, `BRAIN_SCRIPTS=${JSON.stringify(scripts)}`, dir);
   assert.match(out, /REQ=.*SDD/, out);
+}));
+
+test('#1114 S2 bootstrap: an axis the resolver refused leaves NO harness to init, and that is a REQUIRED failure — nothing guessed', () => inTmp((dir) => {
+  const scripts = scriptsWith(dir, 'harness/cli.mjs', 'require("node:fs").writeFileSync(require("node:path").join(__dirname, "ran"), "x");\n');
+  const out = required(region('if [ -z "$AGENT_PLATFORM" ]', '# --- 7.'), `BRAIN_SCRIPTS=${JSON.stringify(scripts)}; AGENT_PLATFORM=""; SDD_ENGINE=gentle-ai`, dir);
+  assert.match(out, /REQ=.*SDD harness not resolved/, out);
+  assert.equal(existsSync(join(scripts, 'harness', 'ran')), false, 'init did not run on a guessed harness');
 }));
 
 test('#1127 bootstrap: a failing core.hooksPath config is a REQUIRED failure', () => inTmp((dir) => {
@@ -115,7 +123,7 @@ test('#1127 bootstrap: a failing VCS login (a token was provided) is a REQUIRED 
 
 test('#1127 bootstrap: an unwritable VCS-provider override is a REQUIRED failure, not a swallowed catch', () => inTmp((dir) => {
   writeFileSync(join(dir, 'brain.config.json'), '{ this is not json');
-  const out = required(region('VCS_PROVIDER_OVERRIDE="$_override" node', 'fi'), '_override=github', dir);
+  const out = required(region('node "$BRAIN_SCRIPTS/config/cli.mjs" set vcs.default', 'fi'), `_override=github; BRAIN_SCRIPTS=${JSON.stringify(HERE)}`, dir);
   assert.match(out, /REQ=.*provider override/i, out);
 }));
 

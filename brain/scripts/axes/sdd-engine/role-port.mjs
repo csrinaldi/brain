@@ -22,9 +22,12 @@
 //      validates them — the contract is imposed ON the inhabitant by a test,
 //      never imported BY it.
 
-import { resolveStageSet } from '../../lib/sdd-layout.mjs';
+import { resolveStageSet, LIFECYCLE_STAGES } from '../../lib/sdd-layout.mjs';
 import { resolveStageConfigs } from '../../lib/stage-config.mjs';
+import { SDD_ENGINES } from '../../lib/axis-config.mjs'; // circular with axis-config (which imports declaredDefaultRole); read only at call time
 import { harnessAdapterUrl } from '../lib/harness-adapter-url.mjs';
+import { declareRoles as declareGentleAi } from './adapters/gentle-ai.roles.mjs';
+import { declareRoles as declarePlain } from './adapters/plain.mjs';
 
 /**
  * The abstract model tiers a role may declare. `null` is a CHECKED value
@@ -174,6 +177,55 @@ export function resolveRoles({ config, engine, inhabitant }) {
     };
   }
   return result;
+}
+
+/**
+ * The roles the `brain` SDD provider declares (ADR-0023's shelf, named `brain` by ADR-0038 §7).
+ * `brain` has no adapter yet, so its roles cannot be read through `declareRoles`: this table is
+ * the explicit stand-in, and THE SEAM #1132 REPLACES with a real inhabitant. Brain runs two roles
+ * itself today: `cold-review`, through `brain:review` (ADR-0033), and `stage`, the generic
+ * custom-stage runner (run stage X with engine Y), the default role for every other CUSTOM stage.
+ * A lifecycle stage has no `brain` role (maintainer ruling, 2026-10-04).
+ */
+export const BRAIN_PROVIDER_ROLES = Object.freeze({
+  stages: Object.freeze({ 'cold-review': 'cold-review' }),
+  customStage: 'stage',
+});
+/**
+ * The inhabitants whose declarations a SYNCHRONOUS reader may consult. Both modules do no I/O on
+ * import (`plain.mjs`, and gentle-ai's recording in `gentle-ai.roles.mjs`), which is why the pure
+ * axis-config validator can ask them; the runtime path still goes through `loadInhabitant`.
+ */
+export const DECLARING_INHABITANTS = Object.freeze({
+  'gentle-ai': { declareRoles: declareGentleAi },
+  plain: { declareRoles: declarePlain },
+});
+
+/**
+ * The role `provider` DECLARES as its default for `stage` (ADR-0038 §4), as `<provider>:<role>` (the form
+ * `sdd.roles.*.agent` uses, for every provider), or `null` when it declares none. A role the provider merely DERIVES for a stage it never declared (`derived: true`, gentle-ai's
+ * `derivedRole`) is not a default role and answers `null`. An unknown provider answers `null`.
+ * Pure; `inhabitants` is injectable for tests. It THROWS for an engine in `SDD_ENGINES` that has no
+ * inhabitant entry: a silent null there would make the validator refuse every routed stage under it.
+ *
+ * @param {string} provider  an `sdd.providers` key
+ * @param {string} stage
+ * @returns {string|null}
+ */
+export function declaredDefaultRole(provider, stage, { inhabitants = DECLARING_INHABITANTS, brainRoles = BRAIN_PROVIDER_ROLES } = {}) {
+  if (typeof provider !== 'string' || typeof stage !== 'string' || stage === '') return null;
+  if (provider === 'brain') {
+    if (Object.prototype.hasOwnProperty.call(brainRoles.stages, stage)) return `brain:${brainRoles.stages[stage]}`;
+    return LIFECYCLE_STAGES.includes(stage) ? null : `brain:${brainRoles.customStage}`;
+  }
+  const inhabitant = Object.prototype.hasOwnProperty.call(inhabitants, provider) ? inhabitants[provider] : null;
+  if (!inhabitant && SDD_ENGINES.includes(provider)) {
+    throw new Error(`declaredDefaultRole: SDD engine "${provider}" is in SDD_ENGINES but has no entry in DECLARING_INHABITANTS (role-port.mjs)`);
+  }
+  if (!inhabitant || typeof inhabitant.declareRoles !== 'function') return null;
+  const role = inhabitant.declareRoles([stage])?.[stage];
+  if (!role || role.derived === true) return null;
+  return typeof role.agent === 'string' && role.agent !== '' ? `${provider}:${role.agent}` : null;
 }
 
 async function defaultLoad(engine) {

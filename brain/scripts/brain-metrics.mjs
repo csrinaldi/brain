@@ -58,6 +58,8 @@ import {
 import { leadTimeDays, selectApprovalEvent } from './lib/lead-time.mjs';
 import { decideMemoryGateOverride, toActorList } from './governance/memory-gate-override.mjs';
 import { computeMemoryCoverage } from './lib/memory-coverage.mjs';
+import { readAxis } from './lib/axis-config.mjs';
+import { projectSlugOrNull } from './lib/project-slug.mjs';
 
 // ── Argument parsing (Phase 4.1) ─────────────────────────────────────────────
 
@@ -507,7 +509,7 @@ async function evaluateOneMerge(sha, subject, ctx) {
     const issueNum = extractIssueNumber(issueLinkBody);
     if (issueNum !== null && vcs) {
       if (!leadTimeCache.has(issueNum)) {
-        leadTimeCache.set(issueNum, vcs.labelEvents({ project: config?.project?.slug, number: issueNum }).catch(() => null));
+        leadTimeCache.set(issueNum, vcs.labelEvents({ project: projectSlugOrNull({ config }), number: issueNum }).catch(() => null));
       }
       const events = await leadTimeCache.get(issueNum);
       leadTime = leadTimeDays(events, approvedLabel, mergedAt);
@@ -522,7 +524,7 @@ async function evaluateOneMerge(sha, subject, ctx) {
     const prNumForRollup = parsePrNumber(subject);
     if (prNumForRollup !== null && vcs && typeof vcs.prStatusRollup === 'function') {
       try {
-        const rollup = await vcs.prStatusRollup({ project: config?.project?.slug, number: prNumForRollup });
+        const rollup = await vcs.prStatusRollup({ project: projectSlugOrNull({ config }), number: prNumForRollup });
         detection = Object.fromEntries(detectionJobs.map((j) => [j, detectionConclusion(rollup, j)]));
       } catch {
         detection = null;
@@ -553,7 +555,7 @@ async function evaluateOneMerge(sha, subject, ctx) {
       if (!bypassAuthorCache.has(prNumForRollup)) {
         bypassAuthorCache.set(
           prNumForRollup,
-          vcs.labelEvents({ project: config?.project?.slug, number: prNumForRollup, kind: 'mr' }).catch(() => null),
+          vcs.labelEvents({ project: projectSlugOrNull({ config }), number: prNumForRollup, kind: 'mr' }).catch(() => null),
         );
       }
       const events = await bypassAuthorCache.get(prNumForRollup);
@@ -633,7 +635,7 @@ export async function runMetrics({ argv, cwd = process.cwd(), vcs: injectedVcs }
 
   const config = loadConfig(cwd);
   const ignoreList = Array.isArray(config?.governance?.ignoreList) ? config.governance.ignoreList : [];
-  const approvedLabel = resolveApprovedLabel(config, config?.vcs?.provider);
+  const approvedLabel = resolveApprovedLabel(config, readAxis(config, 'vcs').default);
   // Tier-scoped detection-job names (issue #358 Q5 Phase 5 review finding 2):
   // resolved ONCE from THIS repo's own declared `governance.tier` — never the
   // stale, tier-blind DETECTION_JOB_NAMES literal (metrics-aggregate.mjs). At
