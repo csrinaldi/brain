@@ -129,9 +129,19 @@ test('a lifecycle stage routed to a framework never reaches platform.providers',
   assert.equal(out.sdd.roles, undefined);
 });
 
-test('a custom stage other than cold-review adds its runtime but invents no role', () => {
-  const { out } = run({ sdd: { map: { lint: { engine: 'gemini' } } } });
+test('a custom stage other than cold-review adds its runtime and is routed to brain:stage (maintainer ruling 2026-10-04)', () => {
+  const { out, notices } = run({ sdd: { map: { lint: { engine: 'gemini', model: 'g-2' }, bare: {} } } });
   assert.deepEqual(out.platform.providers.gemini, {});
+  assert.deepEqual(out.sdd.roles, { lint: { agent: 'brain:stage', engine: 'gemini', model: 'g-2' }, bare: { agent: 'brain:stage' } });
+  assert.ok(notices.some((l) => l.startsWith('sdd.roles["lint"] = {"agent":"brain:stage"')), notices.join('\n'));
+  assert.equal(validateAxisConfig(out).ok, true);
+  const again = run(out);
+  assert.deepEqual(again.out, out);
+  assert.deepEqual(again.notices, []);
+});
+
+test('a lifecycle stage in sdd.map gets no brain role (its engine names a framework)', () => {
+  const { out } = run({ sdd: { map: { design: { engine: 'gentle-ai', model: 'm' } } } });
   assert.equal(out.sdd.roles, undefined);
 });
 
@@ -207,6 +217,10 @@ const FIXTURES = {
   'a gitlab consumer': () => ({ vcs: { provider: 'gitlab', slug: 'g/p' }, memory: { backend: 'plainfiles' } }),
   'AGENT_PLATFORM=plain': () => ({ vcs: { provider: 'github' }, memory: { backend: '' } }),
   'antigravity': () => ({ vcs: { provider: 'github' }, platform: 'antigravity', memory: { backend: 'engram' } }),
+  'a custom lint stage routed by sdd.map': () => ({
+    vcs: { provider: 'github' }, memory: { backend: 'engram' },
+    sdd: { stages: { proposal: {}, spec: {}, design: {}, tasks: {}, lint: { artefact: 'lint.md' } }, map: { lint: { engine: 'gemini', model: 'g-2' }, 'cold-review': { engine: 'codex' } } },
+  }),
 };
 const FIXTURE_ENV = { 'AGENT_PLATFORM=plain': { AGENT_PLATFORM: 'plain' } };
 

@@ -2,7 +2,7 @@
 // migrated reader: a legacy config and the equivalent new-shape config resolve identically.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -155,6 +155,107 @@ test('validateAxisConfig: a role engine must be able to execute a stage prompt',
 
 test('validateAxisConfig: a role without agent/engine is not an error (cascade is S2/#1132)', () => {
   assert.equal(validateAxisConfig({ sdd: { default: 'plain', providers: { plain: {} }, roles: { design: { model: 'm' } } } }).ok, true);
+});
+
+// ── ADR-0038 §4: a stage with no default role must declare its agent (#1263) ──
+const SDD_GENTLE = (roles, extra = {}) => ({
+  platform: { default: 'claude', providers: { claude: {}, codex: {} } },
+  sdd: { default: 'gentle-ai', providers: { 'gentle-ai': {}, brain: { version: 'self' } }, roles, ...extra },
+});
+
+test('§4: a custom stage in sdd.roles without agent is refused, naming the stage and the fix', () => {
+  const r = validateAxisConfig(SDD_GENTLE({ lint: { engine: 'claude' } }));
+  assert.equal(r.ok, false);
+  assert.deepEqual(codes(r), ['role-agent-required']);
+  assert.equal(r.errors[0].axis, 'sdd');
+  assert.equal(r.errors[0].path, 'sdd.roles.lint.agent');
+  assert.match(r.errors[0].message, /"lint"/);
+  assert.match(r.errors[0].message, /npm run brain:config -- set sdd\.roles\.lint\.agent/);
+  assert.equal(r.errors[0].key, 'axes.validate.roleAgentRequired');
+  assert.deepEqual(r.errors[0].params, { stage: 'lint', provider: 'gentle-ai' });
+});
+
+test('§4: cold-review with an explicit agent passes', () => {
+  assert.deepEqual(validateAxisConfig(SDD_GENTLE({ 'cold-review': { agent: 'brain:cold-review', engine: 'codex', model: 'gpt-5.5' } })), { ok: true, errors: [] });
+});
+
+test('§4: a DERIVED role is not a default role — cold-review with no agent under gentle-ai is refused', () => {
+  const r = validateAxisConfig(SDD_GENTLE({ 'cold-review': { engine: 'codex' } }));
+  assert.deepEqual(codes(r), ['role-agent-required']);
+  assert.equal(r.errors[0].path, 'sdd.roles.cold-review.agent');
+});
+
+test('§4: a lifecycle stage whose provider declares a default role passes with no agent', () => {
+  for (const stage of ['proposal', 'spec', 'design', 'tasks']) {
+    assert.equal(validateAxisConfig(SDD_GENTLE({ [stage]: { model: 'claude-opus-5-5' } })).ok, true, stage);
+  }
+});
+
+test('§4: under plain every stage has a default role (the human), so the cascade is always defined', () => {
+  const cfg = { sdd: { default: 'plain', providers: { plain: {} }, roles: { lint: {}, 'cold-review': { model: 'm' } } } };
+  assert.equal(validateAxisConfig(cfg).ok, true);
+});
+
+test('§4: the brain provider declares cold-review and brain:stage for every other custom stage, no lifecycle role (seam #1132 replaces)', () => {
+  const cfg = (roles) => ({ sdd: { default: 'brain', providers: { brain: { version: 'self' } }, roles } });
+  assert.equal(validateAxisConfig(cfg({ 'cold-review': { model: 'm' } })).ok, true);
+  assert.equal(validateAxisConfig(cfg({ lint: { model: 'm' } })).ok, true);
+  assert.deepEqual(codes(validateAxisConfig(cfg({ design: { model: 'm' } }))), ['role-agent-required']);
+});
+
+test('§4: cold-review routed by sdd.map with no role and no agent is refused', () => {
+  const r = validateAxisConfig(SDD_GENTLE(undefined, { map: { 'cold-review': { engine: 'codex' } } }));
+  assert.deepEqual(codes(r), ['role-agent-required']);
+  assert.equal(r.errors[0].path, 'sdd.roles.cold-review.agent');
+});
+
+test('§4: any sdd.map key is routed, declared in sdd.stages or not', () => {
+  assert.deepEqual(codes(validateAxisConfig(SDD_GENTLE(undefined, { map: { lint: { engine: 'gemini' } } }))), ['role-agent-required']);
+});
+
+test('§4: a legacy (unshaped) sdd is not validated by §4 — it is migrated first', () => {
+  const stages = { proposal: {}, spec: {}, design: {}, tasks: {}, lint: { artefact: 'lint.md' } };
+  assert.deepEqual(validateAxisConfig({ engine: 'gentle-ai', sdd: { stages, map: { 'cold-review': { engine: 'codex' }, lint: { engine: 'gemini' } } } }), { ok: true, errors: [] });
+  assert.deepEqual(validateAxisConfig({ harness: 'gentle-ai', sdd: { map: { lint: { engine: 'gemini' } } } }), { ok: true, errors: [] });
+});
+
+test('§4: a declared stage routed only by sdd.map, with no sdd.roles entry and no default role, is refused', () => {
+  const stages = { proposal: {}, spec: {}, design: {}, tasks: {}, lint: { artefact: 'lint.md' } };
+  const r = validateAxisConfig(SDD_GENTLE(undefined, { stages, map: { lint: { engine: 'gentle-ai' } } }));
+  assert.deepEqual(codes(r), ['role-agent-required']);
+  assert.equal(r.errors[0].path, 'sdd.roles.lint.agent');
+});
+
+test('§4: a declared stage that is NOT routed is not refused — a plain config is never refused per lifecycle stage', () => {
+  const stages = { proposal: {}, spec: {}, design: {}, tasks: {}, lint: { artefact: 'lint.md' } };
+  assert.equal(validateAxisConfig(SDD_GENTLE(undefined, { stages })).ok, true);
+  assert.equal(validateAxisConfig({ sdd: { default: 'gentle-ai', providers: { 'gentle-ai': {} } } }).ok, true);
+});
+
+test('§4: the default-role lookup is injected — the validator stays pure', () => {
+  const seen = [];
+  const defaultRole = (provider, stage) => { seen.push(`${provider}:${stage}`); return stage === 'lint' ? 'linter' : null; };
+  assert.equal(validateAxisConfig(SDD_GENTLE({ lint: {} }), { defaultRole }).ok, true);
+  assert.deepEqual(codes(validateAxisConfig(SDD_GENTLE({ design: {} }), { defaultRole })), ['role-agent-required']);
+  assert.deepEqual(seen, ['gentle-ai:lint', 'gentle-ai:design']);
+});
+
+test('§4: an undeclared sdd.default leaves the cascade to resolveAxis\'s own refusal', () => {
+  assert.equal(validateAxisConfig({ sdd: { default: '', providers: {}, roles: { lint: {} } } }).ok, true);
+});
+
+test('§4: this repository\'s own brain.config.json passes', () => {
+  const repoConfig = JSON.parse(readFileSync(new URL('../../../brain.config.json', import.meta.url), 'utf8'));
+  assert.deepEqual(validateAxisConfig(repoConfig), { ok: true, errors: [] });
+});
+
+test('§4: the refusal is catalogued in en and es', async () => {
+  const { default: es } = await import('../i18n/es.mjs');
+  const { default: en } = await import('../i18n/en.mjs');
+  for (const cat of [en, es]) {
+    assert.match(cat['axes.validate.roleAgentRequired'], /\{stage\}/);
+    assert.match(cat['axes.validate.roleAgentRequired'], /brain:config -- set sdd\.roles\.\{stage\}\.agent/);
+  }
 });
 
 test('validateAxisConfig: platform.default must orchestrate (plain does, antigravity does)', () => {

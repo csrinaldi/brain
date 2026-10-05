@@ -19,6 +19,7 @@
 import en from '../i18n/en.mjs';
 import { resolveAxisSelector } from './axis-selector.mjs';
 import { codeownersDrift } from './codeowners-drift.mjs';
+import { declaredDefaultRole } from '../axes/sdd-engine/role-port.mjs';
 
 /**
  * Closed memberships. They live HERE (re-exported by `harness/platform.mjs`, which
@@ -113,14 +114,30 @@ export function readAxis(config, axis, { harness = true } = {}) {
   return { default: '', providers: {}, source: 'none' };
 }
 
+/** The stages a config ROUTES (ADR-0038 §4): every key of `sdd.roles` and every key of `sdd.map`, `cold-review` included. */
+function routedStages(cfg) {
+  const roles = isObj(cfg.sdd?.roles) ? cfg.sdd.roles : {};
+  const map = isObj(cfg.sdd?.map) ? cfg.sdd.map : {};
+  const out = Object.keys(roles);
+  for (const stage of Object.keys(map)) if (!out.includes(stage)) out.push(stage);
+  return out;
+}
+
 /**
  * Validates the ADR-0038 shape. Only the new shape is checked; a legacy config has
- * nothing to validate. Never throws.
- * @returns {{ok: boolean, errors: Array<{axis: string, path: string, code: string, message: string}>}}
+ * nothing to validate: it is migrated first (1.11.1). That includes §4, which runs only when the
+ * `sdd` axis has the shape (`sdd.default` or `sdd.providers` present). Never throws.
+ *
+ * `defaultRole(provider, stage)` answers the role an SDD provider DECLARES as its default for a stage,
+ * or null (ADR-0038 §4). It defaults to the role port's `declaredDefaultRole`, which counts no DERIVED
+ * role; it is injected so the validator stays pure and testable.
+ * @param {object} config
+ * @param {{defaultRole?: (provider: string, stage: string) => string|null}} [opts]
+ * @returns {{ok: boolean, errors: Array<{axis: string, path: string, code: string, message: string, key?: string, params?: object}>}}
  */
-export function validateAxisConfig(config) {
+export function validateAxisConfig(config, { defaultRole = declaredDefaultRole } = {}) {
   const errors = [];
-  const err = (axis, path, code, message) => errors.push({ axis, path, code, message });
+  const err = (axis, path, code, message, i18n) => errors.push({ axis, path, code, message, ...(i18n ?? {}) });
   try {
     const cfg = isObj(config) ? config : {};
 
@@ -177,6 +194,24 @@ export function validateAxisConfig(config) {
           err('sdd', `${base}.engine`, 'role-engine-cannot-execute',
             `${base}.engine "${engine}" cannot execute a stage prompt`);
         }
+      }
+    }
+
+    // ADR-0038 §4: the `agent` cascade is defined only when `sdd.default` DECLARES a default role for the stage. A routed
+    // stage without one (cold-review and every custom stage under gentle-ai) must give `agent` in `sdd.roles`, or it is
+    // refused. A legacy (unshaped) `sdd` is not checked: the 1.11.1 migration writes its roles first. An undeclared
+    // `sdd.default` has no cascade to check: `resolveAxis` refuses the axis itself.
+    const sddShaped = isObj(cfg.sdd) && (has(cfg.sdd, 'default') || has(cfg.sdd, 'providers'));
+    const sddDefault = sddShaped ? nonEmpty(cfg.sdd.default) : '';
+    if (sddDefault !== '') {
+      for (const stage of routedStages(cfg)) {
+        const role = roles[stage];
+        if (has(roles, stage) && !isObj(role)) continue; // a non-object entry is not a role; nothing to cascade
+        if (isObj(role) && has(role, 'agent')) continue;
+        if (nonEmpty(defaultRole(sddDefault, stage) ?? '') !== '') continue;
+        const params = { stage, provider: sddDefault };
+        err('sdd', `sdd.roles.${stage}.agent`, 'role-agent-required', fill(en['axes.validate.roleAgentRequired'], params),
+          { key: 'axes.validate.roleAgentRequired', params });
       }
     }
   } catch (e) { // surfaced: validation never throws; the failure is itself a reported error
@@ -486,7 +521,7 @@ export function diagnoseAxes(args) {
     // invalid-config: everything the validator says.
     for (const e of validateAxisConfig(cfg).errors) {
       add(e.axis, 'invalid-config', 'error',
-        tr('axes.diagnose.invalidConfig', { path: e.path || e.axis, detail: e.message }),
+        tr('axes.diagnose.invalidConfig', { path: e.path || e.axis, detail: e.key ? tr(e.key, e.params ?? {}) : e.message }),
         tr('axes.diagnose.invalidConfig.fix', { path: e.path || e.axis }));
     }
 

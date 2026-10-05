@@ -252,6 +252,7 @@ export default {
   'axes.refusal.undeclared':        "no {axis} is declared: none of {levels} names one, and brain does not guess. Declare the team's choice: npm run brain:config -- set {axis}.default <{names}>",
   'axes.refusal.invalid':           "{axis} \"{value}\" (from {source}) is not a {axis} brain ships ({names}) — it was refused, not coerced. Fix it where it is set, or declare the team's choice: npm run brain:config -- set {axis}.default <{names}>",
   'axes.refusal.notListed':         "{axis} \"{value}\" (from {source}) is not a key of {axis}.providers ({listed}) — it was refused, not coerced. List it: npm run brain:config -- set {axis}.providers.{value} '{}'",
+  'axes.validate.roleAgentRequired': "sdd.roles[\"{stage}\"] gives no agent, and SDD provider \"{provider}\" declares no default role for stage \"{stage}\" (a derived role does not count), so the stage has no agent to run (ADR-0038 §4). Declare it: npm run brain:config -- set sdd.roles.{stage}.agent <sdd provider>:<role>",
   'axes.refusal.invalidConfig':     "brain.config.json is invalid for {axis}, so it was refused: {detail}",
   // #1263 S1 — the user layer and `locked` (ADR-0040). {path} is the user config file, {source} where a refused value was read.
   'axes.refusal.invalid.user':      "{axis} \"{value}\" (from {source}) is not a {axis} brain ships ({names}) — it was refused, not coerced. Correct {axis}.default in that file.",
