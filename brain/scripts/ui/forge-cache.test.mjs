@@ -104,3 +104,16 @@ test('#1257: a closed read on an empty cache keeps the first-poll wording', asyn
   const cache = createForgeCache();
   await assert.rejects(() => cache.port.issueList({ state: 'closed' }), /^Error: the first forge poll has not completed$/);
 });
+
+// ── #1262: the per-number reasons key off the open lane ─────────────────────
+//
+// "Queued" says the open lane has landed and its bounded body and review lanes have not reached
+// this number. The closed lane writes its own list on its own flight, so a closed landing alone
+// does not make that true.
+
+test('#1262: a closed landing alone leaves per-number misses on the first-poll wording', async () => {
+  const cache = createForgeCache();
+  cache.setIssueList([{ number: 3 }], 'closed');
+  await assert.rejects(() => cache.port.issueView({ number: 5 }), /^Error: the first forge poll has not completed$/);
+  await assert.rejects(() => cache.port.prReviews({ number: 10 }), /^Error: the first forge poll has not completed$/);
+});

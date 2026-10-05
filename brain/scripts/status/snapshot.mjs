@@ -37,7 +37,7 @@ import { execFileSync } from 'node:child_process';
 import { gitErrorLine } from '../lib/git-tree.mjs';
 import { join } from 'node:path';
 
-import { field, pending, uncomputable } from './report.mjs';
+import { field, pending, pendingFrom, uncomputable } from './report.mjs';
 import { deriveTasks } from './derive.mjs';
 import { countTasks } from '../lib/tasks-list.mjs';
 import { buildGraph } from './epic-graph.mjs';
@@ -384,6 +384,16 @@ const LOADING = {
 };
 const CLOSED_DISABLED_BY_FLAG = '--no-closed was given';
 const CLOSED_ROW_NO_BODY = 'the forge list carried no body';
+/**
+ * A lane the poller reports `pending`. With no reason of its own a read is in flight, so the section
+ * says the loading wording. A reason means the poller says none will start ("polling is paused",
+ * #1262): the section carries that reason and `idle: true`, so no view claims a read is in flight.
+ */
+function pendingLane(entry, loadingReason) {
+  return typeof entry.reason === 'string' && entry.reason.trim() !== ''
+    ? { ...pending(entry.reason), idle: true }
+    : pending(loadingReason);
+}
 const closedUnreadable = (reason) => `the closed-issue list could not be read: ${reason}`;
 
 const errMessage = (err) => err?.message ?? String(err);
@@ -415,9 +425,9 @@ async function readForge({ vcs, project, forgeLoad = null, closed = true, genera
   let reviews;
   let openEntry;
   if (forgeLoad?.open.state === 'pending') {
-    graph = pending(LOADING.graph);
-    prs = pending(LOADING.prs);
-    reviews = pending(LOADING.reviews);
+    graph = pendingLane(forgeLoad.open, LOADING.graph);
+    prs = pendingLane(forgeLoad.open, LOADING.prs);
+    reviews = pendingLane(forgeLoad.open, LOADING.reviews);
     openEntry = forgeLoad.open;
   } else {
     let openError = null;
@@ -512,7 +522,7 @@ async function readForge({ vcs, project, forgeLoad = null, closed = true, genera
   } else if (forgeLoad) {
     closedEntry = forgeLoad.closed;
     const c = closedEntry;
-    if (c.state === 'pending') closedIssues = pending(LOADING.closedIssues);
+    if (c.state === 'pending') closedIssues = pendingLane(c, LOADING.closedIssues);
     else if (c.state === 'disabled') closedIssues = uncomputable(c.reason);
     else if (c.state === 'failed' && c.lastCompleteAt === null) closedIssues = uncomputable(closedUnreadable(c.reason));
     else {
@@ -541,7 +551,7 @@ async function readForge({ vcs, project, forgeLoad = null, closed = true, genera
  * marked complete can still have an unreadable cache, and a count over open children only is not a count.
  */
 function readHierarchy(graph, closedIssues) {
-  if (!graph.ok) return graph.pending === true ? pending(graph.reason) : uncomputable(graph.reason);
+  if (!graph.ok) return graph.pending === true ? pendingFrom(graph) : uncomputable(graph.reason);
   const closed = closedIssues.ok ? closedIssues.value : null;
   const { issues, divergences } = hierarchyFromGraph({ nodes: graph.value.nodes, declarationDivergences: graph.value.declarationDivergences, closed });
   return field({ issues: [...issues], divergences, closedUnresolved: closed?.unresolved ?? [], closedRead: closedIssues.ok ? { ok: true } : { ok: false, reason: closedIssues.reason } });

@@ -69,12 +69,21 @@ export function failedSections(snapshot) {
     .map(([name, section]) => ({ name, reason: section.reason }));
 }
 
-/** The sections still waiting on a forge read, by name, in snapshot order. */
-function loadingSections(snapshot) {
-  if (!snapshot || typeof snapshot !== 'object') return [];
-  return Object.entries(snapshot)
-    .filter(([, section]) => section && typeof section === 'object' && section.ok === false && section.pending === true)
-    .map(([name]) => name);
+/**
+ * The sections waiting on a forge read, by name, in snapshot order. `idle` (#1262) is a section
+ * whose lane reported a reason of its own, "polling is paused": no read is in flight and none will
+ * start, so it is named apart from the sections that are loading. Returns `{loading, idle}`, where
+ * `idle` also carries the lane's reason.
+ */
+function waitingSections(snapshot) {
+  const out = { loading: [], idle: [] };
+  if (!snapshot || typeof snapshot !== 'object') return out;
+  for (const [name, section] of Object.entries(snapshot)) {
+    if (!section || typeof section !== 'object' || section.ok !== false || section.pending !== true) continue;
+    if (section.idle === true) out.idle.push({ name, reason: section.reason });
+    else out.loading.push(name);
+  }
+  return out;
 }
 
 /**
@@ -96,8 +105,12 @@ export function degradationBands({ stream, controls, meta, snapshot, epic }) {
   if (meta?.poller?.lastError) bands.push({ id: 'poller', text: pollBanner(meta.poller) });
   const rm = meta?.poller?.remotes;
   if (rm && (rm.lastError || (!rm.lastOkAt && !rm.lastAttemptAt && !rm.inFlight))) bands.push({ id: 'remotes', text: remotesBanner(meta.poller.remotes) });
-  const loading = loadingSections(snapshot);
+  const { loading, idle } = waitingSections(snapshot);
   if (loading.length > 0) bands.push({ id: 'loading', text: `still loading from the forge: ${loading.join(', ')}` });
+  // One band per distinct reason, so a lane's own sentence is never replaced by another's.
+  for (const reason of [...new Set(idle.map((i) => i.reason))]) {
+    bands.push({ id: 'idle', text: `not read yet, ${reason}: ${idle.filter((i) => i.reason === reason).map((i) => i.name).join(', ')}` });
+  }
   const failed = failedSections(snapshot);
   if (failed.length > 0) {
     bands.push({

@@ -67,6 +67,14 @@ export function pending(reason) {
   return { ok: false, pending: true, reason: reason.trim() };
 }
 
+/**
+ * A section that is pending because another one is: it keeps that section's reason and its `idle`
+ * flag (#1262), so a paused lane never turns into "loading" one section downstream.
+ */
+export function pendingFrom(section) {
+  return section.idle === true ? { ...pending(section.reason), idle: true } : pending(section.reason);
+}
+
 /** @returns {boolean} */
 export function isUncomputable(f) {
   return Boolean(f) && f.ok === false;
