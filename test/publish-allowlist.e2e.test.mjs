@@ -26,7 +26,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -127,7 +127,19 @@ function isPacked(managedPath, files) {
   return files.includes(managedPath);
 }
 
-const { files, unpackedSize, entryCount } = packedContents();
+// A promote proof file (#1346) is planted for the pack and removed right after: `brain:promote` writes one beside
+// brain/core/config-migrations.mjs and removes it in a finally, but a killed run could leave it, and brain/core
+// ships as a whole directory. The exclusion is asserted against the real tarball, below.
+const PLANTED_PROOF = join(REPO_ROOT, 'brain', 'core', `.brain-promote-proof-${process.pid}-0.mjs`);
+writeFileSync(PLANTED_PROOF, '// planted by publish-allowlist.e2e.test.mjs\n', 'utf8');
+let packed;
+try { packed = packedContents(); } finally { rmSync(PLANTED_PROOF, { force: true }); }
+const { files, unpackedSize, entryCount } = packed;
+
+test('publish-allowlist: a stale promote proof file never ships (#1346)', () => {
+  assert.ok(files.includes('brain/core/config-migrations.mjs'), 'vacuity guard: brain/core did ship, so the absence below is the exclusion');
+  assert.deepEqual(files.filter((f) => f.includes('.brain-promote-proof-')), []);
+});
 const byteNeeding = managed.filter((p) => NEEDS_BYTES.includes(managedStrategy[p] ?? STRATEGY.COPY));
 
 // ── Vacuity guards — a broken reader must not read as a clean tarball ───────

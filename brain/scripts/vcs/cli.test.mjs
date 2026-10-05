@@ -123,7 +123,7 @@ test('migrating to v0.3.0 adds docs.language and vcs.provider without clobbering
     schemaVersion: '0.1.0',
     project: { name: 'mine', slug: 'org/repo', gitHost: 'github.com' },
   };
-  const { config: migrated, applied } = migrateConfig(config, migrations, '0.3.0');
+  const { config: migrated, applied } = migrateConfig(config, migrations, '0.3.0', null);
 
   assert.ok(applied.includes('0.2.0'));             // docs.language
   assert.ok(applied.includes('0.3.0'));             // vcs.provider
@@ -136,6 +136,6 @@ test('migrating to v0.3.0 adds docs.language and vcs.provider without clobbering
 
 test('vcs.provider migration never overwrites a provider the user already set', () => {
   const config = { schemaVersion: '0.2.0', vcs: { provider: 'gitlab' } };
-  const { config: migrated } = migrateConfig(config, migrations, '0.3.0');
+  const { config: migrated } = migrateConfig(config, migrations, '0.3.0', null);
   assert.equal(migrated.vcs.provider, 'gitlab');    // user value wins
 });
