@@ -33,6 +33,27 @@ npm run test:upgrade                     # second-latest → latest tag
 
 CI runs it informationally via `.github/workflows/upgrade-smoke.yml` (not a required check).
 
+---
+
+# M4 danger-path suite (#401)
+
+The test above proves the **happy** path against real releases. This one proves
+the four **danger** paths epic #313's M4 hard gate names — and is the checkable
+form of that gate: external adoption opens when it is green.
+
+```bash
+npm run test:danger-paths
+```
+
+Requires **Docker**. Needs **no github token and no network access to GitHub**.
+
+| # | path | ticket |
+|---|------|--------|
+| 1 | a mid-upgrade write failure rolls the tree back byte-identical | #396 |
+| 2 | a consumer-edited managed file is refused, never silently clobbered | #397 |
+| 3 | a downgrade is refused without `--allow-downgrade` | #398 |
+| 4 | corrupt consumer JSON is named up front; `--skip-merge` completes | #399 |
+
 ## Why it builds a local git remote instead of using tags
 
 The behaviour under test exists only in code **newer than every published tag** —
