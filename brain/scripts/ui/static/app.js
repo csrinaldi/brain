@@ -436,9 +436,11 @@ function renderMemory() {
     // would have gone — never a blank cell, and never a guessed age.
     tr.appendChild(el('td', 'memory-when', record.relativeTime ?? (record.tsUnparseable ? `unparseable: ${record.ts}` : record.ts)));
     tr.appendChild(el('td', 'memory-type', record.type));
-    const actor = el('td', 'memory-actor');
-    actor.appendChild(el('span', 'memory-actor-name', record.actor));
-    actor.appendChild(el('span', 'memory-actor-kind', record.actorKind ?? 'unknown'));
+    const actor = el('td', 'memory-actor-cell');
+    const stack = el('div', 'memory-actor');
+    stack.appendChild(el('span', 'memory-actor-name', record.actor));
+    stack.appendChild(el('span', 'memory-actor-kind', record.actorKind ?? 'unknown'));
+    actor.appendChild(stack);
     tr.appendChild(actor);
     tr.appendChild(el('td', 'memory-id', record.id));
     const source = el('td', 'memory-source');
@@ -1458,7 +1460,10 @@ function renderDecisionRow(row) {
 
   tr.appendChild(el('td', 'decision-number', String(row.number).padStart(4, '0')));
   tr.appendChild(el('td', 'decision-title', row.title));
-  tr.appendChild(el('td', `decision-status status-${String(row.status).replace(/\s+/g, '-').toLowerCase()}`, row.status));
+  // The chip is an inner <span>: a display on the <td> itself breaks the table layout (#1310).
+  const statusCell = el('td', 'decision-status-cell');
+  statusCell.appendChild(el('span', `decision-status status-${String(row.status).replace(/\s+/g, '-').toLowerCase()}`, row.status));
+  tr.appendChild(statusCell);
 
   const amendments = el('td', 'decision-amendments');
   if (row.amendments.length === 0) {
@@ -1550,7 +1555,9 @@ function renderAntiPatternRow(row) {
     return tr;
   }
 
-  tr.appendChild(el('td', 'anti-pattern-scope', row.scope));
+  const scopeCell = el('td', 'anti-pattern-scope-cell');
+  scopeCell.appendChild(el('span', 'anti-pattern-scope', row.scope));
+  tr.appendChild(scopeCell);
   tr.appendChild(el('td', 'anti-pattern-title', row.title));
 
   const cited = el('td', 'anti-pattern-issues');
