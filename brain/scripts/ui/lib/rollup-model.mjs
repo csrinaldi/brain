@@ -80,3 +80,13 @@ export function rollupLabel(rollup) {
   const more = unresolved > 0 ? ` · ${unresolved} closed issue(s) unresolved, so more children may exist` : '';
   return `${closed} / ${total} children closed${unknownSuffix}${stale}${more}`;
 }
+
+/**
+ * rollupNote(rollup) -> the drawer's remark about closed children, or `null`.
+ * It says closed children are "counted above" only when the sentence above holds a count
+ * (`closed !== null`); otherwise the sentence says why nothing was counted (#1267 D108).
+ */
+export function rollupNote(rollup) {
+  if (!rollup.ok || rollup.value.closed === null) return null;
+  return 'the list shows open children; closed children are counted above';
+}

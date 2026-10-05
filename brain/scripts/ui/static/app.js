@@ -49,7 +49,7 @@ function applyTheme(choice) {
 
 import { buildLaneModel, nodeSummaryFor, childrenOf } from './lib/lane-model.mjs';
 import { SOURCE, progressLabel } from './lib/progress-view.mjs';
-import { hierarchyOf, epicRollup, rollupLabel } from './lib/rollup-model.mjs';
+import { hierarchyOf, epicRollup, rollupLabel, rollupNote } from './lib/rollup-model.mjs';
 import { issueUrl } from './lib/forge-url.mjs';
 import { buildDrawerModel, localChangedFor } from './lib/drawer-model.mjs';
 import { remoteBadges, remotePanel, tipAge } from './lib/remote-model.mjs';
@@ -1843,8 +1843,10 @@ function renderChildren(issue) {
   }
   // An epic's drawer leads with its rollup (#1199 D62); closed children are counted there, not listed below.
   if (hierarchyOf(sectionOf(state, 'hierarchy')).value?.issues.get(issue)?.level === 'epic') {
-    wrap.appendChild(el('p', 'epic-rollup', rollupLabel(epicRollup(sectionOf(state, 'hierarchy'), sectionOf(state, 'forgeLoad'), issue))));
-    wrap.appendChild(el('p', 'note', 'the list shows open children; closed children are counted above'));
+    const rollup = epicRollup(sectionOf(state, 'hierarchy'), sectionOf(state, 'forgeLoad'), issue);
+    wrap.appendChild(el('p', 'epic-rollup', rollupLabel(rollup)));
+    const countedNote = rollupNote(rollup); // null while nothing was counted (#1267)
+    if (countedNote !== null) wrap.appendChild(el('p', 'note', countedNote));
   }
   wrap.appendChild(el('h3', 'drawer-section-title', `tickets that declare #${issue} as their parent`));
   if (found.value.length === 0) {
