@@ -1,8 +1,14 @@
 # upgrade-smoke.yml — informational upgrade-safety smoke (issue #1277).
 #
-# Runs `npm run test:upgrade`: installs @logikas/brain@<second-latest tag> in a
-# clean container, customises the consumer, upgrades to the latest tag and
-# asserts the managed core moved while consumer-owned files survived.
+# Runs `npm run test:upgrade`: installs @logikas/brain@<second-latest tag> from the
+# registry in a clean container, customises the consumer, upgrades to the latest tag
+# and asserts every managed brain/scripts file that differs FROM→TO became TO's content
+# while consumer-owned files survived.
+#
+# It tests PUBLISHED releases only: FROM and TO come from the registry, and FROM's
+# published brain-upgrade.mjs installs TO's published tarball. It does NOT exercise a
+# PR's own upgrader; testing that against a packed tarball is a separate decision.
+# If a tag is not published yet it SKIPs with a notice (exit 0).
 #
 # INFORMATIONAL. Not a required status context and not in GOVERNANCE_JOBS (same
 # stance as m4-danger-paths.yml): a red run does not block a merge, it tells a
@@ -15,11 +21,6 @@ on:
     branches: [main]
   pull_request:
     paths:
-      # Globs, not file names: engine-blind-gates.test.mjs reads a literal
-      # brain/scripts/<file> in a workflow as an INVOCATION and demands it be
-      # in VERIFICATION_SURFACE. Covers brain-upgrade.mjs and lib/installer.mjs.
-      - 'brain/scripts/**'
-      - 'brain/core/config-migrations.mjs'
       - 'test/upgrade/**'
       - '.github/workflows/upgrade-smoke.yml'
 
