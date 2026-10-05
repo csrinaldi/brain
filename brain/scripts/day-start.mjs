@@ -59,9 +59,11 @@ const sep = (label) => {
   console.log(`\n${C.bCyan}── ${tag} ${pad}${C.reset}`);
 };
 
-const run = async (cmd, args = [], opts = {}) => {
+// `quietCodes`: exit statuses the callee already explained on its own (a deferral), so the generic
+// "exited with code" line would only repeat it.
+const run = async (cmd, args = [], { quietCodes = [], ...opts } = {}) => {
   const r = spawnSync(cmd, args, { stdio: 'inherit', cwd: ROOT, ...opts });
-  if (r.status !== 0) {
+  if (r.status !== 0 && !quietCodes.includes(r.status)) {
     const signal = await t('common.signal');
     console.warn(`  ${await t('day.run.exitCode', { code: r.status ?? signal })}`);
   }
@@ -351,7 +353,7 @@ if (!existsSync(hookFile)) {
 //     network call and no risk of post-merge hook recursion. It runs BEFORE the engram probe: the
 //     probe below gates only step 4b.
 console.log(`  ${C.dim}${await t('day.memory.hydrating')}${C.reset}`);
-await run(NODE, ['brain/scripts/memory/cli.mjs', 'hydrate']);
+await run(NODE, ['brain/scripts/memory/cli.mjs', 'hydrate'], { quietCodes: [6] });
 
 const engram = capture('engram', ['--version']);
 if (engram.status === 0) {
@@ -363,8 +365,9 @@ if (engram.status === 0) {
   //  record-first — memory-backend-contract rule 2 — and promised a commit "with the next push",
   //  which ADR-0034 retired. Records reach .memory/ through `brain:memory:save` only.)
 } else {
-  info(await t('day.memory.notAvailable'));
-  console.log(`       ${await t('day.memory.install')}`);
+  // Only the engram-only doctrine projection (4b) is skipped; hydration above already ran. No
+  // install hint here: the backend adapter's own deferral message names the remedy when it applies.
+  info(await t('day.memory.reprojectSkipped'));
 }
 
 // 5a. Lane sweep — a synchronous sub-step, own timeout (#906, design.md A7).

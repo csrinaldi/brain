@@ -95,3 +95,13 @@ test('#1115 day-start: the probe still gates 4b (brain-to-engram) — unchanged,
   assert.ok(probe > 0 && projector > probe);
   assert.equal((SOURCE.match(/capture\('engram'/g) ?? []).length, 1, 'exactly one engram probe remains');
 });
+
+test('#1115 day-start: a missing engram binary skips only 4b, says so neutrally, and prints no install hint', () => {
+  assert.match(SOURCE, /t\('day\.memory\.reprojectSkipped'\)/);
+  assert.doesNotMatch(SOURCE, /day\.memory\.notAvailable/);
+  assert.doesNotMatch(SOURCE, /day\.memory\.install/);
+});
+
+test('#1115 day-start: the hydrate step suppresses the generic exit-6 line (the adapter already reported the deferral)', () => {
+  assert.match(SOURCE, /'hydrate'\],\s*\{\s*quietCodes:\s*\[6\]\s*\}/);
+});

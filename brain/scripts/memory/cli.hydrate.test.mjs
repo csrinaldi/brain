@@ -152,3 +152,15 @@ test('an invalid declaration refuses hydrate and import with exit 4', (t) => {
     assert.equal(r.status, 4, `${op}: ${r.stdout}${r.stderr}`);
   }
 });
+
+test('plainfiles `hydrate --verify` over a union-merge duplicate claims no collapse into the index (nothing was written)', (t) => {
+  const w = world(t, { records: 2 });
+  const file = join(w.root, '.memory', 'records', '2026-08.jsonl');
+  const body = readFileSync(file, 'utf8');
+  writeFileSync(file, body + body.split('\n')[0] + '\n', 'utf8');
+  const r = run(w, ['hydrate', '--verify']);
+  assert.equal(r.status, 0, `${r.stdout}${r.stderr}`);
+  assert.doesNotMatch(r.stderr, /collapsed into the index/);
+  assert.match(r.stderr, /collapsed into the records read/);
+  assert.equal(existsSync(w.indexPath), false, 'verify must not create the index');
+});

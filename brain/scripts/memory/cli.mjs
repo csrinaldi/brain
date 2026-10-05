@@ -1251,10 +1251,12 @@ try {
   // writes the index (only `pullMemory` reindexes), so the default wording
   // would have it claim a collapse into an index it did not touch.
   // The surface wording is keyed on the result SHAPE, never on an op or a backend name: a hydration
-  // that carries no `indexCount` (engram's) read the records and never touched an index.
+  // that carries no `indexCount` (engram's) read the records and never touched an index. A
+  // read-only verification (`verified: true`) carries an `indexCount` but wrote nothing, and when
+  // stale the on-disk index does not hold it either — it read the records too.
   await reportDuplicates(result?.duplicates, {
     indexCount: result?.indexCount,
-    surface: op === "hydrate" && result?.indexCount === undefined ? "the records read" : undefined,
+    surface: op === "hydrate" && (result?.indexCount === undefined || result?.verified === true) ? "the records read" : undefined,
   });
 
   if (op === "hydrate") {

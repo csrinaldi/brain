@@ -71,8 +71,7 @@ export default {
   'day.memory.hookActive':     'Pre-push hook active — checkpoints feature working memory before push.',
   'day.memory.hydrating':      'Hydrating the memory backend from .memory/records/...',
   'day.memory.reprojecting':   'Reprojecting brain/ to engram...',
-  'day.memory.notAvailable':   'engram not available — skipping shared memory.',
-  'day.memory.install':        'Install: gentle-ai install   or   npm run tools:install',
+  'day.memory.reprojectSkipped': 'engram not available — skipping the doctrine projection (step 4b, #1349).',
 
   // Lane sweep (#906, design.md A7) — one line, only when memory.lane.enabled is true.
   'day.memory.laneSweep.running':        'Checking the lane sweep...',

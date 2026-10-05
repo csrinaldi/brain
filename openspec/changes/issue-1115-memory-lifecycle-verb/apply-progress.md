@@ -64,3 +64,10 @@ engram (project name = repo name, isolated store):
 - `git pull` of a teammate record: post-merge hydrates it, 2 rows for 2 ids.
 - `hydrate` with engram off PATH: stderr `engram binary not found. Install via: gentle-ai install`, exit 6; `session:start` prints `memory:   engram hydration deferred — engram binary not found. Install via: gentle-ai install` and exits 0; the post-merge hook exits 0 on the same deferral.
 - Finding outside this change: engram 2.0.0's `export` is scoped to the cwd-detected project, so when the detected name differs from brain's project name `importMemory` reads an empty key set and re-imports (4 rows for 1 record before the scratch consumer's names were aligned). `importMemory` is untouched here.
+
+## Cold-review corrections (PR #1354)
+
+1. `hydrate --verify` over a union-merge duplicate claimed "collapsed into the index" although nothing was written.
+   RED: `cli.hydrate.test.mjs` "hydrate --verify over a union-merge duplicate claims no collapse" failed. Fix: `cli.mjs` picks the "the records read" surface when `result.verified === true` as well as when `indexCount` is absent. GREEN.
+2. day-start misreported "skipping shared memory" + install hint when the engram binary is missing, after hydration had already run.
+   RED: two `day-start.test.mjs` source tests failed. Fix: neutral `day.memory.reprojectSkipped` line (en + es, names step 4b / #1349), no install hint, no backend-name branch; `run` gained `quietCodes` and the hydrate step passes `[6]` so the adapter's own deferral message is the single report. Removed `day.memory.notAvailable` and `day.memory.install`. GREEN.
