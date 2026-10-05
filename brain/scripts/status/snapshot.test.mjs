@@ -643,6 +643,17 @@ test('#1257 R1257-9: while forgeLoad.open is pending the graph, prs and reviews 
   assert.deepEqual(s.forgeLoad, { ok: true, value: forgeLoad }, 'the server value is passed through untouched');
 });
 
+test('#1262: a pending lane that carries its own reason keeps it and says it is idle', async () => {
+  const { port, lists } = listPort({ open: [openRow(5)] });
+  const paused = { state: 'pending', at: null, reason: 'polling is paused' };
+  const forgeLoad = { open: paused, closed: { ...paused } };
+  const s = await buildSnapshot({ root: makeFixture(), now: NOW, vcs: port, project: 'o/r', forgeLoad });
+  for (const name of ['graph', 'prs', 'reviews', 'closedIssues']) {
+    assert.deepEqual(s[name], { ok: false, pending: true, idle: true, reason: 'polling is paused' }, name);
+  }
+  assert.deepEqual(lists, [], 'a paused lane is not read');
+});
+
 // ── #1257 R1257-7: the closed issues ────────────────────────────────────────
 
 test('#1257 R1257-7: the graph survives a closed failure', async () => {

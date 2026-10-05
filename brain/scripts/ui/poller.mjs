@@ -181,11 +181,17 @@ export function createPoller({
       .slice(0, BODY_CAP);
   }
 
-  /** The merged closed set, descending by number, minus anything the latest open list holds (a reopened issue). */
+  /**
+   * The merged closed set, descending by number, minus anything the latest open list holds (a
+   * reopened issue). The filter is applied to the PUBLISHED list only and never mutates
+   * `closedHeld` (#1262): a delta can land while `lastOpenNumbers` is still the previous tick's
+   * set, and deleting from the held set would lose a just-closed issue for good. The next open
+   * landing publishes again from the intact held set, so a stale filter heals itself.
+   */
   function publishClosed() {
     if (closedHeld === null) return;
-    for (const n of lastOpenNumbers) closedHeld.delete(n);
-    cache.setIssueList([...closedHeld.values()].sort((a, b) => b.number - a.number), 'closed');
+    const rows = [...closedHeld.values()].filter((r) => !lastOpenNumbers.has(r.number));
+    cache.setIssueList(rows.sort((a, b) => b.number - a.number), 'closed');
   }
 
   /** One closed run: full first and every CLOSED_FULL_EVERY_RUNS-th, a delta otherwise. Never rejects. */
