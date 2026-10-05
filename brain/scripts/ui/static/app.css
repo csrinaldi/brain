@@ -46,7 +46,6 @@
   --state-done-fg: #1b1b1f;           --state-done-bg: #d9f2e0;
   --state-blocked-fg: #1b1b1f;        --state-blocked-bg: #ffd9d4;
   --state-awaiting-review-fg: #1b1b1f; --state-awaiting-review-bg: #ffe9b8;
-  --state-unclassified-fg: #1b1b1f;     --state-unclassified-bg: #ececf2;
   --state-unreadable-fg: #1b1b1f;     --state-unreadable-bg: #f3e3f6;
   --state-not-computed-fg: #1b1b1f;   --state-not-computed-bg: #ffffff;
   --state-unknown-fg: #8a4b00;        --state-unknown-bg: #ffffff;
@@ -95,7 +94,6 @@
     --state-done-fg: #6366f1;           --state-done-bg: #1e1b4b;
     --state-blocked-fg: #fb7185;        --state-blocked-bg: #4c0519;
     --state-awaiting-review-fg: #f59e0b; --state-awaiting-review-bg: #451a03;
-    --state-unclassified-fg: #d97706;     --state-unclassified-bg: #2d1f03;
     --state-unreadable-fg: #d946ef;     --state-unreadable-bg: #3b0764;
     --state-not-computed-fg: #475569;   --state-not-computed-bg: #0f172a;
     --state-unknown-fg: #fbbf24;        --state-unknown-bg: #0f172a;
@@ -128,7 +126,6 @@
     --state-done-fg: #6366f1;           --state-done-bg: #1e1b4b;
     --state-blocked-fg: #fb7185;        --state-blocked-bg: #4c0519;
     --state-awaiting-review-fg: #f59e0b; --state-awaiting-review-bg: #451a03;
-    --state-unclassified-fg: #d97706;     --state-unclassified-bg: #2d1f03;
     --state-unreadable-fg: #d946ef;     --state-unreadable-bg: #3b0764;
     --state-not-computed-fg: #475569;   --state-not-computed-bg: #0f172a;
     --state-unknown-fg: #fbbf24;        --state-unknown-bg: #0f172a;
@@ -368,7 +365,6 @@ body {
 .roadmap-state.state-done { color: var(--state-done-fg); background: var(--state-done-bg); }
 .roadmap-state.status-blocked { color: var(--state-blocked-fg); background: var(--state-blocked-bg); }
 .roadmap-state.status-awaiting-review { color: var(--state-awaiting-review-fg); background: var(--state-awaiting-review-bg); }
-.roadmap-state.status-unclassified { color: var(--state-unclassified-fg); background: var(--state-unclassified-bg); }
 .roadmap-state.status-unreadable { color: var(--state-unreadable-fg); background: var(--state-unreadable-bg); }
 .roadmap-state.roadmap-not-computed { color: var(--state-not-computed-fg); background: var(--state-not-computed-bg); }
 .roadmap-state.node-unknown { color: var(--state-unknown-fg); background: var(--state-unknown-bg); }
@@ -447,7 +443,6 @@ body {
 .node.status-ready rect { fill: var(--state-planned-bg); } /* never returned by state-vocab; kept so the class stays defined */
 .node.status-blocked rect { fill: var(--state-blocked-bg); }
 .node.status-awaiting-review rect { fill: var(--state-awaiting-review-bg); }
-.node.status-unclassified rect { fill: var(--state-unclassified-bg); stroke-dasharray: 4 3; }
 .node.status-unreadable rect { fill: var(--state-unreadable-bg); stroke-dasharray: 2 2; }
 .node.roadmap-not-computed rect { fill: var(--state-not-computed-bg); stroke-dasharray: 6 3; }
 .node.node-unknown rect { fill: var(--state-unknown-bg); stroke: var(--state-unknown-fg); stroke-dasharray: 1 3; }
@@ -645,6 +640,43 @@ body {
   border-radius: 4px;
   font-size: 10.5px;
 }
+/* The track chip (#1308): a different fact from the lifecycle chip, drawn beside it. The missing-configuration
+   chip is a WARNING in the page's warning colour (outlined, so it never reads as one more lifecycle state). */
+.track-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--stamp);
+  white-space: nowrap;
+}
+.track-chip.track-undeclared, .legend-item.track-undeclared { color: var(--warn); }
+.track-chip.track-undeclared { border-color: var(--warn); background: var(--warn-bg); font-weight: 600; }
+.node-card-head { flex-wrap: wrap; justify-content: flex-start; }
+.node-card-head .node-number { margin-right: auto; }
+.batch-tile .node-state, .batch-tile .track-chip { margin-top: 5px; margin-right: 4px; }
+.legend-group { display: inline-flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; }
+.legend-group + .legend-group { padding-left: 12px; border-left: 1px solid var(--line); }
+.legend-group-label { color: var(--stamp); font-size: 10px; text-transform: uppercase; letter-spacing: .04em; }
+.declare-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 8px 0;
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: var(--paper);
+  border: 1px solid var(--warn);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.declare-label { color: var(--warn); font-weight: 600; }
+.declare-block code { color: var(--accent); white-space: pre-wrap; word-break: break-word; user-select: all; }
+.declare-note { margin: 0; color: var(--muted); }
 .node-title {
   margin: 0;
   font-size: 13px;
@@ -672,8 +704,6 @@ body {
 .node-state.state-blocked { background: var(--state-blocked-bg); }
 .node-state.state-awaiting-review, .legend-item.state-awaiting-review { color: var(--state-awaiting-review-fg); }
 .node-state.state-awaiting-review { background: var(--state-awaiting-review-bg); }
-.node-state.state-unclassified, .legend-item.state-unclassified { color: var(--state-unclassified-fg); }
-.node-state.state-unclassified { background: var(--state-unclassified-bg); }
 .node-state.state-unreadable, .legend-item.state-unreadable { color: var(--state-unreadable-fg); }
 .node-state.state-unreadable { background: var(--state-unreadable-bg); }
 .node-state.state-not-computed, .legend-item.state-not-computed { color: var(--state-not-computed-fg); }
@@ -921,7 +951,6 @@ body {
 }
 .drawer-id { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-family: var(--font-mono); font-size: 11px; }
 .drawer-number { color: var(--accent); font-weight: 700; font-size: 12px; }
-.drawer-track { color: var(--stamp); }
 .drawer-forge { color: var(--accent); text-decoration: none; }
 .drawer-forge:hover { text-decoration: underline; }
 .drawer .close {
@@ -1396,7 +1425,6 @@ body {
   flex: 1;
   min-width: 0;
 }
-.epic-track,
 .epic-count {
   font-size: 11px;
   color: var(--muted);
