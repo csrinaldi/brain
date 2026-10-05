@@ -109,6 +109,10 @@ let searchResultsMount = null;
 /** The last `GET /api/change/<N>` body for the selected issue; `null` while it is still being read. */
 let changeView = null;
 let activeTab = 'spec';
+// #1307 D122: set by a tab click so the next drawer render scrolls the body to the panel.
+let tabScrollPending = false;
+let drawerRenderedFor = null;
+let panelPadded = false;
 /**
  * Which track lanes are collapsed (#998 R998-3): a local Set, the same kind
  * of page-only interaction state `selectedIssue`/`activeTab` already are —
@@ -1704,9 +1708,33 @@ function closeDrawer() {
  * branch to get wrong.
  */
 function renderDrawer() {
+  // #1307 D122: the rebuild resets the body's scrollTop. Re-opening the same node keeps it (an SSE
+  // re-render must not jump); a tab click brings the panel to the top of the body; a new node starts at 0.
+  let kept = 0;
+  for (const child of mounts.drawer.childNodes) if (child.className === 'drawer-body') kept = child.scrollTop || 0;
+  if (drawerRenderedFor !== selectedIssue) { kept = 0; panelPadded = false; }
+  drawerRenderedFor = selectedIssue;
+  const built = buildDrawer();
+  const toPanel = tabScrollPending;
+  tabScrollPending = false;
+  if (!built) return;
+  if (toPanel) panelPadded = true;
+  // A short panel at the end of a long body cannot reach the top (the browser clamps scrollTop), so once a tab was
+  // clicked the panel is at least one body tall: its top can always be the body's top.
+  if (panelPadded && built.panel) built.panel.style.minHeight = `${built.body.clientHeight || 0}px`;
+  if (toPanel && built.panel) {
+    built.body.scrollTop = 0;
+    built.body.scrollTop = built.panel.getBoundingClientRect().top - built.body.getBoundingClientRect().top;
+  } else {
+    built.body.scrollTop = kept;
+  }
+}
+
+/** Builds the drawer; returns its scroller and the active tab panel (null when there is none yet). */
+function buildDrawer() {
   clear(mounts.drawer);
   mounts.drawer.hidden = selectedIssue === null;
-  if (selectedIssue === null) return;
+  if (selectedIssue === null) return null;
 
   // Region 08's header: the number, the state the card showed, the track, a
   // link to the issue on the forge, and the close control — all from the same
@@ -1755,12 +1783,12 @@ function renderDrawer() {
 
   if (changeView === null) {
     body.appendChild(el('p', 'note', 'reading this change…'));
-    return;
+    return { body, panel: null };
   }
   const model = buildDrawerModel(changeView);
   if (!model.ok) {
     body.appendChild(said(model.reason));
-    return;
+    return { body, panel: null };
   }
   // #883 R883-9: with no change dir at the served HEAD and a worktree that has one, "on this machine" is the first thing read.
   const localFirst = !model.value.changeDir && model.value.local.length > 0;
@@ -1777,13 +1805,15 @@ function renderDrawer() {
   for (const tab of model.value.tabs) {
     const button = el('button', null, tab.ok ? tab.label : `${tab.label} !`);
     button.setAttribute('aria-selected', String(tab.id === activeTab));
-    button.addEventListener('click', () => { activeTab = tab.id; renderDrawer(); });
+    button.addEventListener('click', () => { activeTab = tab.id; tabScrollPending = true; renderDrawer(); });
     tabs.appendChild(button);
   }
   head.appendChild(tabs);
-  body.appendChild(renderTab(model.value.tabs.find((t) => t.id === activeTab) ?? model.value.tabs[0]));
+  const panel = renderTab(model.value.tabs.find((t) => t.id === activeTab) ?? model.value.tabs[0]);
+  body.appendChild(panel);
   if (!localFirst) body.appendChild(renderLocalBlocks(model.value));
   body.appendChild(renderRemoteBlocks(model.value));
+  return { body, panel };
 }
 
 /**
@@ -1884,6 +1914,7 @@ function renderChildren(issue) {
 
 function renderTab(tab) {
   const wrap = document.createElement('div');
+  wrap.className = 'tab-panel';
   if (tab.from) wrap.appendChild(el('p', 'tab-from', tab.from));
   if (tab.header) wrap.appendChild(el('p', 'tab-progress', tab.header));
   if (tab.note) wrap.appendChild(el('p', 'note', `source: ${tab.note}`));
