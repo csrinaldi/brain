@@ -23,6 +23,7 @@ import { getVcs } from './vcs/cli.mjs';
 import { originIdentity } from './vcs/lib/repo.mjs';
 import { loadBrainConfig } from './lib/brain-config.mjs';
 import { resolveApprovedLabel } from './governance/approved-label.mjs';
+import { readAxis } from './lib/axis-config.mjs';
 
 /**
  * Pure argument parsing — `--label` repeats, `--body-file` is read by the caller so
@@ -107,7 +108,7 @@ export async function main(argv = [], deps = {}) {
     return 1;
   }
 
-  say(nextStepMessage(created, resolveApprovedLabel(config, config?.vcs?.provider)));
+  say(nextStepMessage(created, resolveApprovedLabel(config, readAxis(config, 'vcs').default)));
   return 0;
 }
 

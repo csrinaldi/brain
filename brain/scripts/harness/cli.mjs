@@ -4,7 +4,7 @@
 // Usage: node brain/scripts/harness/cli.mjs <op>
 //   op: init
 //
-// Reads SDD_HARNESS from the environment or .env (default: gentle-ai).
+// Resolves AGENT_PLATFORM and SDD_ENGINE (resolveAxis: env, .env, brain.config.json; no default, #1114 S2).
 // Imports the corresponding backend from axes/<axis>/adapters/<harness>.mjs
 // (harnessAdapterUrl, issue #1141) and
 // dispatches the requested operation.
@@ -21,7 +21,7 @@ import { parseEnvFile } from '../lib/env-read.mjs';
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '../../..');
 
 // ---------------------------------------------------------------------------
-// Read SDD_HARNESS: env var > .env file > default 'gentle-ai'
+// Read the .env file (the precedence itself is resolveAxis's: process env > .env > brain.config.json)
 // ---------------------------------------------------------------------------
 // The PARSE is shared (#316); the precedence stays where it always was — at the
 // consumption site below, `process.env.X ?? envVars.X`, which is already
@@ -43,45 +43,46 @@ function readEnvFile(root = repoRoot) {
 // ADR-0024, and moving it out from under its callers would be a second defect
 // to fix the first.
 import { resolvePlatform, SDD_ENGINES } from './platform.mjs';
+import { resolveAxis, AxisRefusal } from '../lib/axis-config.mjs';
+import { readUserConfig } from '../lib/user-config.mjs';
+import { loadBrainConfig } from '../lib/brain-config.mjs';
+import { t } from '../i18n/t.mjs';
 import { harnessAdapterUrl } from '../axes/lib/harness-adapter-url.mjs';
 export { resolvePlatform, SDD_ENGINES };
 
+/** A refusal's params with its validation `detail` re-rendered in the active locale (resolveAxis has no async access to it). */
+async function localizedParams(err) {
+  if (!Array.isArray(err.details)) return err.params;
+  const parts = await Promise.all(err.details.map((d) => (d.key ? t(d.key, d.params ?? {}) : d.message)));
+  return { ...err.params, detail: parts.join('; ') };
+}
+
 /**
- * Resolves the active SDD engine.
- * Pure — takes env + envVars + config explicitly for testing.
+ * Resolves the active SDD engine: a thin caller of `resolveAxis` (process env > `.env` > `sdd.default` > the legacy
+ * flat key and `SDD_HARNESS`, one minor version). No default: an undeclared engine is refused (#1114 S2).
  *
- * @param {{ env?: object, envVars?: object, config?: object }} [opts]
+ * @param {{ env?: object, envVars?: object, config?: object, user?: ReturnType<typeof readUserConfig> }} [opts]  `user`: the user layer, read through the ONE reader when not injected
  * @returns {string}
+ * @throws {AxisRefusal} when nothing declares an SDD engine
  */
-export function resolveEngine({ env = process.env, envVars = {}, config = {} } = {}) {
-  const engineVal = env.SDD_ENGINE ?? envVars.SDD_ENGINE ?? config.engine;
-  if (engineVal) return engineVal;
-
-  // SDD_ENGINES (platform.mjs, issue #312 D2) is the ONE declaration of this
-  // membership — reading it here, rather than holding a second inline copy,
-  // is the whole point of the extraction. Behavior is unchanged: same two
-  // names, same fallback.
-  const harnessVal = env.SDD_HARNESS ?? envVars.SDD_HARNESS ?? config.harness;
-  if (harnessVal && SDD_ENGINES.includes(harnessVal)) {
-    return harnessVal;
-  }
-
-  return 'gentle-ai';
+export function resolveEngine({ env = process.env, envVars = {}, config = {}, user = readUserConfig({ env }) } = {}) {
+  return resolveAxis('sdd', { env, dotenv: envVars, config, ...user }).value;
 }
 
 // `resolveMemory` was here and is REMOVED (issue #1165): it was exported, dead (memory/cli.mjs
 // re-read the env on its own), and wrong — it read `config.memory` as a string when that key is an
 // object, and it defaulted to 'engram'. The memory backend has ONE resolver now:
-// memory/lib/backend-resolve.mjs, built on lib/axis-selector.mjs (the shape #1114 generalises).
+// memory/lib/backend-resolve.mjs, a caller of `resolveAxis` (lib/axis-config.mjs).
 
 /**
- * Resolves the active harness name (legacy backwards compatibility).
+ * The legacy harness name. `harness` was the one selector before the platform/engine split (#643); the name is the
+ * SDD engine now, so this is `resolveEngine` and carries no precedence of its own (#1114 S2).
  *
  * @param {{ env?: object, envVars?: object, config?: object }} [opts]
  * @returns {string}
  */
-export function resolveHarness({ env = process.env, envVars = {}, config = {} } = {}) {
-  return env.SDD_HARNESS ?? envVars.SDD_HARNESS ?? config.harness ?? resolveEngine({ env, envVars, config });
+export function resolveHarness(opts = {}) {
+  return resolveEngine(opts);
 }
 
 // ---------------------------------------------------------------------------
@@ -214,10 +215,6 @@ export async function dispatch(harness, op, args = [], { backendLoader = default
 // ---------------------------------------------------------------------------
 const isMain = import.meta.url === pathToFileURL(process.argv[1] ?? '').href;
 if (isMain) {
-  const envVars = readEnvFile();
-  const platform = resolvePlatform({ env: process.env, envVars });
-  const engine = resolveEngine({ env: process.env, envVars });
-
   const op = process.argv[2];
   if (!op) {
     console.error(`harness/cli: missing <op>. Valid ops: ${CLI_OPS.join(', ')}`);
@@ -236,6 +233,19 @@ if (isMain) {
           `not something argv can carry. Command-line ops: ${CLI_OPS.join(', ')}`
         : `harness/cli: unknown op '${op}'. Valid ops: ${CLI_OPS.join(', ')}`,
     );
+    process.exit(1);
+  }
+
+  const envVars = readEnvFile();
+  let platform;
+  let engine;
+  try {
+    const config = loadBrainConfig();
+    platform = resolvePlatform({ env: process.env, envVars, config });
+    engine = resolveEngine({ env: process.env, envVars, config });
+  } catch (err) {
+    // A refusal names its fix (#1114 S2): print it in the active locale and stop, never run a guessed harness.
+    console.error(`harness/cli: ${err instanceof AxisRefusal ? await t(err.key, await localizedParams(err)) : err.message}`);
     process.exit(1);
   }
 

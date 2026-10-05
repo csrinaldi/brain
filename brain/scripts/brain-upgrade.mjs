@@ -22,6 +22,7 @@ import { copyManaged, readOutgoing, strategyFor, mergeClaudeSettings, mergePacka
 import { detectPM } from './lib/pm.mjs';
 import { managedStrategy, STRATEGY } from '../core/managed-paths.mjs';
 import { detectAgentsClobber } from './lib/agents-clobber.mjs';
+import { resolveAxisMigrationContext } from './lib/axis-migration-context.mjs';
 
 const ROOT = process.cwd();
 const PM = detectPM(ROOT).name;
@@ -667,14 +668,27 @@ if (!existsSync(configPath)) {
   warn(`brain.config.json not found — skipping migration. Create it and re-run, or run env:init.`);
 } else {
   const current = JSON.parse(readFileSync(configPath, 'utf8'));
-  const { config: migrated, applied } = migrateConfig(current, migrations, installedVersion);
+  // #1114 S3.2: the ADR-0038 migration writes the value each axis EFFECTIVELY runs today, and for
+  // platform and sdd that lives in env and `.env` (read here, never edited). Imported from THIS
+  // script's own tree, like undeclaredUpgradeNotice below: an older target has no such module.
+  const axisContext = resolveAxisMigrationContext({ config: current, env: process.env, root: ROOT });
+  const { config: migrated, applied, notices } = migrateConfig(current, migrations, installedVersion, axisContext);
+  // Every value a migration wrote, with its source, so the reviewer of this commit sees whether a
+  // per-machine value (.env, process env) just became the team's tracked default (ADR-0038 Consequences).
+  const showNotices = (verb) => {
+    if (!notices.length) return;
+    info(`${verb} in brain.config.json (value and where it came from):`);
+    for (const line of notices) info(`  ${line}`);
+  };
   if (dryRun) {
     info(applied.length
       ? `would apply config migration(s): ${applied.join(', ')}`
       : 'config already up to date — no migrations pending.');
+    showNotices('would write');
   } else if (applied.length) {
     writeFileSync(configPath, JSON.stringify(migrated, null, 2) + '\n');
     ok(`Applied config migration(s): ${applied.join(', ')} (schemaVersion → ${migrated.schemaVersion}).`);
+    showNotices('wrote');
   } else {
     // Still persist schemaVersion bump if it advanced without key changes.
     if (migrated.schemaVersion !== current.schemaVersion) {

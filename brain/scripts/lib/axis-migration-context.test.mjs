@@ -1,0 +1,149 @@
+// axis-migration-context.test.mjs — #1114 S3.2: the value a consumer EFFECTIVELY runs today for
+// the two axes that had a code default (platform, sdd), and where it came from. The migration
+// writes that value into tracked config, so it must be exactly what the resolvers answer.
+
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtempSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import { resolveAxisMigrationContext } from './axis-migration-context.mjs';
+import { tryResolveAxis } from './axis-config.mjs';
+import { parseEnvFile } from './env-read.mjs';
+import { LIFECYCLE_STAGES } from './sdd-layout.mjs';
+
+function withRoot(dotenv, fn) {
+  const root = mkdtempSync(join(tmpdir(), 'axis-ctx-'));
+  try {
+    if (dotenv !== null) writeFileSync(join(root, '.env'), dotenv);
+    return fn(root);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+const TABLE = [
+  ['nothing at all', {}, null, {}],
+  ['process env AGENT_PLATFORM', { AGENT_PLATFORM: 'antigravity' }, null, {}],
+  ['.env AGENT_PLATFORM', {}, 'AGENT_PLATFORM=plain\n', {}],
+  ['shell beats .env', { AGENT_PLATFORM: 'antigravity' }, 'AGENT_PLATFORM=plain\n', {}],
+  ['flat platform', {}, null, { platform: 'antigravity' }],
+  ['env beats flat platform', { AGENT_PLATFORM: 'plain' }, null, { platform: 'antigravity' }],
+  ['legacy harness that is a platform', {}, null, { harness: 'antigravity' }],
+  ['legacy harness that is an engine only', {}, null, { harness: 'gentle-ai' }],
+  ['SDD_HARNESS in .env', {}, 'SDD_HARNESS=plain\n', {}],
+  ['SDD_HARNESS in process env', { SDD_HARNESS: 'antigravity' }, null, {}],
+  ['SDD_ENGINE in .env', {}, 'SDD_ENGINE=plain\n', {}],
+  ['SDD_ENGINE in process env, flat engine in config', { SDD_ENGINE: 'plain' }, null, { engine: 'gentle-ai' }],
+  ['flat engine', {}, null, { engine: 'plain' }],
+  ['already the new shape', {}, null, { platform: { default: 'plain', providers: { plain: {} } }, sdd: { default: 'plain', providers: { plain: {} } } }],
+  ['empty process env value', { AGENT_PLATFORM: '', SDD_ENGINE: '' }, null, { platform: 'plain', engine: 'plain' }],
+];
+
+// What the resolvers answered before #1114 S2: `resolveAxis`'s answer, and today's code default where it refuses as
+// undeclared. The migration writes exactly that, so a consumer keeps running what it ran.
+const PRE_S2 = { platform: 'claude', sdd: 'gentle-ai' };
+const effectiveToday = (axis, { env, envVars, config }) => {
+  const r = tryResolveAxis(axis, { env, dotenv: envVars, config, notice: () => {} });
+  return r.ok ? r.value : PRE_S2[axis];
+};
+
+for (const [name, env, dotenv, config] of TABLE) {
+  test(`parity with resolveAxis (plus today's default where it is undeclared): ${name}`, () => {
+    withRoot(dotenv, (root) => {
+      const envVars = dotenv === null ? {} : parseEnvFile(dotenv);
+      const ctx = resolveAxisMigrationContext({ config, env, root });
+      assert.equal(ctx.platform.value, effectiveToday('platform', { env, envVars, config }), 'platform');
+      assert.equal(ctx.sdd.value, effectiveToday('sdd', { env, envVars, config }), 'sdd');
+      assert.ok(ctx.platform.source && ctx.sdd.source, 'every value names its source');
+    });
+  });
+}
+
+test('a per-machine value the resolver would REFUSE is never written into tracked config: the axis is left undeclared', () => {
+  withRoot('AGENT_PLATFORM=bogus\n', (root) => {
+    const ctx = resolveAxisMigrationContext({ config: {}, env: {}, root });
+    assert.equal(ctx.platform.value, '');
+    assert.match(ctx.platform.source, /refused/);
+    assert.doesNotMatch(JSON.stringify(ctx), /bogus/);
+    assert.equal(ctx.sdd.value, 'gentle-ai');
+  });
+});
+
+test('sources name where the value came from, and never carry the value of an unrelated key', () => {
+  withRoot('AGENT_PLATFORM=plain\nSDD_ENGINE=plain\nSECRET_TOKEN=hunter2\n', (root) => {
+    const ctx = resolveAxisMigrationContext({ config: {}, env: {}, root });
+    assert.equal(ctx.platform.source, '.env AGENT_PLATFORM');
+    assert.equal(ctx.sdd.source, '.env SDD_ENGINE');
+    assert.ok(!JSON.stringify(ctx).includes('hunter2'));
+  });
+  withRoot(null, (root) => {
+    assert.equal(resolveAxisMigrationContext({ config: {}, env: { AGENT_PLATFORM: 'claude' }, root }).platform.source, 'process env AGENT_PLATFORM');
+    assert.equal(resolveAxisMigrationContext({ config: { platform: 'plain' }, env: {}, root }).platform.source, 'brain.config.json platform');
+    assert.equal(resolveAxisMigrationContext({ config: { harness: 'plain' }, env: {}, root }).platform.source, 'brain.config.json harness');
+    assert.equal(resolveAxisMigrationContext({ config: { engine: 'plain' }, env: {}, root }).sdd.source, 'brain.config.json engine');
+    assert.equal(resolveAxisMigrationContext({ config: {}, env: {}, root }).platform.source, "today's default");
+    assert.equal(resolveAxisMigrationContext({ config: {}, env: {}, root }).sdd.source, "today's default");
+  });
+});
+
+test('the context carries the lifecycle stages the migration must not route as runtimes', () => {
+  withRoot(null, (root) => {
+    assert.deepEqual(resolveAxisMigrationContext({ config: {}, env: {}, root }).lifecycleStages, [...LIFECYCLE_STAGES]);
+  });
+});
+
+test('it never writes: the .env on disk is byte-identical afterwards', () => {
+  const text = 'AGENT_PLATFORM=plain\n# a comment\nOTHER=1\n';
+  withRoot(text, (root) => {
+    resolveAxisMigrationContext({ config: {}, env: {}, root });
+    assert.equal(readFileSync(join(root, '.env'), 'utf8'), text);
+  });
+});
+
+// ── #1114 S3.3 review: only brain:upgrade may promote a per-machine value into tracked config ──
+test('envSources:false never PROMOTES a per-machine value: an axis whose effective value is in env or .env is left undeclared (S3.3 review)', () => {
+  withRoot('AGENT_PLATFORM=antigravity\nSDD_ENGINE=plain\nSDD_HARNESS=plain\n', (root) => {
+    const ctx = resolveAxisMigrationContext({ config: {}, env: { AGENT_PLATFORM: 'antigravity', SDD_HARNESS: 'plain' }, root, envSources: false });
+    assert.equal(ctx.platform.value, '', 'never today\'s default, never the machine\'s value');
+    assert.equal(ctx.sdd.value, '');
+    assert.match(ctx.platform.source, /per-machine/);
+    assert.doesNotMatch(JSON.stringify(ctx), /antigravity/, 'the per-machine VALUE is never copied into the context');
+  });
+});
+
+test('envSources:false still declares an axis whose effective value is today\'s default (nothing per-machine states it)', () => {
+  withRoot('OTHER=1\n', (root) => {
+    const ctx = resolveAxisMigrationContext({ config: {}, env: {}, root, envSources: false });
+    assert.equal(ctx.platform.value, 'claude');
+    assert.equal(ctx.sdd.value, 'gentle-ai');
+    assert.match(ctx.platform.source, /default/);
+  });
+});
+
+test('envSources:false: a per-machine value on ONE axis leaves only that axis undeclared', () => {
+  withRoot('AGENT_PLATFORM=antigravity\n', (root) => {
+    const ctx = resolveAxisMigrationContext({ config: {}, env: {}, root, envSources: false });
+    assert.equal(ctx.platform.value, '');
+    assert.equal(ctx.sdd.value, 'gentle-ai');
+  });
+});
+
+test('envSources:false still reads the config\'s own keys (flat keys and legacy harness)', () => {
+  withRoot('OTHER=1\n', (root) => {
+    const ctx = resolveAxisMigrationContext({ config: { platform: 'plain', engine: 'plain' }, env: {}, root, envSources: false });
+    assert.equal(ctx.platform.value, 'plain');
+    assert.equal(ctx.sdd.value, 'plain');
+    const h = resolveAxisMigrationContext({ config: { harness: 'antigravity' }, env: {}, root, envSources: false });
+    assert.equal(h.platform.value, 'antigravity');
+  });
+});
+
+test('the default (brain:upgrade) still reads process env and .env, and reports the source', () => {
+  withRoot('AGENT_PLATFORM=antigravity\n', (root) => {
+    const ctx = resolveAxisMigrationContext({ config: {}, env: {}, root });
+    assert.equal(ctx.platform.value, 'antigravity');
+    assert.match(ctx.platform.source, /\.env AGENT_PLATFORM/);
+  });
+});

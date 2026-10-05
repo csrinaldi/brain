@@ -166,6 +166,8 @@ export function buildFixture({
     'lane-paths', 'lane-scrub',
     // #967 PR C — required at every tier, same as the ten above.
     'base-branch',
+    // #1263 slice 4 — required at standard/regulated (this fixture runs regulated).
+    'team-config-reviewed',
   ];
   // Every gate green by default (#443 landed): the deterministic finding of
   // design D4 is the DIFF-BUDGET BREACH again — 250 lines against regulated's

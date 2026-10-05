@@ -11,7 +11,6 @@ import { join } from 'node:path';
 import { testTmp } from './test-tmp.mjs';
 import { gitTry } from '../governance/postmerge/git-seam.mjs';
 import {
-  resolveProjectSlug,
   resolveDefaultBranch,
   npmTestApplicability,
 } from './local-gate-context.mjs';
@@ -38,22 +37,6 @@ function consumerWithUnsetOriginHead(defaultBranch) {
   assert.equal(git(repo, 'push', '-q', '-u', 'origin', defaultBranch).status, 0);
   return { root, repo, origin };
 }
-
-// ── (a) the project slug ───────────────────────────────────────────────────────────
-
-test('#1186 (a): the slug is brain.config.json project.slug — the field every other verb reads', () => {
-  const slug = resolveProjectSlug({ config: { project: { slug: 'acme/widgets' } }, identity: () => ({ project: 'other/thing' }) });
-  assert.equal(slug, 'acme/widgets');
-});
-
-test('#1186 (a): with no configured slug it falls back to the origin remote, as ensureProjectIdentity does', () => {
-  const slug = resolveProjectSlug({ config: {}, identity: () => ({ host: 'github.com', project: 'acme/widgets' }) });
-  assert.equal(slug, 'acme/widgets');
-});
-
-test('#1186 (a): neither source → null, never the string "undefined"', () => {
-  assert.equal(resolveProjectSlug({ config: {}, identity: () => ({ host: null, project: null }) }), null);
-});
 
 // ── (b) the default branch, with no `git remote set-head` ──────────────────────────
 

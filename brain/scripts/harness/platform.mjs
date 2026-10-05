@@ -39,47 +39,25 @@
 // belongs here, where both can reach it and neither depends on the other.
 // `cli.mjs` re-exports `resolvePlatform` so its own importers are unaffected.
 
-/**
- * The SDD_ENGINE axis membership (issue #312, design D2 supporting change).
- * Lives here, not `cli.mjs`, for the same reason this whole file does: a
- * backend may not import the dispatcher, and `axes/sdd-engine/role-port.mjs`'s registry
- * assertion needs this list without reaching into `cli.mjs`'s top-level-await
- * module. `cli.mjs`'s `resolveEngine` reads it below instead of holding its
- * own inline literal — one declaration, two readers, the `CLI_OPS`-from-`OPS`
- * (`cli.mjs:136-145`) / `IMPLEMENTED_AXES`-from-`RUNNERS`
- * (`resolve-challenger.mjs:64-74`) house pattern.
- */
-export const SDD_ENGINES = Object.freeze(['gentle-ai', 'plain']);
+import { AGENT_PLATFORMS, SDD_ENGINES, resolveAxis } from '../lib/axis-config.mjs';
+import { readUserConfig } from '../lib/user-config.mjs';
+// The two memberships are declared in lib/axis-config.mjs (#1114 S3.1) and re-exported here, so
+// every importer of this file is unaffected.
+export { AGENT_PLATFORMS, SDD_ENGINES };
+
+// There is NO default platform and NO default engine (#1114 S2, ADR-0038 section 3): `claude` (ADR-0024 Amendment 2)
+// and `gentle-ai` are not chosen by the code any more. An axis nothing declares is REFUSED by `resolveAxis`, with the
+// fix named. `bootstrap.sh` declares them for a NEW consumer, in tracked config, where they are visible.
 
 /**
- * The AGENT_PLATFORM axis membership (ADR-0024), and the value a repo gets when
- * it states none (issue #1125, ADR-0024 Amendment 2). `claude` is the default;
- * `antigravity` is the second supported platform; `plain` emits nothing.
+ * Resolves the active agent platform: a thin caller of `resolveAxis` (process env > `.env` > `platform.default` >
+ * the legacy flat key and `SDD_HARNESS`, one minor version).
  *
- * ONE DECLARATION IN JS, BUT NOT YET ONE RESOLVER. `bootstrap.sh` §6 still
- * resolves the platform in shell before `harness/cli.mjs` runs, and
- * `bootstrap.default-platform.test.mjs` holds it to `resolvePlatform` by a
- * parity table. #1114 retires the second resolver; until then, a change here
- * is a change there too, and the parity test says so.
- */
-export const AGENT_PLATFORMS = Object.freeze(['claude', 'antigravity', 'plain']);
-export const DEFAULT_PLATFORM = 'claude';
-
-/**
- * Resolves the active agent platform.
- * Pure — takes env + envVars + config explicitly for testing.
- *
- * @param {{ env?: object, envVars?: object, config?: object }} [opts]
+ * @param {{ env?: object, envVars?: object, config?: object, user?: ReturnType<typeof readUserConfig> }} [opts]
+ *   `envVars` is the parsed `.env`; `user` is the user layer, read through the ONE reader (`BRAIN_HOME`, else `~/.brain`) when not injected
  * @returns {string}
+ * @throws {import('../lib/axis-config.mjs').AxisRefusal} when nothing declares a platform
  */
-export function resolvePlatform({ env = process.env, envVars = {}, config = {} } = {}) {
-  const platformVal = env.AGENT_PLATFORM ?? envVars.AGENT_PLATFORM ?? config.platform;
-  if (platformVal) return platformVal;
-
-  const harnessVal = env.SDD_HARNESS ?? envVars.SDD_HARNESS ?? config.harness;
-  if (harnessVal && AGENT_PLATFORMS.includes(harnessVal)) {
-    return harnessVal;
-  }
-
-  return DEFAULT_PLATFORM;
+export function resolvePlatform({ env = process.env, envVars = {}, config = {}, user = readUserConfig({ env }) } = {}) {
+  return resolveAxis('platform', { env, dotenv: envVars, config, ...user }).value;
 }

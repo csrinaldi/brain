@@ -2,9 +2,9 @@
 // backend (issue #1165). `memory/cli.mjs` and `bootstrap.sh` (through this file's
 // CLI) both ask HERE; nothing else in the tree decides which backend runs.
 //
-// Precedence (axis-selector.mjs): process env `MEMORY_BACKEND` → `.env` →
-// `brain.config.json` `memory.backend` → undeclared. Undeclared is a refusal
-// naming the fix, never `engram`: a second checkout with no `.env` used to
+// Precedence (`resolveAxis`, lib/axis-config.mjs, #1114 S2): process env `MEMORY_BACKEND` → `.env` →
+// `brain.config.json` `memory.default` (the legacy `memory.backend` for one minor version) → undeclared.
+// Undeclared is a refusal naming the fix, never `engram`: a second checkout with no `.env` used to
 // silently run a different backend than the team's (#1165).
 //
 // This module owns the closed set of backends. The dispatcher's own
@@ -15,9 +15,12 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { resolveAxisSelector } from '../../lib/axis-selector.mjs';
+import { readDotenv } from '../../lib/env-read.mjs';
+import { tryResolveAxis, MEMORY_BACKENDS } from '../../lib/axis-config.mjs';
+import { readUserConfig } from '../../lib/user-config.mjs';
 
-export const MEMORY_BACKENDS = Object.freeze(['engram', 'plainfiles']);
+// The closed set lives with the other axes' (lib/axis-config.mjs) and is re-exported: its importers are unaffected.
+export { MEMORY_BACKENDS };
 export const MEMORY_ENV_KEY = 'MEMORY_BACKEND';
 export const MEMORY_CONFIG_PATH = 'memory.backend';
 
@@ -67,30 +70,29 @@ export function readConfig({ root, configFile = null }) {
   }
 }
 
+/** The resolver's physical place → this module's historical source tokens (memory/cli.mjs and bootstrap.sh read them). */
+const token = { 'process-env': 'shell', dotenv: 'file', user: 'user', config: 'config' };
+
 /**
  * @param {{root: string, env?: object, envFile?: string|null, configFile?: string|null}} args
- * @returns {{backend: string|null, source: 'shell'|'file'|'config'|'none',
+ * @returns {{backend: string|null, source: 'shell'|'file'|'user'|'config'|'none',
  *            status: 'declared'|'undeclared'|'invalid', invalidValue?: string,
  *            configError: string|null, shadowed: Array<{source: string, value: string}>}}
  */
-export function resolveMemoryBackend({ root, env = process.env, envFile = null, configFile = null }) {
+export function resolveMemoryBackend({ root, env = process.env, envFile = null, configFile = null, user = readUserConfig({ env }) }) {
   const { config, error } = readConfig({ root, configFile });
-  const r = resolveAxisSelector({
-    key: MEMORY_ENV_KEY,
-    configPath: MEMORY_CONFIG_PATH,
-    allowed: MEMORY_BACKENDS,
-    config,
-    env,
-    root,
-    envFile,
-  });
-  if (r.value === null) {
+  const r = tryResolveAxis('memory', { env, dotenv: readDotenv(root, envFile), config, ...user, notice: () => {} });
+  if (r.ok) {
+    return { backend: r.value, source: token[r.where], status: 'declared', configError: error, shadowed: r.shadowed };
+  }
+  const { refusal } = r;
+  if (refusal.code === 'undeclared') {
     return { backend: null, source: 'none', status: 'undeclared', configError: error, shadowed: [] };
   }
-  if (!r.valid) {
-    return { backend: null, source: r.source, status: 'invalid', invalidValue: r.value, configError: error, shadowed: r.shadowed };
-  }
-  return { backend: r.value, source: r.source, status: 'declared', configError: error, shadowed: r.shadowed };
+  // invalid-value | not-a-provider | invalid-config: a value WAS declared and is refused. `invalidValue` is what
+  // the operator typed (the declared default for an invalid config), `source` where it came from.
+  const stated = refusal.params?.value ?? config?.memory?.default ?? config?.memory?.backend ?? '';
+  return { backend: null, source: token[refusal.where] ?? 'config', status: 'invalid', invalidValue: String(stated), configError: error, shadowed: refusal.shadowed ?? [] };
 }
 
 // ---------------------------------------------------------------------------

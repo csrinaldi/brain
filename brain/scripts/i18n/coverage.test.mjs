@@ -289,7 +289,7 @@ test('PR3 bootstrap: VCS auth section keys exist in en', () => {
 test('PR3 bootstrap: SDD harness section keys exist in en', () => {
   assert.equal(en['bootstrap.sdd.section'],            'SDD implementation (harness)');
   assert.equal(en['bootstrap.sdd.prompt'],             'Which SDD implementation do you use? [gentle-ai]: ');
-  assert.equal(en['bootstrap.sdd.ok'],                 'harness: {harness} (.env)');
+  assert.equal(en['bootstrap.sdd.ok'],                 'harness: {harness} ({source})');
   assert.equal(en['bootstrap.sdd.gentleaiMissing'],    'gentle-ai missing — brew install gentle-ai and re-run brain:env:init');
   assert.equal(en['bootstrap.sdd.ecosystemOk'],        'ecosystem already initialized (gentle-ai doctor)');
   assert.equal(en['bootstrap.sdd.ecosystemConfigured'],'ecosystem configured (skills, engram, gga)');
@@ -315,6 +315,13 @@ test('#1214 bootstrap.memory.prompt: no bracketed default, names both backends (
 test('PR3 bootstrap: team memory section keys exist in en', () => {
   assert.equal(en['bootstrap.memory.section'],         'Team memory');
   assert.equal(en['bootstrap.memory.prompt'],          'Which memory backend does this team use? (engram|plainfiles): ');
+  for (const cat of [en, es]) {
+    for (const k of ['bootstrap.memory.envOnly', 'bootstrap.memory.envShadows', 'bootstrap.memory.declared', 'bootstrap.memory.declareFailed']) {
+      assert.doesNotMatch(cat[k], /memory\.backend/, `${k} names the key the commands use: memory.default (#1114 S3.3)`);
+      assert.match(cat[k], /memory\.default/, k);
+    }
+    assert.match(cat['bootstrap.axis.envOnly'], /set \{axis\}\.default \{name\}/, 'the env-only warning names the command that declares it');
+  }
   assert.equal(en['bootstrap.memory.backend'],         'memory backend: {backend} ({source})');
   assert.equal(en['bootstrap.memory.hookOk'],          'pre-push hook activated (checkpoints feature working memory before push — ADR-0003)');
   assert.equal(en['bootstrap.memory.hookFailed'],      'could not activate core.hooksPath (pre-push hook)');

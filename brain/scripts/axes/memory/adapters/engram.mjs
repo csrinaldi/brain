@@ -68,6 +68,7 @@ import { resolveActor, resolveActorKind, deriveIssue, composeSource } from "../.
 import { classifySupersedes } from "../../../memory/lib/supersedes.mjs";
 import { loadBrainConfigOrThrow } from "../../../lib/brain-config.mjs";
 import { t } from "../../../i18n/t.mjs";
+import { projectSlugOrNull } from "../../../lib/project-slug.mjs";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../../../../..");
 
@@ -585,8 +586,8 @@ export async function pull() {
 // `mem_save`, which writes past `.memory/records/` entirely.
 // ---------------------------------------------------------------------------
 
-/** The repository this record belongs to, from config, falling back to the checkout
- *  directory name. Duplicated from plainfiles.mjs verbatim (R1) — no shared-core
+/** The repository this record belongs to, from config: tracked slug, then declared
+ *  project.name, then the origin remote, then the checkout directory name. Duplicated from plainfiles.mjs verbatim (R1) — no shared-core
  *  extraction; the correctness-critical logic already lives in the shared libs
  *  this function calls into.
  *
@@ -598,10 +599,16 @@ export async function pull() {
  *  (plainfiles/engram) staying independent, not about every other caller
  *  reinventing project resolution. */
 export function deriveProject(config, root) {
-  const slug = config?.project?.slug;
-  if (typeof slug === "string" && slug.trim() !== "") return slug.split("/").pop();
+  // Order: tracked slug > declared project.name > origin > checkout directory. A DECLARED name always
+  // beats a derived one (it is what existing records and the engram scope already carry); the origin
+  // replaces only the directory fallback — from an isolated worktree (#782) the directory is the
+  // worktree's name, not the repository's (#1273).
+  const tracked = config?.project?.slug;
+  if (typeof tracked === "string" && tracked.trim() !== "") return tracked.trim().split("/").pop();
   const name = config?.project?.name;
   if (typeof name === "string" && name.trim() !== "") return name;
+  const origin = projectSlugOrNull({ config, cwd: root });
+  if (origin) return origin.split("/").pop();
   return String(root).replace(/\/+$/, "").split("/").pop();
 }
 

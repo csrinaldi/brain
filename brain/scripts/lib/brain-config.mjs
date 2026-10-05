@@ -242,11 +242,19 @@ function buildDefaultConfig() {
     return 0;
   });
   let cfg = mergeDefaults({}, NEW_CONSUMER_DEFAULTS);
+  // #1114 S3.3: a fresh config is written in the ADR-0038 shape by the SAME 1.11.1 entry that migrates
+  // an existing one. A fresh install has nothing to inherit from env or `.env`, so every axis starts
+  // undeclared; `env:init` declares platform, sdd and memory, and the scaffold below declares vcs.
+  const axisContext = {
+    platform: { value: '', source: 'a fresh install' },
+    sdd: { value: '', source: 'a fresh install' },
+    lifecycleStages: [],
+  };
   for (const m of ordered) {
     if (m.defaults) {
       cfg = mergeDefaults(cfg, m.defaults);
     } else if (typeof m.migrate === 'function') {
-      cfg = m.migrate(cfg, { mergeDefaults });
+      cfg = m.migrate(cfg, { mergeDefaults, axisContext });
     }
   }
   cfg.schemaVersion = ordered.at(-1)?.version ?? '0.0.0';
@@ -300,7 +308,10 @@ export function ensureBrainConfig(root = REPO_ROOT, { identity, write = true } =
         cfg.project.slug = id.project;
         filled.push('slug');
       }
-      cfg.vcs.provider = providerFromHost(id.host);
+      const provider = providerFromHost(id.host);
+      cfg.vcs.provider = provider; // legacy key, kept for the alias window (install-tools.sh fallback, un-routed readers)
+      cfg.vcs.default = provider;
+      cfg.vcs.providers = provider ? { [provider]: {} } : {};
     }
 
     if (write) {
@@ -329,32 +340,29 @@ export function ensureBrainConfig(root = REPO_ROOT, { identity, write = true } =
     return { created: false, filled: [], provider: cfg.vcs?.provider ?? '' };
   }
 
-  if (!cfg.project) cfg.project = {};
-
-  const filled = [];
-  if (!cfg.project.gitHost && id.host) {
-    cfg.project.gitHost = id.host;
-    filled.push('gitHost');
-  }
-  if (!cfg.project.slug && id.project) {
-    cfg.project.slug = id.project;
-    filled.push('slug');
-  }
-
-  if (filled.length > 0 && write) {
-    try {
-      writeFileSync(configPath, JSON.stringify(cfg, null, 2) + '\n', 'utf8');
-    } catch {
-      return { created: false, filled: [], provider: cfg.vcs?.provider ?? '' };
-    }
-  }
-
-  return { created: false, filled, provider: cfg.vcs?.provider ?? '' };
+  // An EXISTING config is the team's: env:init writes nothing into it (ADR-0040, #1263 slice 2). A gap in the identity is
+  // REPORTED with the value the origin derives, so the fix is copy-paste; a founding run (the branch above) still writes both.
+  const missing = [];
+  if (!cfg.project?.gitHost && id.host) missing.push({ key: 'gitHost', value: id.host });
+  if (!cfg.project?.slug && id.project) missing.push({ key: 'slug', value: id.project });
+  return { created: false, filled: [], missing, provider: cfg.vcs?.provider ?? '' };
 }
 
 // Main-module guard: run as `node brain/scripts/lib/brain-config.mjs ensure`
 if (process.argv[1] === __filename && process.argv[2] === 'ensure') {
   const result = ensureBrainConfig();
+  // The FOUNDING signal (ADR-0040 section 4, #1263 slice 2): `created` is the one fact that this run is the foundation, and the
+  // creator is the only place that knows it. `--founding-file <path>` hands it to env:init, which must not re-derive it from a
+  // file test (a second reader of the same fact). An ensure that failed reports "existing": the safe side, nothing team-wide is written.
+  const flagAt = process.argv.indexOf('--founding-file');
+  if (flagAt !== -1 && process.argv[flagAt + 1]) {
+    try {
+      writeFileSync(process.argv[flagAt + 1], `${result.created && !result.error ? 'founding' : 'existing'}\n`, 'utf8');
+    } catch (err) {
+      console.error(`  ✗ brain.config.json: could not report the founding signal (${err.message})`);
+      process.exitCode = 1;
+    }
+  }
   if (result.error) {
     console.error(`  ✗ brain.config.json: ${result.error}`);
     process.exitCode = 1;
@@ -366,14 +374,11 @@ if (process.argv[1] === __filename && process.argv[2] === 'ensure') {
       if (cfg.project?.gitHost)  console.log(`  ✓ brain.config.json: gitHost = ${cfg.project.gitHost}`);
       if (cfg.project?.slug)     console.log(`  ✓ brain.config.json: slug = ${cfg.project.slug}`);
     } catch {}
-  } else if (result.filled.length > 0) {
-    try {
-      const cfg = JSON.parse(readFileSync(CONFIG_PATH, 'utf8'));
-      for (const key of result.filled) {
-        const value = key === 'gitHost' ? cfg.project.gitHost : cfg.project.slug;
-        console.log(`  ✓ brain.config.json: ${key} = ${value}`);
-      }
-    } catch {}
+  } else if (result.missing?.length > 0) {
+    // Chained, not awaited: i18n/t.mjs imports this module (see the tier notice below).
+    import('../i18n/t.mjs')
+      .then(async ({ t }) => { for (const m of result.missing) console.error(`  ⚠ ${await t('config.identity.missing', { key: m.key, value: m.value })}`); })
+      .catch((e) => { console.error(`  ⚠ brain.config.json: could not report the missing identity (${e.message})`); });
   }
   // #1124: the tier line runs on EVERY env:init, created or not — a new consumer
   // is told the tier it was given, an existing one the tier it already has.

@@ -277,3 +277,27 @@ test('#814 (round 2): `derived` SURVIVES the port as a strict boolean — the la
   assert.equal(roles.proposal.derived, false, 'recorded → strict false, never absent');
   assert.equal(roles.spec.derived, true, 'guessed → strict true, carried through');
 });
+
+// ── declaredDefaultRole: one form, `<provider>:<role>`, and no second engine list (#1263 R4 follow-ups) ──
+
+test('#1263: declaredDefaultRole answers <provider>:<role> for every provider', async () => {
+  const { declaredDefaultRole } = await import('./role-port.mjs');
+  assert.equal(declaredDefaultRole('gentle-ai', 'proposal'), 'gentle-ai:sdd-propose');
+  assert.equal(declaredDefaultRole('plain', 'proposal'), 'plain:human');
+  assert.equal(declaredDefaultRole('brain', 'cold-review'), 'brain:cold-review');
+  assert.equal(declaredDefaultRole('brain', 'lint'), 'brain:stage');
+  assert.equal(declaredDefaultRole('brain', 'proposal'), null);
+  assert.equal(declaredDefaultRole('gentle-ai', 'cold-review'), null);
+});
+
+test('#1263: the inhabitant map has exactly the keys of SDD_ENGINES (no second engine list)', async () => {
+  const { DECLARING_INHABITANTS } = await import('./role-port.mjs');
+  const { SDD_ENGINES } = await import('../../lib/axis-config.mjs');
+  assert.deepEqual(Object.keys(DECLARING_INHABITANTS).sort(), [...SDD_ENGINES].sort());
+});
+
+test('#1263: an engine in SDD_ENGINES with no inhabitant entry fails loudly, not null', async () => {
+  const { declaredDefaultRole } = await import('./role-port.mjs');
+  assert.throws(() => declaredDefaultRole('plain', 'proposal', { inhabitants: {} }), /plain.*INHABITANTS/);
+  assert.equal(declaredDefaultRole('unknown-engine', 'proposal', { inhabitants: {} }), null);
+});

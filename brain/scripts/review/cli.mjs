@@ -16,6 +16,7 @@ import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 
 import { loadBrainConfig } from '../lib/brain-config.mjs';
+import { projectSlugOrNull } from '../lib/project-slug.mjs';
 import { loadContext } from '../vcs/ci-context.mjs';
 import { getVcs } from '../vcs/cli.mjs';
 import { resolveTier, tierParams, resolveReviewProtocol } from '../vcs/governance-tiers.mjs';
@@ -189,7 +190,7 @@ export function parseArgs(argv) {
 /** `queue` subcommand (H1-5b, task 13.3): dispatches to queue.mjs's
  * gatherQueue, prints the review queue + the escalation inbox. Read-only. */
 async function runQueueCommand(deps, log) {
-  const project = deps.project ?? loadBrainConfig().project?.slug;
+  const project = deps.project ?? projectSlugOrNull({ config: loadBrainConfig() });
   const { reviewQueue, escalations } = await gatherQueue({
     project,
     provider: deps.provider,
@@ -209,7 +210,7 @@ async function runQueueCommand(deps, log) {
  * runBoard, reconciles the seq:* and reviewed:* label namespaces across
  * every open PR. */
 async function runBoardCommand(deps, log) {
-  const project = deps.project ?? loadBrainConfig().project?.slug;
+  const project = deps.project ?? projectSlugOrNull({ config: loadBrainConfig() });
   const results = await runBoard({ project, provider: deps.provider, deps: deps.boardDeps ?? {} });
 
   for (const r of results) {
@@ -331,7 +332,7 @@ export async function main(deps = {}) {
       },
     };
   }
-  const project = deps.project ?? config.project?.slug;
+  const project = deps.project ?? projectSlugOrNull({ config });
   // Reviewer protocol version (issue #391 T2.3 §3, issue #394 M3): the TIER sets
   // the default, and since #442 `reviewer.protocol` in brain.config.json may
   // override it — the D5 middle path, which exists because brain cannot declare
