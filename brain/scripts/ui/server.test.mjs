@@ -12,6 +12,7 @@ import { testTmp } from '../lib/test-tmp.mjs';
 import { createForgeCache } from './forge-cache.mjs';
 import { createUiServer as realCreateUiServer, parseArgs, main as realMain, KNOWN_ROUTES, resolveForgeSource } from './server.mjs';
 import { buildChangeView } from './change-route.mjs';
+import { degradationBands } from './lib/banners.mjs';
 import { fakeGit } from './test-support/fake-git.mjs';
 import { makeWorktreeRepo } from './test-support/git-worktree-fixture.mjs';
 import { STATUS, RESULT, RESULT_OK, createBlockingAdapter, freePort, startRequester } from './test-support/blocking-forge-adapter.mjs';
@@ -1335,6 +1336,26 @@ test('#1257 R1257-9: the first snapshot is served while a forge call is held', a
     assert.equal(snap.prs.pending, true);
   } finally {
     open.release();
+    await server.close();
+  }
+});
+
+test('#1262: --no-poll over the cache-backed snapshot says the lane is paused, not loading', async () => {
+  // No `vcs` is injected, so the snapshot composes the poller's forgeLoad (every other poll:false test bypasses it).
+  const neverCalled = { issueList: async () => { throw new Error('a paused poller must not read the forge'); } };
+  const server = createUiServer({ root: makeFixture(), project: 'o/r', _now: now, poll: false, forgeSource: neverCalled, closedForgeSource: neverCalled });
+  await server.listen(0);
+  try {
+    const snap = await (await fetch(`http://127.0.0.1:${server.port}/api/snapshot`)).json();
+    for (const name of ['graph', 'prs', 'reviews', 'closedIssues']) {
+      assert.equal(snap[name].pending, true, name);
+      assert.equal(snap[name].reason, 'polling is paused', name);
+    }
+    assert.equal(snap.forgeLoad.value.open.reason, 'polling is paused');
+    const ids = degradationBands({ stream: { ok: true }, meta: { poller: { paused: true } }, snapshot: snap }).map((b) => b.id);
+    assert.equal(ids.includes('loading'), false, 'no band claims a read is in flight');
+    assert.equal(ids.includes('idle'), true);
+  } finally {
     await server.close();
   }
 });

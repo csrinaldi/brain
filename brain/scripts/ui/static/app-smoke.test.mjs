@@ -586,3 +586,65 @@ test('#1257 smoke: a pending graph shows the loading sentence, no failure wordin
   // pending forge section is among the failures the sections band lists.
   assert.doesNotMatch(banners, /(graph|prs|reviews|closedIssues): loading/, 'a section that is only loading is not listed as failed');
 });
+
+test('#1307: the drawer separates a non-scrolling head from a scrolling body; the tabs stay in the head', async (t) => {
+  const dom = await boot();
+  t.after(() => dom.restore());
+
+  fire(cardFor(dom, 1059), 'click');
+  await settle();
+
+  const kids = Array.from(dom.mounts.drawer.childNodes).map((n) => n.className);
+  assert.deepEqual(kids, ['drawer-head', 'drawer-body'], 'two regions: the head never scrolls, the body does');
+  const head = find(dom.mounts.drawer, byClass('drawer-head'));
+  const body = find(dom.mounts.drawer, byClass('drawer-body'));
+  assert.ok(find(head, byClass('close')), 'the close control is in the head');
+  assert.ok(find(head, byClass('tabs')), 'the tab bar is in the head, so it stays visible while the body scrolls');
+  assert.equal(find(body, byClass('tabs')), null, 'and not in the scrolling body');
+  assert.ok(find(body, byClass('drawer-title')), 'the title and the tab content are in the body');
+});
+
+// ── #1307 D122: the rebuild resets the scroller, so the page puts the scroll back deliberately ──
+
+const drawerBody = (dom) => find(dom.mounts.drawer, byClass('drawer-body'));
+const tabButton = (dom, label) => findAll(find(dom.mounts.drawer, byClass('tabs')), (n) => n.tagName === 'BUTTON')
+  .find((b) => b.textContent.replace(/ !$/, '') === label);
+
+test('#1307 D122: opening a node starts the body at 0; a tab click scrolls the panel to the top of the body', async (t) => {
+  const dom = await boot();
+  t.after(() => dom.restore());
+
+  fire(cardFor(dom, 1059), 'click');
+  await settle();
+  assert.equal(drawerBody(dom).scrollTop, 0, 'a freshly opened node starts at the top');
+
+  const tabs = findAll(find(dom.mounts.drawer, byClass('tabs')), (n) => n.tagName === 'BUTTON');
+  assert.ok(tabs.length > 1, 'there is a tab to switch to');
+  fire(tabs[1], 'click');
+  await settle();
+
+  const body = drawerBody(dom);
+  const panel = find(body, byClass('tab-panel'));
+  assert.ok(panel, 'the selected panel is in the body');
+  assert.ok(panel.style.minHeight, 'a short panel is padded to a body height so its top can reach the body top');
+  assert.ok(body.scrollTop > 0, 'the content above the panel is scrolled past');
+  assert.equal(panel.getBoundingClientRect().top - body.getBoundingClientRect().top, 0, 'the panel top sits at the body top');
+});
+
+test('#1307 D122: a data re-render keeps the body scroll; opening another node resets it', async (t) => {
+  const dom = await boot();
+  t.after(() => dom.restore());
+
+  fire(cardFor(dom, 1059), 'click');
+  await settle();
+  drawerBody(dom).scrollTop = 137;
+  fire(modeButton(dom, 'governance'), 'click');
+  await settle();
+  assert.equal(drawerBody(dom).scrollTop, 137, 'a re-render the reader did not ask for does not move the reader');
+
+  fire(modeButton(dom, 'map'), 'click');
+  await settle();
+  fire(cardFor(dom, 878), 'click');
+  await settle();
+  assert.equal(drawerBody(dom).scrollTop, 0, 'a different node starts at the top');
+});

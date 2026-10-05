@@ -74,7 +74,8 @@ async function boot({ local = [], remote = [], servedDir = true, section = secti
 const cardOf = (dom, issue) => findAll(dom.mounts.canvas, byClass('node-card')).filter((c) => c.getAttribute('data-issue') === String(issue));
 const open = async (dom, issue = 1198) => { fire(cardOf(dom, issue)[0], 'click'); await settle(); };
 const all = (root) => findAll(root, () => true);
-const positionOf = (dom, name) => Array.from(dom.mounts.drawer.childNodes).findIndex((n) => n.classList && n.classList.contains(name));
+// #1307: the tab bar lives in .drawer-head and the blocks in .drawer-body; the order asserted is head then body.
+const positionOf = (dom, name) => ['drawer-head', 'drawer-body'].flatMap((r) => Array.from(find(dom.mounts.drawer, byClass(r)).childNodes)).findIndex((n) => n.classList && n.classList.contains(name));
 const changeFetches = (dom) => dom.fetched.filter((u) => /^\/api\/change\/\d+$/.test(u));
 
 test('R883-9: with a served change dir the order is the tabs, then "on this machine", then "on origin"', async (t) => {
@@ -95,7 +96,10 @@ test('R883-9: with no served change dir the local block comes first and the empt
   t.after(() => dom.restore());
   await open(dom);
   const local = positionOf(dom, 'local-blocks');
-  assert.ok(local >= 0 && local < positionOf(dom, 'tabs'), 'the local blocks are drawn before the tabs');
+  // #1307: the tab bar moved into the head; "before the tabs" now means before the tab panel, the .tab-panel that follows.
+  const kids = Array.from(find(dom.mounts.drawer, byClass('drawer-body')).childNodes);
+  const at = kids.findIndex((n) => n.classList && n.classList.contains('local-blocks'));
+  assert.ok(at >= 0 && kids[at + 1] && kids[at + 1].className === 'tab-panel', 'the local blocks are drawn before the tab panel');
   assert.match(dom.mounts.drawer.textContent, /the served HEAD has no change dir for this issue; this machine's worktrees follow/);
 });
 

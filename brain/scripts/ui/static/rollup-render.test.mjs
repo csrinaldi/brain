@@ -19,7 +19,7 @@ const T = '2026-10-02T10:00:00.000Z';
 const EPIC_BODY = ['```brain-graph/1', 'track: UI', 'kind: epic', 'blocks: []', 'needs: []', 'files: []', '```'].join('\n');
 const SLICE_BODY = 'Parent: #878 (the epic)';
 
-async function boot({ closed = 0, open = 0, unknown = 0, closedEntry = { state: 'complete', at: T } } = {}) {
+async function boot({ closed = 0, open = 0, unknown = 0, closedEntry = { state: 'complete', at: T }, closedRead = null } = {}) {
   const root = testTmp('rollup-render-');
   writeFileSync(join(root, 'brain.config.json'), readFileSync(join(REPO, 'brain.config.json'), 'utf8'));
   let n = 1000;
@@ -34,6 +34,7 @@ async function boot({ closed = 0, open = 0, unknown = 0, closedEntry = { state: 
   };
   const snapshot = await buildSnapshot({ root, project: 'o/r', vcs, now: T, _run: () => { throw new Error('no git'); } });
   snapshot.forgeLoad = { ok: true, value: { open: { state: 'complete', at: T }, closed: closedEntry } };
+  if (closedRead) snapshot.hierarchy.value.closedRead = closedRead;
   const dom = installDom({ mountIds: MOUNT_IDS, snapshot });
   await loadApp();
   await settle();
@@ -83,4 +84,42 @@ test('#1199 R1199-8: markup in a lane reason is inert text, never an element', a
   assert.equal(heading(dom), `closed children unknown (${xss}) · 4 open`);
   const all = (root) => findAll(root, () => true);
   assert.equal(all(dom.mounts.canvas).filter((x) => x.tagName === 'IMG').length, 0);
+});
+
+// #1267 R1267-1: the drawer's "counted above" note holds only where a count was taken.
+const NOTE = /closed children are counted above/;
+async function drawerOf(opts) {
+  const { dom } = await boot(opts);
+  fire(find(dom.mounts.canvas, byClass('epic-head')), 'click');
+  await settle();
+  return { dom, block: find(dom.mounts.drawer, byClass('drawer-children')) };
+}
+
+test('#1267 R1267-1: a failed refresh over a complete list keeps the note', async (t) => {
+  const { dom, block } = await drawerOf({ closed: 2, open: 1, closedEntry: { state: 'failed', at: T, reason: 'rate limited', lastCompleteAt: T } });
+  t.after(() => dom.restore());
+  assert.match(block.textContent, NOTE);
+});
+
+for (const [name, closedEntry] of [
+  ['pending', { state: 'pending', at: null }],
+  ['pending with a reason', { state: 'pending', at: null, reason: 'polling is paused' }],
+  ['disabled', { state: 'disabled', at: null, reason: 'no VCS' }],
+  ['failed with no earlier list', { state: 'failed', at: T, reason: 'rate limited', lastCompleteAt: null }],
+]) {
+  test(`#1267 R1267-1: a ${name} closed lane claims no count in the drawer`, async (t) => {
+    const { dom, block } = await drawerOf({ open: 3, closedEntry });
+    t.after(() => dom.restore());
+    assert.doesNotMatch(block.textContent, NOTE);
+    assert.equal(findAll(block, byClass('note')).length, 0, 'no empty note element either');
+    assert.equal(find(block, byClass('epic-rollup')).textContent.includes('closed children'), true, 'the rollup sentence still says why');
+    assert.equal(findAll(block, byClass('child-row')).length, 3, 'the open children are still listed');
+  });
+}
+
+test('#1267 R1267-1: a complete lane over an unread closed list claims no count in the drawer', async (t) => {
+  const { dom, block } = await drawerOf({ open: 3, closedRead: { ok: false, reason: 'cache unreadable' } });
+  t.after(() => dom.restore());
+  assert.match(find(block, byClass('epic-rollup')).textContent, /^closed children unknown \(cache unreadable\)/);
+  assert.doesNotMatch(block.textContent, NOTE);
 });

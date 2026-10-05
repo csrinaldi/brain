@@ -15,6 +15,7 @@
      defined here; the dark palette below redefines the same names and
      nothing else, so a token never has its only definition in a media
      query. The values here are the page's colours before #998, unchanged. */
+  color-scheme: light;
   --font-sans: ui-sans-serif, system-ui, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
   /* #1059 phase 1: the light palette is the design's own slate ramp read for a
@@ -74,6 +75,7 @@
    defined for the first time inside one of these blocks. */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) {
+    color-scheme: dark;
     --ink: #f1f5f9;
     --muted: #94a3b8;
     --line: rgba(255, 255, 255, 0.08);
@@ -106,6 +108,7 @@
 }
 
 :root[data-theme='dark'] {
+    color-scheme: dark;
     --ink: #f1f5f9;
     --muted: #94a3b8;
     --line: rgba(255, 255, 255, 0.08);
@@ -137,6 +140,16 @@
   }
 
 * { box-sizing: border-box; }
+
+/* #1311 D118: an element nobody styled keeps the UA colour (black text on the
+   dark surface, #0000EE links). Element selectors have the lowest specificity,
+   so every class rule below still wins; this only fills what none of them set. */
+button, select, input {
+  color: var(--ink);
+  background: var(--surface);
+  border-color: var(--line);
+}
+a { color: var(--accent); }
 
 /* #1059 phase 2 — the app shell the design draws: a full-height column on the
    ground colour, so the page IS the application rather than a document that
@@ -365,7 +378,6 @@ body {
    riding beside the table, never instead of it ── */
 
 .decision-row { margin-bottom: 14px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; }
-.decision-title { display: block; }
 .decision-status { display: inline-block; margin-top: 4px; font-size: 11px; padding: 1px 6px; border-radius: 4px; background: var(--surface); color: var(--muted); }
 .decision-amendments { margin: 6px 0 0 18px; padding: 0; font-size: 12px; }
 .decision-issues, .decision-supersedes, .decision-superseded-by { margin: 6px 0 0; font-size: 12px; color: var(--muted); }
@@ -379,7 +391,6 @@ body {
 
 .anti-pattern-row { margin-bottom: 14px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; }
 .anti-pattern-scope { display: inline-block; margin-right: 6px; font-size: 11px; padding: 1px 6px; border-radius: 4px; background: var(--surface); color: var(--muted); }
-.anti-pattern-title { display: inline-block; }
 .anti-pattern-issues { margin: 6px 0 0; font-size: 12px; color: var(--muted); }
 .anti-pattern-unlistable { margin-top: 10px; padding: 8px 10px; border: 1px dashed var(--divergence-fg); border-radius: 6px; background: var(--divergence-bg); }
 .anti-pattern-unlistable .said { margin: 0; color: var(--divergence-fg); }
@@ -518,16 +529,25 @@ body {
 .drawer {
   width: min(470px, 100%);
   flex: none;
-  overflow: auto;
+  /* #1307 D119: pinned to the viewport, not stretched to the page's height. */
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+  max-height: 100vh;
+  overflow: hidden;
   padding: 0;
   border-left: 1px solid var(--line);
   background: var(--surface);
   display: flex;
   flex-direction: column;
 }
+/* #1307 D120: the head (id line and tab bar) is outside the scroller; the body scrolls. */
+.drawer-body { flex: 1; min-height: 0; overflow: auto; }
+.drawer .drawer-head .tabs { flex: 1 0 100%; padding: 0; margin: 0; } /* (0,3,0): beats the later .drawer .tabs rules, #1307 D122 */
 @media (max-width: 760px) {
   .workspace { flex-direction: column; }
-  .drawer { width: 100%; border-left: 0; border-top: 1px solid var(--line); }
+  .drawer { width: 100%; border-left: 0; border-top: 1px solid var(--line); position: static; max-height: none; overflow: visible; }
+  .drawer-body { overflow: visible; }
 }
 .drawer[hidden] { display: none; }
 .drawer h2 { margin: 0 0 8px; font-size: 16px; }
@@ -896,8 +916,8 @@ body {
   padding: 12px 16px;
   border-bottom: 1px solid var(--line);
   background: var(--paper);
-  position: sticky;
-  top: 0;
+  flex: none;
+  flex-wrap: wrap;
 }
 .drawer-id { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-family: var(--font-mono); font-size: 11px; }
 .drawer-number { color: var(--accent); font-weight: 700; font-size: 12px; }
@@ -923,7 +943,7 @@ body {
   line-height: 1.35;
   color: var(--ink);
 }
-.drawer .tabs, .drawer > .note, .drawer > .said, .drawer > div { padding-left: 16px; padding-right: 16px; }
+.drawer .tabs, .drawer-body > .note, .drawer-body > .said, .drawer-body > div { padding-left: 16px; padding-right: 16px; }
 .drawer .tabs { padding-top: 12px; flex-wrap: wrap; }
 .drawer .tabs button {
   font-family: var(--font-mono);

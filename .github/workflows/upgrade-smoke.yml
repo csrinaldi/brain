@@ -1,0 +1,47 @@
+# upgrade-smoke.yml — informational upgrade-safety smoke (issue #1277).
+#
+# Runs `npm run test:upgrade`: installs @logikas/brain@<second-latest tag> from the
+# registry in a clean container, customises the consumer, upgrades to the latest tag
+# and asserts every managed brain/scripts file that differs FROM→TO became TO's content
+# while consumer-owned files survived.
+#
+# It tests PUBLISHED releases only: FROM and TO come from the registry, and FROM's
+# published brain-upgrade.mjs installs TO's published tarball. It does NOT exercise a
+# PR's own upgrader; testing that against a packed tarball is a separate decision.
+# If a tag is not published yet it SKIPs with a notice (exit 0).
+#
+# INFORMATIONAL. Not a required status context and not in GOVERNANCE_JOBS (same
+# stance as m4-danger-paths.yml): a red run does not block a merge, it tells a
+# maintainer the upgrade path regressed. Its own workflow, not a governance.yml
+# job, because governance.yml is a ratified, vendored contract (ADR-0015).
+
+name: upgrade-smoke
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - 'test/upgrade/**'
+      - '.github/workflows/upgrade-smoke.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  upgrade-smoke:
+    name: upgrade-smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      # Tags select FROM/TO; run.sh reads them from the checkout.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      # Same `.brain-source` gate as m4-danger-paths: never build from a non-brain tree.
+      - name: upgrade smoke (registry install · customise · upgrade · assert)
+        if: ${{ hashFiles('.brain-source') != '' }}
+        env:
+          VCS_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm run test:upgrade
