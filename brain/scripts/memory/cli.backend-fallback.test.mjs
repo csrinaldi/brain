@@ -300,18 +300,19 @@ test('#874 (R11, B4a): MEMORY_BACKEND=engram STATED via .env: same ruling — th
   assert.doesNotMatch(r.stderr, /MEMORY_BACKEND=plainfiles/);
 });
 
-test('#641 `import` — an op the fallback does not serve — keeps engram\'s error, which names the real fix', (t) => {
-  // `import` hydrates engram FROM records/; plainfiles has no such op at all.
-  // Substituting would turn "engram binary not found. Install via: gentle-ai
-  // install" — which names the actual fix — into "backend 'plainfiles' does not
-  // implement op 'import'", naming a backend the caller never asked for.
+test('#641 `import` — an op the fallback does not serve — keeps engram\'s own deferral, which names the real fix', (t) => {
+  // `import` is the deprecated alias of `hydrate` (#1115), which hydrates the DECLARED backend from
+  // records/. Engram declared with no binary must defer (exit 6, never read as done) and say
+  // "gentle-ai install" — never substitute plainfiles, whose answer would name a backend the
+  // caller never asked for.
   const w = world(t);
   const r = runCli(w, ['import']);
 
-  assert.notEqual(r.status, 0);
+  assert.equal(r.status, 6, 'a deferred hydration is exit 6, not a generic failure and not a zero');
   assert.doesNotMatch(r.stderr, SUBSTITUTED, 'no substitution may be claimed');
   assert.doesNotMatch(r.stderr, /'plainfiles'/, 'and the fallback must not be named as the thing that failed');
   assert.match(r.stderr, /gentle-ai install/);
+  assert.match(r.stderr, /'import' is deprecated/, 'the alias says so, naming hydrate');
 });
 
 test('#641 `index` is not substituted either — it projects into engram\'s OWN store', (t) => {

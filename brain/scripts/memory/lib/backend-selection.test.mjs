@@ -111,7 +111,7 @@ test('#641 selectBackend: PRECONDITION 3 removed — an op that is not BLOCKED b
   // names the records-only route; `share` (#874 split B, R11) no longer calls
   // the binary at all. Only a genuine binary-not-found failure may be
   // replaced — see FALLBACK_OPS for the full measurement.
-  for (const op of ['setup', 'save', 'search', 'share', 'index', 'import', 'feature-checkpoint', 'feature-resume']) {
+  for (const op of ['setup', 'save', 'search', 'share', 'index', 'import', 'hydrate', 'feature-checkpoint', 'feature-resume']) {
     const r = selectBackend({ requested: DEFAULT_BACKEND, stated: false, op, probe: ABSENT });
     assert.equal(r.substituted, false, `${op} must not be substituted`);
     assert.equal(r.reason, REASON.OP_NOT_COVERED);
@@ -176,7 +176,7 @@ test('#641 FALLBACK_OPS: every covered op is really implemented by the fallback,
   // plainfiles, so `typeof === function` cannot tell them apart from real ones;
   // they defer via unsupportedOp, so the distinction is BEHAVIOURAL.
   const plainfiles = await import('../../axes/memory/adapters/plainfiles.mjs');
-  const verbExport = (op) => ({ import: 'importMemory' })[op] ?? op.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+  const verbExport = (op) => op.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
 
   for (const op of FALLBACK_OPS) {
     assert.equal(typeof plainfiles[verbExport(op)], 'function', `plainfiles must implement '${op}'`);
@@ -199,6 +199,11 @@ test('#641 FALLBACK_OPS: every covered op is really implemented by the fallback,
     );
   }
 
-  assert.equal(plainfiles.importMemory, undefined, "plainfiles has no 'import'; it must stay uncovered");
+  // #1115: plainfiles now implements the bulk `hydrate` verb, and `import` is only its deprecated
+  // alias at the dispatcher. Neither spelling may enter the fallback: an engram-declared checkout
+  // without its binary DEFERS (exit 6, naming `gentle-ai install`) instead of being substituted.
+  assert.equal(plainfiles.importMemory, undefined, "plainfiles has no 'importMemory' and no backend op is named that any more");
+  assert.equal(typeof plainfiles.hydrate, 'function', 'plainfiles implements hydrate');
   assert.ok(!FALLBACK_OPS.includes('import'));
+  assert.ok(!FALLBACK_OPS.includes('hydrate'));
 });

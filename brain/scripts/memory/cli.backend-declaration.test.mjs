@@ -116,7 +116,7 @@ test('#1165 (b) the process env beats config, and .env beats config', () => {
 test('#1165 (c) nothing declared anywhere is a REFUSAL that names the fix, not engram', () => {
   for (const config of [{ memory: { backend: '' } }, { memory: {} }, {}]) {
     const dir = freshClone(config);
-    for (const args of [['pull'], ['search', MARKER], ['import'], ['heal-duplicates']]) {
+    for (const args of [['pull'], ['search', MARKER], ['import'], ['hydrate'], ['heal-duplicates']]) {
       const r = run(dir, args);
       assert.equal(r.status, 3, `${args[0]} must refuse with the undeclared exit code: ${r.stdout}${r.stderr}`);
       assert.match(r.stderr, /memory\.backend/, 'names the config key');
@@ -178,7 +178,7 @@ test('#1165 B1 `save` on an UNDECLARED checkout is record-first: exit 0, the rec
 
 // The complete table, one assertion per op. WORK: never consults a backend. REFUSE: does.
 const WORK = [['reindex'], ['audit'], ['resolve-index'], ['split-records'], ['collect'], ['ship', '--dry-run'], ['migrate-v1']];
-const REFUSE = [['share'], ['pull'], ['import'], ['index'], ['setup'], ['search', MARKER], ['feature-checkpoint'], ['feature-resume'], ['heal-duplicates']];
+const REFUSE = [['share'], ['pull'], ['import'], ['hydrate'], ['index'], ['setup'], ['search', MARKER], ['feature-checkpoint'], ['feature-resume'], ['heal-duplicates']];
 
 for (const args of WORK) {
   test(`#1165 undeclared: \`${args.join(' ')}\` never consults a backend, so it is NOT refused`, () => {

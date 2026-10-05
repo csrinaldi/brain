@@ -29,7 +29,7 @@ import { t } from "../i18n/t.mjs";
 import { slugRefusalText } from "./lib/ship-failure.mjs";
 import { resolveProjectSlug } from "../lib/project-slug.mjs";
 import { formatDuplicateReport } from "./lib/duplicates.mjs";
-import { resolveMemoryBackend, MEMORY_BACKENDS, EXIT_UNDECLARED, EXIT_INVALID } from "./lib/backend-resolve.mjs";
+import { resolveMemoryBackend, MEMORY_BACKENDS, EXIT_UNDECLARED, EXIT_INVALID, EXIT_DEFERRED } from "./lib/backend-resolve.mjs";
 import {
   DEFAULT_BACKEND,
   ENGRAM_BIN,
@@ -143,7 +143,7 @@ async function requireDeclaredBackend() {
 //
 // To STDERR, not stdout, for the reason importMemory already states about its
 // own skip notice: the automated callers discard stdout. `brain/scripts/hooks/
-// post-merge` runs `cli.mjs import >/dev/null || true` — deliberately keeping
+// post-merge` runs `cli.mjs hydrate >/dev/null || ...` — deliberately keeping
 // stderr — and post-merge is the exact moment a union merge mints a duplicate.
 // A report on stdout would be written to /dev/null on every pull, which is the
 // same outage in a different pipe. (`pre-push`'s `share` and post-merge's
@@ -161,6 +161,7 @@ async function reportDuplicates(duplicates, { indexCount, surface, brief } = {})
 const VALID_OPS = [
   "share",
   "pull",
+  "hydrate",
   "import",
   "index",
   "reindex",
@@ -177,15 +178,19 @@ const VALID_OPS = [
   "save",
   "search",
 ];
-const op = process.argv[2];
+// `import` is a DEPRECATED ALIAS of `hydrate` (#1115, removed by #1351): it is rewritten HERE, before
+// backend selection, so everything below (the selector, the module lookup, ROOTED_OPS, the
+// refusals) sees `hydrate` and the two spellings can never drift apart.
+const requestedOp = process.argv[2];
+const op = requestedOp === "import" ? "hydrate" : requestedOp;
 
-if (!op) {
+if (!requestedOp) {
   console.error(`memory/cli: missing <op>. Valid ops: ${VALID_OPS.join(", ")}`);
   process.exit(1);
 }
 
-if (!VALID_OPS.includes(op)) {
-  console.error(`memory/cli: unknown op '${op}'. Valid ops: ${VALID_OPS.join(", ")}`);
+if (!VALID_OPS.includes(requestedOp)) {
+  console.error(`memory/cli: unknown op '${requestedOp}'. Valid ops: ${VALID_OPS.join(", ")}`);
   process.exit(1);
 }
 
@@ -934,14 +939,10 @@ if (op === "heal-duplicates") {
   }
 }
 
-// Map verb strings that cannot be valid JS export names to their actual export name.
-// "import" is a reserved keyword in JS — the backend export is named "importMemory".
-const VERB_TO_EXPORT = { import: "importMemory" };
-
-// Normalize hyphenated op to camelCase for export name lookup,
-// then apply reserved-keyword overrides.
-// e.g. "feature-checkpoint" → "featureCheckpoint", "import" → "importMemory"
-const fn = VERB_TO_EXPORT[op] ?? op.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+// Normalize a hyphenated op to its camelCase export name, e.g. "feature-checkpoint" →
+// "featureCheckpoint". (`import` never reaches here: it was rewritten to `hydrate` above, so no op
+// maps to a differently-named export any more.)
+const fn = op.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
 
 // ---------------------------------------------------------------------------
 // Which backend actually runs (issue #641).
@@ -969,6 +970,10 @@ const fn = VERB_TO_EXPORT[op] ?? op.replace(/-([a-z])/g, (_, c) => c.toUpperCase
 // durable before any backend is involved, so an undeclared/invalid selector must NOT lose
 // the capture. It writes through plainfiles (records only, nothing hydrated) and says the
 // hydration is deferred; every other op that gets here consults a backend and refuses.
+if (requestedOp === "import") {
+  console.error(await t("memory.import.deprecated"));
+}
+
 let MEMORY_BACKEND;
 if (op === "save" && RESOLVED.status !== "declared") {
   MEMORY_BACKEND = FALLBACK_BACKEND;
@@ -1203,13 +1208,29 @@ if (op === "search") {
 // definition), so it still discards `{root}` and acts on the real repo root —
 // any test that needs a rooted `engram.pull` must give it a `{root}` first
 // rather than trusting this set.
-const ROOTED_OPS = new Set(["share", "pull", "import", "setup"]);
+const ROOTED_OPS = new Set(["share", "pull", "setup"]);
+
+// `hydrate` takes an options object, never positionals: the generic forward below would hand it a bare
+// string. `--verify` is the READ-ONLY form (#1115, ruling Q1) — the one `session:start` passes, because
+// that path is read-only and `.memory/index.jsonl` is tracked. Anything else is refused, not forwarded.
+let hydrateOptions;
+if (op === "hydrate") {
+  const rest = process.argv.slice(3);
+  const unknown = rest.filter((a) => a !== "--verify");
+  if (unknown.length > 0) {
+    console.error(`memory/cli: hydrate does not take ${unknown.join(" ")} — only --verify (read-only).`);
+    process.exit(1);
+  }
+  hydrateOptions = { verify: rest.includes("--verify"), ...(memoryTestRoot && { root: memoryTestRoot }) };
+}
 
 try {
   // Forward positional args (e.g., [feature]) to the backend function.
-  const forwarded = memoryTestRoot && ROOTED_OPS.has(op)
-    ? [{ root: memoryTestRoot }]
-    : process.argv.slice(3);
+  const forwarded = op === "hydrate"
+    ? [hydrateOptions]
+    : memoryTestRoot && ROOTED_OPS.has(op)
+      ? [{ root: memoryTestRoot }]
+      : process.argv.slice(3);
   const result = await backend[fn](...forwarded);
 
   // #874 split B (row 1, R11): `share()` no longer calls the records
@@ -1229,10 +1250,25 @@ try {
   // `import` gets its own surface: it hydrates engram from `records/` and never
   // writes the index (only `pullMemory` reindexes), so the default wording
   // would have it claim a collapse into an index it did not touch.
+  // The surface wording is keyed on the result SHAPE, never on an op or a backend name: a hydration
+  // that carries no `indexCount` (engram's) read the records and never touched an index.
   await reportDuplicates(result?.duplicates, {
     indexCount: result?.indexCount,
-    surface: op === "import" ? "the records read" : undefined,
+    surface: op === "hydrate" && result?.indexCount === undefined ? "the records read" : undefined,
   });
+
+  if (op === "hydrate") {
+    // A read-only verification says so on STDOUT (one JSON line, for session-start to parse) and
+    // names a stale index on stderr for a human. It repaired nothing.
+    if (result?.verified === true) {
+      console.log(JSON.stringify({ hydrate: "verified", stale: result.stale === true, indexCount: result.indexCount }));
+      if (result.stale === true) console.error(`memory/cli: ${await t("memory.hydrate.indexStale")}`);
+    }
+    // A deferred hydration has its own exit status, so it can never read as "done". The adapter has
+    // already printed the reason. Callers that load context treat this as non-fatal (post-merge,
+    // session-start); it is the CLI's honest answer, not a failure.
+    if (result?.deferred === true) process.exitCode = EXIT_DEFERRED;
+  }
 } catch (err) {
   console.error(`memory/cli: ${BACKEND}.${fn}() failed — ${err.message}`);
   process.exit(1);
