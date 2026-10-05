@@ -74,7 +74,8 @@ async function boot({ local = [], remote = [], servedDir = true, section = secti
 const cardOf = (dom, issue) => findAll(dom.mounts.canvas, byClass('node-card')).filter((c) => c.getAttribute('data-issue') === String(issue));
 const open = async (dom, issue = 1198) => { fire(cardOf(dom, issue)[0], 'click'); await settle(); };
 const all = (root) => findAll(root, () => true);
-const positionOf = (dom, name) => Array.from(dom.mounts.drawer.childNodes).findIndex((n) => n.classList && n.classList.contains(name));
+// #1307: the drawer's content lives in .drawer-body; the order asserted is the body's.
+const positionOf = (dom, name) => Array.from(find(dom.mounts.drawer, byClass('drawer-body')).childNodes).findIndex((n) => n.classList && n.classList.contains(name));
 const changeFetches = (dom) => dom.fetched.filter((u) => /^\/api\/change\/\d+$/.test(u));
 
 test('R883-9: with a served change dir the order is the tabs, then "on this machine", then "on origin"', async (t) => {

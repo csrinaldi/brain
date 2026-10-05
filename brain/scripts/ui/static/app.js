@@ -1738,25 +1738,28 @@ function renderDrawer() {
   close.addEventListener('click', closeDrawer);
   head.appendChild(close);
   mounts.drawer.appendChild(head);
+  // #1307 D120: the head never scrolls; everything below it is the scrolling body, with the tab bar sticky inside it.
+  const body = el('div', 'drawer-body');
+  mounts.drawer.appendChild(body);
 
   if (summary.ok) {
-    if (summary.value.title) mounts.drawer.appendChild(el('h2', 'drawer-title', summary.value.title));
-    for (const mark of summary.value.marks) mounts.drawer.appendChild(said(mark));
+    if (summary.value.title) body.appendChild(el('h2', 'drawer-title', summary.value.title));
+    for (const mark of summary.value.marks) body.appendChild(said(mark));
     if (summary.value.blockedBy.length > 0) {
-      mounts.drawer.appendChild(el('p', 'drawer-blocked', `blocked by ${summary.value.blockedBy.map((n) => `#${n}`).join(', ')}`));
+      body.appendChild(el('p', 'drawer-blocked', `blocked by ${summary.value.blockedBy.map((n) => `#${n}`).join(', ')}`));
     }
-    mounts.drawer.appendChild(renderChildren(selectedIssue));
+    body.appendChild(renderChildren(selectedIssue));
   } else {
-    mounts.drawer.appendChild(said(summary.reason));
+    body.appendChild(said(summary.reason));
   }
 
   if (changeView === null) {
-    mounts.drawer.appendChild(el('p', 'note', 'reading this change…'));
+    body.appendChild(el('p', 'note', 'reading this change…'));
     return;
   }
   const model = buildDrawerModel(changeView);
   if (!model.ok) {
-    mounts.drawer.appendChild(said(model.reason));
+    body.appendChild(said(model.reason));
     return;
   }
   // #883 R883-9: with no change dir at the served HEAD and a worktree that has one, "on this machine" is the first thing read.
@@ -1767,8 +1770,8 @@ function renderDrawer() {
   const emptyLine = sourced
     ? `the served HEAD has no change dir for this issue; the tabs read ${tabSource.label}`
     : localFirst ? 'the served HEAD has no change dir for this issue; this machine\'s worktrees follow' : 'no change dir for this issue in the read model';
-  mounts.drawer.appendChild(el('p', 'note', model.value.changeDir ? `change dir: ${model.value.changeDir}` : emptyLine));
-  if (localFirst) mounts.drawer.appendChild(renderLocalBlocks(model.value));
+  body.appendChild(el('p', 'note', model.value.changeDir ? `change dir: ${model.value.changeDir}` : emptyLine));
+  if (localFirst) body.appendChild(renderLocalBlocks(model.value));
 
   const tabs = el('div', 'tabs');
   for (const tab of model.value.tabs) {
@@ -1777,10 +1780,10 @@ function renderDrawer() {
     button.addEventListener('click', () => { activeTab = tab.id; renderDrawer(); });
     tabs.appendChild(button);
   }
-  mounts.drawer.appendChild(tabs);
-  mounts.drawer.appendChild(renderTab(model.value.tabs.find((t) => t.id === activeTab) ?? model.value.tabs[0]));
-  if (!localFirst) mounts.drawer.appendChild(renderLocalBlocks(model.value));
-  mounts.drawer.appendChild(renderRemoteBlocks(model.value));
+  body.appendChild(tabs);
+  body.appendChild(renderTab(model.value.tabs.find((t) => t.id === activeTab) ?? model.value.tabs[0]));
+  if (!localFirst) body.appendChild(renderLocalBlocks(model.value));
+  body.appendChild(renderRemoteBlocks(model.value));
 }
 
 /**
