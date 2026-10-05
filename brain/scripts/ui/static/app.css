@@ -529,16 +529,25 @@ body {
 .drawer {
   width: min(470px, 100%);
   flex: none;
-  overflow: auto;
+  /* #1307 D119: pinned to the viewport, not stretched to the page's height. */
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+  max-height: 100vh;
+  overflow: hidden;
   padding: 0;
   border-left: 1px solid var(--line);
   background: var(--surface);
   display: flex;
   flex-direction: column;
 }
+/* #1307 D120: the head (id line and tab bar) is outside the scroller; the body scrolls. */
+.drawer-body { flex: 1; min-height: 0; overflow: auto; }
+.drawer-head .tabs { flex: 1 0 100%; padding: 0; margin: 0; }
 @media (max-width: 760px) {
   .workspace { flex-direction: column; }
-  .drawer { width: 100%; border-left: 0; border-top: 1px solid var(--line); }
+  .drawer { width: 100%; border-left: 0; border-top: 1px solid var(--line); position: static; max-height: none; overflow: visible; }
+  .drawer-body { overflow: visible; }
 }
 .drawer[hidden] { display: none; }
 .drawer h2 { margin: 0 0 8px; font-size: 16px; }
@@ -907,8 +916,8 @@ body {
   padding: 12px 16px;
   border-bottom: 1px solid var(--line);
   background: var(--paper);
-  position: sticky;
-  top: 0;
+  flex: none;
+  flex-wrap: wrap;
 }
 .drawer-id { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-family: var(--font-mono); font-size: 11px; }
 .drawer-number { color: var(--accent); font-weight: 700; font-size: 12px; }
@@ -934,7 +943,7 @@ body {
   line-height: 1.35;
   color: var(--ink);
 }
-.drawer .tabs, .drawer > .note, .drawer > .said, .drawer > div { padding-left: 16px; padding-right: 16px; }
+.drawer .tabs, .drawer-body > .note, .drawer-body > .said, .drawer-body > div { padding-left: 16px; padding-right: 16px; }
 .drawer .tabs { padding-top: 12px; flex-wrap: wrap; }
 .drawer .tabs button {
   font-family: var(--font-mono);
