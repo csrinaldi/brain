@@ -513,9 +513,26 @@ test('author unresolved + unreadable diff: follows the base tier — warns at li
   const noDiff = () => { throw new Error('git timeout'); };
   const lite = await runTeamConfigReviewedCheck({ ...prCtxNoAuthor, diffNameOnly: noDiff, gitShow: stdBase('lite') });
   assert.equal(lite.level, 'warn');
-  assert.match(lite.reason, /diff could not be read/);
+  assert.match(lite.reason, /could not gather inputs.*author could not be resolved/);
   const std = await runTeamConfigReviewedCheck({ ...prCtxNoAuthor, diffNameOnly: noDiff, gitShow: stdBase('standard') });
   assert.equal(std.level, 'fail');
   const unreadable = await runTeamConfigReviewedCheck({ ...prCtxNoAuthor, diffNameOnly: noDiff, gitShow: () => '{not json' });
   assert.equal(unreadable.level, 'fail');
+});
+
+test('author unresolved + ADOPTION PR (base never had the config): still the founding pass, judged at lite', async () => {
+  const r = await runTeamConfigReviewedCheck({
+    ...prCtxNoAuthor, diffNameOnly: () => touched, gitShow: () => null, isShallow: () => false, lastTouchSha: () => '',
+  });
+  assert.equal(r.level, 'pass');
+  assert.equal(r.founding, true);
+});
+
+test('author unresolved + REMOVAL: the tier comes from the last mainline version, as with a known author', async () => {
+  const gitShow = (ref) => (ref === 'GONE^1' ? baseConfig({ governance: { owners: ['alice'], tier: 'lite' } }) : null);
+  const r = await runTeamConfigReviewedCheck({
+    ...prCtxNoAuthor, diffNameOnly: () => touched, gitShow, isShallow: () => false, lastTouchSha: () => 'GONE',
+  });
+  assert.equal(r.level, 'warn');
+  assert.match(r.reason, /detection at the "lite" tier/);
 });
