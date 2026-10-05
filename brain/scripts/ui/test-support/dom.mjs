@@ -103,6 +103,13 @@ function makeClassList(node) {
   };
 }
 
+const LINE_HEIGHT = 20;
+function flowHeight(n) {
+  if (n.tagName === '#text') return 0;
+  const sum = n._kids.reduce((total, k) => total + flowHeight(k), 0);
+  return sum === 0 ? LINE_HEIGHT : sum; // a text-only or empty element is one line
+}
+
 export function createElement(tag) {
   const node = {
     tagName: String(tag).toUpperCase(),
@@ -113,6 +120,20 @@ export function createElement(tag) {
     parentNode: null,
     [LISTENERS]: Object.create(null),
     _ownText: '',
+    scrollTop: 0,
+    style: {},
+
+    // #1307: the only layout the fake has — a block flow where a childless element is LINE_HEIGHT
+    // tall and a parent is the sum of its children, minus every ancestor's scrollTop. Enough to
+    // assert WHERE a scroll puts an element; not a claim about real CSS (the browser proof is that).
+    getBoundingClientRect() {
+      let top = 0;
+      for (let n = node; n.parentNode; n = n.parentNode) {
+        for (const sib of n.parentNode._kids) { if (sib === n) break; top += flowHeight(sib); }
+        top -= n.parentNode.scrollTop || 0;
+      }
+      return { top, bottom: top + flowHeight(node), height: flowHeight(node), left: 0, right: 0, width: 0 };
+    },
 
     get childNodes() { return (this._view ??= new NodeListView(this)); },
     get firstChild() { return this._kids[0] ?? null; },
