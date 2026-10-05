@@ -55,7 +55,8 @@ The contract already names the operation: `hydrate({root, recordId?})` is a requ
    `session:start` is read-only (`harness-contract.md:30`). The rebuild happens in `post-merge` and
    in the `hydrate` / `memory:pull` calls that already write. Engram's import projects into the
    engram store, not the tracked tree, so under session-start it stays as today.
-9. **Q2 — day-start 4b stays as is.** Follow-up #1349 owns it.
+9. **Q2 — day-start 4b's projection stays as is.** Follow-up #1349 owns it. **Amended by ruling B
+   (2026-10-05):** its skip line now names the doctrine projection and drops the engram install hint.
 10. **Q3 — the records context shows for every backend**, read from `.memory/records/` with no
     backend call. The richer backend-provided context is follow-up #1350.
 11. **Q4 — exit 6 means deferred**, accepted ON CONDITION that `post-merge` and `session-start`
