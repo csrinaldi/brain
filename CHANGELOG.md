@@ -6,12 +6,62 @@ registry (ADR-0030, superseding ADR-0006's git tags); consumers upgrade with
 changes** before upgrading — additive `brain.config.json` migrations apply
 automatically, but renames need manual action.
 
+## v1.12.1 — the axis-shape migration now lands whichever upgrader runs it, and repairs a 1.12.0 upgrade that skipped it
+
+**Manual step: read before upgrading, first.** `1.12.0` shipped a defect in how `brain:upgrade` applies its
+`brain.config.json` migration. Each item below was checked against the code on `main`;
+`openspec/changes/issue-1344-migration-under-old-upgrader/claim-sweep.md` shows each trace.
+
+**What was wrong in 1.12.0.** `npm run brain:upgrade -- v1.12.0` runs the `brain:upgrade` you
+**already have installed** (the 1.11.0 one: `npm i` replaces the package after the script is loaded). That
+script imports the **incoming** migrations but calls its **own** `migrateConfig`, and the 1.11.0 one hands a
+migration no axis context. Migration `1.11.1` (the ADR-0038 axis shape) did nothing without a context, and
+the old upgrader still wrote `schemaVersion: "1.12.0"`. The output said `Applied config migration(s): 1.11.1`
+and printed none of the per-value lines.
+
+**Who is affected.** Any consumer that went from `1.11.0` or earlier to `1.12.0` through `brain:upgrade`.
+A fresh `1.12.0` install, and an upgrade run by a `1.12.0` upgrader (for example `1.12.0` to a later tag),
+are not.
+
+**How to check.** Open `brain.config.json`. If `platform` has no `default` key (or `vcs`, `memory`, `sdd`
+have no `providers`), the migration did not land. The consequence: 1.12.0 removed the `claude` and
+`gentle-ai` code defaults, so in a checkout with no `.env` (CI, a teammate's clone) `npm run brain:config --
+resolve platform` and `resolve sdd` exit **3**, and `diagnose` does not flag it.
+
+**The repair is automatic.** `npm run brain:upgrade -- v1.12.1` applies the new migration `1.12.1`: if any of
+`vcs`, `memory`, `platform`, `sdd` lacks `{ default, providers }`, it applies the same shaping as `1.11.1`
+and prints, under `wrote in brain.config.json (value and where it came from):`, one line per value it
+writes, for example `platform.default = claude (from .env AGENT_PLATFORM) - a per-machine value, now the
+team's tracked default`. Read those lines before you commit, as the 1.12.0 entry says: a value that comes only
+from your `.env` or shell becomes the team's tracked default. On a correctly migrated config it changes
+nothing and prints nothing. If an axis is declared nowhere, it is left `default: ""` and the line names the
+`brain:config set` command that declares it.
+
+**What changed in the code.**
+
+- Migration `1.11.1` no longer needs the caller to hand it a context. When none is given it builds its own from
+  the process env and the repo's `.env` (`brain/scripts/lib/axis-migration-context.mjs`, the module the
+  `1.12.0` upgrader uses), reading `.env` from the directory the upgrader runs in. When no one collects its
+  notices, it prints each value it writes, so the migration is correct under any upgrader.
+- Callers that must never read env or `.env` pass `axisContext: null` (an explicit opt-out):
+  `brain:promote`'s proof import, and `planConfigWrite` when its caller gives none. Fresh-config construction
+  (`buildDefaultConfig`) already hands the migration an explicit fresh-install context and still does. Nothing
+  about a fresh `env:init` changes.
+- `npm run test:upgrade` asserts the outcome: after the upgrade every axis has `default` and `providers`, and all
+  four resolve with `.env` moved aside (only when the target ships migration `1.11.1`).
+
+Not fixed here: the upgrader still runs the version you have installed rather than re-executing the incoming
+one, so a future change to the migration contract can hit the same trap. Tracked in
+[docs/KNOWN-LIMITATIONS.md](docs/KNOWN-LIMITATIONS.md) (#1344).
+
 ## v1.12.0 — no axis is chosen for you in code, the team config has owners and a per-person layer, and the UI opens on the work in flight
 
 **Manual step: read before upgrading.** Unlike 1.10.1 and 1.11.0, this release **has a
 `brain.config.json` migration** (`1.11.1`), and it changes what the resolver does when an axis is not
 declared. `npm run brain:upgrade -- v1.12.0` applies the migration and prints every value
-it writes. Read that output before you commit: an agent platform or SDD engine that today comes
+it writes. **[Correction, 1.12.1] This was false for an upgrade from 1.11.0 or earlier: the installed (old)
+upgrader ran the migration without its context, so nothing was shaped and nothing was printed. See 1.12.1,
+which repairs it.** Read that output before you commit: an agent platform or SDD engine that today comes
 only from your `.env` or your shell becomes the team's tracked default. Each item below was checked against the code on
 `main`, not against the PR descriptions; `openspec/changes/issue-1340-release-1-12-0/claim-sweep.md`
 shows each trace.

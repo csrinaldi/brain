@@ -43,7 +43,7 @@ allowlisted bytes into the same directory
 ([ADR-0030 Amendment 1](../brain/project/decisions/adr-0030-distribution-scoped-registry-package.md)):
 
 ```bash
-npm i -D "git+https://github.com/csrinaldi/brain.git#v1.12.0"
+npm i -D "git+https://github.com/csrinaldi/brain.git#v1.12.1"
 ```
 
 ---
@@ -390,8 +390,8 @@ each tier requires and how to recover if protection locks you out.
 ## Upgrading
 
 ```bash
-npm run brain:upgrade -- v1.12.0             # install a newer tag, copy managed paths
-npm run brain:upgrade -- v1.12.0 --dry-run   # preview what would change
+npm run brain:upgrade -- v1.12.1             # install a newer tag, copy managed paths
+npm run brain:upgrade -- v1.12.1 --dry-run   # preview what would change
 ```
 
 Read the [CHANGELOG](../CHANGELOG.md) first — renames and breaking changes need
