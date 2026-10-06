@@ -700,3 +700,22 @@ test('#1276 D92: the model carries the tab source for the empty-state line, and 
   assert.deepEqual(buildDrawerModel(view({ tabSource })).value.tabSource, tabSource);
   assert.equal(buildDrawerModel(view()).value.tabSource, null);
 });
+
+test('#1312 D150: a queued thread is an entry that says "not read yet", an unreadable one still says "unreadable"', () => {
+  const model = buildDrawerModel(view({
+    reviews: {
+      ok: true,
+      sourceNote: 'n',
+      unreadable: [
+        { pr: 971, ok: false, pending: true, reason: 'queued', source: 'u1' },
+        { pr: 972, ok: false, reason: 'HTTP 502', source: 'u2' },
+      ],
+      value: [],
+    },
+  }));
+  const [q, u] = model.value.tabs[4].entries;
+  assert.equal(q.title, '#971 — not read yet');
+  assert.match(q.detail, /not been read yet: queued/);
+  assert.equal(u.title, '#972 — unreadable');
+  assert.match(u.detail, /could not be read: HTTP 502/);
+});

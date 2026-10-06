@@ -1,6 +1,6 @@
 # ADR-0004 — Memory Adapter: MEMORY_BACKEND Selector + Dispatch
 
-**Status**: Accepted · **amended 04/10/2026** (Amendments 1-4 — see below)  
+**Status**: Accepted · **amended 06/10/2026** (Amendments 1-5 — see below)  
 **Date**: 2026-06-26
 
 ## Context
@@ -14,7 +14,7 @@ The replaceable harness pattern (ADR-0001) must be applied symmetrically to memo
 Memory follows the same adapter pattern as the harness:
 
 - **Selector**: `MEMORY_BACKEND` in `.env`. Default: `engram`. **[Amended by Amendment 3 (#1165) — the current rule: the team declares the backend as `memory.backend` in the tracked `brain.config.json`, and there is NO default. `MEMORY_BACKEND` in the process env or `.env` remains a per-run / per-machine override that wins over the config. The sentence above is what this ADR decided on 2026-06-26, kept as the record.]** **[Amended by Amendment 4 (#1114, #1263): the key is now `memory.default` plus `memory.providers` (ADR-0038), and `memory.backend` is read as a read-only alias for one minor version. A per-run or per-machine override wins only while `memory.locked` is not `true` (ADR-0040). See Amendment 4.]**
-- **Dispatcher**: `scripts/memory/cli.mjs`. Single entry point. Resolves the backend (**[amended by Amendment 3 (#1165)]** process env `MEMORY_BACKEND`, then `.env`, then `brain.config.json` `memory.backend`; refuses when none declares one. **[Amended by Amendment 4 (#1114, #1263): today the one resolver is `resolveAxis` (`brain/scripts/lib/axis-config.mjs`), and the levels are the process env, `.env`, the user layer `<BRAIN_HOME>/config.json`, then `memory.default` (alias `memory.backend`); a locked axis refuses a differing value at every level above the team's.]**) and delegates to the corresponding implementation. The verbs, which are required, their normalized returns and the failure discipline are defined by `brain/core/methodology/memory-backend-contract.md` (Amendment 1, #863): required `setup`, `share`, `hydrate` (today `pull` / `cli.mjs import`), `save`; optional `index`, `search`, `featureCheckpoint`, `featureResume`. Backend-agnostic verbs (`reindex`, `resolve-index`, `audit`) are dispatched directly and never reach a backend.
+- **Dispatcher**: `scripts/memory/cli.mjs`. Single entry point. Resolves the backend (**[amended by Amendment 3 (#1165)]** process env `MEMORY_BACKEND`, then `.env`, then `brain.config.json` `memory.backend`; refuses when none declares one. **[Amended by Amendment 4 (#1114, #1263): today the one resolver is `resolveAxis` (`brain/scripts/lib/axis-config.mjs`), and the levels are the process env, `.env`, the user layer `<BRAIN_HOME>/config.json`, then `memory.default` (alias `memory.backend`); a locked axis refuses a differing value at every level above the team's.]**) and delegates to the corresponding implementation. The verbs, which are required, their normalized returns and the failure discipline are defined by `brain/core/methodology/memory-backend-contract.md` (Amendment 1, #863): required `setup`, `share`, `hydrate` (today `pull` / `cli.mjs import` **[Amended by Amendment 5 (#1115): the bulk form is `cli.mjs hydrate` on both backends; `cli.mjs import` is its deprecated alias for one release]**), `save`; optional `index`, `search`, `featureCheckpoint`, `featureResume`. Backend-agnostic verbs (`reindex`, `resolve-index`, `audit`) are dispatched directly and never reach a backend.
 - **Backend**: `brain/scripts/axes/memory/adapters/engram.mjs` (under `scripts/memory/backends/engram.mjs` until #1141; see Amendment 2). Encapsulates everything specific to engram: the binary CLI invocation, the creation of the symlink `.engram → .memory` (required because engram has no `--dir` flag), and the merge driver registration.
 - **Canonical**: `.memory/` is the real git directory. The symlink `.engram → .memory` is an implementation detail of the engram backend, not of the system.
 
@@ -81,7 +81,7 @@ normal outcome instead of a refusal. #1165 (merged) moves the decision:
   `MEMORY_BACKEND` in the process env or in `.env` stays as a per-run or per-machine override.
   Precedence: process env, then `.env`, then config, then undeclared.
 - **No default.** Undeclared is a result the resolver reports, never a guess. An op that consults a
-  backend (`share`, `pull`, `import`, `index`, `setup`, `search`, `feature-*`, `heal-duplicates`)
+  backend (`share`, `pull`, `import`, `index`, `setup`, `search`, `feature-*`, `heal-duplicates` **[Amended by Amendment 5 (#1115): and `hydrate`; `import` is now its deprecated alias and refuses the same way]**)
   refuses with exit 3 (undeclared) or 4 (invalid value, refused as a typo, never coerced) and names
   `npm run brain:config -- set memory.backend engram|plainfiles`. `save` is the exception: it is
   record-first (`memory-backend-contract.md` rule 2), so it writes the record through `plainfiles`
@@ -165,3 +165,42 @@ The dispatcher, the backend directory, the verbs, the canonical `.memory/` direc
   still runs there, and the gap is reported only by the `axis-undeclared` finding.
 - **An override equal to the team's value is not refused.** It is not an override, and `bootstrap.sh`
   exports the resolved value into the process env.
+
+## Amendment 5 — the bulk `hydrate` verb is delivered, and `import` is its deprecated alias (issue #1115)
+
+**Signed**: 06/10/2026 — Cristian Rinaldi
+
+### What changed
+
+The Dispatcher line named `hydrate` as a required verb "today `pull` / `cli.mjs import`".
+`import` was engram's spelling, and the callers used it:
+
+- **`hydrate` is an op of the dispatcher** (`brain/scripts/memory/cli.mjs`), implemented by both
+  adapters. With no `recordId`, engram runs its guarded import and defers, never throws, without
+  its binary. plainfiles rebuilds the derived index. The contract records the verb
+  (`memory-backend-contract.md` Amendment 3).
+- **The callers use only `hydrate`.** That covers `session:start`, `day:start` step 4a and the
+  `post-merge` hook. None of them names a backend's op, and `session:start` names the active
+  backend instead of "engram".
+- **`import` is a deprecated alias for one release.** It prints a notice naming `hydrate` and
+  dispatches it. It is not added to `FALLBACK_OPS`. Like every op that consults a backend, it
+  refuses with exit 3 or 4 when none is declared (Amendment 3).
+- **day:start no longer runs `engram sync --export`.** That step copied the backend into
+  `.memory/`, the opposite of record-first (contract rule 2).
+
+### Why
+
+#1115 and #1189: on a `plainfiles` consumer every one of those callers printed
+`backend 'plainfiles' does not implement op 'import'`, and the agent received no memory context.
+The selector decided which backend runs, but the callers still decided which op to ask for.
+
+### What this does NOT change
+
+The selector, the resolver, the lock, the backend directory, the canonical `.memory/` directory,
+and `pull` (which keeps its name: it is `git pull` followed by the same projection).
+
+### What the code does not do yet, said plainly
+
+- **day:start step 4b** (`brain-to-engram.mjs`) still probes `engram --version` and projects
+  doctrine into engram by name, instead of calling the `index` verb. A follow-up owns it.
+- **The alias is not removed** until the next release.

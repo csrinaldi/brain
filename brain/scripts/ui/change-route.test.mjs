@@ -879,3 +879,16 @@ test('R1276-4: a change on main never consults origin', () => {
   assert.equal(value.tabSource.kind, 'head');
   assert.equal(value.spec.from, undefined);
 });
+
+test('#1312 D150: a queued review thread is carried as pending, and a tab of only queued threads says "not read yet", not "unreadable"', () => {
+  const snapshot = makeSnapshot({
+    prs: [{ number: 957, title: 'x', headBranch: BRANCH, issue: ISSUE }],
+    reviews: [{ pr: 957, ok: false, pending: true, reason: 'queued' }],
+  });
+  const run = gitFor({ resume: RESUME_TEXT });
+  const reviews = buildChangeView({ issue: ISSUE, snapshot, project: 'o/r', _run: run }).value.reviews;
+  assert.equal(reviews.ok, false);
+  assert.equal(reviews.unreadable[0].pending, true);
+  assert.doesNotMatch(reviews.reason, /unreadable/);
+  assert.match(reviews.reason, /not read yet/);
+});

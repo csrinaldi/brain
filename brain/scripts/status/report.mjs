@@ -75,6 +75,12 @@ export function pendingFrom(section) {
   return section.idle === true ? { ...pending(section.reason), idle: true } : pending(section.reason);
 }
 
+/**
+ * The `code` a cache-only port stamps on the error it throws for a number it has not fetched yet (#1312 D150).
+ * A reader that must tell "not fetched yet" from "fetched and failed" matches this, never the error's prose.
+ */
+export const NOT_FETCHED_YET = 'BRAIN_NOT_FETCHED_YET';
+
 /** @returns {boolean} */
 export function isUncomputable(f) {
   return Boolean(f) && f.ok === false;

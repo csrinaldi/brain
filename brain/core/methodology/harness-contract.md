@@ -35,7 +35,7 @@ this contract — without changes to `project-workflow.md` or `developer-environ
 | `npm run brain:memory:share` | — | — | Materializes what `.memory/records/` does not yet hold and rebuilds `index.jsonl`; reports the duplicate accounting. Under record-first (#864 task 3.2) it exports nothing from the backend. |
 | `npm run brain:memory:pull` | — | — | `git pull`, then hydrates the active backend from `.memory/records/` (idempotent by record id — `memory-backend-contract.md` rule 1). Brings the team's memory. |
 | `npm run brain:memory:index` | — | — | Re-projects `brain/` doctrine into the active backend, where the backend supports it (`plainfiles` does not, by design). Needed when ADRs or glossary change. |
-| `npm run brain:memory:save` | — | — | The producer path: writes a record to `.memory/records/` first (provenance, `--issue`; `--supersedes` lands with #805). Today it is pinned to `plainfiles` and the active backend picks the record up on its next hydration (`session:start`, `cli.mjs import`); direct hydration lands with #874. `memory-backend-contract.md` rule 2. |
+| `npm run brain:memory:save` | — | — | The producer path: writes a record to `.memory/records/` first (provenance, `--issue`; `--supersedes` lands with #805). Today it is pinned to `plainfiles` and the active backend picks the record up on its next hydration (`session:start`, `cli.mjs hydrate` **[amended, #1115: was `cli.mjs import`, now its deprecated alias]**); direct hydration lands with #874. `memory-backend-contract.md` rule 2. |
 | `npm run brain:memory:audit` | — | — | The five numbers of memory 2.0 (#870) from records and `git log` alone; the backend row degrades to a stated reason. |
 
 > **Worktree convention (load-bearing):** task start is
@@ -143,3 +143,20 @@ owning isolation the way `cold-boot.mjs` already does for the cold-review produc
 
 Recorded here rather than left implicit, because a doctrine row that reads as if the problem
 were solved is the failure mode this ticket is an instance of.
+
+## The hydration verb is `hydrate` (issue #1115)
+
+**Signed**: 06/10/2026 — Cristian Rinaldi
+
+### What changed
+
+The `brain:memory:save` row named `cli.mjs import` as the next hydration. That op was engram's,
+and `plainfiles` refused it. The dispatcher's op is now `hydrate`, implemented by every backend
+(`memory-backend-contract.md` Amendment 3). `import` stays as a deprecated alias for one release.
+
+### What this does NOT change
+
+The verb table and the `session:start` row's "hydrates the active memory backend". That row was
+already backend-neutral, and `session:start` stays read-only: it calls `hydrate` in its `verify`
+form, which on `plainfiles` checks the derived index and writes nothing
+(`memory-backend-contract.md` Amendment 3).

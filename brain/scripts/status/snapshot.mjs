@@ -37,7 +37,7 @@ import { execFileSync } from 'node:child_process';
 import { gitErrorLine } from '../lib/git-tree.mjs';
 import { join } from 'node:path';
 
-import { field, pending, pendingFrom, uncomputable } from './report.mjs';
+import { field, pending, pendingFrom, uncomputable, NOT_FETCHED_YET } from './report.mjs';
 import { deriveTasks } from './derive.mjs';
 import { countTasks } from '../lib/tasks-list.mjs';
 import { buildGraph } from './epic-graph.mjs';
@@ -506,7 +506,8 @@ async function readForge({ vcs, project, forgeLoad = null, closed = true, genera
           const list = await vcs.prReviews({ project, number: p.number });
           rows.push(Array.isArray(list) ? reviewRows(p.number, list) : { pr: p.number, ok: false, reason: 'the forge returned no reviews list' });
         } catch (err) {
-          rows.push({ pr: p.number, ok: false, reason: errMessage(err) });
+          // A thread the cache has not been given yet is loading, not failed (#1312 D150, as #1257/#1262 for sections).
+          rows.push(err?.code === NOT_FETCHED_YET ? { pr: p.number, ok: false, pending: true, reason: errMessage(err) } : { pr: p.number, ok: false, reason: errMessage(err) });
         }
       }
       reviews = field(rows);
@@ -634,7 +635,7 @@ export function renderSnapshotText(s) {
     line('local', s.localWorktrees, (l) => `${l.entries.length} worktree(s), ${Object.values(l.hidden).reduce((a, b) => a + b, 0)} hidden`),
     line('hierarchy', s.hierarchy, (h) => `${h.issues.length} issue(s), ${h.divergences.length} divergence(s)`),
     line('closed issues', s.closedIssues, (c) => `${c.nodes.length} node(s), ${c.unresolved.length} unresolved`),
-    line('reviews', s.reviews, (r) => `${r.filter((x) => x.ok).length} thread(s) read, ${r.filter((x) => !x.ok).length} unreadable`),
+    line('reviews', s.reviews, (r) => `${r.filter((x) => x.ok).length} thread(s) read, ${r.filter((x) => x.pending).length} not read yet, ${r.filter((x) => !x.ok && !x.pending).length} unreadable`),
     s.forgeLoad.ok ? `${'forge load'.padEnd(14)} open ${s.forgeLoad.value.open.state}, closed ${s.forgeLoad.value.closed.state}` : `${'forge load'.padEnd(14)} not computed — ${s.forgeLoad.reason}`,
     line('records', s.records, (r) => `${r.records.length} record(s), ${r.duplicates.ids} duplicated id(s)`),
     line('adrs', s.adrs, (a) => `${a.filter((x) => x.ok).length} parsed, ${a.filter((x) => !x.ok).length} unreadable`),
