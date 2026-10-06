@@ -72,9 +72,11 @@ const NOISY_VALUES = new Set(['plain']);
 /** Axis directories whose adapter dir names ARE the axis value set. */
 const AXIS_DIRS = ['memory', 'vcs', 'platform', 'sdd-engine', 'review-engine'];
 
+// An adapter name is a basename with no further dot: every helper leaf (`.roles.`, `.descriptor.`,
+// `.readiness.`) and every test is excluded (#1128).
 function adapterNames(axis) {
   return readdirSync(join(AXES, axis, 'adapters'))
-    .filter((f) => f.endsWith('.mjs') && !f.endsWith('.test.mjs') && !f.includes('.roles.'))
+    .filter((f) => f.endsWith('.mjs') && !f.slice(0, -'.mjs'.length).includes('.'))
     .map((f) => f.slice(0, -'.mjs'.length));
 }
 
@@ -284,6 +286,10 @@ export function reconcile(hits, entries) {
 // ── scanner unit tests (fixtures are plain strings, masked like real source) ──
 
 const rulesOf = (src, rel = 'foo/bar.mjs') => scanSource(rel, src).hits.map((h) => h.rule);
+
+test('#1128: axisValues() is unchanged by helper leaves (descriptors, readiness, roles)', () => {
+  assert.deepEqual(axisValues(), ['antigravity', 'claude', 'codex', 'engram', 'gemini', 'gentle-ai', 'github', 'gitlab', 'plainfiles']);
+});
 
 test('#1114 S1: spawn of a concrete tool is a hit; the same text in a comment or string is not', () => {
   assert.deepEqual(rulesOf("spawnSync('gh', ['api'])"), ['spawn-concrete:gh']);
