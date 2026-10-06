@@ -41,7 +41,7 @@ derivation. `app.js` gains `currentCardReviews()`, the twin of `currentWork()` (
 | D145 | `prs` ok and `reviews` pending → `verdict not read yet`; `reviews` failed → `verdicts could not be read`; thread `ok:false` → `review thread unreadable` with the reason as the hover title | Hiding the PR | The PR was read. Hiding it would be empty-on-failure. |
 | D146 | The footer shows no tasks count | Copying the design's "Tasks n/m" into the footer | The SDD strip already prints `progressLabel` (`app.js:922`). A second count could disagree with it. |
 | D147 | The remote line on a card drops `PR #n` when the footer names `#n`, through a `remoteBadges(…, {omitPrs})` option; the panel calls it unchanged | Two mentions of the PR on one card | Card budget. Ruled (d). |
-| D148 | Footer text: `PR #885 · rev 2 · REVISE · head a1b2c3d · tip here`, with an optional ` · +1 open PR`. One line, CSS ellipsis, the full text in `title` | Two lines, as in the design | The card already carries up to 2 remote lines and the SDD strip. |
+| D148 | Footer text: `PR #885 · rev 2 · REVISE · head a1b2c3d · tip here`, with an optional ` · +1 open PR`. The text wraps (amended at apply: a CSS ellipsis clipped `origin tip here` at card width, hiding the fact the line exists to state), the full SHAs and reasons in `title` | Two lines, as in the design | The card already carries up to 2 remote lines and the SDD strip. |
 | D149 | `shapeRound` gains `headSha` (full) next to `headSha7` | Prefix-comparing 7 characters | Exact equality, as `verdictsAtHead` does. Additive, so the queue and the drawer are untouched. |
 
 ## Data flow
