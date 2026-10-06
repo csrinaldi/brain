@@ -19,8 +19,8 @@ import { dispatch } from '../harness/cli.mjs';
 import { makeRunStageSeam } from '../harness/stage-seam.mjs';
 import { runColdReviewStage } from '../review/lib/run-cold-review-stage.mjs';
 import { artifactPathFor, ARTIFACT_TAG } from '../review/lib/findings-artifact.mjs';
-import { platformParity } from '../__fixtures__/platform-parity.mjs';
-import { engineParity } from '../__fixtures__/engine-parity.mjs';
+import { platformParity } from './platform/contract.test.mjs';
+import { engineParity } from './review-engine/contract.test.mjs';
 
 const STAGE_OUTPUT = pathToFileURL(fileURLToPath(new URL('./lib/stage-output.mjs', import.meta.url))).href;
 

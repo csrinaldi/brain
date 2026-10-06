@@ -1,8 +1,10 @@
-// Codex readiness: the deterministic local prerequisites of a cold-review route to codex.
+// Codex readiness helpers.
 //
-// Dispatched by `harness/readiness.mjs` through the codex descriptor (`readiness: true`),
-// which also resolves the route and enforces the pinned model (#1129). This leaf holds only
-// what is codex's own: the version floor and the install and login diagnostics.
+// Setup uses this small adapter instead of teaching the generic stage resolver
+// about vendor model catalogues. `stage-engine.mjs` deliberately keeps models
+// opaque for every other stage; this transport has a separately specified,
+// pinned model contract. `harness/readiness.mjs` dispatches here through the
+// codex descriptor (`readiness: true`) and resolves the route and the pin (#1129).
 
 import { existsSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
@@ -47,6 +49,10 @@ export function checkReadiness(route, {
   commandExists = defaultCommandExists,
   run = defaultRun,
 } = {}) {
+  if (!route?.required) {
+    const engine = route?.engine ?? 'no engine';
+    return { ready: true, required: false, diagnostic: `cold-review is routed to ${engine}; Codex is not required` };
+  }
   if (!commandExists('codex')) {
     return {
       ready: false,

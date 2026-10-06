@@ -1,7 +1,10 @@
-// Gemini readiness: the deterministic local prerequisites of a cold-review route to gemini.
+// Gemini route and readiness helpers.
 //
-// Dispatched by `harness/readiness.mjs` through the gemini descriptor (`readiness: true`),
-// which also resolves the route and its default model (#1129).
+// Setup uses this small adapter instead of teaching the generic stage resolver
+// about vendor model catalogues.
+//
+// `harness/readiness.mjs` resolves the route and its default model (#1129) and dispatches
+// here through the gemini descriptor (`readiness: true`).
 
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -14,12 +17,17 @@ function defaultCommandExists(bin, env = process.env) {
 
 /**
  * Check only deterministic local prerequisites for Gemini.
+ * Non-Gemini routes stay deliberately outside every Gemini check.
  */
 export function checkReadiness(route, {
   commandExists = defaultCommandExists,
   env = process.env,
   agyAuthCheck = hasAgyAuth,
 } = {}) {
+  if (!route?.required) {
+    const engine = route?.engine ?? 'no engine';
+    return { ready: true, required: false, diagnostic: `cold-review is routed to ${engine}; Gemini is not required` };
+  }
   const hasAgy = commandExists('agy', env) && agyAuthCheck(env);
   const hasGemini = commandExists('gemini', env);
   const hasApiKey = typeof env?.GEMINI_API_KEY === 'string' && env.GEMINI_API_KEY.trim() !== '';
