@@ -1,6 +1,6 @@
 # ADR-0024 — Three-axis decoupling: AGENT_PLATFORM · SDD_ENGINE · MEMORY_BACKEND
 
-**Status**: Accepted · **amended 04/10/2026** (Amendments 1-5 — see below)
+**Status**: Accepted · **amended 06/10/2026** (Amendments 1-6 — see below)
 **Date**: 2026-07-24 — Cristian Rinaldi (implements #305; documents the split shipped via PR #307)
 **Extends**: [ADR-0005](adr-0005-adapter-harness-sdd-harness.md) (the `SDD_HARNESS` selector) and
 [ADR-0019](adr-0019-harness-port.md) (the harness port). Does NOT supersede ADR-0019's
@@ -271,13 +271,13 @@ ADR-0038 names this ADR in "Amendments this requires". What is on the
   the user layer `<BRAIN_HOME>/config.json` (ADR-0040), then `<axis>.default`, then the legacy alias,
   then undeclared. VCS keeps no `.env` or user level (ADR-0008 Amendment 2).
 - **`platform.providers` covers every agent runtime.** `claude`, `antigravity`, `plain`, `codex` and
-  `gemini` each have a capability entry in `PLATFORM_CAPABILITIES`: `orchestrate`, and
+  `gemini` each have a capability entry in `PLATFORM_CAPABILITIES` **[Amended by Amendment 6 (#1128, #1129): the table is derived from each provider's `<name>.descriptor.mjs`]**: `orchestrate`, and
   `executeStage`, the ability to execute a stage prompt.
 - **`platform.default` is the orchestrator.** There is one per session. `validateAxisConfig` refuses
   a `platform.default` that does not declare `orchestrate`. `plain` stays, as the human orchestrator:
   it orchestrates and cannot execute a stage prompt (ADR-0038 Ratified point 4).
 - **`AGENT_PLATFORM` selects only the orchestrator.** Its value is checked against the members brain
-  ships a workspace adapter for (`claude`, `antigravity`, `plain`) and against the providers this
+  ships a workspace adapter for (`claude`, `antigravity`, `plain`) **[Amended by Amendment 6: the membership is derived, the providers whose descriptor declares `orchestrate`]** and against the providers this
   machine lists. `AGENT_PLATFORM=codex` is refused.
 - **No `claude` default.** Amendment 2's default is withdrawn. An undeclared platform or SDD engine
   is refused with the command that declares it. `env:init` declares `claude` and `gentle-ai` as
@@ -305,13 +305,51 @@ ADR-0019's neutral artifact lifecycle; the separation of framework (`SDD_ENGINE`
 ### What the code does not do yet, said plainly
 
 - **The capability table is a seam.** `PLATFORM_CAPABILITIES` lives in `axis-config.mjs`, not in each
-  adapter. #1128 and #1129 move it.
+  adapter. #1128 and #1129 move it. **[Amended by Amendment 6: moved — each adapter's descriptor declares it, and `axis-config.mjs` derives the table.]**
 - **The runtime adapters are still two directories.** `axes/platform/adapters/` and
   `axes/review-engine/adapters/` are not merged.
 - **Nothing routes by `sdd.roles` yet.** The cold-review stage still resolves through `sdd.map`
-  (`resolveStageEngine`) and branches on `codex`/`gemini` by name
+  (`resolveStageEngine`) and branches on `codex`/`gemini` by name **[Amended by Amendment 6 (#1129): the name branch is gone; the runner reads the engine's declared output mode]**
   (`review/lib/run-cold-review-stage.mjs`). The reshape is #1132.
 - **The alias window is not closed.** Nothing yet refuses the flat `engine`/`harness` keys or
   `SDD_HARNESS` after one minor version.
 - **`day-start.mjs`'s direct `gentle-ai` calls** (Amendment 2's "Known state") stay #1114's and
   #1115's. One resolver does not remove a call that bypasses it.
+
+## Amendment 6 — the platform capability table and membership are derived from each adapter's descriptor (issues #1128, #1129)
+
+**Signed**: 06/10/2026 — Cristian Rinaldi
+
+### What changed
+
+Amendment 5 recorded two seams on the platform axis: `PLATFORM_CAPABILITIES` lived in
+`lib/axis-config.mjs` and not in each adapter, and `AGENT_PLATFORM` was checked against a closed list
+in the same file. Both are now derived:
+
+- Each provider declares `orchestrate` and `executeStage` in an import-free `<name>.descriptor.mjs`
+  beside its adapter (ADR-0038 Amendment 2, `agent-platform-contract.md`).
+- `axes/lib/runtime-registry.mjs` discovers the descriptors. `PLATFORM_CAPABILITIES` is its
+  `capabilities`, and `AGENT_PLATFORMS` is its `orchestrators`, the providers that may be
+  `AGENT_PLATFORM` / `platform.default`.
+- A platform's `init` answers `{ ok, … }` on every provider, so `harness/cli.mjs init` fails on a
+  refusal from any of them, antigravity included.
+- The cold-review runner reads the engine's declared output mode instead of branching on `codex` and
+  `gemini` by name.
+
+### Why
+
+A third platform had to edit the validator's table, the membership list, and the tests that pinned
+them. The axis rule (callers use the axis, never a concrete implementation) held for the callers but
+not for the validator.
+
+### What this does NOT change
+
+The four config axes and their shape, `AGENT_PLATFORM` selecting only the orchestrator,
+`AGENT_PLATFORM=codex` refused, no `claude` default, and `SDD_ENGINE` as a closed list (`SDD_ENGINES`
+is not derived).
+
+### What the code does not do yet, said plainly
+
+- **The runtime adapters are still two directories.** One registry reads both. Merging them is a
+  follow-up.
+- **Nothing routes by `sdd.roles` yet** (#1132). The runner still resolves through `sdd.map`.
