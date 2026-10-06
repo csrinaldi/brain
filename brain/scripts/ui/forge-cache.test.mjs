@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { createForgeCache } from './forge-cache.mjs';
+import { NOT_FETCHED_YET } from '../status/report.mjs';
 
 // ── D1: exactly the four read verbs `readForge` calls ──────────────────────
 
@@ -116,4 +117,13 @@ test('#1262: a closed landing alone leaves per-number misses on the first-poll w
   cache.setIssueList([{ number: 3 }], 'closed');
   await assert.rejects(() => cache.port.issueView({ number: 5 }), /^Error: the first forge poll has not completed$/);
   await assert.rejects(() => cache.port.prReviews({ number: 10 }), /^Error: the first forge poll has not completed$/);
+});
+
+test('#1312 D150: every cache miss carries the named not-fetched marker, so a consumer never compares prose', async () => {
+  const cache = createForgeCache();
+  const first = await cache.port.prReviews({ project: 'o/r', number: 10 }).catch((e) => e);
+  assert.equal(first.code, NOT_FETCHED_YET, 'before any answer');
+  cache.setMrList([{ number: 10, title: 'pr' }]);
+  const queued = await cache.port.prReviews({ project: 'o/r', number: 10 }).catch((e) => e);
+  assert.equal(queued.code, NOT_FETCHED_YET, 'queued behind the review lane');
 });

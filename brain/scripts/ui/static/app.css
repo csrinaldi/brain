@@ -1493,3 +1493,10 @@ body {
 .inflight-facts { color: var(--muted); word-break: break-all; }
 .inflight-age { margin-left: auto; color: var(--stamp); font-variant-numeric: tabular-nums; }
 .inflight-stale-toggle { margin-top: 8px; font: inherit; font-size: 12px; cursor: pointer; border: 1px solid var(--line); background: var(--paper); color: var(--ink); padding: 2px 8px; }
+
+/* The review footer (#1312): wraps rather than ellipsises — a clipped "origin tip here" would hide the very fact that a head differs; the title adds the full SHAs. */
+.node-review { margin: 0; padding-top: 6px; font-family: var(--font-mono); font-size: 10px; color: var(--muted); word-break: break-word; }
+.node-review.verdict-approve { color: var(--state-done-fg); }
+.node-review.verdict-revise { color: var(--state-awaiting-review-fg); }
+.node-review.verdict-stop { color: var(--state-blocked-fg); }
+.node-review.verdict-unknown { color: var(--stamp); font-style: italic; }

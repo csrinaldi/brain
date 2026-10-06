@@ -259,8 +259,8 @@ function reviewEntries(rounds, unreadable) {
   });
   // After the rounds that WERE read, never instead of them.
   const missed = unreadable.map((thread) => entry({
-    title: `#${thread.pr} — unreadable`,
-    detail: `this thread could not be read: ${thread.reason}`,
+    title: `#${thread.pr} — ${thread.pending === true ? 'not read yet' : 'unreadable'}`,
+    detail: thread.pending === true ? `this thread has not been read yet: ${thread.reason}` : `this thread could not be read: ${thread.reason}`,
     source: thread.source,
     pending: true,
   }));
