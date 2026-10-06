@@ -60,7 +60,7 @@ See [`brain/project/README.md`](brain/project/README.md) for directory conventio
 - [ADR-0001](brain/project/decisions/adr-0001-arquitectura-3-capas-harness-reemplazable.md) — 3-layer architecture with replaceable harness
 - [ADR-0002](brain/project/decisions/adr-0002-memoria-git-based-dos-capas.md) — Git-based team memory in two layers (**Amendment 1, 08/09/2026** — the manifest note is withdrawn — records are the truth (ADR-0017), the manifest was the chunk transport's index and that transport is retired; manifest, symlink and merge driver are the engram adapter's private artifacts, governed by memory-backend-contract.md rule 3, #863; **Amendment 2, 09/09/2026** — the canonical flow's `memory:share`/`pre-push` bullets and the "verbs keep their names until #862" note now point at the lane (ADR-0034); the two-layer decision itself is unchanged; **Amendment 3, 15/09/2026** — the canonical flow's scripts are now `brain:memory:pull`, `brain:memory:index` and `brain:memory:share`; the bare names stay as repo-only aliases and the two-layer decision is unchanged, #961; **Amendment 4, 15/09/2026** — erratum — Amendment 3 said the body was not rewritten, but its own promotion had annotated the body and Amendment 2 in place under ruling R6 on #961 as amended (option A); that sentence is rewritten, #973; **Amendment 5, 28/09/2026** — the engram backend this ADR cites moved from `memory/backends/` to `axes/memory/adapters/`; the citation is annotated in place and the two-layer decision is unchanged, #1141)
 - [ADR-0003](brain/project/decisions/adr-0003-split-core-project-self-hosting.md) — core/project split and self-hosting
-- [ADR-0004](brain/project/decisions/adr-0004-adapter-memoria-memory-backend.md) — Memory adapter: MEMORY_BACKEND selector (**Amendment 1, 08/09/2026** — the interface exists — memory-backend-contract.md names the required verbs, the three rules and the agnosticism test; "manifest required for all backends" is withdrawn (plainfiles is the proof) and the manifest, symlink and driver are the engram adapter's, #863; **Amendment 2, 28/09/2026** — the engram backend and the "add a new backend" how-to moved from `memory/backends/` to `axes/memory/adapters/`; the citations are annotated in place and the selector decision is unchanged, #1141; **Amendment 3, 30/09/2026** — the selector moves to tracked config (`memory.backend` in `brain.config.json`) with NO default — `.env` and the process env remain per-machine overrides, backend-consulting ops refuse when it is undeclared and `save` stays record-first, #1165; **Amendment 4, 04/10/2026** — the selector is `memory.default` plus `memory.providers` (ADR-0038), with `memory.backend` a read-only alias for one minor; a user layer sits between `.env` and the team config; a `locked` memory axis refuses a differing override from the user layer, `.env` and the process env; and env:init declares the backend only in the founding run, a no-TTY foundation leaving it undeclared (ADR-0040), #1114, #1263)
+- [ADR-0004](brain/project/decisions/adr-0004-adapter-memoria-memory-backend.md) — Memory adapter: MEMORY_BACKEND selector (**Amendment 1, 08/09/2026** — the interface exists — memory-backend-contract.md names the required verbs, the three rules and the agnosticism test; "manifest required for all backends" is withdrawn (plainfiles is the proof) and the manifest, symlink and driver are the engram adapter's, #863; **Amendment 2, 28/09/2026** — the engram backend and the "add a new backend" how-to moved from `memory/backends/` to `axes/memory/adapters/`; the citations are annotated in place and the selector decision is unchanged, #1141; **Amendment 3, 30/09/2026** — the selector moves to tracked config (`memory.backend` in `brain.config.json`) with NO default — `.env` and the process env remain per-machine overrides, backend-consulting ops refuse when it is undeclared and `save` stays record-first, #1165; **Amendment 4, 04/10/2026** — the selector is `memory.default` plus `memory.providers` (ADR-0038), with `memory.backend` a read-only alias for one minor; a user layer sits between `.env` and the team config; a `locked` memory axis refuses a differing override from the user layer, `.env` and the process env; and env:init declares the backend only in the founding run, a no-TTY foundation leaving it undeclared (ADR-0040), #1114, #1263; **Amendment 5, 06/10/2026** — the required `hydrate` verb is delivered on both backends as `cli.mjs hydrate` (engram: guarded import that defers without the binary; plainfiles: index rebuild); session:start, day:start and post-merge call only it, `import` is a deprecated alias for one release, and day:start no longer exports engram into `.memory/`, #1115, #1189)
 - [ADR-0005](brain/project/decisions/adr-0005-adapter-harness-sdd-harness.md) — Harness adapter: SDD_HARNESS selector
 - [ADR-0006](brain/project/decisions/adr-0006-distribucion-installer-versionado.md) — Distribution: versioned installer via git tags (**Amendment 1, 13/08/2026** — **SUPERSEDED by ADR-0030** — the private-repo premise that chose git tags no longer exists; distribution moves to a scoped registry package, #617; **Amendment 2, 18/08/2026** — Amendment 1's own text named `@csrinaldi/brain`, a scope nothing was ever published under, and described a mechanism that has since shipped — the scope is `@logikas/brain` and the accepted loss it recorded is paid, #729)
 - [ADR-0007](brain/project/decisions/adr-0007-config-vcs-agnostica-y-checkrefs.md) — VCS-agnostic config and check-refs engine
@@ -133,7 +133,7 @@ The agent may execute without asking for permission:
 
 - Read any file in the repo (`brain/`, `openspec/`, code, scripts)
 - Create/modify files in `openspec/changes/**` (in-flight SDD artifacts)
-- Capture memory as records: `npm run brain:memory:save` writes a record under `.memory/records/` first (`memory-backend-contract.md` rule 2); the active backend picks it up on the next hydration (`session:start`, `cli.mjs import`) until #874 adds direct hydration. The backend's own MCP write (`mem_save`) is working memory for the change in flight, non-durable by definition: nothing exports it.
+- Capture memory as records: `npm run brain:memory:save` writes a record under `.memory/records/` first (`memory-backend-contract.md` rule 2); the active backend picks it up on the next hydration (`session:start`, `cli.mjs hydrate` **[amended, #1115: was `cli.mjs import`, now its deprecated alias]**) until #874 adds direct hydration. The backend's own MCP write (`mem_save`) is working memory for the change in flight, non-durable by definition: nothing exports it.
 - Write to `scratch/{agent-id}.md` within an active change
 - Run `npm run brain:repo:check`, `npm run backend:build`, `npm run brain:change:verify`
 - Create issues in GitLab (`/gitlab-issue`)
@@ -293,6 +293,16 @@ always held. Its wording forced a human ruling on every migration PR anyway.
   whether an agent invoked it.
 - **Nothing stops an agent from writing the user layer.** That row is doctrine only.
 
+## Hydration verb wording (issue #1115)
+
+**Signed**: 06/10/2026 — Cristian Rinaldi
+
+### What changed
+
+Tier 1's memory-capture row named `cli.mjs import`, engram's op, as the next hydration. The op is
+now `hydrate`, implemented by every backend (`memory-backend-contract.md` Amendment 3). No
+authority changes: every tier, and what an agent may do, is unchanged.
+
 
 ---
 
@@ -335,7 +345,7 @@ this contract — without changes to `project-workflow.md` or `developer-environ
 | `npm run brain:memory:share` | — | — | Materializes what `.memory/records/` does not yet hold and rebuilds `index.jsonl`; reports the duplicate accounting. Under record-first (#864 task 3.2) it exports nothing from the backend. |
 | `npm run brain:memory:pull` | — | — | `git pull`, then hydrates the active backend from `.memory/records/` (idempotent by record id — `memory-backend-contract.md` rule 1). Brings the team's memory. |
 | `npm run brain:memory:index` | — | — | Re-projects `brain/` doctrine into the active backend, where the backend supports it (`plainfiles` does not, by design). Needed when ADRs or glossary change. |
-| `npm run brain:memory:save` | — | — | The producer path: writes a record to `.memory/records/` first (provenance, `--issue`; `--supersedes` lands with #805). Today it is pinned to `plainfiles` and the active backend picks the record up on its next hydration (`session:start`, `cli.mjs import`); direct hydration lands with #874. `memory-backend-contract.md` rule 2. |
+| `npm run brain:memory:save` | — | — | The producer path: writes a record to `.memory/records/` first (provenance, `--issue`; `--supersedes` lands with #805). Today it is pinned to `plainfiles` and the active backend picks the record up on its next hydration (`session:start`, `cli.mjs hydrate` **[amended, #1115: was `cli.mjs import`, now its deprecated alias]**); direct hydration lands with #874. `memory-backend-contract.md` rule 2. |
 | `npm run brain:memory:audit` | — | — | The five numbers of memory 2.0 (#870) from records and `git log` alone; the backend row degrades to a stated reason. |
 
 > **Worktree convention (load-bearing):** task start is
@@ -443,6 +453,23 @@ owning isolation the way `cold-boot.mjs` already does for the cold-review produc
 
 Recorded here rather than left implicit, because a doctrine row that reads as if the problem
 were solved is the failure mode this ticket is an instance of.
+
+## The hydration verb is `hydrate` (issue #1115)
+
+**Signed**: 06/10/2026 — Cristian Rinaldi
+
+### What changed
+
+The `brain:memory:save` row named `cli.mjs import` as the next hydration. That op was engram's,
+and `plainfiles` refused it. The dispatcher's op is now `hydrate`, implemented by every backend
+(`memory-backend-contract.md` Amendment 3). `import` stays as a deprecated alias for one release.
+
+### What this does NOT change
+
+The verb table and the `session:start` row's "hydrates the active memory backend". That row was
+already backend-neutral, and `session:start` stays read-only: it calls `hydrate` in its `verify`
+form, which on `plainfiles` checks the derived index and writes nothing
+(`memory-backend-contract.md` Amendment 3).
 
 
 ---
