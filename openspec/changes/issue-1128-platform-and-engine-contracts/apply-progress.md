@@ -13,3 +13,21 @@ Strict TDD. Each row: the RED observed first, then the GREEN.
 | 1.10 guard filter | `axisValues()` pin fails (`claude.descriptor` etc. leaked into the values) | 15 pass |
 | 1.11 re-own | allowlist owner `#1114` -> `#1367` (Q3) | guard 15 pass |
 | 1.12 | `harness/cli.test.mjs` (#682 graph walker) 22 pass | |
+
+## S2 — the review-engine contract (#1129)
+| task | red (observed) | green |
+|---|---|---|
+| 2.1/2.2 `stage-output` | `stage-output.test.mjs`: module not found | 14 pass |
+| 2.3 engine parity | `contract.test.mjs`: 5 fail — (e) claude, (e) gemini, (f) codex, (g) codex, (g) gemini. (f) codex is the latent `..x` escape: codex's `isWithin` read `/c/..x` as outside the candidate and SPAWNED | (e)/(f) green after 2.4-2.6; (g) after 2.11 |
+| 2.4 claude | (e) red: first raw stderr line, no redaction | `engineTail` on every failure branch; pin `run-stage.test.mjs:60` updated |
+| 2.5/2.6 codex, gemini | (f) codex red above | copies deleted, models from descriptors; gemini's `canonicalPath`/`isWithin` tests moved to `stage-output.test.mjs` |
+| 2.7/2.8 runner | 4 new cases fail (declared mode ignored, `plain`/unknown reach the seam, gemini rename says Codex) | 44 pass; pin `:255-261` now `claude`/`gemini` |
+| 2.9 | guard: `STALE review/lib/run-cold-review-stage.mjs axis-branch` | entry deleted |
+| 2.10-2.12 readiness | `harness/readiness.test.mjs`: module not found | 12 pass; `git mv` x4, leaves export `checkReadiness`, resolvers/loadConfig/main deleted |
+| 2.13 (g) parity | codex and gemini red until the move | green |
+| 2.14 shell | `bash -n` both scripts | `bootstrap.sh`, `install-tools.sh` call `harness/readiness.mjs` only |
+| 2.15 e2e | n/a (import of a deleted file) | `codex-route.e2e.test.mjs` 2 pass |
+| 2.16 | guard red `STALE` x4 after the move | 4 entries deleted, 24 entries left |
+
+Unplanned: the four deleted `harness/*-readiness*` paths are added to `lib/retired-paths.mjs`, so `brain:upgrade` removes them from a consumer (Q6 deletes with no shim; without this the stale files would survive every upgrade).
+Deviation: the parity bodies live in `__fixtures__/engine-parity.mjs` (and `platform-parity.mjs`), not exported from `contract.test.mjs`: importing a `.test.mjs` would run its tests a second time.

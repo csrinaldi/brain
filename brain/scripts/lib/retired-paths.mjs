@@ -70,4 +70,9 @@ export const RETIRED_PATHS = Object.freeze([
   'brain/scripts/vcs/providers/gitlab.mjs',
   'brain/scripts/vcs/providers/identity.drift.test.mjs',
   'brain/scripts/vcs/providers/vcs.contract.test.mjs',
+  // #1129: the readiness probes moved into their adapter directories; `harness/readiness.mjs` is the one verb.
+  'brain/scripts/harness/codex-readiness.mjs',
+  'brain/scripts/harness/codex-readiness.test.mjs',
+  'brain/scripts/harness/gemini-readiness.mjs',
+  'brain/scripts/harness/gemini-readiness.test.mjs',
 ]);

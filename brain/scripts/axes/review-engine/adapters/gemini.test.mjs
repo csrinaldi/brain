@@ -4,7 +4,7 @@ import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
-import { runStage, deduplicateFindingsBlocks, canonicalPath, isWithin, hasAgyAuth, GEMINI_MODEL } from './gemini.mjs';
+import { runStage, deduplicateFindingsBlocks, hasAgyAuth, GEMINI_MODEL } from './gemini.mjs';
 
 function makePaths(t) {
   const root = mkdtempSync(join(tmpdir(), 'gemini-backend-'));
@@ -259,17 +259,4 @@ test('hasAgyAuth: returns true when cli dir and indicator file exists', () => {
 test('hasAgyAuth: returns false when indicator file is missing or dir does not exist', () => {
   assert.equal(hasAgyAuth({ HOME: '/fake/home' }, (p) => p === '/fake/home/.gemini/antigravity-cli'), false);
   assert.equal(hasAgyAuth({ HOME: '/fake/home' }, () => false), false);
-});
-
-test('canonicalPath: correctly preserves first letter when resolving non-existent path directly under root', () => {
-  const resolved = canonicalPath('/nonexistent_test_dir_123');
-  assert.equal(resolved, '/nonexistent_test_dir_123');
-});
-
-test('isWithin: correctly identifies paths inside parent even when filename starts with double dot', () => {
-  assert.equal(isWithin('/candidate', '/candidate/..hacker.tmp'), true);
-  assert.equal(isWithin('/candidate', '/candidate/subdir/..file'), true);
-  assert.equal(isWithin('/candidate', '/candidate'), true);
-  assert.equal(isWithin('/candidate', '/outside/file'), false);
-  assert.equal(isWithin('/candidate', '/candidate/../outside'), false);
 });
