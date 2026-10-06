@@ -43,6 +43,8 @@ function shapeRound(v) {
     // (#1009 cold review round 2 finding): the render layer reads this flag
     // to call it out rather than silently rendering it like any other word.
     unknownVerdict: !KNOWN_VERDICTS.has(v.verdict),
+    // The full SHA beside the short one (#1312 D149): the card compares by equality, as verdictsAtHead does.
+    headSha: typeof v.head_sha === 'string' ? v.head_sha : null,
     headSha7: typeof v.head_sha === 'string' ? v.head_sha.slice(0, 7) : null,
     author: v.author,
     findings,

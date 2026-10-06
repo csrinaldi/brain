@@ -238,3 +238,16 @@ test('#1059 region 05: a thread with no round fills the same columns without inv
   assert.equal(entry.headSha7, null);
   assert.equal(entry.wait, 'no round posted');
 });
+
+test('#1312 D149: a round carries the full head_sha next to headSha7, and the queue entry is unchanged', () => {
+  const t = buildReviewTimeline(
+    reviews([{ pr: 1, ok: true, verdicts: [verdict(1, 'REVISE', { head_sha: 'abcdef0123456789'.padEnd(40, '0') })] }]),
+    prs([{ number: 1, issue: 5, title: 't', headBranch: 'b' }]),
+  );
+  const round = t.value.threads[0].latest;
+  assert.equal(round.headSha, 'abcdef0123456789'.padEnd(40, '0'));
+  assert.equal(round.headSha7, 'abcdef0');
+  assert.deepEqual(Object.keys(t.value.queue[0]).sort(), ['escalate', 'headSha7', 'issue', 'pr', 'rounds', 'title', 'verdict', 'wait']);
+  const noHead = buildReviewTimeline(reviews([{ pr: 1, ok: true, verdicts: [verdict(1, 'REVISE', { head_sha: undefined })] }]), prs([{ number: 1, issue: 5, title: 't', headBranch: 'b' }]));
+  assert.equal(noHead.value.threads[0].latest.headSha, null);
+});

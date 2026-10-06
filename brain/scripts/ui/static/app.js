@@ -53,6 +53,7 @@ import { hierarchyOf, epicRollup, rollupLabel, rollupNote } from './lib/rollup-m
 import { issueUrl } from './lib/forge-url.mjs';
 import { buildDrawerModel, localChangedFor } from './lib/drawer-model.mjs';
 import { remoteBadges, remotePanel, tipAge } from './lib/remote-model.mjs';
+import { cardReviewIndex } from './lib/card-review-model.mjs';
 import { renderOffThread, timeoutNotice, FAILED_NOTICE, UNAVAILABLE_NOTICE } from './lib/render-budget.mjs';
 import { buildSddModel, sddForIssue, quietAbsence, buildSlicePlan, STAGE_VOCAB } from './lib/sdd-model.mjs';
 import { searchNodes } from './lib/search-model.mjs';
@@ -615,6 +616,14 @@ function currentWork() {
   });
 }
 
+/** The footer index of the render in progress; `renderLanes` sets it before any card is drawn. */
+let cardReviews = { show: false, byIssue: new Map() };
+
+/** The review footer index (#1312 D139): the join the Reviews mode reads, built once per render from the sections already served. */
+function currentCardReviews() {
+  return cardReviewIndex({ prs: sectionOf(state, 'prs'), reviews: sectionOf(state, 'reviews'), remoteChanges: sectionOf(state, 'remoteChanges') });
+}
+
 /** The two sections an epic's state is read from (#1309 D134): the models compute the rollup, this only hands them over. */
 function currentEpics() {
   return { hierarchy: sectionOf(state, 'hierarchy'), forgeLoad: sectionOf(state, 'forgeLoad') };
@@ -675,6 +684,7 @@ function renderInflight() {
  * into elements.
  */
 function renderLanes() {
+  cardReviews = currentCardReviews(); // once per render, read by every card (#1312 D139)
   const model = buildLaneModel(sectionOf(state, 'graph'), { collapsedTracks, holdingPage, project: state.meta?.project ?? null, clustering, work: currentWork(), epics: currentEpics() });
   clear(mounts.canvas);
   mounts.canvas.appendChild(renderInflight());
@@ -929,8 +939,9 @@ function renderNodeSdd(issue) {
  * the PR when there is one, the tip author and the age, plus the resume state in
  * its own words when it is not present. A branch and its open PR are one line.
  */
-function renderNodeRemote(issue) {
-  const badges = remoteBadges(sectionOf(state, 'remoteChanges'), issue, nowMs());
+function renderNodeRemote(issue, footer = null) {
+  // #1312 D147: a PR the review footer names is not named a second time on the same card.
+  const badges = remoteBadges(sectionOf(state, 'remoteChanges'), issue, nowMs(), { omitPrs: footer ? [footer.pr] : [] });
   const wrap = el('div', 'node-remote');
   for (const line of badges.lines) {
     wrap.appendChild(el('p', 'node-remote-line', line.text));
@@ -938,6 +949,16 @@ function renderNodeRemote(issue) {
   }
   if (badges.more) wrap.appendChild(el('p', 'node-remote-more', badges.more));
   return wrap;
+}
+
+/**
+ * The review footer (#1312): the joined PR, its latest verdict and rev, and the head the verdict judged. One line,
+ * text only; the title repeats the words and adds the detail (full SHAs, reasons). The model words it, this draws it.
+ */
+function renderNodeReview(footer) {
+  const line = el('p', `node-review${footer.verdict ? ` verdict-${footer.verdict.unknown ? 'unknown' : footer.verdict.word.toLowerCase()}` : ''}`, footer.text);
+  line.setAttribute('title', footer.title);
+  return line;
 }
 
 /**
@@ -1005,7 +1026,9 @@ function renderNodeCard(node) {
   for (const mark of node.marks) card.appendChild(said(mark));
   const sddStrip = renderNodeSdd(node.number);
   if (sddStrip !== null) card.appendChild(sddStrip);
-  card.appendChild(renderNodeRemote(node.number));
+  const footer = cardReviews.byIssue.get(node.number) ?? null;
+  if (footer) card.appendChild(renderNodeReview(footer));
+  card.appendChild(renderNodeRemote(node.number, footer));
 
   card.addEventListener('click', () => selectNode(node.number));
   card.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') selectNode(node.number); });
