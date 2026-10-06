@@ -337,6 +337,16 @@ record is lossy in both directions. This enumeration is the migration contract f
 Per ADR-0002 /
 ADR-0004, the live backend
 (engram) remains a *derived index* for semantic search. This format governs the **durable**
-layer only. `brain:memory:share` materializes durable knowledge into `records/`; `memory:import`
-projects `records/` into the active backend. The gzip chunks are engram's private transport and
+layer only. `brain:memory:share` materializes durable knowledge into `records/`; `cli.mjs hydrate`
+**[amended, #1115: was `memory:import`, a script that no longer exists]** projects `records/` into the active backend. The gzip chunks are engram's private transport and
 are no longer the durable truth.
+
+## Projection verb wording (issue #1115)
+
+**Signed**: 06/10/2026 — Cristian Rinaldi
+
+### What changed
+
+*Relationship to the live layer* named `memory:import` as the projection of `records/` into the
+backend. No such script exists in `package.json`. The projection is the required `hydrate` verb
+(`memory-backend-contract.md` Amendment 3), dispatched as `cli.mjs hydrate` on every backend.
