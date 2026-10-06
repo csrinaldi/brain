@@ -40,7 +40,7 @@
 // exists to forbid. Rather than ship that for one commit and forbid it in the
 // next, the seam is required and the resolution lands in B.6 with its refusal.
 
-import { join, dirname, isAbsolute, relative, resolve } from 'node:path';
+import { join, dirname } from 'node:path';
 import { mkdirSync, existsSync, rmSync, mkdtempSync, renameSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 
@@ -51,6 +51,8 @@ import { assembleReviewPrompt } from './assemble-review-prompt.mjs';
 import { firstPartyRole } from '../../roles/first-party/index.mjs';
 import { artifactPathFor, readFindingsArtifact } from './findings-artifact.mjs';
 import { compareCandidateSnapshots, snapshotCandidate } from './candidate-snapshot.mjs';
+import { RUNTIME_REGISTRY } from '../../axes/lib/runtime-registry.mjs';
+import { isWithin } from '../../axes/lib/stage-output.mjs';
 
 /**
  * describeCandidateChange(changes) — names WHAT changed for the "candidate
@@ -157,17 +159,34 @@ export async function runColdReviewStage({
   const routing = resolveStageEngine(config, COLD_REVIEW_STAGE);
   if (routing === null) return { routed: false };
 
+  // THE ENGINE'S DECLARATION DECIDES WHAT IT CAN DO, AND IT IS READ BEFORE ANY MUTATION (#1129).
+  // An engine with no descriptor, or one that does not declare `executeStage`, cannot run a
+  // stage, and it has no output mode to read. ADR-0038: a provider lacking a capability is
+  // refused wherever that capability is required, and this is where it is required. It sits
+  // above `mkdir`, the forge probe and the `remove` of the previous artifact for the reason
+  // judgment:cold-3 gives below: a refused run must not have destroyed the last run's output.
+  // The reason keeps the phrase the stage seam uses (harness/stage-seam.mjs).
+  const registry = deps.registry ?? RUNTIME_REGISTRY;
+  const descriptor = registry.descriptor(routing.engine);
+  if (descriptor?.capabilities?.executeStage !== true) {
+    return {
+      routed: true,
+      ok: false,
+      reason:
+        `the engine "${routing.engine}" ${descriptor ? 'does not declare executeStage' : 'is not a runtime brain ships a descriptor for'}, ` +
+        'so it cannot run the cold-review stage. Refusing rather than falling back to another engine: ' +
+        'a review by an engine the repo did not route would be attributed to the one it did.',
+    };
+  }
+
   // Before the prompt, because `artifactPathFor` is the boundary that refuses a
   // PR number that is not one, and the prompt is built from its answer.
   const artifactPath = artifactPathFor(prNumber);
   const artifactAbsolutePath = join(root, artifactPath);
-  const isWithin = (parent, child) => {
-    const rel = relative(resolve(parent), resolve(child));
-    return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
-  };
-  // Codex and Gemini return their artifact as a final message. The host creates its only
-  // writable destination beside the normal artifact, never in the candidate.
-  const output = (routing.engine === 'codex' || routing.engine === 'gemini')
+  // An engine that DECLARES `final-message` returns its artifact as one. The host creates its only
+  // writable destination beside the normal artifact, never in the candidate. The mode is read
+  // from the descriptor, so the runner names no engine (#1129).
+  const output = descriptor.stage.outputMode === 'final-message'
     ? {
         mode: 'final-message',
         tempPath: join(dirname(artifactAbsolutePath), `.${routing.engine}-final-${prNumber}-${crypto.randomUUID()}.tmp`),
@@ -362,7 +381,7 @@ export async function runColdReviewStage({
       // #814 D5: the role is SERVED (brain's first-party Adversary instance),
       // the protocol is assembled beside the reader. Direction of imports:
       // review → roles/first-party, never back.
-      prompt: assembleReviewPrompt({ role: firstPartyRole(COLD_REVIEW_STAGE), prNumber, baseRef, headRef, artifactRoot: root, outputMode: output ? 'final-message' : 'file' }),
+      prompt: assembleReviewPrompt({ role: firstPartyRole(COLD_REVIEW_STAGE), prNumber, baseRef, headRef, artifactRoot: root, outputMode: descriptor.stage.outputMode }),
       model: routing.model,
       engine: routing.engine,
       cwd: worktreePath,
@@ -415,11 +434,11 @@ export async function runColdReviewStage({
       try {
         renameSync(output.tempPath, output.artifactPath);
       } catch (err) {
-        return { routed: true, ok: false, reason: `the Codex final message could not be atomically materialized — ${err?.message ?? String(err)}` };
+        return { routed: true, ok: false, reason: `the ${routing.engine} final message could not be atomically materialized — ${err?.message ?? String(err)}` };
       }
       const parsed = readFindingsArtifact(readFileSync(output.artifactPath, 'utf8'));
       if (!parsed.ok) {
-        return { routed: true, ok: false, reason: `the Codex final message could not be read by the existing findings reader — ${parsed.reason}` };
+        return { routed: true, ok: false, reason: `the ${routing.engine} final message could not be read by the existing findings reader — ${parsed.reason}` };
       }
     }
 

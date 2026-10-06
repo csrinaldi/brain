@@ -11,8 +11,13 @@
 //
 // Run with: npm test
 
-import { test } from 'node:test';
+import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
+import { cpSync, mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join as joinPath } from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 import { resolveHarness, resolvePlatform, resolveEngine, dispatch, VALID_OPS } from './cli.mjs';
 import { SDD_ENGINES, AGENT_PLATFORMS } from './platform.mjs';
@@ -269,4 +274,58 @@ test('#682 cold-1: no backend reaches the dispatcher — the cycle that deadlock
     'graph never settles — `node cli.mjs init` exits 13 and writes nothing. Anything a backend needs ' +
     'from the dispatcher is not dispatch logic: put it in a leaf, like platform.mjs.'
   );
+});
+
+// ── #1128: `node harness/cli.mjs init` reports a platform's refusal, on a scratch consumer ──
+//
+// The adapters resolve the repo root from their own location, and the CLI cannot be handed a
+// root, so the scratch consumer is a COPY of brain/scripts (tests excluded) under a temp root.
+// Child I/O goes through files and the process is bounded: a pipe can hang a sandboxed child.
+
+const SCRIPTS_SRC = joinPath(fileURLToPath(new URL('.', import.meta.url)), '..');
+let consumer;
+
+before(() => {
+  consumer = mkdtempSync(joinPath(tmpdir(), 'cli-init-consumer-'));
+  cpSync(SCRIPTS_SRC, joinPath(consumer, 'brain', 'scripts'), { recursive: true, filter: (src) => !/\.test\.mjs$/.test(src) });
+  // The same data files `init` reads (SOURCE_DOCS), so antigravity has real input.
+  cpSync(joinPath(SCRIPTS_SRC, '..', 'HOME.md'), joinPath(consumer, 'brain', 'HOME.md'));
+  cpSync(joinPath(SCRIPTS_SRC, '..', 'core'), joinPath(consumer, 'brain', 'core'), { recursive: true });
+  writeFileSync(joinPath(consumer, 'brain.config.json'), JSON.stringify({
+    platform: { default: 'claude', providers: { claude: {}, antigravity: {} } },
+    sdd: { default: 'plain', providers: { plain: {} } },
+  }));
+});
+after(() => { if (consumer) rmSync(consumer, { recursive: true, force: true }); });
+
+function cliInit(platform) {
+  const out = joinPath(consumer, 'cli.out');
+  const err = joinPath(consumer, 'cli.err');
+  const r = spawnSync('/bin/bash', ['-c', `"${process.execPath}" brain/scripts/harness/cli.mjs init > "${out}" 2> "${err}" < /dev/null; echo $?`], {
+    cwd: consumer, encoding: 'utf8', timeout: 60_000,
+    env: { ...process.env, AGENT_PLATFORM: platform, SDD_ENGINE: 'plain' },
+  });
+  return { status: Number(r.stdout.trim()), out: readFileSync(out, 'utf8'), err: readFileSync(err, 'utf8') };
+}
+
+test('#1128: antigravity with a malformed .gemini/settings.json exits 1, names the file and leaves it byte-identical', () => {
+  mkdirSync(joinPath(consumer, '.gemini'), { recursive: true });
+  const file = joinPath(consumer, '.gemini', 'settings.json');
+  writeFileSync(file, '{ not json at all');
+  const r = cliInit('antigravity');
+  assert.equal(r.status, 1, r.err);
+  assert.match(r.err, /\.gemini\/settings\.json/);
+  assert.equal(readFileSync(file, 'utf8'), '{ not json at all');
+  rmSync(file);
+});
+
+test('#1128: claude init exits 0 and writes .claude/settings.json (#682 holds with the registry)', () => {
+  const r = cliInit('claude');
+  assert.equal(r.status, 0, r.err);
+  assert.ok(existsSync(joinPath(consumer, '.claude', 'settings.json')));
+  mkdirSync(joinPath(consumer, '.claude'), { recursive: true });
+  writeFileSync(joinPath(consumer, '.claude', 'settings.json'), '{ nope');
+  const bad = cliInit('claude');
+  assert.equal(bad.status, 1, bad.err);
+  assert.equal(readFileSync(joinPath(consumer, '.claude', 'settings.json'), 'utf8'), '{ nope');
 });

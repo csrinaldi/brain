@@ -227,15 +227,15 @@ function _defaultReadFile(relPath, root) {
  * @param {(relPath: string, content: string) => void} [opts._writeGeminiSettings]
  *   Writes the compiled .gemini/settings.json content.
  * @param {string} [opts._repoRoot] Repo root used by the default seams.
- * @returns {Promise<{ missingDocs: string[], agentsWritten: boolean, geminiWritten: boolean, geminiSettingsError?: string }>}
- *   Additive report of what init() could not read or write. No `ok` field —
- *   `init()` keeps its "never throws" contract; only its return value grows
- *   (design.md "Additive report object, not `{ ok: false }`"). A caller that
- *   discards or never inspects the resolved value observes no behavior change.
- *   `geminiSettingsError` is present ONLY when the existing
- *   `.gemini/settings.json` could not be parsed as JSON — the one case where
- *   `init()` refuses to write it rather than silently overwrite (#1127: no
- *   report-success-over-a-failure). `geminiWritten` is `false` in that case too.
+ * @returns {Promise<{ ok: boolean, reason?: string, missingDocs: string[], agentsWritten: boolean, geminiWritten: boolean, geminiSettingsError?: string }>}
+ *   `ok` is `true` when nothing refused or failed to write; a source doc that could
+ *   not be read alone stays `ok: true` with `missingDocs` listed. `reason` (the first
+ *   failure) is present only when `ok` is `false`. `missingDocs`, `agentsWritten`
+ *   and `geminiWritten` are additive detail. `geminiSettingsError` is present ONLY
+ *   when the existing `.gemini/settings.json` could not be parsed as JSON — the one
+ *   case where `init()` refuses to write it rather than silently overwrite (#1127: no
+ *   report-success-over-a-failure); `geminiWritten` is `false` in that case too.
+ *   `init()` never throws, and every platform answers `{ok, ...}` (#1128).
  */
 export async function init({
   _readDoc,
@@ -304,7 +304,12 @@ export async function init({
     }
   }
 
+  const reason = geminiSettingsError
+    ?? (agentsWritten ? undefined : `antigravity: could not write ${AGENTS_EMIT_PATH}`)
+    ?? (geminiWritten ? undefined : `antigravity: could not write ${GEMINI_SETTINGS_EMIT_PATH}`);
   return {
+    ok: reason === undefined,
+    ...(reason === undefined ? {} : { reason }),
     missingDocs,
     agentsWritten,
     geminiWritten,
