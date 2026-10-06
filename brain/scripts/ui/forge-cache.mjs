@@ -20,6 +20,8 @@
 // poll has not completed there reads as a dead server when the server is
 // working and that one item is queued.
 
+import { NOT_FETCHED_YET } from '../status/report.mjs';
+
 const FIRST_POLL_REASON = 'the first forge poll has not completed';
 const QUEUED_BODY_REASON = "this issue's body has not been fetched yet (queued)";
 const QUEUED_CLOSED_REASON = 'the closed-issue list has not been fetched yet (queued)';
@@ -45,7 +47,8 @@ export function createForgeCache() {
   const holdsAnyAnswer = () => store.issueList.has('open') || store.mrList !== undefined;
 
   function miss(queuedReason) {
-    throw new Error(holdsAnyAnswer() ? queuedReason : FIRST_POLL_REASON);
+    // The code is the contract (#1312 D150): `snapshot.mjs` reads it to call a review thread "not read yet", never by its prose.
+    throw Object.assign(new Error(holdsAnyAnswer() ? queuedReason : FIRST_POLL_REASON), { code: NOT_FETCHED_YET });
   }
 
   const port = {

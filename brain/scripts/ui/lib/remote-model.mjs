@@ -27,20 +27,21 @@ export function tipAge(tipAt, nowMs) {
 /** Newest tip first, then branch: the section already sorts, but the order is a promise of THIS view, so it does not depend on the producer. */
 const newestFirst = (a, b) => (a.tipAt < b.tipAt ? 1 : a.tipAt > b.tipAt ? -1 : a.branch.localeCompare(b.branch));
 
-const cardText = (e, nowMs) => ['on origin: ' + e.branch, e.pr ? `PR #${e.pr.number}` : null, authorLine(e.author), tipAge(e.tipAt, nowMs)].filter(Boolean).join(' · ');
+const cardText = (e, nowMs, omitPrs = []) => ['on origin: ' + e.branch, e.pr && !omitPrs.includes(e.pr.number) ? `PR #${e.pr.number}` : null, authorLine(e.author), tipAge(e.tipAt, nowMs)].filter(Boolean).join(' · ');
 
 /** One badge line: the text, and the resume wording only when the resume is not present. */
-const cardLine = (e, nowMs) => ({ text: cardText(e, nowMs), resume: resumeWording(e.resume) });
+const cardLine = (e, nowMs, omitPrs) => ({ text: cardText(e, nowMs, omitPrs), resume: resumeWording(e.resume) });
 
 /**
  * The lines a ticket's card carries for its remote branches: `{lines, more}`.
  * A section that could not be read gives no lines — the sections band says why.
+ * `omitPrs` (#1312 D147): PR numbers the card already names in its review footer, so a card never names one twice.
  */
-export function remoteBadges(section, issue, nowMs) {
+export function remoteBadges(section, issue, nowMs, { omitPrs = [] } = {}) {
   if (!section?.ok) return { lines: [], more: null };
   const mine = section.value.branches.filter((e) => e.issue === issue);
   const extra = mine.length - CARD_LINES;
-  return { lines: mine.slice(0, CARD_LINES).map((e) => cardLine(e, nowMs)), more: extra > 0 ? `and ${extra} more` : null };
+  return { lines: mine.slice(0, CARD_LINES).map((e) => cardLine(e, nowMs, omitPrs)), more: extra > 0 ? `and ${extra} more` : null };
 }
 
 /**
