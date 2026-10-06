@@ -21,6 +21,10 @@ export const DESCRIPTOR = Object.freeze({
 });
 ```
 
+`rank` (Q2, ruled) is an optional finite number on a descriptor. The registry orders its derived lists by
+`rank` (absent = last), then by `name`. `claude` is 1, `antigravity` 2, `plain` 3, which keeps ADR-0024
+Amendment 2's order. The stage runtimes carry no rank.
+
 | name | dir | orchestrate | executeStage | outputMode | model | readiness |
 |---|---|---|---|---|---|---|
 | `claude` | platform | true | true | `file` | `opaque` | false |
@@ -93,7 +97,7 @@ the e2e bootstrap run. A new test asserts the registry's import specifiers are a
 
 ## D3 — `axis-config.mjs` derives the platform facts (ruling 2)
 
-- `lib/axis-config.mjs:32`: `export const AGENT_PLATFORMS = RUNTIME_REGISTRY.orchestrators;`
+- `lib/axis-config.mjs:32`: `export const AGENT_PLATFORMS = RUNTIME_REGISTRY.orchestrators;` (rank-ordered)
 - `:48-54`: `export const PLATFORM_CAPABILITIES = RUNTIME_REGISTRY.capabilities;` The "THIS TABLE IS A
   SEAM" comment is replaced by a pointer to the descriptors.
 - `validateAxisConfig(config, { defaultRole, registry = RUNTIME_REGISTRY })`: the two reads at `:172`
@@ -107,12 +111,10 @@ the e2e bootstrap run. A new test asserts the registry's import specifiers are a
 - `harness/platform.mjs:42-46` re-exports, unchanged. `config/config-verb.mjs:26,37,73` reads the same
   exports, unchanged.
 
-**The order (Q2).** The derived list is sorted: `antigravity, claude, plain`. Before, it was
-`claude, antigravity, plain`, and two tests pin that (`harness/cli.test.mjs:78-83`, titled "claude
-first (#1125)", and `lib/axis-config.test.mjs:78`). Nothing reads `AGENT_PLATFORMS[0]` (`rg` finds
-none). The order reaches users only where error and help text list the valid values. If the
-maintainer wants claude first, the alternative is a descriptor `rank` field. That widens the
-vocabulary, so it is listed rather than chosen.
+**The order (Q2, ruled).** The registry sorts by `rank`, then by name. With `claude` 1, `antigravity` 2 and
+`plain` 3 the derived list is `claude, antigravity, plain`, ADR-0024 Amendment 2's ratified order. The two
+"claude first (#1125)" tests (`harness/cli.test.mjs:78-83`, `lib/axis-config.test.mjs:78`) stay green
+unchanged.
 
 ## D4 — Injectable adapter directories (ruling 8)
 
@@ -245,10 +247,10 @@ pinned mismatch at config time was not ruled. It is out of scope (Q7).
 ## D9 — `init` answers `{ok, ...}` (ruling 6)
 
 - `claude.mjs:79-115`: success returns `{ ok: true }`. A malformed file returns
-  `{ ok: false, reason }` (unchanged). A write throw returns `{ ok: false, reason }`. Today it warns and
-  returns `undefined`, which is success over a failure (#1127's class). This is **pending Q1**.
+  `{ ok: false, reason }` (unchanged). A write throw returns `{ ok: false, reason }` (Q1, ruled). Today it
+  warns and returns `undefined`, which is success over a failure (#1127's class).
 - `antigravity.mjs:240-312`: it returns `{ ok, missingDocs, agentsWritten, geminiWritten, geminiSettingsError?, reason? }`
-  with `ok = !geminiSettingsError && agentsWritten && geminiWritten` (the write half pending Q1) and
+  with `ok = !geminiSettingsError && agentsWritten && geminiWritten` (the write half per Q1) and
   `reason` = the first failure. The JSDoc at `:230-238` that says "No `ok` field" is rewritten.
 - `sdd-engine/adapters/plain.mjs:34-37` (`plain`'s platform module): it returns `{ ok: true }`. The
   sdd-engine `plain` tests that ignore the return are unaffected.
@@ -292,7 +294,7 @@ tree never sees them, and `npm pack` cannot ship them.
 - `axes/axis-port.guard.test.mjs:72-76` (`adapterNames`): the filter `!f.includes('.roles.')` becomes
   `!f.slice(0, -'.mjs'.length).includes('.')`. That excludes every helper leaf (`.roles.`,
   `.descriptor.`, `.readiness.`), so `axisValues()` is unchanged.
-- `axes/axis-port.allowlist.mjs`: REQ-1128-9. In S1 the two entries are re-owned (`owner: '#1128'`,
+- `axes/axis-port.allowlist.mjs`: REQ-1128-9. In S1 the two entries are re-owned (`owner: '#1367'`,
   reason rewritten to name the deferred vocabulary). In S2 the five `#833` entries are deleted in the
   same commits that remove the hits, because the guard fails on a stale entry, so each deletion lands
   with its fix.
@@ -355,19 +357,16 @@ tree never sees them, and `npm pack` cannot ship them.
 claude, codex and gemini routes. `brain:review --dry-run` on a gemini route reaches the final-message
 path with a fake engine on `PATH`.
 
-## Rulings still open (product questions, listed and not decided)
+## Rulings on Q1-Q7 (maintainer, 2026-10-06)
 
-- **Q1** `init` write failure: `ok: false` (proposed, closes the claude "success over failure"), or
-  warn-and-`ok: true` as today?
-- **Q2** The order of the derived `AGENT_PLATFORMS`: sorted (proposed), or claude first via a `rank`
-  descriptor field (#1125's test title)?
-- **Q3** The two re-owned allowlist entries point at #1128, which this change closes. Re-point them to
-  follow-up 2 once it is filed, or keep #1128 open until then?
-- **Q4** The runner's early refusal changes the wording for legacy `sdd.map` routes to
-  `plain`/`antigravity`/`gentle-ai`. Is it acceptable that this lands without a deprecation window?
-- **Q5** antigravity's malformed `.gemini/settings.json` becomes a bootstrap REQUIRED failure (parity
-  with claude). Confirm.
-- **Q6** Delete `harness/codex-readiness.mjs` outright, or keep a one-release shim for consumer
-  scripts that call it by path?
-- **Q7** Should `validateAxisConfig` refuse a `pinned` model mismatch in `sdd.roles` at config time?
-  Not ruled; proposed out of scope.
+- **Q1** `init` write failure: `ok: false`.
+- **Q2** order: claude first, via the descriptor `rank` field (above).
+- **Q3** the two re-owned allowlist entries point at **#1367**.
+- **Q4** the runner's early refusal wording for legacy `sdd.map` routes is accepted without a deprecation window.
+- **Q5** antigravity's malformed `.gemini/settings.json` is a bootstrap REQUIRED failure.
+- **Q6** `harness/codex-readiness.mjs` and gemini's old path are deleted outright, no shim (the D8 "named alias for one commit" is dropped).
+- **Q7** config-time pinned-model validation: out of scope.
+
+Follow-ups: #1366 (merge review-engine into platform dirs), #1367 (emit surfaces / role projection),
+#1368 (quota state), #1369 (shell name mentions), #1370 (hint strings, `DEFAULT_PLATFORM`), #1371
+(sdd-engine descriptors).

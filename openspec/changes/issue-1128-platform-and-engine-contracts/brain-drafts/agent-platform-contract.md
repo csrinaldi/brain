@@ -33,6 +33,7 @@ validator read it without loading the adapter's graph (the #682 cycle rule).
 ```js
 export const DESCRIPTOR = Object.freeze({
   name: 'claude',                                            // = the basename
+  rank: 1,                                                   // optional: order of AGENT_PLATFORMS
   capabilities: Object.freeze({ orchestrate: true, executeStage: true }),
   stage: Object.freeze({ outputMode: 'file', model: Object.freeze({ policy: 'opaque' }) }), // iff executeStage
   readiness: false,
@@ -43,6 +44,7 @@ export const DESCRIPTOR = Object.freeze({
 |---|---|---|
 | `capabilities.orchestrate` | may be `platform.default`, the one orchestrator per session | `validateAxisConfig`, `resolveAxis` |
 | `capabilities.executeStage` | may be an `sdd.roles.<stage>.engine`. When true, the provider is also a review engine and `stage` is governed by `review-engine-contract.md` | `validateAxisConfig`, the cold-review runner |
+| `rank` | optional number; orders the derived `AGENT_PLATFORMS` (lower first, then by name), so claude stays first (ADR-0024 Amendment 2) | the registry |
 | `stage`, `readiness` | see `review-engine-contract.md` | the runner, `harness/readiness.mjs` |
 
 **The registry** (`brain/scripts/axes/lib/runtime-registry.mjs`) discovers descriptors by listing
@@ -102,7 +104,7 @@ real dispatcher. The written-file set is observed from the tree. Per-platform by
 - **Emit surfaces and role projection are not contract verbs.** `brain:promote` still imports
   antigravity's `compileAgentsMd` to regenerate `AGENTS.md`, and
   `roles/first-party/project-role.mjs` still branches on `claude` and keeps its own
-  `PROJECTION_PLATFORMS`. Both are allowlisted guard entries owned by #1128 until the follow-up that
+  `PROJECTION_PLATFORMS`. Both are allowlisted guard entries owned by #1367 until the follow-up that
   adds the vocabulary.
 - **The two runtime directories are not merged.** `axes/platform/adapters/` and
   `axes/review-engine/adapters/` are one config axis read by one registry. Moving the files is a

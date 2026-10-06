@@ -12,7 +12,8 @@ For every runtime provider of the `platform` config axis (ADR-0038 §5), meaning
 under `axes/platform/adapters/` and `axes/review-engine/adapters/` whose basename has no further
 dot, exactly ONE `<name>.descriptor.mjs` MUST exist in one of those two directories. It exports
 `DESCRIPTOR`, a frozen object:
-`{ name, capabilities: { orchestrate: boolean, executeStage: boolean }, stage?, readiness: boolean }`.
+`{ name, rank?, capabilities: { orchestrate: boolean, executeStage: boolean }, stage?, readiness: boolean }`.
+`rank`, when present, is a finite number that orders the derived lists (lower first, then by name).
 `name` MUST equal the file's basename. `stage` MUST be present iff `executeStage` is `true`, and is
 `{ outputMode: 'file'|'final-message', model: { policy: 'opaque'|'pinned'|'default', id? } }`, with
 `id` required for `pinned` and `default` and absent for `opaque`. A descriptor file MUST contain no
@@ -42,7 +43,7 @@ these: a malformed descriptor, a `name` that differs from its basename, a duplic
 adapter module with no descriptor. It exports `loadRuntimeRegistry({ dirs })` (async, injectable)
 and `RUNTIME_REGISTRY`, the shipped tree's registry, loaded once at module evaluation. A registry
 exposes `names` (sorted), `capabilities` (`{[name]: {orchestrate, executeStage}}`, frozen),
-`orchestrators` (sorted names with `orchestrate: true`), `stageRuntimes` (sorted names with
+`orchestrators` (names with `orchestrate: true`, ordered by `rank` then name), `stageRuntimes` (sorted names with
 `executeStage: true`) and `descriptor(name)` (`null` when absent).
 
 #### Scenario: a missing descriptor is refused
@@ -68,12 +69,11 @@ injected registry, defaulting to `RUNTIME_REGISTRY`. `AXIS_MEMBERS.platform` fol
 - THEN it refuses with `default-cannot-orchestrate`, because `codex.descriptor.mjs` declares
   `orchestrate: false`. No table in `axis-config.mjs` is consulted
 
-#### Scenario: the order of the derived list (Q2)
-- GIVEN the shipped tree
+#### Scenario: the order of the derived list (Q2, ruled)
+- GIVEN the shipped tree, where `claude` declares `rank: 1`, `antigravity` `rank: 2` and `plain` `rank: 3`
 - WHEN `AGENT_PLATFORMS` is read
-- THEN it is `['antigravity', 'claude', 'plain']` (sorted), pending Q2. The two pins that assert
-  `['claude', 'antigravity', 'plain']` (`harness/cli.test.mjs:79`, `lib/axis-config.test.mjs:78`)
-  change to the derived order
+- THEN it is `['claude', 'antigravity', 'plain']`, ADR-0024 Amendment 2's ratified order. The two pins
+  (`harness/cli.test.mjs:79`, `lib/axis-config.test.mjs:78`) stay green unchanged
 
 ### REQ-1128-4 The adapter directories are injectable
 `harnessAdapterDir(axis, { base })` and `harnessAdapterUrl(name, { base })` MUST accept a base URL,
@@ -197,7 +197,7 @@ the descriptor's model policy is `pinned` and the route's model differs, route r
 naming the pinned id. That is today's codex behaviour, now generic. CLI modes: `--check` (prints the
 diagnostic, exits 1 when not ready), `--required` (`yes`/`no`), `--engine` (prints the routed engine,
 or nothing). `bootstrap.sh` and `install-tools.sh` call only this verb. Neither calls a per-engine
-readiness script. `harness/codex-readiness.mjs` and `harness/gemini-readiness.mjs` no longer exist.
+readiness script. `harness/codex-readiness.mjs` and `harness/gemini-readiness.mjs` no longer exist (Q6: no shim).
 
 #### Scenario: a gemini route is probed at bootstrap (wired today: no)
 - GIVEN `sdd.map['cold-review'] = { engine: 'gemini' }` and neither `agy` nor `gemini` on PATH
@@ -256,7 +256,7 @@ from that base, and a seam whose loader resolves through `harnessAdapterUrl(name
 - `ok: false, reason` when the platform refused to write a consumer file it could not merge
   (malformed JSON). This is claude's behaviour today and is new for antigravity
   (`geminiSettingsError` stays as an additive field);
-- `ok: false, reason` when a write threw (**pending Q1**; the proposed default);
+- `ok: false, reason` when a write threw (Q1, ruled);
 - `ok: true` otherwise. antigravity keeps `missingDocs`, `agentsWritten` and `geminiWritten` as
   additive fields, and a missing source doc alone stays `ok: true` with `missingDocs` listed.
 `init()` never throws. `harness/cli.mjs` keeps reading `undefined` as success, for SDD engines only.
@@ -313,8 +313,8 @@ was rejected: it would fail every later legitimate edit of those files.
 **Re-owned, remaining (2, S1, ruling 1):**
 | file | rule / max | owner before → after | retired by |
 |---|---|---|---|
-| `brain-promote.mjs` | `adapter-import` / 1 | `#1114` → `#1128` | follow-up 2 (emit surfaces); see Q3 |
-| `roles/first-party/project-role.mjs` | `axis-branch` / 1 | `#1114` → `#1128` | follow-up 2 (role projection); see Q3 |
+| `brain-promote.mjs` | `adapter-import` / 1 | `#1114` → `#1367` | #1367 (emit surfaces) |
+| `roles/first-party/project-role.mjs` | `axis-branch` / 1 | `#1114` → `#1367` | #1367 (role projection) |
 
 **Unchanged:** every other entry (`#1107`, `#1349`, `#1352`, `#1114` day-start gentle-ai, `legitimate`).
 The new `harness/readiness.mjs`, `axes/lib/runtime-registry.mjs` and `axes/lib/stage-output.mjs`

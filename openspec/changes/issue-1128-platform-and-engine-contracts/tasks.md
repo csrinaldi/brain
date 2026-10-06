@@ -5,11 +5,10 @@ Run touched tests with `node --test <file>`, and the whole suite with `npm test`
 numbered group, in slice order (ruling 1). Paths are relative to `brain/scripts/`.
 
 ## T0 Pre-apply
-- [ ] 0.1 Maintainer answers Q1–Q7 (design "Rulings still open"). The tasks below assume the proposed
-      defaults: Q1 `ok:false` on a write throw, Q2 sorted, Q3 re-own to #1128 now and re-point to
-      follow-up 2 before the PR, Q4/Q5 accepted, Q6 no shim, Q7 out of scope.
-- [ ] 0.2 Maintainer files follow-ups 1–5 (proposal). Record the numbers here. Follow-up 2's number
-      feeds 4.9.
+- [x] 0.1 Maintainer answered Q1–Q7 (2026-10-06): Q1 `ok:false` on a write throw, Q2 claude first via a
+      descriptor `rank`, Q3 re-own to #1367, Q4/Q5 accepted, Q6 no shim, Q7 out of scope.
+- [x] 0.2 Follow-ups filed: #1366 merge dirs, #1367 emit/role projection, #1368 quota, #1369 shell names,
+      #1370 hint strings, #1371 sdd-engine descriptors.
 
 ## S1 — Descriptors and the registry (shared)
 - [ ] 1.1 RED `axes/lib/runtime-registry.test.mjs`: against temp `base` fixtures, cover the missing
@@ -32,13 +31,13 @@ numbered group, in slice order (ruling 1). Paths are relative to `brain/scripts/
       `AGENT_PLATFORMS === RUNTIME_REGISTRY.orchestrators`.
 - [ ] 1.8 GREEN `lib/axis-config.mjs` (D3): derive both, inject `registry` at `:172`, `:193` and `:358`,
       and replace the seam comment.
-- [ ] 1.9 Update pins: `harness/cli.test.mjs:78-83` and `lib/axis-config.test.mjs:78` take the derived
-      order (Q2).
+- [ ] 1.9 Add `rank` to the descriptors and the registry sort (Q2). The pins `harness/cli.test.mjs:78-83`
+      and `lib/axis-config.test.mjs:78` stay green unchanged.
 - [ ] 1.10 Guard: `axes/axis-port.guard.test.mjs:72-76` `adapterNames` excludes every dotted basename
       (D12). Assert `axisValues()` is unchanged (pin its current value in the test first: RED on the
       `.descriptor.` names).
 - [ ] 1.11 `axes/axis-port.allowlist.mjs`: re-own `brain-promote.mjs` adapter-import and
-      `roles/first-party/project-role.mjs` axis-branch from `#1114` to `#1128`. Rewrite their reasons
+      `roles/first-party/project-role.mjs` axis-branch from `#1114` to `#1367`. Rewrite their reasons
       to name the deferred emit-surface and role-projection vocabulary (ruling 1).
 - [ ] 1.12 Run `harness/cli.test.mjs` (the #682 graph walker) and the guard: both green.
 
@@ -115,8 +114,7 @@ numbered group, in slice order (ruling 1). Paths are relative to `brain/scripts/
       (results in the README).
 - [ ] 4.8 Before the PR, re-run 4.7 against `origin/main`, and renumber if an ADR gained an amendment
       meanwhile.
-- [ ] 4.9 Re-point the two re-owned allowlist entries to follow-up 2's number if Q3 says so, and update
-      the contract draft's "What this does NOT close" to match.
+- [ ] 4.9 Confirm the contract draft's "What this does NOT close" names #1367 for the two re-owned entries.
 
 ## T5 Gates
 - [ ] 5.1 `npm test` green.

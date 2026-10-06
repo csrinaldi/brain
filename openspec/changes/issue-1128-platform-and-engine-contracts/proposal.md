@@ -46,7 +46,7 @@ branches. It also carries two `#1114` platform entries whose reason says "no own
 1. **One change, closing both issues,** delivered as ordered slices: S1 capabilities move into the
    adapters (descriptor), S2 the engine contract (#1129), S3 the platform contract (#1128), S4 the
    doctrine drafts. The two `#1114` platform allowlist entries (`brain-promote.mjs`,
-   `roles/first-party/project-role.mjs`) are re-owned to #1128.
+   `roles/first-party/project-role.mjs`) are re-owned to #1367 (maintainer ruling on Q3, 2026-10-06).
 2. **Each adapter exports a DESCRIPTOR** (capabilities, output mode, readiness) from a cycle-free
    leaf file, on the pattern of `gentle-ai.roles.mjs`. A registry reads the descriptors. There is no
    JSON manifest. `review-engine/` and `platform/` stay separate directories, and merging them is a
@@ -91,8 +91,8 @@ is at Amendment 3, so this one is 4.
   `validateAxisConfig` and `resolveAxis` accept an injected registry.
 - `axes/lib/harness-adapter-url.mjs`: `harnessAdapterDir`/`harnessAdapterUrl` take an injectable
   base.
-- Allowlist: the `brain-promote.mjs` and `project-role.mjs` entries are re-owned `#1114` → `#1128`
-  (ruling 1).
+- Allowlist: the `brain-promote.mjs` and `project-role.mjs` entries are re-owned `#1114` → `#1367`
+  (ruling 1, amended by the Q3 ruling).
 
 **S2 — the review-engine contract (#1129).**
 - Engine descriptors declare `stage.outputMode`, `stage.model` (policy) and `readiness`.
@@ -124,7 +124,7 @@ ADR-0024 Amendment 6, ADR-0033 Amendment 4, and a README that gives the promotio
 
 - Merging `axes/review-engine/` into `axes/platform/` (ruling 2: a follow-up).
 - Emit-surface (`emitPaths`, session hooks) and role-projection vocabulary (ruling 3). The
-  `brain-promote.mjs` adapter import and the `project-role.mjs` claude branch therefore STAY, re-owned.
+  `brain-promote.mjs` adapter import and the `project-role.mjs` claude branch therefore STAY, re-owned to #1367.
 - A distinct quota / rate-limit engine result state (ruling 4).
 - Routing through `sdd.roles` (#1132). The runner still reads `sdd.map`.
 - Deriving `SDD_ENGINES` (the `sdd` axis's closed list): not ruled, and it stays a literal.
@@ -137,22 +137,36 @@ ADR-0024 Amendment 6, ADR-0033 Amendment 4, and a README that gives the promotio
   shell. Follow-up.
 - Hint and help strings that list platforms (`axes/lib/agent-runtime.mjs:274`, `lib/init.mjs:133`).
 
-## Follow-ups to file (maintainer)
+## Follow-ups (filed by the maintainer)
 
-1. **Merge `axes/review-engine/adapters/` into `axes/platform/adapters/`.** Mechanical once the
+1. **#1366 — merge `axes/review-engine/adapters/` into `axes/platform/adapters/`.** Mechanical once the
    registry reads descriptors: it touches the dual-axis re-export (`review-engine/adapters/claude.mjs`),
    `HARNESS_ADAPTER_AXES`, `layout.test.mjs`'s `EXPECTED_ADAPTERS` and the guard's `AXIS_DIRS`.
-2. **Emit-surface and role-projection vocabulary** (`emitPaths`, session-hook emission, `projectRoles`).
-   It retires the two allowlist entries this change re-owns to #1128 (`brain-promote.mjs`
-   adapter-import, `project-role.mjs` axis-branch) and `PROJECTION_PLATFORMS`.
-3. **A distinct engine quota state** (`{ok:false, kind:'quota'}`), so "engine exited" can say "usage
-   limit".
-4. **Shell name mentions:** `bootstrap.sh:400-402` (`claude` in the ecosystem loop and
-   `INSTALL_HINT`) and `install-tools.sh`'s codex install block. Deriving them from the registry
-   needs an install-hint field in the descriptor.
-5. **Derived hint strings** (`agent-runtime.mjs:274`, `init.mjs:133`) read the registry's
-   `orchestrators`.
-6. (Optional, not ruled) `sdd-engine` descriptors, so that `SDD_ENGINES` is derived the same way.
+2. **#1367 — emit-surface and role-projection vocabulary** (`emitPaths`, session-hook emission,
+   `projectRoles`). It owns, and retires, the two allowlist entries this change re-owns
+   (`brain-promote.mjs` adapter-import, `project-role.mjs` axis-branch) and `PROJECTION_PLATFORMS`.
+3. **#1368 — a distinct engine quota state** (`{ok:false, kind:'quota'}`), so "engine exited" can say
+   "usage limit".
+4. **#1369 — shell name mentions:** `bootstrap.sh:400-402` (`claude` in the ecosystem loop and
+   `INSTALL_HINT`) and `install-tools.sh`'s codex install block. Deriving them from the registry needs
+   an install-hint field in the descriptor.
+5. **#1370 — hint strings from the registry** (`agent-runtime.mjs:274`, `init.mjs:133`), and the
+   `DEFAULT_PLATFORM` literal.
+6. **#1371 — `sdd-engine` descriptors**, so that `SDD_ENGINES` is derived the same way.
+
+## Maintainer rulings on Q1-Q7 (2026-10-06)
+
+- **Q1:** an `init` write that throws returns `ok:false` (claude today warns and reports success).
+- **Q2:** keep ADR-0024 Amendment 2's ratified order, claude first and antigravity second. The
+  descriptor gains an optional `rank` number, and the derived `AGENT_PLATFORMS` sorts by `rank`, then
+  name. The two "claude first (#1125)" tests stay green unchanged.
+- **Q3:** the two re-owned allowlist entries go to **#1367**, not #1128.
+- **Q4:** the changed refusal wording for legacy `sdd.map` routes is accepted without a deprecation
+  window.
+- **Q5:** antigravity with a malformed `.gemini/settings.json` is a bootstrap required failure, like
+  claude.
+- **Q6:** `harness/codex-readiness.mjs` (and gemini's old path) are deleted outright, with no shim.
+- **Q7:** config-time pinned-model validation is out of scope.
 
 ## Behaviour changes a consumer can see
 
