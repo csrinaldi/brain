@@ -71,11 +71,12 @@ function _defaultReadFile(relPath, root) {
  * @param {(relPath: string, content: string) => void} [opts._writeClaudeSettings]
  *   Writes the compiled .claude/settings.json content.
  * @param {string} [opts._repoRoot] Repo root used by the default seams.
- * @returns {Promise<undefined|{ok: false, reason: string}>}
- *   `undefined` on success (unchanged contract). `{ok: false, reason}` ONLY
- *   when the existing file could not be parsed as JSON — the one case where
- *   `init()` refuses to write rather than silently overwrite (#1127: no
- *   report-success-over-a-failure).
+ * @returns {Promise<{ok: true}|{ok: false, reason: string}>}
+ *   `{ok: true}` on success. `{ok: false, reason}` when the existing file could
+ *   not be parsed as JSON — `init()` refuses to write rather than silently
+ *   overwrite — or when the write itself threw (#1127: no
+ *   report-success-over-a-failure; #1128 ruled the write half the same way).
+ *   Every platform answers `{ok, ...}` (agent-platform contract).
  */
 export async function init({
   _readClaudeSettings,
@@ -107,8 +108,11 @@ export async function init({
   try {
     writeClaudeSettings(CLAUDE_SETTINGS_EMIT_PATH, settingsContent);
   } catch (err) {
-    console.warn(`  harness: claude could not write ${CLAUDE_SETTINGS_EMIT_PATH} — ${err.message}`);
+    const reason = `claude: could not write ${CLAUDE_SETTINGS_EMIT_PATH} — ${err.message}`;
+    console.warn(`  harness: ${reason}`);
+    return { ok: false, reason };
   }
+  return { ok: true };
 }
 
 // ── run-stage — #682 slice B, ADR-0033 ───────────────────────────────────────

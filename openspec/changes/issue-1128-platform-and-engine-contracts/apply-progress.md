@@ -31,3 +31,13 @@ Strict TDD. Each row: the RED observed first, then the GREEN.
 
 Unplanned: the four deleted `harness/*-readiness*` paths are added to `lib/retired-paths.mjs`, so `brain:upgrade` removes them from a consumer (Q6 deletes with no shim; without this the stale files would survive every upgrade).
 Deviation: the parity bodies live in `__fixtures__/engine-parity.mjs` (and `platform-parity.mjs`), not exported from `contract.test.mjs`: importing a `.test.mjs` would run its tests a second time.
+
+## S3 — the agent-platform contract (#1128)
+| task | red (observed) | green |
+|---|---|---|
+| 3.1 platform parity | `axes/platform/contract.test.mjs`: 4 fail — (b) claude, (b) antigravity, (b) plain (no `ok`), (e) antigravity (malformed settings reported with no `ok`) | 24 pass |
+| 3.2 claude `init` | claude.test.mjs 2 new cases fail (write throw read as success; no `ok:true`), verified by stashing the change | 16 pass (Q1: write throw -> `ok:false`) |
+| 3.3 antigravity `init` | parity (b)/(e) red above; pins `2.1`, `1.5`, `2.4`, `REQ-1139-5` fail on `deepEqual`/"no ok" | `ok` + `reason`, additive fields kept; pins rewritten (1.5 now asserts ok:false on a write failure and ok:true on an unreadable doc) |
+| 3.4 plain | parity (b) red | `{ok:true}` |
+| 3.5 CLI | `cli.test.mjs`: antigravity + malformed `.gemini/settings.json` exits 0 (red, verified with antigravity.mjs stashed) | exits 1, names the file, byte-identical; claude init exits 0 and a malformed `.claude/settings.json` exits 1. Scratch consumer = a copy of `brain/scripts` (tests excluded) under a temp root, because the CLI cannot be given a root |
+| 3.7 scaffold | characterisation: green on arrival (its red state is the tree before S1, where no registry or `base` existed) | 19 pass: registry, validate, resolve, platform parity on `zed`, engine parity (a)(d)(f) on `zed-engine`, `runColdReviewStage` ok through a seam that loads from the temp base |

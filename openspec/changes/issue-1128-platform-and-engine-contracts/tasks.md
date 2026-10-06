@@ -11,93 +11,93 @@ numbered group, in slice order (ruling 1). Paths are relative to `brain/scripts/
       #1370 hint strings, #1371 sdd-engine descriptors.
 
 ## S1 — Descriptors and the registry (shared)
-- [ ] 1.1 RED `axes/lib/runtime-registry.test.mjs`: against temp `base` fixtures, cover the missing
+- [x] 1.1 RED `axes/lib/runtime-registry.test.mjs`: against temp `base` fixtures, cover the missing
       descriptor, duplicate name, malformed shape, `name` ≠ basename, `stage` present without
       `executeStage`, `pinned` without `id`, and dotted helper basenames ignored. Assert that the lists
       are sorted and that the module's import specifiers are all `node:`.
-- [ ] 1.2 GREEN `axes/lib/runtime-registry.mjs` (D2): `loadRuntimeRegistry({base})`, `validateDescriptor`,
+- [x] 1.2 GREEN `axes/lib/runtime-registry.mjs` (D2): `loadRuntimeRegistry({base})`, `validateDescriptor`,
       `RUNTIME_REGISTRY` (top-level await).
-- [ ] 1.3 RED `axes/descriptors.test.mjs`: the five descriptors exist, contain no
+- [x] 1.3 RED `axes/descriptors.test.mjs`: the five descriptors exist, contain no
       `import`/`export … from`/`await` (source scan), and their capabilities deep-equal today's
       `PLATFORM_CAPABILITIES`. Assert the D1 table's stage/model/readiness values.
-- [ ] 1.4 GREEN the five leaves: `axes/platform/adapters/{claude,antigravity,plain}.descriptor.mjs`
+- [x] 1.4 GREEN the five leaves: `axes/platform/adapters/{claude,antigravity,plain}.descriptor.mjs`
       and `axes/review-engine/adapters/{codex,gemini}.descriptor.mjs` (D1).
-- [ ] 1.5 RED `axes/lib/harness-adapter-url.test.mjs`: `harnessAdapterDir/Url(…, { base })` resolve
+- [x] 1.5 RED `axes/lib/harness-adapter-url.test.mjs`: `harnessAdapterDir/Url(…, { base })` resolve
       under a temp base, and the default is unchanged.
-- [ ] 1.6 GREEN `axes/lib/harness-adapter-url.mjs` (D4).
-- [ ] 1.7 RED `lib/axis-config.test.mjs`: with a registry whose `zed` declares `orchestrate`,
+- [x] 1.6 GREEN `axes/lib/harness-adapter-url.mjs` (D4).
+- [x] 1.7 RED `lib/axis-config.test.mjs`: with a registry whose `zed` declares `orchestrate`,
       `validateAxisConfig(…, { registry })` accepts `platform.default: zed`. `resolveAxis('platform',
       { registry, … })` resolves `zed`. `PLATFORM_CAPABILITIES === RUNTIME_REGISTRY.capabilities` and
       `AGENT_PLATFORMS === RUNTIME_REGISTRY.orchestrators`.
-- [ ] 1.8 GREEN `lib/axis-config.mjs` (D3): derive both, inject `registry` at `:172`, `:193` and `:358`,
+- [x] 1.8 GREEN `lib/axis-config.mjs` (D3): derive both, inject `registry` at `:172`, `:193` and `:358`,
       and replace the seam comment.
-- [ ] 1.9 Add `rank` to the descriptors and the registry sort (Q2). The pins `harness/cli.test.mjs:78-83`
+- [x] 1.9 Add `rank` to the descriptors and the registry sort (Q2). The pins `harness/cli.test.mjs:78-83`
       and `lib/axis-config.test.mjs:78` stay green unchanged.
-- [ ] 1.10 Guard: `axes/axis-port.guard.test.mjs:72-76` `adapterNames` excludes every dotted basename
+- [x] 1.10 Guard: `axes/axis-port.guard.test.mjs:72-76` `adapterNames` excludes every dotted basename
       (D12). Assert `axisValues()` is unchanged (pin its current value in the test first: RED on the
       `.descriptor.` names).
-- [ ] 1.11 `axes/axis-port.allowlist.mjs`: re-own `brain-promote.mjs` adapter-import and
+- [x] 1.11 `axes/axis-port.allowlist.mjs`: re-own `brain-promote.mjs` adapter-import and
       `roles/first-party/project-role.mjs` axis-branch from `#1114` to `#1367`. Rewrite their reasons
       to name the deferred emit-surface and role-projection vocabulary (ruling 1).
-- [ ] 1.12 Run `harness/cli.test.mjs` (the #682 graph walker) and the guard: both green.
+- [x] 1.12 Run `harness/cli.test.mjs` (the #682 graph walker) and the guard: both green.
 
 ## S2 — The review-engine contract (#1129)
-- [ ] 2.1 RED `axes/lib/stage-output.test.mjs`: cover `engineTail`'s six steps (a secret straddling
+- [x] 2.1 RED `axes/lib/stage-output.test.mjs`: cover `engineTail`'s six steps (a secret straddling
       the 4 KiB window is redacted, control bytes go, the tail is ≤300 characters with `…`),
       `secretValues`, `isWithin('/c','/c/..x') === true`, `canonicalPath` on a non-existent leaf, and
       `validateFinalMessageOutput` messages naming the passed `engine`.
-- [ ] 2.2 GREEN `axes/lib/stage-output.mjs` (D6).
-- [ ] 2.3 RED `axes/review-engine/contract.test.mjs` (REQ-1129-8, D10) over `stageRuntimes`. (e) is red
+- [x] 2.2 GREEN `axes/lib/stage-output.mjs` (D6).
+- [x] 2.3 RED `axes/review-engine/contract.test.mjs` (REQ-1129-8, D10) over `stageRuntimes`. (e) is red
       for claude and gemini, and (h) covers codex. Record which cases are characterisation (green on
       arrival).
-- [ ] 2.4 GREEN `claude.mjs`: delete `tail`. `engineTail` with scrubbed-name secrets is applied on every
+- [x] 2.4 GREEN `claude.mjs`: delete `tail`. `engineTail` with scrubbed-name secrets is applied on every
       failure branch, including non-zero (`:292-298`). Update the pin `harness/run-stage.test.mjs:60`.
-- [ ] 2.5 GREEN `codex.mjs`: import the helpers from `stage-output.mjs` and delete the copies
+- [x] 2.5 GREEN `codex.mjs`: import the helpers from `stage-output.mjs` and delete the copies
       (`:22-78`). `CODEX_MODEL` comes from the descriptor.
-- [ ] 2.6 GREEN `gemini.mjs`: same, plus `GEMINI_MODEL` from the descriptor. Re-export
+- [x] 2.6 GREEN `gemini.mjs`: same, plus `GEMINI_MODEL` from the descriptor. Re-export
       `canonicalPath`/`isWithin` for this commit only, then move the `gemini.test.mjs` cases to
       `stage-output.test.mjs` and drop the re-export.
-- [ ] 2.7 RED `review/lib/run-cold-review-stage.test.mjs`:
+- [x] 2.7 RED `review/lib/run-cold-review-stage.test.mjs`:
       (a) a fake registry declaring `final-message` for an engine named `alpha` yields
       `output.mode === 'final-message'`;
       (b) `engine: 'plain'` is refused before the seam with the previous artifact intact;
       (c) a gemini rename failure reason contains `gemini final message` and not `Codex`;
       (d) the `outputMode` handed to the prompt equals the descriptor's.
-- [ ] 2.8 GREEN runner (D5): `deps.registry`, the early refusal, the declared mode, the imported
+- [x] 2.8 GREEN runner (D5): `deps.registry`, the early refusal, the declared mode, the imported
       `isWithin`, and the strings at `:418` and `:422`. Update the pin `:255-261` → `claude`/`gemini`.
-- [ ] 2.9 Allowlist: delete `review/lib/run-cold-review-stage.mjs` axis-branch (the guard reported
+- [x] 2.9 Allowlist: delete `review/lib/run-cold-review-stage.mjs` axis-branch (the guard reported
       `STALE`).
-- [ ] 2.10 RED `harness/readiness.test.mjs`: `resolveStageRoute` covers unrouted, claude (not required),
+- [x] 2.10 RED `harness/readiness.test.mjs`: `resolveStageRoute` covers unrouted, claude (not required),
       codex pin mismatch throws, gemini default model. `checkRouteReadiness` covers claude never
       spawning, and gemini with nothing installed giving `ready:false` and its diagnostic. The CLI's
       `--check`/`--required`/`--engine` are tested on a temp cwd.
-- [ ] 2.11 `git mv harness/codex-readiness.mjs axes/review-engine/adapters/codex.readiness.mjs` and the
+- [x] 2.11 `git mv harness/codex-readiness.mjs axes/review-engine/adapters/codex.readiness.mjs` and the
       same for gemini, plus their tests (`*.readiness.test.mjs`). Then GREEN the leaves (D8): export
       `checkReadiness`, delete the route resolvers, `loadConfig`, `main` and the second `CODEX_MODEL`.
-- [ ] 2.12 GREEN `harness/readiness.mjs` (D8).
-- [ ] 2.13 RED parity (g) for codex and gemini (`<name>.readiness.mjs` exports `checkReadiness`), then
+- [x] 2.12 GREEN `harness/readiness.mjs` (D8).
+- [x] 2.13 RED parity (g) for codex and gemini (`<name>.readiness.mjs` exports `checkReadiness`), then
       green from 2.11.
-- [ ] 2.14 `bootstrap.sh:409-418` and `install-tools.sh:139-158` call `harness/readiness.mjs` (D8).
+- [x] 2.14 `bootstrap.sh:409-418` and `install-tools.sh:139-158` call `harness/readiness.mjs` (D8).
       The shell test that greps bootstrap for the codex call (if any, `rg codex-readiness test/`) is
       updated.
-- [ ] 2.15 Update `test/fresh-install/codex-route.e2e.test.mjs:5` to the generic API.
-- [ ] 2.16 Allowlist: delete the four `harness/{codex,gemini}-readiness.mjs` entries. The guard is green
+- [x] 2.15 Update `test/fresh-install/codex-route.e2e.test.mjs:5` to the generic API.
+- [x] 2.16 Allowlist: delete the four `harness/{codex,gemini}-readiness.mjs` entries. The guard is green
       at 24 entries.
 
 ## S3 — The agent-platform contract (#1128)
-- [ ] 3.1 RED `axes/platform/contract.test.mjs` (REQ-1128-7, D10) over `orchestrators`. (b) is red for
+- [x] 3.1 RED `axes/platform/contract.test.mjs` (REQ-1128-7, D10) over `orchestrators`. (b) is red for
       claude and plain, and (e) is red for antigravity. Export the body as `platformParity(name, loader)`
       for 3.7.
-- [ ] 3.2 GREEN `claude.mjs` `init`: `{ok:true}`, and `{ok:false, reason}` on a malformed file or a
+- [x] 3.2 GREEN `claude.mjs` `init`: `{ok:true}`, and `{ok:false, reason}` on a malformed file or a
       write throw (Q1).
-- [ ] 3.3 GREEN `antigravity.mjs` `init`: `ok` plus `reason`, the additive fields kept, and the JSDoc
+- [x] 3.3 GREEN `antigravity.mjs` `init`: `ok` plus `reason`, the additive fields kept, and the JSDoc
       rewritten. Update the pins `antigravity.test.mjs:186,305`.
-- [ ] 3.4 GREEN `sdd-engine/adapters/plain.mjs` `init` returns `{ok:true}`.
-- [ ] 3.5 RED `harness/cli.test.mjs`: a spawned `node harness/cli.mjs init` with `AGENT_PLATFORM=antigravity`
+- [x] 3.4 GREEN `sdd-engine/adapters/plain.mjs` `init` returns `{ok:true}`.
+- [x] 3.5 RED `harness/cli.test.mjs`: a spawned `node harness/cli.mjs init` with `AGENT_PLATFORM=antigravity`
       and a malformed `.gemini/settings.json` (temp `_repoRoot` via env-free fixture repo) exits 1.
       Then GREEN by 3.3. Update the comment at `cli.mjs:252-262`.
-- [ ] 3.6 Update any claude test that asserts `init()` resolved `undefined`.
-- [ ] 3.7 RED→GREEN `axes/runtime-scaffold.test.mjs` (REQ-1128-8, REQ-1129-9, D11): a third platform
+- [x] 3.6 Update any claude test that asserts `init()` resolved `undefined`.
+- [x] 3.7 RED→GREEN `axes/runtime-scaffold.test.mjs` (REQ-1128-8, REQ-1129-9, D11): a third platform
       (`zed`) and a third engine (`zed-engine`) in a temp base. Cover the registry, validate, resolve,
       the platform parity body, the engine parity (a)(d)(f), and `runColdReviewStage` ok. Confirm that
       the commit touches neither `lib/axis-config.mjs`, `roles/first-party/project-role.mjs` nor
