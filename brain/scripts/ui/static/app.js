@@ -615,6 +615,11 @@ function currentWork() {
   });
 }
 
+/** The two sections an epic's state is read from (#1309 D134): the models compute the rollup, this only hands them over. */
+function currentEpics() {
+  return { hierarchy: sectionOf(state, 'hierarchy'), forgeLoad: sectionOf(state, 'forgeLoad') };
+}
+
 /** The lifecycle chip: mark + word, nothing about the track (#1308 R1308-1). */
 function stateChipEl(stateView) {
   const chip = el('span', `node-state state-${stateView.code}`);
@@ -670,7 +675,7 @@ function renderInflight() {
  * into elements.
  */
 function renderLanes() {
-  const model = buildLaneModel(sectionOf(state, 'graph'), { collapsedTracks, holdingPage, project: state.meta?.project ?? null, clustering, work: currentWork() });
+  const model = buildLaneModel(sectionOf(state, 'graph'), { collapsedTracks, holdingPage, project: state.meta?.project ?? null, clustering, work: currentWork(), epics: currentEpics() });
   clear(mounts.canvas);
   mounts.canvas.appendChild(renderInflight());
   if (!model.ok) {
@@ -1408,7 +1413,7 @@ function renderGovernance() {
  * divergences; this renders one loop over rows this page never re-derives.
  */
 function renderRoadmap() {
-  const model = buildRoadmapModel(sectionOf(state, 'graph'), { project: state.meta?.project ?? null, work: currentWork() });
+  const model = buildRoadmapModel(sectionOf(state, 'graph'), { project: state.meta?.project ?? null, work: currentWork(), epics: currentEpics() });
   if (!model.ok) {
     mounts.canvas.appendChild(saidUnavailable('the roadmap could not be computed', model, 'graph'));
     return;
@@ -1422,7 +1427,9 @@ function renderRoadmap() {
 /** One roadmap row: its state chip, its title, its own source stamp (`row()`'s — a link when a project is known, the honest "no source was recorded" stamp when not; #882 cold review of PR 1, blocker), its own `stateReason` when the state could not be read (`roadmap-model.mjs`'s `safeStateOf` guard — #882 cold review of PR #1037, correction 1: a said reason, never a silent `unknown` mark with no explanation), its open blockers, and any `parent`-keyed divergence said inline rather than silently absorbed (R882-2, and correction 2's `nested-epic-not-supported` case). */
 function renderRoadmapRow(row, className) {
   const node = el('div', className);
-  node.appendChild(el('span', `roadmap-state ${row.state.className}`, `${row.state.mark} ${row.state.label}`));
+  const chip = el('span', `roadmap-state ${row.state.className}`, `${row.state.mark} ${row.state.label}`);
+  if (row.state.reason) chip.setAttribute('title', row.state.reason); // #1309 D136: a state's basis is never invisible
+  node.appendChild(chip);
   node.appendChild(el('span', 'roadmap-title', `#${row.number} ${row.title}`));
   node.appendChild(renderSourceStamp(row.sourceStamp));
   if (row.stateReason) node.appendChild(el('span', 'roadmap-state-reason', row.stateReason));
@@ -1785,7 +1792,7 @@ function buildDrawer() {
   // link to the issue on the forge, and the close control — all from the same
   // model the card used, so the panel never contradicts what was clicked.
   const head = el('div', 'drawer-head');
-  const summary = nodeSummaryFor(sectionOf(state, 'graph'), selectedIssue, { work: currentWork() });
+  const summary = nodeSummaryFor(sectionOf(state, 'graph'), selectedIssue, { work: currentWork(), epics: currentEpics() });
 
   const idLine = el('div', 'drawer-id');
   idLine.appendChild(el('span', 'drawer-number', `#${selectedIssue}`));
@@ -1931,7 +1938,7 @@ function renderDeclareBlock(declare) {
  */
 function renderChildren(issue) {
   const wrap = el('div', 'drawer-children');
-  const found = childrenOf(sectionOf(state, 'graph'), sectionOf(state, 'hierarchy'), issue, { work: currentWork() });
+  const found = childrenOf(sectionOf(state, 'graph'), sectionOf(state, 'hierarchy'), issue, { work: currentWork(), epics: currentEpics() });
   if (!found.ok) {
     wrap.appendChild(said(found.reason));
     return wrap;
@@ -2341,7 +2348,7 @@ async function loadChange(issue) {
  */
 function drawnNodes() {
   if (view !== 'map') return [];
-  const model = buildLaneModel(sectionOf(state, 'graph'), { collapsedTracks, holdingPage, project: state.meta?.project ?? null, clustering, work: currentWork() });
+  const model = buildLaneModel(sectionOf(state, 'graph'), { collapsedTracks, holdingPage, project: state.meta?.project ?? null, clustering, work: currentWork(), epics: currentEpics() });
   if (!model.ok) return [];
   const nodes = [];
   model.value.lanes.forEach((lane, laneIndex) => {

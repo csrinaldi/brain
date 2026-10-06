@@ -626,3 +626,32 @@ test('R1308-10/cold-1: a malformed declaration shows its error and NO paste bloc
   const holding = buildLaneModel(section, { work: NO_WORK }).value.holding.nodes.find((r) => r.number === 1);
   assert.equal(holding.trackMark.code, 'unreadable-config', 'the card carries it too');
 });
+
+// ── #1309: the epic's state follows its children, in every shape that carries it ──
+const hE = (children, states) => ({ ok: true, value: { issues: [[10, { level: 'epic', levelSource: 'block', state: 'open', children }], ...children.map((c, i) => [c, { state: states[i], children: [] }])], divergences: [], closedUnresolved: [], closedRead: { ok: true } } });
+const forgeE = (closed) => ({ ok: true, value: { open: { state: 'complete', at: 'T' }, closed } });
+
+test('R1309-1: the epic row, the drawer header and the epic-grouped children agree, and Ready to close is the state of an all-closed epic', () => {
+  const nodes = [declaredNode(10, { kind: 'epic', tracker: null }), declaredNode(20, { parent: 10 }), declaredNode(21, { parent: 10 })];
+  const g = graph({ nodes });
+  const epics = { hierarchy: hE([20, 21], ['closed', 'open']), forgeLoad: forgeE({ state: 'complete', at: 'T' }) };
+  const model = buildLaneModel(g, { work: NO_WORK, epics, clustering: 'epic', collapsedTracks: new Set() }).value;
+  const epic = model.epicGrouping.value.epics.find((e) => e.number === 10);
+  const summary = nodeSummaryFor(g, 10, { work: NO_WORK, epics }).value;
+  assert.equal(epic.state.code, 'in-flight');
+  assert.equal(summary.state.code, 'in-flight');
+  assert.equal(summary.state.reason, '1 / 2 children closed');
+  const allClosed = { hierarchy: hE([20, 21], ['closed', 'closed']), forgeLoad: epics.forgeLoad };
+  assert.equal(nodeSummaryFor(g, 10, { work: NO_WORK, epics: allClosed }).value.state.code, 'ready-to-close');
+  assert.equal(buildLaneModel(g, { work: NO_WORK, epics: allClosed, clustering: 'epic', collapsedTracks: new Set() }).value.epicGrouping.value.epics[0].state.code, 'ready-to-close');
+});
+
+test('R1309-5: an epic whose closed lane is pending is Not computed in the rollup words; a child that is not an epic is unaffected', () => {
+  const nodes = [declaredNode(10, { kind: 'epic', tracker: null }), declaredNode(20, { parent: 10 })];
+  const g = graph({ nodes });
+  const epics = { hierarchy: hE([20], ['open']), forgeLoad: forgeE({ state: 'pending', at: null }) };
+  const s = nodeSummaryFor(g, 10, { work: NO_WORK, epics }).value.state;
+  assert.equal(s.code, 'not-computed');
+  assert.match(s.reason, /counting closed children/);
+  assert.equal(nodeSummaryFor(g, 20, { work: NO_WORK, epics }).value.state.code, 'planned');
+});

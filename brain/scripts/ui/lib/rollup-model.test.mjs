@@ -42,7 +42,7 @@ test('#1199 R1199-6: hierarchyOf rebuilds the Map from the pairs and passes a pe
 
 test('#1199 R1199-7: the counts are closed, open, unknown and total over the direct children', () => {
   const r = epicRollup(hierarchy({ closed: 12, open: 16, unknown: 1 }), load(COMPLETE), 878);
-  assert.deepEqual(r.value, { closed: 12, open: 16, unknown: 1, total: 29, unresolved: 0, load: COMPLETE });
+  assert.deepEqual(r.value, { closed: 12, open: 16, unknown: 1, total: 29, unresolved: 0, openChildren: Array.from({ length: 16 }, (_, i) => 1013 + i), load: COMPLETE });
 });
 
 test('#1199 R1199-7: a complete list with unknown apart reads "12 / 29 children closed · 1 state unknown"', () => {
@@ -154,4 +154,11 @@ test('#1267 R1267-1: the note is null in every state where nothing was counted',
   assert.equal(note(hierarchy({ open: 2 }), load({ state: 'failed', at: 'c', reason: 'r', lastCompleteAt: null })), null);
   assert.equal(note(hierarchy({ open: 2, closedRead: { ok: false, reason: 'x' } }), load(COMPLETE)), null);
   assert.equal(rollupNote({ ok: false, reason: 'no VCS' }), null, 'an unavailable rollup counted nothing either');
+});
+
+test('#1309 D133: epicRollup lists the open children, sorted, also while the closed count is null', () => {
+  const h = hierarchy({ closed: 2, open: 3 });
+  assert.deepEqual(epicRollup(h, load(COMPLETE), 878).value.openChildren, [1003, 1004, 1005]);
+  assert.deepEqual(epicRollup(h, load({ state: 'pending', at: null }), 878).value.openChildren, [1003, 1004, 1005]);
+  assert.deepEqual(epicRollup(hierarchy({ closed: 2 }), load(COMPLETE), 878).value.openChildren, []);
 });
