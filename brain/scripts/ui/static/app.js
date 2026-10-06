@@ -1254,7 +1254,7 @@ function renderReviews() {
     return;
   }
   const { threads, queue, totals } = model.value;
-  mounts.canvas.appendChild(el('p', 'canvas-summary', `${totals.threads} thread(s), ${totals.queue} waiting on a verdict, ${totals.unreadable} unreadable`));
+  mounts.canvas.appendChild(el('p', 'canvas-summary', `${totals.threads} thread(s), ${totals.queue} waiting on a verdict, ${totals.queued} not read yet, ${totals.unreadable} unreadable`));
   mounts.canvas.appendChild(renderQueue(queue));
   for (const thread of threads) mounts.canvas.appendChild(renderReviewThread(thread));
 }
@@ -1319,6 +1319,10 @@ function renderQueue(queue) {
 function renderReviewThread(thread) {
   const card = el('div', 'review-card');
   card.appendChild(el('strong', null, `#${thread.pr}${thread.title ? ` ${thread.title}` : ''}`));
+  if (thread.queued) {
+    card.appendChild(said(`verdict not read yet: ${thread.queued.reason}`));
+    return card;
+  }
   if (thread.unreadable) {
     card.appendChild(said(`this thread could not be read: ${thread.unreadable.reason}`));
     return card;

@@ -140,3 +140,29 @@ test('#1312: an epic-cluster child card carries the footer too', async (t) => {
   await settle();
   assert.equal(footerOf(dom, 1001).textContent, `PR #990 · rev 1 · APPROVE · head ${B.slice(0, 7)}`);
 });
+
+test('#1312 R1312-6 / D150: a queued review thread (first landing, or beyond REVIEW_CAP) draws "verdict not read yet" with the reason in the title', async (t) => {
+  const reason = "this PR's reviews have not been fetched yet (queued)";
+  const { dom } = await boot({ prs: ok([pr(885, 881, 'feat/issue-881-x')]), reviews: ok([{ pr: 885, ok: false, pending: true, reason }]) });
+  t.after(() => dom.restore());
+  const footer = footerOf(dom, 881);
+  assert.equal(footer.textContent, 'PR #885 · verdict not read yet');
+  assert.ok(footer.getAttribute('title').includes(reason));
+  assert.doesNotMatch(footer.textContent + footer.getAttribute('title'), /unreadable/);
+});
+
+test('#1312 D150: the Reviews view calls a queued thread "not read yet", and counts it apart from the unreadable', async (t) => {
+  const { dom } = await boot({
+    prs: ok([pr(885, 881, 'feat/issue-881-x'), pr(886, 1001, 'feat/issue-1001-y')]),
+    reviews: ok([{ pr: 885, ok: false, pending: true, reason: 'queued' }, { pr: 886, ok: false, reason: 'HTTP 502' }]),
+  });
+  t.after(() => dom.restore());
+  fire(find(dom.mounts.modes, (x) => x.tagName === 'BUTTON' && /governance/i.test(x.textContent)), 'click');
+  await settle();
+  fire(find(dom.mounts['governance-nav'], (x) => x.tagName === 'BUTTON' && /verdict queue/i.test(x.textContent)), 'click');
+  await settle();
+  const text = all(dom.mounts.canvas).map((n) => n.textContent ?? '').join('\n');
+  assert.match(text, /1 not read yet, 1 unreadable/);
+  assert.match(text, /not read yet: queued/);
+  assert.match(text, /could not be read: HTTP 502/);
+});

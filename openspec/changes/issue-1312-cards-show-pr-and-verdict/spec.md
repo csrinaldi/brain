@@ -37,7 +37,10 @@ It never silently drops one.
 review footer. The sections band and the In flight notices already say why. When `prs` is readable
 but `reviews` is not, the footer names the PR and says `verdict not read yet` while `reviews` is
 pending, or `verdicts could not be read` when it failed. It shows no verdict. A card whose issue
-joins no PR has no footer.
+joins no PR has no footer. A PR whose own review thread was never fetched (queued) is not a failure:
+its row is `{ok:false, pending:true, reason}`, the footer says `verdict not read yet` with the reason
+in the title, and no consumer of review threads calls it unreadable (the drawer Reviews tab, the
+Verdict queue summary and the snapshot report count it apart).
 
 **R1312-7 — No new derivation, no new read.** The footer is computed by a pure module from the
 served `prs`, `reviews` and `remoteChanges` sections, through `buildReviewTimeline`. It makes no
@@ -67,6 +70,11 @@ panel is unchanged. (ruled 2026-10-05, (d)).
   first render completes with no forge call.
 - **S6** GIVEN `prs` is readable and `reviews` is `{ok:false, pending:true}`, THEN the footer reads
   `PR #885 · verdict not read yet`.
+- **S6b** GIVEN `reviews` is readable and the row of PR 885 is `{ok:false, pending:true, reason}` (the
+  first render, before any thread was fetched, or a PR beyond `REVIEW_CAP` not yet rotated in), THEN
+  the footer reads `PR #885 · verdict not read yet`, its title carries the reason, and the word
+  `unreadable` appears nowhere. A row `{ok:false, reason}` without `pending` still reads
+  `review thread unreadable`.
 - **S7** GIVEN PRs 900 and 910 both join #881, THEN the footer names PR 910 (the highest number)
   and reads `+1 open PR`.
 - **S8** GIVEN #1230 carries no `status:approved` label and no open PR joins it, THEN its card

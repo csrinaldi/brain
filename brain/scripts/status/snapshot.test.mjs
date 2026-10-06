@@ -1,4 +1,5 @@
 import { test } from 'node:test';
+import { NOT_FETCHED_YET } from './report.mjs';
 import assert from 'node:assert/strict';
 import { readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
@@ -820,4 +821,23 @@ test('#1284: the CLI text mode ignores lastCommit (additive field, no new output
   const s = await buildSnapshot({ root: makeFixture(), now: NOW, _run: run });
   assert.equal(s.changes.value.find((x) => x.id === 'issue-1-a').lastCommit.author, 'zelda-author');
   assert.doesNotMatch(renderSnapshotText(s), /zelda-author|2026-10-03T10/);
+});
+
+test('#1312 D150: a review thread never fetched is a pending row with its reason; a real failure stays failed with no pending flag', async () => {
+  const issues = [{ number: 5, title: 'five', labels: [], assignees: [], state: 'open' }];
+  const notFetched = Object.assign(new Error("this PR's reviews have not been fetched yet (queued)"), { code: NOT_FETCHED_YET });
+  const port = readOnlyPort({
+    issueList: async () => issues,
+    issueView: async () => ({ body: '', assignees: null }),
+    mrList: async () => [{ number: 10, title: 'a', headBranch: 'feat/issue-5-x' }, { number: 11, title: 'b', headBranch: 'feat/issue-5-y' }],
+    prReviews: async ({ number }) => {
+      if (number === 10) throw notFetched;
+      throw new Error('HTTP 502');
+    },
+  });
+  const s = await buildSnapshot({ root: makeFixture(), now: NOW, vcs: port, project: 'o/r' });
+  const [queued, failed] = s.reviews.value;
+  assert.deepEqual(queued, { pr: 10, ok: false, pending: true, reason: "this PR's reviews have not been fetched yet (queued)" });
+  assert.deepEqual(failed, { pr: 11, ok: false, reason: 'HTTP 502' });
+  assert.equal('pending' in failed, false);
 });

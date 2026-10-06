@@ -28,3 +28,22 @@ Mode: Strict TDD. All 5 phases complete (tasks.md fully ticked). Single PR; deli
 3. PR named twice (`omitPrs: []`): S10 render test fails.
 4. Lower-numbered PR chosen: S7 model test fails.
 5. Head mismatch hidden (`differs` becomes `null`): two S4 tests fail.
+
+## Batch 2 (review round 1) — cold-1: a never-fetched thread reads "unreadable"
+
+Fixed at the source (D150, R1312-6, S6b). `forge-cache` stamps every miss with `code: NOT_FETCHED_YET` (exported from `status/report.mjs`); `reviewRows` emits `{pr, ok:false, pending:true, reason}` for it, any other failure stays `{pr, ok:false, reason}`; `threadState` maps pending to `queued`.
+
+| Test | RED | GREEN |
+|---|---|---|
+| forge-cache marker, snapshot row, timeline `queued`, card model, footer render, Reviews view, change-route, drawer | 8 failing (missing export, then wrong wording) | marker + mapping in each consumer |
+
+Sweep of review-thread consumers:
+
+- Card footer `ui/lib/card-review-model.mjs` footerOf: fixed.
+- Verdict queue / Reviews view `ui/lib/review-timeline.mjs` threadState + totals.queued, `ui/static/app.js` renderReviews summary and renderReviewThread: fixed.
+- Drawer Reviews tab `ui/change-route.mjs` buildReviewsTab (carries `pending`, all-queued reason) and `ui/lib/drawer-model.mjs` reviewEntries: fixed.
+- Snapshot report line `status/snapshot.mjs` (reviews): fixed (counts not read yet apart).
+- `roadmapState` (`status/snapshot.mjs`): unaffected, filters `r.ok` and words nothing.
+- `ui/lib/actors-model.mjs` reviewCountsByAuthor: unaffected, skips `!ok` and words nothing.
+
+Mutation: threadState no longer maps pending to `queued` -> 4 tests failed (model, timeline, footer render, Reviews view); reverted.

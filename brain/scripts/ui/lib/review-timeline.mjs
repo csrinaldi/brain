@@ -61,6 +61,8 @@ function shapeRound(v) {
 /** A thread's rounds + verdict state, from its `reviewRows` row (or its absence). */
 function threadState(reviewRow) {
   if (!reviewRow) return { rounds: [], latest: null, noRound: true };
+  // Queued, not failed (#1312 D150): the thread has not been fetched yet. Its own state, so no reader words it as a failure.
+  if (reviewRow.ok === false && reviewRow.pending === true) return { rounds: [], latest: null, noRound: false, queued: { reason: reviewRow.reason } };
   if (reviewRow.ok === false) return { rounds: [], latest: null, noRound: false, unreadable: { reason: reviewRow.reason } };
   const rounds = reviewRow.verdicts.map(shapeRound);
   return { rounds, latest: rounds.at(-1) ?? null, noRound: rounds.length === 0 };
@@ -156,6 +158,8 @@ export function buildReviewTimeline(reviewsSection, prsSection, { issue } = {}) 
     threads: threads.length,
     queue: queue.length,
     unreadable: threads.filter((t) => t.unreadable).length,
+    // Queued threads are counted apart: not read yet is not unreadable (#1312 D150).
+    queued: threads.filter((t) => t.queued).length,
     // Counted separately from the rest of the waiting queue (#1009 cold
     // review round 2) — a STOP thread is a human-escalation state, not just
     // another item waiting on a machine verdict.

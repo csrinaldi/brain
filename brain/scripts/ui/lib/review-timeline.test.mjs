@@ -144,7 +144,7 @@ test('#998 R998-5: totals count threads, the queue, and unreadable threads', () 
     reviews([{ pr: 1, ok: true, verdicts: [verdict(1, 'REVISE', { pr: 1 })], latest: null }, { pr: 2, ok: false, reason: 'x' }]),
     prs([{ number: 1, title: 'a', headBranch: 'x', issue: 1 }, { number: 2, title: 'b', headBranch: 'y', issue: 2 }]),
   );
-  assert.deepEqual(t.value.totals, { threads: 2, queue: 1, unreadable: 1, stops: 0 });
+  assert.deepEqual(t.value.totals, { threads: 2, queue: 1, unreadable: 1, queued: 0, stops: 0 });
 });
 
 test('#1009 cold review round 2 finding: a STOP-latest thread is waiting, head of the queue (before REVISE and no-round entries), saying the human escalation', () => {
@@ -250,4 +250,20 @@ test('#1312 D149: a round carries the full head_sha next to headSha7, and the qu
   assert.deepEqual(Object.keys(t.value.queue[0]).sort(), ['escalate', 'headSha7', 'issue', 'pr', 'rounds', 'title', 'verdict', 'wait']);
   const noHead = buildReviewTimeline(reviews([{ pr: 1, ok: true, verdicts: [verdict(1, 'REVISE', { head_sha: undefined })] }]), prs([{ number: 1, issue: 5, title: 't', headBranch: 'b' }]));
   assert.equal(noHead.value.threads[0].latest.headSha, null);
+});
+
+test('#1312 D150: a queued thread is neither unreadable nor waiting — it is queued, with its reason', () => {
+  const t = buildReviewTimeline(
+    reviews([{ pr: 1, ok: false, pending: true, reason: 'queued' }, { pr: 2, ok: false, reason: 'HTTP 502' }]),
+    prs([{ number: 1, issue: 5, title: 'a', headBranch: 'b' }, { number: 2, issue: 6, title: 'c', headBranch: 'd' }]),
+  );
+  const [q, u] = t.value.threads;
+  assert.deepEqual(q.queued, { reason: 'queued' });
+  assert.equal(q.unreadable, undefined);
+  assert.equal(q.noRound, false);
+  assert.deepEqual(u.unreadable, { reason: 'HTTP 502' });
+  assert.equal(u.queued, undefined);
+  assert.equal(t.value.totals.unreadable, 1);
+  assert.equal(t.value.totals.queued, 1);
+  assert.deepEqual(t.value.queue, [], 'a thread not read is not "waiting on a verdict"');
 });

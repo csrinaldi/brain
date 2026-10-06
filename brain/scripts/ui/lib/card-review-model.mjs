@@ -24,8 +24,8 @@ function footerOf(thread, others, remoteChanges) {
   const round = thread.latest ?? null;
   const verdict = round ? { word: round.verdict, rev: round.rev, unknown: round.unknownVerdict } : null;
   const head = headOf(round, thread, remoteChanges);
-  const note = thread.unreadable ? 'review thread unreadable' : round ? null : 'no verdict posted';
-  const reason = thread.unreadable?.reason ?? null;
+  const note = thread.queued ? 'verdict not read yet' : thread.unreadable ? 'review thread unreadable' : round ? null : 'no verdict posted';
+  const reason = thread.queued?.reason ?? thread.unreadable?.reason ?? null;
   const more = others.length > 0 ? plural(others.length) : null;
 
   const parts = [`PR #${thread.pr}`];

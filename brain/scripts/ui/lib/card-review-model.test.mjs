@@ -118,3 +118,11 @@ test('#1312 R1312-7 / D140: the verdict comes from buildReviewTimeline — this 
   assert.match(src, /buildReviewTimeline\(/);
   assert.doesNotMatch(src, /\.verdicts\b|\.at\(-1\)|head_sha|parseVerdict|reviews\??\.value/, 'a second derivation of the latest verdict');
 });
+
+test('#1312 R1312-6 / D150: a thread never fetched (queued) reads "verdict not read yet", never unreadable, reason in the title', () => {
+  const f = footer({ ...base(), reviews: ok([{ pr: 885, ok: false, pending: true, reason: "this PR's reviews have not been fetched yet (queued)" }]) });
+  assert.equal(f.text, 'PR #885 · verdict not read yet');
+  assert.doesNotMatch(f.text, /unreadable/);
+  assert.match(f.title, /not been fetched yet \(queued\)/);
+  assert.equal(f.verdict, null);
+});

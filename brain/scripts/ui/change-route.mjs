@@ -273,13 +273,15 @@ function buildReviewsTab({ snapshot, project, issue }) {
   const unreadable = [];
   for (const row of snapshot.reviews.value) {
     if (!prNumbers.has(row.pr)) continue;
-    if (!row.ok) { unreadable.push({ pr: row.pr, ok: false, reason: row.reason, source: { url: buildPrUrl(project, row.pr) } }); continue; }
+    // A queued thread keeps `pending` so the drawer words it "not read yet", never "unreadable" (#1312 D150).
+    if (!row.ok) { unreadable.push({ pr: row.pr, ok: false, ...(row.pending === true ? { pending: true } : {}), reason: row.reason, source: { url: buildPrUrl(project, row.pr) } }); continue; }
     for (const verdict of row.verdicts) {
       rounds.push({ ...verdict, source: { url: verdict.commentUrl ?? buildPrUrl(project, row.pr) } });
     }
   }
   if (rounds.length === 0 && unreadable.length > 0) {
-    return { ok: false, reason: `every review thread of this issue is unreadable: ${unreadable.map((u) => `#${u.pr} (${u.reason})`).join(', ')}`, unreadable, sourceNote: REVIEWS_SOURCE_NOTE };
+    const allQueued = unreadable.every((u) => u.pending === true);
+    return { ok: false, reason: `${allQueued ? 'every review thread of this issue is not read yet' : 'every review thread of this issue is unreadable'}: ${unreadable.map((u) => `#${u.pr} (${u.reason})`).join(', ')}`, unreadable, sourceNote: REVIEWS_SOURCE_NOTE };
   }
   return { ok: true, value: rounds, unreadable, sourceNote: REVIEWS_SOURCE_NOTE };
 }
