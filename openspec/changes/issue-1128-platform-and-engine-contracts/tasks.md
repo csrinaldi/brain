@@ -112,9 +112,9 @@ numbered group, in slice order (ruling 1). Paths are relative to `brain/scripts/
 - [x] 4.6 `brain-drafts/README.md` with the promotion order and the `decision-gate` coupling.
 - [x] 4.7 `planAmendment()` on the three amendment drafts against `main` `4b847561`: all `ok:true`
       (results in the README).
-- [ ] 4.8 Before the PR, re-run 4.7 against `origin/main`, and renumber if an ADR gained an amendment
+- [x] 4.8 Before the PR, re-run 4.7 against `origin/main`, and renumber if an ADR gained an amendment
       meanwhile.
-- [ ] 4.9 Confirm the contract draft's "What this does NOT close" names #1367 for the two re-owned entries.
+- [x] 4.9 Confirm the contract draft's "What this does NOT close" names #1367 for the two re-owned entries.
 
 ## T5 Gates
 - [ ] 5.1 `npm test` green.

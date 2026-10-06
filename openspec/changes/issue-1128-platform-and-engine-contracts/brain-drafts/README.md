@@ -52,3 +52,7 @@ number. Renumber the draft and its in-place `Amendment N` brackets.
 
 The ADR-0038 number is **2**. `main` carries Amendment 1 only. The same draft numbered 3 is refused:
 "the target stands at Amendment 1 — expected 2". Re-run before promoting (tasks 4.8).
+
+Re-run at apply time (tasks 4.8), `origin/main` at `b3c5c3d2`: all three drafts `ok: true`, numbering unchanged
+(ADR-0038 stands at Amendment 1, ADR-0024 at 5, ADR-0033 at 3). `agent-platform-contract.md` now names #1367 as
+the owner of the two re-owned guard entries, and documents the descriptor's optional `rank`.
