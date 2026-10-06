@@ -46,7 +46,7 @@ skipped.
    **working-memory writer**, not a producer, and its writes are non-durable by definition:
    `share` never exports them.
 3. **The backend owns no artifact the durable layer needs.** `session:start`, `brain:memory:share`,
-   `brain:memory:pull` and `cli.mjs import` complete, and hydrate the active backend from
+   `brain:memory:pull` and `cli.mjs hydrate` (**[Amended by Amendment 3 (#1115): was `cli.mjs import`, now its deprecated alias]**) complete, and hydrate the active backend from
    `.memory/records/` alone, when every backend-private file is absent. What a backend needs
    for its own transport — a manifest, a chunk directory, a symlink, a merge driver — lives
    under the adapter's control, is created by the adapter's `setup`, and is never load-bearing
@@ -62,7 +62,7 @@ never sees a backend-specific field.
 |------|-----------|-------------------|----------|
 | `setup` | `({ root }) -> void` | Prepares whatever the backend privately needs (engram: the `.engram → .memory` symlink, the merge driver — both retiring). Idempotent, non-clobbering. Never throws on an already-set-up tree. | **yes** |
 | `share` | `({ root }) -> { indexCount, duplicates, ... }` | Materializes what the durable layer does not yet hold and rebuilds `index.jsonl`; returns the accounting (#574) so the caller can say it. Under record-first (#864 task 3.2, `engram` since #874) this commits what is already true: it exports nothing from the backend. | **yes** |
-| `hydrate` | `({ root, recordId? }) -> { written, skipped, deferred?, contended? }` | Projects `.memory/records/` into the backend, idempotently (rule 1). With `recordId`, projects that one record — a producer's fast path after its own write. `deferred: true` when hydration could not run (store unreadable, guard contended) with the reason on stderr — never a throw, never a zero that reads as "nothing to do". The single-record form, `hydrate({recordId})`, exists on `engram` as of #874 (3.2); the bulk form is still spelled `pull` (with `git pull`) and `cli.mjs import` (without) — the contract names the operation, those verbs keep their names until #862 settles the lane. | **yes** |
+| `hydrate` | `({ root, recordId? }) -> { written, skipped, deferred?, contended? }` | Projects `.memory/records/` into the backend, idempotently (rule 1). With `recordId`, projects that one record — a producer's fast path after its own write. `deferred: true` when hydration could not run (store unreadable, guard contended) with the reason on stderr — never a throw, never a zero that reads as "nothing to do". The single-record form, `hydrate({recordId})`, exists on `engram` as of #874 (3.2); the bulk form, `hydrate({root})`, exists on both backends as of #1115 and is dispatched as `cli.mjs hydrate` (engram: `importMemory` under the #820 guard, deferring when the binary is absent; plainfiles: `rebuildIndex`); `brain:memory:pull` is `git pull` followed by the same projection. **[Amended by Amendment 3 (#1115): this sentence said the bulk form "is still spelled `pull` (with `git pull`) and `cli.mjs import` (without)". `cli.mjs import` is now a deprecated alias of `cli.mjs hydrate` for one release.]** | **yes** |
 | `save` | `(title, content, { type, project, issue?, supersedes? }) -> { id, file, written }` | The producer path: a record on disk, then `hydrate({recordId})`. **Required on every backend** — a backend without `save` has no record-first capture (D2). **Today**: `engram.save()` mirrors `plainfiles.save()` (provenance #738, `--supersedes` #805) and calls `hydrate({recordId})` as its terminal step, deferring rather than throwing when the backend cannot be reached (#874, 3.2); `brain:memory:save`'s `package.json` pin is removed. `search` stays `unsupportedOp` (R14 scope, unchanged). | **yes** |
 | `search` | `(query, opts) -> [{ id, title, ts, ... }]` | Over the durable layer or the backend's index. | no |
 | `index` | `({ root }) -> void` | Re-projects `brain/` doctrine into the backend. `plainfiles`: `unsupportedOp` by design (obs #578) — it projects doctrine, not captures. | no |
@@ -200,3 +200,52 @@ change. The `save` column (Amendment 1) is untouched here too.
 - Completes with the `engram` binary ABSENT (rule 3's own "may be absent"
   clause, now also true of rule 2's producer path): there is nothing left in
   `share()` that touches the binary at all.
+
+## Amendment 3 — bulk `hydrate` exists on both backends, and `import` is its deprecated alias (issue #1115)
+
+**Signed**: 06/10/2026 — Cristian Rinaldi
+
+### What changed
+
+- **The bulk form of the required `hydrate` verb is implemented.** With no `recordId`,
+  `engram.hydrate({root})` runs `importMemory` under the #820 hydration guard. It returns
+  `{written, skipped, deferred?, contended?}` and defers, never throws, when the binary is absent,
+  the guard is contended, engram's state is unreadable, or the import fails.
+  `plainfiles.hydrate({root})` is `rebuildIndex`, which matches the Conformance row that already
+  said so. Both are in `brain/scripts/axes/memory/adapters/`.
+- **A read-only form, `hydrate({root, verify: true})`.** An adapter given `verify: true` MUST NOT
+  write the tracked tree. `plainfiles` then does not rebuild `.memory/index.jsonl`: it compares it
+  with what the rebuild would write and returns `verified: true` and `stale`. `engram` ignores the
+  flag: its import projects into the engram store, which is not a write to the tracked tree.
+  `session:start` is the caller that passes it, because it is read-only (`harness-contract.md`).
+  Callers that already write (`post-merge`, `brain:memory:pull`, `day:start`) call the default form.
+- **One op name for every caller.** `cli.mjs hydrate` is the op `session:start`, `day:start` and
+  the `post-merge` hook call. None of them names a backend op any more. `cli.mjs import` remains
+  for one release as an alias. It prints a deprecation notice naming `hydrate` and then
+  dispatches `hydrate`. It is not in `FALLBACK_OPS`, which stays `["pull"]`.
+- **`verified` and `stale` are the only fields beyond the shared accounting**, and only the
+  `verify` form returns them.
+- **A deferred bulk hydration has its own exit status, 6** (`EXIT_DEFERRED`,
+  `brain/scripts/memory/lib/backend-resolve.mjs`), so a caller can never read a deferral as
+  "done". That is this contract's failure discipline, applied at the process boundary. The
+  callers that load context (`post-merge`, `session:start`) treat 6 as non-fatal.
+
+### Why
+
+#1115 and #1189: on `plainfiles`, `session:start`, `day:start` and every `git pull` called
+`cli.mjs import`, an op that only engram implemented. The output named the wrong backend
+(`backend 'plainfiles' does not implement op 'import'`), and no memory context reached the agent.
+The contract already required `hydrate`. Only its spelling was engram's.
+
+### What this does NOT change
+
+The three rules, the other required verbs (`setup`, `share`, `save`), the single-record form of
+`hydrate` (which still throws on an unknown `recordId`), and the Conformance table.
+`hydrate` does not return a context payload. That would widen this contract and is a follow-up.
+
+### What the code does not do yet, said plainly
+
+- **The alias is not removed.** It goes in the release after the one that ships `hydrate`.
+- **On `plainfiles`, `session:start` reports a stale index and does not repair it.** The repair
+  is the rebuild in `post-merge` or `brain:memory:share`. A consumer that never pulls through the
+  hook keeps seeing the stale line until it runs one.
