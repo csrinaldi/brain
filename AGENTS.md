@@ -133,7 +133,7 @@ The agent may execute without asking for permission:
 
 - Read any file in the repo (`brain/`, `openspec/`, code, scripts)
 - Create/modify files in `openspec/changes/**` (in-flight SDD artifacts)
-- Capture memory as records: `npm run brain:memory:save` writes a record under `.memory/records/` first (`memory-backend-contract.md` rule 2); the active backend picks it up on the next hydration (`session:start`, `cli.mjs import`) until #874 adds direct hydration. The backend's own MCP write (`mem_save`) is working memory for the change in flight, non-durable by definition: nothing exports it.
+- Capture memory as records: `npm run brain:memory:save` writes a record under `.memory/records/` first (`memory-backend-contract.md` rule 2); the active backend picks it up on the next hydration (`session:start`, `cli.mjs hydrate` **[amended, #1115: was `cli.mjs import`, now its deprecated alias]**) until #874 adds direct hydration. The backend's own MCP write (`mem_save`) is working memory for the change in flight, non-durable by definition: nothing exports it.
 - Write to `scratch/{agent-id}.md` within an active change
 - Run `npm run brain:repo:check`, `npm run backend:build`, `npm run brain:change:verify`
 - Create issues in GitLab (`/gitlab-issue`)
@@ -292,6 +292,16 @@ always held. Its wording forced a human ruling on every migration PR anyway.
   the PR, not who made the edit, and at `lite` it only reports. `brain:config -- set` cannot tell
   whether an agent invoked it.
 - **Nothing stops an agent from writing the user layer.** That row is doctrine only.
+
+## Hydration verb wording (issue #1115)
+
+**Signed**: 06/10/2026 — Cristian Rinaldi
+
+### What changed
+
+Tier 1's memory-capture row named `cli.mjs import`, engram's op, as the next hydration. The op is
+now `hydrate`, implemented by every backend (`memory-backend-contract.md` Amendment 3). No
+authority changes: every tier, and what an agent may do, is unchanged.
 
 
 ---
