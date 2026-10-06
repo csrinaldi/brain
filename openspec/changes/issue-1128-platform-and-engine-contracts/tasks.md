@@ -117,20 +117,20 @@ numbered group, in slice order (ruling 1). Paths are relative to `brain/scripts/
 - [x] 4.9 Confirm the contract draft's "What this does NOT close" names #1367 for the two re-owned entries.
 
 ## T5 Gates
-- [ ] 5.1 `npm test` green.
-- [ ] 5.2 `npm run brain:repo:check` green.
-- [ ] 5.3 `git diff --name-only origin/main -- brain/ | rg '\.md$'` is empty (REQ-1128-10).
-- [ ] 5.4 Measure the gated diff: `git diff --numstat origin/main...HEAD` minus the ignoreList. Confirm
+- [x] 5.1 `npm test` green.
+- [x] 5.2 `npm run brain:repo:check` green.
+- [x] 5.3 `git diff --name-only origin/main -- brain/ | rg '\.md$'` is empty (REQ-1128-10).
+- [x] 5.4 Measure the gated diff: `git diff --numstat origin/main...HEAD` minus the ignoreList. Confirm
       it is ≤ 1000, and that the two readiness moves show as renames.
 
 ## T6 E2E (evidence to `openspec/changes/issue-1128-platform-and-engine-contracts/evidence/`)
-- [ ] 6.1 Scratch consumer from `npm pack` (scratchpad, `BRAIN_HOME` sandboxed):
+- [x] 6.1 Scratch consumer from `npm pack` (scratchpad, `BRAIN_HOME` sandboxed):
       `AGENT_PLATFORM=claude node brain/scripts/harness/cli.mjs init` exits 0 and writes
       `.claude/settings.json` (#682 holds with the top-level-await registry).
-- [ ] 6.2 Same consumer, three `sdd.map['cold-review']` routes (claude, codex, gemini):
+- [x] 6.2 Same consumer, three `sdd.map['cold-review']` routes (claude, codex, gemini):
       `harness/readiness.mjs --check` prints the generic line, codex's diagnostic, and gemini's
       diagnostic. `bootstrap.sh`'s readiness section shows the same.
-- [ ] 6.3 `AGENT_PLATFORM=antigravity` with a malformed `.gemini/settings.json`: `harness/cli.mjs init`
+- [x] 6.3 `AGENT_PLATFORM=antigravity` with a malformed `.gemini/settings.json`: `harness/cli.mjs init`
       exits 1, and the file is unchanged.
 
 ## T7 Close-out
