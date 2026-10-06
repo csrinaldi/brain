@@ -5,8 +5,8 @@
 // returns a bounded transport result. The review layer owns snapshots, parser,
 // challenger, and publication.
 
-import { existsSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
-import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { homedir } from 'node:os';
 
 import { assertRoutableStage } from '../../../lib/stage-engine.mjs';
@@ -14,8 +14,12 @@ import { credentialEnvNames, withoutCredentials } from '../../../lib/credential-
 import { withForgeConfigDir } from '../../../harness/producer-forge-reach.mjs';
 import { DEFAULT_STAGE_TIMEOUT_MS, formatDuration } from '../../../lib/duration.mjs';
 import { defaultRun } from '../../lib/agent-runtime.mjs';
+import { engineTail, secretValues, validateFinalMessageOutput } from '../../lib/stage-output.mjs';
+import { DESCRIPTOR } from './gemini.descriptor.mjs';
 
-export const GEMINI_MODEL = 'gemini-2.5-pro';
+// The default model is declared ONCE, in the descriptor (#1129); this export keeps the importers valid.
+export const GEMINI_MODEL = DESCRIPTOR.stage.model.id;
+
 
 export function hasAgyAuth(_env = process.env, _existsSync = existsSync) {
   const home = _env?.HOME ?? homedir();
@@ -49,59 +53,6 @@ export function deduplicateFindingsBlocks(text) {
   return text;
 }
 
-function tail(result, secrets, max = 300) {
-  const text = String(result?.stderr ?? '').trim() || String(result?.stdout ?? '').trim();
-  if (!text) return '';
-  let safe = text;
-  for (const secret of secrets) {
-    if (typeof secret === 'string' && secret.length > 0) safe = safe.split(secret).join('[redacted]');
-  }
-  const last = safe.split('\n').filter(Boolean).slice(-2).join(' / ');
-  return ` — the engine last said: ${last.length > max ? `${last.slice(0, max)}…` : last}`;
-}
-
-export function canonicalPath(path) {
-  const unresolved = [];
-  let current = resolve(path);
-  while (!existsSync(current)) {
-    const parent = dirname(current);
-    if (parent === current) break;
-    unresolved.unshift(relative(parent, current));
-    current = parent;
-  }
-  const base = existsSync(current) ? realpathSync(current) : current;
-  return resolve(base, ...unresolved);
-}
-
-export function isWithin(parent, child) {
-  const rel = relative(parent, child);
-  return rel === '' || (!rel.startsWith(`..${sep}`) && rel !== '..' && !isAbsolute(rel));
-}
-
-function validateOutput(output, cwd) {
-  if (output?.mode !== 'final-message' || typeof output.tempPath !== 'string' || typeof output.artifactPath !== 'string') {
-    return 'the Gemini transport needs a host-owned final-message output descriptor';
-  }
-  if (!isAbsolute(output.tempPath) || !isAbsolute(output.artifactPath)) {
-    return 'the host-owned final-message paths must be absolute';
-  }
-  let candidate;
-  let tempPath;
-  let artifactPath;
-  try {
-    candidate = canonicalPath(cwd);
-    tempPath = canonicalPath(output.tempPath);
-    artifactPath = canonicalPath(output.artifactPath);
-  } catch (err) {
-    return `the host-owned final-message path cannot be resolved safely — ${err?.message ?? String(err)}`;
-  }
-  if (isWithin(candidate, tempPath) || isWithin(candidate, artifactPath)) {
-    return 'the host-owned final-message output must be outside the candidate';
-  }
-  if (tempPath === artifactPath) return 'the Gemini temporary output and final artifact paths must differ';
-  return null;
-}
-
 function defaultCommandExists(bin, env = process.env) {
   return env?.PATH?.split(':').some((dir) => existsSync(join(dir, bin))) ?? false;
 }
@@ -131,7 +82,7 @@ export async function runStage({
   if (typeof prompt !== 'string' || prompt.trim() === '') {
     return { ok: false, reason: `no prompt for stage "${stage}" — an engine with nothing to do is not a run` };
   }
-  const outputFailure = validateOutput(output, cwd);
+  const outputFailure = validateFinalMessageOutput(output, cwd, { engine: DESCRIPTOR.name });
   if (outputFailure) return { ok: false, reason: outputFailure };
 
   const hasAgy = _commandExists('agy', _env) && _hasAgyAuth(_env);
@@ -165,11 +116,7 @@ export async function runStage({
     : baseScrub;
   const scrubbed = withoutCredentials(_env, scrubNames);
   const env = forgeConfigDir ? withForgeConfigDir(scrubbed, forgeConfigDir) : scrubbed;
-  const secrets = [
-    ...baseScrub.map((name) => _env?.[name]),
-    _env?.GEMINI_API_KEY,
-    _env?.GOOGLE_APPLICATION_CREDENTIALS,
-  ].filter(Boolean);
+  const secrets = secretValues(_env, [...baseScrub, 'GEMINI_API_KEY', 'GOOGLE_APPLICATION_CREDENTIALS']);
 
   const startedAt = _now();
   const elapsed = () => _now() - startedAt;
@@ -193,14 +140,14 @@ export async function runStage({
     return {
       ok: false,
       elapsedMs: elapsed(),
-      reason: (timedOut ? `the Gemini engine did not finish within ${formatDuration(timeoutMs)}` : `the Gemini engine failed to run — ${result.error.message}`) + tail(result, secrets),
+      reason: (timedOut ? `the Gemini engine did not finish within ${formatDuration(timeoutMs)}` : `the Gemini engine failed to run — ${result.error.message}`) + engineTail(result, secrets),
     };
   }
   if (result?.status !== 0) {
     return {
       ok: false,
       elapsedMs: elapsed(),
-      reason: `the Gemini engine exited with status ${result?.status ?? 'unknown'}` + tail(result, secrets),
+      reason: `the Gemini engine exited with status ${result?.status ?? 'unknown'}` + engineTail(result, secrets),
     };
   }
 
@@ -224,7 +171,7 @@ export async function runStage({
   }
 
   if (!existsSync(output.tempPath)) {
-    return { ok: false, elapsedMs: elapsed(), reason: 'the Gemini engine exited cleanly but wrote no final message' + tail(result, secrets) };
+    return { ok: false, elapsedMs: elapsed(), reason: 'the Gemini engine exited cleanly but wrote no final message' + engineTail(result, secrets) };
   }
 
   try {

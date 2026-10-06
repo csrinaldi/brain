@@ -14,7 +14,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { removeTempTree } from '../../__fixtures__/tmp-tree.mjs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
@@ -238,7 +238,7 @@ test('the engine is handed the RESOLVED engine and model, and the stage name', a
       deps: { forgeProbe: LOGGED_OUT,
         runStage: async (args) => {
           seen = args;
-          writeFileSync(join(root, artifactPathFor(PR)), `\`\`\`${ARTIFACT_TAG}\n[]\n\`\`\`\n`);
+          writeFileSync(args.output?.tempPath ?? join(root, artifactPathFor(PR)), `\`\`\`${ARTIFACT_TAG}\n[]\n\`\`\`\n`);
           return { ok: true };
         },
       },
@@ -252,12 +252,12 @@ test('the engine is handed the RESOLVED engine and model, and the stage name', a
   // exact literals left it GREEN. An oracle whose fixture equals the hardcode it
   // is meant to catch is not an oracle. Driving two distinct routings kills the
   // hardcode whichever value it picks.
-  const a = await seamSees({ sdd: { map: { [COLD_REVIEW_STAGE]: { engine: 'antigravity', model: 'zz-9' } } } });
-  const b = await seamSees({ sdd: { map: { [COLD_REVIEW_STAGE]: { engine: 'plain', model: null } } } });
+  const a = await seamSees({ sdd: { map: { [COLD_REVIEW_STAGE]: { engine: 'claude', model: 'zz-9' } } } });
+  const b = await seamSees({ sdd: { map: { [COLD_REVIEW_STAGE]: { engine: 'gemini', model: null } } } });
 
-  assert.equal(a.engine, 'antigravity', 'the resolved engine must reach the seam — B.6 dispatches on it');
+  assert.equal(a.engine, 'claude', 'the resolved engine must reach the seam — B.6 dispatches on it');
   assert.equal(a.model, 'zz-9', 'the model rides through opaquely — brain never interprets it (#323)');
-  assert.equal(b.engine, 'plain');
+  assert.equal(b.engine, 'gemini');
   assert.equal(b.model, null, 'an absent model stays absent rather than acquiring a default');
 
   assert.equal(a.stage, COLD_REVIEW_STAGE);
@@ -990,3 +990,78 @@ test('Gemini receives a host-owned final-message descriptor and materializes the
   assert.equal(existsSync(seen.output.artifactPath), true, 'the host-owned final artifact is available to the reader');
 });
 
+
+// ── #1129: the output mode is the engine's DECLARATION, and an engine that cannot execute is refused first ──
+
+const declare = (outputMode) => ({ name: 'x', capabilities: { orchestrate: false, executeStage: true }, stage: { outputMode, model: { policy: 'opaque' } }, readiness: false });
+const fakeRegistry = (table) => ({ descriptor: (n) => table[n] ?? null });
+const routedTo = (engine, model = null) => ({ sdd: { map: { [COLD_REVIEW_STAGE]: { engine, model } } } });
+
+async function sees(config, registry, t) {
+  const root = makeRepo(t);
+  let seen = null;
+  const result = await runColdReviewStage({
+    config, prNumber: PR, root, worktreePath: makeWorktree(t),
+    deps: {
+      forgeProbe: LOGGED_OUT, registry,
+      runStage: async (args) => {
+        seen = args;
+        writeFileSync(args.output?.tempPath ?? join(root, artifactPathFor(PR)), `\`\`\`${ARTIFACT_TAG}\n[]\n\`\`\`\n`);
+        return { ok: true };
+      },
+    },
+  });
+  return { seen, result, root };
+}
+
+test('#1129: an engine declaring final-message gets the host-owned descriptor, whatever its name', async (t) => {
+  const { seen, result } = await sees(routedTo('alpha'), fakeRegistry({ alpha: declare('final-message') }), t);
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(seen.output.mode, 'final-message');
+  assert.match(seen.output.tempPath, /\.alpha-final-/);
+  assert.ok(seen.prompt.includes('Return exactly the artifact bytes as your final message'), 'the prompt carries the declared mode');
+});
+
+test('#1129: the declaration wins over the name — claude declared final-message gets it, codex declared file does not', async (t) => {
+  const a = await sees(routedTo('claude'), fakeRegistry({ claude: declare('final-message') }), t);
+  assert.equal(a.seen.output?.mode, 'final-message');
+  const b = await sees(routedTo('codex', 'gpt-5.5'), fakeRegistry({ codex: declare('file') }), t);
+  assert.equal(b.seen.output, undefined);
+  assert.ok(!b.seen.prompt.includes('Return exactly the artifact bytes as your final message'));
+});
+
+test('#1129: an engine that cannot execute a stage is refused BEFORE any mutation, previous artifact intact', async (t) => {
+  for (const engine of ['plain', 'no-such-engine-at-all']) {
+    const root = makeRepo(t);
+    const previous = join(root, artifactPathFor(PR));
+    mkdirSync(dirname(previous), { recursive: true });
+    writeFileSync(previous, 'previous round\n');
+    let called = 0;
+    const result = await runColdReviewStage({
+      config: routedTo(engine), prNumber: PR, root, worktreePath: makeWorktree(t),
+      deps: { forgeProbe: LOGGED_OUT, runStage: async () => { called += 1; return { ok: true }; } },
+    });
+    assert.equal(result.routed, true);
+    assert.equal(result.ok, false);
+    assert.match(result.reason, new RegExp(engine));
+    assert.match(result.reason, /Refusing rather than falling back/);
+    assert.equal(called, 0, 'the seam is never reached');
+    assert.equal(readFileSync(previous, 'utf8'), 'previous round\n', 'the previous artifact is byte-identical');
+  }
+  const plain = await runColdReviewStage({ config: routedTo('plain'), prNumber: PR, root: makeRepo(t), worktreePath: makeWorktree(t), deps: { forgeProbe: LOGGED_OUT, runStage: async () => ({ ok: true }) } });
+  assert.match(plain.reason, /does not declare executeStage/);
+});
+
+test('#1129: a gemini rename failure names gemini, not Codex', async (t) => {
+  const { result } = await (async () => {
+    const root = makeRepo(t);
+    const r = await runColdReviewStage({
+      config: GEMINI_ROUTED, prNumber: PR, root, worktreePath: makeWorktree(t),
+      deps: { forgeProbe: LOGGED_OUT, runStage: async () => ({ ok: true }) }, // wrote no temp file
+    });
+    return { result: r };
+  })();
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /^the gemini final message could not be atomically materialized/);
+  assert.doesNotMatch(result.reason, /Codex/);
+});

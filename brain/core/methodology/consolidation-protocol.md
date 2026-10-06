@@ -187,7 +187,7 @@ The human is the final authority over conflicts of type `architecture`, `decisio
 
 `npm run brain:day:start` closes the cycle at the start of the workday:
 
-1. **hydrate** (`brain:memory:pull` — `git pull`, then `cli.mjs import`) — `.memory/records/` → the active backend, idempotent by record id (`memory-backend-contract.md` rule 1)
+1. **hydrate** (`cli.mjs hydrate`, after `day:start`'s own `git pull`; `brain:memory:pull` is `git pull` followed by the same projection **[amended, #1115: was "`git pull`, then `cli.mjs import`"; `import` is now a deprecated alias of `hydrate`]**) — `.memory/records/` → the active backend, idempotent by record id (`memory-backend-contract.md` rule 1)
 2. **index** (`brain:memory:index`) — re-projects `brain/` doctrine into the active backend, where it supports it
 3. **materialize** (`brain:memory:share`) — what the durable layer does not yet hold → `.memory/records/`, and `index.jsonl` rebuilt
 
@@ -198,3 +198,18 @@ The **pre-push hook** (`brain/scripts/hooks/pre-push`) checkpoints feature worki
 On the memory lane (#862, ADR-0034), a captured record reaches `main` on its own pull request — `memory/<host>-<date>`, built by a collector that never checks out a worktree, merged by tier (`lite`: auto on green; `standard`/`regulated`: a human approval) — never the feature's. The team absorbs it with `npm run brain:memory:pull` or on the next `brain:day:start`, exactly as before; only the PR the record travels on changes. Measured cost of the pre-lane flow this replaces: p50 21.6 h, p90 399.7 h learn→main (#864 baseline, n=350); ratified targets on the lane: p50 ≤ 1 h, p90 ≤ 24 h at `lite` (ADR-0034 L9). The five surfaces that used to make a record ride the feature branch retired in 3.1d (issue #890, ADR-0034 Amendment 3): the caveat above now describes the lane as the only transport, not a pending transition.
 
 The **durable** layer (decisions, anti-patterns) is promoted to `brain/` in Markdown, which is the source of truth; engram is the shared **live** layer. See the consuming project's two-layer memory ADR.
+
+## §5 hydrate step names the backend-owned verb (issue #1115)
+
+**Signed**: 06/10/2026 — Cristian Rinaldi
+
+### What changed
+
+§5 described the hydrate step as `brain:memory:pull` followed by `cli.mjs import`, which is
+engram's op. `day:start` step 4a now calls `cli.mjs hydrate`, which every backend implements
+(`memory-backend-contract.md` Amendment 3). It no longer runs `engram sync --export`, so nothing
+copies the backend back into `.memory/`.
+
+### What this does NOT change
+
+Steps 2 (`index`) and 3 (`share`), and the lane rule below them.

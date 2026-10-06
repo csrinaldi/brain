@@ -20,6 +20,7 @@ import en from '../i18n/en.mjs';
 import { resolveAxisSelector } from './axis-selector.mjs';
 import { codeownersDrift } from './codeowners-drift.mjs';
 import { declaredDefaultRole } from '../axes/sdd-engine/role-port.mjs';
+import { RUNTIME_REGISTRY } from '../axes/lib/runtime-registry.mjs';
 
 /**
  * Closed memberships. They live HERE (re-exported by `harness/platform.mjs`, which
@@ -29,7 +30,8 @@ import { declaredDefaultRole } from '../axes/sdd-engine/role-port.mjs';
  * alias is a single key and needs no membership test.
  */
 export const SDD_ENGINES = Object.freeze(['gentle-ai', 'plain']);
-export const AGENT_PLATFORMS = Object.freeze(['claude', 'antigravity', 'plain']);
+/** The platforms `AGENT_PLATFORM` may name: DERIVED from the descriptors (#1128), ordered by their `rank`. */
+export const AGENT_PLATFORMS = RUNTIME_REGISTRY.orchestrators;
 /** The memory backends and VCS providers brain ships an adapter for (re-exported by `memory/lib/backend-resolve.mjs`). */
 export const MEMORY_BACKENDS = Object.freeze(['engram', 'plainfiles']);
 export const VCS_PROVIDERS = Object.freeze(['github', 'gitlab']);
@@ -37,21 +39,14 @@ export const VCS_PROVIDERS = Object.freeze(['github', 'gitlab']);
 export const AXES = Object.freeze(['vcs', 'memory', 'platform', 'sdd']);
 
 /**
- * Platform-provider capability facts, exactly ADR-0038 section 5's table:
+ * Platform-provider capability facts, ADR-0038 section 5:
  *   orchestrate   — may be `platform.default` (the one orchestrator per session);
  *   executeStage  — may be an `sdd.roles.<stage>.engine` (runs a stage prompt).
  *
- * THIS TABLE IS A SEAM. Each fact belongs to the provider's own adapter, and
- * #1128/#1129 move it there. Until then it is declared once, here, so the
- * validator has something to read and nothing else retypes it.
+ * Each fact is declared by the provider's own `<name>.descriptor.mjs` (#1128, #1129)
+ * and DERIVED here by the runtime registry. Nothing in this file retypes them.
  */
-export const PLATFORM_CAPABILITIES = Object.freeze({
-  claude: Object.freeze({ orchestrate: true, executeStage: true }),
-  antigravity: Object.freeze({ orchestrate: true, executeStage: false }), // until a stage-runtime adapter exists (#1128, #1129)
-  plain: Object.freeze({ orchestrate: true, executeStage: false }), // the human orchestrator
-  codex: Object.freeze({ orchestrate: false, executeStage: true }),
-  gemini: Object.freeze({ orchestrate: false, executeStage: true }),
-});
+export const PLATFORM_CAPABILITIES = RUNTIME_REGISTRY.capabilities;
 
 const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 const has = (o, k) => isObj(o) && Object.prototype.hasOwnProperty.call(o, k);
@@ -135,7 +130,7 @@ function routedStages(cfg) {
  * @param {{defaultRole?: (provider: string, stage: string) => string|null}} [opts]
  * @returns {{ok: boolean, errors: Array<{axis: string, path: string, code: string, message: string, key?: string, params?: object}>}}
  */
-export function validateAxisConfig(config, { defaultRole = declaredDefaultRole } = {}) {
+export function validateAxisConfig(config, { defaultRole = declaredDefaultRole, registry = RUNTIME_REGISTRY } = {}) {
   const errors = [];
   const err = (axis, path, code, message, i18n) => errors.push({ axis, path, code, message, ...(i18n ?? {}) });
   try {
@@ -169,7 +164,7 @@ export function validateAxisConfig(config, { defaultRole = declaredDefaultRole }
     const sddProviders = isObj(cfg.sdd?.providers) ? cfg.sdd.providers : {};
 
     const platformDefault = nonEmpty(cfg.platform?.default);
-    if (platformDefault !== '' && PLATFORM_CAPABILITIES[platformDefault]?.orchestrate !== true) {
+    if (platformDefault !== '' && registry.capabilities[platformDefault]?.orchestrate !== true) {
       err('platform', 'platform.default', 'default-cannot-orchestrate',
         `platform.default "${platformDefault}" does not declare orchestrate, so it cannot be the session's orchestrator`);
     }
@@ -190,7 +185,7 @@ export function validateAxisConfig(config, { defaultRole = declaredDefaultRole }
         if (!has(platformProviders, engine)) {
           err('sdd', `${base}.engine`, 'role-engine-unknown',
             `${base}.engine "${engine}" is not a key of platform.providers`);
-        } else if (PLATFORM_CAPABILITIES[engine]?.executeStage !== true) {
+        } else if (registry.capabilities[engine]?.executeStage !== true) {
           err('sdd', `${base}.engine`, 'role-engine-cannot-execute',
             `${base}.engine "${engine}" cannot execute a stage prompt`);
         }
@@ -344,6 +339,7 @@ function mergeUserProviders(cfg, userConfig) {
  *   `catalog` is the i18n catalog the validation detail of an `invalid-config` refusal renders in (English when omitted).
  *   `env` is the process env, `dotenv` the PARSED `.env` (no file is read here); VCS never reads `dotenv`.
  *   `userConfig`/`userError`/`userPath` are `readUserConfig`'s result, spread in (lib/user-config.mjs); VCS never reads them.
+ *   `registry` is the runtime registry the platform membership and capabilities are read from (default: the shipped tree).
  *   `runtimeProvider` is the CI-detected VCS provider; it needs only an adapter brain ships, not a `vcs.providers` entry.
  * @returns {{value: string, source: 'process-env'|'dotenv'|'user'|'config'|'legacy-config'|'legacy-harness'|'runtime',
  *            where: 'process-env'|'dotenv'|'user'|'config'|'runtime', key: string,
@@ -352,10 +348,10 @@ function mergeUserProviders(cfg, userConfig) {
  * @throws {AxisRefusal} undeclared, a value that is not a provider brain ships or not a key of the union of the
  *   layers' `<axis>.providers`, an invalid axis config or user layer, or an override of a locked axis. Never guesses and never coerces.
  */
-export function resolveAxis(axis, { env = process.env, dotenv = {}, config = {}, userConfig = {}, userError = null, userPath = USER_PATH_FALLBACK, runtimeProvider = null, notice = defaultNotice, catalog = en } = {}) {
+export function resolveAxis(axis, { env = process.env, dotenv = {}, config = {}, userConfig = {}, userError = null, userPath = USER_PATH_FALLBACK, runtimeProvider = null, notice = defaultNotice, catalog = en, registry = RUNTIME_REGISTRY } = {}) {
   if (!AXES.includes(axis)) throw new TypeError(`resolveAxis: unknown axis '${axis}'`);
   const cfg = isObj(config) ? config : {};
-  const members = AXIS_MEMBERS[axis];
+  const members = axis === 'platform' ? registry.orchestrators : AXIS_MEMBERS[axis];
   const names = members.join('|');
   const keyName = AXIS_ENV_KEY[axis];
 
@@ -383,7 +379,7 @@ export function resolveAxis(axis, { env = process.env, dotenv = {}, config = {},
   const merged = axis === 'vcs' ? cfg : mergeUserProviders(cfg, userLayer);
   // Team structure (default, roles, capabilities) is a property of the TEAM config alone: the user layer never repairs it.
   // The union below checks only the per-machine SELECTED value.
-  const bad = validateAxisConfig(cfg).errors.filter((e) => e.axis === axis);
+  const bad = validateAxisConfig(cfg, { registry }).errors.filter((e) => e.axis === axis);
   if (bad.length > 0) {
     // Each error is rendered through its i18n { key, params } in the active catalog, as diagnoseAxes does; an error with no key stays English.
     const cat = isObj(catalog) ? catalog : en;

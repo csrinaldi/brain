@@ -136,25 +136,28 @@ else
   ok "$I18N_TOOLS_CLAUDE_INSTALLED"
 fi
 
-# ── 4. Codex (only for an effective Codex cold-review route) ──────────────────
-# The generic stage resolver keeps model identifiers opaque. This route-specific
-# helper is intentionally the only setup reader that pins the Codex contract.
-CODEX_REQUIRED="$(node brain/scripts/harness/codex-readiness.mjs --required)"
-say "Codex cold-review"
-if [ "$CODEX_REQUIRED" = "yes" ]; then
-  if command -v codex >/dev/null 2>&1; then
-    skip "codex $(codex --version 2>/dev/null | head -1)"
-  else
-    npm install -g @openai/codex
-    ok "Codex CLI installed"
+# ── 4. Cold-review engine (only for an effective route to an engine that ships a probe) ──
+# `harness/readiness.mjs` resolves the route and dispatches through the engine's
+# descriptor; this installer only names the tool to install for the engines it knows.
+ENGINE_REQUIRED="$(node brain/scripts/harness/readiness.mjs --required)"
+ENGINE="$(node brain/scripts/harness/readiness.mjs --engine)"
+say "Cold-review engine"
+if [ "$ENGINE_REQUIRED" = "yes" ]; then
+  if [ "$ENGINE" = "codex" ]; then
+    if command -v codex >/dev/null 2>&1; then
+      skip "codex $(codex --version 2>/dev/null | head -1)"
+    else
+      npm install -g @openai/codex
+      ok "Codex CLI installed"
+    fi
   fi
-  if CODEX_READINESS="$(node brain/scripts/harness/codex-readiness.mjs --check 2>&1)"; then
-    ok "$CODEX_READINESS"
+  if ENGINE_READINESS="$(node brain/scripts/harness/readiness.mjs --check 2>&1)"; then
+    ok "$ENGINE_READINESS"
   else
-    warn "$CODEX_READINESS"
+    warn "$ENGINE_READINESS"
   fi
 else
-  skip "codex (cold-review route does not select Codex)"
+  skip "cold-review engine (the route selects an engine with no readiness probe)"
 fi
 
 # ── 5. gentle-ai (manages engram + gga + skills) ──────────────────────────────

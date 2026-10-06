@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { readAxis, validateAxisConfig, resolveAxis, AxisRefusal, PLATFORM_CAPABILITIES, AGENT_PLATFORMS, SDD_ENGINES } from './axis-config.mjs';
+import { RUNTIME_REGISTRY } from '../axes/lib/runtime-registry.mjs';
 import { resolvePlatform } from '../harness/platform.mjs';
 import { resolveEngine, resolveHarness } from '../harness/cli.mjs';
 import { resolveProviderName } from '../vcs/cli.mjs';
@@ -350,4 +351,32 @@ test('parity: resolveMemoryBackend (config level only; env keeps its precedence;
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// ── #1128: the platform facts are DERIVED from the descriptors, and a registry can be injected ──
+const FAKE_REGISTRY = Object.freeze({
+  names: ['zed'],
+  capabilities: Object.freeze({ zed: Object.freeze({ orchestrate: true, executeStage: false }), zeng: Object.freeze({ orchestrate: false, executeStage: true }) }),
+  orchestrators: Object.freeze(['zed']),
+  stageRuntimes: Object.freeze(['zeng']),
+  descriptor: () => null,
+});
+
+test('#1128: PLATFORM_CAPABILITIES and AGENT_PLATFORMS are the registry, not literals', () => {
+  assert.equal(PLATFORM_CAPABILITIES, RUNTIME_REGISTRY.capabilities);
+  assert.equal(AGENT_PLATFORMS, RUNTIME_REGISTRY.orchestrators);
+});
+
+test('#1128: validateAxisConfig reads capabilities from an injected registry', () => {
+  const cfg = { platform: { default: 'zed', providers: { zed: {}, zeng: {} } }, sdd: { roles: { 'cold-review': { engine: 'zeng' } } } };
+  assert.ok(validateAxisConfig(cfg).errors.some((e) => e.code === 'default-cannot-orchestrate'), 'unknown to the shipped registry');
+  const r = validateAxisConfig(cfg, { registry: FAKE_REGISTRY });
+  assert.deepEqual(r.errors.filter((e) => e.axis === 'platform' || /engine|orchestrate/.test(e.code ?? '')), []);
+  assert.ok(validateAxisConfig({ ...cfg, sdd: { roles: { 'cold-review': { engine: 'zed' } } } }, { registry: FAKE_REGISTRY }).errors.some((e) => e.code === 'role-engine-cannot-execute'));
+});
+
+test('#1128: resolveAxis(platform) reads membership from an injected registry', () => {
+  const config = { platform: { default: 'zed', providers: { zed: {} } } };
+  assert.equal(resolveAxis('platform', { config, registry: FAKE_REGISTRY, env: {}, dotenv: {}, userConfig: {} }).value, 'zed');
+  assert.throws(() => resolveAxis('platform', { config, env: {}, dotenv: {}, userConfig: {} }), AxisRefusal);
 });

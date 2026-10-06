@@ -237,3 +237,22 @@ test('runStage: every run carries --settings {disableAllHooks: true} — this re
     'the settings payload must disable every hook, including SessionStart',
   );
 });
+
+// ── #1128: init() answers {ok, ...} on every path ────────────────────────────
+
+test('init(): a write that throws is ok:false naming the path, never a reported success (#1128, Q1)', async () => {
+  const warn = console.warn;
+  console.warn = () => {};
+  try {
+    const r = await init({ _readClaudeSettings: () => null, _writeClaudeSettings: () => { throw new Error('EACCES: denied'); }, _repoRoot: '/fake/repo' });
+    assert.equal(r.ok, false);
+    assert.match(r.reason, /\.claude\/settings\.json/);
+    assert.match(r.reason, /EACCES/);
+  } finally {
+    console.warn = warn;
+  }
+});
+
+test('init(): a clean write answers ok:true (#1128)', async () => {
+  assert.deepEqual(await init({ _readClaudeSettings: () => null, _writeClaudeSettings: () => {}, _repoRoot: '/fake/repo' }), { ok: true });
+});

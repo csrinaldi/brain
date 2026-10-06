@@ -1,18 +1,15 @@
-// Codex route and readiness helpers.
+// Codex readiness helpers.
 //
 // Setup uses this small adapter instead of teaching the generic stage resolver
 // about vendor model catalogues. `stage-engine.mjs` deliberately keeps models
 // opaque for every other stage; this transport has a separately specified,
-// pinned model contract.
+// pinned model contract. `harness/readiness.mjs` dispatches here through the
+// codex descriptor (`readiness: true`) and resolves the route and the pin (#1129).
 
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
 
-import { COLD_REVIEW_STAGE, resolveStageEngine } from '../lib/stage-engine.mjs';
-
-export const CODEX_MODEL = 'gpt-5.5';
 export const MIN_CODEX_VERSION = Object.freeze([0, 154, 0]);
 
 function versionAtLeast(actual, minimum = MIN_CODEX_VERSION) {
@@ -29,30 +26,6 @@ function parseVersion(output) {
 
 function resultText(result) {
   return String(result?.stdout ?? '').trim() || String(result?.stderr ?? '').trim();
-}
-
-/**
- * Resolve whether the effective cold-review route makes Codex a dependency.
- * Non-Codex routes stay deliberately outside every Codex check.
- */
-export function resolveCodexRoute(config) {
-  const routing = resolveStageEngine(config, COLD_REVIEW_STAGE);
-  if (routing === null) {
-    return { required: false, stage: COLD_REVIEW_STAGE, engine: null, model: null };
-  }
-  if (routing.engine !== 'codex') {
-    return { required: false, stage: COLD_REVIEW_STAGE, engine: routing.engine, model: routing.model };
-  }
-  if (routing.model !== CODEX_MODEL) {
-    throw new Error(`Codex cold-review route requires model ${CODEX_MODEL}; received ${routing.model ?? 'none'}`);
-  }
-  return {
-    required: true,
-    stage: COLD_REVIEW_STAGE,
-    engine: routing.engine,
-    model: routing.model,
-    identity: `${COLD_REVIEW_STAGE}:${routing.engine}/${routing.model}`,
-  };
 }
 
 function defaultCommandExists(bin) {
@@ -72,7 +45,7 @@ function defaultRun(bin, args) {
  * validates model entitlement, network, an isolated writable CODEX_HOME, and
  * the read-only sandbox against its immutable candidate.
  */
-export function checkCodexReadiness(route, {
+export function checkReadiness(route, {
   commandExists = defaultCommandExists,
   run = defaultRun,
 } = {}) {
@@ -109,34 +82,4 @@ export function checkCodexReadiness(route, {
     required: true,
     diagnostic: `Codex ${version.join('.')} is authenticated for ${route.identity}; the review run verifies model access, network, writable isolated state, and the read-only sandbox.`,
   };
-}
-
-function loadConfig(cwd) {
-  const file = join(cwd, 'brain.config.json');
-  try {
-    return JSON.parse(readFileSync(file, 'utf8'));
-  } catch (error) {
-    throw new Error(`could not resolve the cold-review route from ${file}: ${error.message}`);
-  }
-}
-
-async function main() {
-  const mode = process.argv[2] ?? '--check';
-  const config = loadConfig(process.cwd());
-  const route = resolveCodexRoute(config);
-  if (mode === '--required') {
-    process.stdout.write(`${route.required ? 'yes' : 'no'}\n`);
-    return;
-  }
-  if (mode !== '--check') throw new Error(`unknown Codex readiness mode: ${mode}`);
-  const result = checkCodexReadiness(route);
-  process.stdout.write(`${result.diagnostic}\n`);
-  if (!result.ready) process.exitCode = 1;
-}
-
-if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
-  main().catch((error) => {
-    process.stderr.write(`Codex readiness failed: ${error.message}\n`);
-    process.exitCode = 1;
-  });
 }
