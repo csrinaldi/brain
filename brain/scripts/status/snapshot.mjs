@@ -50,6 +50,7 @@ import { CHANGES_ROOT, changeDir, archivePath, ARTEFACT_FILE, parseChangeId, isG
 import { requiredArtifactsFor, resolveTier } from '../vcs/governance-tiers.mjs';
 import { parseVerdict } from '../review/lib/parse-verdict.mjs';
 import { readRecords, recordFilename } from '../memory/lib/store.mjs';
+import { summarizeContent } from '../memory/lib/record-summary.mjs';
 import { parseCanonicalIssueBranch } from '../lib/branch-grammar.mjs';
 import { readRemoteChanges, REMOTE_READ_BUDGET } from './remote-changes.mjs';
 import { readLocalWorktrees } from './local-worktrees.mjs';
@@ -126,6 +127,10 @@ export function aggregateActors(records = []) {
  * projectRecord() — a record's index metadata plus the file it lives in (D3).
  * `content` stays in the file; `file` is the pointer. A record whose id or ts
  * cannot name a file is kept with `file: null` rather than dropped.
+ *
+ * `summary` is the one derivation of the content the row carries (#1313, an
+ * amendment of D3): a title and an excerpt, both capped, never the content.
+ * The full text is read on demand through `/api/record/{id}`.
  */
 export function projectRecord(r) {
   let file;
@@ -134,6 +139,7 @@ export function projectRecord(r) {
   if (r.issue !== undefined) row.issue = r.issue;
   if (r.supersedes !== undefined) row.supersedes = r.supersedes;
   if (typeof r.title === 'string') row.title = r.title;
+  row.summary = summarizeContent(r.content);
   row.file = file;
   return row;
 }

@@ -10,6 +10,7 @@ import {
   issueOfBranch, renderSnapshotText, PLANNED, IN_FLIGHT, DONE, UNREADABLE,
 } from './snapshot.mjs';
 import { hierarchyFromGraph } from './hierarchy-adapter.mjs';
+import { NO_TEXT } from '../memory/lib/record-summary.mjs';
 
 const NOW = '2026-09-13T00:00:00Z';
 
@@ -320,8 +321,19 @@ test('#879: actors is one aggregation over records, sorted, humans and agents in
 
 test('#879: a record is projected to its index metadata plus the file that holds it', () => {
   const r = projectRecord({ id: 'rec-0000000000000001', ts: '2026-06-01T00:00:00Z', actor: '@a', actorKind: 'human', type: 'decision', project: 'x', issue: 1, content: 'long' });
-  assert.deepEqual(r, { id: 'rec-0000000000000001', ts: '2026-06-01T00:00:00Z', actor: '@a', actorKind: 'human', type: 'decision', issue: 1, file: '.memory/records/2026-06-rec-0000000000000001.jsonl' });
+  assert.deepEqual(r, { id: 'rec-0000000000000001', ts: '2026-06-01T00:00:00Z', actor: '@a', actorKind: 'human', type: 'decision', issue: 1, summary: { ok: true, title: 'long', excerpt: '', truncated: false }, file: '.memory/records/2026-06-rec-0000000000000001.jsonl' });
   assert.equal(projectRecord({ id: 'bad' }).file, null, 'an unnameable record is kept, with no pointer');
+});
+
+test('#1313 R1313-4: a projected record carries a bounded summary of its content, never the content', () => {
+  const content = `**A title**\n\n${'body words '.repeat(500)}`;
+  const r = projectRecord({ id: 'rec-0000000000000001', ts: '2026-06-01T00:00:00Z', actor: '@a', actorKind: 'human', type: 'decision', content });
+  assert.equal(r.summary.ok, true);
+  assert.equal(r.summary.title, 'A title');
+  assert.ok(Array.from(r.summary.excerpt).length <= 120);
+  assert.equal('content' in r, false);
+  assert.ok(JSON.stringify(r).length < 600, 'the row stays small whatever the content holds');
+  assert.deepEqual(projectRecord({ id: 'rec-0000000000000002', ts: '2026-06-01T00:00:00Z' }).summary, { ok: false, reason: NO_TEXT });
 });
 
 // ── R879-2 / D4: the forge, per section and per item ────────────────────────
