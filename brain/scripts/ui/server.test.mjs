@@ -874,8 +874,46 @@ test('#881: R881-5 S3 / A5 (re-run) — with the poller wired in, a full poll cy
 // ── R881-10 S3: no MCP resource route, no heartbeat/agent-pulse endpoint ────
 
 test('#881: R881-10 S3 — the route table has no MCP resource route and no heartbeat/agent-pulse endpoint', () => {
-  assert.deepEqual(KNOWN_ROUTES, ['/', '/app.js', '/app.css', '/lib/{module}.mjs', '/vendor/marked.esm.js', '/api/snapshot', '/api/stream', '/api/poll/pause', '/api/poll/resume', '/api/poll/once', '/api/remotes/refresh', '/api/change/{issue}']);
+  assert.deepEqual(KNOWN_ROUTES, ['/', '/app.js', '/app.css', '/lib/{module}.mjs', '/vendor/marked.esm.js', '/api/snapshot', '/api/stream', '/api/poll/pause', '/api/poll/resume', '/api/poll/once', '/api/remotes/refresh', '/api/change/{issue}', '/api/record/{id}']);
   assert.ok(!KNOWN_ROUTES.some((r) => /mcp|heartbeat|pulse/i.test(r)));
+});
+
+// ── #1313: GET /api/record/{id} — one record's content, on a click ───────────
+
+test('#1313 R1313-8: GET /api/record/<id> serves that record; a traversal or malformed id is 404 and reads nothing; an unknown id is 404 JSON; POST is 405', async () => {
+  const root = makeFixture();
+  const dir = join(root, '.memory', 'records');
+  mkdirSync(dir, { recursive: true });
+  const id = 'rec-0123456789abcdef';
+  writeFileSync(join(dir, `2026-06-${id}.jsonl`), `${JSON.stringify({ id, ts: '2026-06-01T00:00:00Z', actor: '@a', actorKind: 'human', type: 'decision', content: '**T**\n\nbody' })}\n`);
+  const server = createUiServer({ root, vcs: openIssuesVcs(1), project: 'o/r', _now: now, poll: false });
+  await server.listen(0);
+  try {
+    const base = `http://127.0.0.1:${server.port}`;
+    const ok = await fetch(`${base}/api/record/${id}`);
+    assert.equal(ok.status, 200);
+    assert.equal(ok.headers.get('content-type'), 'application/json');
+    assert.deepEqual(await ok.json(), { ok: true, id, file: `.memory/records/2026-06-${id}.jsonl`, content: '**T**\n\nbody', truncated: false, truncatedAt: null });
+
+    const head = await fetch(`${base}/api/record/${id}`, { method: 'HEAD' });
+    assert.equal(head.status, 200);
+
+    const unknown = await fetch(`${base}/api/record/rec-ffffffffffffffff`);
+    assert.equal(unknown.status, 404);
+    assert.equal((await unknown.json()).ok, false);
+
+    for (const bad of ['..', '..%2F..%2Fpackage.json', '%2e%2e%2f%2e%2e%2fpackage.json', 'rec-xyz', `${id}0`, `${id}%2F..`, '']) {
+      const res = await fetch(`${base}/api/record/${bad}`);
+      assert.equal(res.status, 404, `${bad} must be 404`);
+      assert.equal(await res.text(), 'not found', `${bad} must reach no file`);
+    }
+
+    const mutation = await fetch(`${base}/api/record/${id}`, { method: 'POST' });
+    assert.equal(mutation.status, 405);
+    assert.equal(mutation.headers.get('allow'), 'GET, HEAD');
+  } finally {
+    await server.close();
+  }
 });
 
 // ── T7: GET /api/change/{issue} — the drawer's IO (D8, D11) ────────────────

@@ -2,7 +2,9 @@
 // server.mjs — `brain:ui`: the local read-model server (#881, PR 1 / A1 +
 // PR 2 / A2).
 //
-// Serves the static SPA at `/`, the snapshot at `GET /api/snapshot`, and a
+// Serves the static SPA at `/`, the snapshot at `GET /api/snapshot`, one
+// record's content at `GET /api/record/{id}` (#1313, a local file read, called
+// only on a click), and a
 // push stream at `GET /api/stream` — built IN-PROCESS via `buildSnapshot`,
 // never shelling out to a CLI (R881-1). `buildSnapshot` is composed with a
 // cache-only `vcs` port (`forge-cache.mjs`, D1); `poller.mjs` is the only
@@ -34,6 +36,7 @@ import { createWatcher, resolveGitCommonDir } from './watcher.mjs';
 import { createPoller } from './poller.mjs';
 import { createForgeThread, PRODUCTION_RESOLVE } from './forge-thread.mjs';
 import { buildChangeView } from './change-route.mjs';
+import { buildRecordView, RECORD_ID_RE } from './record-route.mjs';
 import { CHANGES_ROOT } from '../lib/sdd-layout.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -64,8 +67,11 @@ const FETCH_ARGV = Object.freeze(['fetch', 'origin', '--no-tags', '--prune', '--
 /** `GET /api/change/<N digits>` — a non-numeric id falls through to the 404 below (D8's `change-route.mjs`). */
 const CHANGE_ROUTE_RE = /^\/api\/change\/(\d+)$/;
 
+/** `GET /api/record/<rec-16hex>` (#1313): anything else under the prefix falls through to the 404 below and reads no file. */
+const RECORD_ROUTE_RE = /^\/api\/record\/(rec-[0-9a-f]{16})$/;
+
 /** Every route this server knows — the R881-10 S3 guard test pins this set: no MCP resource route, no heartbeat/agent-pulse endpoint. */
-export const KNOWN_ROUTES = Object.freeze(['/', '/app.js', '/app.css', '/lib/{module}.mjs', '/vendor/marked.esm.js', '/api/snapshot', '/api/stream', '/api/poll/pause', '/api/poll/resume', '/api/poll/once', '/api/remotes/refresh', '/api/change/{issue}']);
+export const KNOWN_ROUTES = Object.freeze(['/', '/app.js', '/app.css', '/lib/{module}.mjs', '/vendor/marked.esm.js', '/api/snapshot', '/api/stream', '/api/poll/pause', '/api/poll/resume', '/api/poll/once', '/api/remotes/refresh', '/api/change/{issue}', '/api/record/{id}']);
 
 const NO_FORGE_REASON = 'no forge port was supplied to the poller';
 const noForgeVcs = {
@@ -354,6 +360,8 @@ export function createUiServer({
     if (pathname === '/api/remotes/refresh') return servePollControl(res, poller.refreshRemotes);
     const changeMatch = CHANGE_ROUTE_RE.exec(pathname);
     if (changeMatch) return serveChange(res, Number(changeMatch[1]));
+    const recordMatch = RECORD_ROUTE_RE.exec(pathname);
+    if (recordMatch && RECORD_ID_RE.test(recordMatch[1])) return serveRecord(res, recordMatch[1]);
     res.writeHead(404, { 'content-type': 'text/plain' });
     res.end('not found');
   }
@@ -408,6 +416,14 @@ export function createUiServer({
     const view = buildChangeView({ root, issue: issueNumber, snapshot: current, project, _run: run });
     res.writeHead(200, { 'content-type': 'application/json' });
     res.end(JSON.stringify(view));
+  }
+
+  // #1313: one record's content, read from `.memory/records/` on a click. No snapshot, no forge, no
+  // git: a local file read of a validated id (record-route.mjs), so it never waits on anything.
+  function serveRecord(res, id) {
+    const { status, body } = buildRecordView({ root, id });
+    res.writeHead(status, { 'content-type': 'application/json' });
+    res.end(JSON.stringify(body));
   }
 
   function sendInternalError(res, err) {

@@ -57,7 +57,7 @@ import { cardReviewIndex } from './lib/card-review-model.mjs';
 import { renderOffThread, timeoutNotice, FAILED_NOTICE, UNAVAILABLE_NOTICE } from './lib/render-budget.mjs';
 import { buildSddModel, sddForIssue, quietAbsence, buildSlicePlan, STAGE_VOCAB } from './lib/sdd-model.mjs';
 import { searchNodes } from './lib/search-model.mjs';
-import { buildMemoryModel } from './lib/memory-model.mjs';
+import { buildMemoryModel, RECORD_LOADING, recordFailure, recordTruncated, recordUrl } from './lib/memory-model.mjs';
 import { buildReviewTimeline } from './lib/review-timeline.mjs';
 import { buildRoadmapModel } from './lib/roadmap-model.mjs';
 import { buildDecisionsModel } from './lib/decisions-model.mjs';
@@ -142,6 +142,16 @@ let expandedDocs = new Set();
  * changes, so it cannot grow without bound.
  */
 let docTrees = new Map();
+/**
+ * The Memory ledger's rows opened inline (#1313): the record ids that are open (page-only state, like
+ * `expandedDocs`, so a re-render that is not a user action restores them), each record's read
+ * (`recordLoads`, id to its answer) and each opened record's render (`recordTrees`, a store of its own so
+ * an issue change that empties `docTrees` never cancels a record). A collapse evicts the row's entries,
+ * so what is held is bounded by what the reader has open.
+ */
+const expandedRecords = new Set();
+const recordLoads = new Map();
+const recordTrees = new Map();
 
 /** Cancel every request in flight and forget them all. */
 function resetDocTrees() {
@@ -447,15 +457,149 @@ function renderMemory() {
     stack.appendChild(el('span', 'memory-actor-kind', record.actorKind ?? 'unknown'));
     actor.appendChild(stack);
     tr.appendChild(actor);
-    tr.appendChild(el('td', 'memory-id', record.id));
+    const recordCell = el('td', 'memory-record-cell');
+    const toggle = renderRecordStack(recordCell, record);
+    tr.appendChild(recordCell);
     const source = el('td', 'memory-source');
     source.appendChild(renderSourceStamp(record.sourceStamp));
     tr.appendChild(source);
     body.appendChild(tr);
+    wireRecordToggle(body, tr, toggle, record.id);
   }
   table.appendChild(body);
   scroller.appendChild(table);
   mounts.canvas.appendChild(scroller);
+}
+
+/**
+ * A ledger row's RECORD cell (#1313): the title (or the said reason there is none) as the toggle, the
+ * excerpt, then the id. Every string is text content; a record's words never become markup. Each text
+ * element's `title` attribute is its own text: one wording for one fact. Returns the toggle.
+ */
+function renderRecordStack(cell, record) {
+  const stack = el('div', 'memory-record');
+  const toggle = el('button', 'memory-toggle');
+  toggle.setAttribute('type', 'button');
+  toggle.setAttribute('aria-expanded', 'false');
+  const lead = record.summary.ok ? record.summary.title : record.summary.reason;
+  const title = el('span', 'memory-record-title', lead);
+  title.setAttribute('title', lead);
+  toggle.appendChild(title);
+  stack.appendChild(toggle);
+  if (record.summary.ok && record.summary.excerpt !== '') {
+    const excerpt = el('span', 'memory-record-excerpt', record.summary.excerpt);
+    excerpt.setAttribute('title', record.summary.excerpt);
+    stack.appendChild(excerpt);
+  }
+  stack.appendChild(el('span', 'memory-id', record.id));
+  cell.appendChild(stack);
+  return toggle;
+}
+
+/** The route's answer for one record, or the sentence for why there is none. Never rejects. */
+async function fetchRecord(id) {
+  try {
+    const res = await fetch(recordUrl(id));
+    let answer = null;
+    try { answer = await res.json(); } catch (err) { if (res.ok) throw err; }
+    // The route's own reason is the fact; a status alone is the fallback.
+    if (answer && answer.ok === false && typeof answer.reason === 'string') return { kind: 'reason', reason: answer.reason };
+    if (!res.ok) throw new Error(`answered ${res.status}`);
+    if (!answer || answer.ok !== true || typeof answer.content !== 'string') throw new Error('the answer carried no content');
+    return { kind: 'content', answer };
+  } catch (err) {
+    return { kind: 'failed', reason: recordFailure(id, err.message) };
+  }
+}
+
+/** One record's read, started once per open row and shared by a re-render. */
+function loadRecord(id) {
+  let entry = recordLoads.get(id);
+  if (entry) return entry;
+  entry = { settled: false, result: null };
+  entry.promise = fetchRecord(id).then((result) => {
+    entry.settled = true;
+    entry.result = result;
+    return result;
+  });
+  recordLoads.set(id, entry);
+  return entry;
+}
+
+/** What a rendered record is called: the file it was read from, which no SDD document stamp (`path @ commit`) can equal. */
+const recordStamp = (id, answer) => answer.file ?? `record ${id}`;
+
+/** The opened row's body once the read has an answer: a reason, or the content drawn by the SDD reader's own path. */
+function showRecord(section, id, result) {
+  clear(section);
+  section.removeAttribute('aria-busy');
+  if (result.kind !== 'content') {
+    section.appendChild(el('p', 'note', result.reason));
+    return;
+  }
+  const { answer } = result;
+  const doc = { stamp: recordStamp(id, answer), text: answer.content };
+  section.appendChild(el('p', 'doc-stamp', doc.stamp));
+  if (answer.truncated) section.appendChild(el('p', 'note', recordTruncated(answer.truncatedAt)));
+  // The same loading line, shape and worker as an SDD document: `showDocumentOutcome` takes it away.
+  const rendering = el('p', 'note doc-loading', 'rendering the document\u2026');
+  rendering.setAttribute('role', 'status');
+  section.appendChild(rendering);
+  section.setAttribute('aria-busy', 'true');
+  const entry = requestDoc(doc, recordTrees);
+  if (entry.settled) showDocumentOutcome(section, doc, entry.outcome);
+  else entry.promise.then((outcome) => { if (section.parentNode) showDocumentOutcome(section, doc, outcome); });
+}
+
+/**
+ * The toggle under a ledger row (#1313): opens a second row directly below it, in place, so the
+ * button keeps focus. Many rows may be open; each is its own. A row that is open when the view is
+ * drawn again opens again from the page-only set, without a new read.
+ */
+function wireRecordToggle(body, tr, toggle, id) {
+  let detail = null;
+  let section = null;
+  const seq = requestSequence();
+  const sectionId = `memory-record-${id}`;
+  const setOpen = (open) => {
+    toggle.setAttribute('aria-expanded', String(open));
+    if (open && detail === null) {
+      detail = el('tr', 'memory-detail');
+      const cell = el('td', null);
+      cell.setAttribute('colspan', '5');
+      section = el('section', 'doc-body');
+      section.setAttribute('id', sectionId);
+      section.setAttribute('role', 'region');
+      section.setAttribute('aria-label', id);
+      section.setAttribute('aria-busy', 'true');
+      const loading = el('p', 'note doc-loading', RECORD_LOADING);
+      loading.setAttribute('role', 'status');
+      section.appendChild(loading);
+      cell.appendChild(section);
+      detail.appendChild(cell);
+      body.insertBefore(detail, tr.nextSibling);
+      toggle.setAttribute('aria-controls', sectionId);
+      const token = seq.next();
+      const mine = section;
+      const entry = loadRecord(id);
+      if (entry.settled) showRecord(mine, id, entry.result);
+      else entry.promise.then((result) => { if (seq.isCurrent(token) && section === mine) showRecord(mine, id, result); });
+    }
+    if (!open && detail !== null) {
+      seq.next();
+      const read = recordLoads.get(id);
+      const tree = read?.result?.kind === 'content' ? recordTrees.get(recordStamp(id, read.result.answer)) : undefined;
+      if (tree) { tree.cancel(); recordTrees.delete(recordStamp(id, read.result.answer)); }
+      recordLoads.delete(id);
+      body.removeChild(detail);
+      detail = null;
+      section = null;
+      toggle.removeAttribute('aria-controls');
+    }
+    if (open) expandedRecords.add(id); else expandedRecords.delete(id);
+  };
+  toggle.addEventListener('click', () => setOpen(toggle.getAttribute('aria-expanded') !== 'true'));
+  setOpen(expandedRecords.has(id));
 }
 
 function renderContent() {
@@ -2180,8 +2324,8 @@ const DOC_NOTICES = { failed: FAILED_NOTICE, unavailable: UNAVAILABLE_NOTICE };
 const spawnMarkdownWorker = () => (typeof Worker === 'function' ? new Worker('/lib/markdown-worker.mjs', { type: 'module' }) : null);
 
 /** The in-flight or settled render of a document, started once per stamp. */
-function requestDoc(doc) {
-  let entry = docTrees.get(doc.stamp);
+function requestDoc(doc, store = docTrees) {
+  let entry = store.get(doc.stamp);
   if (entry) return entry;
   const run = renderOffThread(doc.text, {
     spawn: spawnMarkdownWorker,
@@ -2196,10 +2340,10 @@ function requestDoc(doc) {
     // action (a stream frame, a tab switch) reuses it: no new worker, no loading
     // flash. A failed, unavailable or timed-out one is retried only by a user
     // collapse, which evicts it (setOpen).
-    if (outcome.kind === 'cancelled' && docTrees.get(doc.stamp) === entry) docTrees.delete(doc.stamp);
+    if (outcome.kind === 'cancelled' && store.get(doc.stamp) === entry) store.delete(doc.stamp);
     return outcome;
   });
-  docTrees.set(doc.stamp, entry);
+  store.set(doc.stamp, entry);
   return entry;
 }
 

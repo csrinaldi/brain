@@ -63,6 +63,31 @@ const ACTOR_KIND_ORDER = Object.freeze(['human', 'agent', 'unknown']);
  * are looking at everything or a clipped head — never a silent truncation. */
 export const MEMORY_RECENT_CAP = 50;
 
+/** A snapshot row with no usable `summary` (a snapshot from before #1313, or a malformed one). */
+export const SUMMARY_MISSING = 'this snapshot carries no summary for this record';
+/** What an opened record says until `/api/record/{id}` answers (#1313). */
+export const RECORD_LOADING = 'loading record\u2026';
+
+/** The sentence for an opened record the page could not get: a failed fetch or a non-OK status. */
+export const recordFailure = (id, detail) => `the record ${id} could not be loaded: ${detail}`;
+
+/** The note over a record the route cut: the same words `change-route.mjs` gives a cut SDD document. */
+export const recordTruncated = (bytes) => `truncated at ${bytes} bytes`;
+
+/** The one place the route is spelled; an id is encoded, never trusted. */
+export const recordUrl = (id) => `/api/record/${encodeURIComponent(id)}`;
+
+/** A row's summary as the page may render it: the shape from `summarizeContent`, or the one stated gap. */
+function summaryOf(summary) {
+  if (summary && typeof summary === 'object') {
+    if (summary.ok === true && typeof summary.title === 'string' && typeof summary.excerpt === 'string') {
+      return { ok: true, title: summary.title, excerpt: summary.excerpt, truncated: summary.truncated === true };
+    }
+    if (summary.ok === false && typeof summary.reason === 'string') return { ok: false, reason: summary.reason };
+  }
+  return { ok: false, reason: SUMMARY_MISSING };
+}
+
 /** A record's own epoch, or `null` when `ts` cannot be parsed — never `NaN`
  * let loose in a comparator, where an inconsistent order silently misplaces
  * the record (the exact bug `history-model.mjs`'s `dateEpoch` was written to
@@ -137,6 +162,7 @@ function recentRow(r, now) {
     actorKind: r.actorKind,
     type: r.type,
     relativeTime: relativeTimeOf(r.ts, now),
+    summary: summaryOf(r.summary),
   });
 }
 
