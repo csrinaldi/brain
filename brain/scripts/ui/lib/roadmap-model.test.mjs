@@ -151,3 +151,17 @@ test('R1308-6: roadmap rows take the work index — a worktree-only issue is In 
   assert.equal(r.epics[0].children[0].state.code, 'in-flight');
   assert.equal(r.epics[0].state.code, 'planned');
 });
+
+test('#1309 R1309-1: the Roadmap epic row reads the same state as the other shapes, with the rollup as its reason', () => {
+  const epic = node(10, { kind: 'epic' });
+  const kid = node(20, { parent: 10 });
+  const work = { missing: [], byIssue: new Map() };
+  const epics = {
+    hierarchy: { ok: true, value: { issues: [[10, { level: 'epic', levelSource: 'block', state: 'open', children: [20, 21] }], [20, { state: 'closed', children: [] }], [21, { state: 'open', children: [] }]], divergences: [], closedUnresolved: [], closedRead: { ok: true } } },
+    forgeLoad: { ok: true, value: { open: { state: 'complete', at: 'T' }, closed: { state: 'complete', at: 'T' } } },
+  };
+  const row = buildRoadmapModel(graph({ nodes: [epic, kid] }), { work, epics }).value.epics[0];
+  assert.equal(row.state.code, 'in-flight');
+  assert.equal(row.stateReason ?? row.state.reason, '1 / 2 children closed');
+  assert.equal(buildRoadmapModel(graph({ nodes: [epic, kid] }), { work }).value.epics[0].state.code, 'planned', 'no epics option is the legacy path (D135)');
+});

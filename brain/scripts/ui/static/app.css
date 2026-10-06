@@ -44,6 +44,7 @@
   --state-planned-fg: #1b1b1f;        --state-planned-bg: #eef1f8;
   --state-in-flight-fg: #1b1b1f;      --state-in-flight-bg: #d8ecff;
   --state-done-fg: #1b1b1f;           --state-done-bg: #d9f2e0;
+  --state-ready-to-close-fg: #1b1b1f; --state-ready-to-close-bg: #e3dcff;
   --state-blocked-fg: #1b1b1f;        --state-blocked-bg: #ffd9d4;
   --state-awaiting-review-fg: #1b1b1f; --state-awaiting-review-bg: #ffe9b8;
   --state-unreadable-fg: #1b1b1f;     --state-unreadable-bg: #f3e3f6;
@@ -92,6 +93,7 @@
     --state-planned-fg: #64748b;        --state-planned-bg: #1e293b;
     --state-in-flight-fg: #06b6d4;      --state-in-flight-bg: #083344;
     --state-done-fg: #6366f1;           --state-done-bg: #1e1b4b;
+    --state-ready-to-close-fg: #c4b5fd; --state-ready-to-close-bg: #2e1065;
     --state-blocked-fg: #fb7185;        --state-blocked-bg: #4c0519;
     --state-awaiting-review-fg: #f59e0b; --state-awaiting-review-bg: #451a03;
     --state-unreadable-fg: #d946ef;     --state-unreadable-bg: #3b0764;
@@ -124,6 +126,7 @@
     --state-planned-fg: #64748b;        --state-planned-bg: #1e293b;
     --state-in-flight-fg: #06b6d4;      --state-in-flight-bg: #083344;
     --state-done-fg: #6366f1;           --state-done-bg: #1e1b4b;
+    --state-ready-to-close-fg: #c4b5fd; --state-ready-to-close-bg: #2e1065;
     --state-blocked-fg: #fb7185;        --state-blocked-bg: #4c0519;
     --state-awaiting-review-fg: #f59e0b; --state-awaiting-review-bg: #451a03;
     --state-unreadable-fg: #d946ef;     --state-unreadable-bg: #3b0764;
@@ -362,6 +365,7 @@ body {
 .roadmap-state { font-size: 11px; padding: 1px 6px; border-radius: 4px; }
 .roadmap-state.state-planned { color: var(--state-planned-fg); background: var(--state-planned-bg); }
 .roadmap-state.state-in-flight { color: var(--state-in-flight-fg); background: var(--state-in-flight-bg); }
+.roadmap-state.state-ready-to-close { color: var(--state-ready-to-close-fg); background: var(--state-ready-to-close-bg); }
 .roadmap-state.state-done { color: var(--state-done-fg); background: var(--state-done-bg); }
 .roadmap-state.status-blocked { color: var(--state-blocked-fg); background: var(--state-blocked-bg); }
 .roadmap-state.status-awaiting-review { color: var(--state-awaiting-review-fg); background: var(--state-awaiting-review-bg); }
@@ -439,6 +443,7 @@ body {
 
 .node.state-planned rect { fill: var(--state-planned-bg); }
 .node.state-in-flight rect { fill: var(--state-in-flight-bg); }
+.node.state-ready-to-close rect { fill: var(--state-ready-to-close-bg); }
 .node.state-done rect { fill: var(--state-done-bg); }
 .node.status-ready rect { fill: var(--state-planned-bg); } /* never returned by state-vocab; kept so the class stays defined */
 .node.status-blocked rect { fill: var(--state-blocked-bg); }
@@ -698,6 +703,8 @@ body {
 .node-state.state-planned { background: var(--state-planned-bg); }
 .node-state.state-in-flight, .legend-item.state-in-flight { color: var(--state-in-flight-fg); }
 .node-state.state-in-flight { background: var(--state-in-flight-bg); }
+.node-state.state-ready-to-close, .legend-item.state-ready-to-close { color: var(--state-ready-to-close-fg); }
+.node-state.state-ready-to-close { background: var(--state-ready-to-close-bg); }
 .node-state.state-done, .legend-item.state-done { color: var(--state-done-fg); }
 .node-state.state-done { background: var(--state-done-bg); }
 .node-state.state-blocked, .legend-item.state-blocked { color: var(--state-blocked-fg); }

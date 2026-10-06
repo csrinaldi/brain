@@ -10,6 +10,8 @@
 // said `unknown`, distinct from `not-computed`, which is a roadmap that said
 // it could not be computed.
 
+import { rollupLabel } from './rollup-model.mjs';
+
 export const UNKNOWN_CODE = 'unknown';
 
 export const STATES = Object.freeze({
@@ -17,6 +19,7 @@ export const STATES = Object.freeze({
   'not-computed': Object.freeze({ code: 'not-computed', label: 'Not computed', mark: '—', className: 'roadmap-not-computed' }),
   blocked: Object.freeze({ code: 'blocked', label: 'Blocked', mark: '⊘', className: 'status-blocked' }),
   'awaiting-review': Object.freeze({ code: 'awaiting-review', label: 'Awaiting review', mark: '◇', className: 'status-awaiting-review' }),
+  'ready-to-close': Object.freeze({ code: 'ready-to-close', label: 'Ready to close', mark: '◉', className: 'state-ready-to-close' }),
   planned: Object.freeze({ code: 'planned', label: 'Planned', mark: '○', className: 'state-planned' }),
   'in-flight': Object.freeze({ code: 'in-flight', label: 'In flight', mark: '◐', className: 'state-in-flight' }),
   done: Object.freeze({ code: 'done', label: 'Done', mark: '●', className: 'state-done' }),
@@ -48,8 +51,31 @@ function awaitingReview(node) {
 
 const describeMissing = (m) => `${m.name} ${m.state === 'pending' ? 'is still loading' : `could not be read${m.reason ? ` (${m.reason})` : ''}`}`;
 
+const notComputed = (reason) => ({ ...STATES['not-computed'], reason });
+const inFlight = (reason) => ({ ...STATES['in-flight'], reason });
+
 /**
- * stateOf(node, work) -> {code, label, mark, className, reason?}. Throws on a status or a
+ * The evidence an epic's children add (#1309, D132, D137). Returns a state, or null when the node's own
+ * evidence decides. Nothing here claims Planned: an uncounted list is Not computed, in the rollup's own words.
+ */
+function epicProgress(node, work, rollup, roadmapCode) {
+  const own = roadmapCode === 'in-flight' || work.byIssue.has(node.number);
+  if (rollup.ok && rollup.value.closed !== null && rollup.value.closed === rollup.value.total && rollup.value.total > 0) {
+    return { ...STATES['ready-to-close'], reason: `all ${rollup.value.total} children closed; the epic is still open` };
+  }
+  if (own) return STATES['in-flight'];
+  const label = rollupLabel(rollup);
+  if (!rollup.ok) return notComputed(`children: ${label}`);
+  const { closed, unknown, unresolved, openChildren } = rollup.value;
+  if (closed > 0) return inFlight(label);
+  const started = openChildren.filter((n) => work.byIssue.has(n));
+  if (started.length > 0) return inFlight(`${started.length === 1 ? 'child' : 'children'} ${started.map((n) => `#${n}`).join(', ')} in flight`);
+  if (closed === null || unknown > 0 || unresolved > 0) return notComputed(label);
+  return null;
+}
+
+/**
+ * stateOf(node, work, rollup) -> {code, label, mark, className, reason?}. Throws on a status or a
  * roadmap state this table does not know — a renamed constant fails the test
  * that imports the real ones instead of quietly painting a node grey.
  *
@@ -59,9 +85,13 @@ const describeMissing = (m) => `${m.name} ${m.state === 'pending' ? 'is still lo
  * callers) the roadmap alone decides, as before — minus the old `unclassified` short-circuit.
  *
  * @param {{number?:number, status:string, blockedBy?:number[], labels?:string[], roadmap:{ok:boolean, value?:{state:string}}}} node
+ * `rollup` is `epicRollup(...)` (rollup-model.mjs); it is read only with `work` and for `node.kind === 'epic'`, and without it an epic
+ * keeps the #1308 behaviour (#1309 D130, D135). Order: ... awaiting-review > ready-to-close > in-flight > not-computed > planned.
+ *
  * @param {{missing:Array<{name:string,state:string,reason?:string}>, byIssue:Map<number,object>}} [work]
+ * @param {object} [rollup]
  */
-export function stateOf(node, work) {
+export function stateOf(node, work, rollup) {
   if (node.status === 'unreadable') return STATES.unreadable;
   const roadmapOk = !!node.roadmap && node.roadmap.ok === true;
   if (!work && !roadmapOk) return STATES['not-computed'];
@@ -72,6 +102,10 @@ export function stateOf(node, work) {
   if (isBlocked(node)) return STATES.blocked;
   if (awaitingReview(node)) return STATES['awaiting-review'];
   if (!work) return STATES[roadmapCode];
+  if (rollup && node.kind === 'epic') {
+    const progress = epicProgress(node, work, rollup, roadmapCode);
+    if (progress) return progress;
+  }
   if (roadmapCode === 'in-flight' || work.byIssue.has(node.number)) return STATES['in-flight'];
   if (work.missing.length > 0) return { ...STATES['not-computed'], reason: work.missing.map(describeMissing).join('; ') };
   return STATES.planned;
