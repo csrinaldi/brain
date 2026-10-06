@@ -57,7 +57,7 @@ test('#682 B.3 → #323 S2: a lifecycle stage without routed EVIDENCE cannot spa
 
 test('#682 B.3: a non-zero exit is a FAILURE — never an empty result', async () => {
   const cases = [
-    ['a non-zero status', () => ({ status: 2, stderr: 'boom\nmore' }), /exited with status 2 — boom/],
+    ['a non-zero status', () => ({ status: 2, stderr: 'boom\nmore' }), /exited with status 2 — the engine last said: boom \/ more/],
     ['a timeout (status null + error)', () => ({ status: null, error: new Error('ETIMEDOUT') }), /failed to run: ETIMEDOUT/],
     ['a spawn that throws', () => { throw new Error('ENOENT'); }, /could not be spawned: ENOENT/],
   ];

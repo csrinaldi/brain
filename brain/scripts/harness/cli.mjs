@@ -250,16 +250,14 @@ if (isMain) {
   }
 
   try {
-    // THE ANSWER IS READ, and today nothing answers. `init` returns undefined,
-    // so this branch is unreachable on the shipped tree — stated plainly rather
-    // than left to look like a tested path. It is here because the alternative
-    // is a discard that becomes wrong SILENTLY the day a command-line op starts
-    // answering, which is exactly how `run-stage` shipped broken: `dispatch`
-    // itself discarded its result for as long as `init` was the only op, and
-    // that was harmless right up until it was not.
+    // THE ANSWER IS READ. Every platform answers `{ok, ...}` (#1128): claude, antigravity
+    // and plain return `{ok: true}` or `{ok: false, reason}`, so a refusal to merge a
+    // malformed settings file, or a write that failed, exits 1 here instead of reading as
+    // success. This is the discard that was wrong SILENTLY: `run-stage` shipped broken the
+    // same way, because `dispatch` itself discarded its result while `init` was the only op.
     //
-    // `undefined` stays success. Only an explicit `{ok: false}` is a failure —
-    // an op that answers nothing has not failed at anything.
+    // `undefined` stays success, for SDD engines (`gentle-ai`) that answer nothing. Only an
+    // explicit `{ok: false}` is a failure: an op that answers nothing has not failed at anything.
     const results = [await dispatch(platform, op, process.argv.slice(3))];
     if (engine !== platform) {
       // BOTH AXES, deliberately, and only `init` reaches here now. A repo can

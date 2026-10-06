@@ -183,7 +183,7 @@ test('2.1: init() calls _readDoc once per SOURCE_DOCS path (in order) and _write
 
   // REQ: on the all-readable, all-writable happy path, init()'s resolved
   // value reports nothing missing and both writes as successful.
-  assert.deepEqual(result, { missingDocs: [], agentsWritten: true, geminiWritten: true });
+  assert.deepEqual(result, { ok: true, missingDocs: [], agentsWritten: true, geminiWritten: true });
 });
 
 test('1.2: init() resolves with missingDocs naming the one path _readDoc threw for', async () => {
@@ -230,7 +230,7 @@ test('1.4: init() resolves with geminiWritten: false when _writeGeminiSettings t
   assert.equal(result.geminiWritten, false);
 });
 
-test('1.5: init()\'s resolved object has no "ok" property under any read/write failure combination, so harness/cli.mjs\'s r.ok === false check never matches', async () => {
+test('1.5 (#1128): init() answers {ok, ...} — ok:false with a reason when a write failed, ok:true otherwise', async () => {
   const throwingReadDoc = () => { throw new Error('boom-read-all'); };
   const throwingWrite = () => { throw new Error('boom-write-all'); };
 
@@ -240,10 +240,16 @@ test('1.5: init()\'s resolved object has no "ok" property under any read/write f
   const { result: allPassed } = await captureWarn(() =>
     init({ _readDoc: (relPath) => FAKE_DOCS[relPath], _writeAgents: () => {}, _writeGeminiSettings: () => {}, _repoRoot: '/fake/repo' }),
   );
+  const { result: unreadable } = await captureWarn(() =>
+    init({ _readDoc: throwingReadDoc, _writeAgents: () => {}, _writeGeminiSettings: () => {}, _repoRoot: '/fake/repo' }),
+  );
 
-  for (const r of [allFailed, allPassed]) {
-    assert.ok(!Object.prototype.hasOwnProperty.call(r, 'ok'), 'resolved value must not have an "ok" property');
-  }
+  assert.equal(allFailed.ok, false);
+  assert.match(allFailed.reason, /AGENTS\.md/, 'the first failure is named');
+  assert.equal(allPassed.ok, true);
+  assert.equal('reason' in allPassed, false);
+  assert.equal(unreadable.ok, true, 'a source doc that cannot be read alone stays ok:true, with missingDocs listed');
+  assert.equal(unreadable.missingDocs.length, SOURCE_DOCS.length);
 });
 
 test('2.3: init() never throws when _readDoc throws on one path — warns and still writes', async () => {
@@ -302,7 +308,7 @@ test('2.4: dispatch("antigravity", "init", [opts]) resolves through the REAL cli
 
   // The real 5 SOURCE_DOCS are all readable and both writes succeed against
   // this fixture, so the resolved report is the happy-path shape too.
-  assert.deepEqual(result, { missingDocs: [], agentsWritten: true, geminiWritten: true });
+  assert.deepEqual(result, { ok: true, missingDocs: [], agentsWritten: true, geminiWritten: true });
 });
 
 test('2.5: n=3 — antigravity, plain, and gentle-ai all resolve through dispatch() to a real init() export', async () => {
@@ -402,7 +408,7 @@ test('init(): no existing .gemini/settings.json writes brain settings exactly as
   assert.equal(settingsWrites[0].content, compileSettingsHooksJson());
 });
 
-test('init(): a malformed existing .gemini/settings.json is never overwritten and the failure is reported without an "ok" property (REQ-1139-5)', async () => {
+test('init(): a malformed existing .gemini/settings.json is never overwritten and the failure is reported as ok:false (REQ-1139-5, #1128)', async () => {
   const _readDoc = (relPath) => FAKE_DOCS[relPath];
   const _writeAgents = () => {};
   const _readGeminiSettings = () => '{ not valid json';
@@ -416,8 +422,8 @@ test('init(): a malformed existing .gemini/settings.json is never overwritten an
   assert.equal(settingsWrites.length, 0, 'the write seam must never be invoked on a malformed file');
   assert.equal(result.geminiWritten, false);
   assert.match(result.geminiSettingsError, /\.gemini\/settings\.json/, 'must name the offending file');
-  assert.ok(!Object.prototype.hasOwnProperty.call(result, 'ok'),
-    'antigravity init() must never gain an "ok" property (pinned by test 1.5)');
+  assert.equal(result.ok, false, 'a refused settings file is a failure the CLI can see (#1128)');
+  assert.equal(result.reason, result.geminiSettingsError);
 });
 
 // ═══════════════════════════════════════════════════════════════════════════

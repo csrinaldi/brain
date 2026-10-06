@@ -406,15 +406,16 @@ for tool in "$VCS_CLI" engram gentle-ai gga claude; do
   fi
 done
 
-# Codex is not a general bootstrap dependency. Consult the effective route
-# before probing it so consumers that keep the Claude route never need a Codex
-# executable, state directory, authentication, or Linux sandbox support.
-say "Codex cold-review"
-if CODEX_READINESS="$(node "$BRAIN_SCRIPTS/harness/codex-readiness.mjs" --check 2>&1)"; then
-  ok "$CODEX_READINESS"
+# An engine is not a general bootstrap dependency. Consult the effective cold-review
+# route before probing it: the engine's descriptor says whether it ships a readiness
+# probe, so a consumer that keeps the Claude route never needs a Codex or Gemini
+# executable, state directory, authentication, or sandbox support.
+say "Cold-review engine readiness"
+if ENGINE_READINESS="$(node "$BRAIN_SCRIPTS/harness/readiness.mjs" --check 2>&1)"; then
+  ok "$ENGINE_READINESS"
 else
-  warn "$CODEX_READINESS"
-  MISSING_OPTIONAL+=("Codex cold-review readiness")
+  warn "$ENGINE_READINESS"
+  MISSING_OPTIONAL+=("cold-review engine readiness")
 fi
 
 # --- 3. Personal PAT in .env --------------------------------------------------
