@@ -353,8 +353,16 @@ test('#998 R998-6: two records filed against this issue and one against another 
   assert.deepEqual(result.value.records.value.map((r) => r.id), ['rec-b', 'rec-a'], 'newest first, and the other issue\'s record is excluded');
   assert.deepEqual(result.value.records.value[0], {
     id: 'rec-b', ts: '2026-09-16T10:00:00Z', actor: 'claude', actorKind: 'agent', type: 'bugfix', supersedes: 'rec-a',
+    summary: null,
     source: { path: '.memory/records/rec-b.jsonl' },
   });
+});
+
+test('#1373 R1373-1: a record row carries the snapshot\'s own summary untouched, never a second derivation', () => {
+  const summary = { ok: true, title: 'Poller holds one timer', excerpt: 'arm() keeps one handle', truncated: false };
+  const records = { ok: true, value: { records: [{ id: 'rec-a', ts: '2026-09-15T10:00:00Z', actor: 'x', actorKind: 'human', type: 'decision', issue: ISSUE, summary, file: '.memory/records/rec-a.jsonl' }], duplicates: { ids: 0 } } };
+  const result = buildChangeView({ issue: ISSUE, snapshot: makeSnapshot({ records }), _run: gitFor() });
+  assert.deepEqual(result.value.records.value[0].summary, summary);
 });
 
 test('#998 R998-6: an unreadable records section is the tab\'s own reason, never an empty list read as "no records"', () => {

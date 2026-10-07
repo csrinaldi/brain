@@ -5,6 +5,8 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { buildDrawerModel, TAB_IDS, sourceLabel, NO_CHANGE_BRANCH, LOCAL_STATE_WORDING, localChangedFor } from './drawer-model.mjs';
+import { SUMMARY_MISSING } from './memory-model.mjs';
+import { NO_TEXT } from '../../memory/lib/record-summary.mjs';
 
 const view = (over = {}) => ({
   ok: true,
@@ -319,6 +321,26 @@ test('#998 R998-6: the records tab lists this issue\'s own records, each sourced
   assert.match(records.entries[0].detail, /agent/);
   assert.match(records.entries[0].detail, /supersedes rec-a/);
   assert.equal(records.entries[0].source, '.memory/records/rec-b.jsonl');
+});
+
+test('#1373 R1373-1/2: a records entry carries the record id and its summary for the page to draw', () => {
+  const ok = { ok: true, title: 'Poller holds one timer', excerpt: 'arm() keeps one handle', truncated: false };
+  const model = buildDrawerModel(view({
+    records: {
+      ok: true,
+      value: [
+        { id: 'rec-a', ts: '2026-09-16T10:00:00Z', actor: 'x', actorKind: 'human', type: 'decision', summary: ok, source: { path: '.memory/records/rec-a.jsonl' } },
+        { id: 'rec-b', ts: '2026-09-15T10:00:00Z', actor: 'x', actorKind: 'human', type: 'bugfix', summary: { ok: false, reason: NO_TEXT }, source: { path: '.memory/records/rec-b.jsonl' } },
+        { id: 'rec-c', ts: '2026-09-14T10:00:00Z', actor: 'x', actorKind: 'human', type: 'bugfix', source: { path: '.memory/records/rec-c.jsonl' } },
+        { id: 'rec-d', ts: '2026-09-13T10:00:00Z', actor: 'x', actorKind: 'human', type: 'bugfix', summary: { ok: true, title: 7 }, source: { path: '.memory/records/rec-d.jsonl' } },
+      ],
+    },
+  }));
+  const [a, b, c, d] = model.value.tabs.find((t) => t.id === 'records').entries;
+  assert.deepEqual(a.record, { id: 'rec-a', type: 'decision', summary: ok });
+  assert.deepEqual(b.record.summary, { ok: false, reason: NO_TEXT }, 'the Memory ledger\'s own wording for an absent content');
+  assert.deepEqual(c.record.summary, { ok: false, reason: SUMMARY_MISSING }, 'a row with no summary says so, once');
+  assert.deepEqual(d.record.summary, { ok: false, reason: SUMMARY_MISSING }, 'a malformed summary is the same stated gap');
 });
 
 test('#998 R998-6: a failing records tab carries only its own reason — the other five tabs are untouched', () => {
