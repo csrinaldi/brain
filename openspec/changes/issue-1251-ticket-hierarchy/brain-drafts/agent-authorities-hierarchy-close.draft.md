@@ -1,4 +1,4 @@
-# agent-authorities.md — the hierarchy close workflow is an automation act, and `day:start`'s region rewrite is Tier 1 (issue #1251)
+# agent-authorities.md — the hierarchy close workflow is an automation act, and `brain:gc`'s acts keep their tiers (issue #1251)
 
 > **Tier 2 target. Not promoted, and an agent may not promote it.** Changes to this document
 > require an MR reviewed by `@crinaldi`. Promote it after ADR-0039, which it cites.
@@ -22,7 +22,7 @@ body-end: ### Notes for the promoter
 
 ```amend-replace
 - Refresh the skill registry (`gentle-ai skill-registry refresh`)
-- Regenerate an issue's brain-generated children region during `day:start` (ADR-0039 ruling M4): generated, bounded by markers whose outside bytes are proven identical, and read by no tool. No other part of an issue body **[added, #1251]**
+- Regenerate an issue's brain-generated children region during `brain:gc` (ADR-0039 rulings M4, T1-gc): generated, bounded by markers whose outside bytes are proven identical, and read by no tool. No other part of an issue body **[added, #1251]**
 ```
 
 ```amend-find
@@ -77,31 +77,43 @@ default branch, and every rollup above it is wrong.
 - **Nothing enforces that only the workflow does this.** The row describes who runs the acts; it is
   doctrine until the workflow exists.
 - **A run that does not happen is caught late.** A fork PR's read-only token, a missing GitLab
-  variable or an outage leaves the issue open. `day:start`, under the user's credentials, lists
-  every PR merged into a tracker whose issue is still open; it reports, it does not close.
-- **On GitLab the `issues` `closed` trigger has no pipeline counterpart.** How the direct close
-  runs there is an open question on ADR-0039, and this section does not decide it.
+  variable or an outage leaves the issue open. `day:start`, under the user's credentials, reports
+  every PR merged into a tracker whose issue is still open and offers to run `brain:gc` (below).
+- **On GitLab the `issues` `closed` trigger has no pipeline counterpart.** The direct close
+  degrades to `brain:gc` there (below).
 
-### `day:start` proposes a remainder PR: Tier 2 (ruling R1, 2026-10-07)
+### `brain:gc`: the hierarchy sweep, its acts at their tiers (ADR-0039 decision 12, rulings T1 and T1-gc, 2026-10-07)
 
-When a node's integration PR merged before the node was Ready to close, and a child has since
-integrated into its live tracker, the node needs a remainder PR (ADR-0039 ruling M3). The close
-workflow does not open it; it reports the node. `day:start` proposes it under the user's
-credentials, as a **Tier 2** act: it shows the PR (head the live tracker, base its target,
-`Closes #<node>`) and creates it only after the human confirms. In a non-interactive run (no TTY,
-or CI) it only reports. The human is the PR's author, so the producing identity is never the
-automation identity that merges in mode B (ADR-0037), and no second automation identity exists.
+When a provider cannot run one of the acts above, because it lacks the trigger (GitLab has no
+issue-event pipeline source) or the credential (`CI_JOB_TOKEN` cannot write issues and no project
+access token is set; a fork PR's read-only `GITHUB_TOKEN`), control degrades to a dedicated sweep
+verb, `brain:gc`, run under the user's credentials. It also carries the one act that is a human's
+by design, the remainder PR (ruling R1). No automation identity is involved, so none of its acts
+is an automation act. Each keeps the tier it has for an agent:
 
-### `day:start` regenerates the children region: Tier 1 (ruling M4, 2026-10-07)
+| `brain:gc` act | Tier |
+|---|---|
+| Regenerate a stale generated children region (rulings N5, M4) | **Tier 1**, runs |
+| Close a merged-but-open node that qualifies for the direct close (ruling M3) | **Tier 2**, shown, done after confirmation |
+| Delete a tracker branch with no commits its target lacks | **Tier 2** |
+| Propose and open a remainder PR, head the live tracker, base its target, `Closes #<node>` (ruling R1) | **Tier 2** |
+| Close a child or a native milestone, or mark a PR ready, where the workflow could not | **Tier 2** |
 
-`day:start` regenerates a stale generated children region under the user's credentials, as the
-safety net for the workflow (ruling N5). For an agent that runs `day:start`, that write is **Tier 1,
-autonomous**. Three facts earn it: the region is generated, never authored; every byte outside its
-markers is proven identical before the write (`replaceMapRegion`/`outsideRegion`, ADR-0029
-Decision 3); and it is not a contract, so no tool reads it. It is the only issue-body write Tier 1
-grants: the `brain-graph/1` block and every other part of a body stay outside it.
+Without a TTY, or under CI, `brain:gc` only reports. `day:start` reports what is pending and offers
+to run `brain:gc`; it performs none of these acts itself. `session:start` only shows a cached
+pending count and never calls the forge. `brain:doctor` (#1130) absorbs `brain:gc` later.
+
+**Why the remainder PR is a human's.** A human who confirms it is its author, so the producing
+identity is never the automation identity that merges in mode B (ADR-0037), and no second
+automation identity exists.
+
+**Why the region rewrite is Tier 1** (ruling M4, moved from `day:start` to `brain:gc` with the act).
+Three facts earn it: the region is generated, never authored; every byte outside its markers is
+proven identical before the write (`replaceMapRegion`/`outsideRegion`, ADR-0029 Decision 3); and it
+is not a contract, so no tool reads it. It is the only issue-body write Tier 1 grants: the
+`brain-graph/1` block and every other part of a body stay outside it.
 
 ### Notes for the promoter
 
-Two in-place edits: a Tier 1 row for `day:start`'s region rewrite, and an annotation on Tier 2's
+Two in-place edits: a Tier 1 row for `brain:gc`'s region rewrite, and an annotation on Tier 2's
 delete-branches row; plus this section.

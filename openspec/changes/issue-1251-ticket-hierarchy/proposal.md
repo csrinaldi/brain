@@ -8,9 +8,9 @@ issue: 1251
 Issue: #1251 (parent #1121, phase 4). The decision record is the ADR-0039 draft:
 `brain-drafts/adr-0039-a-declared-ticket-hierarchy-one-resolver-and-integration-opened-by-ticket-start.md`.
 It records the maintainer's rulings of 2026-10-02 and 2026-10-07 (Q1-Q12, Q1-hotfix, C1-C10, N1-N5,
-M1-M4, R1 and
-S1) and the questions they still leave open. Three of the amendments it owes are drafted beside
-it: `agent-authorities.md`, ADR-0026 Amendment 11 and `workflow-governance.md`.
+M1-M4, R1, S1,
+T1 and T1-gc) and the questions they still leave open. Every amendment it owes is drafted beside it;
+`brain-drafts/README.md` gives the promotion order and each draft's validation.
 
 ## Why
 
@@ -44,11 +44,11 @@ disagreeing with nothing to notice.
    PR's `Closes #N` to know what to close (N3) and executes it only when the resolver places N
    under the node whose tracker is the base, reporting any other keyword (M2). It rewrites the
    children region in the same step (N5), and closes nothing for a node merged before it was ready
-   (N4); such a node closes through a remainder PR from the same tracker, which `day:start`
+   (N4); such a node closes through a remainder PR from the same tracker, which `brain:gc`
    proposes and a human confirms (Tier 2, R1), or directly when the tracker has no commits its
    target lacks (M3), which the workflow does on the `issues` `closed` event (S1). It runs in every project,
-   the implicit model included (N1). GitLab needs a project access token. `day:start` lists
-   merged-but-open issues and regenerates stale regions as the net.
+   the implicit model included (N1). GitLab needs a project access token. `brain:gc`, offered by
+   `day:start`, sweeps what the workflow could not do (T1, T1-gc).
 4b. **The `integration-ready` gate.** Refuses an integration PR merge before its node is Ready to
    close, judged through the resolver. It runs in every project: where `vcs.hierarchy` is declared,
    detection at `lite` and required at `standard` and `regulated` (N4); on the implicit model,
@@ -63,7 +63,7 @@ disagreeing with nothing to notice.
    PR uses them; without a hierarchy they are the grammar and stay (N2).
 8. **The generated children region** in the parent's body, human-only. It replaces the repo-wide
    `epic:map` region and is written by the existing `replaceMapRegion` writer, from the close
-   workflow and from `day:start` as the net (C8, N5); `day:start`'s write is Tier 1 (M4). #1335
+   workflow and from `brain:gc` as the net (C8, N5, T1-gc); that write is Tier 1 (M4). #1335
    stays block-only. Every project gets it (N1).
 
 ## Sequencing
@@ -74,6 +74,8 @@ starts after ADR-0039 is promoted and its open questions are ruled.
 ## Not in this change
 
 - No code. The slices above are implemented after the ADR is promoted.
-- The amendments the ADR names, promoted after ADR-0039 in this order: `agent-authorities.md`,
-  ADR-0026 Amendment 11 and `workflow-governance.md` (drafted here); ADR-0029, ADR-0032, ADR-0035,
-  ADR-0018 and the `harness-contract.md` `ticket:start` row (owed).
+- The amendments the ADR names are drafted in `brain-drafts/` and promoted after ADR-0039, in the
+  order `brain-drafts/README.md` gives.
+- Provider gaps (GitLab's missing issue-event trigger, a missing token) degrade to the `brain:gc` sweep, which `day:start` offers and `session:start` counts from a local
+  cache
+  (T1): reported, and proposed at Tier 2 where the act is Tier 2.

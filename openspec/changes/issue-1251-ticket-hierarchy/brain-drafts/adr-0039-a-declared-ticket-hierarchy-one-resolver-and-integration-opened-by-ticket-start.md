@@ -1,6 +1,6 @@
 # ADR-0039 — A declared ticket hierarchy: one resolver, a `move` that keeps the sources together, and the integration that `ticket:start` opens
 
-> **status:** proposed — rulings of 2026-10-02 and 2026-10-07 (Q1-Q12, Q1-hotfix, C1-C10, N1-N5, M1-M4, R1, S1) on #1251, pending human promotion | **date:** 2026-10-07 | **owner:** @crinaldi
+> **status:** proposed — rulings of 2026-10-02 and 2026-10-07 (Q1-Q12, Q1-hotfix, C1-C10, N1-N5, M1-M4, R1, S1, T1, T1-gc) on #1251, pending human promotion | **date:** 2026-10-07 | **owner:** @crinaldi
 > **relates to:** ADR-0018 (the GitLab governance fragment), ADR-0020 (port widening is a decision), ADR-0029 (two sources, one graph), ADR-0032 (the `brain-graph/1` tag), ADR-0034 (lanes), ADR-0035 (a branch name is a claim), ADR-0037 (who merges), ADR-0038 (one config shape per axis, with its Amendments 1-2), ADR-0040 (the owned team config); `brain/core/methodology/harness-contract.md` (`ticket:start` row); `brain/core/methodology/agent-authorities.md`; maintainer rulings on #1251, 2026-10-02 and 2026-10-07; #697, #930, #967, #1121, #1130, #1199, #1206, #1257, #1293, #1335
 
 > **Tier 2 draft.** `brain/project/decisions/**` is human-promoted (`agent-authorities.md` Tier 2).
@@ -303,10 +303,12 @@ milestone was authoritative and a `native: "milestone"` level had no issue behin
   (`agent-authorities-hierarchy-close.draft.md`, for the maintainer to sign).
 - **On GitLab, `CI_JOB_TOKEN` cannot write issues.** The project needs a project access token in a
   CI variable for the GitLab governance fragment, and the fragment documents it (ADR-0018). Without
-  it the job reports that it could not close and does nothing else.
-- **The safety net is `day:start`.** Under the user's own credentials it lists every PR merged into
-  a tracker whose issue is still open, so a workflow that did not run (a fork PR's read-only token,
-  a missing GitLab variable, an outage) is seen the next morning.
+  it the job reports that it could not act, and control degrades to `brain:gc` (decision 12).
+- **The safety net is `brain:gc`, offered by `day:start`** (decision 12). `day:start` reports every
+  PR merged into a tracker whose issue is still open, so a workflow that did not run (a fork PR's
+  read-only token, a missing GitLab variable, an outage) is seen the next morning, and offers to
+  run `brain:gc`. Where the provider cannot run the workflow at all, `brain:gc` is not the net but
+  the mechanism.
 - **Every PR keeps `Closes #<own issue>`** (ruling N3, option B, 2026-10-07; this supersedes the
   C5 reading in an earlier draft, under which a PR into a tracker carried no `Closes`). On a PR into
   `main` it is the forge's own close, and the workflow's close is a no-op. On a PR into a tracker
@@ -337,11 +339,12 @@ milestone was authoritative and a `native: "milestone"` level had no issue behin
   and deletes the tracker as the automation identity: the same identity and tier as C5's closes and
   deletions. No PR is authored, so no producer question arises (ADR-0037).
 - **A human authors the remainder PR** (ruling R1, option B, 2026-10-07). The close workflow does
-  not open it; it only reports the merged-but-open node. **`day:start` proposes it under the user's
+  not open it; it only reports the merged-but-open node. **`brain:gc` proposes it under the user's
   credentials, as a Tier 2 act**: it shows the PR (head the live tracker, base its target,
   `Closes #<node>`) and creates it only after the human confirms. The human is therefore the PR's
   author, so ADR-0037's producer rule holds in every mode, and no second automation identity is
-  introduced. In a non-interactive run (no TTY, or CI), `day:start` only reports. The reasons are
+  introduced. In a non-interactive run (no TTY, or CI), `brain:gc` only reports (decision 12, which
+  moves this act from `day:start`, ruling T1-gc). The reasons are
   measured: a PR opened with `GITHUB_TOKEN` triggers no workflow run, so its required checks would
   never report (`governance-postmerge.yml:577-581`, #1106); and a PR authored by the automation
   identity that merges in mode B would be merged by its producer.
@@ -440,10 +443,11 @@ milestone was authoritative and a `native: "milestone"` level had no issue behin
   lanes, never from one forge call per child. It applies to every project, a project on the
   implicit model included (ruling N1).
 - **The close workflow rewrites it in the same step that closes an issue** (ruling N5, option C,
-  2026-10-07). **`day:start` regenerates it under the user's credentials as the safety net**, for
-  when the workflow failed or is not configured, for example GitLab without its token. That write is
-  **Tier 1** for an agent that runs `day:start` (ruling M4, option A, 2026-10-07): the region is
-  generated, the bytes outside it are proven identical, and it is not a contract.
+  2026-10-07). **`brain:gc` regenerates it under the user's credentials as the safety net**, for
+  when the workflow failed or is not configured, for example GitLab without its token; `day:start`
+  offers to run it (decision 12, ruling T1-gc). That write is **Tier 1** for an agent that runs
+  `brain:gc` (ruling M4, option A, 2026-10-07, its reasoning moved from `day:start` with the act):
+  the region is generated, the bytes outside it are proven identical, and it is not a contract.
   `agent-authorities.md` names it (the `agent-authorities-hierarchy-close.draft.md` draft).
 - **It replaces the repo-wide `brain:epic:map` region in epic bodies** (ruling C8). It is written
   by the existing region writer, `replaceMapRegion`, under its `outsideRegion` proof that every
@@ -469,6 +473,58 @@ milestone was authoritative and a `native: "milestone"` level had no issue behin
 to `''` when unread) on every entry, as an additive widening, the same move #930 made for `mrList`.
 **This shipped in #1257**, and it is what lets one paginated call give the resolver every issue's
 block and state. It is recorded here because the resolver depends on it.
+
+### 12. Degradation to `brain:gc`
+
+(ruling T1, option C, 2026-10-07, stated by the maintainer as a general principle; its target
+refined by a second ruling the same day, cited here as T1-gc)
+
+**When a provider's implementation cannot automate an act because it lacks the tools, control
+degrades to a dedicated sweep verb, `brain:gc`.** The act is not dropped and not faked. A
+provider-capability gap is resolved by this principle and recorded here, never left as an open
+question.
+
+**`brain:gc` does the whole hierarchy sweep in one pass**, under the user's credentials:
+
+- closes the merged-but-open nodes that qualify for M3's direct close (last child closed, tracker
+  with no commits its target lacks);
+- proposes remainder PRs (ruling R1);
+- deletes trackers with nothing left to integrate (no commits their target lacks);
+- regenerates stale children regions (rulings N5, M4).
+
+How it runs:
+
+- **Each act keeps the tier it has for an agent** (`agent-authorities.md`). The children region
+  rewrite is Tier 1 and runs (ruling M4: generated, bounds proven, not a contract). Closing an
+  issue, deleting a tracker branch, closing a native milestone, marking a PR ready and opening a
+  remainder PR are Tier 2: shown, and performed only after the human confirms.
+- **Without a TTY, or under CI, it only reports.**
+- **`brain:doctor` (#1130) absorbs it later.** Until then it is its own verb.
+
+Who points at it:
+
+- **`day:start`** (forge access, user credentials) reports what is pending and **offers** to run
+  `brain:gc` interactively. It performs none of the acts itself.
+- **`session:start` stays read-only, local and network-free** (its `harness-contract.md` row). It
+  shows only a cached count, for example "3 hierarchy items pending — run `npm run brain:gc`", read
+  from a local cache the last forge-reading run wrote. It never sweeps and never calls the forge.
+- Where an earlier ruling named `day:start` as the degradation or the safety net (N5's region
+  regeneration, R1's remainder proposal, T1), the act now lives in `brain:gc` and `day:start`
+  offers it (T1-gc). M4's Tier 1 reasoning moves with the region rewrite.
+
+**Each gap is stated as a provider limitation** in the provider's own doctrine (ADR-0018 for
+GitLab), never hidden behind a pass. The gaps this principle covers today:
+
+| Gap | Acts that degrade to `brain:gc` | Where it is stated |
+|---|---|---|
+| GitLab has no issue-event pipeline source, so S1's `issues` `closed` run has no counterpart (ruling T1) | the direct close of a merged-but-open node and the deletion of its tracker (ruling M3) | ADR-0018 amendment |
+| GitLab's `CI_JOB_TOKEN` cannot write issues, and the project has not provided the project access token | every act of the close workflow: closing nodes, deleting trackers, closing the native milestone, marking ready, rewriting the children region | ADR-0018 amendment |
+| A missing or under-scoped token on any provider: a fork PR's read-only `GITHUB_TOKEN`, a token without `issues: write` or `contents: write` | the acts of that workflow run | this decision |
+| Any outage of the workflow | the acts of that run | this decision |
+| Design, not a gap: the remainder PR must have a human author (ruling R1) | opening a remainder PR, on every provider | this decision |
+
+A gap in a READ is not degradation: a native construct a provider lacks is "unmeasured" (decision
+5), never an act for `brain:gc`.
 
 ## Config examples
 
@@ -592,8 +648,8 @@ passes (ruling N4); it merges into `release-1300/tracker` under the declared aut
 Q10), and the workflow then closes #878, deletes `release-1300/epic-878/tracker` and rewrites
 #1300's region. Had #878's PR merged while #56 was still open, at `lite`, #878 would stay open,
 its tracker would stay, and brain would report it as merged but open; #56's merge into the live
-tracker would be reported by the workflow, and the next `day:start` would propose a remainder PR
-for #878, created on the operator's confirmation; its merge closes #878 (rulings M3, R1). Had #56
+tracker would be reported by the workflow, the next `day:start` would offer `brain:gc`, and
+`brain:gc` would propose a remainder PR for #878, created on the operator's confirmation; its merge closes #878 (rulings M3, R1). Had #56
 instead been closed as not planned, with nothing merged into the tracker since #878's merge, the
 workflow's `issues` `closed` run would close #878 and delete its tracker at once (ruling S1). When #1300's PR
 merges into `main`, the forge executes its `Closes #1300`, and the workflow deletes its tracker and
@@ -638,6 +694,9 @@ main into tracker" PR for each, to be merged with `--merge`.
 - **A new CI workflow writes issues and bodies and deletes branches** as the automation identity,
   at every tier, in every project, on the implicit model too (ruling N1). Its token scope (`issues: write`, `contents: write`) is a cost, and on GitLab a project
   access token is a secret the project must create and rotate.
+- **On GitLab some control is manual by design** (decision 12). The direct close never runs
+  automatically there, and without the project access token nothing of the close workflow does;
+  each act waits for an interactive `brain:gc` and a human's confirmation.
 - **A hotfix is invisible to its epic's rollup and children region** (ruling C2). A forge-native
   link from the hotfix to the epic, for example a sub-issue added by hand, is reported as drift,
   because the block declares no parent.
@@ -650,6 +709,9 @@ main into tracker" PR for each, to be merged with `--merge`.
   ready; creating, assigning and closing a native milestone; reading native containment (GitHub
   sub-issues, GitLab epics and work items) and native milestone membership; deleting a remote
   branch; and whatever renaming a remote branch needs.
+- **A new verb, `brain:gc`,** carries every degraded act and the human-authored remainder PR. Its
+  cost is one more thing a person must run; `day:start` offering it and `session:start` showing
+  its pending count are how it is not forgotten (ruling T1-gc).
 - **`ticket:start` gains remote writes.** The single confirmation is their cost.
 - **Writing `tracker:` and the children region rewrites parts of a human-authored body.** Each
   needs ADR-0029 Decision 3's containment proof: everything outside the key, or outside the
@@ -659,8 +721,8 @@ main into tracker" PR for each, to be merged with `--merge`.
 - **A new gate, `integration-ready`,** blocks an early integration merge at `standard` and
   `regulated` where a hierarchy is declared. At `lite`, and on the implicit model at every tier
   (ruling M1), an early merge is possible; its cost is a node reported as merged but open, and a
-  remainder PR a human must confirm in `day:start` before the node can close (rulings M3, R1).
-  Until someone runs `day:start` interactively, the node stays open. When nothing is left to
+  remainder PR a human must confirm in `brain:gc` before the node can close (rulings M3, R1,
+  T1-gc). Until someone runs `brain:gc` interactively, the node stays open. When nothing is left to
   integrate, the `issues` `closed` run closes it without waiting (ruling S1).
 - **A closing keyword in a PR body is no longer enough off `main`.** The workflow closes only what
   the resolver confirms (ruling M2), so a child whose block does not declare its parent stays open
@@ -720,8 +782,10 @@ price of hierarchical names.
   through `brain:governance-status` alone, and the legacy-branch counts have no home.
 - **The `agent-authorities.md`, `workflow-governance.md` and ADR-0026 changes are drafts,** not
   doctrine, until the maintainer signs them.
-- **GitLab's close path needs a token the project must provide.** Until it does, the GitLab
-  workflow reports and does nothing, and `day:start` is the only net.
+- **GitLab's close path needs a token the project must provide, and S1's trigger has no GitLab
+  counterpart.** Both are stated degradations to `brain:gc` (decision 12), not automation.
+- **`brain:gc` does not exist yet,** and neither does the local cache `session:start` reads its
+  count from. Both are slices of #1251; `brain:doctor` (#1130) absorbs the verb later.
 - **Renaming an open PR's head** stays unmeasured, and `move` refuses it.
 - **Native constructs other than the milestone mirror and containment,** such as GitHub issue
   types, are not defined here.
@@ -737,7 +801,8 @@ Promoted after ADR-0039, in this order. "Drafted" means the draft is beside this
    `agent-authorities-hierarchy-close.draft.md`. The close workflow (ruling C5), its branch
    deletions, its ready-marking (ruling C10) and its children-region rewrite (ruling N5) are
    automation acts, run by the automation identity at every tier, not agent acts; and
-   `day:start`'s regeneration of the region is Tier 1 for an agent (ruling M4).
+   `brain:gc`'s regeneration of the region is Tier 1 for an agent (rulings M4, T1-gc); its other
+   acts are Tier 2.
 2. **ADR-0026, Amendment 11** — **drafted**, `adr-0026-amendment-11.draft.md`. A row for
    `integration-ready` in the tier table: detection at `lite`, required at `standard` and
    `regulated` where `vcs.hierarchy` is declared; detection-only at every tier on the implicit model
@@ -746,41 +811,37 @@ Promoted after ADR-0039, in this order. "Drafted" means the draft is beside this
    `workflow-governance-integration-ready.draft.md`. A fifth invariant row, `integration-ready`,
    with its scope: judged through the resolver by content, never by branch name, no label bypass,
    and the close workflow's merged-but-open fallback (ruling N4).
-4. **ADR-0029** — **owed**. Its Decision 2 ("neither wins", the union) governs blocking edges and is
+4. **ADR-0029, Amendment 1** — **drafted**, `adr-0029-amendment-1.draft.md`. Its Decision 2 ("neither wins", the union) governs blocking edges and is
    unchanged for them. For the hierarchy fields, rulings Q2 and C1 set a precedence (block > label >
    default) with every disagreement reported, and ruling Q11 reads native containment, which
    Decision 2 deliberately left unread, for drift only and never into the blocking graph. The union
    for hierarchy is named as a later upgrade. Its Decision 3 changes too (ruling C8): `brain:epic:map`
    no longer writes its repo-wide region into issue bodies; the same proven region writer writes the
-   generated children region instead, from the close workflow and from `day:start` (ruling N5).
-5. **ADR-0032** — **owed**. The `brain-graph/1` format gains levels: `kind` names any declared
+   generated children region instead, from the close workflow and from `brain:gc` (rulings N5,
+   T1-gc).
+5. **ADR-0032, Amendment 2** — **drafted**, `adr-0032-amendment-2.draft.md`. The `brain-graph/1` format gains levels: `kind` names any declared
    level, not only `epic`, `milestone` included; `tracker:` is honoured on any level that declares
    `integration`; `TRACKER_GRAMMAR` admits the hierarchical scheme in a repository that declared a
    hierarchy and keeps `feature/…` (ruling N2). The block gains no name key (ruling C6).
-6. **ADR-0035** — **owed**. Its rule that a branch name is a claim extends from the two lanes to the
+6. **ADR-0035, Amendment 2** — **drafted**, `adr-0035-amendment-2.draft.md`. Its rule that a branch name is a claim extends from the two lanes to the
    hierarchical branch path: ancestry in a name is a claim, and the resolver's sources are the
    proof. `integration-ready` is a second gate judged by content under that rule.
-7. **ADR-0018** — **owed**. The GitLab governance fragment documents the project access token
-   variable the close job needs, because `CI_JOB_TOKEN` cannot write issues.
-8. **`brain/core/methodology/harness-contract.md`, the `brain:ticket:start` row** — **owed**. With a
+7. **ADR-0018, Amendment 1** — **drafted**, `adr-0018-amendment-1.draft.md`. The GitLab governance
+   fragment documents the project access token variable the close job needs, because
+   `CI_JOB_TOKEN` cannot write issues, and states the GitLab degradations to `brain:gc`
+   (decision 12, ruling T1).
+8. **`brain/core/methodology/harness-contract.md`, the `brain:ticket:start` row** — **drafted**,
+   `harness-contract-ticket-start-hierarchy.draft.md`. With a
    declared hierarchy the branch is no longer `{type}/issue-{number}-{slug}`, the base is the
    nearest integrating ancestor's tracker, and the verb may propose creating the missing chain under
    one confirmation; without one, today's row stands (ruling N1). A parentless issue, a hotfix
-   included, starts from `main`.
+   included, starts from `main`. It also adds a `brain:gc` row, and a note that `session:start`
+   shows only `brain:gc`'s cached pending count (ruling T1-gc).
+
+The order and each draft's validation are kept in `brain-drafts/README.md`.
 
 ## Open questions for the maintainer
 
-The rulings of 2026-10-07 (Q1-Q12, Q1-hotfix, C1-C10, N1-N5, M1-M4, R1, S1) settle every question
-earlier drafts listed. Checking S1 against the providers leaves one. This draft takes no position on
-it.
-
-1. **S1's trigger does not exist on GitLab** (ruling S1 against ADR-0018 and the GitLab fragment).
-   GitLab CI starts pipelines on pushes, merge requests, schedules, the web UI, the API and trigger
-   tokens; an issue event is not a pipeline source, so there is no GitLab counterpart to GitHub's
-   `issues` `closed` workflow run. Until one is chosen, a GitLab project's direct close happens
-   only when `day:start` reports the merged-but-open node and a human acts. Options: (a) a project
-   webhook on issue events calls the pipeline trigger API, which needs a pipeline trigger token
-   beside the project access token, both documented in the ADR-0018 amendment; (b) a scheduled
-   pipeline sweeps merged-but-open nodes, which needs no new secret but closes them with up to one
-   schedule interval of delay; (c) on GitLab the direct close is not automated at all, and
-   `day:start`'s report is the mechanism, stated as a provider limitation.
+None. The rulings of 2026-10-07 (Q1-Q12, Q1-hotfix, C1-C10, N1-N5, M1-M4, R1, S1, T1, T1-gc) settle every
+question earlier drafts listed. GitLab's missing issue-event trigger, the last one, is a provider
+gap, and T1 resolves every such gap by degradation to `brain:gc` (decision 12, T1-gc).
