@@ -87,7 +87,7 @@ const STRIPPED_ENV = Object.freeze([
 
 /** The environment every fixture command sees. Pure, so a test can read it. */
 function fixtureEnv(home) {
-  const env = { ...process.env, HOME: home, CI: '1' };
+  const env = { ...process.env, HOME: home, BRAIN_HOME: join(home, '.brain'), CI: '1' }; // the user layer (#1263): the fixture's own, never the developer's
   for (const k of STRIPPED_ENV) delete env[k];
   return env;
 }
@@ -283,10 +283,19 @@ const POST_CONDITIONS = [
   // Amendment 2); `AGENTS.md` is antigravity's emit and a claude consumer does
   // not get one from env:init.
   ['.claude/settings.json (harness init ran for the default platform)', () => existsSync(join(consumer, '.claude', 'settings.json'))],
-  ['.env (PAT scaffold ran)', () => existsSync(join(consumer, '.env'))],
-  ['.env states AGENT_PLATFORM=claude (the default, stated explicitly — #1125)', () =>
-    existsSync(join(consumer, '.env'))
-    && /^AGENT_PLATFORM=claude$/m.test(readFileSync(join(consumer, '.env'), 'utf8'))],
+  // #1114 S3.3: env:init writes NO axis selector into `.env`. In this non-TTY run no token is entered, so
+  // nothing else creates it either (the only `env_set` left stores VCS_TOKEN): its ABSENCE is correct.
+  ['.env absent (no axis selector is written there; no token was entered)', () => !existsSync(join(consumer, '.env'))],
+  // #1125's "the default, stated explicitly" now lives in TRACKED config, with its providers entry.
+  ['brain.config.json states platform.default=claude and sdd.default=gentle-ai explicitly, each a key of its providers (#1125 via #1114 S3.3)', () => {
+    const c = JSON.parse(readFileSync(join(consumer, 'brain.config.json'), 'utf8'));
+    return c.platform?.default === 'claude' && c.platform.providers?.claude !== undefined
+      && c.sdd?.default === 'gentle-ai' && c.sdd.providers?.['gentle-ai'] !== undefined;
+  }],
+  ['brain.config.json declares vcs.default=github with its provider', () => {
+    const c = JSON.parse(readFileSync(join(consumer, 'brain.config.json'), 'utf8'));
+    return c.vcs?.default === 'github' && c.vcs.providers?.github !== undefined;
+  }],
   ['core.hooksPath (pre-push hook installed)', () => {
     const r = spawnSync('git', ['-C', consumer, 'config', '--get', 'core.hooksPath'], { encoding: 'utf8' });
     return (r.stdout ?? '').trim() === 'brain/scripts/hooks';
@@ -335,18 +344,15 @@ const before = manifest(consumer);
 
 // Snapshot the set-compared files BEFORE the run, so the acceptance below
 // compares two real readings rather than re-deriving one of them afterwards.
-for (const p of SET_COMPARED) {
-  check(existsSync(join(consumer, p)),
-    `${p} exists, so relaxing it to a set comparison weakens something real`);
-}
-const beforeSets = new Map(
-  SET_COMPARED.filter((p) => existsSync(join(consumer, p))).map((p) => [p, envKeySet(consumer, p)]),
-);
-// An empty key set makes `sameSet` trivially true, which would turn the one
-// relaxation in this suite into "accept any change to .env whatsoever".
+// `.env` is not created by env:init any more (S3.3), so there is normally nothing to set-compare; if one
+// exists (a token was entered) the set comparison still applies to it, unchanged.
+const present = SET_COMPARED.filter((p) => existsSync(join(consumer, p)));
+check(present.length === 0, '.env is still absent before the second run (env:init writes no axis selector there, #1114 S3.3)');
+const beforeSets = new Map(present.map((p) => [p, envKeySet(consumer, p)]));
 for (const [p, s] of beforeSets) {
   check(s.size > 0, `${p} parsed into ${s.size} key(s) — an empty set would accept every change to it`);
 }
+const configBefore = readFileSync(join(consumer, 'brain.config.json'), 'utf8');
 
 const again = run('npm', ['run', 'brain:env:init'], { cwd: consumer, home });
 check(again.status === 0, `second brain:env:init exits 0 (got ${again.status})`);
@@ -361,6 +367,9 @@ for (const d of diffManifests(before, after)) {
   (relaxed ? reordered : real).push(d);
 }
 
+check(readFileSync(join(consumer, 'brain.config.json'), 'utf8') === configBefore,
+  'the second run leaves brain.config.json byte-identical');
+check(!existsSync(join(consumer, '.env')), '.env is still absent after the second run');
 check(real.length === 0, `second run changed nothing that matters (${real.length} real difference(s))`);
 for (const d of real.slice(0, 20)) info(`${d.kind}: ${d.path}`);
 for (const d of reordered) {

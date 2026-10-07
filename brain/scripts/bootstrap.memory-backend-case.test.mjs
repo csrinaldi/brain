@@ -108,7 +108,7 @@ function runCase(memoryBackend) {
 
     execFileSync('bash', ['-c', script], {
       cwd: dir,
-      env: { PATH: `${bin}:${process.env.PATH}` },
+      env: { PATH: `${bin}:${process.env.PATH}`, BRAIN_HOME: process.env.BRAIN_HOME || '/nonexistent/brain-home' },
       encoding: 'utf8',
     });
 

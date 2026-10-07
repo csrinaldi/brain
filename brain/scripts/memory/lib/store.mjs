@@ -155,6 +155,44 @@ export function appendRecord(record, { recordsDir }) {
  *   duplicate NEVER throws.
  */
 export function rebuildIndex({ recordsDir, indexPath }) {
+  const { entries, duplicates } = buildIndex({ recordsDir });
+  mkdirSync(dirname(indexPath), { recursive: true });
+  writeFileSync(indexPath, serializeIndex(entries), 'utf8');
+  return { count: entries.size, duplicates };
+}
+
+/**
+ * verifyIndex() — the READ-ONLY twin of rebuildIndex() (#1115, ruling Q1).
+ *
+ * Reads `records/` through the same fail-closed loop and compares the bytes
+ * `rebuildIndex` WOULD write with the file on disk. It writes nothing and creates
+ * nothing — not the index, not `.memory/`. That is the whole point: `session:start`
+ * is read-only and `.memory/index.jsonl` is tracked, so the loader may report drift
+ * but never repair it; the repair belongs to the callers that already write
+ * (`post-merge`, `brain:memory:pull`, `brain:memory:share`).
+ *
+ * An absent index with no records is current (there is nothing to be stale
+ * about); an absent index with records present is stale.
+ *
+ * @param {{recordsDir: string, indexPath: string}} opts
+ * @returns {{count: number, duplicates: object, stale: boolean}}
+ * @throws {Error} exactly where rebuildIndex throws (corrupt line, id mismatch).
+ */
+export function verifyIndex({ recordsDir, indexPath }) {
+  const { entries, duplicates } = buildIndex({ recordsDir });
+  const canonical = serializeIndex(entries);
+  let onDisk = null;
+  try {
+    onDisk = readFileSync(indexPath, 'utf8');
+  } catch (err) { // swallow-ok: ENOENT only means there is no index file yet, which is reported as `stale` when records exist; every other error is rethrown
+    if (err?.code !== 'ENOENT') throw err;
+  }
+  const stale = onDisk === null ? entries.size > 0 : onDisk !== canonical;
+  return { count: entries.size, duplicates, stale };
+}
+
+/** The shared, side-effect-free read of `records/` behind rebuildIndex and verifyIndex. */
+function buildIndex({ recordsDir }) {
   const entries = new Map();
   /** id → ['<file>:<line>', …] for every physical line carrying that id. */
   const occurrences = new Map();
@@ -235,9 +273,7 @@ export function rebuildIndex({ recordsDir, indexPath }) {
     }
   }
 
-  mkdirSync(dirname(indexPath), { recursive: true });
-  writeFileSync(indexPath, serializeIndex(entries), 'utf8');
-  return { count: entries.size, duplicates: summarizeDuplicates(occurrences, divergentIds) };
+  return { entries, duplicates: summarizeDuplicates(occurrences, divergentIds) };
 }
 
 /**

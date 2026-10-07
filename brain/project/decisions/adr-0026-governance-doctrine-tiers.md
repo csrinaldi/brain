@@ -1,6 +1,6 @@
 # ADR-0026 — Governance Doctrine Tiers: A Declared Axis Orthogonal to the Detected Substrate Ladder
 
-**Status**: Accepted · **amended 28/09/2026** (Amendments 1-9 — see below)  
+**Status**: Accepted · **amended 04/10/2026** (Amendments 1-10 — see below)  
 **Date**: 31/07/2026 — Cristian Rinaldi
 
 ## Context
@@ -48,7 +48,9 @@ to brain's pre-tier doctrine, so the migration is a no-op for every existing con
 **[Amended by Amendment 8 (#1124): this default now governs EXISTING consumers only. A
 config written by `env:init` for a NEW consumer declares `lite`, and `env:init` states the
 tier, why, and how to change it. The migration still defaults to `standard`, and no
-migration may change a consumer's tier. See Amendment 8.]**
+migration may change a consumer's tier. See Amendment 8.]** **[Amended by Amendment 10
+(#1263): the adoption PR that founds `brain.config.json` is judged by `team-config-reviewed` at
+`lite`, the new-consumer tier, never at the tier its own head declares. See Amendment 10.]**
 The axes compose and neither may mask the other:
 `brain:governance-status` reports both separately and renders their cross-product per
 gate — a gate required by doctrine on a substrate that cannot block is surfaced as
@@ -101,6 +103,7 @@ tier may grant the reviewer merge authority**, which would collide with L5 and #
 | `phase-order` | detection | required | required |
 | release gate (rung 2) | detection | required | required |
 | post-merge auto-revert (rung 3) | detection | detection | required |
+| `team-config-reviewed` **[Added by Amendment 10 (#1263, ADR-0040)]** | detection (a sole owner's own change passes as the ADR-0037 mode A exception) | required: an owner-approved review on the current head | required: same |
 | reviewer verdict recorded | — | detection | detection **[Amended by Amendment 7 (#743): the parenthetical `(panel ≥2)` is retired with the parameter row below. The gate's POSITION still tiers — it is `detection` above `lite` — but what it records does not.]** |
 
 ### Doctrine parameters
@@ -967,3 +970,66 @@ failure #1081 measured: a one-person repository that cannot merge.
 `branchProtect` left brain/scripts/vcs/providers/ for `brain/scripts/axes/vcs/adapters/`, with
 `git mv`, so `git log --follow` still reaches its history. The one citation Amendment 6 made is
 annotated in place. No tier parameter changed.
+
+## Amendment 10 — `team-config-reviewed` is tiered by position, and an adoption PR is judged at `lite` (issue #1263)
+
+**Signed**: 04/10/2026 — Cristian Rinaldi
+
+### What changed
+
+ADR-0040 names this ADR in "Amendments this requires". Two changes, both on the
+`feature/issue-1114-axis-ports` tracker.
+
+**1. A new gate row.** `team-config-reviewed` (`brain/scripts/vcs/team-config-reviewed.mjs`) is
+appended to `GOVERNANCE_JOBS` and to `GATE_MATRIX` (`brain/scripts/vcs/governance-tiers.mjs`):
+
+| Tier | Policy | Evidence |
+|---|---|---|
+| `lite` | detection | `owner-approval-or-solo-maintainer` |
+| `standard` | required | `owner-approved-review` |
+| `regulated` | required | `owner-approved-review` |
+
+On any PR that touches `brain.config.json`, the gate needs an APPROVED review from a
+`governance.owners` login who is not the author, on the current head, and still that owner's latest
+decisive review. It reads the owners and the tier from the BASE ref. At `lite`, a sole owner who
+authored the change passes, labelled ADR-0037 mode A's solo-maintainer exception. At `lite` any other
+failure is a warning that names the tier.
+
+**2. The founding tier.** When the base has no `brain.config.json` and never had one, in a history that
+is not shallow, the PR is the adoption: the founding decision. The gate passes it, labelled as such
+and never as independent review, and judges it at `lite`, the tier Amendment 8 gives a new consumer.
+It never uses the tier the PR's own head declares. A base that once had the file and lost it is a
+removal, judged with the owners and tier of its last version. A shallow history cannot tell the two
+apart, so it is an evidence failure, never a founding.
+
+### Why
+
+The team config sets the tier, the ignore list, the reviewer and the axes for every gate. Changing it
+with the review a typo gets is self-authorization one level up (ADR-0040). The row is position-tiered
+by proportionality. A `lite` repository is typically one maintainer who owns the config, and a team
+that has declared no owner yet should be told, not blocked.
+
+The founding PR has no owner to approve it, and its head declares a tier nobody has reviewed yet.
+Reading that tier would let the PR choose the rule it is judged by.
+
+### Why `lite` is detection here when `brain-writes-reviewed` is required at every tier
+
+`brain-writes-reviewed` guards `brain/**`, the signed doctrine, and is never-tiered by position.
+`team-config-reviewed` guards configuration a solo maintainer edits routinely. At `lite` the sole-owner
+exception already covers that maintainer, and detection reports everything else. Invariant 3 holds: the
+job runs at every tier and is never below `detection`.
+
+### What this does NOT change
+
+The other gates, their evidence and parameters, the seven invariants, and Amendment 8's rule that no
+migration changes a consumer's tier.
+
+### What the code does not do yet, said plainly
+
+- **GitLab cannot pass on an approval.** `prReviews` returns `commitId: null` there, so a current
+  approval cannot be told from a stale one and the gate fails closed: a failure at
+  `standard`/`regulated`, a warning at `lite`.
+- **No existing consumer declares `governance.owners`.** The gate then reports "no owner declared"
+  until an owner is added by PR.
+- **A missing or unreadable base config is judged at `standard`.** Outside a founding, the gate falls
+  back to `resolveTier({})`, the fail-closed side.

@@ -48,19 +48,23 @@ function applyTheme(choice) {
 }
 
 import { buildLaneModel, nodeSummaryFor, childrenOf } from './lib/lane-model.mjs';
+import { SOURCE, progressLabel } from './lib/progress-view.mjs';
+import { hierarchyOf, epicRollup, rollupLabel, rollupNote } from './lib/rollup-model.mjs';
 import { issueUrl } from './lib/forge-url.mjs';
-import { buildDrawerModel } from './lib/drawer-model.mjs';
+import { buildDrawerModel, localChangedFor } from './lib/drawer-model.mjs';
 import { remoteBadges, remotePanel, tipAge } from './lib/remote-model.mjs';
+import { cardReviewIndex } from './lib/card-review-model.mjs';
 import { renderOffThread, timeoutNotice, FAILED_NOTICE, UNAVAILABLE_NOTICE } from './lib/render-budget.mjs';
-import { buildSddModel, sddForIssue, buildSlicePlan, STAGE_VOCAB } from './lib/sdd-model.mjs';
+import { buildSddModel, sddForIssue, quietAbsence, buildSlicePlan, STAGE_VOCAB } from './lib/sdd-model.mjs';
 import { searchNodes } from './lib/search-model.mjs';
-import { buildMemoryModel } from './lib/memory-model.mjs';
+import { buildMemoryModel, RECORD_LOADING, recordFailure, recordTruncated, recordUrl } from './lib/memory-model.mjs';
 import { buildReviewTimeline } from './lib/review-timeline.mjs';
 import { buildRoadmapModel } from './lib/roadmap-model.mjs';
 import { buildDecisionsModel } from './lib/decisions-model.mjs';
 import { buildAntiPatternsModel } from './lib/anti-patterns-model.mjs';
 import { buildHeaderModel } from './lib/header-model.mjs';
-import { STATES } from './lib/state-vocab.mjs';
+import { buildInflight, workIndex } from './lib/inflight-model.mjs';
+import { STATES, TRACK_MARKS } from './lib/state-vocab.mjs';
 import { buildHistoryModel, capNote } from './lib/history-model.mjs';
 import { buildActorsModel } from './lib/actors-model.mjs';
 import { sourceStamp } from './lib/provenance.mjs';
@@ -106,6 +110,10 @@ let searchResultsMount = null;
 /** The last `GET /api/change/<N>` body for the selected issue; `null` while it is still being read. */
 let changeView = null;
 let activeTab = 'spec';
+// #1307 D122: set by a tab click so the next drawer render scrolls the body to the panel.
+let tabScrollPending = false;
+let drawerRenderedFor = null;
+let panelPadded = false;
 /**
  * Which track lanes are collapsed (#998 R998-3): a local Set, the same kind
  * of page-only interaction state `selectedIssue`/`activeTab` already are —
@@ -116,6 +124,8 @@ let activeTab = 'spec';
 let collapsedTracks = new Set(['?']);
 /** Whether the "Remote work" panel's unjoined group is open (#1201 R1201-5). Page-only, like `collapsedTracks`; collapsed by default. */
 let remoteUnjoinedOpen = false;
+/** The in-flight section's stale group starts collapsed (#1284 R1284-5). */
+let inflightStaleOpen = false;
 /** The `?` holding lane's current page (#998 R998-3), 24 rows at a time. */
 let holdingPage = 0;
 /**
@@ -132,6 +142,16 @@ let expandedDocs = new Set();
  * changes, so it cannot grow without bound.
  */
 let docTrees = new Map();
+/**
+ * The Memory ledger's rows opened inline (#1313): the record ids that are open (page-only state, like
+ * `expandedDocs`, so a re-render that is not a user action restores them), each record's read
+ * (`recordLoads`, id to its answer) and each opened record's render (`recordTrees`, a store of its own so
+ * an issue change that empties `docTrees` never cancels a record). A collapse evicts the row's entries,
+ * so what is held is bounded by what the reader has open.
+ */
+const expandedRecords = new Set();
+const recordLoads = new Map();
+const recordTrees = new Map();
 
 /** Cancel every request in flight and forget them all. */
 function resetDocTrees() {
@@ -165,6 +185,12 @@ function clear(node) {
 /** A stated reason, in band. The one thing this page never does is show an empty area instead (R881-9). */
 function said(text) {
   return el('p', 'said', text);
+}
+
+/** A model that is unavailable. A section still loading says its own sentence as is (#1257 D65); anything else is a failure. */
+function saidUnavailable(failure, model, ...sectionNames) {
+  const loading = sectionNames.map((name) => sectionOf(state, name)).find((section) => section.pending === true);
+  return said(loading ? loading.reason : `${failure}: ${model.reason}`);
 }
 
 /** A stated list — the same rule as `said`, for facts that come by the handful.
@@ -425,19 +451,155 @@ function renderMemory() {
     // would have gone — never a blank cell, and never a guessed age.
     tr.appendChild(el('td', 'memory-when', record.relativeTime ?? (record.tsUnparseable ? `unparseable: ${record.ts}` : record.ts)));
     tr.appendChild(el('td', 'memory-type', record.type));
-    const actor = el('td', 'memory-actor');
-    actor.appendChild(el('span', 'memory-actor-name', record.actor));
-    actor.appendChild(el('span', 'memory-actor-kind', record.actorKind ?? 'unknown'));
+    const actor = el('td', 'memory-actor-cell');
+    const stack = el('div', 'memory-actor');
+    stack.appendChild(el('span', 'memory-actor-name', record.actor));
+    stack.appendChild(el('span', 'memory-actor-kind', record.actorKind ?? 'unknown'));
+    actor.appendChild(stack);
     tr.appendChild(actor);
-    tr.appendChild(el('td', 'memory-id', record.id));
+    const recordCell = el('td', 'memory-record-cell');
+    const toggle = renderRecordStack(recordCell, record);
+    tr.appendChild(recordCell);
     const source = el('td', 'memory-source');
     source.appendChild(renderSourceStamp(record.sourceStamp));
     tr.appendChild(source);
     body.appendChild(tr);
+    wireRecordToggle(body, tr, toggle, record.id);
   }
   table.appendChild(body);
   scroller.appendChild(table);
   mounts.canvas.appendChild(scroller);
+}
+
+/**
+ * A ledger row's RECORD cell (#1313): the title (or the said reason there is none) as the toggle, the
+ * excerpt, then the id. Every string is text content; a record's words never become markup. Each text
+ * element's `title` attribute is its own text: one wording for one fact. Returns the toggle.
+ */
+function renderRecordStack(cell, record) {
+  const stack = el('div', 'memory-record');
+  const toggle = el('button', 'memory-toggle');
+  toggle.setAttribute('type', 'button');
+  toggle.setAttribute('aria-expanded', 'false');
+  const lead = record.summary.ok ? record.summary.title : record.summary.reason;
+  const title = el('span', 'memory-record-title', lead);
+  title.setAttribute('title', lead);
+  toggle.appendChild(title);
+  stack.appendChild(toggle);
+  if (record.summary.ok && record.summary.excerpt !== '') {
+    const excerpt = el('span', 'memory-record-excerpt', record.summary.excerpt);
+    excerpt.setAttribute('title', record.summary.excerpt);
+    stack.appendChild(excerpt);
+  }
+  stack.appendChild(el('span', 'memory-id', record.id));
+  cell.appendChild(stack);
+  return toggle;
+}
+
+/** The route's answer for one record, or the sentence for why there is none. Never rejects. */
+async function fetchRecord(id) {
+  try {
+    const res = await fetch(recordUrl(id));
+    let answer = null;
+    try { answer = await res.json(); } catch (err) { if (res.ok) throw err; }
+    // The route's own reason is the fact; a status alone is the fallback.
+    if (answer && answer.ok === false && typeof answer.reason === 'string') return { kind: 'reason', reason: answer.reason };
+    if (!res.ok) throw new Error(`answered ${res.status}`);
+    if (!answer || answer.ok !== true || typeof answer.content !== 'string') throw new Error('the answer carried no content');
+    return { kind: 'content', answer };
+  } catch (err) {
+    return { kind: 'failed', reason: recordFailure(id, err.message) };
+  }
+}
+
+/** One record's read, started once per open row and shared by a re-render. */
+function loadRecord(id) {
+  let entry = recordLoads.get(id);
+  if (entry) return entry;
+  entry = { settled: false, result: null };
+  entry.promise = fetchRecord(id).then((result) => {
+    entry.settled = true;
+    entry.result = result;
+    return result;
+  });
+  recordLoads.set(id, entry);
+  return entry;
+}
+
+/** What a rendered record is called: the file it was read from, which no SDD document stamp (`path @ commit`) can equal. */
+const recordStamp = (id, answer) => answer.file ?? `record ${id}`;
+
+/** The opened row's body once the read has an answer: a reason, or the content drawn by the SDD reader's own path. */
+function showRecord(section, id, result) {
+  clear(section);
+  section.removeAttribute('aria-busy');
+  if (result.kind !== 'content') {
+    section.appendChild(el('p', 'note', result.reason));
+    return;
+  }
+  const { answer } = result;
+  const doc = { stamp: recordStamp(id, answer), text: answer.content };
+  section.appendChild(el('p', 'doc-stamp', doc.stamp));
+  if (answer.truncated) section.appendChild(el('p', 'note', recordTruncated(answer.truncatedAt)));
+  // The same loading line, shape and worker as an SDD document: `showDocumentOutcome` takes it away.
+  const rendering = el('p', 'note doc-loading', 'rendering the document\u2026');
+  rendering.setAttribute('role', 'status');
+  section.appendChild(rendering);
+  section.setAttribute('aria-busy', 'true');
+  const entry = requestDoc(doc, recordTrees);
+  if (entry.settled) showDocumentOutcome(section, doc, entry.outcome);
+  else entry.promise.then((outcome) => { if (section.parentNode) showDocumentOutcome(section, doc, outcome); });
+}
+
+/**
+ * The toggle under a ledger row (#1313): opens a second row directly below it, in place, so the
+ * button keeps focus. Many rows may be open; each is its own. A row that is open when the view is
+ * drawn again opens again from the page-only set, without a new read.
+ */
+function wireRecordToggle(body, tr, toggle, id) {
+  let detail = null;
+  let section = null;
+  const seq = requestSequence();
+  const sectionId = `memory-record-${id}`;
+  const setOpen = (open) => {
+    toggle.setAttribute('aria-expanded', String(open));
+    if (open && detail === null) {
+      detail = el('tr', 'memory-detail');
+      const cell = el('td', null);
+      cell.setAttribute('colspan', '5');
+      section = el('section', 'doc-body');
+      section.setAttribute('id', sectionId);
+      section.setAttribute('role', 'region');
+      section.setAttribute('aria-label', id);
+      section.setAttribute('aria-busy', 'true');
+      const loading = el('p', 'note doc-loading', RECORD_LOADING);
+      loading.setAttribute('role', 'status');
+      section.appendChild(loading);
+      cell.appendChild(section);
+      detail.appendChild(cell);
+      body.insertBefore(detail, tr.nextSibling);
+      toggle.setAttribute('aria-controls', sectionId);
+      const token = seq.next();
+      const mine = section;
+      const entry = loadRecord(id);
+      if (entry.settled) showRecord(mine, id, entry.result);
+      else entry.promise.then((result) => { if (seq.isCurrent(token) && section === mine) showRecord(mine, id, result); });
+    }
+    if (!open && detail !== null) {
+      seq.next();
+      const read = recordLoads.get(id);
+      const tree = read?.result?.kind === 'content' ? recordTrees.get(recordStamp(id, read.result.answer)) : undefined;
+      if (tree) { tree.cancel(); recordTrees.delete(recordStamp(id, read.result.answer)); }
+      recordLoads.delete(id);
+      body.removeChild(detail);
+      detail = null;
+      section = null;
+      toggle.removeAttribute('aria-controls');
+    }
+    if (open) expandedRecords.add(id); else expandedRecords.delete(id);
+  };
+  toggle.addEventListener('click', () => setOpen(toggle.getAttribute('aria-expanded') !== 'true'));
+  setOpen(expandedRecords.has(id));
 }
 
 function renderContent() {
@@ -458,7 +620,8 @@ function renderContent() {
 /** R881-9: one band per degraded thing, each one BESIDE the data, never instead of it. */
 function renderBands() {
   clear(mounts.banners);
-  for (const band of degradationBands({ stream: state.stream, controls: state.controls, meta: state.meta, snapshot: state.snapshot })) {
+  const { epic } = buildHeaderModel(sectionOf(state, 'graph'), state.meta ?? {}).value;
+  for (const band of degradationBands({ stream: state.stream, controls: state.controls, meta: state.meta, snapshot: state.snapshot, epic })) {
     const node = el('div', 'band');
     node.appendChild(el('span', null, band.text));
     if (band.detail?.length) {
@@ -484,7 +647,9 @@ function renderServedBranch(servedBranch) {
     return frag;
   }
   const text = servedBranch.ok ? `serving ${servedBranch.branch}` : `serving: unknown (${servedBranch.reason})`;
-  frag.appendChild(el('span', 'served-branch', text));
+  const branchEl = el('span', 'served-branch', text);
+  branchEl.setAttribute('title', text);
+  frag.appendChild(branchEl);
   frag.appendChild(renderSourceStamp(sourceStamp(servedBranch.source)));
   return frag;
 }
@@ -505,14 +670,18 @@ function renderStatus() {
   live.setAttribute('title', indicator.paused ? 'polling is paused' : 'the page is connected to the stream');
   mounts.status.appendChild(live);
 
-  mounts.status.appendChild(el('span', indicator.paused ? 'poll-indicator paused' : indicator.halted ? 'poll-indicator halted' : 'poll-indicator', indicator.text));
+  const pollEl = el('span', indicator.paused ? 'poll-indicator paused' : indicator.halted ? 'poll-indicator halted' : 'poll-indicator', indicator.text);
+  pollEl.setAttribute('title', indicator.text);
+  mounts.status.appendChild(pollEl);
   mounts.status.appendChild(el('span', 'poll-countdown', indicator.countdown));
 
   // The epic this checkout serves: an epic declares its tracker branch, and
   // nothing joins the two yet, so the bar says that rather than parsing an
-  // epic out of a branch name.
-  mounts.status.appendChild(el('span', 'status-epic', epic.ok ? `epic #${epic.issue}` : 'epic: not resolved'));
-  mounts.status.appendChild(el('span', 'status-epic-reason', epic.ok ? '' : epic.reason));
+  // epic out of a branch name. The one-line bar carries the short form; the
+  // explanation is its title and a banner (#1284 D99, D101).
+  const epicEl = el('span', 'status-epic', epic.ok ? `epic #${epic.issue}` : epic.short);
+  if (!epic.ok) epicEl.setAttribute('title', epic.reason);
+  mounts.status.appendChild(epicEl);
 
   const countsEl = el('span', 'status-counts');
   if (counts.ok) {
@@ -526,6 +695,7 @@ function renderStatus() {
   } else {
     countsEl.appendChild(el('span', 'count-label', `nodes: not counted — ${counts.reason}`));
   }
+  countsEl.setAttribute('title', countsEl.textContent);
   mounts.status.appendChild(countsEl);
 
   mounts.status.appendChild(el('span', 'spacer'));
@@ -562,6 +732,92 @@ function renderStatus() {
   mounts.status.appendChild(refresh);
 }
 
+/** One in-flight row (#1284 D97): the issue, its state when unknown, its facts and its age — text only, opening the card's drawer. */
+function renderInflightRow(row) {
+  const node = el('div', 'inflight-row');
+  node.setAttribute('role', 'button');
+  node.setAttribute('tabindex', '0');
+  node.setAttribute('data-issue', String(row.issue));
+  node.appendChild(el('span', 'inflight-number', `#${row.issue}`));
+  node.appendChild(el('span', 'inflight-title', row.title || '(no title)'));
+  if (row.state === 'unknown') node.appendChild(el('span', 'inflight-state', 'state unknown'));
+  node.appendChild(el('span', 'inflight-facts', row.facts.join(' \u00b7 ')));
+  node.appendChild(el('span', 'inflight-age', row.activityAt ? tipAge(row.activityAt, nowMs()) : 'activity unknown'));
+  node.addEventListener('click', () => selectNode(row.issue));
+  node.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') selectNode(row.issue); });
+  return node;
+}
+
+/**
+ * The work-evidence index every lifecycle chip reads (#1308 D123): the SAME join the "In flight" section
+ * draws from, built once per call from whatever sections have arrived, so a card can never disagree with
+ * the section above it.
+ */
+function currentWork() {
+  return workIndex({
+    changes: sectionOf(state, 'changes'), localWorktrees: sectionOf(state, 'localWorktrees'),
+    remoteChanges: sectionOf(state, 'remoteChanges'), prs: sectionOf(state, 'prs'),
+  });
+}
+
+/** The footer index of the render in progress; `renderLanes` sets it before any card is drawn. */
+let cardReviews = { show: false, byIssue: new Map() };
+
+/** The review footer index (#1312 D139): the join the Reviews mode reads, built once per render from the sections already served. */
+function currentCardReviews() {
+  return cardReviewIndex({ prs: sectionOf(state, 'prs'), reviews: sectionOf(state, 'reviews'), remoteChanges: sectionOf(state, 'remoteChanges') });
+}
+
+/** The two sections an epic's state is read from (#1309 D134): the models compute the rollup, this only hands them over. */
+function currentEpics() {
+  return { hierarchy: sectionOf(state, 'hierarchy'), forgeLoad: sectionOf(state, 'forgeLoad') };
+}
+
+/** The lifecycle chip: mark + word, nothing about the track (#1308 R1308-1). */
+function stateChipEl(stateView) {
+  const chip = el('span', `node-state state-${stateView.code}`);
+  chip.appendChild(el('span', 'node-state-mark', stateView.mark));
+  chip.appendChild(el('span', 'node-state-word', stateView.label));
+  if (stateView.reason) chip.setAttribute('title', stateView.reason);
+  return chip;
+}
+
+/** The track chip: `Track X`, `? No track`, or the missing-configuration warning; nothing for an unreadable body (#1308 R1308-2). */
+function trackChipEl(trackMark) {
+  if (!trackMark) return null;
+  const chip = el('span', `track-chip ${trackMark.className}`);
+  if (trackMark.mark) chip.appendChild(el('span', 'track-chip-mark', trackMark.mark));
+  chip.appendChild(el('span', 'track-chip-word', trackMark.label));
+  if (trackMark.title) chip.setAttribute('title', trackMark.title);
+  return chip;
+}
+
+/**
+ * The home's first section (#1284 R-H): the open issues with work in flight, newest first, from
+ * whatever sections have arrived. Every missing source is named; "nothing in flight" is said only
+ * when every source is ready (`inflight-model.mjs` decides, this places).
+ */
+function renderInflight() {
+  const model = buildInflight({
+    changes: sectionOf(state, 'changes'), localWorktrees: sectionOf(state, 'localWorktrees'), remoteChanges: sectionOf(state, 'remoteChanges'),
+    prs: sectionOf(state, 'prs'), hierarchy: sectionOf(state, 'hierarchy'), graph: sectionOf(state, 'graph'),
+  }, { nowMs: nowMs() }).value;
+  const wrap = el('section', 'inflight');
+  wrap.appendChild(el('h3', 'inflight-title-bar', 'In flight'));
+  for (const line of model.notices) wrap.appendChild(el('p', 'inflight-notice said', line));
+  if (model.empty) wrap.appendChild(el('p', 'inflight-empty said', model.empty));
+  for (const row of [...model.rows, ...model.unknown]) wrap.appendChild(renderInflightRow(row));
+  if (model.stale.length > 0) {
+    const toggle = el('button', 'inflight-stale-toggle', `stale (${model.stale.length})`);
+    toggle.type = 'button';
+    toggle.setAttribute('aria-expanded', String(inflightStaleOpen));
+    toggle.addEventListener('click', () => { inflightStaleOpen = !inflightStaleOpen; render(); });
+    wrap.appendChild(toggle);
+    if (inflightStaleOpen) for (const row of model.stale) wrap.appendChild(renderInflightRow(row));
+  }
+  return wrap;
+}
+
 /**
  * The DAG, drawn as track lanes (#998 R998-3): one row per declared track —
  * each with its OWN board, `layout()` run once per lane by `lane-model.mjs`
@@ -572,10 +828,12 @@ function renderStatus() {
  * into elements.
  */
 function renderLanes() {
-  const model = buildLaneModel(sectionOf(state, 'graph'), { collapsedTracks, holdingPage, project: state.meta?.project ?? null, clustering });
+  cardReviews = currentCardReviews(); // once per render, read by every card (#1312 D139)
+  const model = buildLaneModel(sectionOf(state, 'graph'), { collapsedTracks, holdingPage, project: state.meta?.project ?? null, clustering, work: currentWork(), epics: currentEpics() });
   clear(mounts.canvas);
+  mounts.canvas.appendChild(renderInflight());
   if (!model.ok) {
-    mounts.canvas.appendChild(said(`the graph could not be computed: ${model.reason}`));
+    mounts.canvas.appendChild(saidUnavailable('the graph could not be computed', model, 'graph'));
     return;
   }
   const { lanes, crossEdges, holding, droppedEdges, issuesUnreadable, edgeSummary } = model.value;
@@ -678,13 +936,11 @@ function renderEpicClusters(grouping) {
     // going. The chip is built from the same `state` words every card uses.
     const head = el('div', 'epic-head');
     head.appendChild(el('span', 'epic-number', `#${epic.number}`));
-    const chip = el('span', `node-state state-${epic.state.code}`);
-    chip.appendChild(el('span', 'node-state-mark', epic.state.mark));
-    chip.appendChild(el('span', 'node-state-word', epic.state.label));
-    head.appendChild(chip);
+    head.appendChild(stateChipEl(epic.state));
     head.appendChild(el('h3', 'epic-title', epic.title || '(no title)'));
-    if (epic.track) head.appendChild(el('span', 'epic-track', epic.track));
-    head.appendChild(el('span', 'epic-count', `${epic.children.length} slice(s)`));
+    const epicTrack = trackChipEl(epic.trackMark);
+    if (epicTrack) head.appendChild(epicTrack);
+    head.appendChild(el('span', 'epic-count', rollupLabel(epicRollup(sectionOf(state, 'hierarchy'), sectionOf(state, 'forgeLoad'), epic.number))));
     cluster.appendChild(head);
     for (const mark of epic.marks) cluster.appendChild(said(mark));
 
@@ -775,12 +1031,25 @@ function renderClusteringBar() {
 
   const legend = el('div', 'legend');
   legend.appendChild(el('span', 'legend-label', 'legend'));
+  // Two groups, each built from its own table in state-vocab.mjs (#1308 R1308-7): lifecycle, then track.
+  const stateGroup = el('span', 'legend-group legend-states');
+  stateGroup.appendChild(el('span', 'legend-group-label', 'state'));
   for (const state of Object.values(STATES)) {
     const item = el('span', `legend-item state-${state.code}`);
     item.appendChild(el('span', 'legend-mark', state.mark));
     item.appendChild(el('span', 'legend-word', state.label));
-    legend.appendChild(item);
+    stateGroup.appendChild(item);
   }
+  legend.appendChild(stateGroup);
+  const trackGroup = el('span', 'legend-group legend-tracks');
+  trackGroup.appendChild(el('span', 'legend-group-label', 'track'));
+  for (const mark of Object.values(TRACK_MARKS)) {
+    const item = el('span', `legend-item ${mark.className}`);
+    if (mark.mark) item.appendChild(el('span', 'legend-mark', mark.mark));
+    item.appendChild(el('span', 'legend-word', mark.label ?? 'Track <id>'));
+    trackGroup.appendChild(item);
+  }
+  legend.appendChild(trackGroup);
   bar.appendChild(legend);
   return bar;
 }
@@ -793,7 +1062,9 @@ function renderClusteringBar() {
  */
 function renderNodeSdd(issue) {
   const strip = el('div', 'node-sdd');
-  const found = sddForIssue(sectionOf(state, 'changes'), issue);
+  const found = sddForIssue(sectionOf(state, 'changes'), issue, sectionOf(state, 'localWorktrees'));
+  // #1284 D102: an issue nobody works on says nothing on its card; the drawer still states the absence.
+  if (quietAbsence(found, sectionOf(state, 'localWorktrees'), sectionOf(state, 'remoteChanges'), issue)) return null;
   if (!found.ok) {
     strip.appendChild(el('span', 'node-sdd-none', found.reason));
     return strip;
@@ -802,10 +1073,7 @@ function renderNodeSdd(issue) {
   const reached = [...change.stages].reverse().find((stage) => stage.state === 'present' || stage.state === 'done');
   strip.appendChild(el('span', 'node-sdd-label', change.archived ? 'archived' : 'SDD'));
   strip.appendChild(el('span', 'node-sdd-stage', reached ? reached.id : 'no stage present'));
-  if (change.tasks && typeof change.tasks.checked === 'number') {
-    const total = change.tasks.checked + (change.tasks.open ?? 0);
-    strip.appendChild(el('span', 'node-sdd-tasks', `tasks ${change.tasks.checked}/${total}`));
-  }
+  strip.appendChild(el('span', 'node-sdd-tasks', progressLabel(change.progress, SOURCE.workingTree, { prefix: 'tasks' })));
   strip.appendChild(el('span', 'node-sdd-dir', change.dir));
   return strip;
 }
@@ -815,8 +1083,9 @@ function renderNodeSdd(issue) {
  * the PR when there is one, the tip author and the age, plus the resume state in
  * its own words when it is not present. A branch and its open PR are one line.
  */
-function renderNodeRemote(issue) {
-  const badges = remoteBadges(sectionOf(state, 'remoteChanges'), issue, nowMs());
+function renderNodeRemote(issue, footer = null) {
+  // #1312 D147: a PR the review footer names is not named a second time on the same card.
+  const badges = remoteBadges(sectionOf(state, 'remoteChanges'), issue, nowMs(), { omitPrs: footer ? [footer.pr] : [] });
   const wrap = el('div', 'node-remote');
   for (const line of badges.lines) {
     wrap.appendChild(el('p', 'node-remote-line', line.text));
@@ -824,6 +1093,16 @@ function renderNodeRemote(issue) {
   }
   if (badges.more) wrap.appendChild(el('p', 'node-remote-more', badges.more));
   return wrap;
+}
+
+/**
+ * The review footer (#1312): the joined PR, its latest verdict and rev, and the head the verdict judged. One line,
+ * text only; the title repeats the words and adds the detail (full SHAs, reasons). The model words it, this draws it.
+ */
+function renderNodeReview(footer) {
+  const line = el('p', `node-review${footer.verdict ? ` verdict-${footer.verdict.unknown ? 'unknown' : footer.verdict.word.toLowerCase()}` : ''}`, footer.text);
+  line.setAttribute('title', footer.title);
+  return line;
 }
 
 /**
@@ -878,10 +1157,9 @@ function renderNodeCard(node) {
 
   const head = el('div', 'node-card-head');
   head.appendChild(el('span', 'node-number', `#${node.number}`));
-  const chip = el('span', `node-state state-${node.state.code}`);
-  chip.appendChild(el('span', 'node-state-mark', node.state.mark));
-  chip.appendChild(el('span', 'node-state-word', node.state.label));
-  head.appendChild(chip);
+  head.appendChild(stateChipEl(node.state));
+  const cardTrack = trackChipEl(node.trackMark);
+  if (cardTrack) head.appendChild(cardTrack);
   card.appendChild(head);
 
   card.appendChild(el('h4', 'node-title', node.title || '(no title)'));
@@ -890,8 +1168,11 @@ function renderNodeCard(node) {
     card.appendChild(el('p', 'node-blocked', `blocked by ${node.blockedBy.map((n) => `#${n}`).join(', ')}`));
   }
   for (const mark of node.marks) card.appendChild(said(mark));
-  card.appendChild(renderNodeSdd(node.number));
-  card.appendChild(renderNodeRemote(node.number));
+  const sddStrip = renderNodeSdd(node.number);
+  if (sddStrip !== null) card.appendChild(sddStrip);
+  const footer = cardReviews.byIssue.get(node.number) ?? null;
+  if (footer) card.appendChild(renderNodeReview(footer));
+  card.appendChild(renderNodeRemote(node.number, footer));
 
   card.addEventListener('click', () => selectNode(node.number));
   card.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') selectNode(node.number); });
@@ -962,7 +1243,11 @@ function renderHoldingLane(holding) {
     const tile = el('div', 'batch-tile');
     tile.setAttribute('role', 'button');
     tile.setAttribute('tabindex', '0');
+    tile.setAttribute('data-issue', String(node.number));
     tile.appendChild(el('span', 'batch-tile-number', `#${node.number}`));
+    tile.appendChild(stateChipEl(node.state));
+    const tileTrack = trackChipEl(node.trackMark);
+    if (tileTrack) tile.appendChild(tileTrack);
     tile.appendChild(el('p', 'batch-tile-title', node.title || '(no title)'));
     tile.addEventListener('click', () => selectNode(node.number));
     tile.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') selectNode(node.number); });
@@ -1074,7 +1359,7 @@ function renderSddRow(change, sliceNote) {
   row.appendChild(matrix);
 
   const t = change.tasks;
-  const tasksLine = el('p', 'sdd-tasks', `tasks: ${t.checked} checked, ${t.open} open${t.next ? ` — next: ${t.next}` : ''} `);
+  const tasksLine = el('p', 'sdd-tasks', `${progressLabel(change.progress, SOURCE.workingTree, { prefix: 'tasks' })}${t.next ? ` — next: ${t.next}` : ''} `);
   tasksLine.appendChild(el('span', 'source', sourceStamp(t.source).label));
   row.appendChild(tasksLine);
 
@@ -1109,11 +1394,11 @@ function renderReviews() {
   const model = buildReviewTimeline(sectionOf(state, 'reviews'), sectionOf(state, 'prs'));
   clear(mounts.canvas);
   if (!model.ok) {
-    mounts.canvas.appendChild(said(`the reviews timeline could not be computed: ${model.reason}`));
+    mounts.canvas.appendChild(saidUnavailable('the reviews timeline could not be computed', model, 'reviews', 'prs'));
     return;
   }
   const { threads, queue, totals } = model.value;
-  mounts.canvas.appendChild(el('p', 'canvas-summary', `${totals.threads} thread(s), ${totals.queue} waiting on a verdict, ${totals.unreadable} unreadable`));
+  mounts.canvas.appendChild(el('p', 'canvas-summary', `${totals.threads} thread(s), ${totals.queue} waiting on a verdict, ${totals.queued} not read yet, ${totals.unreadable} unreadable`));
   mounts.canvas.appendChild(renderQueue(queue));
   for (const thread of threads) mounts.canvas.appendChild(renderReviewThread(thread));
 }
@@ -1178,6 +1463,10 @@ function renderQueue(queue) {
 function renderReviewThread(thread) {
   const card = el('div', 'review-card');
   card.appendChild(el('strong', null, `#${thread.pr}${thread.title ? ` ${thread.title}` : ''}`));
+  if (thread.queued) {
+    card.appendChild(said(`verdict not read yet: ${thread.queued.reason}`));
+    return card;
+  }
   if (thread.unreadable) {
     card.appendChild(said(`this thread could not be read: ${thread.unreadable.reason}`));
     return card;
@@ -1295,9 +1584,9 @@ function renderGovernance() {
  * divergences; this renders one loop over rows this page never re-derives.
  */
 function renderRoadmap() {
-  const model = buildRoadmapModel(sectionOf(state, 'graph'), { project: state.meta?.project ?? null });
+  const model = buildRoadmapModel(sectionOf(state, 'graph'), { project: state.meta?.project ?? null, work: currentWork(), epics: currentEpics() });
   if (!model.ok) {
-    mounts.canvas.appendChild(said(`the roadmap could not be computed: ${model.reason}`));
+    mounts.canvas.appendChild(saidUnavailable('the roadmap could not be computed', model, 'graph'));
     return;
   }
   const { epics, unlinked } = model.value;
@@ -1309,7 +1598,9 @@ function renderRoadmap() {
 /** One roadmap row: its state chip, its title, its own source stamp (`row()`'s — a link when a project is known, the honest "no source was recorded" stamp when not; #882 cold review of PR 1, blocker), its own `stateReason` when the state could not be read (`roadmap-model.mjs`'s `safeStateOf` guard — #882 cold review of PR #1037, correction 1: a said reason, never a silent `unknown` mark with no explanation), its open blockers, and any `parent`-keyed divergence said inline rather than silently absorbed (R882-2, and correction 2's `nested-epic-not-supported` case). */
 function renderRoadmapRow(row, className) {
   const node = el('div', className);
-  node.appendChild(el('span', `roadmap-state ${row.state.className}`, `${row.state.mark} ${row.state.label}`));
+  const chip = el('span', `roadmap-state ${row.state.className}`, `${row.state.mark} ${row.state.label}`);
+  if (row.state.reason) chip.setAttribute('title', row.state.reason); // #1309 D136: a state's basis is never invisible
+  node.appendChild(chip);
   node.appendChild(el('span', 'roadmap-title', `#${row.number} ${row.title}`));
   node.appendChild(renderSourceStamp(row.sourceStamp));
   if (row.stateReason) node.appendChild(el('span', 'roadmap-state-reason', row.stateReason));
@@ -1396,7 +1687,10 @@ function renderDecisionRow(row) {
 
   tr.appendChild(el('td', 'decision-number', String(row.number).padStart(4, '0')));
   tr.appendChild(el('td', 'decision-title', row.title));
-  tr.appendChild(el('td', `decision-status status-${String(row.status).replace(/\s+/g, '-').toLowerCase()}`, row.status));
+  // The chip is an inner <span>: a display on the <td> itself breaks the table layout (#1310).
+  const statusCell = el('td', 'decision-status-cell');
+  statusCell.appendChild(el('span', `decision-status status-${String(row.status).replace(/\s+/g, '-').toLowerCase()}`, row.status));
+  tr.appendChild(statusCell);
 
   const amendments = el('td', 'decision-amendments');
   if (row.amendments.length === 0) {
@@ -1488,7 +1782,9 @@ function renderAntiPatternRow(row) {
     return tr;
   }
 
-  tr.appendChild(el('td', 'anti-pattern-scope', row.scope));
+  const scopeCell = el('td', 'anti-pattern-scope-cell');
+  scopeCell.appendChild(el('span', 'anti-pattern-scope', row.scope));
+  tr.appendChild(scopeCell);
   tr.appendChild(el('td', 'anti-pattern-title', row.title));
 
   const cited = el('td', 'anti-pattern-issues');
@@ -1635,24 +1931,46 @@ function closeDrawer() {
  * branch to get wrong.
  */
 function renderDrawer() {
+  // #1307 D122: the rebuild resets the body's scrollTop. Re-opening the same node keeps it (an SSE
+  // re-render must not jump); a tab click brings the panel to the top of the body; a new node starts at 0.
+  let kept = 0;
+  for (const child of mounts.drawer.childNodes) if (child.className === 'drawer-body') kept = child.scrollTop || 0;
+  if (drawerRenderedFor !== selectedIssue) { kept = 0; panelPadded = false; }
+  drawerRenderedFor = selectedIssue;
+  const built = buildDrawer();
+  const toPanel = tabScrollPending;
+  tabScrollPending = false;
+  if (!built) return;
+  if (toPanel) panelPadded = true;
+  // A short panel at the end of a long body cannot reach the top (the browser clamps scrollTop), so once a tab was
+  // clicked the panel is at least one body tall: its top can always be the body's top.
+  if (panelPadded && built.panel) built.panel.style.minHeight = `${built.body.clientHeight || 0}px`;
+  if (toPanel && built.panel) {
+    built.body.scrollTop = 0;
+    built.body.scrollTop = built.panel.getBoundingClientRect().top - built.body.getBoundingClientRect().top;
+  } else {
+    built.body.scrollTop = kept;
+  }
+}
+
+/** Builds the drawer; returns its scroller and the active tab panel (null when there is none yet). */
+function buildDrawer() {
   clear(mounts.drawer);
   mounts.drawer.hidden = selectedIssue === null;
-  if (selectedIssue === null) return;
+  if (selectedIssue === null) return null;
 
   // Region 08's header: the number, the state the card showed, the track, a
   // link to the issue on the forge, and the close control — all from the same
   // model the card used, so the panel never contradicts what was clicked.
   const head = el('div', 'drawer-head');
-  const summary = nodeSummaryFor(sectionOf(state, 'graph'), selectedIssue);
+  const summary = nodeSummaryFor(sectionOf(state, 'graph'), selectedIssue, { work: currentWork(), epics: currentEpics() });
 
   const idLine = el('div', 'drawer-id');
   idLine.appendChild(el('span', 'drawer-number', `#${selectedIssue}`));
   if (summary.ok) {
-    const chip = el('span', `node-state state-${summary.value.state.code}`);
-    chip.appendChild(el('span', 'node-state-mark', summary.value.state.mark));
-    chip.appendChild(el('span', 'node-state-word', summary.value.state.label));
-    idLine.appendChild(chip);
-    if (summary.value.track) idLine.appendChild(el('span', 'drawer-track', `track ${summary.value.track}`));
+    idLine.appendChild(stateChipEl(summary.value.state));
+    const drawerTrack = trackChipEl(summary.value.trackMark);
+    if (drawerTrack) idLine.appendChild(drawerTrack);
   }
   const project = state.meta?.project ?? null;
   if (project) {
@@ -1669,39 +1987,55 @@ function renderDrawer() {
   close.addEventListener('click', closeDrawer);
   head.appendChild(close);
   mounts.drawer.appendChild(head);
+  // #1307 D120: the head (id line + tab bar) never scrolls; everything below it is the scrolling body.
+  const body = el('div', 'drawer-body');
+  mounts.drawer.appendChild(body);
 
   if (summary.ok) {
-    if (summary.value.title) mounts.drawer.appendChild(el('h2', 'drawer-title', summary.value.title));
-    for (const mark of summary.value.marks) mounts.drawer.appendChild(said(mark));
+    if (summary.value.title) body.appendChild(el('h2', 'drawer-title', summary.value.title));
+    for (const mark of summary.value.marks) body.appendChild(said(mark));
+    if (summary.value.declare) body.appendChild(renderDeclareBlock(summary.value.declare));
     if (summary.value.blockedBy.length > 0) {
-      mounts.drawer.appendChild(el('p', 'drawer-blocked', `blocked by ${summary.value.blockedBy.map((n) => `#${n}`).join(', ')}`));
+      body.appendChild(el('p', 'drawer-blocked', `blocked by ${summary.value.blockedBy.map((n) => `#${n}`).join(', ')}`));
     }
-    mounts.drawer.appendChild(renderChildren(selectedIssue));
+    body.appendChild(renderChildren(selectedIssue));
   } else {
-    mounts.drawer.appendChild(said(summary.reason));
+    body.appendChild(said(summary.reason));
   }
 
   if (changeView === null) {
-    mounts.drawer.appendChild(el('p', 'note', 'reading this change…'));
-    return;
+    body.appendChild(el('p', 'note', 'reading this change…'));
+    return { body, panel: null };
   }
   const model = buildDrawerModel(changeView);
   if (!model.ok) {
-    mounts.drawer.appendChild(said(model.reason));
-    return;
+    body.appendChild(said(model.reason));
+    return { body, panel: null };
   }
-  mounts.drawer.appendChild(el('p', 'note', model.value.changeDir ? `change dir: ${model.value.changeDir}` : 'no change dir for this issue in the read model'));
+  // #883 R883-9: with no change dir at the served HEAD and a worktree that has one, "on this machine" is the first thing read.
+  const localFirst = !model.value.changeDir && model.value.local.length > 0;
+  // #1276 D92: when the tabs read a worktree or an origin branch, the line says which.
+  const tabSource = model.value.tabSource;
+  const sourced = !model.value.changeDir && (tabSource?.kind === 'worktree' || tabSource?.kind === 'origin');
+  const emptyLine = sourced
+    ? `the served HEAD has no change dir for this issue; the tabs read ${tabSource.label}`
+    : localFirst ? 'the served HEAD has no change dir for this issue; this machine\'s worktrees follow' : 'no change dir for this issue in the read model';
+  body.appendChild(el('p', 'note', model.value.changeDir ? `change dir: ${model.value.changeDir}` : emptyLine));
+  if (localFirst) body.appendChild(renderLocalBlocks(model.value));
 
   const tabs = el('div', 'tabs');
   for (const tab of model.value.tabs) {
     const button = el('button', null, tab.ok ? tab.label : `${tab.label} !`);
     button.setAttribute('aria-selected', String(tab.id === activeTab));
-    button.addEventListener('click', () => { activeTab = tab.id; renderDrawer(); });
+    button.addEventListener('click', () => { activeTab = tab.id; tabScrollPending = true; renderDrawer(); });
     tabs.appendChild(button);
   }
-  mounts.drawer.appendChild(tabs);
-  mounts.drawer.appendChild(renderTab(model.value.tabs.find((t) => t.id === activeTab) ?? model.value.tabs[0]));
-  mounts.drawer.appendChild(renderRemoteBlocks(model.value));
+  head.appendChild(tabs);
+  const panel = renderTab(model.value.tabs.find((t) => t.id === activeTab) ?? model.value.tabs[0]);
+  body.appendChild(panel);
+  if (!localFirst) body.appendChild(renderLocalBlocks(model.value));
+  body.appendChild(renderRemoteBlocks(model.value));
+  return { body, panel };
 }
 
 /**
@@ -1714,11 +2048,37 @@ function renderRemoteBlock(block) {
   card.appendChild(el('strong', 'remote-block-label', block.label));
   const byline = [block.byline, block.pr ? `PR #${block.pr.number}` : null, tipAge(block.tipAt, nowMs())].filter(Boolean).join(' \u00b7 ');
   card.appendChild(el('p', 'remote-byline', byline));
+  appendBlockRows(card, block);
+  return card;
+}
+
+/** What a remote block and a local block share: why it shows no documents, the resume in its words, then the document rows. */
+function appendBlockRows(card, block) {
   if (block.wording) card.appendChild(said(block.wording));
+  if (block.absentLine) card.appendChild(el('p', 'note', block.absentLine));
   if (block.resume.wording) card.appendChild(said(block.resume.wording));
   for (const item of block.resume.entries ?? []) card.appendChild(renderEntry(item));
   for (const item of block.documents ?? []) card.appendChild(renderEntry(item));
+}
+
+/**
+ * A worktree of the selected ticket on this machine (#883 D78): its label, the
+ * state of each document in words, the content stamp. Every string is set as text.
+ */
+function renderLocalBlock(block) {
+  const card = el('div', 'local-block');
+  card.appendChild(el('strong', 'local-block-label', block.label));
+  appendBlockRows(card, block);
   return card;
+}
+
+function renderLocalBlocks({ local, localNote }) {
+  const wrap = el('div', 'local-blocks');
+  if (local.length === 0 && !localNote) return wrap;
+  wrap.appendChild(el('h3', 'drawer-section-title', 'on this machine'));
+  if (localNote) wrap.appendChild(el('p', 'note', localNote));
+  for (const block of local) wrap.appendChild(renderLocalBlock(block));
+  return wrap;
 }
 
 function renderRemoteBlocks({ remote, remoteNote }) {
@@ -1730,6 +2090,17 @@ function renderRemoteBlocks({ remote, remoteNote }) {
   return wrap;
 }
 
+/** The paste block of an issue with NO brain-graph/1 block (#1308 D128). A malformed block gets none (D129). */
+function renderDeclareBlock(declare) {
+  const wrap = el('div', 'declare-block');
+  wrap.appendChild(el('span', 'declare-label', 'this issue is missing its brain-graph/1 configuration — paste in the issue body'));
+  wrap.appendChild(el('code', null, declare.snippet));
+  wrap.appendChild(el('p', 'declare-note', declare.note));
+  // #1335 fills `declareCommand` with the provider-agnostic `brain:ticket:declare`; a command that does not exist is never drawn.
+  if (declare.declareCommand) wrap.appendChild(el('code', 'declare-command', declare.declareCommand));
+  return wrap;
+}
+
 /**
  * The tickets that belong to the selected one (#1059 phase 10): the issues
  * that DECLARE it as their parent, each with the state vocabulary a card
@@ -1738,10 +2109,17 @@ function renderRemoteBlocks({ remote, remoteNote }) {
  */
 function renderChildren(issue) {
   const wrap = el('div', 'drawer-children');
-  const found = childrenOf(sectionOf(state, 'graph'), issue);
+  const found = childrenOf(sectionOf(state, 'graph'), sectionOf(state, 'hierarchy'), issue, { work: currentWork(), epics: currentEpics() });
   if (!found.ok) {
     wrap.appendChild(said(found.reason));
     return wrap;
+  }
+  // An epic's drawer leads with its rollup (#1199 D62); closed children are counted there, not listed below.
+  if (hierarchyOf(sectionOf(state, 'hierarchy')).value?.issues.get(issue)?.level === 'epic') {
+    const rollup = epicRollup(sectionOf(state, 'hierarchy'), sectionOf(state, 'forgeLoad'), issue);
+    wrap.appendChild(el('p', 'epic-rollup', rollupLabel(rollup)));
+    const countedNote = rollupNote(rollup); // null while nothing was counted (#1267)
+    if (countedNote !== null) wrap.appendChild(el('p', 'note', countedNote));
   }
   wrap.appendChild(el('h3', 'drawer-section-title', `tickets that declare #${issue} as their parent`));
   if (found.value.length === 0) {
@@ -1754,10 +2132,9 @@ function renderChildren(issue) {
     item.setAttribute('role', 'button');
     item.setAttribute('tabindex', '0');
     item.appendChild(el('span', 'child-number', `#${child.number}`));
-    const chip = el('span', `node-state state-${child.state.code}`);
-    chip.appendChild(el('span', 'node-state-mark', child.state.mark));
-    chip.appendChild(el('span', 'node-state-word', child.state.label));
-    item.appendChild(chip);
+    item.appendChild(stateChipEl(child.state));
+    const childTrack = trackChipEl(child.trackMark);
+    if (childTrack) item.appendChild(childTrack);
     item.appendChild(el('span', 'child-title', child.title || '(no title)'));
     item.addEventListener('click', () => selectNode(child.number));
     item.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') selectNode(child.number); });
@@ -1769,6 +2146,9 @@ function renderChildren(issue) {
 
 function renderTab(tab) {
   const wrap = document.createElement('div');
+  wrap.className = 'tab-panel';
+  if (tab.from) wrap.appendChild(el('p', 'tab-from', tab.from));
+  if (tab.header) wrap.appendChild(el('p', 'tab-progress', tab.header));
   if (tab.note) wrap.appendChild(el('p', 'note', `source: ${tab.note}`));
   if (!tab.ok) {
     wrap.appendChild(said(tab.reason));
@@ -1944,8 +2324,8 @@ const DOC_NOTICES = { failed: FAILED_NOTICE, unavailable: UNAVAILABLE_NOTICE };
 const spawnMarkdownWorker = () => (typeof Worker === 'function' ? new Worker('/lib/markdown-worker.mjs', { type: 'module' }) : null);
 
 /** The in-flight or settled render of a document, started once per stamp. */
-function requestDoc(doc) {
-  let entry = docTrees.get(doc.stamp);
+function requestDoc(doc, store = docTrees) {
+  let entry = store.get(doc.stamp);
   if (entry) return entry;
   const run = renderOffThread(doc.text, {
     spawn: spawnMarkdownWorker,
@@ -1960,10 +2340,10 @@ function requestDoc(doc) {
     // action (a stream frame, a tab switch) reuses it: no new worker, no loading
     // flash. A failed, unavailable or timed-out one is retried only by a user
     // collapse, which evicts it (setOpen).
-    if (outcome.kind === 'cancelled' && docTrees.get(doc.stamp) === entry) docTrees.delete(doc.stamp);
+    if (outcome.kind === 'cancelled' && store.get(doc.stamp) === entry) store.delete(doc.stamp);
     return outcome;
   });
-  docTrees.set(doc.stamp, entry);
+  store.set(doc.stamp, entry);
   return entry;
 }
 
@@ -2139,7 +2519,7 @@ async function loadChange(issue) {
  */
 function drawnNodes() {
   if (view !== 'map') return [];
-  const model = buildLaneModel(sectionOf(state, 'graph'), { collapsedTracks, holdingPage, project: state.meta?.project ?? null, clustering });
+  const model = buildLaneModel(sectionOf(state, 'graph'), { collapsedTracks, holdingPage, project: state.meta?.project ?? null, clustering, work: currentWork(), epics: currentEpics() });
   if (!model.ok) return [];
   const nodes = [];
   model.value.lanes.forEach((lane, laneIndex) => {
@@ -2215,8 +2595,12 @@ function subscribe() {
       // A frame this page cannot read is a band, not an exception swallowed
       // by the callback: every held value stays, the reason is on screen.
       if (!parsed.ok) { state = streamFailed(state, parsed.reason); render(); return; }
+      // #883 D80: the open drawer's local blocks are read from the working tree, so the one
+      // section frame that can change them is compared here, with `before` read ahead of applyFrame.
+      const localBefore = name === 'section' && parsed.frame.name === 'localWorktrees' ? sectionOf(state, 'localWorktrees') : null;
       state = applyFrame(state, name, parsed.frame);
       render();
+      if (localBefore !== null && selectedIssue !== null && localChangedFor(localBefore, sectionOf(state, 'localWorktrees'), selectedIssue)) loadChange(selectedIssue);
       // Q3/A2: a worktree's head moved, so the open drawer's Working memory
       // tab (`resume.md` read at the branch tip) is the one value the snapshot
       // diff cannot refresh on its own.

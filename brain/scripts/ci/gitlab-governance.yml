@@ -201,3 +201,31 @@ base-branch:
   stage: test
   script:
     - node brain/scripts/governance/run-check.mjs base-branch
+
+# ── Invariant 12 (issue #1263 slice 4, ADR-0040) — the team config is owner-reviewed ─
+# `detection` at `lite`, REQUIRED at standard/regulated (GATE_MATRIX['team-config-reviewed']).
+# The checker resolves the tier itself (from the BASE config) and downgrades a
+# failure to a warning where the policy is `detection`, so — like
+# brain-writes-reviewed above — this static job needs no `allow_failure:`.
+# Owners are read from the base ref via `git show`, never the MR head. Reviews are
+# read through the same `prReviews` port verb the L6 gate uses (GitLab approvals).
+#
+# TWO DOCUMENTED GAPS ON GITLAB (#1263 S4):
+#   · GitLab's approvals endpoint says WHO approved, not against which commit, so
+#     `prReviews` returns `commitId: null` there and a current approval cannot be
+#     told from a stale one. The gate FAILS CLOSED at standard/regulated naming that
+#     limitation (warn at lite). Until the adapter can say, a team config change on
+#     GitLab at those tiers cannot satisfy this gate by approval.
+#   · A GitLab MR pipeline does not re-run when an approval lands (GitHub's
+#     `pull_request_review` trigger has no equivalent in this static fragment): re-run
+#     the pipeline after approving.
+team-config-reviewed:
+  extends: .governance_mr_rules
+  stage: test
+  variables:
+    # The full history: on GitLab's default shallow clone a config deleted before the depth horizon would look like it
+    # never existed, and its re-creation would pass as a founding. The checker also refuses to call a shallow
+    # history a founding, but the clone should not be shallow in the first place.
+    GIT_DEPTH: "0"
+  script:
+    - node brain/scripts/vcs/team-config-reviewed.mjs

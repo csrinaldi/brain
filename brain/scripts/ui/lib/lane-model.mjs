@@ -39,9 +39,10 @@
 // cannot back (#1032 scope note).
 
 import { layout } from './layout.mjs';
-import { stateOf, STATES } from './state-vocab.mjs';
+import { stateOf, trackMarkOf, withBlockErrors, STATES } from './state-vocab.mjs';
 import { sourceStamp } from './provenance.mjs';
 import { issueUrl } from './forge-url.mjs';
+import { hierarchyOf, rollupFor } from './rollup-model.mjs';
 
 const PAGE_SIZE = 24;
 
@@ -83,17 +84,16 @@ const DECLARE_SNIPPET = [
 const DECLARE_NOTE = 'keep the lines that are true: `kind: epic` only if this issue IS an epic, and `parent:` only if it is a slice of one — an issue that is neither declares just its track';
 
 /** The marks a node carries, plus its state-vocab word — the label's whole content. (The rule was `canvas-model.mjs`'s; that module had no importer left and was removed in #1032.) */
-function stateAndMarks(node) {
+function stateAndMarks(node, work, epics) {
   const marks = [];
   if (node.status === 'unreadable') marks.push('unreadable');
-  else if (node.track == null) marks.push('? track');
-  if (node.roadmap && node.roadmap.ok === false) marks.push('not computed');
+  if (node.blockError != null) marks.push(`brain-graph/1 configuration unreadable: ${node.blockError}`);
   if (Array.isArray(node.blockedBy) && node.blockedBy.length > 0) {
     marks.push(`blocked by ${node.blockedBy.map((n) => `#${n}`).join(', ')}`);
   }
   let state;
   try {
-    state = stateOf(node);
+    state = stateOf(node, work, rollupFor(node, epics));
   } catch (err) {
     // One unknown state cannot blank a lane: mark that node, keep every
     // other one drawing. An unreadable row is a row with a reason on it,
@@ -101,7 +101,23 @@ function stateAndMarks(node) {
     state = STATES.unknown;
     marks.push(`unknown state: ${err?.message ?? err}`);
   }
+  if (state.code === 'not-computed') marks.push(state.reason ? `not computed: ${state.reason}` : 'not computed');
   return { marks, state };
+}
+
+/** The state a row carries to the page: the vocabulary's words, plus the reason only a not-computed state has. */
+const stateView = (state) => ({ code: state.code, label: state.label, mark: state.mark, ...(state.reason ? { reason: state.reason } : {}) });
+
+/**
+ * The paste block for an issue missing its `brain-graph/1` configuration (#1308 D128): `DECLARE_SNIPPET` with
+ * the node's own `parent:` when it is known, and the example-not-form note. Text only. `declareCommand` is the
+ * seam #1335 fills with the provider-agnostic `brain:ticket:declare`; until that command exists it is `null`
+ * and the page shows no command line.
+ */
+function declareFor(node) {
+  if (node.status === 'unreadable' || node.blockError != null || node.declared !== false) return null;
+  const snippet = node.parent == null ? DECLARE_SNIPPET : DECLARE_SNIPPET.replace('parent: 878', `parent: ${node.parent}`);
+  return { snippet, note: DECLARE_NOTE, declareCommand: null };
 }
 
 /**
@@ -113,57 +129,64 @@ function stateAndMarks(node) {
  * derived the state a second way could disagree with the card the reader just
  * clicked, which is the kind of quiet contradiction this page exists to avoid.
  */
-export function nodeSummaryFor(graphSection, issue) {
+export function nodeSummaryFor(graphSection, issue, { work, epics } = {}) {
   if (!graphSection || typeof graphSection !== 'object') return { ok: false, reason: 'no graph section was given' };
   if (graphSection.ok !== true) return { ok: false, reason: graphSection.reason };
-  const node = (graphSection.value?.nodes ?? []).find((n) => n.number === issue);
+  const node = (withBlockErrors(graphSection.value).nodes ?? []).find((n) => n.number === issue);
   if (!node) return { ok: false, reason: `the graph holds no issue #${issue}` };
-  const { marks, state } = stateAndMarks(node);
+  const { marks, state } = stateAndMarks(node, work, epics);
   return {
     ok: true,
     value: {
       number: node.number,
       title: node.title ?? '',
       track: node.track ?? null,
-      state: { code: state.code, label: state.label, mark: state.mark },
+      state: stateView(state),
+      trackMark: trackMarkOf(node),
       marks,
       blockedBy: [...(node.blockedBy ?? [])].sort((a, b) => a - b),
+      declare: declareFor(node),
     },
   };
 }
 
 /**
- * childrenOf(graphSection, issue) -> {ok:true, value:[{number, title, state,
+ * childrenOf(graphSection, hierarchySection, issue) -> {ok:true, value:[{number, title, state,
  * track}]} | {ok:false, reason}
  *
- * The tickets that belong to this one (#1059 phase 10). The relation is
- * DECLARED BY THE CHILD — `parent` is a node field since #967 — so a parent's
- * list is whoever points at it, never a list the parent carries about itself.
- * That asymmetry is why nobody had read it yet, and why a node nobody declares
- * has an empty list rather than a missing one: "no ticket names this as its
- * parent" is a fact, not a failure.
+ * The OPEN tickets that belong to this one (#1059 phase 10, #1199 D61). The relation is read
+ * from the hierarchy's `children` (the hierarchy resolver contract, #1251), never by inverting `parent` here, so
+ * a resolver that gets it from somewhere else (#1251) changes nothing in this function. A closed
+ * child is not a graph node: the rollup counts it, and this list does not show it. A node nobody
+ * declares has an empty list rather than a missing one: "no ticket names this as its parent" is a
+ * fact, not a failure.
  */
-export function childrenOf(graphSection, issue) {
+export function childrenOf(graphSection, hierarchySection, issue, { work, epics } = {}) {
   if (!graphSection || typeof graphSection !== 'object') return { ok: false, reason: 'no graph section was given' };
   if (graphSection.ok !== true) return { ok: false, reason: graphSection.reason };
-  const value = (graphSection.value?.nodes ?? [])
-    .filter((n) => n.parent === issue)
-    .sort((a, b) => a.number - b.number)
-    .map((node) => {
-      const { state } = stateAndMarks(node);
+  const h = hierarchyOf(hierarchySection);
+  if (!h.ok) return { ok: false, reason: h.reason };
+  const nodes = new Map((withBlockErrors(graphSection.value).nodes ?? []).map((n) => [n.number, n]));
+  const value = (h.value.issues.get(issue)?.children ?? [])
+    .filter((n) => nodes.has(n))
+    .sort((a, b) => a - b)
+    .map((n) => {
+      const node = nodes.get(n);
+      const { state } = stateAndMarks(node, work, epics);
       return {
         number: node.number,
         title: node.title ?? '',
         track: node.track ?? null,
-        state: { code: state.code, label: state.label, mark: state.mark },
+        state: stateView(state),
+        trackMark: trackMarkOf(node),
       };
     });
   return { ok: true, value };
 }
 
 /** A drawable node — the shape the retired `canvas-model.mjs` established, plus the state word/mark (#998 R998-3) — for one lane's own board. */
-function drawnNode(node, box) {
-  const { marks, state } = stateAndMarks(node);
+function drawnNode(node, box, work, epics) {
+  const { marks, state } = stateAndMarks(node, work, epics);
   return {
     number: node.number,
     label: `#${node.number} ${node.title ?? ''}`.trim(),
@@ -175,7 +198,8 @@ function drawnNode(node, box) {
     className: state.className,
     marks,
     track: node.track ?? null,
-    state: { code: state.code, label: state.label, mark: state.mark },
+    state: stateView(state),
+    trackMark: trackMarkOf(node),
     x: box.x,
     y: box.y,
     w: box.w,
@@ -184,15 +208,16 @@ function drawnNode(node, box) {
 }
 
 /** A holding-lane row: the same facts, no board coordinates — the `?` lane is a paged list, never a drawing (undeclared nodes carry no track to lay a board out against). */
-function holdingRow(node) {
-  const { marks, state } = stateAndMarks(node);
+function holdingRow(node, work, epics) {
+  const { marks, state } = stateAndMarks(node, work, epics);
   return {
     number: node.number,
     label: `#${node.number} ${node.title ?? ''}`.trim(),
     title: node.title ?? '',
     blockedBy: [...(node.blockedBy ?? [])].sort((a, b) => a - b),
     marks,
-    state: { code: state.code, label: state.label, mark: state.mark },
+    state: stateView(state),
+    trackMark: trackMarkOf(node),
   };
 }
 
@@ -203,8 +228,8 @@ const byFromTo = (a, b) => a.from - b.from || a.to - b.to;
  * `stateAndMarks` already derives for a track-lane card, so a node grouped
  * by epic cannot read differently from the same node's own card just
  * because it now has a second grouped location (#1032). */
-function groupedRow(node) {
-  const { marks, state } = stateAndMarks(node);
+function groupedRow(node, work, epics) {
+  const { marks, state } = stateAndMarks(node, work, epics);
   // EVERY field `drawnNode` gives a lane card, minus the coordinates. The
   // page draws a cluster's slices with the SAME `renderNodeCard` the lanes
   // use, so a row missing one of these produces a card with an `undefined`
@@ -220,7 +245,8 @@ function groupedRow(node) {
     track: node.track ?? null,
     blockedBy: [...(node.blockedBy ?? [])].sort((a, b) => a - b),
     className: state.className,
-    state: { code: state.code, label: state.label, mark: state.mark },
+    state: stateView(state),
+    trackMark: trackMarkOf(node),
     marks,
   };
 }
@@ -235,9 +261,9 @@ function groupedRow(node) {
  * SAID, never a silently empty field (rule 4, evidence-reader-empty-on-
  * failure).
  */
-function epicChildRow(node) {
+function epicChildRow(node, work, epics) {
   return {
-    ...groupedRow(node),
+    ...groupedRow(node, work, epics),
     parentSource: node.parentSource ?? null,
     baseCheck: {
       ok: false,
@@ -248,9 +274,9 @@ function epicChildRow(node) {
 
 /** A node whose declared parent did not resolve to a real epic — carried
  * with the graph's own reason, never re-derived (D5, `epic-graph.mjs`). */
-function divergentChildRow(node, reason) {
+function divergentChildRow(node, reason, work, epics) {
   return {
-    ...groupedRow(node),
+    ...groupedRow(node, work, epics),
     parent: node.parent,
     parentSource: node.parentSource ?? null,
     reason,
@@ -308,7 +334,7 @@ function trackerInfo(epicNode, project) {
  * Determinism: `epics` and every `children` array sort by issue number
  * before returning, independent of input order.
  */
-function buildEpicGrouping(nodes, declarationDivergences, project) {
+function buildEpicGrouping(nodes, declarationDivergences, project, work, epics) {
   const nodeList = Array.isArray(nodes) ? nodes : [];
   const divergences = Array.isArray(declarationDivergences) ? declarationDivergences : [];
   const byNode = new Map(nodeList.map((n) => [n.number, n]));
@@ -332,13 +358,13 @@ function buildEpicGrouping(nodes, declarationDivergences, project) {
     if (n.parent == null) continue; // #1032: no declaration to group by — stays in its track lane, untouched here
     const parentNode = resolveParent(n);
     if (parentNode && parentNode.kind === 'epic') {
-      childrenByEpic.get(parentNode.number).push(epicChildRow(n));
+      childrenByEpic.get(parentNode.number).push(epicChildRow(n, work, epics));
       continue;
     }
-    divergentChildren.push(divergentChildRow(n, parentReason(n, parentNode)));
+    divergentChildren.push(divergentChildRow(n, parentReason(n, parentNode), work, epics));
   }
 
-  const epics = epicNodes.map((e) => {
+  const epicRows = epicNodes.map((e) => {
     // `e.parent == null` alone decides "nothing declared" — `resolveParent`
     // deliberately returns `undefined` (not `null`) for a declared parent
     // this graph holds no node for, and collapsing that into the same
@@ -351,7 +377,7 @@ function buildEpicGrouping(nodes, declarationDivergences, project) {
       reason: parentNode && parentNode.kind === 'epic' ? 'nested-epic-not-supported' : parentReason(e, parentNode),
     };
     return {
-      ...groupedRow(e),
+      ...groupedRow(e, work, epics),
       tracker: trackerInfo(e, project),
       parentDivergence,
       children: childrenByEpic.get(e.number),
@@ -369,10 +395,10 @@ function buildEpicGrouping(nodes, declarationDivergences, project) {
   // one, or is unclaimed. A `divergentChildren` row is UNCLAIMED — its
   // declaration did not resolve to an epic, so nothing claimed it, and it
   // stays on the board in its own track lane with its reason beside it.
-  const claimed = new Set(epics.flatMap((e) => [e.number, ...e.children.map((c) => c.number)]));
+  const claimed = new Set(epicRows.flatMap((e) => [e.number, ...e.children.map((c) => c.number)]));
   const unclaimed = nodeList.map((n) => n.number).filter((number) => !claimed.has(number)).sort((a, b) => a - b);
 
-  return { ok: true, value: { epics, divergentChildren, unclaimed } };
+  return { ok: true, value: { epics: epicRows, divergentChildren, unclaimed } };
 }
 
 /**
@@ -386,11 +412,11 @@ function buildEpicGrouping(nodes, declarationDivergences, project) {
  * @param {{ok:boolean, value?:{nodes:Array, edges:Array, issuesUnreadable?:Array, declarationDivergences?:Array}, reason?:string}} graphSection
  * @param {{collapsedTracks?: Set<string>, holdingPage?: number, project?: string|null}} [options] `collapsedTracks` holds the track ids currently collapsed — the `?` lane starts in it, so it is collapsed by default without `app.js` deciding that on its own. `project` (optional, defaulting to `null` the way `roadmap-model.mjs`'s own `buildRoadmapModel` already does) sources the epic tracker's stamp to a real forge link when known.
  */
-export function buildLaneModel(graphSection, { collapsedTracks = new Set(['?']), holdingPage = 0, project = null, clustering = 'track' } = {}) {
+export function buildLaneModel(graphSection, { collapsedTracks = new Set(['?']), holdingPage = 0, project = null, clustering = 'track', work, epics } = {}) {
   if (!graphSection || typeof graphSection !== 'object') return { ok: false, reason: 'no graph section was given to the lanes' };
   if (graphSection.ok !== true) return { ok: false, reason: graphSection.reason };
 
-  const { nodes = [], edges = [], issuesUnreadable = [], declarationDivergences = [] } = graphSection.value ?? {};
+  const { nodes = [], edges = [], issuesUnreadable = [], declarationDivergences = [] } = withBlockErrors(graphSection.value);
 
   const trackOf = new Map(nodes.map((n) => [n.number, n.track ?? null]));
   const byTrack = new Map();
@@ -439,7 +465,7 @@ export function buildLaneModel(graphSection, { collapsedTracks = new Set(['?']),
     const laneNodes = byTrack.get(track);
     const laneEdges = (perLaneEdges.get(track) ?? []).slice().sort(byFromTo);
     const placed = layout({ nodes: laneNodes, edges: laneEdges });
-    const drawn = laneNodes.map((node) => drawnNode(node, placed.nodes[node.number]));
+    const drawn = laneNodes.map((node) => drawnNode(node, placed.nodes[node.number], work, epics));
     return {
       track,
       label: `Track ${track}`,
@@ -460,7 +486,7 @@ export function buildLaneModel(graphSection, { collapsedTracks = new Set(['?']),
   // The arithmetic stays here rather than in the page. This batch states a
   // count, a total and a page span, and a renderer dropping rows from a page
   // it did not compute would make all three lie.
-  const epicGrouping = buildEpicGrouping(nodes, declarationDivergences, project);
+  const epicGrouping = buildEpicGrouping(nodes, declarationDivergences, project, work, epics);
   const shownElsewhere = clustering === 'epic' && epicGrouping.ok
     ? new Set(nodes.map((n) => n.number).filter((number) => !epicGrouping.value.unclaimed.includes(number)))
     : new Set();
@@ -475,7 +501,7 @@ export function buildLaneModel(graphSection, { collapsedTracks = new Set(['?']),
   const totalPages = Math.max(1, Math.ceil(holdingTotal / PAGE_SIZE));
   const page = Math.min(Math.max(0, holdingPage), totalPages - 1);
   const pageNodesRaw = holdingSorted.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE);
-  const pageNodes = pageNodesRaw.map(holdingRow);
+  const pageNodes = pageNodesRaw.map((n) => holdingRow(n, work, epics));
 
   // holding.edges is a BOARD, laid out the same way a lane's own edges are
   // (one layout() call, over that page's own subgraph) — it is never the
@@ -486,7 +512,7 @@ export function buildLaneModel(graphSection, { collapsedTracks = new Set(['?']),
   const pageNumbers = new Set(pageNodesRaw.map((n) => n.number));
   const pageHoldingEdges = holdingEdges.filter((e) => pageNumbers.has(e.from) && pageNumbers.has(e.to));
   const placedHolding = layout({ nodes: pageNodesRaw, edges: pageHoldingEdges });
-  const boardNodes = pageNodesRaw.map((node) => drawnNode(node, placedHolding.nodes[node.number]));
+  const boardNodes = pageNodesRaw.map((node) => drawnNode(node, placedHolding.nodes[node.number], work, epics));
 
   const holding = {
     track: '?',

@@ -5,8 +5,8 @@
 // returns a bounded transport result. The review layer owns snapshots, parser,
 // challenger, and publication.
 
-import { chmodSync, copyFileSync, existsSync, mkdtempSync, realpathSync, rmSync, statSync } from 'node:fs';
-import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { chmodSync, copyFileSync, existsSync, mkdtempSync, rmSync, statSync } from 'node:fs';
+import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 import { assertRoutableStage } from '../../../lib/stage-engine.mjs';
@@ -14,63 +14,13 @@ import { credentialEnvNames, withoutCredentials } from '../../../lib/credential-
 import { withForgeConfigDir } from '../../../harness/producer-forge-reach.mjs';
 import { DEFAULT_STAGE_TIMEOUT_MS, formatDuration } from '../../../lib/duration.mjs';
 import { defaultRun } from '../../lib/agent-runtime.mjs';
+import { engineTail, secretValues, validateFinalMessageOutput } from '../../lib/stage-output.mjs';
+import { DESCRIPTOR } from './codex.descriptor.mjs';
 
-export const CODEX_MODEL = 'gpt-5.5';
+// The pinned model is declared ONCE, in the descriptor (#1129); this export keeps the importers valid.
+export const CODEX_MODEL = DESCRIPTOR.stage.model.id;
 export const CODEX_HOME_MODE = 0o700;
 export const CODEX_AUTH_MODE = 0o600;
-
-function tail(result, secrets, max = 300) {
-  const text = String(result?.stderr ?? '').trim() || String(result?.stdout ?? '').trim();
-  if (!text) return '';
-  let safe = text;
-  for (const secret of secrets) {
-    if (typeof secret === 'string' && secret.length > 0) safe = safe.split(secret).join('[redacted]');
-  }
-  const last = safe.split('\n').filter(Boolean).slice(-2).join(' / ');
-  return ` — the engine last said: ${last.length > max ? `${last.slice(0, max)}…` : last}`;
-}
-
-function canonicalPath(path) {
-  const unresolved = [];
-  let current = resolve(path);
-  while (!existsSync(current)) {
-    const parent = dirname(current);
-    if (parent === current) break;
-    unresolved.unshift(current.slice(parent.length + 1));
-    current = parent;
-  }
-  const base = existsSync(current) ? realpathSync(current) : current;
-  return resolve(base, ...unresolved);
-}
-
-function isWithin(parent, child) {
-  const rel = relative(parent, child);
-  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
-}
-
-function validateOutput(output, cwd) {
-  if (output?.mode !== 'final-message' || typeof output.tempPath !== 'string' || typeof output.artifactPath !== 'string') {
-    return 'the Codex transport needs a host-owned final-message output descriptor';
-  }
-  if (!isAbsolute(output.tempPath) || !isAbsolute(output.artifactPath)) {
-    return 'the host-owned final-message paths must be absolute';
-  }
-  let candidate;
-  let tempPath;
-  let artifactPath;
-  try {
-    candidate = canonicalPath(cwd);
-    tempPath = canonicalPath(output.tempPath);
-    artifactPath = canonicalPath(output.artifactPath);
-  } catch (err) {
-    return `the host-owned final-message path cannot be resolved safely — ${err?.message ?? String(err)}`;
-  }
-  if (isWithin(candidate, tempPath) || isWithin(candidate, artifactPath)) {
-    return 'the host-owned final-message output must be outside the candidate';
-  }
-  if (tempPath === artifactPath) return 'the Codex temporary output and final artifact paths must differ';
-  return null;
-}
 
 function makeCodexHome() {
   const home = mkdtempSync(join(tmpdir(), 'brain-codex-'));
@@ -121,7 +71,7 @@ export async function runStage({
   if (model !== CODEX_MODEL) {
     return { ok: false, reason: `the Codex cold-review transport requires model ${CODEX_MODEL}` };
   }
-  const outputFailure = validateOutput(output, cwd);
+  const outputFailure = validateFinalMessageOutput(output, cwd, { engine: DESCRIPTOR.name });
   if (outputFailure) return { ok: false, reason: outputFailure };
 
   const scrubNames = Array.isArray(credentialEnv)
@@ -129,7 +79,7 @@ export async function runStage({
     : credentialEnvNames();
   const scrubbed = withoutCredentials(_env, scrubNames);
   const env = forgeConfigDir ? withForgeConfigDir(scrubbed, forgeConfigDir) : scrubbed;
-  const secrets = scrubNames.map((name) => _env?.[name]).filter(Boolean);
+  const secrets = secretValues(_env, scrubNames);
   const authSource = resolveAuthSource(_env);
   if (authSource === null) {
     return {
@@ -174,7 +124,7 @@ export async function runStage({
           '--skip-git-repo-check', '--ephemeral', '--ignore-user-config',
           '--output-last-message', output.tempPath, prompt,
         ];
-        result = _run('codex', args, { cwd, timeoutMs, env: { ...env, CODEX_HOME: codexHome } });
+        result = _run('codex', args, { cwd, timeoutMs, env: { ...env, CODEX_HOME: codexHome }, discardStdout: true });
       } catch (err) {
         result = { spawnError: err };
       }
@@ -186,13 +136,13 @@ export async function runStage({
         answer = {
           ok: false,
           elapsedMs: elapsed(),
-          reason: (timedOut ? `the Codex engine did not finish within ${formatDuration(timeoutMs)}` : `the Codex engine failed to run — ${result.error.message}`) + tail(result, secrets),
+          reason: (timedOut ? `the Codex engine did not finish within ${formatDuration(timeoutMs)}` : `the Codex engine failed to run — ${result.error.message}`) + engineTail(result, secrets),
         };
       } else if (result?.status !== 0) {
         answer = {
           ok: false,
           elapsedMs: elapsed(),
-          reason: `the Codex engine exited with status ${result?.status ?? 'unknown'}` + tail(result, secrets),
+          reason: `the Codex engine exited with status ${result?.status ?? 'unknown'}` + engineTail(result, secrets),
         };
       } else if (!existsSync(output.tempPath)) {
         answer = { ok: false, elapsedMs: elapsed(), reason: 'the Codex engine exited cleanly but wrote no final message' };

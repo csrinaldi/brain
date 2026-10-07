@@ -88,3 +88,65 @@ test('#1059: every token the dark blocks redefine is defined on bare :root first
     assert.ok(light.includes(name), `${name} is redefined for dark but never defined on bare :root — a viewer on light would inherit nothing`);
   }
 });
+
+// ── #1311: controls and links read theme tokens, never the UA default ─────
+// An element nobody styled keeps the user agent's colour (black text on the
+// dark surface, #0000EE links). The base rules below the token blocks close
+// that class; color-scheme makes the UA's own surfaces follow the theme.
+const ruleBody = (selectorRe) => {
+  const m = css.replace(/\/\*[\s\S]*?\*\//g, '').match(new RegExp(`(?:^|\\n)${selectorRe}\\s*\\{([^}]*)\\}`));
+  return m ? m[1] : '';
+};
+
+test('#1311: button and a set color from var(--…) tokens at element level', () => {
+  assert.match(ruleBody('button(?:,\\s*[a-z]+)*'), /(?<![-\w])color:\s*var\(--[a-z-]+\)/, 'a base button rule must set color from a token');
+  assert.match(ruleBody('a'), /(?<![-\w])color:\s*var\(--[a-z-]+\)/, 'a base a rule must set color from a token');
+  for (const el of ['button', 'select', 'input']) {
+    const body = ruleBody(`(?:[a-z]+,\\s*)*${el}(?:,\\s*[a-z]+)*`);
+    assert.match(body, /\bbackground:\s*var\(--[a-z-]+\)/, `${el} must take its background from a token`);
+    assert.match(body, /\bborder-color:\s*var\(--[a-z-]+\)/, `${el} must take its border from a token`);
+  }
+});
+
+test('#1311: each theme block declares color-scheme matching its palette', () => {
+  assert.match((css.match(/^:root \{([\s\S]*?)\n\}/m) ?? [, ''])[1], /color-scheme:\s*light/);
+  assert.match((css.match(/:root:not\(\[data-theme='light'\]\) \{([\s\S]*?)\n  \}/) ?? [, ''])[1], /color-scheme:\s*dark/);
+  assert.match((css.match(/:root\[data-theme='dark'\] \{([\s\S]*?)\n\}/) ?? [, ''])[1], /color-scheme:\s*dark/);
+});
+
+const lum = (hex) => {
+  const c = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255)
+    .map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
+  return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+};
+const ratio = (a, b) => {
+  const [hi, lo] = [lum(a), lum(b)].sort((x, y) => y - x);
+  return (hi + 0.05) / (lo + 0.05);
+};
+const tokenMap = (body) => Object.fromEntries([...body.matchAll(/--([a-z0-9-]+)\s*:\s*(#[0-9a-fA-F]{6})\b/g)].map((m) => [m[1], m[2]]));
+
+test('#1311: text on controls and links meets WCAG AA 4.5:1 in the light and the dark token sets', () => {
+  const light = tokenMap((css.match(/^:root \{([\s\S]*?)\n\}/m) ?? [, ''])[1]);
+  const dark = { ...light, ...tokenMap((css.match(/:root\[data-theme='dark'\] \{([\s\S]*?)\n\}/) ?? [, ''])[1]) };
+  const pairs = [['ink', 'surface'], ['accent', 'paper'], ['accent', 'surface']];
+  for (const [name, set] of [['light', light], ['dark', dark]]) {
+    for (const [fg, bg] of pairs) {
+      const r = ratio(set[fg], set[bg]);
+      assert.ok(r >= 4.5, `${name}: --${fg} on --${bg} is ${r.toFixed(2)}:1, below 4.5`);
+    }
+  }
+});
+
+test('#1309 D138: the Ready to close tokens exist in all three theme blocks and meet AA 4.5:1', () => {
+  const bodies = {
+    light: (css.match(/^:root \{([\s\S]*?)\n\}/m) ?? [, ''])[1],
+    media: (css.match(/@media \(prefers-color-scheme: dark\) \{([\s\S]*?)\n\}/) ?? [, ''])[1],
+    stamp: (css.match(/:root\[data-theme='dark'\] \{([\s\S]*?)\n\}/) ?? [, ''])[1],
+  };
+  for (const [name, body] of Object.entries(bodies)) {
+    const t = tokenMap(body);
+    assert.ok(t['state-ready-to-close-fg'] && t['state-ready-to-close-bg'], `${name}: ready-to-close tokens missing`);
+    const r = ratio(t['state-ready-to-close-fg'], t['state-ready-to-close-bg']);
+    assert.ok(r >= 4.5, `${name}: ready-to-close is ${r.toFixed(2)}:1, below 4.5`);
+  }
+});

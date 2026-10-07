@@ -2,7 +2,9 @@
 // server.mjs — `brain:ui`: the local read-model server (#881, PR 1 / A1 +
 // PR 2 / A2).
 //
-// Serves the static SPA at `/`, the snapshot at `GET /api/snapshot`, and a
+// Serves the static SPA at `/`, the snapshot at `GET /api/snapshot`, one
+// record's content at `GET /api/record/{id}` (#1313, a local file read, called
+// only on a click), and a
 // push stream at `GET /api/stream` — built IN-PROCESS via `buildSnapshot`,
 // never shelling out to a CLI (R881-1). `buildSnapshot` is composed with a
 // cache-only `vcs` port (`forge-cache.mjs`, D1); `poller.mjs` is the only
@@ -22,8 +24,8 @@
 
 import { createServer as createHttpServer } from 'node:http';
 import { gitRun, gitRunAsync, gitErrorLine, FETCH_TIMEOUT_MS } from './git-run.mjs';
-import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import { dirname, join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { buildSnapshot } from '../status/snapshot.mjs';
@@ -32,7 +34,10 @@ import { createForgeCache } from './forge-cache.mjs';
 import { diffSections } from './diff.mjs';
 import { createWatcher, resolveGitCommonDir } from './watcher.mjs';
 import { createPoller } from './poller.mjs';
+import { createForgeThread, PRODUCTION_RESOLVE } from './forge-thread.mjs';
 import { buildChangeView } from './change-route.mjs';
+import { buildRecordView, RECORD_ID_RE } from './record-route.mjs';
+import { CHANGES_ROOT } from '../lib/sdd-layout.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const STATIC_DIR = join(__dirname, 'static');
@@ -62,8 +67,11 @@ const FETCH_ARGV = Object.freeze(['fetch', 'origin', '--no-tags', '--prune', '--
 /** `GET /api/change/<N digits>` — a non-numeric id falls through to the 404 below (D8's `change-route.mjs`). */
 const CHANGE_ROUTE_RE = /^\/api\/change\/(\d+)$/;
 
+/** `GET /api/record/<rec-16hex>` (#1313): anything else under the prefix falls through to the 404 below and reads no file. */
+const RECORD_ROUTE_RE = /^\/api\/record\/(rec-[0-9a-f]{16})$/;
+
 /** Every route this server knows — the R881-10 S3 guard test pins this set: no MCP resource route, no heartbeat/agent-pulse endpoint. */
-export const KNOWN_ROUTES = Object.freeze(['/', '/app.js', '/app.css', '/lib/{module}.mjs', '/vendor/marked.esm.js', '/api/snapshot', '/api/stream', '/api/poll/pause', '/api/poll/resume', '/api/poll/once', '/api/remotes/refresh', '/api/change/{issue}']);
+export const KNOWN_ROUTES = Object.freeze(['/', '/app.js', '/app.css', '/lib/{module}.mjs', '/vendor/marked.esm.js', '/api/snapshot', '/api/stream', '/api/poll/pause', '/api/poll/resume', '/api/poll/once', '/api/remotes/refresh', '/api/change/{issue}', '/api/record/{id}']);
 
 const NO_FORGE_REASON = 'no forge port was supplied to the poller';
 const noForgeVcs = {
@@ -89,7 +97,7 @@ const noForgeVcs = {
  */
 export function createUiServer({
   root = process.cwd(), port = 3000, vcs = null, project = null, _now = () => new Date(),
-  forgeSource = null, forgeUnavailable = null, interval = 60000, poll = true,
+  forgeSource = null, closedForgeSource = null, forgeUnavailable = null, interval = 60000, poll = true,
   gitCommonDir = null, _watch, _run, _readdir,
   _setTimeout = setTimeout, _clearTimeout = clearTimeout,
   _recomputeCurrent = null, onServerError = null, remoteBudget = REMOTE_READ_BUDGET, _snapshotRun, _fetchRun } = {}) {
@@ -191,10 +199,13 @@ export function createUiServer({
   // here, never in the snapshot, so the CLI stays cold and deterministic.
   const remoteCache = new Map();
   const computeSnapshot = _recomputeCurrent ?? (async () => {
-    const snapshot = await buildSnapshot({ root, now: _now(), vcs: forgeVcs, project, _remoteCache: remoteCache, remoteBudget, ...(_snapshotRun ? { _run: _snapshotRun } : {}) });
+    // #1257 D64: the poller's `forgeLoad` says what the cache-only port has not been given yet,
+    // so a section still loading is pending rather than a miss. An injected `vcs` (a test) is read
+    // directly and never loads, so there it is derived the way the CLI derives it.
+    const snapshot = await buildSnapshot({ root, now: _now(), vcs: forgeVcs, project, ...(vcs ? {} : { forgeLoad: poller.state().forgeLoad }), _remoteCache: remoteCache, remoteBudget, ...(_snapshotRun ? { _run: _snapshotRun } : {}) });
     if (!forgeUnavailable) return snapshot;
     const unreachable = { ok: false, reason: forgeUnavailable };
-    return { ...snapshot, graph: unreachable, prs: unreachable, reviews: unreachable };
+    return { ...snapshot, graph: unreachable, prs: unreachable, reviews: unreachable, closedIssues: unreachable, hierarchy: unreachable, localWorktrees: unreachable };
   });
 
   // D36: while the remote section left branches `deferred` (over the per-build
@@ -209,9 +220,43 @@ export function createUiServer({
     followUp = _setTimeout(() => { followUp = null; return recomputeAndBroadcast({ causes: ['remote'] }); }, REMOTE_FOLLOWUP_MS);
   }
 
+  /** True only when `path` resolves, and resolves outside `base`: a symlink that leaves the worktree is never watched (R6). A path that does not exist yet is not an escape. */
+  function escapes(path, base) {
+    try { return !realpathSync(path).startsWith(`${realpathSync(base)}${sep}`); } catch { return false; }
+  }
+
+  /**
+   * #883: when a worktree has no `openspec/changes/` yet, the nearest existing directory above it inside the
+   * worktree (`openspec/`, else the worktree root) to watch non-recursively, so the first change dir is noticed.
+   * `null` when the changes dir exists, or when that ancestor resolves outside the worktree (never followed).
+   */
+  function nearestAncestor(worktree, changesDir) {
+    if (existsSync(changesDir)) return null;
+    const candidate = existsSync(dirname(changesDir)) ? dirname(changesDir) : worktree;
+    return candidate !== worktree && escapes(candidate, worktree) ? null : candidate;
+  }
+
+  /**
+   * #883 D79: the overlay's watches follow the section. Each uncapped worktree's `openspec/changes/`
+   * and, when readable, its change dir. A section that could not be read leaves the current handles
+   * alone, exactly as an unreadable change-dir listing does in the watcher.
+   */
+  function syncLocalWatches() {
+    const section = current?.localWorktrees;
+    if (closed || !section?.ok) return;
+    const targets = section.value.entries.filter((e) => !e.capped).flatMap((e) => {
+      const changesDir = join(e.path, CHANGES_ROOT);
+      if (escapes(changesDir, e.path)) return [];
+      const dir = e.dir && e.dirState === 'present' && !escapes(join(e.path, e.dir), e.path) ? join(e.path, e.dir) : null;
+      return [{ key: e.path, changesDir, dir, ancestor: nearestAncestor(e.path, changesDir) }];
+    });
+    watcher.setLocalTargets(targets);
+  }
+
   async function recomputeCurrent() {
     current = await computeSnapshot();
     armRemoteFollowUp();
+    syncLocalWatches();
     return current;
   }
 
@@ -234,7 +279,10 @@ export function createUiServer({
       // the common dir — never `-C worktreePath` — so no path under the
       // worktree itself is ever opened (R881-3: "not even a linked worktree's
       // own `.git` file"). The primary checkout has no admin dir; a plain
-      // call (default cwd) resolves its own HEAD instead.
+      // call (default cwd) resolves its own HEAD instead. (#883, R883-16: this
+      // read still opens nothing in a worktree. The local overlay is the one
+      // exception, and only for an open issue's change dir; its `ls-tree` names
+      // the worktree's HEAD by sha on the served root's own git dir, never `-C`.)
       for (const { path: worktreePath, id } of refWorktrees) {
         let head = null;
         try {
@@ -264,7 +312,7 @@ export function createUiServer({
 
   const watcher = createWatcher({ root, gitCommonDir, _watch, _run: run, _readdir, _now, _setTimeout, _clearTimeout, onRecompute: recomputeAndBroadcast });
   const poller = createPoller({
-    vcs: forgeSource ?? noForgeVcs, cache: forgeCache, project, interval, enabled: poll,
+    vcs: forgeSource ?? noForgeVcs, closedVcs: closedForgeSource, cache: forgeCache, project, interval, enabled: poll,
     fetchRemotes, initialError: forgeUnavailable, _setTimeout, _clearTimeout, _now,
     onTick: () => { recomputeAndBroadcast({ causes: ['poll'] }); },
   });
@@ -312,6 +360,8 @@ export function createUiServer({
     if (pathname === '/api/remotes/refresh') return servePollControl(res, poller.refreshRemotes);
     const changeMatch = CHANGE_ROUTE_RE.exec(pathname);
     if (changeMatch) return serveChange(res, Number(changeMatch[1]));
+    const recordMatch = RECORD_ROUTE_RE.exec(pathname);
+    if (recordMatch && RECORD_ID_RE.test(recordMatch[1])) return serveRecord(res, recordMatch[1]);
     res.writeHead(404, { 'content-type': 'text/plain' });
     res.end('not found');
   }
@@ -366,6 +416,14 @@ export function createUiServer({
     const view = buildChangeView({ root, issue: issueNumber, snapshot: current, project, _run: run });
     res.writeHead(200, { 'content-type': 'application/json' });
     res.end(JSON.stringify(view));
+  }
+
+  // #1313: one record's content, read from `.memory/records/` on a click. No snapshot, no forge, no
+  // git: a local file read of a validated id (record-route.mjs), so it never waits on anything.
+  function serveRecord(res, id) {
+    const { status, body } = buildRecordView({ root, id });
+    res.writeHead(status, { 'content-type': 'application/json' });
+    res.end(JSON.stringify(body));
   }
 
   function sendInternalError(res, err) {
@@ -514,13 +572,28 @@ export async function main(argv = [], deps = {}) {
   // attempted at all, matching R881-4 S2's existing contract.
   let project = deps.project ?? null;
   let forgeSource = deps.forgeSource ?? null;
+  let closedForgeSource = deps.closedForgeSource ?? null;
+  const forgeThreads = [];
   let forgeUnavailable = null;
   if (deps.forgeSource === undefined && parsed.poll) {
     const resolve = deps._resolveForgeSource ?? resolveForgeSource;
     const resolved = await resolve();
     if (resolved.ok) {
-      forgeSource = resolved.vcs;
       if (project === null) project = resolved.project;
+      // #1257 D63: every forge verb is a `spawnSync`, so the live port runs in worker threads, one per
+      // lane, and the server's own thread never waits on a spawn. A caller that injects
+      // `_resolveForgeSource` and no `_forgeThreadResolve` is a test handing over a stub port: it is used
+      // as given, so no test can reach the production resolver and run a real `gh` in a thread.
+      const threadResolve = deps._forgeThreadResolve ?? (deps._resolveForgeSource ? null : PRODUCTION_RESOLVE);
+      if (threadResolve) {
+        const open = createForgeThread({ resolve: threadResolve });
+        const closedLane = createForgeThread({ resolve: threadResolve });
+        forgeThreads.push(open, closedLane);
+        forgeSource = open.port;
+        closedForgeSource = closedLane.port;
+      } else {
+        forgeSource = resolved.vcs;
+      }
     } else {
       forgeUnavailable = resolved.reason;
       error(`✗ forge: ${resolved.reason} — forge lane halted; tree sections and remote fetch still served`);
@@ -529,7 +602,7 @@ export async function main(argv = [], deps = {}) {
 
   const server = createUiServer({
     root: parsed.root, vcs: deps.vcs ?? null, project,
-    forgeSource, forgeUnavailable, interval: parsed.interval, poll: parsed.poll,
+    forgeSource, closedForgeSource, forgeUnavailable, interval: parsed.interval, poll: parsed.poll,
     _recomputeCurrent: deps._recomputeCurrent ?? null,
     _fetchRun: deps._fetchRun, // test seam only: undefined keeps the production default (a real fetch)
     onServerError: (err) => error(`✗ server error: ${err?.message ?? err} — still serving`),
@@ -546,6 +619,7 @@ export async function main(argv = [], deps = {}) {
     } else {
       error(`✗ ${err?.message ?? err}`);
     }
+    await Promise.all(forgeThreads.map((thread) => thread.close()));
     return 2;
   }
   say(`brain:ui listening on http://127.0.0.1:${server.port}`);
@@ -576,10 +650,15 @@ export async function main(argv = [], deps = {}) {
   // by wrapping `close()` once here rather than duplicating the removal in
   // both places.
   const realClose = server.close.bind(server);
-  server.close = () => {
+  server.close = async () => {
     proc.off('SIGINT', onSigint);
     proc.off('SIGTERM', onSigterm);
-    return realClose();
+    try {
+      return await realClose();
+    } finally {
+      // `terminate()` cannot interrupt a `spawnSync` already running in a thread; the signal path exits the process anyway.
+      await Promise.all(forgeThreads.map((thread) => thread.close()));
+    }
   };
 
   return server;

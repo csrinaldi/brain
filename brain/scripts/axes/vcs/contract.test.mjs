@@ -536,7 +536,7 @@ for (const providerName of Object.keys(PROVIDERS)) {
   // trailing `&` in the endpoint. The second `runJson` call then returns the
   // same array again and normalizes cleanly — a GREEN test for the WRONG
   // reason. Do not "improve" this coverage by adding `assignee` here.
-  test(`${providerName}.issueList (contract): happy fixture normalizes to exactly { number, title, labels } per entry`, async () => {
+  test(`${providerName}.issueList (contract): happy fixture normalizes to exactly { number, title, labels, assignees, state, body } per entry`, async () => {
     const fixtureName = `${providerName}-issueList-happy.json`;
     const fixture = loadFixture(fixtureName);
     assertProvenance(fixture, fixtureName);
@@ -547,8 +547,8 @@ for (const providerName of Object.keys(PROVIDERS)) {
     for (const entry of result) {
       assert.deepEqual(
         Object.keys(entry).sort(),
-        ['assignees', 'labels', 'number', 'title'],
-        'each issueList entry must normalize to EXACTLY { number, title, labels, assignees } — no narrowed or widened shape',
+        ['assignees', 'body', 'labels', 'number', 'state', 'title'],
+        'each issueList entry must normalize to EXACTLY { number, title, labels, assignees, state, body } — no narrowed or widened shape',
       );
       for (const label of entry.labels) {
         assert.equal(
@@ -572,16 +572,16 @@ for (const providerName of Object.keys(PROVIDERS)) {
     const expected =
       providerName === 'github'
         ? [
-            { number: 362, title: 'feat(m10-phase2): issueList contract-parity coverage (rank 4)', labels: ['type:feature', 'status:needs-review'], assignees: null },
-            { number: 361, title: 'fix(memory): index self-healing is backend-asymmetric — engram.share() reindexes conditionally and engram.pull() never does', labels: [], assignees: null },
-            { number: 358, title: 'Q5 — Architecture decision: doctrine tiers (lite/standard/regulated)', labels: [], assignees: null },
-            { number: 340, title: 'fix(governance): issue-link local check and CI job implement the same rule differently — brain:check greenlights PRs that CI rejects', labels: ['type:bug', 'status:needs-review'], assignees: null },
-            { number: 336, title: 'feat(vcs): M10 Phase 1 — port-verb contract coverage audit (detection only)', labels: ['type:feature', 'status:needs-review'], assignees: null },
-            { number: 329, title: 'fix(governance): actor-check L5 and #124 are mutually unsatisfiable for a solo maintainer', labels: ['type:bug'], assignees: null },
+            { number: 362, title: 'feat(m10-phase2): issueList contract-parity coverage (rank 4)', labels: ['type:feature', 'status:needs-review'], assignees: null, state: null, body: null },
+            { number: 361, title: 'fix(memory): index self-healing is backend-asymmetric — engram.share() reindexes conditionally and engram.pull() never does', labels: [], assignees: null, state: null, body: null },
+            { number: 358, title: 'Q5 — Architecture decision: doctrine tiers (lite/standard/regulated)', labels: [], assignees: null, state: null, body: null },
+            { number: 340, title: 'fix(governance): issue-link local check and CI job implement the same rule differently — brain:check greenlights PRs that CI rejects', labels: ['type:bug', 'status:needs-review'], assignees: null, state: null, body: null },
+            { number: 336, title: 'feat(vcs): M10 Phase 1 — port-verb contract coverage audit (detection only)', labels: ['type:feature', 'status:needs-review'], assignees: null, state: null, body: null },
+            { number: 329, title: 'fix(governance): actor-check L5 and #124 are mutually unsatisfiable for a solo maintainer', labels: ['type:bug'], assignees: null, state: null, body: null },
           ]
         : [
-            { number: 42, title: 'Add pagination guard to labelList', labels: ['type:bug', 'status:needs-review'], assignees: null },
-            { number: 41, title: 'Fix issueView author normalization', labels: [], assignees: null },
+            { number: 42, title: 'Add pagination guard to labelList', labels: ['type:bug', 'status:needs-review'], assignees: null, state: null, body: null },
+            { number: 41, title: 'Fix issueView author normalization', labels: [], assignees: null, state: null, body: null },
           ];
     assert.deepEqual(result, expected);
   });
@@ -609,6 +609,36 @@ for (const providerName of Object.keys(PROVIDERS)) {
     // separately above would still pass if both were `[]`.
     assert.notDeepEqual(by(902).assignees, by(904).assignees,
       '"nobody is assigned" and "brain cannot see" must not be the same value');
+  });
+
+  // ── state and body: the widening of #1257 (R4, R10, R12) ────────────────
+  // `null` and `''` are different answers for BOTH fields: `null` is "the payload
+  // did not carry it" and `''` is "read, and empty". A provider that quietly
+  // `?? ''`s an absent body would make every unread issue look like an empty
+  // description and cost nobody a fallback read.
+  test(`${providerName}.issueList (contract): state and body distinguish "cannot see" (null) from a read value`, async () => {
+    const fixtureName = `${providerName}-issueList-state.json`;
+    const fixture = loadFixture(fixtureName);
+    assertProvenance(fixture, fixtureName);
+    assert.equal(fixture._provenance.derived, true, `${fixtureName}: hand-authored, so it must be marked derived`);
+
+    const result = await vcs.issueList({ project: 'x/y', state: 'open', ...issueListArgs(fixture) });
+    const by = (n) => result.find(r => r.number === n);
+
+    assert.equal(by(911).state, 'open', providerName === 'gitlab' ? 'GitLab opened maps to open' : 'GitHub open passes through');
+    assert.equal(by(912).state, 'closed');
+    assert.equal(by(913).state, null, 'no state key is null, never guessed');
+    assert.equal(by(914).state, null, "state '' is null, never guessed");
+    assert.equal(by(915).state, null, 'an unrepresentable state is null');
+
+    assert.equal(by(921).body, 'Part of #878', providerName === 'gitlab' ? 'GitLab description is body' : 'GitHub body passes through');
+    assert.equal(by(922).body, null, 'an ABSENT body key is null (R12)');
+    assert.equal(by(923).body, '', 'a present JSON null body is the empty string (R12)');
+    assert.equal(by(924).body, '', 'an empty body is the empty string');
+    assert.ok(!('description' in by(921)), 'the provider-native key does not leak');
+
+    assert.notDeepEqual(by(912).state, by(913).state, 'closed and cannot-see must differ');
+    assert.notEqual(by(922).body, by(923).body, 'absent (null) and JSON null (empty) must not be the same value');
   });
 
   test(`${providerName}.issueList (contract): an empty open-list yields [], never a fabricated null/undefined`, async () => {
@@ -717,7 +747,7 @@ for (const providerName of Object.keys(PROVIDERS)) {
   // moment someone normalized `body` to `undefined`, and a hand-written
   // review object in the test would reintroduce exactly the injection this
   // block replaces.
-  test(`${providerName}.prReviews (contract): happy fixture normalizes to exactly { state, author, body } per entry`, async () => {
+  test(`${providerName}.prReviews (contract): happy fixture normalizes to exactly { state, author, body, commitId } per entry`, async () => {
     const fixtureName = `${providerName}-prReviews-happy.json`;
     const fixture = loadFixture(fixtureName);
     assertProvenance(fixture, fixtureName);
@@ -729,9 +759,10 @@ for (const providerName of Object.keys(PROVIDERS)) {
     for (const entry of result) {
       assert.deepEqual(
         Object.keys(entry).sort(),
-        ['author', 'body', 'state'],
-        'each prReviews entry must normalize to EXACTLY { state, author, body } — a narrowed shape is the #317 defect itself',
+        ['author', 'body', 'commitId', 'state'],
+        'each prReviews entry must normalize to EXACTLY { state, author, body, commitId } — a narrowed shape is the #317 defect itself; commitId is the #1263 S4 additive widening',
       );
+      assert.ok(entry.commitId === null || typeof entry.commitId === 'string', 'commitId is the head sha the review was submitted against, or null where the forge cannot say — never undefined');
       assert.equal(
         typeof entry.body,
         'string',
@@ -743,6 +774,17 @@ for (const providerName of Object.keys(PROVIDERS)) {
       assert.ok(!('username' in entry), 'must not leak raw GitLab username (only author)');
       assert.ok(!('system' in entry), 'must not leak GitLab note system flag');
       assert.ok(!('created_at' in entry), 'must not leak raw created_at');
+    }
+  });
+
+  test(`${providerName}.prReviews (contract): commitId is the review's head sha on GitHub (commit_id) and null on GitLab (its notes and approvals carry none)`, async () => {
+    const fixtureName = `${providerName}-prReviews-happy.json`;
+    const fixture = loadFixture(fixtureName);
+    const result = await vcs.prReviews({ project: 'x/y', number: 1, ...prReviewsArgs(fixture) });
+    if (providerName === 'github') {
+      assert.ok(result.every(e => /^[0-9a-f]{40}$/.test(e.commitId)), 'every GitHub review carries its commit_id');
+    } else {
+      assert.ok(result.every(e => e.commitId === null), 'GitLab cannot say which head a review was against: null, never guessed');
     }
   });
 
@@ -2715,7 +2757,7 @@ test('github.prReviews (contract): a review with no comment normalizes body to \
   // same empty-vs-uncomputable rule prView.body follows (A3 task 3.7).
   setSpawn(jsonSpawn([{ state: 'APPROVED', user: { login: 'bob' }, body: null }]));
   const result = await github.prReviews({ project: 'o/r', number: 144 });
-  assert.deepEqual(result, [{ state: 'APPROVED', author: 'bob', body: '' }]);
+  assert.deepEqual(result, [{ state: 'APPROVED', author: 'bob', body: '', commitId: null }]);
 });
 
 test('github.prReviews (contract): body passes through VERBATIM — no trimming, no re-encoding of the fenced verdict block', async () => {

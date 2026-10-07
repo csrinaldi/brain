@@ -103,6 +103,13 @@ function makeClassList(node) {
   };
 }
 
+const LINE_HEIGHT = 20;
+function flowHeight(n) {
+  if (n.tagName === '#text') return 0;
+  const sum = n._kids.reduce((total, k) => total + flowHeight(k), 0);
+  return sum === 0 ? LINE_HEIGHT : sum; // a text-only or empty element is one line
+}
+
 export function createElement(tag) {
   const node = {
     tagName: String(tag).toUpperCase(),
@@ -113,6 +120,20 @@ export function createElement(tag) {
     parentNode: null,
     [LISTENERS]: Object.create(null),
     _ownText: '',
+    scrollTop: 0,
+    style: {},
+
+    // #1307: the only layout the fake has — a block flow where a childless element is LINE_HEIGHT
+    // tall and a parent is the sum of its children, minus every ancestor's scrollTop. Enough to
+    // assert WHERE a scroll puts an element; not a claim about real CSS (the browser proof is that).
+    getBoundingClientRect() {
+      let top = 0;
+      for (let n = node; n.parentNode; n = n.parentNode) {
+        for (const sib of n.parentNode._kids) { if (sib === n) break; top += flowHeight(sib); }
+        top -= n.parentNode.scrollTop || 0;
+      }
+      return { top, bottom: top + flowHeight(node), height: flowHeight(node), left: 0, right: 0, width: 0 };
+    },
 
     get childNodes() { return (this._view ??= new NodeListView(this)); },
     get firstChild() { return this._kids[0] ?? null; },
@@ -151,6 +172,21 @@ export function createElement(tag) {
       }
       child.parentNode = node;
       node._kids.push(child);
+      return child;
+    },
+    // #1313: the ledger opens a record in a row inserted after the clicked one.
+    get nextSibling() {
+      if (!node.parentNode) return null;
+      const kids = node.parentNode._kids;
+      return kids[kids.indexOf(node) + 1] ?? null;
+    },
+    insertBefore(child, ref) {
+      if (ref === null || ref === undefined) return node.appendChild(child);
+      const at = node._kids.indexOf(ref);
+      if (at === -1) throw new Error('insertBefore: the reference node is not a child of this node');
+      if (child.parentNode) child.parentNode.removeChild(child);
+      child.parentNode = node;
+      node._kids.splice(node._kids.indexOf(ref), 0, child);
       return child;
     },
     removeChild(child) {
@@ -248,14 +284,16 @@ function makeWorkerClass(mode, workers) {
 /**
  * Install a document, a window and the two network globals the page opens, and
  * return the mounts plus a `restore()`. `snapshot` is served at
- * `/api/snapshot`; `changes` answers `/api/change/<issue>` by issue number; `remotesRefresh`
+ * `/api/snapshot`; `changes` answers `/api/change/<issue>` by issue number; `records` answers
+ * `/api/record/<id>` by record id (#1313): a body, `{status, body}`, or a function returning either
+ * (a promise lets a test hold the answer back); `remotesRefresh`
  * is what `POST /api/remotes/refresh` answers (#1201).
  *
  * The stream is a stub that never emits: the page's first paint comes from the
  * REST read, and a harness that also replayed frames would be testing the
  * stub's timing rather than the render.
  */
-export function installDom({ mountIds, snapshot = null, changes = {}, storage = new Map(), worker = 'reply', remotesRefresh = { remotes: { lastOkAt: null, lastError: null, inFlight: false } } } = {}) {
+export function installDom({ mountIds, snapshot = null, changes = {}, records = {}, storage = new Map(), worker = 'reply', remotesRefresh = { remotes: { lastOkAt: null, lastError: null, inFlight: false } } } = {}) {
   const saved = { document: globalThis.document, window: globalThis.window, fetch: globalThis.fetch, EventSource: globalThis.EventSource, Worker: globalThis.Worker };
   const workers = [];
   if (worker === null) delete globalThis.Worker;
@@ -283,6 +321,7 @@ export function installDom({ mountIds, snapshot = null, changes = {}, storage = 
 
   const json = (body, status = 200) => ({ ok: status >= 200 && status < 300, status, json: async () => body });
   const posts = [];
+  const recordFetches = [];
   globalThis.fetch = async (url, init) => {
     const path = String(url);
     if (init?.method === 'POST') posts.push(path);
@@ -294,6 +333,16 @@ export function installDom({ mountIds, snapshot = null, changes = {}, storage = 
     if (change) {
       const body = changes[change[1]];
       return body ? json(body) : json({ reason: `no change was staged for issue #${change[1]}` }, 404);
+    }
+    const record = path.match(/^\/api\/record\/([^/]+)$/);
+    if (record) {
+      recordFetches.push(path);
+      const id = decodeURIComponent(record[1]);
+      if (!(id in records)) return json({ ok: false, reason: `no record ${id} was staged` }, 404);
+      let entry = records[id];
+      if (typeof entry === 'function') entry = await entry();
+      if (entry instanceof Error) throw entry;
+      return entry && 'status' in entry && 'body' in entry ? json(entry.body, entry.status) : json(entry);
     }
     if (path.startsWith('/api/poll/')) return json({ reason: 'the poller is not part of this harness' }, 503);
     throw new Error(`the page reached for ${path}, which this harness does not answer — ${init?.method ?? 'GET'}`);
@@ -313,6 +362,8 @@ export function installDom({ mountIds, snapshot = null, changes = {}, storage = 
     workers,
     /** Every POST the page made, in order (#1201). */
     posts,
+    /** Every `/api/record/<id>` the page asked for, in order (#1313). */
+    recordFetches,
     /** Deliver one stream frame to the page, as the server would (#1218). */
     emit(name, data = {}) {
       for (const fn of streamListeners.get(name) ?? []) fn({ data: JSON.stringify(data) });

@@ -124,7 +124,7 @@ function fixtureRepo() {
   return root;
 }
 
-async function boot({ issues = ISSUES } = {}) {
+async function boot({ issues = ISSUES, forgeLoad = null } = {}) {
   const root = fixtureRepo();
   const vcs = {
     async issueList() { return issues.map(({ number, title, labels }) => ({ number, title, labels, assignees: [] })); },
@@ -140,6 +140,7 @@ async function boot({ issues = ISSUES } = {}) {
     project: 'csrinaldi/brain',
     vcs,
     now: '2026-09-19T12:00:00.000Z',
+    ...(forgeLoad ? { forgeLoad } : {}),
     // No git in a temp directory, and a harness must not depend on one.
     _run: () => { throw new Error('git is not available in this harness'); },
   });
@@ -224,7 +225,7 @@ test('#1059 smoke: the page boots against a real snapshot and draws the board', 
   // took `renderLanes` down with it — a blank board, not a failing test.
   const card = cardFor(dom, 1059);
   assert.ok(card, 'the issue that owns a change directory is on the board');
-  assert.match(card.textContent, /tasks 1\/2/, 'its strip counts the change directory\'s ticked tasks');
+  assert.match(card.textContent, /tasks 1 \/ 2 · working tree/, 'its strip counts the change directory\'s ticked tasks');
 });
 
 test('#1059 smoke: clicking a ticket opens its panel, from every mode', async (t) => {
@@ -565,4 +566,85 @@ test('#1079: a node with no track that an epic claims is drawn once, and the bat
   // Not hidden, shown elsewhere. A batch that silently shrank would read as
   // the graph changing when only the view did.
   assert.match(find(dom.mounts.canvas, byClass('batch')).textContent, /1 more shown under their epic/);
+});
+
+// ── #1257 R1257-9 / D65: a pending graph is a loading page, not an empty board ──
+
+test('#1257 smoke: a pending graph shows the loading sentence, no failure wording, no count of 0 and no empty-lane message', async (t) => {
+  const dom = await boot({ forgeLoad: { open: { state: 'pending', at: null }, closed: { state: 'pending', at: null } } });
+  t.after(() => dom.restore());
+
+  const text = (node) => [node.textContent, ...findAll(node, () => true).map((n) => n.textContent)].join(' ');
+  const canvas = text(dom.mounts.canvas);
+  assert.match(canvas, /loading open issues from the forge…/);
+  assert.doesNotMatch(canvas, /could not be computed/, 'loading is not a failure');
+  assert.doesNotMatch(canvas, /\b0 track lane/, 'no empty board is counted');
+  assert.equal(cards(dom).length, 0, 'no card is drawn from a graph that has not loaded');
+  const banners = text(dom.mounts.banners);
+  assert.match(banners, /still loading from the forge: graph, prs, reviews, closedIssues/);
+  // Other sections may fail honestly in this harness (no git, no ADR tree); what matters is that no
+  // pending forge section is among the failures the sections band lists.
+  assert.doesNotMatch(banners, /(graph|prs|reviews|closedIssues): loading/, 'a section that is only loading is not listed as failed');
+});
+
+test('#1307: the drawer separates a non-scrolling head from a scrolling body; the tabs stay in the head', async (t) => {
+  const dom = await boot();
+  t.after(() => dom.restore());
+
+  fire(cardFor(dom, 1059), 'click');
+  await settle();
+
+  const kids = Array.from(dom.mounts.drawer.childNodes).map((n) => n.className);
+  assert.deepEqual(kids, ['drawer-head', 'drawer-body'], 'two regions: the head never scrolls, the body does');
+  const head = find(dom.mounts.drawer, byClass('drawer-head'));
+  const body = find(dom.mounts.drawer, byClass('drawer-body'));
+  assert.ok(find(head, byClass('close')), 'the close control is in the head');
+  assert.ok(find(head, byClass('tabs')), 'the tab bar is in the head, so it stays visible while the body scrolls');
+  assert.equal(find(body, byClass('tabs')), null, 'and not in the scrolling body');
+  assert.ok(find(body, byClass('drawer-title')), 'the title and the tab content are in the body');
+});
+
+// ── #1307 D122: the rebuild resets the scroller, so the page puts the scroll back deliberately ──
+
+const drawerBody = (dom) => find(dom.mounts.drawer, byClass('drawer-body'));
+const tabButton = (dom, label) => findAll(find(dom.mounts.drawer, byClass('tabs')), (n) => n.tagName === 'BUTTON')
+  .find((b) => b.textContent.replace(/ !$/, '') === label);
+
+test('#1307 D122: opening a node starts the body at 0; a tab click scrolls the panel to the top of the body', async (t) => {
+  const dom = await boot();
+  t.after(() => dom.restore());
+
+  fire(cardFor(dom, 1059), 'click');
+  await settle();
+  assert.equal(drawerBody(dom).scrollTop, 0, 'a freshly opened node starts at the top');
+
+  const tabs = findAll(find(dom.mounts.drawer, byClass('tabs')), (n) => n.tagName === 'BUTTON');
+  assert.ok(tabs.length > 1, 'there is a tab to switch to');
+  fire(tabs[1], 'click');
+  await settle();
+
+  const body = drawerBody(dom);
+  const panel = find(body, byClass('tab-panel'));
+  assert.ok(panel, 'the selected panel is in the body');
+  assert.ok(panel.style.minHeight, 'a short panel is padded to a body height so its top can reach the body top');
+  assert.ok(body.scrollTop > 0, 'the content above the panel is scrolled past');
+  assert.equal(panel.getBoundingClientRect().top - body.getBoundingClientRect().top, 0, 'the panel top sits at the body top');
+});
+
+test('#1307 D122: a data re-render keeps the body scroll; opening another node resets it', async (t) => {
+  const dom = await boot();
+  t.after(() => dom.restore());
+
+  fire(cardFor(dom, 1059), 'click');
+  await settle();
+  drawerBody(dom).scrollTop = 137;
+  fire(modeButton(dom, 'governance'), 'click');
+  await settle();
+  assert.equal(drawerBody(dom).scrollTop, 137, 'a re-render the reader did not ask for does not move the reader');
+
+  fire(modeButton(dom, 'map'), 'click');
+  await settle();
+  fire(cardFor(dom, 878), 'click');
+  await settle();
+  assert.equal(drawerBody(dom).scrollTop, 0, 'a different node starts at the top');
 });

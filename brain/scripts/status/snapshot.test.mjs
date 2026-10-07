@@ -1,4 +1,5 @@
 import { test } from 'node:test';
+import { NOT_FETCHED_YET } from './report.mjs';
 import assert from 'node:assert/strict';
 import { readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
@@ -8,6 +9,8 @@ import {
   buildSnapshot, roadmapState, aggregateActors, projectRecord, readChanges, readRecordRows, reviewRows,
   issueOfBranch, renderSnapshotText, PLANNED, IN_FLIGHT, DONE, UNREADABLE,
 } from './snapshot.mjs';
+import { hierarchyFromGraph } from './hierarchy-adapter.mjs';
+import { NO_TEXT } from '../memory/lib/record-summary.mjs';
 
 const NOW = '2026-09-13T00:00:00Z';
 
@@ -134,12 +137,58 @@ test('#879: changes read tasks, slice scopes and missing artefacts; an absent ta
   assert.deepEqual(a.sliceScopes, { ok: true, value: [{ slice: 1, claims: ['R1-1'], terminal_pr: 'this PR -> main' }] });
   assert.deepEqual(a.missing, { ok: true, value: [] });
   assert.equal(b.tasks.checked.ok, false);
-  assert.match(b.tasks.checked.reason, /issue-2-no-tasks\/tasks\.md could not be read/);
+  assert.match(b.tasks.checked.reason, /issue-2-no-tasks\/tasks\.md does not exist/);
   assert.deepEqual(b.missing.value, [], 'at lite only spec.md is required, and it is there');
   assert.deepEqual(readChanges({ root, tier: 'standard' }).value.filter((x) => !x.archived)[1].missing.value, ['proposal.md', 'design.md', 'tasks.md'], 'the tier decides the required set');
-  assert.equal(readChanges({ root: '/nowhere', tier: 'lite' }).ok, false);
+  const none = readChanges({ root: '/nowhere', tier: 'lite' });
+  assert.equal(none.ok, true, '#1276: an absent openspec/changes is a repository with no changes');
+  assert.deepEqual(none.value, []);
+  const denied = readChanges({ root, tier: 'lite', _list: () => { throw Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' }); } });
+  assert.equal(denied.ok, false, 'any other read error stays unread');
+  assert.match(denied.reason, /could not be listed: EACCES/);
   const unresolved = readChanges({ root, tier: null });
   assert.equal(unresolved.value.filter((x) => !x.archived)[0].missing.ok, false, 'no tier → the required set cannot be resolved, and that is said');
+});
+
+// ── #1199 R1199-2: progress, with three distinct reasons ────────────────────
+
+/** One active change dir whose tasks.md is whatever the seams say. */
+function progressRow({ exists, read }) {
+  const dir = 'openspec/changes/issue-5-p';
+  const c = readChanges({
+    root: '/fake',
+    tier: 'lite',
+    _list: (p) => { if (p === 'openspec/changes') return ['issue-5-p']; throw new Error(`ENOENT: ${p}`); },
+    _exists: (p) => (p === `${dir}/tasks.md` ? exists : false),
+    _read: (p) => { if (p === `${dir}/tasks.md`) return read(); throw new Error(`ENOENT: ${p}`); },
+  });
+  return c.value[0];
+}
+
+test('#1199 R1199-2: progress is done/total from the same read as tasks, 3 of 5', () => {
+  const row = progressRow({ exists: true, read: () => '- [x] a\n- [ ] b\n  - [X] c\n- [ ] d\n- [x] e' });
+  assert.deepEqual(row.progress, { ok: true, value: { done: 3, total: 5 } });
+  assert.equal(row.tasks.checked.value, row.progress.value.done);
+  assert.equal(row.tasks.open.value, 2);
+});
+
+test('#1199 R1199-2: a missing tasks.md, an unreadable one and one with no items are three codes with three reasons', () => {
+  const missing = progressRow({ exists: false, read: () => { throw new Error('must not be read'); } });
+  const unreadable = progressRow({ exists: true, read: () => { throw new Error('EACCES: permission denied'); } });
+  const none = progressRow({ exists: true, read: () => '# Tasks\nprose' });
+  assert.deepEqual([missing.progress.code, unreadable.progress.code, none.progress.code], ['missing', 'unreadable', 'no-items']);
+  for (const r of [missing, unreadable, none]) assert.equal(r.progress.ok, false);
+  assert.match(unreadable.progress.reason, /issue-5-p\/tasks\.md/);
+  assert.match(unreadable.progress.reason, /EACCES/);
+  assert.equal(new Set([missing.progress.reason, unreadable.progress.reason, none.progress.reason]).size, 3);
+  assert.equal(missing.tasks.checked.reason, missing.progress.reason, 'the tasks field says the same reason');
+  assert.equal(unreadable.tasks.checked.reason, unreadable.progress.reason);
+});
+
+test('#1199 R1199-2: an archived row carries progress too', () => {
+  const root = makeFixture();
+  const nine = readChanges({ root, tier: 'lite' }).value.find((x) => x.archived);
+  assert.deepEqual(nine.progress, { ok: true, value: { done: 2, total: 2 } });
 });
 
 // ── R998-4: the archive reader ──────────────────────────────────────────────
@@ -272,16 +321,27 @@ test('#879: actors is one aggregation over records, sorted, humans and agents in
 
 test('#879: a record is projected to its index metadata plus the file that holds it', () => {
   const r = projectRecord({ id: 'rec-0000000000000001', ts: '2026-06-01T00:00:00Z', actor: '@a', actorKind: 'human', type: 'decision', project: 'x', issue: 1, content: 'long' });
-  assert.deepEqual(r, { id: 'rec-0000000000000001', ts: '2026-06-01T00:00:00Z', actor: '@a', actorKind: 'human', type: 'decision', issue: 1, file: '.memory/records/2026-06-rec-0000000000000001.jsonl' });
+  assert.deepEqual(r, { id: 'rec-0000000000000001', ts: '2026-06-01T00:00:00Z', actor: '@a', actorKind: 'human', type: 'decision', issue: 1, summary: { ok: true, title: 'long', excerpt: '', truncated: false }, file: '.memory/records/2026-06-rec-0000000000000001.jsonl' });
   assert.equal(projectRecord({ id: 'bad' }).file, null, 'an unnameable record is kept, with no pointer');
+});
+
+test('#1313 R1313-4: a projected record carries a bounded summary of its content, never the content', () => {
+  const content = `**A title**\n\n${'body words '.repeat(500)}`;
+  const r = projectRecord({ id: 'rec-0000000000000001', ts: '2026-06-01T00:00:00Z', actor: '@a', actorKind: 'human', type: 'decision', content });
+  assert.equal(r.summary.ok, true);
+  assert.equal(r.summary.title, 'A title');
+  assert.ok(Array.from(r.summary.excerpt).length <= 120);
+  assert.equal('content' in r, false);
+  assert.ok(JSON.stringify(r).length < 600, 'the row stays small whatever the content holds');
+  assert.deepEqual(projectRecord({ id: 'rec-0000000000000002', ts: '2026-06-01T00:00:00Z' }).summary, { ok: false, reason: NO_TEXT });
 });
 
 // ── R879-2 / D4: the forge, per section and per item ────────────────────────
 
 test('#879: with a port the graph carries roadmap per node, and one unreadable thread does not take the others', async () => {
   const issues = [
-    { number: 5, title: 'five', labels: ['status:approved'], assignees: [] },
-    { number: 6, title: 'six', labels: [], assignees: null },
+    { number: 5, title: 'five', labels: ['status:approved'], assignees: [], state: 'open' },
+    { number: 6, title: 'six', labels: [], assignees: null, state: 'open' },
   ];
   const port = readOnlyPort({
     issueList: async () => issues,
@@ -375,8 +435,8 @@ test('#967 R967-2 (PR D, review round 2): a slice body with Parent: prose and NO
 
 test('#879: one issue body that cannot be read is a node that says so — never an issue that declared nothing', async () => {
   const issues = [
-    { number: 5, title: 'five', labels: ['status:approved'], assignees: [] },
-    { number: 6, title: 'six', labels: [], assignees: null },
+    { number: 5, title: 'five', labels: ['status:approved'], assignees: [], state: 'open' },
+    { number: 6, title: 'six', labels: [], assignees: null, state: 'open' },
   ];
   const body5 = '```brain-graph/1\ntrack: UI\nblocks: []\nneeds: [6]\nfiles: []\n```';
   const port = (view6) => readOnlyPort({
@@ -508,4 +568,288 @@ test('#998 R998-5: a verdict that declares findings: [] (genuinely empty) has fi
   const r = reviewRows(7, [{ body: VERDICT('ghi', 1, 'APPROVE'), author: 'bot' }]);
   assert.deepEqual(r.verdicts[0].findings, []);
   assert.equal(r.verdicts[0].findingCount, 0);
+});
+
+// ── #1257 R1257-6: the open read takes bodies and state from the list ───────
+
+const openRow = (number, extra = {}) => ({ number, title: `t${number}`, labels: ['status:approved'], assignees: [], state: 'open', body: '', ...extra });
+const closedRow = (number, extra = {}) => ({ number, title: `c${number}`, labels: [], assignees: [], state: 'closed', body: '', ...extra });
+const BLOCK = (needs = '[]') => `\`\`\`brain-graph/1\ntrack: UI\nblocks: []\nneeds: ${needs}\nfiles: []\n\`\`\``;
+
+/** A port that answers `issueList` by state and records every `issueView`. */
+function listPort({ open = [], closed = [], closedError = null, openError = null, viewBody = () => '' } = {}) {
+  const views = [];
+  const lists = [];
+  const port = readOnlyPort({
+    issueList: async ({ state }) => {
+      lists.push(state);
+      if (state === 'closed') { if (closedError) throw new Error(closedError); return closed; }
+      if (openError) throw new Error(openError);
+      return open;
+    },
+    issueView: async ({ number }) => { views.push(number); return { body: viewBody(number), assignees: null }; },
+    mrList: async () => [],
+    prReviews: async () => [],
+  });
+  return { port, views, lists };
+}
+
+test('#1257 R1257-6: no body is read when the list carries bodies, and declared comes from the row', async () => {
+  const { port, views } = listPort({ open: [openRow(5, { body: BLOCK() }), openRow(6, { body: '' })] });
+  const s = await buildSnapshot({ root: makeFixture(), now: NOW, vcs: port, project: 'o/r' });
+  assert.deepEqual(views, [], 'the issueView spy was never called');
+  assert.equal(s.graph.value.nodes.find((n) => n.number === 5).declared, true);
+});
+
+test('#1257 R1257-6: a null body falls back to issueView, for that row only', async () => {
+  const { port, views } = listPort({ open: [openRow(5, { body: 'x' }), openRow(6, { body: null })], viewBody: () => BLOCK() });
+  const s = await buildSnapshot({ root: makeFixture(), now: NOW, vcs: port, project: 'o/r' });
+  assert.deepEqual(views, [6]);
+  assert.equal(s.graph.value.nodes.find((n) => n.number === 6).declared, true, 'the fallback body was parsed');
+});
+
+test('#1257 R1257-6: an empty body is read, not re-fetched (R12)', async () => {
+  const { port, views } = listPort({ open: [openRow(7, { body: '' })] });
+  const s = await buildSnapshot({ root: makeFixture(), now: NOW, vcs: port, project: 'o/r' });
+  assert.deepEqual(views, []);
+  const n = s.graph.value.nodes.find((x) => x.number === 7);
+  assert.equal(n.ok, true);
+  assert.equal(n.declared, false);
+});
+
+test('#1257 R1257-6: a node state comes from the port, and a null state blocks nothing', async () => {
+  const { port } = listPort({ open: [openRow(5, { body: BLOCK('[6, 7]') }), openRow(6, { state: 'open' }), openRow(7, { state: null })] });
+  const s = await buildSnapshot({ root: makeFixture(), now: NOW, vcs: port, project: 'o/r' });
+  const by = (n) => s.graph.value.nodes.find((x) => x.number === n);
+  assert.equal(by(6).state, 'open');
+  assert.equal(by(7).state, null);
+  assert.deepEqual(by(5).blockedBy, [6], 'only the OPEN prerequisite blocks; the stateless one does not');
+});
+
+// ── #1257 R1257-8/9: forgeLoad and the pending sections ─────────────────────
+
+test('#1257 R1257-8: the CLI derives forgeLoad from its own reads, with at = generatedAt', async () => {
+  const { port } = listPort({ open: [openRow(5)], closed: [closedRow(3)] });
+  const s = await buildSnapshot({ root: makeFixture(), now: '2026-10-02T12:00:00.000Z', vcs: port, project: 'o/r' });
+  assert.deepEqual(s.forgeLoad, { ok: true, value: {
+    open: { state: 'complete', at: '2026-10-02T12:00:00.000Z' },
+    closed: { state: 'complete', at: '2026-10-02T12:00:00.000Z' },
+  } });
+});
+
+test('#1257 R1257-8: a failed open list is forgeLoad failed with the raw reason, and the graph says so', async () => {
+  const { port } = listPort({ openError: 'offline' });
+  const s = await buildSnapshot({ root: makeFixture(), now: '2026-10-02T12:00:00.000Z', vcs: port, project: 'o/r' });
+  assert.deepEqual(s.forgeLoad.value.open, { state: 'failed', at: '2026-10-02T12:00:00.000Z', reason: 'offline', lastCompleteAt: null });
+  assert.equal(s.graph.ok, false);
+});
+
+test('#1257 R1257-9: while forgeLoad.open is pending the graph, prs and reviews are pending with the loading wording, and the port is not read', async () => {
+  const { port, lists } = listPort({ open: [openRow(5)] });
+  const forgeLoad = { open: { state: 'pending', at: null }, closed: { state: 'pending', at: null } };
+  const s = await buildSnapshot({ root: makeFixture(), now: NOW, vcs: port, project: 'o/r', forgeLoad });
+  assert.deepEqual(s.graph, { ok: false, pending: true, reason: 'loading open issues from the forge…' });
+  assert.deepEqual(s.prs, { ok: false, pending: true, reason: 'loading open PRs from the forge…' });
+  assert.deepEqual(s.reviews, { ok: false, pending: true, reason: 'loading PR reviews from the forge…' });
+  assert.deepEqual(s.closedIssues, { ok: false, pending: true, reason: 'loading closed issues from the forge…' });
+  assert.deepEqual(lists, [], 'a pending lane is not read at all');
+  assert.deepEqual(s.forgeLoad, { ok: true, value: forgeLoad }, 'the server value is passed through untouched');
+});
+
+test('#1262: a pending lane that carries its own reason keeps it and says it is idle', async () => {
+  const { port, lists } = listPort({ open: [openRow(5)] });
+  const paused = { state: 'pending', at: null, reason: 'polling is paused' };
+  const forgeLoad = { open: paused, closed: { ...paused } };
+  const s = await buildSnapshot({ root: makeFixture(), now: NOW, vcs: port, project: 'o/r', forgeLoad });
+  for (const name of ['graph', 'prs', 'reviews', 'closedIssues']) {
+    assert.deepEqual(s[name], { ok: false, pending: true, idle: true, reason: 'polling is paused' }, name);
+  }
+  assert.deepEqual(lists, [], 'a paused lane is not read');
+});
+
+// ── #1257 R1257-7: the closed issues ────────────────────────────────────────
+
+test('#1257 R1257-7: the graph survives a closed failure', async () => {
+  const { port } = listPort({ open: [openRow(5)], closedError: 'rate limited' });
+  const s = await buildSnapshot({ root: makeFixture(), now: NOW, vcs: port, project: 'o/r' });
+  assert.equal(s.graph.ok, true);
+  assert.deepEqual(s.closedIssues, { ok: false, reason: 'the closed-issue list could not be read: rate limited' });
+  assert.deepEqual(s.forgeLoad.value.closed, { state: 'failed', at: '2026-09-13T00:00:00.000Z', reason: 'rate limited', lastCompleteAt: null });
+});
+
+test('#1257 R1257-7: a closed row without a body is unresolved, not dropped silently, and closed nodes never enter the graph', async () => {
+  const { port, views } = listPort({ open: [openRow(5)], closed: [closedRow(880, { body: 'Parent: #878 (the epic)' }), closedRow(881, { body: null })] });
+  const s = await buildSnapshot({ root: makeFixture(), now: NOW, vcs: port, project: 'o/r' });
+  assert.deepEqual(s.closedIssues.value.nodes.map((n) => [n.number, n.parent]), [[880, 878]]);
+  assert.deepEqual(s.closedIssues.value.unresolved, [{ number: 881, reason: 'the forge list carried no body' }]);
+  assert.deepEqual(s.graph.value.nodes.map((n) => n.number), [5]);
+  assert.deepEqual(views, [], 'no issueView for a closed row');
+  assert.deepEqual(JSON.parse(JSON.stringify(s)), s);
+});
+
+test('#1257 R1257-7: closed:false skips the read and says why', async () => {
+  const { port, lists } = listPort({ open: [openRow(5)], closed: [closedRow(3)] });
+  const s = await buildSnapshot({ root: makeFixture(), now: NOW, vcs: port, project: 'o/r', closed: false });
+  assert.deepEqual(lists, ['open']);
+  assert.deepEqual(s.forgeLoad.value.closed, { state: 'disabled', at: null, reason: '--no-closed was given' });
+  assert.deepEqual(s.closedIssues, { ok: false, reason: '--no-closed was given' });
+});
+
+test('#1257 R1257-7: in the server the closed list is read only when forgeLoad.closed allows it', async () => {
+  const done = { open: { state: 'complete', at: 'a' } };
+  const read = async (closedEntry) => {
+    const { port, lists } = listPort({ open: [openRow(5)], closed: [closedRow(3, { body: 'x' })] });
+    const s = await buildSnapshot({ root: makeFixture(), now: NOW, vcs: port, project: 'o/r', forgeLoad: { ...done, closed: closedEntry } });
+    return { s, closedReads: lists.filter((l) => l === 'closed').length };
+  };
+  const complete = await read({ state: 'complete', at: 'b' });
+  assert.equal(complete.s.closedIssues.ok, true);
+  assert.equal(complete.closedReads, 1);
+  const failedWithData = await read({ state: 'failed', at: 'c', reason: 'rate limited', lastCompleteAt: 'b' });
+  assert.equal(failedWithData.s.closedIssues.ok, true, 'the held list is still shown');
+  const failedNoData = await read({ state: 'failed', at: 'c', reason: 'boom', lastCompleteAt: null });
+  assert.deepEqual(failedNoData.s.closedIssues, { ok: false, reason: 'the closed-issue list could not be read: boom' });
+  assert.equal(failedNoData.closedReads, 0);
+  const disabled = await read({ state: 'disabled', at: null, reason: 'no closed-issue lane is configured' });
+  assert.deepEqual(disabled.s.closedIssues, { ok: false, reason: 'no closed-issue lane is configured' });
+  const pendingClosed = await read({ state: 'pending', at: null });
+  assert.deepEqual(pendingClosed.s.closedIssues, { ok: false, pending: true, reason: 'loading closed issues from the forge…' });
+  assert.equal(pendingClosed.s.graph.ok, true, 'the open lane is complete, so the graph is real');
+});
+
+// ── #1199 R1199-6: the hierarchy section ────────────────────────────────────
+
+const EPIC_BLOCK = '```brain-graph/1\ntrack: UI\nkind: epic\nblocks: []\nneeds: []\nfiles: []\n```';
+
+test('#1199 R1199-6: closed children come from closedIssues, and a closed row without a body is only listed as unresolved', async () => {
+  const { port } = listPort({
+    open: [openRow(878, { body: EPIC_BLOCK })],
+    closed: [closedRow(880, { body: 'Parent: #878 (the epic)' }), closedRow(881, { body: null })],
+  });
+  const s = await buildSnapshot({ root: makeFixture(), now: NOW, vcs: port, project: 'o/r' });
+  assert.equal(s.hierarchy.ok, true);
+  const issues = new Map(s.hierarchy.value.issues);
+  assert.equal(issues.get(880).parent, 878);
+  assert.equal(issues.get(880).state, 'closed');
+  assert.equal(issues.has(881), false);
+  assert.deepEqual(issues.get(878).children, [880]);
+  assert.deepEqual(s.hierarchy.value.closedUnresolved, [{ number: 881, reason: 'the forge list carried no body' }]);
+  assert.deepEqual([...issues.keys()], [...issues.keys()].sort((a, b) => a - b), 'ascending pairs');
+});
+
+test('#1199 R1199-6: a closed failure leaves the hierarchy open-only, with no unresolved list', async () => {
+  const { port } = listPort({ open: [openRow(878, { body: EPIC_BLOCK }), openRow(900, { body: 'Parent: #878 (the epic)' })], closedError: 'rate limited' });
+  const s = await buildSnapshot({ root: makeFixture(), now: NOW, vcs: port, project: 'o/r' });
+  assert.equal(s.hierarchy.ok, true);
+  assert.equal(s.hierarchy.value.issues.filter(([, e]) => e.state === 'closed').length, 0);
+  assert.deepEqual(s.hierarchy.value.closedUnresolved, []);
+  assert.deepEqual(new Map(s.hierarchy.value.issues).get(878).children, [900]);
+});
+
+test('#1199 R1199-6: closedRead says whether the closed list was read, so a complete lane over an unreadable list is never a count', async () => {
+  const forgeLoad = { open: { state: 'complete', at: 'T' }, closed: { state: 'complete', at: 'T' } };
+  const { port } = listPort({ open: [openRow(878, { body: EPIC_BLOCK }), openRow(900, { body: 'Parent: #878 (the epic)' })], closedError: 'cache unreadable' });
+  const s = await buildSnapshot({ root: makeFixture(), now: NOW, vcs: port, project: 'o/r', forgeLoad });
+  assert.equal(s.hierarchy.ok, true);
+  assert.deepEqual(s.hierarchy.value.closedRead, { ok: false, reason: s.closedIssues.reason });
+  assert.match(s.hierarchy.value.closedRead.reason, /cache unreadable/);
+  const good = listPort({ open: [openRow(878, { body: EPIC_BLOCK })], closed: [] });
+  const g = await buildSnapshot({ root: makeFixture(), now: NOW, vcs: good.port, project: 'o/r' });
+  assert.deepEqual(g.hierarchy.value.closedRead, { ok: true });
+});
+
+test('#1199 R1199-6: the hierarchy is pending when the graph is pending, and uncomputable when the graph is', async () => {
+  const { port } = listPort({ open: [openRow(5)] });
+  const forgeLoad = { open: { state: 'pending', at: null }, closed: { state: 'pending', at: null } };
+  const p = await buildSnapshot({ root: makeFixture(), now: NOW, vcs: port, project: 'o/r', forgeLoad });
+  assert.deepEqual(p.hierarchy, { ok: false, pending: true, reason: p.graph.reason });
+  const u = await buildSnapshot({ root: makeFixture(), now: NOW });
+  assert.deepEqual(u.hierarchy, { ok: false, reason: u.graph.reason });
+});
+
+test('#1199 R1199-6: one shape — the section survives JSON and rebuilds the adapter\'s Map', async () => {
+  const { port } = listPort({ open: [openRow(878, { body: EPIC_BLOCK })], closed: [closedRow(880, { body: 'Parent: #878 (the epic)' })] });
+  const s = await buildSnapshot({ root: makeFixture(), now: NOW, vcs: port, project: 'o/r' });
+  const parsed = JSON.parse(JSON.stringify(s));
+  assert.deepEqual(parsed, s);
+  const expected = hierarchyFromGraph({ nodes: s.graph.value.nodes, declarationDivergences: s.graph.value.declarationDivergences, closed: s.closedIssues.value });
+  assert.deepEqual(new Map(parsed.hierarchy.value.issues), expected.issues);
+  assert.deepEqual(parsed.hierarchy.value.divergences, expected.divergences);
+});
+
+test('#1199 R1199-6: the text mode prints a hierarchy line', async () => {
+  const { port } = listPort({ open: [openRow(878, { body: EPIC_BLOCK })] });
+  const s = await buildSnapshot({ root: makeFixture(), now: NOW, vcs: port, project: 'o/r' });
+  assert.match(renderSnapshotText(s), /^hierarchy +1 issue\(s\), 0 divergence\(s\)$/m);
+});
+
+// ── #1284 D94: lastCommit on every change row, from ONE git log ─────────────
+
+const REC = (iso, author, ...paths) => `\x1e${iso}\x1f${author}\n\n${paths.join('\n')}\n`;
+const logRun = (out) => { const calls = []; const run = (file, args) => { calls.push([file, ...args]); if (out instanceof Error) throw out; return out; }; run.calls = calls; return run; };
+
+test('#1284 D94: one git log names the newest commit per active change dir; archived rows keep the shape', () => {
+  const root = makeFixture();
+  const run = logRun(REC('2026-10-03T10:00:00+00:00', 'ana', 'openspec/changes/issue-2-no-tasks/proposal.md') + REC('2026-09-01T10:00:00+00:00', 'bo', 'openspec/changes/issue-2-no-tasks/old.md', 'openspec/changes/issue-1-a/tasks.md'));
+  const c = readChanges({ root, tier: 'lite', _run: run });
+  assert.equal(run.calls.length, 1, 'ONE git call for every active dir');
+  const [file, ...args] = run.calls[0];
+  assert.equal(file, 'git');
+  assert.deepEqual(args.slice(0, 5), ['log', '--no-renames', '--format=%x1e%cI%x1f%an', '--name-only', '--']);
+  assert.deepEqual(args.slice(5), ['openspec/changes/issue-1-a', 'openspec/changes/issue-2-no-tasks']);
+  const byId = Object.fromEntries(c.value.map((x) => [x.id, x]));
+  assert.deepEqual(byId['issue-2-no-tasks'].lastCommit, { ok: true, at: '2026-10-03T10:00:00+00:00', author: 'ana' }, 'the first (newest) record wins');
+  assert.deepEqual(byId['issue-1-a'].lastCommit, { ok: true, at: '2026-09-01T10:00:00+00:00', author: 'bo' });
+  const archived = c.value.filter((x) => x.archived);
+  assert.ok(archived.length > 0);
+  for (const a of archived) assert.deepEqual(a.lastCommit, { ok: false, reason: 'not read for archived dirs' });
+});
+
+test('#1284 D94: an untracked dir says no commit touches it; a throwing log degrades every active row', () => {
+  const root = makeFixture();
+  const untracked = readChanges({ root, tier: 'lite', _run: logRun(REC('2026-10-03T10:00:00+00:00', 'ana', 'openspec/changes/issue-1-a/x.md')) });
+  const two = untracked.value.find((x) => x.id === 'issue-2-no-tasks');
+  assert.deepEqual(two.lastCommit, { ok: false, reason: 'no commit touches openspec/changes/issue-2-no-tasks on the served tree' });
+  const broke = readChanges({ root, tier: 'lite', _run: logRun(new Error('fatal: not a git repository\nsecond line')) });
+  for (const x of broke.value.filter((r) => !r.archived)) assert.deepEqual(x.lastCommit, { ok: false, reason: 'the change-dir log could not be read: fatal: not a git repository' });
+});
+
+test('#1284 D94: zero active dirs make no git call', () => {
+  const run = logRun('');
+  const c = readChanges({ root: '/nowhere', tier: 'lite', _run: run, _list: () => [], _exists: () => false });
+  assert.equal(c.ok, true);
+  assert.equal(run.calls.length, 0);
+});
+
+test('#1284 D94: buildSnapshot passes its own run to readChanges (no second git seam)', async () => {
+  const calls = [];
+  const s = await buildSnapshot({ root: makeFixture(), now: NOW, _run: (f, a) => { calls.push(a); return ''; } });
+  assert.ok(calls.some((a) => a[0] === 'log' && a.includes('--no-renames')));
+  assert.equal(s.changes.value.find((x) => x.id === 'issue-1-a').lastCommit.ok, false);
+});
+
+test('#1284: the CLI text mode ignores lastCommit (additive field, no new output)', async () => {
+  const run = (f, a) => (a[0] === 'log' && a.includes('--no-renames') ? REC('2026-10-03T10:00:00+00:00', 'zelda-author', 'openspec/changes/issue-1-a/tasks.md') : '');
+  const s = await buildSnapshot({ root: makeFixture(), now: NOW, _run: run });
+  assert.equal(s.changes.value.find((x) => x.id === 'issue-1-a').lastCommit.author, 'zelda-author');
+  assert.doesNotMatch(renderSnapshotText(s), /zelda-author|2026-10-03T10/);
+});
+
+test('#1312 D150: a review thread never fetched is a pending row with its reason; a real failure stays failed with no pending flag', async () => {
+  const issues = [{ number: 5, title: 'five', labels: [], assignees: [], state: 'open' }];
+  const notFetched = Object.assign(new Error("this PR's reviews have not been fetched yet (queued)"), { code: NOT_FETCHED_YET });
+  const port = readOnlyPort({
+    issueList: async () => issues,
+    issueView: async () => ({ body: '', assignees: null }),
+    mrList: async () => [{ number: 10, title: 'a', headBranch: 'feat/issue-5-x' }, { number: 11, title: 'b', headBranch: 'feat/issue-5-y' }],
+    prReviews: async ({ number }) => {
+      if (number === 10) throw notFetched;
+      throw new Error('HTTP 502');
+    },
+  });
+  const s = await buildSnapshot({ root: makeFixture(), now: NOW, vcs: port, project: 'o/r' });
+  const [queued, failed] = s.reviews.value;
+  assert.deepEqual(queued, { pr: 10, ok: false, pending: true, reason: "this PR's reviews have not been fetched yet (queued)" });
+  assert.deepEqual(failed, { pr: 11, ok: false, reason: 'HTTP 502' });
+  assert.equal('pending' in failed, false);
 });

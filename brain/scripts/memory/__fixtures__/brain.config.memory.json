@@ -1,0 +1,6 @@
+{
+  "memory": {
+    "default": "plainfiles",
+    "providers": { "plainfiles": {}, "engram": {} }
+  }
+}

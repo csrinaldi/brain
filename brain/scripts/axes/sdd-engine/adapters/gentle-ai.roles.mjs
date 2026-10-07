@@ -73,3 +73,20 @@ export function derivedRole(stage) {
     instructions: `Execute the "${stage}" stage as a general-purpose producer under the SDD flow: read the stage's upstream artifacts, produce the stage's declared artifact, and save it to the active artifact store. This role is DERIVED from gentle-ai's default delegation row — the recording of 2026-09-02 never saw this stage.`,
   };
 }
+
+/**
+ * gentle-ai's inhabitant surface (issue #814 T2) — the adapter #312's port
+ * calls, re-exported by `gentle-ai.mjs`. Answers EVERY stage it is asked
+ * about: lifecycle stages from the RECORDED declaration above, a custom stage
+ * with the framework's default producer role marked `derived: true`.
+ * Kept here, in a module with no I/O, so a pure reader can call it (#1263).
+ *
+ * @param {string[]} stages The resolved stage set to declare a role for.
+ * @returns {Record<string, {stage: string, agent: string, model_tier: string, chooses_model: false, instructions: string, derived?: true}>}
+ */
+export function declareRoles(stages) {
+  return Object.fromEntries(stages.map((stage) => {
+    const recorded = GENTLE_AI_ROLES[stage];
+    return [stage, recorded ? { stage, ...recorded } : derivedRole(stage)];
+  }));
+}

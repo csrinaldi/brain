@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { createForgeCache } from './forge-cache.mjs';
+import { NOT_FETCHED_YET } from '../status/report.mjs';
 
 // ── D1: exactly the four read verbs `readForge` calls ──────────────────────
 
@@ -72,4 +73,57 @@ test('#881: before any poll completes, both per-number verbs keep the first-poll
   const cache = createForgeCache();
   await assert.rejects(() => cache.port.issueView({ project: 'o/r', number: 5 }), /^Error: the first forge poll has not completed$/);
   await assert.rejects(() => cache.port.prReviews({ project: 'o/r', number: 10 }), /^Error: the first forge poll has not completed$/);
+});
+
+// ── #1257 (R1257-10, D57): one issueList per state ──────────────────────────
+//
+// The port used to ignore `state`, so a closed read through the cache would have
+// been answered with the OPEN list: a silent wrong answer.
+
+test('#1257: the cache keeps one list per state', async () => {
+  const cache = createForgeCache();
+  const openRows = [{ number: 5 }];
+  const closedRows = [{ number: 3 }];
+  cache.setIssueList(openRows);
+  cache.setIssueList(closedRows, 'closed');
+
+  assert.equal(await cache.port.issueList({ state: 'closed' }), closedRows);
+  assert.equal(await cache.port.issueList({}), openRows, 'no state means open');
+  assert.equal(await cache.port.issueList({ state: 'open' }), openRows);
+});
+
+test('#1257: a closed miss is not the open list', async () => {
+  const cache = createForgeCache();
+  cache.setIssueList([{ number: 5 }]);
+  await assert.rejects(
+    () => cache.port.issueList({ state: 'closed' }),
+    /^Error: the closed-issue list has not been fetched yet \(queued\)$/,
+  );
+});
+
+test('#1257: a closed read on an empty cache keeps the first-poll wording', async () => {
+  const cache = createForgeCache();
+  await assert.rejects(() => cache.port.issueList({ state: 'closed' }), /^Error: the first forge poll has not completed$/);
+});
+
+// ── #1262: the per-number reasons key off the open lane ─────────────────────
+//
+// "Queued" says the open lane has landed and its bounded body and review lanes have not reached
+// this number. The closed lane writes its own list on its own flight, so a closed landing alone
+// does not make that true.
+
+test('#1262: a closed landing alone leaves per-number misses on the first-poll wording', async () => {
+  const cache = createForgeCache();
+  cache.setIssueList([{ number: 3 }], 'closed');
+  await assert.rejects(() => cache.port.issueView({ number: 5 }), /^Error: the first forge poll has not completed$/);
+  await assert.rejects(() => cache.port.prReviews({ number: 10 }), /^Error: the first forge poll has not completed$/);
+});
+
+test('#1312 D150: every cache miss carries the named not-fetched marker, so a consumer never compares prose', async () => {
+  const cache = createForgeCache();
+  const first = await cache.port.prReviews({ project: 'o/r', number: 10 }).catch((e) => e);
+  assert.equal(first.code, NOT_FETCHED_YET, 'before any answer');
+  cache.setMrList([{ number: 10, title: 'pr' }]);
+  const queued = await cache.port.prReviews({ project: 'o/r', number: 10 }).catch((e) => e);
+  assert.equal(queued.code, NOT_FETCHED_YET, 'queued behind the review lane');
 });

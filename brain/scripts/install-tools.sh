@@ -30,10 +30,22 @@ fi
 # one field is read without it in that case.
 if [ -f brain.config.json ]; then
   if command -v node >/dev/null 2>&1; then
-    VCS_PROVIDER="$(node -p "(require('./brain.config.json').vcs||{}).provider||'gitlab'")" \
-      || die "brain.config.json exists but cannot be read or parsed — fix it, then re-run. Refusing to guess the VCS provider."
+    # The ADR-0038 shape first, the legacy `vcs.provider` as its alias (#1114 S3.3): `config/cli.mjs default`
+    # is the one reader, so this script never parses JSON by hand. An undeclared axis prints an empty line.
+    # A missing or failing CLI is not an unreadable config (#1114 S3.4): say which one it is, and keep the cause.
+    _vcs_cli="${BRAIN_SCRIPTS:-brain/scripts}/config/cli.mjs"
+    [ -f "$_vcs_cli" ] \
+      || die "the brain config CLI is missing ($_vcs_cli) — reinstall brain (npm run brain:upgrade) and re-run. Refusing to guess the VCS provider."
+    _vcs_err="$(mktemp)"
+    if ! VCS_PROVIDER="$(node "$_vcs_cli" default vcs 2>"$_vcs_err")"; then
+      _vcs_cause="$(<"$_vcs_err")"; rm -f "$_vcs_err"
+      die "the config CLI ($_vcs_cli default vcs) failed: ${_vcs_cause:-no output} — fix the cause (brain.config.json, or the install), then re-run. Refusing to guess the VCS provider."
+    fi
+    rm -f "$_vcs_err"
+    VCS_PROVIDER="${VCS_PROVIDER:-gitlab}"
   else
-    # Without node only a plain `"vcs": { ... "provider": "<name>" ... }` object is understood;
+    # Without node only a plain `"vcs": { ... "provider": "<name>" ... }` object is understood (the legacy
+    # key, which the scaffold and `brain:config set vcs.default` keep in step during the alias window);
     # anything else (including no provider, or an empty one) takes the same gitlab default the
     # node path uses. Corruption cannot be detected here — install node and re-run to validate.
     printf '  note: node is not installed yet — reading vcs.provider with a simple text match\n' >&2
@@ -124,25 +136,28 @@ else
   ok "$I18N_TOOLS_CLAUDE_INSTALLED"
 fi
 
-# ── 4. Codex (only for an effective Codex cold-review route) ──────────────────
-# The generic stage resolver keeps model identifiers opaque. This route-specific
-# helper is intentionally the only setup reader that pins the Codex contract.
-CODEX_REQUIRED="$(node brain/scripts/harness/codex-readiness.mjs --required)"
-say "Codex cold-review"
-if [ "$CODEX_REQUIRED" = "yes" ]; then
-  if command -v codex >/dev/null 2>&1; then
-    skip "codex $(codex --version 2>/dev/null | head -1)"
-  else
-    npm install -g @openai/codex
-    ok "Codex CLI installed"
+# ── 4. Cold-review engine (only for an effective route to an engine that ships a probe) ──
+# `harness/readiness.mjs` resolves the route and dispatches through the engine's
+# descriptor; this installer only names the tool to install for the engines it knows.
+ENGINE_REQUIRED="$(node brain/scripts/harness/readiness.mjs --required)"
+ENGINE="$(node brain/scripts/harness/readiness.mjs --engine)"
+say "Cold-review engine"
+if [ "$ENGINE_REQUIRED" = "yes" ]; then
+  if [ "$ENGINE" = "codex" ]; then
+    if command -v codex >/dev/null 2>&1; then
+      skip "codex $(codex --version 2>/dev/null | head -1)"
+    else
+      npm install -g @openai/codex
+      ok "Codex CLI installed"
+    fi
   fi
-  if CODEX_READINESS="$(node brain/scripts/harness/codex-readiness.mjs --check 2>&1)"; then
-    ok "$CODEX_READINESS"
+  if ENGINE_READINESS="$(node brain/scripts/harness/readiness.mjs --check 2>&1)"; then
+    ok "$ENGINE_READINESS"
   else
-    warn "$CODEX_READINESS"
+    warn "$ENGINE_READINESS"
   fi
 else
-  skip "codex (cold-review route does not select Codex)"
+  skip "cold-review engine (the route selects an engine with no readiness probe)"
 fi
 
 # ── 5. gentle-ai (manages engram + gga + skills) ──────────────────────────────

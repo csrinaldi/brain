@@ -6,6 +6,366 @@ registry (ADR-0030, superseding ADR-0006's git tags); consumers upgrade with
 changes** before upgrading — additive `brain.config.json` migrations apply
 automatically, but renames need manual action.
 
+## v1.13.0 — the package ships no test files and the first upgrade deletes the ones you have, every memory backend hydrates through one verb, and platforms and review engines declare themselves
+
+**Manual step: read before upgrading, first.** This release has **no `brain.config.json` migration**
+(the newest one is still `1.12.1`; the upgrade only restamps `schemaVersion` to `1.13.0`). It does delete
+files, and it changes what a few commands print and return. Each item below was checked against the code on `main`;
+`openspec/changes/issue-1384-release-1-13-0/claim-sweep.md` shows each trace, and the file counts were measured
+by upgrading a 1.12.1 consumer to this tarball with its own 1.12.1 upgrader.
+
+**1. The first `brain:upgrade` deletes brain's test files from your tree.** From 1.13.0 the package ships no test
+infrastructure (#1076): no `*.test.mjs`, `__fixtures__`, `fixtures` or `test-support`, and none of the four
+test-only helpers (`lib/hermetic-box.mjs`, `lib/test-brain-home.mjs`, `lib/test-tmp.mjs`, `test-hygiene.mjs`).
+Earlier releases copied all of that into `brain/scripts/`, so the upgrade removes it. On a fresh 1.12.1 install
+the run printed `Removed 554 file(s) brain no longer ships:` and listed each path: 449 test files, 99 fixture and
+test-support files, the 4 helpers, and the 2 retired readiness scripts of item 4. After it, `node --test` in the
+consumer reports `tests 0`. Your own number can differ if you started from an older release.
+
+- **Preview it:** `npm run brain:upgrade -- v1.13.0 --dry-run` prints `would remove N file(s) brain no longer ships:`
+  and the list.
+- **A file you edited among them is deleted too,** and listed like the rest. Nothing compares the bytes first. The
+  removal runs under the same restore point as the copy, so a run that fails midway puts the files back.
+- **No flag keeps a retired file.** `local` (`brain/project/**`, `brain.config.json`, `.env`, `openspec/changes/**`,
+  `.memory/**`) and the REFUSE and MERGE paths are never removed, but none of them is under `brain/scripts/`,
+  and `--skip-merge` accepts only the three merged settings files. To keep a test you changed, copy it out of
+  `brain/scripts/` before upgrading, or recover it from git afterwards.
+- **Why it works with the upgrader you already have.** The list is data in the incoming package
+  (`lib/retired-paths.mjs`, which folds in the generated `lib/retired-test-paths.mjs`), and the 1.12.1 upgrader
+  already reads it. It was proved by running the saved 1.12.1 `brain-upgrade.mjs` against this release's tarball.
+- The package fell from 10.4 MiB (933 files) to 4.0 MiB (361 files) unpacked; the tarball is 1.4 MB.
+
+**2. `session:start` on `plainfiles` verifies its index and writes nothing.** It runs
+`memory/cli.mjs hydrate --verify` and prints `memory:   plainfiles verified — index current (read-only)`. When
+`.memory/index.jsonl` differs from what the records would produce it prints
+`memory:   plainfiles index is stale — session:start does not write; run npm run brain:memory:share` and still
+writes nothing. In 1.12.1 it called the `import` op, which only `engram` has: on `plainfiles` the line read
+`memory:   engram unavailable (skipped) — memory/cli: backend 'plainfiles' does not implement op 'import'`, naming
+`engram` whatever the backend was. It now names the
+declared backend (`memory:   engram hydrated`, `memory:   <backend> hydration deferred — <reason>`) and adds a
+line from the records themselves, `records:  N durable, newest <date> — <title>`, plus `issue #N: K record(s)` when
+the branch resolves to an issue.
+
+**3. `hydrate` is the one bulk verb; `import` is a deprecated alias (#1115, #1189).** `memory/cli.mjs hydrate`
+exists on both backends. `memory/cli.mjs import` still works for this release: it prints
+`memory/cli: 'import' is deprecated and is removed in the next release — it now runs 'hydrate'. Call 'hydrate'.`
+and runs `hydrate` ([#1351](https://github.com/csrinaldi/brain/issues/1351) removes it). On `plainfiles` the old
+`memory/cli: backend 'plainfiles' does not implement op 'import'` no longer appears from `post-merge`,
+`brain:memory:pull` or `session:start`. A hydration that cannot run (engram declared, binary absent; a contended
+guard; an import that throws) exits **6** and, on `engram`, prints `⚠ hydrating .memory/records/ into engram was deferred — <reason>. The records are
+durable; the next hydration retries.` It is non-fatal for `post-merge` and `session:start`. A script that wraps `memory/cli.mjs` and treats every non-zero
+exit as failure will now see 6.
+
+**4. `brain:day:start` no longer exports engram into `.memory/`.** Step 4c (`engram sync --export`) and its three
+lines (`Exporting memory to repo (.memory/)...`, `Memory exported to .memory/ ...`, `engram export failed ...`) are
+gone: records are the truth and `.memory/` is never written from a backend. Step 4a hydrates the declared backend
+for every backend. Step 4b (the doctrine projection into engram) stays behind the engram probe, and when engram is
+absent it prints one line, `engram not available — skipping the doctrine projection (step 4b, #1349).`, where 1.12.1
+printed `engram not available — skipping shared memory.` and an engram install hint even on `plainfiles`.
+
+**5. `antigravity` with a malformed `.gemini/settings.json` now fails bootstrap.** The `antigravity` platform's `init`
+returns `{ ok: false, reason }` (1.12.1 returned only an additive report and exit 0): `antigravity:
+.gemini/settings.json is not valid JSON — <parse error>. Fix or remove the file, then re-run brain:env:init.`
+`harness/cli.mjs init` prints `harness/cli: init() failed — <reason>` and exits 1, so `env:init` reports
+`harness init failed — REQUIRED, env:init will exit 1`. The same now holds when `AGENTS.md` or `.gemini/settings.json`
+cannot be written. `claude` already behaved this way; `plain` answers `{ ok: true }`.
+
+**6. Two scripts moved.** `brain/scripts/harness/codex-readiness.mjs` and `gemini-readiness.mjs` no longer exist
+(no shim). `harness/readiness.mjs` replaces them (`--check`, `--required`, `--engine`) and reads the routed engine
+from its descriptor, so a route to `gemini` is now probed at bootstrap (it was not). `env:init` prints the section
+`Cold-review engine readiness` where it printed `Codex cold-review`, and lists the pending item
+`cold-review engine readiness` where it listed `Codex cold-review readiness`. The upgrade deletes the two old files
+(they are in the 554). Anything of yours that called them by path must call `harness/readiness.mjs`.
+
+### Platforms and review engines declare themselves (#1128, #1129)
+
+Every runtime provider now has one `<name>.descriptor.mjs` beside its adapter: whether it can orchestrate, whether it
+can run a stage, how it returns its output (`file` or `final-message`), its model policy and whether it ships a
+readiness probe. A registry derives `PLATFORM_CAPABILITIES` and `AGENT_PLATFORMS` from them (the list is still
+`['claude', 'antigravity', 'plain']`, in that order). The review runner no longer branches on an engine name.
+
+- **One redaction rule for every engine.** A failed stage's `reason` carries only the last two lines of the engine's
+  stderr (else stdout), at most 300 characters, with the credential values it scrubbed replaced by `[redacted]` and
+  control bytes removed. In 1.12.1 `claude`'s non-zero-exit branch appended the first stderr line, unredacted and uncapped.
+- **A cold-review route to an engine that cannot run a stage is refused before anything is touched.** For an engine
+  with no descriptor, or `plain`, the reason reads `the engine "<name>" ... so it cannot run the cold-review stage.
+  Refusing rather than falling back to another engine: ...`, and the previous review artifact is left as it was.
+- Two new contract documents, `brain/core/methodology/agent-platform-contract.md` and `review-engine-contract.md`,
+  are installed under `brain/core/`.
+
+### Memory
+
+- `hydrate` also runs on `plainfiles`: it rebuilds `.memory/index.jsonl` only (no git), or with `--verify` checks it
+  and writes nothing.
+- `brain:memory:pull` on `plainfiles` is `git pull` plus the index rebuild; on `engram` it also imports.
+
+### The UI
+
+- **Lane cards** whose issue has an open PR carry a footer: `PR #N · rev R · <VERDICT> · head <sha7> · ...`, read
+  from data the snapshot already holds (#1312). A PR whose verdicts were not read says so instead of inventing one.
+- **The memory ledger** shows each record's title and an excerpt, and a click opens its full content inline as
+  markdown, from the new local route `GET /api/record/{id}` (#1313).
+- **State and track are two chips** (#1308, #1337): the lifecycle state (`◐ In flight`, `○ Planned`, ...) and the
+  track (`Track A`, `? No track`). An issue with no `brain-graph/1` block shows the warning `Configuration missing`
+  and, with it, the text `this issue is missing its brain-graph/1 configuration — paste in the issue body` and the block.
+- **An epic's state follows its children** (#1309): with a closed or in-flight child it no longer reads `○ Planned`,
+  an all-closed open epic reads `Ready to close`, and an uncounted rollup reads `Not computed`.
+- **`Awaiting approval`** replaces `Awaiting review` (#1379): it means the issue lacks `status:approved`, not that a
+  PR waits on a reviewer.
+
+### Known limitations added
+
+[docs/KNOWN-LIMITATIONS.md](docs/KNOWN-LIMITATIONS.md) now lists #1352, #1353, #1355, #1362 and #1374. It
+never carried entries for #1115 and #1189, which item 3 fixes.
+
+## v1.12.1 — the axis-shape migration now lands whichever upgrader runs it, and repairs a 1.12.0 upgrade that skipped it
+
+**Manual step: read before upgrading, first.** `1.12.0` shipped a defect in how `brain:upgrade` applies its
+`brain.config.json` migration. Each item below was checked against the code on `main`;
+`openspec/changes/issue-1344-migration-under-old-upgrader/claim-sweep.md` shows each trace.
+
+**What was wrong in 1.12.0.** `npm run brain:upgrade -- v1.12.0` runs the `brain:upgrade` you
+**already have installed** (the 1.11.0 one: `npm i` replaces the package after the script is loaded). That
+script imports the **incoming** migrations but calls its **own** `migrateConfig`, and the 1.11.0 one hands a
+migration no axis context. Migration `1.11.1` (the ADR-0038 axis shape) did nothing without a context, and
+the old upgrader still wrote `schemaVersion: "1.12.0"`. The output said `Applied config migration(s): 1.11.1`
+and printed none of the per-value lines.
+
+**Who is affected.** Any consumer that went from `1.11.0` or earlier to `1.12.0` through `brain:upgrade`.
+A fresh `1.12.0` install, and an upgrade run by a `1.12.0` upgrader (for example `1.12.0` to a later tag),
+are not.
+
+**How to check.** Open `brain.config.json`. If `platform` has no `default` key (or `vcs`, `memory`, `sdd`
+have no `providers`), the migration did not land. The consequence: 1.12.0 removed the `claude` and
+`gentle-ai` code defaults, so in a checkout with no `.env` (CI, a teammate's clone) `npm run brain:config --
+resolve platform` and `resolve sdd` exit **3**, and `diagnose` does not flag it.
+
+**The repair is automatic.** `npm run brain:upgrade -- v1.12.1` applies the new migration `1.12.1`: if any of
+`vcs`, `memory`, `platform`, `sdd` lacks `{ default, providers }`, it applies the same shaping as `1.11.1`
+and prints, under `wrote in brain.config.json (value and where it came from):`, one line per value it
+writes, for example `platform.default = claude (from .env AGENT_PLATFORM) - a per-machine value, now the
+team's tracked default`. Read those lines before you commit, as the 1.12.0 entry says: a value that comes only
+from your `.env` or shell becomes the team's tracked default. On a correctly migrated config it changes
+nothing and prints nothing. If an axis is declared nowhere, it is left `default: ""` and the line names the
+`brain:config set` command that declares it.
+
+**What changed in the code.**
+
+- Migration `1.11.1` no longer needs the caller to hand it a context. When none is given it builds its own from
+  the process env and the repo's `.env` (`brain/scripts/lib/axis-migration-context.mjs`, the module the
+  `1.12.0` upgrader uses), reading `.env` from the directory the upgrader runs in. When no one collects its
+  notices, it prints each value it writes, so the migration is correct under any upgrader.
+- Callers that must never read env or `.env` pass `axisContext: null` (an explicit opt-out):
+  `brain:promote`'s proof import, and `planConfigWrite` when its caller gives none. Fresh-config construction
+  (`buildDefaultConfig`) already hands the migration an explicit fresh-install context and still does. Nothing
+  about a fresh `env:init` changes.
+- `npm run test:upgrade` asserts the outcome: after the upgrade every axis has `default` and `providers`, and all
+  four resolve with `.env` moved aside (only when the target ships migration `1.11.1`).
+
+Not fixed here: the upgrader still runs the version you have installed rather than re-executing the incoming
+one, so a future change to the migration contract can hit the same trap. Tracked in
+[docs/KNOWN-LIMITATIONS.md](docs/KNOWN-LIMITATIONS.md) (#1344).
+
+## v1.12.0 — no axis is chosen for you in code, the team config has owners and a per-person layer, and the UI opens on the work in flight
+
+**Manual step: read before upgrading.** Unlike 1.10.1 and 1.11.0, this release **has a
+`brain.config.json` migration** (`1.11.1`), and it changes what the resolver does when an axis is not
+declared. `npm run brain:upgrade -- v1.12.0` applies the migration and prints every value
+it writes. **[Correction, 1.12.1] This was false for an upgrade from 1.11.0 or earlier: the installed (old)
+upgrader ran the migration without its context, so nothing was shaped and nothing was printed. See 1.12.1,
+which repairs it.** Read that output before you commit: an agent platform or SDD engine that today comes
+only from your `.env` or your shell becomes the team's tracked default. Each item below was checked against the code on
+`main`, not against the PR descriptions; `openspec/changes/issue-1340-release-1-12-0/claim-sweep.md`
+shows each trace.
+
+| Where | 1.11.0 | 1.12.0 |
+|---|---|---|
+| An axis (`vcs`, `memory`, `platform`, `sdd`) that nothing declares | `platform` resolved to `claude` and `sdd` to `gentle-ai` from defaults in code. `memory` and `vcs` already refused. | **No axis has a default in code.** The resolver refuses an undeclared axis and names the fix (quoted below). `npm run brain:config -- resolve <axis>` exits **3** for "nothing declares it" and **4** for "a declared value is refused". |
+| `brain.config.json` after `brain:upgrade` | One flat key per axis (`memory.backend`, `vcs.provider`, flat `platform`, `engine`/`harness`). | Each axis also carries `{ default, providers }`, and `memory`, `platform` and `sdd` carry `locked: false`. The flat keys stay for the alias window. A custom stage routed in `sdd.map` also gets a role in `sdd.roles`. |
+| A change to `brain.config.json` in a pull request | No brain gate treated it specially. | Checked by the new gate `team-config-reviewed`: it needs an approving review from a login in `governance.owners` who is not the author. A `detection` warning at `lite`; **required at `standard` and `regulated`**. On GitLab at those tiers it **fails closed** until #1281. |
+| `.github/workflows/governance.yml`, `.github/PULL_REQUEST_TEMPLATE.md`, `.gitlab/merge_request_templates/Default.md`, `brain/scripts/ci/gitlab-governance.yml`, `.github/workflows/governance-postmerge.yml` | As shipped in 1.11.0. | The gate's job, one `pull_request_review` trigger, one PR-template row and one post-merge condition are added. These are **REFUSE-managed**: `brain:upgrade` does not replace a copy you edited, and names `--force-managed <path>`. Without the new `governance.yml`, the gate does not exist in your CI. |
+| `env:init` in a repository that already has a `brain.config.json` | Asked for the memory backend on a terminal when none was declared, and filled an empty `project.gitHost` and `project.slug`. | Writes **no team config**. An undeclared axis is refused with its fix, an empty identity is reported with the command that fixes it, and your own `platform` goes to your user layer. The memory prompt is asked only by the run that **creates** `brain.config.json`. |
+
+### No axis is chosen for you in code (ADR-0038, #1114)
+
+Every axis is one object in the tracked `brain.config.json`: `"<axis>": { "default": "<name>",
+"providers": { "<name>": {} } }`. `default` names the implementation the team runs. One
+resolver, `resolveAxis`, reads all four axes, and `platform` and `sdd` lose the `claude` and
+`gentle-ai` defaults they had in code. For `memory`, `platform` and `sdd` the precedence, first wins,
+is: the process env (`MEMORY_BACKEND`, `AGENT_PLATFORM`, `SDD_ENGINE`), then `.env`, then your user
+layer (below), then the team's `<axis>.default`, then the legacy key. `vcs` has no `.env` and no
+user level: the process env (`VCS_PROVIDER`), then `vcs.default`, then the legacy `vcs.provider`; a
+provider the CI run detects wins over all of these.
+
+A value that is not a provider brain ships, or not a key of `<axis>.providers`, is refused, never
+coerced. The three refusals, from `brain/scripts/i18n/en.mjs` (`axes.refusal.*`), for `memory`:
+
+```
+no memory is declared: none of the process env (MEMORY_BACKEND), .env, or brain.config.json memory.default names one, and brain does not guess. Declare the team's choice: npm run brain:config -- set memory.default <engram|plainfiles>
+memory "bogus" (from the process env) is not a memory brain ships (engram|plainfiles) — it was refused, not coerced. Fix it where it is set, or declare the team's choice: npm run brain:config -- set memory.default <engram|plainfiles>
+memory "<value>" (from <source>) is not a key of memory.providers (<listed>) — it was refused, not coerced. List it: npm run brain:config -- set memory.providers.<value> '{}'
+```
+
+`npm run brain:config -- set memory.default plainfiles` writes `memory.default`, lists the provider
+and keeps the legacy `memory.backend` in step; `set memory.backend` still works and does the same.
+**The memory commands (`brain:memory:*`) still refuse with their own 1.11.0 text**, which names
+`set memory.backend` and ends "Or run `npm run brain:env:init`, which asks once and writes it"
+(exit 3). In a repository that already has a `brain.config.json`, `env:init` no longer asks (see
+below), so declare it with `set memory.default` instead (#1341).
+
+The old `SDD_HARNESS` variable and the flat `harness` config key are a deprecated alias for
+`platform` and `sdd`: a use prints `<key> (<value>, from <where>) is a deprecated way to name the
+<axis> and stops working after one more minor version. Declare it: npm run brain:config -- set <axis>.default <value>`.
+The flat `memory.backend`, `vcs.provider`, `platform` and `engine` keys are read as a silent
+read-only alias while no `{ default, providers }` is declared.
+
+### The migration `1.11.1` (#1114, #1263)
+
+`brain:upgrade` applies it when your recorded `schemaVersion` is below it. For each of `memory`,
+`vcs`, `platform` and `sdd` that has no `{ default, providers }` yet, it writes `default` and lists
+that one name under `providers` as `{}`:
+
+- `platform` and `sdd`: the value the axis **effectively resolves to today**, from, in order, the
+  process env, your `.env`, the config's own keys, and today's code default (`claude`,
+  `gentle-ai`). A value that is not a provider brain ships is not copied: `default` is `""`.
+- `memory` and `vcs`: the legacy key (`memory.backend`, `vcs.provider`) and nothing else. **A memory
+  backend that lives only in your `.env` or your shell is not promoted**: `memory.default` is
+  written `""` and your `.env` keeps winning on your machine until the team declares it.
+
+It then:
+
+- writes `locked: false` on `memory`, `platform` and `sdd` where none is stated, so no upgrade locks anything;
+- adds the provider `sdd.providers.brain = { "version": "self" }`;
+- for a **custom stage routed in `sdd.map`**, adds the stage's engine to `platform.providers` as `{}` and writes `sdd.roles["<stage>"]`: `cold-review` gets `{ "agent": "brain:cold-review", "engine": ..., "model": ... }`, any other stage gets `{ "agent": "brain:stage", ... }`;
+- never seeds `governance.owners`, keeps an axis that already has a `default` or `providers` as it is, never overwrites a `locked` you set, and leaves `sdd.map` and `sdd.configs` as they were.
+
+Measured on a consumer at 1.11.0 with `AGENT_PLATFORM` and `SDD_ENGINE` in its `.env`, the upgrade
+prints (abridged; `plainfiles` was the consumer's declared backend):
+
+```
+memory.default = plainfiles (from brain.config.json memory.backend)
+vcs.default = github (from brain.config.json vcs.provider)
+platform.default = claude (from .env AGENT_PLATFORM) - a per-machine value, now the team's tracked default
+sdd.default = gentle-ai (from .env SDD_ENGINE) - a per-machine value, now the team's tracked default
+memory.locked, platform.locked, sdd.locked = false (nothing changes for you: no axis is locked until an owner turns it on, ...)
+sdd.providers.brain = {"version":"self"} (brain's own provider, declared on every consumer)
+```
+
+If your memory backend was undeclared, `memory.default` is written `""` and the line says so
+(`memory.default = "" (undeclared: ...; declare it with: npm run brain:config -- set memory.default <name>)`):
+the memory commands then refuse (exit 3) until you declare it.
+
+### Who defines the project: owners, a user layer, `locked` (ADR-0040, #1263)
+
+- **`governance.owners`** is a list of bare forge logins who own the team config.
+  `npm run brain:config -- set governance.owners alice,bob` writes it (a login, a comma-separated
+  run, or a JSON array; a leading `@` is dropped). An existing consumer is **not** seeded with an
+  owner: `brain:governance-status` and `brain:config -- diagnose` report `owners-undeclared` as a
+  warning until you declare one.
+- **The user layer** is `${BRAIN_HOME:-~/.brain}/config.json`, untracked and per person: your
+  `memory`, `platform` and `sdd` selectors, in the same `{ default, providers }` shape. It is
+  written with mode 0600 in a 0700 directory by `npm run brain:config -- user-set <axis>.default <name>`
+  (`memory`, `platform` or `sdd` only; it never writes `brain.config.json`). Your providers and the
+  team's are unioned, and a selected value must be in the union.
+- **`locked`** is a boolean the team sets on `memory`, `platform` or `sdd`
+  (`npm run brain:config -- set memory.locked true`). A locked axis refuses a differing value from
+  your user layer, your `.env` and your process env. The refusal:
+
+```
+memory is locked by the team (brain.config.json memory.locked), so "engram" from the process env was refused — a locked axis takes no user-layer, .env or process-env override. Ask an owner in governance.owners, or propose the change in a PR: npm run brain:config -- set memory.default engram
+```
+
+  `user-set` applies the same refusal and exits 4. A value equal to the team's is not an override.
+  A locked axis the team never declared refuses nothing (the gap is reported by `diagnose` instead).
+- **A new adoption** (the `env:init` that creates `brain.config.json`) writes `governance.owners`
+  from the adopter's `brain.actor` login, `memory.locked: true` and `sdd.locked: true`, and leaves
+  `platform` free. An existing consumer gets none of that from an upgrade.
+
+### `team-config-reviewed` (ADR-0040, #1263, #1333)
+
+A pull request that touches `brain.config.json` (added, modified, deleted, or renamed away) needs
+an `APPROVED` review, on the **current head**, from a login in `governance.owners` who is not the
+PR author. Owners and tier are read from the **base** branch, so a PR cannot name itself an owner.
+The adoption pull request that creates the file passes, labelled as not independent review. The
+sole owner at tier `lite` may change the config they authored (the named solo-maintainer
+exception). `lite` is `detection` (a warning), `standard` and `regulated` are `required`.
+
+- **When the PR author or repository cannot be resolved** (the forge call failed), a touched team
+  config that is not a founding is a failure at `standard` and `regulated` (a warning at `lite`),
+  even with an owner approval on the head, because the distinct-author rule cannot be checked (#1333).
+- **On GitLab at `standard` and `regulated` the gate fails closed**: GitLab does not say which commit
+  an approval was given on, so the gate cannot tell a current approval from a stale one, and a team
+  config change cannot pass by approval until #1281 (ADR-0040 Amendment 1). Brain offers no way
+  around it in the meantime. An MR pipeline also does not re-run when an approval lands: re-run it.
+- To make GitHub **require** the new check at `standard` or `regulated`, apply the new `governance.yml`
+  and run `npm run brain:protect` again, which derives the required checks from your tier.
+
+### `env:init` writes no team config in an existing repository (#1263, #1273)
+
+`env:init` decides once whether it is the run that **creates** `brain.config.json`. In an existing
+repository it writes nothing into the team config: an undeclared `memory`, `sdd` or `vcs` prints
+`the team has not declared <axis>; ask an owner, or propose it with `npm run brain:config -- set <axis>.default <name>` in a PR. env:init writes no team config in an existing repository.`
+and lists a pending step; an empty `project.gitHost` or `project.slug` is reported with the value
+the origin remote gives and the `set` command; your `platform` is saved with `user-set` to your
+user layer. **The memory backend prompt of 1.11.0 is therefore asked only by the run that creates
+the file**, and only on a terminal. The commands that need `project.slug` now share one resolver: the
+tracked value, then the origin remote, then a refusal, `cannot tell which repository this is:
+brain.config.json has no project.slug and there is no origin remote to read it from. Propose it in a PR: npm run brain:config -- set project.slug <owner/repo>`
+(#1273; the memory adapters keep their own order for the project name they stamp). `env:init` no longer writes any axis selector into `.env`; it writes only
+the VCS token there.
+
+### The local UI opens on the work in flight (#1284, #1199, #883, #1276, #1201)
+
+`npm run brain:ui` serves the same page, with these changes:
+
+- **Home: "In flight" first (#1284).** A section above the track lanes lists the **open** issues that have work behind them: a change directory on the served tree, a local worktree, a pushed branch or a pull request. Newest activity first, one row per issue; issues with no activity for 7 days or more sit in a collapsed `stale (N)` group, and an issue whose state is unknown is marked `state unknown`. While a source is still loading or failed, the section names it and does not claim that nothing is in flight. The header is one line (`epic: not resolved` replaces the long sentence).
+- **Progress (#1199).** A change shows `done / total` tasks and says where it read them (`working tree` or `at HEAD`); a missing, unreadable or empty `tasks.md` is said in words, never a number. An epic shows closed / total children, counted only when the closed-issue data is present.
+- **Work that is not on `main` yet (#883, #1276, #1201).** The Spec, SDD and Tasks tabs read a change from the served `HEAD`, then from the one local worktree that holds it, then from the one `origin/*` branch that holds it; each tab states the source. Local worktree documents are shown as uncommitted and never written. A teammate's in-flight SDD is listed from `origin/*` branches in a `Remote work` panel, with a `refresh remotes` control. Several holders are refused by name rather than guessed.
+- **Responsiveness (#1218, #1257, #1243, #1262).** A document renders in a worker with a 1500 ms budget and says why one is unreadable; forge reads run in their own thread per lane so the server serves its first snapshot before any forge call, and a section still loading reads as loading, not as a failure; the poller keeps one timer, and a forge halt is no longer shown as a user pause.
+- **Honesty fixes (#1267, #1282, #1262).** An epic drawer says "closed children are counted above" only when a closed count exists; the SDD tab, read from a worktree or an origin branch, no longer marks a document it could not read as present and says why; under `brain:ui --no-poll` a section reads as idle with the poller's reason instead of loading forever, and a closed-issue delta can no longer delete a just-closed issue from the list.
+- **Layout fixes (#1310, #1311, #1307, #1326).** Governance table cells keep table layout; buttons, links and form controls are themed so Dark-theme text is legible; the drawer is pinned to the viewport with its own scroll; a tab click scrolls the drawer panel into view.
+
+### Other fixes a consumer can observe
+
+- **The codex review engine no longer dies with ENOBUFS (#1274).** Its stdout, a progress stream, is discarded and its output cap raised to 64 MiB, so a cold review of a large pull request is not lost to Node's default 1 MiB buffer. The stderr tail it quotes is redacted before it is truncated.
+- **The archive-sweep alarm no longer closes itself (#1235).** `governance-postmerge.yml`'s `resolve-sweep` step also requires `steps.sweep.outputs.alarm == ''`; the sweep exits 0 after filing `governance:archive-sweep-failed`, so the same run used to close the alarm it had filed. **If you edited that file**, `brain:upgrade` will not replace it: apply this one condition by hand, or use `--force-managed .github/workflows/governance-postmerge.yml`.
+- **A same-day memory lane re-ship after its own squash merge works (#1190).** `brain:memory:ship` replaces its own remote lane branch, under a lease, when that branch's content is already on `origin/main` and the newest pull request for it is merged, and prints `✓ replaced <branch> on origin under a lease — pull request #<n> was merged and every record it carried is on main.` If origin refuses the forced update (a protection rule on `memory/*`), it says so and changes nothing.
+
+### What ships
+
+| PR | Change |
+|---|---|
+| #1296 (tracker for #1114) | One `resolveAxis`, no axis defaults in code, migration `1.11.1`, `env:init` declares team axes (#1250, #1252, #1255, #1258, #1259). |
+| #1296, from #1263 | The user layer and `locked` (#1268), `env:init` and the foundation (#1272, #1275), `team-config-reviewed` (#1278, #1285, #1333), ADR-0038 section 4 (#1289), the `project.slug` resolver (#1287), ADRs 0038 and 0040 and their amendments. |
+| #1241, #1246, #1260 | UI: teammates' work from `origin/*`, poller timers, non-blocking forge reads (#1201, #1243, #1257). |
+| #1223 | UI: the SDD reader renders off the main thread within 1500 ms (#1218). |
+| #1265, #1269, #1279, #1290 | UI: progress and rollups, local worktree documents, tab lookup order, the in-flight home (#1199, #883, #1276, #1284). |
+| #1295, #1299, #1301 | UI: unreadable documents, the epic drawer's closed count, a paused poller (#1282, #1267, #1262). |
+| #1316, #1319, #1323, #1327 | UI: table layout, Dark theme text, pinned drawer, tab scrolling (#1310, #1311, #1307, #1326). |
+| #1286 | Review: the codex engine no longer dies with ENOBUFS (#1274). |
+| #1239 | Governance: the archive-sweep alarm does not close itself (#1235). |
+| #1234 | Memory: a lane re-ships after its own squash merge (#1190). |
+| #1322, #1329 | Internal: `test:upgrade` installs from the registry and an informational `upgrade-smoke` workflow runs it; it tests **published** releases only (#1325). |
+| memory lane PRs | Internal: memory records. |
+
+### Known follow-ups a consumer can hit
+
+Listed in `docs/KNOWN-LIMITATIONS.md`: #1281 (GitLab cannot satisfy `team-config-reviewed` at
+`standard` and `regulated`), #1339 (`brain:config user-set` can write a value the resolver then
+refuses), #1334 (`brain-writes-reviewed` skips when the PR author cannot be resolved), #1189
+(`plainfiles` prints an `import` refusal after a pull), and the earlier open items. #1190, listed
+in 1.11.0, is fixed above.
+
+### Why a minor and not a patch
+
+The release reporter measured 74 commits since v1.11.0: 13 `feat`, 36 `fix` and 25 internal, and one
+config migration (`1.11.1`) promoted above the published 1.11.0 that did nothing until a release
+shipped it. New capabilities (the user layer, `locked`, `governance.owners` and its gate, the
+in-flight home) are each a minor by the rule 1.6.0 to 1.11.0 applied. The migration is versioned
+`1.11.1`, the smallest version above 1.11.0, and a 1.12.0 cut makes it reachable. It is not a
+patch because a consumer's `platform` and `sdd` now refuse where they used to default, and a
+`standard` or `regulated` repository can gain a required check.
+
 ## v1.11.0 — a missing label or an unpushed branch is refused up front, the memory backend has no default, and SDD artifacts are readable in the UI
 
 **Manual step: read before upgrading.** Nothing in your tree has to move, no `brain.config.json`

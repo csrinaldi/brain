@@ -12,10 +12,13 @@
 // brain's. Only the release that stopped shipping a file knows it did.
 //
 // `brain-upgrade.mjs` reads this module from the INCOMING package. Guarded by
-// lib/installer.retired.test.mjs: every entry is absent from brain and sits under
-// a managed COPY glob.
+// lib/installer.retired.test.mjs: every entry sits under a managed COPY glob, and is
+// either absent from brain or (the #1076 test infrastructure) excluded from the package.
 
-export const RETIRED_PATHS = Object.freeze([
+import { RETIRED_TEST_PATHS } from './retired-test-paths.mjs';
+
+/** Hand-kept entries: each is absent from brain (guarded by installer.retired.test.mjs). */
+const MOVED_PATHS = [
   // #1141: every adapter moved to brain/scripts/axes/<axis>/.
   'brain/scripts/harness/backends/agent-runtime.mjs',
   'brain/scripts/harness/backends/agent-runtime.test.mjs',
@@ -70,4 +73,15 @@ export const RETIRED_PATHS = Object.freeze([
   'brain/scripts/vcs/providers/gitlab.mjs',
   'brain/scripts/vcs/providers/identity.drift.test.mjs',
   'brain/scripts/vcs/providers/vcs.contract.test.mjs',
-]);
+  // #1129: the readiness probes moved into their adapter directories; `harness/readiness.mjs` is the one verb.
+  'brain/scripts/harness/codex-readiness.mjs',
+  'brain/scripts/harness/codex-readiness.test.mjs',
+  'brain/scripts/harness/gemini-readiness.mjs',
+  'brain/scripts/harness/gemini-readiness.test.mjs',
+];
+
+// #1076: brain stopped shipping its test infrastructure. The generated list is exact
+// (never a `**/*.test.mjs` glob: a consumer's own test file under brain/scripts/** is
+// not brain's). These entries are excluded by package.json `files` rather than absent
+// from brain — see the guard in installer.retired.test.mjs.
+export const RETIRED_PATHS = Object.freeze([...new Set([...MOVED_PATHS, ...RETIRED_TEST_PATHS])]);

@@ -7,7 +7,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildChangeView, REVIEWS_SOURCE_NOTE } from './change-route.mjs';
+import { buildChangeView, REMOTE_DRAWER_CAP, REVIEWS_SOURCE_NOTE } from './change-route.mjs';
 import { documentWording } from './lib/drawer-model.mjs';
 import { fakeGit } from './test-support/fake-git.mjs';
 import { execFileSync } from 'node:child_process';
@@ -67,9 +67,10 @@ function gitFor({ spec = SPEC_TEXT, tasks = TASKS_TEXT, files = {}, branches = {
 
 function makeSnapshot({
   changes = [{ id: 'issue-881-ui-server-canvas', issue: ISSUE, slug: 'ui-server-canvas', dir: CHANGE_DIR }],
-  prs = [], reviews = [], records = { ok: true, value: { records: [], duplicates: { ids: 0 } } },
+  prs = [], reviews = [], records = { ok: true, value: { records: [], duplicates: { ids: 0 } } }, localWorktrees,
 } = {}) {
   return {
+    ...(localWorktrees ? { localWorktrees } : {}),
     changes: { ok: true, value: changes },
     prs: { ok: true, value: prs },
     reviews: { ok: true, value: reviews },
@@ -97,18 +98,27 @@ test('#881: a change dir + an open PR resolves the branch from the PR, never cal
 
 // ── 2. a change dir, no PR, exactly one matching branch ─────────────────────
 
-test('#881: no PR but exactly one feat/issue-<N>-* branch resolves working memory from it', () => {
+test('#881: no PR but exactly one */issue-<N>[-*] branch resolves working memory from it', () => {
   const snapshot = makeSnapshot({ prs: [] });
   const run = gitFor({ resume: RESUME_TEXT });
   const result = buildChangeView({ issue: ISSUE, snapshot, _run: run });
   assert.equal(result.value.workingMemory.ok, true);
   assert.equal(result.value.workingMemory.value.current_slice.value, '3'); // parseFrontmatter scalars are always strings — resume-frontmatter.mjs does no type coercion
-  assert.deepEqual(run.calls.find((args) => args[0] === 'branch'), ['branch', '--list', `feat/issue-${ISSUE}-*`]);
+  assert.deepEqual(run.calls.find((args) => args[0] === 'branch'), ['branch', '--list', `*/issue-${ISSUE}`, `*/issue-${ISSUE}-*`]);
+});
+
+test('#883 R883-15: a fix/ branch, with or without a slug, resolves working memory like a feat/ one', () => {
+  for (const name of ['fix/issue-881-x', 'chore/issue-881']) {
+    const run = gitFor({ branches: { [name]: { commit: BRANCH_TIP, files: { [RESUME_PATH]: RESUME_TEXT } }, 'feat/issue-8810-other': { commit: BRANCH_TIP, files: {} } } });
+    const result = buildChangeView({ issue: ISSUE, snapshot: makeSnapshot({ prs: [] }), _run: run });
+    assert.equal(result.value.workingMemory.ok, true, name);
+    assert.equal(result.value.workingMemory.value.current_slice.source.path.startsWith(`${name}:`), true);
+  }
 });
 
 // ── 3. two matching branches ─────────────────────────────────────────────────
 
-test('#881: two matching feat/issue-<N>-* branches renders none, listing both, and never calls `git show`', () => {
+test('#881: two matching */issue-<N>[-*] branches renders none, listing both, and never calls `git show`', () => {
   const snapshot = makeSnapshot({ prs: [] });
   const run = gitFor({ branches: { [`feat/issue-${ISSUE}-a`]: { commit: BRANCH_TIP, files: {} }, [`feat/issue-${ISSUE}-b`]: { commit: BRANCH_TIP, files: {} } } });
   const result = buildChangeView({ issue: ISSUE, snapshot, _run: run });
@@ -116,6 +126,32 @@ test('#881: two matching feat/issue-<N>-* branches renders none, listing both, a
   assert.match(result.value.workingMemory.reason, new RegExp(`feat/issue-${ISSUE}-a`));
   assert.match(result.value.workingMemory.reason, new RegExp(`feat/issue-${ISSUE}-b`));
   assert.ok(!run.calls.some((args) => args[0] === 'show'), 'ambiguous branch resolution must never guess which one to read');
+});
+
+const localEntry = (branch, dirState = 'present') => ({ path: `/wt/${branch.replace(/\//g, '-')}`, leaf: branch.replace(/\//g, '-'), branch, head: BRANCH_TIP, issue: ISSUE, dirState, dir: dirState === 'present' ? CHANGE_DIR : null, capped: false });
+const localSection = (...entries) => ({ ok: true, value: { entries, hidden: {}, tier: 'working-tree' } });
+
+test('#883 W2: several matching branches resolve to the one a kept worktree holding the change dir has checked out', () => {
+  const feat = `feat/issue-${ISSUE}-x`;
+  const tracker = `feature/issue-${ISSUE}-y`;
+  const run = gitFor({ branches: { [feat]: { commit: BRANCH_TIP, files: { [RESUME_PATH]: RESUME_TEXT } }, [tracker]: { commit: BRANCH_TIP, files: {} } } });
+  const snapshot = makeSnapshot({ prs: [], localWorktrees: localSection(localEntry(feat), localEntry(tracker, 'missing')) });
+  const result = buildChangeView({ issue: ISSUE, snapshot, _run: run });
+  assert.equal(result.value.workingMemory.ok, true);
+  assert.equal(result.value.workingMemory.value.current_slice.source.path.startsWith(`${feat}:`), true);
+});
+
+test('#883 W2: several matching branches each held by a kept worktree with the change dir refuse, naming the worktrees', () => {
+  const a = `feat/issue-${ISSUE}-x`;
+  const b = `feature/issue-${ISSUE}-y`;
+  const run = gitFor({ branches: { [a]: { commit: BRANCH_TIP, files: {} }, [b]: { commit: BRANCH_TIP, files: {} } } });
+  const snapshot = makeSnapshot({ prs: [], localWorktrees: localSection(localEntry(a), localEntry(b)) });
+  const result = buildChangeView({ issue: ISSUE, snapshot, _run: run });
+  assert.equal(result.value.workingMemory.ok, false);
+  assert.match(result.value.workingMemory.reason, /more than one \*\/issue-881 branch/);
+  assert.match(result.value.workingMemory.reason, /feat-issue-881-x/);
+  assert.match(result.value.workingMemory.reason, /feature-issue-881-y/);
+  assert.ok(!run.calls.some((args) => args[0] === 'show'));
 });
 
 // ── 4. no change dir ─────────────────────────────────────────────────────────
@@ -160,15 +196,39 @@ test('#881: tasks.md present but `git blame` throws — the checklist still rend
   assert.deepEqual(blameCall, ['blame', '--porcelain', 'HEAD', '--', TASKS_PATH]);
 });
 
+// ── #1199 R1199-4: the tab counts its own HEAD text ─────────────────────────
+
+test('#1199 R1199-4: the Tasks tab carries the count of the HEAD text, not the working tree', () => {
+  const snapshot = makeSnapshot();
+  const head = ['- [x] a', '- [x] b', '- [ ] c', '- [ ] d', '- [ ] e'].join('\n');
+  const result = buildChangeView({ issue: ISSUE, snapshot, _run: gitFor({ tasks: head }) });
+  assert.deepEqual(result.value.tasks.progress, { ok: true, value: { done: 2, total: 5 } });
+});
+
+test('#1199 R1199-4: a tasks.md with no checkboxes carries the no-items reason', () => {
+  const result = buildChangeView({ issue: ISSUE, snapshot: makeSnapshot(), _run: gitFor({ tasks: '# Tasks\nprose' }) });
+  assert.equal(result.value.tasks.progress.code, 'no-items');
+});
+
+test('#1199 R1199-4: a truncated tasks.md has no total, and its items still render', () => {
+  const big = `- [x] first\n- [ ] second\n${'a'.repeat(300000)}`;
+  const result = buildChangeView({ issue: ISSUE, snapshot: makeSnapshot(), _run: gitFor({ tasks: big }) });
+  assert.equal(result.value.tasks.ok, true);
+  assert.equal(result.value.tasks.progress.ok, false);
+  assert.equal(result.value.tasks.progress.code, 'truncated');
+  assert.match(result.value.tasks.progress.reason, /larger than 262144 bytes/);
+  assert.equal(result.value.tasks.value.length, 2);
+});
+
 // ── 7. resume.md absent on the branch ────────────────────────────────────────
 
-test('#881: a resolved branch with no committed resume.md — the tab says so and points at slice 5 / #883', () => {
+test('#881: a resolved branch with no committed resume.md — the tab says so, and no longer promises a later slice (#883)', () => {
   const snapshot = makeSnapshot({ prs: [{ number: 5, title: 'x', headBranch: BRANCH, issue: ISSUE }] });
   const run = gitFor({ resume: null });
   const result = buildChangeView({ issue: ISSUE, snapshot, _run: run });
   assert.deepEqual(result.value.workingMemory, {
     ok: false,
-    reason: `no committed resume.md on ${BRANCH}; the local overlay arrives in slice 5 (#883)`,
+    reason: `no committed resume.md on ${BRANCH}`,
   });
 });
 
@@ -607,13 +667,13 @@ test('#1218 R1218-8: a failing `git branch --list` and an ambiguous listing stay
   assert.match(failing.documents.resume.reason, /git branch --list failed: fatal: not a git repository/);
   const two = viewOf(gitFor({ files: allArtifacts(), branches: { 'feat/issue-881-a': { commit: BRANCH_TIP, files: {} }, 'feat/issue-881-b': { commit: BRANCH_TIP, files: {} } } }), makeSnapshot());
   assert.equal(two.documents.resume.state, 'unreadable');
-  assert.match(two.documents.resume.reason, /more than one feat\/issue-881-\* branch/);
+  assert.match(two.documents.resume.reason, /more than one \*\/issue-881 branch in this clone/);
 });
 
 test('#1218 R1218-8: an unresolved branch (ambiguous or git failed) says the branch could not be resolved, on the Working memory tab and the SDD row', () => {
   const failing = viewOf(gitFor({ files: allArtifacts(), fail: { branch: 'fatal: not a git repository' } }), makeSnapshot());
   const two = viewOf(gitFor({ files: allArtifacts(), branches: { 'feat/issue-881-a': { commit: BRANCH_TIP, files: {} }, 'feat/issue-881-b': { commit: BRANCH_TIP, files: {} } } }), makeSnapshot());
-  for (const [view, reason] of [[failing, /git branch --list failed: fatal: not a git repository/], [two, /more than one feat\/issue-881-\* branch/]]) {
+  for (const [view, reason] of [[failing, /git branch --list failed: fatal: not a git repository/], [two, /more than one \*\/issue-881 branch in this clone/]]) {
     assert.equal(view.documents.resume.state, 'unreadable');
     assert.match(view.workingMemory.reason, /^resume\.md: the change branch could not be resolved: /);
     assert.match(view.workingMemory.reason, reason);
@@ -730,4 +790,105 @@ test('#1218 R1218-9/10: a headBranch that exists only as a remote ref is unreada
   assert.ok(documents.resume.reason.length <= 200);
   assert.doesNotMatch(documents.resume.reason, /^Command failed/);
   assert.match(workingMemory.reason, /fatal: Needed a single revision/);
+});
+
+// ── #1276 R1276-4: origin is the source only when main and every worktree hold nothing ──
+
+const OR_ISSUE = 7;
+const OR_DIR = 'openspec/changes/issue-7-x';
+const OR_SHA = (n) => `${n}`.padStart(2, '0').padEnd(40, 'e');
+const OR_SPEC = '### R7-1: Title\n#### Scenario: s\n- **WHEN** w\n- **THEN** t\n';
+const OR_TASKS = '- [x] 1.1 a\n- [ ] 1.2 b\n';
+
+function originEntry(n, branch = `feat/issue-7-r${n}`) {
+  return {
+    branch, sha: OR_SHA(n), tipAt: '2026-10-01T00:00:00Z', author: 'Ada Lovelace', kind: 'grammar', issue: OR_ISSUE, pr: null,
+    change: { ok: true, value: { dir: OR_DIR, artefacts: {} } }, resume: { state: 'missing' },
+  };
+}
+
+function originSnapshot(entries, { prs = [], localWorktrees } = {}) {
+  return {
+    ...(localWorktrees ? { localWorktrees } : {}),
+    changes: { ok: true, value: [] },
+    prs: { ok: true, value: prs }, reviews: { ok: true, value: [] },
+    records: { ok: true, value: { records: [], duplicates: { ids: 0 } } },
+    remoteChanges: { ok: true, value: { base: 'origin/main', branches: entries, unjoined: [], hidden: { base: 0, lane: 0, merged: 0 }, prsApplied: true, deferred: 0 } },
+  };
+}
+
+function originGit(n, extra = {}) {
+  const branches = {};
+  for (let i = 1; i <= n; i += 1) branches[`origin/feat/issue-7-r${i}`] = { commit: OR_SHA(i), files: { [`${OR_DIR}/spec.md`]: OR_SPEC, [`${OR_DIR}/tasks.md`]: OR_TASKS, ...extra } };
+  return fakeGit({ files: {}, head: HEAD, branches, blame: BLAME_PORCELAIN });
+}
+
+test('R1276-4: an origin-only change feeds the Spec, SDD and Tasks tabs, each saying so, with the blame at the origin sha', () => {
+  const run = originGit(1);
+  const { value } = buildChangeView({ issue: OR_ISSUE, snapshot: originSnapshot([originEntry(1)]), _run: run });
+
+  const from = `from origin/feat/issue-7-r1 @ ${OR_SHA(1).slice(0, 12)}`;
+  assert.equal(value.tabSource.kind, 'origin');
+  assert.equal(value.spec.ok, true);
+  assert.equal(value.spec.value[0].id, 'R7-1');
+  assert.equal(value.spec.value[0].source.path, `origin/feat/issue-7-r1:${OR_DIR}/spec.md`);
+  assert.equal(value.spec.from, from);
+  assert.equal(value.sdd.from, from);
+  assert.equal(value.tasks.from, from);
+  assert.deepEqual(value.sdd.value.filter((r) => r.present).map((r) => r.stage), ['spec', 'tasks']);
+  assert.equal(value.tasks.progressSource, 'at origin/feat/issue-7-r1');
+  assert.deepEqual(run.calls.filter((a) => a[0] === 'blame'), [['blame', '--porcelain', OR_SHA(1), '--', `${OR_DIR}/tasks.md`]]);
+});
+
+test('R1276-4: several origin branches hold the change — the open PR\'s head branch is the source', () => {
+  const run = originGit(2);
+  const snapshot = originSnapshot([originEntry(1), originEntry(2)], { prs: [{ number: 9, title: 'x', headBranch: 'feat/issue-7-r2', issue: OR_ISSUE }] });
+
+  const { value } = buildChangeView({ issue: OR_ISSUE, snapshot, _run: run });
+
+  assert.equal(value.tabSource.kind, 'origin');
+  assert.equal(value.tabSource.branch, 'feat/issue-7-r2');
+  assert.equal(value.spec.from, `from origin/feat/issue-7-r2 @ ${OR_SHA(2).slice(0, 12)}`);
+});
+
+test('R1276-4: several origin branches and no open PR naming one of them are refused, naming the branches', () => {
+  for (const prs of [[], [{ number: 9, title: 'x', headBranch: 'feat/issue-7-other', issue: OR_ISSUE }]]) {
+    const { value } = buildChangeView({ issue: OR_ISSUE, snapshot: originSnapshot([originEntry(1), originEntry(2)], { prs }), _run: originGit(2) });
+    assert.equal(value.tabSource.kind, 'refused');
+    for (const tab of [value.spec, value.sdd, value.tasks]) {
+      assert.equal(tab.reason, 'several origin branches hold the change dir for #7: feat/issue-7-r1, feat/issue-7-r2; no open PR names one of them, so the tabs read none');
+    }
+  }
+});
+
+test('R1276-4: the one holder past the drawer\'s read cap is said, and never read for the tabs', () => {
+  const run = originGit(4);
+  const entries = [1, 2, 3, 4].map((n) => originEntry(n));
+  const snapshot = originSnapshot(entries, { prs: [{ number: 9, title: 'x', headBranch: 'feat/issue-7-r4', issue: OR_ISSUE }] });
+
+  const { value } = buildChangeView({ issue: OR_ISSUE, snapshot, _run: run });
+
+  assert.equal(value.tabSource.kind, 'none');
+  assert.equal(value.spec.reason, `origin/feat/issue-7-r4 holds the change dir but is past the drawer's read cap of ${REMOTE_DRAWER_CAP}`);
+  assert.equal(run.calls.some((a) => a.includes(OR_SHA(4)) && a[0] !== 'rev-parse'), false, 'the capped branch\'s documents were not read');
+});
+
+test('R1276-4: a change on main never consults origin', () => {
+  const snapshot = { ...originSnapshot([originEntry(1)]), changes: { ok: true, value: [{ id: 'issue-7-x', issue: OR_ISSUE, slug: 'x', dir: OR_DIR }] } };
+  const { value } = buildChangeView({ issue: OR_ISSUE, snapshot, _run: fakeGit({ files: { [`${OR_DIR}/spec.md`]: OR_SPEC }, head: HEAD, branches: {}, blame: '' }) });
+  assert.equal(value.tabSource.kind, 'head');
+  assert.equal(value.spec.from, undefined);
+});
+
+test('#1312 D150: a queued review thread is carried as pending, and a tab of only queued threads says "not read yet", not "unreadable"', () => {
+  const snapshot = makeSnapshot({
+    prs: [{ number: 957, title: 'x', headBranch: BRANCH, issue: ISSUE }],
+    reviews: [{ pr: 957, ok: false, pending: true, reason: 'queued' }],
+  });
+  const run = gitFor({ resume: RESUME_TEXT });
+  const reviews = buildChangeView({ issue: ISSUE, snapshot, project: 'o/r', _run: run }).value.reviews;
+  assert.equal(reviews.ok, false);
+  assert.equal(reviews.unreadable[0].pending, true);
+  assert.doesNotMatch(reviews.reason, /unreadable/);
+  assert.match(reviews.reason, /not read yet/);
 });

@@ -68,6 +68,7 @@ import { resolveActor, resolveActorKind, deriveIssue, composeSource } from "../.
 import { classifySupersedes } from "../../../memory/lib/supersedes.mjs";
 import { loadBrainConfigOrThrow } from "../../../lib/brain-config.mjs";
 import { t } from "../../../i18n/t.mjs";
+import { projectSlugOrNull } from "../../../lib/project-slug.mjs";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../../../../..");
 
@@ -276,9 +277,10 @@ export function _defaultReadRecordObservations(root) {
  *
  * Called by:
  *   - pullMemory() as its default _import seam
- *   - cli.mjs "import" verb (import-only, no manifest restore, no git pull)
- *   - post-merge hook (via cli.mjs import)
- *   - day-start step 5 (via cli.mjs import, after step 2 already pulled)
+ *   - hydrate() — the bulk form, which is what `cli.mjs hydrate` dispatches (#1115);
+ *     `cli.mjs import` is its deprecated alias
+ *   - post-merge hook (via cli.mjs hydrate)
+ *   - day-start step 4a (via cli.mjs hydrate, after step 2 already pulled)
  *
  * @param {object} [opts]
  * @param {string} [opts.root]  Repo root (defaults to this package's root).
@@ -533,7 +535,7 @@ export async function importMemory({
  * that case: it is reported as divergent and resolved first-wins.)
  *
  * Use pullMemory() for cross-machine syncs (npm run brain:memory:pull).
- * Use importMemory() when git pull already ran (post-merge hook, day-start step 5).
+ * Use `hydrate` (bulk) when git pull already ran (post-merge hook, day-start step 4a).
  *
  * Injectable seams make the function fully unit-testable without real git/engram:
  *
@@ -585,8 +587,8 @@ export async function pull() {
 // `mem_save`, which writes past `.memory/records/` entirely.
 // ---------------------------------------------------------------------------
 
-/** The repository this record belongs to, from config, falling back to the checkout
- *  directory name. Duplicated from plainfiles.mjs verbatim (R1) — no shared-core
+/** The repository this record belongs to, from config: tracked slug, then declared
+ *  project.name, then the origin remote, then the checkout directory name. Duplicated from plainfiles.mjs verbatim (R1) — no shared-core
  *  extraction; the correctness-critical logic already lives in the shared libs
  *  this function calls into.
  *
@@ -598,10 +600,16 @@ export async function pull() {
  *  (plainfiles/engram) staying independent, not about every other caller
  *  reinventing project resolution. */
 export function deriveProject(config, root) {
-  const slug = config?.project?.slug;
-  if (typeof slug === "string" && slug.trim() !== "") return slug.split("/").pop();
+  // Order: tracked slug > declared project.name > origin > checkout directory. A DECLARED name always
+  // beats a derived one (it is what existing records and the engram scope already carry); the origin
+  // replaces only the directory fallback — from an isolated worktree (#782) the directory is the
+  // worktree's name, not the repository's (#1273).
+  const tracked = config?.project?.slug;
+  if (typeof tracked === "string" && tracked.trim() !== "") return tracked.trim().split("/").pop();
   const name = config?.project?.name;
   if (typeof name === "string" && name.trim() !== "") return name;
+  const origin = projectSlugOrNull({ config, cwd: root });
+  if (origin) return origin.split("/").pop();
   return String(root).replace(/\/+$/, "").split("/").pop();
 }
 
@@ -817,8 +825,13 @@ function isEngramArgvUnsafe(value) {
  * @returns {Promise<{written: 0|1, skipped: number, deferred?: true, contended?: true, reason?: string}>}
  */
 export async function hydrate(
-  { root = repoRoot, recordId, record } = {},
+  // `verify` (#1115, ruling Q1) is the read-only form some adapters honour. Engram does NOT: its
+  // import projects into the engram store (~/.engram), which is not a write to the tracked tree,
+  // and session:start hydrated engram before this verb existed. It is destructured only so it is
+  // never mistaken for a record field, and the result never claims `verified`.
+  { root = repoRoot, recordId, record, verify: _verify } = {},
   {
+    _importMemory = importMemory,
     _engramSave = _defaultEngramSave,
     _guard = acquireHydrationGuard,
     _probe = () => probeBinary(ENGRAM_BIN),
@@ -827,6 +840,11 @@ export async function hydrate(
     _warn = console.error,
   } = {},
 ) {
+  // The BULK form (#1115): neither a record nor an id. The single-record form below, including
+  // D4's recordNotFound throw, is untouched.
+  if (recordId === undefined && record === undefined) {
+    return hydrateAll({ root }, { _importMemory, _probe, _warn });
+  }
   let resolved = record;
   if (resolved === undefined) {
     const { records } = _readRecords({ recordsDir: join(root, ".memory", "records") });
@@ -908,6 +926,51 @@ export async function hydrate(
   } finally {
     guard.release();
   }
+}
+
+/**
+ * hydrateAll() — the bulk form of `hydrate` (#1115, REQ-1115-1/2): the whole of
+ * `.memory/records/` into engram, through the same guarded `importMemory` the
+ * `pull` path uses.
+ *
+ * Probes the binary FIRST and defers when it is not there. `importMemory` would
+ * throw (`requireEngram`), and the contract's failure discipline for `hydrate`
+ * is "defer, never throw, never read as done" — an engram-declared checkout
+ * without its binary is a normal state for a teammate who has not installed it
+ * yet. The reason names the fix (`gentle-ai install`) and is printed here, so
+ * the dispatcher's exit 6 never arrives without a cause.
+ *
+ * `importMemory` keeps its own #820 guard and its own stderr for a contended or
+ * unreadable store; this only normalizes its result (`skipped` is absent on the
+ * empty-store return) and catches a throw.
+ *
+ * @returns {Promise<{written: number, skipped: number, deferred?: true, contended?: true,
+ *   reason?: string, duplicates?: object}>}
+ */
+async function hydrateAll({ root }, { _importMemory, _probe, _warn }) {
+  const probe = _probe();
+  if (probe.available !== true) {
+    const reason = probe.available === false
+      ? "engram binary not found. Install via: gentle-ai install"
+      : `engram binary could not be resolved — ${probe.reason ?? "unknown"}`;
+    _warn(await t("memory.hydrate.deferred", { backend: "engram", reason }));
+    return { written: 0, skipped: 0, deferred: true, reason };
+  }
+  let r;
+  try {
+    r = await _importMemory({ root });
+  } catch (err) { /* surfaced: warned as memory.hydrate.deferred and returned as `{ deferred: true, reason }`; the records are durable */
+    const reason = explainEngramFailure(err);
+    _warn(await t("memory.hydrate.deferred", { backend: "engram", reason }));
+    return { written: 0, skipped: 0, deferred: true, reason };
+  }
+  return {
+    written: r?.written ?? 0,
+    skipped: r?.skipped ?? 0,
+    ...(r?.deferred && { deferred: true }),
+    ...(r?.contended && { contended: true }),
+    ...(r?.duplicates !== undefined && { duplicates: r.duplicates }),
+  };
 }
 
 /**

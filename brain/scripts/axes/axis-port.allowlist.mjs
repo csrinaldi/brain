@@ -1,0 +1,59 @@
+// axis-port.allowlist.mjs — the measured baseline of axis-port leaks (#1114 S1).
+//
+// Each entry is keyed by file + rule (never a line number) and carries the hit
+// count `max` the guard measured when it was introduced. `owner` is an issue
+// reference for DEBT (the entry is deleted when that issue's fix lands) or
+// 'legitimate' for a place that must name the concrete thing. The guard fails on
+// a stale entry and on a count that shrank, so this list can only get shorter.
+// S1 fixes nothing; the debt owners follow the per-axis tickets named in #1114.
+
+export const ALLOWLIST = [
+  { file: 'approve/cli.mjs', rule: 'axis-branch', max: 1, owner: '#1107',
+    reason: 'Picks the GitLab API config by comparing the provider name instead of asking the VCS port for it.' },
+  { file: 'brain-governance-status.mjs', rule: 'axis-branch', max: 4, owner: '#1107',
+    reason: 'Branches on the provider name to choose which CLI to spawn, so the report cannot serve a third provider.' },
+  { file: 'brain-governance-status.mjs', rule: 'spawn-concrete:gh', max: 3, owner: '#1107',
+    reason: 'Spawns `gh api` directly to read branch protection and governance state instead of going through a getVcs verb.' },
+  { file: 'brain-governance-status.mjs', rule: 'spawn-concrete:glab', max: 1, owner: '#1107',
+    reason: 'Spawns `glab api` directly for the GitLab half of the same report instead of a getVcs verb.' },
+  { file: 'brain-promote.mjs', rule: 'adapter-import', max: 1, owner: '#1367',
+    reason: 'Imports the antigravity platform adapter directly to compile AGENTS.md; emit surfaces are not yet descriptor vocabulary, which #1367 owns.' },
+  { file: 'brain-to-engram.mjs', rule: 'adapter-import', max: 1, owner: '#1349',
+    reason: 'Imports the engram adapter for deriveProject from outside the memory axis, the same projector coupling as its spawn.' },
+  { file: 'brain-to-engram.mjs', rule: 'spawn-concrete:engram', max: 1, owner: '#1349',
+    reason: 'The whole file is the engram projector and spawns `engram` by design, so it belongs inside the engram adapter or behind a backend verb.' },
+  { file: 'day-start.mjs', rule: 'spawn-concrete:engram', max: 1, owner: '#1349',
+    reason: 'Probes `engram --version` to gate the brain-to-engram doctrine projection (step 4b) instead of asking the backend for its `index` verb.' },
+  { file: 'day-start.mjs', rule: 'spawn-concrete:gentle-ai', max: 4, owner: '#1114',
+    reason: 'The engine section calls `gentle-ai` for version, update, upgrade and skill-registry refresh without resolving SDD_ENGINE, and no ticket owns an engine lifecycle verb yet.' },
+  { file: 'governance/approved-label.mjs', rule: 'axis-branch', max: 1, owner: '#1107',
+    reason: 'Branches on the gitlab provider inside the approved-label check instead of reading it from the VCS port.' },
+  { file: 'governance/postmerge/alarm.mjs', rule: 'spawn-concrete:gh', max: 1, owner: '#1107',
+    reason: 'The post-merge alarm spawns `gh` directly for issue and PR reads rather than a getVcs verb.' },
+  { file: 'lib/brain-config.mjs', rule: 'axis-branch', max: 1, owner: 'legitimate',
+    reason: 'Infers the provider from the remote host name when none is configured, which is detection of the selector value, not selection of an implementation.' },
+  { file: 'lib/env-init-setup.mjs', rule: 'axis-branch', max: 3, owner: 'legitimate',
+    reason: 'The environment installer must name the provider to decide which credentials and tooling to set up, as installers are allowed to.' },
+  { file: 'memory/cli.mjs', rule: 'adapter-import', max: 1, owner: '#1352',
+    reason: 'Imports the engram adapter directly for healDuplicates instead of dispatching a backend verb.' },
+  { file: 'memory/cli.mjs', rule: 'axis-branch', max: 1, owner: '#1352',
+    reason: 'Refuses the heal op unless the backend is engram, which is the memory axis branching on a backend name outside the adapter.' },
+  { file: 'memory/lib/audit-io.mjs', rule: 'adapter-import', max: 1, owner: '#1352',
+    reason: 'The audit reader imports the engram adapter for topicKeysFromExport rather than a backend verb.' },
+  { file: 'memory/lib/audit-io.mjs', rule: 'axis-branch', max: 2, owner: '#1352',
+    reason: 'The audit picks its export reader by backend name (plainfiles, engram) instead of asking the backend port.' },
+  { file: 'review/identity.mjs', rule: 'axis-branch', max: 1, owner: '#1107',
+    reason: 'Chooses the GitLab identity path by comparing vcs.PROVIDER to gitlab instead of an identity verb on the VCS port.' },
+  { file: 'roles/first-party/project-role.mjs', rule: 'axis-branch', max: 1, owner: '#1367',
+    reason: 'Emits the project role differently when the platform is claude; role projection is not yet descriptor vocabulary, which #1367 owns.' },
+  { file: 'vcs/ci-context.mjs', rule: 'axis-branch', max: 2, owner: 'legitimate',
+    reason: 'The one provider-to-loader dispatch ADR-0016 sanctions as the CI-context seam, so naming github and gitlab here is the design.' },
+  { file: 'vcs/contributor-scaffold.mjs', rule: 'adapter-import', max: 2, owner: '#1107',
+    reason: 'Imports both concrete VCS providers directly from vcs/ instead of resolving them through getVcs.' },
+  { file: 'vcs/label-preflight.mjs', rule: 'adapter-import', max: 2, owner: '#1107',
+    reason: 'Imports both concrete VCS providers directly from vcs/ instead of resolving them through getVcs.' },
+  { file: 'vcs/lib/normalize.mjs', rule: 'axis-branch', max: 4, owner: '#1107',
+    reason: 'Branches on the provider to pick a status vocabulary map in vcs/lib, outside axes/vcs/adapters, so each adapter should normalize its own data.' },
+  { file: 'vcs/substrate.mjs', rule: 'axis-branch', max: 4, owner: '#1107',
+    reason: 'The substrate rung ladder branches on gitlab inside vcs/, outside the adapter directory, so the provider facts should come from the port.' },
+];

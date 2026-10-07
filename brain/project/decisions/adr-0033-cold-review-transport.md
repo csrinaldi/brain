@@ -1,6 +1,6 @@
 # ADR-0033 — The cold review runs as a spawned subagent: the transport is a stage engine, and the producer never holds a credential
 
-**Status**: Accepted · **amended 28/08/2026** (Amendments 1-2 — see below)
+**Status**: Accepted · **amended 06/10/2026** (Amendments 1-4 — see below)
 **Date**: 2026-08-21 — Cristian Rinaldi
 
 ## Context
@@ -39,14 +39,17 @@ port. Its output is a file. Only `brain:review` touches the forge.**
 
 Four parts, and each is separable:
 
-1. **Resolution.** `sdd.map['cold-review'] → { engine, model }`. `model` is a
-   pass-through: brain does not interpret it, validate it against a catalogue, or map it
+1. **Resolution.** `sdd.map['cold-review'] → { engine, model }`. **[Amended by Amendment 3
+   (#1114, #1263): the declared target is `sdd.roles['cold-review'] → { agent, engine, model }`,
+   with `agent` = `"brain:cold-review"` and `engine` a key of `platform.providers` that can execute
+   a stage prompt (ADR-0038). The runner still reads `sdd.map` until #1132; see Amendment 3.]**
+   `model` is a pass-through: brain does not interpret it, validate it against a catalogue, or map it
    to a tier. This is #323's already-ruled shape for M8's router; the cold review is its
    first inhabitant rather than a second opinion.
 2. **Execution.** The orchestrator spawns the engine through the harness with a prompt
    and a model. The harness gains one op.
 3. **Output.** The engine writes `openspec/reviews/pr-NNN/cold-review.md`, carrying a
-   ` ```brain-findings/1 ` block. It is written, never committed by the run.
+   ` ```brain-findings/1 ` block. It is written, never committed by the run. **[Amended by Amendment 4 (#1129): in an engine's declared `final-message` mode the host writes this file from the engine's final message, renamed atomically from a host-owned temp path outside the candidate; the engine declares its mode (review-engine-contract.md).]**
 4. **Projection.** `brain:review` reads that file, merges its findings into the existing
    pipeline, challenges them, builds the verdict, and posts — the fenced block plus
    inline comments on the changed lines.
@@ -365,3 +368,96 @@ The directory is per-run and disposable because `gh` **writes** a `config.yml` i
 directory it is given. A reused path would be a place a session could accumulate, which would
 turn this fix into the channel it closes. It is removed in a `finally`, so a refused run cleans
 up on the very path an operator is already debugging.
+
+## Amendment 3 — part 1 resolves through `sdd.roles['cold-review']`, with `engine` a platform provider (issue #1263)
+
+**Signed**: 04/10/2026 — Cristian Rinaldi
+
+### What changed
+
+ADR-0038 names this ADR in "Amendments this requires". Decision part 1, `sdd.map['cold-review'] →
+{ engine, model }`, becomes `sdd.roles['cold-review'] → { agent, engine, model }`:
+
+- `agent` is `"brain:cold-review"`: the role, declared by brain's own SDD provider `brain`
+  (ADR-0023 Amendment 2).
+- `engine` is a key of `platform.providers`: the runtime that executes the stage, for example `codex`.
+  It must declare the ability to execute a stage prompt. `plain` and `antigravity` cannot.
+- `model` stays an opaque pass-through, as decided.
+
+What is on the `feature/issue-1114-axis-ports` tracker:
+
+- The 1.11.1 migration (`brain/core/config-migrations.mjs`) writes `sdd.roles['cold-review']` from
+  `sdd.map['cold-review']`, and adds the routed runtime to `platform.providers` as `{}`. This
+  repository's own `codex` route is migrated that way.
+- `validateAxisConfig` (`brain/scripts/lib/axis-config.mjs`) refuses a `cold-review` entry whose
+  `agent` provider is not a key of `sdd.providers`, or whose `engine` is not a key of
+  `platform.providers` or cannot execute a stage prompt (`PLATFORM_CAPABILITIES`).
+
+### Why
+
+`engine` meant two things in one field: an SDD framework for a lifecycle stage, and a runtime for
+`cold-review`. ADR-0038 separates them. #833's option C, where the SDD framework holds the transport,
+is not taken. The field split replaces it.
+
+### What this does NOT change
+
+Parts 2-4: spawning through the harness, a file as the output, and only `brain:review` touching the
+forge. The warrant table, the credential channels, and Amendments 1 and 2 are unchanged.
+
+### What the code does not do yet, said plainly
+
+- **The runner still reads `sdd.map`.** `review/lib/run-cold-review-stage.mjs` resolves the stage with
+  `resolveStageEngine(config, 'cold-review')` over `sdd.map`, and still branches on `codex`/`gemini`
+  by name to choose the final-message output. **[Amended by Amendment 4 (#1129): no longer — the runner reads the engine's declared output mode.]** `brain:review --engine/--model` override
+  `sdd.map['cold-review']`, not `sdd.roles`. `sdd.roles['cold-review']` is declared, migrated and
+  validated, and read by nothing that routes. Moving the reader is #1132, and dropping the name branch
+  is #1129. **[Amended by Amendment 4: dropped by #1129.]**
+- **Nothing resolves `brain:cold-review` to a role instance.** The Adversary instance for the stage
+  still comes from `roles/first-party/`, as before.
+
+## Amendment 4 — each engine declares its output mode, and one redaction rule covers every engine (issue #1129)
+
+**Signed**: 06/10/2026 — Cristian Rinaldi
+
+### What changed
+
+Decision part 3 said "the engine writes" the artifact. Two engines did not: codex and gemini return
+it as a final message, and the host writes the file. The runner chose between the two by comparing
+`routing.engine` to `codex` and `gemini`. Now:
+
+- **The engine declares its output mode** in its `<name>.descriptor.mjs` (ADR-0038 Amendment 2):
+  `file` (the engine writes the artifact at the absolute path the prompt names) or `final-message`
+  (the host hands it a temp path outside the candidate, renames the bytes atomically to the artifact
+  path, and reads them with brain's own findings reader). The runner reads the mode and names no
+  engine.
+- **An engine that cannot execute a stage is refused before any mutation.** That covers an engine
+  with no descriptor and one that does not declare `executeStage`. The refusal comes before the
+  previous artifact is cleared, never after, and it is never a fallback.
+- **One redaction rule for every engine.** A failure `reason` carries engine output only through
+  `engineTail`: it redacts the scrubbed credentials' values over the full text, strips control
+  bytes, keeps the last 4 KiB, then shows the last two lines. claude, which redacted nothing, and
+  gemini, which neither stripped nor capped, now conform.
+- **Readiness goes through the descriptor.** `harness/readiness.mjs` reads the routed engine's
+  descriptor, checks a pinned model, and calls the engine's own `checkReadiness`. `bootstrap.sh`
+  calls it, so a gemini route is probed at bootstrap, as a codex route already was.
+- **The model policy is declared:** `opaque` (claude, as part 1 decided), `pinned` (codex) or
+  `default` (gemini).
+
+The contract is `brain/core/methodology/review-engine-contract.md`.
+
+### Why
+
+#1129: a fourth engine meant editing the runner and writing another readiness script. The three
+engines leaked different amounts of their output into a reason that reaches the operator and the
+review.
+
+### What this does NOT change
+
+Part 1's opaque model for every engine that declares `opaque`, part 2 (spawn through the harness),
+part 4 (only `brain:review` touches the forge), the warrant table, the credential channels, and
+Amendments 1-3. In `file` mode the engine still writes the artifact, as part 3 decided.
+
+### What the code does not do yet, said plainly
+
+- **No distinct quota state.** "The engine exited" can still be a usage limit.
+- **The runner still reads `sdd.map`** (#1132).

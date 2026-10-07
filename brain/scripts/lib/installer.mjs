@@ -1534,19 +1534,25 @@ export function compareSemver(a, b) {
  * @param {object} config        The consumer's current brain.config.json.
  * @param {Array}  migrations    Ordered migration descriptors.
  * @param {string} targetVersion The brain version being installed.
- * @returns {{ config: object, applied: string[] }}
+ * @param {object} [axisContext]  What a migration needs from OUTSIDE the file (#1114 S3.2: the
+ *   effective platform and sdd values, from env and `.env`). Handed to `migrate` as
+ *   `helpers.axisContext`. `undefined` means the caller has none: the ADR-0038 migration then builds its own
+ *   (#1344, the older-upgrader case); `null` is the explicit env-blind opt-out and it does nothing.
+ * @returns {{ config: object, applied: string[], notices: string[] }}  `notices` are the lines
+ *   migrations asked to have shown (every value they wrote and where it came from).
  */
-export function migrateConfig(config, migrations, targetVersion) {
+export function migrateConfig(config, migrations, targetVersion, axisContext) {
   const from = config.schemaVersion ?? '0.0.0';
   let result = { ...config };
   const applied = [];
+  const notices = [];
   const ordered = [...migrations].sort((a, b) => compareSemver(a.version, b.version));
   for (const m of ordered) {
     const isAfterCurrent = compareSemver(m.version, from) > 0;
     const isWithinTarget = compareSemver(m.version, targetVersion) <= 0;
     if (!isAfterCurrent || !isWithinTarget) continue;
     if (typeof m.migrate === 'function') {
-      result = m.migrate(result, { mergeDefaults });
+      result = m.migrate(result, { mergeDefaults, axisContext, notice: (line) => notices.push(line) });
     } else if (m.defaults) {
       result = mergeDefaults(result, m.defaults);
     }
@@ -1555,7 +1561,7 @@ export function migrateConfig(config, migrations, targetVersion) {
   result.schemaVersion = compareSemver(targetVersion, result.schemaVersion ?? '0.0.0') > 0
     ? targetVersion
     : (result.schemaVersion ?? targetVersion);
-  return { config: result, applied };
+  return { config: result, applied, notices };
 }
 
 // ── Install URL resolution ─────────────────────────────────────────────────────

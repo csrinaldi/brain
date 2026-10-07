@@ -15,6 +15,12 @@
 // common additive case) OR { version, description, migrate(config, helpers) }
 // for renames / restructures. `defaults` is sugar for a pure additive merge.
 
+// #1344: shipped inside the package, next to the migrations it serves. The ADR-0038 migration must be
+// correct under ANY upgrader, including the OLDER one a consumer already has installed (it imports THIS
+// file from the incoming package but calls its own `migrateConfig`, which hands a migration no context),
+// so it builds its own from the same module the new upgrader uses.
+import { resolveAxisMigrationContext } from '../scripts/lib/axis-migration-context.mjs';
+
 export const migrations = [
   {
     version: '0.1.0',
@@ -224,7 +230,169 @@ export const migrations = [
       },
     },
   },
+  {
+    version: "1.11.1",
+    description:
+      "Move every axis to the ADR-0038 shape: { default, providers } for vcs, memory, platform " +
+      "and sdd (issue #1114 S3.2). No consumer changes behaviour: each default is the value that " +
+      "axis EFFECTIVELY resolves to today (process env, then .env, then the config's own key, " +
+      "then today's code default for platform and sdd; undeclared memory and vcs stay \"\"), and " +
+      "brain:upgrade prints every value it wrote with its source. No `version` is written, except " +
+      "the `brain` SDD provider's \"self\". A custom stage routed in sdd.map adds its runtime to " +
+      "platform.providers as {}, and cold-review gets sdd.roles['cold-review'] = " +
+      "{ agent: 'brain:cold-review', engine, model }. sdd.map and sdd.configs are not reshaped " +
+      "(#1132). The legacy keys (memory.backend, vcs.provider, engine, harness) STAY for the alias " +
+      "window: shell readers (install-tools.sh, bootstrap.sh), the brain-config scaffold and the " +
+      "brain:config verb still read or write them, and readAxis prefers the shape. The one key that " +
+      "cannot stay is the flat `platform` string, which is the same key as the new `platform` object. " +
+      "Also writes `locked: false` on memory, platform and sdd where none is stated, so no existing consumer is locked by an upgrade " +
+      "(ADR-0040, #1263); it never seeds governance.owners. " +
+      "Uses the axisContext migrateConfig hands it (brain-upgrade and brain:config build it from " +
+      "env and .env). With NONE (undefined) it builds its own from process.env and the repo's .env, " +
+      "and prints each value it wrote: an older upgrader, the one a consumer already has installed, " +
+      "hands it nothing (#1344). An explicit `axisContext: null` is the env-blind opt-out " +
+      "(buildDefaultConfig, brain:promote's proof, planConfigWrite's default) and changes nothing. " +
+      "Versioned 1.11.1, the smallest version above the shipped 1.11.0.",
+    migrate: migrateToAxisShape,
+  },
+  {
+    version: "1.12.1",
+    description:
+      "Repair a config stamped 1.12.0 without the ADR-0038 shape (issue #1344). Under the 1.11.0 " +
+      "upgrader, migration 1.11.1 changed nothing (it got no axisContext) while schemaVersion was " +
+      "still stamped 1.12.0, so those consumers carry no { default, providers } on one or more axes " +
+      "and, with no .env, `resolve platform` and `resolve sdd` exit 3. When any axis lacks the shape " +
+      "this applies the same shaping as 1.11.1 (the context is built from process.env and .env when " +
+      "none is handed in, and every value written is printed with its source); on a correctly " +
+      "shaped config it changes nothing and prints nothing. Idempotent. Versioned 1.12.1, the " +
+      "smallest version above the shipped 1.12.0.",
+    migrate: repairAxisShape,
+  },
 ];
+
+// ── 1.11.1: the ADR-0038 axis shape ─────────────────────────────────────────
+// Pure over (config, helpers.axisContext). The context carries the two values that live outside
+// the file (see brain/scripts/lib/axis-migration-context.mjs); everything else is read from the
+// config itself. `helpers.notice(line)` is optional: the caller that prints (brain:upgrade) gets
+// one line per value written.
+//
+// THE CONTEXT (#1344). `helpers.axisContext`:
+//   - an object        -> used as given (brain-upgrade, brain:config).
+//   - null             -> the EXPLICIT env-blind opt-out: the config is returned unchanged. For callers that
+//                         must never read env or `.env` (buildDefaultConfig, brain:promote's proof, planConfigWrite
+//                         when its caller gave none). It has to be explicit because...
+//   - undefined/absent -> ...an OLDER upgrader (1.11.0's `migrateConfig`) hands a migration `{ mergeDefaults }` and
+//                         nothing else, and that is exactly the case that must NOT be a no-op. The migration builds
+//                         the context itself (`helpers.buildAxisContext`, injectable; default: the same
+//                         `resolveAxisMigrationContext` the new upgrader uses, over `helpers.env` (default
+//                         process.env) and `helpers.root` (default process.cwd(), the consumer root under an
+//                         upgrader that does `const ROOT = process.cwd()`)). With no `helpers.notice` sink it prints
+//                         each value it writes with its source, the way the new upgrader does.
+function printingSink() {
+  let first = true;
+  return (line) => {
+    if (first) {
+      console.log('  \u2139  brain.config.json axis shape written by the config migration (value and where it came from):');
+      first = false;
+    }
+    console.log(`  \u2139    ${line}`);
+  };
+}
+
+const AXES = ['vcs', 'memory', 'platform', 'sdd'];
+const isShapeNode = (n) => n !== null && typeof n === 'object' && !Array.isArray(n) &&
+  (Object.prototype.hasOwnProperty.call(n, 'default') || Object.prototype.hasOwnProperty.call(n, 'providers'));
+
+// 1.12.1: the repair. Same shaping, gated on "some axis lacks the shape" so a correctly migrated config is untouched.
+function repairAxisShape(config, helpers = {}) {
+  if (helpers.axisContext === null) return config;
+  if (AXES.every((a) => isShapeNode(config?.[a]))) return config;
+  return migrateToAxisShape(config, helpers);
+}
+
+function migrateToAxisShape(config, helpers = {}) {
+  let ctx = helpers.axisContext;
+  if (ctx === null) return config;
+  let notice = helpers.notice;
+  if (!ctx) {
+    const build = typeof helpers.buildAxisContext === 'function'
+      ? helpers.buildAxisContext
+      : (cfg) => resolveAxisMigrationContext({ config: cfg, env: helpers.env ?? process.env, root: helpers.root ?? process.cwd() });
+    ctx = build(config);
+    if (typeof notice !== 'function') notice = printingSink();
+  }
+  const say = (line) => { if (typeof notice === 'function') notice(line); };
+  const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+  const has = (o, k) => isObj(o) && Object.prototype.hasOwnProperty.call(o, k);
+  const isShape = (n) => isObj(n) && (has(n, 'default') || has(n, 'providers'));
+  const text = (v) => (typeof v === 'string' ? v.trim() : '');
+  const perMachine = (source) => /^(process env|\.env)/.test(source);
+
+  const out = structuredClone(config);
+
+  const toShape = (axis, value, source) => {
+    if (isShape(out[axis])) return;
+    const node = isObj(out[axis]) ? out[axis] : {};
+    out[axis] = { ...node, default: value, providers: value ? { [value]: {} } : {} };
+    if (value === '') {
+      say(`${axis}.default = "" (undeclared: ${source}; declare it with: npm run brain:config -- set ${axis}.default <name>)`);
+    } else {
+      say(`${axis}.default = ${value} (from ${source})` +
+        (perMachine(source) ? ' - a per-machine value, now the team\'s tracked default' : ''));
+    }
+  };
+
+  toShape('memory', text(out.memory?.backend), 'brain.config.json memory.backend');
+  toShape('vcs', text(out.vcs?.provider), 'brain.config.json vcs.provider');
+  toShape('platform', ctx.platform.value, ctx.platform.source);
+  toShape('sdd', ctx.sdd.value, ctx.sdd.source);
+
+  // `locked: false` on every overridable axis that states no `locked` (ADR-0040 section 3, ratified point 6): an existing consumer's
+  // behaviour does not change, and an owner turns a lock on deliberately. A key already present (true or false) is never touched.
+  // `governance.owners` is NOT seeded here (ratified point 4): an existing consumer's owners are a decision its team makes.
+  const unlocked = [];
+  for (const axis of ['memory', 'platform', 'sdd']) {
+    if (isObj(out[axis]) && !has(out[axis], 'locked')) {
+      out[axis].locked = false;
+      unlocked.push(axis);
+    }
+  }
+  if (unlocked.length > 0) {
+    say(`${unlocked.map((a) => `${a}.locked`).join(', ')} = false (nothing changes for you: no axis is locked until an owner turns it on, ` +
+      'e.g. npm run brain:config -- set memory.locked true, in a PR; and declare who owns the team config: npm run brain:config -- set governance.owners <login>)');
+  }
+
+  // The `brain` SDD provider: what brain already runs, given a name. "self" is the one version a
+  // migration may write (ratified point 3): it is the package's own, not the machine's.
+  if (isObj(out.sdd.providers) && !has(out.sdd.providers, 'brain')) {
+    out.sdd.providers.brain = { version: 'self' };
+    say('sdd.providers.brain = {"version":"self"} (brain\'s own provider, declared on every consumer)');
+  }
+
+  // Routed engines (ADR-0038 section 7). A LIFECYCLE stage's engine is a framework and is never a
+  // platform provider; a CUSTOM stage's engine is a runtime and is.
+  const lifecycle = new Set(ctx.lifecycleStages ?? []);
+  const map = isObj(out.sdd.map) ? out.sdd.map : {};
+  // Every custom routed stage gets a role (ADR-0038 §4, maintainer ruling 2026-10-04): `cold-review` is
+  // `brain:cold-review`, any other custom stage `brain:stage`, brain's generic custom-stage runner. An existing role is kept.
+  for (const [stage, route] of Object.entries(map)) {
+    const engine = text(route?.engine);
+    if (lifecycle.has(stage)) continue;
+    if (engine && isObj(out.platform.providers) && !has(out.platform.providers, engine)) {
+      out.platform.providers[engine] = {};
+      say(`platform.providers.${engine} = {} (runtime routed by sdd.map["${stage}"].engine)`);
+    }
+    if (!has(out.sdd.roles, stage)) {
+      const role = { agent: stage === 'cold-review' ? 'brain:cold-review' : 'brain:stage' };
+      if (engine) role.engine = engine;
+      const model = text(route?.model);
+      if (model) role.model = model;
+      out.sdd.roles = { ...(isObj(out.sdd.roles) ? out.sdd.roles : {}), [stage]: role };
+      say(`sdd.roles["${stage}"] = ${JSON.stringify(role)} (from sdd.map["${stage}"])`);
+    }
+  }
+  return out;
+}
 
 // NOTE (issue #231 A2, human ruling in tasks.md/design.md): this entry is versioned
 // 0.7.0, NOT the 0.6.0 gap left by C4's removal of the never-shipped `memory.dualWrite`
@@ -256,6 +424,13 @@ export const migrations = [
 // migrations after it. mergeDefaults never overwrites a value already present, so
 // a fresh config is exactly "a consumer that declared lite before any migration
 // ran" — the same path a declared tier already takes through every upgrade.
+//
+// #1263 slice 3 (ADR-0040 section 3, ratified points 4 and 6): a NEW adoption also starts with `memory` and `sdd` LOCKED (the team's
+// records hydrate into one backend; the pipeline and its roles are the team's process) and `platform` free, and with an empty
+// `governance.owners` that `env:init` seeds from the adopter's login. An EXISTING consumer gets none of this from here: the 1.11.1
+// migration writes `locked: false` for it, so nothing it runs changes, and it never seeds an owner.
 export const NEW_CONSUMER_DEFAULTS = Object.freeze({
-  governance: Object.freeze({ tier: 'lite' }),
+  governance: Object.freeze({ tier: 'lite', owners: Object.freeze([]) }),
+  memory: Object.freeze({ locked: true }),
+  sdd: Object.freeze({ locked: true }),
 });

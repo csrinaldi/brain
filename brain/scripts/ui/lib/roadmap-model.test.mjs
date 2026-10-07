@@ -142,3 +142,26 @@ test('#882 cold review of PR #1037 (correction 2): an epic declaring another epi
   const grandparentRow = model.value.epics.find((e) => e.number === 40);
   assert.deepEqual(grandparentRow.divergences, [], 'the parent epic itself carries no divergence of its own');
 });
+
+// ── #1308: the roadmap rows read the same lifecycle ───────────────────────
+test('R1308-6: roadmap rows take the work index — a worktree-only issue is In flight on the roadmap too', () => {
+  const g = { ok: true, value: { nodes: [{ number: 1, title: 'a', status: 'unclassified', track: null, declared: false, blockedBy: [], kind: 'epic', roadmap: { ok: true, value: { state: 'planned' } } }, { number: 2, title: 'b', status: 'ready', track: 'UI', declared: true, blockedBy: [], parent: 1, roadmap: { ok: true, value: { state: 'planned' } } }], declarationDivergences: [] } };
+  const work = { missing: [], byIssue: new Map([[2, { issue: 2, changes: [], worktrees: [{ leaf: 'w' }], branches: [], prs: [] }]]) };
+  const r = buildRoadmapModel(g, { work }).value;
+  assert.equal(r.epics[0].children[0].state.code, 'in-flight');
+  assert.equal(r.epics[0].state.code, 'planned');
+});
+
+test('#1309 R1309-1: the Roadmap epic row reads the same state as the other shapes, with the rollup as its reason', () => {
+  const epic = node(10, { kind: 'epic' });
+  const kid = node(20, { parent: 10 });
+  const work = { missing: [], byIssue: new Map() };
+  const epics = {
+    hierarchy: { ok: true, value: { issues: [[10, { level: 'epic', levelSource: 'block', state: 'open', children: [20, 21] }], [20, { state: 'closed', children: [] }], [21, { state: 'open', children: [] }]], divergences: [], closedUnresolved: [], closedRead: { ok: true } } },
+    forgeLoad: { ok: true, value: { open: { state: 'complete', at: 'T' }, closed: { state: 'complete', at: 'T' } } },
+  };
+  const row = buildRoadmapModel(graph({ nodes: [epic, kid] }), { work, epics }).value.epics[0];
+  assert.equal(row.state.code, 'in-flight');
+  assert.equal(row.stateReason ?? row.state.reason, '1 / 2 children closed');
+  assert.equal(buildRoadmapModel(graph({ nodes: [epic, kid] }), { work }).value.epics[0].state.code, 'planned', 'no epics option is the legacy path (D135)');
+});

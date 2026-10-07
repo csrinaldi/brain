@@ -138,3 +138,7 @@ openspec/changes/*/scratch/
 # `.memory/chunks/`, `.claude/worktrees/` y `openspec/changes/*/scratch/` tienen
 # exactamente el mismo hueco. Éste es el quinto caso, no uno nuevo.
 openspec/reviews/
+
+# brain:promote proof files (#1346): written beside brain/core/config-migrations.mjs, removed in a finally,
+# but a killed run can leave one. This repo only: .gitignore is not a managed path, consumers never promote.
+brain/core/.brain-promote-proof-*

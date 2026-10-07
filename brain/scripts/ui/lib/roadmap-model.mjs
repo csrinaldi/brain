@@ -11,6 +11,7 @@
 // anywhere in the data): this is per-epic STATUS grouping only.
 
 import { stateOf, STATES } from './state-vocab.mjs';
+import { rollupFor } from './rollup-model.mjs';
 import { row } from './governance-model.mjs';
 import { issueUrl } from './forge-url.mjs';
 
@@ -26,9 +27,9 @@ const byNumber = (a, b) => a.number - b.number;
  * to the `unknown` vocabulary entry and SAYS why, so the other ninety rows
  * still draw (#882 cold review of PR #1037, correction 1).
  */
-function safeStateOf(node) {
+function safeStateOf(node, work, epics) {
   try {
-    return { state: stateOf(node), reason: null };
+    return { state: stateOf(node, work, rollupFor(node, epics)), reason: null };
   } catch (err) {
     return { state: STATES.unknown, reason: err?.message ?? String(err) };
   }
@@ -46,8 +47,8 @@ function safeStateOf(node) {
  * `sourceStamp`'s own honest "no source was recorded" stamp, when it is
  * not.
  */
-function roadmapRow(node, divergences, project) {
-  const { state, reason } = safeStateOf(node);
+function roadmapRow(node, divergences, project, work, epics) {
+  const { state, reason } = safeStateOf(node, work, epics);
   return row({
     title: node.title,
     detail: null,
@@ -95,7 +96,7 @@ function roadmapRow(node, divergences, project) {
  * @param {{ok:boolean, value?:{nodes:Array, declarationDivergences?:Array}, reason?:string}} graphSection
  * @param {{project?: string|null}} [options]
  */
-export function buildRoadmapModel(graphSection, { project = null } = {}) {
+export function buildRoadmapModel(graphSection, { project = null, work, epics: epicEvidence } = {}) {
   if (!graphSection || typeof graphSection !== 'object') return { ok: false, reason: 'no graph section was given to the roadmap' };
   if (graphSection.ok !== true) return { ok: false, reason: graphSection.reason };
 
@@ -121,9 +122,9 @@ export function buildRoadmapModel(graphSection, { project = null } = {}) {
     if (n.kind === 'epic') continue;
     const parentNode = n.parent === null || n.parent === undefined ? null : byNode.get(n.parent);
     if (parentNode && parentNode.kind === 'epic') {
-      childrenByEpic.get(parentNode.number).push(roadmapRow(n, divergencesFor(n.number), project));
+      childrenByEpic.get(parentNode.number).push(roadmapRow(n, divergencesFor(n.number), project, work, epicEvidence));
     } else {
-      unlinked.push(roadmapRow(n, divergencesFor(n.number), project));
+      unlinked.push(roadmapRow(n, divergencesFor(n.number), project, work, epicEvidence));
     }
   }
 
@@ -141,7 +142,7 @@ export function buildRoadmapModel(graphSection, { project = null } = {}) {
   const epics = sorted
     .filter((n) => n.kind === 'epic')
     .map((n) => ({
-      ...roadmapRow(n, [...divergencesFor(n.number), ...epicParentDivergence(n)], project),
+      ...roadmapRow(n, [...divergencesFor(n.number), ...epicParentDivergence(n)], project, work, epicEvidence),
       children: childrenByEpic.get(n.number),
     }));
 

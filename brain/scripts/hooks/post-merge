@@ -1,19 +1,21 @@
 #!/usr/bin/env sh
-# post-merge — best-effort engram re-import after a pull/merge (issue #59 / ADR-0002).
+# post-merge — best-effort hydration of the active memory backend after a pull/merge (issue #59 / ADR-0002, #1115).
 #
 # Triggered automatically by git after:
 #   - git pull (when it results in a merge or fast-forward)
 #   - git merge
 #
-# Purpose: re-import .memory/ into local engram after git has integrated new commits,
-# so that memory chunks committed upstream are immediately available in local engram.
+# Purpose: hydrate the ACTIVE memory backend from .memory/records/ after git has integrated
+# new commits, so that records committed upstream are immediately available to it (engram:
+# projected into its store; plainfiles: the derived index is rebuilt — this is the caller that
+# is allowed to write it, session:start only verifies).
 #
-# Uses "import" (import-only, no git pull) because git itself already completed
-# the merge/pull before this hook fires. Running another git pull here would be
+# Uses "hydrate" (no git pull) because git itself already completed
+# the merge/pull before this hook fires. `import` is its deprecated alias (removed by #1351). Running another git pull here would be
 # redundant (extra network call) and risks infinite recursion on some git versions.
 #
 # Behaviour:
-#   - Non-blocking (|| true): a failed import NEVER aborts the merge/pull.
+#   - Non-blocking (|| true): a failed or DEFERRED (exit 6) hydration NEVER aborts the merge/pull.
 #   - No node required for the guard — we call node only when it is available.
 #   - Mirrors the defensive style of the pre-push hook.
 #
@@ -41,20 +43,21 @@ command -v node >/dev/null 2>&1 || exit 0
 
 repo_root=$(git rev-parse --show-toplevel)
 
-# Re-import .memory/ into local engram now that the working tree is up-to-date.
-# Uses "import" verb (engram sync --import only — no redundant git pull).
-# || true: a failed import is informational, not a merge blocker.
+# Hydrate the active backend from .memory/records/ now that the working tree is up-to-date.
+# Uses the backend-owned "hydrate" verb (no redundant git pull; no backend named here).
+# A failed import is informational, not a merge blocker.
 #
 # stdout is discarded (the per-run progress line is noise on every pull), but
-# STDERR is not. A hydration that SKIPPED because engram's state was unreadable
-# reports there, and swallowing it would make the skip as invisible as the
-# duplication it replaced. `|| true` still guarantees it cannot block the merge.
+# STDERR is not. A hydration that SKIPPED or was DEFERRED (exit 6: binary absent, guard
+# contended, state unreadable) reports its reason there, and swallowing it would make the
+# skip as invisible as the duplication it replaced. Exit 6 is NOT fatal and not special-cased:
+# the hook never blocks a merge, and the reason is already on stderr.
 _pm_rc=0
-node "$repo_root/brain/scripts/memory/cli.mjs" import >/dev/null || _pm_rc=$?
-# Exit 3/4 is the memory backend declaration refusal (#1165): nothing was imported because
+node "$repo_root/brain/scripts/memory/cli.mjs" hydrate >/dev/null || _pm_rc=$?
+# Exit 3/4 is the memory backend declaration refusal (#1165): nothing was hydrated because
 # nothing was attempted. Non-blocking still — one line says so instead of silence.
 if [ "$_pm_rc" -eq 3 ] || [ "$_pm_rc" -eq 4 ]; then
-  echo "post-merge: memory import skipped — memory backend not declared or invalid (npm run brain:config -- set memory.backend engram|plainfiles)" >&2
+  echo "post-merge: memory hydration skipped — memory backend not declared or invalid (npm run brain:config -- set memory.backend engram|plainfiles)" >&2
 fi
 
 # Keep the derived index canonical after a merge git resolved on its own

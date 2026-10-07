@@ -8,11 +8,11 @@
 // `.memory/records/<one record>.jsonl`, injects every seam not under test,
 // and ends with `assertOnlyRecordsAndIndex(root)`.
 //
-// The plainfiles `import` leg proves R12 by named-refusal vacuity (D5,
-// ratified 2026-09-14, engram `sdd/artifact-retirement/design-decisions`):
-// plainfiles has no `importMemory`, so `cli.mjs` refuses by name — this leg
-// asserts that refusal and an untouched tree, never adding
-// `plainfiles.importMemory`.
+// The plainfiles `hydrate` leg proves R12 for real since #1115: plainfiles implements the bulk
+// `hydrate` verb (a `rebuildIndex`), so `cli.mjs hydrate` and its deprecated alias `import` EXIT 0 and
+// leave only records and the derived index; the read-only `--verify` form leaves the tree
+// byte-identical. (This leg used to prove R12 by named-refusal vacuity, D5 of #955 — that retired
+// with the refusal.)
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -29,7 +29,7 @@ import { share as plainfilesShare, pull as plainfilesPull } from './adapters/pla
 import { share as engramShare, pullMemory as engramPullMemory, importMemory } from './adapters/engram.mjs';
 import { runSessionStart, resolveSessionStrings } from '../../session-start.mjs';
 
-const CLI_PATH = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'memory', 'cli.mjs');
+const CLI_PATH = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'memory', 'cli.mjs'); const MEMORY_TEST_CONFIG = join(dirname(CLI_PATH), '__fixtures__', 'brain.config.memory.json');
 
 /** Builds a fresh temp root with exactly one seeded record under `.memory/records/`. */
 function fixtureWithOneRecord(prefix) {
@@ -79,7 +79,7 @@ function walkTree(root) {
 // session:start — backend-agnostic, runs once
 // ---------------------------------------------------------------------------
 
-test('no-artifact parity: session:start hydrates with no manifest operation — only memory/cli.mjs import reaches the spawn seam', async () => {
+test('no-artifact parity: session:start hydrates with no manifest operation — only memory/cli.mjs hydrate --verify reaches the spawn seam', async () => {
   const { root } = fixtureWithOneRecord('parity-session-');
   const calls = [];
   const _spawn = (cmd, args) => { calls.push(args); return { status: 0, stdout: '' }; };
@@ -94,7 +94,7 @@ test('no-artifact parity: session:start hydrates with no manifest operation — 
   assert.equal(result.exitCode, 0);
   assert.equal(calls.length, 1, `expected exactly one spawn call, got: ${JSON.stringify(calls)}`);
   assert.ok(typeof calls[0][0] === 'string' && calls[0][0].includes('memory/cli.mjs'));
-  assert.equal(calls[0][1], 'import');
+  assert.deepEqual(calls[0].slice(1), ['hydrate', '--verify'], 'session:start verifies read-only (#1115, Q1)');
 
   assertOnlyRecordsAndIndex(root);
 });
@@ -153,7 +153,7 @@ test('no-artifact parity: pull hydrates via git-pull-then-reindex alone on both 
 // import — engram (real hydration) and plainfiles (named refusal, D5)
 // ---------------------------------------------------------------------------
 
-test('no-artifact parity: import — engram hydrates the one record from records/ alone; plainfiles refuses by name, tree untouched (D5)', async () => {
+test('no-artifact parity: hydrate — engram hydrates the one record from records/ alone; plainfiles hydrates and verifies from records/ alone (#1115)', async () => {
   {
     const { root, rec } = fixtureWithOneRecord('parity-import-engram-');
     let writtenTopicKey = null;
@@ -170,15 +170,24 @@ test('no-artifact parity: import — engram hydrates the one record from records
     assert.equal(writtenTopicKey, rec.id, 'the record\'s own content-addressed id becomes the engram topic_key');
     assertOnlyRecordsAndIndex(root);
   }
+  const runCli = (root, args) => spawnSync(process.execPath, [CLI_PATH, ...args], {
+    encoding: 'utf8',
+    timeout: 60_000,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    env: { ...process.env, MEMORY_BACKEND: 'plainfiles', BRAIN_MEMORY_CONFIG_FILE: MEMORY_TEST_CONFIG, BRAIN_MEMORY_TEST_ROOT: root },
+  });
+  for (const op of ['hydrate', 'import']) {
+    const { root } = fixtureWithOneRecord(`parity-${op}-plainfiles-`);
+    const r = runCli(root, [op]);
+    assert.equal(r.status, 0, `plainfiles ${op} must succeed; stdout:\n${r.stdout}\nstderr:\n${r.stderr}`);
+    assert.doesNotMatch(r.stderr, /does not implement/);
+    assertOnlyRecordsAndIndex(root);
+  }
   {
-    const { root } = fixtureWithOneRecord('parity-import-plainfiles-');
+    const { root } = fixtureWithOneRecord('parity-verify-plainfiles-');
     const before = walkTree(root);
-    const r = spawnSync(process.execPath, [CLI_PATH, 'import'], {
-      encoding: 'utf8',
-      env: { ...process.env, MEMORY_BACKEND: 'plainfiles', BRAIN_MEMORY_TEST_ROOT: root },
-    });
-    assert.equal(r.status, 1, `plainfiles import must refuse (D5); stdout:\n${r.stdout}\nstderr:\n${r.stderr}`);
-    assert.match(r.stderr, /backend 'plainfiles' does not implement op 'import'/);
-    assert.deepEqual(walkTree(root), before, 'the refusal must leave the tree untouched');
+    const r = runCli(root, ['hydrate', '--verify']);
+    assert.equal(r.status, 0, `${r.stdout}\n${r.stderr}`);
+    assert.deepEqual(walkTree(root), before, 'the read-only form must leave the tree byte-identical');
   }
 });

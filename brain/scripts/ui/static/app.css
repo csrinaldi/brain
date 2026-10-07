@@ -15,6 +15,7 @@
      defined here; the dark palette below redefines the same names and
      nothing else, so a token never has its only definition in a media
      query. The values here are the page's colours before #998, unchanged. */
+  color-scheme: light;
   --font-sans: ui-sans-serif, system-ui, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
   /* #1059 phase 1: the light palette is the design's own slate ramp read for a
@@ -43,9 +44,9 @@
   --state-planned-fg: #1b1b1f;        --state-planned-bg: #eef1f8;
   --state-in-flight-fg: #1b1b1f;      --state-in-flight-bg: #d8ecff;
   --state-done-fg: #1b1b1f;           --state-done-bg: #d9f2e0;
+  --state-ready-to-close-fg: #1b1b1f; --state-ready-to-close-bg: #e3dcff;
   --state-blocked-fg: #1b1b1f;        --state-blocked-bg: #ffd9d4;
   --state-awaiting-review-fg: #1b1b1f; --state-awaiting-review-bg: #ffe9b8;
-  --state-unclassified-fg: #1b1b1f;     --state-unclassified-bg: #ececf2;
   --state-unreadable-fg: #1b1b1f;     --state-unreadable-bg: #f3e3f6;
   --state-not-computed-fg: #1b1b1f;   --state-not-computed-bg: #ffffff;
   --state-unknown-fg: #8a4b00;        --state-unknown-bg: #ffffff;
@@ -74,6 +75,7 @@
    defined for the first time inside one of these blocks. */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) {
+    color-scheme: dark;
     --ink: #f1f5f9;
     --muted: #94a3b8;
     --line: rgba(255, 255, 255, 0.08);
@@ -91,9 +93,9 @@
     --state-planned-fg: #64748b;        --state-planned-bg: #1e293b;
     --state-in-flight-fg: #06b6d4;      --state-in-flight-bg: #083344;
     --state-done-fg: #6366f1;           --state-done-bg: #1e1b4b;
+    --state-ready-to-close-fg: #c4b5fd; --state-ready-to-close-bg: #2e1065;
     --state-blocked-fg: #fb7185;        --state-blocked-bg: #4c0519;
     --state-awaiting-review-fg: #f59e0b; --state-awaiting-review-bg: #451a03;
-    --state-unclassified-fg: #d97706;     --state-unclassified-bg: #2d1f03;
     --state-unreadable-fg: #d946ef;     --state-unreadable-bg: #3b0764;
     --state-not-computed-fg: #475569;   --state-not-computed-bg: #0f172a;
     --state-unknown-fg: #fbbf24;        --state-unknown-bg: #0f172a;
@@ -106,6 +108,7 @@
 }
 
 :root[data-theme='dark'] {
+    color-scheme: dark;
     --ink: #f1f5f9;
     --muted: #94a3b8;
     --line: rgba(255, 255, 255, 0.08);
@@ -123,9 +126,9 @@
     --state-planned-fg: #64748b;        --state-planned-bg: #1e293b;
     --state-in-flight-fg: #06b6d4;      --state-in-flight-bg: #083344;
     --state-done-fg: #6366f1;           --state-done-bg: #1e1b4b;
+    --state-ready-to-close-fg: #c4b5fd; --state-ready-to-close-bg: #2e1065;
     --state-blocked-fg: #fb7185;        --state-blocked-bg: #4c0519;
     --state-awaiting-review-fg: #f59e0b; --state-awaiting-review-bg: #451a03;
-    --state-unclassified-fg: #d97706;     --state-unclassified-bg: #2d1f03;
     --state-unreadable-fg: #d946ef;     --state-unreadable-bg: #3b0764;
     --state-not-computed-fg: #475569;   --state-not-computed-bg: #0f172a;
     --state-unknown-fg: #fbbf24;        --state-unknown-bg: #0f172a;
@@ -137,6 +140,16 @@
   }
 
 * { box-sizing: border-box; }
+
+/* #1311 D118: an element nobody styled keeps the UA colour (black text on the
+   dark surface, #0000EE links). Element selectors have the lowest specificity,
+   so every class rule below still wins; this only fills what none of them set. */
+button, select, input {
+  color: var(--ink);
+  background: var(--surface);
+  border-color: var(--line);
+}
+a { color: var(--accent); }
 
 /* #1059 phase 2 — the app shell the design draws: a full-height column on the
    ground colour, so the page IS the application rather than a document that
@@ -158,7 +171,8 @@ body {
 .status-bar {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  overflow: hidden;
   gap: 8px 14px;
   padding: 10px 20px;
   border-bottom: 1px solid var(--line);
@@ -166,7 +180,17 @@ body {
   font-family: var(--font-mono);
   font-size: 11px;
 }
+/* #1284 D100: one line. What can grow long truncates (its full text is its title); the rest never shrinks. */
+.status-bar .served-branch, .status-bar .poll-indicator, .status-bar .status-epic, .status-bar .status-counts {
+  min-width: 0;
+  flex: 0 1 auto;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.status-bar .status-live, .status-bar .poll-countdown, .status-bar .theme-choice, .status-bar button, .status-bar .source, .status-bar .source-chip { flex: none; }
 .status-bar .title {
+  flex: none;
   font-family: var(--font-mono);
   font-weight: 600;
   letter-spacing: 0.08em;
@@ -222,7 +246,6 @@ body {
   background: var(--live);
 }
 .status-bar .status-epic { font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
-.status-bar .status-epic-reason { font-size: 11px; color: var(--stamp); max-width: 46ch; }
 .status-bar .status-counts {
   display: inline-flex;
   align-items: baseline;
@@ -342,10 +365,10 @@ body {
 .roadmap-state { font-size: 11px; padding: 1px 6px; border-radius: 4px; }
 .roadmap-state.state-planned { color: var(--state-planned-fg); background: var(--state-planned-bg); }
 .roadmap-state.state-in-flight { color: var(--state-in-flight-fg); background: var(--state-in-flight-bg); }
+.roadmap-state.state-ready-to-close { color: var(--state-ready-to-close-fg); background: var(--state-ready-to-close-bg); }
 .roadmap-state.state-done { color: var(--state-done-fg); background: var(--state-done-bg); }
 .roadmap-state.status-blocked { color: var(--state-blocked-fg); background: var(--state-blocked-bg); }
 .roadmap-state.status-awaiting-review { color: var(--state-awaiting-review-fg); background: var(--state-awaiting-review-bg); }
-.roadmap-state.status-unclassified { color: var(--state-unclassified-fg); background: var(--state-unclassified-bg); }
 .roadmap-state.status-unreadable { color: var(--state-unreadable-fg); background: var(--state-unreadable-bg); }
 .roadmap-state.roadmap-not-computed { color: var(--state-not-computed-fg); background: var(--state-not-computed-bg); }
 .roadmap-state.node-unknown { color: var(--state-unknown-fg); background: var(--state-unknown-bg); }
@@ -355,7 +378,6 @@ body {
    riding beside the table, never instead of it ── */
 
 .decision-row { margin-bottom: 14px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; }
-.decision-title { display: block; }
 .decision-status { display: inline-block; margin-top: 4px; font-size: 11px; padding: 1px 6px; border-radius: 4px; background: var(--surface); color: var(--muted); }
 .decision-amendments { margin: 6px 0 0 18px; padding: 0; font-size: 12px; }
 .decision-issues, .decision-supersedes, .decision-superseded-by { margin: 6px 0 0; font-size: 12px; color: var(--muted); }
@@ -369,7 +391,6 @@ body {
 
 .anti-pattern-row { margin-bottom: 14px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; }
 .anti-pattern-scope { display: inline-block; margin-right: 6px; font-size: 11px; padding: 1px 6px; border-radius: 4px; background: var(--surface); color: var(--muted); }
-.anti-pattern-title { display: inline-block; }
 .anti-pattern-issues { margin: 6px 0 0; font-size: 12px; color: var(--muted); }
 .anti-pattern-unlistable { margin-top: 10px; padding: 8px 10px; border: 1px dashed var(--divergence-fg); border-radius: 6px; background: var(--divergence-bg); }
 .anti-pattern-unlistable .said { margin: 0; color: var(--divergence-fg); }
@@ -422,11 +443,11 @@ body {
 
 .node.state-planned rect { fill: var(--state-planned-bg); }
 .node.state-in-flight rect { fill: var(--state-in-flight-bg); }
+.node.state-ready-to-close rect { fill: var(--state-ready-to-close-bg); }
 .node.state-done rect { fill: var(--state-done-bg); }
 .node.status-ready rect { fill: var(--state-planned-bg); } /* never returned by state-vocab; kept so the class stays defined */
 .node.status-blocked rect { fill: var(--state-blocked-bg); }
 .node.status-awaiting-review rect { fill: var(--state-awaiting-review-bg); }
-.node.status-unclassified rect { fill: var(--state-unclassified-bg); stroke-dasharray: 4 3; }
 .node.status-unreadable rect { fill: var(--state-unreadable-bg); stroke-dasharray: 2 2; }
 .node.roadmap-not-computed rect { fill: var(--state-not-computed-bg); stroke-dasharray: 6 3; }
 .node.node-unknown rect { fill: var(--state-unknown-bg); stroke: var(--state-unknown-fg); stroke-dasharray: 1 3; }
@@ -508,16 +529,25 @@ body {
 .drawer {
   width: min(470px, 100%);
   flex: none;
-  overflow: auto;
+  /* #1307 D119: pinned to the viewport, not stretched to the page's height. */
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+  max-height: 100vh;
+  overflow: hidden;
   padding: 0;
   border-left: 1px solid var(--line);
   background: var(--surface);
   display: flex;
   flex-direction: column;
 }
+/* #1307 D120: the head (id line and tab bar) is outside the scroller; the body scrolls. */
+.drawer-body { flex: 1; min-height: 0; overflow: auto; }
+.drawer .drawer-head .tabs { flex: 1 0 100%; padding: 0; margin: 0; } /* (0,3,0): beats the later .drawer .tabs rules, #1307 D122 */
 @media (max-width: 760px) {
   .workspace { flex-direction: column; }
-  .drawer { width: 100%; border-left: 0; border-top: 1px solid var(--line); }
+  .drawer { width: 100%; border-left: 0; border-top: 1px solid var(--line); position: static; max-height: none; overflow: visible; }
+  .drawer-body { overflow: visible; }
 }
 .drawer[hidden] { display: none; }
 .drawer h2 { margin: 0 0 8px; font-size: 16px; }
@@ -615,6 +645,43 @@ body {
   border-radius: 4px;
   font-size: 10.5px;
 }
+/* The track chip (#1308): a different fact from the lifecycle chip, drawn beside it. The missing-configuration
+   chip is a WARNING in the page's warning colour (outlined, so it never reads as one more lifecycle state). */
+.track-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--stamp);
+  white-space: nowrap;
+}
+.track-chip.track-undeclared, .legend-item.track-undeclared { color: var(--warn); }
+.track-chip.track-undeclared { border-color: var(--warn); background: var(--warn-bg); font-weight: 600; }
+.node-card-head { flex-wrap: wrap; justify-content: flex-start; }
+.node-card-head .node-number { margin-right: auto; }
+.batch-tile .node-state, .batch-tile .track-chip { margin-top: 5px; margin-right: 4px; }
+.legend-group { display: inline-flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; }
+.legend-group + .legend-group { padding-left: 12px; border-left: 1px solid var(--line); }
+.legend-group-label { color: var(--stamp); font-size: 10px; text-transform: uppercase; letter-spacing: .04em; }
+.declare-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 8px 0;
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: var(--paper);
+  border: 1px solid var(--warn);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.declare-label { color: var(--warn); font-weight: 600; }
+.declare-block code { color: var(--accent); white-space: pre-wrap; word-break: break-word; user-select: all; }
+.declare-note { margin: 0; color: var(--muted); }
 .node-title {
   margin: 0;
   font-size: 13px;
@@ -636,14 +703,14 @@ body {
 .node-state.state-planned { background: var(--state-planned-bg); }
 .node-state.state-in-flight, .legend-item.state-in-flight { color: var(--state-in-flight-fg); }
 .node-state.state-in-flight { background: var(--state-in-flight-bg); }
+.node-state.state-ready-to-close, .legend-item.state-ready-to-close { color: var(--state-ready-to-close-fg); }
+.node-state.state-ready-to-close { background: var(--state-ready-to-close-bg); }
 .node-state.state-done, .legend-item.state-done { color: var(--state-done-fg); }
 .node-state.state-done { background: var(--state-done-bg); }
 .node-state.state-blocked, .legend-item.state-blocked { color: var(--state-blocked-fg); }
 .node-state.state-blocked { background: var(--state-blocked-bg); }
 .node-state.state-awaiting-review, .legend-item.state-awaiting-review { color: var(--state-awaiting-review-fg); }
 .node-state.state-awaiting-review { background: var(--state-awaiting-review-bg); }
-.node-state.state-unclassified, .legend-item.state-unclassified { color: var(--state-unclassified-fg); }
-.node-state.state-unclassified { background: var(--state-unclassified-bg); }
 .node-state.state-unreadable, .legend-item.state-unreadable { color: var(--state-unreadable-fg); }
 .node-state.state-unreadable { background: var(--state-unreadable-bg); }
 .node-state.state-not-computed, .legend-item.state-not-computed { color: var(--state-not-computed-fg); }
@@ -682,6 +749,8 @@ body {
 .remote-work-row, .remote-unjoined-row { margin: 2px 0; word-break: break-all; }
 .remote-work-reason { display: block; }
 .remote-unjoined-toggle { font: inherit; font-size: 12px; cursor: pointer; border: 1px solid var(--line); background: var(--paper); color: var(--ink); padding: 2px 8px; }
+.local-block { margin: 10px 0; padding: 8px 10px; border: 1px solid var(--line); border-left: 3px solid var(--accent); }
+.local-block-label { font-family: var(--font-mono); font-size: 12px; word-break: break-all; }
 .remote-block { margin: 10px 0; padding: 8px 10px; border: 1px solid var(--line); border-left: 3px solid var(--accent); }
 .remote-block-label { font-family: var(--font-mono); font-size: 12px; word-break: break-all; }
 .remote-byline { margin: 2px 0 6px; font-size: 12px; color: var(--muted); }
@@ -884,12 +953,11 @@ body {
   padding: 12px 16px;
   border-bottom: 1px solid var(--line);
   background: var(--paper);
-  position: sticky;
-  top: 0;
+  flex: none;
+  flex-wrap: wrap;
 }
 .drawer-id { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-family: var(--font-mono); font-size: 11px; }
 .drawer-number { color: var(--accent); font-weight: 700; font-size: 12px; }
-.drawer-track { color: var(--stamp); }
 .drawer-forge { color: var(--accent); text-decoration: none; }
 .drawer-forge:hover { text-decoration: underline; }
 .drawer .close {
@@ -911,7 +979,7 @@ body {
   line-height: 1.35;
   color: var(--ink);
 }
-.drawer .tabs, .drawer > .note, .drawer > .said, .drawer > div { padding-left: 16px; padding-right: 16px; }
+.drawer .tabs, .drawer-body > .note, .drawer-body > .said, .drawer-body > div { padding-left: 16px; padding-right: 16px; }
 .drawer .tabs { padding-top: 12px; flex-wrap: wrap; }
 .drawer .tabs button {
   font-family: var(--font-mono);
@@ -1250,6 +1318,45 @@ body {
 }
 .memory-source { color: var(--muted); }
 
+/* What a record says (#1313): the title is the row's toggle, the excerpt is one
+   quiet line of plain text, the id stays as the stable handle. The stack is a
+   div inside the cell: a display on the <td> itself would break the table. */
+.memory-record {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+}
+.memory-toggle {
+  display: block;
+  max-width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-weight: 600;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.memory-toggle:hover .memory-record-title { text-decoration: underline; }
+.memory-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.memory-toggle[aria-expanded="true"] .memory-record-title { color: var(--accent); }
+.memory-record-excerpt {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.memory-detail > td {
+  padding: 0 10px 10px;
+  background: var(--surface);
+}
+
 /* The file a stage IS, beside its name in the panel's stage strip (#1059). */
 .stage-file {
   font-family: var(--font-mono);
@@ -1364,13 +1471,16 @@ body {
   flex: 1;
   min-width: 0;
 }
-.epic-track,
 .epic-count {
   font-size: 11px;
   color: var(--muted);
   font-family: var(--font-mono);
   white-space: nowrap;
 }
+.epic-count { white-space: normal; text-align: right; }
+.epic-rollup, .tab-progress, .tab-from { margin: 0 0 6px; font-size: 12px; font-family: var(--font-mono); }
+.epic-rollup { color: var(--ink); }
+.tab-progress, .tab-from { color: var(--muted); }
 .epic-tracker {
   display: flex;
   flex-wrap: wrap;
@@ -1410,3 +1520,22 @@ body {
   font-size: 11px;
   color: var(--accent);
 }
+
+/* ── #1284: the in-flight section above the lanes ────────────────────────── */
+.inflight { margin: 0 0 16px; padding: 12px 14px; border: 1px solid var(--line); background: var(--surface); }
+.inflight-title-bar { margin: 0 0 8px; font-size: 13px; }
+.inflight-notice, .inflight-empty { margin: 4px 0; }
+.inflight-row { display: flex; align-items: baseline; gap: 4px 12px; flex-wrap: wrap; padding: 5px 0; border-top: 1px solid var(--line); cursor: pointer; font-family: var(--font-mono); font-size: 11px; }
+.inflight-number { font-weight: 600; color: var(--accent); }
+.inflight-title { font-family: var(--font-body, inherit); font-size: 12px; }
+.inflight-state { color: var(--warn); }
+.inflight-facts { color: var(--muted); word-break: break-all; }
+.inflight-age { margin-left: auto; color: var(--stamp); font-variant-numeric: tabular-nums; }
+.inflight-stale-toggle { margin-top: 8px; font: inherit; font-size: 12px; cursor: pointer; border: 1px solid var(--line); background: var(--paper); color: var(--ink); padding: 2px 8px; }
+
+/* The review footer (#1312): wraps rather than ellipsises — a clipped "origin tip here" would hide the very fact that a head differs; the title adds the full SHAs. */
+.node-review { margin: 0; padding-top: 6px; font-family: var(--font-mono); font-size: 10px; color: var(--muted); word-break: break-word; }
+.node-review.verdict-approve { color: var(--state-done-fg); }
+.node-review.verdict-revise { color: var(--state-awaiting-review-fg); }
+.node-review.verdict-stop { color: var(--state-blocked-fg); }
+.node-review.verdict-unknown { color: var(--stamp); font-style: italic; }

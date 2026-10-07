@@ -30,10 +30,12 @@ export const AGENT_RUNTIME = null;
  * plain backend init: emit the manual-flow manifest. Zero AI provider, zero
  * network, zero tool beyond the repo's own npm verbs.
  * @param {{ _emit?: (line: string) => void }} [opts] Injectable sink (default console.log).
+ * @returns {Promise<{ok: true}>} Every platform answers `{ok, ...}`; this one writes nothing, so it cannot fail (#1128).
  */
 export async function init({ _emit = console.log } = {}) {
   _emit('SDD_HARNESS=plain — manual flow (no AI). Run these npm verbs in sequence:');
   MANUAL_FLOW_STEPS.forEach((step, i) => _emit(`  ${i + 1}. ${step}`));
+  return { ok: true };
 }
 
 /**

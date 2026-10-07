@@ -23,9 +23,12 @@ import { fileURLToPath } from 'node:url';
 /** The axes `harness/backends/` used to hold, in lookup order. */
 export const HARNESS_ADAPTER_AXES = Object.freeze(['platform', 'sdd-engine', 'review-engine']);
 
+/** The shipped `axes/` tree. A fixture injects its own `base` (issue #1128, ruling 8). */
+const DEFAULT_BASE = new URL('../', import.meta.url);
+
 /** The adapters directory of one harness axis, as a URL ending in `/`. */
-export function harnessAdapterDir(axis) {
-  return new URL(`../${axis}/adapters/`, import.meta.url);
+export function harnessAdapterDir(axis, { base = DEFAULT_BASE } = {}) {
+  return new URL(`${axis}/adapters/`, base);
 }
 
 /**
@@ -34,9 +37,10 @@ export function harnessAdapterDir(axis) {
  * the import fails with the same module-not-found error it always did.
  *
  * @param {string} name A backend name, e.g. `claude`, `gentle-ai`, `codex`.
+ * @param {{ base?: URL }} [opts] An `axes/`-shaped tree to search instead of the shipped one.
  * @returns {URL}
  */
-export function harnessAdapterUrl(name) {
-  const candidates = HARNESS_ADAPTER_AXES.map((axis) => new URL(`${name}.mjs`, harnessAdapterDir(axis)));
+export function harnessAdapterUrl(name, { base = DEFAULT_BASE } = {}) {
+  const candidates = HARNESS_ADAPTER_AXES.map((axis) => new URL(`${name}.mjs`, harnessAdapterDir(axis, { base })));
   return candidates.find((url) => existsSync(fileURLToPath(url))) ?? candidates[0];
 }

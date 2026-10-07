@@ -45,7 +45,7 @@ function createMockBin({ callLog, fakeRepoRoot, checkpointCode = 0, includeNode 
 function runHook(bin, args = ['refs/heads/main', 'refs/heads/feature'], input = '') {
   return spawnSync('sh', [HOOK_PATH, ...args], {
     input,
-    env: { PATH: `${bin}:${SAFE_SYSTEM_PATH}`, HOME: process.env.HOME ?? '/tmp' },
+    env: { PATH: `${bin}:${SAFE_SYSTEM_PATH}`, HOME: process.env.HOME ?? '/tmp', BRAIN_HOME: process.env.BRAIN_HOME || '/nonexistent/brain-home' },
     encoding: 'utf8',
     timeout: 5000,
   });

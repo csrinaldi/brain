@@ -18,6 +18,8 @@ this system. `brain/core/` is upstream and treated as read-only here.
 - [SDD canonical layout](core/methodology/sdd-layout.md) — normative openspec/changes/** layout: naming, required artifacts, operational artifacts, single-source accessor
 - [VCS contract](core/methodology/vcs-contract.md) — abstract VCS verbs any provider must implement
 - [Memory backend contract](core/methodology/memory-backend-contract.md) — the four required verbs, three rules and the agnosticism test any memory backend must satisfy
+- [Agent-platform contract](core/methodology/agent-platform-contract.md) — what a platform adapter declares and implements so a new platform is one adapter plus config
+- [Review-engine contract](core/methodology/review-engine-contract.md) — what a cold-review engine declares and implements so the runner names no engine
 - [Feature-working-memory contract](core/methodology/feature-working-memory-contract.md) — resume.md schema + checkpoint/resume verbs
 - [Memory record format](core/methodology/memory-format.md) — the brain-owned durable .memory/ record format
 - [Workflow governance](core/methodology/workflow-governance.md) — invariants, CI gates, lockout recovery

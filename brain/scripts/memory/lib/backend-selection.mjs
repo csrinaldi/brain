@@ -86,11 +86,10 @@ export const ENGRAM_BIN = "engram";
  *     behaviour rather than repairing a failure" mistake `setup`'s own
  *     history already names above.
  *
- * `import` IS genuinely blocked, and is still excluded — but on its own ground:
- * `plainfiles` has no `importMemory` at all, so substituting would trade
- * "engram binary not found", which names the actual fix, for "backend
- * 'plainfiles' does not implement op 'import'", which names a backend the
- * caller never chose. `index` and `feature-*` project into engram's own store
+ * `hydrate` (and its deprecated alias `import`, rewritten to it by the dispatcher, #1115) is
+ * excluded on its own ground: engram's bulk `hydrate` DEFERS without its binary (exit 6, naming
+ * `gentle-ai install`), which is the honest answer. Substituting plainfiles would report a
+ * successful records-only rebuild for a hydration the caller declared into engram. `index` and `feature-*` project into engram's own store
  * and are excluded for the same reason plus never failing on the binary.
  */
 export const FALLBACK_OPS = Object.freeze(["pull"]);

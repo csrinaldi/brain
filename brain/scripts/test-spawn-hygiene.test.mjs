@@ -321,6 +321,7 @@ const ALLOWLIST = [
   // ── memory cli.mjs ops OTHER than ship never import vcs/cli.mjs at all ──
   { file: 'brain/scripts/memory/cli.audit.test.mjs', entrypoint: 'brain/scripts/memory/cli.mjs', reason: 'no-vcs-capability' },
   { file: 'brain/scripts/memory/cli.backend-fallback.test.mjs', entrypoint: 'brain/scripts/memory/cli.mjs', reason: 'no-vcs-capability' },
+  { file: 'brain/scripts/memory/cli.hydrate.test.mjs', entrypoint: 'brain/scripts/memory/cli.mjs', reason: 'no-vcs-capability' },
   { file: 'brain/scripts/memory/cli.collect.test.mjs', entrypoint: 'brain/scripts/memory/cli.mjs', reason: 'no-vcs-capability' },
   { file: 'brain/scripts/memory/cli.heal-duplicates.test.mjs', entrypoint: 'brain/scripts/memory/cli.mjs', reason: 'no-vcs-capability' },
   { file: 'brain/scripts/memory/cli.migrate-v1.test.mjs', entrypoint: 'brain/scripts/memory/cli.mjs', reason: 'no-vcs-capability' },
@@ -338,6 +339,7 @@ const ALLOWLIST = [
   { file: 'brain/scripts/memory/capture-reachable.test.mjs', entrypoint: '<unresolved>', line: 124, reason: 'no-vcs-capability' },
   { file: 'brain/scripts/memory/cli.backend-fallback.test.mjs', entrypoint: '<unresolved>', line: 56, reason: 'no-vcs-capability' },
   { file: 'brain/scripts/memory/cli.backend-fallback.test.mjs', entrypoint: '<unresolved>', line: 59, reason: 'no-vcs-capability' },
+  { file: 'brain/scripts/memory/cli.hydrate.test.mjs', entrypoint: '<unresolved>', line: 25, reason: 'no-vcs-capability' },
   { file: 'brain/scripts/memory/cli.save-search.test.mjs', entrypoint: '<unresolved>', line: 241, reason: 'no-vcs-capability' },
   { file: 'brain/scripts/memory/cli.save-search.test.mjs', entrypoint: '<unresolved>', line: 242, reason: 'no-vcs-capability' },
 
@@ -380,14 +382,19 @@ const ALLOWLIST = [
   { file: 'brain/scripts/memory/cli.backend-declaration.test.mjs', entrypoint: '<unresolved>', line: 29, reason: 'no-vcs-capability' },
   { file: 'brain/scripts/memory/lib/backend-resolve.test.mjs', entrypoint: 'brain/scripts/memory/lib/backend-resolve.mjs', reason: 'no-vcs-capability' },
   // #1127: `brain-config.mjs ensure` run from a COPY of the tree in a temp repo, to pin its exit code.
-  { file: 'brain/scripts/lib/brain-config.ensure-cli.test.mjs', entrypoint: 'brain/scripts/lib/brain-config.mjs', line: 28, reason: 'no-vcs-capability' },
+  { file: 'brain/scripts/lib/brain-config.ensure-cli.test.mjs', entrypoint: 'brain/scripts/lib/brain-config.mjs', line: 29, reason: 'no-vcs-capability' },
+  // #1263 slice 2: the founding signal — the same `ensure` CLI from a COPY of the tree, stdin closed, a temp BRAIN_HOME; reads and writes only the fixture.
+  { file: 'brain/scripts/lib/brain-config.ensure-cli.test.mjs', entrypoint: 'brain/scripts/lib/brain-config.mjs', line: 49, reason: 'no-vcs-capability' },
+  // #1263 slice 2: the REAL bootstrap.sh in the hermetic box (stdin from a FILE, a pty via script(1) for the TTY cases, 240s timeout, a temp BRAIN_HOME): existing-repo and founding runs against a fixture repo with no network.
+  { file: 'brain/scripts/bootstrap.config-ownership.test.mjs', entrypoint: '<unresolved>', line: 66, reason: 'no-vcs-capability' },
   { file: 'brain/scripts/install-tools.test.mjs', entrypoint: '<unresolved>', line: 34, reason: 'no-vcs-capability' },
-  { file: 'brain/scripts/install-tools.test.mjs', entrypoint: '<unresolved>', line: 93, reason: 'no-vcs-capability' }, // `command -v` lookups for the no-node PATH
-  { file: 'brain/scripts/install-tools.test.mjs', entrypoint: '<unresolved>', line: 97, reason: 'no-vcs-capability' }, // the same snippet with node off PATH
+  { file: 'brain/scripts/install-tools.test.mjs', entrypoint: '<unresolved>', line: 105, reason: 'no-vcs-capability' }, // `command -v` lookups for the no-node PATH
+  { file: 'brain/scripts/install-tools.test.mjs', entrypoint: '<unresolved>', line: 109, reason: 'no-vcs-capability' }, // the same snippet with node off PATH
   { file: 'brain/scripts/brain-promote.golden.test.mjs', entrypoint: 'brain/scripts/hooks/commit-msg', reason: 'no-vcs-capability' }, // #1127: masked away by the old masker (a regex literal holding a quote); runs the hook on a message file, no VCS
   { file: 'brain/scripts/hooks/pre-commit.test.mjs', entrypoint: 'brain/scripts/hooks/pre-commit', reason: 'no-vcs-capability' },
   { file: 'brain/scripts/hooks/pre-push.test.mjs', entrypoint: 'brain/scripts/hooks/pre-push', reason: 'no-vcs-capability' },
   { file: 'brain/scripts/hooks/post-merge.undeclared.test.mjs', entrypoint: 'brain/scripts/hooks/post-merge', reason: 'no-vcs-capability' },
+  { file: 'brain/scripts/hooks/post-merge.op.test.mjs', entrypoint: 'brain/scripts/hooks/post-merge', reason: 'no-vcs-capability' },
   { file: 'brain/scripts/hooks/hooks.stream-discipline.test.mjs', entrypoint: '<unresolved>', line: 98, reason: 'no-vcs-capability' },
   { file: 'brain/scripts/axes/platform/lib/settings-hooks.test.mjs', entrypoint: '<unresolved>', line: 93, reason: 'no-vcs-capability' },
   { file: 'brain/scripts/bootstrap.worktree.test.mjs', entrypoint: '<unresolved>', line: 64, reason: 'no-vcs-capability' },
@@ -397,8 +404,14 @@ const ALLOWLIST = [
   // #1124: bootstrap.sh's own brain-config.mjs ensure line — reads `git remote get-url origin` only, never the network
   { file: 'brain/scripts/bootstrap.tier-notice.test.mjs', entrypoint: '<unresolved>', line: 71, reason: 'no-vcs-capability' },
   // #1125: bash runs bootstrap.sh's env helpers and §6 platform block, lifted verbatim, in a scratch dir — no git, no network, no push.
-  { file: 'brain/scripts/bootstrap.default-platform.test.mjs', entrypoint: '<unresolved>', line: 85, reason: 'no-vcs-capability' },
-  { file: 'brain/scripts/bootstrap.default-platform.test.mjs', entrypoint: 'brain/scripts/parity.sh', line: 182, reason: 'no-vcs-capability' }, // #1221: the script is a temp file now, not stdin; same bash-in-scratch-dir shape
+  { file: 'brain/scripts/bootstrap.default-platform.test.mjs', entrypoint: '<unresolved>', line: 141, reason: 'no-vcs-capability' },
+  { file: 'brain/scripts/bootstrap.default-platform.test.mjs', entrypoint: 'brain/scripts/parity.sh', line: 257, reason: 'no-vcs-capability' }, // #1221: the script is a temp file, not stdin
+  { file: 'brain/scripts/bootstrap.default-platform.test.mjs', entrypoint: '<unresolved>', line: 456, reason: 'no-vcs-capability' }, // #1114 S3.4: the lifted success-line fragment; stdin is ignored, not piped
+  { file: 'brain/scripts/bootstrap.default-platform.test.mjs', entrypoint: '<unresolved>', line: 362, reason: 'no-vcs-capability' },
+  { file: 'brain/scripts/bootstrap.default-platform.test.mjs', entrypoint: '<unresolved>', line: 377, reason: 'no-vcs-capability' },
+  { file: 'brain/scripts/bootstrap.default-platform.test.mjs', entrypoint: '<unresolved>', line: 405, reason: 'no-vcs-capability' },
+  { file: 'brain/scripts/bootstrap.default-platform.test.mjs', entrypoint: 'brain/scripts/config/cli.mjs', line: 408, reason: 'no-vcs-capability' },
+  // #1114 S3.3: the lifted §6 blocks run against a scratch dir holding a real brain.config.json, so `brain:config` is the writer under test (bash -c scripts, each with a timeout).
 
   // ── i18n shell-catalog eval: bash -c, zero VCS surface ──────────────────
   { file: 'brain/scripts/i18n/coverage.test.mjs', entrypoint: '<unresolved>', line: 161, reason: 'no-vcs-capability' }, // #1061 shifted this line by inserting the memory.heal.* parity test earlier in the file
@@ -414,6 +427,9 @@ const ALLOWLIST = [
   { file: 'brain/scripts/memory/lib/hydration-guard.processes.integration.test.mjs', entrypoint: '<unresolved>', line: 40, reason: 'no-vcs-capability' },
 
   // ── postmerge release workflow: real git, extracted YAML steps, local fixture repo ──
+  // #1283 the team-config gate's real-git suite: one bash-wrapped `git` helper, only ever against mkdtemp repos (HOME and
+  // BRAIN_HOME are throwaways, stdin comes from a file, timeout 30s); the forge reviews are the only thing faked.
+  { file: 'brain/scripts/vcs/team-config-reviewed.git.test.mjs', entrypoint: '<unresolved>', line: 38, reason: 'fixture-root-local-git' },
   { file: 'brain/scripts/vcs/release-postmerge-workflows.test.mjs', entrypoint: '<unresolved>', line: 135, reason: 'fixture-root-local-git' },
 
   // ── regulated-review e2e: vendored review binary against a fixture PR ──
@@ -427,7 +443,7 @@ const ALLOWLIST = [
   //    of the four ever import or call a VCS/gh port.
   { file: 'brain/scripts/bootstrap.env-gitignore.test.mjs', entrypoint: '<unresolved>', line: 60, reason: 'no-vcs-capability' },
   { file: 'brain/scripts/bootstrap.memory-backend-case.test.mjs', entrypoint: '<unresolved>', line: 109, reason: 'no-vcs-capability' },
-  { file: 'brain/scripts/bootstrap.vcs-provider-validate.test.mjs', entrypoint: '<unresolved>', line: 66, reason: 'no-vcs-capability' },
+  { file: 'brain/scripts/bootstrap.vcs-provider-validate.test.mjs', entrypoint: '<unresolved>', line: 72, reason: 'no-vcs-capability' },
   { file: 'brain/scripts/brain-to-engram.test.mjs', entrypoint: '<unresolved>', line: 141, reason: 'no-vcs-capability' },
 
   // ── #1112 cold-review follow-up (blockers 2/3): more bootstrap.sh
@@ -449,6 +465,7 @@ const ALLOWLIST = [
   { file: 'brain/scripts/bootstrap.required-failure.test.mjs', entrypoint: '<unresolved>', line: 104, reason: 'no-vcs-capability' },
   // #1112 final cold review: the e2e's `sh -c 'command -v gh'` proves the shims resolve first; no VCS port involved.
   { file: 'brain/scripts/bootstrap.pat-refusal-e2e.test.mjs', entrypoint: '<unresolved>', line: 186, reason: 'no-vcs-capability' },
+  { file: 'brain/scripts/vcs/port-coverage.test.mjs', entrypoint: 'brain/scripts/vcs/port-coverage.mjs', reason: 'no-vcs-capability' }, // #1076: reads files only; run from a temp tree with no contract suite
 ];
 
 function validateAllowlist(entries) {

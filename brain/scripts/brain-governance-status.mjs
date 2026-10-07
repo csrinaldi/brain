@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // brain-governance-status.mjs — Report the current state of all three governance layers.
 //
-// Reads vcs.provider and project.slug from brain.config.json, probes the VCS
+// Reads vcs.provider and project.slug (brain.config.json, else the origin remote — lib/project-slug.mjs), probes the VCS
 // provider's capability API, and prints a per-consumer status table.
 //
 // USAGE: npm run brain:governance-status
@@ -25,6 +25,14 @@ import { run } from './vcs/lib/exec.mjs';
 import { detectSubstrate, POSTMERGE_STALE_LABEL } from './vcs/substrate.mjs';
 import { GOVERNANCE_JOBS } from './vcs/governance-checks.mjs';
 import { resolveTier, requiredJobs } from './vcs/governance-tiers.mjs';
+import { readAxis, diagnoseAxes } from './lib/axis-config.mjs';
+import { projectSlugOrNull, describeSlugRefusal } from './lib/project-slug.mjs';
+import { readCodeowners } from './lib/codeowners-drift.mjs';
+import { detectInstalled } from './lib/axis-installed.mjs';
+import { readUserConfig } from './lib/user-config.mjs';
+import { parseEnvFile } from './lib/env-read.mjs';
+import { loadCatalog } from './i18n/t.mjs';
+import en from './i18n/en.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, '..', '..');
@@ -56,8 +64,8 @@ function repoFileExists(relPath) {
  * a fresh dynamic import.
  */
 async function realBranchProtectionProbe({ config, vcs }) {
-  const provider = config?.vcs?.provider;
-  const project = config?.project?.slug;
+  const provider = readAxis(config, 'vcs').default;
+  const project = projectSlugOrNull({ config });
   const branch = config?.project?.defaultBranch ?? 'main';
   if (!project) return { status: undefined, contexts: [] };
 
@@ -135,16 +143,16 @@ async function realPostMergeCiProbe({ config }) {
     return { workflowPresent, read: 'skipped', lastRun: null, error: null, observedAt };
   }
 
-  if (config?.vcs?.provider !== 'github') {
+  if (readAxis(config, 'vcs').default !== 'github') {
     // No ledger reader wired for this provider — keeps today's inert +
     // remedy behavior for GitLab (design "Provider safety"), no `gh`/`glab`
     // spawn either way.
     return { workflowPresent, read: 'unsupported', lastRun: null, error: null, observedAt };
   }
 
-  const project = config?.project?.slug;
+  const project = projectSlugOrNull({ config });
   if (!project) {
-    return { workflowPresent, read: 'failed', lastRun: null, error: 'no project.slug configured', observedAt };
+    return { workflowPresent, read: 'failed', lastRun: null, error: await describeSlugRefusal(), observedAt };
   }
   const branch = config?.project?.defaultBranch ?? 'main';
 
@@ -187,10 +195,10 @@ async function realPostMergeCiProbe({ config }) {
 
 /** rungs[1].gates.brainWritesReviewed — per-provider L6 rung-1 sub-probe. */
 async function realBrainWritesReviewedProbe({ config }) {
-  const provider = config?.vcs?.provider;
+  const provider = readAxis(config, 'vcs').default;
 
   if (provider === 'github') {
-    const project = config?.project?.slug;
+    const project = projectSlugOrNull({ config });
     const branch = config?.project?.defaultBranch ?? 'main';
     const codeownersPresent = repoFileExists('.github/CODEOWNERS');
     if (!project) return { requireCodeOwnerReviews: false, codeownersPresent };
@@ -428,9 +436,31 @@ export function approvalLines(cap = {}) {
   return out;
 }
 
+/**
+ * Pure: the lines of the "axes" section (#1114 S3.4). Findings, never failures: nothing here changes an exit code.
+ * @param {Array<{axis: string, code: string, severity: string, message: string, fix: string}>} findings
+ * @param {Record<string, string>} [catalog]  i18n catalog (English when omitted)
+ * @returns {string[]}
+ */
+export function axesLines(findings, catalog = en) {
+  const out = ['  --- axes ---'];
+  if (!findings.length) {
+    out.push(`  ${catalog['axes.status.clean'] ?? en['axes.status.clean']}`);
+  }
+  for (const f of findings) {
+    out.push(`  ${f.severity.padEnd(7)}  ${f.axis}  ${f.code}: ${f.message}`);
+    out.push(`             → ${f.fix}`);
+  }
+  out.push('');
+  return out;
+}
+
 export async function reportGovernanceStatus({
   config: configOverride,
   env = process.env,
+  dotenv: dotenvOverride,
+  installed: installedOverride,
+  user: userOverride,
   providerModule: providerModuleOverride,
   probes: probeOverrides,
 } = {}) {
@@ -445,8 +475,8 @@ export async function reportGovernanceStatus({
     }
   }
 
-  const provider = config?.vcs?.provider ?? 'unknown';
-  const project = config?.project?.slug ?? 'unknown';
+  const provider = (readAxis(config, 'vcs').default || 'unknown');
+  const project = projectSlugOrNull({ config }) ?? 'unknown';
 
   console.log(`\nbrain:governance status — ${project} (${provider})\n`);
   // Hooks and brain:audit are always ON regardless of provider tier.
@@ -462,7 +492,7 @@ export async function reportGovernanceStatus({
   let providerModule = providerModuleOverride;
   let platformKnown = true;
 
-  if (!config?.vcs?.provider) {
+  if (!readAxis(config, 'vcs').default) {
     console.log('  platform    UNKNOWN (vcs.provider not configured)');
     platformKnown = false;
   } else if (!providerModule) {
@@ -513,6 +543,19 @@ export async function reportGovernanceStatus({
   // default, so this is intentionally NOT wrapped in a try/catch.
   const tier = resolveTier(config);
   printDoctrineReport(tier, substrate);
+
+  // Axis diagnosis (#1114 S3.4): findings, never failures. `.env` is parsed for its selector keys only and never printed.
+  // An injected config means a hermetic caller: it gets no `.env` from disk unless it injects one.
+  let dotenv = dotenvOverride;
+  if (!dotenv) {
+    try { dotenv = configOverride ? {} : parseEnvFile(readFileSync(resolve(REPO_ROOT, '.env'), 'utf8')); } catch { dotenv = {}; }
+  }
+  const lang = config?.docs?.language;
+  const catalog = { ...en, ...(await loadCatalog(lang)) };
+  // The user layer (ADR-0040) through the one reader; like `.env`, an injected config is a hermetic caller and gets none unless it injects one.
+  const user = userOverride ?? (configOverride ? {} : readUserConfig({ env }));
+  const findings = diagnoseAxes({ config, env, dotenv, ...user, installed: installedOverride ?? detectInstalled(), catalog, codeowners: configOverride ? undefined : readCodeowners(REPO_ROOT, readAxis(config, 'vcs').default) });
+  for (const line of axesLines(findings, catalog)) console.log(line);
 }
 
 // CLI guard — the report runs ONLY when this file is invoked directly

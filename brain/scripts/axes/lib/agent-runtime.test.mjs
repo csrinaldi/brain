@@ -18,7 +18,6 @@ import {
   formatRuntimeNotice,
   agentRuntimeReport,
   platformEnvVars,
-  platformConfig,
 } from './agent-runtime.mjs';
 import { resolvePlatform } from '../../harness/cli.mjs';
 
@@ -210,14 +209,14 @@ test('agentRuntimeReport: probes the descriptor of the CONFIGURED platform', asy
   });
 
   const report = await agentRuntimeReport({
-    env: { AGENT_PLATFORM: 'some-other-harness' },
+    env: { AGENT_PLATFORM: 'antigravity' },
     _loadBackend,
     _run,
   });
 
-  assert.deepEqual(loaded, ['some-other-harness']);
-  assert.equal(report.platform, 'some-other-harness');
-  assert.equal(report.status.name, 'runtime-of-some-other-harness');
+  assert.deepEqual(loaded, ['antigravity']);
+  assert.equal(report.platform, 'antigravity');
+  assert.equal(report.status.name, 'runtime-of-antigravity');
   assert.equal(report.status.state, 'up-to-date');
 });
 
@@ -236,8 +235,8 @@ test('agentRuntimeReport: a backend declaring no runtime → not-declared, no ex
 
 test('agentRuntimeReport: a backend that fails to load is unresolved, NOT silently not-declared', async () => {
   const report = await agentRuntimeReport({
-    env: { AGENT_PLATFORM: 'nonexistent' },
-    _loadBackend: async () => { throw new Error('backend not found at ./backends/nonexistent.mjs'); },
+    env: { AGENT_PLATFORM: 'antigravity' },
+    _loadBackend: async () => { throw new Error('backend not found at ./backends/antigravity.mjs'); },
     _run: () => { throw new Error('must not run'); },
   });
 
@@ -318,12 +317,12 @@ test('RUNTIME_STATES: every listed state has its own notice — none falls throu
 
 test('agentRuntimeReport: a backend MISSING the export is not the same as one declaring null', async () => {
   const missing = await agentRuntimeReport({
-    env: { AGENT_PLATFORM: 'forgetful' },
+    env: { AGENT_PLATFORM: 'antigravity' },
     _loadBackend: async () => ({ init: () => {} }),          // no AGENT_RUNTIME at all
     _run: () => { throw new Error('must not run'); },
   });
   const declared = await agentRuntimeReport({
-    env: { AGENT_PLATFORM: 'deliberate' },
+    env: { AGENT_PLATFORM: 'plain' },
     _loadBackend: async () => ({ init: () => {}, AGENT_RUNTIME: null }),
     _run: () => { throw new Error('must not run'); },
   });
@@ -433,15 +432,26 @@ test('platformEnvVars: BOTH axis keys reach resolvePlatform, not just AGENT_PLAT
   assert.equal(resolvePlatform({ env: {}, envVars }), 'antigravity');
 });
 
-test('platformConfig: a harness section of the WRONG shape degrades to {}, never to a crash', () => {
-  // resolvePlatform reads config.platform / config.harness; a consumer writing
-  // "harness": "claude" passes a STRING where an object is expected.
-  assert.deepEqual(platformConfig({ harness: 'claude' }), { harness: 'claude' });
-  assert.deepEqual(platformConfig({ harness: { platform: 'claude' } }), { platform: 'claude' });
-  assert.deepEqual(platformConfig({}), {});
-  assert.deepEqual(platformConfig(null), {});
-  // #1125: `antigravity`, not `claude` — the default must not satisfy this.
-  assert.equal(resolvePlatform({ env: {}, envVars: {}, config: platformConfig({ harness: 'antigravity' }) }), 'antigravity');
+test('agentRuntimeReport: reads the FULL config (the platform axis and the legacy harness), never a platform-only slice (#1114 S2)', async () => {
+  const loaded = [];
+  const _loadBackend = async (platform) => { loaded.push(platform); return { AGENT_RUNTIME: null }; };
+  await agentRuntimeReport({ env: {}, config: { platform: { default: 'antigravity', providers: { antigravity: {} } } }, _loadBackend });
+  // #1125: `antigravity`, not `claude` — a default must not satisfy this. The legacy harness string still resolves (one minor).
+  await agentRuntimeReport({ env: {}, config: { harness: 'antigravity' }, _loadBackend });
+  assert.deepEqual(loaded, ['antigravity', 'antigravity']);
+});
+
+test('agentRuntimeReport: an undeclared or refused platform is UNRESOLVED with the refusal as its cause, never thrown and never claude (#1114 S2)', async () => {
+  for (const [opts, cause] of [
+    [{ env: {}, config: {} }, /no platform is declared/],
+    [{ env: { AGENT_PLATFORM: 'codex' }, config: {} }, /not a platform brain ships/],
+  ]) {
+    const report = await agentRuntimeReport({ ...opts, _loadBackend: async () => { throw new Error('must not load'); }, _run: () => { throw new Error('must not run'); } });
+    assert.equal(report.platform, null);
+    assert.equal(report.status.state, 'unresolved');
+    assert.match(report.status.detail, cause);
+    assert.equal(report.notice.level, 'warn');
+  }
 });
 
 // ── env: #682's SECOND cold review, judgment:cold-2 ──────────────────────────

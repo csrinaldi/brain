@@ -44,7 +44,7 @@ test('resolveProviderName: an explicit provider arg wins over VCS_PROVIDER env A
 test('resolveProviderName throws a helpful error when unset', () => {
   assert.throws(
     () => resolveProviderName({ config: {}, env: {} }),
-    /no provider configured.*brain\.config\.json/s,
+    /no vcs is declared.*brain:config -- set vcs\.default <github\|gitlab>/s,
   );
 });
 
@@ -52,14 +52,14 @@ test('resolveProviderName treats the post-migration empty provider as unset', ()
   // After the v0.2.0 migration and before the user fills it in, vcs.provider is ''.
   assert.throws(
     () => resolveProviderName({ config: { vcs: { provider: '' } }, env: {} }),
-    /no provider configured/,
+    /no vcs is declared/,
   );
 });
 
 test('getVcs rejects an invalid provider name (path-traversal guard)', async () => {
   await assert.rejects(
     getVcs({ config: { vcs: { provider: '../lib/normalize' } }, env: {} }),
-    /invalid provider name/,
+    /not a vcs brain ships/, // refused at the ONE resolver (#1114 S2), before getVcs's own path-traversal guard is reached
   );
 });
 
@@ -73,7 +73,7 @@ test('getVcs loads the matching provider module', async () => {
 test('getVcs throws for an unknown provider', async () => {
   await assert.rejects(
     getVcs({ config: { vcs: { provider: 'nope' } }, env: {} }),
-    /provider 'nope' not found/,
+    /vcs "nope" .* is not a vcs brain ships \(github\|gitlab\)/,
   );
 });
 
@@ -123,7 +123,7 @@ test('migrating to v0.3.0 adds docs.language and vcs.provider without clobbering
     schemaVersion: '0.1.0',
     project: { name: 'mine', slug: 'org/repo', gitHost: 'github.com' },
   };
-  const { config: migrated, applied } = migrateConfig(config, migrations, '0.3.0');
+  const { config: migrated, applied } = migrateConfig(config, migrations, '0.3.0', null);
 
   assert.ok(applied.includes('0.2.0'));             // docs.language
   assert.ok(applied.includes('0.3.0'));             // vcs.provider
@@ -136,6 +136,6 @@ test('migrating to v0.3.0 adds docs.language and vcs.provider without clobbering
 
 test('vcs.provider migration never overwrites a provider the user already set', () => {
   const config = { schemaVersion: '0.2.0', vcs: { provider: 'gitlab' } };
-  const { config: migrated } = migrateConfig(config, migrations, '0.3.0');
+  const { config: migrated } = migrateConfig(config, migrations, '0.3.0', null);
   assert.equal(migrated.vcs.provider, 'gitlab');    // user value wins
 });

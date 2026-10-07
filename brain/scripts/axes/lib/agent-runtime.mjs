@@ -77,6 +77,14 @@ function failureDetail(result) {
 export const RUN_TIMEOUT_MS = 10_000;
 
 /**
+ * Explicit output cap for `defaultRun` (#1274). Node's `spawnSync` default is 1 MiB;
+ * codex streams its progress to stdout, so on a large PR the spawn died with ENOBUFS
+ * and the cold review was lost. Same value and same reason as
+ * `review/lib/base-comparison.mjs`.
+ */
+export const RUN_MAX_BUFFER = 64 * 1024 * 1024;
+
+/**
  * Default command runner: captured output, never a shell, always bounded.
  *
  * `cwd` IS PART OF THE CONTRACT, and it was silently dropped until #682's cold
@@ -106,12 +114,20 @@ export const RUN_TIMEOUT_MS = 10_000;
  * are — see `lib/credential-env.mjs`; it only stops the pass-through from
  * being unrepresentable.
  *
+ * `discardStdout` is for engines that answer through a file (codex's
+ * `--output-last-message`): stdout is dropped, so a chatty progress stream can
+ * neither overflow the buffer nor be mistaken for a diagnostic. stderr is kept.
+ *
  * @param {string} cmd
  * @param {string[]} args
- * @param {{ timeoutMs?: number, cwd?: string, env?: object }} [opts]
+ * @param {{ timeoutMs?: number, cwd?: string, env?: object, discardStdout?: boolean }} [opts]
  */
-export function defaultRun(cmd, args, { timeoutMs = RUN_TIMEOUT_MS, cwd, env } = {}) {
-  return spawnSync(cmd, args, { stdio: 'pipe', encoding: 'utf8', timeout: timeoutMs, cwd, env });
+export function defaultRun(cmd, args, { timeoutMs = RUN_TIMEOUT_MS, cwd, env, discardStdout = false } = {}) {
+  // stdin stays a pipe exactly as before; only stdout may be dropped.
+  const stdio = discardStdout ? ['pipe', 'ignore', 'pipe'] : 'pipe';
+  return spawnSync(cmd, args, {
+    stdio, encoding: 'utf8', timeout: timeoutMs, cwd, env, maxBuffer: RUN_MAX_BUFFER,
+  });
 }
 
 /**
@@ -228,23 +244,6 @@ export function platformEnvVars(readEnvVar) {
 }
 
 /**
- * Normalizes brain.config.json's optional harness declaration into the shape
- * `resolvePlatform` reads. A consumer may reasonably write either
- * `"harness": "claude"` (a string) or `"harness": { "platform": "claude" }`;
- * passing the raw string through as the config object silently resolves to the
- * default instead of to what the consumer declared.
- *
- * @param {object|null} config The full brain.config.json object.
- * @returns {{ platform?: string, harness?: string }}
- */
-export function platformConfig(config) {
-  const harness = config?.harness;
-  if (typeof harness === 'string') return { harness };
-  if (harness && typeof harness === 'object') return { ...harness };
-  return {};
-}
-
-/**
  * Renders one probe result as operator-facing text. Pure.
  *
  * Strings are English literals rather than `t()` keys: the i18n catalogs live
@@ -267,6 +266,14 @@ export function formatRuntimeNotice(status, platform = null) {
         hint: null,
       };
     case 'unresolved':
+      if (platform === null) {
+        // no platform was resolved at all (undeclared or refused, #1114 S2): the detail IS the refusal, with its fix.
+        return {
+          level: 'warn',
+          message: `agent runtime not checked — no platform could be resolved${detail}.`,
+          hint: 'Declare it: npm run brain:config -- set platform.default <claude|antigravity|plain>',
+        };
+      }
       return {
         level: 'warn',
         message: `agent runtime not checked — harness '${platform ?? who}' could not be loaded${detail}.`,
@@ -334,7 +341,7 @@ async function defaultLoadBackend(platform) {
  * @param {object} [opts]
  * @param {object} [opts.env]     Process env (for AGENT_PLATFORM).
  * @param {object} [opts.envVars] Parsed .env vars.
- * @param {object} [opts.config]  brain.config.json's harness section.
+ * @param {object} [opts.config]  the full brain.config.json (the `platform` axis and the legacy keys).
  * @param {(platform: string) => Promise<object>} [opts._loadBackend]
  * @param {(cmd: string, args: string[]) => object} [opts._run]
  * @returns {Promise<{ platform: string, status: object, notice: object }>}
@@ -346,7 +353,16 @@ export async function agentRuntimeReport({
   _loadBackend = defaultLoadBackend,
   _run = defaultRun,
 } = {}) {
-  const platform = resolvePlatform({ env, envVars, config });
+  let platform;
+  try {
+    platform = resolvePlatform({ env, envVars, config });
+  } catch (err) { // surfaced: a refused platform (undeclared, invalid) is reported as an unresolved runtime, never thrown (#1114 S2)
+    const status = {
+      state: 'unresolved', name: null, bin: null, installed: null, latest: null, updateHint: null,
+      detail: err.message,
+    };
+    return { platform: null, status, notice: formatRuntimeNotice(status, null) };
+  }
 
   let backend;
   try {

@@ -55,6 +55,32 @@ export function uncomputable(reason) {
   return { ok: false, reason: reason.trim() };
 }
 
+/**
+ * Marks a fact that is still being loaded (#1257 D65). It is `ok:false`, so every reader that
+ * checks `ok` already treats it as unavailable, and `pending:true` lets a view say "loading"
+ * instead of reporting a failure. The reason is required, for the reason `uncomputable`'s is.
+ */
+export function pending(reason) {
+  if (typeof reason !== 'string' || reason.trim() === '') {
+    throw new Error('status/report: pending() requires a reason: a loading state that says nothing reads as an empty answer.');
+  }
+  return { ok: false, pending: true, reason: reason.trim() };
+}
+
+/**
+ * A section that is pending because another one is: it keeps that section's reason and its `idle`
+ * flag (#1262), so a paused lane never turns into "loading" one section downstream.
+ */
+export function pendingFrom(section) {
+  return section.idle === true ? { ...pending(section.reason), idle: true } : pending(section.reason);
+}
+
+/**
+ * The `code` a cache-only port stamps on the error it throws for a number it has not fetched yet (#1312 D150).
+ * A reader that must tell "not fetched yet" from "fetched and failed" matches this, never the error's prose.
+ */
+export const NOT_FETCHED_YET = 'BRAIN_NOT_FETCHED_YET';
+
 /** @returns {boolean} */
 export function isUncomputable(f) {
   return Boolean(f) && f.ok === false;

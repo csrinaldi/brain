@@ -188,10 +188,10 @@ test('#1214 undeclared: warns, records MISSING_OPTIONAL and writes nothing to co
   assert.doesNotMatch(out, /node:/, 'config/cli.mjs set must not run when nothing was declared');
 });
 
-test('#1214 declared: calls config/cli.mjs set memory.backend <value>', () => {
+test('#1214 declared: calls config/cli.mjs set memory.default <value>', () => {
   const { out, status } = runDeclare('plainfiles');
   assert.equal(status, 0);
-  assert.match(out, /node:\/stub\/config\/cli\.mjs set memory\.backend plainfiles/);
+  assert.match(out, /node:\/stub\/config\/cli\.mjs set memory\.default plainfiles/);
   assert.match(out, /warn:DECLARED/);
   assert.match(out, /source:config/);
   assert.doesNotMatch(out, /UNDECLARED/);

@@ -106,3 +106,13 @@ test('#1201 AC3 D43: nothing the model returns names a session', () => {
 test('#1201 D42: an unreadable section gives the panel the reason, not an empty list', () => {
   assert.deepEqual(remotePanel({ ok: false, reason: 'no refs/remotes/origin/* in this clone' }, new Set(), NOW), { ok: false, reason: 'no refs/remotes/origin/* in this clone' });
 });
+
+test('#1312 D147: omitPrs drops "PR #n" from that PR\'s line only; another PR keeps its part; the default call is unchanged', () => {
+  const entries = [grammar(11, { branch: 'feat/issue-11-a', pr: { number: 31, title: 't' } }), grammar(11, { branch: 'feat/issue-11-b', pr: { number: 32, title: 't' } })];
+  const plain = remoteBadges(section(entries), 11, NOW).lines.map((l) => l.text);
+  assert.ok(plain[0].includes('PR #31') && plain[1].includes('PR #32'));
+  const omitted = remoteBadges(section(entries), 11, NOW, { omitPrs: [31] }).lines.map((l) => l.text);
+  assert.ok(!omitted[0].includes('PR #31'), 'the named PR is dropped');
+  assert.ok(omitted[0].startsWith('on origin: feat/issue-11-a · last commit by'));
+  assert.ok(omitted[1].includes('PR #32'), 'another PR keeps its part');
+});

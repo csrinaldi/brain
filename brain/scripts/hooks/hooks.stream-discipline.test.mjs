@@ -96,7 +96,7 @@ const SAFE_SYSTEM_PATH = '/usr/local/bin:/usr/bin:/bin';
 function runHook(name) {
   const bin = mockBin();
   return spawnSync('sh', [join(HOOKS_DIR, name)], {
-    env: { PATH: `${bin}:${SAFE_SYSTEM_PATH}`, HOME: process.env.HOME ?? '/tmp' },
+    env: { PATH: `${bin}:${SAFE_SYSTEM_PATH}`, HOME: process.env.HOME ?? '/tmp', BRAIN_HOME: process.env.BRAIN_HOME || '/nonexistent/brain-home' },
     encoding: 'utf8',
     timeout: 10000,
   });
@@ -141,7 +141,7 @@ test('#633 post-merge: resolve-index\'s STDERR reaches the operator', () => {
     ops.includes('resolve-index'),
     `resolve-index exists BECAUSE two branches merged, which is when merge=union mints a duplicate — its stderr is the one that must not be swallowed; got: ${JSON.stringify(ops)}`,
   );
-  assert.ok(ops.includes('import'), `import's stderr already survived and must keep doing so; got: ${JSON.stringify(ops)}`);
+  assert.ok(ops.includes('hydrate'), `hydrate's stderr already survived and must keep doing so; got: ${JSON.stringify(ops)}`);
 });
 
 test('#633 post-merge: the progress line on STDOUT is still discarded', () => {

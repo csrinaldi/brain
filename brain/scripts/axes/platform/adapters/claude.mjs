@@ -9,6 +9,7 @@ import { credentialEnvNames, withoutCredentials } from '../../../lib/credential-
 import { withForgeConfigDir } from '../../../harness/producer-forge-reach.mjs';
 import { DEFAULT_STAGE_TIMEOUT_MS, formatDuration } from '../../../lib/duration.mjs';
 import { defaultRun } from '../../lib/agent-runtime.mjs';
+import { engineTail, secretValues } from '../../lib/stage-output.mjs';
 import { writeFileSync, mkdirSync, readFileSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -70,11 +71,12 @@ function _defaultReadFile(relPath, root) {
  * @param {(relPath: string, content: string) => void} [opts._writeClaudeSettings]
  *   Writes the compiled .claude/settings.json content.
  * @param {string} [opts._repoRoot] Repo root used by the default seams.
- * @returns {Promise<undefined|{ok: false, reason: string}>}
- *   `undefined` on success (unchanged contract). `{ok: false, reason}` ONLY
- *   when the existing file could not be parsed as JSON — the one case where
- *   `init()` refuses to write rather than silently overwrite (#1127: no
- *   report-success-over-a-failure).
+ * @returns {Promise<{ok: true}|{ok: false, reason: string}>}
+ *   `{ok: true}` on success. `{ok: false, reason}` when the existing file could
+ *   not be parsed as JSON — `init()` refuses to write rather than silently
+ *   overwrite — or when the write itself threw (#1127: no
+ *   report-success-over-a-failure; #1128 ruled the write half the same way).
+ *   Every platform answers `{ok, ...}` (agent-platform contract).
  */
 export async function init({
   _readClaudeSettings,
@@ -106,8 +108,11 @@ export async function init({
   try {
     writeClaudeSettings(CLAUDE_SETTINGS_EMIT_PATH, settingsContent);
   } catch (err) {
-    console.warn(`  harness: claude could not write ${CLAUDE_SETTINGS_EMIT_PATH} — ${err.message}`);
+    const reason = `claude: could not write ${CLAUDE_SETTINGS_EMIT_PATH} — ${err.message}`;
+    console.warn(`  harness: ${reason}`);
+    return { ok: false, reason };
   }
+  return { ok: true };
 }
 
 // ── run-stage — #682 slice B, ADR-0033 ───────────────────────────────────────
@@ -178,19 +183,6 @@ export const STAGE_TIMEOUT_MS = DEFAULT_STAGE_TIMEOUT_MS;
  *          _run?: Function}} args
  * @returns {Promise<{ok: true} | {ok: false, reason: string}>}
  */
-/**
- * Whatever the engine managed to say before it was killed, trimmed to something
- * a terminal line can carry. `stderr` first — that is where a tool explains
- * itself — then `stdout`, because an engine that printed its reasoning to the
- * wrong stream still printed it.
- */
-function tail(r, max = 300) {
-  const text = String(r?.stderr ?? '').trim() || String(r?.stdout ?? '').trim();
-  if (!text) return '';
-  const last = text.split('\n').filter(Boolean).slice(-2).join(' / ');
-  return ` — the engine last said: ${last.length > max ? `${last.slice(0, max)}…` : last}`;
-}
-
 export async function runStage({
   stage, prompt, model = null, cwd = process.cwd(),
   timeoutMs = STAGE_TIMEOUT_MS, credentialEnv = null, forgeConfigDir = null,
@@ -232,10 +224,10 @@ export async function runStage({
   // Computed here, not at the call: an `env` built by the caller could be
   // handed in unscrubbed, and then the property would hold only for callers
   // that remembered. `credentialEnv` names what to REMOVE, never what to keep.
-  const scrubbed = withoutCredentials(
-    _env,
-    Array.isArray(credentialEnv) ? credentialEnvNames({ extra: credentialEnv }) : credentialEnvNames(),
-  );
+  const scrubNames = Array.isArray(credentialEnv) ? credentialEnvNames({ extra: credentialEnv }) : credentialEnvNames();
+  const scrubbed = withoutCredentials(_env, scrubNames);
+  // Every failure reason's tail is redacted with the SAME values the scrub removed (#1129).
+  const secrets = secretValues(_env, scrubNames);
 
   // #775 — THE SHADOW IS APPLIED TO THE SCRUBBED ENV, AND THE ORDER IS THE
   // WHOLE GUARANTEE. `forgeConfigDir` points the forge CLIs brain names at a
@@ -286,7 +278,7 @@ export async function runStage({
           ? '. Raise `reviewer.stageTimeoutMs` if the change is large — a review opens the files the ' +
             'diff does not touch, reads the ADRs a finding must cite, and may run the suite'
           : '') +
-        tail(r),
+        engineTail(r, secrets),
     };
   }
   if (r?.status !== 0) {
@@ -294,7 +286,7 @@ export async function runStage({
       ok: false,
       elapsedMs: elapsed(),
       reason: `the engine exited ${r?.status === null ? 'without a status (timed out?)' : `with status ${r?.status}`}` +
-        `${r?.stderr ? ` — ${String(r.stderr).trim().split('\n')[0]}` : ''}`,
+        engineTail(r, secrets),
     };
   }
 

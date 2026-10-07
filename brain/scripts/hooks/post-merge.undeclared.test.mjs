@@ -22,7 +22,7 @@ function run(code) {
 test('#1165 post-merge: import and resolve-index skipped for an undeclared backend say so, and never block the merge', () => {
   const r = run(3);
   assert.equal(r.status, 0);
-  assert.match(r.stderr, /post-merge: memory import skipped — memory backend not declared/);
+  assert.match(r.stderr, /post-merge: memory hydration skipped — memory backend not declared/);
   assert.match(r.stderr, /brain:config -- set memory\.backend/);
 });
 

@@ -188,14 +188,14 @@ test('github.issueList filters pull_request entries', async () => {
   ]));
   const result = await github.issueList({ project: 'o/r', state: 'open' });
   assert.equal(result.length, 1);
-  assert.deepEqual(result[0], { number: 1, title: 'Issue A', labels: ['bug'], assignees: null });
+  assert.deepEqual(result[0], { number: 1, title: 'Issue A', labels: ['bug'], assignees: null, state: null, body: null });
 });
 
 test('gitlab.issueList returns normalized array', async () => {
   setSpawn(fakeSpawn([{ iid: 10, title: 'GL Issue', labels: ['backend'] }]));
   const result = await gitlab.issueList({ project: 'g/r', state: 'open' });
   assert.equal(result.length, 1);
-  assert.deepEqual(result[0], { number: 10, title: 'GL Issue', labels: ['backend'], assignees: null });
+  assert.deepEqual(result[0], { number: 10, title: 'GL Issue', labels: ['backend'], assignees: null, state: null, body: null });
 });
 
 // #459: both verbs used to return a PREFIX of the issue list — GitHub capped at one
@@ -241,6 +241,67 @@ test('#459: gitlab.issueList stops after a single short page — no wasted round
   const result = await gitlab.issueList({ project: 'g/r', state: 'open' });
   assert.equal(result.length, 1);
   assert.equal(calls, 1);
+});
+
+// #1257: the closed filter and the incremental `updatedSince` read. Both providers
+// paginate in full for either; an absent `updatedSince` leaves the endpoint as it was.
+
+test('#1257: state=closed reaches both endpoints and both still paginate', async () => {
+  let ghArgv = null;
+  setSpawn((cmd, args) => { ghArgv = args; return { status: 0, stdout: '[]', stderr: '' }; });
+  await github.issueList({ project: 'o/r', state: 'closed' });
+  assert.ok(ghArgv.includes('--paginate'));
+  assert.match(ghArgv[ghArgv.length - 1], /[?&]state=closed(&|$)/);
+
+  const glSeen = [];
+  const page1 = Array.from({ length: 100 }, (_, i) => ({ iid: i + 1, title: 't', labels: [] }));
+  setSpawn((cmd, args) => {
+    const endpoint = args[args.length - 1];
+    glSeen.push(endpoint);
+    return { status: 0, stdout: JSON.stringify(/[&?]page=1(&|$)/.test(endpoint) ? page1 : []), stderr: '' };
+  });
+  await gitlab.issueList({ project: 'g/r', state: 'closed' });
+  assert.equal(glSeen.length, 2, 'a full page is followed by page 2');
+  for (const e of glSeen) assert.match(e, /[?&]state=closed(&|$)/);
+});
+
+test('#1257: github.issueList updatedSince adds since, sort and direction, and still paginates', async () => {
+  let argv = null;
+  setSpawn((cmd, args) => { argv = args; return { status: 0, stdout: '[]', stderr: '' }; });
+  await github.issueList({ project: 'o/r', state: 'closed', updatedSince: '2026-10-02T10:00:00.000Z' });
+  const endpoint = argv[argv.length - 1];
+  assert.ok(argv.includes('--paginate'));
+  assert.match(endpoint, /state=closed/);
+  assert.match(endpoint, /since=2026-10-02T10%3A00%3A00\.000Z/);
+  assert.match(endpoint, /sort=updated/);
+  assert.match(endpoint, /direction=asc/);
+});
+
+test('#1257: gitlab.issueList updatedSince adds updated_after, order_by and sort on every page', async () => {
+  const page1 = Array.from({ length: 100 }, (_, i) => ({ iid: i + 1, title: 't', labels: [] }));
+  const seen = [];
+  setSpawn((cmd, args) => {
+    const endpoint = args[args.length - 1];
+    seen.push(endpoint);
+    return { status: 0, stdout: JSON.stringify(/[&?]page=1(&|$)/.test(endpoint) ? page1 : []), stderr: '' };
+  });
+  await gitlab.issueList({ project: 'g/r', state: 'closed', updatedSince: '2026-10-02T10:00:00.000Z' });
+  assert.equal(seen.length, 2);
+  for (const e of seen) {
+    assert.match(e, /state=closed/);
+    assert.match(e, /updated_after=2026-10-02T10%3A00%3A00\.000Z/);
+    assert.match(e, /order_by=updated_at/);
+    assert.match(e, /sort=asc/);
+  }
+});
+
+test('#1257: an absent updatedSince leaves both endpoints unchanged', async () => {
+  const seen = [];
+  setSpawn((cmd, args) => { seen.push(args[args.length - 1]); return { status: 0, stdout: '[]', stderr: '' }; });
+  await github.issueList({ project: 'o/r', state: 'open' });
+  await gitlab.issueList({ project: 'g/r', state: 'open' });
+  assert.equal(seen.length, 2);
+  for (const e of seen) assert.doesNotMatch(e, /since|updated_after|sort=|order_by|direction/);
 });
 
 // ── mrList ───────────────────────────────────────────────────────────────────────
@@ -1467,12 +1528,12 @@ test('gitlab.labelEvents returns null (never []) when the underlying fetch throw
 test('github.prReviews normalizes gh reviews to { state, author, body }', async () => {
   setSpawn(fakeSpawn([
     { state: 'COMMENTED', user: { login: 'carol' }, body: 'looks good' },
-    { state: 'APPROVED', user: { login: 'bob' }, body: '' },
+    { state: 'APPROVED', user: { login: 'bob' }, body: '', commit_id: 'abc123' },
   ]));
   const result = await github.prReviews({ project: 'o/r', number: 144 });
   assert.deepEqual(result, [
-    { state: 'COMMENTED', author: 'carol', body: 'looks good' },
-    { state: 'APPROVED', author: 'bob', body: '' },
+    { state: 'COMMENTED', author: 'carol', body: 'looks good', commitId: null },
+    { state: 'APPROVED', author: 'bob', body: '', commitId: 'abc123' },
   ]);
 });
 
@@ -1526,8 +1587,8 @@ test('gitlab.prReviews normalizes notes to {state:"COMMENTED", author, body} and
   // APPROVED — see the security-boundary test in the contract suite); the
   // approver is appended after the chronological notes.
   assert.deepEqual(result, [
-    { state: 'COMMENTED', author: 'carol', body: 'a human comment' },
-    { state: 'APPROVED', author: 'bob', body: '' },
+    { state: 'COMMENTED', author: 'carol', body: 'a human comment', commitId: null },
+    { state: 'APPROVED', author: 'bob', body: '', commitId: null },
   ]);
 });
 
@@ -1902,4 +1963,89 @@ test('github.workflowRunSucceeded: no branch → unknown (an unfiltered answer w
 test('gitlab.workflowRunSucceeded: explicitly unsupported (never "none")', async () => {
   const r = await gitlab.workflowRunSucceeded({ workflow: 'w.yml', branch: 'main' });
   assert.equal(r.state, 'unsupported');
+});
+
+// ── #1257: the list reads past node's default 1 MiB spawn buffer ─────────────────
+// Found by the real `brain:ui` smoke against csrinaldi/brain: the closed list was 9 MB
+// (GitHub's /issues carries PRs and bodies) and `spawnSync` died with ENOBUFS, which
+// surfaced as "failed (status null)". The adapter owns the fix: a named buffer ceiling,
+// PRs dropped at the source, and a readable reason when the ceiling is still exceeded.
+
+for (const state of ['open', 'closed']) {
+  test(`#1257: github.issueList(${state}) hands spawn a maxBuffer that fits a full paginated list`, async () => {
+    let seen = null;
+    setSpawn((cmd, args, opts) => { seen = opts; return { status: 0, stdout: '[]', stderr: '' }; });
+    await github.issueList({ project: 'o/r', state });
+    assert.ok(Number.isInteger(github.LIST_MAX_BUFFER) && github.LIST_MAX_BUFFER >= 64 * 1024 * 1024);
+    assert.ok(seen.maxBuffer >= github.LIST_MAX_BUFFER, `maxBuffer was ${seen.maxBuffer}`);
+  });
+}
+
+test('#1257: github.issueList drops pull requests at the source (--jq) and parses the NDJSON it emits', async () => {
+  let argv = null;
+  const rows = [
+    { number: 1, title: 'a', labels: [{ name: 'x' }], assignees: [{ login: 'u' }], state: 'closed', body: null },
+    { number: 2, title: 'b', labels: [], assignees: [], state: 'closed', body: 'hi' },
+  ];
+  setSpawn((cmd, args) => { argv = args; return { status: 0, stdout: rows.map(r => JSON.stringify(r)).join('\n') + '\n', stderr: '' }; });
+  const out = await github.issueList({ project: 'o/r', state: 'closed' });
+  const i = argv.indexOf('--jq');
+  assert.ok(i > 0, 'a --jq filter must run server-side of the pipe');
+  assert.match(argv[i + 1], /pull_request/);
+  assert.equal(argv[argv.length - 1].startsWith('repos/o/r/issues?'), true, 'endpoint stays the last argument');
+  assert.deepEqual(out.map(r => [r.number, r.body, r.labels, r.assignees]), [[1, '', ['x'], ['u']], [2, 'hi', [], []]]);
+});
+
+test('#1257: github.issueList keeps absent body as null (R12) through the NDJSON path', async () => {
+  setSpawn(() => ({ status: 0, stdout: JSON.stringify({ number: 3, title: 'c', state: 'open' }) + '\n', stderr: '' }));
+  const [row] = await github.issueList({ project: 'o/r', state: 'open' });
+  assert.equal(row.body, null);
+});
+
+test('#1257: an ENOBUFS spawn failure becomes a readable reason, not "status null"', async () => {
+  setSpawn(() => ({ status: null, stdout: null, stderr: null, error: Object.assign(new Error('spawnSync gh ENOBUFS'), { code: 'ENOBUFS' }) }));
+  await assert.rejects(
+    () => github.issueList({ project: 'o/r', state: 'closed' }),
+    (e) => /exceeded 64 MiB/.test(e.message) && !/status null/.test(e.message),
+  );
+});
+
+test('#1257: the other spawn-based lists carry the same buffer ceiling', async () => {
+  const seen = [];
+  setSpawn((cmd, args, opts) => { seen.push([args[args.length - 1], opts?.maxBuffer]); return { status: 0, stdout: '[]', stderr: '' }; });
+  await github.mrList({ project: 'o/r', state: 'open' });
+  await github.prReviews({ project: 'o/r', number: 1 });
+  await gitlab.issueList({ project: 'g/r', state: 'open' });
+  await gitlab.mrList({ project: 'g/r', state: 'open' });
+  assert.equal(seen.length >= 4, true);
+  for (const [ep, mb] of seen) assert.ok(mb >= 64 * 1024 * 1024, `${ep} ran with maxBuffer ${mb}`);
+});
+
+// ── #1257 (S1): the class is closed — every gh list read carries the ceiling ─────
+test('#1257: github commitPrs, workflowRunSucceeded and rerunWorkflowRun list reads carry the buffer ceiling', async () => {
+  const seen = [];
+  setSpawn((cmd, args, opts) => {
+    seen.push([args.join(' '), opts?.maxBuffer]);
+    return { status: 0, stdout: args.includes('run') ? '[]' : (args.some(a => /commits\/.*\/pulls/.test(a)) ? '[]' : '{"workflow_runs":[]}'), stderr: '' };
+  });
+  await github.commitPrs({ project: 'o/r', sha: 'abc' });
+  await github.workflowRunSucceeded({ project: 'o/r', workflow: 'w.yml', branch: 'main' });
+  await github.rerunWorkflowRun({ project: 'o/r', ref: 'main' });
+  assert.equal(seen.length, 3);
+  for (const [argv, mb] of seen) assert.ok(mb >= github.LIST_MAX_BUFFER, `${argv} ran with maxBuffer ${mb}`);
+});
+
+test('#1257 guard: github.mjs makes no --paginate / per_page / list call without the list-buffer helper', () => {
+  const src = readFileSync(fileURLToPath(new URL('../axes/vcs/adapters/github.mjs', import.meta.url)), 'utf8');
+  const bare = [...src.matchAll(/\b(gh|ghJson)\(\s*\[([^\]]*)\]/g)]
+    .filter(m => /--paginate|per_page|'list'/.test(m[2]))
+    .map(m => m[0].replace(/\s+/g, ' ').slice(0, 90));
+  assert.deepEqual(bare, [], 'list reads must go through ghListRaw/ghListJson (LIST_MAX_BUFFER)');
+});
+
+test('#1257 (S3): a GitLab list that overflows the buffer says so, naming the ceiling (ENOBUFS)', async () => {
+  setSpawn(() => ({ status: null, stdout: null, stderr: null, error: Object.assign(new Error('spawnSync glab ENOBUFS'), { code: 'ENOBUFS' }) }));
+  const readable = (e) => /exceeded 64 MiB/.test(e.message) && /ENOBUFS/.test(e.message) && !/status null/.test(e.message);
+  await assert.rejects(() => gitlab.issueList({ project: 'g/r', state: 'closed' }), readable);
+  await assert.rejects(() => gitlab.mrList({ project: 'g/r', state: 'open' }), readable);
 });

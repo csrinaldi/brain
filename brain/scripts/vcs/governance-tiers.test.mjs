@@ -189,6 +189,7 @@ test("REQ-TIER-9: requiredJobs('standard') includes the Q5 Phase 5 promotions (p
     'lane-paths',
     'lane-scrub',
     'base-branch',
+    'team-config-reviewed',
   ]);
 });
 
