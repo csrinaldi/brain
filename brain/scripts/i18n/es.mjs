@@ -41,12 +41,15 @@ export default {
 
   'day.ecosystem.notAvailable':    'gentle-ai no disponible — skipping actualizaciones.',
   'day.ecosystem.install':         'Instalar: npm run tools:install',
-  'day.ecosystem.checking':        'Verificando versiones...',
-  'day.ecosystem.allUpToDate':     'Todas las herramientas al día.',
-  'day.ecosystem.updatesAvailable':'{count} actualización(es) disponible(s):',
-  'day.ecosystem.applying':        'Aplicando actualizaciones...',
-  'day.ecosystem.done':            'Listo.',
+  'day.ecosystem.runToUpdate':     'Las actualizaciones de herramientas no se aplican acá — corré `npm run brain:tools:update` para verificarlas y aplicarlas.',
   'day.ecosystem.skillRegistry':   'Skill registry actualizado.',
+
+  // ── tools-update.mjs (#1386) ──
+  'tools.update.checking':      'Verificando y aplicando actualizaciones de herramientas globales (gentle-ai)...',
+  'tools.update.applying':      'Aplicando actualizaciones...',
+  'tools.update.notAvailable':  'gentle-ai no disponible. Instalar: npm run tools:install',
+  'tools.update.refusedCi':     'Me niego a actualizar herramientas globales bajo CI: este verbo se corre de forma interactiva. No se cambió nada.',
+  'tools.update.refusedNoTty':  'Me niego a actualizar herramientas globales sin terminal: este verbo se corre de forma interactiva. No se cambió nada.',
 
   'day.brain.unknownInstalled': 'No se pudo determinar la versión instalada de brain — skipping check.',
   'day.brain.registryUnreachable': 'No se pudo alcanzar el registry para consultar {pkg} — el chequeo se SALTEÓ, no pasó.',

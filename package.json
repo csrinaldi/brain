@@ -102,6 +102,7 @@
     "feature:checkpoint": "node ./brain/scripts/memory/cli.mjs feature-checkpoint",
     "feature:resume": "node ./brain/scripts/memory/cli.mjs feature-resume",
     "tools:install": "bash ./brain/scripts/install-tools.sh",
+    "brain:tools:update": "node ./brain/scripts/tools-update.mjs",
     "brain:audit": "node ./brain/scripts/brain-audit.mjs",
     "brain:metrics": "node ./brain/scripts/brain-metrics.mjs",
     "brain:start": "node ./brain/scripts/brain-start.mjs",

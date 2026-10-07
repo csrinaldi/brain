@@ -57,6 +57,7 @@ export const MANAGED_SCRIPT_KEYS = [
   'brain:ship',
   'brain:start',
   'brain:upgrade',
+  'brain:tools:update',
   'brain:memory:audit',
   'brain:memory:index',
   'brain:memory:pull',
