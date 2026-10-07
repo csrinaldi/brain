@@ -75,8 +75,18 @@ default branch, and every rollup above it is wrong.
 - **A run that does not happen is caught late.** A fork PR's read-only token, a missing GitLab
   variable or an outage leaves the issue open. `day:start`, under the user's credentials, lists
   every PR merged into a tracker whose issue is still open; it reports, it does not close.
-- **Which identity opens a remainder PR** for a merged-but-open node (ADR-0039 ruling M3) is an
-  open question on ADR-0039, and this section does not decide it.
+- **Who executes the direct close** of a merged-but-open node whose last child closed without a
+  merge (ADR-0039 ruling M3) is an open question on ADR-0039, and this section does not decide it.
+
+### `day:start` proposes a remainder PR: Tier 2 (ruling R1, 2026-10-07)
+
+When a node's integration PR merged before the node was Ready to close, and a child has since
+integrated into its live tracker, the node needs a remainder PR (ADR-0039 ruling M3). The close
+workflow does not open it; it reports the node. `day:start` proposes it under the user's
+credentials, as a **Tier 2** act: it shows the PR (head the live tracker, base its target,
+`Closes #<node>`) and creates it only after the human confirms. In a non-interactive run (no TTY,
+or CI) it only reports. The human is the PR's author, so the producing identity is never the
+automation identity that merges in mode B (ADR-0037), and no second automation identity exists.
 
 ### `day:start` regenerates the children region: Tier 1 (ruling M4, 2026-10-07)
 

@@ -7,8 +7,8 @@ issue: 1251
 
 Issue: #1251 (parent #1121, phase 4). The decision record is the ADR-0039 draft:
 `brain-drafts/adr-0039-a-declared-ticket-hierarchy-one-resolver-and-integration-opened-by-ticket-start.md`.
-It records the maintainer's rulings of 2026-10-02 and 2026-10-07 (Q1-Q12, Q1-hotfix, C1-C10, N1-N5
-and M1-M4) and the questions they still leave open. Three of the amendments it owes are drafted beside
+It records the maintainer's rulings of 2026-10-02 and 2026-10-07 (Q1-Q12, Q1-hotfix, C1-C10, N1-N5,
+M1-M4 and R1) and the questions they still leave open. Three of the amendments it owes are drafted beside
 it: `agent-authorities.md`, ADR-0026 Amendment 11 and `workflow-governance.md`.
 
 ## Why
@@ -43,8 +43,9 @@ disagreeing with nothing to notice.
    PR's `Closes #N` to know what to close (N3) and executes it only when the resolver places N
    under the node whose tracker is the base, reporting any other keyword (M2). It rewrites the
    children region in the same step (N5), and closes nothing for a node merged before it was ready
-   (N4); such a node closes through a remainder PR from the same tracker, or directly when the
-   tracker has no commits its target lacks (M3). It runs in every project,
+   (N4); such a node closes through a remainder PR from the same tracker, which `day:start`
+   proposes and a human confirms (Tier 2, R1), or directly when the tracker has no commits its
+   target lacks (M3). It runs in every project,
    the implicit model included (N1). GitLab needs a project access token. `day:start` lists
    merged-but-open issues and regenerates stale regions as the net.
 4b. **The `integration-ready` gate.** Refuses an integration PR merge before its node is Ready to

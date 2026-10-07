@@ -1,6 +1,6 @@
 # ADR-0039 — A declared ticket hierarchy: one resolver, a `move` that keeps the sources together, and the integration that `ticket:start` opens
 
-> **status:** proposed — rulings of 2026-10-02 and 2026-10-07 (Q1-Q12, Q1-hotfix, C1-C10, N1-N5, M1-M4) on #1251, pending human promotion | **date:** 2026-10-07 | **owner:** @crinaldi
+> **status:** proposed — rulings of 2026-10-02 and 2026-10-07 (Q1-Q12, Q1-hotfix, C1-C10, N1-N5, M1-M4, R1) on #1251, pending human promotion | **date:** 2026-10-07 | **owner:** @crinaldi
 > **relates to:** ADR-0018 (the GitLab governance fragment), ADR-0020 (port widening is a decision), ADR-0029 (two sources, one graph), ADR-0032 (the `brain-graph/1` tag), ADR-0034 (lanes), ADR-0035 (a branch name is a claim), ADR-0037 (who merges), ADR-0038 (one config shape per axis, with its Amendments 1-2), ADR-0040 (the owned team config); `brain/core/methodology/harness-contract.md` (`ticket:start` row); `brain/core/methodology/agent-authorities.md`; maintainer rulings on #1251, 2026-10-02 and 2026-10-07; #697, #930, #967, #1121, #1130, #1199, #1206, #1257, #1293, #1335
 
 > **Tier 2 draft.** `brain/project/decisions/**` is human-promoted (`agent-authorities.md` Tier 2).
@@ -325,13 +325,21 @@ milestone was authoritative and a `native: "milestone"` level had no issue behin
   node as "merged but open".
 - **A merged-but-open node closes through a remainder PR** (ruling M3, option C, 2026-10-07). Its
   tracker stays live, and its open children keep integrating into it. When a child integrates into
-  the tracker of a merged-but-open node, brain opens a NEW draft integration PR for the remainder:
+  the tracker of a merged-but-open node, a NEW draft integration PR is needed for the remainder:
   head the same tracker, base the same target, `Closes #<node>`. That PR is marked ready at Ready to
   close (ruling C10), passes `integration-ready`, and its merge closes the node and deletes the
   tracker (ruling C5). **If the node's last child closes while the tracker has no commits its target
   lacks** (`git rev-list <target>..<tracker>` is empty), there is nothing to integrate, so brain
-  closes the node and deletes the tracker directly. Which identity opens the remainder PR is Open
-  question 1.
+  closes the node and deletes the tracker directly (unchanged by ruling R1).
+- **A human authors the remainder PR** (ruling R1, option B, 2026-10-07). The close workflow does
+  not open it; it only reports the merged-but-open node. **`day:start` proposes it under the user's
+  credentials, as a Tier 2 act**: it shows the PR (head the live tracker, base its target,
+  `Closes #<node>`) and creates it only after the human confirms. The human is therefore the PR's
+  author, so ADR-0037's producer rule holds in every mode, and no second automation identity is
+  introduced. In a non-interactive run (no TTY, or CI), `day:start` only reports. The reasons are
+  measured: a PR opened with `GITHUB_TOKEN` triggers no workflow run, so its required checks would
+  never report (`governance-postmerge.yml:577-581`, #1106); and a PR authored by the automation
+  identity that merges in mode B would be merged by its producer.
 - **The same step rewrites the children region** (ruling N5, option C, 2026-10-07). When the
   workflow closes an issue, it rewrites the parent's generated children region (decision 10) in the
   same run, as the same automation identity.
@@ -579,7 +587,8 @@ passes (ruling N4); it merges into `release-1300/tracker` under the declared aut
 Q10), and the workflow then closes #878, deletes `release-1300/epic-878/tracker` and rewrites
 #1300's region. Had #878's PR merged while #56 was still open, at `lite`, #878 would stay open,
 its tracker would stay, and brain would report it as merged but open; #56's merge into the live
-tracker would then open a remainder PR for #878, whose merge closes it (ruling M3). When #1300's PR
+tracker would be reported by the workflow, and the next `day:start` would propose a remainder PR
+for #878, created on the operator's confirmation; its merge closes #878 (rulings M3, R1). When #1300's PR
 merges into `main`, the forge executes its `Closes #1300`, and the workflow deletes its tracker and
 closes the native milestone `Release 1.13` (rulings C5, M2).
 
@@ -642,8 +651,9 @@ main into tracker" PR for each, to be merged with `--merge`.
   PR into a tracker.
 - **A new gate, `integration-ready`,** blocks an early integration merge at `standard` and
   `regulated` where a hierarchy is declared. At `lite`, and on the implicit model at every tier
-  (ruling M1), an early merge is possible; its cost is a node reported as merged but open and a
-  remainder PR to close it (ruling M3).
+  (ruling M1), an early merge is possible; its cost is a node reported as merged but open, and a
+  remainder PR a human must confirm in `day:start` before the node can close (rulings M3, R1).
+  Until someone runs `day:start` interactively, the node stays open.
 - **A closing keyword in a PR body is no longer enough off `main`.** The workflow closes only what
   the resolver confirms (ruling M2), so a child whose block does not declare its parent stays open
   after a tracker merge, and is reported.
@@ -752,25 +762,17 @@ Promoted after ADR-0039, in this order. "Drafted" means the draft is beside this
 
 ## Open questions for the maintainer
 
-The rulings of 2026-10-07 (Q1-Q12, Q1-hotfix, C1-C10, N1-N5, M1-M4) settle every question earlier
-drafts listed. Checking M1-M4 against each other, this ADR and the repository leaves one. This draft
-takes no position on it.
+The rulings of 2026-10-07 (Q1-Q12, Q1-hotfix, C1-C10, N1-N5, M1-M4, R1) settle every question
+earlier drafts listed. Checking R1 against M3 leaves one. This draft takes no position on it.
 
-1. **Which identity opens the remainder PR** (ruling M3 against the close workflow's token and
-   ADR-0037). M3 says brain opens a new draft integration PR when a child integrates into a
-   merged-but-open node's tracker. That moment is a merge, so the only process present is the close
-   workflow. Two facts measured in this repository constrain it:
-   - **A PR opened with `GITHUB_TOKEN` triggers no workflow run**, so `governance.yml`'s required
-     checks, `integration-ready` among them, would never report on it, and it could never merge.
-     `governance-postmerge.yml` (`:577-581`) records this, and the archive sweep opens its PR with a
-     GitHub App token for that reason (#1106).
-   - **ADR-0037 counts the PR author as a producer**, and in mode B the platform merges under the
-     automation identity. If the same automation identity authors the remainder PR and merges it,
-     the producer merges its own change.
-
-   Options: (a) the close workflow opens it with a GitHub App token, as the archive sweep does, and
-   the App identity is declared distinct from the merging automation identity (and is added to
-   `agent-authorities.md` as an automation act; on GitLab the project access token plays the same
-   role); (b) the workflow only reports the merged-but-open node, and `day:start` proposes the
-   remainder PR under the user's credentials (Tier 2), so a human authors it; (c) the workflow opens
-   it with an App token, and a remainder PR is merged as in mode A, by a human, in every mode.
+1. **Who executes M3's direct close** (ruling R1 against M3's direct-close branch). M3 closes a
+   merged-but-open node and deletes its tracker "directly" when its last child closes and the
+   tracker has no commits its target lacks. That branch fires when the last child closes without a
+   merge (a child closed as not planned, or moved away by `move`): no PR merges, so the close
+   workflow, which runs on a merged PR, never fires. R1 moved the sibling act, the remainder PR, to
+   `day:start` under the user's credentials; it left this one "unchanged", with no actor.
+   Options: (a) the close workflow also runs on the `issues` `closed` event and performs the direct
+   close as the automation identity, the same identity and tier as C5's closes and deletions;
+   (b) `day:start` proposes the direct close and the tracker deletion as a Tier 2 act, shown and
+   confirmed like the remainder PR, and only reports in a non-interactive run; (c) `day:start`
+   performs it without asking, as a Tier 1 act, because nothing is left to integrate.
