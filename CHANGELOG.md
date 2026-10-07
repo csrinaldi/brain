@@ -6,6 +6,118 @@ registry (ADR-0030, superseding ADR-0006's git tags); consumers upgrade with
 changes** before upgrading — additive `brain.config.json` migrations apply
 automatically, but renames need manual action.
 
+## v1.13.0 — the package ships no test files and the first upgrade deletes the ones you have, every memory backend hydrates through one verb, and platforms and review engines declare themselves
+
+**Manual step: read before upgrading, first.** This release has **no `brain.config.json` migration**
+(the newest one is still `1.12.1`; the upgrade only restamps `schemaVersion` to `1.13.0`). It does delete
+files, and it changes what a few commands print and return. Each item below was checked against the code on `main`;
+`openspec/changes/issue-1384-release-1-13-0/claim-sweep.md` shows each trace, and the file counts were measured
+by upgrading a 1.12.1 consumer to this tarball with its own 1.12.1 upgrader.
+
+**1. The first `brain:upgrade` deletes brain's test files from your tree.** From 1.13.0 the package ships no test
+infrastructure (#1076): no `*.test.mjs`, `__fixtures__`, `fixtures` or `test-support`, and none of the four
+test-only helpers (`lib/hermetic-box.mjs`, `lib/test-brain-home.mjs`, `lib/test-tmp.mjs`, `test-hygiene.mjs`).
+Earlier releases copied all of that into `brain/scripts/`, so the upgrade removes it. On a fresh 1.12.1 install
+the run printed `Removed 554 file(s) brain no longer ships:` and listed each path: 449 test files, 99 fixture and
+test-support files, the 4 helpers, and the 2 retired readiness scripts of item 4. After it, `node --test` in the
+consumer reports `tests 0`. Your own number can differ if you started from an older release.
+
+- **Preview it:** `npm run brain:upgrade -- v1.13.0 --dry-run` prints `would remove N file(s) brain no longer ships:`
+  and the list.
+- **A file you edited among them is deleted too,** and listed like the rest. Nothing compares the bytes first. The
+  removal runs under the same restore point as the copy, so a run that fails midway puts the files back.
+- **No flag keeps a retired file.** `local` (`brain/project/**`, `brain.config.json`, `.env`, `openspec/changes/**`,
+  `.memory/**`) and the REFUSE and MERGE paths are never removed, but none of them is under `brain/scripts/`,
+  and `--skip-merge` accepts only the three merged settings files. To keep a test you changed, copy it out of
+  `brain/scripts/` before upgrading, or recover it from git afterwards.
+- **Why it works with the upgrader you already have.** The list is data in the incoming package
+  (`lib/retired-paths.mjs`, which folds in the generated `lib/retired-test-paths.mjs`), and the 1.12.1 upgrader
+  already reads it. It was proved by running the saved 1.12.1 `brain-upgrade.mjs` against this release's tarball.
+- The package fell from 10.4 MiB (933 files) to 4.0 MiB (361 files) unpacked; the tarball is 1.4 MB.
+
+**2. `session:start` on `plainfiles` verifies its index and writes nothing.** It runs
+`memory/cli.mjs hydrate --verify` and prints `memory:   plainfiles verified — index current (read-only)`. When
+`.memory/index.jsonl` differs from what the records would produce it prints
+`memory:   plainfiles index is stale — session:start does not write; run npm run brain:memory:share` and still
+writes nothing. In 1.12.1 it called the `import` op, which only `engram` has: on `plainfiles` the line read
+`memory:   engram unavailable (skipped) — memory/cli: backend 'plainfiles' does not implement op 'import'`, naming
+`engram` whatever the backend was. It now names the
+declared backend (`memory:   engram hydrated`, `memory:   <backend> hydration deferred — <reason>`) and adds a
+line from the records themselves, `records:  N durable, newest <date> — <title>`, plus `issue #N: K record(s)` when
+the branch resolves to an issue.
+
+**3. `hydrate` is the one bulk verb; `import` is a deprecated alias (#1115, #1189).** `memory/cli.mjs hydrate`
+exists on both backends. `memory/cli.mjs import` still works for this release: it prints
+`memory/cli: 'import' is deprecated and is removed in the next release — it now runs 'hydrate'. Call 'hydrate'.`
+and runs `hydrate` ([#1351](https://github.com/csrinaldi/brain/issues/1351) removes it). On `plainfiles` the old
+`memory/cli: backend 'plainfiles' does not implement op 'import'` no longer appears from `post-merge`,
+`brain:memory:pull` or `session:start`. A hydration that cannot run (engram declared, binary absent; a contended
+guard; an import that throws) exits **6** and, on `engram`, prints `⚠ hydrating .memory/records/ into engram was deferred — <reason>. The records are
+durable; the next hydration retries.` It is non-fatal for `post-merge` and `session:start`. A script that wraps `memory/cli.mjs` and treats every non-zero
+exit as failure will now see 6.
+
+**4. `brain:day:start` no longer exports engram into `.memory/`.** Step 4c (`engram sync --export`) and its three
+lines (`Exporting memory to repo (.memory/)...`, `Memory exported to .memory/ ...`, `engram export failed ...`) are
+gone: records are the truth and `.memory/` is never written from a backend. Step 4a hydrates the declared backend
+for every backend. Step 4b (the doctrine projection into engram) stays behind the engram probe, and when engram is
+absent it prints one line, `engram not available — skipping the doctrine projection (step 4b, #1349).`, where 1.12.1
+printed `engram not available — skipping shared memory.` and an engram install hint even on `plainfiles`.
+
+**5. `antigravity` with a malformed `.gemini/settings.json` now fails bootstrap.** The `antigravity` platform's `init`
+returns `{ ok: false, reason }` (1.12.1 returned only an additive report and exit 0): `antigravity:
+.gemini/settings.json is not valid JSON — <parse error>. Fix or remove the file, then re-run brain:env:init.`
+`harness/cli.mjs init` prints `harness/cli: init() failed — <reason>` and exits 1, so `env:init` reports
+`harness init failed — REQUIRED, env:init will exit 1`. The same now holds when `AGENTS.md` or `.gemini/settings.json`
+cannot be written. `claude` already behaved this way; `plain` answers `{ ok: true }`.
+
+**6. Two scripts moved.** `brain/scripts/harness/codex-readiness.mjs` and `gemini-readiness.mjs` no longer exist
+(no shim). `harness/readiness.mjs` replaces them (`--check`, `--required`, `--engine`) and reads the routed engine
+from its descriptor, so a route to `gemini` is now probed at bootstrap (it was not). `env:init` prints the section
+`Cold-review engine readiness` where it printed `Codex cold-review`, and lists the pending item
+`cold-review engine readiness` where it listed `Codex cold-review readiness`. The upgrade deletes the two old files
+(they are in the 554). Anything of yours that called them by path must call `harness/readiness.mjs`.
+
+### Platforms and review engines declare themselves (#1128, #1129)
+
+Every runtime provider now has one `<name>.descriptor.mjs` beside its adapter: whether it can orchestrate, whether it
+can run a stage, how it returns its output (`file` or `final-message`), its model policy and whether it ships a
+readiness probe. A registry derives `PLATFORM_CAPABILITIES` and `AGENT_PLATFORMS` from them (the list is still
+`['claude', 'antigravity', 'plain']`, in that order). The review runner no longer branches on an engine name.
+
+- **One redaction rule for every engine.** A failed stage's `reason` carries only the last two lines of the engine's
+  stderr (else stdout), at most 300 characters, with the credential values it scrubbed replaced by `[redacted]` and
+  control bytes removed. In 1.12.1 `claude`'s non-zero-exit branch appended the first stderr line, unredacted and uncapped.
+- **A cold-review route to an engine that cannot run a stage is refused before anything is touched.** For an engine
+  with no descriptor, or `plain`, the reason reads `the engine "<name>" ... so it cannot run the cold-review stage.
+  Refusing rather than falling back to another engine: ...`, and the previous review artifact is left as it was.
+- Two new contract documents, `brain/core/methodology/agent-platform-contract.md` and `review-engine-contract.md`,
+  are installed under `brain/core/`.
+
+### Memory
+
+- `hydrate` also runs on `plainfiles`: it rebuilds `.memory/index.jsonl` only (no git), or with `--verify` checks it
+  and writes nothing.
+- `brain:memory:pull` on `plainfiles` is `git pull` plus the index rebuild; on `engram` it also imports.
+
+### The UI
+
+- **Lane cards** whose issue has an open PR carry a footer: `PR #N · rev R · <VERDICT> · head <sha7> · ...`, read
+  from data the snapshot already holds (#1312). A PR whose verdicts were not read says so instead of inventing one.
+- **The memory ledger** shows each record's title and an excerpt, and a click opens its full content inline as
+  markdown, from the new local route `GET /api/record/{id}` (#1313).
+- **State and track are two chips** (#1308, #1337): the lifecycle state (`◐ In flight`, `○ Planned`, ...) and the
+  track (`Track A`, `? No track`). An issue with no `brain-graph/1` block shows the warning `Configuration missing`
+  and, with it, the text `this issue is missing its brain-graph/1 configuration — paste in the issue body` and the block.
+- **An epic's state follows its children** (#1309): with a closed or in-flight child it no longer reads `○ Planned`,
+  an all-closed open epic reads `Ready to close`, and an uncounted rollup reads `Not computed`.
+- **`Awaiting approval`** replaces `Awaiting review` (#1379): it means the issue lacks `status:approved`, not that a
+  PR waits on a reviewer.
+
+### Known limitations added
+
+[docs/KNOWN-LIMITATIONS.md](docs/KNOWN-LIMITATIONS.md) now lists #1352, #1353, #1355, #1362 and #1374. It
+never carried entries for #1115 and #1189, which item 3 fixes.
+
 ## v1.12.1 — the axis-shape migration now lands whichever upgrader runs it, and repairs a 1.12.0 upgrade that skipped it
 
 **Manual step: read before upgrading, first.** `1.12.0` shipped a defect in how `brain:upgrade` applies its
