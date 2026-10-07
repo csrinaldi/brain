@@ -26,12 +26,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { managed, managedStrategy, STRATEGY } from '../brain/core/managed-paths.mjs';
+import { RETIRED_TEST_PATHS } from '../brain/scripts/lib/retired-test-paths.mjs';
+import { isTestInfraPath } from './tools/retired-test-paths.mjs';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -46,7 +48,7 @@ const NEEDS_BYTES = Object.freeze([STRATEGY.COPY, STRATEGY.REFUSE, STRATEGY.MERG
 const MUST_NOT_SHIP = Object.freeze([
   { path: '.memory', why: '2177 session records narrating internal decisions; the #410/#427 records bypassed the secret-scrub backend path' },
   { path: 'openspec', why: 'in-flight and archived change artifacts — 5.3 MB of this project, meaningless to a consumer' },
-  { path: 'test', why: "brain's own suites; the consumer runs the ones vendored under brain/scripts/**" },
+  { path: 'test', why: "brain's own repo-level suites. No consumer path runs a brain suite (#1076): install, brain:upgrade, brain:check and the CI templates never do" },
   { path: 'docs', why: 'documentation of this repository, not of the product a consumer installs' },
   { path: '.brain-source', why: 'the marker brain:upgrade and npx brain init use to REFUSE running inside brain\'s own checkout' },
 ]);
@@ -57,13 +59,11 @@ const MUST_NOT_SHIP = Object.freeze([
  * grows; if raising it is ever the quick fix for a red run, read what got added
  * first.
  *
- * Raised 8 → 9 (#936, 2026-09-19) after reading what was added: `main` sat at
- * 7.96 MB after the UI design pages (#1067), and #936's lane sweep added
- * ~0.1 MB of source and vendored tests under `brain/scripts/**` (sweep.mjs,
- * delivery.mjs and their suites). Organic growth, no bulk. Whether every
- * vendored suite must ship is tracked in #1076.
+ * History: raised 8 → 10.4 between #936 and #1128/#1129, nearly all of it vendored
+ * `*.test.mjs` growth. #1076 stopped shipping test infrastructure (no consumer path
+ * runs a brain suite), re-arming this as a tripwire on RUNTIME growth.
  */
-const SIZE_CANARY_MB = 10.4; // #1128/#1129 merged with main on 2026-10-06: measured 10.33 MiB / 925 files (main alone 10.26 / 909); +64 KB from the descriptors, registry, stage-output and readiness modules and their tests, read and no bulk. *.test.mjs is 6.24 MiB of it — #1076 is the real fix. Previous line, 10.3: #1115 + main's #1337 merged on 2026-10-05: measured 10.21 MiB / 905 files — #1115's hydrate/verify code and its five new *.test.mjs suites plus #1337's UI, read and no bulk; #1076 is the real fix. Previous line, 10.2: 1.12.0 cut (#1340): measured 10.10 MiB / 898 files, +1.5 KB over the 10.1 line from the README adapters table and the version string (CHANGELOG, docs and openspec do not ship); no bulk. Previous line, 10.1: the #1114 tracker line (… -> 9.8, #1263) and main's line (… -> 9.7, #1284) merged on 2026-10-05: measured 10.06 MiB / 896 files after the merge, both lines' growth read and no bulk. *.test.mjs suites are most of it — #1076 is the real fix, and every raise since 9.3 says so
+const SIZE_CANARY_MB = 4.4; // #1076: no test infrastructure ships. Measured 3.99 MiB / 361 files after the exclusion (was 10.43 MiB / 933), ~10% headroom. Before this line the canary was raised 8 -> 10.4 over a dozen merges, almost all of it `*.test.mjs` growth; now a raise means shipped runtime grew, so read what was added before moving it.
 
 /**
  * The real packed contents — read from the ACTUAL tarball, not from npm's
@@ -183,6 +183,32 @@ test('publish-allowlist: nothing on the must-not-ship list is in the tarball', (
     'these would be published and cannot be cleanly unpublished:\n'
       + leaked.map((e) => `  ${e.path} — ${e.why}`).join('\n'),
   );
+});
+
+// ── No test infrastructure ships (#1076) ────────────────────────────────────
+
+test('publish-allowlist: no test, fixture or test-support file ships under brain/scripts (#1076)', () => {
+  // Vacuity guard: the runtime half of brain/scripts is in the tarball, so an empty
+  // leak list below means the exclusion worked, not that the pack read nothing.
+  for (const runtime of ['brain/scripts/lib/installer.mjs', 'brain/scripts/lib/tmp-tree.mjs', 'brain/scripts/vcs/port-coverage.mjs', 'brain/scripts/lib/retired-test-paths.mjs']) {
+    assert.ok(files.includes(runtime), `${runtime} must ship — it is runtime`);
+  }
+  const leaked = files.filter((f) => isTestInfraPath(f));
+  assert.deepEqual(leaked, [], 'test infrastructure reached the tarball; package.json `files` needs a negated pattern for it');
+  assert.deepEqual(files.filter((f) => /\.test\.(m?js|cjs)$/.test(f)), [], 'no *.test.* anywhere in the package');
+});
+
+test('publish-allowlist: every path earlier releases shipped as test infrastructure is absent from the tarball (#1076)', () => {
+  assert.ok(RETIRED_TEST_PATHS.length > 400, 'the retired list is not vacuous');
+  const present = RETIRED_TEST_PATHS.filter((p) => files.includes(p));
+  assert.deepEqual(present, [], 'declared retired (pruned from consumers) yet still shipped');
+});
+
+test('publish-allowlist: the exclusions are patterns, so a new suite is excluded without a list edit (#1076)', () => {
+  const pkg = JSON.parse(readFileSync(join(REPO_ROOT, 'package.json'), 'utf8'));
+  for (const pat of ['!brain/scripts/**/*.test.mjs', '!brain/scripts/**/__fixtures__', '!brain/scripts/**/test-support', '!brain/scripts/**/fixtures']) {
+    assert.ok(pkg.files.includes(pat), `package.json files must carry ${pat}`);
+  }
 });
 
 test('publish-allowlist: the tarball has not silently gained bulk (canary, not a budget)', () => {

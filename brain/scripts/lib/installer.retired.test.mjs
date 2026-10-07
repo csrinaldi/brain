@@ -23,6 +23,8 @@ import { fileURLToPath } from 'node:url';
 
 import { copyManaged, strategyFor } from './installer.mjs';
 import { RETIRED_PATHS } from './retired-paths.mjs';
+import { RETIRED_TEST_PATHS } from './retired-test-paths.mjs';
+import { isTestInfraPath } from '../../../test/tools/retired-test-paths.mjs';
 import { managedStrategy } from '../../core/managed-paths.mjs';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
@@ -113,9 +115,37 @@ test('#1141: the retired directory is left empty-free once its last brain file g
 
 test('#1141: RETIRED_PATHS names only paths brain no longer ships, each under a managed COPY glob', () => {
   assert.ok(RETIRED_PATHS.length > 0, 'the list is empty — the guard below would pass vacuously');
+  const testInfra = new Set(RETIRED_TEST_PATHS);
+  assert.ok(testInfra.size > 0, 'the generated test-infrastructure list is empty — the split below would be vacuous');
+  let strict = 0;
   for (const rel of RETIRED_PATHS) {
-    assert.equal(existsSync(join(REPO_ROOT, rel)), false, `${rel} is declared retired but brain still has it`);
     assert.equal(strategyFor(rel, managedStrategy), 'copy', `${rel} must sit under a managed COPY glob — nothing else is brain's to remove`);
+    if (testInfra.has(rel)) {
+      // #1076: brain still HAS its tests; what it stopped doing is shipping them. Such an entry
+      // must be test infrastructure, and package.json `files` must exclude it. That the packed
+      // tarball really lacks every one is asserted against a real `npm pack` in
+      // test/publish-allowlist.e2e.test.mjs.
+      assert.equal(isTestInfraPath(rel), true, `${rel} is in the generated list but is not test infrastructure`);
+      continue;
+    }
+    strict += 1;
+    assert.equal(existsSync(join(REPO_ROOT, rel)), false, `${rel} is declared retired but brain still has it`);
   }
+  assert.ok(strict > 0, 'every entry took the lenient branch — the strict guard went inert');
   assert.ok(RETIRED_PATHS.includes(OLD), 'the #1141 move is in the list');
+});
+
+test('#1076: a retired test file the CONSUMER edited is removed like any retired path, reported, and restorable', (t) => {
+  // Existing behaviour, pinned rather than changed: copyManaged does not compare a retired
+  // path with a brain hash. Protection is the consumer's `local` list, and the restore point.
+  const { src, dest } = fixture(t);
+  const T = 'brain/scripts/lib/installer.test.mjs';
+  mkdirSync(dirname(join(dest, T)), { recursive: true });
+  writeFileSync(join(dest, T), '// my edit\n');
+  const kept = copyManaged({ srcRoot: src, destRoot: dest, managed: ['brain/scripts/**'], local: [T], retired: [T] });
+  assert.equal(readFileSync(join(dest, T), 'utf8'), '// my edit\n', 'declaring it local keeps the edit');
+  assert.deepEqual(kept.removed, []);
+  const gone = copyManaged({ srcRoot: src, destRoot: dest, managed: ['brain/scripts/**'], local: [], retired: [T] });
+  assert.deepEqual(gone.removed, [T], 'otherwise the removal is reported by name');
+  assert.equal(existsSync(join(dest, T)), false);
 });
