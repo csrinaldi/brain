@@ -2,16 +2,22 @@
 
 The requirements below restate the decisions in
 `brain-drafts/adr-0039-a-declared-ticket-hierarchy-one-resolver-and-integration-opened-by-ticket-start.md`.
-They are implemented in the slices listed in `proposal.md`, after #1114 lands. Anything the ADR lists
-as an open question is not a requirement here.
+They are implemented in the slices listed in `proposal.md`, after the ADR is promoted. Anything the
+ADR lists as an open question is not a requirement here.
 
 - REQ-1 `vcs.hierarchy.levels` is an ordered list whose order is the nesting. A parent is a higher level; skipping a level is allowed; an inversion in issue data is reported as a top-level divergence.
-- REQ-2 A level declares `label`, `native`, or both; a config with a level that declares neither, or a level entry with a `parent` key, is refused.
-- REQ-3 Level labels are `level:<name>`; `type:*` is never read as a level.
-- REQ-4 `lib/ticket-hierarchy.mjs` is the one resolver. It returns `{ issues: Map<number, { level, levelSource, parent, children, tracker, milestone, state, divergences[] }>, divergences: [...] }`, with `state` in `'open' | 'closed' | null` and `null` meaning unreadable.
-- REQ-5 The native milestone is authoritative; a block that disagrees is reported as a divergence.
-- REQ-6 `brain:ticket:move` rewrites the block, the labels, the native milestone and the branch together, and refuses to rename a branch while a PR is open on it.
-- REQ-7 A drift check reports every issue whose sources disagree, from the resolver's divergences alone.
-- REQ-8 `brain:ticket:start` resolves the nearest integrating ancestor; when its tracker is missing it proposes, and only after confirmation creates, the tracker branch and draft PR (`Closes #<ancestor>`), then writes `tracker:` into the ancestor's block. The ticket's PR targets the tracker with `Part of #<ancestor>`. Brain never merges.
-- REQ-9 Branches are hierarchical, with a fixed `tracker` leaf for integrating nodes and no type prefix; today's `{type}/issue-{N}-{slug}` is parsed as an alias for a window. Lane branches keep their names.
-- REQ-10 `issueList` returns `state` on every entry, additively, on both providers.
+- REQ-2 A level declares `label`, `native`, or both; a level entry with a `parent` key, a level that declares neither, or a `branch` pattern starting with `memory` or `auto-archive` is refused (Q9, 2026-10-07).
+- REQ-3 `vcs.hierarchy.default` is required and names a level in `levels`; resolving to it is not drift (Q7, 2026-10-07). `vcs.hierarchy` is team-layer only and changes pass `team-config-reviewed` (ADR-0040).
+- REQ-4 Level labels are `level:<name>`; `type:*` is never read as a level.
+- REQ-5 `lib/ticket-hierarchy.mjs` is the one resolver. It returns `{ issues: Map<number, { level, levelSource, parent, children, tracker, milestone, state, divergences[] }>, divergences: [...] }`. Level precedence is block > label > native > default and every disagreement is a divergence (Q2, 2026-10-07). `state` is `'open' | 'closed' | null`; `milestone` is `object | 'none' | null`, with `null` meaning unreadable and never shown as "no milestone" (Q8, 2026-10-07). An unloaded parent is a divergence only when its `forgeLoad` lane is `complete`.
+- REQ-6 A milestone is an issue with `kind: milestone`; its children declare `parent:`. The native milestone object is a mirror brain creates and assigns, read for drift only (Q4, 2026-10-07).
+- REQ-7 Native containment (GitHub sub-issues, GitLab epics/work items, native milestone) is read in a cached background lane for drift only, never to resolve a parent; an unsupported provider or tier is unmeasured, never "no children" (Q11, 2026-10-07).
+- REQ-8 `brain:ticket:move` rewrites the block, the labels, the native milestone mirror and the branch together, and refuses to rename a branch while a PR is open on it.
+- REQ-9 A drift check reports every issue whose sources disagree, from the resolver's divergences alone, and counts open branches and PRs on the legacy grammar.
+- REQ-10 `brain:ticket:start` resolves the nearest integrating ancestor; when trackers are missing it prints the whole chain and, after one confirmation, creates every missing tracker and draft PR top-down and writes `tracker:` into each block (Q1, 2026-10-07). A milestone integrates into `main` and an epic into its milestone's tracker (Q5, 2026-10-07).
+- REQ-11 A hotfix is `ticket:start N --base main` on a `hotfix` issue; it creates no tracker chain; after it merges, brain proposes one "merge main into tracker" PR per open tracker behind `main`, merged with `--merge` (Q1-hotfix, 2026-10-07). Hotfix is not a level.
+- REQ-12 When a child's PR merges into a tracker, a post-merge step closes the child through `issueClose`; the child PR keeps `Closes #<child>` and adds `Part of #<parent>` (Q3, 2026-10-07).
+- REQ-13 Integration PRs follow the declared ADR-0037 autonomy mode; no agent merges (Q10, 2026-10-07).
+- REQ-14 Branches are hierarchical, with a fixed `tracker` leaf for integrating nodes and no type prefix; a level without `branch` contributes no segment; the legacy `{type}/issue-{N}-{slug}` is parsed while any open branch or PR uses it and removed the minor after the count reads 0 (Q5, Q6, 2026-10-07). Lane branches keep their names.
+- REQ-15 The parent's body carries a generated children region between HTML markers outside any `brain-graph/1` fence, marked "generated by brain, not read, do not edit"; no brain tool reads its contents, pinned by a test (Q12, 2026-10-07).
+- REQ-16 `issueList` returns `state` and `body` on every entry, additively, on both providers (shipped in #1257).

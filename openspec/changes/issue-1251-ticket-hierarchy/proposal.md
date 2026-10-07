@@ -7,36 +7,48 @@ issue: 1251
 
 Issue: #1251 (parent #1121, phase 4). The decision record is the ADR-0039 draft:
 `brain-drafts/adr-0039-a-declared-ticket-hierarchy-one-resolver-and-integration-opened-by-ticket-start.md`.
-It records the maintainer's rulings of 2026-10-02 and lists the open questions they leave.
+It records the maintainer's rulings of 2026-10-02 and 2026-10-07 (Q1-Q12 and Q1-hotfix) and the
+questions they still leave open.
 
 ## Why
 
 Brain knows one level, `epic`, and one hop, from a ticket to its epic's tracker. It cannot
-declare a release, a feature or a milestone. `issueList` carries no `state`. A tracker branch is
-created by hand, no draft PR collects a parent's work, and moving a ticket leaves its block,
-labels, milestone and branch disagreeing with nothing to notice.
+declare a milestone or any other level. A tracker branch is created by hand, no draft PR collects
+a parent's work, changes made in the forge UI are invisible, a parent's list of children is
+hand-written and drifts, and moving a ticket leaves its block, labels, milestone and branch
+disagreeing with nothing to notice.
 
 ## Slices (from #1251)
 
-1. **The resolver and the config shape.** `vcs.hierarchy` with its validation, and
-   `lib/ticket-hierarchy.mjs` returning `{ issues, divergences }`. `issueList` gains `state` (#1199).
-2. **`ticket:start` initialisation.** Resolve the nearest integrating ancestor, and propose and
-   confirm (Tier 2) its tracker branch and draft PR. Write `tracker:` into its block, branch the
-   ticket from it, and have the ticket's PR target it with `Part of`.
-3. **`brain:ticket:move`.** Rewrite the block, the labels, the native milestone and the branch
-   together. Refuse to rename a branch while a PR is open on it.
-4. **The drift check** in `brain:doctor` (#1130) and `brain:governance-status`.
-5. **The branch scheme.** Hierarchical names with a `tracker` leaf and no type prefix. Today's
-   `{type}/issue-{N}-{slug}` is parsed as an alias for a window.
+1. **The resolver and the config shape.** `vcs.hierarchy` (`levels`, a required `default`, the
+   label-or-native and lane-prefix rules) with its validation, and `lib/ticket-hierarchy.mjs`
+   replacing `status/hierarchy-adapter.mjs` under the same contract. Precedence
+   block > label > native > default; `milestone` is `object | 'none' | null`; partial input via
+   `forgeLoad`. (`issueList`'s `state` and `body` already shipped in #1257.)
+2. **The native drift lane.** A cached background read of GitHub sub-issues, GitLab epics/work
+   items and the native milestone, compared with the resolved hierarchy; unmeasured when
+   unsupported.
+3. **`ticket:start` initialisation.** Resolve the nearest integrating ancestor, print the whole
+   missing tracker chain, and on one confirmation push the trackers, open their draft PRs and write
+   `tracker:` into their blocks. Milestones integrate into `main`, epics into their milestone.
+   Hotfix: `--base main` on a `hotfix` issue, with "merge main into tracker" proposals afterwards.
+4. **The post-merge close.** `issueClose` on a child merged into a tracker, after measuring
+   GitLab's behaviour.
+5. **`brain:ticket:move`.** Rewrite the block, the labels, the native milestone mirror and the
+   branch together. Refuse to rename a branch while a PR is open on it.
+6. **The drift check** in `brain:doctor` (#1130) and `brain:governance-status`, plus the count of
+   branches and PRs still on the legacy grammar.
+7. **The branch scheme.** Hierarchical names with a `tracker` leaf and no type prefix. The legacy
+   `{type}/issue-{N}-{slug}` is parsed while any open branch or PR uses it.
+8. **The generated children region** in the parent's body, human-only, written by #1335's writer.
 
 ## Sequencing
 
-**Implementation waits until #1114 lands.** `vcs.hierarchy` lives inside the `vcs` axis object
-that ADR-0038 defines, and ADR-0038 is on the #1114 tracker, not on `main`. This change carries
-only the ADR draft until then.
+#1114 has landed (PR #1296), so ADR-0038's `vcs` axis object exists on `main`. Implementation
+starts after ADR-0039 is promoted and its open questions are ruled.
 
 ## Not in this change
 
 - No code. The slices above are implemented after the ADR is promoted.
 - The amendments the ADR names (ADR-0029, ADR-0032, ADR-0035, the `harness-contract.md`
-  `ticket:start` row) are separate drafts, promoted after ADR-0039.
+  `ticket:start` row, `agent-authorities.md`) are separate drafts, promoted after ADR-0039.
