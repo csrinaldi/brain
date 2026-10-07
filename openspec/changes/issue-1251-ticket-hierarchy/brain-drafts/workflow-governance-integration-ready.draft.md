@@ -17,11 +17,11 @@ body-end: ### Notes for the promoter
 ```
 
 ```amend-find
-| 4 | An ADDED ADR co-occurs with a `brain/HOME.md` entry | `decision-gate` _(S4)_ | _(none — the gate reads no labels)_ | Hard, in one direction — see below |
+| Hard, in one direction — see below |
 ```
 
 ```amend-replace
-| 4 | An ADDED ADR co-occurs with a `brain/HOME.md` entry | `decision-gate` _(S4)_ | _(none — the gate reads no labels)_ | Hard, in one direction — see below |
+| Hard, in one direction — see below |
 | 5 **[Added, #1251, ADR-0039]** | An integration PR merges only when every child of its node is closed | `integration-ready` | _(none — no label bypasses it)_ | Tiered where `vcs.hierarchy` is declared: detection at `lite`, required at `standard` and `regulated`; detection-only at every tier on the implicit model (ADR-0026 Amendment 11) — see "Invariant 5" below |
 ```
 
