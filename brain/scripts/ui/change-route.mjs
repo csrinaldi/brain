@@ -280,8 +280,13 @@ function buildReviewsTab({ snapshot, project, issue }) {
     }
   }
   if (rounds.length === 0 && unreadable.length > 0) {
-    const allQueued = unreadable.every((u) => u.pending === true);
-    return { ok: false, reason: `${allQueued ? 'every review thread of this issue is not read yet' : 'every review thread of this issue is unreadable'}: ${unreadable.map((u) => `#${u.pr} (${u.reason})`).join(', ')}`, unreadable, sourceNote: REVIEWS_SOURCE_NOTE };
+    const queued = unreadable.filter((u) => u.pending === true).length;
+    // #1365: a thread is worded by its OWN state; only a tab where every thread agrees names them with one phrase.
+    if (queued === 0 || queued === unreadable.length) {
+      return { ok: false, reason: `${queued > 0 ? 'every review thread of this issue is not read yet' : 'every review thread of this issue is unreadable'}: ${unreadable.map((u) => `#${u.pr} (${u.reason})`).join(', ')}`, unreadable, sourceNote: REVIEWS_SOURCE_NOTE };
+    }
+    const own = (u) => `#${u.pr} (${u.pending === true ? 'not read yet' : 'unreadable'}: ${u.reason})`;
+    return { ok: false, reason: `no review thread of this issue could be shown: ${unreadable.map(own).join(', ')}`, unreadable, sourceNote: REVIEWS_SOURCE_NOTE };
   }
   return { ok: true, value: rounds, unreadable, sourceNote: REVIEWS_SOURCE_NOTE };
 }

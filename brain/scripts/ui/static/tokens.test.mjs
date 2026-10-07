@@ -155,7 +155,7 @@ test('#1309 D138: the Ready to close tokens exist in all three theme blocks and 
 // The review footer and the queue chip printed APPROVE, REVISE and STOP in `--state-*-fg`, which are chip
 // foregrounds: in the light theme all three are #1b1b1f, so the three verdicts read in one colour. A verdict's
 // text colour differs per verdict in each theme and meets AA on every ground it is drawn on.
-test('#1365: --verdict-approve/-revise/-stop exist in all three theme blocks, differ per verdict and meet AA on the card and on the chip ground', () => {
+test('R1342-7: --verdict-approve/-revise/-stop exist in all three theme blocks, differ per verdict and meet AA on the card and on the chip ground', () => {
   const bodies = {
     light: (css.match(/^:root \{([\s\S]*?)\n\}/m) ?? [, ''])[1],
     media: (css.match(/@media \(prefers-color-scheme: dark\) \{([\s\S]*?)\n\}/) ?? [, ''])[1],
@@ -177,7 +177,7 @@ test('#1365: --verdict-approve/-revise/-stop exist in all three theme blocks, di
   }
 });
 
-test('#1365: the verdict rules read --verdict-* and never a state chip foreground', () => {
+test('R1342-7: the verdict rules read --verdict-* and never a state chip foreground', () => {
   const rules = css.replace(/\/\*[\s\S]*?\*\//g, '').split('\n').filter((l) => /\.(node-review|queue-verdict)\.verdict-(approve|revise|stop)\s*\{/.test(l));
   assert.equal(rules.length, 6, 'three footer rules and three chip rules');
   for (const rule of rules) {

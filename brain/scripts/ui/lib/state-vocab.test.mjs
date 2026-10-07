@@ -106,7 +106,7 @@ test('R1308-5/S5/S7: a pending or failed source with no evidence is Not computed
   assert.equal(stateOf(node(), w).code, 'in-flight', 'a local change dir is enough while prs is pending');
 });
 
-test('R1303-1: an idle source is named as not read yet with its reason, never as loading (#1303)', () => {
+test('R1342-4: an idle source is named as not read yet with its reason, never as loading (#1303)', () => {
   const s = stateOf(node(), { missing: [{ name: 'prs', state: 'idle', reason: 'polling is paused' }], byIssue: new Map() });
   assert.equal(s.code, 'not-computed');
   assert.match(s.reason, /prs was not read yet \(polling is paused\)/);
@@ -250,7 +250,7 @@ test('R1309-7/ruling a: every child closed on an open epic reads Ready to close 
   assert.equal(stateOf(epicNode({ roadmap: { ok: true, value: { state: DONE } } }), READY_WORK, rollupOf(hier({ closed: 4 }))).code, 'done');
 });
 
-test('R1360-1: Ready to close over a closed list a refresh failed to renew carries the rollup stale qualifier (#1360)', () => {
+test('R1342-5: Ready to close over a closed list a refresh failed to renew carries the rollup stale qualifier (#1360)', () => {
   const failed = { state: 'failed', at: '2026-09-02T00:00:00Z', reason: 'HTTP 502', lastCompleteAt: '2026-09-01' };
   const s = stateOf(epicNode(), READY_WORK, rollupOf(hier({ closed: 2 }), failed));
   assert.equal(s.code, 'ready-to-close');
