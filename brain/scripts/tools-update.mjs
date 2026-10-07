@@ -35,7 +35,7 @@ export async function runToolsUpdate({
   const probe = spawn('gentle-ai', ['--version'], { stdio: 'pipe', encoding: 'utf8' });
   if (probe.status !== 0) {
     err(await t('tools.update.notAvailable'));
-    return { exitCode: 1 };
+    return { exitCode: probe.status || 1 };
   }
   log(await t('tools.update.checking'));
   const update = spawn('gentle-ai', ['update'], { stdio: 'inherit' });

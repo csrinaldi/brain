@@ -103,3 +103,16 @@ test('the verb is an npm script and a managed script key (it reaches consumers)'
   assert.equal(pkg.scripts['brain:tools:update'], 'node ./brain/scripts/tools-update.mjs');
   assert.ok(MANAGED_SCRIPT_KEYS.includes('brain:tools:update'));
 });
+
+test('a failing probe returns its own status, like every other step (R2)', async () => {
+  const r = await harness({ statuses: { '--version': 7 } }).run();
+  assert.equal(r.exitCode, 7);
+});
+
+test('a probe with no status (the binary is missing, ENOENT) still exits non-zero', async () => {
+  const calls = [];
+  const spawn = (cmd, args) => { calls.push(args[0]); return { status: null, error: new Error('spawn gentle-ai ENOENT') }; };
+  const r = await runToolsUpdate({ spawn, env: {}, isTTY: true, log: () => {}, err: () => {} });
+  assert.equal(r.exitCode, 1);
+  assert.deepEqual(calls, ['--version']);
+});
