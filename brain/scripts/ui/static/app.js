@@ -1603,7 +1603,11 @@ function renderRoadmapRow(row, className) {
   node.appendChild(chip);
   node.appendChild(el('span', 'roadmap-title', `#${row.number} ${row.title}`));
   node.appendChild(renderSourceStamp(row.sourceStamp));
-  if (row.stateReason) node.appendChild(el('span', 'roadmap-state-reason', row.stateReason));
+  if (row.stateReason) {
+    const why = el('span', 'roadmap-state-reason', row.stateReason);
+    why.setAttribute('title', row.stateReason);
+    node.appendChild(why);
+  }
   if (row.blockedBy.length > 0) node.appendChild(el('span', 'roadmap-blocked', `blocked by ${row.blockedBy.map((n) => `#${n}`).join(', ')}`));
   for (const d of row.divergences) node.appendChild(el('span', 'roadmap-divergence', `${d.reason}${d.value !== null && d.value !== undefined ? `: #${d.value}` : ''}`));
   return node;

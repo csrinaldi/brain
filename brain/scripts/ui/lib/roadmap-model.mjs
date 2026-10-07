@@ -48,7 +48,10 @@ function safeStateOf(node, work, epics) {
  * not.
  */
 function roadmapRow(node, divergences, project, work, epics) {
-  const { state, reason } = safeStateOf(node, work, epics);
+  const { state, reason: unreadReason } = safeStateOf(node, work, epics);
+  // #1342: a Not computed row says why (the missing sources, or the roadmap's own reason on the legacy path);
+  // a state with nothing to explain says nothing.
+  const reason = unreadReason ?? (state.code === 'not-computed' ? state.reason ?? (node.roadmap?.ok === false ? node.roadmap.reason ?? null : null) : null);
   return row({
     title: node.title,
     detail: null,
