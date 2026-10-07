@@ -414,7 +414,7 @@ const ALLOWLIST = [
   // #1114 S3.3: the lifted §6 blocks run against a scratch dir holding a real brain.config.json, so `brain:config` is the writer under test (bash -c scripts, each with a timeout).
 
   // ── i18n shell-catalog eval: bash -c, zero VCS surface ──────────────────
-  { file: 'brain/scripts/i18n/coverage.test.mjs', entrypoint: '<unresolved>', line: 161, reason: 'no-vcs-capability' }, // #1061 shifted this line by inserting the memory.heal.* parity test earlier in the file
+  { file: 'brain/scripts/i18n/coverage.test.mjs', entrypoint: '<unresolved>', line: 160, reason: 'no-vcs-capability' }, // #1386 shifted this line by removing the dead day.ecosystem.* pins earlier in the file (161 before; #1061 had moved it there)
 
   // ── #1061 heal-duplicates cli spawn test's own `which` resolution ───────
   { file: 'brain/scripts/memory/cli.heal-duplicates.test.mjs', entrypoint: '<unresolved>', line: 24, reason: 'no-vcs-capability' },
