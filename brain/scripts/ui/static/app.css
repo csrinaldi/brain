@@ -62,6 +62,10 @@
      parent-grammar/parent-ambiguous/parent-not-epic warnings and, from PR 2
      on, the Decisions view's drift warnings — one shared visual language,
      distinct from --severity-*, which is about review findings. */
+  /* the TEXT colour of a review verdict (#1365): APPROVE, REVISE and STOP differ in both themes and meet AA 4.5:1 on the
+     card (--surface), the page (--paper) and the queue chip's own ground. The --state-*-fg pairs are chip foregrounds
+     (#1b1b1f for all three in the light theme), so verdict text never reads them. */
+  --verdict-approve: #166534;         --verdict-revise: #92400e;          --verdict-stop: #991b1b;
   --divergence-fg: #6b21a8;           --divergence-bg: #f3e8ff;
 }
 
@@ -103,6 +107,7 @@
     --severity-correction-fg: #f59e0b;  --severity-correction-bg: #451a03;
     --severity-editorial-fg: #94a3b8;   --severity-editorial-bg: #1e293b;
     --severity-unknown-fg: #fbbf24;     --severity-unknown-bg: #0f172a;
+    --verdict-approve: #4ade80;         --verdict-revise: #fbbf24;          --verdict-stop: #fb7185;
     --divergence-fg: #d8b4fe;           --divergence-bg: #2e1065;
   }
 }
@@ -136,6 +141,7 @@
     --severity-correction-fg: #f59e0b;  --severity-correction-bg: #451a03;
     --severity-editorial-fg: #94a3b8;   --severity-editorial-bg: #1e293b;
     --severity-unknown-fg: #fbbf24;     --severity-unknown-bg: #0f172a;
+    --verdict-approve: #4ade80;         --verdict-revise: #fbbf24;          --verdict-stop: #fb7185;
     --divergence-fg: #d8b4fe;           --divergence-bg: #2e1065;
   }
 
@@ -877,9 +883,9 @@ body {
   border: 1px solid;
   font-weight: 600;
 }
-.queue-verdict.verdict-approve { color: var(--state-done-fg); background: var(--state-done-bg); border-color: var(--state-done-fg); }
-.queue-verdict.verdict-revise { color: var(--state-awaiting-review-fg); background: var(--state-awaiting-review-bg); border-color: var(--state-awaiting-review-fg); }
-.queue-verdict.verdict-stop { color: var(--state-blocked-fg); background: var(--state-blocked-bg); border-color: var(--state-blocked-fg); }
+.queue-verdict.verdict-approve { color: var(--verdict-approve); background: var(--state-done-bg); border-color: var(--verdict-approve); }
+.queue-verdict.verdict-revise { color: var(--verdict-revise); background: var(--state-awaiting-review-bg); border-color: var(--verdict-revise); }
+.queue-verdict.verdict-stop { color: var(--verdict-stop); background: var(--state-blocked-bg); border-color: var(--verdict-stop); }
 .queue-row.escalate .queue-wait { color: var(--state-blocked-fg); font-weight: 600; }
 .queue-note { margin: 0 0 10px; color: var(--stamp); font-size: 12px; }
 
@@ -1535,7 +1541,7 @@ body {
 
 /* The review footer (#1312): wraps rather than ellipsises — a clipped "origin tip here" would hide the very fact that a head differs; the title adds the full SHAs. */
 .node-review { margin: 0; padding-top: 6px; font-family: var(--font-mono); font-size: 10px; color: var(--muted); word-break: break-word; }
-.node-review.verdict-approve { color: var(--state-done-fg); }
-.node-review.verdict-revise { color: var(--state-awaiting-review-fg); }
-.node-review.verdict-stop { color: var(--state-blocked-fg); }
+.node-review.verdict-approve { color: var(--verdict-approve); }
+.node-review.verdict-revise { color: var(--verdict-revise); }
+.node-review.verdict-stop { color: var(--verdict-stop); }
 .node-review.verdict-unknown { color: var(--stamp); font-style: italic; }

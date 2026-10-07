@@ -27,7 +27,8 @@ function missingSources(sections) {
   for (const name of DATA_SECTIONS) {
     const s = sections[name];
     if (s?.ok === true) continue;
-    if (s && typeof s === 'object') out.push({ name, state: s.pending === true ? 'pending' : 'failed', reason: s.reason });
+    // `idle` (#1262): the poller says no read will start, so the source was not read, which is not "loading" (#1303).
+    if (s && typeof s === 'object') out.push({ name, state: s.pending === true ? (s.idle === true ? 'idle' : 'pending') : 'failed', reason: s.reason });
     else out.push({ name, state: 'failed', reason: `no ${name} section was given` });
   }
   return out;
@@ -44,7 +45,17 @@ export function workIndex(sections) {
   return { missing: missingSources(s).filter((m) => m.name !== 'hierarchy'), byIssue: collect(s) };
 }
 
-const noticeFor = (m) => (m.state === 'pending' ? `${m.name}: still loading` : `${m.name}: could not be read — ${m.reason}`);
+const noticeFor = (m) => {
+  if (m.state === 'pending') return `${m.name}: still loading`;
+  if (m.state === 'idle') return `${m.name}: not read yet, ${m.reason}`;
+  return `${m.name}: could not be read — ${m.reason}`;
+};
+
+/** What a hierarchy that is not ready says about itself: loading, idle with its reason, or failed with its reason. */
+const hierarchyWords = (h) => {
+  if (h.pending !== true) return `could not be read — ${h.reason}`;
+  return h.idle === true ? `not read yet, ${h.reason}` : `still loading — ${h.reason}`;
+};
 
 /** Every issue number one of the four sources names, with that source's entries. */
 function collect(sections) {
@@ -150,7 +161,7 @@ export function buildInflight(sections, { nowMs }) {
   const h = hierarchyOf(s.hierarchy);
   if (!h.ok) {
     // D96: with no state there is no filter, so no row is drawn; the count says how many were named.
-    value.notices = [`${candidates.size} candidate issue(s); their open/closed state is not read yet (hierarchy: ${h.pending === true ? 'still loading' : 'could not be read'} — ${h.reason})`, ...notices.filter((n) => !n.startsWith('hierarchy:'))];
+    value.notices = [`${candidates.size} candidate issue(s); their open/closed state is not read yet (hierarchy: ${hierarchyWords(h)})`, ...notices.filter((n) => !n.startsWith('hierarchy:'))];
     return { ok: true, value };
   }
 

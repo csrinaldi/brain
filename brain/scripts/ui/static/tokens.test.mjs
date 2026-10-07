@@ -150,3 +150,38 @@ test('#1309 D138: the Ready to close tokens exist in all three theme blocks and 
     assert.ok(r >= 4.5, `${name}: ready-to-close is ${r.toFixed(2)}:1, below 4.5`);
   }
 });
+
+// ── #1365: verdict text has its own tokens ────────────────────────────────
+// The review footer and the queue chip printed APPROVE, REVISE and STOP in `--state-*-fg`, which are chip
+// foregrounds: in the light theme all three are #1b1b1f, so the three verdicts read in one colour. A verdict's
+// text colour differs per verdict in each theme and meets AA on every ground it is drawn on.
+test('R1342-7: --verdict-approve/-revise/-stop exist in all three theme blocks, differ per verdict and meet AA on the card and on the chip ground', () => {
+  const bodies = {
+    light: (css.match(/^:root \{([\s\S]*?)\n\}/m) ?? [, ''])[1],
+    media: (css.match(/@media \(prefers-color-scheme: dark\) \{([\s\S]*?)\n\}/) ?? [, ''])[1],
+    stamp: (css.match(/:root\[data-theme='dark'\] \{([\s\S]*?)\n\}/) ?? [, ''])[1],
+  };
+  const base = tokenMap(bodies.light);
+  const CHIP_GROUND = { approve: 'state-done-bg', revise: 'state-awaiting-review-bg', stop: 'state-blocked-bg' };
+  for (const [name, body] of Object.entries(bodies)) {
+    const t = { ...base, ...tokenMap(body) };
+    const colours = ['approve', 'revise', 'stop'].map((v) => t[`verdict-${v}`]);
+    assert.ok(colours.every(Boolean), `${name}: a --verdict-* token is missing`);
+    assert.equal(new Set(colours).size, 3, `${name}: the three verdicts must not share a colour`);
+    for (const v of ['approve', 'revise', 'stop']) {
+      for (const ground of ['surface', 'paper', CHIP_GROUND[v]]) {
+        const r = ratio(t[`verdict-${v}`], t[ground]);
+        assert.ok(r >= 4.5, `${name}: --verdict-${v} on --${ground} is ${r.toFixed(2)}:1, below 4.5`);
+      }
+    }
+  }
+});
+
+test('R1342-7: the verdict rules read --verdict-* and never a state chip foreground', () => {
+  const rules = css.replace(/\/\*[\s\S]*?\*\//g, '').split('\n').filter((l) => /\.(node-review|queue-verdict)\.verdict-(approve|revise|stop)\s*\{/.test(l));
+  assert.equal(rules.length, 6, 'three footer rules and three chip rules');
+  for (const rule of rules) {
+    const color = rule.match(/(?<![-\w])color:\s*var\((--[a-z-]+)\)/)?.[1];
+    assert.match(color ?? '', /^--verdict-(approve|revise|stop)$/, rule);
+  }
+});

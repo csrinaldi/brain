@@ -105,3 +105,35 @@ test('#1115 day-start: a missing engram binary skips only 4b, says so neutrally,
 test('#1115 day-start: the hydrate step suppresses the generic exit-6 line (the adapter already reported the deferral)', () => {
   assert.match(SOURCE, /'hydrate'\],\s*\{\s*quietCodes:\s*\[6\]\s*\}/);
 });
+
+// ── #1386: day:start updates nothing ─────────────────────────────────────────
+
+function ecosystemBlock() {
+  const start = SOURCE.indexOf('// ── 3. Ecosystem updates');
+  const end = SOURCE.indexOf('// ── 4. brain (core) version');
+  assert.ok(start !== -1 && end > start, 'the ecosystem block markers must be present');
+  return SOURCE.slice(start, end);
+}
+
+test('day-start.mjs step 3 spawns neither `gentle-ai update` nor `gentle-ai upgrade` (#1386)', () => {
+  const block = ecosystemBlock();
+  assert.ok(!/['"]upgrade['"]/.test(block), 'no upgrade spawn');
+  assert.ok(!/['"]update['"]/.test(block), 'no update spawn — it is treated as mutating');
+  assert.ok(!/\brun\(/.test(block), 'step 3 must not use the inherit-stdio run() helper');
+});
+
+test('day-start.mjs step 3 names the dedicated verb and keeps the skill-registry refresh (#1386)', () => {
+  const block = ecosystemBlock();
+  assert.match(block, /day\.ecosystem\.runToUpdate/);
+  assert.match(block, /\['skill-registry', 'refresh'\]/);
+});
+
+test('day-start.mjs has no printf specifiers mixed into a console.log template (#1386 ruling 6)', () => {
+  assert.ok(!/console\.log\(`[^`]*%-?\d*s/.test(SOURCE), 'a %s inside a template literal is never formatted');
+});
+
+test('the reminder is in both catalogs and names the verb (#1386)', async () => {
+  const en = (await import('./i18n/en.mjs')).default;
+  const es = (await import('./i18n/es.mjs')).default;
+  for (const c of [en, es]) assert.match(c['day.ecosystem.runToUpdate'], /npm run brain:tools:update/);
+});

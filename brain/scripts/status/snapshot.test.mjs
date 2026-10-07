@@ -661,7 +661,8 @@ test('#1262: a pending lane that carries its own reason keeps it and says it is 
   const paused = { state: 'pending', at: null, reason: 'polling is paused' };
   const forgeLoad = { open: paused, closed: { ...paused } };
   const s = await buildSnapshot({ root: makeFixture(), now: NOW, vcs: port, project: 'o/r', forgeLoad });
-  for (const name of ['graph', 'prs', 'reviews', 'closedIssues']) {
+  // #1303: hierarchy and localWorktrees derive from the graph through pendingFrom and must keep `idle` and the reason too.
+  for (const name of ['graph', 'prs', 'reviews', 'closedIssues', 'hierarchy', 'localWorktrees']) {
     assert.deepEqual(s[name], { ok: false, pending: true, idle: true, reason: 'polling is paused' }, name);
   }
   assert.deepEqual(lists, [], 'a paused lane is not read');

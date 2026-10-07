@@ -50,8 +50,7 @@ test('PR2 day-start: main sync keys exist in en', () => {
 });
 
 test('PR2 day-start: ecosystem + brain + memory + done keys exist in en', () => {
-  assert.equal(en['day.ecosystem.allUpToDate'],    'All tools up to date.');
-  assert.equal(en['day.ecosystem.updatesAvailable'], '{count} update(s) available:');
+  assert.match(en['day.ecosystem.runToUpdate'], /npm run brain:tools:update/);
   assert.equal(en['day.brain.newVersion'],         'New brain version available: {installed} → {latest}');
   assert.equal(en['day.brain.upToDate'],           'brain up to date ({installed}).');
   assert.equal(en['day.memory.hookActive'],        'Pre-push hook active — checkpoints feature working memory before push.');

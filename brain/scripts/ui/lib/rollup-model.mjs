@@ -14,7 +14,7 @@ export const NO_CHILDREN = 'no children declared';
 /** hierarchyOf(section) -> {ok:true, value:{issues: Map, divergences, closedUnresolved}} | {ok:false, pending?, reason} */
 export function hierarchyOf(section) {
   if (!section || typeof section !== 'object') return { ok: false, reason: 'no hierarchy section was given' };
-  if (section.ok !== true) return { ok: false, ...(section.pending === true ? { pending: true } : {}), reason: section.reason };
+  if (section.ok !== true) return { ok: false, ...(section.pending === true ? { pending: true } : {}), ...(section.pending === true && section.idle === true ? { idle: true } : {}), reason: section.reason };
   const { issues, divergences, closedUnresolved, closedRead } = section.value;
   // A section that does not say its closed list was read is not trusted as having it.
   const read = closedRead && typeof closedRead === 'object' ? closedRead : { ok: false, reason: 'the hierarchy did not report whether the closed list was read' };
@@ -73,6 +73,11 @@ function uncountedWords(load) {
   return `closed children unknown (${load.reason})`;
 }
 
+/** The qualifier an answer counted from a list a refresh failed to renew carries; empty when the list is current (#1360). */
+export function staleSuffix(load) {
+  return load.state === 'failed' ? ` · closed list as of ${load.lastCompleteAt}; refresh failed (${load.reason})` : '';
+}
+
 /** rollupLabel(rollup) -> the one sentence the heading and the drawer show. Text only; the caller sets it with `textContent`. */
 export function rollupLabel(rollup) {
   if (!rollup.ok) return rollup.pending === true ? rollup.reason : `rollup unavailable: ${rollup.reason}`;
@@ -81,7 +86,7 @@ export function rollupLabel(rollup) {
   if (closed === null) return `${uncountedWords(load)}${open > 0 ? ` · ${open} open` : ''}${unknownSuffix}`;
   // Built before the zero-children branch: an answer counted from a list a refresh failed to renew is
   // as-of that list whether it found children or not, and must say so either way.
-  const stale = load.state === 'failed' ? ` · closed list as of ${load.lastCompleteAt}; refresh failed (${load.reason})` : '';
+  const stale = staleSuffix(load);
   if (total === 0) {
     const none = unresolved > 0 ? `${NO_CHILDREN}; ${unresolved} closed issue${unresolved === 1 ? '' : 's'} could not be read` : NO_CHILDREN;
     return `${none}${stale}`;
