@@ -1,6 +1,6 @@
 # ADR-0039 — A declared ticket hierarchy: one resolver, a `move` that keeps the sources together, and the integration that `ticket:start` opens
 
-> **status:** proposed — rulings of 2026-10-02 and 2026-10-07 (Q1-Q12, Q1-hotfix, C1-C10) on #1251, pending human promotion | **date:** 2026-10-07 | **owner:** @crinaldi
+> **status:** proposed — rulings of 2026-10-02 and 2026-10-07 (Q1-Q12, Q1-hotfix, C1-C10, N1-N5) on #1251, pending human promotion | **date:** 2026-10-07 | **owner:** @crinaldi
 > **relates to:** ADR-0018 (the GitLab governance fragment), ADR-0020 (port widening is a decision), ADR-0029 (two sources, one graph), ADR-0032 (the `brain-graph/1` tag), ADR-0034 (lanes), ADR-0035 (a branch name is a claim), ADR-0037 (who merges), ADR-0038 (one config shape per axis, with its Amendments 1-2), ADR-0040 (the owned team config); `brain/core/methodology/harness-contract.md` (`ticket:start` row); `brain/core/methodology/agent-authorities.md`; maintainer rulings on #1251, 2026-10-02 and 2026-10-07; #697, #930, #967, #1121, #1130, #1199, #1206, #1257, #1293, #1335
 
 > **Tier 2 draft.** `brain/project/decisions/**` is human-promoted (`agent-authorities.md` Tier 2).
@@ -16,11 +16,10 @@
 > **ADR-0038 is on `main` now** (#1114, PR #1296), so the placement of `hierarchy` inside the
 > `vcs` axis object no longer waits on another tracker.
 >
-> This ADR names amendments to ADR-0029, ADR-0032, ADR-0035, ADR-0018, to the `harness-contract.md`
-> `ticket:start` row and to `agent-authorities.md`, and edits none of them. Each is a separate
-> draft, promoted after this ADR. The `agent-authorities.md` one is drafted beside this file
-> (`agent-authorities-hierarchy-close.draft.md`); the others are listed under "Amendments this
-> requires".
+> This ADR names amendments to ADR-0026, ADR-0029, ADR-0032, ADR-0035, ADR-0018,
+> `workflow-governance.md`, the `harness-contract.md` `ticket:start` row and `agent-authorities.md`,
+> and edits none of them. Each is a separate draft, promoted after this ADR. The ones drafted beside
+> this file, and the ones still owed, are listed under "Amendments this requires".
 
 ## Context
 
@@ -118,8 +117,17 @@ ADR-0038 §1 allows this: settings that belong to the axis, not to a provider, s
 two-level model, `epic` above `ticket`, and writes no migration. Q7's required `default` applies
 only once a project declares `vcs.hierarchy`. No consumer changes behaviour on upgrade (ADR-0038
 §7), and no `brain:upgrade` rewrite of `brain.config.json` is needed, so ADR-0040 Amendment 1's
-GitLab block on such rewrites does not arise. What the implicit model does beyond today's
-behaviour is Open question 1.
+GitLab block on such rewrites does not arise.
+
+What the implicit model keeps and what it gains (ruling N1, option C, 2026-10-07):
+
+- **It keeps today's branches and trackers:** hand-made `feature/…` tracker branches, one hop
+  from a ticket to its epic's `tracker:`, and `{type}/issue-{N}-{slug}` ticket branches.
+  `ticket:start` creates no tracker chain for it.
+- **It gains the close workflow (decision 7) and the generated children region (decision 10)**,
+  because each only reads the `tracker:` an epic already declares and the resolver's children, and
+  renames nothing. Whether the `integration-ready` gate applies to it too is Open question 1.
+- **Its branch grammar is never retired** (ruling N2, decision 9).
 
 **What owning the key means (ADR-0038, ADR-0040).** `vcs` has no `.env` level and no user layer
 (ADR-0038 §2 and Amendment 1; ADR-0040 section 2), so `vcs.hierarchy` is a team setting only and
@@ -266,15 +274,14 @@ milestone was authoritative and a `native: "milestone"` level had no issue behin
   from the highest down:
   1. pushes the tracker branch from its own parent's tracker, or from `main`;
   2. opens the draft PR, head the tracker, base that same parent branch, when the level declares
-     `draftPr: true`. Its body is `Closes #<node>` when the base is `main`; when the base is a
-     tracker it names the node without a closing keyword and adds `Part of #<parent>` (ruling C5;
-     the gate's view of that body is Open question 3);
+     `draftPr: true`. Its body is `Closes #<node>`, plus `Part of #<parent>` when the base is a
+     tracker (ruling N3);
   3. writes `tracker: <branch>` into the node's block.
 
   On "no" nothing remote happens, and the operator gets today's behaviour: base `main`, with the
   reason said.
 - **It then creates the ticket's worktree on a branch off the nearest tracker.** The ticket's PR
-  targets that tracker, with `Part of #<parent>`.
+  targets that tracker, with `Closes #<ticket>` and `Part of #<parent>` (ruling N3).
 - **Remote branch creation and PR creation are Tier 2** (`agent-authorities.md`). The single
   confirmation covers exactly the plan it printed; anything not in the plan is not authorised.
 
@@ -299,11 +306,19 @@ milestone was authoritative and a `native: "milestone"` level had no issue behin
 - **The safety net is `day:start`.** Under the user's own credentials it lists every PR merged into
   a tracker whose issue is still open, so a workflow that did not run (a fork PR's read-only token,
   a missing GitLab variable, an outage) is seen the next morning.
-- **`Closes #<node>` stays only where it still means something.** On a PR into `main`, a standalone
-  ticket's, a hotfix's or a milestone tracker's, it is the forge's own close and needs no workflow;
-  the workflow's close is then a no-op. On a PR into a tracker it closes nothing, so `brain:ship`
-  writes `Part of #<parent>` there and leaves `Closes` out. Whether `issue-link` needs it on such a
-  PR is Open question 3.
+- **Every PR keeps `Closes #<own issue>`** (ruling N3, option B, 2026-10-07; this supersedes the
+  C5 reading in an earlier draft, under which a PR into a tracker carried no `Closes`). On a PR into
+  `main` it is the forge's own close, and the workflow's close is a no-op. On a PR into a tracker
+  the forge does not act on it, because GitHub closes only off the default branch, so **the
+  keyword is the signal the close workflow reads to know which issue to close**. `Part of #<parent>`
+  is added as context. `issue-link` is unchanged.
+- **A node merged early is not closed** (ruling N4, fallback B, 2026-10-07). If an integration PR
+  merges while its node is not Ready to close, at `lite` or through an admin override, the workflow
+  does not close the issue and does not delete the tracker. It reports the node as "merged but
+  open".
+- **The same step rewrites the children region** (ruling N5, option C, 2026-10-07). When the
+  workflow closes an issue, it rewrites the parent's generated children region (decision 10) in the
+  same run, as the same automation identity.
 
 **Marked ready by the same automation** (ruling C10, 2026-10-07).
 
@@ -312,6 +327,19 @@ milestone was authoritative and a `native: "milestone"` level had no issue behin
 - **Marking ready is not merging.** The merge follows the declared autonomy mode like any PR
   (ruling Q10, option A, 2026-10-07): ADR-0037 applies unchanged, the producer never approves or
   merges, and there is no exception per PR kind. Brain itself holds no merge verb.
+
+**Guarded by a new gate, `integration-ready`** (ruling N4, option C, 2026-10-07).
+
+- **It refuses to merge an integration PR before its node is Ready to close**, that is, while any
+  child of the node is open or unknown (`state: null`).
+- **It judges by content, through the resolver, never by branch name** (ADR-0035): a PR is an
+  integration PR when its head is the `tracker:` its issue's block declares, and the node's
+  readiness is the resolver's rollup of that issue's children.
+- **It is tiered by position, as ADR-0026 tiers a gate:** detection at `lite`, required at
+  `standard` and `regulated`. When a PR merges past it anyway, the close workflow falls back as
+  above: no close, no deletion, "merged but open".
+- **The gate's name, `integration-ready`, is this draft's proposal.** It joins `GOVERNANCE_JOBS`
+  and the tier table through the `workflow-governance.md` and ADR-0026 drafts.
 
 ### 8. A hotfix has no parent and is not a level
 
@@ -353,12 +381,17 @@ milestone was authoritative and a `native: "milestone"` level had no issue behin
   `ticket:start` already requires. The branch parsers (`lib/branch-grammar.mjs`, #697, and its
   readers) adapt.
 - **The legacy grammars stay accepted while they are in use** (ruling Q6, option A, and ruling C9,
-  option A, 2026-10-07). `{type}/issue-{N}-{slug}` and `feature/…` trackers are parsed for as long
-  as any open branch or PR uses them. The doctor counts them (decision 6), and each alias is
-  removed in the minor after its count reads 0. `capture-provenance` and the snapshot read the
+  option A, 2026-10-07). In a repository that declared a hierarchy, `{type}/issue-{N}-{slug}` and
+  `feature/…` trackers are parsed for as long as any open branch or PR there uses them. The doctor
+  counts them (decision 6). `capture-provenance` and the snapshot read the
   canonical form only ("durable writes never guess", `branch-grammar.mjs:8`), so the new form is
-  canonical in that module from the first slice, not a lenient fallback. How this window meets a
-  consumer that never declares a hierarchy is Open question 2.
+  canonical in that module from the first slice, not a lenient fallback.
+- **The window is per repository, and only for one that declared a hierarchy** (ruling N2,
+  option C, 2026-10-07). `{type}/issue-{N}-{slug}` and `feature/…` ARE the implicit model's
+  grammar, and they are never removed for a project without `vcs.hierarchy`. The count-to-zero
+  applies only to a repository that declared `vcs.hierarchy`, and only to that repository: once its
+  count reads 0, the legacy forms stop being accepted there, and keep being accepted everywhere
+  else.
 - **A branch name is a claim, never the proof** (ADR-0035). A branch path that disagrees with the
   resolver is drift, reported by decision 6, and never a reason to re-parent anything.
 - **`move` renames a branch only when no PR is open on it.** When one is open, `move` leaves the
@@ -372,7 +405,11 @@ milestone was authoritative and a `native: "milestone"` level had no issue behin
 
 - **The parent's body carries a generated children region**: its subtree, closed children
   included, each child's state, and the rollup. It is rendered from the resolver and the cached
-  lanes, never from one forge call per child, and it is rewritten after merges.
+  lanes, never from one forge call per child. It applies to every project, a project on the
+  implicit model included (ruling N1).
+- **The close workflow rewrites it in the same step that closes an issue** (ruling N5, option C,
+  2026-10-07). **`day:start` regenerates it under the user's credentials as the safety net**, for
+  when the workflow failed or is not configured, for example GitLab without its token.
 - **It replaces the repo-wide `brain:epic:map` region in epic bodies** (ruling C8). It is written
   by the existing region writer, `replaceMapRegion`, under its `outsideRegion` proof that every
   byte outside the markers is unchanged (ADR-0029 Decision 3). The repo-wide graph stays a printed
@@ -503,20 +540,23 @@ and asks once (ruling Q1):
 | 2 | open draft PR | `release-1300/tracker` | `main` | `Closes #1300` |
 | 3 | write `tracker: release-1300/tracker` into #1300's block | — | — | — |
 | 4 | push branch | `release-1300/epic-878/tracker` | from `release-1300/tracker` | — |
-| 5 | open draft PR | `release-1300/epic-878/tracker` | `release-1300/tracker` | names #878, `Part of #1300` |
+| 5 | open draft PR | `release-1300/epic-878/tracker` | `release-1300/tracker` | `Closes #878`, `Part of #1300` |
 | 6 | write `tracker: release-1300/epic-878/tracker` into #878's block | — | — | — |
 | 7 | create worktree and local branch | `release-1300/epic-878/issue-56-<slug>` | from `release-1300/epic-878/tracker` | — |
 
 An ancestor is created before its child, because a child's tracker branches from its parent's. A
 node's draft PR is opened before its block is written, so a failed PR leaves no `tracker:` naming
-a branch nobody collects. #878's PR targets a tracker, so it carries no `Closes`, which would
-close nothing there (decision 7).
+a branch nobody collects. #878's PR targets a tracker, so the forge will not act on its
+`Closes #878`; the close workflow reads it instead (ruling N3).
 
-**3. Later.** `brain:ship` on #56's branch opens a PR with base `release-1300/epic-878/tracker`
-and `Part of #878`. When it merges, the close workflow closes #56 (ruling C5). When every child of
-#878 is closed, the workflow marks #878's draft PR ready (ruling C10); it merges into
-`release-1300/tracker` under the declared autonomy mode (ruling Q10), and the workflow then closes
-#878 and deletes `release-1300/epic-878/tracker`. When #1300's PR merges into `main`, #1300 closes
+**3. Later.** `brain:ship` on #56's branch opens a PR with base `release-1300/epic-878/tracker`,
+`Closes #56` and `Part of #878` (ruling N3). When it merges, the close workflow reads `Closes #56`,
+closes #56 and rewrites #878's children region in the same step (rulings C5, N5). When every child
+of #878 is closed, the workflow marks #878's draft PR ready (ruling C10), and `integration-ready`
+passes (ruling N4); it merges into `release-1300/tracker` under the declared autonomy mode (ruling
+Q10), and the workflow then closes #878, deletes `release-1300/epic-878/tracker` and rewrites
+#1300's region. Had #878's PR merged while #56 was still open, at `lite`, #878 would stay open,
+its tracker would stay, and brain would report it as merged but open. When #1300's PR merges into `main`, #1300 closes
 (by its own `Closes #1300` and by the workflow), its tracker is deleted and the native milestone
 `Release 1.13` is closed.
 
@@ -547,7 +587,7 @@ main into tracker" PR for each, to be merged with `--merge`.
 ### Negative
 
 - **The branch scheme changes for every consumer that declares a hierarchy.** Every branch parser
-  accepts both forms while the legacy ones are in use (rulings Q6, C9): `lib/branch-grammar.mjs`
+  accepts both forms (rulings Q6, C9, N2): `lib/branch-grammar.mjs`
   and its readers, `TRACKER_GRAMMAR` (`epic-graph.mjs:117`, which today refuses anything outside
   `feature/…`), `status/stranded.mjs`'s `feature/` prefix oracle and the `base-branch` gate.
 - **The `base-branch` gate's tracker rule reverses.** Today a tracker PR must target the default
@@ -556,8 +596,8 @@ main into tracker" PR for each, to be merged with `--merge`.
 - **`hierarchy-adapter.mjs`'s contract changes in two fields.** `milestone` becomes
   `object | 'none' | null`, and `levelSource` has no `'native'`. Its consumers (the snapshot and
   `ui/lib/{rollup,lane,inflight}-model.mjs`) adapt.
-- **A new CI workflow writes issues and deletes branches** as the automation identity, at every
-  tier. Its token scope (`issues: write`, `contents: write`) is a cost, and on GitLab a project
+- **A new CI workflow writes issues and bodies and deletes branches** as the automation identity,
+  at every tier, in every project, on the implicit model too (ruling N1). Its token scope (`issues: write`, `contents: write`) is a cost, and on GitLab a project
   access token is a secret the project must create and rotate.
 - **A hotfix is invisible to its epic's rollup and children region** (ruling C2). A forge-native
   link from the hotfix to the epic, for example a sub-issue added by hand, is reported as drift,
@@ -575,7 +615,13 @@ main into tracker" PR for each, to be merged with `--merge`.
 - **Writing `tracker:` and the children region rewrites parts of a human-authored body.** Each
   needs ADR-0029 Decision 3's containment proof: everything outside the key, or outside the
   markers, is byte-identical.
-- **`brain:ship` must learn the base** and write `Part of #<parent>` on a PR into a tracker.
+- **`brain:ship` must learn the base** and add `Part of #<parent>` beside `Closes #<issue>` on a
+  PR into a tracker.
+- **A new gate, `integration-ready`,** blocks an early integration merge at `standard` and
+  `regulated`. At `lite` an early merge is possible, and its cost is a node reported as merged but
+  open until a human reconciles it.
+- **Two legacy grammars live on indefinitely** for every project without `vcs.hierarchy` (ruling
+  N2), so the branch parsers keep both forms for good, not for a window.
 - **A native-containment read costs one call per issue,** paid in a background lane and cached.
 - **The first drift report on an existing repository will be noisy,** for ADR-0029's reason:
   every issue that was never labelled with a level is a block-only claim until someone reconciles
@@ -627,8 +673,8 @@ price of hierarchical names.
   hotfix follow-up and the branch scheme are the slices in #1251.
 - **`brain:doctor` does not exist yet.** It is #1130. Until it lands, the drift check reports
   through `brain:governance-status` alone, and the legacy-branch counts have no home.
-- **The `agent-authorities.md` row for the close workflow is a draft,** not doctrine, until the
-  maintainer signs it.
+- **The `agent-authorities.md`, `workflow-governance.md` and ADR-0026 changes are drafts,** not
+  doctrine, until the maintainer signs them.
 - **GitLab's close path needs a token the project must provide.** Until it does, the GitLab
   workflow reports and does nothing, and `day:start` is the only net.
 - **Renaming an open PR's head** stays unmeasured, and `move` refuses it.
@@ -639,71 +685,67 @@ price of hierarchical names.
 
 ## Amendments this requires (none are made here)
 
-Promoted after ADR-0039, in this order:
+Promoted after ADR-0039, in this order. "Drafted" means the draft is beside this file and
+`planAmendment` accepts it against the target on `main`; "owed" means it is still to be written.
 
-1. **`brain/core/methodology/agent-authorities.md`** — drafted beside this file as
+1. **`brain/core/methodology/agent-authorities.md`** — **drafted**,
    `agent-authorities-hierarchy-close.draft.md`. The close workflow (ruling C5), its branch
-   deletions and its ready-marking (ruling C10) are automation acts, run by the automation identity
-   at every tier, not agent acts.
-2. **ADR-0029.** Its Decision 2 ("neither wins", the union) governs blocking edges and is unchanged
-   for them. For the hierarchy fields, rulings Q2 and C1 set a precedence (block > label > default)
-   with every disagreement reported, and ruling Q11 reads native containment, which Decision 2
-   deliberately left unread, for drift only and never into the blocking graph. The union for
-   hierarchy is named as a later upgrade. Its Decision 3 changes too (ruling C8): `brain:epic:map`
-   no longer writes its repo-wide region into issue bodies; the same proven region writer writes
-   the generated children region instead.
-3. **ADR-0032.** The `brain-graph/1` format gains levels: `kind` names any declared level, not only
-   `epic`, `milestone` included; `tracker:` is honoured on any level that declares `integration`;
-   `TRACKER_GRAMMAR` admits the hierarchical scheme. The block gains no name key (ruling C6).
-4. **ADR-0035.** Its rule that a branch name is a claim extends from the two lanes to the
+   deletions, its ready-marking (ruling C10) and its children-region rewrite (ruling N5) are
+   automation acts, run by the automation identity at every tier, not agent acts.
+2. **ADR-0026, Amendment 11** — **drafted**, `adr-0026-amendment-11.draft.md`. A row for
+   `integration-ready` in the tier table: detection at `lite`, required at `standard` and
+   `regulated` (ruling N4).
+3. **`brain/core/methodology/workflow-governance.md`** — **drafted**,
+   `workflow-governance-integration-ready.draft.md`. A fifth invariant row, `integration-ready`,
+   with its scope: judged through the resolver by content, never by branch name, no label bypass,
+   and the close workflow's merged-but-open fallback (ruling N4).
+4. **ADR-0029** — **owed**. Its Decision 2 ("neither wins", the union) governs blocking edges and is
+   unchanged for them. For the hierarchy fields, rulings Q2 and C1 set a precedence (block > label >
+   default) with every disagreement reported, and ruling Q11 reads native containment, which
+   Decision 2 deliberately left unread, for drift only and never into the blocking graph. The union
+   for hierarchy is named as a later upgrade. Its Decision 3 changes too (ruling C8): `brain:epic:map`
+   no longer writes its repo-wide region into issue bodies; the same proven region writer writes the
+   generated children region instead, from the close workflow and from `day:start` (ruling N5).
+5. **ADR-0032** — **owed**. The `brain-graph/1` format gains levels: `kind` names any declared
+   level, not only `epic`, `milestone` included; `tracker:` is honoured on any level that declares
+   `integration`; `TRACKER_GRAMMAR` admits the hierarchical scheme in a repository that declared a
+   hierarchy and keeps `feature/…` (ruling N2). The block gains no name key (ruling C6).
+6. **ADR-0035** — **owed**. Its rule that a branch name is a claim extends from the two lanes to the
    hierarchical branch path: ancestry in a name is a claim, and the resolver's sources are the
-   proof.
-5. **ADR-0018.** The GitLab governance fragment documents the project access token variable the
-   close job needs, because `CI_JOB_TOKEN` cannot write issues.
-6. **`brain/core/methodology/harness-contract.md`, the `brain:ticket:start` row.** The branch is no
-   longer `{type}/issue-{number}-{slug}` once a hierarchy is declared; the base is the nearest
-   integrating ancestor's tracker; the verb may propose creating the missing chain under one
-   confirmation; a parentless issue, a hotfix included, starts from `main`.
+   proof. `integration-ready` is a second gate judged by content under that rule.
+7. **ADR-0018** — **owed**. The GitLab governance fragment documents the project access token
+   variable the close job needs, because `CI_JOB_TOKEN` cannot write issues.
+8. **`brain/core/methodology/harness-contract.md`, the `brain:ticket:start` row** — **owed**. With a
+   declared hierarchy the branch is no longer `{type}/issue-{number}-{slug}`, the base is the
+   nearest integrating ancestor's tracker, and the verb may propose creating the missing chain under
+   one confirmation; without one, today's row stands (ruling N1). A parentless issue, a hotfix
+   included, starts from `main`.
 
 ## Open questions for the maintainer
 
-The rulings of 2026-10-07 (Q1-Q12, Q1-hotfix, C1-C10) settle every question earlier drafts listed.
-Checking C1-C10 against each other and against this ADR leaves the ones below. This draft takes no
-position on them.
+The rulings of 2026-10-07 (Q1-Q12, Q1-hotfix, C1-C10, N1-N5) settle every question earlier drafts
+listed. Checking N1-N5 against each other and against this ADR leaves the ones below. This draft
+takes no position on them.
 
-1. **What the implicit model does** (ruling C4 against decisions 7 and 9). The implicit `epic` /
-   `ticket` model has no `branch` pattern and no `integration` declaration, so the tracker chain,
-   the close workflow, ready-marking and the children region are undefined for it.
-   (a) the implicit model is exactly today's behaviour: hand-made `feature/…` trackers, one hop,
-   legacy branch names, and none of the new automation; (b) the implicit model is the config
-   `{ epic: { label: "level:epic", branch: "epic-{number}", integration: { draftPr: true } },
-   ticket: { label: "level:ticket", branch: "issue-{number}-{slug}" } }` with `default: "ticket"`,
-   applied in code, which changes branch names and adds automation for consumers who declared
-   nothing; (c) today's branches and trackers, but the close workflow and the children region apply
-   to every consumer.
-2. **When a legacy alias can be removed** (rulings Q6 and C9 against C4). The count-to-zero rule
-   reads one repository's open branches, but the alias ships in brain to every consumer, and a
-   consumer on the implicit model may keep producing legacy names for ever.
-   (a) the alias is decided at runtime per repository: legacy names stay valid while the repository
-   has no `vcs.hierarchy` or its count is above 0, and no release removes them; (b) the count is
-   this repository's, the alias is removed from the code after it reads 0, and a consumer still
-   using legacy names gets a refusal with the fix; (c) legacy names are the implicit model's
-   grammar and stay for it, and the window applies only to a repository that has declared a
-   hierarchy.
-3. **`issue-link` on a PR into a tracker** (ruling C5 against invariant 1). The child PR now carries
-   `Part of #<parent>` and no `Closes`, because `Closes` closes nothing there. `issue-link` asks
-   for a closing keyword. (a) `issue-link` accepts `Part of #N` on a PR whose base is a declared
-   tracker, by content (the base resolved through the resolver), not by branch name; (b) the child
-   PR keeps `Closes #<child>` as the gate's link even though it closes nothing on that merge;
-   (c) `issue-link` runs only on PRs into the default branch.
-4. **An integration PR merged before its node is ready** (rulings C5 and C10 against Q10). C10 marks
-   a draft ready only when every child is closed, but a human, or the platform in mode B, can merge
-   a tracker PR earlier. The C5 rule would then close the node, and delete its tracker, while
-   children are still open. (a) close and delete anyway, and report the open children as drift;
-   (b) do not close and do not delete, and report the node as merged-but-open; (c) a gate refuses
-   to merge an integration PR whose node is not ready.
-5. **Who rewrites the children region after a merge** (rulings Q12 and C8 against C5). Decision 10
-   says "rewritten after merges", and the region writer runs today from `brain:epic:map` under a
-   user's credentials. (a) the C5 workflow rewrites it as the automation identity, which the
-   `agent-authorities.md` draft would then also name; (b) `day:start` rewrites it under the user's
-   credentials; (c) both, the workflow first and `day:start` as the net.
+1. **Does `integration-ready` apply on the implicit model?** (rulings N1 and N4). N1 extends the
+   close workflow and the children region to every project; N4's gate guards that workflow, but N1
+   does not name it. On the implicit model it would block an epic's `feature/…` tracker PR into
+   `main` while any child is open. (a) yes, every project, tiered as N4 says; (b) no, only a
+   repository that declared `vcs.hierarchy`; (c) every project, but detection-only on the implicit
+   model at every tier.
+2. **Which `Closes #N` the close workflow trusts** (ruling N3 against ADR-0035). The PR body is
+   author-editable, so a PR into a tracker could carry `Closes #999` for an unrelated issue. On
+   `main` the forge closes whatever the keyword names. (a) the workflow closes N only when the
+   resolver places N under the node whose tracker is the PR's base, and reports any other keyword;
+   (b) it closes every keyword, as the forge does on `main`; (c) it closes only the issue whose
+   number the head branch carries, a branch-name claim ADR-0035 refuses as proof.
+3. **How a "merged but open" node ever closes** (ruling N4's fallback). Its integration PR has
+   merged, so no later integration merge will trigger the workflow for it. (a) when the node's last
+   open child closes, the workflow closes the node and deletes its tracker if the tracker has no
+   commits its target lacks; (b) `day:start` reports it and a human closes it; (c) a new integration
+   PR is opened from the tracker for the remainder.
+4. **`day:start`'s region rewrite and agent authority** (ruling N5 against `agent-authorities.md`).
+   `day:start` writes issue bodies under the user's credentials, and an agent session may run it.
+   `agent-authorities.md` does not list an issue-body write. (a) Tier 1, because the region is
+   generated and its containment is proven; (b) Tier 2, `day:start` asks before writing; (c)
+   `day:start` only reports stale regions, and a human runs the write.
