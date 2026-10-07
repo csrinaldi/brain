@@ -1,6 +1,6 @@
 # ADR-0039 — A declared ticket hierarchy: one resolver, a `move` that keeps the sources together, and the integration that `ticket:start` opens
 
-> **status:** proposed — rulings of 2026-10-02 and 2026-10-07 (Q1-Q12, Q1-hotfix, C1-C10, N1-N5) on #1251, pending human promotion | **date:** 2026-10-07 | **owner:** @crinaldi
+> **status:** proposed — rulings of 2026-10-02 and 2026-10-07 (Q1-Q12, Q1-hotfix, C1-C10, N1-N5, M1-M4) on #1251, pending human promotion | **date:** 2026-10-07 | **owner:** @crinaldi
 > **relates to:** ADR-0018 (the GitLab governance fragment), ADR-0020 (port widening is a decision), ADR-0029 (two sources, one graph), ADR-0032 (the `brain-graph/1` tag), ADR-0034 (lanes), ADR-0035 (a branch name is a claim), ADR-0037 (who merges), ADR-0038 (one config shape per axis, with its Amendments 1-2), ADR-0040 (the owned team config); `brain/core/methodology/harness-contract.md` (`ticket:start` row); `brain/core/methodology/agent-authorities.md`; maintainer rulings on #1251, 2026-10-02 and 2026-10-07; #697, #930, #967, #1121, #1130, #1199, #1206, #1257, #1293, #1335
 
 > **Tier 2 draft.** `brain/project/decisions/**` is human-promoted (`agent-authorities.md` Tier 2).
@@ -126,7 +126,8 @@ What the implicit model keeps and what it gains (ruling N1, option C, 2026-10-07
   `ticket:start` creates no tracker chain for it.
 - **It gains the close workflow (decision 7) and the generated children region (decision 10)**,
   because each only reads the `tracker:` an epic already declares and the resolver's children, and
-  renames nothing. Whether the `integration-ready` gate applies to it too is Open question 1.
+  renames nothing. The `integration-ready` gate runs there too, detection-only at every tier
+  (ruling M1, decision 7).
 - **Its branch grammar is never retired** (ruling N2, decision 9).
 
 **What owning the key means (ADR-0038, ADR-0040).** `vcs` has no `.env` level and no user layer
@@ -312,10 +313,25 @@ milestone was authoritative and a `native: "milestone"` level had no issue behin
   the forge does not act on it, because GitHub closes only off the default branch, so **the
   keyword is the signal the close workflow reads to know which issue to close**. `Part of #<parent>`
   is added as context. `issue-link` is unchanged.
+- **The workflow executes a keyword only when the resolver confirms it** (ruling M2, option A,
+  2026-10-07). It closes `#N` only when the resolver places N under the node whose tracker is the
+  PR's base. Any other closing keyword in the body is not executed; it is reported. The body is
+  author-editable, so a keyword in it is a claim, and the resolver's sources are the proof
+  (ADR-0035). On a PR into `main` the forge executes the keyword itself, as it always has; the
+  workflow closes nothing there and only does the deletions and the mirror close C5 names.
 - **A node merged early is not closed** (ruling N4, fallback B, 2026-10-07). If an integration PR
-  merges while its node is not Ready to close, at `lite` or through an admin override, the workflow
-  does not close the issue and does not delete the tracker. It reports the node as "merged but
-  open".
+  merges while its node is not Ready to close, at `lite`, on the implicit model, or through an admin
+  override, the workflow does not close the issue and does not delete the tracker. It reports the
+  node as "merged but open".
+- **A merged-but-open node closes through a remainder PR** (ruling M3, option C, 2026-10-07). Its
+  tracker stays live, and its open children keep integrating into it. When a child integrates into
+  the tracker of a merged-but-open node, brain opens a NEW draft integration PR for the remainder:
+  head the same tracker, base the same target, `Closes #<node>`. That PR is marked ready at Ready to
+  close (ruling C10), passes `integration-ready`, and its merge closes the node and deletes the
+  tracker (ruling C5). **If the node's last child closes while the tracker has no commits its target
+  lacks** (`git rev-list <target>..<tracker>` is empty), there is nothing to integrate, so brain
+  closes the node and deletes the tracker directly. Which identity opens the remainder PR is Open
+  question 1.
 - **The same step rewrites the children region** (ruling N5, option C, 2026-10-07). When the
   workflow closes an issue, it rewrites the parent's generated children region (decision 10) in the
   same run, as the same automation identity.
@@ -335,9 +351,12 @@ milestone was authoritative and a `native: "milestone"` level had no issue behin
 - **It judges by content, through the resolver, never by branch name** (ADR-0035): a PR is an
   integration PR when its head is the `tracker:` its issue's block declares, and the node's
   readiness is the resolver's rollup of that issue's children.
-- **It is tiered by position, as ADR-0026 tiers a gate:** detection at `lite`, required at
-  `standard` and `regulated`. When a PR merges past it anyway, the close workflow falls back as
-  above: no close, no deletion, "merged but open".
+- **It runs in every project, and blocks only where a hierarchy is declared** (ruling M1, option C,
+  2026-10-07). With `vcs.hierarchy` declared it is tiered by position, as ADR-0026 tiers a gate:
+  detection at `lite`, required at `standard` and `regulated` (ruling N4). On the implicit model
+  (no `vcs.hierarchy`) it is detection-only at every tier. When a PR merges past it, the close
+  workflow falls back as above: no close, no deletion, "merged but open", and a remainder PR
+  (ruling M3).
 - **The gate's name, `integration-ready`, is this draft's proposal.** It joins `GOVERNANCE_JOBS`
   and the tier table through the `workflow-governance.md` and ADR-0026 drafts.
 
@@ -409,7 +428,10 @@ milestone was authoritative and a `native: "milestone"` level had no issue behin
   implicit model included (ruling N1).
 - **The close workflow rewrites it in the same step that closes an issue** (ruling N5, option C,
   2026-10-07). **`day:start` regenerates it under the user's credentials as the safety net**, for
-  when the workflow failed or is not configured, for example GitLab without its token.
+  when the workflow failed or is not configured, for example GitLab without its token. That write is
+  **Tier 1** for an agent that runs `day:start` (ruling M4, option A, 2026-10-07): the region is
+  generated, the bytes outside it are proven identical, and it is not a contract.
+  `agent-authorities.md` names it (the `agent-authorities-hierarchy-close.draft.md` draft).
 - **It replaces the repo-wide `brain:epic:map` region in epic bodies** (ruling C8). It is written
   by the existing region writer, `replaceMapRegion`, under its `outsideRegion` proof that every
   byte outside the markers is unchanged (ADR-0029 Decision 3). The repo-wide graph stays a printed
@@ -556,9 +578,10 @@ of #878 is closed, the workflow marks #878's draft PR ready (ruling C10), and `i
 passes (ruling N4); it merges into `release-1300/tracker` under the declared autonomy mode (ruling
 Q10), and the workflow then closes #878, deletes `release-1300/epic-878/tracker` and rewrites
 #1300's region. Had #878's PR merged while #56 was still open, at `lite`, #878 would stay open,
-its tracker would stay, and brain would report it as merged but open. When #1300's PR merges into `main`, #1300 closes
-(by its own `Closes #1300` and by the workflow), its tracker is deleted and the native milestone
-`Release 1.13` is closed.
+its tracker would stay, and brain would report it as merged but open; #56's merge into the live
+tracker would then open a remainder PR for #878, whose merge closes it (ruling M3). When #1300's PR
+merges into `main`, the forge executes its `Closes #1300`, and the workflow deletes its tracker and
+closes the native milestone `Release 1.13` (rulings C5, M2).
 
 **A hotfix beside it.** #57, labelled `hotfix`, says "related to #878" in prose and declares no
 parent. Plain `ticket:start 57` starts it from `main` (ruling C3). No tracker is touched, and #57
@@ -618,8 +641,12 @@ main into tracker" PR for each, to be merged with `--merge`.
 - **`brain:ship` must learn the base** and add `Part of #<parent>` beside `Closes #<issue>` on a
   PR into a tracker.
 - **A new gate, `integration-ready`,** blocks an early integration merge at `standard` and
-  `regulated`. At `lite` an early merge is possible, and its cost is a node reported as merged but
-  open until a human reconciles it.
+  `regulated` where a hierarchy is declared. At `lite`, and on the implicit model at every tier
+  (ruling M1), an early merge is possible; its cost is a node reported as merged but open and a
+  remainder PR to close it (ruling M3).
+- **A closing keyword in a PR body is no longer enough off `main`.** The workflow closes only what
+  the resolver confirms (ruling M2), so a child whose block does not declare its parent stays open
+  after a tracker merge, and is reported.
 - **Two legacy grammars live on indefinitely** for every project without `vcs.hierarchy` (ruling
   N2), so the branch parsers keep both forms for good, not for a window.
 - **A native-containment read costs one call per issue,** paid in a background lane and cached.
@@ -691,10 +718,12 @@ Promoted after ADR-0039, in this order. "Drafted" means the draft is beside this
 1. **`brain/core/methodology/agent-authorities.md`** — **drafted**,
    `agent-authorities-hierarchy-close.draft.md`. The close workflow (ruling C5), its branch
    deletions, its ready-marking (ruling C10) and its children-region rewrite (ruling N5) are
-   automation acts, run by the automation identity at every tier, not agent acts.
+   automation acts, run by the automation identity at every tier, not agent acts; and
+   `day:start`'s regeneration of the region is Tier 1 for an agent (ruling M4).
 2. **ADR-0026, Amendment 11** — **drafted**, `adr-0026-amendment-11.draft.md`. A row for
    `integration-ready` in the tier table: detection at `lite`, required at `standard` and
-   `regulated` (ruling N4).
+   `regulated` where `vcs.hierarchy` is declared; detection-only at every tier on the implicit model
+   (rulings N4, M1).
 3. **`brain/core/methodology/workflow-governance.md`** — **drafted**,
    `workflow-governance-integration-ready.draft.md`. A fifth invariant row, `integration-ready`,
    with its scope: judged through the resolver by content, never by branch name, no label bypass,
@@ -723,29 +752,25 @@ Promoted after ADR-0039, in this order. "Drafted" means the draft is beside this
 
 ## Open questions for the maintainer
 
-The rulings of 2026-10-07 (Q1-Q12, Q1-hotfix, C1-C10, N1-N5) settle every question earlier drafts
-listed. Checking N1-N5 against each other and against this ADR leaves the ones below. This draft
-takes no position on them.
+The rulings of 2026-10-07 (Q1-Q12, Q1-hotfix, C1-C10, N1-N5, M1-M4) settle every question earlier
+drafts listed. Checking M1-M4 against each other, this ADR and the repository leaves one. This draft
+takes no position on it.
 
-1. **Does `integration-ready` apply on the implicit model?** (rulings N1 and N4). N1 extends the
-   close workflow and the children region to every project; N4's gate guards that workflow, but N1
-   does not name it. On the implicit model it would block an epic's `feature/…` tracker PR into
-   `main` while any child is open. (a) yes, every project, tiered as N4 says; (b) no, only a
-   repository that declared `vcs.hierarchy`; (c) every project, but detection-only on the implicit
-   model at every tier.
-2. **Which `Closes #N` the close workflow trusts** (ruling N3 against ADR-0035). The PR body is
-   author-editable, so a PR into a tracker could carry `Closes #999` for an unrelated issue. On
-   `main` the forge closes whatever the keyword names. (a) the workflow closes N only when the
-   resolver places N under the node whose tracker is the PR's base, and reports any other keyword;
-   (b) it closes every keyword, as the forge does on `main`; (c) it closes only the issue whose
-   number the head branch carries, a branch-name claim ADR-0035 refuses as proof.
-3. **How a "merged but open" node ever closes** (ruling N4's fallback). Its integration PR has
-   merged, so no later integration merge will trigger the workflow for it. (a) when the node's last
-   open child closes, the workflow closes the node and deletes its tracker if the tracker has no
-   commits its target lacks; (b) `day:start` reports it and a human closes it; (c) a new integration
-   PR is opened from the tracker for the remainder.
-4. **`day:start`'s region rewrite and agent authority** (ruling N5 against `agent-authorities.md`).
-   `day:start` writes issue bodies under the user's credentials, and an agent session may run it.
-   `agent-authorities.md` does not list an issue-body write. (a) Tier 1, because the region is
-   generated and its containment is proven; (b) Tier 2, `day:start` asks before writing; (c)
-   `day:start` only reports stale regions, and a human runs the write.
+1. **Which identity opens the remainder PR** (ruling M3 against the close workflow's token and
+   ADR-0037). M3 says brain opens a new draft integration PR when a child integrates into a
+   merged-but-open node's tracker. That moment is a merge, so the only process present is the close
+   workflow. Two facts measured in this repository constrain it:
+   - **A PR opened with `GITHUB_TOKEN` triggers no workflow run**, so `governance.yml`'s required
+     checks, `integration-ready` among them, would never report on it, and it could never merge.
+     `governance-postmerge.yml` (`:577-581`) records this, and the archive sweep opens its PR with a
+     GitHub App token for that reason (#1106).
+   - **ADR-0037 counts the PR author as a producer**, and in mode B the platform merges under the
+     automation identity. If the same automation identity authors the remainder PR and merges it,
+     the producer merges its own change.
+
+   Options: (a) the close workflow opens it with a GitHub App token, as the archive sweep does, and
+   the App identity is declared distinct from the merging automation identity (and is added to
+   `agent-authorities.md` as an automation act; on GitLab the project access token plays the same
+   role); (b) the workflow only reports the merged-but-open node, and `day:start` proposes the
+   remainder PR under the user's credentials (Tier 2), so a human authors it; (c) the workflow opens
+   it with an App token, and a remainder PR is merged as in mode A, by a human, in every mode.

@@ -1,4 +1,4 @@
-# agent-authorities.md — the hierarchy close workflow is an automation act, not an agent act (issue #1251)
+# agent-authorities.md — the hierarchy close workflow is an automation act, and `day:start`'s region rewrite is Tier 1 (issue #1251)
 
 > **Tier 2 target. Not promoted, and an agent may not promote it.** Changes to this document
 > require an MR reviewed by `@crinaldi`. Promote it after ADR-0039, which it cites.
@@ -14,6 +14,15 @@ target: brain/core/methodology/agent-authorities.md
 issue: 1251
 body: ## Hierarchy close workflow (issue #1251)
 body-end: ### Notes for the promoter
+```
+
+```amend-find
+- Refresh the skill registry (`gentle-ai skill-registry refresh`)
+```
+
+```amend-replace
+- Refresh the skill registry (`gentle-ai skill-registry refresh`)
+- Regenerate an issue's brain-generated children region during `day:start` (ADR-0039 ruling M4): generated, bounded by markers whose outside bytes are proven identical, and read by no tool. No other part of an issue body **[added, #1251]**
 ```
 
 ```amend-find
@@ -37,7 +46,9 @@ milestone mirror is closed. In the same step it rewrites the parent's generated 
 the issue body (ruling N5), through the proven region writer that touches nothing outside the
 region's markers. The same workflow marks a draft integration PR ready when every child of its node
 is closed (ruling C10). When an integration PR merged before its node was Ready to close, it closes
-nothing and deletes nothing, and reports the node as merged but open (ruling N4).
+nothing and deletes nothing, and reports the node as merged but open (ruling N4). It executes a
+closing keyword only when the resolver places that issue under the node whose tracker is the PR's
+base; any other keyword is reported, never executed (ruling M2).
 
 These are **automation acts**. A forge CI workflow runs them on `pull_request` `closed` with
 `merged == true`, as the automation identity (`GITHUB_TOKEN` with `issues: write` and
@@ -63,10 +74,20 @@ default branch, and every rollup above it is wrong.
   doctrine until the workflow exists.
 - **A run that does not happen is caught late.** A fork PR's read-only token, a missing GitLab
   variable or an outage leaves the issue open. `day:start`, under the user's credentials, lists
-  every PR merged into a tracker whose issue is still open; it reports, it does not close. It also
-  regenerates stale children regions (ruling N5). Whether that write is Tier 1 for an agent that
-  runs `day:start` is an open question on ADR-0039, and this section does not decide it.
+  every PR merged into a tracker whose issue is still open; it reports, it does not close.
+- **Which identity opens a remainder PR** for a merged-but-open node (ADR-0039 ruling M3) is an
+  open question on ADR-0039, and this section does not decide it.
+
+### `day:start` regenerates the children region: Tier 1 (ruling M4, 2026-10-07)
+
+`day:start` regenerates a stale generated children region under the user's credentials, as the
+safety net for the workflow (ruling N5). For an agent that runs `day:start`, that write is **Tier 1,
+autonomous**. Three facts earn it: the region is generated, never authored; every byte outside its
+markers is proven identical before the write (`replaceMapRegion`/`outsideRegion`, ADR-0029
+Decision 3); and it is not a contract, so no tool reads it. It is the only issue-body write Tier 1
+grants: the `brain-graph/1` block and every other part of a body stay outside it.
 
 ### Notes for the promoter
 
-One in-place annotation, Tier 2's delete-branches row, plus this section.
+Two in-place edits: a Tier 1 row for `day:start`'s region rewrite, and an annotation on Tier 2's
+delete-branches row; plus this section.

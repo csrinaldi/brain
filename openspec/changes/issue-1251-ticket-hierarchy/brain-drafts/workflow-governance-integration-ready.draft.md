@@ -22,7 +22,7 @@ body-end: ### Notes for the promoter
 
 ```amend-replace
 | 4 | An ADDED ADR co-occurs with a `brain/HOME.md` entry | `decision-gate` _(S4)_ | _(none — the gate reads no labels)_ | Hard, in one direction — see below |
-| 5 **[Added, #1251, ADR-0039]** | An integration PR merges only when every child of its node is closed | `integration-ready` | _(none — no label bypasses it)_ | Tiered: detection at `lite`, required at `standard` and `regulated` (ADR-0026 Amendment 11) — see "Invariant 5" below |
+| 5 **[Added, #1251, ADR-0039]** | An integration PR merges only when every child of its node is closed | `integration-ready` | _(none — no label bypasses it)_ | Tiered where `vcs.hierarchy` is declared: detection at `lite`, required at `standard` and `regulated`; detection-only at every tier on the implicit model (ADR-0026 Amendment 11) — see "Invariant 5" below |
 ```
 
 ## Invariant 5 — an integration PR merges only when its node is Ready to close (issue #1251)
@@ -39,11 +39,14 @@ Invariants" in its heading; this row is the fifth.
   children and fails while any child is open or its state is unknown (`null`).
 - **Judged by content, never by branch name** (ADR-0035). A head called `…/tracker` that no block
   declares is not an integration PR; a declared tracker is one whatever it is called.
-- **Tiered by position** (ADR-0026 Amendment 11): detection at `lite`, required at `standard` and
-  `regulated`. No label bypasses it.
+- **Runs in every project, blocks only where a hierarchy is declared** (ADR-0039 ruling M1,
+  ADR-0026 Amendment 11). With `vcs.hierarchy` declared: detection at `lite`, required at
+  `standard` and `regulated`. On the implicit model: detection-only at every tier. No label
+  bypasses it.
 - **When a PR merges past it** (at `lite`, or through an admin override, "Lockout Recovery" path
-  2), ADR-0039's close workflow closes nothing and deletes nothing, and reports the node as merged
-  but open.
+  2), or on the implicit model, ADR-0039's close workflow closes nothing and deletes nothing, and
+  reports the node as merged but open. A later remainder PR from the same tracker closes it (ruling
+  M3).
 
 ### What L1 enforces, and what it does not
 

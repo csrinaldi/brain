@@ -7,8 +7,8 @@ issue: 1251
 
 Issue: #1251 (parent #1121, phase 4). The decision record is the ADR-0039 draft:
 `brain-drafts/adr-0039-a-declared-ticket-hierarchy-one-resolver-and-integration-opened-by-ticket-start.md`.
-It records the maintainer's rulings of 2026-10-02 and 2026-10-07 (Q1-Q12, Q1-hotfix, C1-C10 and
-N1-N5) and the questions they still leave open. Three of the amendments it owes are drafted beside
+It records the maintainer's rulings of 2026-10-02 and 2026-10-07 (Q1-Q12, Q1-hotfix, C1-C10, N1-N5
+and M1-M4) and the questions they still leave open. Three of the amendments it owes are drafted beside
 it: `agent-authorities.md`, ADR-0026 Amendment 11 and `workflow-governance.md`.
 
 ## Why
@@ -40,13 +40,17 @@ disagreeing with nothing to notice.
 4. **The close workflow.** A forge CI workflow on a merged PR into a tracker or `main` closes the
    node at every level, deletes merged trackers, closes the native milestone mirror, and marks a
    draft integration PR ready when its node's children are all closed (C5, C10). It reads the
-   PR's `Closes #N` to know what to close (N3), rewrites the children region in the same step
-   (N5), and closes nothing for a node merged before it was ready (N4). It runs in every project,
+   PR's `Closes #N` to know what to close (N3) and executes it only when the resolver places N
+   under the node whose tracker is the base, reporting any other keyword (M2). It rewrites the
+   children region in the same step (N5), and closes nothing for a node merged before it was ready
+   (N4); such a node closes through a remainder PR from the same tracker, or directly when the
+   tracker has no commits its target lacks (M3). It runs in every project,
    the implicit model included (N1). GitLab needs a project access token. `day:start` lists
    merged-but-open issues and regenerates stale regions as the net.
 4b. **The `integration-ready` gate.** Refuses an integration PR merge before its node is Ready to
-   close, judged through the resolver; detection at `lite`, required at `standard` and `regulated`
-   (N4).
+   close, judged through the resolver. It runs in every project: where `vcs.hierarchy` is declared,
+   detection at `lite` and required at `standard` and `regulated` (N4); on the implicit model,
+   detection-only at every tier (M1).
 5. **`brain:ticket:move`.** Rewrite the block, the labels, the native milestone mirror and the
    branch together. Refuse to rename a branch while a PR is open on it.
 6. **The drift check** in `brain:doctor` (#1130) and `brain:governance-status`, plus the counts of
@@ -57,8 +61,8 @@ disagreeing with nothing to notice.
    PR uses them; without a hierarchy they are the grammar and stay (N2).
 8. **The generated children region** in the parent's body, human-only. It replaces the repo-wide
    `epic:map` region and is written by the existing `replaceMapRegion` writer, from the close
-   workflow and from `day:start` as the net (C8, N5); #1335 stays block-only. Every project gets
-   it (N1).
+   workflow and from `day:start` as the net (C8, N5); `day:start`'s write is Tier 1 (M4). #1335
+   stays block-only. Every project gets it (N1).
 
 ## Sequencing
 
