@@ -13,7 +13,7 @@
 // The word of `awaiting-review` is "Awaiting approval" (#1379, D163): the state means the ISSUE lacks
 // `status:approved`, not that a PR waits on review. The code, class and tokens keep the old name on purpose.
 
-import { rollupLabel } from './rollup-model.mjs';
+import { rollupLabel, staleSuffix } from './rollup-model.mjs';
 
 export const UNKNOWN_CODE = 'unknown';
 
@@ -68,7 +68,7 @@ const inFlight = (reason) => ({ ...STATES['in-flight'], reason });
 function epicProgress(node, work, rollup, roadmapCode) {
   const own = roadmapCode === 'in-flight' || work.byIssue.has(node.number);
   if (rollup.ok && rollup.value.closed !== null && rollup.value.closed === rollup.value.total && rollup.value.total > 0) {
-    return { ...STATES['ready-to-close'], reason: `all ${rollup.value.total} children closed; the epic is still open` };
+    return { ...STATES['ready-to-close'], reason: `all ${rollup.value.total} children closed; the epic is still open${staleSuffix(rollup.value.load)}` };
   }
   if (own) return STATES['in-flight'];
   const label = rollupLabel(rollup);
@@ -86,15 +86,15 @@ function epicProgress(node, work, rollup, roadmapCode) {
  * roadmap state this table does not know — a renamed constant fails the test
  * that imports the real ones instead of quietly painting a node grey.
  *
- * Precedence (#1308, ruled 2026-10-05): unreadable > done > blocked > awaiting-review > in-flight >
- * not-computed > planned. `work` is `workIndex(...)` (inflight-model.mjs): when given, In flight is read from
+ * Precedence (#1309): Unreadable > Done > Blocked > Awaiting approval (code `awaiting-review`) > Ready to close >
+ * In flight > Not computed > Planned. `work` is `workIndex(...)` (inflight-model.mjs): when given, In flight is read from
  * the four work sources and Planned is claimed only when every one of them is ready. Without it (legacy
  * callers) the roadmap alone decides, as before — minus the old `unclassified` short-circuit.
  *
- * @param {{number?:number, status:string, blockedBy?:number[], labels?:string[], roadmap:{ok:boolean, value?:{state:string}}}} node
  * `rollup` is `epicRollup(...)` (rollup-model.mjs); it is read only with `work` and for `node.kind === 'epic'`, and without it an epic
- * keeps the #1308 behaviour (#1309 D130, D135). Order: ... awaiting-review > ready-to-close > in-flight > not-computed > planned.
+ * keeps the #1308 behaviour (#1309 D130, D135); Ready to close is reached only through it.
  *
+ * @param {{number?:number, status:string, blockedBy?:number[], labels?:string[], roadmap:{ok:boolean, value?:{state:string}}}} node
  * @param {{missing:Array<{name:string,state:string,reason?:string}>, byIssue:Map<number,object>}} [work]
  * @param {object} [rollup]
  */

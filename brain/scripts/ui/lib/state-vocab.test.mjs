@@ -240,6 +240,15 @@ test('R1309-7/ruling a: every child closed on an open epic reads Ready to close 
   assert.equal(stateOf(epicNode({ roadmap: { ok: true, value: { state: DONE } } }), READY_WORK, rollupOf(hier({ closed: 4 }))).code, 'done');
 });
 
+test('R1360-1: Ready to close over a closed list a refresh failed to renew carries the rollup stale qualifier (#1360)', () => {
+  const failed = { state: 'failed', at: '2026-09-02T00:00:00Z', reason: 'HTTP 502', lastCompleteAt: '2026-09-01' };
+  const s = stateOf(epicNode(), READY_WORK, rollupOf(hier({ closed: 2 }), failed));
+  assert.equal(s.code, 'ready-to-close');
+  assert.equal(s.reason, 'all 2 children closed; the epic is still open · closed list as of 2026-09-01; refresh failed (HTTP 502)');
+  const fresh = stateOf(epicNode(), READY_WORK, rollupOf(hier({ closed: 2 })));
+  assert.equal(fresh.reason, 'all 2 children closed; the epic is still open', 'a complete list adds no qualifier');
+});
+
 test('R1309-5/ruling d: zero closed with unresolved closed issues, or an unknown child, is Not computed — never Planned', () => {
   assert.equal(stateOf(epicNode(), READY_WORK, rollupOf(hier({ open: 2, unresolved: [9] }))).code, 'not-computed');
   const u = stateOf(epicNode(), READY_WORK, rollupOf(hier({ open: 2, unknown: 1 })));
