@@ -105,7 +105,7 @@ test('R1308-5/S5/S7: a pending or failed source with no evidence is Not computed
   assert.equal(stateOf(node(), w).code, 'in-flight', 'a local change dir is enough while prs is pending');
 });
 
-test('R1308-8/S10: Awaiting review reads status:approved from the labels of an undeclared node, by the same rule as every node', () => {
+test('R1308-8/S10: Awaiting approval reads status:approved from the labels of an undeclared node, by the same rule as every node', () => {
   assert.equal(stateOf(undeclared({ labels: [] }), READY_WORK).code, 'awaiting-review');
   assert.equal(stateOf(undeclared({ labels: ['status:approved'] }), READY_WORK).code, 'planned');
   assert.equal(stateOf(undeclared({ labels: [] }), workWith(1)).code, 'awaiting-review', 'awaiting-review outranks in-flight');
@@ -240,7 +240,7 @@ test('R1309-5/ruling d: zero closed with unresolved closed issues, or an unknown
   assert.match(u.reason, /1 state unknown/);
 });
 
-test('R1309-2/S8: Ready to close sits after Awaiting review and before In flight; blocked, awaiting and closed epics keep their state', () => {
+test('R1309-2/S8: Ready to close sits after Awaiting approval and before In flight; blocked, awaiting and closed epics keep their state', () => {
   const all = rollupOf(hier({ closed: 5 }));
   assert.equal(stateOf(epicNode({ blockedBy: [3] }), READY_WORK, all).code, 'blocked');
   assert.equal(stateOf(epicNode({ status: AWAITING_HUMAN }), READY_WORK, all).code, 'awaiting-review');
@@ -253,4 +253,11 @@ test('R1309-1/S10/D135: a non-epic ignores the rollup, and no rollup or no work 
   assert.equal(stateOf(node({ roadmap: { ok: true, value: { state: PLANNED } } }), READY_WORK, ROLLUP_17_39()).code, 'planned');
   assert.equal(stateOf(epicNode(), READY_WORK).code, 'planned');
   assert.equal(stateOf(epicNode(), undefined, ROLLUP_17_39()).code, 'planned', 'without work the roadmap alone decides');
+});
+
+test('#1379/D163: the word of awaiting-review is Awaiting approval; the code and class keep their name', () => {
+  assert.equal(STATES['awaiting-review'].label, 'Awaiting approval');
+  assert.equal(STATES['awaiting-review'].code, 'awaiting-review');
+  assert.equal(STATES['awaiting-review'].className, 'status-awaiting-review');
+  for (const s of Object.values(STATES)) assert.doesNotMatch(s.label, /awaiting review/i);
 });
