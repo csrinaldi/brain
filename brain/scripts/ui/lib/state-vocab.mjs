@@ -7,13 +7,15 @@
 // marks are the design's glyphs; `unknown` is the renderer's own output when
 // this table throws on a status it has never heard of — that throw is
 // deliberate (never empty-on-failure) and the per-node guard turns it into a
-// said `unknown`, distinct from `not-computed`, which is a roadmap that said
-// it could not be computed.
+// said `unknown`, distinct from `not-computed`. `not-computed` is a node whose state cannot be
+// claimed: with `work` it is derived from the work sources that are missing (D125) and its
+// reason names them; on the legacy path (no `work`) it is a roadmap that said it could not be computed.
 //
 // The word of `awaiting-review` is "Awaiting approval" (#1379, D163): the state means the ISSUE lacks
 // `status:approved`, not that a PR waits on review. The code, class and tokens keep the old name on purpose.
 
 import { rollupLabel, staleSuffix } from './rollup-model.mjs';
+import { APPROVED_LABEL } from './approval-label.mjs';
 
 export const UNKNOWN_CODE = 'unknown';
 
@@ -38,7 +40,6 @@ export const STATE_CODES = Object.freeze(Object.keys(STATES));
 const KNOWN_STATUS = new Set(['ready', 'blocked', 'awaiting-human', 'unclassified', 'unreadable']);
 const ROADMAP_STATE_CODE = { planned: 'planned', 'in-flight': 'in-flight', done: 'done' };
 
-const AWAITING_LABEL = 'status:approved';
 
 const isBlocked = (node) => Array.isArray(node.blockedBy) && node.blockedBy.length > 0;
 
@@ -49,7 +50,7 @@ const isBlocked = (node) => Array.isArray(node.blockedBy) && node.blockedBy.leng
  */
 function awaitingReview(node) {
   if (node.status === 'awaiting-human') return true;
-  return node.status === 'unclassified' && Array.isArray(node.labels) && !node.labels.includes(AWAITING_LABEL);
+  return node.status === 'unclassified' && Array.isArray(node.labels) && !node.labels.includes(APPROVED_LABEL);
 }
 
 const describeMissing = (m) => {

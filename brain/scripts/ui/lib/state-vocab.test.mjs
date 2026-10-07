@@ -12,6 +12,7 @@ import { PLANNED, IN_FLIGHT, DONE, UNREADABLE } from '../../status/snapshot.mjs'
 import { READY, BLOCKED, AWAITING_HUMAN, UNCLASSIFIED } from '../../status/epic-graph.mjs';
 import { colourClass, NOT_COMPUTED_CLASS } from './colour.mjs';
 import { stateOf, STATES, STATE_CODES, UNKNOWN_CODE } from './state-vocab.mjs';
+import { APPROVED_LABEL } from './approval-label.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const node = ({ status = READY, blockedBy = [], roadmap = { ok: true, value: { state: PLANNED } } } = {}) => ({ number: 1, status, blockedBy, roadmap });
@@ -112,9 +113,18 @@ test('R1303-1: an idle source is named as not read yet with its reason, never as
   assert.doesNotMatch(s.reason, /loading/);
 });
 
+test('R1342-3: the approval label is declared once; the graph and the state table import it and restate no literal (#1342)', () => {
+  assert.equal(APPROVED_LABEL, 'status:approved');
+  for (const file of ['../../status/epic-graph.mjs', './state-vocab.mjs']) {
+    const text = readFileSync(join(HERE, file), 'utf8');
+    assert.match(text, /import \{ APPROVED_LABEL \} from '.*approval-label\.mjs'/, file);
+    assert.doesNotMatch(text, /'status:approved'/, `${file} restates the label`);
+  }
+});
+
 test('R1308-8/S10: Awaiting approval reads status:approved from the labels of an undeclared node, by the same rule as every node', () => {
   assert.equal(stateOf(undeclared({ labels: [] }), READY_WORK).code, 'awaiting-review');
-  assert.equal(stateOf(undeclared({ labels: ['status:approved'] }), READY_WORK).code, 'planned');
+  assert.equal(stateOf(undeclared({ labels: [APPROVED_LABEL] }), READY_WORK).code, 'planned');
   assert.equal(stateOf(undeclared({ labels: [] }), workWith(1)).code, 'awaiting-review', 'awaiting-review outranks in-flight');
   assert.equal(stateOf(undeclared(), READY_WORK).code, 'planned', 'no labels array makes no claim');
 });
