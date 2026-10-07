@@ -5,7 +5,7 @@ the first days of using brain in a repository you did not build brain in. Each o
 found live, most of them by the `#1081` consumer demonstration (a fresh, empty
 repository installing the published `@logikas/brain` package). Every item links its
 tracking issue, where one exists, and states the practical workaround, if one exists.
-This list describes brain **1.12.1**.
+This list describes brain **1.13.0**.
 
 This is not a scorecard of brain's own test suite — brain's suite is green on all of
 these, which is the point: none of them shows up in brain's own repository (see
@@ -56,6 +56,30 @@ For the plan to close this class of gap, see the
   exists in the data (`supersedes`) but isn't surfaced to the reader, so a stale claim
   can be read as current. **Workaround:** when in doubt, check a record's
   `supersedes` field directly rather than trusting the newest-looking result.
+
+- **On `engram`, repeated `hydrate` runs can import a record again when engram detects a different
+  project than brain uses.** ([#1353](https://github.com/csrinaldi/brain/issues/1353)) `engram export`
+  is scoped to the project engram detects from the current directory. When that name differs from the
+  one brain imports under, the import reads an empty key set and imports again: one record became four
+  rows in the issue's e2e on engram 2.0.0. **Workaround:** none; records stay durable and the extra
+  rows are in the derived engram store only.
+
+- **`session:start`'s subprocess gate would allow a bare `hydrate`.**
+  ([#1355](https://github.com/csrinaldi/brain/issues/1355)) `session:start` is read-only on `plainfiles`
+  because it spawns `hydrate --verify`. The gate that restricts what it may spawn also accepts the bare
+  `hydrate`, which writes `.memory/index.jsonl` there. Nothing spawns the bare form today; the gap is a
+  guard that would not catch a regression. **Workaround:** none needed.
+
+- **`heal` and `audit` still reach the `engram` adapter directly instead of the backend port.**
+  ([#1352](https://github.com/csrinaldi/brain/issues/1352)) `heal` refuses unless the backend is
+  `engram`, and `audit` picks its export reader by backend name. Four entries stay in the axis-port
+  allowlist for it. **Workaround:** none needed; both behave as before on each backend.
+
+- **`agent-authorities.md` and `harness-contract.md` still describe `brain:memory:save` as it was
+  before #874.** ([#1362](https://github.com/csrinaldi/brain/issues/1362)) They say the backend picks a
+  saved record up on its next hydration and that `save` is pinned to `plainfiles`. Today `save` writes
+  the record, then calls `hydrate({recordId})` on the declared backend, and falls back to `plainfiles`
+  only when none is declared. **Workaround:** read `memory-backend-contract.md`, which states it.
 
 - **The engram duplicate-heal probe is tested on 1.20.x only.** On engram 2.x, import and
   hydration work, but the probe refuses the duplicate-heal verb with "outside the tested
@@ -184,6 +208,13 @@ healthy tree.
   was written is in `brain.config.json`.
 
 ## Platform axis
+
+- **`harness/readiness.mjs` can call a cold-review route to an unknown engine "ready".**
+  ([#1374](https://github.com/csrinaldi/brain/issues/1374)) With `sdd.map['cold-review'].engine` set
+  to a name brain ships no descriptor for, the readiness check answers ready (`cold-review is routed
+  to <engine>; it declares no readiness probe`), while the review runner refuses the same route.
+  **Workaround:** route the cold review to `claude`, `codex` or `gemini`; a typo shows up only when
+  the review runs.
 
 - **`day:start` always drives `gentle-ai`, regardless of your configured
   `SDD_ENGINE`.** ([#1114](https://github.com/csrinaldi/brain/issues/1114)) `claude`

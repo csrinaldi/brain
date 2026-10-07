@@ -43,7 +43,7 @@ allowlisted bytes into the same directory
 ([ADR-0030 Amendment 1](../brain/project/decisions/adr-0030-distribution-scoped-registry-package.md)):
 
 ```bash
-npm i -D "git+https://github.com/csrinaldi/brain.git#v1.12.1"
+npm i -D "git+https://github.com/csrinaldi/brain.git#v1.13.0"
 ```
 
 ---
@@ -390,8 +390,8 @@ each tier requires and how to recover if protection locks you out.
 ## Upgrading
 
 ```bash
-npm run brain:upgrade -- v1.12.1             # install a newer tag, copy managed paths
-npm run brain:upgrade -- v1.12.1 --dry-run   # preview what would change
+npm run brain:upgrade -- v1.13.0             # install a newer tag, copy managed paths
+npm run brain:upgrade -- v1.13.0 --dry-run   # preview what would change
 ```
 
 Read the [CHANGELOG](../CHANGELOG.md) first — renames and breaking changes need
@@ -399,6 +399,13 @@ manual action. Additive `brain.config.json` migrations apply automatically; your
 own values in `brain/project/**`, `brain.config.json`, `.env`, `openspec/changes/**`
 and `.memory/**` are never touched. `brain:day:start` checks for a newer tag every
 morning and never auto-updates.
+
+**The first upgrade to 1.13.0 deletes brain's test files from your tree.** Since 1.13.0 the package
+ships no test infrastructure, and `brain:upgrade` removes what earlier releases copied into
+`brain/scripts/` (test suites, fixtures, test-support and four test-only helpers). It lists each file
+under `Removed N file(s) brain no longer ships:`; `--dry-run` lists them first as `would remove N
+file(s) brain no longer ships:`. A file you edited among them is removed too. Anything you want to
+keep must be copied out of `brain/scripts/` (or recovered from git, if you committed it) — see the CHANGELOG.
 
 ---
 
