@@ -12,7 +12,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { isTestInfraPath, publishedTags, generateList, renderModule } from './tools/retired-test-paths.mjs';
+import { isTestInfraPath, publishedTags, generateList, renderModule, shipsTests } from './tools/retired-test-paths.mjs';
 import { RETIRED_TEST_PATHS } from '../brain/scripts/lib/retired-test-paths.mjs';
 import { RETIRED_PATHS } from '../brain/scripts/lib/retired-paths.mjs';
 
@@ -66,4 +66,19 @@ test('#1076: the committed module equals a regeneration from the published tags'
   assert.deepEqual([...RETIRED_TEST_PATHS], generated, 'run `npm run retired:test-paths` to regenerate');
   const onDisk = readFileSync(join(REPO_ROOT, 'brain/scripts/lib/retired-test-paths.mjs'), 'utf8');
   assert.equal(onDisk, renderModule(generated, tags), 'the file is byte-identical to the generator output');
+});
+
+test('#1389: a tag whose package.json excludes *.test.mjs from files shipped no tests and is not counted', () => {
+  const pkg = (files) => JSON.stringify({ name: '@logikas/brain', files });
+  assert.equal(shipsTests(pkg(['brain/scripts', 'brain/core'])), true, 'a plain brain/scripts entry shipped its suites');
+  assert.equal(shipsTests(pkg(['brain/scripts', '!brain/scripts/**/*.test.mjs'])), false, 'the #1076 negation ships none');
+  assert.equal(shipsTests(null), true, 'an unreadable package.json is treated as shipping, the conservative side for a prune list');
+});
+
+test('#1389: publishedTags stops at the last tag that shipped tests, so a later release cannot turn the regeneration red', () => {
+  let tags;
+  try { tags = publishedTags(REPO_ROOT); } catch { tags = []; }
+  if (!tags.includes('v1.12.1')) return;
+  assert.ok(!tags.includes('v1.13.0'), 'v1.13.0 ships no tests (#1076) and must not be counted');
+  assert.equal(tags.at(-1), 'v1.12.1', 'the list freezes at the last release that shipped tests');
 });
