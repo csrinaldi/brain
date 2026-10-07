@@ -6,7 +6,7 @@
 // renamed constant fails that test instead of quietly painting a node grey.
 //
 // Precedence (#1308 R1308-3): `stateOf` in state-vocab.mjs is the ONE authority and this comment
-// restates nothing it could drift from. In order: Unreadable > Done > Blocked > Awaiting review >
+// restates nothing it could drift from. In order: Unreadable > Done > Blocked > Awaiting approval >
 // In flight > Not computed > Planned. (R881-6 once ranked an open `blockedBy` above the roadmap
 // state; Done now outranks Blocked.)
 // `node.status === 'unclassified'` (no declaring source at all) is no longer a

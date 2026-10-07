@@ -9,6 +9,9 @@
 // deliberate (never empty-on-failure) and the per-node guard turns it into a
 // said `unknown`, distinct from `not-computed`, which is a roadmap that said
 // it could not be computed.
+//
+// The word of `awaiting-review` is "Awaiting approval" (#1379, D163): the state means the ISSUE lacks
+// `status:approved`, not that a PR waits on review. The code, class and tokens keep the old name on purpose.
 
 import { rollupLabel } from './rollup-model.mjs';
 
@@ -18,7 +21,7 @@ export const STATES = Object.freeze({
   unreadable: Object.freeze({ code: 'unreadable', label: 'Unreadable', mark: '⚠', className: 'status-unreadable' }),
   'not-computed': Object.freeze({ code: 'not-computed', label: 'Not computed', mark: '—', className: 'roadmap-not-computed' }),
   blocked: Object.freeze({ code: 'blocked', label: 'Blocked', mark: '⊘', className: 'status-blocked' }),
-  'awaiting-review': Object.freeze({ code: 'awaiting-review', label: 'Awaiting review', mark: '◇', className: 'status-awaiting-review' }),
+  'awaiting-review': Object.freeze({ code: 'awaiting-review', label: 'Awaiting approval', mark: '◇', className: 'status-awaiting-review' }),
   'ready-to-close': Object.freeze({ code: 'ready-to-close', label: 'Ready to close', mark: '◉', className: 'state-ready-to-close' }),
   planned: Object.freeze({ code: 'planned', label: 'Planned', mark: '○', className: 'state-planned' }),
   'in-flight': Object.freeze({ code: 'in-flight', label: 'In flight', mark: '◐', className: 'state-in-flight' }),
@@ -40,7 +43,7 @@ const AWAITING_LABEL = 'status:approved';
 const isBlocked = (node) => Array.isArray(node.blockedBy) && node.blockedBy.length > 0;
 
 /**
- * Awaiting review: the graph says so (`awaiting-human`), or — for a node nobody declares, which
+ * Awaiting approval (code `awaiting-review`, kept — D163): the graph says so (`awaiting-human`), or — for a node nobody declares, which
  * epic-graph.mjs classifies before it ever reads the approval label — its own labels say it is not approved.
  * A node with no `labels` array makes no claim (#1308 ruling 2).
  */

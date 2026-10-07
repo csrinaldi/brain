@@ -120,7 +120,7 @@ test('#1312 S8 / R1312-1: an issue no open PR joins has no footer, whatever its 
   const { dom } = await boot({ prs: ok([pr(885, 881, 'feat/issue-881-x')]), reviews: ok([thread(885, [A, 1, 'REVISE'])]) });
   t.after(() => dom.restore());
   assert.equal(cardOf(dom, 1230).length, 1);
-  assert.match(cardOf(dom, 1230)[0].textContent, /Awaiting review/);
+  assert.match(cardOf(dom, 1230)[0].textContent, /Awaiting approval/);
   assert.equal(footerOf(dom, 1230), null);
 });
 
