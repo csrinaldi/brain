@@ -63,6 +63,7 @@
 // but a fence literally tagged `brain-graph/1` can ever match it.
 
 import { fencedBlocks } from '../lib/fenced-blocks.mjs';
+import { APPROVED_LABEL } from '../ui/lib/approval-label.mjs';
 import { scalar, parseJsonScalar } from '../review/lib/yaml-block.mjs';
 
 export const GRAPH_PROTOCOL = 'brain-graph/1';
@@ -761,7 +762,7 @@ export function buildGraph(issues = []) {
     node.blockedBy = blockers;
     if (node.sources.length === 0) node.status = UNCLASSIFIED;
     else if (blockers.length > 0) node.status = BLOCKED;
-    else if (!node.labels.includes('status:approved')) node.status = AWAITING_HUMAN;
+    else if (!node.labels.includes(APPROVED_LABEL)) node.status = AWAITING_HUMAN;
     else node.status = READY;
   }
 

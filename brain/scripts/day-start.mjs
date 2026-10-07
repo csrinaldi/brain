@@ -196,36 +196,18 @@ sep(await t('day.main.section'));
 }
 
 // ── 3. Ecosystem updates ─────────────────────────────────────────────────────
+// Reminder only (#1386): day:start updates NOTHING. A global tool is machine-wide, so applying
+// an update from a routine verb changes every repository on the box — see
+// brain/core/anti-patterns/instaladores-autoactualizantes-no-inocuos.md. `gentle-ai update` is
+// not spawned either: it is not known to be read-only. The dedicated, interactive verb is
+// `brain:tools:update`.
 sep(await t('day.ecosystem.section'));
 const gaCheck = capture('gentle-ai', ['--version']);
 if (gaCheck.status !== 0) {
   info(await t('day.ecosystem.notAvailable'));
   console.log(`       ${await t('day.ecosystem.install')}`);
 } else {
-  console.log(`  ${C.dim}${await t('day.ecosystem.checking')}${C.reset}`);
-  const check = capture('gentle-ai', ['update']);
-  if (check.status === 0) {
-    const updates = (check.stdout ?? '')
-      .split('\n')
-      .filter(l => l.includes('[UP]'));
-
-    if (updates.length === 0) {
-      ok(await t('day.ecosystem.allUpToDate'));
-    } else {
-      console.log(`  ${C.yellow}${await t('day.ecosystem.updatesAvailable', { count: updates.length })}${C.reset}\n`);
-      for (const line of updates) {
-        const m = line.match(/\[UP\]\s+(\S+)\s+installed:\s+(\S+)\s+latest:\s+(\S+)/);
-        if (m) {
-          console.log(`    ${C.cyan}%-20s${C.reset}  ${C.dim}%s${C.reset} → ${C.green}%s${C.reset}`, m[1], m[2], m[3]);
-        } else {
-          console.log(`   ${line.trim()}`);
-        }
-      }
-      console.log(`\n  ${await t('day.ecosystem.applying')}`);
-      await run('gentle-ai', ['upgrade']);
-      ok(await t('day.ecosystem.done'));
-    }
-  }
+  info(await t('day.ecosystem.runToUpdate'));
   capture('gentle-ai', ['skill-registry', 'refresh']);
   ok(await t('day.ecosystem.skillRegistry'));
 }

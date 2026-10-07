@@ -165,3 +165,16 @@ test('#1309 R1309-1: the Roadmap epic row reads the same state as the other shap
   assert.equal(row.stateReason ?? row.state.reason, '1 / 2 children closed');
   assert.equal(buildRoadmapModel(graph({ nodes: [epic, kid] }), { work }).value.epics[0].state.code, 'planned', 'no epics option is the legacy path (D135)');
 });
+
+test('R1342-2: a roadmap row in Not computed carries the reason naming the missing sources (#1342)', () => {
+  const work = { missing: [{ name: 'prs', state: 'failed', reason: 'rate limited' }, { name: 'remoteChanges', state: 'idle', reason: 'polling is paused' }], byIssue: new Map() };
+  const row = buildRoadmapModel(graph({ nodes: [node(40)] }), { work }).value.unlinked[0];
+  assert.equal(row.state.code, 'not-computed');
+  assert.match(row.stateReason, /prs could not be read \(rate limited\)/);
+  assert.match(row.stateReason, /remoteChanges was not read yet \(polling is paused\)/);
+  const legacy = buildRoadmapModel(graph({ nodes: [node(41, { roadmap: { ok: false, reason: 'the PR list could not be read' } })] })).value.unlinked[0];
+  assert.equal(legacy.state.code, 'not-computed');
+  assert.equal(legacy.stateReason, 'the PR list could not be read', 'the legacy path says the roadmap reason');
+  const planned = buildRoadmapModel(graph({ nodes: [node(42)] }), { work: { missing: [], byIssue: new Map() } }).value.unlinked[0];
+  assert.equal(planned.stateReason, null, 'a state with nothing to explain says nothing');
+});

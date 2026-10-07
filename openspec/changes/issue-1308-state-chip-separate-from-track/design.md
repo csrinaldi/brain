@@ -30,7 +30,7 @@ issue: 1308
 work evidence. `work` is `{ missing: [{name,state,reason}], byIssue: Map<issue, {changes,
 worktrees, branches, prs}> }` produced by a new export `workIndex(sections)` in
 `inflight-model.mjs`, built from its existing `collect` and `missingSources` (minus `hierarchy`).
-`buildInflight` calls `workIndex` too, so the section and the chips share one join (R1308-6).
+`buildInflight` and `workIndex` both call the same `missingSources` and `collect`, so the section and the chips share one join (R1308-6). (Corrected by #1342: this text said `buildInflight` calls `workIndex`; it does not, because the section also needs `hierarchy` among its missing sources and `workIndex` drops it.)
 **Alternatives**: recompute evidence in `lane-model` (two joins that drift); move it into the
 snapshot server-side (breaks "first render never waits": local sources arrive before forge ones,
 and the snapshot's graph field is forge-bound).
@@ -54,7 +54,7 @@ always passes `work`.
 `TRACK_MARKS` = `declared` (`Track <id>`), `no-track` (`? No track`, block without track),
 `undeclared` (`⚠ Configuration missing`, `node.declared === false` — a warning, see D128; supersedes ruling 5's `Undeclared` word for the chip). New pure
 `trackMarkOf(node)` returns `null` for `status === 'unreadable'`. `STATES.unclassified` is
-removed; its CSS variables are reused by the track chip's `undeclared` class. The `? track` mark in
+removed; the track chip's `undeclared` class is styled with `--warn` / `--warn-bg` (the `--state-unclassified-*` variables were deleted; corrected by #1342). The `? track` mark in
 `stateAndMarks` is removed (the chip says it).
 **Alternative**: keep "Undeclared" as a state with a secondary in-flight badge — keeps two facts in
 one slot, the defect itself.
@@ -104,7 +104,7 @@ RULED 2026-10-05: An issue whose only work evidence is stale (>= 7 days, the sec
 
 ### D128 — The missing-configuration warning and the paste block
 
-The `undeclared` track mark is a warning chip: mark `⚠`, word `Configuration missing`, class `track-undeclared` drawn in the existing warning colours (`--state-unclassified-*`, the amber the unreadable/warning visual language already uses). It replaces the old `? Undeclared` chip. The drawer of such a node shows, in the body, a copyable text block: `DECLARE_SNIPPET` (exported from `lane-model.mjs`) with `parent: 878` replaced by the node's own `parent` when it is known, plus the example-not-form note `DECLARE_NOTE`. Pure model: `nodeSummaryFor` returns `declare: {snippet, note, declareCommand}` for an undeclared node and `declare: null` otherwise. `declareCommand` is `null` today: the provider-agnostic `brain:ticket:declare` is #1335 and does not exist, and a command that does not exist is never shown. #1335 fills this one field; a test pins it `null` so the day it is filled the test names the renderer work owed.
+The `undeclared` track mark is a warning chip: mark `⚠`, word `Configuration missing`, class `track-undeclared` drawn in the existing warning colours (`--warn` / `--warn-bg`, the amber the unreadable/warning visual language already uses; corrected by #1342, the `--state-unclassified-*` variables were deleted). It replaces the old `? Undeclared` chip. The drawer of such a node shows, in the body, a copyable text block: `DECLARE_SNIPPET` (exported from `lane-model.mjs`) with `parent: 878` replaced by the node's own `parent` when it is known, plus the example-not-form note `DECLARE_NOTE`. Pure model: `nodeSummaryFor` returns `declare: {snippet, note, declareCommand}` for an undeclared node and `declare: null` otherwise. `declareCommand` is `null` today: the provider-agnostic `brain:ticket:declare` is #1335 and does not exist, and a command that does not exist is never shown. #1335 fills this one field; a test pins it `null` so the day it is filled the test names the renderer work owed.
 
 ### D129 — A malformed declaration is not a missing one (cold review round 1, finding 1)
 

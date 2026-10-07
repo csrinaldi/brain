@@ -48,12 +48,15 @@ export default {
   // Ecosystem updates
   'day.ecosystem.notAvailable':    'gentle-ai not available — skipping updates.',
   'day.ecosystem.install':         'Install: npm run tools:install',
-  'day.ecosystem.checking':        'Checking versions...',
-  'day.ecosystem.allUpToDate':     'All tools up to date.',
-  'day.ecosystem.updatesAvailable':'{count} update(s) available:',
-  'day.ecosystem.applying':        'Applying updates...',
-  'day.ecosystem.done':            'Done.',
+  'day.ecosystem.runToUpdate':     'Tool updates are not applied here — run `npm run brain:tools:update` to check and apply them.',
   'day.ecosystem.skillRegistry':   'Skill registry updated.',
+
+  // ── tools-update.mjs (#1386) ──
+  'tools.update.checking':      'Checking and applying global tool updates (gentle-ai)...',
+  'tools.update.applying':      'Applying updates...',
+  'tools.update.notAvailable':  'gentle-ai not available. Install: npm run tools:install',
+  'tools.update.refusedCi':     'Refusing to update global tools under CI: this verb must be run interactively. Nothing was changed.',
+  'tools.update.refusedNoTty':  'Refusing to update global tools without a terminal: this verb must be run interactively. Nothing was changed.',
 
   // brain version
   'day.brain.unknownInstalled': 'Could not determine installed brain version — skipping check.',
