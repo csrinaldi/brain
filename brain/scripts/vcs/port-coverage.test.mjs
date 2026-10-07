@@ -343,3 +343,27 @@ test('#336 (round 11): a computed read off the verb is a property access, not a 
   assert.equal(countConsumers('checkRuns', [{ file: 'x.mjs', text: 'listCheckRuns: providerModule.checkRuns,' }]), 1,
     'while a bare reference is still a use');
 });
+
+// ── #1076: the package ships no tests, so a consumer has nothing to measure ──
+
+test('#1076: a tree without the contract suite is refused with a clear message, not reported as 0% coverage', async () => {
+  const { contractSuiteMissing } = await import('./port-coverage.mjs');
+  assert.match(contractSuiteMissing({ contractText: '' }), /contract\.test\.mjs/);
+  assert.match(contractSuiteMissing({ contractText: '' }), /brain source repository|does not ship/i);
+  assert.equal(contractSuiteMissing({ contractText: 'export {}' }), null, 'a present suite is not refused');
+});
+
+test('#1076: the CLI exits non-zero and prints the refusal when run from a tree with no contract suite', async (t) => {
+  const { mkdtempSync, mkdirSync, copyFileSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { spawnSync } = await import('node:child_process');
+  const root = mkdtempSync(join(tmpdir(), 'brain-1076-pc-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  mkdirSync(join(root, 'brain/scripts/vcs'), { recursive: true });
+  copyFileSync(new URL('./port-coverage.mjs', import.meta.url), join(root, 'brain/scripts/vcs/port-coverage.mjs'));
+  const r = spawnSync(process.execPath, [join(root, 'brain/scripts/vcs/port-coverage.mjs')], { encoding: 'utf8', timeout: 30000 });
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /contract\.test\.mjs/);
+  assert.equal(r.stdout, '', 'no table is printed');
+});

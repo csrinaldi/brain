@@ -18,6 +18,9 @@ const SCAN_ROOT = join(REPO_ROOT, 'brain', 'scripts');
 
 const EXCLUDE_TEST_FILE = /\.test\.mjs$/;
 const EXCLUDE_FIXTURES_DIR = /^__fixtures__$/;
+// #1076: generated DATA naming test files earlier releases shipped, one of which is `merge-engram-manifest.test.mjs`.
+// It is a list of historical file names, not code that reads or writes the retired artifact.
+const EXCLUDE_RETIRED_NAMES_DATA = 'retired-test-paths.mjs';
 
 /**
  * Walks `brain/scripts/**` (hooks included), skipping `*.test.mjs` files and
@@ -38,7 +41,7 @@ function scanForRetiredArtifactStrings() {
         walk(join(dir, e.name));
         continue;
       }
-      if (EXCLUDE_TEST_FILE.test(e.name)) continue;
+      if (EXCLUDE_TEST_FILE.test(e.name) || e.name === EXCLUDE_RETIRED_NAMES_DATA) continue;
       const p = join(dir, e.name);
       if (statSync(p).size > 2 * 1024 * 1024) continue;
       scanned++;

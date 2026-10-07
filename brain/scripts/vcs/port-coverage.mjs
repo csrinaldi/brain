@@ -424,7 +424,22 @@ export function renderMarkdown(report) {
   return lines.join('\n');
 }
 
+/**
+ * The audit measures contract COVERAGE, so it needs the contract suite. The published
+ * package ships no tests (#1076): in a consumer this tool has nothing to read, and
+ * without this refusal it would print a table of "uncovered" for every verb.
+ * @returns {string|null} the refusal, or null when the suite was read
+ */
+export function contractSuiteMissing({ contractText }) {
+  if (contractText) return null;
+  return 'port-coverage: brain/scripts/axes/vcs/contract.test.mjs was not found. This audit reads brain\'s own '
+    + 'contract suite, which the published package does not ship; run it from a checkout of the brain source repository.';
+}
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const report = buildReport(gather());
+  const gathered = gather();
+  const refusal = contractSuiteMissing(gathered);
+  if (refusal) { console.error(refusal); process.exit(1); }
+  const report = buildReport(gathered);
   console.log(process.argv.includes('--json') ? JSON.stringify(report, null, 2) : renderMarkdown(report));
 }

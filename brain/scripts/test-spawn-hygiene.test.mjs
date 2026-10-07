@@ -465,6 +465,7 @@ const ALLOWLIST = [
   { file: 'brain/scripts/bootstrap.required-failure.test.mjs', entrypoint: '<unresolved>', line: 104, reason: 'no-vcs-capability' },
   // #1112 final cold review: the e2e's `sh -c 'command -v gh'` proves the shims resolve first; no VCS port involved.
   { file: 'brain/scripts/bootstrap.pat-refusal-e2e.test.mjs', entrypoint: '<unresolved>', line: 186, reason: 'no-vcs-capability' },
+  { file: 'brain/scripts/vcs/port-coverage.test.mjs', entrypoint: 'brain/scripts/vcs/port-coverage.mjs', reason: 'no-vcs-capability' }, // #1076: reads files only; run from a temp tree with no contract suite
 ];
 
 function validateAllowlist(entries) {
