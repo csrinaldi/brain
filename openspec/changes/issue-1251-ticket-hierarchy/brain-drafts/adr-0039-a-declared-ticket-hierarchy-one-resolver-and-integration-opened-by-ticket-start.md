@@ -1,6 +1,6 @@
 # ADR-0039 — A declared ticket hierarchy: one resolver, a `move` that keeps the sources together, and the integration that `ticket:start` opens
 
-> **status:** proposed — rulings of 2026-10-02 and 2026-10-07 (Q1-Q12, Q1-hotfix, C1-C10, N1-N5, M1-M4, R1) on #1251, pending human promotion | **date:** 2026-10-07 | **owner:** @crinaldi
+> **status:** proposed — rulings of 2026-10-02 and 2026-10-07 (Q1-Q12, Q1-hotfix, C1-C10, N1-N5, M1-M4, R1, S1) on #1251, pending human promotion | **date:** 2026-10-07 | **owner:** @crinaldi
 > **relates to:** ADR-0018 (the GitLab governance fragment), ADR-0020 (port widening is a decision), ADR-0029 (two sources, one graph), ADR-0032 (the `brain-graph/1` tag), ADR-0034 (lanes), ADR-0035 (a branch name is a claim), ADR-0037 (who merges), ADR-0038 (one config shape per axis, with its Amendments 1-2), ADR-0040 (the owned team config); `brain/core/methodology/harness-contract.md` (`ticket:start` row); `brain/core/methodology/agent-authorities.md`; maintainer rulings on #1251, 2026-10-02 and 2026-10-07; #697, #930, #967, #1121, #1130, #1199, #1206, #1257, #1293, #1335
 
 > **Tier 2 draft.** `brain/project/decisions/**` is human-promoted (`agent-authorities.md` Tier 2).
@@ -329,8 +329,13 @@ milestone was authoritative and a `native: "milestone"` level had no issue behin
   head the same tracker, base the same target, `Closes #<node>`. That PR is marked ready at Ready to
   close (ruling C10), passes `integration-ready`, and its merge closes the node and deletes the
   tracker (ruling C5). **If the node's last child closes while the tracker has no commits its target
-  lacks** (`git rev-list <target>..<tracker>` is empty), there is nothing to integrate, so brain
-  closes the node and deletes the tracker directly (unchanged by ruling R1).
+  lacks** (`git rev-list <target>..<tracker>` is empty), there is nothing to integrate, so the node
+  is closed and its tracker deleted directly (unchanged by ruling R1).
+- **The close workflow executes the direct close** (ruling S1, option A, 2026-10-07). Besides a
+  merged PR, it also runs on the `issues` `closed` event. When the closed issue is the last open
+  child of a merged-but-open node whose tracker has no commits its target lacks, it closes the node
+  and deletes the tracker as the automation identity: the same identity and tier as C5's closes and
+  deletions. No PR is authored, so no producer question arises (ADR-0037).
 - **A human authors the remainder PR** (ruling R1, option B, 2026-10-07). The close workflow does
   not open it; it only reports the merged-but-open node. **`day:start` proposes it under the user's
   credentials, as a Tier 2 act**: it shows the PR (head the live tracker, base its target,
@@ -588,7 +593,9 @@ Q10), and the workflow then closes #878, deletes `release-1300/epic-878/tracker`
 #1300's region. Had #878's PR merged while #56 was still open, at `lite`, #878 would stay open,
 its tracker would stay, and brain would report it as merged but open; #56's merge into the live
 tracker would be reported by the workflow, and the next `day:start` would propose a remainder PR
-for #878, created on the operator's confirmation; its merge closes #878 (rulings M3, R1). When #1300's PR
+for #878, created on the operator's confirmation; its merge closes #878 (rulings M3, R1). Had #56
+instead been closed as not planned, with nothing merged into the tracker since #878's merge, the
+workflow's `issues` `closed` run would close #878 and delete its tracker at once (ruling S1). When #1300's PR
 merges into `main`, the forge executes its `Closes #1300`, and the workflow deletes its tracker and
 closes the native milestone `Release 1.13` (rulings C5, M2).
 
@@ -653,7 +660,8 @@ main into tracker" PR for each, to be merged with `--merge`.
   `regulated` where a hierarchy is declared. At `lite`, and on the implicit model at every tier
   (ruling M1), an early merge is possible; its cost is a node reported as merged but open, and a
   remainder PR a human must confirm in `day:start` before the node can close (rulings M3, R1).
-  Until someone runs `day:start` interactively, the node stays open.
+  Until someone runs `day:start` interactively, the node stays open. When nothing is left to
+  integrate, the `issues` `closed` run closes it without waiting (ruling S1).
 - **A closing keyword in a PR body is no longer enough off `main`.** The workflow closes only what
   the resolver confirms (ruling M2), so a child whose block does not declare its parent stays open
   after a tracker merge, and is reported.
@@ -762,17 +770,17 @@ Promoted after ADR-0039, in this order. "Drafted" means the draft is beside this
 
 ## Open questions for the maintainer
 
-The rulings of 2026-10-07 (Q1-Q12, Q1-hotfix, C1-C10, N1-N5, M1-M4, R1) settle every question
-earlier drafts listed. Checking R1 against M3 leaves one. This draft takes no position on it.
+The rulings of 2026-10-07 (Q1-Q12, Q1-hotfix, C1-C10, N1-N5, M1-M4, R1, S1) settle every question
+earlier drafts listed. Checking S1 against the providers leaves one. This draft takes no position on
+it.
 
-1. **Who executes M3's direct close** (ruling R1 against M3's direct-close branch). M3 closes a
-   merged-but-open node and deletes its tracker "directly" when its last child closes and the
-   tracker has no commits its target lacks. That branch fires when the last child closes without a
-   merge (a child closed as not planned, or moved away by `move`): no PR merges, so the close
-   workflow, which runs on a merged PR, never fires. R1 moved the sibling act, the remainder PR, to
-   `day:start` under the user's credentials; it left this one "unchanged", with no actor.
-   Options: (a) the close workflow also runs on the `issues` `closed` event and performs the direct
-   close as the automation identity, the same identity and tier as C5's closes and deletions;
-   (b) `day:start` proposes the direct close and the tracker deletion as a Tier 2 act, shown and
-   confirmed like the remainder PR, and only reports in a non-interactive run; (c) `day:start`
-   performs it without asking, as a Tier 1 act, because nothing is left to integrate.
+1. **S1's trigger does not exist on GitLab** (ruling S1 against ADR-0018 and the GitLab fragment).
+   GitLab CI starts pipelines on pushes, merge requests, schedules, the web UI, the API and trigger
+   tokens; an issue event is not a pipeline source, so there is no GitLab counterpart to GitHub's
+   `issues` `closed` workflow run. Until one is chosen, a GitLab project's direct close happens
+   only when `day:start` reports the merged-but-open node and a human acts. Options: (a) a project
+   webhook on issue events calls the pipeline trigger API, which needs a pipeline trigger token
+   beside the project access token, both documented in the ADR-0018 amendment; (b) a scheduled
+   pipeline sweeps merged-but-open nodes, which needs no new secret but closes them with up to one
+   schedule interval of delay; (c) on GitLab the direct close is not automated at all, and
+   `day:start`'s report is the mechanism, stated as a provider limitation.

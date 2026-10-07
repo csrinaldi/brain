@@ -48,7 +48,11 @@ region's markers. The same workflow marks a draft integration PR ready when ever
 is closed (ruling C10). When an integration PR merged before its node was Ready to close, it closes
 nothing and deletes nothing, and reports the node as merged but open (ruling N4). It executes a
 closing keyword only when the resolver places that issue under the node whose tracker is the PR's
-base; any other keyword is reported, never executed (ruling M2).
+base; any other keyword is reported, never executed (ruling M2). It also runs on the `issues`
+`closed` event: when the closed issue is the last open child of a merged-but-open node whose
+tracker has no commits its target lacks, it closes the node and deletes the tracker, as the same
+automation identity at the same tier, an automation act like the others (ruling S1). No PR is
+authored by it, so it is never a producer under ADR-0037.
 
 These are **automation acts**. A forge CI workflow runs them on `pull_request` `closed` with
 `merged == true`, as the automation identity (`GITHUB_TOKEN` with `issues: write` and
@@ -75,8 +79,8 @@ default branch, and every rollup above it is wrong.
 - **A run that does not happen is caught late.** A fork PR's read-only token, a missing GitLab
   variable or an outage leaves the issue open. `day:start`, under the user's credentials, lists
   every PR merged into a tracker whose issue is still open; it reports, it does not close.
-- **Who executes the direct close** of a merged-but-open node whose last child closed without a
-  merge (ADR-0039 ruling M3) is an open question on ADR-0039, and this section does not decide it.
+- **On GitLab the `issues` `closed` trigger has no pipeline counterpart.** How the direct close
+  runs there is an open question on ADR-0039, and this section does not decide it.
 
 ### `day:start` proposes a remainder PR: Tier 2 (ruling R1, 2026-10-07)
 
