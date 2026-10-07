@@ -89,7 +89,7 @@ npm run brain:env:init
 > ([ADR-0030 Amendment 1](brain/project/decisions/adr-0030-distribution-scoped-registry-package.md)):
 >
 > ```bash
-> npm i -D "git+https://github.com/csrinaldi/brain.git#v1.12.1"
+> npm i -D "git+https://github.com/csrinaldi/brain.git#v1.13.0"
 > ```
 
 `npx brain init` needs no aliases to exist first — it is a `bin` entry, which is
@@ -104,7 +104,7 @@ you already defined, and is safe to re-run. `npx brain --help` lists the verb su
 >
 > ```bash
 > #      "brain:upgrade": "node node_modules/@logikas/brain/brain/scripts/brain-upgrade.mjs"
-> npm run brain:upgrade -- v1.12.1
+> npm run brain:upgrade -- v1.13.0
 > ```
 
 > **Using pnpm / yarn / bun?** brain is **package-manager-agnostic** — it detects your
@@ -155,8 +155,8 @@ Then:
 ### Updating brain
 
 ```bash
-npm run brain:upgrade -- v1.12.1             # install a newer tag, copy managed paths
-npm run brain:upgrade -- v1.12.1 --dry-run   # preview what would change
+npm run brain:upgrade -- v1.13.0             # install a newer tag, copy managed paths
+npm run brain:upgrade -- v1.13.0 --dry-run   # preview what would change
 ```
 
 Read the [CHANGELOG](CHANGELOG.md) before upgrading — **renames / breaking
@@ -193,8 +193,8 @@ to core go **upstream first** (PR to the brain repo), then you bump the version.
 | `npm run feature:checkpoint` / `feature:resume` | Save / restore per-feature working memory (`resume.md`). |
 | `npm run brain:repo:check` | Check for prohibited references and structural violations. |
 | `npm run brain:memory:save --issue <id>` | Capture durable issue memory; the enabled memory lane ships it. |
-| `npm run brain:memory:pull` | **Cross-machine sync**: runs `git pull`, rebuilds `.memory/index.jsonl`, then imports `.memory/` into local engram. |
-| `npm test` | Harness unit tests (`node --test`). |
+| `npm run brain:memory:pull` | **Cross-machine sync**: runs `git pull`, rebuilds `.memory/index.jsonl`, then (on `engram`) imports `.memory/` into the local engram; on `plainfiles` the rebuilt index is the whole step. |
+| `npm test` | Brain's own source repository only: harness unit tests (`node --test`). Since 1.13.0 the suites are not in the package, so an installed repository has none to run. |
 | `npm run brain:start` / `check` / `ship` / `next` | **Golden path** — self-gating workflow verbs (start a ticket → check → capture issue memory → ship a PR; `next` tells you the next step). |
 | `npm run brain:audit` | Re-verify the 4 governance invariants on merged history (the tool-independent teeth). |
 | `npm run brain:governance-status` | Report what governance enforcement your repo's platform + tier supports. |
