@@ -52,7 +52,11 @@ function awaitingReview(node) {
   return node.status === 'unclassified' && Array.isArray(node.labels) && !node.labels.includes(AWAITING_LABEL);
 }
 
-const describeMissing = (m) => `${m.name} ${m.state === 'pending' ? 'is still loading' : `could not be read${m.reason ? ` (${m.reason})` : ''}`}`;
+const describeMissing = (m) => {
+  if (m.state === 'pending') return `${m.name} is still loading`;
+  const why = m.reason ? ` (${m.reason})` : '';
+  return `${m.name} ${m.state === 'idle' ? 'was not read yet' : 'could not be read'}${why}`;
+};
 
 const notComputed = (reason) => ({ ...STATES['not-computed'], reason });
 const inFlight = (reason) => ({ ...STATES['in-flight'], reason });

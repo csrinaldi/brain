@@ -191,6 +191,26 @@ test('R1284-6/D95: each non-ready source is named, pending worded apart from fai
   assert.match(r.value.notices.join('\n'), /prs.*rate limited/);
 });
 
+test('R1303-1: an idle source is worded as not read with its reason, never as loading (#1303)', () => {
+  const paused = { ok: false, pending: true, idle: true, reason: 'polling is paused' };
+  const r = build({ prs: paused, remoteChanges: { ok: false, pending: true, reason: 'loading remote branches…' } });
+  assert.deepEqual(r.value.missingSources, [
+    { name: 'remoteChanges', state: 'pending', reason: 'loading remote branches…' },
+    { name: 'prs', state: 'idle', reason: 'polling is paused' },
+  ]);
+  assert.deepEqual(r.value.notices, ['remoteChanges: still loading', 'prs: not read yet, polling is paused']);
+  assert.deepEqual(workIndex(sections({ prs: paused })).missing, [{ name: 'prs', state: 'idle', reason: 'polling is paused' }]);
+});
+
+test('R1303-1: a paused hierarchy says it is not read yet, once, with no "still loading"', () => {
+  const paused = { ok: false, pending: true, idle: true, reason: 'polling is paused' };
+  const r = build({ hierarchy: paused, prs: paused, changes: ok([change(1)]) });
+  const text = r.value.notices.join('\n');
+  assert.doesNotMatch(text, /loading/);
+  assert.match(text, /1 candidate issue\(s\); their open\/closed state is not read yet \(hierarchy: not read yet, polling is paused\)/);
+  assert.match(text, /prs: not read yet, polling is paused/);
+});
+
 test('R1284-6/D96: while hierarchy is not ready no row is drawn; the candidate count and the reason are carried', () => {
   const r = build({
     hierarchy: { ok: false, reason: 'rate limited' },

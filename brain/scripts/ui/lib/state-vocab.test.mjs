@@ -105,6 +105,13 @@ test('R1308-5/S5/S7: a pending or failed source with no evidence is Not computed
   assert.equal(stateOf(node(), w).code, 'in-flight', 'a local change dir is enough while prs is pending');
 });
 
+test('R1303-1: an idle source is named as not read yet with its reason, never as loading (#1303)', () => {
+  const s = stateOf(node(), { missing: [{ name: 'prs', state: 'idle', reason: 'polling is paused' }], byIssue: new Map() });
+  assert.equal(s.code, 'not-computed');
+  assert.match(s.reason, /prs was not read yet \(polling is paused\)/);
+  assert.doesNotMatch(s.reason, /loading/);
+});
+
 test('R1308-8/S10: Awaiting approval reads status:approved from the labels of an undeclared node, by the same rule as every node', () => {
   assert.equal(stateOf(undeclared({ labels: [] }), READY_WORK).code, 'awaiting-review');
   assert.equal(stateOf(undeclared({ labels: ['status:approved'] }), READY_WORK).code, 'planned');

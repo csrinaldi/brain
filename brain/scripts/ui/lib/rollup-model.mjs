@@ -14,7 +14,7 @@ export const NO_CHILDREN = 'no children declared';
 /** hierarchyOf(section) -> {ok:true, value:{issues: Map, divergences, closedUnresolved}} | {ok:false, pending?, reason} */
 export function hierarchyOf(section) {
   if (!section || typeof section !== 'object') return { ok: false, reason: 'no hierarchy section was given' };
-  if (section.ok !== true) return { ok: false, ...(section.pending === true ? { pending: true } : {}), reason: section.reason };
+  if (section.ok !== true) return { ok: false, ...(section.pending === true ? { pending: true } : {}), ...(section.pending === true && section.idle === true ? { idle: true } : {}), reason: section.reason };
   const { issues, divergences, closedUnresolved, closedRead } = section.value;
   // A section that does not say its closed list was read is not trusted as having it.
   const read = closedRead && typeof closedRead === 'object' ? closedRead : { ok: false, reason: 'the hierarchy did not report whether the closed list was read' };
