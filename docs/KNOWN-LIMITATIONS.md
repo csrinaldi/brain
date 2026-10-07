@@ -220,8 +220,9 @@ healthy tree.
   `SDD_ENGINE`.** ([#1114](https://github.com/csrinaldi/brain/issues/1114)) `claude`
   and `antigravity` are both supported agent platforms
   ([ADR-0024](../brain/project/decisions/adr-0024-three-axis-decoupling.md)), but the
-  daily ecosystem-update step (`gentle-ai --version`/`update`/`upgrade`/
-  `skill-registry refresh`) is hardcoded rather than reading the axis. **No
+  daily ecosystem step (`gentle-ai --version`/`skill-registry refresh`) and the
+  `brain:tools:update` verb (`gentle-ai update`/`upgrade`, #1386) are hardcoded
+  rather than reading the axis. **No
   workaround** beyond ignoring that step on a non-`gentle-ai` setup.
 
 ---
