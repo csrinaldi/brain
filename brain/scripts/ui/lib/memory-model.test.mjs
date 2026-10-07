@@ -8,7 +8,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildMemoryModel, MEMORY_RECENT_CAP } from './memory-model.mjs';
+import { buildMemoryModel, MEMORY_RECENT_CAP, RECORD_LOADING, SUMMARY_MISSING, recordFailure, recordTruncated, recordUrl } from './memory-model.mjs';
 
 const rec = (over = {}) => ({
   id: 'rec-0000000000000001',
@@ -306,4 +306,42 @@ test('#1067: a non-string actorKind cannot throw the comparator either', () => {
   assert.equal(model.ok, true, 'a rogue actorKind must not take the ledger down');
   assert.equal(model.value.countsByActorKind.reduce((sum, row) => sum + row.count, 0), 3,
     'and every record is still counted — the value is unexpected, not absent');
+});
+
+// ── #1313: what a row says, and what an opened record says while it loads ──
+
+test('#1313 R1313-5: a recent row passes its summary through unchanged', () => {
+  const summary = { ok: true, title: 'A title', excerpt: 'some words', truncated: false };
+  const model = buildMemoryModel(section([rec({ summary })]));
+  assert.deepEqual(model.value.recent.records[0].summary, summary);
+});
+
+test('#1313 R1313-3: a reason summary passes through with its own sentence', () => {
+  const summary = { ok: false, reason: 'this record has no content field' };
+  const model = buildMemoryModel(section([rec({ summary })]));
+  assert.deepEqual(model.value.recent.records[0].summary, summary);
+});
+
+test('#1313 R1313-5: a row whose snapshot carries no usable summary says so, in one sentence, and never says unreadable', () => {
+  for (const summary of [undefined, null, 'x', { ok: true }, { ok: true, title: 1, excerpt: 'e' }, { ok: false }]) {
+    const model = buildMemoryModel(section([rec({ summary })]));
+    assert.deepEqual(model.value.recent.records[0].summary, { ok: false, reason: SUMMARY_MISSING });
+  }
+  assert.doesNotMatch(SUMMARY_MISSING, /unreadable/i);
+});
+
+test('#1313 R1313-11: the loading line and the failure sentence are written here, once', () => {
+  assert.equal(RECORD_LOADING, 'loading record\u2026');
+  assert.equal(recordFailure('rec-0000000000000001', 'answered 500'), 'the record rec-0000000000000001 could not be loaded: answered 500');
+  assert.doesNotMatch(recordFailure('rec-1', 'x'), /unreadable/i);
+  assert.doesNotMatch(RECORD_LOADING, /unreadable/i);
+});
+
+test('#1313 R1313-8: the record url is the id, percent-encoded, under /api/record/', () => {
+  assert.equal(recordUrl('rec-0000000000000001'), '/api/record/rec-0000000000000001');
+  assert.equal(recordUrl('../x'), '/api/record/..%2Fx');
+});
+
+test('#1313 R1313-8 S15: a cut record says where it was cut, in the words an SDD document uses', () => {
+  assert.equal(recordTruncated(262144), 'truncated at 262144 bytes');
 });

@@ -234,3 +234,43 @@ test('#1218: the page never calls an Array method on childNodes — a NodeList h
     .filter(({ text }) => /childNodes\.(find|filter|map|some|every|reduce|includes|indexOf)\b/.test(text));
   assert.deepEqual(hits, [], 'childNodes is a NodeList in a browser: iterate it with for...of, forEach or index access');
 });
+
+test('#1313: insertBefore puts a child ahead of its reference, null appends, and nextSibling reads the order back', () => {
+  const body = createElement('tbody');
+  const a = body.appendChild(createElement('tr'));
+  const c = body.appendChild(createElement('tr'));
+  const b = createElement('tr');
+  body.insertBefore(b, a.nextSibling);
+  assert.deepEqual(body.childNodes.length, 3);
+  assert.equal(a.nextSibling, b);
+  assert.equal(b.nextSibling, c);
+  assert.equal(c.nextSibling, null);
+  assert.equal(b.parentNode, body);
+  const d = createElement('tr');
+  body.insertBefore(d, c.nextSibling);
+  assert.equal(c.nextSibling, d, 'a null reference appends');
+  body.removeChild(b);
+  assert.equal(a.nextSibling, c);
+  assert.throws(() => body.insertBefore(createElement('tr'), createElement('tr')), /not a child/);
+});
+
+test('#1313: `records` answers /api/record/<id>, logs the path, and a held answer waits until released', async () => {
+  let release;
+  const held = new Promise((r) => { release = r; });
+  const dom = installDom({ mountIds: ['canvas'], records: { 'rec-a': { ok: true, content: 'x' }, 'rec-held': () => held.then(() => ({ ok: true, content: 'later' })), 'rec-bad': { status: 500, body: { ok: false, reason: 'boom' } } } });
+  try {
+    assert.deepEqual(await (await fetch('/api/record/rec-a')).json(), { ok: true, content: 'x' });
+    const res = await fetch('/api/record/rec-bad');
+    assert.equal(res.status, 500);
+    assert.equal((await fetch('/api/record/rec-none')).status, 404);
+    let settled = false;
+    const pending = fetch('/api/record/rec-held').then((r) => { settled = true; return r.json(); });
+    await new Promise((r) => setImmediate(r));
+    assert.equal(settled, false);
+    release();
+    assert.deepEqual(await pending, { ok: true, content: 'later' });
+    assert.deepEqual(dom.recordFetches, ['/api/record/rec-a', '/api/record/rec-bad', '/api/record/rec-none', '/api/record/rec-held']);
+  } finally {
+    dom.restore();
+  }
+});
