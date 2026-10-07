@@ -37,10 +37,28 @@ export function isTestInfraPath(rel) {
 
 const git = (cwd, args) => execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
 
-/** Release tags `v1.x`, oldest first. */
+/**
+ * Did the package built from this `package.json` text ship test suites? A release whose `files`
+ * negates `brain/scripts/**\/*.test.mjs` (#1076, from 1.13.0) shipped none, so its repo tree must
+ * not feed the prune list (#1389). Unreadable text counts as shipping, the conservative side.
+ */
+export function shipsTests(pkgText) {
+  try {
+    const files = JSON.parse(pkgText)?.files;
+    return !(Array.isArray(files) && files.includes('!brain/scripts/**/*.test.mjs'));
+  } catch {
+    return true;
+  }
+}
+
+/** Release tags `v1.x` whose package shipped tests, oldest first. */
 export function publishedTags(cwd = ROOT) {
+  const showPkg = (tag) => {
+    try { return git(cwd, ['show', `${tag}:package.json`]); } catch { return null; }
+  };
   return git(cwd, ['tag', '--list', 'v1.*']).split('\n').filter(Boolean)
-    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+    .filter((tag) => shipsTests(showPkg(tag)));
 }
 
 /** Sorted union of test-infrastructure paths across `tags`. */
