@@ -892,3 +892,16 @@ test('#1312 D150: a queued review thread is carried as pending, and a tab of onl
   assert.doesNotMatch(reviews.reason, /unreadable/);
   assert.match(reviews.reason, /not read yet/);
 });
+
+test('R1342-6: a mixed queued and failed Reviews tab words each thread by its own state (#1365)', () => {
+  const snapshot = makeSnapshot({
+    prs: [{ number: 957, title: 'x', headBranch: BRANCH, issue: ISSUE }, { number: 958, title: 'y', headBranch: BRANCH, issue: ISSUE }],
+    reviews: [{ pr: 957, ok: false, pending: true, reason: 'queued' }, { pr: 958, ok: false, reason: 'rate limited' }],
+  });
+  const run = gitFor({ resume: RESUME_TEXT });
+  const reviews = buildChangeView({ issue: ISSUE, snapshot, project: 'o/r', _run: run }).value.reviews;
+  assert.equal(reviews.ok, false);
+  assert.match(reviews.reason, /#957 \(not read yet: queued\)/, 'the queued thread is not called unreadable');
+  assert.match(reviews.reason, /#958 \(unreadable: rate limited\)/, 'the failed thread is');
+  assert.doesNotMatch(reviews.reason, /every review thread of this issue is unreadable/);
+});

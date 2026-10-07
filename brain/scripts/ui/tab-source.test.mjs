@@ -9,7 +9,7 @@ import { mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSyn
 import { basename, dirname, join } from 'node:path';
 
 import { buildSnapshot } from '../status/snapshot.mjs';
-import { buildChangeView } from './change-route.mjs';
+import { buildChangeView, buildSourcedSddTab } from './change-route.mjs';
 import { gitRun } from './git-run.mjs';
 import { recordingGit } from './test-support/recording-git.mjs';
 import { git, makeWorktreeRepo } from './test-support/git-worktree-fixture.mjs';
@@ -452,5 +452,23 @@ test('R1282-3: when the origin tree cannot be listed, no stage is present and ea
   for (const row of rows) {
     assert.equal(row.present, false, row.stage);
     assert.match(row.detail, /^could not be read: /);
+    // #1298: the detail carries the git reason, not the fallback the same prefix would also match.
+    assert.doesNotMatch(row.detail, /no reason was given/, row.stage);
+    assert.ok(row.detail.length > 'could not be read: '.length, row.stage);
   }
+});
+
+test('R1342-1: a document state that is not readable is not present (allow-list, #1298)', () => {
+  const doc = (state) => ({ path: 'x.md', state, text: state === 'present' || state === 'truncated' ? 'x' : null });
+  const source = {
+    kind: 'origin', ref: 'origin/x', sha: 'a'.repeat(40), dir: 'openspec/changes/issue-7-x',
+    documents: { proposal: doc('present'), spec: doc('truncated'), design: doc('refused-new-kind'), tasks: doc('unreadable'), apply: doc('missing'), verify: doc('deleted') },
+  };
+  const rows = Object.fromEntries(buildSourcedSddTab(source).value.map((r) => [r.stage, r.present]));
+  assert.equal(rows.proposal, true);
+  assert.equal(rows.spec, true);
+  assert.equal(rows.design, false, 'an unknown state must not read as present');
+  assert.equal(rows.tasks, false);
+  assert.equal(rows.apply, false);
+  assert.equal(rows.verify, false);
 });

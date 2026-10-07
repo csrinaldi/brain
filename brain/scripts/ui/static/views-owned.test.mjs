@@ -71,6 +71,13 @@ test('#882 cold review of PR #1037 (correction 1): a roadmap row says its own st
   assert.match(fnMatch[0], /row\.stateReason/, 'renderRoadmapRow must read row.stateReason, so roadmap-model.mjs\'s said reason for an unknown state actually reaches the screen');
 });
 
+test('R1342-2: a roadmap row shows its stateReason as text and as the span\'s title (#1342)', () => {
+  const fnMatch = APP_JS.match(/function renderRoadmapRow\([^)]*\) \{[\s\S]*?\n}\n/);
+  assert.ok(fnMatch, 'renderRoadmapRow function must exist in app.js');
+  assert.match(fnMatch[0], /el\('span', 'roadmap-state-reason', row\.stateReason\)/, 'the reason is drawn as text');
+  assert.match(fnMatch[0], /setAttribute\('title', row\.stateReason\)/, 'and as the title, so a clipped row still carries it');
+});
+
 test('#882 R882-3: Decisions draws real content — the ADR table, drift warnings beside it, never a second drift computation', () => {
   assert.match(APP_JS, /function renderDecisions\(/, 'R882-3: Decisions must render real content, not a placeholder');
   assert.match(APP_JS, /buildDecisionsModel\(/, 'renderDecisions must build its rows from lib/decisions-model.mjs, not recompute them inline');

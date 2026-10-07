@@ -78,7 +78,7 @@ panel is unchanged. (ruled 2026-10-05, (d)).
 - **S7** GIVEN PRs 900 and 910 both join #881, THEN the footer names PR 910 (the highest number)
   and reads `+1 open PR`.
 - **S8** GIVEN #1230 carries no `status:approved` label and no open PR joins it, THEN its card
-  shows the Awaiting review chip and no footer.
+  shows the Awaiting review [label renamed to Awaiting approval by #1379] chip and no footer.
 - **S9** GIVEN the latest verdict word is `MAYBE`, THEN the footer shows `MAYBE` marked
   unrecognised.
 - **S10** GIVEN PR 885 joins #881 and `remoteChanges` holds its branch with `pr: {number: 885}`,
