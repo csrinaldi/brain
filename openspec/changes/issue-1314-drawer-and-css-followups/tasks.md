@@ -13,8 +13,8 @@ issue: 1314
 - [x] 1.5 R1314-5: summary matches the clustering
 
 ## #1318
-- [ ] 2.1 R1318-1: fake-DOM render guard for table classes
-- [ ] 2.2 R1318-2: reword R1310-1
+- [x] 2.1 R1318-1: fake-DOM render guard for table classes
+- [x] 2.2 R1318-2: reword R1310-1
 
 ## #1321
 - [ ] 3.1 R1321-1: ship and pin `font: inherit`
