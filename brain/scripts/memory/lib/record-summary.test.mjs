@@ -119,5 +119,20 @@ test('#1313 R1313-1: a lead line with no text left after stripping gives the tit
 });
 
 test('#1313 R1313-2: a table separator row carries no text and is dropped from the excerpt', () => {
-  assert.equal(summarizeContent('**T**\n| a | b |\n|---|:-:|\n| 1 | 2 |').excerpt, '| a | b | | 1 | 2 |');
+  assert.equal(summarizeContent('**T**\n| a | b |\n|---|:-:|\n| 1 | 2 |').excerpt, 'a · b 1 · 2');
+});
+
+test('#1377 R1377-1: a table row reads as its cell text joined by a separator, with no literal pipe', () => {
+  const out = summarizeContent('**Review Workload Forecast**\n\n| Field | Value |\n|---|---|\n| Estimated change | 12 `lines` |\n|  | **bold** \\| kept |');
+  assert.equal(out.excerpt, 'Field · Value Estimated change · 12 lines bold | kept');
+  assert.equal(out.excerpt.replace('bold | kept', '').includes('|'), false, 'no layout pipe survives');
+});
+
+test('#1377 R1377-1: a table-led record gets a pipe-free title and excerpt', () => {
+  assert.deepEqual(summarizeContent('| Field | Value |\n|---|---|\n| a | b |'), { ok: true, title: 'Field · Value', excerpt: 'a · b', truncated: false });
+  assert.deepEqual(summarizeContent('|||\n**x**'), { ok: true, title: 'x', excerpt: '', truncated: false });
+});
+
+test('#1377 R1377-1: a line that merely contains a pipe in prose is not a table row', () => {
+  assert.equal(summarizeContent('**T**\nuse a | b in a shell').excerpt, 'use a | b in a shell');
 });

@@ -78,7 +78,7 @@ export const recordTruncated = (bytes) => `truncated at ${bytes} bytes`;
 export const recordUrl = (id) => `/api/record/${encodeURIComponent(id)}`;
 
 /** A row's summary as the page may render it: the shape from `summarizeContent`, or the one stated gap. */
-function summaryOf(summary) {
+export function summaryOf(summary) {
   if (summary && typeof summary === 'object') {
     if (summary.ok === true && typeof summary.title === 'string' && typeof summary.excerpt === 'string') {
       return { ok: true, title: summary.title, excerpt: summary.excerpt, truncated: summary.truncated === true };

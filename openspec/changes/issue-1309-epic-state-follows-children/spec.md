@@ -19,7 +19,7 @@ other node uses, with the rollup as additional evidence. No caller derives an ep
 own. The cluster heading, the drawer header, the children list and the Roadmap row agree.
 
 **R1309-2 — Precedence.** #1308's precedence holds, with `Ready to close` inserted: `Unreadable > Done > Blocked >
-Awaiting review > Ready to close > In flight > Not computed > Planned`. The rollup only adds evidence at the `Ready to close`,
+Awaiting review [label renamed to Awaiting approval by #1379] > Ready to close > In flight > Not computed > Planned`. The rollup only adds evidence at the `Ready to close`,
 `In flight` and `Not computed` steps. A closed epic reads `Done`. A blocked epic reads
 `Blocked`, whatever its children say.
 
@@ -42,7 +42,7 @@ source is ready.
 
 **R1309-7 — All children closed.** An open epic whose rollup counted every direct child closed
 (`closed === total > 0`) reads `◉ Ready to close`. The reason says that all N children are closed and
-the epic is still open. It sits after Awaiting review and before In flight (D137); it is never `Done`.
+the epic is still open. It sits after Awaiting review [label renamed to Awaiting approval by #1379] and before In flight (D137); it is never `Done`.
 
 **R1309-8 — Reason visible on the Roadmap.** A Roadmap row whose state carries a reason shows
 it as the row chip's tooltip, as cards and drawer chips already do.

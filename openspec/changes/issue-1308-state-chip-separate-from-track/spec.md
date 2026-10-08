@@ -32,9 +32,9 @@ and no ready source names the issue, it reads `— Not computed`, never `Planned
 reason names the missing source(s). Positive evidence from a ready source is enough for
 `In flight` while another source is still pending.
 
-**R1308-8 — Precedence (ruled 2026-10-05).** `Unreadable > Done > Blocked > Awaiting review > In
+**R1308-8 — Precedence (ruled 2026-10-05).** `Unreadable > Done > Blocked > Awaiting review [label renamed to Awaiting approval by #1379] > In
 flight > Not computed > Planned`. Lifecycle is computed for every node; for an undeclared node
-Awaiting review is read from `status:approved` in its labels, by the same rule as every node.
+Awaiting review [label renamed to Awaiting approval by #1379] is read from `status:approved` in its labels, by the same rule as every node.
 
 **R1308-9 — Stale evidence (ruled 2026-10-05).** An issue whose only work evidence is stale
 (>= 7 days, the "In flight" section's collapsed stale group) reads `◐ In flight`.
@@ -100,7 +100,7 @@ as a state. Each lane header's state counts sum to the lane's node count and use
 
 ### S10 — undeclared and not approved
 - GIVEN open #1300 has no block and no `status:approved` label, and nothing names it
-- THEN it shows `◇ Awaiting review` and the warning chip
+- THEN it shows `◇ Awaiting review [label renamed to Awaiting approval by #1379]` and the warning chip
 
 ### S11 — precedence
 - GIVEN open #1198 is blocked by an open issue and a worktree names it

@@ -58,6 +58,7 @@ import { renderOffThread, timeoutNotice, FAILED_NOTICE, UNAVAILABLE_NOTICE } fro
 import { buildSddModel, sddForIssue, quietAbsence, buildSlicePlan, STAGE_VOCAB } from './lib/sdd-model.mjs';
 import { searchNodes } from './lib/search-model.mjs';
 import { buildMemoryModel, RECORD_LOADING, recordFailure, recordTruncated, recordUrl } from './lib/memory-model.mjs';
+import { staleIds, unheldIds } from './lib/record-hold.mjs';
 import { buildReviewTimeline } from './lib/review-timeline.mjs';
 import { buildRoadmapModel } from './lib/roadmap-model.mjs';
 import { buildDecisionsModel } from './lib/decisions-model.mjs';
@@ -143,13 +144,17 @@ let expandedDocs = new Set();
  */
 let docTrees = new Map();
 /**
- * The Memory ledger's rows opened inline (#1313): the record ids that are open (page-only state, like
- * `expandedDocs`, so a re-render that is not a user action restores them), each record's read
- * (`recordLoads`, id to its answer) and each opened record's render (`recordTrees`, a store of its own so
- * an issue change that empties `docTrees` never cancels a record). A collapse evicts the row's entries,
- * so what is held is bounded by what the reader has open.
+ * Records opened inline (#1313, #1373): the Memory ledger's rows and the drawer's Records tab rows. Each
+ * surface has its own page-only set of open ids (`expandedRecords` for the ledger, `expandedDrawerRecords`
+ * for the drawer, like `expandedDocs`, so a re-render that is not a user action restores them) and both
+ * share one read per id (`recordLoads`, id to its answer) and one render per record (`recordTrees`, a store
+ * of its own so an issue change that empties `docTrees` never cancels a record). A read is held while ANY
+ * surface has its id open: a collapse, an id leaving a surface's visible rows, or the drawer closing evicts
+ * what no surface holds (`evictUnheldRecords`, D173), so what is held is bounded by what is open and can
+ * still be shown, not by clicks.
  */
 const expandedRecords = new Set();
+const expandedDrawerRecords = new Set();
 const recordLoads = new Map();
 const recordTrees = new Map();
 
@@ -388,6 +393,8 @@ function renderMemory() {
   clear(mounts.canvas);
 
   const model = buildMemoryModel(sectionOf(state, 'records'), { now: nowMs() });
+  // #1377: the ids this draw can show are the window's; an open row the window no longer holds is let go.
+  pruneRecords(expandedRecords, new Set(model.ok ? model.value.recent.records.map((r) => r.id) : []));
   if (!model.ok) {
     mounts.canvas.appendChild(said(`the memory ledger could not be read: ${model.reason}`));
     return;
@@ -464,7 +471,7 @@ function renderMemory() {
     source.appendChild(renderSourceStamp(record.sourceStamp));
     tr.appendChild(source);
     body.appendChild(tr);
-    wireRecordToggle(body, tr, toggle, record.id);
+    wireRecordToggle(ledgerHost(body, tr), toggle, record.id, expandedRecords);
   }
   table.appendChild(body);
   scroller.appendChild(table);
@@ -472,9 +479,10 @@ function renderMemory() {
 }
 
 /**
- * A ledger row's RECORD cell (#1313): the title (or the said reason there is none) as the toggle, the
- * excerpt, then the id. Every string is text content; a record's words never become markup. Each text
- * element's `title` attribute is its own text: one wording for one fact. Returns the toggle.
+ * A record's title (or the said reason there is none) as the toggle, the excerpt, then the id. The ledger
+ * row's RECORD cell (#1313) and the drawer's Records tab row (#1373) are drawn by this one function. Every
+ * string is text content; a record's words never become markup. Each text element's `title` attribute is
+ * its own text: one wording for one fact. Returns the toggle.
  */
 function renderRecordStack(cell, record) {
   const stack = el('div', 'memory-record');
@@ -510,6 +518,28 @@ async function fetchRecord(id) {
   } catch (err) {
     return { kind: 'failed', reason: recordFailure(id, err.message) };
   }
+}
+
+/** Let go of one record's read and its render, cancelling the render if it is still running. */
+function evictRecord(id) {
+  const read = recordLoads.get(id);
+  if (read?.result?.kind === 'content') {
+    const stamp = recordStamp(id, read.result.answer);
+    recordTrees.get(stamp)?.cancel();
+    recordTrees.delete(stamp);
+  }
+  recordLoads.delete(id);
+}
+
+/** Evict every read no surface has open (D173): the one place the hold bound is enforced. */
+function evictUnheldRecords() {
+  for (const id of unheldIds(recordLoads.keys(), expandedRecords, expandedDrawerRecords)) evictRecord(id);
+}
+
+/** A surface drew a new set of rows: its open ids that are not among them are closed, and their reads let go. */
+function pruneRecords(open, visible) {
+  for (const id of staleIds(open, visible)) open.delete(id);
+  evictUnheldRecords();
 }
 
 /** One record's read, started once per open row and shared by a re-render. */
@@ -551,22 +581,48 @@ function showRecord(section, id, result) {
   else entry.promise.then((outcome) => { if (section.parentNode) showDocumentOutcome(section, doc, outcome); });
 }
 
-/**
- * The toggle under a ledger row (#1313): opens a second row directly below it, in place, so the
- * button keeps focus. Many rows may be open; each is its own. A row that is open when the view is
- * drawn again opens again from the page-only set, without a new read.
- */
-function wireRecordToggle(body, tr, toggle, id) {
+/** Where the ledger's opened record goes: a second row directly below the clicked one, spanning the table. */
+function ledgerHost(body, tr) {
   let detail = null;
-  let section = null;
-  const seq = requestSequence();
-  const sectionId = `memory-record-${id}`;
-  const setOpen = (open) => {
-    toggle.setAttribute('aria-expanded', String(open));
-    if (open && detail === null) {
+  return {
+    prefix: 'memory',
+    place: (section) => {
       detail = el('tr', 'memory-detail');
       const cell = el('td', null);
       cell.setAttribute('colspan', '5');
+      cell.appendChild(section);
+      detail.appendChild(cell);
+      body.insertBefore(detail, tr.nextSibling);
+    },
+    remove: () => {
+      body.removeChild(detail);
+      detail = null;
+    },
+  };
+}
+
+/** Where the drawer's opened record goes: inside the row's own card, under its source stamp. */
+function drawerHost(card) {
+  let held = null;
+  return {
+    prefix: 'drawer',
+    place: (section) => { held = section; card.appendChild(section); },
+    remove: () => { card.removeChild(held); held = null; },
+  };
+}
+
+/**
+ * The toggle of a record row (#1313 ledger, #1373 drawer): opens the record's body in place through
+ * `host`, so the button keeps focus. Many rows may be open; each is its own. A row that is open when its
+ * surface is drawn again opens again from that surface's page-only set, without a new read.
+ */
+function wireRecordToggle(host, toggle, id, openSet) {
+  let section = null;
+  const seq = requestSequence();
+  const sectionId = `${host.prefix}-record-${id}`;
+  const setOpen = (open) => {
+    toggle.setAttribute('aria-expanded', String(open));
+    if (open && section === null) {
       section = el('section', 'doc-body');
       section.setAttribute('id', sectionId);
       section.setAttribute('role', 'region');
@@ -575,31 +631,27 @@ function wireRecordToggle(body, tr, toggle, id) {
       const loading = el('p', 'note doc-loading', RECORD_LOADING);
       loading.setAttribute('role', 'status');
       section.appendChild(loading);
-      cell.appendChild(section);
-      detail.appendChild(cell);
-      body.insertBefore(detail, tr.nextSibling);
+      host.place(section);
       toggle.setAttribute('aria-controls', sectionId);
       const token = seq.next();
       const mine = section;
       const entry = loadRecord(id);
       if (entry.settled) showRecord(mine, id, entry.result);
-      else entry.promise.then((result) => { if (seq.isCurrent(token) && section === mine) showRecord(mine, id, result); });
+      // A read evicted while it was in flight (its row left the surface) shows nothing and renders nothing.
+      else entry.promise.then((result) => { if (seq.isCurrent(token) && section === mine && recordLoads.get(id) === entry) showRecord(mine, id, result); });
     }
-    if (!open && detail !== null) {
+    if (open) openSet.add(id); else openSet.delete(id);
+    if (!open && section !== null) {
       seq.next();
-      const read = recordLoads.get(id);
-      const tree = read?.result?.kind === 'content' ? recordTrees.get(recordStamp(id, read.result.answer)) : undefined;
-      if (tree) { tree.cancel(); recordTrees.delete(recordStamp(id, read.result.answer)); }
-      recordLoads.delete(id);
-      body.removeChild(detail);
-      detail = null;
+      host.remove();
       section = null;
       toggle.removeAttribute('aria-controls');
+      // The read goes unless the other surface still has this id open.
+      evictUnheldRecords();
     }
-    if (open) expandedRecords.add(id); else expandedRecords.delete(id);
   };
   toggle.addEventListener('click', () => setOpen(toggle.getAttribute('aria-expanded') !== 'true'));
-  setOpen(expandedRecords.has(id));
+  setOpen(openSet.has(id));
 }
 
 function renderContent() {
@@ -1603,7 +1655,11 @@ function renderRoadmapRow(row, className) {
   node.appendChild(chip);
   node.appendChild(el('span', 'roadmap-title', `#${row.number} ${row.title}`));
   node.appendChild(renderSourceStamp(row.sourceStamp));
-  if (row.stateReason) node.appendChild(el('span', 'roadmap-state-reason', row.stateReason));
+  if (row.stateReason) {
+    const why = el('span', 'roadmap-state-reason', row.stateReason);
+    why.setAttribute('title', row.stateReason);
+    node.appendChild(why);
+  }
   if (row.blockedBy.length > 0) node.appendChild(el('span', 'roadmap-blocked', `blocked by ${row.blockedBy.map((n) => `#${n}`).join(', ')}`));
   for (const d of row.divergences) node.appendChild(el('span', 'roadmap-divergence', `${d.reason}${d.value !== null && d.value !== undefined ? `: #${d.value}` : ''}`));
   return node;
@@ -1957,7 +2013,7 @@ function renderDrawer() {
 function buildDrawer() {
   clear(mounts.drawer);
   mounts.drawer.hidden = selectedIssue === null;
-  if (selectedIssue === null) return null;
+  if (selectedIssue === null) { pruneRecords(expandedDrawerRecords, new Set()); return null; }
 
   // Region 08's header: the number, the state the card showed, the track, a
   // link to the issue on the forge, and the close control — all from the same
@@ -2004,10 +2060,13 @@ function buildDrawer() {
   }
 
   if (changeView === null) {
+    pruneRecords(expandedDrawerRecords, new Set());
     body.appendChild(el('p', 'note', 'reading this change…'));
     return { body, panel: null };
   }
   const model = buildDrawerModel(changeView);
+  // #1377: this issue's records are the ids the drawer can show (whichever tab is up); the rest are let go.
+  pruneRecords(expandedDrawerRecords, new Set(model.ok ? model.value.tabs.find((t) => t.id === 'records').entries.map((e) => e.record.id) : []));
   if (!model.ok) {
     body.appendChild(said(model.reason));
     return { body, panel: null };
@@ -2439,7 +2498,21 @@ function renderDocumentControl(card, doc) {
   setOpen(expandedDocs.has(key));
 }
 
+/**
+ * A Records tab row (#1373): the record's title and excerpt as the ledger draws them, who wrote it, its
+ * source stamp, and the toggle that opens its full content inline. A row with no id has nothing to open.
+ */
+function renderRecordEntry(item) {
+  const card = el('div', 'card');
+  const toggle = renderRecordStack(card, item.record);
+  card.appendChild(el('p', null, `${item.record.type ?? 'record'} — ${item.detail}`));
+  card.appendChild(renderSourceStamp(item.sourceStamp));
+  if (item.record.id !== null) wireRecordToggle(drawerHost(card), toggle, item.record.id, expandedDrawerRecords);
+  return card;
+}
+
 function renderEntry(item) {
+  if (item.record) return renderRecordEntry(item);
   const card = el('div', item.pending ? 'card pending' : 'card');
   // A numbered, marked entry is the design's stage strip (#1059 region 08);
   // everything else keeps the checkbox form the tasks tab needs.

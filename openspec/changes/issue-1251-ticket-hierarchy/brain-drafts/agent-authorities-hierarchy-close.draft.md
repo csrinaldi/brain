@@ -1,0 +1,119 @@
+# agent-authorities.md — the hierarchy close workflow is an automation act, and `brain:gc`'s acts keep their tiers (issue #1251)
+
+> **Tier 2 target. Not promoted, and an agent may not promote it.** Changes to this document
+> require an MR reviewed by `@crinaldi`. Promote it after ADR-0039, which it cites.
+>
+> ```
+> npm run brain:promote -- openspec/changes/issue-1251-ticket-hierarchy/brain-drafts/agent-authorities-hierarchy-close.draft.md
+> ```
+>
+> **Your commit is the signature** (ADR-0028).
+
+```brain-amendment/1
+target: brain/core/methodology/agent-authorities.md
+issue: 1251
+body: ## Hierarchy close workflow (issue #1251)
+body-end: ### Notes for the promoter
+```
+
+```amend-find
+- Refresh the skill registry (`gentle-ai skill-registry refresh`)
+```
+
+```amend-replace
+- Refresh the skill registry (`gentle-ai skill-registry refresh`)
+- Regenerate an issue's brain-generated children region during `brain:gc` (ADR-0039 rulings M4, T1-gc): generated, bounded by markers whose outside bytes are proven identical, and read by no tool. No other part of an issue body **[added, #1251]**
+```
+
+```amend-find
+- **Delete branches or committed files** — irreversible destructive actions
+```
+
+```amend-replace
+- **Delete branches or committed files** — irreversible destructive actions **[amended, #1251: the hierarchy close workflow's deletion of a merged tracker branch is an automation act, not an agent act; see "Hierarchy close workflow"]**
+```
+
+## Hierarchy close workflow (issue #1251)
+
+**Signed**: DD/MM/YYYY — <Name>
+
+### What changed
+
+ADR-0039 (ruling C5, 2026-10-07) closes a node's issue when its integration PR merges into its
+parent's target, a tracker or `main`. When an epic's tracker merges, its tracker branch is deleted.
+When a milestone's tracker merges into `main`, its tracker branch is deleted and the native
+milestone mirror is closed. In the same step it rewrites the parent's generated children region in
+the issue body (ruling N5), through the proven region writer that touches nothing outside the
+region's markers. The same workflow marks a draft integration PR ready when every child of its node
+is closed (ruling C10). When an integration PR merged before its node was Ready to close, it closes
+nothing and deletes nothing, and reports the node as merged but open (ruling N4). It executes a
+closing keyword only when the resolver places that issue under the node whose tracker is the PR's
+base; any other keyword is reported, never executed (ruling M2). It also runs on the `issues`
+`closed` event: when the closed issue is the last open child of a merged-but-open node whose
+tracker has no commits its target lacks, it closes the node and deletes the tracker, as the same
+automation identity at the same tier, an automation act like the others (ruling S1). No PR is
+authored by it, so it is never a producer under ADR-0037.
+
+These are **automation acts**. A forge CI workflow runs them on `pull_request` `closed` with
+`merged == true`, as the automation identity (`GITHUB_TOKEN` with `issues: write` and
+`contents: write` on GitHub; a project access token in a CI variable on GitLab, because
+`CI_JOB_TOKEN` cannot write issues). They run at every tier and report what they did. No agent
+runs them, and no agent gains a verb from this section:
+
+- an agent still may not delete a branch without confirmation (Tier 2);
+- marking a PR ready is not merging, and the merge still follows ADR-0037's autonomy mode;
+- the workflow writes issue state, the children region of an issue body, branches and PR state,
+  never `brain.config.json` and never any other part of an issue body.
+
+### Why
+
+A forge merge happens on the server. A git `post-merge` hook is client-side and never fires on it,
+and an agent is not present at merge time to ask for confirmation. Without a server-side step, a
+child merged into a tracker stays open, because closing keywords act only on merges into the
+default branch, and every rollup above it is wrong.
+
+### What this does NOT close, said plainly
+
+- **Nothing enforces that only the workflow does this.** The row describes who runs the acts; it is
+  doctrine until the workflow exists.
+- **A run that does not happen is caught late.** A fork PR's read-only token, a missing GitLab
+  variable or an outage leaves the issue open. `day:start`, under the user's credentials, reports
+  every PR merged into a tracker whose issue is still open and offers to run `brain:gc` (below).
+- **On GitLab the `issues` `closed` trigger has no pipeline counterpart.** The direct close
+  degrades to `brain:gc` there (below).
+
+### `brain:gc`: the hierarchy sweep, its acts at their tiers (ADR-0039 decision 12, rulings T1 and T1-gc, 2026-10-07)
+
+When a provider cannot run one of the acts above, because it lacks the trigger (GitLab has no
+issue-event pipeline source) or the credential (`CI_JOB_TOKEN` cannot write issues and no project
+access token is set; a fork PR's read-only `GITHUB_TOKEN`), control degrades to a dedicated sweep
+verb, `brain:gc`, run under the user's credentials. It also carries the one act that is a human's
+by design, the remainder PR (ruling R1). No automation identity is involved, so none of its acts
+is an automation act. Each keeps the tier it has for an agent:
+
+| `brain:gc` act | Tier |
+|---|---|
+| Regenerate a stale generated children region (rulings N5, M4) | **Tier 1**, runs |
+| Close a merged-but-open node that qualifies for the direct close (ruling M3) | **Tier 2**, shown, done after confirmation |
+| Delete a tracker branch with no commits its target lacks | **Tier 2** |
+| Propose and open a remainder PR, head the live tracker, base its target, `Closes #<node>` (ruling R1) | **Tier 2** |
+| Close a child or a native milestone, or mark a PR ready, where the workflow could not | **Tier 2** |
+
+Without a TTY, or under CI, `brain:gc` only reports. `day:start` reports what is pending and offers
+to run `brain:gc`; it performs none of these acts itself. `session:start` only shows a cached
+pending count and never calls the forge. `brain:doctor` (#1130) absorbs `brain:gc` later.
+
+**Why the remainder PR is a human's.** A human who confirms it is its author, so the producing
+identity is never the automation identity that merges in mode B (ADR-0037), and no second
+automation identity exists.
+
+**Why the region rewrite is Tier 1** (ruling M4, moved from `day:start` to `brain:gc` with the act).
+Three facts earn it: the region is generated, never authored; every byte outside its markers is
+proven identical before the write (`replaceMapRegion`/`outsideRegion`, ADR-0029 Decision 3); and it
+is not a contract, so no tool reads it. It is the only issue-body write Tier 1 grants: the
+`brain-graph/1` block and every other part of a body stay outside it.
+
+### Notes for the promoter
+
+Two in-place edits: a Tier 1 row for `brain:gc`'s region rewrite, and an annotation on Tier 2's
+delete-branches row; plus this section.

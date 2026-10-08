@@ -12,6 +12,7 @@ import { PLANNED, IN_FLIGHT, DONE, UNREADABLE } from '../../status/snapshot.mjs'
 import { READY, BLOCKED, AWAITING_HUMAN, UNCLASSIFIED } from '../../status/epic-graph.mjs';
 import { colourClass, NOT_COMPUTED_CLASS } from './colour.mjs';
 import { stateOf, STATES, STATE_CODES, UNKNOWN_CODE } from './state-vocab.mjs';
+import { APPROVED_LABEL } from './approval-label.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const node = ({ status = READY, blockedBy = [], roadmap = { ok: true, value: { state: PLANNED } } } = {}) => ({ number: 1, status, blockedBy, roadmap });
@@ -105,9 +106,25 @@ test('R1308-5/S5/S7: a pending or failed source with no evidence is Not computed
   assert.equal(stateOf(node(), w).code, 'in-flight', 'a local change dir is enough while prs is pending');
 });
 
+test('R1342-4: an idle source is named as not read yet with its reason, never as loading (#1303)', () => {
+  const s = stateOf(node(), { missing: [{ name: 'prs', state: 'idle', reason: 'polling is paused' }], byIssue: new Map() });
+  assert.equal(s.code, 'not-computed');
+  assert.match(s.reason, /prs was not read yet \(polling is paused\)/);
+  assert.doesNotMatch(s.reason, /loading/);
+});
+
+test('R1342-3: the approval label is declared once; the graph and the state table import it and restate no literal (#1342)', () => {
+  assert.equal(APPROVED_LABEL, 'status:approved');
+  for (const file of ['../../status/epic-graph.mjs', './state-vocab.mjs']) {
+    const text = readFileSync(join(HERE, file), 'utf8');
+    assert.match(text, /import \{ APPROVED_LABEL \} from '.*approval-label\.mjs'/, file);
+    assert.doesNotMatch(text, /'status:approved'/, `${file} restates the label`);
+  }
+});
+
 test('R1308-8/S10: Awaiting approval reads status:approved from the labels of an undeclared node, by the same rule as every node', () => {
   assert.equal(stateOf(undeclared({ labels: [] }), READY_WORK).code, 'awaiting-review');
-  assert.equal(stateOf(undeclared({ labels: ['status:approved'] }), READY_WORK).code, 'planned');
+  assert.equal(stateOf(undeclared({ labels: [APPROVED_LABEL] }), READY_WORK).code, 'planned');
   assert.equal(stateOf(undeclared({ labels: [] }), workWith(1)).code, 'awaiting-review', 'awaiting-review outranks in-flight');
   assert.equal(stateOf(undeclared(), READY_WORK).code, 'planned', 'no labels array makes no claim');
 });
@@ -231,6 +248,15 @@ test('R1309-7/ruling a: every child closed on an open epic reads Ready to close 
   assert.match(s.reason, /all 4 children closed; the epic is still open/);
   assert.equal(stateOf(epicNode(), workWith(878), rollupOf(hier({ closed: 4 }))).code, 'ready-to-close', 'it wins over the epic\'s own In flight');
   assert.equal(stateOf(epicNode({ roadmap: { ok: true, value: { state: DONE } } }), READY_WORK, rollupOf(hier({ closed: 4 }))).code, 'done');
+});
+
+test('R1342-5: Ready to close over a closed list a refresh failed to renew carries the rollup stale qualifier (#1360)', () => {
+  const failed = { state: 'failed', at: '2026-09-02T00:00:00Z', reason: 'HTTP 502', lastCompleteAt: '2026-09-01' };
+  const s = stateOf(epicNode(), READY_WORK, rollupOf(hier({ closed: 2 }), failed));
+  assert.equal(s.code, 'ready-to-close');
+  assert.equal(s.reason, 'all 2 children closed; the epic is still open · closed list as of 2026-09-01; refresh failed (HTTP 502)');
+  const fresh = stateOf(epicNode(), READY_WORK, rollupOf(hier({ closed: 2 })));
+  assert.equal(fresh.reason, 'all 2 children closed; the epic is still open', 'a complete list adds no qualifier');
 });
 
 test('R1309-5/ruling d: zero closed with unresolved closed issues, or an unknown child, is Not computed — never Planned', () => {

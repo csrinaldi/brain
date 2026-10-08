@@ -280,8 +280,13 @@ function buildReviewsTab({ snapshot, project, issue }) {
     }
   }
   if (rounds.length === 0 && unreadable.length > 0) {
-    const allQueued = unreadable.every((u) => u.pending === true);
-    return { ok: false, reason: `${allQueued ? 'every review thread of this issue is not read yet' : 'every review thread of this issue is unreadable'}: ${unreadable.map((u) => `#${u.pr} (${u.reason})`).join(', ')}`, unreadable, sourceNote: REVIEWS_SOURCE_NOTE };
+    const queued = unreadable.filter((u) => u.pending === true).length;
+    // #1365: a thread is worded by its OWN state; only a tab where every thread agrees names them with one phrase.
+    if (queued === 0 || queued === unreadable.length) {
+      return { ok: false, reason: `${queued > 0 ? 'every review thread of this issue is not read yet' : 'every review thread of this issue is unreadable'}: ${unreadable.map((u) => `#${u.pr} (${u.reason})`).join(', ')}`, unreadable, sourceNote: REVIEWS_SOURCE_NOTE };
+    }
+    const own = (u) => `#${u.pr} (${u.pending === true ? 'not read yet' : 'unreadable'}: ${u.reason})`;
+    return { ok: false, reason: `no review thread of this issue could be shown: ${unreadable.map(own).join(', ')}`, unreadable, sourceNote: REVIEWS_SOURCE_NOTE };
   }
   return { ok: true, value: rounds, unreadable, sourceNote: REVIEWS_SOURCE_NOTE };
 }
@@ -470,17 +475,21 @@ function sliceScopesOf(tasksDoc) {
   return parsed.refusal ? { ok: false, reason: parsed.refusal } : { ok: true, value: parsed.scopes };
 }
 
+/** The document states that hold text a reader can open (R1282-1). */
+const READABLE_STATES = new Set(['present', 'truncated']);
+
 const ARCHIVE_NOT_READ = 'not read outside the served root';
 
 /** The SDD tab of a worktree or origin source: a stage is present when the source holds its document; `archive` is never read there (R1276-8). */
-function buildSourcedSddTab(source) {
+export function buildSourcedSddTab(source) {
   const rows = SDD_STAGES.map((stage) => {
     const doc = source.documents[stage];
     const base = { stage, file: STAGE_FILE[stage], source: { path: docPath(source, `${source.dir}/${STAGE_FILE[stage]}`) } };
     if (stage === 'archive') return { ...base, present: false, detail: ARCHIVE_NOT_READ };
     // R1282-1: a document the source could not read is not there to be done, and its row says why.
     const unreadable = doc?.state === 'unreadable';
-    const present = Boolean(doc) && !unreadable && doc.state !== 'missing' && doc.state !== 'deleted';
+    // R1342-1: an allow-list. Only a state that holds readable text is present; a state this code does not know is not.
+    const present = READABLE_STATES.has(doc?.state);
     if (unreadable) return { ...base, present, detail: `could not be read: ${doc.reason ?? 'no reason was given'}` };
     return { ...base, present, ...(source.kind === 'worktree' ? { detail: doc ? localRowDetail(doc, source.branch) : 'missing' } : {}) };
   });
@@ -532,7 +541,7 @@ function buildRecordsTab({ snapshot, issue }) {
     .sort((a, b) => (b.ts ?? '').localeCompare(a.ts ?? ''));
   return {
     ok: true,
-    value: rows.map((r) => ({ id: r.id, ts: r.ts, actor: r.actor, actorKind: r.actorKind, type: r.type, supersedes: r.supersedes ?? null, source: { path: r.file } })),
+    value: rows.map((r) => ({ id: r.id, ts: r.ts, actor: r.actor, actorKind: r.actorKind, type: r.type, supersedes: r.supersedes ?? null, summary: r.summary ?? null, source: { path: r.file } })),
   };
 }
 
