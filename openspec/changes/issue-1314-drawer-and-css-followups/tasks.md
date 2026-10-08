@@ -25,7 +25,7 @@ issue: 1314
 - [x] 4.2 R1330-2: tab-click test asserts the padding value
 
 ## Close
-- [ ] 5.1 full suite, repo:check, nav, gated diff, tarball size, mutations, browser proof
+- [x] 5.1 full suite, repo:check, nav, gated diff, tarball size, mutations, browser proof
 
 ## Micro-decisions
 None yet.
