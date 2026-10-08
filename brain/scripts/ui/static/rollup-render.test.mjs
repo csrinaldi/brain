@@ -95,6 +95,14 @@ async function drawerOf(opts) {
   return { dom, block: find(dom.mounts.drawer, byClass('drawer-children')) };
 }
 
+test('#1300 R1267-1: a complete lane with a read closed list keeps the note (the plain counted case)', async (t) => {
+  const { dom, block } = await drawerOf({ closed: 2, open: 1, closedRead: { ok: true } });
+  t.after(() => dom.restore());
+  assert.match(block.textContent, NOTE);
+  assert.equal(findAll(block, byClass('note')).length, 1, 'exactly one note element');
+  assert.match(find(block, byClass('epic-rollup')).textContent, /^2 \/ 3 children closed$/);
+});
+
 test('#1267 R1267-1: a failed refresh over a complete list keeps the note', async (t) => {
   const { dom, block } = await drawerOf({ closed: 2, open: 1, closedEntry: { state: 'failed', at: T, reason: 'rate limited', lastCompleteAt: T } });
   t.after(() => dom.restore());

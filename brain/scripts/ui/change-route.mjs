@@ -541,7 +541,7 @@ function buildRecordsTab({ snapshot, issue }) {
     .sort((a, b) => (b.ts ?? '').localeCompare(a.ts ?? ''));
   return {
     ok: true,
-    value: rows.map((r) => ({ id: r.id, ts: r.ts, actor: r.actor, actorKind: r.actorKind, type: r.type, supersedes: r.supersedes ?? null, source: { path: r.file } })),
+    value: rows.map((r) => ({ id: r.id, ts: r.ts, actor: r.actor, actorKind: r.actorKind, type: r.type, supersedes: r.supersedes ?? null, summary: r.summary ?? null, source: { path: r.file } })),
   };
 }
 

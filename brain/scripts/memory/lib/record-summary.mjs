@@ -20,6 +20,8 @@ export const NO_TEXT = 'this record has no content field';
 export const EMPTY_TEXT = 'this record has no text in its content';
 
 const ELLIPSIS = '…';
+/** What joins the cells of a table row: the excerpt reads the cells, never the layout (#1377). */
+export const CELL_SEPARATOR = ' · ';
 const BOLD_LEAD = /^\*\*((?:(?!\*\*).)+)\*\*$/;
 
 /** Cut to `max` code points, the last one an ellipsis. Returns the text and whether it was cut. */
@@ -54,11 +56,25 @@ function stripLine(line) {
     .replace(/^\s*(?:[-*+]|\d{1,9}[.)])\s+/, '');
 }
 
+/**
+ * A table row (a line that starts with a pipe) as the text of its cells joined by CELL_SEPARATOR.
+ * The pipes are layout; an escaped pipe (`\|`) is a character of a cell. Empty cells say nothing.
+ */
+function tableRowText(line) {
+  const cells = line.trim().replace(/^\|/, '').split(/(?<!\\)\|/)
+    .map((cell) => collapse(stripInline(cell.replace(/\\\|/g, '|'))))
+    .filter((cell) => cell !== '');
+  return cells.join(CELL_SEPARATOR);
+}
+
+const isTableRow = (line) => /^\s*\|/.test(line);
+
 /** One line as plain text. A fence line carries no text of its own. */
 function plainLine(line) {
   if (/^\s*(```|~~~)/.test(line)) return '';
   // A table's separator row (`|---|:-:|`) is layout, not text.
   if (/^\s*\|?(?:\s*:?-+:?\s*\|)+\s*:?-*:?\s*$/.test(line) && line.includes('-')) return '';
+  if (isTableRow(line)) return tableRowText(line);
   return collapse(stripInline(stripLine(line)));
 }
 
@@ -84,7 +100,7 @@ export function summarizeContent(content) {
 
   const lead = lines[first].trim();
   const bold = BOLD_LEAD.exec(lead);
-  let titleText = collapse(stripInline(bold ? bold[1] : stripLine(lead)));
+  let titleText = bold ? collapse(stripInline(bold[1])) : plainLine(lead);
   let from = first + 1;
   if (titleText === '') {
     // A lead of nothing but markers has no text: the next line that has some is the title.
