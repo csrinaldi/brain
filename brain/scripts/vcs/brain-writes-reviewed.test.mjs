@@ -897,3 +897,115 @@ test('T13: runBrainWritesReviewedCheck — invalid injected tier during a config
   assert.ok(!result.threw, `runBrainWritesReviewedCheck must never throw: ${result.threw?.message}`);
   assert.equal(result.level, 'fail', 'an invalid tier must degrade fail-closed, not silently pass or warn');
 });
+
+// ── issue #1334: PR context present, PR author / repository unresolved ──────
+// The author comes only from the forge API. When that fails the Tier-2 distinct-actor rule
+// cannot be verified, so a PR touching brain/core/** or brain/project/** must NOT skip.
+
+const unresolvedBase = {
+  baseSha: 'base',
+  headSha: 'head',
+  prNumber: 144,
+  repo: 'org/repo',
+  prLabels: [],
+  readBotAllowlist: () => [],
+  readOverrideActors: () => [],
+  fetchReviews: () => { throw new Error('reviews must not be fetched when the author is unresolved'); },
+};
+
+for (const tier of ['lite', 'standard', 'regulated']) {
+  test(`#1334 (a): author null + PR context + brain write touched → fail at ${tier}, naming the unresolved PR author`, async () => {
+    const result = await runBrainWritesReviewedCheck({
+      ...unresolvedBase, author: null, tier, diffNameOnly: () => ['brain/core/foo.md'],
+    });
+    assert.equal(result.level, 'fail');
+    assert.match(result.reason, /PR author/);
+    assert.match(result.reason, /forge API/);
+    assert.match(result.reason, /distinct-actor rule cannot be verified/);
+  });
+}
+
+test('#1334 (a): brain/project/** touched with an unresolved author also fails', async () => {
+  const result = await runBrainWritesReviewedCheck({
+    ...unresolvedBase, author: undefined, tier: 'standard', diffNameOnly: () => ['brain/project/decisions/x.md'],
+  });
+  assert.equal(result.level, 'fail');
+});
+
+test('#1334 (b): author null + no brain write touched → not fail (ordinary pass)', async () => {
+  const result = await runBrainWritesReviewedCheck({
+    ...unresolvedBase, author: null, tier: 'standard', diffNameOnly: () => ['docs/readme.md'],
+  });
+  assert.equal(result.level, 'pass');
+});
+
+test('#1334 (c): no PR context at all → skip-warn', async () => {
+  const result = await runBrainWritesReviewedCheck({ baseSha: undefined, headSha: undefined, prNumber: undefined, repo: 'org/repo', author: undefined });
+  assert.equal(result.level, 'warn');
+  assert.match(result.reason, /skipping/);
+});
+
+test('#1334 (d): repo null with a known author takes the same path and names the repository', async () => {
+  const result = await runBrainWritesReviewedCheck({
+    ...unresolvedBase, repo: null, author: 'alice', tier: 'standard', diffNameOnly: () => ['brain/core/foo.md'],
+  });
+  assert.equal(result.level, 'fail');
+  assert.match(result.reason, /repository/);
+  assert.doesNotMatch(result.reason, /PR author/);
+});
+
+test('#1334 (d): both author and repo unresolved name both', async () => {
+  const result = await runBrainWritesReviewedCheck({
+    ...unresolvedBase, repo: null, author: null, tier: 'standard', diffNameOnly: () => ['brain/core/foo.md'],
+  });
+  assert.equal(result.level, 'fail');
+  assert.match(result.reason, /PR author and repository/);
+});
+
+test('#1334 (e): gather failure with an unresolved author follows the tier policy and names the unresolved author', async () => {
+  const failing = () => { throw new Error('git exploded'); };
+  const required = await runBrainWritesReviewedCheck({ ...unresolvedBase, author: null, tier: 'standard', diffNameOnly: failing });
+  assert.equal(required.level, 'fail');
+  assert.match(required.reason, /git exploded/);
+  assert.match(required.reason, /PR author/);
+  const detection = await runBrainWritesReviewedCheck({
+    ...unresolvedBase, author: null, tier: 'lite', diffNameOnly: failing, resolveGatePolicy: () => 'detection',
+  });
+  assert.equal(detection.level, 'warn');
+});
+
+test('#1334 (e): an unresolved-author brain write at a detection-policy tier warns, not fails', async () => {
+  const result = await runBrainWritesReviewedCheck({
+    ...unresolvedBase, author: null, tier: 'lite', diffNameOnly: () => ['brain/core/foo.md'], resolveGatePolicy: () => 'detection',
+  });
+  assert.equal(result.level, 'warn');
+  assert.match(result.reason, /PR author/);
+});
+
+test('#1334 (f): an allow-listed override:* label does not bypass an unresolved author (the verdict stays fail)', async () => {
+  const result = await runBrainWritesReviewedCheck({
+    ...unresolvedBase, author: null, tier: 'standard', prLabels: ['override:alice'],
+    readOverrideActors: () => ['override:alice'], diffNameOnly: () => ['brain/core/foo.md'],
+  });
+  assert.equal(result.level, 'fail');
+});
+
+test('#1334 (f): regulated + refused override label + unresolved author → fail naming the refusal (ordinary gather classification preserved)', async () => {
+  const result = await runBrainWritesReviewedCheck({
+    ...unresolvedBase, author: null, tier: 'regulated', prLabels: ['override:alice'],
+    readOverrideActors: () => ['override:alice'], diffNameOnly: () => ['brain/core/foo.md'],
+  });
+  assert.equal(result.level, 'fail');
+  assert.match(result.reason, /override:\* label was present but is not honored/);
+});
+
+test('#1334 (f): an unreadable config with an unresolved author still fails closed through the ordinary gather path', async () => {
+  const dir = testTmp('brain-config-');
+  writeFileSync(join(dir, 'brain.config.json'), '{oops');
+  const result = await runBrainWritesReviewedCheck({
+    baseSha: 'base', headSha: 'head', prNumber: 144, repo: 'org/repo', author: null, cwd: dir, tier: 'standard',
+    diffNameOnly: () => ['brain/core/foo.md'],
+  });
+  assert.equal(result.level, 'fail');
+  assert.match(result.reason, /could not gather inputs/);
+});

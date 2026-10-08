@@ -10,6 +10,12 @@
 // actor-check). All I/O is dependency-injectable via `deps` (same
 // CI-fragility discipline as actor-check.mjs / phase-order-check.mjs) — no
 // test spawns a real gh or git process.
+//
+// Unresolved PR author or repository (#1334): the author comes only from the forge API. With PR context
+// (base, head, PR number) but no author or repo, the check does not skip: it takes the ordinary gather path
+// and only the author-dependent verdict is replaced — a touched brain/core/** or brain/project/** path fails at
+// the gate's tier policy (the distinct-actor rule cannot be verified). A diff touching neither still passes, and
+// only with no PR context at all does the check skip-warn.
 
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
@@ -433,6 +439,13 @@ export async function gatherBrainWritesReviewedInputs({
  * gate's position to `detection` (not true today), mirroring
  * `actor-check.mjs`'s identical catch shape exactly.
  *
+ * Unresolved author or repo (#1334): with PR context (base, head, PR number) but no author or repo — the
+ * forge API failed — the check does NOT skip. It gathers the ordinary inputs (reviews are stubbed, nothing can
+ * be judged without an author), and only the author-dependent verdict is replaced: a touched brain/core/** or
+ * brain/project/** path fails at the gate's tier policy (warn if the policy is detection), naming the
+ * unresolved PR author or repository. No admin override is honored: the distinct-actor rule is unverifiable
+ * whoever holds the label. A touch-free diff still passes. Only with no PR context at all does it skip-warn.
+ *
  * baseSha/headSha/prNumber/repo/author/prLabels source from the normalized
  * ci-context (`ctx.*`, ADR-0016) — never from process.env directly (a
  * drift-guard test enforces this). `ctx.labels` is already an array, so it
@@ -459,18 +472,29 @@ export async function runBrainWritesReviewedCheck(deps = {}) {
   const prLabels = deps.prLabels ?? ctx.labels ?? [];
   const cwd = deps.cwd ?? process.cwd();
 
-  if (!baseSha || !headSha || !prNumber || !repo || !author) {
+  // No PR context at all (not running on a PR): nothing to verify, skip.
+  if (!baseSha || !headSha || !prNumber) {
     return {
       level: 'warn',
       reason:
-        'BASE_SHA/HEAD_SHA/PR_NUMBER/GITHUB_REPOSITORY/PR_AUTHOR not set — cannot verify brain-writes ' +
+        'BASE_SHA/HEAD_SHA/PR_NUMBER not set — cannot verify brain-writes ' +
         'review; skipping brain-writes-reviewed check.',
     };
   }
+  // PR context exists but the author or repo is unresolved (the forge API failed, #1334). The distinct-actor
+  // rule cannot be verified, so this must NOT skip. It takes the ORDINARY path through gather, so the touched
+  // paths, tier, allow-list and override classification are judged exactly as with a known author; only the
+  // author-dependent verdict is replaced.
+  const missing = [!author && 'PR author', !repo && 'repository'].filter(Boolean).join(' and ');
+  const unresolved = missing
+    ? `the ${missing} could not be resolved (forge API), so the distinct-actor rule cannot be verified`
+    : null;
 
   let inputs;
   try {
-    inputs = await gatherBrainWritesReviewedInputs({ baseSha, headSha, prNumber, repo, author, provider, prLabels, cwd, deps });
+    // With no repo there is no forge to ask, and with no author no review can be judged: reviews are not fetched.
+    const gatherDeps = unresolved ? { ...deps, fetchReviews: async () => [] } : deps;
+    inputs = await gatherBrainWritesReviewedInputs({ baseSha, headSha, prNumber, repo, author, provider, prLabels, cwd, deps: gatherDeps });
   } catch (err) {
     const tier = resolveTierForFailure(cwd, deps);
     // `resolveGatePolicy` is injectable via `deps` for the same reason every
@@ -484,13 +508,29 @@ export async function runBrainWritesReviewedCheck(deps = {}) {
         level: 'fail',
         reason:
           `brain-writes-reviewed: could not gather inputs (gh/git or brain.config.json failure) — ` +
-          `${err.message} — failing closed: this gate is required at the "${tier}" tier.`,
+          `${err.message}${unresolved ? `; ${unresolved}` : ''} — failing closed: this gate is required at the "${tier}" tier.`,
       };
     }
     return {
       level: 'warn',
-      reason: `brain-writes-reviewed: could not gather inputs (gh/git or brain.config.json failure) — ${err.message} (detection-tier at "${tier}").`,
+      reason: `brain-writes-reviewed: could not gather inputs (gh/git or brain.config.json failure) — ${err.message}${unresolved ? `; ${unresolved}` : ''} (detection-tier at "${tier}").`,
     };
+  }
+
+  if (unresolved && inputs.changedFiles.some(f => BRAIN_MANAGED_PREFIXES.some(prefix => f.startsWith(prefix)))) {
+    const resolvePolicy = deps.resolveGatePolicy ?? resolveGatePolicy;
+    const required = resolvePolicy('brain-writes-reviewed', inputs.tier) === 'required';
+    const verdict = {
+      level: required ? 'fail' : 'warn',
+      reason:
+        `brain-writes-reviewed: brain/core or brain/project changed and ${unresolved}` +
+        (required
+          ? ` — failing closed: this gate is required at the "${inputs.tier}" tier.`
+          : ` (detection at the "${inputs.tier}" tier).`),
+    };
+    return inputs.overrideRefused
+      ? { ...verdict, reason: `${verdict.reason} (an override:* label was present but is not honored at the "${inputs.tier}" tier — refusing the bypass, REQ-TIER-6.)` }
+      : verdict;
   }
 
   return evaluateBrainWritesReviewed(inputs);
