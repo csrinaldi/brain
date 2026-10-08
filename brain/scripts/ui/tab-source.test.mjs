@@ -472,3 +472,14 @@ test('R1342-1: a document state that is not readable is not present (allow-list,
   assert.equal(rows.apply, false);
   assert.equal(rows.verify, false);
 });
+
+test('#1314 R1314-2: an unreadable stage row says so as a field, so the count can blank', () => {
+  const source = {
+    kind: 'origin', ref: 'origin/x', sha: 'a'.repeat(40), dir: 'openspec/changes/issue-7-x',
+    documents: { proposal: { path: 'p.md', state: 'present', text: 'x' }, spec: { path: 's.md', state: 'unreadable', reason: 'EIO', text: null }, design: { path: 'd.md', state: 'missing', text: null } },
+  };
+  const rows = Object.fromEntries(buildSourcedSddTab(source).value.map((r) => [r.stage, r]));
+  assert.equal(rows.spec.unreadable, true);
+  assert.equal(rows.proposal.unreadable, undefined);
+  assert.equal(rows.design.unreadable, undefined);
+});

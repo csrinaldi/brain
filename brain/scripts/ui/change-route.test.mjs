@@ -220,6 +220,14 @@ test('#1199 R1199-4: a truncated tasks.md has no total, and its items still rend
   assert.equal(result.value.tasks.value.length, 2);
 });
 
+test('#1314 R1314-2: a truncated spec.md says so as a field, not only in the note; a whole one does not', () => {
+  const cut = buildChangeView({ issue: ISSUE, snapshot: makeSnapshot(), _run: gitFor({ spec: `${SPEC_TEXT}\n${'a'.repeat(300000)}` }) });
+  assert.equal(cut.value.spec.ok, true);
+  assert.equal(cut.value.spec.truncated, true);
+  const whole = buildChangeView({ issue: ISSUE, snapshot: makeSnapshot(), _run: gitFor() });
+  assert.equal(whole.value.spec.truncated, undefined);
+});
+
 // ── 7. resume.md absent on the branch ────────────────────────────────────────
 
 test('#881: a resolved branch with no committed resume.md — the tab says so, and no longer promises a later slice (#883)', () => {

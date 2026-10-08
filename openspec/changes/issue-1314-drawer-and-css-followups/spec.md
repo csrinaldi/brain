@@ -17,6 +17,11 @@ A blocked card, and the drawer of a blocked node, MUST name its blockers in exac
 - **WHEN** its card is rendered
 - **THEN** the text "blocked by #881" occurs once in the card
 
+#### Scenario: A blocked epic head
+- **GIVEN** epic 878 is blocked by #907 and epic clustering is shown
+- **WHEN** the epic's cluster is rendered
+- **THEN** the text "blocked by #907" occurs once in the cluster, in the same line a card uses
+
 ### R1314-2: The drawer header names the change dir and branch; tab counts are measured
 The drawer head MUST carry the change dir and the branch the tabs read when each is known, and
 say so when it is not. A tab MUST show a count only when its source was fully read; a tab that
@@ -31,6 +36,16 @@ failed, or whose source is partly pending, MUST show no count.
 - **GIVEN** one review thread is not read yet
 - **WHEN** the tab bar is rendered
 - **THEN** "Reviews" shows no number
+
+#### Scenario: A truncated spec.md blanks the count
+- **GIVEN** spec.md is larger than the document cap and its cards cover only the read part
+- **WHEN** the tab bar is rendered
+- **THEN** "Spec" shows no number and no title claiming a total; the tab still says it is truncated
+
+#### Scenario: An unreadable stage blanks the stages count
+- **GIVEN** a stage document of the SDD tab could not be read
+- **WHEN** the tab bar is rendered
+- **THEN** "SDD" shows no x/y
 
 ### R1314-3: No drift is a quiet line
 The Decisions view MUST draw the drift band only when there is drift or the drift could not be computed.

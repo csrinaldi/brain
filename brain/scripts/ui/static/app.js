@@ -992,6 +992,8 @@ function renderEpicClusters(grouping) {
     if (epicTrack) head.appendChild(epicTrack);
     head.appendChild(el('span', 'epic-count', rollupLabel(epicRollup(sectionOf(state, 'hierarchy'), sectionOf(state, 'forgeLoad'), epic.number))));
     cluster.appendChild(head);
+    // The blockers are a field, not a mark (#1314 R1314-1): the cluster head draws them once, as a card does.
+    if (epic.blockedBy.length > 0) cluster.appendChild(el('p', 'node-blocked', `blocked by ${epic.blockedBy.map((n) => `#${n}`).join(', ')}`));
     for (const mark of epic.marks) cluster.appendChild(said(mark));
 
     // Clicking the epic opens its panel, the same panel its slices open.

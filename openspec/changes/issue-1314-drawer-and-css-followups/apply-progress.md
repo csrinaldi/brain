@@ -34,3 +34,19 @@ Mode: Strict TDD. All 12 tasks complete (1.1-1.5, 2.1-2.2, 3.1-3.2, 4.1-4.2, 5.1
 
 - Epic summary (R1314-5) also removes the cluster view's own "N declared epic(s)" line: one summary, not two.
 - Zero counts (Reviews 0, Records 0) are shown when the source was read and held none: measured zeros.
+
+## Batch 2 (review round 1, PR #1403)
+
+Strict TDD. Findings: cold-1 (truncated spec printed a count) and cold-2 (blocked epic head lost its blocker).
+
+| Finding | RED | GREEN |
+|---------|-----|-------|
+| cold-1 spec | drawer-model, change-route, render tests failed (count printed, no `truncated` field) | `truncated: true` from `buildSpecTab`; Spec count null on it |
+| cold-1 sweep SDD | drawer-model + tab-source tests failed | `unreadable: true` on the row; stages count null on any |
+| cold-2 epic head | render test failed (0 occurrences) | `node-blocked` line after the epic head in app.js |
+
+Sweep: Spec fixed (change-route.mjs buildSpecTab, drawer-model.mjs spec tab); SDD fixed (change-route.mjs buildSourcedSddTab unreadable row, drawer-model.mjs stagesMeasured); Tasks unaffected (already blank when truncated); Reviews unaffected (blank on unreadable/pending; REVIEW_CAP rotation yields pending rows); Records unaffected (no cap; silent corrupt-line skip in the shared reader is out of scope).
+
+Mutations (reverted): epic blocker line disabled -> epic render test fails; spec count restored on truncation -> drawer-model and render tests fail.
+
+Deviations: the epic blocker line is a sibling after the epic head (the head is a clickable button row), not inside it.

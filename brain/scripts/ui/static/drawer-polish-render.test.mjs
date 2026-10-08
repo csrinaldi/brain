@@ -20,8 +20,8 @@ const REPO = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..
 const MOUNT_IDS = ['status', 'modes', 'search', 'banners', 'governance-nav', 'canvas', 'drawer'];
 const fence = (lines) => ['```brain-graph/1', ...lines, '```', ''].join('\n');
 
-const ISSUES = [
-  { number: 878, title: 'the epic', labels: [], body: fence(['kind: epic', 'track: UI', 'blocks: []', 'needs: []']) },
+const issuesWith = (epicNeeds) => [
+  { number: 878, title: 'the epic', labels: [], body: fence(['kind: epic', 'track: UI', 'blocks: []', `needs: [${epicNeeds.join(', ')}]`]) },
   { number: 881, title: 'the blocker', labels: [], body: fence(['track: UI', 'parent: 878', 'blocks: []', 'needs: []']) },
   { number: 882, title: 'the blocked slice', labels: [], body: fence(['track: UI', 'parent: 878', 'blocks: []', 'needs: [881]']) },
   { number: 907, title: 'declares nothing', labels: [], body: 'no block\n' },
@@ -29,14 +29,15 @@ const ISSUES = [
 
 const ADR = (number, status, extra = {}) => ({ ok: true, path: `brain/project/decisions/adr-${String(number).padStart(4, '0')}-x.md`, number, title: `ADR ${number}`, status, statusLine: `${status} (the file's own line)`, date: null, amendments: [], supersedes: [], supersededBy: null, issues: [], ...extra });
 
-async function boot({ drift = { ok: true, value: { homeOnly: [], filesOnly: [], unreadable: [] } } } = {}) {
+async function boot({ drift = { ok: true, value: { homeOnly: [], filesOnly: [], unreadable: [] } }, specPad = 0, epicNeeds = [] } = {}) {
+  const ISSUES = issuesWith(epicNeeds);
   const root = testTmp('drawer-polish-');
   writeFileSync(join(root, 'brain.config.json'), readFileSync(join(REPO, 'brain.config.json'), 'utf8'));
   const changeDir = 'openspec/changes/issue-882-slice';
   mkdirSync(join(root, changeDir), { recursive: true });
   const files = {
     [`${changeDir}/proposal.md`]: '# P\n',
-    [`${changeDir}/spec.md`]: ['# Spec', '', '### R882-1: one', '#### Scenario: s', '- **WHEN** a', '- **THEN** b', '', '### R882-2: two', '#### Scenario: t', '- **WHEN** c', '- **THEN** d', ''].join('\n'),
+    [`${changeDir}/spec.md`]: ['# Spec', '', '### R882-1: one', '#### Scenario: s', '- **WHEN** a', '- **THEN** b', '', '### R882-2: two', '#### Scenario: t', '- **WHEN** c', '- **THEN** d', '', 'x'.repeat(specPad)].join('\n'),
     [`${changeDir}/design.md`]: '# D\n',
     [`${changeDir}/tasks.md`]: '# T\n\n- [x] a\n- [x] b\n- [ ] c\n',
   };
@@ -135,4 +136,27 @@ test('R1314-5: epic clustering prints the epic summary, never the track-lane lin
   assert.equal(epic.filter((s) => /^1 declared epic\(s\)/.test(s)).length, 1, 'one epic summary');
   assert.ok(!epic.some((s) => /^\d+ track lane\(s\), /.test(s)), 'the track-lane line is gone');
   assert.match(epic.find((s) => /declared epic/.test(s)), /1 declared epic\(s\), 0 track lane\(s\) of nodes no epic claimed, 1 in the `\?` holding lane/);
+});
+
+test('R1314-2: a truncated spec.md prints no count, because the cards cover only the read part', async (t) => {
+  const dom = await boot({ specPad: 300000 });
+  t.after(() => dom.restore());
+  fire(card(dom, 882), 'click');
+  await settle();
+  const tabs = find(find(dom.mounts.drawer, byClass('drawer-head')), byClass('tabs'));
+  assert.equal(button(tabs, 'Spec').textContent, 'Spec', 'no total was measured, so no number');
+  assert.equal(button(tabs, 'Spec').getAttribute('title') ?? '', '', 'and no title claims one');
+  fire(button(tabs, 'Spec'), 'click');
+  await settle();
+  assert.match(dom.mounts.drawer.textContent, /truncated at 262144 bytes; cards cover the read part/, 'the tab still says it is cut');
+});
+
+test('R1314-1: a blocked epic names its blocker once, on its cluster head', async (t) => {
+  const dom = await boot({ epicNeeds: [907] });
+  t.after(() => dom.restore());
+  fire(button(dom.mounts.canvas, 'epic clusters'), 'click');
+  await settle();
+  const cluster = find(dom.mounts.canvas, byClass('epic-cluster'));
+  assert.equal(occurrences(cluster.textContent, 'blocked by #907'), 1, 'the cluster names the epic\'s blocker exactly once');
+  assert.equal(find(cluster, byClass('node-blocked')).textContent, 'blocked by #907', 'in the line a card uses');
 });

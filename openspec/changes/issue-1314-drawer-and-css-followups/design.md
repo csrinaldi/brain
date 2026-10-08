@@ -45,6 +45,17 @@ blocks and also asserts identical values.
 `dom.mjs` gives an element `clientHeight` (settable; default 0) and `scrollHeight` from its layout flow;
 `scrollTop` assignment clamps to `[0, max(0, flowHeight - clientHeight)]`. Synthetic: it models only the clamp, not layout.
 
+### D185: Cold review round 1 of PR #1403 (#1314)
+Spec count: `buildSpecTab` adds `truncated: true` beside the note when the read was cut; `drawer-model.mjs`
+shows no Spec count then (no count, like Tasks, rather than a partial "12+"). A field, not the note's text.
+Sweep of the other counts: SDD blanks when a stage row carries `unreadable: true` (new field on
+`buildSourcedSddTab`, set where the row already said "could not be read"); Reviews already blank on any
+unreadable or pending thread, and the poller's REVIEW_CAP rotation leaves uncached PRs as `pending` rows
+(snapshot.mjs NOT_FETCHED_YET), so it is unaffected; Records reads every file with no cap (a corrupt line is
+skipped silently by `readRecords`, a pre-existing gap with no signal to gate on), unaffected here; Tasks was
+already blank on truncation. Epic head: D177 removed the blocker mark from `stateAndMarks`, which the epic
+cluster head rendered; the head now draws `epic.blockedBy` once in the card's `node-blocked` line.
+
 ## Contract / API impact
 None. `drawer-model.mjs` and `lane-model.mjs` gain additive fields.
 

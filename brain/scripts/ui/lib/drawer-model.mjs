@@ -433,6 +433,8 @@ export function buildDrawerModel(changeView) {
   // A count is shown only when the tab's source was read in full (#1314 R1314-2): a failed tab, a truncated
   // tasks.md and a review thread not read yet each blank it, so no button prints a number nobody measured.
   const stages = sdd.ok ? sdd.value : [];
+  // An unreadable stage row is neither present nor absent: x/y over it would count a file nobody read (#1314 R1314-2).
+  const stagesMeasured = stages.length > 0 && !stages.some((item) => item.unreadable === true);
   const stagesPresent = stages.filter((item) => item.present).length;
   const tasksCount = tasks.ok && tasks.progress?.ok === true
     ? countOf(`${tasks.progress.value.done}/${tasks.progress.value.total}`, progressLabel(tasks.progress, tasks.progressSource ?? SOURCE.head))
@@ -440,8 +442,8 @@ export function buildDrawerModel(changeView) {
   const reviewsCount = reviews.ok && (reviews.unreadable ?? []).length === 0 ? countOf(String((reviews.value ?? []).length), `${(reviews.value ?? []).length} review round(s) read`) : null;
 
   const tabs = [
-    spec.ok ? { id: 'spec', label: TAB_LABELS.spec, ok: true, reason: null, source: null, count: countOf(String(spec.value.length), `${spec.value.length} requirement(s) read`), note: spec.note ?? null, entries: specEntries(spec.value), orphans: orphanEntries(spec.orphans), ...fromOf(spec) } : failedTab('spec', spec),
-    sdd.ok ? { id: 'sdd', label: TAB_LABELS.sdd, ok: true, reason: null, source: null, count: stages.length > 0 ? countOf(`${stagesPresent}/${stages.length}`, `${stagesPresent} of ${stages.length} stages present`) : null, note: null, entries: sddEntries(sdd.value, documents), slices: sliceEntries(sdd.slices), ...fromOf(sdd) } : failedTab('sdd', sdd),
+    spec.ok ? { id: 'spec', label: TAB_LABELS.spec, ok: true, reason: null, source: null, count: spec.truncated === true ? null : countOf(String(spec.value.length), `${spec.value.length} requirement(s) read`), note: spec.note ?? null, entries: specEntries(spec.value), orphans: orphanEntries(spec.orphans), ...fromOf(spec) } : failedTab('spec', spec),
+    sdd.ok ? { id: 'sdd', label: TAB_LABELS.sdd, ok: true, reason: null, source: null, count: stagesMeasured ? countOf(`${stagesPresent}/${stages.length}`, `${stagesPresent} of ${stages.length} stages present`) : null, note: null, entries: sddEntries(sdd.value, documents), slices: sliceEntries(sdd.slices), ...fromOf(sdd) } : failedTab('sdd', sdd),
     tasks.ok ? { id: 'tasks', label: TAB_LABELS.tasks, ok: true, reason: null, source: null, count: tasksCount, header: progressLabel(tasks.progress, tasks.progressSource ?? SOURCE.head), note: tasks.note ?? null, entries: taskEntries(tasks.value), ...fromOf(tasks) } : failedTab('tasks', tasks),
     workingMemory.ok
       ? { id: 'workingMemory', label: TAB_LABELS.workingMemory, ok: true, reason: null, source: null, count: null, note: null, entries: workingMemoryEntries(workingMemory.value) }
