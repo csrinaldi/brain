@@ -11,7 +11,7 @@ issue: 1267
 Round-2 cold review of #1265 (#1199) returned two corrections, deferred here.
 
 1. `renderChildren` (`brain/scripts/ui/static/app.js`) always appends "the list shows open children; closed children are counted above" under an epic's rollup. `epicRollup` returns `closed: null` when the closed lane is pending or disabled, when it failed with no `lastCompleteAt`, and when `closedRead.ok` is false. In those states the sentence above reads "counting closed children…", "closed children not read (…)" or "closed children unknown (…)". Nothing is counted, and the note says it was.
-2. `openspec/changes/issue-1199-progress-epic-milestone/design.md` (D59, D60, Risks) still lists the unreadable-closed-list gap as open. Commit `b354737e` shipped `closedRead` (`readHierarchy` adds it; `epicRollup` counts only when `hasClosedData(lane) && closedRead.ok`). The design never mentions it and names a follow-up that no longer exists.
+2. `openspec/changes/issue-1199-progress-epic-milestone/design.md` (D59, D60, Risks) still lists the unreadable-closed-list gap as open. Commit `bea6a853` (#1265) shipped `closedRead` (`readHierarchy` adds it; `epicRollup` counts only when `hasClosedData(lane) && closedRead.ok`). The design never mentions it and names a follow-up that no longer exists.
 
 ## Scope
 

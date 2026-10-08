@@ -35,6 +35,7 @@ import { sourceLabel, sourceStamp } from './provenance.mjs';
 import { SOURCE, progressLabel } from './progress-view.mjs';
 import { KNOWN_VERDICTS } from './review-timeline.mjs';
 import { resumeWording } from './resume-view.mjs';
+import { summaryOf } from './memory-model.mjs';
 export { sourceLabel };
 
 function entry({ title, detail, source, pending = false, ...rest }) {
@@ -223,6 +224,9 @@ function recordsEntries(items) {
     title: `${item.type ?? 'record'} — ${item.id ?? '?'}`,
     detail: `${item.actor ?? 'unknown'} (${item.actorKind ?? 'unknown'})${item.supersedes ? `, supersedes ${item.supersedes}` : ''}${item.ts ? `, ${item.ts}` : ''}`,
     source: item.source,
+    // #1373: the page draws the title and excerpt of the ledger's own derivation (`summaryOf` is the
+    // ledger's validator), and opens the full content by id through `/api/record/{id}`.
+    record: { id: item.id ?? null, type: item.type ?? null, summary: summaryOf(item.summary) },
   }));
 }
 
