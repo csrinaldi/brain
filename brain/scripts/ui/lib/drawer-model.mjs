@@ -44,8 +44,11 @@ function entry({ title, detail, source, pending = false, ...rest }) {
 
 /** A failed tab: the reason stays, and so does whatever path the failure knew about. */
 function failedTab(id, tabView, entries = []) {
-  return { id, label: TAB_LABELS[id], ok: false, reason: tabView.reason, source: tabView.source ? sourceLabel(tabView.source) : null, entries, note: tabView.sourceNote ?? null, ...fromOf(tabView) };
+  return { id, label: TAB_LABELS[id], ok: false, reason: tabView.reason, source: tabView.source ? sourceLabel(tabView.source) : null, entries, note: tabView.sourceNote ?? null, count: null, ...fromOf(tabView) };
 }
+
+/** A tab's count as the page shows it (#1314 R1314-2): the text on the button and the title that names its source. `null` is "no count". */
+const countOf = (text, title) => ({ text, title });
 
 /** The `from` line of a tab whose documents came from a worktree or an origin branch (#1276 D92); nothing for the served HEAD. */
 const fromOf = (tabView) => (tabView.from ? { from: tabView.from } : {});
@@ -405,6 +408,18 @@ export function localChangedFor(prevSection, nextSection, issue) {
 }
 
 /**
+ * The drawer head's change-dir line (#1314 R1314-2). The dir is the served one, else the one the tabs read; the branch is the
+ * worktree's or origin's, and the served HEAD has none the page knows, so it says "served HEAD" instead of inventing one.
+ */
+function headerOf(changeDir, tabSource) {
+  const dir = changeDir ?? tabSource?.dir ?? null;
+  const branch = tabSource?.kind === 'worktree' || tabSource?.kind === 'origin' ? tabSource.branch ?? null : null;
+  if (!dir) return { changeDir: null, branch: null, line: null };
+  const where = branch ? `branch: ${branch}` : 'served HEAD';
+  return { changeDir: dir, branch, line: `change dir: ${dir} · ${where}` };
+}
+
+/**
  * buildDrawerModel(changeView) -> {ok:true, value:{issue, changeDir, tabs}} |
  * {ok:false, reason}
  *
@@ -415,18 +430,27 @@ export function buildDrawerModel(changeView) {
   if (changeView.ok !== true) return { ok: false, reason: changeView.reason };
   const { issue, changeDir, spec, sdd, tasks, workingMemory, reviews, records, documents, remote = [], remoteNote = null, local = [], localNote = null, tabSource = null } = changeView.value;
 
+  // A count is shown only when the tab's source was read in full (#1314 R1314-2): a failed tab, a truncated
+  // tasks.md and a review thread not read yet each blank it, so no button prints a number nobody measured.
+  const stages = sdd.ok ? sdd.value : [];
+  const stagesPresent = stages.filter((item) => item.present).length;
+  const tasksCount = tasks.ok && tasks.progress?.ok === true
+    ? countOf(`${tasks.progress.value.done}/${tasks.progress.value.total}`, progressLabel(tasks.progress, tasks.progressSource ?? SOURCE.head))
+    : null;
+  const reviewsCount = reviews.ok && (reviews.unreadable ?? []).length === 0 ? countOf(String((reviews.value ?? []).length), `${(reviews.value ?? []).length} review round(s) read`) : null;
+
   const tabs = [
-    spec.ok ? { id: 'spec', label: TAB_LABELS.spec, ok: true, reason: null, source: null, note: spec.note ?? null, entries: specEntries(spec.value), orphans: orphanEntries(spec.orphans), ...fromOf(spec) } : failedTab('spec', spec),
-    sdd.ok ? { id: 'sdd', label: TAB_LABELS.sdd, ok: true, reason: null, source: null, note: null, entries: sddEntries(sdd.value, documents), slices: sliceEntries(sdd.slices), ...fromOf(sdd) } : failedTab('sdd', sdd),
-    tasks.ok ? { id: 'tasks', label: TAB_LABELS.tasks, ok: true, reason: null, source: null, header: progressLabel(tasks.progress, tasks.progressSource ?? SOURCE.head), note: tasks.note ?? null, entries: taskEntries(tasks.value), ...fromOf(tasks) } : failedTab('tasks', tasks),
+    spec.ok ? { id: 'spec', label: TAB_LABELS.spec, ok: true, reason: null, source: null, count: countOf(String(spec.value.length), `${spec.value.length} requirement(s) read`), note: spec.note ?? null, entries: specEntries(spec.value), orphans: orphanEntries(spec.orphans), ...fromOf(spec) } : failedTab('spec', spec),
+    sdd.ok ? { id: 'sdd', label: TAB_LABELS.sdd, ok: true, reason: null, source: null, count: stages.length > 0 ? countOf(`${stagesPresent}/${stages.length}`, `${stagesPresent} of ${stages.length} stages present`) : null, note: null, entries: sddEntries(sdd.value, documents), slices: sliceEntries(sdd.slices), ...fromOf(sdd) } : failedTab('sdd', sdd),
+    tasks.ok ? { id: 'tasks', label: TAB_LABELS.tasks, ok: true, reason: null, source: null, count: tasksCount, header: progressLabel(tasks.progress, tasks.progressSource ?? SOURCE.head), note: tasks.note ?? null, entries: taskEntries(tasks.value), ...fromOf(tasks) } : failedTab('tasks', tasks),
     workingMemory.ok
-      ? { id: 'workingMemory', label: TAB_LABELS.workingMemory, ok: true, reason: null, source: null, note: null, entries: workingMemoryEntries(workingMemory.value) }
+      ? { id: 'workingMemory', label: TAB_LABELS.workingMemory, ok: true, reason: null, source: null, count: null, note: null, entries: workingMemoryEntries(workingMemory.value) }
       : failedTab('workingMemory', workingMemory),
     reviews.ok
-      ? { id: 'reviews', label: TAB_LABELS.reviews, ok: true, reason: null, source: null, note: reviews.sourceNote ?? null, entries: reviewEntries(reviews.value ?? [], reviews.unreadable ?? []) }
+      ? { id: 'reviews', label: TAB_LABELS.reviews, ok: true, reason: null, source: null, count: reviewsCount, note: reviews.sourceNote ?? null, entries: reviewEntries(reviews.value ?? [], reviews.unreadable ?? []) }
       : failedTab('reviews', reviews, reviewEntries([], reviews.unreadable ?? [])),
-    records.ok ? { id: 'records', label: TAB_LABELS.records, ok: true, reason: null, source: null, note: null, entries: recordsEntries(records.value) } : failedTab('records', records),
+    records.ok ? { id: 'records', label: TAB_LABELS.records, ok: true, reason: null, source: null, count: countOf(String(records.value.length), `${records.value.length} record(s) for this issue`), note: null, entries: recordsEntries(records.value) } : failedTab('records', records),
   ];
 
-  return { ok: true, value: { issue, changeDir, tabs, remote: remote.map(remoteBlockModel), remoteNote, local: local.map(localBlockModel), localNote, tabSource } };
+  return { ok: true, value: { issue, changeDir, header: headerOf(changeDir, tabSource), tabs, remote: remote.map(remoteBlockModel), remoteNote, local: local.map(localBlockModel), localNote, tabSource } };
 }

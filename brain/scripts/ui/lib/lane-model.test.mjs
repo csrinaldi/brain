@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildLaneModel, nodeSummaryFor, childrenOf } from './lane-model.mjs';
+import { buildLaneModel, nodeSummaryFor, childrenOf, laneSummary } from './lane-model.mjs';
 import { parseGraphBlock, buildGraph } from '../../status/epic-graph.mjs';
 
 const node = (number, over = {}) => ({
@@ -101,7 +101,19 @@ test('#998 R998-3: every node carries a state word and mark for the label, along
   const model = buildLaneModel(graph({ nodes: [node(1, { blockedBy: [2] })] }));
   const drawn = model.value.lanes[0].nodes[0];
   assert.deepEqual(drawn.state, { code: 'blocked', label: 'Blocked', mark: '⊘' });
-  assert.ok(Array.isArray(drawn.marks) && drawn.marks.some((m) => m.includes('blocked by')));
+  assert.ok(Array.isArray(drawn.marks));
+});
+
+// #1314 R1314-1: the blocker is a field of the node (`blockedBy`), drawn once by the card and once by the drawer.
+// A "blocked by" mark beside it printed the same fact twice.
+test('#1314 R1314-1: a blocked node carries its blockers in blockedBy only, never as a mark as well', () => {
+  const model = buildLaneModel(graph({ nodes: [node(1, { blockedBy: [2, 3] })] }));
+  const drawn = model.value.lanes[0].nodes[0];
+  assert.deepEqual(drawn.blockedBy, [2, 3]);
+  assert.deepEqual(drawn.marks.filter((m) => /blocked by/.test(m)), [], 'no mark repeats the blockers');
+  const summary = nodeSummaryFor(graph({ nodes: [node(1, { blockedBy: [2] })] }), 1);
+  assert.deepEqual(summary.value.blockedBy, [2]);
+  assert.deepEqual(summary.value.marks.filter((m) => /blocked by/.test(m)), []);
 });
 
 test('#1032: a node with no declared parent is untouched by epicGrouping — it stays in its track lane as today', () => {
@@ -654,4 +666,25 @@ test('R1309-5: an epic whose closed lane is pending is Not computed in the rollu
   assert.equal(s.code, 'not-computed');
   assert.match(s.reason, /counting closed children/);
   assert.equal(nodeSummaryFor(g, 20, { work: NO_WORK, epics }).value.state.code, 'planned');
+});
+
+// ── #1314 R1314-5: the summary line matches the clustering that is on ──
+
+test('#1314 R1314-5: track clustering keeps the track-lane line; epic clustering counts epics, lanes with unclaimed nodes and the holding lane', () => {
+  const g = graph({ nodes: [
+    node(1, { kind: 'epic', track: 'A' }),
+    node(2, { track: 'A', parent: 1 }),
+    node(3, { track: 'B' }),
+    node(4, { track: null }),
+    node(5, { track: null, parent: 1 }),
+  ] });
+  const track = buildLaneModel(g, { clustering: 'track' }).value;
+  assert.equal(laneSummary(track, 'track'), '2 track lane(s), 2 in the `?` holding lane');
+
+  const epic = buildLaneModel(g, { clustering: 'epic' }).value;
+  assert.equal(epic.epicGrouping.ok, true);
+  assert.equal(laneSummary(epic, 'epic'), '1 declared epic(s), 1 track lane(s) of nodes no epic claimed, 1 in the `?` holding lane',
+    'lane A is claimed whole by the epic, B keeps #3, and #5 left the holding lane for its epic');
+
+  assert.equal(laneSummary({ ...epic, epicGrouping: { ok: false, reason: 'x' } }, 'epic'), '2 track lane(s), 1 in the `?` holding lane', 'no grouping, the board is the track lanes whole');
 });

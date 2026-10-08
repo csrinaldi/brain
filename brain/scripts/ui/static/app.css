@@ -962,6 +962,7 @@ body {
   flex: none;
   flex-wrap: wrap;
 }
+.drawer-change { flex: 1 0 100%; margin: 0; font-family: var(--font-mono); font-size: 11px; color: var(--muted); overflow-wrap: anywhere; }
 .drawer-id { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-family: var(--font-mono); font-size: 11px; }
 .drawer-number { color: var(--accent); font-weight: 700; font-size: 12px; }
 .drawer-forge { color: var(--accent); text-decoration: none; }
