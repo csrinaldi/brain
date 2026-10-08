@@ -17,8 +17,8 @@ issue: 1314
 - [x] 2.2 R1318-2: reword R1310-1
 
 ## #1321
-- [ ] 3.1 R1321-1: ship and pin `font: inherit`
-- [ ] 3.2 R1321-2: contrast for the media dark block
+- [x] 3.1 R1321-1: ship and pin `font: inherit`
+- [x] 3.2 R1321-2: contrast for the media dark block
 
 ## #1330
 - [ ] 4.1 R1330-1: fake DOM clientHeight and scrollTop clamp

@@ -154,6 +154,7 @@ button, select, input {
   color: var(--ink);
   background: var(--surface);
   border-color: var(--line);
+  font: inherit; /* #1321 D118: a native control keeps the UA font where no class rule sets one */
 }
 a { color: var(--accent); }
 
