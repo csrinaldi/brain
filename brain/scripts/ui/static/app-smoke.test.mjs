@@ -124,7 +124,7 @@ function fixtureRepo() {
   return root;
 }
 
-async function boot({ issues = ISSUES, forgeLoad = null } = {}) {
+async function boot({ issues = ISSUES, forgeLoad = null, scrollers = {} } = {}) {
   const root = fixtureRepo();
   const vcs = {
     async issueList() { return issues.map(({ number, title, labels }) => ({ number, title, labels, assignees: [] })); },
@@ -167,7 +167,7 @@ async function boot({ issues = ISSUES, forgeLoad = null } = {}) {
     });
   }
 
-  const dom = installDom({ mountIds: MOUNT_IDS, snapshot, changes });
+  const dom = installDom({ mountIds: MOUNT_IDS, snapshot, changes, scrollers });
   await loadApp();
   await settle();
   return dom;
@@ -610,8 +610,12 @@ const drawerBody = (dom) => find(dom.mounts.drawer, byClass('drawer-body'));
 const tabButton = (dom, label) => findAll(find(dom.mounts.drawer, byClass('tabs')), (n) => n.tagName === 'BUTTON')
   .find((b) => b.textContent.replace(/ !$/, '') === label);
 
+// #1330: the body is given the clientHeight a browser would give it, so the fake clamps scrollTop to flowHeight - clientHeight
+// and a short last panel really cannot reach the top without its padding. Synthetic (test-support/dom.mjs); the real proof is the browser.
+const BODY_HEIGHT = 400;
+
 test('#1307 D122: opening a node starts the body at 0; a tab click scrolls the panel to the top of the body', async (t) => {
-  const dom = await boot();
+  const dom = await boot({ scrollers: { 'drawer-body': BODY_HEIGHT } });
   t.after(() => dom.restore());
 
   fire(cardFor(dom, 1059), 'click');
@@ -626,7 +630,7 @@ test('#1307 D122: opening a node starts the body at 0; a tab click scrolls the p
   const body = drawerBody(dom);
   const panel = find(body, byClass('tab-panel'));
   assert.ok(panel, 'the selected panel is in the body');
-  assert.ok(panel.style.minHeight, 'a short panel is padded to a body height so its top can reach the body top');
+  assert.equal(panel.style.minHeight, `${BODY_HEIGHT}px`, 'a short panel is padded to exactly one body height (#1330): the value, not that something is set');
   assert.ok(body.scrollTop > 0, 'the content above the panel is scrolled past');
   assert.equal(panel.getBoundingClientRect().top - body.getBoundingClientRect().top, 0, 'the panel top sits at the body top');
 });

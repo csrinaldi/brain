@@ -47,7 +47,7 @@ function applyTheme(choice) {
   }
 }
 
-import { buildLaneModel, nodeSummaryFor, childrenOf } from './lib/lane-model.mjs';
+import { buildLaneModel, nodeSummaryFor, childrenOf, laneSummary } from './lib/lane-model.mjs';
 import { SOURCE, progressLabel } from './lib/progress-view.mjs';
 import { hierarchyOf, epicRollup, rollupLabel, rollupNote } from './lib/rollup-model.mjs';
 import { issueUrl } from './lib/forge-url.mjs';
@@ -893,7 +893,7 @@ function renderLanes() {
   // 03). The legend is built from `state-vocab.mjs` itself — a hand-written
   // list here would be a second definition of what a state is called.
   mounts.canvas.appendChild(renderClusteringBar());
-  mounts.canvas.appendChild(el('p', 'canvas-summary', `${lanes.length} track lane(s), ${holding.count} in the \`?\` holding lane`));
+  mounts.canvas.appendChild(el('p', 'canvas-summary', laneSummary(model.value, clustering)));
   mounts.canvas.appendChild(el('p', 'edge-summary', `edges: ${edgeSummary.laneInternal} in lanes, ${edgeSummary.holdingInternal} in the \`?\` holding lane, ${edgeSummary.crossLane} crossing lanes, ${edgeSummary.unknownNode} to an unknown node (${edgeSummary.total} total)`));
 
   // #1032: in epic clustering the declared epics lead, and the lanes below
@@ -975,8 +975,6 @@ function renderEpicClusters(grouping) {
     return wrap;
   }
 
-  wrap.appendChild(el('p', 'canvas-summary', `${epics.length} declared epic(s)`));
-
   for (const epic of epics) {
     const cluster = el('div', 'epic-cluster');
 
@@ -994,6 +992,8 @@ function renderEpicClusters(grouping) {
     if (epicTrack) head.appendChild(epicTrack);
     head.appendChild(el('span', 'epic-count', rollupLabel(epicRollup(sectionOf(state, 'hierarchy'), sectionOf(state, 'forgeLoad'), epic.number))));
     cluster.appendChild(head);
+    // The blockers are a field, not a mark (#1314 R1314-1): the cluster head draws them once, as a card does.
+    if (epic.blockedBy.length > 0) cluster.appendChild(el('p', 'node-blocked', `blocked by ${epic.blockedBy.map((n) => `#${n}`).join(', ')}`));
     for (const mark of epic.marks) cluster.appendChild(said(mark));
 
     // Clicking the epic opens its panel, the same panel its slices open.
@@ -1745,7 +1745,9 @@ function renderDecisionRow(row) {
   tr.appendChild(el('td', 'decision-title', row.title));
   // The chip is an inner <span>: a display on the <td> itself breaks the table layout (#1310).
   const statusCell = el('td', 'decision-status-cell');
-  statusCell.appendChild(el('span', `decision-status status-${String(row.status).replace(/\s+/g, '-').toLowerCase()}`, row.status));
+  const chip = el('span', `decision-status ${row.statusClass}`, row.statusShown);
+  chip.setAttribute('title', row.statusTitle);
+  statusCell.appendChild(chip);
   tr.appendChild(statusCell);
 
   const amendments = el('td', 'decision-amendments');
@@ -1761,7 +1763,6 @@ function renderDecisionRow(row) {
   const file = el('td', 'decision-file');
   file.appendChild(renderSourceStamp(row.sourceStamp));
   if (row.supersedes.length > 0) file.appendChild(el('p', 'decision-supersedes', `supersedes ${row.supersedes.map((n) => `ADR-${String(n).padStart(4, '0')}`).join(', ')}`));
-  if (row.supersededBy !== null) file.appendChild(el('p', 'decision-superseded-by', `superseded by ADR-${String(row.supersededBy).padStart(4, '0')}`));
   if (row.issues.length > 0) file.appendChild(el('p', 'decision-issues', `${row.issuesLabel}: ${row.issues.map((n) => `#${n}`).join(', ')}`));
   tr.appendChild(file);
   return tr;
@@ -1776,10 +1777,8 @@ function renderDriftWarnings(driftWarnings) {
   }
   const { homeOnly, filesOnly, unreadable } = driftWarnings.value;
   const n = homeOnly.length + filesOnly.length + unreadable.length;
-  if (n === 0) {
-    wrap.appendChild(said('adr drift: none — HOME.md and the parser agree'));
-    return wrap;
-  }
+  // No drift is a quiet line, not the alert band (#1314 R1314-3).
+  if (n === 0) return el('p', 'note decision-drift-none', 'adr drift: none — HOME.md and the parser agree');
   const lines = [
     ...homeOnly.map((h) => `listed in HOME.md, not readable: ADR-${String(h.number).padStart(4, '0')} ${h.path ?? ''}`.trimEnd()),
     ...filesOnly.map((f) => `on disk, not listed in HOME.md: ADR-${String(f.number).padStart(4, '0')} ${f.path}`),
@@ -2079,12 +2078,16 @@ function buildDrawer() {
   const emptyLine = sourced
     ? `the served HEAD has no change dir for this issue; the tabs read ${tabSource.label}`
     : localFirst ? 'the served HEAD has no change dir for this issue; this machine\'s worktrees follow' : 'no change dir for this issue in the read model';
-  body.appendChild(el('p', 'note', model.value.changeDir ? `change dir: ${model.value.changeDir}` : emptyLine));
+  // #1314 R1314-2: the change dir and branch live in the head (the model words the line); the body keeps only the "no change dir" sentence.
+  if (!model.value.changeDir) body.appendChild(el('p', 'note', emptyLine));
+  if (model.value.header.line) head.appendChild(el('p', 'drawer-change', model.value.header.line));
   if (localFirst) body.appendChild(renderLocalBlocks(model.value));
 
   const tabs = el('div', 'tabs');
   for (const tab of model.value.tabs) {
-    const button = el('button', null, tab.ok ? tab.label : `${tab.label} !`);
+    // A count is the model's, measured; a tab without one prints none (#1314 R1314-2).
+    const button = el('button', null, !tab.ok ? `${tab.label} !` : tab.count ? `${tab.label} ${tab.count.text}` : tab.label);
+    if (tab.ok && tab.count) button.setAttribute('title', tab.count.title);
     button.setAttribute('aria-selected', String(tab.id === activeTab));
     button.addEventListener('click', () => { activeTab = tab.id; tabScrollPending = true; renderDrawer(); });
     tabs.appendChild(button);

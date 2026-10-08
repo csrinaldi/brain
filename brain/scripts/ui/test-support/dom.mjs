@@ -107,8 +107,15 @@ const LINE_HEIGHT = 20;
 function flowHeight(n) {
   if (n.tagName === '#text') return 0;
   const sum = n._kids.reduce((total, k) => total + flowHeight(k), 0);
-  return sum === 0 ? LINE_HEIGHT : sum; // a text-only or empty element is one line
+  // A text-only or empty element is one line. A `min-height` in px pads it, as the browser does (#1330): the page's
+  // clamp padding (#1307 D122) is only visible to a layout that honours it.
+  return Math.max(sum === 0 ? LINE_HEIGHT : sum, Number.parseFloat(n.style?.minHeight) || 0);
 }
+
+// #1330: the scrollers of the installed page. A class name -> the `clientHeight` an element carrying it has. Empty by default:
+// an element with no `clientHeight` is not a scroller, so its `scrollTop` is a plain number as it always was. A test that
+// wants the browser's clamp names the scroller it wants (`installDom({ scrollers: { 'drawer-body': 400 } })`).
+let SCROLLERS = {};
 
 export function createElement(tag) {
   const node = {
@@ -120,8 +127,24 @@ export function createElement(tag) {
     parentNode: null,
     [LISTENERS]: Object.create(null),
     _ownText: '',
-    scrollTop: 0,
     style: {},
+
+    // #1330: SYNTHETIC, like the layout below. A scroller (an element with a `clientHeight`) clamps `scrollTop` into
+    // [0, flowHeight - clientHeight], which is what makes a short panel at the end of a long body unable to reach the top.
+    // It models that one clamp and nothing else: no overflow rule, no scrollbar, no momentum.
+    get clientHeight() {
+      if (node._clientHeight !== undefined) return node._clientHeight;
+      const token = String(node.className).split(/\s+/).find((c) => c in SCROLLERS);
+      return token === undefined ? 0 : SCROLLERS[token];
+    },
+    set clientHeight(value) { node._clientHeight = Number(value); },
+    get scrollHeight() { return flowHeight(node); },
+    get scrollTop() { return node._scrollTop ?? 0; },
+    set scrollTop(value) {
+      const wanted = Number(value) || 0;
+      const room = node.clientHeight;
+      node._scrollTop = room > 0 ? Math.max(0, Math.min(wanted, flowHeight(node) - room)) : wanted;
+    },
 
     // #1307: the only layout the fake has — a block flow where a childless element is LINE_HEIGHT
     // tall and a parent is the sum of its children, minus every ancestor's scrollTop. Enough to
@@ -293,7 +316,8 @@ function makeWorkerClass(mode, workers) {
  * REST read, and a harness that also replayed frames would be testing the
  * stub's timing rather than the render.
  */
-export function installDom({ mountIds, snapshot = null, changes = {}, records = {}, storage = new Map(), worker = 'reply', remotesRefresh = { remotes: { lastOkAt: null, lastError: null, inFlight: false } } } = {}) {
+export function installDom({ mountIds, snapshot = null, changes = {}, records = {}, storage = new Map(), worker = 'reply', scrollers = {}, remotesRefresh = { remotes: { lastOkAt: null, lastError: null, inFlight: false } } } = {}) {
+  SCROLLERS = { ...scrollers };
   const saved = { document: globalThis.document, window: globalThis.window, fetch: globalThis.fetch, EventSource: globalThis.EventSource, Worker: globalThis.Worker };
   const workers = [];
   if (worker === null) delete globalThis.Worker;
@@ -369,6 +393,7 @@ export function installDom({ mountIds, snapshot = null, changes = {}, records = 
       for (const fn of streamListeners.get(name) ?? []) fn({ data: JSON.stringify(data) });
     },
     restore() {
+      SCROLLERS = {};
       globalThis.document = saved.document;
       globalThis.window = saved.window;
       globalThis.fetch = saved.fetch;

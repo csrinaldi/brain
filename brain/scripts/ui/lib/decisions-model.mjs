@@ -29,7 +29,13 @@ const byNumber = (a, b) => {
  * null` (rule zero: never dropped, sorted last). */
 function decisionRow(adr) {
   if (!adr.ok) return { number: null, ok: false, path: adr.path, reason: adr.reason };
+  // The shown status follows supersession (#1314 R1314-4): the parser's `status` is the file's first word, and ADR-0006
+  // still says "Accepted" while another ADR supersedes it. The file's own line stays as the chip title.
+  const superseded = adr.supersededBy !== null && adr.supersededBy !== undefined;
   return row({
+    statusShown: superseded ? `Superseded (by ADR-${String(adr.supersededBy).padStart(4, '0')})` : adr.status,
+    statusClass: `status-${String(superseded ? 'superseded' : adr.status).replace(/\s+/g, '-').toLowerCase()}`,
+    statusTitle: adr.statusLine ?? adr.status,
     source: { path: adr.path },
     number: adr.number,
     title: adr.title,

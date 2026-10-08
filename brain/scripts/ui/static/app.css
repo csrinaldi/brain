@@ -154,6 +154,7 @@ button, select, input {
   color: var(--ink);
   background: var(--surface);
   border-color: var(--line);
+  font: inherit; /* #1321 D118: a native control keeps the UA font where no class rule sets one */
 }
 a { color: var(--accent); }
 
@@ -962,6 +963,7 @@ body {
   flex: none;
   flex-wrap: wrap;
 }
+.drawer-change { flex: 1 0 100%; margin: 0; font-family: var(--font-mono); font-size: 11px; color: var(--muted); overflow-wrap: anywhere; }
 .drawer-id { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-family: var(--font-mono); font-size: 11px; }
 .drawer-number { color: var(--accent); font-weight: 700; font-size: 12px; }
 .drawer-forge { color: var(--accent); text-decoration: none; }

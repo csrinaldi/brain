@@ -108,6 +108,15 @@ test('#1311: button and a set color from var(--…) tokens at element level', ()
   }
 });
 
+// #1321 R1321-1: D118 decided `font: inherit` on the base control rule. Native controls otherwise keep the UA font
+// wherever no class rule sets one.
+test('#1321 R1321-1: button, select and input inherit the page font from the base control rule', () => {
+  for (const el of ['button', 'select', 'input']) {
+    const body = ruleBody(`(?:[a-z]+,\\s*)*${el}(?:,\\s*[a-z]+)*`);
+    assert.match(body, /(?<![-\w])font:\s*inherit\b/, `${el} must carry font: inherit in the base control rule`);
+  }
+});
+
 test('#1311: each theme block declares color-scheme matching its palette', () => {
   assert.match((css.match(/^:root \{([\s\S]*?)\n\}/m) ?? [, ''])[1], /color-scheme:\s*light/);
   assert.match((css.match(/:root:not\(\[data-theme='light'\]\) \{([\s\S]*?)\n  \}/) ?? [, ''])[1], /color-scheme:\s*dark/);
@@ -123,13 +132,27 @@ const ratio = (a, b) => {
   const [hi, lo] = [lum(a), lum(b)].sort((x, y) => y - x);
   return (hi + 0.05) / (lo + 0.05);
 };
+/** Every `--name: value` of a block, whatever the value is (colours, rgba(), keywords) — for comparing two blocks verbatim. */
+const tokenValues = (body) => Object.fromEntries([...body.matchAll(/--([a-z0-9-]+)\s*:\s*([^;]+);/g)].map((m) => [m[1], m[2].trim()]));
 const tokenMap = (body) => Object.fromEntries([...body.matchAll(/--([a-z0-9-]+)\s*:\s*(#[0-9a-fA-F]{6})\b/g)].map((m) => [m[1], m[2]]));
 
-test('#1311: text on controls and links meets WCAG AA 4.5:1 in the light and the dark token sets', () => {
+// #1321 R1321-2: a System-theme viewer on a dark OS gets the `prefers-color-scheme` block, not the stamped one.
+const MEDIA_DARK = () => (css.match(/:root:not\(\[data-theme='light'\]\) \{([\s\S]*?)\n  \}/) ?? [, ''])[1];
+const STAMPED_DARK = () => (css.match(/:root\[data-theme='dark'\] \{([\s\S]*?)\n\}/) ?? [, ''])[1];
+
+test('#1321 R1321-2: the two dark blocks hold identical values for every token, not only identical names', () => {
+  const media = tokenValues(MEDIA_DARK());
+  const stamped = tokenValues(STAMPED_DARK());
+  assert.ok(Object.keys(media).length > 20, 'the scan reads the media block');
+  assert.deepEqual(media, stamped, 'an edit to one dark block alone would give the System theme a different palette than the stamped one');
+});
+
+test('#1311 / #1321 R1321-2: text on controls and links meets WCAG AA 4.5:1 in the light, the stamped dark and the System-dark token sets', () => {
   const light = tokenMap((css.match(/^:root \{([\s\S]*?)\n\}/m) ?? [, ''])[1]);
-  const dark = { ...light, ...tokenMap((css.match(/:root\[data-theme='dark'\] \{([\s\S]*?)\n\}/) ?? [, ''])[1]) };
+  const dark = { ...light, ...tokenMap(STAMPED_DARK()) };
+  const systemDark = { ...light, ...tokenMap(MEDIA_DARK()) };
   const pairs = [['ink', 'surface'], ['accent', 'paper'], ['accent', 'surface']];
-  for (const [name, set] of [['light', light], ['dark', dark]]) {
+  for (const [name, set] of [['light', light], ['dark', dark], ['system-dark', systemDark]]) {
     for (const [fg, bg] of pairs) {
       const r = ratio(set[fg], set[bg]);
       assert.ok(r >= 4.5, `${name}: --${fg} on --${bg} is ${r.toFixed(2)}:1, below 4.5`);

@@ -115,7 +115,8 @@ function buildSpecTab({ source, issue }) {
   if (failure) return withFrom({ ok: false, reason: failure, source: { path: docPath(source, doc?.path ?? `${source.dir}/${file}`) } }, source, detail);
   const parsed = parseSpecCards({ text: doc.text, path: docPath(source, doc.path) });
   const note = truncationNote(doc, 'cards');
-  return withFrom(parsed.ok && note ? { ...parsed, note } : parsed, source, detail);
+  // `truncated` is a field, not only the note's words: the drawer prints no requirement count over a cut read (#1314 R1314-2).
+  return withFrom(parsed.ok && note ? { ...parsed, note, truncated: true } : parsed, source, detail);
 }
 
 const UNCOMMITTED_SHA = /^0+$/;
@@ -490,7 +491,7 @@ export function buildSourcedSddTab(source) {
     const unreadable = doc?.state === 'unreadable';
     // R1342-1: an allow-list. Only a state that holds readable text is present; a state this code does not know is not.
     const present = READABLE_STATES.has(doc?.state);
-    if (unreadable) return { ...base, present, detail: `could not be read: ${doc.reason ?? 'no reason was given'}` };
+    if (unreadable) return { ...base, present, unreadable: true, detail: `could not be read: ${doc.reason ?? 'no reason was given'}` };
     return { ...base, present, ...(source.kind === 'worktree' ? { detail: doc ? localRowDetail(doc, source.branch) : 'missing' } : {}) };
   });
   const detail = source.kind === 'worktree' ? source.branch : null;

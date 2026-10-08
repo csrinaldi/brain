@@ -741,3 +741,63 @@ test('#1312 D150: a queued thread is an entry that says "not read yet", an unrea
   assert.equal(u.title, '#972 — unreadable');
   assert.match(u.detail, /could not be read: HTTP 502/);
 });
+
+// ── #1314 R1314-2: the header names the change dir and branch; a tab count is only ever a measured one ──
+
+const counts = (model) => Object.fromEntries(model.value.tabs.map((t) => [t.id, t.count]));
+const REVIEW_ROUND = { pr: 971, rev: 1, verdict: 'APPROVE', author: 'bob', findings: [], findingCount: 0, head_sha: 'abc1234', source: { url: 'https://github.com/o/r/pull/971#c1' } };
+
+test('#1314 R1314-2: tabs carry counts measured from their own source, each with a title that names it', () => {
+  const model = buildDrawerModel(view({
+    spec: { ok: true, value: [{ id: 'R1-1', title: 'a', source: { path: 's.md', line: 1 }, scenarios: [] }, { id: 'R1-2', title: 'b', source: { path: 's.md', line: 2 }, scenarios: [] }] },
+    sdd: { ok: true, value: [{ stage: 'proposal', present: true, source: { path: 'p.md' } }, { stage: 'spec', present: true, source: { path: 's.md' } }, { stage: 'design', present: false, source: { path: 'd.md' } }] },
+    tasks: { ok: true, value: [], progress: { ok: true, value: { done: 14, total: 18 } } },
+    reviews: { ok: true, value: [REVIEW_ROUND, { ...REVIEW_ROUND, rev: 2 }], unreadable: [] },
+    records: { ok: true, value: [{ id: 'a', type: 'bugfix', summary: null }] },
+  }));
+  const c = counts(model);
+  assert.deepEqual(c.spec, { text: '2', title: '2 requirement(s) read' });
+  assert.deepEqual(c.sdd, { text: '2/3', title: '2 of 3 stages present' });
+  assert.deepEqual(c.tasks, { text: '14/18', title: '14 / 18 tasks done · at HEAD' }, 'the title is the Tasks header: one wording for the count');
+  assert.deepEqual(c.reviews, { text: '2', title: '2 review round(s) read' });
+  assert.deepEqual(c.records, { text: '1', title: '1 record(s) for this issue' });
+  assert.equal(c.workingMemory, null, 'a tab with nothing countable shows no number');
+});
+
+test('#1314 R1314-2: a count is never shown when its source was not fully read', () => {
+  const noDir = { ok: false, reason: 'no change dir', source: { path: 'openspec/changes/issue-881-*' } };
+  const failed = counts(buildDrawerModel(view({ changeDir: null, spec: noDir, sdd: noDir, tasks: noDir, records: noDir, reviews: noDir })));
+  for (const id of ['spec', 'sdd', 'tasks', 'reviews', 'records']) assert.equal(failed[id], null, `${id}: a tab that failed has no count`);
+
+  const truncated = counts(buildDrawerModel(view({ tasks: { ok: true, value: [], progress: { ok: false, code: 'truncated', reason: 'x' } } })));
+  assert.equal(truncated.tasks, null, 'tasks.md truncated: no total, so no count');
+
+  const pending = counts(buildDrawerModel(view({ reviews: { ok: true, value: [REVIEW_ROUND], unreadable: [{ pr: 972, pending: true, reason: 'queued', source: { url: 'u' } }] } })));
+  assert.equal(pending.reviews, null, 'one thread is not read yet, so "1" would claim a total nobody measured');
+});
+
+test('#1314 R1314-2: a truncated spec.md prints no count; a stage row that could not be read blanks the stages count', () => {
+  const card = { id: 'R1-1', title: 'a', source: { path: 's.md', line: 1 }, scenarios: [] };
+  const cut = counts(buildDrawerModel(view({ spec: { ok: true, value: [card], truncated: true, note: 'truncated at 262144 bytes; cards cover the read part' } })));
+  assert.equal(cut.spec, null, 'cards cover the read part only: no total');
+  const whole = counts(buildDrawerModel(view({ spec: { ok: true, value: [card] } })));
+  assert.deepEqual(whole.spec, { text: '1', title: '1 requirement(s) read' });
+
+  const rows = (second) => ({ ok: true, value: [{ stage: 'proposal', present: true, source: { path: 'p.md' } }, { stage: 'spec', present: false, ...second, source: { path: 's.md' } }] });
+  assert.equal(counts(buildDrawerModel(view({ sdd: rows({ unreadable: true, detail: 'could not be read: EIO' }) }))).sdd, null, 'an unreadable stage is not "absent": no x/y');
+  assert.deepEqual(counts(buildDrawerModel(view({ sdd: rows({}) }))).sdd, { text: '1/2', title: '1 of 2 stages present' });
+});
+
+test('#1314 R1314-2: the header carries the change dir and the branch the tabs read; the served HEAD has no branch to name', () => {
+  const head = buildDrawerModel(view({ tabSource: { kind: 'head', dir: 'openspec/changes/issue-881-ui' } })).value.header;
+  assert.deepEqual(head, { changeDir: 'openspec/changes/issue-881-ui', branch: null, line: 'change dir: openspec/changes/issue-881-ui · served HEAD' });
+
+  const wt = buildDrawerModel(view({ changeDir: null, tabSource: { kind: 'worktree', leaf: 'w', branch: 'feat/issue-881-ui', dir: 'openspec/changes/issue-881-ui', label: 'worktree w' } })).value.header;
+  assert.deepEqual(wt, { changeDir: 'openspec/changes/issue-881-ui', branch: 'feat/issue-881-ui', line: 'change dir: openspec/changes/issue-881-ui · branch: feat/issue-881-ui' });
+
+  const origin = buildDrawerModel(view({ changeDir: null, tabSource: { kind: 'origin', branch: 'feat/issue-881-ui', sha12: 'abcdef123456', dir: 'openspec/changes/issue-881-ui', label: 'origin/feat/issue-881-ui @ abcdef123456' } })).value.header;
+  assert.equal(origin.branch, 'feat/issue-881-ui');
+
+  const none = buildDrawerModel(view({ changeDir: null, tabSource: { kind: 'none', reason: 'x' } })).value.header;
+  assert.deepEqual(none, { changeDir: null, branch: null, line: null }, 'no change dir: nothing is claimed');
+});
