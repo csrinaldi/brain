@@ -13,7 +13,7 @@ Scenario grammar: each scenario carries exactly one `WHEN` line and one `THEN` l
 
 ### R1310-1: No table cell has a non-table display
 
-No CSS rule whose last selector compound names a class applied to a `<td>`, `<th>` or `<tr>` in `app.js` MUST set `display`.
+A CSS rule whose last selector compound names a class applied to a `<td>`, `<th>` or `<tr>` in `app.js` MUST NOT set `display`.
 
 #### Scenario: A chip class on a cell is refused
 - **GIVEN** `app.css` carries `.decision-title { display: inline-block; }` and `app.js` applies `decision-title` to a `<td>`

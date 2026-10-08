@@ -91,3 +91,18 @@ test('#882 R882-3: drift warnings ride beside the table, not instead of it — a
   assert.equal(model.value.rows.length, 1);
   assert.deepEqual(model.value.driftWarnings, { ok: false, reason: 'brain/HOME.md could not be read' });
 });
+
+test('#1314 R1314-4: the shown status follows supersession; the file\'s own status line is the title', () => {
+  const rows = buildDecisionsModel({ ok: true, value: [
+    readableAdr({ number: 6, status: 'Accepted', statusLine: 'Accepted (updated 2026-06-29) · amended', supersededBy: 30 }),
+    readableAdr({ number: 31, status: 'Accepted', statusLine: 'Accepted' }),
+    readableAdr({ number: 40, status: 'Proposed', statusLine: 'Proposed' }),
+  ] }, drift()).value.rows;
+  const [six, thirtyOne, forty] = rows;
+  assert.equal(six.statusShown, 'Superseded (by ADR-0030)');
+  assert.equal(six.statusClass, 'status-superseded');
+  assert.equal(six.statusTitle, 'Accepted (updated 2026-06-29) · amended');
+  assert.equal(six.status, 'Accepted', 'the parser\'s word is untouched');
+  assert.deepEqual([thirtyOne.statusShown, thirtyOne.statusClass], ['Accepted', 'status-accepted']);
+  assert.deepEqual([forty.statusShown, forty.statusClass], ['Proposed', 'status-proposed']);
+});

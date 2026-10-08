@@ -88,9 +88,8 @@ function stateAndMarks(node, work, epics) {
   const marks = [];
   if (node.status === 'unreadable') marks.push('unreadable');
   if (node.blockError != null) marks.push(`brain-graph/1 configuration unreadable: ${node.blockError}`);
-  if (Array.isArray(node.blockedBy) && node.blockedBy.length > 0) {
-    marks.push(`blocked by ${node.blockedBy.map((n) => `#${n}`).join(', ')}`);
-  }
+  // The blockers are NOT a mark (#1314 R1314-1): `blockedBy` is a field of the node, drawn once by the card
+  // and once by the drawer; a mark beside it printed the same fact twice.
   let state;
   try {
     state = stateOf(node, work, rollupFor(node, epics));
@@ -399,6 +398,21 @@ function buildEpicGrouping(nodes, declarationDivergences, project, work, epics) 
   const unclaimed = nodeList.map((n) => n.number).filter((number) => !claimed.has(number)).sort((a, b) => a - b);
 
   return { ok: true, value: { epics: epicRows, divergentChildren, unclaimed } };
+}
+
+/**
+ * The one summary line above the board (#1314 R1314-5, D181), worded for the clustering that is ON. Track clustering says how many
+ * track lanes and how many nodes sit in the `?` holding lane. Epic clustering draws the epics first and only the unclaimed nodes in the
+ * lanes, so it counts the epics, the lanes that still hold an unclaimed node, and the holding lane (already net of claimed nodes).
+ * An epic grouping that could not be built falls back to the track line: the page draws the track lanes whole in that case.
+ */
+export function laneSummary({ lanes, holding, epicGrouping }, clustering = 'track') {
+  if (clustering === 'epic' && epicGrouping?.ok) {
+    const unclaimed = new Set(epicGrouping.value.unclaimed);
+    const laneCount = lanes.filter((lane) => lane.nodes.some((n) => unclaimed.has(n.number))).length;
+    return `${epicGrouping.value.epics.length} declared epic(s), ${laneCount} track lane(s) of nodes no epic claimed, ${holding.count} in the \`?\` holding lane`;
+  }
+  return `${lanes.length} track lane(s), ${holding.count} in the \`?\` holding lane`;
 }
 
 /**
