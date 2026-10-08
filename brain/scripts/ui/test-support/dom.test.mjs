@@ -274,3 +274,65 @@ test('#1313: `records` answers /api/record/<id>, logs the path, and a held answe
     dom.restore();
   }
 });
+
+// ── #1330: a scroller has a clientHeight and clamps scrollTop. SYNTHETIC: it models the one clamp, not a browser. ──
+
+const tall = (lines) => {
+  const body = createElement('div');
+  for (let i = 0; i < lines; i += 1) body.appendChild(createElement('p')); // one line (20) each
+  return body;
+};
+
+test('#1330: with no clientHeight an element is not a scroller; its scrollTop is a plain number', () => {
+  const body = tall(3);
+  assert.equal(body.clientHeight, 0);
+  body.scrollTop = 500;
+  assert.equal(body.scrollTop, 500, 'unchanged behaviour for every element that is not a scroller');
+});
+
+test('#1330: a scroller clamps scrollTop to [0, flowHeight - clientHeight]', () => {
+  const body = tall(10); // 200 tall
+  body.clientHeight = 80;
+  assert.equal(body.scrollHeight, 200);
+  body.scrollTop = 50;
+  assert.equal(body.scrollTop, 50);
+  body.scrollTop = 999;
+  assert.equal(body.scrollTop, 120, '200 - 80');
+  body.scrollTop = -5;
+  assert.equal(body.scrollTop, 0);
+});
+
+test('#1330: a content shorter than its scroller cannot scroll at all', () => {
+  const body = tall(2);
+  body.clientHeight = 300;
+  body.scrollTop = 40;
+  assert.equal(body.scrollTop, 0);
+});
+
+test('#1330: min-height pads the flow, so padding a short last child makes its top reachable', () => {
+  const body = tall(10);
+  body.clientHeight = 100;
+  const last = body._kids[9];
+  assert.equal(last.getBoundingClientRect().top, 180);
+  body.scrollTop = 180;
+  assert.equal(body.scrollTop, 100, 'unpadded: the browser stops at 200 - 100, so the last child is stuck below the top');
+  last.style.minHeight = '100px';
+  body.scrollTop = 180;
+  assert.equal(body.scrollTop, 180, 'padded to one body height: 280 - 100');
+  assert.equal(last.getBoundingClientRect().top - body.getBoundingClientRect().top, 0);
+});
+
+test('#1330: installDom({ scrollers }) gives every element with that class a clientHeight, and restore() forgets it', () => {
+  const dom = installDom({ mountIds: ['canvas'], scrollers: { 'drawer-body': 400 } });
+  try {
+    const body = createElement('div');
+    body.className = 'drawer-body';
+    assert.equal(body.clientHeight, 400);
+    assert.equal(createElement('div').clientHeight, 0, 'other elements are not scrollers');
+  } finally {
+    dom.restore();
+  }
+  const after = createElement('div');
+  after.className = 'drawer-body';
+  assert.equal(after.clientHeight, 0, 'the configuration does not leak into the next test');
+});

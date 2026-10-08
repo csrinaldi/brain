@@ -21,8 +21,8 @@ issue: 1314
 - [x] 3.2 R1321-2: contrast for the media dark block
 
 ## #1330
-- [ ] 4.1 R1330-1: fake DOM clientHeight and scrollTop clamp
-- [ ] 4.2 R1330-2: tab-click test asserts the padding value
+- [x] 4.1 R1330-1: fake DOM clientHeight and scrollTop clamp
+- [x] 4.2 R1330-2: tab-click test asserts the padding value
 
 ## Close
 - [ ] 5.1 full suite, repo:check, nav, gated diff, tarball size, mutations, browser proof
