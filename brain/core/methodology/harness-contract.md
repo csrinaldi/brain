@@ -26,7 +26,8 @@ this contract — without changes to `project-workflow.md` or `developer-environ
 | Canonical verb (npm) | Deprecated alias | Verb (Claude) | Responsibility |
 |---|---|---|---|
 | `npm run brain:env:init` | `env:init` | — | Environment bootstrap: installs tools, configures auth, imports memory, refreshes skill registry. Idempotent. |
-| `npm run brain:day:start` | `day:start` | — | Daily startup: VCS auth, ecosystem updates, team memory, ticket board. |
+| `npm run brain:day:start` | `day:start` | — | Daily startup: VCS auth, team memory, ticket board. **Updates nothing** (#1386): its ecosystem step only refreshes the local skill registry and prints a reminder of `brain:tools:update`. |
+| `npm run brain:tools:update` | — | — | The ONLY verb that applies global tool updates: runs `gentle-ai update`, then `gentle-ai upgrade`, showing their output. Refuses under `CI` or without a TTY (exit non-zero, nothing applied): it must be run interactively. Becomes a subcommand of `brain:doctor` (#1130). |
 | `npm run brain:session:start` | `session:start` | — | Session context loader: restores `.memory/manifest.json` churn (step 1 — required by `openspec/specs/session-start/spec.md` REQ-3 today; the manifest is the engram adapter's artifact per ADR-0002 Amendment 1, and #864 task 2.4 retires the step and amends REQ-3 together), hydrates the active memory backend from `.memory/records/`, resolves the active change and ticket memory, reports memory recency. Read-only, local-only, no network. |
 | `npm run brain:ticket:start -- <id> [--base <tracker>]` | `ticket:start -- <id>` | `/ticket-start <id>` | Task start. Creates the branch `{type}/issue-{number}-{slug}` in an ISOLATED WORKTREE off `<tracker>` — **that is the DEFAULT, no flag required (#782)**. **Always an isolated worktree; NEVER a branch in the main checkout when parallel work is possible.** `--in-place` is the named opt-out, for strictly solo serial work only, and the verb says which mode it took. `<tracker>` is the integration base (e.g. `feature/v2.0.0`), not `main`, while an epic is in flight. |
 | `npm run brain:project:feature -- --issue <id>` | `project:feature -- --issue <id>` | `/sdd-new <id>` | Starts an SDD change: creates `openspec/changes/issue-<id>-<slug>/` with `proposal.md`, `design.md`, `tasks.md`, `spec.md`. |
@@ -95,7 +96,8 @@ Only the durable residue (ADRs, anti-patterns, glossary) is promoted to `brain/`
 ## Current implementation (gentle-ai)
 
 `gentle-ai` implements this contract. Claude skills are installed with
-`gentle-ai install` and maintained with `gentle-ai upgrade`. The local registry is
+`gentle-ai install` and maintained with `gentle-ai upgrade`, which a human runs through
+`npm run brain:tools:update` (#1386). The local registry is
 refreshed automatically on `brain:day:start` and `brain:env:init`.
 
 
@@ -160,3 +162,28 @@ The verb table and the `session:start` row's "hydrates the active memory backend
 already backend-neutral, and `session:start` stays read-only: it calls `hydrate` in its `verify`
 form, which on `plainfiles` checks the derived index and writes nothing
 (`memory-backend-contract.md` Amendment 3).
+
+## `day:start` updates nothing (issue #1386)
+
+**Signed**: 07/10/2026 — Cristian Rinaldi
+
+### What changed
+
+The `brain:day:start` row said "ecosystem updates", which read as "check" and was implemented as
+"apply": step 3 ran `gentle-ai upgrade` unconditionally. The row now says the verb updates
+nothing, and a new row names `brain:tools:update`, the dedicated verb that applies tool updates.
+
+### Why
+
+A global tool is machine-wide. A `day:start` run inside a throwaway consumer upgraded the
+machine's `engram` from 2.0.0 to 3.2.1 and so changed every repository on it, including a live
+MCP (#1386, found by the 1.13.0 exit run). That is the class
+`brain/core/anti-patterns/instaladores-autoactualizantes-no-inocuos.md` names.
+
+### What this does NOT change
+
+`day:start` keeps its step count and still runs `gentle-ai skill-registry refresh`, a local
+write. `env:init` and `tools:install` are not changed here. They install a missing tool, and when `gentle-ai doctor`
+reports an unhealthy state they also run `gentle-ai install` on an installed gentle-ai
+(`install-tools.sh:175-181`, and `gentle-ai.mjs:215` under a TTY). Whether that re-fetches newer
+binaries is not established here; #1394 owns verifying it.

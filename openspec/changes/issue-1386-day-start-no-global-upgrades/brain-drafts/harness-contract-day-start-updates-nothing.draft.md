@@ -55,7 +55,10 @@ MCP (#1386, found by the 1.13.0 exit run). That is the class
 ### What this does NOT change
 
 `day:start` keeps its step count and still runs `gentle-ai skill-registry refresh`, a local
-write. `env:init` and `tools:install` still INSTALL missing tools and never upgrade an installed one.
+write. `env:init` and `tools:install` are not changed here. They install a missing tool, and when `gentle-ai doctor`
+reports an unhealthy state they also run `gentle-ai install` on an installed gentle-ai
+(`install-tools.sh:175-181`, and `gentle-ai.mjs:215` under a TTY). Whether that re-fetches newer
+binaries is not established here; #1394 owns verifying it.
 
 ### Notes for the promoter
 
