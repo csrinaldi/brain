@@ -44,6 +44,13 @@ read-only (`gentle-ai update` is treated as mutating). It may print a reminder n
 Upgrades run only from a dedicated verb that is interactive: it refuses under `CI` and without a
 TTY, and says why.
 
+### What the code does not do yet, said plainly
+
+`env:init` may not comply. When `gentle-ai doctor` reports an unhealthy state, it runs
+`gentle-ai install` on an installed gentle-ai (`install-tools.sh:175-181`; `gentle-ai.mjs:215`
+under a TTY). Whether that re-fetches newer binaries is not established. #1394 verifies it, and
+moves the step behind `brain:tools:update` if it does.
+
 ### Notes for the promoter
 
 One in-place bullet in "Solution / correct pattern", plus the appended section.
